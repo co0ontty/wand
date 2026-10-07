@@ -86,11 +86,11 @@ test("web source preserves native events, safe-area variables, and selector hook
     "--wand-safe-left",
     "--wand-safe-right",
     ".is-wand-app-native-insets",
-    ".is-wand-embed-terminal .file-side-panel",
-    ".is-wand-embed-terminal .main-content.file-panel-open",
+    ".is-wand-embed-terminal :is(",
+    ".file-side-panel, .file-panel-backdrop",
     ".is-wand-embed-terminal .terminal-scroll-wrap",
     ".is-wand-embed-terminal.is-wand-native-input .input-panel",
-    ".is-wand-embed-terminal .terminal-container",
+    ".terminal-container { background: var(--bg-terminal",
   ]);
 });
 
@@ -158,7 +158,7 @@ test("Apple clients preserve mobile WebView and desktop native terminal contract
       ".is-wand-embed-terminal .terminal-scroll-wrap",
       ".is-wand-embed-terminal .input-panel",
       ".is-wand-embed-terminal .notification-bubble",
-      ".is-wand-embed-terminal .terminal-container",
+      ".terminal-container { background: var(--bg-terminal",
       "__wandNativeTerminalTapInstalled",
       "requestTerminalInput",
       "restoreEmbeddedTerminalInput",
@@ -375,13 +375,18 @@ test("subagent execution surfaces stay compact, avatar-free, and follow the newe
     "export function getPersistedAgentSelection",
     "export function setPersistedAgentSelection",
   ]);
-  includesAll("src/web-ui/content/styles.css", [
-    ".agent-run-summary",
-    ".agent-run-rail",
-    ".agent-run-detail",
-    ".agent-run-result",
-    "max-height: none;",
-    "overflow: visible;",
+  includesAll("src/web-ui/react/chat/presentation.tsx", [
+    'projection.kind === "agent"',
+    'projection.kind === "agent-rail"',
+    'projection.kind === "agent-process"',
+    'projection.kind === "agent-timeline"',
+    '<Card size="small"',
+    '<Collapse size="small"',
+    '<Timeline items=',
+    'destroyOnHidden={false}',
+    'classNames={{ header: "agent-run-process-summary" }}',
+    'seed.style.getPropertyValue("--agent-color")',
+    '.agent-run-body[aria-hidden="true"]',
   ]);
   assert.doesNotMatch(
     source("src/web-ui/browser/chat-render.ts"),
@@ -394,64 +399,23 @@ test("subagent execution surfaces stay compact, avatar-free, and follow the newe
     "Web subagent styling must not keep legacy subagent chrome",
   );
   assert.doesNotMatch(
-    source("src/web-ui/content/styles.css"),
+    source("src/web-ui/react/chat/presentation.tsx"),
     /\.agent-run-body\s*\{[^}]*height:\s*\d+px/s,
-    "Web Agent Run body must not use a fixed-height nested scroller",
-  );
-  // 动效合规：展开/收起必须是可动画的行高变形，收起是展开的倒放；
-  // 时长与曲线只能取 token，`.agent-run*` 区段里不许出现字面毫秒/秒。
-  const agentRunCss = (() => {
-    const css = source("src/web-ui/content/styles.css");
-    const start = css.indexOf(".agent-run {");
-    const end = css.indexOf(".chat-message.agent-run-owned");
-    return start >= 0 && end > start ? css.slice(start, end) : "";
-  })();
-  assert.ok(agentRunCss.length > 0, "Web Agent Run styles must exist");
-  assert.match(
-    agentRunCss,
-    /grid-template-rows:\s*0fr/,
-    "Agent Run collapse must animate grid-template-rows, not display:none",
+    "Web Agent Run body stays in the conversation flow instead of a fixed-height nested scroller",
   );
   assert.doesNotMatch(
-    agentRunCss,
-    /\[data-expanded="false"\][^}]*display:\s*none/s,
-    "Agent Run must not hard-cut the body with display:none",
-  );
-  // 收起态不能留下可聚焦元素：opacity/overflow 藏不住 rail 的 role="tab" 与 <details>
-  // summary，键盘会 Tab 进一张看不见的卡里（也与渲染侧 aria-hidden="true" 矛盾）。
-  // 必须用 visibility，且收起侧延迟到动画走完（step-end）、展开侧立刻恢复（step-start），
-  // 这样 0fr⇄1fr 的倒放与触发行不位移都不受影响。
-  assert.match(
-    agentRunCss,
-    /\.agent-run-body\s*\{[^}]*visibility:\s*hidden;[^}]*visibility\s+var\(--motion-\w+\)\s+step-end/s,
-    "Collapsed Agent Run body must hide its focusables via visibility, delayed to the animation end",
+    source("src/web-ui/react/chat/presentation.tsx"),
+    /status === "running" \? "loading"/,
+    "Tool timeline rows must not spin: the compact summary owns the only running mark",
   );
   assert.match(
-    agentRunCss,
-    /\[data-expanded="true"\]\s+\.agent-run-body\s*\{[^}]*visibility:\s*visible;[^}]*visibility\s+var\(--motion-\w+\)\s+step-start/s,
-    "Expanded Agent Run body must restore visibility immediately",
+    source("src/web-ui/react/chat/presentation.tsx"),
+    /const live = element\.classList\.contains\("is-command-running"\) \|\| element\.classList\.contains\("is-thinking-running"\)/,
+    "The compact summary keeps its loading whether or not the timeline is expanded",
   );
-  // 时长既可能写在 transition 里，也可能写在 animation 里（上一轮只查 transition，
-  // 于是 spin 的 `2.4s` 从正则底下漏了出去）。两条一起查，字面值一律不许出现。
-  // 必须是**前缀**匹配而不是 `transition:` / `animation:` 紧跟冒号：
-  // `animation-duration: 2.4s;` 与 `transition-delay: 120ms;` 是同一类违规，
-  // 只查简写等于给守卫留一道可以从底下绕过去的口子。
-  assert.doesNotMatch(
-    agentRunCss,
-    /(?:transition|animation)(?:-[a-z]+)?:[^;]*\d+(?:\.\d+)?m?s\b/,
-    "Agent Run transition/animation durations must read from tokens (shorthand and *-duration / *-delay)",
-  );
-  // rail 不能被长结论挤成 0 宽（只剩两个点），也不能跟详情面板等长出空柱子。
-  assert.match(
-    agentRunCss,
-    /\.agent-run-rail\s*\{[^}]*flex:\s*0 0 [^;}]*;[^}]*align-self:\s*flex-start;/s,
-    "Agent Run rail must keep its own width and hug its rows",
-  );
-  assert.match(
-    agentRunCss,
-    /\.agent-run-detail\s*\{[^}]*flex:\s*1 1 0;/s,
-    "Agent Run detail must size from free space, not from its content",
-  );
+  // Disclosure, keyboard state, selected identity, reading geometry and reduced
+  // motion are exercised with production Ant components by antd-chat-browser.
+  // A retired hand-maintained grid animation is not the observable contract.
 
   includesAll("ios/Wand/ChatView.swift", [
     "private let subagentWindowContentHeight: CGFloat = 280",
@@ -556,7 +520,7 @@ test("tool activity summaries stay consecutive and split when prose arrives", ()
     "flushPendingActivity(true)",
     "opts.isTrailing",
     "isFoldableActivityBlock",
-    'class="chat-activity-summary"',
+    'class="chat-process-summary"',
     'class="chat-activity-menu"',
     "__activityEntryToggle",
   ]);

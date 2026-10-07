@@ -17,68 +17,75 @@ function rule(selector: string): string {
   return styles.slice(start, styles.indexOf("}", start) + 1);
 }
 
-test("login and shared controls use the same flat geometry and primary color", () => {
-  assert.match(styles, /--control-radius: 6px/);
-  assert.match(rule(".login-page .form-col .btn"), /border-radius: var\(--control-radius\)/);
-  assert.match(foundationStyles, /\.wand-ui-button \{\s*border-radius: var\(--control-radius\)/);
-  assert.match(rule(".blank-chat-tool-btn.welcome-new-task"), /background: var\(--accent-solid\)/);
-  assert.match(rule(".input-composer .btn-circle-send"), /background: var\(--accent-solid\)/);
-  assert.match(rule(".input-composer .btn-circle-send"), /box-shadow: none/);
-  assert.match(foundationStyles, /\.wand-ui-button-primary::before,[\s\S]*?background: transparent/);
+test("login and shared controls use the approved warm library theme", () => {
+  const theme = readFileSync(new URL("../src/web-ui/react/theme.tsx", import.meta.url), "utf8");
+  const button = readFileSync(new URL("../src/web-ui/react/ui/button.tsx", import.meta.url), "utf8");
+  const login = readFileSync(new URL("../src/web-ui/react/login/host.tsx", import.meta.url), "utf8");
+  assert.match(theme, /colorPrimary: "#b8562f"/);
+  assert.match(button, /<Button/);
+  assert.match(login, /<Input.Password/);
+  assert.match(login, /<Button id="login-button" type="primary"/);
+  assert.doesNotMatch(foundationStyles, /\.wand-ui-button \{[^}]*border-radius/);
 });
 
-test("sidebar colors alias the login palette instead of introducing a second palette", () => {
-  for (const [alias, token] of [
-    ["surface", "bg-primary"], ["surface-raised", "bg-elevated"],
-    ["ink", "text-primary"], ["muted", "text-tertiary"],
-    ["line", "border-subtle"], ["hover", "bg-hover"], ["active", "accent-muted"],
-  ]) {
-    assert.ok(styles.includes(`--web-sidebar-${alias}: var(--${token});`));
-  }
+test("sidebar and login share the approved Ant theme owner", () => {
+  const shell = readFileSync(new URL("../src/web-ui/react/shell/shell-app.tsx", import.meta.url), "utf8");
+  const sidebar = readFileSync(new URL("../src/web-ui/react/shell/shell-sidebar.tsx", import.meta.url), "utf8");
+  const theme = readFileSync(new URL("../src/web-ui/react/theme.tsx", import.meta.url), "utf8");
+  assert.match(shell, /<WandUiProvider>/);
+  assert.match(sidebar, /<Layout.Sider/);
+  assert.match(sidebar, /theme="light"/);
+  assert.match(theme, /Layout: \{ siderBg: "#f4f0e9"/);
+  assert.doesNotMatch(styles, /--web-sidebar-/);
 });
 
-test("Appica press feedback cannot reintroduce scaling or vertical jumps", () => {
-  const press = foundationStyles.slice(foundationStyles.indexOf(".wand-ui-button:is(:active"));
-  const block = press.slice(0, press.indexOf("}"));
-  assert.match(block, /scale: none/);
-  assert.match(block, /translate: none/);
-  assert.match(block, /transform: none/);
-  assert.match(foundationStyles, /\.wand-ui-button:focus-visible/);
+test("reduced-motion library popups retain alignment without visible translation or scaling", () => {
+  const shared = readFileSync(new URL("../src/web-ui/react/styles/base.ts", import.meta.url), "utf8");
+  const theme = readFileSync(new URL("../src/web-ui/react/theme.tsx", import.meta.url), "utf8");
+  assert.match(shared, /prefers-reduced-motion: reduce/);
+  assert.match(shared, /\.ant-picker-dropdown[^}]*transform: none !important/s);
+  assert.match(theme, /motion: true/);
+  assert.match(theme, /motionDurationFast: reduced \? "0.00001s"/);
 });
 
-test("portalled menus remain interactive above the shell", () => {
-  const start = foundationStyles.indexOf(".wand-ui-dropdown-content {");
-  const menu = foundationStyles.slice(start, foundationStyles.indexOf("}", start));
-  assert.match(menu, /pointer-events: auto/);
-  assert.match(menu, /z-index: 10/);
+test("library popups opt into hit testing above the passive shell portal", () => {
+  assert.match(foundationStyles, /#overlay-root \{[^}]*pointer-events: none/);
+  assert.match(foundationStyles, /\.wand-ui-portals :is\([^)]*\.ant-dropdown[^)]*\) \{ pointer-events: auto;/);
 });
 
-test("the task welcome glyph remains visible on the paper surface", () => {
-  const icon = rule(".workspace-task-welcome .blank-chat-logo");
-  assert.match(icon, /color: var\(--text-secondary\)/);
-  assert.match(icon, /background: var\(--bg-secondary\)/);
-  assert.doesNotMatch(icon, /color: white/);
+test("the task welcome glyph is a visible Ant Result icon", () => {
+  const welcome = readFileSync(new URL("../src/web-ui/react/workspaces/workspace-agent-picker.tsx", import.meta.url), "utf8");
+  assert.match(welcome, /<Result icon=\{<WandIcon name="task" size=\{36\}/);
+  assert.doesNotMatch(welcome, /color: "white"/);
+  const mark = readFileSync(new URL("../src/web-ui/react/ui/brand-mark.tsx", import.meta.url), "utf8");
+  assert.match(mark, /width: 24, height: 24/);
 });
 
 test("web sidebar uses a create row, two destinations, and a marked session tree", () => {
-  const start = styles.indexOf("/* ========================================================================\n   Web sidebar hierarchy");
-  assert.ok(start >= 0, "missing web sidebar hierarchy block");
-  const block = styles.slice(start, styles.indexOf("/* ── GitHub", start));
-  assert.match(block, /grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\)/);
-  assert.match(block, /\.sidebar-feature-create \{\s*grid-column: 1 \/ -1/);
-  assert.match(block, /\.sidebar-refined \.workspace-session-mark \{\s*display: inline-flex/);
-  assert.match(block, /\.sidebar-feature-badge \{/);
-  assert.match(block, /border-left: 1px solid color-mix\(in srgb, var\(--accent\) 22%/);
-  assert.match(block, /\.sidebar\.pinned\.collapsed[\s\S]*span:not\(\.sidebar-feature-badge\)/);
+  const sidebar = readFileSync(new URL("../src/web-ui/react/shell/shell-sidebar.tsx", import.meta.url), "utf8");
+  const tree = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
+  assert.match(sidebar, /<Flex hidden=\{conversationState\.mode !== "tasks"\} component="nav" vertical gap="small" className="sidebar-feature-nav"/);
+  assert.ok(sidebar.indexOf('id="drawer-new-session-button"') < sidebar.indexOf('id="task-board-button"'));
+  assert.match(sidebar, /<Flex vertical=\{narrow\} gap="small">/);
+  assert.match(sidebar, /id="task-board-button"/);
+  assert.match(sidebar, /id="ai-teams-button"/);
+  assert.match(sidebar, /<Badge count=\{teamAttention\}/);
+  assert.match(tree, /paddingInlineStart: 8.*className="workspace-tasks"/);
+  assert.match(tree, /<Badge dot=\{glow !== "none"\}/);
+  assert.match(sidebar, /<span hidden=\{narrow\}>任务看板<\/span>/);
 });
 
-test("hover actions preserve title width and keyboard access", () => {
-  const start = styles.indexOf("/* Reserve the action gutter");
-  assert.ok(start >= 0);
-  const gutter = styles.slice(start, styles.indexOf("}\n}", start) + 3);
-  assert.match(gutter, /:not\(:focus-within\)/);
-  assert.match(gutter, /opacity: 0/);
-  assert.doesNotMatch(gutter, /(?:min-)?width: 0|margin-left: -/);
+test("row actions preserve title width and keyboard access", () => {
+  const tree = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(tree, /className="workspace-row-actions"|className="workspace-task-actions"/);
+  assert.match(tree, /<SidebarRowMenu/);
+  const rowMenu = readFileSync(new URL("../src/web-ui/react/workspaces/sidebar-row-menu.tsx", import.meta.url), "utf8");
+  assert.match(rowMenu, /event\.key === "ContextMenu" \|\| event\.shiftKey && event\.key === "F10"/);
+  assert.match(rowMenu, /onTouchEnd:/);
+  assert.match(tree, /className="workspace-task-name"/);
+  assert.match(tree, /minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis"/);
+  assert.match(tree, /aria-label=\{`任务 \$\{task.name\} 的更多操作`\}/);
+  assert.doesNotMatch(styles, /:hover \.workspace-row-actions|workspace-row-actions[^}]*opacity: 0/);
 });
 
 const DWELL_SOURCES = [
@@ -140,7 +147,7 @@ test("原位已有结果的反馈不再同时弹 Toast", () => {
 });
 
 // 发送 ⇄ 停止（docs/motion-design.md §3、§4）：一颗按钮的相位模型 + 原位结果行。
-// 这里钉的是「结构」而不是手感：单宿主、四层 glyph、相位属性、token 化时长、
+// 这里验单宿主、库加载与相位、token 化驻留时长、
 // 以及旧的两按钮 / .input-hint / 发送类 Toast 三种形态都不许回来。
 test("发送与停止是同一颗按钮的相位模型，结果原位显示不借 Toast", () => {
   const renderSrc = readFileSync(new URL("../src/web-ui/browser/render.ts", import.meta.url), "utf8");
@@ -157,36 +164,16 @@ test("发送与停止是同一颗按钮的相位模型，结果原位显示不�
   assert.doesNotMatch(styles, /\.input-hint\s*[,{]/, ".input-hint 不许有活的规则");
   assert.doesNotMatch(styles, /\.chat-mode-select\s*[,{]/, ".chat-mode-select 不许有活的规则");
 
-  // ① 单宿主 + 四层 glyph，相位写在宿主自己身上；glyph 一律 aria-hidden。
+  // A single host keeps the phase contract; Ant owns loading, icon and colors.
   assert.match(renderSrc, /id="send-input-button"[^\n]*data-phase="idle"[^\n]*aria-label="发送消息"/);
-  assert.equal((renderSrc.match(/class="composer-send-glyph composer-send-glyph-/g) ?? []).length, 4, "四层 glyph");
-  for (const layer of ["arrow", "stop", "sending", "sent"]) {
-    assert.ok(renderSrc.includes(`composer-send-glyph-${layer}`), `缺 ${layer} 层 glyph`);
-  }
+  assert.doesNotMatch(renderSrc, /composer-send-glyph/);
   assert.match(inputSrc, /type ComposerSendPhase = "idle" \| "sending" \| "sent" \| "failed" \| "running";/);
   assert.match(inputSrc, /sendBtn\.setAttribute\("data-phase", sendPhase\)/);
-
-  // ① morph 段：只用 token，不写字面毫秒，也没有 display 互斥（切换不改变几何）。
-  const morphBlock = styles.slice(styles.indexOf("── 发送 ⇄ 停止"), styles.indexOf(".composer-send-spinner"));
-  assert.ok(morphBlock.length > 400, "找不到 morph 段");
-  assert.doesNotMatch(morphBlock, /\d+ms/, "morph 过渡不许写字面毫秒");
-  assert.doesNotMatch(morphBlock, /display:\s*none\s*;/, "交叉淡入不是 display 硬切");
-  for (const token of ["--motion-morph", "--motion-fast", "--motion-quick-exit"]) {
-    assert.ok(morphBlock.includes(`var(${token})`), `morph 段未消费 ${token}`);
-  }
-
-  // ② 驻留时长两边同源：JS 从 motion-tokens 取，CSS 由原位结果行的倒计时下划线消费。
+  const controls = readFileSync(new URL("../src/web-ui/browser/library-buttons.tsx", import.meta.url), "utf8");
+  assert.match(controls, /loading=\{snapshot\.phase === "sending"\}/);
+  assert.match(controls, /danger=\{snapshot\.phase === "running" \|\| snapshot\.phase === "failed"\}/);
+  assert.match(controls, /snapshot\.phase === "running" \? "stop" : snapshot\.phase === "sent" \? "check" : "up"/);
   assert.match(inputSrc, /return phase === "failed" \? MOTION_DWELL_FAILED_MS : MOTION_DWELL_SENT_MS;/);
-  assert.match(
-    styles,
-    /\.composer-status-line\[data-tone="sent"\]::after\s*\{[^}]*var\(--motion-dwell-sent\)/s,
-    "--motion-dwell-sent 必须被原位行消费",
-  );
-  assert.match(
-    styles,
-    /\.composer-status-line\[data-tone="failed"\]::after\s*\{[^}]*var\(--motion-dwell-failed\)/s,
-    "--motion-dwell-failed 必须被原位行消费（失败驻留 ≥ 成功）",
-  );
 
   // ② 提交链路（sendInputFromBox 全文）：结果只落原位相位，不再落 Toast。
   const submitChain = inputSrc.slice(
@@ -210,17 +197,17 @@ test("发送与停止是同一颗按钮的相位模型，结果原位显示不�
   assert.match(renderSrc, /id="terminal-scale-down-top"[^\n]*aria-label="缩小终端字号"/);
   assert.match(renderSrc, /id="terminal-scale-up-top"[^\n]*aria-label="放大终端字号"/);
   assert.match(renderSrc, /id="page-refresh-btn"[^\n]*aria-label="刷新页面"/);
-  assert.match(notificationsSrc, /notification-bubble-close"[^\n]*aria-label="关闭这条通知"/);
-  assert.match(inputSrc, /queue-item-cancel"[^\n]*aria-label="取消这条排队消息"/);
+  const notices = readFileSync(new URL("../src/web-ui/browser/notice-view-adapter.tsx", import.meta.url), "utf8");
+  assert.match(notices, /notification-bubble-close"[^\n]*aria-label="关闭这条通知"/);
+  const queue = readFileSync(new URL("../src/web-ui/browser/queue-view-adapter.tsx", import.meta.url), "utf8");
+  assert.match(queue, /aria-label="取消这条排队消息"/);
 });
 
 // 用户可见的成句文案统一中文；code fence 里的命令、诊断 key 这类技术标识不在此列。
 test("离线横幅不再有英文成句", () => {
   const renderSrc = readFileSync(new URL("../src/web-ui/browser/render.ts", import.meta.url), "utf8");
-  assert.match(
-    renderSrc,
-    /el\.textContent = ['"]当前处于离线状态，部分功能可能不可用。['"]/,
-    "断线横幅是浏览器真的离线时唯一的提示，必须读得懂",
-  );
+  const notices = readFileSync(new URL("../src/web-ui/browser/notice-view-adapter.tsx", import.meta.url), "utf8");
+  assert.match(notices, /当前处于离线状态，部分功能可能不可用。/);
+  assert.match(renderSrc, /paintOfflineNotice\(el\)/);
   assert.doesNotMatch(renderSrc, /You are offline/);
 });

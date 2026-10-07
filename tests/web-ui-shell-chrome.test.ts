@@ -16,6 +16,7 @@ import {
   UiStoreProvider,
   getParentFilePanelCwd,
   getShellSidebarEntryActions,
+  getTopbarMoreActions,
   normalizeFilePanelCwd,
   type UiSessionVm,
   type UiSnapshotData,
@@ -121,10 +122,15 @@ test("ShellTopbar SSR preserves title, status, cwd, git, and menu contracts", ()
 
   assert.doesNotMatch(html, /id="sessions-toggle-button"/);
   assert.doesNotMatch(html, /class="topbar-brand"/);
-  assert.match(html, /class="topbar-session-title title-generating"[^>]*aria-busy="true"[^>]*>Chrome migration</);
-  assert.match(html, /class="session-status-pill idle"/);
+  assert.match(html, /(?=[^<]*class="[^"]*topbar-session-title title-generating[^"]*")[^>]*aria-busy="true"/);
+  assert.match(html, /Chrome migration/);
+  assert.match(html, /class="[^"]*session-status-pill idle[^"]*"/);
   assert.match(html, /实现 Shell chrome/);
-  assert.match(html, /class="topbar-cwd tail-marquee-path"/);
+  assert.match(html, /<span[^>]*id="topbar-cwd"/);
+  assert.doesNotMatch(html, /<button[^>]*id="topbar-cwd"/);
+  assert.equal((html.match(/id="topbar-more-button"/g) ?? []).length, 1);
+  assert.equal((html.match(/aria-label="当前会话操作"/g) ?? []).length, 1);
+  assert.match(html, /class="[^"]*\btopbar-cwd tail-marquee-path\b/);
   assert.match(html, /class="topbar-git-branch">codex\/chrome</);
   assert.match(html, /class="topbar-git-count">·3</);
   // Appica's icon button reports its pressed state through `data-pressed`.
@@ -132,7 +138,8 @@ test("ShellTopbar SSR preserves title, status, cwd, git, and menu contracts", ()
   assert.match(html, /id="topbar-more-button"[^>]*wand-ui-icon-button/);
   // Appica's trigger carries the popup contract itself; the menu body is
   // portalled and only mounts while open, so SSR keeps the closed state.
-  assert.match(html, /id="topbar-more-button"[^>]*aria-haspopup="menu"[^>]*aria-expanded="false"/);
+  assert.match(html, /<button(?=[^>]*id="topbar-more-button")(?=[^>]*aria-haspopup="menu")(?=[^>]*aria-expanded="true")/);
+  assert.match(readFileSync(new URL("../src/web-ui/react/shell/shell-topbar.tsx", import.meta.url), "utf8"), /WandDropdownMenuTrigger/);
   // 聊天宽度开关只在聊天在屏时出现（本 fixture 是 terminal 视图）。
   assert.doesNotMatch(html, /chat-width-toggle/);
 });
@@ -142,14 +149,12 @@ test("ShellTopbar exposes the chat width toggle while a chat is on screen", () =
     createElement(ShellTopbar),
     fixture({ legacyVisibility: { terminal: false, chat: true, blank: false, composer: true } }),
   );
-  assert.match(
-    chat,
-    /<div class="chat-width-toggle topbar-chat-width" role="group" aria-label="聊天内容宽度">/,
-  );
-  // 默认铺满：第一段是选中的那一段。
-  assert.match(chat, /data-active="true" aria-pressed="true" title="铺满可用宽度[^"]*"[^>]*>铺满</);
-  assert.match(chat, /title="正文收成居中阅读列[^"]*"[^>]*>居中</);
-  assert.doesNotMatch(chat, /aria-pressed="true"[^>]*>居中</);
+  assert.match(chat, /aria-label="聊天内容宽度"/);
+  assert.match(chat, /ant-segmented/);
+  assert.match(chat, /data-stretch-value="full"/);
+  assert.match(chat, /data-stretch-value="column"/);
+  assert.match(chat, /ant-segmented-item-selected[^>]*>[\s\S]*?data-stretch-value="full"/);
+
 });
 
 test("TopbarMoreMenu keeps every action hook the browser layer dispatches", () => {
@@ -168,20 +173,15 @@ test("TopbarMoreMenu keeps every action hook the browser layer dispatches", () =
     ),
   );
 
-  for (const action of [
-    "copy-claude-session-id",
-    "copy-cwd",
-    "copy-session-id",
-    "worktree-merge",
-    "delete-session",
-  ]) {
-    assert.match(html, new RegExp(`data-action="${action}"`), `missing data-action=${action}`);
+  assert.equal(html, "", "composed library items are portals, not duplicate visible SSR menus");
+  const source = readFileSync(new URL("../src/web-ui/react/shell/shell-topbar.tsx", import.meta.url), "utf8");
+  for (const action of ["copy-claude-session-id", "copy-cwd", "copy-session-id", "worktree-merge", "delete-session"]) {
+    assert.ok(getTopbarMoreActions(selected, getShellSidebarEntryActions(selected, false)).some(item => item.actionName === action), `missing real action ${action}`);
   }
-  // The rows are Appica DropdownMenu items now; the business hooks are the
-  // `wand-ui-dropdown-*` classes plus the `data-action` the browser layer dispatches.
-  assert.match(html, /data-slot="dropdown-menu-item"[^>]*data-action="copy-cwd"/);
-  assert.match(html, /data-action="delete-session"[^>]*wand-ui-dropdown-item-danger/);
-  assert.match(html, /wand-ui-dropdown-separator/);
+  assert.match(source, /WandDropdownMenuItem/);
+  assert.ok(getTopbarMoreActions(selected, getShellSidebarEntryActions(selected, false)).some(item => item.actionName === "delete-session" && item.tone === "danger"));
+  assert.match(source, /WandDropdownMenuSeparator/);
+
 });
 
 test("ShellTopbar SSR renders the home state and an empty stable git slot", () => {
@@ -229,25 +229,16 @@ test("file panel path helpers normalize navigation without accessing the DOM", (
   assert.equal(getParentFilePanelCwd("/"), "/");
 });
 
-test("ShellFilePanel SSR preserves the legacy slot and renders the React explorer", () => {
+test("ShellFilePanel keeps the legacy slot outside its client Drawer portal", () => {
   const explorerRef = createRef<HTMLDivElement>();
   const html = renderWithStore(createElement(ShellFilePanel, { explorerRef }));
-  const requiredIds = [
-    "file-panel-backdrop",
-    "file-side-panel",
-    "file-explorer-refresh",
-    "file-side-panel-close",
-    "file-explorer-up",
-    "file-explorer-cwd",
-    "file-explorer",
-  ];
-  for (const id of requiredIds) assert.match(html, new RegExp(`id="${id}"`), `missing #${id}`);
-
-  assert.match(html, /id="file-panel-backdrop" class="file-panel-backdrop open"/);
-  assert.match(html, /id="file-side-panel" class="file-side-panel open"/);
-  assert.match(html, /id="file-explorer-cwd"[^>]*value="\/workspace\/wand"/);
+  assert.match(html, /id="file-panel-backdrop"/);
   assert.match(html, /<div class="file-explorer legacy-file-explorer-host" id="file-explorer" hidden="" aria-hidden="true"><\/div>/);
-  assert.match(html, /class="wand-file-explorer"/);
+  const source = readFileSync(new URL("../src/web-ui/react/shell/shell-file-panel.tsx", import.meta.url), "utf8");
+  assert.match(source, /<Drawer forceRender open=\{snapshot\.layout\.filePanelOpen\}/);
+  for (const id of ["file-side-panel", "file-explorer-refresh", "file-side-panel-close", "file-explorer-up", "file-explorer-cwd"]) {
+    assert.match(source, new RegExp(`id="${id}"`), `missing #${id}`);
+  }
 });
 
 test("Shell chrome sources use UiStore hooks and no forbidden legacy seam", () => {

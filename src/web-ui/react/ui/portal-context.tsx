@@ -5,6 +5,13 @@ import * as React from "react";
 export const REACT_UI_PORTALS_ID = "wand-react-ui-portals";
 
 const PortalContainerContext = createContext<HTMLElement | null>(null);
+const PopupOwnerContext = createContext<string | null>(null);
+
+/** Explicit nested ownership, independent of the DOM location of an Ant Portal. */
+export function PopupOwnerProvider({ owner, children }: { owner: string; children: ReactNode }) {
+  return <PopupOwnerContext.Provider value={owner}>{children}</PopupOwnerContext.Provider>;
+}
+export function useParentPopupOwner(): string | null { return useContext(PopupOwnerContext); }
 
 interface PortalContainerProviderProps {
   container: HTMLElement;
@@ -19,7 +26,7 @@ export function PortalContainerProvider({ container, children }: PortalContainer
   );
 }
 
-function documentPortalContainer(): HTMLElement | undefined {
+export function documentPortalContainer(): HTMLElement | undefined {
   if (typeof document === "undefined") return undefined;
   return document.getElementById(REACT_UI_PORTALS_ID) ?? undefined;
 }

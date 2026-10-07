@@ -1,7 +1,10 @@
+import { List } from "antd";
+import { WandUiBoundary } from "../theme";
+import { SidebarDisclosure } from "../workspaces/sidebar-disclosure";
 import * as React from "react";
 import type { AttentionItem } from "../../../attention";
 import { taskBoardController } from "../issues/task-board-controller";
-import { WandIcon } from "../ui";
+import { WandButton, WandIcon } from "../ui";
 import { classNames } from "../ui/class-names";
 import { useUiDispatch, useUiStoreSnapshot } from "../shell/ui-store-react";
 import { refreshAttention, useAttentionItems } from "./attention-store";
@@ -41,18 +44,12 @@ function AttentionList({
   items: readonly AttentionItem[];
   onOpen(item: AttentionItem): void;
 }): React.ReactElement {
-  return (
-    <ul className="home-attention-list">
-      {items.map((item) => (
-        <li key={item.id}>
-          <button type="button" className="home-attention-item" onClick={() => onOpen(item)}>
-            <strong>{item.title}</strong>
-            <span>{item.detail}</span>
-          </button>
-        </li>
-      ))}
-    </ul>
-  );
+  return <WandUiBoundary><List size="small" dataSource={[...items]}
+    renderItem={(item) => <List.Item key={item.id}>
+      <WandButton kind="ghost" className="wand-attention-item" onClick={() => onOpen(item)}>
+        <span><strong>{item.title}</strong><br/>{item.detail}</span>
+      </WandButton>
+    </List.Item>}/></WandUiBoundary>;
 }
 
 /**
@@ -68,18 +65,19 @@ export function HomeAttentionBadge({ open, onToggle }: {
   const label = `${items.length} 个报错`;
   const hint = open ? `${label}，收起清单` : `${label}，点开查看`;
   return (
-    <button
+    <WandButton kind="ghost"
       type="button"
       className={classNames("sidebar-attention-badge", open && "is-open")}
       title={hint}
       aria-label={hint}
       aria-expanded={open}
+      aria-controls="sidebar-attention-list"
       onClick={onToggle}
     >
       <WandIcon name="info" size={12} className="sidebar-attention-badge-icon"/>
       <span className="sidebar-attention-badge-label">{label}</span>
       <WandIcon name="chevronDown" size={11} className="sidebar-attention-badge-chevron"/>
-    </button>
+    </WandButton>
   );
 }
 
@@ -95,13 +93,13 @@ export function HomeAttentionPanel({ open, onClose }: {
   const dispatch = useUiDispatch();
   if (items.length === 0) return null;
   return (
-    <div className="home-attention is-sidebar">
-      <div
-        className={classNames("home-attention-panel", open && "is-open")}
-        inert={!open}
-      >
+    <div className="home-attention is-sidebar" onKeyDown={(event) => {
+      if (event.key !== "Escape" || event.defaultPrevented || event.nativeEvent.isComposing) return;
+      event.preventDefault(); event.stopPropagation(); onClose();
+    }}>
+      <SidebarDisclosure id="sidebar-attention-list" open={open}>
         <AttentionList items={items} onOpen={(item) => openAttention(item, dispatch, onClose)}/>
-      </div>
+      </SidebarDisclosure>
     </div>
   );
 }
@@ -112,6 +110,8 @@ export function HomeAttention(): React.ReactElement | null {
   const dispatch = useUiDispatch();
   const [open, setOpen] = React.useState(false);
   const collapse = React.useCallback(() => setOpen(false), []);
+  const id = React.useId();
+  const trigger = React.useRef<HTMLButtonElement>(null);
 
   React.useEffect(() => {
     // 报错被处理掉（或刷新后不再有）时收起，不留停在半开的状态。
@@ -122,10 +122,15 @@ export function HomeAttention(): React.ReactElement | null {
   const label = `${items.length} 个报错`;
   const hint = open ? `${label}，收起清单` : `${label}，点开查看`;
   return (
-    <section className="home-attention" aria-label="需要处理的报错">
-      <button
+    <section className="home-attention" aria-label="需要处理的报错" onKeyDown={(event) => {
+      if (event.key !== "Escape" || event.defaultPrevented || event.nativeEvent.isComposing || !open) return;
+      event.preventDefault(); event.stopPropagation(); setOpen(false); trigger.current?.focus({ preventScroll: true });
+    }}>
+      <WandButton kind="ghost"
         type="button"
         className="home-attention-trigger"
+        ref={trigger}
+        aria-controls={id}
         aria-expanded={open}
         aria-label={hint}
         title={hint}
@@ -134,13 +139,10 @@ export function HomeAttention(): React.ReactElement | null {
         <WandIcon name="info" size={13} className="home-attention-trigger-icon"/>
         <span>{label}</span>
         <WandIcon name="chevronDown" size={13} className="home-attention-trigger-chevron"/>
-      </button>
-      <div
-        className={classNames("home-attention-panel", open && "is-open")}
-        inert={!open}
-      >
+      </WandButton>
+      <SidebarDisclosure id={id} open={open}>
         <AttentionList items={items} onOpen={(item) => openAttention(item, dispatch, collapse)}/>
-      </div>
+      </SidebarDisclosure>
     </section>
   );
 }

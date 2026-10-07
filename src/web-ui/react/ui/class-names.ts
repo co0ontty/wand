@@ -3,9 +3,8 @@ export function classNames(...values: Array<string | false | null | undefined>):
 }
 
 /**
- * Appica / Base UI accept a state-driven `className` function. Wand always
- * passes a plain string, so normalise it back before handing it to
- * `classNames` - a function would otherwise be silently stringified.
+ * Retained compatibility helper for callers with a state-driven className.
+ * Wand styling hooks are plain strings; never stringify a callback.
  */
 export function staticClassName(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;

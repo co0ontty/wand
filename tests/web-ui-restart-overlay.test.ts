@@ -428,10 +428,6 @@ test("restart host is non-dismissable, live, safe-area aware, and mobile respons
     new URL("../src/web-ui/react/restart-overlay/host.tsx", import.meta.url),
     "utf8",
   );
-  const styles = readFileSync(
-    new URL("../src/web-ui/react/restart-overlay/styles.ts", import.meta.url),
-    "utf8",
-  );
   assert.match(host, /<WandDialogSurface/);
   assert.match(host, /dismissable=\{false\}/);
   assert.match(host, /onOpenChange=\{\(\) => \{\}\}/);
@@ -440,10 +436,12 @@ test("restart host is non-dismissable, live, safe-area aware, and mobile respons
   assert.match(host, /controller\.manualRefresh\(\)/);
   assert.ok(!host.includes("onClick={() => controller.dispose"));
   assert.ok(!host.includes("fetch("));
-  assert.match(styles, /var\(--wand-safe-top\)/);
-  assert.match(styles, /var\(--wand-safe-right\)/);
-  assert.match(styles, /var\(--wand-safe-bottom\)/);
-  assert.match(styles, /var\(--wand-safe-left\)/);
-  assert.match(styles, /@media \(max-width: 600px\)/);
-  assert.match(styles, /wand-restart-header > \.wand-ui-button[\s\S]*display: none/);
+  assert.match(host, /var\(--wand-safe-top\)/);
+  assert.match(host, /var\(--wand-safe-right\)/);
+  assert.match(host, /var\(--wand-safe-bottom\)/);
+  assert.match(host, /var\(--wand-safe-left\)/);
+  assert.match(host, /width=\{\{ xs: "calc\(100vw - 32px\)", sm: 520 \}\}/);
+  assert.doesNotMatch(host, /restartOverlayStyles/, "Modal/Flex owns ordinary chrome");
+  assert.match(host, /showClose=\{false\}/);
+  assert.match(host, /zIndex=\{\(wandTheme\.token\?\.zIndexPopupBase \?\? 1000\) \+ 2000\}/, "restart stays above library popup layers");
 });

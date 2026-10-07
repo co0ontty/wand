@@ -24,7 +24,7 @@ export interface SidebarRecentGroup {
   readonly entries: readonly SidebarRecentEntry[];
   readonly latestStartedAt: string;
   readonly activeCount: number;
-  /** 团队与终端永远画一级行；员工 / CLI 只有一条会话时那一行就是会话本身。 */
+  /** 所有非空归属都保留一级身份头，数量/筛选不改变结构。 */
   readonly showsHeader: boolean;
 }
 
@@ -158,8 +158,7 @@ export function recentConversationGroups(
       entries: sorted,
       latestStartedAt: startedAtOf(sorted[0].session),
       activeCount: sorted.filter((entry) => isSessionActive(entry.session)).length,
-      showsHeader: bucket.kind === "team" || bucket.kind === "terminal"
-        || bucket.kind === "blank-terminal" || sorted.length > 1,
+      showsHeader: true,
     };
   });
 

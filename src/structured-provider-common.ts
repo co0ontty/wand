@@ -129,7 +129,30 @@ export function defaultStructuredState(
   provider: SessionProvider,
   runner = defaultStructuredRunner(provider),
 ): StructuredSessionState {
-  return { provider, runner, lastError: null, inFlight: false, activeRequestId: null };
+  return {
+    provider,
+    runner,
+    lastError: null,
+    inFlight: false,
+    activeRequestId: null,
+    // 锚点是 inFlight 的派生读数：不在飞的默认态必须显式为 null，而不是 undefined，
+    // 这样任何 {...defaultStructuredState(...)} 展开都不会把上一轮的旧锚点带出来。
+    turnStartedAt: null,
+    lastActivityAt: null,
+  };
+}
+
+/**
+ * 回合锚点的收敛兜底：`inFlight !== true` 时 turnStartedAt / lastActivityAt 一律读成
+ * null。写入点已经逐条走 settleTurn()，这里再挡一层历史库残值和重启降级窗口——
+ * 否则客户端会在一条早就结束的会话上算出「已运行 N 分钟」。
+ */
+export function normalizeTurnAnchors(
+  state: StructuredSessionState | undefined,
+): StructuredSessionState | undefined {
+  if (!state || state.inFlight) return state;
+  if (state.turnStartedAt === null && state.lastActivityAt === null) return state;
+  return { ...state, turnStartedAt: null, lastActivityAt: null };
 }
 
 export function normalizeThinkingEffort(value: unknown): SessionSnapshot["thinkingEffort"] {

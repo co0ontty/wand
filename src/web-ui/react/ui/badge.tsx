@@ -1,38 +1,14 @@
-import { Badge, type BadgeProps } from "@appica/ui-react/badge";
+import { Tag } from "antd";
 import * as React from "react";
 import { classNames } from "./class-names";
+import { WandUiBoundary } from "../theme";
 
 type WandBadgeTone = "neutral" | "accent" | "info" | "success" | "warning";
-
-/** Wand's semantic tones. Appica only supplies the tinted "soft" chrome;
- *  the tone colours themselves come from the `wand-ui-badge-<tone>` hooks in
- *  react/styles/base.ts, because Appica's role variants pair a tint fill with
- *  `*-foreground`, which in Wand's palette is the on-solid (white) colour. */
-const TONE_VARIANTS = {
-  neutral: "soft",
-  accent: "soft",
-  info: "soft",
-  success: "soft",
-  warning: "soft",
-} as const satisfies Record<WandBadgeTone, NonNullable<BadgeProps["variant"]>>;
-
-export interface WandBadgeProps extends Omit<BadgeProps, "variant" | "tone"> {
+export interface WandBadgeProps extends React.ComponentPropsWithRef<"span"> {
   tone?: WandBadgeTone;
+  size?: "xs" | "sm" | "md" | "lg" | "icon-sm" | "icon-md" | "icon-lg";
 }
-
-export function WandBadge({ className, tone = "neutral", size = "sm", ...props }: WandBadgeProps) {
-  return (
-    <Badge
-      {...props}
-      size={size}
-      variant={TONE_VARIANTS[tone]}
-      className={classNames(
-        /* `tabular-nums`: badges are mostly counts/percentages, and proportional
-           digits make their width jitter as the value changes. */
-        "wand-ui-badge tabular-nums",
-        `wand-ui-badge-${tone}`,
-        className,
-      )}
-    />
-  );
+const colors = { neutral: undefined, accent: "#b8562f", info: "processing", success: "success", warning: "warning" };
+export function WandBadge({ className, tone = "neutral", size: _size, ...props }: WandBadgeProps) {
+  return <WandUiBoundary><Tag {...props} color={colors[tone]} className={classNames("wand-ui-badge", `wand-ui-badge-${tone}`, className)}/></WandUiBoundary>;
 }

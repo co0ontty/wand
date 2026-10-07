@@ -229,17 +229,17 @@ test("chat titles project current task names for existing chats and follow exclu
       assert.equal(storage.getSession(chat.id)?.title, "测试团队 · 补安装说明", "读取不回写历史会话");
       assert.equal(storage.listAiTeamRunChatMarkers().has(plain.id), false, "普通会话不受影响");
     };
-    await checkTitles("补安装说明任务处理群", task.workspaceTaskId!);
+    await checkTitles("补安装说明", task.workspaceTaskId!);
     const before = await fetch(`${baseUrl}/api/tasks?revision=initial`).then((r) => r.json());
     storage.updateWandTask(task.id, { title: "整理文档" });
     const after = await fetch(`${baseUrl}/api/tasks?revision=${encodeURIComponent(before.revision)}`)
       .then((r) => r.json());
     assert.equal(after.unchanged, false, "改任务名即使不改运行也会刷新列表");
-    await checkTitles("整理文档任务处理群", task.workspaceTaskId!);
+    await checkTitles("整理文档", task.workspaceTaskId!);
     storage.saveAiTeam({ ...TEAM, name: "新团队名称" });
-    await checkTitles("整理文档任务处理群", task.workspaceTaskId!);
+    await checkTitles("整理文档", task.workspaceTaskId!);
     storage.moveSessionToWorkspaceTask(chat.id, other.workspaceTaskId!);
-    await checkTitles("排查登录任务处理群", other.workspaceTaskId!);
+    await checkTitles("排查登录", other.workspaceTaskId!);
     assert.equal(storage.getAiTeamRun("run-1")!.taskId, task.id, "运行归属快照保留");
   } finally {
     manager.dispose();
@@ -250,12 +250,12 @@ test("chat titles project current task names for existing chats and follow exclu
 });
 
 test("group titles retain the whole task name and have a neutral fallback", () => {
-  assert.equal(aiTeamChatTitle("  修复登录  "), "修复登录任务处理群");
-  assert.equal(aiTeamChatTitle("检查 🐱 & <标签>"), "检查 🐱 & <标签>任务处理群");
-  assert.equal(aiTeamChatTitle("长标题".repeat(50)), `${"长标题".repeat(50)}任务处理群`);
-  assert.equal(aiTeamChatTitle(" "), "任务处理群");
-  assert.equal(aiTeamChatTitle(null), "任务处理群");
-  assert.equal(aiTeamChatTitle(), "任务处理群");
+  assert.equal(aiTeamChatTitle("  修复登录  "), "修复登录");
+  assert.equal(aiTeamChatTitle("检查 🐱 & <标签>"), "检查 🐱 & <标签>");
+  assert.equal(aiTeamChatTitle("长标题".repeat(50)), `${"长标题".repeat(50)}`);
+  assert.equal(aiTeamChatTitle(" "), "群聊");
+  assert.equal(aiTeamChatTitle(null), "群聊");
+  assert.equal(aiTeamChatTitle(), "群聊");
 });
 
 // ── 展示层：折叠分组、短标题、显示模式 ──
@@ -352,7 +352,9 @@ test("display mode cycles full → folded → active and survives dirty storage 
   assert.equal(nextSidebarDisplayMode("active"), "full");
   assert.equal(parseSidebarDisplayMode(null), "full");
   assert.equal(parseSidebarDisplayMode("nonsense"), "full");
-  assert.equal(sidebarDisplayModeLabel("active"), "只看活动");
+  assert.equal(sidebarDisplayModeLabel("full"), "展开");
+  assert.equal(sidebarDisplayModeLabel("folded"), "收起");
+  assert.equal(sidebarDisplayModeLabel("active"), "在跑");
 });
 
 test("active mode drops idle sessions, then idle tasks and directories", () => {

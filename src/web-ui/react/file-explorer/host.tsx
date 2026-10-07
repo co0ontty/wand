@@ -1,7 +1,8 @@
+import { Alert, Button, Card, Empty, Flex, Progress, Segmented, Spin, Tag, Typography } from "antd";
 import * as React from "react";
 import { useSyncExternalStore } from "react";
 import { wandOverlay } from "../overlay-controller";
-import { WandButton, WandMenuItem, WandSearchField } from "../ui";
+import { WandButton, WandIconButton, WandInput, WandMenuItem, WandMenuSeparator, WandSearchField } from "../ui";
 import { copyTextToPlatformClipboard } from "../file-preview/platform-adapter";
 import { codeEditorController, codeEditorStore } from "../code-editor/controller";
 import { nextFolderPickerIndex, type FolderPickerNavigationKey } from "../folder-picker/model";
@@ -122,6 +123,10 @@ function gitBadge(entry: FileExplorerEntry): GitBadge | null {
   return null;
 }
 
+function gitColor(badge: GitBadge): string | undefined {
+  return ({ "git-added": "success", "git-modified": "warning", "git-deleted": "error", "git-renamed": "purple" } as Record<string, string>)[badge.className];
+}
+
 /**
  * Rows stay quiet: size and mtime only show up in the native tooltip, so a long
  * directory listing keeps a single reading column.
@@ -148,7 +153,7 @@ interface PendingCreate {
   kind: "file" | "dir";
 }
 
-const TreeItemsContext = React.createContext<Map<string, HTMLDivElement> | null>(null);
+const TreeItemsContext = React.createContext<Map<string, HTMLElement> | null>(null);
 
 function ExplorerRow({
   entry,
@@ -209,13 +214,14 @@ function ExplorerRow({
 
   if (isRenaming) {
     return (
-      <div className="wand-explorer-row editing" style={{ paddingLeft: 8 + depth * 12 }}>
-        <span className="wand-explorer-rename">
+      <Flex align="center" gap="small" className="wand-explorer-row editing" style={{ padding: "4px 8px", paddingLeft: 8 + depth * 12 }}>
+        <Flex align="center" gap="small" className="wand-explorer-rename" style={{ flex: 1, minWidth: 0 }}>
           <span className="wand-explorer-icon"><ExplorerIcon name={iconForEntry(entry, false)}/></span>
-          <input
+          <WandInput
             value={renameDraft}
             autoFocus
             spellCheck={false}
+            aria-label={`重命名 ${entry.name}`}
             onChange={(event) => setRenameDraft(event.currentTarget.value)}
             onClick={(event) => event.stopPropagation()}
             onBlur={() => void commitRename()}
@@ -231,20 +237,21 @@ function ExplorerRow({
               }
             }}
           />
-        </span>
-      </div>
+        </Flex>
+      </Flex>
     );
   }
 
   return (
     <>
-      <div
+      <Button
         className={`wand-explorer-row${isActiveFile ? " active" : ""}`}
         ref={(node) => {
           if (node) treeItems?.set(entry.path, node);
           else treeItems?.delete(entry.path);
         }}
-        style={{ paddingLeft: 8 + depth * 12 }}
+        block size="small" type={isActiveFile ? "primary" : "text"}
+        style={{ paddingLeft: 8 + depth * 12, justifyContent: "flex-start", gap: 4 }}
         role="treeitem"
         tabIndex={0}
         aria-label={entry.name}
@@ -293,34 +300,34 @@ function ExplorerRow({
           onContextMenu({ x: event.clientX, y: event.clientY, entry, dir: parentOf(entry.path) });
         }}
       >
-        <span className={`wand-explorer-chevron${isOpen ? " open" : ""}${showChevron ? "" : " empty"}`} aria-hidden="true">
+        <span className={`wand-explorer-chevron${isOpen ? " open" : ""}${showChevron ? "" : " empty"}`} style={{ width: 12, flexShrink: 0, transform: isOpen ? "rotate(90deg)" : undefined }} aria-hidden="true">
           {showChevron ? "▸" : ""}
         </span>
         <span className="wand-explorer-icon" aria-hidden="true"><ExplorerIcon name={iconForEntry(entry, isOpen && isDir)}/></span>
-        <span className="wand-explorer-name">{entry.name}</span>
-        {sizeLabel ? <span className="wand-explorer-size">{sizeLabel}</span> : null}
-        {badge && <span className={`wand-explorer-git ${badge.className}`} role="img" title={badge.label} aria-label={badge.label}>{badge.text}</span>}
-      </div>
+        <Typography.Text ellipsis className="wand-explorer-name" style={{ flex: 1, minWidth: 0, textAlign: "left", color: "inherit" }}>{entry.name}</Typography.Text>
+        {sizeLabel ? <Typography.Text type={isActiveFile ? undefined : "secondary"} className="wand-explorer-size" style={{ color: isActiveFile ? "inherit" : undefined }}>{sizeLabel}</Typography.Text> : null}
+        {badge && <Tag className={`wand-explorer-git ${badge.className}`} color={gitColor(badge)} role="img" title={badge.label} aria-label={badge.label}>{badge.text}</Tag>}
+      </Button>
       {isDir && isOpen && (
         <div className="wand-explorer-children">
           {nodeState?.status === "loading" && (
-            <div className="wand-explorer-row pending" style={{ paddingLeft: 8 + (depth + 1) * 12 }} role="status">
+            <Flex align="center" gap="small" className="wand-explorer-row pending" style={{ padding: "4px 8px", paddingLeft: 8 + (depth + 1) * 12 }} role="status">
               <span className="wand-explorer-chevron empty"/>
               <span className="wand-explorer-name">加载中</span>
-              <span className="wand-explorer-dots" aria-hidden="true"><i/><i/><i/></span>
-            </div>
+              <Spin className="wand-explorer-dots" size="small" aria-hidden="true"/>
+            </Flex>
           )}
           {nodeState?.status === "error" && (
-            <div className="wand-explorer-row error" style={{ paddingLeft: 8 + (depth + 1) * 12 }} role="alert">
+            <Flex align="center" gap="small" className="wand-explorer-row error" style={{ padding: "4px 8px", paddingLeft: 8 + (depth + 1) * 12 }} role="alert">
               <span className="wand-explorer-chevron empty"/>
               <span className="wand-explorer-name">{nodeState.error || "读取失败"}</span>
-            </div>
+            </Flex>
           )}
           {nodeState?.status === "loaded" && nodeState.entries.length === 0 && (
-            <div className="wand-explorer-row pending" style={{ paddingLeft: 8 + (depth + 1) * 12 }}>
+            <Flex align="center" gap="small" className="wand-explorer-row pending" style={{ padding: "4px 8px", paddingLeft: 8 + (depth + 1) * 12 }}>
               <span className="wand-explorer-chevron empty"/>
               <span className="wand-explorer-name">空文件夹</span>
-            </div>
+            </Flex>
           )}
           {isCreatingHere && pendingCreate && (
             <CreateInput
@@ -374,12 +381,13 @@ function CreateInput({
 }) {
   const [value, setValue] = React.useState("");
   return (
-    <div className="wand-explorer-row editing" style={{ paddingLeft: 8 + depth * 12 }}>
-      <span className="wand-explorer-rename">
+    <Flex align="center" gap="small" className="wand-explorer-row editing" style={{ padding: "4px 8px", paddingLeft: 8 + depth * 12 }}>
+      <Flex align="center" gap="small" className="wand-explorer-rename" style={{ flex: 1, minWidth: 0 }}>
         <span className="wand-explorer-icon"><ExplorerIcon name={kind === "file" ? "file" : "folder"}/></span>
-        <input
+        <WandInput
           value={value}
           autoFocus
+          aria-label={kind === "file" ? "新文件名" : "新文件夹名"}
           placeholder={kind === "file" ? "文件名（回车创建，Esc 取消）" : "文件夹名（回车创建，Esc 取消）"}
           spellCheck={false}
           onChange={(event) => setValue(event.currentTarget.value)}
@@ -397,8 +405,8 @@ function CreateInput({
             }
           }}
         />
-      </span>
-    </div>
+      </Flex>
+    </Flex>
   );
 }
 
@@ -445,17 +453,17 @@ function ContextMenu({
         if (node) buttons.current.set(action, node);
         else buttons.current.delete(action);
       }}
-      className={`wand-explorer-context-item${opts.danger ? " danger" : ""}`}
       disabled={opts.disabled}
       onClick={() => { onAction(action); }}
     />
   );
 
   return (
-    <div
+    <Card
       ref={ref}
+      size="small" styles={{ body: { padding: 4 } }}
       className="wand-explorer-context-menu"
-      style={{ left: Math.max(8, left), top: Math.max(8, top) }}
+      style={{ position: "fixed", zIndex: 1000, width: 180, left: Math.max(8, left), top: Math.max(8, top) }}
       role="menu"
       aria-label="文件操作"
       onKeyDown={(event) => {
@@ -474,7 +482,7 @@ function ContextMenu({
     >
       {item("新建文件", "newFile", { disabled: !targetDir })}
       {item("新建文件夹", "newDir", { disabled: !targetDir })}
-      <div className="wand-explorer-context-divider"/>
+      <WandMenuSeparator/>
       {entry ? (
         <>
           {isDir ? item("进入此目录", "navigate") : item("打开", "open")}
@@ -482,7 +490,7 @@ function ContextMenu({
           {item("复制完整路径", "copyPath")}
           {item("复制相对路径", "copyRelative")}
           {!isDir && item("下载文件", "download")}
-          <div className="wand-explorer-context-divider"/>
+          <WandMenuSeparator/>
           {item("重命名", "rename")}
           {item("移动到…", "move")}
           {item("删除", "delete", { danger: true })}
@@ -493,7 +501,7 @@ function ContextMenu({
           {item("复制目录路径", "copyPath")}
         </>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -505,6 +513,7 @@ interface SearchPanelProps {
   activeIndex: number;
   listId: string;
   rowRefs: React.RefObject<Map<string, HTMLElement>>;
+  searchInputRef: React.RefObject<HTMLInputElement | null>;
   onActiveIndex(index: number): void;
   onOpen(entry: FileExplorerEntry): void;
   onReveal(entry: FileExplorerEntry): void;
@@ -526,6 +535,7 @@ function SearchPanel({
   activeIndex,
   listId,
   rowRefs,
+  searchInputRef,
   onActiveIndex,
   onOpen,
   onReveal,
@@ -536,60 +546,74 @@ function SearchPanel({
 }: SearchPanelProps) {
   const counts = countFileExplorerSearchResults(snapshot.searchResults ?? []);
   const groups = groupFileExplorerSearchResults(rows, snapshot.root);
+  // Segmented changes filter for pointer and keyboard alike; only a pointer
+  // move should take the caret out of the field (see the panel keyboard story).
+  const filterPointer = React.useRef(false);
   const indexByPath = new Map<string, number>();
   rows.forEach((entry, index) => indexByPath.set(entry.path, index));
   const activeFilter = SEARCH_FILTERS.find((filter) => filter.value === snapshot.searchFilter);
   const showSummary = !snapshot.searchError;
 
   return (
-    <div className="wand-explorer-search-panel">
+    <Flex vertical className="wand-explorer-search-panel" style={{ flex: 1, minHeight: 0 }}>
       {showSummary && (
-        <div className="wand-explorer-search-summary">
-          <span className="wand-explorer-search-count">
+        <Flex wrap align="center" gap="small" className="wand-explorer-search-summary" style={{ padding: 8 }}>
+          <Typography.Text className="wand-explorer-search-count">
             {snapshot.searching ? "搜索中" : `${counts.all} 项结果`}
-          </span>
+          </Typography.Text>
           {!snapshot.searching && snapshot.searchDurationMs !== null && counts.all > 0 && (
-            <span className="wand-explorer-search-duration">{snapshot.searchDurationMs} ms</span>
+            <Typography.Text type="secondary" className="wand-explorer-search-duration">{snapshot.searchDurationMs} ms</Typography.Text>
           )}
-          <div className="wand-explorer-search-filters" role="group" aria-label="按类型筛选结果">
-            {SEARCH_FILTERS.map((filter) => (
-              <button
-                key={filter.value}
-                type="button"
-                className={`wand-explorer-filter${snapshot.searchFilter === filter.value ? " active" : ""}`}
-                aria-pressed={snapshot.searchFilter === filter.value}
-                disabled={counts.all === 0}
-                onClick={() => onFilter(filter.value)}
-              >
-                {filter.label}
-                <span className="wand-explorer-filter-count">{counts[filter.value]}</span>
-              </button>
-            ))}
-          </div>
-        </div>
+          <Segmented
+            className="wand-explorer-search-filters"
+            size="small"
+            aria-label="按类型筛选结果"
+            value={snapshot.searchFilter}
+            onMouseDown={() => { filterPointer.current = true; }}
+            options={SEARCH_FILTERS.map((filter) => ({
+              value: filter.value,
+              disabled: counts.all === 0,
+              label: (
+                <Flex align="center" gap={4} className="wand-explorer-filter-option">
+                  {filter.label}
+                  <Typography.Text type="secondary" className="wand-explorer-filter-count">{counts[filter.value]}</Typography.Text>
+                </Flex>
+              ),
+            }))}
+            onChange={(value) => {
+              onFilter(value as FileExplorerSearchFilter);
+              // A pointer click on a filter must not strand the keyboard on the
+              // control: the whole panel is driven from the search field.
+              if (filterPointer.current) searchInputRef.current?.focus();
+              filterPointer.current = false;
+            }}
+          />
+        </Flex>
       )}
-      {snapshot.searching && <div className="wand-explorer-search-progress" aria-hidden="true"><span/></div>}
+      {snapshot.searching && (
+        <Progress className="wand-explorer-search-progress" percent={100} showInfo={false}
+          size="small" status="active" aria-label="正在搜索文件"/>
+      )}
 
       {snapshot.searchError ? (
-        <div className="wand-file-explorer-empty" role="alert">
+        <Alert className="wand-file-explorer-empty" type="error" showIcon title="读取失败" description={<Flex vertical gap="small">
           <p className="wand-file-explorer-empty-title">搜索失败</p>
           <p className="wand-file-explorer-empty-hint">{snapshot.searchError}</p>
           <WandButton kind="ghost" size="small" onClick={onRetry}>重试搜索</WandButton>
-        </div>
+        </Flex>} />
       ) : rows.length > 0 ? (
-        <div id={listId} className="wand-explorer-results" role="listbox" aria-label="搜索结果">
+        <Flex vertical id={listId} className="wand-explorer-results" role="listbox" aria-label="搜索结果" style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
           {groups.map((group) => (
             <div className="wand-explorer-search-group" role="group" aria-label={group.label} key={group.key}>
-              <div className="wand-explorer-search-group-label" title={group.key}>
-                <span className="wand-explorer-search-group-path">{group.label}</span>
-                <span className="wand-explorer-search-group-count">{group.entries.length}</span>
-              </div>
+              <Card size="small" className="wand-explorer-search-group-label" title={<Typography.Text ellipsis className="wand-explorer-search-group-path">{group.label}</Typography.Text>} extra={<Typography.Text type="secondary" className="wand-explorer-search-group-count">{group.entries.length}</Typography.Text>} styles={{ body: { display: "none" } }} style={{ position: "sticky", top: 0, zIndex: 1 }}><span/></Card>
               {group.entries.map((entry) => {
                 const index = indexByPath.get(entry.path) ?? -1;
                 const active = index === activeIndex;
                 const badge = gitBadge(entry);
                 return (
-                  <div
+                  <Button
+                    block type={active ? "primary" : "text"}
+                    style={{ justifyContent: "flex-start", gap: 6 }}
                     key={entry.path}
                     id={`${listId}-option-${index}`}
                     ref={(node) => {
@@ -611,55 +635,55 @@ function SearchPanel({
                     <span className="wand-explorer-result-icon" aria-hidden="true">
                       <ExplorerIcon name={iconForEntry(entry, false)}/>
                     </span>
-                    <span className="wand-explorer-result-name">
+                    <Typography.Text ellipsis className="wand-explorer-result-name" style={{ flex: 1, minWidth: 0, textAlign: "left", color: "inherit" }}>
                       {fileExplorerSearchSegments(entry.name, query).map((segment, segmentIndex) => (
                         segment.match
-                          ? <mark className="wand-explorer-hit" key={segmentIndex}>{segment.value}</mark>
+                          ? <Typography.Text mark className="wand-explorer-hit" key={segmentIndex}>{segment.value}</Typography.Text>
                           : <React.Fragment key={segmentIndex}>{segment.value}</React.Fragment>
                       ))}
-                    </span>
+                    </Typography.Text>
                     {badge && (
-                      <span className={`wand-explorer-git ${badge.className}`} role="img" title={badge.label} aria-label={badge.label}>
+                      <Tag className={`wand-explorer-git ${badge.className}`} color={gitColor(badge)} role="img" title={badge.label} aria-label={badge.label}>
                         {badge.text}
-                      </span>
+                      </Tag>
                     )}
-                  </div>
+                  </Button>
                 );
               })}
             </div>
           ))}
-        </div>
+        </Flex>
       ) : snapshot.searching ? null : counts.all > 0 ? (
-        <div className="wand-file-explorer-empty">
+        <Empty className="wand-file-explorer-empty" description={null}>
           <p className="wand-file-explorer-empty-title">「{activeFilter?.label ?? "当前"}」筛选下没有结果</p>
           <WandButton kind="ghost" size="small" onClick={() => onFilter("all")}>
             显示全部 {counts.all} 项
           </WandButton>
-        </div>
+        </Empty>
       ) : (
-        <div className="wand-file-explorer-empty">
+        <Empty className="wand-file-explorer-empty" description={null}>
           <p className="wand-file-explorer-empty-title">没有匹配「{query}」的文件</p>
           <p className="wand-file-explorer-empty-hint">
             只匹配名称；已跳过 .git、node_modules、dist 等目录，最多向下 5 层。
           </p>
           <WandButton kind="ghost" size="small" onClick={onClear}>清除搜索</WandButton>
-        </div>
+        </Empty>
       )}
 
       {rows.length > 0 && (
-        <div className="wand-explorer-keyhints" aria-hidden="true">
-          <span><kbd>↑</kbd><kbd>↓</kbd>选择</span>
-          <span><kbd>↵</kbd>打开</span>
-          <span><kbd>⇧↵</kbd>在树中定位</span>
-          <span><kbd>Esc</kbd>清空</span>
-        </div>
+        <Flex wrap gap="small" className="wand-explorer-keyhints" aria-hidden="true" style={{ padding: 8 }}>
+          <span><Typography.Text keyboard>↑</Typography.Text><Typography.Text keyboard>↓</Typography.Text>选择</span>
+          <span><Typography.Text keyboard>↵</Typography.Text>打开</span>
+          <span><Typography.Text keyboard>⇧↵</Typography.Text>在树中定位</span>
+          <span><Typography.Text keyboard>Esc</Typography.Text>清空</span>
+        </Flex>
       )}
-    </div>
+    </Flex>
   );
 }
 
 export function FileExplorerHost({ root }: { root: string }) {
-  const treeItems = React.useRef(new Map<string, HTMLDivElement>());
+  const treeItems = React.useRef(new Map<string, HTMLElement>());
   const resultItems = React.useRef(new Map<string, HTMLElement>());
   const searchInputRef = React.useRef<HTMLInputElement>(null);
   const revealRequest = React.useRef<{ path: string; focus: boolean } | null>(null);
@@ -837,14 +861,14 @@ export function FileExplorerHost({ root }: { root: string }) {
   return (
     <TreeItemsContext.Provider value={treeItems.current}>
       <style id="wand-file-explorer-styles">{fileExplorerStyles}</style>
-      <div className="wand-file-explorer" onContextMenu={(event) => {
+      <Flex vertical className="wand-file-explorer" style={{ flex: 1, minHeight: 0 }} onContextMenu={(event) => {
         // background context menu (empty area)
         if (event.target !== event.currentTarget) return;
         event.preventDefault();
         setContextMenu({ x: event.clientX, y: event.clientY, entry: null, dir: snapshot.activeDir || snapshot.root });
       }}>
-        <div className="wand-file-explorer-toolbar">
-          <div className="wand-file-explorer-search" onKeyDown={handleSearchKeyDown}>
+        <Flex align="center" gap={4} className="wand-file-explorer-toolbar" style={{ padding: 8, flexShrink: 0 }}>
+          <Flex className="wand-file-explorer-search" style={{ flex: 1, minWidth: 0 }} onKeyDown={handleSearchKeyDown}>
             <WandSearchField
               value={searchInput}
               label="搜索文件"
@@ -856,24 +880,22 @@ export function FileExplorerHost({ root }: { root: string }) {
               onValueChange={setSearchInput}
               onSearch={(next) => void dispatch.execute({ type: "search.start", query: next })}
             />
-          </div>
-          <button
-            type="button"
+          </Flex>
+          <WandIconButton
             className="wand-file-explorer-btn"
             title="新建文件"
             aria-label="新建文件"
             disabled={!snapshot.root || snapshot.busy}
             onClick={() => setPendingCreate({ dir: snapshot.activeDir || snapshot.root, kind: "file" })}
-          ><ExplorerIcon name="newFile" size={15}/></button>
-          <button
-            type="button"
+          ><ExplorerIcon name="newFile" size={15}/></WandIconButton>
+          <WandIconButton
             className="wand-file-explorer-btn"
             title="新建文件夹"
             aria-label="新建文件夹"
             disabled={!snapshot.root || snapshot.busy}
             onClick={() => setPendingCreate({ dir: snapshot.activeDir || snapshot.root, kind: "dir" })}
-          ><ExplorerIcon name="newFolder" size={15}/></button>
-        </div>
+          ><ExplorerIcon name="newFolder" size={15}/></WandIconButton>
+        </Flex>
         {searchMode ? (
           <SearchPanel
             snapshot={snapshot}
@@ -882,29 +904,27 @@ export function FileExplorerHost({ root }: { root: string }) {
             activeIndex={activeRow}
             listId={listId}
             rowRefs={resultItems}
+            searchInputRef={searchInputRef}
             onActiveIndex={setActiveResult}
             onOpen={activateResult}
             onReveal={(entry) => revealInTree(entry.path)}
             onContextMenu={setContextMenu}
             onFilter={(filter) => {
               void dispatch.execute({ type: "search.filter", filter });
-              // Clicking a chip must not strand the keyboard on the chip: the
-              // whole panel is driven from the field.
-              searchInputRef.current?.focus();
             }}
             onClear={() => void dispatch.execute({ type: "search.clear" })}
             onRetry={() => void dispatch.execute({ type: "search.start", query: searchInput })}
           />
         ) : (
-          <div className="wand-file-explorer-tree" role="tree" aria-label="文件树">
+          <Flex vertical className="wand-file-explorer-tree" style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden" }} role="tree" aria-label="文件树">
             {!snapshot.root && (
-              <div className="wand-file-explorer-empty">尚未选择工作目录。</div>
+              <Empty className="wand-file-explorer-empty" description={null}>尚未选择工作目录。</Empty>
             )}
             {snapshot.root && rootNode?.status === "loading" && !rootNode.entries.length && (
-              <div className="wand-file-explorer-empty">加载中…</div>
+              <Empty className="wand-file-explorer-empty" description={null}><Spin size="small"/>加载中…</Empty>
             )}
             {snapshot.root && rootNode?.status === "error" && (
-              <div className="wand-file-explorer-empty" role="alert">
+              <Alert className="wand-file-explorer-empty" type="error" showIcon title="读取失败" description={<Flex vertical gap="small">
                 <p className="wand-file-explorer-empty-title">{rootNode.error || "读取目录失败"}</p>
                 <WandButton
                   kind="ghost"
@@ -912,7 +932,7 @@ export function FileExplorerHost({ root }: { root: string }) {
                   // refresh 缺省目录就是 snapshot.root，会重新 loadDir 并把该节点打回 loading。
                   onClick={() => void dispatch.execute({ type: "refresh", dir: snapshot.root })}
                 >重新加载</WandButton>
-              </div>
+              </Flex>} />
             )}
             {rootNode?.status === "loaded" && (
               <>
@@ -932,12 +952,12 @@ export function FileExplorerHost({ root }: { root: string }) {
                     pendingCreate={pendingCreate}
                     setPendingCreate={setPendingCreate}
                   />
-                )) : <div className="wand-file-explorer-empty">这个目录是空的。</div>}
+                )) : <Empty className="wand-file-explorer-empty" description={null}>这个目录是空的。</Empty>}
               </>
             )}
-          </div>
+          </Flex>
         )}
-      </div>
+      </Flex>
       {contextMenu && (
         <ContextMenu
           state={contextMenu}

@@ -1,3 +1,5 @@
+import { Alert, Flex, Form, Space, Typography } from "antd";
+import { FolderPickerOptions } from "../folder-picker/options";
 import {
   type KeyboardEvent,
   useEffect,
@@ -5,7 +7,9 @@ import {
   useState,
 } from "react";
 import * as React from "react";
-import { WandButton, WandDialogSurface } from "../ui";
+import { WandButton, WandDialogSurface, WandInput } from "../ui";
+import "../issues/library-layout";
+import { TaskForm } from "../issues/form-controls";
 import { httpFolderPickerRepository } from "../folder-picker/repository";
 import { nextFolderPickerIndex, type FolderPickerNavigationKey } from "../folder-picker/model";
 import type {
@@ -177,21 +181,17 @@ export function MoveEntryDialog({
       onOpenChange={(nextOpen) => { if (!nextOpen) onDismiss(); }}
       title={`移动${request.isDir ? "文件夹" : "文件"}`}
       description={`为「${entryName}」选择目标目录，确认后立即移动。`}
-      className="wand-folder-picker-dialog wand-move-dialog"
-      overlayClassName="wand-folder-picker-overlay"
-      titleClassName="wand-folder-picker-title"
-      descriptionClassName="wand-folder-picker-description"
-      headerClassName="wand-folder-picker-header"
+      className="wand-task-library-dialog wand-folder-picker-library-dialog wand-move-dialog"
       closeLabel="关闭移动对话框"
       testId="move-entry-dialog"
       dismissable={!moving}
     >
-      <form noValidate
-        className="wand-folder-picker-form"
+      <TaskForm noValidate
         aria-busy={loading || moving}
         onSubmit={(event) => { event.preventDefault(); void commit(targetDir); }}
       >
-        <div className="wand-folder-picker-quick" aria-label="快捷目录">
+        <Flex vertical gap={16}>
+        <Space wrap aria-label="快捷目录">
           <WandButton size="small" onClick={() => navigate("/tmp")}>临时目录 /tmp</WandButton>
           <WandButton size="small" onClick={() => navigate("/")}>根目录 /</WandButton>
           <WandButton
@@ -201,13 +201,11 @@ export function MoveEntryDialog({
           >
             返回上级
           </WandButton>
-        </div>
+        </Space>
 
-        <label className="wand-folder-picker-field" htmlFor="wand-move-input">
-          <span>目标目录</span>
-          <input
+        <Form.Item label="目标目录" htmlFor="wand-move-input">
+          <WandInput
             id="wand-move-input"
-            className="wand-folder-picker-input"
             data-wand-autofocus
             autoFocus
             autoComplete="off"
@@ -221,43 +219,22 @@ export function MoveEntryDialog({
             onChange={(event) => setPath(event.currentTarget.value)}
             onKeyDown={handleInputKeyDown}
           />
-        </label>
+        </Form.Item>
 
-        <div id="wand-move-options" className="wand-folder-picker-options" role="listbox" aria-label="目录建议">
-          {loading ? (
-            <div className="wand-folder-picker-state" role="status">正在加载目录…</div>
-          ) : listing && listing.items.length > 0 ? (
-            listing.items.map((item, index) => (
-              <button
-                key={`${item.type}:${item.path}`}
-                ref={(element) => { itemRefs.current[index] = element; }}
-                id={`wand-move-option-${index}`}
-                type="button"
-                role="option"
-                aria-selected={activeIndex === index}
-                className={`wand-folder-picker-option${activeIndex === index ? " active" : ""}`}
-                onMouseEnter={() => setActiveIndex(index)}
-                onClick={() => activateItem(item)}
-              >
-                <span aria-hidden="true">{item.type === "parent" ? "↩" : "▸"}</span>
-                <span>{item.type === "parent" ? "..（返回上级目录）" : item.name}</span>
-                <code>{item.path}</code>
-              </button>
-            ))
-          ) : error ? null : (
-            <div className="wand-folder-picker-state">当前目录没有子目录。</div>
-          )}
-        </div>
+        <FolderPickerOptions id="wand-move-options" optionPrefix="wand-move-option"
+          items={listing?.items} loading={loading} error={error} activeIndex={activeIndex}
+          itemRefs={itemRefs} onActivate={activateItem} onActiveIndex={setActiveIndex}/>
 
-        {error ? <p className="wand-folder-picker-error" role="alert">{error}</p> : null}
+        {error ? <Alert type="error" showIcon role="alert" title={error}/> : null}
 
-        <div className="wand-folder-picker-footer">
-          <span>{targetDir || "请输入目标目录"}</span>
+        <Flex justify="space-between" align="center" gap={12} wrap>
+          <Typography.Text type="secondary" ellipsis style={{ minWidth: 0, flex: 1 }} title={targetDir}>{targetDir || "请输入目标目录"}</Typography.Text>
           <WandButton kind="primary" type="submit" disabled={loading || moving || !targetDir}>
             {moving ? "正在移动…" : "移动到此处"}
           </WandButton>
-        </div>
-      </form>
+        </Flex>
+        </Flex>
+      </TaskForm>
     </WandDialogSurface>
   );
 }

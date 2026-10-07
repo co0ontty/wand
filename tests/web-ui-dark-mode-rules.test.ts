@@ -95,11 +95,8 @@ test("styles.css 不再保留无人消费的 [data-theme=\"dark\"] 深色规则"
     !/\[\s*data-theme/.test(styles),
     "src/web-ui/content/styles.css 不应再按 data-theme 选择器分支",
   );
-  // 删的只能是那一条死规则；浅色 token 与 UA 触发的合法深色分支都要留着。
-  assert.ok(
-    styles.includes("--qb-bg: rgba(255, 255, 255, 0.14);"),
-    ".queue-bar 的液态玻璃浅色 token 必须保留",
-  );
+  assert.match(source("src/web-ui/browser/queue-view-adapter.tsx"), /<Card size="small" className=\{`queue-bar/,
+    "queue visuals now inherit the shared Ant theme");
   assert.ok(
     styles.includes("@media (prefers-color-scheme: dark)"),
     "prefers-color-scheme 分支由 UA 触发，是活代码，不得当作死规则删除",
@@ -123,14 +120,9 @@ test("全仓没有任何 data-theme 生产者（消费者选择器不算）", ()
   );
 });
 
-test("appica.css 仍然声明 @custom-variant dark 契约", () => {
-  const appica = source("src/web-ui/css/appica.css");
-  assert.ok(
-    appica.includes("@custom-variant dark (&:is([data-theme=\"dark\"] *, [data-theme=\"dark\"]));"),
-    "删除 @custom-variant dark 会让 Appica 的 dark: 类改用 Tailwind 默认 .dark 选择器，改变编译产物",
-  );
-  assert.ok(
-    !appica.includes("Wand renders dark mode through"),
-    "appica.css 不得再声明「Wand 通过 data-theme 渲染深色模式」这个与事实不符的契约",
-  );
+test("retired Appica CSS has no build or runtime entry", () => {
+  assert.doesNotMatch(source("scripts/bundle-tailwind.js"), /appica/);
+  assert.doesNotMatch(source("src/web-ui/styles.ts"), /appica/);
+  assert.doesNotMatch(source("package.json"), /@appica\/ui-react/);
+  assert.match(source("package.json"), /"antd": "6\.6\.5"/);
 });

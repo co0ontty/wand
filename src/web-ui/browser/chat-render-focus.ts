@@ -1,3 +1,5 @@
+import { browserButtonKey, isBrowserButtonPair, patchBrowserButton } from "./library-buttons.js";
+import { patchChatPresentation, presentChat } from "../react/chat/presentation.js";
 import { state } from "./state.js";
 
 /** DOM-only interaction ownership. No draft, selection, submit or scroll state store. */
@@ -139,6 +141,8 @@ export function scopeChatMarkup(html: string, scope: string): string {
   return template.innerHTML;
 }
 function explicitKey(element: Element): string | null {
+  const libraryButton = browserButtonKey(element); if (libraryButton) return libraryButton;
+  if (element.matches(".chat-file-attachment")) return "attachment:" + element.getAttribute("data-path");
   const own = element.getAttribute("data-chat-key"); if (own) return own;
   const entry = element.getAttribute("data-entry-key"); if (entry) return "entry:" + entry;
   if (element.classList.contains("agent-run-agent") || element.classList.contains("agent-run-detail-panel")) {
@@ -156,7 +160,7 @@ function explicitKey(element: Element): string | null {
   return null;
 }
 function postChild(node: Node): boolean {
-  return node instanceof Element && node.matches(".assistant-reply-disclosure, .msg-copy-btn");
+  return node instanceof Element && node.matches(".assistant-reply-disclosure, .assistant-reply-host, .msg-copy-btn");
 }
 function structure(node: Node): string {
   if (!(node instanceof Element)) return String(node.nodeType);
@@ -173,7 +177,7 @@ function attributes(current: Element, next: Element): void {
   if (copied) postClasses.push("copied");
   if (visible) postClasses.push("visible");
   for (const attribute of Array.from(current.attributes)) {
-    if (!next.hasAttribute(attribute.name) && attribute.name !== "open") current.removeAttribute(attribute.name);
+    if (!next.hasAttribute(attribute.name) && attribute.name !== "open" && attribute.name !== "data-x-presentation") current.removeAttribute(attribute.name);
   }
   for (const attribute of Array.from(next.attributes)) {
     if (attribute.name === "open" && nativeOpen !== null) continue;
@@ -191,13 +195,33 @@ function morph(current: Node, next: Node): void {
     if (current.nodeValue !== next.nodeValue) current.nodeValue = next.nodeValue;
     return;
   }
+  if (patchBrowserButton(current, next)) return;
   attributes(current, next);
   if (current.matches(".code-copy.copied, .msg-copy-btn.copied")) return;
   const left = current.scrollLeft, top = current.scrollTop;
-  morphChildren(current, next);
-  // Browser clamps legitimately when new content is shorter. Never jump to its tail.
+  // A block-page prepend changes row offsets inside the timeline, not the outer chat.
+  // Preserve the actual reading row/control rather than merely restoring its old scrollTop.
+  const reading = timelineReadingAnchor(current);
+  if (!patchChatPresentation(current, next, morph)) morphChildren(current, next);
+  if (current instanceof HTMLElement && current.matches(".chat-activity-timeline")) presentChat(current);
   if (current.scrollLeft !== left) current.scrollLeft = left;
-  if (current.scrollTop !== top) current.scrollTop = top;
+  const nextTop = reading?.node.isConnected && current.contains(reading.node)
+    ? top + reading.node.getBoundingClientRect().top - current.getBoundingClientRect().top - reading.top
+    : top;
+  // Browser clamps legitimately when content is shorter; never jump to its tail.
+  if (current.scrollTop !== nextTop) current.scrollTop = nextTop;
+}
+function timelineReadingAnchor(current: Element): { node: HTMLElement; top: number } | null {
+  if (!current.matches(".chat-activity-timeline") || current.closest("[inert]")) return null;
+  const bounds = current.getBoundingClientRect();
+  const visible = (node: HTMLElement): boolean => {
+    const rect = node.getBoundingClientRect();
+    return rect.bottom > bounds.top && rect.top < bounds.bottom;
+  };
+  const active = document.activeElement;
+  const node = active instanceof HTMLElement && current.contains(active) && visible(active) ? active
+    : Array.from(current.querySelectorAll<HTMLElement>(".chat-call")).find(visible);
+  return node ? { node, top: node.getBoundingClientRect().top - bounds.top } : null;
 }
 function morphChildren(current: Element, next: Element): void {
   const old = Array.from(current.childNodes).filter(node => !postChild(node));
@@ -226,7 +250,7 @@ function morphChildren(current: Element, next: Element): void {
       else if (old.length === fresh.length && old[index] && compatible(old[index])) existing = old[index];
     }
     if (existing && (used.has(existing) || existing.nodeType !== node.nodeType
-      || existing instanceof Element && node instanceof Element && existing.tagName !== node.tagName)) existing = undefined;
+      || existing instanceof Element && node instanceof Element && existing.tagName !== node.tagName && !isBrowserButtonPair(existing, node))) existing = undefined;
     if (existing) {
       used.add(existing);
       morph(existing, node);
@@ -301,11 +325,11 @@ export function beginChatInteraction(root: HTMLElement): ChatInteractionTicket |
   const row = candidate?.closest<HTMLElement>(".chat-message");
   const node = !row || row.getAttribute("data-chat-owner")?.startsWith("view:" + view.id + ":") ? candidate : null;
   const version = intent;
-  const scopes = node ? [node.closest(".tool-use-card, .inline-terminal, .inline-diff"), node.closest(".chat-activity-entry"),
+  const scopes = node ? [node.closest(".chat-tool-card, .inline-terminal, .inline-diff"), node.closest(".chat-call"),
     node.closest(".chat-activity"), node.closest(".agent-run-process"), node.closest(".agent-run"), row] : [];
   const fallbacks: HTMLElement[] = [];
   for (const scope of scopes) {
-    const candidate = scope?.querySelector<HTMLElement>(".tool-use-header[tabindex], .term-header, .diff-header, .chat-activity-entry-button, .chat-activity-summary, .agent-run-process-summary, .agent-run-summary, .assistant-reply-disclosure");
+    const candidate = scope?.querySelector<HTMLElement>(".chat-tool-header[tabindex], .term-header, .diff-header, .chat-call-button, .chat-process-summary, .agent-run-process-summary, .agent-run-summary, .assistant-reply-disclosure");
     if (candidate && candidate !== node) fallbacks.push(candidate);
   }
   const bounds = root.getBoundingClientRect();

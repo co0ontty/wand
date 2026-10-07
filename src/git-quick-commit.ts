@@ -312,6 +312,7 @@ interface QuickCommitOptions extends CommitInputOptions, QuickCommitAiOptions {
 }
 
 export interface QuickCommitAiOptions {
+  modelGroups?: import("./model-groups.js").ModelGroup[];
   provider?: SessionProvider;
   model?: string | null;
   thinkingEffort?: SessionSnapshot["thinkingEffort"];
@@ -320,6 +321,10 @@ export interface QuickCommitAiOptions {
   opsPersona?: string;
   /** CLI 降级链（按顺序）；未设置时只用 provider/model 这一次调用。 */
   cliCandidates?: import("./types.js").AiCliCandidate[];
+  /** 系统应用必须经员工渠道；没有可用 CLI 候选时直接失败，不退回默认 provider。 */
+  employeeChannelOnly?: boolean;
+  /** 整条候选链的时间上限；默认 CLI_CHAIN_BUDGET_MS。第一条消息里的调用要短得多。 */
+  budgetMs?: number;
 }
 
 export class QuickCommitError extends Error {
@@ -824,14 +829,21 @@ async function callCliCandidates<T>(
   opts: QuickCommitAiOptions,
   parseOutput: (raw: string) => T,
 ): Promise<T> {
-  const chain = opts.cliCandidates?.length ? opts.cliCandidates : [singleCandidate(opts)];
+  const { resolveModelGroupModels } = await import("./model-groups.js");
+  const chain = (opts.cliCandidates?.length ? opts.cliCandidates : [singleCandidate(opts)])
+    .flatMap((candidate) => resolveModelGroupModels(opts.modelGroups, candidate.provider, candidate.model,
+      { preferDefault: !candidate.model || candidate.model === "default" })
+      .map((model) => ({ ...candidate, model: model || undefined })));
+  if (opts.employeeChannelOnly && !opts.cliCandidates?.length) {
+    throw new QuickCommitError("系统员工没有可用的 CLI 候选，已跳过 SDK 候选。", "AI_FALLBACK_FAILED");
+  }
+  const deadline = Date.now() + Math.max(1, opts.budgetMs ?? CLI_CHAIN_BUDGET_MS);
   if (chain.length === 1) {
-    return parseOutput(await callCliAiText(request, cwd, language, candidateOptions(opts, chain[0]!)));
+    return parseOutput(await callCliAiText(request, cwd, language, { ...candidateOptions(opts, chain[0]!), deadline }));
   }
 
   const installed = chain.filter((candidate) => providerCliInstalled(candidate.provider));
   const attempts = installed.length ? installed : chain;
-  const deadline = Date.now() + CLI_CHAIN_BUDGET_MS;
   const errors: string[] = [];
   for (const candidate of attempts) {
     if (Date.now() >= deadline) {

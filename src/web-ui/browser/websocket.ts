@@ -3,6 +3,7 @@ import { syncBrowserComposerBadges } from "./composer-badges-adapter";
 import { getErrorMessage } from "../../error-utils.js";
 import { parseJsonResponse } from "../react/http-adapter";
 import { notifyAiTeamDefinitionChanged, notifyAiTeamRunChanged, notifyAiTeamStepLive } from "../react/ai-teams/repository";
+import { notifyConversationSessionPreview } from "../react/conversations/session-preview.js";
 import { notifySiliconEmployeeDefinitionChanged } from "../react/agents/employee-repository.js";
 import { resolveComposerPermission } from "../react/composer-badges/model";
 import type { ComposerPermissionAction } from "../react/composer-badges/controller";
@@ -11,7 +12,7 @@ import { clearStructuredQueuePersistence } from "./chat-scroll";
 import { mergeIncrementalWindowedTurn } from "./message-reconciliation";
 import { flushPendingMessages, buildMessagesForRender, isCurrentTerminalSession, flashComposerFailed, flushStructuredInputQueue, updateStructuredQueueCounter, setTerminalInteractive, flushCrossSessionQueue, reconcileInteractiveState, getSelectedSession, closeKeyboardPopup } from "./input";
 import { notifyTaskEnded, clearSessionProgressNative, _syncWakeLock, showNotificationBubble, notifyTaskProgress, syncSessionProgressToNative, notifyPermissionRequest, notifyUpdateAvailable, showAutoUpdateOverlay, showRestartOverlay, showToast } from "./notifications";
-import { refreshAll, scheduleSessionListUpdate, subscribeToSession, updateSessionSnapshot, markSessionCompletionViewed, getPreferredMessages, selectSession, updateShellChrome, loadOutput, isAutoApproveImpliedByMode, applyCurrentView, fetchAvailableModels } from "./session-engine";
+import { refreshAll, scheduleSessionListUpdate, subscribeToSession, updateSessionSnapshot, markSessionCompletionViewed, getPreferredMessages, selectSession, updateShellChrome, loadOutput, isAutoApproveImpliedByMode, applyCurrentView, fetchAvailableModels, loadSessions } from "./session-engine";
 import { getLastAssistantSummary } from "./session-ui";
 import { clampClientTerminalOutput, restoreTerminalState, scheduleTerminalChromeUpdate, syncTerminalBuffer, updateTerminalJumpToBottomButton, wandTerminalWrite } from "./terminal";
 import {
@@ -819,12 +820,18 @@ function projectSelectedChat(sessionId: string): any {
                 showRestartOverlay(msg.data.previousInstanceId || null, msg.data.latest || null);
               } else if (msg.data.kind === "restart") {
                 showRestartOverlay();
+              } else if (msg.data.kind === "conversation-session-preview" && typeof msg.data.sessionId === "string"
+                && typeof msg.data.conversationId === "string" && typeof msg.data.preview?.text === "string") {
+                notifyConversationSessionPreview(msg.data);
               } else if (msg.data.kind === "ai-team-run" && typeof msg.data.runId === "string") {
                 notifyAiTeamRunChanged({ runId: msg.data.runId, taskId: String(msg.data.taskId || "") });
               } else if (msg.data.kind === "ai-team-definition" && typeof msg.data.teamId === "string") {
                 notifyAiTeamDefinitionChanged(msg.data.teamId);
               } else if (msg.data.kind === "silicon-employee-definition" && typeof msg.data.employeeId === "string") {
                 notifySiliconEmployeeDefinitionChanged(msg.data.employeeId);
+              } else if (msg.data.kind === "task-retention") {
+                notifyTasksChanged();
+                void loadSessions({ skipSelectedOutputReload: true });
               } else if (msg.data.kind === "ai-team-step-live" && typeof msg.data.runId === "string") {
                 notifyAiTeamStepLive({
                   runId: msg.data.runId,

@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 
+import { buildChildEnv } from "./env-utils.js";
 import { runGit, runGitRaw } from "./git-utils.js";
 import type { MissionDiff, MissionDiffFile } from "./mission-types.js";
 
@@ -28,7 +29,7 @@ function untrackedPatch(cwd: string, relativePath: string): string {
       cwd,
       encoding: "utf8",
       maxBuffer: DEFAULT_MAX_PATCH_BYTES,
-      env: { ...process.env, GIT_PAGER: "cat", PAGER: "cat", GIT_TERMINAL_PROMPT: "0" },
+      env: { ...buildChildEnv(true), GIT_PAGER: "cat", PAGER: "cat", GIT_TERMINAL_PROMPT: "0" },
     },
   );
   if (result.status !== 0 && result.status !== 1) {

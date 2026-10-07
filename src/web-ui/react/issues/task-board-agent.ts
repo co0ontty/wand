@@ -12,6 +12,7 @@ import {
   DEFAULT_WAND_TASK_AGENT_KIND,
   DEFAULT_WAND_TASK_AGENT_MODE,
   isClosedWandTaskStatus,
+  isWandTaskAgentEngine,
   isWandTaskAgentKind,
   normalizeWandTaskAgentMode,
   supportedWandTaskAgentModes,
@@ -41,7 +42,7 @@ export const ISSUE_AGENT_PROVIDERS: ReadonlyArray<{
   { value: "opencode", label: "OpenCode", description: "OpenCode CLI" },
   { value: "grok", label: "Grok", description: "Grok Build CLI" },
   { value: "qoder", label: "Qoder", description: "Qoder CLI" },
-  { value: "pi", label: "Pi", description: "Pi coding agent" },
+  { value: "pi", label: "one 的 Agent", description: "内置多模型 Agent" },
   { value: "gemini", label: "Gemini", description: "Gemini CLI" },
 ];
 
@@ -302,14 +303,16 @@ export function withIssueAgentProvider(
     thinkingEffort: effortOptions.some((option) => option.value === agent.thinkingEffort)
       ? agent.thinkingEffort
       : "off",
+    ...(provider === "pi" && agent.engine === "sdk" ? { engine: "sdk" as const } : { engine: undefined }),
   };
 }
-
 export function isDispatchableIssueAgent(agent: WandTaskAgent | null | undefined): agent is WandTaskAgent {
   if (!agent) return false;
   if (!ISSUE_AGENT_PROVIDERS.some((entry) => entry.value === agent.provider)) return false;
   if (!agent.model.trim()) return false;
   if (!isThinkingEffort(agent.thinkingEffort)) return false;
+  if (agent.engine !== undefined && !isWandTaskAgentEngine(agent.engine)) return false;
+  if (agent.engine === "sdk" && (agent.provider !== "pi" || agent.kind !== "structured")) return false;
   return ISSUE_AGENT_MODES.some((entry) => entry.value === agent.mode);
 }
 
@@ -463,15 +466,13 @@ export function groupIssuesByStatus<T extends { status: WandTaskStatus }>(
   return grouped;
 }
 
-/** 归档目录默认折叠；搜索或勾选「归档任务」时自动展开，避免匹配结果被藏住。 */
+/** 归档只在用户主动打开目录或勾选「归档任务」时显示，普通搜索不自动展开。 */
 export function issueArchiveFolderOpen(
   collapsed: boolean,
-  query: string,
+  _query: string,
   filters: IssueBoardFilters,
 ): boolean {
-  if (!collapsed) return true;
-  if (query.trim()) return true;
-  return filters.statuses.includes("archived");
+  return !collapsed || filters.statuses.includes("archived");
 }
 
 /**
@@ -590,9 +591,11 @@ export function filterIssues<T extends {
   query: string,
   workspaceId: string,
   filters: IssueBoardFilters = EMPTY_ISSUE_FILTERS,
+  includeArchived = filters.statuses.includes("archived"),
 ): T[] {
   const needle = query.trim().toLowerCase();
   return tasks.filter((task) => {
+    if (task.status === "archived" && !includeArchived) return false;
     if (workspaceId && (task.workspaceId ?? "") !== workspaceId) return false;
     if (filters.statuses.length > 0 && !filters.statuses.includes(task.status)) return false;
     if (filters.priorities.length > 0 && (task.priority == null || !filters.priorities.includes(task.priority))) return false;
@@ -668,13 +671,14 @@ export function issueBoardStats<T extends {
   let overdue = 0;
   let high = 0;
   for (const task of tasks) {
+    if (task.status === "archived") continue;
     if (task.status === "todo") todo += 1;
     else if (task.status === "doing") doing += 1;
     else if (task.status === "done") done += 1;
     if (issueIsOverdue(task.dueDate, task.status, today)) overdue += 1;
     if (task.priority === "high" || task.priority === "urgent") high += 1;
   }
-  return { total: tasks.length, todo, doing, done, overdue, high, remaining: todo + doing };
+  return { total: todo + doing + done, todo, doing, done, overdue, high, remaining: todo + doing };
 }
 
 export interface IssueProgressPoint {
@@ -688,22 +692,23 @@ export function issueProgressSeries<T extends { status: WandTaskStatus; createdA
   tasks: readonly T[],
 ): IssueProgressPoint[] {
   const now = Date.now();
-  const created = tasks.map((task) => new Date(task.createdAt).getTime()).filter((value) => !Number.isNaN(value));
+  const activeTasks = tasks.filter((task) => task.status !== "archived");
+  const created = activeTasks.map((task) => new Date(task.createdAt).getTime()).filter((value) => !Number.isNaN(value));
   const start = created.length > 0 ? Math.min(...created) : now - 12 * 86_400_000;
   const interval = Math.max(1, (now - start) / 12);
   return Array.from({ length: 13 }, (_, index) => {
     const timestamp = index === 12 ? now : start + interval * index;
     return {
       timestamp,
-      scope: tasks.filter((task) => new Date(task.createdAt).getTime() <= timestamp).length,
-      started: tasks.filter((task) => {
+      scope: activeTasks.filter((task) => new Date(task.createdAt).getTime() <= timestamp).length,
+      started: activeTasks.filter((task) => {
         const createdAt = new Date(task.createdAt).getTime();
         const updatedAt = new Date(task.updatedAt).getTime();
         if (Number.isNaN(createdAt)) return false;
         if (task.status === "todo") return false;
         return (Number.isNaN(updatedAt) ? createdAt : Math.max(createdAt, updatedAt)) <= timestamp;
       }).length,
-      completed: tasks.filter((task) => isClosedWandTaskStatus(task.status) && new Date(task.updatedAt).getTime() <= timestamp).length,
+      completed: activeTasks.filter((task) => isClosedWandTaskStatus(task.status) && new Date(task.updatedAt).getTime() <= timestamp).length,
     };
   });
 }

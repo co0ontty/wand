@@ -1,8 +1,19 @@
+import { Badge, Checkbox, Flex, Layout, Tag, Typography } from "antd";
+import { WandUiBoundary } from "../theme";
+import { ImSidebarGroup } from "./im-sidebar-group";
 import { WandBrandMark } from "../ui/brand-mark";
+import { wandOverlay } from "../overlay-controller";
 import * as React from "react";
+import { isSessionJustCompleted } from "../../../session-completion-state.js";
 import { normalizeProviderId, providerDisplayName } from "../../provider-identity";
 import { ProviderLogo } from "../provider-logo";
 import { WorkspacesPanel } from "../workspaces/workspaces-panel";
+import { SidebarProjectionSwap } from "../workspaces/sidebar-projection-swap";
+import { conversationUi, useConversationUi } from "../conversations/state";
+import { ConversationNavigation, ConversationSidebarList, ConversationSidebarTools } from "../conversations/sidebar";
+import { SidebarPresentationContext, useSidebarPresentation } from "../workspaces/sidebar-display-mode";
+import { sidebarSafeError } from "../workspaces/sidebar-safe-error";
+import { SidebarToggleIcon } from "./sidebar-toggle-icon";
 import {
   WandButton,
   WandDropdownMenu,
@@ -12,10 +23,6 @@ import {
   WandDropdownMenuTrigger,
   WandIcon,
   WandIconButton,
-  WandNavigation,
-  WandNavigationItem,
-  WandNavigationLink,
-  WandNavigationList,
   type WandIconName,
 } from "../ui";
 import { classNames } from "../ui/class-names";
@@ -168,18 +175,16 @@ function ManageCheckbox({
   const target = getSidebarEntryTarget(entry);
   const legacyKind = target === "session" ? "sessions" : target === "codex-history" ? "codex" : "history";
   return (
-    <label className="session-manage-check" onClick={(event) => event.stopPropagation()}>
-      <input
-        type="checkbox"
+    <span className="wand-session-manage-check" onClick={(event) => event.stopPropagation()}>
+      <WandUiBoundary><Checkbox
         data-action="toggle-selection"
         data-kind={legacyKind}
         data-id={entry.id}
         checked={entry.selected}
         aria-label={`选择会话 ${entry.title}`}
         onChange={() => void dispatch({ type: "session.manage.select", target, id: entry.id })}
-      />
-      <span/>
-    </label>
+      /></WandUiBoundary>
+    </span>
   );
 }
 
@@ -198,11 +203,11 @@ function WorktreeBadges({ entry }: { entry: Readonly<UiSessionVm> }) {
   ].filter(Boolean).join("\n");
   return (
     <>
-      <span className="session-kind-badge worktree" title={title || undefined}>Worktree</span>
+      <Tag className="session-kind-badge worktree" title={title || undefined}>Worktree</Tag>
       {entry.worktree.mergeStatus && (
-        <span className={classNames("session-kind-badge worktree-merge", entry.worktree.mergeStatus)}>
+        <Tag className={classNames("session-kind-badge worktree-merge", entry.worktree.mergeStatus)}>
           {labels[entry.worktree.mergeStatus] ?? entry.worktree.mergeStatus}
-        </span>
+        </Tag>
       )}
     </>
   );
@@ -213,8 +218,14 @@ function formatEntryTime(entry: Readonly<UiSessionVm>): string {
   if (!value) return "";
   const parsed = new Date(value);
   if (!Number.isFinite(parsed.getTime())) return "";
-  if (!entry.endedAt && entry.turnActive && entry.startedAt) {
-    const seconds = Math.max(0, Math.floor((Date.now() - new Date(entry.startedAt).getTime()) / 1000));
+  if (!entry.endedAt && entry.turnActive) {
+    // 优先服务端本轮锚点：会话可能开了几天，用 startedAt 计时会把「本轮已运行」读成
+    // 「会话已存在」，静默期数字还在涨，等于用错的时长骗用户。锚点缺失时不显示时长。
+    const anchor = entry.turnStartedAt ?? entry.startedAt;
+    if (!anchor) return "";
+    const started = new Date(anchor).getTime();
+    if (!Number.isFinite(started)) return "";
+    const seconds = Math.max(0, Math.floor((Date.now() - started) / 1000));
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     const rest = seconds % 60;
@@ -247,51 +258,9 @@ function ProviderMark({ entry }: { entry: Readonly<UiSessionVm> }) {
   );
 }
 
-function PathReveal({ path }: { path: string }) {
-  const containerRef = React.useRef<HTMLSpanElement>(null);
-  const [overflow, setOverflow] = React.useState(0);
-  const normalized = path.replace(/\\/g, "/").replace(/\/$/, "");
-  const separator = normalized.lastIndexOf("/");
-  const prefix = separator >= 0 ? normalized.slice(0, separator + 1) : "";
-  const leaf = separator >= 0 ? normalized.slice(separator + 1) : normalized;
-  const staggerMs = Array.from(normalized).reduce((sum, character) => sum + character.charCodeAt(0), 0) % 1_200;
-
-  React.useLayoutEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-    const measure = () => {
-      const inner = container.firstElementChild as HTMLElement | null;
-      setOverflow(Math.max(0, (inner?.scrollWidth ?? 0) - container.clientWidth));
-    };
-    const frame = requestAnimationFrame(measure);
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
-    observer?.observe(container);
-    return () => {
-      cancelAnimationFrame(frame);
-      observer?.disconnect();
-    };
-  }, [normalized]);
-
-  const travelSeconds = Math.max(4.8, overflow / 28);
+function PathReveal({ path }: { path: string }): React.ReactElement | null {
   if (!path) return null;
-  return (
-    <span
-      ref={containerRef}
-      className={classNames("session-path", "tail-marquee-path", overflow > 1 && "is-overflowing")}
-      title={path}
-      aria-label={path}
-      style={{
-        "--tail-marquee-shift": `${overflow}px`,
-        "--tail-marquee-duration": `${Math.min(8, travelSeconds)}s`,
-        "--tail-marquee-delay": `${1.8 + staggerMs / 1_000}s`,
-      } as React.CSSProperties}
-    >
-      <span className="tail-marquee-path-inner">
-        <span className="tail-marquee-prefix">{prefix}</span>
-        <span className="tail-marquee-leaf">{leaf}</span>
-      </span>
-    </span>
-  );
+  return <Typography.Text ellipsis type="secondary" className="session-path" style={{ maxWidth: 160, fontSize: 12 }} title={path} aria-label={path}>{path}</Typography.Text>;
 }
 
 function SessionEntry({
@@ -320,6 +289,23 @@ function SessionEntry({
   const prominentWarning = entry.permissionBlocked
     || ["waiting-input", "waiting_input", "reconnecting"].includes(entry.status);
 
+  const glow = isHistory ? "none"
+    : entry.permissionBlocked ? "permission"
+    : entry.status === "waiting-input" || entry.status === "waiting_input" ? "waiting-input"
+    : entry.status === "reconnecting" ? "reconnecting"
+    : entry.status === "failed" ? "failed"
+    : (entry.inFlight || (entry.turnActive && entry.status === "running"))
+      ? (entry.status === "thinking" ? "thinking" : "running")
+    : entry.status === "running" && Boolean(entry.provider) && entry.kind === "pty" && !entry.ptyBusy
+      ? "none"
+    : entry.status === "running"
+      ? "running"
+    : entry.status === "thinking"
+      ? "thinking"
+    : isSessionJustCompleted(entry)
+      ? "just-completed"
+    : "none";
+
   return (
     <div
       className={classNames(
@@ -331,39 +317,40 @@ function SessionEntry({
         prominentStatus && "status-prominent",
         prominentWarning && "status-prominent-warning",
       )}
+      style={{ marginBlock: 4 }}
       data-session-id={isHistory ? undefined : entry.id}
       data-claude-history-id={isHistory ? entry.id : undefined}
       data-provider={isHistory ? provider : undefined}
       data-cwd={isHistory ? entry.cwd : undefined}
-      role="button"
-      tabIndex={0}
-      aria-current={entry.active ? "page" : undefined}
-      onClick={activate}
-      onKeyDown={(event) => {
-        if (event.target !== event.currentTarget) return;
-        if (event.key !== "Enter" && event.key !== " ") return;
-        event.preventDefault();
-        activate();
-      }}
+
     >
       <div className="session-item-content">
-        <div className="session-item-row">
+        <Flex align="center" gap={4} className="session-item-row">
           {manageMode && <ManageCheckbox entry={entry} dispatch={dispatch}/>} 
-          <div className="session-main">
-            <div className="session-title-row">
-              <span className="session-leading-slot"><ProviderMark entry={entry}/></span>
+          <WandButton kind={entry.active ? "soft" : "ghost"} className="session-main wand-sidebar-history-action"
+            style={{ flex: 1, minWidth: 0, height: "auto", whiteSpace: "normal", padding: 8, display: "flex", flexDirection: "column", alignItems: "stretch", textAlign: "start" }}
+            aria-current={entry.active ? "page" : undefined} onClick={activate}>
+            <Flex align="center" gap="small" className="session-title-row">
+              <span
+                className={classNames("session-leading-slot", glow !== "none" && `wand-logo-glow glow-${glow}`)}
+                data-glow={glow}
+                style={{ display: "inline-flex", width: 20, height: 20, flexShrink: 0 }}
+              >
+                <ProviderMark entry={entry}/>
+              </span>
               <div
                 className={classNames(
                   isHistory ? "session-command claude-history-preview" : "session-title",
                   entry.titleGenerating && "title-generating",
                 )}
                 aria-busy={entry.titleGenerating || undefined}
+                style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
               >
                 {entry.title}
               </div>
-            </div>
+            </Flex>
             {entry.description && <div className="session-description">{entry.description}</div>}
-            <div className="session-meta">
+            <Flex gap="small" wrap className="session-meta" style={{ fontSize: 12 }}>
               <span className="session-leading-slot session-time">{time}</span>
               {isHistory ? (
                 <>
@@ -372,23 +359,14 @@ function SessionEntry({
                 </>
               ) : (
                 <>
-                  <span className={classNames("session-status", entry.permissionBlocked
-                    ? "permission-blocked"
-                    : (entry.inFlight || (entry.turnActive && entry.status === "running"))
-                      ? "running"
-                      : entry.status === "running" && Boolean(entry.provider) && entry.kind === "pty"
-                        ? "idle"
-                        : entry.status)}>
-                    {entry.statusLabel}
-                  </span>
                   <PathReveal path={entry.cwd}/>
                   <WorktreeBadges entry={entry}/>
                 </>
               )}
-            </div>
-          </div>
+            </Flex>
+          </WandButton>
           {!manageMode && (
-            <span className="session-actions">
+            <Flex align="center" gap={2} className="session-actions">
               {actions.resume && (
                 <ActionButton
                   action={actions.resume}
@@ -437,9 +415,9 @@ function SessionEntry({
                   data={data}
                 />
               )}
-            </span>
+            </Flex>
           )}
-        </div>
+        </Flex>
       </div>
     </div>
   );
@@ -466,11 +444,11 @@ function SidebarListErrorBadge() {
   if (!error) return null;
   const label = SIDEBAR_ERROR_LABELS[error.kind];
   return (
-    <button
+    <WandButton kind="ghost"
       type="button"
       className={classNames("sidebar-list-error", retrying && "is-retrying")}
-      title={`${error.message}｜点击重新加载`}
-      aria-label={`${label}：${error.message}，点击重新加载`}
+      title={`${sidebarSafeError(error.message)}｜点击重新加载`}
+      aria-label={`${label}：${sidebarSafeError(error.message)}，点击重新加载`}
       disabled={retrying}
       onClick={() => {
         setRetrying(true);
@@ -479,7 +457,7 @@ function SidebarListErrorBadge() {
     >
       <WandIcon name="refresh" size={11} className="sidebar-list-error-icon"/>
       <span className="sidebar-list-error-label">{label}</span>
-    </button>
+    </WandButton>
   );
 }
 
@@ -490,11 +468,11 @@ export interface ShellSidebarPrimaryAction {
 }
 
 export function getShellSidebarPrimaryAction(): ShellSidebarPrimaryAction {
-  // 侧栏统一为任务视图：主按钮固定为「新任务」，不再有独立的「新会话」入口。
+  // 统一创建器创建的是会话，是否归入任务由用户在创建器中选择。
   return {
     action: { type: "workspace.new" },
-    label: "新建任务",
-    ariaLabel: "新建任务",
+    label: "新建会话",
+    ariaLabel: "新建会话",
   };
 }
 
@@ -511,6 +489,18 @@ export function sidebarActionLeavesPage(action: UiAction): boolean {
     default:
       return false;
   }
+}
+
+export async function confirmSidebarLogout(onConfirm: () => void): Promise<void> {
+  const answer = await wandOverlay.dialog({
+    title: "退出登录？",
+    description: "退出后需要重新连接。正在运行的任务会继续执行。",
+    actions: [
+      { label: "取消", value: false, autoFocus: true },
+      { label: "退出登录", value: true, kind: "danger" },
+    ],
+  });
+  if (answer.dismissed !== true && answer.action) onConfirm();
 }
 
 
@@ -534,8 +524,8 @@ function SidebarCompactToggle({
       title={label}
       onClick={onToggle}
     >
-      <WandIcon name="rail" size={18} className={active ? "sidebar-rail-icon is-collapsed" : "sidebar-rail-icon"}/>
-      <span className="sidebar-compact-toggle-label">{label}</span>
+      <SidebarToggleIcon open={!active}/>
+      <span className="sidebar-compact-toggle-label" hidden>{label}</span>
     </WandIconButton>
   );
 }
@@ -564,56 +554,38 @@ function SessionGroup({
   if (group.kind === "wand") return entries;
 
   const automation = group.kind === "automation";
-  return (
-    <details
-      className={classNames(
-        automation ? "automation-session-group" : "non-wand-session-group",
-        manageMode && "manage-mode",
-      )}
-      open={manageMode || group.expanded}
-      onToggle={(event) => {
-        if (manageMode) return;
-        void dispatch({
-          type: "layout.drawer.group.set",
-          group: automation ? "automation" : "history",
-          expanded: event.currentTarget.open,
-        });
-      }}
-    >
-      <summary
-        className={automation ? "automation-session-summary" : "non-wand-session-summary"}
-        title={automation
-          ? "由自动化或启动任务创建，不参与普通 Wand 会话排序"
-          : "Claude 与 Codex 的本机原生会话，不参与 Wand 会话排序"}
-        onClick={manageMode ? (event) => event.preventDefault() : undefined}
-      >
-        <span className={automation ? "automation-session-icon" : "non-wand-session-icon"} aria-hidden="true">
-          <WandIcon name={automation ? "zap" : "history"}/>
-        </span>
-        <span className={automation ? "automation-session-title" : "non-wand-session-title"}>{group.label}</span>
-        <span
-          className={automation ? "automation-session-count" : "non-wand-session-count"}
-          aria-label={`${group.entries.length} 个会话`}
-        >
-          {group.entries.length}
-        </span>
-        <WandIcon
-          name="chevron"
-          className={automation ? "automation-session-chevron" : "non-wand-session-chevron"}
-        />
-      </summary>
+  const setOpen = (expanded: boolean): void => {
+    if (!manageMode) void dispatch({
+      type: "layout.drawer.group.set",
+      group: automation ? "automation" : "history",
+      expanded,
+    });
+  };
+  return <div className={classNames(
+    automation ? "automation-session-group" : "non-wand-session-group",
+    manageMode && "manage-mode",
+  )}>
+    <ImSidebarGroup label={group.label} count={group.entries.length}
+      description={automation
+        ? "由自动化或启动任务创建，不参与普通 Wand 会话排序"
+        : "本机原生会话，不参与 Wand 会话排序"}
+      avatarNode={<WandIcon name={automation ? "zap" : "history"}/>}
+      expanded={manageMode || group.expanded}
+      onToggle={() => setOpen(!group.expanded)} onSetOpen={setOpen}>
       {entries}
-    </details>
-  );
+    </ImSidebarGroup>
+  </div>;
 }
 
 export function ShellSidebar() {
   const snapshot = useUiStoreSnapshot();
+  const conversationState = useConversationUi();
   const dispatch = useUiDispatch();
   const taskBoard = React.useSyncExternalStore(taskBoardStore.subscribe, taskBoardStore.getSnapshot, taskBoardStore.getSnapshot);
   const teamAttention = useAiTeamAttentionCount();
   const [moreOpen, setMoreOpen] = React.useState(false);
-  const [searchQuery, setSearchQuery] = React.useState("");
+  const presentation = useSidebarPresentation();
+  const { query: searchQuery, setQuery: setSearchQuery } = presentation;
   // 报错清单默认收起：头部徽标只显示条数，点开才在下方就地展开。
   const [attentionOpen, setAttentionOpen] = React.useState(false);
   const narrow = !snapshot.layout.sidebarDrawer && snapshot.layout.sidebarPinned && snapshot.layout.sidebarCollapsed;
@@ -643,28 +615,30 @@ export function ShellSidebar() {
     setPeekDirectory((current) => current?.id === id && current.name === name && current.top === top
       ? current : { id, name, top });
   }, [drawerRef]);
-  const peek = useSidebarPeek(narrow && hoverPointer && !moreOpen, drawerRef, peekSurfaceRef, selectPeekDirectory);
-  const scrollPositions = React.useRef({ full: 0, compact: 0 });
+  const peek = useSidebarPeek(visible && narrow && hoverPointer && !moreOpen, drawerRef, peekSurfaceRef, selectPeekDirectory);
+  const scrollPositions = React.useRef<Record<string, number>>({ ...conversationState.scrolls });
   React.useLayoutEffect(() => {
     const body = bodyRef.current;
     if (!body) return;
-    const mode = narrow ? "compact" : "full";
-    body.scrollTop = scrollPositions.current[mode];
-    return () => { scrollPositions.current[mode] = body.scrollTop; };
-  }, [narrow]);
+    const mode = `sidebar:${conversationState.mode}:${narrow ? "compact" : "full"}`;
+    body.scrollTop = scrollPositions.current[mode] ?? 0;
+    return () => { scrollPositions.current[mode] = body.scrollTop; conversationUi.scroll(mode, body.scrollTop); };
+  }, [narrow, conversationState.mode]);
   const dismissSidebarSurfaces = (): void => {
     peek.close();
     if (overlay) void dispatch({ type: "layout.drawer.close" });
   };
   const navigate = (action: UiAction): void => {
     // 设置、创建表单和辅助面板只暂时覆盖当前页面，取消后仍留在原视图。
-    if (sidebarActionLeavesPage(action)) taskBoardController.close();
+    if (sidebarActionLeavesPage(action)) { taskBoardController.close(); conversationUi.suspend(); }
+    if (action.type === "nav.home") conversationUi.show();
     dismissSidebarSurfaces();
     void dispatch(action);
   };
   // 真正打开任务 / 会话时离开看板；树内创建表单复用临时弹层入口。
   const navigateFromTree = (): void => {
     taskBoardController.close();
+    conversationUi.suspend();
     dismissSidebarSurfaces();
   };
   const dispatchEntryAction = (action: UiAction): void => {
@@ -677,11 +651,11 @@ export function ShellSidebar() {
   };
   React.useEffect(() => {
     setMoreOpen(false);
-  }, [visible, narrow]);
+  }, [visible, narrow, conversationState.mode, conversationState.directory]);
   // 窄栏放不下清单，收成窄条时一并收起，展开窄栏不会停在半开状态。
   React.useEffect(() => {
-    if (narrow) setAttentionOpen(false);
-  }, [narrow]);
+    if (narrow || !visible) setAttentionOpen(false);
+  }, [narrow, visible]);
   const extraGroups = snapshot.sidebar.groups
     .filter((group) => group.kind === "history")
     .map((group) => ({
@@ -702,10 +676,14 @@ export function ShellSidebar() {
       compact={compact}
       directoryId={directoryId}
       peekDirectoryId={peek.open ? peekDirectory?.id : undefined}
-      onExpand={() => void dispatch({ type: "layout.drawer.collapse" })}
+      onExpand={() => {
+        peek.close();
+        void dispatch({ type: "layout.drawer.collapse" });
+      }}
       onNavigate={navigateFromTree}
       onOpenDialog={dismissSidebarSurfaces}
-      searchQuery={directoryId === undefined ? searchQuery : ""}
+      searchQuery={searchQuery}
+      surfacesEnabled={directoryId ? visible && peek.open : visible && !narrow && conversationState.mode === "tasks"}
       onSearchChange={setSearchQuery}
       selectedSessionId={snapshot.selected?.id ?? null}
       sessionTitles={Object.fromEntries(snapshot.sidebar.groups.flatMap((group) => (
@@ -716,26 +694,33 @@ export function ShellSidebar() {
   );
 
   return (
-    <>
+    <SidebarPresentationContext.Provider value={presentation}>
       <div
         id="sessions-drawer-backdrop"
         className={classNames("drawer-backdrop", snapshot.layout.sessionsBackdropVisible && "open")}
         aria-hidden="true"
+        style={{ position: "fixed", inset: 0, background: "var(--bg-overlay)", zIndex: 19999, display: snapshot.layout.sessionsBackdropVisible ? undefined : "none" }}
         onClick={() => void dispatch({ type: "layout.drawer.close" })}
       />
-      <aside id="sessions-drawer" ref={drawerRef} className={sidebarClass}
-        aria-label="任务侧栏" role={overlay ? "dialog" : undefined}
+      <Layout.Sider id="sessions-drawer" ref={drawerRef as React.RefObject<HTMLDivElement | null>} className={sidebarClass}
+        width={296} collapsedWidth={72} collapsed={narrow} theme="light"
+        style={{ position: overlay ? "fixed" : "relative", top: overlay ? "var(--wand-safe-top, 0px)" : undefined, bottom: overlay ? "var(--wand-safe-bottom, 0px)" : undefined, left: 0, display: visible ? undefined : "none", zIndex: overlay ? 20000 : 2, maxWidth: "calc(100vw - 24px)", height: "100%", overflow: "visible" }}
+        styles={{ body: { display: "flex", flexDirection: "column", height: "100%", minHeight: 0 } }}
+        aria-label="主导航与会话列表" role={overlay ? "dialog" : undefined}
         aria-modal={overlay || undefined} aria-hidden={!visible || undefined}
         inert={!visible} tabIndex={-1} {...peek.triggerBindings}>
-        <div className="sidebar-header">
-          <div className="sidebar-header-primary">
-            <div className="sidebar-header-main">
-              <WandBrandMark className="sidebar-brand-mark" />
-              <span className="sidebar-title">Wand</span>
-              <SidebarListErrorBadge />
-              <HomeAttentionBadge open={attentionOpen} onToggle={() => setAttentionOpen((value) => !value)} />
-            </div>
-            <div className="sidebar-header-actions">
+        <Flex vertical gap="small" className="sidebar-header" style={{ padding: narrow ? "12px 8px" : "12px 16px", flexShrink: 0 }}>
+          <Flex vertical={narrow} align="center" justify="space-between" gap="small" wrap className="sidebar-header-primary">
+            <Flex align="center" gap="small" className="sidebar-header-main">
+              <WandBrandMark className="sidebar-brand-mark" style={{ width: 24, height: 24 }} />
+              <Typography.Text strong className="sidebar-title" hidden={narrow} style={{ whiteSpace: "nowrap" }}>Wand</Typography.Text>
+              {!narrow && <><SidebarListErrorBadge />
+              <HomeAttentionBadge open={attentionOpen} onToggle={() => setAttentionOpen((value) => !value)} /></>}
+            </Flex>
+            <Flex align="center" gap={4} vertical={narrow} className="sidebar-header-actions">
+              <div hidden={conversationState.mode !== "chats"}><ConversationSidebarTools enabled={visible && conversationState.mode === "chats"}
+                onCreateSession={() => navigate(primaryAction.action)}
+                onNavigate={() => { taskBoardController.close(); dismissSidebarSurfaces(); }}/></div>
               <div className="sidebar-header-more">
                 <WandDropdownMenu
                   open={moreOpen}
@@ -771,7 +756,7 @@ export function ShellSidebar() {
                         navigate({ type: "missions.open" });
                       }}
                     >
-                      自动化任务
+                      并行任务
                     </WandDropdownMenuItem>
                     <WandDropdownMenuItem
                       id="github-issues-button"
@@ -794,7 +779,7 @@ export function ShellSidebar() {
                         navigate({ type: "nav.home" });
                       }}
                     >
-                      回到首页
+                      返回对话
                     </WandDropdownMenuItem>
                     <WandDropdownMenuItem
                       id="sidebar-refresh-btn"
@@ -813,7 +798,7 @@ export function ShellSidebar() {
                       tone="danger"
                       onClick={() => {
                         setMoreOpen(false);
-                        navigate({ type: "auth.logout" });
+                        void confirmSidebarLogout(() => navigate({ type: "auth.logout" }));
                       }}
                     >
                       退出登录
@@ -824,7 +809,10 @@ export function ShellSidebar() {
               {!snapshot.layout.sidebarDrawer && (
                 <SidebarCompactToggle
                   active={narrow}
-                  onToggle={() => void dispatch({ type: "layout.drawer.collapse" })}
+                  onToggle={() => {
+                    peek.close();
+                    void dispatch({ type: "layout.drawer.collapse" });
+                  }}
                 />
               )}
               {snapshot.layout.sidebarDrawer && (
@@ -836,72 +824,47 @@ export function ShellSidebar() {
                   size="medium"
                   onClick={() => void dispatch({ type: "layout.drawer.close" })}
                 >
-                  <WandIcon name="close"/>
+                  <SidebarToggleIcon open/>
                 </WandIconButton>
               )}
-            </div>
-          </div>
-        </div>
+            </Flex>
+          </Flex>
+        </Flex>
         <HomeAttentionPanel open={attentionOpen && !narrow} onClose={() => setAttentionOpen(false)} />
-        <WandNavigation
-          className="sidebar-feature-nav"
-          aria-label="功能菜单"
-          active={taskBoard.open ? (taskBoard.page === "teams" ? "ai-teams" : "task-board") : null}
-        >
-          <WandNavigationList className="sidebar-feature-list">
-            <WandNavigationItem className="sidebar-feature-create">
-              <WandButton
-                id="drawer-new-session-button"
-                className="sidebar-new-task"
-                kind="primary"
-                size="medium"
-                title="新建任务"
-                aria-label={primaryAction.ariaLabel}
-                onClick={() => navigate(primaryAction.action)}
-              >
-                <WandIcon name="plus" slot="start" size={18}/>
-                <span>{primaryAction.label}</span>
-              </WandButton>
-            </WandNavigationItem>
-            <WandNavigationItem>
-              <WandNavigationLink
-                id="task-board-button"
-                title="任务看板"
-                value="task-board"
-                render={<button type="button"/>}
-                onClick={() => {
-                  peek.close();
-                  if (overlay) void dispatch({ type: "layout.drawer.close" });
-                  taskBoardController.open(snapshot.selected?.workspaceId ?? "", snapshot.selected?.id ?? "");
-                }}
-              >
-                <WandIcon name="board" slot="start" size={18}/>
-                <span>任务看板</span>
-              </WandNavigationLink>
-            </WandNavigationItem>
-            <WandNavigationItem>
-              <WandNavigationLink
-                id="ai-teams-button"
-                title="AI 团队"
-                value="ai-teams"
-                render={<button type="button"/>}
-                onClick={() => {
-                  peek.close();
-                  if (overlay) void dispatch({ type: "layout.drawer.close" });
-                  taskBoardController.open(snapshot.selected?.workspaceId ?? "", snapshot.selected?.id ?? "", "teams");
-                }}
-              >
-                <WandIcon name="parallel" slot="start" size={18}/>
-                <span>AI 团队</span>
-                {teamAttention > 0 ? <span className="sidebar-feature-badge" aria-label={`${teamAttention} 个团队运行等你处理`}>{teamAttention}</span> : null}
-              </WandNavigationLink>
-            </WandNavigationItem>
-          </WandNavigationList>
-        </WandNavigation>
-        <div className="sidebar-body" ref={bodyRef}>
+        <div style={{ padding: narrow ? "0 4px 8px" : "0 12px 8px" }}><ConversationNavigation compact={narrow} onDirectory={() => { taskBoardController.close(); conversationUi.directory(true); dismissSidebarSurfaces(); }}/></div>
+        <Flex hidden={conversationState.mode !== "tasks"} component="nav" vertical gap="small" className="sidebar-feature-nav" aria-label="功能菜单" style={{ padding: narrow ? "0 8px 8px" : "0 16px 12px", flexShrink: 0 }}>
+          <WandButton id="drawer-new-session-button" className="sidebar-new-task" kind="primary" title={primaryAction.label}
+            aria-label={primaryAction.ariaLabel} onClick={() => navigate(primaryAction.action)}>
+            <WandIcon name="plus" size={18}/><span hidden={narrow}>{primaryAction.label}</span>
+          </WandButton>
+          <Flex vertical={narrow} gap="small">
+            <WandButton id="task-board-button" title="任务看板" kind={taskBoard.open && taskBoard.page !== "teams" ? "soft" : "ghost"}
+              aria-current={taskBoard.open && taskBoard.page !== "teams" ? "page" : undefined}
+              style={{ flex: narrow ? undefined : 1 }} onClick={() => {
+                peek.close();
+                if (overlay) void dispatch({ type: "layout.drawer.close" });
+                taskBoardController.open(snapshot.selected?.workspaceId ?? "", snapshot.selected?.id ?? "");
+              }}>
+              <WandIcon name="board" size={18}/><span hidden={narrow}>任务看板</span>
+            </WandButton>
+            <WandButton id="ai-teams-button" title="AI 团队" kind={taskBoard.open && taskBoard.page === "teams" ? "soft" : "ghost"}
+              aria-current={taskBoard.open && taskBoard.page === "teams" ? "page" : undefined}
+              style={{ flex: narrow ? undefined : 1 }} onClick={() => {
+                peek.close();
+                if (overlay) void dispatch({ type: "layout.drawer.close" });
+                taskBoardController.open(snapshot.selected?.workspaceId ?? "", snapshot.selected?.id ?? "", "teams");
+              }}>
+              <Badge count={teamAttention} size="small"><WandIcon name="parallel" size={18}/></Badge><span hidden={narrow}>AI 团队</span>
+            </WandButton>
+          </Flex>
+        </Flex>
+        <div className="sidebar-body" ref={bodyRef} style={{ flex: 1, minHeight: 0, overflow: "auto", padding: narrow ? 4 : "0 8px" }}>
           <div id="sessions-panel">
             <div className="sessions-list" id="sessions-list">
-              {taskTree(narrow)}
+              <SidebarProjectionSwap value={conversationState.mode}>
+                <div hidden={conversationState.mode !== "chats"} inert={conversationState.mode !== "chats"}><ConversationSidebarList compact={narrow} onNavigate={() => { taskBoardController.close(); dismissSidebarSurfaces(); }}/></div>
+                <div hidden={conversationState.mode !== "tasks"} inert={conversationState.mode !== "tasks"}>{taskTree(narrow)}</div>
+              </SidebarProjectionSwap>
             </div>
           </div>
         </div>
@@ -923,77 +886,27 @@ export function ShellSidebar() {
             <div className="sessions-list">{taskTree(false, peekDirectory.id)}</div>
           </SidebarPeek>
         ) : null}
-        <div className="sidebar-footer">
-          <WandNavigation
-            className="sidebar-footer-actions"
-            aria-label="侧栏快捷操作"
-            orientation="horizontal"
-            size="sm"
-          >
-            <WandNavigationList>
-              <WandNavigationItem>
-                <WandNavigationLink
-                  id="settings-button"
-                  title="设置"
-                  value="settings"
-                  render={<button type="button"/>}
-                  onClick={() => navigate({ type: "settings.open" })}
-                >
-                  <WandIcon name="gear" slot="start" size={16}/>
-                  <span>设置</span>
-                </WandNavigationLink>
-              </WandNavigationItem>
-              {snapshot.layout.sidebarDrawer && (
-                <WandNavigationItem>
-                  <WandNavigationLink
-                    id="file-panel-toggle-btn"
-                    className={classNames("sidebar-file-toggle", snapshot.layout.filePanelOpen && "active")}
-                    title="查看文件"
-                    value="files"
-                    active={snapshot.layout.filePanelOpen}
-                    render={<button type="button"/>}
-                    onClick={() => navigate({ type: "layout.files.toggle" })}
-                  >
-                    <WandIcon name="explorer" slot="start" size={16}/>
-                    <span>文件</span>
-                  </WandNavigationLink>
-                </WandNavigationItem>
-              )}
-              {snapshot.capabilities.backToNative && (
-                <WandNavigationItem>
-                  <WandNavigationLink
-                    id="back-to-native-button"
-                    className="sidebar-back-to-native"
-                    title="返回 App 原生界面"
-                    value="native-back"
-                    render={<button type="button"/>}
-                    onClick={() => navigate({ type: "native.back" })}
-                  >
-                    <WandIcon name="back" slot="start" size={16}/>
-                    <span>返回App</span>
-                  </WandNavigationLink>
-                </WandNavigationItem>
-              )}
-              {snapshot.capabilities.switchServer && (
-                <WandNavigationItem>
-                  <WandNavigationLink
-                    id="switch-server-button"
-                    className="sidebar-switch-server"
-                    title="切换服务器"
-                    value="switch-server"
-                    render={<button type="button"/>}
-                    onClick={() => navigate({ type: "native.switchServer" })}
-                  >
-                    <WandIcon name="server" slot="start" size={16}/>
-                    <span>切换</span>
-                  </WandNavigationLink>
-                </WandNavigationItem>
-              )}
-            </WandNavigationList>
-          </WandNavigation>
-          <span className="sidebar-footer-caption">本地控制台</span>
-        </div>
-      </aside>
-    </>
+        <Flex vertical gap="small" className="sidebar-footer" style={{ flexShrink: 0, padding: narrow ? 8 : "12px 16px", borderTop: "1px solid var(--border-subtle)" }}>
+          <Flex component="nav" wrap gap={4} vertical={narrow} className="sidebar-footer-actions" aria-label="侧栏快捷操作">
+            <WandButton kind="ghost" id="settings-button" title="设置" aria-label="设置" onClick={() => navigate({ type: "settings.open" })}>
+              <WandIcon name="gear" size={16}/><span hidden={narrow}>设置</span>
+            </WandButton>
+            {snapshot.layout.sidebarDrawer && <WandIconButton id="file-panel-toggle-btn" title="查看文件" aria-label="文件"
+              aria-pressed={snapshot.layout.filePanelOpen} onClick={() => navigate({ type: "layout.files.toggle" })}>
+              <WandIcon name="explorer" size={16}/><span>文件</span>
+            </WandIconButton>}
+            {snapshot.capabilities.backToNative && <WandIconButton id="back-to-native-button" title="返回 App 原生界面" aria-label="返回 App"
+              onClick={() => navigate({ type: "native.back" })}>
+              <WandIcon name="back" size={16}/><span hidden={narrow}>返回App</span>
+            </WandIconButton>}
+            {snapshot.capabilities.switchServer && <WandIconButton id="switch-server-button" title="切换服务器" aria-label="切换服务器"
+              onClick={() => navigate({ type: "native.switchServer" })}>
+              <WandIcon name="server" size={16}/><span hidden={narrow}>切换</span>
+            </WandIconButton>}
+          </Flex>
+          <Typography.Text type="secondary" className="sidebar-footer-caption" hidden={narrow} style={{ fontSize: 12 }}>本机工作台</Typography.Text>
+        </Flex>
+      </Layout.Sider>
+    </SidebarPresentationContext.Provider>
   );
 }

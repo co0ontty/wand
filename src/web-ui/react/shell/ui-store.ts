@@ -25,6 +25,7 @@ export interface UiSessionVm {
   resumable: boolean;
   permissionBlocked: boolean;
   inFlight: boolean;
+  ptyBusy?: boolean;
   /**
    * 本轮是否真的在生成：structured 看 inFlight；PTY 裸 shell 看进程存活；
    * PTY provider CLI 看 ptyBusy。用于运行徽标/计时器/prominent 展示。
@@ -36,6 +37,12 @@ export interface UiSessionVm {
   employeeAvatar?: string;
   startedAt?: string;
   endedAt?: string;
+  /**
+   * 服务端本轮锚点（不是会话创建时间）。缺失表示服务端没给出这一轮的时刻，
+   * 展示层据此不渲染时长与「无新消息」读数，不用本地时刻补。
+   */
+  turnStartedAt?: string;
+  lastActivityAt?: string;
   claudeSessionId?: string;
   /** Present when the session belongs to a named workspace task. */
   workspaceId?: string;

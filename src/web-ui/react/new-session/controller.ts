@@ -7,13 +7,19 @@ export interface NewSessionControllerSnapshot {
   initialEmployeeId: string;
   /** 侧栏「新建空白终端」这类入口直接带上形态；空串表示用默认形态。 */
   initialKind: NewSessionKind | "";
+  workspaceId: string;
+  workspaceTaskId: string;
+  taskName: string;
   revision: number;
 }
 
-interface NewSessionOpenOptions {
+export interface NewSessionOpenOptions {
   initialCwd?: string;
   initialEmployeeId?: string;
   initialKind?: NewSessionKind;
+  workspaceId?: string;
+  workspaceTaskId?: string;
+  taskName?: string;
 }
 
 export interface WandNewSessionController {
@@ -34,6 +40,9 @@ let snapshot: NewSessionControllerSnapshot = {
   initialCwd: "",
   initialEmployeeId: "",
   initialKind: "",
+  workspaceId: "",
+  workspaceTaskId: "",
+  taskName: "",
   revision: 0,
 };
 const listeners = new Set<Listener>();
@@ -43,6 +52,9 @@ function publish(
   initialCwd = "",
   initialEmployeeId = "",
   initialKind: NewSessionKind | "" = "",
+  workspaceId = "",
+  workspaceTaskId = "",
+  taskName = "",
 ): void {
   snapshot = {
     open,
@@ -50,6 +62,9 @@ function publish(
     initialCwd: open ? initialCwd.trim() : "",
     initialEmployeeId: open ? initialEmployeeId.trim() : "",
     initialKind: open ? initialKind : "",
+    workspaceId: open ? workspaceId.trim() : "",
+    workspaceTaskId: open ? workspaceTaskId.trim() : "",
+    taskName: open ? taskName.trim() : "",
     revision: snapshot.revision + 1,
   };
   for (const listener of listeners) listener();
@@ -67,7 +82,15 @@ export const newSessionController: WandNewSessionController = {
   open(options = {}): boolean {
     if (!runtime) return false;
     runtime.onOpen();
-    publish(true, options.initialCwd, options.initialEmployeeId, options.initialKind ?? "");
+    publish(
+      true,
+      options.initialCwd,
+      options.initialEmployeeId,
+      options.initialKind ?? "",
+      options.workspaceId,
+      options.workspaceTaskId,
+      options.taskName,
+    );
     return true;
   },
 

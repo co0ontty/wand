@@ -168,6 +168,33 @@ test("protocol v2 stamps pi subagent dispatches but not management calls", () =>
   assert.equal(enriched[0].content[3].__subagent, undefined);
 });
 
+test("protocol v2 stamps pi workflow dispatches and leaves its control calls in the transcript", () => {
+  const messages: ConversationTurn[] = [
+    { role: "assistant", content: [
+      { type: "tool_use", id: "pi-wf", name: "Pi/subagent", input: {
+        workflow: "./output/web-ui-library-migration/continuation.js",
+        async: true,
+        globalConcurrencyLimit: 3,
+        missionId: "22c8e070-16ba-4bc4-977b-6e956d42615a",
+      } },
+      { type: "tool_result", tool_use_id: "pi-wf", content: "Run fan-out: 6/16 used, 10 remaining\nAsync workflow [4b3596c0-f3af-47e9-a61b-8d701b3c9d7a]" },
+      { type: "tool_use", id: "pi-validate", name: "Pi/subagent", input: { action: "validate", workflow: "./output/web-ui-library-migration/continuation.js", cwd: "/tmp" } },
+      { type: "tool_use", id: "pi-status", name: "Pi/subagent", input: { action: "status", id: "4b3596c0-f3af-47e9-a61b-8d701b3c9d7a", lines: 30 } },
+    ] },
+  ];
+
+  const enriched = enrichStructuredMessages(messages);
+  // workflow 脚本派发没有 agent/task，但它是真派发：面板要拿得到分组。
+  assert.deepEqual(enriched[0].content[0].__subagent, {
+    taskId: "pi-wf",
+    agentType: "workflow",
+    taskDescription: "continuation.js",
+  });
+  assert.equal(enriched[0].content[1].__subagent?.taskId, "pi-wf", "回执块共用派发章");
+  assert.equal(enriched[0].content[2].__subagent, undefined, "validate 是控制调用");
+  assert.equal(enriched[0].content[3].__subagent, undefined, "status 是控制调用");
+});
+
 test("protocol v2 keeps existing subagent stamps and unrelated tools untouched", () => {
   const existing = { taskId: "task-9", agentType: "general-purpose" };
   const messages: ConversationTurn[] = [

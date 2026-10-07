@@ -1,4 +1,5 @@
 import * as React from "react";
+import { Alert, Card, Flex, Collapse, Input, Typography } from "antd";
 import { WandButton, WandIcon } from "../ui";
 import { CandidatesListEditor } from "./candidate-editor.js";
 import { EmployeeAvatarPicker } from "./employee-avatar.js";
@@ -9,6 +10,7 @@ import { candidateListError } from "./candidate-list.js";
 import { createDefaultIssueAgent } from "../issues/task-board-agent.js";
 import { siliconEmployeesRepository } from "./employee-repository.js";
 import { EmployeeTagsField } from "./employee-tags-field.js";
+import { SettingsField } from "../settings/fields.js";
 import { parseSiliconEmployeeTagInput } from "../../../ai-team-types.js";
 
 export function EmployeeCreateForm({
@@ -126,16 +128,12 @@ export function EmployeeCreateForm({
   const manualMode = advanced && name.trim().length > 0;
 
   return (
-    <div className="wand-team-member wand-employee-card is-new" data-open="true">
+    <Card size="small" className="wand-team-member wand-employee-card is-new" data-open="true">
       <div className="wand-team-member-body">
-        <div className="wand-team-member-inner">
-          <div className="wand-settings-field">
-            <label className="wand-settings-label" htmlFor="new-employee-expectation">
-              想要什么样的员工
-            </label>
-            <textarea
+        <Flex vertical gap={10} style={{ minWidth: 0, paddingTop: 10 }} className="wand-team-member-inner">
+          <SettingsField label="想要什么样的员工" htmlFor="new-employee-expectation">
+            <Input.TextArea
               id="new-employee-expectation"
-              className="wand-settings-input resize-none"
               rows={3}
               value={expectation}
               placeholder="说说你的期望：让它负责什么、需要什么专长、希望它怎么交付……"
@@ -143,114 +141,91 @@ export function EmployeeCreateForm({
               autoFocus
               onChange={(e) => setExpectation(e.target.value)}
             />
-            <p className="wand-employee-hint">
+            <Typography.Text type="secondary" className="wand-employee-hint">
               {manualMode
                 ? "将按下面填好的配置创建。"
                 : "AI 会按你的期望配好名字、职责、角色设定和执行工具。"}
-            </p>
-          </div>
+            </Typography.Text>
+          </SettingsField>
 
           <EmployeeTagsField id="new-employee-tags" value={tagInput}
             disabled={saving || filling} onChange={setTagInput} />
 
-          <div className="wand-employee-advanced-toggle" data-open={advanced || undefined}>
-            <WandButton
-              kind="ghost"
-              size="small"
-              aria-expanded={advanced}
-              disabled={saving}
-              onClick={() => setAdvanced((value) => !value)}
-            >
-              <WandIcon name="sliders" size={14} slot="start" />
-              高级配置
-              <WandIcon name="chevronDown" size={14} slot="end" />
-            </WandButton>
-          </div>
-
-          <section
+          <Collapse
             className="wand-employee-advanced"
-            data-open={advanced || undefined}
-            aria-hidden={!advanced}
-            inert={!advanced}
-          >
-            <div className="wand-employee-advanced-inner">
-              <div className="wand-settings-field">
-                <label className="wand-settings-label" htmlFor="new-employee-name">
-                  名字
-                </label>
-                <input
-                  id="new-employee-name"
-                  type="text"
-                  className="wand-settings-input"
-                  value={name}
-                  placeholder="员工名字"
+            activeKey={advanced ? ["advanced"] : []}
+            onChange={(keys) => setAdvanced((Array.isArray(keys) ? keys.length > 0 : !!keys))}
+            items={[{
+              key: "advanced",
+              label: "高级配置",
+              // 收起时内容仍挂载：重新展开后候选列表的 key 与上一次填写的字段都在。
+              forceRender: true,
+              children: <Flex vertical gap={10} className="wand-employee-advanced-inner">
+                <SettingsField label="名字" htmlFor="new-employee-name">
+                  <Input
+                    id="new-employee-name"
+                    value={name}
+                    placeholder="员工名字"
+                    disabled={saving || filling}
+                    onChange={(e) => setName(e.target.value)}
+                  />
+                </SettingsField>
+
+                <EmployeeAvatarPicker
+                  avatar={avatar}
+                  name={name}
                   disabled={saving || filling}
-                  onChange={(e) => setName(e.target.value)}
+                  onChange={setAvatar}
                 />
-              </div>
 
-              <EmployeeAvatarPicker
-                avatar={avatar}
-                name={name}
-                disabled={saving || filling}
-                onChange={setAvatar}
-              />
+                <SettingsField label="职责" htmlFor="new-employee-duty">
+                  <Input.TextArea
+                    id="new-employee-duty"
+                    rows={2}
+                    value={duty}
+                    placeholder="一句话职责：在侧栏、选择器和署名中显示"
+                    disabled={saving || filling}
+                    onChange={(e) => setDuty(e.target.value)}
+                  />
+                </SettingsField>
 
-              <div className="wand-settings-field">
-                <label className="wand-settings-label" htmlFor="new-employee-duty">
-                  职责
-                </label>
-                <textarea
-                  id="new-employee-duty"
-                  className="wand-settings-input resize-none"
-                  rows={2}
-                  value={duty}
-                  placeholder="一句话职责：在侧栏、选择器和署名中显示"
+                <SettingsField label="角色设定 (Prompt)" htmlFor="new-employee-prompt">
+                  <Input.TextArea
+                    id="new-employee-prompt"
+                    rows={4}
+                    value={prompt}
+                    placeholder="设定角色的专业能力、行为守则与交付习惯（创建会话时作为系统提示生效）"
+                    disabled={saving || filling}
+                    onChange={(e) => setPrompt(e.target.value)}
+                  />
+                </SettingsField>
+
+                <CandidatesListEditor
+                  agents={agents}
+                  label={name || "新员工"}
+                  catalog={catalog}
+                  providerOptions={providerOptions}
                   disabled={saving || filling}
-                  onChange={(e) => setDuty(e.target.value)}
+                  structuredOnly
+                  onChange={setAgents}
                 />
-              </div>
 
-              <div className="wand-settings-field">
-                <label className="wand-settings-label" htmlFor="new-employee-prompt">
-                  角色设定 (Prompt)
-                </label>
-                <textarea
-                  id="new-employee-prompt"
-                  className="wand-settings-input resize-none"
-                  rows={4}
-                  value={prompt}
-                  placeholder="设定角色的专业能力、行为守则与交付习惯（创建会话时作为系统提示生效）"
-                  disabled={saving || filling}
-                  onChange={(e) => setPrompt(e.target.value)}
-                />
-              </div>
+                <Flex justify="end" className="wand-employee-advanced-tools">
+                  <WandButton
+                    kind="ghost"
+                    size="small"
+                    disabled={saving || filling}
+                    onClick={() => void handleFillFromExpectation()}
+                  >
+                    <WandIcon name="spark" size={14} slot="start" />
+                    {filling ? "生成中…" : "按期望生成"}
+                  </WandButton>
+                </Flex>
+              </Flex>,
+            }]}
+          />
 
-              <CandidatesListEditor
-                agents={agents}
-                label={name || "新员工"}
-                catalog={catalog}
-                providerOptions={providerOptions}
-                disabled={saving || filling}
-                structuredOnly
-                onChange={setAgents}
-              />
-
-              <div className="wand-employee-advanced-tools">
-                <WandButton
-                  kind="ghost"
-                  size="small"
-                  disabled={saving || filling}
-                  onClick={() => void handleFillFromExpectation()}
-                >
-                  <WandIcon name="spark" size={14} slot="start" />
-                  {filling ? "生成中…" : "按期望生成"}
-                </WandButton>
-              </div>
-            </div>
-          </section>
-
-          <div className="wand-team-member-actions">
+          <Flex justify="end" wrap gap={6} className="wand-team-member-actions">
             <WandButton
               kind="primary"
               size="small"
@@ -269,10 +244,10 @@ export function EmployeeCreateForm({
             >
               取消
             </WandButton>
-          </div>
-          {error ? <div className="wand-team-candidate-error" role="alert">{error}</div> : null}
-        </div>
+          </Flex>
+          {error ? <Alert className="wand-team-candidate-error" role="alert" type="error" showIcon title={error}/> : null}
+        </Flex>
       </div>
-    </div>
+    </Card>
   );
 }

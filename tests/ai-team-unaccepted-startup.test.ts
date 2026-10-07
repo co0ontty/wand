@@ -59,10 +59,10 @@ function writeLeaderDecision(ctx: StructuredRunnerContext, action: "assign" | "a
   const past = new Date(Date.now() - 10_000); utimesSync(file, past, past);
 }
 
-for (const failure of ["unaccepted", "metadata", "accepted", "unknown", "superseded"] as const) {
+for (const failure of ["unaccepted", "rejected", "metadata", "accepted", "unknown", "superseded"] as const) {
   test(`real team dispatch ${failure}: only explicit unaccepted spawn retries candidate 1 once`, async (t) => {
     const { root, storage, config } = setup(t);
-    const unaccepted = failure === "unaccepted" || failure === "metadata";
+    const unaccepted = failure === "unaccepted" || failure === "metadata" || failure === "rejected";
     const starts: StructuredRunnerContext[] = [];
     let leaderTurns = 0;
     const leader = adapter(async (ctx) => {
@@ -71,6 +71,8 @@ for (const failure of ["unaccepted", "metadata", "accepted", "unknown", "superse
     });
     const first = adapter(async (ctx) => {
       starts.push(ctx);
+      if (failure === "rejected") return result({ primaryError: "积分已耗尽，调用失败", inputAccepted: false, rejection: "quota",
+        state: { blocks: [], result: "", sessionId: "refused-metadata" } });
       if (unaccepted || (failure === "superseded" && starts.length === 1)) return missing();
       if (failure === "superseded") throw new Error("new request delivery is unknown");
       if (failure === "unknown") throw new Error("spawn codex ENOENT but delivery is unknown");
@@ -132,6 +134,8 @@ for (const failure of ["unaccepted", "metadata", "accepted", "unknown", "superse
       assert.notEqual(starts[1]!.session.id, starts[0]!.session.id);
       const steps = storage.listAiTeamSteps(initial.run.id);
       assert.equal(steps.filter((step) => step.kind === "work" && step.status === "skipped").length, 1);
+      assert.equal(steps.find((step) => step.kind === "work" && step.status === "done")!.dispatchInfo!.skipped[0]!.errorKind,
+        failure === "rejected" ? "input-rejected" : "spawn-missing", "typed rejection survives storage without blacklisting the provider");
       assert.equal(steps.find((step) => step.kind === "work" && step.status === "done")!.dispatchInfo!.usedCandidate, 1);
       assert.equal(storage.getAiTeamRun(initial.run.id)!.stepsUsed, steps.filter((step) => step.status === "done" || step.status === "failed").length,
         "unaccepted skipped candidate does not consume another team step");
@@ -151,12 +155,12 @@ for (const failure of ["unaccepted", "metadata", "accepted", "unknown", "superse
   });
 }
 
-test("real leader spawn failure consumes its fact but retains waiting_user, no automatic candidate fallback", async (t) => {
+test("real leader spawn failure tries its fallback and consumes the unaccepted fact", async (t) => {
   const { root, storage, config } = setup(t);
   const starts: StructuredRunnerContext[] = [];
   const manager = new StructuredSessionManager(storage, config, null, {
     claudeCli: adapter(async (ctx) => { starts.push(ctx); return missing(); }),
-    pi: adapter(async (ctx) => { starts.push(ctx); return result(); }),
+    pi: adapter(async (ctx) => { starts.push(ctx); writeLeaderDecision(ctx, "ask"); return result(); }),
   });
   const registry = new SessionRegistry({ getOwned: () => null } as unknown as ProcessManager, manager, storage);
   const runner = new AiTeamRunner({ storage, ops: createAiTeamSessionOps({ storage, config, structured: manager,
@@ -174,10 +178,83 @@ test("real leader spawn failure consumes its fact but retains waiting_user, no a
   const task = storage.createWandTask({ title: "负责人" });
   const detail = await runner.start({ teamId: team.id, taskId: task.id });
   await until(() => storage.getAiTeamRun(detail.run.id)!.status === "waiting_user", () => runner.idle());
-  assert.equal(starts.length, 1);
+  assert.equal(starts.length, 2);
+  assert.deepEqual(starts.map((ctx) => ctx.session.provider), ["claude", "pi"]);
+  const steps = storage.listAiTeamSteps(detail.run.id);
+  assert.deepEqual(steps.map((step) => step.status), ["skipped", "done"]);
+  assert.equal(steps[1]!.dispatchInfo?.usedCandidate, 1);
+  assert.equal(storage.getAiTeamRun(detail.run.id)!.statusDetail, "完成，等回复");
   assert.ok(failedToken);
   assert.equal(manager.consumeUnacceptedTeamStartup(starts[0]!.session.id, failedToken!), false);
   assert.equal(storage.getAiTeamRun(detail.run.id)!.stepsUsed, 1);
+});
+
+test("real leader runtime model errors traverse three Pi candidates before a decision", async (t) => {
+  const { root, storage, config } = setup(t);
+  const candidates = ["primary", "backup", "last"].map((model) => ({ ...agent("pi"), model }));
+  storage.saveSiliconEmployee(person("e_leader", candidates));
+  const starts: StructuredRunnerContext[] = [];
+  const manager = new StructuredSessionManager(storage, config, null, {
+    pi: adapter(async (ctx) => {
+      starts.push(ctx);
+      if (ctx.session.selectedModel === "primary") throw new Error("fetch failed");
+      if (ctx.session.selectedModel === "backup") return result({ exitCode: 1, stderr: "API 503" });
+      writeLeaderDecision(ctx, "ask");
+      return result();
+    }),
+  });
+  const registry = new SessionRegistry({ getOwned: () => null } as unknown as ProcessManager, manager, storage);
+  const runner = new AiTeamRunner({ storage, ops: createAiTeamSessionOps({ storage, config, structured: manager,
+    processes: null, sessions: registry }), resolveCwd: () => root });
+  t.after(() => { runner.dispose(); manager.dispose(); });
+  manager.setEventEmitter((event) => runner.ingest(event));
+  const team = parseAiTeamInput({ name: "负责人网络失败", members: [
+    { id: "m_lead", employeeId: "e_leader", isLeader: true }, { id: "m_worker", employeeId: "e_worker" },
+  ] }, null, new Date().toISOString(), storage);
+  storage.saveAiTeam(team);
+  const task = storage.createWandTask({ title: "负责人重试" });
+  const detail = await runner.start({ teamId: team.id, taskId: task.id });
+  await until(() => storage.getAiTeamRun(detail.run.id)!.status === "waiting_user", () => runner.idle());
+  assert.deepEqual(starts.map((ctx) => ctx.session.selectedModel), ["primary", "backup", "last"]);
+  assert.deepEqual(starts.map((ctx) => ctx.session.employeeCandidateIndex), [0, 1, 2]);
+  assert.equal(new Set(starts.map((ctx) => ctx.session.id)).size, 3);
+  assert.equal(storage.getAiTeamRun(detail.run.id)!.statusDetail, "完成，等回复");
+  assert.equal(storage.getAiTeamRun(detail.run.id)!.stepsUsed, 1);
+  assert.deepEqual(storage.listAiTeamSteps(detail.run.id).map((step) => step.status), ["skipped", "skipped", "done"]);
+});
+
+test("a rejected worker keeps same-provider backup channels available", async (t) => {
+  const { root, storage, config } = setup(t);
+  storage.saveSiliconEmployee(person("e_worker", [
+    { ...agent("codex"), model: "primary" }, { ...agent("codex"), model: "backup" },
+  ]));
+  const models: Array<string | null | undefined> = [];
+  let leaderTurns = 0;
+  const manager = new StructuredSessionManager(storage, config, null, {
+    claudeCli: adapter(async (ctx) => { writeLeaderDecision(ctx, leaderTurns++ === 0 ? "assign" : "ask"); return result(); }),
+    codex: adapter(async (ctx) => {
+      models.push(ctx.session.selectedModel);
+      return ctx.session.selectedModel === "primary"
+        ? result({ primaryError: "积分已耗尽，调用失败", inputAccepted: false, rejection: "quota" })
+        : result({ state: { blocks: [{ type: "text", text: "完成" }], result: "完成", sessionId: "backup" } });
+    }),
+  });
+  const registry = new SessionRegistry({ getOwned: () => null } as unknown as ProcessManager, manager, storage);
+  const runner = new AiTeamRunner({ storage, ops: createAiTeamSessionOps({ storage, config, structured: manager,
+    processes: null, sessions: registry }), resolveCwd: () => root });
+  t.after(() => { runner.dispose(); manager.dispose(); });
+  manager.setEventEmitter((event) => runner.ingest(event));
+  const team = parseAiTeamInput({ name: "同工具备用", requirePlanApproval: false, members: [
+    { id: "m_lead", employeeId: "e_leader", isLeader: true }, { id: "m_worker", employeeId: "e_worker" },
+  ] }, null, new Date().toISOString(), storage);
+  storage.saveAiTeam(team);
+  const task = storage.createWandTask({ title: "同工具备用" });
+  const detail = await runner.start({ teamId: team.id, taskId: task.id });
+  await until(() => storage.getAiTeamRun(detail.run.id)!.status === "waiting_user", () => runner.idle());
+  assert.deepEqual(models, ["primary", "backup"]);
+  const work = storage.listAiTeamSteps(detail.run.id).filter((step) => step.kind === "work");
+  assert.deepEqual(work.map((step) => step.status), ["skipped", "done"]);
+  assert.equal(work[1]!.dispatchInfo?.skipped[0]?.errorKind, "input-rejected");
 });
 
 test("manager startup facts are current-request one-shot, disappear on new request/stop/delete/dispose and never enter storage", async (t) => {

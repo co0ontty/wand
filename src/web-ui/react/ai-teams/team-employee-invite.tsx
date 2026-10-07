@@ -1,4 +1,5 @@
 import * as React from "react";
+import { Collapse, Alert, Card, Flex, Typography } from "antd";
 import type { SiliconEmployee } from "../../../ai-team-types.js";
 import { WandButton, WandIcon, WandSelect } from "../ui";
 import { employeeJoinError, type TeamMemberDraft } from "./team-employee-binding.js";
@@ -47,18 +48,22 @@ export function TeamEmployeeInvite({
       <WandIcon name="plus" slot="start" className="wand-teams-create-icon"/>
       {replacing ? "从通讯录选择 / 替换" : "从通讯录邀请"}
     </WandButton>
-    <div className="wand-team-candidate-slot" data-collapsed={!open || undefined}>
+    <Collapse ghost bordered={false} className="wand-team-candidate-slot" activeKey={open ? ["invite"] : []}
+      styles={{ header: { display: "none" }, body: { padding: 0 } }}
+      items={[{ key: "invite", label: "邀请员工", showArrow: false, forceRender: true, children: <>
       <div className="wand-team-employee-invite-inner" inert={!open}>
-        <div className="wand-team-candidates">
-          <small className="wand-new-session-field-hint">员工在私聊与团队中使用自己的知识库，不共享私聊历史或其他员工知识。基础角色与 CLI 候选由员工资料决定；团队只配置分工。</small>
-          {error ? <div role="alert" className="wand-new-session-error">
-            通讯录加载失败：{error}
-            <WandButton kind="ghost" size="small" disabled={loading || disabled} onClick={reload}>重试通讯录</WandButton>
-          </div> : loading ? <p role="status">正在加载通讯录…</p> : <WandSelect
+        <Card size="small" className="wand-team-candidates"><Flex vertical gap={8}>
+          <Typography.Text type="secondary">员工在私聊与团队中使用自己的知识库，不共享私聊历史或其他员工知识。基础角色与 CLI 候选由员工资料决定；团队只配置分工。</Typography.Text>
+          {error ? <Alert
+            type="error"
+            showIcon
+            role="alert"
+            title={`通讯录加载失败：${error}`}
+            action={<WandButton kind="ghost" size="small" disabled={loading || disabled} onClick={reload}>重试通讯录</WandButton>}
+          /> : loading ? <Alert type="info" showIcon title="正在加载通讯录…" role="status"/> : <div className="wand-team-select"><WandSelect
             ariaLabel={replacing ? "绑定团队员工" : "邀请团队员工"}
             triggerRef={selectTriggerRef}
             contentClassName={menuClass}
-            className="wand-settings-input"
             searchable searchPlaceholder="搜索员工" placeholder="选择员工"
             disabled={disabled}
             options={employees.map((employee) => {
@@ -73,10 +78,10 @@ export function TeamEmployeeInvite({
               setOpen(false);
               requestAnimationFrame(() => inviteButtonRef.current?.focus());
             }}
-          />}
-          {!error && !loading && employees.length === 0 ? <p>通讯录中还没有员工，可继续添加手工 CLI 成员。</p> : null}
-        </div>
+          /></div>}
+          {!error && !loading && employees.length === 0 ? <Typography.Text type="secondary">通讯录中还没有员工，可继续添加手工 CLI 成员。</Typography.Text> : null}
+        </Flex></Card>
       </div>
-    </div>
+          </> }]}/>
   </div>;
 }

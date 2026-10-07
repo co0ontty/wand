@@ -1,6 +1,7 @@
 import * as React from "react";
+import { Drawer, Flex } from "antd";
 
-import { WandIcon, WandIconButton } from "../ui";
+import { WandInput, WandIcon, WandIconButton } from "../ui";
 import { classNames } from "../ui/class-names";
 import { fileExplorerController } from "../file-explorer/controller";
 import { FileExplorerHost } from "../file-explorer/host";
@@ -36,6 +37,17 @@ export function ShellFilePanel({ explorerRef }: ShellFilePanelProps = {}) {
   // 时那次 setState 会被 React bail-out，root 就不会跟着变。
   const [committedCwd, setCommittedCwd] = React.useState(snapshotCwd);
   const editingCwd = React.useRef(false);
+  const triggerRef = React.useRef<HTMLElement | null>(null);
+  const returnFocus = React.useRef(false);
+  React.useLayoutEffect(() => {
+    if (snapshot.layout.filePanelOpen) triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }, [snapshot.layout.filePanelOpen]);
+  const closePanel = (): void => {
+    if (!snapshot.layout.filePanelOpen) return;
+    returnFocus.current = true;
+    void dispatch({ type: "layout.files.close" });
+    if (!snapshot.viewport.mobile) triggerRef.current?.focus({ preventScroll: true });
+  };
 
   React.useEffect(() => {
     if (editingCwd.current) return;
@@ -62,18 +74,23 @@ export function ShellFilePanel({ explorerRef }: ShellFilePanelProps = {}) {
         className={classNames("file-panel-backdrop", snapshot.layout.filePanelBackdropVisible && "open")}
         aria-hidden="true"
         onClick={() => void dispatch({ type: "layout.files.close" })}
+        hidden
       />
-      <div
-        id="file-side-panel"
-        className={classNames("file-side-panel", snapshot.layout.filePanelOpen && "open")}
-        aria-hidden={!snapshot.layout.filePanelOpen}
-      >
-        <div className="file-side-panel-header">
-          <div className="file-side-panel-title-group">
-            <span className="file-side-panel-icon"><WandIcon name="explorer" size={16} className="wand-icon wand-icon-explorer"/></span>
-            <span className="file-side-panel-title">文件</span>
-          </div>
-          <div className="file-side-panel-header-actions">
+      <div className="file-explorer legacy-file-explorer-host" id="file-explorer" ref={explorerRef} hidden aria-hidden="true" />
+      <Drawer forceRender open={snapshot.layout.filePanelOpen} title="文件" size={snapshot.viewport.mobile ? "100%" : 360}
+        rootClassName="wand-file-drawer"
+        mask={snapshot.layout.filePanelBackdropVisible} keyboard={snapshot.layout.filePanelOpen} onClose={closePanel} focusable={{ focusTriggerAfterClose: false }}
+        afterOpenChange={(shown) => {
+          if (shown || !returnFocus.current) return;
+          returnFocus.current = false;
+          const active = document.activeElement;
+          if (active === document.body || active?.closest(".wand-file-drawer")) {
+            triggerRef.current?.focus({ preventScroll: true });
+          }
+        }}
+        closable={false} styles={{ body: { padding: 12, display: "flex", flexDirection: "column", minHeight: 0 }, header: { paddingTop: "max(16px, var(--wand-safe-top, 0px))" } }}
+        drawerRender={(node) => <div id="file-side-panel" className={classNames("file-side-panel", snapshot.layout.filePanelOpen && "open")} style={{ height: "100%" }}>{node}</div>}
+        extra={<Flex align="center" gap="small" className="file-side-panel-header-actions">
             <WandIconButton
               className="file-side-panel-iconbtn"
               id="file-explorer-refresh"
@@ -90,14 +107,14 @@ export function ShellFilePanel({ explorerRef }: ShellFilePanelProps = {}) {
               className="file-side-panel-iconbtn close"
               aria-label="关闭文件面板"
               title="关闭"
-              onClick={() => void dispatch({ type: "layout.files.close" })}
+              onClick={closePanel}
             >
               <WandIcon name="close" size={16} className="wand-icon wand-icon-close"/>
             </WandIconButton>
-          </div>
-        </div>
-        <div className="file-side-panel-body">
-          <div className="file-explorer-header">
+          </Flex>}
+      >
+        <Flex vertical gap="small" className="file-side-panel-body" style={{ flex: 1, minHeight: 0 }}>
+          <Flex align="center" gap="small" className="file-explorer-header" style={{ flexShrink: 0 }}>
             <WandIconButton
               className="file-explorer-up"
               id="file-explorer-up"
@@ -112,7 +129,7 @@ export function ShellFilePanel({ explorerRef }: ShellFilePanelProps = {}) {
             >
               <WandIcon name="up" size={15} className="wand-icon wand-icon-up"/>
             </WandIconButton>
-            <input
+            <WandInput
               type="text"
               className="file-explorer-path"
               id="file-explorer-cwd"
@@ -148,17 +165,10 @@ export function ShellFilePanel({ explorerRef }: ShellFilePanelProps = {}) {
                 }
               }}
             />
-          </div>
-          <div
-            className="file-explorer legacy-file-explorer-host"
-            id="file-explorer"
-            ref={explorerRef}
-            hidden
-            aria-hidden="true"
-          />
+          </Flex>
           <FileExplorerHost root={committedCwd}/>
-        </div>
-      </div>
+        </Flex>
+      </Drawer>
     </>
   );
 }

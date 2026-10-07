@@ -8,6 +8,9 @@ interface DecisionToolLike {
   semantic?: { kind?: string };
 }
 
+/** core 会话里决策是进程内工具（`src/core-runner.ts`）；CLI 会话是命令行调用。 */
+export const DECISION_TOOL_NAME = "decision_evaluate";
+
 /** Small shell lexer: quoted examples are one argument, not executable commands; heredoc bodies are data. */
 function commandWords(source: string): string[][] {
   const commands: string[][] = [];
@@ -72,6 +75,8 @@ export function isDecisionToolCall(block: DecisionToolLike): boolean {
   if (block.semantic?.kind === "decision") return true;
   if (block.type && block.type !== "tool_use") return false;
   const operation = (block.name ?? "").toLowerCase().split(/__|[/.]/).at(-1) ?? "";
+  // core（进程内 harness）把决策暴露成真工具，不是命令行调用。
+  if (operation === DECISION_TOOL_NAME) return true;
   if (!["bash", "exec", "exec_command", "command_execution", "shell_command", "terminal", "run_command", "run_shell_command"].includes(operation)) return false;
   const input = block.input ?? {};
   const command = input.command ?? input.cmd;
@@ -183,28 +188,47 @@ function decisionCommands(input: Record<string, unknown> | undefined): string[] 
 
 /** 请求侧要点：被判定内容摘要 + 题数 + 模式。请求体读不出时整块省略。 */
 function requestDigest(input: Record<string, unknown> | undefined): Pick<DecisionCardSummary, "mode" | "questions" | "preview"> | null {
+  if (!input) return null;
+  // core 进程内工具：questions 直接是字段（JSON 字符串），state 也在同一层。
+  if (typeof input.questions === "string") {
+    try {
+      const parsed = JSON.parse(input.questions) as unknown;
+      const digest = bodyDigest({ state: input.state, questions: parsed });
+      if (digest) return digest;
+    } catch {
+      // questions 坏了不影响从 state 给出被判定内容摘要。
+    }
+    const stateOnly = statePreview(input.state);
+    return Object.keys(stateOnly).length ? stateOnly : null;
+  }
   for (const source of decisionCommands(input)) {
     for (const candidate of jsonCandidates(source)) {
       let value: unknown;
       try { value = JSON.parse(candidate); } catch { continue; }
-      if (!isRecord(value) || !isRecord(value.questions)) continue;
-      const questions = Object.entries(value.questions);
-      if (!questions.length) continue;
-      const types: string[] = [];
-      let recognized = 0;
-      for (const [, raw] of questions) {
-        if (!isRecord(raw)) continue;
-        if (raw.type === "choice" || raw.type === "score" || raw.type === "noul") { types.push(raw.type); recognized++; }
-      }
-      if (!recognized) continue;
-      return {
-        mode: modeOf(types),
-        questions: questions.length,
-        ...statePreview(value.state),
-      };
+      const digest = bodyDigest(value);
+      if (digest) return digest;
     }
   }
   return null;
+}
+
+/** 决策请求体 → 摘要要点；读不出题目就返回 null（宁可没有摘要也不猜）。 */
+function bodyDigest(value: unknown): Pick<DecisionCardSummary, "mode" | "questions" | "preview"> | null {
+  if (!isRecord(value) || !isRecord(value.questions)) return null;
+  const questions = Object.entries(value.questions);
+  if (!questions.length) return null;
+  const types: string[] = [];
+  let recognized = 0;
+  for (const [, raw] of questions) {
+    if (!isRecord(raw)) continue;
+    if (raw.type === "choice" || raw.type === "score" || raw.type === "noul") { types.push(raw.type); recognized++; }
+  }
+  if (!recognized) return null;
+  return {
+    mode: modeOf(types),
+    questions: questions.length,
+    ...statePreview(value.state),
+  };
 }
 
 function statePreview(state: unknown): { preview?: string } {

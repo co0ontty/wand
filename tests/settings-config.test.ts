@@ -162,6 +162,74 @@ test("settings validate atomically, persist without secrets, and password rotati
     });
     assert.equal(connectedPreferenceWrite.status, 200);
 
+    const taskRetention = {
+      autoArchiveEnabled: false,
+      autoArchiveDays: 3,
+      autoDeleteEnabled: true,
+      autoDeleteDays: 14,
+    };
+    const connectedRetentionWrite = await fetch(`${baseUrl}/api/settings/config`, {
+      method: "POST",
+      headers: connectedHeaders,
+      body: JSON.stringify({ taskRetention }),
+    });
+    assert.equal(connectedRetentionWrite.status, 403);
+    const retentionWrite = await fetch(`${baseUrl}/api/settings/config`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ taskRetention }),
+    });
+    assert.equal(retentionWrite.status, 200);
+    const retentionSaved = await retentionWrite.json() as {
+      retention?: { archivedSessions: number; purgedSessions: number; archivedTasks: number; purgedTasks: number };
+    };
+    assert.deepEqual(retentionSaved.retention, {
+      archivedSessions: 0,
+      purgedSessions: 0,
+      archivedTasks: 0,
+      purgedTasks: 0,
+      purgedTeamRuns: 0,
+    });
+    assert.deepEqual(config.taskRetention, taskRetention);
+    const retentionSettings = await fetch(`${baseUrl}/api/settings`, { headers });
+    assert.equal(retentionSettings.status, 200);
+    const retentionBody = await retentionSettings.json() as { config: { taskRetention?: unknown } };
+    assert.deepEqual(retentionBody.config.taskRetention, taskRetention);
+    const retentionRejected = await fetch(`${baseUrl}/api/settings/config`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ taskRetention: { ...taskRetention, autoDeleteDays: 0 } }),
+    });
+    assert.equal(retentionRejected.status, 400);
+    assert.deepEqual(config.taskRetention, taskRetention);
+
+    // 个人资料是纯展示偏好：DB 权威源、热生效、不进 config.json。
+    const connectedProfileWrite = await fetch(`${baseUrl}/api/settings/config`, {
+      method: "POST",
+      headers: connectedHeaders,
+      body: JSON.stringify({ userProfile: { name: "App 连接不该能改" } }),
+    });
+    assert.equal(connectedProfileWrite.status, 403, "App 连接没有管理权限，不许改用户资料");
+    const profileWrite = await fetch(`${baseUrl}/api/settings/config`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ userProfile: { name: "赛博虎妞", avatar: "cat:3" } }),
+    });
+    assert.equal(profileWrite.status, 200);
+    assert.deepEqual(config.userProfile, { name: "赛博虎妞", avatar: "cat:3" });
+    const profileBody = await profileWrite.json() as { config: { userProfile?: unknown } };
+    assert.deepEqual(profileBody.config.userProfile, { name: "赛博虎妞", avatar: "cat:3" });
+    const profileRejected = await fetch(`${baseUrl}/api/settings/config`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ userProfile: { avatar: "https://example.com/a.png" } }),
+    });
+    assert.equal(profileRejected.status, 400, "非法头像明确拒绝，不静默换一张");
+    assert.deepEqual(config.userProfile, { name: "赛博虎妞", avatar: "cat:3" });
+    const adminProfile = await fetch(`${baseUrl}/api/config`, { headers });
+    assert.deepEqual(((await adminProfile.json()) as { userProfile?: unknown }).userProfile,
+      { name: "赛博虎妞", avatar: "cat:3" }, "/api/config 供客户端投影署名");
+
     const invalid = await fetch(`${baseUrl}/api/settings/config`, {
       method: "POST",
       headers,
@@ -230,6 +298,8 @@ test("settings validate atomically, persist without secrets, and password rotati
     assert.equal("systemAi" in persisted, false);
     assert.equal("systemAiCli" in persisted, false);
     assert.equal("systemAiModel" in persisted, false);
+    assert.equal("taskRetention" in persisted, false);
+    assert.equal("userProfile" in persisted, false, "用户资料只落 DB，不回写 config.json");
 
     const oversizedPrompt = await fetch(`${baseUrl}/api/optimize-prompt`, {
       method: "POST",

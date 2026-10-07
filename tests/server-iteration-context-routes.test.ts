@@ -162,7 +162,7 @@ test("iteration context route exposes the window between commits and remembers t
   }
 });
 
-test("quick commit archives only completed tasks linked to this commit and directory", async (t) => {
+test("quick commit archives the open task even while in progress, and only completed other cards", async (t) => {
   resetRepoKeyCache();
   t.after(() => resetRepoKeyCache());
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-commit-archive-"));
@@ -184,7 +184,7 @@ test("quick commit archives only completed tasks linked to this commit and direc
     const otherWorkspace = storage.createWorkspace({ name: "other", cwd: other });
     const iteration = storage.ensureDefaultWandMilestone();
     const repoKey = await repoKeyForCwd(repo);
-    const current = storage.createWandTask({ workspaceId, title: "当前任务", status: "done" });
+    const current = storage.createWandTask({ workspaceId, title: "当前任务", status: "doing" });
     storage.bindWandTaskSession(current.id, session.id);
     const sidebarTask = storage.createWorkspaceTask({ workspaceId, name: "本次完成" });
     const selected = storage.createWandTask({
@@ -209,12 +209,13 @@ test("quick commit archives only completed tasks linked to this commit and direc
     // A failed commit must not archive anything.
     const empty = await commit([entries[0]!.id], true);
     assert.equal(empty.status, 409);
-    assert.equal(storage.getWandTask(current.id)?.status, "done");
+    assert.equal(storage.getWandTask(current.id)?.status, "doing");
 
     writeFileSync(path.join(repo, "tracked.txt"), "first\n");
     const plain = await commit([entries[0]!.id], false);
     assert.equal(plain.status, 200);
     assert.deepEqual((await plain.json() as { archivedTaskIds: string[] }).archivedTaskIds, []);
+    assert.equal(storage.getWandTask(current.id)?.status, "doing");
     assert.equal(storage.getWandTask(selected.id)?.status, "done");
 
     writeFileSync(path.join(repo, "tracked.txt"), "second\n");
@@ -230,10 +231,45 @@ test("quick commit archives only completed tasks linked to this commit and direc
     assert.equal(storage.getWandTask(selected.id)?.status, "archived");
     assert.equal(storage.getWorkspaceTask(sidebarTask.id)?.status, "done", "side task stays recoverable");
     assert.equal(storage.getWandTask(skipped.id)?.status, "done");
-    assert.equal(storage.getWandTask(active.id)?.status, "doing");
+    assert.equal(storage.getWandTask(active.id)?.status, "doing", "selected in-progress cards stay in the list");
     assert.equal(storage.getWandTask(foreign.id)?.status, "done");
+    assert.equal(storage.getWorkspaceTask(current.workspaceTaskId!)?.status, "done", "archived card leaves the sidebar");
     assert.equal(storage.listIterationPromptsByIds([entries[0]!.id])[0]?.consumedCommit, result.commit.hash);
     assert.equal(storage.listIterationPromptsByIds([entries[1]!.id])[0]?.consumedCommit, null);
+
+    // A chat opened from the sidebar may not be bound yet. The client still names that row.
+    const opened = await fetch(`${baseUrl}/api/structured-sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cwd: repo, provider: "opencode", mode: "assist" }),
+    });
+    assert.equal(opened.status, 201);
+    const openedSession = await opened.json() as { id: string };
+    writeFileSync(path.join(repo, "tracked.txt"), "third\n");
+    const foreignRoute = await fetch(`${baseUrl}/api/sessions/${openedSession.id}/quick-commit`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        autoMessage: false, customMessage: "foreign", mode: "diff", entryIds: [],
+        archiveRelatedTasks: true, workspaceTaskId: foreign.workspaceTaskId,
+      }),
+    });
+    assert.equal(foreignRoute.status, 200);
+    assert.deepEqual((await foreignRoute.json() as { archivedTaskIds: string[] }).archivedTaskIds, []);
+    assert.equal(storage.getWandTask(foreign.id)?.status, "done");
+    writeFileSync(path.join(repo, "tracked.txt"), "fourth\n");
+    const openedRoute = await fetch(`${baseUrl}/api/sessions/${openedSession.id}/quick-commit`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        autoMessage: false, customMessage: "opened", mode: "diff", entryIds: [],
+        archiveRelatedTasks: true, workspaceTaskId: active.workspaceTaskId,
+      }),
+    });
+    assert.equal(openedRoute.status, 200);
+    const openedResult = await openedRoute.json() as { archivedTaskIds: string[] };
+    assert.deepEqual(openedResult.archivedTaskIds, [active.id]);
+    assert.equal(storage.getWandTask(active.id)?.status, "archived");
   } finally {
     await harness.close();
     rmSync(root, { recursive: true, force: true });

@@ -1,5 +1,6 @@
 import type { ConversationTurn, SessionSnapshot } from "./types.js";
 import { enrichStructuredMessages, WAND_PROTOCOL_VERSION } from "./structured-client-protocol.js";
+import { normalizeTurnAnchors } from "./structured-provider-common.js";
 import {
   collectSessionTopicBlocklist,
   shouldAcceptGeneratedSessionTitle,
@@ -71,6 +72,10 @@ function sessionBase(snapshot: SessionSnapshot): SessionBaseDTO {
     providerCliActive: snapshot.providerCliActive,
     providerCliExitCode: snapshot.providerCliExitCode,
     ptyBusy: snapshot.ptyBusy === true,
+    // 与 ptyBusy 同生命周期的本轮锚点（运行时事实，存储里没有对应列）。和 ptyBusy 一起
+    // 读成 null，客户端才不会在一条已经 idle 的会话上算出「已运行 N 分钟」。
+    ptyTurnStartedAt: snapshot.ptyBusy === true ? snapshot.ptyTurnStartedAt ?? null : null,
+    ptyLastActivityAt: snapshot.ptyBusy === true ? snapshot.ptyLastActivityAt ?? null : null,
     runner: snapshot.runner,
     command: snapshot.command,
     cwd: snapshot.cwd,
@@ -96,7 +101,8 @@ function sessionBase(snapshot: SessionSnapshot): SessionBaseDTO {
     claudeSessionId: snapshot.claudeSessionId,
     providerSessionId: snapshot.claudeSessionId,
     queuedMessages: snapshot.queuedMessages,
-    structuredState: snapshot.structuredState,
+    // inFlight 之外的回合锚点一律读成 null（兜底历史库残值与重启降级窗口）。
+    structuredState: normalizeTurnAnchors(snapshot.structuredState),
     resumedFromSessionId: snapshot.resumedFromSessionId,
     autoRecovered: snapshot.autoRecovered,
     autoApprovePermissions: snapshot.autoApprovePermissions,
@@ -113,6 +119,7 @@ function sessionBase(snapshot: SessionSnapshot): SessionBaseDTO {
     workspaceTaskId: snapshot.workspaceTaskId,
     selectedModel: snapshot.selectedModel,
     thinkingEffort: snapshot.thinkingEffort,
+    piSettings: snapshot.piSettings,
     ptyCols: snapshot.ptyCols,
     ptyRows: snapshot.ptyRows,
   };

@@ -289,10 +289,14 @@ export function registerAiTeamRoutes(app: Express, deps: {
     }
   });
 
-  /** 运行中步骤的 live 文本（§4.9）：Web 走 ai-team-step-live 推送，移动端轻量轮询这个端点。 */
+  /**
+   * 运行中步骤的 live 文本（§4.9.1）：Web 走 ai-team-step-live 推送，移动端轻量轮询这个端点。
+   * 除步骤快照外还回 run 级活动时间（startedAt / lastActivityAt / observedAt），轮询端不必
+   * 再拉一次 detail 才知道「还在跑、只是这一轮安静」。
+   */
   app.get("/api/ai-team-runs/:id/live", (req, res) => {
     try {
-      res.json({ runId: req.params.id, steps: runner.live(req.params.id) });
+      res.json(runner.liveSnapshot(req.params.id));
     } catch (error) {
       sendTeamError(res, error);
     }

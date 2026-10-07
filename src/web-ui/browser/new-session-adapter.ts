@@ -19,6 +19,11 @@ import {
 import { state, writeStoredBoolean } from "./state";
 import { saveWorkingDir } from "./terminal";
 import { closeReactOverlays } from "./react-overlay-coordinator";
+import { notifyTasksChanged } from "../react/task-changes";
+import { taskDetailStore } from "../react/workspaces/task-detail-store";
+import { workspaceContextStore } from "../react/workspaces/workspace-context";
+import { workspacesStore } from "../react/workspaces/controller";
+import { reconcileTaskWindowLayout, layoutSessionIds } from "../react/workspaces/window-layout";
 
 let uninstallRuntime: (() => void) | null = null;
 
@@ -78,6 +83,19 @@ const legacyRuntime: NewSessionRuntimeAdapter = {
     clearDraftValueForSession(created.id, true);
     saveWorkingDir(request.cwd);
     await loadSessions({ skipSelectedOutputReload: true });
+    if (request.workspaceTaskId) {
+      await taskDetailStore.reload(request.workspaceTaskId).catch(() => {});
+      const rt = workspacesStore.getRuntime();
+      if (workspaceContextStore.getSnapshot().taskId === request.workspaceTaskId && rt) {
+        const current = workspaceContextStore.getSnapshot().layout;
+        const existing = current
+          ? current.windows.flatMap((window) => layoutSessionIds(window.layout))
+          : [];
+        const next = reconcileTaskWindowLayout(current, [...existing, created.id], created.id);
+        void rt.saveTaskLayout(next);
+      }
+      notifyTasksChanged();
+    }
     selectSession(created.id);
     dismissDrawerIfOverlay();
     window.setTimeout(() => focusInputBox(true), 0);

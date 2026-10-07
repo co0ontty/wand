@@ -9,7 +9,7 @@ function vendorAssetUrl(relPath: EmbeddedVendorAssetPath): string {
   return `${relPath}?v=${EMBEDDED_WEB_ASSETS.vendor[relPath].hash}`;
 }
 
-export function renderApp(configPath: string): string {
+export function renderApp(configPath: string, page: "console" | "settings" = "console", settingsAuth: "browser" | "client" = "browser"): string {
   const stylesHref = `/assets/app.css?v=${getStylesAsset().hash}`;
   const scriptSrc = `/assets/app.js?v=${getScriptAsset(configPath).hash}`;
   const xtermSrc = vendorAssetUrl("/vendor/xterm/xterm.bundle.js");
@@ -17,11 +17,11 @@ export function renderApp(configPath: string): string {
   const xtermCssHref = vendorAssetUrl("/vendor/xterm/xterm.css");
 
   return `<!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN"${page === "settings" ? ` data-wand-page="settings" data-wand-settings-auth="${settingsAuth}"` : ""}>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
-  <title>Wand Console</title>
+  <title>${page === "settings" ? "Wand 设置" : "Wand Console"}</title>
   <link rel="icon" type="image/svg+xml" href="${WAND_FAVICON_URL}" />
   <meta name="description" content="Local CLI Console for Vibe Coding - Manage terminal sessions from your browser" />
   <meta name="theme-color" content="#f1eadf" media="(prefers-color-scheme: light)" />

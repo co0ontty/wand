@@ -1,9 +1,10 @@
+import { Alert, Badge, Empty, Flex, Spin, Tabs, Typography } from "antd";
 import * as React from "react";
 import { Fragment, type KeyboardEvent, type RefObject, useEffect, useRef, useSyncExternalStore } from "react";
 import { isMarkdownPreview, tokenizeFilePreviewCode, type FilePreviewCodeToken } from "../file-preview/model";
 import { MarkdownPreview } from "../file-preview/markdown";
 import { markdownPreviewStyles } from "../file-preview/markdown-styles";
-import { WandButton, WandIcon } from "../ui";
+import { WandBadge, WandButton, WandIcon, WandIconButton, WandInput } from "../ui";
 import { codeEditorController, codeEditorStore } from "./controller";
 import { codeEditorFindMatches, maxCodeEditorFindHighlights, type CodeEditorFindMatch } from "./model";
 import { codeEditorStyles } from "./styles";
@@ -128,12 +129,16 @@ function EditorBody({ snapshot, editorRef, ranges, activeRange }: {
   }, [editorRef, ranges, activeRange]);
 
   if (snapshot.status === "loading") {
-    return <div id={CODE_EDITOR_PANEL_ID} className="wand-code-editor-state" role="status">正在打开文件…</div>;
+    return (
+      <Flex id={CODE_EDITOR_PANEL_ID} align="center" justify="center" gap="small" style={{ flex: 1 }} className="wand-code-editor-state" role="status">
+        <Spin size="small" aria-hidden="true"/>正在打开文件…
+      </Flex>
+    );
   }
   if (snapshot.status === "error") {
     return (
-      <div id={CODE_EDITOR_PANEL_ID} className="wand-code-editor-state error" role="alert">
-        <span aria-hidden="true">!</span>
+      <Flex id={CODE_EDITOR_PANEL_ID} vertical align="center" justify="center" gap="small" style={{ flex: 1 }} className="wand-code-editor-state error" role="alert">
+        <WandIcon name="warning" size={20}/>
         <strong>{snapshot.failure?.message || "打开文件失败"}</strong>
         {snapshot.activePath ? <WandButton
           kind="ghost"
@@ -141,11 +146,11 @@ function EditorBody({ snapshot, editorRef, ranges, activeRange }: {
           // 失败的文件没进 files 缓存，open(同一路径) 会真的重读磁盘（activate/open 的已开分支只会复用）。
           onClick={() => void codeEditorController.open(snapshot.activePath!)}
         >重新加载</WandButton> : null}
-      </div>
+      </Flex>
     );
   }
   const file = snapshot.file;
-  if (!file) return <div id={CODE_EDITOR_PANEL_ID} className="wand-code-editor-state">选择文件后将在这里编辑。</div>;
+  if (!file) return <Flex id={CODE_EDITOR_PANEL_ID} justify="center" align="center" style={{ flex: 1 }}><Empty className="wand-code-editor-state" description="选择文件后将在这里编辑。" /></Flex>;
   if (snapshot.preview && isMarkdownPreview(file)) {
     return (
       <div id={CODE_EDITOR_PANEL_ID} className="wand-code-editor-markdown" tabIndex={0} aria-label={`${file.name} 预览`}>
@@ -207,11 +212,13 @@ function FindBar({ snapshot, matchCount, activeIndex, activeLine, inputRef }: {
   const hasQuery = snapshot.findQuery.length > 0;
   const hidden = matchCount > maxCodeEditorFindHighlights;
   return (
-    <div className="wand-code-editor-find">
+    <Flex wrap align="center" gap="small" className="wand-code-editor-find" style={{ padding: "4px 12px", flexShrink: 0 }}>
       <WandIcon name="search" size={14}/>
-      <input
+      <WandInput
         ref={inputRef}
         className="wand-code-editor-find-input"
+        style={{ flex: "1 1 180px", minWidth: 0, maxWidth: 320 }}
+        inputSize="sm"
         type="text"
         value={snapshot.findQuery}
         aria-label="在文件中查找"
@@ -228,48 +235,42 @@ function FindBar({ snapshot, matchCount, activeIndex, activeLine, inputRef }: {
           }
         }}
       />
-      <span
+      <Typography.Text
+        type={hasQuery && matchCount === 0 ? "danger" : "secondary"}
         className={`wand-code-editor-find-count${hasQuery && matchCount === 0 ? " empty" : ""}`}
         title={hidden ? "匹配过多，只高亮当前项" : undefined}
         aria-live="polite"
       >
         {!hasQuery ? "" : matchCount === 0 ? "无结果" : `${activeIndex + 1}/${matchCount}`}
-      </span>
+      </Typography.Text>
       {hasQuery && activeLine !== null ? (
-        <span className="wand-code-editor-find-line">第 {activeLine} 行</span>
+        <Typography.Text type="secondary" className="wand-code-editor-find-line">第 {activeLine} 行</Typography.Text>
       ) : null}
-      <button
-        type="button"
-        className="wand-code-editor-find-btn"
+      <WandIconButton
         title="上一个匹配 (⇧↵)"
         aria-label="上一个匹配"
         disabled={matchCount === 0}
         onClick={() => run({ type: "find.step", delta: -1 })}
-      >↑</button>
-      <button
-        type="button"
-        className="wand-code-editor-find-btn"
+      >↑</WandIconButton>
+      <WandIconButton
         title="下一个匹配 (↵)"
         aria-label="下一个匹配"
         disabled={matchCount === 0}
         onClick={() => run({ type: "find.step", delta: 1 })}
-      >↓</button>
-      <button
-        type="button"
-        className={`wand-code-editor-find-btn${snapshot.findCaseSensitive ? " active" : ""}`}
+      >↓</WandIconButton>
+      <WandIconButton
+        kind={snapshot.findCaseSensitive ? "primary" : "ghost"}
         title="区分大小写"
         aria-label="区分大小写"
         aria-pressed={snapshot.findCaseSensitive}
         onClick={() => run({ type: "find.case.toggle" })}
-      >Aa</button>
-      <button
-        type="button"
-        className="wand-code-editor-find-btn"
+      >Aa</WandIconButton>
+      <WandIconButton
         title="关闭查找 (Esc)"
         aria-label="关闭查找"
         onClick={() => run({ type: "find.close" })}
-      ><WandIcon name="close" size={12}/></button>
-    </div>
+      ><WandIcon name="close" size={12}/></WandIconButton>
+    </Flex>
   );
 }
 
@@ -304,8 +305,7 @@ export function CodeEditorHost() {
   );
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const findInputRef = useRef<HTMLInputElement>(null);
-  // 方向键走位要焦点，但 React 侧不许摸 DOM 查询（见 web-ui-architecture 的边界）：按路径记标签节点。
-  const tabRefs = useRef(new Map<string, HTMLDivElement>());
+  const wasSaving = useRef(false);
 
   const file = snapshot.file;
   const markdown = file ? isMarkdownPreview(file) : false;
@@ -333,6 +333,14 @@ export function CodeEditorHost() {
   }, [snapshot.findOpen, snapshot.findQuery, snapshot.findCaseSensitive, snapshot.findIndex, content]);
 
   useEffect(() => {
+    const finished = wasSaving.current && !snapshot.saving;
+    wasSaving.current = snapshot.saving;
+    // A successful save disables its button; keep subsequent typing/Escape in
+    // the editor when the browser drops that focus, without stealing elsewhere.
+    if (finished && snapshot.status === "ready" && document.activeElement === document.body) editorRef.current?.focus();
+  }, [snapshot.saving, snapshot.status]);
+
+  useEffect(() => {
     if (snapshot.findOpen) {
       const input = findInputRef.current;
       input?.focus();
@@ -342,7 +350,7 @@ export function CodeEditorHost() {
     if (snapshot.status !== "ready" || !snapshot.file) return;
     // Leaving the rendered Markdown view returns the caret to the source, so
     // typing continues where the user left off.
-    editorRef.current?.focus();
+    if (document.activeElement?.getAttribute("role") !== "tab") editorRef.current?.focus();
   }, [snapshot.findOpen, snapshot.activePath, snapshot.status, snapshot.preview]);
 
   useEffect(() => {
@@ -359,7 +367,21 @@ export function CodeEditorHost() {
     run({ type: "find.open" });
   }
 
+  function closeFile(path: string): void {
+    const origin = document.activeElement;
+    void codeEditorController.execute({ type: "close", path }).then(closed => {
+      if (closed) return;
+      requestAnimationFrame(() => {
+        const active = document.activeElement;
+        const owner = editorRef.current?.closest(".wand-code-editor-host");
+        if (origin instanceof HTMLElement && origin.isConnected
+          && (active === document.body || (active && owner?.contains(active)))) origin.focus({ preventScroll: true });
+      });
+    });
+  }
+
   function handleKeydown(event: KeyboardEvent<HTMLDivElement>): void {
+    if (event.nativeEvent.isComposing) return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
       event.preventDefault();
       event.stopPropagation();
@@ -379,7 +401,7 @@ export function CodeEditorHost() {
         run({ type: "find.close" });
         return;
       }
-      if (snapshot.activePath) run({ type: "close", path: snapshot.activePath });
+      if (snapshot.activePath) closeFile(snapshot.activePath);
     }
   }
 
@@ -388,139 +410,119 @@ export function CodeEditorHost() {
   return (
     <>
       <style id="wand-code-editor-styles">{codeEditorStyles}{markdownPreviewStyles}</style>
-      <div
+      <Flex vertical
         className={`wand-code-editor-host${snapshot.wrap ? " wrap" : ""}`}
         hidden={hidden}
         onKeyDownCapture={handleKeydown}
         aria-hidden={hidden}
+        style={{ position: "absolute", inset: 0, zIndex: 40, background: "var(--bg-primary)", minHeight: 0 }}
       >
         {snapshot.tabs.length > 0 && (
-          <div className="wand-code-editor-tabs" role="tablist" aria-label="打开的文件">
-            {snapshot.tabs.map((tab) => (
-              <div
-                key={tab.path}
-                ref={(element) => {
-                  if (element) tabRefs.current.set(tab.path, element);
-                  else tabRefs.current.delete(tab.path);
-                }}
-                role="tab"
-                tabIndex={snapshot.activePath === tab.path ? 0 : -1}
-                aria-selected={snapshot.activePath === tab.path}
-                aria-controls={CODE_EDITOR_PANEL_ID}
-                aria-label={tab.dirty ? `${tab.name}，未保存` : tab.name}
-                className={`wand-code-editor-tab${snapshot.activePath === tab.path ? " active" : ""}`}
-                title={tab.path}
-                onClick={() => run({ type: "activate", path: tab.path })}
-                onKeyDown={(event) => {
-                  // 外层从 button 换成 div（button 里不能再套 button），
-                  // Enter / Space 激活要自己补；子节点上的按键不归标签页处理。
-                  if (event.target !== event.currentTarget) return;
-                  const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
-                  if (step !== 0 || event.key === "Home" || event.key === "End") {
-                    event.preventDefault();
-                    // roving tabindex：一组只有一个停靠点，方向键在标签之间走并跟着激活。
-                    const order = snapshot.tabs.map((item) => item.path);
-                    const at = order.indexOf(tab.path);
-                    const next = event.key === "Home" ? 0
-                      : event.key === "End" ? order.length - 1
-                        : (at + step + order.length) % order.length;
-                    const target = order[next];
-                    if (!target || target === tab.path) return;
-                    run({ type: "activate", path: target });
-                    // 标签节点原地不动，焦点直接跟上；关闭按钮是独立停靠点，不参与走位。
-                    tabRefs.current.get(target)?.focus();
-                    return;
-                  }
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    run({ type: "activate", path: tab.path });
-                  }
-                }}
-              >
-                {tab.dirty && <span className="wand-code-editor-tab-dirty" aria-hidden="true" title="未保存"/>}
-                <span className="wand-code-editor-tab-name">{tab.name}</span>
-                <button
-                  type="button"
-                  className="wand-code-editor-tab-close"
-                  aria-label={`关闭 ${tab.name}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    run({ type: "close", path: tab.path });
-                  }}
-                >
-                  <WandIcon name="close" size={11}/>
-                </button>
-              </div>
-            ))}
-          </div>
+          <Tabs
+            className="wand-code-editor-tabs"
+            type="editable-card"
+            hideAdd
+            size="small"
+            activeKey={snapshot.activePath ?? undefined}
+            aria-label="打开的文件"
+            onChange={path => run({ type: "activate", path })}
+            onEdit={(path, action) => { if (action === "remove" && typeof path === "string") closeFile(path); }}
+            items={snapshot.tabs.map(tab => ({
+              key: tab.path,
+              label: <span className={`wand-code-editor-tab${snapshot.activePath === tab.path ? " active" : ""}`} title={tab.path}>
+                <Badge dot={tab.dirty} offset={[4, 0]}><span className="wand-code-editor-tab-name">{tab.name}</span></Badge>
+              </span>,
+              closeIcon: <WandIcon name="close" size={12}/>,
+            }))}
+            style={{ flexShrink: 0 }}
+            styles={{ header: { margin: 0 }, body: { display: "none" } }}
+            renderTabBar={(props, DefaultTabBar) => <DefaultTabBar {...props}>{node => {
+              const tab = snapshot.tabs.find(item => item.path === node.key);
+              const element = node as React.ReactElement<React.HTMLAttributes<HTMLElement>>;
+              return React.cloneElement(element, {}, React.Children.map(element.props.children, child => {
+                if (!React.isValidElement(child)) return child;
+                const control = child as React.ReactElement<React.HTMLAttributes<HTMLElement>>;
+                if (control.props.role === "tab") return React.cloneElement(control, {
+                  "aria-controls": CODE_EDITOR_PANEL_ID,
+                  "aria-label": tab?.dirty ? `${tab.name}，未保存` : tab?.name,
+                  onFocus: event => {
+                    control.props.onFocus?.(event);
+                    if (tab) run({ type: "activate", path: tab.path });
+                  },
+                });
+                if (control.type === "button") return React.cloneElement(control, {
+                  className: `${control.props.className ?? ""} wand-code-editor-tab-close`,
+                  "aria-label": `关闭 ${tab?.name ?? "文件"}`,
+                });
+                return child;
+              }));
+            }}</DefaultTabBar>}
+          />
         )}
         {snapshot.file && (
-          <div className="wand-code-editor-toolbar" aria-label="编辑器工具栏">
-            <span className="wand-code-editor-dirty-mark">
+          <Flex wrap align="center" gap="small" className="wand-code-editor-toolbar" aria-label="编辑器工具栏" style={{ padding: "8px 12px", flexShrink: 0 }}>
+            <WandBadge className="wand-code-editor-dirty-mark" size="sm"
+              tone={snapshot.file.dirty ? "warning" : "success"}>
               {snapshot.file.dirty ? "● 未保存" : "已保存"}
-            </span>
-            <span className="wand-code-editor-toolbar-spacer"/>
-            <button
-              type="button"
-              className="wand-code-editor-btn primary"
+            </WandBadge>
+            <span style={{ flex: 1 }}/>
+            <WandButton
+              size="small"
+              kind="primary"
+              loading={snapshot.saving}
               disabled={snapshot.saving || !snapshot.file.dirty}
               onClick={() => run({ type: "save" })}
             >
               {snapshot.saving ? "保存中…" : "保存 (⌘S)"}
-            </button>
-            <button
-              type="button"
-              className="wand-code-editor-btn"
+            </WandButton>
+            <WandButton
+              size="small"
               disabled={snapshot.saving || !snapshot.file.dirty}
               onClick={() => run({ type: "revert" })}
             >
               撤销改动
-            </button>
+            </WandButton>
             {markdown ? (
-              <button
-                type="button"
-                className={`wand-code-editor-btn${rendered ? " active" : ""}`}
+              <WandButton
+                size="small"
+                kind={rendered ? "primary" : "secondary"}
                 aria-pressed={rendered}
                 title={rendered ? "显示 Markdown 源码" : "渲染 Markdown 预览"}
                 onClick={() => run({ type: "preview.toggle" })}
               >
                 预览
-              </button>
+              </WandButton>
             ) : null}
-            <button
-              type="button"
-              className="wand-code-editor-btn"
+            <WandButton
+              size="small"
+              kind={snapshot.findOpen ? "primary" : "secondary"}
               onClick={openFind}
               aria-pressed={snapshot.findOpen}
               title="在文件中查找 (⌘F)"
             >
               查找 ⌘F
-            </button>
-            <button
-              type="button"
-              className={`wand-code-editor-btn${snapshot.wrap ? " active" : ""}`}
+            </WandButton>
+            <WandButton
+              size="small"
+              kind={snapshot.wrap ? "primary" : "secondary"}
               onClick={() => run({ type: "wrap.toggle" })}
               aria-pressed={snapshot.wrap}
             >
               自动换行
-            </button>
-            <button
-              type="button"
-              className="wand-code-editor-btn"
+            </WandButton>
+            <WandIconButton
               aria-label="缩小字号"
               onClick={() => run({ type: "font.adjust", delta: -1 })}
-            >A−</button>
+            >A−</WandIconButton>
             <span role="status" aria-label={`字号 ${snapshot.fontSize}`}>{snapshot.fontSize}</span>
-            <button
-              type="button"
-              className="wand-code-editor-btn"
+            <WandIconButton
               aria-label="放大字号"
               onClick={() => run({ type: "font.adjust", delta: 1 })}
-            >A+</button>
-          </div>
+            >A+</WandIconButton>
+          </Flex>
         )}
         {snapshot.status === "ready" && snapshot.failure ? (
-          <p className="wand-code-editor-inline-error" role="alert">{snapshot.failure.message}</p>
+          <Alert className="wand-code-editor-inline-error" type="error" showIcon title={snapshot.failure.message} />
         ) : null}
         {snapshot.findOpen && snapshot.file ? (
           <FindBar
@@ -537,7 +539,7 @@ export function CodeEditorHost() {
           ranges={find.ranges}
           activeRange={find.activeRange}
         />
-      </div>
+      </Flex>
     </>
   );
 }

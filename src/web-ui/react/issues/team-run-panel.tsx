@@ -1,3 +1,4 @@
+import { Alert, Card, Collapse, Descriptions, Flex, Input, List, Tabs, Tag, Timeline, Typography } from "antd";
 import * as React from "react";
 import type { AgentActivityState } from "../../../mission-types";
 import {
@@ -16,7 +17,7 @@ import { failureMessage } from "../errors";
 import { issueAgentProviderLabel } from "./task-board-agent";
 import { taskBoardController } from "./task-board-controller";
 import { MOTION_DWELL_FAILED_MS, MOTION_DWELL_SENT_MS } from "../ui/motion-tokens";
-import { WandBadge, WandButton, WandIcon, WandStretchTabs } from "../ui";
+import { WandBadge, WandButton, WandIcon } from "../ui";
 
 type BadgeTone = "neutral" | "accent" | "info" | "success" | "warning";
 
@@ -147,6 +148,8 @@ function StepRow({
   const who = member?.name ?? (step.kind === "leader" ? "负责人" : step.memberId);
   const [report, setReport] = React.useState("");
   const [skippedOpen, setSkippedOpen] = React.useState(false);
+  const triggerRef = React.useRef<HTMLButtonElement>(null);
+  const skippedTriggerRef = React.useRef<HTMLButtonElement>(null);
   const skipped = step.dispatchInfo?.skipped ?? [];
   const live = memberState ? MEMBER_STATE[memberState] : undefined;
   const canComplete = step.kind === "work" && step.status === "running";
@@ -155,82 +158,69 @@ function StepRow({
       .filter((item): item is AiTeamStep => !!item && item.status !== "done")
       .map((item) => `#${item.seq}`)
     : [];
-  return <li
-    className="task-board-team-step"
-    data-status={step.status}
-    data-kind={step.kind}
-    data-open={open || undefined}
-  >
-    {member ? <TeamAvatar member={member} size="sm" state={stepAvatarState(step, memberState)}/> : <span/>}
-    <div className="task-board-team-step-card">
-      <button type="button" className="task-board-team-step-head" aria-expanded={open} onClick={onToggle}>
-        <span className="task-board-team-step-title">
-          <small>{who} · #{step.seq}</small>
-          <strong>{step.title || (step.kind === "leader" ? "负责人决策" : "成员步骤")}</strong>
-        </span>
-        <span className="task-board-team-step-status">
+  return <Flex align="start" gap={10} className="task-board-team-step" data-status={step.status} data-kind={step.kind} data-open={open || undefined}
+    onKeyDown={(event) => {
+      if (event.key !== "Escape" || event.defaultPrevented || !open || actions.pending) return;
+      event.preventDefault(); event.stopPropagation(); onToggle(); triggerRef.current?.focus();
+    }}>
+    {member ? <TeamAvatar member={member} size="sm" state={stepAvatarState(step, memberState)}/> : null}
+    <Card size="small" className="task-board-team-step-card" style={{ flex: 1, minWidth: 0 }}>
+      <WandButton kind="ghost" type="button" ref={triggerRef} className="task-board-team-step-head" aria-expanded={open}
+        style={{ width: "100%", height: "auto", minHeight: 44, textAlign: "start", alignItems: "start", whiteSpace: "normal" }} onClick={onToggle}>
+        <Flex vertical className="task-board-team-step-title" style={{ flex: 1, minWidth: 0 }}>
+          <Typography.Text type="secondary" ellipsis>{who} · #{step.seq}</Typography.Text>
+          <Typography.Text strong ellipsis>{step.title || (step.kind === "leader" ? "负责人决策" : "成员步骤")}</Typography.Text>
+        </Flex>
+        <Tag className="task-board-team-step-status" color={step.status === "running" ? "processing" : step.status === "done" ? "success" : step.status === "failed" ? "error" : undefined}>
           {live ?? (waitsOn.length ? `等待 ${waitsOn.join("、")}` : STEP_STATUS[step.status])}
-        </span>
-        <WandIcon name="chevronDown" size={14}/>
-      </button>
-      {step.report && !open ? <p className="task-board-team-step-preview">{step.report}</p> : null}
-      <div className="task-board-team-step-body" inert={!open}>
-        <div className="task-board-team-step-inner">
-          {step.instructions ? <section>
-            <h4>{step.kind === "leader" ? "发给负责人" : "任务说明"}</h4>
-            <pre>{step.instructions}</pre>
-          </section> : null}
-          {step.report ? <section>
-            <h4>{step.kind === "leader" ? "负责人说明" : "报告"}</h4>
-            <pre>{step.report}</pre>
-          </section> : null}
-          <p className="task-board-team-step-meta">报告文件：<code>{step.reportPath}</code></p>
-          {step.sessionId && onOpenSession ? <div className="task-board-native-editor-actions">
-            <WandButton kind="ghost" size="small" onClick={() => onOpenSession(step.sessionId!)}>
-              <WandIcon name="terminal" size={14} slot="start"/>打开会话
-            </WandButton>
-          </div> : null}
-          {canComplete ? <div className="task-board-team-manual">
-            <textarea
-              className="resize-none task-board-detail-body"
-              rows={3}
-              value={report}
-              placeholder="成员没有写报告文件时，在这里补一段结果再手动完成"
-              aria-label="手动完成的报告"
-              onChange={(event) => setReport(event.currentTarget.value)}
-            />
-            <ActionButton
-              id={`complete-${step.id}`}
-              state={actions}
-              label="手动完成此步"
-              pendingLabel="提交中…"
-              onClick={() => onComplete(report)}
-            />
-          </div> : null}
-        </div>
-      </div>
-      {skipped.length ? <div className="task-board-team-step-skips" data-open={skippedOpen || undefined}>
-        <button
-          type="button"
-          className="task-board-team-step-skip-head"
-          aria-expanded={skippedOpen}
-          onClick={() => setSkippedOpen((current) => !current)}
-        >
+        </Tag>
+        <WandIcon name={open ? "chevronUp" : "chevronDown"} size={14}/>
+      </WandButton>
+      {step.report && !open ? <Typography.Paragraph className="task-board-team-step-preview" ellipsis={{ rows: 2 }} style={{ whiteSpace: "pre-wrap", margin: "8px 0 0" }}>{step.report}</Typography.Paragraph> : null}
+      <Collapse ghost bordered={false} activeKey={open ? ["step"] : []}
+        styles={{ header: { display: "none" }, body: { padding: "8px 0 0" } }}
+        items={[{ key: "step", label: "步骤详情", showArrow: false, forceRender: true, children:
+          <Flex vertical gap={8} className="task-board-team-step-body" inert={!open}>
+            <Descriptions size="small" column={1} layout="vertical" items={[
+              ...(step.instructions ? [{ key: "instructions", label: step.kind === "leader" ? "发给负责人" : "任务说明", children: <Typography.Paragraph style={{ maxHeight: 320, overflow: "auto", whiteSpace: "pre-wrap", overflowWrap: "anywhere", margin: 0 }}>{step.instructions}</Typography.Paragraph> }] : []),
+              ...(step.report ? [{ key: "report", label: step.kind === "leader" ? "负责人说明" : "报告", children: <Typography.Paragraph style={{ maxHeight: 320, overflow: "auto", whiteSpace: "pre-wrap", overflowWrap: "anywhere", margin: 0 }}>{step.report}</Typography.Paragraph> }] : []),
+              { key: "file", label: "报告文件", children: <Typography.Text code style={{ overflowWrap: "anywhere" }}>{step.reportPath}</Typography.Text> },
+            ]}/>
+            {step.sessionId && onOpenSession ? <Flex wrap gap={8}>
+              <WandButton kind="ghost" size="small" onClick={() => onOpenSession(step.sessionId!)}>
+                <WandIcon name="terminal" size={14} slot="start"/>打开会话
+              </WandButton>
+            </Flex> : null}
+            {canComplete ? <Flex vertical gap={8} className="task-board-team-manual">
+              <Input.TextArea rows={3} value={report} placeholder="成员没有写报告文件时，在这里补一段结果再手动完成" aria-label="手动完成的报告" onChange={(event) => setReport(event.currentTarget.value)}/>
+              <ActionButton id={`complete-${step.id}`} state={actions} label="手动完成此步" pendingLabel="提交中…" onClick={() => onComplete(report)}/>
+            </Flex> : null}
+          </Flex> }]}/>
+      {skipped.length ? <Flex vertical gap={4} className="task-board-team-step-skips" data-open={skippedOpen || undefined}
+        onKeyDown={(event) => {
+          if (event.key !== "Escape" || event.defaultPrevented || !skippedOpen) return;
+          event.preventDefault(); event.stopPropagation(); setSkippedOpen(false); skippedTriggerRef.current?.focus();
+        }}>
+        <WandButton kind="ghost" type="button" ref={skippedTriggerRef} className="task-board-team-step-skip-head" aria-expanded={skippedOpen}
+          style={{ width: "100%", height: "auto", minHeight: 44, whiteSpace: "normal" }} onClick={() => setSkippedOpen((current) => !current)}>
           <WandIcon name="warning" size={13}/>
-          <span>备用候选 {skipped.map((item) => item.candidate).join("、")} 没用上</span>
-          <WandIcon name="chevronDown" size={14}/>
-        </button>
-        <div className="task-board-team-step-skip-body" inert={!skippedOpen}>
-          <ul className="task-board-team-step-skip-inner">
-            {skipped.map((item) => <li key={item.candidate}>
-              <strong>候选 {item.candidate} · {issueAgentProviderLabel(item.agent.provider)}</strong>
-              <span>{item.reason}</span>
-            </li>)}
-          </ul>
-        </div>
-      </div> : null}
-    </div>
-  </li>;
+          <Typography.Text style={{ flex: 1 }}>备用候选 {skipped.map((item) => item.candidate).join("、")} 没用上</Typography.Text>
+          <WandIcon name={skippedOpen ? "chevronUp" : "chevronDown"} size={14}/>
+        </WandButton>
+        <Collapse ghost bordered={false} activeKey={skippedOpen ? ["skipped"] : []}
+          styles={{ header: { display: "none" }, body: { padding: 0 } }}
+          items={[{ key: "skipped", label: "备用候选跳过原因", showArrow: false, forceRender: true, children:
+            <div className="task-board-team-step-skip-body" inert={!skippedOpen}>
+              <List size="small" className="task-board-team-step-skip-inner" dataSource={skipped} renderItem={(item) => <List.Item key={item.candidate}>
+                <Flex vertical gap={2}>
+                  <Typography.Text strong>候选 {item.candidate} · {issueAgentProviderLabel(item.agent.provider)}</Typography.Text>
+                  <Typography.Text style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{item.reason}</Typography.Text>
+                </Flex>
+              </List.Item>}/>
+            </div> }]}/>
+      </Flex> : null}
+    </Card>
+  </Flex>;
 }
 
 const RUN_VIEWS = [
@@ -308,13 +298,14 @@ export function TeamRunView({
   // 点头像只看这位成员时，只剩时间线一条视图可看；tabs 收起来，容器不换。
   const activeView = focusMember ? "timeline" : view;
 
-  return <div className="task-board-team-run" data-status={run.status}>
-    <div className="task-board-team-run-head">
-      <span className="task-board-team-run-kicker">团队运行</span>
+  return <Card size="small" className="task-board-team-run" data-status={run.status}>
+    <Flex vertical gap={12}>
+    <Flex align="center" wrap gap={8} className="task-board-team-run-head">
+      <Typography.Text type="secondary">团队运行</Typography.Text>
       <TeamAvatarStack members={displayTeam.members} size="sm"/>
-      <strong>{displayTeam.name}</strong>
+      <Typography.Text strong>{displayTeam.name}</Typography.Text>
       <WandBadge tone={status.tone}>{status.label}</WandBadge>
-      <small>步数 {run.stepsUsed}/{run.stepLimit}</small>
+      <Typography.Text type="secondary" style={{ marginInlineEnd: "auto" }}>步数 {run.stepsUsed}/{run.stepLimit}</Typography.Text>
       {run.chatSessionId ? <WandButton kind="secondary" size="small" onClick={() => taskBoardController.open("", "", "teamchat", run.id)}>
         打开群聊
       </WandButton> : null}
@@ -326,32 +317,36 @@ export function TeamRunView({
         pendingLabel="停止中…"
         onClick={act(() => aiTeamsRepository.stop(run.id))}
       /> : null}
-    </div>
-    <div className="task-board-team-roster" role="group" aria-label="成员">
+    </Flex>
+    <Flex gap={6} style={{ overflowX: "auto", padding: 2 }} className="task-board-team-roster" role="group" aria-label="成员">
       {members.map((member) => {
         const own = steps.filter((step) => step.memberId === member.id && step.status !== "skipped");
         const done = own.filter((step) => step.status === "done").length;
-        return <button
+        return <WandButton kind={focusMember === member.id ? "soft" : "ghost"}
           key={member.id}
           type="button"
           className="task-board-team-roster-item"
+          style={{ flexShrink: 0, height: "auto", minWidth: 64 }}
           aria-pressed={focusMember === member.id}
           title={focusMember === member.id ? "显示全部成员" : `只看${member.name}`}
           onClick={() => setFocusMember((current) => current === member.id ? "" : member.id)}
         >
-          <TeamAvatar member={member} state={memberAvatarState(member, steps, memberStates)} showProvider/>
-          <span>{member.name}</span>
-          <small>{own.length ? `${done}/${own.length}` : "待命"}</small>
-        </button>;
+          <Flex vertical align="center" gap={4}>
+            <TeamAvatar member={member} state={memberAvatarState(member, steps, memberStates)} showProvider/>
+            <Typography.Text ellipsis style={{ maxWidth: 72 }}>{member.name}</Typography.Text>
+            <Typography.Text type="secondary">{own.length ? `${done}/${own.length}` : "待命"}</Typography.Text>
+          </Flex>
+        </WandButton>;
       })}
-    </div>
+    </Flex>
     {detail.delivery?.runId === run.id ? <div hidden={activeView === "chat"} inert={activeView === "chat"}>
       <TeamDeliveryCard delivery={detail.delivery}/>
     </div> : null}
-    {needsYou || !detail.delivery && run.statusDetail ? <div className="task-board-team-banner" data-attention={needsYou || undefined}>
-      {!detail.delivery && run.statusDetail ? <p>{run.statusDetail}</p> : null}
-      {needsYou ? <div className="task-board-team-respond">
-        <textarea
+    {needsYou || !detail.delivery && run.statusDetail ? <Card size="small" className="task-board-team-banner" data-attention={needsYou || undefined}>
+      <Flex vertical gap={8}>
+      {!detail.delivery && run.statusDetail ? <Alert type={needsYou ? "warning" : "info"} showIcon title={run.statusDetail}/> : null}
+      {needsYou ? <Flex vertical gap={8} className="task-board-team-respond">
+        <Input.TextArea
           className="resize-none task-board-detail-body"
           rows={3}
           value={text}
@@ -359,7 +354,7 @@ export function TeamRunView({
           aria-label={run.status === "awaiting_approval" ? "退回意见" : "回复负责人"}
           onChange={(event) => { inputRevision.current++; setText(event.currentTarget.value); }}
         />
-        <div className="task-board-native-editor-actions">
+        <Flex justify="end" gap={8} wrap>
           {run.status === "awaiting_approval" ? <>
             <ActionButton
               id="reject"
@@ -395,43 +390,33 @@ export function TeamRunView({
               onClick={act(() => aiTeamsRepository.reply(run.id, text))}
             />
           </>}
-        </div>
-      </div> : null}
-    </div> : null}
-    {error ? <p className="task-board-team-error" role="alert">{error}</p> : null}
-    {focusMember ? null : <WandStretchTabs
-      tabs={RUN_VIEWS}
-      value={view}
-      ariaLabel="运行视图"
-      className="task-board-team-views"
-      onValueChange={setView}
-    />}
-    <div className="task-board-team-views-stack">
-      {RUN_VIEWS.map((tab) => <div
-        key={tab.value}
-        className="task-board-team-view"
-        data-view={tab.value}
-        data-hidden={activeView !== tab.value || undefined}
-        inert={activeView !== tab.value}
-      >
+        </Flex>
+      </Flex> : null}
+      </Flex>
+    </Card> : null}
+    {error ? <Alert className="task-board-team-error" type="error" showIcon role="alert" title={error}/> : null}
+    <Tabs className="task-board-team-views" activeKey={activeView} onChange={setView}
+      destroyOnHidden={false} tabBarStyle={focusMember ? { display: "none" } : undefined}
+      items={RUN_VIEWS.map((tab) => ({ key: tab.value, label: tab.label, forceRender: true, children:
+        <div className="task-board-team-view" data-view={tab.value}
+          data-hidden={activeView !== tab.value || undefined} inert={activeView !== tab.value}>
         {tab.value === "chat" ? <TeamChatView detail={detail} onChange={onChange} onOpenSession={onOpenSession}/> : null}
-        {tab.value === "timeline" ? <ol className="task-board-team-steps">{shown.map(row)}</ol> : null}
-        {tab.value === "members" ? <div className="task-board-team-groups">
+        {tab.value === "timeline" ? <Timeline className="task-board-team-steps" items={shown.map((step) => ({ key: step.id, color: step.status === "failed" ? "red" : step.status === "done" ? "green" : "blue", children: row(step) }))}/> : null}
+        {tab.value === "members" ? <Flex vertical gap={14} className="task-board-team-groups">
           {members.map((member) => {
             const own = steps.filter((step) => step.memberId === member.id);
-            return <section key={member.id} className="task-board-team-group">
-              <header>
-                <strong>{member.name}</strong>
-                <small>{member.duty}</small>
-              </header>
-              {own.length ? <ol className="task-board-team-steps">{own.map(row)}</ol>
-                : <p className="task-board-team-run-detail">还没有分到步骤。</p>}
-            </section>;
+            return <Card size="small" key={member.id} className="task-board-team-group" title={member.name}>
+              <Flex vertical gap={8}>
+              <Typography.Text type="secondary">{member.duty}</Typography.Text>
+              {own.length ? <List split={false} className="task-board-team-steps" dataSource={own} renderItem={(step) => <List.Item style={{ display: "block" }}>{row(step)}</List.Item>}/>
+                : <Typography.Text type="secondary">还没有分到步骤。</Typography.Text>}
+              </Flex>
+            </Card>;
           })}
-        </div> : null}
-      </div>)}
-    </div>
-  </div>;
+        </Flex> : null}
+        </div> }))}/>
+    </Flex>
+  </Card>;
 }
 
 /**
@@ -498,7 +483,7 @@ function TaskTeamRunPanelContent({
     requestGeneration.current++;
     setDetail((current) => mergeTeamChatDetail(current, next));
   };
-  return <section className="task-board-team" aria-label="AI 团队">
+  return <Flex component="section" vertical gap={10} style={{ marginTop: 14 }} className="task-board-team" aria-label="AI 团队">
     <TeamRunView key={detail.run.id} detail={detail} onChange={acceptAction} onOpenSession={onOpenSession}/>
-  </section>;
+  </Flex>;
 }

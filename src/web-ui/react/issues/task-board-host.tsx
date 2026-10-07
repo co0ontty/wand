@@ -1,4 +1,8 @@
+import "./library-layout";
+import { TaskForm, TaskTextArea, TaskDatePicker } from "./form-controls";
+import { WandInput } from "../ui";
 import * as React from "react";
+import { Alert, Card, Flex, Form, Typography } from "antd";
 import { subscribeWandModelCatalog } from "../model-catalog";
 import { subscribeTaskChanges } from "../task-changes";
 import { draggedTaskId, isTaskDrag, startTaskDrag, TASK_DRAG_TYPE } from "./task-drag";
@@ -65,7 +69,8 @@ import {
   type IssueGanttZoom,
   type IssueModelCatalog,
 } from "./task-board-agent";
-import { AgentField, AgentFields, agentTargetOptions, agentTargetTeamId, agentTargetEmployeeId } from "./agent-fields";
+import { AgentField, AgentFields, DISPATCH_VALUE, agentTargetIsDispatch, agentTargetOptions, agentTargetTeamId, agentTargetEmployeeId } from "./agent-fields";
+import { TeamDispatchActionButton, TeamDispatchRoster, dispatchStartBlockedReason, useTeamDispatchFlow } from "../team-dispatch/roster";
 import { aiTeamsRepository, type AiTeam } from "../ai-teams/repository";
 import { TaskTeamRunPanel } from "../ai-teams/lazy";
 import { taskBoardController, taskBoardStore } from "./task-board-controller";
@@ -170,6 +175,8 @@ export function TaskBoardHost({
   const [createMore, setCreateMore] = React.useState(false);
   const [createExpanded, setCreateExpanded] = React.useState(false);
   const [draft, setDraft] = React.useState<DraftState>(() => emptyDraft(""));
+  const draftRef = React.useRef(draft);
+  draftRef.current = draft;
   const [selectedId, setSelectedId] = React.useState("");
   // 看板卡片的就地展开态，同一时刻只开一张；完整详情仍由 selectedId 那套详情页承担。
   const [expandedTaskId, setExpandedTaskId] = React.useState("");
@@ -384,7 +391,10 @@ export function TaskBoardHost({
           assignError = cause instanceof Error ? cause.message : "任务已创建，但第一次指派失败。";
         }
       }
-      if (createMore) {
+      if (draftRef.current !== draft) {
+        // Keep edits made after this submission; the accepted task still refreshes below.
+        requestAnimationFrame(() => titleRef.current?.focus());
+      } else if (createMore) {
         setDraft({ ...emptyDraft(draft.workspaceId, draft.status, draft.agent, draft.parentTaskId), milestoneId: draft.milestoneId });
         requestAnimationFrame(() => titleRef.current?.focus());
       } else {
@@ -543,8 +553,8 @@ export function TaskBoardHost({
     if (!moving || moving.status === "archived") return;
     await runFor(taskId, async () => {
       await taskBoardRepository.update(taskId, { status: "archived" });
-      // 归档目录默认折叠，不展开的话卡片只是从看板上消失，用户看不出落在哪里。
-      setCollapsedList((current) => ({ ...current, archived: false }));
+      // 归档后从普通列表消失，只有主动查看归档时才展示。
+      setCollapsedList((current) => ({ ...current, archived: true }));
       setNotice(`已归档「${moving.title}」，拖回任意列或右键「恢复到等待认领」即可恢复。`);
       await reload();
     });
@@ -563,9 +573,43 @@ export function TaskBoardHost({
 
   const selected = tasks.find((task) => task.id === selectedId) ?? null;
   const selectedChildren = selected ? tasks.filter((task) => task.parentTaskId === selected.id) : [];
-  const visible = filterIssues(tasks, query, filterWorkspaceId, filters);
-  const grouped = groupIssuesByStatus(visible);
   const archiveOpen = issueArchiveFolderOpen(collapsedList.archived, query, filters);
+  const visible = filterIssues(tasks, query, filterWorkspaceId, filters, archiveOpen);
+  const grouped = groupIssuesByStatus(visible);
+  const archiveCount = filterIssues(tasks, query, filterWorkspaceId, filters, true)
+    .filter((task) => task.status === "archived").length;
+  // 「清空归档」删的是当前项目范围内全部归档卡片，不受搜索和筛选影响，确认框按这个数量说话。
+  const archivePurgeScope = tasks.filter((task) => task.status === "archived"
+    && (!filterWorkspaceId || task.workspaceId === filterWorkspaceId)).length;
+  // 清空归档是硬删除，不可恢复；范围跟随当前项目筛选，服务端会跳过名下会话还在处理的卡片。
+  const [archivePurging, setArchivePurging] = React.useState(false);
+  const purgeArchive = React.useCallback(async (): Promise<void> => {
+    const answer = await wandOverlay.dialog({
+      title: `永久删除 ${archivePurgeScope} 个归档任务？`,
+      description: "归档卡片会被彻底删除，无法恢复；仍在运行的会话名下的任务会被跳过。",
+      actions: [
+        { label: "取消", value: false, autoFocus: true },
+        { label: "永久删除", value: true, kind: "danger" },
+      ],
+    });
+    if (answer.dismissed === true || answer.action !== true) return;
+    if (mutationPending.current) return;
+    mutationPending.current = true;
+    setArchivePurging(true);
+    setError("");
+    try {
+      const result = await taskBoardRepository.purgeArchived(filterWorkspaceId || null);
+      setNotice(result.skipped > 0
+        ? `已删除 ${result.deleted} 个归档任务，${result.skipped} 个仍在处理已跳过。`
+        : `已删除 ${result.deleted} 个归档任务。`);
+      await reload();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "无法清空归档任务。");
+    } finally {
+      mutationPending.current = false;
+      setArchivePurging(false);
+    }
+  }, [archivePurgeScope, filterWorkspaceId, reload]);
   const workspaceOptions = issueWorkspaceOptions(workspaces);
   const createParentOptions = issueParentOptions(tasks, draft.workspaceId || undefined, null, draft.parentTaskId);
   const projectName = filterWorkspaceId
@@ -578,6 +622,10 @@ export function TaskBoardHost({
   const contextTask = contextMenu ? tasks.find((task) => task.id === contextMenu.taskId) ?? null : null;
   const filterActive = issueFilterCount(filters) > 0;
   // 新建对话框与「处理中」列保持一致：只有会立刻指派时才展示指派控件。
+  // 无指派派工：不指定员工/团队，由本机决策模型给建议名单后再确认开工。
+  // 服务端自己建卡 + 建临时团队 + 起 run，所以这条路径不创建本地任务，也不派 CLI。
+  const [dispatchSelected, setDispatchSelected] = React.useState(false);
+  const dispatchFlow = useTeamDispatchFlow();
   const createDispatches = issueCreateDispatches(draft.status);
   const createTeam = createDispatches ? teams?.find((team) => team.id === teamTarget) ?? null : null;
   const createEmployee = createDispatches ? employees.find((employee) => employee.id === employeeTarget) ?? null : null;
@@ -663,6 +711,7 @@ export function TaskBoardHost({
     const parent = tasks.find((item) => item.id === task.parentTaskId);
     const childCount = tasks.filter((item) => item.parentTaskId === task.id).length;
     const expanded = expandedTaskId === task.id;
+    // 拖拽所有权留在原生 article；表面和展开内容由 Ant 组件管理。
     return <article
       key={task.id}
       className={classNames(
@@ -715,23 +764,23 @@ export function TaskBoardHost({
         setContextMenu({ taskId: task.id, x: event.clientX, y: event.clientY });
       }}
     >
-      <button
+      <Card size="small" styles={{ body: { padding: 12 } }} loading={busy}>
+      <Flex vertical gap="small">
+      <WandButton kind="ghost"
         type="button"
         ref={bindCardTrigger(task.id)}
         className="task-board-card-open"
+        style={{ height: "auto", width: "100%", justifyContent: "flex-start", whiteSpace: "normal", textAlign: "left" }}
         aria-expanded={expanded}
         aria-controls={`task-card-detail-${task.id}`}
         aria-label={`${expanded ? "收起" : "展开"} ${task.identifier}: ${task.title}`}
         onClick={() => setExpandedTaskId((current) => current === task.id ? "" : task.id)}
-      />
-      <div className="task-board-card-topline">
-        <h3 id={`task-${task.id}-title`}>{task.title || "未命名任务"}</h3>
-      </div>
+      ><Typography.Text strong id={`task-${task.id}-title`}>{task.title || "未命名任务"}</Typography.Text></WandButton>
       {display.body && task.description && task.sessions.length === 0 && !task.agent
         ? <p className="task-board-card-body">{task.description}</p>
         : null}
       <TaskBoardProgressRow task={task}/>
-      <div className="task-board-card-meta" aria-label="任务属性">
+      <Flex wrap gap={4} align="center" className="task-board-card-meta" aria-label="任务属性">
         <span className="task-board-card-id">{task.identifier}</span>
         {parent && <span className="task-board-chip is-parent" title={`归属 ${parent.identifier} · ${parent.title}`}>
           ↳ {parent.identifier}
@@ -751,19 +800,19 @@ export function TaskBoardHost({
         {task.status !== "doing"
           ? <TaskBoardConversationButton sessions={task.sessions} onOpen={onOpenSession}/>
           : null}
-      </div>
-      {sessionDropTarget === task.id && <p className="workspace-task-drop-hint">移入此任务 · 运行目录不变</p>}
-      {task.sessions.length > 0 && <div className="task-board-session-list" aria-label={`${task.title} 的会话`}>
-        {task.sessions.map((session) => <div key={session.id} className="task-board-session-row"
+      </Flex>
+      {sessionDropTarget === task.id && <Alert type="info" showIcon title="移入此任务 · 运行目录不变"/>}
+      {task.sessions.length > 0 && <Flex vertical gap={4} className="task-board-session-list" style={{ display: expanded ? "none" : undefined }} aria-label={`${task.title} 的会话`}>
+        {task.sessions.map((session) => <Flex key={session.id} align="center" justify="space-between" gap={4} className="task-board-session-row" style={{ minWidth: 0 }}
           data-session-id={session.id} draggable={!busy}
           onDragStart={(event) => { event.stopPropagation(); startSessionDrag(event.dataTransfer, session.id); }}>
-          <button type="button" className="task-board-session-open" title={`${session.title}\n${session.cwd}`}
+          <WandButton kind="ghost" type="button" className="task-board-session-open" style={{ flex: 1, minWidth: 0, justifyContent: "flex-start" }} title={`${session.title}\n${session.cwd}`}
             onClick={() => onOpenSession?.(session.id)}>
-            <WandIcon name="terminal" size={13}/><span>{session.title || session.provider || "CLI 会话"}</span>
-          </button>
+            <WandIcon name="terminal" size={13}/><Typography.Text ellipsis style={{ flex: 1, minWidth: 0, textAlign: "left" }}>{session.title || session.provider || "CLI 会话"}</Typography.Text>
+          </WandButton>
           <SessionMoveButton sessionId={session.id} taskId={task.workspaceTaskId ?? undefined}/>
-        </div>)}
-      </div>}
+        </Flex>)}
+      </Flex>}
       {task.status === "doing"
         ? <TaskBoardProcessingRow task={task} onOpenSession={onOpenSession}/>
         : null}
@@ -776,6 +825,7 @@ export function TaskBoardHost({
         onCollapse={() => setExpandedTaskId("")}
         onOpenSession={onOpenSession}
       />
+      </Flex></Card>
     </article>;
   };
 
@@ -785,6 +835,7 @@ export function TaskBoardHost({
     return <section
       key={status}
       className={classNames("task-board-column", `is-${status}`, dropStatus === status && "is-drop-target")}
+      style={{ flex: "1 0 280px", minWidth: 0, maxWidth: 420 }}
       aria-labelledby={`column-${status}`}
       onDragEnter={(event) => { if (!isSessionDrag(event.dataTransfer)) setDropStatus(status); }}
       onDragOver={(event) => {
@@ -805,11 +856,11 @@ export function TaskBoardHost({
         if (id) void dropTask(status, id);
       }}
     >
-      <header className="task-board-column-head">
-        <div className="task-board-column-heading">
+      <Flex component="header" align="center" justify="space-between" gap="small" className="task-board-column-head">
+        <Flex align="center" gap="small" className="task-board-column-heading">
           <TaskBoardStatusGlyph status={status}/>
-          <h2 id={`column-${status}`}>{column.label}{items.length > 0 ? ` ${items.length}` : ""}</h2>
-        </div>
+          <Typography.Title level={5} id={`column-${status}`} style={{ margin: 0 }}>{column.label}{items.length > 0 ? ` ${items.length}` : ""}</Typography.Title>
+        </Flex>
         <div className="task-board-column-actions">
           <WandIconButton
             className="task-board-icon-button"
@@ -820,67 +871,25 @@ export function TaskBoardHost({
             <WandIcon name="plus"/>
           </WandIconButton>
         </div>
-      </header>
-      <div className="task-board-column-list">
+      </Flex>
+      <Flex vertical gap="small" className="task-board-column-list">
         {loading && tasks.length === 0
           ? <>
               <WandSkeleton className="task-board-skeleton"/>
               <WandSkeleton className="task-board-skeleton"/>
             </>
           : null}
-        {!loading && items.length === 0 && !(status === "done" && grouped.archived.length > 0) && <p className="task-board-column-empty">{column.empty}</p>}
+        {!loading && items.length === 0 && <p className="task-board-column-empty">{column.empty}</p>}
         {items.map(renderCard)}
-        {status === "done" ? (
-          <div
-            className={classNames(
-              "task-board-archive-zone",
-              draggedId && "is-dragging-task",
-              archiveDrop && "is-over",
-            )}
-            aria-label="归档区"
-            onDragOver={(event) => {
-              if (!isTaskDrag(event.dataTransfer)) return;
-              event.preventDefault();
-              event.stopPropagation();
-              event.dataTransfer.dropEffect = "move";
-              setArchiveDrop(true);
-            }}
-            onDragLeave={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setArchiveDrop(false);
-            }}
-            onDrop={(event) => {
-              if (!isTaskDrag(event.dataTransfer)) return;
-              event.preventDefault();
-              event.stopPropagation();
-              setArchiveDrop(false);
-              setDraggedId("");
-              setDropStatus("");
-              const id = event.dataTransfer.getData(TASK_DRAG_TYPE);
-              if (id) void archiveCard(id);
-            }}
-          >
-            <TaskBoardArchiveFolder
-              count={grouped.archived.length}
-              open={archiveOpen}
-              onToggle={() => setCollapsedList((current) => ({ ...current, archived: !current.archived }))}
-            >
-              <div className="task-board-archive-cards">
-                {grouped.archived.map(renderCard)}
-              </div>
-            </TaskBoardArchiveFolder>
-            <p className="task-board-archive-hint">
-              <WandIcon name="archive" size={12}/>
-              {archiveDrop ? "松开鼠标，归档此任务" : "拖到这里归档：侧栏隐藏，终端与记录保留"}
-            </p>
-          </div>
-        ) : null}
-      </div>
+
+      </Flex>
     </section>;
   };
 
-  return <section className="task-board-native-page" aria-label="任务管理">
-    <header className="task-board-workspace-header">
-      <div className="task-board-kicker">
+  return <Flex component="section" vertical gap="middle" className="task-board-native-page" aria-label="任务管理"
+    style={{ position: "absolute", inset: 0, zIndex: 8, overflow: "auto", padding: 16, background: "var(--bg-primary)", minWidth: 0 }}>
+    <Flex component="header" wrap align="center" justify="space-between" gap="small" className="task-board-workspace-header">
+      <Flex align="center" gap="small" className="task-board-kicker">
         {onOpenSidebar ? (
           <WandIconButton
             className="task-board-icon-button"
@@ -911,9 +920,8 @@ export function TaskBoardHost({
             <p>安排工作，跟进执行，确认结果。</p>
           </>}
         </div>
-      </div>
-
-      <div className="task-board-header-actions">
+      </Flex>
+      <Flex wrap gap="small" className="task-board-header-actions">
         {!selected && <>
           <WandButton kind="ghost" size="small" disabled={loading} onClick={() => void reload()} aria-label="刷新任务">
             <WandIcon name="refresh" slot="start"/>刷新
@@ -930,9 +938,9 @@ export function TaskBoardHost({
             <span>新建任务</span>
           </WandButton>
         </>}
-      </div>
-    </header>
-    {!selected && <div className="task-board-toolbar">
+      </Flex>
+    </Flex>
+    {!selected && <Flex wrap align="center" justify="space-between" gap="small" className="task-board-toolbar">
       {!selected && <WandStretchTabs
         className="task-board-view-tabs"
         ariaLabel="看板视图"
@@ -944,7 +952,7 @@ export function TaskBoardHost({
         }))}
       />}
 
-      <div className="task-board-toolbar-controls">
+      <Flex wrap align="center" gap="small" className="task-board-toolbar-controls">
         <WandSelect
           value={filterWorkspaceId || "__all__"}
           options={[{ value: "__all__", label: "所有目录" }, ...workspaces.map((workspace) => ({ value: workspace.id, label: workspace.name }))]}
@@ -960,16 +968,16 @@ export function TaskBoardHost({
             onChange={setFilters}
           />}
           {view === "board" && <TaskBoardDisplayMenu display={display} onChange={persistDisplay}/>}
-      </div>
-    </div>}
-    {!selected && <div className="task-board-result-summary" role="status">
+      </Flex>
+    </Flex>}
+    {!selected && <Flex wrap align="center" justify="space-between" gap="small" className="task-board-result-summary" role="status">
       <span>{loading ? "正在同步任务…" : `共 ${visible.length} 个任务`}{(query || filterActive || filterWorkspaceId) ? " · 已筛选" : ""}</span>
       {(query || filterActive || filterWorkspaceId) && <WandButton kind="ghost" size="small" onClick={() => {
         setQuery(""); setFilters(EMPTY_ISSUE_FILTERS); setFilterWorkspaceId(""); searchRef.current?.focus();
       }}>清除筛选</WandButton>}
-    </div>}
+    </Flex>}
 
-    {error && <div className="task-board-native-banner is-error" role="alert"><span>{error}</span><WandButton kind="ghost" size="small" disabled={loading} onClick={() => void reload()}>重新加载</WandButton></div>}
+    {error && <Alert type="error" role="alert" showIcon title={error} action={<WandButton kind="ghost" size="small" disabled={loading} onClick={() => void reload()}>重新加载</WandButton>}/>}
 
     {selected ? <IssueDetail
       task={selected}
@@ -1019,8 +1027,11 @@ export function TaskBoardHost({
       allTasks={tasks}
       collapsed={collapsedList}
       archiveOpen={archiveOpen}
+      archiveCount={archiveCount}
       onToggle={(status) => setCollapsedList((current) => ({ ...current, [status]: !current[status] }))}
       onToggleArchive={() => setCollapsedList((current) => ({ ...current, archived: !current.archived }))}
+      onPurgeArchive={() => void purgeArchive()}
+      archivePurging={archivePurging}
       onOpen={setSelectedId}
       onOpenSession={onOpenSession}
     /> : view === "gantt" ? <TaskBoardGantt
@@ -1030,16 +1041,62 @@ export function TaskBoardHost({
       onZoom={setGanttZoom}
       onHideCompleted={setGanttHideCompleted}
       onOpen={setSelectedId}
-    /> : <div className={classNames("task-board-layout", otherColumns.length > 0 && "has-other-tasks")}>
-      <div className="task-board-scroll">
-        <div className="task-board-board" style={{ "--main-column-count": Math.max(mainColumns.length, 1) } as React.CSSProperties}>
+    /> : <Flex vertical gap="middle" className={classNames("task-board-layout", otherColumns.length > 0 && "has-other-tasks")}>
+      <div className="task-board-scroll" style={{ overflowX: "auto", minWidth: 0 }}>
+        <Flex gap="middle" align="stretch" className="task-board-board" style={{ minWidth: Math.max(mainColumns.length, 1) * 280 }}>
           {mainColumns.map((column) => renderColumn(column.status))}
-        </div>
+        </Flex>
       </div>
-      {otherColumns.length > 0 && <aside className="task-board-other" aria-label="其他任务">
+      {otherColumns.length > 0 && <Flex component="aside" wrap gap="middle" className="task-board-other" aria-label="其他任务">
         {otherColumns.map((column) => renderColumn(column.status))}
-      </aside>}
-    </div>}
+      </Flex>}
+      {archiveCount > 0 || draggedId ? (
+        <Card size="small"
+          styles={{ body: { padding: 12 } }}
+          style={{ marginTop: 12, borderColor: archiveDrop ? "var(--accent)" : undefined }}
+          className={classNames(
+            "task-board-archive-zone",
+            draggedId && "is-dragging-task",
+            archiveDrop && "is-over",
+          )}
+          aria-label="归档区"
+          onDragOver={(event) => {
+            if (!isTaskDrag(event.dataTransfer)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            event.dataTransfer.dropEffect = "move";
+            setArchiveDrop(true);
+          }}
+          onDragLeave={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setArchiveDrop(false);
+          }}
+          onDrop={(event) => {
+            if (!isTaskDrag(event.dataTransfer)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            setArchiveDrop(false);
+            setDraggedId("");
+            setDropStatus("");
+            const id = event.dataTransfer.getData(TASK_DRAG_TYPE);
+            if (id) void archiveCard(id);
+          }}
+        >
+          <TaskBoardArchiveFolder
+            count={archiveCount}
+            open={archiveOpen}
+            onPurge={() => void purgeArchive()}
+            purging={archivePurging}
+            onToggle={() => setCollapsedList((current) => ({ ...current, archived: !current.archived }))}
+          >
+            <div className="task-board-archive-cards">
+              {grouped.archived.map(renderCard)}
+            </div>
+          </TaskBoardArchiveFolder>
+          {draggedId ? <Alert className="task-board-archive-hint" type={archiveDrop ? "info" : "warning"} showIcon
+            title={archiveDrop ? "松开鼠标，归档此任务" : "拖到这里归档：侧栏隐藏，终端与记录保留"}/> : null}
+        </Card>
+      ) : null}
+    </Flex>}
 
     {contextTask && contextMenu && <TaskBoardContextMenu
       x={contextMenu.x}
@@ -1073,11 +1130,7 @@ export function TaskBoardHost({
     <WandDialogSurface
       open={createOpen}
       title="新建任务"
-      className={classNames("wand-ui-dialog-content", "task-board-create-dialog", createExpanded && "is-expanded")}
-      overlayClassName="wand-ui-dialog-overlay task-board-create-overlay"
-      titleClassName="task-board-create-title"
-      descriptionClassName="task-board-create-description"
-      headerClassName="task-board-create-heading"
+      className={classNames("wand-ui-dialog-content", "wand-task-library-dialog task-board-create-library-dialog", createExpanded && "is-expanded")}
       description={createDispatches
         ? "描述要完成的工作，创建后交给所选工具执行。"
         : "先记录要做的事，准备好后再从任务详情启动执行。"}
@@ -1088,22 +1141,35 @@ export function TaskBoardHost({
         if (!open) void closeCreate();
       }}
     >
-      <form noValidate
+      <TaskForm noValidate
         aria-busy={busyId === "__create__"}
         className="task-board-create-form task-board-native-composer"
         onSubmit={(event) => {
           event.preventDefault();
+          if (dispatchSelected) {
+            // 派工由服务端建卡 + 起 run：同一个按钮先选人、再确认开工。
+            void (dispatchFlow.hasPlan
+              ? dispatchFlow.startNow(draft.workspaceId, draft.description).then((started) => {
+                if (started) {
+                  setDispatchSelected(false);
+                  dispatchFlow.resetResults();
+                  closeCreate();
+                  const chatId = started.run?.chatSessionId;
+                  if (chatId) onOpenSession?.(chatId);
+                  else setNotice(`已开工（任务 ${started.taskId}），可在任务详情里查看团队运行。`);
+                }
+              })
+              : dispatchFlow.planNow(draft.description));
+            return;
+          }
           void createTask();
         }}
       >
-        <div className="task-board-create-writing">
+        <Flex vertical gap="small" className="task-board-create-writing">
           {/* 标题是可选字段：留空就按描述自动生成，所以这里刻意做得比描述框更轻。 */}
-          <div className="task-board-create-title-field">
-            <span className="task-board-create-title-label" id="task-board-create-title-label">
-              任务标题
-              <em>可选</em>
-            </span>
-            <textarea
+          <Form.Item label={<span id="task-board-create-title-label">任务标题 <Typography.Text type="secondary">可选</Typography.Text></span>} className="task-board-create-title-field">
+
+            <TaskTextArea
               ref={titleRef}
               className="resize-none task-board-create-title-input"
               rows={1}
@@ -1117,8 +1183,8 @@ export function TaskBoardHost({
                 setDraft((current) => ({ ...current, title: value }));
               }}
             />
-          </div>
-          <textarea
+          </Form.Item>
+          <TaskTextArea
             className="resize-none task-board-create-body-input"
             rows={4}
             value={draft.description}
@@ -1131,9 +1197,9 @@ export function TaskBoardHost({
               setDraft((current) => ({ ...current, description: value }));
             }}
           />
-        </div>
-        <div className="task-board-create-meta">
-          <div className="task-board-create-properties" aria-label="任务属性">
+        </Flex>
+        <Flex vertical gap="middle" className="task-board-create-meta">
+          <Flex wrap gap="small" align="center" className="task-board-create-properties" aria-label="任务属性">
             <WandSelect
               value={issueWorkspaceSelectValue(draft.workspaceId)}
               options={workspaceOptions}
@@ -1186,13 +1252,11 @@ export function TaskBoardHost({
             />
             <label className="task-board-create-chip">
               <span>截止日期</span>
-              <input
-                type="date"
+              <TaskDatePicker
+                ariaLabel="截止日期"
                 value={draft.dueDate}
-                onChange={(event) => {
-                  const value = event.currentTarget.value;
-                  setDraft((current) => ({ ...current, dueDate: value }));
-                }}
+                popupOwner="task-board-create"
+                onValueChange={(dueDate) => setDraft((current) => ({ ...current, dueDate }))}
               />
             </label>
             <MilestonePicker
@@ -1202,7 +1266,7 @@ export function TaskBoardHost({
             />
             <label className="task-board-create-chip is-grow">
               <span>标签</span>
-              <input
+              <WandInput
                 type="text"
                 value={draft.labels}
                 placeholder="用逗号分隔"
@@ -1212,22 +1276,40 @@ export function TaskBoardHost({
                 }}
               />
             </label>
-          </div>
+          </Flex>
 
           {/* 运行模式必须始终可选：只创建的任务也要把工作模式记进全局默认，
               否则下次派发会退回标准模式，Agent 反过来「改不了东西」。 */}
-          <div className="task-board-create-assign" aria-label={createDispatches ? "第一次指派" : "Agent 与运行模式"}>
-            <div className="task-board-create-assign-copy">
+          <Card size="small" className="task-board-create-assign" aria-label={createDispatches ? "第一次指派" : "Agent 与运行模式"}>
+            <Flex vertical gap={4} className="task-board-create-assign-copy" style={{ marginBottom: 12 }}>
               <strong>{createDispatches ? "第一次指派" : "Agent 与运行模式"}</strong>
-              <span>{createTeam ? "有描述时会立刻交给团队，由负责人拆解分派" : createEmployee ? "有描述时会立刻交给员工" : createDispatches ? "有描述时会立刻发给所选 CLI" : "会记入全局默认，之后派发沿用"}</span>
-            </div>
-            <div className="task-board-create-assign-controls">
+              <span>{dispatchSelected
+                ? "不指派员工：本机决策模型给建议名单，确认后才开工"
+                : createTeam ? "有描述时会立刻交给团队，由负责人拆解分派"
+                : createEmployee ? "有描述时会立刻交给员工"
+                : createDispatches ? "有描述时会立刻发给所选 CLI" : "会记入全局默认，之后派发沿用"}</span>
+            </Flex>
+            <Flex wrap gap="small" className="task-board-create-assign-controls">
               {providerOptions ? <WandSelect
-                value={createEmployee ? `employee:${createEmployee.id}` : createTeam ? `team:${createTeam.id}` : draft.agent.provider}
-                options={createDispatches ? agentTargetOptions(providerOptions, teams, employees) : providerOptions}
+                value={dispatchSelected ? DISPATCH_VALUE
+                  : createEmployee ? `employee:${createEmployee.id}`
+                  : createTeam ? `team:${createTeam.id}` : draft.agent.provider}
+                options={createDispatches
+                  ? agentTargetOptions(providerOptions, teams, employees, { includeDispatch: true })
+                  : providerOptions}
                 ariaLabel="第一次指派给谁"
                 className="task-board-native-select"
                 onValueChange={(value) => {
+                  if (agentTargetIsDispatch(value)) {
+                    setTeamTarget("");
+                    setEmployeeTarget("");
+                    dispatchFlow.resetResults();
+                    setDispatchSelected(true);
+                    setDraft((current) => ({ ...current, agent: { ...current.agent, kind: "structured" } }));
+                    return;
+                  }
+                  setDispatchSelected(false);
+                  dispatchFlow.resetResults();
                   const nextTeam = agentTargetTeamId(value);
                   const nextEmployee = agentTargetEmployeeId(value);
                   setTeamTarget(nextTeam);
@@ -1242,7 +1324,7 @@ export function TaskBoardHost({
                   }));
                 }}
               /> : <span role="status">正在加载工具列表…</span>}
-              {createTeam || createEmployee ? null : <>
+              {createTeam || createEmployee || dispatchSelected ? null : <>
               <WandSelect
                 value={draft.agent.model}
                 options={issueAgentModelOptions(catalog, draft.agent.provider)}
@@ -1275,11 +1357,22 @@ export function TaskBoardHost({
                 }}
               />
               </>}
-            </div>
-          </div>
-        </div>
-        {error && <p className="task-board-native-banner is-error" role="alert">{error}</p>}
-        <div className="task-board-create-footer">
+            </Flex>
+            {dispatchSelected ? <div className="task-board-create-dispatch">
+              <TeamDispatchRoster
+                flow={dispatchFlow}
+                blockedReason={dispatchStartBlockedReason({
+                  selection: dispatchFlow.selection,
+                  workspaceId: draft.workspaceId,
+                  note: draft.description,
+                  busy: dispatchFlow.busy,
+                })}
+              />
+            </div> : null}
+          </Card>
+        </Flex>
+        {error && <Alert type="error" role="alert" showIcon title={error}/>}
+        <Flex wrap gap="small" align="center" justify="space-between" className="task-board-create-footer" style={{ marginTop: 16 }}>
           <WandSwitch
             checked={createMore}
             onCheckedChange={setCreateMore}
@@ -1293,18 +1386,29 @@ export function TaskBoardHost({
           >
             <WandIcon name={createExpanded ? "chevron" : "up"}/>
           </WandIconButton>
-          <WandButton
+          {dispatchSelected ? <div className="task-board-create-submit-slot">
+            <TeamDispatchActionButton
+              flow={dispatchFlow}
+              canPlan={draft.description.trim().length > 0}
+              blockedReason={dispatchStartBlockedReason({
+                selection: dispatchFlow.selection,
+                workspaceId: draft.workspaceId,
+                note: draft.description,
+                busy: dispatchFlow.busy,
+              })}
+            />
+          </div> : <WandButton
             kind="primary"
             type="submit"
             className="task-board-create-submit"
             disabled={(!draft.title.trim() && !draft.description.trim()) || busyId === "__create__"}
           >
             {busyId === "__create__" ? "正在保存…" : createDispatches && draft.description.trim() ? "创建并指派" : "创建任务"}
-          </WandButton>
-        </div>
-      </form>
+          </WandButton>}
+        </Flex>
+      </TaskForm>
     </WandDialogSurface>
-  </section>;
+  </Flex>;
 }
 
 function IssueDetail({
@@ -1398,14 +1502,14 @@ function IssueDetail({
     setComposePrompt("");
   }, [composeRequest, task.id]);
 
-  return <div className="task-board-detail" aria-label="任务详情">
+  return <Flex vertical gap="middle" className="task-board-detail" aria-label="任务详情">
     <div className="task-board-detail-scroll">
-      <div className="task-board-detail-layout">
-        <div className="task-board-detail-main">
-          {parent && <button className="task-board-parent-link" type="button" onClick={() => onOpenTask(parent.id)}>
+      <Flex wrap gap="middle" className="task-board-detail-layout">
+        <Flex vertical gap="middle" className="task-board-detail-main" style={{ flex: "2 1 380px", minWidth: 0 }}>
+          {parent && <WandButton kind="ghost" className="task-board-parent-link" type="button" onClick={() => onOpenTask(parent.id)}>
             ↳ 归属 {parent.identifier} · {parent.title}
-          </button>}
-          <textarea
+          </WandButton>}
+          <TaskTextArea
             className="resize-none task-board-detail-title"
             rows={1}
             value={title}
@@ -1433,18 +1537,18 @@ function IssueDetail({
                 <WandIcon name="plus" size={14} slot="start"/>派发子任务
               </WandButton>}
             </div>
-            {children.map((child) => <button key={child.id} type="button" className="task-board-child-row" onClick={() => onOpenTask(child.id)}>
+            {children.map((child) => <WandButton kind="ghost" key={child.id} type="button" className="task-board-child-row" onClick={() => onOpenTask(child.id)}>
               <TaskBoardStatusGlyph status={child.status}/>
               <span>{child.title}</span>
               <small>{child.identifier}</small>
-            </button>)}
+            </WandButton>)}
           </section>}
-          {composeOpen ? <section className="task-board-native-assign" aria-label="指派 Agent">
-            <div className="task-board-native-assign-head">
+          {composeOpen ? <Card size="small" className="task-board-native-assign" aria-label="指派 Agent">
+            <Flex vertical gap={4} className="task-board-native-assign-head" style={{ marginBottom: 12 }}>
               <strong>{task.sessions.length > 0 ? "再指派一个 Agent" : "指派 Agent"}</strong>
               <small>先输入提示词，再选员工、团队或 CLI</small>
-            </div>
-            <textarea
+            </Flex>
+            <TaskTextArea
               className="resize-none task-board-detail-body"
               rows={5}
               value={composePrompt}
@@ -1460,7 +1564,7 @@ function IssueDetail({
                 setComposePrompt(value);
               }}
             />
-            <div className="task-board-native-editor-grid is-assign">
+            <Flex wrap gap="middle" className="task-board-native-editor-grid is-assign" style={{ marginTop: 12 }}>
               <AgentFields
                 agent={agent}
                 catalog={catalog}
@@ -1475,7 +1579,7 @@ function IssueDetail({
                 onEmployeeChange={onEmployeeChange}
                 onChange={onAgentChange}
               />
-            </div>
+            </Flex>
             <div className="task-board-native-editor-actions">
               {task.sessions.length > 0 ? <WandButton kind="ghost" size="small" disabled={busy} onClick={() => setComposeOpen(false)}>取消</WandButton> : null}
               <WandButton
@@ -1489,7 +1593,7 @@ function IssueDetail({
                 {busy ? "正在派发…" : teams?.some((team) => team.id === teamId) ? "交给团队" : employeeId ? "交给员工" : "派发 CLI"}
               </WandButton>
             </div>
-          </section> : <button
+          </Card> : <WandButton kind="ghost"
             type="button"
             className="task-board-agent-add"
             aria-label="再指派一个 Agent"
@@ -1500,11 +1604,11 @@ function IssueDetail({
             }}
           >
             <WandIcon name="plus" size={16}/>
-          </button>}
+          </WandButton>}
           <TaskTeamRunPanel taskId={task.id} refreshKey={teamRunRefresh} onOpenSession={onOpenSession}/>
-        </div>
-        <aside className="task-board-detail-properties" aria-label="属性">
-          <h2>属性</h2>
+        </Flex>
+        <Card size="small" title="属性" className="task-board-detail-properties" aria-label="属性" style={{ flex: "1 1 260px", minWidth: 0 }}>
+          <Form component={false} layout="vertical">
           <IssueField label="状态">
             <WandSelect
               value={task.status}
@@ -1563,19 +1667,16 @@ function IssueDetail({
             />
           </IssueField>
           <IssueField label="截止日期">
-            <input
-              type="date"
+            <TaskDatePicker
+              ariaLabel="任务截止日期"
               className="task-board-detail-date"
               value={task.dueDate ?? ""}
               disabled={busy}
-              onChange={(event) => {
-                const value = event.currentTarget.value;
-                onPatch({ dueDate: value || null });
-              }}
+              onValueChange={(value) => onPatch({ dueDate: value || null })}
             />
           </IssueField>
           <IssueField label="标签">
-            <input
+            <WandInput
               type="text"
               className="task-board-detail-date"
               value={labelDraft}
@@ -1598,8 +1699,9 @@ function IssueDetail({
           <div className="task-board-native-editor-actions">
             <WandButton kind="danger" size="small" className="task-board-native-remove" disabled={busy} onClick={onRemove}>归档</WandButton>
           </div>
-        </aside>
-      </div>
+          </Form>
+        </Card>
+      </Flex>
     </div>
-  </div>;
+  </Flex>;
 }

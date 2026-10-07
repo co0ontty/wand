@@ -1,3 +1,9 @@
+import { type OpenRouterFreeModelsService } from "./openrouter-free-models.js";
+import { defaultModelGroupSelector, isAutoAssignSelector, resolveModelGroupModels } from "./model-groups.js";
+import { resolveAutoAssign } from "./model-auto-assign.js";
+import { withModelGroups } from "./model-group-runner.js";
+import { classifyStructuredFailure, hasStructuredExecutionProgress, type StructuredFailure } from "./structured-failure.js";
+import { withAutomaticPiResources } from "./pi-auto-resources.js";
 import { randomUUID } from "node:crypto";
 
 import { prepareSessionWorktree, type WorktreeSetupSpec } from "./git-worktree.js";
@@ -6,7 +12,7 @@ import { SessionLogger } from "./session-logger.js";
 import { WandStorage } from "./storage.js";
 import {
   CardExpandDefaults, ContentBlock, ConversationTurn, EscalationRequest, EscalationScope,
-  ExecutionMode, ProcessEvent, SessionProvider, SessionRunner, SessionSnapshot, SessionSource, StructuredSessionState,
+  ExecutionMode, HarnessSessionContext, ProcessEvent, SessionProvider, SessionRunner, SessionSnapshot, SessionSource, StructuredSessionState,
   WandConfig,
 } from "./types.js";
 import { truncateMessagesForTransport } from "./message-truncator.js";
@@ -17,6 +23,11 @@ import { getDefaultModelForProvider } from "./config.js";
 import type { WandTaskAgent } from "./task-types.js";
 import { recordIterationPrompt } from "./iteration-log.js";
 import { startEmployeeKnowledgeRunner } from "./employee-knowledge.js";
+import { CoreRunner } from "./core-runner.js";
+import { CoreTurnTracker } from "./core-turn-tracker.js";
+import type { CoreStatus } from "./core-status-cli.js";
+import { coreHarnessAgentDir, resolveHarnessEngineSync, type EngineResolution } from "./harness-engine.js";
+import { cliPiSettingsRejection, defaultPiCliSessionSettings, defaultPiSessionSettings, patchPiSessionSettings, type PiSessionSettings } from "./pi-session-settings.js";
 import { withDecisionAccess, type DecisionRuntimeAccess } from "./decision-runner.js";
 import { signalNameFromNumber } from "./signal-utils.js";
 import {
@@ -61,19 +72,26 @@ import {
   type StructuredExecHost,
   type StructuredRunState,
 } from "./structured-exec-host.js";
-import type { StructuredRunnerAdapter, StructuredRunnerExecution, StructuredRunnerTurnState } from "./structured-runner.js";
+import type { StructuredCompactionNotice, StructuredRunnerAdapter, StructuredRunnerExecution, StructuredRunnerResult, StructuredRunnerTurnState } from "./structured-runner.js";
 import {
   defaultStructuredRunner,
   defaultStructuredState,
   isStructuredRunnerForProvider,
   normalizeThinkingEffort,
+  normalizeTurnAnchors,
   resolveStructuredRunner,
 } from "./structured-provider-common.js";
+import { TurnQuietHeartbeat } from "./turn-heartbeat.js";
 import { enrichStructuredMessages, WAND_PROTOCOL_VERSION } from "./structured-client-protocol.js";
 import { RETENTION_IDLE_MS } from "./retention.js";
 
 
 export interface StructuredSessionManagerRunners {
+  /**
+   * 宿主注入的执行器。注入 `pi` 视作钉死 CLI 引擎（`auto` 不覆盖）；
+   * 注入 `core` 则视为宿主提供了进程内 harness 能力。
+   */
+  core?: StructuredRunnerAdapter;
   claudeCli?: StructuredRunnerAdapter;
   codex?: StructuredRunnerAdapter;
   opencode?: StructuredRunnerAdapter;
@@ -84,6 +102,7 @@ export interface StructuredSessionManagerRunners {
 }
 
 interface CreateStructuredSessionOptions {
+  title?: string;
   cwd: string;
   mode: ExecutionMode;
   provider?: SessionProvider;
@@ -129,12 +148,15 @@ class PersistedStructuredRunnerError extends Error {
   }
 }
 
-/** The child process never started, so retrying the same input with another CLI cannot duplicate work. */
-class UnacceptedStructuredSpawnError extends Error {
-  constructor(message: string) {
+/** Runner-owned refusal facts, never inferred by schedulers from a displayed error. */
+class UnacceptedStructuredInputError extends Error {
+  readonly #state: StructuredRunnerTurnState;
+  constructor(message: string, readonly failure: StructuredFailure, state: StructuredRunnerTurnState) {
     super(message);
-    this.name = "UnacceptedStructuredSpawnError";
+    this.name = "UnacceptedStructuredInputError";
+    this.#state = state;
   }
+  get state(): StructuredRunnerTurnState { return this.#state; }
 }
 
 interface StreamingTurnState extends StructuredRunnerTurnState {}
@@ -149,7 +171,7 @@ interface ReplayProcessor {
   stopReason?: "ask-user-question";
   askUserQuestionDetected?: boolean;
   /** Feed one complete stdout line; returns true when turn state changed. */
-  feed(line: string): boolean;
+  feed(line: string, observedAt?: string): boolean;
 }
 
 function buildReplayProcessor(session: SessionSnapshot): ReplayProcessor {
@@ -212,7 +234,7 @@ function buildReplayProcessor(session: SessionSnapshot): ReplayProcessor {
     state,
     stderr: "",
     primaryError: null,
-    feed: (line) => {
+    feed: (line, observedAt) => {
       const trimmed = line.trim();
       if (!trimmed) return false;
       let event: Record<string, unknown>;
@@ -223,7 +245,7 @@ function buildReplayProcessor(session: SessionSnapshot): ReplayProcessor {
           ? applyOpenCodeEvent(state, event)
           : runner === "gemini-cli-json"
             ? applyGeminiEvent(state, event)
-            : applyPiEvent(state, event);
+            : applyPiEvent(state, event, observedAt);
       if (error) processor.primaryError = error;
       return true;
     },
@@ -494,6 +516,24 @@ function appendNoticeTurn(messages: ConversationTurn[] | undefined, turn: Conver
   return [...(messages ?? []), { ...turn, createdAt: isoNow(), completedAt: isoNow() }];
 }
 
+/** core 引擎的压缩通知 → 可持久化的会话上下文（历史不删，只记切点与摘要）。 */
+function compactionToSessionContext(notice: StructuredCompactionNotice): HarnessSessionContext {
+  return {
+    summary: notice.summary,
+    fromTurnIndex: notice.fromTurnIndex,
+    tokensBefore: notice.tokensBefore,
+    compactions: notice.compactions,
+  };
+}
+
+function cancelPendingResourceSelection(messages: ConversationTurn[] | undefined): ConversationTurn[] | undefined {
+  const last = messages?.at(-1);
+  if (!messages || last?.role !== "assistant" || last.resourceSelection?.status !== "selecting") return messages;
+  return [...messages.slice(0, -1), { ...last, completedAt: isoNow(), resourceSelection: {
+    ...last.resourceSelection, status: "cancelled", label: "本轮自动选择已取消",
+  } }];
+}
+
 function upsertAssistantMessage(
   messages: ConversationTurn[] | undefined,
   turn: ConversationTurn,
@@ -506,6 +546,8 @@ function upsertAssistantMessage(
   const createdAt = (last?.role === "assistant" ? last.createdAt : undefined) ?? turn.createdAt ?? observedAt;
   const next: ConversationTurn = {
     ...turn,
+    ...(turn.resourceSelection ? { resourceSelection: turn.resourceSelection }
+      : last?.role === "assistant" && last.resourceSelection ? { resourceSelection: last.resourceSelection } : {}),
     createdAt,
     content: stampNewToolUseTimes(
       turn.content, last?.role === "assistant" ? last.content : undefined, observedAt, stampNewTools,
@@ -524,8 +566,13 @@ export class StructuredSessionManager {
   private readonly pendingRunnerExecutions = new Map<string, Pick<StructuredRunnerExecution, "interrupt">>();
   // Server-only, one-shot execution UUIDs. Actual request lifecycle clears them; metadata updates do not.
   // Never persisted or included in session DTOs.
-  private readonly unacceptedTeamStarts = new Map<string, { requestId: string }>();
+  private readonly unacceptedTeamStarts = new Map<string, { requestId: string; failure: StructuredFailure }>();
   private readonly interruptedWith = new Map<string, string>();
+  /**
+   * 「智能分配」正在结算的会话：这段窗口内还没有 runner 归属，新输入必须排队而不是另起一轮。
+   * token.cancelled 由 stop / delete 置位，结算回来后不得再启动。
+   */
+  private readonly autoAssignPending = new Map<string, { cancelled: boolean }>();
   private readonly preserveQueueOnInterrupt = new Set<string>();
   /** Last wall-clock time (ms) a streaming checkpoint reached SQLite. */
   private readonly lastStreamSaveAt = new Map<string, number>();
@@ -542,6 +589,11 @@ export class StructuredSessionManager {
   private readonly relayHandlers = new Map<string, StructuredRelayHandler>();
   private emitEvent: ((event: ProcessEvent) => void) | null = null;
   private archiveTimer: NodeJS.Timeout | null = null;
+  /**
+   * 静默期心跳：回合在飞且连续 TURN_QUIET_HEARTBEAT_MS 没有任何事件时，用现有的
+   * status 事件重发一次权威快照（含最新 turn 锚点）。timer 只在 inFlight 期间存在。
+   */
+  private readonly turnHeartbeat = new TurnQuietHeartbeat((sessionId) => this.publishQuietHeartbeat(sessionId));
   private readonly topicCoordinator = new SessionTopicCoordinator();
   private readonly nativeTitles = new SessionNativeTitleTracker();
   private readonly streamEmitTimers = new Set<NodeJS.Timeout>();
@@ -551,6 +603,12 @@ export class StructuredSessionManager {
   private readonly grokRunner: StructuredRunnerAdapter;
   private readonly qoderRunner: StructuredRunnerAdapter;
   private readonly piRunner: StructuredRunnerAdapter;
+  /** 进程内 core 引擎供员工候选显式启用；普通 Pi 主功能不使用它。 */
+  private readonly coreRunner: StructuredRunnerAdapter;
+  /** 宿主是否显式注入了 pi 的 CLI runner / core runner，供系统级引擎状态使用。 */
+  private readonly piRunnerSupplied: boolean;
+  private readonly coreRunnerSupplied: boolean;
+  private coreRestartDrains = 0;
   private readonly geminiRunner: StructuredRunnerAdapter;
   /** Structured CLI runs that were mid-flight when the previous web process died. */
   private pendingRecoveryIds: string[] = [];
@@ -565,16 +623,28 @@ export class StructuredSessionManager {
     private readonly logger: SessionLogger | null = null,
     runners: StructuredSessionManagerRunners = {},
     private readonly execHost?: StructuredExecHost,
-    decisionRuntime: () => DecisionRuntimeAccess | null = () => null,
+    private readonly decisionRuntime: () => DecisionRuntimeAccess | null = () => null,
+    openRouter?: OpenRouterFreeModelsService,
+    /** 「智能分配」专用的本地决策入口：只有真正能跑时才注入，没注入则用系统员工回退。 */
+    private readonly autoAssignEvaluate: () => DecisionRuntimeAccess["evaluate"] = () => undefined,
   ) {
-    const wrap = (runner: StructuredRunnerAdapter): StructuredRunnerAdapter => withDecisionAccess(runner, storage, decisionRuntime);
+    const wrap = (runner: StructuredRunnerAdapter): StructuredRunnerAdapter =>
+      withModelGroups(withDecisionAccess(runner, storage, decisionRuntime), config);
     this.claudeCliRunner = wrap(runners.claudeCli ?? new ClaudeCliRunner({ language: () => this.config.language }, this.execHost));
     this.codexRunner = wrap(runners.codex ?? new CodexRunner(undefined, this.execHost));
     this.openCodeRunner = wrap(runners.opencode ?? new OpenCodeRunner(undefined, this.execHost));
     this.grokRunner = wrap(runners.grok ?? new GrokRunner(undefined, this.execHost));
     this.qoderRunner = wrap(runners.qoder ?? new QoderRunner(undefined, this.execHost));
-    this.piRunner = wrap(runners.pi ?? new PiRunner(undefined, this.execHost));
+    this.piRunner = wrap(withAutomaticPiResources(
+      runners.pi ?? new PiRunner(undefined, this.execHost, coreHarnessAgentDir(config.harness),
+        openRouter ? { storage, service: openRouter } : undefined), config,
+      { evaluate: () => this.decisionRuntime()?.evaluate }));
+    this.coreRunner = withModelGroups(runners.core ?? new CoreRunner({ config: this.config,
+      decisionAccess: decisionRuntime, openRouter }), config);
+    this.piRunnerSupplied = runners.pi !== undefined;
+    this.coreRunnerSupplied = runners.core !== undefined;
     this.geminiRunner = wrap(runners.gemini ?? new GeminiRunner(undefined, this.execHost));
+    // 能力探测放到 server 启动处 await（warmCoreHarness），这里不再另起预热。
     for (const snapshot of this.storage.loadSessions()) {
       if ((snapshot.sessionKind ?? "pty") !== "structured") continue;
       const restoredStatus = snapshot.status === "running" ? "idle" : snapshot.status;
@@ -587,7 +657,9 @@ export class StructuredSessionManager {
         ? storedRunner
         : defaultStructuredRunner(provider);
       const recoverableDetachedRun = snapshot.status === "running"
-        && this.execHost?.persistent === true;
+        && this.execHost?.persistent === true
+        // 进程内 core 回合不会比服务活得更久；重启后只能算中断，不能去 daemon 里领养。
+        && snapshot.structuredState?.engine !== "core";
       if (recoverableDetachedRun) this.pendingRecoveryIds.push(snapshot.id);
       const restored: SessionSnapshot = {
         ...snapshot,
@@ -603,6 +675,8 @@ export class StructuredSessionManager {
         pendingEscalation: null,
         permissionBlocked: false,
         structuredState: {
+          // 保留既有可读投影（engine / contextUsage / compactions / phase），只覆盖受管字段。
+          ...(snapshot.structuredState ?? {}),
           provider,
           runner,
           model: snapshot.structuredState?.model ?? snapshot.selectedModel ?? undefined,
@@ -613,6 +687,11 @@ export class StructuredSessionManager {
           activeRequestId: recoverableDetachedRun
             ? snapshot.structuredState?.activeRequestId ?? `recover-pending-${snapshot.id}`
             : null,
+          // 锚点跟着真实运行事实走：还能被 terminald 领养的回合保留重启前那一轮的起点
+          // （attach 成功后由 adoptTurn 重新挂静默心跳）；服务重启导致中断的回合降级为
+          // idle，锚点一并清 null，不伪造「还在跑」。
+          turnStartedAt: recoverableDetachedRun ? snapshot.structuredState?.turnStartedAt ?? null : null,
+          lastActivityAt: recoverableDetachedRun ? snapshot.structuredState?.lastActivityAt ?? null : null,
         },
         selectedModel: snapshot.selectedModel ?? null,
         titleGenerating: false,
@@ -650,11 +729,48 @@ export class StructuredSessionManager {
     this.emitEvent = emitEvent;
   }
 
+  getCoreTurnStatus(): CoreStatus {
+    const ids = new Set(CoreTurnTracker.getActiveTurnIds());
+    // Include manager-owned executions through their final durable checkpoint.
+    for (const [id] of this.pendingRunnerExecutions) {
+      if (this.sessions.get(id)?.structuredState?.engine === "core") ids.add(id);
+    }
+    const activeTurnCount = Math.max(CoreTurnTracker.getActiveTurnCount(), ids.size);
+    return { hasActiveTurns: activeTurnCount > 0, activeTurnCount, activeTurnIds: [...ids] };
+  }
+
+  /** Keep current turns running; new Pi inputs stay in the durable input queue. */
+  beginCoreRestartDrain(): () => void {
+    if (this.disposed) throw new Error("StructuredSessionManager has been disposed.");
+    this.coreRestartDrains += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.coreRestartDrains -= 1;
+      if (this.coreRestartDrains === 0) this.resumeQueuedPiMessages();
+    };
+  }
+
+  /** Resume accepted inputs after a cancelled drain or after a successful restart. */
+  resumeQueuedPiMessages(): void {
+    if (this.disposed || this.coreRestartDrains > 0) return;
+    for (const session of this.sessions.values()) {
+      if (session.provider === "pi" && session.status === "idle"
+        && !session.structuredState?.inFlight && !session.structuredState?.lastError
+        && (session.queuedMessages?.length ?? 0) > 0) {
+        setImmediate(() => { void this.flushNextQueuedMessage(session.id); });
+      }
+    }
+  }
+
   /** Stop every runner and flush terminal state before storage is closed. */
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
     this.unacceptedTeamStarts.clear();
+    // 静默心跳不跨服务关闭存活（会话级 timer 不允许泄漏）。
+    this.turnHeartbeat.dispose();
 
     if (this.archiveTimer) {
       clearInterval(this.archiveTimer);
@@ -682,13 +798,14 @@ export class StructuredSessionManager {
       if (detachSafe) continue;
       const cancelled: SessionSnapshot = {
         ...session,
+        messages: cancelPendingResourceSelection(session.messages),
         status: "idle",
         exitCode: null,
         endedAt: null,
         pendingEscalation: null,
         permissionBlocked: false,
         structuredState: {
-          ...(session.structuredState ?? defaultStructuredState(session.provider ?? "claude", session.runner)),
+          ...this.settleTurn(id, session.structuredState ?? defaultStructuredState(session.provider ?? "claude", session.runner)),
           inFlight: false,
           activeRequestId: null,
           lastError: null,
@@ -705,6 +822,8 @@ export class StructuredSessionManager {
     this.pendingRunnerExecutions.clear();
     this.interruptedWith.clear();
     this.preserveQueueOnInterrupt.clear();
+    for (const token of this.autoAssignPending.values()) token.cancelled = true;
+    this.autoAssignPending.clear();
     for (const timer of this.streamCheckpointTimers.values()) clearTimeout(timer);
     this.streamCheckpointTimers.clear();
     this.streamCheckpointDirty.clear();
@@ -772,7 +891,7 @@ export class StructuredSessionManager {
           exitCode: null,
           endedAt: null,
           structuredState: {
-            ...(session.structuredState as StructuredSessionState),
+            ...this.settleTurn(sessionId, session.structuredState as StructuredSessionState),
             inFlight: false,
             activeRequestId: null,
             lastError: "服务重启，上一轮已中断。",
@@ -836,12 +955,12 @@ export class StructuredSessionManager {
       status: "running",
       exitCode: null,
       endedAt: null,
-      structuredState: {
+      structuredState: this.adoptTurn(sessionId, {
         ...(snapshot.structuredState as StructuredSessionState),
         inFlight: true,
         activeRequestId: requestId,
         lastError: null,
-      },
+      }),
     };
     this.sessions.set(sessionId, resumed);
     this.saveAuthoritativeSession(resumed);
@@ -868,11 +987,11 @@ export class StructuredSessionManager {
     const syncTurn = (turnState: StructuredRunnerTurnState): void => {
       const current = this.currentSessionForRequest(sessionId, requestId);
       if (!current) return;
-      const structuredState = {
+      const structuredState = this.noteTurnActivity(sessionId, {
         ...(current.structuredState as StructuredSessionState),
         model: turnState.model ?? current.structuredState?.model,
         phase: turnState.phase ?? current.structuredState?.phase,
-      };
+      });
       if (replayTruncated) {
         // 锚点未定前（首轮 feed 中）只有半截 blocks，先只落元数据。
         if (!replayView.ready) {
@@ -936,7 +1055,7 @@ export class StructuredSessionManager {
     let lastStdoutSeq = initialState.stdoutSeq;
     let lastStderrSeq = initialState.stderrSeq;
     const feedLine = (line: string): void => {
-      onApplied(processor.feed(line));
+      onApplied(processor.feed(line, replayingHistory ? undefined : new Date().toISOString()));
     };
     const feedDelta = (text: string): void => {
       carry += text;
@@ -1105,7 +1224,7 @@ export class StructuredSessionManager {
       pendingEscalation: null,
       permissionBlocked: false,
       structuredState: {
-        ...(current.structuredState as StructuredSessionState),
+        ...this.settleTurn(sessionId, current.structuredState as StructuredSessionState),
         model: processor.state.model ?? current.structuredState?.model,
         inFlight: false,
         activeRequestId: null,
@@ -1260,9 +1379,11 @@ export class StructuredSessionManager {
     return updated;
   }
 
-  /** 归档 / 取消归档：只写标记并广播，不中断运行中的 run，也不删历史。 */
+  /** 归档会先停掉还在跑的回合，会话 ID 和 provider session id 都留着。 */
   setSessionArchived(id: string, archived: boolean): SessionSnapshot {
-    const current = this.requireSession(id);
+    const current = archived && this.requireSession(id).status === "running"
+      ? this.stop(id)
+      : this.requireSession(id);
     const archivedAt = archived ? new Date().toISOString() : null;
     const updated: SessionSnapshot = { ...current, archived, archivedAt };
     this.sessions.set(id, updated);
@@ -1387,10 +1508,22 @@ export class StructuredSessionManager {
       : null;
     const selectedModel = options.model?.trim() || null;
     const initialThinkingEffort = normalizeThinkingEffort(options.thinkingEffort);
+    const autoCompaction = this.config.harness?.compaction?.enabled ?? true;
+    // 员工 SDK 会话不静默继承用户的全局扩展，也不继承 CLI 专属的资源/CodeMode 默认。
+    const sdkEmployeeSession = provider === "pi"
+      && options.employeeCandidates?.[options.employeeCandidateIndex ?? 0]?.engine === "sdk";
+    // CLI Pi 会话从「上次设置」起步：用户在任一 Pi 会话改过的自动选择 / CodeMode / 资源选择
+    // 就是新会话的默认，不需要每开一个会话重配一次。autoCompaction 始终取当前配置。
+    const rememberedPiSettings = provider === "pi" && !sdkEmployeeSession ? this.storage.getPiSessionDefaults() : null;
     const snapshot: SessionSnapshot = {
       id,
+      // Pi 会话从创建起就带着自己的工具/功能安排：面板显示的设置与首轮真实启动参数必须一致。
+      ...(provider === "pi" ? { piSettings: sdkEmployeeSession ? defaultPiSessionSettings(autoCompaction)
+        : rememberedPiSettings ? { ...rememberedPiSettings, autoCompaction }
+        : defaultPiCliSessionSettings(autoCompaction) } : {}),
       sessionKind: "structured",
       sessionSource: options.sessionSource ?? "interactive",
+      title: options.title?.trim() || undefined,
       automationId: options.automationId,
       employeeId: options.employeeId,
       employeeName: options.employeeName,
@@ -1439,6 +1572,9 @@ export class StructuredSessionManager {
         inFlight: false,
         activeRequestId: null,
         lastError: null,
+        // 新会话还没有回合在飞：锚点显式为 null，客户端不会看到「已运行 N 分钟」。
+        turnStartedAt: null,
+        lastActivityAt: null,
       },
       autoRecovered: false,
       autoApprovePermissions: shouldAutoApproveForMode(options.mode),
@@ -1485,17 +1621,28 @@ export class StructuredSessionManager {
       ?? (session.status === "failed" && !session.structuredState?.inFlight ? failed?.requestId ?? null : null);
   }
 
-  /** Consume only the exact failed request observed by the team's dispatch, never error-text inference. */
+  /** Compatibility boolean API; typed consumers preserve the reason without parsing user-facing text. */
   consumeUnacceptedTeamStartup(id: string, requestId: string): boolean {
+    return this.consumeUnacceptedTeamFailure(id, requestId) !== null;
+  }
+
+  /** Consume only the exact failed request observed by dispatch, once, before a newer request can replace it. */
+  consumeUnacceptedTeamFailure(id: string, requestId: string): StructuredFailure | null {
     const fact = this.unacceptedTeamStarts.get(id);
-    if (!fact || fact.requestId !== requestId) return false;
+    if (!fact || fact.requestId !== requestId) return null;
     this.unacceptedTeamStarts.delete(id);
     const session = this.sessions.get(id);
     return !this.disposed && session?.status === "failed"
-      && !session.structuredState?.activeRequestId && !session.structuredState?.inFlight;
+      && !session.structuredState?.activeRequestId && !session.structuredState?.inFlight ? fact.failure : null;
   }
 
-  /** Only an unstarted employee conversation may change CLI after a failed first turn. */
+  private employeeCandidateModel(agent: WandTaskAgent): string | null {
+    return agent.model === "default"
+      ? defaultModelGroupSelector(this.config.modelGroups, agent.provider, getDefaultModelForProvider(this.config, agent.provider))
+        || getDefaultModelForProvider(this.config, agent.provider) || null : agent.model;
+  }
+
+  /** Only an unstarted employee conversation may replay its explicitly rejected first input. */
   private retryEmployeeCandidate(
     id: string,
     original: SessionSnapshot,
@@ -1503,21 +1650,28 @@ export class StructuredSessionManager {
     error: unknown,
   ): Promise<SessionSnapshot> | null {
     // Team runs own candidate scheduling; keep the snapshot without a second retry loop.
-    if (original.automationId?.startsWith("ai-team:")) return null;
+    if (original.automationId?.startsWith("ai-team:") || !(error instanceof UnacceptedStructuredInputError)) return null;
     const candidates = original.employeeCandidates ?? [];
-    const nextIndex = (original.employeeCandidateIndex ?? 0) + 1;
-    if (!original.employeeId || (original.messages?.length ?? 0) !== 0 || nextIndex >= candidates.length) return null;
-    // 手动选择候选链外的工具时，不把明确选择又换回员工的另一条候选。
-    if (original.provider !== candidates[original.employeeCandidateIndex ?? 0]?.provider) return null;
+    const index = original.employeeCandidateIndex ?? 0;
+    const nextIndex = index + 1;
+    if (!original.employeeId || (original.messages?.length ?? 0) !== 0 || original.claudeSessionId
+      || !error.failure.retryable || nextIndex >= candidates.length) return null;
+    const selected = candidates[index];
+    // Explicit tool/model changes, including changes during the pending request, remain authoritative.
+    if (!selected || original.provider !== selected.provider
+      || (original.selectedModel && original.selectedModel !== this.employeeCandidateModel(selected))) return null;
     const current = this.sessions.get(id);
-    if (!current || (current.status !== "running" && current.status !== "failed")) return null;
-    if ((current.messages ?? []).length !== 1 || current.messages?.[0]?.role !== "user") return null;
-    if (!(error instanceof UnacceptedStructuredSpawnError)) return null;
+    if (!current || current.status !== "running" || current.provider !== original.provider
+      || current.selectedModel !== original.selectedModel || current.mode !== original.mode
+      || current.piSettings !== original.piSettings) return null;
     const next = candidates[nextIndex]!;
     const runner = resolveStructuredRunner(next.provider, undefined);
-    const model = next.model === "default"
-      ? getDefaultModelForProvider(this.config, next.provider) || null
-      : next.model;
+    const model = this.employeeCandidateModel(next);
+    const sameTool = next.provider === original.provider && (next.engine ?? "cli") === (selected.engine ?? "cli");
+    const piSettings = next.provider !== "pi" ? undefined : sameTool ? current.piSettings
+      : next.engine === "sdk" ? defaultPiSessionSettings(this.config.harness?.compaction?.enabled ?? true)
+      : { ...(this.storage.getPiSessionDefaults() ?? defaultPiCliSessionSettings()),
+        autoCompaction: this.config.harness?.compaction?.enabled ?? true };
     const retry: SessionSnapshot = {
       ...current,
       provider: next.provider,
@@ -1528,8 +1682,12 @@ export class StructuredSessionManager {
       selectedModel: model,
       thinkingEffort: next.thinkingEffort,
       employeeCandidateIndex: nextIndex,
+      piSettings,
       claudeSessionId: null,
+      harnessContext: undefined,
+      harnessExtensionState: undefined,
       messages: [],
+      output: "",
       status: "idle",
       exitCode: null,
       endedAt: null,
@@ -1538,10 +1696,23 @@ export class StructuredSessionManager {
         model: model ?? undefined,
       },
     };
+    this.logger?.appendStructuredSpawn(id, { kind: "candidate-fallback", failureKind: error.failure.kind,
+      fromProvider: original.provider, toProvider: next.provider, candidateIndex: nextIndex });
     this.sessions.set(id, retry);
     this.saveAuthoritativeSession(retry);
-    this.emitStructuredSnapshot(retry);
+    // sendMessage publishes the new running snapshot synchronously; do not expose a transient idle slot.
     return this.sendMessage(id, prompt);
+  }
+
+  private throwUnacceptedInput(sessionId: string, result: StructuredRunnerResult, command: string, missingHint: string): void {
+    const failure = result.failure ?? classifyStructuredFailure(result);
+    if (!failure?.retryable || this.interruptedWith.has(sessionId)) return;
+    const message = result.spawnError
+      ? `${command} 启动失败：${result.spawnError.message}${result.spawnError.code === "ENOENT" ? missingHint : ""}`
+      : result.primaryError?.trim() || `${command} 在执行前拒绝了输入。`;
+    this.logger?.appendStructuredSpawn(sessionId, { kind: "structured-input-rejected", command,
+      exitCode: result.exitCode, failureKind: failure.kind });
+    throw new UnacceptedStructuredInputError(message, failure, result.state);
   }
 
   /** 往转发会话里追加别的参与者的发言。 */
@@ -1601,7 +1772,10 @@ export class StructuredSessionManager {
         }
       }
     }
+    // Pi 主功能现在固定走 CLI；core SDK 重启 drain 不影响 CLI 会话入场。
     this.maybeGenerateSessionTopic(id, prompt);
+    // 「智能分配」结算窗口：还没有 runner 归属，新输入先排队，不能另起一轮。
+    if (this.autoAssignPending.has(id)) return this.enqueueInput(session, prompt);
     if (session.structuredState?.inFlight) {
       const runnerExecution = this.pendingRunnerExecutions.get(id);
       // interrupt() only requests cancellation; completion can settle later.
@@ -1613,7 +1787,7 @@ export class StructuredSessionManager {
           status: "idle",
           endedAt: session.endedAt ?? new Date().toISOString(),
           structuredState: {
-            ...(session.structuredState as StructuredSessionState),
+            ...this.settleTurn(id, session.structuredState as StructuredSessionState),
             inFlight: false,
             activeRequestId: null,
           },
@@ -1648,23 +1822,57 @@ export class StructuredSessionManager {
         runnerExecution?.interrupt();
         return session;
       } else {
-        const queue = [...(session.queuedMessages ?? [])];
-        if (isDuplicateStructuredQueueInput(session, prompt)) {
-          const err = new Error("与上一条消息相同，已忽略，不会加入排队。") as Error & { code?: string };
-          err.code = "duplicate_queued_message";
-          throw err;
-        }
-        if (queue.length >= 10) {
-          throw new Error("排队消息已满（最多 10 条），请等待当前消息处理完成。");
-        }
-        const queued: SessionSnapshot = {
+        return this.enqueueInput(session, prompt);
+      }
+    }
+
+    // 「智能分配」：只有真拿到这一轮提示词才能结算成本次使用的分组。结算后钉在会话上，
+    // 后续轮次用同一个分组（不在会话中途换模型）；客户端选择器同步显示实际分组。
+    if (isAutoAssignSelector(session.selectedModel)) {
+      const token = { cancelled: false };
+      this.autoAssignPending.set(id, token);
+      let assigned: Awaited<ReturnType<typeof resolveAutoAssign>>;
+      try {
+        assigned = await resolveAutoAssign({
+          provider: session.provider ?? "claude",
+          prompt,
+          groups: this.config.modelGroups,
+          evaluate: this.autoAssignEvaluate(),
+          ai: resolveSystemAiContext(session, this.config, this.storage.getSystemSiliconEmployee()),
+          cwd: session.cwd,
+          language: this.config.language,
+        });
+      } catch (error) {
+        // 结算本身绝不阻断发送：拿不到结论就按默认分组继续。
+        console.warn("[AutoAssign] 分配分组失败，改用默认分组:", getErrorMessage(error));
+        assigned = { selector: "", group: null, strategy: "default", calls: 0 };
+      } finally {
+        if (this.autoAssignPending.get(id) === token) this.autoAssignPending.delete(id);
+      }
+      const latest = this.sessions.get(id);
+      if (!latest || token.cancelled || this.disposed) return latest ?? session;
+      session = latest;
+      // 结算期间用户可能自己换了模型；那是更强的意愿，不覆盖。
+      if (isAutoAssignSelector(session.selectedModel)) {
+        const resolved: SessionSnapshot = {
           ...session,
-          queuedMessages: [...queue, prompt],
+          selectedModel: assigned.selector || null,
+          structuredState: {
+            ...(session.structuredState ?? defaultStructuredState(session.provider ?? "claude", session.runner)),
+            ...(assigned.selector ? { model: assigned.selector } : {}),
+          },
         };
-        this.sessions.set(id, queued);
-        this.storage.updateSessionRuntimeMetadata(queued);
-        this.emitStructuredSnapshot(queued);
-        return queued;
+        this.sessions.set(id, resolved);
+        this.storage.updateSessionRuntimeMetadata(resolved);
+        this.emit({
+          type: "status",
+          sessionId: id,
+          data: { sessionKind: "structured", selectedModel: resolved.selectedModel, structuredState: resolved.structuredState },
+        });
+        session = resolved;
+        if (assigned.group) {
+          console.info(`[AutoAssign] ${id} → 分组「${assigned.group.name}」（${assigned.strategy}${assigned.probability === undefined ? "" : `, p=${assigned.probability.toFixed(2)}`}）`);
+        }
       }
     }
 
@@ -1703,12 +1911,12 @@ export class StructuredSessionManager {
       exitCode: null,
       endedAt: null,
       messages: [...(session.messages ?? []), userTurn],
-      structuredState: {
+      structuredState: this.beginTurn(id, {
         ...(session.structuredState ?? defaultStructuredState(session.provider ?? "claude", session.runner)),
         inFlight: true,
         activeRequestId: requestId,
         lastError: null,
-      },
+      }),
     };
     this.sessions.set(id, updated);
     if (updated.automationId?.startsWith("ai-team:")) opts?.teamRequestStarted?.(id, requestId);
@@ -1752,13 +1960,39 @@ export class StructuredSessionManager {
           installHint: "请安装 @qoder-ai/qodercli，或重跑 `wand service:install` 刷新服务的 PATH",
         });
       } else if (provider === "pi") {
-        await this.runClaudeStreaming(id, updated, prompt, requestId, {
-          runner: this.piRunner,
-          provider: "pi",
-          commandLabel: "pi --mode json --print",
-          logKind: "pi-json",
-          installHint: "请安装 @earendil-works/pi-coding-agent（或兼容的 Pi CLI），或重跑 `wand service:install` 刷新服务的 PATH",
-        });
+        const employeeAgent = updated.employeeCandidates?.[updated.employeeCandidateIndex ?? 0];
+        const sdkRequested = employeeAgent?.engine === "sdk";
+        // 对话框默认固定走 CLI；只有员工候选明确配置 SDK 时，员工会话才启用 core。
+        const resolution = sdkRequested
+          ? resolveHarnessEngineSync({ ...this.config.harness, engine: "core" }, "pi", {
+            coreRunnerSupplied: this.coreRunnerSupplied,
+          })
+          : { engine: "cli" as const, reason: "Pi 主功能固定使用 CLI JSON" };
+        const enginePatched: SessionSnapshot = {
+          ...updated,
+          structuredState: {
+            ...(updated.structuredState as StructuredSessionState),
+            engine: resolution.engine,
+            engineReason: resolution.reason,
+          },
+        };
+        this.sessions.set(id, enginePatched);
+        if (resolution.engine === "core") {
+          await this.runClaudeStreaming(id, enginePatched, prompt, requestId, {
+            runner: this.coreRunner,
+            provider: "pi",
+            commandLabel: "pi core（员工 SDK）",
+            logKind: "pi-core",
+          });
+        } else {
+          await this.runClaudeStreaming(id, enginePatched, prompt, requestId, {
+            runner: this.piRunner,
+            provider: "pi",
+            commandLabel: "pi --mode json --print",
+            logKind: "pi-json",
+            installHint: "请安装 @earendil-works/pi-coding-agent（或兼容的 Pi CLI），或重跑 `wand service:install` 刷新服务的 PATH",
+          });
+        }
       } else if (provider === "gemini") {
         await this.runClaudeStreaming(id, updated, prompt, requestId, {
           runner: this.geminiRunner,
@@ -1777,11 +2011,7 @@ export class StructuredSessionManager {
       // Close handlers use this tagged error after they have already persisted
       // the detailed failure. Re-throw even if an ended-event listener removed
       // the session synchronously; there is no request-id marker to leak.
-      if (error instanceof PersistedStructuredRunnerError) {
-        const retry = this.retryEmployeeCandidate(id, session, prompt, error);
-        if (retry) return await retry;
-        throw error;
-      }
+      if (error instanceof PersistedStructuredRunnerError) throw error;
       const current = this.sessions.get(id);
       if (!current) throw error;
       // stop() or a newer turn may have invalidated this execution while its
@@ -1791,29 +2021,31 @@ export class StructuredSessionManager {
       }
       const retry = this.retryEmployeeCandidate(id, session, prompt, error);
       if (retry) return await retry;
-      const failed: SessionSnapshot = {
-        ...current,
-        status: "failed",
-        exitCode: 1,
-        endedAt: new Date().toISOString(),
-        pendingEscalation: null,
-        permissionBlocked: false,
-        structuredState: {
-          ...(current.structuredState as StructuredSessionState),
-          inFlight: false,
-          activeRequestId: null,
-          lastError: message,
-        },
-      };
+      const failed: SessionSnapshot = error instanceof UnacceptedStructuredInputError
+        ? this.finishStructuredFailure(current, 1, message, error.state)
+        : {
+          ...current,
+          status: "failed",
+          exitCode: 1,
+          endedAt: new Date().toISOString(),
+          pendingEscalation: null,
+          permissionBlocked: false,
+          structuredState: {
+            ...this.settleTurn(id, current.structuredState as StructuredSessionState),
+            inFlight: false,
+            activeRequestId: null,
+            lastError: message,
+          },
+        };
       this.sessions.set(id, failed);
       this.saveAuthoritativeSession(failed);
-      if (!this.disposed && error instanceof UnacceptedStructuredSpawnError
+      if (!this.disposed && error instanceof UnacceptedStructuredInputError
         && current.automationId?.startsWith("ai-team:")) {
         // Available before status/ended listeners run. A later turn/stop/delete invalidates this fact.
         if (this.unacceptedTeamStarts.size >= 1024) {
           this.unacceptedTeamStarts.delete(this.unacceptedTeamStarts.keys().next().value!);
         }
-        this.unacceptedTeamStarts.set(id, { requestId });
+        this.unacceptedTeamStarts.set(id, { requestId, failure: error.failure });
       }
       this.emit({
         type: "status",
@@ -1975,7 +2207,7 @@ export class StructuredSessionManager {
     const candidate = candidateIndex >= 0 ? candidates[candidateIndex] : undefined;
     const runner = defaultStructuredRunner(provider);
     const model = candidate && candidate.model !== "default" ? candidate.model
-      : getDefaultModelForProvider(this.config, provider) || null;
+      : defaultModelGroupSelector(this.config.modelGroups, provider, getDefaultModelForProvider(this.config, provider)) || getDefaultModelForProvider(this.config, provider) || null;
     const effort = normalizeThinkingEffort(candidate?.thinkingEffort ?? this.config.defaultThinkingEffort);
     const thinkingEffort = effort?.includes(":") && !effort.startsWith(`${provider}:`) ? "off" : effort;
     const requestedMode = candidate?.mode ?? session.mode;
@@ -1987,6 +2219,11 @@ export class StructuredSessionManager {
       ...session,
       provider,
       runner,
+      // 从别的 provider 切到 Pi 的空白会话与新建 Pi 会话同等：以「上次设置」起步。
+      ...(provider === "pi" && !session.piSettings ? { piSettings: candidate?.engine === "sdk"
+        ? defaultPiSessionSettings(this.config.harness?.compaction?.enabled ?? true)
+        : { ...(this.storage.getPiSessionDefaults() ?? defaultPiCliSessionSettings(this.config.harness?.compaction?.enabled ?? true)),
+          autoCompaction: this.config.harness?.compaction?.enabled ?? true } } : {}),
       command: recoveredCommandLabel(runner),
       mode,
       autoApprovePermissions: shouldAutoApproveForMode(mode),
@@ -2007,10 +2244,69 @@ export class StructuredSessionManager {
     return updated;
   }
 
+  getPiSettings(sessionId: string): { settings: PiSessionSettings; resolution: EngineResolution } {
+    const session = this.requireSession(sessionId);
+    if (session.provider !== "pi") throw new Error("这些设置仅适用于 Pi 结构化会话。");
+    const employeeAgent = session.employeeCandidates?.[session.employeeCandidateIndex ?? 0];
+    const sdkRequested = employeeAgent?.engine === "sdk";
+    let resolution: EngineResolution;
+    if (sdkRequested) {
+      try {
+        resolution = resolveHarnessEngineSync({ ...this.config.harness, engine: "core" }, "pi", {
+          coreRunnerSupplied: this.coreRunnerSupplied,
+        });
+      } catch (error) {
+        resolution = { engine: "core", reason: getErrorMessage(error) };
+      }
+    } else {
+      resolution = { engine: "cli", reason: "Pi 主功能固定使用 CLI JSON" };
+    }
+    const defaults = resolution.engine === "cli"
+      ? defaultPiCliSessionSettings(this.config.harness?.compaction?.enabled ?? true)
+      : defaultPiSessionSettings(this.config.harness?.compaction?.enabled ?? true);
+    // Legacy sessions really use Pi discovery. Do not report a new empty selection as applied.
+    if (!session.piSettings) delete defaults.resources;
+    return { settings: session.piSettings ?? defaults, resolution };
+  }
+
+  /** Metadata-only, synchronous merge: active runs retain their captured settings, queued rounds see these. */
+  setPiSettings(sessionId: string, patch: unknown): SessionSnapshot {
+    const session = this.requireSession(sessionId);
+    if (session.archived) throw new Error("请先恢复已归档的会话。");
+    const { settings, resolution } = this.getPiSettings(sessionId);
+    const updatedSettings = patchPiSessionSettings(settings, patch);
+    if (resolution.engine === "core" && ((patch as Record<string, unknown>).resources !== undefined
+      || (patch as Record<string, unknown>).codemodeOverride !== undefined
+      || (patch as Record<string, unknown>).autoResources !== undefined
+      || (patch as Record<string, unknown>).lockedSkills !== undefined)) {
+      throw new Error("当前 SDK 候选尚不支持此会话级设置；没有改用全局资源或 CodeMode 配置。");
+    }
+    if (resolution.engine !== "core") {
+      // 写入裁决与启动参数用同一套能力边界：表达不出的字段/取值不落库。
+      const rejection = cliPiSettingsRejection(patch, updatedSettings);
+      if (rejection) throw new Error(rejection);
+    }
+    // Automatic selection or skill locks need an explicit on/off boundary, not legacy discovery.
+    if ((updatedSettings.autoResources || updatedSettings.lockedSkills?.length) && !updatedSettings.resources) {
+      updatedSettings.resources = { skills: [], mcpServers: [] };
+    }
+    const updated = { ...session, piSettings: updatedSettings };
+    // Do not publish a setting that did not reach durable storage.
+    this.storage.updateSessionRuntimeMetadata(updated);
+    // 记住这次设置：新建 Pi CLI 会话以它起步。SDK 会话表达不出资源/CodeMode，不写回默认。
+    if (resolution.engine === "cli") this.storage.setPiSessionDefaults(updatedSettings);
+    this.sessions.set(sessionId, updated);
+    this.emit({ type: "status", sessionId, data: { sessionKind: "structured", piSettings: updated.piSettings } });
+    return updated;
+  }
+
   /** Update the selected model for a structured session. Takes effect on the next spawn. */
   setSessionModel(sessionId: string, model: string | null): SessionSnapshot {
     const session = this.requireSession(sessionId);
     const normalized = model?.trim() || null;
+    resolveModelGroupModels(this.config.modelGroups, session.provider ?? "claude", normalized, {
+      preferDefault: !normalized || normalized === "default",
+    });
     const updated: SessionSnapshot = {
       ...session,
       selectedModel: normalized,
@@ -2165,6 +2461,12 @@ export class StructuredSessionManager {
     this.unacceptedTeamStarts.delete(id);
     const session = this.requireSession(id);
     this.requireRecoveryControl(id);
+    // 结算中的智能分配还没有 runner：置位取消，结算回来后不得再启动。
+    const pendingAssign = this.autoAssignPending.get(id);
+    if (pendingAssign) {
+      pendingAssign.cancelled = true;
+      this.autoAssignPending.delete(id);
+    }
     this.interruptedWith.delete(id);
     this.preserveQueueOnInterrupt.delete(id);
     // Clearing activeRequestId is the generation barrier: late data/close callbacks
@@ -2173,13 +2475,14 @@ export class StructuredSessionManager {
     // 这样前端不会进入"会话已结束/恢复会话"终止态，输入框保持可用，直接展示历史内容。
     const cancelled: SessionSnapshot = {
       ...session,
+      messages: cancelPendingResourceSelection(session.messages),
       status: "idle",
       exitCode: null,
       endedAt: null,
       pendingEscalation: null,
       permissionBlocked: false,
       structuredState: {
-        ...(session.structuredState ?? defaultStructuredState(session.provider ?? "claude", session.runner)),
+        ...this.settleTurn(id, session.structuredState ?? defaultStructuredState(session.provider ?? "claude", session.runner)),
         inFlight: false,
         activeRequestId: null,
         lastError: null,
@@ -2201,6 +2504,11 @@ export class StructuredSessionManager {
   delete(id: string): void {
     this.unacceptedTeamStarts.delete(id);
     this.requireRecoveryControl(id);
+    const pendingAssign = this.autoAssignPending.get(id);
+    if (pendingAssign) {
+      pendingAssign.cancelled = true;
+      this.autoAssignPending.delete(id);
+    }
     const runnerExecution = this.pendingRunnerExecutions.get(id);
     // Invalidate callback ownership before signalling the runner. Cancellation
     // can synchronously wake listeners in some adapter implementations.
@@ -2210,6 +2518,8 @@ export class StructuredSessionManager {
       this.releasePendingRunnerExecution(id, runnerExecution);
     }
     this.clearStreamingCheckpoint(id);
+    // 会话被删除后迟到的回合回调必须失效，静默心跳也不能再给一个不存在的会话发事件。
+    this.turnHeartbeat.cancel(id);
     this.interruptedWith.delete(id);
     this.preserveQueueOnInterrupt.delete(id);
     this.storage.deleteSession(id);
@@ -2230,7 +2540,7 @@ export class StructuredSessionManager {
 
   /** True only while this exact turn still owns the session's mutable state. */
   private isCurrentRequest(sessionId: string, requestId: string): boolean {
-    return this.sessions.get(sessionId)?.structuredState?.activeRequestId === requestId;
+    return !this.disposed && this.sessions.get(sessionId)?.structuredState?.activeRequestId === requestId;
   }
 
   private currentSessionForRequest(sessionId: string, requestId: string): SessionSnapshot | null {
@@ -2251,6 +2561,69 @@ export class StructuredSessionManager {
     return true;
   }
 
+  /**
+   * 本轮开始：turnStartedAt / lastActivityAt 同时落下，并给这一轮挂上静默心跳。
+   * 只在新回合（新 requestId）起点未知时调用；daemon 领养走 adoptTurn。
+   */
+  private beginTurn(sessionId: string, state: StructuredSessionState): StructuredSessionState {
+    const at = isoNow();
+    this.turnHeartbeat.observe(sessionId);
+    return { ...state, turnStartedAt: at, lastActivityAt: at };
+  }
+
+  /**
+   * 领养 daemon 里仍在飞的回合：起点是重启前那一轮的真实时刻，不能改写成重连时刻；
+   * 锚点缺失（改动之前落库的历史数据）才退回现在。
+   */
+  private adoptTurn(sessionId: string, state: StructuredSessionState): StructuredSessionState {
+    const at = isoNow();
+    this.turnHeartbeat.observe(sessionId);
+    return { ...state, turnStartedAt: state.turnStartedAt ?? at, lastActivityAt: at };
+  }
+
+  /**
+   * 观测到本轮活动（输出 chunk / 状态变化）：只刷新 lastActivityAt 并重新计算静默窗口；
+   * turnStartedAt 保持不变，客户端才算是「这一轮已经跑了多久」而不是「距离上一条输出多久」。
+   */
+  private noteTurnActivity(sessionId: string, state: StructuredSessionState): StructuredSessionState {
+    this.turnHeartbeat.observe(sessionId);
+    return { ...state, lastActivityAt: isoNow() };
+  }
+
+  /**
+   * 本轮收敛：`inFlight` 清 false 的一切路径（结束 / 失败 / 停止 / 中断 / 重启降级 /
+   * 候选降级）都必须走这里——两个锚点一起回 null，静默心跳立即 cancel。
+   * 收敛后不存在任何「还在跑」的读数，客户端不需要再猜上一轮的锚点属于哪一轮。
+   */
+  private settleTurn(sessionId: string, state: StructuredSessionState): StructuredSessionState {
+    this.turnHeartbeat.cancel(sessionId);
+    return { ...state, turnStartedAt: null, lastActivityAt: null };
+  }
+
+  /**
+   * 静默窗口到期：确认这一轮仍在飞才补发一次，payload 与一条普通 status 快照完全一致
+   * （不带新字段、不开新事件类型）。返回值决定要不要再挂下一个窗口。
+   */
+  private publishQuietHeartbeat(sessionId: string): boolean {
+    if (this.disposed) return false;
+    const session = this.sessions.get(sessionId);
+    if (session?.structuredState?.inFlight !== true) return false;
+    // 停在权限 / 升级裁决上的回合不是在「安静地干活」：那一屏已经有 pendingEscalation
+    // 这个显式指示，再广播「仍在运行」是错的。保留窗口（返回 true），但不发事件，
+    // 等用户裁决后 runner 继续产出时会自然重新计时。
+    if (session.pendingEscalation || session.permissionBlocked) return true;
+    this.emit({
+      type: "status",
+      sessionId,
+      data: {
+        ...(buildStructuredOutputPayload(session) as Record<string, unknown>),
+        status: session.status,
+        exitCode: session.exitCode,
+      },
+    });
+    return true;
+  }
+
   private emitStructuredSnapshot(session: SessionSnapshot, eventType: "output" | "ended" = "output"): void {
     // 排队消息只通过 payload.queuedMessages 单独下发，由各端在消息卡片外的「排队条」
     // 里纵向渲染——绝不再把它们当成 __queued 占位 turn 混进 messages 消息流里，否则会
@@ -2266,6 +2639,21 @@ export class StructuredSessionManager {
       sessionId: session.id,
       data,
     });
+  }
+
+  private enqueueInput(session: SessionSnapshot, prompt: string): SessionSnapshot {
+    if (isDuplicateStructuredQueueInput(session, prompt)) {
+      const err = new Error("与上一条消息相同，已忽略，不会加入排队。") as Error & { code?: string };
+      err.code = "duplicate_queued_message";
+      throw err;
+    }
+    const queue = session.queuedMessages ?? [];
+    if (queue.length >= 10) throw new Error("排队消息已满（最多 10 条），请等待当前消息处理完成。");
+    const queued = { ...session, queuedMessages: [...queue, prompt] };
+    this.sessions.set(session.id, queued);
+    this.storage.updateSessionRuntimeMetadata(queued);
+    this.emitStructuredSnapshot(queued);
+    return queued;
   }
 
   private async flushNextQueuedMessage(sessionId: string): Promise<void> {
@@ -2351,10 +2739,10 @@ export class StructuredSessionManager {
         claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
         messages,
         output: turnState.result || current.output,
-        structuredState: {
+        structuredState: this.noteTurnActivity(sessionId, {
           ...(current.structuredState as StructuredSessionState),
           model: turnState.model ?? current.structuredState?.model,
-        },
+        }),
       };
       this.sessions.set(sessionId, patched);
       this.saveStreamingSnapshot(patched);
@@ -2417,12 +2805,8 @@ export class StructuredSessionManager {
     }
     flushEmit();
 
-    if (result.spawnError) {
-      const hint = result.spawnError.code === "ENOENT"
-        ? "（PATH 中找不到 codex 可执行文件；请确认 codex 已安装，或重跑 `wand service:install` 刷新服务的 PATH）"
-        : "";
-      throw new UnacceptedStructuredSpawnError(`codex exec 启动失败：${result.spawnError.message}${hint}`);
-    }
+    this.throwUnacceptedInput(sessionId, result, "codex exec",
+      "（PATH 中找不到 codex 可执行文件；请确认 codex 已安装，或重跑 `wand service:install` 刷新服务的 PATH）");
 
     this.logger?.appendStructuredSpawn(sessionId, {
       kind: "codex-exec-close",
@@ -2473,7 +2857,7 @@ export class StructuredSessionManager {
       pendingEscalation: null,
       permissionBlocked: false,
       structuredState: {
-        ...(current.structuredState as StructuredSessionState),
+        ...this.settleTurn(sessionId, current.structuredState as StructuredSessionState),
         model: result.state.model ?? current.structuredState?.model,
         inFlight: false,
         activeRequestId: null,
@@ -2519,6 +2903,8 @@ export class StructuredSessionManager {
         claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
         messages,
         output: turnState.result || current.output,
+        // 每个 provider 帧都是本轮还在活动的证据：刷新 lastActivityAt 并重挂静默窗口。
+        structuredState: this.noteTurnActivity(sessionId, current.structuredState as StructuredSessionState),
       };
       this.sessions.set(sessionId, patched);
       this.saveStreamingSnapshot(patched);
@@ -2573,12 +2959,8 @@ export class StructuredSessionManager {
       return;
     }
     flushEmit();
-    if (result.spawnError) {
-      const hint = result.spawnError.code === "ENOENT"
-        ? "（PATH 中找不到 grok；请安装 Grok Build CLI，或重跑 `wand service:install` 刷新服务 PATH）"
-        : "";
-      throw new UnacceptedStructuredSpawnError(`grok 启动失败：${result.spawnError.message}${hint}`);
-    }
+    this.throwUnacceptedInput(sessionId, result, "grok",
+      "（PATH 中找不到 grok；请安装 Grok Build CLI，或重跑 `wand service:install` 刷新服务 PATH）");
     this.logger?.appendStructuredSpawn(sessionId, {
       kind: "grok-headless-close",
       pid: execution.pid,
@@ -2625,7 +3007,7 @@ export class StructuredSessionManager {
       pendingEscalation: null,
       permissionBlocked: false,
       structuredState: {
-        ...(current.structuredState as StructuredSessionState),
+        ...this.settleTurn(sessionId, current.structuredState as StructuredSessionState),
         model: result.state.model ?? current.structuredState?.model,
         inFlight: false,
         activeRequestId: null,
@@ -2669,6 +3051,8 @@ export class StructuredSessionManager {
         claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
         messages,
         output: turnState.result || current.output,
+        // 每个 provider 帧都是本轮还在活动的证据：刷新 lastActivityAt 并重挂静默窗口。
+        structuredState: this.noteTurnActivity(sessionId, current.structuredState as StructuredSessionState),
       };
       this.sessions.set(sessionId, patched);
       this.saveStreamingSnapshot(patched);
@@ -2731,12 +3115,8 @@ export class StructuredSessionManager {
     }
     flushEmit();
 
-    if (result.spawnError) {
-      const hint = result.spawnError.code === "ENOENT"
-        ? "（PATH 中找不到 opencode；请安装 opencode-ai，或重跑 `wand service:install` 刷新服务 PATH）"
-        : "";
-      throw new UnacceptedStructuredSpawnError(`opencode run 启动失败：${result.spawnError.message}${hint}`);
-    }
+    this.throwUnacceptedInput(sessionId, result, "opencode run",
+      "（PATH 中找不到 opencode；请安装 opencode-ai，或重跑 `wand service:install` 刷新服务 PATH）");
 
     this.logger?.appendStructuredSpawn(sessionId, {
       kind: "opencode-run-close",
@@ -2789,7 +3169,7 @@ export class StructuredSessionManager {
       pendingEscalation: null,
       permissionBlocked: false,
       structuredState: {
-        ...(current.structuredState as StructuredSessionState),
+        ...this.settleTurn(sessionId, current.structuredState as StructuredSessionState),
         model: result.state.model ?? current.structuredState?.model,
         inFlight: false,
         activeRequestId: null,
@@ -2845,13 +3225,14 @@ export class StructuredSessionManager {
     const syncSnapshot = (turnState: StructuredRunnerTurnState): void => {
       const current = this.currentSessionForRequest(sessionId, requestId);
       if (!current) return;
-      const hasAssistantContent = turnState.blocks.length > 0 || !!turnState.result;
+      const hasAssistantContent = turnState.blocks.length > 0 || !!turnState.result || !!turnState.resourceSelection;
       let messages = [...(current.messages ?? [])];
       if (hasAssistantContent) {
         const turn: ConversationTurn = {
           role: "assistant",
           content: this.compactContentBlocks([...turnState.blocks], turnState.result),
           usage: turnState.usage,
+          ...(turnState.resourceSelection ? { resourceSelection: turnState.resourceSelection } : {}),
         };
         messages = upsertAssistantMessage(current.messages, turn);
       }
@@ -2860,11 +3241,11 @@ export class StructuredSessionManager {
         claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
         messages,
         output: turnState.result || current.output,
-        structuredState: {
+        structuredState: this.noteTurnActivity(sessionId, {
           ...(current.structuredState as StructuredSessionState),
           model: turnState.model ?? current.structuredState?.model,
           phase: turnState.phase ?? current.structuredState?.phase,
-        },
+        }),
       };
       this.sessions.set(sessionId, patched);
       this.saveStreamingSnapshot(patched, hasAssistantContent ? undefined : { metadata: true });
@@ -2929,12 +3310,8 @@ export class StructuredSessionManager {
     }
     flushEmit();
 
-    if (result.spawnError) {
-      const hint = result.spawnError.code === "ENOENT"
-        ? `（PATH 中找不到 ${provider === "qoder" ? "qodercli" : provider === "gemini" ? "gemini" : provider === "pi" ? "pi" : "claude"} 可执行文件；${options.installHint ?? "请确认 claude 已安装，或重跑 `wand service:install` 刷新服务的 PATH"}）`
-        : "";
-      throw new UnacceptedStructuredSpawnError(`${commandLabel} 启动失败：${result.spawnError.message}${hint}`);
-    }
+    this.throwUnacceptedInput(sessionId, result, commandLabel,
+      `（PATH 中找不到 ${provider === "qoder" ? "qodercli" : provider === "gemini" ? "gemini" : provider === "pi" ? "pi" : "claude"} 可执行文件；${options.installHint ?? "请确认 claude 已安装，或重跑 `wand service:install` 刷新服务的 PATH"}）`);
 
     this.logger?.appendStructuredSpawn(sessionId, {
       kind: `${logKind}-close`,
@@ -2950,13 +3327,11 @@ export class StructuredSessionManager {
     const interruptedByUser = this.interruptedWith.has(sessionId);
     const interruptedForQuestion = result.stopReason === "ask-user-question";
     const failedExit = (result.exitCode !== null && result.exitCode !== 0) || result.signal !== null;
-    // Pi 等 CLI 在 provider 报错（额度用尽、鉴权失败）时仍以 0 退出；这一轮没有任何产出时
-    // 必须按失败落盘，否则会被当成一次空回复，用户和团队调度都看不到真正的错误。
-    const erroredEmptyTurn = !failedExit && !!result.primaryError && !result.state.blocks.some(
-      (block) => block.type === "tool_use" || (block.type === "text" && block.text.trim() !== ""),
-    );
-    if ((failedExit || erroredEmptyTurn) && !interruptedByUser && !interruptedForQuestion) {
-      const errorText = erroredEmptyTurn
+    // A protocol failure remains a failure even if the CLI exits 0 or already produced work.
+    // Earlier work is preserved below and must never be replayed on another candidate.
+    const failure = result.failure ?? classifyStructuredFailure(result);
+    if (failure && !interruptedByUser && !interruptedForQuestion) {
+      const errorText = !failedExit && result.primaryError
         ? result.primaryError!.trim()
         : this.formatStructuredExitError(commandLabel, result.exitCode, result.signal, {
           stderr: result.stderr,
@@ -2997,13 +3372,20 @@ export class StructuredSessionManager {
       pendingEscalation: null,
       permissionBlocked: false,
       structuredState: {
-        ...(current.structuredState as StructuredSessionState),
+        ...this.settleTurn(sessionId, current.structuredState as StructuredSessionState),
         model: result.state.model ?? current.structuredState?.model,
         inFlight: false,
         activeRequestId: null,
         lastError: null,
         phase: undefined,
+        ...(result.state.contextUsage ? { contextUsage: result.state.contextUsage } : {}),
+        // core 压缩状态：历史不删，只记录切点与摘要，下一轮按它重建模型上下文。
+        ...(result.state.compaction
+          ? { compactions: result.state.compaction.compactions, harnessContext: compactionToSessionContext(result.state.compaction) }
+          : {}),
       },
+      ...(result.state.compaction ? { harnessContext: compactionToSessionContext(result.state.compaction) } : {}),
+      ...(result.state.harnessExtensionState ? { harnessExtensionState: result.state.harnessExtensionState } : {}),
     };
     this.sessions.set(sessionId, finished);
     this.saveAuthoritativeSession(finished);
@@ -3088,6 +3470,7 @@ export class StructuredSessionManager {
       role: "assistant",
       content: this.compactContentBlocks([...turnState.blocks], turnState.result),
       usage: turnState.usage,
+      ...(turnState.resourceSelection ? { resourceSelection: turnState.resourceSelection } : {}),
     };
     return upsertAssistantMessage(current.messages, assistantTurn, true, stampNewTools);
   }
@@ -3186,12 +3569,15 @@ export class StructuredSessionManager {
     const failureTurn: ConversationTurn = {
       role: "assistant",
       content: [{ type: "text", text: `结构化会话执行失败：${errorText}` }],
+      ...(turnState.resourceSelection ? { resourceSelection: turnState.resourceSelection } : {}),
     };
-    // 日志被截断时本地已存的 turn 是重启前唯一完整的记录：失败提示追加成独立一轮，
-    // 不能把整段 turn 换成错误文本（那会把用户看到过的输出全删掉）。
+    // Keep actual work and append the failure, including protocol errors with process exit 0.
+    // A truncated replay must retain its complete local checkpoint rather than rebuild from a tail.
     const msgs = options.keepTranscript
       ? appendNoticeTurn(current.messages, failureTurn)
-      : upsertAssistantMessage(current.messages, failureTurn, true);
+      : hasStructuredExecutionProgress(turnState)
+        ? appendNoticeTurn(this.buildCompletedAssistantMessages(current, turnState), failureTurn)
+        : upsertAssistantMessage(current.messages, failureTurn, true);
     return {
       ...current,
       status: "failed",
@@ -3202,8 +3588,10 @@ export class StructuredSessionManager {
       messages: msgs,
       pendingEscalation: null,
       permissionBlocked: false,
+      ...(turnState.compaction ? { harnessContext: compactionToSessionContext(turnState.compaction) } : {}),
+      ...(turnState.harnessExtensionState ? { harnessExtensionState: turnState.harnessExtensionState } : {}),
       structuredState: {
-        ...(current.structuredState as StructuredSessionState),
+        ...this.settleTurn(current.id, current.structuredState as StructuredSessionState),
         model: turnState.model ?? current.structuredState?.model,
         inFlight: false,
         activeRequestId: null,

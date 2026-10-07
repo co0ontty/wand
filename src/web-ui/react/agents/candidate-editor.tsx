@@ -1,7 +1,7 @@
 import * as React from "react";
+import { Alert, Card, Flex, Space, Tag, Typography, Tooltip } from "antd";
 import type { WandTaskAgent } from "../../../task-types.js";
-import { agentKey } from "../../../ai-team-types.js";
-import { WandIcon } from "../ui";
+import { WandButton, WandIcon, WandIconButton } from "../ui";
 import {
   addCandidate,
   candidateLabel,
@@ -43,6 +43,7 @@ export interface CandidateRowProps {
   onRemove(): void;
 }
 
+/** 一行候选：卡片与操作钮都用通用控件外观，顺序（即降级顺序）仍由候选数组决定。 */
 export function CandidateEditorRow({
   id,
   agent,
@@ -58,20 +59,20 @@ export function CandidateEditorRow({
   onMove,
   onRemove,
 }: CandidateRowProps): React.ReactElement {
-  const rowRef = React.useRef<HTMLDivElement>(null);
   const label = candidateLabel(index);
 
   return (
-    <div
-      ref={rowRef}
+    <Card
+      size="small"
+      hoverable
       data-candidate-id={id}
       className="wand-team-candidate"
       data-candidate-index={index}
       data-duplicate={duplicate || undefined}
     >
-      <div className="wand-team-candidate-inner">
-        <span className="wand-team-candidate-tag">{label}</span>
-        <div className="wand-ai-team-member-agent">
+      <Flex align="start" gap={8} wrap className="wand-team-candidate-inner">
+        <Tag color={duplicate ? "error" : index === 0 ? "orange" : undefined} className="wand-team-candidate-tag">{label}</Tag>
+        <Flex wrap gap={8} className="wand-ai-team-member-agent" style={{ flex: "1 1 200px", minWidth: 0 }}>
           <AgentFields
             agent={agent}
             disabled={disabled}
@@ -79,51 +80,50 @@ export function CandidateEditorRow({
             providerOptions={providerOptions}
             ariaPrefix={`${ariaPrefix} ${label}`}
             showKind={!structuredOnly}
+            allowSdkEngine
             onChange={(next) => onChange(structuredOnly ? { ...next, kind: "structured" } : next)}
           />
-        </div>
-        <div className="wand-team-candidate-tools">
-          <button
-            type="button"
-            className="wand-team-candidate-tool"
-            data-tool="up"
-            title="上移"
-            aria-label={`把${label}上移`}
-            disabled={disabled || index === 0}
-            onClick={() => onMove(-1)}
-          >
-            <WandIcon name="chevronUp" size={14} />
-          </button>
-          <button
-            type="button"
-            className="wand-team-candidate-tool"
-            data-tool="down"
-            title="下移"
-            aria-label={`把${label}下移`}
-            disabled={disabled || index === total - 1}
-            onClick={() => onMove(1)}
-          >
-            <WandIcon name="chevronDown" size={14} />
-          </button>
-          <button
-            type="button"
-            className="wand-team-candidate-tool"
-            data-tool="remove"
-            title={total <= 1 ? "至少要保留 1 个候选" : "删除该候选"}
-            aria-label={`删除${label}`}
-            disabled={disabled || total <= 1}
-            onClick={onRemove}
-          >
-            <WandIcon name="close" size={14} />
-          </button>
-        </div>
-      </div>
-    </div>
+        </Flex>
+        <Space className="wand-team-candidate-tools" size={4}>
+          <Tooltip title="上移">
+            <WandIconButton
+              data-tool="up"
+              aria-label={`把${label}上移`}
+              disabled={disabled || index === 0}
+              onClick={() => onMove(-1)}
+            >
+              <WandIcon name="chevronUp" size={14} />
+            </WandIconButton>
+          </Tooltip>
+          <Tooltip title="下移">
+            <WandIconButton
+              data-tool="down"
+              aria-label={`把${label}下移`}
+              disabled={disabled || index === total - 1}
+              onClick={() => onMove(1)}
+            >
+              <WandIcon name="chevronDown" size={14} />
+            </WandIconButton>
+          </Tooltip>
+          <Tooltip title={total <= 1 ? "至少要保留 1 个候选" : "删除该候选"}>
+            <WandIconButton
+              data-tool="remove"
+              aria-label={`删除${label}`}
+              disabled={disabled || total <= 1}
+              onClick={onRemove}
+            >
+              <WandIcon name="close" size={14} />
+            </WandIconButton>
+          </Tooltip>
+        </Space>
+      </Flex>
+    </Card>
   );
 }
 
 /**
  * 带有 FLIP 动画与高度过渡的候选列表容器，禁止整表重挂载（移除 listKey）。
+ * FLIP 只读 `data-candidate-id` 的位移，所以容器换成通用卡片后顺序动画仍按同一份数据算。
  */
 export function CandidatesListEditor({
   agents,
@@ -230,16 +230,17 @@ export function CandidatesListEditor({
   };
 
   return (
-    <div
-      ref={containerRef}
+    <Card size="small"
       className="wand-team-candidates"
       role="group"
       aria-label={`${label} 的执行候选`}
     >
-      <header className="wand-team-candidates-head">
-        <span>执行候选</span>
-        <small>首选不可用时按顺序自动降级，最多 {AI_TEAM_MAX_CANDIDATES} 个</small>
-      </header>
+      <Flex vertical gap={8}>
+      <Flex component="header" wrap align="baseline" gap={8} className="wand-team-candidates-head">
+        <Typography.Text strong>执行候选</Typography.Text>
+        <Typography.Text type="secondary">首选不可用时按顺序自动降级，最多 {AI_TEAM_MAX_CANDIDATES} 个</Typography.Text>
+      </Flex>
+      <Flex vertical gap={8} ref={containerRef}>
       {agents.map((agent, at) => {
         const rowId = keysRef.current[at] || `row-${at}`;
         return (
@@ -261,10 +262,11 @@ export function CandidatesListEditor({
           />
         );
       })}
-      <div className="wand-team-candidates-foot">
-        <button
-          type="button"
-          className="wand-team-candidate-add"
+      </Flex>
+      <Flex wrap align="center" gap={10} className="wand-team-candidates-foot">
+        <WandButton
+          kind="ghost"
+          size="small"
           disabled={disabled || agents.length >= AI_TEAM_MAX_CANDIDATES}
           title={
             agents.length >= AI_TEAM_MAX_CANDIDATES
@@ -273,15 +275,14 @@ export function CandidatesListEditor({
           }
           onClick={addRow}
         >
-          <WandIcon name="plus" size={14} />
+          <WandIcon name="plus" size={14} slot="start" />
           <span>添加候选</span>
-        </button>
+        </WandButton>
         {listError ? (
-          <small className="wand-team-candidate-error" role="alert">
-            {listError}
-          </small>
+          <Alert type="error" showIcon className="wand-team-candidate-error" role="alert" title={listError} />
         ) : null}
-      </div>
-    </div>
+      </Flex>
+      </Flex>
+    </Card>
   );
 }

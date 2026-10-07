@@ -194,8 +194,8 @@ test("React business modules do not reach through legacy DOM or state seams", ()
     { label: "dangerouslySetInnerHTML", pattern: /\bdangerouslySetInnerHTML\s*=/g },
     { label: "insertAdjacentHTML", pattern: /\.\s*insertAdjacentHTML\s*\(/g },
     {
-      label: "getElementById/querySelector",
-      pattern: /\.\s*(?:getElementById|querySelector(?:All)?)\s*(?:<[^>\n]*>)?\s*\(/g,
+      label: "document.getElementById/querySelector",
+      pattern: /(?:\bdocument|\bwindow\.document)\s*\.\s*(?:getElementById|querySelector(?:All)?)\s*(?:<[^>\n]*>)?\s*\(/g,
     },
   ];
 
@@ -381,11 +381,13 @@ test("React style installation keeps foundation and business layers behind one i
   assert.ok(foundation.includes("@media (prefers-reduced-motion: reduce)"));
   assert.ok(!foundation.includes(".wand-settings-"));
   assert.ok(!foundation.includes(".wand-quick-"));
-  assert.ok(features.includes(".wand-settings-dialog"));
-  assert.ok(features.includes(".wand-quick-dialog"));
-  assert.ok(features.includes(".wand-new-session-dialog"));
-  assert.ok(features.includes(".wand-folder-picker-dialog"));
-  assert.ok(features.includes(".wand-worktree-dialog"));
+  assert.doesNotMatch(features, /\.wand-(?:quick-form|new-session-body|folder-picker-options)\s*\{/);
+  assert.match(source("src/web-ui/react/quick-commit/host.tsx"), /<Form/);
+  assert.match(source("src/web-ui/react/new-session/host.tsx"), /<AutoComplete/);
+  assert.match(source("src/web-ui/react/folder-picker/options.tsx"), /<List/);
+  const layout = source("src/web-ui/react/issues/library-layout.ts");
+  assert.match(layout, /\.ant-modal:has\(\.wand-task-library-dialog\)/);
+  assert.match(source("src/web-ui/react/settings/styles.ts"), /wand-settings-library-dialog/);
 
   const cascade = [
     "foundationStyles",
@@ -434,10 +436,8 @@ test("migrated feature overlays do not restore legacy selectors", () => {
   ]) {
     assert.ok(!styles.includes(selector), `styles.css must not restore legacy ${selector}`);
   }
-  assert.ok(
-    styles.includes(".session-kind-badge.worktree-merge"),
-    "legacy Shell must retain the Worktree status badge presentation",
-  );
+  assert.match(source("src/web-ui/react/shell/shell-sidebar.tsx"), /<Tag className={classNames\("session-kind-badge worktree-merge"/,
+    "worktree status must use the shared library badge");
 });
 
 test("migrated Worktree, File Preview, and Restart overlays keep only browser adapters", () => {

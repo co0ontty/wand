@@ -1,6 +1,7 @@
+import { Flex, Form, Typography } from "antd";
 import * as React from "react";
 import type { AiTeam, SiliconEmployee } from "../../../ai-team-types";
-import type { WandTaskAgent } from "../../../task-types";
+import type { WandTaskAgent, WandTaskAgentEngine } from "../../../task-types";
 import { TeamAvatarStack } from "../ai-teams/avatar";
 import { WandSelect } from "../ui";
 import {
@@ -14,12 +15,15 @@ import {
 
 const TEAM_VALUE_PREFIX = "team:";
 const EMPLOYEE_VALUE_PREFIX = "employee:";
+/** 无指派派工：不指定员工/团队，由本机决策模型给出建议名单后再确认开工。 */
+export const DISPATCH_VALUE = "dispatch:";
 
 /** CLI 工具下拉的候选：CLI 在前，团队接在后面，值带 "team:" 前缀区分。 */
 export function agentTargetOptions(
   providerOptions: Array<{ value: IssueAgentProvider; label: string }>,
   teams: ReadonlyArray<AiTeam> | null | undefined,
   employees?: ReadonlyArray<SiliconEmployee> | null,
+  options: { includeDispatch?: boolean } = {},
 ): Array<{ value: string; label: string }> {
   return [
     ...providerOptions,
@@ -28,7 +32,13 @@ export function agentTargetOptions(
       label: `员工 · ${employee.name}`,
     })),
     ...(teams ?? []).map((team) => ({ value: `${TEAM_VALUE_PREFIX}${team.id}`, label: `团队 · ${team.name}` })),
+    ...(options.includeDispatch ? [{ value: DISPATCH_VALUE, label: "临时派工 · 决策选人" }] : []),
   ];
+}
+
+/** 选中的是「临时派工」时返回 true；它不是 ExecutionSubject，提交路径完全不同。 */
+export function agentTargetIsDispatch(value: string): boolean {
+  return value === DISPATCH_VALUE;
 }
 
 /** 选中的是团队时返回团队 id，否则返回空串。 */
@@ -40,21 +50,25 @@ export function agentTargetEmployeeId(value: string): string {
   return value.startsWith(EMPLOYEE_VALUE_PREFIX) ? value.slice(EMPLOYEE_VALUE_PREFIX.length) : "";
 }
 
+const AGENT_ENGINE_OPTIONS: ReadonlyArray<{ value: WandTaskAgentEngine; label: string }> = [
+  { value: "cli", label: "CLI" },
+  { value: "sdk", label: "SDK（Pi 员工会话）" },
+];
+
 const AGENT_KIND_OPTIONS = [
   { value: "structured", label: "结构化对话" },
   { value: "pty", label: "终端（PTY）" },
 ];
-
 export function AgentField({ label, children }: { label: string; children: React.ReactNode }): React.ReactElement {
-  return <label className="task-board-native-field">
-    <span className="task-board-native-field-label">{label}</span>
+  return <Form.Item label={label} className="task-board-native-field">
     {children}
-  </label>;
+  </Form.Item>;
 }
 
 /**
  * CLI 工具 / 模型 / 思考深度 / 工作模式（可选会话形态）这一组执行配置控件。
  * 任务看板的指派面板与 AI 团队成员编辑共用，保证两处的可选项与联动规则一致。
+ * SDK 执行引擎只在员工/团队候选编辑器中开放。
  */
 export function AgentFields({
   agent,
@@ -63,6 +77,7 @@ export function AgentFields({
   disabled,
   ariaPrefix,
   showKind = false,
+  allowSdkEngine = false,
   teams,
   teamId = "",
   onTeamChange,
@@ -77,7 +92,7 @@ export function AgentFields({
   disabled?: boolean;
   ariaPrefix: string;
   showKind?: boolean;
-  /** 传入后团队会作为额外选项出现在 CLI 工具下拉里；选中团队时隐藏模型等参数。 */
+  allowSdkEngine?: boolean;
   teams?: ReadonlyArray<AiTeam> | null;
   teamId?: string;
   onTeamChange?(teamId: string): void;
@@ -111,20 +126,21 @@ export function AgentFields({
       /> : <span role="status">正在加载工具列表…</span>}
     </AgentField>
     {employee ? <AgentField label="执行顺序">
-      <span className="task-board-team-target">
-        <span>{employee.agents.length} 个结构化候选 · 按顺序降级</span>
-      </span>
+      <Flex align="center" gap={10}>
+        <Typography.Text type="secondary">{employee.agents.length} 个结构化候选 · 按顺序降级</Typography.Text>
+      </Flex>
     </AgentField> : team ? <AgentField label="团队成员">
-      <span className="task-board-team-target">
+      <Flex align="center" gap={10}>
         <TeamAvatarStack members={team.members}/>
-        <span>{team.members.length} 人 · 由负责人拆解分派</span>
-      </span>
+        <Typography.Text type="secondary">{team.members.length} 人 · 由负责人拆解分派</Typography.Text>
+      </Flex>
     </AgentField> : <AgentModelFields
       agent={agent}
       catalog={catalog}
       disabled={disabled}
       ariaPrefix={ariaPrefix}
       showKind={showKind}
+      allowSdkEngine={allowSdkEngine}
       onChange={onChange}
     />}
   </>;
@@ -136,6 +152,7 @@ function AgentModelFields({
   disabled,
   ariaPrefix,
   showKind,
+  allowSdkEngine = false,
   onChange,
 }: {
   agent: WandTaskAgent;
@@ -143,6 +160,7 @@ function AgentModelFields({
   disabled?: boolean;
   ariaPrefix: string;
   showKind: boolean;
+  allowSdkEngine?: boolean;
   onChange(agent: WandTaskAgent): void;
 }): React.ReactElement {
   return <>
@@ -184,6 +202,16 @@ function AgentModelFields({
         })}
       />
     </AgentField>
+    {allowSdkEngine && agent.provider === "pi" && agent.kind === "structured" && <AgentField label="执行引擎">
+      <WandSelect
+        value={agent.engine ?? "cli"}
+        options={AGENT_ENGINE_OPTIONS}
+        ariaLabel={`${ariaPrefix}执行引擎`}
+        className="task-board-native-select"
+        disabled={disabled}
+        onValueChange={(engine) => onChange({ ...agent, engine: engine as WandTaskAgentEngine })}
+      />
+    </AgentField>}
     {showKind && <AgentField label="会话形态">
       <WandSelect
         value={agent.kind}
@@ -191,7 +219,7 @@ function AgentModelFields({
         ariaLabel={`${ariaPrefix}会话形态`}
         className="task-board-native-select"
         disabled={disabled}
-        onValueChange={(kind) => onChange({ ...agent, kind: kind as WandTaskAgent["kind"] })}
+        onValueChange={(kind) => onChange({ ...agent, kind: kind as WandTaskAgent["kind"], ...(kind === "pty" ? { engine: undefined } : {}) })}
       />
     </AgentField>}
   </>;

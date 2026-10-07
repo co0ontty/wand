@@ -1,3 +1,5 @@
+import { WandButton } from "../ui";
+import { Empty, Flex, Splitter, Typography } from "../design-library";
 // 活动工作窗口为 split 时取代单例终端槽位：split 节点递归渲染两个窗格和可拖拽 sash，
 // pane 节点只显示窗格标题/窗口控制（不是第二层 Tab）。终端实例来自 terminal-pool，
 // 每个 session 独立路由 input/output/resize，并拥有自己的缩放比例。
@@ -16,7 +18,6 @@ import {
 } from "./session-order";
 import type { LayoutNode, PaneTab } from "./types";
 import { SessionProviderMark } from "./session-mark";
-import { classNames } from "../ui/class-names";
 import { useUiDispatch, useUiStoreSnapshot } from "../shell/ui-store-react";
 import {
   activeWorkWindow,
@@ -59,20 +60,33 @@ function paneLabel(tab: PaneTab, meta: Map<string, SessionMeta>): string {
 }
 
 /** 在窗格容器里挂一个池终端（sessionId 自路由 input/resize/output）。 */
+const pendingTerminalUnmounts = new Map<string, () => void>();
+
 function SessionPane({ sessionId }: { sessionId: string }) {
   const ref = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
     const rt = runtime();
     const node = ref.current;
     if (!rt || !node) return;
+    pendingTerminalUnmounts.delete(sessionId);
     rt.mountSessionTerminal(sessionId, node);
-    return () => rt.unmountSessionTerminal(sessionId);
+    return () => {
+      // A Splitter direction change replaces panel containers in one commit.
+      // Let the new pane move the existing terminal before releasing its lease.
+      const dispose = () => rt.unmountSessionTerminal(sessionId);
+      pendingTerminalUnmounts.set(sessionId, dispose);
+      queueMicrotask(() => {
+        if (pendingTerminalUnmounts.get(sessionId) !== dispose) return;
+        pendingTerminalUnmounts.delete(sessionId);
+        dispose();
+      });
+    };
   }, [sessionId]);
-  return <div className="ws-session-pane" ref={ref} />;
+  return <div className="ws-session-pane" ref={ref} style={{ height: "100%", width: "100%", position: "relative" }} />;
 }
 
 function PaneEmpty() {
-  return <div className="ws-pane-empty">这个窗格没有可显示的终端</div>;
+  return <Empty className="ws-pane-empty" image={Empty.PRESENTED_IMAGE_SIMPLE} description="这个窗格没有可显示的终端"/>;
 }
 
 function PaneNode({ pane, path, api }: { pane: Extract<LayoutNode, { type: "pane" }>; path: readonly number[]; api: WindowApi }) {
@@ -97,44 +111,46 @@ function PaneNode({ pane, path, api }: { pane: Extract<LayoutNode, { type: "pane
   };
 
   return (
-    <div
-      className="ws-pane"
+    <Flex vertical
+      className="ws-pane" style={{ height: "100%", minHeight: 0, minWidth: 0 }}
       onPointerDownCapture={() => {
         if (activeTab) api.focusTab(activeTab);
       }}
     >
-      <div className="ws-pane-toolbar">
-        <span className="ws-pane-title" title={activeTab ? paneLabel(activeTab, api.sessionMeta) : "空窗格"}>
-          {sessionMeta ? <SessionProviderMark session={sessionMeta} className="ws-pane-logo"/> : null}
-          {activeTab ? paneLabel(activeTab, api.sessionMeta) : "空窗格"}
-        </span>
+      <Flex align="center" gap="small" wrap className="ws-pane-toolbar" style={{ padding: 8, flexShrink: 0 }}>
+        <Flex align="center" gap={4} style={{ flex: "1 1 140px", minWidth: 0 }}>
+          {sessionMeta ? <SessionProviderMark session={sessionMeta} className="ws-pane-logo" size={14}/> : null}
+          <Typography.Text ellipsis style={{ flex: 1, minWidth: 0 }} className="ws-pane-title" title={activeTab ? paneLabel(activeTab, api.sessionMeta) : "空窗格"}>
+            {activeTab ? paneLabel(activeTab, api.sessionMeta) : "空窗格"}
+          </Typography.Text>
+        </Flex>
         {sessionId ? (
-          <div className="ws-pane-scale" role="group" aria-label={`${paneLabel(activeTab, api.sessionMeta)} 终端缩放`}>
-            <button
+          <Flex align="center" gap={4} className="ws-pane-scale" role="group" aria-label={`${paneLabel(activeTab, api.sessionMeta)} 终端缩放`}>
+            <WandButton kind="ghost"
               type="button"
               className="ws-pane-scale-btn"
               aria-label="缩小终端"
               title="缩小这个终端"
               onClick={(event) => { event.stopPropagation(); changeScale(scale - 0.25); }}
-            >−</button>
-            <button
+            >−</WandButton>
+            <WandButton kind="ghost"
               type="button"
               className="ws-pane-scale-value"
               aria-label={`恢复终端缩放，当前 ${Math.round(scale * 100)}%`}
               title="恢复为 100%"
               onClick={(event) => { event.stopPropagation(); changeScale(1); }}
-            >{Math.round(scale * 100)}%</button>
-            <button
+            >{Math.round(scale * 100)}%</WandButton>
+            <WandButton kind="ghost"
               type="button"
               className="ws-pane-scale-btn"
               aria-label="放大终端"
               title="放大这个终端"
               onClick={(event) => { event.stopPropagation(); changeScale(scale + 0.25); }}
-            >+</button>
-          </div>
+            >+</WandButton>
+          </Flex>
         ) : null}
         {activeTab?.kind === "session" ? (
-          <button
+          <WandButton kind="ghost"
             type="button"
             className="ws-pane-btn extract"
             title="把这个终端移出为独立工作窗口 Tab"
@@ -145,10 +161,10 @@ function PaneNode({ pane, path, api }: { pane: Extract<LayoutNode, { type: "pane
             }}
           >
             ↗
-          </button>
+          </WandButton>
         ) : null}
         {activeTab?.kind === "session" ? (
-          <button
+          <WandButton kind="ghost"
             type="button"
             className="ws-pane-btn close"
             title="关闭这个终端"
@@ -160,11 +176,11 @@ function PaneNode({ pane, path, api }: { pane: Extract<LayoutNode, { type: "pane
             }}
           >
             ×
-          </button>
+          </WandButton>
         ) : null}
         {isPrimary ? (
           <>
-            <button
+            <WandButton kind="ghost"
               type="button"
               className="ws-pane-btn files"
               title="打开文件面板"
@@ -172,8 +188,8 @@ function PaneNode({ pane, path, api }: { pane: Extract<LayoutNode, { type: "pane
               onClick={api.openFiles}
             >
               ▤
-            </button>
-            <button
+            </WandButton>
+            <WandButton kind="ghost"
               type="button"
               className="ws-pane-btn exit"
               title="把当前分屏拆成独立工作窗口 Tabs"
@@ -181,70 +197,39 @@ function PaneNode({ pane, path, api }: { pane: Extract<LayoutNode, { type: "pane
               onClick={api.ungroupWindow}
             >
               ◫
-            </button>
+            </WandButton>
           </>
         ) : null}
-      </div>
-      <div className="ws-pane-content">
+      </Flex>
+      <div className="ws-pane-content" style={{ flex: 1, minHeight: 0, position: "relative", contain: "strict", isolation: "isolate", background: "var(--bg-terminal)" }}>
         {activeTab && activeTab.kind === "session"
           ? <SessionPane sessionId={activeTab.sessionId} />
           : <PaneEmpty />}
       </div>
-    </div>
+    </Flex>
   );
 }
 
 function SplitNode({ node, path, api }: { node: Extract<LayoutNode, { type: "split" }>; path: readonly number[]; api: WindowApi }) {
   const [ratio, setRatio] = React.useState(node.ratio);
-  const ratioRef = React.useRef(node.ratio);
-  const containerRef = React.useRef<HTMLDivElement>(null);
-  const dragging = React.useRef(false);
-
-  React.useEffect(() => {
-    ratioRef.current = node.ratio;
-    setRatio(node.ratio);
-  }, [node.ratio]);
-
-  const horizontal = node.dir === "h";
-
-  const onPointerDown = (event: React.PointerEvent) => {
-    dragging.current = true;
-    try { (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId); } catch { /* ignore */ }
+  React.useEffect(() => setRatio(node.ratio), [node.ratio]);
+  const ratioFromSizes = (sizes: number[]) => {
+    const total = sizes.reduce((sum, size) => sum + size, 0);
+    return total > 0 ? Math.max(0.1, Math.min(0.9, sizes[0] / total)) : node.ratio;
   };
-  const onPointerMove = (event: React.PointerEvent) => {
-    if (!dragging.current || !containerRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    const raw = horizontal
-      ? (event.clientX - rect.left) / rect.width
-      : (event.clientY - rect.top) / rect.height;
-    const nextRatio = Math.max(0.1, Math.min(0.9, raw));
-    ratioRef.current = nextRatio;
-    setRatio(nextRatio);
-  };
-  const onPointerUp = () => {
-    if (!dragging.current) return;
-    dragging.current = false;
-    api.mutateRoot(setRatioAtPath(api.root, path, ratioRef.current));
-  };
-
-  return (
-    <div className={classNames("ws-split", horizontal ? "h" : "v")} ref={containerRef}>
-      <div className="ws-split-child" style={{ flexBasis: `${ratio * 100}%`, flexGrow: 0, flexShrink: 0 }}>
-        <LayoutRenderer node={node.children[0]} path={[...path, 0]} api={api} />
-      </div>
-      <div
-        className={classNames("ws-sash", horizontal ? "h" : "v")}
-        role="separator"
-        aria-orientation={horizontal ? "vertical" : "horizontal"}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-      />
-      <div className="ws-split-child" style={{ flex: 1 }}>
-        <LayoutRenderer node={node.children[1]} path={[...path, 1]} api={api} />
-      </div>
-    </div>
-  );
+  // Ant 6 caches the measured axis until the outer box resizes. A direction
+  // change must reset that measurement even when the box has the same bounds.
+  return <Splitter key={node.dir} className="ws-split" orientation={node.dir === "h" ? "horizontal" : "vertical"}
+    style={{ width: "100%", height: "100%" }}
+    onResize={sizes => setRatio(ratioFromSizes(sizes))}
+    onResizeEnd={sizes => api.mutateRoot(setRatioAtPath(api.root, path, ratioFromSizes(sizes)))}>
+    <Splitter.Panel size={`${ratio * 100}%`} min="10%" max="90%">
+      <LayoutRenderer node={node.children[0]} path={[...path, 0]} api={api}/>
+    </Splitter.Panel>
+    <Splitter.Panel size={`${(1 - ratio) * 100}%`} min="10%" max="90%">
+      <LayoutRenderer node={node.children[1]} path={[...path, 1]} api={api}/>
+    </Splitter.Panel>
+  </Splitter>;
 }
 
 function LayoutRenderer({ node, path, api }: { node: LayoutNode; path: readonly number[]; api: WindowApi }) {
@@ -347,8 +332,8 @@ export function WorkspaceWindow(): React.ReactElement | null {
   };
 
   return (
-    <div className="workspace-window">
-      <div className="workspace-window-body">
+    <div className="workspace-window" style={{ flex: 1, minHeight: 0, minWidth: 0 }}>
+      <div className="workspace-window-body" style={{ height: "100%" }}>
         <LayoutRenderer node={root} path={[]} api={api} />
       </div>
     </div>

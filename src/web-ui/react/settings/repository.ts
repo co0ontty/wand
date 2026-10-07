@@ -1,3 +1,7 @@
+import { publishWandModelCatalog } from "../model-catalog";
+import { normalizeModelGroups } from "../../../model-groups.js";
+import { normalizeTaskRetention } from "../../../task-retention.js";
+import { normalizeUserProfile } from "../../../user-profile.js";
 import { parseJsonResponse } from "../http-adapter";
 import { wandOverlay } from "../overlay-controller";
 import type {
@@ -112,6 +116,12 @@ function normalizeGithubConnector(value: unknown): SettingsGithubConnector {
   };
 }
 
+/** 未设置资料时给空串，表单与保存都不必判 undefined；服务端按未设置处理。 */
+function normalizeUserProfileInput(value: unknown): SettingsConfig["userProfile"] {
+  const profile = normalizeUserProfile(value);
+  return { name: profile?.name ?? "", avatar: profile?.avatar ?? "" };
+}
+
 function normalizeConfig(value: unknown): SettingsConfig {
   const input = record(value);
   const defaults = record(input.defaultModels);
@@ -160,6 +170,7 @@ function normalizeConfig(value: unknown): SettingsConfig {
     defaultPiModel: pi,
     defaultGeminiModel: gemini,
     defaultModels: { claude, codex, opencode, grok, qoder, pi, gemini },
+    modelGroups: normalizeModelGroups(input.modelGroups ?? []),
     defaultProvider,
     defaultThinkingEffort,
     commitCli,
@@ -178,6 +189,8 @@ function normalizeConfig(value: unknown): SettingsConfig {
       terminal: cards.terminal === true,
       thinking: cards.thinking === true,
     },
+    taskRetention: normalizeTaskRetention(input.taskRetention),
+    userProfile: normalizeUserProfileInput(input.userProfile),
   };
 }
 
@@ -209,6 +222,8 @@ export function normalizeModels(value: unknown): SettingsModelCatalog {
   const models = (key: string) => Array.isArray(input[key]) ? input[key] as SettingsModelCatalog["models"] : [];
   const defaults = record(input.defaultModels);
   return {
+    modelGroups: normalizeModelGroups(input.modelGroups ?? []),
+    freeModels: models("freeModels"),
     models: models("models"),
     codexModels: models("codexModels"),
     opencodeModels: models("opencodeModels"),
@@ -368,6 +383,7 @@ function aboutSnapshot(input: JsonRecord, access: "admin" | "read-only"): Settin
       dmg: record(input.autoUpdate).dmg === true,
       cli: record(input.autoUpdate).cli === true,
     },
+    openRouter: access === "admin" ? input.openRouter as SettingsSnapshot["openRouter"] ?? null : null,
     models: null,
     providerCliUpdates: null,
     connectCode: null,
@@ -521,8 +537,25 @@ export class HttpSettingsRepository implements SettingsRepository {
         }, options.signal);
         this.runtime.configSaved(normalizeConfig(record(result).config));
         break;
+      case "modelGroups.save": {
+        const saved = await post("/api/settings/config", {
+          modelGroups: normalizeModelGroups(command.value), expectedModelGroups: command.expected,
+        }, options.signal);
+        const config = normalizeConfig(record(saved).config);
+        this.runtime.configSaved(config);
+        const catalog = await request("/api/models", { signal: options.signal }).catch(() => null);
+        if (catalog) publishWandModelCatalog(catalog);
+        result = { ...saved, config, models: catalog ? normalizeModels(catalog) : null };
+        break;
+      }
       case "display.save":
         result = await post("/api/settings/config", { cardDefaults: command.value }, options.signal);
+        this.runtime.configSaved(normalizeConfig(record(result).config));
+        break;
+      case "profile.save":
+        result = await post("/api/settings/config", {
+          userProfile: { name: command.value.name.trim(), avatar: command.value.avatar },
+        }, options.signal);
         this.runtime.configSaved(normalizeConfig(record(result).config));
         break;
       case "password.change":
@@ -539,6 +572,18 @@ export class HttpSettingsRepository implements SettingsRepository {
       case "models.refresh":
         result = normalizeModels(await post("/api/models/refresh", undefined, options.signal));
         break;
+      case "openrouter.save":
+      case "openrouter.refresh":
+      case "openrouter.clear": {
+        const status = command.type === "openrouter.clear"
+          ? await request("/api/settings/openrouter", { method: "DELETE", signal: options.signal })
+          : await post(command.type === "openrouter.save" ? "/api/settings/openrouter" : "/api/settings/openrouter/refresh",
+            command.type === "openrouter.save" ? { apiKey: command.apiKey } : undefined, options.signal);
+        const catalog = await request("/api/models", { signal: options.signal }).catch(() => null);
+        if (catalog) publishWandModelCatalog(catalog);
+        result = { ...status, ...(catalog ? { models: normalizeModels(catalog) } : {}) };
+        break;
+      }
       case "webUpdate.check":
         result = await request("/api/check-update", { signal: options.signal });
         break;

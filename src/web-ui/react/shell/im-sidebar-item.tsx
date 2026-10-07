@@ -1,82 +1,53 @@
+import { Badge, Flex, Typography } from "antd";
+import { WandButton } from "../ui";
 import * as React from "react";
-import { WandIcon } from "../ui/index.js";
-import type { EmployeePresence } from "../agents/employee-presence.js";
+import { classNames } from "../ui/class-names";
+import type { GlowStatus, SidebarSessionState } from "../workspaces/sidebar-session-state";
+import { sidebarGlowColor } from "../workspaces/sidebar-session-state";
 
 export interface ImSidebarItemProps {
   id: string;
   avatarNode?: React.ReactNode;
   title: string;
-  presence?: EmployeePresence;
+  state: SidebarSessionState;
+  glow?: GlowStatus;
   summary: string;
-  time?: string;
-  unreadCount?: number;
   active?: boolean;
-  compact?: boolean;
   onClick(): void;
 }
 
 export function ImSidebarItem({
-  id,
-  avatarNode,
-  title,
-  presence,
-  summary,
-  time,
-  unreadCount = 0,
-  active = false,
-  compact = false,
-  onClick,
+  id, avatarNode, title, state, glow, summary, active = false, onClick,
 }: ImSidebarItemProps): React.ReactElement {
-  const showChip = presence && presence.text !== "空闲" && presence.text !== "未开始";
-
-  const itemCls = [
-    "session-item",
-    "im-sidebar-item",
-    active ? "active" : "",
-    compact ? "is-compact" : "",
-  ].filter(Boolean).join(" ");
-
-  const dotCls = presence ? [
-    "im-sidebar-presence-dot",
-    `tone-${presence.tone}`,
-    presence.dotKind === "solid-spin" ? "is-spin" : "",
-    presence.dotKind === "hollow" ? "is-hollow" : "",
-  ].filter(Boolean).join(" ") : "";
-
+  const effectiveGlow = glow ?? (
+    state.label === "运行中" ? "running"
+      : state.label === "思考中" ? "thinking"
+      : state.label === "刚完成" ? "just-completed"
+      : state.tone === "warning" ? "permission"
+      : state.label === "失败" ? "failed"
+      : "none"
+  );
+  const descriptionId = React.useId();
   return (
-    <button
-      type="button"
-      className={itemCls}
-      data-session-id={id}
-      title={`${title}${presence ? ` · ${presence.text}` : ""}`}
-      onClick={onClick}
-    >
-      <div className="im-sidebar-item-avatar-wrap">
-        {avatarNode}
-        {presence ? <span className={dotCls} aria-hidden="true" /> : null}
-      </div>
-
-      {!compact ? (
-        <div className="im-sidebar-item-body">
-          <div className="im-sidebar-item-row-top">
-            <span className="im-sidebar-item-name">{title}</span>
-            {showChip ? (
-              <span className={`im-sidebar-presence-chip tone-${presence.tone}`}>
-                {presence.text}
-              </span>
-            ) : null}
-            {time ? <span className="im-sidebar-item-time">{time}</span> : null}
-          </div>
-          <div className="im-sidebar-item-row-bottom">
-            <span className="im-sidebar-item-summary">{summary || "暂无消息"}</span>
-            {unreadCount > 0 ? (
-              <span className="im-sidebar-unread-badge">
-                {unreadCount > 99 ? "99+" : unreadCount}
-              </span>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
-    </button>
+    <WandButton kind={active ? "soft" : "ghost"} type="button" className={`session-item wand-sidebar-session-row${active ? " active" : ""}`}
+      style={{ width: "100%", height: "auto", whiteSpace: "normal", justifyContent: "flex-start", padding: 8 }}
+      data-session-id={id} aria-current={active ? "page" : undefined}
+      aria-describedby={descriptionId} title={`${title} · ${summary}`} onClick={onClick}>
+      <span
+        className={classNames(
+          "im-sidebar-item-avatar-wrap",
+          effectiveGlow !== "none" && `wand-logo-glow glow-${effectiveGlow}`,
+        )}
+        style={{ width: 28, height: 28, display: "inline-flex", flexShrink: 0 }}
+        data-glow={effectiveGlow}
+        aria-hidden="true"
+      >
+        <Badge dot={effectiveGlow !== "none"} color={sidebarGlowColor(effectiveGlow)}>{avatarNode}</Badge>
+      </span>
+      <Flex vertical className="im-sidebar-item-body" style={{ minWidth: 0, textAlign: "start", flex: 1 }}>
+        <Typography.Text ellipsis className="im-sidebar-item-name">{title}</Typography.Text>
+        <Typography.Text ellipsis type="secondary" id={descriptionId} className="im-sidebar-item-summary" style={{ fontSize: 12 }}>{summary}</Typography.Text>
+      </Flex>
+    </WandButton>
   );
 }

@@ -1,3 +1,6 @@
+import type { ModelGroup } from "../../../model-groups.js";
+import type { TaskRetentionSettings } from "../../../task-retention.js";
+
 export interface SettingsGithubConnector {
   provider: "github";
   connected: boolean;
@@ -21,7 +24,8 @@ export type SettingsTab =
   | "notifications"
   | "security"
   | "presets"
-  | "display";
+  | "display"
+  | "profile";
 
 type SettingsAccess = "admin" | "read-only";
 /** Provider 的唯一真源：浏览器层沿用 provider-identity（不拉服务端 types 进 bundle）。 */
@@ -112,6 +116,7 @@ type SettingsExecutionMode =
   | "managed";
 
 export interface SettingsConfig {
+  modelGroups?: ModelGroup[];
   host: string;
   port: number;
   https: boolean;
@@ -134,6 +139,15 @@ export interface SettingsConfig {
   commitModel: string;
   commandPresets: SettingsCommandPreset[];
   cardDefaults: SettingsCardDefaults;
+  taskRetention: TaskRetentionSettings;
+  /** 用户自己的显示名与头像；会话里「我」这条发言用它署名。 */
+  userProfile: SettingsUserProfile;
+}
+
+/** 与服务端 `UserProfileConfig` 同构：空字符串表示未设置，回落默认署名。 */
+export interface SettingsUserProfile {
+  name: string;
+  avatar: string;
 }
 
 export interface SettingsAutoUpdate {
@@ -143,7 +157,24 @@ export interface SettingsAutoUpdate {
   cli: boolean;
 }
 
+export interface SettingsOpenRouterStatus {
+  candidateCount?: number;
+  rejectedCount?: number;
+  configured: boolean;
+  group: string;
+  modelCount: number;
+  lastCheckedAt: string | null;
+  lastSyncedAt: string | null;
+  lastError: string | null;
+  refreshIntervalHours: number;
+}
+
+export interface SettingsOpenRouterResult extends SettingsOpenRouterStatus {
+  models?: SettingsModelCatalog;
+}
+
 export interface SettingsModelOption {
+  group?: string;
   id: string;
   label: string;
   note?: string;
@@ -157,6 +188,8 @@ export interface SettingsModelOption {
 }
 
 export interface SettingsModelCatalog {
+  modelGroups?: ModelGroup[];
+  freeModels?: SettingsModelOption[];
   models: SettingsModelOption[];
   codexModels: SettingsModelOption[];
   opencodeModels: SettingsModelOption[];
@@ -262,6 +295,7 @@ export interface SettingsSnapshot {
   restartRequired: boolean;
   hasCert: boolean;
   autoUpdate: SettingsAutoUpdate;
+  openRouter?: SettingsOpenRouterStatus | null;
   models: SettingsModelCatalog | null;
   providerCliUpdates: SettingsProviderCliUpdates | null;
   connectCode: SettingsConnectCode | null;
@@ -285,6 +319,7 @@ export interface SettingsGeneralInput {
   shell: string;
   language: string;
   inheritEnv: boolean;
+  taskRetention: TaskRetentionSettings;
 }
 
 export interface SettingsAiInput {
@@ -299,12 +334,23 @@ export interface SettingsAiInput {
   defaultThinkingEffort: SettingsThinkingEffort;
 }
 
+export interface SettingsRetentionSweep {
+  archivedSessions: number;
+  purgedSessions: number;
+  archivedTasks: number;
+  purgedTasks: number;
+  purgedTeamRuns?: number;
+}
+
 interface SettingsSaveResult {
   ok: boolean;
   config: SettingsConfig;
   desiredConfig: SettingsConfig;
   activeConfig: SettingsConfig;
   restartRequired: boolean;
+  /** 本次保存包含任务保留设置时，服务端已立即重扫。 */
+  retention?: SettingsRetentionSweep;
+  retentionError?: string;
 }
 
 interface SettingsEnvironmentEntry {
@@ -352,10 +398,15 @@ export type SettingsCommand =
   | { type: "general.save"; value: SettingsGeneralInput }
   | { type: "ai.save"; value: SettingsAiInput }
   | { type: "display.save"; value: SettingsCardDefaults }
+  | { type: "profile.save"; value: SettingsUserProfile }
   | { type: "password.change"; password: string }
   | { type: "certificate.upload"; key: string; cert: string }
   | { type: "environment.load"; reveal?: boolean }
   | { type: "models.refresh" }
+  | { type: "modelGroups.save"; value: ModelGroup[]; expected: ModelGroup[] }
+  | { type: "openrouter.save"; apiKey: string }
+  | { type: "openrouter.refresh" }
+  | { type: "openrouter.clear" }
   | { type: "github.connect"; value: SettingsGithubConnectInput }
   | { type: "github.disconnect" }
   | { type: "github.request"; method: "GET" | "POST" | "PATCH"; path: string; body?: Record<string, unknown> }
@@ -389,10 +440,15 @@ interface SettingsCommandResultMap {
   "general.save": SettingsSaveResult;
   "ai.save": SettingsSaveResult;
   "display.save": SettingsSaveResult;
+  "profile.save": SettingsSaveResult;
   "password.change": { ok: boolean; reauthenticationRequired: boolean };
   "certificate.upload": { ok: boolean; restartRequired: boolean; hasCert: boolean };
   "environment.load": SettingsEnvironmentPreview;
   "models.refresh": SettingsModelCatalog;
+  "modelGroups.save": SettingsSaveResult & { models: SettingsModelCatalog | null };
+  "openrouter.save": SettingsOpenRouterResult;
+  "openrouter.refresh": SettingsOpenRouterResult;
+  "openrouter.clear": SettingsOpenRouterResult;
   "github.connect": SettingsGithubConnector;
   "github.disconnect": { ok: boolean; connected: false };
   "github.request": unknown;

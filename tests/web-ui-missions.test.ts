@@ -58,17 +58,17 @@ test("任务面板的状态标签与 provider 名都有兜底，加号是图标�
   // 四个渲染点全走同一个出口，认不出来的状态不再漏英文 id、也不渲染成空芯片。
   assert.doesNotMatch(host, /\{STATE_LABELS\[[^\]]+\]\}/);
   assert.equal((host.match(/missionStateLabel\(/g) ?? []).length, 5, "一处定义 + 四处调用");
-  assert.match(host, /<small>\{missionStateLabel\(item\.state\)\}\{item\.summary/);
+  assert.match(host, /<Typography.Text type="secondary">\{missionStateLabel\(item\.state\)\}\{item\.summary/);
   assert.match(host, /个 Agent · \{missionStateLabel\(mission\.status\)\}/);
 
   // provider 名取自看板同一个标签函数，不再直接印内部 id。
-  assert.match(host, /<strong>\{issueAgentProviderLabel\(attempt\.provider\)\}<\/strong>/);
-  assert.match(host, /<h3>\{issueAgentProviderLabel\(diffAttempt\.provider\)\} 的 Diff<\/h3>/);
+  assert.match(host, /title=\{<Space>[\s\S]*issueAgentProviderLabel\(attempt\.provider\)/);
+  assert.match(host, /title=\{`\$\{issueAgentProviderLabel\(diffAttempt\.provider\)\} 的 Diff`\}/);
   assert.doesNotMatch(host, /\{diffAttempt\.provider\} Diff/);
   assert.notEqual(issueAgentProviderLabel("claude"), "claude");
   assert.equal(issueAgentProviderLabel(""), "Agent", "空值也不空白");
 
-  assert.match(host, /<WandIcon name="plus" slot="start" size=\{13\}\/>\s*<span>新任务<\/span>/);
+  assert.match(host, /<WandIcon name="plus" slot="start" size=\{13\}\/>新任务/);
   assert.doesNotMatch(host, /＋/);
 });
 

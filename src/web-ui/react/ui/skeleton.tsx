@@ -1,15 +1,10 @@
-import { Skeleton, type SkeletonProps } from "@appica/ui-react/skeleton";
+import { Skeleton } from "antd";
 import * as React from "react";
 import { classNames } from "./class-names";
-
-export type WandSkeletonProps = SkeletonProps;
-
-export function WandSkeleton({ className, ...props }: WandSkeletonProps) {
-  return (
-    <Skeleton
-      {...props}
-      aria-hidden="true"
-      className={classNames("wand-ui-skeleton", className)}
-    />
-  );
+import { WandUiBoundary } from "../theme";
+export type WandSkeletonProps = React.ComponentPropsWithRef<"div"> & { effect?: "shimmer" | "pulse" | "none" };
+export function WandSkeleton({ className, effect = "shimmer", ...props }: WandSkeletonProps) {
+  return <WandUiBoundary><div {...props} aria-hidden="true" className={classNames("wand-ui-skeleton", className)}>
+    <Skeleton.Input active={effect !== "none"} block size="small"/>
+  </div></WandUiBoundary>;
 }

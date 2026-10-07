@@ -1,3 +1,5 @@
+import { mountComposerSender } from "./composer-sender-adapter.js";
+import { mountBrowserButtons } from "./library-buttons.js";
 import type { SendError } from "./types";
 import { composer as composerStore, composerQueue, state } from "./state";
 import { t } from "./i18n";
@@ -9,10 +11,11 @@ import { clearActivityDetailState, renderChat, shortCommand } from "./chat-rende
 import { getStructuredQueuedInputs, persistCrossSessionQueue, persistSelectedId, prepareChatBottomFollow, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession } from "./chat-scroll";
 import "./file-browser";
 import "./git-commit";
-import { showToast, wandConfirm } from "./notifications";
+import { showToast, wandConfirm, wandPrompt as uiPrompt } from "./notifications";
 import { getEffectiveCwd } from "./render";
 import { applyCurrentView, buildAttachmentPrefix, canSendComposer, clearDraftValueForSession, closePlusPopover, COMPOSER_IDLE_HINT, dismissDrawerIfOverlay, getComposerPlaceholder, getDraftValueForSession, getPendingAttachments, getPreferredMessages, getPreferredTool, isStructuredSession, selectSession, loadOutput, refreshAll, renderAttachmentPreview, restoreComposerStateForSession, setDraftValue, setDraftValueForSession, shouldBracketPtyPaste, subscribeToSession, syncComposerHasText, updateSessionSnapshot, updateSessionsList, uploadAttachments, withTerminalDimensions } from "./session-engine";
 import { confirmDelete } from "./sidebar";
+import { clearRunningStatusBar, paintRunningStatusBar } from "./running-status-adapter.js";
 import { initTerminal, maybeScrollTerminalToBottom, scheduleSoftResyncTerminal, waitForProviderPaint, waitForTerminalSettled } from "./terminal";
 import { ensureTerminalFit, scheduleClosedViewportBaselineWindow, syncAppViewportHeight, updateJoystickPanelUI, updateJoystickVisibility } from "./viewport";
 import "./websocket";
@@ -24,7 +27,9 @@ import { syncBrowserComposerPopover } from "./composer-popover-adapter";
 import { showActionError } from "./composer-action-error";
 import { syncBrowserComposerVoice } from "./composer-voice-adapter";
 import { shouldPersistQueueItemRestore } from "./composer-draft";
+import { handlePiSettingsSubmit, syncPiSettingsComposer } from "./pi-settings-adapter";
 import { resolveInsertBeforeAnchor } from "./queue-dom";
+import { clearQueueView, paintCrossSessionQueue, paintQueueBar } from "./queue-view-adapter";
 
 function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   return fetch(input, { ...init,
@@ -492,7 +497,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         var blankQueueHost = document.getElementById("cross-session-queue-host");
 
         if (state.crossSessionQueue.length === 0) {
-          if (container) container.remove();
+          if (container) { clearQueueView(container as HTMLElement); container.remove(); }
           persistCrossSessionQueue();
           return;
         }
@@ -511,6 +516,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
 
         // If container exists but is in the wrong parent, move it
         if (container && container.parentNode !== parent) {
+          clearQueueView(container as HTMLElement);
           container.remove();
           container = null;
         }
@@ -528,28 +534,9 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           parent.insertBefore(container, insertBefore);
         }
 
-        var total = state.crossSessionQueue.length;
-        var items = state.crossSessionQueue.map(function(item, i) {
-          var preview = item.text.length > 60 ? item.text.slice(0, 60) + "…" : item.text;
-          var age = formatQueueAge(item.queuedAt);
-          return '<div class="queue-item" data-queue-id="' + escapeHtml(item.id) + '">' +
-            '<span class="queue-item-dot"></span>' +
-            '<span class="queue-item-text" title="' + escapeHtml(item.text) + '">' + escapeHtml(preview) + '</span>' +
-            '<span class="queue-item-age">' + age + '</span>' +
-            '<button class="queue-item-send-now" data-queue-id="' + escapeHtml(item.id) + '" title="立即发送" type="button">发送</button>' +
-            // × 没有可见文本，只有 title 时读屏念不出动作（WCAG 2.2 AA 4.1.2）。
-            '<button class="queue-item-cancel" data-queue-id="' + escapeHtml(item.id) + '" title="取消" aria-label="取消这条排队消息" type="button">×</button>' +
-          '</div>';
-        }).join("");
-
-        var header = total > 1
-          ? '<div class="queue-header">' +
-              '<span class="queue-header-label">排队 ' + total + ' 条</span>' +
-              '<button class="queue-header-clear" id="queue-clear-all" type="button" title="清空排队">清空</button>' +
-            '</div>'
-          : '';
-
-        container.innerHTML = header + items;
+        paintCrossSessionQueue(container as HTMLElement, state.crossSessionQueue.map(item => ({
+          id: item.id, text: item.text, age: formatQueueAge(item.queuedAt),
+        })));
       }
 
       // 跨会话排队条的节拍器：只在队列非空时运行。以前它是模块级 interval，
@@ -807,6 +794,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           && state.promptOptimizeRequest.sessionId === sessionId) {
           return Promise.resolve();
         }
+        if (handlePiSettingsSubmit(value, selectedSession)) return Promise.resolve();
         if (!sessionId || !canSendComposer(value, sessionId)) return Promise.resolve();
 
         var existingSubmission = composerStore.pendingSubmission(sessionId, { text: value, attachments: pendingAttachments });
@@ -1316,15 +1304,6 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
       // ──────────────────────────────────────────────────────────────────────────
 
       var QUEUE_BAR_MAX = 10;            // 后端硬上限
-      var QUEUE_CHIP_MAX_TEXT = 26;      // 单行气泡字数上限（一行一个，右侧贴边）
-
-      function queueChipTruncate(text) {
-        if (typeof text !== "string") return "";
-        var s = text.replace(/\s+/g, " ").trim();
-        if (s.length <= QUEUE_CHIP_MAX_TEXT) return s;
-        return s.slice(0, QUEUE_CHIP_MAX_TEXT) + "…";
-      }
-
       // 旧的「展开/收起」整体态已下线（气泡条改为常驻垂直列表）。保留 setter 供
       // ESC 兜底调用，确保任何遗留 expanded class 都会被清掉。
       function isQueueBarExpanded() {
@@ -1338,60 +1317,6 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         if (bar) bar.classList.toggle("expanded", !!expanded);
       }
 
-      function renderQueueBarHtml(items, inFlight, atCapacity) {
-        var n = items.length;
-        var barClass = "queue-bar";
-        if (atCapacity) barClass += " queue-bar-capacity";
-        if (inFlight) barClass += " queue-bar-inflight";
-
-        var promoteTitle = inFlight ? "中断当前回复，立即发送这条" : "立即发送这条";
-        // 始终垂直列表：一行一个气泡，右侧贴边，浮在输入框顶边线上方。
-        // 每条气泡：编号 + 单行截断文本 + ⚡ 立即 + × 删除。气泡本体可按住拖动调序。
-        var chipNodes = "";
-        for (var i = 0; i < n; i++) {
-          var raw = items[i] == null ? "" : String(items[i]);
-          var displayText = queueChipTruncate(raw);
-          var titleAttr = raw + "（按住可拖动调序）";
-          chipNodes +=
-            '<li class="queue-bar-item" data-index="' + i + '" data-action="drag"' +
-                ' title="' + escapeHtml(titleAttr) + '">' +
-              '<span class="queue-bar-item-index" aria-hidden="true">' + (i + 1) + '</span>' +
-              '<span class="queue-bar-item-text">' + escapeHtml(displayText) + '</span>' +
-              '<button type="button" data-action="edit" title="编辑" aria-label="编辑第 ' + (i + 1) + ' 条">✎</button>' +
-              '<button type="button" class="queue-bar-item-promote" data-action="promote-item"' +
-                    ' title="' + escapeHtml(promoteTitle) + '" aria-label="立即发送第 ' + (i + 1) + ' 条">' +
-                '<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
-                  '<path d="M13 2 L4 14 L11 14 L10 22 L20 9 L13 9 Z"/>' +
-                '</svg>' +
-              '</button>' +
-              '<button type="button" class="queue-bar-item-delete" data-action="delete"' +
-                    ' aria-label="删除第 ' + (i + 1) + ' 条排队消息" title="删除">' +
-                '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"' +
-                    ' stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-                    '<line x1="6" y1="6" x2="18" y2="18"/><line x1="6" y1="18" x2="18" y2="6"/></svg>' +
-              '</button>' +
-            '</li>';
-        }
-
-        // 顶部小工具条：仅在 ≥2 条时出现，展示条数 + 「清空」。右侧贴边。
-        var headerBar = "";
-        if (n >= 2) {
-          headerBar =
-            '<div class="queue-bar-head">' +
-              '<span class="queue-bar-head-count">' + n + ' 条排队</span>' +
-              '<button type="button" class="queue-bar-clear-all" data-action="clear-all"' +
-                    ' title="清空全部排队" aria-label="清空全部 ' + n + ' 条排队消息">清空</button>' +
-            '</div>';
-        }
-
-        return (
-          '<div class="' + barClass + '" data-queue-bar="1" title="排队 ' + n + ' 条（按住气泡可调序）">' +
-            headerBar +
-            '<ol class="queue-bar-list" data-queue-list="1">' + chipNodes + '</ol>' +
-          '</div>'
-        );
-      }
-
       export function updateQueueBar() {
         var host = document.getElementById("queue-bar-host");
         if (!host) return;
@@ -1402,7 +1327,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
 
         if (!isStructured || queue.length === 0) {
           host.hidden = true;
-          host.innerHTML = "";
+          clearQueueView(host);
           // 队列空时同步把"展开"标志收回，避免下次出现新排队时还是展开态。
           state.queueBarExpanded = false;
           return;
@@ -1415,7 +1340,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         var inFlight = !!(session.structuredState && session.structuredState.inFlight && session.status === "running");
         var atCapacity = queue.length >= QUEUE_BAR_MAX;
 
-        host.innerHTML = renderQueueBarHtml(queue, inFlight, atCapacity);
+        paintQueueBar(host, queue, inFlight, atCapacity);
       }
 
       // ── 单条删除 / 全部清空 / 队首插队 ──
@@ -1431,25 +1356,61 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         }
       }
 
+      var queueBarEditing = new Set<string>();
       async function queueBarEditItem(index) {
         var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
         var original = session && session.queuedMessages && session.queuedMessages[index];
-        if (typeof original !== "string") return;
-        var edited = window.prompt("编辑排队消息", original);
-        if (edited === null || edited.trim() === original) return;
-        if (!edited.trim()) { flashComposerFailed("排队消息不能为空。"); return; }
-        var mutationVersion = composerQueue.advance(session.id, "local");
+        if (typeof original !== "string" || queueBarEditing.has(session.id)) return;
+        var sessionId = session.id;
+        var originalQueue = session.queuedMessages.slice();
+        var version = composerQueue.read(sessionId);
+        var draft = original;
+        var message = "修改这条排队消息";
+        var isCurrent = function() {
+          var current = state.sessions.find(function(s) { return s.id === sessionId; });
+          var now = composerQueue.read(sessionId);
+          var queue = current && current.queuedMessages;
+          return !!current && state.selectedId === sessionId
+            && now.revision === version.revision && now.epoch === version.epoch
+            && Array.isArray(queue) && queue.length === originalQueue.length
+            && queue.every(function(text, position) { return text === originalQueue[position]; });
+        };
+        queueBarEditing.add(sessionId);
         try {
-          var res = await compactSessionFetch("/api/structured-sessions/" + encodeURIComponent(session.id) + "/queued/" + index, {
-            method: "PATCH", credentials: "same-origin",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ expectedText: original, text: edited }),
-          });
-          if (!res.ok) throw new Error((await res.json()).error || "编辑失败");
-          var snapshot = { id: session.id, queuedMessages: (await res.json()).queuedMessages };
-          updateSessionSnapshot(composerQueue.filter(snapshot, session.id, mutationVersion));
-          updateQueueBar();
-        } catch (err) { flashComposerFailed((err && err.message) || "编辑排队消息失败。"); }
+          while (true) {
+            var edited = await uiPrompt(message, draft, { title: "编辑排队消息", okLabel: "保存" });
+            if (edited === null || edited.trim() === original) return;
+            if (!isCurrent()) {
+              showToast("会话或排队内容已更新，此次编辑已取消。", "warning");
+              return;
+            }
+            draft = edited;
+            if (!edited.trim()) { message = "排队消息不能为空。"; continue; }
+            version = composerQueue.advance(sessionId, "local");
+            try {
+              var res = await compactSessionFetch("/api/structured-sessions/" + encodeURIComponent(sessionId) + "/queued/" + index, {
+                method: "PATCH", credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ expectedText: original, text: edited }),
+              });
+              if (!res.ok) throw new Error((await res.json()).error || "编辑失败");
+              var payload = await res.json();
+              if (!Array.isArray(payload.queuedMessages)) throw new Error("编辑结果暂不可用，请检查排队内容。");
+              if (!state.sessions.some(function(s) { return s.id === sessionId; })) return;
+              var snapshot = composerQueue.filter({ id: sessionId, queuedMessages: payload.queuedMessages }, sessionId, version);
+              if (snapshot.queuedMessages) updateSessionSnapshot(snapshot);
+              if (state.selectedId === sessionId) updateQueueBar();
+              return;
+            } catch (err) {
+              // Keep the entered text in the same owner's dialog. A late error
+              // must neither reopen it over another session nor replace new queue state.
+              if (!isCurrent()) return;
+              message = getErrorMessage(err, "编辑排队消息失败。") + " 请重试或取消。";
+            }
+          }
+        } catch (err) {
+          if (isCurrent()) showToast(getErrorMessage(err, "无法打开编辑对话框，排队内容已保留。"), "error");
+        } finally { queueBarEditing.delete(sessionId); }
       }
 
       function queueBarDeleteItem(index) {
@@ -1814,7 +1775,17 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           return base;
         }
         if (session.structuredState && session.structuredState.inFlight) {
-          var last = base[base.length - 1];
+          // Provider tool-result envelopes may use role=user, but are not a new
+          // human turn. Do not insert a second processing row below an open tool.
+          var last = null;
+          for (var lastIndex = base.length - 1; lastIndex >= 0; lastIndex--) {
+            var message = base[lastIndex];
+            if (message.role !== "user" || !Array.isArray(message.content) ||
+              message.content.some(function(block) { return block?.type !== "tool_result"; })) {
+              last = message;
+              break;
+            }
+          }
           if (!last || last.role !== "assistant") {
             base.push({ role: "assistant", content: [{ type: "text", text: "", __processing: true }] });
           }
@@ -2386,6 +2357,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
       }
 
       export function updateInteractiveControls() {
+        mountComposerSender(autoResizeInput);
         var selectedSession = state.sessions.find(function(session) { return session.id === state.selectedId; });
         var structured = isStructuredSession(selectedSession);
         var isCodex = selectedSession && selectedSession.provider === "codex";
@@ -2446,6 +2418,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
             focusInputWithSelection(document.getElementById("input-box"));
           },
         });
+        syncPiSettingsComposer();
         var promptOptimizeBtn = document.getElementById("prompt-optimize-btn") as HTMLButtonElement | null;
         if (promptOptimizeBtn) {
           promptOptimizeBtn.disabled = promptOptimizeBusyAnywhere;
@@ -2522,6 +2495,23 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         var container = document.getElementById("output");
         if (container) container.classList.toggle("interactive", !structured && state.terminalInteractive);
         updateJoystickVisibility();
+        paintSelectedRunningStatus();
+      }
+
+      // 会话区持续可见的「正在执行」状态条。只在聊天视图投影，终端视图不抢位置。
+      function paintSelectedRunningStatus() {
+        var host = document.getElementById("chat-running-host");
+        if (!host) return;
+        var selected = state.sessions.find(function(session) { return session.id === state.selectedId; });
+        var chatVisible = !!selected && document.getElementById("chat-output") != null
+          && !(document.getElementById("chat-output") as HTMLElement).classList.contains("hidden");
+        if (!chatVisible) {
+          clearRunningStatusBar(host);
+          return;
+        }
+        paintRunningStatusBar(host, selected
+          ? { ...selected, ptyRunning: computeRunningSignal(selected).ptyRunning }
+          : null);
       }
 
       // COPY-2/COPY-4: 是否存在落在终端输出区(#output)内的活动文本选区。用于：

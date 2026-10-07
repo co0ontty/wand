@@ -4,11 +4,14 @@ import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promi
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { AndroidApkConfig, CardExpandDefaults, ExecutionMode, IosIpaConfig, MacosDmgConfig, RenderConfig, RenderEngine, SessionProvider, StructuredChatPersonaConfig, WandConfig } from "./types.js";
+import { AndroidApkConfig, CardExpandDefaults, ExecutionMode, HarnessConfig, HarnessEngine, IosIpaConfig, MacosDmgConfig, RenderConfig, RenderEngine, SessionProvider, StructuredChatPersonaConfig, WandConfig } from "./types.js";
 import type { WandStorage } from "./storage.js";
 import { isRunningAsRoot } from "./env-utils.js";
 import { isSessionProvider, SESSION_PROVIDERS } from "./session-provider.js";
 import { isThinkingEffort } from "./structured-provider-common.js";
+import { normalizeModelGroups } from "./model-groups.js";
+import { normalizeUserProfile, parseUserProfile } from "./user-profile.js";
+import { defaultTaskRetention, normalizeTaskRetention, parseTaskRetention } from "./task-retention.js";
 
 const DEFAULT_CONFIG_DIR = ".wand";
 const DEFAULT_CONFIG_FILE = "config.json";
@@ -33,6 +36,7 @@ export const PREFERENCE_KEYS = [
   "defaultQoderModel",
   "defaultPiModel",
   "defaultGeminiModel",
+  "modelGroups",
   "commitCli",
   "commitModel",
   "systemAiCli",
@@ -41,6 +45,8 @@ export const PREFERENCE_KEYS = [
   "language",
   "cardDefaults",
   "inheritEnv",
+  "taskRetention",
+  "userProfile",
 ] as const satisfies readonly (keyof WandConfig)[];
 
 export type PreferenceKey = (typeof PREFERENCE_KEYS)[number];
@@ -122,9 +128,11 @@ export const defaultConfig = (): WandConfig => ({
   macos: defaultMacosDmgConfig(),
   ios: defaultIosIpaConfig(),
   render: defaultRenderConfig(),
+  harness: defaultHarnessConfig(),
   structured: { processHost: "legacy" },
   localDecision: { enabled: false, pythonPath: "", modelPath: "" },
   cardDefaults: defaultCardExpandDefaults(),
+  taskRetention: defaultTaskRetention(),
   defaultModel: "",
   defaultCodexModel: "",
   defaultOpenCodeModel: "",
@@ -132,6 +140,7 @@ export const defaultConfig = (): WandConfig => ({
   defaultQoderModel: "",
   defaultPiModel: "",
   defaultGeminiModel: "",
+  modelGroups: [],
   commitCli: "claude",
   commitModel: "",
   systemAiModel: "",
@@ -376,6 +385,9 @@ export function applyStoragePreferences(config: WandConfig, storage: WandStorage
     const v = storage.getPreference<string>(dbKey, defaults[field] ?? "");
     if (typeof v === "string") config[field] = v.trim();
   }
+  if (storage.hasPreference(preferenceStorageKey("modelGroups"))) {
+    config.modelGroups = normalizeModelGroups(storage.getPreference<unknown>(preferenceStorageKey("modelGroups"), []));
+  }
   if (storage.hasPreference(preferenceStorageKey("commitCli"))) {
     const v = storage.getPreference<string>(preferenceStorageKey("commitCli"), defaults.commitCli ?? "claude");
     if (v === "claude" || v === "codex" || v === "opencode") config.commitCli = v;
@@ -408,6 +420,14 @@ export function applyStoragePreferences(config: WandConfig, storage: WandStorage
     const v = storage.getPreference<unknown>(preferenceStorageKey("inheritEnv"), defaults.inheritEnv ?? true);
     config.inheritEnv = v === false ? false : true;
   }
+  if (storage.hasPreference(preferenceStorageKey("taskRetention"))) {
+    config.taskRetention = normalizeTaskRetention(
+      storage.getPreference<unknown>(preferenceStorageKey("taskRetention"), defaults.taskRetention),
+    );
+  }
+  if (storage.hasPreference(preferenceStorageKey("userProfile"))) {
+    config.userProfile = normalizeUserProfile(storage.getPreference<unknown>(preferenceStorageKey("userProfile"), null));
+  }
   return config;
 }
 
@@ -428,6 +448,12 @@ export function writePreferenceToStorage(
     return;
   }
   switch (key) {
+    case "modelGroups": {
+      const groups = normalizeModelGroups(value);
+      storage.setPreference(dbKey, groups);
+      config.modelGroups = groups;
+      break;
+    }
     case "defaultProvider": {
       if (!isSessionProvider(value)) throw new Error(`无效 Provider: ${String(value)}`);
       storage.setPreference(dbKey, value);
@@ -506,6 +532,18 @@ export function writePreferenceToStorage(
       const v = value;
       storage.setPreference(dbKey, v);
       config.inheritEnv = v;
+      break;
+    }
+    case "taskRetention": {
+      const retention = parseTaskRetention(value);
+      storage.setPreference(dbKey, retention);
+      config.taskRetention = retention;
+      break;
+    }
+    case "userProfile": {
+      const profile = parseUserProfile(value);
+      storage.setPreference(dbKey, profile ?? null);
+      config.userProfile = profile;
       break;
     }
   }
@@ -600,6 +638,41 @@ function normalizeRenderConfig(input: unknown): RenderConfig | undefined {
   const engine: RenderEngine = raw.engine === "rust" || raw.engine === "legacy" ? raw.engine : "auto";
   const binaryPath = typeof raw.binaryPath === "string" ? raw.binaryPath.trim() : "";
   return { engine, ...(binaryPath ? { binaryPath } : {}) };
+}
+
+/**
+ * 默认 auto：Pi 侧有可用认证时，结构化 pi 会话走进程内 core，否则保持 CLI。
+ * 放在 config.json（部署项）而非 SQLite 偏好里：它决定「谁持有 agent loop」，属于部署决策。
+ */
+function defaultHarnessConfig(): HarnessConfig {
+  return { engine: "auto" };
+}
+
+function normalizeHarnessTokenLimit(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+/** 旧 config.json 没有 harness 字段时回落到默认值，不能因为新字段让启动失败。 */
+function normalizeHarnessConfig(input: unknown): HarnessConfig | undefined {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return undefined;
+  const raw = input as Record<string, unknown>;
+  const engine: HarnessEngine = raw.engine === "core" || raw.engine === "cli" ? raw.engine : "auto";
+  const compactionRaw = raw.compaction && typeof raw.compaction === "object" && !Array.isArray(raw.compaction)
+    ? raw.compaction as Record<string, unknown>
+    : null;
+  const reserveTokens = normalizeHarnessTokenLimit(compactionRaw?.reserveTokens);
+  const keepRecentTokens = normalizeHarnessTokenLimit(compactionRaw?.keepRecentTokens);
+  const compaction = {
+    ...(typeof compactionRaw?.enabled === "boolean" ? { enabled: compactionRaw.enabled } : {}),
+    ...(reserveTokens !== undefined ? { reserveTokens } : {}),
+    ...(keepRecentTokens !== undefined ? { keepRecentTokens } : {}),
+  };
+  const agentDir = typeof raw.agentDir === "string" ? raw.agentDir.trim() : "";
+  return {
+    engine,
+    ...(agentDir ? { agentDir } : {}),
+    ...(Object.keys(compaction).length > 0 ? { compaction } : {}),
+  };
 }
 
 function normalizeIosIpaConfig(input: unknown): IosIpaConfig | undefined {
@@ -697,6 +770,7 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
           }))
       : defaults.commandPresets,
     structuredChatPersona: normalizeStructuredChatPersona(input.structuredChatPersona),
+    userProfile: normalizeUserProfile(input.userProfile),
     language: typeof input.language === "string" ? input.language.trim() : defaults.language,
     appSecret: typeof input.appSecret === "string" && input.appSecret.length >= 32
       ? input.appSecret
@@ -705,6 +779,7 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
     macos: normalizeMacosDmgConfig(input.macos) ?? defaults.macos,
     ios: normalizeIosIpaConfig(input.ios) ?? defaults.ios,
     render: normalizeRenderConfig(input.render) ?? defaults.render,
+    harness: normalizeHarnessConfig(input.harness) ?? defaults.harness,
     structured: { processHost: input.structured?.processHost === "rust" ? "rust" : "legacy" },
     localDecision: {
       enabled: input.localDecision?.enabled === true,
@@ -712,10 +787,12 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
       modelPath: typeof input.localDecision?.modelPath === "string" ? input.localDecision.modelPath.trim() : "",
     },
     cardDefaults: normalizeCardDefaults(input.cardDefaults),
+    taskRetention: normalizeTaskRetention(input.taskRetention),
     defaultProvider: isSessionProvider(input.defaultProvider) ? input.defaultProvider : "claude",
     defaultSessionKind: input.defaultSessionKind === "pty" ? "pty" : "structured",
     defaultTaskWorktree: typeof input.defaultTaskWorktree === "boolean" ? input.defaultTaskWorktree : defaults.defaultTaskWorktree,
     ...providerModelOverrides(input, defaults),
+    modelGroups: normalizeModelGroups(input.modelGroups ?? []),
     commitCli: input.commitCli === "codex" || input.commitCli === "opencode" ? input.commitCli : "claude",
     commitModel: typeof input.commitModel === "string" ? input.commitModel.trim() : defaults.commitModel,
     systemAiCli: isSessionProvider(input.systemAiCli) ? input.systemAiCli : undefined,

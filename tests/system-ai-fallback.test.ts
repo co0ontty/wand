@@ -100,6 +100,17 @@ for (const [provider, failure] of failures) {
   });
 }
 
+test("一次性文本选模型分组时按成员顺序尝试，分组 ID 不传给 CLI", async () => {
+  await withCliOutputs({ first: [piText(FAILURE, "error")], second: [piText(SUCCESS)] }, async (root, attempts) => {
+    const result = await callConfiguredAiText(REQUEST, root, "中文", {
+      provider: "pi", model: "wand-model-group/pi/coding",
+      modelGroups: [{ id: "coding", provider: "pi", name: "编程", models: ["first", "second"] }],
+    });
+    assert.equal(result, SUCCESS);
+    assert.deepEqual(attempts(), ["first", "second"]);
+  });
+});
+
 test("three candidates continue after both Qoder and Pi report protocol errors", async () => {
   await withCliOutputs({
     first: [{ type: "assistant", message: { content: [{ type: "text", text: FAILURE }] } }, failures[3][1]],

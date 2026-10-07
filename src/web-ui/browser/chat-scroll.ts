@@ -587,16 +587,10 @@ export function applyExpandedState(el: any, kind: string, expanded: boolean) {
       break;
     }
     case "thinking": {
+      // 预览文案与展开/收起文案由 Ant Design X 的 Think 接手（见 react/chat/presentation.tsx），
+      // 宿主只保留展开状态；这里不再读写已经不存在的手写 preview / action 节点。
       el.classList.toggle("collapsed", !expanded);
       el.classList.toggle("expanded", !!expanded);
-      var previewEl = el.querySelector(".thinking-inline-preview");
-      if (previewEl) {
-        var fullText = el.dataset.thinking || "";
-        var preview = fullText.slice(0, 57) + (fullText.length > 60 ? "…" : "");
-        previewEl.textContent = expanded ? fullText : preview;
-      }
-      var actionEl = el.querySelector(".thinking-inline-action");
-      if (actionEl) actionEl.textContent = expanded ? "收起" : "展开";
       break;
     }
     case "inline-tool": {
@@ -626,7 +620,7 @@ export function applyExpandedState(el: any, kind: string, expanded: boolean) {
         if (expanded) activityMenu.removeAttribute("aria-hidden");
         else activityMenu.setAttribute("aria-hidden", "true");
       }
-      var activitySummary = el.querySelector(".chat-activity-summary");
+      var activitySummary = el.querySelector(".chat-process-summary");
       if (activitySummary) activitySummary.setAttribute("aria-expanded", expanded ? "true" : "false");
       break;
     }

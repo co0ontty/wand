@@ -1,3 +1,5 @@
+import { WandButton } from "../ui";
+import { Card, Checkbox, Flex, List, Space, Tag, Typography } from "antd";
 // 快捷提交面板的「本次变更输入」区：默认用本轮迭代的提示词标题总结改动，
 // 不再每次都把完整 diff 灌给模型。用户可以往回勾历史条目，或整套切回完整 diff。
 //
@@ -8,8 +10,7 @@
 
 import * as React from "react";
 
-import { WandSwitch } from "../ui";
-import { classNames } from "../ui/class-names";
+import { WandSwitch, WandStretchTabs } from "../ui";
 import { formatTaskRecency } from "../workspaces/sidebar-task-meta";
 import type {
   QuickCommitContextMode,
@@ -56,122 +57,41 @@ export function IterationContextPanel({
   onIncludeDiffChange,
 }: IterationContextPanelProps): React.ReactElement {
   const [now, setNow] = React.useState(() => Date.now());
-  // 方向键走位需要的节点：React 侧不许摸 querySelector，按 mode 记这两个按钮。
-  const modeRefs = React.useRef(new Map<QuickCommitContextMode, HTMLButtonElement>());
   // 相对时间只在面板打开时刷新一次，不必按秒重渲染。
   React.useEffect(() => setNow(Date.now()), [context]);
   const selectedCount = context.entries.filter((entry) => selectedIds.has(entry.id)).length;
   const pendingCount = context.entries.filter((entry) => !entry.consumed).length;
 
-  return (
-    <section className="wand-quick-iteration" aria-labelledby="wand-quick-iteration-title">
-      <div className="wand-quick-section-heading">
-        <h3 id="wand-quick-iteration-title">本次变更输入</h3>
-        <span title={context.iteration.isDefault ? "没单独选里程碑的任务都归到它" : undefined}>
-          {context.iteration.isDefault ? "默认迭代" : context.iteration.name}
-        </span>
-      </div>
-
-      <div
-        className="wand-quick-iteration-modes"
-        role="radiogroup"
-        aria-label="生成 Commit 信息的输入"
-        onKeyDown={(event) => {
-          // radiogroup 的键盘契约：整组只占一个 Tab 停靠点，箭头在选项间移动并即时选中。
-          const keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
-          if (!keys.includes(event.key)) return;
-          const options = ITERATION_CONTEXT_MODES.map((item) => item.mode);
-          const at = options.indexOf(mode);
-          const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
-          const next = event.key === "Home" ? 0
-            : event.key === "End" ? options.length - 1
-              : (at + step + options.length) % options.length;
-          const target = options[next];
-          if (!target || disabled) return;
-          event.preventDefault();
-          onModeChange(target);
-          modeRefs.current.get(target)?.focus();
-        }}
-      >
-        {ITERATION_CONTEXT_MODES.map((item) => (
-          <button
-            key={item.mode}
-            type="button"
-            ref={(element) => {
-              if (element) modeRefs.current.set(item.mode, element);
-              else modeRefs.current.delete(item.mode);
-            }}
-            role="radio"
-            aria-checked={mode === item.mode}
-            tabIndex={mode === item.mode ? 0 : -1}
-            className={classNames("wand-quick-iteration-mode", mode === item.mode && "is-selected")}
-            title={item.hint}
-            disabled={disabled}
-            onClick={() => onModeChange(item.mode)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-
-      {mode === "diff" ? (
-        <p className="wand-quick-iteration-hint">
-          {context.defaultEntryIds.length > 0
-            ? `将把完整 diff 交给模型，并照常把本轮未提交的 ${context.defaultEntryIds.length} 条变更记为已提交。`
-            : "将把完整 diff 交给模型。"}
-        </p>
-      ) : context.entries.length === 0 ? (
-        <p className="wand-quick-iteration-hint">
-          本轮迭代还没有记录到提示词，这次会改读完整 diff。
-        </p>
-      ) : (
-        <>
-          <ul className="wand-quick-iteration-list">
-            {context.entries.map((entry) => (
-              <li key={entry.id}>
-                <label title={entry.detail || entry.title}>
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.has(entry.id)}
-                    disabled={disabled}
-                    onChange={(event) => onToggleEntry(entry.id, event.currentTarget.checked)}
-                  />
-                  <span className="wand-quick-iteration-entry-title">{entry.title}</span>
-                  <span className="wand-quick-iteration-entry-meta">
-                    {entryMeta(entry, now)}
-                  </span>
-                </label>
-              </li>
-            ))}
-          </ul>
-          <div className="wand-quick-iteration-actions">
-            <span>
-              {selectedCount > 0
-                ? `已选 ${selectedCount} 条${pendingCount > 0 ? `（本轮未提交 ${pendingCount} 条）` : ""}`
-                : "没有勾选任何条目，这次会改读完整 diff"}
-              {context.truncated ? " · 更早的历史未显示" : ""}
-            </span>
-            <div>
-              <button type="button" disabled={disabled} onClick={() => onSelectAll("pending")}>上次提交以来</button>
-              <button type="button" disabled={disabled || context.entries.length === selectedCount} onClick={() => onSelectAll("all")}>全选</button>
-              <button type="button" disabled={disabled || selectedCount === 0} onClick={() => onSelectAll("none")}>清空</button>
-            </div>
-          </div>
-          <div className="wand-quick-iteration-diff-toggle">
-            <div>
-              <strong>同时附上完整 diff</strong>
-              <span>提示词说不清楚时用它兜底。</span>
-            </div>
-            <WandSwitch
-              id="wand-quick-iteration-diff"
-              checked={includeDiff}
-              disabled={disabled}
-              ariaLabel="同时附上完整 diff"
-              onCheckedChange={onIncludeDiffChange}
-            />
-          </div>
-        </>
-      )}
-    </section>
-  );
+  return <Card className="wand-quick-iteration" size="small" title={<span id="wand-quick-iteration-title">本次变更输入</span>}
+    aria-labelledby="wand-quick-iteration-title" extra={<Tag title={context.iteration.isDefault ? "没单独选里程碑的任务都归到它" : undefined}>{context.iteration.isDefault ? "默认迭代" : context.iteration.name}</Tag>}>
+    <Flex vertical gap={12}>
+      <fieldset disabled={disabled} style={{ border: 0, padding: 0, margin: 0 }}>
+        <WandStretchTabs ariaLabel="生成 Commit 信息的输入" value={mode}
+          tabs={ITERATION_CONTEXT_MODES.map((item) => ({ value: item.mode, label: item.label }))}
+          onValueChange={(value) => { if (!disabled) onModeChange(value as QuickCommitContextMode); }}/>
+      </fieldset>
+      {mode === "diff" ? <Typography.Text type="secondary">
+        {context.defaultEntryIds.length > 0 ? `将把完整 diff 交给模型，并照常把本轮未提交的 ${context.defaultEntryIds.length} 条变更记为已提交。` : "将把完整 diff 交给模型。"}
+      </Typography.Text> : context.entries.length === 0 ? <Typography.Text type="secondary">本轮迭代还没有记录到提示词，这次会改读完整 diff。</Typography.Text> : <>
+        <List size="small" style={{ maxHeight: 180, overflow: "auto" }} dataSource={[...context.entries]} renderItem={(entry) =>
+          <List.Item key={entry.id}>
+            <Checkbox title={entry.detail || entry.title} checked={selectedIds.has(entry.id)} disabled={disabled} onChange={(event) => onToggleEntry(entry.id, event.target.checked)}>
+              <Flex vertical><Typography.Text>{entry.title}</Typography.Text><Typography.Text type="secondary">{entryMeta(entry, now)}</Typography.Text></Flex>
+            </Checkbox>
+          </List.Item>}/>
+        <Flex vertical gap={8}>
+          <Typography.Text type="secondary">{selectedCount > 0 ? `已选 ${selectedCount} 条${pendingCount > 0 ? `（本轮未提交 ${pendingCount} 条）` : ""}` : "没有勾选任何条目，这次会改读完整 diff"}{context.truncated ? " · 更早的历史未显示" : ""}</Typography.Text>
+          <Space wrap>
+            <WandButton kind="ghost" type="button" disabled={disabled} onClick={() => onSelectAll("pending")}>上次提交以来</WandButton>
+            <WandButton kind="ghost" type="button" disabled={disabled || context.entries.length === selectedCount} onClick={() => onSelectAll("all")}>全选</WandButton>
+            <WandButton kind="ghost" type="button" disabled={disabled || selectedCount === 0} onClick={() => onSelectAll("none")}>清空</WandButton>
+          </Space>
+        </Flex>
+        <Flex justify="space-between" align="center" gap={12}>
+          <Flex vertical><Typography.Text strong>同时附上完整 diff</Typography.Text><Typography.Text type="secondary">提示词说不清楚时用它兜底。</Typography.Text></Flex>
+          <WandSwitch id="wand-quick-iteration-diff" checked={includeDiff} disabled={disabled} ariaLabel="同时附上完整 diff" onCheckedChange={onIncludeDiffChange}/>
+        </Flex>
+      </>}
+    </Flex>
+  </Card>;
 }

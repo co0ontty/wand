@@ -65,7 +65,7 @@ async function withHarness(
   const config = { ...defaultConfig(), defaultCwd: root };
   const manager = new StructuredSessionManager(storage, config);
   // Task routes only ever read the registry, so the PTY manager can stay absent.
-  const registry = new SessionRegistry({ getOwned: () => null } as never, manager, storage);
+  const registry = new SessionRegistry({ getOwned: () => null, listSlim: () => [] } as never, manager, storage);
   const harness = await start(storage, manager, registry, config, {
     ...(options.generateTitle
       ? { generateTitle: ((description: string) => options.generateTitle!(description)) as never }
@@ -812,5 +812,62 @@ test("reading a single card projects sessions without repairing membership", asy
     assert.deepEqual(detail.sessions.map((session) => session.id), ["sess-unbound"]);
     assert.equal(detail.status, "doing");
     assert.deepEqual(storage.listWandTaskSessionIds(card.id), ["sess-unbound"]);
+  });
+});
+
+test("clearing the archive folder hard-deletes archived cards only", async () => {
+  await withHarness(async ({ url, storage }) => {
+    const keep = storage.createWandTask({ title: "还在待办" });
+    const first = storage.createWandTask({ title: "归档一", status: "archived" });
+    const second = storage.createWandTask({ title: "归档二", status: "archived" });
+
+    const result = await fetch(`${url}/api/wand-tasks/archived`, { method: "DELETE" })
+      .then(jsonOf<{ ok: boolean; deleted: number; skipped: number }>);
+    assert.deepEqual(result, { ok: true, deleted: 2, skipped: 0 });
+    assert.equal(storage.getWandTask(first.id), null);
+    assert.equal(storage.getWandTask(second.id), null);
+    assert.equal(storage.getWandTask(keep.id)?.status, "todo");
+
+    const listed = await fetch(`${url}/api/wand-tasks`).then(jsonOf<Array<{ id: string }>>);
+    assert.deepEqual(listed.map((task) => task.id), [keep.id]);
+  });
+});
+
+test("clearing the archive folder can stay inside one project", async () => {
+  await withHarness(async ({ url, storage }) => {
+    const wand = storage.createWorkspace({ name: "wand", cwd: storage.directory() });
+    const other = storage.createWorkspace({ name: "other", cwd: storage.directory() });
+    const inWand = storage.createWandTask({ title: "本项目归档", workspaceId: wand.id, status: "archived" });
+    const elsewhere = storage.createWandTask({ title: "别的项目归档", workspaceId: other.id, status: "archived" });
+
+    const result = await fetch(`${url}/api/wand-tasks/archived?workspaceId=${encodeURIComponent(wand.id)}`,
+      { method: "DELETE" }).then(jsonOf<{ ok: boolean; deleted: number; skipped: number }>);
+    assert.deepEqual(result, { ok: true, deleted: 1, skipped: 0 });
+    assert.equal(storage.getWandTask(inWand.id), null);
+    assert.equal(storage.getWandTask(elsewhere.id)?.status, "archived");
+  });
+});
+
+test("clearing the archive folder skips cards whose session is still working", async () => {
+  await withHarness(async ({ url, storage }) => {
+    const workspace = storage.createWorkspace({ name: "wand", cwd: storage.directory() });
+    const container = storage.createWorkspaceTask({ workspaceId: workspace.id, name: "还在跑" });
+    const busyCard = storage.createWandTask({
+      title: "名下会话还在处理", workspaceId: workspace.id, workspaceTaskId: container.id, status: "archived",
+    });
+    storage.saveSession(sessionSnapshot({
+      id: "sess-running",
+      workspaceId: workspace.id,
+      workspaceTaskId: container.id,
+      status: "running",
+    }));
+    const gone = storage.createWandTask({ title: "可以删", status: "archived" });
+
+    const result = await fetch(`${url}/api/wand-tasks/archived`, { method: "DELETE" })
+      .then(jsonOf<{ ok: boolean; deleted: number; skipped: number }>);
+    assert.deepEqual(result, { ok: true, deleted: 1, skipped: 1 });
+    assert.equal(storage.getWandTask(gone.id), null);
+    assert.equal(storage.getWandTask(busyCard.id)?.status, "archived");
+    assert.ok(storage.getWorkspaceTask(container.id), "the skipped card keeps its container");
   });
 });

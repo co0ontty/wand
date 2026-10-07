@@ -31,6 +31,14 @@ test("sidebar hides completed tasks and their sessions before applying search", 
   assert.equal(source.tasks[0].sessions.length, 1);
 });
 
+test("sidebar excludes the canonical archive flag even when a legacy status says active", () => {
+  const archived = { ...task("archived", "active"), archived: true };
+  const group = { ...source, tasks: [archived, source.tasks[1]] };
+  assert.deepEqual(filterSidebarGroups([group], "")[0].tasks.map((item) => item.id), ["active"]);
+  assert.deepEqual(filterSidebarGroups([group], "archived"), []);
+  assert.equal(group.tasks[0].sessions.length, 1, "the source history is retained");
+});
+
 test("legacy global tasks use a named fallback group after real workspaces", () => {
   const global = { ...source, workspaceId: "wand-global", global: true, workspaceName: "全局" };
   const groups = filterSidebarGroups([global, source], "");

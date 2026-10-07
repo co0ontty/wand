@@ -184,6 +184,8 @@ export function installWorkspacesLegacyAdapter(): void {
       // 标签栏「+」/ 窗格「+」/ 空白桌面：在同一任务 worktree 再起一个绑定会话；
       // startSessionInCwd 在 resolve 前已把新会话写入 state.selectedId。
       // PTY 路径回传 sessionId 字符串，结构化路径回传会话对象，这里统一成 id。
+      // payload.taskId 缺省时不绑定任务：会话只带项目/目录归属，落入「未分组任务」，
+      // 没有任务标签布局可恢复，所以跳过任务详情与布局写入。
       return Promise.resolve(startSessionInCwd(payload.cwd, {
         workspaceId: payload.workspaceId,
         workspaceTaskId: payload.taskId,
@@ -200,6 +202,10 @@ export function installWorkspacesLegacyAdapter(): void {
             ? created.id
             : undefined);
         if (!sessionId) return undefined;
+        if (!payload.taskId) {
+          notifyTasksChanged();
+          return sessionId;
+        }
         await taskDetailStore.reload(payload.taskId).catch(() => {});
         if (currentTaskId() === payload.taskId) {
           const current = workspaceContextStore.getSnapshot().layout;

@@ -1,3 +1,4 @@
+import { WandInput } from "../ui";
 // 「里程碑（迭代）」选择器：新建任务时点开下拉，选历史里程碑，或就地新增一个。
 // 任务看板与「新建任务」对话框共用这一个组件，保证两处行为一致。
 // 传了 `workspaceId` 就只展示该工作区的迭代（含全局的），新增的也归属该工作区。
@@ -110,7 +111,7 @@ export function MilestonePicker({
       side="bottom"
       ariaLabel="选择里程碑"
       className="milestone-picker-menu"
-      trigger={<button
+      trigger={<WandButton kind="ghost"
         type="button"
         className={classNames("milestone-picker-trigger", selected && "is-set", className)}
         aria-label={selected ? `里程碑：${selected.name}` : "里程碑"}
@@ -122,20 +123,20 @@ export function MilestonePicker({
         <WandIcon name="milestone" size={13}/>
         <span className="milestone-picker-trigger-label">{selected ? selected.name : "里程碑"}</span>
         <WandIcon name="chevron" size={12} className="milestone-picker-trigger-caret"/>
-      </button>}
+      </WandButton>}
     >
       <div className="milestone-picker" role="dialog" aria-label="选择里程碑">
         <div className="milestone-picker-head">
           <strong>里程碑</strong>
-          {selected ? <button
+          {selected ? <WandButton kind="ghost"
             type="button"
             className="milestone-picker-clear"
             onClick={() => close(null)}
-          >{selected.isDefault ? "回到默认" : "清除"}</button> : null}
+          >{selected.isDefault ? "回到默认" : "清除"}</WandButton> : null}
         </div>
         {creating ? (
           <div className="milestone-picker-create">
-            <input
+            <WandInput
               ref={inputRef}
               className="milestone-picker-input"
               type="text"
@@ -159,12 +160,12 @@ export function MilestonePicker({
               }}
             />
             <div className="milestone-picker-create-actions">
-              <button
+              <WandButton kind="ghost"
                 type="button"
                 className="milestone-picker-create-cancel"
                 onClick={() => { setCreating(false); setError(""); }}
                 disabled={busy}
-              >取消</button>
+              >取消</WandButton>
               <WandButton
                 kind="primary"
                 size="small"
@@ -179,7 +180,7 @@ export function MilestonePicker({
           <>
             {items.length > 0 ? (
               <div className="milestone-picker-list" role="listbox" aria-label="历史里程碑">
-                {items.map((item) => <button
+                {items.map((item) => <WandButton kind="ghost"
                   key={item.id}
                   type="button"
                   role="option"
@@ -194,7 +195,7 @@ export function MilestonePicker({
                   {/* 按工作区过滤时，把跨工作区可见的全局迭代标出来，避免看起来「串台」。 */}
                   {scoped && !item.workspaceId && !item.isDefault ? <span className="milestone-picker-item-scope">全局</span> : null}
                   {item.taskCount > 0 ? <span className="milestone-picker-item-count">{item.taskCount}</span> : null}
-                </button>)}
+                </WandButton>)}
               </div>
             ) : loadError ? (
               <>
@@ -207,9 +208,9 @@ export function MilestonePicker({
                 >{snapshot.loading ? "加载中…" : "重新加载"}</WandButton>
               </>
             ) : <p className="milestone-picker-empty">{scoped ? "这个工作区还没有里程碑，新增一个吧。" : "还没有里程碑，新增一个吧。"}</p>}
-            <button type="button" className="milestone-picker-add" onClick={startCreating}>
+            <WandButton kind="ghost" type="button" className="milestone-picker-add" onClick={startCreating}>
               <WandIcon name="plus" size={13}/><span>新增里程碑</span>
-            </button>
+            </WandButton>
           </>
         )}
       </div>

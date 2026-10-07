@@ -1,3 +1,5 @@
+import "../issues/library-layout";
+import { Alert, Card, Flex, List, Spin, Typography } from "antd";
 import {
   useEffect,
   useMemo,
@@ -5,7 +7,6 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import * as React from "react";
 import { WandButton, WandDialogSurface } from "../ui";
 import { MOTION_DWELL_RESULT_SENTENCE_MS } from "../ui/motion-tokens";
 import { worktreeMergeController, worktreeMergeStore } from "./controller";
@@ -39,15 +40,10 @@ function MergeDetail({
   value: string;
   tone?: "warning" | "success" | "error";
 }) {
-  const valueClassName = tone
-    ? `wand-worktree-value wand-worktree-value-${tone}`
-    : "wand-worktree-value";
-  return (
-    <div className="wand-worktree-row">
-      <span className="wand-worktree-label">{label}</span>
-      <strong className={valueClassName}>{value || "-"}</strong>
-    </div>
-  );
+  return <Flex justify="space-between" align="baseline" gap={12} wrap>
+    <Typography.Text type="secondary">{label}</Typography.Text>
+    <Typography.Text type={tone === "error" ? "danger" : tone} strong style={{ overflowWrap: "anywhere" }}>{value || "-"}</Typography.Text>
+  </Flex>;
 }
 
 function InspectionDetails({ inspection }: { inspection: WorktreeMergeInspection }) {
@@ -66,23 +62,17 @@ function InspectionDetails({ inspection }: { inspection: WorktreeMergeInspection
         tone={inspection.hasConflicts ? "error" : "success"}
       />
       {inspection.commits.length > 0 ? (
-        <section className="wand-worktree-commits" aria-labelledby="worktree-merge-commits-title">
-          <p className="wand-worktree-commits-title" id="worktree-merge-commits-title">
-            <strong>待合并提交列表（{inspection.commits.length}）</strong>
-          </p>
-          <div className="wand-worktree-commit-list" role="list" aria-label="待合并提交">
+        <Card size="small" aria-labelledby="worktree-merge-commits-title" title={<span id="worktree-merge-commits-title">待合并提交列表（{inspection.commits.length}）</span>}>
+          <List className="wand-worktree-commit-list" size="small" aria-label="待合并提交">
             {inspection.commits.map((commit) => (
-              <div className="wand-worktree-row" role="listitem" key={commit.hash}>
-                <span><code>{commit.shortHash}</code></span>
-                <strong className="wand-worktree-value">{commit.subject || commit.hash}</strong>
-              </div>
+              <List.Item key={commit.hash}>
+                <Flex gap={12} align="baseline"><Typography.Text code>{commit.shortHash}</Typography.Text><Typography.Text strong style={{ overflowWrap: "anywhere" }}>{commit.subject || commit.hash}</Typography.Text></Flex>
+              </List.Item>
             ))}
-          </div>
-        </section>
+          </List>
+        </Card>
       ) : null}
-      <p className={`wand-worktree-status wand-worktree-status-${inspection.ok ? "success" : inspection.hasConflicts ? "error" : "warning"}`}>
-        {inspectionStatusMessage(inspection)}
-      </p>
+      <Alert type={inspection.ok ? "success" : inspection.hasConflicts ? "error" : "warning"} title={inspectionStatusMessage(inspection)}/>
     </>
   );
 }
@@ -212,16 +202,13 @@ export function WorktreeMergeHost({
       onOpenChange={(open) => { if (!open) worktreeMergeController.close(); }}
       title={title}
       description={description}
-      className="wand-ui-dialog-content wand-worktree-dialog"
-      headerClassName="wand-worktree-header"
-      titleClassName="wand-worktree-title"
-      descriptionClassName="wand-worktree-description"
+      className="wand-ui-dialog-content wand-task-library-dialog wand-worktree-library-dialog"
       closeLabel="关闭 Worktree 合并"
       testId="worktree-merge-dialog"
       dismissable={!submitting}
     >
-      <div className="wand-worktree-body">
-        <div className="wand-worktree-content" aria-busy={loading || submitting}>
+      <Flex vertical gap={16}>
+        <Flex vertical gap={12} aria-busy={loading || submitting}>
           {context ? (
             <>
               <MergeDetail
@@ -236,11 +223,9 @@ export function WorktreeMergeHost({
           ) : null}
 
           {!availability.allowed ? (
-            <p className="wand-worktree-status wand-worktree-status-warning" role="status">
-              {availability.reason}
-            </p>
+            <Alert type="warning" showIcon role="status" title={availability.reason}/>
           ) : loading ? (
-            <p className="wand-worktree-status" role="status">正在检查 worktree 合并状态…</p>
+            <Spin tip="正在检查 worktree 合并状态…"><div style={{ minHeight: 70 }} role="status">正在检查 worktree 合并状态…</div></Spin>
           ) : inspection && !cleanupRequired ? (
             <InspectionDetails inspection={inspection} />
           ) : cleanupRequired ? (
@@ -252,19 +237,16 @@ export function WorktreeMergeHost({
               {mergeResult?.mergeCommit ? (
                 <MergeDetail label="合并提交" value={mergeResult.mergeCommit.slice(0, 12)} />
               ) : null}
-              <p className="wand-worktree-status wand-worktree-status-warning">
-                合并结果已经保留；此操作只重试删除遗留 worktree 和任务分支。
-              </p>
+              <Alert type="warning" showIcon title="合并结果已经保留；此操作只重试删除遗留 worktree 和任务分支。"/>
             </>
           ) : null}
 
           {resultNote ? (
-            <p className="wand-worktree-status wand-worktree-status-success" role="status">{resultNote}</p>
+            <Alert type="success" showIcon role="status" title={resultNote}/>
           ) : null}
-          {error ? <p className="wand-worktree-error" role="alert">{error}</p> : null}
-        </div>
-
-        <div className="wand-worktree-actions">
+          {error ? <Alert type="error" showIcon role="alert" title={error}/> : null}
+        </Flex>
+        <Flex justify="flex-end" gap={8}>
           <WandButton
             ref={cancelButton}
             kind="secondary"
@@ -286,8 +268,8 @@ export function WorktreeMergeHost({
               {submitting ? "合并中…" : "确认合并并清理"}
             </WandButton>
           ) : null}
-        </div>
-      </div>
+        </Flex>
+      </Flex>
     </WandDialogSurface>
   );
 }

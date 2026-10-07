@@ -1,3 +1,4 @@
+import { Marked, type MarkedToken, type Token } from "marked";
 import type {
   FilePreviewFile,
   FilePreviewKind,
@@ -147,18 +148,19 @@ export function tokenizeFilePreviewCode(source: string): FilePreviewCodeToken[] 
   return tokens;
 }
 
+/**
+ * Markdown parsing is Marked's job. This module only maps Marked's token stream
+ * onto the flat shapes the React renderer consumes, so the viewer keeps one
+ * parser and one spelling for every construct. Raw HTML is never interpreted —
+ * it stays literal text — and links/images pass an explicit protocol allowlist.
+ */
+const markdown = new Marked({ gfm: true, breaks: true, async: false });
+
 function safeMarkdownUrl(value: string, image = false): string | null {
   const trimmed = value.trim();
   if (/^(?:https?:|mailto:|#|\/)/i.test(trimmed)) return trimmed;
   if (image && /^data:image\/(?:png|gif|jpe?g|webp);base64,/i.test(trimmed)) return trimmed;
   return null;
-}
-
-function splitMarkdownRow(line: string): string[] {
-  let value = line.trim();
-  if (value.startsWith("|")) value = value.slice(1);
-  if (value.endsWith("|")) value = value.slice(0, -1);
-  return value.split("|");
 }
 
 export type FilePreviewMarkdownInline =
@@ -176,137 +178,177 @@ export type FilePreviewMarkdownBlock =
   | { type: "table"; headers: FilePreviewMarkdownInline[][]; aligns: FilePreviewTableAlignment[]; rows: FilePreviewMarkdownInline[][][] }
   | { type: "rule" };
 
-const INLINE_MARKDOWN = /(!\[[^\]]*\]\([^)]+\)|\[[^\]]+\]\([^)]+\)|`[^`]+`|\*\*[^*]+\*\*|~~[^~]+~~|\*[^*]+\*)/g;
-
-export function tokenizeFilePreviewMarkdownInline(source: string): FilePreviewMarkdownInline[] {
-  const tokens: FilePreviewMarkdownInline[] = [];
-  let offset = 0;
-  for (const match of source.matchAll(INLINE_MARKDOWN)) {
-    const index = match.index ?? 0;
-    if (index > offset) tokens.push({ type: "text", value: source.slice(offset, index) });
-    const value = match[0];
-    const image = /^!\[([^\]]*)\]\(([^)]+)\)$/.exec(value);
-    const link = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(value);
-    if (image) {
-      const url = safeMarkdownUrl(image[2], true);
-      tokens.push(url ? { type: "image", value: image[1], url } : { type: "text", value: image[1] });
-    } else if (link) {
-      const url = safeMarkdownUrl(link[2]);
-      tokens.push(url ? { type: "link", value: link[1], url } : { type: "text", value: link[1] });
-    } else if (value.startsWith("`")) {
-      tokens.push({ type: "code", value: value.slice(1, -1) });
-    } else if (value.startsWith("**")) {
-      tokens.push({ type: "strong", value: value.slice(2, -2) });
-    } else if (value.startsWith("~~")) {
-      tokens.push({ type: "delete", value: value.slice(2, -2) });
-    } else {
-      tokens.push({ type: "emphasis", value: value.slice(1, -1) });
+/** Flattens nested inline tokens to their readable text (used inside emphasis/link). */
+function inlineText(tokens: readonly Token[]): string {
+  let text = "";
+  for (const raw of tokens) {
+    const token = raw as MarkedToken;
+    if (token.type === "br") { text += "\n"; continue; }
+    if ("tokens" in token && Array.isArray(token.tokens) && token.tokens.length > 0) {
+      text += inlineText(token.tokens);
+      continue;
     }
-    offset = index + value.length;
+    if ("text" in token && typeof token.text === "string") text += token.text;
   }
-  if (offset < source.length) tokens.push({ type: "text", value: source.slice(offset) });
-  return tokens;
+  return text;
 }
 
-function startsMarkdownBlock(lines: string[], index: number): boolean {
-  const line = lines[index] ?? "";
-  const next = lines[index + 1]?.trim() ?? "";
-  return /^```/.test(line)
-    || /^#{1,6}\s+/.test(line)
-    || /^>\s?/.test(line)
-    || /^[-*]\s+/.test(line)
-    || /^\d+\.\s+/.test(line)
-    || /^(?:---+|\*\*\*+)$/.test(line.trim())
-    || (line.includes("|") && /^\|?\s*:?-+:?(\s*\|\s*:?-+:?)+\s*\|?$/.test(next));
+function inlineTokens(tokens: readonly Token[]): FilePreviewMarkdownInline[] {
+  const result: FilePreviewMarkdownInline[] = [];
+  for (const raw of tokens) {
+    const token = raw as MarkedToken;
+    switch (token.type) {
+      case "text":
+        if (token.tokens && token.tokens.length > 0) result.push(...inlineTokens(token.tokens));
+        else result.push({ type: "text", value: token.text });
+        break;
+      case "escape":
+      case "html":
+        // Raw HTML reaches the DOM as text; React never parses it.
+        result.push({ type: "text", value: token.text });
+        break;
+      case "checkbox":
+        result.push({ type: "text", value: token.raw });
+        break;
+      case "br":
+        result.push({ type: "text", value: "\n" });
+        break;
+      case "codespan":
+        result.push({ type: "code", value: token.text });
+        break;
+      case "strong":
+        result.push({ type: "strong", value: inlineText(token.tokens) });
+        break;
+      case "em":
+        result.push({ type: "emphasis", value: inlineText(token.tokens) });
+        break;
+      case "del":
+        result.push({ type: "delete", value: inlineText(token.tokens) });
+        break;
+      case "link": {
+        const url = safeMarkdownUrl(token.href);
+        const label = inlineText(token.tokens);
+        result.push(url ? { type: "link", value: label, url } : { type: "text", value: label });
+        break;
+      }
+      case "image": {
+        const url = safeMarkdownUrl(token.href, true);
+        result.push(url ? { type: "image", value: token.text, url } : { type: "text", value: token.text });
+        break;
+      }
+      default:
+        if ("tokens" in token && token.tokens && token.tokens.length > 0) result.push(...inlineTokens(token.tokens));
+        else if ("text" in token && typeof token.text === "string") result.push({ type: "text", value: token.text });
+    }
+  }
+  return result;
 }
 
-/** Parses a safe Markdown subset into data; React owns all resulting DOM. */
+function codeText(value: string): string {
+  return value.endsWith("\n") ? value.slice(0, -1) : value;
+}
+
+/** Flattens the block tokens of one quote / list item into one inline run. */
+type MarkdownListItem = Extract<MarkedToken, { type: "list" }>["items"][number];
+
+/** One list item as one inline run; GFM task markers are part of the label text. */
+function listItemInline(item: MarkdownListItem): FilePreviewMarkdownInline[] {
+  const content = blockInlineTokens(item.tokens);
+  return item.task
+    ? [{ type: "text", value: item.checked ? "[x] " : "[ ] " }, ...content]
+    : content;
+}
+
+function blockInlineTokens(tokens: readonly Token[]): FilePreviewMarkdownInline[] {
+  const parts: FilePreviewMarkdownInline[][] = [];
+  for (const raw of tokens) {
+    const token = raw as MarkedToken;
+    switch (token.type) {
+      case "paragraph":
+      case "text":
+        parts.push(inlineTokens(token.tokens ?? []));
+        break;
+      case "blockquote":
+        parts.push(blockInlineTokens(token.tokens));
+        break;
+      case "list":
+        // The flat model has no nested list level: child items join the parent
+        // item's text instead of disappearing.
+        parts.push(token.items.map(listItemInline)
+          .flatMap((item, index) => index === 0 ? item : [{ type: "text" as const, value: "\n" }, ...item]));
+        break;
+      case "code":
+        parts.push([{ type: "text", value: codeText(token.text) }]);
+        break;
+      case "table":
+        parts.push([...token.header, ...token.rows.flat()].map((cell) => inlineTokens(cell.tokens))
+          .flatMap((cell, index) => index === 0 ? cell : [{ type: "text" as const, value: " " }, ...cell]));
+        break;
+      case "space":
+      case "def":
+      case "hr":
+        break;
+      default:
+        if ("tokens" in token && token.tokens && token.tokens.length > 0) parts.push(inlineTokens(token.tokens));
+        else if ("text" in token && typeof token.text === "string") parts.push([{ type: "text", value: token.text }]);
+    }
+  }
+  return parts.flatMap((part, index) => index === 0 ? part : [{ type: "text" as const, value: "\n" }, ...part]);
+}
+
+/** Parses Markdown with Marked into data; React owns all resulting DOM. */
 export function parseFilePreviewMarkdown(source: string): FilePreviewMarkdownBlock[] {
-  const lines = source.split("\n");
   const blocks: FilePreviewMarkdownBlock[] = [];
-  let index = 0;
-  while (index < lines.length) {
-    const line = lines[index];
-    if (!line.trim()) {
-      index += 1;
-      continue;
+  for (const raw of markdown.lexer(source)) {
+    const token = raw as MarkedToken;
+    switch (token.type) {
+      case "heading":
+        blocks.push({
+          type: "heading",
+          level: Math.min(6, Math.max(1, token.depth)) as 1 | 2 | 3 | 4 | 5 | 6,
+          content: inlineTokens(token.tokens),
+        });
+        break;
+      case "paragraph":
+        blocks.push({ type: "paragraph", content: inlineTokens(token.tokens) });
+        break;
+      case "text":
+        blocks.push({ type: "paragraph", content: inlineTokens(token.tokens ?? []) });
+        break;
+      case "html":
+        blocks.push({ type: "paragraph", content: [{ type: "text", value: token.text }] });
+        break;
+      case "blockquote":
+        blocks.push({ type: "blockquote", content: blockInlineTokens(token.tokens) });
+        break;
+      case "list":
+        blocks.push({ type: "list", ordered: token.ordered, items: token.items.map(listItemInline) });
+        break;
+      case "code":
+        blocks.push({
+          type: "code",
+          lang: (token.lang || "").trim().split(/\s+/)[0] || "",
+          value: codeText(token.text),
+        });
+        break;
+      case "table":
+        blocks.push({
+          type: "table",
+          headers: token.header.map((cell) => inlineTokens(cell.tokens)),
+          aligns: token.align.map((align) => align ?? undefined),
+          rows: token.rows.map((row) => row.map((cell) => inlineTokens(cell.tokens))),
+        });
+        break;
+      case "hr":
+        blocks.push({ type: "rule" });
+        break;
+      default:
+        break;
     }
-    const fence = /^```([\w+-]*)\s*$/.exec(line);
-    if (fence) {
-      const content: string[] = [];
-      index += 1;
-      while (index < lines.length && !/^```\s*$/.test(lines[index])) {
-        content.push(lines[index]);
-        index += 1;
-      }
-      if (index < lines.length) index += 1;
-      blocks.push({ type: "code", lang: fence[1], value: content.join("\n") });
-      continue;
-    }
-    const heading = /^(#{1,6})\s+(.*)$/.exec(line);
-    if (heading) {
-      blocks.push({
-        type: "heading",
-        level: heading[1].length as 1 | 2 | 3 | 4 | 5 | 6,
-        content: tokenizeFilePreviewMarkdownInline(heading[2]),
-      });
-      index += 1;
-      continue;
-    }
-    if (/^(?:---+|\*\*\*+)$/.test(line.trim())) {
-      blocks.push({ type: "rule" });
-      index += 1;
-      continue;
-    }
-    const separator = lines[index + 1]?.trim() ?? "";
-    if (line.includes("|") && /^\|?\s*:?-+:?(\s*\|\s*:?-+:?)+\s*\|?$/.test(separator)) {
-      const headers = splitMarkdownRow(line).map((cell) => tokenizeFilePreviewMarkdownInline(cell.trim()));
-      const aligns: FilePreviewTableAlignment[] = splitMarkdownRow(separator).map((cell) => {
-        const value = cell.trim();
-        if (value.startsWith(":") && value.endsWith(":")) return "center";
-        if (value.endsWith(":")) return "right";
-        if (value.startsWith(":")) return "left";
-        return undefined;
-      });
-      const rows: FilePreviewMarkdownInline[][][] = [];
-      index += 2;
-      while (index < lines.length && lines[index].trim() && lines[index].includes("|")) {
-        rows.push(splitMarkdownRow(lines[index]).map((cell) => tokenizeFilePreviewMarkdownInline(cell.trim())));
-        index += 1;
-      }
-      blocks.push({ type: "table", headers, aligns, rows });
-      continue;
-    }
-    if (/^>\s?/.test(line)) {
-      const quote: string[] = [];
-      while (index < lines.length && /^>\s?/.test(lines[index])) {
-        quote.push(lines[index].replace(/^>\s?/, ""));
-        index += 1;
-      }
-      blocks.push({ type: "blockquote", content: tokenizeFilePreviewMarkdownInline(quote.join("\n")) });
-      continue;
-    }
-    const unordered = /^[-*]\s+/.test(line);
-    const ordered = /^\d+\.\s+/.test(line);
-    if (unordered || ordered) {
-      const items: FilePreviewMarkdownInline[][] = [];
-      const itemPattern = ordered ? /^\d+\.\s+(.*)$/ : /^[-*]\s+(.*)$/;
-      while (index < lines.length) {
-        const item = itemPattern.exec(lines[index]);
-        if (!item) break;
-        items.push(tokenizeFilePreviewMarkdownInline(item[1]));
-        index += 1;
-      }
-      blocks.push({ type: "list", ordered, items });
-      continue;
-    }
-    const paragraph = [line];
-    index += 1;
-    while (index < lines.length && lines[index].trim() && !startsMarkdownBlock(lines, index)) {
-      paragraph.push(lines[index]);
-      index += 1;
-    }
-    blocks.push({ type: "paragraph", content: tokenizeFilePreviewMarkdownInline(paragraph.join("\n")) });
   }
   return blocks;
+}
+
+export function tokenizeFilePreviewMarkdownInline(source: string): FilePreviewMarkdownInline[] {
+  return inlineTokens(markdown.Lexer.lexInline(source, markdown.defaults));
 }

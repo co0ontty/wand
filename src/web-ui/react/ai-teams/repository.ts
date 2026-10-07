@@ -13,6 +13,38 @@ export type AiTeamInput = Pick<AiTeam, "name" | "description" | "instructions" |
 /** 直接开工的回包：运行详情 + 服务端顺手建出来的任务卡 id。 */
 export type AiTeamDirectRun = AiTeamRunDetail & { taskId: string };
 
+/** 无指派派工的候选/建议成员（服务端 `src/team-dispatch.ts` 的投影）。 */
+export interface TeamDispatchCandidate {
+  employeeId: string;
+  name: string;
+  duty: string;
+  tags: string[];
+  avatar: string;
+}
+
+/** 建议名单里的人带参与概率（仅参考，不是正确率）；负责人标记由服务端给出。 */
+export interface TeamDispatchPlanMember extends TeamDispatchCandidate {
+  probability: number;
+  isLeader: boolean;
+}
+
+export interface TeamDispatchPlan {
+  members: TeamDispatchPlanMember[];
+  /** 达到门槛但超出人数上限的备选。 */
+  bench: TeamDispatchPlanMember[];
+  considered: number;
+  omitted: number;
+  threshold: number;
+  maxMembers: number;
+  /** 人类可读说明：空名单、被截断、确认后才开工等。 */
+  note: string;
+  decision: { calls: number; model: string | null; inputTokens: number };
+  experimental: true;
+}
+
+/** 派工开工的回包：运行详情 + 服务端建的临时团队与任务卡。 */
+export type AiTeamDispatchRun = AiTeamRunDetail & { teamId: string; taskId: string };
+
 type Listener = (change: { runId: string; taskId: string }) => void;
 const listeners = new Set<Listener>();
 
@@ -148,6 +180,31 @@ export const aiTeamsRepository = {
       `/api/ai-teams/${encodeURIComponent(teamId)}/runs`,
       jsonBody({ note: input.note, workspaceId: input.workspaceId }),
     );
+  },
+  /**
+   * 无指派派工第一步（§服务端 `POST /api/team-dispatch/plan`）：不指定员工，
+   * 由本机决策模型按开工说明给出建议名单。只读、不建任何东西。
+   */
+  dispatchPlan(input: { note: string; maxMembers?: number }): Promise<TeamDispatchPlan> {
+    return requestJson<TeamDispatchPlan>("/api/team-dispatch/plan", jsonBody({
+      note: input.note,
+      ...(input.maxMembers === undefined ? {} : { maxMembers: input.maxMembers }),
+    }));
+  },
+  /**
+   * 无指派派工第二步：确认名单后才建临时团队、建卡、起 run。
+   * 名单由调用方回传（服务端会重新校验员工身份），所以中间不需要前后端存计划。
+   */
+  dispatchStart(input: {
+    workspaceId: string;
+    note: string;
+    members: Array<{ employeeId: string; isLeader?: boolean }>;
+  }): Promise<AiTeamDispatchRun> {
+    return requestJson<AiTeamDispatchRun>("/api/team-dispatch/start", jsonBody({
+      workspaceId: input.workspaceId,
+      note: input.note,
+      members: input.members,
+    }));
   },
   /**
    * §7 要求 3：结果在原位停留够时间再前进（成功）或恢复按钮（失败）。

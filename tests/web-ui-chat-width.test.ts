@@ -160,16 +160,9 @@ test("both shell chrome rows render the same width toggle", () => {
 test("width toggle breakpoint matches the stylesheet media query", () => {
   const css = readFileSync(path.join(root, "src/web-ui/content/styles.css"), "utf8");
   const min = `@media (min-width: ${CHAT_WIDTH_MIN_VIEWPORT}px)`;
-  assert.ok(
-    css.includes(`${min} {\n      .chat-width-toggle {`),
-    "开关只在宽屏出现，且用的是同一个断点",
-  );
-  assert.ok(
-    css.includes(`:where(html[data-chat-width="column"]) .chat-messages`),
-    "正文居中列必须由 data-chat-width 属性驱动",
-  );
-  assert.ok(
-    css.includes(`html[data-chat-width="column"]:not(.is-wand-app) #chat-output.active ~ .input-panel`),
-    "居中模式下输入栏要跟正文同一列，且不碰原生壳",
-  );
+  assert.ok(css.includes(`${min} { .chat-width-toggle { display: inline-flex; }`),
+    "width controls use the same wide-screen threshold");
+  assert.match(css, /\.chat-width-toggle \{ display: none; \}/);
+  assert.match(css, /html\[data-chat-width="column"\]:not\(\.is-wand-app\) :is\(\.chat-messages, \.chat-running-bar, \.input-panel\)/,
+    "message and composer widths share one column rule while native shells keep their layout");
 });

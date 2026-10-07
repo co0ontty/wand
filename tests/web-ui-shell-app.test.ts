@@ -120,15 +120,15 @@ test("ShellApp provides the store and composes one sidebar and one main content"
   const store = new MemoryUiAdapter(fixture());
   try {
     const html = renderToStaticMarkup(createElement(ShellApp, { store, legacyRefs: legacyRefs() }));
-    assert.match(html, /^<div class="app-container"><div class="main-layout sidebar-open sidebar-pinned">/);
+    assert.match(html, /^<div(?=[^>]*class="[^"]*app-container[^"]*")[^>]*><div(?=[^>]*class="[^"]*main-layout sidebar-open sidebar-pinned[^"]*")/);
     assert.equal((html.match(/id="sessions-drawer-backdrop"/g) ?? []).length, 1);
     assert.equal((html.match(/id="sessions-drawer"/g) ?? []).length, 1);
-    assert.equal((html.match(/class="main-content"/g) ?? []).length, 1);
+    assert.equal((html.match(/class="[^"]*main-content[^"]*"/g) ?? []).length, 1);
     assert.equal((html.match(/id="output"/g) ?? []).length, 1);
     assert.equal((html.match(/id="chat-output"/g) ?? []).length, 1);
-    assert.match(html, /<div id="output" class="terminal-container active"><\/div>/);
-    assert.match(html, /<div id="chat-output" class="chat-container hidden"><\/div>/);
-    assert.match(html, /<div class="input-panel"><\/div>.*<\/main><\/div><\/div>$/s);
+    assert.match(html, /<div id="output" class="terminal-container active"[^>]*><\/div>/);
+    assert.match(html, /<div id="chat-output" class="chat-container hidden"[^>]*><\/div>/);
+    assert.match(html, /<div class="input-panel"[^>]*><\/div>.*<\/main><\/div><\/div>$/s);
   } finally {
     store.dispose();
   }
@@ -154,16 +154,16 @@ test("MemoryUiAdapter snapshot replacement preserves every legacy slot contract"
     }, { sync: true });
     const updated = renderToStaticMarkup(createElement(ShellApp, { store, legacyRefs: refs }));
 
-    assert.match(initial, /class="main-layout sidebar-open sidebar-pinned"/);
-    assert.match(updated, /class="main-layout sidebar-pinned sidebar-collapsed"/);
+    assert.match(initial, /class="[^"]*main-layout sidebar-open sidebar-pinned[^"]*"/);
+    assert.match(updated, /class="[^"]*main-layout sidebar-pinned sidebar-collapsed[^"]*"/);
     for (const html of [initial, updated]) {
       assert.equal((html.match(/id="output"/g) ?? []).length, 1);
       assert.equal((html.match(/id="chat-output"/g) ?? []).length, 1);
       assert.equal((html.match(/class="input-panel(?: hidden)?"/g) ?? []).length, 1);
       assert.equal((html.match(/id="file-explorer"/g) ?? []).length, 1);
     }
-    assert.match(updated, /<div id="output" class="terminal-container hidden"><\/div>/);
-    assert.match(updated, /<div id="chat-output" class="chat-container active"><\/div>/);
+    assert.match(updated, /<div id="output" class="terminal-container hidden"[^>]*><\/div>/);
+    assert.match(updated, /<div id="chat-output" class="chat-container active"[^>]*><\/div>/);
   } finally {
     store.dispose();
   }

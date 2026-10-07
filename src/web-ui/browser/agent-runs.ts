@@ -1,3 +1,5 @@
+import { deriveSubagentDispatchMeta } from "../../subagent-dispatch.js";
+
 export interface AgentRunSourceMeta {
   taskId: string;
   agentType?: string;
@@ -93,10 +95,6 @@ export interface AgentRunStatusSummary {
 
 function textValue(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
-
-function inputRecord(block: any): Record<string, unknown> {
-  return block && block.input && typeof block.input === "object" ? block.input : {};
 }
 
 /**
@@ -243,37 +241,14 @@ export function agentRunAccentSeed(agent: AgentRunAgent | null | undefined): str
   return String(agent?.taskId || agent?.meta?.agentType || "agent-run");
 }
 
+/**
+ * 派发判据：与 Web 服务端共用 `src/subagent-dispatch.ts` 同一份实现。
+ * pi 的 `subagent` 以「有没有 `action`」区分管理/控制与真派发，所以
+ * `subagent({ workflow: "…", async: true })` 这类工作流派发同样进「子 Agent」面板。
+ * 这里只留薄包装，不再自己判参数形状。
+ */
 export function deriveSubagentMeta(block: any): AgentRunSourceMeta | null {
-  if (!block) return null;
-  var stamped = block.__subagent;
-  if (stamped && textValue(stamped.taskId)) {
-    return {
-      taskId: stamped.taskId,
-      ...(textValue(stamped.agentType) ? { agentType: textValue(stamped.agentType) } : {}),
-      ...(textValue(stamped.taskDescription) ? { taskDescription: textValue(stamped.taskDescription) } : {}),
-    };
-  }
-  if (block.type !== "tool_use") return null;
-
-  var input = inputRecord(block);
-  if (block.name === "Pi/subagent") {
-    var piAgent = textValue(input.agent);
-    var piTask = textValue(input.task);
-    if (!piAgent && !piTask) return null;
-    return {
-      taskId: String(block.id || ""),
-      ...(piAgent ? { agentType: piAgent } : {}),
-      ...(piTask ? { taskDescription: piTask } : {}),
-    };
-  }
-  var agentType = textValue(input.subagent_type);
-  if (block.name !== "Task" && block.name !== "Agent" && !agentType) return null;
-  if (!textValue(block.id)) return null;
-  return {
-    taskId: block.id,
-    ...(agentType ? { agentType } : {}),
-    ...(textValue(input.description) ? { taskDescription: textValue(input.description) } : {}),
-  };
+  return deriveSubagentDispatchMeta(block);
 }
 
 export function agentRunBlockKey(messageIndex: number, blockIndex: number): string {
@@ -392,6 +367,7 @@ function blockRenderSignature(block: any): string {
     String(block.id || block.tool_use_id || ""),
     String(block.name || ""),
     String(contentLength),
+    block.execution ? JSON.stringify(block.execution) : "",
     block.is_error === true ? "1" : "0",
   ].join(",");
 }
@@ -400,7 +376,7 @@ export function buildAgentRunRenderSignature(index: AgentRunIndex): string {
   if (!index || !index.runs.length) return "";
   return index.runs.map(function(run) {
     return run.id + "|" + run.agents.map(function(agent) {
-      var refs = agent.blocks.concat(agent.result ? [agent.result] : []);
+      var refs = (agent.dispatch ? [agent.dispatch] : []).concat(agent.blocks, agent.result ? [agent.result] : []);
       return agent.taskId + ":" + refs.map(function(ref) {
         return ref.messageIndex + "." + ref.blockIndex + "." + blockRenderSignature(ref.block);
       }).join("/");

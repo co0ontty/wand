@@ -24,6 +24,9 @@ export interface AiTeamMember {
   id: string;
   /** 通讯录身份链接；缺省是独立 CLI 成员，不按名字猜测。 */
   employeeId?: string;
+  /** Group-only identity for unbound legacy preset members; never guessed from a name. */
+  legacyTemplateId?: string;
+  legacyMemberId?: string;
   name: string;
   /** 职责说明，原样写进提示词。 */
   duty: string;
@@ -34,7 +37,7 @@ export interface AiTeamMember {
   /** 职责标注；缺省视同 "any"。 */
   role?: TeamMemberRole;
   isLeader: boolean;
-  /** 头像：空串按 id 哈希选毛色；"cat:<n>" 指定毛色；"data:image/…" 为用户上传的小图。 */
+  /** 头像：空串按身份生成（渐变底 + 名字首字）；"cat:<n>" 指定毛色；"data:image/…" 为用户上传的小图。 */
   avatar?: string;
 }
 
@@ -55,12 +58,14 @@ export function memberAgents(member: {
  * 按字面量比较：model:"default" 不与具体默认模型名做等价归一。
  */
 export function agentKey(agent: WandTaskAgent): string {
-  return `${agent.provider}|${agent.model}|${agent.thinkingEffort}|${agent.mode}|${agent.kind}`;
+  const engine = agent.engine === "sdk" ? "|sdk" : "";
+  return `${agent.provider}|${agent.model}|${agent.thinkingEffort}|${agent.mode}|${agent.kind}${engine}`;
 }
 
 /** 启动失败分类（§3.4）；ai-team-availability（T2）复用此联合类型。 */
 export type CandidateFailureKind =
   | "spawn-missing"
+  | "input-rejected"
   | "host-disabled"
   | "model-unknown"
   | "startup-timeout"
@@ -101,14 +106,18 @@ export interface SiliconEmployee {
 }
 
 /**
- * AI 按自然语言期望起草的员工配置：只带一个首选执行候选，
- * 其余手动字段（头像、备用候选）仍由表单和「高级配置」负责。
+ * AI 按自然语言期望起草（或结构化校验后）的员工配置：agent 是首选执行候选，
+ * candidates 是已校验的完整候选清单。其余手动字段（头像等）仍由表单和「高级配置」负责。
  */
 export interface SiliconEmployeeDraft {
   name: string;
   duty: string;
   prompt: string;
   agent: WandTaskAgent;
+  /**
+   * IM-11 新增：已校验的执行候选，首项即 agent；旧客户端继续只读 agent 不受影响。
+   */
+  candidates?: WandTaskAgent[];
 }
 
 export const AI_TEAM_AVATAR_MAX_CHARS = 60_000;
@@ -195,6 +204,8 @@ export interface AiTeam {
   /** 协作指令：分工、工作要求与注意事项，写进负责人和成员的提示词。 */
   instructions: string;
   members: AiTeamMember[];
+  /** Per-run @ coordinator may take a duty-specific work step in a separate stage session. */
+  allowLeaderWork?: boolean;
   requirePlanApproval: boolean;
   /** Leader 轮次 + 成员步骤合计的上限。 */
   maxSteps: number;
@@ -218,7 +229,11 @@ export const AI_TEAM_TERMINAL_RUN_STATUSES: readonly AiTeamRunStatus[] = ["done"
 export interface AiTeamRun {
   id: string;
   teamId: string;
-  /** 执行快照；仅 runner 在明确续跑/回复边界按规则刷新，展示层改名不写回这里。 */
+  /** 群实例运行全程冻结；预设旧 CLI 运行保留兼容刷新规则。 */
+  conversationId?: string;
+  memberVersion?: number;
+  roundNumber?: number;
+  /** 执行快照；展示层改名不写回这里。 */
   team: AiTeam;
   taskId: string;
   objective: string;
@@ -241,7 +256,7 @@ export interface AiTeamRun {
 
 /** 群聊名从任务标题派生；不修改团队定义，也不回写历史消息。 */
 export function aiTeamChatTitle(taskTitle?: string | null): string {
-  return `${taskTitle?.trim() ?? ""}任务处理群`;
+  return taskTitle?.trim() || "群聊";
 }
 
 /**
@@ -309,6 +324,11 @@ export interface AiTeamStep {
 export interface AiTeamRunSummary extends AiTeamRun {
   taskTitle: string;
   taskIdentifier: string;
+  /**
+   * 活动时间投影（派生、不入库）。本机服务端总是带；旧服务端或测试夹具可能缺省，
+   * 读取端按可选处理，不要在缺省时把 `updatedAt` 当活动证据（长静默期它不动）。
+   */
+  activity?: AiTeamRunActivity;
 }
 
 /** detail() 里群聊回合的截尾条数（§4.4）：面板只给最近这一段，完整会话走「打开群聊」。 */
@@ -316,6 +336,34 @@ export const AI_TEAM_DETAIL_CHAT_TURNS = 200;
 
 /** live 卡片文本的尾部保留上限（§4.9），超出部分回报 omittedChars 给前端显示「已省略前面 N 字」。 */
 export const AI_TEAM_LIVE_TEXT_MAX_CHARS = 2000;
+
+/**
+ * 静默心跳阈值：run 处于 running 且这段时间内没有任何可观测活动，就重推一次 live 快照
+ * 和一次 `ai-team-run` 通知（与会话侧的静默口径同一数值）。阈值只决定**重推频率**，
+ * 不引入新事件类型，也不是轮询：计时器每个 run 至多一个，run 离开 running 即 cancel。
+ */
+export const AI_TEAM_SILENCE_HEARTBEAT_MS = 30_000;
+
+/**
+ * run 级活动时间的投影，读取时派生、**不入库**（`ai_team_runs` 没有对应列，也不加）：
+ * 长任务静默期（模型在想、在跑一条长命令）界面上要能区分「还在跑」和「卡死了」。
+ */
+export interface AiTeamRunActivity {
+  /**
+   * 本轮开始 = `run.createdAt`。终态 run 也照原值返回，客户端可以继续显示「共运行 N 分钟」；
+   * 它不是心跳时间，不会随推送前进。
+   */
+  startedAt: string;
+  /**
+   * 最近一次**可观测活动**的时刻：live 文本/状态/输出增长、步骤开始或结束、run 状态写入。
+   * 心跳不推进它 —— 只有真实活动才变，所以「startedAt 在走、lastActivityAt 不动」正是
+   * 「仍在跑、只是这一轮安静」的判据。终态 run 取最后一次活动的时刻（等于结束时的
+   * `run.updatedAt`），之后不再变化；缺证据时退回 `startedAt`，不会返回未来时间。
+   */
+  lastActivityAt: string;
+  /** 服务端生成这份投影的时刻；客户端用它算「N 秒前」，不受两端时钟偏差影响。 */
+  observedAt: string;
+}
 
 /**
  * 一个正在干活的运行中步骤的实时快照（§4.9）：Web 走 ai-team-step-live 推送，
@@ -340,6 +388,20 @@ export interface AiTeamLiveStep {
   /** renderLiveStepText 的渲染结果，尾部保留、至多 AI_TEAM_LIVE_TEXT_MAX_CHARS 字。 */
   text: string;
   omittedChars: number;
+  /**
+   * 本步开始执行的时刻（= `AiTeamStep.startedAt`，步骤进入 running 时写入）。
+   * 客户端用它算「这步已运行 N 分钟」；理论上 running 步都有值，旧数据缺省时为 null，
+   * 客户端按「没有开始时间」处理，不要拿 updatedAt 代替。
+   */
+  startedAt: string | null;
+  /**
+   * 这一步最近一次**可观测活动**的时刻：live 文本、思考/输出增量或活动状态发生变化才前进。
+   * 静默期（模型在想、在跑长命令、没有新输出）它保持不变，此时靠 `heartbeat` 快照证明还活着。
+   * 首次观察到该步时以 `startedAt` 为基线（不假造「刚刚有活动」），所以它不会早于 startedAt、
+   * 也不会晚于生成这次快照的时刻。步骤结束后该步不再出现在 live 列表里，本字段随之消失。
+   */
+  lastActivityAt: string;
+  /** 本次快照的生成时刻（不是活动时刻）：每次推送/轮询都会前进，别拿它判断「有没有新进展」。 */
   updatedAt: string;
 }
 
@@ -347,6 +409,31 @@ export interface AiTeamLiveStep {
 export interface AiTeamLiveUpdate {
   runId: string;
   taskId: string;
+  /**
+   * 推送时的 run 状态；客户端据此区分「在跑」「等批准」「已结束」，不必再拉 detail。
+   * 本机服务端总是带；未升级的转发层或旧服务端可能缺省，读取端按可选处理。
+   */
+  status?: AiTeamRunStatus;
+  /** run 级活动时间；与 steps 同级，避免为「仍在运行」指示再多打一次 detail。同上，可选项。 */
+  activity?: AiTeamRunActivity;
+  /**
+   * true = 静默超阈值的重推：内容与上一次可能逐字相同，但 `activity.observedAt` 是新的，
+   * 语义是「服务端此刻仍在跟踪这个 run」。真实内容变化产生的推送这里是 false，
+   * 缺省按 false 处理。run 进入终态后不会再有 heartbeat 推送。
+   */
+  heartbeat?: boolean;
+  steps: AiTeamLiveStep[];
+}
+
+/**
+ * `GET /api/ai-team-runs/:id/live` 的回包（§4.9.1）：轮询侧的 live 快照 + run 级活动时间。
+ * 轮询本身就是「服务端此刻的真实观察」，所以没有 heartbeat 标记，只有推送通道才有。
+ */
+export interface AiTeamLiveSnapshot {
+  runId: string;
+  /** 投影时的 run 状态；轮询端不必为「还在跑吗」再拉一次 detail。 */
+  status: AiTeamRunStatus;
+  activity: AiTeamRunActivity;
   steps: AiTeamLiveStep[];
 }
 
@@ -354,6 +441,11 @@ export interface AiTeamRunDetail {
   run: AiTeamRun;
   /** One run's result/files/current handoffs; absent on older servers, no side effects. */
   delivery?: AiTeamDeliverySummary;
+  /**
+   * 活动时间投影（派生、不入库）：长任务静默期靠它显示「已运行 N 分钟、M 秒前有活动」。
+   * 本机的 detail() 总是带；旧服务端缺省时读取端要退回 `run.updatedAt`，不能当作活动证据。
+   */
+  activity?: AiTeamRunActivity;
   /** 仅供展示的群名，读取当前任务标题，不以团队名代替。 */
   chatTitle?: string;
   /** 任务标题的版本；任务改名不改变 run.updatedAt。 */

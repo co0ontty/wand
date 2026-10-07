@@ -100,16 +100,20 @@ test("默认迭代预选钩子只在打开时填一次", () => {
   assert.ok(source.includes("const done = React.useRef(false);"));
   assert.ok(source.includes("if (done.current || !milestone) return;"));
   assert.ok(source.includes("done.current = false;"), "关闭后要允许下次打开重新预选");
-  // 三个新建入口都要接上预选，否则「所有任务都有默认迭代」在前端不成立。
+  // 会建任务卡的入口都要接上预选，否则「所有任务都有默认迭代」在前端不成立。
+  // 侧栏「新建任务」现在统一复用新建会话页（`workspaces/host.tsx` 只是桥接，不建任务卡），
+  // 那条路径没有迭代可预选；桥接本身单独钉住，避免有人又在那里建任务却忘了预选。
   for (const file of [
     "../src/web-ui/react/issues/task-board-host.tsx",
-    "../src/web-ui/react/workspaces/host.tsx",
     "../src/web-ui/react/missions/host.tsx",
   ]) {
     const host = readFileSync(new URL(file, import.meta.url), "utf8");
     assert.ok(host.includes("usePreselectMilestone("), `${file} 应该预选默认迭代`);
     assert.ok(host.includes("useDefaultMilestone("), `${file} 应该拿到默认迭代`);
   }
+  const bridge = readFileSync(new URL("../src/web-ui/react/workspaces/host.tsx", import.meta.url), "utf8");
+  assert.ok(bridge.includes("newSessionController.open("), "侧栏新建任务桥接到统一的新建会话页");
+  assert.doesNotMatch(bridge, /\/api\/tasks|createTask/, "桥接不建任务卡，所以没有可预选的迭代");
   assert.equal(typeof useDefaultMilestone, "function");
   assert.equal(typeof usePreselectMilestone, "function");
 });
@@ -129,7 +133,6 @@ test("默认迭代只在面板打开时拉列表（登录前挂载的宿主不�
   assert.ok(source.includes("[active, snapshot.loaded, snapshot.loading]"), "打开或加载状态变化后要能重试");
   for (const file of [
     "../src/web-ui/react/issues/task-board-host.tsx",
-    "../src/web-ui/react/workspaces/host.tsx",
     "../src/web-ui/react/missions/host.tsx",
   ]) {
     const host = readFileSync(new URL(file, import.meta.url), "utf8");
@@ -142,7 +145,7 @@ test("本轮变更面板默认用迭代提示词，勾选状态一眼可见", ()
   assert.ok(html.includes("本次变更输入"));
   assert.ok(html.includes("迭代提示词"));
   assert.ok(html.includes("完整 diff"));
-  assert.ok(html.includes('aria-checked="true"'), "默认选中「迭代提示词」");
+  assert.ok(/ant-segmented-item-selected[\s\S]*?<input[^>]*checked/.test(html), "默认选中「迭代提示词」");
   assert.ok(html.includes("默认迭代"), "标出迭代归属");
   assert.ok(html.includes("修终端乱码"));
   assert.ok(html.includes("已提交"), "已提交过的条目要标出来");

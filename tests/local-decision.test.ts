@@ -14,6 +14,7 @@ import type { SessionSnapshot } from "../src/types.js";
 import { withDecisionAccess } from "../src/decision-runner.js";
 import { installDecisionSkill } from "../src/decision-skill.js";
 import { buildChildEnv } from "../src/env-utils.js";
+import { defaultPiSessionSettings } from "../src/pi-session-settings.js";
 import type { StructuredRunnerAdapter, StructuredRunnerContext, StructuredRunnerResult } from "../src/structured-runner.js";
 
 const input = { state: "synthetic", questions: {
@@ -138,6 +139,34 @@ test("runner capability is transient, replaces inherited credentials and revokes
   process.env.WAND_DECISION_TOKEN = "inherited";
   try { assert.equal(buildChildEnv(true).WAND_DECISION_TOKEN, undefined); }
   finally { if (original === undefined) delete process.env.WAND_DECISION_TOKEN; else process.env.WAND_DECISION_TOKEN = original; }
+});
+
+test("Pi sessions can switch off the per-turn decision capability without touching other providers", async (t) => {
+  const { storage } = setup(t);
+  let received!: StructuredRunnerContext;
+  const runner: StructuredRunnerAdapter = { start(context) {
+    received = context;
+    return { args: [], pid: null, spawnedAt: new Date().toISOString(), interrupt() {},
+      completion: new Promise((resolve) => { void resolve; }) };
+  } };
+  const wrapper = withDecisionAccess(runner, storage, () => ({ url: "http://127.0.0.1:8443" }));
+  const observer = { isActive: () => true, onUpdate() {} };
+  const base = session("pi-off");
+  storage.saveSession(base);
+  const settings = defaultPiSessionSettings();
+  // 关掉开关：不注入凭据，也不追加运行时提示。
+  const off = wrapper.start({ session: { ...base, piSettings: { ...settings, localDecision: false } }, prompt: "x", env: {} }, observer);
+  assert.equal(received.env.WAND_DECISION_TOKEN, undefined);
+  assert.equal(received.session.runtimeSystemPrompt, undefined);
+  void off;
+  // 打开（默认）：仍然拿到本轮可撤销能力。
+  received = undefined as unknown as StructuredRunnerContext;
+  const on = wrapper.start({ session: { ...base, id: "test", piSettings: { ...settings, localDecision: true } }, prompt: "x", env: {} }, observer);
+  const token = received.env.WAND_DECISION_TOKEN;
+  assert.ok(token, "enabled Pi session must still receive a capability token");
+  assert.match(received.session.runtimeSystemPrompt ?? "", /本地判断工具/);
+  storage.revokeDecisionAccess(token!);
+  void on;
 });
 
 test("managed skill installation is shared, idempotent and preserves user edits and foreign skills", async (t) => {

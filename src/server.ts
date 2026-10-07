@@ -1,3 +1,4 @@
+import { OpenRouterFreeModelsService } from "./openrouter-free-models.js";
 import crypto from "node:crypto";
 import compression from "compression";
 import express, { NextFunction, Request, Response } from "express";
@@ -28,12 +29,16 @@ import {
   resolveConfigDir,
 } from "./config.js";
 import { ModelCatalogService, type ModelRefreshOptions } from "./models.js";
+import { defaultModelGroupSelector } from "./model-groups.js";
+
 import { ProcessManager, ProcessEvent } from "./process-manager.js";
 import { SessionLogger } from "./session-logger.js";
+import { coreHarnessAgentDir, warmCoreHarness } from "./harness-engine.js";
 import { SessionRegistry } from "./session-registry.js";
 import { SessionCompletionTracker } from "./session-completion.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
+import { SettingsWebAccess, registerSettingsWebAccessRoute } from "./settings-web-access.js";
 import { DecisionService } from "./decision-service.js";
 import type { DecisionRuntimeAccess } from "./decision-runner.js";
 import { registerDecisionRoutes } from "./server-decision-routes.js";
@@ -56,9 +61,14 @@ import { registerTaskRoutes } from "./server-task-routes.js";
 import { getGithubConnectorStatus } from "./github-connector.js";
 import { registerMissionRoutes } from "./server-mission-routes.js";
 import { Missions } from "./missions.js";
-import { createAiTeamRunner } from "./ai-team-runner.js";
+import { AI_TEAM_CHAT_PREFIX, createAiTeamRunner } from "./ai-team-runner.js";
+import { ConversationService } from "./conversation-service.js";
+import type { ConversationSessionUpdate } from "./conversation-types.js";
+import { CONVERSATION_RELAY_PREFIX } from "./conversation-types.js";
+import { forwardConversationRelay, registerConversationRoutes } from "./server-conversation-routes.js";
 import type { AiTeamLiveUpdate } from "./ai-team-types.js";
 import { registerAiTeamRoutes } from "./server-ai-team-routes.js";
+import { registerTeamDispatchRoutes } from "./server-team-dispatch-routes.js";
 import { registerSiliconEmployeeRoutes } from "./server-employee-routes.js";
 import { defaultRoleForCli } from "./default-employee.js";
 import { UserMemoryService } from "./user-memory.js";
@@ -86,7 +96,7 @@ import {
 } from "./npm-update-utils.js";
 import { repairServiceUnitAfterUpdate } from "./service-self-repair.js";
 import { computeRelaunch } from "./relaunch.js";
-import { startRetentionTimer } from "./retention.js";
+import { createRetentionSweep, startRetentionTimer, type RetentionResult } from "./retention.js";
 import { RuntimeConfigState } from "./runtime-config.js";
 import { safeServiceInstalled } from "./tui/runtime-utils.js";
 import {
@@ -117,6 +127,7 @@ import {
   type ProviderCliUpdateStatus,
 } from "./provider-cli-updater.js";
 import { CommandRequest, SessionProvider, WandConfig } from "./types.js";
+import { userAuthor } from "./user-profile.js";
 
 const SERVER_MODULE_DIR = path.dirname(new URL(import.meta.url).pathname);
 const RUNTIME_ROOT_DIR = path.resolve(SERVER_MODULE_DIR, "..");
@@ -196,9 +207,12 @@ const SERVER_INSTANCE_ID = crypto.randomUUID();
 
 const requestPrincipals = new WeakMap<Request, AuthPrincipal>();
 
-function buildRequireAuth(useHttps: boolean, storage: WandStorage, config: WandConfig, authService: AuthService) {
+function buildRequireAuth(useHttps: boolean, storage: WandStorage, config: WandConfig, authService: AuthService, settingsAccess: SettingsWebAccess) {
   return function requireAuth(req: Request, res: Response, next: NextFunction): void {
-    const principal = authService.authenticateSession(readSessionCookie(req, useHttps))
+    const sessionToken = readSessionCookie(req, useHttps);
+    const sessionPrincipal = authService.authenticateSession(sessionToken);
+    const principal = (sessionPrincipal && principalHasScope(sessionPrincipal, "session-preferences") &&
+      settingsAccess.accepts(sessionToken, req.headers.cookie) ? BROWSER_ADMIN_PRINCIPAL : sessionPrincipal)
       ?? authenticateBearerAppToken(req, storage, config);
     if (!principal) {
       res.status(401).json({ error: "未授权，请先登录。" });
@@ -371,8 +385,9 @@ export function isPortInUseError(error: unknown): error is PortInUseError {
 export async function startServer(
   config: WandConfig,
   configPath: string,
-  options: { modelRefreshOptions?: () => Partial<ModelRefreshOptions>; terminalHost?: TerminalHost } = {},
+  options: { modelRefreshOptions?: () => Partial<ModelRefreshOptions>; terminalHost?: TerminalHost; openRouterFetch?: typeof fetch } = {},
 ): Promise<ServerHandle> {
+  if (config.shell?.trim()) process.env.SHELL = config.shell.trim();
   // 关键：在创建 ProcessManager / 任何 spawn 之前先修 PATH。
   // 服务被注册为 systemd / launchd 时，unit 文件里的 PATH 是安装那一刻烧死的，
   // 之后用户切 node 版本 / 重装 wand / 把 claude 装到新位置都不会更新 unit，
@@ -402,7 +417,9 @@ export async function startServer(
   app.set("trust proxy", "loopback, 172.16.0.0/12");
   const storage = new WandStorage(resolveDatabasePath(configPath));
   const runtimeConfig = new RuntimeConfigState(config);
+  const openRouter = new OpenRouterFreeModelsService(storage, options.openRouterFetch);
   const authService = new AuthService(storage);
+  const settingsAccess = new SettingsWebAccess();
   const decisions = new DecisionService(config.localDecision);
   // 默认模型优先读存储（UI 改设置后实时生效），未设置时由 getPreference 回落到 config。
   const getCurrentDefaultModels = (): { claude: string; codex: string; opencode: string; grok: string; qoder: string; pi: string; gemini: string } => ({
@@ -420,11 +437,14 @@ export async function startServer(
     const currentDefaults = getCurrentDefaultModels();
     return {
       storage,
+      managedPiModels: () => openRouter.catalog(),
+      managedPiModelMembers: () => openRouter.members(),
+      modelGroups: () => config.modelGroups ?? [],
       inheritEnv: config.inheritEnv !== false,
       apiKey: process.env.ANTHROPIC_API_KEY,
       baseUrl: process.env.ANTHROPIC_BASE_URL,
       ...injected,
-      piEndpointDiscovery: injected.piEndpointDiscovery ?? { enabled: !testMode },
+      piEndpointDiscovery: injected.piEndpointDiscovery ?? { enabled: !testMode, agentDir: coreHarnessAgentDir(config.harness) },
       configuredClaudeModels: [
         currentDefaults.claude,
         config.commitCli === "claude" ? (storage.getPreference("pref:commitModel", config.commitModel) ?? "") : undefined,
@@ -455,7 +475,10 @@ export async function startServer(
         knownSessionIds: knownPtySessionIds,
       });
   const terminalHost = ptyHosts.host;
-  const processes = new ProcessManager(config, storage, configDir, terminalHost);
+  let decisionRuntime: DecisionRuntimeAccess | null = null;
+  let autoAssignEvaluate: DecisionRuntimeAccess["evaluate"];
+  const processes = new ProcessManager(config, storage, configDir, terminalHost,
+    { resolveDecisionEvaluate: () => autoAssignEvaluate });
   const structuredLogger = new SessionLogger(configDir, config.shortcutLogMaxBytes);
   // Production startup provides a daemon-backed host for structured CLI runs
   // even when Render owns every PTY. In-process hosts are for test injection.
@@ -464,13 +487,25 @@ export async function startServer(
   const structuredHosts = await createUpgradeAwareStructuredHost(
     configPath, legacyStructuredHost, config.structured?.processHost,
   );
-  let decisionRuntime: DecisionRuntimeAccess | null = null;
   const structuredSessions = new StructuredSessionManager(
-    storage, config, structuredLogger, {}, structuredHosts.host, () => decisionRuntime,
+    storage, config, structuredLogger, {}, structuredHosts.host, () => decisionRuntime, openRouter,
+    () => autoAssignEvaluate,
   );
+  // core harness 预热：只读本机 Pi 认证与模型目录，不联网。失败不影响启动，
+  // 但要在开始接输入前得到确定结论，否则首轮引擎裁决会因缓存未就绪而退回 CLI。
+  const coreHarnessStatus = await warmCoreHarness(config.harness);
+  if (coreHarnessStatus) {
+    console.log(coreHarnessStatus.available
+      ? `[wand] core harness 可用（Pi provider ${coreHarnessStatus.providerCount} 个、模型 ${coreHarnessStatus.modelCount} 个，agentDir ${coreHarnessStatus.agentDir}）；pi 结构化会话将使用进程内引擎。`
+      : `[wand] core harness 不可用，pi 结构化会话回退 CLI：${coreHarnessStatus.reason}`);
+  }
   const sessionRegistry = new SessionRegistry(processes, structuredSessions, storage);
   const sessionCompletions = new SessionCompletionTracker(storage, (id) => sessionRegistry.get(id));
   const missions = new Missions(storage, structuredSessions, sessionRegistry);
+  // 任务保留的立即扫描也晚绑定：设置路由先注册，WebSocket 和会话表稍后才就绪。
+  let runTaskRetentionSweep = (): RetentionResult => ({
+    archivedSessions: 0, purgedSessions: 0, archivedTasks: 0, purgedTasks: 0, purgedTeamRuns: 0,
+  });
   // wsManager 在后面才建：团队运行的变更通知经由这个转发口，接好之前静默丢弃。
   let notifyAiTeamRun = (_data:
     | { kind: "ai-team-run"; runId: string; taskId: string }
@@ -478,6 +513,7 @@ export async function startServer(
     | { kind: "silicon-employee-definition"; employeeId: string }): void => {};
   // 运行中步骤的 live 文本推送（§4.9），同样走系统通知，接好之前静默丢弃。
   let notifyAiTeamRunLive = (_update: AiTeamLiveUpdate): void => {};
+  let notifyConversationSession = (_update: ConversationSessionUpdate): void => {};
   // 团队降级的 model-unknown 事前比对只看这份已发现的清单；没刷新过就是空，判定方向是放行。
   const aiTeamModelIds = (provider: SessionProvider): string[] => {
     const cache = modelCatalog.snapshot();
@@ -492,14 +528,27 @@ export async function startServer(
     } as const)[provider];
     return cache[key].map((entry) => entry.id);
   };
+  let conversations: ConversationService | null = null;
   const aiTeams = createAiTeamRunner({
     storage, config, structured: structuredSessions, processes, sessions: sessionRegistry,
-    notify: (run) => notifyAiTeamRun({ kind: "ai-team-run", runId: run.id, taskId: run.taskId }),
+    selfAuthor: () => userAuthor(config.userProfile),
+    notify: (run) => {
+      conversations?.importRun(run);
+      notifyAiTeamRun({ kind: "ai-team-run", runId: run.id, taskId: run.taskId });
+    },
     notifyLive: (update) => notifyAiTeamRunLive(update),
     models: aiTeamModelIds,
+    chatHistoryTurns: id => conversations?.history(id) ?? [],
     // 成员名单里的模型名：`default` 哨兵换成服务端为该 CLI 配置的默认模型。
     defaultModelOf: (provider) => getDefaultModelForProvider(config, provider),
   });
+  const conversationService = new ConversationService({ storage, config, structured: structuredSessions, runner: aiTeams,
+    notifySession: update => notifyConversationSession(update), deleteSession: id => { sessionRegistry.deleteWithProviderHistory(id); } });
+  conversations = conversationService;
+  conversationService.migrateExistingChats();
+  for (const prefix of [CONVERSATION_RELAY_PREFIX, AI_TEAM_CHAT_PREFIX]) {
+    structuredSessions.registerRelay(prefix, (sessionId, input) => forwardConversationRelay(conversationService, sessionId, input));
+  }
   const updateState = new ServerUpdateState();
   const getUpdateChannel = (): "stable" | "beta" =>
     normalizeUpdateChannel(storage.getConfigValue("updateChannel"));
@@ -509,7 +558,7 @@ export async function startServer(
   };
   const useHttps = config.https === true;
   const protocol = useHttps ? "https" : "http";
-  const requireAuth = buildRequireAuth(useHttps, storage, config, authService);
+  const requireAuth = buildRequireAuth(useHttps, storage, config, authService, settingsAccess);
   const requireAdmin = buildRequireScope("admin");
   const requireSessions = buildRequireScope("sessions");
   const requireFiles = buildRequireScope("files");
@@ -585,9 +634,10 @@ export async function startServer(
 
   // ── Web UI endpoints ──
 
-  app.get("/", (_req, res) => {
+  app.get(["/", "/settings"], (req, res) => {
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-    res.type("html").send(renderApp(configPath));
+    res.type("html").send(renderApp(configPath, /^\/settings\/?$/.test(req.path) ? "settings" : "console",
+      req.query.client === "app" ? "client" : "browser"));
   });
 
   app.get("/api/structured-chat-avatar/:role", requireAuth, asyncRoute(async (req, res) => {
@@ -725,11 +775,23 @@ export async function startServer(
 
   // ── Android APK update & download (no auth required) ──
 
-  registerPublicUpdateRoutes(app, distributionManager);
+  registerPublicUpdateRoutes(app, distributionManager, config.publicOrigin);
 
   // Public probe so the unauthenticated browser does not log a 401 on /api/config
   app.get("/api/session-check", (req, res) => {
     res.json({ authed: authService.validateSession(readSessionCookie(req, useHttps)) });
+  });
+
+  registerSettingsWebAccessRoute(app, {
+    requireAuth, useHttps, access: settingsAccess,
+    authenticateSession: (token) => authService.authenticateSession(token),
+  });
+
+  // Count-only compatibility probe. Local control (including session IDs and
+  // admission barriers) uses the owner-only Unix IPC socket.
+  app.get("/api/core-status", (_req, res) => {
+    const { hasActiveTurns, activeTurnCount } = structuredSessions.getCoreTurnStatus();
+    res.set("Cache-Control", "no-store").json({ hasActiveTurns, activeTurnCount });
   });
 
   registerDecisionRoutes(app, { storage, decisions, requireAuth, requireSessions });
@@ -744,6 +806,7 @@ export async function startServer(
     "/api/session-list",
     "/api/session-directories",
     "/api/structured-sessions",
+    "/api/conversations",
     "/api/commands",
     "/api/user-memory",
     "/api/claude-history",
@@ -824,6 +887,8 @@ export async function startServer(
       ],
       structuredChatPersona,
       cardDefaults: config.cardDefaults,
+      // 会话署名与头像：客户端只做展示投影，不解释成任何执行身份。
+      userProfile: config.userProfile ?? {},
       // 把语言偏好暴露给前端做 UI 文案 i18n。后端原本只用它给 Claude 拼 system prompt，
       // 前端没收到 → "SUBAGENT" / "Read" 这些 UI label 一直是英文，跟用户设的中文不匹配。
       language: config.language ?? "",
@@ -860,8 +925,10 @@ export async function startServer(
     getDistributionSettings,
     getGithubConnector: () => getGithubConnectorStatus(storage),
     modelCatalog,
+    openRouter,
     resolveAppConnectCode: (req) =>
       resolveAppConnectCode(req, config, useHttps, getEffectivePassword(storage, config)),
+    sweepTaskRetention: () => runTaskRetentionSweep(),
   });
 
   registerGithubRoutes(app, { storage, requireAdmin, sessions: sessionRegistry });
@@ -872,12 +939,15 @@ export async function startServer(
     runner: aiTeams,
     notifyTeamChanged: (teamId) => notifyAiTeamRun({ kind: "ai-team-definition", teamId }),
   });
+  // 无指派派工：本地决策模型建议名单 → 确认开工（不自动派工，见 AGENTS）。
+  registerTeamDispatchRoutes(app, { storage, runner: aiTeams, decisions });
   registerSiliconEmployeeRoutes(app, {
     storage,
     config,
     notifyEmployeeChanged: (employeeId) => notifyAiTeamRun({ kind: "silicon-employee-definition", employeeId }),
   });
   registerAttentionRoutes(app, { sessions: sessionRegistry, runner: aiTeams });
+  registerConversationRoutes(app, conversationService);
 
   registerAdminUpdateRoutes(app, {
     storage,
@@ -908,7 +978,7 @@ export async function startServer(
 
   registerSessionRoutes(app, processes, structuredSessions, storage, config.defaultMode, config, sessionRegistry, (cwd) => {
     recordRecentPath(storage, cwd);
-  }, (event) => wsManager.emitEvent(event));
+  }, (event) => wsManager.emitEvent(event), decisions);
   registerClaudeHistoryRoutes(app, processes, storage);
   registerWorkspaceRoutes(app, storage, sessionRegistry, { config });
   registerMissionRoutes(app, missions);
@@ -983,7 +1053,7 @@ export async function startServer(
         ? "qodercli"
         : rawCommand;
       const effectiveModel = provider
-        ? rawModel || getDefaultModelForProvider(config, provider) || undefined
+        ? rawModel || defaultModelGroupSelector(config.modelGroups, provider, getDefaultModelForProvider(config, provider)) || getDefaultModelForProvider(config, provider) || undefined
         : undefined;
       const reqCols = typeof body.cols === "number" && Number.isFinite(body.cols) ? body.cols : undefined;
       const reqRows = typeof body.rows === "number" && Number.isFinite(body.rows) ? body.rows : undefined;
@@ -1119,6 +1189,7 @@ export async function startServer(
     wsManager.emitEvent(event);
   });
   structuredSessions.setEventEmitter((event) => {
+    conversationService.ingestSessionEvent(event);
     sessionCompletions.ingest(event);
     missions.ingest(event);
     aiTeams.ingest(event);
@@ -1132,10 +1203,14 @@ export async function startServer(
       type: "notification", sessionId: "__system__", data: { kind: "ai-team-step-live", ...update },
     });
   };
+  notifyConversationSession = update => {
+    wsManager.emitEvent({ type: "notification", sessionId: "__system__", data: { kind: "conversation-session-preview", ...update } });
+  };
   // Re-attach structured CLI runs that kept going inside terminald while the
   // previous web process was down; fire-and-forget, failures are logged inside.
   void structuredSessions.recoverDetachedRuns();
   aiTeams.reconcile();
+  structuredSessions.resumeQueuedPiMessages();
 
   // ── Restart endpoint (needs server + wss in scope) ──
 
@@ -1145,12 +1220,27 @@ export async function startServer(
    *     重写的）ExecStart 拉起，避免再 spawn detached 子进程与 systemd 抢单实例 pidfile；
    *   - 否则 → spawn 一个 detached 子进程（bin 优先全局安装，确保更新后跑到新版）再退出。
    */
+  let restartPending = false;
   function relaunchAfterShutdown(): void {
-    const plan = computeRelaunch({
-      serviceInstalled: safeServiceInstalled(),
-      globalCli: resolveGlobalWandCli(),
-    });
-    void close().finally(() => {
+    if (restartPending) return;
+    restartPending = true;
+    const releaseDrain = structuredSessions.beginCoreRestartDrain();
+    void (async () => {
+      if (structuredSessions.getCoreTurnStatus().hasActiveTurns) {
+        process.stdout.write("[wand] 等待原生 Core 回合完成后再重启…\n");
+      }
+      while (structuredSessions.getCoreTurnStatus().hasActiveTurns) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+      }
+      // Do not dispose tools/services or arm the force-exit timer while a native
+      // turn is still running. The same barrier covers manual and auto restart.
+      const plan = computeRelaunch({
+        serviceInstalled: safeServiceInstalled(),
+        globalCli: resolveGlobalWandCli(),
+      });
+      const forceExitTimer = setTimeout(() => process.exit(0), 5000);
+      forceExitTimer.unref?.();
+      await close();
       if (plan.mode === "spawn") {
         spawn(process.execPath, [plan.bin ?? "", ...(plan.args ?? [])], {
           detached: true,
@@ -1160,10 +1250,11 @@ export async function startServer(
         }).unref();
       }
       process.exit(0);
+    })().catch((error: unknown) => {
+      restartPending = false;
+      releaseDrain();
+      wandError("等待 Core 回合后重启失败", getErrorMessage(error));
     });
-    // Force exit after 5s if graceful shutdown stalls
-    const forceExitTimer = setTimeout(() => process.exit(0), 5000);
-    forceExitTimer.unref?.();
   }
 
   app.post("/api/restart", requireAdmin, asyncRoute(async (_req, res) => {
@@ -1186,7 +1277,9 @@ export async function startServer(
     const cleanupFailedListen = (): void => {
       shuttingDown = true;
       decisions.dispose();
+      openRouter.dispose();
       try { processes.dispose(); } catch { /* noop */ }
+      conversationService.dispose();
       try { structuredSessions.dispose(); } catch { /* noop */ }
       aiTeams.dispose();
       try { structuredHosts.rustClient?.disconnect(); } catch { /* noop */ }
@@ -1212,10 +1305,18 @@ export async function startServer(
       const address = server.address();
       const actualPort = typeof address === "object" && address ? address.port : config.port;
       bindAddr = `${config.host}:${actualPort}`;
+      const decisionStatus = decisions.status();
       if (config.localDecision?.enabled) {
         const localHost = config.host === "::1" ? "[::1]" : config.host === "0.0.0.0" || config.host === "::" ? "127.0.0.1" : config.host;
         decisionRuntime = { url: `${protocol}://${localHost}:${actualPort}`,
-          ...(activeSslCertPath ? { caPath: activeSslCertPath } : {}) };
+          ...(activeSslCertPath ? { caPath: activeSslCertPath } : {}),
+          // core 会话直接调进程内决策服务，不再绕出 HTTP + env token。
+          evaluate: (value, caller, signal) => decisions.evaluate(value, caller, signal) };
+      }
+      // 「智能分配」只要真正能跑（启用 + 平台/运行环境就绪）才由本地决策负责；
+      // 否则转给系统员工的一次性文本回退，而不是每次白等一个必然失败的调用。
+      if (config.localDecision?.enabled && decisionStatus.supported && decisionStatus.configured) {
+        autoAssignEvaluate = (value, caller, signal) => decisions.evaluate(value, caller, signal);
       }
       const scheme: "HTTP" | "HTTPS" = useHttps ? "HTTPS" : "HTTP";
       // 主 URL：本机回环；若绑定 0.0.0.0 再补一个对外提示。
@@ -1256,6 +1357,8 @@ export async function startServer(
       data: { kind: "models", revision: result.revision, refreshedAt: result.refreshedAt },
     });
   });
+  openRouter.onChanged(() => modelCatalog.publishManagedPiModels());
+  if (!testMode) openRouter.start();
   let modelCatalogRefreshTimer: NodeJS.Timeout | null = null;
   if (!testMode) {
     void modelCatalog.refresh().catch(() => {});
@@ -1265,10 +1368,28 @@ export async function startServer(
     modelCatalogRefreshTimer.unref();
   }
 
-  // 保留期扫描：7 天没活动的会话/任务自动归档，归档 7 天后自动清理。
+  // 会话仍按固定 7 天归档再清理；任务窗口每次扫描读取当前设置。
+  // 保存任务保留设置后走同一条扫描，不等下一小时。
+  const retentionDeps = {
+    storage,
+    sessions: sessionRegistry,
+    taskRetention: () => config.taskRetention,
+  };
+  const sweepRetention = createRetentionSweep(retentionDeps);
+  runTaskRetentionSweep = () => {
+    const result = sweepRetention();
+    try {
+      wsManager.emitEvent({
+        type: "notification",
+        sessionId: "__system__",
+        data: { kind: "task-retention", ...result },
+      });
+    } catch { /* 扫描结果已经返回给保存请求，通知失败不回滚 */ }
+    return result;
+  };
   let retentionTimer: NodeJS.Timeout | null = null;
   if (!testMode) {
-    retentionTimer = startRetentionTimer({ storage, sessions: sessionRegistry });
+    retentionTimer = startRetentionTimer(retentionDeps, 60 * 60 * 1000, sweepRetention);
   }
 
   // Express 4 does not forward rejected route promises automatically. Every
@@ -1348,10 +1469,8 @@ export async function startServer(
           previousInstanceId: SERVER_INSTANCE_ID,
         },
       });
-      // Restart after a brief delay
-      const restartTimer = setTimeout(() => {
-        relaunchAfterShutdown();
-      }, 1000);
+      // Manual and automatic restarts share the same live admission barrier.
+      const restartTimer = setTimeout(() => relaunchAfterShutdown(), 1000);
       restartTimer.unref?.();
     } catch (error) {
       const msg = getErrorMessage(error, "未知错误");
@@ -1420,6 +1539,7 @@ export async function startServer(
     closePromise = (async () => {
       shuttingDown = true;
       decisions.dispose();
+      openRouter.dispose();
       await userMemory.dispose();
       if (updateCheckTimer) {
         clearInterval(updateCheckTimer);
@@ -1458,6 +1578,7 @@ export async function startServer(
       });
 
       try { processes.dispose(); } catch { /* best-effort shutdown */ }
+      conversationService.dispose();
       try { structuredSessions.dispose(); } catch { /* best-effort shutdown */ }
       aiTeams.dispose();
       try { structuredHosts.rustClient?.disconnect(); } catch { /* best-effort shutdown */ }

@@ -32,12 +32,18 @@ export interface NewSessionDefaults {
 export interface NewSessionForm {
   provider: NewSessionProvider;
   employeeId?: string;
+  /** 选中的 AI 团队：走直发路由，不建会话（§5.1 修正 B8）。 */
+  teamId?: string;
   kind: NewSessionKind;
   cwd: string;
   mode: NewSessionMode;
   worktreeEnabled: boolean;
   /** 用户为这个 provider 选定的模型；空串表示跟随服务端配置的默认模型。 */
   model: string;
+  /** 是否显式指定了 CLI 和模型（在员工会话下；false 表示走员工默认派发流程） */
+  specifiedCli?: boolean;
+  workspaceId?: string;
+  workspaceTaskId?: string;
 }
 
 export interface NewSessionPreferencePatch {
@@ -63,6 +69,8 @@ interface NewSessionCreateRequestBase {
   mode: NewSessionMode;
   worktreeEnabled: boolean;
   sessionSource: "interactive";
+  workspaceId?: string;
+  workspaceTaskId?: string;
 }
 
 interface StructuredNewSessionCreateRequest extends NewSessionCreateRequestBase {
@@ -72,6 +80,7 @@ interface StructuredNewSessionCreateRequest extends NewSessionCreateRequestBase 
   model?: string;
   thinkingEffort?: string;
   employeeId?: string;
+  overrideCli?: boolean;
 }
 
 interface PtyNewSessionCreateRequest extends NewSessionCreateRequestBase {

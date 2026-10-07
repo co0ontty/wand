@@ -184,6 +184,14 @@ function isUpdateSupported(id: ProviderCliId, version: string | null): boolean {
   return !(id === "opencode" && version !== null && /^0\.0\./.test(version));
 }
 
+function isCodexOptionalDependencyError(error: string | undefined): boolean {
+  return /Missing optional dependency\s+@openai\/codex-[\w-]+/.test(error ?? "");
+}
+
+function npmBin(options: ProviderCliUpdaterOptions): string {
+  return options.env?.WAND_NPM_BIN || process.env.WAND_NPM_BIN || (process.platform === "win32" ? "npm.cmd" : "npm");
+}
+
 export function providerCliUpdateAvailable(currentVersion: string | null, latestVersion: string | null): boolean {
   if (!currentVersion || !latestVersion) return false;
   return compareSemver(latestVersion, currentVersion) > 0;
@@ -223,10 +231,9 @@ async function readLatestVersion(spec: ProviderCliSpec, options: ProviderCliUpda
     if (install) return readBrewLatestVersion(install, options);
   }
   if (!spec.npmPackage) return { version: null, error: "该 CLI 没有配置版本来源。" };
-  const npm = options.env?.WAND_NPM_BIN || process.env.WAND_NPM_BIN || (process.platform === "win32" ? "npm.cmd" : "npm");
   try {
     const result = await runCommand(
-      npm,
+      npmBin(options),
       ["view", `${spec.npmPackage}@latest`, "version"],
       options.registryTimeoutMs ?? REGISTRY_TIMEOUT_MS,
       options,
@@ -330,6 +337,7 @@ export async function checkProviderCliUpdates(
     const installKind = resolveInstallKind(installed.executable, spec.id, installed.version);
     const latest = await readLatestVersion(spec, options, { executable: installed.executable, installKind });
     const updateSupported = isUpdateSupported(spec.id, installed.version);
+    const repairableCodexInstall = spec.id === "codex" && isCodexOptionalDependencyError(installed.error);
     const errors = [installed.error, latest.error].filter(Boolean);
     if (!updateSupported) {
       errors.push("检测到已归档的 OpenCode 0.0.x；请先卸载旧包并安装 opencode-ai@latest。");
@@ -342,7 +350,7 @@ export async function checkProviderCliUpdates(
       installed: installed.executable !== null,
       currentVersion: installed.version,
       latestVersion: latest.version,
-      updateAvailable: providerCliUpdateAvailable(installed.version, latest.version),
+      updateAvailable: repairableCodexInstall || providerCliUpdateAvailable(installed.version, latest.version),
       updateSupported,
       installKind,
       ...(errors.length ? { error: errors.join("；") } : {}),
@@ -421,15 +429,33 @@ export async function updateProviderClis(
     }
     options.onLog?.(`[CLI Update] ${spec.label}: ${status.currentVersion} -> ${status.latestVersion}`);
     try {
-      // 没有自更新子命令的 CLI（Gemini）走它的 npm 发布渠道。
-      const output = spec.updateArgs
-        ? await runCommand(executable, spec.updateArgs, options.updateTimeoutMs ?? UPDATE_TIMEOUT_MS, options)
-        : await runCommand(
-            options.env?.WAND_NPM_BIN || process.env.WAND_NPM_BIN || (process.platform === "win32" ? "npm.cmd" : "npm"),
-            ["install", "-g", `${spec.npmPackage}@latest`],
-            options.updateTimeoutMs ?? UPDATE_TIMEOUT_MS,
-            options,
-          );
+      const repairCodexInstall = spec.id === "codex" && isCodexOptionalDependencyError(status.error);
+      // Codex 的 Node shim 依赖平台 optional package；缺失时任何 `codex ...` 子命令都会先崩溃，只能用 npm 重装修复。
+      let output: CommandResult;
+      if (repairCodexInstall) {
+        output = await runCommand(
+          npmBin(options),
+          ["install", "-g", `${spec.npmPackage}@latest`, "--include=optional"],
+          options.updateTimeoutMs ?? UPDATE_TIMEOUT_MS,
+          options,
+        );
+      } else if (spec.updateArgs) {
+        output = await runCommand(executable, spec.updateArgs, options.updateTimeoutMs ?? UPDATE_TIMEOUT_MS, options);
+      } else {
+        // 没有自更新子命令的 CLI（Gemini）走它的 npm 发布渠道。
+        output = await runCommand(
+          npmBin(options),
+          ["install", "-g", `${spec.npmPackage}@latest`],
+          options.updateTimeoutMs ?? UPDATE_TIMEOUT_MS,
+          options,
+        );
+      }
+      if (spec.id === "codex") {
+        const verified = await readInstalledVersion(spec, options);
+        if (!verified.version) {
+          throw new Error(`Codex 更新后仍不可用：${verified.error ?? "无法读取版本。"}`);
+        }
+      }
       const combined = trimOutput([output.stdout, output.stderr].filter(Boolean).join("\n"));
       results.push({
         id: spec.id,
@@ -438,7 +464,7 @@ export async function updateProviderClis(
         skipped: false,
         fromVersion: status.currentVersion,
         toVersion: status.latestVersion,
-        message: `${spec.label} 更新命令执行完成。`,
+        message: repairCodexInstall ? `${spec.label} optional dependency 已修复。` : `${spec.label} 更新命令执行完成。`,
         ...(combined ? { output: combined } : {}),
       });
     } catch (error) {

@@ -61,7 +61,7 @@ function harness() {
     runLongPress: () => { const timer = longPressTimers.pop(); if (timer) timer(); },
     longPress: (btn: CopyButton) => {
       const msgEl = {
-        querySelector: (selector: string) => selector === ".chat-message-bubble" ? {} : selector === ".msg-copy-btn" ? btn : null,
+        querySelector: (selector: string) => selector === ".chat-message-text, .chat-message-content" ? {} : selector === ".msg-copy-btn" ? btn : null,
       };
       fire("touchstart", { target: { closest: (selector: string) => selector === ".chat-message" ? msgEl : null }, touches: [{ clientY: 10 }] });
       const timer = longPressTimers.pop();

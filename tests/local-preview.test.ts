@@ -8,6 +8,7 @@ import test from "node:test";
 
 import express from "express";
 
+import { renderChatMarkdown } from "../src/web-ui/markdown.js";
 import { parseLocalPreviewTarget, registerLocalPreviewRoutes } from "../src/server-local-preview-routes.js";
 import { localFilePreviewHref, localHttpPreviewHref, localPreviewController } from "../src/web-ui/react/local-preview/controller.js";
 import { openLocalPreviewFromLegacy } from "../src/web-ui/browser/local-preview-adapter.js";
@@ -55,10 +56,11 @@ test("local preview helpers turn message links into one-click previews", () => {
   assert.match(localPreviewController.getSnapshot().previewUrl ?? "", /^\/api\/local-file\//);
   localPreviewController.close();
 
-  const chatRender = readFileSync(new URL("../src/web-ui/browser/chat-render.ts", import.meta.url), "utf8");
-  assert.match(chatRender, /function autoLinkLocalHttp/);
-  assert.match(chatRender, /result = autoLinkLocalHttp\(result\);/);
-  assert.match(chatRender, /__openLocalPreview/);
+  const links = renderChatMarkdown("http://localhost:3000/docs?tab=run\n\n[Demo](/tmp/demo/index.html)");
+  assert.match(links, /class="local-preview-link"/);
+  assert.match(links, /href="\/api\/local-preview\/127\.0\.0\.1\/3000\/docs\?tab=run"/);
+  assert.match(links, /data-local-preview-url="\/tmp\/demo\/index.html"/);
+  assert.match(links, /__openLocalPreview/);
 
   const terminal = readFileSync(new URL("../src/web-ui/browser/terminal.ts", import.meta.url), "utf8");
   assert.match(terminal, /registerLinkProvider/);

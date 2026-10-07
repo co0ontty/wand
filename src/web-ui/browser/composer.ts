@@ -12,6 +12,7 @@ export interface ComposerDraft {
   readonly attachments: readonly ComposerAttachment[];
   readonly memoryOnly: boolean;
   readonly revision: number;
+  readonly recovery?: ComposerPayload | null;
 }
 
 export interface ComposerPayload {
@@ -25,10 +26,11 @@ interface ComposerSession {
   memoryOnly: boolean;
   revision: number;
   submissions: Map<string, Promise<unknown>>;
+  recovery?: { payload: ComposerPayload; persist: boolean };
 }
 
 interface ComposerDependencies {
-  storage: () => Pick<Storage, "getItem" | "setItem" | "removeItem">;
+  storage: () => Pick<Storage, "getItem" | "setItem" | "removeItem"> & Partial<Pick<Storage, "key" | "length">>;
   isUnloading: () => boolean;
   disposeAttachment: (attachment: ComposerAttachment) => void;
 }
@@ -39,7 +41,10 @@ export type ComposerEdit =
   | { removeAttachment: number }
   | { clear: true }
   | { restore: ComposerPayload; persist?: boolean }
-  | { preserve: string };
+  | { preserve: string }
+  | { recoverCapture: true }
+  | { acknowledgeRevision: number }
+  | { forgetRecovery: true };
 
 export function composerPayloadFingerprint(payload: ComposerPayload): string {
   const files = payload.attachments.map((item) =>
@@ -83,6 +88,7 @@ export class ComposerStore {
       attachments: session?.attachments.slice() ?? [],
       memoryOnly: session?.memoryOnly ?? false,
       revision: session?.revision ?? 0,
+      recovery: session?.recovery?.payload ?? null,
     };
   }
 
@@ -116,6 +122,20 @@ export class ComposerStore {
       const [removed] = session.attachments.splice(change.removeAttachment, 1);
       this.dependencies.disposeAttachment(removed);
       session.revision = ++this.revision;
+    } else if ("acknowledgeRevision" in change) {
+      if (session.revision !== change.acknowledgeRevision) return false;
+      session.attachments.forEach(this.dependencies.disposeAttachment);
+      session.attachments = [];
+      return this.edit(sessionId, { clear: true });
+    } else if ("forgetRecovery" in change) {
+      session.recovery?.payload.attachments.forEach(this.dependencies.disposeAttachment);
+      session.recovery = undefined;
+      session.revision = ++this.revision;
+    } else if ("recoverCapture" in change) {
+      const capture = session.recovery;
+      if (!capture) return false;
+      session.recovery = undefined;
+      return this.edit(sessionId, { restore: capture.payload, persist: capture.persist });
     } else if ("restore" in change) {
       const text = change.restore.text;
       const current = session.text;
@@ -138,6 +158,21 @@ export class ComposerStore {
     return true;
   }
 
+  /** Explicit adoption of an unaddressed draft; never overwrite a recipient's own draft. */
+  transfer(from: string, to: string, expectedRevision: number): boolean {
+    const source = this.sessions.get(from);
+    if (!source || source.revision !== expectedRevision || source.submissions.size) return false;
+    const target = this.session(to);
+    if (target.text || target.attachments.length || target.submissions.size) return false;
+    target.attachments = source.attachments;
+    target.revision = ++this.revision;
+    source.attachments = [];
+    this.writeText(to, target, source.text, !source.memoryOnly);
+    this.edit(from, { clear: true });
+    this.notify();
+    return true;
+  }
+
   pendingSubmission(sessionId: string | null | undefined, payload: ComposerPayload): Promise<unknown> | null {
     return sessionId ? this.session(sessionId).submissions.get(composerPayloadFingerprint(payload)) ?? null : null;
   }
@@ -156,7 +191,14 @@ export class ComposerStore {
       return result;
     }, (error: unknown) => {
       if (this.sessions.get(sessionId) === session) {
-        this.edit(sessionId, { restore: payload, persist: !isAmbiguousComposerSubmissionFailure(error) });
+        const persist = !isAmbiguousComposerSubmissionFailure(error);
+        if (sessionId.startsWith("conversation-draft:") && (session.text || session.attachments.length)) {
+          // A new instance composer never inserts the old capture into text being edited.
+          session.recovery?.payload.attachments.forEach(this.dependencies.disposeAttachment);
+          session.recovery = { payload, persist };
+          session.revision = ++this.revision;
+          this.notify();
+        } else this.edit(sessionId, { restore: payload, persist });
       } else {
         // A server list removed this session while delivery was pending.
         // Its late failure must release the capture instead of recreating a draft.
@@ -170,9 +212,28 @@ export class ComposerStore {
     return submission;
   }
 
+  /** Explicit conversation deletion invalidates in-flight captures and removes every target draft. */
+  discardScope(prefix: string): void {
+    for (const [id, session] of this.sessions) {
+      if (!id.startsWith(prefix)) continue;
+      new Set([...session.attachments, ...(session.recovery?.payload.attachments ?? [])]).forEach(this.dependencies.disposeAttachment);
+      this.sessions.delete(id);
+      try { this.dependencies.storage().removeItem("wand-draft-" + id); } catch {}
+    }
+    try {
+      const storage = this.dependencies.storage();
+      for (let index = (storage.length ?? 0) - 1; index >= 0; index--) {
+        const key = storage.key?.(index);
+        if (key?.startsWith("wand-draft-" + prefix)) storage.removeItem(key);
+      }
+    } catch {}
+    this.notify();
+  }
+
   retain(sessionIds: ReadonlySet<string>): void {
     for (const [id, session] of this.sessions) {
-      if (sessionIds.has(id)) continue;
+      // Logical instance/target drafts exist before a transport session and survive list refreshes.
+      if (sessionIds.has(id) || id.startsWith("conversation-draft:")) continue;
       session.attachments.forEach(this.dependencies.disposeAttachment);
       this.sessions.delete(id);
       try { this.dependencies.storage().removeItem("wand-draft-" + id); } catch {}

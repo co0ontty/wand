@@ -1,3 +1,5 @@
+import { presentAssistantReply, presentChat, refreshChatPresentation } from "../react/chat/presentation.js";
+import { mountBrowserButtons, updateBrowserButtonLabel } from "./library-buttons.js";
 import { state } from "./state";
 import { ChatRenderCache } from "./chat-render-cache.js";
 import { beginChatInteraction, chatViewLease, isChatLeaseCurrent, patchChatContents, patchChatRow, prepareChatOwners, reconcileChatRows, retireChatTurnOwners, scopeChatMarkup } from "./chat-render-focus.js";
@@ -10,20 +12,20 @@ import { buildMessagesForRender } from "./input";
 import { syncSessionProgressToNative } from "./notifications";
 import "./render";
 import { copyToClipboard, getPreferredMessages, isRecoverableToolError, markSessionCompletionViewed } from "./session-engine";
-import { buildTodoItemsHtml, buildTodoSegmentsHtml, summarizeTodoProgress } from "./todo-progress";
+import { summarizeTodoProgress } from "./todo-progress";
+import { paintTodoProgress } from "./todo-view-adapter";
 import { renderStructuredStatusBar } from "./utils";
 import { getCardDefault } from "./events";
 import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
 import { shouldExtractPtySystemInfo } from "./pty-system-info";
 import { codexActivityRe, codexFooterRe, isPtyCodexNoiseLine, isPtySystemInfoNoiseLine, isPtyTranscriptNoiseLine } from "./pty-noise";
 import { getToolDisplayName, getToolIcon } from "./tool-identity";
-import { localFilePreviewHref, localHttpPreviewHref } from "../react/local-preview/controller";
-import { catCoatGrid, memberCoatIndex } from "../react/ai-teams/cat-coats";
+import { renderChatMarkdown as renderMarkdown } from "../markdown.js";
+import { chatReplyDuration, chatUsageMetrics } from "../chat-message-meta.js";
 import { parseJsonResponse } from "../react/http-adapter";
-import { commandOccurredAt, currentToolActivity, formatActivityElapsed, groupToolActivities, isToolActivityOnly, latestCommandOccurredAt, toolActivityTimeline, TOOL_ACTIVITY_KINDS } from "./tool-activity";
+import { activityLiveRow, commandOccurredAt, currentToolActivity, formatActivityElapsed, formatThinkingElapsed, groupToolActivities, isPlanTool, isToolActivityOnly, latestCommandOccurredAt, presentActivityBlock, thinkingRoundLabel, thinkingRounds, toolActivityTimeline, TOOL_ACTIVITY_KINDS } from "./tool-activity";
 import { isDecisionToolCall } from "../../decision-tool.js";
-import { cachedSiliconEmployee, subscribeSiliconEmployeeCache } from "../react/agents/employee-repository.js";
-import { renderEmployeeCliBadge } from "../react/agents/employee-identity.js";
+import { activityDetailText, activityFilePath, activityOpensFile } from "./tool-activity-detail.js";
 import {
   agentRunAccentSeed,
   agentRunAgentTitle,
@@ -50,12 +52,13 @@ const activityPendingDetails = new Map<string, any>();
 const activityResultRefreshRequested = new Set<string>();
 let activityDetailEpoch = 0;
 let chatOwnerPlan: ChatOwnerPlan | null = null;
-const activityGroupAnchors = new Map<string, Array<{ anchor: string; key: string }>>();
+const activityGroupAnchors = new Map<string, Array<{ anchors: string[]; key: string }>>();
 let groupsUsedInPaint = new Set<string>();
 const activityEntryStates = new Map<string, { lease: ChatViewLease; open: object; request: object | null; error: string | null }>();
 const questionSchemas = new Map<string, string>();
 const copyBound = new WeakSet<Element>();
 let unprovenRowSequence = 0;
+let focusedAnchorPaint = 0;
 
 function renderMessageKey(message: any, index: number): string {
   return chatOwnerPlan?.messages[index]?.displayKey || getMessageKey(message, index);
@@ -83,8 +86,13 @@ function chatRowMarkup(html: string, index: number): string {
 function activityGroupKey(items: any[], messageKey: string, segmentFirstIndex: number): string {
   const scopes = items.map(item => renderBlockScope(messageKey, item.index + segmentFirstIndex, item.block));
   const previous = activityGroupAnchors.get(messageKey) || [];
-  const continued = previous.find(group => scopes.includes(group.anchor) && !groupsUsedInPaint.has(group.key));
-  const group = continued || { anchor: scopes[0], key: JSON.stringify(["activity-group", messageKey, scopes[0]]) };
+  // An empty live thinking placeholder can disappear when a result arrives in
+  // another turn. Any surviving source call owns the same group and open details.
+  const scopeSet = new Set(scopes);
+  const continued = previous.find(group => group.anchors.some(anchor => scopeSet.has(anchor))
+    && !groupsUsedInPaint.has(group.key));
+  const group = continued || { anchors: scopes, key: JSON.stringify(["activity-group", messageKey, scopes[0]]) };
+  group.anchors = scopes;
   groupsUsedInPaint.add(group.key);
   if (!previous.some(candidate => candidate.key === group.key)) activityGroupAnchors.set(messageKey, previous.concat(group));
   return group.key;
@@ -93,12 +101,15 @@ let activityElapsedTimer: ReturnType<typeof setTimeout> | null = null;
 
 function refreshActivityElapsedLabels(): void {
   const labels = document.querySelectorAll<HTMLElement>(
-    ".chat-activity.is-command-running .chat-activity-command-elapsed[data-started-at]",
+    ".chat-activity.is-command-running .chat-activity-command-elapsed[data-started-at], " +
+    ".chat-activity.is-thinking-running .chat-activity-command-elapsed[data-started-at]",
   );
   for (const label of labels) {
     const startedAt = Date.parse(label.dataset.startedAt || "");
     if (Number.isFinite(startedAt)) {
-      label.textContent = "已等待 " + formatActivityElapsed(Date.now() - startedAt);
+      label.textContent = label.dataset.activityKind === "thinking"
+        ? formatThinkingElapsed(label.dataset.startedAt!, label.dataset.lastActivityAt)
+        : "已等待 " + formatActivityElapsed(Date.now() - startedAt);
     }
   }
   if (activityElapsedTimer !== null) clearTimeout(activityElapsedTimer);
@@ -163,11 +174,6 @@ export function clearActivityDetailState(): void {
           catch (error) { release(); console.error("[wand] chat frame scheduling failed:", error); }
         }
       }
-
-      subscribeSiliconEmployeeCache(function() {
-        var selected = state.sessions.find(function(session) { return session.id === state.selectedId; });
-        if (selected && selected.employeeId) renderChat(true);
-      });
 
       state.chatRenderTimer = null;
       export function scheduleChatRender(immediate?) {
@@ -382,9 +388,8 @@ function buildChatRowDependencies(messages: any[], revisions: number[], runs: an
       usage: roundUsage[index] || null,
       grouped: index >= visibleOffset && isGroupedChatMessage(visible, index - visibleOffset),
       live: isTurnActivityLive(index), commandRunning: commandRunning,
-      lang: getActiveLang(), persona: state.config?.structuredChatPersona,
+      lang: getActiveLang(),
       defaults: state.config?.cardDefaults,
-      employee: [session.employeeId, session.employeeName, session.employeeAvatar, session.provider],
       interactionOwner: chatOwnerPlan?.messages[index]?.key || null };
   });
 }
@@ -445,10 +450,12 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         var selectedSession = state.sessions.find(function(s) { return s.id === renderSessionId; });
         if (!selectedSession) {
           if (state.lastRenderedEmpty !== "none") {
-            renderChatEmptyState(chatOutput, '<div class="empty-state"><strong>未选择会话</strong><br>点击上方「新对话」开始你的第一次对话。</div>');
+            renderChatEmptyState(chatOutput, "");
             state.lastRenderedEmpty = "none";
             state.lastRenderedMsgCount = 0;
           }
+          renderStructuredStatusBar(null, null);
+          updateTodoProgress([]);
           state.chatRenderCache?.reset();
           return;
         }
@@ -485,11 +492,9 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
 
         if (allMessages.length === 0) {
           if (state.lastRenderedEmpty !== "empty") {
-            // 结构化空会话只显示提示。模式/模型/思考在底部 composer 一直可见，
-            // 不再在空态里重复渲染同一组下拉，避免同页两处控件让用户不知道点哪个。
-            renderChatEmptyState(chatOutput,
-              '<div class="empty-state"><strong>对话已开始</strong><br>在下方输入框发送消息，Claude 会自动回复。</div>'
-            );
+            // No transcript means no message. The composer owns input guidance;
+            // loading, execution and errors keep their existing status owners.
+            renderChatEmptyState(chatOutput, "");
             state.lastRenderedEmpty = "empty";
             state.lastRenderedMsgCount = 0;
           }
@@ -570,6 +575,12 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         // "近底即锁回 true"的自愈，避免 resize / 键盘动画 / 锚点回填瞬间
         // 把已经上滚阅读的用户误判回贴底状态。
         var readingInteraction = typeof HTMLElement !== "undefined" ? beginChatInteraction(chatMessages) : null;
+        var focusedAnchorToken = ++focusedAnchorPaint;
+        // The explicit focus lease owns this update; prevent native anchoring from rounding a second correction.
+        if (typeof HTMLElement !== "undefined") {
+          if (readingInteraction?.anchor) chatMessages.style.overflowAnchor = "none";
+          else chatMessages.style.removeProperty("overflow-anchor");
+        }
         var renderWasAtBottom = isChatNearBottom(chatMessages) && !readingInteraction?.anchor;
         var renderIsInitial = !state.chatInitialRenderDone;
 
@@ -638,7 +649,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
             // 在消息流尾部原位追加思考占位行
             html = '<div class="chat-message assistant is-inflight-placeholder animate-in" data-role="assistant">' +
               '<div class="chat-message-avatar assistant"><span class="chat-thinking-dot-pulse"></span></div>' +
-              '<div class="chat-message-bubble"><div class="typing-indicator"><span></span><span></span><span></span></div></div>' +
+              '<div class="chat-message-text"><div class="typing-indicator"><span></span><span></span><span></span></div></div>' +
             '</div>' + html;
           }
         }
@@ -649,7 +660,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
               ? ('加载更早的 ' + Math.min(state.chatPageSize, visibleOffset) + ' 条消息')
               : '加载更早的消息';
             html += '<div class="chat-load-more" id="chat-load-more-sentinel">' +
-              '<button class="chat-load-more-btn" type="button">' + loadMoreLabel + '</button>' +
+              '<button data-antd-control class="chat-load-more-btn" type="button">' + loadMoreLabel + '</button>' +
             '</div>';
           }
 
@@ -764,6 +775,14 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           }
         }
 
+        if (typeof HTMLElement !== "undefined") {
+          presentChat(chatMessages);
+          mountBrowserButtons(chatMessages);
+          // The X presentation adopts the message body first; the temporary
+          // touch-copy control then belongs to that retained message root.
+          attachMessageCopyButtons(chatMessages);
+        }
+
         // 发新消息后把"最后一条用户消息"之前的历史折叠成摘要卡（后处理，不动上面的 DOM diff）。
         applyHistoryCollapse(chatMessages, selectedSession);
 
@@ -792,6 +811,18 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           var focusDelta = readingInteraction.anchor.node.getBoundingClientRect().top -
             chatMessages.getBoundingClientRect().top - readingInteraction.anchor.top;
           if (Math.abs(focusDelta) > 0.5) chatMessages.scrollTop += focusDelta;
+          // Library style insertion and browser scroll anchoring settle across the next layout frame.
+          // The same intent/view lease owns this correction; later input cancels it.
+          requestAnimationFrame(function() { requestAnimationFrame(function() {
+            if (focusedAnchorToken !== focusedAnchorPaint) return;
+            // Keep native anchoring disabled while this focus lease owns the
+            // scroller. The next paint without a reading anchor releases it;
+            // restoring it before correction would schedule a competing shift.
+            if (!isCurrentChatPaint() || !readingInteraction.current() || !readingInteraction.anchor.node.isConnected) return;
+            var settledDelta = readingInteraction.anchor.node.getBoundingClientRect().top -
+              chatMessages.getBoundingClientRect().top - readingInteraction.anchor.top;
+            if (Math.abs(settledDelta) > 0.5) chatMessages.scrollTop += settledDelta;
+          }); });
         }
         cache.commit(plan);
         chatOwnerPlan?.commit();
@@ -1066,33 +1097,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         container.classList.remove("hidden");
         if (bodyEl) bodyEl.classList.remove("hidden");
 
-        // 计数器直接展示"已完成 / 总数"，与展开列表的 ✓ 勾选一致。
-        // 旧方案用 completed+1 试图表达"正在干第 N 个"，但列表只有 completed 个
-        // 勾，造成计数器和列表不匹配（如计数器 3/4、列表只 2 个 ✓）。
-        // 面板头部那个计数与收起态保持同一口径。
-        var countText = completed + " / " + summary.total;
-        var counter = document.getElementById("todo-progress-counter");
-        if (counter) counter.textContent = countText;
-        var panelCount = document.getElementById("todo-progress-panel-count");
-        if (panelCount) panelCount.textContent = countText;
-
-        // 右侧任务描述：优先取首个 in_progress 的 activeForm / content；
-        // 没有任何进行中项时回退到下一条 pending（逻辑在 summarizeTodoProgress）。
-        var task = document.getElementById("todo-progress-task");
-        if (task) task.textContent = summary.activeTask || "准备中…";
-
-        // 进度环与底部通栏进度轨共用同一比例。
-        var progress = summary.ratio.toFixed(3);
-        var ring = document.getElementById("todo-progress-ring");
-        if (ring) ring.style.setProperty("--progress", progress);
-        var fill = document.getElementById("todo-progress-fill");
-        if (fill) fill.style.setProperty("--progress", progress);
-
-        var segments = document.getElementById("todo-progress-segments");
-        if (segments) segments.innerHTML = buildTodoSegmentsHtml(todos);
-
-        var list = document.getElementById("todo-progress-list");
-        if (list) list.innerHTML = buildTodoItemsHtml(todos);
+        paintTodoProgress(todos);
 
         // Sync todo progress to native notification
         if (state.selectedId) {
@@ -1103,6 +1108,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
       }
 
       function attachCopyHandler(el) {
+        if (typeof HTMLElement !== "undefined") mountBrowserButtons(el);
         el.querySelectorAll(".code-copy").forEach(function(btn) {
           if (copyBound.has(btn)) return;
           copyBound.add(btn);
@@ -1111,9 +1117,8 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
             var code = codeBlock ? codeBlock.querySelector("code") : null;
             if (code) {
               copyToClipboard(code.textContent || "", null, function() {
-                btn.textContent = "已复制";
-                btn.classList.add("copied");
-                setTimeout(function() { btn.textContent = "复制"; btn.classList.remove("copied"); }, 2000);
+                updateBrowserButtonLabel(btn, "已复制", true);
+                setTimeout(function() { updateBrowserButtonLabel(btn, "复制", false); }, 2000);
               });
             }
           });
@@ -1122,7 +1127,6 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
 
       function attachAllCopyHandlers(container) {
         attachCopyHandler(container);
-        attachMessageCopyButtons(container);
       }
 
       function attachMessageCopyButtons(container) {
@@ -1130,20 +1134,22 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         if (!isTouch) return;
         container.querySelectorAll(".chat-message").forEach(function(msgEl) {
           if (msgEl.querySelector(".msg-copy-btn")) return; // already attached
-          var bubble = msgEl.querySelector(".chat-message-bubble");
+          var bubble = msgEl.querySelector(".chat-message-text, .chat-message-content");
           if (!bubble) return;
           var btn = document.createElement("button");
           btn.className = "msg-copy-btn";
+          btn.dataset.antdControl = "";
           btn.textContent = "复制";
+          msgEl.appendChild(btn);
+          mountBrowserButtons(msgEl);
+          btn = msgEl.querySelector(".msg-copy-btn") as HTMLButtonElement;
           btn.addEventListener("click", function(e) {
             e.stopPropagation();
             var text = bubble.innerText || bubble.textContent || "";
             copyToClipboard(text.trim(), null, function() {
-              btn.textContent = "已复制";
-              btn.classList.add("copied");
+              updateBrowserButtonLabel(btn, "已复制", true);
               setTimeout(function() {
-                btn.textContent = "复制";
-                btn.classList.remove("copied");
+                updateBrowserButtonLabel(btn, "复制", false);
                 btn.classList.remove("visible");
                 // 自动隐藏后引用也必须失效：否则下一次点击还是会走进
                 // closest() 分支（虽然已不再扫 DOM，但会指向一个已隐藏的按钮）。
@@ -1151,7 +1157,6 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
               }, 1500);
             });
           });
-          msgEl.appendChild(btn);
         });
       }
 
@@ -1166,18 +1171,28 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
 
         var longPressTimer = null;
         var touchStartY = 0;
+        var longPressSource: Element | null = null;
+        var releasedCopySource: Element | null = null;
 
+        document.addEventListener("pointerdown", function(e) {
+          // A later mouse gesture is distinct from the compatibility click
+          // produced by releasing the finger that revealed the copy control.
+          if (e.pointerType === "mouse") releasedCopySource = null;
+        }, { passive: true });
         document.addEventListener("touchstart", function(e) {
+          releasedCopySource = null;
+          longPressSource = null;
           var msgEl = (e.target as HTMLElement).closest(".chat-message");
           if (!msgEl) return;
-          var bubble = msgEl.querySelector(".chat-message-bubble");
+          var bubble = msgEl.querySelector(".chat-message-text, .chat-message-content");
           if (!bubble) return;
           touchStartY = e.touches[0].clientY;
           longPressTimer = setTimeout(function() {
-            var btn = msgEl.querySelector(".msg-copy-btn");
+            var btn = msgEl.querySelector(".msg-copy-btn") as HTMLButtonElement;
             if (!btn) return;
             if (visibleCopyButton && visibleCopyButton !== btn) visibleCopyButton.classList.remove("visible");
             visibleCopyButton = btn;
+            longPressSource = msgEl;
             btn.classList.add("visible");
           }, 500);
         }, { passive: true });
@@ -1190,6 +1205,8 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         }, { passive: true });
 
         document.addEventListener("touchend", function() {
+          releasedCopySource = longPressSource;
+          longPressSource = null;
           if (longPressTimer) {
             clearTimeout(longPressTimer);
             longPressTimer = null;
@@ -1199,7 +1216,10 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         // Dismiss copy buttons when tapping elsewhere
         document.addEventListener("click", function(e) {
           if (!visibleCopyButton) return;
-          if ((e.target as HTMLElement).closest(".msg-copy-btn")) return;
+          if ((e.target as HTMLElement).closest(".msg-copy-btn")) { releasedCopySource = null; return; }
+          const release = releasedCopySource;
+          releasedCopySource = null;
+          if (release?.contains(e.target as Node)) return;
           visibleCopyButton.classList.remove("visible");
           visibleCopyButton = null;
         });
@@ -1889,14 +1909,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         );
         if (!blockHtml || !String(blockHtml).trim()) return "";
         var kind = block.type === "thinking" ? "thinking" : (block.type === "tool_use" ? "tool" : "text");
-        var marker = '<span class="agent-run-step-dot" aria-hidden="true"></span>';
-        if (kind === "thinking") {
-          marker = '<span class="agent-run-step-icon" aria-hidden="true">' + iconSvg("spark", { size: 11, strokeWidth: 1.8 }) + '</span>';
-        } else if (kind === "tool") {
-          marker = '<span class="agent-run-step-icon" aria-hidden="true">' + getToolIcon(block.name) + '</span>';
-        }
         return '<div class="agent-run-step is-' + kind + '">' +
-          '<span class="agent-run-step-marker">' + marker + '</span>' +
           '<div class="agent-run-step-content">' + blockHtml + '</div>' +
         '</div>';
       }
@@ -1957,8 +1970,8 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           if (stepHtml && String(stepHtml).trim()) steps.push(stepHtml);
         }
         if (!steps.length) return "";
-        return '<details class="agent-run-process"' + (open ? " open" : "") + ">" +
-          '<summary class="agent-run-process-summary">' +
+        return '<div class="agent-run-process" data-expanded="' + String(open) + '">' +
+          '<span class="agent-run-process-summary">' +
             '<span class="agent-run-process-chevron" aria-hidden="true">' +
               iconSvg("chevronRight", { size: 12, strokeWidth: 2 }) +
             "</span>" +
@@ -1966,9 +1979,9 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
             '<span class="agent-run-process-count">' +
               escapeHtml(t("agentRun.process_count", { count: String(steps.length) })) +
             "</span>" +
-          "</summary>" +
+          "</span>" +
           '<div class="agent-run-timeline">' + steps.join("") + "</div>" +
-        "</details>";
+        "</div>";
       }
       // 展开体顺序：结论在前、过程在后（原来是过程铺完才给结论，结论被挤到几十屏之下）。
       function renderAgentRunAgentBody(agent, status, activity, role, toolResults, messageKey) {
@@ -2002,6 +2015,9 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           '<div class="agent-run-detail-head">' +
             '<div class="agent-run-detail-titles">' +
               '<div class="agent-run-detail-task">' + escapeHtml(taskDesc) + '</div>' +
+              (agent.dispatch && ["Pi/subagent", "subagent", "Pi/workflow", "workflow"].indexOf(agent.dispatch.block.name) >= 0
+                ? '<button data-antd-control type="button" class="pi-execution-open" data-tool-id="' + escapeHtml(taskId) + '" onclick="__piExecutionOpen(event, this)">执行结构</button>'
+                : "") +
               (showType && agentType && agentType !== taskDesc
                 ? '<span class="agent-run-type-chip">' + escapeHtml(agentType) + '</span>'
                 : '') +
@@ -2066,7 +2082,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           var panelId = agentRunPanelId(run.id, agent.taskId);
           var tabId = panelId + "-tab";
           var rowType = showType && agentType && agentType !== typeChip ? agentType : "";
-          if (isMulti) railHtml += '<button type="button" class="agent-run-agent' + (isSelected ? ' is-selected' : '') + '" ' +
+          if (isMulti) railHtml += '<button data-antd-control type="button" class="agent-run-agent' + (isSelected ? ' is-selected' : '') + '" ' +
               'id="' + escapeHtml(tabId) + '" role="tab" aria-controls="' + escapeHtml(panelId) + '" ' +
               'aria-selected="' + (isSelected ? "true" : "false") + '" ' +
               'tabindex="' + (isSelected ? "0" : "-1") + '" data-agent-task-id="' + escapeHtml(agent.taskId) + '" ' +
@@ -2091,7 +2107,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
             'data-agent-run-id="' + escapeHtml(run.id) + '" data-status="' + summary.status + '" ' +
             'data-expanded="' + (expanded ? "true" : "false") + '" ' +
             'aria-label="' + escapeHtml(summaryAria) + '">' +
-          '<button type="button" class="agent-run-summary" aria-expanded="' + (expanded ? "true" : "false") + '" ' +
+          '<button data-antd-control type="button" class="agent-run-summary" aria-expanded="' + (expanded ? "true" : "false") + '" ' +
               'aria-controls="' + escapeHtml(bodyId) + '" aria-label="' + escapeHtml(summaryAria) + '" ' +
               'onclick="__agentRunToggle(event, this)">' +
             '<span class="agent-run-summary-icon" aria-hidden="true">' + agentRunStatusIcon(summary.status) + '</span>' +
@@ -2126,42 +2142,6 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         user: buildPixelSvg(buildCatGrid(SHORTHAIR_PALETTE)),
       };
 
-      var DEFAULT_CHAT_PERSONA = {
-        user: {
-          name: "赛博虎妞",
-          avatarSvg: PIXEL_AVATAR.user
-        },
-        assistant: {
-          name: "勤劳初二",
-          avatarSvg: PIXEL_AVATAR.assistant
-        }
-      };
-
-      function getStructuredChatPersona(role) {
-        var configPersona = state.config && state.config.structuredChatPersona;
-        var roleConfig = configPersona && configPersona[role] ? configPersona[role] : null;
-        var defaults = DEFAULT_CHAT_PERSONA[role] || DEFAULT_CHAT_PERSONA.assistant;
-        return {
-          name: roleConfig && typeof roleConfig.name === "string" && roleConfig.name.trim()
-            ? roleConfig.name.trim()
-            : defaults.name,
-          avatar: roleConfig && typeof roleConfig.avatar === "string" && roleConfig.avatar.trim()
-            ? roleConfig.avatar.trim()
-            : null,
-          avatarSvg: defaults.avatarSvg
-        };
-      }
-
-      function renderAvatarFallback(svg) {
-        return '<div class="pixel-avatar">' + svg + '</div>';
-      }
-
-      function handleChatAvatarImageError(img, role) {
-        if (!img || !img.parentNode) return;
-        var persona = getStructuredChatPersona(role === "user" ? "user" : "assistant");
-        img.outerHTML = renderAvatarFallback(persona.avatarSvg);
-      }
-
       function formatChatClock(iso) {
         if (!iso) return "";
         var d = new Date(iso);
@@ -2180,25 +2160,10 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         if (!label) return "";
         var title = "";
         try { title = new Date(iso).toLocaleString(); } catch (e) {}
-        return '<div class="chat-message-time" title="' + escapeHtml(title) + '">' + escapeHtml(label) + '</div>';
-      }
-
-      // 群聊（AI 团队）里的发言人：像素猫头像 + 成员名，负责人带「负责人」标；
-      // 有成员会话时名字可点，打开这位成员的完整过程。
-      function teamAuthorAvatar(author) {
-        var grid = catCoatGrid(memberCoatIndex({ id: author.id || "", name: author.name || "", avatar: author.avatar }));
-        var svg = buildPixelSvg(grid.map(function(row) {
-          return row.map(function(fill) { return fill || _AVATAR_T; });
-        }));
-        var name = escapeHtml(author.name || "成员");
-        var nameHtml = author.sessionId
-          ? '<button type="button" class="avatar-name chat-author-link" title="查看 ' + name + ' 的会话" onclick="__openAuthorSession(' + escapeHtml(JSON.stringify(author.sessionId)) + ')">' + name + '</button>'
-          : '<span class="avatar-name">' + name + '</span>';
-        return '<div class="chat-message-avatar assistant chat-message-author">' +
-          renderAvatarFallback(svg) +
-          nameHtml +
-          (author.leader ? '<span class="chat-author-badge">负责人</span>' : '') +
-        '</div>';
+        var duration = chatReplyDuration(msg);
+        return '<div class="chat-message-time" title="' + escapeHtml(title) + '">' +
+          (duration ? '<span class="chat-message-duration" data-chat-key="meta:duration">耗时 ' + escapeHtml(duration) + '</span>' : '') +
+          '<time data-chat-key="meta:clock" datetime="' + escapeHtml(iso) + '" aria-label="' + escapeHtml("消息时间 " + title) + '">' + escapeHtml(label) + '</time></div>';
       }
 
       // 群聊进度提示：居中一行，不占气泡。
@@ -2224,37 +2189,6 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           .join("\n");
       }
 
-      function chatAvatar(role, author?) {
-        if (author && role === "assistant") return teamAuthorAvatar(author);
-        var selectedSession = state.sessions.find(function(session) { return session.id === state.selectedId; });
-        if (role === "assistant" && selectedSession && selectedSession.employeeId) {
-          var currentEmployee = cachedSiliconEmployee(selectedSession.employeeId);
-          var employee = {
-            id: selectedSession.employeeId,
-            name: currentEmployee?.name || selectedSession.employeeName || "硅基员工",
-            avatar: currentEmployee ? currentEmployee.avatar : selectedSession.employeeAvatar || "",
-          };
-          var employeeAvatar = employee.avatar.startsWith("data:image/")
-            ? '<img class="pixel-avatar-image" src="' + escapeHtml(employee.avatar) + '" alt="" />'
-            : renderAvatarFallback(buildPixelSvg(catCoatGrid(memberCoatIndex(employee)).map(function(row) {
-                return row.map(function(fill) { return fill || _AVATAR_T; });
-              })));
-          return '<div class="chat-message-avatar assistant"><span class="pixel-avatar wand-employee-avatar">' +
-            '<span class="wand-employee-avatar-face">' + employeeAvatar + '</span>' +
-            renderEmployeeCliBadge(selectedSession.provider) + '</span>' +
-            '<span class="avatar-name">' + escapeHtml(employee.name) + '</span></div>';
-        }
-        var personaRole = role === "user" ? "user" : "assistant";
-        var persona = getStructuredChatPersona(personaRole);
-        var avatarInner = persona.avatar
-          ? '<img class="pixel-avatar-image" src="' + escapeHtml(persona.avatar) + '" alt="' + escapeHtml(persona.name) + '" onerror="handleChatAvatarImageError(this, ' + JSON.stringify(personaRole) + ')" />'
-          : renderAvatarFallback(persona.avatarSvg);
-        return '<div class="chat-message-avatar ' + role + '">' +
-          avatarInner +
-          '<span class="avatar-name">' + escapeHtml(persona.name) + '</span>' +
-        '</div>';
-      }
-
       function renderChatMessage(msg, roundUsage, messageIndex, agentRunIndex, conversationToolResults, isGrouped?) {
         if (msg.notice) return renderChatNotice(msg, messageIndex);
         // Thinking card (deep thought) — from PTY parsing
@@ -2267,12 +2201,8 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           var thinkingPersisted = getPersistedExpandState(thinkingKey);
           var thinkingExpanded = thinkingPersisted === null ? getCardDefault("thinking") : thinkingPersisted;
           return '<div class="chat-message thinking">' +
-            '<div class="thinking-inline thinking-pty ' + (thinkingExpanded ? 'expanded' : 'collapsed') + '" data-expand-kind="thinking" data-expand-key="' + escapeHtml(thinkingKey) + '" data-thinking="' + escapeHtml(ptyThinkingText) + '" onclick="__thinkingToggle(this)">' +
-              '<span class="thinking-inline-icon">' + iconSvg("spark", { size: 12, strokeWidth: 1.8 }) + '</span>' +
-              '<span class="thinking-inline-preview">' + escapeHtml(thinkingExpanded ? ptyThinkingText : '深度思考') + '</span>' +
-              '<span class="thinking-inline-action">' + (thinkingExpanded ? '收起' : '展开') + '</span>' +
-            '</div>' +
-          '</div>';
+            '<div class="chat-thinking ' + (thinkingExpanded ? 'expanded' : 'collapsed') + '" data-expand-kind="thinking" data-expand-key="' + escapeHtml(thinkingKey) + '" data-thinking="' + escapeHtml(ptyThinkingText) + '"></div></div>';
+
         }
 
         // Prompt suggestion card (pulsing display) — from PTY parsing
@@ -2291,15 +2221,13 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         }
 
         // Legacy string content (from PTY parsing)
-        var avatar = isGrouped || msg.role === "user" ? "" : chatAvatar(msg.role);
         var bubbleContent = msg.role === "assistant"
           ? renderMarkdown(msg.content)
           : (msg.role === "user" ? renderUserText(msg.content) : escapeHtml(msg.content));
         var groupedAttr = isGrouped ? ' data-grouped="true"' : "";
         return '<div class="chat-message ' + msg.role + '"' + groupedAttr + ' data-role="' + escapeHtml(msg.role) + '">' +
           renderChatMessageTime(msg) +
-          avatar +
-          '<div class="chat-message-bubble">' + bubbleContent + '</div>' +
+          '<div class="chat-message-text">' + bubbleContent + '</div>' +
         '</div>';
       }
 
@@ -2431,6 +2359,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           var idx = parseInt(el.getAttribute("data-msg-index") || "", 10);
           if (isNaN(idx) || !allMessages[idx] || allMessages[idx].role !== "assistant") continue;
           if (isToolActivityOnly(allMessages[idx].content || [], _currentDecisionToolIds)) {
+            el.querySelector(":scope > .assistant-reply-host")?.remove();
             el.querySelector(":scope > .assistant-reply-disclosure")?.remove();
             el.classList.remove("assistant-reply-collapsed", "assistant-reply-expanded");
             continue;
@@ -2438,39 +2367,21 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           var historical = idx < lastUserIdx;
           var key = buildExpandKey(historical ? "assistant-reply-history" : "assistant-reply-current", [renderMessageKey(allMessages[idx], idx)]);
           var persisted = getPersistedExpandState(key);
-          var disclosure = el.querySelector(":scope > .assistant-reply-disclosure");
+          var disclosure = el.querySelector(":scope > .assistant-reply-host .assistant-reply-disclosure, :scope > .assistant-reply-disclosure");
           // Same-owner soft/full paint keeps the current user's choice, including
           // the current→history boundary. Initial defaults remain unchanged.
           var expanded = disclosure ? disclosure.getAttribute("aria-expanded") === "true"
             : persisted === null ? true : persisted;
-          if (!disclosure) {
-            disclosure = document.createElement("button");
-            disclosure.className = "assistant-reply-disclosure";
-            disclosure.setAttribute("type", "button");
-            el.insertBefore(disclosure, el.firstChild);
-          }
-          disclosure.setAttribute("data-expand-key", key);
-          disclosure.setAttribute("aria-expanded", expanded ? "true" : "false");
           var previewText = getMessagePreviewText(allMessages[idx]) || "助手回复";
-          var disclosureHtml =
-            '<span class="assistant-reply-label">回复</span>' +
-            '<span class="assistant-reply-preview" title="' + escapeHtml(previewText) + '">' + escapeHtml(previewText) + '</span>' +
-            '<span class="assistant-reply-action">' + (expanded ? "收起" : "展开") + '</span>' +
-            '<span class="assistant-reply-chevron">' + iconSvg("chevronDown", { size: 15 }) + '</span>';
-          if (typeof HTMLElement !== "undefined") patchChatContents(disclosure, disclosureHtml);
-          else disclosure.innerHTML = disclosureHtml;
           el.classList.toggle("assistant-reply-collapsed", !expanded);
           el.classList.toggle("assistant-reply-expanded", expanded);
-          disclosure.onclick = function() {
-            var parent = this.parentElement;
-            var nextExpanded = parent.classList.contains("assistant-reply-collapsed");
-            parent.classList.toggle("assistant-reply-collapsed", !nextExpanded);
-            parent.classList.toggle("assistant-reply-expanded", nextExpanded);
-            this.setAttribute("aria-expanded", nextExpanded ? "true" : "false");
-            var action = this.querySelector(".assistant-reply-action");
-            if (action) action.textContent = nextExpanded ? "收起" : "展开";
-            setPersistedExpandState(this.getAttribute("data-expand-key"), nextExpanded);
-          };
+          (function(owner, expandKey) {
+            presentAssistantReply(owner, expandKey, previewText, expanded, function(nextExpanded) {
+              owner.classList.toggle("assistant-reply-collapsed", !nextExpanded);
+              owner.classList.toggle("assistant-reply-expanded", nextExpanded);
+              setPersistedExpandState(expandKey, nextExpanded);
+            });
+          })(el, key);
         }
       }
 
@@ -2609,11 +2520,13 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         var parts = [];
         for (var j = 0; j < TOOL_ACTIVITY_KINDS.length; j++) {
           var summaryKind = TOOL_ACTIVITY_KINDS[j];
-          var count = groups[summaryKind].length;
+          var planCount = summaryKind === "other" ? groups.other.filter(function(entry) { return isPlanTool(entry.calls[0].block); }).length : 0;
+          var count = groups[summaryKind].length - planCount;
           if (count > 0) {
             var kindMeta = ACTIVITY_KIND_META[summaryKind];
             parts.push({ kind: summaryKind, text: kindMeta.summary + count + kindMeta.unit });
           }
+          if (planCount) parts.push({ kind: "plan", text: "待办更新 " + planCount + " 次" });
         }
         return { groups: groups, parts: parts, thinking: thinking,
           latestCommandAt: latestCommandOccurredAt(groups.run_command) };
@@ -2651,7 +2564,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         var requestedEpoch = activityDetailEpoch;
         var requestedView = typeof HTMLElement !== "undefined" ? chatViewLease() : null;
         var request = fetch("/api/sessions/" + encodeURIComponent(sessionId) +
-          "/tool-content/" + encodeURIComponent(toolId), { credentials: "same-origin" })
+          "/tool-content/" + encodeURIComponent(toolId), { credentials: "same-origin", cache: "no-store" })
           .then(function(response) { return parseJsonResponse<any>(response); })
           .then(function(data) {
             if (requestedEpoch !== activityDetailEpoch || state.selectedId !== sessionId ||
@@ -2677,19 +2590,26 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         return request;
       }
 
-      function renderActivityEntryDetails(entry, messageKey, segmentFirstIndex, toolResults, running, entryKey) {
+      function renderActivityEntryDetails(entry, toolResults, running, entryKey) {
         var entryState = activityEntryStates.get(entryKey);
-        if (entryState?.error) return '<button type="button" class="chat-activity-retry" onclick="__activityEntryRetry(this)">' +
-          escapeHtml(entryState.error) + '，点击重试</button>';
         if (!entry.calls.some(function(call) { return !!call.block?.id; })) return "这条调用没有可读取的详情。";
-        var content = "";
+        if (activityOpensFile(entry.calls[0].block)) {
+          return '<div class="chat-activity-file-action"><button type="button" data-antd-control class="chat-activity-file-open" ' +
+            'onclick="__activityFileOpen(this)"' + (entryState?.request ? ' disabled' : '') + '>' +
+            iconSvg("file", { size: 14 }) + '查看文件</button>' +
+            '<span class="chat-activity-feedback" role="status">' +
+            escapeHtml(entryState?.error || (entryState?.request ? "正在打开…" : "查看文件当前版本")) + '</span></div>';
+        }
+        var content = '<div class="chat-activity-feedback" role="status">' +
+          escapeHtml(entryState?.error || (entryState?.request ? "加载详情…" : "调用详情")) +
+          (entryState?.error ? '<button type="button" data-antd-control class="chat-activity-retry" onclick="__activityEntryRetry(this)">重试</button>' : '') + '</div>';
         for (var c = 0; c < entry.calls.length; c++) {
           var call = entry.calls[c];
           var block = call.block;
           var cacheKey = activityDetailCacheKey(state.selectedId, block.id);
           var detail = state.toolContentCache[cacheKey] || activityPendingDetails.get(cacheKey);
           if (!detail || !Object.prototype.hasOwnProperty.call(detail, "input")) {
-            content += '<div class="chat-activity-loading">加载详情…</div>';
+            content += '<div class="chat-activity-loading">' + (entryState?.error ? '详情未加载' : '加载详情…') + '</div>';
             continue;
           }
           if (detail.pending && pickToolResultForDisplay(toolResults, block.id) &&
@@ -2713,52 +2633,58 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
               });
             }
           }
-          if (detail.pending) {
+          // The timeline owns this disclosure. Never embed a second collapsible tool card.
+          var input = detail.input || {};
+          var keys = Object.keys(input).sort();
+          if (keys.length) {
+            content += '<section class="chat-activity-detail-section"><h4>输入参数</h4>';
+            keys.slice(0, 24).forEach(function(key) {
+              content += '<div class="chat-activity-param-name">' + escapeHtml(key) + '</div><pre>' +
+                escapeHtml(activityDetailText(input[key], 4000)) + '</pre>';
+            });
+            if (keys.length > 24) content += '<p>另有 ' + (keys.length - 24) + ' 个参数未展示</p>';
+            content += '</section>';
+          }
+          if (detail.pending || detail.resultAvailable === false) {
             content += '<div class="chat-activity-pending-detail">' +
-              '<div class="chat-activity-pending-label">' + (running ? "执行中" : "结果未返回") + '</div>' +
-              '<pre class="tool-use-content">' + escapeHtml(JSON.stringify(detail.input || {}, null, 2)) + '</pre>' +
-            '</div>';
-            continue;
+              (detail.pending && running ? "执行中，等待结果…" : "本次调用尚未返回结果") + '</div>';
+          } else {
+            var resultText = activityDetailText(extractToolResultText(detail.content));
+            content += '<section class="chat-activity-detail-section' + (detail.is_error ? ' is-error' : '') +
+              '"><h4>' + (detail.is_error ? '错误输出' : '工具输出') + '</h4><pre>' +
+              escapeHtml(resultText || (detail.is_error ? '工具执行失败，未返回错误详情' : '工具已完成，没有文本输出')) + '</pre></section>';
           }
-          var hydrated = Object.assign({}, block, { input: detail.input || {} });
-          var results = {} as any;
-          if (detail.resultAvailable !== false && !detail.pending) {
-            results[block.id] = [{
-              type: "tool_result",
-              tool_use_id: block.id,
-              content: detail.content,
-              is_error: !!detail.is_error,
-            }];
-          }
-          content += renderContentBlock(hydrated, "assistant", results,
-            call.index + segmentFirstIndex, messageKey,
-            { noActivityFold: true, forceExpandedToolBodies: true });
         }
         return content;
+      }
+
+      function activityMarkHtml(className: string): string {
+        return '<span class="' + className + '" aria-hidden="true">' +
+          '<i></i>'.repeat(9) + '</span>';
       }
 
       function renderActivityFold(items, role, toolResults, messageKey, segmentFirstIndex, options?: any) {
         var opts = options || {};
         var summary = summarizeActivityRun(items);
         if (!summary.parts.length && !summary.thinking.length) return "";
-        var commandRunning = _currentActivitySessionBusy && !!_currentLatestPendingCommandId &&
-          summary.groups.run_command.some(function(entry) {
-            return entry.calls.some(function(call) {
-              return call.block.id === _currentLatestPendingCommandId;
-            });
-          });
-        var runningCommandAt = commandRunning
-          ? commandOccurredAt(summary.groups.run_command, _currentLatestPendingCommandId)
-          : null;
-        var latestBlock = items.length ? items[items.length - 1].block : null;
-        var thinkingRunning = !commandRunning && !!opts.isTrailing &&
-          latestBlock?.type === "thinking" && isTurnActivityLive(_currentMessageGlobalIndex);
         var groupKey = activityGroupKey(items, messageKey, segmentFirstIndex);
         var expandKey = buildExpandKey("activity-menu", [groupKey]);
         var persisted = getPersistedExpandState(expandKey);
         var expanded = persisted === true;
+        // 全段只有一个活跃条目：没回执的调用优先，其次最后一轮思考。
+        // 摘要的 running 标记与时间线行的 loading 都读它，两处不会同时闪。
+        var liveRow = activityLiveRow(items, _currentActivitySessionBusy && _currentLatestPendingCommandId
+          || null, !!opts.isTrailing && isTurnActivityLive(_currentMessageGlobalIndex));
+        var commandRunning = liveRow?.kind === "call";
+        var thinkingRunning = liveRow?.kind === "thinking";
+        var liveBlock = liveRow ? (liveRow.kind === "call" ? liveRow.call.block : liveRow.round.call.block) : null;
+        var activityLive = !!liveRow;
+        var runningCommandAt = commandRunning
+          ? commandOccurredAt(summary.groups.run_command, _currentLatestPendingCommandId)
+          : null;
         var menuHtml = "";
         var timeline = toolActivityTimeline(items);
+        var roundOf = new Map(thinkingRounds(items).map(function(round) { return [round.call, round]; }));
         for (var k = 0; k < timeline.length; k++) {
           var call = timeline[k];
           var block = call.block;
@@ -2768,42 +2694,33 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           var entryKey = buildExpandKey(isThinking ? "activity-thinking" : "activity-detail",
             [state.selectedId, groupKey, callScope]);
           var entryOpen = activityDetailOpen.has(entryKey);
-          var entryRunning = isThinking ? thinkingRunning && block === latestBlock
-            : commandRunning && block.id === _currentLatestPendingCommandId;
+          var entryRunning = !!liveRow && block === liveBlock;
           var result = isThinking ? null : pickToolResultForDisplay(toolResults, block.id);
           var status = entryRunning ? "运行中" : result?.is_error ? "失败" : result ? "完成" : "未返回";
-          var itemLabel = isThinking ? "深度思考" : block.activity?.label ||
+          var itemLabel = isThinking ? thinkingRoundLabel(roundOf.get(call)) : block.activity?.label ||
             (ACTIVITY_KIND_META[kind]?.item || "调用") + " · " + (block.name || "工具");
-          var occurredAt = block.activity?.occurredAt;
+          var occurredAt = isThinking ? block.occurredAt : block.activity?.occurredAt;
           var itemClock = occurredAt ? formatActivityEventTime(occurredAt) : "";
-          var inputPreview = block.preview || "";
-          var resultPreview = result?.preview || "";
+          var inputPreview = isThinking ? "" : block.preview || "";
+          // Task receipts repeat the title/status already shown by the progress owner.
+          // Full receipts remain available on demand, including errors.
+          var resultPreview = isPlanTool(block) && !result?.is_error ? "" : result?.preview || "";
           var detailHtml = "";
           if (entryOpen && expanded) {
             detailHtml = isThinking
               ? '<div class="chat-activity-thinking-content">' +
-                escapeHtml(block.thinking || "思考内容尚未到达。") + '</div>'
-              : renderActivityEntryDetails({ calls: [call] }, messageKey, segmentFirstIndex,
-                toolResults, entryRunning, entryKey);
+                escapeHtml(block.thinking || "模型未提供可显示的思考正文。") + '</div>'
+              : renderActivityEntryDetails({ calls: [call] }, toolResults, entryRunning, entryKey);
           }
-          var entryState = result?.is_error ? "error" : entryRunning ? "running" : result ? "complete" : "pending";
-          menuHtml += '<div class="chat-activity-entry" data-status="' + entryState + '" role="listitem" data-entry-key="' + escapeHtml(entryKey) +
+          var entryState = result?.is_error ? "error" : entryRunning ? "running" : result || isThinking ? "complete" : "pending";
+          menuHtml += '<div class="chat-call" data-status="' + entryState + '" role="listitem" data-entry-key="' + escapeHtml(entryKey) +
             (isThinking ? '" data-thinking-entry="true' : '" data-tool-ids="' +
               escapeHtml(JSON.stringify(block.id ? [String(block.id)] : []))) +
-            '" data-expanded="' + (entryOpen ? "true" : "false") + '">' +
-              '<button type="button" class="chat-activity-entry-button" aria-expanded="' +
-                (entryOpen ? "true" : "false") + '" onclick="__activityEntryToggle(this)">' +
-                '<span class="chat-activity-entry-dot' + (entryRunning ? ' is-active' : '') + '" aria-hidden="true"></span>' +
-                (itemClock ? '<time class="chat-activity-entry-time" datetime="' + escapeHtml(occurredAt) + '">' +
-                  escapeHtml(itemClock) + '</time>' : '') +
-                '<span class="chat-activity-entry-copy"><span class="chat-activity-entry-label">' + escapeHtml(itemLabel) + '</span>' +
-                  (inputPreview ? '<span class="chat-activity-entry-preview">' + escapeHtml(inputPreview) + '</span>' : '') +
-                  (resultPreview ? '<span class="chat-activity-entry-result">' + escapeHtml(resultPreview) + '</span>' : '') + '</span>' +
-                (isThinking && !entryRunning ? '' : '<span class="chat-activity-entry-status' +
-                  (result?.is_error ? ' is-error' : '') + '">' + escapeHtml(status) + '</span>') +
-                '<span class="chat-activity-entry-arrow">' + iconSvg("chevronDown", { size: 13 }) + '</span>' +
-              '</button>' +
-              '<div class="chat-activity-entry-detail"' + (entryOpen ? '' : ' inert aria-hidden="true"') + '>' +
+            '" data-file-entry="' + (activityOpensFile(block) ? "true" : "false") + '" data-expanded="' + (entryOpen ? "true" : "false") + '">' +
+              '<button type="button" class="chat-call-button" data-label="' + escapeHtml(itemLabel) +
+                '" data-preview="' + escapeHtml(inputPreview) + '" data-time="' + escapeHtml(itemClock) + '" data-occurred-at="' + escapeHtml(occurredAt || '') + '" data-result="' + escapeHtml(isThinking ? (entryRunning ? '思考中' : '已结束') : resultPreview || status) +
+                '" aria-expanded="' + (entryOpen ? "true" : "false") + '" onclick="__activityEntryToggle(this)">' + escapeHtml(itemLabel) + '</button>' +
+              '<div class="chat-call-detail"' + (entryOpen ? '' : ' inert aria-hidden="true"') + '>' +
                 '<div class="chat-activity-detail-content">' + detailHtml + '</div></div>' +
             '</div>';
         }
@@ -2819,6 +2736,13 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           summaryItems.push('<span class="chat-activity-meta-item is-thinking' +
             (thinkingRunning ? ' is-active' : '') + '">' +
             (thinkingRunning ? "正在思考" : "深度思考") + '</span>');
+          var liveThinking = thinkingRunning ? liveBlock : null;
+          if (liveThinking?.occurredAt && Number.isFinite(Date.parse(liveThinking.occurredAt))) {
+            summaryItems.push('<span class="chat-activity-command-elapsed" data-activity-kind="thinking" data-started-at="' +
+              escapeHtml(liveThinking.occurredAt) + '" data-last-activity-at="' + escapeHtml(liveThinking.lastActivityAt || '') +
+              '" title="按收到的思考事件计时；无新进展不代表任务已停止。">' +
+              escapeHtml(formatThinkingElapsed(liveThinking.occurredAt, liveThinking.lastActivityAt)) + '</span>');
+          }
         }
         for (var p = 0; p < summary.parts.length; p++) {
           var part = summary.parts[p];
@@ -2836,17 +2760,23 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           summaryItems.push(itemHtml + '</span>');
         }
 
+        var failedCount = timeline.filter(function(call) { return call.block.type === "tool_use" && pickToolResultForDisplay(toolResults, call.block.id)?.is_error; }).length;
+        if (failedCount) summaryItems.push('<span class="chat-activity-error">' + failedCount + ' 项失败</span>');
+        if (commandRunning && liveBlock?.activity?.kind !== "run_command") {
+          summaryItems.unshift('<span class="chat-activity-meta-item is-active">正在' + (isPlanTool(liveBlock) ? '更新待办' : '执行工具') + '</span>');
+        }
+
         return '<div class="chat-activity' + (commandRunning ? ' is-command-running' : '') +
-            (thinkingRunning ? ' is-thinking-running' : '') + '" ' +
+            (thinkingRunning ? ' is-thinking-running' : '') + (activityLive ? '' : ' is-history') + '" ' +
             'data-expand-kind="activity" ' +
             'data-expand-key="' + escapeHtml(expandKey) + '" ' +
             'data-expanded="' + (expanded ? "true" : "false") + '">' +
-          '<button type="button" class="chat-activity-summary" aria-expanded="' + (expanded ? "true" : "false") + '" onclick="__activityToggle(this)">' +
-            '<span class="chat-activity-summary-dot" aria-hidden="true"></span>' +
+          '<span class="chat-process-summary">' +
+            // 缩略统计行是全段唯一的动态 loading；时间线行只用状态，不再来一份。
+            (activityLive ? activityMarkHtml('chat-process-summary-dot') : '') +
             '<span class="chat-activity-meta">' + leadClockHtml + summaryItems.join(
               '<span class="chat-activity-separator" aria-hidden="true">·</span>') + '</span>' +
-            '<span class="chat-activity-chevron">' + iconSvg("chevronDown", { size: 13, strokeWidth: 2 }) + '</span>' +
-          '</button>' +
+          '</span>' +
           '<div class="chat-activity-menu"' + (expanded ? '' : ' inert aria-hidden="true"') + '>' +
             '<div class="chat-activity-menu-inner"><div class="chat-activity-timeline" role="list" aria-label="工具调用时间线">' +
               menuHtml + '</div></div></div>' +
@@ -2857,17 +2787,17 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         if (!wrap || wrap.getAttribute("data-expanded") !== "true") return;
         wrap.setAttribute("data-expanded", "false");
         var menu = wrap.querySelector(".chat-activity-menu");
-        var summary = wrap.querySelector(".chat-activity-summary");
+        var summary = wrap.querySelector(".chat-process-summary");
         if (menu) { menu.inert = true; menu.setAttribute("aria-hidden", "true"); }
-        var openEntries = wrap.querySelectorAll('.chat-activity-entry[data-expanded="true"]');
+        var openEntries = wrap.querySelectorAll('.chat-call[data-expanded="true"]');
         for (var i = 0; i < openEntries.length; i++) {
           var entry = openEntries[i];
           var entryKey = entry.getAttribute("data-entry-key") || "";
           activityDetailOpen.delete(entryKey);
           activityEntryStates.delete(entryKey);
           entry.setAttribute("data-expanded", "false");
-          var entryButton = entry.querySelector(".chat-activity-entry-button");
-          var entryDetail = entry.querySelector(".chat-activity-entry-detail");
+          var entryButton = entry.querySelector(".chat-call-button");
+          var entryDetail = entry.querySelector(".chat-call-detail");
           if (entryButton) entryButton.setAttribute("aria-expanded", "false");
           if (entryDetail) { entryDetail.inert = true; entryDetail.setAttribute("aria-hidden", "true"); }
         }
@@ -2877,6 +2807,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         }
         var key = wrap.getAttribute("data-expand-key");
         if (key) setPersistedExpandState(key, false);
+        refreshChatPresentation(wrap);
       }
 
       (window as any).__activityToggle = function(btn) {
@@ -2887,21 +2818,21 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           closeActivityMenu(wrap, false);
           return;
         }
-        var openMenus = document.querySelectorAll('.chat-activity[data-expanded="true"]');
-        for (var i = 0; i < openMenus.length; i++) closeActivityMenu(openMenus[i], false);
+        // Inline history is not a popup: opening another group must not close this one.
         wrap.setAttribute("data-expanded", "true");
         btn.setAttribute("aria-expanded", "true");
         var menu = wrap.querySelector(".chat-activity-menu");
         if (menu) { menu.inert = false; menu.removeAttribute("aria-hidden"); }
         var key = wrap.getAttribute("data-expand-key");
         if (key) setPersistedExpandState(key, true);
+        renderChat(true);
       };
 
       (window as any).__activityEntryToggle = function(btn) {
-        var row = btn && btn.closest ? btn.closest(".chat-activity-entry") : null;
+        var row = btn && btn.closest ? btn.closest(".chat-call") : null;
         if (!row) return;
         var key = row.getAttribute("data-entry-key") || "";
-        var detail = row.querySelector(".chat-activity-entry-detail");
+        var detail = row.querySelector(".chat-call-detail");
         var nowExpanded = row.getAttribute("data-expanded") !== "true";
         row.setAttribute("data-expanded", nowExpanded ? "true" : "false");
         btn.setAttribute("aria-expanded", nowExpanded ? "true" : "false");
@@ -2913,6 +2844,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         if (!nowExpanded) {
           activityDetailOpen.delete(key);
           activityEntryStates.delete(key);
+          refreshChatPresentation(row);
           return;
         }
         activityDetailOpen.add(key);
@@ -2920,20 +2852,21 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         var view = chatViewLease();
         if (!view) return;
         activityEntryStates.set(key, { lease: view, open: {}, request: null, error: null });
+        if (row.getAttribute("data-file-entry") === "true") { renderChat(true); return; }
         requestActivityEntry(key, row);
       };
 
       function currentActivityEntry(key, entryState) {
         if (activityEntryStates.get(key) !== entryState || !activityDetailOpen.has(key) ||
           !isChatLeaseCurrent(entryState.lease)) return null;
-        var entries = entryState.lease.root.querySelectorAll(".chat-activity-entry");
+        var entries = entryState.lease.root.querySelectorAll(".chat-call");
         for (var i = 0; i < entries.length; i++) {
           if (entries[i].getAttribute("data-entry-key") === key && entries[i].getAttribute("data-expanded") === "true" &&
             entries[i].closest('.chat-activity[data-expanded="true"]')) return entries[i];
         }
         return null;
       }
-      function requestActivityEntry(key, row) {
+      function requestActivityEntry(key, row, openFile = false) {
         var entryState = activityEntryStates.get(key);
         if (!entryState || !currentActivityEntry(key, entryState)) return;
         var sessionId = state.selectedId;
@@ -2946,8 +2879,15 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         renderChat(true);
         if (!ids.length) return;
         Promise.all(ids.map(function(id) { return fetchActivityToolDetail(sessionId, id, requestToken); }))
-          .then(function() {
+          .then(function(details) {
             if (!currentActivityEntry(key, entryState) || entryState.request !== requestToken) return;
+            if (openFile) {
+              var cwd = state.sessions.find(function(session) { return session.id === sessionId; })?.cwd;
+              var path = activityFilePath(details[0]?.input || {}, cwd);
+              if (!path) throw new Error("此调用未提供可查看的文件路径");
+              if (!(window as any).__openFilePreview) throw new Error("文件预览暂不可用");
+              (window as any).__openFilePreview(path);
+            }
             entryState.request = null;
             renderChat(true);
           })
@@ -2958,20 +2898,19 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
             renderChat(true);
           });
       }
+      (window as any).__activityFileOpen = function(btn) {
+        var row = btn?.closest(".chat-call");
+        if (!row || btn.disabled) return;
+        requestActivityEntry(row.getAttribute("data-entry-key") || "", row, true);
+      };
       (window as any).__activityEntryRetry = function(btn) {
-        var row = btn && btn.closest ? btn.closest(".chat-activity-entry") : null;
+        var row = btn && btn.closest ? btn.closest(".chat-call") : null;
         if (!row) return;
         requestActivityEntry(row.getAttribute("data-entry-key") || "", row);
       };
 
       if (!(window as any).__activityDismissBound) {
         (window as any).__activityDismissBound = true;
-        document.addEventListener("pointerdown", function(event) {
-          var target = event.target as HTMLElement;
-          if (target && target.closest && target.closest(".chat-activity")) return;
-          var openMenus = document.querySelectorAll('.chat-activity[data-expanded="true"]');
-          for (var i = 0; i < openMenus.length; i++) closeActivityMenu(openMenus[i], false);
-        });
         document.addEventListener("keydown", function(event) {
           if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
           var target = event.target as HTMLElement;
@@ -2979,7 +2918,12 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           if (!target?.closest || target !== active && !target.contains(active)) return;
           var openMenu = target.closest('.chat-activity[data-expanded="true"]');
           if (!openMenu || target.closest('[role="dialog"], dialog, [aria-modal="true"]')) return;
-          closeActivityMenu(openMenu, true);
+          var openEntry = target.closest('.chat-call[data-expanded="true"]');
+          if (openEntry) {
+            var entryButton = openEntry.querySelector<HTMLElement>(".chat-call-button");
+            (window as any).__activityEntryToggle(entryButton);
+            entryButton?.focus({ preventScroll: true });
+          } else closeActivityMenu(openMenu, true);
           event.preventDefault();
         });
       }
@@ -3006,7 +2950,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
               pendingActivity = [];
             };
             for (var fi = 0; fi < segmentBlocks.length; fi++) {
-              var fBlock = segmentBlocks[fi];
+              var fBlock = presentActivityBlock(segmentBlocks[fi]);
               if (isHiddenActivityBlock(fBlock)) continue;
               if (isFoldableActivityBlock(fBlock)) {
                 pendingActivity.push({ block: fBlock, index: fi });
@@ -3044,23 +2988,24 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         var messageKey = renderMessageKey(msg, messageIndex);
         var timeHtml = renderChatMessageTime(msg);
         var usageHtml = role === "assistant" ? renderUsageSummaryHtml(roundUsage) : "";
+        var resourceLabel = role === "assistant" && typeof msg.resourceSelection?.label === "string"
+          ? msg.resourceSelection.label.slice(0, 1024) : "";
+        var resourceHtml = resourceLabel ? '<div class="chat-resource-selection" role="status">' + escapeHtml(resourceLabel) + '</div>' : "";
+        var resourceFinished = msg.resourceSelection?.status === "cancelled" || Boolean(resourceHtml && msg.completedAt);
         var content = Array.isArray(msg.content) ? msg.content : [];
         var isQueued = role === "user" && content.some(function(b) { return b && b.__queued; });
         var activityOnly = role === "assistant" && isToolActivityOnly(content, _currentDecisionToolIds);
-        var avatarHtml = (isGrouped || role === "user" || activityOnly) ? "" : chatAvatar(role, msg.author);
         var groupedAttr = isGrouped ? ' data-grouped="true"' : "";
 
         if (content.length === 0) {
           if (role === "assistant") {
             return '<div class="chat-message ' + role + '"' + groupedAttr + ' data-role="' + escapeHtml(role) + '">' +
               timeHtml +
-              avatarHtml +
-              '<div class="chat-message-content"><div class="typing-indicator"><span></span><span></span><span></span></div>' + usageHtml + '</div>' +
+              '<div class="chat-message-content">' + resourceHtml + (resourceFinished ? "" : '<div class="typing-indicator"><span></span><span></span><span></span></div>') + usageHtml + '</div>' +
             '</div>';
           }
           return '<div class="chat-message ' + role + ' empty-message"' + groupedAttr + ' data-role="' + escapeHtml(role) + '" data-message-key="' + escapeHtml(messageKey) + '">' +
             timeHtml +
-            avatarHtml +
             '<div class="chat-message-content"><span class="empty-message-hint">（空消息）</span></div>' +
           '</div>';
         }
@@ -3108,7 +3053,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         flushPendingBlocks();
 
         // 跨 turn 到达的 Agent result 只负责回填原 Run，不再在结果消息里生成一张孤立卡片。
-        if (!bodyHtml || !bodyHtml.trim()) {
+        if ((!bodyHtml || !bodyHtml.trim()) && !resourceHtml) {
           return '<div class="chat-message agent-run-owned" data-message-key="' + escapeHtml(messageKey) + '" hidden></div>';
         }
 
@@ -3116,33 +3061,20 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         var queuedBadge = isQueued ? '<span class="queued-badge">排队中</span>' : "";
         return '<div class="chat-message ' + role + queuedClass + '"' + groupedAttr + ' data-role="' + escapeHtml(role) + '" data-message-key="' + escapeHtml(messageKey) + '">' +
           timeHtml +
-          avatarHtml +
-          '<div class="chat-message-content">' + bodyHtml + queuedBadge + usageHtml + '</div>' +
+          '<div class="chat-message-content">' + resourceHtml + bodyHtml + queuedBadge + usageHtml + '</div>' +
         '</div>';
-      }
-
-      function compactUsageNumber(value) {
-        if (value >= 1000000) return (value / 1000000).toFixed(1).replace(/\.0$/, "") + "M";
-        if (value >= 1000) return (value / 1000).toFixed(1).replace(/\.0$/, "") + "k";
-        return String(Math.max(0, Math.round(value || 0)));
       }
 
       function renderUsageSummaryHtml(usage) {
-        if (!usage) return "";
-        var estimated = usage.estimated === true;
-        var parts = [];
-        if ((usage.inputTokens || 0) > 0) parts.push("输入 " + compactUsageNumber(usage.inputTokens));
-        if ((usage.cacheReadInputTokens || 0) > 0) parts.push("缓存命中 " + compactUsageNumber(usage.cacheReadInputTokens));
-        if ((usage.cacheCreationInputTokens || 0) > 0) parts.push("缓存写入 " + compactUsageNumber(usage.cacheCreationInputTokens));
-        if ((usage.outputTokens || 0) > 0) parts.push("输出 " + (estimated ? "≈" : "") + compactUsageNumber(usage.outputTokens));
-        if ((usage.reasoningOutputTokens || 0) > 0) parts.push("推理 " + (estimated ? "≈" : "") + compactUsageNumber(usage.reasoningOutputTokens));
-        if ((usage.totalCostUsd || 0) > 0) parts.push("$" + Number(usage.totalCostUsd).toFixed(4).replace(/0+$/, "").replace(/\.$/, ""));
-        if (parts.length === 0 && estimated) parts.push("正在统计用量…");
-        if (parts.length === 0) return "";
-        return '<div class="turn-usage-summary' + (estimated ? ' is-estimated' : '') + '" role="status" aria-live="polite" aria-label="本轮用量 ' + escapeHtml(parts.join("，")) + '">' +
-          '<svg class="turn-usage-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 13.5h11M4 11V7.5M8 11V3M12 11V5.5"/></svg>' +
-          '<span>' + escapeHtml(parts.join(" · ")) + '</span>' +
-        '</div>';
+        var metrics = chatUsageMetrics(usage);
+        if (!metrics.length) return "";
+        var parts = metrics.map(function(metric) { return metric.label + " " + metric.value; });
+        return '<div class="turn-usage-summary' + (usage.estimated === true ? ' is-estimated' : '') + '" role="status" aria-live="polite" aria-label="本轮用量（Token） ' + escapeHtml(parts.join("，")) + '">' +
+          '<svg class="turn-usage-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" aria-hidden="true"><path d="M2.5 13.5h11M4 11V7.5M8 11V3M12 11V5.5"/></svg>' +
+          '<span class="turn-usage-values">' + metrics.map(function(metric) {
+            return '<span class="turn-usage-value" data-chat-key="usage:' + metric.key + '" title="' + escapeHtml(metric.title) + '">' +
+              escapeHtml(metric.label + " " + metric.value) + '</span>';
+          }).join("") + '</span></div>';
       }
       // 用户上传附件时，客户端用 buildAttachmentPrefix 在 prompt 前注入一段
       //   [附件已上传，请查看以下文件:\n<path1>\n<path2>]\n\n<正文>
@@ -3166,13 +3098,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
               'onerror="var w=this.closest(\'.user-attachment-image\'); if(w)w.style.display=\'none\';" />' +
           '</div>';
         }
-        return '<div class="user-attachment-file" data-path="' + escapeHtml(p) + '" ' +
-          'onclick="event.stopPropagation(); if(window.__openFilePreview)window.__openFilePreview(this.getAttribute(\'data-path\'));">' +
-          '<span class="user-attachment-file-icon">' +
-            '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 1.5H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5.5L9 1.5z"/><path d="M9 1.5V5.5h4"/></svg>' +
-          '</span>' +
-          '<span class="user-attachment-file-name">' + escapeHtml(name) + '</span>' +
-        '</div>';
+        return '<div class="chat-file-attachment" data-path="' + escapeHtml(p) + '" data-file-name="' + escapeHtml(name) + '"></div>';
       }
 
       // 渲染用户文本：剥离附件前缀，附件渲染成缩略图 / 文件块（在上），正文转义（在下）。
@@ -3238,12 +3164,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
             var thinkingText = block.thinking || "";
             var isStreaming = block.thinking === undefined && block.type === "thinking";
             if (isStreaming) {
-              return '<div class="thinking-inline thinking-streaming" data-thinking="">' +
-                '<div class="thinking-streaming-inner">' +
-                  '<span class="thinking-streaming-icon spinning">' + iconSvg("spark", { size: 12, strokeWidth: 1.8 }) + '</span>' +
-                  '<div class="thinking-streaming-text"></div>' +
-                '</div>' +
-              '</div>';
+              return '<div class="chat-thinking" data-thinking="" data-loading="true"></div>';
             }
             // 非流式分支：thinking 字段是空字符串时，UI 上只会出现一条带"展开"
             // 的紫色窄条，展开了也是空——直接不渲染，避免视觉噪音。
@@ -3251,12 +3172,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
             var thinkingKey = buildExpandKey("thinking", [messageKey, index]);
             var thinkingPersisted = getPersistedExpandState(thinkingKey);
             var thinkingExpanded = resolveCardExpanded(thinkingPersisted, opts, index, getCardDefault("thinking"));
-            var preview = thinkingExpanded ? thinkingText : "深度思考";
-            return '<div class="thinking-inline ' + (thinkingExpanded ? 'expanded' : 'collapsed') + '" data-expand-kind="thinking" data-expand-key="' + escapeHtml(thinkingKey) + '" data-thinking="' + escapeHtml(thinkingText) + '" onclick="__thinkingToggle(this)">' +
-              '<span class="thinking-inline-icon">' + iconSvg("spark", { size: 12, strokeWidth: 1.8 }) + '</span>' +
-              '<span class="thinking-inline-preview">' + escapeHtml(thinkingExpanded ? thinkingText : preview) + '</span>' +
-              '<span class="thinking-inline-action">' + (thinkingExpanded ? '收起' : '展开') + '</span>' +
-            '</div>';
+            return '<div class="chat-thinking ' + (thinkingExpanded ? 'expanded' : 'collapsed') + '" data-expand-kind="thinking" data-expand-key="' + escapeHtml(thinkingKey) + '" data-thinking="' + escapeHtml(thinkingText) + '"></div>';
 
           case "tool_use":
             var toolResult = pickToolResultForDisplay(toolResults, block.id);
@@ -3369,7 +3285,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         var fullResult = resultContent;
 
         var expandedHtml = "";
-        var shouldExpand = opts.forceExpandedToolBodies ? true : resolveCardExpanded(persistedExpanded, opts, index, getCardDefault("inlineTools"));
+        var shouldExpand = resolveCardExpanded(persistedExpanded, opts, index, getCardDefault("inlineTools"));
         // 展开区始终留在 DOM 里，由 .inline-tool-open 驱动高度动画（收起是同一段倒放），
         // 所以这里只负责内容，不再写 display。
         if (hasResult) {
@@ -3495,7 +3411,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
 
         // Show command preview in header (truncate long commands)
         var cmdPreview = command.length > 80 ? command.slice(0, 77) + "…" : command;
-        var shouldExpand = opts.forceExpandedToolBodies ? true : resolveCardExpanded(persistedExpanded, opts, index, getCardDefault("terminal"));
+        var shouldExpand = resolveCardExpanded(persistedExpanded, opts, index, getCardDefault("terminal"));
 
         var termTruncated = toolResult && toolResult._truncated === true;
         var termTruncAttrs = termTruncated
@@ -3503,11 +3419,11 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           : '';
 
         return '<div class="inline-terminal" data-expand-kind="terminal" data-expand-key="' + escapeHtml(expandKey) + '" data-expanded="' + (shouldExpand ? 'true' : 'false') + '"' + termTruncAttrs + '>' +
-          '<div class="term-header" role="button" tabindex="0" aria-expanded="' + (shouldExpand ? 'true' : 'false') + '" onclick="__terminalExpand(this)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();__terminalExpand(this);}">' +
+          '<button data-antd-control type="button" class="term-header" aria-expanded="' + (shouldExpand ? 'true' : 'false') + '" onclick="__terminalExpand(this)">' +
             statusDot +
             '<span class="term-cmd-preview"><span class="term-prompt">$</span> ' + escapeHtml(cmdPreview) + '</span>' +
             '<span class="term-toggle-icon">' + (shouldExpand ? '▼' : '▶') + '</span>' +
-          '</div>' +
+          '</button>' +
           renderToolPreview(block, toolResult, false) +
           '<div class="term-body" aria-hidden="' + (shouldExpand ? 'false' : 'true') + '" style="display:' + (shouldExpand ? 'block' : 'none') + ';">' +
             '<div class="term-command"><span class="term-prompt">$</span> ' + cmdDisplay + '</div>' +
@@ -3624,7 +3540,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         var expandKey = buildExpandKey("diff", [messageKey, toolId || index]);
         var persistedExpanded = getPersistedExpandState(expandKey);
         var cardDefaultExpand = getCardDefault("editCards");
-        var shouldExpand = opts.forceExpandedToolBodies ? true : resolveCardExpanded(persistedExpanded, opts, index, cardDefaultExpand);
+        var shouldExpand = resolveCardExpanded(persistedExpanded, opts, index, cardDefaultExpand);
         var collapsedClass = shouldExpand ? "" : " collapsed";
 
         // If only one column has content, show full width
@@ -3635,20 +3551,20 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           '<div class="diff-col ' + colClass + '"><div class="diff-col-label">' + (bothCols ? '新' : '') + '</div>' + (rightCol || leftCol || renderEmptyDiff(path)) + '</div>'
         );
         var openButton = path
-          ? '<button class="diff-open-file" type="button" data-path="' + escapeHtml(path) + '" title="打开文件" onclick="event.stopPropagation(); if(window.__openFilePreview)window.__openFilePreview(this.getAttribute(\'data-path\'));">打开</button>'
+          ? '<button data-antd-control class="diff-open-file" type="button" data-path="' + escapeHtml(path) + '" title="打开文件" onclick="event.stopPropagation(); if(window.__openFilePreview)window.__openFilePreview(this.getAttribute(\'data-path\'));">打开</button>'
           : '';
 
         return '<div class="inline-diff' + collapsedClass + '" data-tool-name="' + escapeHtml(toolName) + '"' +
           ' data-expand-kind="diff" data-expand-key="' + escapeHtml(expandKey) + '"' +
           ' data-tool-use-id="' + escapeHtml(toolId) + '" data-path="' + escapeHtml(path) + '">' +
-          '<div class="diff-header" role="button" tabindex="0" aria-expanded="' + (shouldExpand ? 'true' : 'false') + '" onclick="__tcToggle(event,this)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();__tcToggle(event,this);}">' +
+          '<button data-antd-control type="button" class="diff-header" aria-expanded="' + (shouldExpand ? 'true' : 'false') + '" onclick="__tcToggle(event,this)">' +
             '<span class="diff-file-icon"></span>' +
             '<span class="diff-file-name">' + escapeHtml(fileName) + '</span>' +
             renderTailMarqueePath(path, "diff-path") +
             '<span class="diff-status ' + statusClass + '">' + statusText + '</span>' +
-            openButton +
             '<span class="diff-toggle">▼</span>' +
-          '</div>' +
+          '</button>' +
+          (openButton ? '<div class="diff-file-action">' + openButton + '</div>' : '') +
           renderToolPreview(block, toolResult) +
           '<div class="diff-body" aria-hidden="' + (shouldExpand ? 'false' : 'true') + '">' +
             '<div class="diff-columns">' +
@@ -3710,15 +3626,15 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         var status = toolResult ? failed ? "失败" : "完成" : running ? "判断中" : "未返回";
         var inputText = typeof input.command === "string" ? input.command : JSON.stringify(input, null, 2);
         var fixedResultWindow = !!(toolResult?._truncated || detail);
-        var load = fixedResultWindow ? '<button type="button" class="chat-activity-retry decision-result-load" data-tool-use-id="' + escapeHtml(toolId) + '" onclick="__decisionLoadResult(this)"' + (detail ? ' disabled' : '') + '>' + (detail ? '已加载完整结果' : '加载完整结果') + '</button>' : '';
+        var load = fixedResultWindow ? '<button type="button" data-antd-control class="chat-activity-retry decision-result-load" data-tool-use-id="' + escapeHtml(toolId) + '" onclick="__decisionLoadResult(this)"' + (detail ? ' disabled' : '') + '>' + (detail ? '已加载完整结果' : '加载完整结果') + '</button>' : '';
         var summaryLabel = decisionSummaryLabel(block, toolResult);
-        return '<section class="tool-use-card decision-tool-card ' + (failed ? 'error' : toolResult ? 'success' : 'loading') + (expanded ? '' : ' collapsed') + '" data-expand-kind="tool-card" data-expand-key="' + escapeHtml(expandKey) + '" data-tool-use-id="' + escapeHtml(toolId) + '" data-decision-result-window="' + fixedResultWindow + '" aria-label="本地决策">' +
-          '<div class="tool-use-header" role="button" tabindex="0" aria-expanded="' + expanded + '" onclick="__decisionToggle(event,this)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();__decisionToggle(event,this);}">' +
+        return '<section class="chat-tool-card decision-tool-card ' + (failed ? 'error' : toolResult ? 'success' : 'loading') + (expanded ? '' : ' collapsed') + '" data-expand-kind="tool-card" data-expand-key="' + escapeHtml(expandKey) + '" data-tool-use-id="' + escapeHtml(toolId) + '" data-decision-result-window="' + fixedResultWindow + '" aria-label="本地决策">' +
+          '<button data-antd-control type="button" class="chat-tool-header" aria-expanded="' + expanded + '" onclick="__decisionToggle(event,this)">' +
             '<span class="tool-use-icon">' + iconSvg("spark", { size: 16 }) + '</span>' +
             '<span class="tool-use-head"><span class="tool-use-name">本地决策</span>' +
             '<span class="decision-tool-summary" role="status">' + escapeHtml(summaryLabel + " · 实验性 · " + status) + '</span></span>' +
-            '<span class="tool-use-toggle" aria-hidden="true">' + iconSvg("chevronDown", { size: 14 }) + '</span></div>' +
-          '<div class="decision-tool-details"><div class="decision-tool-details-inner"><div class="tool-use-body" aria-hidden="' + !expanded + '"' + (expanded ? '' : ' inert') + '>' + load +
+            '<span class="tool-use-toggle" aria-hidden="true">' + iconSvg("chevronDown", { size: 14 }) + '</span></button>' +
+          '<div class="decision-tool-details"><div class="decision-tool-details-inner"><div class="chat-tool-body" aria-hidden="' + !expanded + '"' + (expanded ? '' : ' inert') + '>' + load +
             '<div class="tool-use-result"><pre class="tool-use-result-content" tabindex="0" aria-label="决策结果">' + escapeHtml(content || (running ? '正在等待决策结果…' : toolResult ? '本次调用没有文本输出' : '尚未收到结果')) + '</pre></div>' +
             (Object.keys(input).length ? '<div class="tool-use-meta">调用输入</div><pre class="tool-use-content" tabindex="0" aria-label="调用输入">' + escapeHtml(inputText) + '</pre>' : '') +
           '</div></div></div></section>';
@@ -3730,7 +3646,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         var expanded = card.classList.contains("collapsed");
         applyExpandedState(card, "tool-card", expanded);
         header.setAttribute("aria-expanded", String(expanded));
-        var body = card.querySelector(".tool-use-body");
+        var body = card.querySelector(".chat-tool-body");
         body?.setAttribute("aria-hidden", String(!expanded));
         body?.toggleAttribute("inert", !expanded);
         persistElementExpandState(card, "tool-card");
@@ -3834,7 +3750,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
                     // Interactive: selection state from askUserSelections
                     var isSelected = (sel[qIdx] || []).indexOf(idx) !== -1;
                     var disabledAttr = isSubmitted ? ' disabled' : '';
-                    optionsHtml += '<button class="ask-user-option' + (isSelected ? ' selected' : '') + '"' +
+                    optionsHtml += '<button data-antd-control class="ask-user-option' + (isSelected ? ' selected' : '') + '"' +
                       ' data-option-index="' + idx + '"' +
                       ' data-question-index="' + qIdx + '"' +
                       ' data-option-label="' + escapeHtml(opt.label || "选项 " + (idx + 1)) + '"' +
@@ -3864,7 +3780,7 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
               var submitClass = isSubmitted ? " ask-user-submitted" : "";
               var submitText = isSubmitted ? "已提交..." : "确认提交";
               actionsHtml = '<div class="ask-user-actions">' +
-                '<button class="ask-user-submit' + submitClass + '" data-tool-use-id="' + escapeHtml(toolId) + '"' +
+                '<button data-antd-control="primary" class="ask-user-submit' + submitClass + '" data-tool-use-id="' + escapeHtml(toolId) + '"' +
                   ' onclick="__askSubmit(\'' + escapeHtml(toolId) + '\')"' + submitDisabled + '>' +
                   submitText +
                 '</button>' +
@@ -3882,15 +3798,15 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
             // Expand state: default expanded when unanswered, collapsed when answered
             var askExpandKey = buildExpandKey("tool-card", [messageKey, toolId]);
             var askPersisted = getPersistedExpandState(askExpandKey);
-            var askShouldExpand = opts.forceExpandedToolBodies ? true : (askPersisted === null ? !isAnswered : askPersisted);
+            var askShouldExpand = askPersisted === null ? !isAnswered : askPersisted;
             var askCollapsed = askShouldExpand ? "" : " collapsed";
             var answeredClass = isAnswered ? " ask-user-answered" : "";
 
-            return '<div class="tool-use-card ask-user' + answeredClass + askCollapsed + '"' +
+            return '<div class="chat-tool-card ask-user' + answeredClass + askCollapsed + '"' +
               ' data-tool-use-id="' + escapeHtml(toolId) + '"' +
               ' data-expand-kind="tool-card"' +
               ' data-expand-key="' + escapeHtml(askExpandKey) + '">' +
-              '<div class="tool-use-header" data-tool-toggle onclick="__tcToggle(event,this)">' +
+              '<button data-antd-control type="button" class="chat-tool-header" aria-expanded="' + (askShouldExpand ? 'true' : 'false') + '" data-tool-toggle onclick="__tcToggle(event,this)">' +
                 '<span class="tool-use-icon">' + (isAnswered
                   ? iconSvg("check", { size: 13, strokeWidth: 2 })
                   : iconSvg("question", { size: 13, strokeWidth: 1.8 })) + '</span>' +
@@ -3898,8 +3814,8 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
                 headerSummary +
                 answeredSummary +
                 '<span class="tool-use-toggle">▼</span>' +
-              '</div>' +
-              '<div class="tool-use-body ask-user-body">' +
+              '</button>' +
+              '<div class="chat-tool-body ask-user-body">' +
                 questionsHtml +
                 actionsHtml +
               '</div>' +
@@ -3910,21 +3826,11 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         // ── Default card rendering for: Agent, Task, TodoWrite, NotebookEdit, Exit, and unknown tools
         var description = block.description || (block.input && block.input.description) || "";
         var summary = generateInputSummary(block.name, block.input);
-        var titleText = "";
-        var subtitleHtml = "";
-        if (description) {
-          titleText = description.length > 80 ? description.slice(0, 77) + "..." : description;
-          if (fileInfo) {
-            subtitleHtml = '<span class="tool-use-file">' + escapeHtml(fileInfo) + '</span>';
-          }
-        } else {
-          titleText = getToolDisplayName(toolName);
-          if (fileInfo) {
-            subtitleHtml = '<span class="tool-use-file">' + escapeHtml(fileInfo) + '</span>';
-          }
-          if (summary) {
-            subtitleHtml += '<span class="tool-use-summary">' + escapeHtml(summary) + '</span>';
-          }
+        // Tool identity is the title; a long description must never become a heading.
+        var titleText = getToolDisplayName(toolName);
+        var subtitleHtml = fileInfo ? '<span class="tool-use-file">' + escapeHtml(fileInfo) + '</span>' : "";
+        if (summary || description) {
+          subtitleHtml += '<span class="tool-use-summary">' + escapeHtml(truncateInline(summary || description, 160)) + '</span>';
         }
         var fullJson = block.input ? JSON.stringify(block.input, null, 2) : "{}";
         var statusClass = "loading";
@@ -3959,10 +3865,10 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         var expandKey = buildExpandKey("tool-card", [messageKey, toolId]);
         var persistedExpanded = getPersistedExpandState(expandKey);
         var cardDefaultExpand = getCardDefault("editCards");
-        var shouldExpand = opts.forceExpandedToolBodies ? true : resolveCardExpanded(persistedExpanded, opts, index, cardDefaultExpand);
+        var shouldExpand = resolveCardExpanded(persistedExpanded, opts, index, cardDefaultExpand);
         // 带图片的工具卡默认展开：折叠会把整块 body（含缩略图）藏掉，
         // 与「图片直接展示」的诉求冲突。
-        if (!opts.forceExpandedToolBodies && toolResult && extractToolResultImages(toolResult.content).length > 0) {
+        if (toolResult && extractToolResultImages(toolResult.content).length > 0) {
           shouldExpand = true;
         }
         var tcTruncated = toolResult && toolResult._truncated === true;
@@ -3977,15 +3883,15 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           '</div>';
         }
 
-        return '<div class="tool-use-card ' + statusClass + collapsedClass + '" data-expand-kind="tool-card" data-expand-key="' + escapeHtml(expandKey) + '" data-tool-use-id="' + escapeHtml(toolId) + '"' + (tcTruncated ? ' data-truncated="true"' : '') + '>' +
-          '<div class="tool-use-header" role="button" tabindex="0" aria-expanded="' + (shouldExpand ? 'true' : 'false') + '" data-tool-toggle onclick="__tcToggle(event,this)" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();__tcToggle(event,this);}">' +
+        return '<div class="chat-tool-card ' + statusClass + collapsedClass + '" data-expand-kind="tool-card" data-expand-key="' + escapeHtml(expandKey) + '" data-tool-use-id="' + escapeHtml(toolId) + '"' + (tcTruncated ? ' data-truncated="true"' : '') + '>' +
+          '<button data-antd-control type="button" class="chat-tool-header" aria-expanded="' + (shouldExpand ? 'true' : 'false') + '" data-tool-toggle onclick="__tcToggle(event,this)">' +
             '<span class="tool-use-icon">' + headerIcon + '</span>' +
             '<span class="tool-use-name">' + escapeHtml(titleText) + '</span>' +
             subtitleHtml +
             toggleHtml +
-          '</div>' +
+          '</button>' +
           renderToolPreview(block, toolResult) +
-          '<div class="tool-use-body" aria-hidden="' + (shouldExpand ? 'false' : 'true') + '">' +
+          '<div class="chat-tool-body" aria-hidden="' + (shouldExpand ? 'false' : 'true') + '">' +
             (description ? '<div class="tool-use-meta"><span class="tool-use-meta-label">工具：</span>' + escapeHtml(toolName) + '</div>' : '') +
             '<pre class="tool-use-content">' + escapeHtml(fullJson) + '</pre>' +
             (resultHtml ? '<div class="tool-use-result">' + resultHtml + '</div>' : '') +
@@ -4141,424 +4047,6 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
 
         // Return plain text — renderChatMessage will handle markdown rendering
         return deduped.join(newline);
-      }
-
-      function parseMarkdownTables(source) {
-        var NL = "\n";
-        var lines = source.split(NL);
-        var out = [];
-        var i = 0;
-
-        function splitRow(line) {
-          var s = line.trim();
-          if (s.charAt(0) === "|") s = s.slice(1);
-          if (s.charAt(s.length - 1) === "|") s = s.slice(0, -1);
-          return s.split("|");
-        }
-        function styleAttr(a) { return a ? ' style="text-align:' + a + '"' : ""; }
-        function buildTable(headers, aligns, rows) {
-          var thead = "<thead><tr>" + headers.map(function(c, idx) {
-            return "<th" + styleAttr(aligns[idx]) + ">" + c.trim() + "</th>";
-          }).join("") + "</tr></thead>";
-          var tbody = rows.length ? ("<tbody>" + rows.map(function(r) {
-            return "<tr>" + r.map(function(c, idx) {
-              return "<td" + styleAttr(aligns[idx]) + ">" + c.trim() + "</td>";
-            }).join("") + "</tr>";
-          }).join("") + "</tbody>") : "";
-          return '<div class="md-table-wrap"><table class="md-table">' + thead + tbody + "</table></div>";
-        }
-
-        while (i < lines.length) {
-          var header = lines[i];
-          if (header.indexOf("|") !== -1 && i + 1 < lines.length) {
-            var sep = lines[i + 1].trim();
-            if (/^\|?\s*:?-+:?(\s*\|\s*:?-+:?)+\s*\|?$/.test(sep)) {
-              var headers = splitRow(header);
-              var aligns = splitRow(sep).map(function(c) {
-                var t = c.trim();
-                var L = t.charAt(0) === ":";
-                var R = t.charAt(t.length - 1) === ":";
-                if (L && R) return "center";
-                if (R) return "right";
-                if (L) return "left";
-                return "";
-              });
-              var rows = [];
-              var j = i + 2;
-              while (j < lines.length) {
-                var trimmed = lines[j].trim();
-                if (!trimmed || trimmed.indexOf("|") === -1) break;
-                rows.push(splitRow(lines[j]));
-                j += 1;
-              }
-              out.push("", buildTable(headers, aligns, rows), "");
-              i = j;
-              continue;
-            }
-          }
-          out.push(header);
-          i += 1;
-        }
-        return out.join(NL);
-      }
-
-      function renderMarkdown(text) {
-        if (!text) return "";
-
-        var markdownLinks = [];
-        var result = escapeHtml(stashMarkdownLinks(String(text)));
-        var bt = String.fromCharCode(96);
-        var newline = String.fromCharCode(10);
-        // 代码块内部的换行用 \x01 占位：下面的行首规则（- / * / # / > / 1.）和
-        // 表格解析都按行处理，如果代码行参与其中，`# 注释`、`- 旧行` 这类
-        // 常见代码行会被改写成标题、列表、引用。渲染完成前再换回真换行。
-        var codeNewline = String.fromCharCode(1);
-
-        function serverFilePathFromLink(target) {
-          var value = String(target || "").trim();
-          if (!value) return null;
-          if (value.charAt(0) === "<" && value.charAt(value.length - 1) === ">") {
-            value = value.slice(1, -1).trim();
-          }
-          if (/^file:\/\//i.test(value)) {
-            try {
-              var fileUrl = new URL(value);
-              if (fileUrl.protocol !== "file:") return null;
-              value = decodeURIComponent(fileUrl.pathname || "");
-            } catch (_) {
-              value = value.replace(/^file:\/\/(?:localhost)?/i, "");
-              try { value = decodeURIComponent(value); } catch (_) {}
-            }
-          } else if (value.charAt(0) !== "/" || value.indexOf("//") === 0) {
-            return null;
-          }
-          if (/^\/(?:api|android|macos)(?:\/|$)/.test(value)) return null;
-          value = value.replace(/#L\d+(?:C\d+)?$/i, "");
-          value = value.replace(/:\d+(?::\d+)?$/, "");
-          return value.charAt(0) === "/" ? value : null;
-        }
-
-        function localFilePreviewAnchor(value, label) {
-          var href = localFilePreviewHref(value);
-          if (!href) return label;
-          return '<a class="local-preview-link" href="' + escapeHtml(href) + '"' +
-            ' data-local-preview-url="' + escapeHtml(value) + '"' +
-            ' onclick="if(window.__openLocalPreview){event.preventDefault();window.__openLocalPreview(this.getAttribute(\'data-local-preview-url\'));}">' +
-            label + '</a>';
-        }
-
-        function localPreviewAnchor(value, label) {
-          var href = localHttpPreviewHref(value);
-          if (!href) return label;
-          return '<a class="local-preview-link" href="' + escapeHtml(href) + '"' +
-            ' data-local-preview-url="' + escapeHtml(value) + '"' +
-            ' onclick="if(window.__openLocalPreview){event.preventDefault();window.__openLocalPreview(this.getAttribute(\'data-local-preview-url\'));}">' +
-            label + '</a>';
-        }
-
-        function safeExternalLink(target, label) {
-          var value = String(target || "").trim();
-          if (value.charAt(0) === "<" && value.charAt(value.length - 1) === ">") {
-            value = value.slice(1, -1).trim();
-          }
-          if (!/^(?:https?:\/\/|mailto:|#)/i.test(value)) return label;
-          if (localHttpPreviewHref(value)) return localPreviewAnchor(value, label);
-          var escapedTarget = escapeHtml(value);
-          var opensNewWindow = /^https?:\/\//i.test(value);
-          return '<a href="' + escapedTarget + '"' +
-            (opensNewWindow ? ' target="_blank"' : "") +
-            ' rel="noopener">' + label + '</a>';
-        }
-
-        function autoLinkLocalHttp(source) {
-          // Wand message text is already escaped here. The prefix excludes URL
-          // attributes and existing data attributes, so this only turns bare
-          // loopback URLs into clickable preview links.
-          return source.replace(
-            /(^|[^"'>])(https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/[^\s<>"'`\\]*)?)/gi,
-            function(_all, prefix, value) {
-              return prefix + localPreviewAnchor(value, value);
-            }
-          );
-        }
-
-        function stashMarkdownLinks(source) {
-          function findTargetEnd(start) {
-            if (source.charAt(start) === "<") {
-              var closeAngle = source.indexOf(">", start + 1);
-              return closeAngle >= 0 && source.charAt(closeAngle + 1) === ")" ? closeAngle + 1 : -1;
-            }
-            var depth = 0;
-            for (var i = start; i < source.length; i += 1) {
-              if (source.charAt(i) === "\\") {
-                i += 1;
-                continue;
-              }
-              if (source.charAt(i) === "(") depth += 1;
-              else if (source.charAt(i) === ")") {
-                if (depth === 0) return i;
-                depth -= 1;
-              }
-            }
-            return -1;
-          }
-
-          var output = "";
-          var cursor = 0;
-          var inFence = false;
-          var inInlineCode = false;
-          while (cursor < source.length) {
-            if (source.slice(cursor, cursor + 3) === "```") {
-              inFence = !inFence;
-              output += "```";
-              cursor += 3;
-              continue;
-            }
-            if (!inFence && source.charAt(cursor) === "`") {
-              inInlineCode = !inInlineCode;
-              output += "`";
-              cursor += 1;
-              continue;
-            }
-            if (!inFence && !inInlineCode && source.charAt(cursor) === "[" && source.charAt(cursor - 1) !== "!") {
-              var closeText = source.indexOf("](", cursor + 1);
-              var closeTarget = closeText >= 0 ? findTargetEnd(closeText + 2) : -1;
-              if (closeText > cursor + 1 && closeTarget > closeText + 2) {
-                var label = escapeHtml(source.slice(cursor + 1, closeText));
-                var target = source.slice(closeText + 2, closeTarget).trim();
-                var serverPath = serverFilePathFromLink(target);
-                var linkHtml;
-                if (serverPath && /\.(?:html?|)$/i.test(serverPath)) {
-                  linkHtml = localFilePreviewAnchor(serverPath, label);
-                } else if (serverPath) {
-                  var rawUrl = "/api/file-raw?download=1&amp;path=" + encodeURIComponent(serverPath);
-                  linkHtml = '<a class="server-file-link" href="' + rawUrl + '" data-server-file-path="' +
-                    escapeHtml(serverPath) + '" title="打开或下载服务端文件" onclick="if(window.__openFilePreview){event.preventDefault();window.__openFilePreview(this.getAttribute(\'data-server-file-path\'));}">' +
-                    label + '</a>';
-                } else {
-                  linkHtml = safeExternalLink(target, label);
-                }
-                var token = "WANDMARKDOWNLINKTOKEN" + markdownLinks.length + "END";
-                markdownLinks.push(linkHtml);
-                output += token;
-                cursor = closeTarget + 1;
-                continue;
-              }
-            }
-            output += source.charAt(cursor);
-            cursor += 1;
-          }
-          return output;
-        }
-
-        function restoreMarkdownLinks(source) {
-          for (var i = 0; i < markdownLinks.length; i += 1) {
-            source = source.split("WANDMARKDOWNLINKTOKEN" + i + "END").join(markdownLinks[i]);
-          }
-          return source;
-        }
-
-        function replacePair(source, marker, openTag, closeTag) {
-          var cursor = 0;
-          while (true) {
-            var start = source.indexOf(marker, cursor);
-            if (start === -1) break;
-            var end = source.indexOf(marker, start + marker.length);
-            if (end === -1) break;
-            var inner = source.slice(start + marker.length, end);
-            if (!inner) {
-              cursor = end + marker.length;
-              continue;
-            }
-            var replacement = openTag + inner + closeTag;
-            source = source.slice(0, start) + replacement + source.slice(end + marker.length);
-            cursor = start + replacement.length;
-          }
-          return source;
-        }
-
-        function isWordChar(code) {
-          return (code >= 48 && code <= 57) ||
-            (code >= 65 && code <= 90) ||
-            (code >= 97 && code <= 122) ||
-            code === 95;
-        }
-
-        function replaceUnderscoreEmphasis(source, openTag, closeTag) {
-          var cursor = 0;
-          while (cursor < source.length) {
-            var start = source.indexOf("_", cursor);
-            if (start === -1) break;
-            var leftCode = start > 0 ? source.charCodeAt(start - 1) : 0;
-            if (isWordChar(leftCode)) {
-              cursor = start + 1;
-              continue;
-            }
-            var searchFrom = start + 1;
-            var end = -1;
-            while (searchFrom < source.length) {
-              var candidate = source.indexOf("_", searchFrom);
-              if (candidate === -1) break;
-              var rightIdx = candidate + 1;
-              var rightCode = rightIdx < source.length ? source.charCodeAt(rightIdx) : 0;
-              if (!isWordChar(rightCode)) {
-                end = candidate;
-                break;
-              }
-              searchFrom = candidate + 1;
-            }
-            if (end === -1) break;
-            var inner = source.slice(start + 1, end);
-            if (!inner) {
-              cursor = end + 1;
-              continue;
-            }
-            var replacement = openTag + inner + closeTag;
-            source = source.slice(0, start) + replacement + source.slice(end + 1);
-            cursor = start + replacement.length;
-          }
-          return source;
-        }
-
-        function replaceLinePrefix(source, marker, openTag, closeTag) {
-          return source.split(newline).map(function(line) {
-            if (line.indexOf(marker) !== 0) return line;
-            return openTag + line.slice(marker.length) + closeTag;
-          }).join(newline);
-        }
-
-        function replaceOrderedList(source) {
-          return source.split(newline).map(function(line) {
-            var dotIndex = line.indexOf('. ');
-            if (dotIndex <= 0) return line;
-            for (var i = 0; i < dotIndex; i += 1) {
-              var code = line.charCodeAt(i);
-              if (code < 48 || code > 57) return line;
-            }
-            return '<li>' + line.slice(dotIndex + 2) + '</li>';
-          }).join(newline);
-        }
-
-        function wrapParagraphs(source) {
-          return source.split(newline + newline).map(function(part) {
-            var block = part.trim();
-            if (!block) return "";
-            if (block.indexOf("<div") === 0 || block.indexOf("<h1") === 0 || block.indexOf("<h2") === 0 || block.indexOf("<h3") === 0 || block.indexOf("<h4") === 0 || block.indexOf("<h5") === 0 || block.indexOf("<h6") === 0 || block.indexOf("<ul") === 0 || block.indexOf("<ol") === 0 || block.indexOf("<li") === 0 || block.indexOf("<blockquote") === 0 || block.indexOf("<pre") === 0) {
-              return block;
-            }
-            return '<p>' + block.split(newline).join('<br>') + '</p>';
-          }).join("");
-        }
-
-        var pos = 0;
-        while (true) {
-          var start = result.indexOf(bt + bt + bt, pos);
-          if (start === -1) break;
-          var endTag = result.indexOf(bt + bt + bt, start + 3);
-          if (endTag === -1) break;
-
-          var codeBlock = result.slice(start + 3, endTag);
-          var langLineEnd = codeBlock.indexOf(newline);
-          var lang = "";
-          var code = codeBlock;
-          if (langLineEnd !== -1 && langLineEnd < 30) {
-            var potentialLang = codeBlock.slice(0, langLineEnd).trim();
-            var isSimpleLang = potentialLang.length > 0;
-            for (var j = 0; j < potentialLang.length; j += 1) {
-              var langCode = potentialLang.charCodeAt(j);
-              var isDigit = langCode >= 48 && langCode <= 57;
-              var isUpper = langCode >= 65 && langCode <= 90;
-              var isLower = langCode >= 97 && langCode <= 122;
-              if (!isDigit && !isUpper && !isLower) {
-                isSimpleLang = false;
-                break;
-              }
-            }
-            if (isSimpleLang) {
-              lang = potentialLang;
-              code = codeBlock.slice(langLineEnd + 1);
-            }
-          }
-
-          var highlighted = highlightCode(code.trim(), lang);
-          var protectedHighlighted = highlighted.replace(/\n/g, codeNewline).replace(/_/g, '&#95;').replace(/\*/g, '&#42;');
-          // 没有语言标注时留空占位（header 靠 flex 两端对齐把「复制」推到右侧），
-          // 不要写 "code" 这个假语言名。
-          var replacement = '<div class="code-block">' +
-            '<div class="code-block-header">' +
-              '<span class="code-lang">' + (lang ? escapeHtml(lang) : "") + '</span>' +
-              '<button class="code-copy">复制</button>' +
-            '</div>' +
-            '<pre><code>' + protectedHighlighted + '</code></pre>' +
-          '</div>';
-          result = result.slice(0, start) + replacement + result.slice(endTag + 3);
-          pos = start + replacement.length;
-        }
-
-        pos = 0;
-        while (true) {
-          var inlineStart = result.indexOf(bt, pos);
-          if (inlineStart === -1) break;
-          var inlineEnd = result.indexOf(bt, inlineStart + 1);
-          if (inlineEnd === -1) break;
-          if (inlineEnd === inlineStart + 1) {
-            pos = inlineEnd + 1;
-            continue;
-          }
-          var inlineCode = result.slice(inlineStart + 1, inlineEnd);
-          var protectedInlineCode = inlineCode.replace(/_/g, '&#95;').replace(/\*/g, '&#42;');
-          var inlineReplacement = '<code class="code-inline">' + protectedInlineCode + '</code>';
-          result = result.slice(0, inlineStart) + inlineReplacement + result.slice(inlineEnd + 1);
-          pos = inlineStart + inlineReplacement.length;
-        }
-
-        result = replacePair(result, "**", '<strong>', '</strong>');
-        result = replacePair(result, "*", '<em>', '</em>');
-        result = replaceUnderscoreEmphasis(result, '<em>', '</em>');
-        // 内容区标题整体下移一级：一屏的最高级标题（h1）属于页面本身
-        // （面包屑末段 / 对话框标题），气泡里的 `# ` 不能再占 h1。
-        // 三档各自有独立字号：styles.css 给 .markdown-content 定义了
-        // h1 17.5 / h2 15.4 / h3 14 / h4 13.3，所以 `### ` 用真 h4，不需要 aria-level。
-        result = replaceLinePrefix(result, "### ", '<h4>', '</h4>');
-        result = replaceLinePrefix(result, "## ", '<h3>', '</h3>');
-        result = replaceLinePrefix(result, "# ", '<h2>', '</h2>');
-        result = replaceLinePrefix(result, "&gt; ", '<blockquote>', '</blockquote>');
-        result = replaceLinePrefix(result, "- ", '<li>', '</li>');
-        result = replaceLinePrefix(result, "* ", '<li>', '</li>');
-        result = replaceOrderedList(result);
-        result = parseMarkdownTables(result);
-
-        var lines = result.split(newline);
-        var grouped = [];
-        var listBuffer = [];
-
-        function flushListBuffer() {
-          if (!listBuffer.length) return;
-          grouped.push('<ul>' + listBuffer.join("") + '</ul>');
-          listBuffer = [];
-        }
-
-        lines.forEach(function(line) {
-          if (line.indexOf('<li>') === 0 && line.lastIndexOf('</li>') === line.length - 5) {
-            listBuffer.push(line);
-            return;
-          }
-          flushListBuffer();
-          grouped.push(line);
-        });
-        flushListBuffer();
-
-        result = wrapParagraphs(grouped.join(newline));
-        result = autoLinkLocalHttp(result);
-        result = restoreMarkdownLinks(result);
-        return '<div class="markdown-content">' + result.split(codeNewline).join(newline) + '</div>';
-      }
-
-      function highlightCode(code, lang) {
-        // 入参已由 renderMarkdown 顶部的 escapeHtml 处理过。这里再转义一次会让
-        // 代码里的 & 和尖括号变成第二层 HTML 实体，屏幕上和「复制」出来的都不对。
-        // 真正接语法高亮时，标注必须建立在「已转义文本」之上，不能重新转义。
-        return code;
       }
 
       export function shortCommand(cmd) {

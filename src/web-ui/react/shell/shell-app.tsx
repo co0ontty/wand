@@ -1,4 +1,8 @@
 import * as React from "react";
+import { EmployeeProfileHost } from "../agents/employee-profile";
+import { Layout } from "antd";
+import { WandUiProvider } from "../theme";
+import { installSidebarStyles } from "./sidebar-styles";
 
 import { ShellMainContent, type ShellMainContentRefs } from "./shell-main-content";
 import { ShellSidebar } from "./shell-sidebar";
@@ -33,22 +37,26 @@ export function getShellLayoutClassName(layout: Readonly<ShellLayoutState>): str
 function ShellAppFrame({ legacyRefs }: ShellAppFrameProps = {}) {
   const snapshot = useUiStoreSnapshot();
   return (
-    <div className="app-container">
-      <div className={getShellLayoutClassName(snapshot.layout.sidebarDrawer
+    <Layout className="app-container" style={{ position: "fixed", top: "var(--app-viewport-top, 0px)", left: 0, right: 0, height: "var(--app-viewport-height, 100dvh)", overflow: "hidden", paddingTop: "var(--wand-safe-top, 0px)", paddingBottom: "var(--wand-safe-bottom, 0px)" }}>
+      <Layout hasSider className={getShellLayoutClassName(snapshot.layout.sidebarDrawer
         ? { ...snapshot.layout, sidebarAnchored: false, sidebarCollapsed: false }
-        : snapshot.layout)}>
+        : snapshot.layout)} style={{ height: "100%", minHeight: 0 }}>
         <ShellSidebar/>
         <ShellMainContent legacyRefs={legacyRefs}/>
-      </div>
-    </div>
+        <EmployeeProfileHost mobile={snapshot.viewport.mobile}/>
+      </Layout>
+    </Layout>
   );
 }
 
 /** Stable shell composition boundary used by the browser migration adapter. */
 export function ShellApp({ store, legacyRefs }: ShellAppProps) {
+  React.useLayoutEffect(() => installSidebarStyles(), []);
   return (
-    <UiStoreProvider store={store}>
-      <ShellAppFrame legacyRefs={legacyRefs}/>
-    </UiStoreProvider>
+    <WandUiProvider>
+      <UiStoreProvider store={store}>
+        <ShellAppFrame legacyRefs={legacyRefs}/>
+      </UiStoreProvider>
+    </WandUiProvider>
   );
 }

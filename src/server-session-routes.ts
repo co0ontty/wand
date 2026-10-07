@@ -7,6 +7,9 @@ import { WandStorage } from "./storage.js";
 import { ExecutionMode, InputRequest, ProcessEvent, ResizeRequest, SessionProvider, SessionRunner, SessionSnapshot, SessionSource, ToolResultBlock, ToolUseBlock, WandConfig } from "./types.js";
 import { getDefaultModelForProvider, isExecutionMode } from "./config.js";
 import { defaultRoleForCli } from "./default-employee.js";
+import { defaultModelGroupSelector } from "./model-groups.js";
+
+import { inspectPiExecution } from "./pi-execution.js";
 import { alignedBlockStart, blockWindowMessagesForTransport, compactToolMessagesForTransport, sliceTurnBlocksForTransport, truncateMessagesForTransport, visibleBlockCount, windowMessagesForTransport } from "./message-truncator.js";
 import { toSessionDetailDTO, toSessionListItemDTO } from "./session-transport.js";
 import {
@@ -44,9 +47,13 @@ import { parseBoundedInteger } from "./request-limits.js";
 import { asyncRoute } from "./express-async.js";
 import { sendRouteError } from "./server-request.js";
 import { registerStructuredResumeRoutes } from "./server-resume-routes.js";
-import { addHiddenSessionIds, removeHiddenSessionIds, SessionRegistry } from "./session-registry.js";
+import { addHiddenSessionIds, deleteProviderNativeHistory, type ProviderHistoryDeleter, removeHiddenSessionIds, SessionRegistry } from "./session-registry.js";
 import { enrichStructuredMessages, WAND_PROTOCOL_VERSION } from "./structured-client-protocol.js";
 import { asRecord, isStructuredImagePart } from "./structured-content.js";
+import { installedPiExtensions } from "./pi-extension-resources.js";
+import { registerPiRecommendationRoute, type PiRecommendationRuntime } from "./server-pi-recommendation-routes.js";
+import { discoverPiResources, resolvePiResourceSelection } from "./pi-resource-catalog.js";
+import { effectivePiSessionSettings, patchPiSessionSettings, type PiSettingsControls, type PiSettingsResponse } from "./pi-session-settings.js";
 import {
   buildDirectoryTree,
   normalizeSessionDirectory,
@@ -173,9 +180,7 @@ function getInputDebugMeta(error: unknown) {
 type SessionDeletionProcesses = Pick<
   ProcessManager,
   "get" | "delete"
-  | "deleteClaudeHistoryFiles" | "deleteCodexHistoryFiles"
-  | "deleteOpenCodeHistorySessions" | "deleteQoderHistoryFiles"
->;
+> & ProviderHistoryDeleter;
 
 type SessionDeletionStructured = Pick<StructuredSessionManager, "get" | "delete">;
 
@@ -206,20 +211,7 @@ export function deleteSessionWithProviderHistory(
     ?? inferProviderFromCommand(snapshot.command)
     ?? "claude";
 
-  if (provider === "claude") {
-    processes.deleteClaudeHistoryFiles([{
-      claudeSessionId: providerSessionId,
-      cwd: snapshot.cwd,
-    }]);
-  } else if (provider === "codex") {
-    processes.deleteCodexHistoryFiles([providerSessionId]);
-  } else if (provider === "opencode") {
-    processes.deleteOpenCodeHistorySessions([providerSessionId]);
-  } else if (provider === "qoder") {
-    processes.deleteQoderHistoryFiles([providerSessionId]);
-  } else {
-    return;
-  }
+  deleteProviderNativeHistory(processes, provider, providerSessionId, snapshot.cwd);
 
   // History deletion is intentionally best-effort at the filesystem layer.
   // Keep a tombstone as a fallback for permission errors or process tail writes.
@@ -459,6 +451,36 @@ async function startResumedPtySession(
   });
 }
 
+/** 取消归档后，用原来的 Wand 会话 ID 把终端拉起来；有 provider session id 就续接那次对话。 */
+async function restoreArchivedSession(
+  sessions: SessionRegistry,
+  processes: ProcessManager,
+  storage: WandStorage,
+  sessionId: string,
+  defaultMode: ExecutionMode,
+): Promise<SessionSnapshot | null> {
+  const existing = sessions.get(sessionId) ?? storage.getSession(sessionId);
+  if (!existing) return null;
+  const cleared = sessions.setArchived(sessionId, false);
+  if (!cleared) return null;
+  if ((existing.sessionKind ?? "pty") !== "pty" || cleared.status === "running") return cleared;
+  const command = existing.command.trim();
+  if (!command) return cleared;
+  const provider = existing.provider ?? inferProviderFromCommand(command) ?? undefined;
+  if (existing.claudeSessionId && provider && isPtyProviderCommand(provider, command)) {
+    return startResumedPtySession(processes, storage, { ...existing, ...cleared }, sessionId, defaultMode, {});
+  }
+  return processes.start(command, existing.cwd, parseExecutionMode(existing.mode, defaultMode), undefined, {
+    reuseId: sessionId,
+    provider,
+    model: existing.selectedModel ?? undefined,
+    thinkingEffort: existing.thinkingEffort ?? undefined,
+    systemPrompt: existing.systemPrompt ?? undefined,
+    workspaceId: existing.workspaceId,
+    workspaceTaskId: existing.workspaceTaskId,
+  });
+}
+
 function getAutoResumeInitialInput(
   snapshot: SessionSnapshot | null,
   input: string,
@@ -505,7 +527,9 @@ export function registerSessionRoutes(
   sessions: SessionRegistry,
   onSessionCreated?: (cwd: string | undefined | null) => void,
   onCompletionViewed?: (event: ProcessEvent) => void,
+  decisions?: PiRecommendationRuntime,
 ): void {
+  registerPiRecommendationRoute(app, { structured, sessions, config, decisions });
   const wantsCompactTools = (req: Request): boolean =>
     req.get("X-Wand-Tool-Projection") === "compact" || req.query.compactTools === "1";
 
@@ -613,7 +637,7 @@ export function registerSessionRoutes(
   });
 
   app.post("/api/structured-sessions", asyncRoute(async (req, res) => {
-    const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; provider?: string; worktreeEnabled?: boolean; model?: string; thinkingEffort?: string; sessionSource?: unknown; automationId?: unknown; workspaceId?: string; workspaceTaskId?: string; respondImmediately?: unknown; systemPrompt?: string; employeeId?: unknown; teamId?: unknown; kind?: unknown; subject?: { type?: unknown } };
+    const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; provider?: string; worktreeEnabled?: boolean; model?: string; thinkingEffort?: string; sessionSource?: unknown; automationId?: unknown; workspaceId?: string; workspaceTaskId?: string; respondImmediately?: unknown; systemPrompt?: string; employeeId?: unknown; teamId?: unknown; kind?: unknown; subject?: { type?: unknown }; overrideCli?: unknown };
     try {
       if (body.teamId !== undefined || body.subject?.type === "team") {
         throw new Error("AI 团队请通过团队开工入口创建群聊。");
@@ -630,11 +654,15 @@ export function registerSessionRoutes(
       if (employeeId && (!employee || employee.archivedAt)) throw new Error("硅基员工不存在或已归档。");
       const selectedEmployeeCandidate = employee ? selectEmployeeCandidate(employee) : null;
       const employeeAgent = selectedEmployeeCandidate?.agent;
-      if (!employee && body.provider && !isSessionProvider(body.provider)) {
+      if (body.provider && !isSessionProvider(body.provider)) {
         res.status(400).json({ error: "结构化会话当前仅支持 Claude、Codex、OpenCode、Grok、Qoder、Pi 或 Gemini provider。" });
         return;
       }
-      const provider: SessionProvider = employeeAgent?.provider
+      const overrideCli = body.overrideCli === true;
+      const rawProvider = typeof body.provider === "string" ? body.provider.trim() : "";
+      const requestedProvider = overrideCli && isSessionProvider(rawProvider) ? rawProvider : null;
+      const provider: SessionProvider = requestedProvider
+        ?? employeeAgent?.provider
         ?? (isSessionProvider(body.provider) ? body.provider : config.defaultProvider ?? "claude");
       const rawModel = typeof body.model === "string" ? body.model.trim() : "";
       const origin = parseSessionCreationOrigin(body);
@@ -645,15 +673,19 @@ export function registerSessionRoutes(
       const cwd = resolveSessionCwd(body.cwd, config.defaultCwd);
       const snapshot = structured.createSession({
         cwd,
-        mode: employeeAgent?.mode ?? parseExecutionMode(body.mode, defaultMode),
+        mode: (requestedProvider && body.mode ? parseExecutionMode(body.mode, defaultMode) : null)
+          ?? employeeAgent?.mode
+          ?? parseExecutionMode(body.mode, defaultMode),
         provider,
         // Omit runner to let StructuredSessionManager apply the configured
         // Claude default; explicit values are validated against the provider.
-        runner: employee ? undefined : body.runner,
+        runner: employee && !requestedProvider ? undefined : body.runner,
         worktreeEnabled: body.worktreeEnabled === true,
-        model: employeeAgent
-          ? employeeAgent.model === "default" ? getDefaultModelForProvider(config, provider) || undefined : employeeAgent.model
-          : rawModel || getDefaultModelForProvider(config, provider) || undefined,
+        model: rawModel && rawModel !== "default"
+          ? rawModel
+          : (employeeAgent && !requestedProvider
+              ? employeeAgent.model === "default" ? defaultModelGroupSelector(config.modelGroups, provider, getDefaultModelForProvider(config, provider)) || getDefaultModelForProvider(config, provider) || undefined : employeeAgent.model
+              : rawModel || defaultModelGroupSelector(config.modelGroups, provider, getDefaultModelForProvider(config, provider)) || getDefaultModelForProvider(config, provider) || undefined),
         thinkingEffort: employeeAgent?.thinkingEffort ?? (typeof body.thinkingEffort === "string"
           ? (body.thinkingEffort as SessionSnapshot["thinkingEffort"])
           : config.defaultThinkingEffort),
@@ -665,7 +697,7 @@ export function registerSessionRoutes(
         employeeName: role?.name,
         employeeAvatar: role?.avatar,
         employeeCandidates: employee?.agents,
-        employeeCandidateIndex: selectedEmployeeCandidate?.index,
+        employeeCandidateIndex: requestedProvider ? undefined : selectedEmployeeCandidate?.index,
         ...origin,
       });
       onSessionCreated?.(snapshot.cwd);
@@ -719,6 +751,96 @@ export function registerSessionRoutes(
       sendRouteError(res, error, "切换工具失败。");
     }
   });
+
+  const piSettingsResponse = async (id: string): Promise<PiSettingsResponse> => {
+    const { settings, resolution } = structured.getPiSettings(id);
+    const snapshot = structured.get(id)!;
+    const installed = await installedPiExtensions(config, snapshot.cwd);
+    const sdk = resolution.engine === "core";
+    const archived = snapshot.archived;
+    const modifiable = !archived;
+    const goalAvailable = installed.some((item) => item.goal);
+    const localDecisionAvailable = config.localDecision?.enabled === true;
+    const inventory = await discoverPiResources(config, snapshot.cwd);
+    const resourceCatalog = { ...inventory.catalog, supported: modifiable && !sdk && inventory.catalog.supported,
+      reason: archived ? "请先恢复已归档的会话。" : sdk ? "当前 SDK 候选尚不支持 Skills / MCP 会话选择。" : inventory.catalog.reason };
+    const controls: PiSettingsControls = {
+      // 基础工具与 CodeMode 在两种引擎下都能表达（CLI 通过 --tools 白名单）。
+      tools: modifiable,
+      codemode: modifiable,
+      codemodeOnly: modifiable && sdk,
+      codemodeOverride: modifiable && !sdk,
+      globalTools: modifiable,
+      goalMode: modifiable && goalAvailable,
+      localDecision: modifiable && localDecisionAvailable,
+      autoCompaction: modifiable && sdk,
+    };
+    const status = decisions?.status();
+    const recommendationAvailable = resourceCatalog.supported && settings.localDecision !== false
+      && status?.enabled === true && status.supported && status.configured;
+    const recommendationReason = !resourceCatalog.supported ? resourceCatalog.reason
+      : settings.localDecision === false ? "本会话已关闭本地决策。"
+      : !recommendationAvailable ? "本地决策未启用或运行环境不可用。" : "";
+    return { recommendationAvailable, recommendationReason,
+      autoResourcesAvailable: recommendationAvailable, autoResourcesReason: recommendationReason,
+      autoCodemodeAvailable: recommendationAvailable, skillLocksAvailable: resourceCatalog.supported,
+      settings: effectivePiSessionSettings(settings, resolution.engine), engine: resolution.engine,
+      available: sdk && modifiable, toolsAvailable: !sdk && modifiable,
+      reason: archived ? "请先恢复已归档的会话。" : resolution.reason,
+      goalAvailable, globalExtensions: [...new Set(installed.filter((item) => !item.goal).map((item) => item.name))],
+      localDecisionAvailable, controls, resourceCatalog };
+  };
+  const requirePiSession = (id: string): void => {
+    const owner = sessions.ownerOf(id);
+    if (!owner) throw Object.assign(new Error("未找到该会话。"), { status: 404 });
+    if (owner !== "structured" || structured.get(id)?.provider !== "pi") {
+      throw new Error("这些设置仅适用于 Pi 结构化会话，不会改变 PTY 或其他工具。");
+    }
+  };
+  app.get("/api/sessions/:id/pi-settings", asyncRoute(async (req, res) => {
+    try {
+      requirePiSession(req.params.id);
+      res.set("Cache-Control", "no-store");
+      res.json(await piSettingsResponse(req.params.id));
+    } catch (error) { sendRouteError(res, error, "读取 Pi 设置失败。", (error as { status?: number }).status ?? 400); }
+  }));
+  app.patch("/api/sessions/:id/pi-settings", asyncRoute(async (req, res) => {
+    try {
+      const id = req.params.id;
+      requirePiSession(id);
+      const { settings } = structured.getPiSettings(id);
+      const next = patchPiSessionSettings(settings, req.body);
+      if (req.body.autoResources === true) {
+        const capabilities = await piSettingsResponse(id);
+        const runtime = decisions?.status();
+        if (!capabilities.resourceCatalog?.supported || next.localDecision === false
+          || !runtime?.enabled || !runtime.supported || !runtime.configured) {
+          throw new Error(next.localDecision === false ? "本会话已关闭本地决策。"
+            : capabilities.autoResourcesReason || "自动选择暂不可用。");
+        }
+      }
+      if (req.body.resources !== undefined || req.body.lockedSkills !== undefined) {
+        const inventory = await discoverPiResources(config, structured.get(id)!.cwd);
+        // Removed resources may be retained only when already selected, so users can deselect stale
+        // items one at a time. Any NEW ID must resolve; the runner always revalidates the full list.
+        if (req.body.resources !== undefined) resolvePiResourceSelection(inventory, {
+          skills: next.resources!.skills.filter((id) => !settings.resources?.skills.includes(id)),
+          mcpServers: next.resources!.mcpServers.filter((id) => !settings.resources?.mcpServers.includes(id)),
+        });
+        if (req.body.lockedSkills !== undefined) resolvePiResourceSelection(inventory, {
+          skills: next.lockedSkills!.filter((id) => !settings.lockedSkills?.includes(id)), mcpServers: [],
+        });
+      }
+      if (next.goalMode && !settings.goalMode) {
+        const installed = await installedPiExtensions(config, structured.get(id)!.cwd);
+        if (!installed.some((item) => item.goal)) throw new Error("目标模式不可用：请先在 Pi 中安装并启用 pi-goal。");
+      }
+      structured.setPiSettings(id, req.body);
+      // 回复「实际生效」的设置（CLI 的 CodeMode 只归一到 off/on），不把存库原值当生效值展示。
+      const saved = structured.getPiSettings(id);
+      res.json({ settings: effectivePiSessionSettings(saved.settings, saved.resolution.engine) });
+    } catch (error) { sendRouteError(res, error, "保存 Pi 设置失败。", (error as { status?: number }).status ?? 400); }
+  }));
 
   app.post("/api/sessions/:id/model", (req, res) => {
     const body = req.body as { model?: string | null };
@@ -912,6 +1034,15 @@ export function registerSessionRoutes(
 
   // ── Tool content lazy-load endpoint ──
 
+  app.get("/api/sessions/:id/pi-execution/:toolUseId", asyncRoute(async (req, res) => {
+    const snapshot = sessions.get(req.params.id);
+    if (!snapshot) { res.status(404).json({ error: "未找到该会话。" }); return; }
+    const execution = await inspectPiExecution(snapshot.messages ?? [], req.params.toolUseId);
+    if (!execution) { res.status(404).json({ error: "未找到该 Pi 执行调用。" }); return; }
+    res.setHeader("Cache-Control", "no-store");
+    res.json(execution);
+  }));
+
   app.get("/api/sessions/:id/tool-content/:toolUseId", (req, res) => {
     const snapshot = sessions.get(req.params.id);
     if (!snapshot) {
@@ -1080,6 +1211,7 @@ export function registerSessionRoutes(
       autoMessage?: boolean; customMessage?: string; tag?: string; autoTag?: boolean; push?: boolean;
       submodule?: boolean; mode?: unknown; entryIds?: unknown; includeDiff?: boolean;
       archiveRelatedTasks?: boolean;
+      workspaceTaskId?: unknown;
     };
     try {
       const ai = resolveSystemAiContext(snapshot, config, storage.getSystemSiliconEmployee());
@@ -1107,7 +1239,10 @@ export function registerSessionRoutes(
         try {
           // A commit is already durable, even when push failed. Archiving must not turn that
           // successful commit into a retryable HTTP error (which would duplicate the commit).
-          archivedTaskIds = archiveCommitTasks(storage, snapshot, context.entryIds);
+          const openedTaskId = typeof body.workspaceTaskId === "string" ? body.workspaceTaskId.trim() : "";
+          archivedTaskIds = archiveCommitTasks(storage, snapshot, context.entryIds, {
+            workspaceTaskId: openedTaskId || null,
+          });
         } catch (error) {
           archiveError = getErrorMessage(error, "归档关联任务失败。");
           console.error("[QuickCommit] Failed to archive related tasks:", archiveError);
@@ -1569,7 +1704,8 @@ export function registerSessionRoutes(
     try {
       if (structured.get(sessionId)) {
         const completion = structured.sendMessage(sessionId, input);
-        if (body.respondImmediately === true) {
+        if (body.respondImmediately === true || (structured.get(sessionId)?.provider === "pi"
+          && structured.get(sessionId)?.piSettings?.autoResources === true)) {
           // sendMessage updates the canonical snapshot synchronously before it
           // starts awaiting the runner. Native clients should not hold this
           // request open for an entire model turn (which can exceed their HTTP
@@ -1728,7 +1864,7 @@ export function registerSessionRoutes(
     }
   });
 
-  // 归档 / 取消归档会话：只写标记，不杀终端、不删历史；保留期扫描再按 archivedAt 清理。
+  // 归档会停止会话，但保留 Wand 会话 ID 和 provider session id。恢复时用这个 ID 续上。
   app.post("/api/sessions/:id/archive", (req, res) => {
     try {
       const updated = sessions.setArchived(req.params.id, true);
@@ -1742,9 +1878,9 @@ export function registerSessionRoutes(
     }
   });
 
-  app.post("/api/sessions/:id/unarchive", (req, res) => {
+  app.post("/api/sessions/:id/unarchive", asyncRoute(async (req, res) => {
     try {
-      const updated = sessions.setArchived(req.params.id, false);
+      const updated = await restoreArchivedSession(sessions, processes, storage, req.params.id, defaultMode);
       if (!updated) {
         res.status(404).json({ error: "未找到该会话。" });
         return;
@@ -1753,10 +1889,10 @@ export function registerSessionRoutes(
     } catch (error) {
       sendRouteError(res, error, "无法恢复会话。");
     }
-  });
+  }));
 
   // 批量归档 / 恢复：与 /api/sessions/batch-delete 对称，返回失败项让客户端保留选择。
-  app.post("/api/sessions/batch-archive", (req, res) => {
+  app.post("/api/sessions/batch-archive", asyncRoute(async (req, res) => {
     const body = req.body as { sessionIds?: unknown; archived?: unknown } | null | undefined;
     const ids: string[] = Array.isArray(body?.sessionIds)
       ? body!.sessionIds.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)
@@ -1770,14 +1906,17 @@ export function registerSessionRoutes(
     let changed = 0;
     for (const id of ids) {
       try {
-        if (sessions.setArchived(id, archived)) changed += 1;
+        const updated = archived
+          ? sessions.setArchived(id, true)
+          : await restoreArchivedSession(sessions, processes, storage, id, defaultMode);
+        if (updated) changed += 1;
         else failed.push(id);
       } catch {
         failed.push(id);
       }
     }
     res.json({ ok: true, archived: changed, ...(failed.length > 0 ? { failed } : {}) });
-  });
+  }));
 
   app.delete("/api/sessions/:id", (req, res) => {
     try {

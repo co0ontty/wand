@@ -23,8 +23,8 @@ export {
  * 内置的「系统运维」员工。
  *
  * Wand 自己的 AI 调用（commit message / tag、提示词优化、会话与任务标题、
- * 员工起草）都由这位员工执行：名字、职责与人设写死在代码里，不可编辑、不可归档、
- * 不可删除；只有执行候选（CLI 工具 + 模型 + 思考深度，按顺序降级）由用户维护。
+ * 员工起草）都通过这位员工的 CLI 候选链执行：名字、职责与人设写死在代码里，不可编辑、不可归档、
+ * 不可删除；只有执行候选（CLI 工具 + 模型 + 思考深度，按顺序降级）由用户维护。候选中的 SDK 会被系统应用跳过。
  */
 export const SYSTEM_EMPLOYEE_DUTY = "Wand 系统运维：服务与 CLI 线路、更新分发、仓库与会话操作，Wand 自有 AI 任务的执行者。";
 
@@ -86,13 +86,17 @@ export function systemEmployeeDefinition(agents: WandTaskAgent[], now: string, e
   };
 }
 
+export function isSdkEmployeeAgent(agent: Pick<WandTaskAgent, "engine">): boolean {
+  return agent.engine === "sdk";
+}
+
 /**
- * 内部 AI 调用的 CLI 降级链：按用户设置的顺序，模型为空 / "default" 时跟随 provider 默认值。
+ * 系统应用只走员工的 CLI 渠道：员工候选里可以保存 SDK，但这里明确跳过。
  */
 export function systemEmployeeCliCandidates(employee: Pick<SiliconEmployee, "agents"> | null | undefined): AiCliCandidate[] {
   if (!employee) return [];
   return employee.agents
-    .filter((agent) => agent.kind === "structured")
+    .filter((agent) => agent.kind === "structured" && !isSdkEmployeeAgent(agent))
     .map((agent) => {
       const model = (agent.model ?? "").trim();
       return {

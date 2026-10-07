@@ -1,31 +1,19 @@
-/**
- * Compiles the Tailwind v4 + Appica UI entry (src/web-ui/css/appica.css) into
- * src/web-ui/content/tailwind.css.
- *
- * The output is a generated artifact consumed by src/web-ui/styles.ts, which
- * serves it before the hand-written content/styles.css. Do not edit the output
- * by hand. Uses the Tailwind CLI so the CSS pipeline matches what Appica
- * documents, instead of relying on unstable @tailwindcss/node internals.
+/** Build only the utilities/preflight still used by Wand's feature layouts.
+ * Ant Design/X install their own styles; no Appica CSS or token bridge is loaded.
  */
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const root = path.resolve(__dirname, "..");
-
-const entry = path.join(root, "src", "web-ui", "css", "appica.css");
-const outfile = path.join(root, "src", "web-ui", "content", "tailwind.css");
-const cli = path.join(root, "node_modules", "@tailwindcss", "cli", "dist", "index.mjs");
-
-const result = spawnSync(process.execPath, [cli, "-i", entry, "-o", outfile], {
-  cwd: root,
-  stdio: "inherit",
-});
-
-if (result.status !== 0) {
-  console.error("tailwind bundle failed");
-  process.exit(result.status ?? 1);
-}
-
-console.log(`tailwind bundle written to ${path.relative(root, outfile)}`);
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const temporary = mkdtempSync(path.join(tmpdir(), "wand-tailwind-"));
+const entry = path.join(temporary, "utilities.css");
+const outfile = path.join(root, "src/web-ui/content/tailwind.css");
+const cli = path.join(root, "node_modules/@tailwindcss/cli/dist/index.mjs");
+try {
+  writeFileSync(entry, `@import ${JSON.stringify(path.join(root, "node_modules/tailwindcss/index.css"))} source(none);\n@source ${JSON.stringify(path.join(root, "src/web-ui/react"))};\n@source ${JSON.stringify(path.join(root, "src/web-ui/browser"))};\n`);
+  const result = spawnSync(process.execPath, [cli, "-i", entry, "-o", outfile, "--minify"], { cwd: root, stdio: "inherit" });
+  if (result.status !== 0) throw new Error(`tailwind bundle failed (${result.status})`);
+} finally { rmSync(temporary, { recursive: true, force: true }); }
+console.log(`tailwind utilities written to ${path.relative(root, outfile)}`);

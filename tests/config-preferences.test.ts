@@ -201,6 +201,45 @@ test("new-session preferences reject unsupported values", () => {
   );
 });
 
+test("task retention preference updates live config and rejects partial or out-of-range values", () => {
+  const storage = new FakePreferenceStorage() as unknown as WandStorage;
+  const config = defaultConfig();
+  const value = {
+    autoArchiveEnabled: false,
+    autoArchiveDays: 3,
+    autoDeleteEnabled: true,
+    autoDeleteDays: 14,
+  };
+
+  writePreferenceToStorage(config, storage, "taskRetention", value);
+  assert.deepEqual(config.taskRetention, value);
+  assert.deepEqual(applyStoragePreferences(defaultConfig(), storage).taskRetention, value);
+
+  assert.throws(
+    () => writePreferenceToStorage(config, storage, "taskRetention", { ...value, autoArchiveDays: 0 }),
+    /空闲天数/,
+  );
+  assert.throws(
+    () => writePreferenceToStorage(config, storage, "taskRetention", { autoArchiveEnabled: false }),
+    /空闲天数/,
+  );
+  assert.throws(
+    () => writePreferenceToStorage(config, storage, "taskRetention", {
+      ...value,
+      autoDeleteEnabled: "no",
+    }),
+    /自动删除开关/,
+  );
+  assert.deepEqual(config.taskRetention, value, "a rejected write must not replace the live setting");
+
+  storage.setPreference("pref:taskRetention", { autoArchiveEnabled: "no", autoArchiveDays: 2, autoDeleteDays: 9 });
+  const restored = applyStoragePreferences(defaultConfig(), storage);
+  assert.equal(restored.taskRetention?.autoArchiveEnabled, true);
+  assert.equal(restored.taskRetention?.autoArchiveDays, 2);
+  assert.equal(restored.taskRetention?.autoDeleteEnabled, true);
+  assert.equal(restored.taskRetention?.autoDeleteDays, 9);
+});
+
 test("`default` 哨兵不是模型 id：历史配置里读到它当没配", () => {
   // 老设置页允许把目录里的 `default` 项存成默认模型，那会一路传成 `--model default`。
   const config = { ...defaultConfig(), defaultModel: "default", defaultCodexModel: " gpt-5 " };

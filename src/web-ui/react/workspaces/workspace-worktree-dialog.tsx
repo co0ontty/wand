@@ -1,4 +1,7 @@
 import * as React from "react";
+import { Alert, Card, Checkbox, Empty, Flex, List, Space, Spin, Tag, Typography } from "antd";
+import "../issues/library-layout";
+import { WandUiBoundary } from "../theme";
 
 import { WandButton, WandDialogSurface, WandIcon } from "../ui";
 import { httpWorkspacesRepository } from "./repository";
@@ -23,17 +26,17 @@ interface WorkspaceWorktreeDialogProps {
   onDismiss(): void;
 }
 
-const STATE_META: Record<WorkspaceWorktreeReview["state"], { label: string; tone: string }> = {
-  ready: { label: "待合并", tone: "ready" },
-  dirty: { label: "有未提交改动", tone: "dirty" },
-  conflict: { label: "可能冲突", tone: "conflict" },
-  empty: { label: "已同步", tone: "empty" },
-  unavailable: { label: "不可用", tone: "unavailable" },
+const STATE_META: Record<WorkspaceWorktreeReview["state"], { label: string }> = {
+  ready: { label: "待合并" },
+  dirty: { label: "有未提交改动" },
+  conflict: { label: "可能冲突" },
+  empty: { label: "已同步" },
+  unavailable: { label: "不可用" },
 };
 
 
 
-function WorktreeBubble({
+function WorktreeSelection({
   worktree,
   selected,
   first,
@@ -52,23 +55,19 @@ function WorktreeBubble({
     worktree.hasConflicts ? "需处理冲突" : "",
   ].filter(Boolean).join(" · ") || worktree.reason || "没有新的待合并改动";
   return (
-    <button
-      type="button"
-      role="checkbox"
-      aria-checked={selected}
+    <WandUiBoundary><Checkbox
+      checked={selected}
       disabled={disabled}
-      className={`workspace-worktree-bubble is-${meta.tone}${selected ? " is-selected" : ""}`}
       data-wand-autofocus={first ? "" : undefined}
-      onClick={onToggle}
+      onChange={onToggle}
     >
-      <span className="workspace-worktree-bubble-check" aria-hidden="true">{selected ? <WandIcon name="check" size={12}/> : ""}</span>
-      <span className="workspace-worktree-bubble-copy">
-        <strong>{workspaceWorktreeSummary(worktree)}</strong>
-        <code title={worktree.path}>{worktree.branch}</code>
-        <small>{details}</small>
-      </span>
-      <span className={`workspace-worktree-state is-${meta.tone}`}>{meta.label}</span>
-    </button>
+      <Flex vertical gap={4}>
+        <Typography.Text strong>{workspaceWorktreeSummary(worktree)}</Typography.Text>
+        <Typography.Text code title={worktree.path}>{worktree.branch}</Typography.Text>
+        <Typography.Text type="secondary">{details}</Typography.Text>
+        <Tag color={worktree.state === "ready" ? "success" : worktree.state === "dirty" || worktree.state === "conflict" ? "warning" : undefined}>{meta.label}</Tag>
+      </Flex>
+    </Checkbox></WandUiBoundary>
   );
 }
 
@@ -149,68 +148,30 @@ export function WorkspaceWorktreeDialog({
       onOpenChange={(nextOpen) => { if (!nextOpen) onDismiss(); }}
       title="项目 Worktrees"
       description={`${workspace.name} · ${count} 个 Worktree · 默认合并到 ${target}`}
-      className="workspace-worktree-dialog"
-      overlayClassName="workspace-worktree-overlay"
-      titleClassName="workspace-worktree-title"
-      descriptionClassName="workspace-worktree-description"
-      headerClassName="workspace-worktree-header"
+      className="wand-task-library-dialog wand-worktree-modal"
       closeLabel="关闭项目 Worktree"
       testId="workspace-worktree-dialog"
       dismissable={!submitting}
     >
-      <div className="workspace-worktree-body" aria-busy={loading || submitting}>
-        <section className="workspace-worktree-lens" aria-label="合并目标">
-          <span className="workspace-worktree-lens-icon"><WandIcon name="branch" size={18} strokeWidth={1.8}/></span>
-          <span>
-            <small>合并目标</small>
-            <strong>{target}</strong>
-          </span>
-          <code title={overview?.repoRoot || workspace.cwd}>{overview?.repoRoot || workspace.cwd}</code>
-        </section>
-
-        {loading ? (
-          <p className="workspace-worktree-loading" role="status">正在检查所有 Worktree…</p>
-        ) : overview && overview.worktrees.length > 0 ? (
-          <fieldset className="workspace-worktree-picker">
-            <legend>
-              <span>选择要交给 Agent 合并的 Worktree</span>
-              {actionable.length > 1 ? (
-                <button type="button" disabled={submitting} onClick={toggleAll}>
-                  {selectedCount === actionable.length ? "取消全选" : "全选可合并项"}
-                </button>
-              ) : null}
-            </legend>
-            <div className="workspace-worktree-bubbles">
-              {overview.worktrees.map((worktree, index) => (
-                <WorktreeBubble
-                  key={worktree.taskId}
-                  worktree={worktree}
-                  selected={selected.has(worktree.taskId)}
-                  first={index === 0}
-                  onToggle={() => toggle(worktree.taskId)}
-                />
-              ))}
-            </div>
-          </fieldset>
-        ) : overview ? (
-          <p className="workspace-worktree-empty">这个项目还没有独立 Worktree。请先新建任务。</p>
-        ) : null}
-
-        {error ? <p className="workspace-worktree-error" role="alert">{error}</p> : null}
-      </div>
-      <footer className="workspace-worktree-footer">
-        <span>{selectedCount > 0 ? `已选择 ${selectedCount} 个` : "选择后会启动一个托管 Agent"}</span>
-        <div>
-          <WandButton kind="ghost" disabled={submitting} onClick={onDismiss}>取消</WandButton>
-          <WandButton
-            kind="primary"
-            disabled={loading || submitting || selectedCount === 0}
-            onClick={() => void submit()}
-          >
-            {submitting ? "正在启动 Agent…" : `启动 Agent 合并${selectedCount ? ` ${selectedCount} 个` : ""}`}
-          </WandButton>
-        </div>
-      </footer>
+      <Flex vertical gap={16} aria-busy={loading || submitting}>
+        <Alert type="info" showIcon icon={<WandIcon name="branch" size={18} strokeWidth={1.8}/>}
+          title={`合并目标：${target}`} description={<Typography.Text code style={{ overflowWrap: "anywhere" }}>{overview?.repoRoot || workspace.cwd}</Typography.Text>}/>
+        {loading ? <Spin tip="正在检查所有 Worktree…"><div style={{ minHeight: 100 }} role="status">正在检查所有 Worktree…</div></Spin>
+          : overview && overview.worktrees.length > 0 ? <Card size="small" title="选择要交给 Agent 合并的 Worktree"
+              extra={actionable.length > 1 ? <WandButton kind="ghost" type="button" disabled={submitting} onClick={toggleAll}>{selectedCount === actionable.length ? "取消全选" : "全选可合并项"}</WandButton> : null}>
+            <List size="small" dataSource={[...overview.worktrees]} renderItem={(worktree, index) => <List.Item key={worktree.taskId}>
+              <WorktreeSelection worktree={worktree} selected={selected.has(worktree.taskId)} first={index === 0} onToggle={() => toggle(worktree.taskId)}/>
+            </List.Item>}/>
+          </Card> : overview ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="这个项目还没有独立 Worktree。请先新建任务。"/> : null}
+        {error ? <Alert type="error" showIcon role="alert" title={error}/> : null}
+        <Flex component="footer" data-slot="worktree-footer" justify="space-between" align="center" gap={12} wrap>
+          <Typography.Text type="secondary">{selectedCount > 0 ? `已选择 ${selectedCount} 个` : "选择后会启动一个托管 Agent"}</Typography.Text>
+          <Space>
+            <WandButton kind="ghost" disabled={submitting} onClick={onDismiss}>取消</WandButton>
+            <WandButton kind="primary" disabled={loading || submitting || selectedCount === 0} onClick={() => void submit()}>{submitting ? "正在启动 Agent…" : `启动 Agent 合并${selectedCount ? ` ${selectedCount} 个` : ""}`}</WandButton>
+          </Space>
+        </Flex>
+      </Flex>
     </WandDialogSurface>
   );
 }

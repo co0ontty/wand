@@ -1,3 +1,6 @@
+import { newSessionController } from "../new-session/controller";
+import { workspaceContextStore } from "./workspace-context";
+
 type Listener = () => void;
 
 export interface WorkspaceAgentDialogSnapshot {
@@ -18,10 +21,18 @@ function publish(open: boolean): void {
 /** Shared entry point used by both the task welcome page and the tab-bar add button. */
 export const workspaceAgentDialogController = {
   open(): void {
+    const ctx = workspaceContextStore.getSnapshot();
+    newSessionController.open({
+      initialCwd: ctx.cwd,
+      workspaceId: ctx.workspaceId ?? undefined,
+      workspaceTaskId: ctx.taskId ?? undefined,
+      taskName: ctx.taskName ?? undefined,
+    });
     publish(true);
   },
   close(): void {
     publish(false);
+    newSessionController.close();
   },
 };
 

@@ -122,7 +122,7 @@ test("legacy stylesheet no longer owns migrated business overlays", () => {
   ]) {
     assert.ok(!styles.includes(selector), `legacy styles must not restore ${selector}`);
   }
-  assert.ok(styles.includes(".session-kind-badge.worktree-merge"));
+  assert.match(source("src/web-ui/react/shell/shell-sidebar.tsx"), /<Tag className={classNames\("session-kind-badge worktree-merge"/);
 });
 
 test("portalled popovers and selects re-enable hit testing under the passive overlay root", () => {
@@ -132,12 +132,6 @@ test("portalled popovers and selects re-enable hit testing under the passive ove
   // into it must opt back into pointer events or its menu items are unhittable.
   assert.match(overlayRule, /pointer-events:\s*none;/);
 
-  const floatingRuleStart = styles.indexOf(".wand-ui-popover-content,\n.wand-ui-select-content {");
-  assert.ok(floatingRuleStart >= 0, "floating-layer rule must exist");
-  const floatingRule = styles.slice(floatingRuleStart, styles.indexOf("}", floatingRuleStart));
-  assert.match(
-    floatingRule,
-    /pointer-events:\s*auto;/,
-    "popover/select content must restore pointer-events for hit testing",
-  );
+  assert.match(styles, /\.wand-ui-portals :is\([^)]*\.ant-dropdown[^)]*\.ant-popover[^)]*\) \{ pointer-events: auto;/);
+
 });

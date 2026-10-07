@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { confirmSidebarLogout } from "../src/web-ui/react/shell/shell-sidebar.js";
+import { overlayStore } from "../src/web-ui/react/overlay-controller.js";
 
 import {
   MemoryUiAdapter,
@@ -24,6 +26,21 @@ import {
 } from "../src/web-ui/react/shell/index.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+test("sidebar logout waits for explicit confirmation and leaves cancellation in place", async () => {
+  let exits = 0;
+  for (const result of [{ dismissed: true }, { dismissed: false, action: false }, { dismissed: false, action: true }] as const) {
+    const pending = confirmSidebarLogout(() => { exits++; });
+    const dialog = overlayStore.getSnapshot().activeDialog;
+    assert.ok(dialog);
+    assert.equal(exits, 0, "opening the dialog must not log out");
+    assert.equal(dialog.options.title, "退出登录？");
+    assert.ok(dialog.options.actions.some(action => action.value === false && action.autoFocus));
+    overlayStore.completeDialog(dialog.id, result);
+    await pending;
+    assert.equal(exits, !result.dismissed && result.action ? 1 : 0);
+  }
+});
 
 function session(overrides: Partial<UiSessionVm> = {}): UiSessionVm {
   return {
@@ -228,19 +245,18 @@ test("ShellSidebar SSR preserves native ids, key classes, groups, and action con
   assert.equal((html.match(/id="close-drawer-button"/g) ?? []).length, 1);
   assert.doesNotMatch(html, /id="switch-server-button"/);
   assert.doesNotMatch(html, /id="sidebar-pin-btn"/);
-  // 统一任务视图：不再有「会话/任务」切换，也不再有独立的新会话主按钮。
+  // 创建器不会自动建任务，入口准确命名为会话。
   assert.doesNotMatch(html, />会话<\/button>/);
-  assert.match(html, /aria-label="新建任务"/);
+  assert.match(html, /aria-label="新建会话"/);
   assert.doesNotMatch(html, /<button[^>]*title="首页"/);
-  assert.match(html, /id="sessions-drawer" class="sidebar sidebar-refined open"/);
+  assert.match(html, /<aside(?=[^>]*id="sessions-drawer")(?=[^>]*class="[^"]*sidebar sidebar-refined open[^"]*")/);
   assert.match(html, /id="sessions-drawer-backdrop" class="drawer-backdrop open"/);
-  // Appica's NavigationLink owns the row chrome; the business hook + the active
-  // state are the contract the shell binds to.
-  assert.match(html, /class="[^"]*sidebar-file-toggle active[^"]*"[^>]*id="file-panel-toggle-btn"/);
-  assert.match(html, /class="[^"]*wand-ui-navigation-link[^"]*"/);
+  // Ant Button reports the selected file action through its accessible pressed state.
+  assert.match(html, /id="file-panel-toggle-btn"[^>]*aria-pressed="true"/);
+  assert.match(html, /ant-layout-sider/);
   // 自动化会话不再占用侧栏底部；原生历史仍可达。
   assert.doesNotMatch(html, /class="automation-session-group"/);
-  assert.match(html, /class="non-wand-session-group" open=""/);
+  assert.match(html, /class="[^"]*non-wand-session-group[^"]*"[\s\S]*?aria-expanded="true"/);
   assert.match(html, /data-claude-history-id="codex-history-1"/);
   assert.match(html, /data-action="resume-codex-history"/);
   assert.match(html, /data-action="delete-codex-history"/);
@@ -310,20 +326,20 @@ test("ShellSidebar collapsed rail still renders the unified task panel", () => {
   }));
 
   // 窄栏不再有散会话磁贴，改为极简任务轨：展开入口 + 新建任务。
-  assert.match(html, /id="sessions-drawer" class="sidebar sidebar-refined open pinned collapsed"/);
+  assert.match(html, /<aside(?=[^>]*id="sessions-drawer")(?=[^>]*class="[^"]*sidebar sidebar-refined open pinned collapsed[^"]*")/);
   assert.doesNotMatch(html, /class="sidebar-collapsed-tiles"[^>]*>[\s\S]*任务列表/);
   assert.doesNotMatch(html, /aria-label="任务列表"/);
   assert.match(html, /aria-label="展开完整侧边栏"/);
-  assert.match(html, /aria-label="新建任务"/);
+  assert.match(html, /aria-label="新建会话"/);
   assert.doesNotMatch(html, /class="session-manage-bar/);
 
 });
 
-test("ShellSidebar primary action always creates a task", () => {
+test("ShellSidebar primary action accurately names the unified session creator", () => {
   assert.deepEqual(getShellSidebarPrimaryAction(), {
     action: { type: "workspace.new" },
-    label: "新建任务",
-    ariaLabel: "新建任务",
+    label: "新建会话",
+    ariaLabel: "新建会话",
   });
 });
 
@@ -357,9 +373,8 @@ test("ShellSidebar keeps creation above the directory task tree and settings in 
   const createIndex = html.indexOf('id="drawer-new-session-button"');
   const treeIndex = html.indexOf('class="workspaces-panel"');
   assert.ok(createIndex > 0 && createIndex < treeIndex);
-  assert.match(html, /class="[^"]*sidebar-feature-create/);
-  assert.ok(html.indexOf("sidebar-feature-create") < createIndex);
-  assert.ok(html.indexOf('id="settings-button"') > html.indexOf('class="sidebar-footer"'));
+  assert.ok(html.indexOf("sidebar-feature-nav") < createIndex);
+  assert.ok(html.indexOf('id="settings-button"') > html.indexOf('sidebar-footer'));
   assert.equal(html.match(/id="drawer-new-session-button"/g)?.length, 1);
   assert.doesNotMatch(html, /aria-label="新建项目"/);
   assert.doesNotMatch(html, /aria-label="独立任务"/);
@@ -370,7 +385,7 @@ test("mobile drawer ignores the desktop compact preference", () => {
   const base = fixture();
   const html = renderSidebar(fixture({ layout: { ...base.layout, sidebarCollapsed: true } }));
   assert.doesNotMatch(html, /class="sidebar sidebar-refined open pinned collapsed"/);
-  assert.match(html, /aria-label="目录"/);
+  assert.match(html, /aria-label="正在加载任务列表"/);
   assert.doesNotMatch(html, /aria-label="新建项目"/);
 });
 
@@ -383,7 +398,7 @@ test("ShellSidebar keeps secondary tools in the closed overflow menu", () => {
   for (const id of ["missions-button", "github-issues-button", "logout-button"]) {
     assert.doesNotMatch(html, new RegExp(`id="${id}"`));
   }
-  assert.match(html, />对话与任务<\/h2>/);
+  assert.match(html, /sidebar-list-title[^>]*><strong>执行会话<\/strong>/);
   // 搜索框现在常驻 DOM（靠 CSS 展开、inert 收起），所以收起时断言「不可交互」，
   // 而不是「不存在」（旧断言是 placeholder 不出现）。
   assert.match(html, /class="sidebar-search-expand[^"]*"[^>]*inert=/);
@@ -449,10 +464,11 @@ test("员工资料面板外点与 Escape 都可关闭，面板和触发按钮属
     "utf8",
   );
   assert.match(profile, /e\.key === "Escape"/);
-  assert.match(profile, /document\.addEventListener\("pointerdown", onPointerDown\)/);
+  assert.match(profile, /document\.addEventListener\("pointerdown", onPointerDown, true\)/);
   assert.match(profile, /panelRef\.current\?\.contains\(target\)/);
+  assert.match(profile, /isWandPopupOwnedBy\(target, "object-profile"\)/);
   assert.match(profile, /triggerRef\.current\?\.contains\(target\)/);
-  assert.match(profile, /document\.removeEventListener\("pointerdown", onPointerDown\)/);
+  assert.match(profile, /document\.removeEventListener\("pointerdown", onPointerDown, true\)/);
 });
 
 /** 前端源码（不含生成的 bundle / 内联资产），用来扫有没有重新写死 locale。 */

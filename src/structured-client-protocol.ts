@@ -1,5 +1,6 @@
 import { withToolPreview } from "./tool-preview.js";
 import { asRecord, isStructuredImagePart } from "./structured-content.js";
+import { deriveSubagentDispatchMeta, PI_TODO_TOOL_NAME } from "./subagent-dispatch.js";
 import { isDecisionToolCall, decisionCardSummary } from "./decision-tool.js";
 import type {
   ContentBlock,
@@ -54,42 +55,16 @@ function questionsFromInput(input: Record<string, unknown>): StructuredQuestion[
   return questions;
 }
 
-/** 派发子 Agent 的工具名：Claude Code 的 Task/Agent，以及 Wand pi 扩展的 subagent。 */
-const SUBAGENT_TOOL_NAMES = new Set(["Task", "Agent"]);
-const PI_SUBAGENT_TOOL_NAME = "Pi/subagent";
-/** pi 的待办扩展工具，经 `piToolName` 映射后带 `Pi/` 前缀。 */
-const PI_TODO_TOOL_NAME = "Pi/todo";
-
 /**
  * 历史 turn / 非 Claude provider 的子 Agent 工具调用没有 `__subagent` 盖章，
  * 按调用参数现场补一份，让「子 Agent」面板在所有端都拿得到同一份分组。
  *
- * 只认一次真正的派发：Claude 的 Task/Agent（`subagent_type` 可省），
- * pi 扩展的 `Pi/subagent` 必须带 `agent`，避免把管理类调用误当子任务。
+ * 判据本体在 `src/subagent-dispatch.ts`：与 Web 前端共用同一份实现，
+ * pi 的 `subagent` 以「有没有 `action`」区分管理/控制与真派发，不靠枚举参数形状。
+ * 服务端盖的这份章就是 Android / iOS / macOS 的唯一判据来源，各端只消费不重判。
  */
 function deriveSubagentMeta(block: ToolUseBlock): SubagentMeta | null {
-  const existing = block.__subagent;
-  if (existing?.taskId) return existing;
-  const input = asRecord(block.input) ?? {};
-  if (block.name === PI_SUBAGENT_TOOL_NAME) {
-    const agent = text(input.agent);
-    const task = text(input.task);
-    if (!agent && !task) return null;
-    return {
-      taskId: block.id,
-      ...(agent ? { agentType: agent } : {}),
-      ...(task ? { taskDescription: task } : {}),
-    };
-  }
-  const agentType = text(input.subagent_type);
-  // Claude 的 Task/Agent 允许省 `subagent_type`；其他工具只有在真给了 `subagent_type` 时才算派发。
-  if (!SUBAGENT_TOOL_NAMES.has(block.name) && !agentType) return null;
-  const description = text(input.description);
-  return {
-    taskId: block.id,
-    ...(agentType ? { agentType } : {}),
-    ...(description ? { taskDescription: description } : {}),
-  };
+  return deriveSubagentDispatchMeta(block);
 }
 
 /**
@@ -283,7 +258,11 @@ export function enrichStructuredMessages(messages: ConversationTurn[], sessionId
   };
   const enriched = stampDerivedSubagents(messages).map((turn) => ({
     ...turn,
-    content: turn.content.map(withToolPreview).map((block) => {
+    content: turn.content.map((block) => {
+      if (block.type !== "tool_use" || !block.piExecutionRef) return block;
+      const { piExecutionRef: _hostReference, ...publicBlock } = block;
+      return publicBlock;
+    }).map(withToolPreview).map((block) => {
       if (block.type === "tool_use" && decisionIds.has(block.id)) {
         return { ...block, semantic: decisionSemantic(block.id), activity: undefined };
       }

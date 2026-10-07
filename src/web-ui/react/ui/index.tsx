@@ -1,4 +1,4 @@
-// Appica imports stay inside this directory. Business modules consume these
+// Library adapters stay inside this directory. Business modules consume these
 // Wand interfaces so the implementation can change without spreading a
 // third-party interface across the application.
 export {WandBadge} from "./badge";
@@ -32,11 +32,14 @@ export {
   type WandNavigationLinkProps,
 } from "./navigation";
 export {WandPopover} from "./popover";
-export {WandSelect, type WandSelectOption} from "./select";
+export {WandSelect, filterSelectOptions, type WandSelectOption, type WandSelectProps} from "./select";
 export {WandSkeleton} from "./skeleton";
 export {WandSearchField} from "./search-field";
 export {WandSwitch} from "./switch";
 export {WandStretchTabs, type WandStretchTab, type WandStretchTabsProps} from "./stretch-tabs";
 export {WandTabs} from "./tabs";
 export {WandToastRegion, showWandToast, type WandToastHandle, type WandToastTone} from "./toast";
-export { PortalContainerProvider, REACT_UI_PORTALS_ID } from "./portal-context";
+export { PortalContainerProvider, usePortalContainer, REACT_UI_PORTALS_ID } from "./portal-context";
+
+export { WandUiProvider, WandUiBoundary, wandTheme } from "../theme";
+export { isWandPopupOwnedBy } from "./popup-lifecycle";

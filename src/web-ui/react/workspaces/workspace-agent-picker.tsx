@@ -1,3 +1,5 @@
+import { Alert, Flex, Result, Typography } from "antd";
+import { TaskForm } from "../issues/form-controls";
 import { type FormEvent, useEffect, useState } from "react";
 import * as React from "react";
 
@@ -48,7 +50,7 @@ export const WORKSPACE_AGENT_OPTIONS: ReadonlyArray<{
   { value: "opencode", label: "OpenCode", description: "OpenCode CLI" },
   { value: "grok", label: "Grok", description: "Grok Build CLI" },
   { value: "qoder", label: "Qoder", description: "Qoder CLI" },
-  { value: "pi", label: "Pi", description: "Pi coding agent" },
+  { value: "pi", label: "one 的 Agent", description: "内置多模型 Agent" },
   { value: "gemini", label: "Gemini", description: "Gemini CLI" },
   { value: "shell", label: "空白终端", description: "仅启动系统 Shell" },
 ];
@@ -196,12 +198,13 @@ export function WorkspaceWelcomeChooser({
   const [employeeId, setEmployeeId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const choiceTouched = React.useRef(false);
 
   useEffect(() => {
     let cancelled = false;
     void httpNewSessionRepository.loadConfig()
       .then((config) => {
-        if (cancelled) return;
+        if (cancelled || choiceTouched.current) return;
         const savedProvider = WORKSPACE_AGENT_OPTIONS.some((option) => option.value === config.defaultProvider)
           ? config.defaultProvider as WorkspaceSessionTarget
           : null;
@@ -248,13 +251,10 @@ export function WorkspaceWelcomeChooser({
       ? (teams?.find((team) => team.id === teamId)?.name ?? "AI 团队")
       : target === "shell" ? "空白终端" : (WORKSPACE_AGENT_OPTIONS.find((option) => option.value === target)?.label ?? "");
 
-  return (
-    <div className="blank-chat-inner workspace-task-welcome workspace-session-welcome">
-      {eyebrow ? <div className="workspace-task-welcome-eyebrow">{eyebrow}</div> : null}
-      <div className="blank-chat-logo"><WandIcon name="task" size={28} strokeWidth={1.8}/></div>
-      <h2 className="blank-chat-title">{title}</h2>
-      <p className="blank-chat-subtitle">{subtitle}</p>
-      <form noValidate className="workspace-welcome-form" aria-busy={submitting} onSubmit={(event) => void submit(event)}>
+  return <Result icon={<WandIcon name="task" size={36} strokeWidth={1.8}/>} title={title} subTitle={subtitle}
+    extra={<TaskForm noValidate aria-busy={submitting} onSubmit={(event) => void submit(event)}>
+      <Flex vertical gap={16} style={{ maxWidth: 600, marginInline: "auto", textAlign: "start" }}>
+        {eyebrow ? <Typography.Text type="secondary">{eyebrow}</Typography.Text> : null}
         <WorkspaceAgentPicker
           target={target}
           kind={kind}
@@ -264,23 +264,17 @@ export function WorkspaceWelcomeChooser({
           teamWorkspaceId={teamWorkspaceId}
           teamId={teamId}
           employeeId={employeeId}
-          onTargetChange={(next) => { setTarget(next); setModel(workspaceModelDefault(next)); }}
-          onKindChange={setKind}
-          onModelChange={setModel}
-          onTeamChange={setTeamId}
-          onEmployeeChange={setEmployeeId}
+          onTargetChange={(next) => { choiceTouched.current = true; setTarget(next); setModel(workspaceModelDefault(next)); }}
+          onKindChange={(next) => { choiceTouched.current = true; setKind(next); }}
+          onModelChange={(next) => { choiceTouched.current = true; setModel(next); }}
+          onTeamChange={(next) => { choiceTouched.current = true; setTeamId(next); }}
+          onEmployeeChange={(next) => { choiceTouched.current = true; setEmployeeId(next); }}
         />
-        {error ? <p className="wand-new-session-error" role="alert">{error}</p> : null}
+        {error ? <Alert type="error" showIcon role="alert" title={error}/> : null}
         <WandButton kind="primary" size="large" type="submit" disabled={submitting}>
           {submitting ? (teamId ? "正在开工…" : "正在启动…") : `${submitLabel}${submitted}`}
         </WandButton>
-      </form>
-      {cwd ? (
-        <div className="workspace-task-welcome-cwd" title={cwd}>
-          <WandIcon name="folder" size={13} strokeWidth={1.8}/>
-          <span>{cwd}</span>
-        </div>
-      ) : null}
-    </div>
-  );
+        {cwd ? <Typography.Text type="secondary" ellipsis title={cwd}><WandIcon name="folder" size={13} strokeWidth={1.8}/> {cwd}</Typography.Text> : null}
+      </Flex>
+    </TaskForm>}/>;
 }

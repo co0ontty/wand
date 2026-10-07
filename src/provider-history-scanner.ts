@@ -71,6 +71,9 @@ export interface ProviderHistoryScannerOptions {
   openCodeDatabasePath?: string;
   /** Qoder and Qoder CN use separate config roots; callers may override both for tests. */
   qoderProjectsDirs?: string[];
+  piSessionsDir?: string;
+  grokSessionsDir?: string;
+  geminiHome?: string;
 }
 
 interface CachedSummary<T> {
@@ -336,6 +339,9 @@ export class ProviderHistoryScanner {
   private readonly codexSessionsDir: string;
   private readonly openCodeDatabasePath: string;
   private readonly qoderProjectsDirs: string[];
+  private readonly piSessionsDir: string;
+  private readonly grokSessionsDir: string;
+  private readonly geminiHome: string;
   private readonly claudeIndex = new Map<string, CachedSummary<ClaudeHistorySession>>();
   private readonly codexIndex = new Map<string, CachedSummary<CodexHistorySession>>();
   private readonly qoderIndex = new Map<string, CachedSummary<QoderHistorySession>>();
@@ -353,6 +359,9 @@ export class ProviderHistoryScanner {
       path.join(os.homedir(), ".qoder", "projects"),
       path.join(os.homedir(), ".qoder-cn", "projects"),
     ];
+    this.piSessionsDir = options.piSessionsDir ?? path.join(os.homedir(), ".pi", "agent", "sessions");
+    this.grokSessionsDir = options.grokSessionsDir ?? path.join(os.homedir(), ".grok", "sessions");
+    this.geminiHome = options.geminiHome ?? path.join(os.homedir(), ".gemini");
   }
 
   getDiagnostics(): { parsedFiles: number; claudeEntries: number; codexEntries: number; openCodeEntries: number; qoderEntries: number } {
@@ -628,10 +637,27 @@ export class ProviderHistoryScanner {
     let database: DatabaseSync | null = null;
     try {
       database = new DatabaseSync(this.openCodeDatabasePath);
+      // This is OpenCode's own database, shared with every live `opencode run`. Default
+      // busy_timeout is 0, so one concurrent writer turned a delete into an instant
+      // SQLITE_BUSY that we swallowed as "0 deleted".
+      database.exec("PRAGMA busy_timeout = 5000");
       database.exec("PRAGMA foreign_keys = ON");
+      // `session` has no foreign key to `event_sequence`, so deleting a session row alone
+      // orphans every event row it ever wrote (measured: 425MB across 28 deleted sessions).
+      // Removing the sequence row first cascades to `event` and actually reclaims the space.
+      // The event tables only exist on newer schemas, so their absence must not fail the delete.
+      const hasEventSequence = database.prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'event_sequence'",
+      ).get() !== undefined;
+      const dropSequence = hasEventSequence
+        ? database.prepare("DELETE FROM event_sequence WHERE aggregate_id = ?")
+        : null;
       const remove = database.prepare("DELETE FROM session WHERE id = ?");
       let deleted = 0;
-      for (const id of ids) deleted += Number(remove.run(id).changes ?? 0);
+      for (const id of ids) {
+        dropSequence?.run(id);
+        deleted += Number(remove.run(id).changes ?? 0);
+      }
       this.invalidate("opencode");
       return deleted;
     } catch {
@@ -650,6 +676,77 @@ export class ProviderHistoryScanner {
       if (!ids.has(id)) continue;
       try { unlinkSync(filePath); deleted += 1; } catch { /* already absent */ }
       this.qoderIndex.delete(filePath);
+    }
+    return deleted;
+  }
+
+  deletePiHistoryFiles(sessionIds: string[]): number {
+    const ids = new Set(sessionIds.filter((id) => PROVIDER_SESSION_ID_PATTERN.test(id)));
+    if (ids.size === 0 || !existsSync(this.piSessionsDir)) return 0;
+    let deleted = 0;
+    try {
+      const dirs = readdirSync(this.piSessionsDir, { withFileTypes: true });
+      for (const dir of dirs) {
+        if (!dir.isDirectory()) continue;
+        const projectDir = path.join(this.piSessionsDir, dir.name);
+        try {
+          const files = readdirSync(projectDir, { withFileTypes: true });
+          for (const file of files) {
+            if (!file.isFile() || !file.name.endsWith(".jsonl")) continue;
+            const matched = Array.from(ids).some((id) => file.name.endsWith(`_${id}.jsonl`) || file.name === `${id}.jsonl`);
+            if (matched) {
+              try {
+                unlinkSync(path.join(projectDir, file.name));
+                deleted += 1;
+              } catch { /* already absent */ }
+            }
+          }
+        } catch { /* ignore per-project read error */ }
+      }
+    } catch {
+      return 0;
+    }
+    return deleted;
+  }
+
+  deleteGrokHistoryFiles(sessionIds: string[]): number {
+    const ids = new Set(sessionIds.filter((id) => PROVIDER_SESSION_ID_PATTERN.test(id)));
+    if (ids.size === 0 || !existsSync(this.grokSessionsDir)) return 0;
+    let deleted = 0;
+    try {
+      const dirs = readdirSync(this.grokSessionsDir, { withFileTypes: true });
+      for (const dir of dirs) {
+        if (!dir.isDirectory()) continue;
+        const projectDir = path.join(this.grokSessionsDir, dir.name);
+        for (const id of ids) {
+          const targetDir = path.join(projectDir, id);
+          if (existsSync(targetDir)) {
+            try {
+              rmSync(targetDir, { recursive: true, force: true });
+              deleted += 1;
+            } catch { /* best effort */ }
+          }
+        }
+      }
+    } catch {
+      return 0;
+    }
+    return deleted;
+  }
+
+  deleteGeminiHistoryFiles(sessionIds: string[]): number {
+    const ids = new Set(sessionIds.filter((id) => PROVIDER_SESSION_ID_PATTERN.test(id)));
+    if (ids.size === 0 || !existsSync(this.geminiHome)) return 0;
+    let deleted = 0;
+    for (const id of ids) {
+      const dbPath = path.join(this.geminiHome, "antigravity-cli", "conversations", `${id}.db`);
+      if (existsSync(dbPath)) {
+        try { unlinkSync(dbPath); deleted += 1; } catch { /* already absent */ }
+      }
+      const lockPath = path.join(this.geminiHome, "antigravity-cli", "presence", `${id}.lock`);
+      if (existsSync(lockPath)) {
+        try { unlinkSync(lockPath); } catch { /* best effort */ }
+      }
     }
     return deleted;
   }

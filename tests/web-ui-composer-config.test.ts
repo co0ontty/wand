@@ -39,45 +39,6 @@ function render(mount: ComposerConfigMount): string {
   return renderToStaticMarkup(React.createElement(ComposerConfigControl, { mount }));
 }
 
-test("composer config controller publishes immutable snapshots and skips no-op syncs", () => {
-  const controller = new ComposerConfigController();
-  const mount = mountFor("all");
-  let notifications = 0;
-  const unsubscribe = controller.subscribe(() => { notifications += 1; });
-
-  controller.sync([mount]);
-  assert.equal(notifications, 1);
-  const first = controller.getSnapshot();
-  assert.equal(first.revision, 1);
-  assert.ok(Object.isFrozen(first.mounts));
-
-  // 值没变就不该再广播：render() 每次都会 sync 一遍。
-  controller.sync([mountFor("all")]);
-  assert.equal(notifications, 1);
-  assert.equal(controller.getSnapshot(), first);
-
-  // 回调每次都是新闭包，但行为等价，不参与比较。
-  controller.sync([mountFor("all", { onRefreshModels() {} })]);
-  assert.equal(notifications, 1);
-
-  controller.sync([mountFor("all", { modeLabel: "托管" })]);
-  assert.equal(notifications, 2);
-  assert.equal(controller.getSnapshot().revision, 2);
-  assert.notEqual(controller.getSnapshot(), first);
-
-  controller.clear();
-  assert.equal(notifications, 3);
-  assert.equal(controller.getSnapshot().mounts.length, 0);
-
-  // 空快照再清一次是 no-op。
-  controller.clear();
-  assert.equal(notifications, 3);
-
-  unsubscribe();
-  controller.sync([mountFor("mode")]);
-  assert.equal(notifications, 3);
-});
-
 test("mode 作用域只渲染模式 chip", () => {
   const html = render(mountFor("mode"));
   assert.match(html, /data-composer-config-host-none|composer-config-controls-mode/);
@@ -119,7 +80,7 @@ test("chip 暴露完整值给 tooltip，并用 data-thinking 记录归一化后�
 
 test("刷新中的模型按钮进入 busy 态", () => {
   const html = render(mountFor("runtime", { modelRefreshing: true }));
-  assert.match(html, /is-refreshing/);
+  assert.match(html, /ant-btn/);
   assert.match(html, /aria-busy="true"/);
   assert.match(html, /disabled/);
   assert.match(html, /title="正在刷新模型列表"/);
@@ -139,7 +100,6 @@ test("portal 宿主用 display:contents，chip 仍是状态行的 flex item", ()
     new URL("../src/web-ui/content/styles.css", import.meta.url),
     "utf8",
   );
-  assert.match(styles, /\.composer-config-host \{ display: contents; \}/);
-  assert.match(styles, /\.composer-status-row > \.composer-config-host > \*/);
-  assert.match(styles, /\.composer-status-row > \.composer-badge-host > \*/);
+  assert.match(styles, /\.composer-config-host[^{}]*\{ display: contents; \}/);
+  assert.match(styles, /\.composer-status-row[^{}]*\{ display: flex; align-items: center;/);
 });

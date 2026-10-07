@@ -1,6 +1,6 @@
 import * as React from "react";
 import { WandIcon } from "./icons";
-import { WandIconButton } from "./button";
+import { WandInput } from "./input";
 import { classNames } from "./class-names";
 
 export interface WandSearchFieldProps {
@@ -37,9 +37,9 @@ export function WandSearchField({
     onSearch?.("");
     ref.current?.focus();
   };
-  return <div className={classNames("wand-ui-search", className)}>
-    <WandIcon name="search" size={16}/>
-    <input
+  return <WandInput className={classNames("wand-ui-search", className)}
+      startSlot={<WandIcon name="search" size={16}/>}
+      clearable={Boolean(value)} onClear={clear}
       ref={ref}
       type="search"
       aria-label={label}
@@ -71,9 +71,5 @@ export function WandSearchField({
           clear();
         }
       }}
-    />
-    {value && <WandIconButton aria-label={`清除${label}`} title={`清除${label}`} disabled={disabled} onClick={clear}>
-      <WandIcon name="close" size={14}/>
-    </WandIconButton>}
-  </div>;
+    />;
 }

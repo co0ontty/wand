@@ -40,7 +40,7 @@ test("file card replaces all report text and offers authenticated preview/downlo
   assert.match(html, /title="查看完整报告：输入恢复验收报告"/);
   assert.match(html, /六种界面验证通过。/);
   assert.match(html, /team-chat-file-excerpt/);
-  assert.match(html, /team-chat-file-icon" aria-hidden="true"/);
+  assert.match(html, /ant-file-card/);
   assert.ok(!html.includes("不会在卡片显示的正文"));
   assert.ok(!html.includes("team-chat-preview"));
   assert.ok(!html.includes("点击展开"));

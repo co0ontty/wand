@@ -16,6 +16,10 @@ export class WandCliApi {
     return this.request<T>("POST", pathname, body);
   }
 
+  async del<T>(pathname: string): Promise<T> {
+    return this.request<T>("DELETE", pathname);
+  }
+
   private async login(): Promise<void> {
     const result = await this.rawRequest("POST", "/api/login", { password: this.config.password });
     if (result.status < 200 || result.status >= 300) throw new Error(`Wand 登录失败 (HTTP ${result.status})`);
@@ -23,7 +27,7 @@ export class WandCliApi {
     if (!this.cookie) throw new Error("Wand 服务未返回登录会话。");
   }
 
-  private async request<T>(method: "GET" | "POST", pathname: string, body?: unknown): Promise<T> {
+  private async request<T>(method: "GET" | "POST" | "DELETE", pathname: string, body?: unknown): Promise<T> {
     if (!this.cookie) await this.login();
     const result = await this.rawRequest(method, pathname, body, this.cookie);
     let parsed: unknown = {};
@@ -38,7 +42,7 @@ export class WandCliApi {
   }
 
   private rawRequest(
-    method: "GET" | "POST",
+    method: "GET" | "POST" | "DELETE",
     pathname: string,
     body?: unknown,
     cookie?: string,

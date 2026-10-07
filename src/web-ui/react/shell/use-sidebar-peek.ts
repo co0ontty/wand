@@ -1,4 +1,5 @@
 import * as React from "react";
+import { readMotionTokenMs, useReducedMotion } from "../ui/motion-tokens";
 
 /**
  * 折叠窄栏「悬浮目录树」的开关时序。
@@ -6,10 +7,10 @@ import * as React from "react";
  * 先等一小段悬停意图：鼠标快速扫过目录图标时不该弹出预览。
  * 指针离开后再留一点时间，让指针能从窄栏滑进弹出面板而不闪断。
  */
-const OPEN_DELAY_MS = 140;
-const CLOSE_DELAY_MS = 240;
+
 
 export interface SidebarPeekHoverBindings {
+  onKeyDown(event: React.KeyboardEvent<HTMLElement>): void;
   onPointerLeave(event: React.PointerEvent<HTMLElement>): void;
   onFocusCapture(event: React.FocusEvent<HTMLElement>): void;
   onBlurCapture(event: React.FocusEvent<HTMLElement>): void;
@@ -26,13 +27,6 @@ export interface SidebarPeekSurfaceBindings extends SidebarPeekHoverBindings {
   onPointerEnter(event: React.PointerEvent<HTMLElement>): void;
 }
 
-/**
- * 弹出面板里的下拉 / 选择器都被 portal 到 `#overlay-root`（`data-wand-ui-root`）。
- * 指针从面板滑进这些浮层时不能把面板收掉，否则触发行会跟着面板一起消失。
- */
-function insideFloatingLayer(node: EventTarget | null): boolean {
-  return node instanceof Element && node.closest("[data-wand-ui-root]") !== null;
-}
 
 export interface SidebarPeek {
   /** 只有真正悬停过才挂载面板：折叠态常驻会多跑一份目录树轮询。 */
@@ -78,6 +72,10 @@ export function useSidebarPeek(
   const [mounted, setMounted] = React.useState(false);
   const openTimer = React.useRef(0);
   const closeTimer = React.useRef(0);
+  const activeTrigger = React.useRef<HTMLElement | null>(null);
+  const suppressedTrigger = React.useRef<HTMLElement | null>(null);
+  const desiredOpen = React.useRef(false);
+  const reduced = useReducedMotion();
 
   const clearTimers = React.useCallback((): void => {
     window.clearTimeout(openTimer.current);
@@ -86,12 +84,14 @@ export function useSidebarPeek(
 
   const close = React.useCallback((): void => {
     clearTimers();
+    desiredOpen.current = false;
     setOpen(false);
   }, [clearTimers]);
 
   const scheduleOpen = React.useCallback((delay: number): void => {
     window.clearTimeout(closeTimer.current);
     window.clearTimeout(openTimer.current);
+    desiredOpen.current = true;
     openTimer.current = window.setTimeout(() => {
       setMounted(true);
       setOpen(true);
@@ -101,8 +101,10 @@ export function useSidebarPeek(
   const scheduleClose = React.useCallback((): void => {
     window.clearTimeout(openTimer.current);
     window.clearTimeout(closeTimer.current);
-    closeTimer.current = window.setTimeout(() => setOpen(false), CLOSE_DELAY_MS);
-  }, []);
+    desiredOpen.current = false;
+    if (reduced) { setOpen(false); return; }
+    closeTimer.current = window.setTimeout(() => setOpen(false), readMotionTokenMs("--motion-normal"));
+  }, [reduced]);
 
   /**
    * 窄栏在展开态也会收到指针/焦点事件（折叠按钮就在侧栏里）。
@@ -122,11 +124,27 @@ export function useSidebarPeek(
     if (enabled) return;
     // 展开成完整侧栏后卸载面板：否则会多出一份隐藏的目录树在后台轮询。
     clearTimers();
+    desiredOpen.current = false;
     setOpen(false);
     setMounted(false);
   }, [enabled, clearTimers]);
 
   React.useEffect(() => clearTimers, [clearTimers]);
+  React.useEffect(() => {
+    if (!reduced) return;
+    clearTimers();
+    if (enabled && desiredOpen.current) setMounted(true);
+    setOpen(enabled && desiredOpen.current);
+  }, [reduced, enabled, clearTimers]);
+
+  const insideFloatingLayer = React.useCallback((node: EventTarget | null): boolean => {
+    if (!(node instanceof Element)) return false;
+    const owner = node.closest<HTMLElement>("[data-wand-popup-owner]")?.dataset.wandPopupOwner;
+    if (!owner) return false;
+    // Only the active peek's projection owns these portalled controls.
+    return Array.from(surfaceRef.current?.querySelectorAll<HTMLElement>("[data-sidebar-popup-owner]") ?? [])
+      .some((projection) => projection.dataset.sidebarPopupOwner === owner);
+  }, [surfaceRef]);
 
   const holds = React.useCallback((next: EventTarget | null): boolean => (
     next instanceof Node
@@ -143,11 +161,11 @@ export function useSidebarPeek(
       if (!holds(focused)) return;
       // 面板里开着端口浮层（行内下拉 / 弹窗）：让浮层自己收。
       if (insideFloatingLayer(event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      suppressedTrigger.current = activeTrigger.current;
       close();
-      // 焦点还在面板里时别把它交回窄栏：窄栏的 focusin 会立刻再把面板弹起来。
-      if (focused instanceof HTMLElement && surfaceRef.current?.contains(focused)) {
-        focused.blur();
-      }
+      activeTrigger.current?.focus({ preventScroll: true });
     };
     const onPointerDown = (event: PointerEvent): void => {
       const target = event.target;
@@ -165,12 +183,13 @@ export function useSidebarPeek(
       document.removeEventListener("keydown", onKeyDown);
       document.removeEventListener("pointerdown", onPointerDown, true);
     };
-  }, [open, close, holds, surfaceRef, triggerRef]);
+  }, [open, close, holds, insideFloatingLayer, surfaceRef, triggerRef]);
 
   const leave = React.useCallback((event: React.PointerEvent<HTMLElement>): void => {
     if (insideFloatingLayer(event.relatedTarget)) return;
+    suppressedTrigger.current = null;
     scheduleClose();
-  }, [scheduleClose]);
+  }, [scheduleClose, insideFloatingLayer]);
 
   const requestDirectory = (target: EventTarget | null, delay: number): void => {
     if (!enabled || insideSurface(target) || insideFloatingLayer(target)) return;
@@ -182,8 +201,10 @@ export function useSidebarPeek(
       scheduleClose();
       return;
     }
+    if (suppressedTrigger.current === trigger) return;
+    activeTrigger.current = trigger;
     onDirectory(id, trigger);
-    requestOpen(delay);
+    requestOpen(reduced ? 0 : delay);
   };
 
   return {
@@ -191,9 +212,23 @@ export function useSidebarPeek(
     open,
     close,
     triggerBindings: {
+      onKeyDown: (event) => {
+        if (event.key !== "Tab" || event.shiftKey || !open || event.defaultPrevented) return;
+        if (document.activeElement !== activeTrigger.current) return;
+        const first = surfaceRef.current?.querySelector<HTMLElement>("button, [tabindex='0']");
+        if (!first) return;
+        event.preventDefault();
+        first.focus({ preventScroll: true });
+      },
       // 目录之间可直接切换；头部、导航、页脚都不触发目录预览。
-      onPointerOver: (event) => requestDirectory(event.target, OPEN_DELAY_MS),
-      onClick: (event) => requestDirectory(event.target, 0),
+      onPointerOver: (event) => requestDirectory(event.target, readMotionTokenMs("--motion-fast")),
+      onClick: (event) => {
+        const trigger = event.target instanceof Element
+          ? event.target.closest<HTMLElement>("[data-sidebar-directory-id]") : null;
+        suppressedTrigger.current = null;
+        if (open && trigger === activeTrigger.current) { close(); return; }
+        requestDirectory(event.target, 0);
+      },
       onPointerLeave: leave,
       onFocusCapture: (event) => requestDirectory(event.target, 0),
       onBlurCapture: (event) => {
@@ -202,9 +237,16 @@ export function useSidebarPeek(
       },
     },
     surfaceBindings: {
-      onPointerEnter: () => window.clearTimeout(closeTimer.current),
+      onKeyDown: (event) => {
+        if (event.key !== "Tab" || !event.shiftKey) return;
+        const first = surfaceRef.current?.querySelector<HTMLElement>("button, [tabindex='0']");
+        if (document.activeElement !== first) return;
+        event.preventDefault();
+        activeTrigger.current?.focus({ preventScroll: true });
+      },
+      onPointerEnter: () => { desiredOpen.current = true; window.clearTimeout(closeTimer.current); },
       onPointerLeave: leave,
-      onFocusCapture: () => window.clearTimeout(closeTimer.current),
+      onFocusCapture: () => { desiredOpen.current = true; window.clearTimeout(closeTimer.current); },
       onBlurCapture: (event) => {
         if (holds(event.relatedTarget) || insideFloatingLayer(event.relatedTarget)) return;
         close();

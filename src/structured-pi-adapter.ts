@@ -1,17 +1,27 @@
 import { spawn } from "node:child_process";
+import { capturePiExecutionEvent } from "./pi-execution.js";
+import { defaultCoreHarnessAgentDir } from "./harness-engine.js";
+import { preparePiResources, type PreparedPiResources } from "./pi-resource-run.js";
+import { prepareOpenRouterFreeCli, type OpenRouterFreeCliDependencies } from "./openrouter-free-cli.js";
+import { isOpenRouterFreeSelector } from "./openrouter-free-selection.js";
+import { getErrorMessage } from "./error-utils.js";
+import { classifyProviderRejection, hasStructuredExecutionProgress } from "./structured-failure.js";
 
+import { settleThinkingRound, updateThinkingActivity } from "./structured-thinking.js";
 import { startStructuredCli } from "./structured-exec-pump.js";
 import type { StructuredExecHost } from "./structured-exec-host.js";
-import { asRecord, normalizeStructuredToolResultContent } from "./structured-content.js";
+import { asRecord, canonicalizeToolResultContent } from "./structured-content.js";
 import { systemPromptArgs, thinkingEffortToPiLevel } from "./structured-provider-common.js";
+import { defaultPiCliSessionSettings, PI_BUILTIN_TOOLS, piToolSelection } from "./pi-session-settings.js";
 import type {
   StructuredRunnerAdapter,
   StructuredRunnerContext,
   StructuredRunnerExecution,
   StructuredRunnerObserver,
+  StructuredRunnerResult,
   StructuredRunnerTurnState,
 } from "./structured-runner.js";
-import type { SessionSnapshot } from "./types.js";
+import type { ContentBlock, SessionSnapshot } from "./types.js";
 
 type PiTurnState = StructuredRunnerTurnState & { pendingSessionId?: string };
 
@@ -28,24 +38,22 @@ function textContent(value: unknown): string {
   return textContent(item.content);
 }
 
-/**
- * Pi 的工具结果是 `{ content: [ text…, image… ] }`。图片 part 不能像以前那样只抽文本
- * 丢掉——读图 / 截图全靠它，统一交给 normalizeStructuredToolResultContent 归一化。
- * 纯文本结果仍压成字符串，保持既有形态。
- */
-function piToolResultContent(value: unknown): string | Array<{ type: string; [key: string]: unknown }> {
-  const record = asRecord(value);
-  const raw = record && "content" in record ? record.content : value;
-  const normalized = normalizeStructuredToolResultContent(raw);
-  if (typeof normalized === "string") return normalized;
-  if (normalized.length > 0 && normalized.every((part) => part.type === "text" && typeof part.text === "string")) {
-    return normalized.map((part) => part.text as string).filter(Boolean).join("\n");
-  }
-  return normalized;
+export function piToolsArgs(session: Pick<SessionSnapshot, "piSettings">): string[] {
+  // 没有会话设置（旧快照）时按 CLI 出厂默认：跟随 Pi 自身配置，不传任何工具参数。
+  const settings = session.piSettings ?? defaultPiCliSessionSettings();
+  // 旧快照可能带未校验的名字：只保留合法的基础工具，再交给策略附加 CodeMode / 目标工具。
+  const selection = piToolSelection({
+    ...settings,
+    tools: settings.tools.filter((tool) => PI_BUILTIN_TOOLS.includes(tool)),
+  });
+  // `globalTools` 打开：既不传 --tools 也不传 --exclude-tools，完全跟随 Pi 自身配置。
+  if (selection.mode === "config") return [];
+  return selection.names.length ? ["--tools", selection.names.join(",")] : ["--no-tools"];
 }
 
-export function buildPiArgs(session: SessionSnapshot, prompt: string): string[] {
+export function buildPiArgs(session: SessionSnapshot, prompt: string, resourceArgs: string[] = []): string[] {
   const args = ["--mode", "json", "--print"];
+  args.push(...piToolsArgs(session), ...resourceArgs);
   const model = session.selectedModel?.trim();
   if (model && model !== "default") args.push("--model", model);
   const thinking = thinkingEffortToPiLevel(session.thinkingEffort);
@@ -92,8 +100,18 @@ function applyPiAssistantMessage(state: StructuredRunnerTurnState, message: Reco
     }
   }
   const thinking = thinkings.join("");
-  if (thinking && !state.blocks.some((block) => block.type === "thinking")) {
-    state.blocks.push({ type: "thinking", thinking });
+  // 流式事件只给出边界时，最后一轮会停在空占位上。这里用完整正文补齐，
+  // 而不是因为「已经有思考块」就把真实内容整段丢掉；单轮时更长的正文为准。
+  const thinkingBlocks = state.blocks.filter((block) => block.type === "thinking");
+  const lastThinking = thinkingBlocks.at(-1) as Extract<ContentBlock, { type: "thinking" }> | undefined;
+  if (thinking) {
+    if (!lastThinking) state.blocks.push({ type: "thinking", thinking });
+    else if (!lastThinking.thinking.trim()) lastThinking.thinking = thinking;
+    else if (thinkingBlocks.length === 1 && thinking.length > lastThinking.thinking.length) {
+      lastThinking.thinking = thinking;
+    }
+  } else {
+    settleThinkingRound(state.blocks, thinking);
   }
   const text = texts.join("");
   if (text) {
@@ -112,7 +130,8 @@ function applyPiAssistantMessage(state: StructuredRunnerTurnState, message: Reco
   return null;
 }
 
-export function applyPiEvent(state: PiTurnState, event: Record<string, unknown>): string | null {
+export function applyPiEvent(state: PiTurnState, event: Record<string, unknown>, observedAt?: string): string | null {
+  capturePiExecutionEvent(state.blocks, event);
   // Pi announces the ID before it writes a session file. The file is only
   // created when an assistant message is saved, so this ID is not resumable yet.
   if (event.type === "session" && typeof event.id === "string") state.pendingSessionId = event.id;
@@ -123,6 +142,7 @@ export function applyPiEvent(state: PiTurnState, event: Record<string, unknown>)
     state.phase = "responding";
     const update = asRecord(event.assistantMessageEvent);
     const delta = typeof update?.delta === "string" ? update.delta : "";
+    updateThinkingActivity(state.blocks, update, observedAt);
     if (update?.type === "text_delta" && delta) {
       const last = state.blocks.at(-1);
       if (last?.type === "text") last.text += delta;
@@ -150,7 +170,7 @@ export function applyPiEvent(state: PiTurnState, event: Record<string, unknown>)
   }
   if (event.type === "tool_execution_end") {
     const id = typeof event.toolCallId === "string" ? event.toolCallId : "unknown";
-    state.blocks.push({ type: "tool_result", tool_use_id: id, content: piToolResultContent(event.result), is_error: event.isError === true });
+    state.blocks.push({ type: "tool_result", tool_use_id: id, content: canonicalizeToolResultContent(event.result), is_error: event.isError === true });
   }
   if (event.type === "message_end" || event.type === "turn_end") {
     const message = asRecord(event.message);
@@ -166,14 +186,15 @@ export function applyPiEvent(state: PiTurnState, event: Record<string, unknown>)
     }
   }
   if (event.type === "agent_end" && Array.isArray(event.messages)) {
+    let error: string | null = null;
     for (const raw of event.messages) {
       const message = asRecord(raw);
       if (message?.role === "assistant") {
         if (state.pendingSessionId) state.sessionId = state.pendingSessionId;
-        const error = applyPiAssistantMessage(state, message);
-        if (error) return error;
+        error = applyPiAssistantMessage(state, message);
       }
     }
+    return error;
   }
   return null;
 }
@@ -182,10 +203,59 @@ export class PiRunner implements StructuredRunnerAdapter {
   constructor(
     private readonly spawnProcess: typeof spawn = spawn,
     private readonly execHost?: StructuredExecHost,
+    private readonly agentDir?: string,
+    private readonly freeModels?: OpenRouterFreeCliDependencies,
   ) {}
 
   start(context: StructuredRunnerContext, observer: StructuredRunnerObserver): StructuredRunnerExecution {
-    const args = buildPiArgs(context.session, context.prompt);
+    const selection = context.session.piSettings?.resources;
+    const codemodeOverride = context.session.piSettings?.codemodeOverride;
+    const freeSelection = isOpenRouterFreeSelector(context.session.selectedModel);
+    const env = { ...context.env };
+    delete env.WAND_PI_RESOURCE_POLICY;
+    delete env.WAND_PI_FREE_POLICY;
+    delete env.WAND_PI_FREE_TOKEN;
+    context = { ...context, env };
+    if (!selection && !codemodeOverride && !freeSelection) return this.startCli(context, observer);
+    // Return synchronously so the manager registers ownership in this tick. Preparation belongs to
+    // this execution; stop/delete during preparation prevents the process from being started.
+    let execution: StructuredRunnerExecution | null = null;
+    let interrupted = false;
+    const spawnedAt = new Date().toISOString();
+    const completion = (async () => {
+      const prepared: PreparedPiResources[] = [];
+      try {
+        let preparedEnv = context.env;
+        if (selection || codemodeOverride) {
+          const resources = await preparePiResources(this.agentDir ?? defaultCoreHarnessAgentDir(),
+            context.session.cwd, selection, preparedEnv, codemodeOverride);
+          prepared.push(resources); preparedEnv = resources.env;
+        }
+        if (interrupted || !observer.isActive()) throw new Error("资源准备已取消，尚未启动 Pi。");
+        if (freeSelection) {
+          if (!this.freeModels) throw new Error("免费模型 CLI 接入未就绪，请更新 Wand 服务后重试。");
+          const free = prepareOpenRouterFreeCli(this.freeModels, { ...context, env: preparedEnv });
+          prepared.push(free); preparedEnv = free.env;
+        }
+        execution = this.startCli({ ...context, env: preparedEnv }, observer, prepared.flatMap((item) => item.args));
+        const result = await execution.completion;
+        // A configured fallback tool uses its own capabilities. Only the free-price boundary
+        // forbids switching after execution; resource preparation failures still fail closed below.
+        return freeSelection ? { ...result, retryForbidden: true } : result;
+      } finally { for (const item of prepared.reverse()) item.close(); }
+    })().catch((error: unknown): StructuredRunnerResult => ({
+      state: { blocks: [], result: "", sessionId: context.session.claudeSessionId },
+      exitCode: 1, signal: null, stderr: "", primaryError: getErrorMessage(error),
+      inputAccepted: false, retryForbidden: true,
+    }));
+    return { get args() { return execution?.args ?? buildPiArgs(context.session, context.prompt, ["--no-skills"]); },
+      get pid() { return execution?.pid ?? null; }, spawnedAt, completion,
+      interrupt: () => { interrupted = true; execution?.interrupt(); } };
+  }
+
+  private startCli(context: StructuredRunnerContext, observer: StructuredRunnerObserver,
+    resourceArgs: string[] = []): StructuredRunnerExecution {
+    const args = buildPiArgs(context.session, context.prompt, resourceArgs);
     const state: PiTurnState = {
       blocks: [],
       result: "",
@@ -194,12 +264,14 @@ export class PiRunner implements StructuredRunnerAdapter {
       phase: "responding",
     };
     let primaryError: string | null = null;
+    let progressed = false;
+    let unparsedOutput = false;
     return startStructuredCli({
       sessionId: context.session.id,
       file: "pi",
       args,
       cwd: context.session.cwd,
-      env: context.env,
+      env: this.agentDir ? { ...context.env, PI_CODING_AGENT_DIR: this.agentDir } : context.env,
       observer,
       execHost: this.execHost,
       spawnProcess: this.spawnProcess,
@@ -209,11 +281,28 @@ export class PiRunner implements StructuredRunnerAdapter {
         try {
           const event = JSON.parse(line) as Record<string, unknown>;
           observer.onEvent?.(event);
-          primaryError = applyPiEvent(state, event) ?? primaryError;
+          primaryError = applyPiEvent(state, event, new Date().toISOString()) ?? primaryError;
+          progressed ||= hasStructuredExecutionProgress(state);
+          const messages = event.type === "agent_end" && Array.isArray(event.messages) ? event.messages
+            : event.type === "message_end" || event.type === "turn_end" ? [event.message] : [];
+          progressed ||= messages.some((raw) => {
+            const message = asRecord(raw);
+            return message?.role === "assistant" && (message.stopReason !== "error"
+              || (Array.isArray(message.content) && message.content.length > 0));
+          });
+          const lastAssistant = asRecord([...messages].reverse().find((raw) => asRecord(raw)?.role === "assistant"));
+          // Pi can recover internally. A later completed answer supersedes an earlier error;
+          // the opposite order remains a failure and the monotonic progress fact forbids replay.
+          if (lastAssistant && lastAssistant.stopReason !== "error") primaryError = null;
           observer.onUpdate(state);
-        } catch { /* Pi stdout is NDJSON; ignore non-protocol noise. */ }
+        } catch { unparsedOutput = true; /* Unknown stdout is not evidence of a safe refusal. */ }
       },
-      finalize: (ctx, exitCode, signal, spawnError) => ({ state, exitCode, signal, stderr: ctx.stderr, primaryError, ...(spawnError ? { spawnError } : {}) }),
+      finalize: (ctx, exitCode, signal, spawnError) => {
+        const rejection = !progressed && !unparsedOutput && !signal && !spawnError
+          ? classifyProviderRejection(primaryError) : null;
+        return { state, exitCode, signal, stderr: ctx.stderr, primaryError, ...(spawnError ? { spawnError } : {}),
+          ...(rejection ? { rejection, inputAccepted: false } : progressed ? { inputAccepted: true } : {}) };
+      },
     });
   }
 }

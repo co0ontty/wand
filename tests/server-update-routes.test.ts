@@ -300,3 +300,73 @@ test("iOS OTA update routes expose check, manifest, and install page", async () 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("iOS OTA routes prefer configured publicOrigin over plain-http requests", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-ios-ota-origin-"));
+  const ipaPath = path.join(root, "wand-v4.52.0.ipa");
+  writeFileSync(ipaPath, "ipa-payload");
+  const app = express();
+  registerPublicUpdateRoutes(app, {
+    async resolveLatestApk() { return null; },
+    async resolveAndroidDownload() { return null; },
+    async computeAssetSha256() { return null; },
+    async resolveLatestDmg() { return null; },
+    async resolveMacosDownload() { return null; },
+    async resolveLatestMacosBeta() { return null; },
+    async resolveMacosBetaDownload() { return null; },
+    async resolveLatestIpa() {
+      return {
+        version: "4.52.0",
+        downloadUrl: "/ios/download",
+        fileName: "wand-v4.52.0.ipa",
+        size: 11,
+        source: "local",
+      };
+    },
+    async resolveIosDownload() {
+      return { fileName: "wand-v4.52.0.ipa", filePath: ipaPath, size: 11 };
+    },
+  }, "https://public.example.com:8443");
+  app.use(jsonErrorHandler);
+  const server = createServer(app);
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+  try {
+    const address = server.address() as AddressInfo;
+    // Plain http request without forwarded headers: the configured origin must win,
+    // otherwise the manifest would carry http:// URLs that iOS refuses to install.
+    const metadata = await fetch(`http://127.0.0.1:${address.port}/api/ios-ipa-update?currentVersion=0.0.0`);
+    assert.equal(metadata.status, 200);
+    const body = await metadata.json() as {
+      manifestUrl: string;
+      installUrl: string;
+      otaBlockers: string[];
+    };
+    assert.equal(body.manifestUrl, "https://public.example.com:8443/ios/manifest.plist");
+    assert.equal(
+      body.installUrl,
+      "itms-services://?action=download-manifest&url=https%3A%2F%2Fpublic.example.com%3A8443%2Fios%2Fmanifest.plist",
+    );
+    assert.ok(!body.otaBlockers.includes("not-https"));
+
+    const manifest = await fetch(`http://127.0.0.1:${address.port}/ios/manifest.plist`);
+    assert.equal(manifest.status, 200);
+    assert.match(await manifest.text(), /https:\/\/public\.example\.com:8443\/ios\/download/);
+
+    // An explicit ?origin= still overrides the configured origin.
+    const overridden = await fetch(
+      `http://127.0.0.1:${address.port}/api/ios-ipa-update?currentVersion=0.0.0&origin=${encodeURIComponent("https://override.example.com")}`,
+    );
+    assert.equal(overridden.status, 200);
+    const overriddenBody = await overridden.json() as { manifestUrl: string };
+    assert.equal(overriddenBody.manifestUrl, "https://override.example.com/ios/manifest.plist");
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    rmSync(root, { recursive: true, force: true });
+  }
+});

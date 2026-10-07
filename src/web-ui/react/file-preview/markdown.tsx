@@ -1,4 +1,5 @@
-import { Fragment, useMemo, type ReactNode } from "react";
+import * as React from "react";
+import type { ReactNode } from "react";
 import { localFilePreviewHref, localHttpPreviewHref, localPreviewController } from "../local-preview/controller";
 import { classNames } from "../ui/class-names";
 import { parseFilePreviewMarkdown, tokenizeFilePreviewCode } from "./model";
@@ -14,20 +15,25 @@ export function CodeTokens({ tokens }: { tokens: ReadonlyArray<FilePreviewCodeTo
     <>
       {tokens.map((token, index) => token.kind ? (
         <span className={`wand-file-preview-syntax-${token.kind}`} key={index}>{token.value}</span>
-      ) : <Fragment key={index}>{token.value}</Fragment>)}
+      ) : <React.Fragment key={index}>{token.value}</React.Fragment>)}
     </>
   );
 }
 
-function MarkdownInline({ tokens }: { tokens: ReadonlyArray<FilePreviewMarkdownInline> }) {
+function MarkdownInline({ tokens, renderText }: {
+  tokens: ReadonlyArray<FilePreviewMarkdownInline>;
+  renderText?: (value: string) => ReactNode;
+}) {
+  // 纯文本片段的自定义渲染（群聊用它保留 @成员名 token）；不传就是原样文本。
+  const text = (value: string): ReactNode => renderText ? renderText(value) : value;
   return (
     <>
       {tokens.map((token, index): ReactNode => {
         switch (token.type) {
           case "code": return <code key={index}>{token.value}</code>;
-          case "strong": return <strong key={index}>{token.value}</strong>;
-          case "emphasis": return <em key={index}>{token.value}</em>;
-          case "delete": return <del key={index}>{token.value}</del>;
+          case "strong": return <strong key={index}>{text(token.value)}</strong>;
+          case "emphasis": return <em key={index}>{text(token.value)}</em>;
+          case "delete": return <del key={index}>{text(token.value)}</del>;
           case "link": {
             const isServerHtmlPath = token.url.startsWith("/") && /\.(?:html?|)$/i.test(token.url);
             const localHref = isServerHtmlPath
@@ -43,14 +49,14 @@ function MarkdownInline({ tokens }: { tokens: ReadonlyArray<FilePreviewMarkdownI
                   else localPreviewController.openUrl(token.url);
                 }}
               >
-                {token.value}
+                {text(token.value)}
               </a>
             ) : (
-              <a key={index} href={token.url} target="_blank" rel="noopener noreferrer">{token.value}</a>
+              <a key={index} href={token.url} target="_blank" rel="noopener noreferrer">{text(token.value)}</a>
             );
           }
           case "image": return <img key={index} src={token.url} alt={token.value} />;
-          default: return <Fragment key={index}>{token.value}</Fragment>;
+          default: return <React.Fragment key={index}>{text(token.value)}</React.Fragment>;
         }
       })}
     </>
@@ -63,24 +69,30 @@ function MarkdownInline({ tokens }: { tokens: ReadonlyArray<FilePreviewMarkdownI
 // 元素最深只用到 h3：markdown-styles.ts 的标题间距规则只覆盖 h1..h3（而且它们共享
 // 同一条规则），落到 h4 连这段间距都没有。所以第 4 级往下仍用 h3 拿样式，
 // 真实层级交给 aria-level。
-function MarkdownHeading({ block }: { block: Extract<FilePreviewMarkdownBlock, { type: "heading" }> }) {
-  const content = <MarkdownInline tokens={block.content} />;
+function MarkdownHeading({ block, renderText }: {
+  block: Extract<FilePreviewMarkdownBlock, { type: "heading" }>;
+  renderText?: (value: string) => ReactNode;
+}) {
+  const content = <MarkdownInline tokens={block.content} renderText={renderText}/>;
   const level = Math.min(block.level + 1, 6);
   const Tag: "h2" | "h3" = level === 2 ? "h2" : "h3";
   if (level <= 3) return <Tag>{content}</Tag>;
   return <Tag role="heading" aria-level={level}>{content}</Tag>;
 }
 
-function MarkdownBlock({ block }: { block: FilePreviewMarkdownBlock }) {
+function MarkdownBlock({ block, renderText }: {
+  block: FilePreviewMarkdownBlock;
+  renderText?: (value: string) => ReactNode;
+}) {
   switch (block.type) {
     case "heading":
-      return <MarkdownHeading block={block} />;
+      return <MarkdownHeading block={block} renderText={renderText}/>;
     case "paragraph":
-      return <p><MarkdownInline tokens={block.content} /></p>;
+      return <p><MarkdownInline tokens={block.content} renderText={renderText}/></p>;
     case "blockquote":
-      return <blockquote><MarkdownInline tokens={block.content} /></blockquote>;
+      return <blockquote><MarkdownInline tokens={block.content} renderText={renderText}/></blockquote>;
     case "list": {
-      const items = block.items.map((item, index) => <li key={index}><MarkdownInline tokens={item} /></li>);
+      const items = block.items.map((item, index) => <li key={index}><MarkdownInline tokens={item} renderText={renderText}/></li>);
       return block.ordered ? <ol>{items}</ol> : <ul>{items}</ul>;
     }
     case "code":
@@ -95,13 +107,13 @@ function MarkdownBlock({ block }: { block: FilePreviewMarkdownBlock }) {
           <table>
             <thead>
               <tr>{block.headers.map((cell, index) => (
-                <th key={index} style={{ textAlign: block.aligns[index] }}><MarkdownInline tokens={cell} /></th>
+                <th key={index} style={{ textAlign: block.aligns[index] }}><MarkdownInline tokens={cell} renderText={renderText}/></th>
               ))}</tr>
             </thead>
             <tbody>
               {block.rows.map((row, rowIndex) => (
                 <tr key={rowIndex}>{row.map((cell, cellIndex) => (
-                  <td key={cellIndex} style={{ textAlign: block.aligns[cellIndex] }}><MarkdownInline tokens={cell} /></td>
+                  <td key={cellIndex} style={{ textAlign: block.aligns[cellIndex] }}><MarkdownInline tokens={cell} renderText={renderText}/></td>
                 ))}</tr>
               ))}
             </tbody>
@@ -119,21 +131,28 @@ export interface MarkdownPreviewProps {
   fontSize?: number;
   /** Soft-wrap long lines instead of forcing the container to scroll. */
   wrap?: boolean;
+  /**
+   * `page`（默认）是对话框/编辑器里的纸面排版；`inline` 去掉纸面（宽度、内边距、底色、
+   * 行高）只留正文排版，供消息气泡复用同一份解析与转义。
+   */
+  variant?: "page" | "inline";
+  /** 纯文本片段的自定义渲染（群聊用它把 @成员名 交回自己的 token）；不传就是原样文本。 */
+  renderText?: (value: string) => ReactNode;
 }
 
 /**
- * Renders the supported Markdown subset as React elements. Both the file
- * preview dialog and the code editor's rendered mode use this entry point, so
- * parsing and sanitising stay in one place; React owns every DOM node.
+ * Renders the supported Markdown subset as React elements. The file preview
+ * dialog, the code editor's rendered mode and the chat message bodies use this
+ * entry point, so parsing and sanitising stay in one place; React owns every DOM node.
  */
-export function MarkdownPreview({ content, fontSize, wrap }: MarkdownPreviewProps) {
-  const blocks = useMemo(() => parseFilePreviewMarkdown(content), [content]);
+export function MarkdownPreview({ content, fontSize, wrap, variant = "page", renderText }: MarkdownPreviewProps) {
+  const blocks = React.useMemo(() => parseFilePreviewMarkdown(content), [content]);
   return (
     <div
-      className={classNames("wand-markdown-preview", wrap && "wrap")}
+      className={classNames("wand-markdown-preview", variant === "inline" && "wand-markdown-preview-inline", wrap && "wrap")}
       style={fontSize == null ? undefined : { fontSize: `${fontSize}px` }}
     >
-      {blocks.map((block, index) => <MarkdownBlock block={block} key={index} />)}
+      {blocks.map((block, index) => <MarkdownBlock block={block} renderText={renderText} key={index} />)}
     </div>
   );
 }

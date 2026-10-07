@@ -179,22 +179,11 @@ test("terminal view keeps the attachment button and one waiting batch per pick",
   // the next chunk waits for terminal output to settle instead of a fixed delay.
   assert.match(terminal, /export function waitForTerminalSettled\(wroteAtMs\?: number, maxMs\?: number\)/);
 
-  // 直通 composer: 排版成三列把附件按钮放回来（composer-actions-left 占第 1 列，
-  // 输入行占第 2 列），popover 里只留上传附件，锚点上移到 62px 对齐 50px 高的一行。
-  assert.match(
-    css,
-    /html:not\(\.is-wand-app\) \.input-composer\.is-terminal-interactive \.composer-main-row[^{]*\{\s*grid-template-columns: auto minmax\(0, 1fr\) auto;/,
-  );
-  assert.match(
-    css,
-    /html:not\(\.is-wand-app\) \.input-composer\.is-terminal-interactive \.composer-actions-left[^{]*\{\s*grid-column: 1;/,
-  );
-  assert.match(
-    css,
-    /\has\(\.input-composer\.is-terminal-interactive\) \.composer-plus-popover > \.plus-popover-trio-wrap \{\s*display: none !important;/,
-  );
-  assert.match(
-    css,
-    /\has\(\.input-composer\.is-terminal-interactive\) \.composer-plus-popover \{\s*bottom: calc\(\s*62px/,
-  );
+  // Ant surfaces keep the attachment controls and native input in one grid.
+  // 桌面正文占弹性轨道、两个控件组在下一行；窄屏把控件组收进第一列，两条轨道不变。
+  assert.match(css, /\.composer-main-row \{ display: grid;[^}]*grid-template-columns: minmax\(0, 1fr\) auto/);
+  assert.match(css, /\.composer-main-row \{ grid-template-columns: auto minmax\(0, 1fr\)/);
+  assert.doesNotMatch(css, /\.input-composer\.is-terminal-interactive \.composer-actions-left[^{}]*\{[^}]*display: none/);
+  assert.match(css, /\.input-composer\.is-terminal-interactive :is\([^)]*\.composer-inline-config/);
+  assert.match(css, /\.composer-plus-popover \{ position: absolute; bottom: calc\(100% - 8px\)/);
 });

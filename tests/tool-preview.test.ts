@@ -20,7 +20,9 @@ test("collapsed previews expose actual command, search scope, read range and edi
 
 test("result previews surface explicit facts and errors without inventing success", () => {
   assert.equal(toolResultPreview({ content: JSON.stringify({ exit_code: 1, output: "FAIL tests/ui.test.ts\nTypeError: missing element" }), is_error: true }), "退出码 1 · FAIL tests/ui.test.ts · TypeError: missing element");
-  assert.equal(toolResultPreview({ content: [{ type: "image", source: { data: "PRIVATE_BASE64" } }] }), "");
+  // 图片结果只报数量，绝不回显 base64 内容。
+  assert.equal(toolResultPreview({ content: [{ type: "image", source: { data: "PRIVATE_BASE64" } }] }), "返回 1 张图片");
+  assert.doesNotMatch(toolResultPreview({ content: [{ type: "image", source: { data: "PRIVATE_BASE64" } }] }), /PRIVATE_BASE64/);
   assert.equal(toolResultPreview({ content: "" }), "");
   assert.equal(toolResultPreview({ content: JSON.stringify({ matches: ["a.ts", "b.ts"] }) }), "返回 2 项");
   assert.equal(toolResultPreview({ content: "Bearer very-secret-token\npassword=hidden" }), "Bearer [隐藏] · password=[隐藏]");

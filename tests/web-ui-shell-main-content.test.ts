@@ -103,13 +103,13 @@ test("ShellMainContent SSR keeps all identity-stable legacy slots childless", ()
   };
   const html = renderMainContent(fixture(), refs);
 
-  assert.match(html, /^<main class="main-content">/);
-  assert.match(html, /<div id="output" class="terminal-container active"><\/div>/);
-  assert.match(html, /<div id="chat-output" class="chat-container hidden"><\/div>/);
-  assert.match(html, /<div class="input-panel"><\/div>.*<\/main>$/s);
+  assert.match(html, /^<main[^>]*class="[^"]*main-content[^"]*"/);
+  assert.match(html, /<div id="output" class="terminal-container active"[^>]*><\/div>/);
+  assert.match(html, /<div id="chat-output" class="chat-container hidden"[^>]*><\/div>/);
+  assert.match(html, /<div class="input-panel"[^>]*><\/div>.*<\/main>$/s);
   assert.match(html, /<div class="file-explorer legacy-file-explorer-host" id="file-explorer" hidden="" aria-hidden="true"><\/div>/);
-  assert.match(html, /class="wand-file-explorer"/);
-  assert.match(html, /<div id="blank-chat" class="blank-chat hidden">/);
+  // Ant Drawer renders its explorer in a client portal; the legacy bridge root is SSR-stable.
+  assert.match(html, /<div(?=[^>]*id="blank-chat")(?=[^>]*class="[^"]*blank-chat hidden[^"]*")/);
   assert.match(html, /<div id="cross-session-queue-host"><\/div>/);
   assert.equal((html.match(/id="output"/g) ?? []).length, 1);
   assert.equal((html.match(/id="chat-output"/g) ?? []).length, 1);
@@ -142,10 +142,11 @@ test("ShellMainContent SSR renders the complete React welcome state contract", (
   // 统一任务入口：欢迎页不再有按 provider 的快捷建会话按钮与目录选择器。
   assert.doesNotMatch(html, /welcome-tool-|blank-chat-cwd/);
   assert.match(html, /新建任务/);
-  assert.match(html, /<div id="output" class="terminal-container hidden"><\/div>/);
-  assert.match(html, /<div id="chat-output" class="chat-container hidden"><\/div>/);
-  assert.match(html, /<div id="blank-chat" class="blank-chat">/);
-  assert.match(html, /<div class="input-panel hidden"><\/div>.*<\/main>$/s);
+  assert.match(html, /<div id="output" inert="" class="terminal-container hidden"[^>]*><\/div>/);
+  assert.match(html, /<div id="chat-output" inert="" class="chat-container hidden"[^>]*><\/div>/);
+  assert.match(html, /<section class="conversation-root" aria-label="正在读取聊天输入服务"/);
+  assert.match(html, /<div(?=[^>]*id="blank-chat")(?=[^>]*class="[^"]*blank-chat[^"]*")/);
+  assert.match(html, /<div inert="" class="input-panel hidden"[^>]*><\/div>.*<\/main>$/s);
 });
 
 test("legacy slot visibility projection preserves hidden and active semantics", () => {
@@ -180,13 +181,14 @@ test("ShellMainContent uses UiStore actions and no forbidden legacy seam", () =>
   );
   assert.match(source, /useUiStoreSnapshot\(\)/);
   assert.match(source, /useUiDispatch\(\)/);
-  assert.match(source, /<div id="output" inert=\{editor\.open\} className=\{classes\.terminal\} ref=\{legacyRefs\?\.terminal\}\/>/);
-  assert.match(source, /<div id="chat-output" inert=\{editor\.open\} className=\{classes\.chat\} ref=\{legacyRefs\?\.chat\}\/>/);
-  assert.match(source, /<div inert=\{editor\.open\} className=\{classes\.composer\} ref=\{legacyRefs\?\.composer\}\/>/);
+  assert.match(source, /<div id="output" inert=\{pageLayerOpen\} className=\{classes\.terminal\} ref=\{legacyRefs\?\.terminal\}[^>]*\/>/);
+  assert.match(source, /<div id="chat-output" inert=\{pageLayerOpen\} className=\{classes\.chat\} ref=\{legacyRefs\?\.chat\}[^>]*\/>/);
+  assert.match(source, /<div inert=\{pageLayerOpen\} className=\{classes\.composer\} ref=\{legacyRefs\?\.composer\}[^>]*\/>/);
   assert.match(source, /id="cross-session-queue-host" ref=\{queueRef\}/);
-  assert.match(source, /context\.taskId \? null : <ShellTopbar\/>/);
+  assert.match(source, /context\.taskId \? null : <div[^>]*inert=\{conversationVisible\}[^>]*><ShellTopbar\/>/);
   assert.match(source, /<WorkspaceTabBar\/>/);
   assert.doesNotMatch(source, /inSplit \? null : <WorkspaceTabBar\/>/);
+  assert.match(source, /const pageLayerOpen = conversationVisible \|\| taskBoard\.open \|\| editor\.open/);
   // 任务管理是叠层路由，不能替换 <main>，否则 #output 被卸载后会话回不去。
   assert.match(source, /taskBoard\.open \? <TaskBoardHost/);
   assert.doesNotMatch(source, /if \(taskBoard\.open\) \{\s*return <main/s);
@@ -211,7 +213,10 @@ test("workspace task blank state offers an explicit Agent or shell choice", () =
   );
   assert.match(source, /选择 CLI 工具，以及结构化或 PTY，开始这个任务。/);
   assert.match(source, /WorkspaceWelcomeChooser/);
-  assert.match(source, /项目还是空白的。选择 CLI 工具和结构化 \/ PTY，开始第一个任务。/);
+  assert.match(source, /选择 CLI 工具和结构化 \/ PTY，在项目里直接开始会话；需要时再归纳成任务。/);
+  // 项目欢迎页开工不再替会话建任务：会话只带项目归属，落在侧栏「未分组任务」里。
+  assert.doesNotMatch(source, /createTask\(|httpWorkspacesRepository/);
+  assert.match(source, /runtime\.newTaskSession\(\{\s*workspaceId: workspaceProject\.workspaceId,\s*cwd: workspaceProject\.cwd,/);
 });
 
 test("mobile tasks keep a sidebar navigation entry even without terminal windows", () => {

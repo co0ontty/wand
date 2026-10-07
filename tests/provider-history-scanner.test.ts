@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { appendFileSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -208,6 +209,129 @@ test("provider history scanner exposes resumable OpenCode and Qoder sessions cre
     assert.equal(scanner.listOpenCodeHistorySessions().length, 0);
     assert.equal(scanner.deleteQoderHistoryFiles([qoderId]), 1);
     assert.deepEqual(scanner.listQoderHistorySessions(), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("provider history scanner deletes Pi, Grok, and Gemini native session resources", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-pi-grok-gemini-history-"));
+  try {
+    const piSessionsDir = path.join(root, ".pi", "agent", "sessions");
+    const piProjectDir = path.join(piSessionsDir, "--Users-test-project--");
+    mkdirSync(piProjectDir, { recursive: true });
+    const piSessionId = "01a0f57c-9f2f-77f9-8b96-de95f720057f";
+    const piFile = path.join(piProjectDir, `2026-10-01T00-00-00-000Z_${piSessionId}.jsonl`);
+    writeFileSync(piFile, '{"type":"session"}\n');
+
+    const grokSessionsDir = path.join(root, ".grok", "sessions");
+    const grokProjectDir = path.join(grokSessionsDir, "%2FUsers%2Ftest%2Fproject");
+    const grokSessionId = "01a02707-9ac0-7212-aceb-503e9693a341";
+    const grokSessionDir = path.join(grokProjectDir, grokSessionId);
+    mkdirSync(grokSessionDir, { recursive: true });
+    writeFileSync(path.join(grokSessionDir, "meta.json"), "{}");
+
+    const geminiHome = path.join(root, ".gemini");
+    const geminiSessionId = "8e3cb689-bdf7-42ec-96a0-c762ce08d547";
+    const geminiConvDir = path.join(geminiHome, "antigravity-cli", "conversations");
+    mkdirSync(geminiConvDir, { recursive: true });
+    const geminiDb = path.join(geminiConvDir, `${geminiSessionId}.db`);
+    writeFileSync(geminiDb, "sqlite");
+
+    const scanner = new ProviderHistoryScanner({
+      piSessionsDir,
+      grokSessionsDir,
+      geminiHome,
+    });
+
+    assert.equal(scanner.deletePiHistoryFiles([piSessionId]), 1);
+    assert.equal(scanner.deletePiHistoryFiles([piSessionId]), 0);
+
+    assert.equal(scanner.deleteGrokHistoryFiles([grokSessionId]), 1);
+    assert.equal(scanner.deleteGrokHistoryFiles([grokSessionId]), 0);
+
+    assert.equal(scanner.deleteGeminiHistoryFiles([geminiSessionId]), 1);
+    assert.equal(scanner.deleteGeminiHistoryFiles([geminiSessionId]), 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("deleting an OpenCode session reclaims its event rows and waits out a concurrent writer", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-opencode-event-reclaim-"));
+  try {
+    const openCodeDatabasePath = path.join(root, "opencode.db");
+    const database = new DatabaseSync(openCodeDatabasePath);
+    database.exec(`
+      CREATE TABLE session (
+        id TEXT PRIMARY KEY,
+        parent_id TEXT,
+        directory TEXT NOT NULL,
+        title TEXT NOT NULL,
+        time_created INTEGER NOT NULL,
+        time_updated INTEGER NOT NULL
+      );
+      CREATE TABLE message (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        data TEXT NOT NULL
+      );
+      CREATE TABLE event_sequence (
+        aggregate_id TEXT PRIMARY KEY,
+        seq INTEGER NOT NULL,
+        owner_id TEXT
+      );
+      CREATE TABLE event (
+        id TEXT PRIMARY KEY,
+        aggregate_id TEXT NOT NULL,
+        seq INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        data TEXT NOT NULL,
+        CONSTRAINT fk_event_aggregate_id FOREIGN KEY (aggregate_id)
+          REFERENCES event_sequence(aggregate_id) ON DELETE CASCADE
+      );
+    `);
+    const keptId = "ses_kept";
+    const deletedId = "ses_deleted";
+    for (const id of [keptId, deletedId]) {
+      database.prepare("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?)").run(
+        id, null, root, `title ${id}`, 1, 2,
+      );
+      database.prepare("INSERT INTO event_sequence (aggregate_id, seq) VALUES (?, 0)").run(id);
+      for (let seq = 1; seq <= 3; seq++) {
+        database.prepare("INSERT INTO event VALUES (?, ?, ?, ?, ?)")
+          .run(`${id}-event-${seq}`, id, seq, "message.updated.1", "x".repeat(1024));
+      }
+    }
+    database.close();
+
+    // A concurrent writer in another process holds the write lock. With the default
+    // busy_timeout of 0 this delete returned a silent 0; it must now wait the writer out.
+    const blocker = spawn(process.execPath, ["-e", `
+      const { DatabaseSync } = require("node:sqlite");
+      const db = new DatabaseSync(process.argv[1]);
+      db.exec("BEGIN IMMEDIATE");
+      db.prepare("UPDATE session SET title = title WHERE 0").run();
+      process.stdout.write("locked\\n");
+      setTimeout(() => { db.exec("ROLLBACK"); db.close(); }, 1500);
+    `, openCodeDatabasePath], { stdio: ["ignore", "pipe", "ignore"] });
+    await new Promise<void>((resolve, reject) => {
+      blocker.stdout.once("data", () => resolve());
+      blocker.once("error", reject);
+    });
+
+    const scanner = new ProviderHistoryScanner({ openCodeDatabasePath });
+    assert.equal(scanner.deleteOpenCodeHistorySessions([deletedId]), 1);
+
+    await new Promise<void>((resolve) => blocker.once("exit", () => resolve()));
+
+    const verify = new DatabaseSync(openCodeDatabasePath, { readOnly: true });
+    const events = verify.prepare("SELECT aggregate_id, COUNT(*) AS c FROM event GROUP BY aggregate_id").all();
+    const sequences = verify.prepare("SELECT aggregate_id FROM event_sequence").all();
+    verify.close();
+
+    assert.deepEqual(events.map((row) => row.aggregate_id), [keptId]);
+    assert.deepEqual(sequences.map((row) => row.aggregate_id), [keptId]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -9,6 +9,8 @@ import { resolveChildEnv } from "./env-utils.js";
 import { discoverPiEndpointModels, type PiModelEndpointDiscoveryOptions } from "./pi-model-discovery.js";
 import { ClaudeModelAvailability, ClaudeModelInfo, ClaudeModelSource } from "./types.js";
 import { extractSemver } from "./version-utils.js";
+import { AUTO_ASSIGN_LABEL, AUTO_ASSIGN_SELECTOR, FREE_MODEL_GROUP_ID, isAutoAssignSelector, isModelGroupSelector, modelGroupSelector, orderModelIds, type ModelGroup } from "./model-groups.js";
+import { OPENROUTER_FREE_GROUP } from "./openrouter-free-selection.js";
 
 const execFileAsync = promisify(execFile);
 const CLAUDE_VERIFICATION_CACHE_KEY = "claude-model-verifications-v1";
@@ -66,7 +68,7 @@ const QODER_FALLBACK_MODELS: ClaudeModelInfo[] = [
   { id: "ultimate", label: "Ultimate" },
 ];
 const PI_FALLBACK_MODELS: ClaudeModelInfo[] = [
-  { id: "default", label: "跟随 Pi 默认", alias: true },
+  { id: "default", label: "跟随 one 的 Agent 默认", alias: true },
 ];
 
 /**
@@ -125,6 +127,9 @@ export interface ModelRefreshOptions {
   modelsApi?: ClaudeModelsApi;
   verifyClaudeCandidates?: boolean;
   piEndpointDiscovery?: PiModelEndpointDiscoveryOptions & { enabled: boolean };
+  managedPiModels?: () => readonly ClaudeModelInfo[];
+  managedPiModelMembers?: () => ClaudeModelInfo[];
+  modelGroups?: () => readonly ModelGroup[];
   now?: () => Date;
 }
 
@@ -217,9 +222,13 @@ export function withConfiguredDefaultModelLabels<T extends object>(
     ));
     if (at < 0) continue;
     const entry = list[at] as { label?: unknown };
-    if (String(entry.label ?? "").includes(configured)) continue;
+    const selected = list.find((item) => item?.id === configured);
+    const name = configured.startsWith("wand-model-group/") || configured === "wand-openrouter-free/auto"
+      ? selected?.label || "模型分组"
+      : isAutoAssignSelector(configured) ? selected?.label || AUTO_ASSIGN_LABEL : configured;
+    if (String(entry.label ?? "").includes(name)) continue;
     const updated = [...list];
-    updated[at] = { ...(entry as object), label: `跟随服务端默认（${configured}）` };
+    updated[at] = { ...(entry as object), label: `跟随服务端默认（${name}）` };
     next ??= { ...(catalog as Record<string, unknown>) };
     next[field] = updated;
   }
@@ -227,6 +236,9 @@ export function withConfiguredDefaultModelLabels<T extends object>(
 }
 
 export interface ModelCatalogSnapshot extends ModelCache {
+  modelGroups?: ModelGroup[];
+  /** Verified concrete free members, used only when editing the pool order. */
+  freeModels?: ClaudeModelInfo[];
   /** SHA-256 of the catalog excluding `refreshedAt`. Changes only with content. */
   revision: string;
 }
@@ -325,7 +337,7 @@ function defaultCommandRunner(
 function normalizeClaudeModelId(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const id = value.trim();
-  return MODEL_ID_PATTERN.test(id) ? id : null;
+  return MODEL_ID_PATTERN.test(id) && !isModelGroupSelector(id) ? id : null;
 }
 
 function formatClaudeModelLabel(id: string, displayName?: string): string {
@@ -578,6 +590,8 @@ async function probePiModels(
   env: NodeJS.ProcessEnv,
   options: ModelRefreshOptions,
 ): Promise<ProbeResult<ClaudeModelInfo[]>> {
+  const agentDir = options.piEndpointDiscovery?.agentDir;
+  if (agentDir) env = { ...env, PI_CODING_AGENT_DIR: agentDir };
   const rpcText = await commandText(
     runner,
     "pi",
@@ -1000,7 +1014,7 @@ export function parsePiRpcModels(stdout: string): ClaudeModelInfo[] {
   return [
     {
       id: "default",
-      label: "跟随 Pi 默认",
+      label: "跟随 one 的 Agent 默认",
       alias: true,
       ...(union.length ? { reasoningEfforts: union } : {}),
     },
@@ -1030,7 +1044,7 @@ export function parsePiModels(stdout: string): ClaudeModelInfo[] {
   }
   if (!discovered.length) return cloneModels(PI_FALLBACK_MODELS);
   return [
-    { id: "default", label: "跟随 Pi 默认", alias: true },
+    { id: "default", label: "跟随 one 的 Agent 默认", alias: true },
     ...discovered,
   ];
 }
@@ -1162,6 +1176,7 @@ function parsePersistedModelInfo(value: unknown): ClaudeModelInfo | null {
     id,
     label,
     ...(typeof value.alias === "boolean" ? { alias: value.alias } : {}),
+    ...(typeof value.group === "string" ? { group: value.group.slice(0, 80) } : {}),
     ...(source ? { source } : {}),
     ...(availability ? { availability } : {}),
     ...(note ? { note } : {}),
@@ -1374,6 +1389,7 @@ async function discoverModelCache(
 export class ModelCatalogService {
   private cache: ModelCache;
   private revision: string;
+  private publishedRevision: string;
   private hasPersistedSnapshot: boolean;
   private refreshPromise: Promise<ModelCatalogRefreshResult> | null = null;
   private inFlightIncludesVerification = false;
@@ -1383,12 +1399,85 @@ export class ModelCatalogService {
     const initialOptions = getOptions();
     const persisted = loadPersistedModelCatalog(initialOptions.storage);
     this.cache = persisted ? cloneCache(persisted.catalog) : createInitialCache(initialOptions);
-    this.revision = persisted?.revision ?? catalogRevision(this.cache);
+    this.cache.piModels = this.withManagedPiModels(this.cache.piModels);
+    this.revision = catalogRevision(this.cache);
     this.hasPersistedSnapshot = persisted !== null;
+    this.publishedRevision = this.snapshot().revision;
+  }
+
+  private withManagedPiModels(models: ClaudeModelInfo[]): ClaudeModelInfo[] {
+    const managed = this.getOptions().managedPiModels;
+    if (!managed) return models;
+    const entries = managed();
+    const ids = new Set(entries.map((model) => model.id));
+    return [...models.filter((model) => !model.id.startsWith("wand-openrouter-free/") && !ids.has(model.id)), ...entries];
+  }
+
+  publishManagedPiModels(): void {
+    const next = { ...this.cache, piModels: this.withManagedPiModels(this.cache.piModels) };
+    const revision = catalogRevision(next);
+    const projectionChanged = this.snapshot().revision !== this.publishedRevision;
+    if (revision === this.revision && !projectionChanged) return;
+    next.refreshedAt = new Date().toISOString();
+    this.cache = next;
+    this.revision = revision;
+    savePersistedModelCatalog(this.getOptions().storage, this.cache, revision);
+    const result = { ...this.snapshot(), changed: true, checkedAt: next.refreshedAt };
+    this.publishedRevision = result.revision;
+    for (const listener of this.changeListeners) {
+      try { listener(result); } catch { /* notification must not prevent publication */ }
+    }
   }
 
   snapshot(): ModelCatalogSnapshot {
-    return { ...cloneCache(this.cache), revision: this.revision };
+    const options = this.getOptions();
+    const configured = options.modelGroups?.() ?? [];
+    const catalog = cloneCache(this.cache);
+    // Virtual group identities are never concrete models or CLI verification targets.
+    for (const field of Object.values(PROVIDER_MODEL_LIST_FIELDS)) {
+      catalog[field] = catalog[field].filter((model) => !isModelGroupSelector(model.id));
+    }
+    const freeModels = options.managedPiModelMembers?.() ?? [];
+    const groups = structuredClone(configured.filter((group) => group.id !== FREE_MODEL_GROUP_ID));
+    if (options.managedPiModelMembers) {
+      const saved = configured.find((group) => group.id === FREE_MODEL_GROUP_ID && group.provider === "pi");
+      groups.push({ id: FREE_MODEL_GROUP_ID, provider: "pi", name: OPENROUTER_FREE_GROUP,
+        models: orderModelIds(freeModels.map((model) => model.id), saved?.models ?? []) });
+    }
+    for (const group of groups) {
+      if (group.id === FREE_MODEL_GROUP_ID) continue; // Already published by OpenRouter as a single pool option.
+      const list = catalog[PROVIDER_MODEL_LIST_FIELDS[group.provider]];
+      const members = group.provider === "pi" ? [...list, ...freeModels] : list;
+      const memberInfo = group.models.map((id) => members.find((model) => model.id === id));
+      const efforts = memberInfo.every((model) => model?.reasoningEfforts?.length)
+        ? memberInfo[0]!.reasoningEfforts!.filter((level) => memberInfo.every((model) =>
+          model!.reasoningEfforts!.some((item) => item.effort === level.effort))) : [];
+      list.push({ id: modelGroupSelector(group), label: group.name, group: "模型分组",
+        ...(efforts.length ? { reasoningEfforts: structuredClone(efforts) } : {}) });
+    }
+    const projection = { ...catalog, ...(groups.length ? { modelGroups: groups } : {}),
+      ...(options.managedPiModelMembers ? { freeModels } : {}) };
+    for (const field of Object.values(PROVIDER_MODEL_LIST_FIELDS)) {
+      const list = projection[field];
+      if (!list.some((model) => model.id === AUTO_ASSIGN_SELECTOR)) {
+        const entry = { id: AUTO_ASSIGN_SELECTOR, label: AUTO_ASSIGN_LABEL, alias: false,
+          source: "builtin" as ClaudeModelSource, availability: "default" as ClaudeModelAvailability,
+          note: "按第一条提示词在本工具的模型分组里自动选一个" };
+        // 默认项排在最前；智能分配紧跟其后，其余具体模型与分组保持原顺序。
+        if (list[0]?.id === "default") list.splice(1, 0, entry); else list.unshift(entry);
+      }
+    }
+    return { ...projection, revision: groups.length
+      ? createHash("sha256").update(`${this.revision}:${JSON.stringify(groups)}:${JSON.stringify(freeModels)}`).digest("hex") : this.revision };
+  }
+
+  /** Preference changes publish immediately without re-running CLI discovery or altering stored history. */
+  publishModelGroups(): void {
+    const result = { ...this.snapshot(), changed: true, checkedAt: new Date().toISOString() };
+    this.publishedRevision = result.revision;
+    for (const listener of this.changeListeners) {
+      try { listener(result); } catch { /* notification must not prevent saving */ }
+    }
   }
 
   /** 目录内容真正变化时通知。客户端靠它刷新下拉，不用自己再跑一遍 CLI。 */
@@ -1428,6 +1517,7 @@ export class ModelCatalogService {
     };
     const checkedAt = (options.now?.() ?? new Date()).toISOString();
     const discovered = await discoverModelCache(options, this.cache);
+    discovered.piModels = this.withManagedPiModels(discovered.piModels);
     const discoveredRevision = catalogRevision(discovered);
     const changed = !this.hasPersistedSnapshot || discoveredRevision !== this.revision;
     if (changed) {
@@ -1439,6 +1529,7 @@ export class ModelCatalogService {
       this.hasPersistedSnapshot = Boolean(options.storage);
     }
     const result = { ...this.snapshot(), changed, checkedAt };
+    this.publishedRevision = result.revision;
     if (changed) {
       for (const listener of this.changeListeners) {
         try { listener(result); } catch { /* 通知失败不影响目录本身 */ }

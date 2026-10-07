@@ -1,11 +1,14 @@
 import crypto from "node:crypto";
+import { CONVERSATION_OWNER, type ConversationInstance, type ConversationRequest } from "./conversation-types.js";
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { SessionSnapshot, ConversationTurn, SessionKind, SessionProvider, SessionRunner, SessionSource, StructuredSessionState, WorktreeMergeInfo, Workspace, LayoutNode, TaskWindowLayout, WorkspaceDefaultProvider, WorkspaceKind, WorkspaceTask, WorkspaceTaskWorktree, WorkspaceTaskStatus, GLOBAL_WORKSPACE_ID } from "./types.js";
+import { SessionSnapshot, ConversationTurn, HarnessSessionContext, SessionKind, SessionProvider, SessionRunner, SessionSource, StructuredSessionState, WorktreeMergeInfo, Workspace, LayoutNode, TaskWindowLayout, WorkspaceDefaultProvider, WorkspaceKind, WorkspaceTask, WorkspaceTaskWorktree, WorkspaceTaskStatus, GLOBAL_WORKSPACE_ID } from "./types.js";
 import { normalizeSessionDirectory } from "./session-directory-tree.js";
+import { defaultPiCliSessionSettings, defaultPiSessionSettings, patchPiSessionSettings, type PiSessionSettings } from "./pi-session-settings.js";
+import { parseHarnessExtensionState } from "./core-extension-host.js";
 import { inferProviderFromCommand, inferProviderFromRunner, isSessionProvider, SESSION_PROVIDERS } from "./session-provider.js";
-import { DEFAULT_ITERATION_NAME, DEFAULT_WAND_TASK_AGENT_KIND, DEFAULT_WAND_TASK_PRIORITY, isWandTaskAgentKind, normalizeWandTaskAgentMode } from "./task-types.js";
+import { DEFAULT_ITERATION_NAME, DEFAULT_WAND_TASK_AGENT_KIND, DEFAULT_WAND_TASK_PRIORITY, isWandTaskAgentEngine, isWandTaskAgentKind, normalizeWandTaskAgentMode } from "./task-types.js";
 import { firstLayoutTabId } from "./layout-tree.js";
 import { isUnnamedWorkspaceTaskName } from "./wand-task-sync.js";
 import { AI_TEAM_DEFAULT_MAX_STEPS, AI_TEAM_TERMINAL_RUN_STATUSES, aiTeamChatTitle, isBuiltinSiliconEmployee, isTeamMemberRole, memberAgents, parseSiliconEmployeeTags, siliconEmployeeTags } from "./ai-team-types.js";
@@ -180,7 +183,11 @@ export function parseWandTaskAgent(raw: unknown): import("./task-types.js").Wand
   const mode = normalizeWandTaskAgentMode(provider, value.mode);
   // kind 同样是后加字段：老数据 / 老客户端没带时按结构化会话读取。
   const kind = isWandTaskAgentKind(value.kind) ? value.kind : DEFAULT_WAND_TASK_AGENT_KIND;
-  return { provider, model: model.trim(), thinkingEffort, mode, kind };
+  const engine = value.engine === undefined || value.engine === null || value.engine === ""
+    ? undefined
+    : isWandTaskAgentEngine(value.engine) ? value.engine : null;
+  if (engine === null || (engine === "sdk" && (provider !== "pi" || kind !== "structured"))) return null;
+  return { provider, model: model.trim(), thinkingEffort, mode, kind, ...(engine === "sdk" ? { engine } : {}) };
 }
 
 /** `wand_milestones` 行 → 领域对象；名字必须非空，脏行直接跳过。 */
@@ -244,6 +251,10 @@ type DurableSessionOptions = Pick<SessionSnapshot,
   | "employeeAvatar"
   | "employeeCandidates"
   | "employeeCandidateIndex"
+  | "harnessContext"
+  | "piSettings"
+  | "harnessExtensionState"
+
 >;
 
 type PersistedSessionOptions = DurableSessionOptions & {
@@ -358,6 +369,9 @@ function serializeSessionOptions(snapshot: SessionSnapshot): string {
     employeeAvatar: snapshot.employeeAvatar,
     employeeCandidates: snapshot.employeeCandidates,
     employeeCandidateIndex: snapshot.employeeCandidateIndex,
+    harnessContext: snapshot.harnessContext,
+    piSettings: snapshot.piSettings,
+    harnessExtensionState: snapshot.harnessExtensionState,
   };
   return JSON.stringify(options);
 }
@@ -422,7 +436,34 @@ function parseSessionOptions(raw: string | null): DurableSessionOptions {
   if (Number.isSafeInteger(parsed.employeeCandidateIndex) && (parsed.employeeCandidateIndex as number) >= 0) {
     options.employeeCandidateIndex = parsed.employeeCandidateIndex as number;
   }
+  const harnessContext = parseHarnessContext(parsed.harnessContext);
+  if (harnessContext) options.harnessContext = harnessContext;
+  if (parsed.piSettings !== undefined) {
+    try { options.piSettings = patchPiSessionSettings(defaultPiSessionSettings(), parsed.piSettings); }
+    catch { /* Invalid old settings do not enable optional capabilities. */ }
+  }
+  const extensions = parseHarnessExtensionState(parsed.harnessExtensionState);
+  if (extensions) options.harnessExtensionState = extensions;
   return options;
+}
+
+/** core 引擎压缩状态：形状不对就当没有压缩过，不让旧数据把会话读坏。 */
+const HARNESS_SUMMARY_MAX_CHARS = 20_000;
+
+function parseHarnessContext(raw: unknown): HarnessSessionContext | undefined {
+  if (!isRecord(raw)) return undefined;
+  const { summary, fromTurnIndex, tokensBefore, compactions } = raw;
+  if (typeof summary !== "string" || summary.length === 0) return undefined;
+  const boundedFrom = typeof fromTurnIndex === "number" && Number.isSafeInteger(fromTurnIndex) && fromTurnIndex > 0
+    ? fromTurnIndex
+    : undefined;
+  if (boundedFrom === undefined) return undefined;
+  return {
+    summary: summary.slice(0, HARNESS_SUMMARY_MAX_CHARS),
+    fromTurnIndex: boundedFrom,
+    tokensBefore: typeof tokensBefore === "number" && Number.isFinite(tokensBefore) && tokensBefore >= 0 ? Math.floor(tokensBefore) : 0,
+    compactions: typeof compactions === "number" && Number.isSafeInteger(compactions) && compactions > 0 ? compactions : 1,
+  };
 }
 
 function parseQueuedMessages(raw: string | null): string[] | undefined {
@@ -512,6 +553,7 @@ interface WorkspaceTaskRow {
   created_at: string;
   last_opened_at: string | null;
   layout_revision: number | null;
+  card_status: string | null;
 }
 
 function mapWorkspaceTaskWorktree(raw: string | null): WorkspaceTaskWorktree | null {
@@ -550,6 +592,7 @@ function mapWorkspaceTaskRow(row: WorkspaceTaskRow): WorkspaceTask {
     milestoneId: typeof row.milestone_id === "string" && row.milestone_id ? row.milestone_id : null,
     layout: mapWorkspaceTaskLayout(row.layout_json),
     status: (row.status === "done" ? "done" : "active") as WorkspaceTaskStatus,
+    ...(row.card_status === "archived" ? { archived: true } : {}),
     createdAt: row.created_at,
     lastOpenedAt: row.last_opened_at,
     layoutRevision: Number(row.layout_revision ?? 0) || 0,
@@ -1069,6 +1112,16 @@ const INIT_SQL = `
   );
   CREATE INDEX IF NOT EXISTS idx_decision_access_expiry ON decision_access(expires_at);
 
+  CREATE TABLE IF NOT EXISTS openrouter_free_access (
+    token_hash TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES command_sessions(id) ON DELETE CASCADE,
+    selector TEXT NOT NULL,
+    requirements_json TEXT NOT NULL,
+    credential_hash TEXT NOT NULL,
+    expires_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_openrouter_free_access_expiry ON openrouter_free_access(expires_at);
+
   CREATE TABLE IF NOT EXISTS user_memory_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     feature TEXT NOT NULL,
@@ -1183,7 +1236,7 @@ function ensureWandTaskSchema(db: DatabaseSync): void {
   if (columns.length > 0 && !names.has("auto_title_signature")) db.exec("ALTER TABLE wand_tasks ADD COLUMN auto_title_signature TEXT");
   // 里程碑：只加列，历史行保持 NULL；里程碑本体在 wand_milestones（INIT_SQL 建表）。
   if (columns.length > 0 && !names.has("milestone_id")) db.exec("ALTER TABLE wand_tasks ADD COLUMN milestone_id TEXT");
-  // 归档时间（自动/手动归档都写它）：保留期清理按它起算 7 天，历史归档行保持 NULL。
+  // 归档时间（自动/手动归档都写它）：任务自动删除按它起算；历史归档行保持 NULL。
   if (columns.length > 0 && !names.has("archived_at")) db.exec("ALTER TABLE wand_tasks ADD COLUMN archived_at TEXT");
   if (columns.length > 0) {
     // Index creation must wait until the column exists on legacy databases.
@@ -1286,6 +1339,9 @@ export function ensureDatabaseFile(dbPath: string): boolean {
   chmodSync(dir, 0o700);
   const created = !existsSync(dbPath);
   const db = new DatabaseSync(dbPath);
+  // DDL below takes the write lock; without this a concurrent CLI/Server writer
+  // aborts startup with SQLITE_BUSY instead of waiting its turn.
+  db.exec("PRAGMA busy_timeout = 5000");
   db.exec(INIT_SQL);
   ensureAuthSessionSchema(db);
   ensureCommandSessionSchema(db);
@@ -1345,7 +1401,7 @@ const WORKSPACE_TASK_PROJECTION = `SELECT wt.id,
     WHEN card.status IN ('done', 'archived') THEN 'done' ELSE 'active' END AS status,
   CASE WHEN card.id IS NULL THEN wt.milestone_id ELSE card.milestone_id END AS milestone_id,
   wt.worktree_json, wt.layout_json, wt.cwd, wt.created_at, wt.last_opened_at, wt.layout_revision,
-  wt.rowid AS _created_order
+  card.status AS card_status, wt.rowid AS _created_order
   FROM workspace_tasks wt LEFT JOIN wand_tasks card ON card.id = (
     SELECT id FROM wand_tasks WHERE workspace_task_id = wt.id
     ORDER BY updated_at DESC, rowid DESC LIMIT 1
@@ -1383,6 +1439,40 @@ export class WandStorage {
     ensureWandMilestoneSchema(this.db);
     ensureIterationPromptSchema(this.db);
     ensureAiTeamSchema(this.db);
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS conversation_list_state (
+        conversation_id TEXT PRIMARY KEY,
+        pinned_at TEXT,
+        hidden_at TEXT, dissolved_at TEXT, dissolved_by TEXT, deleting INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE IF NOT EXISTS conversations (
+        id TEXT PRIMARY KEY, owner TEXT NOT NULL, kind TEXT NOT NULL,
+        peer_employee_id TEXT, session_id TEXT, instance_json TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_conversation_peer ON conversations(owner, peer_employee_id)
+        WHERE kind = 'dm';
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_conversation_session ON conversations(session_id)
+        WHERE session_id IS NOT NULL;
+      CREATE TABLE IF NOT EXISTS conversation_tasks (
+        conversation_id TEXT NOT NULL, task_id TEXT NOT NULL UNIQUE, linked_at TEXT NOT NULL,
+        PRIMARY KEY(conversation_id, task_id)
+      );
+      CREATE TABLE IF NOT EXISTS conversation_messages (
+        id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, turn_json TEXT NOT NULL, created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_conversation_messages ON conversation_messages(conversation_id, created_at);
+      CREATE TABLE IF NOT EXISTS conversation_requests (
+        id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, receipt_json TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+    `);
+    const conversationListColumns = new Set((this.db.prepare("PRAGMA table_info(conversation_list_state)").all() as Array<{ name: string }>).map(column => column.name));
+    for (const [name, type] of [["dissolved_at", "TEXT"], ["dissolved_by", "TEXT"], ["deleting", "INTEGER NOT NULL DEFAULT 0"]]) {
+      if (!conversationListColumns.has(name!)) this.db.exec(`ALTER TABLE conversation_list_state ADD COLUMN ${name} ${type}`);
+    }
+    const conversationRunColumns = new Set((this.db.prepare("PRAGMA table_info(ai_team_runs)").all() as Array<{ name: string }>).map((column) => column.name));
+    if (!conversationRunColumns.has("conversation_id")) this.db.exec("ALTER TABLE ai_team_runs ADD COLUMN conversation_id TEXT");
+    if (!conversationRunColumns.has("member_version")) this.db.exec("ALTER TABLE ai_team_runs ADD COLUMN member_version INTEGER");
+    if (!conversationRunColumns.has("round_number")) this.db.exec("ALTER TABLE ai_team_runs ADD COLUMN round_number INTEGER");
     ensureConnectorSchema(this.db);
     this.ensureDefaultPasswordVault();
     this.migrateTaskRecords();
@@ -1416,6 +1506,174 @@ export class WandStorage {
       try { this.db.exec("ROLLBACK"); } catch { /* preserve the original error */ }
       throw error;
     }
+  }
+
+  // ============ Stable conversations (no read-side repair) ============
+
+  conversationListState(id: string): { pinnedAt: string | null; dissolvedAt: string | null; dissolvedBy: string | null; deleting: boolean } {
+    const row = this.db.prepare("SELECT pinned_at, dissolved_at, dissolved_by, deleting FROM conversation_list_state WHERE conversation_id = ?")
+      .get(id) as { pinned_at: string | null; dissolved_at: string | null; dissolved_by: string | null; deleting: number } | undefined;
+    return { pinnedAt: row?.pinned_at ?? null, dissolvedAt: row?.dissolved_at ?? null, dissolvedBy: row?.dissolved_by ?? null, deleting: !!row?.deleting };
+  }
+
+  /** Separate from channel snapshots, so late run saves cannot overwrite lifecycle state. */
+  updateConversationListState(id: string, patch: { pinned?: boolean; dissolved?: boolean; deleting?: boolean; dissolvedBy?: string }): void {
+    this.transaction(() => {
+      const previous = this.conversationListState(id);
+      const pinnedAt = patch.pinned === false ? null : patch.pinned === true ? previous.pinnedAt ?? nowIso() : previous.pinnedAt;
+      const dissolvedAt = patch.dissolved === true ? previous.dissolvedAt ?? nowIso() : patch.dissolved === false ? null : previous.dissolvedAt;
+      // 解散人是当时那一版署名，保留真实归属；只有没传资料时才回落到默认的「我」。
+      const dissolvedBy = dissolvedAt ? previous.dissolvedBy ?? patch.dissolvedBy ?? "我" : null;
+      this.db.prepare(`INSERT INTO conversation_list_state(conversation_id, pinned_at, dissolved_at, dissolved_by, deleting) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(conversation_id) DO UPDATE SET pinned_at = excluded.pinned_at, dissolved_at = excluded.dissolved_at, dissolved_by = excluded.dissolved_by, deleting = excluded.deleting`)
+        .run(id, pinnedAt, dissolvedAt, dissolvedBy, Number(patch.deleting ?? previous.deleting));
+    });
+  }
+
+  deleteConversation(id: string): void {
+    this.transaction(() => {
+      this.db.prepare("DELETE FROM conversation_messages WHERE conversation_id = ?").run(id);
+      this.db.prepare("DELETE FROM conversation_tasks WHERE conversation_id = ?").run(id);
+      this.db.prepare("DELETE FROM conversations WHERE id = ? AND owner = ?").run(id, CONVERSATION_OWNER);
+      this.db.prepare("DELETE FROM conversation_list_state WHERE conversation_id = ?").run(id);
+      // Keep the content-free request ledger: retrying an old accepted request must never recreate deleted work.
+    });
+  }
+
+  listConversations(): ConversationInstance[] {
+    return (this.db.prepare("SELECT instance_json FROM conversations WHERE owner = ?").all(CONVERSATION_OWNER) as Array<{ instance_json: string }>)
+      .map((row) => JSON.parse(row.instance_json) as ConversationInstance);
+  }
+
+  getConversation(id: string): ConversationInstance | null {
+    const row = this.db.prepare("SELECT instance_json FROM conversations WHERE id = ? AND owner = ?")
+      .get(id, CONVERSATION_OWNER) as { instance_json: string } | undefined;
+    return row ? JSON.parse(row.instance_json) as ConversationInstance : null;
+  }
+
+  getConversationBySession(sessionId: string): ConversationInstance | null {
+    const row = this.db.prepare("SELECT instance_json FROM conversations WHERE session_id = ? AND owner = ?")
+      .get(sessionId, CONVERSATION_OWNER) as { instance_json: string } | undefined;
+    return row ? JSON.parse(row.instance_json) as ConversationInstance : null;
+  }
+
+  saveConversation(instance: ConversationInstance): void {
+    this.db.prepare(`INSERT INTO conversations(id, owner, kind, peer_employee_id, session_id, instance_json)
+      VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET
+      session_id = excluded.session_id, instance_json = excluded.instance_json`)
+      .run(instance.id, instance.owner, instance.kind, instance.peerEmployeeId, instance.sessionId, JSON.stringify(instance));
+  }
+
+  conversationTasks(id: string): Array<{ taskId: string; linkedAt: string }> {
+    return (this.db.prepare("SELECT task_id, linked_at FROM conversation_tasks WHERE conversation_id = ? ORDER BY linked_at, rowid")
+      .all(id) as Array<{ task_id: string; linked_at: string }>).map((row) => ({ taskId: row.task_id, linkedAt: row.linked_at }));
+  }
+
+  linkConversationTask(conversationId: string, taskId: string, linkedAt: string): void {
+    this.db.prepare("INSERT OR IGNORE INTO conversation_tasks(conversation_id, task_id, linked_at) VALUES (?, ?, ?)")
+      .run(conversationId, taskId, linkedAt);
+  }
+
+  /** One canonical task/workspace/instance association commit, before any model input. */
+  createConversationTask(instance: ConversationInstance, input: CreateWandTaskInput, accept?: (task: WandTask) => void): WandTask {
+    return this.transaction(() => {
+      const workspace = input.workspaceId ? this.getWorkspace(input.workspaceId) : null;
+      if (!workspace || workspace.kind === "global") throw new Error("请选择非全局工作项目。");
+      const milestoneId = this.taskMilestoneForWrite(input.milestoneId, workspace.id);
+      const workspaceTaskId = this.insertWorkspaceTask({ workspaceId: workspace.id, name: input.title, milestoneId });
+      const task = this.insertWandTask({ ...input, workspaceId: workspace.id, workspaceTaskId, milestoneId });
+      this.saveConversation(instance);
+      this.linkConversationTask(instance.id, task.id, task.createdAt);
+      accept?.(task);
+      return task;
+    });
+  }
+
+  /** Commit the first accepted fact, identifiers and DM link together, before any execution I/O. */
+  acceptConversationDispatch(instance: ConversationInstance, input: CreateWandTaskInput | { continueTaskId: string },
+    request: ConversationRequest, source?: ConversationInstance): WandTask {
+    const accept = (task: WandTask): WandTask => {
+      this.saveConversation(instance);
+      this.linkConversationTask(instance.id, task.id, task.createdAt);
+      request.receipt = { ...request.receipt, state: "accepted", conversationId: instance.id, taskId: task.id, startup: "pending" };
+      if (source) {
+        source.createdAt ||= nowIso(); source.updatedAt = nowIso();
+        this.saveConversation(source);
+        this.appendConversationEvent(source.id, { role: "user", messageId: request.id, requestId: request.id,
+          conversationTarget: null, content: [{ type: "text", text: "description" in input ? input.description ?? task.description : task.description }] });
+        request.receipt.messageId = request.id;
+        const employee = source.peerEmployeeId ? this.getSiliconEmployee(source.peerEmployeeId) : null;
+        this.appendConversationEvent(source.id, { role: "assistant", notice: true,
+          author: { id: source.peerEmployeeId ?? source.id, name: employee?.name ?? source.name, avatar: employee?.avatar },
+          messageId: `${request.id}:task-link`, requestId: request.id,
+          conversationLink: { conversationId: instance.id, taskId: task.id, title: task.title },
+          content: [{ type: "text", text: `我正在处理「${task.title}」，进展在任务群实时同步。` }] });
+      }
+      this.saveConversationRequest({ ...request, updatedAt: nowIso() });
+      return task;
+    };
+    if (!("continueTaskId" in input)) return this.createConversationTask(instance, input, accept);
+    return this.transaction(() => {
+      const task = this.getWandTask(input.continueTaskId);
+      if (!task) throw new Error("任务不存在。");
+      return accept(task);
+    });
+  }
+
+  /** Message + reply + exact session association + receipt are committed before any model input. */
+  acceptConversationSession(instance: ConversationInstance, createSession: () => string, title: string, input: string,
+    request: ConversationRequest): void {
+    this.transaction(() => {
+      const sessionId = createSession();
+      instance.createdAt ||= nowIso(); instance.updatedAt = nowIso();
+      this.saveConversation(instance);
+      this.appendConversationEvent(instance.id, { role: "user", messageId: request.id, requestId: request.id,
+        conversationTarget: null, content: [{ type: "text", text: input }] });
+      const employee = instance.peerEmployeeId ? this.getSiliconEmployee(instance.peerEmployeeId) : null;
+      this.appendConversationEvent(instance.id, { role: "assistant", messageId: `${request.id}:session`, requestId: request.id,
+        author: { id: instance.peerEmployeeId ?? instance.id, name: employee?.name ?? instance.name, avatar: employee?.avatar },
+        sessionLink: { sessionId, title }, content: [] });
+      this.saveConversationRequest({ ...request, updatedAt: nowIso(), receipt: { ...request.receipt,
+        state: "accepted", conversationId: instance.id, sessionId, messageId: request.id, startup: "pending" } });
+    });
+  }
+
+  conversationSessionIds(id: string): string[] {
+    const rows = this.db.prepare(`SELECT json_extract(turn_json, '$.sessionLink.sessionId') AS session_id
+      FROM conversation_messages WHERE conversation_id = ? AND json_extract(turn_json, '$.sessionLink.sessionId') IS NOT NULL`)
+      .all(id) as Array<{ session_id: string }>;
+    return [...new Set(rows.map(row => row.session_id))];
+  }
+
+  conversationTaskStartup(taskId: string): ConversationRequest["receipt"] | null {
+    const row = this.db.prepare(`SELECT receipt_json FROM conversation_requests
+      WHERE json_extract(receipt_json, '$.taskId') = ? AND json_extract(receipt_json, '$.startup') IS NOT NULL
+      ORDER BY updated_at DESC, rowid DESC LIMIT 1`).get(taskId) as { receipt_json: string } | undefined;
+    return row ? JSON.parse(row.receipt_json) as ConversationRequest["receipt"] : null;
+  }
+
+  appendConversationEvent(id: string, turn: ConversationTurn): void {
+    const createdAt = turn.createdAt ?? nowIso();
+    const messageId = turn.messageId ?? crypto.randomUUID();
+    this.db.prepare("INSERT INTO conversation_messages(id, conversation_id, turn_json, created_at) VALUES (?, ?, ?, ?)")
+      .run(messageId, id, JSON.stringify({ ...turn, messageId, conversationId: id, createdAt }), createdAt);
+  }
+
+  conversationEvents(id: string): ConversationTurn[] {
+    return (this.db.prepare("SELECT turn_json FROM conversation_messages WHERE conversation_id = ? ORDER BY created_at, rowid")
+      .all(id) as Array<{ turn_json: string }>).map((row) => JSON.parse(row.turn_json) as ConversationTurn);
+  }
+
+  getConversationRequest(id: string): ConversationRequest | null {
+    const row = this.db.prepare("SELECT * FROM conversation_requests WHERE id = ?").get(id) as
+      { id: string; fingerprint: string; receipt_json: string; updated_at: string } | undefined;
+    return row ? { id: row.id, fingerprint: row.fingerprint, receipt: JSON.parse(row.receipt_json), updatedAt: row.updated_at } : null;
+  }
+
+  saveConversationRequest(request: ConversationRequest): void {
+    this.db.prepare(`INSERT INTO conversation_requests(id, fingerprint, receipt_json, updated_at) VALUES (?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET receipt_json = excluded.receipt_json, updated_at = excluded.updated_at`)
+      .run(request.id, request.fingerprint, JSON.stringify(request.receipt), request.updatedAt);
   }
 
   // ============ Config Methods ============
@@ -1472,6 +1730,27 @@ export class WandStorage {
   /** 判断偏好是否在 DB 中存在（区别于值为 null/false/""）。 */
   hasPreference(key: string): boolean {
     return this.getConfigValue(key) !== null;
+  }
+
+  // ============ Pi 会话默认设置 ============
+
+  /**
+   * Pi CLI 会话的「上次设置」：用户在任意 Pi 会话里改过设置后，新建会话以它起步，
+   * 不必每开一个会话都重配自动选择 / CodeMode。返回 null 表示沿用出厂默认
+   * （跟随 Pi 自身配置），不是「设置全关」。只存设置字段本身，不含路径、命令或凭据。
+   */
+  getPiSessionDefaults(): PiSessionSettings | null {
+    const raw = this.getPreference<unknown>(PI_SESSION_DEFAULTS_KEY, null);
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+    try { return patchPiSessionSettings(defaultPiCliSessionSettings(), raw); } catch {
+      // 非法/过期的默认设置不能静默开启任何能力，退回出厂默认。
+      return null;
+    }
+  }
+
+  /** 写入 Pi 会话默认设置；null / undefined 清除，回到出厂默认。 */
+  setPiSessionDefaults(settings: PiSessionSettings | null | undefined): void {
+    this.setPreference(PI_SESSION_DEFAULTS_KEY, settings ?? null);
   }
 
   // ============ 首页目录组顺序 ============
@@ -1702,16 +1981,20 @@ export class WandStorage {
       .run(task?.workspaceId ?? workspaceId, sessionId);
   }
 
-  /** Lightweight count of persisted sessions grouped by workspace. */
-  countSessionsByWorkspace(): Map<string, number> {
+  /** Normal workspace counts exclude archived sessions and sessions in archived tasks. */
+  countSessionsByWorkspace(options: { includeArchived?: boolean } = {}): Map<string, number> {
     const rows = this.db
       .prepare(
-        `SELECT workspace_id AS id, COUNT(*) AS n
-         FROM command_sessions
-         WHERE workspace_id IS NOT NULL AND workspace_id != ''
-         GROUP BY workspace_id`,
+        `SELECT session.workspace_id AS id, COUNT(*) AS n
+         FROM command_sessions session
+         WHERE session.workspace_id IS NOT NULL AND session.workspace_id != ''
+           AND (? = 1 OR (session.archived = 0 AND COALESCE((
+             SELECT status FROM wand_tasks WHERE workspace_task_id = session.workspace_task_id
+             ORDER BY updated_at DESC, rowid DESC LIMIT 1
+           ), '') <> 'archived'))
+         GROUP BY session.workspace_id`,
       )
-      .all() as unknown as Array<{ id: string; n: number }>;
+      .all(options.includeArchived === true ? 1 : 0) as unknown as Array<{ id: string; n: number }>;
     return new Map(rows.map((row) => [row.id, Number(row.n) || 0]));
   }
 
@@ -2097,11 +2380,20 @@ export class WandStorage {
 
   /** Commit completion archives only the selected completed cards, atomically. */
   archiveCompletedWandTasks(ids: readonly string[]): string[] {
+    return this.archiveWandTasks(ids, { completedOnly: true });
+  }
+
+  /**
+   * Archive the given cards. Already-archived ids are skipped.
+   * `completedOnly` keeps the historical commit helper from closing in-progress work.
+   */
+  archiveWandTasks(ids: readonly string[], options: { completedOnly?: boolean } = {}): string[] {
     return this.transaction(() => {
       const archived: string[] = [];
       for (const id of new Set(ids)) {
         const task = this.getWandTask(id);
-        if (task?.status !== "done") continue;
+        if (!task || task.status === "archived") continue;
+        if (options.completedOnly && task.status !== "done") continue;
         this.writeWandTask(task, { status: "archived" });
         archived.push(id);
       }
@@ -2110,17 +2402,35 @@ export class WandStorage {
   }
 
   deleteWandTask(id: string): void {
-    this.transaction(() => {
-      const card = this.getWandTask(id);
-      if (!card) return;
-      this.db.prepare("UPDATE wand_tasks SET parent_task_id = NULL WHERE parent_task_id = ?").run(id);
-      if (card.workspaceTaskId) {
-        this.db.prepare("UPDATE command_sessions SET workspace_task_id = NULL WHERE workspace_task_id = ?")
-          .run(card.workspaceTaskId);
-        this.db.prepare("DELETE FROM workspace_tasks WHERE id = ?").run(card.workspaceTaskId);
+    this.transaction(() => this.removeWandTaskRow(id));
+  }
+
+  /**
+   * 批量硬删除卡片：一次事务，返回实际删除的 id（不存在或已消失的跳过）。
+   * 归档目录的「清空」和保留期扫描都走这里，调用方自己决定哪些 id 可以删。
+   */
+  deleteWandTasks(ids: readonly string[]): string[] {
+    return this.transaction(() => {
+      const deleted: string[] = [];
+      for (const id of new Set(ids)) {
+        if (this.removeWandTaskRow(id)) deleted.push(id);
       }
-      this.db.prepare("DELETE FROM wand_tasks WHERE id = ?").run(id);
+      return deleted;
     });
+  }
+
+  /** Single-card hard delete body; callers own the transaction (SQLite forbids nesting). */
+  private removeWandTaskRow(id: string): boolean {
+    const card = this.getWandTask(id);
+    if (!card) return false;
+    this.db.prepare("UPDATE wand_tasks SET parent_task_id = NULL WHERE parent_task_id = ?").run(id);
+    if (card.workspaceTaskId) {
+      this.db.prepare("UPDATE command_sessions SET workspace_task_id = NULL WHERE workspace_task_id = ?")
+        .run(card.workspaceTaskId);
+      this.db.prepare("DELETE FROM workspace_tasks WHERE id = ?").run(card.workspaceTaskId);
+    }
+    this.db.prepare("DELETE FROM wand_tasks WHERE id = ?").run(id);
+    return true;
   }
 
   /** One-time id-based reconciliation; normal reads never create tasks or repair membership. */
@@ -3119,6 +3429,28 @@ export class WandStorage {
       .run(crypto.createHash("sha256").update(token).digest("hex"));
   }
 
+  /** CLI-only free inference scope, durable across Server restarts but not reusable by another run. */
+  issueOpenRouterFreeAccess(sessionId: string, selector: string, credentialHash: string,
+    requirements: { preferReasoning?: boolean; allowedSelectors?: readonly string[] }, now = Date.now()): string {
+    const session = this.getSessionSlim(sessionId);
+    if (session?.provider !== "pi" || session.sessionKind !== "structured"
+      || !selector.startsWith("wand-openrouter-free/") || !/^[a-f0-9]{64}$/.test(credentialHash)) {
+      throw new Error("免费模型调用所属会话或凭据无效。");
+    }
+    this.db.prepare("DELETE FROM openrouter_free_access WHERE expires_at <= ? OR session_id = ?").run(now, sessionId);
+    const token = `wf_${crypto.randomBytes(32).toString("base64url")}`;
+    this.db.prepare(`INSERT INTO openrouter_free_access
+      (token_hash, session_id, selector, requirements_json, credential_hash, expires_at) VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(crypto.createHash("sha256").update(token).digest("hex"), sessionId, selector,
+        JSON.stringify(requirements), credentialHash, now + 6 * 60 * 60 * 1000);
+    return token;
+  }
+
+  revokeOpenRouterFreeAccess(token: string): void {
+    this.db.prepare("DELETE FROM openrouter_free_access WHERE token_hash = ?")
+      .run(crypto.createHash("sha256").update(token).digest("hex"));
+  }
+
   // ============ User short-term memory ============
 
   /** No IO on input hot paths; queued observations still CAS against the database before writing. */
@@ -3279,24 +3611,36 @@ export class WandStorage {
     this.db.prepare("DELETE FROM ai_teams WHERE id = ?").run(id);
   }
 
+  /** 保留期清理：删掉一次运行及其步骤。关联会话由调用方按运行所有权删除。 */
+  deleteAiTeamRun(id: string): void {
+    this.transaction(() => {
+      this.db.prepare("DELETE FROM ai_team_steps WHERE run_id = ?").run(id);
+      this.db.prepare("DELETE FROM ai_team_runs WHERE id = ?").run(id);
+    });
+  }
+
   saveAiTeamRun(run: AiTeamRun): void {
     this.db.prepare(
       `INSERT INTO ai_team_runs (
          id, team_id, task_id, team_json, objective, cwd, status, status_detail,
          steps_used, step_limit, format_retries, plan_approved, chat_session_id, pending_notes_json,
-         created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         created_at, updated_at, conversation_id, member_version, round_number
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          team_json = excluded.team_json,
          status = excluded.status, status_detail = excluded.status_detail,
          steps_used = excluded.steps_used, step_limit = excluded.step_limit,
          format_retries = excluded.format_retries, plan_approved = excluded.plan_approved,
          chat_session_id = excluded.chat_session_id, pending_notes_json = excluded.pending_notes_json,
+         conversation_id = COALESCE(excluded.conversation_id, ai_team_runs.conversation_id),
+         member_version = COALESCE(excluded.member_version, ai_team_runs.member_version),
+         round_number = COALESCE(excluded.round_number, ai_team_runs.round_number),
          updated_at = excluded.updated_at`
     ).run(
       run.id, run.teamId, run.taskId, serializeExecutionTeam(run.team), run.objective, run.cwd,
       run.status, run.statusDetail, run.stepsUsed, run.stepLimit, run.formatRetries,
       run.planApproved ? 1 : 0, run.chatSessionId, JSON.stringify(run.pendingNotes), run.createdAt, run.updatedAt,
+      run.conversationId ?? null, run.memberVersion ?? null, run.roundNumber ?? null,
     );
   }
 
@@ -3847,6 +4191,8 @@ function normalizeAiTeamMember(raw: unknown): AiTeamMember | null {
   };
   if (typeof value.avatar === "string" && value.avatar) member.avatar = value.avatar;
   if (isTeamMemberRole(value.role)) member.role = value.role;
+  if (typeof value.legacyTemplateId === "string") member.legacyTemplateId = value.legacyTemplateId;
+  if (typeof value.legacyMemberId === "string") member.legacyMemberId = value.legacyMemberId;
   if (typeof value.employeeId === "string" && value.employeeId.trim()) {
     member.employeeId = value.employeeId.trim();
     const raw = value._employeeSnapshot;
@@ -3898,6 +4244,7 @@ function mapAiTeamRunRow(row: Record<string, unknown>): AiTeamRun {
     description: String(rawTeam.description ?? ""),
     instructions: String(rawTeam.instructions ?? ""),
     members: normalizeAiTeamMembers(rawTeam.members),
+    ...(rawTeam.allowLeaderWork === true ? { allowLeaderWork: true } : {}),
     requirePlanApproval: rawTeam.requirePlanApproval === undefined ? true : rawTeam.requirePlanApproval !== false,
     maxSteps: Number(rawTeam.maxSteps) || AI_TEAM_DEFAULT_MAX_STEPS,
     createdAt: String(rawTeam.createdAt ?? row.created_at),
@@ -3920,6 +4267,9 @@ function mapAiTeamRunRow(row: Record<string, unknown>): AiTeamRun {
     formatRetries: Number(row.format_retries) || 0,
     planApproved: Number(row.plan_approved) !== 0,
     chatSessionId: typeof row.chat_session_id === "string" && row.chat_session_id ? row.chat_session_id : null,
+    ...(typeof row.conversation_id === "string" ? {
+      conversationId: row.conversation_id, memberVersion: Number(row.member_version), roundNumber: Number(row.round_number),
+    } : {}),
     pendingNotes: (safeJsonParse<unknown[]>(typeof row.pending_notes_json === "string" ? row.pending_notes_json : null) ?? [])
       .filter((note): note is string => typeof note === "string"),
     createdAt: String(row.created_at),
@@ -3929,7 +4279,7 @@ function mapAiTeamRunRow(row: Record<string, unknown>): AiTeamRun {
 
 /** 候选失败类别的读侧白名单；真源是 `ai-team-types.ts` 的 `CandidateFailureKind`。 */
 const CANDIDATE_FAILURE_KINDS: readonly CandidateFailureKind[] = [
-  "spawn-missing", "host-disabled", "model-unknown", "startup-timeout",
+  "spawn-missing", "input-rejected", "host-disabled", "model-unknown", "startup-timeout",
   "runtime-failure", "format-error", "user-stop",
 ];
 
@@ -4173,6 +4523,9 @@ const SCHEMA_MIGRATIONS: ReadonlyArray<[column: string, sql: string]> = [
 
 /** 首页目录组顺序的偏好键（app_config 表，与其它 UI 偏好同一套读写）。 */
 const WORKSPACE_GROUP_ORDER_KEY = "workspaceGroupOrder";
+
+/** Pi 会话默认设置的偏好键，与其它 UI 偏好同一套读写，不出现在 config.json。 */
+const PI_SESSION_DEFAULTS_KEY = "pref:piSessionDefaults";
 
 const AUTH_SESSION_MIGRATIONS: ReadonlyArray<[column: string, sql: string]> = [
   ["kind", "ALTER TABLE auth_sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'browser-admin'"],

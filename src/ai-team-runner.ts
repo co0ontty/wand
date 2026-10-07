@@ -44,15 +44,18 @@ import {
 import {
   AI_TEAM_ACTIVE_RUN_STATUSES,
   AI_TEAM_DETAIL_CHAT_TURNS,
+  AI_TEAM_SILENCE_HEARTBEAT_MS,
   AI_TEAM_TERMINAL_RUN_STATUSES,
   agentKey,
   aiTeamChatTitle,
   memberAgents,
   type AiTeam,
+  type AiTeamLiveSnapshot,
   type AiTeamLiveStep,
   type AiTeamLiveUpdate,
   type AiTeamMember,
   type AiTeamRun,
+  type AiTeamRunActivity,
   type AiTeamRunDetail,
   type AiTeamRunSummary,
   type AiTeamStep,
@@ -65,6 +68,7 @@ import { getErrorMessage } from "./error-utils.js";
 import { activityState } from "./missions.js";
 import type { AgentActivityState } from "./mission-types.js";
 import type { SessionRegistry } from "./session-registry.js";
+import type { StructuredFailure } from "./structured-failure.js";
 import type { AiTeamRunState, WandStorage } from "./storage.js";
 import type { WandTask, WandTaskAgent } from "./task-types.js";
 import type { ConversationAuthor, ConversationTurn, ProcessEvent, SessionSnapshot, TeamReportFile } from "./types.js";
@@ -77,6 +81,7 @@ const OUTPUT_DEBOUNCE_MS = 1000;
 const LIVE_NOTIFY_DEBOUNCE_MS = 500;
 const SWEEP_INTERVAL_MS = 5000;
 const MAX_FORMAT_RETRIES = 2;
+
 /** 同一个候选累计这么多次 startup-timeout 就按五元组拉黑（§3.4 黑名单 agents 层）。 */
 const STARTUP_TIMEOUT_STRIKES = 2;
 /** 群聊会话的 automationId 前缀；后面接运行 id。 */
@@ -87,6 +92,13 @@ const STOP_REPLY = /^(停止|停下|stop)[。.!！]*$/i;
 /** 步数用完后，纯「继续」保留尚未执行的计划；带新要求的回复交回负责人安排。 */
 const CONTINUE_REPLY = /^(继续|让团队继续|继续执行|接着做|接着干|continue)[。.!！]*$/i;
 const STEP_LIMIT_DETAIL = "已达到步数上限";
+
+/** ISO 文本 → 毫秒；脏值 / 缺省返回 0，调用方按「没有这条活动」处理，不参与最大值比较。 */
+function toMs(value: string | null | undefined): number {
+  if (!value) return 0;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : 0;
+}
 
 /** 用户可见的冲突错误（路由转 409）。 */
 export class AiTeamConflictError extends Error {}
@@ -110,6 +122,7 @@ export interface AiTeamSessionOps {
   ownerOf(sessionId: string): "structured" | "pty" | "storage" | null;
   /** Server-private generation and one-shot, explicitly unaccepted startup fact. */
   consumeUnacceptedStartup?(sessionId: string, requestId: string): boolean;
+  consumeUnacceptedFailure?(sessionId: string, requestId: string): StructuredFailure | null;
 }
 
 /** 群聊：一次运行一个转发会话，团队的决定、派工和报告都以成员身份发在里面。 */
@@ -121,6 +134,8 @@ export interface AiTeamChatOps {
 export interface AiTeamRunnerOptions {
   storage: WandStorage;
   chat?: AiTeamChatOps;
+  /** Instance projection includes ordinary group replies without copying private DMs. */
+  chatHistoryTurns?: (conversationId: string) => ConversationTurn[];
   /** 解析任务卡的执行目录；默认走 agent-dispatch 的规则。 */
   resolveCwd: (task: WandTask) => string;
   ops: AiTeamSessionOps;
@@ -128,6 +143,11 @@ export interface AiTeamRunnerOptions {
   /** 运行中步骤的 live 文本推送（§4.9）：去抖后每 500ms 至多一次，stepId+text+omittedChars+state 全同不重复推。 */
   notifyLive?: (update: AiTeamLiveUpdate) => void;
   now?: () => number;
+  /**
+   * 静默心跳阈值（毫秒），默认 AI_TEAM_SILENCE_HEARTBEAT_MS。测试注入小值来验证静默期确实重推，
+   * 生产不设这一项；调用方不要拿它做无界轮询——每个 run 至多一个计时器，离开 running 即 cancel。
+   */
+  heartbeatMs?: number;
   /**
    * 某 provider 已发现的模型清单（§3.4 model-unknown 事前比对）。目录未就绪 / 清单为空时
    * 返回空值即可，判定方向是「拿不准就放行」。
@@ -138,6 +158,11 @@ export interface AiTeamRunnerOptions {
    * `default` 哨兵不是模型名，写真正会用的那个。
    */
   defaultModelOf?: (provider: WandTaskAgent["provider"]) => string;
+  /**
+   * 当前用户资料的署名投影。只在没有对话归属、只能回放 relay 快照的旧群聊里用；
+   * 有对话归属时由 ConversationService 统一投影，避免两处口径。
+   */
+  selfAuthor?: () => ConversationAuthor;
 }
 
 export function createAiTeamSessionOps(deps: AgentDispatchDeps & { sessions: SessionRegistry }): AiTeamSessionOps {
@@ -152,6 +177,8 @@ export function createAiTeamSessionOps(deps: AgentDispatchDeps & { sessions: Ses
     ownerOf: (sessionId) => deps.sessions.ownerOf(sessionId),
     consumeUnacceptedStartup: (sessionId, requestId) =>
       deps.structured?.consumeUnacceptedTeamStartup(sessionId, requestId) ?? false,
+    consumeUnacceptedFailure: (sessionId, requestId) =>
+      deps.structured?.consumeUnacceptedTeamFailure(sessionId, requestId) ?? null,
   };
 }
 
@@ -186,9 +213,11 @@ export function createAiTeamRunner(
   deps: AgentDispatchDeps & {
     sessions: SessionRegistry;
     notify?: (run: AiTeamRun) => void;
+    chatHistoryTurns?: (conversationId: string) => ConversationTurn[];
     notifyLive?: (update: AiTeamLiveUpdate) => void;
     models?: (provider: WandTaskAgent["provider"]) => ModelCatalogView;
     defaultModelOf?: (provider: WandTaskAgent["provider"]) => string;
+    selfAuthor?: () => ConversationAuthor;
   },
 ): AiTeamRunner {
   const runner = new AiTeamRunner({
@@ -196,10 +225,12 @@ export function createAiTeamRunner(
     resolveCwd: (task) => resolveTaskDispatchTarget(deps, task).cwd,
     ops: createAiTeamSessionOps(deps),
     chat: createAiTeamChatOps(deps),
+    chatHistoryTurns: deps.chatHistoryTurns,
     notify: deps.notify,
     notifyLive: deps.notifyLive,
     models: deps.models,
     defaultModelOf: deps.defaultModelOf,
+    selfAuthor: deps.selfAuthor,
   });
   deps.structured?.registerRelay(AI_TEAM_CHAT_PREFIX, (sessionId, text) => runner.chatInput(sessionId, text));
   return runner;
@@ -478,7 +509,7 @@ type StepOutcome =
   /** sessionError：会话以出错结束（额度用尽、鉴权失败等），重试同一个模型只会再错一次。 */
   | { kind: "failed"; text: string; sessionError?: boolean };
 
-/** 会话启动失败 + 一个人类可读原因，degradeWorkStep 的输入。 */
+/** 候选失败与可读原因，degradeStep 的输入。 */
 interface CandidateFailure {
   kind: CandidateFailureKind;
   reason: string;
@@ -500,11 +531,13 @@ export class AiTeamRunner {
   private readonly storage: WandStorage;
   private readonly ops: AiTeamSessionOps;
   private readonly chat?: AiTeamChatOps;
+  private readonly chatHistoryTurns?: (conversationId: string) => ConversationTurn[];
   private readonly resolveCwd: (task: WandTask) => string;
   private readonly notifyListener?: (run: AiTeamRun) => void;
   private readonly notifyLiveListener?: (update: AiTeamLiveUpdate) => void;
   private readonly modelsOf?: (provider: WandTaskAgent["provider"]) => ModelCatalogView;
   private readonly defaultModelOf?: (provider: WandTaskAgent["provider"]) => string;
+  private readonly selfAuthorOf?: () => ConversationAuthor;
   private readonly now: () => number;
   private readonly chains = new Map<string, Promise<unknown>>();
   private readonly outputTimers = new Map<string, NodeJS.Timeout>();
@@ -512,6 +545,22 @@ export class AiTeamRunner {
   private readonly liveTimers = new Map<string, NodeJS.Timeout>();
   /** 上次推出去的 live 列表指纹（§4.9）：stepId + text + omittedChars + state 全同就不重复推。 */
   private readonly lastLiveKey = new Map<string, string>();
+  /** 上次真正推出 live 列表的时刻（毫秒），静默心跳的起算点。 */
+  private readonly lastLivePushAt = new Map<string, number>();
+  /** 上次 `ai-team-run` 通知发出的时刻（毫秒）；心跳据此判断 run 通道是否也该重推。 */
+  private readonly lastRunNotifyAt = new Map<string, number>();
+  /**
+   * 静默心跳计时器，按 runId 计：**每个 run 至多一个**，run 离开 running（终态 / 等批准 / 等回复）
+   * 或 dispose 时立即 cancel，不留悬挂计时器。
+   */
+  private readonly heartbeatTimers = new Map<string, NodeJS.Timeout>();
+  /**
+   * 每个运行中步骤最近一次「可观测活动」的签名与时刻（毫秒）。纯内存观测记录，不入库：
+   * 服务重启后退回步骤自己的 `startedAt` 重新起算，第一次观察不算活动。
+   * 步骤落地（done / failed / skipped）时在 `saveStep` 里删掉，容量随并发步数有界。
+   */
+  private readonly stepActivity = new Map<string, { signal: string; at: number }>();
+  private readonly heartbeatMs: number;
   private readonly recheckTimers = new Map<string, NodeJS.Timeout>();
   /** 已经确定「不降级、按既有路径记 failed」的步骤，防止 finishStep 再判一次形成回环。 */
   private readonly noDegrade = new Set<string>();
@@ -524,12 +573,15 @@ export class AiTeamRunner {
     this.storage = options.storage;
     this.ops = options.ops;
     this.chat = options.chat;
+    this.chatHistoryTurns = options.chatHistoryTurns;
     this.resolveCwd = options.resolveCwd;
     this.notifyListener = options.notify;
     this.notifyLiveListener = options.notifyLive;
     this.modelsOf = options.models;
     this.defaultModelOf = options.defaultModelOf;
+    this.selfAuthorOf = options.selfAuthor;
     this.now = options.now ?? Date.now;
+    this.heartbeatMs = Math.max(1, options.heartbeatMs ?? AI_TEAM_SILENCE_HEARTBEAT_MS);
   }
 
   /** 提示词里的模型名解析器：`default` 哨兵交给服务端配置的默认模型。 */
@@ -562,8 +614,9 @@ export class AiTeamRunner {
 
   // ── 公开操作 ──
 
-  async start(input: { teamId: string; taskId: string; note?: string; chatSessionId?: string }): Promise<AiTeamRunDetail> {
-    const definition = this.storage.getAiTeam(input.teamId);
+  async start(input: { teamId?: string; team?: AiTeam; taskId: string; note?: string; chatSessionId?: string;
+    conversationId?: string; memberVersion?: number; runId?: string; onAccepted?: (run: AiTeamRun) => void }): Promise<AiTeamRunDetail> {
+    const definition = input.team ?? this.storage.getAiTeam(input.teamId ?? "");
     if (!definition) throw new Error("团队不存在。");
     const team = freezeTeamEmployees(definition, this.storage);
     const task = this.storage.getWandTask(input.taskId);
@@ -574,7 +627,11 @@ export class AiTeamRunner {
     const objective = buildAiTeamObjective(task, input.note);
     const createdAt = this.iso();
     const run: AiTeamRun = {
-      id: `run_${randomUUID().replace(/-/g, "").slice(0, 12)}`,
+      id: input.runId ?? `run_${randomUUID().replace(/-/g, "").slice(0, 12)}`,
+      ...(input.conversationId ? {
+        conversationId: input.conversationId, memberVersion: input.memberVersion,
+        roundNumber: this.storage.listAiTeamRuns({ taskId: task.id }).length + 1,
+      } : {}),
       teamId: team.id,
       team,
       taskId: task.id,
@@ -598,6 +655,7 @@ export class AiTeamRunner {
     const chatHistory = input.chatSessionId ? this.writeChatHistory(run) : null;
     this.openChat(run, task, shown, chatHistory);
     this.storage.saveAiTeamRun(run);
+    input.onAccepted?.(run);
     if (task.status === "todo") this.storage.updateWandTask(task.id, { status: "doing" });
     excludeReportDir(cwd);
     await this.enqueue(run.id, async () => {
@@ -743,6 +801,27 @@ export class AiTeamRunner {
     }
   }
 
+  /** Explicit task target; ordinary group talk never implicitly approves/stops/starts a run. */
+  async inputForRun(runId: string, text: string): Promise<AiTeamRunDetail> {
+    const note = text.trim();
+    if (!note) throw new Error("消息不能为空。");
+    const run = this.storage.getAiTeamRun(runId);
+    if (!run) throw new Error("团队运行不存在。");
+    if (run.status === "awaiting_approval") return this.reject(runId, note);
+    if (run.status === "waiting_user") {
+      if (run.statusDetail === STEP_LIMIT_DETAIL) throw new AiTeamConflictError("请显式增加步数，不用普通消息扩预算。");
+      return this.reply(runId, note);
+    }
+    if (run.status !== "running") throw new AiTeamConflictError("本轮已结束，请切回群内沟通或显式继续此任务。");
+    return this.act(runId, async (current) => {
+      this.requireStatus(current, "running", "本轮状态已变化，请核对发送目标。");
+      this.postUser(current, note);
+      current.pendingNotes = [...current.pendingNotes, note];
+      this.postNotice(current, "已记下，负责人安排下一步时会看到。");
+      this.saveRun(current);
+    });
+  }
+
   detail(runId: string): AiTeamRunDetail {
     const run = this.storage.getAiTeamRun(runId);
     if (!run) throw new Error("团队运行不存在。");
@@ -754,16 +833,20 @@ export class AiTeamRunner {
       if (snapshot) memberStates[step.sessionId] = activityState(snapshot);
     }
     // 群聊回合只给最近这一段（§4.4）；没有群聊会话的旧运行给空数组，前端不用判 null。
-    const messages = run.chatSessionId ? this.ops.snapshot(run.chatSessionId)?.messages ?? [] : [];
+    // 有对话归属时 ConversationService 已投影用户署名；旧运行只回放 relay 快照，在这里补同一口径。
+    const self = this.selfAuthorOf;
+    const messages = (run.conversationId && this.chatHistoryTurns ? this.chatHistoryTurns(run.conversationId)
+      : run.chatSessionId ? this.ops.snapshot(run.chatSessionId)?.messages ?? [] : [])
+      .map((turn) => (turn.role === "user" && !turn.author && self ? { ...turn, author: self() } : turn));
     const currentTeam = this.storage.getAiTeam(run.teamId);
-    const binding = run.chatSessionId ? this.storage.getSessionWorkspace(run.chatSessionId) : null;
-    const task = (binding?.workspaceTaskId
-      ? this.storage.getWandTaskByWorkspaceTaskId(binding.workspaceTaskId) : null)
-      ?? this.storage.getWandTask(run.taskId);
+    // A relay belongs to a conversation, not its newest task. Always use the run's task.
+    const task = this.storage.getWandTask(run.taskId);
     const displayTeam = projectTeamEmployees(displayAiTeam(run.team, currentTeam), this.storage);
     return {
       run,
       delivery: buildAiTeamDeliverySummary({ run, steps, displayTeam, relayTurns: messages, memberStates }),
+      // 活动时间投影（派生、不入库）：静默期界面上要能给出「本轮已跑多久 + 最近一次活动的时刻」。
+      activity: this.activityOf(run, steps),
       chatTitle: aiTeamChatTitle(task?.title),
       chatTitleUpdatedAt: task?.updatedAt ?? "",
       steps,
@@ -783,14 +866,46 @@ export class AiTeamRunner {
    * 快照拿不到的步骤跳过而不抛。run 不存在时与 detail() 同口径抛错。
    */
   live(runId: string): AiTeamLiveStep[] {
-    const run = this.storage.getAiTeamRun(runId);
-    if (!run) throw new Error("团队运行不存在。");
-    return this.liveSteps(run);
+    return this.liveSnapshot(runId).steps;
   }
 
-  private liveSteps(run: AiTeamRun): AiTeamLiveStep[] {
+  /**
+   * 轮询端（`GET /api/ai-team-runs/:id/live`）的完整投影：live 步骤 + run 级活动时间。
+   * 一次读数算出两者，移动端不必为了「还在跑吗」再拉一次 detail。run 不存在时与 detail() 同口径抛错。
+   */
+  liveSnapshot(runId: string): AiTeamLiveSnapshot {
+    const run = this.storage.getAiTeamRun(runId);
+    if (!run) throw new Error("团队运行不存在。");
+    const all = this.storage.listAiTeamSteps(runId);
+    const steps = this.liveSteps(run, all);
+    return { runId, status: run.status, activity: this.activityOf(run, all), steps };
+  }
+
+  /**
+   * run 级活动时间投影（派生、不入库）。`steps` 为该 run 的全部步骤，缺省时只在 run 还在跑
+   * 才去查表：终态 / 等批准 / 等用户时 `run.updatedAt` 就是最后一次状态写入，而逐步骤的内存观察
+   * 也已随步骤落地清掉，再查几十条历史记录没有意义。
+   */
+  private activityOf(run: AiTeamRun, steps?: AiTeamStep[]): AiTeamRunActivity {
+    const startedMs = toMs(run.createdAt);
+    let lastMs = Math.max(startedMs, toMs(run.updatedAt));
+    const known = steps ?? (run.status === "running" ? this.storage.listAiTeamSteps(run.id) : []);
+    for (const step of known) {
+      lastMs = Math.max(lastMs, toMs(step.startedAt), toMs(step.endedAt));
+      const observed = this.stepActivity.get(step.id);
+      if (observed !== undefined) lastMs = Math.max(lastMs, observed.at);
+    }
+    // 时钟只前进不后退：观测到的活动不可能早于本轮开始。
+    return {
+      startedAt: new Date(startedMs).toISOString(),
+      lastActivityAt: new Date(Math.max(lastMs, startedMs)).toISOString(),
+      observedAt: this.iso(),
+    };
+  }
+
+  private liveSteps(run: AiTeamRun, allSteps?: AiTeamStep[]): AiTeamLiveStep[] {
     const steps: AiTeamLiveStep[] = [];
-    for (const step of this.storage.listAiTeamSteps(run.id)) {
+    for (const step of allSteps ?? this.storage.listAiTeamSteps(run.id)) {
       if (step.status !== "running" || !step.sessionId) continue;
       const snapshot = this.ops.snapshot(step.sessionId);
       if (!snapshot) continue;
@@ -811,6 +926,7 @@ export class AiTeamRunner {
       preferOutput: this.ops.ownerOf(step.sessionId!) === "pty"
         && !(provider === "claude" && snapshot.providerCliActive === true),
     });
+    const state = activityState(snapshot);
     return {
       stepId: step.id,
       seq: step.seq,
@@ -820,11 +936,42 @@ export class AiTeamRunner {
       model: agent?.model?.trim() || undefined,
       thinkingEffort: agent?.thinkingEffort || undefined,
       sessionId: step.sessionId!,
-      state: activityState(snapshot),
+      state,
       text: rendered.text,
       omittedChars: rendered.omittedChars,
+      startedAt: step.startedAt,
+      lastActivityAt: this.isoOf(this.noteStepActivity(step, state, rendered.text, snapshot)),
+      // updatedAt 是「本次快照生成时刻」，每次推送/轮询都会前进；判断有没有新进展看 lastActivityAt。
       updatedAt: this.iso(),
     };
+  }
+
+  /**
+   * 记一步「最近一次可观测活动」的时刻并返回。签名 = 活动状态 + live 文本长度 + 原始输出与回合
+   * 规模 + 是否在本轮里 + 待授权请求 id；任一项变了就算活动发生在此刻。
+   * 与 live 推送指纹刻意不同：指纹只管「要不要推」，这里的信号要能把「文本没变但输出仍在涨」
+   * （一条长命令、一段被 ANSI 包住的进度）也认成活动。首次观察不记成活动，以 `startedAt` 为基线，
+   * 免得服务重启后第一次读快照就谎报「刚刚有活动」。
+   */
+  private noteStepActivity(
+    step: AiTeamStep,
+    state: AgentActivityState,
+    text: string,
+    snapshot: SessionSnapshot,
+  ): number {
+    const signal = [
+      state,
+      text.length,
+      snapshot.output?.length ?? 0,
+      snapshot.messages?.length ?? 0,
+      snapshot.structuredState?.inFlight === true ? 1 : 0,
+      snapshot.pendingEscalation?.requestId ?? "",
+    ].join("\u0000");
+    const seen = this.stepActivity.get(step.id);
+    if (seen && seen.signal === signal) return seen.at;
+    const at = seen ? this.now() : Math.max(toMs(step.startedAt), toMs(step.endedAt));
+    this.stepActivity.set(step.id, { signal, at });
+    return at;
   }
 
   /** 挂一次 run 级 live 去抖：同一 run 每 500ms 至多算一遍、推一次，与 evaluate 的计时器互不干扰。 */
@@ -838,27 +985,94 @@ export class AiTeamRunner {
     this.liveTimers.set(runId, timer);
   }
 
-  /** 推一次 live 列表（§4.9）；指纹（stepId + text + omittedChars + state）没变就不重复推，推送失败只忽略。 */
-  private pushLive(runId: string): void {
+  /**
+   * 推一次 live 列表（§4.9）；指纹（stepId + text + omittedChars + state）没变就不重复推，
+   * 推送失败只忽略。例外是静默心跳：`heartbeat` 为 true 时按心跳计时器的裁决放行，内容可以逐字相同，
+   * 但新的 `activity.observedAt` 与 heartbeat 标记让前端知道「这个 run 还在被跟踪」。
+   * 放行不松开去抖：推完照样记指纹并重排心跳，所以静默期最多每 heartbeatMs 一次，不是无界重推。
+   */
+  private pushLive(runId: string, heartbeat = false): void {
     if (!this.notifyLiveListener) return;
     const run = this.storage.getAiTeamRun(runId);
     if (!run) return;
-    const steps = this.liveSteps(run);
+    const terminal = AI_TEAM_TERMINAL_RUN_STATUSES.includes(run.status);
+    const all = this.storage.listAiTeamSteps(runId);
+    const steps = this.liveSteps(run, all);
     const key = steps
       .map((step) => `${step.stepId}\u0000${step.text}\u0000${step.omittedChars}\u0000${step.state}`)
       .join("\u0001");
-    if (this.lastLiveKey.get(runId) === key) return;
-    if (AI_TEAM_TERMINAL_RUN_STATUSES.includes(run.status)) {
-      // 终态的收尾推送之后不再留指纹：留着就没人清，长跑服务会按 run 数攒字符串（§4.9）。
+    const unchanged = this.lastLiveKey.get(runId) === key;
+    if (terminal) {
+      // 终态：指纹和心跳基线一律清掉（留着就没人清，长跑服务会按 run 数攒字符串，§4.9）；
+      // 没有新内容就什么都不发，此后不会再有 heartbeat 推送。
       this.lastLiveKey.delete(runId);
-    } else {
+      this.cancelHeartbeat(runId);
+      if (unchanged) return;
+    } else if (unchanged) {
+      if (!heartbeat) {
+        // 内容没变：不重复推，但把「静默到点重推一次」排上，去抖不能把后面的心跳吃掉。
+        this.scheduleHeartbeat(runId);
+        return;
+      }
+    }
+    if (!terminal) {
       this.lastLiveKey.set(runId, key);
+      this.lastLivePushAt.set(runId, this.now());
+      // 只有 running 才有心跳；等批准 / 等用户是「等人」而不是「在干活」，状态芯片本身已经说明。
+      if (run.status === "running") this.scheduleHeartbeat(runId);
+      else this.cancelHeartbeat(runId);
     }
     try {
-      this.notifyLiveListener({ runId, taskId: run.taskId, steps });
+      this.notifyLiveListener({
+        runId, taskId: run.taskId, status: run.status,
+        activity: this.activityOf(run, all), heartbeat, steps,
+      });
     } catch {
       // 通知失败不影响调度；客户端靠下一次事件或轮询端点补齐。
     }
+  }
+
+  /**
+   * 排一次静默心跳：距上次 live 推送或 run 通知还差多久到阈值，就多久后再看一次。
+   * 同一 run 至多一个计时器；run 不在 running、被删除或 dispose 时 cancel，不泄漏。
+   */
+  private scheduleHeartbeat(runId: string): void {
+    if (this.heartbeatTimers.has(runId)) return;
+    if (!this.notifyLiveListener && !this.notifyListener) return;
+    const last = Math.max(this.lastLivePushAt.get(runId) ?? 0, this.lastRunNotifyAt.get(runId) ?? 0);
+    if (last <= 0) return;
+    const delay = Math.max(0, last + this.heartbeatMs - this.now());
+    const timer = setTimeout(() => {
+      this.heartbeatTimers.delete(runId);
+      this.beat(runId);
+    }, delay);
+    timer.unref?.();
+    this.heartbeatTimers.set(runId, timer);
+  }
+
+  /** 心跳到点：仍在跑且仍在静默就把 live 快照和 run 状态各重推一次，然后按新基线续排。 */
+  private beat(runId: string): void {
+    const run = this.storage.getAiTeamRun(runId);
+    if (!run) return; // run 已被删除：不再续排，这条心跳到此为止
+    if (run.status !== "running") {
+      this.cancelHeartbeat(runId);
+      return;
+    }
+    const now = this.now();
+    if (now - (this.lastLivePushAt.get(runId) ?? now) >= this.heartbeatMs) this.pushLive(runId, true);
+    // run 通道同样允许静默重推：客户端收到 ai-team-run 会重拉 detail，进而拿到新的活动时间。
+    // 用刚从存储读出的 run（已带 conversationId）通知，importRun 会早退，心跳不产生额外写入。
+    if (now - (this.lastRunNotifyAt.get(runId) ?? now) >= this.heartbeatMs) this.notify(run);
+    this.scheduleHeartbeat(runId);
+  }
+
+  /** run 离开 running（终态、等批准、等用户）、被删除或 dispose：取消心跳并清掉基线。 */
+  private cancelHeartbeat(runId: string): void {
+    const timer = this.heartbeatTimers.get(runId);
+    if (timer) clearTimeout(timer);
+    this.heartbeatTimers.delete(runId);
+    this.lastLivePushAt.delete(runId);
+    this.lastRunNotifyAt.delete(runId);
   }
 
   /** 团队页的运行记录；teamId 为空时列出所有团队（侧边栏计数用）。 */
@@ -870,7 +1084,13 @@ export class AiTeamRunner {
     });
     return runs.map((run) => {
       const task = this.storage.getWandTask(run.taskId);
-      return { ...run, taskTitle: task?.title ?? "（任务已删除）", taskIdentifier: task?.identifier ?? "" };
+      // activity 是派生投影（不入库）：列表页靠它显示「已运行 N 分钟」，终态 run 不再查步骤表。
+      return {
+        ...run,
+        taskTitle: task?.title ?? "（任务已删除）",
+        taskIdentifier: task?.identifier ?? "",
+        activity: this.activityOf(run),
+      };
     });
   }
 
@@ -942,9 +1162,14 @@ export class AiTeamRunner {
     for (const timer of this.outputTimers.values()) clearTimeout(timer);
     for (const timer of this.recheckTimers.values()) clearTimeout(timer);
     for (const timer of this.liveTimers.values()) clearTimeout(timer);
+    for (const timer of this.heartbeatTimers.values()) clearTimeout(timer);
     this.outputTimers.clear();
     this.recheckTimers.clear();
     this.liveTimers.clear();
+    this.heartbeatTimers.clear();
+    this.lastLivePushAt.clear();
+    this.lastRunNotifyAt.clear();
+    this.stepActivity.clear();
     this.lastLiveKey.clear();
     this.noDegrade.clear();
     this.teamRequestIds.clear();
@@ -1093,9 +1318,14 @@ export class AiTeamRunner {
     ) {
       const failure = this.asyncStartupFailure(run, step, outcome.text);
       if (failure) {
-        await this.degradeWorkStep(run, step, failure, proceed);
+        await this.degradeStep(run, step, failure, proceed);
         return;
       }
+    }
+    if (step.kind === "leader" && outcome.kind === "failed" && outcome.sessionError
+      && !this.noDegrade.has(step.id)) {
+      await this.degradeStep(run, step, { kind: "runtime-failure", reason: outcome.text }, proceed);
+      return;
     }
     run.stepsUsed += 1;
     if (step.kind === "work") {
@@ -1121,11 +1351,10 @@ export class AiTeamRunner {
       return;
     }
 
-    // 负责人的模型报错时停下来等用户（换模型或稍后回复即可接着来），不当成格式错误空转重试。
-    // 按真实角色身份发出正常对话气泡并展示完整报错，而不是次级 notice 小字。
+    // 负责人候选耗尽后才等用户，不把模型调用失败当作格式错误重试。
     const leader = leaderOf(run.team);
     if (outcome.kind === "failed" && outcome.sessionError) {
-      // Leaders keep their existing wait-for-user rule, not worker candidate fallback.
+      // Candidate failures have already traversed the configured chain.
       const requestId = this.teamRequestIds.get(step.id);
       if (step.sessionId && requestId) this.ops.consumeUnacceptedStartup?.(step.sessionId, requestId);
       this.saveStep({ ...step, status: "failed", report: outcome.text, endedAt });
@@ -1151,7 +1380,7 @@ export class AiTeamRunner {
       run.formatRetries += 1;
       this.postNotice(run, `负责人的回复没能读懂，让他重答（${run.formatRetries}/${MAX_FORMAT_RETRIES}）`, step.sessionId);
       this.saveRun(run);
-      const retry = this.createLeaderStep(run, "重新回复");
+      const retry = this.createLeaderStep(run, "重新回复", this.infoOf(step).usedCandidate);
       await this.dispatchStep(run, retry, (reportPath, fresh) => (
         buildLeaderFormatRetryPrompt(
           run, parsed.error, reportPath, fresh, this.chatHistoryFor(run), this.defaultModelName,
@@ -1262,7 +1491,12 @@ export class AiTeamRunner {
     const finished: AiTeamFinishedStepSummary[] = steps
       .filter((step) => step.kind === "work" && step.seq > lastLeaderSeq && (step.status === "done" || step.status === "failed"))
       .map((step) => ({ step, memberName: this.member(run.team, step.memberId)?.name ?? step.memberId }));
-    const step = this.createLeaderStep(run, userNote ? "回应用户" : "安排下一步");
+    const previousLeader = [...steps].reverse().find((item) => item.kind === "leader" && item.status === "done");
+    const leader = leaderOf(run.team);
+    const previousCandidate = previousLeader ? this.infoOf(previousLeader).usedCandidate : 0;
+    const agent = memberAgents(leader)[previousCandidate];
+    const candidate = agent && this.liveSessionFor(run, leader, "", agent, "leader") ? previousCandidate : 0;
+    const step = this.createLeaderStep(run, userNote ? "回应用户" : "安排下一步", candidate);
     const handoffPath = this.writeHandoff(
       run,
       step.seq,
@@ -1357,7 +1591,8 @@ export class AiTeamRunner {
     const previous = this.storage.listAiTeamRuns({ taskId: run.taskId })
       .filter((item) => item.id !== run.id && item.chatSessionId === chatSessionId)
       .reverse();
-    const turns = this.ops.snapshot(chatSessionId)?.messages ?? [];
+    const turns = run.conversationId && this.chatHistoryTurns ? this.chatHistoryTurns(run.conversationId)
+      : this.ops.snapshot(chatSessionId)?.messages ?? [];
     if (previous.length === 0 && turns.length === 0) return null;
     const runs = previous.map((item) => ({
       status: item.status,
@@ -1411,7 +1646,7 @@ export class AiTeamRunner {
     return false;
   }
 
-  private createLeaderStep(run: AiTeamRun, title: string): AiTeamStep {
+  private createLeaderStep(run: AiTeamRun, title: string, usedCandidate = 0): AiTeamStep {
     const seq = this.nextSeq(run.id);
     const leader = leaderOf(run.team);
     const step: AiTeamStep = {
@@ -1427,6 +1662,7 @@ export class AiTeamRunner {
       report: "",
       reportPath: aiTeamReportPath(run.id, seq, "leader", leader.id),
       dependsOn: [],
+      dispatchInfo: { usedCandidate, skipped: [] },
       startedAt: null,
       endedAt: null,
     };
@@ -1449,8 +1685,8 @@ export class AiTeamRunner {
     const info = this.infoOf(step);
     const agent = candidates[info.usedCandidate];
     // §3.4 触发点 1 的事前分支：当前候选已被拉黑、候选列表被改到没有这一档，或快照就绪且模型
-    // 明确不在清单里。三者都走 degradeWorkStep 留痕，不在这里静默换候选。
-    if (member && step.kind === "work") {
+    // 明确不在清单里。三者都走 degradeStep 留痕，不在这里静默换候选。
+    if (member) {
       const blocked = agent
         ? this.blockedCandidate(run.id, agent)
         : { kind: "runtime-failure" as const, reason: `候选列表已变更，没有候选 ${info.usedCandidate + 1}` };
@@ -1460,11 +1696,11 @@ export class AiTeamRunner {
         : null;
       const pre = blocked ?? unknown;
       if (pre) {
-        await this.degradeWorkStep(run, step, pre, proceed);
+        await this.degradeStep(run, step, pre, proceed, step.kind === "leader" ? buildPrompt : undefined);
         return;
       }
     }
-    const reusable = member ? this.liveSessionFor(run, member, step.id, agent) : null;
+    const reusable = member ? this.liveSessionFor(run, member, step.id, agent, step.kind) : null;
     const prompt = buildPrompt(step.reportPath, reusable === null);
     const startedAt = this.iso();
     let running: AiTeamStep = { ...step, instructions: step.kind === "leader" ? prompt.message : step.instructions, status: "running", startedAt, sessionId: reusable };
@@ -1510,13 +1746,23 @@ export class AiTeamRunner {
         // 进程级信号（agent-dispatch 的「当前服务未启用 … 会话」）：本次运行该 kind 的候选全部不再
         // 尝试，也不能当成「不可降级」直接吞掉——记进黑名单后交给既有失败出口。
         this.disableHostKind(run.id, agent.kind);
-      } else if (agent && step.kind === "work" && kind === "spawn-missing"
+      }
+      if (step.kind === "leader" && !this.noDegrade.has(step.id)) {
+        const delivered = this.stepOutcome(run, running);
+        if (delivered.kind === "done") {
+          await this.finishStep(run, running, delivered, proceed);
+          return;
+        }
+        await this.degradeStep(run, running, { kind, reason: message }, proceed, buildPrompt);
+        return;
+      }
+      if (agent && step.kind === "work" && kind === "spawn-missing"
         && (!member?.employeeId || reusable === null)
         && !existsSync(path.join(run.cwd, step.reportPath)) && !this.noDegrade.has(step.id)) {
         // §3.4 触发点 1：会话根本没起来，ENOENT 对 structured / pty 同样可靠（修正 B4 排除的是
         // PTY 的异步分类）。传 `running` 而不是入参 `step`：复用会话时 sessionId 只在 running 上。
-        // 候选边界与黑名单由 degradeWorkStep 自己判，耗尽时它走 failed 出口。
-        await this.degradeWorkStep(run, running, { kind, reason: message }, proceed);
+        // 候选边界与黑名单由 degradeStep 自己判，耗尽时它走 failed 出口。
+        await this.degradeStep(run, running, { kind, reason: message }, proceed);
         return;
       }
       await this.finishStep(run, running, { kind: "failed", text: `派发失败：${this.redact(message)}` }, proceed);
@@ -1528,11 +1774,12 @@ export class AiTeamRunner {
    * 只直接派出 A′，**不整轮 advance**（N1：advance 的 queued/byId/busyMembers 是进循环时的快照，
    * 整轮调整会在同一栈里对同一步二次派发）。`proceed` 原样透传给 A′ 的 dispatchStep。
    */
-  private async degradeWorkStep(
+  private async degradeStep(
     run: AiTeamRun,
     step: AiTeamStep,
     failure: CandidateFailure,
     proceed: boolean,
+    buildPrompt?: (reportPath: string, fresh: boolean) => AiTeamPrompt,
   ): Promise<void> {
     const info = this.infoOf(step);
     const member = this.member(run.team, step.memberId);
@@ -1547,16 +1794,17 @@ export class AiTeamRunner {
     ];
     const next = info.usedCandidate + 1;
     const tail = candidates.slice(next);
-    // 级联深度天然以候选上限（4）为界：每降一级 usedCandidate +1。耗尽时退回既有 failed 出口，
-    // 交回 Leader 决定 ask/finish，不另设 waiting_user 捷径、不循环。
+    // 候选下标单调增加；耗尽时负责人等待用户，成员失败交回负责人。
+    // 内部候选重试不扣业务步骤预算，也不循环回首选。
     if (!member || !agent || tail.length === 0 || tail.every((item) => this.blockedCandidate(run.id, item))) {
       const detail = skipped.map((item) => `候选 ${item.candidate + 1}（${item.reason}）`).join("、");
       this.noDegrade.add(step.id);
       try {
-        await this.finishStep(run, step, {
+        await this.finishStep(run, { ...step, dispatchInfo: { ...info, skipped } }, {
           kind: "failed",
           sessionError: true,
-          text: `${member?.name ?? "该成员"}的所有候选均不可用：${detail || reason}`,
+          text: step.kind === "leader" && candidates.length === 1 ? reason
+            : `${member?.name ?? "该成员"}的所有候选均不可用：${detail || reason}`,
         }, proceed);
       } finally {
         this.noDegrade.delete(step.id);
@@ -1569,9 +1817,21 @@ export class AiTeamRunner {
       if (previous && !isSessionGone(previous)) {
         try {
           this.ops.stop(step.sessionId);
+          if (step.kind === "leader" && !isSessionGone(this.ops.snapshot(step.sessionId) ?? previous)) {
+            throw new Error("旧负责人会话尚未停止");
+          }
         } catch (error) {
-          // stop 抛错不做兜底会让旧步卡在 running，这里只记日志继续记账。
           console.error(`[AiTeam] stop degraded session ${step.sessionId} failed:`, getErrorMessage(error));
+          if (step.kind === "leader") {
+            this.noDegrade.add(step.id);
+            try {
+              await this.finishStep(run, step, { kind: "failed", sessionError: true,
+                text: `无法停止旧负责人会话，未启动备用：${this.cleanError(getErrorMessage(error))}` }, proceed);
+            } finally {
+              this.noDegrade.delete(step.id);
+            }
+            return;
+          }
         }
       }
     }
@@ -1591,14 +1851,14 @@ export class AiTeamRunner {
       id: randomUUID(),
       runId: run.id,
       seq,
-      kind: "work",
+      kind: step.kind,
       memberId: step.memberId,
       title: step.title,
       instructions: step.instructions,
       sessionId: null,
       status: "queued",
       report: "",
-      reportPath: aiTeamReportPath(run.id, seq, "work", step.memberId),
+      reportPath: aiTeamReportPath(run.id, seq, step.kind, step.memberId),
       dependsOn: step.dependsOn,
       startedAt: null,
       endedAt: null,
@@ -1606,10 +1866,10 @@ export class AiTeamRunner {
     };
     this.saveStep(replacement);
     // 群聊降级行（§5.3/B15）：一次降级一行，署名用切过去的新候选；事前 model-unknown 跳过
-    // 同样走 degradeWorkStep，所以这里也覆盖它。reason 已经过脱敏 + 头尾截断（§4.5）。
+    // 同样走 degradeStep，所以这里也覆盖它。reason 已经过脱敏 + 头尾截断（§4.5）。
     this.postNotice(
       run,
-      `⚠️ ${member.name} 的首选配置不可用（${reason}），已切换到候选 ${next + 1}`,
+      `⚠️ ${member.name} 的${info.usedCandidate === 0 ? "首选配置" : `候选 ${info.usedCandidate + 1}`}不可用（${reason}），已切换到候选 ${next + 1}`,
       null,
       member,
       candidates[next],
@@ -1626,6 +1886,20 @@ export class AiTeamRunner {
     // ⑤ 黑名单记账（立即写 run_state_json），然后只直接派 A′。
     this.accountCandidateFailure(run.id, agent, failure.kind);
     await this.dispatchStep(run, replacement, (reportPath, fresh) => {
+      if (step.kind === "leader") {
+        const original = buildPrompt ? buildPrompt(reportPath, true).message
+          : step.instructions.replaceAll(step.reportPath, reportPath);
+        // New candidates need completed reports and the exact failed-round request.
+        const finished = this.storage.listAiTeamSteps(run.id)
+          .filter((item) => item.kind === "work" && (item.status === "done" || item.status === "failed"))
+          .map((item) => ({ step: item, memberName: this.member(run.team, item.memberId)?.name ?? item.memberId }));
+        const history = this.writeChatHistory(run) ?? this.chatHistoryFor(run);
+        const handoff = this.writeHandoff(run, replacement.seq, "leader",
+          finished.map(({ step: item, memberName }) => this.handoffEntry(run, item, memberName)));
+        return buildLeaderFollowupPrompt(run, finished, reportPath,
+          `这是同一轮负责人判断的候选重试；继续下面的原始要求，已完成的工作不要重做。\n${original}`,
+          fresh, handoff, history, this.defaultModelName);
+      }
       const target = this.member(run.team, replacement.memberId) ?? member;
       return buildMemberPrompt(
         run, replacement, target, fresh, this.memberUpstream(run, replacement), this.chatHistoryFor(run),
@@ -1641,12 +1915,15 @@ export class AiTeamRunner {
     const member = this.member(run.team, step.memberId);
     if (!member) return null;
     const requestId = this.teamRequestIds.get(step.id);
-    const unaccepted = !!(step.sessionId && requestId
-      && this.ops.consumeUnacceptedStartup?.(step.sessionId, requestId));
-    // Bound employees may retry only this request's explicit unaccepted fact, never a text/time guess.
-    if (member.employeeId) {
+    const refusal = step.sessionId && requestId && this.ops.consumeUnacceptedFailure
+      ? this.ops.consumeUnacceptedFailure(step.sessionId, requestId) : null;
+    const unaccepted = this.ops.consumeUnacceptedFailure ? refusal?.retryable === true
+      : !!(step.sessionId && requestId && this.ops.consumeUnacceptedStartup?.(step.sessionId, requestId));
+    // Production dispatch uses the shared current-request fact; never infer a replay from a time window.
+    if (member.employeeId || this.ops.consumeUnacceptedFailure) {
       if (!unaccepted || existsSync(path.join(run.cwd, step.reportPath))) return null;
-      return { kind: "spawn-missing", reason: outcomeText };
+      // A quota rejection must not blacklist the whole provider and suppress its other channels.
+      return { kind: !refusal || refusal.kind === "spawn" ? "spawn-missing" : "input-rejected", reason: outcomeText };
     }
     const info = this.infoOf(step);
     const candidates = memberAgents(member);
@@ -1758,7 +2035,7 @@ export class AiTeamRunner {
    * 独立 CLI 团队沿用旧刷新规则；带员工链接的运行全程保留新开工时的执行快照。
    */
   private refreshTeam(run: AiTeamRun): void {
-    if (run.team.members.some((member) => member.employeeId)) return;
+    if (run.conversationId || run.team.members.some((member) => member.employeeId)) return;
     const latest = this.storage.getAiTeam(run.teamId);
     if (!latest || !latest.members.some((member) => member.isLeader)) return;
     const used = new Set(this.storage.listAiTeamSteps(run.id).map((step) => step.memberId));
@@ -1776,11 +2053,14 @@ export class AiTeamRunner {
     member: AiTeamMember,
     excludeStepId: string,
     agent: WandTaskAgent | undefined,
+    kind?: AiTeamStep["kind"],
   ): string | null {
     const steps = this.storage.listAiTeamSteps(run.id);
     for (let index = steps.length - 1; index >= 0; index -= 1) {
       const step = steps[index]!;
       if (step.id === excludeStepId || step.memberId !== member.id || !step.sessionId) continue;
+      // One identity, two compatible stage contexts: a JSON planner is not the work executor.
+      if (kind && step.kind !== kind) continue;
       const snapshot = this.ops.snapshot(step.sessionId);
       if (!snapshot || isSessionGone(snapshot)) return null;
       if ((snapshot.employeeId ?? undefined) !== member.employeeId) return null;
@@ -1850,7 +2130,10 @@ export class AiTeamRunner {
   private postTurn(run: AiTeamRun, turn: ConversationTurn): void {
     if (!this.chat || !run.chatSessionId) return;
     try {
-      this.chat.post(run.chatSessionId, [turn]);
+      this.chat.post(run.chatSessionId, [{ ...turn,
+        ...(run.conversationId ? { messageId: randomUUID(), conversationId: run.conversationId,
+          conversationTarget: { taskId: run.taskId, runId: run.id } } : {}),
+      }]);
     } catch (error) {
       console.error(`[AiTeam] post to chat ${run.chatSessionId} failed:`, getErrorMessage(error));
     }
@@ -1944,6 +2227,8 @@ export class AiTeamRunner {
     this.saveRun(run);
     // 进终态就不可能再有 live 变化，清掉该 run 的推送指纹：不然长跑的服务会按 run 数线性攒字符串。
     if (AI_TEAM_TERMINAL_RUN_STATUSES.includes(status)) this.lastLiveKey.delete(run.id);
+    // 不再干活（终态或等人）就撤掉心跳：留着计时器会继续推「仍在运行」，那才是误判。
+    if (status !== "running") this.cancelHeartbeat(run.id);
   }
 
   private saveRun(run: AiTeamRun): void {
@@ -1957,11 +2242,18 @@ export class AiTeamRunner {
       const requestId = this.teamRequestIds.get(step.id);
       if (step.sessionId && requestId) this.ops.consumeUnacceptedStartup?.(step.sessionId, requestId);
       this.teamRequestIds.delete(step.id);
+      // 步骤落地：逐步骤的活动观察随之失效（live 列表里已经没有这一步了），不留内存条目。
+      this.stepActivity.delete(step.id);
     }
     this.storage.saveAiTeamStep(step);
   }
 
   private notify(run: AiTeamRun): void {
+    // 记下 run 通道的活动基线并排上静默心跳：长任务只等一次状态写入是不够的，
+    // 用户在十几分钟没有新消息时需要「仍在运行」的证据，见 beat()。
+    this.lastRunNotifyAt.set(run.id, this.now());
+    if (run.status === "running") this.scheduleHeartbeat(run.id);
+    else this.cancelHeartbeat(run.id);
     try {
       this.notifyListener?.(run);
     } catch {
@@ -1971,5 +2263,9 @@ export class AiTeamRunner {
 
   private iso(): string {
     return new Date(this.now()).toISOString();
+  }
+
+  private isoOf(ms: number): string {
+    return new Date(ms).toISOString();
   }
 }

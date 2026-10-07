@@ -1,7 +1,9 @@
 import * as React from "react";
+import { Flex, Tag, Typography } from "antd";
 
 import {
   WandBrandMark,
+  WandButton,
   WandDropdownMenu,
   WandDropdownMenuContent,
   WandDropdownMenuItem,
@@ -24,10 +26,23 @@ import {
 import { ChatWidthToggle } from "./chat-width-toggle";
 import { SidebarToggleIcon } from "./sidebar-toggle-icon";
 import { SessionElapsed } from "./session-elapsed";
+import { useServerAnchoredClock } from "./use-server-anchored-clock";
+import { SILENCE_NOTICE_MS, silenceDurationMs } from "../../running-activity";
+
+/** 顶栏徽标位的紧凑静默读数；完整语义（阶段 + 已运行 + 无新消息）在会话状态条上。 */
+function silenceBadgeText(selected: UiSessionVm | null, now: number): string {
+  if (!selected?.turnActive) return "";
+  // VM 上的 status 是会话级事实（provider CLI 活着也算 running），运行事实取 turnActive。
+  const silence = silenceDurationMs({
+    status: "idle",
+    permissionBlocked: selected.permissionBlocked,
+    structuredState: { inFlight: true, lastActivityAt: selected.lastActivityAt },
+  }, now);
+  if (silence < SILENCE_NOTICE_MS) return "";
+  const minutes = Math.floor(silence / 60_000);
+  return minutes < 60 ? `静默 ${minutes} 分` : `静默 ${Math.floor(minutes / 60)} 时`;
+}
 import { TopbarGitBadge } from "./topbar-git-badge";
-import { ObjectProfilePanel } from "./object-profile-panel.js";
-import { EmployeeAvatar } from "../agents/employee-avatar.js";
-import { useSiliconEmployees } from "../agents/employee-repository.js";
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
 import type { UiAction, UiSessionVm } from "./ui-store";
 
@@ -155,51 +170,21 @@ export function ShellTopbar() {
   const selected = snapshot.selected;
   const moreOpen = snapshot.layout.topbarMoreOpen;
   const selectedActions = selected ? getShellSidebarEntryActions(selected, false) : null;
-  const { employees } = useSiliconEmployees();
-  const [profileOpen, setProfileOpen] = React.useState(false);
-  const profileTriggerRef = React.useRef<HTMLButtonElement>(null);
+  const topbarNow = useServerAnchoredClock(Boolean(selected?.turnActive));
 
-  // 匹配当前会话关联的员工
-  const matchedEmployee = React.useMemo(() => {
-    if (!selected) return null;
-    return employees.find((employee) => employee.id === selected.employeeId) || null;
-  }, [selected, employees]);
-  const employeeSnapshot = selected?.employeeId ? {
-    id: selected.employeeId,
-    name: matchedEmployee?.name || selected.employeeName || "硅基员工",
-    avatar: matchedEmployee ? matchedEmployee.avatar : selected.employeeAvatar || "",
-  } : null;
-
-  // 切会话时如果新对象没有员工/团队身份，平滑收起资料面板
-  React.useEffect(() => {
-    if (!selected?.employeeId) {
-      setProfileOpen(false);
-    }
-  }, [selected?.id, selected?.employeeId]);
-
-  const openFiles = () => {
-    if (!snapshot.layout.filePanelOpen) void dispatch({ type: "layout.files.toggle" });
-  };
   // Selecting an item closes the menu through `onOpenChange`, so the action
   // itself is all that is left to dispatch here.
   const runMoreAction = (action: UiAction) => {
     void dispatch(action);
   };
 
-  const toggleProfile = () => {
-    if (!profileOpen && snapshot.layout.filePanelOpen) {
-      void dispatch({ type: "layout.files.close" });
-    }
-    setProfileOpen((v) => !v);
-  };
-
   return (
-    <div className={classNames(
+    <Flex align="center" gap="small" wrap className={classNames(
       "main-header-row",
       (selected?.turnActive || selected?.permissionBlocked) && "is-running",
       selected?.permissionBlocked && "is-permission-blocked",
-    )}>
-      <div className="topbar-left">
+    )} style={{ flexShrink: 0, padding: "8px 12px", borderBottom: "1px solid var(--border-subtle)" }}>
+      <Flex align="center" gap="small" className="topbar-left">
         {(snapshot.layout.sidebarDrawer || !snapshot.layout.sidebarAnchored) && (
           <WandIconButton
             id="sessions-toggle-button"
@@ -213,66 +198,48 @@ export function ShellTopbar() {
             <SidebarToggleIcon open={snapshot.layout.sessionsDrawerOpen} size={18}/>
           </WandIconButton>
         )}
-        {!snapshot.layout.sidebarAnchored && <WandBrandMark className="topbar-brand"/>}
-      </div>
-      <div className="topbar-center">
+        {!snapshot.layout.sidebarAnchored && <WandBrandMark className="topbar-brand" style={{ width: 24, height: 24 }}/>}
+      </Flex>
+      <Flex align="center" gap="small" wrap className="topbar-center" style={{ flex: "1 1 200px", minWidth: "min(100%, 200px)" }}>
         {selected ? (
           <>
-            {/* 对话对象是主标题，会话题目保留为次级上下文。 */}
-            <button
-              ref={profileTriggerRef}
-              type="button"
-              className={classNames("topbar-object-btn", profileOpen && "active")}
-              aria-label={`查看${employeeSnapshot?.name || selected.provider}资料`}
-              aria-expanded={profileOpen}
-              onClick={toggleProfile}
-            >
-              {employeeSnapshot ? (
-                <EmployeeAvatar employee={employeeSnapshot} provider={selected.provider} size="sm" className="topbar-object-avatar" />
-              ) : (
-                <span className="topbar-object-cli-icon"><WandIcon name="terminal" size={14} /></span>
-              )}
-              <span className="topbar-object-name">{employeeSnapshot?.name || selected.provider}</span>
-              <span className={classNames("topbar-object-dot", (selected.turnActive || selected.inFlight) ? "is-active" : "")} />
-            </button>
-            <span
+            <Typography.Text type="secondary">{selected.provider}</Typography.Text>
+            <Typography.Text ellipsis
               className={classNames("topbar-session-title", snapshot.topbar.titleGenerating && "title-generating")}
               title={snapshot.topbar.description || selected.title}
               aria-busy={snapshot.topbar.titleGenerating || undefined}
+              style={{ flex: "1 1 120px", minWidth: 0, maxWidth: 260 }}
             >
               {snapshot.topbar.title}
-            </span>
-            <span
+            </Typography.Text>
+            <Tag
               className={classNames("session-status-pill", snapshot.topbar.statusTone)}
               title={snapshot.topbar.statusLabel}
             >
-              <span className="session-status-dot"/>
               <span className="session-status-text">{snapshot.topbar.statusLabel}</span>
-              {selected.inFlight && <SessionElapsed key={selected.id}/>}
-            </span>
-            <span
+              {selected.turnActive && <SessionElapsed anchor={selected.turnStartedAt}/>}
+              {selected.turnActive && silenceBadgeText(selected, topbarNow) && (
+                <span className="session-status-silent" title={silenceBadgeText(selected, topbarNow) || undefined}>
+                  {silenceBadgeText(selected, topbarNow)}
+                </span>
+              )}
+            </Tag>
+            <Typography.Text type="secondary"
               className={classNames("current-task", !snapshot.topbar.currentTask && "hidden")}
               id="current-task"
-              title={snapshot.topbar.currentTask || undefined}
+              title={snapshot.topbar.currentTask || undefined} hidden={!snapshot.topbar.currentTask}
             >
               {snapshot.topbar.currentTask}
-            </span>
+            </Typography.Text>
             {snapshot.topbar.cwd && (
-              <span
+              <Typography.Text type="secondary"
                 className="topbar-cwd tail-marquee-path"
                 id="topbar-cwd"
-                role="button"
-                tabIndex={0}
                 title={snapshot.topbar.cwd}
-                onClick={openFiles}
-                onKeyDown={(event) => {
-                  if (event.key !== "Enter" && event.key !== " ") return;
-                  event.preventDefault();
-                  openFiles();
-                }}
+                style={{ maxWidth: 220, minWidth: 0, overflow: "hidden" }}
               >
-                <span className="tail-marquee-path-inner">{snapshot.topbar.cwd}</span>
-              </span>
+                <Typography.Text ellipsis className="tail-marquee-path-inner">{snapshot.topbar.cwd}</Typography.Text>
+              </Typography.Text>
             )}
           </>
         ) : (
@@ -281,8 +248,8 @@ export function ShellTopbar() {
             <span className="current-task hidden" id="current-task"/>
           </>
         )}
-      </div>
-      <div className="topbar-right">
+      </Flex>
+      <Flex align="center" gap={4} className="topbar-right">
         <ChatWidthToggle className="topbar-chat-width"/>
         <WandIconButton
           id="topbar-file-button"
@@ -342,15 +309,8 @@ export function ShellTopbar() {
             </WandDropdownMenu>
           </div>
         )}
-      </div>
-      <ObjectProfilePanel
-        open={profileOpen}
-        employee={matchedEmployee}
-        employeeSnapshot={employeeSnapshot}
-        selectedSession={selected}
-        triggerRef={profileTriggerRef}
-        onClose={() => setProfileOpen(false)}
-      />
-    </div>
+      </Flex>
+
+    </Flex>
   );
 }

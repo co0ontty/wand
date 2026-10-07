@@ -414,3 +414,136 @@ test("controller delegates lifecycle through one runtime adapter", () => {
   uninstall();
   assert.equal(newSessionController.open(), false);
 });
+
+test("新会话对话框支持员工默认派发与指定 CLI 及模型", () => {
+  const defaults: NewSessionConfig = {
+    defaultProvider: "claude",
+    defaultSessionKind: "structured",
+    defaultMode: "default",
+    defaultCwd: "/repo",
+  };
+  const context: NewSessionRuntimeContext = {
+    effectiveCwd: "/repo",
+    selectedModels: { claude: "sonnet", pi: "pi-base" },
+  };
+
+  // 1. 员工默认派发流程
+  const defaultEmployeeForm: NewSessionForm = {
+    provider: "claude",
+    employeeId: "emp-test-1",
+    kind: "structured",
+    cwd: "/repo",
+    mode: "default",
+    worktreeEnabled: false,
+    model: "sonnet",
+    specifiedCli: false,
+  };
+  const defaultReq = buildCreateRequest(defaultEmployeeForm, defaults, context);
+  assert.equal(defaultReq.kind, "structured");
+  if (defaultReq.kind === "structured") {
+    assert.equal(defaultReq.employeeId, "emp-test-1");
+    assert.equal(defaultReq.overrideCli, false);
+    assert.equal(defaultReq.model, undefined, "默认员工派发不强制锁死客户端 model，交由服务端员工候选自动解析");
+  }
+
+  // 2. 点击后指定 CLI 和模型
+  const specifiedForm: NewSessionForm = {
+    provider: "pi",
+    employeeId: "emp-test-1",
+    kind: "structured",
+    cwd: "/repo",
+    mode: "default",
+    worktreeEnabled: false,
+    model: "custom-pi-model",
+    specifiedCli: true,
+  };
+  const specifiedReq = buildCreateRequest(specifiedForm, defaults, context);
+  assert.equal(specifiedReq.kind, "structured");
+  if (specifiedReq.kind === "structured") {
+    assert.equal(specifiedReq.employeeId, "emp-test-1");
+    assert.equal(specifiedReq.overrideCli, true);
+    assert.equal(specifiedReq.provider, "pi");
+    assert.equal(specifiedReq.model, "custom-pi-model");
+  }
+
+  // 3. UI 源码核对
+  const host = readFileSync(new URL("../src/web-ui/react/new-session/host.tsx", import.meta.url), "utf8");
+  assert.match(host, /wand-new-session-employee-section/);
+  assert.match(host, /wand-new-session-logo-bar/);
+  assert.match(host, /EmployeeAvatar[\s\S]*selectedEmployee/);
+  assert.match(host, /默认走员工派发流程/);
+  assert.match(host, /customizingCli/);
+  assert.match(host, /选择执行工具/);
+  assert.match(host, /指定模型/);
+});
+
+test("新会话控制器与请求生成器支持工作区任务上下文绑定", () => {
+  const runtime: NewSessionRuntimeAdapter = {
+    onOpen() {},
+    onClose() {},
+    getContext() { return { effectiveCwd: "/task-worktree" }; },
+    async prepareCreate() { return {}; },
+    async completeCreate() {},
+    rememberModel() {},
+  };
+  const uninstall = configureNewSessionRuntime(runtime);
+
+  const defaults: NewSessionConfig = {
+    defaultProvider: "claude",
+    defaultSessionKind: "structured",
+    defaultMode: "default",
+    defaultCwd: "/repo",
+  };
+  const context: NewSessionRuntimeContext = {
+    effectiveCwd: "/task-worktree",
+  };
+
+  const opened = newSessionController.open({
+    initialCwd: "/task-worktree",
+    workspaceId: "ws-123",
+    workspaceTaskId: "task-456",
+    taskName: "修复用户交互",
+  });
+  assert.equal(opened, true);
+  const snap = newSessionStore.getSnapshot();
+  assert.equal(snap.initialCwd, "/task-worktree");
+  assert.equal(snap.workspaceId, "ws-123");
+  assert.equal(snap.workspaceTaskId, "task-456");
+  assert.equal(snap.taskName, "修复用户交互");
+
+  const form: NewSessionForm = {
+    provider: "codex",
+    kind: "structured",
+    cwd: "/task-worktree",
+    mode: "full-access",
+    worktreeEnabled: false,
+    model: "gpt-4o",
+    workspaceId: snap.workspaceId,
+    workspaceTaskId: snap.workspaceTaskId,
+  };
+  const req = buildCreateRequest(form, defaults, context);
+  assert.equal(req.workspaceId, "ws-123");
+  assert.equal(req.workspaceTaskId, "task-456");
+
+  newSessionController.close();
+  uninstall();
+});
+
+test("新会话页的团队直发：不建会话、本轮说明必填、按已存在项目直发", () => {
+  const host = readFileSync(new URL("../src/web-ui/react/new-session/host.tsx", import.meta.url), "utf8");
+  const types = readFileSync(new URL("../src/web-ui/react/new-session/types.ts", import.meta.url), "utf8");
+  // 表单契约：团队与 employeeId 并列，是同一页的第三类执行主体。
+  assert.match(types, /teamId\?: string;/);
+  // 团队分支先于建会话：直发路由自己建 team_direct 卡，不下发 cwd、不先开空会话。
+  const submit = host.slice(host.indexOf("async function submit"));
+  assert.match(submit, /if \(form\.teamId\) \{\s*await startDirectTeamRun\(form\);\s*return;\s*\}/);
+  assert.ok(submit.indexOf("if (form.teamId) {") < submit.indexOf("prepareCreate"), "团队分支在建会话之前");
+  // 说明必填：服务端 boundedText(note, 1, …) 会拒空，前端本地就拦并把光标放回说明框。
+  assert.match(host, /const note = teamNote\.trim\(\);\s*\n\s*if \(!note\) \{[\s\S]*?teamNoteRef\.current\?\.focus\(\);/);
+  // 直发只发 note + workspaceId（cwd 由服务端按项目解析）。
+  assert.match(host, /aiTeamsRepository\.startDirect\(teamId, \{ note, workspaceId \}\)/);
+  // 团队只在「非任务上下文」时提供，且要一个已存在的项目 id。
+  assert.match(host, /const teamContext = Boolean\(controller\.open && form && !form\.workspaceTaskId\)/);
+  assert.match(host, /teams=\{teamContext \? teamOptions : null\}/);
+  assert.match(host, /const teamWorkspaceId = form\?\.workspaceTaskId/);
+});

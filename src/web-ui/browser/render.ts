@@ -1,8 +1,8 @@
+import { isStandaloneSettingsPage } from "../page.js";
+import { clearNoticeView, paintBootNotice, paintOfflineNotice } from "./notice-view-adapter";
 import { composer, state, writeStoredBoolean } from "./state";
 import { invalidateChatInteraction } from "./chat-render-focus.js";
 import { restoreActiveTask } from "./active-task";
-import { renderLoginVisual } from "./login-visual.js";
-import { renderWandBrandMarkup } from "../brand-identity.js";
 import { iconSvg } from "./i18n";
 import { escapeHtml, refreshTailMarqueePaths, scrollPathElementToEnd } from "./utils";
 import { getConfigCwd } from "./chat-scroll";
@@ -90,23 +90,20 @@ export function updateOfflineBanner() {
     el.id = 'offline-banner';
     el.className = 'offline-banner';
     // 全站提示都是中文，这条也不例外（原来那句英文只在真断线时才看得见）。
-    el.textContent = '当前处于离线状态，部分功能可能不可用。';
+    el.style.cssText = "position:fixed;top:var(--wand-safe-top);left:50%;transform:translateX(-50%);z-index:20030;width:min(440px,calc(100vw - 32px))";
     document.body.appendChild(el);
+    paintOfflineNotice(el);
   } else if (state.isOnline && banner) {
+    clearNoticeView(banner);
     banner.remove();
   }
 }
 
 export function renderBootLoading() {
+  if (isStandaloneSettingsPage()) return;
   var app = document.getElementById("app");
   if (!app) return;
-  app.innerHTML =
-    '<div class="boot-loading">' +
-      '<div class="boot-loading-card">' +
-        '<div class="boot-loading-spinner"></div>' +
-        '<div class="boot-loading-text">正在连接 Wand…</div>' +
-      '</div>' +
-    '</div>';
+  paintBootNotice(app);
 }
 
 /**
@@ -117,12 +114,7 @@ export function renderBootLoading() {
 export function renderBootFailure() {
   var app = document.getElementById("app");
   if (!app) return;
-  app.innerHTML =
-    '<div class="boot-loading">' +
-      '<div class="boot-loading-card">' +
-        '<div class="boot-loading-text">界面加载失败，请刷新页面重试</div>' +
-      '</div>' +
-    '</div>';
+  paintBootNotice(app, "界面加载失败，请刷新页面重试");
 }
 
 export function scheduleForegroundSync(reason: string, opts?: any) {
@@ -263,6 +255,7 @@ export function bindForegroundSyncListeners() {
 }
 
 export function restoreLoginSession() {
+  if (isStandaloneSettingsPage()) return;
   // Probe an unauthenticated endpoint first so an anonymous visit
   // does not leave a noisy 401 on /api/config in DevTools.
   fetch("/api/session-check", { credentials: "same-origin" })
@@ -318,14 +311,7 @@ export function restoreLoginSession() {
       if (!navigator.onLine) {
         var app = document.getElementById("app");
         if (app) {
-          app.innerHTML =
-            '<div class="boot-loading">' +
-              '<div class="boot-loading-card">' +
-                '<div class="boot-loading-text" style="font-size:1.3em;margin-bottom:12px;display:flex;align-items:center;justify-content:center;gap:8px">' + iconSvg("signal", { size: 20, strokeWidth: 1.8 }) + '<span>无法连接到服务器</span></div>' +
-                '<div class="boot-loading-text" style="opacity:0.7;font-size:0.95em">请检查网络连接或确认 Wand 服务正在运行。</div>' +
-                '<button onclick="location.reload()" style="margin-top:18px;padding:8px 24px;border-radius:8px;border:1px solid rgba(150,118,85,0.3);background:rgba(255,255,255,0.8);cursor:pointer;font-size:0.95em">重试</button>' +
-              '</div>' +
-            '</div>';
+          paintBootNotice(app, "无法连接到服务器", "请检查网络连接或确认 Wand 服务正在运行。");
         }
         window.addEventListener('online', function() { location.reload(); }, { once: true });
         return;
@@ -369,6 +355,9 @@ renderBootLoading();
 restoreLoginSession();
 
 export function render(options?: any) {
+  if (isStandaloneSettingsPage()) return;
+  const boot = document.getElementById("app");
+  if (boot) clearNoticeView(boot);
   var skipShellChrome = options && options.skipShellChrome;
   var app = document.getElementById("app");
   if (!app) return;
@@ -454,80 +443,9 @@ export function render(options?: any) {
   refreshTailMarqueePaths();
 }
 
-// 与 favicon、React Shell 和原生客户端共用 Android 像素猫，不依赖外部资源。
-var LOGIN_BRAND_MARK = renderWandBrandMarkup("brand-logo");
-
-var LOGIN_TRUST_LINE =
-  '<p class="trust-line">' +
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>' +
-    '<span>凭据只发送到当前 Wand 服务</span>' +
-  '</p>';
-
 export function renderLogin() {
-  if (!state.loginChecked) {
-    return '<div class="login-page">' +
-      '<div class="login-left">' +
-        '<div class="brand-row">' +
-          LOGIN_BRAND_MARK +
-          '<span class="brand-wordmark">Wand</span>' +
-        '</div>' +
-        '<p class="brand-statement">重新连接到这台设备上的 Wand 服务。</p>' +
-        '<div class="left-spacer">' + renderLoginVisual(LOGIN_BRAND_MARK) + '</div>' +
-        LOGIN_TRUST_LINE +
-      '</div>' +
-      '<div class="login-right">' +
-        '<div class="form-col">' +
-          '<p class="eyebrow">本地控制台</p>' +
-          '<h1 class="login-title">正在恢复会话</h1>' +
-          '<div class="login-status">' +
-            '<span class="login-spinner" aria-hidden="true"></span>' +
-            '<div>' +
-              '<p class="login-hint">正在检查本地登录会话，请稍候。</p>' +
-              '<p class="login-muted">如果你刚刷新页面，这是正常现象。</p>' +
-            '</div>' +
-          '</div>' +
-        '</div>' +
-      '</div>' +
-    '</div>';
-  }
-  return '<div class="login-page">' +
-    '<div class="login-left">' +
-      '<div class="brand-row">' +
-        LOGIN_BRAND_MARK +
-        '<span class="brand-wordmark">Wand</span>' +
-      '</div>' +
-      '<p class="brand-statement">连接到本机终端、会话和工作区。</p>' +
-      '<div class="left-spacer">' + renderLoginVisual(LOGIN_BRAND_MARK) + '</div>' +
-      LOGIN_TRUST_LINE +
-    '</div>' +
-    '<div class="login-right">' +
-      '<form id="login-form" class="form-col" autocomplete="on">' +
-        '<input type="text" name="username" autocomplete="username" value="wand" tabindex="-1" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none" readonly />' +
-        '<p class="eyebrow">本地控制台</p>' +
-        '<h1 class="login-title">欢迎回来</h1>' +
-        '<p class="login-hint">使用当前 Wand 服务的访问密码继续。</p>' +
-        '<div class="field">' +
-          '<label class="field-label" for="password">访问密码</label>' +
-          '<div class="password-field">' +
-            '<input id="password" type="password" class="password-input" placeholder="输入访问密码" autocomplete="current-password" data-error="false" aria-describedby="password-hint login-error" aria-invalid="false" />' +
-            '<button id="toggle-password-button" type="button" class="password-toggle" aria-label="显示密码" aria-pressed="false">显示</button>' +
-          '</div>' +
-          '<p id="password-hint" class="hint">密码由当前服务验证，不会保存在此页面。</p>' +
-          '<p id="login-error" class="error-message hidden" role="alert"></p>' +
-        '</div>' +
-        '<div id="login-cert-hint" class="login-cert-hint hidden" role="alert">' +
-          '<div class="login-cert-hint-title">证书不受信任，登录态无法保存</div>' +
-          '<p class="login-cert-hint-body">密码是对的，但当前 HTTPS 证书不受浏览器信任，浏览器因此拒绝保存登录 Cookie，所以进不了控制台。<br/>解决办法（任选其一）：改用 HTTP 访问本服务；或把本服务证书设为「受信任」（推荐 mkcert）；或在本机将该自签证书设为完全信任后重试。</p>' +
-          '<a id="login-cert-http-link" class="btn btn-ghost btn-block" href="#" rel="noopener">改用 HTTP 访问</a>' +
-        '</div>' +
-        '<button id="login-button" type="submit" class="btn btn-primary btn-block">进入控制台</button>' +
-        (hasNativeSwitchServer() ?
-          '<button id="login-switch-server-button" class="login-switch-server" type="button">切换服务器</button>'
-          : ''
-        ) +
-      '</form>' +
-    '</div>' +
-  '</div>';
+  return '<div data-login-controls style="height:100%" data-checking="' + (!state.loginChecked) +
+    '" data-switch-server="' + hasNativeSwitchServer() + '"></div>';
 }
 
 // Seeds only the imperative host children. Shell chrome and welcome content
@@ -543,49 +461,34 @@ export function renderAppShell() {
           '<div class="terminal-scale-overlay" aria-label="终端缩放控件">' +
             // 只有 title 时读屏在图标 / 符号按钮上只能念出「减号 / 加号」，够不到动作本身
             // （UX-CONTRACT 的 WCAG 2.2 AA 4.1.2）；aria-label 与 title 同步写明动作。
-            '<button id="terminal-scale-down-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="缩小" aria-label="缩小终端字号">−</button>' +
+            '<button data-antd-control id="terminal-scale-down-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="缩小" aria-label="缩小终端字号">−</button>' +
             '<span class="terminal-scale-overlay-label terminal-scale-label" id="terminal-scale-label-top">' + Math.round(state.terminalScale * 100) + '%</span>' +
-            '<button id="terminal-scale-up-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="放大" aria-label="放大终端字号">+</button>' +
+            '<button data-antd-control id="terminal-scale-up-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="放大" aria-label="放大终端字号">+</button>' +
             '<span class="terminal-scale-overlay-divider"></span>' +
-            '<button id="page-refresh-btn" class="terminal-scale-overlay-btn" type="button" title="刷新页面" aria-label="刷新页面">' + iconSvg("refresh", { size: 13, strokeWidth: 2 }) + '</button>' +
+            '<button data-antd-control id="page-refresh-btn" class="terminal-scale-overlay-btn" type="button" title="刷新页面" aria-label="刷新页面">' + iconSvg("refresh", { size: 13, strokeWidth: 2 }) + '</button>' +
           '</div>' +
-          '<button id="terminal-jump-bottom" class="terminal-jump-bottom' + (state.showTerminalJumpToBottom ? ' visible' : '') + '" type="button" title="回到底部" aria-label="回到底部"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></button>' +
+          '<button data-antd-control id="terminal-jump-bottom" class="terminal-jump-bottom' + (state.showTerminalJumpToBottom ? ' visible' : '') + '" type="button" title="回到底部" aria-label="回到底部"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></button>' +
         '</div>' +
         '<div id="chat-output" class="chat-container hidden">' +
           '<div id="chat-fold-bar" class="chat-fold-bar hidden" aria-live="polite"></div>' +
-          '<button id="chat-unread-bubble" class="chat-unread-bubble" type="button" title="回到最新消息" aria-label="回到最新消息">' +
+          '<button data-antd-control id="chat-unread-bubble" class="chat-unread-bubble" type="button" title="回到最新消息" aria-label="回到最新消息">' +
             '<span class="chat-unread-bubble-icon"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></span>' +
             '<span class="chat-unread-bubble-count" aria-hidden="true"></span>' +
           '</button>' +
         '</div>' +
+        // 持续可见的「正在执行」状态条宿主（React 投影，读数来自服务端本轮锚点）。
+        // 固定占位在聊天区与输入区之间：出现/消失只改自身高度，不推动触发点。
+        '<div id="chat-running-host"></div>' +
         '<div id="cross-session-queue-host"></div>' +
         '<div class="input-panel' + (state.selectedId ? "" : " hidden") + '">' +
           '<div class="composer-top-row">' +
             '<div id="todo-progress" class="todo-progress hidden">' +
-              '<button class="todo-progress-header" id="todo-progress-toggle" type="button" aria-expanded="false" aria-controls="todo-progress-body" aria-label="展开待办列表">' +
-                // 通栏进度轨（轨道由 .todo-progress-header::after 画，填充由这里生长）
-                '<div class="todo-progress-fill" id="todo-progress-fill" aria-hidden="true" style="--progress:0"></div>' +
-                '<span class="todo-progress-ring" id="todo-progress-ring" aria-hidden="true" style="--progress:0">' +
-                  '<svg width="18" height="18" viewBox="0 0 36 36">' +
-                    '<circle class="todo-ring-track" cx="18" cy="18" r="15.5" fill="none" stroke-width="3.4"/>' +
-                    '<circle class="todo-ring-fill" cx="18" cy="18" r="15.5" fill="none" stroke-width="3.4" stroke-linecap="round"/>' +
-                  '</svg>' +
-                '</span>' +
-                '<span class="todo-progress-counter" id="todo-progress-counter" aria-live="polite"></span>' +
-                '<span class="todo-progress-divider" aria-hidden="true"></span>' +
-                // 当前任务描述占满中间剩余空间，过长时单行截断（展开面板里换行全显）。
-                '<span class="todo-progress-task" id="todo-progress-task"></span>' +
-                '<span class="todo-progress-chevron" aria-hidden="true">' + iconSvg("chevronDown", { size: 14, strokeWidth: 2 }) + '</span>' +
+              '<button data-antd-control class="todo-progress-header" id="todo-progress-toggle" type="button" aria-expanded="false" aria-controls="todo-progress-body" aria-label="展开待办列表">' +
+                '<span id="todo-progress-summary"></span>' +
               '</button>' +
             '</div>' +
             '<div class="todo-progress-body hidden" id="todo-progress-body">' +
-              '<div class="todo-progress-panel-head">' +
-                '<span class="todo-progress-panel-title">待办进度</span>' +
-                '<span class="todo-progress-panel-count" id="todo-progress-panel-count"></span>' +
-              '</div>' +
-              // 分段进度：一段一项，一眼能看出「哪几项做完了、当前卡在第几项」。
-              '<div class="todo-progress-segments" id="todo-progress-segments" aria-hidden="true"></div>' +
-              '<ul class="todo-progress-list" id="todo-progress-list"></ul>' +
+              '<div id="todo-progress-content"></div>' +
             '</div>' +
           '</div>' +
           // 排队气泡宿主：绝对定位浮在 .input-panel 顶边线「上方」、右侧贴边。
@@ -594,21 +497,25 @@ export function renderAppShell() {
           '<div id="queue-bar-host" class="queue-bar-host" hidden></div>' +
           // 输入主行：正文独占上层书写区域；下层按参考布局分为
           // 「添加 / 权限」与「模型 / 思考 / 发送」两组，键盘顺序与视觉顺序一致。
-          '<div class="input-composer-row">' +
+          '<div class="input-composer-row" data-pi-composer="">' +
+          '<span data-pi-settings-host=""></span>' +
           '<div class="input-composer' + (String(currentDraft || "").trim() ? ' has-text' : '') + (state.terminalInteractive ? ' is-terminal-interactive' : '') + '" role="group" aria-label="消息编辑器">' +
             // 附件预览条由 React portal 渲染（见 composer-attachments 组件）。
             '<span class="composer-attachments-host" data-composer-attachments-host="main"></span>' +
             '<div class="composer-main-row">' +
               '<div class="composer-input-wrap">' +
-                '<textarea id="input-box" class="input-textarea" aria-label="消息输入" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml(currentDraft) + '</textarea>' +
+                '<div data-composer-sender><textarea id="input-box" class="input-textarea" aria-label="消息输入" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml(currentDraft) + '</textarea></div>' +
               '</div>' +
               '<div class="composer-actions-left" role="group" aria-label="添加内容与权限">' +
                 // 加号按钮 —— 点击向上展开 popover：附件 / 终端交互 / 三件套（模式·模型·思考）
-                '<button id="attach-btn" class="btn-circle btn-circle-action composer-attach-trigger" type="button" title="更多" aria-label="更多操作" aria-haspopup="dialog" aria-controls="composer-plus-popover" aria-expanded="false">' +
+                '<button id="attach-btn" data-antd-control class="composer-attach-trigger" type="button" title="更多" aria-label="更多操作" aria-haspopup="dialog" aria-controls="composer-plus-popover" aria-expanded="false">' +
                   iconSvg("plus", { size: 18, strokeWidth: 2.2 }) +
                 '</button>' +
                 // tabindex="-1": 把 file input 移出 iOS Safari 表单导航链，避免软键盘顶部工具条出现 ⌃ ⌄ ✓。
                 '<input type="file" id="file-upload-input" multiple tabindex="-1" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0);pointer-events:none">' +
+                // Pi 会话设置图标（React portal，见 pi-settings 组件）：只在 Pi 结构化会话
+                // 挂载，点开就在输入框上方原位展开设置面板；非 Pi 会话宿主为空、不占位。
+                '<span class="composer-pi-settings-toggle-host" data-pi-settings-toggle-host=""></span>' +
                 '<div class="composer-status-row" id="composer-status-row">' +
                   // 三件套 chip 的内容全部由 React portal 渲染（见 composer-config 组件），
                   // 宿主常驻；chip 内还会长出 select 宿主，所以配置同步要先于 select 同步。
@@ -635,36 +542,18 @@ export function renderAppShell() {
                   // React 外壳的 `replaceChildren()` 丢弃。
                   '<span class="composer-config-host" data-composer-config-host="runtime"></span>' +
                 '</div>' +
-                '<button class="prompt-optimize-btn" id="prompt-optimize-btn" type="button" title="优化提示词" aria-label="优化提示词">' +
+                '<button data-antd-control class="prompt-optimize-btn" id="prompt-optimize-btn" type="button" title="优化提示词" aria-label="优化提示词">' +
                   iconSvg("sparkle", { size: 15, strokeWidth: 1.9, cls: "prompt-optimize-icon" }) +
                   '<span class="prompt-optimize-label">优化</span>' +
                   '<span class="prompt-optimize-spinner" aria-hidden="true"></span>' +
                 '</button>' +
                 // 语音按钮位于输入框内部、发送按钮左侧；只在按钮自身处理长按。
-                '<button id="voice-record-btn" class="btn-circle btn-circle-action btn-circle-voice" type="button" title="按住语音输入" aria-label="按住语音输入" aria-pressed="false"' + (state.terminalInteractive ? ' disabled' : '') + '>' +
+                '<button id="voice-record-btn" data-antd-control type="button" title="按住语音输入" aria-label="按住语音输入" aria-pressed="false"' + (state.terminalInteractive ? ' disabled' : '') + '>' +
                   iconSvg("mic", { size: 19, strokeWidth: 2 }) +
                 '</button>' +
                 // 「立即发送」按钮已下线 —— 默认行为永远是排队（气泡），想插队点输入框上方那条气泡。
-                // 发送 / 停止是同一个按钮的两种状态（docs/motion-design.md §4）：四层 glyph
-                // 叠在同一个宿主里，靠宿主上的 data-phase 做交叉淡入 + 轻微旋转/缩放，
-                // 不再用「两个按钮 + display:none 互斥」（那种切换是硬切，且按钮会左右跳）。
-                // 相位优先级见 input.ts 的 composerBaseSendPhase()：结果态（sending/sent/failed）
-                // > 运行中且无草稿（running = 停止）> 有草稿（idle = 发送）。
-                // glyph 一律 aria-hidden：可读名称由宿主上的 title / aria-label 随相位更新。
-                '<button id="send-input-button" class="btn-circle btn-circle-send" type="button" data-phase="idle" title="发送" aria-label="发送消息">' +
-                  '<span class="composer-send-glyph composer-send-glyph-arrow" aria-hidden="true">' +
-                    '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m6 11 6-6 6 6"/></svg>' +
-                  '</span>' +
-                  '<span class="composer-send-glyph composer-send-glyph-stop" aria-hidden="true">' +
-                    '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="2"/></svg>' +
-                  '</span>' +
-                  '<span class="composer-send-glyph composer-send-glyph-sending" aria-hidden="true">' +
-                    '<span class="composer-send-spinner"></span>' +
-                  '</span>' +
-                  '<span class="composer-send-glyph composer-send-glyph-sent" aria-hidden="true">' +
-                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 13 4 4L19 7"/></svg>' +
-                  '</span>' +
-                '</button>' +
+                // 输入控制器只更新data-phase；Ant投影单个发送/停止/结果图标。
+                '<button id="send-input-button" data-antd-control="primary" type="button" data-phase="idle" title="发送" aria-label="发送消息"></button>' +
               '</div>' +
             '</div>' +
           '</div>' +

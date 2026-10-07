@@ -11,6 +11,7 @@ import path from "node:path";
 import { IpcRequest, IpcResponseErr, IpcResponseOk, IpcSnapshotData } from "./ipc-protocol.js";
 import { getErrorMessage } from "../error-utils.js";
 import { keepUnixSocketAlive } from "../unix-socket-keepalive.js";
+import type { CoreStatus } from "../core-status-cli.js";
 
 export interface IpcServerDeps {
   socketPath: string;
@@ -18,6 +19,9 @@ export interface IpcServerDeps {
   snapshotProvider: () => IpcSnapshotData;
   /** attach 客户端发起 shutdown 时调用；返回 promise，resolve 后服务端退出。 */
   onShutdown?: () => void | Promise<void>;
+  coreStatusProvider?: () => CoreStatus;
+  /** Connection-scoped admission barrier; disconnect cancels the pending restart. */
+  beginCoreDrain?: () => () => void;
 }
 
 export interface IpcServerHandle {
@@ -31,7 +35,15 @@ export function startIpcServer(deps: IpcServerDeps): IpcServerHandle | null {
     try { unlinkSync(deps.socketPath); } catch { /* noop */ }
   }
 
+  const connections = new Map<net.Socket, (() => void) | null>();
   const server = net.createServer((conn) => {
+    connections.set(conn, null);
+    conn.on("close", () => {
+      const release = connections.get(conn);
+      connections.delete(conn);
+      // Server shutdown must not resume queues just before manager disposal.
+      if (!closed) release?.();
+    });
     let buf = "";
     const decoder = new StringDecoder("utf8");
     conn.on("data", (chunk) => {
@@ -66,6 +78,18 @@ export function startIpcServer(deps: IpcServerDeps): IpcServerHandle | null {
         case "snapshot": {
           const data = deps.snapshotProvider();
           const resp: IpcResponseOk<IpcSnapshotData> = { id: req.id, ok: true, data };
+          conn.write(JSON.stringify(resp) + "\n");
+          return;
+        }
+        case "core-status":
+        case "core-drain": {
+          if (!deps.coreStatusProvider || (req.cmd === "core-drain" && !deps.beginCoreDrain)) {
+            throw new Error(`unknown cmd: ${req.cmd}`);
+          }
+          if (req.cmd === "core-drain" && !connections.get(conn)) {
+            connections.set(conn, deps.beginCoreDrain!());
+          }
+          const resp: IpcResponseOk<CoreStatus> = { id: req.id, ok: true, data: deps.coreStatusProvider() };
           conn.write(JSON.stringify(resp) + "\n");
           return;
         }
@@ -110,6 +134,7 @@ export function startIpcServer(deps: IpcServerDeps): IpcServerHandle | null {
     close: async () => {
       closed = true;
       stopSocketKeepalive();
+      for (const conn of connections.keys()) conn.destroy();
       await new Promise<void>((resolve) => {
         server.close(() => resolve());
         // 兜底：1s 内强制 resolve

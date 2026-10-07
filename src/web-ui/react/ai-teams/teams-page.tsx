@@ -1,4 +1,5 @@
 import * as React from "react";
+import { Alert, Avatar, Button, Card, Collapse, Empty, Flex, Input, InputNumber, List, Tabs, Tag, Tooltip, Typography } from "antd";
 import {
   AI_TEAM_AVATAR_MAX_CHARS,
   AI_TEAM_DEFAULT_MAX_STEPS,
@@ -13,6 +14,7 @@ import {
 import type { SiliconEmployee } from "../../../ai-team-types.js";
 import { useSiliconEmployees } from "../agents/employee-repository.js";
 import { TeamEmployeeInvite } from "./team-employee-invite.js";
+import { TeamDispatchPanel, TeamDispatchTrigger } from "./team-dispatch.js";
 import { bindTeamEmployee, duplicateTeamEmployees, employeeJoinError, teamRequestInput, teamSaveDefinitelyRejected,
   type TeamDraftInput, type TeamMemberDraft } from "./team-employee-binding.js";
 import type { WandTaskAgent } from "../../../task-types";
@@ -39,12 +41,11 @@ import {
   SettingsActionButton,
   SettingsField,
   SettingsSaveBar,
-  SettingsTextInput,
   SettingsToggle,
 } from "../settings/fields";
 import { SidebarToggleIcon } from "../shell/sidebar-toggle-icon";
 import { WandBadge, WandBreadcrumb, WandButton, WandIcon, WandIconButton, WandSearchField, WandSelect, WandStretchTabs } from "../ui";
-import { CAT_COATS, memberCoatIndex, PixelCat, shrinkAvatarImage, TeamAvatar, TeamAvatarStack } from "./avatar";
+import { CAT_COATS, PixelCat, shrinkAvatarImage, TeamAvatar, TeamAvatarStack } from "./avatar";
 import {
   aiTeamsRepository,
   subscribeAiTeamRunChanges,
@@ -123,14 +124,15 @@ function templateInput(template: TeamTemplate, agent: WandTaskAgent): AiTeamInpu
     instructions: template.instructions,
     requirePlanApproval: true,
     maxSteps: AI_TEAM_DEFAULT_MAX_STEPS,
-    members: template.members.map((member, index) => ({
+    members: template.members.map((member) => ({
       id: "",
       name: member.name,
       duty: member.duty,
       isLeader: !!member.isLeader,
       agents: [{ ...agent }],
       agent: { ...agent },
-      avatar: `cat:${index % CAT_COATS.length}`,
+      // 没有用户自定义就不写头像：系统按成员身份生成，不替用户先挑一只猫。
+      avatar: "",
     })),
   };
 }
@@ -185,7 +187,7 @@ export function validateTeamDraft(members: TeamMemberDraft[]): string[] {
   return errors;
 }
 
-/** 头像选择：八种毛色 + 上传小图；「自动」按成员 id 选毛色。 */
+/** 头像选择：八种毛色 + 上传小图；不挑也不上传就是按成员身份生成的默认头像。 */
 function AvatarPicker({
   member,
   disabled,
@@ -198,36 +200,42 @@ function AvatarPicker({
   const fileRef = React.useRef<HTMLInputElement>(null);
   const [error, setError] = React.useState("");
   const current = member.avatar ?? "";
-  const coat = memberCoatIndex(member);
-  return <div className="wand-team-avatar-picker" role="group" aria-label="头像">
-    {CAT_COATS.map((entry, index) => <button
-      key={entry.name}
-      type="button"
-      className="wand-team-coat"
-      title={entry.name}
-      aria-label={entry.name}
-      aria-pressed={!current.startsWith("data:") && coat === index}
-      disabled={disabled}
-      onClick={() => onChange(`cat:${index}`)}
-    >
-      <PixelCat coat={index}/>
-    </button>)}
-    <button
-      type="button"
-      className="wand-team-coat is-upload"
-      title="上传图片"
-      aria-label="上传头像图片"
-      aria-pressed={current.startsWith("data:")}
-      disabled={disabled}
-      onClick={() => fileRef.current?.click()}
-    >
-      {current.startsWith("data:") ? <img src={current} alt=""/> : <WandIcon name="image" size={14}/>}
-    </button>
+  const selectedMatch = /^cat:(\d+)$/.exec(current);
+  const selectedCoat = selectedMatch ? Number(selectedMatch[1]) % CAT_COATS.length : null;
+  return <Flex wrap gap={6} align="center" role="group" aria-label="头像">
+    {CAT_COATS.map((entry, index) => <Tooltip key={entry.name} title={entry.name}>
+      <Button
+        className="wand-team-coat"
+        shape="circle"
+        size="small"
+        aria-label={entry.name}
+        aria-pressed={!current.startsWith("data:") && selectedCoat === index}
+        disabled={disabled}
+        onClick={() => { setError(""); onChange(`cat:${index}`); }}
+      >
+        <PixelCat coat={index}/>
+      </Button>
+    </Tooltip>)}
+    <Tooltip title="上传图片">
+      <Button
+        className="wand-team-coat is-upload"
+        shape="circle"
+        size="small"
+        aria-label="上传头像图片"
+        aria-pressed={current.startsWith("data:")}
+        disabled={disabled}
+        onClick={() => fileRef.current?.click()}
+      >
+        {current.startsWith("data:") ? <Avatar size={18} src={current} alt=""/> : <WandIcon name="image" size={14}/>}
+      </Button>
+    </Tooltip>
     <input
       ref={fileRef}
       type="file"
       accept="image/png,image/jpeg,image/webp"
       hidden
+      tabIndex={-1}
+      aria-label="上传头像图片"
       onChange={(event) => {
         const file = event.currentTarget.files?.[0];
         event.currentTarget.value = "";
@@ -237,8 +245,8 @@ function AvatarPicker({
           .catch((cause) => setError(failureMessage(cause, "图片处理失败。")));
       }}
     />
-    {error ? <small className="wand-team-avatar-error" role="alert">{error}</small> : null}
-  </div>;
+    {error ? <Alert type="error" showIcon role="alert" title={error}/> : null}
+  </Flex>;
 }
 
 /** 组织图里的一张成员卡：点卡片在原位展开编辑区，再点一次原路收起。 */
@@ -281,47 +289,55 @@ function MemberCard({
     onChange({ agents: next, agent: { ...next[0]! } });
   };
 
-  return <article className="wand-team-member" data-leader={member.isLeader || undefined} data-open={open || undefined}>
-    <button type="button" className="wand-team-member-head" aria-expanded={open} onClick={onToggle}>
+  return <Card
+    size="small"
+    className="wand-team-member"
+    data-leader={member.isLeader || undefined}
+    data-open={open || undefined}
+  >
+    <WandButton kind="ghost" type="button" className="wand-team-member-head" style={{ width: "100%", height: "auto", minHeight: 56, textAlign: "start", alignItems: "center", gap: 12 }} aria-expanded={open} onClick={onToggle}>
       <TeamAvatar member={member} size="lg" showProvider/>
-      <span className="wand-team-member-copy">
-        <strong>{label}{member.isLeader ? <em>负责人</em> : null}</strong>
-        <small>{member.duty || "还没写职责"}</small>
-        <span className="wand-team-member-agent">
+      <Flex vertical gap={2} className="wand-team-member-copy" style={{ flex: 1, minWidth: 0 }}>
+        <Flex align="center" wrap gap={6}><Typography.Text strong>{label}</Typography.Text>{member.isLeader ? <Tag color="gold">负责人</Tag> : null}</Flex>
+        <Typography.Text type="secondary" ellipsis>{member.duty || "还没写职责"}</Typography.Text>
+        <Typography.Text type="secondary" ellipsis className="wand-team-member-agent">
           {issueAgentProviderModelLine(member.agent, catalog)}
-        </span>
-      </span>
+        </Typography.Text>
+      </Flex>
       <WandIcon name="chevronDown" size={14}/>
-    </button>
-    <div className="wand-team-member-body" inert={!open}>
-      <div className="wand-team-member-inner">
+    </WandButton>
+    <Collapse bordered={false} ghost activeKey={open ? ["editor"] : []}
+        styles={{ header: { display: "none" }, body: { padding: 0 } }}
+        items={[{ key: "editor", label: "成员编辑", showArrow: false, forceRender: true, children:
+          <div className="wand-team-member-body" inert={!open}>
+      <Flex vertical gap={10} style={{ minWidth: 0, paddingTop: 10 }} className="wand-team-member-inner">
         <TeamEmployeeInvite {...employeeSource} members={members} replacingIndex={index}
           disabled={disabled} onPick={onBind}/>
         {bound ? <>
-          <small className="wand-new-session-field-hint">已绑定通讯录员工；名字、头像、基础角色与候选只读。知识归属仍是该员工，不共享私聊。</small>
+          <Typography.Text type="secondary">已绑定通讯录员工；名字、头像、基础角色与候选只读。知识归属仍是该员工，不共享私聊。</Typography.Text>
           {employee?.archivedAt || (!employeeSource.loading && !employeeSource.error && !employee)
-            ? <small className="wand-new-session-error" role="alert">绑定员工已归档或删除，绑定保留。请明确替换、移除或改为手工 CLI 成员。</small> : null}
+            ? <Alert type="warning" showIcon role="alert" title="绑定员工已归档或删除，绑定保留。请明确替换、移除或改为手工 CLI 成员。"/> : null}
           <WandButton kind="ghost" size="small" disabled={disabled}
             onClick={() => onChange({ ...member, employeeId: null })}>改为手工 CLI 成员（解除绑定）</WandButton>
         </> : null}
         <SettingsField label="名字" htmlFor={`team-member-${index}-name`}>
-          <SettingsTextInput
+          <Input
             id={`team-member-${index}-name`}
             value={member.name}
             placeholder="成员名字"
             disabled={disabled || bound}
-            onChange={(name) => onChange({ name })}
+            onChange={(event) => onChange({ name: event.target.value })}
           />
         </SettingsField>
         <AvatarPicker member={member} disabled={disabled || bound} onChange={(avatar) => onChange({ avatar })}/>
-        <textarea
-          className="wand-settings-input wand-ai-team-duty resize-none"
+        <Input.TextArea
+          className="wand-ai-team-duty"
           rows={3}
           value={member.duty}
           placeholder="职责：这位成员负责什么、交付什么"
           aria-label={`${label}的职责`}
           disabled={disabled}
-          onChange={(event) => onChange({ duty: event.currentTarget.value })}
+          onChange={(event) => onChange({ duty: event.target.value })}
         />
         <CandidatesListEditor
           agents={agents}
@@ -337,17 +353,17 @@ function MemberCard({
               { value: "work", label: "执行" }, { value: "verify", label: "验证" }]}
             onValueChange={(role) => onChange({ role: role as AiTeamMember["role"] })}/>
         </SettingsField>
-        <div className="wand-team-member-actions">
+        <Flex justify="end" wrap gap={6} className="wand-team-member-actions">
           {member.isLeader ? null : <WandButton kind="ghost" size="small" disabled={disabled} onClick={() => onChange({ isLeader: true })}>
             设为负责人
           </WandButton>}
           <WandButton kind="ghost" size="small" disabled={disabled || !canRemove} onClick={onRemove}>
             <WandIcon name="trash" size={14} slot="start"/>移除
           </WandButton>
-        </div>
-      </div>
-    </div>
-  </article>;
+        </Flex>
+      </Flex>
+    </div> }]}/>
+  </Card>;
 }
 
 export function TeamEditor({
@@ -480,12 +496,12 @@ export function TeamEditor({
     onRemove={() => removeMember(index)}
   />;
 
-  return <div className="wand-team-editor">
-    <section className="wand-team-section" aria-label="成员">
-      <header className="wand-team-section-head">
-        <h3>成员</h3>
-        <small>{draft.members.length}/{AI_TEAM_MAX_MEMBERS} · 点成员卡展开编辑</small>
-      </header>
+  return <Flex vertical gap={22} className="wand-team-editor">
+    <Flex component="section" vertical gap={12} className="wand-team-section" aria-label="成员">
+      <Flex className="wand-team-section-head" justify="space-between" align="baseline" gap={8} wrap>
+        <Typography.Title level={5} style={{ margin: 0 }}>成员</Typography.Title>
+        <Typography.Text type="secondary">{draft.members.length}/{AI_TEAM_MAX_MEMBERS} · 点成员卡展开编辑</Typography.Text>
+      </Flex>
       <TeamEmployeeInvite {...employeeSource} members={draft.members}
         disabled={busy || draft.members.length >= AI_TEAM_MAX_MEMBERS}
         onPick={(employee) => {
@@ -498,8 +514,9 @@ export function TeamEditor({
         {leaderIndex >= 0 ? <div className="wand-team-org-leader">{card(leaderIndex)}</div> : null}
         <div className="wand-team-org-members">
           {draft.members.map((member, index) => member.isLeader ? null : card(index))}
-          <button
-            type="button"
+          <WandButton
+            kind="ghost"
+            size="small"
             className="wand-team-member-add"
             disabled={busy || draft.members.length >= AI_TEAM_MAX_MEMBERS}
             onClick={() => {
@@ -507,65 +524,70 @@ export function TeamEditor({
                 ...current,
                 members: [...current.members, {
                   id: "", name: "", duty: "", agents: [{ ...defaultAgent }], agent: { ...defaultAgent }, isLeader: false,
-                  avatar: `cat:${current.members.length % CAT_COATS.length}`,
+                  // 与模板成员一致：不替用户挑毛色，留空交给系统按身份生成。
+                  avatar: "",
                 }],
               }));
               setOpenMember(draft.members.length);
             }}
           >
-            <WandIcon name="plus" size={16}/>
+            <WandIcon name="plus" size={16} slot="start"/>
             <span>添加手工 CLI 成员</span>
-          </button>
+          </WandButton>
         </div>
       </div>
-    </section>
-    <section className="wand-team-section" aria-label="协作设置">
-      <header className="wand-team-section-head"><h3>协作设置</h3></header>
-      <div className="wand-ai-team-editor-grid">
+    </Flex>
+    <Flex component="section" vertical gap={12} className="wand-team-section" aria-label="协作设置">
+      <Flex className="wand-team-section-head" justify="space-between" align="baseline" gap={8} wrap><Typography.Title level={5} style={{ margin: 0 }}>协作设置</Typography.Title></Flex>
+      <Flex className="wand-ai-team-editor-grid" gap={12} wrap>
+        <div className="wand-ai-team-editor-cell">
         <SettingsField label="团队名" htmlFor={`${idPrefix}-name`}>
-          <SettingsTextInput
+          <Input
             id={`${idPrefix}-name`}
             value={draft.name}
             placeholder="例如：全栈小组"
             disabled={busy}
-            onChange={(name) => setDraft((current) => ({ ...current, name }))}
+            onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
           />
         </SettingsField>
+        </div>
+        <div className="wand-ai-team-editor-cell">
         <SettingsField
           label="步数上限"
           htmlFor={`${idPrefix}-steps`}
           hint={`负责人轮次与成员步骤合计，${AI_TEAM_MIN_STEPS}–${AI_TEAM_MAX_STEPS}`}
         >
-          <SettingsTextInput
+          <InputNumber
             id={`${idPrefix}-steps`}
-            type="number"
             min={AI_TEAM_MIN_STEPS}
             max={AI_TEAM_MAX_STEPS}
             value={draft.maxSteps}
             disabled={busy}
-            onChange={(value) => setDraft((current) => ({ ...current, maxSteps: Number(value) }))}
+            style={{ width: "100%" }}
+            onChange={(value) => setDraft((current) => ({ ...current, maxSteps: Number(value ?? AI_TEAM_DEFAULT_MAX_STEPS) }))}
           />
         </SettingsField>
-      </div>
+        </div>
+      </Flex>
       <SettingsField label="简介" htmlFor={`${idPrefix}-description`}>
-        <SettingsTextInput
+        <Input
           id={`${idPrefix}-description`}
           value={draft.description}
           placeholder="可选：这个团队擅长什么"
           disabled={busy}
-          onChange={(description) => setDraft((current) => ({ ...current, description }))}
+          onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))}
         />
       </SettingsField>
       <SettingsField label="协作指令" htmlFor={`${idPrefix}-instructions`} hint="写进负责人和每位成员的提示词：分工约定、工作要求、注意事项。">
-        <textarea
+        <Input.TextArea
           id={`${idPrefix}-instructions`}
-          className="wand-settings-input wand-ai-team-duty resize-none"
+          className="wand-ai-team-duty"
           rows={4}
           value={draft.instructions}
           placeholder="例如：先读 AGENTS.md；改动必须附测试；不要动 migrations 目录。"
           disabled={busy}
           onChange={(event) => {
-            const instructions = event.currentTarget.value;
+            const instructions = event.target.value;
             setDraft((current) => ({ ...current, instructions }));
           }}
         />
@@ -577,8 +599,8 @@ export function TeamEditor({
         disabled={busy}
         onCheckedChange={(requirePlanApproval) => setDraft((current) => ({ ...current, requirePlanApproval }))}
       />
-    </section>
-    <div className="wand-ai-team-editor-footer">
+    </Flex>
+    <Flex align="end" justify="space-between" wrap gap={12} className="wand-ai-team-editor-footer">
       {team ? <SettingsActionButton
         kind="danger"
         size="small"
@@ -598,19 +620,13 @@ export function TeamEditor({
         status={status}
         tone={tone}
       />
-    </div>
-  </div>;
+    </Flex>
+  </Flex>;
 }
 
-/** 直接开工能选的项目：只有已有项目，全局工作区会被服务端 400 掉（§4.2 R2）。 */
-export function teamStartProjects(projects: readonly IssueWorkspace[]): IssueWorkspace[] {
-  return projects.filter((project) => project.kind !== "global");
-}
-
-/** 缺省项目 = 列表第一个（服务端按创建时间倒序返回，也就是「最近一个」）；没有则 ""。 */
-export function defaultTeamStartProject(projects: readonly IssueWorkspace[]): string {
-  return teamStartProjects(projects)[0]?.id ?? "";
-}
+/** 直接开工能选的项目：只有已有项目，全局工作区会被服务端 400 掉（§4.2 R2）；与临时派工共用同一份规则。 */
+export { defaultTeamStartProject, teamStartProjects } from "./team-start-projects";
+import { defaultTeamStartProject, teamStartProjects } from "./team-start-projects";
 
 type StartPhase = "idle" | "sending" | "sent" | "failed";
 
@@ -643,7 +659,7 @@ function TeamStartRow({
   const [phase, setPhase] = React.useState<StartPhase>("idle");
   const [message, setMessage] = React.useState("");
   const rowRef = React.useRef<HTMLDivElement>(null);
-  const noteRef = React.useRef<HTMLTextAreaElement>(null);
+  const noteRef = React.useRef<React.ComponentRef<typeof Input.TextArea>>(null);
   const projectMenuClass = "wand-team-start-project-menu-" + React.useId();
   const picked = workspaceId || defaultTeamStartProject(projects);
   const busy = phase === "sending" || phase === "sent";
@@ -725,7 +741,7 @@ function TeamStartRow({
     event.stopPropagation();
     collapse();
   }}>
-    <div className="wand-team-member-actions">
+    <Flex justify="end" wrap gap={6} className="wand-team-member-actions">
       <WandButton
         className="task-board-create-button"
         kind="ghost"
@@ -737,19 +753,21 @@ function TeamStartRow({
         <WandIcon name="plus" slot="start" className="wand-teams-create-icon"/>
         <span>直接开工</span>
       </WandButton>
-    </div>
-    <div className="wand-team-candidate-slot" data-collapsed={!settled || undefined}>
-      <div className="wand-team-member-inner" inert={!open}>
-        <div className="wand-team-candidates">
+    </Flex>
+    <Collapse ghost bordered={false} className="wand-team-candidate-slot" activeKey={settled ? ["start"] : []}
+      styles={{ header: { display: "none" }, body: { padding: 0 } }}
+      items={[{ key: "start", label: "直接开工", showArrow: false, forceRender: true, children: <>
+      <Flex vertical gap={10} style={{ minWidth: 0, paddingTop: 10 }} className="wand-team-member-inner" inert={!open}>
+        <Card size="small" className="wand-team-candidates"><Flex vertical gap={8}>
           {startable.length === 0 ? (
-            projectsLoaded ? <p className="wand-new-session-error" role="alert">
-              还没有可开工的项目，先在工作区创建一个项目。
-            </p> : <p className="wand-team-empty-line">正在加载项目…</p>
+            projectsLoaded
+              ? <Alert type="error" showIcon role="alert" title="还没有可开工的项目，先在工作区创建一个项目。"/>
+              : <Typography.Text type="secondary">正在加载项目…</Typography.Text>
           ) : <>
             <SettingsField label="项目">
+              <div className="wand-team-select">
               <WandSelect
                 ariaLabel="开工项目"
-                className="wand-settings-input"
                 contentClassName={projectMenuClass}
                 value={picked}
                 disabled={busy}
@@ -760,27 +778,32 @@ function TeamStartRow({
                 }))}
                 onValueChange={setWorkspaceId}
               />
+              </div>
             </SettingsField>
             <SettingsField
               label="开工说明"
               htmlFor={`team-start-note-${teamId}`}
               hint="会建一张任务卡，并把这段说明交给负责人。"
             >
-              <textarea
+              <Input.TextArea
                 id={`team-start-note-${teamId}`}
                 ref={noteRef}
-                className="wand-settings-input wand-ai-team-duty resize-none"
+                className="wand-ai-team-duty"
                 rows={2}
                 value={note}
                 placeholder="例如：把设置页的模型下拉换成可搜索的选择器，并补单测。"
                 disabled={busy}
-                onChange={(event) => setNote(event.currentTarget.value)}
+                onChange={(event) => setNote(event.target.value)}
               />
             </SettingsField>
           </>}
-          {message ? <p className={phase === "failed" ? "wand-new-session-error" : "wand-new-session-field-hint"}
-            role={phase === "failed" ? "alert" : "status"}>{message}</p> : null}
-          {open && startable.length > 0 ? <div className="wand-team-member-actions">
+          {message ? <Alert
+            type={phase === "failed" ? "error" : "success"}
+            showIcon
+            role={phase === "failed" ? "alert" : "status"}
+            title={message}
+          /> : null}
+          {open && startable.length > 0 ? <Flex justify="end" wrap gap={6} className="wand-team-member-actions">
             <WandButton
               kind="primary"
               size="small"
@@ -789,10 +812,10 @@ function TeamStartRow({
             >
               {phase === "sending" ? "正在开工…" : phase === "sent" ? "已开工" : "开工"}
             </WandButton>
-          </div> : null}
-        </div>
-      </div>
-    </div>
+          </Flex> : null}
+        </Flex></Card>
+      </Flex>
+          </> }]}/>
   </div>;
 }
 
@@ -843,27 +866,37 @@ export function TeamRuns({
     if (change.runId === openId) void load(openId);
   }), [load, openId]);
 
-  if (runs === null) return <p className="wand-team-empty-line">正在加载运行记录…</p>;
-  if (runs.length === 0) return <p className="wand-team-empty-line">还没有运行过。用团队卡下面的「直接开工」，或在任务看板派发任务时从「CLI 工具」里选这个团队。</p>;
-  return <ol className="wand-team-runs">
-    {runs.map((run) => {
+  if (runs === null) return <Typography.Text type="secondary">正在加载运行记录…</Typography.Text>;
+  if (runs.length === 0) return <Empty
+    image={Empty.PRESENTED_IMAGE_SIMPLE}
+    description="还没有运行过。用团队卡下面的「直接开工」，或在任务看板派发任务时从「CLI 工具」里选这个团队。"
+  />;
+  return <List
+    className="wand-team-runs"
+    size="small"
+    dataSource={runs}
+    renderItem={(run) => {
       const open = openId === run.id;
       const status = RUN_STATUS[run.status];
-      return <li key={run.id} className="wand-team-run" data-open={open || undefined}>
-        <button type="button" className="wand-team-run-head" aria-expanded={open} onClick={() => {
+      return <List.Item key={run.id} style={{ display: "block" }}>
+        <Card size="small" className="wand-team-run" data-open={open || undefined}>
+        <WandButton kind="ghost" type="button" className="wand-team-run-head" style={{ width: "100%", height: "auto", minHeight: 44, textAlign: "start", flexWrap: "wrap" }} aria-expanded={open} onClick={() => {
           requestGeneration.current++;
           selectedRun.current = open ? "" : run.id;
           setDetail(null);
           setOpenId((current) => current === run.id ? "" : run.id);
         }}>
-          <span className="wand-team-run-id">{run.taskIdentifier}</span>
-          <strong>{run.taskTitle || run.objective.split("\n")[0]}</strong>
+          <Typography.Text type="secondary" code className="wand-team-run-id">{run.taskIdentifier}</Typography.Text>
+          <Typography.Text ellipsis strong style={{ flex: 1, minWidth: 100 }}>{run.taskTitle || run.objective.split("\n")[0]}</Typography.Text>
           <WandBadge tone={status.tone}>{status.label}</WandBadge>
           {/* 时刻格式跟着浏览器 locale 走（和 team-chat-view.tsx 的 chatTurnClock 同一口径）：
               写死 "zh-CN" 会让英文环境的用户在同一页里看到两种日期写法。 */}
-          <small>{new Date(run.updatedAt).toLocaleString([], { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</small>
+          <Typography.Text type="secondary">{new Date(run.updatedAt).toLocaleString([], { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</Typography.Text>
           <WandIcon name="chevronDown" size={14}/>
-        </button>
+        </WandButton>
+        <Collapse ghost bordered={false} activeKey={open ? ["run"] : []}
+          styles={{ header: { display: "none" }, body: { padding: "8px 0 0" } }}
+          items={[{ key: "run", label: "运行详情", showArrow: false, children:
         <div className="wand-team-run-body" inert={!open}>
           <div className="wand-team-run-inner">
             {open && detail?.run.id === run.id
@@ -872,12 +905,13 @@ export function TeamRuns({
                   requestGeneration.current++;
                   setDetail((previous) => mergeTeamChatDetail(previous, next));
                 }} onOpenSession={onOpenSession}/>
-              : open ? <p className="wand-team-empty-line">正在加载…</p> : null}
+              : open ? <Typography.Text type="secondary">正在加载…</Typography.Text> : null}
           </div>
-        </div>
-      </li>;
-    })}
-  </ol>;
+        </div> }]}/>
+        </Card>
+      </List.Item>;
+    }}
+  />;
 }
 
 import { EmployeeListPage } from "../agents/employee-list-page.js";
@@ -929,6 +963,8 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
   const [projects, setProjects] = React.useState<IssueWorkspace[]>([]);
   const [projectsLoaded, setProjectsLoaded] = React.useState(false);
   const [focusRunId, setFocusRunId] = React.useState("");
+  const [dispatchOpen, setDispatchOpen] = React.useState(false);
+  const [dispatchBusy, setDispatchBusy] = React.useState(false);
 
   React.useEffect(() => {
     if (teamRoute.page !== "teams" || !teamRoute.teamId) return;
@@ -979,7 +1015,7 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
       if (event.key !== "Escape" || event.defaultPrevented) return;
       const target = event.target as HTMLElement | null;
       if (target?.closest("input, textarea, [contenteditable='true'], [role='dialog']")) return;
-      if (selectedId) {
+      if (pageMode === "teams" && selectedId) {
         // 和面包屑返回同一条路：脏草稿先问，取消就不离开（这里在 handler 里取，
         // 不放依赖数组——leaveDetail 是后声明的 const，渲染期取值会踩 TDZ）。
         void leaveDetail();
@@ -989,7 +1025,7 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onBack, selectedId]);
+  }, [onBack, pageMode, selectedId]);
 
   const runsOf = (teamId: string): AiTeamRunSummary[] => runs.filter((run) => run.teamId === teamId);
   const teamState = (teamId: string): TeamFilter | "idle" => {
@@ -1007,7 +1043,7 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
   });
   const selected = teams?.find((team) => team.id === selectedId) ?? null;
   const creating = selectedId === NEW_TEAM;
-  const detailOpen = creating || !!selected;
+  const detailOpen = pageMode === "teams" && (creating || !!selected);
 
   // 「新建团队」和换人、面包屑返回是同一件事：详情面板按 selectedId 挂 key，
   // 换过去就把正在编辑的编辑器整个卸载。所以这里也先走同一套确认（脏才弹，不脏零打扰）。
@@ -1085,9 +1121,9 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
     setDetailTab("runs");
   };
 
-  return <section className="task-board-native-page wand-teams-page" aria-label="硅基员工与 AI 团队" data-detail={detailOpen || undefined}>
-    <header className="task-board-workspace-header">
-      <div className="task-board-kicker">
+  return <Flex component="section" vertical className="task-board-native-page wand-teams-page" aria-label="硅基员工与 AI 团队" style={{ position: "absolute", inset: 0, zIndex: 8, overflow: "hidden", minWidth: 0, minHeight: 0, background: "var(--bg-primary)" }} data-detail={detailOpen || undefined}>
+    <Flex component="header" wrap align="center" justify="space-between" gap="small" className="task-board-workspace-header" style={{ flexShrink: 0, padding: 16 }}>
+      <Flex align="center" gap="small" className="task-board-kicker" style={{ minWidth: 0 }}>
         {onOpenSidebar ? <WandIconButton
           className="task-board-icon-button"
           aria-label={sidebarOpen ? "关闭任务列表" : "打开任务"}
@@ -1095,7 +1131,7 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
         >
           <SidebarToggleIcon open={sidebarOpen} size={16}/>
         </WandIconButton> : null}
-        {!selected ? <WandIconButton
+        {pageMode === "employees" || !selected ? <WandIconButton
           className="task-board-icon-button"
           aria-label="返回工作区"
           title="返回工作区"
@@ -1112,38 +1148,59 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
               { label: selected.name },
             ]}
           /> : <>
-            <h1>{pageMode === "employees" ? "硅基员工" : "AI 团队"}</h1>
-            <p>{pageMode === "employees" ? "定义专属角色与工具链降级顺序，以对话方式协作完成工作。" : "负责人拆解分派，成员各用自己的 CLI 协作完成。"}</p>
+            <Typography.Title level={3} style={{ margin: 0 }}>{pageMode === "employees" ? "硅基员工" : "AI 团队"}</Typography.Title>
+            <Typography.Paragraph type="secondary" style={{ margin: 0 }}>{pageMode === "employees" ? "定义专属角色与工具链降级顺序，以对话方式协作完成工作。" : "负责人拆解分派，成员各用自己的 CLI 协作完成。"}</Typography.Paragraph>
           </>}
         </div>
-      </div>
-      <div className="task-board-header-actions" style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+      </Flex>
+      <Flex wrap align="center" gap="small" className="task-board-header-actions">
         <WandStretchTabs
           tabs={PAGE_MODE_TABS}
           value={pageMode}
           ariaLabel="切换员工或团队"
           onValueChange={(val) => {
             void confirmDiscardTeamDraft().then((allowed) => {
-              if (allowed) { teamDraftDirty.current = false; setPageMode(val as "employees" | "teams"); }
+              if (allowed) {
+                teamDraftDirty.current = false;
+                // 离开团队页就收起派工面板：回来时要从收起态重新展开，不带上次的草稿状态。
+                setDispatchOpen(false);
+                setPageMode(val as "employees" | "teams");
+              }
             });
           }}
         />
         {pageMode === "teams" ? (
-          <WandButton
-            className="task-board-create-button"
-            kind="primary"
-            size="small"
-            aria-pressed={creating}
-            onClick={() => (creating ? void leaveDetail() : void startCreate())}
-          >
-            <WandIcon name="plus" slot="start" className="wand-teams-create-icon"/>
-            <span>新建团队</span>
-          </WandButton>
+          <>
+            <TeamDispatchTrigger
+              open={dispatchOpen}
+              busy={dispatchBusy}
+              onToggle={() => setDispatchOpen((current) => !current)}
+            />
+            <WandButton
+              className="task-board-create-button"
+              kind="primary"
+              size="small"
+              aria-pressed={creating}
+              onClick={() => (creating ? void leaveDetail() : void startCreate())}
+            >
+              <WandIcon name="plus" slot="start" className="wand-teams-create-icon"/>
+              <span>新建团队</span>
+            </WandButton>
+          </>
         ) : null}
-      </div>
-    </header>
+      </Flex>
+    </Flex>
+    {/* 面板在页头下方原位长出：入口按钮留在页头，不把页头拉宽、不把按钮挤走。 */}
+    {pageMode === "teams" ? <TeamDispatchPanel
+      open={dispatchOpen}
+      onOpenChange={setDispatchOpen}
+      onBusyChange={setDispatchBusy}
+      projects={projects}
+      projectsLoaded={projectsLoaded}
+      onStarted={(started) => afterDirectRun(started.teamId, started)}
+    /> : null}
     {pageMode === "employees" ? (
-      <div className="wand-teams-layout wand-employees-layout">
+      <div className="wand-teams-layout wand-employees-layout" style={{ width: "100%", minWidth: 0 }}>
         <EmployeeListPage catalog={catalog} providerOptions={providerOptions} />
       </div>
     ) : (
@@ -1156,33 +1213,46 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
           ariaLabel="按状态筛选"
           onValueChange={(value) => setFilter(value as TeamFilter)}
         />
-        {loadError ? <div className="task-board-native-banner is-error" role="alert">
-          <span>{loadError}</span>
-          <WandButton kind="ghost" size="small" onClick={() => void loadTeams()}>重新加载</WandButton>
-        </div> : null}
-        <div className="wand-teams-cards">
+        {loadError ? <Alert
+          className="task-board-native-banner"
+          type="error"
+          showIcon
+          role="alert"
+          title={loadError}
+          action={<WandButton kind="ghost" size="small" onClick={() => void loadTeams()}>重新加载</WandButton>}
+        /> : null}
+        <Flex vertical gap={6} className="wand-teams-cards">
           {visible.map((team) => {
             const state = teamState(team.id);
             const providers = [...new Set(team.members.map((member) => member.agent.provider))];
+            const glow = state === "running" ? "running" : state === "attention" ? "permission" : "none";
             return <div key={team.id}>
-              <button
-                type="button"
+              <Card
+                size="small"
+                hoverable
                 className="wand-teams-card"
+                role="button"
+                tabIndex={0}
                 aria-pressed={selectedId === team.id}
                 data-state={state}
                 onClick={() => { void selectTeam(team.id); }}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" && event.key !== " ") return;
+                  event.preventDefault();
+                  void selectTeam(team.id);
+                }}
               >
-                <TeamAvatarStack members={team.members} max={4}/>
-                <span className="wand-teams-card-copy">
-                  <strong>{team.name}</strong>
-                  <small>{team.description || leaderFirst(team.members).map((member) => member.name).join(" · ")}</small>
+                <span className={`wand-teams-avatar-wrap${glow !== "none" ? ` wand-logo-glow glow-${glow}` : ""}`} data-glow={glow}>
+                  <TeamAvatarStack members={team.members} max={4}/>
                 </span>
-                <span className="wand-teams-card-meta">
-                  {state === "attention" ? <WandBadge tone="warning">待你处理</WandBadge>
-                    : state === "running" ? <WandBadge tone="info">运行中</WandBadge>
-                      : <small>{team.members.length} 人 · {providers.map(issueAgentProviderLabel).join(" / ")}</small>}
-                </span>
-              </button>
+                <Flex vertical gap={2} className="wand-teams-card-copy" style={{ minWidth: 0 }}>
+                  <Typography.Text strong>{team.name}</Typography.Text>
+                  <Typography.Text type="secondary" ellipsis>{team.description || leaderFirst(team.members).map((member) => member.name).join(" · ")}</Typography.Text>
+                </Flex>
+                <Flex className="wand-teams-card-meta">
+                  <Typography.Text type="secondary" ellipsis>{team.members.length} 人 · {providers.map(issueAgentProviderLabel).join(" / ")}</Typography.Text>
+                </Flex>
+              </Card>
               <TeamStartRow
                 teamId={team.id}
                 teamName={team.name}
@@ -1193,35 +1263,56 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
               />
             </div>;
           })}
-          {teams !== null && visible.length === 0 ? <div className="wand-teams-empty">
-            <p>{teams.length === 0 ? "还没有团队。" : "没有匹配的团队。"}</p>
+          {teams !== null && visible.length === 0 ? <Empty
+            className="wand-teams-empty"
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={teams.length === 0 ? "还没有团队。" : "没有匹配的团队。"}
+          >
             {teams.length === 0 ? <WandButton kind="soft" size="small" onClick={() => { void startCreate(); }}>从模板创建</WandButton> : null}
-          </div> : null}
-        </div>
+          </Empty> : null}
+        </Flex>
       </aside>
       <div className="wand-teams-detail" key={creating ? `new-${template?.id ?? ""}` : selectedId}>
-        {creating && !template ? <div className="wand-teams-templates">
-          <header className="wand-team-section-head"><h3>从模板开始</h3><small>创建前还能修改</small></header>
+        {creating && !template ? <Flex vertical gap={12} className="wand-teams-templates">
+          <Flex className="wand-team-section-head" justify="space-between" align="baseline" gap={8} wrap>
+            <Typography.Title level={5} style={{ margin: 0 }}>从模板开始</Typography.Title>
+            <Typography.Text type="secondary">创建前还能修改</Typography.Text>
+          </Flex>
           <div className="wand-teams-template-grid">
             {TEMPLATES.map((entry) => {
               const preview = templateInput(entry, defaultAgent);
-              return <button key={entry.id} type="button" className="wand-teams-template" onClick={() => setTemplate(entry)}>
+              return <Card
+                key={entry.id}
+                size="small"
+                hoverable
+                className="wand-teams-template"
+                role="button"
+                tabIndex={0}
+                onClick={() => setTemplate(entry)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" && event.key !== " ") return;
+                  event.preventDefault();
+                  setTemplate(entry);
+                }}
+              >
                 <TeamAvatarStack members={preview.members} size="md"/>
-                <strong>{entry.name}</strong>
-                <small>{entry.summary}</small>
-              </button>;
+                <Flex vertical gap={6}>
+                  <Typography.Text strong>{entry.name}</Typography.Text>
+                  <Typography.Text type="secondary">{entry.summary}</Typography.Text>
+                </Flex>
+              </Card>;
             })}
           </div>
-        </div> : creating && template ? <>
-          <div className="wand-teams-detail-head">
+        </Flex> : creating && template ? <>
+          <Flex className="wand-teams-detail-head" align="center" gap={12} wrap>
             <WandIconButton className="task-board-icon-button" aria-label="换一个模板" onClick={() => { void backToTemplates(); }}>
               <WandIcon name="chevronLeft"/>
             </WandIconButton>
             <div>
-              <h2>新建团队</h2>
-              <p>模板：{template.name}</p>
+              <Typography.Title level={4} style={{ margin: 0 }}>新建团队</Typography.Title>
+              <Typography.Text type="secondary">模板：{template.name}</Typography.Text>
             </div>
-          </div>
+          </Flex>
           <TeamEditor
             team={null}
             initial={templateInput(template, defaultAgent)}
@@ -1237,25 +1328,13 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
             onDeleted={() => undefined}
           />
         </> : selected ? <>
-          <div className="wand-teams-detail-head">
+          <Flex className="wand-teams-detail-head" align="center" gap={12} wrap>
             <TeamAvatarStack members={selected.members} size="md" max={6}/>
-            <div>
-              <p>{selected.description || `${selected.members.length} 位成员`}</p>
-            </div>
-          </div>
-          <WandStretchTabs tabs={DETAIL_TABS} value={detailTab} ariaLabel="团队详情" onValueChange={setDetailTab}/>
-          {/*
-            两个面板都常驻，切标签只翻可见性（对齐 team-run-panel 的三视图叠放）：
-            原来这里写 key={detailTab} 强制重挂载，整块重新走一遍进场动画所以闪，
-            而且 TeamEditor 的草稿和成员卡展开态会被一起清掉。
-          */}
-          <div className="wand-teams-detail-stack">
-            {DETAIL_TABS.map((tab) => <div
-              key={tab.value}
-              className="wand-teams-detail-pane"
-              data-hidden={detailTab !== tab.value || undefined}
-              inert={detailTab !== tab.value}
-            >
+            <Typography.Text type="secondary">{selected.description || `${selected.members.length} 位成员`}</Typography.Text>
+          </Flex>
+          <Tabs activeKey={detailTab} onChange={setDetailTab} destroyOnHidden={false}
+            items={DETAIL_TABS.map((tab) => ({ key: tab.value, label: tab.label, forceRender: true, children:
+              <div className="wand-teams-detail-pane" data-hidden={detailTab !== tab.value || undefined} inert={detailTab !== tab.value}>
               {tab.value === "runs" ? <TeamRuns
                 runs={teams === null ? null : runsOf(selected.id)}
                 focusRunId={focusRunId}
@@ -1276,14 +1355,14 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
                     setTeams((current) => (current ?? []).filter((item) => item.id !== id));
                   }}
                 />}
-            </div>)}
-          </div>
-        </> : <div className="wand-teams-empty is-detail">
-          <WandIcon name="parallel" size={28}/>
-          <p>选一个团队，或新建一个。</p>
-        </div>}
+              </div> }))}/>
+        </> : <Empty
+          className="wand-teams-empty is-detail"
+          image={<WandIcon name="parallel" size={28}/>}
+          description="选一个团队，或新建一个。"
+        />}
       </div>
     </div>
     )}
-  </section>;
+  </Flex>;
 }

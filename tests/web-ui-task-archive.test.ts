@@ -70,7 +70,7 @@ test("sidebar task menus archive by default and only isolated tasks keep a workt
   assert.match(panel, /归档任务（保留 Worktree）/);
   assert.match(panel, /可在任务看板的归档任务中恢复/);
   // 硬删除只剩隔离任务的 Worktree 清理入口；普通任务不再有级联删除按钮。
-  assert.match(panel, /isolated \? \(/);
+  assert.match(panel, /\.\.\.\(isolated \? \[\{ key: "delete"/);
   assert.match(panel, /删除任务并清理 Worktree/);
   assert.equal(
     (panel.match(/httpWorkspacesRepository\.deleteTask\(/g) ?? []).length,
@@ -89,12 +89,13 @@ test("board cards archive by dragging into the archive zone and restore by dragg
   assert.match(host, /task-board-archive-zone/);
   assert.match(host, /拖到这里归档：侧栏隐藏，终端与记录保留/);
   // 归档完成后自动展开归档目录，否则卡片只是从看板上消失，看不出落在哪里。
-  assert.match(host, /setCollapsedList\(\(current\) => \(\{ \.\.\.current, archived: false \}\)\)/);
+  assert.match(host, /setCollapsedList\(\(current\) => \(\{ \.\.\.current, archived: true \}\)\)/);
   // 恢复：拖回任意列改状态，右键菜单也留了「恢复到等待认领」。
   assert.match(host, /taskBoardRepository\.update\(taskId, \{ status: "todo" \}\)/);
   assert.match(host, /onRestore=\{\(\) => \{/);
-  assert.ok(styles.includes(".task-board-archive-zone.is-over .task-board-archive-hint"));
-  assert.ok(styles.includes(".task-board-column-list > .task-board-archive-zone"));
+  assert.match(host, /<Card size="small"[\s\S]*?borderColor: archiveDrop \? "var\(--accent\)"/);
+  assert.match(host, /<Alert className="task-board-archive-hint" type=\{archiveDrop \? "info" : "warning"\}/);
+  assert.doesNotMatch(styles, /\.task-board-archive-zone/);
 });
 
 test("archived sessions leave the normal sidebar list and stay restorable in their own fold", async () => {

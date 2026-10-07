@@ -1043,6 +1043,46 @@ function homeForUser(userName: string, fallback: string): string {
   return fallback;
 }
 
+function shellFromConfig(configPath: string): string | null {
+  try {
+    const parsed = JSON.parse(readFileSync(configPath, "utf8")) as { shell?: unknown };
+    const shell = typeof parsed.shell === "string" ? parsed.shell.trim() : "";
+    return shell || null;
+  } catch {
+    return null;
+  }
+}
+
+function shellForUser(userName: string, fallback: string): string {
+  if (userName && userName !== "root") {
+    if (process.platform === "darwin") {
+      const resolved = spawnSync("dscl", [".", "-read", `/Users/${userName}`, "UserShell"], {
+        encoding: "utf8",
+        timeout: 3000,
+      });
+      const match = (resolved.stdout || "").match(/UserShell:\s*(.+)/);
+      if (resolved.status === 0 && match?.[1]) return match[1].trim();
+    }
+    if (process.platform === "linux") {
+      const resolved = spawnSync("getent", ["passwd", userName], { encoding: "utf8", timeout: 3000 });
+      const shell = (resolved.stdout || "").split(":")[6];
+      if (resolved.status === 0 && shell) return shell.trim();
+    }
+  }
+  try {
+    const current = os.userInfo().shell?.trim();
+    if (current) return current;
+  } catch {
+    // userInfo() can throw in stripped-down service environments.
+  }
+  return process.env.SHELL?.trim() || fallback;
+}
+
+function serviceShellFor(ctx: ServiceContext, runUser: string): string {
+  return shellFromConfig(ctx.configPath)
+    ?? shellForUser(runUser, process.platform === "darwin" ? "/bin/zsh" : "/bin/bash");
+}
+
 function statUid(targetPath: string): number {
   return readFileStat(targetPath).uid;
 }
@@ -1063,6 +1103,7 @@ function installSystemdService(ctx: ServiceContext, scope: ServiceScope): Comman
   const runUser = scope === "system" ? ownerUserNameForPath(ctx.configPath) : currentUserName();
   const fallbackHome = process.env.HOME || os.homedir();
   const runHome = scope === "system" ? homeForUser(runUser, fallbackHome) : fallbackHome;
+  const runShell = serviceShellFor(ctx, runUser);
   // 关键：把调用 `wand service:install` 时的真实 PATH 写进 unit。
   // 否则 systemd 默认 PATH 极简（system scope 之前写死 `nodeBin:/usr/local/...`，
   // user scope 干脆没写），spawn 出的 claude/codex 子进程会撞 "command not found"
@@ -1081,6 +1122,7 @@ function installSystemdService(ctx: ServiceContext, scope: ServiceScope): Comman
     `ExecStart=${nodeBin} ${wandBin} web -c ${ctx.configPath}`,
     `Environment=WAND_NO_TUI=1`,
     `Environment=PATH=${servicePath}`,
+    `Environment=SHELL=${runShell}`,
     "Restart=always",
     "RestartSec=3",
     "StandardOutput=journal",
@@ -1123,6 +1165,7 @@ function installSystemdService(ctx: ServiceContext, scope: ServiceScope): Comman
     "Type=simple",
     `ExecStart=${nodeBin} ${wandBin} terminald -c ${ctx.configPath}`,
     `Environment=PATH=${servicePath}`,
+    `Environment=SHELL=${runShell}`,
     "Restart=always",
     "RestartSec=3",
     "StandardOutput=journal",
@@ -1169,6 +1212,7 @@ function installSystemdService(ctx: ServiceContext, scope: ServiceScope): Comman
     `scope: ${scope}`,
     `unit: ${unitPath}`,
     `terminal unit: ${terminalUnitPath}`,
+    `shell: ${runShell}`,
     ...daemonNotes,
     "daemons:",
     describeDaemonEndpoints(ctx.configPath),
@@ -1231,6 +1275,7 @@ function installLaunchdService(ctx: ServiceContext, scope: ServiceScope): Comman
   const runUser = scope === "system" ? ownerUserNameForPath(ctx.configPath) : currentUserName();
   const fallbackHome = process.env.HOME || os.homedir();
   const runHome = scope === "system" ? homeForUser(runUser, fallbackHome) : fallbackHome;
+  const runShell = serviceShellFor(ctx, runUser);
   // 与 systemd 同理：launchd 默认 PATH 极简，spawn 出的 claude 会找不到。
   const servicePath = buildServicePath(nodeBinDir, runHome);
   // launchd 默认把 stdout/stderr 丢进 /dev/null：线上出问题时连“daemon 活着但端点没了”
@@ -1261,6 +1306,7 @@ ${userNameField}  <key>WorkingDirectory</key><string>${runHome}</string>
   <dict>
     <key>WAND_NO_TUI</key><string>1</string>
     <key>PATH</key><string>${servicePath}</string>
+    <key>SHELL</key><string>${runShell}</string>
     <key>HOME</key><string>${runHome}</string>
   </dict>
   <key>RunAtLoad</key><true/>
@@ -1285,6 +1331,7 @@ ${userNameField}  <key>WorkingDirectory</key><string>${runHome}</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key><string>${servicePath}</string>
+    <key>SHELL</key><string>${runShell}</string>
     <key>HOME</key><string>${runHome}</string>
   </dict>
   <key>RunAtLoad</key><true/>
@@ -1353,7 +1400,7 @@ ${logFields("terminald.log", "terminald-error.log")}  <key>KeepAlive</key><true/
     message: `已注册 launchd ${scope === "user" ? "用户代理" : "系统守护"}: ${plistPath}` +
       (daemonNotes.length > 0 ? `（已清理 ${daemonNotes.length} 个僵尸 daemon）` : "") +
       (staleDaemonNote(ctx.configPath) ?? ""),
-    detail: [terminalDetail, started.detail, ...daemonNotes, "daemons:", describeDaemonEndpoints(ctx.configPath)]
+    detail: [`shell: ${runShell}`, terminalDetail, started.detail, ...daemonNotes, "daemons:", describeDaemonEndpoints(ctx.configPath)]
       .filter(Boolean)
       .join("\n"),
   };

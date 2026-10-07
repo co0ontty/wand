@@ -99,6 +99,8 @@ export function buildCreateRequest(
     cwd,
     worktreeEnabled: form.worktreeEnabled === true,
     sessionSource: "interactive" as const,
+    ...(form.workspaceId ? { workspaceId: form.workspaceId } : {}),
+    ...(form.workspaceTaskId ? { workspaceTaskId: form.workspaceTaskId } : {}),
   };
 
   if (form.kind === "shell") {
@@ -127,13 +129,14 @@ export function buildCreateRequest(
   }
 
   const thinkingEffort = context.thinkingEffort?.trim();
+  const overrideCli = Boolean(form.employeeId && form.specifiedCli);
   return {
     ...base,
     kind: "structured",
     runner: structuredRunner(form.provider),
-    model: model || undefined,
+    model: (form.employeeId && !form.specifiedCli) ? undefined : (model || undefined),
     thinkingEffort: thinkingEffort || undefined,
-    ...(form.employeeId ? { employeeId: form.employeeId } : {}),
+    ...(form.employeeId ? { employeeId: form.employeeId, overrideCli } : {}),
   };
 }
 
@@ -212,6 +215,9 @@ export class HttpNewSessionRepository implements NewSessionRepository {
           model: request.model,
           thinkingEffort: request.thinkingEffort,
           employeeId: request.employeeId,
+          overrideCli: request.overrideCli,
+          ...(request.workspaceId ? { workspaceId: request.workspaceId } : {}),
+          ...(request.workspaceTaskId ? { workspaceTaskId: request.workspaceTaskId } : {}),
           sessionSource: request.sessionSource,
         }
       : {
@@ -225,6 +231,8 @@ export class HttpNewSessionRepository implements NewSessionRepository {
           model: request.kind === "pty" ? request.model : undefined,
           cols: request.cols,
           rows: request.rows,
+          ...(request.workspaceId ? { workspaceId: request.workspaceId } : {}),
+          ...(request.workspaceTaskId ? { workspaceTaskId: request.workspaceTaskId } : {}),
           sessionSource: request.sessionSource,
         };
     const response = await this.fetchImpl(endpoint, {

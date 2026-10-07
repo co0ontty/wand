@@ -1,5 +1,5 @@
 import { build } from "esbuild";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -24,6 +24,7 @@ const commonOptions = {
   jsx: "automatic",
   outfile,
   treeShaking: true,
+  metafile: true,
   define: {
     "process.env.NODE_ENV": JSON.stringify(isProduction ? "production" : "development"),
   },
@@ -47,7 +48,8 @@ const commonOptions = {
 async function bundle(options, plugins = []) {
   const target = options.outfile;
   if (!isProduction) {
-    await build({ ...options, minify: false, plugins });
+    const result = await build({ ...options, minify: false, plugins });
+    await recordGraph(target, result.metafile);
     return;
   }
   const cssCandidates = new Set();
@@ -65,11 +67,18 @@ async function bundle(options, plugins = []) {
         `got: ${outputFiles.map((file) => file.path).join(", ") || "none"}`,
     );
   }
+  await recordGraph(target, result.metafile);
   const pooled = poolEmittedCssStringLiterals(outputFiles[0].text, cssCandidates);
   await writeFile(target, pooled.code);
   console.log(
     `[bundle-browser] ${path.basename(target)} CSS pooling: ${pooled.pooled} literals -> ${pooled.poolSize} pooled fragments`,
   );
+}
+
+async function recordGraph(target, metafile) {
+  const output = path.join(root, "output", "web-ui-library-migration", "bundle-graphs");
+  await mkdir(output, { recursive: true });
+  await writeFile(path.join(output, `${path.basename(target)}.json`), JSON.stringify(metafile, null, 2));
 }
 
 try {

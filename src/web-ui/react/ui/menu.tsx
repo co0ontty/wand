@@ -1,5 +1,7 @@
 import { forwardRef, type ComponentPropsWithoutRef, type ReactNode } from "react";
 import * as React from "react";
+import { Divider } from "antd";
+import { WandButton } from "./button";
 import { classNames } from "./class-names";
 import { WandIcon, type WandIconName } from "./icons";
 
@@ -28,7 +30,7 @@ export const WandMenuItem = forwardRef<HTMLButtonElement, WandMenuItemProps>(fun
   ref,
 ) {
   return (
-    <button
+    <WandButton kind={tone === "danger" ? "danger" : "ghost"}
       {...props}
       onClick={props.onClick}
       ref={ref}
@@ -45,12 +47,12 @@ export const WandMenuItem = forwardRef<HTMLButtonElement, WandMenuItemProps>(fun
       <span className="wand-ui-menu-item-label">{label}</span>
       {hint != null ? <span className="wand-ui-menu-item-hint">{hint}</span> : null}
       {shortcut ? <span className="wand-ui-menu-item-hint">{shortcut}</span> : null}
-    </button>
+    </WandButton>
   );
 });
 
 export function WandMenuSeparator({ className }: { className?: string }) {
-  return <div className={classNames("wand-ui-menu-separator", className)} role="separator"/>;
+  return <Divider className={classNames("wand-ui-menu-separator", className)}/>;
 }
 
 export function WandMenuLabel({ children, className }: { children: ReactNode; className?: string }) {

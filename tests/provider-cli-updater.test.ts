@@ -137,6 +137,64 @@ test("unreadable CLI versions keep their reason instead of silently showing noth
   assert.match(codex?.error ?? "", /--version/);
 });
 
+test("broken Codex optional dependency is repaired through npm", async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-cli-codex-repair-"));
+  const bin = path.join(root, "bin");
+  const log = path.join(root, "updates.log");
+  const fixed = path.join(root, "codex-fixed");
+  mkdirSync(bin);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+
+  executable(path.join(bin, "npm"), `
+if [ "$1" = "view" ] && [ "$3" = "version" ]; then
+  case "$2" in
+    @openai/codex@latest) echo 0.160.1 ;;
+    *) echo 9.9.9 ;;
+  esac
+  exit 0
+fi
+if [ "$1" = "install" ] && [ "$2" = "-g" ] && [ "$3" = "@openai/codex@latest" ]; then
+  [ "$4" = "--include=optional" ] || exit 2
+  printf '%s\n' "$*" >> "$UPDATE_LOG"
+  touch "$CODEX_FIXED"
+  echo repaired
+  exit 0
+fi
+exit 1`);
+  executable(path.join(bin, "codex"), `
+if [ "$1" = "--version" ]; then
+  if [ -f "$CODEX_FIXED" ]; then
+    echo 'codex-cli 0.160.1'
+    exit 0
+  fi
+  echo 'Error: Missing optional dependency @openai/codex-darwin-arm64. Reinstall Codex: npm install -g @openai/codex@latest' >&2
+  exit 1
+fi
+printf '%s\n' "unexpected codex subcommand: $*" >> "$UPDATE_LOG"
+exit 2`);
+
+  const env = { PATH: `${bin}${path.delimiter}/usr/bin:/bin`, WAND_NPM_BIN: path.join(bin, "npm"), UPDATE_LOG: log, CODEX_FIXED: fixed };
+  const before = await checkProviderCliUpdates({ env });
+  const codexBefore = before.find((item) => item.id === "codex");
+  assert.equal(codexBefore?.currentVersion, null);
+  assert.equal(codexBefore?.latestVersion, "0.160.1");
+  assert.equal(codexBefore?.updateAvailable, true);
+  assert.match(codexBefore?.error ?? "", /Missing optional dependency/);
+
+  const results = await updateProviderClis(before, undefined, { env });
+  assert.equal(results.length, 1);
+  assert.equal(results[0]?.id, "codex");
+  assert.equal(results[0]?.ok, true);
+  assert.equal(results[0]?.skipped, false);
+  assert.match(results[0]?.message ?? "", /optional dependency/);
+  assert.equal(readFileSync(log, "utf8").trim(), "install -g @openai/codex@latest --include=optional");
+
+  const after = await checkProviderCliUpdates({ env });
+  const codexAfter = after.find((item) => item.id === "codex");
+  assert.equal(codexAfter?.currentVersion, "0.160.1");
+  assert.equal(codexAfter?.updateAvailable, false);
+});
+
 test("provider CLI update verification detects a stale active binary", () => {
   const result = verifyProviderCliUpdateResults([{
     id: "codex",

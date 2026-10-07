@@ -125,7 +125,11 @@ function requireCurrentVersion(req: Request, res: Response): string | null {
   return currentVersion;
 }
 
-export function registerPublicUpdateRoutes(app: Express, deps: PublicUpdateRoutesDependencies): void {
+export function registerPublicUpdateRoutes(
+  app: Express,
+  deps: PublicUpdateRoutesDependencies,
+  publicOrigin?: string,
+): void {
   app.get("/api/android-apk-update", asyncRoute(async (req, res) => {
     const currentVersion = requireCurrentVersion(req, res);
     if (currentVersion === null) return;
@@ -282,7 +286,7 @@ export function registerPublicUpdateRoutes(app: Express, deps: PublicUpdateRoute
   app.get("/api/ios-ipa-update", asyncRoute(async (req, res) => {
     const currentVersion = requireCurrentVersion(req, res);
     if (currentVersion === null) return;
-    const payload = await resolveIosOtaPayload(req, deps);
+    const payload = await resolveIosOtaPayload(req, deps, publicOrigin);
     if (!payload) {
       res.json({
         updateAvailable: false,
@@ -322,7 +326,7 @@ export function registerPublicUpdateRoutes(app: Express, deps: PublicUpdateRoute
   }));
 
   app.get("/ios/manifest.plist", asyncRoute(async (req, res) => {
-    const payload = await resolveIosOtaPayload(req, deps);
+    const payload = await resolveIosOtaPayload(req, deps, publicOrigin);
     if (!payload) {
       res.status(404).type("text/plain").send("当前没有可安装的 IPA 文件。");
       return;
@@ -333,7 +337,7 @@ export function registerPublicUpdateRoutes(app: Express, deps: PublicUpdateRoute
   }));
 
   app.get("/ios/install", asyncRoute(async (req, res) => {
-    const payload = await resolveIosOtaPayload(req, deps);
+    const payload = await resolveIosOtaPayload(req, deps, publicOrigin);
     if (!payload) {
       res.status(404).type("text/plain").send("当前没有可安装的 IPA 文件。");
       return;
@@ -388,11 +392,17 @@ interface IosOtaPayload {
 async function resolveIosOtaPayload(
   req: Request,
   deps: PublicUpdateRoutesDependencies,
+  publicOrigin?: string,
 ): Promise<IosOtaPayload | null> {
   const latest = await deps.resolveLatestIpa();
   const local = await deps.resolveIosDownload();
   if (!latest && !local) return null;
+  // Explicit ?origin= wins; then the deployment's configured publicOrigin
+  // (same precedence as the connection-code logic in server-app-connect);
+  // request-derived headers are the last resort — L4 proxies may not forward
+  // x-forwarded-proto, which would otherwise emit http:// manifest URLs.
   const origin = normalizePublicOrigin(typeof req.query.origin === "string" ? req.query.origin : undefined)
+    ?? normalizePublicOrigin(publicOrigin)
     ?? publicOriginFromRequest(req)
     ?? "";
   const source = local ? "local" as const : (latest?.source ?? "github");

@@ -40,7 +40,7 @@ test("React, login, illustration and favicon reuse the same pixel-cat geometry a
     }
     assert.doesNotMatch(svg, /M13 21l9|<text\b|<image\b/);
   }
-  assert.match(source("src/web-ui/browser/render.ts"), /renderWandBrandMarkup\("brand-logo"\)/);
+  assert.match(source("src/web-ui/browser/login-controls-adapter.tsx"), /renderWandBrandMarkup\("brand-logo"\)/);
   assert.match(source("src/web-ui/index.ts"), /href="\$\{WAND_FAVICON_URL\}"/);
   assert.match(source("src/web-ui/browser/notifications.ts"), /icon: options.icon \|\| WAND_FAVICON_URL/);
   assert.match(renderWandBrandMarkup('" onload="bad<>&'), /class="&quot; onload=&quot;bad&lt;&gt;&amp;"/);

@@ -690,7 +690,7 @@ test("编辑器的 Tab 缩进在输入法组字期不写进正文", () => {
   assert.match(hostSource, /isComposing/);
   // 查找框回车 + 正文 Tab 两处都要挡组字，且都在 preventDefault 之前。
   const guards = hostSource.match(/if \(event\.nativeEvent\.isComposing\) return;/g) ?? [];
-  assert.equal(guards.length, 2, `IME 守卫应为 2 处，实际 ${guards.length} 处`);
+  assert.equal(guards.length, 3, `查找回车、正文Tab及Shell Escape/查找快捷键都应挡组字，实际 ${guards.length} 处`);
   assert.match(hostSource, /if \(event\.key === "Tab"\) \{\n\s*\/\/ [^\n]*\n\s*if \(event\.nativeEvent\.isComposing\) return;\n\s*event\.preventDefault\(\);/);
   // 保存的 Ctrl/Cmd+S 分支在 Tab 之前，不受组字守卫影响。
   assert.match(hostSource, /\(event\.ctrlKey \|\| event\.metaKey\) && event\.key\.toLowerCase\(\) === "s"[\s\S]{0,160}if \(event\.key === "Tab"\)/);
@@ -702,7 +702,7 @@ test("编辑器打开失败：原位给出重新加载，且 open(同一路径) 
     "utf8",
   );
   // id 是批H 给标签页 aria-controls 用的面板身份，不影响这段失败态本身。
-  assert.match(hostSource, /<div id=\{CODE_EDITOR_PANEL_ID\} className="wand-code-editor-state error" role="alert">[\s\S]{0,400}\{snapshot\.activePath \? <WandButton/);
+  assert.match(hostSource, /<Flex id=\{CODE_EDITOR_PANEL_ID\}[^>]*className="wand-code-editor-state error" role="alert">[\s\S]{0,400}\{snapshot\.activePath \? <WandButton/);
   assert.match(hostSource, /void codeEditorController\.open\(snapshot\.activePath!\)/);
   assert.match(hostSource, />重新加载<\/WandButton>/);
   // 不用 activate：activate 的「已激活同一路径」分支只 return true，不读盘。
@@ -722,41 +722,25 @@ test("编辑器打开失败：原位给出重新加载，且 open(同一路径) 
   assert.equal(repo.calls.filter((call) => call.op === "load" && call.path === "/app/late.ts").length, 2);
 });
 
-test("标签页是合法的可键盘结构：外层 role=tab 的 div，关闭是真的 button", () => {
+test("Ant Tabs承担标签焦点与关闭控件，源码canvas保持唯一面板", () => {
   const host = readFileSync(new URL("../src/web-ui/react/code-editor/host.tsx", import.meta.url), "utf8");
-  const tabs = host.slice(host.indexOf('role="tablist"'), host.indexOf('className="wand-code-editor-toolbar"'));
-  // 改前是 <button role="tab"> 里套 <span role="button">，button 内嵌交互元素非法。
-  assert.doesNotMatch(tabs, /<button[\s\S]{0,400}role="tab"/);
-  assert.match(tabs, /<div\n\s*key=\{tab\.path\}[\s\S]{0,220}?\n\s*role="tab"\n\s*tabIndex=\{snapshot\.activePath === tab\.path \? 0 : -1\}/,
-    "div 自己补上可聚焦，且一组只留一个 Tab 停靠点");
-  assert.match(tabs, /aria-controls=\{CODE_EDITOR_PANEL_ID\}/, "标签指向它控制的面板");
-  assert.match(tabs, /aria-selected=\{snapshot\.activePath === tab\.path\}/);
-  assert.match(tabs, /if \(event\.key === "Enter" \|\| event\.key === " "\)/, "原生 button 白给的激活要自己写回来");
-  assert.match(tabs, /<button\n\s*type="button"\n\s*className="wand-code-editor-tab-close"\n\s*aria-label=\{`关闭 \$\{tab\.name\}`\}/);
-  // 未保存标记：点本身是装饰，含义写进标签的可读名称，避免同一句读两遍。
-  assert.match(tabs, /aria-label=\{tab\.dirty \? `\$\{tab\.name\}，未保存` : tab\.name\}/);
-  assert.match(tabs, /className="wand-code-editor-tab-dirty" aria-hidden="true" title="未保存"/);
-  // 字号读数：无 role 的 span 上 aria-label 会被忽略。
-  assert.match(host, /<span role="status" aria-label=\{`字号 \$\{snapshot\.fontSize\}`\}/);
+  assert.match(host, /<Tabs/);
+  assert.match(host, /type="editable-card"/);
+  assert.match(host, /activeKey=\{snapshot.activePath/);
+  assert.match(host, /onChange=\{path => run\(\{ type: "activate", path \}\)\}/);
+  assert.match(host, /action === "remove"[\s\S]{0,100}closeFile\(path\)/);
+  assert.match(host, /"aria-controls": CODE_EDITOR_PANEL_ID/);
+  assert.match(host, /"aria-label": tab\?\.dirty \? `\$\{tab.name\}，未保存`/);
+  assert.match(host, /"aria-label": `关闭 \$\{tab\?\.name/);
+  assert.match(host, /<Badge dot=\{tab.dirty\}/);
+  assert.match(host, /<span role="status" aria-label=\{`字号 \$\{snapshot.fontSize\}`\}/);
 });
 
-test("编辑器标签栏：方向键在标签间走位并跟着激活，Tab 只停一次", () => {
+test("库标签的方向键焦点继续激活对应文件，不被编辑区抢回", () => {
   const host = readFileSync(new URL("../src/web-ui/react/code-editor/host.tsx", import.meta.url), "utf8");
-  const tabs = host.slice(host.indexOf('role="tablist"'), host.indexOf('className="wand-code-editor-toolbar"'));
-  // roving tabindex：非激活标签从 Tab 序列里退出，改由方向键走访。
-  assert.match(tabs, /tabIndex=\{snapshot\.activePath === tab\.path \? 0 : -1\}/);
-  assert.doesNotMatch(tabs, /tabIndex=\{0\}\n\s*aria-selected/, "不能所有标签都 tabIndex=0");
-  assert.match(tabs, /const step = event\.key === "ArrowRight" \? 1 : event\.key === "ArrowLeft" \? -1 : 0;/);
-  assert.match(tabs, /if \(step !== 0 \|\| event\.key === "Home" \|\| event\.key === "End"\)/, "Home/End 跳首尾");
-  assert.match(tabs, /: \(at \+ step \+ order\.length\) % order\.length;/, "首尾环形相接");
-  assert.match(tabs, /run\(\{ type: "activate", path: target \}\);/, "选中跟着焦点走（tablist 口径）");
-  assert.match(tabs, /tabRefs\.current\.get\(target\)\?\.focus\(\);/,
-    "焦点靠 ref 登记簿移动，不摸 querySelector（架构边界）");
-  assert.match(tabs, /ref=\{\(element\) => \{\n\s*if \(element\) tabRefs\.current\.set\(tab\.path, element\);/);
-  // 面板 id 挂在既有结构上（不新增包裹层，避免动 flex 布局），每种状态都同一个身份。
-  assert.match(host, /const CODE_EDITOR_PANEL_ID = "wand-code-editor-panel";/);
-  assert.equal((host.match(/id=\{CODE_EDITOR_PANEL_ID\}/g) ?? []).length, 5,
-    "loading / error / 未选文件 / Markdown 预览 / 编辑主体都算这块面板");
-  // 关闭按钮仍是独立停靠点：它没有 role=tab，也不参与方向键走位。
-  assert.match(tabs, /<button\n\s*type="button"\n\s*className="wand-code-editor-tab-close"/);
+  assert.match(host, /onFocus: event => \{[\s\S]{0,150}run\(\{ type: "activate", path: tab.path \}\)/);
+  assert.match(host, /document.activeElement\?\.getAttribute\("role"\) !== "tab"/);
+  assert.equal((host.match(/id=\{CODE_EDITOR_PANEL_ID\}/g) ?? []).length, 5);
+  assert.match(host, /renderTabBar=/);
+  assert.doesNotMatch(host, /tabRefs|const step = event.key/);
 });

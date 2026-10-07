@@ -302,7 +302,7 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
     }
   }
 
-  /** 归档 / 恢复单个会话（软处理，不杀终端）。 */
+  /** 归档会停止会话；恢复用原来的会话 ID 续上。 */
   async archiveSession(sessionId: string, archived: boolean): Promise<void> {
     await parseJsonResponse(await this.fetchImpl(
       `/api/sessions/${encodeURIComponent(sessionId)}/${archived ? "archive" : "unarchive"}`,

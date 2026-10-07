@@ -2,6 +2,7 @@
 // Import order matters: legacy cleanup first, then state/base utilities and business modules.
 // Each import triggers module-level side effects (e.g. localStorage migrations,
 // global assignments, setInterval timers).
+import { installSharedLibraryBridge } from "../react/library-bridge";
 import "./legacy-pwa-cleanup";
 import "./state";        // state initialization + localStorage migrations
 // 首帧前把 <html data-chat-width> 落到真实偏好上，避免铺满→居中闪一帧。
@@ -43,6 +44,8 @@ import { installWorkspacesLegacyAdapter } from "./workspaces-adapter";
 import { appendToComposer, copyTextSafely, setFilePanelOpen } from "./file-browser";
 import { fileExplorerController, fileExplorerStore } from "../react/file-explorer/controller";
 import { explorerParentOf } from "../react/file-explorer/paths";
+
+installSharedLibraryBridge();
 
 installAiTeamComposerAdapter();
 installSettingsRuntimeBridge();

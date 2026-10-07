@@ -23,10 +23,20 @@ try {
     if (path === "/app.js") { res.setHeader("Content-Type", "text/javascript"); res.end(readFileSync(bundle)); return; }
     if (path === "/style.css") { res.setHeader("Content-Type", "text/css"); res.end(readFileSync(join(root, "src/web-ui/content/styles.css"))); return; }
     if (path.startsWith("/api/sessions/timeline-fixture/tool-content/")) {
-      report.requests.push(path.split("/").pop());
+      const toolId = path.split("/").pop();
+      report.requests.push(toolId);
+      const attempt = report.requests.filter(id => id === toolId).length;
       res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ input: { file_path: "src/main.ts" }, content: "DETAIL_ONLY",
-        pending: false, resultAvailable: true })); return;
+      if (toolId === "retry-command" && attempt === 1) {
+        res.writeHead(503); res.end(JSON.stringify({error:"fixture unavailable"})); return;
+      }
+      if (toolId === "pending-command" && attempt === 1) {
+        res.end(JSON.stringify({input:{command:"npm test"},pending:true,resultAvailable:false})); return;
+      }
+      const reply = () => res.end(JSON.stringify({ input: { file_path: "src/main.ts" }, content: "DETAIL_ONLY",
+        pending: false, resultAvailable: true }));
+      if (toolId === "late-command") setTimeout(reply, 200); else reply();
+      return;
     }
     if (path.startsWith("/api/")) { res.writeHead(404); res.end(); return; }
     res.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -74,41 +84,69 @@ try {
   };
   await send("Runtime.enable"); await send("Page.bringToFront");
   await wait("!!window.toolTimelineHarness");
-  const modes = ["desktop", "390px", "native-shell", "reactUi=0", "reduce-motion", "390px-native-reduce"];
+  const modes = process.env.WAND_TIMELINE_MODES?.split(",") || ["desktop", "390px", "native-shell", "reactUi=0", "reduce-motion", "390px-native-reduce"];
   for (const mode of modes) {
     await send("Emulation.setDeviceMetricsOverride", { width: mode.includes("390px") ? 390 : 1280, height: 900, deviceScaleFactor: 1, mobile: false });
     await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: mode.includes("reduce") ? "reduce" : "no-preference" }] });
     await e(`document.documentElement.classList.toggle("is-wand-app",${mode.includes("native")});history.replaceState(null,"",${JSON.stringify(mode === "reactUi=0" ? "/?reactUi=0" : "/")});`);
-    await e(`(async()=>{window.h=toolTimelineHarness;window.fixture=[{role:"assistant",uuid:"timeline-row",content:Array.from({length:40},(_,i)=>({type:"tool_use",id:"call-"+i,name:"Read",input:{},activity:{kind:i%2?"edit_file":"read_file",label:(i%2?"修改":"查看")+" src/main.ts",fileKey:"same-file",occurredAt:"2026-09-30T12:00:"+String(i).padStart(2,"0")+"Z"}}))}];await h.fresh(fixture)})()`);
+    await e(`(async()=>{window.h=toolTimelineHarness;window.resourceTurns=[{role:"user",content:[{type:"text",text:"绘制接口图"}]},{role:"assistant",uuid:"resource-choice",content:[],resourceSelection:{status:"selecting",label:"正在自动选择 Skills / MCP…",skills:[],mcpServers:[]}}];await h.fresh(resourceTurns)})()`);
+    assert.equal(await e('document.querySelector(".chat-resource-selection")?.textContent'), '正在自动选择 Skills / MCP…', 'selection progress is a small message, not a blocking composer flow');
+    await e(`(()=>{resourceTurns[1]={...resourceTurns[1],content:[{type:"text",text:"正在处理这轮请求"}],resourceSelection:{status:"selected",label:'本轮选择 · Skills：mermaid <img src=x>',skills:["mermaid"],mcpServers:[]}};h.publish(resourceTurns,true)})()`);
+    await e('h.settle()');
+    assert.equal(await e('document.querySelectorAll(".chat-resource-selection").length'), 1);
+    assert.equal(await e('document.querySelector(".chat-resource-selection").textContent'), '本轮选择 · Skills：mermaid <img src=x>');
+    assert.equal(await e('document.querySelectorAll(".chat-resource-selection img").length'), 0, 'resource names are escaped');
+    assert.equal(await e('parseFloat(getComputedStyle(document.querySelector(".chat-resource-selection")).fontSize) <= parseFloat(getComputedStyle(document.body).fontSize)'), true, 'resource selection uses small text');
+    await e('(()=>{resourceTurns[1]={...resourceTurns[1],resourceSelection:{status:"fallback",label:"自动选择超时，沿用手选",skills:[],mcpServers:[]}};h.publish(resourceTurns,true)})()');
+    await e('h.settle()');
+    assert.equal(await e('document.querySelector(".chat-resource-selection").textContent'), '自动选择超时，沿用手选', 'metadata-only updates repaint the selection label');
+    await e('(()=>{resourceTurns[1]={...resourceTurns[1],content:[],resourceSelection:{status:"cancelled",label:"本轮自动选择已取消",skills:[],mcpServers:[]}};h.publish(resourceTurns,false)})()');
+    await e('h.settle()');
+    assert.equal(await e('document.querySelector(".chat-resource-selection").textContent'), '本轮自动选择已取消');
+    assert.equal(await e('document.querySelectorAll(".typing-indicator").length'), 0, 'cancelled resource preparation cannot remain in a loading state');
+    report.cases.push({ mode, case: "automatic-resource-notice", ok: true });
+    await e(`(async()=>{window.h=toolTimelineHarness;window.fixture=[{role:"assistant",uuid:"timeline-row",content:Array.from({length:40},(_,i)=>({type:"tool_use",id:"call-"+i,name:"Bash",input:{},preview:"npm run check",activity:{kind:"run_command",label:"运行命令 · Bash",occurredAt:"2026-09-30T12:00:"+String(i).padStart(2,"0")+"Z"}}))}];await h.fresh(fixture)})()`);
     assert.equal(await e('document.querySelectorAll(".assistant-reply-disclosure,.chat-avatar").length'), 0, "no outer reply card/avatar");
     const initialRequests = report.requests.length;
-    const before = await e('document.querySelector(".chat-activity-summary").getBoundingClientRect().toJSON()');
-    await click(".chat-activity-summary"); await e("h.settle()");
+    const before = await e('document.querySelector("button.chat-process-summary").getBoundingClientRect().toJSON()');
+    await e(`(()=>{window.revealFrames=[];const g=document.querySelector('.chat-activity');const menu=g.querySelector('.chat-disclosure-body');const summary=g.querySelector('button.chat-process-summary');function frame(){revealFrames.push({height:menu.getBoundingClientRect().height,y:summary.getBoundingClientRect().y});if(revealFrames.length<24)requestAnimationFrame(()=>requestAnimationFrame(()=>setTimeout(frame,0)))}requestAnimationFrame(()=>requestAnimationFrame(()=>setTimeout(frame,0)))})()`);
+    await click("button.chat-process-summary"); await e("h.settle()");
+    const frames=await e('revealFrames');
+    assert.ok(frames.every(f=>Math.abs(f.y-before.y)<=1),"trigger remains fixed during the entire reveal: "+JSON.stringify({before,frames}));
+    if(mode.includes('reduce')) assert.ok(frames.every(f=>f.height<1||f.height>=239),'reduced motion has no geometry tween');
+    else assert.ok(frames.some(f=>f.height>1&&f.height<239),'including the native shell, reveal uses a real reversible height animation');
     assert.equal(report.requests.length, initialRequests, "timeline expansion must not fetch any detail");
-    assert.equal(await e('document.querySelectorAll(".chat-activity-entry").length'), 40);
-    assert.deepEqual(await e('Array.from(document.querySelectorAll(".chat-activity-entry[data-tool-ids]")).map(n=>JSON.parse(n.dataset.toolIds))'), Array.from({length:40},(_,i)=>["call-"+i]));
-    const metrics = await e('(()=>{const n=document.querySelector(".chat-activity-timeline");return{height:n.clientHeight,overflow:n.scrollHeight>n.clientHeight,detail:!!n.querySelector("pre,.tool-use-card,.inline-diff,.inline-terminal"),summary:document.querySelector(".chat-activity-summary").getBoundingClientRect().toJSON(),wide:document.documentElement.scrollWidth>innerWidth}})()');
+    assert.equal(await e('document.querySelectorAll(".chat-call").length'), 40);
+    assert.deepEqual(await e('Array.from(document.querySelectorAll(".chat-call[data-tool-ids]")).map(n=>JSON.parse(n.dataset.toolIds))'), Array.from({length:40},(_,i)=>["call-"+i]));
+    const metrics = await e('(()=>{const n=document.querySelector(".chat-activity-timeline");return{height:n.clientHeight,overflow:n.scrollHeight>n.clientHeight,detail:!!n.querySelector("pre,.tool-use-card,.inline-diff,.inline-terminal"),summary:document.querySelector("button.chat-process-summary").getBoundingClientRect().toJSON(),wide:document.documentElement.scrollWidth>innerWidth}})()');
     assert.equal(metrics.height, 240); assert.equal(metrics.overflow, true); assert.equal(metrics.detail, false); assert.equal(metrics.wide, false);
-    assert.equal(await e('Array.from(document.querySelectorAll(".chat-activity-entry-button")).every(row=>{const clock=row.querySelector("time");const label=row.querySelector(".chat-activity-entry-label");return !clock || clock.getBoundingClientRect().right <= label.getBoundingClientRect().left})'), true, "each time is rendered at the beginning, before its file/tool label");
+    assert.equal(await e('Array.from(document.querySelectorAll("button.chat-call-button")).every(row=>{const clock=row.querySelector("time");const label=row.querySelector(".chat-call-label");return !clock || clock.getBoundingClientRect().left >= label.getBoundingClientRect().right})'), true, "each timestamp stays aligned after the readable title");
     for (const axis of ["x","y","width","height"]) assert.ok(Math.abs(metrics.summary[axis]-before[axis])<=1, "summary stays in place: " + axis);
     if (output && (mode === "desktop" || mode === "390px")) {
       mkdirSync(output,{recursive:true});
       const shot = await send("Page.captureScreenshot",{format:"png"}); writeFileSync(join(output,`timeline-summary-${mode}.png`),Buffer.from(shot.data,"base64"));
     }
     report.removedSelectorHits.push({ mode, groups: await e('document.querySelectorAll(".chat-activity-group,.chat-activity-group-title").length'), oldAnimation: await e('document.getAnimations().filter(a=>a.animationName==="activity-menu-in").length') });
-    await click('.chat-activity-entry:nth-child(1) .chat-activity-entry-button');
-    await wait('document.querySelector(".chat-activity-entry-detail")?.textContent.includes("DETAIL_ONLY")'); await e("h.settle()");
+    await e('window.entryNode=document.querySelector("button.chat-call-button");entryNode.scrollIntoView({block:"nearest"})');
+    await e('h.settle()');
+    await e('window.entryRect=entryNode.getBoundingClientRect().toJSON()');
+    await click('.chat-call:nth-child(1) button.chat-call-button');
+    await wait('document.querySelector(".chat-call-detail")?.textContent.includes("DETAIL_ONLY")'); await e("h.settle()");
+    assert.equal(await e('entryNode===document.querySelector("button.chat-call-button")'),true);
+    const entryDelta=await e('(()=>{const r=entryNode.getBoundingClientRect();return ["x","y","width","height"].map(k=>r[k]-entryRect[k])})()');
+    assert.ok(entryDelta.every(v=>Math.abs(v)<=1),"entry trigger remains fixed: "+JSON.stringify(entryDelta));
+    assert.equal(await e('document.querySelectorAll(".chat-call-detail .tool-use-card,.chat-call-detail .inline-terminal,.chat-call-detail .inline-tool-call").length'),0,"no third disclosure level");
     assert.deepEqual(report.requests.slice(initialRequests), ["call-0"], "only the explicitly opened call is loaded");
     assert.equal(await e('document.querySelector(".chat-activity-timeline").clientHeight'), 240, "details cannot grow the window");
-    await click('.chat-activity-entry:nth-child(3) .chat-activity-entry-button');
-    await wait('document.querySelectorAll(".chat-activity-entry-detail .inline-tool-result-text").length===2');
-    assert.deepEqual(report.requests.slice(initialRequests), ["call-0", "call-2"], "same file does not batch-load other invocations");
+    await click('.chat-call:nth-child(3) button.chat-call-button');
+    await wait('document.querySelectorAll(".chat-call[data-expanded=true]").length===2 && [...document.querySelectorAll(".chat-activity-detail-section pre")].filter(n=>n.textContent==="DETAIL_ONLY").length===2');
+    assert.deepEqual(report.requests.slice(initialRequests), ["call-0", "call-2"], "opening a call never batch-loads other invocations");
     await e("h.settle()");
-    for (let n=0;n<80 && !await e('document.activeElement.matches(".chat-activity-summary")');n++) {
+    for (let n=0;n<80 && !await e('document.activeElement.matches("button.chat-process-summary")');n++) {
       await send("Input.dispatchKeyEvent",{type:"keyDown",key:"Tab",code:"Tab",windowsVirtualKeyCode:9,modifiers:8});
       await send("Input.dispatchKeyEvent",{type:"keyUp",key:"Tab",code:"Tab",windowsVirtualKeyCode:9,modifiers:8});
     }
-    assert.equal(await e('document.activeElement.matches(".chat-activity-summary")'),true);
+    assert.equal(await e('document.activeElement.matches("button.chat-process-summary")'),true);
     await e('window.originalSummary=document.activeElement;window.originalGlyph=originalSummary.querySelector("svg");document.querySelector(".chat-activity-timeline").scrollTop=180');
     const top = await e('document.querySelector(".chat-activity-timeline").scrollTop');
     await e('(async()=>{fixture[0].content.push({...fixture[0].content[0],id:"call-40"});h.publish(fixture);await h.settle()})()');
@@ -119,15 +157,15 @@ try {
       mkdirSync(output,{recursive:true});
       const shot = await send("Page.captureScreenshot",{format:"png"}); writeFileSync(join(output,`timeline-${mode}.png`),Buffer.from(shot.data,"base64"));
     }
-    await click(".chat-activity-summary"); await e("h.settle()");
-    assert.equal(await e('document.querySelector(".chat-activity-menu").getBoundingClientRect().height'), 0);
+    await click("button.chat-process-summary"); await e("h.settle()");
+    assert.equal(await e('document.querySelector(".chat-activity > div > .chat-disclosure-body").getBoundingClientRect().height'), 0);
     assert.equal(await e('document.querySelector(".chat-activity-menu").inert'), true);
-    await click(".chat-activity-summary"); await e("h.settle()");
+    await click("button.chat-process-summary"); await e("h.settle()");
     await send("Input.dispatchKeyEvent", { type:"keyDown", key:"Escape", code:"Escape", windowsVirtualKeyCode:27 });
     await send("Input.dispatchKeyEvent", { type:"keyUp", key:"Escape", code:"Escape", windowsVirtualKeyCode:27 });
     await e("h.settle()"); assert.equal(await e('document.querySelector(".chat-activity").dataset.expanded'),"false");
-    await click(".chat-activity-summary"); await click("#outside"); await e("h.settle()");
-    assert.equal(await e('document.querySelector(".chat-activity").dataset.expanded'),"false");
+    await click("button.chat-process-summary"); await click("#outside"); await e("h.settle()");
+    assert.equal(await e('document.querySelector(".chat-activity").dataset.expanded'),"true","inline reading is not dismissed by an unrelated pointer");
     // Body-bearing replies retain their existing disclosure and regular copy/identity.
     await e('(async()=>{fixture[0].content.push({type:"text",text:"正式回复"});await h.fresh(fixture)})()');
     assert.equal(await e('document.querySelectorAll(".assistant-reply-disclosure").length'),1);
@@ -136,39 +174,40 @@ try {
     await e(`(async()=>{h.state.config={...(h.state.config||{}),cardDefaults:{terminal:true,editCards:true}};window.decisionSummary={mode:"mixed",questions:3,preview:"订单被重复扣款",outcome:"category=billing 84%",label:"category=billing 84% · 3 题 · 订单被重复扣款"};window.decisionUse={type:"tool_use",id:${JSON.stringify('decision-'+mode)},name:"Bash",input:{command:"wand decide --stdin"},semantic:{kind:"decision",summary:decisionSummary},activity:{kind:"run_command",label:"stale metadata"}};window.decisionResult={type:"tool_result",tool_use_id:decisionUse.id,semantic:{kind:"decision",summary:decisionSummary},content:JSON.stringify({runtime:"laya-mlx",experimental:true,answers:{department:{choice:"billing"},unsafe:"<img src=x onerror='globalThis.injected=true'>"}})};await h.fresh([{role:"assistant",uuid:"decision-call",content:[decisionUse]}]);h.publish(h.turns(),true);await h.settle()})()`);
     assert.equal(await e('document.querySelectorAll(".decision-tool-card").length'),1);
     assert.equal(await e('!!document.querySelector(".decision-tool-card").closest(".chat-activity")'),false);
-    assert.equal(await e('document.querySelector(".decision-tool-card .tool-use-header").getAttribute("aria-expanded")'),"false");
+    assert.equal(await e('document.querySelector(".decision-tool-card .chat-tool-header").getAttribute("aria-expanded")'),"false");
     // 收起态就要看得到服务端投影：结论 + 题数 + 被判定内容，两端渲染同一份 label。
     const decisionHead = await e('document.querySelector(".decision-tool-card .decision-tool-summary").textContent');
     assert.ok(decisionHead.includes("category=billing 84% · 3 题 · 订单被重复扣款"), "collapsed decision card shows the projected summary: " + decisionHead);
     assert.ok(decisionHead.endsWith("· 实验性 · 判断中"), "summary stays ahead of the experimental and status labels: " + decisionHead);
     assert.equal(await e('document.querySelector(".decision-tool-card .decision-tool-summary").getAttribute("role")'),"status");
     // 两行卡头：箭头留在标题行右侧（窄屏也不换行到下一行左侧）。
-    const decisionHeadBox = await e('(()=>{const h=document.querySelector(".decision-tool-card .tool-use-header");const toggle=h.querySelector(".tool-use-toggle");const hb=h.getBoundingClientRect();const tb=toggle.getBoundingClientRect();return{sameRow:(tb.top+tb.height/2)<=hb.top+hb.height/2+1,rightGap:hb.right-tb.right}})()');
+    const decisionHeadBox = await e('(()=>{const h=document.querySelector(".decision-tool-card .chat-tool-header");const toggle=h.querySelector(".chat-disclosure-chevron");const hb=h.getBoundingClientRect();const tb=toggle.getBoundingClientRect();return{sameRow:(tb.top+tb.height/2)<=hb.top+hb.height/2+1,rightGap:hb.right-tb.right}})()');
     assert.equal(decisionHeadBox.sameRow,true,"decision toggle stays on the header's first row: "+JSON.stringify({mode,...decisionHeadBox}));
     assert.ok(decisionHeadBox.rightGap>=0&&decisionHeadBox.rightGap<=20,"decision toggle stays at the trailing edge: "+JSON.stringify({mode,...decisionHeadBox}));
-    assert.equal(await e('document.querySelector(".decision-tool-card .tool-use-body").getAttribute("aria-hidden")'),"true");
-    assert.equal(await e('document.querySelector(".decision-tool-card .tool-use-body").inert'),true);
-    assert.equal(await e('document.querySelector(".decision-tool-details").getBoundingClientRect().height'),0);
+    assert.equal(await e('document.querySelector(".decision-tool-card .chat-tool-body").getAttribute("aria-hidden")'),"true");
+    assert.equal(await e('document.querySelector(".decision-tool-card .chat-tool-body").inert'),true);
+    assert.equal(await e('document.querySelector(".decision-tool-card .chat-disclosure-body").getBoundingClientRect().height'),0);
     assert.equal(await e('document.querySelector(".decision-tool-card").textContent.includes("判断中")'),true);
-    await e('window.decisionHeader=document.querySelector(".decision-tool-card .tool-use-header");window.decisionArrow=decisionHeader.querySelector(".tool-use-toggle svg");decisionHeader.scrollIntoView({block:"nearest"})');await e('h.settle()');
+    await e('window.decisionHeader=document.querySelector(".decision-tool-card .chat-tool-header");window.decisionArrow=decisionHeader.querySelector(".chat-disclosure-chevron svg");decisionHeader.scrollIntoView({block:"nearest"})');await e('h.settle()');
     const headerBefore=await e('decisionHeader.getBoundingClientRect().toJSON()');
     if(output&&(mode==="desktop"||mode==="390px")){const shot=await send("Page.captureScreenshot",{format:"png"});writeFileSync(join(output,`decision-collapsed-${mode}.png`),Buffer.from(shot.data,"base64"));}
-    await click(".decision-tool-card .tool-use-header");await e('h.settle()');
+    await click(".decision-tool-card .chat-tool-header");await e('h.settle()');
     assert.equal(await e('document.querySelector(".decision-tool-card").classList.contains("collapsed")'),false);
-    assert.equal(await e('decisionHeader===document.querySelector(".decision-tool-card .tool-use-header")&&decisionHeader.contains(decisionArrow)'),true);
+    assert.equal(await e('decisionHeader===document.querySelector(".decision-tool-card .chat-tool-header")&&decisionHeader.contains(decisionArrow)'),true);
     const headerAfter=await e('decisionHeader.getBoundingClientRect().toJSON()');
-    for(const axis of ["x","y","width","height"])assert.ok(Math.abs(headerBefore[axis]-headerAfter[axis])<=1,"decision header stays in place: "+axis);
-    assert.equal(await e('document.querySelector(".decision-tool-card .tool-use-body").inert'),false);
+    for(const axis of ["x","y","width","height"])assert.ok(Math.abs(headerBefore[axis]-headerAfter[axis])<=1,"decision header stays in place: "+axis+" "+JSON.stringify({mode,before:headerBefore,after:headerAfter}));
+    assert.equal(await e('document.querySelector(".decision-tool-card .chat-tool-body").inert'),false);
     await e('(async()=>{h.publish([{role:"assistant",uuid:"decision-call",content:[decisionUse]},{role:"assistant",uuid:"decision-result",content:[decisionResult]}]);await h.settle()})()');
     assert.equal(await e('document.querySelectorAll(".decision-tool-card").length'),1,"late result updates the invocation, not a second card");
     assert.equal(await e('document.querySelector(".decision-tool-card .tool-use-result-content").textContent.includes("billing")'),true);
     assert.equal(await e('document.querySelectorAll(".decision-tool-card img").length'),0,"result text cannot inject HTML");
     assert.equal(report.requests.length,decisionRequestsBefore,"decision disclosure must not prefetch details");
     assert.equal(await e('document.querySelector(".decision-tool-card").classList.contains("collapsed")'),false,"late results preserve explicit expansion");
-    await click('.decision-tool-card .tool-use-header');await e('h.settle()');
+    await click('.decision-tool-card .chat-tool-header');await e('h.settle()');
     await e('(async()=>{h.publish(h.turns());await h.settle()})()');
     assert.equal(await e('document.querySelector(".decision-tool-card").classList.contains("collapsed")'),true,"refresh preserves explicit collapse");
-    await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});await e('h.settle()');
+    assert.equal(await e('document.activeElement===decisionHeader'),true,'decision header keeps keyboard focus after refresh');
+    await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,text:'\r'});await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});await e('h.settle()');
     assert.equal(await e('document.querySelector(".decision-tool-card").classList.contains("collapsed")'),false,"keyboard opens the same disclosure");
     if(output && (mode==="desktop" || mode==="390px")){const shot=await send("Page.captureScreenshot",{format:"png"});writeFileSync(join(output,`decision-${mode}.png`),Buffer.from(shot.data,"base64"));}
     await e('(async()=>{await h.fresh([{role:"assistant",uuid:"decision-orphan",content:[decisionResult]}])})()');
@@ -179,12 +218,12 @@ try {
     assert.equal(await e('document.querySelector(".decision-tool-card .decision-tool-summary").textContent.startsWith("选择 / 评分 / 是非判断")'),true,"no projection falls back without inventing a result");
     await e('(async()=>{await h.fresh([{role:"assistant",uuid:"decision-error",content:[{...decisionUse,id:decisionUse.id+"-error"},{...decisionResult,tool_use_id:decisionUse.id+"-error",is_error:true,content:"CONTEXT_LIMIT"}]}])})()');
     assert.equal(await e('!!document.querySelector(".decision-tool-card.error.collapsed")'),true,"new errors keep the collapsed default");
-    await click('.decision-tool-card .tool-use-header');await e('h.settle()');
+    await click('.decision-tool-card .chat-tool-header');await e('h.settle()');
     assert.equal(await e('!!document.querySelector(".decision-tool-card.error:not(.collapsed)")'),true);
     assert.equal(await e('document.querySelector(".decision-tool-card").textContent.includes("CONTEXT_LIMIT")'),true);
     assert.equal(await e('document.documentElement.scrollWidth > innerWidth'),false);
     await e('(async()=>{await h.fresh([{role:"assistant",uuid:"decision-truncated",content:[decisionUse,{...decisionResult,content:"SHORT_PART",_truncated:true}]}]);window.decisionButton=document.querySelector(".decision-result-load")})()');
-    await e('decisionButton.scrollIntoView({block:"nearest"})');await e('h.settle()');
+    if(await e('document.querySelector(".decision-tool-card").classList.contains("collapsed")'))await click('.decision-tool-card .chat-tool-header');await e('decisionButton.scrollIntoView({block:"nearest"})');await e('h.settle()');
     const loadBounds=await e('decisionButton.getBoundingClientRect().toJSON()');
     await click('.decision-result-load');await wait('document.querySelector(".decision-tool-card").textContent.includes("DETAIL_ONLY")');await e('h.settle()');
     assert.equal(await e('decisionButton===document.querySelector(".decision-result-load")'),true,"detail loading keeps the same feedback button");
@@ -198,7 +237,7 @@ try {
   await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
   await e('document.documentElement.classList.remove("is-wand-app")');
   await e('(async()=>{window.h=toolTimelineHarness;await h.fresh([{role:"assistant",uuid:"summary-time",content:[{type:"thinking",thinking:"planning"},{type:"tool_use",id:"cmd-1",name:"Bash",input:{},activity:{kind:"run_command",label:"运行命令 · Bash",occurredAt:"2026-09-30T12:03:10Z"}}]}])})()');
-  const lead = await e('(()=>{const s=document.querySelector(".chat-activity-summary");const meta=s.querySelector(".chat-activity-meta");const clock=meta&&meta.firstElementChild;const first=meta&&meta.querySelector(".chat-activity-meta-item");return{tag:clock&&clock.tagName,clock:clock&&clock.textContent.trim(),first:first&&first.textContent,expanded:s.getAttribute("aria-expanded"),before:!!clock&&!!first&&clock.getBoundingClientRect().right<=first.getBoundingClientRect().left}})()');
+  const lead = await e('(()=>{const s=document.querySelector("button.chat-process-summary");const meta=s.querySelector(".chat-activity-meta");const clock=meta&&meta.firstElementChild;const first=meta&&meta.querySelector(".chat-activity-meta-item");return{tag:clock&&clock.tagName,clock:clock&&clock.textContent.trim(),first:first&&first.textContent,expanded:s.getAttribute("aria-expanded"),before:!!clock&&!!first&&clock.getBoundingClientRect().right<=first.getBoundingClientRect().left}})()');
   assert.equal(lead.tag, "TIME", "collapsed summary starts with the command time");
   assert.match(lead.clock ?? "", /^\d{2}:\d{2}:\d{2}$/, "collapsed summary shows a real clock");
   assert.equal(lead.first, "深度思考", "the time precedes the thinking/count text");
@@ -216,14 +255,57 @@ try {
     {type:"tool_result",tool_use_id:"preview-call",content:"",_truncated:true,is_error:true,preview:"退出码 1 · TypeError: missing element"}
   ]}])})()`);
   const previewRequests = report.requests.length;
-  assert.doesNotMatch(await e('document.querySelector(".chat-activity-summary").textContent'), /npm run check|退出码 1/);
-  assert.equal(await e('document.querySelector(".chat-activity-menu").getBoundingClientRect().height'), 0);
-  await click('.chat-activity-summary'); await e('h.settle()');
-  assert.equal(await e('document.querySelector(".chat-activity-entry-preview").textContent'), 'npm run check');
-  assert.match(await e('document.querySelector(".chat-activity-entry-result").textContent'), /TypeError/);
+  assert.doesNotMatch(await e('document.querySelector("button.chat-process-summary").textContent'), /npm run check|退出码 1/);
+  assert.equal(await e('document.querySelector(".chat-activity > div > .chat-disclosure-body").getBoundingClientRect().height'), 0);
+  await click('button.chat-process-summary'); await e('h.settle()');
+  assert.match(await e('document.querySelector(".chat-call-preview").textContent'), /npm run check/);
+  assert.match(await e('document.querySelector(".chat-call-preview").textContent'), /TypeError/);
   assert.equal(report.requests.length, previewRequests, 'summary and timeline do not fetch bodies');
-  assert.equal(await e('document.querySelector(".chat-activity-entry").dataset.status'), 'error');
+  assert.equal(await e('document.querySelector(".chat-call").dataset.status'), 'error');
   report.cases.push({mode:'compact-preview',collapsedOverviewOnly:true,inputVisible:true,resultVisible:true,noDetailFetch:true});
+  // Pending -> complete hydrates once; retries and stale responses never reopen a closed row.
+  for (const kind of ["pending-command", "retry-command", "late-command"]) {
+    await e(`(async()=>{await h.fresh([{role:"assistant",uuid:${JSON.stringify(kind)},content:[
+      {type:"tool_use",id:${JSON.stringify(kind)},name:"Bash",input:{},preview:"npm test",activity:{kind:"run_command",label:"运行命令 · Bash"}}
+    ]}])})()`);
+    await click('button.chat-process-summary'); await click('button.chat-call-button');
+    if (kind === "pending-command") {
+      await wait('!!document.querySelector(".chat-activity-pending-detail")');await e('h.settle()');
+      await e('window.pendingHeader=document.querySelector("button.chat-call-button");window.pendingBounds=pendingHeader.getBoundingClientRect().toJSON()');
+      await e('h.turns()[0].content.push({type:"tool_result",tool_use_id:"pending-command",content:"",_truncated:true,preview:"tests passed"});h.publish(h.turns())');
+      await wait('document.querySelector(".chat-activity-detail-content").textContent.includes("DETAIL_ONLY")');await e('h.settle()');
+      assert.equal(report.requests.filter(id=>id===kind).length,2);
+      assert.equal(await e('pendingHeader===document.querySelector("button.chat-call-button")'),true);
+      assert.ok(await e('["x","y","width","height"].every(k=>Math.abs(pendingHeader.getBoundingClientRect()[k]-pendingBounds[k])<=1)'),"late result keeps the exact trigger rectangle");
+    } else if (kind === "retry-command") {
+      await wait('!!document.querySelector(".chat-activity-retry")');await e('h.settle()');
+      await click('.chat-activity-retry');
+      await wait('document.querySelector(".chat-activity-detail-content").textContent.includes("DETAIL_ONLY")');
+      assert.equal(report.requests.filter(id=>id===kind).length,2);
+    } else {
+      await wait('!!document.querySelector(".chat-activity-loading")');
+      await click('button.chat-call-button'); await sleep(300); await e('h.settle()');
+      assert.equal(await e('document.querySelector(".chat-call").dataset.expanded'),"false");
+      assert.equal(await e('document.querySelector(".chat-call-detail").inert'),true);
+    }
+    report.cases.push({mode:kind,ok:true});
+  }
+  // File actions stay lazy and describe the CURRENT file, not an old invocation result.
+  await e(`(async()=>{await h.fresh([{role:"assistant",uuid:"file",content:[
+    {type:"tool_use",id:"file-only",name:"Read",input:{},activity:{kind:"read_file",label:"查看文件",fileKey:"opaque"}}
+  ]}]);h.state.sessions[0].cwd="/repo";window.openedPath=null;window.__openFilePreview=p=>{window.openedPath=p}})()`);
+  const fileRequests=report.requests.length;
+  await click('button.chat-process-summary');await click('button.chat-call-button');await e('h.settle()');
+  assert.equal(report.requests.length,fileRequests);
+  assert.equal(await e('document.querySelectorAll(".chat-activity-file-open").length'),1);
+  await click('.chat-activity-file-open');await wait('openedPath==="/repo/src/main.ts"');await e('h.settle()');
+  assert.equal(report.requests.length,fileRequests+1);
+  await e('document.querySelector("button.chat-call-button").focus({preventScroll:true})');
+  await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+  await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});await e('h.settle()');
+  assert.equal(await e('document.querySelector(".chat-call").dataset.expanded'),"false");
+  assert.equal(await e('document.querySelector(".chat-activity").dataset.expanded'),"true","Escape closes the innermost disclosure first");
+  report.cases.push({mode:'file-action',lazy:true,currentFile:true,innerEscape:true});
   assert.deepEqual(report.errors, []); assert.ok(report.removedSelectorHits.every(x=>x.groups===0 && x.oldAnimation===0));
   report.ok = true; console.log(JSON.stringify(report));
 } catch (error) {

@@ -99,11 +99,28 @@ test("delivery overview fits only its on-demand allowance", (t) => {
 test("the raised lazy allowance still rejects oversized team chunks", (t) => {
   const fixture = budgetFixture();
   t.after(fixture.cleanup);
-  const lazy = chunkText(1_400);
+  const lazy = chunkText(1_500);
   const size = gzipSync(lazy).length;
-  assert.ok(size > 48_000, `fixture gzip size: ${size}`);
+  assert.ok(size > 52_000, `fixture gzip size: ${size}`);
   const result = fixture.run(lazy);
   assert.equal(result.status, 1);
   assert.match(String(result.stderr), /\[bundle-budget\] FAILED:/);
-  assert.match(String(result.stderr), /ai-teams\.js \(lazy\): \d+ B > 48000 B/);
+  assert.match(String(result.stderr), /ai-teams\.js \(lazy\): \d+ B > 52000 B/);
+});
+
+test("无指派派工的名单面板只吃新的按需额度，不进主包", (t) => {
+  const fixture = budgetFixture();
+  t.after(fixture.cleanup);
+  // 48,000–52,000 B 区间：旧额度会拒、现额度接受（层阶与上一条一致）。
+  const lazy = chunkText(1_440);
+  const size = gzipSync(lazy).length;
+  assert.ok(size > 48_000 && size <= 52_000, `fixture gzip size: ${size}`);
+  const small = fixture.run("");
+  const result = fixture.run(lazy);
+  assert.equal(result.status, 0, String(result.stderr));
+  const firstLoad = (stdout: unknown): string | undefined =>
+    String(stdout).match(/first load \(HTML \+ app \+ vendor\).*\((\d+) B\)/)?.[1];
+  const shellBytes = firstLoad(small.stdout);
+  assert.ok(shellBytes, "必须报出真实首载字节数");
+  assert.equal(firstLoad(result.stdout), shellBytes, "按需包的字节不进首载");
 });

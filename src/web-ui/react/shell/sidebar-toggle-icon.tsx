@@ -3,7 +3,7 @@
 // （不 import React 的那种）会在 SSR 测试里 ReferenceError。
 import * as React from "react";
 import type { ReactElement } from "react";
-import { WandIcon } from "../ui";
+import { ConversationMorphIcon } from "../conversations/controls";
 
 /** Rail icon while the drawer is closed; it turns into a close icon when open. */
 export function SidebarToggleIcon({
@@ -15,8 +15,7 @@ export function SidebarToggleIcon({
 }): ReactElement {
   return (
     <span className="sidebar-toggle-morph" data-open={open ? "true" : "false"} aria-hidden="true">
-      <WandIcon name="rail" size={size} className="sidebar-toggle-morph-rail"/>
-      <WandIcon name="close" size={size} className="sidebar-toggle-morph-close"/>
+      <ConversationMorphIcon active={open} from="rail" to="close" size={size}/>
     </span>
   );
 }

@@ -4,6 +4,7 @@ import {
   type ExecFileOptionsWithStringEncoding,
   type ExecFileSyncOptionsWithStringEncoding,
 } from "node:child_process";
+import { buildChildEnv } from "./env-utils.js";
 
 interface GitCommandError extends Error {
   stderr?: string;
@@ -30,7 +31,7 @@ function positiveInteger(value: number | undefined, fallback: number): number {
 
 function gitEnvironment(opts: RunGitOptions): NodeJS.ProcessEnv {
   return {
-    ...process.env,
+    ...buildChildEnv(true),
     ...(opts.env ?? {}),
     GIT_TERMINAL_PROMPT: "0",
     GIT_ASKPASS: "true",

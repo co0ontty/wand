@@ -1,0 +1,264 @@
+import { cssEvidenceCapture } from "./helpers/antd-css-evidence.js";
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { existsSync, mkdtempSync, readFileSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { createServer } from "node:http";
+import { build } from "esbuild";
+
+test("settings tabs use Ant controls and preserve draft, ordering, permission and popup contracts", { timeout: 180_000, skip: process.env.WAND_SETTINGS_BROWSER !== "1" }, async () => {
+  const root = resolve(import.meta.dirname, "..");
+  const temporary = mkdtempSync(join(tmpdir(), "wand-antd-settings-"));
+  const artifact = join(root, "output/web-ui-library-migration/settings");
+  const browserErrors: string[] = [];
+  const evidence: Array<Record<string, unknown>> = [];
+  let access = "admin", failSave = false, holdSave = false;
+  let releaseSave: (() => void) | undefined;
+  const commands: Array<{path: string; value: any}> = [];
+  let config: Record<string, any> = {
+    host: "127.0.0.1", port: 3000, https: false, defaultMode: "default", defaultCwd: "/tmp",
+    shell: "/bin/zsh", language: "", inheritEnv: true, defaultProvider: "claude", defaultThinkingEffort: "off",
+    defaultModel: "first", defaultCodexModel: "codex-first", defaultPiModel: "",
+    modelGroups: [{ id: "coding", provider: "claude", name: "编程分组", models: ["first", "second"] }],
+    commandPresets: [{label: "示例预设", command: "echo example", mode: "default"}],
+    cardDefaults: { editCards: false, inlineTools: false, terminal: false, thinking: false },
+    taskRetention: { autoArchiveEnabled: false, autoArchiveDays: 7, autoDeleteEnabled: false, autoDeleteDays: 30 },
+    userProfile: { name: "", avatar: "" },
+  };
+  const models = { models: [{id:"default",label:"默认"},{id:"first",label:"首选模型"},{id:"second",label:"备用模型"}],
+    codexModels:[{id:"codex-first",label:"Codex First"}], freeModels:[], piModels:[] };
+  const about = () => ({packageName:"wand-local", version:"4.83.1", nodeVersion:">=26", updateChannel:"stable",
+    build:{}, androidApk:{enabled:true},macosDmg:{enabled:true},iosIpa:{enabled:true},
+    config, desiredConfig:config, activeConfig:config, githubConnector:{connected:false},
+    autoUpdate:{}, openRouter:{configured:false,modelCount:0,lastError:null}});
+  const source = `
+    import * as React from "react";
+    import { createRoot } from "react-dom/client";
+    import { SettingsHost } from "./src/web-ui/react/settings/host";
+    import { settingsController } from "./src/web-ui/react/settings/controller";
+    import { installReactUiStyles } from "./src/web-ui/react/styles";
+    installReactUiStyles();
+    if (location.search.includes("native")) { document.documentElement.classList.add("is-wand-app","is-wand-ios");
+      window.WandNative = {getAvailableSounds:()=>JSON.stringify([{id:"native-one",name:"原生铃声"}]),
+        getNotificationSound:()=>"native-one", isHapticEnabled:()=>true, getPermission:()=>"denied",
+        sendNotification:()=>{}}; }
+    window.settingsHarness = {open: settingsController.open, close: settingsController.close};
+    createRoot(document.getElementById("root")).render(<SettingsHost/>);
+    settingsController.open("general");
+  `;
+  await build({ stdin: { contents: source, resolveDir: root, loader: "tsx" }, bundle: true, format: "iife", platform: "browser", jsx: "automatic", outfile: join(temporary, "app.js"), define: { "process.env.NODE_ENV": '"production"' } });
+  const server = createServer(async (request, response) => {
+    const path = new URL(request.url!, "http://localhost").pathname;
+    if (path.startsWith("/api/")) {
+      response.setHeader("content-type", "application/json");
+      if (path === "/api/settings" && access !== "admin") { response.statusCode=403; response.end(JSON.stringify({error:"管理权限不足"})); return; }
+      let value: any = {};
+      if (request.method === "POST") {
+        const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk));
+        value = JSON.parse(Buffer.concat(chunks).toString() || "{}");
+        // Only nonsecret settings payloads are collected; credential commands never enter outputs.
+        if (path === "/api/settings/config") {
+          commands.push({path,value});
+          if (failSave) { response.statusCode=500; response.end(JSON.stringify({error:"保存失败，草稿已保留"})); return; }
+          if (holdSave) await new Promise<void>((resolve) => { releaseSave = resolve; });
+          config = {...config,...value};
+          response.end(JSON.stringify({ok:true,config,desiredConfig:config,activeConfig:config,restartRequired:false})); return;
+        }
+        if (path === "/api/settings/openrouter") { response.statusCode=500; response.end(JSON.stringify({error:"本地验证失败"})); return; }
+      }
+      const payload = path === "/api/settings" || path === "/api/settings/about" ? about()
+        : path === "/api/models" ? models
+        : path === "/api/provider-cli-updates" ? {items:[],autoUpdate:false}
+        : path === "/api/app-connect-code" ? {code:"",url:""}
+        : path === "/api/silicon-employees" ? {employees:[]}
+        : path === "/api/sessions/provider-usage" ? {claude:5,codex:2}
+        : path === "/api/settings/env-preview" ? {inheritEnv:true,total:1,reveal:false,entries:[{name:"EXAMPLE",value:"masked",length:6,sensitive:false}]}
+        : path === "/api/check-update" ? {channel:"stable",current:"4.83.1",latest:"4.83.1",updateAvailable:false}
+        : value;
+      response.end(JSON.stringify(payload)); return;
+    }
+    if (path === "/app.js") { response.setHeader("content-type", "application/javascript"); response.end(readFileSync(join(temporary, "app.js"))); }
+    else if (path === "/styles.css") { response.setHeader("content-type", "text/css"); response.end(readFileSync(join(root, "src/web-ui/content/styles.css"))); }
+    else if (path === "/tailwind.css") { response.setHeader("content-type", "text/css"); response.end(readFileSync(join(root, "src/web-ui/content/tailwind.css"))); }
+    else { response.setHeader("content-type", "text/html; charset=utf-8"); response.end('<!doctype html><html lang="zh-CN"><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/tailwind.css"><link rel="stylesheet" href="/styles.css"></head><body><div id="root"></div><div id="overlay-root"><div class="wand-ui-portals" id="wand-react-ui-portals"></div></div><script src="/app.js"></script></body></html>'); }
+  });
+  server.listen(0, "127.0.0.1"); await once(server, "listening");
+  const address = server.address(); assert.ok(address && typeof address === "object");
+  const origin = `http://127.0.0.1:${address.port}`;
+  const chrome = spawn(process.env.CHROME_BIN ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", ["--headless=new", "--disable-gpu", "--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows", "--no-first-run", "--remote-allow-origins=*", "--remote-debugging-port=0", `--user-data-dir=${temporary}/profile`, "about:blank"], { stdio: "ignore" });
+  let socket: WebSocket | undefined;
+  const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+  try {
+    const portFile = join(temporary, "profile/DevToolsActivePort");
+    for (let attempt = 0; attempt < 120 && !existsSync(portFile); attempt++) await pause(50);
+    assert.ok(existsSync(portFile), "Chrome debugging endpoint available");
+    const debugPort = readFileSync(portFile, "utf8").split("\n")[0];
+    const targets = await (await fetch(`http://127.0.0.1:${debugPort}/json`)).json() as Array<{ type: string; webSocketDebuggerUrl: string }>;
+    socket = new WebSocket(targets.find(target => target.type === "page")!.webSocketDebuggerUrl); await once(socket, "open");
+    let sequence = 0;
+    const pending = new Map<number, { resolve(value: any): void; reject(error: Error): void }>();
+    socket.addEventListener("message", event => {
+      const message = JSON.parse(String(event.data));
+      if (message.method === "Runtime.exceptionThrown") browserErrors.push(JSON.stringify(message.params.exceptionDetails));
+      const call = pending.get(message.id); if (!call) return; pending.delete(message.id);
+      message.error ? call.reject(new Error(JSON.stringify(message.error))) : call.resolve(message.result);
+    });
+    const send = (method: string, params: Record<string, unknown> = {}): Promise<any> => new Promise((resolve, reject) => {
+      const id = ++sequence; pending.set(id, { resolve, reject }); socket!.send(JSON.stringify({ id, method, params }));
+    });
+    const captureCss = cssEvidenceCapture("settings");
+    const evaluate = async (expression: string): Promise<any> => {
+      const result = await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
+      if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
+      await captureCss(send);
+      return result.result.value;
+    };
+    const wait = async (expression: string): Promise<void> => {
+      for (let attempt = 0; attempt < 160; attempt++) { if (await evaluate(expression)) return; await pause(30); }
+      throw new Error(`Timed out: ${expression}`);
+    };
+    const click = async (selector: string): Promise<void> => {
+      await wait(`!!document.querySelector(${JSON.stringify(selector)})`);
+      await evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n.closest('.ant-dropdown,.ant-popover'))n.scrollIntoView({block:"nearest",behavior:"instant"})})()`);
+      await pause(280);
+      await wait(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n)return false;if(!n.closest('.ant-dropdown,.ant-popover'))n.scrollIntoView({block:"nearest",behavior:"instant"});const r=n.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return r.width>0&&r.height>0&&(n===hit||n.contains(hit))})()`);
+      const locate = () => evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)}),r=n.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,hit=document.elementFromPoint(x,y);if(!r.width||!r.height||!(n===hit||n.contains(hit)))throw Error("Target obstructed: "+${JSON.stringify(selector)});return{x,y}})()`);
+      await send("Page.bringToFront");
+      await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...await locate() });
+      await pause(80);
+      const point = await locate();
+      for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, ...point, button: "left", clickCount: 1 });
+    };
+    const clickText = async (text: string, role = "button"): Promise<void> => {
+      await evaluate(`(()=>{const n=Array.from(document.querySelectorAll(${JSON.stringify(role === "tab" ? '[role="tab"]' : 'button')})).find(n=>n.innerText.trim()===${JSON.stringify(text)});if(!n)throw Error("Missing action: "+${JSON.stringify(text)});n.setAttribute("data-settings-test-target","true")})()`);
+      if (role === "tab") await evaluate('document.querySelector("[data-settings-test-target]").focus({preventScroll:true})');
+      try { await click('[data-settings-test-target="true"]'); }
+      catch (error) { throw new Error(`Cannot click ${role}: ${text}: ${String(error)}; layout=${await evaluate(`JSON.stringify(Array.from(document.querySelectorAll('.ant-modal-body,.wand-settings-library-tabs,.ant-tabs-body-holder,[data-settings-test-target]')).map(n=>({tag:n.tagName,cls:n.className,rect:n.getBoundingClientRect().toJSON(),scroll:n.scrollTop,scrollHeight:n.scrollHeight,overflow:getComputedStyle(n).overflow,display:getComputedStyle(n).display,height:getComputedStyle(n).height})))`)} `); }
+      await evaluate('document.querySelector("[data-settings-test-target]")?.removeAttribute("data-settings-test-target")');
+    };
+    const enter = async (selector: string, text: string): Promise<void> => {
+      await click(selector); await evaluate(`document.querySelector(${JSON.stringify(selector)}).select()`);
+      await send("Input.insertText", {text});
+    };
+    const key = async (key: string): Promise<void> => {
+      await send("Input.dispatchKeyEvent", { type: "keyDown", key, code: key, windowsVirtualKeyCode: ({ Escape:27, Enter:13, ArrowLeft:37, ArrowUp:38, ArrowRight:39, ArrowDown:40, Home:36, End:35 } as Record<string,number>)[key] ?? 0 });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", key, code: key });
+    };
+    await send("Page.enable"); await send("Runtime.enable");
+    const tabs = ["我的资料","连接器","基本配置","AI 与模型","通知","显示","安全","命令预设","关于"];
+    for (const mode of process.env.WAND_SETTINGS_TEST_MODES?.split(",") ?? ["desktop","mobile","native","rollback","reduced-motion"]) {
+      access="admin"; failSave=false;
+      await send("Emulation.setDeviceMetricsOverride", {width:mode === "mobile" ? 390 : 1280,height:1000,deviceScaleFactor:1,mobile:false});
+      await send("Emulation.setEmulatedMedia", {features:[{name:"prefers-reduced-motion",value:mode === "reduced-motion" ? "reduce" : "no-preference"}]});
+      await evaluate("window.__wandFixtureBeforeNavigation = true");
+      await send("Page.navigate", {url:origin+(mode === "rollback" ? "/?reactUi=0" : mode === "native" ? "/?native" : "/")});
+      await wait("!window.__wandFixtureBeforeNavigation && document.readyState === 'complete'");
+      await send("Page.bringToFront"); await wait('!!document.querySelector("#settings-host")');
+      assert.equal(await evaluate('document.querySelector("#settings-host").classList.contains("ant-input")'),true);
+      await enter("#settings-host","draft.example"); failSave=true;
+      await clickText("保存基本配置"); await wait('document.body.innerText.includes("保存失败，草稿已保留")');
+      assert.equal(await evaluate('document.querySelector("#settings-host").value'),"draft.example",`${mode}: rejected save retains input`);
+      failSave=false; holdSave=true;
+      const saveCount=commands.length;
+      const saveRect=await evaluate("(()=>{let r=document.querySelector('.wand-settings-library-save-bar button').getBoundingClientRect();return {width:r.width,height:r.height}})()");
+      await click('.wand-settings-library-save-bar button');
+      for(let i=0;i<100&&commands.length===saveCount;i++) await pause(20);
+      assert.ok(releaseSave,"save is in flight");
+      const pendingRect=await evaluate("(()=>{let r=document.querySelector('.wand-settings-library-save-bar button').getBoundingClientRect();return {width:r.width,height:r.height}})()");
+      assert.ok(Math.abs(pendingRect.width-saveRect.width)<0.5 && Math.abs(pendingRect.height-saveRect.height)<0.5,`${mode}: save button keeps size while pending (within modal animation subpixels)`);
+      await enter("#settings-host","newer.example");
+      holdSave=false; releaseSave(); releaseSave=undefined;
+      await wait('document.body.innerText.includes("基本配置已保存")');
+      assert.equal(await evaluate('document.querySelector("#settings-host").value'),"newer.example",`${mode}: late receipt retains newer draft`);
+      const coverage: Array<Record<string,unknown>>=[];
+      for (const tab of tabs) {
+        await clickText(tab,"tab"); await pause(140);
+        assert.equal(await evaluate(`!!document.querySelector('[role="tabpanel"]:not([aria-hidden="true"]) .wand-settings-library-panel')`),true,`${mode}: ${tab}`);
+        coverage.push({tab,...await evaluate(`({legacyControls:document.querySelectorAll('.wand-settings-input,.wand-settings-field,.wand-settings-section,.wand-model-group-disclosure,.wand-settings-range').length,antCards:document.querySelectorAll('.ant-card').length})`)});
+        if (mode === "desktop" || mode === "mobile") {
+          await evaluate("document.querySelector('.ant-tabs-body-holder').scrollTop=0");
+          // Mask credentials and connection artifacts even when this fixture contains no real ones.
+          await evaluate(`(()=>{const s=document.createElement('style');s.id='settings-redact';s.textContent='input[type=password],.wand-settings-library-connect-code,[data-testid=settings-connect-qr]{visibility:hidden!important}';document.head.append(s)})()`);
+          const shot=await send("Page.captureScreenshot",{format:"png"});mkdirSync(artifact,{recursive:true});
+          writeFileSync(join(artifact,`settings-${mode}-${tabs.indexOf(tab)}.png`),Buffer.from(shot.data,"base64"));
+          await evaluate('document.getElementById("settings-redact").remove()');
+        }
+      }
+      await clickText("基本配置","tab");
+      await clickText("查看将注入的环境变量"); await wait('!!document.querySelector("[data-testid=settings-environment-dialog] .ant-table")');
+      await click('[data-testid=settings-environment-dialog] [aria-label="搜索变量名"]');
+      await key("Escape"); await wait('!document.querySelector("[data-testid=settings-environment-dialog]")');
+      assert.equal(await evaluate('!!document.querySelector("[data-testid=settings-dialog]")'),true,`${mode}: nested Escape`);
+      await clickText("AI 与模型","tab");
+      await click('[aria-label="Claude 默认模型"]'); await wait('!!document.querySelector(".wand-ui-select-content input")');
+      await click('.wand-ui-select-content input'); await send("Input.insertText",{text:"备用"});
+      await wait('document.querySelectorAll(".wand-ui-select-content [role=option]").length===1');
+      await click('.wand-ui-select-content [role=option]');
+      assert.equal(await evaluate('!!document.querySelector("[data-testid=settings-dialog]")'),true,`${mode}: option portal stays owned`);
+      await clickText("保存 AI 与模型配置"); await wait('document.body.innerText.includes("AI 与模型配置已保存")');
+      assert.equal(commands.at(-1)!.value.defaultModel,"second");
+      assert.equal(commands.at(-1)!.value.defaultCodexModel,"codex-first",`${mode}: other provider choice retained`);
+      await click('.ant-collapse-header'); await wait(`!!document.querySelector('[aria-label="下移模型 1"]')`);
+      await click('[aria-label="下移模型 1"]');
+      await wait("document.querySelector('.wand-settings-library-group-members li')?.textContent.includes('备用模型')");
+      await wait("Array.from(document.querySelectorAll('button')).find(n=>n.innerText.trim()==='保存模型分组')?.disabled === false");
+      await clickText("保存模型分组");
+      try { await wait('document.body.innerText.includes("模型分组与顺序已保存")'); }
+      catch { throw new Error(`${mode}: group save did not settle; commands=${commands.length}; last=${commands.at(-1)?.value.modelGroups ? "modelGroups.save" : "other"}; alerts=${await evaluate("Array.from(document.querySelectorAll('.ant-alert')).map(n=>n.innerText).join('|')")}`); }
+      assert.equal(commands.at(-1)!.value.modelGroups[0].models[0],"second");
+      await click('.ant-collapse-header');
+      await wait(`(()=>{const n=document.querySelector('[aria-label="下移模型 1"]');return !n||n.getBoundingClientRect().height===0})()`);
+      // Restore the fixture order for the next mode, without invoking any real service.
+      config.modelGroups[0].models=["first","second"];
+      await clickText("基本配置","tab");
+      assert.equal(await evaluate('document.querySelector("#settings-host").value'),"newer.example",`${mode}: unrelated model save retains draft`);
+      await clickText("AI 与模型","tab");
+      await enter("#settings-openrouter-key","local-fixture-input"); await clickText("保存并同步");
+      await wait('document.body.innerText.includes("本地验证失败")');
+      assert.equal(await evaluate('document.querySelector("#settings-openrouter-key").value.length>0'),true,`${mode}: credential draft retained on failure`);
+      await clickText("通知","tab"); await wait('!!document.querySelector(".ant-slider")');
+      await click('.ant-slider-handle');
+      await wait(`document.querySelector('.ant-slider-handle').getAttribute('aria-disabled')!=='true'`);
+      const volumeBefore=Number(await evaluate(`document.querySelector('.ant-slider-handle').getAttribute('aria-valuenow')`));
+      await key("ArrowRight");
+      await wait(`document.querySelector('.ant-slider-handle').getAttribute('aria-valuenow')==='${Math.min(100,volumeBefore+5)}'`);
+      await clickText("我的资料","tab");
+      await enter("#settings-profile-name","赛博虎妞");
+      await click('[aria-label="上传头像图片"]').catch(() => {});
+      await click('.wand-team-coat[aria-pressed]');
+      await clickText("保存资料");
+      try { await wait('document.body.innerText.includes("资料已保存")'); }
+      catch { throw new Error(`${mode}: profile save did not settle; last=${JSON.stringify(commands.at(-1)?.value.userProfile)}; alerts=${await evaluate("Array.from(document.querySelectorAll('.ant-alert')).map(n=>n.innerText).join('|')")}`); }
+      assert.equal(commands.at(-1)!.value.userProfile.name,"赛博虎妞",`${mode}: profile name submitted trimmed`);
+      assert.match(String(commands.at(-1)!.value.userProfile.avatar),/^(cat:\d+|data:image\/)/,`${mode}: profile avatar submitted as picked`);
+      await clickText("安全","tab");
+      assert.equal(await evaluate('document.querySelectorAll(".ant-upload input[type=file]").length'),2,`${mode}: local controlled Upload`);
+      await clickText("关于","tab"); await clickText("检查更新"); await wait('document.body.innerText.includes("版本检查完成")');
+      const result = await evaluate(`({antInputs:document.querySelectorAll('.ant-input,.ant-input-number').length,antCards:document.querySelectorAll('.ant-card').length,overflow:document.documentElement.scrollWidth>innerWidth,legacy:document.querySelectorAll('.wand-settings-input,.wand-settings-field,.wand-settings-section,.wand-settings-dialog,.wand-model-group-disclosure,.wand-settings-range').length})`);
+      assert.equal(result.legacy,0); assert.equal(result.overflow,false,`${mode}: no horizontal overflow`);
+      evidence.push({mode,tabs,coverage,...result,interactions:["failed general save retains draft","late save receipt retains newer draft","unrelated model save retains general draft","search and option Portal","nested Escape","all provider choices retained","model group order save","OpenRouter failure retains draft","keyboard Slider","controlled Upload","update check"]});
+      if (mode === "desktop" || mode === "mobile") { const shot=await send("Page.captureScreenshot",{format:"png"});mkdirSync(artifact,{recursive:true});writeFileSync(join(artifact,`settings-${mode}.png`),Buffer.from(shot.data,"base64")); }
+      await key("Escape"); await wait('!document.querySelector("[data-testid=settings-dialog]")');
+      access="read-only";
+      await evaluate('settingsHarness.open("general")');
+      await wait('!!document.querySelector("#settings-admin-password")');
+      assert.equal(await evaluate('document.querySelectorAll("[role=tab]").length'),2,`${mode}: connected App permissions`);
+      assert.equal(await evaluate('!!document.querySelector("#settings-host")'),false);
+      // Respect the shared modal's trailing outside-press guard after reopening.
+      await pause(550);
+      for(const type of ["mousePressed","mouseReleased"]) await send("Input.dispatchMouseEvent",{type,x:5,y:5,button:"left",clickCount:1});
+      await wait('!document.querySelector("[data-testid=settings-dialog]")');
+    }
+    assert.deepEqual(browserErrors,[],"no browser runtime exceptions");
+    mkdirSync(artifact,{recursive:true});
+    writeFileSync(join(artifact,"settings-browser.json"),JSON.stringify({passed:true,evidence,scope:"Current production SettingsHost and HTTP repository in real Chrome with local API fixtures. Installed service/native host acceptance remains integration-owned."},null,2));
+  } catch(error) {
+    mkdirSync(artifact,{recursive:true});writeFileSync(join(artifact,"settings-browser.json"),JSON.stringify({passed:false,evidence,error:String(error),browserErrors},null,2));throw error;
+  } finally {
+    socket?.close(); if(chrome.exitCode===null){const stopped=once(chrome,"exit");chrome.kill();await stopped;}
+    server.close();rmSync(temporary,{recursive:true,force:true,maxRetries:8,retryDelay:100});
+  }
+});

@@ -52,14 +52,18 @@ function harness(overrides: Partial<UnifiedExecutionSubjectPickerProps> = {}) {
     ...React,
     useState: (initial: unknown) => [typeof initial === "function" ? (initial as () => unknown)() : initial, () => {}],
     useEffect: () => {},
+    useLayoutEffect: () => {},
     useMemo: (fn: () => unknown) => fn(),
     useRef: (initial: unknown) => ({ current: initial }),
   };
   const dependencies: Record<string, unknown> = {
+    antd: { Radio: Object.assign(() => null, { Group: () => null }), Segmented: () => null, Alert: () => null, Spin: () => null, Flex: () => null, Form: { Item: () => null }, Typography: { Text: () => null, Paragraph: () => null } },
+    "../theme": { WandUiBoundary: () => null },
+    "../shell/sidebar-styles": { installSidebarStyles: () => {} },
     react,
     "react/jsx-runtime": jsxRuntime,
     "../agents/employee-avatar.js": { EmployeeAvatar: () => null },
-    "../ui": { WandIcon: () => null, WandSelect: () => null },
+    "../ui": { WandIcon: () => null, WandSelect: () => null, WandButton: () => null },
     "../provider-logo.js": { ProviderLogo: () => null },
     "../provider-usage.js": { sortProviderOptions, useProviderUsage: () => ({}) },
     "../new-session/choice-navigation.js": { nextChoice },
@@ -86,67 +90,63 @@ function harness(overrides: Partial<UnifiedExecutionSubjectPickerProps> = {}) {
     requestAnimationFrame: (callback: () => void) => callback(),
   });
 
-  function radios(): Map<string, Radio> {
-    const result = new Map<string, Radio>();
+  const ant = dependencies.antd as any;
+  function projection() {
+    const radios = new Map<string, React.ReactElement<any>>();
+    let subject: React.ReactElement<any> | undefined;
+    let kind: React.ReactElement<any> | undefined;
     function visit(node: React.ReactNode): void {
-      React.Children.forEach(node, (child) => {
-        if (!React.isValidElement<{ role?: string; children?: React.ReactNode }>(child)) return;
-        if (child.props.role === "radio") {
-          const radio = child as Radio;
-          const key = String(child.key);
-          result.set(key, radio);
-          radio.props.ref?.({ focus: () => { focused = key; } });
-        }
+      React.Children.forEach(node, child => {
+        if (!React.isValidElement<any>(child)) return;
+        if (child.type === ant.Radio) radios.set(String(child.key), child);
+        if (child.type === ant.Radio.Group) subject = child;
+        if (child.type === ant.Segmented) kind = child;
         visit(child.props.children);
       });
     }
     visit(exports.UnifiedExecutionSubjectPicker(props));
-    return result;
+    return { radios, subject: subject!, kind: kind! };
   }
-
-  function key(current: string, value: string): boolean {
-    let prevented = false;
-    radios().get(current)!.props.onKeyDown({ key: value, preventDefault: () => { prevented = true; } });
-    return prevented;
+  function choose(id: string) {
+    const current = projection();
+    const choice = current.radios.get(id)!;
+    if (current.subject.props.disabled || choice.props.disabled) return;
+    current.subject.props.onChange({ target: { value: choice.props.value } });
   }
-  return { props, changes, radios, key, focused: () => focused };
+  return { props, changes, projection, choose };
 }
 
-test("structured subjects offer active employees, teams and CLI with keyboard navigation", () => {
+test("structured subjects use the library radio group with real employee/team/CLI identities", () => {
   const h = harness();
-  const radios = h.radios();
+  const { radios, subject, kind } = h.projection();
   assert.ok(radios.has("e1"));
   assert.equal(radios.has("e2"), false, "archived employees are not assignable");
-  assert.ok(radios.has("t1"));
-  assert.ok(radios.has("claude"));
-  assert.equal(h.key("claude", "Home"), true);
-  assert.equal(h.changes.at(-1), "employee:e1");
-  assert.equal(h.focused(), "e1");
-  assert.equal(h.key("e1", "ArrowRight"), true);
-  assert.equal(h.changes.at(-1), "team:t1");
-  assert.equal(h.focused(), "t1");
+  assert.ok(radios.has("t1")); assert.ok(radios.has("claude"));
+  assert.equal(subject.props["aria-label"], "执行主体");
+  assert.equal(subject.props.value, "cli:claude");
+  assert.equal(kind.props["aria-label"], "会话类型");
+  h.choose("e1"); h.choose("t1");
+  assert.deepEqual(h.changes, ["employee:e1", "team:t1"]);
+  // Ant owns roving radio/Segmented keyboard navigation; the production sidebar Chrome gate verifies it.
 });
 
 test("PTY switches employee back to CLI and hides employee and team choices", () => {
   const h = harness({ selectedSubject: { type: "employee", id: "e1" } });
-  h.radios().get("pty")!.props.onClick();
+  h.projection().kind.props.onChange("pty");
   assert.deepEqual(h.changes, ["pty", "cli:claude"]);
-  assert.equal(h.props.kind, "pty");
-  const radios = h.radios();
-  assert.equal(radios.has("e1"), false);
-  assert.equal(radios.has("t1"), false);
+  const { radios, kind } = h.projection();
+  assert.equal(kind.props.value, "pty");
+  assert.equal(radios.has("e1"), false); assert.equal(radios.has("t1"), false);
   assert.ok(radios.has("claude"));
-  assert.equal(h.key("structured", "End"), true);
-  assert.equal(h.props.kind, "pty");
 });
 
-test("disabled and project-blocked choices cannot enter the keyboard sequence", () => {
+test("disabled and project-blocked choices cannot change the selected execution identity", () => {
   const blocked = harness({ teamWorkspaceId: "" });
-  assert.equal(blocked.radios().get("t1")!.props.disabled, true);
-  assert.equal(blocked.key("e1", "ArrowRight"), true);
-  assert.match(blocked.changes.at(-1) ?? "", /^cli:(claude|codex|shell)$/);
+  assert.equal(blocked.projection().radios.get("t1")!.props.disabled, true);
+  blocked.choose("t1"); assert.deepEqual(blocked.changes, []);
   const disabled = harness({ disabled: true });
-  assert.equal(disabled.key("claude", "ArrowRight"), false);
-  assert.equal(disabled.radios().get("claude")!.props.disabled, true);
+  assert.equal(disabled.projection().subject.props.disabled, true);
+  assert.equal(disabled.projection().kind.props.disabled, true);
+  disabled.choose("claude"); disabled.projection().kind.props.onChange("pty");
   assert.deepEqual(disabled.changes, []);
 });

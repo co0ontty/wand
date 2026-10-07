@@ -1,4 +1,5 @@
 import * as React from "react";
+import { Tag } from "antd";
 import {
   SYSTEM_EMPLOYEE_ID,
   SYSTEM_EMPLOYEE_NAME,
@@ -30,28 +31,28 @@ export function SystemAiOwnerSummary({
   const name = employee?.name ?? SYSTEM_EMPLOYEE_NAME;
   const agents = employee?.agents ?? [];
   return (
-    <div className="wand-settings-system-ai-owner" aria-label="系统 AI 执行者">
+    <div className="wand-settings-library-system-ai-owner" aria-label="系统 AI 执行者">
       <EmployeeAvatar
         employee={employee ?? { id: SYSTEM_EMPLOYEE_ID, name: SYSTEM_EMPLOYEE_NAME, avatar: "" }}
         size="sm"
       />
-      <div className="wand-settings-system-ai-owner-copy">
+      <div className="wand-settings-library-system-ai-owner-copy">
         <strong>
           {name}
-          <em className="wand-employee-system-tag">{SYSTEM_EMPLOYEE_TAG}</em>
+          <Tag>{SYSTEM_EMPLOYEE_TAG}</Tag>
         </strong>
-        <ol className="wand-settings-system-ai-chain" aria-label="执行候选顺序">
+        <ol className="wand-settings-library-system-ai-chain" aria-label="执行候选顺序">
           {agents.length > 0 ? agents.map((agent, index) => (
             <li key={`${agent.provider}-${agent.model}-${index}`}>
-              <span className="wand-settings-route-rank" aria-label={`优先 ${index + 1}`}>
+              <span className="wand-settings-library-route-rank" aria-label={`优先 ${index + 1}`}>
                 {String(index + 1).padStart(2, "0")}
               </span>
               {providerLabel(agent.provider)}
               {agent.model && agent.model !== "default" ? ` · ${agent.model}` : " · 默认模型"}
             </li>
-          )) : <li className="wand-settings-system-ai-chain-empty">正在读取执行候选…</li>}
+          )) : <li className="wand-settings-library-system-ai-chain-empty">正在读取执行候选…</li>}
         </ol>
-        <span className="wand-settings-system-ai-hint">
+        <span className="wand-settings-library-system-ai-hint">
           名字、职责与角色设定由服务端固定；候选与顺序在「AI 团队 → 硅基员工 → {name}」里调整。
         </span>
       </div>

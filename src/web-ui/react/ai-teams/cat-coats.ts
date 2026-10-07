@@ -48,7 +48,7 @@ export function catCoatGrid(coat: number): string[][] {
   ];
 }
 
-function hashIndex(seed: string, mod: number): number {
+export function hashIndex(seed: string, mod: number): number {
   let hash = 0;
   for (let at = 0; at < seed.length; at += 1) hash = ((hash << 5) - hash + seed.charCodeAt(at)) | 0;
   return Math.abs(hash) % mod;

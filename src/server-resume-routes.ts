@@ -107,7 +107,7 @@ const STRUCTURED_RESUME_SPECS: Array<{ path: string; param: string; spec: Struct
     path: "/api/pi-sessions/:nativeId/resume",
     param: "nativeId",
     spec: {
-      label: "Pi",
+      label: "one 的 Agent",
       provider: "pi",
       runner: "pi-cli-json",
       nativeIdKey: "claudeSessionId",

@@ -36,8 +36,8 @@ test("delivery details use bounded server previews, old files keep identity, all
     totalFiles: 25, totalHandoffs: 8,
   };
   const bounded = renderToStaticMarkup(React.createElement(TeamDeliveryDetails, { delivery: oversized }));
-  assert.equal((bounded.match(/class="team-delivery-file"/g) ?? []).length, 20);
-  assert.equal((bounded.match(/class="team-delivery-handoff"/g) ?? []).length, 6);
+  assert.equal((bounded.match(/class="[^"]*ant-file-card [^"]*"/g) ?? []).length, 20);
+  assert.equal((bounded.match(/class="[^"]*\bteam-delivery-handoff\b[^"]*"/g) ?? []).length, 6);
 });
 
 test("merge preserves fresh delivery against stale run, old timestamp, absent field and late partial same snapshot", () => {
@@ -167,7 +167,10 @@ test("delivery is chunk-owned and disclosure/request guards keep canonical DOM a
   assert.match(panel, /next\.run\.id !== latestId/);
   assert.match(read("scripts/ai-teams-chunk.js"), /"ai-teams", "team-delivery\.tsx"/);
   assert.doesNotMatch(read("src/web-ui/react/ai-teams/lazy.tsx"), /import.*team-delivery/);
-  const styles = read("src/web-ui/react/ai-teams/styles.ts");
-  assert.match(styles, /\.team-delivery-body.*var\(--motion-normal\).*var\(--ease-in-out-smooth\)/);
-  assert.match(styles, /\.team-delivery-body, \.team-delivery-trigger > svg, \.team-chat-details \{ transition: none; \}/);
+  assert.match(component, /<Collapse ghost bordered=\{false\} activeKey=\{open \? \["delivery"\] : \[\]\}/);
+  assert.match(component, /forceRender: true/);
+  assert.match(component, /inert=\{!open\}/);
+  assert.match(component, /event\.key === "Escape" && open/);
+  assert.match(component, /trigger\.current\?\.focus\(\)/);
+  assert.doesNotMatch(read("src/web-ui/react/ai-teams/styles.ts"), /\.team-delivery-(?:body|trigger|inner)\s*\{/);
 });

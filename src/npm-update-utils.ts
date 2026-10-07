@@ -35,6 +35,7 @@ import {
 import path from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
+import { buildChildEnv } from "./env-utils.js";
 import { whichSync } from "./path-repair.js";
 import { getErrorMessage } from "./error-utils.js";
 import { compareWandInstallOrder, extractSemver } from "./version-utils.js";
@@ -171,7 +172,7 @@ function getChildEnv(): NodeJS.ProcessEnv {
     pathEntries.push(entry);
   }
   return {
-    ...process.env,
+    ...buildChildEnv(true),
     PATH: pathEntries.join(path.delimiter),
   };
 }

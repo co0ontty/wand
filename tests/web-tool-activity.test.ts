@@ -27,7 +27,7 @@ test("tool activity counts distinct files and groups their calls for on-demand d
 test("timeline preserves mixed invocation order and separate calls to the same file", () => {
   const blocks = [
     { type: "tool_use", id: "read", activity: { kind: "read_file", fileKey: "same" } },
-    { type: "thinking" },
+    { type: "thinking", thinking: "reasoning" },
     { type: "tool_use", id: "edit", activity: { kind: "edit_file", fileKey: "same" } },
     { type: "tool_use", id: "run", activity: { kind: "run_command" } },
     { type: "tool_use", id: "edit-again", activity: { kind: "edit_file", fileKey: "same" } },
@@ -36,6 +36,14 @@ test("timeline preserves mixed invocation order and separate calls to the same f
   const calls = toolActivityTimeline(blocks.map((block, index) => ({ block, index })));
   assert.deepEqual(calls.map(call => call.index), [0, 1, 2, 3, 4]);
   assert.equal(groupToolActivities(calls).edit_file.length, 1, "summary still counts distinct files");
+  // 没有产出正文的轮次不是条目；只有段尾那一块留着当进行中的占位。
+  const withBlank = [
+    { type: "tool_use", id: "read", activity: { kind: "read_file", fileKey: "same" } },
+    { type: "thinking", thinking: "" },
+    { type: "thinking", thinking: "有正文" },
+  ];
+  assert.deepEqual(toolActivityTimeline(withBlank.map((block, index) => ({ block, index })))
+    .map(call => call.index), [0, 2]);
 });
 
 test("only ordinary activity turns bypass the outer reply disclosure", () => {

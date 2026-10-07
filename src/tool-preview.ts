@@ -1,4 +1,5 @@
 import type { ContentBlock, ToolResultBlock, ToolUseBlock } from "./types.js";
+import { contentHasStructuredImage, isStructuredImagePart } from "./structured-content.js";
 
 export const TOOL_PREVIEW_LIMIT = 180;
 
@@ -94,7 +95,13 @@ export function toolResultPreview(result: Pick<ToolResultBlock, "content" | "is_
   const raw = typeof result.content === "string" ? result.content : result.content
     .filter(part => part.type === "text" && typeof part.text === "string")
     .slice(0, 3).map(part => part.text as string).join("\n");
-  if (!raw.trim()) return "";
+  if (!raw.trim()) {
+    if (Array.isArray(result.content) && contentHasStructuredImage(result.content)) {
+      const count = result.content.filter(isStructuredImagePart).length;
+      return compactPreviewText(count > 1 ? `返回 ${count} 张图片` : "返回 1 张图片");
+    }
+    return "";
+  }
   let text = raw;
   let exit = "";
   if (raw.length <= 65_536 && /^\s*[{[]/.test(raw)) {

@@ -1,3 +1,4 @@
+import { clearNoticeView, paintNotificationNotice, paintUpdateNotice } from "./notice-view-adapter";
 import { state, writeStoredBoolean } from "./state";
 import { WAND_FAVICON_URL } from "../brand-identity.js";
 import { HttpResponseError, parseJsonResponse } from "../react/http-adapter";
@@ -9,12 +10,14 @@ import { setFilePanelOpen, isMobileLayout, isSidebarDrawerLayout } from "./file-
 import { render } from "./render";
 import { selectSession, closeSessionsDrawer } from "./session-engine";
 import "./session-ui";
-import { openReactLegacyDialog, showReactLegacyToast } from "../react/legacy-overlays";
+import { openOwnedLegacyDialog, openReactLegacyDialog, showReactLegacyToast } from "../react/legacy-overlays";
+import { closeOwnedDialog } from "../react/owned-dialog";
 import {
   restartOverlayController,
   showAutoUpdate as showReactAutoUpdate,
   showRestart as showReactRestart,
 } from "../react/restart-overlay/controller";
+import { piExecutionController } from "../react/pi-execution/controller";
 import { imageViewerController } from "../react/image-viewer/controller";
 
 // TODO: import from correct modules when created
@@ -93,35 +96,8 @@ export function showToast(message: string, type?: string) {
 export function openWandDialog(opts: any) {
   opts = opts || {};
   var reactDialog = openReactLegacyDialog(opts);
-  if (reactDialog) return reactDialog;
-  return openNativeWandDialog(opts);
-}
-
-function openNativeWandDialog(opts: any): Promise<any> {
-  var title = opts.title == null ? "" : String(opts.title);
-  var message = opts.message == null ? "" : String(opts.message);
-  var text = title && message ? title + "\n\n" + message : title || message;
-  var buttons = Array.isArray(opts.buttons) && opts.buttons.length
-    ? opts.buttons
-    : [{ label: "好", value: true, kind: "primary" }];
-
-  if (opts.input) {
-    return Promise.resolve(window.prompt(text, opts.inputValue == null ? "" : String(opts.inputValue)));
-  }
-
-  if (buttons.length <= 1) {
-    window.alert(text);
-    return Promise.resolve(buttons[0]?.value);
-  }
-
-  var accepted = window.confirm(text);
-  if (!accepted) {
-    return Promise.resolve(opts.cancelValue !== undefined ? opts.cancelValue : false);
-  }
-  var primary = buttons.find(function(button: any) {
-    return button.kind === "primary" || button.kind === "danger";
-  }) || buttons[buttons.length - 1];
-  return Promise.resolve(primary.value);
+  if (reactDialog) return reactDialog.catch(function() { return openOwnedLegacyDialog(opts); });
+  return openOwnedLegacyDialog(opts);
 }
 
 /**
@@ -178,7 +154,7 @@ export function wandConfirm(message: any, options?: any) {
  * @param {object} [options] - { title, placeholder, okLabel, cancelLabel }
  * @returns {Promise<string|null>}
  */
-export function wandPrompt(message: any, defaultValue?: any, options?: any) {
+export function wandPrompt(message: any, defaultValue?: any, options?: any): Promise<string | null> {
   options = options || {};
   return openWandDialog({
     title: options.title || "请输入",
@@ -193,7 +169,7 @@ export function wandPrompt(message: any, defaultValue?: any, options?: any) {
       { label: options.cancelLabel || "取消", value: null, kind: "secondary" },
       { label: options.okLabel || "确定", value: undefined, kind: "primary" },
     ],
-  });
+  }).then(function(value) { return value == null ? null : String(value); });
 }
 
 // Expose globally for ad-hoc use from inline handlers / future code
@@ -233,34 +209,14 @@ export function showNotificationBubble(opts: any) {
 
   var id = ++notificationIdCounter;
   var type = opts.type || "info";
-  var iconName = type === "warning" ? "warning" : type === "success" ? "check" : "info";
-  var icon = iconSvg(iconName, { size: 14, strokeWidth: 1.8 });
   var duration = opts.duration !== undefined ? opts.duration : 8000;
 
   var bubble = document.createElement("div");
   bubble.className = "notification-bubble";
   bubble.setAttribute("data-nid", String(id));
 
-  var headerHtml =
-    '<div class="notification-bubble-header">' +
-      '<span class="notification-bubble-icon ' + type + '">' + icon + '</span>' +
-      '<span class="notification-bubble-title">' + escapeHtml(opts.title) + '</span>' +
-      // × 没有可见文本，只有 title 时读屏念不出动作（WCAG 2.2 AA 4.1.2）。
-      '<button class="notification-bubble-close" type="button" title="关闭" aria-label="关闭这条通知">×</button>' +
-    '</div>';
-
-  var bodyHtml = opts.body
-    ? '<div class="notification-bubble-body">' + escapeHtml(opts.body).replace(/\n/g, '<br>') + '</div>'
-    : '';
-
-  var actionsHtml = opts.actionLabel
-    ? '<div class="notification-bubble-actions">' +
-        '<button class="primary">' + escapeHtml(opts.actionLabel) + '</button>' +
-      '</div>'
-    : '';
-
-  bubble.innerHTML = headerHtml + bodyHtml + actionsHtml;
   document.body.appendChild(bubble);
+  paintNotificationNotice(bubble, opts);
 
   // Stack position
   var entry = { id: id, el: bubble };
@@ -301,6 +257,7 @@ function dismissNotification(id: number) {
   notificationStack.splice(idx, 1);
   repositionNotifications();
   setTimeout(function() {
+    clearNoticeView(entry.el);
     if (entry.el.parentNode) entry.el.parentNode.removeChild(entry.el);
   }, 300);
 }
@@ -657,6 +614,7 @@ export function clearSessionProgressNative(sessionId: string) {
   // Restart/update is intentionally non-dismissable. Consume the native back
   // action so the WebView cannot reveal a half-restarted application state.
   if (restartOverlayController.isOpen()) return true;
+  if (closeOwnedDialog()) return true;
   var reactOverlay = (window as any).__wandReactUi;
   if (reactOverlay && typeof reactOverlay.closeTopmost === "function") {
     try {
@@ -669,6 +627,7 @@ export function clearSessionProgressNative(sessionId: string) {
       if (reactFilePreview.closeTopmost()) return true;
     } catch (_e) {}
   }
+  if (piExecutionController.closeIfOpen()) return true;
   if (imageViewerController.closeIfOpen()) return true;
   var reactQuickCommit = (window as any).__wandReactQuickCommit;
   if (reactQuickCommit && typeof reactQuickCommit.closeTopmost === "function") {
@@ -792,42 +751,8 @@ function showUpdateBubble(currentVer: string, latestVer: string) {
   card.className = "notification-bubble update-card";
   card.setAttribute("data-nid", String(id));
 
-  card.innerHTML =
-    '<div class="update-card-shine" aria-hidden="true"></div>' +
-    '<div class="update-card-header">' +
-      '<div class="update-card-icon" aria-hidden="true">' +
-        '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' +
-          '<path d="M12 19V5"/><path d="M5 12l7-7 7 7"/>' +
-        '</svg>' +
-      '</div>' +
-      '<div class="update-card-heading">' +
-        '<div class="update-card-title">发现新版本</div>' +
-        '<div class="update-card-subtitle" id="update-card-subtitle">点击下方按钮一键更新</div>' +
-      '</div>' +
-      '<button class="update-card-close" title="稍后提醒" aria-label="关闭">' +
-        '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' +
-          '<path d="M18 6L6 18"/><path d="M6 6l12 12"/>' +
-        '</svg>' +
-      '</button>' +
-    '</div>' +
-    '<div class="update-card-version">' +
-      '<span class="update-card-version-chip update-card-version-current">v' + escapeHtml(String(currentVer).replace(/^v/, "")) + '</span>' +
-      '<svg class="update-card-version-arrow" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-        '<path d="M5 12h14"/><path d="M13 5l7 7-7 7"/>' +
-      '</svg>' +
-      '<span class="update-card-version-chip update-card-version-latest">v' + escapeHtml(String(latestVer).replace(/^v/, "")) + '</span>' +
-    '</div>' +
-    '<div class="update-card-progress" id="update-card-progress" aria-hidden="true">' +
-      '<div class="update-card-progress-track"><div class="update-card-progress-fill"></div></div>' +
-    '</div>' +
-    '<div class="update-card-status hidden" id="update-card-status"></div>' +
-    '<div class="update-card-actions">' +
-      '<button class="update-card-action update-card-action-primary" id="update-bubble-action" type="button">' +
-        '<span class="update-card-action-label">立即更新</span>' +
-      '</button>' +
-    '</div>';
-
   document.body.appendChild(card);
+  paintUpdateNotice(card, currentVer, latestVer);
 
   var entry = { id: id, el: card };
   notificationStack.push(entry);

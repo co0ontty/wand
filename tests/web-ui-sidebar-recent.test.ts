@@ -83,7 +83,7 @@ test("会话归属：员工 > 群聊团队 > 派发步骤团队 > PTY 终端 > �
   );
 });
 
-test("只有真有会话的归属才出现，员工只有一条会话时不套空壳组头", () => {
+test("只有真有会话的归属才出现，单会话员工也保留身份头", () => {
   const groups = groupsOf({
     tasks: [{ id: "task-1", name: "对齐安卓", sessions: [session({ id: "s1", employeeId: "e_a", title: "对齐安卓" })] }],
     standalone: [session({ id: "s2", employeeId: "e_b", title: "看文档" })],
@@ -91,7 +91,7 @@ test("只有真有会话的归属才出现，员工只有一条会话时不套�
   const recent = recentConversationGroups(collectRecentEntries(groups), { employees: EMPLOYEES });
   assert.deepEqual(recent.map((group) => group.title), ["赛博虎妞", "石一"]);
   for (const group of recent) {
-    assert.equal(group.showsHeader, false, "单条会话的员工组不画一级行");
+    assert.equal(group.showsHeader, true, "数量与筛选不改变员工身份头");
     assert.equal(group.entries.length, 1);
   }
   // 没有任何会话的员工不出现在列表里。

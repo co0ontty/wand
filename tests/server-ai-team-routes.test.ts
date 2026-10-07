@@ -352,11 +352,21 @@ test("GET /api/ai-team-runs/:id/live returns running steps and 404s unknown runs
   // 模型与思考深度是给候选真值，客户端才有东西可显示；路由不另挑字段。
   assert.equal(step.model, "default");
   assert.equal(typeof step.thinkingEffort, "string");
+  // 开始与最近活动时间一并投影：长任务静默期客户端要能区分「还在跑」和「卡死了」。
+  assert.equal(step.startedAt, started.json.steps[0].startedAt);
+  assert.match(step.lastActivityAt, /^\d{4}-\d{2}-\d{2}T/);
   assert.deepEqual(Object.keys(step).sort(), [
-    "memberId", "memberName", "model", "omittedChars", "provider", "seq", "sessionId",
-    "state", "stepId", "text", "thinkingEffort", "updatedAt",
+    "lastActivityAt", "memberId", "memberName", "model", "omittedChars", "provider", "seq", "sessionId",
+    "startedAt", "state", "stepId", "text", "thinkingEffort", "updatedAt",
   ], "/live 返回与 AiTeamLiveStep 逐字段一致");
   assert.match(step.updatedAt, /^\d{4}-\d{2}-\d{2}T/);
+  // 回包顶层带 run 级活动投影与状态，轮询端不必再拉一次 detail。
+  assert.equal(live.json.status, "running");
+  assert.equal(live.json.activity.startedAt, started.json.run.createdAt);
+  assert.deepEqual(Object.keys(live.json.activity).sort(), ["lastActivityAt", "observedAt", "startedAt"]);
+  assert.match(live.json.activity.lastActivityAt, /^\d{4}-\d{2}-\d{2}T/);
+  const detail = await call(`${url}/api/ai-team-runs/${started.json.run.id}`, "GET");
+  assert.equal(detail.json.activity.startedAt, started.json.run.createdAt, "detail 同样投影活动时间");
 
   const missing = await call(`${url}/api/ai-team-runs/nope/live`, "GET");
   assert.equal(missing.status, 404);

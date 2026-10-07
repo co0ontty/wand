@@ -31,7 +31,7 @@ export interface IpcSnapshotData {
 
 export interface IpcRequest {
   id: string;
-  cmd: "snapshot" | "ping" | "shutdown";
+  cmd: "snapshot" | "ping" | "shutdown" | "core-status" | "core-drain";
 }
 
 export interface IpcResponseOk<T = unknown> {

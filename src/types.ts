@@ -96,6 +96,34 @@ export interface StructuredProcessConfig {
   processHost: "legacy" | "rust";
 }
 
+/**
+ * 结构化会话的 harness 引擎。`core` 在 Wand 进程内跑 agent loop（首期只支持 pi），
+ * `cli` 保留既有 CLI runner，`auto` 在 Pi 侧认证可用时选 core、否则回退 CLI。
+ * 与 `render.engine` 一样只切换执行所有权，存储与客户端契约不变。
+ */
+export type HarnessEngine = "auto" | "core" | "cli";
+
+/** 进程内 core 引擎的上下文预算；省略时用上游内置默认。 */
+export interface HarnessCompactionConfig {
+  /** 是否开启自动压缩（默认开启）。关闭后超长会话会直接报上下文超限。 */
+  enabled?: boolean;
+  /** 为模型回复预留的 token（默认 16384）。 */
+  reserveTokens?: number;
+  /** 压缩后保留的近期 token（默认 20000）。 */
+  keepRecentTokens?: number;
+}
+
+export interface HarnessConfig {
+  engine: HarnessEngine;
+  /**
+   * Pi 的 agent 目录（默认 `~/.pi/agent`）：core 引擎从这里读认证与模型目录。
+   * 与 Pi CLI 共用同一份登录态；隔离实例可指向别处。
+   */
+  agentDir?: string;
+  /** 新建 core 会话的默认上下文预算；单会话可在会话选项里覆盖。 */
+  compaction?: HarnessCompactionConfig;
+}
+
 export interface MacosDmgConfig {
   enabled?: boolean;
   dmgDir?: string;
@@ -147,6 +175,8 @@ export interface WandConfig {
   allowedCommandPrefixes: string[];
   commandPresets: CommandPreset[];
   structuredChatPersona?: StructuredChatPersonaConfig;
+  /** 用户自己的显示名与头像；会话里「我」这条发言的署名。DB 权威源 `pref:userProfile`。 */
+  userProfile?: import("./user-profile.js").UserProfileConfig;
   /** Max total size (bytes) for shortcut interaction logs per session (default: 10 MB). Set 0 to disable logging. */
   shortcutLogMaxBytes?: number;
   /** Preferred response language for Claude (e.g. "中文", "English"). Empty string means no override. */
@@ -158,12 +188,16 @@ export interface WandConfig {
   ios?: IosIpaConfig;
   /** Render（常驻 PTY 持有者）引擎选择。默认 auto。 */
   render?: RenderConfig;
+  /** 结构化会话 harness 引擎选择。默认 auto（Pi 侧认证可用时用进程内 core）。 */
+  harness?: HarnessConfig;
   /** Structured CLI process owner for new runs; default legacy. SDK stays in Node. */
   structured?: StructuredProcessConfig;
   /** Optional offline, inference-only local decision worker. Never a chat provider. */
   localDecision?: import("./decision-types.js").LocalDecisionConfig;
   /** Default expand/collapse state for card types in structured chat view */
   cardDefaults?: CardExpandDefaults;
+  /** 看板任务自动归档 / 自动删除。会话保留期不跟这里变。 */
+  taskRetention?: import("./task-retention.js").TaskRetentionSettings;
   /** 新建会话时默认使用的 Claude 模型（别名或完整 ID）。留空则不传 --model，由 claude 自行决定。 */
   defaultModel?: string;
   /** 新建 Codex 会话时默认使用的模型。留空则不传 --model，由 codex 自行决定。 */
@@ -178,6 +212,8 @@ export interface WandConfig {
   defaultPiModel?: string;
   /** 新建 Gemini 会话时默认使用的模型。留空则不传 --model，由 gemini 自行决定。 */
   defaultGeminiModel?: string;
+  /** 每工具的命名模型优先链。SQLite 偏好，稳定分组 ID 可用于会话/员工/默认值。 */
+  modelGroups?: import("./model-groups.js").ModelGroup[];
   /** 快捷提交生成 commit message / tag 时使用的 CLI。 */
   commitCli?: SessionProvider;
   /** 快捷提交专用模型。留空则跟随所选 CLI 的默认模型。 */
@@ -227,6 +263,8 @@ export interface ClaudeModelInfo {
   id: string;
   /** UI 显示的友好标签 */
   label: string;
+  /** 模型选择器的显示分组。 */
+  group?: string;
   /** 可选备注：例如 "当前默认"、"最新" */
   note?: string;
   /** 是否为别名（opus/sonnet 等）；完整 ID 为 false */
@@ -514,6 +552,9 @@ interface TextBlock {
 interface ThinkingBlock {
   type: "thinking";
   thinking: string;
+  /** Server observation times; absent for untimed historical reasoning. */
+  occurredAt?: string;
+  lastActivityAt?: string;
   __subagent?: SubagentMeta;
 }
 
@@ -564,6 +605,10 @@ type ToolUseSemantic =
   | { kind: "decision"; summary?: DecisionCardSummary };
 
 export interface ToolUseBlock {
+  /** Bounded facts supplied by the Pi executor; partial updates are not final results. */
+  execution?: import("./pi-execution-types.js").PiExecutionSnapshot;
+  /** Host-only reference to a run created by this invocation. */
+  piExecutionRef?: { runId: string; directory: string };
   type: "tool_use";
   id: string;
   name: string;
@@ -608,7 +653,7 @@ export interface ConversationAuthor {
   /** 团队成员 id；用户发言为 "user"。 */
   id: string;
   name: string;
-  /** 成员头像：上传的 data URL、"cat:<n>" 指定毛色，或空（按 id 哈希毛色）。 */
+  /** 成员头像：上传的 data URL、"cat:<n>" 指定毛色，或空（按身份生成一张脸）。 */
   avatar?: string;
   leader?: boolean;
   provider?: SessionProvider;
@@ -633,11 +678,30 @@ export interface TeamReportFile {
   preview?: { title: string; excerpt: string };
 }
 
+export interface ConversationSessionPreview {
+  status: "starting" | "running" | "waiting_user" | "done" | "failed" | "stopped" | "unavailable";
+  text: string;
+}
+
 export interface ConversationTurn {
+  /** Stable instance/target association. Legacy turns remain unchanged. */
+  messageId?: string;
+  requestId?: string;
+  conversationId?: string;
+  conversationTarget?: { taskId: string; runId: string } | null;
+  /** Legacy/explicit group task links remain readable; ordinary DMs link directly to a session. */
+  conversationLink?: { conversationId: string; taskId: string; title: string };
+  sessionLink?: { sessionId: string; title: string };
+  /** Read-only projection, not a second transcript. */
+  sessionPreview?: ConversationSessionPreview;
+  /** Bounded read-only task output, projected at read time; never stored as a second execution history. */
+  taskPreview?: { runId: string | null; status: "starting" | "running" | "awaiting_approval" | "waiting_user" | "done" | "failed" | "stopped" | "unavailable"; text: string };
   role: "user" | "assistant";
   content: ContentBlock[];
   author?: ConversationAuthor;
   reportFile?: TeamReportFile;
+  /** Per-round Pi resource choice; retained with history, never injected into model input. */
+  resourceSelection?: import("./pi-session-settings.js").PiResourceSelectionNotice;
   /** 群聊里的进度提示（派工、开始、出错）：渲染成居中的一行，不是气泡。 */
   notice?: boolean;
   /** ISO time when this turn was first recorded (user send / assistant start). */
@@ -665,8 +729,33 @@ export interface StructuredSessionState {
   lastError: string | null;
   inFlight: boolean;
   activeRequestId: string | null;
+  /**
+   * 本轮（一次用户输入触发的 assistant 回合）开始时刻。客户端据此算「这一轮已经跑了
+   * 多久」，刷新页面后依旧可读（随 structured_state 落库，不依赖本地挂载时刻）。
+   * 与 inFlight 同生命周期：回合开始 / daemon 领养时写入（领养保留真实起点），
+   * inFlight 清 false 的一切收敛路径（结束、失败、停止、中断、重启降级）置 null。
+   */
+  turnStartedAt?: string | null;
+  /**
+   * 本轮最近一次观测到活动（回合开始、输出 chunk、状态变化）的时刻，由服务端权威给出。
+   * 客户端用「服务端当前时刻 − lastActivityAt」显示「已 N 分钟无新消息」；静默期服务端
+   * 会按 TURN_QUIET_HEARTBEAT_MS 用 status 事件重发带该锚点的快照。同样只在 inFlight
+   * 期间非空，回合收敛时与 turnStartedAt 一起回 null，不残留「还在跑」的旧读数。
+   */
+  lastActivityAt?: string | null;
   /** Pi 已结束前台回复、但 CLI 仍在等待异步子任务收尾。 */
   phase?: "responding" | "background";
+  /**
+   * 本轮实际使用的执行引擎：`core` = Wand 进程内 harness（目前仅 pi），
+   * `cli` = 外部 CLI runner。决定重启后能否恢复：进程内回合不会比服务活得更久。
+   */
+  engine?: "core" | "cli";
+  /** 选择该引擎的原因；`auto` 降级回 CLI 时写在这里（可直接展示给用户）。 */
+  engineReason?: string;
+  /** 最近一次回合结束后的上下文占用（core 引擎能给才有）。 */
+  contextUsage?: import("./structured-runner.js").StructuredContextUsage;
+  /** 本会话累计发生的上下文压缩次数（core 引擎）。 */
+  compactions?: number;
 }
 
 export interface SessionSnapshot extends SessionCompletionState {
@@ -706,6 +795,15 @@ export interface SessionSnapshot extends SessionCompletionState {
    * 其余 provider 不产生该信号（undefined），客户端应回落到旧行为。
    */
   ptyBusy?: boolean;
+  /**
+   * PTY 本轮的时间锚点，语义与 structuredState.turnStartedAt / lastActivityAt 完全一致，
+   * 是 ptyBusy 的配套读数：turn 开始（或静默窗口被输出续期）时写入，ptyBusy 清 false
+   * 的一切路径（回复结束、CLI 退回提示符、进程退出、stop）一起置 null。
+   * 同样是运行时信号，不持久化（存储里没有对应列），服务重启后视为 null。
+   * 目前仅 Claude PTY（bridge）与非 Claude 前台采样能给出；其余 provider 为 undefined。
+   */
+  ptyTurnStartedAt?: string | null;
+  ptyLastActivityAt?: string | null;
   runner?: SessionRunner;
   command: string;
   cwd: string;
@@ -775,6 +873,34 @@ export interface SessionSnapshot extends SessionCompletionState {
   ptyOutputSeq?: number;
   /** Internal shell-wrapper marker needed to keep parsing a daemon-owned PTY after reattach. */
   ptyLaunchMarkerToken?: string | null;
+  /**
+   * core 引擎的上下文压缩状态（摘要 + 切点）。
+   * 只在服务端使用：会话历史不删，模型上下文按切点 + 摘要重建；不投影给客户端。
+   */
+  harnessContext?: HarnessSessionContext;
+  /** Native Pi harness settings, session-scoped; changes apply on the next turn. */
+  piSettings?: import("./pi-session-settings.js").PiSessionSettings;
+  /** SDK extension metadata only. Private, no separate copy of ordinary conversation history. */
+  harnessExtensionState?: HarnessExtensionState;
+}
+
+export interface HarnessExtensionState {
+  entries: Array<
+    | { type: "custom"; customType: string; data?: unknown }
+    | { type: "custom_message"; customType: string; content: string; display: boolean; details?: unknown }
+  >;
+}
+
+/** core 引擎每会话的上下文压缩状态；旧会话没有该字段时按未压缩处理。 */
+export interface HarnessSessionContext {
+  /** 被压缩历史的结构化摘要。 */
+  summary: string;
+  /** 从第几条会话消息开始未被压缩（摘要覆盖它之前的全部内容）。 */
+  fromTurnIndex: number;
+  /** 上次压缩前的上下文 token 估算。 */
+  tokensBefore: number;
+  /** 累计压缩次数。 */
+  compactions: number;
 }
 
 // ── Workspace（多标签 / 分屏项目，参考 Orca）──
@@ -852,6 +978,8 @@ export interface WorkspaceTask {
   /** 该任务的工作窗口 Tabs；每个窗口内部可含一棵分屏树。 */
   layout: TaskWindowLayout | null;
   status: WorkspaceTaskStatus;
+  /** Canonical board archive flag; a done task is not necessarily archived. */
+  archived?: boolean;
   createdAt: string;
   lastOpenedAt: string | null;
   layoutRevision?: number;

@@ -5,6 +5,8 @@ import type {
   WandOverlay,
 } from "./overlay-controller";
 import type { WandButtonKind, WandDialogTone, WandToastTone } from "./ui";
+import { openOwnedDialog } from "./owned-dialog";
+import { overlayStore } from "./overlay-controller";
 
 interface LegacyDialogButton {
   label?: unknown;
@@ -123,14 +125,23 @@ function finishReactLegacyDialog(): void {
 }
 
 /**
- * Routes the legacy dialog contract through the mounted React/Appica host.
+ * Routes the legacy dialog contract through the mounted canonical React host.
  * `null` means that the host is disabled or unavailable and the caller must
- * use its DOM fallback. Button tokens retain the original value/kind so prompt
- * submission has exactly the same return semantics as the legacy dialog.
+ * use the application-owned canonical root. Button tokens retain the original
+ * value/kind so prompt submission has the same return semantics as before.
  */
 export function openReactLegacyDialog(options: LegacyDialogOptions): Promise<unknown> | null {
   const overlay = activeOverlay();
   if (!overlay) return null;
+  return openLegacyDialog(options, overlay);
+}
+
+/** Canonical, application-owned fallback for startup and the generic rollback. */
+export function openOwnedLegacyDialog(options: LegacyDialogOptions): Promise<unknown> {
+  return openLegacyDialog(options, { dialog: openOwnedDialog })!;
+}
+
+function openLegacyDialog(options: LegacyDialogOptions, overlay: Pick<WandOverlay, "dialog">): Promise<unknown> | null {
 
   const focusAtOpen = pendingReactLegacyDialogs === 0 && !reactLegacyFocusRestoreScheduled
     ? readFocusOrigin()
@@ -164,8 +175,9 @@ export function openReactLegacyDialog(options: LegacyDialogOptions): Promise<unk
 
   let result: Promise<OverlayDialogResult<LegacyDialogActionToken>>;
   try {
-    result = overlay.dialog(reactOptions);
+    result = Promise.resolve(overlay.dialog(reactOptions));
   } catch {
+    overlayStore.cancelDialogRequest(reactOptions);
     return null;
   }
 
@@ -182,6 +194,10 @@ export function openReactLegacyDialog(options: LegacyDialogOptions): Promise<unk
         return outcome.inputValue ?? "";
       }
       return button.value;
+    })
+    .catch(error => {
+      overlayStore.cancelDialogRequest(reactOptions);
+      throw error;
     })
     .finally(finishReactLegacyDialog);
 }

@@ -1,3 +1,4 @@
+import { isStandaloneSettingsPage } from "../page.js";
 import { createRoot, type Root } from "react-dom/client";
 import * as React from "react";
 import { isReactUiEnabled } from "./feature-flags";
@@ -15,6 +16,7 @@ import { missionsController } from "./missions/controller";
 import { workspacesController } from "./workspaces/controller";
 import { githubIssuesController } from "./issues/controller";
 import { installTaskBoardHistory, taskBoardController } from "./issues/task-board-controller";
+import { WandUiProvider } from "./theme";
 import { REACT_UI_PORTALS_ID } from "./ui/portal-context";
 
 const OVERLAY_ROOT_ID = "overlay-root";
@@ -74,20 +76,23 @@ function exposeBusinessControllers(): void {
 export function startReactUi(): WandOverlay | null {
   const overlayRoot = getOrCreateOverlayRoot();
   const genericUiEnabled = isReactUiEnabled();
+  const standaloneSettings = isStandaloneSettingsPage();
 
   if (!activeRoot) {
     installReactUiStyles();
     const mount = getOrCreateChild(overlayRoot, REACT_MOUNT_ID, "wand-ui-mount");
     const portals = getOrCreateChild(overlayRoot, REACT_UI_PORTALS_ID, "wand-ui-portals");
     activeRoot = createRoot(mount);
-    activeRoot.render(<OverlayHost portalContainer={portals} />);
+    activeRoot.render(<WandUiProvider><OverlayHost portalContainer={portals}
+      settingsPresentation={standaloneSettings ? "page" : "dialog"} /></WandUiProvider>);
   }
 
-  exposeBusinessControllers();
+  if (standaloneSettings) window.__wandReactSettings = settingsController;
+  else exposeBusinessControllers();
   overlayRoot.dataset.reactUi = genericUiEnabled ? "enabled" : "fallback";
   if (!genericUiEnabled) {
-    // Keep native confirm/prompt and the legacy notification bubble as the
-    // explicit generic fallback while business controllers retain real Hosts.
+    // Keep the application-owned canonical dialog and legacy notice bubble as
+    // generic fallbacks while business controllers retain real Hosts.
     delete window.__wandReactUi;
     return null;
   }
@@ -104,3 +109,5 @@ export type { NewSessionCreateRequest, NewSessionCreated, NewSessionRuntimeAdapt
 export type { FolderPickerRuntimeAdapter } from "./folder-picker/types";
 export * from "./shell";
 export * from "./ui";
+
+export { WandUiProvider, WandUiBoundary, wandTheme } from "./theme";

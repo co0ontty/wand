@@ -18,8 +18,8 @@ export function filterSidebarGroups(
   const activeGroups = groups.map((group) => ({
     ...group,
     workspaceName: group.global ? "未归属工作区" : group.workspaceName,
-    tasks: group.tasks.filter((task) => task.status !== "done"),
-  })).filter((group) => !group.global || group.tasks.length > 0 || group.standaloneSessions.length > 0)
+    tasks: group.tasks.filter((task) => !task.archived && task.status !== "done"),
+  })).filter((group) => !group.global || group.tasks.length > 0 || group.standaloneSessions.length > 0 || Boolean(group.archivedSessions?.length))
     .sort((left, right) => Number(Boolean(left.global)) - Number(Boolean(right.global)));
   if (!query.trim()) return activeGroups;
   const matches = (...values: (string | undefined)[]): boolean => sidebarSearchMatches(query, ...values);
@@ -30,11 +30,13 @@ export function filterSidebarGroups(
     const name = group.workspaceName;
     if (matches(name, group.workspaceCwd)) return [group];
     const tasks = group.tasks.filter((task) => matches(
-      name, task.name, task.cwd, ...task.sessions.map(sessionText),
+      name, task.name, task.cwd, ...task.sessions.map(sessionText), ...(task.archivedSessions ?? []).map(sessionText),
     ));
     const standaloneSessions = group.standaloneSessions.filter((session) => (
       matches(name, sessionText(session))
     ));
-    return tasks.length || standaloneSessions.length ? [{ ...group, tasks, standaloneSessions }] : [];
+    const archivedSessions = group.archivedSessions?.filter((session) => matches(name, sessionText(session)));
+    return tasks.length || standaloneSessions.length || archivedSessions?.length
+      ? [{ ...group, tasks, standaloneSessions, archivedSessions }] : [];
   });
 }

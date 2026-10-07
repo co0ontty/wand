@@ -46,7 +46,7 @@ export const PROVIDER_LABELS: Readonly<Record<SessionProvider, string>> = {
   opencode: "OpenCode",
   grok: "Grok",
   qoder: "Qoder",
-  pi: "Pi",
+  pi: "one 的 Agent",
   gemini: "Gemini",
 };
 

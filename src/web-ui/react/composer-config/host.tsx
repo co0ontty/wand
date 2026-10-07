@@ -1,7 +1,8 @@
 import { useSyncExternalStore } from "react";
 import * as React from "react";
 import { createPortal } from "react-dom";
-import { WandIcon } from "../ui";
+import { Flex } from "antd";
+import { WandIcon, WandIconButton } from "../ui";
 import { composerConfigController, type ComposerConfigMount, type ComposerConfigScope } from "./controller";
 
 function ariaLabelFor(scope: ComposerConfigScope): string {
@@ -29,7 +30,7 @@ export function ComposerConfigControl({ mount }: { mount: ComposerConfigMount })
   const showModelRefresh = scope !== "mode";
 
   return (
-    <div
+    <Flex align="center" gap={6} wrap style={{ flex: showRuntime ? 1 : undefined, minWidth: 0 }}
       className={`composer-config-controls composer-config-controls-${scope}`}
       data-config-scope={scope}
       role="group"
@@ -38,27 +39,23 @@ export function ComposerConfigControl({ mount }: { mount: ComposerConfigMount })
     >
       {showMode && (
         <span
-          className="composer-config-chip composer-config-chip-mode"
           data-mode-control-pill="mode"
           title={`模式：${mount.modeLabel}`}
         >
-          <WandIcon name="sliders" size={13} strokeWidth={1.8} className="composer-config-icon" />
           {selectHost(scope, "mode")}
         </span>
       )}
       {showRuntime && (
         <>
           <span
-            className="composer-config-chip composer-config-model"
             data-mode-control-pill="model"
+            style={{ minWidth: 144 }}
             title={`模型：${mount.modelFullLabel}`}
           >
-            <WandIcon name="cpu" size={13} strokeWidth={1.8} className="composer-config-icon" />
             {selectHost(scope, "model")}
           </span>
           {showModelRefresh && (
-            <button
-              className={`model-refresh-button composer-model-refresh-button${mount.modelRefreshing ? " is-refreshing" : ""}`}
+            <WandIconButton
               type="button"
               data-models-refresh=""
               data-models-refresh-scope={scope}
@@ -68,22 +65,20 @@ export function ComposerConfigControl({ mount }: { mount: ComposerConfigMount })
               disabled={mount.modelRefreshing}
               onClick={mount.onRefreshModels}
             >
-              <WandIcon name="refresh" size={13} strokeWidth={1.9} className="model-refresh-icon" />
-              <span className="model-refresh-label">刷新模型列表</span>
-            </button>
+              <WandIcon name="refresh" size={13} strokeWidth={1.9} />
+            </WandIconButton>
           )}
           <span
-            className="composer-config-chip composer-config-thinking"
             data-mode-control-pill="thinking"
+            style={{ minWidth: 80 }}
             data-thinking={mount.thinkingValue}
             title={`思考深度：${mount.thinkingLabel}`}
           >
-            <WandIcon name="brain" size={13} strokeWidth={1.8} className="composer-config-icon" />
             {selectHost(scope, "thinking")}
           </span>
         </>
       )}
-    </div>
+    </Flex>
   );
 }
 

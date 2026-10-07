@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 import * as React from "react";
 import { createPortal } from "react-dom";
-import { WandIcon } from "../ui";
+import { WandIcon, WandButton } from "../ui";
 import { ComposerPopoverAction } from "./action";
 import { composerPopoverController, type ComposerPopoverMount } from "./controller";
 
@@ -10,7 +10,7 @@ import { composerPopoverController, type ComposerPopoverMount } from "./controll
  * 点外部关闭都留在 legacy：那些逻辑绑在容器节点上，React 只管这两个条目。
  */
 export function ComposerPopoverItems({ mount }: { mount: ComposerPopoverMount }): React.ReactElement {
-  const interactiveClass = `plus-popover-item${mount.interactiveOn ? " is-on" : ""}${
+  const interactiveClass = `${mount.interactiveOn ? "is-on" : ""}${
     mount.interactiveVisible ? "" : " hidden"
   }`;
 
@@ -22,7 +22,7 @@ export function ComposerPopoverItems({ mount }: { mount: ComposerPopoverMount })
         label="上传附件"
         onClick={(event) => mount.onAttach(event.detail === 0)}
       />
-      <button
+      <WandButton kind="ghost"
         className={interactiveClass}
         id="terminal-interactive-toggle-top"
         type="button"
@@ -32,7 +32,7 @@ export function ComposerPopoverItems({ mount }: { mount: ComposerPopoverMount })
         <WandIcon name="keyboard" size={14} strokeWidth={1.8} className="plus-popover-icon" />
         <span className="plus-popover-label">终端交互</span>
         <span className="plus-popover-toggle-state">{mount.interactiveOn ? "开" : "关"}</span>
-      </button>
+      </WandButton>
     </>
   );
 }

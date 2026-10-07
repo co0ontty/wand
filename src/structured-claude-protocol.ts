@@ -245,7 +245,7 @@ export class ClaudeCliProtocolReducer {
       } else {
         const duplicate = block.type === "text"
           ? merged.some((entry) => entry.type === "text" && entry.text === block.text)
-          : merged.some((entry) => entry.type === "thinking" && entry.thinking === block.thinking);
+          : block.type === "thinking" && merged.some((entry) => entry.type === "thinking" && entry.thinking === block.thinking);
         if (!duplicate) merged.push(block);
       }
     }

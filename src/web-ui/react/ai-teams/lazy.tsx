@@ -1,9 +1,12 @@
+import { Alert, Flex, Spin } from "antd";
 import * as React from "react";
 import * as jsxRuntime from "react/jsx-runtime";
 import { failureMessage } from "../errors";
 import { ComposerAttachmentList } from "../composer-attachments/host";
 import { ComposerPopoverAction } from "../composer-popover/action";
+import { RunningStatusBar } from "../chat/running-status-bar";
 import { filePreviewController } from "../file-preview/controller";
+import { MarkdownPreview } from "../file-preview/markdown";
 import { formatFilePreviewSize } from "../file-preview/model";
 import { HttpResponseError, jsonBody, requestJson } from "../http-adapter";
 import { AgentFields } from "../issues/agent-fields";
@@ -32,16 +35,43 @@ import {
 } from "../settings/fields";
 import { SidebarToggleIcon } from "../shell/sidebar-toggle-icon";
 import { installStyleSheet } from "../styles";
+import {
+  TeamDispatchActionButton,
+  TeamDispatchRoster,
+  dispatchStartBlockedReason,
+  useTeamDispatchFlow,
+} from "../team-dispatch/roster";
 import { subscribeTaskChanges } from "../task-changes";
-import { WandBadge, WandBrandMark, WandBreadcrumb, WandButton, WandDialogSurface, WandIcon, WandIconButton, WandSearchField, WandSelect, WandStretchTabs } from "../ui";
-import { MOTION_DWELL_FAILED_MS, MOTION_DWELL_SENT_MS } from "../ui/motion-tokens";
-import { CAT_COATS, memberCoatIndex, PixelCat, shrinkAvatarImage, TeamAvatar, TeamAvatarStack } from "./avatar";
+import { appendedConversationKeys, CONVERSATION_TAIL_PX, conversationClock, conversationDay, conversationMessageKey, joinsConversationBubble } from "../conversations/presentation";
+import { conversationUi } from "../conversations/state";
+import { currentUserAuthor, selfAuthorFor, userProfileStore, useUserProfile } from "../user-profile-repository";
+import {
+  WandBadge,
+  WandBrandMark,
+  WandBreadcrumb,
+  WandButton,
+  WandDialogSurface,
+  WandDropdownMenu,
+  WandDropdownMenuContent,
+  WandDropdownMenuItem,
+  WandDropdownMenuTrigger,
+  WandIcon,
+  WandIconButton,
+  WandSearchField,
+  WandSelect,
+  WandStretchTabs,
+} from "../ui";
+import { MOTION_DWELL_FAILED_MS, MOTION_DWELL_SENT_MS, useReducedMotion } from "../ui/motion-tokens";
+import {
+  CAT_COATS, GeneratedAvatarGlyph, TeamAvatar, TeamAvatarStack, avatarFace, avatarFaceParts,
+  generatedAvatarBackground, generatedAvatarFace, memberCoatIndex, PixelCat, shrinkAvatarImage,
+} from "./avatar";
 import { useSiliconEmployees, siliconEmployeesRepository, notifySiliconEmployeeDefinitionChanged } from "../agents/employee-repository.js";
 import { employeeAvatarProvider, employeeCliLabel } from "../agents/employee-identity.js";
 import { ProviderLogo } from "../provider-logo.js";
 import { teamChatComposer } from "./composer-bridge";
 import { aiTeamsRepository, subscribeAiTeamDefinitionChanges, subscribeAiTeamRunChanges } from "./repository";
-import type { TeamChatViewProps } from "./team-chat-view";
+import type { ConversationMessagesProps, TeamChatViewProps } from "./team-chat-view";
 import type { TeamChatPageProps } from "./team-chat-page";
 import type { AiTeamsPageProps } from "./teams-page";
 
@@ -54,9 +84,14 @@ const AI_TEAMS_HOST: Record<string, object> = {
   "react": React,
   "react/jsx-runtime": jsxRuntime,
   "errors": { failureMessage },
+  "team-dispatch/roster": {
+    useTeamDispatchFlow, TeamDispatchRoster, TeamDispatchActionButton, dispatchStartBlockedReason,
+  },
   "composer-attachments/host": { ComposerAttachmentList },
   "composer-popover/action": { ComposerPopoverAction },
+  "chat/running-status-bar": { RunningStatusBar },
   "file-preview/controller": { filePreviewController },
+  "file-preview/markdown": { MarkdownPreview },
   "file-preview/model": { formatFilePreviewSize },
   "http-adapter": { HttpResponseError, jsonBody, requestJson },
   "issues/agent-fields": { AgentFields },
@@ -88,10 +123,20 @@ const AI_TEAMS_HOST: Record<string, object> = {
   "shell/sidebar-toggle-icon": { SidebarToggleIcon },
   "styles": { installStyleSheet },
   "task-changes": { subscribeTaskChanges },
-  "ui": { WandBadge, WandBrandMark, WandBreadcrumb, WandButton, WandDialogSurface, WandIcon, WandIconButton, WandSearchField, WandSelect, WandStretchTabs },
-  "ui/motion-tokens": { MOTION_DWELL_FAILED_MS, MOTION_DWELL_SENT_MS },
+  "conversations/state": { conversationUi },
+  "conversations/presentation": { appendedConversationKeys, CONVERSATION_TAIL_PX, conversationClock, conversationDay, conversationMessageKey, joinsConversationBubble },
+  "user-profile-repository": { currentUserAuthor, selfAuthorFor, userProfileStore, useUserProfile },
+  "ui": {
+    WandBadge, WandBrandMark, WandBreadcrumb, WandButton, WandDialogSurface,
+    WandDropdownMenu, WandDropdownMenuContent, WandDropdownMenuItem, WandDropdownMenuTrigger,
+    WandIcon, WandIconButton, WandSearchField, WandSelect, WandStretchTabs,
+  },
+  "ui/motion-tokens": { MOTION_DWELL_FAILED_MS, MOTION_DWELL_SENT_MS, useReducedMotion },
   "ai-teams/cat-coats": { CAT_COATS },
-  "ai-teams/avatar": { CAT_COATS, memberCoatIndex, PixelCat, shrinkAvatarImage, TeamAvatar, TeamAvatarStack },
+  "ai-teams/avatar": {
+    CAT_COATS, GeneratedAvatarGlyph, TeamAvatar, TeamAvatarStack, avatarFace, avatarFaceParts,
+    memberCoatIndex, PixelCat, generatedAvatarBackground, generatedAvatarFace, shrinkAvatarImage,
+  },
   "ai-teams/composer-bridge": { teamChatComposer },
   "ai-teams/repository": { aiTeamsRepository, subscribeAiTeamDefinitionChanges, subscribeAiTeamRunChanges },
 };
@@ -100,6 +145,8 @@ interface AiTeamsChunk {
   AiTeamsPage: React.ComponentType<AiTeamsPageProps>;
   TaskTeamRunPanel: React.ComponentType<TaskTeamRunPanelProps>;
   TeamChatView: React.ComponentType<TeamChatViewProps>;
+  ConversationMessages: React.ComponentType<ConversationMessagesProps>;
+  chatAttachmentPrompt(files: readonly { savedPath: string }[], text: string): string;
   TeamChatPage: React.ComponentType<TeamChatPageProps>;
 }
 
@@ -171,12 +218,12 @@ function useAiTeamsChunk(): { chunk: AiTeamsChunk | null; error: string; retry: 
 export function AiTeamsPage(props: AiTeamsPageProps): React.ReactElement {
   const { chunk, error, retry } = useAiTeamsChunk();
   if (chunk) return <chunk.AiTeamsPage {...props}/>;
-  return <section className="task-board-native-page wand-teams-pending" aria-label="AI 团队" aria-busy={!error}>
+  return <Flex vertical gap={12} align="center" justify="center" component="section" style={{ height: "100%" }} className="task-board-native-page" aria-label="AI 团队" aria-busy={!error}>
     {error ? <>
-      <p>{error}</p>
+      <Alert type="error" showIcon title={error}/>
       <WandButton kind="soft" size="small" onClick={retry}>重试</WandButton>
-    </> : <p>正在加载 AI 团队…</p>}
-  </section>;
+    </> : <><Spin/><span role="status">正在加载 AI 团队…</span></>}
+  </Flex>;
 }
 
 /** 任务详情里的团队运行：脚本到位前不占位（没有运行时本来也不渲染）。 */
@@ -185,14 +232,24 @@ export function TaskTeamRunPanel(props: TaskTeamRunPanelProps): React.ReactEleme
   return chunk ? <chunk.TaskTeamRunPanel {...props}/> : null;
 }
 
+export async function formatConversationAttachments(files: readonly { savedPath: string }[], text: string): Promise<string> {
+  return (await loadAiTeamsChunk()).chatAttachmentPrompt(files, text);
+}
+
+export function ConversationMessages(props: ConversationMessagesProps): React.ReactElement {
+  const { chunk, error, retry } = useAiTeamsChunk();
+  if (chunk) return <chunk.ConversationMessages {...props}/>;
+  return <div role="status">{error || "正在读取消息组件…"}{error ? <WandButton onClick={retry}>重试</WandButton> : null}</div>;
+}
+
 /** 群聊页：侧栏点群聊条目进入，脚本到位前显示占位，失败可重试。 */
 export function TeamChatPage(props: TeamChatPageProps): React.ReactElement {
   const { chunk, error, retry } = useAiTeamsChunk();
   if (chunk) return <chunk.TeamChatPage {...props}/>;
-  return <section className="task-board-native-page wand-teams-pending" aria-label="群聊" aria-busy={!error}>
+  return <Flex vertical gap={12} align="center" justify="center" component="section" style={{ height: "100%" }} className="task-board-native-page" aria-label="群聊" aria-busy={!error}>
     {error ? <>
-      <p>{error}</p>
+      <Alert type="error" showIcon title={error}/>
       <WandButton kind="soft" size="small" onClick={retry}>重试</WandButton>
-    </> : <p>正在加载群聊…</p>}
-  </section>;
+    </> : <><Spin/><span role="status">正在加载群聊…</span></>}
+  </Flex>;
 }

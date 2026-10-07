@@ -40,14 +40,14 @@ test("错误条注册表在文案未变时跳过广播", () => {
   unsubscribe();
 });
 
-test("错误条保留 #action-error 与 .error-message 选择器", () => {
+test("错误条保留动作身份并由库 Alert 提供播报", () => {
   const html = renderToStaticMarkup(
     React.createElement(ComposerActionError, { mount: mountFor("密码错误，请重试。") }),
   );
-  assert.match(html, /<p id="action-error" class="error-message" role="alert">/);
+  assert.match(html, /<div id="action-error"[^>]*class="[^"]*ant-alert[^>]*role="alert"/);
   assert.match(html, /密码错误，请重试。/);
   // 旧节点用 .hidden 表达隐藏；现在隐藏等于不渲染。
-  assert.doesNotMatch(html, /hidden/);
+  assert.doesNotMatch(html, /class="[^"]*\bhidden\b/);
 });
 
 test("适配器只在有文案时发布 mount，并用 flushSync 立刻可见", () => {
@@ -86,6 +86,6 @@ test("resumeSession 不再接收从不传入的 errorEl 参数", () => {
 test("错误条带 role=alert：插入即播报，但不碰焦点", () => {
   const html = renderToStaticMarkup(React.createElement(ComposerActionError, { mount: mountFor("发送失败：会话已退出") }));
   // 这条只承载「刚做完的动作失败了」，属于 assertive；role=alert 自带 aria-live=assertive。
-  assert.match(html, /<p id="action-error" class="error-message" role="alert">/);
+  assert.match(html, /<div id="action-error"[^>]*class="[^"]*ant-alert[^>]*role="alert"/);
   assert.doesNotMatch(html, /tabindex|autofocus/i, "播报不靠抢焦点，键盘位置留给输入框");
 });

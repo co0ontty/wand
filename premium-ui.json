@@ -15,7 +15,7 @@
   ],
   "ownership": {
     "Select/Listbox": "authored",
-    "Date": "native"
+    "Date": "authored"
   },
   "requiredCommands": [
     "typecheck",

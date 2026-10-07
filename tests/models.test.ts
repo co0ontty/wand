@@ -17,6 +17,7 @@ import {
   parseQoderModels,
   refreshModels,
 } from "../src/models.js";
+import { AUTO_ASSIGN_SELECTOR } from "../src/model-groups.js";
 
 class FakeModelStorage {
   private readonly values = new Map<string, string>();
@@ -311,11 +312,11 @@ test("server model catalog persists every provider and writes only when its cont
 
   const first = await catalog.refresh();
   assert.equal(first.changed, true);
-  assert.deepEqual(first.codexModels.map((model) => model.id), ["default", "gpt-5.5"]);
-  assert.deepEqual(first.opencodeModels.map((model) => model.id), ["default", "openai/gpt-5.4"]);
-  assert.deepEqual(first.grokModels.map((model) => model.id), ["default", "grok-4.5", "grok-3"]);
+  assert.deepEqual(first.codexModels.map((model) => model.id), ["default", AUTO_ASSIGN_SELECTOR, "gpt-5.5"]);
+  assert.deepEqual(first.opencodeModels.map((model) => model.id), ["default", AUTO_ASSIGN_SELECTOR, "openai/gpt-5.4"]);
+  assert.deepEqual(first.grokModels.map((model) => model.id), ["default", AUTO_ASSIGN_SELECTOR, "grok-4.5", "grok-3"]);
   assert.equal(first.qoderModels.some((model) => model.id === "qoder-frontier-1"), true);
-  assert.deepEqual(first.piModels.map((model) => model.id), ["default", "xai/grok-4.6"]);
+  assert.deepEqual(first.piModels.map((model) => model.id), ["default", AUTO_ASSIGN_SELECTOR, "xai/grok-4.6"]);
   const firstRaw = storage.getRaw(MODEL_CATALOG_CACHE_KEY);
   assert.ok(firstRaw);
 

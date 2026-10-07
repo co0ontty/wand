@@ -23,6 +23,7 @@ import {
   type AiTeamLiveStep,
   type AiTeamLiveUpdate,
   type AiTeamMember,
+  type AiTeamRun,
   type AiTeamStep,
 } from "../src/ai-team-types.js";
 import { WandStorage } from "../src/storage.js";
@@ -175,10 +176,15 @@ function harness(
   t: TestContext,
   overrides: Partial<AiTeam> = {},
   options: {
+    leaderAgents?: WandTaskAgent[];
     worker?: WandTaskAgent;
     workerAgents?: WandTaskAgent[];
     models?: (provider: WandTaskAgent["provider"]) => string[];
     notifyLive?: (update: AiTeamLiveUpdate) => void;
+    /** ai-team-run 通知回调；静默心跳测试要数它重推了几次。 */
+    notify?: (run: AiTeamRun) => void;
+    /** 静默心跳阈值；只给测试用小值，生产走 AI_TEAM_SILENCE_HEARTBEAT_MS。 */
+    heartbeatMs?: number;
   } = {},
 ): Harness {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-ai-team-"));
@@ -199,8 +205,8 @@ function harness(
     id: "team-1", name: "测试团队", description: "", instructions: "",
     members: [
       {
-        id: "m_lead", name: "负责人", duty: "拆分和派工", agents: [structuredAgent("claude")],
-        agent: structuredAgent("claude"), isLeader: true,
+        id: "m_lead", name: "负责人", duty: "拆分和派工", agents: options.leaderAgents ?? [structuredAgent("claude")],
+        agent: options.leaderAgents?.[0] ?? structuredAgent("claude"), isLeader: true,
       },
       worker,
       {
@@ -220,6 +226,7 @@ function harness(
   const runner = new AiTeamRunner({
     storage, ops, chat, resolveCwd: () => cwd, now: () => clock.now,
     models: options.models, notifyLive: options.notifyLive,
+    notify: options.notify, heartbeatMs: options.heartbeatMs,
   });
   t.after(() => runner.dispose());
   return { storage, ops, chat, runner, cwd, team, taskId: task.id, clock, models: options.models };
@@ -747,6 +754,91 @@ test("team run list carries the task title and filters by team and activity", as
   assert.equal(h.runner.listRuns({ activeOnly: true }).length, 1);
 });
 
+const leaderCandidates = ["primary", "backup", "last"].map((model) => ({ ...structuredAgent("pi"), model }));
+
+function failModel(h: Harness, step: AiTeamStep, error = "fetch failed"): void {
+  const session = h.ops.sessions.get(step.sessionId!)!;
+  session.inFlight = false;
+  session.status = "failed";
+  session.lastError = error;
+}
+
+test("leader model errors exhaust same-provider candidates before waiting for user", async (t) => {
+  const h = harness(t, {}, { leaderAgents: leaderCandidates });
+  const initial = await h.runner.start({ teamId: h.team.id, taskId: h.taskId });
+  for (let index = 0; index < leaderCandidates.length; index++) {
+    assert.equal(h.runner.detail(initial.run.id).run.status, "running");
+    const step = runningStep(h, initial.run.id);
+    assert.equal(step.kind, "leader");
+    assert.equal(step.dispatchInfo?.usedCandidate ?? 0, index);
+    failModel(h, step, `fetch failed ${index + 1}`);
+    await settle(h, step.sessionId!);
+  }
+  const detail = h.runner.detail(initial.run.id);
+  assert.equal(detail.run.status, "waiting_user");
+  assert.equal(detail.run.stepsUsed, 1, "internal retries cost one completed round");
+  assert.equal(detail.run.formatRetries, 0);
+  assert.deepEqual(h.ops.attempts.map((item) => item.model), ["primary", "backup", "last"]);
+  assert.deepEqual(detail.steps.map((step) => step.status), ["skipped", "skipped", "failed"]);
+  assert.equal(detail.steps[2]!.dispatchInfo?.skipped.length, 3);
+  for (const error of ["fetch failed 1", "fetch failed 2", "fetch failed 3"]) assert.ok(detail.run.statusDetail.includes(error));
+  assert.deepEqual(h.storage.getAiTeamRunState(initial.run.id).providers, [], "network failure must not ban every Pi model");
+  await h.runner.chatInput(detail.run.chatSessionId!, "继续");
+  assert.equal(h.runner.detail(initial.run.id).run.status, "running");
+  assert.equal(runningStep(h, initial.run.id).dispatchInfo?.usedCandidate ?? 0, 0);
+});
+
+test("leader synchronous failures traverse all remaining candidates", async (t) => {
+  const h = harness(t, {}, { leaderAgents: leaderCandidates });
+  h.ops.openFailure = () => "fetch failed";
+  const detail = await h.runner.start({ teamId: h.team.id, taskId: h.taskId });
+  assert.equal(detail.run.status, "waiting_user");
+  assert.deepEqual(h.ops.attempts.map((item) => item.model), ["primary", "backup", "last"]);
+  assert.equal(detail.run.stepsUsed, 1);
+});
+
+test("leader backup receives completed reports and user notes, then stays selected", async (t) => {
+  const h = harness(t, { requirePlanApproval: false }, { leaderAgents: leaderCandidates });
+  const initial = await h.runner.start({ teamId: h.team.id, taskId: h.taskId });
+  const kickoff = runningStep(h, initial.run.id);
+  h.ops.finishTurn(kickoff.sessionId!, JSON.stringify({ action: "assign", message: "分析", steps: [
+    { member: "m_dev", title: "分析", instructions: "只分析" },
+  ] }));
+  await settle(h, kickoff.sessionId!);
+  await h.runner.chatInput(initial.run.chatSessionId!, "只总结已有结果，不要重新派工");
+  const worker = runningStep(h, initial.run.id);
+  h.ops.finishTurn(worker.sessionId!, "状态: 完成\n已有分析结论");
+  await settle(h, worker.sessionId!);
+  const followup = runningStep(h, initial.run.id);
+  assert.equal(followup.sessionId, kickoff.sessionId);
+  failModel(h, followup);
+  await settle(h, followup.sessionId!);
+  const backup = runningStep(h, initial.run.id);
+  const opened = h.ops.opened.find((item) => item.sessionId === backup.sessionId)!;
+  assert.equal(opened.model, "backup");
+  assert.ok(opened.prompt.includes(initial.run.objective));
+  assert.ok(opened.prompt.includes(worker.reportPath));
+  assert.ok(opened.prompt.includes("只总结已有结果，不要重新派工"));
+  assert.ok(opened.prompt.includes(backup.reportPath));
+  assert.ok(!opened.prompt.includes(followup.reportPath));
+  assert.match(opened.systemPrompt!, /负责人/);
+  h.ops.finishTurn(backup.sessionId!, JSON.stringify({ action: "ask", message: "等待产品决定" }));
+  await settle(h, backup.sessionId!);
+  await h.runner.chatInput(initial.run.chatSessionId!, "总结即可");
+  const next = runningStep(h, initial.run.id);
+  assert.equal(next.dispatchInfo?.usedCandidate, 1);
+  assert.equal(next.sessionId, backup.sessionId, "reuse the successful backup context");
+  assert.equal(h.ops.opened.filter((item) => item.provider === "pi").length, 2);
+});
+
+test("leader explicit user stop does not try backups", async (t) => {
+  const h = harness(t, {}, { leaderAgents: leaderCandidates });
+  const initial = await h.runner.start({ teamId: h.team.id, taskId: h.taskId });
+  await h.runner.stop(initial.run.id);
+  assert.equal(h.ops.attempts.length, 1);
+  assert.equal(h.runner.detail(initial.run.id).run.status, "stopped");
+});
+
 test("a leader whose model errors out stops with the real error instead of format retries", async (t) => {
   const h = harness(t);
   const detail = await h.runner.start({ teamId: h.team.id, taskId: h.taskId });
@@ -791,7 +883,7 @@ test("group chat title follows the task, not team renames or subsequent instruct
   const h = harness(t);
   const started = await h.runner.start({ teamId: h.team.id, taskId: h.taskId });
   const chatId = started.run.chatSessionId!;
-  const expected = "给 README 加安装说明任务处理群";
+  const expected = "给 README 加安装说明";
   assert.equal(h.chat.titles.get(chatId), expected, "新建会话的标题按任务命名");
   assert.equal(started.chatTitle, expected, "聊天页头与会话标题一致");
   assert.equal(h.storage.listAiTeamRunChatMarkers().get(chatId)?.chatTitle, expected);
@@ -800,7 +892,7 @@ test("group chat title follows the task, not team renames or subsequent instruct
   const snapshot = JSON.stringify(started.run.team);
   h.storage.updateWandTask(h.taskId, { title: "整理 README" });
   const renamed = h.runner.detail(started.run.id);
-  assert.equal(renamed.chatTitle, "整理 README任务处理群");
+  assert.equal(renamed.chatTitle, "整理 README");
   assert.equal(renamed.chatTitleUpdatedAt, h.storage.getWandTask(h.taskId)!.updatedAt);
   assert.equal(h.storage.listAiTeamRunChatMarkers().get(chatId)?.chatTitle, renamed.chatTitle);
   assert.equal(JSON.stringify(renamed.chatTurns), history, "不批量改写历史发言");
@@ -823,7 +915,7 @@ test("a team run posts its plan, dispatches and reports into one group chat", as
   const lines = h.chat.lines(chatId);
   assert.match(lines[0]!, /^用户: 给 README 加安装说明/);
   // v2 入群序列（S1/S2）：两条居中系统行，作者都是负责人，不再有旧的「接手了这个任务：roster」。
-  assert.match(lines[1]!, /^·负责人: 创建了团队群聊「给 README 加安装说明任务处理群」$/);
+  assert.match(lines[1]!, /^·负责人: 创建了团队群聊「给 README 加安装说明」$/);
   assert.match(lines[2]!, /^·负责人: 邀请 @实现、@验收 加入群聊$/);
   assert.equal(lines.some((line) => line.includes("接手了这个任务")), false, "旧 roster 文案已被入群序列取代");
   // 负责人开工发言（S4）：负责人一轮可能想几分钟，群里得先有条真实发言。
@@ -1189,17 +1281,12 @@ test("[T3] host-disabled ends degrading for that kind instead of being swallowed
   assert.equal(h.ops.attempts.filter((item) => item.provider === "codex").length, 1,
     "第二个同 kind 候选不再尝试");
 
-  // Leader 再派一次同成员：事前就发现该 kind 全被封掉，直接给出原因，不起会话。
-  const leader = runningStep(h, runId);
-  writeReport(h, leader, assign([["m_dev", "再来一次"]]));
-  h.ops.finishTurn(leader.sessionId!);
-  await settle(h, leader.sessionId!);
-  await h.runner.approve(runId).catch(() => undefined);
-  const steps = h.runner.detail(runId).steps;
-  const second = steps.filter((step) => step.kind === "work").at(-1)!;
-  assert.equal(second.status, "failed");
-  assert.match(second.report, /所有候选均不可用/);
-  assert.equal(h.ops.opened.length, 1, "整个 run 停止降级");
+  // The disabled host also applies to the leader, so an unavailable leader cannot be restarted.
+  const detail = h.runner.detail(runId);
+  assert.equal(detail.run.status, "waiting_user");
+  assert.match(detail.run.statusDetail, /未启用结构化会话/);
+  assert.equal(detail.steps.filter((step) => step.kind === "leader").at(-1)!.status, "failed");
+  assert.equal(h.ops.opened.length, 1, "do not launch another session on the disabled host");
 });
 
 test("[T3] a model missing from a ready catalog is skipped before dispatch, with a paper trail", async (t) => {
@@ -1675,6 +1762,124 @@ test("live() only covers running steps with a snapshot and truncates long text",
   assert.throws(() => h.runner.live("run_nope"), /团队运行不存在/);
 });
 
+// ── 静默心跳与活动时间投影（长任务「还在跑吗」）──
+
+test("[heartbeat] 静默超阈值重推一次 live 快照；心跳不伪造活动时刻，run 停下即停", async (t) => {
+  const pushes: AiTeamLiveUpdate[] = [];
+  const h = harness(t, {}, { notifyLive: (update) => pushes.push(update), heartbeatMs: 120 });
+  const started = await h.runner.start({ teamId: h.team.id, taskId: h.taskId });
+  const leader = runningStep(h, started.run.id);
+  const session = h.ops.sessions.get(leader.sessionId!)!;
+  session.messages.push({ role: "assistant", content: [{ type: "text", text: "先读 README" }] });
+  h.runner.ingest({ type: "output", sessionId: leader.sessionId! });
+  await sleep(650);
+  await h.runner.idle();
+  assert.equal(pushes.length, 1, "真实内容变化先推一次");
+  assert.equal(pushes[0]!.heartbeat, false);
+  assert.equal(pushes[0]!.status, "running");
+  const first = pushes[0]!.steps[0]!;
+  assert.equal(first.startedAt, leader.startedAt, "live 步带出本轮开始时间，客户端能算「已跑 N 分钟」");
+  assert.ok(Date.parse(first.lastActivityAt) >= Date.parse(first.startedAt!), "活动时刻不早于开始时刻");
+  assert.ok(Date.parse(first.updatedAt) >= Date.parse(first.lastActivityAt), "updatedAt 是快照生成时刻");
+  const firstActivity = pushes[0]!.activity;
+  assert.equal(firstActivity.startedAt, started.run.createdAt, "run 级开始时间 = createdAt");
+
+  // 静默：只推假时钟，不喂新内容。到点重推一次同样的快照，标记 heartbeat。
+  h.clock.now += 130;
+  await sleep(500);
+  await h.runner.idle();
+  assert.equal(pushes.length, 2, "静默到阈值重推一次（去抖不能把心跳吃掉）");
+  assert.equal(pushes[1]!.heartbeat, true);
+  assert.deepEqual(pushes[1]!.steps.map((step) => step.text), [first.text], "内容可以逐字相同");
+  assert.equal(pushes[1]!.steps[0]!.lastActivityAt, first.lastActivityAt, "心跳不伪造新的活动时刻");
+  assert.ok(
+    Date.parse(pushes[1]!.activity.observedAt) > Date.parse(firstActivity.observedAt),
+    "心跳带更新的观察时刻，前端据此显示「仍在运行」",
+  );
+
+  // 有界周期：再静默一轮才再来一次；中间的空转不刷屏。
+  h.clock.now += 130;
+  await sleep(500);
+  await h.runner.idle();
+  assert.equal(pushes.length, 3, "静默期每阈值至多一次，不是一次性也不是无界");
+
+  // 真实内容变化：立刻推，且 heartbeat 标记回到 false。
+  session.messages.push({ role: "assistant", content: [{ type: "text", text: "接着改第二段" }] });
+  h.runner.ingest({ type: "output", sessionId: leader.sessionId! });
+  await sleep(650);
+  await h.runner.idle();
+  assert.equal(pushes.length, 4);
+  assert.equal(pushes[3]!.heartbeat, false);
+  assert.ok(pushes[3]!.steps[0]!.text.includes("接着改第二段"));
+  assert.ok(
+    Date.parse(pushes[3]!.steps[0]!.lastActivityAt) > Date.parse(first.lastActivityAt),
+    "真变化才推进活动时刻",
+  );
+
+  // run 停止：心跳计时器立即 cancel，此后不再有任何推送。
+  await h.runner.stop(started.run.id);
+  const atStop = pushes.length;
+  h.clock.now += 10_000;
+  await sleep(500);
+  await h.runner.idle();
+  assert.equal(pushes.length, atStop, "stop 之后不再有心跳推送");
+  assert.equal(pushes[pushes.length - 1]!.status, "stopped", "终态推送之后没有 heartbeat 推送");
+});
+
+test("[heartbeat] 静默期 ai-team-run 通知也重推一次；run 停下只补终态那一次", async (t) => {
+  const notified: AiTeamRun[] = [];
+  const h = harness(t, {}, { notify: (run) => notified.push(run), heartbeatMs: 120 });
+  const started = await h.runner.start({ teamId: h.team.id, taskId: h.taskId });
+  const before = notified.length;
+  assert.ok(before > 0, "开工本来就有状态通知");
+
+  h.clock.now += 130;
+  await sleep(500);
+  await h.runner.idle();
+  assert.ok(notified.length > before, "静默到点重推一次 run 通知（客户端据此重拉 detail）");
+  assert.equal(notified[notified.length - 1]!.id, started.run.id);
+  assert.equal(notified[notified.length - 1]!.status, "running");
+
+  const atStop = notified.length;
+  await h.runner.stop(started.run.id);
+  assert.equal(notified.length, atStop + 1, "stop 补一次终态通知");
+  h.clock.now += 10_000;
+  await sleep(500);
+  await h.runner.idle();
+  assert.equal(notified.length, atStop + 1, "终态之后心跳已 cancel");
+});
+
+test("[heartbeat] run / step 的对外投影带开始与活动时间，终态后活动时刻冻结", async (t) => {
+  const h = harness(t);
+  const started = await h.runner.start({ teamId: h.team.id, taskId: h.taskId });
+  const detail = h.runner.detail(started.run.id);
+  assert.ok(detail.activity, "detail 带 activity 投影");
+  assert.equal(detail.activity.startedAt, started.run.createdAt);
+  assert.ok(Date.parse(detail.activity.lastActivityAt) >= Date.parse(detail.activity.startedAt));
+  assert.ok(Date.parse(detail.activity.observedAt) >= Date.parse(detail.activity.lastActivityAt),
+    "观察时刻不会早于活动时刻");
+
+  const live = h.runner.liveSnapshot(started.run.id);
+  assert.equal(live.runId, started.run.id);
+  assert.equal(live.status, "running");
+  assert.equal(live.steps[0]!.startedAt, started.steps[0]!.startedAt);
+  assert.ok(live.steps[0]!.lastActivityAt, "轮询端也拿到该步最近活动时刻");
+  assert.equal(live.activity.startedAt, detail.activity.startedAt);
+
+  const summary = h.runner.listRuns({ teamId: h.team.id })[0]!;
+  assert.ok(summary.activity, "列表页的 run 同样带 activity");
+  assert.equal(summary.activity.startedAt, started.run.createdAt);
+
+  await h.runner.stop(started.run.id);
+  const ended = h.runner.detail(started.run.id);
+  assert.equal(ended.run.status, "stopped");
+  assert.equal(ended.activity!.lastActivityAt, ended.run.updatedAt,
+    "终态：活动时刻冻结在最后一次状态写入，不随读取或心跳前进");
+  assert.equal(ended.activity!.startedAt, started.run.createdAt, "终态仍保留开始时刻，可算总耗时");
+  assert.deepEqual(h.runner.live(started.run.id), [], "终态没有运行中的 live 步");
+  assert.equal(h.runner.liveSnapshot(started.run.id).status, "stopped");
+});
+
 // ── live 文本的来源：pty 非 claude 走 output（R1），claude pty / structured 走 messages ──
 
 const ptyAgent = (provider: WandTaskAgent["provider"]): WandTaskAgent => ({
@@ -1989,7 +2194,7 @@ test("[v2] the intro sequence is posted once per group chat and never replayed",
   const chatId = h.runner.detail(runId).run.chatSessionId!;
 
   const lines = h.chat.lines(chatId);
-  assert.match(lines[1]!, /^·负责人: 创建了团队群聊「给 README 加安装说明任务处理群」$/);
+  assert.match(lines[1]!, /^·负责人: 创建了团队群聊「给 README 加安装说明」$/);
   assert.match(lines[2]!, /^·负责人: 邀请 @实现、@验收 加入群聊$/);
   assert.equal(lines.filter((line) => line.includes("创建了团队群聊")).length, 1);
   assert.equal(lines.filter((line) => line.includes("加入群聊")).length, 1);

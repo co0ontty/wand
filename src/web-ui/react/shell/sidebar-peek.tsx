@@ -1,4 +1,5 @@
 import * as React from "react";
+import { Card, Flex, Typography } from "antd";
 
 import { WandIcon, WandIconButton } from "../ui";
 import { classNames } from "../ui/class-names";
@@ -9,6 +10,7 @@ export interface SidebarPeekProps {
   readonly top?: number;
   readonly surfaceRef: React.RefObject<HTMLDivElement | null>;
   onExpand(): void;
+  onKeyDown?(event: React.KeyboardEvent<HTMLElement>): void;
   onPointerEnter(event: React.PointerEvent<HTMLElement>): void;
   onPointerLeave(event: React.PointerEvent<HTMLElement>): void;
   onFocusCapture(event: React.FocusEvent<HTMLElement>): void;
@@ -30,6 +32,7 @@ export function SidebarPeek({
   top = 8,
   surfaceRef,
   onExpand,
+  onKeyDown,
   onPointerEnter,
   onPointerLeave,
   onFocusCapture,
@@ -37,22 +40,24 @@ export function SidebarPeek({
   children,
 }: SidebarPeekProps) {
   return (
-    <div
+    <Card size="small"
       id="sidebar-peek"
       ref={surfaceRef}
       className={classNames("sidebar-peek", open && "open")}
-      style={{ top, maxHeight: `calc(100dvh - ${top + 12}px)` }}
+      style={{ position: "absolute", top, left: "100%", marginLeft: 8, width: "min(320px, calc(100vw - 88px))", maxHeight: `calc(100dvh - ${top + 12}px)`, zIndex: 20020, visibility: open ? "visible" : "hidden", pointerEvents: open ? undefined : "none", overflow: "hidden" }}
+      styles={{ body: { display: "flex", flexDirection: "column", minHeight: 0, maxHeight: `calc(100dvh - ${top + 40}px)` } }}
       data-open={open || undefined}
       aria-label={title}
       aria-hidden={!open}
       inert={!open}
+      onKeyDown={onKeyDown}
       onPointerEnter={onPointerEnter}
       onPointerLeave={onPointerLeave}
       onFocusCapture={onFocusCapture}
       onBlurCapture={onBlurCapture}
     >
-      <div className="sidebar-peek-header">
-        <span className="sidebar-peek-title" title={title}>{title}</span>
+      <Flex align="center" justify="space-between" gap="small" className="sidebar-peek-header" style={{ flexShrink: 0 }}>
+        <Typography.Text strong ellipsis className="sidebar-peek-title" title={title}>{title}</Typography.Text>
         <WandIconButton
           className="sidebar-peek-expand"
           kind="ghost"
@@ -63,8 +68,8 @@ export function SidebarPeek({
         >
           <WandIcon name="rail" size={15} className="sidebar-rail-icon"/>
         </WandIconButton>
-      </div>
-      <div className="sidebar-peek-body">{children}</div>
-    </div>
+      </Flex>
+      <div className="sidebar-peek-body" style={{ minHeight: 0, overflow: "auto" }}>{children}</div>
+    </Card>
   );
 }

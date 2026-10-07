@@ -1,4 +1,6 @@
+import * as React from "react";
 import { useEffect, useRef, useState, type ComponentProps, type MouseEvent, type ReactNode } from "react";
+import { Alert, Card, Form, Input, InputNumber } from "antd";
 import { WandButton, WandSelect, WandSwitch } from "../ui";
 import { MOTION_DWELL_FAILED_MS, MOTION_DWELL_SENT_MS } from "../ui/motion-tokens";
 
@@ -14,21 +16,17 @@ export function SettingsSection({
   children: ReactNode;
 }) {
   return (
-    <section className="wand-settings-section">
-      <div className="wand-settings-section-heading">
-        <div>
-          <h3>{title}</h3>
-          {description ? <p>{description}</p> : null}
-        </div>
-        {action ? <div className="wand-settings-section-action">{action}</div> : null}
-      </div>
-      <div className="wand-settings-section-body">{children}</div>
-    </section>
+    <Card title={title} extra={action} className="wand-settings-library-section">
+      {description ? <p>{description}</p> : null}
+      <Form component={false} layout="vertical">
+        <div className="wand-settings-library-section-body">{children}</div>
+      </Form>
+    </Card>
   );
 }
 
 export function SettingsGrid({ children }: { children: ReactNode }) {
-  return <div className="wand-settings-grid">{children}</div>;
+  return <div className="wand-settings-library-grid">{children}</div>;
 }
 
 export function SettingsField({
@@ -45,12 +43,11 @@ export function SettingsField({
   children: ReactNode;
 }) {
   return (
-    <div className="wand-settings-field">
-      <label htmlFor={htmlFor}>{label}</label>
+    <Form.Item label={label} htmlFor={htmlFor} layout="vertical"
+      validateStatus={error ? "error" : undefined} help={error || hint}
+      className="wand-settings-library-field">
       {children}
-      {error ? <span className="wand-settings-field-error">{error}</span> : null}
-      {!error && hint ? <span className="wand-settings-field-hint">{hint}</span> : null}
-    </div>
+    </Form.Item>
   );
 }
 
@@ -79,23 +76,17 @@ export function SettingsTextInput({
   max?: number;
   list?: string;
 }) {
-  return (
-    <input
-      id={id}
-      className="wand-settings-input"
-      type={type}
-      value={value}
-      placeholder={placeholder}
-      disabled={disabled}
-      aria-invalid={invalid || undefined}
-      autoComplete={autoComplete}
-      min={min}
-      max={max}
-      list={list}
-      spellCheck={false}
-      onChange={(event) => onChange(event.currentTarget.value)}
-    />
-  );
+  if (type === "number") {
+    return <InputNumber id={id} value={value === "" ? null : String(value)} stringMode
+      className="wand-settings-library-number" min={min === undefined ? undefined : String(min)} max={max === undefined ? undefined : String(max)} disabled={disabled}
+      placeholder={placeholder} status={invalid ? "error" : undefined}
+      aria-invalid={invalid || undefined} autoComplete={autoComplete}
+      onChange={(next) => onChange(next === null ? "" : String(next))} />;
+  }
+  return <Input id={id} type={type} value={value} placeholder={placeholder}
+    disabled={disabled} status={invalid ? "error" : undefined}
+    aria-invalid={invalid || undefined} autoComplete={autoComplete} list={list}
+    spellCheck={false} onChange={(event) => onChange(event.currentTarget.value)} />;
 }
 
 export function SettingsSelect({
@@ -118,7 +109,7 @@ export function SettingsSelect({
   searchPlaceholder?: string;
 }) {
   return (
-    <div id={id} className="wand-settings-select">
+    <div id={id} className="wand-settings-library-select">
       <WandSelect
       ariaLabel={ariaLabel}
       value={value}
@@ -146,7 +137,7 @@ export function SettingsToggle({
   disabled?: boolean;
 }) {
   return (
-    <div className="wand-settings-toggle-row">
+    <div className="wand-settings-library-toggle-row">
       <div>
         <strong>{label}</strong>
         {description ? <span>{description}</span> : null}
@@ -170,9 +161,7 @@ export function SettingsStatus({
 }) {
   if (!children) return null;
   return (
-    <div className={`wand-settings-status wand-settings-status-${tone}`} role="status" aria-live="polite">
-      {children}
-    </div>
+    <Alert type={tone} title={children} role="status" aria-live="polite" showIcon />
   );
 }
 
@@ -231,8 +220,7 @@ export function SettingsSaveBar({
       ? "success"
       : null;
   return (
-    <div className="wand-settings-save-bar">
-      <SettingsStatus tone={tone}>{status}</SettingsStatus>
+    <div className="wand-settings-library-save-bar">
       <SettingsActionButton
         kind="primary"
         pending={pending}
@@ -245,6 +233,7 @@ export function SettingsSaveBar({
       >
         {label}
       </SettingsActionButton>
+      <SettingsStatus tone={tone}>{status}</SettingsStatus>
     </div>
   );
 }
@@ -285,6 +274,7 @@ export function SettingsActionButton({
   return (
     <WandButton
       {...props}
+      className={["wand-settings-library-action", props.className].filter(Boolean).join(" ")}
       aria-busy={pending || undefined}
       aria-live="polite"
       disabled={disabled || pending || flash === "success"}
@@ -298,7 +288,13 @@ export function SettingsActionButton({
         }
       } : undefined}
     >
-      {pending ? pendingLabel : flash === "success" ? successLabel : flash === "error" ? errorLabel : children}
+      <span className="wand-settings-library-action-label">
+        <span aria-hidden="true" className="wand-settings-library-action-measure">{children}</span>
+        <span aria-hidden="true" className="wand-settings-library-action-measure">{pendingLabel}</span>
+        <span aria-hidden="true" className="wand-settings-library-action-measure">{successLabel}</span>
+        <span aria-hidden="true" className="wand-settings-library-action-measure">{errorLabel}</span>
+        <span>{pending ? pendingLabel : flash === "success" ? successLabel : flash === "error" ? errorLabel : children}</span>
+      </span>
     </WandButton>
   );
 }

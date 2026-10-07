@@ -156,15 +156,24 @@ service_confirmed_stopped() {
 }
 
 stop_service_for_install() {
-  local output status=0
-  output="$(run_privileged "$NODE_FOR_WAND" "$WAND_BIN" service:stop "$SCOPE_FLAG" -c "$CONFIG_PATH" --verbose 2>&1)" || status=$?
-
+  local status=0
+  # Keep this array nonempty: macOS Bash 3.2 + nounset rejects empty arrays.
+  local guard_args=(-c "$CONFIG_PATH" --timeout "${WAND_CORE_WAIT_TIMEOUT:-0}")
+  # Query the live process BEFORE service:stop. Run the current source so an
+  # older installed core:status (which reads its own empty tracker) cannot lie.
+  # Hold the drain connection through service:stop to close the check/stop race.
+  service_confirmed_stopped && guard_args+=(--allow-stopped)
+  run_privileged "$NODE_BIN" "$REPO_ROOT/src/core-status-cli.ts" "${guard_args[@]}" -- \
+    "$NODE_FOR_WAND" "$WAND_BIN" service:stop "$SCOPE_FLAG" -c "$CONFIG_PATH" --verbose || status=$?
+  # Only 3 means the guarded stop command ran but failed. All other failures
+  # (including a missing/unsupported Node guard) must cancel without cleanup.
+  if [[ "$status" != "0" && "$status" != "3" ]]; then
+    die "原生 Core 重启保护失败，已取消后续清理/安装/重启"
+  fi
   if [[ "$status" -ne 0 ]]; then
     if service_confirmed_stopped; then
       warn "service:stop 返回 exit ${status}，但服务管理器已确认服务停止，继续安装"
-      [[ -n "$output" ]] && printf '%s\n' "$output" >&2
     else
-      [[ -n "$output" ]] && printf '%s\n' "$output" >&2
       die "service:stop 失败且服务仍处于加载状态，已取消覆盖全局包"
     fi
   fi
@@ -174,7 +183,6 @@ stop_service_for_install() {
   cleanup_stale_wand
 
   if ! service_confirmed_stopped; then
-    [[ -n "$output" ]] && printf '%s\n' "$output" >&2
     die "停止命令执行后服务仍处于加载状态，已取消覆盖全局包"
   fi
   ok "$SCOPE 服务已停止"
@@ -336,17 +344,33 @@ cleanup_stale_wand() {
 repair_global_package_permissions() {
   local scope_dir="$WAND_PREFIX/lib/node_modules/@co0ontty"
   [[ -e "$scope_dir" ]] || return 0
-  if ! find "$scope_dir" -maxdepth 3 \( ! -user "$(id -u)" -o ! -group "$(id -g)" \) -print -quit | grep -q .; then
-    return 0
+  local owner_uid owner_gid problems needs_sudo=0
+  owner_uid="$(id -u)"
+  owner_gid="$(id -g)"
+  # sudo ./start.sh 仍应把 NVM 包交还给调用者，而不是留给 root。
+  if [[ "$owner_uid" == "0" && "${SUDO_UID:-}" =~ ^[0-9]+$ && "${SUDO_GID:-}" =~ ^[0-9]+$ ]]; then
+    owner_uid="$SUDO_UID"
+    owner_gid="$SUDO_GID"
   fi
-  if ! command -v sudo >/dev/null 2>&1; then
-    die "$scope_dir 含有非当前用户拥有的 npm 文件，但找不到 sudo。请手动执行: chown -R $(id -un):$(id -gn) $scope_dir"
+  # 不用 find | grep：find 无权遍历时不能被当作“没有权限问题”。
+  if problems="$(find "$scope_dir" -maxdepth 3 \( ! -user "$owner_uid" -o ! -group "$owner_gid" -o ! -perm -a+r -o \( -type d ! -perm -a+x \) \) -print -quit 2>/dev/null)"; then
+    [[ -n "$problems" ]] || return 0
   fi
-  if [[ ! -t 0 ]] && ! sudo -n true 2>/dev/null; then
-    die "$scope_dir 含有非当前用户拥有的 npm 文件，当前环境不能输入 sudo 密码。请在终端执行: sudo chown -R $(id -un):$(id -gn) $scope_dir"
+  if [[ "$(id -u)" != "0" ]]; then
+    command -v sudo >/dev/null 2>&1 || die "$scope_dir 权限异常，但找不到 sudo。请修复该目录的所有者与读取权限。"
+    if [[ ! -t 0 ]] && ! sudo -n true 2>/dev/null; then
+      die "$scope_dir 权限异常，当前环境不能输入 sudo 密码。请在终端重新运行 ./start.sh。"
+    fi
+    needs_sudo=1
   fi
   warn "修复 npm 全局包目录权限: $scope_dir"
-  sudo chown -R "$(id -u):$(id -g)" "$scope_dir"
+  if [[ "$needs_sudo" == "1" ]]; then
+    sudo chown -R "$owner_uid:$owner_gid" "$scope_dir"
+    sudo chmod -R u+rwX,go+rX "$scope_dir"
+  else
+    chown -R "$owner_uid:$owner_gid" "$scope_dir"
+    chmod -R u+rwX,go+rX "$scope_dir"
+  fi
 }
 
 restore_node_pty_spawn_helper() {
@@ -376,9 +400,8 @@ ensure_service_installed_and_running() {
 
   if service_installed; then
     if [[ "$SERVICE_STOPPED_FOR_INSTALL" != "1" ]]; then
-      msg "$(sudo_prefix)$NODE_FOR_WAND $WAND_BIN service:stop $SCOPE_FLAG -c $CONFIG_PATH"
-      run_privileged "$NODE_FOR_WAND" "$WAND_BIN" service:stop "$SCOPE_FLAG" -c "$CONFIG_PATH" >/dev/null 2>&1 || die "service:stop 失败"
-      cleanup_stale_wand
+      msg "等待原生 Core 回合完成，再停止 $SCOPE 服务"
+      stop_service_for_install
     fi
     msg "$(sudo_prefix)$NODE_FOR_WAND $WAND_BIN service:install $SCOPE_FLAG -c $CONFIG_PATH"
     run_privileged "$NODE_FOR_WAND" "$WAND_BIN" service:install "$SCOPE_FLAG" -c "$CONFIG_PATH" --verbose || die "service:install 失败"
@@ -642,6 +665,8 @@ refresh_wand_runtime
 # service. This is especially important when migrating an older nvm install.
 if [[ "$ACTION" == "install-and-restart" ]]; then
   "$NODE_BIN" "$REPO_ROOT/scripts/check-node-version.js" || die "请先运行 nvm use，再重新构建/安装。"
+  # 先确认全局目录可读写，再构建或停止服务。
+  [[ "$DO_INSTALL" != "1" ]] || repair_global_package_permissions
 fi
 
 case "$ACTION" in
@@ -762,9 +787,9 @@ fi
 
 if [[ "$DO_INSTALL" == "1" ]]; then
   PACK_DIR="$(mktemp -d)"
-  DAEMON_PIDS_BEFORE="$(daemon_pids | tr '\n' ' ')"
   msg "npm pack -> install -g --prefix $WAND_PREFIX"
   repair_global_package_permissions
+  DAEMON_PIDS_BEFORE="$(daemon_pids | tr '\n' ' ')"
   cleanup_npm_package_temps
   # dist was built explicitly above with the local debug version. Do not run
   # publish lifecycle hooks here: prepublishOnly rewrites package.json back to
@@ -777,7 +802,8 @@ if [[ "$DO_INSTALL" == "1" ]]; then
     msg "安装前先停止 $SCOPE 服务"
     stop_service_for_install
   fi
-  "$NPM_FOR_WAND" install -g --prefix "$WAND_PREFIX" "$PACK_DIR/$PACK_FILE" --no-audit --no-fund
+  # sudo 继承的私有 umask 不应让包目录变成 0700，阻断 service 的普通用户。
+  (umask 022; "$NPM_FOR_WAND" install -g --prefix "$WAND_PREFIX" "$PACK_DIR/$PACK_FILE" --no-audit --no-fund)
   ok "本地 npm 包已安装到 $WAND_PREFIX"
   # npm 可能把全局包重新写成 root 所有、并丢掉 spawn-helper 的 +x。
   # 安装后再修一次，避免随后每一次新建 PTY 都 posix_spawnp failed。

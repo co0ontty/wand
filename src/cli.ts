@@ -189,8 +189,21 @@ async function main(): Promise<void> {
     case "mission:create":
     case "mission:diff":
     case "mission:review":
-    case "mission:review:send": {
+    case "mission:review:send":
+    case "tasks:purge-archived": {
       await runAgentCliCommand(command, args, configPath);
+      break;
+    }
+    case "core:status": {
+      const { checkCoreStatus } = await import("./core-status-cli.js");
+      await checkCoreStatus(configPath);
+      break;
+    }
+    case "core:wait": {
+      const { waitForCoreTurnsComplete } = await import("./core-status-cli.js");
+      const timeoutArg = readFlagValue(args.slice(1), "--timeout");
+      const timeout = timeoutArg === undefined ? 0 : Number(timeoutArg);
+      await waitForCoreTurnsComplete(configPath, timeout);
       break;
     }
     case "decision:configure": {
@@ -282,6 +295,7 @@ Agent runtime:
   wand mission:diff <mission-id> <attempt-id>
   wand mission:review <mission-id> <attempt-id> --file <path> --body <text> [--line N]
   wand mission:review:send <mission-id> <attempt-id>
+  wand tasks:purge-archived   Hard-delete every archived board task
   wand decide --stdin | --status  Use the session-bound local decision service
   wand decision:configure --python <path> --model <dir> | --disable
   wand decision:skills [--providers pi,claude,...]  Install managed user-level skills
@@ -375,6 +389,7 @@ async function runAgentCliCommand(command: string, args: string[], configPath: s
       const attemptId = required(args[2], "wand mission:review:send <mission-id> <attempt-id>");
       return output(await api.post(`/api/missions/${encodeURIComponent(missionId)}/attempts/${encodeURIComponent(attemptId)}/review/send`, {}));
     }
+    case "tasks:purge-archived": return output(await api.del("/api/wand-tasks/archived"));
   }
 }
 
@@ -520,6 +535,8 @@ async function registerInstance(
 
   const ipc = startIpcServer({
     socketPath: sockPath,
+    coreStatusProvider: () => handle.structuredSessions.getCoreTurnStatus(),
+    beginCoreDrain: () => handle.structuredSessions.beginCoreRestartDrain(),
     snapshotProvider: () => buildSnapshotData({
       version: handle.version,
       url: pidInfo.url,

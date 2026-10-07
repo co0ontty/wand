@@ -25,6 +25,7 @@ function fakeElement(): any {
     children: [],
     classList: { contains: () => false },
     appendChild(child: any) {
+      child.parentNode?.removeChild(child);
       child.parentNode = element;
       element.children.push(child);
       return child;
@@ -143,6 +144,32 @@ test("嵌入终端和桌面使用同一基础字号", () => {
   const h = harness({ embed: true });
   assert.equal(h.pool.createPooledTerminal("S1", h.container), true);
   assert.equal(h.created[0].options.fontSize, 13);
+});
+
+test("分屏方向重挂载只迁移终端容器，保留实例、缓冲和缩放直到实际释放", () => {
+  const h = harness();
+  h.pool.createPooledTerminal("S1", h.container);
+  const terminal = h.created[0];
+  const wrap = h.container.children[0];
+  terminal.buffer.active.ydisp = 12;
+  terminal.buffer.active.ybase = 40;
+  h.pool.setPooledTerminalScale("S1", 1.5);
+  const fontSize = terminal.options.fontSize;
+
+  const nextContainer = fakeElement();
+  assert.equal(h.pool.createPooledTerminal("S1", nextContainer), true);
+  assert.equal(h.created.length, 1, "移动容器不重新创建 xterm");
+  assert.equal(nextContainer.children[0], wrap, "迁移原终端 DOM");
+  assert.equal(h.container.children.length, 0);
+  assert.equal(terminal.buffer.active.ydisp, 12);
+  assert.equal(terminal.buffer.active.ybase, 40);
+  assert.equal(h.pool.getPooledTerminalScale("S1"), 1.5);
+  assert.equal(terminal.options.fontSize, fontSize);
+
+  h.pool.disposePooledTerminal("S1");
+  assert.equal(nextContainer.children.length, 0);
+  assert.equal(h.pool.hasPooledTerminal("S1"), false);
+  assert.equal(h.pool.getPooledTerminalScale("S1"), 1);
 });
 
 test("退出分屏清空整个池时同样丢弃缩放记录", () => {

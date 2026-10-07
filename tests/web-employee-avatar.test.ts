@@ -8,7 +8,6 @@ import ts from "typescript";
 import { employeeAvatarProvider, renderEmployeeCliBadge } from "../src/web-ui/react/agents/employee-identity.js";
 import { PROVIDER_IDS } from "../src/web-ui/provider-identity.js";
 import { EmployeeAvatar } from "../src/web-ui/react/agents/employee-avatar.js";
-import * as catCoats from "../src/web-ui/react/ai-teams/cat-coats.js";
 
 const employee = { id: "e_cli", name: "员工", avatar: "cat:2", agents: [{ provider: "codex" }, { provider: "pi" }] };
 const source = readFileSync(new URL("../src/web-ui/browser/chat-render.ts", import.meta.url), "utf8");
@@ -29,8 +28,10 @@ test("all supported CLI logos appear as one badge outside the avatar face", () =
     assert.match(html, /wand-team-avatar wand-employee-avatar/);
     assert.match(html, /data-size="sm"/);
     assert.match(html, new RegExp(`data-provider-logo="${provider}"`));
-    assert.equal((html.match(/class="wand-employee-avatar-provider"/g) ?? []).length, 1);
-    assert.ok(html.indexOf("wand-employee-avatar-provider") > html.indexOf("</svg></span>"), "badge is not clipped by face");
+    assert.equal((html.match(/class="[^"]*\bwand-employee-avatar-provider\b[^"]*"/g) ?? []).length, 1);
+    assert.match(html, /ant-badge/);
+    assert.match(html, /ant-avatar-square/);
+    assert.ok(html.indexOf("wand-employee-avatar-provider") > html.indexOf("</svg></span>"), "library badge is outside the avatar face");
     assert.match(html, /role="img" aria-label="[^\"]+ CLI"/);
     assert.match(renderEmployeeCliBadge(provider), new RegExp(`data-provider-logo="${provider}"`));
   }
@@ -47,16 +48,19 @@ test("uploaded employee avatars retain their image and missing CLI has no generi
 });
 
 test("contact presence indicator remains visible without covering the CLI badge", () => {
-  const styles = readFileSync(new URL("../src/web-ui/content/styles.css", import.meta.url), "utf8");
-  assert.match(styles, /\.im-sidebar-item-avatar-wrap:has\(\.wand-employee-avatar-provider\) > \.im-sidebar-presence-dot \{\s*top: -2px;\s*bottom: auto;/);
+  const component = readFileSync(new URL("../src/web-ui/react/shell/im-sidebar-item.tsx", import.meta.url), "utf8");
+  assert.match(component, /data-glow=\{effectiveGlow\}/);
+  assert.match(component, /<Badge dot=\{effectiveGlow !== "none"\} color=\{sidebarGlowColor\(effectiveGlow\)\}/);
+  assert.match(component, /im-sidebar-item-avatar-wrap/);
+  assert.doesNotMatch(component, /im-sidebar-presence-dot/);
 });
 
-function legacyAvatar(provider: string, avatar = employee.avatar): string {
+function legacyReply(provider: string, avatar = employee.avatar): string {
   const exports: Record<string, any> = {};
   const noop = () => {};
   const fallback = new Proxy({}, { get: () => noop });
   const code = ts.transpileModule(source + `
-    export function employeeAvatarFixture() { return chatAvatar("assistant"); }
+    export function replyFixture() { return renderChatMessage({ role: "assistant", content: "通用会话回复" }, null, 0, {}, {}); }
   `, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   runInNewContext(code, {
     exports,
@@ -64,25 +68,34 @@ function legacyAvatar(provider: string, avatar = employee.avatar): string {
       if (id === "./state") return { state: { selectedId: "s_cli", sessions: [{
         id: "s_cli", employeeId: employee.id, employeeName: employee.name, employeeAvatar: avatar, provider,
       }] } };
-      if (id === "../react/agents/employee-identity.js") return { renderEmployeeCliBadge };
-      if (id === "../react/agents/employee-repository.js") return { cachedSiliconEmployee: () => null, subscribeSiliconEmployeeCache: noop };
-      if (id === "../react/ai-teams/cat-coats") return catCoats;
+      if (id === "../markdown.js") return { renderChatMarkdown: (value: string) => value };
       if (id === "./utils") return { escapeHtml: (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;") };
       return fallback;
     },
     window: { matchMedia: () => ({ matches: false }) }, document: { addEventListener: noop },
     setTimeout: noop, clearTimeout: noop,
   });
-  return exports.employeeAvatarFixture();
+  return exports.replyFixture();
 }
 
-test("ordinary chat renderer badges the actual CLI even after employee deletion", () => {
-  assert.match(legacyAvatar("pi"), /pixel-avatar wand-employee-avatar/);
-  assert.match(legacyAvatar("pi"), /data-provider-logo="pi"/);
-  const changed = legacyAvatar("codex", "data:image/png;base64,AAA");
-  assert.match(changed, /data-provider-logo="codex"/);
-  assert.match(changed, /src="data:image\/png;base64,AAA"/);
-  assert.doesNotMatch(legacyAvatar("future-cli"), /data-provider-logo/);
-  assert.match(source, /employee: \[session\.employeeId, session\.employeeName, session\.employeeAvatar, session\.provider\]/,
-    "provider change invalidates cached avatar rows");
+test("session transcript stays generic with or without employee identity and actual provider changes", () => {
+  for (const provider of ["pi", "codex", "future-cli"]) {
+    for (const avatar of ["", "cat:2", "data:image/png;base64,AAA"]) {
+      const html = legacyReply(provider, avatar);
+      assert.match(html, /通用会话回复/);
+      assert.doesNotMatch(html, /employee|avatar|负责人|员工|查看.*资料/);
+    }
+  }
+  const topbar = readFileSync(new URL("../src/web-ui/react/shell/shell-topbar.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(topbar, /ObjectProfilePanel|EmployeeAvatar|useSiliconEmployees/);
+  assert.match(topbar, /snapshot\.topbar\.title/);
+});
+
+test("contact avatars still support generated faces, explicit cats and uploaded images outside sessions", () => {
+  const generated = renderToStaticMarkup(createElement(EmployeeAvatar, { employee: { ...employee, avatar: "" } }));
+  assert.match(generated, /wand-employee-avatar/);
+  const chosen = renderToStaticMarkup(createElement(EmployeeAvatar, { employee }));
+  assert.match(chosen, /<svg/);
+  const uploaded = renderToStaticMarkup(createElement(EmployeeAvatar, { employee: { ...employee, avatar: "data:image/png;base64,BBB" } }));
+  assert.match(uploaded, /data:image\/png;base64,BBB/);
 });

@@ -1,4 +1,5 @@
 import * as React from "react";
+import { Alert, Card, Empty, Flex, List, Typography } from "antd";
 import { DEFAULT_EMPLOYEE_ID } from "../../../ai-team-types.js";
 import type { UserMemoryView } from "../../../user-memory-types.js";
 import { jsonBody, requestJson } from "../http-adapter.js";
@@ -55,25 +56,35 @@ export function EmployeeMemory({ active }: { active: boolean }): React.ReactElem
     }
   };
 
-  return <section className="wand-employee-memory" aria-label="用户短期记忆">
-    <strong>用户短期记忆</strong>
-    <p>只参考最近 30 天的有效提示词与成功的关键操作，每天整理一次。内容会经敏感信息过滤，整理仍由系统运维员工的 CLI 候选执行；请勿提交凭据。不会修改已有会话、其他员工或工具权限。</p>
-    <div className="wand-employee-memory-actions">
+  return <Card size="small" title="用户短期记忆" className="wand-employee-memory" aria-label="用户短期记忆">
+    <Flex vertical gap={10}>
+    <Typography.Paragraph type="secondary" style={{ margin: 0 }}>
+      只参考最近 30 天的有效提示词与成功的关键操作，每天整理一次。内容会经敏感信息过滤，整理仍由系统运维员工的 CLI 候选执行；请勿提交凭据。不会修改已有会话、其他员工或工具权限。
+    </Typography.Paragraph>
+    <Flex wrap gap={8} className="wand-employee-memory-actions">
       {(["toggle", "refresh", "clear"] as const).map((action) => <WandButton
         key={action} size="small" kind="ghost" disabled={!view || !!pending || (action === "refresh" && !view.enabled)}
         aria-busy={pending === action} onClick={() => void act(action)}
       >{pending === action ? "处理中…" : results[action]
         || (action === "toggle" ? view?.enabled ? "暂停记忆" : "恢复记忆"
           : action === "refresh" ? "整理记忆" : "清空记忆")}</WandButton>)}
-    </div>
-    <p aria-live="polite">{view
-      ? `${view.enabled ? "已开启" : "已暂停"} · ${view.eventCount} 条近期记录${view.profile ? ` · 最近整理 ${new Date(view.profile.generatedAt).toLocaleString()}` : " · 尚未形成偏好"}`
-      : "正在读取记忆…"}</p>
-    {view?.profile?.preferences.length ? <ul>
-      {view.profile.preferences.map((entry, index) => <li key={`${entry.category}-${index}`}>
+    </Flex>
+    <Typography.Text type="secondary" aria-live="polite">
+      {view
+        ? `${view.enabled ? "已开启" : "已暂停"} · ${view.eventCount} 条近期记录${view.profile ? ` · 最近整理 ${new Date(view.profile.generatedAt).toLocaleString()}` : " · 尚未形成偏好"}`
+        : "正在读取记忆…"}
+    </Typography.Text>
+    <List
+      size="small"
+      dataSource={view?.profile?.preferences ?? []}
+      locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未形成偏好。" /> }}
+      renderItem={(entry, index) => <List.Item key={`${entry.category}-${index}`}>
         <span>{LABELS[entry.category]}：</span>{entry.text}
-      </li>)}
-    </ul> : null}
-    {error || view?.lastError ? <p role="alert" className="wand-team-candidate-error">{error || view?.lastError}</p> : null}
-  </section>;
+      </List.Item>}
+    />
+    {error || view?.lastError
+      ? <Alert className="wand-team-candidate-error" type="error" showIcon role="alert" title={error || view?.lastError} />
+      : null}
+    </Flex>
+  </Card>;
 }

@@ -7,6 +7,52 @@ import type { ExecutionMode, SessionSnapshot } from "./types.js";
 
 export type SessionOwner = "structured" | "pty" | "storage";
 
+export type ProviderHistoryDeleter = Pick<
+  ProcessManager,
+  | "deleteClaudeHistoryFiles"
+  | "deleteCodexHistoryFiles"
+  | "deleteOpenCodeHistorySessions"
+  | "deleteQoderHistoryFiles"
+  | "deletePiHistoryFiles"
+  | "deleteGrokHistoryFiles"
+  | "deleteGeminiHistoryFiles"
+>;
+
+export function deleteProviderNativeHistory(
+  deleter: ProviderHistoryDeleter,
+  provider: string,
+  providerSessionId: string,
+  cwd: string,
+): void {
+  const id = providerSessionId.trim();
+  if (!id) return;
+  switch (provider) {
+    case "claude":
+      deleter.deleteClaudeHistoryFiles([{ claudeSessionId: id, cwd }]);
+      break;
+    case "codex":
+      deleter.deleteCodexHistoryFiles([id]);
+      break;
+    case "opencode":
+      deleter.deleteOpenCodeHistorySessions([id]);
+      break;
+    case "qoder":
+      deleter.deleteQoderHistoryFiles([id]);
+      break;
+    case "pi":
+      deleter.deletePiHistoryFiles([id]);
+      break;
+    case "grok":
+      deleter.deleteGrokHistoryFiles([id]);
+      break;
+    case "gemini":
+      deleter.deleteGeminiHistoryFiles([id]);
+      break;
+    default:
+      break;
+  }
+}
+
 type HiddenSessionStore = Pick<WandStorage, "getConfigValue" | "setConfigValue">;
 
 /** 读取 `hidden_claude_session_ids`；坏数据 / 空值按空集合处理，不抛错。 */
@@ -141,6 +187,12 @@ export class SessionRegistry {
    * 归档 / 取消归档一个会话：只写标记，不杀进程、不删历史；真正的清理留给保留期扫描。
    * 会话可能只存在于 storage（重启后未加载），因此 storage-only 也要能改。
    */
+  /** 停掉空闲 PTY 壳。保留期只对「进程还在、但没有正在处理的回合」调用。 */
+  stop(id: string): SessionSnapshot | null {
+    if (this.ownerOf(id) !== "pty") return this.get(id);
+    return this.processes.stop(id);
+  }
+
   setArchived(id: string, archived: boolean): SessionSnapshot | null {
     const owner = this.ownerOf(id);
     if (owner === "structured") return this.structured.setSessionArchived(id, archived);
@@ -180,9 +232,15 @@ export class SessionRegistry {
       try { cleanupWorktreeSync(snapshot.worktree); } catch { /* never block deletion */ }
     }
     const owner = this.ownerOf(id);
-    if (owner === "structured") this.structured.delete(id);
-    else if (owner === "pty") this.processes.delete(id);
-    else this.storage.deleteSession(id);
+    if (owner === "structured") {
+      this.structured.delete(id);
+    } else if (owner === "pty") {
+      this.processes.delete(id);
+    } else if (snapshot.sessionKind === "structured") {
+      this.structured.delete(id);
+    } else {
+      this.processes.delete(id);
+    }
     return snapshot;
   }
 
@@ -195,13 +253,7 @@ export class SessionRegistry {
       ?? snapshot.structuredState?.provider
       ?? inferProviderFromCommand(snapshot.command)
       ?? "claude";
-    if (provider === "claude") {
-      this.processes.deleteClaudeHistoryFiles([{ claudeSessionId: providerSessionId, cwd: snapshot.cwd }]);
-    } else if (provider === "codex") {
-      this.processes.deleteCodexHistoryFiles([providerSessionId]);
-    } else {
-      return snapshot;
-    }
+    deleteProviderNativeHistory(this.processes, provider, providerSessionId, snapshot.cwd);
     addHiddenSessionIds(this.storage, [providerSessionId]);
     return snapshot;
   }

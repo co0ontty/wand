@@ -15,6 +15,7 @@ import { registerTaskRoutes } from "../src/server-task-routes.js";
 import { registerWorkspaceRoutes } from "../src/server-workspace-routes.js";
 import { SessionRegistry } from "../src/session-registry.js";
 import { selectEmployeeCandidate } from "../src/silicon-employee-dispatch.js";
+import { EMPLOYEE_CREATION_DEFAULTS_PREF, resolveSiliconEmployeeDefaults } from "../src/silicon-employee-defaults.js";
 import { StructuredSessionManager } from "../src/structured-session-manager.js";
 import { WandStorage } from "../src/storage.js";
 import { parseSiliconEmployeeInput, registerSiliconEmployeeRoutes } from "../src/server-employee-routes.js";
@@ -23,8 +24,10 @@ import {
   buildEmployeeDraftPrompt,
   employeeAgentFor,
   generateSiliconEmployeeDraft,
+  normalizeSiliconEmployeeDraft,
   parseSiliconEmployeeDraft,
   SiliconEmployeeDraftError,
+  validateStructuredEmployeeDraft,
 } from "../src/silicon-employee-draft.js";
 import type { SiliconEmployee } from "../src/ai-team-types.js";
 import type { StructuredRunnerAdapter } from "../src/structured-runner.js";
@@ -150,6 +153,15 @@ test("employee candidates keep configured order and skip an unavailable CLI", ()
   assert.equal(selectEmployeeCandidate(employee(), () => false).index, 0);
 });
 
+test("普通任务派发跳过 SDK 候选，显式员工会话仍可选择 SDK", () => {
+  const configured = { ...employee(), agents: [{ ...PI, engine: "sdk" as const }, CODEX] };
+  const cli = selectEmployeeCandidate(configured, () => true, { skipSdk: true });
+  assert.equal(cli.index, 1);
+  assert.equal(cli.agent.provider, "codex");
+  const explicit = selectEmployeeCandidate(configured, () => true);
+  assert.equal(explicit.index, 0);
+  assert.equal(explicit.agent.engine, "sdk");
+});
 test("employee HTTP create cannot replace an existing id; sessions and tasks retain identity snapshots", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "wand-employee-http-"));
   const storage = new WandStorage(join(root, "wand.db"));
@@ -207,6 +219,16 @@ test("employee HTTP create cannot replace an existing id; sessions and tasks ret
   assert.equal(storage.getSession(sessionId)?.systemPrompt, "你是严谨的测试工程师。");
   assert.equal(storage.getSession(sessionId)?.employeeId, "e_test123");
   assert.equal(storage.getSession(sessionId)?.employeeCandidates?.length, 2);
+
+  const customSession = await request("/api/structured-sessions", "POST", {
+    cwd: root, employeeId: "e_test123", overrideCli: true, provider: "pi", model: "custom-pi-model",
+  });
+  assert.equal(customSession.status, 201, JSON.stringify(customSession.json));
+  assert.equal(customSession.json?.employeeId, "e_test123");
+  assert.equal(customSession.json?.provider, "pi");
+  assert.equal(customSession.json?.selectedModel, "custom-pi-model");
+  assert.equal(customSession.json?.employeeName, "测试员工");
+
   assert.equal((await request("/api/structured-sessions", "POST", {
     cwd: root, employeeId: "e_test123", runner: "pty",
   })).status, 400);
@@ -451,4 +473,218 @@ test("员工起草接口：注入生成器返回草稿，失败以 400 回传", 
   const failed = await post({ expectation: "boom" });
   assert.equal(failed.status, 400, JSON.stringify(failed.json));
   assert.match(String(failed.json?.error), /系统 AI 不可用/);
+});
+
+test("员工草稿：重名/非法候选在统一校验入口被结构化拒绝", () => {
+  // 名字与已有员工重复：结构化可恢复错误，不静默改名。
+  assert.throws(
+    () => normalizeSiliconEmployeeDraft(
+      { name: "既有员工", duty: "职责", prompt: "你是严谨的工程师。", provider: "claude" },
+      { existingNames: ["既有员工"] },
+    ),
+    (error: unknown) => error instanceof SiliconEmployeeDraftError && error.code === "DRAFT_DUPLICATE_NAME",
+  );
+  // 大小写不敏感的重名判定。
+  assert.throws(
+    () => normalizeSiliconEmployeeDraft(
+      { name: "QA Bot", duty: "职责", prompt: "你是测试工程师。", provider: "claude" },
+      { existingNames: ["qa bot"] },
+    ),
+    /DRAFT_DUPLICATE_NAME|已有名叫/,
+  );
+
+  // 严格模式（HR 结构化草稿）：越出允许集合的 provider 直接拒绝，不悄悄换成别的资源。
+  assert.throws(
+    () => validateStructuredEmployeeDraft(
+      { name: "接口守夜人", duty: "守接口", prompt: "你是值守工程师。", agents: [{ provider: "codex" }] },
+      { allowedProviders: ["pi", "claude"] },
+    ),
+    (error: unknown) => error instanceof SiliconEmployeeDraftError && error.code === "DRAFT_PROVIDER_NOT_ALLOWED",
+  );
+  // 未知 provider：拒绝而非兜底。
+  assert.throws(
+    () => validateStructuredEmployeeDraft(
+      { name: "接口守夜人", duty: "守接口", prompt: "你是值守工程师。", provider: "not-a-cli" },
+      { allowedProviders: ["pi"] },
+    ),
+    (error: unknown) => error instanceof SiliconEmployeeDraftError && error.code === "DRAFT_INVALID_PROVIDER",
+  );
+  // 缺执行候选：结构化错误并定位字段。
+  assert.throws(
+    () => validateStructuredEmployeeDraft({ name: "甲", duty: "职责", prompt: "你是……。" }, { allowedProviders: ["pi"] }),
+    (error: unknown) => error instanceof SiliconEmployeeDraftError
+      && error.code === "DRAFT_MISSING_AGENT" && error.field === "provider",
+  );
+  // SDK 引擎只允许 Pi；非 Pi 越界拒绝。
+  assert.throws(
+    () => validateStructuredEmployeeDraft(
+      { name: "甲", duty: "职责", prompt: "你是……。", agents: [{ provider: "claude", engine: "sdk" }] },
+      { allowedProviders: ["claude", "pi"] },
+    ),
+    /SDK/,
+  );
+  // 重复候选拒绝。
+  assert.throws(
+    () => validateStructuredEmployeeDraft(
+      { name: "甲", duty: "职责", prompt: "你是……。", agents: [{ provider: "pi" }, { provider: "pi" }] },
+      { allowedProviders: ["pi", "claude"] },
+    ),
+    /重复/,
+  );
+
+  // 完整结构化草稿：agent 与 candidates 一致，旧客户端读 agent 不受影响。
+  const ok = validateStructuredEmployeeDraft(
+    { name: "接口守夜人", duty: "守接口", prompt: "你是值守工程师。", agents: [{ provider: "pi", model: "default" }] },
+    { allowedProviders: ["pi", "claude"] },
+  );
+  assert.equal(ok.agent.provider, "pi");
+  assert.deepEqual(ok.candidates, [ok.agent]);
+});
+
+test("员工默认解析：已保存创建配置 → 服务端默认 → 需要用户选择", () => {
+  // 1. 已保存的员工创建配置最优先（两端读到同一份）。
+  const saved = { provider: "pi", model: "default", thinkingEffort: "off", mode: "default", kind: "structured" } as const;
+  const withSaved = resolveSiliconEmployeeDefaults({ savedAgent: saved, config: { defaultProvider: "codex" } });
+  assert.equal(withSaved.source, "saved");
+  assert.equal(withSaved.provider, "pi");
+  assert.deepEqual(withSaved.agent, saved);
+
+  // 2. 没有保存配置时解析服务端 defaultProvider/defaultModel。
+  const server = resolveSiliconEmployeeDefaults({ savedAgent: null, config: { defaultProvider: "codex", defaultCodexModel: "gpt-5" } });
+  assert.equal(server.source, "server");
+  assert.equal(server.provider, "codex");
+  assert.deepEqual(server.agent, employeeAgentFor("codex"));
+  assert.equal(server.configured, true);
+
+  // 3. 两者都没有：如实返回需要用户选择，不硬编码任何端的默认。
+  const none = resolveSiliconEmployeeDefaults({ savedAgent: null, config: { defaultProvider: undefined } });
+  assert.equal(none.configured, false);
+  assert.equal(none.requiresUserChoice, true);
+  assert.equal(none.provider, undefined);
+});
+
+test("员工草稿接口：结构化草稿走同一校验，不调用模型且不改实体", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "wand-employee-structured-draft-"));
+  const storage = new WandStorage(join(root, "wand.db"));
+  let generateCalls = 0;
+  const app = express();
+  app.use(express.json());
+  registerSiliconEmployeeRoutes(app, {
+    storage,
+    isProviderAvailable: (agent) => ["pi", "claude", "codex"].includes(agent.provider),
+    generateDraft: async () => { generateCalls += 1; return { name: "不该出现", duty: "", prompt: "", agent: employeeAgentFor("claude") }; },
+  });
+  app.use(jsonErrorHandler);
+  const server = createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  t.after(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    storage.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+  const postDraft = async (body: unknown) => {
+    const response = await fetch(`${base}/api/silicon-employees/draft`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    });
+    return { status: response.status, json: await response.json() as Record<string, unknown> };
+  };
+
+  storage.saveSiliconEmployee(employee({ name: "既有员工" }));
+  const employeesBefore = storage.listSiliconEmployees({ includeArchived: true }).length;
+  const tasksBefore = storage.listWandTasks().length;
+
+  // 结构化草稿校验：0 次模型调用，usage 如实标注。
+  const validated = await postDraft({
+    draft: { name: "接口守夜人", duty: "守护接口稳定", prompt: "你是值守接口的工程师。", provider: "pi" },
+  });
+  assert.equal(validated.status, 200, JSON.stringify(validated.json));
+  assert.equal(generateCalls, 0, "结构化草稿不能触发第二次模型调用");
+  assert.deepEqual((validated.json.usage as { generateCalls: number }).generateCalls, 0);
+  assert.equal((validated.json.usage as { path: string }).path, "validated");
+  const draft = validated.json.draft as { name: string; agent: { provider: string }; candidates: unknown[] };
+  assert.equal(draft.name, "接口守夜人");
+  assert.equal(draft.agent.provider, "pi");
+  assert.equal(draft.candidates.length, 1);
+
+  // 非法候选：结构化错误码。
+  const illegal = await postDraft({
+    draft: { name: "越界员工", duty: "职责", prompt: "你是……。", provider: "gemini" },
+  });
+  assert.equal(illegal.status, 400);
+  assert.equal(illegal.json.code, "DRAFT_PROVIDER_NOT_ALLOWED");
+
+  // 生成路径空期望：调模型前就被拒，且不落任何实体。
+  const empty = await postDraft({ expectation: "  " });
+  assert.equal(empty.status, 400);
+  assert.equal(empty.json.code, "EMPTY_EXPECTATION");
+
+  // 生成路径错误回显原口语输入，客户端可继续编辑。
+  const echoed = await postDraft({ expectation: "不该被调用的期望" });
+  assert.equal(generateCalls, 1, "普通期望仍走一次生成");
+  const duplicate = await postDraft({
+    draft: { name: "既有员工", duty: "职责", prompt: "你是……。", provider: "pi" },
+  });
+  assert.equal(duplicate.status, 400);
+  assert.equal(duplicate.json.code, "DRAFT_DUPLICATE_NAME");
+  assert.equal(duplicate.json.field, "name");
+  void echoed;
+
+  assert.equal(storage.listSiliconEmployees({ includeArchived: true }).length, employeesBefore, "草稿接口不能保存员工");
+  assert.equal(storage.listWandTasks().length, tasksBefore, "草稿接口不能创建任务");
+});
+
+test("员工 defaults 接口：Web/Android 同配置同响应，可显式保存创建默认", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "wand-employee-defaults-"));
+  const storage = new WandStorage(join(root, "wand.db"));
+  const config = { ...defaultConfig(), defaultProvider: "codex" as const };
+  const app = express();
+  app.use(express.json());
+  registerSiliconEmployeeRoutes(app, { storage, config });
+  app.use(jsonErrorHandler);
+  const server = createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  t.after(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    storage.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+  const getDefaults = async () => {
+    const response = await fetch(`${base}/api/silicon-employees/draft/defaults`);
+    return { status: response.status, json: await response.json() as Record<string, unknown> };
+  };
+
+  // 未保存创建配置：解析服务端 defaultProvider；两个客户端各取一次拿到同一份。
+  const web = await getDefaults();
+  const android = await getDefaults();
+  assert.equal(web.status, 200);
+  assert.deepEqual(web.json, android.json, "同服务配置下两端 defaults 必须一致");
+  assert.equal(web.json.source, "server");
+  assert.equal(web.json.provider, "codex");
+
+  // 显式保存后：来源切到 saved，仍是同一解析函数。
+  const put = await fetch(`${base}/api/silicon-employees/draft/defaults`, {
+    method: "PUT", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ provider: "pi", model: "default", kind: "structured" }),
+  });
+  assert.equal(put.status, 200);
+  const after = await getDefaults();
+  assert.equal(after.json.source, "saved");
+  assert.equal((after.json.agent as { provider: string }).provider, "pi");
+
+  // PTY 候选拒绝。
+  const bad = await fetch(`${base}/api/silicon-employees/draft/defaults`, {
+    method: "PUT", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ provider: "claude", kind: "pty" }),
+  });
+  assert.equal(bad.status, 400);
+
+  // 损坏的已保存配置回落到服务端默认，不 500。
+  storage.setPreference(EMPLOYEE_CREATION_DEFAULTS_PREF, { provider: "not-a-cli" });
+  const fallback = await getDefaults();
+  assert.equal(fallback.json.source, "server");
+
+  // 保存默认不创建员工实体。
+  assert.equal(storage.listSiliconEmployees({ includeArchived: true }).length, 0);
 });

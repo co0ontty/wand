@@ -41,6 +41,11 @@ function harness() {
     ptyDeletes: [] as string[],
     storageDeletes: [] as string[],
     claudeDeletes: [] as string[],
+    piDeletes: [] as string[],
+    grokDeletes: [] as string[],
+    geminiDeletes: [] as string[],
+    opencodeDeletes: [] as string[],
+    qoderDeletes: [] as string[],
     slimStorageLoads: 0,
   };
 
@@ -75,6 +80,11 @@ function harness() {
       return items.length;
     },
     deleteCodexHistoryFiles: () => 0,
+    deletePiHistoryFiles: (ids: string[]) => { calls.piDeletes.push(...ids); return ids.length; },
+    deleteGrokHistoryFiles: (ids: string[]) => { calls.grokDeletes.push(...ids); return ids.length; },
+    deleteGeminiHistoryFiles: (ids: string[]) => { calls.geminiDeletes.push(...ids); return ids.length; },
+    deleteOpenCodeHistorySessions: (ids: string[]) => { calls.opencodeDeletes.push(...ids); return ids.length; },
+    deleteQoderHistoryFiles: (ids: string[]) => { calls.qoderDeletes.push(...ids); return ids.length; },
   } as unknown as ProcessManager;
 
   const storage = {
@@ -164,4 +174,32 @@ test("SessionRegistry deletion chooses one owner and preserves provider history 
   assert.deepEqual(h.calls.storageDeletes, []);
   assert.deepEqual(h.calls.claudeDeletes, [value.claudeSessionId]);
   assert.deepEqual(JSON.parse(h.config.get("hidden_claude_session_ids") ?? "[]"), [value.claudeSessionId]);
+});
+
+test("SessionRegistry deletion routes storage-only sessions to manager delete for artifact cleanup", () => {
+  const h = harness();
+  const storedStructured = {
+    ...snapshot("stored-structured", "structured", "persisted-structured"),
+    claudeSessionId: "pi-session-001",
+    provider: "pi" as const,
+  };
+  const storedPty = {
+    ...snapshot("stored-pty", "pty", "persisted-pty"),
+    claudeSessionId: "grok-session-002",
+    provider: "grok" as const,
+  };
+  h.storageRows.set(storedStructured.id, storedStructured);
+  h.storageRows.set(storedPty.id, storedPty);
+
+  // Stored structured session routed to structured.delete (which cleans storage + logger)
+  const del1 = h.registry.deleteWithProviderHistory(storedStructured.id);
+  assert.equal(del1?.title, "persisted-structured");
+  assert.deepEqual(h.calls.structuredDeletes, [storedStructured.id]);
+  assert.deepEqual(h.calls.piDeletes, [storedStructured.claudeSessionId]);
+
+  // Stored PTY session routed to processes.delete (which cleans storage + logger)
+  const del2 = h.registry.deleteWithProviderHistory(storedPty.id);
+  assert.equal(del2?.title, "persisted-pty");
+  assert.deepEqual(h.calls.ptyDeletes, [storedPty.id]);
+  assert.deepEqual(h.calls.grokDeletes, [storedPty.claudeSessionId]);
 });

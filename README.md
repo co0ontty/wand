@@ -135,6 +135,8 @@ npm run check              # TypeScript type check
 npm run build              # Compile and copy static assets to dist/
 ```
 
+On this configured development machine, use `~/start.sh` to build/install the working tree and restart, `~/start.sh --restart` to restart without rebuilding, or `~/start.sh --status` to check status. This user-home helper enters the project and handles sudo locally; do not prefix it with `sudo`. It is not included in a fresh clone, and credentials stay outside the repository. Restart safety rules remain in [AGENTS.md](AGENTS.md).
+
 Use an isolated config for testing:
 
 ```bash
@@ -315,6 +317,8 @@ npm run dev                # 从源码直接启动开发服务器
 npm run check              # TypeScript 类型检查
 npm run build              # 编译 + 复制静态资源到 dist/
 ```
+
+本机开发环境统一调用用户主目录入口：`~/start.sh` 构建/安装当前代码并重启，`~/start.sh --restart` 仅重启、不重新构建，`~/start.sh --status` 查状态。入口自动进入项目并在本地处理 sudo，外层不要再加 sudo；它是本机配置，不随新克隆提供，凭据不入仓库。重启安全约束仍以 [AGENTS.md](AGENTS.md) 为准。
 
 隔离测试环境（不影响生产实例）：
 

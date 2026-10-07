@@ -120,6 +120,39 @@ test("decision card summary stays bounded and deterministic on hostile input", (
     assert.equal(decisionCardSummary({ command }, { content })?.outcome, undefined, content);
 });
 
+test("core（进程内 harness）决策工具：识别、请求要点与结论都走同一套卡片语义", () => {
+  const input = {
+    state: "用户在问退款政策，已知订单已发货。",
+    questions: JSON.stringify({ refund: { type: "noul", instructions: "是否应该直接退款？" } }),
+  };
+  assert.equal(isDecisionToolCall({ type: "tool_use", name: "decision_evaluate", input }), true);
+  // 其它工具不能被当成决策，即使名字里带 decision
+  assert.equal(isDecisionToolCall({ type: "tool_use", name: "knowledge_search", input }), false);
+  assert.equal(isDecisionToolCall({ type: "tool_use", name: "decision_configure", input }), false);
+
+  const result = JSON.stringify({ model: "aac6fef/laya-multilingual-mlx", answers: { refund: { type: "noul", noul: 0.68 } }, usage: { input_tokens: 120, output_tokens: 0 } });
+  const summary = decisionCardSummary(input, { content: result })!;
+  assert.equal(summary.mode, "noul");
+  assert.equal(summary.questions, 1);
+  assert.equal(summary.outcome, "refund=P(true) 68%");
+  assert.match(summary.preview ?? "", /退款政策/);
+
+  // 投影到客户端消息上也一样（core 的 tool_use 就走这条路径）
+  const enriched = enrichStructuredMessages([
+    { role: "assistant", content: [{ type: "tool_use", id: "core-d1", name: "decision_evaluate", input }] },
+    { role: "assistant", content: [{ type: "tool_result", tool_use_id: "core-d1", content: result }] },
+  ]);
+  assert.equal((enriched[0].content[0] as ToolUseBlock).semantic?.kind, "decision");
+  assert.equal((enriched[0].content[0] as ToolUseBlock).semantic?.summary?.outcome, "refund=P(true) 68%");
+  assert.equal((enriched[1].content[0] as ToolResultBlock).semantic?.summary?.questions, 1);
+
+  // questions 不是合法 JSON 时不编题数/结论（但仍然是决策卡）
+  const broken = decisionCardSummary({ state: "x", questions: "{不是 JSON" }, { content: result });
+  assert.equal(isDecisionToolCall({ type: "tool_use", name: "decision_evaluate", input: { state: "x", questions: "{不是 JSON" } }), true);
+  assert.equal(broken?.questions, 1, "题数只能来自结果侧，不从损坏的请求体猜");
+  assert.equal(broken?.preview, "x");
+});
+
 test("compact, legacy, result-only windows and defaults preserve decision bodies", () => {
   const messages: ConversationTurn[] = [{ role: "assistant", content: [use(), result()] }];
   const enriched = enrichStructuredMessages(messages);

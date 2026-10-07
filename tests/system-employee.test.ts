@@ -25,6 +25,7 @@ import type { SessionSnapshot } from "../src/types.js";
 
 const CLAUDE = { provider: "claude", model: "default", thinkingEffort: "off", mode: "default", kind: "structured" } as const;
 const GROK = { provider: "grok", model: "grok-4.5", thinkingEffort: "off", mode: "default", kind: "structured" } as const;
+const PI = { provider: "pi", model: "default", thinkingEffort: "off", mode: "default", kind: "structured" } as const;
 
 const config = {
   defaultModel: "claude-sonnet-4-6",
@@ -202,6 +203,15 @@ test("候选链：空模型跟随 provider 默认，PTY 候选与内部 AI 调�
   assert.deepEqual(systemEmployeeCliCandidates(null), []);
 });
 
+test("系统应用候选链会跳过员工中启用的 SDK", () => {
+  const chain = systemEmployeeCliCandidates({
+    agents: [
+      { ...PI, engine: "sdk" },
+      { ...CLAUDE, provider: "grok", model: "grok-4.5" },
+    ],
+  });
+  assert.deepEqual(chain, [{ provider: "grok", model: "grok-4.5", thinkingEffort: "off" }]);
+});
 test("系统 AI：CLI 模式按候选链取首个已安装工具，并带上运维人设", async () => {
   const root = mkdtempSync(join(tmpdir(), "wand-system-employee-chain-"));
   const bin = join(root, "bin");
@@ -250,6 +260,17 @@ function storageEmployee() {
   };
 }
 
+test("系统员工只有 SDK 候选时不回退到默认 provider", async () => {
+  const context = resolveSystemAiContext(session(), { ...config, systemAiCli: "claude", systemAiModel: "fallback" }, {
+    ...storageEmployee(), agents: [{ ...PI, engine: "sdk" }],
+  });
+  assert.equal(context.employeeChannelOnly, true);
+  assert.equal(context.cliCandidates, undefined);
+  await assert.rejects(
+    callConfiguredAiText({ system: "s", prompt: "p" }, process.cwd(), "中文", context),
+    /已跳过 SDK 候选/,
+  );
+});
 test("角色设定只做前缀，任务自己的输出格式仍排在后面", () => {
   const merged = withOpsPersona({ system: "只输出一行 JSON。", prompt: "x" }, SYSTEM_EMPLOYEE_PROMPT);
   assert.equal(merged.system, `${SYSTEM_EMPLOYEE_PROMPT}\n\n只输出一行 JSON。`);

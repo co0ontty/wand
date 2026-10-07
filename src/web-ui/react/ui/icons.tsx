@@ -38,11 +38,13 @@ export type WandIconName =
   | "image"
   | "info"
   | "keyboard"
+  | "lock"
   | "logout"
   | "markdown"
   | "merge"
   | "mic"
   | "milestone"
+  | "pin"
   | "more"
   | "paperclip"
   | "parallel"
@@ -66,6 +68,7 @@ export type WandIconName =
   | "task"
   | "terminal"
   | "trash"
+  | "unlock"
   | "up"
   | "video"
   | "warning"
@@ -76,11 +79,9 @@ export function workspaceTaskIconName(isolated: boolean): "branch" | "task" {
   return isolated ? "branch" : "task";
 }
 
-/** Appica's buttons and navigation links detect their icon slot with
- *  `has-data-[icon=start|end]` and adjust the leading/trailing padding. Wand's
- *  icons carry their own name in `data-icon` for `[data-icon="..."]` styling
- *  hooks, so the slot is opt-in: pass `slot` and the element reports the Appica
- *  slot instead, while the name moves to `data-wand-icon`. */
+/** Stable icon metadata. `slot` identifies an optional leading/trailing
+ * adornment; `data-wand-icon` always retains the real icon identity. Existing
+ * consumers can continue styling `data-icon` without coupling to a library. */
 export type WandIconSlot = "start" | "end";
 
 export function WandIcon({
@@ -103,7 +104,7 @@ export function WandIcon({
     fill: "none",
     stroke: "currentColor",
     strokeWidth,
-    // Appica's descendant utilities otherwise override the SVG attributes.
+    // Explicit dimensions keep legacy host styles from resizing icon adornments.
     style: { width: size, height: size, strokeWidth },
     strokeLinecap: "round" as const,
     strokeLinejoin: "round" as const,
@@ -185,6 +186,10 @@ export function WandIcon({
       return <svg {...common}><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>;
     case "keyboard":
       return <svg {...common}><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6"/></svg>;
+    case "lock":
+      return <svg {...common}><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4M12 15v2"/></svg>;
+    case "unlock":
+      return <svg {...common}><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.8-1.2M12 15v2"/></svg>;
     case "logout":
       return <svg {...common}><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>;
     case "markdown":
@@ -195,6 +200,8 @@ export function WandIcon({
       return <svg {...common}><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><line x1="12" y1="18" x2="12" y2="21"/><line x1="9" y1="21" x2="15" y2="21"/></svg>;
     case "milestone":
       return <svg {...common}><path d="M5 21V4"/><path d="M5 5h11l-1.6 3.5L16 12H5z"/></svg>;
+    case "pin":
+      return <svg {...common}><path d="m9 3 6 0-1 5 4 4v2h-5v7l-1-2-1 2v-7H6v-2l4-4z"/></svg>;
     case "more":
       return <svg {...common}><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>;
     case "paperclip":

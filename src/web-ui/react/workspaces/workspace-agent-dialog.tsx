@@ -1,3 +1,6 @@
+import { Alert, Flex } from "antd";
+import "../issues/library-layout";
+import { TaskForm } from "../issues/form-controls";
 import {
   type FormEvent,
   useEffect,
@@ -41,10 +44,12 @@ export function WorkspaceAgentDialog({
   const [employeeId, setEmployeeId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const choiceTouched = React.useRef(false);
 
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
+    choiceTouched.current = false;
     setSubmitting(false);
     setError("");
     setTarget(initialProvider);
@@ -53,7 +58,7 @@ export function WorkspaceAgentDialog({
     setModel(workspaceModelDefault(initialProvider));
     void httpNewSessionRepository.loadConfig()
       .then((config) => {
-        if (cancelled) return;
+        if (cancelled || choiceTouched.current) return;
         const savedProvider = WORKSPACE_AGENT_OPTIONS.some((option) => option.value === config.defaultProvider)
           ? config.defaultProvider as WorkspaceSessionTarget
           : null;
@@ -91,17 +96,13 @@ export function WorkspaceAgentDialog({
       onOpenChange={(nextOpen) => { if (!nextOpen) onDismiss(); }}
       title="新建工作窗口"
       description="在当前任务中选择 CLI 工具，以及结构化或 PTY 会话。"
-      className="wand-new-session-dialog wand-workspace-agent-dialog"
-      overlayClassName="wand-new-session-overlay"
-      titleClassName="wand-new-session-title"
-      descriptionClassName="wand-new-session-description"
-      headerClassName="wand-new-session-header"
+      className="wand-task-library-dialog wand-workspace-agent-modal"
       closeLabel="关闭工作窗口选择"
       testId="workspace-agent-dialog"
       dismissable={!submitting}
     >
-      <form noValidate className="wand-new-session-form" aria-busy={submitting} onSubmit={(event) => void submit(event)}>
-        <div className="wand-new-session-body wand-workspace-agent-body">
+      <TaskForm noValidate aria-busy={submitting} onSubmit={(event) => void submit(event)}>
+        <Flex vertical gap={16}>
           <WorkspaceAgentPicker
             usageEnabled={open}
             target={target}
@@ -109,20 +110,20 @@ export function WorkspaceAgentDialog({
             model={model}
             disabled={submitting}
             employeeId={employeeId}
-            onTargetChange={(next) => { setTarget(next); setModel(workspaceModelDefault(next)); }}
-            onKindChange={setKind}
-            onModelChange={setModel}
-            onEmployeeChange={setEmployeeId}
+            onTargetChange={(next) => { choiceTouched.current = true; setTarget(next); setModel(workspaceModelDefault(next)); }}
+            onKindChange={(next) => { choiceTouched.current = true; setKind(next); }}
+            onModelChange={(next) => { choiceTouched.current = true; setModel(next); }}
+            onEmployeeChange={(next) => { choiceTouched.current = true; setEmployeeId(next); }}
           />
-          {error ? <p className="wand-new-session-error" role="alert">{error}</p> : null}
-        </div>
-        <div className="wand-new-session-footer wand-workspace-agent-footer">
+          {error ? <Alert type="error" showIcon role="alert" title={error}/> : null}
+        <Flex justify="flex-end" gap={8}>
           <WandButton kind="ghost" disabled={submitting} onClick={onDismiss}>取消</WandButton>
           <WandButton kind="primary" size="large" type="submit" disabled={submitting}>
             {submitting ? "正在创建…" : employeeId ? "与员工对话" : `创建 ${WORKSPACE_AGENT_OPTIONS.find((option) => option.value === target)?.label ?? target}`}
           </WandButton>
-        </div>
-      </form>
+        </Flex>
+        </Flex>
+      </TaskForm>
     </WandDialogSurface>
   );
 }

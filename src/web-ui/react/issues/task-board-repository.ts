@@ -95,6 +95,11 @@ export const taskBoardRepository = {
   remove(id: string): Promise<void> {
     return mutateTask(`/api/wand-tasks/${encodeURIComponent(id)}`, { method: "DELETE" }).then(() => undefined);
   },
+  /** 清空归档目录：永久删除归档卡片。省略 workspaceId 表示所有项目；服务端跳过仍在处理的会话。 */
+  purgeArchived(workspaceId?: string | null): Promise<{ ok: boolean; deleted: number; skipped: number }> {
+    return mutateTask(`/api/wand-tasks/archived${workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : ""}`,
+      { method: "DELETE" });
+  },
   /** 用选定的 CLI 工具开一个结构化会话；prompt 作为这次派发的首条消息。 */
   dispatch(
     id: string,

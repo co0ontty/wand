@@ -1,3 +1,5 @@
+import { paintTerminalPanel } from "./terminal-panel-adapter";
+import { mountBrowserButtons } from "./library-buttons.js";
 import { computeFloatingPanelPosition } from "./floating-panel-position";
 import { state, writeStoredBoolean } from "./state";
 import { iconSvg } from "./i18n";
@@ -452,33 +454,6 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           : "top right";
       }
 
-      function renderJoystickPanel() {
-        function keyBtn(key, label, cls) {
-          return '<button type="button" class="wjp-key' + (cls ? " " + cls : "") +
-            '" data-key="' + key + '">' + label + "</button>";
-        }
-        var dpad =
-          '<div class="wjp-dpad">' +
-            '<div class="wjp-dpad-row">' + keyBtn("up", "↑", "wjp-dir") + "</div>" +
-            '<div class="wjp-dpad-row">' +
-              keyBtn("left", "←", "wjp-dir") + keyBtn("down", "↓", "wjp-dir") + keyBtn("right", "→", "wjp-dir") +
-            "</div>" +
-          "</div>";
-        var fnRow = "";
-        var i;
-        for (i = 0; i < JOYSTICK_ACTION_KEYS.length; i++) {
-          fnRow += keyBtn(JOYSTICK_ACTION_KEYS[i].key, JOYSTICK_ACTION_KEYS[i].label, "");
-        }
-        var html =
-          '<div class="wjp-header">' +
-            '<span class="wjp-title">' + iconSvg("paw", { size: 13, strokeWidth: 1.6, cls: "wjp-title-icon" }) + '<span>遥控面板</span></span>' +
-            '<button type="button" class="wjp-close" aria-label="关闭遥控面板">' + iconSvg("x", { size: 13, strokeWidth: 2 }) + '</button>' +
-          '</div>' +
-          dpad +
-          '<div class="wjp-grid wjp-fnkeys">' + fnRow + "</div>";
-        return html;
-      }
-
       export function initTerminalJoystick() {
         if (state.joystickRootEl) return;
         // 新页面从「没有手指压在球上」开始。上一次手势如果在换页前没跑完，外壳里的
@@ -497,7 +472,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
 
         var panel = document.createElement("div");
         panel.className = "wand-joystick-panel";
-        panel.innerHTML = renderJoystickPanel();
+        paintTerminalPanel(panel, JOYSTICK_ACTION_KEYS);
         panel.addEventListener("click", onJoystickPanelClick);
         root.appendChild(panel);
 
@@ -510,6 +485,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         root.appendChild(ball);
 
         document.body.appendChild(root);
+        mountBrowserButtons(root);
         state.joystickRootEl = root;
         state.joystickBackdropEl = backdrop;
         state.joystickPanelEl = panel;

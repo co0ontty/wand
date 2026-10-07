@@ -112,7 +112,7 @@ export function createBrowserShellCommands(): LegacyUiCommands {
     refreshPage: () => window.location.reload(),
     openNewSession: (cwd) => openSessionModal(cwd),
     openMissions: () => { missionsController.open(); },
-    openNewProject: (cwd) => { workspacesController.open(cwd); },
+    openNewProject: (cwd) => openSessionModal(cwd),
     quickStartClaudeTerminal: () => quickStart("claude"),
     quickStartCodexTerminal: () => quickStart("codex"),
     quickStartOpenCodeTerminal: () => quickStart("opencode"),

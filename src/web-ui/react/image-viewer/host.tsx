@@ -1,3 +1,4 @@
+import { Button, Image } from "antd";
 import { useSyncExternalStore } from "react";
 import * as React from "react";
 
@@ -19,21 +20,19 @@ export function ImageViewerHost() {
       title={snapshot.label}
       description={snapshot.zoomed ? "再次点击图片缩小" : "点击图片查看原始尺寸"}
       className="wand-ui-dialog-content wand-image-viewer-dialog"
-      overlayClassName="wand-ui-dialog-overlay wand-image-viewer-overlay"
-      titleClassName="wand-ui-dialog-title wand-image-viewer-title"
-      descriptionClassName="wand-ui-dialog-description wand-image-viewer-hint"
-      headerClassName="wand-ui-dialog-heading wand-image-viewer-header"
+      width={{ xs: "calc(100vw - 16px)", md: 1080, xl: 1320 }}
+      styles={{ body: { display: "flex", height: "min(70dvh, 760px)", minHeight: 0 } }}
       closeLabel="关闭图片预览"
       testId="image-viewer-dialog"
     >
-      <button
-        type="button"
-        className={classNames("wand-image-viewer-stage", snapshot.zoomed && "zoomed")}
+      <Button
+        type="text"
+        className={classNames("wand-media-stage wand-image-viewer-stage", snapshot.zoomed && "zoomed")}
         aria-label={snapshot.zoomed ? "缩小图片" : "放大图片"}
         onClick={() => imageViewerController.toggleZoom()}
       >
-        {snapshot.src ? <img src={snapshot.src} alt={snapshot.label} /> : null}
-      </button>
+        {snapshot.src ? <Image preview={false} src={snapshot.src} alt={snapshot.label} /> : null}
+      </Button>
     </WandDialogSurface>
   );
 }

@@ -33,10 +33,10 @@ function renderPeek(open: boolean, top = 8): string {
 test("SidebarPeek stays hidden and inert until the pointer arrives", () => {
   const html = renderPeek(false);
 
-  assert.match(html, /id="sidebar-peek" class="sidebar-peek"/);
+  assert.match(html, /id="sidebar-peek"[^>]*class="[^"]*sidebar-peek[^"]*"/);
   assert.match(html, /aria-hidden="true"/);
   assert.match(html, /inert=""/);
-  assert.doesNotMatch(html, /class="sidebar-peek open"/);
+  assert.doesNotMatch(html, /class="[^"]*sidebar-peek open[^"]*"/);
   // 面板常挂载：内容（目录树）跟着一起渲染，只是被 CSS 藏起来。
   assert.match(html, /TREE-MARKER/);
 });
@@ -44,7 +44,7 @@ test("SidebarPeek stays hidden and inert until the pointer arrives", () => {
 test("SidebarPeek exposes the directory tree and an expand escape hatch", () => {
   const html = renderPeek(true);
 
-  assert.match(html, /class="sidebar-peek open"/);
+  assert.match(html, /class="[^"]*sidebar-peek open[^"]*"/);
   assert.match(html, /data-open="true"/);
   assert.doesNotMatch(html, /inert=/);
   assert.match(html, /aria-label="Wand 项目"/);
@@ -75,12 +75,12 @@ test("ShellSidebar drives the peek from hover/focus on the collapsed rail", () =
   );
 
   // 展开后的完整侧栏不再挂第二份目录树：启用条件绑定在窄栏上。
-  assert.match(source, /useSidebarPeek\(narrow && hoverPointer && !moreOpen, drawerRef, peekSurfaceRef, selectPeekDirectory\)/);
+  assert.match(source, /useSidebarPeek\(visible && narrow && hoverPointer && !moreOpen, drawerRef, peekSurfaceRef, selectPeekDirectory\)/);
   assert.match(source, /narrow && hoverPointer && peek\.mounted/);
   assert.match(source, /\.\.\.peek\.triggerBindings/);
   assert.match(source, /\.\.\.peek\.surfaceBindings/);
   // 窄栏按目录显示图标，悬浮树只传当前目录，不复制 legacy id。
-  assert.match(source, /<div className="sessions-list" id="sessions-list">\s*\{taskTree\(narrow\)\}/);
+  assert.match(source, /<div className="sessions-list" id="sessions-list">\s*<SidebarProjectionSwap[\s\S]*?\{taskTree\(narrow\)\}/);
   assert.match(source, /<div className="sessions-list">\{taskTree\(false, peekDirectory.id\)\}<\/div>/);
 });
 
@@ -95,7 +95,7 @@ test("hover hook only opens while the rail is collapsed", () => {
   // 只允许带目录标识的图标触发预览，面板自身不重复触发。
   assert.match(source, /if \(!enabled \|\| insideSurface\(target\) \|\| insideFloatingLayer\(target\)\) return;/);
   assert.match(source, /target.closest<HTMLElement>\("\[data-sidebar-directory-id\]"\)/);
-  assert.match(source, /onDirectory\(id, trigger\);\s*requestOpen\(delay\);/);
+  assert.match(source, /onDirectory\(id, trigger\);\s*requestOpen\(reduced \? 0 : delay\);/);
   assert.doesNotMatch(source, /onPointerEnter: \(\) => scheduleOpen/);
   // 端口浮层（行内下拉 / 弹窗）自己处理 Esc 和内部点击，面板要让位。
   assert.match(source, /if \(insideFloatingLayer\(event\.target\)\) return;/);
@@ -103,18 +103,16 @@ test("hover hook only opens while the rail is collapsed", () => {
   // Esc 只在焦点真在侧栏（窄栏或面板）里时才接管：
   // 焦点在终端 / 聊天框时 Esc 属于它们（xterm 会把 Esc 发给 CLI）。
   assert.match(source, /const focused = document\.activeElement;\s*if \(!holds\(focused\)\) return;/);
-  assert.match(source, /if \(focused instanceof HTMLElement && surfaceRef\.current\?\.contains\(focused\)\) \{\s*focused\.blur\(\);/);
+  assert.match(source, /suppressedTrigger\.current = activeTrigger\.current/);
+  assert.match(source, /activeTrigger\.current\?\.focus\(\{ preventScroll: true \}\)/);
+  assert.doesNotMatch(source, /focused\.blur/);
 });
 
-test("SidebarPeek styles anchor the panel to the rail's right edge", () => {
-  const css = readFileSync(path.join(root, "src", "web-ui", "content", "styles.css"), "utf8");
-  const block = css.slice(css.indexOf(".sidebar-peek {"), css.indexOf(".sidebar-peek-header"));
-
-  assert.ok(block.length > 0, "缺少 .sidebar-peek 样式块");
-  assert.match(block, /position: fixed;/);
-  assert.match(block, /left: 100%;/);
-  assert.match(block, /visibility: hidden;/);
-  assert.match(block, /pointer-events: none;/);
-  assert.match(css, /\.sidebar-peek\.open \{[\s\S]*?visibility: visible;[\s\S]*?pointer-events: auto;/);
-  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\.sidebar-peek \{\s*transition: none;/);
+test("SidebarPeek uses Ant Card and explicit rail geometry", () => {
+  const source = readFileSync(path.join(root, "src", "web-ui", "react", "shell", "sidebar-peek.tsx"), "utf8");
+  assert.match(source, /<Card size="small"/);
+  assert.match(source, /position: "absolute"/);
+  assert.match(source, /left: "100%"/);
+  assert.match(source, /visibility: open \? "visible" : "hidden"/);
+  assert.match(source, /pointerEvents: open \? undefined : "none"/);
 });

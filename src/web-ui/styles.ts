@@ -6,17 +6,8 @@ import { versionWebAsset, type VersionedWebAsset } from "./asset-version.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// 顺序即层叠顺序：Tailwind/Appica 编译产物在前，手写 styles.css 在后。
-//
-// 两个原因决定这个顺序不能反过来：
-//
-// 1. Tailwind 的 @layer 规则永远输给无层规则，所以 styles.css 里的手写规则
-//    仍然稳压 Utilities 一层（两个文件里 `*` 重置的分工见
-//    src/web-ui/css/appica.css 顶部说明）。这一条与先后无关。
-// 2. Appica 在自己的无层 `:root` 里也声明了一批与 Wand 同名的 token
-//    （--success / --warning / --info / --border-strong / --radius-md /
-//    --shadow-sm …）。无层对无层只能靠先后裁决，styles.css 必须排在后面，
-//    否则 Appica 的中性灰会悄无声息地覆盖掉整套暖色调。
+// Tailwind utilities/preflight precede the retained business CSS. Ant Design/X
+// install their own component styles through the shared provider.
 const CSS_FILES = ["tailwind.css", "styles.css"] as const;
 
 // 用 mtime+size 做缓存键，磁盘上 CSS 一变（npm run build / 手工 edit dist/）下次请求

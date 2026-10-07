@@ -188,7 +188,7 @@ test("task tab bar and standalone topbar share one quick-commit badge", () => {
   assert.match(badge, /id = "topbar-git-badge"/, "默认保留顶栏的 DOM id");
   assert.match(badge, /dispatch\(\{ type: "topbar\.gitCommit" \}\)/);
   assert.match(badge, /if \(!git\) return null;/, "非 git 会话 / 首页不显示徽章");
-  assert.match(styles, /\.workspace-tab-git\s*\{/);
+  assert.match(tabBar, /<Flex align="center" gap=\{4\} wrap=\{!mobile\} className="workspace-tab-bar"/);
 });
 
 test("clicking a session inside the open task skips the task reopen", () => {
@@ -201,23 +201,21 @@ test("clicking a session inside the open task skips the task reopen", () => {
   assert.match(panel, /const openTask = React\.useCallback\(\(group: TaskDirectoryGroup, task: TaskSummary, preferredSessionId\?: string\)/);
 });
 
-test("new task dialog can create a standalone task without find-or-create project", () => {
-  const source = readFileSync(new URL("../src/web-ui/react/workspaces/host.tsx", import.meta.url), "utf8");
-  assert.doesNotMatch(source, /findOrCreateWorkspace/);
-  assert.match(source, /createStandaloneTask/);
-  assert.match(source, /WorkspaceAgentPicker/);
-  assert.match(source, /全局临时目录/);
-  assert.doesNotMatch(source, /openWorkspace\(createdProject\)/);
-  assert.doesNotMatch(source, /wand-workspace-creation-kind/);
-  assert.doesNotMatch(source, /新建项目/);
-  assert.doesNotMatch(source, /所属项目/);
+test("new task dialog unifies through newSessionController to eliminate duplicate dialogs", () => {
+  const host = readFileSync(new URL("../src/web-ui/react/workspaces/host.tsx", import.meta.url), "utf8");
+  assert.match(host, /newSessionController\.open/);
+  assert.match(host, /workspacesController\.close/);
+  const panel = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
+  assert.match(panel, /newSessionController\.open\(\{\s*initialCwd: group\.global \? undefined : group\.workspaceCwd,/);
 });
 
-test("workspaces panel steers creation to the empty-state CTA without manual refresh", () => {
+test("workspaces panel waits for the first read before offering its business empty CTA", () => {
   const html = renderToStaticMarkup(createElement(WorkspacesPanel));
-  // 面板顶部不再有独立工具条；新建入口在空态 CTA（与底部主按钮、目录组「＋」并存）。
   assert.doesNotMatch(html, /workspaces-panel-toolbar|workspaces-panel-new-project/);
-  assert.match(html, /aria-label="新建任务"/);
+  assert.match(html, /aria-label="正在加载任务列表"/);
+  assert.doesNotMatch(html, /开始一个任务|还没有对话/);
+  const panel = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
+  assert.match(panel, /className="workspaces-empty-action" aria-label="新建会话"/);
   assert.doesNotMatch(html, /刷新项目列表|workspaces-panel-refresh/);
 });
 
@@ -280,19 +278,17 @@ test("sidebar restores task selection from a selected session without overriding
   });
 });
 
-test("new task dialog follows the selected directory instead of retaining an old project", () => {
-  const source = readFileSync(new URL("../src/web-ui/react/workspaces/host.tsx", import.meta.url), "utf8");
-  assert.match(source, /const setTaskCwd = \(nextCwd: string\): void =>/);
-  assert.match(source, /setSelectedProjectId\(matchingProject\?\.id \?\? ""\)/);
-  assert.match(source, /onChange=\{\(event\) => setTaskCwd\(event\.currentTarget\.value\)\}/);
-  assert.match(source, /createStandaloneTask\([\s\S]*cwd: mountedCwd \|\| undefined/);
+test("new task dialog follows the selected directory through newSessionController", () => {
+  const panel = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
+  assert.match(panel, /newSessionController\.open\(\{\s*initialCwd: group\.global \? undefined : group\.workspaceCwd,/);
+  const commands = readFileSync(new URL("../src/web-ui/browser/shell-commands.ts", import.meta.url), "utf8");
+  assert.match(commands, /openNewProject: \(cwd\) => openSessionModal\(cwd\)/);
 });
 
 test("new task dialog no longer exposes a project creation view", () => {
-  const source = readFileSync(new URL("../src/web-ui/react/workspaces/host.tsx", import.meta.url), "utf8");
-  assert.doesNotMatch(source, /setCreationKind/);
-  assert.doesNotMatch(source, /creationKind === "project"/);
-  assert.match(source, /const setTaskCwd = \(nextCwd: string\): void =>/);
+  const host = readFileSync(new URL("../src/web-ui/react/workspaces/host.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(host, /setCreationKind/);
+  assert.doesNotMatch(host, /creationKind === "project"/);
 });
 
 test("workspace path captions keep the leaf and hide redundant absolute prefixes", () => {
@@ -308,15 +304,13 @@ test("task list treats directories as group headers and exposes per-terminal del
   assert.match(panel, /workspace-row-count/);
   assert.match(panel, /删除终端/);
   assert.match(panel, /onDeleteSession/);
-  assert.match(panel, /workspace-session-action delete/);
-  assert.match(styles, /\.workspace-item\s*\{[^}]*border-radius:\s*8px/s);
-  assert.match(styles, /\.workspace-tasks\s*\{[^}]*border-left/s);
+  assert.match(panel, /<SidebarRowMenu row=\{row\}/);
+  assert.doesNotMatch(panel, /workspace-session-action more/);
+  assert.match(panel, /<Flex vertical gap=\{4\} style=\{\{ paddingInlineStart: 8 \}\} className="workspace-tasks"/);
   // Row chrome (cursor, padding, hover wash) is Appica's NavigationLink now;
   // Wand keeps the identity hook so the shell can still find the row.
   assert.match(panel, /className="workspace-task-main"/);
-  assert.match(styles, /\.workspace-task-main\s*\{/);
-  assert.match(styles, /\.workspace-task-name\s*\{[^}]*font-size:\s*var\(--font-size-sm\)/s);
-  assert.match(styles, /\.workspace-task-name\s*\{[^}]*-webkit-line-clamp:\s*2/s);
+  assert.match(panel, /minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"/);
   assert.match(panel, /workspace-task-count/);
   assert.match(panel, /className="workspace-task-menu"/);
   assert.match(panel, /删除目录/);
@@ -327,25 +321,34 @@ test("task list treats directories as group headers and exposes per-terminal del
   assert.doesNotMatch(panel, /if \(!collapsible\) return/);
   assert.doesNotMatch(panel, /is-static/);
 
-  // Same split for the session row: Appica owns padding + the active wash, and the
-  // delete affordance is an always-rendered Appica icon button.
+  // Library row chrome remains; destructive actions live in the menu with explicit confirmation.
   assert.match(panel, /className="workspace-session-main"/);
-  assert.match(styles, /\.workspace-session-main\s*\{/);
-  assert.match(panel, /className="workspace-session-action delete"/);
-  assert.match(styles, /\.workspace-session-action\s*\{/);
-  assert.match(styles, /\.workspace-tab-item\.active \.workspace-tab-item-close[\s\S]*?pointer-events:\s*auto/);
+  assert.match(panel, /<Flex align="center" gap=\{4\} style=\{\{ minWidth: 0, width: "100%" \}\} className=\{classNames\(/);
+  assert.match(panel, /className="workspace-session-menu"/);
+  assert.doesNotMatch(panel, /workspace-row-folder|workspace-task-marker/);
+  assert.match(panel, /confirmSessionDelete/);
+  assert.match(panel, /<ClearSessionsButton count=\{totalSessionCount\} label=\{`任务/,
+    "clearing a task must count team sessions too; its delete scope includes them");
+  // 删除确认只有一个来源：公共确认模块，各列表不再各写一套内联确认。
+  const sessionDelete = readFileSync(new URL("../src/web-ui/react/workspaces/session-delete-confirm.ts", import.meta.url), "utf8");
+  assert.match(sessionDelete, /无法撤销。任务和其他会话保留/);
+  const tabs = readFileSync(new URL("../src/web-ui/react/workspaces/workspace-tab-bar.tsx", import.meta.url), "utf8");
+  assert.match(tabs, /type="editable-card"/);
+  assert.match(tabs, /onEdit=/);
+  assert.match(tabs, /aria-label=\{`任务 \$\{context.taskName\} 的工作窗口标签`\}/);
 });
 
-test("task session lists default to expanded, empty tasks collapse unless they are the only task", () => {
+test("task sessions prioritize the active or only task and standalone sessions have no fake task fold", () => {
   const panel = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
-  assert.match(panel, /useSidebarCollapsed\(`task\.\$\{task.id\}`, false\)/);
-  assert.match(panel, /useSidebarCollapsed\(`project\.\$\{group.workspaceId\}`\)/);
-  assert.match(panel, /useSidebarCollapsed\(`loose\.\$\{group.workspaceId\}`\)/);
+  assert.match(panel, /useSidebarExpansion\(\s*`task\.\$\{task.id\}`, true, false, isActive \|\| isOnlyTask/);
+  assert.match(panel, /useSidebarExpansion\(`project\.\$\{group.workspaceId\}`, false, true\)/);
+  assert.doesNotMatch(panel, /useSidebarExpansion\(`loose\./);
+  assert.match(panel, /aria-label="独立会话"/);
   assert.doesNotMatch(panel, /orderSidebarTasks\(group.tasks\)/);
   assert.match(panel, /group\.tasks\.map\(\(task\)/);
   assert.doesNotMatch(panel, /taskRecency\(right\)\.localeCompare\(taskRecency\(left\)\)/);
   assert.doesNotMatch(panel, /if \(isActive\) setCollapsed|setCollapsed\(false\); onOpen/);
-  assert.match(panel, /canCollapseSessions \? \(/);
+  assert.match(panel, /anchorSidebarDisclosure\(event.currentTarget, toggleSessionsOpen\)/);
   assert.equal(isDirectoryExpanded(true, 1), false);
   assert.equal(isDirectoryExpanded(false, 1), true);
   assert.equal(showsTaskSessionDisclosure(0), false);
@@ -374,10 +377,12 @@ test("task session rows and work-window tabs render each CLI logo", () => {
   assert.match(structured, /provisionalSessionTopic\(input, blockedTitles\)/);
 });
 
-test("new project dialog has shared dialog styling and a responsive provider grid", () => {
-  assert.match(sessionPickerAndWorktreeStyles, /\.wand-new-project-providers\s*\{/);
-  assert.match(sessionPickerAndWorktreeStyles, /grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\)/);
-  assert.match(sessionPickerAndWorktreeStyles, /\.wand-new-project-provider:active\s*\{[^}]*scale\(0\.97\)/s);
+test("new task dialog delegates project suggestions and controls to the library", () => {
+  const newSessionHost = readFileSync(new URL("../src/web-ui/react/new-session/host.tsx", import.meta.url), "utf8");
+  assert.match(newSessionHost, /<AutoComplete/);
+  assert.match(newSessionHost, /<Collapse/);
+  assert.match(newSessionHost, /<TaskForm/);
+  assert.doesNotMatch(sessionPickerAndWorktreeStyles, /wand-new-project-providers/);
 });
 
 test("workspace session order stays stable when timestamps are absent", () => {
@@ -444,8 +449,9 @@ test("closing an active work-window tab selects its left neighbour", () => {
 });
 
 test("split terminals isolate xterm row redraws from the workspace page", () => {
-  const styles = readFileSync(new URL("../src/web-ui/content/styles.css", import.meta.url), "utf8");
-  assert.match(styles, /\.ws-session-pane\s*\{[^}]*contain:\s*strict;[^}]*isolation:\s*isolate;/s);
+  const window = sourceText("src/web-ui/react/workspaces/workspace-window.tsx");
+  assert.match(window, /contain: "strict", isolation: "isolate"/);
+  assert.match(window, /<Splitter/);
 });
 
 test("workspace repository closes terminal sessions with the batch endpoint", async () => {
@@ -545,7 +551,7 @@ test("project menus retain worktree management and a multi-select dialog", () =>
   const adapter = readFileSync(new URL("../src/web-ui/browser/workspaces-adapter.ts", import.meta.url), "utf8");
   assert.match(panel, /查看并合并 Worktree/);
   assert.match(panel, /startWorktreeMergeAgent/);
-  assert.match(dialog, /role="checkbox"/);
+  assert.match(dialog, /<Checkbox[\s\S]*?checked=\{selected\}/);
   assert.match(dialog, /启动 Agent 合并/);
   // 合并 Agent 的角色与规则走系统提示，不能和清单一起拼成首条用户消息。
   assert.match(panel, /systemPrompt: brief\.system/);
@@ -775,9 +781,9 @@ test("compact rail shows every directory, including empty ones, without task ent
 
 test("workspaces panel exposes multi-select and a compact directory rail", () => {
   const html = renderToStaticMarkup(createElement(WorkspacesPanel));
-  assert.match(html, /aria-label="多选任务和终端"/);
-  assert.match(html, /title="批量管理"/);
-  assert.match(html, />对话与任务<\/h2>/);
+  assert.match(html, /aria-label="会话列表选项"/);
+  assert.match(html, /title="列表选项"/);
+  assert.match(html, /sidebar-list-title[^>]*><strong>执行会话<\/strong>/);
   const panel = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
   assert.match(panel, /CompactDirectoryRail/);
   assert.match(panel, /groups=\{visibleGroups\}/);
@@ -829,17 +835,11 @@ function sourceText(relativePath: string): string {
 }
 
 test("sidebar directory tree indents every level without extra re-renders", () => {
-  const styles = sourceText("src/web-ui/content/styles.css");
-  // Sessions must indent past the task row they belong to, so 目录 / 任务 / 终端
-  // never share one left edge.
-  const taskSessions = styles.indexOf('#app[data-react-shell="enabled"] .workspace-task-sessions {');
-  assert.ok(taskSessions >= 0);
-  assert.match(styles.slice(taskSessions, styles.indexOf("}", taskSessions)), /padding-left:\s*9px;/);
-  const looseSessions = styles.indexOf('#app[data-react-shell="enabled"] .workspace-loose-sessions {');
-  assert.ok(looseSessions >= 0);
-  const looseRule = styles.slice(looseSessions, styles.indexOf("}", looseSessions));
-  assert.match(looseRule, /border-left:/);
-  assert.match(looseRule, /padding-left:\s*9px;/);
+  const layout = sourceText("src/web-ui/react/workspaces/workspaces-panel.tsx");
+  // Flex explicitly indents task children and session children past their parent.
+  assert.match(layout, /paddingInlineStart: 8.*className="workspace-tasks"/);
+  assert.match(layout, /paddingInlineStart: 12.*className="workspace-task-sessions"/);
+  assert.match(layout, /paddingInlineStart: 12.*className="workspace-team-fold-list"/);
 
   // The /api/tasks poll hands back fresh objects every few seconds; folding must
   // be memoized by content or 40-session directories re-render on a timer.
@@ -941,7 +941,7 @@ test("批量处理失败：原因写进原位文案位，不再只活在 Toast �
   assert.match(panel, /setConfirmingManage\(false\);\n\s*setManageFeedback\("idle"\);\n\s*setManageFeedbackLabel\(""\);\n\s*\}, MOTION_DWELL_FAILED_MS\);/);
 });
 
-test("侧栏只留「最近对话 + 任务与工作区」两段，活动条与联系人分组并进最近对话", () => {
+test("工作区与最近会话互斥展示，不重复堆叠同一批会话", () => {
   const panel = readFileSync(
     new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url),
     "utf8",
@@ -949,9 +949,12 @@ test("侧栏只留「最近对话 + 任务与工作区」两段，活动条与�
   // 归属分组只有一个真源（sidebar-recent.ts），面板只做过滤与转发。
   assert.match(panel, /collectRecentEntries\(sourceGroups\)/);
   assert.match(panel, /<SidebarRecentSection\b[\s\S]*?entries=\{visibleRecentEntries\}/);
-  assert.match(panel, /filterRecentEntries\(recentEntries, \{[\s\S]*?activeOnly: displayMode === "active" && directoryId === undefined,/);
-  // 第二段仍是目录 → 任务 → 会话树，带自己的表头。
-  assert.match(panel, /<h3 className="sidebar-section-title">任务与工作区<\/h3>/);
+  assert.match(panel, /filterRecentEntries\(recentEntries, \{[\s\S]*?activeOnly: displayMode === "active",/);
+  // 同一列表位置切换组织方式；按目录为默认，不把折叠行为冒充数据筛选。
+  assert.match(panel, /ariaLabel="会话组织方式"/);
+  assert.match(panel, /hidden=\{manageMode \|\| view !== "recent"\}/);
+  assert.match(panel, /hidden=\{directoryId === undefined && !manageMode && view !== "directory"\}/);
+  assert.match(panel, /aria-label="只看活动会话"/);
   // 重复的入口不再各自渲染一份。
   assert.doesNotMatch(panel, /sidebar-activity-rail/);
   assert.doesNotMatch(panel, /label="硅基员工"/);
@@ -967,7 +970,7 @@ test("最近对话：头像与「+」都在一级行，二级行只说工具", (
   assert.match(section, /avatarNode=\{<GroupMark group=\{group\} employees=\{employees\}\/>\}/);
   assert.match(section, /action=\{<GroupCreateButton group=\{group\} onStartConversation=\{onStartConversation\}\/>\}/);
   // 二级会话行只标工具，不再重复员工头像。
-  assert.match(section, /avatarNode=\{group\.showsHeader\n\s*\? <SecondaryRowMark entry=\{entry\} group=\{group\}\/>\n\s*: <GroupMark group=\{group\} employees=\{employees\}\/>\}/);
+  assert.match(section, /avatarNode=\{<SecondaryRowMark entry=\{entry\} group=\{group\}\/>\}/);
   assert.match(section, /function SecondaryRowMark\(\{[\s\S]*?SessionProviderMark session=\{session\}/);
   assert.doesNotMatch(section, /<EmployeeAvatar[\s\S]{0,120}entry\.session/);
   // 空白终端「+」直接带上形态，员工「+」带上员工 id。
@@ -976,5 +979,5 @@ test("最近对话：头像与「+」都在一级行，二级行只说工具", (
   assert.match(section, /onClick=\{\(\) => onStartConversation\(group\.employeeId \?\? undefined\)\}/);
   // 侧栏一键新建员工对话：段头「+」原位展开联系人列表。
   assert.match(section, /className=\{classNames\("sidebar-section-add"/);
-  assert.match(section, /className=\{classNames\("sidebar-contact-picker", pickerOpen && "is-open"\)\} inert=\{!pickerOpen\}/);
+  assert.match(section, /<SidebarDisclosure id=\{pickerId\} open=\{pickerOpen\}>/);
 });

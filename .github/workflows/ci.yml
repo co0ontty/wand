@@ -58,5 +58,8 @@ jobs:
         run: npm run check
 
       # 真实的 Chrome CDP 用例；macOS runner 预装 Google Chrome。
+      # 浏览器回归在本地默认跳过，CI 在这里显式打开。
       - name: Unit and contract tests
         run: npm test
+        env:
+          WAND_BROWSER_E2E: "1"

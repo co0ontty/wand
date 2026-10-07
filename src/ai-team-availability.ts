@@ -84,7 +84,7 @@ export function classifyStartupFailure(probe: StartupFailureProbe): CandidateFai
 }
 
 export interface WorkFailureInput {
-  /** 只有 work 步骤参与降级；leader 步骤走既有格式重试/waiting_user 路径。 */
+  /** 成员执行步骤的启动失败降级；负责人完整候选重试由 runner 管理。 */
   stepKind: "leader" | "work";
   /** PTY 候选一律不异步分类、不降级（§3.4 修正 B4）。 */
   agentKind: WandTaskAgentKind;

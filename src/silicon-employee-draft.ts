@@ -1,19 +1,24 @@
 import { callConfiguredAiText, type QuickCommitAiOptions } from "./git-quick-commit.js";
 import { employeeCliAvailable } from "./silicon-employee-dispatch.js";
 import { SESSION_PROVIDERS, isSessionProvider } from "./session-provider.js";
+import { isThinkingEffort } from "./structured-provider-common.js";
 import {
   DEFAULT_WAND_TASK_AGENT_KIND,
   DEFAULT_WAND_TASK_AGENT_MODE,
   normalizeWandTaskAgentMode,
 } from "./task-types.js";
 import { clipAtWordBoundary } from "./text-utils.js";
-import type { SiliconEmployeeDraft } from "./ai-team-types.js";
+import { agentKey, type SiliconEmployeeDraft } from "./ai-team-types.js";
 import type { AiTextRequest } from "./types.js";
 import type { WandTaskAgent } from "./task-types.js";
 import type { SessionProvider } from "./types.js";
 
 export class SiliconEmployeeDraftError extends Error {
-  constructor(message: string, public readonly code: string) {
+  constructor(
+    message: string,
+    public readonly code: string,
+    public readonly field?: string,
+  ) {
     super(message);
     this.name = "SiliconEmployeeDraftError";
   }
@@ -94,29 +99,139 @@ function oneLine(record: Record<string, unknown>, key: string): string {
   return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
 }
 
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 /**
- * 校验并收敛模型输出。名字 / 角色设定缺失即视为不可用；
- * provider 不在已安装清单里时按候选顺序兜底，不让员工带着跑不起来的 CLI 落库。
+ * 解析一个执行候选。员工候选只允许结构化会话，provider 必须在允许集合内；
+ * 模型只接受字符串（空即 "default"，跟随服务端默认），不静默改成别的资源。
+ */
+function parseEmployeeCandidate(raw: unknown, allowed: SessionProvider[]): WandTaskAgent {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new SiliconEmployeeDraftError("执行候选必须是对象。", "DRAFT_INVALID_AGENT", "agents");
+  }
+  const body = raw as Record<string, unknown>;
+  const provider = stringValue(body.provider).toLowerCase();
+  if (!isSessionProvider(provider)) {
+    throw new SiliconEmployeeDraftError("请选择有效的执行工具。", "DRAFT_INVALID_PROVIDER", "provider");
+  }
+  if (allowed.length && !allowed.includes(provider)) {
+    throw new SiliconEmployeeDraftError(
+      `执行工具「${provider}」不在当前允许的候选集合（${allowed.join("、")}）里，请重新选择。`,
+      "DRAFT_PROVIDER_NOT_ALLOWED", "provider",
+    );
+  }
+  const model = stringValue(body.model) || "default";
+  if (model.length > 128) {
+    throw new SiliconEmployeeDraftError("模型名称过长。", "DRAFT_MODEL_TOO_LONG", "model");
+  }
+  const effort = stringValue(body.thinkingEffort) || "off";
+  if (!isThinkingEffort(effort)) {
+    throw new SiliconEmployeeDraftError("思考深度无效。", "DRAFT_INVALID_THINKING", "thinkingEffort");
+  }
+  const engine = stringValue(body.engine);
+  if (engine && engine !== "cli" && engine !== "sdk") {
+    throw new SiliconEmployeeDraftError("执行引擎无效。", "DRAFT_INVALID_ENGINE", "engine");
+  }
+  if (engine === "sdk" && provider !== "pi") {
+    throw new SiliconEmployeeDraftError("SDK 执行引擎仅支持 Pi 结构化会话。", "DRAFT_INVALID_ENGINE", "engine");
+  }
+  return {
+    provider,
+    model,
+    thinkingEffort: effort,
+    mode: normalizeWandTaskAgentMode(provider, body.mode ?? DEFAULT_WAND_TASK_AGENT_MODE),
+    kind: DEFAULT_WAND_TASK_AGENT_KIND,
+    ...(engine === "sdk" ? { engine: "sdk" as const } : {}),
+  };
+}
+
+export interface EmployeeDraftNormalizeOptions {
+  allowedProviders?: SessionProvider[];
+  fallbackProvider?: SessionProvider;
+  existingNames?: string[];
+  /** 结构化输入（HR 草稿 / API 直传）走严格模式：非法资源直接拒绝，不静默兜底。 */
+  strict?: boolean;
+}
+
+/**
+ * 唯一的草稿规范化/校验入口：模型输出与结构化草稿都经过这里。
+ * 名字 / 角色设定缺失即视为不可用；strict=false 时 provider 不在允许集合内按候选顺序兜底，
+ * strict=true 时拒绝并提示选择，避免把非法或越费用边界的资源悄悄换成别的。
+ */
+export function normalizeSiliconEmployeeDraft(
+  record: Record<string, unknown>,
+  options: EmployeeDraftNormalizeOptions = {},
+): SiliconEmployeeDraft {
+  const name = clipAtWordBoundary(oneLine(record, "name"), NAME_MAX);
+  if (!name) throw new SiliconEmployeeDraftError("AI 没有给出员工名字，请重试。", "DRAFT_MISSING_NAME", "name");
+  const duty = clipAtWordBoundary(oneLine(record, "duty"), DUTY_MAX);
+  const prompt = typeof record.prompt === "string" ? record.prompt.trim().slice(0, PROMPT_MAX) : "";
+  if (!prompt) {
+    throw new SiliconEmployeeDraftError(
+      options.strict ? "员工草稿缺少角色设定。" : "AI 没有给出员工角色设定，请重试。",
+      "DRAFT_MISSING_PROMPT", "prompt",
+    );
+  }
+  const duplicate = (options.existingNames ?? []).some(
+    (existing) => existing.trim().toLowerCase() === name.toLowerCase(),
+  );
+  if (duplicate) {
+    throw new SiliconEmployeeDraftError(
+      `已有名叫「${name}」的员工，请换个名字。`, "DRAFT_DUPLICATE_NAME", "name",
+    );
+  }
+
+  const allowed = options.allowedProviders?.length ? options.allowedProviders : [...SESSION_PROVIDERS];
+  let candidates: WandTaskAgent[];
+  if (Array.isArray(record.agents) && record.agents.length > 0) {
+    candidates = record.agents.map((raw) => parseEmployeeCandidate(raw, allowed));
+    if (new Set(candidates.map(agentKey)).size !== candidates.length) {
+      throw new SiliconEmployeeDraftError("执行候选存在重复。", "DRAFT_DUPLICATE_AGENT", "agents");
+    }
+  } else if (record.agent !== undefined && record.agent !== null) {
+    candidates = [parseEmployeeCandidate(record.agent, allowed)];
+  } else if (options.strict) {
+    if (!stringValue(record.provider)) {
+      throw new SiliconEmployeeDraftError("员工草稿缺少执行候选。", "DRAFT_MISSING_AGENT", "provider");
+    }
+    candidates = [parseEmployeeCandidate(
+      { provider: record.provider, model: record.model, thinkingEffort: record.thinkingEffort, mode: record.mode },
+      allowed,
+    )];
+  } else {
+    const requested = oneLine(record, "provider").toLowerCase();
+    const provider = isSessionProvider(requested) && allowed.includes(requested)
+      ? requested
+      : options.fallbackProvider && allowed.includes(options.fallbackProvider)
+        ? options.fallbackProvider
+        : allowed[0]!;
+    candidates = [employeeAgentFor(provider)];
+  }
+  return { name, duty, prompt, agent: candidates[0]!, candidates };
+}
+
+/**
+ * 校验并收敛模型输出（宽松路径：非法 provider 在允许集合内按候选顺序兜底，
+ * 不让员工带着跑不起来的 CLI 落库）。
  */
 export function parseSiliconEmployeeDraft(
   raw: string,
-  options: { allowedProviders?: SessionProvider[]; fallbackProvider?: SessionProvider } = {},
+  options: { allowedProviders?: SessionProvider[]; fallbackProvider?: SessionProvider; existingNames?: string[] } = {},
 ): SiliconEmployeeDraft {
-  const record = extractDraftJson(raw);
-  const name = clipAtWordBoundary(oneLine(record, "name"), NAME_MAX);
-  if (!name) throw new SiliconEmployeeDraftError("AI 没有给出员工名字，请重试。", "DRAFT_MISSING_NAME");
-  const duty = clipAtWordBoundary(oneLine(record, "duty"), DUTY_MAX);
-  const prompt = typeof record.prompt === "string" ? record.prompt.trim().slice(0, PROMPT_MAX) : "";
-  if (!prompt) throw new SiliconEmployeeDraftError("AI 没有给出员工角色设定，请重试。", "DRAFT_MISSING_PROMPT");
+  return normalizeSiliconEmployeeDraft(extractDraftJson(raw), options);
+}
 
-  const allowed = options.allowedProviders?.length ? options.allowedProviders : [...SESSION_PROVIDERS];
-  const requested = oneLine(record, "provider").toLowerCase();
-  const provider = isSessionProvider(requested) && allowed.includes(requested)
-    ? requested
-    : options.fallbackProvider && allowed.includes(options.fallbackProvider)
-      ? options.fallbackProvider
-      : allowed[0]!;
-  return { name, duty, prompt, agent: employeeAgentFor(provider) };
+/** HR / 客户端已给出完整结构化草稿时走同一校验，不再调用模型。 */
+export function validateStructuredEmployeeDraft(
+  input: unknown,
+  options: Omit<EmployeeDraftNormalizeOptions, "strict"> = {},
+): SiliconEmployeeDraft {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new SiliconEmployeeDraftError("员工草稿必须是对象。", "DRAFT_INVALID_DRAFT");
+  }
+  return normalizeSiliconEmployeeDraft(input as Record<string, unknown>, { ...options, strict: true });
 }
 
 /** 规则走系统提示，用户的期望走用户消息；一次性调用沿用系统 AI 通道。 */
@@ -170,7 +285,9 @@ export async function generateSiliconEmployeeDraft(
   const request = buildEmployeeDraftPrompt(trimmed, providers, options.existingNames);
   try {
     return await callConfiguredAiText(request, options.cwd || process.cwd(), options.language ?? "", ai,
-      (raw) => parseSiliconEmployeeDraft(raw, { allowedProviders: providers, fallbackProvider: providers[0] }));
+      (raw) => parseSiliconEmployeeDraft(raw, {
+        allowedProviders: providers, fallbackProvider: providers[0], existingNames: options.existingNames,
+      }));
   } catch (error) {
     if (error instanceof SiliconEmployeeDraftError) throw error;
     const message = error instanceof Error ? error.message : String(error);

@@ -1,4 +1,5 @@
 import * as React from "react";
+import { Flex, Typography } from "antd";
 
 import { WandBrandMark, WandButton, WandIcon, WandIconButton } from "../ui";
 import { CodeEditorHost } from "../code-editor/host";
@@ -6,7 +7,6 @@ import { codeEditorStore } from "../code-editor/controller";
 import { workspaceContextStore } from "../workspaces/workspace-context";
 import { openSessionWithOwningTask } from "../workspaces/session-open";
 import { workspacesStore } from "../workspaces/controller";
-import { httpWorkspacesRepository } from "../workspaces/repository";
 import { WorkspaceWelcomeChooser, usableTeamWorkspaceId } from "../workspaces/workspace-agent-picker";
 import { aiTeamPickerOption, aiTeamsRepository, useAiTeamList } from "../ai-teams/repository";
 import { WorkspaceTabBar } from "../workspaces/workspace-tab-bar";
@@ -23,6 +23,8 @@ import { SidebarToggleIcon } from "./sidebar-toggle-icon";
 import { ShellTopbar } from "./shell-topbar";
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
 import type { UiSnapshotData } from "./ui-store";
+import { ConversationHome } from "../conversations/home";
+import { conversationUi, useConversationUi } from "../conversations/state";
 
 export interface ShellMainContentRefs {
   /** Stable roots populated by the corresponding imperative legacy hosts. */
@@ -109,20 +111,11 @@ function ShellBlankChat({ className, queueRef, workspaceTask, workspaceProject }
     const runtime = workspacesStore.getRuntime();
     if (!runtime) throw new Error("工作空间运行环境尚未就绪，请刷新页面后重试。");
     try {
-      const created = await httpWorkspacesRepository.createTask(workspaceProject.workspaceId, {
-        worktree: false,
-      });
-      await Promise.resolve(runtime.openTask({
-        workspaceId: workspaceProject.workspaceId,
-        workspaceName: workspaceProject.workspaceName,
-        taskId: created.id,
-        taskName: created.name,
-        cwd: created.cwd || workspaceProject.cwd,
-      }));
+      // 项目里直接开工不再替会话建任务：会话只带项目归属，落在侧栏「未分组任务」，
+      // 用户需要时再从会话行「归纳为新任务」。
       await runtime.newTaskSession({
         workspaceId: workspaceProject.workspaceId,
-        taskId: created.id,
-        cwd: created.cwd || workspaceProject.cwd,
+        cwd: workspaceProject.cwd,
         target,
         kind,
         model: model || undefined,
@@ -164,7 +157,7 @@ function ShellBlankChat({ className, queueRef, workspaceTask, workspaceProject }
   };
 
   return (
-    <div id="blank-chat" className={className}>
+    <Flex vertical id="blank-chat" className={className} style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 24, display: className.includes("hidden") ? "none" : undefined }}>
       <HomeAttention/>
       {workspaceTask ? (
         // 任务上下文已有这张卡，加团队只会冗余建卡，所以这里不传 teams/onStartTeam（§5.1）。
@@ -180,7 +173,7 @@ function ShellBlankChat({ className, queueRef, workspaceTask, workspaceProject }
         <WorkspaceWelcomeChooser
           eyebrow="项目"
           title={workspaceProject.workspaceName}
-          subtitle="项目还是空白的。选择 CLI 工具和结构化 / PTY，开始第一个任务。"
+          subtitle="选择 CLI 工具和结构化 / PTY，在项目里直接开始会话；需要时再归纳成任务。"
           cwd={workspaceProject.cwd}
           submitLabel="开始 "
           teams={teamWorkspaceId ? teamOptions : null}
@@ -188,11 +181,11 @@ function ShellBlankChat({ className, queueRef, workspaceTask, workspaceProject }
           onStart={startInProject}
           onStartTeam={startTeamInProject}
         />
-      ) : <div className="blank-chat-inner">
-        <WandBrandMark className="blank-chat-logo" />
-        <h2 className="blank-chat-title">Wand</h2>
-        <p className="blank-chat-subtitle">创建一个任务，选择目录和 CLI，开始工作。</p>
-        <div className="blank-chat-tools">
+      ) : <Flex vertical align="center" justify="center" gap="middle" className="blank-chat-inner" style={{ flex: 1 }}>
+        <WandBrandMark className="blank-chat-logo" style={{ width: 48, height: 48 }} />
+        <Typography.Title level={2} className="blank-chat-title" style={{ margin: 0 }}>Wand</Typography.Title>
+        <Typography.Paragraph type="secondary" className="blank-chat-subtitle">创建一个任务，选择目录和 CLI，开始工作。</Typography.Paragraph>
+        <Flex className="blank-chat-tools">
           <WandButton
             className="blank-chat-tool-btn welcome-new-task"
             id="welcome-new-task"
@@ -202,10 +195,10 @@ function ShellBlankChat({ className, queueRef, workspaceTask, workspaceProject }
             <span className="tool-icon" slot="start"><WandIcon name="plus" size={18}/></span>
             新建任务
           </WandButton>
-        </div>
-      </div>}
+        </Flex>
+      </Flex>}
       <div id="cross-session-queue-host" ref={queueRef}/>
-    </div>
+    </Flex>
   );
 }
 
@@ -218,6 +211,7 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
     codeEditorStore.subscribe, codeEditorStore.getSnapshot, codeEditorStore.getSnapshot,
   );
   const snapshot = useUiStoreSnapshot();
+  const conversationState = useConversationUi();
   const dispatch = useUiDispatch();
   const taskBoard = React.useSyncExternalStore(taskBoardStore.subscribe, taskBoardStore.getSnapshot, taskBoardStore.getSnapshot);
   const classes = getShellLegacySlotClasses(snapshot.legacyVisibility);
@@ -231,13 +225,20 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
   // #output 本身仍保留在 DOM（单例终端实例仍挂在上面，仅不可见），退出分屏后
   // 用缓冲 output 重置即可恢复，无需重建终端。
   const inSplit = !!context.taskId && activeWorkWindow(context.layout)?.layout.type === "split";
+  const conversationVisible = !taskBoard.open && !editor.open && (conversationState.active === true
+    || (conversationState.active === null && !inSplit && !snapshot.selected && !context.workspaceId));
+  // 对话 / 看板 / 编辑器都是盖满主区的绝对定位页面层。它们在上面时，遗留槽位不能只是
+  // 「被盖住」：#output / #chat-output / 输入区里的浮层仍然按自己的 z-index 参与主区堆叠
+  // （终端缩放 11、终端拖拽把手 12、未读气泡 20、排队气泡 40、待办浮层 50 都高于页面层的 8），
+  // 会直接浮到私聊页上。这里统一收口成 page layer，可见性交给同一条样式规则处理。
+  const pageLayerOpen = conversationVisible || taskBoard.open || editor.open;
 
   return (
-    <main inert={snapshot.layout.sessionsBackdropVisible} className={`main-content${snapshot.layout.filePanelOpen ? " file-panel-open" : ""}${inSplit ? " main-content-in-split" : ""}${taskBoard.open ? " task-board-main-content" : ""}`}>
+    <Flex component="main" vertical inert={snapshot.layout.sessionsBackdropVisible} className={`main-content${snapshot.layout.filePanelOpen ? " file-panel-open" : ""}${inSplit ? " main-content-in-split" : ""}${conversationVisible ? " main-content-conversation" : ""}${taskBoard.open ? " task-board-main-content" : ""}${pageLayerOpen ? " main-content-page-layer" : ""}`} style={{ flex: 1, minWidth: 0, minHeight: 0, position: "relative", overflow: "hidden" }}>
       {/* 任务内由标签条承担主区导航；不再叠一层重复的会话标题栏。 */}
-      {context.taskId ? null : <ShellTopbar/>}
+      {context.taskId ? null : <div style={{ display: "contents" }} inert={conversationVisible} aria-hidden={conversationVisible}><ShellTopbar/></div>}
       {context.taskId && snapshot.layout.sidebarDrawer && (
-        <nav className="workspace-mobile-navigation" aria-label="任务导航">
+        <Flex component="nav" align="center" gap="small" className="workspace-mobile-navigation" aria-label="任务导航" style={{ flexShrink: 0, padding: "6px 12px" }}>
           <WandIconButton
             aria-label={snapshot.layout.sessionsDrawerOpen ? "关闭任务列表" : "打开任务"}
             title={snapshot.layout.sessionsDrawerOpen ? "关闭任务列表" : "打开任务"}
@@ -246,15 +247,15 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
             onClick={() => void dispatch({ type: "layout.drawer.toggle" })}>
             <SidebarToggleIcon open={snapshot.layout.sessionsDrawerOpen} size={19}/>
           </WandIconButton>
-          <span title={context.taskName}>{context.taskName || "任务"}</span>
-        </nav>
+          <Typography.Text ellipsis title={context.taskName}>{context.taskName || "任务"}</Typography.Text>
+        </Flex>
       )}
       <ShellFilePanel explorerRef={legacyRefs?.fileExplorer}/>
-      <WorkspaceTabBar/>
-      <div id="output" inert={editor.open} className={classes.terminal} ref={legacyRefs?.terminal}/>
-      <div id="chat-output" inert={editor.open} className={classes.chat} ref={legacyRefs?.chat}/>
+      <div style={{ display: "contents" }} inert={conversationVisible} aria-hidden={conversationVisible}><WorkspaceTabBar/></div>
+      <div id="output" inert={pageLayerOpen} className={classes.terminal} ref={legacyRefs?.terminal} style={{ flex: 1, minHeight: 0, position: "relative", overflow: "hidden", display: snapshot.legacyVisibility.terminal && !inSplit ? "flex" : "none" }}/>
+      <div id="chat-output" inert={pageLayerOpen} className={classes.chat} ref={legacyRefs?.chat} style={{ flex: 1, minHeight: 0, position: "relative", overflow: "hidden", display: snapshot.legacyVisibility.chat && !inSplit ? "flex" : "none", flexDirection: "column" }}/>
       <ShellBlankChat
-        className={classes.blank}
+        className={`${classes.blank}${inSplit || conversationVisible ? " hidden" : ""}`}
         queueRef={legacyRefs?.crossSessionQueue}
         workspaceTask={context.taskId && context.workspaceId ? {
           workspaceId: context.workspaceId,
@@ -269,9 +270,15 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
           cwd: context.cwd,
         } : undefined}
       />
-      <div inert={editor.open} className={classes.composer} ref={legacyRefs?.composer}/>
-      {inSplit ? <WorkspaceWindow/> : null}
+      <div inert={pageLayerOpen} className={classes.composer} ref={legacyRefs?.composer} style={{ flexShrink: 0, position: "relative", display: snapshot.legacyVisibility.composer && !inSplit ? undefined : "none" }}/>
+      {inSplit ? <div style={{ display: "contents" }} inert={conversationVisible} aria-hidden={conversationVisible}><WorkspaceWindow/></div> : null}
       <CodeEditorHost/>
+      <ConversationHome visible={conversationVisible} sidebarOpen={snapshot.layout.sessionsDrawerOpen}
+        onOpenSidebar={snapshot.layout.sidebarDrawer ? () => void dispatch({ type: "layout.drawer.toggle" }) : undefined}
+        onOpenSession={id => {
+          conversationUi.suspend();
+          void openSessionWithOwningTask(id, selectedId => { void dispatch({ type: "session.select", id: selectedId }); });
+        }}/>
       {/* 看板是独立路由，不能替换 <main>：#output 等 LegacyHost 槽位必须一直挂着。 */}
       {taskBoard.open && taskBoard.page === "teamchat" ? <TeamChatPage
         runId={taskBoard.runId}
@@ -313,6 +320,6 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
           });
         }}
       /> : null}
-    </main>
+    </Flex>
   );
 }

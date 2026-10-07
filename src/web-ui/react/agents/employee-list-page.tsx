@@ -1,4 +1,5 @@
 import * as React from "react";
+import { Alert, Checkbox, Empty, Flex, Spin, Typography } from "antd";
 import { isBuiltinSiliconEmployee, siliconEmployeeTags, type SiliconEmployee } from "../../../ai-team-types.js";
 import { WandButton, WandIcon, WandSearchField } from "../ui";
 import { EmployeeCard } from "./employee-card.js";
@@ -108,25 +109,25 @@ export function EmployeeListPage({
   };
 
   return (
-    <div className="wand-teams-list wand-employee-list">
-      <header className="wand-teams-toolbar">
-        <div className="wand-teams-toolbar-search">
+    <Flex vertical gap={16} className="wand-teams-list wand-employee-list">
+      <Flex component="header" wrap align="center" justify="space-between" gap={12} className="wand-teams-toolbar">
+        <Flex className="wand-teams-toolbar-search" style={{ flex: "1 1 240px", maxWidth: 400, minWidth: 0 }}>
           <WandSearchField
             value={query}
             label="搜索员工名字、标签、职责或 Prompt"
             placeholder="搜索员工名字、标签、职责或 Prompt…"
             onValueChange={setQuery}
           />
-        </div>
-        <div className="wand-teams-toolbar-actions">
-          <label className="wand-employee-filter-toggle">
-            <input
-              type="checkbox"
-              checked={showArchived}
-              onChange={(e) => setShowArchived(e.target.checked)}
-            />
-            <span>显示归档</span>
-          </label>
+        </Flex>
+        <Flex wrap align="center" gap={12} className="wand-teams-toolbar-actions">
+          <Checkbox
+            className="wand-employee-filter-toggle"
+            checked={showArchived}
+            disabled={loading}
+            onChange={(event) => setShowArchived(event.target.checked)}
+          >
+            显示归档
+          </Checkbox>
           <WandButton
             kind="primary"
             disabled={isCreating}
@@ -135,17 +136,25 @@ export function EmployeeListPage({
             <WandIcon name="plus" size={14} slot="start" />
             新建员工
           </WandButton>
-        </div>
-      </header>
+        </Flex>
+      </Flex>
 
       {error ? (
-        <div className="wand-team-candidate-error" role="alert">
-          {error}
-        </div>
+        <Alert
+          className="wand-team-candidate-error"
+          type="error"
+          showIcon
+          role="alert"
+          title="读取员工列表失败"
+          description={error}
+          action={<WandButton kind="ghost" size="small" onClick={reload}>重新加载</WandButton>}
+        />
       ) : null}
-      {mutationError ? <div className="wand-team-candidate-error" role="alert">{mutationError}</div> : null}
+      {mutationError
+        ? <Alert className="wand-team-candidate-error" type="error" showIcon role="alert" title={mutationError} />
+        : null}
 
-      <div className="wand-team-members">
+      <Flex vertical gap={12} className="wand-team-members">
         {isCreating ? (
           <EmployeeCreateForm
             catalog={catalog}
@@ -156,25 +165,26 @@ export function EmployeeListPage({
         ) : null}
 
         {loading && employees.length === 0 ? (
-          <p className="wand-teams-empty" role="status">
-            正在加载员工列表…
-          </p>
+          <Typography.Text type="secondary" className="wand-teams-empty" role="status">
+            <Spin size="small"/> 正在加载员工列表…
+          </Typography.Text>
         ) : null}
 
         {!loading && filtered.length === 0 && !isCreating ? (
-          <div className="wand-teams-empty">
-            <p>
-              {query
-                ? "没有匹配的员工"
-                : "还没有硅基员工。创建一个角色，并为它配置专属的执行工具链吧！"}
-            </p>
+          <Empty
+            className="wand-teams-empty"
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={query
+              ? "没有匹配的员工"
+              : "还没有硅基员工。创建一个角色，并为它配置专属的执行工具链吧！"}
+          >
             {!query ? (
               <WandButton kind="primary" onClick={() => setIsCreating(true)}>
                 <WandIcon name="plus" size={14} slot="start" />
                 创建你的第一个硅基员工
               </WandButton>
             ) : null}
-          </div>
+          </Empty>
         ) : null}
 
         {filtered.map((employee) => (
@@ -189,7 +199,7 @@ export function EmployeeListPage({
             onDelete={() => handleDelete(employee.id)}
           />
         ))}
-      </div>
-    </div>
+      </Flex>
+    </Flex>
   );
 }

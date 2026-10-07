@@ -1,109 +1,41 @@
-import {
-  Navigation,
-  NavigationItem,
-  NavigationLink,
-  NavigationList,
-  type NavigationLinkProps,
-} from "@appica/ui-react/navigation";
 import * as React from "react";
-import { classNames, staticClassName } from "./class-names";
+import { classNames } from "./class-names";
+import { WandButton } from "./button";
 
-/**
- * Wand's navigation list, rendered by Appica UI.
- *
- * The `wand-ui-navigation*` classes are stable styling hooks for the business
- * stylesheets. They carry no visuals of their own: Appica's `pill` variant owns
- * the row geometry (padding, radius, text size) and the hover/active wash, and
- * its `data-active` state replaces Wand's old `[aria-current="page"]` rules.
- *
- * `NavigationLink` renders an `<a>` by default; Wand's rows are buttons that
- * dispatch UI actions, so callers pass `render={<button ... />}`.
- */
-/** Appica's navigation context types are not re-exported by the subpath, so the
- * two literal unions Wand actually passes through live here. */
 export type WandNavigationOrientation = "horizontal" | "vertical";
 export type WandNavigationVariant = "pill" | "line" | "indicator";
-
-export interface WandNavigationProps
-  extends Omit<React.ComponentProps<"nav">, "onChange"> {
-  readonly active?: string | number | null;
-  readonly orientation?: WandNavigationOrientation;
-  readonly variant?: WandNavigationVariant;
-  readonly size?: "sm" | "md" | "lg";
+export interface WandNavigationProps extends Omit<React.ComponentProps<"nav">, "onChange"> {
+  active?: string | number | null;
+  orientation?: WandNavigationOrientation;
+  variant?: WandNavigationVariant;
+  size?: "sm" | "md" | "lg";
 }
-
-export function WandNavigation({
-  className,
-  active = null,
-  orientation = "vertical",
-  variant = "pill",
-  size = "md",
-  ...props
-}: WandNavigationProps) {
-  const merged = classNames("wand-ui-navigation", staticClassName(className));
-  // Appica's props are a discriminated union on `orientation` (the `indicator`
-  // variant only exists vertically), so the two branches are written out
-  // instead of spreading a widened `orientation` variable.
-  if (orientation === "vertical") {
-    return (
-      <Navigation
-        {...props}
-        orientation="vertical"
-        variant={variant}
-        size={size}
-        activeLink={active}
-        className={merged}
-      />
-    );
-  }
-  return (
-    <Navigation
-      {...props}
-      orientation="horizontal"
-      variant={variant === "indicator" ? "pill" : variant}
-      size={size}
-      activeLink={active}
-      className={merged}
-    />
-  );
+const NavigationActive = React.createContext<string | number | null>(null);
+export function WandNavigation({ className, active = null, orientation = "vertical", variant: _variant, size: _size, children, ...props }: WandNavigationProps) {
+  return <NavigationActive.Provider value={active}><nav {...props} className={classNames("wand-ui-navigation", className)} data-orientation={orientation}>{children}</nav></NavigationActive.Provider>;
 }
-
-export function WandNavigationList({
-  className,
-  ...props
-}: React.ComponentProps<"ul">) {
-  return (
-    <NavigationList
-      {...props}
-      className={classNames("wand-ui-navigation-list", staticClassName(className))}
-    />
-  );
+export function WandNavigationList({ className, ...props }: React.ComponentProps<"ul">) {
+  return <ul {...props} className={classNames("wand-ui-navigation-list", className)}/>;
 }
-
-export function WandNavigationItem({
-  className,
-  ...props
-}: React.ComponentProps<"li">) {
-  return (
-    <NavigationItem
-      {...props}
-      className={classNames("wand-ui-navigation-item", staticClassName(className))}
-    />
-  );
+export function WandNavigationItem({ className, ...props }: React.ComponentProps<"li">) {
+  return <li {...props} className={classNames("wand-ui-navigation-item", className)}/>;
 }
-
-export interface WandNavigationLinkProps extends NavigationLinkProps {
-  readonly className?: string;
+export interface WandNavigationLinkProps extends Omit<React.ComponentPropsWithRef<"button">, "size"> {
+  render?: React.ReactElement<React.ComponentPropsWithRef<"button">>;
+  active?: boolean;
+  variant?: WandNavigationVariant;
+  indicator?: React.ReactNode;
+  href?: string;
+  target?: string;
+  rel?: string;
+  value?: string | number;
+  orientation?: WandNavigationOrientation;
+  size?: "sm" | "md" | "lg";
 }
-
-export function WandNavigationLink({
-  className,
-  ...props
-}: WandNavigationLinkProps) {
-  return (
-    <NavigationLink
-      {...props}
-      className={classNames("wand-ui-navigation-link", staticClassName(className))}
-    />
-  );
+export function WandNavigationLink({ className, render, active, value, orientation: _orientation, size = "md", variant: _variant, indicator, children, ...props }: WandNavigationLinkProps) {
+  const current = React.useContext(NavigationActive);
+  const selected = active ?? (value != null && value === current);
+  return <WandButton {...render?.props} {...props} className={classNames("wand-ui-navigation-link", render?.props.className, className)}
+    kind={selected ? "soft" : "ghost"} data-active={selected ? "" : undefined}
+    aria-current={selected ? "page" : undefined} size={size === "sm" ? "small" : size === "lg" ? "large" : "medium"}>{children ?? render?.props.children}{indicator}</WandButton>;
 }

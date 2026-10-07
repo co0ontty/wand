@@ -1,4 +1,5 @@
 import { getDefaultModelForProvider } from "./config.js";
+import { resolveModelGroupModels, type ModelGroup } from "./model-groups.js";
 import { providerCliInstalled, isSessionProvider } from "./session-provider.js";
 import type { SiliconEmployee } from "./ai-team-types.js";
 import { isSystemSiliconEmployee, systemEmployeeCliCandidates } from "./system-employee.js";
@@ -14,6 +15,9 @@ export interface SessionAiContext {
   opsPersona?: string;
   /** CLI 降级链（按顺序）。为空时只用 provider/model 这一次调用。 */
   cliCandidates?: AiCliCandidate[];
+  /** 系统应用必须经员工 CLI 渠道；候选为空时禁止退回当前会话/默认 provider。 */
+  employeeChannelOnly?: boolean;
+  modelGroups?: ModelGroup[];
 }
 
 /**
@@ -44,7 +48,7 @@ export function resolveSessionAiContext(
     SessionSnapshot,
     "provider" | "structuredState" | "runner" | "command" | "selectedModel" | "thinkingEffort"
   >,
-  config: Pick<WandConfig, "defaultModel" | "defaultCodexModel" | "defaultOpenCodeModel" | "defaultGrokModel" | "defaultQoderModel" | "defaultPiModel" | "defaultThinkingEffort" | "inheritEnv">,
+  config: Pick<WandConfig, "defaultModel" | "defaultCodexModel" | "defaultOpenCodeModel" | "defaultGrokModel" | "defaultQoderModel" | "defaultPiModel" | "defaultThinkingEffort" | "inheritEnv" | "modelGroups">,
 ): SessionAiContext {
   const provider = resolveSessionProvider(snapshot);
   const sessionModel = normalizeModel(snapshot.selectedModel) ?? normalizeModel(snapshot.structuredState?.model);
@@ -55,6 +59,7 @@ export function resolveSessionAiContext(
     model: sessionModel ?? defaultModel,
     thinkingEffort: snapshot.thinkingEffort ?? config.defaultThinkingEffort,
     inheritEnv: config.inheritEnv,
+    ...(config.modelGroups?.length ? { modelGroups: config.modelGroups } : {}),
   };
 }
 
@@ -68,13 +73,16 @@ export function resolveSystemAiContext(
   const sessionContext = resolveSessionAiContext(snapshot, config);
   // 候选里的「跟随默认模型」在这里就换成具体的 Wand 默认模型：降级到下一个 provider
   // 时不能拿上一个 provider 的模型，也不能把决定权交给 CLI 自己的默认值。
-  const chain = systemEmployeeCliCandidates(systemEmployee).map((candidate) => ({
-    ...candidate,
-    model: candidate.model ?? normalizeModel(getDefaultModelForProvider(config, candidate.provider)),
-  }));
+  const chain = systemEmployeeCliCandidates(systemEmployee).flatMap((candidate) =>
+    resolveModelGroupModels(config.modelGroups, candidate.provider,
+      candidate.model ?? normalizeModel(getDefaultModelForProvider(config, candidate.provider)), {
+        preferDefault: !candidate.model || candidate.model === "default",
+      })
+      .map((model) => ({ ...candidate, model: normalizeModel(model) })));
   const owned: SessionAiContext = {
     ...sessionContext,
     ...(chain.length ? { cliCandidates: chain } : {}),
+    ...(systemEmployee ? { employeeChannelOnly: true } : {}),
     ...(isSystemSiliconEmployee(systemEmployee) ? { opsPersona: systemEmployee!.prompt } : {}),
   };
   // 内置员工可用时，Wand 自有调用一律按它的候选链：provider/model 取首个已安装的
@@ -86,6 +94,7 @@ export function resolveSystemAiContext(
     owned.thinkingEffort = preferred.thinkingEffort ?? config.defaultThinkingEffort;
   }
   if (chain.length) return owned;
+  if (systemEmployee) return owned;
   // Older installations without a system AI CLI preference still follow the
   // current session. A chosen CLI must never inherit another provider's model.
   if (!isSessionProvider(config.systemAiCli)) return owned;

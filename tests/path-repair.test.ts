@@ -4,8 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { buildChildEnv } from "../src/env-utils.js";
-import { deepRepairRuntimePath, whichSync, type PathRepairResult } from "../src/path-repair.js";
+import { buildChildEnv, getLoginShellEnv, setLoginShellEnv } from "../src/env-utils.js";
+import { deepRepairRuntimePath, formatPathRepairSummary, whichSync, type PathRepairResult } from "../src/path-repair.js";
 
 test("deepRepairRuntimePath follows provider PTY interactive login shell PATH", async (t) => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-path-repair-"));
@@ -70,4 +70,74 @@ test("deepRepairRuntimePath follows provider PTY interactive login shell PATH", 
   assert.equal(whichSync("codex", { env: buildChildEnv(true) }), path.join(preferredBin, "codex"));
   assert.deepEqual(result.added, []);
   assert.equal(result.deepProbe, "success");
+  assert.equal(result.shell, probeShell);
+  assert.match(formatPathRepairSummary(result), new RegExp(`deep-probe: ok \\(${probeShell.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\)`));
+});
+
+test("login shell probe reuses the default shell environment for every CLI child", async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-shell-env-"));
+  const loginPath = path.join(root, "nvm-bin");
+  mkdirSync(loginPath);
+
+  const makeExecutable = (file: string, body: string): void => {
+    writeFileSync(file, body, "utf8");
+    chmodSync(file, 0o755);
+  };
+  const probeShell = path.join(root, "probe-shell");
+  makeExecutable(probeShell, [
+    "#!/bin/sh",
+    "[ \"$1\" = '-lic' ] || exit 2",
+    "printf 'PATH\\037%s\\n' \"$WAND_TEST_LOGIN_PATH\"",
+    "printf '\\nWAND_ENV_BEGIN_7c1f\\n'",
+    "printf 'WAND_TEST_SHELL_ONLY=from-shell\\n'",
+    "printf 'WAND_TEST_SHELL_CONFLICT=from-shell\\n'",
+    "printf 'PS1=leaked\\n'",
+    "printf 'PATH=%s\\n' \"$WAND_TEST_LOGIN_PATH\"",
+    "printf 'WAND_ENV_END_7c1f\\n'",
+  ].join("\n") + "\n");
+
+  const originalPath = process.env.PATH;
+  const originalLoginPath = process.env.WAND_TEST_LOGIN_PATH;
+  const originalConflict = process.env.WAND_TEST_SHELL_CONFLICT;
+  const originalOnly = process.env.WAND_TEST_SHELL_ONLY;
+  t.after(() => {
+    const restore = (name: string, value: string | undefined): void => {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    };
+    restore("PATH", originalPath);
+    restore("WAND_TEST_LOGIN_PATH", originalLoginPath);
+    restore("WAND_TEST_SHELL_CONFLICT", originalConflict);
+    restore("WAND_TEST_SHELL_ONLY", originalOnly);
+    setLoginShellEnv(undefined);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  // 服务进程环境里没有的变量只存在于用户 shell rc：探测必须把它回收给所有 CLI 子进程，
+  // 而进程里已显式设置的同名变量仍以进程值为准。
+  delete process.env.WAND_TEST_SHELL_ONLY;
+  process.env.WAND_TEST_SHELL_CONFLICT = "from-process";
+  process.env.PATH = [path.join(root, "service-bin"), "/usr/bin", "/bin"].join(path.delimiter);
+  process.env.WAND_TEST_LOGIN_PATH = [loginPath, "/usr/bin", "/bin"].join(path.delimiter);
+
+  const initial: PathRepairResult = {
+    added: [],
+    resolved: {},
+    finalPath: process.env.PATH,
+    deepProbe: "skipped",
+    warnings: [],
+  };
+  const result = await deepRepairRuntimePath(initial, { shell: probeShell, timeoutMs: 5_000 });
+
+  assert.equal(result.deepProbe, "success");
+  assert.equal(getLoginShellEnv()?.WAND_TEST_SHELL_ONLY, "from-shell");
+  assert.equal(getLoginShellEnv()?.PS1, undefined, "probe-only prompt state must not leak");
+
+  const childEnv = buildChildEnv(true);
+  assert.equal(childEnv.WAND_TEST_SHELL_ONLY, "from-shell");
+  assert.equal(childEnv.WAND_TEST_SHELL_CONFLICT, "from-process");
+  assert.equal(childEnv.PS1, undefined);
+  // PATH 仍按登录 shell 优先重排，两条链路命中同一个 CLI。
+  assert.equal(childEnv.PATH?.split(path.delimiter)[0], loginPath);
+  assert.equal(buildChildEnv(false).WAND_TEST_SHELL_ONLY, undefined, "关闭继承时仍只注入白名单");
 });

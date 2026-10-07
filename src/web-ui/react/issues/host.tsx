@@ -1,3 +1,7 @@
+import "./library-layout";
+import { TaskTextArea } from "./form-controls";
+import { WandInput } from "../ui";
+import { Card } from "antd";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { JSX } from "react";
 import { WandButton, WandDialogSurface, WandIcon } from "../ui";
@@ -28,6 +32,7 @@ export function GithubIssuesHost(): JSX.Element | null {
   const [error, setError] = useState("");
   const loadGenerationRef = useRef(0);
   const createGenerationRef = useRef(0);
+  const inputRevisionRef = useRef(0);
 
   useEffect(() => {
     if (!state.open) return;
@@ -69,13 +74,16 @@ export function GithubIssuesHost(): JSX.Element | null {
     if (!loadedRepo || !title.trim() || creating) return;
     const target = loadedRepo;
     const generation = ++createGenerationRef.current;
+    const inputRevision = inputRevisionRef.current;
     setCreating(true);
     setError("");
     try {
       await issuesRepository.create(target.owner, target.repo, title.trim(), body.trim());
       if (generation !== createGenerationRef.current) return;
-      setTitle("");
-      setBody("");
+      if (inputRevision === inputRevisionRef.current) {
+        setTitle("");
+        setBody("");
+      }
       await loadFrom(target.owner, target.repo);
     } catch (cause) {
       if (generation !== createGenerationRef.current) return;
@@ -121,36 +129,34 @@ export function GithubIssuesHost(): JSX.Element | null {
 
   const hasRepo = Boolean(loadedRepo);
 
-  return <WandDialogSurface open={state.open} title="GitHub 议题" description="管理项目议题，并绑定到任意 Agent 会话。" className="wand-ui-dialog-content github-issues-dialog" onOpenChange={(open) => { if (!open) githubIssuesController.close(); }}>
+  return <WandDialogSurface open={state.open} title="GitHub 议题" description="管理项目议题，并绑定到任意 Agent 会话。" className="wand-ui-dialog-content wand-task-library-dialog github-issues-library-dialog" onOpenChange={(open) => { if (!open) githubIssuesController.close(); }}>
     <div className="github-issues-body">
       <section className="github-issues-section" aria-label="选择仓库">
         <h3 className="github-issues-section-title">仓库</h3>
         <div className="github-issues-repo-row">
-          <input className="wand-ui-dialog-input" placeholder="仓库所有者" value={owner} onChange={(event) => setOwner(event.currentTarget.value)} />
+          <WandInput className="wand-ui-dialog-input" placeholder="仓库所有者" value={owner} onChange={(event) => setOwner(event.currentTarget.value)} />
           <span className="github-issues-repo-separator" aria-hidden="true">/</span>
-          <input className="wand-ui-dialog-input" placeholder="仓库名" value={repo} onChange={(event) => setRepo(event.currentTarget.value)} />
+          <WandInput className="wand-ui-dialog-input" placeholder="仓库名" value={repo} onChange={(event) => setRepo(event.currentTarget.value)} />
           <WandButton kind="primary" onClick={() => void loadFrom(owner.trim(), repo.trim())} disabled={loading}>{loading ? "加载中…" : "加载"}</WandButton>
         </div>
         {loadedRepo && <p className="github-issues-loaded">当前列表 <strong>{loadedRepo.owner}/{loadedRepo.repo}</strong></p>}
         {error && <p className="github-issues-error" role="alert">{error}</p>}
       </section>
-
       <section className="github-issues-section" aria-label="新建议题">
         <h3 className="github-issues-section-title">新建议题</h3>
         <div className="github-issues-create">
           <div className="github-issues-create-row">
-            <input className="wand-ui-dialog-input" placeholder="新议题标题" value={title} onChange={(event) => setTitle(event.currentTarget.value)} />
+            <WandInput className="wand-ui-dialog-input" placeholder="新议题标题" value={title} onChange={(event) => { inputRevisionRef.current++; setTitle(event.currentTarget.value); }} />
             <WandButton onClick={() => void create()} disabled={!hasRepo || !title.trim() || creating || loading}>{creating ? "创建中…" : "创建议题"}</WandButton>
           </div>
-          <textarea className="resize-none wand-ui-dialog-input" placeholder="描述（可选）" value={body} onChange={(event) => setBody(event.currentTarget.value)} />
+          <TaskTextArea className="resize-none wand-ui-dialog-input" placeholder="描述（可选）" value={body} onChange={(event) => { inputRevisionRef.current++; setBody(event.currentTarget.value); }} />
         </div>
       </section>
-
       <section className="github-issues-section" aria-label="议题列表">
         <h3 className="github-issues-section-title">议题列表</h3>
         <div className="github-issues-list">
           {hasRepo && issues.length === 0 && <p className="github-issues-empty">这个仓库还没有开放的议题。</p>}
-          {issues.map((issue) => <article className={issueStateClassName(issue.state)} key={`${loadedRepo?.owner ?? ""}/${loadedRepo?.repo ?? ""}#${issue.number}`}>
+          {issues.map((issue) => <Card className={issueStateClassName(issue.state)} key={`${loadedRepo?.owner ?? ""}/${loadedRepo?.repo ?? ""}#${issue.number}`}>
             <div className="github-issue-main">
               <strong className="github-issue-title"><span className="github-issue-number">#{issue.number}</span>{issue.title}</strong>
               {issue.labels?.length ? <div className="github-issue-labels">
@@ -165,7 +171,7 @@ export function GithubIssuesHost(): JSX.Element | null {
               <WandButton size="small" kind="outline" onClick={() => void toggleState(issue)} disabled={!hasRepo}>{issue.state === "open" ? "关闭" : "重开"}</WandButton>
               {issue.html_url && <a href={issue.html_url} target="_blank" rel="noreferrer"><WandIcon name="git" size={13} /> GitHub</a>}
             </div>
-          </article>)}
+          </Card>)}
         </div>
       </section>
     </div>

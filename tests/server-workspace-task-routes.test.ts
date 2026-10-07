@@ -850,19 +850,43 @@ test("archiving a sidebar task keeps its terminals and worktree, and restoring b
     assert.ok(task.worktree && existsSync(task.worktree.path), "归档不能清理 worktree");
     assert.equal(storage.getWandTaskByWorkspaceTaskId(task.id)?.id, card!.id);
 
-    // 侧栏拿到的是隐藏状态（done），会话仍挂在任务里；看板归档目录里卡片还在。
-    const groups = await fetch(`${baseUrl}/api/tasks`).then((r) => r.json() as Promise<Array<{
-      tasks: Array<{ id: string; status: string; sessions: Array<{ id: string }> }>;
-    }>>);
-    const listed = groups.flatMap((group) => group.tasks).find((item) => item.id === task.id);
+    // 普通任务/工作区列表直接隐藏归档，关联会话也不能泄露成未分组项。
+    type Groups = Array<{
+      tasks: Array<{ id: string; status: string; archived?: boolean; sessions: Array<{ id: string }> }>;
+      standaloneSessions: Array<{ id: string }>;
+    }>;
+    const groups = await fetch(`${baseUrl}/api/tasks`).then((r) => r.json() as Promise<Groups>);
+    assert.equal(groups.flatMap((group) => group.tasks).some((item) => item.id === task.id), false);
+    assert.equal(groups.flatMap((group) => group.standaloneSessions).some((item) => item.id === session.id), false);
+    const workspaceTasks = await fetch(`${baseUrl}/api/workspaces/${ws.id}/tasks`)
+      .then((r) => r.json() as Promise<Array<{ id: string }>>);
+    assert.equal(workspaceTasks.some((item) => item.id === task.id), false);
+    const worktrees = await fetch(`${baseUrl}/api/workspaces/${ws.id}/worktrees`)
+      .then((r) => r.json() as Promise<{ worktrees: Array<{ taskId: string }> }>);
+    assert.deepEqual(worktrees.worktrees, []);
+    const workspaces = await fetch(`${baseUrl}/api/workspaces`)
+      .then((r) => r.json() as Promise<Array<{ id: string; worktreeCount: number }>>);
+    assert.equal(workspaces.find((item) => item.id === ws.id)?.worktreeCount, 0);
+
+    // 显式查归档与按 ID 访问仍可读到原记录；恢复不新建容器/会话。
+    const archives = await fetch(`${baseUrl}/api/tasks?includeArchived=1`)
+      .then((r) => r.json() as Promise<Groups>);
+    const listed = archives.flatMap((group) => group.tasks).find((item) => item.id === task.id);
     assert.equal(listed?.status, "done");
+    assert.equal(listed?.archived, true);
     assert.deepEqual(listed?.sessions.map((item) => item.id), [session.id]);
+    const archiveTasks = await fetch(`${baseUrl}/api/workspaces/${ws.id}/tasks?includeArchived=1`)
+      .then((r) => r.json() as Promise<Array<{ id: string; archived?: boolean }>>);
+    assert.equal(archiveTasks.find((item) => item.id === task.id)?.archived, true);
     assert.equal(storage.getWandTask(card!.id)?.status, "archived");
 
     // 恢复：卡片改回「等待认领」后，侧栏任务由反向投影重新出现，终端仍绑在原任务上。
     storage.updateWandTask(card!.id, { status: "todo" });
     assert.equal(storage.getWorkspaceTask(task.id)?.status, "active");
+    assert.equal(storage.getWorkspaceTask(task.id)?.archived, undefined);
     assert.equal(storage.getSession(session.id)?.workspaceTaskId, task.id);
+    const restored = await fetch(`${baseUrl}/api/tasks`).then((r) => r.json() as Promise<Groups>);
+    assert.deepEqual(restored.flatMap((group) => group.tasks).find((item) => item.id === task.id)?.sessions.map((item) => item.id), [session.id]);
 
     const missing = await fetch(`${baseUrl}/api/workspace-tasks/missing/archive`, json({}, "POST"));
     assert.equal(missing.status, 404);
@@ -885,10 +909,52 @@ test("archiving a board card hides its sidebar container without deleting the ta
 
     const archived = storage.updateWandTask(card!.id, { status: "archived" });
     assert.equal(archived?.status, "archived");
-    // 侧栏不显示靠 status=done，任务行与看板绑定都还在，方便随时恢复。
+    // 归档标记由看板权威状态投影，兼容 status=done 不能和普通已完成混淆。
     assert.equal(storage.getWorkspaceTask(created.id)?.status, "done");
+    assert.equal(storage.getWorkspaceTask(created.id)?.archived, true);
     assert.equal(storage.getWandTaskByWorkspaceTaskId(created.id)?.id, card!.id);
     assert.equal(storage.listWorkspaceTasks(ws.id).length, 1);
+  } finally {
+    await close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("normal task lists exclude archives before pagination and revisions distinguish archive scope", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-archive-visibility-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const { baseUrl, close } = await startWorkspaceApp(storage);
+  try {
+    const ws = storage.createWorkspace({ name: "Project", cwd: root });
+    const active = storage.createWorkspaceTask({ workspaceId: ws.id, name: "Active" });
+    const done = storage.createWorkspaceTask({ workspaceId: ws.id, name: "Awaiting review", status: "done" });
+    const hidden = storage.createWorkspaceTask({ workspaceId: ws.id, name: "Archived" });
+    storage.archiveWorkspaceTask(hidden.id);
+    const stamp = new Date().toISOString();
+    storage.saveSession({
+      id: "hidden-session", sessionKind: "structured", command: "pi", cwd: root, mode: "default",
+      status: "idle", exitCode: null, startedAt: stamp, endedAt: stamp, output: "",
+      archived: true, archivedAt: stamp, claudeSessionId: "native-session",
+      workspaceId: ws.id, workspaceTaskId: hidden.id,
+    });
+    type Group = { tasks: Array<{ id: string; archived?: boolean }>; standaloneSessions: Array<{ id: string }> };
+    type Page = { unchanged: boolean; revision: string; groups: Group[] };
+    const list = await fetch(`${baseUrl}/api/tasks?revision=probe`).then((r) => r.json() as Promise<Page>);
+    assert.deepEqual(list.groups.flatMap((g) => g.tasks).map((t) => t.id), [done.id, active.id]);
+    assert.equal(list.groups.flatMap((g) => g.standaloneSessions).some((s) => s.id === "hidden-session"), false);
+    const limited = await fetch(`${baseUrl}/api/tasks?limit=1`).then((r) => r.json() as Promise<Group[]>);
+    assert.deepEqual(limited.flatMap((g) => g.tasks).map((t) => t.id), [done.id]);
+    const archived = await fetch(`${baseUrl}/api/tasks?includeArchived=1&revision=${encodeURIComponent(list.revision)}`)
+      .then((r) => r.json() as Promise<Page>);
+    assert.equal(archived.unchanged, false);
+    assert.notEqual(archived.revision, list.revision);
+    assert.equal(archived.groups.flatMap((g) => g.tasks).find((t) => t.id === hidden.id)?.archived, true);
+    const again = await fetch(`${baseUrl}/api/tasks?revision=${encodeURIComponent(archived.revision)}`)
+      .then((r) => r.json() as Promise<Page>);
+    assert.equal(again.unchanged, false);
+    assert.deepEqual(again.groups.flatMap((g) => g.tasks).map((t) => t.id), [done.id, active.id]);
+    assert.equal(storage.getSession("hidden-session")?.claudeSessionId, "native-session");
+    assert.equal(storage.getWandTaskByWorkspaceTaskId(hidden.id)?.status, "archived");
   } finally {
     await close();
     rmSync(root, { recursive: true, force: true });
@@ -935,7 +1001,7 @@ test("group-chat relay sessions carry a teamChat marker built from the latest ru
     // 同一条群聊会话挂过两次运行时，标记取最近一次（run-1 晚于 run-older）。
     assert.deepEqual(
       rows.find((row) => row.id === chatSession.id)?.teamChat,
-      { runId: "run-1", teamId: team.id, teamName: "开发三人组", chatTitle: "任务处理群", memberCount: 3 },
+      { runId: "run-1", teamId: team.id, teamName: "开发三人组", chatTitle: "群聊", memberCount: 3 },
     );
     assert.equal(rows.find((row) => row.id === plainSession.id)?.teamChat, undefined);
   } finally {

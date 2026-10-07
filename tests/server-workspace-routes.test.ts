@@ -42,6 +42,52 @@ const json = (body: unknown) => ({
   body: JSON.stringify(body),
 });
 
+test("workspace session lists and counts exclude standalone archives and hidden task members", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-workspace-session-visibility-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const { baseUrl, close } = await startWorkspaceApp(storage);
+  try {
+    const workspace = storage.createWorkspace({ name: "Project", cwd: root });
+    const activeTask = storage.createWorkspaceTask({ workspaceId: workspace.id, name: "Active task" });
+    const archivedTask = storage.createWorkspaceTask({ workspaceId: workspace.id, name: "Archived task" });
+    storage.archiveWorkspaceTask(archivedTask.id);
+    const save = (id: string, archived: boolean, taskId?: string, startedAt = "2026-10-02T00:00:00Z") => storage.saveSession({
+      id, command: "pi", sessionKind: "structured", cwd: root, mode: "default", status: "idle",
+      exitCode: null, startedAt, endedAt: startedAt, output: "", archived,
+      archivedAt: archived ? "2026-10-05T00:00:00Z" : null, claudeSessionId: `native-${id}`,
+      workspaceId: workspace.id, workspaceTaskId: taskId,
+    });
+    save("task-normal", false, activeTask.id);
+    save("task-archive", true, activeTask.id, "2026-10-03T00:00:00Z");
+    save("standalone-normal", false);
+    save("standalone-archive", true);
+    save("hidden-task-member", false, archivedTask.id);
+    assert.equal(storage.countSessionsByWorkspace().get(workspace.id), 2);
+    assert.equal(storage.countSessionsByWorkspace({ includeArchived: true }).get(workspace.id), 5);
+    const workspaces = await fetch(`${baseUrl}/api/workspaces`).then((r) => r.json() as Promise<Array<{ id: string; sessionCount: number }>>);
+    assert.equal(workspaces.find((item) => item.id === workspace.id)?.sessionCount, 2);
+    const detail = await fetch(`${baseUrl}/api/workspaces/${workspace.id}`).then((r) => r.json() as Promise<{ sessionCount: number; sessions: Array<{ id: string }> }>);
+    assert.equal(detail.sessionCount, 2);
+    assert.deepEqual(detail.sessions.map((s) => s.id).sort(), ["standalone-normal", "task-normal"]);
+    type Group = { tasks: Array<{ id: string; totalSessions: number; sessions: Array<{ id: string }> }>; standaloneSessions: Array<{ id: string }> };
+    const groups = await fetch(`${baseUrl}/api/tasks?maxSessions=1`).then((r) => r.json() as Promise<Group[]>);
+    assert.deepEqual(groups.flatMap((g) => g.standaloneSessions).map((s) => s.id), ["standalone-normal"]);
+    const task = groups.flatMap((g) => g.tasks).find((t) => t.id === activeTask.id)!;
+    assert.equal(task.totalSessions, 1);
+    assert.deepEqual(task.sessions.map((s) => s.id), ["task-normal"], "filter archives before applying maxSessions");
+    const archiveDetail = await fetch(`${baseUrl}/api/workspaces/${workspace.id}?includeArchived=1`).then((r) => r.json() as Promise<{ sessionCount: number; sessions: Array<{ id: string }> }>);
+    assert.equal(archiveDetail.sessionCount, 5);
+    assert.equal(archiveDetail.sessions.length, 5);
+    const archiveGroups = await fetch(`${baseUrl}/api/tasks?includeArchived=1`).then((r) => r.json() as Promise<Group[]>);
+    assert.equal(archiveGroups.flatMap((g) => [...g.standaloneSessions, ...g.tasks.flatMap((t) => t.sessions)]).length, 5);
+    assert.equal(storage.getSession("standalone-archive")?.claudeSessionId, "native-standalone-archive");
+    assert.equal(storage.loadSessionsSlim().length, 5, "listing never deletes archive history");
+  } finally {
+    await close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("workspace CRUD + layout round-trip via REST", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-workspace-routes-"));
   const storage = new WandStorage(path.join(root, "wand.db"));

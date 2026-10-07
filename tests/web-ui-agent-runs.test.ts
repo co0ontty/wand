@@ -510,3 +510,56 @@ test("结论体保留换行，摘要行才压平并去掉 markdown 记号", () =
     "状态 __ready__ 已就绪",
   );
 });
+
+/**
+ * 回归：真实丢显示的那一次派发——`subagent({ workflow: <脚本>, async: true })`。
+ * 它没有 agent / task，旧判据把它当管理调用丢掉，界面上什么都不出现。
+ */
+test("pi workflow 派发（无 agent/task）同样进面板，回执标后台", () => {
+  const index = collectAgentRuns([
+    { role: "user", content: [{ type: "text", text: "接着迁移组件库" }] },
+    {
+      role: "assistant",
+      content: [
+        {
+          type: "tool_use",
+          name: "Pi/subagent",
+          id: "call-wf",
+          input: {
+            workflow: "./output/web-ui-library-migration/continuation.js",
+            async: true,
+            globalConcurrencyLimit: 3,
+          },
+        },
+        { type: "tool_result", tool_use_id: "call-wf", is_error: false, content: PI_WORKFLOW_RECEIPT },
+      ],
+    },
+  ]);
+
+  assert.equal(index.runs.length, 1);
+  const agent = index.agentByTaskId.get("call-wf");
+  assert.ok(agent, "workflow 派发必须有 Agent Run");
+  assert.equal(agent.meta.agentType, "workflow");
+  assert.equal(agent.meta.taskDescription, "continuation.js");
+  assert.equal(agent.dispatch?.block.id, "call-wf");
+  assert.equal(agent.receipt?.runId, "79c600cb-1714-43e9-ad65-756177c8bb34");
+  assert.equal(getAgentRunStatusSummary(index.runs[0], LIVE).status, "background");
+  assert.equal(agentRunInLatestWindow(index.runs[0], index.lastUserTextMessageIndex), true);
+});
+
+test("pi 子 Agent 控制调用不建 Agent Run", () => {
+  const index = collectAgentRuns([
+    {
+      role: "assistant",
+      content: [
+        { type: "tool_use", name: "Pi/subagent", id: "call-status", input: { action: "status", id: "4b3596c0", lines: 30 } },
+        { type: "tool_result", tool_use_id: "call-status", is_error: false, content: PI_STATUS_TEXT },
+        { type: "tool_use", name: "Pi/subagent", id: "call-validate", input: { action: "validate", workflow: "./x.js" } },
+        { type: "tool_use", name: "Pi/subagent", id: "call-steer", input: { action: "steer", id: "4b3596c0", message: "停" } },
+      ],
+    },
+  ]);
+
+  assert.equal(index.runs.length, 0);
+  assert.equal(index.agentByTaskId.size, 0);
+});

@@ -459,7 +459,7 @@ test("空目录里的「新建文件 / 新建文件夹」不是死点击，且�
   assert.match(host, /\{rootNode\?\.status === "loaded" && \(\n\s*<>\n\s*\{rootCreateInput\}/);
   // 空态文案仍在，但和创建入口同屏（三元 else 分支），不再各管一半。
   assert.match(host, /rootNode\.entries\.length > 0 \? rootNode\.entries\.map/);
-  assert.match(host, /: <div className="wand-file-explorer-empty">这个目录是空的。<\/div>}/);
+  assert.match(host, /: <Empty className="wand-file-explorer-empty" description=\{null\}>这个目录是空的。<\/Empty>}/);
   assert.doesNotMatch(host, /rootNode\.entries\.length === 0 && \(\n\s*<div className="wand-file-explorer-empty">这个目录是空的/);
   // 改名 / 新建 / 搜索三处 Enter 都要先挡输入法组字。
   const guards = host.match(/if \(event\.nativeEvent\.isComposing\) return;/g) ?? [];
@@ -487,7 +487,7 @@ test("移动对话框的路径输入在输入法组字期不进入目录、也�
 test("目录读取失败：原位给出重新加载，且该命令真的能把节点拉回 loaded", async () => {
   const host = readFileSync(new URL("../src/web-ui/react/file-explorer/host.tsx", import.meta.url), "utf8");
   // 错误块升成 role=alert，并在同一位置给出重试；命令沿用既有的 refresh（缺省目录就是 root）。
-  assert.match(host, /rootNode\?\.status === "error" && \(\n\s*<div className="wand-file-explorer-empty" role="alert">/);
+  assert.match(host, /rootNode\?\.status === "error" && \(\n\s*<Alert className="wand-file-explorer-empty" type="error"/);
   assert.match(host, /dispatch\.execute\(\{ type: "refresh", dir: snapshot\.root \}\)/);
   assert.match(host, />重新加载<\/WandButton>/);
 
@@ -514,7 +514,7 @@ test("git 状态徽章两处都带 role=img，aria-label 不再是哑的", () =>
   // 关键是 role/aria-label 必须落在**包着可见字形的那个 span**上：挂在父级或被
   // role=treeitem 的行名覆盖，读屏就只念条目名，M / ? 变成看不懂的哑符号。
   assert.equal((host.match(
-    /<span className=\{`wand-explorer-git \$\{badge\.className\}\`\} role="img" title=\{badge\.label\} aria-label=\{badge\.label\}>\s*\{badge\.text\}\s*<\/span>/g,
+    /<Tag className=\{`wand-explorer-git \$\{badge\.className\}\`\} color=\{gitColor\(badge\)\} role="img" title=\{badge\.label\} aria-label=\{badge\.label\}>\s*\{badge\.text\}\s*<\/Tag>/g,
   ) ?? []).length, 2, "树行与搜索结果行两处徽章都必须是 role+label+字形同节点");
 });
 

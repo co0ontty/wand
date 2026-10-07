@@ -1,4 +1,5 @@
 import { composer, state, writeStoredBoolean } from "./state";
+import { handlePiSettingsKeydown } from "./pi-settings-adapter";
 import { createSessionReads } from "./session-reads";
 import { createSessionCompletionViewIntent, isSessionJustCompleted, mergeSessionCompletionState } from "../../session-completion-state.js";
 import { notifyTasksChanged } from "../react/task-changes";
@@ -26,6 +27,7 @@ import {
 } from "./worktree-merge-adapter";
 import { prepareFilePreviewForCompetingOverlay } from "./file-preview-adapter";
 import { closeReactOverlays } from "./react-overlay-coordinator";
+import { piExecutionController } from "../react/pi-execution/controller";
 import { syncBrowserComposerSelects } from "./composer-select-adapter";
 import { syncBrowserComposerConfig } from "./composer-config-adapter";
 import { syncBrowserComposerAttachments } from "./composer-attachments-adapter";
@@ -619,7 +621,9 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         if (provider === "opencode") return state.availableOpenCodeModels || [];
         if (provider === "grok") return state.availableGrokModels || [];
         if (provider === "qoder") return state.availableQoderModels || [];
-        if (provider === "pi") return state.availablePiModels || [];
+        if (provider === "pi") return (state.availablePiModels || []).filter(function(model) {
+          return session?.sessionKind !== "pty" || !model.id.startsWith("wand-openrouter-free/");
+        });
         if (provider === "gemini") return state.availableGeminiModels || [];
         return state.availableModels || [];
       }
@@ -627,7 +631,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
       function getChatModelSelectOptions(selected, session) {
         var models = getModelsForCurrentProvider(session);
         var normalized = normalizeComposerModelValue(selected);
-        var options = [{ value: "", label: "默认 · " + getModelDisplayLabel("", session) }];
+        var options: Array<{ value: string; label: string; group?: string }> = [{ value: "", label: "默认 · " + getModelDisplayLabel("", session) }];
         for (var i = 0; i < models.length; i++) {
           var m = models[i];
           if (m.id === "default") continue;
@@ -641,7 +645,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
                   ? " · API 候选"
                   : " · 候选"
             : "";
-          options.push({ value: m.id, label: label + suffix });
+          options.push({ value: m.id, label: label + suffix, group: m.group });
         }
         if (normalized && !models.some(function(m) { return m.id === normalized; })) {
           options.push({ value: normalized, label: normalized + "（自定义）" });
@@ -1547,6 +1551,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           }
         }
         if (state.selectedId !== id) {
+          piExecutionController.closeIfOpen();
           teardownTerminal();
         }
         clearActivityDetailState();
@@ -2167,6 +2172,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         // keyCode 229), or immediately after compositionend in the same event
         // loop. None of those cases may submit the composer.
         if (isImeKeyboardEvent(event)) return;
+        if (handlePiSettingsKeydown(event)) return;
 
         if (terminalZoomFromKeyboard(event)) return;
 
@@ -2523,6 +2529,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
                 index: index,
                 name: a.name,
                 sizeLabel: formatFileSize(a.size),
+                size: a.size,
                 previewUrl: a.previewUrl || null,
               };
             });

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { OPENROUTER_FREE_GROUP, OPENROUTER_FREE_SELECTOR } from "../src/openrouter-free-selection.js";
 import {
   ComposerSelectController,
   type ComposerSelectMount,
@@ -149,6 +150,19 @@ test("composer 三件套的 chip 与内层 select 宿主都由 React 渲染", ()
   assert.match(selectHost, /<WandSelect/);
   assert.match(selectHost, /searchable=\{mount\.control === "model"\}/);
   assert.match(selectHost, /searchPlaceholder="搜索模型"/);
+});
+
+test("免费分组在输入栏直接可选，显式、默认和未加载目录时均显示分组名", () => {
+  const model = { id: OPENROUTER_FREE_SELECTOR, label: OPENROUTER_FREE_GROUP };
+  const markup = renderToStaticMarkup(React.createElement(WandSelect, {
+    value: model.id, ariaLabel: "模型", options: [{ value: model.id, label: model.label }],
+    onValueChange() {},
+  }));
+  assert.match(markup, /免费分组/);
+  assert.equal(modelDisplayName(model.id, [model], ""), "免费分组");
+  assert.equal(modelDisplayName("default", [model], model.id), "免费分组");
+  assert.equal(modelDisplayName(model.id, [], ""), "免费分组");
+  assert.equal(modelDisplayName("", [], model.id), "免费分组");
 });
 
 test("输入栏模型触发器不写「默认模型/默认」：哨兵换成服务端默认模型的名字", () => {

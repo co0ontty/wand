@@ -1,8 +1,12 @@
+import { Tabs } from "antd";
+import { WandUiBoundary } from "../theme";
+import { WandButton, WandDropdownMenu, WandDropdownMenuTrigger, WandDropdownMenuContent, WandDropdownMenuItem, WandDropdownMenuSeparator } from "../ui";
 // 任务顶部的“工作窗口”标签栏。每个顶层 Tab 是一个工作窗口：默认含一个终端；
 // 终端移入另一窗口后，来源空 Tab 消失、目标 Tab 内部转为 split。单窗格继续复用全局终端，
 // 只有活动工作窗口为 split 时才由 WorkspaceWindow 挂载多终端池。
 
 import * as React from "react";
+import { Badge, Flex } from "antd";
 
 import { workspaceContextStore } from "./workspace-context";
 import { workspacesStore } from "./controller";
@@ -15,18 +19,11 @@ import {
   workspaceProviderLabel,
 } from "./session-order";
 import type {
-  NewTaskSessionPayload,
   TaskWindowLayout,
   WorkWindowLayout,
-  WorkspaceSessionKind,
-  WorkspaceSessionTarget,
   WorkspaceSessionSummary,
 } from "./types";
-import { WorkspaceAgentDialog } from "./workspace-agent-dialog";
-import {
-  workspaceAgentDialogController,
-  workspaceAgentDialogStore,
-} from "./workspace-agent-dialog-controller";
+import { newSessionController } from "../new-session/controller";
 import { useUiDispatch, useUiStoreSnapshot } from "../shell/ui-store-react";
 import { ChatWidthToggle } from "../shell/chat-width-toggle";
 import { TopbarGitBadge } from "../shell/topbar-git-badge";
@@ -52,7 +49,7 @@ function StatusDot({ status }: { status?: string }) {
     : status === "exited" || status === "failed" || status === "stopped"
       ? "ended"
       : "idle";
-  return <span className={classNames("workspace-tab-dot", tone)} aria-hidden />;
+  return <Badge status={tone === "running" ? "processing" : status === "failed" ? "error" : "default"} className={classNames("workspace-tab-dot", tone)} aria-hidden />;
 }
 
 function layoutsEqual(left: TaskWindowLayout | null, right: TaskWindowLayout): boolean {
@@ -84,11 +81,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
   );
   const snapshot = useUiStoreSnapshot();
   const dispatch = useUiDispatch();
-  const agentDialog = React.useSyncExternalStore(
-    workspaceAgentDialogStore.subscribe,
-    workspaceAgentDialogStore.getSnapshot,
-    workspaceAgentDialogStore.getServerSnapshot,
-  );
+  const mobile = snapshot.viewport.mobile;
   const [moving, setMoving] = React.useState<{ sessionId: string; dir: "h" | "v" } | null>(null);
   const [closingWindowId, setClosingWindowId] = React.useState<string | null>(null);
   const selectedId = snapshot.selected?.id ?? null;
@@ -96,10 +89,9 @@ export function WorkspaceTabBar(): React.ReactElement | null {
 
   React.useEffect(() => {
     setMoving(null);
-    workspaceAgentDialogController.close();
   }, [context.taskId]);
 
-  React.useEffect(() => () => workspaceAgentDialogController.close(), []);
+  React.useEffect(() => () => newSessionController.close(), []);
 
   React.useEffect(() => {
     if (!moving) return;
@@ -132,30 +124,6 @@ export function WorkspaceTabBar(): React.ReactElement | null {
   // 无活动任务，或还没有任何工作窗口：让主区全页 CLI 选择桌面单独出现，
   // 避免空标签栏和选择器叠在一起。
   if (!context.taskId || taskLayout.windows.length === 0) return null;
-
-  const handleNewSession = async (target: WorkspaceSessionTarget, kind: WorkspaceSessionKind, model: string, employeeId?: string) => {
-    if (!context.taskId || !context.workspaceId) {
-      throw new Error("当前任务上下文已失效，请重新打开任务后重试。");
-    }
-    const rt = runtime();
-    if (!rt) throw new Error("工作空间运行环境尚未就绪，请刷新页面后重试。");
-    const payload: NewTaskSessionPayload = {
-      workspaceId: context.workspaceId,
-      taskId: context.taskId,
-      cwd: taskCwd,
-      target,
-      kind,
-      model: model || undefined,
-      employeeId,
-    };
-    const result = await rt.newTaskSession(payload);
-    const sessionId = typeof result === "string" ? result : null;
-    if (!sessionId) throw new Error("服务端未返回新会话 ID。");
-    if (workspaceContextStore.getSnapshot().taskId !== payload.taskId) return;
-    // The runtime refreshes task detail and persists the new window through its queue.
-    void dispatch({ type: "session.select", id: sessionId });
-    rt.toast(employeeId ? "已开始员工对话" : target === "shell" ? "已新建空白终端" : `已新建 ${workspaceProviderLabel(target)} 对话`, "success");
-  };
 
   const selectWindow = (window: WorkWindowLayout) => {
     const rt = runtime();
@@ -208,66 +176,56 @@ export function WorkspaceTabBar(): React.ReactElement | null {
     void dispatch({ type: "nav.home" });
   };
 
+  const openNewSession = () => newSessionController.open({
+    initialCwd: taskCwd,
+    workspaceId: context.workspaceId || undefined,
+    workspaceTaskId: context.taskId || undefined,
+    taskName: context.taskName || undefined,
+  });
+  const activeWindow = taskLayout.windows.find((window) => window.id === taskLayout.activeWindowId);
+
   return (
-    <div className="workspace-tab-bar" role="tablist" aria-label={`任务 ${context.taskName} 的工作窗口标签`}>
-      <div className="workspace-tab-bar-list">
-        {taskLayout.windows.map((window) => {
-            const active = window.id === taskLayout.activeWindowId;
+    <Flex align="center" gap={4} wrap={!mobile} className="workspace-tab-bar" style={{ flexShrink: 0, minWidth: 0, padding: "6px 12px", borderBottom: "1px solid var(--border-subtle)" }}>
+      <Flex align="center" gap={4} className="workspace-tab-bar-list" style={{ flex: mobile ? "1 1 0" : "1 1 420px", minWidth: 0 }}>
+        <WandUiBoundary><Tabs className="wand-workspace-tabs" type="editable-card" hideAdd tabBarStyle={{ marginBottom: 0 }} style={{ flex: 1, minWidth: 0 }}
+          aria-label={`任务 ${context.taskName} 的工作窗口标签`}
+          activeKey={taskLayout.activeWindowId ?? undefined}
+          items={taskLayout.windows.map((window) => {
             const presentation = windowPresentation(window, sessionById);
-            const containsMoving = moving
-              ? layoutSessionIds(window.layout).includes(moving.sessionId)
-              : false;
-            return (
-              <div
-                key={window.id}
-                className={classNames("workspace-tab-item", active && "active")}
-              >
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  className={classNames(
-                    "workspace-tab",
-                    active && "active",
-                    moving && !containsMoving && "move-target",
-                    containsMoving && "moving-source",
-                  )}
-                  title={moving && !containsMoving
-                    ? `把当前终端移入「${presentation.label}」`
-                    : `${presentation.label}${presentation.count > 1 ? "（分屏工作窗口）" : ""}`}
-                  onClick={() => selectWindow(window)}
-                >
-                  <StatusDot status={presentation.status} />
-                  {presentation.session ? (
-                    <SessionProviderMark session={presentation.session} className="workspace-tab-logo"/>
-                  ) : null}
-                  <span className="workspace-tab-label">{presentation.label}</span>
-                </button>
-                <button
-                  type="button"
-                  className="workspace-tab-item-close"
-                  aria-label={`关闭工作窗口 ${presentation.label}`}
-                  title="关闭这个工作窗口"
-                  disabled={closingWindowId === window.id}
-                  onClick={() => void closeWindow(window)}
-                >
-                  <WandIcon name="close" size={14}/>
-                </button>
-              </div>
-            );
+            const containsMoving = Boolean(moving && layoutSessionIds(window.layout).includes(moving.sessionId));
+            return {
+              key: window.id,
+              closable: !mobile,
+              label: <span className={classNames("wand-workspace-tab-label",
+                moving && !containsMoving && "move-target", containsMoving && "moving-source")}
+                title={moving && !containsMoving ? `把当前终端移入「${presentation.label}」`
+                  : `${presentation.label}${presentation.count > 1 ? "（分屏工作窗口）" : ""}`}>
+                <StatusDot status={presentation.status}/>
+                {presentation.session ? <SessionProviderMark session={presentation.session} className="workspace-tab-logo"/> : null}
+                <span>{presentation.label}</span>
+              </span>,
+              closeIcon: <span aria-label={`关闭工作窗口 ${presentation.label}`} aria-busy={closingWindowId === window.id}
+                aria-disabled={closingWindowId === window.id}><WandIcon name="close" size={14}/></span>,
+            };
           })}
-        <button
+          onTabClick={(key) => { const window = taskLayout.windows.find((window) => window.id === key); if (window) selectWindow(window); }}
+          onEdit={(key, action) => {
+            if (action !== "remove") return;
+            const window = taskLayout.windows.find((window) => window.id === key);
+            if (window) void closeWindow(window);
+          }}/></WandUiBoundary>
+        {!mobile ? <WandButton kind="ghost"
           type="button"
           className="workspace-tab-add"
           title="新建 Agent 或空白终端（在同一 worktree）"
           aria-label="新建 Agent 或空白终端"
-          onClick={() => workspaceAgentDialogController.open()}
+          onClick={openNewSession}
         >
           <WandIcon name="plus" size={18}/>
-        </button>
-        {taskLayout.windows.length > 1 ? (
+        </WandButton> : null}
+        {!mobile && taskLayout.windows.length > 1 ? (
           <>
-            <button
+            <WandButton kind="ghost"
               type="button"
               className={classNames("workspace-tab-move", moving?.dir === "h" && "active")}
               title="把当前终端移入另一个工作窗口并左右分屏"
@@ -276,8 +234,8 @@ export function WorkspaceTabBar(): React.ReactElement | null {
               onClick={() => moving?.dir === "h" ? setMoving(null) : beginMove("h")}
             >
               <WandIcon name="splitHorizontal" size={18}/>
-            </button>
-            <button
+            </WandButton>
+            <WandButton kind="ghost"
               type="button"
               className={classNames("workspace-tab-move", moving?.dir === "v" && "active")}
               title="把当前终端移入另一个工作窗口并上下分屏"
@@ -286,46 +244,57 @@ export function WorkspaceTabBar(): React.ReactElement | null {
               onClick={() => moving?.dir === "v" ? setMoving(null) : beginMove("v")}
             >
               <WandIcon name="splitVertical" size={18}/>
-            </button>
+            </WandButton>
           </>
         ) : null}
-      </div>
+      </Flex>
       {moving ? (
-        <button
+        <WandButton kind="ghost"
           type="button"
           className="workspace-tab-move-hint"
           title="取消移动"
           onClick={() => setMoving(null)}
         >
           选择目标窗口 · Esc 取消
-        </button>
+        </WandButton>
       ) : null}
-      <TopbarGitBadge id="workspace-tab-git-badge" className="workspace-tab-git"/>
-      <ChatWidthToggle className="workspace-tab-chat-width"/>
-      <button
-        type="button"
-        className="workspace-tab-files"
-        title="打开文件面板"
-        aria-label="文件"
-        onClick={() => void dispatch({ type: "layout.files.toggle" })}
-      >
-        <WandIcon name="explorer" size={16} strokeWidth={1.8}/>
-      </button>
-      <button
-        type="button"
-        className="workspace-tab-close"
-        title="关闭任务标签组"
-        aria-label="关闭任务标签组"
-        onClick={handleClose}
-      >
-        <WandIcon name="close" size={18}/>
-      </button>
-      <WorkspaceAgentDialog
-        open={agentDialog.open}
-        initialProvider={context.provider}
-        onConfirm={handleNewSession}
-        onDismiss={() => workspaceAgentDialogController.close()}
-      />
-    </div>
+      {mobile ? <WandDropdownMenu>
+        <WandDropdownMenuTrigger render={<WandButton kind="ghost" className="workspace-tab-more" aria-label="工作窗口操作" title="工作窗口操作" style={{ width: 44, height: 44, flexShrink: 0 }}><WandIcon name="more" size={18}/></WandButton>}/>
+        <WandDropdownMenuContent align="end" aria-label="工作窗口操作">
+          <WandDropdownMenuItem icon="plus" onSelect={openNewSession}>新建 Agent 或空白终端</WandDropdownMenuItem>
+          <WandDropdownMenuItem icon="explorer" onSelect={() => void dispatch({ type: "layout.files.toggle" })}>文件</WandDropdownMenuItem>
+          {snapshot.topbar.git ? <WandDropdownMenuItem icon="git" onSelect={() => void dispatch({ type: "topbar.gitCommit" })}>快捷提交 · {snapshot.topbar.git.branch}</WandDropdownMenuItem> : null}
+          {taskLayout.windows.length > 1 ? <>
+            <WandDropdownMenuSeparator/>
+            <WandDropdownMenuItem icon="splitHorizontal" onSelect={() => beginMove("h")}>移动终端并左右分屏</WandDropdownMenuItem>
+            <WandDropdownMenuItem icon="splitVertical" onSelect={() => beginMove("v")}>移动终端并上下分屏</WandDropdownMenuItem>
+          </> : null}
+          <WandDropdownMenuSeparator/>
+          {activeWindow ? <WandDropdownMenuItem icon="close" disabled={closingWindowId !== null} onSelect={() => void closeWindow(activeWindow)}>关闭当前工作窗口</WandDropdownMenuItem> : null}
+          <WandDropdownMenuItem icon="close" onSelect={handleClose}>关闭任务标签组</WandDropdownMenuItem>
+        </WandDropdownMenuContent>
+      </WandDropdownMenu> : <>
+        <TopbarGitBadge id="workspace-tab-git-badge" className="workspace-tab-git"/>
+        <ChatWidthToggle className="workspace-tab-chat-width"/>
+        <WandButton kind="ghost"
+          type="button"
+          className="workspace-tab-files"
+          title="打开文件面板"
+          aria-label="文件"
+          onClick={() => void dispatch({ type: "layout.files.toggle" })}
+        >
+          <WandIcon name="explorer" size={16} strokeWidth={1.8}/>
+        </WandButton>
+        <WandButton kind="ghost"
+          type="button"
+          className="workspace-tab-close"
+          title="关闭任务标签组"
+          aria-label="关闭任务标签组"
+          onClick={handleClose}
+        >
+          <WandIcon name="close" size={18}/>
+        </WandButton>
+      </>}
+    </Flex>
   );
 }

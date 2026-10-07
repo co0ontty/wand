@@ -1,5 +1,8 @@
+import "../issues/library-layout";
+import { TaskTextArea, TaskForm } from "../issues/form-controls";
+import { WandInput } from "../ui";
+import { Alert, Button, Card, Checkbox, Collapse, Empty, Flex, Form, List, Space, Tag, Typography } from "antd";
 import { type FormEvent, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import * as React from "react";
 import { workspaceContextStore } from "../workspaces/workspace-context";
 import { failureMessage } from "../errors";
 
@@ -24,7 +27,7 @@ import type {
 const PROVIDERS: Array<{ id: MissionProvider; label: string }> = [
   { id: "claude", label: "Claude" }, { id: "codex", label: "Codex" },
   { id: "opencode", label: "OpenCode" }, { id: "grok", label: "Grok" },
-  { id: "qoder", label: "Qoder" }, { id: "pi", label: "Pi" },
+  { id: "qoder", label: "Qoder" }, { id: "pi", label: "one 的 Agent" },
   { id: "gemini", label: "Gemini" },
 ];
 
@@ -98,19 +101,11 @@ function AttemptCard({ attempt, onOpen, onDiff }: {
   onOpen(): void;
   onDiff(): void;
 }) {
-  return (
-    <article className="wand-missions-attempt">
-      <div className="wand-missions-attempt-head">
-        <span className="wand-missions-provider"><ProviderLogo provider={attempt.provider}/><strong>{issueAgentProviderLabel(attempt.provider)}</strong></span>
-        <span className={`wand-missions-state is-${attempt.state}`}>{missionStateLabel(attempt.state)}</span>
-      </div>
-      <p>{attempt.summary || attempt.error || attempt.branch || "正在准备独立 worktree…"}</p>
-      <div className="wand-missions-attempt-actions">
-        <WandButton size="small" kind="ghost" disabled={!attempt.sessionId} onClick={onOpen}>打开会话</WandButton>
-        <WandButton size="small" kind="outline" disabled={!attempt.worktreePath} onClick={onDiff}>审查 Diff</WandButton>
-      </div>
-    </article>
-  );
+  return <Card className="wand-missions-attempt" size="small" title={<Space><ProviderLogo provider={attempt.provider}/>{issueAgentProviderLabel(attempt.provider)}</Space>} extra={<Tag>{missionStateLabel(attempt.state)}</Tag>}>
+    <Typography.Paragraph>{attempt.summary || attempt.error || attempt.branch || "正在准备独立 worktree…"}</Typography.Paragraph>
+    <Space wrap><WandButton size="small" kind="ghost" disabled={!attempt.sessionId} onClick={onOpen}>打开会话</WandButton>
+      <WandButton size="small" kind="outline" disabled={!attempt.worktreePath} onClick={onDiff}>审查 Diff</WandButton></Space>
+  </Card>;
 }
 
 export function MissionsHost({ repository = httpMissionsRepository }: { repository?: MissionsRepository }) {
@@ -258,177 +253,123 @@ export function MissionsHost({ repository = httpMissionsRepository }: { reposito
       open={controller.open}
       title="并行任务"
       description="把同一个目标分派给多个 Agent，在独立 worktree 中并行尝试，并审查 Diff。"
-      className="wand-missions-dialog"
-      overlayClassName="wand-missions-overlay"
-      headerClassName="wand-missions-header"
-      titleClassName="wand-missions-title"
-      descriptionClassName="wand-missions-description"
+      className="wand-task-library-dialog wand-missions-library-dialog wand-task-library-dialog-wide"
       dismissable={!creating && controller.dismissable}
       onOpenChange={(open) => { if (!open) missionsController.close(); }}
     >
-      <div className="wand-missions-toolbar">
-        <span className="wand-missions-toolbar-note">{missions.length} 个任务</span>
-        <WandButton kind="primary" size="small" disabled={busy || submitting} onClick={startCreateMission}>
-          <WandIcon name="plus" slot="start" size={13}/>
-          <span>新任务</span>
-        </WandButton>
-      </div>
-
-      {error ? <div className="wand-missions-error" role="alert">{error}</div> : null}
-
-      <div className="wand-missions-body">
-        <div className="wand-missions-workspace">
-          <aside className="wand-missions-list">
-            {inbox.length ? (
-              <div className="wand-missions-inbox">
-                <strong>收件箱</strong>
-                {inbox.map((item) => (
-                  <button
-                    key={item.sessionId}
-                    type="button"
-                    onClick={() => {
-                      void repository.markInboxRead(item.sessionId).catch(() => undefined);
-                      if (item.sessionId) void openSession(item.sessionId);
-                    }}
-                  >
-                    <strong>{item.title}</strong>
-                    <small>{missionStateLabel(item.state)}{item.summary ? ` · ${item.summary}` : ""}</small>
-                  </button>
-                ))}
-              </div>
-            ) : null}
-            {missions.map((mission) => (
-              <button key={mission.id} className={selected?.id === mission.id ? "active" : ""} onClick={() => { setSelectedId(mission.id); setDiff(null); }}>
-                <strong>{mission.title}</strong>
-                <small>{mission.attempts.length} 个 Agent · {missionStateLabel(mission.status)}</small>
-                {mission.milestoneId ? <small className="wand-missions-milestone">
-                  <WandIcon name="milestone" size={11}/>
-                  {milestoneNameOf(milestoneSnapshot.items, mission.milestoneId) || "里程碑"}
-                </small> : null}
-              </button>
-            ))}
-            {!missions.length ? <div className="wand-missions-empty">
-              <p>还没有并行任务。创建一个，让多个 Agent 在独立 worktree 中并行尝试。</p>
-              <WandButton kind="soft" size="small" disabled={creating} onClick={startCreateMission}>新建任务</WandButton>
-            </div> : null}
-          </aside>
-          <main className="wand-missions-detail">
-            {selected ? (
-              <>
-                <div className="wand-missions-detail-head">
-                  <div><h2>{selected.title}</h2><p>{selected.cwd} · 基线 {selected.worktree.baseRef || "当前分支"}</p></div>
-                  <span className={`wand-missions-state is-${selected.status}`}>{missionStateLabel(selected.status)}</span>
-                </div>
-                {selected.milestoneId ? <p className="wand-missions-detail-milestone">
-                  <WandIcon name="milestone" size={12}/>
-                  {milestoneNameOf(milestoneSnapshot.items, selected.milestoneId) || "里程碑"}
-                </p> : null}
-                <p className="wand-missions-prompt">{selected.prompt}</p>
-                <div className="wand-missions-attempt-grid">
-                  {selected.attempts.map((attempt) => (
-                    <AttemptCard key={attempt.id} attempt={attempt} onOpen={() => attempt.sessionId && openSession(attempt.sessionId)} onDiff={() => void openDiff(selected, attempt)}/>
-                  ))}
-                </div>
-                {diff && diffAttempt ? (
-                  <section className="wand-missions-review">
-                    <div className="wand-missions-review-head">
-                      <div><h3>{issueAgentProviderLabel(diffAttempt.provider)} 的 Diff</h3><span>{diff.files.length} 个文件{diff.truncated ? " · 内容已截断" : ""}</span></div>
-                      <WandButton size="small" kind="ghost" onClick={() => setDiff(null)}>收起</WandButton>
-                    </div>
-                    <div className="wand-missions-diff" role="list" aria-label="任务 Diff">
-                      {diffLines.map((line) => (
-                        <button
-                          key={line.key}
-                          className={`is-${line.kind}`}
-                          disabled={!line.path || line.line === null}
-                          title={line.path && line.line ? `在 ${line.path}:${line.line} 添加意见` : undefined}
-                          onClick={() => line.path && setReviewTarget({ filePath: line.path, line: line.line, side: line.side })}
-                        >
-                          <span>{line.line ?? ""}</span><code>{line.text || " "}</code>
-                        </button>
-                      ))}
-                    </div>
-                    {reviewTarget ? (
-                      <div className="wand-missions-comment-form">
-                        <label>{reviewTarget.filePath}{reviewTarget.line ? `:${reviewTarget.line}` : ""}</label>
-                        <textarea className="resize-none" value={reviewBody} onChange={(event) => setReviewBody(event.target.value)} placeholder="写下具体、可执行的修改意见…"/>
-                        <WandButton kind="primary" size="small" disabled={busy || !reviewBody.trim()} onClick={() => void addComment()}>
-                          {busy ? "处理中…" : "加入 Review"}
-                        </WandButton>
-                      </div>
-                    ) : null}
-                    {pendingComments.length ? (
-                      <div className="wand-missions-pending-review">
-                        <div>{pendingComments.map((comment) => <p key={comment.id}><strong>{comment.filePath}{comment.line ? `:${comment.line}` : ""}</strong>{comment.body}</p>)}</div>
-                        <WandButton kind="primary" disabled={busy} onClick={() => void sendReview()}>
-                          {busy ? "处理中…" : `发送 ${pendingComments.length} 条意见`}
-                        </WandButton>
-                      </div>
-                    ) : null}
-                  </section>
-                ) : null}
-              </>
-            ) : <div className="wand-missions-empty">
-              <p>选择或创建一个任务，看每个 Agent 的尝试与 Diff。</p>
-              <WandButton kind="soft" size="small" disabled={creating} onClick={startCreateMission}>新建任务</WandButton>
-            </div>}
-          </main>
-        </div>
-      </div>
-
+      <Flex vertical gap={16}>
+        <Flex align="center" justify="space-between" gap={12}>
+          <Typography.Text type="secondary">{missions.length} 个任务</Typography.Text>
+          <WandButton kind="primary" size="small" disabled={busy || submitting} onClick={startCreateMission}><WandIcon name="plus" slot="start" size={13}/>新任务</WandButton>
+        </Flex>
+        {error ? <Alert type="error" showIcon role="alert" title={error}/> : null}
+        <Flex gap={16} wrap>
+          <Flex vertical gap={8} component="aside" style={{ flex: "1 1 220px", minWidth: 0, maxHeight: "60vh", overflow: "auto" }}>
+            {inbox.length ? <Card size="small" title="收件箱">
+              <List size="small" dataSource={inbox} renderItem={(item) => <List.Item key={item.sessionId}>
+                <WandButton kind="ghost" type="button" style={{ height: "auto", width: "100%", justifyContent: "flex-start" }} onClick={() => {
+                  void repository.markInboxRead(item.sessionId).catch(() => undefined);
+                  if (item.sessionId) void openSession(item.sessionId);
+                }}><Flex vertical align="flex-start"><Typography.Text strong>{item.title}</Typography.Text><Typography.Text type="secondary">{missionStateLabel(item.state)}{item.summary ? ` · ${item.summary}` : ""}</Typography.Text></Flex></WandButton>
+              </List.Item>}/>
+            </Card> : null}
+            {missions.map((mission) => <WandButton kind={selected?.id === mission.id ? "soft" : "ghost"} key={mission.id}
+              style={{ height: "auto", width: "100%", justifyContent: "flex-start" }} onClick={() => { setSelectedId(mission.id); setDiff(null); }}>
+              <Flex vertical align="flex-start" gap={4} style={{ minWidth: 0 }}>
+                <Typography.Text strong ellipsis>{mission.title}</Typography.Text>
+                <Typography.Text type="secondary">{mission.attempts.length} 个 Agent · {missionStateLabel(mission.status)}</Typography.Text>
+                {mission.milestoneId ? <Typography.Text type="secondary"><WandIcon name="milestone" size={11}/> {milestoneNameOf(milestoneSnapshot.items, mission.milestoneId) || "里程碑"}</Typography.Text> : null}
+              </Flex>
+            </WandButton>)}
+            {!missions.length ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有并行任务。创建一个，让多个 Agent 在独立 worktree 中并行尝试。"><WandButton kind="soft" size="small" disabled={creating} onClick={startCreateMission}>新建任务</WandButton></Empty> : null}
+          </Flex>
+          <Flex vertical gap={16} component="main" style={{ flex: "3 1 280px", minWidth: 0, maxHeight: "60vh", overflow: "auto" }}>
+            {selected ? <>
+              <Flex align="center" justify="space-between" gap={12} wrap>
+                <Flex vertical><Typography.Title level={4} style={{ margin: 0 }}>{selected.title}</Typography.Title><Typography.Text type="secondary">{selected.cwd} · 基线 {selected.worktree.baseRef || "当前分支"}</Typography.Text></Flex>
+                <Tag>{missionStateLabel(selected.status)}</Tag>
+              </Flex>
+              {selected.milestoneId ? <Typography.Text type="secondary"><WandIcon name="milestone" size={12}/> {milestoneNameOf(milestoneSnapshot.items, selected.milestoneId) || "里程碑"}</Typography.Text> : null}
+              <Typography.Paragraph style={{ whiteSpace: "pre-wrap" }}>{selected.prompt}</Typography.Paragraph>
+              <Flex gap={12} wrap>{selected.attempts.map((attempt) => <div key={attempt.id} style={{ flex: "1 1 240px", minWidth: 0 }}><AttemptCard attempt={attempt} onOpen={() => attempt.sessionId && openSession(attempt.sessionId)} onDiff={() => void openDiff(selected, attempt)}/></div>)}</Flex>
+              {diff && diffAttempt ? <Card size="small" title={`${issueAgentProviderLabel(diffAttempt.provider)} 的 Diff`} extra={<WandButton size="small" kind="ghost" onClick={() => setDiff(null)}>收起</WandButton>}>
+                <Flex vertical gap={12}>
+                  <Typography.Text type="secondary">{diff.files.length} 个文件{diff.truncated ? " · 内容已截断" : ""}</Typography.Text>
+                  <div className="wand-missions-diff" role="list" aria-label="任务 Diff" style={{ maxHeight: "48vh", overflow: "auto" }}>
+                    <Flex vertical style={{ minWidth: "max-content" }}>
+                      {diffLines.map((line) => <Button key={line.key} type="text" color={line.kind === "add" ? "green" : line.kind === "remove" ? "danger" : undefined}
+                        variant={line.kind === "add" || line.kind === "remove" ? "filled" : undefined}
+                        style={{ justifyContent: "flex-start", height: "auto", fontFamily: "var(--font-mono)" }}
+                        disabled={!line.path || line.line === null} title={line.path && line.line ? `在 ${line.path}:${line.line} 添加意见` : undefined}
+                        onClick={() => line.path && setReviewTarget({ filePath: line.path, line: line.line, side: line.side })}>
+                        <span style={{ display: "inline-block", minWidth: 40 }}>{line.line ?? ""}</span><code style={{ whiteSpace: "pre" }}>{line.text || " "}</code>
+                      </Button>)}
+                    </Flex>
+                  </div>
+                  {reviewTarget ? <Form component={false} layout="vertical"><Form.Item htmlFor="wand-missions-review-body" label={`${reviewTarget.filePath}${reviewTarget.line ? `:${reviewTarget.line}` : ""}`}>
+                    <TaskTextArea className="resize-none" id="wand-missions-review-body" value={reviewBody} onChange={(event) => setReviewBody(event.target.value)} placeholder="写下具体、可执行的修改意见…"/>
+                    <WandButton kind="primary" size="small" disabled={busy || !reviewBody.trim()} onClick={() => void addComment()}>{busy ? "处理中…" : "加入 Review"}</WandButton>
+                  </Form.Item></Form> : null}
+                  {pendingComments.length ? <>
+                    <List size="small" dataSource={pendingComments} renderItem={(comment) => <List.Item key={comment.id}><Flex vertical><Typography.Text strong>{comment.filePath}{comment.line ? `:${comment.line}` : ""}</Typography.Text><Typography.Text>{comment.body}</Typography.Text></Flex></List.Item>}/>
+                    <WandButton kind="primary" disabled={busy} onClick={() => void sendReview()}>{busy ? "处理中…" : `发送 ${pendingComments.length} 条意见`}</WandButton>
+                  </> : null}
+                </Flex>
+              </Card> : null}
+            </> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选择或创建一个任务，看每个 Agent 的尝试与 Diff。"><WandButton kind="soft" size="small" disabled={creating} onClick={startCreateMission}>新建任务</WandButton></Empty>}
+          </Flex>
+        </Flex>
+      </Flex>
       <WandDialogSurface
         open={creating}
         title="新建并行任务"
         description="创建后立即分派给所选工具，在独立 Worktree 中执行。"
-        className="wand-ui-dialog-content wand-missions-create-dialog"
-        overlayClassName="wand-ui-dialog-overlay wand-missions-create-overlay"
-        headerClassName="wand-missions-create-head"
+        className="wand-ui-dialog-content wand-task-library-dialog wand-missions-create-library-dialog"
         closeLabel="关闭新建并行任务"
         dismissable={!submitting}
         onOpenChange={(open) => { if (!open && !submitting) setCreating(false); }}
       >
-        <form noValidate className="wand-missions-create" aria-busy={submitting} onSubmit={(event) => void submitMission(event)}>
-          <div className="wand-missions-create-body">
-            <label>任务标题（可选）<input disabled={submitting} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="例如：重构会话恢复流程"/></label>
-            <div className="wand-missions-field">
-              <span>里程碑（可选）</span>
+        <TaskForm className="wand-missions-create" noValidate aria-busy={submitting} onSubmit={(event) => void submitMission(event)}>
+          <Flex vertical gap={16}>
+            <Form.Item label="任务标题（可选）"><WandInput disabled={submitting} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="例如：重构会话恢复流程"/></Form.Item>
+            <Form.Item label="里程碑（可选）">
               <MilestonePicker
                 value={milestoneId || null}
                 workspaceId={activeTaskContext.workspaceId}
                 disabled={submitting}
                 onChange={(next) => setMilestoneId(next ?? "")}
               />
-            </div>
-            <label>目标<textarea className="resize-none" data-wand-autofocus disabled={submitting} required value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="描述清楚完成条件、限制和验证要求…"/></label>
+            </Form.Item>
+            <Form.Item label="目标"><TaskTextArea className="resize-none" data-wand-autofocus disabled={submitting} required value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="描述清楚完成条件、限制和验证要求…"/></Form.Item>
             {linkedTaskName ? (
-              <p className="wand-missions-linked-task">派发的 Agent 会话将关联到当前任务「{linkedTaskName}」。</p>
+              <Alert type="info" title={`派发的 Agent 会话将关联到当前任务「${linkedTaskName}」。`}/>
             ) : null}
-            <label>项目目录<input required disabled={submitting} value={cwd} onChange={(event) => setCwd(event.target.value)}/></label>
-            <div className="wand-missions-provider-picker">
+            <Form.Item label="项目目录"><WandInput required disabled={submitting} value={cwd} onChange={(event) => setCwd(event.target.value)}/></Form.Item>
+            <Space wrap role="group" aria-label="执行工具">
               {providerUsage === null ? <p role="status">正在加载工具列表…</p> : sortProviderOptions(
                 PROVIDERS, providerUsage, (provider) => provider.id,
               ).map((provider) => (
-                <label key={provider.id} className={providers.has(provider.id) ? "active" : ""}>
-                  <input type="checkbox" disabled={submitting} checked={providers.has(provider.id)} onChange={() => setProviders((current) => {
+                <Checkbox key={provider.id} className={providers.has(provider.id) ? "active" : ""} disabled={submitting} checked={providers.has(provider.id)} onChange={() => setProviders((current) => {
                     const next = new Set(current); if (next.has(provider.id)) next.delete(provider.id); else next.add(provider.id); return next;
-                  })}/><ProviderLogo provider={provider.id}/><span>{provider.label}</span>
-                </label>
+                  })}>
+                  <ProviderLogo provider={provider.id}/><span>{provider.label}</span>
+                </Checkbox>
               ))}
-            </div>
-            <details><summary>Worktree 高级选项</summary>
-              <label>基线 ref<input disabled={submitting} value={baseRef} onChange={(event) => setBaseRef(event.target.value)} placeholder="当前分支"/></label>
-              <label>共享目录（仅 gitignored）<input disabled={submitting} value={sharedPaths} onChange={(event) => setSharedPaths(event.target.value)} placeholder="node_modules, .venv"/></label>
-              <label>复制路径（仅 gitignored）<input disabled={submitting} value={copyPaths} onChange={(event) => setCopyPaths(event.target.value)} placeholder=".env.local"/></label>
-            </details>
-          </div>
-          {createError ? <div className="wand-missions-error" role="alert">{createError}</div> : null}
-          <div className="wand-missions-create-actions">
+            </Space>
+            <Collapse items={[{ key: "worktree", label: "Worktree 高级选项", children: <>
+              <Form.Item label="基线 ref"><WandInput disabled={submitting} value={baseRef} onChange={(event) => setBaseRef(event.target.value)} placeholder="当前分支"/></Form.Item>
+              <Form.Item label="共享目录（仅 gitignored）"><WandInput disabled={submitting} value={sharedPaths} onChange={(event) => setSharedPaths(event.target.value)} placeholder="node_modules, .venv"/></Form.Item>
+              <Form.Item label="复制路径（仅 gitignored）"><WandInput disabled={submitting} value={copyPaths} onChange={(event) => setCopyPaths(event.target.value)} placeholder=".env.local"/></Form.Item>
+            </> }]}/>
+          {createError ? <Alert type="error" showIcon role="alert" title={createError}/> : null}
+          <Flex justify="flex-end" gap={8}>
             <WandButton kind="ghost" disabled={submitting} onClick={() => setCreating(false)}>取消</WandButton>
             <WandButton kind="primary" type="submit" disabled={submitting || !prompt.trim() || !cwd.trim() || providers.size === 0}>
               {submitting ? "正在分派…" : `分派给 ${providers.size} 个 Agent`}
             </WandButton>
-          </div>
-        </form>
+          </Flex>
+          </Flex>
+        </TaskForm>
       </WandDialogSurface>
     </WandDialogSurface>
   );

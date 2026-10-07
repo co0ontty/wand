@@ -1,3 +1,6 @@
+import * as React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { LoginForm } from "../src/web-ui/react/login/host.tsx";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
@@ -17,14 +20,16 @@ const styles = readFileSync(
 // Execute the real, synchronous login template without importing the browser's
 // WebSocket/terminal entry graph. Keep both anonymous and restoring branches.
 function renderLogin(loginChecked: boolean, native = false): string {
-  const start = renderSource.indexOf("var LOGIN_BRAND_MARK =");
+  const start = renderSource.indexOf("export function renderLogin()");
   const end = renderSource.indexOf("export function renderAppShell(");
   assert.ok(start >= 0 && end > start);
-  return runInNewContext(
+  const seed = runInNewContext(
     renderSource.slice(start, end).replace("export function renderLogin", "function renderLogin") +
       "\nrenderLogin();",
     { state: { loginChecked }, hasNativeSwitchServer: () => native, renderLoginVisual, renderWandBrandMarkup },
   ) as string;
+  const visual = React.createElement("div", { dangerouslySetInnerHTML: { __html: renderLoginVisual(renderWandBrandMarkup("brand-logo")) } });
+  return seed.replace(/(<div data-login-controls[^>]*>)(<\/div>)/, "$1" + renderToStaticMarkup(React.createElement(LoginForm, { checking: !loginChecked, switchServer: native, visual })) + "$2");
 }
 
 test("login illustration reuses all seven local provider marks, without text or remote media", () => {
@@ -54,12 +59,12 @@ test("restoring and anonymous logins share one illustration and preserve the for
       const html = renderLogin(checked, native);
       assert.equal((html.match(/class="login-visual"/g) ?? []).length, 1);
       assert.equal((html.match(/id="login-visual-paused"/g) ?? []).length, 1);
-      assert.ok(html.indexOf('class="login-visual"') < html.indexOf('class="login-right"'));
+      assert.ok(html.indexOf('class="login-visual"') < html.indexOf('login-right'));
       assert.equal(html.includes('id="login-form"'), checked);
       assert.equal(html.includes('id="login-switch-server-button"'), checked && native);
       if (checked) {
-        assert.match(html, /id="password" type="password"/);
-        assert.match(html, /id="login-button" type="submit"/);
+        assert.match(html, /type="password"[^>]*id="password"|id="password"[^>]*type="password"/);
+        assert.match(html, /id="login-button"[^>]*type="button"/);
         assert.match(html, /id="login-error"[^>]+role="alert"/);
       } else {
         assert.ok(html.includes("正在恢复会话"));

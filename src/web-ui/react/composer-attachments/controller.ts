@@ -1,15 +1,4 @@
-/**
- * 待发送附件预览（`#attachment-preview`）的 portal 渲染契约。
- *
- * 旧实现用 `innerHTML` 拼 pill 列表、挂 `.att-remove` 监听、再用
- * `.hidden` 表达空状态；每次列表变化都要整段重建 DOM。现在 items 由
- * composer Module 算出快照，React 渲染并自带移除回调。
- *
- * `previewUrl` 是 legacy 侧 `URL.createObjectURL` 的产物，revoke 也由 legacy
- * 负责（composer Module 的移除/提交生命周期），React 只负责显示。
- *
- * 幂等注册表见 `../composer-portal/mount-store`。
- */
+/** Attachment snapshots and object URLs remain owned by the browser composer. */
 import { MountStore, type MountSnapshot } from "../composer-portal/mount-store";
 
 export interface ComposerAttachmentItem {
@@ -18,6 +7,7 @@ export interface ComposerAttachmentItem {
   readonly name: string;
   /** 由 legacy 侧的 `formatFileSize` 算好，React 不做业务格式化。 */
   readonly sizeLabel: string;
+  readonly size?: number;
   /** 图片附件的 object URL；其他类型为 null。 */
   readonly previewUrl: string | null;
 }
@@ -34,6 +24,7 @@ export interface ComposerAttachmentsSnapshot extends MountSnapshot<ComposerAttac
 function sameItem(a: ComposerAttachmentItem, b: ComposerAttachmentItem): boolean {
   return a.index === b.index
     && a.name === b.name
+    && a.size === b.size
     && a.sizeLabel === b.sizeLabel
     && a.previewUrl === b.previewUrl;
 }

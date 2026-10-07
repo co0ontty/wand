@@ -1,4 +1,5 @@
 import { getDefaultModelForProvider } from "./config.js";
+import { defaultModelGroupSelector } from "./model-groups.js";
 import type { ProcessManager } from "./process-manager.js";
 import { defaultRoleForCli } from "./default-employee.js";
 import { providerCliCommand } from "./session-provider.js";
@@ -48,6 +49,9 @@ export async function dispatchAgentForTask(
 ): Promise<AgentDispatchResult> {
   const { storage, config, structured, processes } = deps;
   const { agent } = input;
+  if (agent.engine === "sdk" && !input.employee) {
+    throw new Error("SDK 执行引擎只能通过员工候选启用。");
+  }
   if (input.employee) {
     if (agent.kind !== "structured") throw new Error("绑定员工只支持结构化会话。");
     const candidate = input.employee.agents[input.employeeCandidateIndex ?? 0];
@@ -64,7 +68,7 @@ export async function dispatchAgentForTask(
   const cwd = group.cwd;
   const provider = agent.provider as SessionProvider;
   const model = agent.model === "default" ? "" : agent.model;
-  const resolvedModel = model || getDefaultModelForProvider(config, provider) || undefined;
+  const resolvedModel = model || defaultModelGroupSelector(config.modelGroups, provider, getDefaultModelForProvider(config, provider)) || getDefaultModelForProvider(config, provider) || undefined;
   const session = agent.kind === "pty"
     ? await processes!.start(providerCliCommand(provider), cwd, agent.mode, input.prompt, {
         provider,

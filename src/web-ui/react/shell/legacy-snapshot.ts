@@ -56,11 +56,20 @@ interface LegacySession {
   completionRevision?: number;
   viewedCompletionRevision?: number;
   permissionBlocked?: boolean;
+  pendingEscalation?: unknown;
   ptyBusy?: boolean;
   runner?: string;
   archived?: boolean;
   providerCliActive?: boolean;
-  structuredState?: { inFlight?: boolean; phase?: "responding" | "background" } | null;
+  structuredState?: {
+    inFlight?: boolean;
+    phase?: "responding" | "background";
+    turnStartedAt?: string | null;
+    lastActivityAt?: string | null;
+  } | null;
+  turnStartedAt?: string | null;
+  lastActivityAt?: string | null;
+  queuedMessages?: readonly unknown[] | null;
   startedAt?: string;
   endedAt?: string;
   claudeSessionId?: string;
@@ -225,6 +234,15 @@ function sessionToVm(
     ...(session.employeeAvatar ? { employeeAvatar: session.employeeAvatar } : {}),
     ...(session.startedAt ? { startedAt: session.startedAt } : {}),
     ...(session.endedAt ? { endedAt: session.endedAt } : {}),
+    ...(() => {
+      // 服务端锚点优先取 structured 侧（structured 会话），PTY 侧走快照顶层字段。
+      const turn = stringValue(session.structuredState?.turnStartedAt) || stringValue(session.turnStartedAt);
+      const activity = stringValue(session.structuredState?.lastActivityAt) || stringValue(session.lastActivityAt);
+      return {
+        ...(turn ? { turnStartedAt: turn } : {}),
+        ...(activity ? { lastActivityAt: activity } : {}),
+      };
+    })(),
     ...(session.claudeSessionId ? { claudeSessionId: session.claudeSessionId } : {}),
     ...(session.workspaceId ? { workspaceId: session.workspaceId } : {}),
     ...(session.workspaceTaskId ? { workspaceTaskId: session.workspaceTaskId } : {}),

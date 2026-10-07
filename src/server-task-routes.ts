@@ -3,6 +3,8 @@ import { dispatchAgentForTask, resolveTaskDispatchTarget } from "./agent-dispatc
 import { asyncRoute } from "./express-async.js";
 import { getErrorMessage } from "./error-utils.js";
 import { bodyObject, sendRouteError, text } from "./server-request.js";
+import { cleanupWorktreeSync } from "./git-worktree.js";
+import { isRetentionBusy } from "./retention.js";
 import { parseWandTaskAgent, type WandStorage } from "./storage.js";
 import { defaultMilestoneIdForWrite, resolvedMilestoneFields, scopedMilestoneId } from "./milestone-scope.js";
 import { generateWandTaskTitle, provisionalTaskTitleFromDescription, TASK_TITLE_MAX_LENGTH } from "./task-title.js";
@@ -16,8 +18,8 @@ import type { AiTeamRunner } from "./ai-team-runner.js";
 import { memberAgents } from "./ai-team-types.js";
 import { selectEmployeeCandidate } from "./silicon-employee-dispatch.js";
 import { defaultRoleForCli } from "./default-employee.js";
-import type { TaskExecutionSubject, WandTaskAgent, WandTaskAgentKind, WandTaskAgentMode, WandTaskPriority, WandTaskStatus, WandTaskTitleSource } from "./task-types.js";
-import { DEFAULT_WAND_TASK_AGENT_KIND, DEFAULT_WAND_TASK_AGENT_MODE, DEFAULT_WAND_TASK_PRIORITY, isWandTaskAgentKind, isWandTaskAgentMode, normalizeWandTaskAgentMode, WAND_MILESTONE_NAME_MAX_LENGTH } from "./task-types.js";
+import type { TaskExecutionSubject, WandTaskAgent, WandTaskAgentEngine, WandTaskAgentKind, WandTaskAgentMode, WandTaskPriority, WandTaskStatus, WandTaskTitleSource } from "./task-types.js";
+import { DEFAULT_WAND_TASK_AGENT_KIND, DEFAULT_WAND_TASK_AGENT_MODE, DEFAULT_WAND_TASK_PRIORITY, isWandTaskAgentEngine, isWandTaskAgentKind, isWandTaskAgentMode, normalizeWandTaskAgentMode, WAND_MILESTONE_NAME_MAX_LENGTH } from "./task-types.js";
 import { isAutoNameableBoardTask, taskAutoNameSignature, taskAutoNameSourceText } from "./wand-task-sync.js";
 import type { SessionSnapshot, WandConfig } from "./types.js";
 import { isSessionProvider } from "./session-provider.js";
@@ -203,7 +205,13 @@ export function parseTaskAgent(
   // kind 与 mode 同样兼容老客户端：不传就沿用任务当前值，避免把 PTY 悄悄复位成结构化。
   const rawKind = body.kind === undefined || body.kind === null || body.kind === "" ? fallbackKind : body.kind;
   if (!isWandTaskAgentKind(rawKind)) throw new Error("会话形态无效。");
-  return { provider, model, thinkingEffort, mode, kind: rawKind };
+  const rawEngine = body.engine === undefined || body.engine === null || body.engine === "" ? "cli" : body.engine;
+  if (!isWandTaskAgentEngine(rawEngine)) throw new Error("执行引擎无效。");
+  if (rawEngine === "sdk" && (provider !== "pi" || rawKind !== "structured")) {
+    throw new Error("SDK 执行引擎仅支持 Pi 结构化会话。");
+  }
+  const engine: WandTaskAgentEngine | undefined = rawEngine === "sdk" ? rawEngine : undefined;
+  return { provider, model, thinkingEffort, mode, kind: rawKind, ...(engine ? { engine } : {}) };
 }
 
 interface TaskDtoDeps {
@@ -597,6 +605,38 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       sendRouteError(res, error, "无法更新任务。");
     }
   });
+  /**
+   * 清空归档目录：硬删除所有 archived 卡片（可按项目范围）。
+   * 名下会话还在处理的卡片跳过，不静默打断执行；其余按单卡删除的同一套归属清理。
+   * 必须注册在 `/api/wand-tasks/:id` 之前，否则 "archived" 会被当成任务 id。
+   */
+  app.delete("/api/wand-tasks/archived", (req, res) => {
+    try {
+      const workspaceId = typeof req.query.workspaceId === "string" && req.query.workspaceId
+        ? req.query.workspaceId
+        : undefined;
+      const archived = storage.listWandTasks(workspaceId).filter((task) => task.status === "archived");
+      const busy = new Set(sessions?.listSlim().filter(isRetentionBusy).map((session) => session.id) ?? []);
+      const deletable: string[] = [];
+      let skipped = 0;
+      for (const task of archived) {
+        const bound = storage.listWandTaskSessionIds(task.id);
+        if (bound.some((sessionId) => busy.has(sessionId))) {
+          skipped += 1;
+          continue;
+        }
+        const container = task.workspaceTaskId ? storage.getWorkspaceTask(task.workspaceTaskId) : null;
+        if (container?.worktree) {
+          try { cleanupWorktreeSync(container.worktree); } catch { /* worktree 可能已被手动删除 */ }
+        }
+        deletable.push(task.id);
+      }
+      const deleted = storage.deleteWandTasks(deletable);
+      res.json({ ok: true, deleted: deleted.length, skipped });
+    } catch (error) {
+      sendRouteError(res, error, "无法清空归档任务。");
+    }
+  });
   app.delete("/api/wand-tasks/:id", (req, res) => {
     const archived = storage.updateWandTask(req.params.id, { status: "archived" });
     if (!archived) {
@@ -702,12 +742,12 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       if (subject?.type === "employee" && (!employee || employee.archivedAt)) {
         throw new Error("硅基员工不存在或已归档。");
       }
-      const selected = employee ? selectEmployeeCandidate(employee) : null;
+      const selected = employee ? selectEmployeeCandidate(employee, undefined, { skipSdk: true }) : null;
       const cliDefault = subject?.type === "cli"
         ? parseTaskAgent({ ...cliAgentForSubject(subject, task.agent), ...(body.kind === "pty" ? { kind: "pty" } : {}) })
         : null;
       const fallbackCandidate = !subject && body.agent === undefined && !task.agent
-        && !body.provider ? selectEmployeeCandidate(defaultRoleForCli(storage, config.defaultProvider)).agent : null;
+        && !body.provider ? selectEmployeeCandidate(defaultRoleForCli(storage, config.defaultProvider), undefined, { skipSdk: true }).agent : null;
       const fallbackAgent = fallbackCandidate && body.kind === "pty"
         ? { ...fallbackCandidate, kind: "pty" as const } : fallbackCandidate;
       const agent = selected?.agent ?? (body.agent === undefined

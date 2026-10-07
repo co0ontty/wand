@@ -1,8 +1,12 @@
+import { isClientSettingsPage } from "../../page.js";
+import { Alert, Form, Skeleton } from "antd";
+import { WandUiProvider } from "../theme";
+import { installSettingsLibraryStyles } from "./styles";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import * as React from "react";
 import { useSyncExternalStore } from "react";
 import { wandOverlay } from "../overlay-controller";
-import { WandBadge, WandButton, WandDialogSurface, WandSkeleton, WandTabs } from "../ui";
+import { WandBadge, WandButton, WandDialogSurface, WandTabs } from "../ui";
 import { settingsController, settingsStore } from "./controller";
 import { httpSettingsRepository } from "./repository";
 import {
@@ -13,6 +17,7 @@ import {
   GeneralSettingsTab,
   NotificationSettingsTab,
   PresetSettingsTab,
+  ProfileSettingsTab,
   SecuritySettingsTab,
 } from "./tabs";
 import { SettingsActionButton, SettingsField, SettingsStatus, SettingsTextInput } from "./fields";
@@ -21,20 +26,23 @@ import type { SettingsRepository, SettingsSnapshot, SettingsTab } from "./types"
 export interface SettingsHostProps {
   repository?: SettingsRepository;
   showRestart?: () => void;
+  presentation?: "dialog" | "page";
 }
 
-const TAB_LABELS: Record<SettingsTab, { title: string; description: string }> = {
-  connectors: { title: "连接器", description: "GitHub 与外部服务" },
-  general: { title: "基本配置", description: "服务与工作环境" },
-  ai: { title: "AI 与模型", description: "新会话默认与系统 AI 执行者" },
-  notifications: { title: "通知", description: "声音与系统提醒" },
-  display: { title: "显示", description: "界面外观偏好" },
-  security: { title: "安全", description: "密码与证书" },
-  presets: { title: "命令预设", description: "常用命令模板" },
-  about: { title: "关于", description: "版本与更新" },
+const TAB_LABELS: Record<SettingsTab, string> = {
+  profile: "我的资料",
+  connectors: "连接器",
+  general: "基本配置",
+  ai: "AI 与模型",
+  notifications: "通知",
+  display: "显示",
+  security: "安全",
+  presets: "命令预设",
+  about: "关于",
 };
 
 const ADMIN_TAB_ORDER: SettingsTab[] = [
+  "profile",
   "connectors",
   "general",
   "ai",
@@ -57,31 +65,13 @@ const PLATFORM_LABELS = {
   macos: "macOS 原生",
 } as const;
 
-function SettingsTabIcon({ tab }: { tab: SettingsTab }) {
-  const paths: Record<SettingsTab, ReactNode> = {
-    connectors: <><path d="M8 7h8M8 17h8" /><path d="M6 5a2 2 0 1 0 0 4 2 2 0 0 0 0-4ZM18 15a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z" /></>,
-    general: <><path d="M4 7h10M18 7h2M4 17h2M10 17h10" /><circle cx="16" cy="7" r="2" /><circle cx="8" cy="17" r="2" /></>,
-    ai: <><path d="m12 3 1.25 3.75L17 8l-3.75 1.25L12 13l-1.25-3.75L7 8l3.75-1.25L12 3Z" /><path d="m18 14 .75 2.25L21 17l-2.25.75L18 20l-.75-2.25L15 17l2.25-.75L18 14ZM6 13l.75 2.25L9 16l-2.25.75L6 19l-.75-2.25L3 16l2.25-.75L6 13Z" /></>,
-    notifications: <><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 7h18s-3 0-3-7Z" /><path d="M10 20h4" /></>,
-    display: <><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M8 21h8M12 17v4" /></>,
-    security: <><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3" /></>,
-    presets: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="m7 9 2 2-2 2M12 14h5" /></>,
-    about: <><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></>,
-  };
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      {paths[tab]}
-    </svg>
-  );
-}
-
 /** 把当前连接、通道和端形态放在设置入口，而不是埋在各个分组中。 */
-function SettingsOverview({ snapshot }: { snapshot: SettingsSnapshot }) {
+function SettingsOverview({ snapshot, clientAuth = false }: { snapshot: SettingsSnapshot; clientAuth?: boolean }) {
   const version = snapshot.platform.appVersion || snapshot.about.version || "未知版本";
   return (
-    <section className="wand-settings-overview" aria-label="当前设置概览">
-      <div className="wand-settings-overview-pills">
-        <WandBadge tone="success">{snapshot.access === "admin" ? "管理员连接" : "App 连接"}</WandBadge>
+    <section className="wand-settings-library-overview" aria-label="当前设置概览">
+      <div className="wand-settings-library-overview-pills">
+        <WandBadge tone="success">{clientAuth ? "客户端连接" : snapshot.access === "admin" ? "管理员连接" : "App 连接"}</WandBadge>
         <WandBadge tone={snapshot.about.updateChannel === "beta" ? "warning" : "info"}>
           {snapshot.about.updateChannel === "beta" ? "Beta 通道" : "Stable 通道"}
         </WandBadge>
@@ -93,37 +83,19 @@ function SettingsOverview({ snapshot }: { snapshot: SettingsSnapshot }) {
 }
 
 function SettingsLoading() {
-  return (
-    <div className="wand-settings-loading" role="status" aria-label="正在加载设置">
-      <div className="wand-settings-loading-overview">
-        <WandSkeleton className="wand-settings-skeleton-pill" />
-        <WandSkeleton className="wand-settings-skeleton-pill is-wide" />
-        <WandSkeleton className="wand-settings-skeleton-pill" />
-        <WandSkeleton className="wand-settings-skeleton-version" />
-      </div>
-      <div className="wand-settings-loading-layout">
-        <div className="wand-settings-loading-nav">
-          {Array.from({ length: 6 }, (_, index) => (
-            <WandSkeleton className="wand-settings-skeleton-nav" key={index} />
-          ))}
-        </div>
-        <div className="wand-settings-loading-content">
-          <WandSkeleton className="wand-settings-skeleton-title" />
-          <WandSkeleton className="wand-settings-skeleton-copy" />
-          <WandSkeleton className="wand-settings-skeleton-card" />
-          <WandSkeleton className="wand-settings-skeleton-card is-short" />
-        </div>
-      </div>
-    </div>
-  );
+  return <div role="status" aria-label="正在加载设置"><Skeleton active paragraph={{ rows: 8 }} /></div>;
 }
 
 function ConnectedAppAccess({
   repository,
   onAuthenticated,
+  signedOut = false,
+  allowEmptyPassword = false,
 }: {
   repository: SettingsRepository;
   onAuthenticated(snapshot: SettingsSnapshot): void;
+  signedOut?: boolean;
+  allowEmptyPassword?: boolean;
 }) {
   const [password, setPassword] = useState("");
   const [pending, setPending] = useState(false);
@@ -131,7 +103,7 @@ function ConnectedAppAccess({
   const [error, setError] = useState("");
 
   async function authenticate() {
-    if (!password) {
+    if (!password && !allowEmptyPassword) {
       setError("请输入管理员密码。");
       return;
     }
@@ -154,18 +126,13 @@ function ConnectedAppAccess({
   }
 
   return (
-    <section className="wand-settings-app-access" aria-label="App 连接权限">
-      <div className="wand-settings-app-access-copy">
-        <strong>设备功能已可用</strong>
-        <span>通知、触感、应用图标和客户端下载无需管理权限。要修改服务配置，请使用管理员密码登录此网页。</span>
-      </div>
-      <form noValidate
-        className="wand-settings-app-access-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void authenticate();
-        }}
-      >
+    <section className="wand-settings-library-app-access" aria-label="App 连接权限">
+      <Alert type="info" showIcon title={signedOut ? "登录完整设置" : "设备功能已可用"}
+        description={signedOut
+          ? "输入当前服务器的管理员密码，即可在此页面打开全部设置。"
+          : "通知、触感、应用图标和客户端下载无需管理权限。要修改服务配置，请使用管理员密码登录此网页。"} />
+      <Form noValidate layout="vertical" className="wand-settings-library-app-access-form"
+        onFinish={() => void authenticate()}>
         <input type="text" name="username" autoComplete="username" value="wand" readOnly hidden />
         <SettingsField label="管理员密码" htmlFor="settings-admin-password" error={error}>
           <SettingsTextInput
@@ -193,7 +160,7 @@ function ConnectedAppAccess({
         >
           登录管理设置
         </SettingsActionButton>
-      </form>
+      </Form>
       <SettingsStatus tone="warning">
         修改 Host、端口或 HTTPS 可能中断当前 App 连接；修改密码会使现有连接码失效。
       </SettingsStatus>
@@ -204,7 +171,9 @@ function ConnectedAppAccess({
 export function SettingsHost({
   repository = httpSettingsRepository,
   showRestart = () => {},
+  presentation = "dialog",
 }: SettingsHostProps) {
+  useEffect(() => { installSettingsLibraryStyles(); }, []);
   const [horizontalTabs, setHorizontalTabs] = useState(() => (
     typeof window !== "undefined" && typeof window.matchMedia === "function"
       && window.matchMedia("(max-width: 760px)").matches
@@ -225,28 +194,40 @@ export function SettingsHost({
   const [snapshot, setSnapshot] = useState<SettingsSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
+  const [loginRequired, setLoginRequired] = useState(false);
+  const isOpen = presentation === "page" || controller.open;
+  const clientAuth = presentation === "page" && isClientSettingsPage();
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     try {
       const next = await repository.load({ signal });
+      if (clientAuth && next.access !== "admin") throw new Error("客户端认证已失效，请返回客户端重新打开完整设置。");
       if (!signal?.aborted) {
         setSnapshot(next);
+        setLoginRequired(false);
         setLoadError("");
       }
     } catch (error) {
-      if (!signal?.aborted) setLoadError(error instanceof Error ? error.message : "设置加载失败。");
+      if (!signal?.aborted) {
+        if (clientAuth && (error as Error & { status?: number }).status === 401) {
+          setLoadError("客户端登录已失效，请返回客户端重新连接。");
+        } else if (presentation === "page" && (error as Error & { status?: number }).status === 401) {
+          setLoginRequired(true);
+          setLoadError("");
+        } else setLoadError(error instanceof Error ? error.message : "设置加载失败。");
+      }
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
-  }, [repository]);
+  }, [clientAuth, presentation, repository]);
 
   useEffect(() => {
-    if (!controller.open) return;
+    if (!isOpen) return;
     const abort = new AbortController();
     void load(abort.signal);
     return () => abort.abort();
-  }, [controller.open, load]);
+  }, [isOpen, load]);
 
   const refresh = useCallback(async () => load(), [load]);
   const toast = useCallback((message: string, tone: "info" | "success" | "warning" | "error" = "info") => {
@@ -257,6 +238,7 @@ export function SettingsHost({
     if (!snapshot) return [];
     const props = { snapshot, repository, refresh, setSnapshot, toast, showRestart };
     const contentByTab: Record<SettingsTab, ReactNode> = {
+      profile: <ProfileSettingsTab {...props} />,
       connectors: <GithubSettingsTab {...props} />,
       general: <GeneralSettingsTab {...props} />,
       ai: <AiSettingsTab {...props} />,
@@ -269,15 +251,7 @@ export function SettingsHost({
     const order = snapshot.access === "admin" ? ADMIN_TAB_ORDER : CONNECTED_APP_TAB_ORDER;
     return order.map((value) => ({
       value,
-      label: (
-        <span className="wand-settings-tab-label">
-          <span className="wand-settings-tab-icon"><SettingsTabIcon tab={value} /></span>
-          <span className="wand-settings-tab-copy">
-            <strong>{TAB_LABELS[value].title}</strong>
-            <span>{TAB_LABELS[value].description}</span>
-          </span>
-        </span>
-      ),
+      label: TAB_LABELS[value],
       content: contentByTab[value],
     }));
   }, [refresh, repository, showRestart, snapshot, toast]);
@@ -288,24 +262,20 @@ export function SettingsHost({
       ? "about"
       : "notifications";
 
-  return (
-    <WandDialogSurface
-      open={controller.open}
-      onOpenChange={(open) => { if (!open) settingsController.close(); }}
-      title="系统设置"
-      className="wand-settings-dialog"
-      overlayClassName="wand-settings-overlay"
-      titleClassName="wand-settings-title"
-      descriptionClassName="wand-settings-description"
-      headerClassName="wand-settings-header"
-      closeLabel="关闭设置"
-      testId="settings-dialog"
-    >
+  const onAuthenticated = (next: SettingsSnapshot): void => {
+    setLoadError("");
+    setLoginRequired(false);
+    setSnapshot(next);
+  };
+  const content = (
+    <>
+          {loginRequired && !clientAuth ? <ConnectedAppAccess repository={repository} signedOut allowEmptyPassword
+            onAuthenticated={onAuthenticated} /> : null}
           {snapshot ? (
             <>
-              <SettingsOverview snapshot={snapshot} />
+              <SettingsOverview snapshot={snapshot} clientAuth={clientAuth} />
               {loadError ? (
-                <div className="wand-settings-refresh-error">
+                <div className="wand-settings-library-refresh-error">
                   <SettingsStatus tone="error">
                     <span>刷新设置失败，当前内容已保留。{loadError}</span>
                     <WandButton size="small" disabled={loading} aria-busy={loading} onClick={() => void refresh()}>
@@ -314,19 +284,15 @@ export function SettingsHost({
                   </SettingsStatus>
                 </div>
               ) : null}
-              {snapshot.access === "read-only" ? (
+              {snapshot.access === "read-only" && !loginRequired && !clientAuth ? (
                 <ConnectedAppAccess
                   repository={repository}
-                  onAuthenticated={(next) => {
-                    setLoadError("");
-                    setSnapshot(next);
-                    // Keep the requested section after upgrading an App
-                    // connection; native tools may have opened AI or security.
-                  }}
+                  allowEmptyPassword={presentation === "page"}
+                  onAuthenticated={onAuthenticated}
                 />
               ) : null}
               <WandTabs
-                className="wand-settings-tabs"
+                className="wand-settings-library-tabs"
                 ariaLabel="设置分组"
                 orientation={horizontalTabs ? "horizontal" : "vertical"}
                 value={selectedTab}
@@ -337,11 +303,32 @@ export function SettingsHost({
           ) : loading ? (
             <SettingsLoading />
           ) : loadError ? (
-            <div className="wand-settings-load-error" role="alert">
+            <div className="wand-settings-library-load-error" role="alert">
               <p>{loadError}</p>
               <WandButton kind="primary" onClick={() => void load()}>重试加载设置</WandButton>
             </div>
           ) : null}
-    </WandDialogSurface>
+    </>
+  );
+  if (presentation === "page") {
+    return <WandUiProvider><main className="wand-settings-library-page" data-testid="settings-page"
+      aria-labelledby="settings-page-title">
+      <header className="wand-settings-library-page-heading"><h1 id="settings-page-title">系统设置</h1></header>
+      <div className="wand-settings-library-page-content">{content}</div>
+    </main></WandUiProvider>;
+  }
+  return (
+    <WandUiProvider><WandDialogSurface
+      open={controller.open}
+      onOpenChange={(open) => { if (!open) settingsController.close(); }}
+      title="系统设置"
+      className="wand-settings-library-dialog"
+      overlayClassName="wand-settings-library-overlay"
+      titleClassName="wand-settings-library-title"
+      descriptionClassName="wand-settings-library-description"
+      headerClassName="wand-settings-library-header"
+      closeLabel="关闭设置"
+      testId="settings-dialog"
+    >{content}</WandDialogSurface></WandUiProvider>
   );
 }

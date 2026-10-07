@@ -1,11 +1,17 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import type { DecisionResult } from "./decision-types.js";
 import type { WandStorage } from "./storage.js";
 import type { StructuredRunnerAdapter } from "./structured-runner.js";
 
 export interface DecisionRuntimeAccess {
   url: string;
   caPath?: string;
+  /**
+   * 进程内调用入口（core 会话用）：同一个 server 进程直接调决策服务，
+   * 不经过 env token / HTTP 回环。CLI runner 仍然走 `url` + 环境变量。
+   */
+  evaluate?: (value: unknown, caller: string, signal?: AbortSignal) => Promise<DecisionResult>;
 }
 export const DECISION_ENV_KEYS = ["WAND_DECISION_URL", "WAND_DECISION_TOKEN", "WAND_DECISION_CA", "WAND_DECISION_NODE", "WAND_DECISION_CLI"] as const;
 
@@ -19,7 +25,10 @@ export function withDecisionAccess(
     const env = { ...context.env };
     for (const key of DECISION_ENV_KEYS) delete env[key];
     const access = runtime();
-    if (!access) return runner.start({ ...context, env }, observer);
+    // Pi 会话可以逐次关闭本轮决策能力：关掉就不注入凭据，也不加运行时提示。
+    if (!access || (context.session.provider === "pi" && context.session.piSettings?.localDecision === false)) {
+      return runner.start({ ...context, env }, observer);
+    }
     const token = storage.issueDecisionAccess(context.session.id);
     const cleanup = (): void => { try { storage.revokeDecisionAccess(token); } catch { /* storage may be closing */ } };
     const js = fileURLToPath(new URL("./cli.js", import.meta.url));

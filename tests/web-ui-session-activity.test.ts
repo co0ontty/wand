@@ -49,6 +49,37 @@ test("React snapshot and composer controls agree on turn activity", () => {
   }
 });
 
+test("React snapshot carries server turn anchors and never falls back to session startedAt", () => {
+  const environment = { width: 1440, online: true, embedTerminal: false, nativeInput: false, backToNative: false, switchServer: false };
+  const structured = deriveLegacyUiSnapshot({
+    sessions: [{
+      id: "a",
+      sessionKind: "structured",
+      status: "running",
+      startedAt: "2026-10-01T00:00:00.000Z",
+      structuredState: { inFlight: true, turnStartedAt: "2026-10-07T03:58:00.000Z", lastActivityAt: "2026-10-07T03:59:00.000Z" },
+    }],
+    selectedId: "a",
+  }, environment);
+  assert.equal(structured.selected?.turnStartedAt, "2026-10-07T03:58:00.000Z");
+  assert.equal(structured.selected?.lastActivityAt, "2026-10-07T03:59:00.000Z");
+
+  // PTY 侧锚点在快照顶层。
+  const pty = deriveLegacyUiSnapshot({
+    sessions: [{ id: "a", status: "running", provider: "claude", ptyBusy: true, turnStartedAt: "2026-10-07T03:58:00.000Z" }],
+    selectedId: "a",
+  }, environment);
+  assert.equal(pty.selected?.turnStartedAt, "2026-10-07T03:58:00.000Z");
+
+  // 服务端没给锚点就不带字段，展示层不得拿会话 startedAt 冒充本轮开始时间。
+  const bare = deriveLegacyUiSnapshot({
+    sessions: [{ id: "a", sessionKind: "structured", status: "running", startedAt: "2026-10-01T00:00:00.000Z", structuredState: { inFlight: true } }],
+    selectedId: "a",
+  }, environment);
+  assert.equal(bare.selected?.turnStartedAt, undefined);
+  assert.equal(bare.selected?.lastActivityAt, undefined);
+});
+
 test("elapsed labels preserve minute and hour boundaries", () => {
   assert.equal(formatElapsedShort(-100), "0s");
   assert.equal(formatElapsedShort(59_999), "59s");

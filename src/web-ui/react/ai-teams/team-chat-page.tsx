@@ -1,14 +1,24 @@
 import * as React from "react";
+import { Alert, Card, Collapse, Descriptions, Flex, List, Tag, Typography } from "antd";
 import type { AiTeamRunDetail, AiTeamStep } from "../../../ai-team-types";
 import { failureMessage } from "../errors";
 import { RUN_STATUS } from "../issues/team-run-panel";
 import { taskBoardController } from "../issues/task-board-controller";
 import { SidebarToggleIcon } from "../shell/sidebar-toggle-icon";
 import { subscribeTaskChanges } from "../task-changes";
+import { conversationUi } from "../conversations/state";
 import { WandBadge, WandBreadcrumb, WandButton, WandIcon, WandIconButton } from "../ui";
 import { TeamAvatar, TeamAvatarStack, type TeamAvatarState } from "./avatar";
 import { aiTeamsRepository, subscribeAiTeamDefinitionChanges, subscribeAiTeamRunChanges } from "./repository";
 import { displayTeamOf, mergeTeamChatDetail, TeamChatView } from "./team-chat-view";
+
+const STEP_TAG_COLOR: Record<AiTeamStep["status"], string | undefined> = {
+  queued: undefined,
+  running: "processing",
+  done: "success",
+  failed: "error",
+  skipped: undefined,
+};
 
 const STEP_LABEL: Record<AiTeamStep["status"], string> = {
   queued: "排队",
@@ -64,45 +74,44 @@ function WorkTaskTree({
       return next;
     });
   };
-  return <section className="wand-team-work-tasks" aria-label="工作任务">
-    <div className="wand-team-work-tasks-inner">
-      <header className="wand-team-work-tasks-head">
-        <h2>工作任务</h2>
-        <small>{steps.length ? `${done}/${steps.length} 完成` : "等待派工"}</small>
-      </header>
-      {steps.length ? <ol className="wand-team-work-list">
-        {steps.map((step) => {
-          const member = displayTeamOf(detail).members.find((item) => item.id === step.memberId);
-          const open = openIds.has(step.id);
-          return <li key={step.id} className="wand-team-work-item" data-status={step.status} data-open={open || undefined}>
-            <button type="button" className="wand-team-work-head" aria-expanded={open} onClick={() => toggle(step.id)}>
-              <span className="wand-team-work-seq">#{step.seq}</span>
-              <span className="wand-team-work-title">{step.title || "成员步骤"}</span>
-              <span className="wand-team-work-status">{STEP_LABEL[step.status]}</span>
-              <WandIcon name="chevronDown" size={14}/>
-            </button>
-            <div className="wand-team-work-body" data-open={open || undefined} inert={!open}>
-              <div className="wand-team-work-body-inner">
-                <div className="wand-team-work-member">
-                  {member ? <TeamAvatar member={member} size="sm" state={stepAvatarState(step.status)}/> : null}
-                  <span className="wand-team-work-member-name">{member?.name ?? step.memberId}</span>
-                  {member?.duty ? <small className="wand-team-work-member-duty">{member.duty}</small> : null}
-                </div>
-                <dl className="wand-team-work-meta">
-                  <div><dt>状态</dt><dd>{STEP_LABEL[step.status]}</dd></div>
-                  {step.reportPath ? <div><dt>报告文件</dt><dd><code>{step.reportPath}</code></dd></div> : null}
-                </dl>
-                {step.report ? <p className="wand-team-work-report">{step.report}</p> : null}
-                {step.sessionId && onOpenSession ? <WandButton kind="ghost" size="small" onClick={() => onOpenSession(step.sessionId!)}>
-                  <WandIcon name="terminal" size={14} slot="start"/>打开会话
-                </WandButton> : null}
-              </div>
-            </div>
-          </li>;
-        })}
-      </ol> : <p className="wand-team-empty-line">负责人还没有派发工作任务。</p>}
-    </div>
-  </section>;
+  return <Card size="small" className="wand-team-work-tasks" aria-label="工作任务"
+    title="工作任务" extra={<Typography.Text type="secondary">{steps.length ? `${done}/${steps.length} 完成` : "等待派工"}</Typography.Text>}>
+    {steps.length ? <List className="wand-team-work-list" split={false} dataSource={steps}
+      renderItem={(step) => {
+        const member = displayTeamOf(detail).members.find((item) => item.id === step.memberId);
+        const open = openIds.has(step.id);
+        return <List.Item key={step.id} style={{ display: "block" }}>
+          <Card size="small" className="wand-team-work-item" data-status={step.status} data-open={open || undefined}>
+            <WandButton kind="ghost" type="button" className="wand-team-work-head" aria-expanded={open}
+              style={{ width: "100%", height: "auto", minHeight: 44, textAlign: "start" }} onClick={() => toggle(step.id)}>
+              <Typography.Text type="secondary" className="wand-team-work-seq">#{step.seq}</Typography.Text>
+              <Typography.Text ellipsis className="wand-team-work-title" style={{ flex: 1, minWidth: 0 }}>{step.title || "成员步骤"}</Typography.Text>
+              <Tag className="wand-team-work-status" color={STEP_TAG_COLOR[step.status]}>{STEP_LABEL[step.status]}</Tag>
+              <WandIcon name={open ? "chevronUp" : "chevronDown"} size={14}/>
+            </WandButton>
+            <Collapse ghost bordered={false} activeKey={open ? ["step"] : []}
+              styles={{ header: { display: "none" }, body: { padding: "8px 0 0" } }}
+              items={[{ key: "step", label: "工作任务详情", showArrow: false, forceRender: true, children:
+                <Flex vertical gap={8} className="wand-team-work-body" data-open={open || undefined} inert={!open}>
+                  <Flex align="center" gap={8} wrap className="wand-team-work-member">
+                    {member ? <TeamAvatar member={member} size="sm" state={stepAvatarState(step.status)}/> : null}
+                    <Typography.Text className="wand-team-work-member-name">{member?.name ?? step.memberId}</Typography.Text>
+                    {member?.duty ? <Typography.Text type="secondary" className="wand-team-work-member-duty">{member.duty}</Typography.Text> : null}
+                  </Flex>
+                  <Descriptions size="small" column={1} className="wand-team-work-meta" items={[
+                    { key: "status", label: "状态", children: STEP_LABEL[step.status] },
+                    ...(step.reportPath ? [{ key: "report", label: "报告文件", children: <Typography.Text code style={{ overflowWrap: "anywhere" }}>{step.reportPath}</Typography.Text> }] : []),
+                  ]}/>
+                  {step.report ? <Typography.Paragraph className="wand-team-work-report" style={{ maxHeight: 180, margin: 0, overflow: "auto", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{step.report}</Typography.Paragraph> : null}
+                  {step.sessionId && onOpenSession ? <WandButton kind="ghost" size="small" onClick={() => onOpenSession(step.sessionId!)}>
+                    <WandIcon name="terminal" size={14} slot="start"/>打开会话
+                  </WandButton> : null}
+                </Flex> }]}/>
+          </Card>
+        </List.Item>;
+      }}
+    /> : <Typography.Text type="secondary">负责人还没有派发工作任务。</Typography.Text>}
+  </Card>;
 }
 
 /**
@@ -152,6 +161,11 @@ export function TeamChatPage({
       // 群聊绑的是 chat 会话，不是某一次运行：用户在群里接着说话时服务端会在同一个群聊上开新一轮，
       // 这里原地跟着切过去（地址栏 replace，返回键行为仍是一步回到原会话），
       // 否则状态条、工作任务和步骤报告都停在旧的一轮，新一轮的活根本看不到。
+      if (next.run.conversationId) {
+        taskBoardController.close();
+        conversationUi.select(next.run.conversationId);
+        return;
+      }
       const newer = await newerRunIdOnSameChat(next);
       if (epoch !== loadEpochRef.current || currentRunRef.current !== runId) return;
       if (newer) {
@@ -213,9 +227,9 @@ export function TeamChatPage({
 
   const status = visibleDetail && !showingPreviousRun
     ? RUN_STATUS[visibleDetail.run.status] : null;
-  return <section className="task-board-native-page wand-team-chat-page" aria-label="群聊">
-    <header className="task-board-workspace-header">
-      <div className="task-board-kicker">
+  return <Flex component="section" vertical className="task-board-native-page wand-team-chat-page" aria-label="群聊" style={{ position: "absolute", inset: 0, zIndex: 8, overflow: "hidden", minWidth: 0, minHeight: 0, background: "var(--bg-primary)" }}>
+    <Flex component="header" wrap align="center" justify="space-between" gap="small" className="task-board-workspace-header" style={{ flexShrink: 0, padding: 16 }}>
+      <Flex align="center" gap="small" className="task-board-kicker" style={{ minWidth: 0 }}>
         {onOpenSidebar ? <WandIconButton
           className="task-board-icon-button"
           aria-label={sidebarOpen ? "关闭任务列表" : "打开任务"}
@@ -244,21 +258,19 @@ export function TeamChatPage({
               { label: visibleDetail?.chatTitle || "任务处理群" },
             ]}
           />
-          <p>{showingPreviousRun
+          <Typography.Paragraph type="secondary" style={{ margin: 0 }}>{showingPreviousRun
             ? error ? "上一轮记录 · 新一轮加载失败" : "上一轮记录 · 正在接入新一轮…"
             : visibleDetail ? `${displayTeamOf(visibleDetail).members.length} 位成员 · 团队群聊`
-              : error || "正在加载群聊…"}</p>
+              : error || "正在加载群聊…"}</Typography.Paragraph>
         </div>
-      </div>
-      {visibleDetail && status ? <div className="task-board-header-actions wand-team-chat-head-meta">
+      </Flex>
+      {visibleDetail && status ? <Flex align="center" gap="small" className="task-board-header-actions wand-team-chat-head-meta">
         <WandBadge tone={status.tone}>{status.label}</WandBadge>
-      </div> : null}
-    </header>
-    {error ? <div className="task-board-native-banner is-error" role="alert">
-      <span>{error}</span>
-      {runId ? <WandButton kind="ghost" size="small" onClick={() => void load()}>重新加载</WandButton> : null}
-    </div> : null}
-    <div className="wand-team-chat-body">
+      </Flex> : null}
+    </Flex>
+    {error ? <Alert type="error" showIcon role="alert" title={error}
+      action={runId ? <WandButton kind="ghost" size="small" onClick={() => void load()}>重新加载</WandButton> : undefined}/> : null}
+    <div className="wand-team-chat-body" style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
       {visibleDetail ? <TeamChatView
         detail={visibleDetail}
         staleRun={showingPreviousRun}
@@ -273,7 +285,7 @@ export function TeamChatPage({
           >查看完整会话记录</WandButton> : null}
         </>}
       />
-        : !error ? <p className="wand-team-empty-line">正在加载…</p> : null}
+        : !error ? <Typography.Text type="secondary">正在加载…</Typography.Text> : null}
     </div>
-  </section>;
+  </Flex>;
 }

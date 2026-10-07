@@ -1,4 +1,5 @@
-import { Switch } from "@appica/ui-react/switch";
+import { Switch } from "antd";
+import { WandUiBoundary } from "../theme";
 import * as React from "react";
 import { useId } from "react";
 import { classNames } from "./class-names";
@@ -11,7 +12,7 @@ export interface WandSwitchProps {
   disabled?: boolean;
   className?: string;
   id?: string;
-  /** Appica scale. `lg` matches the previous 42x24 wand switch geometry. */
+  /** Retained Wand scale; sm maps to the library small size, md/lg to default. */
   size?: "sm" | "md" | "lg";
 }
 
@@ -29,15 +30,15 @@ export function WandSwitch({
   const switchId = id ?? generatedId;
   return (
     <div className={classNames("wand-ui-switch-row", className)}>
-      <Switch
+      <WandUiBoundary><Switch
         id={switchId}
-        size={size}
+        size={size === "sm" ? "small" : "default"}
         className="wand-ui-switch"
         checked={checked}
         disabled={disabled}
         aria-label={ariaLabel}
-        onCheckedChange={onCheckedChange}
-      />
+        onChange={onCheckedChange}
+      /></WandUiBoundary>
       {label ? <label htmlFor={switchId}>{label}</label> : null}
     </div>
   );

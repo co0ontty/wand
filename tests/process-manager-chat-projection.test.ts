@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ClaudePtyBridge } from "../src/claude-pty-bridge.js";
+import { TurnQuietHeartbeat } from "../src/turn-heartbeat.js";
 import { ProcessManager } from "../src/process-manager.js";
 import type { ConversationTurn, ProcessEvent, SessionEvent } from "../src/types.js";
 
@@ -12,13 +13,14 @@ function harness(t: test.TestContext) {
   const bridge = new ClaudePtyBridge({ sessionId: "fixture", initialMessages: initial, isClaudeCommand: true });
   const events: ProcessEvent[] = [];
   // Exercise the real bridge -> ProcessManager projection without spawning a CLI.
+  const ptyHeartbeat = new TurnQuietHeartbeat(() => false);
   const manager = Object.assign(Object.create(ProcessManager.prototype), {
-    config: { cardDefaults: {} }, emitEvent: (event: ProcessEvent) => events.push(structuredClone(event)), persist: () => {},
+    ptyHeartbeat, config: { cardDefaults: {} }, emitEvent: (event: ProcessEvent) => events.push(structuredClone(event)), persist: () => {},
   }) as any;
   const record = { id: "fixture", status: "running", output: "", ptyBridge: bridge, pendingEscalation: null,
     ptyPermissionBlocked: false, ptyBusy: false, rememberedEscalationScopes: new Set(), rememberedEscalationTargets: new Set() };
   bridge.on("event", (event: SessionEvent) => manager.handleBridgeEvent(record, event));
-  t.after(() => { bridge.onExit(0); bridge.removeAllListeners(); });
+  t.after(() => { bridge.onExit(0); bridge.removeAllListeners(); ptyHeartbeat.dispose(); });
   return { bridge, events, record, outputs: () => events.filter(e => e.type === "output" && !(e.data as any)?.chunk) };
 }
 

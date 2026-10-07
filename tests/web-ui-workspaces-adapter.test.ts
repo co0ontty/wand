@@ -90,6 +90,20 @@ test("task prompts start a bound session for both PTY and structured runners", a
   }
 });
 
+test("project welcome starts an unbound session without touching any task layout", async () => {
+  const h = harness();
+  const created = await h.runtime.newTaskSession({
+    workspaceId: "workspace", cwd: "/project", target: "pi", kind: "structured",
+  });
+  await tick();
+  assert.equal(created, "new-session");
+  // 没有 taskId 就不提交任务归属：会话落在所在目录的「未分组任务」，也没有任务详情/布局可读写。
+  assert.equal(h.starts[0].options.workspaceTaskId, undefined);
+  assert.equal(h.starts[0].options.workspaceId, "workspace");
+  assert.equal(h.reads.length, 0);
+  assert.equal(h.writes.length, 0);
+});
+
 test("model preference reads and writes the composer's per-provider memory", () => {
   const h = harness();
   assert.equal(h.runtime.modelPreference("claude"), "");

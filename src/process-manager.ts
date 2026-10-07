@@ -1,3 +1,8 @@
+import { isOpenRouterFreeSelector } from "./openrouter-free-models.js";
+import { isAutoAssignSelector, defaultModelGroupSelector, resolveModelGroupModels } from "./model-groups.js";
+import { resolveAutoAssign } from "./model-auto-assign.js";
+import type { DecisionResult } from "./decision-types.js";
+import { getDefaultModelForProvider } from "./config.js";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { ChildProcess } from "node:child_process";
@@ -13,7 +18,7 @@ import { ApprovalPolicy, AutonomyPolicy, ChatOutputData, ConversationTurn, Escal
 import { ClaudePtyBridge, type PermissionResolution } from "./claude-pty-bridge.js";
 import { truncateMessagesForTransport } from "./message-truncator.js";
 import { appendWindow, hasExplicitConfirmSyntax, hasPermissionActionContext, normalizePromptText, PTY_OUTPUT_MAX_SIZE } from "./pty-text-utils.js";
-import { buildChildEnv, isRunningAsRoot } from "./env-utils.js";
+import { buildChildEnv, isRunningAsRoot, systemEnvValue } from "./env-utils.js";
 import { buildLanguageDirective, buildManagedAutonomyDirective } from "./language-prompt.js";
 import { prepareSessionWorktree } from "./git-worktree.js";
 import { getProviderCommandSessionId, getProviderResumeCommandSessionId } from "./resume-policy.js";
@@ -31,11 +36,12 @@ import {
 } from "./session-topic.js";
 import { readNativeSessionTitle } from "./native-session-title.js";
 import { getErrorMessage } from "./error-utils.js";
+import { TurnQuietHeartbeat } from "./turn-heartbeat.js";
 import { recordIterationPrompt } from "./iteration-log.js";
 import { describePtySpawnFailure } from "./ensure-node-pty-helper.js";
 import { resolveSessionProvider, resolveSystemAiContext } from "./session-ai-context.js";
 import { resolveSessionCwd } from "./session-cwd.js";
-import { inferProviderFromCommand } from "./session-provider.js";
+import { inferProviderFromCommand, providerCliCommand } from "./session-provider.js";
 import { RETENTION_IDLE_MS } from "./retention.js";
 import { PtyTerminalState, type PtyTerminalSnapshot, type PtyHistoryPage } from "./pty-terminal-state.js";
 import { isPtySubmitInput } from "./pty-turn-activity.js";
@@ -233,6 +239,14 @@ interface SessionRecord extends SessionSnapshot {
   ptyBridge: ClaudePtyBridge | null;
   /** 运行时每轮忙碌信号（对齐 structured inFlight）；由 bridge 事件驱动，不持久化 */
   ptyBusy?: boolean;
+  /**
+   * 本轮时间锚点，语义与 structuredState.turnStartedAt / lastActivityAt 一致，
+   * 和 ptyBusy 同生命周期：openPtyTurn / bridge 翻转为 busy 时写入，clearPtyTurn
+   * （退回提示符、CLI 退出、stop、cleanup）连同 ptyBusy 一起清 null。
+   * 同样是运行时信号，不持久化（存储里没有对应列），服务重启后为 null。
+   */
+  ptyTurnStartedAt?: string | null;
+  ptyLastActivityAt?: string | null;
   /** Quiet-window timer for the non-Claude PTY turn tracker (no bridge). */
   ptyTurnTimer?: NodeJS.Timeout | null;
   /**
@@ -663,7 +677,7 @@ function restoreTerminalState(state: TerminalSessionState): PtyTerminalState {
 }
 
 const MAX_SESSIONS = 200;
-// 与会话/任务的统一保留期一致：7 天没活动才自动归档（随后由保留期扫描在 7 天后清理）。
+// 会话空闲 7 天后在这里自动归档，再由保留期扫描于 7 天后清理。任务窗口在设置里单独配置。
 const ARCHIVE_AFTER_MS = RETENTION_IDLE_MS;
 const CONFIRM_WINDOW_SIZE = 800;
 /**
@@ -745,6 +759,8 @@ export interface ProcessManagerOptions {
   ptyForegroundSampleMs?: number;
   /** Overrides the foreground probe itself, so tests can drive it deterministically. */
   samplePtyForegrounds?: typeof samplePtyForegrounds;
+  /** 本地决策入口；只有带首条提示词创建终端会话时用来结算「智能分配」。 */
+  resolveDecisionEvaluate?: () => ((value: unknown, caller: string, signal?: AbortSignal) => Promise<DecisionResult>) | undefined;
 }
 
 export class ProcessManager extends EventEmitter {
@@ -757,6 +773,7 @@ export class ProcessManager extends EventEmitter {
   private readonly ptyForegroundSampleMs: number;
   /** Foreground probe; injectable so tests can drive it without a real process table. */
   private readonly probePtyForegrounds: typeof samplePtyForegrounds;
+  private readonly resolveDecisionEvaluate: NonNullable<ProcessManagerOptions["resolveDecisionEvaluate"]>;
   /** 24h archive scan timer */
   private archiveTimer: NodeJS.Timeout | null = null;
   /** 前台进程组采样定时器（见 samplePtyForegrounds） */
@@ -773,6 +790,12 @@ export class ProcessManager extends EventEmitter {
   private orphanRecoveredCount = 0;
   private readonly topicCoordinator = new SessionTopicCoordinator();
   private readonly nativeTitles = new SessionNativeTitleTracker();
+  /**
+   * 静默期心跳：ptyBusy 且连续 TURN_QUIET_HEARTBEAT_MS 没有任何输出时，用现有的 status
+   * 事件重发一次 ptyBusy 事实与本轮锚点，证明「还在跑」。timer 只在回合在飞期间存在，
+   * clearPtyTurn / cleanupRecord / dispose 立即撤销。
+   */
+  private readonly ptyHeartbeat = new TurnQuietHeartbeat((sessionId) => this.publishPtyQuietHeartbeat(sessionId));
   private disposed = false;
   private readonly terminalHost: TerminalHost;
 
@@ -787,6 +810,7 @@ export class ProcessManager extends EventEmitter {
     this.ptyTurnIdleMs = options.ptyTurnIdleMs ?? PTY_TURN_IDLE_MS;
     this.ptyForegroundSampleMs = options.ptyForegroundSampleMs ?? PTY_FOREGROUND_SAMPLE_MS;
     this.probePtyForegrounds = options.samplePtyForegrounds ?? samplePtyForegrounds;
+    this.resolveDecisionEvaluate = options.resolveDecisionEvaluate ?? (() => undefined);
     this.terminalHost = terminalHost ?? new InProcessTerminalHost();
     this.logger = new SessionLogger(configDir || path.join(process.env.HOME || process.cwd(), ".wand"), config.shortcutLogMaxBytes);
     let startupCodexHistory: CodexHistorySession[] | null = null;
@@ -1014,7 +1038,8 @@ export class ProcessManager extends EventEmitter {
 
   private initializeClaudeBridge(record: SessionRecord, initialOutput: string): void {
     if (record.provider !== "claude" || !record.providerCliActive) return;
-    record.ptyBusy = false;
+    // 新 bridge 接管 ptyBusy 与本轮锚点：从干净的一轮起步，锚点由 bridge 的翻转写入。
+    this.clearPtyTurn(record);
     record.ptyBridge?.removeAllListeners();
     record.ptyBridge = new ClaudePtyBridge({
       sessionId: record.id,
@@ -1051,7 +1076,16 @@ export class ProcessManager extends EventEmitter {
     if (record.ptyBridge || !this.canTrackPtyTurn(record) || record.status !== "running") return;
     if (record.ptyBusy !== true) {
       record.ptyBusy = true;
-      this.emitEvent({ type: "status", sessionId: record.id, data: { ptyBusy: true } });
+      // 本轮起点：两个锚点同时落下，客户端据此算「这一轮跑了多久 / 多久没动静」。
+      const at = new Date().toISOString();
+      record.ptyTurnStartedAt = at;
+      record.ptyLastActivityAt = at;
+      this.ptyHeartbeat.observe(record.id);
+      this.emitEvent({
+        type: "status",
+        sessionId: record.id,
+        data: { ptyBusy: true, ptyTurnStartedAt: at, ptyLastActivityAt: at },
+      });
     }
     this.refreshPtyTurn(record);
   }
@@ -1059,6 +1093,10 @@ export class ProcessManager extends EventEmitter {
   /** Extend the quiet window because the CLI is still producing output. */
   private refreshPtyTurn(record: SessionRecord): void {
     if (record.ptyBridge || !this.canTrackPtyTurn(record)) return;
+    // 输出续期只动 lastActivityAt；turnStartedAt 留在本轮开始处，否则「已运行多久」
+    // 会被每次 chunk 重置。静默窗口跟着往后推。
+    record.ptyLastActivityAt = new Date().toISOString();
+    this.ptyHeartbeat.observe(record.id);
     if (record.ptyTurnTimer) clearTimeout(record.ptyTurnTimer);
     const timer = setTimeout(() => {
       record.ptyTurnTimer = null;
@@ -1074,7 +1112,12 @@ export class ProcessManager extends EventEmitter {
     this.clearPtyTurn(record);
     if (record.ptyBusy !== true) return;
     record.ptyBusy = false;
-    this.emitEvent({ type: "status", sessionId: record.id, data: { ptyBusy: false } });
+    this.emitEvent({
+      type: "status",
+      sessionId: record.id,
+      // 锚点与 ptyBusy 一起收敛成 null，不残留「还在跑」的读数。
+      data: { ptyBusy: false, ptyTurnStartedAt: null, ptyLastActivityAt: null },
+    });
   }
 
   private clearPtyTurn(record: SessionRecord): void {
@@ -1082,6 +1125,33 @@ export class ProcessManager extends EventEmitter {
       clearTimeout(record.ptyTurnTimer);
       record.ptyTurnTimer = null;
     }
+    // ptyBusy 清 false 的一切路径（退回提示符、CLI 退出、finishProviderCli、stop、
+    // cleanupRecord）都经过这里：撤掉静默心跳，锚点一并回 null。
+    this.ptyHeartbeat.cancel(record.id);
+    record.ptyTurnStartedAt = null;
+    record.ptyLastActivityAt = null;
+  }
+
+  /**
+   * 静默窗口到期：确认这一轮仍在飞才补发，payload 与一次普通 ptyBusy status 事件同形
+   * （不带新字段、不用新事件类型）。停在权限裁决上的回合不广播「仍在运行」——那一屏
+   * 已有 pendingEscalation 这个显式指示，再说在跑是错的（保留窗口，等输出恢复）。
+   */
+  private publishPtyQuietHeartbeat(id: string): boolean {
+    if (this.disposed) return false;
+    const record = this.sessions.get(id);
+    if (!record || record.ptyBusy !== true) return false;
+    if (record.pendingEscalation || this.isPermissionBlocked(record)) return true;
+    this.emitEvent({
+      type: "status",
+      sessionId: id,
+      data: {
+        ptyBusy: true,
+        ptyTurnStartedAt: record.ptyTurnStartedAt ?? null,
+        ptyLastActivityAt: record.ptyLastActivityAt ?? null,
+      },
+    });
+    return true;
   }
 
   private bindTerminalProcess(
@@ -1262,6 +1332,8 @@ export class ProcessManager extends EventEmitter {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    // 静默心跳不跨服务关闭存活；每个会话的 timer 也在 cleanupRecord 里单独撤销。
+    this.ptyHeartbeat.dispose();
 
     if (this.archiveTimer) {
       clearInterval(this.archiveTimer);
@@ -1355,8 +1427,48 @@ export class ProcessManager extends EventEmitter {
 
   async start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean; worktreeEnabled?: boolean; provider?: SessionProvider; model?: string; reuseId?: string; cols?: number; rows?: number; thinkingEffort?: SessionSnapshot["thinkingEffort"]; sessionSource?: SessionSource; automationId?: string; workspaceId?: string; workspaceTaskId?: string; interactiveShell?: boolean; systemPrompt?: string } & Pick<SessionSnapshot, "employeeId" | "employeeName" | "employeeAvatar">): Promise<SessionSnapshot> {
     if (this.disposed) throw new Error("ProcessManager has been disposed.");
+    if (isOpenRouterFreeSelector(opts?.model)) throw new Error("免费分组仅支持 one 的 Agent 结构化对话。");
     if (!opts?.interactiveShell) this.assertCommandAllowed(command);
 
+    const groupProvider = opts?.interactiveShell ? undefined : opts?.provider ?? inferProviderFromCommand(command);
+    const configured = groupProvider ? getDefaultModelForProvider(this.config, groupProvider) : "";
+    const requested = opts?.model?.trim();
+    let selector = requested && requested !== "default" ? requested : configured;
+    /** 「智能分配」在终端里结算后的落地选择器；不让会话停在哨兵上说不清实际用了什么。 */
+    let autoAssignedSelector: string | undefined;
+    // 终端在创建时就带着首条提示词（任务派发 / API）时，可以按提示词结算「智能分配」；
+    // 交互式终端没有提示词，只能回落默认分组，不能靠猜。
+    if (groupProvider && isAutoAssignSelector(selector)) {
+      const prompt = initialInput?.trim() ?? "";
+      // 没有提示词时的落地值：默认分组（没有分组时才是该工具配置的默认模型）。
+      const fallbackGroup = defaultModelGroupSelector(this.config.modelGroups, groupProvider, undefined) ?? "";
+      const fallback = fallbackGroup || (isAutoAssignSelector(configured) ? "" : configured);
+      if (prompt) {
+        const assigned = await resolveAutoAssign({
+          provider: groupProvider,
+          prompt,
+          groups: this.config.modelGroups,
+          evaluate: this.resolveDecisionEvaluate(),
+          ai: resolveSystemAiContext({
+            provider: groupProvider, runner: undefined, command: providerCliCommand(groupProvider),
+            structuredState: undefined, selectedModel: null, thinkingEffort: opts?.thinkingEffort,
+          }, this.config, this.storage.getSystemSiliconEmployee()),
+          cwd: resolveSessionCwd(cwd, this.config.defaultCwd),
+          language: this.config.language,
+        });
+        selector = assigned.selector || fallback;
+        autoAssignedSelector = assigned.selector || fallback || undefined;
+        if (assigned.group) console.info(`[AutoAssign] 终端会话使用分组「${assigned.group.name}」（${assigned.strategy}）`);
+      } else {
+        console.info("[AutoAssign] 终端会话没有首条提示词，使用默认分组");
+        selector = fallback;
+        autoAssignedSelector = fallback || undefined;
+      }
+    }
+    const preferredModels = groupProvider ? resolveModelGroupModels(this.config.modelGroups, groupProvider, selector, {
+      preferDefault: !requested || requested === "default",
+    }) : [requested ?? ""];
+    if (preferredModels.some(isOpenRouterFreeSelector)) throw new Error("免费模型分组仅支持 one 的 Agent 结构化对话。");
     const baseCwd = resolveSessionCwd(cwd, this.config.defaultCwd);
 
     const id = opts?.reuseId || randomUUID();
@@ -1402,9 +1514,11 @@ export class ProcessManager extends EventEmitter {
       : opts?.provider ?? inferProviderFromCommand(command);
     const effectiveMode = provider === "codex" ? "full-access" : mode;
     const isClaudeProvider = provider === "claude";
-    const selectedModel = opts?.model?.trim() || undefined;
+    const selectedModel = autoAssignedSelector ?? (opts?.model?.trim() || undefined);
+    // Resolve before touching a resume record/worktree; invalid groups must not disturb prior work.
+    // PTY has no reliable pre-input acceptance fact: use the preferred member, never replay automatically.
     const initialThinkingEffort = normalizeThinkingEffort(opts?.thinkingEffort);
-    let processedCommand = this.processCommandForMode(command, effectiveMode, provider, selectedModel, initialThinkingEffort);
+    let processedCommand = this.processCommandForMode(command, effectiveMode, provider, preferredModels[0], initialThinkingEffort);
     // 会话级系统提示：provider 有系统提示开关就走开关（PTY 与结构化行为一致），没有就并进首条输入。
     const systemPrompt = (opts?.systemPrompt ?? inheritedRole?.systemPrompt)?.trim() || undefined;
     const initialInputText = initialInput && systemPrompt && !systemPromptFlag(provider)
@@ -1530,8 +1644,8 @@ export class ProcessManager extends EventEmitter {
           WAND_AUTO_CONFIRM: record.autoApprovePermissions ? "1" : "0",
           WAND_AUTO_EDIT: effectiveMode === "auto-edit" ? "1" : "0",
           SHELL: this.config.shell,
-          LANG: process.env.LANG || process.env.LC_ALL || process.env.LC_CTYPE || "C.UTF-8",
-          LC_CTYPE: process.env.LC_CTYPE || process.env.LANG || process.env.LC_ALL || "C.UTF-8",
+          LANG: systemEnvValue("LANG") || systemEnvValue("LC_ALL") || systemEnvValue("LC_CTYPE") || "C.UTF-8",
+          LC_CTYPE: systemEnvValue("LC_CTYPE") || systemEnvValue("LANG") || systemEnvValue("LC_ALL") || "C.UTF-8",
         }),
         name: "xterm-256color",
         // 使用 record 上由前端协商好的真实尺寸，避免"先 120 列、几百毫秒后再 resize"
@@ -1770,6 +1884,18 @@ export class ProcessManager extends EventEmitter {
     return this.providerHistory.deleteQoderHistoryFiles(sessionIds);
   }
 
+  deletePiHistoryFiles(sessionIds: string[]): number {
+    return this.providerHistory.deletePiHistoryFiles(sessionIds);
+  }
+
+  deleteGrokHistoryFiles(sessionIds: string[]): number {
+    return this.providerHistory.deleteGrokHistoryFiles(sessionIds);
+  }
+
+  deleteGeminiHistoryFiles(sessionIds: string[]): number {
+    return this.providerHistory.deleteGeminiHistoryFiles(sessionIds);
+  }
+
   private captureCodexSessionId(record: SessionRecord, options?: { allowTimeWindowFallback?: boolean }): boolean {
     if (record.provider !== "codex" || record.claudeSessionId) {
       return false;
@@ -1877,9 +2003,15 @@ export class ProcessManager extends EventEmitter {
   setSessionModel(id: string, model: string | null): SessionSnapshot {
     const record = this.mustGet(id);
     const normalized = model?.trim() || null;
+    const configured = record.provider ? getDefaultModelForProvider(this.config, record.provider) : "";
+    const selector = normalized && normalized !== "default" ? normalized : configured;
+    const members = resolveModelGroupModels(this.config.modelGroups, record.provider ?? "claude", selector, {
+      preferDefault: !normalized || normalized === "default",
+    });
+    if (members.some(isOpenRouterFreeSelector)) throw new Error("免费分组仅支持 one 的 Agent 结构化对话。");
     record.selectedModel = normalized;
     if (record.providerCliActive && record.provider === "claude" && record.status === "running" && record.ptyProcess) {
-      const value = normalized && normalized !== "default" ? normalized : "default";
+      const value = members[0] && members[0] !== "default" ? members[0] : "default";
       record.ptyProcess.write(`/model ${value}\r`);
     }
     this.persist(record);
@@ -1888,14 +2020,22 @@ export class ProcessManager extends EventEmitter {
   }
 
   /**
-   * 归档 / 取消归档一个 PTY 会话：只写标记，不杀进程；保留期清理再按 archivedAt 删除。
+   * 归档会先停掉还在跑的终端，但保留会话 ID 和 provider session id，恢复时用它们续上。
+   * 取消归档只清标记；重新拉起由恢复入口负责。
    */
   setSessionArchived(id: string, archived: boolean): SessionSnapshot {
+    if (archived && this.mustGet(id).status === "running") {
+      this.stop(id);
+    }
     const record = this.mustGet(id);
     record.archived = archived;
-    record.archivedAt = archived ? new Date().toISOString() : null;
+    record.archivedAt = archived ? (record.archivedAt ?? new Date().toISOString()) : null;
     this.persist(record);
-    this.emitEvent({ type: "status", sessionId: id, data: { archived, archivedAt: record.archivedAt } });
+    this.emitEvent({
+      type: "status",
+      sessionId: id,
+      data: { archived, archivedAt: record.archivedAt, claudeSessionId: record.claudeSessionId },
+    });
     return this.snapshot(record);
   }
 
@@ -2255,6 +2395,8 @@ export class ProcessManager extends EventEmitter {
     const record = this.mustGet(id);
 
     // Always clear pending timers
+    // 会话删除后迟到的回合回调要失效，静默心跳也不能再给不存在的会话发事件。
+    this.ptyHeartbeat.cancel(id);
     if (record.claudeTaskDiscoveryTimer) {
       clearTimeout(record.claudeTaskDiscoveryTimer);
       record.claudeTaskDiscoveryTimer = null;
@@ -2372,6 +2514,9 @@ export class ProcessManager extends EventEmitter {
       providerCliActive: record.providerCliActive,
       providerCliExitCode: record.providerCliExitCode,
       ptyBusy: record.ptyBridge ? record.ptyBridge.isResponding() : record.ptyBusy === true,
+      // 与 ptyBusy 同生命周期的本轮锚点。运行时事实：存储没有对应列，重启后为 null。
+      ptyTurnStartedAt: record.ptyTurnStartedAt ?? null,
+      ptyLastActivityAt: record.ptyLastActivityAt ?? null,
       runner: "pty",
       command: record.command,
       cwd: record.cwd,
@@ -2831,11 +2976,23 @@ export class ProcessManager extends EventEmitter {
         const responding = bridgeData?.isResponding === true;
         if (record.ptyBusy !== responding) {
           record.ptyBusy = responding;
+          // Claude 的 bridge 精确知道回合边界：翻转为 busy 时落下本轮锚点并挂静默
+          // 心跳；回复结束就一起清回 null。
+          const at = responding ? new Date().toISOString() : null;
+          record.ptyTurnStartedAt = at;
+          record.ptyLastActivityAt = at;
+          if (responding) this.ptyHeartbeat.observe(record.id);
+          else this.ptyHeartbeat.cancel(record.id);
           this.emitEvent({
             type: "status",
             sessionId: event.sessionId,
-            data: { ptyBusy: responding },
+            data: { ptyBusy: responding, ptyTurnStartedAt: at, ptyLastActivityAt: at },
           });
+        } else if (responding) {
+          // 回合仍在飞：每个 chat 事件都是活动证据，只续 lastActivityAt 与静默窗口，
+          // 不额外广播（流式期间每 chunk 一条 status 会把 WS 刷爆）。
+          record.ptyLastActivityAt = new Date().toISOString();
+          this.ptyHeartbeat.observe(record.id);
         }
 
         const data: Record<string, unknown> = {

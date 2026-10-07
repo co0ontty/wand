@@ -1,95 +1,55 @@
-import {
-  Toast as AppicaToast,
-  ToastClose as AppicaToastClose,
-  ToastDescription as AppicaToastDescription,
-  ToastPortal as AppicaToastPortal,
-  ToastProvider as AppicaToastProvider,
-  ToastTitle as AppicaToastTitle,
-  ToastViewport as AppicaToastViewport,
-  createToastManager,
-  useToastManager,
-} from "@appica/ui-react/toast";
+import { notification } from "antd";
 import * as React from "react";
-import { classNames } from "./class-names";
 import { usePortalContainer } from "./portal-context";
+import { WandUiBoundary } from "../theme";
 
 export type WandToastTone = "info" | "success" | "warning" | "error";
-
-interface WandToastData {
-  tone?: WandToastTone;
-}
-
-export interface WandToastOptions {
-  description?: string;
-  tone?: WandToastTone;
-  duration?: number;
-}
-
-/** Wand's default auto-dismiss; the old hand-rolled stack used the same value. */
-const TOAST_DURATION = 3200;
-
-/**
- * Appica drives toasts from a manager rather than from React state, which is
- * exactly what Wand needs: `wandOverlay.toast()` is called from plain browser
- * modules (legacy overlays, editors, file explorer) that have no component to
- * hook into. The provider below subscribes to this same manager, so a toast
- * queued before React is even mounted still shows up.
- */
-const toastManager = createToastManager<WandToastData>();
-
-export interface WandToastHandle {
-  readonly id: string;
-  dismiss(): void;
-}
-
+export interface WandToastOptions { description?: string; tone?: WandToastTone; duration?: number; }
+export interface WandToastHandle { readonly id: string; dismiss(): void; }
+type ToastEntry = { id: string; message: string; options: WandToastOptions; expiresAt: number | null };
+const queue = new Map<string, ToastEntry>();
+const listeners = new Set<() => void>();
+let serial = 0;
+const notify = (): void => { for (const listener of listeners) listener(); };
+/** Plain browser modules may queue feedback before the React region mounts. */
 export function showWandToast(message: string, options: WandToastOptions = {}): WandToastHandle {
-  const id = toastManager.add({
-    title: message,
-    description: options.description,
-    timeout: options.duration ?? TOAST_DURATION,
-    data: { tone: options.tone },
-  });
-  return { id, dismiss: () => toastManager.close(id) };
+  for (const [key, toast] of queue) if (toast.expiresAt !== null && toast.expiresAt <= Date.now()) queue.delete(key);
+  while (queue.size >= 20) queue.delete(queue.keys().next().value!);
+  const id = `wand-toast-${++serial}`;
+  const duration = options.duration ?? 3200;
+  queue.set(id, { id, message, options, expiresAt: duration > 0 ? Date.now() + duration : null });
+  notify();
+  return { id, dismiss() { queue.delete(id); notify(); } };
 }
-
-/**
- * Wand's toast stack, rendered by Appica UI.
- *
- * Appica only ships the manager-driven `Toaster` as a whole; Wand needs a tone
- * per toast (`wand-ui-toast-<tone>`) plus its own surface styling, so the
- * viewport is composed from the same parts the library's `Toaster` uses.
- */
 export function WandToastRegion() {
-  const portalContainer = usePortalContainer();
-  return (
-    <AppicaToastProvider toastManager={toastManager} timeout={TOAST_DURATION}>
-      <AppicaToastPortal container={portalContainer}>
-        <WandToastViewport />
-      </AppicaToastPortal>
-    </AppicaToastProvider>
-  );
+  return <WandUiBoundary><ToastRegion/></WandUiBoundary>;
 }
-
-function WandToastViewport() {
-  const { toasts } = useToastManager<WandToastData>();
-  return (
-    <AppicaToastViewport position="top-right" className="wand-ui-toast-viewport">
-      {toasts.map((toast) => (
-        <AppicaToast
-          key={toast.id}
-          toast={toast}
-          position="top-right"
-          className={classNames("wand-ui-toast", `wand-ui-toast-${toast.data?.tone ?? "info"}`)}
-        >
-          <AppicaToastTitle className="wand-ui-toast-title">{toast.title}</AppicaToastTitle>
-          {toast.description ? (
-            <AppicaToastDescription className="wand-ui-toast-description">
-              {toast.description}
-            </AppicaToastDescription>
-          ) : null}
-          <AppicaToastClose className="wand-ui-toast-close" closeLabel="关闭通知"/>
-        </AppicaToast>
-      ))}
-    </AppicaToastViewport>
-  );
+function ToastRegion() {
+  const portal = usePortalContainer();
+  const config = React.useMemo(() => ({ getContainer: () => portal ?? document.body,
+    placement: "topRight" as const, stack: { threshold: 3 } }), [portal]);
+  const [api, holder] = notification.useNotification(config);
+  const generation = React.useRef(0);
+  React.useEffect(() => {
+    const lease = ++generation.current;
+    const shown = new Set<string>();
+    const sync = (): void => {
+      for (const id of shown) if (!queue.has(id)) { api.destroy(id); shown.delete(id); }
+      for (const [id, toast] of queue) {
+        if (shown.has(id)) continue;
+        const remaining = toast.expiresAt === null ? 0 : toast.expiresAt - Date.now();
+        if (toast.expiresAt !== null && remaining <= 0) { queue.delete(id); continue; }
+        shown.add(id);
+        api.open({ key: id, title: toast.message, description: toast.options.description,
+          type: toast.options.tone ?? "info", duration: remaining / 1000,
+          onClose: () => {
+            if (generation.current !== lease) return;
+            shown.delete(id); queue.delete(id);
+          } });
+      }
+    };
+    listeners.add(sync); sync();
+    return () => { generation.current++; listeners.delete(sync); api.destroy(); };
+  }, [api]);
+  return holder;
 }

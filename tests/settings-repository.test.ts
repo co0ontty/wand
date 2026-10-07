@@ -12,6 +12,8 @@ import type {
   SettingsSnapshot,
 } from "../src/web-ui/react/settings/types.ts";
 
+import { normalizeModels } from "../src/web-ui/react/settings/repository.ts";
+
 const originalFetch = globalThis.fetch;
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
 const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
@@ -155,10 +157,47 @@ test("admin load is settings-first and maps models, CLI updates, and connect cod
   assert.equal(snapshot.connectCode?.code, "connect-secret");
   assert.equal(snapshot.config?.defaultProvider, "grok");
   assert.equal(snapshot.config?.defaultThinkingEffort, "deep");
+  assert.deepEqual(snapshot.config?.taskRetention, {
+    autoArchiveEnabled: true,
+    autoArchiveDays: 7,
+    autoDeleteEnabled: true,
+    autoDeleteDays: 7,
+  });
   // 直连 API 已移除：客户端快照里不再有 systemAi / commitAiSource，也不回显旧 CLI 字段。
   assert.equal("systemAi" in (snapshot.config ?? {}), false);
   assert.equal("commitAiSource" in (snapshot.config ?? {}), false);
   assert.equal("systemAiCli" in (snapshot.config ?? {}), false);
+});
+
+test("general save posts task retention with the rest of the basic config", async () => {
+  let body: Record<string, unknown> | null = null;
+  globalThis.fetch = async (input, init) => {
+    assert.equal(String(input), "/api/settings/config");
+    body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return json({ ok: true, config: config({ taskRetention: body.taskRetention }), restartRequired: false });
+  };
+  const taskRetention = {
+    autoArchiveEnabled: false,
+    autoArchiveDays: 3,
+    autoDeleteEnabled: true,
+    autoDeleteDays: 14,
+  };
+  const result = await new HttpSettingsRepository(new RuntimeSpy()).execute({
+    type: "general.save",
+    value: {
+      host: "127.0.0.1",
+      port: 8443,
+      https: false,
+      defaultMode: "default",
+      defaultCwd: "/tmp",
+      shell: "/bin/zsh",
+      language: "",
+      inheritEnv: true,
+      taskRetention,
+    },
+  });
+  assert.deepEqual(body?.taskRetention, taskRetention);
+  assert.deepEqual(result.config.taskRetention, taskRetention);
 });
 
 test("new-session defaults fall back safely and keep Codex dynamic thinking levels", async () => {
@@ -369,4 +408,112 @@ test("MemorySettingsRepository records semantic commands without browser side ef
   const result = await memory.execute({ type: "clipboard.copy", text: "hello" });
   assert.deepEqual(result, { copied: true });
   assert.deepEqual(memory.commands, [{ type: "clipboard.copy", text: "hello" }]);
+});
+
+test("模型分组保存只发送分组及并发基线，回执刷新所有选择器，不改默认模型", async () => {
+  const group = { id: "coding", provider: "pi" as const, name: "编程", models: ["second", "first"] };
+  const spy = new RuntimeSpy();
+  const calls: string[] = [];
+  globalThis.fetch = async (input, options) => {
+    const url = String(input); calls.push(url);
+    if (url === "/api/settings/config") {
+      assert.deepEqual(JSON.parse(String(options?.body)), { modelGroups: [group], expectedModelGroups: [] });
+      return json({ ok: true, config: config({ modelGroups: [group] }), restartRequired: false });
+    }
+    if (url === "/api/models") return json({ modelGroups: [group], freeModels: [],
+      piModels: [{ id: "wand-model-group/pi/coding", label: "编程", group: "模型分组" }] });
+    throw new Error(`unexpected ${url}`);
+  };
+  const result = await new HttpSettingsRepository(spy).execute({ type: "modelGroups.save", value: [group], expected: [] });
+  assert.deepEqual(result.config.modelGroups, [group]);
+  assert.deepEqual(result.models?.modelGroups, [group]);
+  assert.equal(result.models?.piModels[0]!.label, "编程");
+  assert.equal(spy.configs.length, 1);
+  assert.deepEqual(calls, ["/api/settings/config", "/api/models"]);
+  assert.deepEqual(normalizeModels({}).modelGroups, []);
+});
+
+test("模型分组并发冲突不公布未保存目录；保存成功但目录失败不报假保存失败", async () => {
+  const group = { id: "coding", provider: "pi" as const, name: "编程", models: ["second", "first"] };
+  let conflict = true;
+  const spy = new RuntimeSpy();
+  globalThis.fetch = async (input) => {
+    if (String(input) === "/api/settings/config") return conflict
+      ? json({ error: "模型分组已在其他设备修改，草稿保留。" }, 409)
+      : json({ ok: true, config: config({ modelGroups: [group] }) });
+    throw new Error("offline");
+  };
+  const repository = new HttpSettingsRepository(spy);
+  await assert.rejects(repository.execute({ type: "modelGroups.save", value: [group], expected: [] }), /其他设备/);
+  assert.equal(spy.configs.length, 0);
+  conflict = false;
+  const result = await repository.execute({ type: "modelGroups.save", value: [group], expected: [] });
+  assert.equal(result.ok, true);
+  assert.equal(result.models, null);
+  assert.deepEqual(result.config.modelGroups, [group]);
+});
+
+test("OpenRouter 同步失败仍返回保存状态和上次模型目录，不误判为 HTTP 失败", async () => {
+  const calls: string[] = [];
+  globalThis.fetch = async (input, options) => {
+    const url = String(input);
+    calls.push(url);
+    if (url === "/api/settings/openrouter") {
+      assert.equal(options?.method, "POST");
+      assert.deepEqual(JSON.parse(String(options?.body)), { apiKey: "offline-key" });
+      return json({ configured: true, group: "免费分组", modelCount: 1,
+        lastSyncedAt: "2026-10-04T12:00:00.000Z", lastCheckedAt: null,
+        lastError: "OpenRouter 同步失败，请重试。", refreshIntervalHours: 6 });
+    }
+    if (url === "/api/models") return json({ piModels: [{ id: "wand-openrouter-free/vendor/model:free",
+      label: "Free Model", group: "免费分组" }] });
+    throw new Error(`unexpected request ${url}`);
+  };
+  const result = await new HttpSettingsRepository(new RuntimeSpy()).execute({ type: "openrouter.save", apiKey: "offline-key" });
+  assert.equal(result.configured, true);
+  assert.match(result.lastError ?? "", /同步失败/);
+  assert.equal(result.models?.piModels[0]!.group, "免费分组");
+  assert.deepEqual(calls, ["/api/settings/openrouter", "/api/models"]);
+});
+
+test("profile save posts only the trimmed name and avatar, then broadcasts the new config", async () => {
+  let body: Record<string, unknown> | null = null;
+  globalThis.fetch = async (input, init) => {
+    assert.equal(String(input), "/api/settings/config");
+    body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return json({ ok: true, config: config({ userProfile: body.userProfile }), restartRequired: false });
+  };
+  const runtime = new RuntimeSpy();
+  const result = await new HttpSettingsRepository(runtime).execute({
+    type: "profile.save",
+    value: { name: "  赛博虎妞  ", avatar: "cat:3" },
+  });
+  assert.deepEqual(body, { userProfile: { name: "赛博虎妞", avatar: "cat:3" } }, "只提交资料字段，不捎带别的配置");
+  assert.deepEqual(result.config.userProfile, { name: "赛博虎妞", avatar: "cat:3" });
+  assert.deepEqual(runtime.configs.at(-1)?.userProfile, { name: "赛博虎妞", avatar: "cat:3" }, "保存成功才广播");
+});
+
+test("an unset profile loads as empty strings so the form never sees undefined", async () => {
+  globalThis.fetch = async (input) => {
+    const path = String(input);
+    if (path === "/api/settings") return json(adminPayload());
+    if (path === "/api/models" || path.startsWith("/api/provider-cli-updates") || path.startsWith("/api/app-connect-code")) {
+      return json({});
+    }
+    throw new Error(`unexpected ${path}`);
+  };
+  const snapshot = await new HttpSettingsRepository(new RuntimeSpy()).load();
+  assert.deepEqual(snapshot.config?.userProfile, { name: "", avatar: "" });
+});
+
+test("a profile payload with unusable values degrades to unset instead of failing the load", async () => {
+  const payload = adminPayload();
+  (payload.config as Record<string, unknown>).userProfile = { name: "名字", avatar: "https://example.com/a.png" };
+  globalThis.fetch = async (input) => {
+    const path = String(input);
+    if (path === "/api/settings") return json(payload);
+    return json({});
+  };
+  const snapshot = await new HttpSettingsRepository(new RuntimeSpy()).load();
+  assert.deepEqual(snapshot.config?.userProfile, { name: "名字", avatar: "" }, "坏头像当没配，不换一张也不报错");
 });

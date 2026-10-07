@@ -1,21 +1,38 @@
 import * as React from "react";
+import { Alert, Avatar, Button, Card, Collapse, Flex, List, Tag, Tooltip, Typography } from "antd";
+import { Bubble, FileCard, Sender, Think } from "@ant-design/x";
 import type { AgentActivityState } from "../../../mission-types";
 import { AI_TEAM_DETAIL_CHAT_TURNS, type AiTeamLiveStep, type AiTeamRun,
   type AiTeamRunDetail, type AiTeamStep, type AiTeam } from "../../../ai-team-types";
 import type { ConversationAuthor, ConversationTurn, TeamReportFile } from "../../../types";
 import { failureMessage } from "../errors";
 import { filePreviewController } from "../file-preview/controller";
+import { MarkdownPreview } from "../file-preview/markdown";
 import { formatFilePreviewSize } from "../file-preview/model";
 import { HttpResponseError, jsonBody, requestJson } from "../http-adapter";
 import { issueAgentEffortLabel, issueAgentProviderLabel } from "../issues/task-board-agent";
 import { wandModelDisplayName, type WandModelCatalog } from "../model-catalog";
-import { WandBrandMark, WandButton, WandDialogSurface, WandIcon } from "../ui";
+import {
+  WandBrandMark,
+  WandButton,
+  WandDialogSurface,
+  WandDropdownMenu,
+  WandDropdownMenuContent,
+  WandDropdownMenuItem,
+  WandDropdownMenuTrigger,
+  WandIcon,
+  WandIconButton,
+} from "../ui";
 import { ComposerAttachmentList } from "../composer-attachments/host";
-import { ComposerPopoverAction } from "../composer-popover/action";
-import { memberCoatIndex, PixelCat, TeamAvatar } from "./avatar";
+import { GeneratedAvatarGlyph, PixelCat, TeamAvatar, avatarFace, generatedAvatarBackground, type GeneratedAvatarFace } from "./avatar";
+import { appendedConversationKeys, CONVERSATION_TAIL_PX, conversationClock, conversationDay, conversationMessageKey, joinsConversationBubble } from "../conversations/presentation";
+import { useReducedMotion } from "../ui/motion-tokens";
 import { teamChatComposer } from "./composer-bridge";
 import { aiTeamsRepository } from "./repository";
+import { currentUserAuthor, selfAuthorFor, useUserProfile } from "../user-profile-repository";
 import { deliveryResultText, deliverySummaryText, TeamDeliveryDetails } from "./team-delivery";
+import { RunningStatusBar } from "../chat/running-status-bar";
+import type { RunningActivityShape } from "../../running-activity";
 
 /**
  * 面板内嵌的群聊视图（§5.3）：只读渲染 `detail.chatTurns`，加一个往 relay 会话发话的输入框。
@@ -77,12 +94,6 @@ export function parseChatAttachments(text: string): { paths: string[]; body: str
 
 export function chatAttachmentIsImage(path: string): boolean {
   return /\.(?:png|jpe?g|gif|webp|bmp|avif)$/i.test(path);
-}
-
-function resizeChatComposerInput(input: HTMLTextAreaElement): void {
-  input.style.height = "auto";
-  input.style.height = `${input.scrollHeight}px`;
-  input.style.overflowY = input.scrollHeight > input.clientHeight + 1 ? "auto" : "hidden";
 }
 
 /** ACK 没有可用消息标识时才用的保守时间窗；两端时钟有偏差也不能无限放宽。 */
@@ -208,26 +219,29 @@ function TeamOffice({ detail, onOpenSession }: {
   const members = teamOfficeMembers(detail);
   const working = members.filter((item) => item.state === "working").length;
   const attention = members.filter((item) => item.state === "attention").length;
-  return <section className="team-chat-office" aria-label="团队工位">
-    <header className="team-chat-office-head">
-      <strong>团队工位</strong>
-      <small>{attention ? `${attention} 人待处理 · ` : ""}{working} 人工作中 · {members.length} 人在组</small>
-    </header>
-    <div className="team-chat-office-members">
+  return <Card className="team-chat-office" size="small" title="团队工位" aria-label="团队工位"
+    extra={<Typography.Text type="secondary">
+      {attention ? `${attention} 人待处理 · ` : ""}{working} 人工作中 · {members.length} 人在组
+    </Typography.Text>}
+  >
+    <Flex gap={8} className="team-chat-office-members" style={{ overflowX: "auto", paddingBottom: 5 }}>
       {members.map(({ member, state, label, task, sessionId }) => {
         const content = <>
           <TeamAvatar member={member} size="sm" state={state === "working" ? "working" : state === "done" ? "done" : state === "failed" ? "failed" : "idle"}/>
-          <span className="team-chat-office-copy"><strong>{member.name}</strong><small title={task}>{task}</small></span>
-          <span className="team-chat-office-state" data-state={state}>{label}</span>
+          <Flex vertical gap={2} className="team-chat-office-copy" style={{ flex: 1, minWidth: 0 }}>
+            <Typography.Text strong>{member.name}</Typography.Text>
+            <Typography.Text type="secondary" title={task} ellipsis>{task}</Typography.Text>
+          </Flex>
+          <Tag className="team-chat-office-state" data-state={state} color={state === "working" ? "processing" : state === "attention" ? "warning" : state === "done" ? "success" : state === "failed" ? "error" : undefined}>{label}</Tag>
         </>;
         return sessionId && onOpenSession
-          ? <button key={member.id} type="button" className="team-chat-office-member" onClick={() => onOpenSession(sessionId)} aria-label={`查看${member.name}的会话：${label}`}>
+          ? <WandButton kind="ghost" key={member.id} type="button" className="team-chat-office-member" style={{ flex: "0 0 210px", height: "auto", minHeight: 52, whiteSpace: "normal", textAlign: "start", gap: 7 }} onClick={() => onOpenSession(sessionId)} aria-label={`查看${member.name}的会话：${label}`}>
             {content}
-          </button>
-          : <div key={member.id} className="team-chat-office-member">{content}</div>;
+          </WandButton>
+          : <Flex key={member.id} align="center" gap={7} className="team-chat-office-member" style={{ flex: "0 0 210px", minHeight: 52, minWidth: 0 }}>{content}</Flex>;
       })}
-    </div>
-  </section>;
+    </Flex>
+  </Card>;
 }
 
 const CHAT_HINTS: Partial<Record<AiTeamRun["status"], string>> = {
@@ -420,8 +434,19 @@ export function needsCollapse(text: string): boolean {
   return text.length > COLLAPSE_AFTER_CHARS || text.split("\n").length > COLLAPSE_AFTER_LINES;
 }
 
-/** 「我」：用户自己的发言没有成员身份，署名固定用这个词（两端同文案）。 */
+/**
+ * 「我」：用户自己的发言没有成员身份，署名默认用这个词（两端同文案）。
+ *
+ * 真值在设置里的「我的资料」；服务端把署名投影成 `author`（只带名字），
+ * 头像由 `selfAuthorFor` 从当前资料补上，旧数据与本地临时行回落到这里。
+ */
 export const CHAT_SELF_NAME = "我";
+
+/** 「我」这条发言的署名与头像：服务端署名 + 当前资料头像，缺一才回落默认。 */
+export function chatSelfAuthor(turn: Pick<ConversationTurn, "role" | "author">): ConversationAuthor {
+  const self = selfAuthorFor(turn);
+  return { id: self.id, name: self.name || CHAT_SELF_NAME, ...(self.avatar ? { avatar: self.avatar } : {}) };
+}
 
 /** 正文为空的发言也要占住气泡/文档卡，不能变成一个空气泡。 */
 export const CHAT_EMPTY_BODY = "（这条消息没有正文）";
@@ -474,23 +499,20 @@ export function collapsedPreview(text: string): string {
   return truncated ? `${kept}…` : kept;
 }
 
-/** 一条发言的头像来源（设计 §5.2）：上传图 > 显式毛色 > 派生毛色 > 默认 APP logo。 */
+/** 一条发言的头像来源（设计 §5.2）：上传图 > 显式毛色 > 按身份生成 > 默认 APP logo。 */
 export type ChatAvatarSpec =
   | { kind: "upload"; src: string }
   | { kind: "cat"; coat: number }
+  | { kind: "generated"; face: GeneratedAvatarFace }
   | { kind: "brand" };
 
 export function chatAvatarSpec(
   author: Pick<ConversationAuthor, "id" | "name" | "avatar"> | null | undefined,
 ): ChatAvatarSpec {
-  const avatar = author?.avatar ?? "";
-  if (avatar.startsWith("data:image/")) return { kind: "upload", src: avatar };
-  // 能定位到成员身份才给猫脸（显式 `cat:<n>` 与派生毛色都由 memberCoatIndex 裁决，
-  // 与团队页/工位是同一张脸）；「我」和没有署名的发言才回落成默认 APP logo。
-  if (author && (author.id || author.name)) {
-    return { kind: "cat", coat: memberCoatIndex({ id: author.id, name: author.name, avatar }) };
-  }
-  return { kind: "brand" };
+  // 能定位到成员身份才给脸（显式 `cat:<n>` 走像素猫，其余按身份生成，与团队页/工位同一张脸）；
+  // 「我」和没有署名的发言才回落成默认 APP logo。
+  return avatarFace({ id: author?.id ?? "", name: author?.name ?? "", avatar: author?.avatar ?? "" })
+    ?? { kind: "brand" };
 }
 
 /**
@@ -572,66 +594,89 @@ function MentionText({ text, names, source }: {
     : <React.Fragment key={`plain#${index}`}>{segment.text}</React.Fragment>))}</>;
 }
 
-function ChatAttachment({ path }: { path: string }): React.ReactElement {
-  const [imageFailed, setImageFailed] = React.useState(false);
-  const name = path.split("/").at(-1)?.replace(/^\d{13}-[0-9a-f]{8}-/, "") || path;
-  const image = chatAttachmentIsImage(path) && !imageFailed;
-  return <button
-    type="button"
-    className="team-chat-attachment"
-    data-image={image || undefined}
-    title={`预览 ${name}`}
-    onClick={() => { void filePreviewController.open(path); }}
-  >{image ? <img
-    src={`/api/file-raw?path=${encodeURIComponent(path)}`}
-    alt={name}
-    loading="lazy"
-    onError={() => setImageFailed(true)}
-  /> : <><WandIcon name="file" size={18}/><span>{name}</span></>}</button>;
+/**
+ * 消息正文的 Markdown 渲染：与会话聊天、文件预览共用同一份解析与转义（React 持有全部 DOM），
+ * 行内 @成员名 仍交回本页 token（对应 Android `MarkdownText(text, inlineDecoration)`）。
+ */
+function ChatMessageBody({ text, names }: { text: string; names: readonly string[] }): React.ReactElement {
+  return <MarkdownPreview
+    content={text}
+    variant="inline"
+    renderText={names.length ? (value: string) => <MentionText text={value} names={names}/> : undefined}
+  />;
 }
 
+/** 附件名与展示用的路径截断只影响文字，不改变任何身份或权限。 */
+export function chatAttachmentName(path: string): string {
+  return path.split("/").at(-1)?.replace(/^\d{13}-[0-9a-f]{8}-/, "") || path;
+}
+
+function chatAttachmentUrl(path: string): string {
+  return `/api/file-raw?path=${encodeURIComponent(path)}`;
+}
+
+/**
+ * 消息附件：通用文件卡片（图片走图片卡，加载失败就地降成文件卡），点击才去读文件，
+ * 不给卡片加自己的预览层。
+ */
 function ChatAttachments({ paths }: { paths: readonly string[] }): React.ReactElement | null {
+  const [brokenImages, setBrokenImages] = React.useState<readonly string[]>([]);
   if (!paths.length) return null;
-  return <div className="team-chat-attachments" aria-label="消息附件">
-    {paths.map((path, index) => <ChatAttachment path={path} key={`${path}#${index}`}/>)}
-  </div>;
+  return <FileCard.List
+    className="team-chat-attachments"
+    overflow="wrap"
+    items={paths.map((path, index) => {
+      const name = chatAttachmentName(path);
+      const image = chatAttachmentIsImage(path) && !brokenImages.includes(path);
+      return {
+        key: `${path}#${index}`,
+        name,
+        type: image ? "image" : "file",
+        src: image ? chatAttachmentUrl(path) : undefined,
+        // 自己的预览层才是打开文件的入口，图片卡不带内建预览。
+        imageProps: image ? {
+          preview: false,
+          onError: () => setBrokenImages((current) => current.includes(path) ? current : [...current, path]),
+          onClick: () => { void filePreviewController.open(path); },
+        } : undefined,
+        onClick: () => { void filePreviewController.open(path); },
+      };
+    })}
+  />;
 }
 
 /** 真正的文件消息，不展示正文或报告预览；只有点击后才读取文件。 */
 function ReportFileCard({ file }: { file: TeamReportFile }): React.ReactElement {
   const title = file.preview?.title || file.name;
   const excerpt = file.preview?.excerpt || (file.preview ? "报告暂无正文" : "点击查看完整报告");
-  return <div className="team-chat-file-card">
-    <button type="button" className="team-chat-file-open" title={`查看完整报告：${title}`}
-      onClick={() => { void filePreviewController.open(file.path); }}>
-      <span className="team-chat-file-copy">
-        <strong>{title}</strong>
-        <span className="team-chat-file-excerpt">{excerpt}</span>
-      </span>
-      <span className="team-chat-file-icon" aria-hidden="true">
-        <WandIcon name="file" size={12}/>
-        <b>{title}</b>
-        <span>{file.preview?.excerpt}</span>
-      </span>
-      <span className="team-chat-file-meta">
-        <span>{file.name}</span><span>Markdown · {formatFilePreviewSize(file.size)}</span>
-      </span>
-    </button>
-  </div>;
+  return <FileCard
+    className="team-chat-file-card"
+    name={title}
+    byte={file.size}
+    icon="markdown"
+    title={`查看完整报告：${title}`}
+    description={<>
+      <span className="team-chat-file-excerpt">{excerpt}</span>
+      <span className="team-chat-file-meta">{file.name} · Markdown · {formatFilePreviewSize(file.size)}</span>
+    </>}
+    onClick={() => { void filePreviewController.open(file.path); }}
+  />;
 }
 
-/** 发言头像：32px 圆角方块，成员是各自的像素猫，没有身份的发言用系统 APP logo。 */
+/** 发言头像：32px 圆角方块，没挑毛色的成员是按身份生成的字形头，没有身份的发言用系统 APP logo。 */
 function MessageAvatar({ spec, size = "md" }: {
   spec: ChatAvatarSpec;
   size?: "md" | "sm";
 }): React.ReactElement {
-  return <span className="team-chat-avatar" data-kind={spec.kind} data-size={size} aria-hidden="true">
-    {spec.kind === "upload"
-      ? <img className="team-chat-avatar-upload" src={spec.src} alt=""/>
-      : spec.kind === "cat"
-        ? <PixelCat coat={spec.coat}/>
-        : <WandBrandMark className="team-chat-avatar-brand"/>}
-  </span>;
+  return <Avatar className="team-chat-avatar" shape="square" size={size === "sm" ? 24 : 32}
+    data-kind={spec.kind} data-size={size} aria-hidden="true"
+    src={spec.kind === "upload" ? spec.src : undefined}
+    style={spec.kind === "brand" ? { background: "transparent" }
+      : spec.kind === "generated" ? generatedAvatarBackground(spec.face) : undefined}
+    icon={spec.kind === "cat" ? <PixelCat coat={spec.coat}/>
+      : spec.kind === "generated" ? <GeneratedAvatarGlyph face={spec.face} size={size === "sm" ? 24 : 32}/>
+      : spec.kind === "brand" ? <WandBrandMark/> : undefined}
+  />;
 }
 
 /**
@@ -661,16 +706,19 @@ interface ChatDocLayer extends ChatDocPayload {
 
 /**
  * 正文块：短发言收进气泡，文档性质内容用全宽文档卡铺开。
+ * 气泡本身由通用气泡组件承担（自己的发言靠 placement 镜像）；
  * 超阈值时**只渲染预览**（不渲染第二份全文，也不靠 `inert` 藏），底部给「点击展开」。
  */
 function MessageBody({
   shape,
+  side,
   text,
   assignments,
   names,
   onExpand,
 }: {
   shape: "bubble" | "document";
+  side: "start" | "end";
   text: string;
   assignments?: ChatAssignment[];
   /** 当前运行的 roster：正文里的 @成员名 靠它识别（设计 v2.2.3）。 */
@@ -681,34 +729,41 @@ function MessageBody({
   const body = parsed.paths.length && parsed.body.trim() === "请查看附件。" ? "" : parsed.body;
   const truncated = needsCollapse(body);
   const list = assignments ?? [];
-  return <div
-    className={shape === "document" ? "team-chat-doc" : "chat-message-bubble team-chat-bubble"}
+  return <Bubble
+    className={shape === "document" ? "team-chat-doc" : "team-chat-bubble"}
     data-shape={shape}
-  >
-    <ChatAttachments paths={parsed.paths}/>
-    {body.trim()
-      ? truncated
-        ? <p className="team-chat-preview"><MentionText text={collapsedPreview(body)} names={names} source={body}/></p>
-        : <pre className={shape === "document" ? "team-chat-doc-text" : "team-chat-bubble-text"}>
-          <MentionText text={body} names={names}/>
-        </pre>
-      : list.length === 0 && parsed.paths.length === 0
-        ? <p className="team-chat-preview team-chat-msg-empty">{CHAT_EMPTY_BODY}</p>
-        : null}
-    {list.length > 0 ? <ol className="team-chat-plan-list">
-      {list.map((item, index) => <li key={`${item.member}#${index}`}>
-        <span className="team-chat-mention">@{item.member}</span>
-        <span className="team-chat-plan-title">{item.title}</span>
-        {item.note ? <small className="team-chat-plan-basis">{item.note}</small> : null}
-      </li>)}
-    </ol> : null}
-    {truncated && onExpand ? <button
+    placement={side}
+    variant={shape === "document" ? "outlined" : "filled"}
+    content={<>
+      <ChatAttachments paths={parsed.paths}/>
+      {body.trim()
+        ? truncated
+          ? <p className="team-chat-preview"><MentionText text={collapsedPreview(body)} names={names} source={body}/></p>
+          : shape === "document"
+            // 长正文（文档卡）走 Markdown：与 Android 的 `document -> MarkdownText` 同口径，
+            // 报告里的清单/代码块不再当作原文铺开；气泡是短发言，仍照原文铺文本。
+            ? <div className="team-chat-doc-text"><ChatMessageBody text={body} names={names}/></div>
+            : <pre className="team-chat-bubble-text"><MentionText text={body} names={names}/></pre>
+        : list.length === 0 && parsed.paths.length === 0
+          ? <p className="team-chat-preview team-chat-msg-empty">{CHAT_EMPTY_BODY}</p>
+          : null}
+      {list.length > 0 ? <List size="small" className="team-chat-plan-list" dataSource={list}
+        renderItem={(item, index) => <List.Item key={`${item.member}#${index}`}>
+          <Flex wrap align="baseline" gap={6}>
+            <span className="team-chat-mention">@{item.member}</span>
+            <Typography.Text className="team-chat-plan-title">{item.title}</Typography.Text>
+            {item.note ? <Typography.Text type="secondary" className="team-chat-plan-basis">{item.note}</Typography.Text> : null}
+          </Flex>
+        </List.Item>}
+      /> : null}
+    </>}
+    footer={truncated && onExpand ? <WandButton kind="ghost"
       type="button"
       className="team-chat-expand"
       aria-haspopup="dialog"
       onClick={onExpand}
-    >{CHAT_EXPAND_LABEL}</button> : null}
-  </div>;
+    >{CHAT_EXPAND_LABEL}</WandButton> : undefined}
+  />;
 }
 
 /** 一条消息：头像是内容列外侧、署名行在上、正文块在下；自己的发言整行镜像靠右。 */
@@ -747,7 +802,7 @@ function TeamMessageRow({
   arriving?: boolean;
   onArrivalEnd?: (event: React.AnimationEvent<HTMLDivElement>) => void;
 }): React.ReactElement {
-  return <div
+  return <Flex align="start" gap={10} style={{ width: "100%" }}
     className="chat-message assistant team-chat-msg"
     data-presentation-id={presentationId}
     data-arriving={arriving || undefined}
@@ -761,69 +816,75 @@ function TeamMessageRow({
     <div className="team-chat-msg-content">
       <div className="team-chat-msg-head">
         {sessionId && onOpenSession
-          ? <button
+          ? <WandButton kind="ghost"
             type="button"
             className="avatar-name chat-author-link"
             title="查看这个成员的会话"
             onClick={() => onOpenSession(sessionId)}
-          >{name}</button>
+          >{name}</WandButton>
           : <span className="avatar-name">{name}</span>}
         {chip}
-        {badge ? <span className="chat-author-badge">{badge}</span> : null}
-        {clock ? <span className="chat-message-time">{clock}</span> : null}
+        {badge ? <Tag className="chat-author-badge">{badge}</Tag> : null}
+        {clock ? <Typography.Text type="secondary" className="chat-message-time">{clock}</Typography.Text> : null}
       </div>
       {children}
       {footer}
     </div>
-  </div>;
+  </Flex>;
 }
 
 /**
  * 主任务公告位专用的长正文：收起给行数截断的预览，展开在原位长高（§7 要求 7，收起是展开的倒放）。
  * 消息正文不走这里：报告可长达数千字，就地展开会把下面的对话整体顶走，改用全文弹层（见 MessageBody）。
+ * `markdownBody` 打开的调用点（会话消息）展开态按 Markdown 渲染，与会话聊天/Android 气泡同口径；
+ * `plainWhenShort` 给“自己的短发言”：原文照铺，不把用户自己写的符号当语法。
  */
 function CollapsibleText({
   text,
   previewClassName,
   bodyClassName,
+  names = EMPTY_MENTION_NAMES,
+  markdownBody = false,
+  plainWhenShort = false,
 }: {
   text: string;
   previewClassName: string;
   bodyClassName: string;
+  names?: readonly string[];
+  markdownBody?: boolean;
+  plainWhenShort?: boolean;
 }): React.ReactElement {
   const long = needsCollapse(text);
   const [open, setOpen] = React.useState(false);
   const expanded = !long || open;
   return <>
-    {long && !expanded ? <p className={previewClassName}>{text}</p> : null}
-    <div className={bodyClassName} data-open={expanded || undefined} inert={!expanded}>
-      <div className={`${bodyClassName}-inner`}>
-        <pre className={`${bodyClassName}-text`}>{text}</pre>
-      </div>
-    </div>
-    {long ? <button
-      type="button"
-      className="team-chat-expand"
-      aria-expanded={expanded}
-      onClick={() => setOpen((current) => !current)}
-    >{expanded ? "收起" : "展开全文"}</button> : null}
+    {long && !expanded ? <Typography.Paragraph className={previewClassName} ellipsis={{ rows: 3 }} style={{ whiteSpace: "pre-wrap", margin: 0 }}>{text}</Typography.Paragraph> : null}
+    <Collapse ghost bordered={false} activeKey={expanded ? ["text"] : []}
+      styles={{ header: { display: "none" }, body: { padding: 0 } }}
+      items={[{ key: "text", label: "主任务全文", showArrow: false, forceRender: true, children:
+        <div className={bodyClassName} data-open={expanded || undefined} inert={!expanded}>
+          {markdownBody && !(plainWhenShort && !long)
+            ? <div className={`${bodyClassName}-text`}><ChatMessageBody text={text} names={names}/></div>
+            : <Typography.Paragraph className={`${bodyClassName}-text`} style={{ margin: 0, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{text}</Typography.Paragraph>}
+        </div> }]}/>
+    {long ? <Button type="link" size="small" className="team-chat-expand" aria-expanded={expanded} onClick={() => setOpen((current) => !current)}>
+      {expanded ? "收起" : "展开全文"}
+    </Button> : null}
   </>;
 }
 
 /** 顶部钉住的「主任务」：群公告位，永远在群聊第一屏。 */
 function MainTaskCard({ detail }: { detail: AiTeamRunDetail }): React.ReactElement {
   const { run } = detail;
-  return <section className="team-chat-goal">
-    <header className="team-chat-goal-head">
-      <span className="team-chat-goal-label">主任务</span>
-      <span className="team-chat-goal-meta">{run.stepsUsed}/{run.stepLimit} 步 · {displayTeamOf(detail).name}</span>
-    </header>
+  return <Card className="team-chat-goal" size="small" title="主任务"
+    extra={<Typography.Text type="secondary">{run.stepsUsed}/{run.stepLimit} 步 · {displayTeamOf(detail).name}</Typography.Text>}
+  >
     <CollapsibleText
       text={run.objective}
       previewClassName="team-chat-goal-preview"
       bodyClassName="team-chat-goal-body"
     />
-  </section>;
+  </Card>;
 }
 
 /** 成员的步骤发言：报告 chip + 头像/名字，正文按形态走气泡或文档卡。 */
@@ -863,7 +924,7 @@ function StepTurn({
     avatar={avatar}
     name={name}
     sessionId={author?.sessionId ?? null}
-    chip={report ? <span className="team-chat-step-chip" data-ok={report.ok || undefined}>{chip}</span> : null}
+    chip={report ? <Tag className="team-chat-step-chip" color={report.ok ? "success" : "error"} data-ok={report.ok || undefined}>{chip}</Tag> : null}
     clock={clock}
     onOpenSession={onOpenSession}
     presentationId={presentationId}
@@ -872,6 +933,7 @@ function StepTurn({
   >
     {turn.reportFile ? <ReportFileCard file={turn.reportFile}/> : <MessageBody
       shape={shape}
+      side="start"
       text={text}
       names={names}
       onExpand={(event) => onExpandDoc(event.currentTarget, {
@@ -929,6 +991,7 @@ function LeaderTurn({
   >
     <MessageBody
       shape={shape}
+      side="start"
       text={head}
       assignments={assignments}
       names={names}
@@ -946,11 +1009,19 @@ function LeaderTurn({
   </TeamMessageRow>;
 }
 
-/** live 卡片「贴尾」阈值（§9 窗口口径）：距底不超过这么多像素才跟着最新一行滚。 */
-export const LIVE_TAIL_PX = 24;
+/** live 卡片「贴尾」阈值（§9 窗口口径）：距底不超过这么多像素才跟着最新一行滚。与 IM 会话恢复同一口径。 */
+export const LIVE_TAIL_PX = CONVERSATION_TAIL_PX;
 
 /** 文本还没来时的占位，卡片不能是个空框。 */
 export const LIVE_EMPTY_TEXT = "已开始，等待第一段输出…";
+
+/** 状态芯片的颜色按状态取库里的语义色，不在样式表里重画一遍。 */
+const LIVE_STATE_TAG: Partial<Record<AgentActivityState, string>> = {
+  working: "processing",
+  needs_input: "warning",
+  needs_permission: "warning",
+  failed: "error",
+};
 
 const LIVE_STATE_LABEL: Partial<Record<AgentActivityState, string>> = {
   working: "工作中",
@@ -986,8 +1057,7 @@ export function isFollowingTail(
   return shouldFollowTail(container.scrollTop, container.scrollHeight, container.clientHeight, threshold);
 }
 
-/** 按 seq 升序、按 stepId 去重：重推或乱序都不会让同一行出现两次。 */
-export function orderLiveSteps(steps: AiTeamLiveStep[]): AiTeamLiveStep[] {
+/** 按 seq 升序、按 stepId 去重：重推或乱序都不会让同一行出现两次。 */export function orderLiveSteps(steps: AiTeamLiveStep[]): AiTeamLiveStep[] {
   const seen = new Set<string>();
   const unique: AiTeamLiveStep[] = [];
   for (const step of steps) {
@@ -1118,54 +1188,71 @@ function LiveStepRow({
       if (row.leaving && event.target === event.currentTarget) onRetire(step.stepId);
     }}
   >
-    <div className="team-chat-live-head">
-      {/* 署名行不再放头像：紧贴其上的开工发言已经给过同一张脸（设计 v2.2.4）；
-          也不单独挂链接——整卡已可点进该成员会话，不再嵌套点击。 */}
-      <span className="team-chat-live-name" title={memberName}>{memberName}</span>
-      <span className="team-chat-live-chip">#{step.seq}{title ? ` ${title}` : ""}</span>
-      {label ? <span className="team-chat-live-state" data-state={step.state}>{label}</span> : null}
-      {clock ? <span className="chat-message-time">{clock}</span> : null}
-    </div>
-    <button
-      type="button"
-      className="team-chat-live-summary"
-      aria-expanded={expanded}
-      onClick={() => setExpanded((current) => !current)}
+    {/*
+      展开 / 收起交给通用过程块：收起是展开的倒放，减动效由 provider 统一关掉。
+      `destroyOnHidden={false}` 是必须的——内部滚动窗口是这一行的 owner，
+      每次收起重挂载都会把「贴尾」状态和已滚到的位置丢掉。
+    */}
+    <Think
+      className="team-chat-live-think"
+      expanded={expanded}
+      onExpand={setExpanded}
+      destroyOnHidden={false}
+      title={<>
+        <span className="team-chat-live-head">
+          {/* 署名行不再放头像：紧贴其上的开工发言已经给过同一张脸（设计 v2.2.4）；
+              也不单独挂链接——整卡已可点进该成员会话，不再嵌套点击。 */}
+          <span className="team-chat-live-name" title={memberName}>{memberName}</span>
+          <span className="team-chat-live-chip">#{step.seq}{title ? ` ${title}` : ""}</span>
+          {label ? <Tag className="team-chat-live-state" data-state={step.state} color={LIVE_STATE_TAG[step.state]}>{label}</Tag> : null}
+          {clock ? <span className="chat-message-time">{clock}</span> : null}
+        </span>
+        {/* 过程块的表头整体可点，但键盘与读屏要有一个真正的按钮：它是唯一会改展开态的控件。 */}
+        <WandButton kind="ghost"
+          type="button"
+          className="team-chat-live-summary" style={{ width: "100%", height: "auto", minHeight: 32, textAlign: "start" }}
+          aria-expanded={expanded}
+          onClick={(event) => {
+            event.stopPropagation();
+            setExpanded((current) => !current);
+          }}
+        >
+          <Typography.Text ellipsis className="team-chat-live-summary-text" style={{ flex: 1, minWidth: 0 }}>{lastLine}</Typography.Text>
+          <Typography.Text type="secondary">{expanded ? "收起输出" : "展开输出"}</Typography.Text>
+        </WandButton>
+      </>}
     >
-      <span>{lastLine}</span>
-      <small>{expanded ? "收起输出" : "展开输出"}</small>
-    </button>
-    <div className="team-chat-live-body" data-open={expanded || undefined} inert={!expanded}>
       <div className="team-chat-live-body-inner">
-      <div
-      className="team-chat-live-card"
-      role="button"
-      tabIndex={0}
-      title="查看这个成员的会话"
-      aria-label={`打开${memberName}正在输出的会话`}
-      onPointerDown={(event) => { pressRef.current = { x: event.clientX, y: event.clientY }; }}
-      onClick={(event) => {
-        const press = pressRef.current;
-        if (press && Math.hypot(event.clientX - press.x, event.clientY - press.y) > LIVE_CARD_DRAG_PX) return;
-        open();
-      }}
-      onKeyDown={(event) => {
-        if (event.key !== "Enter" && event.key !== " ") return;
-        event.preventDefault();
-        open();
-      }}
-    >
-      {omitted ? <p className="team-chat-live-omitted">{omitted}</p> : null}
-      <pre
-        className="team-chat-live-text"
-        ref={bodyRef}
-        onScroll={(event) => {
-          pinnedRef.current = isFollowingTail(event.currentTarget);
-        }}
-      >{step.text || LIVE_EMPTY_TEXT}</pre>
+        <Tooltip title="查看这个成员的会话"><Card size="small" hoverable
+          className="team-chat-live-card"
+          style={{ width: "100%", maxWidth: 560, height: 200, overflow: "hidden" }}
+          styles={{ body: { height: "100%", display: "flex", flexDirection: "column", minHeight: 0 } }}
+          role="button"
+          tabIndex={0}
+          aria-label={`打开${memberName}正在输出的会话`}
+          onPointerDown={(event) => { pressRef.current = { x: event.clientX, y: event.clientY }; }}
+          onClick={(event) => {
+            const press = pressRef.current;
+            if (press && Math.hypot(event.clientX - press.x, event.clientY - press.y) > LIVE_CARD_DRAG_PX) return;
+            open();
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            open();
+          }}
+        >
+          {omitted ? <Typography.Text type="secondary" className="team-chat-live-omitted">{omitted}</Typography.Text> : null}
+          <pre
+            className="team-chat-live-text"
+            ref={bodyRef}
+            onScroll={(event) => {
+              pinnedRef.current = isFollowingTail(event.currentTarget);
+            }}
+          >{step.text || LIVE_EMPTY_TEXT}</pre>
+        </Card></Tooltip>
       </div>
-      </div>
-    </div>
+    </Think>
   </div>;
 }
 
@@ -1365,15 +1452,15 @@ function ChatDocContents({ layer, onExited }: {
     <div className="team-chat-doc-layer-meta">
       <MessageAvatar spec={layer.avatar} size="sm"/>
       <span className="team-chat-doc-layer-name">{layer.name}</span>
-      {layer.chip ? <span className="team-chat-step-chip">{layer.chip}</span> : null}
+      {layer.chip ? <Tag className="team-chat-step-chip">{layer.chip}</Tag> : null}
       {layer.clock ? <span className="chat-message-time">{layer.clock}</span> : null}
     </div>
     <ChatAttachments paths={parsed.paths}/>
-    <pre className="team-chat-doc-layer-text" tabIndex={0} data-wand-autofocus>
+    <div className="team-chat-doc-layer-text" tabIndex={0} data-wand-autofocus>
       {parsed.body.trim()
-        ? <MentionText text={parsed.body} names={layer.mentionNames}/>
+        ? <ChatMessageBody text={parsed.body} names={layer.mentionNames}/>
         : CHAT_EMPTY_BODY}
-    </pre>
+    </div>
   </div>;
 }
 
@@ -1390,6 +1477,120 @@ export function chatDocOwnerPresent(
     : projection.rows.some((row) => row.presentationId === ownerId);
 }
 
+export interface ConversationMessagesProps {
+  turns: ConversationTurn[];
+  taskLabels: Record<string, string>;
+  group?: boolean;
+  ready?: boolean;
+  active?: boolean;
+  restoreScroll?: number;
+  /** Native execution projection supplied by the owning IM page, outside this lazy chunk. */
+  renderActivity?(turn: ConversationTurn, index: number): React.ReactNode;
+  renderTaskPreview?(turn: ConversationTurn): React.ReactNode;
+  renderSessionPreview?(turn: ConversationTurn, index: number): React.ReactNode;
+  employeeIds?: Record<string, string>;
+  /** 当前群成员名：正文里的 @成员名 靠它识别（与团队页同一套 token；私聊为空名单）。 */
+  mentionNames?: readonly string[];
+  onOpenEmployee?(identity: { id: string; name: string; avatar?: string }, trigger: HTMLButtonElement): void;
+  onOpenConversation(id: string): void;
+  onOpenSession?(id: string): void;
+}
+
+/** IM presentation shares file cards and text expansion; composer/receipt ownership stays unchanged. */
+export function ConversationMessages({ turns, taskLabels, group = true, ready = true, active = true, restoreScroll,
+  employeeIds = {}, mentionNames = EMPTY_MENTION_NAMES, onOpenEmployee, onOpenConversation, onOpenSession, renderActivity, renderTaskPreview, renderSessionPreview }: ConversationMessagesProps): React.ReactElement {
+  const list = React.useRef<HTMLDivElement>(null);
+  const previous = React.useRef<string[] | null>(null);
+  const following = React.useRef(true);
+  const [arrivals, setArrivals] = React.useState<ReadonlySet<string>>(new Set());
+  const [unseen, setUnseen] = React.useState(0);
+  const reduced = useReducedMotion();
+  const keys = turns.map(conversationMessageKey);
+  React.useLayoutEffect(() => {
+    const scroll = list.current?.closest<HTMLElement>(".conversation-message-scroll");
+    if (!scroll || !active || list.current?.closest(".sidebar-projection-old")) return;
+    const track = (): void => { following.current = isFollowingTail(scroll); if (following.current) setUnseen(0); };
+    scroll.addEventListener("scroll", track, { passive: true });
+    return () => scroll.removeEventListener("scroll", track);
+  }, [active]);
+  React.useLayoutEffect(() => {
+    if (!ready || list.current?.closest(".sidebar-projection-old")) return;
+    const scroll = list.current?.closest<HTMLElement>(".conversation-message-scroll");
+    const initial = previous.current === null;
+    const added = appendedConversationKeys(previous.current, keys);
+    previous.current = keys;
+    if (!scroll || !active || document.hidden) { setArrivals(new Set()); return; }
+    if (reduced) setArrivals(current => current.size ? new Set() : current);
+    const own = turns.some((turn, index) => turn.role === "user" && added.includes(keys[index]!));
+    if (initial) {
+      scroll.scrollTop = restoreScroll ?? scroll.scrollHeight;
+      following.current = isFollowingTail(scroll);
+    } else if (added.length) {
+      if (following.current || own) {
+        scroll.scrollTop = scroll.scrollHeight;
+        following.current = true;
+        setUnseen(0);
+        if (!reduced) setArrivals(new Set(added));
+      } else setUnseen(count => count + added.length);
+    }
+  }, [turns, ready, active, reduced]);
+  return <div ref={list} className="task-board-team-chat team-chat-stream conversation-stream" role="log" aria-label="对话消息" aria-relevant="additions">
+    {turns.map((turn, index) => {
+      const key = keys[index]!;
+      const text = chatTurnText(turn);
+      const target = turn.conversationTarget;
+      const self = turn.role === "user";
+      const joined = joinsConversationBubble(turns[index - 1], turn);
+      // 一次连续发言（同一个人、五分钟内）只有首条带身份：头像与名字都在首条上，
+      // 后续各条只留头像占位，气泡仍对齐在同一列。
+      const lead = !joined;
+      const tail = !joinsConversationBubble(turn, turns[index + 1]);
+      const day = conversationDay(turn.createdAt);
+      const parsed = parseChatAttachments(text);
+      const signature = turn.author ? agentSignatureLabel(turn.author) : "";
+      const name = turn.author?.name ?? "员工";
+      return <React.Fragment key={key}>
+        {day && day !== conversationDay(turns[index - 1]?.createdAt) ? <div className="conversation-day"><span>{day}</span></div> : null}
+        {turn.sessionLink && renderSessionPreview ? renderSessionPreview(turn, index) : turn.conversationLink && renderTaskPreview ? renderTaskPreview(turn) : turn.notice ? <Flex vertical align="center" className="team-chat-notice">
+          <Typography.Text type="secondary">{text}</Typography.Text>
+          {turn.conversationLink ? <WandButton onClick={() => onOpenConversation(turn.conversationLink!.conversationId)}>打开任务群 · {turn.conversationLink.title}</WandButton> : null}
+        </Flex> : <div className="chat-message assistant team-chat-msg conversation-message"
+          data-side={self ? "end" : "start"} data-shape="bubble" data-group={group} data-joined={joined} data-lead={lead} data-tail={tail}
+          data-presentation-id={key} data-im-arriving={arrivals.has(key) || undefined}
+          onAnimationEnd={event => { if (event.target === event.currentTarget) setArrivals(current => { const next = new Set(current); next.delete(key); return next; }); }}>
+          {group && !self ? <span className="conversation-peer-avatar" data-visible={lead}>{lead && turn.author && employeeIds[turn.author.id] && onOpenEmployee
+            ? <WandButton kind="ghost" className="conversation-avatar-button" aria-label={`查看${name}的资料`} onClick={event => onOpenEmployee({ id: employeeIds[turn.author!.id], name, avatar: turn.author?.avatar }, event.currentTarget)}><MessageAvatar spec={chatAvatarSpec(turn.author)}/></WandButton>
+            : <MessageAvatar spec={chatAvatarSpec(turn.author)}/>}</span> : null}
+          <div className="team-chat-msg-content">
+            {group && !self && lead ? <div className="conversation-message-author" title={signature || undefined}>
+              {turn.author?.sessionId && onOpenSession ? <WandButton kind="ghost" className="chat-author-link" title={`${name} · 查看本轮执行窗口${signature ? ` · ${signature}` : ""}`}
+                onClick={() => onOpenSession(turn.author!.sessionId!)}>{name}</WandButton> : <span>{name}</span>}
+            </div> : null}
+            <Bubble placement={self ? "end" : "start"} content={<>
+              {!group && !self && turn.author?.sessionId && onOpenSession ? <WandButton kind="ghost" className="conversation-execution" title={signature || undefined}
+                onClick={() => onOpenSession(turn.author!.sessionId!)}>查看本轮执行窗口</WandButton> : null}
+              {target ? <Tag>{taskLabels[target.taskId] ?? target.taskId}</Tag> : null}
+              {renderActivity?.(turn, index)}
+              {turn.reportFile ? <ReportFileCard file={turn.reportFile}/> : <><ChatAttachments paths={parsed.paths}/>
+                {parsed.body.trim() ? <CollapsibleText text={parsed.body} previewClassName="team-chat-preview" bodyClassName="team-chat-body-text"
+                  names={mentionNames} markdownBody plainWhenShort={self}/> : null}</>}
+              <div className="conversation-message-meta">
+                {conversationClock(turn.completedAt ?? turn.createdAt) ? <time dateTime={turn.completedAt ?? turn.createdAt} title={turn.completedAt ?? turn.createdAt}>{conversationClock(turn.completedAt ?? turn.createdAt)}</time> : null}
+                {self ? <span className="conversation-message-accepted" role="img" aria-label="已发送到服务端" title="已发送到服务端">✓</span> : null}
+              </div>
+            </>}/>
+          </div>
+        </div>}
+      </React.Fragment>;
+    })}
+    {unseen > 0 ? <div className="conversation-new-messages"><WandButton onClick={() => {
+      const scroll = list.current?.closest<HTMLElement>(".conversation-message-scroll");
+      if (scroll) scroll.scrollTop = scroll.scrollHeight;
+      following.current = true; setUnseen(0);
+    }}>↓ {unseen} 条新消息</WandButton></div> : null}
+  </div>;
+}
+
 export interface TeamChatViewProps {
   detail: AiTeamRunDetail;
   onChange(detail: AiTeamRunDetail): void;
@@ -1401,6 +1602,8 @@ export interface TeamChatViewProps {
 
 export function TeamChatView({ detail, onChange, onOpenSession, details, staleRun = false }: TeamChatViewProps): React.ReactElement {
   const { run, chatTurns, steps } = detail;
+  // 拉一次当前资料，让本地临时行与已落库回合用同一个署名。
+  useUserProfile();
   const [local, setLocal] = React.useState<LocalChatTurn[]>([]);
   const [error, setError] = React.useState("");
   const [pending, setPending] = React.useState<"" | "send" | "stop">("");
@@ -1410,14 +1613,11 @@ export function TeamChatView({ detail, onChange, onOpenSession, details, staleRu
   const composerHostRef = React.useRef<HTMLDivElement>(null);
   const imageInputRef = React.useRef<HTMLInputElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
-  const inputRef = React.useRef<HTMLTextAreaElement>(null);
+  const senderRef = React.useRef<React.ComponentRef<typeof Sender>>(null);
   const attachmentButtonRef = React.useRef<HTMLButtonElement>(null);
-  const attachmentMenuRef = React.useRef<HTMLDivElement>(null);
-  const composingRef = React.useRef(false);
-  const compositionEpochRef = React.useRef(0);
   const [liveRows, setLiveRows] = React.useState<LiveRow[]>([]);
   const [detailsOpen, setDetailsOpen] = React.useState(false);
-  const contextTriggerRef = React.useRef<HTMLButtonElement>(null);
+  const contextTriggerRef = React.useRef<HTMLDivElement>(null);
   const [docLayer, setDocLayer] = React.useState<ChatDocLayer | null>(null);
   const [arrival, setArrival] = React.useState<{ scope: string; ids: ReadonlySet<string> }>(
     { scope: "", ids: new Set() },
@@ -1446,7 +1646,6 @@ export function TeamChatView({ detail, onChange, onOpenSession, details, staleRu
   // 只提交成功渲染的账本；并发/StrictMode 放弃的 render 不消耗候选入场资格。
   React.useLayoutEffect(() => { ledgerRef.current = projection; }, [projection]);
   const detailsId = React.useId();
-  const attachmentMenuId = React.useId();
   const listRef = React.useRef<HTMLDivElement>(null);
   const triggerRef = React.useRef<HTMLElement | null>(null);
   const ownerSnapshotRef = React.useRef({ projection, local });
@@ -1482,73 +1681,6 @@ export function TeamChatView({ detail, onChange, onOpenSession, details, staleRu
     : pending === "stop" ? "停止中…" : primaryStops ? "停止团队" : "发送消息";
   const composerStatus = error ? "操作失败" : (pending === "send" ? sendStage === "upload" ? "上传中…" : "发送中…"
     : pending === "stop" ? "停止中…" : "Enter 发送 · Shift+Enter 换行");
-
-  React.useLayoutEffect(() => {
-    const input = inputRef.current;
-    if (!input) return;
-    resizeChatComposerInput(input);
-  }, [draft, chatSessionId]);
-
-  React.useLayoutEffect(() => {
-    const input = inputRef.current;
-    const wrap = input?.parentElement;
-    if (!input || !wrap) return;
-    let lastWidth = -1;
-    const observer = new ResizeObserver(([entry]) => {
-      const width = entry?.contentRect.width ?? wrap.getBoundingClientRect().width;
-      if (width <= 0 || Math.abs(width - lastWidth) < 0.5) return;
-      lastWidth = width;
-      resizeChatComposerInput(input);
-    });
-    observer.observe(wrap);
-    return () => observer.disconnect();
-  }, [chatSessionId]);
-
-  React.useEffect(() => {
-    if (!attachmentMenuOpen) return;
-    const onPointerDown = (event: PointerEvent): void => {
-      const target = event.target as Node | null;
-      if (target && (attachmentButtonRef.current?.contains(target)
-        || attachmentMenuRef.current?.contains(target))) return;
-      setAttachmentMenuOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopPropagation();
-      setAttachmentMenuOpen(false);
-      attachmentButtonRef.current?.focus();
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [attachmentMenuOpen]);
-
-  React.useLayoutEffect(() => {
-    if (!attachmentMenuOpen) return;
-    const host = composerHostRef.current;
-    const trigger = attachmentButtonRef.current;
-    const menu = attachmentMenuRef.current;
-    if (!host || !trigger || !menu) return;
-    const align = (): void => {
-      const hostRect = host.getBoundingClientRect();
-      const triggerRect = trigger.getBoundingClientRect();
-      menu.style.left = `${Math.max(0, triggerRect.left - hostRect.left)}px`;
-      menu.style.bottom = `${Math.max(0, hostRect.bottom - triggerRect.top + 8)}px`;
-    };
-    align();
-    const observer = new ResizeObserver(align);
-    observer.observe(host);
-    observer.observe(trigger);
-    window.addEventListener("resize", align);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", align);
-    };
-  }, [attachmentMenuOpen, attachments.length, chatSessionId, hint]);
 
   React.useEffect(() => { setAttachmentMenuOpen(false); }, [chatSessionId]);
 
@@ -1686,6 +1818,24 @@ export function TeamChatView({ detail, onChange, onOpenSession, details, staleRu
       unsubscribe();
     };
   }, [run.id, running]);
+
+  /**
+   * 群聊持续可见的运行状态：时刻全部取服务端事实（run 锚点优先，退回 live 步骤
+   * 与 running 步骤的 startedAt）。一个都拿不到时只显示阶段，不本地起表伪造时长。
+   */
+  const runActivity = React.useMemo<RunningActivityShape>(() => {
+    const serverRun = run as typeof run & { turnStartedAt?: string | null; lastActivityAt?: string | null };
+    const liveActivity = liveRows.reduce<string | null>((latest, row) => (
+      row.step.updatedAt && (!latest || Date.parse(row.step.updatedAt) > Date.parse(latest))
+        ? row.step.updatedAt : latest
+    ), null);
+    const runningStep = detail?.steps.find((step) => step.status === "running");
+    return {
+      status: running ? "running" : "idle",
+      turnStartedAt: serverRun.turnStartedAt ?? runningStep?.startedAt ?? null,
+      lastActivityAt: serverRun.lastActivityAt ?? liveActivity ?? null,
+    };
+  }, [run, running, liveRows, detail?.steps]);
 
   /**
    * 退场兜底：标签页在后台时 CSS 动画不播、`animationend` 永远不来，退场行会一直攒着。
@@ -1880,29 +2030,45 @@ export function TeamChatView({ detail, onChange, onOpenSession, details, staleRu
       contextTriggerRef.current?.focus({ preventScroll: true });
     }
   }}>
-    <button
+    <Card
+      size="small"
+      hoverable
       ref={contextTriggerRef}
-      type="button"
       className="team-chat-context"
+      style={{ minWidth: 0, cursor: "pointer" }}
+      role="button"
+      tabIndex={0}
       aria-expanded={detailsOpen}
       aria-controls={detailsId}
       onClick={() => setDetailsOpen((current) => !current)}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        setDetailsOpen((current) => !current);
+      }}
     >
-      <span className="team-chat-context-label">{delivery ? "交付" : "群公告"}</span>
-      <span className="team-chat-context-title" title={delivery ? deliverySummaryText(delivery) : run.objective}>
-        {delivery ? deliveryResultText(delivery) : run.objective.split("\n")[0] || "查看本次任务"}
-      </span>
-      {delivery ? <small className="team-chat-context-action">{delivery.totalFiles} 文件 · {delivery.totalHandoffs} 接力</small> : null}
-      <span className="team-chat-context-action">{detailsOpen ? "收起" : "详情"}</span>
-    </button>
-    <div id={detailsId} className="team-chat-details" data-open={detailsOpen || undefined} inert={!detailsOpen}>
-      <div className="team-chat-details-inner">
+      <Flex align="center" gap={8} style={{ minWidth: 0 }}>
+      <Typography.Text strong className="team-chat-context-label">{delivery ? "交付" : "群公告"}</Typography.Text>
+      <Tooltip title={delivery ? deliverySummaryText(delivery) : run.objective}>
+        <Typography.Text className="team-chat-context-title" style={{ flex: 1, minWidth: 0 }} ellipsis>
+          {delivery ? deliveryResultText(delivery) : run.objective.split("\n")[0] || "查看本次任务"}
+        </Typography.Text>
+      </Tooltip>
+      {delivery ? <Typography.Text type="secondary" className="team-chat-context-action" style={{ flexShrink: 0 }}>{delivery.totalFiles} 文件 · {delivery.totalHandoffs} 接力</Typography.Text> : null}
+      <Typography.Text type="secondary" className="team-chat-context-action" style={{ flexShrink: 0 }}>{detailsOpen ? "收起" : "详情"}</Typography.Text>
+      </Flex>
+    </Card>
+    <Collapse ghost bordered={false} activeKey={detailsOpen ? ["details"] : []}
+      styles={{ header: { display: "none" }, body: { padding: 0 } }}
+      items={[{ key: "details", label: "群公告详情", showArrow: false, forceRender: true, children:
+        <div id={detailsId} className="team-chat-details" data-open={detailsOpen || undefined} inert={!detailsOpen}>
+          <Flex vertical gap={12} className="team-chat-details-inner">
         {delivery ? <TeamDeliveryDetails delivery={delivery}/> : null}
         <MainTaskCard detail={detail}/>
         <TeamOffice detail={detail} onOpenSession={onOpenSession}/>
         {details}
-      </div>
-    </div>
+          </Flex>
+        </div> }]}/>
     <div
       className="task-board-team-chat-list"
       ref={listRef}
@@ -1922,8 +2088,6 @@ export function TeamChatView({ detail, onChange, onOpenSession, details, staleRu
         };
       }}
     >
-      {chatTurns.length + local.length + liveRows.length === 0
-        ? <p className="task-board-team-run-detail">群聊还没有消息。</p> : null}
       {projection.rows.map(({ turn: storedTurn, presentationId: key }, index) => {
         const turn = displayChatTurn(storedTurn, displayTeam);
         const kind = chatTurnKind(turn);
@@ -1941,37 +2105,41 @@ export function TeamChatView({ detail, onChange, onOpenSession, details, staleRu
           }
         };
         if (kind === "notice") {
-          return withTimeMarker(<div className="chat-message chat-notice" data-presentation-id={key}
+          return withTimeMarker(<Flex justify="center" className="chat-message chat-notice" data-presentation-id={key}
             data-arriving={arriving || undefined} onAnimationEnd={onArrivalEnd}>
-            <div className="chat-notice-line"
+            <Typography.Text type="secondary" className="chat-notice-line" style={{ textAlign: "center" }}
               title={[turn.author?.name, chatTurnText(turn)].filter(Boolean).join(" ")}>
               {turn.author?.name ? <span className="chat-notice-author">{turn.author.name}</span> : null}
               <span className="chat-notice-text"><MentionText text={chatTurnText(turn)} names={rosterNames}/></span>
-            </div>
-          </div>);
+            </Typography.Text>
+          </Flex>);
         }
         if (kind === "user") {
           const text = chatTurnText(turn);
           const clock = chatTurnClock(turn);
           const shape = teamChatMessageShape("user", text, 0);
+          // 自己的发言也带头像和名字，取服务端投影的用户资料。
+          const self = chatSelfAuthor(turn);
+          const selfAvatar = chatAvatarSpec(self);
           return withTimeMarker(<TeamMessageRow
             presentationId={key}
             kind="user"
             side="end"
             shape={shape}
-            avatar={{ kind: "brand" }}
-            name={CHAT_SELF_NAME}
+            avatar={selfAvatar}
+            name={self.name}
             clock={clock}
             arriving={arriving}
             onArrivalEnd={onArrivalEnd}
           >
             <MessageBody
               shape={shape}
+              side="end"
               text={text}
               names={EMPTY_MENTION_NAMES}
               onExpand={(event) => openDoc(event.currentTarget, key, {
-                text, name: CHAT_SELF_NAME, clock, typeLabel: "我的消息",
-                avatar: { kind: "brand" }, side: "end", mentionNames: EMPTY_MENTION_NAMES,
+                text, name: self.name, clock, typeLabel: "我的消息",
+                avatar: selfAvatar, side: "end", mentionNames: EMPTY_MENTION_NAMES,
               })}
             />
           </TeamMessageRow>);
@@ -2014,23 +2182,26 @@ export function TeamChatView({ detail, onChange, onOpenSession, details, staleRu
       />)}
       {local.map((row) => {
         const shape = teamChatMessageShape("user", row.text, 0);
+        // 临时行还没有服务端回合，用当前资料署名，避免落库前后闪一次默认名字。
+        const selfAvatar = chatAvatarSpec(currentUserAuthor());
         return <TeamMessageRow
           key={`local#${row.sentAt}`}
           kind="user"
           side="end"
           shape={shape}
-          avatar={{ kind: "brand" }}
-          name={CHAT_SELF_NAME}
+          avatar={selfAvatar}
+          name={currentUserAuthor().name}
           footer={row.unconfirmed ? <small className="wand-team-chat-unconfirmed">未确认</small> : null}
         >
           <MessageBody
             shape={shape}
+            side="end"
             text={row.text}
             names={EMPTY_MENTION_NAMES}
             // 临时行保持原发送身份与未确认规则；呈现句柄用独立命名空间。
             onExpand={(event) => openDoc(event.currentTarget, `local#${row.sentAt}`, {
-              text: row.text, name: CHAT_SELF_NAME, clock: "", typeLabel: "我的消息",
-              avatar: { kind: "brand" }, side: "end", mentionNames: EMPTY_MENTION_NAMES,
+              text: row.text, name: currentUserAuthor().name, clock: "", typeLabel: "我的消息",
+              avatar: selfAvatar, side: "end", mentionNames: EMPTY_MENTION_NAMES,
             })}
           />
         </TeamMessageRow>;
@@ -2055,9 +2226,10 @@ export function TeamChatView({ detail, onChange, onOpenSession, details, staleRu
         addFiles(event.dataTransfer.files);
       }}
     >
-      {hint ? <p className="task-board-team-chat-hint">{hint}</p> : null}
-      <div className="input-composer-row">
-        <div className={`input-composer${draft.trim() ? " has-text" : ""}${pending === "send" ? " in-flight" : ""}${draggingFiles ? " drag-over" : ""}`}
+      {hint ? <Typography.Text type="secondary" className="task-board-team-chat-hint">{hint}</Typography.Text> : null}
+      <RunningStatusBar activity={runActivity} runMode />
+      <Flex vertical gap={8} className="input-composer-row">
+        <Flex vertical gap={8} className={`input-composer${draft.trim() ? " has-text" : ""}${pending === "send" ? " in-flight" : ""}${draggingFiles ? " drag-over" : ""}`}
           role="group" aria-label="消息编辑器">
           {attachments.length ? <ComposerAttachmentList
             items={attachments.map((item, index) => ({
@@ -2068,104 +2240,112 @@ export function TeamChatView({ detail, onChange, onOpenSession, details, staleRu
             }))}
             onRemove={(index) => teamChatComposer.edit(chatSessionId, { removeAttachment: index })}
           /> : null}
-          <div className="composer-main-row team-chat-compose-main">
-            <div className="composer-input-wrap">
-              <textarea
-                ref={inputRef}
-                className="input-textarea"
-                rows={1}
-                value={draft}
-                placeholder={CHAT_INPUT_PLACEHOLDER}
-                aria-label="群聊消息"
-                onChange={(event) => teamChatComposer.edit(chatSessionId, { text: event.currentTarget.value })}
-                onCompositionStart={() => { compositionEpochRef.current++; composingRef.current = true; }}
-                onCompositionEnd={() => {
-                  const epoch = compositionEpochRef.current;
-                  window.setTimeout(() => {
-                    if (epoch === compositionEpochRef.current) composingRef.current = false;
-                  }, 0);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key !== "Enter" || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey
-                    || event.nativeEvent.isComposing || event.keyCode === 229 || composingRef.current) return;
-                  event.preventDefault();
-                  void send();
-                }}
-                onPaste={(event) => {
-                  if (!event.clipboardData.files.length) return;
-                  event.preventDefault();
-                  addFiles(event.clipboardData.files);
-                }}
-              />
-            </div>
-            <div className="composer-actions-left" role="group" aria-label="添加内容">
-              <button ref={attachmentButtonRef} type="button"
-                className="btn-circle btn-circle-action composer-attach-trigger"
-                title="更多" aria-label="更多操作" aria-haspopup="dialog"
-                aria-controls={attachmentMenuId} aria-expanded={attachmentMenuOpen}
-                onClick={() => setAttachmentMenuOpen((open) => !open)}>
-                <WandIcon name="plus" size={18} strokeWidth={2.2}/>
-              </button>
+          <Flex vertical className="team-chat-compose-main" style={{ width: "100%", minWidth: 0 }}>
+            {/*
+              输入框用通用发送器：值仍来自团队 composer bridge（它才是草稿 owner），
+              自动换行由 autoSize 负责，本页不再手工量高度。
+            */}
+            <Sender
+              ref={senderRef}
+              className="team-chat-sender"
+              value={draft}
+              placeholder={CHAT_INPUT_PLACEHOLDER}
+              autoSize={{ minRows: 1, maxRows: 8 }}
+              submitType="enter"
+              loading={pending === "send"}
+              onCancel={() => void stop()}
+              suffix={false}
+              onChange={(value) => teamChatComposer.edit(chatSessionId, { text: value })}
+              onSubmit={() => void send()}
+              onKeyDown={(event) => {
+                // 中文输入法回车是确认候选词，不是发送。
+                const native = event.nativeEvent as KeyboardEvent;
+                if (native.isComposing || event.keyCode === 229) return false;
+                if (event.key !== "Enter" || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) {
+                  return undefined;
+                }
+                // Enter 发送沿用本页自己的判断（发送器自带的提交按钮已经关掉）；
+                // 返回 false 表示这一下已经处理，不再走发送器内部的提交。
+                event.preventDefault();
+                void send();
+                return false;
+              }}
+              onPaste={(event) => {
+                if (!event.clipboardData.files.length) return;
+                event.preventDefault();
+                addFiles(event.clipboardData.files);
+              }}
+              footer={<Flex align="center" justify="space-between" gap={8}>
+            <Flex align="center" gap={8} style={{ minWidth: 0, flex: 1 }} className="composer-actions-left" role="group" aria-label="添加内容">
+              <WandDropdownMenu open={attachmentMenuOpen} onOpenChange={setAttachmentMenuOpen}>
+                <WandDropdownMenuTrigger render={<WandIconButton
+                  ref={attachmentButtonRef}
+                  className="composer-attach-trigger"
+                  title="更多"
+                  aria-label="更多操作"
+                  aria-expanded={attachmentMenuOpen}
+                >
+                  <WandIcon name="plus" size={18} strokeWidth={2.2}/>
+                </WandIconButton>}/>
+                <WandDropdownMenuContent className="team-chat-attach-menu" popupOwner="team-chat-attach">
+                  <WandDropdownMenuItem id="team-chat-attach-image" icon="image" onClick={() => {
+                    imageInputRef.current?.click();
+                  }}>上传图片</WandDropdownMenuItem>
+                  <WandDropdownMenuItem id="team-chat-attach-file" icon="paperclip" onClick={() => {
+                    fileInputRef.current?.click();
+                  }}>上传附件</WandDropdownMenuItem>
+                </WandDropdownMenuContent>
+              </WandDropdownMenu>
               <input ref={imageInputRef} type="file" accept="image/*" multiple hidden tabIndex={-1}
                 aria-label="选择图片" onChange={(event) => {
                   if (event.currentTarget.files) addFiles(event.currentTarget.files);
                   event.currentTarget.value = "";
-                  inputRef.current?.focus();
+                  senderRef.current?.focus();
                 }}/>
               <input ref={fileInputRef} type="file" multiple hidden tabIndex={-1}
                 aria-label="选择附件" onChange={(event) => {
                   if (event.currentTarget.files) addFiles(event.currentTarget.files);
                   event.currentTarget.value = "";
-                  inputRef.current?.focus();
+                  senderRef.current?.focus();
                 }}/>
-              <div className="composer-status-row">
-                <span className="composer-status-line" role={error ? "alert" : "status"}
+              <Flex className="composer-status-row" style={{ minWidth: 0 }}>
+                <Typography.Text type={error ? "danger" : "secondary"} ellipsis className="composer-status-line" role={error ? "alert" : "status"}
                   aria-live={error ? "assertive" : "polite"}
                   data-tone={error ? "failed" : pending ? "sending" : undefined}
-                  title={composerStatus}>{composerStatus}</span>
-              </div>
-            </div>
-            <div className="composer-actions-right" role="group" aria-label="发送与停止">
-              {composerMode === "send-and-stop" ? <button type="button"
-                className="btn-circle btn-circle-action team-chat-stop-action"
-                disabled={busy || staleRun} title="停止团队" aria-label="停止团队"
-                onClick={() => void stop()}><WandIcon name="stop" size={16}/></button> : null}
-              <button type="button" className="btn-circle btn-circle-send"
-                data-phase={primaryPhase} disabled={primaryDisabled}
-                title={primaryLabel} aria-label={primaryLabel}
-                onClick={() => void (primaryStops ? stop() : send())}>
-                <span className="composer-send-glyph composer-send-glyph-arrow" aria-hidden="true">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                    strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 19V5"/><path d="m6 11 6-6 6 6"/>
-                  </svg>
-                </span>
-                <span className="composer-send-glyph composer-send-glyph-stop" aria-hidden="true">
-                  <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-                    <rect x="3" y="3" width="10" height="10" rx="2"/>
-                  </svg>
-                </span>
-                <span className="composer-send-glyph composer-send-glyph-sending" aria-hidden="true">
-                  <span className="composer-send-spinner"/>
-                </span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div ref={attachmentMenuRef} id={attachmentMenuId} role="dialog" aria-label="更多操作"
-        aria-modal="false" aria-hidden={!attachmentMenuOpen} inert={!attachmentMenuOpen}
-        className={`composer-plus-popover${attachmentMenuOpen ? "" : " hidden"}`}>
-        <ComposerPopoverAction icon="image" label="上传图片" onClick={() => {
-          setAttachmentMenuOpen(false);
-          imageInputRef.current?.click();
-        }}/>
-        <ComposerPopoverAction icon="paperclip" label="上传附件" onClick={() => {
-          setAttachmentMenuOpen(false);
-          fileInputRef.current?.click();
-        }}/>
-      </div>
-      {error ? <p className="task-board-team-error" role="alert">{error}</p> : null}
+                  title={composerStatus}>{composerStatus}</Typography.Text>
+              </Flex>
+            </Flex>
+            <Flex align="center" gap={8} className="composer-actions-right" role="group" aria-label="发送与停止">
+              {composerMode === "send-and-stop" ? <Button
+                className="team-chat-stop-action"
+                shape="circle"
+                type="text"
+                danger
+                disabled={busy || staleRun}
+                title="停止团队"
+                aria-label="停止团队"
+                onClick={() => void stop()}
+              ><WandIcon name="stop" size={16}/></Button> : null}
+              <Button
+                className="team-chat-send-action"
+                type="primary"
+                shape="circle"
+                loading={pending === "send"}
+                data-phase={primaryPhase}
+                disabled={primaryDisabled}
+                title={primaryLabel}
+                aria-label={primaryLabel}
+                onClick={() => void (primaryStops ? stop() : send())}
+              >
+                {primaryStops ? <WandIcon name="stop" size={16}/> : <WandIcon name="up" size={16}/>}
+              </Button>
+            </Flex>
+              </Flex>}
+            />
+          </Flex>
+        </Flex>
+      </Flex>
+      {error ? <Alert className="task-board-team-error" type="error" showIcon role="alert" title={error}/> : null}
     </div> : <p className="task-board-team-run-detail">这次运行没有群聊会话，只能在时间线里看。</p>}
     {/*
       全文弹层：Portal 到 `#overlay-root`，不换路由、不 remount 页面，所以不算跳页；

@@ -1,3 +1,5 @@
+import type { OpenRouterFreeModelsService } from "./openrouter-free-models.js";
+import { normalizeModelGroups } from "./model-groups.js";
 import { existsSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { Express, Request, RequestHandler } from "express";
@@ -19,6 +21,7 @@ import { SESSION_PROVIDERS } from "./session-provider.js";
 import { withConfiguredDefaultModelLabels, type ModelCatalogService } from "./models.js";
 import { DEPLOYMENT_CONFIG_KEYS, type RuntimeConfigState } from "./runtime-config.js";
 import type { WandStorage } from "./storage.js";
+import type { RetentionResult } from "./retention.js";
 import type { WandConfig } from "./types.js";
 import type { GithubConnectorStatus } from "./github-connector.js";
 
@@ -43,7 +46,10 @@ export interface ServerSettingsRoutesDependencies {
   getDistributionSettings(): Promise<SettingsDistributionPayload>;
   getGithubConnector(): GithubConnectorStatus;
   modelCatalog: ModelCatalogService;
+  openRouter: OpenRouterFreeModelsService;
   resolveAppConnectCode(req: Request): { code: string; url: string };
+  /** 任务保留设置已写入当前进程后调用。失败不得回滚已保存的偏好。 */
+  sweepTaskRetention?: () => RetentionResult;
 }
 
 function publicConfig(config: WandConfig): Record<string, unknown> {
@@ -112,6 +118,7 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
       restartRequired: runtimeConfig.hasPendingRestart(),
       hasCert: existsSync(path.join(configDir, "server.key")) && existsSync(path.join(configDir, "server.crt")),
       githubConnector: deps.getGithubConnector(),
+      openRouter: deps.openRouter.status(),
       updateAvailable: cachedUpdate?.updateAvailable ?? false,
       latestVersion: cachedUpdate?.latest ?? null,
       updateChannel: deps.getUpdateChannel(),
@@ -165,6 +172,7 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
 
   app.post("/api/settings/config", requireAdminOrSessionPreferences, asyncRoute(async (req, res) => {
     const body = req.body as Partial<WandConfig> & {
+      expectedModelGroups?: unknown;
       defaultModels?: { claude?: unknown; codex?: unknown; opencode?: unknown; grok?: unknown; qoder?: unknown; pi?: unknown; gemini?: unknown };
     };
     const previousDesiredConfig = runtimeConfig.desiredSnapshot();
@@ -180,6 +188,11 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
     };
     let touchedDeployField = false;
     try {
+      if (body.modelGroups !== undefined && body.expectedModelGroups !== undefined
+        && JSON.stringify(normalizeModelGroups(body.expectedModelGroups)) !== JSON.stringify(config.modelGroups ?? [])) {
+        res.status(409).json({ error: "模型分组已在其他设备修改，请先刷新；当前草稿已保留。" });
+        return;
+      }
       for (const field of DEPLOYMENT_CONFIG_KEYS) {
         if (!(field in body) || body[field] === undefined) continue;
         if (field === "port") {
@@ -234,12 +247,25 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
         });
       }
       runtimeConfig.commit(candidateConfig, stagedPreferenceFields);
+      if (stagedPreferenceFields.has("modelGroups")) deps.modelCatalog.publishModelGroups();
+      let retention: RetentionResult | undefined;
+      let retentionError: string | undefined;
+      if (stagedPreferenceFields.has("taskRetention") && deps.sweepTaskRetention) {
+        try {
+          retention = deps.sweepTaskRetention();
+        } catch (error) {
+          retentionError = error instanceof Error ? error.message : String(error);
+          console.error(`[retention] save sweep failed: ${retentionError}`);
+        }
+      }
       res.json({
         ok: true,
         config: publicConfig(candidateConfig),
         desiredConfig: publicConfig(candidateConfig),
         activeConfig: publicConfig(config),
         restartRequired: runtimeConfig.hasPendingRestart(),
+        ...(retention ? { retention } : {}),
+        ...(retentionError ? { retentionError: "设置已保存，但立即扫描失败，将在下次定时扫描时重试。" } : {}),
       });
     } catch (error) {
       if (deployConfigWritten) {
@@ -248,6 +274,33 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
       sendRouteError(res, error, "保存配置失败。", 500);
     }
   }));
+
+  app.get("/api/settings/openrouter", requireAdmin, (_req, res) => {
+    res.set("Cache-Control", "no-store");
+    res.json(deps.openRouter.status());
+  });
+
+  app.post("/api/settings/openrouter", requireAdmin, asyncRoute(async (req, res) => {
+    try {
+      res.json(await deps.openRouter.saveKey(req.body?.apiKey));
+    } catch (error) {
+      res.status(error instanceof TypeError ? 400 : 500).json({
+        error: error instanceof TypeError ? "请填写有效的 OpenRouter Key。" : "保存 OpenRouter 配置失败。",
+      });
+    }
+  }));
+
+  app.post("/api/settings/openrouter/refresh", requireAdmin, asyncRoute(async (_req, res) => {
+    if (!deps.openRouter.status().configured) {
+      res.status(400).json({ error: "请先保存 OpenRouter Key。" });
+      return;
+    }
+    res.json(await deps.openRouter.refresh());
+  }));
+
+  app.delete("/api/settings/openrouter", requireAdmin, (_req, res) => {
+    res.json(deps.openRouter.clearKey());
+  });
 
   app.get("/api/models", (_req, res) => {
     // Every client reads the server's persisted snapshot. Avoid browser/proxy

@@ -102,3 +102,86 @@ export function normalizeStructuredToolResultContent(
   }
   return typeof content === "undefined" || content === null ? "" : String(content);
 }
+
+/**
+ * 将工具执行产生的原始结果（无论是纯文本、JSON、还是带图片的多模态数组）统一归一化为 Wand 内容块格式。
+ * - 纯文本结果（或仅包含 text part 的数组）：统一合并为格式规整的纯文本字符串，避免无谓的数组包装；
+ * - 包含图片/富媒体的结果：归一化为 `StructuredContentPart[]`，并将图片收敛为规范的 image part；
+ * - 针对 `{ content: [...] }` / `{ result: ... }` / `{ output: ... }` 等常见包装层自动解包。
+ */
+export function canonicalizeToolResultContent(
+  value: unknown,
+): string | StructuredContentPart[] {
+  const record = asRecord(value);
+  const raw = record && "content" in record
+    ? record.content
+    : record && "output" in record && typeof record.output === "string"
+      ? record.output
+      : value;
+
+  const normalized = normalizeStructuredToolResultContent(raw);
+  if (typeof normalized === "string") return normalized;
+  if (normalized.length > 0 && normalized.every((part) => part.type === "text" && typeof part.text === "string")) {
+    return normalized
+      .map((part) => part.text as string)
+      .filter((text) => text.length > 0)
+      .join("\n");
+  }
+  return normalized;
+}
+
+export type AgentContentPart =
+  | { type: "text"; text: string }
+  | { type: "image"; data: string; mimeType: string };
+
+/**
+ * 将 Wand 历史存储或传输层中的 tool_result content 还原为 Agent/LLM SDK（如 @earendil-works/pi-ai）
+ * 可识别的 content parts 数组。
+ * - 文本转换为 `{ type: "text", text }`；
+ * - 包含 Base64 的图片转换为 `{ type: "image", data, mimeType }`；
+ * - 保证在多轮历史回放或断点恢复时，模型能够感知之前工具返回的多模态图片。
+ */
+export function toolResultContentToAgentParts(
+  content: unknown,
+): AgentContentPart[] {
+  if (typeof content === "string") {
+    return [{ type: "text", text: content }];
+  }
+  if (!Array.isArray(content)) {
+    const text = typeof content === "undefined" || content === null ? "" : String(content);
+    return [{ type: "text", text }];
+  }
+
+  const parts: AgentContentPart[] = [];
+  for (const part of content) {
+    if (!part || typeof part !== "object") continue;
+    const record = part as Record<string, unknown>;
+    if (record.type === "text" && typeof record.text === "string") {
+      parts.push({ type: "text", text: record.text });
+      continue;
+    }
+    if (isStructuredImagePart(record)) {
+      const canonical = canonicalizeStructuredImagePart(record);
+      const source = asRecord(canonical?.source);
+      if (source && source.type === "base64" && typeof source.data === "string" && source.data) {
+        parts.push({
+          type: "image",
+          data: source.data,
+          mimeType: typeof source.media_type === "string" && source.media_type ? source.media_type : "image/png",
+        });
+        continue;
+      }
+    }
+    try {
+      parts.push({ type: "text", text: JSON.stringify(record) });
+    } catch {
+      parts.push({ type: "text", text: String(record) });
+    }
+  }
+
+  if (parts.length === 0) {
+    return [{ type: "text", text: "" }];
+  }
+  return parts;
+}
+

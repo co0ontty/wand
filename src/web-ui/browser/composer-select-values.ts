@@ -1,3 +1,6 @@
+import { OPENROUTER_FREE_GROUP, OPENROUTER_FREE_SELECTOR } from "../../openrouter-free-selection.js";
+import { AUTO_ASSIGN_LABEL, isAutoAssignSelector, isModelGroupSelector } from "../../model-groups.js";
+
 export interface ComposerSelectValueOption {
   readonly value: string;
 }
@@ -40,13 +43,17 @@ export function modelDisplayName(
 ): string {
   const id = (model ?? "").trim();
   if (id && id !== MODEL_DEFAULT_VALUE) {
+    if (id === OPENROUTER_FREE_SELECTOR) return OPENROUTER_FREE_GROUP;
     const match = models.find((item) => item.id === id);
-    return (match?.label ?? "").trim() || id;
+    return (match?.label ?? "").trim()
+      || (isModelGroupSelector(id) ? "模型分组" : isAutoAssignSelector(id) ? AUTO_ASSIGN_LABEL : id);
   }
   const configured = (configuredDefault ?? "").trim();
   if (configured && configured !== MODEL_DEFAULT_VALUE) {
+    if (configured === OPENROUTER_FREE_SELECTOR) return OPENROUTER_FREE_GROUP;
     const match = models.find((item) => item.id === configured);
-    return (match?.label ?? "").trim() || configured;
+    return (match?.label ?? "").trim()
+      || (isModelGroupSelector(configured) ? "模型分组" : isAutoAssignSelector(configured) ? AUTO_ASSIGN_LABEL : configured);
   }
   const entry = (models.find((item) => item.id === MODEL_DEFAULT_VALUE)?.label ?? "").trim();
   const stripped = entry.replace(TRAILING_DEFAULT_NOTE, "").trim();

@@ -117,7 +117,7 @@ export async function runFocusBrowser({ root = resolve(import.meta.dirname, "../
         window.h = window.focusRefreshHarness;
         window.focusTurns = [{role:"assistant",uuid:"focus-row",createdAt:"2026-09-30T00:00:00Z",content:[
           {type:"thinking",thinking:"fixture thought"},
-          {type:"tool_use",id:"focus-read",name:"Read",input:{},activity:{kind:"read_file",fileKey:"fixture-file"}},
+          {type:"tool_use",id:"focus-read",name:"Bash",input:{},activity:{kind:"run_command",fileKey:"fixture-file"}},
           {type:"tool_result",tool_use_id:"focus-read",content:""}]}];
         await h.fresh(focusTurns);
       })()`);
@@ -126,7 +126,7 @@ export async function runFocusBrowser({ root = resolve(import.meta.dirname, "../
       if (geometryProbe) {
         // Observational repair/baseline comparison only, never a B01/matrix pass.
         responsePlans.push({defer:true,input:{file_path:"fixture.txt"},pending:true,resultAvailable:false});
-        await evaluate('h.fresh([{role:"assistant",uuid:"pending",content:[{type:"thinking",thinking:""},{type:"tool_use",id:"pending-read",name:"Read",input:{},activity:{kind:"read_file",fileKey:"same-file"}}]}],{status:"running",structuredState:{inFlight:true}})');
+        await evaluate('h.fresh([{role:"assistant",uuid:"pending",content:[{type:"thinking",thinking:""},{type:"tool_use",id:"pending-read",name:"Bash",input:{},activity:{kind:"run_command",fileKey:"same-file"}}]}],{status:"running",structuredState:{inFlight:true}})');
         await click(summary);await click(entry);await wait('!!document.querySelector(".chat-activity-loading")',"probe loading");await evaluate("h.frames()");
         const snapshot='(()=>{const n=document.querySelector(".chat-activity-entry[data-tool-ids] > button.chat-activity-entry-button"),r=document.querySelector(".chat-messages");return {rect:n.getBoundingClientRect().toJSON(),text:n.textContent,scrollTop:r.scrollTop,clientHeight:r.clientHeight,scrollHeight:r.scrollHeight,flexDirection:getComputedStyle(r).flexDirection,activeTag:document.activeElement.tagName,documentScroll:document.scrollingElement.scrollTop}})()';
         const before=await evaluate(snapshot);await evaluate('window.probeEntry=document.querySelector(".chat-activity-entry[data-tool-ids] > button.chat-activity-entry-button");');
@@ -136,17 +136,17 @@ export async function runFocusBrowser({ root = resolve(import.meta.dirname, "../
         continue;
       }
       await click(summary); await click(entry);
-      await wait('document.querySelector(".chat-activity-entry-detail .inline-tool-result-text")?.textContent === "AAAA"', "exact on-demand Read result AAAA");
+      await wait('document.querySelector(".chat-activity-detail-section:last-child pre")?.textContent === "AAAA"', "exact on-demand tool result AAAA");
       await evaluate("h.frames()");
       // Focus through actual keyboard navigation without toggling the already-open menu.
       for (let step = 0; step < 30 && !await evaluate('document.activeElement === document.querySelector("button.chat-activity-summary")'); step++) await key("Tab");
       await evaluate(`window.observation=h.watch(${JSON.stringify(summary)});`);
       responsePlans.push({ input: { file_path: "fixture.txt" }, content: "BBBB", resultAvailable: true, pending: false });
       await evaluate(`(async()=>{await h.acceptDetail("focus-read"); focusTurns[0].content[0].thinking="new fixture thought"; h.publish(focusTurns); h.doRenderChat(false); await h.frames();})()`);
-      const observed = await evaluate(`({ ...observation.result(), exactResult: document.querySelector(".chat-activity-entry-detail .inline-tool-result-text")?.textContent,
+      const observed = await evaluate(`({ ...observation.result(), exactResult: document.querySelector(".chat-activity-detail-section:last-child pre")?.textContent,
         menuOpen: document.querySelector(".chat-activity")?.dataset.expanded==="true", entryOpen: document.querySelector(".chat-activity-entry[data-tool-ids]")?.dataset.expanded==="true" })`);
       result.cases.push({ id: "A01", mode, ...observed });
-      assert.equal(observed.exactResult, "BBBB", `${mode}: exact Read body must update (not whole row text)`);
+      assert.equal(observed.exactResult, "BBBB", `${mode}: exact tool body must update (not whole row text)`);
       for (const name of ["focusedBefore", "focusedAfter", "originalConnected", "chainContinuous", "glyphSame", "menuOpen", "entryOpen"]) assert.equal(observed[name], true, `${mode}: A01 ${name}: ${JSON.stringify(observed)}`);
       assert.equal(observed.blurCount, 0);
       for (const axis of ["x", "y", "width", "height"]) assert.ok(Math.abs(observed.rectAfter[axis] - observed.rectBefore[axis]) <= 1, `A01 geometry ${axis}`);
@@ -167,7 +167,7 @@ export async function runFocusBrowser({ root = resolve(import.meta.dirname, "../
     return result;
   } catch (error) {
     if (diagnosticEval) {
-      try { result.failureDiagnostic = await diagnosticEval('({visible:!document.hidden,front:document.hasFocus(),active:document.activeElement?.outerHTML?.slice(0,300),animations:document.getAnimations().map(a=>({state:a.playState,timing:a.effect?.getComputedTiming(),target:a.effect?.target?.className}))})'); }
+      try { result.failureDiagnostic = await diagnosticEval('({visible:!document.hidden,front:document.hasFocus(),active:document.activeElement?.outerHTML?.slice(0,300),activity:document.querySelector(".chat-activity")?.textContent,activityOpen:document.querySelector(".chat-activity")?.dataset.expanded,activeOwner:document.activeElement?.closest(".chat-message")?.dataset.chatOwner,selected:h.state.selectedId,view:h.state.currentView,cache:h.state.toolContentCache,projected:h.state.currentMessages,animations:document.getAnimations().map(a=>({state:a.playState,timing:a.effect?.getComputedTiming(),target:a.effect?.target?.className}))})'); }
       catch (diagnosticError) { result.failureDiagnostic = String(diagnosticError); }
     }
     result.failure = String(error.stack || error); throw Object.assign(error, { focusResult: result });
@@ -193,9 +193,9 @@ async function runExtended({ evaluate: e, send, click, key, wait, mode, result, 
   };
   const summary = "button.chat-activity-summary";
   const entry = '.chat-activity-entry[data-tool-ids] > button.chat-activity-entry-button';
-  const exact = '.chat-activity-entry-detail .inline-tool-result-text';
+  const exact = '.chat-activity-detail-section:last-child pre';
   const openRead = async () => {
-    await click(summary); await click(entry); await wait(`!!document.querySelector(${JSON.stringify(exact)})`, "real Read details"); await e("h.frames()");
+    await click(summary); await click(entry); await wait(`!!document.querySelector(${JSON.stringify(exact)})`, "real tool details"); await e("h.frames()");
   };
   const freshRead = async (patch = {}) => {
     await e(`h.fresh(focusTurns,${JSON.stringify(patch)})`); await openRead();
@@ -294,7 +294,7 @@ async function runExtended({ evaluate: e, send, click, key, wait, mode, result, 
   // Loading → pending → cross-turn result, genuinely on-demand; same file deduplicates.
   const requestsBefore=result.requests.length;
   plans.push({defer:true,input:{file_path:"fixture.txt"},pending:true,resultAvailable:false});
-  await e(`(async()=>{window.pendingTurns=[{role:"assistant",uuid:"pending",content:[{type:"thinking",thinking:""},{type:"tool_use",id:"pending-read",name:"Read",input:{},activity:{kind:"read_file",fileKey:"same-file"}}]}];await h.fresh(pendingTurns,{status:"running",structuredState:{inFlight:true}});})()`);
+  await e(`(async()=>{window.pendingTurns=[{role:"assistant",uuid:"pending",content:[{type:"thinking",thinking:""},{type:"tool_use",id:"pending-read",name:"Bash",input:{},activity:{kind:"run_command",fileKey:"same-file"}}]}];await h.fresh(pendingTurns,{status:"running",structuredState:{inFlight:true}});})()`);
   assert.equal(result.requests.length,requestsBefore,"unopened entries do not prefetch");
   await click(summary);await click(entry);await wait('document.querySelector(".chat-activity-loading")?.textContent.includes("加载详情")',"loading state");
   await e("h.frames()");await e(`window.o=h.watch(${JSON.stringify(entry)});`);assert.equal(deferred.length,1);deferred.shift()();
@@ -304,15 +304,15 @@ async function runExtended({ evaluate: e, send, click, key, wait, mode, result, 
   await e(`window.o=h.watch(${JSON.stringify(entry)}); h.publish(pendingTurns.concat([{role:"user",content:[{type:"tool_result",tool_use_id:"pending-read",content:""}]}]));h.doRenderChat(false);`);
   await wait(`document.querySelector(${JSON.stringify(exact)})?.textContent==="CROSS-RESULT"`,"cross-turn actual result");await e("h.frames()");
   observed=await e(`({...o.result(),body:document.querySelector(${JSON.stringify(exact)}).textContent})`);checkStable(observed);record("A06","cross-message result fetches open detail once",observed);
-  await e(`(async()=>{pendingTurns[0].content.push({type:"tool_use",id:"pending-read-2",name:"Read",input:{},activity:{kind:"read_file",fileKey:"same-file"}});h.publish(pendingTurns);h.doRenderChat(false);await h.frames();})()`);
-  assert.equal(await e('document.querySelectorAll(".chat-activity-entry[data-tool-ids]").length'),1);record("A15","same file retains one entry; compact inputs remain empty",{requests:result.requests.length-requestsBefore});
+  await e(`(async()=>{pendingTurns[0].content.push({type:"tool_use",id:"pending-read-2",name:"Bash",input:{},activity:{kind:"run_command",fileKey:"same-file"}});h.publish(pendingTurns);h.doRenderChat(false);await h.frames();})()`);
+  assert.equal(await e('document.querySelectorAll(".chat-activity-entry[data-tool-ids]").length'),2);record("A15","separate invocations remain separate; compact inputs remain empty",{requests:result.requests.length-requestsBefore});
 
   // Error survives unrelated/full paints. Retry retires to its own ORIGINAL entry.
   plans.push({error:"fixture failure"});await e("h.fresh(focusTurns)");await click(summary);await click(entry);
   await wait('!!document.querySelector(".chat-activity-retry")',"actual retry");await e("h.frames()");
   await focusTab(".chat-activity-retry");await e('window.o=h.watch(".chat-activity-retry");window.entryNode=document.querySelector(".chat-activity-entry[data-tool-ids] > button");');
   await e('(async()=>{focusTurns[0].content[0].thinking="error remains";h.publish(focusTurns);h.doRenderChat(true);await h.frames();})()');
-  observed=await e('({...o.result(),error:document.querySelector(".chat-activity-retry").textContent})');checkStable(observed);assert.match(observed.error,/fixture failure/);record("A07","real retry instance survives full paint",observed);
+  observed=await e('({...o.result(),error:document.querySelector(".chat-activity-feedback").textContent})');checkStable(observed);assert.match(observed.error,/fixture failure/);record("A07","real retry instance survives full paint",observed);
   const retryRequestCount=result.requests.length;plans.push({input:{file_path:"fixture.txt"},content:"RETRIED",pending:false});
   await key("Enter");await wait(`document.querySelector(${JSON.stringify(exact)})?.textContent==="RETRIED"`,"retry result");await e("h.frames()");
   assert.equal(result.requests.length-retryRequestCount,1);assert.equal(await e('document.activeElement===entryNode'),true);record("A07","one retry request; exact same-entry retirement fallback",{requests:1});
@@ -320,7 +320,7 @@ async function runExtended({ evaluate: e, send, click, key, wait, mode, result, 
   // New composer focus, selection and real CDP IME: old render must do zero JS focus.
   await e('window.focusCalls=[];window.nativeFocus=HTMLElement.prototype.focus;HTMLElement.prototype.focus=function(...args){focusCalls.push(this.className||this.id);return nativeFocus.apply(this,args);};');
   await focusTab("#input-box");
-  await e('const box=document.querySelector("#input-box");box.value="draft untouched";box.setSelectionRange(2,8,"backward");h.composer.setText(h.state.selectedId,box.value);window.composerNode=box;');
+  await e('const box=document.querySelector("#input-box");box.value="draft untouched";box.setSelectionRange(2,8,"backward");h.composer.edit(h.state.selectedId,{text:box.value});window.composerNode=box;');
   await e('h.publish(focusTurns);h.renderChat();');await e("h.frames()");
   assert.deepEqual(await e('({same:document.activeElement===composerNode,value:composerNode.value,start:composerNode.selectionStart,end:composerNode.selectionEnd,direction:composerNode.selectionDirection})'),{same:true,value:"draft untouched",start:2,end:8,direction:"backward"});assert.deepEqual(await e("focusCalls"),[]);
   await send("Input.imeSetComposition",{text:"输入",selectionStart:0,selectionEnd:2});
@@ -344,9 +344,10 @@ async function runExtended({ evaluate: e, send, click, key, wait, mode, result, 
   // Escape is scope/intent/composition-aware. External focus never reverts to summary.
   await focusTab("#input-box");await key("Escape");assert.equal(await e('document.activeElement.id'),"input-box");assert.equal(await e('document.querySelector(".chat-activity").dataset.expanded'),"true");
   await focusTab(entry);await e('document.activeElement.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",isComposing:true,bubbles:true}));');assert.equal(await e('document.querySelector(".chat-activity").dataset.expanded'),"true");
+  await key("Escape");await e("h.frames()");assert.equal(await e('document.activeElement.matches(".chat-activity-entry-button")'),true);assert.equal(await e('document.querySelector(".chat-activity").dataset.expanded'),"true");
   await key("Escape");await e("h.frames()");assert.equal(await e('document.activeElement===document.querySelector("button.chat-activity-summary")'),true);assert.equal(await e('document.querySelector(".chat-activity").dataset.expanded'),"false");
   await key("Tab");assert.equal(await e('document.activeElement.matches(".chat-activity-entry-button")'),false,"hidden entries out of Tab order");record("A08-M3","scope Escape, composition ignored, hidden Tab chain, external Escape");
-  await freshRead();await click("#input-box");assert.equal(await e('document.querySelector(".chat-activity").dataset.expanded'),"false");assert.equal(await e('document.activeElement.id'),"input-box");record("A08-M3","outside pointer closes without stealing new focus");
+  await freshRead();await click("#input-box");assert.equal(await e('document.querySelector(".chat-activity").dataset.expanded'),"true");assert.equal(await e('document.activeElement.id'),"input-box");record("A08-M3","outside pointer preserves inline reading without stealing new focus");
 
   // Question choice belongs to the existing store; soft reset must not wipe it.
   await e(`(async()=>{window.askTurns=[{role:"assistant",uuid:"ask",content:[{type:"tool_use",id:"ask-fixture",name:"AskUserQuestion",input:{questions:[{question:"fixture question",options:[{label:"A"},{label:"B"}]}]}}]}];await h.fresh(askTurns);})()`);
@@ -366,7 +367,7 @@ async function runExtended({ evaluate: e, send, click, key, wait, mode, result, 
   assert.equal(await e('document.activeElement===fallbackSummary'),true);record("A10","entry removed falls back to original same-group summary");
   await focusTab(summary);await e('window.replyNode=document.querySelector(".assistant-reply-disclosure");');
   await e('(async()=>{h.publish([{...focusTurns[0],content:[{type:"text",text:"retired activity"}]}]);h.doRenderChat(false);await h.frames();})()');
-  assert.equal(await e('document.activeElement===replyNode'),true);record("A10","empty/removed activity goes to same reply");
+  assert.equal(await e('replyNode===null && document.activeElement.matches(".chat-messages[tabindex=\\"-1\\"]")'),true);record("A10","activity-only reply has no outer control; retirement falls back to existing root");
   await e('(async()=>{h.publish([]);h.doRenderChat(false);await h.frames();})()');
   assert.equal(await e('document.activeElement.matches(".chat-messages[tabindex=\\\"-1\\\"]")'),true);record("A10","empty source goes to existing programmatic message anchor");
 
@@ -379,10 +380,10 @@ async function runExtended({ evaluate: e, send, click, key, wait, mode, result, 
     else if (scenario==="root-unmount") await e('document.querySelector(".chat-messages").remove();');
     else if (scenario==="pagehide") await e('window.dispatchEvent(new PageTransitionEvent("pagehide"));');
     else {
-      await e(`h.state.currentView=${JSON.stringify(scenario==="terminal" ? "terminal" : "chat")};h.state.selectedId=${scenario==="Home" ? "null" : '"focus-B"'};h.resetChatRenderCache();h.publish([{role:"assistant",uuid:"other-view",content:[{type:"text",text:"other view"}]}]);h.doRenderChat(true);`);
+      await e(`h.state.currentView=${JSON.stringify(scenario==="terminal" ? "terminal" : "chat")};h.state.selectedId=${scenario==="Home" ? "null" : '"focus-B"'};h.clearActivityDetailState();h.resetChatRenderCache();h.publish([{role:"assistant",uuid:"other-view",content:[{type:"text",text:"other view"}]}]);h.doRenderChat(true);`);
     }
     if (scenario==="ABA" || scenario==="close-reopen") {
-      if (scenario==="ABA") { await e('h.state.currentView="chat";h.state.selectedId="focus-A";h.resetChatRenderCache();h.publish(focusTurns);h.doRenderChat(true);');await click(summary); }
+      if (scenario==="ABA") { await e('h.state.currentView="chat";h.state.selectedId="focus-A";h.clearActivityDetailState();h.resetChatRenderCache();h.publish(focusTurns);h.doRenderChat(true);');await click(summary); }
       // Close-reopen has started the new request; ABA opens it here.
       if (scenario==="ABA") { plans.push({input:{file_path:"fixture.txt"},content:"NEW-CURRENT",pending:false});await click(entry); }
       await wait(`document.querySelector(${JSON.stringify(exact)})?.textContent==="NEW-CURRENT"`,"new incarnation result");await e("h.frames()");
@@ -419,7 +420,7 @@ async function runExtended({ evaluate: e, send, click, key, wait, mode, result, 
       }
       h.publish(focusTurns);h.renderChat();await h.frames();
     })()`);
-    assert.equal(await e("faultFailed"),true,"fault must actually execute");observed=await e('({...o.result(),pending:h.state.renderPending,body:document.querySelector(".chat-activity-entry-detail .inline-tool-result-text")?.textContent})');checkStable(observed);assert.equal(observed.pending,false);assert.equal(observed.body,"AAAA");record("A12",fault,observed);
+    assert.equal(await e("faultFailed"),true,"fault must actually execute");observed=await e('({...o.result(),pending:h.state.renderPending,body:document.querySelector(".chat-activity-detail-section:last-child pre")?.textContent})');checkStable(observed);assert.equal(observed.pending,false);assert.equal(observed.body,"AAAA");record("A12",fault,observed);
   }
 
   // Long/short/early+tail dirty frames, unchanged nodes and historical reading anchor.
@@ -428,6 +429,7 @@ async function runExtended({ evaluate: e, send, click, key, wait, mode, result, 
     window.historyTurns=Array.from({length:12},(_,i)=>text(i));historyTurns[8]={...focusTurns[0],uuid:"historical-focus"};
     await h.fresh(historyTurns);document.querySelector(".chat-messages").scrollTop=-1200;await h.frames();
   })()`);
+  await e('document.querySelector(".chat-activity-summary").scrollIntoView({block:"center"})');await e('h.frames()');
   await openRead();await focusTab(summary);await e(`window.o=h.watch(${JSON.stringify(summary)});window.unchanged=document.querySelector('.chat-message[data-msg-index="5"]');window.total=document.querySelector(".chat-messages");`);
   const performanceSamples=[];
   for (const text of ["LONG ".repeat(400),"Z"]) {
@@ -437,9 +439,9 @@ async function runExtended({ evaluate: e, send, click, key, wait, mode, result, 
   }
   observed=await e('o.result()');checkStable(observed);record("A14-M2","historical same-owner anchor and unchanged row",observed);
   plans.push({input:{file_path:"fixture.txt"},content:"line\n".repeat(100),pending:false});
-  await e('(async()=>{await h.acceptDetail("focus-read");historyTurns[8].content[0].thinking="long inner result";h.publish(historyTurns);h.doRenderChat(false);await h.frames();window.innerPre=document.querySelector(".chat-activity-entry-detail .inline-tool-result-text");innerPre.scrollTop=120;window.innerBefore=innerPre.scrollTop;})()');
+  await e('(async()=>{await h.acceptDetail("focus-read");historyTurns[8].content[0].thinking="long inner result";h.publish(historyTurns);h.doRenderChat(false);await h.frames();window.innerPre=document.querySelector(".chat-activity-timeline");innerPre.scrollTop=120;window.innerBefore=innerPre.scrollTop;})()');
   plans.push({input:{file_path:"fixture.txt"},content:"Z",pending:false});
-  const inner=await e(`(async()=>{await h.acceptDetail("focus-read");historyTurns[8].content[0].thinking="inner scroll update";h.publish(historyTurns);h.doRenderChat(false);await h.frames();const next=document.querySelector(${JSON.stringify(exact)});return {same:innerPre===next,before:innerBefore,after:next.scrollTop,max:next.scrollHeight-next.clientHeight};})()`);
+  const inner=await e(`(async()=>{await h.acceptDetail("focus-read");historyTurns[8].content[0].thinking="inner scroll update";h.publish(historyTurns);h.doRenderChat(false);await h.frames();const next=document.querySelector(".chat-activity-timeline");return {same:innerPre===next,before:innerBefore,after:next.scrollTop,max:next.scrollHeight-next.clientHeight};})()`);
   assert.equal(inner.same,true);assert.equal(inner.after,Math.min(inner.before,inner.max));record("A14-M2","detail scrolling legitimately clamps for shorter result",inner);
   const perf=await e(`(async()=>{const samples=[];const rows=Array.from(document.querySelectorAll(".chat-message"));const mutations=[];const obs=new MutationObserver(r=>mutations.push(...r));obs.observe(total,{childList:true,subtree:true});for(let i=0;i<30;i++){historyTurns[8].content[0].thinking="local update "+i;h.publish(historyTurns);const start=performance.now();h.doRenderChat(false);samples.push(performance.now()-start);}await h.frames();obs.disconnect();return {samples,unchanged:rows.filter(row=>row.getAttribute("data-msg-index")!=="8").every(row=>row.isConnected),outsideTarget:mutations.some(r=>!r.target.closest?.('.chat-message[data-msg-index="8"]')&&r.target!==total)};})()`);
   assert.equal(perf.unchanged,true);assert.equal(perf.outsideTarget,false);record("performance","single-dirty mutation scope",perf);

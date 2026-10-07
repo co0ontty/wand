@@ -1,3 +1,7 @@
+import "../issues/library-layout";
+import { TaskForm, TaskTextArea } from "../issues/form-controls";
+import { WandInput } from "../ui";
+import { Alert, Card, Empty, Flex, Form, List, Radio, Space, Spin, Tag, Typography } from "antd";
 import {
   type FormEvent,
   type KeyboardEvent,
@@ -61,100 +65,55 @@ function commitSummary(outcome: QuickCommitOutcome): string {
 }
 
 function CommitValue({ hash, subject, empty }: { hash: string; subject: string; empty: string }) {
-  if (!hash) return <span className="wand-quick-muted">{empty}</span>;
-  return (
-    <span className="wand-quick-value-stack">
-      <code>{hash}</code>
-      {subject ? <span>{subject}</span> : null}
-    </span>
-  );
+  if (!hash) return <Typography.Text type="secondary">{empty}</Typography.Text>;
+  return <Flex vertical gap={4}>
+    <Typography.Text code>{hash}</Typography.Text>
+    {subject ? <Typography.Text type="secondary" ellipsis title={subject}>{subject}</Typography.Text> : null}
+  </Flex>;
 }
 
-function ResultPair({
-  label,
-  before,
-  after,
-}: {
-  label: string;
-  before: React.ReactNode;
-  after: React.ReactNode;
+function ResultPair({ label, before, after }: {
+  label: string; before: React.ReactNode; after: React.ReactNode;
 }) {
-  return (
-    <div className="wand-quick-result-pair">
-      <span className="wand-quick-result-label">{label}</span>
-      <div className="wand-quick-result-flow">
-        <div>{before}</div>
-        <span aria-hidden="true">→</span>
-        <div>{after}</div>
-      </div>
-    </div>
-  );
+  return <Card size="small" title={label}>
+    <Flex gap={12} align="center" wrap>
+      {before}<Typography.Text type="secondary" aria-hidden="true">→</Typography.Text>{after}
+    </Flex>
+  </Card>;
 }
+
+const FILE_TONES: Record<string, string | undefined> = {
+  added: "success", untracked: "success", modified: "warning", deleted: "error", renamed: "processing",
+};
 
 function ChangedFiles({ status }: { status: QuickCommitStatus }) {
-  return (
-    <section className="wand-quick-files" aria-labelledby="wand-quick-files-title">
-      <div className="wand-quick-section-heading">
-        <h3 id="wand-quick-files-title">改动文件</h3>
-        <span>{status.modifiedCount}</span>
-      </div>
-      {status.files.length > 0 ? (
-        <ul className="wand-quick-file-list">
-          {status.files.map((file, index) => {
-            const badge = quickCommitStatusBadge(file.status);
-            const submoduleLabels = file.submoduleState
-              ? [
-                  file.submoduleState.commitChanged ? "新指针" : "",
-                  file.submoduleState.hasTrackedChanges ? "有改动" : "",
-                  file.submoduleState.hasUntracked ? "未跟踪" : "",
-                ].filter(Boolean)
-              : [];
-            return (
-              <li key={`${file.path}-${index}`} title={file.path}>
-                <span
-                  className={`wand-quick-file-badge wand-quick-file-badge-${badge.tone}`}
-                  role="img"
-                  title={badge.label}
-                  aria-label={badge.label}
-                >
-                  {badge.letter}
-                </span>
-                <span className="wand-quick-file-path">{file.path}</span>
-                {file.isSubmodule ? (
-                  <span className="wand-quick-submodule-badge">
-                    submodule{submoduleLabels.length ? ` · ${submoduleLabels.join(" / ")}` : ""}
-                  </span>
-                ) : null}
-              </li>
-            );
-          })}
-        </ul>
-      ) : (
-        <p className="wand-quick-empty">没有可提交的改动。</p>
-      )}
-    </section>
-  );
+  return <Card size="small" title={<span id="wand-quick-files-title">改动文件</span>} extra={<Tag>{status.modifiedCount}</Tag>} aria-labelledby="wand-quick-files-title">
+    {status.files.length > 0 ? <List size="small" style={{ maxHeight: 148, overflow: "auto" }}
+      dataSource={[...status.files]} renderItem={(file) => {
+        const badge = quickCommitStatusBadge(file.status);
+        const submoduleLabels = file.submoduleState
+          ? [file.submoduleState.commitChanged ? "新指针" : "", file.submoduleState.hasTrackedChanges ? "有改动" : "", file.submoduleState.hasUntracked ? "未跟踪" : ""].filter(Boolean)
+          : [];
+        return <List.Item key={file.path} title={file.path}>
+          <Flex gap={8} align="center" style={{ minWidth: 0, width: "100%" }}>
+            <Tag color={FILE_TONES[badge.tone]} role="img" title={badge.label} aria-label={badge.label}>{badge.letter}</Tag>
+            <Typography.Text ellipsis style={{ minWidth: 0, flex: 1 }} title={file.path}>{file.path}</Typography.Text>
+            {file.isSubmodule ? <Tag color="processing">submodule{submoduleLabels.length ? ` · ${submoduleLabels.join(" / ")}` : ""}</Tag> : null}
+          </Flex>
+        </List.Item>;
+      }}/>
+      : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有可提交的改动。"/>}
+  </Card>;
 }
 
 /** 提交前先明确当前分支与工作区状态，避免表单脱离上下文。 */
 function CommitWorkspaceLens({ status }: { status: QuickCommitStatus }) {
   const hasChanges = status.modifiedCount > 0;
-  const hasAhead = status.ahead > 0;
-  const tone = hasChanges ? "accent" : "success";
-  const state = hasChanges
-    ? `${status.modifiedCount} 个改动待处理`
-    : (hasAhead ? `${status.ahead} 个 commit 待推送` : "工作区干净");
-
-  return (
-    <section className={`wand-quick-workspace-lens is-${tone}`} aria-label="当前工作区">
-      <span className="wand-quick-workspace-icon" aria-hidden="true">⌘</span>
-      <div>
-        <strong title={status.branch || "未识别分支"}>{status.branch || "未识别分支"}</strong>
-        <span>{state}</span>
-      </div>
-      {hasChanges && hasAhead ? <code>↑{status.ahead}</code> : null}
-    </section>
-  );
+  const state = hasChanges ? `${status.modifiedCount} 个改动待处理`
+    : status.ahead > 0 ? `${status.ahead} 个 commit 待推送` : "工作区干净";
+  return <Alert aria-label="当前工作区" showIcon type={hasChanges ? "info" : "success"}
+    title={status.branch || "未识别分支"} description={state}
+    action={hasChanges && status.ahead > 0 ? <Tag color="success">↑{status.ahead}</Tag> : undefined}/>;
 }
 
 export function QuickCommitHost({ repository = httpQuickCommitRepository }: QuickCommitHostProps) {
@@ -386,7 +345,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
       const archiveNote = response.archiveError
         ? `；归档失败：${response.archiveError}`
         : archiveRelatedTasks
-          ? `；${response.archivedTaskIds?.length ? `已归档 ${response.archivedTaskIds.length} 个关联任务` : "没有已完成的关联任务"}`
+          ? `；${response.archivedTaskIds?.length ? `已归档 ${response.archivedTaskIds.length} 个关联任务` : "没有可归档的关联任务"}`
           : "";
       if (!response.pushError) {
         void reloadStatus(operationSessionId);
@@ -481,197 +440,84 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
       onOpenChange={(open) => { if (!open) quickCommitController.close(); }}
       title="快捷提交"
       description={statusDescription(status)}
-      className="wand-quick-dialog"
-      overlayClassName="wand-quick-overlay"
-      titleClassName="wand-quick-title"
-      descriptionClassName="wand-quick-description"
-      headerClassName="wand-quick-header"
+      className="wand-task-library-dialog wand-quick-library-dialog"
       closeLabel="关闭快捷提交"
       testId="quick-commit-dialog"
     >
       {loading ? (
-        <div className="wand-quick-loading" role="status">正在加载 Git 状态…</div>
+        <Spin tip="正在加载 Git 状态…"><div style={{ minHeight: 100 }} role="status">正在加载 Git 状态…</div></Spin>
       ) : outcome ? (
-        <section className="wand-quick-result" aria-label="提交结果">
-          <ResultPair
-            label="Commit"
-            before={<CommitValue hash={outcome.oldCommitHash} subject={outcome.oldCommitSubject} empty="无" />}
-            after={<CommitValue hash={outcome.commitHash} subject={outcome.commitMessage} empty="无" />}
-          />
-          <ResultPair
-            label="Tag"
-            before={outcome.oldTag ? <code>{outcome.oldTag}</code> : <span className="wand-quick-muted">无 tag</span>}
-            after={outcome.tagName ? <code>{outcome.tagName}</code> : <span className="wand-quick-muted">未打 tag</span>}
-          />
-          {outcome.submoduleCount > 0 ? (
-            <p className="wand-quick-result-note">已提交 {outcome.submoduleCount} 个 submodule。</p>
-          ) : null}
-          {resultNote ? <p className="wand-quick-result-note">{resultNote}</p> : null}
-          {outcome.pushError || pushError ? (
-            <p className="wand-quick-error" role="alert">{pushError || outcome.pushError}</p>
-          ) : null}
-          {error ? <p className="wand-quick-error" role="alert">{error}</p> : null}
-          <div className="wand-quick-result-actions">
-            <WandButton kind="ghost" onClick={() => quickCommitController.close()}>
-              关闭
-            </WandButton>
-            {outcome.pushed ? (
-              <span className="wand-quick-pushed">已推送</span>
-            ) : (
-              <WandButton kind="primary" disabled={pushing} onClick={() => void pushAndClose()}>
-                {pushing ? "推送中…" : "推送并关闭"}
-              </WandButton>
-            )}
-          </div>
-        </section>
+        <Flex vertical gap={16} component="section" aria-label="提交结果">
+          <ResultPair label="Commit"
+            before={<CommitValue hash={outcome.oldCommitHash} subject={outcome.oldCommitSubject} empty="无"/>}
+            after={<CommitValue hash={outcome.commitHash} subject={outcome.commitMessage} empty="无"/>}/>
+          <ResultPair label="Tag"
+            before={outcome.oldTag ? <Typography.Text code>{outcome.oldTag}</Typography.Text> : <Typography.Text type="secondary">无 tag</Typography.Text>}
+            after={outcome.tagName ? <Typography.Text code>{outcome.tagName}</Typography.Text> : <Typography.Text type="secondary">未打 tag</Typography.Text>}/>
+          {outcome.submoduleCount > 0 ? <Typography.Text>已提交 {outcome.submoduleCount} 个 submodule。</Typography.Text> : null}
+          {resultNote ? <Typography.Text>{resultNote}</Typography.Text> : null}
+          {outcome.pushError || pushError ? <Alert type="error" showIcon role="alert" title={pushError || outcome.pushError}/> : null}
+          {error ? <Alert type="error" showIcon role="alert" title={error}/> : null}
+          <Flex justify="flex-end" gap={8} align="center">
+            <WandButton kind="ghost" onClick={() => quickCommitController.close()}>关闭</WandButton>
+            {outcome.pushed ? <Tag color="success">已推送</Tag> : <WandButton kind="primary" disabled={pushing} onClick={() => void pushAndClose()}>{pushing ? "推送中…" : "推送并关闭"}</WandButton>}
+          </Flex>
+        </Flex>
       ) : status ? (
-        <form noValidate className="wand-quick-form" aria-busy={busy} onSubmit={(event) => void submit(event)}>
-          <div className="wand-quick-body">
-            <CommitWorkspaceLens status={status} />
-            <ChangedFiles status={status} />
-            {iterationContext ? (
-              <IterationContextPanel
-                context={iterationContext}
-                mode={contextMode}
-                selectedIds={selectedEntryIds}
-                includeDiff={includeDiff}
-                disabled={busy}
-                onModeChange={changeContextMode}
-                onToggleEntry={toggleEntry}
-                onSelectAll={selectEntries}
-                onIncludeDiffChange={setIncludeDiff}
-              />
-            ) : null}
-            <section className="wand-quick-editor" aria-labelledby="wand-quick-editor-title">
-              <div className="wand-quick-section-heading">
-                <h3 id="wand-quick-editor-title">提交信息</h3>
-                <WandButton
-                  kind="ghost"
-                  size="small"
-                  disabled={generating || submitting || !hasQuickCommitChanges(status)}
-                  title="AI 生成 commit message 与 tag"
-                  onClick={() => void generateSuggestion()}
-                >
-                  {generating ? "生成中…" : "✦ AI"}
+        <TaskForm noValidate aria-busy={busy} onSubmit={(event) => void submit(event)}>
+          <Flex vertical gap={16}>
+            <CommitWorkspaceLens status={status}/>
+            <ChangedFiles status={status}/>
+            {iterationContext ? <IterationContextPanel
+              context={iterationContext} mode={contextMode} selectedIds={selectedEntryIds}
+              includeDiff={includeDiff} disabled={busy} onModeChange={changeContextMode}
+              onToggleEntry={toggleEntry} onSelectAll={selectEntries} onIncludeDiffChange={setIncludeDiff}/> : null}
+            <Card size="small" title={<span id="wand-quick-editor-title">提交信息</span>} aria-labelledby="wand-quick-editor-title"
+              extra={<WandButton kind="ghost" size="small" disabled={generating || submitting || !hasQuickCommitChanges(status)} title="AI 生成 commit message 与 tag" onClick={() => void generateSuggestion()}>{generating ? "生成中…" : "✦ AI"}</WandButton>}>
+              <Form.Item htmlFor="wand-quick-message" label="新的 Commit 信息">
+                <TaskTextArea className="resize-none" id="wand-quick-message" ref={messageInput}
+                  data-wand-autofocus="" rows={3} value={form.message} disabled={submitting}
+                  placeholder="留空则自动生成" onChange={(event) => setForm({ ...form, message: event.currentTarget.value })}
+                  onKeyDown={submitShortcut}/>
+              </Form.Item>
+              {generatedFrom ? <Typography.Paragraph type="secondary">{generatedFrom.source === "iteration"
+                ? `已依据 ${generatedFrom.count} 条迭代提示词生成，没有读取代码。` : "已依据完整 diff 生成。"}</Typography.Paragraph> : null}
+              <Form.Item htmlFor="wand-quick-tag" label="Tag（可选）" style={{ marginBottom: 0 }}>
+                <WandInput id="wand-quick-tag" type="text" value={form.tag} disabled={submitting}
+                  placeholder="选择 Tag 动作时，留空则自动生成" autoComplete="off" spellCheck={false}
+                  onChange={(event) => setForm({ ...form, tag: event.currentTarget.value, tagEdited: true })}/>
+              </Form.Item>
+            </Card>
+            <Card size="small" title="执行动作">
+              <Flex vertical gap={16}>
+                <Radio.Group className="wand-quick-action-grid" aria-label="执行动作" name="wand-quick-action" value={action} disabled={!hasQuickCommitChanges(status) || busy} onChange={(event) => setAction(event.target.value)}>
+                  <Space wrap>{QUICK_COMMIT_ACTIONS.map((item) => <Radio key={item.action} value={item.action}>{item.label}</Radio>)}</Space>
+                </Radio.Group>
+                {status.hasSubmodule ? <Flex justify="space-between" align="center" gap={12}>
+                  <Flex vertical><Typography.Text strong>包含 Submodule</Typography.Text><Typography.Text type="secondary">递归执行 commit、tag 和 push。</Typography.Text></Flex>
+                  <WandSwitch id="wand-quick-submodule" checked={includeSubmodule} disabled={busy} ariaLabel="包含 Submodule" onCheckedChange={setIncludeSubmodule}/>
+                </Flex> : null}
+                <Flex justify="space-between" align="center" gap={12}>
+                  <Flex vertical><Typography.Text strong>归档关联任务</Typography.Text><Typography.Text type="secondary">提交成功后，归档当前会话的任务；其它任务只在已完成时归档。</Typography.Text></Flex>
+                  <WandSwitch id="wand-quick-archive-tasks" checked={archiveRelatedTasks} disabled={busy || !hasQuickCommitChanges(status)} ariaLabel="提交后归档关联任务" onCheckedChange={setArchiveRelatedTasks}/>
+                </Flex>
+              </Flex>
+            </Card>
+            {error ? <Alert type="error" showIcon role="alert" title={error}/> : null}
+            <Flex component="footer" justify="space-between" gap={12} align="center" wrap className="wand-dialog-sticky-actions">
+              <Typography.Text type="secondary">{resultNote || (hasQuickCommitChanges(status) ? "⌘/Ctrl + Enter 快速执行" : "工作区干净，无可提交改动")}</Typography.Text>
+              <Space>
+                <WandButton kind="ghost" onClick={() => quickCommitController.close()}>取消</WandButton>
+                <WandButton kind="primary" type="submit" aria-live="polite" disabled={!canCommit || submitting || submitPhase === "pending" || submitPhase === "success"}>
+                  {submitPhase === "pending" ? (form.message.trim() ? "执行中…" : "AI 生成 + 提交中…")
+                    : submitPhase === "success" || submitPhase === "error" ? submitResult : selectedMeta.verb}
                 </WandButton>
-              </div>
-              <label className="wand-quick-field" htmlFor="wand-quick-message">
-                <span>新的 Commit 信息</span>
-                <textarea className="resize-none"
-                  id="wand-quick-message"
-                  ref={messageInput}
-                  data-wand-autofocus=""
-                  rows={3}
-                  value={form.message}
-                  disabled={submitting}
-                  placeholder="留空则自动生成"
-                  onChange={(event) => setForm({ ...form, message: event.currentTarget.value })}
-                  onKeyDown={submitShortcut}
-                />
-              </label>
-              {/* 生成来源可见：默认走迭代提示词，只有没得用时才会去读完整 diff。 */}
-              {generatedFrom ? (
-                <p className="wand-quick-generated-from">
-                  {generatedFrom.source === "iteration"
-                    ? `已依据 ${generatedFrom.count} 条迭代提示词生成，没有读取代码。`
-                    : "已依据完整 diff 生成。"}
-                </p>
-              ) : null}
-              <label className="wand-quick-field" htmlFor="wand-quick-tag">
-                <span>Tag（可选）</span>
-                <input
-                  id="wand-quick-tag"
-                  type="text"
-                  value={form.tag}
-                  disabled={submitting}
-                  placeholder="选择 Tag 动作时，留空则自动生成"
-                  autoComplete="off"
-                  spellCheck={false}
-                  onChange={(event) => setForm({
-                    ...form,
-                    tag: event.currentTarget.value,
-                    tagEdited: true,
-                  })}
-                />
-              </label>
-            </section>
-            <fieldset className="wand-quick-actions">
-              <legend>执行动作</legend>
-              <div className="wand-quick-action-grid">
-                {QUICK_COMMIT_ACTIONS.map((item) => (
-                  <label
-                    key={item.action}
-                    className={action === item.action ? "is-selected" : undefined}
-                  >
-                    <input
-                      type="radio"
-                      name="wand-quick-action"
-                      value={item.action}
-                      checked={action === item.action}
-                      disabled={!hasQuickCommitChanges(status) || busy}
-                      onChange={() => setAction(item.action)}
-                    />
-                    <strong>{item.label}</strong>
-                    <span>{item.verb}</span>
-                  </label>
-                ))}
-              </div>
-              {status.hasSubmodule ? (
-                <div className="wand-quick-option-toggle">
-                  <div>
-                    <strong>包含 Submodule</strong>
-                    <span>递归执行 commit、tag 和 push。</span>
-                  </div>
-                  <WandSwitch
-                    id="wand-quick-submodule"
-                    checked={includeSubmodule}
-                    disabled={busy}
-                    ariaLabel="包含 Submodule"
-                    onCheckedChange={setIncludeSubmodule}
-                  />
-                </div>
-              ) : null}
-              <div className="wand-quick-option-toggle">
-                <div>
-                  <strong>归档关联任务</strong>
-                  <span>提交成功后，仅归档本次关联且已完成的任务。</span>
-                </div>
-                <WandSwitch
-                  id="wand-quick-archive-tasks"
-                  checked={archiveRelatedTasks}
-                  disabled={busy || !hasQuickCommitChanges(status)}
-                  ariaLabel="提交后归档关联任务"
-                  onCheckedChange={setArchiveRelatedTasks}
-                />
-              </div>
-            </fieldset>
-            {error ? <p className="wand-quick-error" role="alert">{error}</p> : null}
-          </div>
-          <footer className="wand-quick-footer">
-            <span>{resultNote || (hasQuickCommitChanges(status) ? "⌘/Ctrl + Enter 快速执行" : "工作区干净，无可提交改动")}</span>
-            <div>
-              <WandButton kind="ghost" onClick={() => quickCommitController.close()}>
-                取消
-              </WandButton>
-              <WandButton className="wand-quick-submit" kind="primary" type="submit" aria-live="polite" disabled={!canCommit || submitting || submitPhase === "pending" || submitPhase === "success"}>
-                {submitPhase === "pending"
-                  ? (form.message.trim() ? "执行中…" : "AI 生成 + 提交中…")
-                  : submitPhase === "success" || submitPhase === "error"
-                    ? submitResult
-                    : selectedMeta.verb}
-              </WandButton>
-            </div>
-          </footer>
-        </form>
-      ) : (
-        <div className="wand-quick-loading">
-          {/* 走到这里说明既没 loading 也没 status：要么这次读取失败了，要么请求被后来的
-              打开顶掉（aborted）。「没读到」不能冒充「失败」，两句分开写。 */}
-          {error
-            ? <p className="wand-quick-error" role="alert">{error}</p>
-            : <p role="status">还没有读到 Git 状态，重新打开快捷提交即可再试一次。</p>}
-        </div>
-      )}
+              </Space>
+            </Flex>
+          </Flex>
+        </TaskForm>
+      ) : error ? <Alert type="error" showIcon role="alert" title={error}/>
+        : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有读到 Git 状态，重新打开快捷提交即可再试一次。"/>}
     </WandDialogSurface>
   );
 }

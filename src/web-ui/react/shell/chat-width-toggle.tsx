@@ -1,3 +1,4 @@
+import { WandStretchTabs } from "../ui";
 // 聊天内容宽度开关：铺满 / 居中两态的分段控件。
 //
 // 放在「第一屏就能看到」的位置——独立会话在顶栏右侧、任务里在标签栏右侧
@@ -40,28 +41,12 @@ export function ChatWidthToggle({ className }: { readonly className?: string }) 
   );
   const snapshot = useUiStoreSnapshot();
   if (!snapshot.legacyVisibility.chat) return null;
-  return (
-    <div
-      className={classNames("chat-width-toggle", className)}
-      role="group"
-      aria-label="聊天内容宽度"
-    >
-      {CHAT_WIDTH_OPTIONS.map((option) => {
-        const active = option.mode === mode;
-        return (
-          <button
-            key={option.mode}
-            type="button"
-            className="chat-width-toggle-option"
-            data-active={active || undefined}
-            aria-pressed={active}
-            title={option.title}
-            onClick={() => setChatWidthMode(option.mode)}
-          >
-            {option.label}
-          </button>
-        );
-      })}
-    </div>
-  );
+  return <WandStretchTabs
+    className={classNames("chat-width-toggle", className)}
+    ariaLabel="聊天内容宽度"
+    value={mode}
+    tabs={CHAT_WIDTH_OPTIONS.map((option) => ({ value: option.mode,
+      label: <span title={option.title}>{option.label}</span> }))}
+    onValueChange={(value) => setChatWidthMode(value as ChatWidthMode)}
+  />;
 }

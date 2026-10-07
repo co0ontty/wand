@@ -1,15 +1,20 @@
+import { Flex, Menu, Skeleton, Typography } from "antd";
+import { WandUiBoundary } from "../theme";
 import * as React from "react";
 
-import { EmployeeAvatar } from "../agents/employee-avatar";
-import { getEmployeePresence } from "../agents/employee-presence";
+import { SidebarEmployeeAvatar } from "./sidebar-employee-avatar";
 import { newSessionController } from "../new-session/controller";
-import { WandIcon, WandIconButton, WandStretchTabs } from "../ui";
+import { WandButton, WandIcon, WandIconButton } from "../ui";
 import { classNames } from "../ui/class-names";
 import { ImSidebarGroup } from "../shell/im-sidebar-group";
 import { ImSidebarItem } from "../shell/im-sidebar-item";
 import { SessionProviderMark, TeamChatSessionMark } from "./session-mark";
-import { sidebarSessionLabel, workspaceSessionProvider } from "./session-order";
-import { useSidebarCollapsed } from "./sidebar-disclosure";
+import { SidebarRowMenu } from "./sidebar-row-menu";
+import { SessionMoveButton } from "./session-move-button";
+import { confirmSessionDelete } from "./session-delete-confirm";
+import { sidebarSessionLabel } from "./session-order";
+import { SidebarDisclosure, useSidebarExpansion, anchorSidebarDisclosure } from "./sidebar-disclosure";
+import { sidebarSessionState, sidebarAggregateState, sessionGlowStatus } from "./sidebar-session-state";
 import { formatTaskRecency } from "./sidebar-task-meta";
 import type { SidebarDisplayMode } from "./sidebar-display-mode";
 import {
@@ -22,109 +27,135 @@ import type { WorkspaceSessionSummary } from "./types";
 
 /**
  * 侧栏第一段「最近对话」：会话按员工 / 团队 / 终端归属分组（口径见 `sidebar-recent.ts`），
- * 与安卓首页一致——只有真有会话的归属才出现，头像与「+」都在一级行上，
- * 二级会话行不再重复员工身份。档位开关贴在这一行文字的右边（安卓「总档位」的位置）。
+ * 只有真有会话的归属才出现，头像与「+」始终在固定一级行上；
+ * 二级会话行只标实际工具。档位由公共展示控制行提供。
  */
 export interface SidebarRecentSectionProps {
   entries: readonly SidebarRecentEntry[];
   employees: readonly SidebarRecentEmployee[];
   displayMode: SidebarDisplayMode;
-  onSelectMode(mode: SidebarDisplayMode): void;
+  query?: string;
+  disabled?: boolean;
+  contactsLoading?: boolean;
+  contactsError?: string | null;
+  onReloadContacts?(): void;
+  listLoading?: boolean;
+  listError?: boolean;
   liveTitles?: Readonly<Record<string, string>>;
   selectedSessionId: string | null;
   now: number;
   onOpen(entry: SidebarRecentEntry): void;
   /** 新建员工对话前先让调用方收起侧栏浮层（原生外壳下会关抽屉）。 */
   onStartConversation?(): void;
+  /** 与目录树同一批会话动作，右键 / 长按 / Shift+F10 打开；缺失时不提供菜单。 */
+  onArchiveSession?(sessionId: string, archived: boolean): Promise<void>;
+  onDeleteSession?(session: WorkspaceSessionSummary, label: string): Promise<void>;
 }
-
-const FOLD_TABS: ReadonlyArray<{ value: SidebarDisplayMode; label: string }> = [
-  { value: "full", label: "展开" },
-  { value: "folded", label: "收起" },
-  { value: "active", label: "在跑" },
-];
 
 export function SidebarRecentSection({
   entries,
   employees,
   displayMode,
-  onSelectMode,
+  query = "",
+  disabled = false,
+  contactsLoading = false,
+  contactsError = null,
+  onReloadContacts,
+  listLoading = false,
+  listError = false,
   liveTitles,
   selectedSessionId,
   now,
   onOpen,
   onStartConversation,
+  onArchiveSession,
+  onDeleteSession,
 }: SidebarRecentSectionProps): React.ReactElement {
   const groups = React.useMemo(
     () => recentConversationGroups(entries, { employees }),
     [entries, employees],
   );
   const [pickerOpen, setPickerOpen] = React.useState(false);
+  const pickerButton = React.useRef<HTMLButtonElement>(null);
+  const pickerId = React.useId();
+  React.useEffect(() => { setPickerOpen(false); }, [displayMode, disabled, query]);
+  const cancelPicker = (): void => {
+    pickerButton.current?.focus({ preventScroll: true });
+    setPickerOpen(false);
+  };
   const startConversation = React.useCallback((employeeId?: string): void => {
     setPickerOpen(false);
     onStartConversation?.();
     newSessionController.open(employeeId ? { initialEmployeeId: employeeId } : {});
   }, [onStartConversation]);
-  // 收起路径：Esc 与再点触发点都能关掉联系人选择。
-  React.useEffect(() => {
-    if (!pickerOpen) return;
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      setPickerOpen(false);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [pickerOpen]);
 
   return (
-    <section className="sidebar-recent" aria-label="最近对话">
-      <div className="sidebar-section-head">
-        <h3 className="sidebar-section-title">最近对话</h3>
+    <section className="sidebar-recent" aria-label="最近对话" onKeyDown={(event) => {
+      if (event.key !== "Escape" || !pickerOpen || event.defaultPrevented
+        || event.nativeEvent.isComposing) return;
+      event.preventDefault();
+      event.stopPropagation();
+      cancelPicker();
+    }}>
+      <Flex align="center" justify="space-between" gap="small" className="sidebar-section-head" style={{ paddingBlock: 8 }}>
+        <Typography.Text strong className="sidebar-section-title">最近对话</Typography.Text>
         <WandIconButton
+          ref={pickerButton}
           className={classNames("sidebar-section-add", pickerOpen && "is-open")}
           title={pickerOpen ? "收起联系人" : "新建员工对话"}
           aria-label={pickerOpen ? "收起联系人" : "新建员工对话"}
           aria-expanded={pickerOpen}
-          onClick={() => setPickerOpen((value) => !value)}
+          aria-controls={pickerId}
+          disabled={disabled}
+          onClick={(event) => anchorSidebarDisclosure(event.currentTarget,
+            () => pickerOpen ? cancelPicker() : setPickerOpen(true))}
         >
-          <WandIcon name={pickerOpen ? "close" : "plus"} size={14}/>
+          <WandIcon name="plus" size={16} className="sidebar-plus-morph"/>
         </WandIconButton>
-        <WandStretchTabs
-          className="sidebar-fold-switch"
-          ariaLabel="会话显示档位"
-          tabs={FOLD_TABS.map((tab) => ({ value: tab.value, label: tab.label }))}
-          value={displayMode}
-          onValueChange={(value) => onSelectMode(value as SidebarDisplayMode)}
-        />
-      </div>
-      <div className={classNames("sidebar-contact-picker", pickerOpen && "is-open")} inert={!pickerOpen}>
+
+      </Flex>
+      <SidebarDisclosure id={pickerId} open={pickerOpen}>
+      <div className="sidebar-contact-picker">
         <div className="sidebar-contact-picker-inner">
           <p className="sidebar-contact-picker-hint">点一位员工开始新对话</p>
-          <div className="sidebar-contact-picker-list">
+          <Flex vertical gap={4} className="sidebar-contact-picker-list">
             {employees.map((employee) => (
-              <button
+              <WandButton kind="ghost"
                 key={employee.id}
                 type="button"
                 className="sidebar-contact-picker-item"
-                title={employee.duty || employee.name}
+                style={{ height: "auto", width: "100%", minWidth: 0, justifyContent: "flex-start", whiteSpace: "normal", padding: 8 }}
+                title={[employee.name, employee.duty].filter(Boolean).join(" · ")}
                 onClick={() => startConversation(employee.id)}
               >
-                <EmployeeAvatar employee={employee} size="sm"/>
-                <span className="sidebar-contact-picker-name">{employee.name}</span>
-                <span className="sidebar-contact-picker-duty">{employee.duty || "员工"}</span>
-              </button>
+                <span className="sidebar-contact-avatar"><SidebarEmployeeAvatar employee={employee}/></span>
+                <Typography.Text ellipsis className="sidebar-contact-picker-name" title={employee.name} style={{ flex: 1, textAlign: "start" }}>{employee.name}</Typography.Text>
+                <Typography.Text ellipsis type="secondary" className="sidebar-contact-picker-duty" style={{ maxWidth: 100, fontSize: 12 }}>{employee.duty || "员工"}</Typography.Text>
+              </WandButton>
             ))}
-            {employees.length === 0 ? <p className="sidebar-section-empty">还没有硅基员工。</p> : null}
-          </div>
+            {contactsLoading || contactsError ? (
+              <div className="sidebar-contact-state" role={contactsError ? "alert" : "status"}
+                aria-busy={contactsLoading}>
+                <span>{contactsLoading ? "正在加载联系人…" : "联系人加载失败"}</span>
+                <WandButton kind="ghost" type="button" disabled={contactsLoading} onClick={onReloadContacts}>重试</WandButton>
+              </div>
+            ) : employees.length === 0 ? (
+              <p className="sidebar-contact-state">还没有硅基员工，可从AI团队管理。</p>
+            ) : null}
+          </Flex>
         </div>
       </div>
-      {groups.length === 0 ? (
+      </SidebarDisclosure>
+      {listLoading && groups.length === 0 ? (
+        <div role="status" aria-label="正在加载最近对话" aria-busy="true">
+          <WandUiBoundary><Skeleton active title={false} paragraph={{ rows: 2 }}/></WandUiBoundary>
+        </div>
+      ) : groups.length === 0 && (listError || query.trim() || displayMode === "active") ? null : groups.length === 0 ? (
         <p className="sidebar-section-empty">
-          {displayMode === "active" ? "现在没有在跑或等你处理的会话。" : "还没有对话。"}
+          {displayMode === "active" ? "现在没有在跑、待处理或刚完成的会话。" : "还没有对话，点＋选择员工开始。"}
         </p>
       ) : (
-        <div className="sidebar-recent-groups">
+        <Flex vertical gap={4} className="sidebar-recent-groups">
           {groups.map((group) => (
             <RecentConversationGroup
               key={group.key}
@@ -136,9 +167,12 @@ export function SidebarRecentSection({
               now={now}
               onOpen={onOpen}
               onStartConversation={startConversation}
+              onArchiveSession={onArchiveSession}
+              onDeleteSession={onDeleteSession}
+              disabled={disabled}
             />
           ))}
-        </div>
+        </Flex>
       )}
     </section>
   );
@@ -153,6 +187,9 @@ function RecentConversationGroup({
   now,
   onOpen,
   onStartConversation,
+  onArchiveSession,
+  onDeleteSession,
+  disabled = false,
 }: {
   group: SidebarRecentGroup;
   employees: readonly SidebarRecentEmployee[];
@@ -162,55 +199,101 @@ function RecentConversationGroup({
   now: number;
   onOpen(entry: SidebarRecentEntry): void;
   onStartConversation(employeeId?: string): void;
+  onArchiveSession?(sessionId: string, archived: boolean): Promise<void>;
+  onDeleteSession?(session: WorkspaceSessionSummary, label: string): Promise<void>;
+  disabled?: boolean;
 }): React.ReactElement {
-  const [collapsed, toggleCollapsed] = useSidebarCollapsed(`recent.${group.key}`, false);
-  // 收起档下点一级行临时展开本组内容，再点恢复；不写全局档位（和任务行同一口径）。
-  const [expandedInFolded, toggleExpandedInFolded] = useSidebarCollapsed(`recentFolded.${group.key}`, false);
-  const open = displayMode === "folded"
-    ? !collapsed && expandedInFolded
-    : displayMode === "active"
-      ? true
-      : !collapsed;
-  const toggleOpen = displayMode === "folded" ? toggleExpandedInFolded : toggleCollapsed;
+  const [open, setOpen] = useSidebarExpansion(`recent.${group.key}`);
+  const [menuSessionId, setMenuSessionId] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState(false);
+  const activity = sidebarAggregateState(group.entries.map((entry) => entry.session));
+  // 右键菜单与目录树是同一批动作；确认走公共对话框，不复制一套内联确认。
+  const hasMenu = Boolean(onArchiveSession || onDeleteSession);
+  const confirmDelete = async (session: WorkspaceSessionSummary, label: string): Promise<void> => {
+    if (!await confirmSessionDelete(label)) return;
+    setBusy(true);
+    try {
+      await onDeleteSession?.(session, label);
+      setMenuSessionId(null);
+    } finally {
+      setBusy(false);
+    }
+  };
 
-  const rows = group.entries.map((entry, index) => (
-    <ImSidebarItem
-      key={entry.session.id}
-      id={entry.session.id}
-      title={sidebarSessionLabel(entry.session, index, liveTitles?.[entry.session.id])}
-      // 一级行承载身份；组头已经在上面交代身份时，二级行只标这一条会话是哪个工具跑的。
-      avatarNode={group.showsHeader
-        ? <SecondaryRowMark entry={entry} group={group}/>
-        : <GroupMark group={group} employees={employees}/>}
-      presence={getEmployeePresence({
-        hasSession: true,
-        status: entry.session.status,
-        inFlight: entry.session.inFlight,
-      })}
-      summary={entrySummary(entry, group, now)}
-      active={selectedSessionId === entry.session.id}
-      onClick={() => onOpen(entry)}
-    />
-  ));
-
-  // 员工 / CLI 只有一条会话：一级行就是那张会话卡（头像仍在一级行上），不套空壳组头。
-  if (!group.showsHeader) {
-    return (
-      <div className="sidebar-recent-flat">
-        <div className="sidebar-recent-flat-main">{rows}</div>
-        <GroupCreateButton group={group} onStartConversation={onStartConversation} flat/>
-      </div>
+  const rows = group.entries.map((entry, index) => {
+    const session = entry.session;
+    const label = sidebarSessionLabel(session, index, liveTitles?.[session.id]);
+    const archived = session.archived === true;
+    const item = (
+      <ImSidebarItem
+        id={session.id}
+        title={label}
+        avatarNode={<SecondaryRowMark entry={entry} group={group}/>}
+        state={sidebarSessionState(session)}
+        glow={sessionGlowStatus(session)}
+        summary={entrySummary(entry, group, now)}
+        active={selectedSessionId === session.id}
+        onClick={() => onOpen(entry)}
+      />
     );
-  }
+    if (!hasMenu) return <React.Fragment key={session.id}>{item}</React.Fragment>;
+    return (
+      <SidebarRowMenu
+        key={session.id}
+        row={<div className="sidebar-recent-row">{item}</div>}
+        open={menuSessionId === session.id}
+        disabled={disabled || busy}
+        onOpenChange={(next) => setMenuSessionId(next ? session.id : null)}
+        label={`会话 ${label} 的操作`}
+        className="workspace-session-menu"
+      >
+        {!archived && (
+          <SessionMoveButton menuItem sessionId={session.id} taskId={session.workspaceTaskId}
+            intoNewTask={session.workspaceTaskId ? undefined : entry.group}
+            onMoved={() => setMenuSessionId(null)}/>
+        )}
+        <Menu selectable={false} items={[
+          ...(onArchiveSession ? [{
+            key: "archive", disabled: busy, icon: <WandIcon name={archived ? "resume" : "archive"}/>,
+            label: archived ? "恢复会话" : "归档会话",
+          }] : []),
+          ...(onDeleteSession ? [{
+            key: "delete", disabled: busy, danger: true, icon: <WandIcon name="trash"/>,
+            label: "删除会话…",
+          }] : []),
+        ]} onClick={({ key }) => {
+          if (key === "archive") {
+            void (async () => {
+              setBusy(true);
+              try {
+                await onArchiveSession?.(session.id, !archived);
+                setMenuSessionId(null);
+              } finally {
+                setBusy(false);
+              }
+            })();
+          } else if (key === "delete") {
+            // 同目录树：确认层打开时不再留着行菜单。
+            setMenuSessionId(null);
+            void confirmDelete(session, label);
+          }
+        }}/>
+      </SidebarRowMenu>
+    );
+  });
+
   return (
     <ImSidebarGroup
       label={group.title}
       count={group.entries.length}
-      hasAttention={group.activeCount > 0}
+      description={activity.description}
+      activity={activity}
+      containsCurrent={group.entries.some((entry) => entry.session.id === selectedSessionId)}
       avatarNode={<GroupMark group={group} employees={employees}/>}
       action={<GroupCreateButton group={group} onStartConversation={onStartConversation}/>}
       expanded={open}
-      onToggle={toggleOpen}
+      onToggle={() => setOpen(!open)}
+      onSetOpen={setOpen}
     >
       {rows}
     </ImSidebarGroup>
@@ -221,16 +304,14 @@ function RecentConversationGroup({
 function GroupCreateButton({
   group,
   onStartConversation,
-  flat = false,
 }: {
   group: SidebarRecentGroup;
   onStartConversation(employeeId?: string): void;
-  flat?: boolean;
 }): React.ReactElement | null {
   if (group.kind === "employee") {
     return (
       <WandIconButton
-        className={classNames("sidebar-recent-add", flat && "is-flat")}
+        className="sidebar-recent-add"
         title={`与${group.title}新建对话`}
         aria-label={`与${group.title}新建对话`}
         onClick={() => onStartConversation(group.employeeId ?? undefined)}
@@ -243,7 +324,7 @@ function GroupCreateButton({
     const blank = group.kind === "blank-terminal";
     return (
       <WandIconButton
-        className={classNames("sidebar-recent-add", flat && "is-flat")}
+        className="sidebar-recent-add"
         title={blank ? "新建空白终端" : "新建终端"}
         aria-label={blank ? "新建空白终端" : "新建终端"}
         onClick={() => {
@@ -260,10 +341,7 @@ function GroupCreateButton({
 
 function entrySummary(entry: SidebarRecentEntry, group: SidebarRecentGroup, now: number): string {
   const recency = formatTaskRecency(entry.session.startedAt ?? "", now);
-  // 有组头时组名（也就是归属）已经写在一级行上，这里补上下文；单条会话的行要把归属自己带上。
-  const parts = group.showsHeader
-    ? [entry.taskName || entry.group.workspaceName, recency]
-    : [group.title, recency];
+  const parts = [entry.taskName || entry.group.workspaceName, recency];
   return parts.filter(Boolean).join(" · ");
 }
 
@@ -280,10 +358,10 @@ function GroupMark({
     // 员工改名 / 换头像后按当前定义显示，定义被删才退回会话快照。
     const employee = employees.find((candidate) => candidate.id === group.employeeId)
       ?? employeeSnapshot(session, group.title);
-    return <EmployeeAvatar employee={employee} size="md"/>;
+    return <SidebarEmployeeAvatar employee={employee}/>;
   }
   if (session?.teamChat) return <TeamChatSessionMark teamChat={session.teamChat}/>;
-  if (group.kind === "team") return <WandIcon name="parallel" size={19}/>;
+  if (group.kind === "team") return <WandIcon name="parallel" size={18}/>;
   if (session) return <SessionProviderMark session={session} size={18} className="sidebar-recent-provider"/>;
   return <WandIcon name="terminal" size={18} className="sidebar-recent-provider"/>;
 }
@@ -298,8 +376,8 @@ function SecondaryRowMark({
 }): React.ReactElement {
   const session = entry.session;
   if (session.teamChat) return <TeamChatSessionMark teamChat={session.teamChat}/>;
-  if (group.kind === "team") return <WandIcon name="parallel" size={17} className="sidebar-recent-provider"/>;
-  return <SessionProviderMark session={session} size={16} className="sidebar-recent-provider"/>;
+  if (group.kind === "team") return <WandIcon name="parallel" size={14} className="sidebar-recent-provider"/>;
+  return <SessionProviderMark session={session} size={14} className="sidebar-recent-provider"/>;
 }
 
 function employeeSnapshot(

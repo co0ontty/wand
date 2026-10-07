@@ -1,7 +1,10 @@
+import { WandButton } from "../ui";
+import { Alert, Badge, Checkbox, Card, Collapse, Descriptions, Empty, Flex, List, Tag, Progress, Dropdown, Typography } from "antd";
 import * as React from "react";
 import type { WandTaskAgent, WandTaskPriority, WandTaskStatus } from "../../../task-types";
 import { ProviderLogo } from "../provider-logo";
-import { WandIcon, WandIconButton, WandMenuItem, WandPopover, WandStretchTabs, WandSwitch } from "../ui";
+import { WandIcon, WandIconButton, WandPopover, WandStretchTabs, WandSwitch } from "../ui";
+import { isWandPopupOwnedBy, usePopupDismiss } from "../ui/popup-lifecycle";
 import { classNames } from "../ui/class-names";
 import {
   collectIssueLabels,
@@ -23,13 +26,13 @@ import {
   issueFilterCount,
   issueGanttRange,
   issueGanttSpan,
+  isoDate,
   issueHideStatusFilterLabel,
   issueIsOverdue,
   issueLabelColor,
   issueLabelName,
   issueLabelTone,
   issuePriorityLabel,
-  issueProgressSeries,
   issueSessionRunning,
   issueStatusLabel,
   listIssueAgents,
@@ -65,21 +68,16 @@ export function TaskBoardPriorityChip({
   interactive?: boolean;
 }): React.ReactElement | null {
   if (priority === "none" && !interactive) return null;
-  return <span className={`task-board-priority is-${priority}`}>
+  return <Tag className={`task-board-priority is-${priority}`}>
     <TaskBoardPriorityIcon priority={priority} size={14}/>
     {issuePriorityLabel(priority)}
-  </span>;
+  </Tag>;
 }
 
 export function TaskBoardLabelChip({ label }: { label: string }): React.ReactElement {
   const tone = issueLabelTone(label);
-  return <span
-    className={classNames("task-board-label", tone && `is-${tone}`)}
-    style={tone ? undefined : { "--label-color": issueLabelColor(label) } as React.CSSProperties}
-  >
-    <i aria-hidden="true"/>
-    <span>{issueLabelName(label)}</span>
-  </span>;
+  return <Tag className={classNames("task-board-label", tone && `is-${tone}`)}
+    color={issueLabelColor(label)}>{issueLabelName(label)}</Tag>;
 }
 
 export function TaskBoardConversationButton({
@@ -93,7 +91,7 @@ export function TaskBoardConversationButton({
   if (sessions.length === 0) return null;
   const multiple = sessions.length > 1;
   if (!multiple) {
-    return <button
+    return <WandButton kind="ghost"
       type="button"
       className="task-board-conversation"
       title={sessions[0]!.title || sessions[0]!.id}
@@ -104,7 +102,7 @@ export function TaskBoardConversationButton({
       }}
     >
       <TaskBoardConversationIcon size={16}/>
-    </button>;
+    </WandButton>;
   }
   return <WandPopover
     align="end"
@@ -112,7 +110,7 @@ export function TaskBoardConversationButton({
     sideOffset={6}
     ariaLabel="关联会话"
     className="task-board-conversation-menu"
-    trigger={<button
+    trigger={<WandButton kind="ghost"
       type="button"
       className="task-board-conversation is-multiple"
       aria-label={`查看 ${sessions.length} 个会话`}
@@ -120,10 +118,10 @@ export function TaskBoardConversationButton({
     >
       <TaskBoardConversationIcon size={16}/>
       <span>+{sessions.length}</span>
-    </button>}
+    </WandButton>}
   >
     <div className="task-board-conversation-menu-heading">关联会话</div>
-    {sessions.map((session) => <button
+    {sessions.map((session) => <WandButton kind="ghost"
       key={session.id}
       type="button"
       role="menuitem"
@@ -134,7 +132,7 @@ export function TaskBoardConversationButton({
         <strong>{session.title || issueAgentProviderLabel(session.provider)}</strong>
         <small>{issueAgentProviderModelLine({ provider: session.provider, model: session.model }, catalog)}</small>
       </span>
-    </button>)}
+    </WandButton>)}
   </WandPopover>;
 }
 
@@ -147,23 +145,20 @@ export function TaskBoardProcessingRow({
 }): React.ReactElement | null {
   if (task.status !== "doing") return null;
   const running = task.sessions.some((session) => issueSessionRunning(session.status));
-  return <div className={classNames("task-board-processing", running && "is-running")}>
+  return <Flex align="center" gap="small" className={classNames("task-board-processing", running && "is-running")}>
     {running ? <TaskBoardProcessingGlyph/> : null}
     <span className="task-board-processing-label">{running ? "正在处理..." : task.sessions.length > 0 ? "暂停处理" : "等待派发"}</span>
-    <span className="task-board-processing-spacer" aria-hidden="true"/>
+    <span style={{ flex: 1 }} aria-hidden="true"/>
     <TaskBoardConversationButton sessions={task.sessions} onOpen={onOpenSession}/>
-  </div>;
+  </Flex>;
 }
 
 export function TaskBoardProgressRow({ task }: { task: WandTaskListed }): React.ReactElement | null {
-  if (task.status !== "doing") return null;
-  const total = Math.max(4, task.sessions.length + 2);
-  const completed = task.sessions.filter((session) => session.status === "exited" || session.status === "idle").length;
-  return <div className="task-board-progress-row">
-    <div className={classNames("task-board-progress-segments", task.sessions.some((session) => issueSessionRunning(session.status)) && "is-running")} aria-hidden="true">
-      {Array.from({ length: total }, (_, index) => <span key={index} className={index < completed ? "is-complete" : undefined}/>)}
-    </div>
-  </div>;
+  if (task.status !== "doing" || task.sessions.length === 0) return null;
+  const running = task.sessions.filter((session) => issueSessionRunning(session.status)).length;
+  return <Typography.Text type="secondary" className="task-board-progress-row">
+    {running > 0 ? `${running} 个会话运行中 · 共 ${task.sessions.length} 个关联会话` : `${task.sessions.length} 个关联会话`}
+  </Typography.Text>;
 }
 
 export function TaskBoardFilterMenu({
@@ -196,39 +191,24 @@ export function TaskBoardFilterMenu({
   >
     <strong>筛选</strong>
     <p>状态</p>
-    {ISSUE_STATUS_FILTERS.map((column) => <label key={column.status}>
-      <input
-        type="checkbox"
-        checked={filters.statuses.includes(column.status)}
-        onChange={() => onChange({ ...filters, statuses: toggleValue(column.status, filters.statuses) })}
-      />
+    {ISSUE_STATUS_FILTERS.map((column) => <Checkbox key={column.status} checked={filters.statuses.includes(column.status)} onChange={() => onChange({ ...filters, statuses: toggleValue(column.status, filters.statuses) })}>
       <TaskBoardStatusIcon status={column.status} size={14}/>
       {column.label}
-    </label>)}
+    </Checkbox>)}
     <p>优先级</p>
-    {ISSUE_PRIORITIES.map((entry) => <label key={entry.value}>
-      <input
-        type="checkbox"
-        checked={filters.priorities.includes(entry.value)}
-        onChange={() => onChange({ ...filters, priorities: toggleValue(entry.value, filters.priorities) })}
-      />
+    {ISSUE_PRIORITIES.map((entry) => <Checkbox key={entry.value} checked={filters.priorities.includes(entry.value)} onChange={() => onChange({ ...filters, priorities: toggleValue(entry.value, filters.priorities) })}>
       <TaskBoardPriorityIcon priority={entry.value} size={14}/>
       {entry.label}
-    </label>)}
+    </Checkbox>)}
     {labels.length > 0 && <>
       <p>标签</p>
-      {labels.map((label) => <label key={label}>
-        <input
-          type="checkbox"
-          checked={filters.labels.includes(label)}
-          onChange={() => onChange({ ...filters, labels: toggleValue(label, filters.labels) })}
-        />
+      {labels.map((label) => <Checkbox key={label} checked={filters.labels.includes(label)} onChange={() => onChange({ ...filters, labels: toggleValue(label, filters.labels) })}>
         <TaskBoardLabelChip label={label}/>
-      </label>)}
+      </Checkbox>)}
     </>}
-    {count > 0 && <button type="button" className="task-board-filter-clear" onClick={() => onChange(EMPTY_ISSUE_FILTERS)}>
+    {count > 0 && <WandButton kind="ghost" type="button" className="task-board-filter-clear" onClick={() => onChange(EMPTY_ISSUE_FILTERS)}>
       清除筛选
-    </button>}
+    </WandButton>}
   </WandPopover>;
 }
 
@@ -258,11 +238,7 @@ export function TaskBoardDisplayMenu({
     <p>主列</p>
     {ISSUE_COLUMNS.map((column) => {
       const checked = display.mainStatuses.includes(column.status);
-      return <label key={column.status} className="task-board-display-status">
-        <input
-          type="checkbox"
-          checked={checked}
-          onChange={() => {
+      return <Checkbox key={column.status} className="task-board-display-status" checked={checked} onChange={() => {
             const mainStatuses = checked
               ? display.mainStatuses.filter((status) => status !== column.status)
               : [...display.mainStatuses, column.status];
@@ -270,11 +246,10 @@ export function TaskBoardDisplayMenu({
               ...display,
               mainStatuses: mainStatuses.length > 0 ? mainStatuses : [column.status],
             });
-          }}
-        />
+          }}>
         <TaskBoardStatusIcon status={column.status} size={14}/>
         {column.label}
-      </label>;
+      </Checkbox>;
     })}
   </WandPopover>;
 }
@@ -283,26 +258,39 @@ export function TaskBoardArchiveFolder({
   count,
   open,
   onToggle,
+  onPurge,
+  purging = false,
   children,
 }: {
   count: number;
   open: boolean;
   onToggle(): void;
+  /** 「清空归档」入口；省略时目录只展示，不提供批量删除。 */
+  onPurge?(): void;
+  purging?: boolean;
   children: React.ReactNode;
 }): React.ReactElement | null {
   if (count === 0) return null;
   return <div className="task-board-archive-folder">
-    <button
-      type="button"
-      className="task-board-archive-header"
-      aria-expanded={open}
-      onClick={onToggle}
-    >
-      <WandIcon name={open ? "chevron" : "chevronLeft"} size={12}/>
-      <TaskBoardFolderIcon size={13}/>
-      <strong>{ISSUE_ARCHIVE_COLUMN.label}</strong>
-      <span>{count}</span>
-    </button>
+    <div className="task-board-archive-heading" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+      <WandButton kind="ghost"
+        type="button"
+        className="task-board-archive-header"
+        style={{ flex: 1, minWidth: 0, justifyContent: "flex-start" }}
+        aria-expanded={open}
+        onClick={onToggle}
+      >
+        <WandIcon name={open ? "chevron" : "chevronLeft"} size={12}/>
+        <TaskBoardFolderIcon size={13}/>
+        <strong>{ISSUE_ARCHIVE_COLUMN.label}</strong>
+        <span>{count}</span>
+      </WandButton>
+      {onPurge ? <WandButton kind="ghost" size="small" type="button" className="task-board-archive-purge"
+        disabled={purging}
+        title="永久删除归档目录里的全部任务，无法恢复"
+        onClick={onPurge}
+      >{purging ? "清理中…" : "清空归档"}</WandButton> : null}
+    </div>
     {open ? children : null}
   </div>;
 }
@@ -319,6 +307,14 @@ function sessionStatusLabel(status: string): string {
   if (status === "exited" || status === "stopped") return "已结束";
   if (status === "failed") return "失败";
   return status || "会话";
+}
+
+function taskSessionGlow(status: string): string {
+  if (issueSessionRunning(status)) return "running";
+  if (status === "thinking") return "thinking";
+  if (status === "waiting-input" || status === "waiting_input") return "waiting-input";
+  if (status === "failed") return "failed";
+  return "none";
 }
 
 /**
@@ -370,14 +366,14 @@ function TaskBoardListRow({
 }): React.ReactElement {
   const description = task.description.trim();
   const triggerRef = React.useMemo(() => bindTrigger(task.id), [bindTrigger, task.id]);
-  return <article
+  return <Card
     className={classNames("task-board-list-row", expanded && "is-open", task.status === "archived" && "is-archived")}
     onClick={(event) => {
       if ((event.target as HTMLElement).closest("button, a")) return;
       onToggle();
     }}
   >
-    <button
+    <WandButton kind="ghost"
       type="button"
       ref={triggerRef}
       className="task-board-list-title"
@@ -389,8 +385,8 @@ function TaskBoardListRow({
       <WandIcon name="chevron" size={12} className="task-board-list-chevron"/>
       <small>{task.identifier}{parentLabel ? ` ↳ ${parentLabel}` : ""}</small>
       <strong>{task.title}</strong>
-    </button>
-    <span className="task-board-list-meta">
+    </WandButton>
+    <Flex wrap align="center" gap={4} className="task-board-list-meta">
       <TaskBoardPriorityChip priority={task.priority}/>
       {task.milestone ? <TaskBoardMilestoneChip name={task.milestone.name}/> : null}
       {task.labels.slice(0, 2).map((label) => <TaskBoardLabelChip key={label} label={label}/>)}
@@ -398,33 +394,44 @@ function TaskBoardListRow({
       <span>{task.workspace?.name ?? "未归属工作区"}</span>
       <TaskBoardConversationButton sessions={task.sessions} onOpen={onOpenSession}/>
       <time>{formatIssueStamp(task.updatedAt)}</time>
-    </span>
-    <div className="task-board-list-detail" id={`task-list-detail-${task.id}`} inert={!expanded}>
+    </Flex>
+    <Collapse bordered={false} ghost activeKey={expanded ? ["details"] : []}
+      styles={{ header: { display: "none" }, body: { padding: 0 } }}
+      items={[{ key: "details", label: "任务详情", forceRender: true, showArrow: false, children: <div className="task-board-list-detail" id={`task-list-detail-${task.id}`} inert={!expanded}>
       <div className="task-board-list-detail-inner">
         <p>
           <span>{issueStatusLabel(task.status)}</span>
           <span>更新于 {formatIssueStamp(task.updatedAt)}</span>
         </p>
-        {description ? <p className="task-board-list-description">{description}</p> : null}
+        {description ? <Typography.Paragraph className="task-board-list-description" ellipsis={{ rows: 4, expandable: "collapsible", symbol: (expanded) => expanded ? "收起全文" : "展开全文" }} style={{ whiteSpace: "pre-wrap", margin: "8px 0" }}>{description}</Typography.Paragraph> : null}
+        <div aria-label="全部任务标签">{task.labels.map((label) => <TaskBoardLabelChip key={label} label={label}/>)}</div>
+        {task.workspace?.cwd && <p><code>{task.workspace.cwd}</code></p>}
         {task.sessions.length > 0 ? (
           <ul>
-            {task.sessions.map((session) => (
-              <li key={session.id}>
-                <button type="button" onClick={() => onOpenSession?.(session.id)}>
-                  <ProviderLogo provider={session.provider} className="task-board-agent-logo"/>
-                  <span>{session.title || issueAgentProviderLabel(session.provider)}</span>
-                  <small>{sessionStatusLabel(session.status)}</small>
-                </button>
-              </li>
-            ))}
+            {task.sessions.map((session) => {
+              const glow = taskSessionGlow(session.status);
+              return (
+                <li key={session.id}>
+                  <WandButton kind="ghost" type="button" onClick={() => onOpenSession?.(session.id)} data-session-glow={glow}>
+                    <ProviderLogo
+                      provider={session.provider}
+                      className={classNames("task-board-agent-logo", glow !== "none" && `wand-logo-glow glow-${glow}`)}
+                    />
+                    <span>{session.title || issueAgentProviderLabel(session.provider)}</span>
+                    <small>{sessionStatusLabel(session.status)}</small>
+                    <code>{session.cwd}</code>
+                  </WandButton>
+                </li>
+              );
+            })}
           </ul>
         ) : <p className="task-board-list-description">还没有关联会话</p>}
-        <button type="button" className="task-board-list-open" onClick={() => onOpen(task.id)}>
+        <WandButton kind="ghost" type="button" className="task-board-list-open" onClick={() => onOpen(task.id)}>
           查看详情
-        </button>
+        </WandButton>
       </div>
-    </div>
-  </article>;
+    </div> }]}/>
+  </Card>;
 }
 
 /**
@@ -450,45 +457,54 @@ export function TaskBoardCardDetail({
   onOpenSession?: (sessionId: string) => void;
 }): React.ReactElement {
   const description = task.description.trim();
+  const catalog = useWandModelCatalog();
   const agent = task.agent;
   const assignee = agent
     ? `${issueAgentProviderLabel(agent.provider)} · ${issueAgentModeLabel(agent.mode)}`
     : "未指派";
-  return <div className="task-board-card-detail" id={`task-card-detail-${task.id}`} inert={!open}>
-    <div className="task-board-card-detail-inner">
-      <dl className="task-board-card-detail-fields">
-        <div><dt>状态</dt><dd>{issueStatusLabel(task.status)}</dd></div>
-        <div><dt>负责人</dt><dd>{assignee}</dd></div>
-        <div><dt>迭代</dt><dd>{task.milestone?.name ?? "默认迭代"}</dd></div>
-        <div><dt>截止</dt><dd>{task.dueDate ? issueDueStamp(task.dueDate) : "未设置"}</dd></div>
-        <div><dt>更新</dt><dd>{formatIssueStamp(task.updatedAt)}</dd></div>
-        {parentLabel ? <div><dt>父任务</dt><dd>{parentLabel}</dd></div> : null}
-        {childCount > 0 ? <div><dt>子任务</dt><dd>{childCount} 个</dd></div> : null}
-      </dl>
-      <p className="task-board-card-detail-body">{description || "还没有填写任务说明。"}</p>
-      {task.sessions.length > 0 ? (
-        <ul className="task-board-card-detail-sessions">
-          {task.sessions.map((session) => (
-            <li key={session.id}>
-              <button type="button" onClick={() => onOpenSession?.(session.id)} title={session.cwd}>
-                <ProviderLogo provider={session.provider} className="task-board-agent-logo"/>
-                <span>{session.title || issueAgentProviderLabel(session.provider)}</span>
-                <small>{sessionStatusLabel(session.status)}</small>
-              </button>
-            </li>
-          ))}
-        </ul>
-      ) : <p className="task-board-card-detail-note">还没有关联会话。</p>}
-      <div className="task-board-card-detail-actions">
-        <button type="button" className="task-board-card-detail-open" onClick={() => onOpen(task.id)}>
-          查看完整详情
-        </button>
-        <button type="button" className="task-board-card-detail-collapse" onClick={onCollapse}>
-          收起
-        </button>
-      </div>
-    </div>
-  </div>;
+  const fields = [
+    { key: "status", label: "状态", children: issueStatusLabel(task.status) },
+    { key: "assignee", label: "负责人", children: assignee },
+    { key: "priority", label: "优先级", children: issuePriorityLabel(task.priority) },
+    { key: "workspace", label: "项目", children: <Flex vertical><span>{task.workspace?.name ?? "未归属工作区"}</span>{task.workspace?.cwd && <Typography.Text code>{task.workspace.cwd}</Typography.Text>}</Flex> },
+    ...(agent ? [{ key: "model", label: "模型", children: `${issueAgentProviderModelLine(agent, catalog)} · ${issueAgentEffortLabel(agent.thinkingEffort)}` }] : []),
+    { key: "milestone", label: "迭代", children: task.milestone?.name ?? "默认迭代" },
+    { key: "due", label: "截止", children: task.dueDate ? issueDueStamp(task.dueDate) : "未设置" },
+    { key: "updated", label: "更新", children: formatIssueStamp(task.updatedAt) },
+    ...(parentLabel ? [{ key: "parent", label: "父任务", children: parentLabel }] : []),
+    ...(childCount > 0 ? [{ key: "children", label: "子任务", children: `${childCount} 个` }] : []),
+  ];
+  return <Collapse bordered={false} ghost activeKey={open ? ["details"] : []}
+    styles={{ header: { display: "none" }, body: { padding: 0 } }}
+    items={[{ key: "details", label: "任务详情", showArrow: false, forceRender: true, children:
+      <div className="task-board-card-detail" id={`task-card-detail-${task.id}`} inert={!open}>
+        <Flex vertical gap="middle" className="task-board-card-detail-inner">
+          <Descriptions size="small" column={1} items={fields}/>
+          {task.labels.length > 0 && <Flex wrap gap={4} aria-label="全部任务标签">{task.labels.map((label) => <TaskBoardLabelChip key={label} label={label}/>)}</Flex>}
+          <Typography.Paragraph ellipsis={{ rows: 4, expandable: "collapsible", symbol: (expanded) => expanded ? "收起全文" : "展开全文" }} style={{ whiteSpace: "pre-wrap", margin: 0 }}>{description || "还没有填写任务说明。"}</Typography.Paragraph>
+          {task.sessions.length > 0 ? <List size="small" className="task-board-card-detail-sessions" dataSource={task.sessions}
+            renderItem={(session) => {
+              const glow = taskSessionGlow(session.status);
+              return <List.Item>
+                <WandButton kind="ghost" type="button" onClick={() => onOpenSession?.(session.id)} title={session.cwd} data-session-glow={glow}
+                  style={{ height: "auto", width: "100%", justifyContent: "flex-start", textAlign: "left", whiteSpace: "normal" }}>
+                  <Badge status={glow === "failed" ? "error" : glow === "none" ? "default" : "processing"}><ProviderLogo provider={session.provider}/></Badge>
+                  <Flex vertical align="flex-start" style={{ minWidth: 0 }}>
+                    <Typography.Text>{session.title || issueAgentProviderLabel(session.provider)}</Typography.Text>
+                    <Typography.Text type="secondary">{sessionStatusLabel(session.status)}</Typography.Text>
+                    <Typography.Text code style={{ overflowWrap: "anywhere" }}>{session.cwd}</Typography.Text>
+                  </Flex>
+                </WandButton>
+              </List.Item>;
+            }}/>
+          : <Typography.Text type="secondary">还没有关联会话。</Typography.Text>}
+          <Flex wrap gap="small" className="task-board-card-detail-actions">
+            <WandButton kind="ghost" type="button" className="task-board-card-detail-open" onClick={() => onOpen(task.id)}>查看完整详情</WandButton>
+            <WandButton kind="ghost" type="button" className="task-board-card-detail-collapse" onClick={() => onCollapse()}>收起</WandButton>
+          </Flex>
+        </Flex>
+      </div>,
+    }]}/>;
 }
 
 export function TaskBoardListView({
@@ -496,8 +512,11 @@ export function TaskBoardListView({
   allTasks,
   collapsed,
   archiveOpen,
+  archiveCount = grouped.archived.length,
   onToggle,
   onToggleArchive,
+  onPurgeArchive,
+  archivePurging = false,
   onOpen,
   onOpenSession,
 }: {
@@ -505,8 +524,11 @@ export function TaskBoardListView({
   allTasks: WandTaskListed[];
   collapsed: Record<WandTaskStatus, boolean>;
   archiveOpen: boolean;
+  archiveCount?: number;
   onToggle(status: WandTaskStatus): void;
   onToggleArchive(): void;
+  onPurgeArchive?(): void;
+  archivePurging?: boolean;
   onOpen(id: string): void;
   onOpenSession?: (sessionId: string) => void;
 }): React.ReactElement {
@@ -516,14 +538,14 @@ export function TaskBoardListView({
     setExpandedId((current) => current === id ? null : id);
   };
   const archived = grouped.archived;
-  return <div className="task-board-list-view">
+  return <Flex vertical gap="middle" className="task-board-list-view">
     {ISSUE_COLUMNS.map((column) => {
       const items = grouped[column.status];
       const isCollapsed = column.status === "done" && archiveOpen && archived.length > 0
         ? false
         : collapsed[column.status];
       return <section key={column.status} className={`task-board-list-group is-${column.status}`}>
-        <button
+        <WandButton kind="ghost"
           type="button"
           className="task-board-list-header"
           aria-expanded={!isCollapsed}
@@ -535,8 +557,8 @@ export function TaskBoardListView({
             <strong>{column.label}</strong>
           </span>
           <b>{items.length}</b>
-        </button>
-        {!isCollapsed && <div className="task-board-list-rows">
+        </WandButton>
+        {!isCollapsed && <Flex vertical gap="small" className="task-board-list-rows">
           {items.length === 0 && column.status !== "done" && <p className="task-board-column-empty">{column.empty}</p>}
           {items.length === 0 && column.status === "done" && archived.length === 0 && <p className="task-board-column-empty">{column.empty}</p>}
           {items.map((task) => <TaskBoardListRow
@@ -550,11 +572,13 @@ export function TaskBoardListView({
             bindTrigger={bindTrigger}
           />)}
           {column.status === "done" ? <TaskBoardArchiveFolder
-            count={archived.length}
+            count={archiveCount}
             open={archiveOpen}
             onToggle={onToggleArchive}
+            onPurge={onPurgeArchive}
+            purging={archivePurging}
           >
-            <div className="task-board-archive-rows">
+            <Flex vertical gap="small" className="task-board-archive-rows">
               {archived.map((task) => <TaskBoardListRow
                 key={task.id}
                 task={task}
@@ -565,12 +589,12 @@ export function TaskBoardListView({
                 onOpenSession={onOpenSession}
                 bindTrigger={bindTrigger}
               />)}
-            </div>
+            </Flex>
           </TaskBoardArchiveFolder> : null}
-        </div>}
+        </Flex>}
       </section>;
     })}
-  </div>;
+  </Flex>;
 }
 
 export function TaskBoardDashboard({
@@ -585,130 +609,57 @@ export function TaskBoardDashboard({
   onOpenSession?: (sessionId: string) => void;
 }): React.ReactElement {
   const stats = issueBoardStats(tasks);
-  const series = issueProgressSeries(tasks);
-  const max = Math.max(1, ...series.map((point) => point.scope));
-  const path = (key: "scope" | "started" | "completed"): string => series
-    .map((point, index) => {
-      const x = (index / Math.max(1, series.length - 1)) * 426;
-      const y = 250 - (point[key] / max) * 220;
-      return `${index === 0 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`;
-    })
-    .join(" ");
-  const dueSoon = [...tasks]
+  const activeTasks = tasks.filter((task) => task.status !== "archived");
+  const dueSoon = [...activeTasks]
     .filter((task) => task.dueDate && task.status !== "done")
     .sort((left, right) => (left.dueDate ?? "").localeCompare(right.dueDate ?? ""))
     .slice(0, 6);
   const byPriority = ISSUE_PRIORITIES.map((entry) => ({
     ...entry,
-    count: tasks.filter((task) => task.priority === entry.value).length,
+    count: activeTasks.filter((task) => task.priority === entry.value).length,
   })).filter((entry) => entry.count > 0);
-  const labels = collectIssueLabels(tasks).map((label) => ({
+  const labels = collectIssueLabels(activeTasks).map((label) => ({
     label,
-    count: tasks.filter((task) => task.labels.includes(label)).length,
+    count: activeTasks.filter((task) => task.labels.includes(label)).length,
   }));
-  const summary = stats.remaining === 0
-    ? `${projectName} 当前没有未完成任务。`
-    : `${projectName} 还有 ${stats.remaining} 项未完成，其中 ${stats.doing} 项正在处理、${stats.todo} 项等待认领。`;
-  const metric = (
-    label: string,
-    value: number,
-    tone: string,
-    total = stats.total,
-  ): React.ReactElement => <article className={`task-board-metric tone-${tone}`}>
-    <span className="task-board-metric-label">{label}</span>
-    <div className="task-board-metric-value">
-      <strong>{value}</strong>
-      <b>{total ? Math.round((value / total) * 100) : 0}%</b>
-    </div>
-    <span className="task-board-metric-meter"><i style={{ width: `${total ? (value / total) * 100 : 0}%` }}/></span>
-  </article>;
-
-  return <div className="task-board-dashboard">
-    <div className="task-board-dashboard-content">
-      <div className="task-board-dashboard-overview">
-        <header className="task-board-dashboard-heading">
-          <h2 className="task-board-dashboard-title">{projectName}</h2>
-          <p className="task-board-hero-value">
-            <strong>{stats.remaining}</strong>
-            <span>未完成</span>
-          </p>
-        </header>
-        <div className="task-board-dashboard-summary">
-          <div className="task-board-summary-bubble"><p>{summary}</p></div>
-        </div>
-      </div>
-      <div className="task-board-metrics">
-        {metric("处理中", stats.doing, "doing")}
+  const summary = stats.total === 0
+    ? `${projectName} 当前没有任务。`
+    : `共 ${stats.total} 项任务，${stats.remaining} 项待处理，${stats.done} 项${issueStatusLabel("done")}。`;
+  const highRemaining = activeTasks.filter((task) => task.status !== "done" && (task.priority === "high" || task.priority === "urgent")).length;
+  const metric = (label: string, value: number, tone: string, total = stats.total): React.ReactElement =>
+    <Card size="small" className={`task-board-metric tone-${tone}`} style={{ flex: "1 1 160px" }}>
+      <Typography.Text type="secondary">{label}</Typography.Text>
+      <Typography.Title level={3} style={{ margin: "4px 0" }}>{value}</Typography.Title>
+      <Progress status="normal" percent={Math.round(total ? value / total * 100 : 0)} aria-label={`${label}占当前任务比例`}/>
+    </Card>;
+  const panel = (title: string, children: React.ReactNode): React.ReactElement =>
+    <Card title={title} size="small" className="task-board-dashboard-panel" style={{ flex: "1 1 260px", minWidth: 0 }}>{children}</Card>;
+  return <Flex vertical gap="middle" className="task-board-dashboard">
+    <Card size="small"><Typography.Title level={4} style={{ margin: 0 }}>{projectName}</Typography.Title><Typography.Paragraph style={{ margin: "8px 0 0" }}>{summary}</Typography.Paragraph></Card>
+    <section aria-label="任务状态">
+      <Typography.Title level={5} style={{ margin: "0 0 8px" }}>任务状态</Typography.Title>
+      <Flex wrap gap="small" className="task-board-metrics">
+        {metric(issueStatusLabel("todo"), stats.todo, "todo")}
+        {metric(issueStatusLabel("doing"), stats.doing, "doing")}
         {metric(issueStatusLabel("done"), stats.done, "done")}
-        {metric("等待认领", stats.todo, "todo")}
-        {metric("已逾期", stats.overdue, "overdue")}
-        {metric("高优先级", stats.high, "high")}
-      </div>
-      <section className="task-board-progress-panel" aria-label="进度">
-        <header>
-          <span>进度</span>
-          <div className="task-board-progress-legend">
-            <span className="tone-scope"><i/>范围 <strong>{stats.total}</strong></span>
-            <span className="tone-started"><i/>已开始 <strong>{stats.doing + stats.done}</strong></span>
-            <span className="tone-completed"><i/>{issueStatusLabel("done")} <strong>{stats.done}</strong></span>
-          </div>
-        </header>
-        <svg className="task-board-progress-chart" viewBox="0 0 426 272" role="img" aria-label="任务进度图">
-          <path d="M0 250h426" className="task-board-progress-baseline"/>
-          <path d={path("scope")} className="task-board-progress-line is-scope"/>
-          <path d={path("started")} className="task-board-progress-line is-started"/>
-          <path d={path("completed")} className="task-board-progress-line is-completed"/>
-        </svg>
-      </section>
-      <div className="task-board-dashboard-grid">
-        <section className="task-board-dashboard-panel">
-          <header><span>即将到期</span></header>
-          {dueSoon.length === 0 ? <p className="task-board-column-empty">没有设置截止日期的任务</p> : dueSoon.map((task) => <button
-            key={task.id}
-            type="button"
-            className="task-board-dashboard-row"
-            onClick={() => onOpen(task.id)}
-          >
-            <TaskBoardStatusGlyph status={task.status}/>
-            <strong>{task.title}</strong>
-            <span className={classNames("task-board-due", issueIsOverdue(task.dueDate, task.status) && "is-overdue")}>
-              <TaskBoardDueIcon size={12}/>{issueDueStamp(task.dueDate)}
-            </span>
-          </button>)}
-        </section>
-        <section className="task-board-dashboard-panel">
-          <header><span>优先级</span></header>
-          {byPriority.length === 0 ? <p className="task-board-column-empty">还没有优先级分布</p> : byPriority.map((entry) => <div key={entry.value} className="task-board-stack-row">
-            <TaskBoardPriorityIcon priority={entry.value} size={14}/>
-            <span>{entry.label}</span>
-            <b>{entry.count}</b>
-            <i style={{ width: `${(entry.count / Math.max(1, stats.total)) * 100}%` }}/>
-          </div>)}
-        </section>
-        <section className="task-board-dashboard-panel">
-          <header><span>标签</span></header>
-          {labels.length === 0 ? <p className="task-board-column-empty">还没有标签</p> : labels.map((entry) => <div key={entry.label} className="task-board-stack-row">
-            <TaskBoardLabelChip label={entry.label}/>
-            <b>{entry.count}</b>
-          </div>)}
-        </section>
-        <section className="task-board-dashboard-panel">
-          <header><span>最近会话</span></header>
-          {tasks.flatMap((task) => task.sessions.map((session) => ({ task, session }))).slice(0, 6).map(({ task, session }) => <button
-            key={session.id}
-            type="button"
-            className="task-board-dashboard-row"
-            onClick={() => onOpenSession?.(session.id)}
-          >
-            <ProviderLogo provider={session.provider} className="task-board-agent-logo"/>
-            <strong>{task.title}</strong>
-            <span>{issueAgentProviderLabel(session.provider)}</span>
-          </button>)}
-          {tasks.every((task) => task.sessions.length === 0) && <p className="task-board-column-empty">还没有派发会话</p>}
-        </section>
-      </div>
-    </div>
-  </div>;
+      </Flex>
+    </section>
+    <Card size="small" title="需要关注" className="task-board-risk-panel">
+      <Flex wrap gap="small">
+        <Tag color={stats.overdue > 0 ? "error" : "default"}>已逾期 {stats.overdue}</Tag>
+        <Tag color={highRemaining > 0 ? "warning" : "default"}>高优先级待处理 {highRemaining}</Tag>
+      </Flex>
+      <Typography.Paragraph type="secondary" style={{ margin: "8px 0 0" }}>
+        {stats.overdue === 0 && highRemaining === 0 ? "当前没有逾期或高优先级待处理任务。" : "同一任务可能同时逾期且属于高优先级。"}
+      </Typography.Paragraph>
+    </Card>
+    <Flex wrap gap="middle" className="task-board-dashboard-grid">
+      {panel("即将到期", dueSoon.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有设置截止日期的任务"/> : <List size="small" dataSource={dueSoon} renderItem={(task) => <List.Item><WandButton kind="ghost" onClick={() => onOpen(task.id)} style={{ height: "auto", whiteSpace: "normal" }}><TaskBoardStatusGlyph status={task.status}/><span>{task.title}</span><Tag color={issueIsOverdue(task.dueDate, task.status) ? "error" : "default"}>{issueDueStamp(task.dueDate)}</Tag></WandButton></List.Item>}/>)}
+      {panel("优先级", byPriority.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有优先级分布"/> : <List size="small" dataSource={byPriority} renderItem={(entry) => <List.Item><Flex vertical style={{ width: "100%" }}><Flex justify="space-between"><span>{entry.label}</span><span>{entry.count}</span></Flex><Progress status="normal" percent={Math.round(entry.count / Math.max(1, stats.total) * 100)} size="small" showInfo={false}/></Flex></List.Item>}/>)}
+      {panel("标签", labels.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有标签"/> : <List size="small" dataSource={labels} renderItem={(entry) => <List.Item><TaskBoardLabelChip label={entry.label}/><Tag>{entry.count}</Tag></List.Item>}/>)}
+      {panel("最近会话", tasks.every((task) => task.sessions.length === 0) ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有派发会话"/> : <List size="small" dataSource={tasks.flatMap((task) => task.sessions.map((session) => ({ task, session }))).slice(0, 6)} renderItem={({ task, session }) => <List.Item><WandButton kind="ghost" onClick={() => onOpenSession?.(session.id)} style={{ height: "auto", whiteSpace: "normal" }}><ProviderLogo provider={session.provider}/><span>{task.title}</span><span>{issueAgentProviderLabel(session.provider)}</span></WandButton></List.Item>}/>)}
+    </Flex>
+  </Flex>;
 }
 
 export function TaskBoardGantt({
@@ -730,12 +681,23 @@ export function TaskBoardGantt({
   const tasks = [...ISSUE_COLUMNS.flatMap((column) => grouped[column.status]), ...grouped.archived]
     .filter((task) => !(hideCompleted && closed(task.status)));
   const range = issueGanttRange(tasks, zoom);
-  return <div className="task-board-gantt">
-    <div className="task-board-gantt-toolbar">
-      <label className="task-board-gantt-hide">
-        <input type="checkbox" checked={hideCompleted} onChange={(event) => onHideCompleted(event.currentTarget.checked)}/>
+  const today = isoDate(new Date());
+  const todayIndex = range.columns.indexOf(today);
+  const months: Array<{ key: string; start: number; days: number }> = [];
+  range.columns.forEach((day, index) => {
+    const key = day.slice(0, 7);
+    const last = months.at(-1);
+    if (last?.key === key) last.days += 1;
+    else months.push({ key, start: index, days: 1 });
+  });
+  const timelineColumns = `repeat(${range.days}, minmax(0, 1fr))`;
+  const todayLine = todayIndex >= 0 ? <span className="task-board-gantt-today-line" aria-hidden="true"
+    style={{ position: "absolute", top: 0, bottom: 0, left: `${(todayIndex + 0.5) / range.days * 100}%`, borderLeft: "1px dashed var(--accent)", pointerEvents: "none" }}/> : null;
+  return <Card size="small" className="task-board-gantt" styles={{ body: { minWidth: 0 } }}>
+    <Flex wrap align="center" justify="space-between" gap="small" className="task-board-gantt-toolbar">
+      <Checkbox className="task-board-gantt-hide" checked={hideCompleted} onChange={(event) => onHideCompleted(event.target.checked)}>
         {issueHideStatusFilterLabel("done")}
-      </label>
+      </Checkbox>
       <WandStretchTabs
         className="task-board-gantt-zooms"
         ariaLabel="甘特图缩放"
@@ -743,49 +705,66 @@ export function TaskBoardGantt({
         tabs={ISSUE_GANTT_ZOOMS.map((entry) => ({ value: entry.value, label: entry.label }))}
         onValueChange={(next) => onZoom(next as IssueGanttZoom)}
       />
-    </div>
-    <div className="task-board-gantt-scroll">
-      <div className="task-board-gantt-grid" style={{ "--gantt-days": range.days } as React.CSSProperties}>
-        <div className="task-board-gantt-head">
-          <span>任务</span>
+    </Flex>
+    <Typography.Paragraph type="secondary" style={{ margin: "8px 0 0" }}>
+      今天 {today} · 时间条表示创建至截止日期，未设截止日期时仅标记创建日。
+    </Typography.Paragraph>
+    {tasks.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前没有可显示的任务"/> :
+    <div className="task-board-gantt-scroll" tabIndex={0} role="region" aria-label="任务时间线，可横向滚动" style={{ overflowX: "auto", marginTop: 12 }}>
+      <div className="task-board-gantt-grid" style={{ minWidth: Math.max(680, 180 + range.days * (zoom === "day" ? 32 : 24)) }}>
+        <div className="task-board-gantt-head" style={{ display: "grid", gridTemplateColumns: "180px minmax(0, 1fr)", borderBottom: "1px solid var(--border-subtle)" }}>
+          <Typography.Text strong style={{ alignSelf: "center", paddingInline: 8 }}>任务</Typography.Text>
           <div>
-            {range.columns.map((day) => <b key={day}>{Number(day.slice(8, 10))}</b>)}
+            <div className="task-board-gantt-months" style={{ display: "grid", gridTemplateColumns: timelineColumns }}>
+              {months.map((month) => <Typography.Text strong key={month.key}
+                style={{ gridColumn: `${month.start + 1} / span ${month.days}`, borderLeft: "1px solid var(--border-subtle)", padding: "4px 8px", whiteSpace: "nowrap" }}>
+                {month.key.slice(0, 4)}年{Number(month.key.slice(5))}月
+              </Typography.Text>)}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: timelineColumns, textAlign: "center" }}>
+              {range.columns.map((day) => <time key={day} dateTime={day} title={day} aria-current={day === today ? "date" : undefined}
+                style={{ paddingBlock: 6, color: day === today ? "var(--accent)" : "var(--text-secondary)", fontWeight: day === today ? 700 : 400, borderLeft: day.endsWith("-01") ? "1px solid var(--border-subtle)" : undefined }}>
+                {day === today ? "今" : Number(day.slice(8, 10))}
+              </time>)}
+            </div>
           </div>
         </div>
         {[...ISSUE_COLUMNS, ...(hideCompleted ? [] : [ISSUE_ARCHIVE_COLUMN])].map((column) => {
-          const items = grouped[column.status].filter((task) => !(hideCompleted && (task.status === "done" || task.status === "archived")));
+          const items = grouped[column.status].filter((task) => !(hideCompleted && closed(task.status)));
           if (items.length === 0) return null;
           return <section key={column.status} className={`task-board-gantt-group is-${column.status}`}>
-            <header>
-              <TaskBoardStatusGlyph status={column.status}/>
-              <strong>{column.label}</strong>
-              <span>{items.length}</span>
-            </header>
+            <div style={{ display: "grid", gridTemplateColumns: "180px minmax(0, 1fr)", height: 36 }}>
+              <Flex component="header" align="center" gap="small" style={{ paddingInline: 8 }}><TaskBoardStatusGlyph status={column.status}/><Typography.Text strong>{column.label}</Typography.Text><Tag>{items.length}</Tag></Flex>
+              <div style={{ position: "relative" }}>{todayLine}</div>
+            </div>
             {items.map((task) => {
-              const span = issueGanttSpan(task, range.start, range.days);
-              return <button
+              const created = isoDate(new Date(task.createdAt));
+              const finish = task.dueDate || created;
+              const inRange = created <= range.columns.at(-1)! && finish >= range.start;
+              const span = issueGanttSpan({ ...task, dueDate: finish }, range.start, range.days);
+              return <WandButton kind="ghost"
                 key={task.id}
                 type="button"
                 className="task-board-gantt-row"
+                title={`${task.title} · ${created}${task.dueDate ? ` 至 ${task.dueDate}` : " · 未设置截止日期"}`}
+                style={{ width: "100%", height: 48, padding: 0, display: "grid", gridTemplateColumns: "180px minmax(0, 1fr)", gap: 0, textAlign: "left" }}
                 onClick={() => onOpen(task.id)}
               >
-                <span>
-                  <small>{task.identifier}</small>
-                  <strong>{task.title}</strong>
-                </span>
-                <div className="task-board-gantt-track">
-                  <i
-                    className={`is-${task.status}`}
-                    style={{ gridColumn: `${span.offset + 1} / span ${span.length}` }}
-                  />
+                <Flex vertical style={{ minWidth: 0, paddingInline: 8 }}><Typography.Text type="secondary">{task.identifier}</Typography.Text><Typography.Text ellipsis>{task.title}</Typography.Text></Flex>
+                <div className="task-board-gantt-track" style={{ position: "relative", display: "grid", gridTemplateColumns: timelineColumns, alignItems: "center", height: "100%", minWidth: 0,
+                  backgroundImage: "linear-gradient(to right, var(--border-subtle) 1px, transparent 1px)", backgroundSize: `${100 / range.days}% 100%` }}>
+                  {inRange ? <i className={`is-${task.status}`} aria-hidden="true"
+                    style={{ gridColumn: `${span.offset + 1} / span ${span.length}`, height: 16, borderRadius: 4, marginInline: 2, background: task.status === "done" ? "var(--success)" : task.status === "archived" ? "var(--text-tertiary)" : "var(--accent)" }}/>
+                    : <Typography.Text type="secondary" style={{ gridColumn: `1 / ${range.days + 1}`, paddingInline: 8 }}>时间不在当前范围</Typography.Text>}
+                  {todayLine}
                 </div>
-              </button>;
+              </WandButton>;
             })}
           </section>;
         })}
       </div>
-    </div>
-  </div>;
+    </div>}
+  </Card>;
 }
 
 export function TaskBoardContextMenu({
@@ -811,30 +790,30 @@ export function TaskBoardContextMenu({
   onRestore(): void;
   onClose(): void;
 }): React.ReactElement {
+  usePopupDismiss(true, onClose);
   React.useEffect(() => {
-    const close = (): void => onClose();
-    window.addEventListener("pointerdown", close);
-    window.addEventListener("keydown", close);
-    return () => {
-      window.removeEventListener("pointerdown", close);
-      window.removeEventListener("keydown", close);
+    const close = (event: PointerEvent): void => {
+      if (!isWandPopupOwnedBy(event.target, "task-board-context")) onClose();
     };
+    window.addEventListener("pointerdown", close);
+    return () => window.removeEventListener("pointerdown", close);
   }, [onClose]);
-  return <div
-    className="task-board-context-menu"
-    role="menu"
-    style={{ left: x, top: y }}
-    onPointerDown={(event) => event.stopPropagation()}
-  >
-    <WandMenuItem icon="folder" label="打开" onClick={onOpen}/>
-    <WandMenuItem icon="copy" label="复制 ID" onClick={onCopy}/>
-    {task.status === "archived"
-      ? <WandMenuItem icon="resume" label="恢复到等待认领" onClick={onRestore}/>
-      : <>
-          <WandMenuItem icon="zap" label="派发 Agent" onClick={onDispatch}/>
-          <WandMenuItem icon="archive" label="归档" tone="danger" onClick={onArchive}/>
-        </>}
-  </div>;
+  const actions = [
+    { key: "open", label: "打开", icon: <WandIcon name="folder"/>, onClick: onOpen },
+    { key: "copy", label: "复制 ID", icon: <WandIcon name="copy"/>, onClick: onCopy },
+    ...(task.status === "archived"
+      ? [{ key: "restore", label: "恢复到等待认领", icon: <WandIcon name="resume"/>, onClick: onRestore }]
+      : [
+          { key: "dispatch", label: "派发 Agent", icon: <WandIcon name="zap"/>, onClick: onDispatch },
+          { key: "archive", label: "归档", icon: <WandIcon name="archive"/>, danger: true, onClick: onArchive },
+        ]),
+  ];
+  return <Dropdown open autoFocus placement="bottomLeft" trigger={[]}
+    onOpenChange={(open) => { if (!open) onClose(); }}
+    menu={{ items: actions.map((action) => ({ ...action, onClick: () => { action.onClick(); onClose(); } })) }}
+    popupRender={(menu) => <div data-wand-popup-owner="task-board-context">{menu}</div>}>
+    <span style={{ position: "fixed", left: x, top: y, width: 1, height: 1 }} aria-hidden="true"/>
+  </Dropdown>;
 }
 
 export function TaskBoardAgentChip({
@@ -845,13 +824,11 @@ export function TaskBoardAgentChip({
   running?: boolean;
 }): React.ReactElement | null {
   if (!agent) return null;
-  return <span className={classNames("task-board-chip is-agent", running && "is-running")}>
+  return <Tag className={classNames("task-board-chip is-agent", running && "is-running")}>
     <ProviderLogo provider={agent.provider} className="task-board-agent-logo"/>
     {issueAgentProviderLabel(agent.provider)}
-    {running ? <span className="task-board-agent-dots" aria-hidden="true">
-      <span/><span/><span/>
-    </span> : null}
-  </span>;
+    {running ? <Badge status="processing"/> : null}
+  </Tag>;
 }
 
 export function TaskBoardAgentChips({
@@ -901,7 +878,7 @@ export function TaskBoardAgentSessionList({
       </header>
       {group.sessions.length === 0
         ? <p className="task-board-agent-empty">已指派，等待派发</p>
-        : group.sessions.map((session) => <button
+        : group.sessions.map((session) => <WandButton kind="ghost"
             key={session.id}
             type="button"
             className="task-board-agent-session"
@@ -914,22 +891,22 @@ export function TaskBoardAgentSessionList({
                 .filter(Boolean)
                 .join(" · ")}
             </small>
-          </button>)}
+          </WandButton>)}
     </section>)}
   </div>;
 }
 
 export function TaskBoardProjectChip({ name }: { name: string }): React.ReactElement {
-  return <span className="task-board-chip" title={name}>
+  return <Tag className="task-board-chip" title={name}>
     <TaskBoardFolderIcon size={12}/>
     <span>{name}</span>
-  </span>;
+  </Tag>;
 }
 
 /** 卡片上的里程碑胶囊；名字由服务端 DTO 直接给出。 */
 export function TaskBoardMilestoneChip({ name }: { name: string }): React.ReactElement {
-  return <span className="task-board-chip is-milestone" title={`里程碑：${name}`}>
+  return <Tag className="task-board-chip is-milestone" title={`里程碑：${name}`}>
     <WandIcon name="milestone" size={12}/>
     <span>{name}</span>
-  </span>;
+  </Tag>;
 }

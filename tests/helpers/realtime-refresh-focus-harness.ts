@@ -40,7 +40,7 @@ function publish(next = turns, patch: Record<string, unknown> = {}): void {
   state.currentMessages = buildMessagesForRender(session, next);
 }
 (window as any).focusRefreshHarness = {
-  state, composer, frames, publish, doRenderChat, renderChat, resetChatRenderCache, applyCurrentView,
+  state, composer, frames, publish, doRenderChat, renderChat, resetChatRenderCache, clearActivityDetailState, applyCurrentView,
   turns: () => turns,
   openRealImagePreview() {
     if (!imageHostMounted) {

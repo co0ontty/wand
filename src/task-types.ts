@@ -12,6 +12,12 @@ export const DEFAULT_WAND_TASK_PRIORITY: WandTaskPriority = "low";
 /** 任务派发时选择的 CLI 工具；空串表示尚未指定。沿用 provider 的唯一真源。 */
 export type WandTaskAgentProvider = import("./provider-catalog.js").SessionProvider;
 export type WandTaskAgentModel = string;
+export type WandTaskAgentEngine = "cli" | "sdk";
+
+export function isWandTaskAgentEngine(value: unknown): value is WandTaskAgentEngine {
+  return value === "cli" || value === "sdk";
+}
+
 /** 与会话思考档位同一套：旧四档，或 `provider:level` 原生档。 */
 export type WandTaskAgentEffort = "off" | "standard" | "deep" | "max" | `${WandTaskAgentProvider}:${string}`;
 
@@ -77,6 +83,8 @@ export interface WandTaskAgent {
   /** 具体模型 ID；"default" 表示跟随服务端为该 provider 选择的默认模型。 */
   model: WandTaskAgentModel;
   thinkingEffort: WandTaskAgentEffort;
+  /** 执行引擎；缺省为 CLI。SDK 仅支持 Pi 结构化员工会话。 */
+  engine?: WandTaskAgentEngine;
   /** 执行模式；缺省时按标准模式处理。 */
   mode: WandTaskAgentMode;
   /** 派发出来的会话是结构化对话还是 PTY 终端；缺省时按结构化处理。 */

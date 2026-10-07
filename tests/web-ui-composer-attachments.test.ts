@@ -28,59 +28,29 @@ function render(mount: ComposerAttachmentsMount): string {
   return renderToStaticMarkup(React.createElement(ComposerAttachments, { mount }));
 }
 
-test("附件注册表按 item 明细比较，值没变不广播", () => {
-  const controller = new ComposerAttachmentsController();
-  let notifications = 0;
-  const unsubscribe = controller.subscribe(() => { notifications += 1; });
-
-  controller.sync([mountFor()]);
-  assert.equal(notifications, 1);
-  const first = controller.getSnapshot();
-
-  // renderAttachmentPreview() 每次都会重放；回调变了但 items 相同不能广播。
-  controller.sync([mountFor(ITEMS, { onRemove() {} })]);
-  assert.equal(notifications, 1);
-  assert.equal(controller.getSnapshot(), first);
-
-  // 只有大小文案变化也要广播（对象字面量是新建的，必须逐字段比较）。
-  controller.sync([mountFor([
-    { ...ITEMS[0], sizeLabel: "12.5 KB" },
-    ITEMS[1],
-  ])]);
-  assert.equal(notifications, 2);
-
-  controller.sync([mountFor([ITEMS[1]], { key: "composer-attachments" })]);
-  assert.equal(notifications, 3);
-  assert.equal(controller.getSnapshot().mounts[0].items.length, 1);
-
-  // 列表清空 → 适配器传空 mounts。
-  controller.clear();
-  assert.equal(notifications, 4);
-  assert.equal(controller.getSnapshot().mounts.length, 0);
-  unsubscribe();
+test("附件只使用 X 的展示入口，SSR 保留 live region 与受控上传", () => {
+  const html = render(mountFor());
+  assert.match(html, /ant-attachment/);
+  assert.match(html, /aria-label="待发送附件" aria-live="polite"/);
+  assert.match(html, /ant-upload-select" style="display:none"/);
+  assert.doesNotMatch(html, /attachment-pill|att-remove/);
 });
 
-test("图片附件渲染 img，其他类型渲染 file 图标", () => {
-  const html = render(mountFor());
-  assert.equal((html.match(/<img src="blob:wand\/1" alt=""\/>/g) || []).length, 1);
-  assert.equal((html.match(/class="att-icon"/g) || []).length, 1);
+test("附件身份、大小与移除动作映射到唯一 composer 快照", () => {
+  const host = readFileSync(new URL("../src/web-ui/react/composer-attachments/host.tsx", import.meta.url), "utf8");
+  assert.match(host, /uid: String\(item\.index\)/);
+  assert.match(host, /size: item\.size/);
+  assert.match(host, /thumbUrl: item\.previewUrl/);
+  assert.match(host, /onRemove\(Number\(item\.uid\)\)/);
+  assert.match(host, /node\.setAttribute\("aria-label", `移除附件/);
+  assert.match(host, /event\.key === "Enter" \|\| event\.key === " "/);
+  assert.match(host, /getDropContainer=\{\(\) => null\}/);
+  // Actual image/file rendering and keyboard removal are covered by the opt-in production Chrome gate.
 });
 
-test("pill 暴露下标、大小与可访问的移除按钮", () => {
-  const html = render(mountFor());
-  assert.match(html, /<span class="attachment-pill" data-index="0">/);
-  assert.match(html, /data-index="1"/);
-  assert.match(html, /class="att-size">12.4 KB</);
-  assert.match(html, /title="shot\.png">shot\.png</);
-  assert.match(html, /class="att-remove" data-index="0" type="button" title="移除" aria-label="移除附件 shot\.png"/);
-  assert.equal((html.match(/class="att-remove"/g) || []).length, 2);
-});
-
-test("预览条保留原有 class 与 live region 语义", () => {
-  const html = render(mountFor());
-  assert.match(html, /<div class="attachment-preview" aria-label="待发送附件" aria-live="polite">/);
-  // 空状态交给适配器（不发布 mount），不再用 .hidden。
-  assert.doesNotMatch(html, /attachment-preview hidden/);
+test("预览条播报新附件，空列表的挂载由适配器负责", () => {
+  assert.match(render(mountFor()), /<div aria-label="待发送附件" aria-live="polite">/);
+  assert.doesNotMatch(render(mountFor()), /attachment-preview hidden/);
 });
 
 test("适配器在空列表时不发布 mount，legacy 侧不再重建 DOM", () => {

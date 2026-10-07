@@ -63,7 +63,8 @@ export function leaderOf(team: AiTeam): AiTeamMember {
 }
 
 export function workersOf(team: AiTeam): AiTeamMember[] {
-  return team.members.filter((member) => !member.isLeader);
+  // A single employee or explicitly @-selected coordinator retains their own professional duty.
+  return team.members.length === 1 || team.allowLeaderWork ? team.members : team.members.filter((member) => !member.isLeader);
 }
 
 /** 每步的约定报告文件（相对 cwd）。所有 CLI 都能写文件，因此是通用的交接方式。 */
@@ -318,7 +319,8 @@ function leaderSystemPrompt(run: AiTeamRun, resolveModel?: AiTeamModelNameResolv
   return [
     ...(employeePrompt ? [employeePrompt] : []),
     `你是 AI 团队「${run.team.name}」的负责人（${leader.name}）。`,
-    `你的职责：${leader.duty.trim() || "拆分任务、派工、根据报告决定下一步。"}`,
+    `你的专业职责：${leader.duty.trim() || "拆分任务、派工、根据报告决定下一步。"}`,
+    ...(run.team.allowLeaderWork ? ["用户通过 @ 指定你为本轮负责人：协调职责是拆分任务、按群成员的专业职责派工、收集报告并汇总；不代表所有工作都由你执行。"] : []),
     "",
     "## 成员（只能把工作派给下列成员；id 必须原样使用）",
     "成员的名单行只列首选执行配置；执行配置由系统按候选顺序自动降级，你只按成员能力分派，不操心模型可用性。",
@@ -326,11 +328,18 @@ function leaderSystemPrompt(run: AiTeamRun, resolveModel?: AiTeamModelNameResolv
     ...teamInstructions(run.team),
     "",
     "## 工作方式",
-    "- 你不直接改代码：你负责拆分任务、派工，并根据成员报告决定下一步。",
+    run.team.members.length === 1
+      ? "- 本群只有你一位员工：规划阶段只制定计划，work 步骤使用你的同一 member id。执行阶段会在独立的阶段会话里工作并交付。"
+      : run.team.allowLeaderWork
+        ? "- 规划阶段只负责拆分、派工和汇总。属于你专业职责的工作可派给自己的 member id，系统会用独立 work 会话执行；其余工作交给职责匹配的成员，不能包办，也不为了全员发言重复派工。"
+        : "- 你不直接改代码：你负责拆分任务、派工，并根据成员报告决定下一步。",
     `- 每次只安排接下来要做的几步（1–${AI_TEAM_MAX_ASSIGN_STEPS} 步）。互不依赖的工作派给不同成员可以并行；所有在跑的步骤结束后，我会把报告交回给你。`,
     "- 并行成员共用同一个工作目录，不要让两个人同时改同一批文件。",
-    "- 实现与验收交给不同成员，不要让同一个成员验收自己的工作。",
+    run.team.members.length === 1
+      ? "- 可以自测，但不能声称独立交叉验收。任务需要另一人验收时，等待用户明确邀请/确认，不虚构成员。"
+      : "- 实现与验收交给不同成员，不要让同一个成员验收自己的工作。",
     "- 派工优先按角色：制定计划给 plan 成员，实现给 work 成员，验收给 verify 成员；没标角色的成员视为 any。",
+    "- 同时按成员的专业职责选人并遵守边界（例如设计成员只出设计，不改产品代码），不能因为某人是负责人就把所有工作交给他。",
     "- 同一成员同一时间只有一个步骤；互不相干的步骤并行派出，有先后关系的用 after 声明。",
     "- 需要用户拍板时就提问，不要猜。",
     `- ${OBJECTIVE_INTENT_NOTE}`,

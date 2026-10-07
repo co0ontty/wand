@@ -39,7 +39,7 @@ interface OverlayToastHandle {
 
 /**
  * External seam for all React-owned overlays. Callers learn two operations;
- * Base UI lifecycle, focus handling, portals, queueing, and rendering stay
+ * Library lifecycle, focus handling, portals, queueing, and rendering stay
  * behind the module.
  */
 export interface WandOverlay {
@@ -88,7 +88,7 @@ export const wandOverlay: WandOverlay = {
   },
 
   toast(message: string, options: OverlayToastOptions = {}): OverlayToastHandle {
-    // Toast lifecycle (stacking, timers, swipe) lives in Appica's toast manager,
+    // Toast lifecycle (stacking and timers) lives in Ant notification,
     // not in the overlay snapshot, so publishing here would be pointless churn.
     return showWandToast(message, options);
   },
@@ -109,6 +109,12 @@ export const overlayStore = {
 
   getSnapshot(): OverlaySnapshot {
     return snapshot;
+  },
+
+  /** Undo only this bridge request if its provider fails after publishing it. */
+  cancelDialogRequest(options: OverlayDialogOptions<unknown>): void {
+    const entry = dialogQueue.find(dialog => dialog.options === options);
+    if (entry) this.completeDialog(entry.id, { dismissed: true });
   },
 
   completeDialog(

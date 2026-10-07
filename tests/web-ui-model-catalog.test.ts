@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { OPENROUTER_FREE_GROUP, OPENROUTER_FREE_SELECTOR } from "../src/openrouter-free-selection.js";
+import { AUTO_ASSIGN_LABEL, AUTO_ASSIGN_SELECTOR } from "../src/model-groups.js";
+import { modelDisplayName } from "../src/web-ui/browser/composer-select-values.js";
 
 import {
   MODEL_CATALOG_DEFAULT_VALUE,
@@ -94,4 +97,47 @@ test("登录前那次 401 不写缓存，下一次打开对话框会重试", asy
   } finally {
     globalThis.fetch = original;
   }
+});
+
+test("免费分组可直接选择，任务及员工展示名称不泄漏选择器ID", () => {
+  const catalog = normalizeWandModelCatalog({
+    piModels: [{ id: OPENROUTER_FREE_SELECTOR, label: OPENROUTER_FREE_GROUP }],
+    defaultModels: { pi: OPENROUTER_FREE_SELECTOR },
+  });
+  assert.deepEqual(wandModelOptions(catalog, "pi")[1], {
+    value: OPENROUTER_FREE_SELECTOR, label: "免费分组",
+  });
+  assert.equal(wandModelOptions(catalog, "pi")[0]!.label, "跟随服务端默认（免费分组）");
+  assert.equal(pickedModelId(OPENROUTER_FREE_SELECTOR), OPENROUTER_FREE_SELECTOR);
+  assert.equal(wandModelDisplayName(catalog, "pi", OPENROUTER_FREE_SELECTOR), "免费分组");
+  assert.equal(wandModelDisplayName(catalog, "pi", "default"), "免费分组");
+  assert.equal(wandModelDisplayName(null, "pi", OPENROUTER_FREE_SELECTOR), "免费分组");
+});
+
+test("免费模型的分组元数据传到任务及员工模型选择器", () => {
+  const model = { id: "wand-openrouter-free/vendor/model:free", label: "Free Model", group: "免费分组" };
+  const catalog = normalizeWandModelCatalog({ piModels: [model] });
+  assert.deepEqual(wandModelOptions(catalog, "pi")[1], {
+    value: model.id, label: model.label, group: "免费分组",
+  });
+});
+
+test("智能分配按服务端给的 label 展示，且能原样进入请求体", () => {
+  const catalog = normalizeWandModelCatalog({ piModels: [
+    { id: "default", label: "跟随 one 的 Agent 默认" },
+    { id: AUTO_ASSIGN_SELECTOR, label: AUTO_ASSIGN_LABEL },
+    { id: "openai-codex/gpt-6.1-sol", label: "GPT-6.1-Sol" },
+  ], defaultModels: { pi: AUTO_ASSIGN_SELECTOR } });
+  const options = wandModelOptions(catalog, "pi");
+  assert.deepEqual(options[1], { value: AUTO_ASSIGN_SELECTOR, label: AUTO_ASSIGN_LABEL });
+  assert.equal(wandModelDisplayName(catalog, "pi", AUTO_ASSIGN_SELECTOR), AUTO_ASSIGN_LABEL);
+  assert.equal(wandModelDisplayName(null, "pi", AUTO_ASSIGN_SELECTOR), AUTO_ASSIGN_LABEL,
+    "目录没加载时也要显示人读名，而不是裸选择器");
+  assert.equal(wandModelDisplayName(catalog, "pi", "default"), AUTO_ASSIGN_LABEL,
+    "默认项文案按服务端默认模型渲染");
+  assert.equal(pickedModelId(AUTO_ASSIGN_SELECTOR), AUTO_ASSIGN_SELECTOR, "选择器原样提交给服务端结算");
+  assert.equal(modelDisplayName(AUTO_ASSIGN_SELECTOR, [{ id: AUTO_ASSIGN_SELECTOR, label: AUTO_ASSIGN_LABEL }], ""),
+    AUTO_ASSIGN_LABEL, "终端/聊天 chip 与 React 侧同口径");
+  assert.equal(modelDisplayName(AUTO_ASSIGN_SELECTOR, [], AUTO_ASSIGN_SELECTOR), AUTO_ASSIGN_LABEL,
+    "browser 侧目录没加载时也不显示裸选择器");
 });

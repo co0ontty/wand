@@ -1,4 +1,5 @@
 import type { WorkspacesRuntimeAdapter } from "./types";
+import { newSessionController } from "../new-session/controller";
 
 export type WorkspaceCreationKind = "project" | "task";
 
@@ -49,24 +50,28 @@ export interface WandWorkspacesController {
 
 export const workspacesController: WandWorkspacesController = {
   open(initialCwd?: string, kind: WorkspaceCreationKind = "task"): boolean {
+    newSessionController.open({ initialCwd });
     runtime?.onOpen();
     publish({ open: true, dismissable: true, initialCwd: initialCwd ?? "", initialKind: kind });
     return true;
   },
   close(): void {
+    newSessionController.close();
     if (!snapshot.open) return;
     publish({ open: false });
     runtime?.onClose();
   },
   closeIfOpen(): boolean {
+    newSessionController.closeIfOpen();
     if (!snapshot.open || !snapshot.dismissable) return false;
     this.close();
     return true;
   },
   isOpen(): boolean {
-    return snapshot.open;
+    return snapshot.open || newSessionController.isOpen();
   },
   setDismissable(dismissable): void {
+    newSessionController.setDismissable(dismissable);
     publishDismissable(dismissable);
   },
 };

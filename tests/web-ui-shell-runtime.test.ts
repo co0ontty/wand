@@ -206,18 +206,11 @@ test("PTY terminal interaction keeps a usable web composer and only the native e
   assert.match(input, /shouldUseTerminalPassthrough\(selectedSession\)/);
   assert.match(input, /var terminalPassthrough = el\.classList\.contains\("is-terminal-passthrough"\)/);
   assert.match(render, /state\.terminalInteractive \? ' is-terminal-interactive' : ''/);
-  // 网页端 composer 是真实的 PTY 输入面：保留 textarea，只收纳 Agent-only 章节。
-  assert.match(styles, /\.input-composer\.is-terminal-interactive \.composer-input-wrap[\s\S]*?display: flex;/);
-  assert.match(styles, /\.input-composer\.is-terminal-interactive \.composer-actions-left[\s\S]*?display: none !important;/);
-  // 直通规则必须带 html:not(.is-wand-app) 前缀：基础 composer 规则在
-  // :focus-within / .is-expanded 变体下是 0-3-1 特指度，不带前缀的直通规则只有
-  // 0-3-0，打字（textarea 聚焦）时会输给基础规则，把 composer 顶回 84/100px。
-  assert.match(styles, /html:not\(\.is-wand-app\) \.input-composer\.is-terminal-interactive \.composer-main-row[\s\S]*?grid-template-rows: auto;/);
-  assert.match(styles, /html:not\(\.is-wand-app\) \.input-composer\.is-terminal-interactive:focus-within \.composer-main-row/);
-  assert.match(styles, /html:not\(\.is-wand-app\) \.input-composer\.is-terminal-interactive \.input-textarea[\s\S]*?height: 40px;/);
-  // 原生嵌入壳才把 drafting row 整个交还给原生底栏。
-  assert.match(styles, /html\.is-wand-embed-terminal \.input-composer\.is-terminal-interactive \.composer-input-wrap[\s\S]*?display: none;/);
-  assert.match(styles, /html\.is-wand-embed-terminal \.input-composer\.is-terminal-interactive \.composer-main-row[\s\S]*?grid-template-rows: 48px;[\s\S]*?min-height: 48px;/);
+  // Web PTY preserves the native textarea and library toolbar; only agent controls hide.
+  assert.match(styles, /\.input-textarea \{[^}]*min-height: 36px;/);
+  assert.match(styles, /\.input-composer\.is-terminal-interactive :is\([^)]*\.composer-inline-config/);
+  assert.doesNotMatch(styles, /\.input-composer\.is-terminal-interactive \.composer-input-wrap[^{}]*\{[^}]*display: none/);
+  assert.match(styles, /\.is-wand-embed-terminal\.is-wand-native-input \.input-panel \{ display: none !important;/);
   // #input-box 自己拥有按键（逐字透传走 input 事件），不能再被 keydown 捕获重复发送。
   assert.match(input, /if \(target\.closest && target\.closest\("#input-box"\)\) return false;/);
   // Enter 提交：先文本（若有）后单独 "\r"，符合 PTY 输入契约。
@@ -226,7 +219,7 @@ test("PTY terminal interaction keeps a usable web composer and only the native e
   assert.match(sessions, /state\.terminalInteractive\s*&& !document\.documentElement\.classList\.contains\("is-wand-embed-terminal"\)[\s\S]*?String\.fromCharCode\(127\), "backspace"/);
 });
 
-test("PTY passthrough composer renders its trailing action with Appica", () => {
+test("PTY passthrough composer renders its trailing action with the library", () => {
   const render = readFileSync(path.join(root, "src/web-ui/browser/render.ts"), "utf8");
   const input = readFileSync(path.join(root, "src/web-ui/browser/input.ts"), "utf8");
   const adapter = readFileSync(path.join(root, "src/web-ui/browser/composer-rail-adapter.ts"), "utf8");
@@ -247,12 +240,11 @@ test("PTY passthrough composer renders its trailing action with Appica", () => {
   );
   assert.match(adapter, /if \(!config\.active\(\)\) \{[\s\S]*?composerRailController\.clear\(\);/);
   assert.match(adapter, /document\.querySelectorAll<HTMLElement>\("\[data-composer-rail-host\]"\)/);
-  // 空宿主不占位（结构化会话保留 legacy 发送按钮），直通下按钮与 40px 输入框对齐。
-  assert.match(styles, /\.composer-rail-host:empty \{\s*display: none;/);
-  assert.match(styles, /html:not\(\.is-wand-app\) \.input-composer\.is-terminal-interactive \.composer-rail-host[\s\S]*?min-height: 40px;/);
+  assert.match(styles, /\.composer-rail-host[^{}]*\{ display: contents; \}/);
+  assert.match(styles, /\.composer-actions-right[^{}]*\{ display: flex; align-items: center;/);
 });
 
-test("composer rail controller publishes and clears Appica mounts", async () => {
+test("composer rail controller publishes and clears library mounts", async () => {
   const { composerRailController } = await import("../src/web-ui/react/composer-rail/controller.js");
   const target = {} as HTMLElement;
   let notified = 0;

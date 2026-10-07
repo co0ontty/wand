@@ -114,7 +114,7 @@ test("自动批准 chip 渲染手动/自动两种文案与 aria 状态", () => {
   }));
   assert.match(on, /aria-pressed="true"/);
   assert.match(on, />自动</);
-  assert.match(on, /auto-approve-indicator active/);
+  assert.match(on, /ant-btn-variant-filled/);
   assert.match(on, /data-wand-icon="shieldCheck"/);
 });
 
@@ -128,21 +128,19 @@ test("统计徽章渲染总数、分类行与合计行，无统计时不渲染",
     stats: { total: 4, command: 2, file: 0, tool: 2 },
     revision: 2,
   }));
-  assert.match(html, /id="approval-stats"/);
-  assert.match(html, /class="approval-stats-total">4</);
-  // 计数为 0 的分类行不渲染。
-  assert.doesNotMatch(html, /文件写入/);
-  assert.match(html, /命令执行/);
-  assert.match(html, /其他工具/);
-  assert.match(html, /approval-stats-row-total/);
-  assert.match(html, /data-wand-icon="sigma"/);
+  assert.match(html, /id="approval-stats-badge"/);
+  assert.match(html, /aria-label="本次会话自动批准统计"/);
+  assert.match(html, />4<\/button>/);
+  assert.doesNotMatch(html, /id="approval-stats"/, "closed statistics content is portalled only when requested");
+  const host = readFileSync(new URL("../src/web-ui/react/composer-badges/host.tsx", import.meta.url), "utf8");
+  assert.match(host, /命令执行 \{stats\.command\} · 文件写入 \{stats\.file\} · 其他工具 \{stats\.tool\} · 合计 \{stats\.total\}/);
 });
 
 test("宿主 span 用 display:contents 让徽章直接成为状态行的 flex item", () => {
   const css = readFileSync(new URL("../src/web-ui/content/styles.css", import.meta.url), "utf8");
-  assert.match(css, /\.composer-badge-host\s*\{\s*display:\s*contents;/);
-  assert.ok(css.includes('.composer-status-row > :not([data-composer-badge-host="permissions"])'),
-    "permission emphasis must keep the portal host visible");
+  assert.match(css, /\.composer-badge-host[^{}]*\{ display: contents; \}/);
+  const host = readFileSync(new URL("../src/web-ui/react/composer-badges/host.tsx", import.meta.url), "utf8");
+  assert.match(host, /permissions/);
 });
 
 test("输入栏种子 markup 只保留徽章宿主，不再内联渲染徽章", () => {

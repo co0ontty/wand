@@ -18,6 +18,8 @@ import { LocalPreviewHost } from "./local-preview/host";
 import { ImageViewerHost } from "./image-viewer/host";
 import { ComposerSelectHost } from "./composer-select/host";
 import { ComposerConfigHost } from "./composer-config/host";
+import { PiSettingsHost } from "./pi-settings/host";
+import { PiExecutionHost } from "./pi-execution/host";
 import { ComposerPopoverHost } from "./composer-popover/host";
 import { ComposerActionErrorHost } from "./composer-action-error/host";
 import { ComposerAttachmentsHost } from "./composer-attachments/host";
@@ -30,9 +32,10 @@ import { GithubIssuesHost } from "./issues/host";
 
 export interface OverlayHostProps {
   portalContainer: HTMLElement;
+  settingsPresentation?: "dialog" | "page";
 }
 
-export function OverlayHost({ portalContainer }: OverlayHostProps) {
+export function OverlayHost({ portalContainer, settingsPresentation = "dialog" }: OverlayHostProps) {
   const current = useSyncExternalStore(
     overlayStore.subscribe,
     overlayStore.getSnapshot,
@@ -42,8 +45,11 @@ export function OverlayHost({ portalContainer }: OverlayHostProps) {
 
   return (
     <PortalContainerProvider container={portalContainer}>
+      {settingsPresentation === "dialog" ? <>
       <ComposerSelectHost />
       <ComposerConfigHost />
+      <PiSettingsHost />
+      <PiExecutionHost />
       <ComposerPopoverHost />
       <ComposerActionErrorHost />
       <ComposerAttachmentsHost />
@@ -53,7 +59,9 @@ export function OverlayHost({ portalContainer }: OverlayHostProps) {
       <MissionsHost />
       <WorkspacesHost />
       <GithubIssuesHost />
-      <SettingsHost showRestart={() => restartOverlayController.showRestart()} />
+      </> : null}
+      <SettingsHost presentation={settingsPresentation} showRestart={() => restartOverlayController.showRestart()} />
+      {settingsPresentation === "dialog" ? <>
       <NewSessionHost />
       <FolderPickerHost />
       <QuickCommitHost />
@@ -61,6 +69,7 @@ export function OverlayHost({ portalContainer }: OverlayHostProps) {
       <FilePreviewHost />
       <LocalPreviewHost />
       <ImageViewerHost />
+      </> : null}
       <RestartOverlayHost />
       <WandToastRegion />
 

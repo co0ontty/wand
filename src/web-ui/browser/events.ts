@@ -1,4 +1,11 @@
+import { refreshChatPresentation } from "../react/chat/presentation.js";
+import { mountLoginControls } from "./login-controls-adapter.js";
+import { mountComposerSender } from "./composer-sender-adapter.js";
+import { mountBrowserButtons } from "./library-buttons.js";
 import { state } from "./state";
+import { piExecutionController } from "../react/pi-execution/controller";
+import { closeReactOverlays } from "./react-overlay-coordinator";
+import { syncPiSettingsComposer } from "./pi-settings-adapter";
 import "./i18n";
 import { HttpResponseError, parseJsonResponse } from "../react/http-adapter";
 import { imageViewerController } from "../react/image-viewer/controller";
@@ -63,13 +70,13 @@ import { setupVisualViewportHandlers } from "./viewport";
       }
 
       (window as any).__tcToggle = function(e: any, headerEl: any) {
-        var card = headerEl.closest(".tool-use-card") || headerEl.closest(".inline-diff");
+        var card = headerEl.closest(".chat-tool-card") || headerEl.closest(".inline-diff");
         if (card) {
           var wasCollapsed = card.classList.contains("collapsed");
           card.classList.toggle("collapsed");
           var isExpanded = wasCollapsed;
           headerEl.setAttribute("aria-expanded", isExpanded ? "true" : "false");
-          var cardBody = card.querySelector(".tool-use-body, .diff-body");
+          var cardBody = card.querySelector(".chat-tool-body, .diff-body");
           if (cardBody) cardBody.setAttribute("aria-hidden", isExpanded ? "false" : "true");
           var expandKind = card.dataset.expandKind || "tool-card";
           persistElementExpandState(card, expandKind);
@@ -81,7 +88,7 @@ import { setupVisualViewportHandlers } from "./viewport";
               function(content: any) {
                 if (resultDiv) resultDiv.innerHTML = '<pre class="tool-use-result-content">' + escapeHtml(content) + '</pre>';
               },
-              '<div class="tool-content-error" onclick="__tcToggle(null, this.closest(\'.tool-use-card,.inline-diff\').querySelector(\'.tool-use-header,.diff-header\'))">加载失败，点击重试</div>'
+              '<div class="tool-content-error" onclick="__tcToggle(null, this.closest(\'.chat-tool-card,.inline-diff\').querySelector(\'.chat-tool-header,.diff-header\'))">加载失败，点击重试</div>'
             );
           }
         }
@@ -92,27 +99,23 @@ import { setupVisualViewportHandlers } from "./viewport";
         if (typeof sessionId === "string" && sessionId) selectSession(sessionId);
       };
             // Toggle function for inline thinking blocks — called via onclick attribute
+      // 展开状态仍写在宿主 class / 持久化通道上；预览文案与动作文案由 X 的 Think 渲染，
+      // 手写的 .thinking-inline-preview / .thinking-inline-action 已不存在。
       (window as any).__thinkingToggle = function(el: any) {
         var isCollapsed = el.classList.contains("collapsed");
-        if (isCollapsed) {
-          el.classList.remove("collapsed");
-          el.classList.add("expanded");
-          el.querySelector(".thinking-inline-preview").textContent = el.dataset.thinking || "";
-          var action = el.querySelector(".thinking-inline-action");
-          if (action) action.textContent = "收起";
-        } else {
-          el.classList.remove("expanded");
-          el.classList.add("collapsed");
-          var preview = "深度思考";
-          el.querySelector(".thinking-inline-preview").textContent = preview;
-          var action = el.querySelector(".thinking-inline-action");
-          if (action) action.textContent = "展开";
-        }
+        el.classList.toggle("collapsed", !isCollapsed);
+        el.classList.toggle("expanded", isCollapsed);
         persistElementExpandState(el, "thinking");
       };
       // Agent Run 头部由原生 button 驱动，Enter / Space 交给浏览器默认行为。
       // 展开状态写在 data-expanded 上，并通过 data-expand-key 走通用持久化通道；
       // 展开后的时间线是主对话流的一部分，不创建嵌套滚动容器。
+      (window as any).__piExecutionOpen = function(e: Event, target: HTMLElement) {
+        e.preventDefault(); e.stopPropagation();
+        const toolId = target.dataset.toolId;
+        if (!state.selectedId || !toolId || !closeReactOverlays(["piExecution"])) return;
+        piExecutionController.open(state.selectedId, toolId, target);
+      };
       (window as any).__agentRunToggle = function(e: any, target: any) {
         if (e) { e.preventDefault(); e.stopPropagation(); }
         var run = target && target.closest ? target.closest(".agent-run") : null;
@@ -120,6 +123,7 @@ import { setupVisualViewportHandlers } from "./viewport";
         var expanded = run.getAttribute("data-expanded") !== "true";
         applyExpandedState(run, "agent-run", expanded);
         persistElementExpandState(run, "agent-run");
+        refreshChatPresentation(run);
       };
       // Agent 切换：点击 + 全套键盘导航（←/→/Home/End 环绕）。选择结果按会话持久化，
       // 刷新或重连后仍停留在用户上次查看的 Agent。
@@ -171,6 +175,7 @@ import { setupVisualViewportHandlers } from "./viewport";
           }
         }
         if (runId && taskId) setPersistedAgentSelection(runId, taskId);
+        refreshChatPresentation(run);
       }
 
       // 聊天里内联图片缩略图点击 → 打开文件预览弹层（复用文件浏览器同款模态）。
@@ -399,6 +404,10 @@ import { setupVisualViewportHandlers } from "./viewport";
           composerInputResizeObserver = null;
         }
 
+        mountLoginControls();
+        mountComposerSender(refreshInputBoxState);
+        mountBrowserButtons(document);
+
         var loginButton = document.getElementById("login-button");
         if (loginButton) {
           loginButton.addEventListener("click", login);
@@ -410,17 +419,6 @@ import { setupVisualViewportHandlers } from "./viewport";
           var loginSwitchServerBtn = document.getElementById("login-switch-server-button");
           if (loginSwitchServerBtn) loginSwitchServerBtn.addEventListener("click", switchServer);
           var passwordEl = document.getElementById("password") as HTMLInputElement | null;
-          var togglePasswordButton = document.getElementById("toggle-password-button");
-          if (togglePasswordButton && passwordEl) {
-            togglePasswordButton.addEventListener("click", function() {
-              var visible = passwordEl!.type === "text";
-              passwordEl!.type = visible ? "password" : "text";
-              togglePasswordButton!.textContent = visible ? "显示" : "隐藏";
-              togglePasswordButton!.setAttribute("aria-label", visible ? "显示密码" : "隐藏密码");
-              togglePasswordButton!.setAttribute("aria-pressed", visible ? "false" : "true");
-              passwordEl!.focus();
-            });
-          }
           if (passwordEl) {
             passwordEl.addEventListener("keydown", function(e) {
               if (e.key === "Enter") login();
@@ -471,6 +469,7 @@ import { setupVisualViewportHandlers } from "./viewport";
             setDraftValue(inputBox!.value, true);
             // v2: 触发 ghost meta / 优化按钮的显隐切换
             syncComposerHasText(inputBox!);
+            syncPiSettingsComposer();
           });
           // INPUT-3: 所有 composer 都跟踪 IME 组字，避免 Safari / WKWebView 在
           // compositionend 同一轮事件里把“确认候选”的 Enter 当成发送。PTY 交互模式

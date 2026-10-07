@@ -81,8 +81,8 @@ export function pruneManagedSelection(
 }
 
 /**
- * 任务和会话在批量操作里是同一套逻辑：主操作都是归档（软处理——终端继续跑、worktree 保留、
- * 7 天后由保留期清理），只有显式选中的终端才走真删除。所以两个按钮分开描述，
+ * 任务和会话在批量操作里是同一套逻辑：主操作都是归档（软处理——终端继续跑、worktree 保留，
+ * 之后由保留期清理），只有显式选中的终端才走真删除。所以两个按钮分开描述，
  * 不再用一句「归档任务并删除终端」把两种动作揉在一起。
  */
 export function describeManagedAction(selection: SidebarManageSelection): string {

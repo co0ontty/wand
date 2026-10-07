@@ -490,7 +490,7 @@ test("legacy adapter converts synchronous and asynchronous refresh failures to t
   ]);
 });
 
-test("Worktree dialog styles are React-owned while sidebar badges stay legacy-owned", () => {
+test("Worktree dialog layout is React-owned and library controls replace legacy chrome", () => {
   const host = readFileSync(
     new URL("../src/web-ui/react/worktree-merge/host.tsx", import.meta.url),
     "utf8",
@@ -504,15 +504,12 @@ test("Worktree dialog styles are React-owned while sidebar badges stay legacy-ow
     "utf8",
   );
 
-  for (const selector of [
-    ".wand-worktree-dialog",
-    ".wand-worktree-header",
-    ".wand-worktree-row",
-    ".wand-worktree-status",
-    ".wand-worktree-actions",
-  ]) {
-    assert.ok(reactStyles.includes(selector), `React styles must own ${selector}`);
-  }
+  const layout = readFileSync(new URL("../src/web-ui/react/issues/library-layout.ts", import.meta.url), "utf8");
+  assert.match(host, /wand-task-library-dialog wand-worktree-library-dialog/);
+  assert.match(layout, /overflow: auto/);
+  assert.doesNotMatch(reactStyles, /\.wand-worktree-actions/);
+  assert.match(host, /<Flex justify="flex-end" gap=\{8\}/);
+  assert.match(host, /<Card size="small"/);
   for (const selector of [
     ".worktree-merge-modal",
     ".worktree-merge-content",
@@ -521,7 +518,7 @@ test("Worktree dialog styles are React-owned while sidebar badges stay legacy-ow
   ]) {
     assert.ok(!legacyStyles.includes(selector), `legacy styles must delete ${selector}`);
   }
-  assert.ok(legacyStyles.includes(".session-kind-badge.worktree-merge"));
+  assert.doesNotMatch(legacyStyles, /\.session-kind-badge\.worktree-merge/);
   assert.ok(!host.includes('className="worktree-merge'));
 });
 
@@ -556,9 +553,9 @@ test("worktree 成功结果先在弹层体内原位读完，再关闭", () => {
     "utf8",
   );
   assert.match(host, /setResultNote\(worktreeMergeResultMessage\(result\)\)/);
-  assert.match(host, /role="status">\{resultNote\}/);
+  assert.match(host, /role="status" title=\{resultNote\}/);
   assert.match(host, /window\.setTimeout\(resolve, MOTION_DWELL_RESULT_SENTENCE_MS\)/);
   assert.ok(!host.includes("toast("), "成功不再靠 toast 抢在关闭前露一面");
   // 失败仍然是原位 alert，两条通道对称。
-  assert.match(host, /className="wand-worktree-error" role="alert"/);
+  assert.match(host, /<Alert type="error" showIcon role="alert"/);
 });

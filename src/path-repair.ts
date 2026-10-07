@@ -1,4 +1,5 @@
 import { existsSync, readdirSync } from "node:fs";
+import { setLoginShellEnv } from "./env-utils.js";
 import { compareSemver } from "./version-utils.js";
 import { getErrorMessage } from "./error-utils.js";
 import { providerCliCommand, SESSION_PROVIDERS } from "./session-provider.js";
@@ -30,6 +31,12 @@ import { spawn, spawnSync } from "node:child_process";
  *      "前插"到 process.env.PATH 前面。这
  *      是真正能修好"unit 里 PATH 太旧、用户 shell 里却好好的"这种场景的关键。
  *
+ * 同一次探测还回收登录 shell 的**完整环境**（rc 里 export 的变量），交给
+ * src/env-utils.ts 作为所有 CLI 子进程的底座：服务进程 env 与 shell env 冲突时
+ * 保留进程值（本轮显式启动的参数最大），shell 只填补进程里没有的变量。PATH 顺序
+ * 由上面第 2 层单独重排，所以两条链路的 CLI 版本一致。
+ * WAND_SHELL_ENV_DISABLE=1 只关掉环境回收，不影响 PATH 修复。
+ *
  * 设计决策：
  *   - 同步那层只追加不前插：尊重用户已有顺序；异步那层愿意前插，因为它拿到的是
  *     用户实际"会用的"PATH，比 unit 里的更可信。
@@ -52,6 +59,10 @@ export interface PathRepairResult {
   finalPath: string;
   /** login shell 探测阶段的状态：success / disabled / failed / skipped。 */
   deepProbe: "success" | "disabled" | "failed" | "skipped";
+  /** login shell 探测实际使用的 shell；用于确认服务环境与用户默认 shell 对齐。 */
+  shell?: string;
+  /** 登录 shell 里进程环境没有、因此新回收给子进程的变量数。 */
+  shellEnvVars?: number;
   /** 异步阶段产生的告警信息（login shell 超时、解析失败等）。 */
   warnings: string[];
 }
@@ -252,6 +263,7 @@ export async function deepRepairRuntimePath(
     result.deepProbe = "skipped";
     return result;
   }
+  result.shell = shell;
 
   let probe: ProbeResult;
   try {
@@ -260,6 +272,13 @@ export async function deepRepairRuntimePath(
     result.warnings.push(`login shell 探测失败 (${shell}): ${getErrorMessage(err)}`);
     result.deepProbe = "failed";
     return result;
+  }
+
+  if (process.env.WAND_SHELL_ENV_DISABLE === "1") {
+    result.warnings.push("跳过登录 shell 环境回收：WAND_SHELL_ENV_DISABLE=1");
+  } else {
+    setLoginShellEnv(probe.env);
+    result.shellEnvVars = Object.keys(probe.env).filter((key) => !(key in process.env)).length;
   }
 
   const delim = path.delimiter;
@@ -315,6 +334,34 @@ interface ProbeResult {
   opencode: string | null;
   grok: string | null;
   qodercli: string | null;
+  /** 登录 shell 的完整环境（rc 文件生效之后）。 */
+  env: NodeJS.ProcessEnv;
+}
+
+/** 探测用的 shell 自身状态，不回填给会话（探测把 PS1 清空只为解析 stdout）。 */
+const PROBE_ONLY_ENV_KEYS: readonly string[] = ["PS0", "PS1", "PS2", "PS3", "PS4", "PROMPT_COMMAND"];
+
+const ENV_LINE = /^[A-Za-z_][A-Za-z0-9_]*=/;
+const ENV_BEGIN_MARKER = "WAND_ENV_BEGIN_7c1f";
+const ENV_END_MARKER = "WAND_ENV_END_7c1f";
+
+/**
+ * 解析 env 输出。只接受形如 `NAME=value` 的行：交互式 rc 可能往 stdout 喷无关内容，
+ * 把噪声行当"上一个值的续行"会污染变量，宁可丢掉内嵌换行这种罕见值。
+ */
+function parseEnvDump(stdout: string): NodeJS.ProcessEnv {
+  const begin = stdout.indexOf(`${ENV_BEGIN_MARKER}\n`);
+  const end = stdout.lastIndexOf(`\n${ENV_END_MARKER}`);
+  const env: NodeJS.ProcessEnv = {};
+  if (begin < 0 || end < begin) return env;
+  for (const line of stdout.slice(begin + ENV_BEGIN_MARKER.length + 1, end).split("\n")) {
+    if (!ENV_LINE.test(line)) continue;
+    const idx = line.indexOf("=");
+    const key = line.slice(0, idx);
+    if (PROBE_ONLY_ENV_KEYS.includes(key)) continue;
+    env[key] = line.slice(idx + 1);
+  }
+  return env;
 }
 
 function pickProbeShell(configured?: string): string | null {
@@ -334,8 +381,8 @@ function pickProbeShell(configured?: string): string | null {
 }
 
 /**
- * 用与 PTY provider 相同的交互式 login shell 跑最小脚本，拿到实际的 PATH 和 CLI 路径。
- * 用 \x1f（ASCII Unit Separator）作字段分隔符避免和路径里的字符冲突。
+ * 用与 PTY provider 相同的交互式 login shell 跑最小脚本，拿到实际的 PATH、CLI 路径和
+ * rc 生效后的完整环境。用 \x1f（ASCII Unit Separator）作字段分隔符避免和路径里的字符冲突。
  */
 function probeLoginShell(shell: string, timeoutMs: number): Promise<ProbeResult> {
   const script =
@@ -344,7 +391,8 @@ function probeLoginShell(shell: string, timeoutMs: number): Promise<ProbeResult>
     `printf 'CODEX\\x1f%s\\n' "$(command -v codex 2>/dev/null)"; ` +
     `printf 'OPENCODE\\x1f%s\\n' "$(command -v opencode 2>/dev/null)"; ` +
     `printf 'GROK\\x1f%s\\n' "$(command -v grok 2>/dev/null)"; ` +
-    `printf 'QODERCLI\\x1f%s\\n' "$(command -v qodercli 2>/dev/null)"`;
+    `printf 'QODERCLI\\x1f%s\\n' "$(command -v qodercli 2>/dev/null)"; ` +
+    `printf '\\n${ENV_BEGIN_MARKER}\\n'; command env; printf '${ENV_END_MARKER}\\n'`;
 
   return new Promise((resolve, reject) => {
     const child = spawn(shell, ["-lic", script], {
@@ -381,7 +429,15 @@ function probeLoginShell(shell: string, timeoutMs: number): Promise<ProbeResult>
           reject(new Error(`login shell exited ${code}: ${stderr.trim().slice(0, 200)}`));
           return;
         }
-        const out: ProbeResult = { path: "", claude: null, codex: null, opencode: null, grok: null, qodercli: null };
+        const out: ProbeResult = {
+          path: "",
+          claude: null,
+          codex: null,
+          opencode: null,
+          grok: null,
+          qodercli: null,
+          env: parseEnvDump(stdout),
+        };
         for (const line of stdout.split("\n")) {
           const idx = line.indexOf("\x1f");
           if (idx < 0) continue;
@@ -446,7 +502,8 @@ export function formatPathRepairSummary(result: PathRepairResult): string {
   if (result.deepProbe === "failed" && result.warnings.length > 0) {
     parts.push(`deep-probe: ${result.warnings[0]}`);
   } else if (result.deepProbe === "success") {
-    parts.push("deep-probe: ok");
+    const envSuffix = result.shellEnvVars ? `, +${result.shellEnvVars} env vars` : "";
+    parts.push(`deep-probe: ok${result.shell ? ` (${result.shell})` : ""}${envSuffix}`);
   }
   return parts.join("; ");
 }

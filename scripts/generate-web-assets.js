@@ -26,8 +26,8 @@ for (const [key, relPath, contentType] of assets) {
   if (relPath === "scripts.js") {
     content = Buffer.from(minifyJs(content.toString("utf8")), "utf8");
   } else if (relPath === "styles.css") {
-    // Must mirror src/web-ui/styles.ts: Tailwind/Appica output first, then the
-    // hand-written CSS so Wand's palette wins over Appica's same-named tokens.
+    // Must mirror src/web-ui/styles.ts: Tailwind utilities first, then the
+    // business CSS. Ant Design/X component styles are installed at runtime.
     const tailwind = readFileSync(path.join(contentDir, "tailwind.css"), "utf8");
     content = Buffer.from(minifyCss(`${tailwind}\n${content.toString("utf8")}`), "utf8");
   }

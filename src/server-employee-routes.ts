@@ -16,7 +16,19 @@ import { asyncRoute } from "./express-async.js";
 import { bodyObject, sendRouteError, text } from "./server-request.js";
 import { parseTaskAgent } from "./server-task-routes.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
-import { generateSiliconEmployeeDraft } from "./silicon-employee-draft.js";
+import { employeeCliAvailable } from "./silicon-employee-dispatch.js";
+import {
+  EMPLOYEE_CREATION_DEFAULTS_PREF,
+  resolveSiliconEmployeeDefaults,
+} from "./silicon-employee-defaults.js";
+import {
+  availableEmployeeProviders,
+  generateSiliconEmployeeDraft,
+  SiliconEmployeeDraftError,
+  validateStructuredEmployeeDraft,
+} from "./silicon-employee-draft.js";
+import { SESSION_PROVIDERS } from "./session-provider.js";
+import { DEFAULT_WAND_TASK_AGENT_KIND } from "./task-types.js";
 import type { QuickCommitAiOptions } from "./git-quick-commit.js";
 import { EMPLOYEE_KNOWLEDGE_MAX_ENTRIES } from "./employee-knowledge-types.js";
 import type { WandStorage } from "./storage.js";
@@ -46,10 +58,22 @@ export interface EmployeeDraftRequest {
   existingNames: string[];
 }
 
-function sendEmployeeError(res: Response, error: unknown): void {
+function sendEmployeeError(res: Response, error: unknown, context?: { expectation?: string }): void {
   const message = getErrorMessage(error, "硅基员工操作失败。");
   const status = /不存在/.test(message) ? 404 : 400;
-  sendRouteError(res, error, "硅基员工操作失败。", status);
+  const code = error instanceof SiliconEmployeeDraftError ? error.code : undefined;
+  const field = error instanceof SiliconEmployeeDraftError ? error.field : undefined;
+  if (!code && !context?.expectation) {
+    sendRouteError(res, error, "硅基员工操作失败。", status);
+    return;
+  }
+  // 结构化可恢复错误：带 code/field，并回显原口语输入，客户端可继续编辑重试。
+  res.status(status).json({
+    error: message,
+    ...(code ? { code } : {}),
+    ...(field ? { field } : {}),
+    ...(context?.expectation ? { expectation: context.expectation } : {}),
+  });
 }
 
 /** 内置员工是 Wand 自己的执行者，不能被归档或删除。 */
@@ -108,14 +132,14 @@ export function parseSystemEmployeeAgents(value: unknown, existing: SiliconEmplo
     throw new Error("该员工是内置的，身份不可修改。");
   }
 
-  if (!Array.isArray(body.agents)) throw new Error("请提供执行候选数组。");
+  if (!Array.isArray(body.agents)) throw new Error("请提供执行候选数组（CLI / SDK）。");
   if (body.agents.length === 0) throw new Error("至少需要一个执行候选。");
   if (body.agents.length > AI_TEAM_MAX_CANDIDATES) {
     throw new Error(`最多 ${AI_TEAM_MAX_CANDIDATES} 个执行候选。`);
   }
   const agents = body.agents.map((rawAgent): WandTaskAgent => {
     const parsed = parseTaskAgent(rawAgent ?? {});
-    if (!parsed) throw new Error("请选择有效的 CLI 工具。");
+    if (!parsed) throw new Error("请选择有效的 CLI 工具或 SDK 执行引擎。");
     if (parsed.kind !== "structured") throw new Error("硅基员工只支持结构化会话。");
     return parsed;
   });
@@ -145,7 +169,7 @@ export function parseSiliconEmployeeInput(
     }
     agents = body.agents.map((rawAgent): WandTaskAgent => {
       const parsed = parseTaskAgent(rawAgent ?? {});
-      if (!parsed) throw new Error("请选择有效的 CLI 工具。");
+      if (!parsed) throw new Error("请选择有效的 CLI 工具或 SDK 执行引擎。");
       if (parsed.kind !== "structured") throw new Error("硅基员工只支持结构化会话。");
       return parsed;
     });
@@ -153,7 +177,7 @@ export function parseSiliconEmployeeInput(
     throw new Error("候选执行配置必须是数组。");
   } else if (body.agent !== undefined && body.agent !== null) {
     const singleAgent = parseTaskAgent(body.agent);
-    if (!singleAgent) throw new Error("请选择有效的 CLI 工具。");
+    if (!singleAgent) throw new Error("请选择有效的 CLI 工具或 SDK 执行引擎。");
     if (singleAgent.kind !== "structured") throw new Error("硅基员工只支持结构化会话。");
     agents = [singleAgent];
   } else {
@@ -192,15 +216,36 @@ export function registerSiliconEmployeeRoutes(
     config?: WandConfig;
     /** 测试注入点：默认按系统 AI 配置真实调用模型。 */
     generateDraft?: (request: EmployeeDraftRequest) => Promise<SiliconEmployeeDraft>;
+    /** 测试注入点：CLI 可用性探测。 */
+    isProviderAvailable?: (agent: WandTaskAgent) => boolean;
   },
 ): void {
   const { storage, notifyEmployeeChanged, config } = deps;
+  const isProviderAvailable = deps.isProviderAvailable ?? employeeCliAvailable;
+  /** 已保存的员工创建配置优先；没有就用服务端 defaultProvider；再没有就要求用户选择。 */
+  const savedEmployeeAgent = (): WandTaskAgent | null => {
+    const raw = storage.getPreference<unknown>(EMPLOYEE_CREATION_DEFAULTS_PREF, null);
+    if (!raw) return null;
+    try {
+      const agent = parseTaskAgent(raw, undefined, DEFAULT_WAND_TASK_AGENT_KIND);
+      return agent?.kind === "structured" ? agent : null;
+    } catch {
+      return null;
+    }
+  };
+  const resolveDefaults = () =>
+    resolveSiliconEmployeeDefaults({ savedAgent: savedEmployeeAgent(), config });
+  const allowedProviders = (): SessionProvider[] => {
+    const available = availableEmployeeProviders(resolveDefaults().provider, isProviderAvailable);
+    return available.length ? available : [...SESSION_PROVIDERS];
+  };
   const generateDraft = deps.generateDraft ?? ((request: EmployeeDraftRequest) =>
     generateSiliconEmployeeDraft(request.expectation, employeeDraftAiOptions(storage, config), {
       cwd: config?.defaultCwd || process.cwd(),
       language: config?.language ?? "",
       existingNames: request.existingNames,
-      preferredProvider: config?.defaultProvider ?? "claude",
+      preferredProvider: resolveDefaults().provider,
+      isProviderAvailable,
     }));
   const notifyEmployee = (employeeId: string): void => {
     try {
@@ -220,16 +265,53 @@ export function registerSiliconEmployeeRoutes(
     }
   });
 
-  app.post("/api/silicon-employees/draft", asyncRoute(async (req, res) => {
+  /** 两端唯一的默认执行配置读取点；未配置时如实返回需要用户选择。 */
+  app.get("/api/silicon-employees/draft/defaults", (_req, res) => {
+    res.json(resolveDefaults());
+  });
+
+  /** 显式保存员工创建默认配置（只落偏好，不创建员工实体）。 */
+  app.put("/api/silicon-employees/draft/defaults", (req, res) => {
     try {
-      const body = bodyObject(req.body);
-      const expectation = text(body.expectation);
-      const existingNames = storage.listSiliconEmployees({ includeArchived: true })
-        .map((employee) => employee.name);
-      const draft = await generateDraft({ expectation, existingNames });
-      res.json({ draft });
+      const agent = parseTaskAgent(req.body ?? {}, undefined, DEFAULT_WAND_TASK_AGENT_KIND);
+      if (!agent) throw new Error("请选择有效的执行候选。");
+      if (agent.kind !== "structured") throw new Error("硅基员工只支持结构化会话。");
+      storage.setPreference(EMPLOYEE_CREATION_DEFAULTS_PREF, {
+        provider: agent.provider,
+        model: agent.model,
+        thinkingEffort: agent.thinkingEffort,
+        mode: agent.mode,
+        kind: agent.kind,
+        ...(agent.engine ? { engine: agent.engine } : {}),
+      });
+      res.json(resolveDefaults());
     } catch (error) {
       sendEmployeeError(res, error);
+    }
+  });
+
+  app.post("/api/silicon-employees/draft", asyncRoute(async (req, res) => {
+    let expectation = "";
+    try {
+      const body = bodyObject(req.body);
+      expectation = text(body.expectation);
+      const existingNames = storage.listSiliconEmployees({ includeArchived: true })
+        .map((employee) => employee.name);
+      // HR 已给完整结构化草稿：走同一校验，不再调用模型。
+      if (body.draft !== undefined && body.draft !== null) {
+        const draft = validateStructuredEmployeeDraft(body.draft, {
+          allowedProviders: allowedProviders(), existingNames,
+        });
+        res.json({ draft, usage: { generateCalls: 0, path: "validated" as const } });
+        return;
+      }
+      if (!expectation) {
+        throw new SiliconEmployeeDraftError("先说说你对这位员工的期望吧。", "EMPTY_EXPECTATION", "expectation");
+      }
+      const draft = await generateDraft({ expectation, existingNames });
+      res.json({ draft, usage: { generateCalls: 1, path: "generated" as const } });
+    } catch (error) {
+      sendEmployeeError(res, error, { expectation });
     }
   }));
 

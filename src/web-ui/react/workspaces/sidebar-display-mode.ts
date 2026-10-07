@@ -37,8 +37,8 @@ export function nextSidebarDisplayMode(mode: SidebarDisplayMode): SidebarDisplay
 export function sidebarDisplayModeLabel(mode: SidebarDisplayMode): string {
   switch (mode) {
     case "folded": return "收起";
-    case "active": return "只看活动";
-    default: return "全部";
+    case "active": return "在跑";
+    default: return "展开";
   }
 }
 
@@ -107,4 +107,58 @@ export function useSidebarDisplayMode(): [SidebarDisplayMode, () => void, (mode:
   }, []);
   const cycle = React.useCallback(() => update(nextSidebarDisplayMode(mode)), [mode, update]);
   return [mode, cycle, update];
+}
+
+/** One presentation scope for the full list, rail and peek; never a business registry. */
+export interface SidebarPresentation {
+  mode: SidebarDisplayMode;
+  query: string;
+  setMode(mode: SidebarDisplayMode): void;
+  setQuery(query: string): void;
+  normal: Readonly<Record<string, boolean>>;
+  setNormal(key: string, collapsed: boolean): void;
+  overrides: Readonly<Record<string, boolean>>;
+  setOverride(key: string, open: boolean): void;
+}
+
+export const SidebarPresentationContext = React.createContext<SidebarPresentation | null>(null);
+
+export function sidebarModeOverrides(
+  previous: SidebarDisplayMode,
+  next: SidebarDisplayMode,
+  overrides: Readonly<Record<string, boolean>>,
+): Readonly<Record<string, boolean>> {
+  return previous === next ? overrides : {};
+}
+
+export function sidebarExpansionOpen(
+  mode: SidebarDisplayMode,
+  normalOpen: boolean,
+  override: boolean | undefined,
+  foldedOpen: boolean,
+  searching: boolean,
+): boolean {
+  if (searching) return true;
+  if (mode === "full") return normalOpen;
+  return override ?? (mode === "active" || foldedOpen);
+}
+
+export function useSidebarPresentation(): SidebarPresentation {
+  const [mode, , persistMode] = useSidebarDisplayMode();
+  const [query, setQuery] = React.useState("");
+  const [normal, setNormalState] = React.useState<Record<string, boolean>>({});
+  const [overrides, setOverrides] = React.useState<Readonly<Record<string, boolean>>>({});
+  const setMode = React.useCallback((next: SidebarDisplayMode): void => {
+    setOverrides((current) => sidebarModeOverrides(mode, next, current));
+    persistMode(next);
+  }, [mode, persistMode]);
+  const setNormal = React.useCallback((key: string, collapsed: boolean): void => {
+    setNormalState((current) => ({ ...current, [key]: collapsed }));
+  }, []);
+  const setOverride = React.useCallback((key: string, open: boolean): void => {
+    setOverrides((current) => ({ ...current, [key]: open }));
+  }, []);
+  return React.useMemo(() => ({
+    mode, query, setMode, setQuery, normal, setNormal, overrides, setOverride,
+  }), [mode, query, setMode, normal, setNormal, overrides, setOverride]);
 }

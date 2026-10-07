@@ -1,3 +1,5 @@
+import * as React from "react";
+
 /**
  * 「结果停留」时长：提交后完成态 / 失败态在原位停多久再恢复或前进。
  * 真值见 docs/motion-design.md:63（Android 同名常量 SEND_SENT_DWELL_MS / SEND_FAILED_DWELL_MS），
@@ -21,3 +23,27 @@ export const MOTION_DWELL_RESULT_SENTENCE_MS = 1200;
  * task-board-processing-dot 的 900ms 周期配套，改这里必须同时核对那条动画。
  */
 export const MOTION_PROCESSING_STAGGER_MS = 150;
+
+/** Geometry timing comes only from the existing CSS tokens, with no feature fallback. */
+export function readMotionTokenMs(token: "--motion-fast" | "--motion-normal" | "--motion-indicator"): number {
+  if (typeof document === "undefined") return 0;
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(token).trim();
+  const value = Number.parseFloat(raw);
+  return Number.isFinite(value) ? value * (raw.endsWith("ms") ? 1 : 1000) : 0;
+}
+
+export function useReducedMotion(): boolean {
+  const read = (): boolean => typeof window !== "undefined"
+    && typeof window.matchMedia === "function"
+    && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const [reduced, setReduced] = React.useState(read);
+  React.useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = (): void => setReduced(media.matches);
+    media.addEventListener("change", update);
+    update();
+    return () => media.removeEventListener("change", update);
+  }, []);
+  return reduced;
+}

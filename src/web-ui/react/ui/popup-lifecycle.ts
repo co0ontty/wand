@@ -1,0 +1,70 @@
+import { useEffect, useRef } from "react";
+import type { DropdownProps } from "antd";
+
+export type PopupSide = "top" | "right" | "bottom" | "left";
+export type PopupAlign = "start" | "center" | "end";
+
+export function popupPlacement(side: PopupSide, align: PopupAlign): Exclude<NonNullable<DropdownProps["placement"]>, "topCenter" | "bottomCenter"> {
+  if (side === "top" || side === "bottom") {
+    return align === "center" ? side : `${side}${align === "end" ? "Right" : "Left"}`;
+  }
+  return align === "center" ? side : `${side}${align === "end" ? "Bottom" : "Top"}`;
+}
+
+export function popupOffset(side: PopupSide, distance: number): [number, number] {
+  return side === "left" ? [-distance, 0] : side === "right" ? [distance, 0] : [0, side === "top" ? -distance : distance];
+}
+
+const dismissStack: Array<() => void> = [];
+function dismissTopPopup(event: KeyboardEvent): void {
+  if (event.key !== "Escape" || event.isComposing || !dismissStack.length) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  dismissStack.at(-1)?.();
+}
+
+function dismissTopOnHistory(): void { dismissStack.at(-1)?.(); }
+
+/** Escape/back closes only the top popup; the enclosing dialog keeps its focus lease. */
+export function registerPopupDismiss(dismiss: () => void): () => void {
+  if (!dismissStack.length) {
+    document.addEventListener("keydown", dismissTopPopup, true);
+    window.addEventListener("popstate", dismissTopOnHistory);
+  }
+  dismissStack.push(dismiss);
+  return () => {
+    const index = dismissStack.indexOf(dismiss);
+    if (index >= 0) dismissStack.splice(index, 1);
+    if (!dismissStack.length) {
+      document.removeEventListener("keydown", dismissTopPopup, true);
+      window.removeEventListener("popstate", dismissTopOnHistory);
+    }
+  };
+}
+
+const popupParents = new Map<string, string>();
+
+/** Only an explicitly registered child belongs to a parent; unrelated Portals stay outside. */
+export function registerPopupOwner(owner: string, parent: string | null): () => void {
+  if (!parent || owner === parent) return () => {};
+  popupParents.set(owner, parent);
+  return () => { if (popupParents.get(owner) === parent) popupParents.delete(owner); };
+}
+
+/** Parent outside-press handlers recognize their registered ownership chain, never all popups. */
+export function isWandPopupOwnedBy(target: EventTarget | null, owner: string): boolean {
+  let current = target instanceof Element ? target.closest("[data-wand-popup-owner]")?.getAttribute("data-wand-popup-owner") : null;
+  const seen = new Set<string>();
+  while (current && !seen.has(current)) {
+    if (current === owner) return true;
+    seen.add(current); current = popupParents.get(current) ?? null;
+  }
+  return false;
+}
+
+/** Updating a callback must not reorder an already open popup's dismissal lease. */
+export function usePopupDismiss(open: boolean, dismiss: () => void): void {
+  const latest = useRef(dismiss);
+  latest.current = dismiss;
+  useEffect(() => open ? registerPopupDismiss(() => latest.current()) : undefined, [open]);
+}

@@ -1,97 +1,29 @@
-import { Button as AppicaButton, type ButtonProps as AppicaButtonProps } from "@appica/ui-react/button";
+import { Button, type ButtonProps } from "antd";
 import * as React from "react";
-import { classNames, staticClassName } from "./class-names";
+import { classNames } from "./class-names";
+import { WandUiBoundary } from "../theme";
 
 export type WandButtonKind = "primary" | "secondary" | "outline" | "soft" | "ghost" | "danger";
 type WandButtonSize = "small" | "medium" | "large";
-
-/**
- * Wand's button surface, rendered by Appica UI.
- *
- * The `wand-ui-button*` classes are kept as stable styling hooks for the
- * business stylesheets (`.task-board-create-footer .wand-ui-button { ... }`
- * and friends). Appica owns sizes and behavior; foundationStyles owns the flat
- * surfaces and restrained motion shared with the login page.
- */
-export interface WandButtonProps extends Omit<AppicaButtonProps, "variant" | "size"> {
+export interface WandButtonProps extends Omit<React.ComponentPropsWithRef<"button">, "className" | "color"> {
+  className?: string;
   kind?: WandButtonKind;
   size?: WandButtonSize;
+  loading?: ButtonProps["loading"];
+  href?: string;
+  target?: string;
+  rel?: string;
+}
+export interface WandIconButtonProps extends WandButtonProps { children: React.ReactNode; }
+
+export function WandButton({ className, kind = "secondary", size = "medium", type = "button", ref, ...props }: WandButtonProps) {
+  return <WandUiBoundary><Button {...props} ref={ref} htmlType={type}
+    type={kind === "soft" ? undefined : kind === "primary" || kind === "danger" ? "primary" : kind === "ghost" ? "text" : "default"}
+    color={kind === "soft" ? "default" : undefined} danger={kind === "danger"} variant={kind === "soft" ? "filled" : undefined}
+    size={size === "medium" ? "middle" : size}
+    className={classNames("wand-ui-button", `wand-ui-button-${kind}`, size !== "medium" && `wand-ui-button-${size}`, className)}/></WandUiBoundary>;
 }
 
-export interface WandIconButtonProps
-  extends Omit<AppicaButtonProps, "variant" | "size" | "children"> {
-  kind?: WandButtonKind;
-  size?: WandButtonSize;
-  children: React.ReactNode;
-}
-
-const KIND_TO_VARIANT: Record<WandButtonKind, AppicaButtonProps["variant"]> = {
-  primary: "primary",
-  secondary: "secondary",
-  outline: "outline",
-  soft: "soft",
-  ghost: "ghost",
-  danger: "destructive",
-};
-
-const SIZE_TO_APPICA: Record<WandButtonSize, AppicaButtonProps["size"]> = {
-  small: "sm",
-  medium: "md",
-  large: "lg",
-};
-
-/**
- * Icon-only buttons use Appica's square `icon-*` sizes. The visible label is
- * the SVG itself, so callers must keep passing `aria-label` / `title`.
- */
-const ICON_SIZE_TO_APPICA: Record<WandButtonSize, AppicaButtonProps["size"]> = {
-  small: "icon-sm",
-  medium: "icon-md",
-  large: "icon-lg",
-};
-
-export function WandIconButton({
-  className,
-  kind = "ghost",
-  size = "small",
-  type = "button",
-  ...props
-}: WandIconButtonProps) {
-  return (
-    <AppicaButton
-      {...props}
-      type={type}
-      variant={KIND_TO_VARIANT[kind]}
-      size={ICON_SIZE_TO_APPICA[size]}
-      className={classNames(
-        "wand-ui-button",
-        `wand-ui-button-${kind}`,
-        "wand-ui-icon-button",
-        staticClassName(className),
-      )}
-    />
-  );
-}
-
-export function WandButton({
-  className,
-  kind = "secondary",
-  size = "medium",
-  type = "button",
-  ...props
-}: WandButtonProps) {
-  return (
-    <AppicaButton
-      {...props}
-      type={type}
-      variant={KIND_TO_VARIANT[kind]}
-      size={SIZE_TO_APPICA[size]}
-      className={classNames(
-        "wand-ui-button",
-        `wand-ui-button-${kind}`,
-        size !== "medium" && `wand-ui-button-${size}`,
-        staticClassName(className),
-      )}
-    />
-  );
+export function WandIconButton({ className, kind = "ghost", size = "small", children, ...props }: WandIconButtonProps) {
+  return <WandButton {...props} kind={kind} size={size} className={classNames("wand-ui-icon-button", className)}>{children}</WandButton>;
 }

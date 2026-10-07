@@ -89,11 +89,11 @@ test("加载失败收成品牌区右侧徽标，完整原因留在提示里", ()
   reportSidebarListError({ kind: "load", message: "无法加载任务列表：连接被拒绝。", retry: async () => {} });
   let header = "";
   try {
-    header = renderSidebar().match(/<div class="sidebar-header-main">[\s\S]*?<\/div>/)?.[0] ?? "";
+    header = renderSidebar().match(/<div[^>]*class="[^"]*sidebar-header-main[^"]*"[^>]*>[\s\S]*?<\/div>/)?.[0] ?? "";
   } finally {
     reportSidebarListError(null);
   }
-  assert.match(header, /class="sidebar-list-error"/, "徽标要贴在 logo 与 Wand 右侧");
+  assert.match(header, /class="[^"]*\bsidebar-list-error\b/, "徽标要贴在 logo 与 Wand 右侧");
   assert.match(header, /加载失败/);
   assert.match(header, /无法加载任务列表：连接被拒绝。｜点击重新加载/);
   assert.ok(
@@ -103,7 +103,7 @@ test("加载失败收成品牌区右侧徽标，完整原因留在提示里", ()
   assert.doesNotMatch(renderSidebar(), /sidebar-list-error/);
 });
 
-test("未同步徽标顶替列表里的两条报错横幅", () => {
+test("未同步保留旧行，首次失败提供原位错误与重试", () => {
   reportSidebarListError({ kind: "sync", message: "列表暂未同步，正在显示上次结果。", retry: async () => {} });
   let html = "";
   try {
@@ -111,9 +111,11 @@ test("未同步徽标顶替列表里的两条报错横幅", () => {
   } finally {
     reportSidebarListError(null);
   }
-  assert.match(html, /class="sidebar-list-error"[^>]*>[\s\S]*?未同步/);
+  assert.match(html, /class="[^"]*\bsidebar-list-error\b[^"]*"[^>]*>[\s\S]*?未同步/);
 
   const panel = readFileSync(path.join(root, "src/web-ui/react/workspaces/workspaces-panel.tsx"), "utf8");
-  assert.doesNotMatch(panel, /workspaces-panel-state error/, "侧栏列表不再插报错横幅");
+  assert.match(panel, /sidebar-load-error/);
+  assert.match(panel, /任务列表加载失败/);
+  assert.match(panel, /onClick=\{\(\) => void reload\(\)\}/);
   assert.match(panel, /reportSidebarListError\(\{/, "报错改由侧栏主树上报给头部徽标");
 });

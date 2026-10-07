@@ -1,0 +1,564 @@
+import { cssEvidenceCapture } from "./helpers/antd-css-evidence.js";
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { existsSync, mkdtempSync, readFileSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { createServer } from "node:http";
+import { build } from "esbuild";
+
+/**
+ * Lane gate for the AI teams / employees migration: mounts the real page components
+ * against a local canned API and drives them with genuine Chrome input. Canned JSON
+ * is fixture data for this lane only; installed-service acceptance stays with integration.
+ * Opt in with WAND_TEAMS_BROWSER=1 because it needs a local Chrome.
+ */
+test("Ant Design teams pages keep library controls, chat ownership and keyboard contracts", { timeout: 180_000, skip: process.env.WAND_TEAMS_BROWSER !== "1" }, async () => {
+  const root = resolve(import.meta.dirname, "..");
+  const temporary = mkdtempSync(join(tmpdir(), "wand-antd-teams-"));
+  const artifact = join(root, "output/web-ui-library-migration/lanes/teams");
+  const browserErrors: string[] = [];
+  const evidence: Array<Record<string, unknown>> = [];
+  const posts: Array<Record<string, unknown>> = [];
+  const source = `
+    import * as React from "react";
+    import { createRoot } from "react-dom/client";
+    import { WandUiProvider } from "./src/web-ui/react/theme";
+    import { installReactUiStyles, installStyleSheet } from "./src/web-ui/react/styles";
+    import { PortalContainerProvider } from "./src/web-ui/react/ui";
+    import { aiTeamsChunkStyles } from "./src/web-ui/react/ai-teams/styles";
+    import { AiTeamsPage } from "./src/web-ui/react/ai-teams/teams-page";
+    import { TeamChatPage } from "./src/web-ui/react/ai-teams/team-chat-page";
+    import { configureTeamChatComposerRuntime } from "./src/web-ui/react/ai-teams/composer-bridge";
+    import { notifyAiTeamStepLive } from "./src/web-ui/react/ai-teams/repository";
+    import * as dispatchRoster from "./src/web-ui/react/team-dispatch/roster";
+
+    // 生产里这份注册表由 lazy.tsx 装上；这里照同一把钥匙装同一份共享模块。
+    globalThis.__wandAiTeamsHost = key => {
+      if (key === "team-dispatch/roster") return dispatchRoster;
+      throw new Error("unexpected host key " + key);
+    };
+    installReactUiStyles();
+    installStyleSheet("wand-ai-teams-styles", aiTeamsChunkStyles);
+
+    const drafts = new Map();
+    const listeners = new Set();
+    const fixture = { submits: [], drafts, toolbar: 0 };
+    const empty = () => ({ text: "", attachments: [], revision: 0 });
+    const read = id => drafts.get(id || "") ?? empty();
+    configureTeamChatComposerRuntime({
+      read,
+      edit: (id, change) => {
+        if (!("text" in change)) return false;
+        const key = id || "";
+        const current = read(key);
+        drafts.set(key, { ...current, text: change.text, revision: current.revision + 1 });
+        for (const listener of listeners) listener();
+        return true;
+      },
+      subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener); },
+      submit: (id, text, deliver) => {
+        fixture.submits.push({ sessionId: id, text });
+        return Promise.resolve(deliver({ text, attachments: [] }));
+      },
+    });
+
+    function App() {
+      const [mode, setMode] = React.useState(globalThis.location.hash === "#chat" ? "chat" : "teams");
+      React.useEffect(() => {
+        const onHash = () => setMode(globalThis.location.hash === "#chat" ? "chat" : "teams");
+        globalThis.addEventListener("hashchange", onHash);
+        return () => globalThis.removeEventListener("hashchange", onHash);
+      }, []);
+      return mode === "chat"
+        ? <TeamChatPage runId="run-a" onOpenSession={() => undefined}/>
+        : <AiTeamsPage/>;
+    }
+
+    globalThis.teamsFixture = { fixture, notifyAiTeamStepLive,
+      pushLive: steps => notifyAiTeamStepLive({ runId: "run-a", steps }) };
+    const portal = document.getElementById("wand-react-ui-portals");
+    createRoot(document.getElementById("root")).render(
+      <PortalContainerProvider container={portal}><WandUiProvider><App/></WandUiProvider></PortalContainerProvider>,
+    );
+  `;
+  await build({
+    stdin: { contents: source, resolveDir: root, loader: "tsx" },
+    bundle: true, format: "iife", platform: "browser", jsx: "automatic",
+    outfile: join(temporary, "app.js"), logLevel: "warning",
+    define: { "process.env.NODE_ENV": '"production"' },
+  });
+
+  const now = "2026-10-03T10:00:00.000Z";
+  const agent = { kind: "structured", provider: "claude", model: "default", thinkingEffort: "default" };
+  const member = (id: string, name: string, leader = false, duty = "负责交付") =>
+    ({ id, name, duty, isLeader: leader, agents: [agent], agent, avatar: "cat:0", role: "any" });
+  const team = (id: string, name: string, members: unknown[]) => ({
+    id, name, description: `${name}的简介`, instructions: "", requirePlanApproval: true, maxSteps: 12,
+    members, createdAt: now, updatedAt: now,
+  });
+  const employees = [
+    { id: "emp-active", name: "景行", duty: "实现", prompt: "实现者设定", avatar: "cat:1", tags: ["开发"],
+      agents: [agent], createdAt: now, updatedAt: now },
+    { id: "emp-archived", name: "旧档", duty: "归档样本", prompt: "已归档", avatar: "", tags: [],
+      agents: [agent], archivedAt: now, createdAt: now, updatedAt: now },
+  ];
+  const detail = {
+    run: {
+      id: "run-a", taskId: "task-a", teamId: "team-a",
+      team: team("team-a", "协作团队", [member("m-lead", "负责人", true), member("m-dev", "实现者")]),
+      objective: "把设置页的模型下拉换成可搜索的选择器，并补单测。",
+      cwd: "/synthetic", status: "running", statusDetail: "正在执行第 3 步", stepsUsed: 2, stepLimit: 12,
+      formatRetries: 0, planApproved: true, chatSessionId: "relay-a", pendingNotes: [],
+      createdAt: now, updatedAt: now,
+    },
+    steps: [{ id: "step-1", seq: 1, kind: "work", title: "实现 Web 端", memberId: "m-dev", status: "running",
+      sessionId: "session-dev", reportPath: "/synthetic/report-0.md", report: "改好了" }],
+    chatTurns: [
+      { role: "user", createdAt: "2026-10-03T09:59:00.000Z", content: [{ type: "text",
+        text: Array.from({ length: 8 }, (_, index) => `第 ${index + 1} 行：把报告写短一点，只留结论与验证方式。`).join("\n") }] },
+      { role: "assistant", notice: true, createdAt: "2026-10-03T09:59:30.000Z",
+        author: { id: "m-lead", name: "负责人", leader: true },
+        content: [{ type: "text", text: "邀请 @实现者、@负责人 加入群聊" }] },
+      { role: "assistant", createdAt: "2026-10-03T09:59:35.000Z",
+        author: { id: "m-lead", name: "负责人", leader: true },
+        content: [{ type: "text", text: "计划\n\n1. **@实现者** 实现 Web 端" }] },
+      { role: "assistant", createdAt: "2026-10-03T09:59:40.000Z",
+        author: { id: "m-dev", name: "实现者", sessionId: "session-dev" },
+        reportFile: { stepId: "step-1", path: "/synthetic/report-0.md", name: "report-0.md", size: 2048,
+          preview: { title: "实现 Web 端报告", excerpt: "服务器给的冻结摘要" } },
+        content: [{ type: "text", text: "✅ 完成「实现 Web 端」\\n\\n改好了" }] },
+    ],
+    memberStates: { "session-dev": "working" },
+    delivery: {
+      runId: "run-a", updatedAt: now, headline: "已交付 2 个文件", conclusion: "负责人交付说明",
+      files: [{ stepId: "step-1", seq: 1, memberId: "m-dev", memberName: "实现者", title: "实现 Web 端",
+        file: { stepId: "step-1", path: "/synthetic/secret-card.png", name: "secret-card.png", size: 100,
+          preview: { title: "冻结标题", excerpt: "冻结摘录" } } }],
+      totalFiles: 1, handoffs: [], totalHandoffs: 0, attention: null,
+    },
+  };
+
+  const server = createServer((request, response) => {
+    const url = request.url ?? "/";
+    const send = (value: unknown, status = 200): void => {
+      response.setHeader("content-type", "application/json");
+      response.statusCode = status;
+      response.end(JSON.stringify(value));
+    };
+    if (url === "/app.js") {
+      response.setHeader("content-type", "application/javascript");
+      response.end(readFileSync(join(temporary, "app.js")));
+      return;
+    }
+    if (url === "/styles.css") {
+      response.setHeader("content-type", "text/css");
+      response.end(readFileSync(join(root, "src/web-ui/content/styles.css")));
+      return;
+    }
+    if (url === "/tailwind.css") {
+      response.setHeader("content-type", "text/css");
+      response.end(readFileSync(join(root, "src/web-ui/content/tailwind.css")));
+      return;
+    }
+    if (url.startsWith("/api/ai-teams")) return send([
+      team("team-a", "协作团队", [member("m-lead", "负责人", true), member("m-dev", "实现者")]),
+      team("team-b", "调研小组", [member("m-lead", "负责人", true)]),
+    ]);
+    if (url.startsWith("/api/ai-team-runs/run-a/live")) return send({ runId: "run-a", steps: [] });
+    if (url.startsWith("/api/ai-team-runs/run-a")) return send(detail);
+    if (url.startsWith("/api/ai-team-runs")) return send([]);
+    if (url.startsWith("/api/workspaces")) return send([]);
+    if (url.startsWith("/api/models")) return send({ providers: [] });
+    if (url.startsWith("/api/silicon-employees")) return send({ employees });
+    if (url.startsWith("/api/provider-usage")) return send({});
+    if (url.startsWith("/api/structured-sessions") && request.method === "POST") {
+      let body = "";
+      request.on("data", (chunk) => { body += chunk; });
+      request.on("end", () => {
+        posts.push({ url, body });
+        send({ messages: [{ role: "user", content: [{ type: "text", text: "hello from the lane gate" }],
+          createdAt: "2026-10-03T10:00:05.000Z" }] });
+      });
+      return;
+    }
+    if (url.startsWith("/api/")) return send({});
+    response.setHeader("content-type", "text/html; charset=utf-8");
+    response.end(`<!doctype html><html lang="zh-CN"><head><meta name="viewport" content="width=device-width,initial-scale=1">`
+      + `<link rel="stylesheet" href="/tailwind.css"><link rel="stylesheet" href="/styles.css">`
+      + `<style>html,body{margin:0}</style></head><body><div id="root"></div>`
+      + `<div id="overlay-root"><div class="wand-ui-portals" id="wand-react-ui-portals"></div></div>`
+      + `<script src="/app.js"></script></body></html>`);
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const origin = `http://127.0.0.1:${address.port}`;
+
+  const chrome = spawn(
+    process.env.CHROME_BIN ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    ["--headless=new", "--disable-gpu", "--disable-background-timer-throttling", "--disable-renderer-backgrounding",
+      "--disable-backgrounding-occluded-windows", "--no-first-run", "--remote-allow-origins=*",
+      "--remote-debugging-port=0", `--user-data-dir=${temporary}/profile`, "about:blank"],
+    { stdio: "ignore" },
+  );
+  let socket: WebSocket | undefined;
+  const pause = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
+  try {
+    const portFile = join(temporary, "profile/DevToolsActivePort");
+    for (let attempt = 0; attempt < 160 && !existsSync(portFile); attempt++) await pause(50);
+    assert.ok(existsSync(portFile), "Chrome debugging endpoint available");
+    const debugPort = readFileSync(portFile, "utf8").split("\n")[0];
+    const targets = await (await fetch(`http://127.0.0.1:${debugPort}/json`)).json() as Array<{ type: string; webSocketDebuggerUrl: string }>;
+    socket = new WebSocket(targets.find((target) => target.type === "page")!.webSocketDebuggerUrl);
+    await once(socket, "open");
+    let sequence = 0;
+    const pending = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>();
+    socket.addEventListener("message", (event) => {
+      const message = JSON.parse(String(event.data)) as { id?: number; method?: string; params?: unknown; error?: unknown; result?: unknown };
+      if (message.method === "Runtime.exceptionThrown") browserErrors.push(JSON.stringify(message.params));
+      const call = message.id === undefined ? undefined : pending.get(message.id);
+      if (!call || message.id === undefined) return;
+      pending.delete(message.id);
+      message.error ? call.reject(new Error(JSON.stringify(message.error))) : call.resolve(message.result);
+    });
+    const send = (method: string, params: Record<string, unknown> = {}): Promise<any> => new Promise((resolveCall, rejectCall) => {
+      const id = ++sequence;
+      pending.set(id, { resolve: resolveCall, reject: rejectCall });
+      socket!.send(JSON.stringify({ id, method, params }));
+    });
+    const captureCss = cssEvidenceCapture("teams");
+    const evaluate = async (expression: string): Promise<any> => {
+      const result = await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
+      if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
+      await captureCss(send);
+      return result.result.value;
+    };
+    const wait = async (expression: string): Promise<void> => {
+      for (let attempt = 0; attempt < 200; attempt++) {
+        if (await evaluate(expression)) return;
+        await pause(30);
+      }
+      throw new Error(`Timed out: ${expression}; errors=${JSON.stringify(browserErrors.slice(0, 3))} text=${await evaluate("document.body.innerText.slice(0,400)")}`);
+    };
+    const click = async (selector: string): Promise<void> => {
+      await pause(260);
+      await send("Page.bringToFront");
+      const probe = async () => evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});
+        if(!n)return {missing:true};
+        n.scrollIntoView({block:'nearest',behavior:'instant'});
+        const r=n.getBoundingClientRect();
+        if(r.width<=0||r.height<=0)return {hidden:true};
+        const x=r.x+r.width/2,y=r.y+r.height/2,hit=document.elementFromPoint(x,y);
+        if(n===hit||n.contains(hit))return {x,y,width:r.width,height:r.height};
+        return {blocked:(hit&&hit.outerHTML.slice(0,160))||'nothing at point',rect:r.toJSON()}})()`);
+      let obstruction = "";
+      for (let attempt = 0; attempt < 40; attempt++) {
+        const before = await probe();
+        if (typeof before?.x !== "number") { obstruction = JSON.stringify(before); await pause(80); continue; }
+        await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: before.x, y: before.y });
+        await pause(80);
+        const after = await probe();
+        // A library collapse may still change the scroll extent after scrolling.
+        // Click only after hover keeps the target visible and its geometry stable.
+        if (typeof after?.x !== "number" || ["x", "y", "width", "height"].some((key) => Math.abs(after[key] - before[key]) > 1)) {
+          obstruction = JSON.stringify({ before, after }); continue;
+        }
+        for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", {
+          type, x: after.x, y: after.y, button: "left", clickCount: 1,
+        });
+        return;
+      }
+      assert.fail(`Cannot click ${selector} with stable hover geometry: ${obstruction}`);
+    };
+    const key = async (name: string): Promise<void> => {
+      const code = name === "Enter" ? 13 : name === "Escape" ? 27 : 0;
+      await send("Input.dispatchKeyEvent", { type: "keyDown", key: name, code: name, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", key: name, code: name, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code });
+    };
+    const screenshot = async (name: string): Promise<void> => {
+      const shot = await send("Page.captureScreenshot", { format: "png" });
+      mkdirSync(artifact, { recursive: true });
+      writeFileSync(join(artifact, `${name}.png`), Buffer.from(shot.data, "base64"));
+    };
+    const RETIRED_SELECTORS = [
+      "composer-plus-popover", "team-chat-attachment", "team-chat-file-open", "team-chat-file-copy",
+      "team-chat-file-icon", "team-delivery-file", "team-chat-goal-head", "team-chat-goal-label",
+      "team-chat-goal-meta", "team-chat-live-body", "team-chat-office-head", "wand-employee-tag",
+      "wand-employee-advanced-toggle", "wand-team-candidate-tool", "wand-team-candidate-add",
+      "wand-team-empty-line", "wand-settings-label",
+    ];
+    // 退役的旧控件类名必须在真实页面里一个节点都不剩（不是只靠 grep 判死）。
+    const assertRetiredSelectorsGone = async (scope: string): Promise<void> => {
+      const found = await evaluate(`JSON.stringify(${JSON.stringify(RETIRED_SELECTORS)}
+        .flatMap(name => Array.from(document.querySelectorAll('.' + name)).map(node => name + ':' + node.tagName)))`);
+      assert.deepEqual(JSON.parse(found), [], `${scope}: 退役的旧控件类名在页面上已经没有节点`);
+    };
+    await send("Page.enable");
+    await send("Runtime.enable");
+
+    for (const mode of (process.env.WAND_TEAMS_TEST_MODES?.split(",") ?? ["desktop", "mobile", "reduced-motion"])) {
+      await send("Emulation.setDeviceMetricsOverride", { width: mode === "mobile" ? 390 : 1280, height: 1000, deviceScaleFactor: 1, mobile: false });
+      await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: mode === "reduced-motion" ? "reduce" : "no-preference" }] });
+      await evaluate("window.__wandFixtureBeforeNavigation = true");
+      await send("Page.navigate", { url: `${origin}/?mode=${mode}` });
+      await wait("!window.__wandFixtureBeforeNavigation && document.readyState === 'complete'");
+      await send("Page.bringToFront");
+      await wait("!!document.querySelector('.wand-employee-list')");
+      await wait("document.querySelectorAll('.wand-employee-list .wand-employee-card').length === 1");
+
+      // A selected team belongs to its own page even after a desktop-to-mobile resize.
+      await click(".wand-teams-page [data-stretch-value=teams]");
+      await wait("document.querySelectorAll('.wand-teams-cards .wand-teams-card').length === 2");
+      await click(".wand-teams-cards .wand-teams-card");
+      await wait("!!document.querySelector('.wand-teams-page[data-detail]')");
+      await click(".wand-teams-page [data-stretch-value=employees]");
+      await wait("!!document.querySelector('.wand-employee-list .wand-employee-card')");
+      await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 1000, deviceScaleFactor: 1, mobile: false });
+      const employeeResize = await evaluate(`(()=>{const page=document.querySelector('.wand-teams-page'),card=document.querySelector('.wand-employee-card'),button=document.querySelector('.wand-teams-toolbar-actions button');const r=card.getBoundingClientRect(),b=button.getBoundingClientRect(),hit=document.elementFromPoint(b.x+b.width/2,b.y+b.height/2);return {detail:page.hasAttribute('data-detail'),cardVisible:r.width>0&&r.height>0,cardContained:r.left>=0&&r.right<=innerWidth+1,createReachable:hit===button||button.contains(hit)}})()`);
+      assert.deepEqual(employeeResize, { detail: false, cardVisible: true, cardContained: true, createReachable: true }, `${mode}: employee cards and actions survive narrowing with a selected team`);
+      assert.equal(await evaluate("!!document.querySelector('.wand-teams-page button[aria-label=返回工作区]')"), true, `${mode}: selected team does not hide the employee page's back action`);
+      await click(".wand-teams-page [data-stretch-value=teams]");
+      await wait("!!document.querySelector('.wand-teams-page[data-detail]') && !!document.querySelector('.wand-team-member')");
+      await click('[aria-label="AI 团队导航"] button');
+      await wait("!document.querySelector('.wand-teams-page[data-detail]')");
+      await click(".wand-teams-page [data-stretch-value=employees]");
+      await wait("!!document.querySelector('.wand-employee-list .wand-employee-card')");
+      await send("Emulation.setDeviceMetricsOverride", { width: mode === "mobile" ? 390 : 1280, height: 1000, deviceScaleFactor: 1, mobile: false });
+      evidence.push({ mode, employeeResize, teamSelectionPreserved: true });
+
+      // ---- 员工页：库控件 + 归档筛选 + 就地编辑 ----
+      assert.equal(await evaluate("document.querySelectorAll('.wand-employee-list .wand-employee-card').length"), 1,
+        `${mode}: 只显示未归档员工`);
+      await click(".wand-employee-list input[type=checkbox]");
+      await wait("document.querySelectorAll('.wand-employee-list .wand-employee-card').length === 2");
+      assert.equal(await evaluate("document.querySelectorAll('.wand-employee-list .ant-tag').length > 0"), true,
+        `${mode}: 标签用通用标签组件`);
+      await click(".wand-employee-list input[type=checkbox]");
+      await wait("document.querySelectorAll('.wand-employee-list .wand-employee-card').length === 1");
+      await click(".wand-employee-list .wand-team-member-head");
+      await wait("!!document.querySelector('.wand-employee-list .ant-card[data-open] input#employee-emp-active-name')");
+      assert.equal(await evaluate(`(()=>{const n=document.querySelector('#employee-emp-active-name');
+        return n.tagName === 'INPUT' && n.closest('.ant-input') !== null || n.classList.contains('ant-input')})()`), true,
+        `${mode}: 员工名是通用输入框`);
+      await click(".wand-employee-list .wand-employee-save-submit");
+      await wait("document.querySelector('.wand-employee-list .wand-employee-save-submit').textContent.includes('已保存')");
+      await click("#employee-emp-active-name");
+      await key("Escape");
+      await wait("!document.querySelector('.wand-employee-list .wand-employee-card[data-open]')");
+      assert.equal(await evaluate("document.activeElement === document.querySelector('.wand-employee-list .wand-team-member-head')"), true,
+        `${mode}: employee Escape returns focus to its own disclosure trigger`);
+      evidence.push({ mode, employeeCard: "expanded, Ant input + tag + in-place save label and Escape focus verified" });
+
+      // ---- 新建员工：高级配置收进通用折叠面板 ----
+      await click(".wand-employee-list .wand-teams-toolbar-actions .wand-ui-button");
+      await wait("!!document.querySelector('.wand-employee-list .ant-collapse')");
+      assert.equal(await evaluate(`(()=>{const c=document.querySelector('.wand-employee-list .ant-collapse');
+        return !!c && !c.querySelector('textarea#new-employee-name')})()`), true, `${mode}: 高级配置默认收起`);
+      await click(".wand-employee-list .ant-collapse-header");
+      await wait("!!document.querySelector('#new-employee-name')");
+      assert.equal(await evaluate(`document.getElementById('new-employee-name').className.includes('ant-input')`), true,
+        `${mode}: 展开后是通用输入框`);
+      await click(".wand-employee-list .ant-collapse-header");
+      await pause(200);
+
+      // ---- 团队页：卡片 + 详情 + 成员编辑 ----
+      await click(".wand-teams-page [data-stretch-value=teams]");
+      await wait("document.querySelectorAll('.wand-teams-cards .wand-teams-card').length === 2");
+      assert.equal(await evaluate("document.querySelectorAll('.wand-teams-card.ant-card').length"), 2,
+        `${mode}: 团队卡是通用卡片`);
+      await click(".wand-teams-cards .wand-teams-card");
+      await wait("!!document.querySelector('.wand-team-member .ant-card-head') || !!document.querySelector('.wand-team-member')");
+      await wait("!!document.querySelectorAll('.wand-team-section')[0]");
+      const firstMember = ".wand-team-org-leader .wand-team-member-head, .wand-team-org-members .wand-team-member-head";
+      await click(firstMember);
+      await wait("!!document.querySelector('.wand-team-member[data-open] textarea')");
+      assert.equal(await evaluate(`(()=>{const n=document.querySelector('.wand-team-member[data-open] textarea');
+        return n.className.includes('ant-input')})()`), true, `${mode}: 成员职责是通用多行输入`);
+      assert.equal(await evaluate(`(()=>{const s=document.querySelector('.wand-team-member[data-open] .wand-team-select .wand-ui-select-trigger');
+        return !!s && Math.abs(s.getBoundingClientRect().width - s.parentElement.getBoundingClientRect().width) < 2})()`), true,
+        `${mode}: 选择器铺满字段宽度`);
+      const scoreBefore = await evaluate("document.querySelectorAll('.wand-team-member[data-open] .wand-team-candidate').length");
+      await click(".wand-team-member[data-open] .wand-team-candidates-foot .wand-ui-button");
+      await wait(`document.querySelectorAll('.wand-team-member[data-open] .wand-team-candidate').length === ${scoreBefore + 1}`);
+      assert.equal(await evaluate("document.querySelectorAll('.wand-team-member[data-open] .wand-team-candidate.ant-card').length"),
+        scoreBefore + 1, `${mode}: 候选行也是通用卡片`);
+      assert.equal(await evaluate("!!document.querySelector('.wand-team-member[data-open] .wand-team-candidate .ant-tag')"), true,
+        `${mode}: 候选位次用通用标签`);
+      assert.equal(await evaluate("matchMedia('(prefers-reduced-motion: reduce)').matches"), mode === "reduced-motion",
+        `${mode}: reduced-motion 媒体查询生效`);
+      if (mode === "desktop" || mode === "mobile") await screenshot(`teams-${mode}`);
+      await assertRetiredSelectorsGone(mode);
+      assert.equal(await evaluate("document.documentElement.scrollWidth <= innerWidth + 1"), true, `${mode}: 无横向溢出`);
+      const invite = ".wand-team-member[data-open] .wand-team-employee-invite";
+      await click(invite + " > button");
+      await wait(`document.querySelector(${JSON.stringify(invite)} + ' > button').getAttribute('aria-pressed') === 'true'`);
+      await click(invite + " .wand-ui-select-trigger");
+      await wait("!!document.querySelector('.wand-ui-select-content input')");
+      await click(".wand-ui-select-content input");
+      assert.equal(await evaluate(`document.querySelector(${JSON.stringify(invite)} + ' > button').getAttribute('aria-pressed')`), "true",
+        `${mode}: search in the owned Portal does not close the invitation`);
+      await key("Escape");
+      await wait("!document.querySelector('.wand-ui-select-content')");
+      assert.equal(await evaluate(`document.querySelector(${JSON.stringify(invite)} + ' > button').getAttribute('aria-pressed')`), "true",
+        `${mode}: the first Escape closes only the selector Portal`);
+      await key("Escape");
+      await wait(`document.querySelector(${JSON.stringify(invite)} + ' > button').getAttribute('aria-pressed') === 'false'`);
+      assert.equal(await evaluate(`document.activeElement === document.querySelector(${JSON.stringify(invite)} + ' > button')`), true,
+        `${mode}: invitation Escape returns focus to the invitation trigger`);
+      await click(invite + " > button");
+      await click(".wand-teams-detail-head");
+      await wait(`document.querySelector(${JSON.stringify(invite)} + ' > button').getAttribute('aria-pressed') === 'false'`);
+      const memberName = ".wand-team-member[data-open] input[id$='-name']";
+      await evaluate(`(()=>{window.__memberEditorNode=document.querySelector(${JSON.stringify(memberName)});return true})()`);
+      await click('.wand-teams-detail .ant-tabs-tab[data-node-key="runs"]');
+      assert.equal(await evaluate("document.querySelector('.wand-teams-detail-pane[data-hidden]').hasAttribute('inert')"), true,
+        `${mode}: hidden member editor remains inert`);
+      assert.equal(await evaluate("getComputedStyle(document.querySelector('.wand-teams-detail-pane[data-hidden]').closest('[role=tabpanel]')).display"), "none",
+        `${mode}: Ant hides the inactive pane without reserving height`);
+      await click('.wand-teams-detail .ant-tabs-tab[data-node-key="members"]');
+      assert.equal(await evaluate(`document.querySelector(${JSON.stringify(memberName)})===window.__memberEditorNode`), true,
+        `${mode}: switching tabs keeps the exact editor node`);
+      assert.equal(await evaluate("document.querySelectorAll('.wand-team-member[data-open] .wand-team-candidate').length"), scoreBefore + 1,
+        `${mode}: unsaved candidate edits survive the tab switch`);
+      evidence.push({ mode, teams: "card list, detail, member editor, candidate add and persistent library tab switching verified" });
+    }
+
+    // ---- 群聊页：X 展示 + composer bridge 所有权 + 键盘/Portal 契约 ----
+    for (const mode of (process.env.WAND_TEAMS_TEST_MODES?.split(",") ?? ["desktop", "mobile", "reduced-motion"])) {
+    await send("Emulation.setDeviceMetricsOverride", { width: mode === "mobile" ? 390 : 1280, height: 1000, deviceScaleFactor: 1, mobile: false });
+    await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: mode === "reduced-motion" ? "reduce" : "no-preference" }] });
+    await evaluate("window.__wandFixtureBeforeNavigation = true");
+      await send("Page.navigate", { url: `${origin}/?mode=chat-${mode}#chat` });
+      await wait("!window.__wandFixtureBeforeNavigation && document.readyState === 'complete'");
+    await send("Page.bringToFront");
+    await wait("!!document.querySelector('.task-board-team-chat')");
+    await wait("document.querySelectorAll('.ant-bubble').length >= 2");
+    assert.equal(await evaluate("!!document.querySelector('.ant-bubble-end')"), true, "自己的发言靠气泡 placement 镜像");
+    assert.equal(await evaluate("!!document.querySelector('.ant-bubble-start')"), true, "成员/负责人发言在另一侧");
+    assert.equal(await evaluate("!!document.querySelector('.team-chat-plan-list')"), true, "派工清单仍按任务条目渲染");
+    assert.equal(await evaluate("!!document.querySelector('.chat-notice')"), true, "系统提示行仍是居中 notice");
+    assert.equal(await evaluate(`(()=>{const row=document.querySelector('.chat-notice').getBoundingClientRect();
+      const text=document.querySelector('.chat-notice-line').getBoundingClientRect();
+      return Math.abs(row.x+row.width/2-text.x-text.width/2)<2})()`), true, `${mode}: 系统提示内容居中`);
+    assert.equal(await evaluate("!!document.querySelector('.team-chat-mention')"), true, "@ 成员名仍由本页渲染");
+    assert.equal(await evaluate("!!document.querySelector('.ant-file-card')"), true, "报告文件走通用文件卡");
+    assert.equal(await evaluate("document.querySelectorAll('.ant-tag').length > 0"), true, "报告 chip 用通用标签");
+    assert.equal(await evaluate(`Array.from(document.querySelectorAll('.team-chat-msg')).every(row => {
+      const avatar=row.querySelector('.team-chat-avatar').getBoundingClientRect();
+      const content=row.querySelector('.team-chat-msg-content').getBoundingClientRect();
+      return Math.abs(avatar.y-content.y)<2 && (row.dataset.side==='end'
+        ? content.right<=avatar.left+2 : avatar.right<=content.left+2);
+    })`), true, `${mode}: 每条发言的头像与内容列并排，自己的发言镜像靠右`);
+
+    // 交付面板：历史文件不预载图片流
+    await click(".team-chat-context");
+    await wait("!!document.querySelector('.team-chat-details[data-open] .ant-file-card')");
+    assert.equal(await evaluate("document.querySelectorAll('link[rel=preload][href*=\"/api/file-\"]').length"), 0,
+      "交付列表不预载文件流");
+    assert.equal(await evaluate("document.querySelector('.team-chat-details').hasAttribute('inert')"), false, "展开后详情可聚焦");
+    await click(".team-chat-context");
+    await wait("document.querySelector('.team-chat-details').hasAttribute('inert')");
+
+    // live 过程块：推送一步输出，展开后在固定窗口里滚
+    await evaluate(`(()=>{globalThis.teamsFixture.pushLive([{ stepId: "step-1", seq: 1, memberId: "m-dev",
+      memberName: "实现者", sessionId: "session-dev", state: "working", text: "第一行\\n第二行", omittedChars: 12, updatedAt: "${now}" }]);
+      return true})()`);
+    await wait("!!document.querySelector('.team-chat-live-think')");
+    await wait("!!document.querySelector('.team-chat-live-summary')");
+    assert.equal(await evaluate("!!document.querySelector('.team-chat-live-summary')"), true, "展开态有键盘可达的按钮");
+    assert.equal(await evaluate("document.querySelector('.team-chat-live-think .ant-think-status-down-icon') !== null"), true,
+      "过程块自带展开图标");
+    await click(".team-chat-live-summary");
+    await wait("document.querySelector('.team-chat-live-summary').getAttribute('aria-expanded') === 'true'");
+    await wait("!!document.querySelector('.team-chat-live-card')");
+    assert.equal(await evaluate("document.querySelector('.team-chat-live-summary').getAttribute('aria-expanded')"), "true");
+    assert.equal(await evaluate("!!document.querySelector('.team-chat-live-text')"), true, "输出窗口保留");
+    const liveHeight = await evaluate("Math.round(document.querySelector('.team-chat-live-card').getBoundingClientRect().height)");
+    assert.ok(liveHeight > 100 && liveHeight < 260, `live 窗口有界，实测 ${liveHeight}px`);
+    assert.equal(await evaluate("document.querySelector('.team-chat-live-text').scrollHeight > 0"), true);
+    assert.equal(await evaluate("document.querySelector('.team-chat-live-card .ant-card-head')===null"), true,
+      `${mode}: 原生提示不误渲染为 Card 页头`);
+
+    // 输入框：通用发送器 + bridge 是唯一草稿 owner
+    await wait("!!document.querySelector('.ant-sender textarea')");
+    const composerWidths = await evaluate(`(()=>{const host=document.querySelector('.task-board-team-chat-input').getBoundingClientRect();
+      const sender=document.querySelector('.ant-sender').getBoundingClientRect();return {host:host.width,sender:sender.width}})()`);
+    assert.ok(Math.abs(composerWidths.host-composerWidths.sender)<2,
+      `${mode}: Sender 填满群聊输入列，实测 ${JSON.stringify(composerWidths)}`);
+    await click(".ant-sender textarea");
+    await wait("document.activeElement===document.querySelector('.ant-sender textarea')");
+    await send("Input.insertText", { text: "hello from the lane gate" });
+    await wait("globalThis.teamsFixture.fixture.drafts.get('relay-a')?.text === 'hello from the lane gate'");
+    assert.equal(await evaluate("document.querySelector('.ant-sender textarea').value"), "hello from the lane gate",
+      "发送器显示的就是 bridge 里的草稿");
+    // 输入法确认键不能当成发送
+    await evaluate(`(()=>{const input=document.querySelector('.ant-sender textarea');
+      input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true }));
+      input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
+      return true})()`);
+    await pause(120);
+    assert.equal(await evaluate("globalThis.teamsFixture.fixture.submits.length"), 0, "合成态回车不发送");
+    await key("Enter");
+    await wait("globalThis.teamsFixture.fixture.submits.length === 1");
+    assert.equal(await evaluate("globalThis.teamsFixture.fixture.submits[0].sessionId"), "relay-a", "提交仍走群聊 relay 会话");
+    await wait("!!document.querySelector('.ant-bubble-end')");
+    assert.ok(posts.some((post) => String(post.url).includes("/api/structured-sessions/relay-a/messages")
+      && JSON.parse(String(post.body)).input.includes("hello from the lane gate")),
+      "请求体字段仍是 input");
+
+    // 附件菜单：Portal 归属 + Escape 关闭并把焦点还给触发点
+    await click(".composer-attach-trigger");
+    await wait("document.querySelectorAll('.wand-ui-dropdown-content .wand-ui-dropdown-item').length === 2");
+    assert.equal(await evaluate(`(()=>{const t=document.querySelector('.composer-attach-trigger');
+      return t.getAttribute('aria-expanded') === 'true'})()`), true, "触发点带上展开态");
+    await key("Escape");
+    await wait("!document.querySelector('.wand-ui-dropdown-content')");
+    assert.equal(await evaluate("document.activeElement === document.querySelector('.composer-attach-trigger')"), true,
+      "Escape 把焦点还给触发点");
+    assert.equal(await evaluate("document.documentElement.scrollWidth <= innerWidth + 1"), true, `${mode}: 群聊无横向溢出`);
+    await screenshot(`teams-chat-${mode}`);
+
+    // 全文弹层：真实点击展开进入通用弹层，Escape 关闭
+    const expanders = await evaluate("document.querySelectorAll('.team-chat-expand').length");
+    assert.ok(expanders > 0, "长正文有展开入口");
+    await click(".team-chat-expand");
+    await wait("!!document.querySelector('[data-testid=team-chat-doc-dialog]')");
+    assert.equal(await evaluate(`document.querySelector('[data-testid=team-chat-doc-dialog]').querySelector('pre').textContent.length > 20`), true,
+      "弹层给全文而不是预览");
+    await screenshot(`teams-chat-doc-${mode}`);
+    await key("Escape");
+    await wait("!document.querySelector('[data-testid=team-chat-doc-dialog]')");
+    assert.equal(browserErrors.length, 0, `浏览器运行期异常：${browserErrors.slice(0, 2).join(" | ")}`);
+    evidence.push({ mode: `chat-${mode}`, library: ["ant-bubble", "ant-file-card", "ant-sender", "ant-think", "wand-ui-dropdown-content"],
+      geometry: composerWidths,
+      contracts: ["avatar beside content", "Sender fills input column", "bridge owns draft/submit", "IME Enter blocked", "relay body input", "Escape refocus", "doc dialog full text"] });
+
+    await assertRetiredSelectorsGone("chat");
+    }
+    evidence.push({ mode: "retired-css", selectorsChecked: RETIRED_SELECTORS.length, matches: 0 });
+    assert.deepEqual(browserErrors, [], "no browser runtime exceptions");
+    mkdirSync(artifact, { recursive: true });
+    writeFileSync(join(artifact, "teams-browser.json"), JSON.stringify({
+      passed: true, evidence, browserErrors,
+      scope: "Lane gate in real Chrome against canned local API data; installed-service acceptance stays integration-owned",
+    }, null, 2));
+  } catch (error) {
+    mkdirSync(artifact, { recursive: true });
+    writeFileSync(join(artifact, "teams-browser.json"), JSON.stringify({ passed: false, evidence, browserErrors, error: String(error) }, null, 2));
+    throw error;
+  } finally {
+    socket?.close();
+    if (chrome.exitCode === null) {
+      const stopped = once(chrome, "exit");
+      chrome.kill();
+      await stopped;
+    }
+    server.close();
+    rmSync(temporary, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
+  }
+});

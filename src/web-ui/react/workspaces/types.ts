@@ -147,6 +147,7 @@ export interface WorkspaceTask {
   milestoneId?: string | null;
   layout: TaskWindowLayout | null;
   status: WorkspaceTaskStatus;
+  archived?: boolean;
   createdAt: string;
   lastOpenedAt: string | null;
   layoutRevision?: number;
@@ -300,7 +301,7 @@ export interface WorkspacesRepository {
   deleteTask(taskId: string, cascade?: boolean): Promise<void>;
   /** 归档任务：保留终端与 worktree，仅从侧栏隐藏并移入看板归档。 */
   archiveTask(taskId: string): Promise<WorkspaceTask>;
-  /** 归档 / 恢复单个会话：软处理，不杀终端、不删历史；与任务同一套 7 天清理规则。 */
+  /** 归档会停止会话、保留 session id；恢复时用这个 ID 续上。 */
   archiveSession(sessionId: string, archived: boolean): Promise<void>;
   /** 批量归档 / 恢复会话。 */
   batchArchiveSessions(sessionIds: readonly string[], archived: boolean): Promise<void>;
@@ -329,7 +330,8 @@ export interface OpenWorkspaceTaskPayload {
 /** 标签栏「+ 新建会话」时传给宿主：在同一任务 worktree 内再起一个绑定会话。 */
 export interface NewTaskSessionPayload {
   workspaceId: string;
-  taskId: string;
+  /** 缺省表示这次不绑定任务：会话落在所在目录的「未分组任务」里。 */
+  taskId?: string;
   cwd: string;
   target: WorkspaceSessionTarget;
   kind?: WorkspaceSessionKind;
@@ -374,7 +376,7 @@ export interface WorkspacesRuntimeAdapter {
    * 必须先 await，避免恢复流程用旧快照覆盖新会话的选中态。
    */
   openTask(payload: OpenWorkspaceTaskPayload): void | Promise<void>;
-  /** 标签栏「+」：在该任务 worktree 再起一个绑定会话（返回 promise 以便标签栏刷新）。 */
+  /** 标签栏「+」：在该任务 worktree 再起一个绑定会话；taskId 缺省时起未分组会话。 */
   newTaskSession(payload: NewTaskSessionPayload): void | Promise<unknown>;
   /**
    * 某个 CLI 工具「上次用过的模型」；新建任务 / 工作窗口用它预选模型。

@@ -20,7 +20,6 @@ const REAL_STYLE_FILES = [
   "src/web-ui/react/file-preview/styles.ts",
   "src/web-ui/react/image-viewer/styles.ts",
   "src/web-ui/react/local-preview/styles.ts",
-  "src/web-ui/react/restart-overlay/styles.ts",
   "src/web-ui/react/styles/base.ts",
   "src/web-ui/react/styles/features.ts",
 ];
@@ -165,7 +164,7 @@ test("real source style files are transformed in memory but untouched on disk", 
     assert.ok(code.length < before.length, rel);
     totalReplaced += replaced;
   }
-  assert.equal(totalReplaced, 15);
+  assert.equal(totalReplaced, 13);
 });
 
 test("plugin exposes the expected esbuild plugin shape", () => {
@@ -360,7 +359,7 @@ test("plugin records minified CSS candidates in memory without touching disk", a
   assert.deepEqual([...candidates].sort(), [...expected].sort());
 });
 
-test("all 15 real style fragments pool with identical runtime values", () => {
+test("all remaining real style fragments pool with identical runtime values", () => {
   const values: string[] = [];
   for (const rel of REAL_STYLE_FILES) {
     const full = path.join(root, rel);
@@ -369,10 +368,10 @@ test("all 15 real style fragments pool with identical runtime values", () => {
     assert.equal(readFileSync(full, "utf8"), before, `${rel} must not be written to disk`);
     values.push(...fileValues);
   }
-  assert.equal(values.length, 15);
+  assert.equal(values.length, 13);
   const source = emittedBundle(values);
   const { code, pooled, poolSize } = poolEmittedCssStringLiterals(source, new Set(values));
-  assert.equal(pooled, 15);
+  assert.equal(pooled, values.length);
   assert.equal(poolSize, new Set(values).size);
   assert.deepEqual(extractPool(code), [...new Set(values)]);
   assert.deepEqual(hostArray(executeBundle(code).__out), hostArray(executeBundle(source).__out));

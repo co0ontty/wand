@@ -5,6 +5,8 @@
  * 模型选择。归一化只做一次，避免同一个 payload 在两处解析出不同的下拉项。
  */
 import { type ProviderId } from "../provider-identity";
+import { OPENROUTER_FREE_GROUP, OPENROUTER_FREE_SELECTOR } from "../../openrouter-free-selection.js";
+import { AUTO_ASSIGN_LABEL, isAutoAssignSelector, isModelGroupSelector } from "../../model-groups.js";
 import { requestJson } from "./http-adapter";
 import type { CliThinkingEffort } from "../thinking-efforts";
 import type { WandSelectOption } from "./ui";
@@ -37,6 +39,7 @@ export function pickedModelId(model: string | null | undefined): string {
 }
 
 interface ModelEntry {
+  group?: unknown;
   id?: unknown;
   label?: unknown;
   reasoningEfforts?: unknown;
@@ -61,7 +64,7 @@ function modelEntryToOption(entry: ModelEntry): WandSelectOption | null {
   const id = typeof entry.id === "string" ? entry.id.trim() : "";
   if (!id) return null;
   const label = typeof entry.label === "string" && entry.label.trim() ? entry.label.trim() : id;
-  return { value: id, label };
+  return { value: id, label, ...(typeof entry.group === "string" && entry.group ? { group: entry.group } : {}) };
 }
 
 /** provider → [模型列表字段, 单值默认字段]；provider 字典序即 UI 顺序。 */
@@ -99,7 +102,10 @@ export function normalizeWandModelCatalog(payload: unknown): WandModelCatalog {
     if (!options.some((option) => option.value === MODEL_CATALOG_DEFAULT_VALUE)) {
       options.unshift({
         value: MODEL_CATALOG_DEFAULT_VALUE,
-        label: fallback ? `跟随服务端默认（${fallback}）` : "跟随服务端默认",
+        label: fallback ? `跟随服务端默认（${fallback === OPENROUTER_FREE_SELECTOR ? OPENROUTER_FREE_GROUP
+          : isModelGroupSelector(fallback) ? options.find((entry) => entry.value === fallback)?.label || "模型分组"
+            : isAutoAssignSelector(fallback) ? options.find((entry) => entry.value === fallback)?.label || AUTO_ASSIGN_LABEL
+            : fallback}）` : "跟随服务端默认",
       });
     }
     byProvider[provider] = options;
@@ -157,9 +163,14 @@ export function wandModelDisplayName(
   model: string | null | undefined,
 ): string {
   const id = (model ?? "").trim();
-  if (id && id !== MODEL_CATALOG_DEFAULT_VALUE) return id;
+  const display = (value: string): string => value === OPENROUTER_FREE_SELECTOR ? OPENROUTER_FREE_GROUP
+    : isModelGroupSelector(value) || isAutoAssignSelector(value)
+      ? providerOptions(catalog, provider).find((entry) => entry.value === value)?.label
+        || (isAutoAssignSelector(value) ? AUTO_ASSIGN_LABEL : "模型分组")
+      : value;
+  if (id && id !== MODEL_CATALOG_DEFAULT_VALUE) return display(id);
   const configured = (catalog?.defaultModels as Record<string, string | undefined> | undefined)?.[provider ?? ""]?.trim();
-  if (configured) return configured;
+  if (configured) return display(configured);
   const entry = providerOptions(catalog, provider)
     .find((option) => option.value === MODEL_CATALOG_DEFAULT_VALUE)?.label.trim() ?? "";
   const stripped = entry.replace(TRAILING_DEFAULT_NOTE, "").trim();

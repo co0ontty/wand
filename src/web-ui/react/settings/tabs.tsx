@@ -1,3 +1,5 @@
+import { OpenRouterSettingsPanel } from "./openrouter-panel";
+import { ModelGroupsSettingsPanel } from "./model-groups-panel";
 import {
   type Dispatch,
   type SetStateAction,
@@ -9,9 +11,11 @@ import {
   useSyncExternalStore,
 } from "react";
 import * as React from "react";
+import { Card, Empty, Form, Slider, Table, Tag, Upload } from "antd";
 import { WandBadge, WandButton, WandDialogSurface, WandIcon, WandSearchField } from "../ui";
 import { MOTION_DWELL_RESULT_SENTENCE_MS } from "../ui/motion-tokens";
 import { settingsStore } from "./controller";
+import { useSettingsDraft } from "./draft";
 import {
   SettingsActionButton,
   SettingsField,
@@ -37,9 +41,11 @@ import type {
   SettingsProviderCliStatus,
   SettingsProviderCliUpdates,
   SettingsRepository,
+  SettingsRetentionSweep,
   SettingsSessionProvider,
   SettingsSnapshot,
   SettingsThinkingEffort,
+  SettingsUserProfile,
   SettingsWebUpdate,
 } from "./types";
 import { failureMessage } from "../errors";
@@ -48,8 +54,18 @@ import { MODEL_CATALOG_DEFAULT_VALUE } from "../model-catalog";
 import { normalizeModels } from "./repository";
 import { sortProviderOptions, useProviderUsage } from "../provider-usage";
 import { useSiliconEmployees } from "../agents/employee-repository";
+import { EmployeeAvatarPicker } from "../agents/employee-avatar";
 import { SystemAiOwnerSummary } from "./system-ai-owner";
 import { isSystemSiliconEmployee } from "../../../ai-team-types.js";
+import {
+  DEFAULT_TASK_AUTO_ARCHIVE_DAYS,
+  DEFAULT_TASK_AUTO_DELETE_DAYS,
+  normalizeTaskRetention,
+  TASK_RETENTION_MAX_DAYS,
+  TASK_RETENTION_MIN_DAYS,
+  type TaskRetentionSettings,
+} from "../../../task-retention.js";
+import { DEFAULT_USER_DISPLAY_NAME, USER_PROFILE_NAME_MAX } from "../../../user-profile.js";
 
 export interface SettingsTabProps {
   snapshot: SettingsSnapshot;
@@ -136,18 +152,18 @@ function ConnectCodePanel({
   return (
     <SettingsSection title="App 连接码" description="用 Wand App 扫码或粘贴连接码；修改密码后会失效。">
       {code ? (
-        <div className="wand-settings-connect">
-          <div className="wand-settings-connect-qr" data-testid="settings-connect-qr">
+        <div className="wand-settings-library-connect">
+          <div className="wand-settings-library-connect-qr" data-testid="settings-connect-qr">
             <canvas ref={canvasRef} aria-label="App 连接二维码" />
           </div>
           {qrError ? <SettingsStatus tone="warning">{qrError}</SettingsStatus> : null}
-          <div className="wand-settings-connect-code-row">
-            <code className="wand-settings-connect-code" aria-label="App 连接码">{code}</code>
+          <div className="wand-settings-library-connect-code-row">
+            <code className="wand-settings-library-connect-code" aria-label="App 连接码">{code}</code>
             <WandButton kind="secondary" onClick={() => void copyCode()}>复制连接码</WandButton>
           </div>
         </div>
       ) : (
-        <code className="wand-settings-connect-code" aria-label="App 连接码">暂不可用</code>
+        <code className="wand-settings-library-connect-code" aria-label="App 连接码">暂不可用</code>
       )}
     </SettingsSection>
   );
@@ -178,7 +194,7 @@ function DistributionSection({
         const installable = !currentVersion || isNewerVersion(asset!.version, currentVersion);
         const iosOta = kind === "ipa" && source === "local";
         return (
-          <div className="wand-settings-download-row" key={source}>
+          <div className="wand-settings-library-download-row" key={source}>
             <div><strong>{source === "github" ? "线上版本" : "本地版本"}</strong><span>{asset!.version ? `v${asset!.version}` : asset!.fileName} · {formatBytes(asset!.size)}</span></div>
             <WandButton
               kind="secondary"
@@ -210,7 +226,7 @@ function DistributionSection({
             >{installable ? (currentVersion ? (iosOta ? "安装更新" : "下载并安装") : (iosOta ? "安装" : "下载")) : "已安装"}</WandButton>
           </div>
         );
-      }) : <div className="wand-settings-empty">暂无可用安装包</div>}
+      }) : <div className="wand-settings-library-empty">暂无可用安装包</div>}
     </SettingsSection>
   );
 }
@@ -242,34 +258,36 @@ export function AboutSettingsTab({ snapshot, repository, refresh, toast, showRes
   const cliUpdates = cliItems.filter((item) => item.updateAvailable && item.updateSupported);
 
   return (
-    <section className="wand-settings-panel" aria-label="关于 Wand">
-      <header className="wand-settings-panel-heading">
+    <section className="wand-settings-library-panel" aria-label="关于 Wand">
+      <header className="wand-settings-library-panel-heading">
         <h2>关于 Wand</h2><p>查看版本信息、更新状态和客户端连接方式。</p>
       </header>
       <SettingsSection title="版本信息">
-        <dl className="wand-settings-about-list">
-          <div><dt>包名</dt><dd>{about.packageName}</dd></div>
-          <div><dt>当前版本</dt><dd>{about.version}</dd></div>
-          <div><dt>Node.js 要求</dt><dd>{about.nodeVersion}</dd></div>
-          {about.build.shortCommit ? <div><dt>构建</dt><dd>{about.build.shortCommit}{about.build.channel ? ` · ${about.build.channel}` : ""}</dd></div> : null}
-          {about.repoUrl ? <div><dt>仓库地址</dt><dd><a href={about.repoUrl} target="_blank" rel="noopener noreferrer">{about.repoUrl}</a></dd></div> : null}
-        </dl>
+        <Table size="small" showHeader={false} pagination={false} rowKey="label"
+          columns={[{ dataIndex: "label" }, { dataIndex: "value" }]}
+          dataSource={[
+            { label: "包名", value: about.packageName },
+            { label: "当前版本", value: about.version },
+            { label: "Node.js 要求", value: about.nodeVersion },
+            ...(about.build.shortCommit ? [{ label: "构建", value: `${about.build.shortCommit}${about.build.channel ? ` · ${about.build.channel}` : ""}` }] : []),
+            ...(about.repoUrl ? [{ label: "仓库地址", value: <a href={about.repoUrl} target="_blank" rel="noopener noreferrer">{about.repoUrl}</a> }] : []),
+          ]} />
       </SettingsSection>
 
       {snapshot.access === "admin" ? (
         <>
           <SettingsSection title="保持在最新版本" description={`当前 ${about.version} · ${about.updateChannel === "beta" ? "Beta 通道" : "Stable 通道"}`}>
-            <div className="wand-settings-update-deck">
-              <span className="wand-settings-update-deck-icon" aria-hidden="true"><WandIcon name="refresh" size={18} strokeWidth={1.8}/></span>
+            <div className="wand-settings-library-update-deck">
+              <span className="wand-settings-library-update-deck-icon" aria-hidden="true"><WandIcon name="refresh" size={18} strokeWidth={1.8}/></span>
               <div>
                 <strong>检查并管理 Web 服务更新</strong>
                 <span>{update?.latest || about.latestVersion ? "已获取可用版本信息" : "选择检查更新以获取最新版本。"}</span>
               </div>
-              <span className={about.updateChannel === "beta" ? "wand-settings-update-channel is-beta" : "wand-settings-update-channel"}>
+              <span className={about.updateChannel === "beta" ? "wand-settings-library-update-channel is-beta" : "wand-settings-library-update-channel"}>
                 {about.updateChannel === "beta" ? "BETA" : "STABLE"}
               </span>
             </div>
-            <div className="wand-settings-about-list">
+            <div className="wand-settings-library-about-list">
               <div><span>最新版本</span><strong>{update?.latest || about.latestVersion || "尚未检查"}</strong></div>
             </div>
             <SettingsToggle
@@ -293,8 +311,8 @@ export function AboutSettingsTab({ snapshot, repository, refresh, toast, showRes
                 await refresh();
               }, "自动更新偏好已保存。")}
             />
-            <div className="wand-settings-button-row">
-              <SettingsActionButton className="wand-settings-update-primary" pending={pending === "check"} kind="primary" onClick={() => action("check", async () => setUpdate(await repository.execute({ type: "webUpdate.check" })), "版本检查完成。")}>检查更新</SettingsActionButton>
+            <div className="wand-settings-library-button-row">
+              <SettingsActionButton className="wand-settings-library-update-primary" pending={pending === "check"} kind="primary" onClick={() => action("check", async () => setUpdate(await repository.execute({ type: "webUpdate.check" })), "版本检查完成。")}>检查更新</SettingsActionButton>
               <SettingsActionButton pending={pending === "install"} kind="secondary" onClick={() => action("install", async () => { const result = await repository.execute({ type: "webUpdate.install" }); setStatus(result.message); }, undefined)}>更新或重新安装</SettingsActionButton>
               {snapshot.restartRequired ? <SettingsActionButton pending={pending === "restart"} kind="secondary" onClick={() => action("restart", async () => {
                 try {
@@ -307,11 +325,11 @@ export function AboutSettingsTab({ snapshot, repository, refresh, toast, showRes
           </SettingsSection>
 
           <SettingsSection title="开发 CLI" description="服务端检测到的各开发 CLI 版本；显示「当前 → 最新」表示有新版本。">
-            <div className="wand-settings-cli-list">
+            <div className="wand-settings-library-cli-list">
               {cliItems.map((item) => (
                 <div key={item.id} title={cliStatusDetail(item)}><strong>{item.label}</strong><span>{cliStatusText(item)}</span></div>
               ))}
-              {!cliItems.length ? <div className="wand-settings-empty">尚未检查 CLI 版本</div> : null}
+              {!cliItems.length ? <div className="wand-settings-library-empty">尚未检查 CLI 版本</div> : null}
             </div>
             <SettingsToggle
               label="自动更新开发 CLI"
@@ -323,7 +341,7 @@ export function AboutSettingsTab({ snapshot, repository, refresh, toast, showRes
                 await refresh();
               }, "CLI 自动更新偏好已保存。")}
             />
-            <div className="wand-settings-button-row">
+            <div className="wand-settings-library-button-row">
               <SettingsActionButton pending={pending === "cli-check"} kind="secondary" onClick={() => action("cli-check", async () => { await repository.execute({ type: "cliUpdates.load", force: true }); await refresh(); }, "CLI 版本检查完成。")}>检查 CLI 更新</SettingsActionButton>
               {cliUpdates.length ? <SettingsActionButton pending={pending === "cli-install"} kind="primary" onClick={() => action("cli-install", async () => {
                 const result = await repository.execute({ type: "cliUpdates.install", ids: cliUpdates.map((item) => item.id) });
@@ -413,13 +431,13 @@ export function GithubSettingsTab({ snapshot, repository, refresh, setSnapshot }
 
   const connector = snapshot.github;
   return (
-    <section className="wand-settings-panel" aria-label="连接器">
-      <header className="wand-settings-panel-heading">
+    <section className="wand-settings-library-panel" aria-label="连接器">
+      <header className="wand-settings-library-panel-heading">
         <h2>连接器</h2><p>连接外部服务，让 Wand 可以在你的授权范围内读取和处理协作数据。</p>
       </header>
       <SettingsSection title="GitHub" description="使用 Fine-grained Token，建议只授权需要操作的仓库和权限。">
-        <div className="wand-settings-update-deck">
-          <span className="wand-settings-update-deck-icon" aria-hidden="true"><WandIcon name="git" size={18} strokeWidth={1.8}/></span>
+        <div className="wand-settings-library-update-deck">
+          <span className="wand-settings-library-update-deck-icon" aria-hidden="true"><WandIcon name="git" size={18} strokeWidth={1.8}/></span>
           <div>
             <strong>{connector.connected ? `已连接：${connector.username || "GitHub 账号"}` : "尚未连接"}</strong>
             <span>{connector.connected ? `连接地址：${connector.apiUrl || "https://api.github.com"}` : "连接后可读取仓库、Issue、Pull Request，并执行创建和更新操作。"}</span>
@@ -435,7 +453,7 @@ export function GithubSettingsTab({ snapshot, repository, refresh, setSnapshot }
           </SettingsField>
         </SettingsGrid>
         {connector.connected && connector.scopes.length ? <SettingsStatus tone="info">Token 权限：{connector.scopes.join("、")}</SettingsStatus> : null}
-        <div className="wand-settings-button-row">
+        <div className="wand-settings-library-button-row">
           <SettingsActionButton pending={pending === "connect"} kind="primary" successLabel="已连接" onClick={() => connect()}>{connector.connected ? "验证并轮换 Token" : "连接 GitHub"}</SettingsActionButton>
           {connector.connected ? <SettingsActionButton pending={pending === "disconnect"} kind="secondary" successLabel="已断开" onClick={() => disconnect()}>断开并删除 Token</SettingsActionButton> : null}
         </div>
@@ -470,7 +488,29 @@ function generalFromSnapshot(snapshot: SettingsSnapshot): SettingsGeneralInput {
     shell: config.shell,
     language: config.language,
     inheritEnv: config.inheritEnv,
+    taskRetention: normalizeTaskRetention(config.taskRetention),
   };
+}
+
+function retentionDayError(value: number, label: string): string {
+  if (!Number.isInteger(value) || value < TASK_RETENTION_MIN_DAYS || value > TASK_RETENTION_MAX_DAYS) {
+    return `${label}必须是 ${TASK_RETENTION_MIN_DAYS}–${TASK_RETENTION_MAX_DAYS} 的整数。`;
+  }
+  return "";
+}
+
+function retentionSweepStatus(retention: SettingsRetentionSweep | undefined, error: string | undefined): string {
+  if (error) return error.endsWith("。") ? error : `${error}。`;
+  if (!retention) return "";
+  const parts: string[] = [];
+  if (retention.archivedTasks > 0) parts.push(`归档 ${retention.archivedTasks} 个任务`);
+  if (retention.purgedTasks > 0) parts.push(`删除 ${retention.purgedTasks} 个任务`);
+  if (retention.archivedSessions > 0) parts.push(`归档 ${retention.archivedSessions} 个会话`);
+  if (retention.purgedSessions > 0) parts.push(`删除 ${retention.purgedSessions} 个会话`);
+  if ((retention.purgedTeamRuns ?? 0) > 0) parts.push(`清理 ${retention.purgedTeamRuns} 个团队任务`);
+  return parts.length
+    ? `已按新设置重新扫描：${parts.join("，")}。`
+    : "已按新设置重新扫描，没有需要处理的任务或会话。";
 }
 
 function EnvironmentDialog({ repository }: { repository: SettingsRepository }) {
@@ -518,15 +558,15 @@ function EnvironmentDialog({ repository }: { repository: SettingsRepository }) {
       onOpenChange={(open) => { if (!open) settingsStore.setNested(null); }}
       title="将注入子进程的环境变量"
       description="这些变量会传给新启动的会话子进程，敏感值默认隐藏。"
-      className="wand-settings-nested-dialog"
-      overlayClassName="wand-settings-nested-overlay"
-      headerClassName="wand-settings-header"
-      titleClassName="wand-settings-title"
-      descriptionClassName="wand-settings-description"
+      className="wand-settings-library-nested-dialog"
+      overlayClassName="wand-settings-library-nested-overlay"
+      headerClassName="wand-settings-library-header"
+      titleClassName="wand-settings-library-title"
+      descriptionClassName="wand-settings-library-description"
       closeLabel="关闭环境变量预览"
       testId="settings-environment-dialog"
     >
-      <div className="wand-settings-env-toolbar">
+      <div className="wand-settings-library-env-toolbar">
         <WandSearchField
           value={search}
           label="搜索变量名"
@@ -541,41 +581,41 @@ function EnvironmentDialog({ repository }: { repository: SettingsRepository }) {
           onCheckedChange={(checked) => void load(checked)}
         />
       </div>
-      <div className="wand-settings-env-list" role="table" aria-label="子进程环境变量" aria-busy={loading}>
-        {error ? (
-          <div className="wand-settings-load-error" role="alert">
-            <p>{error}</p>
-            <WandButton size="small" disabled={loading} aria-busy={loading} onClick={() => void load(requestedReveal.current)}>
-              重新加载
-            </WandButton>
-          </div>
-        ) : null}
-        {loading && !preview ? <div role="status">加载中…</div> : entries.map((entry) => (
-          <div className="wand-settings-env-row" role="row" key={entry.name}>
-            <code role="cell">{entry.name}</code>
-            <span role="cell" title={entry.value}>{entry.value}</span>
-          </div>
-        ))}
-        {!loading && !error && preview && entries.length === 0 ? (
-          <div className="wand-settings-empty">{search.trim() ? "没有匹配的变量" : "暂无环境变量"}</div>
-        ) : null}
-      </div>
+      {error ? <SettingsStatus tone="error">
+        {error}<WandButton size="small" disabled={loading} onClick={() => void load(requestedReveal.current)}>重新加载</WandButton>
+      </SettingsStatus> : null}
+      <Table size="small" pagination={false} loading={loading} rowKey="name"
+        aria-label="子进程环境变量" dataSource={entries}
+        locale={{ emptyText: search.trim() ? "没有匹配的变量" : "暂无环境变量" }}
+        columns={[
+          { title: "变量名", dataIndex: "name", render: (name: string) => <code>{name}</code> },
+          { title: "值", dataIndex: "value", render: (value: string) => <span className="wand-settings-library-env-value">{value}</span> },
+        ]} />
     </WandDialogSurface>
   );
 }
 
 export function GeneralSettingsTab({ snapshot, repository, refresh }: SettingsTabProps) {
-  const [form, setForm] = useState(() => generalFromSnapshot(snapshot));
+  const [form, setForm, acceptSaved] = useSettingsDraft(generalFromSnapshot(snapshot));
   const [pending, setPending] = useState(false);
   const [status, setStatus] = useState("");
   const [tone, setTone] = useState<StatusTone>("info");
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  useEffect(() => setForm(generalFromSnapshot(snapshot)), [snapshot]);
 
   function update<K extends keyof SettingsGeneralInput>(key: K, value: SettingsGeneralInput[K]) {
     setForm((current) => ({ ...current, [key]: value }));
     setErrors((current) => ({ ...current, [key]: "" }));
+  }
+
+  function updateRetention<K extends keyof TaskRetentionSettings>(key: K, value: TaskRetentionSettings[K]) {
+    setForm((current) => ({ ...current, taskRetention: { ...current.taskRetention, [key]: value } }));
+    setErrors((current) => ({
+      ...current,
+      [key]: "",
+      ...(key === "autoArchiveEnabled" ? { autoArchiveDays: "" } : {}),
+      ...(key === "autoDeleteEnabled" ? { autoDeleteDays: "" } : {}),
+    }));
   }
 
   async function save() {
@@ -583,20 +623,33 @@ export function GeneralSettingsTab({ snapshot, repository, refresh }: SettingsTa
     if (!form.host.trim()) nextErrors.host = "Host 不能为空。";
     if (!Number.isInteger(form.port) || form.port < 1 || form.port > 65535) nextErrors.port = "端口必须是 1–65535 的整数。";
     if (!form.shell.trim()) nextErrors.shell = "Shell 不能为空。";
+    const archiveDays = retentionDayError(form.taskRetention.autoArchiveDays, "空闲天数");
+    const deleteDays = retentionDayError(form.taskRetention.autoDeleteDays, "归档后天数");
+    if (form.taskRetention.autoArchiveEnabled && archiveDays) nextErrors.autoArchiveDays = archiveDays;
+    if (form.taskRetention.autoDeleteEnabled && deleteDays) nextErrors.autoDeleteDays = deleteDays;
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) {
       setStatus("请修正标记的配置项。");
       setTone("error");
       return;
     }
+    const taskRetention: TaskRetentionSettings = {
+      autoArchiveEnabled: form.taskRetention.autoArchiveEnabled,
+      autoDeleteEnabled: form.taskRetention.autoDeleteEnabled,
+      autoArchiveDays: archiveDays ? DEFAULT_TASK_AUTO_ARCHIVE_DAYS : form.taskRetention.autoArchiveDays,
+      autoDeleteDays: deleteDays ? DEFAULT_TASK_AUTO_DELETE_DAYS : form.taskRetention.autoDeleteDays,
+    };
     setPending(true);
     setStatus("");
     try {
-      const result = await repository.execute({ type: "general.save", value: form });
-      setStatus(result.restartRequired
+      const result = await repository.execute({ type: "general.save", value: { ...form, taskRetention } });
+      acceptSaved(form, generalFromSnapshot({ ...snapshot, config: result.config }));
+      const saved = result.restartRequired
         ? "配置已保存；Host、端口、HTTPS 或 Shell 的变化需要重启服务后生效。"
-        : "基本配置已保存。");
-      setTone(result.restartRequired ? "warning" : "success");
+        : "基本配置已保存。";
+      const scanned = retentionSweepStatus(result.retention, result.retentionError);
+      setStatus(scanned ? `${saved}${scanned}` : saved);
+      setTone(result.retentionError ? "warning" : result.restartRequired ? "warning" : "success");
       await refresh();
     } catch (cause) {
       setStatus(failureMessage(cause, "保存基本配置失败。"));
@@ -607,8 +660,8 @@ export function GeneralSettingsTab({ snapshot, repository, refresh }: SettingsTa
   }
 
   return (
-    <section className="wand-settings-panel" aria-label="基本配置">
-      <header className="wand-settings-panel-heading">
+    <section className="wand-settings-library-panel" aria-label="基本配置">
+      <header className="wand-settings-library-panel-heading">
         <h2>基本配置</h2><p>配置服务连接、执行方式和工作目录。</p>
       </header>
       <SettingsSection title="服务连接" description="部署字段保存后可能需要重启服务。">
@@ -645,7 +698,7 @@ export function GeneralSettingsTab({ snapshot, repository, refresh }: SettingsTa
         </SettingsGrid>
         <SettingsToggle
           label="继承环境变量"
-          description="把当前服务进程的环境变量传给 PTY 与结构化子进程。"
+          description="复用系统默认 Shell 与服务进程的环境变量，传给 PTY 与结构化子进程；关闭后只注入最小运行环境。"
           checked={form.inheritEnv}
           onCheckedChange={(checked) => update("inheritEnv", checked)}
         />
@@ -659,6 +712,47 @@ export function GeneralSettingsTab({ snapshot, repository, refresh }: SettingsTa
           </SettingsField>
           <SettingsField label="Shell" htmlFor="settings-shell" error={errors.shell}>
             <SettingsTextInput id="settings-shell" value={form.shell} invalid={!!errors.shell} placeholder="/bin/zsh" onChange={(value) => update("shell", value)} />
+          </SettingsField>
+        </SettingsGrid>
+      </SettingsSection>
+
+      <SettingsSection title="任务保留" description="看板任务、团队运行和会话使用同一套天数。正在运行的会跳过。">
+        <SettingsToggle
+          label="自动归档空闲任务"
+          description="连续没有更新、打开或会话活动达到设定天数后，移入归档。手动归档不受影响。"
+          checked={form.taskRetention.autoArchiveEnabled}
+          onCheckedChange={(checked) => updateRetention("autoArchiveEnabled", checked)}
+        />
+        <SettingsToggle
+          label="自动删除已归档任务"
+          description="归档后超过设定天数仍未恢复，则删除任务并清理它的 worktree。会话只解除关联，不立刻删除。"
+          checked={form.taskRetention.autoDeleteEnabled}
+          onCheckedChange={(checked) => updateRetention("autoDeleteEnabled", checked)}
+        />
+        <SettingsGrid>
+          <SettingsField label="空闲天数" htmlFor="settings-task-archive-days" error={errors.autoArchiveDays} hint={`${TASK_RETENTION_MIN_DAYS}–${TASK_RETENTION_MAX_DAYS} 天`}>
+            <SettingsTextInput
+              id="settings-task-archive-days"
+              type="number"
+              min={TASK_RETENTION_MIN_DAYS}
+              max={TASK_RETENTION_MAX_DAYS}
+              value={Number.isFinite(form.taskRetention.autoArchiveDays) ? form.taskRetention.autoArchiveDays : ""}
+              invalid={!!errors.autoArchiveDays}
+              disabled={!form.taskRetention.autoArchiveEnabled}
+              onChange={(value) => updateRetention("autoArchiveDays", value.trim() === "" ? Number.NaN : Number(value))}
+            />
+          </SettingsField>
+          <SettingsField label="归档后天数" htmlFor="settings-task-delete-days" error={errors.autoDeleteDays} hint={`从归档时间起算，${TASK_RETENTION_MIN_DAYS}–${TASK_RETENTION_MAX_DAYS} 天`}>
+            <SettingsTextInput
+              id="settings-task-delete-days"
+              type="number"
+              min={TASK_RETENTION_MIN_DAYS}
+              max={TASK_RETENTION_MAX_DAYS}
+              value={Number.isFinite(form.taskRetention.autoDeleteDays) ? form.taskRetention.autoDeleteDays : ""}
+              invalid={!!errors.autoDeleteDays}
+              disabled={!form.taskRetention.autoDeleteEnabled}
+              onChange={(value) => updateRetention("autoDeleteDays", value.trim() === "" ? Number.NaN : Number(value))}
+            />
           </SettingsField>
         </SettingsGrid>
       </SettingsSection>
@@ -699,7 +793,7 @@ const SESSION_PROVIDER_OPTIONS: ReadonlyArray<{ value: SettingsSessionProvider; 
   { value: "opencode", label: "OpenCode" },
   { value: "grok", label: "Grok" },
   { value: "qoder", label: "Qoder" },
-  { value: "pi", label: "Pi" },
+  { value: "pi", label: "one 的 Agent" },
   { value: "gemini", label: "Gemini" },
 ];
 
@@ -810,7 +904,7 @@ function DefaultModelControl({
   // 留着它就能被选中并写成 defaultModel="default"，等于把哨兵当模型 id 存进配置。
   const suggestions = providerModelSuggestions(models, provider)
     .filter((model) => model.id !== MODEL_CATALOG_DEFAULT_VALUE);
-  const options = suggestions.map((model) => ({ value: model.id, label: model.label || model.id }));
+  const options = suggestions.map((model) => ({ value: model.id, label: model.label || model.id, group: model.group }));
   const label = sessionProviderLabel(provider);
   const trimmed = value.trim();
   const customValue = trimmed !== "" && !options.some((option) => option.value === trimmed);
@@ -830,7 +924,7 @@ function DefaultModelControl({
         <WandButton
           kind="ghost"
           size="small"
-          className="wand-settings-inline-action"
+          className="wand-settings-library-inline-action"
           onClick={() => {
             setCustomEntry(false);
             onChange("");
@@ -866,9 +960,13 @@ function DefaultModelControl({
 }
 
 /** 三件套只展示选中的工具；把其余工具已保存的默认值摆出来，避免配置被藏起来。 */
-function sessionDefaultsSummary(form: SettingsAiInput): string {
+function sessionDefaultsSummary(form: SettingsAiInput, models: SettingsSnapshot["models"]): string {
   return SESSION_PROVIDER_OPTIONS
-    .map((option) => `${option.label} · ${providerModelValue(form, option.value) || "跟随默认"}`)
+    .map((option) => {
+      const value = providerModelValue(form, option.value);
+      const label = providerModelSuggestions(models, option.value).find((model) => model.id === value)?.label;
+      return `${option.label} · ${label || value || "跟随默认"}`;
+    })
     .join("；");
 }
 
@@ -891,7 +989,7 @@ export function modelCatalogSummary(models: SettingsModelCatalog): string {
     ["OpenCode", models.opencodeModels.length],
     ["Grok", models.grokModels.length],
     ["Qoder", models.qoderModels.length],
-    ["Pi", models.piModels.length],
+    ["one 的 Agent", models.piModels.length],
     ["Gemini", models.geminiModels.length],
   ];
   return groups
@@ -926,13 +1024,12 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot }: Se
   const providerOptions = sortProviderOptions(
     SESSION_PROVIDER_OPTIONS, providerUsage ?? {}, (entry) => entry.value,
   );
-  const [form, setForm] = useState(() => aiFromSnapshot(snapshot));
+  const [form, setForm, acceptSaved] = useSettingsDraft(aiFromSnapshot(snapshot));
   const [pending, setPending] = useState("");
   const [status, setStatus] = useState("");
   const [tone, setTone] = useState<StatusTone>("info");
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  useEffect(() => setForm(aiFromSnapshot(snapshot)), [snapshot.config]);
 
   function update<K extends keyof SettingsAiInput>(key: K, value: SettingsAiInput[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -966,6 +1063,7 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot }: Se
     setStatus("");
     try {
       const result = await repository.execute({ type: "ai.save", value: form });
+      acceptSaved(form, aiFromSnapshot({ ...snapshot, config: result.config }));
       setStatus(result.restartRequired ? "AI 配置已保存；部分部署变化等待重启。" : "AI 与模型配置已保存。");
       setTone(result.restartRequired ? "warning" : "success");
       await refresh();
@@ -988,8 +1086,8 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot }: Se
   }, [setSnapshot]);
 
   return (
-    <section className="wand-settings-panel" aria-label="AI 与模型">
-      <header className="wand-settings-panel-heading">
+    <section className="wand-settings-library-panel" aria-label="AI 与模型">
+      <header className="wand-settings-library-panel-heading">
         <h2>AI 与模型</h2><p>集中管理会话默认模型，以及 Wand 自有 AI 的执行者与候选链。</p>
       </header>
 
@@ -998,7 +1096,7 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot }: Se
         description="选 CLI 工具、模型和思考深度；模型留空表示跟随该 CLI 默认值，目录外的模型 ID 也能手输。"
         action={<SettingsActionButton pending={pending === "models"} kind="secondary" onClick={() => void refreshModels()}>刷新模型列表</SettingsActionButton>}
       >
-        <div className="wand-settings-default-row">
+        <div className="wand-settings-library-default-row">
           <SettingsField label="CLI 工具" hint="新建会话默认使用的工具">
             <SettingsSelect
               id="settings-default-provider"
@@ -1046,10 +1144,13 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot }: Se
             />
           </SettingsField>
         </div>
-        <p className="wand-settings-default-summary" aria-label="各 CLI 工具已保存的默认模型">
-          {sessionDefaultsSummary(form)}
+        <p className="wand-settings-library-default-summary" aria-label="各 CLI 工具已保存的默认模型">
+          {sessionDefaultsSummary(form, models)}
         </p>
       </SettingsSection>
+
+      <OpenRouterSettingsPanel snapshot={snapshot} repository={repository} setSnapshot={setSnapshot} />
+      <ModelGroupsSettingsPanel snapshot={snapshot} repository={repository} setSnapshot={setSnapshot} />
 
       <SettingsSection
         title="系统 AI"
@@ -1116,8 +1217,8 @@ export function NotificationSettingsTab(_props: SettingsTabProps) {
         : "尚未授权";
 
   return (
-    <section className="wand-settings-panel" aria-label="通知">
-      <header className="wand-settings-panel-heading">
+    <section className="wand-settings-library-panel" aria-label="通知">
+      <header className="wand-settings-library-panel-heading">
         <h2>通知</h2><p>设置提示音、应用内气泡和系统通知的行为。</p>
       </header>
       <SettingsSection title="通知偏好">
@@ -1130,22 +1231,11 @@ export function NotificationSettingsTab(_props: SettingsTabProps) {
         />
         {preferences.sound ? (
           <SettingsField label={`提示音音量（${preferences.volume}%）`} htmlFor="settings-notification-volume">
-            <input
-              id="settings-notification-volume"
-              className="wand-settings-range"
-              type="range"
-              min="0"
-              max="100"
-              step="5"
+            <Slider id="settings-notification-volume" min={0} max={100} step={5}
               value={preferences.volume}
-              aria-label="提示音音量"
-              onChange={(event) => {
-                const volume = Number(event.currentTarget.value);
-                setPreferences((current) => ({ ...current, volume }));
-              }}
-              onPointerUp={(event) => void savePreference({ volume: Number(event.currentTarget.value) }, true)}
-              onKeyUp={(event) => { if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) void savePreference({ volume: Number(event.currentTarget.value) }, true); }}
-            />
+              aria-label="提示音音量" ariaLabelForHandle="提示音音量"
+              onChange={(volume) => setPreferences((current) => ({ ...current, volume }))}
+              onChangeComplete={(volume) => void savePreference({ volume }, true)} />
           </SettingsField>
         ) : null}
         <SettingsToggle
@@ -1195,7 +1285,7 @@ export function NotificationSettingsTab(_props: SettingsTabProps) {
       ) : null}
 
       <SettingsSection title="系统通知" description={`授权状态：${permissionLabel}`}>
-        <div className="wand-settings-button-row">
+        <div className="wand-settings-library-button-row">
           {preferences.permission !== "granted" && preferences.permission !== "unsupported" ? (
             <SettingsActionButton pending={pending === "permission"} kind="primary" onClick={() => run("permission", async () => {
               const result = await repository.execute({ type: "notification.permission.request" });
@@ -1234,7 +1324,7 @@ export function NotificationSettingsTab(_props: SettingsTabProps) {
 }
 
 export function SecuritySettingsTab(_props: SettingsTabProps) {
-  const { snapshot, repository, refresh, toast } = _props;
+  const { snapshot, repository, refresh } = _props;
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [keyFile, setKeyFile] = useState<File | null>(null);
@@ -1297,7 +1387,6 @@ export function SecuritySettingsTab(_props: SettingsTabProps) {
       setTone("success");
       setSettled("success");
       await refresh();
-      toast("SSL 证书已上传", "success");
     } catch (cause) {
       setStatus(failureMessage(cause, "上传证书失败。"));
       setTone("error");
@@ -1308,12 +1397,12 @@ export function SecuritySettingsTab(_props: SettingsTabProps) {
   }
 
   return (
-    <section className="wand-settings-panel" aria-label="安全">
-      <header className="wand-settings-panel-heading">
+    <section className="wand-settings-library-panel" aria-label="安全">
+      <header className="wand-settings-library-panel-heading">
         <h2>安全</h2><p>管理登录密码与 SSL 证书。敏感变更保存前请仔细确认。</p>
       </header>
       <SettingsSection title="修改密码" description="至少 6 个字符；保存后会撤销包括当前页面在内的所有登录会话。">
-        <form noValidate className="wand-settings-security-form" onSubmit={(event) => { event.preventDefault(); void changePassword(); }}>
+        <Form noValidate layout="vertical" className="wand-settings-library-security-form" onFinish={() => void changePassword()}>
           <input type="text" name="username" autoComplete="username" value="wand" readOnly hidden />
           <SettingsGrid>
             <SettingsField label="新密码" htmlFor="settings-new-password" error={passwordError}>
@@ -1324,22 +1413,28 @@ export function SecuritySettingsTab(_props: SettingsTabProps) {
             </SettingsField>
           </SettingsGrid>
           <SettingsActionButton type="submit" pending={pending === "password"} settled={pending === "password" ? null : settled} successLabel="已修改密码" kind="primary">修改密码并重新登录</SettingsActionButton>
-        </form>
+        </Form>
       </SettingsSection>
 
       <SettingsSection title="SSL 证书" description={`当前状态：${snapshot.hasCert ? "已安装证书" : "未安装证书（使用自签名或 HTTP）"}`}>
-        <div className="wand-settings-file-grid">
-          <label>
-            <span>私钥文件（server.key）</span>
-            <input aria-label="SSL 私钥文件" type="file" accept=".key,.pem,text/plain" onChange={(event) => setKeyFile(event.currentTarget.files?.[0] || null)} />
-            <small>{keyFile?.name || "未选择文件"}</small>
-          </label>
-          <label>
-            <span>证书文件（server.crt）</span>
-            <input aria-label="SSL 证书文件" type="file" accept=".crt,.pem,text/plain" onChange={(event) => setCertFile(event.currentTarget.files?.[0] || null)} />
-            <small>{certFile?.name || "未选择文件"}</small>
-          </label>
-        </div>
+        <SettingsGrid>
+          <SettingsField label="私钥文件（server.key）">
+            <Upload accept=".key,.pem,text/plain" maxCount={1} disabled={!!pending}
+              beforeUpload={(file) => { setKeyFile(file); return false; }}
+              onRemove={() => { setKeyFile(null); }}
+              fileList={keyFile ? [{ uid: "key", name: keyFile.name }] : []}>
+              <WandButton disabled={!!pending} aria-label="SSL 私钥文件">选择私钥文件</WandButton>
+            </Upload>
+          </SettingsField>
+          <SettingsField label="证书文件（server.crt）">
+            <Upload accept=".crt,.pem,text/plain" maxCount={1} disabled={!!pending}
+              beforeUpload={(file) => { setCertFile(file); return false; }}
+              onRemove={() => { setCertFile(null); }}
+              fileList={certFile ? [{ uid: "cert", name: certFile.name }] : []}>
+              <WandButton disabled={!!pending} aria-label="SSL 证书文件">选择证书文件</WandButton>
+            </Upload>
+          </SettingsField>
+        </SettingsGrid>
         <SettingsActionButton pending={pending === "certificate"} settled={pending === "certificate" ? null : settled} successLabel="已上传" kind="primary" onClick={() => uploadCertificate()}>上传证书</SettingsActionButton>
       </SettingsSection>
       {status ? <SettingsStatus tone={tone}>{status}</SettingsStatus> : null}
@@ -1350,19 +1445,18 @@ export function SecuritySettingsTab(_props: SettingsTabProps) {
 export function PresetSettingsTab({ snapshot }: SettingsTabProps) {
   const presets = snapshot.config?.commandPresets || [];
   return (
-    <section className="wand-settings-panel" aria-label="命令预设">
-      <header className="wand-settings-panel-heading">
+    <section className="wand-settings-library-panel" aria-label="命令预设">
+      <header className="wand-settings-library-panel-heading">
         <h2>命令预设</h2><p>预设由服务端配置管理，可在创建会话时快速选择。</p>
       </header>
-      <div className="wand-settings-preset-list" aria-label="已有命令预设">
+      <div className="wand-settings-library-preset-list" aria-label="已有命令预设">
         {presets.map((preset, index) => (
-          <article className="wand-settings-preset" key={`${preset.label}-${index}`}>
-            <strong>{preset.label || "未命名预设"}</strong>
+          <Card size="small" title={preset.label || "未命名预设"} key={`${preset.label}-${index}`}>
             <code>{preset.command}</code>
-            {preset.mode ? <span>模式：{preset.mode}</span> : null}
-          </article>
+            {preset.mode ? <Tag>模式：{preset.mode}</Tag> : null}
+          </Card>
         ))}
-        {presets.length === 0 ? <div className="wand-settings-empty">没有命令预设；可在 config.json 的 commandPresets 中配置。</div> : null}
+        {presets.length === 0 ? <Empty description="没有命令预设；可在 config.json 的 commandPresets 中配置。" /> : null}
       </div>
     </section>
   );
@@ -1376,18 +1470,18 @@ const CARD_OPTIONS: Array<{ key: keyof SettingsCardDefaults; title: string; desc
 ];
 
 export function DisplaySettingsTab({ snapshot, repository, refresh }: SettingsTabProps) {
-  const [value, setValue] = useState<SettingsCardDefaults>(() => ({ ...snapshot.config!.cardDefaults }));
+  const [value, setValue, acceptSaved] = useSettingsDraft<SettingsCardDefaults>({ ...snapshot.config!.cardDefaults });
   const [pending, setPending] = useState(false);
   const [status, setStatus] = useState("");
   const [tone, setTone] = useState<StatusTone>("info");
 
-  useEffect(() => setValue({ ...snapshot.config!.cardDefaults }), [snapshot]);
 
   async function save() {
     setPending(true);
     setStatus("");
     try {
-      await repository.execute({ type: "display.save", value });
+      const result = await repository.execute({ type: "display.save", value });
+      acceptSaved(value, { ...result.config.cardDefaults });
       setStatus("显示设置已保存，并会立即应用于之后渲染的卡片。");
       setTone("success");
       await refresh();
@@ -1400,8 +1494,8 @@ export function DisplaySettingsTab({ snapshot, repository, refresh }: SettingsTa
   }
 
   return (
-    <section className="wand-settings-panel" aria-label="显示">
-      <header className="wand-settings-panel-heading">
+    <section className="wand-settings-library-panel" aria-label="显示">
+      <header className="wand-settings-library-panel-heading">
         <h2>显示</h2><p>设置各类结果卡片的默认展开状态。</p>
       </header>
       <SettingsSection title="默认展开的卡片">
@@ -1416,6 +1510,75 @@ export function DisplaySettingsTab({ snapshot, repository, refresh }: SettingsTa
         ))}
       </SettingsSection>
       <SettingsSaveBar label="保存显示设置" pending={pending} onSave={() => void save()} status={status} tone={tone} />
+    </section>
+  );
+}
+
+/**
+ * 我的资料：会话里「我」这条发言的署名与头像。
+ *
+ * 只是展示设置，不牵涉执行身份或权限；留空名字就沿用默认的「我」，
+ * 这样不改资料的老用户看到的还是原来的样子。
+ */
+export function ProfileSettingsTab({ snapshot, repository, refresh }: SettingsTabProps) {
+  const [value, setValue, acceptSaved] = useSettingsDraft<SettingsUserProfile>({ ...snapshot.config!.userProfile });
+  const [pending, setPending] = useState(false);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [status, setStatus] = useState("");
+  const [tone, setTone] = useState<StatusTone>("info");
+  const name = value.name.trim();
+  const nameError = value.name.length > USER_PROFILE_NAME_MAX ? `名字不能超过 ${USER_PROFILE_NAME_MAX} 个字符。` : "";
+
+  async function save() {
+    setPending(true);
+    setStatus("");
+    try {
+      const result = await repository.execute({ type: "profile.save", value });
+      acceptSaved(value, { ...result.config.userProfile });
+      setStatus(name
+        ? "资料已保存，之后发出的会话消息会署这个名字。"
+        : "资料已保存；名字留空时按默认的「我」署名。");
+      setTone("success");
+      await refresh();
+    } catch (cause) {
+      setStatus(failureMessage(cause, "保存资料失败。"));
+      setTone("error");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <section className="wand-settings-library-panel" aria-label="我的资料">
+      <header className="wand-settings-library-panel-heading">
+        <h2>我的资料</h2>
+        <p>这里的名字和头像用于你自己发出的会话消息；只影响显示，不改变任何执行身份或权限。</p>
+      </header>
+      <SettingsSection title="署名与头像" description={`名字留空时按「${DEFAULT_USER_DISPLAY_NAME}」显示；历史消息会跟着当前资料一起显示，不改写已保存的内容。`}>
+        <SettingsField label="显示名字" htmlFor="settings-profile-name" error={nameError}
+          hint={`最多 ${USER_PROFILE_NAME_MAX} 个字符`}>
+          <SettingsTextInput
+            id="settings-profile-name"
+            value={value.name}
+            max={USER_PROFILE_NAME_MAX}
+            disabled={pending}
+            invalid={!!nameError}
+            placeholder={DEFAULT_USER_DISPLAY_NAME}
+            onChange={(next) => setValue((current) => ({ ...current, name: next }))}
+          />
+        </SettingsField>
+        <SettingsField label="头像" hint="可以挑一只像素猫，或上传一张自己的图片。">
+          <EmployeeAvatarPicker
+            avatar={value.avatar}
+            name={name || DEFAULT_USER_DISPLAY_NAME}
+            disabled={pending}
+            onBusyChange={setAvatarBusy}
+            onChange={(avatar) => setValue((current) => ({ ...current, avatar }))}
+          />
+        </SettingsField>
+      </SettingsSection>
+      <SettingsSaveBar label="保存资料" pending={pending || avatarBusy} onSave={() => void save()}
+        status={status} tone={tone} />
     </section>
   );
 }

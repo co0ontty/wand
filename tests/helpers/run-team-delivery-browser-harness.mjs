@@ -77,7 +77,7 @@ try {
   });
   const evaluate = async (expression) => {
     const result = await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
-    if (result.exceptionDetails) throw Error(JSON.stringify(result.exceptionDetails));
+    if (result.exceptionDetails) throw Error(expression.slice(0, 180) + ": " + JSON.stringify(result.exceptionDetails));
     return result.result.value;
   };
   const wait = async (expression) => {
@@ -91,6 +91,11 @@ try {
     assert.equal(await evaluate(`document.querySelector(${JSON.stringify(selector)}).contains(document.elementFromPoint(${pos.x},${pos.y}))`), true, selector);
     for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, ...pos, button: "left", clickCount: 1 });
     await sleep(400);
+  };
+  const clickText = async (owner, label) => {
+    const marker = "fixture-" + Math.random().toString(36).slice(2);
+    await evaluate(`(()=>{const n=Array.from(document.querySelectorAll(${JSON.stringify(owner)}+' button')).find(n=>n.textContent.includes(${JSON.stringify(label)}));if(!n)throw Error('button missing');n.setAttribute('data-fixture-click',${JSON.stringify(marker)})})()`);
+    await click(`[data-fixture-click="${marker}"]`);
   };
   const text = async (selector, value) => {
     await click(selector);
@@ -117,7 +122,7 @@ try {
     assert.ok((await evaluate('document.querySelector("#card").textContent')).includes("2/23"));
     assert.ok((await evaluate('document.querySelector("#card").textContent')).includes("1/8"));
     assert.equal(filesRead, beforeReads, "opening delivery makes no file request");
-    await click("#card .team-delivery-file"); await wait('!!document.querySelector("[data-testid=file-preview-dialog]")');
+    await click("#card .ant-file-card"); await wait('!!document.querySelector("[data-testid=file-preview-dialog]")');
     await wait('document.body.textContent.includes("公共预览正文")');
     assert.equal(filesRead, beforeReads + 1, "actual public preview controller fetched exactly once");
     assert.ok((await evaluate('document.querySelector(".wand-file-preview-download").getAttribute("href")')).startsWith("/api/file-raw?download=1&path="));
@@ -166,7 +171,7 @@ try {
     for (const [totalFiles, files] of [[24, fileWindow(24)], [24, fileWindow(25)], [25, fileWindow(24)]]) {
       await publish({ ...capped, delivery: { ...capped.delivery, totalFiles, files } });
       assert.ok((await evaluate('document.querySelector(".team-chat-context").textContent')).includes("25 文件"));
-      const names = await evaluate('Array.from(document.querySelectorAll("#chat .team-delivery-file small")).map(n=>n.textContent)');
+      const names = await evaluate('Array.from(document.querySelectorAll("#chat .team-delivery-files .ant-file-card")).map(n=>n.textContent)');
       assert.equal(names.length, 20);
       assert.ok(names[0].includes("report-25.md")); assert.ok(names.at(-1).includes("report-6.md"));
       assert.equal(names.some((name) => name.includes("report-5.md")), false, "retain snapshot, never union windows");
@@ -191,8 +196,9 @@ try {
     assert.equal(await evaluate('document.querySelector(".team-chat-context").getAttribute("aria-expanded")'), "false", "new run resets disclosure");
     assert.equal(await evaluate('document.documentElement.scrollWidth > innerWidth'), false, "no narrow overflow");
     if (mode === "reduce-motion") {
-      assert.equal(await evaluate('getComputedStyle(document.querySelector(".team-delivery-body")).transitionProperty'), "none");
-      assert.equal(await evaluate('getComputedStyle(document.querySelector(".team-chat-details")).transitionProperty'), "none");
+      assert.equal(await evaluate('!!document.querySelector("#card .ant-collapse")'), true);
+      assert.ok(await evaluate('parseFloat(getComputedStyle(document.querySelector("#card .ant-collapse-panel")).transitionDuration) <= 0.001'), "library disclosure is instantaneous under reduced motion");
+      assert.ok(await evaluate('parseFloat(getComputedStyle(document.querySelector(".team-chat-details")).transitionDuration) <= 0.001'));
     }
     results.push({ mode, summaryAndTotals: true, noPrefetch: true, publicPreviewAndDownload: true,
       triggerStable: true, closeAndEscape: true, lateDeliveryChoicePreserved: true, latePreviewProtected: true,
@@ -216,7 +222,7 @@ try {
   details["run-a"].run.status = "waiting_user"; details["run-a"].run.updatedAt = "2026-10-03T10:05:00Z";
   await evaluate('window.deliveryHarness.refresh()'); await wait('!!document.querySelector("textarea[aria-label=回复负责人]")');
   holdReply = true;
-  await evaluate(`Array.from(document.querySelectorAll('.task-board-team-respond button')).find(n=>n.textContent.includes('发送回复')).click()`);
+  await clickText(".task-board-team-respond", "发送回复");
   for (let n = 0; n < 100 && !held.length; n++) await sleep(25); assert.equal(held.length, 1);
   await text('textarea[aria-label="回复负责人"]', "提交期间的新草稿");
   held.splice(0).forEach((release) => release()); holdReply = false; await sleep(300);
@@ -226,7 +232,7 @@ try {
   for (let n = 0; n < 100 && !held.length; n++) await sleep(25); assert.equal(held.length, 1);
   details["run-a"].delivery.headline = "操作回执的新结果";
   await wait(`Array.from(document.querySelectorAll('.task-board-team-respond button')).some(n=>n.textContent.includes('发送回复'))`);
-  await evaluate(`Array.from(document.querySelectorAll('.task-board-team-respond button')).find(n=>n.textContent.includes('发送回复')).click()`);
+  await clickText(".task-board-team-respond", "发送回复");
   await wait('document.querySelector(".team-chat-context").textContent.includes("操作回执的新结果")');
   held.splice(0).forEach((release) => release()); await sleep(300);
   assert.ok((await evaluate('document.querySelector(".team-chat-context").textContent')).includes("操作回执的新结果"));
@@ -238,7 +244,7 @@ try {
   // Old action acknowledgement must not inject the other task after switching scope.
   await evaluate('window.deliveryHarness.setTaskId("task-a")'); await wait('!!document.querySelector("textarea[aria-label=回复负责人]")');
   await text('textarea[aria-label="回复负责人"]', "旧任务回复"); holdReply = true;
-  await evaluate(`Array.from(document.querySelectorAll('.task-board-team-respond button')).find(n=>n.textContent.includes('发送回复')).click()`);
+  await clickText(".task-board-team-respond", "发送回复");
   for (let n = 0; n < 100 && !held.length; n++) await sleep(25); assert.equal(held.length, 1);
   await evaluate('window.deliveryHarness.setTaskId("task-b")'); await wait('document.querySelector(".team-chat-context")?.textContent.includes("任务B结果")');
   held.splice(0).forEach((release) => release()); holdReply = false; await sleep(300);
@@ -263,8 +269,42 @@ try {
   assert.equal(await evaluate('document.querySelector("#runs .team-chat-context")'), null);
   await click("#runs .wand-team-run-head");
   await wait('document.querySelector("#runs .team-chat-context")?.textContent.includes("运行记录的新交付")');
+  const executionModes = [];
+  for (const mode of ["desktop", "390px", "reduce-motion"]) {
+    await send("Emulation.setDeviceMetricsOverride", { width: mode === "390px" ? 390 : 1280, height: 1000, deviceScaleFactor: 1, mobile: false });
+    await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: mode === "reduce-motion" ? "reduce" : "no-preference" }] });
+    await send("Page.navigate", { url: origin + `/?execution=1&mode=${mode}` });
+    await wait('!!document.querySelector("#execution .ant-tabs-tab")');
+    await click('#execution .ant-tabs-tab[data-node-key="timeline"]');
+    const timeline = '#execution .task-board-team-view[data-view="timeline"]';
+    await wait('!!document.querySelector("#execution .ant-timeline")');
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(timeline)}).closest('[role=tabpanel]').getAttribute('aria-hidden')`), "false");
+    await click(timeline + ' .task-board-team-step-head');
+    await text(timeline + ' textarea[aria-label="手动完成的报告"]', '视图切换保留的手动报告');
+    await evaluate(`(()=>{window.__timelineDraftNode=document.querySelector(${JSON.stringify(timeline)}+' textarea');return true})()`);
+    await click('#execution .ant-tabs-tab[data-node-key="members"]');
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(timeline)}).hasAttribute('inert')`), true);
+    assert.equal(await evaluate(`getComputedStyle(document.querySelector(${JSON.stringify(timeline)}).closest('[role=tabpanel]')).display`), "none", "hidden library panel does not reserve height");
+    await click('#execution .ant-tabs-tab[data-node-key="timeline"]');
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(timeline)}+' textarea')===window.__timelineDraftNode`), true, "forceRender retains the original editor node");
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(timeline)}+' textarea').value`), '视图切换保留的手动报告');
+    await click(timeline + ' .task-board-team-step-skip-head');
+    await wait(`document.querySelector(${JSON.stringify(timeline)}+' .task-board-team-step-skip-head').getAttribute('aria-expanded')==='true'`);
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(timeline)}+' .task-board-team-step-skip-body').hasAttribute('inert')`), false);
+    assert.ok(await evaluate(`document.querySelector(${JSON.stringify(timeline)}+' .ant-list').textContent.includes('合成候选不可用')`));
+    await escape();
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(timeline)}+' .task-board-team-step-skip-head').getAttribute('aria-expanded')`), "false");
+    assert.equal(await evaluate(`document.activeElement===document.querySelector(${JSON.stringify(timeline)}+' .task-board-team-step-skip-head')`), true);
+    await click(timeline + ' .task-board-team-step-head');
+    await click(timeline + ' .task-board-team-step-head');
+    await escape();
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(timeline)}+' .task-board-team-step-head').getAttribute('aria-expanded')`), "false");
+    assert.equal(await evaluate(`document.activeElement===document.querySelector(${JSON.stringify(timeline)}+' .task-board-team-step-head')`), true);
+    assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth + 1'), true, `${mode}: execution pane has no horizontal overflow`);
+    executionModes.push({ mode, timeline: true, editorNodePreserved: true, draftPreserved: true, hiddenPaneInert: true, skippedList: true, escapeFocus: true, noOverflow: true });
+  }
   assert.equal(knowledgeReads, 0); assert.equal(errors, 0);
-  console.log(JSON.stringify({ ok: true, fixture: "synthetic, not live acceptance", results,
+  console.log(JSON.stringify({ ok: true, fixture: "synthetic, not live acceptance", results, executionModes,
     runHistoryOldGetProtected: true, runHistoryClosedScopeProtected: true,
     taskRequestGeneration: true, actionReceiptInvalidatesOldGet: true, taskSwitchProtected: true, oldActionProtected: true, replyRevisionProtected: true,
     statusDraftPreserved: true, filesRead, knowledgeReads, errors }));

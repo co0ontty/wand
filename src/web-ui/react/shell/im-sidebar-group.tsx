@@ -1,61 +1,70 @@
 import * as React from "react";
-import { WandIcon } from "../ui/index.js";
+import { Badge, Flex, Typography } from "antd";
+import { WandButton } from "../ui/index.js";
+import {
+  SidebarChevron,
+  SidebarDisclosure,
+  anchorSidebarDisclosure,
+  sidebarDisclosureKeys,
+} from "../workspaces/sidebar-disclosure";
 
-/**
- * 分组一级行：左边「头像 + 名字 + 计数」，右边「快捷新增 + 折叠箭头」。
- * 一级行自己承载头像，二级会话行不再重复身份（与安卓首页同一口径）。
- *
- * 结构上是 div 里套两个 button：一级行本身可点（折叠），右侧的快捷新增是独立动作，
- * 不能把按钮嵌进按钮。
- */
+/** Fixed identity head, including one-session groups; independent action slot. */
 export function ImSidebarGroup({
   label,
   count,
-  hasAttention = false,
+  description,
+  activity,
+  containsCurrent = false,
   avatarNode,
   action,
   expanded = true,
   onToggle,
+  onSetOpen,
   children,
 }: {
   label: string;
   count: number;
-  hasAttention?: boolean;
+  description?: string;
+  activity?: { label: string; tone: string };
+  containsCurrent?: boolean;
   avatarNode?: React.ReactNode;
-  /** 一级行右侧的快捷动作（例如「+ 新建对话」）。 */
   action?: React.ReactNode;
   expanded?: boolean;
   onToggle?(): void;
+  onSetOpen?(open: boolean): void;
   children: React.ReactNode;
 }): React.ReactElement {
+  const id = React.useId();
+  const descriptionId = React.useId();
   return (
     <div className={`im-sidebar-group${expanded ? " is-expanded" : ""}`}>
-      <div className="im-sidebar-group-header">
-        <button
-          type="button"
-          className="im-sidebar-group-toggle"
-          aria-expanded={expanded}
-          onClick={onToggle}
-        >
-          {avatarNode ? <span className="im-sidebar-group-avatar" aria-hidden="true">{avatarNode}</span> : null}
-          <span className="im-sidebar-group-title">{label}</span>
+      <Flex align="center" gap={4} className="im-sidebar-group-header">
+        <WandButton kind="ghost" type="button" className="wand-sidebar-group-toggle"
+          style={{ flex: 1, minWidth: 0, height: "auto", justifyContent: "flex-start", whiteSpace: "normal" }}
+          aria-expanded={expanded} aria-controls={id} aria-describedby={descriptionId}
+          title={`${label} · ${description ?? `${count} 个会话`}${containsCurrent ? " · 包含当前会话" : ""}`}
+          onClick={(event) => anchorSidebarDisclosure(event.currentTarget, () => onToggle?.())}
+          onKeyDown={(event) => sidebarDisclosureKeys(event, expanded,
+            (open) => onSetOpen ? onSetOpen(open) : onToggle?.())}>
+          <SidebarChevron open={expanded}/>
+          <span className="im-sidebar-group-avatar" aria-hidden="true" style={{ display: "inline-flex", width: 20, height: 20, flexShrink: 0 }}>{avatarNode}</span>
+          <Typography.Text ellipsis className="im-sidebar-group-title" style={{ flex: 1, textAlign: "start" }}>{label}</Typography.Text>
           <span className="im-sidebar-group-meta">
-            <span className="im-sidebar-group-count">{count}</span>
-            {hasAttention ? <span className="im-sidebar-group-attention-dot" /> : null}
+            <Badge count={count} color="var(--text-tertiary)"/>
+            <span className={`im-sidebar-group-attention-slot tone-${activity?.tone ?? "muted"}`}
+              title={activity?.label} aria-label={activity?.label || undefined}>
+              {activity?.label ? <Badge status={activity.tone === "danger" ? "error" : "warning"}/> : null}
+            </span>
           </span>
-          <WandIcon
-            name="chevron"
-            className={`im-sidebar-group-chevron${expanded ? " is-rotated" : ""}`}
-          />
-        </button>
-        {action ? <span className="im-sidebar-group-action">{action}</span> : null}
-      </div>
-
-      <div className={`im-sidebar-group-content${!expanded ? " is-collapsed" : ""}`}>
-        <div className="im-sidebar-group-inner">
-          {children}
-        </div>
-      </div>
+        </WandButton>
+        <span className="im-sidebar-group-action">{action}</span>
+      </Flex>
+      <span id={descriptionId} className="sidebar-visually-hidden" hidden>
+        {description}{containsCurrent ? "，包含当前会话" : ""}
+      </span>
+      <SidebarDisclosure id={id} open={expanded}>
+        <div className="im-sidebar-group-inner" style={{ paddingInlineStart: 8 }}>{children}</div>
+      </SidebarDisclosure>
     </div>
   );
 }

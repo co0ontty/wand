@@ -16,6 +16,8 @@ export const AI_TEAMS_CHUNK_OUTFILE = path.join(WEB_UI_ROOT, "content", "ai-team
 const CHUNK_FILES = new Set([
   AI_TEAMS_CHUNK_ENTRY,
   path.join(REACT_ROOT, "ai-teams", "teams-page.tsx"),
+  path.join(REACT_ROOT, "ai-teams", "team-dispatch.tsx"),
+  path.join(REACT_ROOT, "ai-teams", "team-start-projects.ts"),
   path.join(REACT_ROOT, "ai-teams", "team-employee-invite.tsx"),
   path.join(REACT_ROOT, "ai-teams", "team-employee-binding.ts"),
   path.join(REACT_ROOT, "ai-teams", "team-chat-view.tsx"),
@@ -34,6 +36,10 @@ const CHUNK_FILES = new Set([
   path.join(REACT_ROOT, "agents", "employee-list-page.tsx"),
 ]);
 const HOST_PACKAGES = new Set(["react", "react/jsx-runtime"]);
+const SHARED_LIBRARY_KEYS = new Set([
+  "ui", "theme", "styles", "design-library", "x-library",
+  "ui/motion-tokens", "ui/portal-context", "ui/popup-lifecycle",
+]);
 const HOST_NAMESPACE = "wand-ai-teams-host";
 
 /** 主包注册表的键：相对 src/web-ui/react、去扩展名、去 /index。 */
@@ -49,6 +55,12 @@ export function createAiTeamsHostPlugin() {
     setup(build) {
       build.onResolve({ filter: /.*/ }, async (args) => {
         if (args.kind === "entry-point" || args.pluginData?.aiTeamsHostProbe) return undefined;
+        if (args.path === "antd" || args.path === "@ant-design/x") {
+          return { path: args.path, namespace: "wand-shared-library" };
+        }
+        if (args.path.startsWith("antd/") || args.path.startsWith("@ant-design/x/")) {
+          return { errors: [{ text: "Team chunk must import antd / @ant-design/x at the package root to share the library runtime" }] };
+        }
         if (HOST_PACKAGES.has(args.path)) return { path: args.path, namespace: HOST_NAMESPACE };
         if (!args.path.startsWith(".")) {
           return { errors: [{ text: `ai-teams chunk 不能自带第三方包 ${args.path}，请经主包注册表共享` }] };
@@ -67,8 +79,13 @@ export function createAiTeamsHostPlugin() {
           }
           return { path: file };
         }
-        return { path: aiTeamsHostKey(file), namespace: HOST_NAMESPACE };
+        const key = aiTeamsHostKey(file);
+        if (SHARED_LIBRARY_KEYS.has(key)) return { path: key, namespace: "wand-shared-library" };
+        return { path: key, namespace: HOST_NAMESPACE };
       });
+      build.onLoad({ filter: /.*/, namespace: "wand-shared-library" }, args => ({
+        contents: `module.exports = globalThis.__wandSharedLibrary(${JSON.stringify(args.path)});`, loader: "js",
+      }));
       build.onLoad({ filter: /.*/, namespace: HOST_NAMESPACE }, (args) => ({
         contents: `module.exports = globalThis.__wandAiTeamsHost(${JSON.stringify(args.path)});`,
         loader: "js",
