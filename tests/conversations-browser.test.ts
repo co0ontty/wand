@@ -305,9 +305,20 @@ async function runConversationBrowser(t: TestContext, mentions: boolean): Promis
     const update = (text: string) => ({ conversationId: "dm_e_wand_default", sessionId, preview: { status: "running", text } });
     await evaluate(`conversationFixture.sessionLive(${JSON.stringify(update(liveText))})`);
     await wait(`document.querySelector(${JSON.stringify(cardSelector)})?.textContent.includes('可核对的最新片段')`);
-    assert.deepEqual(await rect(cardSelector), cardBefore, "streaming never resizes or moves the reply");
+    // 回复气泡装的是这条会话的转录：内容变长会撑高气泡（上限封顶），但列宽与左边距不变，
+    // 读者也不会被流式内容顶走（下面单独验阅读位置）。
+    const cardAfter = await rect(cardSelector);
+    assert.equal(cardAfter.width, cardBefore.width, "the reply column keeps its width while the transcript grows");
+    assert.equal(cardAfter.x, cardBefore.x, "the reply column keeps its place");
+    assert.ok(cardAfter.height >= cardBefore.height, "a longer transcript grows the reply");
+    assert.ok(cardAfter.height - cardBefore.height <= 600, "the transcript viewport stays bounded");
+    assert.deepEqual(await rect('.conversation-submit'), submitBefore, "acceptance and streaming preserve submit geometry");
     assert.deepEqual(await rect('.conversation-submit'), submitBefore, "acceptance and streaming preserve submit geometry");
     const scrollSelector = cardSelector + ' [aria-label="会话实时回复"]';
+    // 转录用内容自适应 + 上限封顶，不再是固定 232px 的小窗口。
+    const transcriptShape = await evaluate(`(()=>{const b=document.querySelector(${JSON.stringify(scrollSelector)});const cs=getComputedStyle(b);return {height:cs.height,maxHeight:cs.maxHeight,overflowY:cs.overflowY}})()`);
+    assert.match(transcriptShape.maxHeight, /\d+px/, "the transcript viewport is capped, not fixed");
+    assert.equal(transcriptShape.overflowY, "auto", "a transcript taller than the cap scrolls inside the bubble");
     assert.equal(await evaluate(`(()=>{const b=document.querySelector(${JSON.stringify(scrollSelector)});return b.scrollHeight>b.clientHeight && b.scrollHeight-b.clientHeight-b.scrollTop<2})()`), true);
     await evaluate(`document.querySelector(${JSON.stringify(scrollSelector)}).scrollTop=0`); await pause(100);
     await evaluate(`conversationFixture.sessionLive(${JSON.stringify(update(liveText + "新增不抢阅读"))})`);
@@ -316,7 +327,9 @@ async function runConversationBrowser(t: TestContext, mentions: boolean): Promis
     const executing = h.sessions.get(sessionId)!;
     h.sessions.set(sessionId, { ...executing, messages: [{ role: "assistant", content: [{ type: "text", text: "轮询恢复的新进展" }] }] });
     await wait(`document.querySelector(${JSON.stringify(cardSelector)})?.textContent.includes('轮询恢复的新进展')`);
-    assert.deepEqual(await rect(cardSelector), cardBefore);
+    const cardRestored = await rect(cardSelector);
+    assert.equal(cardRestored.width, cardBefore.width, "a polled transcript keeps the same column");
+    assert.equal(cardRestored.x, cardBefore.x);
     assert.equal(h.storage.listWandTasks().length, taskCount); assert.equal(h.storage.listConversations().filter(item => item.kind === "group").length, groupCount);
     await click(cardSelector + " button");
     await wait(`conversationFixture.openedSession===${JSON.stringify(sessionId)}`);
@@ -329,7 +342,7 @@ async function runConversationBrowser(t: TestContext, mentions: boolean): Promis
     assert.notEqual(cards[0]?.sessionLink?.sessionId, cards[1]?.sessionLink?.sessionId);
     assert.equal(h.storage.listWandTasks().length, taskCount);
     const previewShot = await send("Page.captureScreenshot", { format: "png" }); writeFileSync(join(evidenceDir, "dm-independent-sessions.png"), Buffer.from(previewShot.data, "base64"));
-    rows.push({ mode: "dm-sessions", stayInPrivateChat: true, independentSessions: true, noTasksOrGroups: true, boundedLiveViewport: true, exactSessionNavigation: true });
+    rows.push({ mode: "dm-sessions", stayInPrivateChat: true, independentSessions: true, noTasksOrGroups: true, inlineSessionTranscript: true, exactSessionNavigation: true });
     // Explicit group task history stays separate and keeps its existing reply/navigation semantics.
     const dispatchedId = await h.group();
     const dispatched = await h.dispatch(dispatchedId, "浏览器群任务");

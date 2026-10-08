@@ -48,7 +48,7 @@ html.no-transition *, html.no-transition *::before, html.no-transition *::after 
 .is-wand-embed-terminal.is-wand-terminal-passthrough .terminal-scroll-wrap { width: 100%; min-width: 0; }
 .is-wand-embed-terminal.is-wand-native-input .input-panel { display: none !important; }
 /* Reverse message order and stable imperative roots preserve scroll/focus leases. */
-.chat-messages { flex: 1; min-width: 0; width: 100%; box-sizing: border-box; height: 100%; overflow: auto; display: flex; flex-direction: column-reverse; gap: 16px; padding: 16px; overflow-anchor: none; overscroll-behavior: contain; }
+.chat-messages { flex: 1; min-width: 0; width: 100%; box-sizing: border-box; height: 100%; overflow: auto; display: flex; flex-direction: column-reverse; gap: 16px; padding: 16px; overflow-anchor: none; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .chat-message, .chat-activity, .chat-call, .agent-run { flex-shrink: 0; min-width: 0; }
 .chat-unread-divider { text-align: center; color: var(--text-secondary); font-size: var(--font-size-xs); }
 .chat-loading-more, .chat-empty { margin: auto; text-align: center; }
@@ -160,6 +160,7 @@ html.no-transition *, html.no-transition *::before, html.no-transition *::after 
 /* Only instance IM changes density; legacy team execution and terminal projections keep their own geometry. */
 .conversation-root .team-chat-stream { gap:8px; }
 .conversation-root .team-chat-msg > .team-chat-avatar { flex-shrink:0; }
+/* IM 层是气泡：两侧都按聊天气泡收口，不铺满整页（会话详情层才用满宽度）。 */
 .conversation-root .team-chat-stream .team-chat-msg[data-shape="bubble"] .team-chat-msg-content { max-width:min(calc(100% - 42px),600px); }
 .conversation-root .team-chat-msg-head { gap:8px; }
 .conversation-root .team-chat-msg-head .chat-message-time { color:var(--text-tertiary); font-size:var(--font-size-xs); }

@@ -528,8 +528,12 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
     assert.ok(expanders > 0, "长正文有展开入口");
     await click(".team-chat-expand");
     await wait("!!document.querySelector('[data-testid=team-chat-doc-dialog]')");
-    assert.equal(await evaluate(`document.querySelector('[data-testid=team-chat-doc-dialog]').querySelector('pre').textContent.length > 20`), true,
-      "弹层给全文而不是预览");
+    // 全文弹层渲染的是和行内同一份消息正文（Markdown/提及投影），不是 <pre> 块：
+    // 判据是「给全文而不是三行预览」——末行只在弹层里可达。
+    const docText = await evaluate(`document.querySelector('[data-testid=team-chat-doc-dialog] .team-chat-doc-layer-text')?.innerText || ""`);
+    assert.ok(docText.includes("第 8 行"), "弹层给全文而不是预览");
+    assert.equal(await evaluate(`!!document.querySelector(".team-chat-preview")?.textContent.includes("第 8 行")`), false,
+      "收起态仍然只给三行预览，末行只在弹层里可达");
     await screenshot(`teams-chat-doc-${mode}`);
     await key("Escape");
     await wait("!document.querySelector('[data-testid=team-chat-doc-dialog]')");

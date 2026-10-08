@@ -2190,6 +2190,32 @@ export class StructuredSessionManager {
     return updated;
   }
 
+  /** 仅空白独立对话能改目录：不建替代会话、不迁移任务/worktree 或已接受的输入。 */
+  setSessionDirectory(sessionId: string, cwd: string): SessionSnapshot {
+    if (typeof cwd !== "string" || !cwd.trim()) throw new Error("请选择有效的运行目录。");
+    const session = this.requireSession(sessionId);
+    if (session.status !== "idle" || session.archived || session.structuredState?.inFlight ||
+        this.pendingRunnerExecutions.has(sessionId) || session.claudeSessionId ||
+        session.resumedFromSessionId || session.autoRecovered ||
+        (session.messages?.length ?? 0) > 0 || (session.queuedMessages?.length ?? 0) > 0 ||
+        session.automationId || (session.sessionSource && session.sessionSource !== "interactive") ||
+        this.relayHandlerFor(session)) {
+      throw new Error("只有尚未发送消息的新建空白对话可以更换运行目录。");
+    }
+    if (session.workspaceTaskId || session.worktreeEnabled || session.worktree) {
+      throw new Error("任务或工作树会话必须保留原运行目录。");
+    }
+    const resolved = resolveSessionCwd(cwd, null);
+    const workspaceId = this.storage.updateBlankSessionDirectory(sessionId, resolved);
+    const updated = { ...session, cwd: resolved, workspaceId };
+    this.sessions.set(sessionId, updated);
+    this.emit({
+      type: "status", sessionId,
+      data: { sessionKind: "structured", cwd: resolved, workspaceId },
+    });
+    return updated;
+  }
+
   /** 新建空白对话可原位换 CLI；接受过输入、恢复会话和自动化不跨 provider 搬历史。 */
   setSessionProvider(sessionId: string, provider: SessionProvider): SessionSnapshot {
     const session = this.requireSession(sessionId);

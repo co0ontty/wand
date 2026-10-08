@@ -17,7 +17,8 @@ test("conversation IM density stays scoped and keeps the bounded feedback and fi
   assert.match(css, /\.conversation-feedback \{ min-height:44px;/);
   assert.match(css, /\.conversation-feedback\[hidden\] \{ display:none; \}/);
   assert.match(css, /\.conversation-action-row \{ height:44px;/);
-  assert.match(css, /\.conversation-root \.team-chat-stream \.team-chat-msg\[data-shape="bubble"\] \.team-chat-msg-content/);
+  // IM 层两侧都是气泡：按聊天气泡收口，不铺满整页。
+  assert.match(css, /\.conversation-root \.team-chat-stream \.team-chat-msg\[data-shape="bubble"\] \.team-chat-msg-content \{ max-width:min\(calc\(100% - 42px\),600px\); \}/);
   assert.match(css, /\.conversation-root \.ant-bubble-content/);
   assert.match(css, /\.conversation-row-topline \.conversation-row-title[^}]*text-overflow:ellipsis/);
   assert.match(css, /prefers-reduced-motion:reduce/);

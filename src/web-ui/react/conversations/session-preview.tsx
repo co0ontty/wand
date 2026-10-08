@@ -40,11 +40,13 @@ export function ConversationSessionReply({ turn, active, onOpen, children }: {
     if (body.current && following.current) body.current.scrollTop = body.current.scrollHeight;
   }, [text]);
   return <Bubble className="conversation-session-reply" data-session-id={sessionId} placement="start" variant="filled"
-    styles={{ root: { width: "min(420px, 100%)", flexShrink: 0 }, body: { width: "100%" },
-      content: { height: 232, boxSizing: "border-box", display: "flex", flexDirection: "column", gap: token.marginXS, overflow: "hidden" } }}
+    // IM 层的回复是「装着这条会话转录的气泡」：宽度按聊天气泡收口（不铺满整页），
+    // 内容按转录自然增长，只有超过上限才在气泡内部滚动。
+    styles={{ root: { width: "min(100%, 620px)", minWidth: 0, flexShrink: 0 }, body: { width: "100%" },
+      content: { boxSizing: "border-box", display: "flex", flexDirection: "column", gap: token.marginXS } }}
     content={<>
       <Typography.Text strong ellipsis title={turn.sessionLink?.title}>{turn.sessionLink?.title}</Typography.Text>
-      <div ref={body} role="region" tabIndex={0} aria-label="会话实时回复" style={{ flex: 1, minHeight: 0, overflow: "auto", overflowWrap: "anywhere" }}
+      <div ref={body} role="region" tabIndex={0} aria-label="会话实时回复" style={{ minHeight: 0, maxHeight: "min(60dvh, 520px)", overflow: "auto", overflowWrap: "anywhere" }}
         onScroll={event => { const el = event.currentTarget; following.current = el.scrollHeight - el.scrollTop - el.clientHeight <= CONVERSATION_TAIL_PX; }}>
         <MarkdownPreview content={text} variant="inline" wrap/>{children}
       </div>

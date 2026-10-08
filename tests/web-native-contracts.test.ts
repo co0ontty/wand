@@ -256,17 +256,20 @@ test("task board create sheets only assign agents from the doing column", () => 
   // 三端 + Web 必须一致，否则同一个面板在不同端会做出不同的事。
   includesAll("android/app/src/main/java/com/wand/app/ui/screens/TaskBoardScreen.kt", [
     'internal fun boardCreateDispatches(status: String): Boolean = status == "doing"',
-    "initialStatus: String",
-    "var status by remember { mutableStateOf(initialStatus) }",
     "onCreateForStatus: (String) -> Unit",
     'BoardSectionHeader(',
     'onAdd = onCreateForStatus,',
     "contentDescription = boardGroupAddTaskDescription(status)",
-    'label = boardCreateActionLabel(',
-    "dispatches = dispatches,",
-    "hasDescription = description.trim().isNotEmpty(),",
-    'enabled = !busy && (title.trim().isNotEmpty() || description.trim().isNotEmpty())',
-    "只创建任务，不指派 Agent",
+  ]);
+  includesAll("android/app/src/main/java/com/wand/app/ui/screens/CreateBoardTaskDialog.kt", [
+    "initialStatus: String",
+    "var status by remember { mutableStateOf(initialStatus) }",
+    "val dispatches = boardCreateDispatches(status)",
+    "else boardCreateActionLabel(teamTarget != null, dispatches, description.trim().isNotEmpty(),",
+    "else title.isNotBlank() || description.isNotBlank()",
+    "只创建任务，稍后再开始",
+    "WandFormDialog(",
+    "WorkspaceDirectoryPicker(",
   ]);
   // 派工门槛：两个条件都得成立，且必须是 `&&`。Kotlin 把这条 if 写成多行（teamId/retriedTaskId
   // 在第一行，boardCreateDispatches/description 在第二行），所以断言只容忍换行与缩进，不容忍语义变化。
@@ -410,8 +413,13 @@ test("subagent execution surfaces stay compact, avatar-free, and follow the newe
   );
   assert.match(
     source("src/web-ui/react/chat/presentation.tsx"),
-    /const live = element\.classList\.contains\("is-command-running"\) \|\| element\.classList\.contains\("is-thinking-running"\)/,
-    "The compact summary keeps its loading whether or not the timeline is expanded",
+    /\.chat-activity\.is-command-running \.chat-process-summary-dot[\s\S]{0,320}?color:var\(--accent\)/,
+    "The compact summary keeps its running mark whether or not the timeline is expanded",
+  );
+  assert.doesNotMatch(
+    source("src/web-ui/react/chat/presentation.tsx"),
+    /icon=\{live \? <Spin/,
+    "The running mark is the business nine-dot mark, not a library spinner",
   );
   // Disclosure, keyboard state, selected identity, reading geometry and reduced
   // motion are exercised with production Ant components by antd-chat-browser.

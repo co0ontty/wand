@@ -729,6 +729,31 @@ export function registerSessionRoutes(
     }
   }));
 
+  app.post("/api/sessions/:id/directory", (req, res) => {
+    const cwd = req.body?.cwd;
+    if (typeof cwd !== "string" || !cwd.trim()) {
+      res.status(400).json({ error: "请选择有效的运行目录。" });
+      return;
+    }
+    const id = req.params.id;
+    const owner = sessions.ownerOf(id);
+    if (!owner) {
+      res.status(404).json({ error: "未找到该会话。" });
+      return;
+    }
+    if (owner !== "structured") {
+      res.status(400).json({ error: "只有新建空白结构化对话可以更换运行目录。" });
+      return;
+    }
+    try {
+      const updated = structured.setSessionDirectory(id, cwd);
+      onSessionCreated?.(updated.cwd);
+      res.json(sessionResponseDTO(updated, req));
+    } catch (error) {
+      sendRouteError(res, error, "切换运行目录失败。");
+    }
+  });
+
   app.post("/api/sessions/:id/provider", (req, res) => {
     const provider = req.body?.provider;
     if (!isSessionProvider(provider)) {

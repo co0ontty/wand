@@ -5,6 +5,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { SessionSnapshot, ConversationTurn, HarnessSessionContext, SessionKind, SessionProvider, SessionRunner, SessionSource, StructuredSessionState, WorktreeMergeInfo, Workspace, LayoutNode, TaskWindowLayout, WorkspaceDefaultProvider, WorkspaceKind, WorkspaceTask, WorkspaceTaskWorktree, WorkspaceTaskStatus, GLOBAL_WORKSPACE_ID } from "./types.js";
 import { normalizeSessionDirectory } from "./session-directory-tree.js";
+import { ensureWorkspaceForCwd } from "./workspace-binding.js";
 import { defaultPiCliSessionSettings, defaultPiSessionSettings, patchPiSessionSettings, type PiSessionSettings } from "./pi-session-settings.js";
 import { parseHarnessExtensionState } from "./core-extension-host.js";
 import { inferProviderFromCommand, inferProviderFromRunner, isSessionProvider, SESSION_PROVIDERS } from "./session-provider.js";
@@ -1972,6 +1973,20 @@ export class WandStorage {
     const row = this.db.prepare("SELECT workspace_id, workspace_task_id FROM command_sessions WHERE id = ?")
       .get(sessionId) as { workspace_id: string | null; workspace_task_id: string | null } | undefined;
     return row ? { workspaceId: row.workspace_id ?? undefined, workspaceTaskId: row.workspace_task_id ?? undefined } : null;
+  }
+
+  /** 空白独立会话的目录与项目归属一次落库；创建新项目失败也随事务回滚。 */
+  updateBlankSessionDirectory(sessionId: string, cwd: string): string {
+    return this.transaction(() => {
+      const session = this.getSession(sessionId);
+      if (!session || session.workspaceTaskId || session.worktreeEnabled || session.worktree) {
+        throw new Error("任务或工作树会话必须保留原运行目录。");
+      }
+      const workspace = ensureWorkspaceForCwd(this, cwd);
+      this.db.prepare("UPDATE command_sessions SET cwd = ?, workspace_id = ? WHERE id = ?")
+        .run(cwd, workspace.id, sessionId);
+      return workspace.id;
+    });
   }
 
   setSessionWorkspaceId(sessionId: string, workspaceId: string | null): void {

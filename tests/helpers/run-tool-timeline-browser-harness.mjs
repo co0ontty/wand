@@ -110,17 +110,47 @@ try {
     const initialRequests = report.requests.length;
     const before = await e('document.querySelector("button.chat-process-summary").getBoundingClientRect().toJSON()');
     await e(`(()=>{window.revealFrames=[];const g=document.querySelector('.chat-activity');const menu=g.querySelector('.chat-disclosure-body');const summary=g.querySelector('button.chat-process-summary');function frame(){revealFrames.push({height:menu.getBoundingClientRect().height,y:summary.getBoundingClientRect().y});if(revealFrames.length<24)requestAnimationFrame(()=>requestAnimationFrame(()=>setTimeout(frame,0)))}requestAnimationFrame(()=>requestAnimationFrame(()=>setTimeout(frame,0)))})()`);
-    await click("button.chat-process-summary"); await e("h.settle()");
+    // 抽帧只能证明「抓到过中间帧」，机器忙时会漏帧而误报（历史 flaky）。
+    // 改成读披露体自己的过渡状态：同 tick 读 getAnimations() 会强制样式更新，
+    // 过渡是否真实存在、是否在跑、进度是否 <1 都是确定性的。
+    const reveal = await e(`(()=>{
+      const g=document.querySelector('.chat-activity');
+      const menu=g.querySelector('.chat-disclosure-body');
+      const summary=g.querySelector('button.chat-process-summary');
+      const read=()=>({height:Math.round(menu.getBoundingClientRect().height),
+        transitions:menu.getAnimations().map(a=>({state:a.playState,progress:a.effect?Number(a.effect.getComputedTiming().progress):null}))});
+      summary.click();
+      return read();
+    })()`);
+    await e("h.settle()");
+    const openedHeight=await e('Math.round(document.querySelector(".chat-activity .chat-disclosure-body").getBoundingClientRect().height)');
     const frames=await e('revealFrames');
     assert.ok(frames.every(f=>Math.abs(f.y-before.y)<=1),"trigger remains fixed during the entire reveal: "+JSON.stringify({before,frames}));
-    if(mode.includes('reduce')) assert.ok(frames.every(f=>f.height<1||f.height>=239),'reduced motion has no geometry tween');
-    else assert.ok(frames.some(f=>f.height>1&&f.height<239),'including the native shell, reveal uses a real reversible height animation');
+    if(mode.includes('reduce')){
+      assert.ok(reveal.transitions.every(a=>a.state!=='running'),'reduced motion has no geometry tween: '+JSON.stringify(reveal));
+      assert.ok(reveal.height>=239,'reduced motion reaches the final height at once: '+JSON.stringify(reveal));
+      assert.ok(openedHeight>=239,'reduced motion keeps the settled height');
+    } else {
+      assert.ok(reveal.transitions.some(a=>a.state==='running'&&a.progress!==null&&a.progress<1),
+        'including the native shell, reveal uses a real reversible height animation: '+JSON.stringify(reveal));
+      assert.ok(reveal.height<239,'the reveal starts from the collapsed height: '+JSON.stringify(reveal));
+      assert.ok(openedHeight>=239,'the reveal settles at the full height');
+    }
     assert.equal(report.requests.length, initialRequests, "timeline expansion must not fetch any detail");
     assert.equal(await e('document.querySelectorAll(".chat-call").length'), 40);
     assert.deepEqual(await e('Array.from(document.querySelectorAll(".chat-call[data-tool-ids]")).map(n=>JSON.parse(n.dataset.toolIds))'), Array.from({length:40},(_,i)=>["call-"+i]));
     const metrics = await e('(()=>{const n=document.querySelector(".chat-activity-timeline");return{height:n.clientHeight,overflow:n.scrollHeight>n.clientHeight,detail:!!n.querySelector("pre,.tool-use-card,.inline-diff,.inline-terminal"),summary:document.querySelector("button.chat-process-summary").getBoundingClientRect().toJSON(),wide:document.documentElement.scrollWidth>innerWidth}})()');
     assert.equal(metrics.height, 240); assert.equal(metrics.overflow, true); assert.equal(metrics.detail, false); assert.equal(metrics.wide, false);
-    assert.equal(await e('Array.from(document.querySelectorAll("button.chat-call-button")).every(row=>{const clock=row.querySelector("time");const label=row.querySelector(".chat-call-label");return !clock || clock.getBoundingClientRect().left >= label.getBoundingClientRect().right})'), true, "each timestamp stays aligned after the readable title");
+    // 安卓行内顺序是「时钟 + 标签」同行：时钟在前、标签在后，且每行时钟落在同一列。
+    const clockLayout = await e(`(()=>{const rows=[...document.querySelectorAll("button.chat-call-button")];
+      const clocks=rows.map(row=>row.querySelector("time")).filter(Boolean);
+      return {count:clocks.length,
+        before:rows.every(row=>{const clock=row.querySelector("time"),label=row.querySelector(".chat-call-label");
+          return !clock||!label||clock.getBoundingClientRect().right<=label.getBoundingClientRect().left+1}),
+        aligned:new Set(clocks.map(node=>Math.round(node.getBoundingClientRect().left))).size<=1}})()`);
+    assert.ok(clockLayout.count>0,"rows carry a clock");
+    assert.equal(clockLayout.before,true,"the clock stays before the readable title");
+    assert.equal(clockLayout.aligned,true,"every row keeps its clock in the same column");
     for (const axis of ["x","y","width","height"]) assert.ok(Math.abs(metrics.summary[axis]-before[axis])<=1, "summary stays in place: " + axis);
     if (output && (mode === "desktop" || mode === "390px")) {
       mkdirSync(output,{recursive:true});

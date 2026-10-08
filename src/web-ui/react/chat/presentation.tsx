@@ -1,8 +1,9 @@
 import * as React from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { flushSync } from "react-dom";
-import { Alert, Badge, Button, Card, Collapse, Flex, Spin, Tag, Timeline, Typography, theme } from "antd";
+import { Alert, Badge, Button, Card, Collapse, Flex, Tag, Timeline, Typography, theme } from "antd";
 import { Bubble, FileCard, Think, ThoughtChain } from "@ant-design/x";
+import { EmployeeAvatar } from "../agents/employee-avatar";
 import { WandIcon } from "../ui";
 import { WandUiProvider } from "../theme";
 import { installStyleSheet } from "../styles";
@@ -34,6 +35,19 @@ const slotNames: Partial<Record<Kind, string[]>> = {
 function OwnedNode({ node }: { node?: HTMLElement }): React.ReactElement {
   const ref = React.useRef<HTMLDivElement>(null);
   React.useLayoutEffect(() => { if (node && ref.current && node.parentElement !== ref.current) ref.current.replaceChildren(node); }, [node]);
+  return <div ref={ref}/>;
+}
+
+/** 固定形状的业务节点（工具图标）：每次重渲染 imperative 层都会给新实例，形状没变就保留
+ *  已挂载的那一个 —— 迟到结果只更新正文，不重造头部图标。 */
+function StableOwnedNode({ node }: { node?: HTMLElement }): React.ReactElement {
+  const ref = React.useRef<HTMLDivElement>(null);
+  React.useLayoutEffect(() => {
+    const host = ref.current;
+    if (!node || !host) return;
+    const mounted = host.firstElementChild;
+    if (!mounted || !mounted.isEqualNode(node)) host.replaceChildren(node);
+  }, [node]);
   return <div ref={ref}/>;
 }
 function textOf(node: Element | null | undefined, selector?: string): string {
@@ -156,32 +170,36 @@ function captureSlots(element: Element, kind: Kind): Map<string, HTMLElement> {
 
 /** Ant owns message chrome; detached, non-interactive metadata stays a patchable source. */
 function ChatBubble({ element, slots }: { element: HTMLElement; slots: Map<string, HTMLElement> }): React.ReactElement {
-  const { token } = theme.useToken();
   const user = element.dataset.role === "user";
   const usage = slots.get("turn-usage-summary");
   const timing = slots.get("chat-message-time");
   const clock = timing?.querySelector("time");
   const duration = textOf(timing, ".chat-message-duration");
-  const stats = usage || timing;
-  const smallText = { fontSize: token.fontSizeSM, color: token.colorText };
+  const usageIcon = usage?.querySelector<HTMLElement>(".turn-usage-icon");
   const values = Array.from(usage?.querySelectorAll<HTMLElement>(".turn-usage-value") || []);
+  // Android ChatMessageTime：时间行在正文之上，自己的发言靠右；等宽字体、次要色。
+  const timeRow = timing ? <span className="chat-message-time">
+    {duration ? <span className="chat-message-duration">{duration}</span> : null}
+    <time dateTime={clock?.getAttribute("datetime") || undefined} title={timing.title}
+      aria-label={clock?.getAttribute("aria-label") || undefined}>{textOf(clock || timing)}</time>
+  </span> : null;
+  // Android UsageSummaryRow：回复尾部独立一行的小字用量，不再和时间挤在同一行。
+  const usageRow = usage ? <span className="turn-usage-summary" role="status" aria-live="polite"
+    aria-label={usage.getAttribute("aria-label") || undefined}>
+    {usageIcon ? <OwnedNode node={usageIcon}/> : null}
+    {values.length ? values.map(value => <span key={value.dataset.chatKey} className="turn-usage-value" title={value.title}>{textOf(value)}</span>)
+      : <span className="turn-usage-value">{textOf(usage)}</span>}
+  </span> : null;
   return <Bubble placement={user ? "end" : "start"} variant={user ? "filled" : "borderless"} shape="corner"
-    styles={{ body: { minWidth: 0, width: user ? undefined : "100%", maxWidth: user ? "min(85%, 72ch)" : "min(100%, 72ch)" },
-      content: { background: user ? token.colorPrimaryBg : "transparent", overflowWrap: "anywhere", ...(user ? {} : { padding: 0 }) },
-      footer: { marginBlockStart: token.marginXS, fontVariantNumeric: "tabular-nums" } }}
+    // 助手的回复头部（时间 + 署名 + 收起）由 presentAssistantReply 持有，这里不再重复一份时间行。
+    header={user ? timeRow : undefined}
+    // 助手回复不设阅读栏宽：横向用满可用宽度（对齐 Android 回复正文），只有自己的发言按气泡收口。
+    styles={{ body: { minWidth: 0, width: user ? undefined : "100%", maxWidth: user ? "calc(100% - 44px)" : "100%", marginInlineStart: user ? "auto" : undefined },
+      content: { overflowWrap: "anywhere", ...(user ? {} : { padding: 0 }) },
+      footer: { marginBlockStart: 8, fontVariantNumeric: "tabular-nums", textAlign: "start" } }}
     content={businessBody(slots.get("chat-message-content") || slots.get("chat-message-text"))}
-    footerPlacement={user ? "inner-end" : "inner-start"}
-    footer={stats ? <Flex className="chat-message-stats" align="center" wrap gap="middle" justify={usage ? "space-between" : "flex-end"}>
-      {usage ? <Flex className={usage.className} align="center" wrap gap="small" role="status" aria-live="polite" aria-label={usage.getAttribute("aria-label") || undefined}>
-        {values.length ? values.map(value => <Typography.Text key={value.dataset.chatKey} type="secondary" style={smallText} title={value.title}>{textOf(value)}</Typography.Text>)
-          : <Typography.Text type="secondary" style={smallText}>{textOf(usage)}</Typography.Text>}
-      </Flex> : null}
-      {timing ? <Flex className="chat-message-time" align="center" wrap gap="small">
-        {duration ? <Typography.Text type="secondary" style={smallText}>{duration}</Typography.Text> : null}
-        <Typography.Text type="secondary" style={smallText}><time dateTime={clock?.getAttribute("datetime") || undefined}
-          title={timing.title} aria-label={clock?.getAttribute("aria-label") || undefined}>{textOf(clock || timing)}</time></Typography.Text>
-      </Flex> : null}
-    </Flex> : undefined}/>;
+    footerPlacement="outer-start"
+    footer={usageRow || undefined}/>;
 }
 
 function renderProjection(element: HTMLElement, projection: Projection): void {
@@ -207,7 +225,7 @@ function renderProjection(element: HTMLElement, projection: Projection): void {
     const header = slots.get(headerClass);
     const title = textOf(header, kind === "tool" ? ".tool-use-name" : kind === "terminal" ? ".term-cmd-preview" : ".diff-file-name");
     const subtitle = kind === "tool" ? [textOf(header, ".tool-use-summary"), textOf(header, ".tool-use-file"), textOf(header, ".decision-tool-summary")].filter(Boolean).join(" · ") : kind === "diff" ? element.dataset.path : "";
-    const status = kind === "tool" ? element.classList.contains("error") ? "error" : element.classList.contains("success") ? "success" : "pending" : kind === "terminal" ? header?.querySelector(".term-error") ? "error" : header?.querySelector(".term-success") ? "success" : "running" : header?.querySelector(".diff-error") ? "error" : header?.querySelector(".diff-success") ? "success" : "running";
+    const status = kind === "tool" ? element.classList.contains("error") ? "error" : element.classList.contains("success") ? "success" : "running" : kind === "terminal" ? header?.querySelector(".term-error") ? "error" : header?.querySelector(".term-success") ? "success" : "running" : header?.querySelector(".diff-error") ? "error" : header?.querySelector(".diff-success") ? "success" : "running";
     const expanded = kind === "terminal" ? element.dataset.expanded === "true" : !element.classList.contains("collapsed");
     const toggle = (event: React.MouseEvent<HTMLButtonElement>) => {
       preserveDisclosurePosition(event.currentTarget, () => {
@@ -217,13 +235,26 @@ function renderProjection(element: HTMLElement, projection: Projection): void {
         renderProjection(element, projection);
       });
     };
-    const trigger = <Button type="text" block className={`${headerClass} chat-tool-trigger`} aria-expanded={expanded}
-      data-tool-toggle={kind === "tool" && !element.classList.contains("decision-tool-card") ? "" : undefined}
+    const decision = element.classList.contains("decision-tool-card");
+    // 工具图标由 imperative 层提供（tool-identity），这里只把它放进状态图标槽，不另建一套图标表。
+    const iconNode = header?.querySelector<HTMLElement>(".tool-use-icon") || undefined;
+    const stateLabel = element.classList.contains("ask-user") ? element.classList.contains("ask-user-answered") ? "已回答" : "待回答" : status === "error" ? "失败" : status === "success" ? "完成" : "运行中";
+    // Android ToolCard：左侧状态图标槽（状态色 11% 底 + 运行态与工具图标交叉变形），
+    // 中间标题/摘录两行，右侧箭头；状态不再写成文字，只留在语义与槽位颜色里。
+    const trigger = <Button type="text" block className={`${headerClass} chat-tool-trigger${kind === "tool" && !decision ? " chat-tool-trigger-card" : ""}`} aria-expanded={expanded}
+      aria-label={`${title || "调用工具"}，${stateLabel}`}
+      data-tool-toggle={kind === "tool" && !decision ? "" : undefined}
       onClick={toggle}>
-      <Badge status={statusColor(status)}/>
-      <span className="chat-tool-title" title={title}>{title || "工具调用"}</span>
-      {subtitle && <Typography.Text className={`chat-tool-subtitle${element.classList.contains("decision-tool-card") ? " decision-tool-summary" : ""}`} role={element.classList.contains("decision-tool-card") ? "status" : undefined} type="secondary" ellipsis title={subtitle}>{subtitle}</Typography.Text>}
-      {!element.classList.contains("decision-tool-card") && <span className={`chat-tool-state${status === "error" ? " chat-activity-error" : ""}`}>{element.classList.contains("ask-user") ? element.classList.contains("ask-user-answered") ? "已回答" : "待回答" : status === "error" ? "失败" : status === "success" ? "完成" : "未返回"}</span>}
+      {kind === "tool" && !decision
+        ? <span className="chat-tool-icon-slot" data-status={status} aria-hidden="true">
+          <span className="chat-tool-icon-progress"/>
+          <span className="chat-tool-icon-glyph">{iconNode ? <StableOwnedNode node={iconNode}/> : <WandIcon name="wrench" size={16}/>}</span>
+        </span>
+        : <Badge status={statusColor(status)}/>}
+      <span className="chat-tool-head">
+        <span className="chat-tool-title" title={title}>{title || "工具调用"}</span>
+        {subtitle && <span className={`chat-tool-summary${decision ? " decision-tool-summary" : ""}`} role={decision ? "status" : undefined} title={subtitle}>{subtitle}</span>}
+      </span>
       <DisclosureChevron expanded={expanded}/>
     </Button>;
     const body = <DisclosureBody expanded={expanded}>
@@ -232,7 +263,7 @@ function renderProjection(element: HTMLElement, projection: Projection): void {
     </DisclosureBody>;
     const interactive = element.classList.contains("ask-user") || element.classList.contains("decision-tool-card");
     content = interactive ? <Card size="small" title={trigger} styles={{ body: { padding: 0 }, header: { paddingInline: 8 } }}>{body}</Card>
-      : <Flex vertical className="chat-tool-surface">
+      : <Flex vertical className={`chat-tool-surface${kind === "tool" ? " chat-tool-card-surface" : ""}`}>
         <Flex align="center" style={{ minWidth: 0 }}>{trigger}{kind === "diff" && <OwnedNode node={slots.get("diff-file-action")}/>}</Flex>
         {status === "error" && !expanded && <Typography.Text type="danger" className="chat-tool-error-preview" ellipsis>
           {textOf(slots.get("tool-preview"), ".tool-preview-output") || "工具执行失败，展开查看详情"}
@@ -243,9 +274,9 @@ function renderProjection(element: HTMLElement, projection: Projection): void {
     const summary = slots.get("chat-process-summary");
     const expanded = element.dataset.expanded === "true";
     // 缩略统计行是全段唯一的动态 loading，展开时也不让位；时间线行不再另起一份。
-    const live = element.classList.contains("is-command-running") || element.classList.contains("is-thinking-running");
+    // 运行标记是业务标记（九点流动标记）而不是库的 Spin：标记随 imperative 标记一起进出，
+    // 运行态由 .chat-activity.is-*-running 表达，同一实例里展开，不做两套图标切换。
     content = <><Button type="text" block className="chat-process-summary" aria-expanded={expanded}
-      icon={live ? <Spin size="small"/> : undefined}
       onClick={event => preserveDisclosurePosition(event.currentTarget, () => { (window as any).__activityToggle(event.currentTarget); renderProjection(element, projection); })}>
       <OwnedNode node={summary}/><DisclosureChevron expanded={expanded}/>
     </Button><DisclosureBody expanded={expanded}><OwnedNode node={slots.get("chat-activity-menu")}/></DisclosureBody></>;
@@ -256,18 +287,20 @@ function renderProjection(element: HTMLElement, projection: Projection): void {
     const status = element.dataset.status;
     const thinking = element.dataset.thinkingEntry === "true";
     const stateLabel = status === "error" ? "失败" : status === "running" ? thinking ? "思考中" : "运行中" : status === "complete" ? thinking ? "已结束" : "完成" : "未返回";
-    const preview = thinking ? "" : [seed?.dataset.preview, seed?.dataset.result === stateLabel ? "" : seed?.dataset.result].filter(Boolean).join(" · ");
-    content = <ThoughtChain line={false} styles={{ itemHeader: { padding: 0 }, itemContent: { marginTop: 0, marginBottom: 0, padding: 0, background: "transparent" } }} items={[{
+    const inputPreview = thinking ? "" : seed?.dataset.preview || "";
+    const resultPreview = thinking || !seed?.dataset.result || seed.dataset.result === stateLabel ? "" : seed.dataset.result;
+    content = <ThoughtChain line={false} styles={{ itemHeader: { padding: 0 }, itemIcon: { width: 12, minWidth: 12, marginInlineEnd: 8, alignSelf: "flex-start", marginTop: 12 }, itemContent: { marginTop: 0, marginBottom: 0, padding: 0, background: "transparent" } }} items={[{
       key: element.dataset.entryKey,
-      // Only the summary animates. Rows are compact, selectable records, not cards.
-      icon: <WandIcon name={thinking ? "spark" : status === "error" ? "close" : status === "complete" ? "check" : "circle"} size={13}/>,
+      // Only the summary animates. Rows carry a static status dot, and the state is read from colour.
+      icon: <span className="chat-call-mark" data-status={status} aria-hidden="true"/>,
       title: <Button type="text" block className="chat-call-button" aria-expanded={open}
+        aria-label={`${seed?.dataset.label || "工具调用"}，${stateLabel}`}
         onClick={event => preserveDisclosurePosition(event.currentTarget, () => { (window as any).__activityEntryToggle(event.currentTarget); renderProjection(element, projection); })}>
-        <span className="chat-call-copy"><span className="chat-call-label" title={seed?.dataset.label}>{seed?.dataset.label || "工具调用"}</span>
-          {preview && <span className="chat-call-preview" title={preview}>{preview}</span>}
-        </span>
-        <span className="chat-call-meta"><span className={status === "error" ? "chat-activity-error" : ""}>{stateLabel}</span>
-          {seed?.dataset.time && <time dateTime={seed.dataset.occurredAt}>{seed.dataset.time}</time>}
+        <span className="chat-call-copy"><span className="chat-call-line">
+          {seed?.dataset.time && <time className="chat-call-time" dateTime={seed.dataset.occurredAt}>{seed.dataset.time}</time>}
+          <span className="chat-call-label" title={seed?.dataset.label}>{seed?.dataset.label || "工具调用"}</span></span>
+          {inputPreview && <span className="chat-call-preview" title={inputPreview}>{inputPreview}</span>}
+          {resultPreview && <span className="chat-call-result" data-error={status === "error" ? "" : undefined} title={resultPreview}>{resultPreview}</span>}
         </span><DisclosureChevron expanded={open}/>
       </Button>,
       content: <DisclosureBody expanded={open}>{businessBody(detail)}</DisclosureBody>,
@@ -372,8 +405,13 @@ function renderProjection(element: HTMLElement, projection: Projection): void {
   flushSync(() => projection.root.render(<WandUiProvider>{content}</WandUiProvider>));
 }
 
+
 /** The message owner keeps the fold choice; Ant owns its single keyboard control. */
-export function presentAssistantReply(element: HTMLElement, key: string, preview: string, expanded: boolean, toggle: (expanded: boolean) => void): void {
+export function presentAssistantReply(element: HTMLElement, key: string, preview: string, expanded: boolean, toggle: (expanded: boolean) => void, meta?: { time?: string; dateTime?: string; duration?: string; author?: string; employee?: { id: string; name?: string; avatar?: string; provider?: string } }): void {
+  // 署名只是「谁在做这件事」的说明：会话自带员工快照就署员工，团队 relay 的 msg.author 次之，
+  // 都取不到才回落品牌标记 + Wand（与 Android AssistantReplyHeader 同一套优先级）。
+  const employee = meta?.employee?.id ? meta.employee : null;
+  const authorName = employee?.name || meta?.author || "Wand";
   let host = Array.from(element.children).find(child => child.classList.contains("assistant-reply-host")) as HTMLElement | undefined;
   if (!host) {
     host = document.createElement("div"); host.className = "assistant-reply-host";
@@ -381,16 +419,30 @@ export function presentAssistantReply(element: HTMLElement, key: string, preview
   }
   let root = replies.get(host);
   if (!root) { root = createRoot(host); replies.set(host, root); }
-  flushSync(() => root!.render(<WandUiProvider><Button type="text" block className="assistant-reply-disclosure"
-    data-expand-key={key} aria-expanded={expanded} onClick={event => preserveDisclosurePosition(event.currentTarget, () => {
-      toggle(!expanded); presentAssistantReply(element, key, preview, !expanded, toggle);
-    })}>
-    <Flex gap="small" align="center" style={{ width: "100%", minWidth: 0 }}>
-      <Typography.Text strong>回复</Typography.Text>
-      <Typography.Text type="secondary" ellipsis title={preview} style={{ flex: 1, minWidth: 0, textAlign: "left" }}>{expanded ? "" : preview}</Typography.Text>
+  // Android TurnView：时间行在上，署名行（头像 + 名字 + 展开/收起）在下，正文与用量在头部之后。
+  flushSync(() => root!.render(<WandUiProvider><div className="assistant-reply-head">
+    {meta?.time ? <span className="chat-message-time">
+      {meta.duration ? <span className="chat-message-duration">耗时 {meta.duration}</span> : null}
+      <time dateTime={meta.dateTime || undefined}>{meta.time}</time>
+    </span> : null}
+    <Button type="text" block className="assistant-reply-disclosure"
+      data-expand-key={key} aria-expanded={expanded} aria-label={`${authorName} 的回复，${expanded ? "收起" : "展开"}`}
+      onClick={event => preserveDisclosurePosition(event.currentTarget, () => {
+        toggle(!expanded); presentAssistantReply(element, key, preview, !expanded, toggle, meta);
+      })}>
+      <span className="assistant-author">
+        <span className="assistant-author-avatar" aria-hidden="true">
+          {employee
+            ? <EmployeeAvatar employee={{ id: employee.id, name: employee.name || employee.id, avatar: employee.avatar }} provider={employee.provider} size="sm"/>
+            : <span className="assistant-author-spark"><WandIcon name="sparkle" size={14}/></span>}
+        </span>
+        <span className="assistant-author-name">{authorName}</span>
+      </span>
+      {!expanded && preview ? <span className="assistant-author-preview" title={preview}>{preview}</span> : <span className="assistant-author-space"/>}
+      <span className="assistant-reply-action">{expanded ? "收起" : "展开"}</span>
       <DisclosureChevron expanded={expanded}/>
-    </Flex>
-  </Button></WandUiProvider>));
+    </Button>
+  </div></WandUiProvider>));
 }
 
 /** Read native business state after a disclosure/tab delegate, without owning it again. */
@@ -454,21 +506,56 @@ export function presentChat(root: HTMLElement): void {
     .chat-message-text, .chat-activity-thinking-content { white-space:pre-wrap; overflow-wrap:anywhere; }
     .chat-process-summary.ant-btn { height:auto; min-height:36px; padding:6px 0; text-align:left; justify-content:flex-start; white-space:normal; color:var(--text-secondary); font-size:var(--font-size-xs); }
     .chat-process-summary.ant-btn > div { flex:1; min-width:0; }
+    .chat-process-summary:not(.ant-btn) { display:inline-flex; align-items:center; gap:6px; min-width:0; }
+    /* 运行标记：静态是一枚实心点，运行态在同一个实例里展开成 3×3 并相位流动。
+       几何对齐 Android ToolActivityMark（12dp 标记盒 / 6dp 点 / 步进 4dp）：折叠时九点
+       在中心重合放大成一点，展开时只平移不缩放。动画只由运行态驱动，不做演示用定时。 */
+    .chat-process-summary-dot { flex:0 0 12px; width:12px; height:12px; display:grid; grid-template-columns:repeat(3,2px); grid-template-rows:repeat(3,2px); place-content:center; gap:2px; --mark-x:0px; --mark-y:0px; }
+    .chat-process-summary-dot i { width:2px; height:2px; border-radius:50%; background:currentColor; transform:translate(var(--mark-x),var(--mark-y)) scale(2); transition:transform var(--motion-morph) var(--ease-out-expo); }
+    .chat-process-summary-dot i:nth-child(3n + 1) { --mark-x:4px; }
+    .chat-process-summary-dot i:nth-child(3n) { --mark-x:-4px; }
+    .chat-process-summary-dot i:nth-child(-n + 3) { --mark-y:4px; }
+    .chat-process-summary-dot i:nth-child(n + 7) { --mark-y:-4px; }
+    .chat-activity.is-command-running .chat-process-summary-dot,
+    .chat-activity.is-thinking-running .chat-process-summary-dot { color:var(--accent); }
+    .chat-activity.is-command-running .chat-process-summary-dot i,
+    .chat-activity.is-thinking-running .chat-process-summary-dot i { transform:none; animation:wand-activity-mark-flow var(--motion-spin) var(--ease-in-out-smooth) infinite; }
+    .chat-process-summary-dot i:nth-child(3n + 2) { animation-delay:calc(var(--motion-spin) / -3); }
+    .chat-process-summary-dot i:nth-child(3n) { animation-delay:calc(var(--motion-spin) * -2 / 3); }
+    /* Android: 呼吸是 1600ms 单程 + Reverse（3.2s 一周）；这里沿用 Web 既有的持续周期 token。 */
+    @keyframes wand-activity-mark-flow { 0%, 100% { opacity:.3; } 50% { opacity:1; } }
     .chat-activity-meta { display:inline-flex; flex-wrap:wrap; align-items:baseline; gap:6px; }
     .chat-activity-command-time { color:var(--text-secondary); font-variant-numeric:tabular-nums; }
     .chat-activity-error { color:color-mix(in srgb,var(--ant-color-error-text-active,var(--danger)) 80%,var(--text-primary)); }
     .chat-activity-menu { display:block; opacity:1; pointer-events:auto; }
     .chat-activity-menu-inner { overflow:visible; }
-    .chat-activity-timeline { height:240px; max-height:50dvh; box-sizing:border-box; overflow:auto; overscroll-behavior:contain; overflow-anchor:none; scrollbar-gutter:stable; padding:4px 0 4px 12px; border-inline-start:1px solid var(--border-subtle); }
+    .chat-activity-timeline { height:240px; max-height:50dvh; box-sizing:border-box; overflow:auto; overscroll-behavior:contain; overflow-anchor:none; scrollbar-gutter:stable; padding:4px 0 4px 24px; }
     .chat-call .ant-thought-chain-node-box { flex:1; min-width:0; }
     .chat-call-detail { min-width:0; overflow-wrap:anywhere; }
-    .chat-call-button.ant-btn { height:auto; min-height:36px; padding:6px 4px; text-align:left; justify-content:flex-start; white-space:normal; gap:8px; }
+    /* 时间线竖线只连接首末状态点：单条活动不画贯穿整卡的长线（对齐 Android activityTimelineRailBounds）。 */
+    .chat-call { position:relative; }
+    .chat-call::before { content:""; position:absolute; inset-block:0; inset-inline-start:6px; width:1px; background:var(--border-subtle); }
+    /* 15px = 状态点槽上边距（12px）+ 点半径（3px），首末行按它收口。 */
+    .chat-call:first-child::before { top:15px; }
+    .chat-call:last-child::before { bottom:calc(100% - 15px); }
+    /* 左侧状态点：颜色承担状态（失败/运行/完成/未返回），右侧不再写状态字样。 */
+    .chat-call-mark { display:block; width:6px; height:6px; margin-inline-start:3px; border-radius:50%; background:var(--text-muted); }
+    .chat-call[data-status="error"] .chat-call-mark { background:var(--danger); }
+    .chat-call[data-status="running"] .chat-call-mark { background:var(--accent); }
+    .chat-call[data-status="complete"] .chat-call-mark { background:var(--success); }
+    .chat-call-button.ant-btn { height:auto; min-height:36px; padding:6px 4px; text-align:left; justify-content:flex-start; white-space:normal; gap:8px; transition:background-color var(--motion-fast) var(--ease-in-out-smooth); }
+    /* 行高亮：运行中与已展开用品牌色 5%，失败行用危险色 5%（对齐 Android activityEntryHighlight）。 */
+    .chat-call[data-status="running"] .chat-call-button, .chat-call[data-expanded="true"] .chat-call-button { background:color-mix(in srgb,var(--accent) 5%,transparent); }
+    .chat-call[data-status="error"] .chat-call-button { background:color-mix(in srgb,var(--danger) 5%,transparent); }
     .chat-call-copy { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
-    .chat-call-label, .chat-call-preview { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .chat-call-label { font-size:var(--font-size-sm); font-weight:var(--font-weight-medium); }
-    .chat-call-preview, .chat-call-meta { font-size:var(--font-size-xs); color:var(--text-secondary); font-weight:400; }
-    .chat-call-meta { display:flex; flex-direction:column; align-items:flex-end; flex-shrink:0; font-variant-numeric:tabular-nums; }
-    .chat-call[data-thinking-entry] .chat-call-meta { flex-direction:row; gap:8px; }
+    .chat-call-line { display:flex; align-items:baseline; gap:6px; min-width:0; line-height:18px; }
+    .chat-call-time, .chat-call-preview, .chat-call-result { font-family:var(--font-mono); font-size:var(--font-size-2xs); color:var(--text-muted); }
+    .chat-call-label, .chat-call-preview, .chat-call-result { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .chat-call-line .chat-call-label { flex:1; min-width:0; }
+    .chat-call-label { font-size:var(--font-size-xs); font-weight:var(--font-weight-medium); color:var(--text-secondary); }
+    .chat-call[data-status="running"] .chat-call-label, .chat-call[data-expanded="true"] .chat-call-label { color:var(--text-primary); }
+    .chat-call-result[data-error] { color:var(--danger); }
+    .chat-call[data-thinking-entry] .chat-call-preview, .chat-call[data-thinking-entry] .chat-call-result { white-space:normal; -webkit-line-clamp:2; -webkit-box-orient:vertical; display:-webkit-box; }
     .chat-disclosure-chevron { display:inline-flex; flex-shrink:0; margin-inline-start:auto; transition:transform var(--motion-normal) var(--ease-out-expo); }
     .chat-disclosure-chevron[data-expanded="true"] { transform:rotate(180deg); }
     .chat-disclosure-body { display:grid; grid-template-rows:0fr; opacity:0; transition:grid-template-rows var(--motion-normal) var(--ease-out-expo),opacity var(--motion-fast) var(--ease-in-out-smooth); }
@@ -483,20 +570,63 @@ export function presentChat(root: HTMLElement): void {
     .inline-tool-image-thumb { max-height:320px; object-fit:contain; object-position:left center; }
     .chat-tool-card, .inline-terminal, .inline-diff, .agent-run { width:100%; min-width:0; }
     .chat-tool-trigger.ant-btn { height:40px; min-width:0; justify-content:flex-start; text-align:left; gap:8px; padding:6px 8px; }
+    /* Android ToolCard 头部：34dp 状态图标槽 + 标题/摘要两行 + 箭头，去掉右侧状态字样。 */
+    .chat-tool-trigger-card.ant-btn { height:auto; min-height:54px; padding:10px 12px; gap:10px; align-items:center; }
+    .chat-tool-icon-slot { position:relative; flex:none; width:34px; height:34px; border-radius:9px; display:grid; place-items:center; background:color-mix(in srgb,var(--text-muted) 11%,transparent); color:var(--text-secondary); transition:background-color var(--motion-fast) var(--ease-in-out-smooth), color var(--motion-fast) var(--ease-in-out-smooth); }
+    .chat-tool-icon-slot[data-status="running"] { background:color-mix(in srgb,var(--accent) 11%,transparent); color:var(--accent); }
+    .chat-tool-icon-slot[data-status="success"] { background:color-mix(in srgb,var(--success) 11%,transparent); color:var(--success); }
+    .chat-tool-icon-slot[data-status="error"] { background:color-mix(in srgb,var(--danger) 11%,transparent); color:var(--danger); }
+    .chat-tool-icon-progress, .chat-tool-icon-glyph { position:absolute; inset:0; display:grid; place-items:center; transition:opacity var(--motion-morph) var(--ease-out-expo), transform var(--motion-morph) var(--ease-out-expo); }
+    .chat-tool-icon-progress { opacity:0; transform:rotate(90deg) scale(.78); }
+    .chat-tool-icon-progress::before { content:""; box-sizing:border-box; width:16px; height:16px; border-radius:50%; border:2px solid color-mix(in srgb,currentColor 22%,transparent); border-top-color:currentColor; }
+    /* 运行态：进度环淡入并转响，工具图标旋转缩小淡出；结果到达后沿同一曲线倒放（同一个实例）。 */
+    .chat-tool-icon-slot[data-status="running"] .chat-tool-icon-progress { opacity:1; transform:none; }
+    .chat-tool-icon-slot[data-status="running"] .chat-tool-icon-progress::before { animation:wand-tool-icon-spin var(--motion-spin) linear infinite; }
+    .chat-tool-icon-slot[data-status="running"] .chat-tool-icon-glyph { opacity:0; transform:rotate(90deg) scale(.78); }
+    @keyframes wand-tool-icon-spin { to { transform:rotate(360deg); } }
+    .chat-tool-head { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; text-align:start; }
     .chat-tool-title { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .chat-tool-summary { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; font-family:var(--font-mono); font-size:var(--font-size-2xs); line-height:1.4; color:var(--text-secondary); }
     .chat-tool-subtitle { flex:1; min-width:0; text-align:left; font-size:var(--font-size-xs); }
-    .chat-tool-state { margin-inline-start:auto; font-size:var(--font-size-xs); color:var(--text-secondary); flex-shrink:0; }
     .chat-tool-error-preview { padding-inline:8px; font-size:var(--font-size-xs); }
     .decision-result-load { width:12em; max-width:100%; }
     .decision-tool-card[data-decision-result-window="true"] .tool-use-result-content { height:160px; overflow:auto; }
     .chat-tool-surface { border-bottom:1px solid var(--border-subtle); }
+    /* Android 工具卡是一张 14dp 圆角的描边卡，不是只有一条分隔线的裸行。 */
+    .chat-tool-surface.chat-tool-card-surface { border:1px solid var(--border-subtle); border-radius:var(--radius-lg); background:var(--bg-surface); overflow:hidden; }
     .ant-btn.agent-run-summary, .ant-btn.agent-run-agent { height:auto; text-align:left; white-space:normal; }
-    .assistant-reply-host { font-size:var(--font-size-sm); max-width:min(100%,72ch); }
-    .assistant-reply-disclosure.ant-btn { height:28px; padding-inline:0; font-size:var(--font-size-xs); color:var(--text-secondary); }
+    /* 头部（时间 + 署名）与正文都占满整行；正文不再压成窄阅读栏。 */
+    .assistant-reply-host { font-size:var(--font-size-sm); width:100%; min-width:0; }
+    /* Android TurnView：时间行在上，署名行（头像 + 名字 + 展开/收起）在下，正文与用量在头部之后。 */
+    .assistant-reply-head { display:flex; flex-direction:column; gap:6px; width:100%; min-width:0; }
+    .chat-message-time { display:inline-flex; align-items:center; gap:8px; padding:2px 8px; font-family:var(--font-mono); font-size:var(--font-size-2xs); font-weight:var(--font-weight-medium); color:var(--text-secondary); font-variant-numeric:tabular-nums; }
+    .chat-message.user .ant-bubble-header { display:flex; justify-content:flex-end; }
+    .assistant-reply-disclosure.ant-btn { height:auto; min-height:44px; padding:5px 8px; border-radius:var(--radius-md); justify-content:flex-start; gap:8px; text-align:left; color:var(--text-primary); }
+    /* 收起态用弱底色交代「这里折起来了」，展开态回到透明标题行（对齐 Android AssistantReplyHeader）。 */
+    .chat-message.assistant-reply-collapsed .assistant-reply-disclosure.ant-btn { background:color-mix(in srgb,var(--bg-secondary) 58%,transparent); }
+    .assistant-author { display:inline-flex; align-items:center; gap:8px; flex:none; min-width:0; }
+    .assistant-author-avatar { display:grid; place-items:center; width:26px; height:26px; flex:none; }
+    .assistant-author-avatar .ant-avatar { border-radius:50%; }
+    .assistant-author-spark { display:grid; place-items:center; width:26px; height:26px; border-radius:50%; background:color-mix(in srgb,var(--accent) 14%,transparent); color:var(--accent); }
+    .assistant-author-name { font-size:var(--font-size-xs); font-weight:var(--font-weight-semibold); color:var(--text-primary); max-width:16em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .assistant-author-preview { flex:1; min-width:0; font-size:var(--font-size-2xs); font-weight:400; color:var(--text-secondary); text-align:start; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .assistant-author-space { flex:1; min-width:0; }
+    .assistant-reply-action { flex:none; font-size:var(--font-size-2xs); font-weight:var(--font-weight-semibold); color:var(--text-primary); }
+    /* Android UsageSummaryRow：回复尾部独立一行的小字用量（等宽、次要色、左对齐）。 */
+    .turn-usage-summary { display:inline-flex; align-items:center; flex-wrap:wrap; gap:6px 10px; padding:2px; font-family:var(--font-mono); font-size:var(--font-size-2xs); color:var(--text-muted); font-variant-numeric:tabular-nums; }
+    .turn-usage-icon { flex:none; width:13px; height:13px; color:var(--text-muted); }
+    /* 自己的发言：品牌色 13% 拼接底 + 品牌色 24% 描边 + 右下小圆角尾巴（对齐 Android UserBubble）。 */
+    .chat-message.user .ant-bubble-content { padding:8px 13px; /* 15px/21px：与 Android UserBubble 同一档正文 */ border-radius:20px 20px 6px 20px; border:1px solid color-mix(in srgb,var(--accent) 24%,transparent); background:color-mix(in srgb,var(--accent) 13%,var(--bg-surface)); font-size:15px; line-height:21px; }
     .chat-resource-selection { font-size:var(--font-size-xs); overflow-wrap:anywhere; }
-    .chat-process-summary.ant-btn, .chat-activity-command-time, .chat-call-preview, .chat-call-meta, .chat-tool-subtitle.ant-typography, .chat-tool-state:not(.chat-activity-error), .chat-resource-selection { color:color-mix(in srgb,var(--text-secondary) 88%,var(--text-primary)); }
-    @media (max-width:640px) { .chat-process-summary.ant-btn, .chat-call-button.ant-btn, .chat-tool-trigger.ant-btn { min-height:44px; } .chat-activity-timeline { padding-inline-start:8px; } }
-    @media (prefers-reduced-motion:reduce) { .chat-disclosure-body, .chat-disclosure-chevron { transition:none; } }
+    .chat-process-summary.ant-btn, .chat-activity-command-time, .chat-call-time, .chat-tool-subtitle.ant-typography, .chat-resource-selection { color:color-mix(in srgb,var(--text-secondary) 88%,var(--text-primary)); }
+    @media (max-width:640px) { .chat-process-summary.ant-btn, .chat-call-button.ant-btn, .chat-tool-trigger.ant-btn { min-height:44px; } .chat-activity-timeline { padding-inline-start:20px; } }
+    /* reduce-motion：不流动、不旋转，只保留状态色，和 Android WandStatusIconSlot / ToolActivityMark 一致。 */
+    @media (prefers-reduced-motion:reduce) { .chat-disclosure-body, .chat-disclosure-chevron { transition:none; } .chat-process-summary-dot i, .chat-tool-icon-progress, .chat-tool-icon-glyph, .chat-call-button.ant-btn { transition:none; }
+      .chat-activity.is-command-running .chat-process-summary-dot i,
+      .chat-activity.is-thinking-running .chat-process-summary-dot i { animation:none; transform:translate(var(--mark-x),var(--mark-y)) scale(2); }
+      .chat-tool-icon-slot[data-status="running"] .chat-tool-icon-progress { opacity:0; }
+      .chat-tool-icon-slot[data-status="running"] .chat-tool-icon-progress::before { animation:none; }
+      .chat-tool-icon-slot[data-status="running"] .chat-tool-icon-glyph { opacity:1; transform:none; } }
     .agent-run-detail, .agent-run-agent-body { display:grid; gap:12px; }
     .agent-run-body-inner { display:grid; gap:12px; }
     .ask-user-options { display:grid; gap:8px; }

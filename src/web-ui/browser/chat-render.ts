@@ -2375,12 +2375,33 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
           var previewText = getMessagePreviewText(allMessages[idx]) || "助手回复";
           el.classList.toggle("assistant-reply-collapsed", !expanded);
           el.classList.toggle("assistant-reply-expanded", expanded);
+          // 回复头部自带时间行（安卓把消息时间放在正文之上），不再藏在气泡尾部。
+          var replyMsg = allMessages[idx];
+          var replyIso = (replyMsg && (replyMsg.completedAt || replyMsg.createdAt)) || "";
+          // 会话自带员工快照（/api/sessions 已投影）就是这条会话的署名来源，取不到才回落
+          // 团队 relay 的 msg.author 或品牌标记。
+          var replySession = (state.sessions || []).find(function(candidate) {
+            return candidate && candidate.id === state.selectedId;
+          });
+          var replyEmployee = replySession && replySession.employeeId ? {
+            id: replySession.employeeId,
+            name: replySession.employeeName || "",
+            avatar: replySession.employeeAvatar || "",
+            provider: replySession.provider || "",
+          } : null;
+          var replyMeta = {
+            time: formatChatClock(replyIso),
+            dateTime: replyIso,
+            duration: chatReplyDuration(replyMsg),
+            author: (replyMsg && replyMsg.author && replyMsg.author.name) || "",
+            employee: replyEmployee,
+          };
           (function(owner, expandKey) {
             presentAssistantReply(owner, expandKey, previewText, expanded, function(nextExpanded) {
               owner.classList.toggle("assistant-reply-collapsed", !nextExpanded);
               owner.classList.toggle("assistant-reply-expanded", nextExpanded);
               setPersistedExpandState(expandKey, nextExpanded);
-            });
+            }, replyMeta);
           })(el, key);
         }
       }
@@ -3834,14 +3855,14 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
         }
         var fullJson = block.input ? JSON.stringify(block.input, null, 2) : "{}";
         var statusClass = "loading";
-        var headerIcon = '<span class="tool-use-spinner"></span>';
+        // 图标槽始终是工具自己的图标：运行态由 loading 状态同一实例里交叉变形，不换节点。
+        var headerIcon = getToolIcon(toolName);
         var resultHtml = "";
 
         if (toolResult) {
           var isError = toolResult.is_error;
           var content = extractToolResultText(toolResult.content);
           statusClass = isError ? "error" : "success";
-          headerIcon = getToolIcon(toolName);
           var hasContent = content && content.trim().length > 0;
           if (hasContent) {
             resultHtml = '<pre class="tool-use-result-content">' + escapeHtml(content) + '</pre>';
@@ -3858,8 +3879,6 @@ function captureChatRenderAnchor(container: any, changedIndices: number[]): { in
               '</div>';
             }).join("") + resultHtml;
           }
-        } else {
-          headerIcon = getToolIcon(toolName);
         }
 
         var expandKey = buildExpandKey("tool-card", [messageKey, toolId]);
