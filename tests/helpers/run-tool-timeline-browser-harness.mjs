@@ -288,8 +288,9 @@ try {
   assert.doesNotMatch(await e('document.querySelector("button.chat-process-summary").textContent'), /npm run check|退出码 1/);
   assert.equal(await e('document.querySelector(".chat-activity > div > .chat-disclosure-body").getBoundingClientRect().height'), 0);
   await click('button.chat-process-summary'); await e('h.settle()');
+  // 输入与结果各占一行（对齐安卓的摘录行）：输入看 .chat-call-preview，结果看 .chat-call-result。
   assert.match(await e('document.querySelector(".chat-call-preview").textContent'), /npm run check/);
-  assert.match(await e('document.querySelector(".chat-call-preview").textContent'), /TypeError/);
+  assert.match(await e('document.querySelector(".chat-call-result").textContent'), /TypeError/);
   assert.equal(report.requests.length, previewRequests, 'summary and timeline do not fetch bodies');
   assert.equal(await e('document.querySelector(".chat-call").dataset.status'), 'error');
   report.cases.push({mode:'compact-preview',collapsedOverviewOnly:true,inputVisible:true,resultVisible:true,noDetailFetch:true});
