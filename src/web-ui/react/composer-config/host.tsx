@@ -11,7 +11,7 @@ function ariaLabelFor(scope: ComposerConfigScope): string {
   return "会话设置";
 }
 
-function selectHost(scope: ComposerConfigScope, control: "mode" | "model" | "thinking") {
+function selectHost(scope: ComposerConfigScope, control: "mode" | "model" | "thinking" | "tool") {
   return (
     <span
       className="composer-config-select-host"
@@ -37,6 +37,12 @@ export function ComposerConfigControl({ mount }: { mount: ComposerConfigMount })
       aria-label={ariaLabelFor(scope)}
       title={mount.groupTitle}
     >
+      {showRuntime && mount.toolVisible && (
+        <span data-mode-control-pill="tool" style={{ display: "inline-flex", width: 136, flexShrink: 0 }}
+          aria-live="polite" aria-busy={mount.toolDisabled || undefined} title={mount.toolStatus}>
+          {selectHost(scope, "tool")}
+        </span>
+      )}
       {showMode && (
         <span
           data-mode-control-pill="mode"

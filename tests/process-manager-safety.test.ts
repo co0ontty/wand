@@ -648,6 +648,82 @@ test("foreground sampling is what qualifies a non-Claude PTY turn", async (t) =>
   assert.deepEqual(wireStatuses, [true, false]);
 });
 
+test("blank terminal foreground commands are active even without output, but are not provider turns", async (t) => {
+  let foreground: boolean | null | undefined = false;
+  const { manager, root, spawned } = createHarness(t, [], {
+    ptyTurnIdleMs: 20,
+    ptyForegroundSampleMs: 60_000,
+    samplePtyForegrounds: async (pids) => foreground === null ? null
+      : new Map(foreground === undefined ? [] : pids.map((pid) => [pid, foreground as boolean])),
+  });
+  t.after(() => manager.dispose());
+  const sample = () => (manager as unknown as { samplePtyForegrounds(): Promise<void> }).samplePtyForegrounds();
+  const session = await manager.start("/bin/zsh", root, "default", undefined, { interactiveShell: true });
+  const statuses: Record<string, unknown>[] = [];
+  manager.on("process", (event: ProcessEvent) => {
+    if (event.type === "status" && event.sessionId === session.id) statuses.push(event.data as Record<string, unknown>);
+  });
+  await sample();
+  spawned[0].emitData("shell prompt");
+  manager.sendInput(session.id, "\r", "terminal", "enter_text");
+  assert.equal(manager.get(session.id)?.ptyCommandRunning, false, "submit and prompt repaint do not prove a foreground command");
+
+  foreground = true;
+  await sample();
+  await delay(50);
+  const running = manager.get(session.id)!;
+  assert.equal(running.ptyCommandRunning, true, "silent foreground work must not expire on the provider quiet window");
+  assert.equal(running.ptyBusy, false);
+  assert.equal(running.provider, undefined);
+  assert.equal(running.providerCliActive, false);
+  assert.equal(running.ptyTurnStartedAt, null);
+  assert.equal(toSessionListItemDTO(running).ptyCommandRunning, true);
+  await sample();
+  foreground = null;
+  await sample();
+  foreground = undefined;
+  await sample();
+  assert.equal(manager.get(session.id)?.ptyCommandRunning, true, "failed/missing samples preserve the last known fact");
+  foreground = false;
+  await sample();
+  assert.equal(manager.get(session.id)?.ptyCommandRunning, false);
+  assert.deepEqual(statuses, [{ ptyCommandRunning: true }, { ptyCommandRunning: false }], "only changes broadcast, with no ptyBusy or completion events");
+
+  foreground = true;
+  await sample();
+  spawned[0].emitExit(0);
+  assert.equal(manager.get(session.id)?.ptyCommandRunning, false, "an exited PTY cannot retain a foreground flag");
+});
+
+test("a late foreground probe cannot reactivate a stopped or replaced terminal", async (t) => {
+  let finish: ((samples: Map<number, boolean>) => void) | undefined;
+  let pid = 0;
+  const { manager, root } = createHarness(t, [], {
+    ptyForegroundSampleMs: 60_000,
+    samplePtyForegrounds: (pids) => new Promise((resolve) => { pid = pids[0]; finish = resolve; }),
+  });
+  t.after(() => manager.dispose());
+  const sample = () => (manager as unknown as { samplePtyForegrounds(): Promise<void> }).samplePtyForegrounds();
+  let session = await manager.start("/bin/zsh", root, "default", undefined, { interactiveShell: true });
+  const statuses: unknown[] = [];
+  manager.on("process", (event: ProcessEvent) => {
+    if (event.type === "status") statuses.push(event.data);
+  });
+  const stoppedProbe = sample();
+  manager.stop(session.id);
+  finish!(new Map([[pid, true]]));
+  await stoppedProbe;
+  assert.equal(manager.get(session.id)?.ptyCommandRunning, false);
+
+  session = await manager.start("/bin/zsh", root, "default", undefined, { interactiveShell: true, reuseId: session.id });
+  const replacedProbe = sample();
+  session = await manager.start("/bin/zsh", root, "default", undefined, { interactiveShell: true, reuseId: session.id });
+  finish!(new Map([[pid, true]]));
+  await replacedProbe;
+  assert.equal(manager.get(session.id)?.ptyCommandRunning, false);
+  assert.equal(statuses.some((data) => (data as { ptyCommandRunning?: boolean }).ptyCommandRunning === true), false);
+});
+
 test("stopping a non-Claude PTY turn clears the quiet-window timer", async (t) => {
   const { manager, root } = createHarness(t, [], { ptyTurnIdleMs: 60 });
   const session = await manager.start("pi", root, "managed", undefined, { provider: "pi" });

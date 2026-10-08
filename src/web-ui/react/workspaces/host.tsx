@@ -1,6 +1,6 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { newSessionController } from "../new-session/controller";
-import { workspacesController, workspacesStore } from "./controller";
+import { workspacesStore } from "./controller";
 import type { WorkspacesRepository } from "./types";
 import { httpWorkspacesRepository } from "./repository";
 
@@ -21,8 +21,8 @@ export function WorkspacesHost({ repository: _repository = httpWorkspacesReposit
 
   useEffect(() => {
     if (!controller.open) return;
-    newSessionController.open({ initialCwd: controller.initialCwd });
-    workspacesController.close();
+    if (!newSessionController.isOpen()) newSessionController.open({ initialCwd: controller.initialCwd });
+    workspacesStore.consumeOpen();
   }, [controller.initialCwd, controller.open]);
 
   return null;

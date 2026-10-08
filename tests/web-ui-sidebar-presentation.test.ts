@@ -139,7 +139,7 @@ test("task arrow, rail and peek share the projection through Ant layout and cont
   assert.match(panel, /onClick=\{\(\) => setDisplayMode\("full"\)\}/);
   assert.match(panel, /nativeEvent.isComposing/);
   assert.match(shell, /<Layout.Sider/);
-  assert.match(shell, /width=\{296\} collapsedWidth=\{72\}/);
+  assert.match(shell, /width="min\(320px, calc\(100vw - 24px\)\)" collapsedWidth=\{72\}/);
   const peek = source("src/web-ui/react/shell/sidebar-peek.tsx");
   assert.match(peek, /<Card size="small"/);
   assert.match(peek, /width: "min\(320px, calc\(100vw - 88px\)\)"/);
@@ -464,6 +464,7 @@ test("sidebar review regression: real browser cascade and peek unmount focus", {
   } finally {
     browser.kill("SIGTERM");
     await exited;
-    rmSync(profile, { recursive: true, force: true });
+    // Chrome helpers can still flush profile files after the parent exits.
+    rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });

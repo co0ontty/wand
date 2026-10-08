@@ -124,7 +124,7 @@ test("免费模型的分组元数据传到任务及员工模型选择器", () =>
 
 test("智能分配按服务端给的 label 展示，且能原样进入请求体", () => {
   const catalog = normalizeWandModelCatalog({ piModels: [
-    { id: "default", label: "跟随 one 的 Agent 默认" },
+    { id: "default", label: "跟随 Pi 默认" },
     { id: AUTO_ASSIGN_SELECTOR, label: AUTO_ASSIGN_LABEL },
     { id: "openai-codex/gpt-6.1-sol", label: "GPT-6.1-Sol" },
   ], defaultModels: { pi: AUTO_ASSIGN_SELECTOR } });

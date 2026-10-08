@@ -7,7 +7,7 @@ import type { IncomingMessage } from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
 import type { CardExpandDefaults, ConversationTurn, SessionSnapshot, ProcessEvent } from "./types.js";
 import { readSessionCookie, type AuthService } from "./auth.js";
-import { blockWindowMessagesForTransport, compactToolMessagesForTransport, windowMessagesForTransport } from "./message-truncator.js";
+import { blockWindowMessagesForTransport, compactToolMessagesForTransport, messageWindowByteBudget, windowMessagesForTransport } from "./message-truncator.js";
 import { boundSessionEventData, toSessionDetailDTO } from "./session-transport.js";
 import { enrichStructuredMessages } from "./structured-client-protocol.js";
 import type { PtyTerminalSnapshot } from "./pty-terminal-state.js";
@@ -94,6 +94,9 @@ interface WsClient {
    * undefined 表示走原有 turn 级窗口（Web/Android），行为与改动前完全一致。
    */
   blockBudget?: number;
+  /** Opted-in clients narrow the initial/resync page and fetch earlier pages. */
+  byteBudget?: number;
+  omitStructuredOutput?: boolean;
   /** Explicit capability: Web/Android can fetch full tool input/result on demand. */
   compactTools: boolean;
   toolNamesBySession: Map<string, Map<string, string>>;
@@ -245,6 +248,10 @@ export class WsBroadcastManager {
             if (Number.isSafeInteger(msg.blockBudget) && msg.blockBudget > 0) {
               client.blockBudget = Math.min(msg.blockBudget, MAX_BLOCK_BUDGET);
             }
+            if (Number.isSafeInteger(msg.byteBudget) && msg.byteBudget > 0) {
+              client.byteBudget = messageWindowByteBudget(msg.byteBudget);
+            }
+            client.omitStructuredOutput = client.omitStructuredOutput || msg.omitStructuredOutput === true;
             // 默认仍是历史的“切换当前会话”；分屏池显式用 mode:add 叠加订阅。
             if (msg.mode !== "add") {
               client.ptySubscriptions.clear();
@@ -478,7 +485,7 @@ export class WsBroadcastManager {
       ...(resync ? { resync: true } : {}),
       data: {
         ...toSessionDetailDTO(snapshot, {
-          output: snapshot.output,
+          output: client.omitStructuredOutput && snapshot.sessionKind === "structured" ? "" : snapshot.output,
           outputLimit: terminalState ? 16_000 : undefined,
           ...windowed,
         }),
@@ -505,7 +512,8 @@ export class WsBroadcastManager {
       messages = compactToolMessagesForTransport(messages);
     }
     if (client.blockBudget && client.blockBudget > 0) {
-      const w = blockWindowMessagesForTransport(messages, this.getCardDefaults(), client.blockBudget);
+      const w = blockWindowMessagesForTransport(messages, this.getCardDefaults(), client.blockBudget, client.byteBudget,
+        client.byteBudget !== undefined);
       return {
         messages: w.messages,
         messageOffset: w.messageOffset,
@@ -567,7 +575,9 @@ export class WsBroadcastManager {
       if (client.compactTools || (client.blockBudget && client.blockBudget > 0)) {
         return {
           ...boundedEvent,
-          data: { ...data, ...this.windowForClient(client, event.sessionId, rawMessages) },
+          data: { ...data, ...this.windowForClient(client, event.sessionId, rawMessages),
+            ...(client.omitStructuredOutput && (data?.sessionKind === "structured" || data?.structuredState)
+              ? { output: "" } : {}) },
         } as ProcessEvent;
       }
       if (!turnWindowedEvent) {

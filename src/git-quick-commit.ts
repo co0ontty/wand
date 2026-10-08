@@ -835,7 +835,7 @@ async function callCliCandidates<T>(
       { preferDefault: !candidate.model || candidate.model === "default" })
       .map((model) => ({ ...candidate, model: model || undefined })));
   if (opts.employeeChannelOnly && !opts.cliCandidates?.length) {
-    throw new QuickCommitError("系统员工没有可用的 CLI 候选，已跳过 SDK 候选。", "AI_FALLBACK_FAILED");
+    throw new QuickCommitError("系统员工没有可用的 CLI 候选，已跳过 Wand Agent。", "AI_FALLBACK_FAILED");
   }
   const deadline = Date.now() + Math.max(1, opts.budgetMs ?? CLI_CHAIN_BUDGET_MS);
   if (chain.length === 1) {

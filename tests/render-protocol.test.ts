@@ -701,6 +701,156 @@ test("confirmed PTY writes expose a Render rejection to the caller", async () =>
   );
 });
 
+// Deterministic socket-read boundaries, including multiple frames/partial frames.
+// This exercises the production decoder without depending on OS packet grouping.
+async function consumeRead(client: RenderDaemonClient, frames: unknown[]): Promise<void> {
+  (client as unknown as { consume(chunk: Buffer): void }).consume(Buffer.concat(frames.map(encodeRenderFrame)));
+  client.flush();
+}
+
+function dataFrame(sessionId: string, seq: number, data: string) {
+  return { event: "data", sessionId, incarnationId: `${sessionId}-inc`, seq, data };
+}
+
+test("a Render socket read batches live projection but retains every replay sequence", async () => {
+  await withFakeRender(
+    fake => fake.setSessions([sessionState("live")]),
+    async (_fake, client) => {
+      await client.connect();
+      const process = client.attach("live")!.process!;
+      const received: TerminalDataEvent[] = [];
+      process.onData(event => received.push(event));
+      const parts = Array.from({ length: 1000 }, (_, index) => ({ seq: index + 1, data: `${index}虎\u001b[0m` }));
+      await consumeRead(client, parts.map(part => dataFrame("live", part.seq, part.data)));
+      // A forced read boundary publishes synchronously without changing wire cursors.
+      assert.deepEqual(received, [{ data: parts.map(part => part.data).join(""), seq: 1000 }]);
+      assert.equal(client.attach("live")!.state.seq, 1000);
+      assert.deepEqual(client.attach("live", 996)!.replay, parts.slice(996));
+      assert.equal(client.attach("live")!.state.output, received[0].data);
+    },
+  );
+});
+
+test("Render output flushes before exit/reconcile and never crosses sessions", async () => {
+  await withFakeRender(
+    fake => fake.setSessions([sessionState("a"), sessionState("b")]),
+    async (_fake, client) => {
+      await client.connect();
+      const order: string[] = [];
+      const a = client.attach("a")!.process!;
+      const b = client.attach("b")!.process!;
+      a.onData(event => order.push(`a:${event.data}`));
+      b.onData(event => order.push(`b:${event.data}`));
+      a.onExit(() => order.push("exit:a"));
+      b.onExit(() => order.push("exit:b"));
+      await consumeRead(client, [dataFrame("a", 1, "first"), dataFrame("a", 2, "尾"),
+        { event: "exit", sessionId: "a", incarnationId: "a-inc", exitCode: 0, signal: null },
+        dataFrame("b", 1, "second"), { event: "reconcile", sessionIds: [] }]);
+      assert.deepEqual(order, ["a:first尾", "exit:a", "b:second", "exit:b"]);
+    },
+  );
+});
+
+test("partial frames cannot delay complete echo bytes or replay a batch twice", async () => {
+  await withFakeRender(
+    fake => fake.setSessions([sessionState("partial")]),
+    async (_fake, client) => {
+      await client.connect();
+      const received: TerminalDataEvent[] = [];
+      client.attach("partial")!.process!.onData(event => received.push(event));
+      const encoded = encodeRenderFrame(dataFrame("partial", 2, "虎\u001b[31m"));
+      const consumer = client as unknown as { consume(chunk: Buffer): void };
+      consumer.consume(Buffer.concat([encodeRenderFrame(dataFrame("partial", 1, "echo")), encoded.subarray(0, 10)]));
+      await waitFor(() => received.length === 1, "complete echo waited for a partial frame");
+      assert.deepEqual(received, [{ data: "echo", seq: 1 }]);
+      consumer.consume(encoded.subarray(10));
+      await waitFor(() => received.length === 2, "completed partial frame was not flushed");
+      assert.deepEqual(received, [{ data: "echo", seq: 1 }, { data: "虎\u001b[31m", seq: 2 }]);
+      await consumeRead(client, [dataFrame("partial", 2, "duplicate"), dataFrame("partial", 3, "next")]);
+      assert.equal(received.map(event => event.data).join(""), "echo虎\u001b[31mnext");
+    },
+  );
+});
+
+test("bounded Render batches deliver all bytes and keep per-frame recovery cursors", async () => {
+  await withFakeRender(
+    fake => fake.setSessions([sessionState("bounded")]),
+    async (_fake, client) => {
+      await client.connect();
+      const received: TerminalDataEvent[] = [];
+      client.attach("bounded")!.process!.onData(event => received.push(event));
+      const parts = Array.from({ length: 4000 }, (_, index) => ({ seq: index + 1, data: `${index}:` + "x".repeat(80) + "\n" }));
+      await consumeRead(client, parts.map(part => dataFrame("bounded", part.seq, part.data)));
+      assert.equal(received.map(event => event.data).join(""), parts.map(part => part.data).join(""));
+      assert.ok(received.length <= 8, "projection work is bounded by byte batches, not 4000 wire events");
+      assert.equal(received.at(-1)!.seq, 4000);
+      const tail = client.attach("bounded", 3998)!.replay;
+      assert.deepEqual(tail, parts.slice(3998));
+      assert.ok(client.attach("bounded")!.state.output.length <= 200_000);
+    },
+  );
+});
+
+test("a wire sequence gap flushes accepted bytes before authoritative resync", async () => {
+  await withFakeRender(
+    fake => fake.setSessions([sessionState("live-gap")]),
+    async (fake, client) => {
+      await client.connect();
+      const order: string[] = [];
+      const process = client.attach("live-gap")!.process!;
+      process.onData(event => order.push(`data:${event.data}`));
+      process.onResync!(state => order.push(`resync:${state.output}`));
+      fake.setSessions([sessionState("live-gap", 80, 24, 4, [{ data: "full screen", seq: 4 }])]);
+      await consumeRead(client, [dataFrame("live-gap", 1, "accepted"), dataFrame("live-gap", 4, "not contiguous")]);
+      await waitFor(() => order.length === 2, "gap resync did not settle");
+      assert.deepEqual(order, ["data:accepted", "resync:full screen"]);
+      assert.equal(client.attach("live-gap")!.state.seq, 4);
+    },
+  );
+});
+
+test("separate IPC reads share a fixed-deadline batch and teardown flushes accepted bytes", async () => {
+  await withFakeRender(
+    fake => fake.setSessions([sessionState("read-turn")]),
+    async (_fake, client) => {
+      await client.connect();
+      const received: TerminalDataEvent[] = [];
+      client.attach("read-turn")!.process!.onData(event => received.push(event));
+      const consumer = client as unknown as { consume(chunk: Buffer): void };
+      consumer.consume(encodeRenderFrame(dataFrame("read-turn", 1, "one")));
+      consumer.consume(encodeRenderFrame(dataFrame("read-turn", 2, "two")));
+      assert.deepEqual(received, [], "read callbacks only validate/enqueue until the fixed deadline");
+      await waitFor(() => received.length === 1, "separate reads did not coalesce");
+      assert.deepEqual(received, [{ data: "onetwo", seq: 2 }]);
+      consumer.consume(encodeRenderFrame(dataFrame("read-turn", 3, "final")));
+      client.disconnect();
+      assert.deepEqual(received, [{ data: "onetwo", seq: 2 }, { data: "final", seq: 3 }]);
+      await new Promise<void>(resolve => setImmediate(resolve));
+      assert.equal(received.length, 2, "cancelled flush does not replay after disposal");
+    },
+  );
+});
+
+test("live output keeps the first batch deadline rather than waiting for silence", async (t) => {
+  await withFakeRender(
+    fake => fake.setSessions([sessionState("deadline")]),
+    async (_fake, client) => {
+      await client.connect();
+      const received: TerminalDataEvent[] = [];
+      client.attach("deadline")!.process!.onData(event => received.push(event));
+      const consumer = client as unknown as { consume(chunk: Buffer): void };
+      t.mock.timers.enable({ apis: ["setTimeout"] });
+      consumer.consume(encodeRenderFrame(dataFrame("deadline", 1, "first")));
+      t.mock.timers.tick(3);
+      consumer.consume(encodeRenderFrame(dataFrame("deadline", 2, "second")));
+      assert.deepEqual(received, []);
+      t.mock.timers.tick(1);
+      assert.deepEqual(received, [{ data: "firstsecond", seq: 2 }], "more output cannot push the first deadline back");
+      t.mock.timers.reset();
+    },
+  );
+});
+
 test("disconnect only unbinds: no kill/shutdown is sent to Render", async () => {
   await withFakeRender(
     () => {},

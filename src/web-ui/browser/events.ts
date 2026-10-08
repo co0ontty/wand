@@ -11,7 +11,7 @@ import { HttpResponseError, parseJsonResponse } from "../react/http-adapter";
 import { imageViewerController } from "../react/image-viewer/controller";
 import { getErrorMessage } from "../../error-utils.js";
 import { escapeHtml } from "./utils";
-import { formatInlineResult, scheduleChatRender } from "./chat-render";
+import { formatInlineResult, scheduleChatRender, setInlineToolImageState } from "./chat-render";
 import { applyExpandedState, persistElementExpandState, persistSelectedId, scrollChatToBottom, setPersistedAgentSelection } from "./chat-scroll";
 import { adjustTerminalScale, openFilePreview } from "./file-browser";
 import { attachQueueBarDelegates, bindInputTouchScroll, cancelVoiceRecording, getComposerSendPhase, handleInputBoxBlur, handleInputBoxFocus, handleVoiceMove, refreshInputBoxState, sendOrStart, setupMobileKeyboardHandlers, startVoiceRecording, stopSession, stopVoiceRecording, updateQueueBar } from "./input";
@@ -185,6 +185,10 @@ import { setupVisualViewportHandlers } from "./viewport";
       // 没有服务端路径的内联图（工具返回的截图 / base64 图）只能按 src 放大。
       (window as any).__openImageViewer = function(img: any, label?: any) {
         if (img) imageViewerController.open(String(img), typeof label === "string" ? label : "");
+      };
+      // 工具结果内联图片的加载终态：ready 收掉占位行，error 整块隐藏（对齐安卓不渲染失败图）。
+      (window as any).__inlineToolImageState = function(img: any, state: any) {
+        if (img) setInlineToolImageState(img, state === "error" ? "error" : "ready");
       };
       // Toggle function for inline tool rows (Read, Glob, Grep, etc.)
       (window as any).__inlineToolToggle = function(el: any) {

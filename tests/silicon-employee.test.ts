@@ -521,7 +521,7 @@ test("员工草稿：重名/非法候选在统一校验入口被结构化拒绝"
       { name: "甲", duty: "职责", prompt: "你是……。", agents: [{ provider: "claude", engine: "sdk" }] },
       { allowedProviders: ["claude", "pi"] },
     ),
-    /SDK/,
+    /Wand Agent/,
   );
   // 重复候选拒绝。
   assert.throws(

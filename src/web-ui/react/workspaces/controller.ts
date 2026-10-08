@@ -87,6 +87,10 @@ export const workspacesStore = {
   getRuntime(): WorkspacesRuntimeAdapter | null {
     return runtime;
   },
+  /** The legacy request has been handed to NewSessionHost; do not dismiss the live form. */
+  consumeOpen(): void {
+    if (snapshot.open) publish({ open: false });
+  },
 };
 
 export function configureWorkspacesRuntime(adapter: WorkspacesRuntimeAdapter): () => void {

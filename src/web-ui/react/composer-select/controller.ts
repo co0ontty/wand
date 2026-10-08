@@ -1,6 +1,6 @@
 import type { WandSelectOption } from "../ui";
 
-export type ComposerSelectControl = "mode" | "model" | "thinking";
+export type ComposerSelectControl = "mode" | "model" | "thinking" | "tool";
 export type ComposerSelectScope = "mode" | "runtime" | "all" | "dropdown";
 
 export interface ComposerSelectMount {

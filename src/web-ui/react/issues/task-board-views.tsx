@@ -17,6 +17,7 @@ import {
   ISSUE_PRIORITIES,
   ISSUE_STATUS_FILTERS,
   issueAgentEffortLabel,
+  issueAgentLabel,
   issueAgentModeLabel,
   issueAgentProviderLabel,
   issueAgentProviderModelLine,
@@ -865,10 +866,10 @@ export function TaskBoardAgentSessionList({
     </div>;
   }
   return <div className="task-board-agent-list" aria-label="已指派的 Agent">
-    {groups.map((group) => <section key={group.provider} className="task-board-agent-group">
+    {groups.map((group) => <section key={`${group.provider}:${group.engine ?? "cli"}`} className="task-board-agent-group">
       <header className="task-board-agent-group-head">
         <ProviderLogo provider={group.agent?.provider ?? group.provider} className="task-board-agent-logo"/>
-        <strong>{issueAgentProviderLabel(group.agent?.provider ?? group.provider)}</strong>
+        <strong>{issueAgentLabel(group.agent?.provider ?? group.provider, group.engine ?? group.agent?.engine)}</strong>
         {group.agent ? <span>{[
           wandModelDisplayName(catalog ?? null, group.agent.provider, group.agent.model),
           issueAgentEffortLabel(group.agent.thinkingEffort),

@@ -39,6 +39,8 @@ interface TestClient {
   outputSeqBySession: Map<string, number>;
   pendingResyncSessions: Set<string>;
   blockBudget?: number;
+  byteBudget?: number;
+  omitStructuredOutput?: boolean;
   compactTools?: boolean;
   toolNamesBySession?: Map<string, Map<string, string>>;
   lastSeenAt: number;
@@ -142,6 +144,35 @@ test("compact subscribers omit tool payloads in init and incremental frames whil
   const fullFrame = JSON.parse(full.socket.sent[0]);
   assert.deepEqual(fullFrame.data.messages[0].content[0].input, {});
   assert.equal(fullFrame.data.messages[1].content[0].content, "");
+});
+
+test("small-page subscribers get matching bounded init/resync and full snapshots without duplicate structured output", () => {
+  const web = createHarness();
+  web.client.blockBudget = 12;
+  web.client.byteBudget = 96 * 1024;
+  web.client.omitStructuredOutput = true;
+  const legacy = createHarness();
+  const messages: SessionSnapshot["messages"] = Array.from({ length: 100 }, (_, i) => ({
+    role: "assistant", content: [{ type: "text", text: `message-${i}` }],
+  }));
+  const snapshot = { id: "session-a", sessionKind: "structured", cwd: "/tmp",
+    output: "duplicate transcript", messages } as SessionSnapshot;
+  web.manager.sendInit(web.client, "session-a", snapshot, false);
+  legacy.manager.sendInit(legacy.client, "session-a", snapshot, false);
+  const init = JSON.parse(web.socket.sent[0]).data;
+  assert.equal(init.messages.length, 12);
+  assert.equal(init.messageOffset, 88);
+  assert.equal(init.messageTotal, 100);
+  assert.equal(init.output, "");
+  assert.equal(JSON.parse(legacy.socket.sent[0]).data.output, snapshot.output);
+  web.manager.sendInit(web.client, "session-a", snapshot, true);
+  assert.equal(JSON.parse(web.socket.sent[1]).data.messageOffset, init.messageOffset);
+  web.manager.broadcast({ type: "output", sessionId: "session-a", data: { ...snapshot, incremental: false } });
+  const frame = JSON.parse(web.socket.sent[2]).data;
+  assert.equal(frame.messageOffset, 88);
+  assert.equal(frame.output, "");
+  web.manager.sendInit(web.client, "terminal-a", { ...snapshot, sessionKind: "pty", messages: [] }, false);
+  assert.equal(JSON.parse(web.socket.sent[3]).data.output, snapshot.output, "PTY transcripts remain authoritative");
 });
 
 test("R07: continuous small chunks retain the first output deadline and preserve raw byte order", (t) => {

@@ -17,7 +17,8 @@ import { applyCurrentView, buildAttachmentPrefix, canSendComposer, clearDraftVal
 import { confirmDelete } from "./sidebar";
 import { clearRunningStatusBar, paintRunningStatusBar } from "./running-status-adapter.js";
 import { initTerminal, maybeScrollTerminalToBottom, scheduleSoftResyncTerminal, waitForProviderPaint, waitForTerminalSettled } from "./terminal";
-import { ensureTerminalFit, scheduleClosedViewportBaselineWindow, syncAppViewportHeight, updateJoystickPanelUI, updateJoystickVisibility } from "./viewport";
+import { ensureTerminalFit, scheduleClosedViewportBaselineWindow, syncAppViewportHeight } from "./viewport";
+import { paintTerminalPanel } from "./terminal-panel-adapter";
 import "./websocket";
 import { buildPtyAttachmentChunks, isImageAttachmentSource } from "./pty-paste";
 import { notifyLegacyUiChange } from "./ui-store-bridge";
@@ -762,12 +763,13 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           var passthroughBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
           var passthroughText = passthroughBox ? passthroughBox.value : "";
           var passthroughSessionId = state.selectedId;
+          var passthroughView = state.currentView;
           if (passthroughBox && passthroughText) {
             passthroughBox.value = "";
             setDraftValue("", true);
             autoResizeInput(passthroughBox);
-            return queueDirectInput(passthroughText, "interactive_text")
-              .then(function() { return queueDirectInput("\r", "enter_text"); })
+            return queueDirectInput(passthroughText, "interactive_text", passthroughView, passthroughSessionId)
+              .then(function() { return queueDirectInput("\r", "enter_text", passthroughView, passthroughSessionId); })
               .catch(function(err) {
                 // 直通模式自己就是提交链路，不走下面那条带原位状态行的链路，
                 // 所以失败必须在这里说清楚：文本刚从框里清空，不响就是整条丢失。
@@ -777,7 +779,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
                 reportPassthroughInputFailure(passthroughSessionId, passthroughText, err);
               });
           }
-          return queueDirectInput("\r", "enter_text").catch(function(err) {
+          return queueDirectInput("\r", "enter_text", passthroughView, passthroughSessionId).catch(function(err) {
             // 空回车没送到终端同样要响一声：用户会以为是自己按键丢了。
             // 这条没有草稿可回填，只播报。
             reportPassthroughInputFailure(passthroughSessionId, "", err);
@@ -2177,25 +2179,13 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         "_": 31
       };
 
-      // ── 终端悬浮摇杆遥控器常量与布局表 ──
-      export var JOYSTICK_MOVE_THRESHOLD = 10;     // px：手指/指针移出这么多就进入拖动（无需先长按）
-      export var JOYSTICK_TAP_THRESHOLD = 8;       // px：抬手时位移不超过这么多算点击
-      export var JOYSTICK_BALL_SIZE = 54;          // 球球直径（与 CSS 一致）
-      export var JOYSTICK_EDGE_MARGIN = 8;         // 球球钳进视口的留白
-      export var JOYSTICK_ACTION_KEYS = [
-        { key: "enter", label: "Enter" },
-        { key: "ctrl_c", label: "Ctrl+C" },
-        { key: "escape", label: "Esc" },
-        { key: "shift_tab", label: "Shift+Tab" }
-      ];
-
       function shouldIgnoreInteractiveTarget(target) {
         if (!target) return false;
         // React/Radix overlays own their keyboard contract. In terminal-interactive
         // mode the document capture listener otherwise consumes Escape before the
         // dialog can dismiss itself (and can forward radio arrow keys to the PTY).
         return !!(target.closest && target.closest(
-          '[role="dialog"], [role="alertdialog"], .wand-ui-select-trigger, .wand-ui-select-content, [role="listbox"], [role="option"]'
+          '[role="dialog"], [role="alertdialog"], .wand-ui-select-trigger, .wand-ui-select-content, [role="listbox"], [role="option"], .terminal-shortcuts'
         ));
       }
 
@@ -2242,15 +2232,6 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
 
       function focusTerminalInteractionTarget() {
         focusTerminalContainer();
-      }
-
-      export function hideMiniKeyboard(clearModifiersOnHide?) {
-        // Just clear modifiers, inline keyboard visibility follows view
-        state.keyboardPopupOpen = false;
-        if (clearModifiersOnHide !== false) {
-          clearModifiers();
-        }
-        updateKeyboardPopupUI();
       }
 
       export function toggleTerminalInteractive() {
@@ -2324,12 +2305,10 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         }
         if (next) {
           enableTerminalCapture();
-          hideMiniKeyboard(false);
           if (opts.focus !== false && !shouldLockNativeInputTerminalIme()) focusTerminalInteractionTarget();
           if (opts.announce !== false) showToast("终端交互模式已开启", "info");
         } else {
           disableTerminalCapture();
-          clearModifiers();
         }
         updateInteractiveControls();
         // Re-measure after the terminal modifier lands so an inline height
@@ -2349,9 +2328,6 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         if (shouldUsePassthrough && !state.terminalInteractive) {
           setTerminalInteractive(true, { announce: false, focus: false });
           return;
-        }
-        if ((!selectedSession || state.currentView !== "terminal") && state.keyboardPopupOpen) {
-          state.keyboardPopupOpen = false;
         }
         updateInteractiveControls();
       }
@@ -2494,7 +2470,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         // 不再单独控制一个停止节点的显隐。
         var container = document.getElementById("output");
         if (container) container.classList.toggle("interactive", !structured && state.terminalInteractive);
-        updateJoystickVisibility();
+        updateTerminalShortcuts();
         paintSelectedRunningStatus();
       }
 
@@ -2556,13 +2532,33 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         scheduleSoftResyncTerminal(500);
       }
 
-      function updateKeyboardPopupUI() {
-        updateJoystickPanelUI();
+      function sendTerminalShortcut(key: string) {
+        var session = getSelectedSession();
+        if (!session || isStructuredSession(session) || isNativeInputEmbed()) return;
+        if (session.status !== "running") return;
+        if (key === "enter") {
+          if (state.composerComposing || state.terminalComposing) return;
+          // The composer owns pending text/attachments and the separate CR packet.
+          var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
+          if (state.terminalInteractive || canSendComposer(inputBox ? inputBox.value : "", session.id)) {
+            void sendInputFromBox(undefined);
+          } else {
+            sendTerminalSequence("\r", "enter_text");
+          }
+          return;
+        }
+        sendTerminalSequence(buildPtySequence(key, undefined), key);
+        scheduleShortcutResync();
       }
 
-      export function closeKeyboardPopup() {
-        state.keyboardPopupOpen = false;
-        updateInteractiveControls();
+      export function updateTerminalShortcuts() {
+        var host = document.getElementById("terminal-shortcuts");
+        if (!host) return;
+        var session = getSelectedSession();
+        // Native input shells already own a shortcut row; never duplicate it.
+        host.hidden = !session || isStructuredSession(session) || isNativeInputEmbed();
+        if (host.hidden) return;
+        paintTerminalPanel(host, session.status !== "running", sendTerminalShortcut);
       }
 
       function enableTerminalCapture() {
@@ -2601,12 +2597,6 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         }
         if (mods.alt) return String.fromCharCode(27) + text;
         return text;
-      }
-
-      export function clearModifiers() {
-        state.modifiers.ctrl = false;
-        state.modifiers.alt = false;
-        state.modifiers.shift = false;
       }
 
       export function getControlInput(key) {
@@ -3099,8 +3089,8 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           return;
         }
         // 触摸设备点击任何区域都不主动聚焦输入框：自动聚焦会唤起系统虚拟键盘，属于
-        // 预期外行为——点输出区、点聊天区、以及点终端遥控悬浮球派发到底层 #output 的
-        // 合成 click，都不该弹出输入法。手机端要打字直接点输入框本身。桌面鼠标点击不
+        // 预期外行为——点输出区、点聊天区都不该弹出输入法。
+        // 手机端要打字直接点输入框本身。桌面鼠标点击不
         // 唤起键盘，保留原本的「点输出/聊天区聚焦输入框」便利。
         if (isTouchDevice()) return;
         var inputBox = document.getElementById('input-box');
@@ -3170,12 +3160,8 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           if (!inputBox || document.activeElement !== inputBox) return;
           var target = e.target as HTMLElement | null;
           if (!target || typeof target.closest !== "function") return;
-          // 输入面板自身（输入框/发送/快捷按钮）与终端悬浮遥控上的点击
-          // 不收起键盘。
-          if (
-            target.closest(".input-panel") ||
-            target.closest(".wand-joystick-root")
-          ) {
+          // 输入面板自身（输入框/发送/快捷键行）的点击不收起键盘。
+          if (target.closest(".input-panel")) {
             return;
           }
           inputBox.blur();

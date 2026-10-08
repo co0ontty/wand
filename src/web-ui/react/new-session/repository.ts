@@ -38,6 +38,7 @@ function normalizeConfig(value: JsonRecord): NewSessionConfig {
     defaultSessionKind: oneOf(value.defaultSessionKind, KINDS, "structured"),
     defaultMode: oneOf(value.defaultMode, MODES, "default"),
     defaultCwd: stringValue(value.defaultCwd),
+    defaultEngine: value.defaultEngine === "sdk" ? "sdk" : "cli",
   };
 }
 
@@ -130,8 +131,11 @@ export function buildCreateRequest(
 
   const thinkingEffort = context.thinkingEffort?.trim();
   const overrideCli = Boolean(form.employeeId && form.specifiedCli);
+  // 引擎只对 pi 结构化会话有意义：不传就是既有的 Pi CLI 行为。
+  const engine = form.provider === "pi" && form.engine === "sdk" ? { engine: "sdk" as const } : {};
   return {
     ...base,
+    ...engine,
     kind: "structured",
     runner: structuredRunner(form.provider),
     model: (form.employeeId && !form.specifiedCli) ? undefined : (model || undefined),

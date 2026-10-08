@@ -18,12 +18,13 @@ import type { SessionSnapshot } from "../src/types.js";
 import type { StructuredRunnerAdapter } from "../src/structured-runner.js";
 import { whenIterationPromptsSettled } from "../src/iteration-log.js";
 
-function harness(t: TestContext, claudeCli?: StructuredRunnerAdapter) {
+function harness(t: TestContext, claudeCli?: StructuredRunnerAdapter, core?: StructuredRunnerAdapter) {
   const root = mkdtempSync(join(tmpdir(), "wand-provider-switch-"));
   const storage = new WandStorage(join(root, "wand.db"));
   const config = { ...defaultConfig(), defaultCwd: root, defaultCodexModel: "codex-default",
-    defaultThinkingEffort: "pi:high" as const };
-  const manager = new StructuredSessionManager(storage, config, null, { claudeCli });
+    defaultThinkingEffort: "pi:high" as const,
+    harness: { ...defaultConfig().harness, agentDir: join(root, "unconfigured-agent") } };
+  const manager = new StructuredSessionManager(storage, config, null, { claudeCli, core });
   t.after(async () => {
     manager.dispose();
     await whenIterationPromptsSettled();
@@ -95,6 +96,67 @@ test("selecting the same tool is a no-op preserving explicit model and thinking 
   assert.equal(updated.thinkingEffort, "max");
 });
 
+test("Pi and Wand Agent switch in place using the matching engine candidate and persist their decision", (t) => {
+  const { manager, storage, create } = harness(t, undefined, {} as StructuredRunnerAdapter);
+  const original = create();
+  original.employeeCandidates!.push({ provider: "pi", engine: "sdk", model: "sdk-model",
+    thinkingEffort: "deep", mode: "default", kind: "structured" });
+  const sdk = manager.setSessionProvider(original.id, "pi", "sdk");
+  assert.equal(sdk.id, original.id);
+  assert.equal(sdk.structuredState?.engine, "core");
+  assert.equal(sdk.selectedModel, "sdk-model");
+  assert.equal(sdk.employeeCandidateIndex, 2);
+  assert.equal(sdk.piSettings?.globalTools, false);
+  assert.equal(sdk.employeeId, original.employeeId);
+  assert.equal(sdk.systemPrompt, original.systemPrompt);
+  assert.equal(storage.getSession(original.id)?.structuredState?.engine, "core");
+  assert.equal(manager.getPiSettings(original.id).resolution.engine, "core");
+  manager.setSessionModel(original.id, "explicit-sdk-model");
+  assert.equal(manager.setSessionProvider(original.id, "pi").selectedModel, "explicit-sdk-model", "legacy same-provider request keeps engine");
+  const cli = manager.setSessionProvider(original.id, "pi", "cli");
+  assert.equal(cli.structuredState?.engine, "cli");
+  assert.equal(cli.selectedModel, "pi-model");
+  assert.equal(cli.employeeCandidateIndex, 0);
+  assert.equal(cli.piSettings?.globalTools, true);
+  assert.equal(manager.getPiSettings(original.id).resolution.engine, "cli");
+  const other = manager.setSessionProvider(original.id, "codex");
+  assert.equal(other.structuredState?.engine, undefined);
+  assert.equal(other.piSettings, undefined, "other tools do not inherit Pi capabilities");
+});
+
+test("engine switch rejects unsupported capability selections without discarding them", (t) => {
+  const { manager, create } = harness(t, undefined, {} as StructuredRunnerAdapter);
+  for (const patch of [
+    { resources: { skills: ["skill-test"], mcpServers: [] } },
+    { resources: { skills: [], mcpServers: ["mcp-test"] } },
+    { lockedSkills: ["skill-test"] }, { autoResources: true }, { codemodeOverride: "off" as const },
+  ]) {
+    const original = create();
+    const settings = { ...manager.getPiSettings(original.id).settings, ...patch };
+    manager.get(original.id)!.piSettings = settings;
+    assert.throws(() => manager.setSessionProvider(original.id, "pi", "sdk"), /Wand Agent 不支持/);
+    assert.equal(manager.get(original.id)?.piSettings, settings);
+    assert.notEqual(manager.get(original.id)?.structuredState?.engine, "core");
+  }
+});
+
+test("an unavailable SDK or failed persistence cannot publish an engine switch", (t) => {
+  const { manager, storage, create } = harness(t);
+  const original = create();
+  assert.throws(() => manager.setSessionProvider(original.id, "pi", "sdk"));
+  assert.equal(manager.get(original.id), original);
+  assert.throws(() => manager.setSessionProvider(original.id, "codex", "sdk"), /只支持 Pi/);
+  const available = harness(t, undefined, {} as StructuredRunnerAdapter);
+  const blank = available.create();
+  const save = available.storage.saveSession.bind(available.storage);
+  available.storage.saveSession = () => { throw new Error("数据库不可写"); };
+  try {
+    assert.throws(() => available.manager.setSessionProvider(blank.id, "pi", "sdk"), /数据库不可写/);
+    assert.equal(available.manager.get(blank.id), blank);
+    assert.notEqual(storage.getSession(original.id)?.structuredState?.engine, "core");
+  } finally { available.storage.saveSession = save; }
+});
+
 test("accepted input, queued input, active execution, resume ids and automation forbid provider changes", (t) => {
   const { manager, create } = harness(t);
   const blocked: Partial<SessionSnapshot>[] = [
@@ -102,6 +164,8 @@ test("accepted input, queued input, active execution, resume ids and automation 
     { queuedMessages: ["已经排队"] },
     { status: "running" },
     { claudeSessionId: "native-session" },
+    { resumedFromSessionId: "restored-session" },
+    { autoRecovered: true },
     { automationId: "ai-team:run-1" },
     { sessionSource: "automation" },
     { sessionSource: "startup" },
@@ -160,8 +224,8 @@ test("HTTP provider switch routes by owner, validates input and never rewrites a
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-  const request = (id: string, provider: unknown) => fetch(`${base}/api/sessions/${id}/provider`, {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ provider }),
+  const request = (id: string, provider: unknown, engine?: unknown) => fetch(`${base}/api/sessions/${id}/provider`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ provider, engine }),
   });
   const original = create();
   assert.equal(registry.ownerOf(original.id), "structured");
@@ -176,6 +240,14 @@ test("HTTP provider switch routes by owner, validates input and never rewrites a
   for (const invalid of ["shell", "bad-cli", "", null, 42]) {
     assert.equal((await request(original.id, invalid)).status, 400);
   }
+  assert.equal((await request(original.id, "pi", "core")).status, 400);
+  assert.equal((await request(original.id, "codex", "sdk")).status, 400);
+  assert.equal((await request(original.id, "pi", "sdk")).status, 400, "unavailable SDK must not mutate the session");
+  assert.equal(manager.get(original.id)?.provider, "codex");
+  const cli = await request(original.id, "pi", "cli");
+  assert.equal(cli.status, 200);
+  assert.equal((await cli.json() as SessionSnapshot).structuredState?.engine, "cli");
+  manager.setSessionProvider(original.id, "codex");
   assert.equal((await request("missing", "pi")).status, 404);
   const stored = { ...original, id: "stored-pty", sessionKind: "pty" as const, runner: "pty" as const };
   storage.saveSession(stored);

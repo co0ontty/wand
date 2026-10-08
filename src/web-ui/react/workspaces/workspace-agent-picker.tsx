@@ -9,6 +9,7 @@ import {
 } from "../model-catalog";
 import { httpNewSessionRepository } from "../new-session/repository";
 import { WandButton, WandIcon } from "../ui";
+import { AGENT_TOOL_OPTIONS, WAND_AGENT_TOOL_ID } from "../../provider-identity";
 import {
   UnifiedExecutionSubjectPicker,
   type UnifiedExecutionSubject,
@@ -20,6 +21,7 @@ import type {
   WorkspaceSessionTarget,
   WorkspaceTeamOption,
 } from "./types";
+import { workspaceTargetEngine, workspaceTargetProvider } from "./types";
 
 /** 镜像服务端 src/types.ts 的 GLOBAL_WORKSPACE_ID：隐藏的「全局暂存」工作区没有真实目录。 */
 const GLOBAL_WORKSPACE_ID = "wand-global";
@@ -40,20 +42,28 @@ export function usableTeamWorkspaceId(
   return workspaceId;
 }
 
+/**
+ * 工作窗口可选的执行项。
+ * 单一真源是浏览器层的 `AGENT_TOOL_OPTIONS`（Pi 与 Wand Agent 是两条独立选项），
+ * 这里只追加“空白终端”这一项，不再自己维护一份 provider 列表。
+ */
 export const WORKSPACE_AGENT_OPTIONS: ReadonlyArray<{
   value: WorkspaceSessionTarget;
   label: string;
   description: string;
 }> = [
-  { value: "claude", label: "Claude", description: "Claude Code" },
-  { value: "codex", label: "Codex", description: "OpenAI Codex CLI" },
-  { value: "opencode", label: "OpenCode", description: "OpenCode CLI" },
-  { value: "grok", label: "Grok", description: "Grok Build CLI" },
-  { value: "qoder", label: "Qoder", description: "Qoder CLI" },
-  { value: "pi", label: "one 的 Agent", description: "内置多模型 Agent" },
-  { value: "gemini", label: "Gemini", description: "Gemini CLI" },
+  ...AGENT_TOOL_OPTIONS.map((option) => ({
+    value: option.id as WorkspaceSessionTarget,
+    label: option.label,
+    description: option.description,
+  })),
   { value: "shell", label: "空白终端", description: "仅启动系统 Shell" },
 ];
+
+/** 工具选项 id（如用 pi / wand-agent）对应的展示名；认不出来就回落成原值。 */
+export function workspaceAgentLabel(target: WorkspaceSessionTarget): string {
+  return WORKSPACE_AGENT_OPTIONS.find((option) => option.value === target)?.label ?? target;
+}
 
 export const WORKSPACE_KIND_OPTIONS: ReadonlyArray<{
   value: WorkspaceSessionKind;
@@ -93,10 +103,18 @@ export interface WorkspaceAgentPickerProps {
  * 某个 CLI 工具「上次用过的模型」：与输入框 composer 的记忆同源（localStorage + 会话状态）。
  * 空值表示还没选过，回落到「跟随服务端默认」。
  */
-export function workspaceModelDefault(provider: WorkspaceSessionTarget): string {
-  if (provider === "shell") return MODEL_CATALOG_DEFAULT_VALUE;
-  return workspacesStore.getRuntime()?.modelPreference(provider as WorkspaceProvider)
+export function workspaceModelDefault(target: WorkspaceSessionTarget): string {
+  const provider = workspaceTargetProvider(target);
+  if (!provider) return MODEL_CATALOG_DEFAULT_VALUE;
+  return workspacesStore.getRuntime()?.modelPreference(provider)
     || MODEL_CATALOG_DEFAULT_VALUE;
+}
+
+/** 选中项 → 选择器用的主体（provider + 引擎）；Wand Agent 用 pi provider + sdk 引擎。 */
+function pickerSubjectFor(target: WorkspaceSessionTarget): UnifiedExecutionSubject {
+  const engine = workspaceTargetEngine(target);
+  const provider = workspaceTargetProvider(target);
+  return { type: "cli", id: provider || "shell", ...(engine ? { engine } : {}) };
 }
 
 export function WorkspaceAgentPicker({
@@ -119,7 +137,7 @@ export function WorkspaceAgentPicker({
     ? { type: "employee", id: employeeId }
     : teamId
       ? { type: "team", id: teamId }
-      : { type: "cli", id: target };
+      : pickerSubjectFor(target);
 
   const selectSubject = (next: UnifiedExecutionSubject): void => {
     if (next.type === "employee") {
@@ -134,11 +152,18 @@ export function WorkspaceAgentPicker({
     }
     onEmployeeChange?.("");
     onTeamChange?.("");
-    onTargetChange(next.id as WorkspaceSessionTarget);
-    if (next.id === "shell") onKindChange("pty");
-    if (persistPreferences && next.id !== "shell") {
+    // 引擎是第二个维度：Wand Agent 与 Pi 共享 provider，但 target 要能分辨。
+    const nextTarget: WorkspaceSessionTarget = next.id === "shell"
+      ? "shell"
+      : next.engine === "sdk" ? WAND_AGENT_TOOL_ID : next.id as WorkspaceSessionTarget;
+    onTargetChange(nextTarget);
+    if (nextTarget === "shell") onKindChange("pty");
+    const provider = workspaceTargetProvider(nextTarget);
+    if (persistPreferences && provider) {
       void httpNewSessionRepository.savePreferences({
-        defaultProvider: next.id as WorkspaceProvider,
+        defaultProvider: provider,
+        // 与 provider 一起记住引擎，下次打开直接回到 Wand Agent。
+        defaultEngine: workspaceTargetEngine(nextTarget) ?? "cli",
       }).catch(() => undefined);
     }
   };
@@ -160,8 +185,9 @@ export function WorkspaceAgentPicker({
     }}
     onModelChange={(next) => {
       onModelChange(next);
-      if (persistPreferences && target !== "shell") {
-        workspacesStore.getRuntime()?.rememberModelPreference(target as WorkspaceProvider, pickedModelId(next));
+      const provider = workspaceTargetProvider(target);
+      if (persistPreferences && provider) {
+        workspacesStore.getRuntime()?.rememberModelPreference(provider, pickedModelId(next));
       }
     }}
   />;
@@ -205,12 +231,14 @@ export function WorkspaceWelcomeChooser({
     void httpNewSessionRepository.loadConfig()
       .then((config) => {
         if (cancelled || choiceTouched.current) return;
-        const savedProvider = WORKSPACE_AGENT_OPTIONS.some((option) => option.value === config.defaultProvider)
-          ? config.defaultProvider as WorkspaceSessionTarget
+        const savedTarget = WORKSPACE_AGENT_OPTIONS.some((option) => option.value === config.defaultProvider)
+          ? (config.defaultProvider === "pi" && config.defaultEngine === "sdk"
+              ? WAND_AGENT_TOOL_ID
+              : config.defaultProvider) as WorkspaceSessionTarget
           : null;
-        if (savedProvider && savedProvider !== "shell") {
-          setTarget(savedProvider);
-          setModel(workspaceModelDefault(savedProvider));
+        if (savedTarget && savedTarget !== "shell") {
+          setTarget(savedTarget);
+          setModel(workspaceModelDefault(savedTarget));
         }
         if (config.defaultSessionKind === "pty" || config.defaultSessionKind === "structured") {
           setKind(config.defaultSessionKind);
@@ -249,7 +277,7 @@ export function WorkspaceWelcomeChooser({
     ? "硅基员工"
     : teamId
       ? (teams?.find((team) => team.id === teamId)?.name ?? "AI 团队")
-      : target === "shell" ? "空白终端" : (WORKSPACE_AGENT_OPTIONS.find((option) => option.value === target)?.label ?? "");
+      : target === "shell" ? "空白终端" : workspaceAgentLabel(target);
 
   return <Result icon={<WandIcon name="task" size={36} strokeWidth={1.8}/>} title={title} subTitle={subtitle}
     extra={<TaskForm noValidate aria-busy={submitting} onSubmit={(event) => void submit(event)}>

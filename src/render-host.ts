@@ -139,6 +139,11 @@ export class CompositeTerminalHost implements TerminalHost {
     this.render.forget(sessionId);
   }
 
+  flush(): void {
+    this.legacy?.flush?.();
+    this.render.flush?.();
+  }
+
   /**
    * 两侧都只是解绑：legacy daemon 可能还持有升级前的旧 PTY，Render 更是必须
    * 跨 Server 重启继续活着。**这里绝不能 kill 任何东西。**

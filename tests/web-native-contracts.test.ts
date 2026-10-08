@@ -67,7 +67,6 @@ test("web source preserves native events, safe-area variables, and selector hook
     "wand-ios-ime-state",
     "--app-viewport-top",
     "--app-viewport-height",
-    "wand-joystick-root",
   ]);
   includesAll("src/web-ui/browser/input.ts", [
     "shouldLockNativeInputTerminalIme",

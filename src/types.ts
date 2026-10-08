@@ -166,6 +166,11 @@ export interface WandConfig {
   defaultProvider?: SessionProvider;
   /** 新建会话时默认使用的承载类型。 */
   defaultSessionKind?: SessionKind;
+  /**
+   * 新建会话时默认的执行引擎；只对支持多引擎的 provider 有意义（目前只有 pi）：
+   * `cli` = Pi CLI，`sdk` = Wand Agent（进程内 SDK）。缺省视为 CLI。
+   */
+  defaultEngine?: "cli" | "sdk";
   /** 新建任务时是否默认开启独立 worktree。 */
   defaultTaskWorktree?: boolean;
   defaultMode: ExecutionMode;
@@ -657,6 +662,8 @@ export interface ConversationAuthor {
   avatar?: string;
   leader?: boolean;
   provider?: SessionProvider;
+  /** 本条发言实际候选的执行引擎；历史缺省仍按 CLI 显示。 */
+  engine?: "cli" | "sdk";
   /**
    * 这条发言**实际使用候选**的模型 id（真值，不是展示文案；`"default"` 表示跟随该 provider
    * 的服务端默认模型）。老数据没有这个字段，读端要能只按 provider 显示。
@@ -791,10 +798,15 @@ export interface SessionSnapshot extends SessionCompletionState {
   /**
    * PTY 会话本轮是否正在生成回复（provider CLI busy）。语义对齐 structured 的
    * structuredState.inFlight：turn 开始置 true，回复结束/进程退出清 false。
-   * 运行时信号，不持久化，服务重启后视为 false。目前仅 Claude PTY（bridge）能精确判定；
-   * 其余 provider 不产生该信号（undefined），客户端应回落到旧行为。
+   * 运行时信号，不持久化；Claude 使用 bridge，其余 provider 使用前台资格与输出静默窗口。
    */
   ptyBusy?: boolean;
+  /**
+   * 空白 PTY 中有前台命令（如手动启动 CLI / 构建），由内核前台进程组采样得出。
+   * 与 provider 回合无关，不产生成功完成回执或回合计时；无输出也可为 true。
+   * 仅运行时，不持久化；未探测、不支持的平台、提示符与已结束终端均为 false。
+   */
+  ptyCommandRunning?: boolean;
   /**
    * PTY 本轮的时间锚点，语义与 structuredState.turnStartedAt / lastActivityAt 完全一致，
    * 是 ptyBusy 的配套读数：turn 开始（或静默窗口被输出续期）时写入，ptyBusy 清 false

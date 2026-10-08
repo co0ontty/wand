@@ -68,7 +68,7 @@ const QODER_FALLBACK_MODELS: ClaudeModelInfo[] = [
   { id: "ultimate", label: "Ultimate" },
 ];
 const PI_FALLBACK_MODELS: ClaudeModelInfo[] = [
-  { id: "default", label: "跟随 one 的 Agent 默认", alias: true },
+  { id: "default", label: "跟随 Pi 默认", alias: true },
 ];
 
 /**
@@ -1014,7 +1014,7 @@ export function parsePiRpcModels(stdout: string): ClaudeModelInfo[] {
   return [
     {
       id: "default",
-      label: "跟随 one 的 Agent 默认",
+      label: "跟随 Pi 默认",
       alias: true,
       ...(union.length ? { reasoningEfforts: union } : {}),
     },
@@ -1044,7 +1044,7 @@ export function parsePiModels(stdout: string): ClaudeModelInfo[] {
   }
   if (!discovered.length) return cloneModels(PI_FALLBACK_MODELS);
   return [
-    { id: "default", label: "跟随 one 的 Agent 默认", alias: true },
+    { id: "default", label: "跟随 Pi 默认", alias: true },
     ...discovered,
   ];
 }

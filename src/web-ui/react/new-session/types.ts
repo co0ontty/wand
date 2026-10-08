@@ -17,6 +17,11 @@ export interface NewSessionConfig {
   defaultSessionKind: NewSessionPreferenceKind;
   defaultMode: NewSessionMode;
   defaultCwd: string;
+  /**
+   * 默认执行引擎；只对 pi 有意义：`sdk` = Wand Agent（进程内 SDK），缺省 / `cli` = Pi CLI。
+   * 它跟 provider 一起构成「上次用的执行工具」，用户选过 Wand Agent 下次要能沿用。
+   */
+  defaultEngine?: "cli" | "sdk";
 }
 
 export interface NewSessionPath {
@@ -31,6 +36,11 @@ export interface NewSessionDefaults {
 
 export interface NewSessionForm {
   provider: NewSessionProvider;
+  /**
+   * 执行引擎；只有 pi 有两种：`cli`（Pi CLI，缺省）与 `sdk`（Wand Agent，进程内 SDK）。
+   * 其他 provider 不设这个字段。
+   */
+  engine?: "cli" | "sdk";
   employeeId?: string;
   /** 选中的 AI 团队：走直发路由，不建会话（§5.1 修正 B8）。 */
   teamId?: string;
@@ -50,6 +60,8 @@ export interface NewSessionPreferencePatch {
   defaultProvider?: NewSessionProvider;
   defaultSessionKind?: NewSessionPreferenceKind;
   defaultMode?: NewSessionMode;
+  /** 只对 pi 有意义的默认引擎；与 defaultProvider 一起记住上次用的执行工具。 */
+  defaultEngine?: "cli" | "sdk";
   defaultTaskWorktree?: boolean;
 }
 
@@ -77,6 +89,8 @@ interface StructuredNewSessionCreateRequest extends NewSessionCreateRequestBase 
   kind: "structured";
   provider: NewSessionProvider;
   runner: string;
+  /** 仅 pi：`sdk` 表示 Wand Agent（进程内 SDK），不传是 Pi CLI。 */
+  engine?: "cli" | "sdk";
   model?: string;
   thinkingEffort?: string;
   employeeId?: string;

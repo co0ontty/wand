@@ -11,7 +11,16 @@ export function installSidebarStyles(): void {
 .sidebar:not(.collapsed) .conversation-navigation .ant-segmented { width:100%; }
 .sidebar:not(.collapsed) .conversation-navigation .ant-segmented-group { display:flex; }
 .sidebar:not(.collapsed) .conversation-navigation .ant-segmented-item { flex:1; text-align:center; }
-.sidebar .sidebar-body { overscroll-behavior:contain; }
+.sidebar .sidebar-body { overscroll-behavior:contain; scrollbar-gutter:stable; }
+/* Keep navigation and header actions anchored when switching list modes. */
+.sidebar-header-primary { min-height:44px; }
+.sidebar-header-main { min-width:0; }
+.sidebar-header-actions { flex-shrink:0; }
+.sidebar-header-actions :is(.sidebar-more-trigger,.sidebar-compact-toggle,.sidebar-close) { width:44px; min-width:44px; height:44px; }
+.sidebar-status:empty { display:none; }
+.sidebar-footer-actions { min-width:0; }
+.sidebar-footer:has(#back-to-native-button,#switch-server-button) { flex-wrap:wrap; }
+.sidebar .conversation-list-tools { position:sticky; top:0; z-index:2; background:var(--bg-surface); }
 .sidebar-presentation-tools { position:sticky; top:0; z-index:2; background:var(--bg-surface); }
 .sidebar-search-slot { display:grid; flex:1; min-width:0; align-items:center; min-height:32px; }
 .sidebar-list-title, .sidebar-search-expand { grid-area:1 / 1; min-width:0; transition:opacity var(--motion-fast) var(--ease-in-out-smooth), visibility var(--motion-fast) var(--ease-in-out-smooth); }

@@ -25,9 +25,9 @@ async function settle(): Promise<void> {
 }
 (window as any).toolTimelineHarness = {
   state, publish, settle, turns: () => turns,
-  async fresh(next: any[]) {
+  async fresh(next: any[], running = false) {
     clearActivityDetailState(); state.toolContentCache = {}; state.sessions = [];
     state.selectedId = "timeline-fixture"; state.currentView = "chat";
-    resetChatRenderCache(); publish(next); await settle();
+    resetChatRenderCache(); publish(next, running); await settle();
   },
 };

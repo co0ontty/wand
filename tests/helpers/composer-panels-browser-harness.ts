@@ -1,9 +1,9 @@
 // Production adapters and owners; only data/HTTP transport are synthetic.
 import { composer, composerQueue, state } from "../../src/web-ui/browser/state.js";
 import { renderAppShell, render, renderBootLoading, updateOfflineBanner, resetChatRenderCache } from "../../src/web-ui/browser/render.js";
-import { updateQueueBar, attachQueueBarDelegates, buildMessagesForRender } from "../../src/web-ui/browser/input.js";
+import { updateQueueBar, attachQueueBarDelegates, buildMessagesForRender, updateTerminalShortcuts, reconcileInteractiveState, captureTerminalInput } from "../../src/web-ui/browser/input.js";
 import { doRenderChat } from "../../src/web-ui/browser/chat-render.js";
-import { initTerminalJoystick, updateJoystickVisibility } from "../../src/web-ui/browser/viewport.js";
+import { attachEventListeners } from "../../src/web-ui/browser/events.js";
 import { showNotificationBubble, wandAlert, wandConfirm, wandPrompt } from "../../src/web-ui/browser/notifications.js";
 import { mountBrowserButtons } from "../../src/web-ui/browser/library-buttons.js";
 import { installReactUiStyles } from "../../src/web-ui/react/styles.js";
@@ -84,8 +84,12 @@ function publish(next: any): void {
   async terminal() {
     publish(Object.assign({}, session(), { sessionKind: "pty" }));
     state.currentView = "terminal"; state.wsConnected = true; state.ws = null;
-    initTerminalJoystick(); initTerminalJoystick(); updateJoystickVisibility(); await frames();
+    composer.edit(state.selectedId!, { text: "", attachments: [] });
+    (document.getElementById("input-box") as HTMLTextAreaElement).value = "";
+    reconcileInteractiveState(); attachEventListeners();
+    updateTerminalShortcuts(); updateTerminalShortcuts(); await frames();
   },
+  updateTerminalShortcuts, captureTerminalInput,
   notification(action = false) {
     return showNotificationBubble({ title: "Synthetic notice", body: "Local browser test", duration: 0,
       ...(action ? { actionLabel: "执行测试动作", action: () => { stats.actions++; } } : {}) });

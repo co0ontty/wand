@@ -49,9 +49,6 @@ export async function dispatchAgentForTask(
 ): Promise<AgentDispatchResult> {
   const { storage, config, structured, processes } = deps;
   const { agent } = input;
-  if (agent.engine === "sdk" && !input.employee) {
-    throw new Error("SDK 执行引擎只能通过员工候选启用。");
-  }
   if (input.employee) {
     if (agent.kind !== "structured") throw new Error("绑定员工只支持结构化会话。");
     const candidate = input.employee.agents[input.employeeCandidateIndex ?? 0];
@@ -89,6 +86,11 @@ export async function dispatchAgentForTask(
         provider,
         model: resolvedModel,
         thinkingEffort: agent.thinkingEffort,
+        // 直接派发 Wand Agent（不进员工候选链）：先裁决进程内引擎是否可用，
+        // 不可用就让这次派发明确失败，不静默退回 CLI 冒充。
+        ...(agent.engine === "sdk"
+          ? { engine: structured!.resolveNewSessionPiEngine("sdk").engine }
+          : {}),
         worktreeEnabled: false,
         sessionSource: "automation",
         automationId: input.automationId,

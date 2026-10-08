@@ -142,7 +142,7 @@ const PKG_JSON = JSON.parse(readFileSync(path.join(RUNTIME_ROOT_DIR, "package.js
 };
 const PKG_NAME = PKG_JSON.name;
 const PKG_VERSION = PKG_JSON.version;
-const PKG_NODE_REQ = PKG_JSON.engines?.node ?? ">=26.10.0";
+const PKG_NODE_REQ = PKG_JSON.engines?.node ?? ">=24.21.0";
 const PKG_REPO_URL = "https://github.com/co0ontty/wand";
 
 /** 结构化聊天头像允许的图片类型；未知扩展名回 415。 */
@@ -249,6 +249,7 @@ const CONNECTED_APP_PREFERENCE_KEYS = new Set([
   "defaultThinkingEffort",
   "defaultProvider",
   "defaultSessionKind",
+  "defaultEngine",
   "defaultTaskWorktree",
 ]);
 
@@ -867,6 +868,7 @@ export async function startServer(
       port: config.port,
       defaultProvider: config.defaultProvider ?? "claude",
       defaultSessionKind: config.defaultSessionKind ?? "structured",
+      defaultEngine: config.defaultEngine ?? "cli",
       defaultTaskWorktree: config.defaultTaskWorktree !== false,
       defaultMode: config.defaultMode,
       defaultCwd: config.defaultCwd,

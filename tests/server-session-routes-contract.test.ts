@@ -80,6 +80,18 @@ test("session HTTP interface preserves create, list, update, detail, and delete 
     assert.equal(beforePage.offset, 78);
     assert.equal(beforePage.total, 90);
     assert.equal(beforePage.leadingBlockOffset, 0);
+    const getSession = sessions.get.bind(sessions);
+    sessions.get = (id) => { const snapshot = getSession(id); return snapshot ? { ...snapshot, output: "duplicate transcript" } : snapshot; };
+    const webDetail = await (await fetch(
+      `${baseUrl}/api/sessions/${created.id}?format=chat&blockBudget=12&byteBudget=98304&output=omit`,
+    )).json() as typeof beforePage & { output: string; messageOffset: number; messageTotal: number };
+    assert.equal(webDetail.messages.length, 12);
+    assert.equal(webDetail.messageOffset, 78);
+    assert.equal(webDetail.messageTotal, 90);
+    assert.equal(webDetail.output, "", "Web chat omits only the duplicate structured transcript");
+    const unchangedOutput = await (await fetch(`${baseUrl}/api/sessions/${created.id}?format=chat&blockBudget=60`)).json() as { output: string };
+    assert.equal(unchangedOutput.output, "duplicate transcript", "non-opted clients keep the existing DTO");
+    sessions.get = getSession;
     messages.push({ role: "assistant", content: Array.from({ length: 150 }, (_, index) =>
       ({ type: "text", text: `large-${index}` })) });
     const boundedPage = await (await fetch(
@@ -610,4 +622,53 @@ test("创建会话时 systemPrompt 落到会话上，不并进首条消息", asy
     storage.close();
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("创建会话接口把 Pi 与 Wand Agent 当两个引擎，非法组合明确拒绝", async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-pi-engine-routes-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  t.after(() => storage.close());
+  const config = { ...defaultConfig(), defaultCwd: root, startupCommands: [] };
+  const processes = new ProcessManager(config, storage, root);
+  const structured = new StructuredSessionManager(storage, config);
+  const sessions = new SessionRegistry(processes, structured, storage);
+  const app = express();
+  app.use(express.json());
+  registerSessionRoutes(app, processes, structured, storage, config.defaultMode, config, sessions);
+  app.use(jsonErrorHandler);
+  const server = createServer(app);
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => { server.off("error", reject); resolve(); });
+  });
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const post = (body: Record<string, unknown>) => fetch(`${baseUrl}/api/structured-sessions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ cwd: root, mode: "default", ...body }),
+  });
+
+  const bogus = await post({ provider: "pi", engine: "bogus" });
+  assert.equal(bogus.status, 400);
+  assert.match(String((await bogus.json() as { error: string }).error), /执行引擎/);
+
+  const wrongProvider = await post({ provider: "claude", engine: "sdk" });
+  assert.equal(wrongProvider.status, 400);
+  assert.match(String((await wrongProvider.json() as { error: string }).error), /Wand Agent/);
+
+  // Pi CLI：不传引擎与显式 cli 等价，pi-settings 必须报告 cli。
+  const cli = await post({ provider: "pi" });
+  assert.equal(cli.status, 201);
+  const cliSession = await cli.json() as { id: string };
+  const settings = await (await fetch(`${baseUrl}/api/sessions/${cliSession.id}/pi-settings`)).json() as { engine: string };
+  assert.equal(settings.engine, "cli");
+
+  // Wand Agent：本机 harness 未预热/不可用时明确拒绝，不悄悄退回 CLI 冒充。
+  const sdk = await post({ provider: "pi", engine: "sdk" });
+  assert.equal(sdk.status, 400);
+  assert.match(String((await sdk.json() as { error: string }).error), /core|harness/i);
+  const listed = await (await fetch(`${baseUrl}/api/sessions`)).json() as Array<{ id: string }>;
+  assert.deepEqual(listed.map((item) => item.id), [cliSession.id], "被拒绝的 SDK 会话不能留下半个会话");
 });

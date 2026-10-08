@@ -94,13 +94,13 @@ html.no-transition *, html.no-transition *::before, html.no-transition *::after 
 .structured-status-bar { display: flex; gap: 8px; color: var(--text-secondary); font-size: var(--font-size-xs); }
 .input-composer.is-terminal-interactive :is(.composer-status-row, .composer-inline-config, .prompt-optimize-btn, #voice-record-btn, .composer-attachments-host) { display: none; }
 .input-composer.is-terminal-interactive #send-input-button:not([data-phase="running"]) { display: none; }
-/* Floating terminal remote keeps pointer capture; the key panel is an Ant Card. */
-.wand-joystick-root { position: fixed; inset: 0; z-index: 120; pointer-events: none; visibility: hidden; }
-.wand-joystick-root.visible { visibility: visible; }
-.wand-joystick-ball { position: absolute; width: 50px; height: 50px; display: grid; place-items: center; border-radius: 50%; background: var(--bg-elevated); color: var(--accent); box-shadow: var(--shadow-md); touch-action: none; pointer-events: auto; }
-.wand-joystick-panel { position: absolute; width: min(300px, calc(100vw - 24px)); visibility: hidden; pointer-events: none; }
-.wand-joystick-panel.active { visibility: visible; pointer-events: auto; }
-.wand-joystick-backdrop.active { position: absolute; inset: 0; pointer-events: auto; }
+/* One PTY key row stays with the composer; Ant owns the key visuals. */
+.terminal-shortcuts:not([hidden]) { min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; padding: 2px 0 8px; }
+.terminal-shortcuts-row { width: max-content; }
+.terminal-shortcuts-row > button { flex: none; min-width: 36px; }
+@media (pointer: coarse), (max-width: 640px) {
+  .terminal-shortcuts-row > button { min-width: 44px; min-height: 44px; }
+}
 .notification-bubble { position: fixed; left: 50%; transform: translateX(-50%); width: min(440px, calc(100vw - 32px)); z-index: 20020; }
 .update-card-progress:not(.active) { display: none; }
 #update-card-status.error { color: var(--danger); }
@@ -127,6 +127,9 @@ html.no-transition *, html.no-transition *::before, html.no-transition *::after 
 .login-visual-toggle:checked ~ .login-visual-scene * { animation-play-state: paused; }
 @keyframes login-signal { to { stroke-dashoffset: -1; } }
 .chat-width-toggle { display: none; }
+/* 原生壳保留自己的正文 / 输入栏几何（下面的居中列规则排除 is-wand-app），那里切成「居中」
+   不会有任何变化 —— 所以除了窄屏隐藏，整个原生壳也隐藏这个开关，不给用户空动作。 */
+html.is-wand-app .chat-width-toggle { display: none; }
 @media (min-width: 1280px) { .chat-width-toggle { display: inline-flex; } html[data-chat-width="column"]:not(.is-wand-app) :is(.chat-messages, .chat-running-bar, .input-panel) { max-width: var(--chat-column-width); width: 100%; margin-inline: auto; } }
 @media (max-width: 640px) { .input-panel { padding-inline: 8px; } .composer-status-line, .composer-status-row [data-config-scope="mode"], [data-models-refresh-scope="runtime"], .login-page .left-spacer { display: none; } .input-textarea { --input-max-height: min(160px, 35dvh); } .composer-main-row { grid-template-columns: auto minmax(0, 1fr); } .composer-actions-left { align-self: end; } .composer-inline-config { flex-basis: 100%; justify-content: flex-end; } .composer-actions-right .ant-btn { flex-shrink: 0; } #send-input-button { min-width: 32px; } }
 @media (prefers-color-scheme: dark) { .is-wand-embed-terminal { --bg-terminal: #17120f; } }
@@ -237,10 +240,13 @@ html.no-transition *, html.no-transition *::before, html.no-transition *::after 
 .conversation-sidebar-tools .conversation-panel { width:272px; }
 .sidebar-header-actions:has(.conversation-sidebar-tools:not([hidden])) { flex-wrap:nowrap; }
 .sidebar-header-main .sidebar-title { flex-shrink:0; }
-.conversation-search-host { width:100%; min-width:0; padding:8px 0; }
+.conversation-search-host { position:relative; width:100%; min-width:0; padding:8px 0; }
 .conversation-search-input { flex:1; min-width:0; }
-.conversation-search-input input { height:40px; }
-.conversation-search-host > .ant-btn { width:40px; min-width:40px; height:40px; }
+.conversation-search-input .ant-input-affix-wrapper { height:40px; }
+.conversation-search-input input::-webkit-search-cancel-button { display:none; }
+.conversation-search-clear-space { display:block; width:28px; }
+.conversation-search-host > .ant-btn { position:absolute; z-index:2; inset-inline-end:0; top:8px; width:40px; min-width:40px; height:40px; }
+.conversation-search-host > .ant-btn:disabled { opacity:0; pointer-events:none; }
 .conversation-search-input input::-webkit-search-cancel-button { -webkit-appearance:none; appearance:none; display:none; }
 /* IM scope: Telegram-style grouping, footer clocks and single accepted check; theme remains Wand. */
 .conversation-group-avatar { display:inline-flex; position:relative; flex-shrink:0; }
@@ -309,4 +315,4 @@ html.no-transition *, html.no-transition *::before, html.no-transition *::after 
 .conversation-dissolved { padding:16px; border-top:1px solid var(--border-subtle); text-align:center; color:var(--text-secondary); font-size:13px; display:flex; align-items:center; justify-content:center; gap:6px; flex-wrap:wrap; }
 .conversation-restore-link.ant-btn { color:var(--accent); text-decoration:underline; padding-inline:4px; }
 
-@media (max-width:640px) { .conversation-input-hint { display:none; } .conversation-heading { padding-inline:8px; } .conversation-composer { padding-inline:8px; } .conversation-task-index { padding-inline:8px; } .conversation-search-input input, .conversation-search-host > .ant-btn { height:44px; } .conversation-message-scroll { padding:12px; } }
+@media (max-width:640px) { .conversation-input-hint { display:none; } .conversation-heading { padding-inline:8px; } .conversation-composer { padding-inline:8px; } .conversation-task-index { padding-inline:8px; } .conversation-search-input .ant-input-affix-wrapper, .conversation-search-host > .ant-btn { height:44px; } .conversation-message-scroll { padding:12px; } }

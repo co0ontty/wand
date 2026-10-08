@@ -346,6 +346,7 @@ export async function loadNewProjectDefaults(
   }
   return {
     defaultProvider: parseProvider(config.defaultProvider) ?? "claude",
+    defaultEngine: config.defaultEngine === "sdk" ? "sdk" : "cli",
     defaultCwd: stringValue(config.defaultCwd),
     defaultSessionKind: config.defaultSessionKind === "pty" ? "pty" : "structured",
     defaultTaskWorktree: config.defaultTaskWorktree !== false,

@@ -793,7 +793,7 @@ const SESSION_PROVIDER_OPTIONS: ReadonlyArray<{ value: SettingsSessionProvider; 
   { value: "opencode", label: "OpenCode" },
   { value: "grok", label: "Grok" },
   { value: "qoder", label: "Qoder" },
-  { value: "pi", label: "one 的 Agent" },
+  { value: "pi", label: "Pi" },
   { value: "gemini", label: "Gemini" },
 ];
 
@@ -989,7 +989,7 @@ export function modelCatalogSummary(models: SettingsModelCatalog): string {
     ["OpenCode", models.opencodeModels.length],
     ["Grok", models.grokModels.length],
     ["Qoder", models.qoderModels.length],
-    ["one 的 Agent", models.piModels.length],
+    ["Pi", models.piModels.length],
     ["Gemini", models.geminiModels.length],
   ];
   return groups

@@ -258,6 +258,41 @@ function rawRenderRpc(configPath: string, method: string, params?: Record<string
   });
 }
 
+test("large PTY bursts keep every byte with a busy Server consumer", { skip: RENDER_BINARY ? false : SKIP_REASON, timeout: 30_000 }, async (t) => {
+  const fixture = await startFixture();
+  try {
+    const line = "012345678901234567890123456789012345678901234567890123456789";
+    const command = `process.stdin.once('data',()=>{const text=Array.from({length:20000},(_,i)=>'line '+(i+1)+' ${line}\\n').join('');process.stdout.write(text+'__BURST_DONE__\\n');});setInterval(()=>{},1000);`;
+    const attached = await fixture.client.createOrAttach({
+      // Disable OS newline expansion: bulk TTY writes can repeat CR at a
+      // macOS short-write boundary. The fixture checks the byte stream itself.
+      sessionId: "busy-consumer", file: "/bin/sh", args: ["-c", 'stty -opost; exec "$@"', "fixture-node", process.execPath, "-e", command], cwd: fixture.dir,
+      env: { PATH: "/usr/bin:/bin", LANG: "en_US.UTF-8" }, name: "xterm-256color", cols: 120, rows: 36,
+    });
+    assert.ok(attached.process);
+    let output = "";
+    let resyncs = 0;
+    attached.process.onResync?.(() => { resyncs += 1; });
+    attached.process.onData((event) => {
+      output += event.data;
+      // Deliberate bounded main-thread work simulates real Server fan-out. The
+      // old read-per-event daemon disconnected and lost this burst under load.
+      const deadline = performance.now() + 5;
+      while (performance.now() < deadline) { /* pressure fixture only */ }
+    });
+    await attached.process.writeConfirmed!("go\r");
+    await waitFor(() => output.includes("\n__BURST_DONE__\n"), "PTY burst was lost to a reconnect/replay gap");
+    const expected = Array.from({ length: 20000 }, (_, index) => `line ${index + 1} ${line}\n`).join("");
+    assert.ok(output.includes(expected), "all lines arrive exactly once and in order");
+    assert.equal(resyncs, 0, "no full-screen rebuild is needed for a live burst");
+    const wireChunks = fixture.client.attach("busy-consumer")!.state.seq;
+    t.diagnostic(`burst IPC events: ${wireChunks}`);
+    assert.ok(wireChunks < 500, `the producer must coalesce tiny reads before IPC (actual ${wireChunks} events)`);
+  } finally {
+    await fixture.dispose();
+  }
+});
+
 test("reconnect after a daemon crash re-reads the rotated token and reconciles the lost PTY", { skip: RENDER_BINARY ? false : SKIP_REASON }, async () => {
   const fixture = await startFixture();
   let replacementDaemonPid: number | null = null;

@@ -196,10 +196,13 @@ export class Missions {
 
   ingest(event: ProcessEvent): void {
     if (!event.sessionId || event.sessionId === "__system__") return;
-    const snapshot = this.sessions.getLatest(event.sessionId);
-    if (!snapshot) return;
+    // Most PTY output belongs to no mission. Check the indexed ownership first
+    // instead of projecting a session (and reading its workspace/completion) for
+    // every unrelated output batch.
     const attempt = this.storage.getMissionAttemptBySession(event.sessionId);
     if (!attempt) return;
+    const snapshot = this.sessions.getLatest(event.sessionId);
+    if (!snapshot) return;
     const state = activityState(snapshot, event);
     const updatedAt = nowIso();
     this.storage.saveMissionAttempt({

@@ -8,6 +8,7 @@ import { createSessionReads } from "../src/web-ui/browser/session-reads.js";
 import { parseJsonResponse } from "../src/web-ui/react/http-adapter.js";
 import { getErrorMessage } from "../src/error-utils.js";
 import * as completionState from "../src/session-completion-state.js";
+import * as chatHistoryWindow from "../src/web-ui/chat-history-window.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -34,6 +35,7 @@ function harness() {
   const fallback = new Proxy({}, { get: () => noop });
   const dependencies: Record<string, unknown> = {
     "./state": { composer, state, writeStoredBoolean: noop },
+    "../chat-history-window.js": chatHistoryWindow,
     "./session-reads": { createSessionReads },
     "../../session-completion-state.js": completionState,
     "../react/http-adapter": { parseJsonResponse },
@@ -166,7 +168,7 @@ test("earlier messages use the current snapshot and deduplicate independently pe
   h.state.sessions[0] = { id: "A", messageOffset: 1, messages: ["live tail"] };
   h.state.selectedId = "B";
   assert.equal(h.api.fetchEarlierMessages(), true);
-  assert.match(h.requests[0].url, /messages\?before=1&blockBudget=60/);
+  assert.match(h.requests[0].url, /messages\?before=1&blockBudget=12&byteBudget=98304/);
   h.respond(0, { messages: ["history"], offset: 0, total: 2,
     leadingBlockOffset: 0, leadingBlockTotal: 1 }); await tick();
   assert.deepEqual(Array.from(h.state.sessions[0].messages), ["history", "live tail"]);

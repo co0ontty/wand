@@ -10,7 +10,8 @@
 #   ./start.sh --attach       # attach to the running instance TUI
 #   ./start.sh --no-build     # skip build, use existing dist/
 #   ./start.sh --skip-install # skip npm install, only restart
-#   ./start.sh --restart      # only restart current service
+#   ./start.sh --restart      # only restart current service (leave daemon owners alive)
+#   ./start.sh --restart --restart-daemons # explicit: stop Core-drained Server, replace both daemon owners, restart
 #   ./start.sh --status       # print status
 #   ./start.sh --logs         # follow service logs where supported
 #   ./start.sh --stop         # stop service
@@ -395,9 +396,24 @@ cleanup_npm_package_temps() {
   done
 }
 
+restore_stopped_service() {
+  if [[ "$SERVICE_STOPPED_FOR_INSTALL" == "1" ]]; then
+    warn "重启/安装未完成，尝试恢复启动原 $SCOPE 服务"
+    if [[ -f "$WAND_BIN" || -x "$WAND_BIN" ]]; then
+      run_privileged "$NODE_FOR_WAND" "$WAND_BIN" service:install "$SCOPE_FLAG" -c "$CONFIG_PATH" >/dev/null 2>&1 || warn "服务自动恢复失败，请运行 ./start.sh --restart"
+    else
+      warn "全局 wand 入口不存在，请重新运行 ./start.sh"
+    fi
+    SERVICE_STOPPED_FOR_INSTALL=0
+  fi
+}
+
 ensure_service_installed_and_running() {
   [[ -x "$WAND_BIN" || -f "$WAND_BIN" ]] || die "找不到 wand: $WAND_BIN"
 
+  # Every restart route (including --restart and --skip-install) reaches here.
+  # Only an explicit flag permits stopping the persistent daemon owners.
+  restart_requested_daemons
   if service_installed; then
     if [[ "$SERVICE_STOPPED_FOR_INSTALL" != "1" ]]; then
       msg "等待原生 Core 回合完成，再停止 $SCOPE 服务"
@@ -647,6 +663,17 @@ restart_daemons_now() {
   sleep 1
 }
 
+restart_requested_daemons() {
+  [[ "$RESTART_DAEMONS" == "1" ]] || return 0
+  # Drain and stop Server first: a live Server otherwise revives the old daemon
+  # from its cached binary path, and a Core turn must never be force-killed.
+  if [[ "$SERVICE_STOPPED_FOR_INSTALL" != "1" ]]; then
+    msg "等待原生 Core 回合完成并停止 Server，再按显式请求重启 daemon"
+    stop_service_for_install
+  fi
+  restart_daemons_now
+}
+
 print_daemon_lines() {
   local line
   daemon_state_lines | while IFS=$'\t' read -r label pid state endpoint version; do
@@ -692,8 +719,11 @@ case "$ACTION" in
     exit 0
     ;;
   restart-only)
+    trap restore_stopped_service EXIT
     ensure_service_installed_and_running
     wait_for_service_ready
+    SERVICE_STOPPED_FOR_INSTALL=0
+    trap - EXIT
     print_panel
     exit 0
     ;;
@@ -721,15 +751,7 @@ DEV_VERSION="${BASE_VERSION}-debug.t$(date +%m%d%H%M)"
 PACK_DIR=""
 
 restore_version() {
-  if [[ "$SERVICE_STOPPED_FOR_INSTALL" == "1" ]]; then
-    warn "Beta 安装未完成，尝试恢复启动原 $SCOPE 服务"
-    if [[ -f "$WAND_BIN" || -x "$WAND_BIN" ]]; then
-      run_privileged "$NODE_FOR_WAND" "$WAND_BIN" service:install "$SCOPE_FLAG" -c "$CONFIG_PATH" >/dev/null 2>&1 || warn "服务自动恢复失败，请运行 ./start.sh --restart"
-    else
-      warn "全局 wand 入口不存在，请重新运行 ./start.sh"
-    fi
-    SERVICE_STOPPED_FOR_INSTALL=0
-  fi
+  restore_stopped_service
   "$NPM_FOR_WAND" version "$RESTORE_VERSION" --no-git-tag-version --allow-same-version --ignore-scripts >/dev/null 2>&1 || true
   [[ -n "$PACK_DIR" && -d "$PACK_DIR" ]] && rm -rf "$PACK_DIR"
   return 0
@@ -820,9 +842,7 @@ if [[ "$DO_INSTALL" == "1" ]]; then
   echo -e "  ${C_DIM}Daemons${C_RESET}"
   print_daemon_lines
   if [[ "$RESTART_DAEMONS" == "1" ]]; then
-    restart_daemons_now
-    echo "  重启后："
-    print_daemon_lines
+    msg "已请求重启 daemon：启动 Server 前由统一排空路径执行"
   else
     STALE_DAEMON_ALIVE=0
     for pid in $DAEMON_PIDS_BEFORE; do

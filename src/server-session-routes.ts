@@ -10,7 +10,7 @@ import { defaultRoleForCli } from "./default-employee.js";
 import { defaultModelGroupSelector } from "./model-groups.js";
 
 import { inspectPiExecution } from "./pi-execution.js";
-import { alignedBlockStart, blockWindowMessagesForTransport, compactToolMessagesForTransport, sliceTurnBlocksForTransport, truncateMessagesForTransport, visibleBlockCount, windowMessagesForTransport } from "./message-truncator.js";
+import { alignedBlockStart, blockWindowMessagesForTransport, compactToolMessagesForTransport, messageWindowByteBudget, sliceTurnBlocksForTransport, truncateMessagesForTransport, visibleBlockCount, windowMessagesForTransport } from "./message-truncator.js";
 import { toSessionDetailDTO, toSessionListItemDTO } from "./session-transport.js";
 import {
   checkSessionWorktreeMergeabilityAsync,
@@ -273,6 +273,7 @@ function sessionListRevision(
     entry.session.completionRevision ?? 0,
     entry.session.viewedCompletionRevision ?? 0,
     entry.session.ptyBusy === true,
+    entry.session.ptyCommandRunning === true,
     entry.session.structuredState?.inFlight === true,
   ]);
   const revisionState = directoryNames.length === 0
@@ -637,7 +638,7 @@ export function registerSessionRoutes(
   });
 
   app.post("/api/structured-sessions", asyncRoute(async (req, res) => {
-    const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; provider?: string; worktreeEnabled?: boolean; model?: string; thinkingEffort?: string; sessionSource?: unknown; automationId?: unknown; workspaceId?: string; workspaceTaskId?: string; respondImmediately?: unknown; systemPrompt?: string; employeeId?: unknown; teamId?: unknown; kind?: unknown; subject?: { type?: unknown }; overrideCli?: unknown };
+    const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; provider?: string; engine?: string; worktreeEnabled?: boolean; model?: string; thinkingEffort?: string; sessionSource?: unknown; automationId?: unknown; workspaceId?: string; workspaceTaskId?: string; respondImmediately?: unknown; systemPrompt?: string; employeeId?: unknown; teamId?: unknown; kind?: unknown; subject?: { type?: unknown }; overrideCli?: unknown };
     try {
       if (body.teamId !== undefined || body.subject?.type === "team") {
         throw new Error("AI 团队请通过团队开工入口创建群聊。");
@@ -664,6 +665,21 @@ export function registerSessionRoutes(
       const provider: SessionProvider = requestedProvider
         ?? employeeAgent?.provider
         ?? (isSessionProvider(body.provider) ? body.provider : config.defaultProvider ?? "claude");
+      // 引擎是第二个维度：Pi CLI（cli）与 Wand Agent（sdk）都是 provider=pi，但执行方式不同。
+      // 员工候选自己带引擎；只有直选 CLI（含员工面板里的「指定 CLI」）才接受请求里的 engine。
+      const rawEngine = typeof body.engine === "string" ? body.engine.trim() : "";
+      if (rawEngine && rawEngine !== "cli" && rawEngine !== "sdk") {
+        res.status(400).json({ error: "请选择有效的执行引擎。" });
+        return;
+      }
+      const requestedEngine: "cli" | "sdk" | undefined = (employee && !requestedProvider) || !rawEngine
+        ? undefined
+        : rawEngine as "cli" | "sdk";
+      if (requestedEngine === "sdk" && provider !== "pi") {
+        res.status(400).json({ error: "Wand Agent 只支持 Pi 结构化会话。" });
+        return;
+      }
+      const engineDecision = requestedEngine ? structured.resolveNewSessionPiEngine(requestedEngine) : null;
       const rawModel = typeof body.model === "string" ? body.model.trim() : "";
       const origin = parseSessionCreationOrigin(body);
       // Explicit employees/custom role rules and internal automation retain their own role.
@@ -698,6 +714,7 @@ export function registerSessionRoutes(
         employeeAvatar: role?.avatar,
         employeeCandidates: employee?.agents,
         employeeCandidateIndex: requestedProvider ? undefined : selectedEmployeeCandidate?.index,
+        ...(engineDecision ? { engine: engineDecision.engine } : {}),
         ...origin,
       });
       onSessionCreated?.(snapshot.cwd);
@@ -756,8 +773,17 @@ export function registerSessionRoutes(
 
   app.post("/api/sessions/:id/provider", (req, res) => {
     const provider = req.body?.provider;
+    const engine = req.body?.engine;
+    if (engine !== undefined && engine !== "cli" && engine !== "sdk") {
+      res.status(400).json({ error: "执行引擎必须是 cli 或 sdk。" });
+      return;
+    }
+    if (engine === "sdk" && provider !== "pi") {
+      res.status(400).json({ error: "Wand Agent 只支持 Pi 结构化会话。" });
+      return;
+    }
     if (!isSessionProvider(provider)) {
-      res.status(400).json({ error: "请选择有效的 CLI 工具。" });
+      res.status(400).json({ error: "请选择有效的执行工具。" });
       return;
     }
     const id = req.params.id;
@@ -771,7 +797,7 @@ export function registerSessionRoutes(
       return;
     }
     try {
-      res.json(sessionResponseDTO(structured.setSessionProvider(id, provider), req));
+      res.json(sessionResponseDTO(structured.setSessionProvider(id, provider, engine), req));
     } catch (error) {
       sendRouteError(res, error, "切换工具失败。");
     }
@@ -788,7 +814,7 @@ export function registerSessionRoutes(
     const localDecisionAvailable = config.localDecision?.enabled === true;
     const inventory = await discoverPiResources(config, snapshot.cwd);
     const resourceCatalog = { ...inventory.catalog, supported: modifiable && !sdk && inventory.catalog.supported,
-      reason: archived ? "请先恢复已归档的会话。" : sdk ? "当前 SDK 候选尚不支持 Skills / MCP 会话选择。" : inventory.catalog.reason };
+      reason: archived ? "请先恢复已归档的会话。" : sdk ? "Wand Agent 尚不支持 Skills / MCP 会话选择。" : inventory.catalog.reason };
     const controls: PiSettingsControls = {
       // 基础工具与 CodeMode 在两种引擎下都能表达（CLI 通过 --tools 白名单）。
       tools: modifiable,
@@ -1520,7 +1546,7 @@ export function registerSessionRoutes(
     }
     const transcriptOutput = (snapshot.sessionKind ?? "pty") === "pty"
       ? processes.getPtyTranscript(snapshot.id) ?? snapshot.output
-      : snapshot.output;
+      : req.query.format === "chat" && req.query.output === "omit" ? "" : snapshot.output;
     const enriched = enrichStructuredMessages(snapshot.messages ?? [], snapshot.id);
     const messages = wantsCompactTools(req) ? compactToolMessagesForTransport(enriched) : enriched;
     if (req.query.format === "chat") {
@@ -1533,6 +1559,8 @@ export function registerSessionRoutes(
           messages,
           config.cardDefaults ?? {},
           blockBudget,
+          messageWindowByteBudget(req.query.byteBudget),
+          typeof req.query.byteBudget === "string",
         );
         res.json(toSessionDetailDTO(snapshot, {
           output: transcriptOutput,
@@ -1580,7 +1608,8 @@ export function registerSessionRoutes(
       && typeof req.query.blockBudget === "string" && /^\d+$/.test(req.query.blockBudget)) {
       const before = parseBoundedInteger(req.query.before, total, 0, total);
       const budget = parseBoundedInteger(req.query.blockBudget, 60, 1, 200);
-      const windowed = blockWindowMessagesForTransport(all.slice(0, before), config.cardDefaults ?? {}, budget);
+      const windowed = blockWindowMessagesForTransport(all.slice(0, before), config.cardDefaults ?? {}, budget,
+        messageWindowByteBudget(req.query.byteBudget), typeof req.query.byteBudget === "string");
       res.json({ wandProtocolVersion: WAND_PROTOCOL_VERSION, ...windowed,
         offset: windowed.messageOffset, total });
       return;
@@ -1605,7 +1634,8 @@ export function registerSessionRoutes(
       const blockEnd = Math.min(Math.max(Number.isFinite(rawBlockOffset) ? rawBlockOffset : blockTotal, 0), blockTotal);
       const blockStart = Math.max(0, blockEnd - blockLimit);
       const cardDefaults = config.cardDefaults ?? {};
-      const startOffset = alignedBlockStart(turn.content, cardDefaults, blockStart, blockEnd);
+      const startOffset = alignedBlockStart(turn.content, cardDefaults, blockStart, blockEnd,
+        Math.min(128 * 1024, messageWindowByteBudget(req.query.byteBudget)));
       const blocks = enrichStructuredMessages([{
         ...turn,
         content: sliceTurnBlocksForTransport(turn, startOffset, blockEnd, cardDefaults),

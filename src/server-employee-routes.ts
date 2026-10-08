@@ -139,7 +139,7 @@ export function parseSystemEmployeeAgents(value: unknown, existing: SiliconEmplo
   }
   const agents = body.agents.map((rawAgent): WandTaskAgent => {
     const parsed = parseTaskAgent(rawAgent ?? {});
-    if (!parsed) throw new Error("请选择有效的 CLI 工具或 SDK 执行引擎。");
+    if (!parsed) throw new Error("请选择有效的 CLI 工具或 Wand Agent。");
     if (parsed.kind !== "structured") throw new Error("硅基员工只支持结构化会话。");
     return parsed;
   });
@@ -169,7 +169,7 @@ export function parseSiliconEmployeeInput(
     }
     agents = body.agents.map((rawAgent): WandTaskAgent => {
       const parsed = parseTaskAgent(rawAgent ?? {});
-      if (!parsed) throw new Error("请选择有效的 CLI 工具或 SDK 执行引擎。");
+      if (!parsed) throw new Error("请选择有效的 CLI 工具或 Wand Agent。");
       if (parsed.kind !== "structured") throw new Error("硅基员工只支持结构化会话。");
       return parsed;
     });
@@ -177,7 +177,7 @@ export function parseSiliconEmployeeInput(
     throw new Error("候选执行配置必须是数组。");
   } else if (body.agent !== undefined && body.agent !== null) {
     const singleAgent = parseTaskAgent(body.agent);
-    if (!singleAgent) throw new Error("请选择有效的 CLI 工具或 SDK 执行引擎。");
+    if (!singleAgent) throw new Error("请选择有效的 CLI 工具或 Wand Agent。");
     if (singleAgent.kind !== "structured") throw new Error("硅基员工只支持结构化会话。");
     agents = [singleAgent];
   } else {

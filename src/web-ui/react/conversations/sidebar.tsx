@@ -135,17 +135,18 @@ export function ConversationSidebarList({ compact, onNavigate }: { compact: bool
   };
   return <div className="conversation-sidebar-list" onPointerEnter={() => setEngaged(true)} onPointerLeave={() => setEngaged(false)}
     onFocusCapture={() => setEngaged(true)} onBlurCapture={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setEngaged(false); }}>
-    {!compact ? <Flex className="conversation-search-host" align="center" gap={4}>
+    {!compact ? <div className="conversation-list-tools"><Flex className="conversation-search-host" align="center" gap={4}>
       <div className="conversation-search-input"><WandInput ref={searchInput} type="search" aria-label="搜索对话或任务" placeholder="搜索对话或任务"
+        startSlot={<WandIcon name="search" size={16}/>} endSlot={<span className="conversation-search-clear-space"/>}
         value={ui.filters["list-query"] ?? ""} onChange={event => conversationUi.filter("list-query", event.currentTarget.value)}
         onKeyDown={event => { if (event.key === "Escape" && !event.nativeEvent.isComposing) { event.preventDefault(); conversationUi.filter("list-query", ""); } }}/></div>
       <WandIconButton aria-label="清空搜索" disabled={!query} onClick={() => { conversationUi.filter("list-query", ""); searchInput.current?.focus({ preventScroll: true }); }}><WandIcon name="close"/></WandIconButton>
-    </Flex> : null}
-    {error ? <Typography.Text type="danger" role="status">{error}<WandButton size="small" onClick={refresh}>重新读取</WandButton></Typography.Text> : null}
-    {!compact ? <Flex justify="space-between" align="center" gap={4} className="conversation-list-section"><Typography.Text type="secondary">{conversationListFilterLabel(filter)}</Typography.Text>
+    </Flex>
+    <Flex justify="space-between" align="center" gap={4} className="conversation-list-section"><Typography.Text type="secondary">{conversationListFilterLabel(filter)}</Typography.Text>
       <WandStretchTabs className="conversation-list-filter" ariaLabel="对话归档筛选"
         tabs={[{ value: "all", label: "全部" }, { value: "active", label: "未归档" }, { value: "archived", label: "已归档" }]}
-        value={filter} onValueChange={(value) => setFilter(value as ConversationListFilter)}/></Flex> : null}
+        value={filter} onValueChange={(value) => setFilter(value as ConversationListFilter)}/></Flex></div> : null}
+    {error ? <Typography.Text type="danger" role="status">{error}<WandButton size="small" onClick={refresh}>重新读取</WandButton></Typography.Text> : null}
     {actionError ? <Typography.Paragraph type="danger" role="alert">{actionError}</Typography.Paragraph> : null}
     {rows.map(item => <ConversationListRow key={item.id} item={item} compact={compact} query={query}
       selected={ui.selectedId === item.id && ui.active !== false} onSelect={() => select(item.id)}
@@ -190,9 +191,8 @@ function ConversationListRow({ item, compact, query, selected, onSelect, onUpdat
       {employee ? <EmployeeAvatar employee={employee} size="chat"/> : item.kind === "group" ? <ConversationGroupAvatar title={item.title}/> : <Avatar size={48} icon={<WandIcon name="chat"/>}/>}</WandIconButton>
     {!compact ? <WandButton kind="ghost" className="conversation-row-open" title={item.title} onClick={onSelect}>
       <span className="conversation-row-copy"><span className="conversation-row-topline"><span className="conversation-row-title">{item.title}</span>
-        {archived ? <span className="conversation-archived-tag">已归档</span> : null}
         {formatConversationListTime(item.messageAt) ? <time className="conversation-row-time" dateTime={item.messageAt}>{formatConversationListTime(item.messageAt)}</time> : null}</span>
-        <span className="conversation-row-bottomline"><span className="conversation-row-preview">{item.dissolvedAt ? "群聊已解散 · 点击查看或恢复" : item.preview || (item.kind === "group" ? `${selfName} + ${item.team?.members.length ?? 0} 位员工` : "私聊")}</span>
+        <span className="conversation-row-bottomline">{archived ? <span className="conversation-archived-tag">已归档</span> : null}<span className="conversation-row-preview">{item.dissolvedAt ? "群聊已解散 · 点击查看或恢复" : item.preview || (item.kind === "group" ? `${selfName} + ${item.team?.members.length ?? 0} 位员工` : "私聊")}</span>
           {item.pinnedAt ? <span className="conversation-pin" title="已置顶" aria-label="已置顶"><WandIcon name="pin" size={13}/></span> : null}</span>
       </span></WandButton> : null}
     {!compact ? <WandIconButton className="conversation-row-more" aria-label={`${item.title}的菜单`} aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}><WandIcon name="more" size={16}/></WandIconButton> : null}

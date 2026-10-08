@@ -1,5 +1,6 @@
 import * as React from "react";
 import { isSessionJustCompleted } from "../../../session-completion-state.js";
+import { ptyTurnActive } from "../../session-activity.js";
 
 import type { TaskDirectoryGroup, WorkspaceSessionSummary } from "./types";
 
@@ -56,12 +57,13 @@ export function isSessionAttention(session: WorkspaceSessionSummary): boolean {
 }
 
 export function isSessionRunning(session: WorkspaceSessionSummary): boolean {
-  // Provider CLIs stay alive at their prompt between turns, so liveness alone
-  // (`providerCliActive`) is not "running". Only a real in-flight turn counts:
-  // ptyBusy for PTY (bridge or quiet-window tracker) and inFlight for structured.
+  // Provider liveness and an open shell are not work. Provider turns use ptyBusy/inFlight;
+  // a blank terminal uses the server-observed foreground command, including silent work.
+  if (session.archived) return false;
   return session.ptyBusy === true
     || session.inFlight === true
-    || session.status === "thinking";
+    || session.status === "thinking"
+    || ptyTurnActive(session);
 }
 
 /** 「活动」= 在跑或等你处理；群聊条目按同一规则判定。 */

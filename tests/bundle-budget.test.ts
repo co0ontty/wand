@@ -24,6 +24,8 @@ function budgetFixture(): { run: (lazy: string) => ReturnType<typeof spawnSync>;
   copyFileSync(new URL("../.nvmrc", import.meta.url), join(root, ".nvmrc"));
   copyFileSync(new URL("../scripts/check-bundle-budget.js", import.meta.url),
     join(scripts, "check-bundle-budget.js"));
+  copyFileSync(new URL("../scripts/node-version.js", import.meta.url),
+    join(scripts, "node-version.js"));
   writeFileSync(join(assets, "index.js"),
     'export const renderApp = () => \'<!doctype html><script src="/assets/app.js"></script>\';');
   writeFileSync(join(assets, "styles.js"),

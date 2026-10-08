@@ -26,6 +26,7 @@ const DEFAULT_CONFIG_FILE = "config.json";
 export const PREFERENCE_KEYS = [
   "defaultProvider",
   "defaultSessionKind",
+  "defaultEngine",
   "defaultTaskWorktree",
   "defaultMode",
   "defaultCwd",
@@ -111,6 +112,8 @@ export const defaultConfig = (): WandConfig => ({
   password: "change-me",
   defaultProvider: "claude",
   defaultSessionKind: "structured",
+  // 新建会话默认走 CLI；只有用户在新建面板显式选过 Wand Agent 才会改成 sdk。
+  defaultEngine: "cli",
   defaultTaskWorktree: true,
   // 非 root 启动时才有资格用 Claude 的 permission-bypass（root 会被 Claude CLI 拒绝），
   // 所以这种环境下把默认执行模式抬到「托管」——开箱即得自动确认权限的全自主体验。
@@ -367,6 +370,10 @@ export function applyStoragePreferences(config: WandConfig, storage: WandStorage
     const v = storage.getPreference<string>(preferenceStorageKey("defaultSessionKind"), defaults.defaultSessionKind ?? "structured");
     if (v === "pty" || v === "structured") config.defaultSessionKind = v;
   }
+  if (storage.hasPreference(preferenceStorageKey("defaultEngine"))) {
+    const v = storage.getPreference<string>(preferenceStorageKey("defaultEngine"), defaults.defaultEngine ?? "cli");
+    if (v === "cli" || v === "sdk") config.defaultEngine = v;
+  }
   if (storage.hasPreference(preferenceStorageKey("defaultTaskWorktree"))) {
     const v = storage.getPreference<boolean>(preferenceStorageKey("defaultTaskWorktree"), defaults.defaultTaskWorktree ?? true);
     if (typeof v === "boolean") config.defaultTaskWorktree = v;
@@ -464,6 +471,12 @@ export function writePreferenceToStorage(
       if (value !== "pty" && value !== "structured") throw new Error(`无效会话类型: ${value}`);
       storage.setPreference(dbKey, value);
       config.defaultSessionKind = value;
+      break;
+    }
+    case "defaultEngine": {
+      if (value !== "cli" && value !== "sdk") throw new Error(`无效执行引擎: ${String(value)}`);
+      storage.setPreference(dbKey, value);
+      config.defaultEngine = value;
       break;
     }
     case "defaultTaskWorktree": {
@@ -790,6 +803,7 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
     taskRetention: normalizeTaskRetention(input.taskRetention),
     defaultProvider: isSessionProvider(input.defaultProvider) ? input.defaultProvider : "claude",
     defaultSessionKind: input.defaultSessionKind === "pty" ? "pty" : "structured",
+    defaultEngine: input.defaultEngine === "sdk" ? "sdk" : "cli",
     defaultTaskWorktree: typeof input.defaultTaskWorktree === "boolean" ? input.defaultTaskWorktree : defaults.defaultTaskWorktree,
     ...providerModelOverrides(input, defaults),
     modelGroups: normalizeModelGroups(input.modelGroups ?? []),

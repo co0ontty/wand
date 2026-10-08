@@ -35,7 +35,7 @@ export function OpenRouterSettingsPanel({ snapshot, repository, setSnapshot }: P
 
   return (
     <SettingsSection title="OpenRouter 免费模型"
-      description="在 one 的 Agent 中选择「免费分组」即可，由系统自动分配已验证的免费语言模型，无需指定具体模型。填写 Key 后立即同步，之后每 6 小时自动更新；每次调用前检查价格，已收费的自动换用其他免费模型。">
+      description="在 Pi 中选择「免费分组」即可，由系统自动分配已验证的免费语言模型，无需指定具体模型。填写 Key 后立即同步，之后每 6 小时自动更新；每次调用前检查价格，已收费的自动换用其他免费模型。">
       <SettingsField label="OpenRouter Key" htmlFor="settings-openrouter-key"
         hint={status?.configured ? "Key 已保存；填写新 Key 可以替换。密钥不会回显。" : "在 OpenRouter 创建 API Key 后填写。"}>
         <SettingsTextInput id="settings-openrouter-key" type="password" autoComplete="new-password"
@@ -53,7 +53,7 @@ export function OpenRouterSettingsPanel({ snapshot, repository, setSnapshot }: P
       <SettingsStatus tone={message ? failed ? "error" : "success" : status?.lastError ? "error" : "info"}>
         {(pending ? "正在同步价格并验证新增模型，请稍候…" : message) || status?.lastError || (status?.configured
           ? `免费分组 · ${status.modelCount} 个已验证模型 · ${status.rejectedCount ?? 0} 个已移除${status.lastSyncedAt ? ` · 上次同步 ${new Date(status.lastSyncedAt).toLocaleString()}` : " · 尚未同步成功"}`
-          : "保存 Key 后，可在 one 的 Agent 的模型选择器中选择「免费分组」。")}
+          : "保存 Key 后，可在 Pi 的模型选择器中选择「免费分组」。")}
       </SettingsStatus>
     </SettingsSection>
   );

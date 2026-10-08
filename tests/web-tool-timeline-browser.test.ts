@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import test from "node:test";
 
 const exec = promisify(execFile);
-test("real Chrome tool timeline keeps all calls, fixed height and click-only detail requests", {
+test("real Chrome tool timeline auto-expands, follows new calls and preserves manual reading", {
   timeout: 180_000,
 }, async (t) => {
   // 浏览器回归默认关闭：本地 npm test 只跑单测；CI（和需要时手动）用 WAND_BROWSER_E2E=1 打开。
@@ -17,10 +17,11 @@ test("real Chrome tool timeline keeps all calls, fixed height and click-only det
   ], { maxBuffer: 2 * 1024 * 1024, timeout: 170_000 });
   const report = JSON.parse(stdout.trim());
   assert.equal(report.ok, true);
-  assert.equal(report.cases.length, 18);
+  assert.equal(report.cases.length, 24);
+  assert.equal(report.cases.filter((entry: any) => entry.case === "live-auto-expand" && entry.ok).length, 6);
   assert.equal(report.cases.filter((entry: any) => entry.case === "automatic-resource-notice" && entry.ok).length, 6);
-  assert.equal(report.cases.filter((entry: any) => entry.fixedHeight === 240).length, 6);
-  assert.ok(report.cases.filter((entry: any) => entry.fixedHeight === 240)
+  assert.equal(report.cases.filter((entry: any) => entry.rows === 40 && entry.panelHeight === 200).length, 6);
+  assert.ok(report.cases.filter((entry: any) => entry.rows === 40)
     .every((entry: any) => entry.decisionIndependent && entry.decisionPendingErrorAndOrphan && entry.decisionFeedbackStable
       && entry.decisionDefaultCollapsed && entry.decisionHeaderStable));
   const summaryCase = report.cases.find((entry: any) => entry.mode === "collapsed-summary-time");

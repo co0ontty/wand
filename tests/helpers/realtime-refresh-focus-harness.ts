@@ -54,6 +54,9 @@ function publish(next = turns, patch: Record<string, unknown> = {}): void {
     clearActivityDetailState(); state.toolContentCache = {}; state.sessions = [];
     state.selectedId = "focus-A"; state.currentView = "chat";
     resetChatRenderCache();
+    // Focus/reading fixtures explicitly put their whole small transcript in the
+    // local window; viewport pagination has its own real-browser regression.
+    state.chatRenderedCount = next.length;
     publish(next, patch); doRenderChat(false); await frames();
   },
   // A synthetic second on-demand HTTP response is accepted in the existing detail cache.

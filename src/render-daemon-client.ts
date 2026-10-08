@@ -19,6 +19,7 @@ import {
   type RenderResponse,
 } from "./render-protocol.js";
 import {
+  appendTerminalChunkBatch,
   appendTerminalChunkWindow,
   type TerminalAttachResult,
   type TerminalDataEvent,
@@ -42,6 +43,17 @@ const AUTH_FAILURE_RETRY_MS = 60_000;
 const REQUEST_TIMEOUT_MS = 10_000;
 /** 未挂上 listener 时的缓存上限，与 legacy 客户端保持一致。 */
 const MAX_PENDING_EVENTS = 512;
+/** Tiny fixed window bounds projection cost even when IPC reads arrive one by one. */
+const LIVE_BATCH_FLUSH_MS = 4;
+const LIVE_BATCH_MAX_CHARS = 64 * 1024;
+const LIVE_BATCH_MAX_EVENTS = 1024;
+
+interface LiveDataBatch {
+  state: TerminalSessionState;
+  handle: RemoteRenderProcess;
+  events: TerminalDataEvent[];
+  chars: number;
+}
 
 interface PendingRequest {
   method: RenderMethod;
@@ -201,6 +213,8 @@ export class RenderDaemonClient implements TerminalHost {
   private bodyParts: Buffer[] = [];
   private bodyBytes = 0;
   private frameLength: number | null = null;
+  private liveDataBatch: LiveDataBatch | null = null;
+  private liveFlushTimer: NodeJS.Timeout | null = null;
   private disposed = false;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private reconnectDelayMs = RECONNECT_INITIAL_MS;
@@ -401,6 +415,7 @@ export class RenderDaemonClient implements TerminalHost {
   }
 
   attach(sessionId: string, afterSeq = 0): TerminalAttachResult | null {
+    this.flushLiveData();
     const state = this.inventory.get(sessionId);
     if (!state) return null;
     return this.resultFromState(state, false, afterSeq);
@@ -449,6 +464,7 @@ export class RenderDaemonClient implements TerminalHost {
    * 这是 Server / Render 分离的核心 —— 下一次启动 attach 回来仍拿到同一批会话。
    */
   disconnect(): void {
+    this.flushLiveData();
     this.disposed = true;
     this.stopHeartbeat?.();
     this.stopHeartbeat = null;
@@ -663,6 +679,7 @@ export class RenderDaemonClient implements TerminalHost {
   }
 
   private handleResponse(message: RenderResponse): void {
+    this.flushLiveData();
     if (typeof message.id !== "number") return;
     const pending = this.pending.get(message.id);
     if (!pending) return;
@@ -678,6 +695,7 @@ export class RenderDaemonClient implements TerminalHost {
   }
 
   private routeEvent(event: RenderEvent): void {
+    if (event.event !== "data") this.flushLiveData();
     if (this.reconciling) {
       if (event.event === "reconcile") {
         this.reconcileDuringSync = event;
@@ -712,24 +730,71 @@ export class RenderDaemonClient implements TerminalHost {
       if (event.event === "data" && typeof event.data === "string" && typeof event.seq === "number") {
         if (event.seq <= state.seq) return;
         if (event.seq > state.seq + 1) {
+          this.flushLiveData();
           this.queuePendingEvent(sessionId, event);
           void this.refreshSession(sessionId, handle);
           return;
         }
-        state.seq = Math.max(state.seq, event.seq);
-        state.output = appendWindow(state.output, event.data, PTY_OUTPUT_MAX_SIZE);
-        state.chunks = appendTerminalChunkWindow(state.chunks, { data: event.data, seq: event.seq });
+        // Validate every wire sequence independently. Only local projection is
+        // batched; attach/reconnect still retain the original per-frame cursors.
+        state.seq = event.seq;
+        this.queueLiveData(state, handle, { data: event.data, seq: event.seq });
+        return;
       } else if (event.event === "exit") {
         state.status = "exited";
         state.exitCode = event.exitCode ?? -1;
       }
     }
     if (event.event === "data" && typeof event.data === "string" && typeof event.seq === "number") {
+      this.flushLiveData();
       handle.acceptData({ data: event.data, seq: event.seq });
     } else if (event.event === "exit") {
       handle.acceptExit({ exitCode: event.exitCode ?? -1, signal: event.signal ?? undefined });
       this.handles.delete(sessionId);
     }
+  }
+
+  private queueLiveData(state: TerminalSessionState, handle: RemoteRenderProcess, event: TerminalDataEvent): void {
+    if (this.liveDataBatch && (this.liveDataBatch.state !== state || this.liveDataBatch.handle !== handle)) {
+      this.flushLiveData();
+    }
+    const batch = this.liveDataBatch ?? { state, handle, events: [], chars: 0 };
+    this.liveDataBatch = batch;
+    batch.events.push(event);
+    batch.chars += event.data.length;
+    if (batch.chars >= LIVE_BATCH_MAX_CHARS || batch.events.length >= LIVE_BATCH_MAX_EVENTS) {
+      this.flushLiveData();
+    } else if (!this.liveFlushTimer) {
+      // IPC can deliver many tiny reads on successive turns. A check-phase
+      // flush alone still projects each read on a busy installed Server. Keep
+      // the first read's deadline (never reset on more data): continuous output
+      // cannot starve, while idle echo pays at most one 4ms window.
+      this.liveFlushTimer = setTimeout(() => {
+        this.liveFlushTimer = null;
+        this.flushLiveData();
+      }, LIVE_BATCH_FLUSH_MS);
+      this.liveFlushTimer.unref();
+    }
+  }
+
+  flush(): void {
+    this.flushLiveData();
+  }
+
+  private flushLiveData(): void {
+    if (this.liveFlushTimer) {
+      clearTimeout(this.liveFlushTimer);
+      this.liveFlushTimer = null;
+    }
+    const batch = this.liveDataBatch;
+    if (!batch) return;
+    this.liveDataBatch = null;
+    if (this.disposed || this.handles.get(batch.state.sessionId) !== batch.handle
+      || this.inventory.get(batch.state.sessionId) !== batch.state) return;
+    const data = batch.events.map(event => event.data).join("");
+    batch.state.output = appendWindow(batch.state.output, data, PTY_OUTPUT_MAX_SIZE);
+    batch.state.chunks = appendTerminalChunkBatch(batch.state.chunks, batch.events);
+    batch.handle.acceptData({ data, seq: batch.events[batch.events.length - 1].seq });
   }
 
   private queuePendingEvent(sessionId: string, event: RenderEvent): void {
@@ -809,6 +874,7 @@ export class RenderDaemonClient implements TerminalHost {
    */
   private handleDisconnect(origin: net.Socket): void {
     if (this.socket !== origin) return;
+    this.flushLiveData();
     this.socket = null;
     this.stopHeartbeat?.();
     this.stopHeartbeat = null;

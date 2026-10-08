@@ -37,6 +37,10 @@ export function sessionGlowStatus(session: {
   inFlight?: boolean;
   turnActive?: boolean;
   ptyBusy?: boolean;
+  ptyCommandRunning?: boolean;
+  sessionKind?: string;
+  runner?: string;
+  provider?: string;
   providerCliActive?: boolean;
   completionRevision?: number;
   viewedCompletionRevision?: number;

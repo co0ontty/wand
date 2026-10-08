@@ -39,16 +39,29 @@ export function providerCliCommand(provider: SessionProvider): string {
   return provider === "qoder" ? "qodercli" : provider;
 }
 
-/** provider 的展示名。缺省不认识的字符串一律回落到 "AI"。 */
+/**
+ * provider 的展示名。缺省不认识的字符串一律回落到 "AI"。
+ *
+ * `pi` 指的是 Pi CLI（结构化 JSON / PTY 终端），与 Wand 自带的 Agent 是两条独立执行路径：
+ * 后者走进程内 SDK，展示名用 `WAND_AGENT_LABEL`，不要拿 provider 名字冒充它。
+ */
 export const PROVIDER_LABELS: Readonly<Record<SessionProvider, string>> = {
   claude: "Claude",
   codex: "Codex",
   opencode: "OpenCode",
   grok: "Grok",
   qoder: "Qoder",
-  pi: "one 的 Agent",
+  pi: "Pi",
   gemini: "Gemini",
 };
+
+/**
+ * Wand 自带 Agent（进程内 `core` harness / SDK）的展示名。
+ *
+ * 它和 `pi` provider 不是同一个东西：`pi` 起 Pi CLI 进程，Wand Agent 在 Wand 进程内用 SDK 跑 agent loop，
+ * 因此能力边界（会话级 Skills / MCP、CodeMode、持久化恢复）也不一样。
+ */
+export const WAND_AGENT_LABEL = "Wand Agent";
 
 /**
  * provider id 别名表：既接受用户/客户端可能写出的别名（`anthropic`、`open-code`），

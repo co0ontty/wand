@@ -80,7 +80,7 @@ export function normalizeModelGroups(value: unknown): ModelGroup[] {
         || trimmed === OPENROUTER_FREE_SELECTOR || trimmed.startsWith("-")) {
         throw new Error("组内必须是具体模型 ID，不能嵌套分组或使用默认值。");
       }
-      if (isOpenRouterFreeSelector(trimmed) && provider !== "pi") throw new Error("免费模型仅属于 one 的 Agent。");
+      if (isOpenRouterFreeSelector(trimmed) && provider !== "pi") throw new Error("免费模型仅属于 Pi。");
       if (free && !trimmed.startsWith(`${OPENROUTER_FREE_PROVIDER}/`)) throw new Error("免费分组只能包含免费池中的模型。");
       return trimmed;
     });
@@ -126,7 +126,7 @@ export function resolveModelGroupModels(
 ): string[] {
   const value = modelSelectorWithoutAutoAssign(selector);
   if (value === OPENROUTER_FREE_SELECTOR) {
-    if (provider !== "pi") throw new Error("免费分组仅属于 one 的 Agent。");
+    if (provider !== "pi") throw new Error("免费分组仅属于 Pi。");
     return [value];
   }
   const group = findModelGroup(groups, provider, value, options);

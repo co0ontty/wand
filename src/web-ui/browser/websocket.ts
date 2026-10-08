@@ -10,7 +10,7 @@ import type { ComposerPermissionAction } from "../react/composer-badges/controll
 import { renderChat, scheduleChatRender } from "./chat-render";
 import { clearStructuredQueuePersistence } from "./chat-scroll";
 import { mergeIncrementalWindowedTurn } from "./message-reconciliation";
-import { flushPendingMessages, buildMessagesForRender, isCurrentTerminalSession, flashComposerFailed, flushStructuredInputQueue, updateStructuredQueueCounter, setTerminalInteractive, flushCrossSessionQueue, reconcileInteractiveState, getSelectedSession, closeKeyboardPopup } from "./input";
+import { flushPendingMessages, buildMessagesForRender, isCurrentTerminalSession, flashComposerFailed, flushStructuredInputQueue, updateStructuredQueueCounter, setTerminalInteractive, flushCrossSessionQueue, reconcileInteractiveState, getSelectedSession } from "./input";
 import { notifyTaskEnded, clearSessionProgressNative, _syncWakeLock, showNotificationBubble, notifyTaskProgress, syncSessionProgressToNative, notifyPermissionRequest, notifyUpdateAvailable, showAutoUpdateOverlay, showRestartOverlay, showToast } from "./notifications";
 import { refreshAll, scheduleSessionListUpdate, subscribeToSession, updateSessionSnapshot, markSessionCompletionViewed, getPreferredMessages, selectSession, updateShellChrome, loadOutput, isAutoApproveImpliedByMode, applyCurrentView, fetchAvailableModels, loadSessions } from "./session-engine";
 import { getLastAssistantSummary } from "./session-ui";
@@ -684,6 +684,10 @@ function projectSelectedChat(sessionId: string): any {
               if (Object.prototype.hasOwnProperty.call(msg.data, 'ptyBusy')) {
                 statusUpdate.ptyBusy = !!msg.data.ptyBusy;
               }
+              if (Object.prototype.hasOwnProperty.call(msg.data, 'ptyCommandRunning')) {
+                statusUpdate.ptyCommandRunning = msg.data.ptyCommandRunning === true;
+                notifyTasksChanged();
+              }
               if (msg.data.structuredState) {
                 statusUpdate.structuredState = msg.data.structuredState;
               } else if (Object.prototype.hasOwnProperty.call(msg.data, 'status')) {
@@ -792,7 +796,8 @@ function projectSelectedChat(sessionId: string): any {
                 }
                 // Re-render chat when structured session inFlight state changes
                 if (statusUpdate.structuredState || statusUpdate.messages ||
-                  Object.prototype.hasOwnProperty.call(statusUpdate, "ptyBusy")) {
+                  Object.prototype.hasOwnProperty.call(statusUpdate, "ptyBusy") ||
+                  Object.prototype.hasOwnProperty.call(statusUpdate, "ptyCommandRunning")) {
                   // Flush queued structured messages synchronously before render
                   // so the chat view uses up-to-date queue state.
                   if (statusUpdate.structuredState && !statusUpdate.structuredState.inFlight) {
@@ -974,7 +979,6 @@ function projectSelectedChat(sessionId: string): any {
         state.currentView = view || "terminal";
         if (state.currentView !== "terminal") {
           setTerminalInteractive(false);
-          closeKeyboardPopup();
         }
         applyCurrentView();
         reconcileInteractiveState();

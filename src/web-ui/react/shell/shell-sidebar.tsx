@@ -5,7 +5,7 @@ import { WandBrandMark } from "../ui/brand-mark";
 import { wandOverlay } from "../overlay-controller";
 import * as React from "react";
 import { isSessionJustCompleted } from "../../../session-completion-state.js";
-import { normalizeProviderId, providerDisplayName } from "../../provider-identity";
+import { WAND_AGENT_LABEL, normalizeProviderId, providerDisplayName } from "../../provider-identity";
 import { ProviderLogo } from "../provider-logo";
 import { WorkspacesPanel } from "../workspaces/workspaces-panel";
 import { SidebarProjectionSwap } from "../workspaces/sidebar-projection-swap";
@@ -245,11 +245,13 @@ function formatEntryTime(entry: Readonly<UiSessionVm>): string {
 }
 
 function ProviderMark({ entry }: { entry: Readonly<UiSessionVm> }) {
-  const label = providerDisplayName(entry.provider);
+  // 引擎决定名字：Wand Agent 与 Pi 共用一个 provider，标记不能都写成 Pi。
+  const label = entry.engine === "sdk" ? WAND_AGENT_LABEL : providerDisplayName(entry.provider);
   const provider = normalizeProviderId(entry.provider);
   return (
     <span
-      className={classNames("session-provider-mark", `provider-${provider ?? "generic"}`)}
+      className={classNames("session-provider-mark", `provider-${provider ?? "generic"}`,
+        entry.engine === "sdk" && "provider-engine-sdk")}
       aria-hidden="true"
       title={label}
     >
@@ -703,19 +705,17 @@ export function ShellSidebar() {
         onClick={() => void dispatch({ type: "layout.drawer.close" })}
       />
       <Layout.Sider id="sessions-drawer" ref={drawerRef as React.RefObject<HTMLDivElement | null>} className={sidebarClass}
-        width={296} collapsedWidth={72} collapsed={narrow} theme="light"
-        style={{ position: overlay ? "fixed" : "relative", top: overlay ? "var(--wand-safe-top, 0px)" : undefined, bottom: overlay ? "var(--wand-safe-bottom, 0px)" : undefined, left: 0, display: visible ? undefined : "none", zIndex: overlay ? 20000 : 2, maxWidth: "calc(100vw - 24px)", height: "100%", overflow: "visible" }}
+        width="min(320px, calc(100vw - 24px))" collapsedWidth={72} collapsed={narrow} theme="light"
+        style={{ position: overlay ? "fixed" : "relative", top: overlay ? "var(--wand-safe-top, 0px)" : undefined, bottom: overlay ? "var(--wand-safe-bottom, 0px)" : undefined, left: 0, display: visible ? undefined : "none", zIndex: overlay ? 20000 : 2, height: "100%", overflow: "visible" }}
         styles={{ body: { display: "flex", flexDirection: "column", height: "100%", minHeight: 0 } }}
         aria-label="主导航与会话列表" role={overlay ? "dialog" : undefined}
         aria-modal={overlay || undefined} aria-hidden={!visible || undefined}
         inert={!visible} tabIndex={-1} {...peek.triggerBindings}>
         <Flex vertical gap="small" className="sidebar-header" style={{ padding: narrow ? "12px 8px" : "12px 16px", flexShrink: 0 }}>
-          <Flex vertical={narrow} align="center" justify="space-between" gap="small" wrap className="sidebar-header-primary">
+          <Flex vertical={narrow} align="center" justify="space-between" gap="small" className="sidebar-header-primary">
             <Flex align="center" gap="small" className="sidebar-header-main">
               <WandBrandMark className="sidebar-brand-mark" style={{ width: 24, height: 24 }} />
               <Typography.Text strong className="sidebar-title" hidden={narrow} style={{ whiteSpace: "nowrap" }}>Wand</Typography.Text>
-              {!narrow && <><SidebarListErrorBadge />
-              <HomeAttentionBadge open={attentionOpen} onToggle={() => setAttentionOpen((value) => !value)} /></>}
             </Flex>
             <Flex align="center" gap={4} vertical={narrow} className="sidebar-header-actions">
               <div hidden={conversationState.mode !== "chats"}><ConversationSidebarTools enabled={visible && conversationState.mode === "chats"}
@@ -829,6 +829,10 @@ export function ShellSidebar() {
               )}
             </Flex>
           </Flex>
+          {!narrow && <Flex gap={4} wrap className="sidebar-status">
+            <SidebarListErrorBadge />
+            <HomeAttentionBadge open={attentionOpen} onToggle={() => setAttentionOpen((value) => !value)} />
+          </Flex>}
         </Flex>
         <HomeAttentionPanel open={attentionOpen && !narrow} onClose={() => setAttentionOpen(false)} />
         <div style={{ padding: narrow ? "0 4px 8px" : "0 12px 8px" }}><ConversationNavigation compact={narrow} onDirectory={() => { taskBoardController.close(); conversationUi.directory(true); dismissSidebarSurfaces(); }}/></div>
@@ -886,7 +890,7 @@ export function ShellSidebar() {
             <div className="sessions-list">{taskTree(false, peekDirectory.id)}</div>
           </SidebarPeek>
         ) : null}
-        <Flex vertical gap="small" className="sidebar-footer" style={{ flexShrink: 0, padding: narrow ? 8 : "12px 16px", borderTop: "1px solid var(--border-subtle)" }}>
+        <Flex vertical={narrow} align="center" justify="space-between" gap="small" className="sidebar-footer" style={{ flexShrink: 0, padding: narrow ? 8 : "8px 16px", borderTop: "1px solid var(--border-subtle)" }}>
           <Flex component="nav" wrap gap={4} vertical={narrow} className="sidebar-footer-actions" aria-label="侧栏快捷操作">
             <WandButton kind="ghost" id="settings-button" title="设置" aria-label="设置" onClick={() => navigate({ type: "settings.open" })}>
               <WandIcon name="gear" size={16}/><span hidden={narrow}>设置</span>
@@ -904,7 +908,7 @@ export function ShellSidebar() {
               <WandIcon name="server" size={16}/><span hidden={narrow}>切换</span>
             </WandIconButton>}
           </Flex>
-          <Typography.Text type="secondary" className="sidebar-footer-caption" hidden={narrow} style={{ fontSize: 12 }}>本机工作台</Typography.Text>
+          <Typography.Text type="secondary" className="sidebar-footer-caption" hidden={narrow} style={{ fontSize: 12, whiteSpace: "nowrap" }}>本机工作台</Typography.Text>
         </Flex>
       </Layout.Sider>
     </SidebarPresentationContext.Provider>

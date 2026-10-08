@@ -36,7 +36,7 @@ import {
   filterIssues,
   groupIssuesByStatus,
   issueAgentEffortOptions,
-  ISSUE_AGENT_PROVIDERS,
+  ISSUE_AGENT_TARGETS,
   ISSUE_ARCHIVE_COLUMN,
   ISSUE_NO_PARENT,
   ISSUE_BOARD_VIEWS,
@@ -60,7 +60,8 @@ import {
   normalizeIssueModelCatalog,
   readIssueBoardDisplay,
   resolveIssueAgent,
-  withIssueAgentProvider,
+  issueAgentTargetValue,
+  withIssueAgentTarget,
   writeIssueBoardDisplay,
   type IssueAgentProvider,
   type IssueBoardDisplay,
@@ -152,7 +153,7 @@ export function TaskBoardHost({
   const controller = React.useSyncExternalStore(taskBoardStore.subscribe, taskBoardStore.getSnapshot, taskBoardStore.getSnapshot);
   const providerUsage = useProviderUsage(controller.open);
   const providerOptions = providerUsage === null ? null : sortProviderOptions(
-    ISSUE_AGENT_PROVIDERS, providerUsage, (entry) => entry.value,
+    ISSUE_AGENT_TARGETS, providerUsage, (entry) => entry.provider,
   ).map((entry) => ({ value: entry.value, label: entry.label }));
   const [restored] = React.useState(readTaskBoardViewState);
   const [tasks, setTasks] = React.useState<WandTaskListed[]>([]);
@@ -1293,7 +1294,7 @@ export function TaskBoardHost({
               {providerOptions ? <WandSelect
                 value={dispatchSelected ? DISPATCH_VALUE
                   : createEmployee ? `employee:${createEmployee.id}`
-                  : createTeam ? `team:${createTeam.id}` : draft.agent.provider}
+                  : createTeam ? `team:${createTeam.id}` : issueAgentTargetValue(draft.agent)}
                 options={createDispatches
                   ? agentTargetOptions(providerOptions, teams, employees, { includeDispatch: true })
                   : providerOptions}
@@ -1320,7 +1321,7 @@ export function TaskBoardHost({
                   }
                   setDraft((current) => ({
                     ...current,
-                    agent: withIssueAgentProvider(current.agent, value as WandTaskAgent["provider"], catalog),
+                    agent: withIssueAgentTarget(current.agent, value, catalog),
                   }));
                 }}
               /> : <span role="status">正在加载工具列表…</span>}
@@ -1441,7 +1442,7 @@ function IssueDetail({
   busy: boolean;
   catalog: IssueModelCatalog | null;
   agent: WandTaskAgent;
-  providerOptions: Array<{ value: IssueAgentProvider; label: string }> | null;
+  providerOptions: Array<{ value: string; label: string }> | null;
   teams: AiTeam[] | null;
   teamId: string;
   employees: ReturnType<typeof useSiliconEmployees>["employees"];

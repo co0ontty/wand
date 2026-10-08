@@ -52,6 +52,16 @@ async function runConversationBrowser(t: TestContext, mentions: boolean): Promis
     h.storage.appendConversationEvent(conversationId, { role: "user", createdAt, messageId: `visual-markdown-own-${conversationId}`,
       content: [{ type: "text", text: "**不加粗**：自己写的原文保留" }] });
   }
+  // 会话转录：IM 页现在用与会话详情同一套工具行（状态点 + 时钟 + 标签 + 等宽摘录）。
+  const activityAt = new Date().toISOString();
+  h.storage.appendConversationEvent("dm_e_wand_default", { role: "assistant", createdAt: activityAt,
+    messageId: "visual-activity-dm", author: { id: "e_test_1", name: "员工 1", sessionId: "visual-activity-session" },
+    content: [
+      { type: "thinking", thinking: "先核对页面结构，再决定改哪一层。", occurredAt: activityAt },
+      { type: "tool_use", id: "visual-read", name: "Read", input: { file_path: "src/main.ts" }, preview: "src/main.ts",
+        activity: { kind: "read_file", label: "查看 src/main.ts", occurredAt: activityAt } },
+      { type: "tool_result", tool_use_id: "visual-read", content: "const checked = 1;", preview: "已读取 12 行" },
+    ] });
   const source = `
     import * as React from "react";
     import { createRoot } from "react-dom/client";
@@ -313,7 +323,6 @@ async function runConversationBrowser(t: TestContext, mentions: boolean): Promis
     assert.ok(cardAfter.height >= cardBefore.height, "a longer transcript grows the reply");
     assert.ok(cardAfter.height - cardBefore.height <= 600, "the transcript viewport stays bounded");
     assert.deepEqual(await rect('.conversation-submit'), submitBefore, "acceptance and streaming preserve submit geometry");
-    assert.deepEqual(await rect('.conversation-submit'), submitBefore, "acceptance and streaming preserve submit geometry");
     const scrollSelector = cardSelector + ' [aria-label="会话实时回复"]';
     // 转录用内容自适应 + 上限封顶，不再是固定 232px 的小窗口。
     const transcriptShape = await evaluate(`(()=>{const b=document.querySelector(${JSON.stringify(scrollSelector)});const cs=getComputedStyle(b);return {height:cs.height,maxHeight:cs.maxHeight,overflowY:cs.overflowY}})()`);
@@ -324,6 +333,49 @@ async function runConversationBrowser(t: TestContext, mentions: boolean): Promis
     await evaluate(`conversationFixture.sessionLive(${JSON.stringify(update(liveText + "新增不抢阅读"))})`);
     await wait(`document.querySelector(${JSON.stringify(cardSelector)})?.textContent.includes('新增不抢阅读')`);
     assert.equal(await evaluate(`document.querySelector(${JSON.stringify(scrollSelector)}).scrollTop`), 0, "reading position wins over new stream data");
+    // IM 会话转录：展开摘要后是共享的行骨架，不再有自己的 Ant Collapse 外壳。
+    const activitySection = '.conversation-turn-activity';
+    assert.equal(await evaluate(`!!document.querySelector(${JSON.stringify(activitySection)})`), true, "the IM page renders the turn transcript");
+    const collapsedActivity = await evaluate(`(()=>{const block=document.querySelector(${JSON.stringify(activitySection)});
+      const summary=block.querySelector('.chat-process-summary-plain');
+      return {expanded:summary?.getAttribute('aria-expanded'),rows:block.querySelectorAll('.chat-call-inline').length,legacyCollapse:!!block.querySelector('.ant-collapse')}})()`);
+    assert.equal(collapsedActivity.expanded, "false", "the transcript summary starts collapsed while the turn is idle");
+    assert.equal(collapsedActivity.legacyCollapse, false, "the IM transcript drops its own collapse chrome");
+    assert.equal(collapsedActivity.rows, 0, "collapsed rows stay unrendered");
+    await click(`${activitySection} .chat-process-summary-plain`);
+    await pause(150);
+    const activityRows = await evaluate(`(()=>{const block=document.querySelector(${JSON.stringify(activitySection)});
+      const rows=[...block.querySelectorAll('.chat-call-inline')];
+      const tool=rows.find(row=>row.dataset.toolId);
+      const thinking=rows.find(row=>row.dataset.thinkingEntry==="true");
+      const mark=tool?.querySelector('.chat-call-mark');
+      return {rows:rows.length,summary:block.querySelector('.chat-process-summary-plain')?.innerText||'',
+        expanded:block.querySelector('.chat-process-summary-plain')?.getAttribute('aria-expanded'),
+        markColor:mark?getComputedStyle(mark).backgroundColor:'', label:tool?.querySelector('.chat-call-label')?.innerText||'',
+        clock:tool?.querySelector('.chat-call-time')?.innerText||'', input:tool?.querySelector('.chat-call-preview')?.innerText||'',
+        result:tool?.querySelector('.chat-call-result')?.innerText||'', thinkingLabel:thinking?.querySelector('.chat-call-label')?.innerText||''}})()`);
+    assert.equal(activityRows.expanded, "true");
+    assert.equal(activityRows.rows, 2, "thinking and tool rows share one row skeleton");
+    assert.match(activityRows.summary, /条记录/);
+    assert.equal(activityRows.thinkingLabel, "思考过程");
+    assert.match(activityRows.label, /查看 src\/main\.ts/);
+    assert.match(activityRows.clock, /^\d{2}:\d{2}:\d{2}$/);
+    assert.equal(activityRows.input, "src/main.ts");
+    assert.equal(activityRows.result, "已读取 12 行");
+    assert.notEqual(activityRows.markColor, "rgba(0, 0, 0, 0)", "each row carries a status mark");
+    await click(`${activitySection} .chat-call-inline[data-tool-id=visual-read] .chat-call-button`);
+    await pause(150);
+    const activityDetail = await evaluate(`(()=>{const row=document.querySelector('.chat-call-inline[data-tool-id=visual-read]');
+      const body=row.querySelector('.chat-disclosure-body'); return {open:row.dataset.expanded, height:Math.round(body.getBoundingClientRect().height),
+        headings:[...row.querySelectorAll('.chat-activity-detail-section h4')].map(node=>node.innerText), text:body.innerText}})()`);
+    assert.equal(activityDetail.open, "true");
+    assert.ok(activityDetail.height > 0, "expanding a row reveals its detail in place");
+    assert.deepEqual(activityDetail.headings, ["调用输入", "结果"]);
+    // 结果正文按需从会话取（这里会话不在测试替身里，取到的是空详情），行内摘录已经给过结果。
+    assert.match(activityDetail.text, /file_path/);
+    const activityShot = await send("Page.captureScreenshot", { format: "png" });
+    writeFileSync(join(evidenceDir, "im-transcript-rows.png"), Buffer.from(activityShot.data, "base64"));
+    rows.push({ mode: "im-transcript", sharedRowSkeleton: true, statusMarks: true, monospaceExcerpts: true, inlineDetail: true, noLegacyCollapse: true });
     const executing = h.sessions.get(sessionId)!;
     h.sessions.set(sessionId, { ...executing, messages: [{ role: "assistant", content: [{ type: "text", text: "轮询恢复的新进展" }] }] });
     await wait(`document.querySelector(${JSON.stringify(cardSelector)})?.textContent.includes('轮询恢复的新进展')`);

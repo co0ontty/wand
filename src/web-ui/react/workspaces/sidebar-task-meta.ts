@@ -1,4 +1,5 @@
 import type { TaskDirectoryGroup, TaskSummary } from "./types";
+import { isSessionAttention, isSessionRunning } from "./sidebar-display-mode";
 
 interface SidebarSelection {
   workspaceId: string | null;
@@ -41,11 +42,7 @@ export function formatTaskRecency(timestamp: string, now: number): string {
 }
 
 export function taskActivity(task: TaskSummary): "attention" | "running" | null {
-  if (task.sessions.some((session) => (
-    ["failed", "waiting-input", "waiting_input", "permission-blocked", "reconnecting"].includes(session.status ?? "")
-  ))) return "attention";
-  if (task.sessions.some((session) => (
-    session.ptyBusy || session.inFlight || session.status === "thinking"
-  ))) return "running";
+  if (task.sessions.some(isSessionAttention)) return "attention";
+  if (task.sessions.some(isSessionRunning)) return "running";
   return null;
 }

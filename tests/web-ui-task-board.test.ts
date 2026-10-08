@@ -42,6 +42,7 @@ import {
   normalizeIssueModelCatalog,
   withIssueAgentProvider,
   groupIssueSessionsByAgent,
+  issueAgentLabel,
   listIssueAgents,
 } from "../src/web-ui/react/issues/task-board-agent.ts";
 import {
@@ -672,4 +673,26 @@ test("看板行不写「默认模型」：default 哨兵渲染成服务端默认
     catalog: null,
   }));
   assert.doesNotMatch(bare, /默认模型/);
+});
+
+test("Pi 与 Wand Agent 在任务面板上是两个标签、两个分组", () => {
+  assert.equal(issueAgentLabel("pi", "sdk"), "Wand Agent", "进程内 SDK 会话不能显示成 Pi");
+  assert.equal(issueAgentLabel("pi", "cli"), "Pi");
+  assert.equal(issueAgentLabel("pi"), "Pi", "拿不到引擎时仍按 Pi CLI");
+  assert.equal(issueAgentLabel("claude", "sdk"), "Claude", "引擎只属于 pi，别的 provider 不受影响");
+
+  const sessions: IssueSessionSummary[] = [
+    { id: "cli-1", provider: "pi", sessionKind: "structured", title: "Pi 会话", status: "idle", cwd: "/w", model: "default", thinkingEffort: "off", engine: "cli" },
+    { id: "sdk-1", provider: "pi", sessionKind: "structured", title: "Wand Agent 会话", status: "idle", cwd: "/w", model: "default", thinkingEffort: "off", engine: "sdk" },
+  ];
+  const groups = groupIssueSessionsByAgent(sessions);
+  assert.equal(groups.length, 2, "同一个 provider 的两条执行路径不能挤成一组");
+  assert.deepEqual(groups.map((group) => [group.provider, group.engine ?? "cli"]), [["pi", "cli"], ["pi", "sdk"]]);
+  assert.deepEqual(groups.map((group) => group.sessions.map((session) => session.id)), [["cli-1"], ["sdk-1"]]);
+  assert.equal(groups[1].agent?.engine, "sdk", "分组里的 agent 要带上引擎，派发时才知道走 SDK");
+
+  const markup = renderToStaticMarkup(createElement(TaskBoardAgentSessionList, {
+    sessions, assigned: null, catalog: null,
+  }));
+  assert.match(markup, /Wand Agent/, "指派记录里要能看出跑的是 Wand Agent");
 });

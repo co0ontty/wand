@@ -284,6 +284,21 @@ async function startAndPlanRaw(h: Harness, steps: Parameters<typeof assignRaw>[0
   return detail.run.id;
 }
 
+test("team authored turns preserve the actual SDK engine instead of labeling Wand Agent as Pi CLI", async (t) => {
+  const h = harness(t, { requirePlanApproval: false }, { worker: { ...structuredAgent("pi"), engine: "sdk" } });
+  const runId = await startAndPlan(h, [["m_dev", "SDK 工作"]]);
+  const chatId = h.runner.detail(runId).run.chatSessionId!;
+  const start = h.chat.turns.get(chatId)!.find(turn => turn.author?.id === "m_dev" && !turn.notice)!;
+  assert.equal(start.author?.provider, "pi");
+  assert.equal(start.author?.engine, "sdk");
+  const work = runningStep(h, runId);
+  writeReport(h, work, "状态: 完成\nSDK 完成报告");
+  h.ops.finishTurn(work.sessionId!);
+  await settle(h, work.sessionId!);
+  const report = h.chat.turns.get(chatId)!.find(turn => turn.author?.sessionId === work.sessionId && !turn.notice)!;
+  assert.equal(report.author?.engine, "sdk");
+});
+
 test("kickoff puts role and rules in the system prompt and only the goal in the first message", async (t) => {
   const h = harness(t);
   const detail = await h.runner.start({ teamId: h.team.id, taskId: h.taskId });

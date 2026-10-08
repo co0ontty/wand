@@ -75,6 +75,8 @@ export interface TerminalHost {
   attach(sessionId: string, afterSeq?: number): TerminalAttachResult | null;
   createOrAttach(request: TerminalSpawnRequest, afterSeq?: number): Promise<TerminalAttachResult>;
   forget(sessionId: string): void;
+  /** Publish already-read bytes before synchronous snapshots or owner teardown. */
+  flush?(): void;
   disconnect(): void;
 }
 
@@ -198,10 +200,17 @@ export function appendTerminalChunkWindow(
   chunks: readonly TerminalDataEvent[],
   event: TerminalDataEvent,
 ): TerminalDataEvent[] {
-  const boundedEvent = event.data.length > PTY_OUTPUT_MAX_SIZE
+  return appendTerminalChunkBatch(chunks, [event]);
+}
+
+/** Same replay window, computed once for a batch instead of per wire frame. */
+export function appendTerminalChunkBatch(
+  chunks: readonly TerminalDataEvent[],
+  events: readonly TerminalDataEvent[],
+): TerminalDataEvent[] {
+  const next = [...chunks, ...events.map((event) => event.data.length > PTY_OUTPUT_MAX_SIZE
     ? { ...event, data: event.data.slice(-PTY_OUTPUT_MAX_SIZE) }
-    : event;
-  const next = [...chunks, boundedEvent];
+    : event)];
   let size = 0;
   let first = next.length;
   while (first > 0) {

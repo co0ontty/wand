@@ -14,6 +14,8 @@ export interface UiSessionVm {
   id: string;
   source: UiSessionSource;
   provider: UiProvider;
+  /** 执行引擎：`sdk` = Wand Agent（进程内 SDK）；缺省/Cli 都是命令行。 */
+  engine?: "cli" | "sdk";
   kind: UiSessionKind;
   title: string;
   description: string;

@@ -1,7 +1,13 @@
-import { readFileSync } from "node:fs";
+import { compareNodeVersions, nodeBaseline } from "./node-version.js";
 
-const required = readFileSync(new URL("../.nvmrc", import.meta.url), "utf8").trim();
-if (process.versions.node !== required) {
-  console.error(`[wand] Node ${required} is required for reproducible builds; got ${process.version}. Run \`nvm use\`.`);
+const current = process.versions.node;
+if (compareNodeVersions(current, nodeBaseline) < 0) {
+  console.error(`[wand] Node >= ${nodeBaseline} is required; got v${current}. Run \`nvm use\`.`);
   process.exit(1);
+}
+if (current !== nodeBaseline) {
+  console.warn(
+    `[wand] Node v${current} is newer than the baseline v${nodeBaseline} in .nvmrc; ` +
+      "bundle-budget bytes are measured on the baseline and may drift here.",
+  );
 }

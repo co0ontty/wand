@@ -180,8 +180,8 @@ test("记住上次 Pi 设置：新建 CLI 会话直接起步，SDK 员工会话�
   assert.equal(sdk.piSettings?.autoResources, undefined);
   assert.equal(sdk.piSettings?.resources, undefined);
   assert.equal(sdk.piSettings?.lockedSkills, undefined);
-  assert.throws(() => manager.setPiSettings(sdk.id, { autoResources: true }), /SDK/);
-  assert.throws(() => manager.setPiSettings(sdk.id, { lockedSkills: pinned.skills }), /SDK/);
+  assert.throws(() => manager.setPiSettings(sdk.id, { autoResources: true }), /Wand Agent/);
+  assert.throws(() => manager.setPiSettings(sdk.id, { lockedSkills: pinned.skills }), /Wand Agent/);
   manager.setPiSettings(sdk.id, { globalTools: false });
   assert.equal(JSON.stringify(storage.getPiSessionDefaults()), defaultsBefore, "SDK 会话的改动不进默认记忆");
 });

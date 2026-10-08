@@ -35,6 +35,7 @@ export function isSessionJustCompleted(session: SessionCompletionState & {
   status?: string;
   archived?: boolean;
   ptyBusy?: boolean;
+  ptyCommandRunning?: boolean;
   inFlight?: boolean;
   structuredState?: { inFlight?: boolean } | null;
   permissionBlocked?: boolean;
@@ -44,6 +45,7 @@ export function isSessionJustCompleted(session: SessionCompletionState & {
   return (session.completionRevision ?? 0) > (session.viewedCompletionRevision ?? 0)
     && !session.archived
     && !session.ptyBusy
+    && !session.ptyCommandRunning
     && !session.inFlight
     && !session.structuredState?.inFlight
     && !session.permissionBlocked

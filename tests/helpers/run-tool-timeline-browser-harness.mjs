@@ -6,6 +6,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { build } from "esbuild";
+import { runLiveTimelineCases } from "./tool-timeline-live-cases.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
 const temp = mkdtempSync(join(tmpdir(), "wand-tool-timeline-"));
@@ -107,6 +108,7 @@ try {
     report.cases.push({ mode, case: "automatic-resource-notice", ok: true });
     await e(`(async()=>{window.h=toolTimelineHarness;window.fixture=[{role:"assistant",uuid:"timeline-row",content:Array.from({length:40},(_,i)=>({type:"tool_use",id:"call-"+i,name:"Bash",input:{},preview:"npm run check",activity:{kind:"run_command",label:"运行命令 · Bash",occurredAt:"2026-09-30T12:00:"+String(i).padStart(2,"0")+"Z"}}))}];await h.fresh(fixture)})()`);
     assert.equal(await e('document.querySelectorAll(".assistant-reply-disclosure,.chat-avatar").length'), 0, "no outer reply card/avatar");
+    const expectedHeight = await e('Math.round(Math.max(120,Math.min(240,document.querySelector(".chat-messages").clientHeight/3)))');
     const initialRequests = report.requests.length;
     const before = await e('document.querySelector("button.chat-process-summary").getBoundingClientRect().toJSON()');
     await e(`(()=>{window.revealFrames=[];const g=document.querySelector('.chat-activity');const menu=g.querySelector('.chat-disclosure-body');const summary=g.querySelector('button.chat-process-summary');function frame(){revealFrames.push({height:menu.getBoundingClientRect().height,y:summary.getBoundingClientRect().y});if(revealFrames.length<24)requestAnimationFrame(()=>requestAnimationFrame(()=>setTimeout(frame,0)))}requestAnimationFrame(()=>requestAnimationFrame(()=>setTimeout(frame,0)))})()`);
@@ -128,19 +130,19 @@ try {
     assert.ok(frames.every(f=>Math.abs(f.y-before.y)<=1),"trigger remains fixed during the entire reveal: "+JSON.stringify({before,frames}));
     if(mode.includes('reduce')){
       assert.ok(reveal.transitions.every(a=>a.state!=='running'),'reduced motion has no geometry tween: '+JSON.stringify(reveal));
-      assert.ok(reveal.height>=239,'reduced motion reaches the final height at once: '+JSON.stringify(reveal));
-      assert.ok(openedHeight>=239,'reduced motion keeps the settled height');
+      assert.ok(reveal.height>=expectedHeight-1,'reduced motion reaches the final height at once: '+JSON.stringify(reveal));
+      assert.ok(openedHeight>=expectedHeight-1,'reduced motion keeps the settled height');
     } else {
       assert.ok(reveal.transitions.some(a=>a.state==='running'&&a.progress!==null&&a.progress<1),
         'including the native shell, reveal uses a real reversible height animation: '+JSON.stringify(reveal));
-      assert.ok(reveal.height<239,'the reveal starts from the collapsed height: '+JSON.stringify(reveal));
-      assert.ok(openedHeight>=239,'the reveal settles at the full height');
+      assert.ok(reveal.height<expectedHeight-1,'the reveal starts from the collapsed height: '+JSON.stringify(reveal));
+      assert.ok(openedHeight>=expectedHeight-1,'the reveal settles at the full height');
     }
     assert.equal(report.requests.length, initialRequests, "timeline expansion must not fetch any detail");
     assert.equal(await e('document.querySelectorAll(".chat-call").length'), 40);
     assert.deepEqual(await e('Array.from(document.querySelectorAll(".chat-call[data-tool-ids]")).map(n=>JSON.parse(n.dataset.toolIds))'), Array.from({length:40},(_,i)=>["call-"+i]));
     const metrics = await e('(()=>{const n=document.querySelector(".chat-activity-timeline");return{height:n.clientHeight,overflow:n.scrollHeight>n.clientHeight,detail:!!n.querySelector("pre,.tool-use-card,.inline-diff,.inline-terminal"),summary:document.querySelector("button.chat-process-summary").getBoundingClientRect().toJSON(),wide:document.documentElement.scrollWidth>innerWidth}})()');
-    assert.equal(metrics.height, 240); assert.equal(metrics.overflow, true); assert.equal(metrics.detail, false); assert.equal(metrics.wide, false);
+    assert.equal(metrics.height, expectedHeight); assert.equal(metrics.overflow, true); assert.equal(metrics.detail, false); assert.equal(metrics.wide, false);
     // 安卓行内顺序是「时钟 + 标签」同行：时钟在前、标签在后，且每行时钟落在同一列。
     const clockLayout = await e(`(()=>{const rows=[...document.querySelectorAll("button.chat-call-button")];
       const clocks=rows.map(row=>row.querySelector("time")).filter(Boolean);
@@ -167,7 +169,7 @@ try {
     assert.ok(entryDelta.every(v=>Math.abs(v)<=1),"entry trigger remains fixed: "+JSON.stringify(entryDelta));
     assert.equal(await e('document.querySelectorAll(".chat-call-detail .tool-use-card,.chat-call-detail .inline-terminal,.chat-call-detail .inline-tool-call").length'),0,"no third disclosure level");
     assert.deepEqual(report.requests.slice(initialRequests), ["call-0"], "only the explicitly opened call is loaded");
-    assert.equal(await e('document.querySelector(".chat-activity-timeline").clientHeight'), 240, "details cannot grow the window");
+    assert.equal(await e('document.querySelector(".chat-activity-timeline").clientHeight'), expectedHeight, "details cannot grow the window");
     await click('.chat-call:nth-child(3) button.chat-call-button');
     await wait('document.querySelectorAll(".chat-call[data-expanded=true]").length===2 && [...document.querySelectorAll(".chat-activity-detail-section pre")].filter(n=>n.textContent==="DETAIL_ONLY").length===2');
     assert.deepEqual(report.requests.slice(initialRequests), ["call-0", "call-2"], "opening a call never batch-loads other invocations");
@@ -261,7 +263,8 @@ try {
     for(const axis of ["x","y","width","height"])assert.ok(Math.abs(loadBounds[axis]-loadedBounds[axis])<=1,"decision load feedback stays in place: "+axis+" "+JSON.stringify({mode,before:loadBounds,after:loadedBounds}));
     await e('(async()=>{h.publish([{role:"assistant",uuid:"decision-truncated",content:[decisionUse,{...decisionResult,content:"NEW_LIVE_RESULT"}]}]);await h.settle()})()');
     assert.equal(await e('document.querySelector(".decision-tool-card").textContent.includes("NEW_LIVE_RESULT")'),true,"late full result wins over cached detail");
-    report.cases.push({ mode, fixedHeight:240, rows:40, requestCount:2, stableScroll:true, closePaths:true, decisionIndependent:true, decisionPendingErrorAndOrphan:true, decisionFeedbackStable:true, decisionDefaultCollapsed:true, decisionHeaderStable:true });
+    report.cases.push({ mode, panelHeight:expectedHeight, rows:40, requestCount:2, stableScroll:true, closePaths:true, decisionIndependent:true, decisionPendingErrorAndOrphan:true, decisionFeedbackStable:true, decisionDefaultCollapsed:true, decisionHeaderStable:true });
+    await runLiveTimelineCases({ e, send, click, wait, mode, report });
   }
   // 收起态行首时间：没有展开时也能一眼看到「什么时候跑的」，位置在分类计数之前。
   await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });

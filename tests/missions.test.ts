@@ -155,6 +155,17 @@ test("mission HTTP routes expose tasks and validate dispatch before spawning", a
   assert.match(JSON.stringify(await invalid.json()), /工作目录不存在/);
 });
 
+test("unrelated PTY output checks mission ownership before projecting a session", () => {
+  let lookups = 0;
+  const storage = { getMissionAttemptBySession() { lookups += 1; return null; } } as unknown as ConstructorParameters<typeof Missions>[0];
+  const registry = { getLatest() { throw new Error("Unrelated output must not read session/workspace/completion state"); } } as unknown as ConstructorParameters<typeof Missions>[2];
+  const missions = new Missions(storage, {} as ConstructorParameters<typeof Missions>[1], registry);
+  for (let index = 0; index < 1000; index++) {
+    missions.ingest({ type: "output", sessionId: "independent-pty", data: { incremental: true, chunk: "echo" } });
+  }
+  assert.equal(lookups, 1000);
+});
+
 test("missions linked to a task bind dispatched sessions to it", (t) => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-mission-task-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));

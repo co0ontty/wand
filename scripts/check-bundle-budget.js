@@ -6,7 +6,9 @@
  *
  * Ant Design 6.6.5 / X 2.9.0 are shared from the main bundle (including their
  * generated component-style code), never duplicated in the team chunk.
- * Foundation measurement on Node 26.10.0: JS 896,271 B, CSS 74,553 B,
+ * Foundation measurement on Node 26.10.0, when that release was the pinned
+ * baseline (it moved to the 24.21.0 LTS; packaged asset bytes do not depend on
+ * the runtime): JS 896,271 B, CSS 74,553 B,
  * vendor 112,008 B, HTML 1,014 B; cold 1,083,846 B gzip. Preallocated dirty
  * baseline embedded assets: JS 572,308 B, CSS 101,297 B; same vendor bytes.
  * The JS increase is 323,963 B; CSS drops 26,744 B after removing Appica's
@@ -20,11 +22,17 @@ import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { compareNodeVersions, nodeBaseline } from "./node-version.js";
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const requiredNode = readFileSync(path.join(root, ".nvmrc"), "utf8").trim();
-if (process.versions.node !== requiredNode) {
-  console.error(`[bundle-budget] expected Node ${requiredNode}, got ${process.version}; run \`nvm use\`.`);
+if (compareNodeVersions(process.versions.node, nodeBaseline) < 0) {
+  console.error(`[bundle-budget] Node >= ${nodeBaseline} is required, got ${process.version}; run \`nvm use\`.`);
   process.exit(1);
+}
+if (process.versions.node !== nodeBaseline) {
+  console.warn(
+    `[bundle-budget] measured with Node ${process.version}; the baseline is v${nodeBaseline} (.nvmrc), byte deltas may drift.`,
+  );
 }
 
 if (!existsSync(path.join(root, "dist", "web-ui", "index.js"))) {

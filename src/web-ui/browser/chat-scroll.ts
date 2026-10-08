@@ -1,6 +1,8 @@
 import { state, CHAT_EXPAND_STATE_STORAGE_KEY } from "./state";
 import { renderChat } from "./chat-render";
 import { fetchEarlierMessages } from "./session-engine";
+import { ChatHistoryPrefetchGate, chatHistoryRootMargin, needsChatHistoryBuffer } from "../chat-history-window.js";
+import { updateBrowserButtonLabel } from "./library-buttons.js";
 import "./events";
 import "./render";
 // import { iconSvg } from "./i18n";
@@ -9,17 +11,10 @@ import "./render";
 
 function getChatScrollElement() {
   var chatOutput = document.getElementById("chat-output");
-  if (!chatOutput) {
-    state.chatScrollElement = null;
-    return null;
-  }
-  var chatMessages = chatOutput.querySelector(".chat-messages");
-  if (chatMessages) {
-    state.chatScrollElement = chatMessages;
-    return chatMessages;
-  }
-  state.chatScrollElement = null;
-  return null;
+  // Lookup must not replace the bound-listener owner. Otherwise an empty →
+  // nonempty transcript makes bindChatScrollListener mistake a new root for
+  // the old bound one, losing manual-scroll/sticky handlers.
+  return chatOutput?.querySelector(".chat-messages") || null;
 }
 
 // column-reverse: scrollTop=0 是视觉底部，越往上看 scrollTop 绝对值越大。
@@ -186,6 +181,7 @@ export function bindChatScrollListener() {
 
   state.chatScrollHandler = function() {
     if (!(chatMsgs as any).isConnected) return;
+    checkChatHistoryBuffer();
     // 程序触发的滚动（点了气泡 / 发送后贴底）不算"用户翻页"——别把状态弄乱。
     if (state.chatIsProgrammaticScroll || Date.now() < state.chatProgrammaticScrollUntil) {
       updateChatUnreadBubble();
@@ -234,47 +230,102 @@ export function bindChatScrollListener() {
   updateChatUnreadBubble();
 }
 
-/** Load older messages: first expand the local window, then fetch earlier pages from the server. */
-function loadMoreChatMessages() {
-  // 本地还有没展开的：先扩大渲染窗口。
-  if (state.chatRenderedCount < state.currentMessages.length) {
-    state.chatRenderedCount += state.chatPageSize;
+const historyPrefetch = new ChatHistoryPrefetchGate();
+
+/** First reveal a small local page, then request a bounded earlier server page. */
+function loadMoreChatMessages(manual = false): void {
+  var session = state.sessions.find(function(s: any) { return s.id === state.selectedId; });
+  if (!session || state.currentView !== "chat") return;
+  var scope = session.id + ":" + (state.chatRenderEpoch || 0);
+  var local = state.chatRenderedCount < state.currentMessages.length;
+  // A stream update at the tail is not progress on a failed history request.
+  // Only the remote head cursor may unlock automatic server-page retries.
+  var cursor = local ? "local:" + state.chatRenderedCount + ":" + state.currentMessages.length
+    : "server:" + (session.messageOffset || 0) + ":" + (session.leadingBlockOffset || 0);
+  if (!historyPrefetch.canAttempt(scope, cursor, manual)) return;
+  if (local) {
+    historyPrefetch.attempted(scope, cursor);
+    state.chatRenderedCount = Math.min(state.currentMessages.length, state.chatRenderedCount + state.chatPageSize);
     renderChat(true);
-    return;
-  }
-  // 本地已全展开，但服务端还有更早的（窗口化）：拉下一页。
-  var sess = state.sessions.find(function(s: any) { return s.id === state.selectedId; });
-  if (sess && ((typeof sess.messageOffset === "number" && sess.messageOffset > 0)
-    || (typeof sess.leadingBlockOffset === "number" && sess.leadingBlockOffset > 0))) {
-    fetchEarlierMessages();
+  } else if ((session.messageOffset > 0 || session.leadingBlockOffset > 0) && fetchEarlierMessages()) {
+    historyPrefetch.attempted(scope, cursor);
   }
 }
 
-// Observe the "load more" sentinel for auto-loading when scrolled into view
-var _loadMoreObserver: any = null;
-export function observeLoadMoreSentinel() {
-  if (_loadMoreObserver) { _loadMoreObserver.disconnect(); _loadMoreObserver = null; }
+function checkChatHistoryBuffer(): void {
+  if (document.hidden || state.currentView !== "chat") return;
+  var root = getChatScrollElement();
+  if (!root?.isConnected || !document.getElementById("chat-load-more-sentinel")) return;
+  if (needsChatHistoryBuffer(root)) loadMoreChatMessages();
+}
+
+let historyRefillFrame: number | null = null;
+function scheduleChatHistoryBufferCheck(): void {
+  if (historyRefillFrame !== null) cancelAnimationFrame(historyRefillFrame);
+  var sessionId = state.selectedId;
+  var epoch = state.chatRenderEpoch || 0;
+  historyRefillFrame = requestAnimationFrame(function() {
+    historyRefillFrame = null;
+    if (state.selectedId === sessionId && (state.chatRenderEpoch || 0) === epoch) checkChatHistoryBuffer();
+  });
+}
+
+document.addEventListener("visibilitychange", function() {
+  if (!document.hidden) scheduleChatHistoryBufferCheck();
+});
+
+/** Captured session/generation owns feedback; late requests cannot touch another view. */
+export function setChatHistoryLoadState(sessionId: string, epoch: number, phase: "loading" | "idle" | "failed"): void {
+  if (state.selectedId !== sessionId || (state.chatRenderEpoch || 0) !== epoch) return;
   var sentinel = document.getElementById("chat-load-more-sentinel");
-  if (!sentinel) return;
-  // Click handler for the button
-  var btn = sentinel.querySelector(".chat-load-more-btn");
-  if (btn) (btn as any).onclick = function() { loadMoreChatMessages(); };
-  // 移动端 App 里不要靠惯性滚动自动翻页：用户一拉到顶就连着加载历史，
-  // 容易把阅读位置带到很上面。保留显式按钮，桌面继续自动预取。
-  var coarsePointer = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
-  var mobileViewport = window.innerWidth <= 768;
-  if (coarsePointer || mobileViewport || window.__wandImeNative || window.__wandIosNative) return;
-  // IntersectionObserver for auto-load on scroll
-  if (typeof IntersectionObserver === "undefined") return;
-  _loadMoreObserver = new IntersectionObserver(function(entries) {
-    for (var i = 0; i < entries.length; i++) {
-      if (entries[i].isIntersecting) {
-        loadMoreChatMessages();
-        break;
-      }
+  var button = sentinel?.querySelector<HTMLElement>(".chat-load-more-btn");
+  if (!sentinel || !button) return;
+  sentinel.dataset.historyLoad = phase;
+  updateBrowserButtonLabel(button, phase === "loading" ? "正在加载更早内容…"
+    : phase === "failed" ? "加载失败 · 点击重试" : "加载更早的消息", false);
+  button.setAttribute("aria-busy", String(phase === "loading"));
+  // Called after the single-flight lock is released. A same-height page may
+  // trigger neither IntersectionObserver nor ResizeObserver again, so keep
+  // filling explicitly, one request/layout frame at a time. Failed/no-progress
+  // replies do not schedule another attempt.
+  if (phase === "idle") scheduleChatHistoryBufferCheck();
+}
+
+var _loadMoreObserver: IntersectionObserver | null = null;
+var _historyResizeObserver: ResizeObserver | null = null;
+export function observeLoadMoreSentinel(): void {
+  if (historyRefillFrame !== null) { cancelAnimationFrame(historyRefillFrame); historyRefillFrame = null; }
+  _loadMoreObserver?.disconnect(); _loadMoreObserver = null;
+  _historyResizeObserver?.disconnect(); _historyResizeObserver = null;
+  var sentinel = document.getElementById("chat-load-more-sentinel");
+  var root = getChatScrollElement();
+  if (!sentinel || !root) return;
+  var button = sentinel.querySelector<HTMLElement>(".chat-load-more-btn");
+  if (button) button.onclick = function() { loadMoreChatMessages(true); };
+  var sessionId = state.selectedId;
+  var epoch = state.chatRenderEpoch || 0;
+  var current = function() {
+    return state.selectedId === sessionId && (state.chatRenderEpoch || 0) === epoch
+      && root.isConnected && sentinel.isConnected && document.getElementById("chat-load-more-sentinel") === sentinel;
+  };
+  var observe = function() {
+    _loadMoreObserver?.disconnect();
+    if (!current() || root.clientHeight <= 0) return;
+    if (typeof IntersectionObserver !== "undefined") {
+      _loadMoreObserver = new IntersectionObserver(function(entries) {
+        if (current() && entries.some(function(entry) { return entry.isIntersecting; })) checkChatHistoryBuffer();
+      }, { root: root, rootMargin: chatHistoryRootMargin(root.clientHeight) });
+      _loadMoreObserver.observe(sentinel);
     }
-  }, { root: getChatScrollElement(), rootMargin: "200px" });
-  _loadMoreObserver.observe(sentinel);
+    checkChatHistoryBuffer();
+  };
+  // Desktop, touch and native WebViews share the same measured two-screen buffer.
+  // Prepending preserves the renderer's existing reading anchor, not scroll-to-top.
+  observe();
+  if (typeof ResizeObserver !== "undefined") {
+    _historyResizeObserver = new ResizeObserver(observe);
+    _historyResizeObserver.observe(root);
+  }
 }
 
 // Helper function to persist selected session ID to localStorage

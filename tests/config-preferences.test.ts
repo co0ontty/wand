@@ -110,15 +110,18 @@ test("new-session provider and kind preferences round-trip through storage", () 
 
   writePreferenceToStorage(config, storage, "defaultProvider", "codex");
   writePreferenceToStorage(config, storage, "defaultSessionKind", "pty");
+  writePreferenceToStorage(config, storage, "defaultEngine", "sdk");
   writePreferenceToStorage(config, storage, "defaultTaskWorktree", false);
 
   assert.equal(config.defaultProvider, "codex");
   assert.equal(config.defaultSessionKind, "pty");
+  assert.equal(config.defaultEngine, "sdk");
   assert.equal(config.defaultTaskWorktree, false);
 
   const restored = applyStoragePreferences(defaultConfig(), storage);
   assert.equal(restored.defaultProvider, "codex");
   assert.equal(restored.defaultSessionKind, "pty");
+  assert.equal(restored.defaultEngine, "sdk", "Wand Agent 的选择要能记住，不能下次悄悄回到 Pi CLI");
   assert.equal(restored.defaultTaskWorktree, false);
 });
 
@@ -190,6 +193,10 @@ test("new-session preferences reject unsupported values", () => {
   assert.throws(
     () => writePreferenceToStorage(defaultConfig(), storage, "defaultSessionKind", "terminal"),
     /无效会话类型/,
+  );
+  assert.throws(
+    () => writePreferenceToStorage(defaultConfig(), storage, "defaultEngine", "core"),
+    /无效执行引擎/,
   );
   assert.throws(
     () => writePreferenceToStorage(defaultConfig(), storage, "defaultThinkingEffort", "turbo"),

@@ -17,12 +17,12 @@ test("终端直通提交失败：原位结果行不可见时退回错误气泡�
   const input = source("src/web-ui/browser/input.ts");
   assert.match(
     input,
-    /return queueDirectInput\(passthroughText, "interactive_text"\)[\s\S]{0,200}?\.catch\(function\(err\) \{\n\s*\/\/[\s\S]{0,400}?reportPassthroughInputFailure\(passthroughSessionId, passthroughText, err\);/,
+    /return queueDirectInput\(passthroughText, "interactive_text", passthroughView, passthroughSessionId\)[\s\S]{0,200}?\.catch\(function\(err\) \{\n\s*\/\/[\s\S]{0,400}?reportPassthroughInputFailure\(passthroughSessionId, passthroughText, err\);/,
     "有文本的直通提交失败必须交给统一播报，不能再空 catch",
   );
   assert.match(
     input,
-    /return queueDirectInput\("\\r", "enter_text"\)\.catch\(function\(err\) \{[\s\S]{0,200}?reportPassthroughInputFailure\(passthroughSessionId, "", err\);/,
+    /return queueDirectInput\("\\r", "enter_text", passthroughView, passthroughSessionId\)\.catch\(function\(err\) \{[\s\S]{0,200}?reportPassthroughInputFailure\(passthroughSessionId, "", err\);/,
     "空回车失败同样要响一声",
   );
   assert.match(

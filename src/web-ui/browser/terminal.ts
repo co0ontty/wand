@@ -8,7 +8,7 @@ import { focusInputBox, hasActiveTerminalSelection, installNativeInputImeGuard, 
 import { showToast } from "./notifications";
 import "./render";
 import { copyToClipboard, isStructuredSession } from "./session-engine";
-import { ensureTerminalFit, initTerminalJoystick, initTerminalResizeHandle, observeTerminalResize, sendTerminalResize, startTerminalHealthCheck } from "./viewport";
+import { ensureTerminalFit, initTerminalResizeHandle, observeTerminalResize, sendTerminalResize, startTerminalHealthCheck } from "./viewport";
 import { fitTerminalToContainer } from "./terminal-fit";
 import "./i18n";
 import { consumeTerminalTouchPage, consumeTerminalWheelLines, consumeTerminalWheelPage, consumeTerminalZoomWheel, installTerminalPinchZoom, terminalWheelPageSequence, type TerminalTouchPagingState, type TerminalWheelPagingState, type TerminalWheelScrollState, type TerminalZoomWheelState } from "./terminal-wheel";
@@ -1031,7 +1031,6 @@ import { cachedTerminalHistory, loadTerminalHistory, resetTerminalHistory } from
           container.addEventListener("click", state.terminalClickHandler);
           updateTerminalJumpToBottomButton();
           initTerminalResizeHandle();
-          initTerminalJoystick();
           observeTerminalResize();
           startTerminalHealthCheck();
           ensureTerminalFit("mount");

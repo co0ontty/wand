@@ -5,6 +5,7 @@ export interface SessionActivitySource {
   readonly status?: string;
   readonly provider?: string;
   readonly ptyBusy?: boolean;
+  readonly ptyCommandRunning?: boolean;
   readonly providerCliActive?: boolean;
   readonly archived?: boolean;
   readonly permissionBlocked?: boolean;
@@ -26,7 +27,9 @@ function isStructured(session: SessionActivitySource): boolean {
 
 export function ptyTurnActive(session: SessionActivitySource | null | undefined): boolean {
   if (!session || session.status !== "running" || isStructured(session)) return false;
-  return session.provider && PROVIDER_CLI_IDS.has(session.provider) ? session.ptyBusy === true : true;
+  return session.provider && PROVIDER_CLI_IDS.has(session.provider)
+    ? session.ptyBusy === true
+    : session.ptyCommandRunning === true;
 }
 
 export function computeRunningSignal(session: SessionActivitySource | null | undefined): SessionActivity {
@@ -35,7 +38,8 @@ export function computeRunningSignal(session: SessionActivitySource | null | und
   }
   const permissionBlocked = Boolean(session.permissionBlocked);
   const inFlight = isStructured(session) && Boolean(session.structuredState?.inFlight);
-  const ptyRunning = ptyTurnActive(session) && session.providerCliActive !== false;
+  // The launch marker describes the original provider CLI, not manual commands in a blank shell.
+  const ptyRunning = ptyTurnActive(session) && (!session.provider || session.providerCliActive !== false);
   return { active: inFlight || ptyRunning || permissionBlocked, inFlight, ptyRunning, permissionBlocked };
 }
 

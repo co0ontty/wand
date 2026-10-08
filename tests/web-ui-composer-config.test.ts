@@ -78,6 +78,21 @@ test("chip 暴露完整值给 tooltip，并用 data-thinking 记录归一化后�
   assert.match(html, /data-thinking="standard"/);
 });
 
+test("blank tool selector reuses the stable scoped host without appearing on other sessions", () => {
+  const html = render(mountFor("runtime", { toolVisible: true, toolDisabled: true, toolStatus: "正在切换工具…" }));
+  assert.match(html, /data-mode-control-pill="tool"/);
+  assert.match(html, /data-composer-select-key="runtime-tool"/);
+  assert.match(html, /aria-live="polite" aria-busy="true"/);
+  assert.doesNotMatch(render(mountFor("runtime")), /data-mode-control-pill="tool"/);
+  assert.doesNotMatch(render(mountFor("mode", { toolVisible: true })), /data-mode-control-pill="tool"/);
+  const controller = new ComposerConfigController();
+  const mount = mountFor("runtime");
+  controller.sync([mount]);
+  const revision = controller.getSnapshot().revision;
+  controller.sync([{ ...mount, toolVisible: true, toolStatus: "切换失败" }]);
+  assert.ok(controller.getSnapshot().revision > revision);
+});
+
 test("刷新中的模型按钮进入 busy 态", () => {
   const html = render(mountFor("runtime", { modelRefreshing: true }));
   assert.match(html, /ant-btn/);

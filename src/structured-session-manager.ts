@@ -133,6 +133,12 @@ interface CreateStructuredSessionOptions {
    * 留空表示新建会话。
    */
   claudeSessionId?: string;
+  /**
+   * 已裁决的执行引擎；只对 pi 结构化会话有意义。
+   * `core` = Wand Agent（进程内 SDK harness），`cli` = Pi CLI。
+   * 调用方（新建会话路由）负责先裁决可用性，这里只负责落库与后续回合沿用。
+   */
+  engine?: "core" | "cli";
 }
 
 /**
@@ -1509,9 +1515,12 @@ export class StructuredSessionManager {
     const selectedModel = options.model?.trim() || null;
     const initialThinkingEffort = normalizeThinkingEffort(options.thinkingEffort);
     const autoCompaction = this.config.harness?.compaction?.enabled ?? true;
+    // 显式引擎优先：用户新建会话时选了 Wand Agent（core）就不要再被员工候选或默认推断改口。
+    const explicitEngine = provider === "pi" ? options.engine : undefined;
     // 员工 SDK 会话不静默继承用户的全局扩展，也不继承 CLI 专属的资源/CodeMode 默认。
     const sdkEmployeeSession = provider === "pi"
-      && options.employeeCandidates?.[options.employeeCandidateIndex ?? 0]?.engine === "sdk";
+      && (explicitEngine ? explicitEngine === "core"
+        : options.employeeCandidates?.[options.employeeCandidateIndex ?? 0]?.engine === "sdk");
     // CLI Pi 会话从「上次设置」起步：用户在任一 Pi 会话改过的自动选择 / CodeMode / 资源选择
     // 就是新会话的默认，不需要每开一个会话重配一次。autoCompaction 始终取当前配置。
     const rememberedPiSettings = provider === "pi" && !sdkEmployeeSession ? this.storage.getPiSessionDefaults() : null;
@@ -1568,6 +1577,7 @@ export class StructuredSessionManager {
       structuredState: {
         provider,
         runner,
+        ...(explicitEngine ? { engine: explicitEngine } : {}),
         model: selectedModel ?? undefined,
         inFlight: false,
         activeRequestId: null,
@@ -1659,6 +1669,7 @@ export class StructuredSessionManager {
     const selected = candidates[index];
     // Explicit tool/model changes, including changes during the pending request, remain authoritative.
     if (!selected || original.provider !== selected.provider
+      || (original.structuredState?.engine && (original.structuredState.engine === "core" ? "sdk" : "cli") !== (selected.engine ?? "cli"))
       || (original.selectedModel && original.selectedModel !== this.employeeCandidateModel(selected))) return null;
     const current = this.sessions.get(id);
     if (!current || current.status !== "running" || current.provider !== original.provider
@@ -1961,8 +1972,10 @@ export class StructuredSessionManager {
         });
       } else if (provider === "pi") {
         const employeeAgent = updated.employeeCandidates?.[updated.employeeCandidateIndex ?? 0];
-        const sdkRequested = employeeAgent?.engine === "sdk";
-        // 对话框默认固定走 CLI；只有员工候选明确配置 SDK 时，员工会话才启用 core。
+        // 会话已裁决过引擎就沿用（新建会话选了 Wand Agent 或 Pi CLI）；未裁决的旧会话/员工会话回落到候选配置。
+        const decidedEngine = updated.structuredState?.engine;
+        const sdkRequested = decidedEngine ? decidedEngine === "core" : employeeAgent?.engine === "sdk";
+        // 没显式选择时对话框固定走 CLI；只有选定 Wand Agent 或员工候选配置 SDK 才是 core。
         const resolution = sdkRequested
           ? resolveHarnessEngineSync({ ...this.config.harness, engine: "core" }, "pi", {
             coreRunnerSupplied: this.coreRunnerSupplied,
@@ -1981,7 +1994,7 @@ export class StructuredSessionManager {
           await this.runClaudeStreaming(id, enginePatched, prompt, requestId, {
             runner: this.coreRunner,
             provider: "pi",
-            commandLabel: "pi core（员工 SDK）",
+            commandLabel: "Wand Agent（SDK）",
             logKind: "pi-core",
           });
         } else {
@@ -2216,20 +2229,35 @@ export class StructuredSessionManager {
     return updated;
   }
 
-  /** 新建空白对话可原位换 CLI；接受过输入、恢复会话和自动化不跨 provider 搬历史。 */
-  setSessionProvider(sessionId: string, provider: SessionProvider): SessionSnapshot {
+  /** 空白对话原位换执行工具；引擎也是工具身份，不跨工具搬历史或能力设置。 */
+  setSessionProvider(sessionId: string, provider: SessionProvider, engine?: "cli" | "sdk"): SessionSnapshot {
     const session = this.requireSession(sessionId);
-    if (!isSessionProvider(provider)) throw new Error("请选择有效的 CLI 工具。");
+    if (!isSessionProvider(provider)) throw new Error("请选择有效的执行工具。");
+    if (engine !== undefined && engine !== "cli" && engine !== "sdk") throw new Error("执行引擎必须是 cli 或 sdk。");
+    if (engine === "sdk" && provider !== "pi") throw new Error("Wand Agent 只支持 Pi 结构化会话。");
     if (session.status !== "idle" || session.archived || session.structuredState?.inFlight ||
         this.pendingRunnerExecutions.has(sessionId) || session.claudeSessionId ||
+        session.resumedFromSessionId || session.autoRecovered ||
         (session.messages?.length ?? 0) > 0 || (session.queuedMessages?.length ?? 0) > 0 ||
         session.automationId || (session.sessionSource && session.sessionSource !== "interactive") ||
         this.relayHandlerFor(session)) {
       throw new Error("只有尚未发送消息的新建空白对话可以更换工具。");
     }
-    if (session.provider === provider) return session;
     const candidates = session.employeeCandidates ?? [];
-    const candidateIndex = candidates.findIndex((candidate) => candidate.provider === provider);
+    const currentCandidate = candidates[session.employeeCandidateIndex ?? 0];
+    const currentEngine = session.provider === "pi" && (session.structuredState?.engine === "core"
+      || (!session.structuredState?.engine && currentCandidate?.provider === "pi" && currentCandidate.engine === "sdk")) ? "sdk" : "cli";
+    // 旧客户端只发 provider 时，同 provider 保持原引擎；显式 Pi 选项始终传 cli。
+    const targetEngine = provider === "pi" ? engine ?? (session.provider === provider ? currentEngine : "cli") : "cli";
+    if (session.provider === provider && currentEngine === targetEngine) return session;
+    if (targetEngine === "sdk" && session.provider === "pi" && (session.piSettings?.resources?.skills.length
+      || session.piSettings?.resources?.mcpServers.length || session.piSettings?.lockedSkills?.length
+      || session.piSettings?.autoResources || session.piSettings?.codemodeOverride !== undefined)) {
+      throw new Error("Wand Agent 不支持会话级 Skills / MCP、自动选择或 CodeMode 覆盖；请先在 Pi 设置中关闭这些选项再切换。");
+    }
+    const resolution = provider === "pi" ? this.resolveNewSessionPiEngine(targetEngine) : undefined;
+    const candidateIndex = candidates.findIndex((candidate) => candidate.provider === provider
+      && (candidate.engine ?? "cli") === targetEngine);
     const candidate = candidateIndex >= 0 ? candidates[candidateIndex] : undefined;
     const runner = defaultStructuredRunner(provider);
     const model = candidate && candidate.model !== "default" ? candidate.model
@@ -2245,18 +2273,19 @@ export class StructuredSessionManager {
       ...session,
       provider,
       runner,
-      // 从别的 provider 切到 Pi 的空白会话与新建 Pi 会话同等：以「上次设置」起步。
-      ...(provider === "pi" && !session.piSettings ? { piSettings: candidate?.engine === "sdk"
+      // 换引擎也是换工具：使用目标自己的默认设置，不复用另一路的能力配置。
+      piSettings: provider !== "pi" ? undefined : targetEngine === "sdk"
         ? defaultPiSessionSettings(this.config.harness?.compaction?.enabled ?? true)
         : { ...(this.storage.getPiSessionDefaults() ?? defaultPiCliSessionSettings(this.config.harness?.compaction?.enabled ?? true)),
-          autoCompaction: this.config.harness?.compaction?.enabled ?? true } } : {}),
-      command: recoveredCommandLabel(runner),
+          autoCompaction: this.config.harness?.compaction?.enabled ?? true },
+      command: targetEngine === "sdk" ? "Wand Agent（SDK）" : recoveredCommandLabel(runner),
       mode,
       autoApprovePermissions: shouldAutoApproveForMode(mode),
       selectedModel: model,
       thinkingEffort,
       employeeCandidateIndex: candidateIndex >= 0 ? candidateIndex : undefined,
-      structuredState: { ...defaultStructuredState(provider, runner), model: model ?? undefined },
+      structuredState: { ...defaultStructuredState(provider, runner), model: model ?? undefined,
+        ...(resolution ? { engine: resolution.engine, engineReason: resolution.reason } : {}) },
     };
     // 身份、知识归属、任务/目录和候选快照不变；只更新本会话的执行参数。
     this.storage.saveSession(updated);
@@ -2270,11 +2299,25 @@ export class StructuredSessionManager {
     return updated;
   }
 
+  /**
+   * 新建 pi 结构化会话前的引擎裁决。
+   *
+   * 用户在新建会话里选的是两个不同的东西：Pi CLI（`cli`）与 Wand Agent（`sdk`，进程内 harness）。
+   * 显式选了 Wand Agent 就必须真的可用：不可用时抛错由路由告诉用户，不静默退回 CLI 冒充。
+   */
+  resolveNewSessionPiEngine(engine: "cli" | "sdk" | undefined): EngineResolution {
+    if (engine !== "sdk") return { engine: "cli", reason: "Pi 主功能固定使用 CLI JSON" };
+    return resolveHarnessEngineSync({ ...this.config.harness, engine: "core" }, "pi", {
+      coreRunnerSupplied: this.coreRunnerSupplied,
+    });
+  }
+
   getPiSettings(sessionId: string): { settings: PiSessionSettings; resolution: EngineResolution } {
     const session = this.requireSession(sessionId);
     if (session.provider !== "pi") throw new Error("这些设置仅适用于 Pi 结构化会话。");
     const employeeAgent = session.employeeCandidates?.[session.employeeCandidateIndex ?? 0];
-    const sdkRequested = employeeAgent?.engine === "sdk";
+    const decidedEngine = session.structuredState?.engine;
+    const sdkRequested = decidedEngine ? decidedEngine === "core" : employeeAgent?.engine === "sdk";
     let resolution: EngineResolution;
     if (sdkRequested) {
       try {
@@ -2305,7 +2348,7 @@ export class StructuredSessionManager {
       || (patch as Record<string, unknown>).codemodeOverride !== undefined
       || (patch as Record<string, unknown>).autoResources !== undefined
       || (patch as Record<string, unknown>).lockedSkills !== undefined)) {
-      throw new Error("当前 SDK 候选尚不支持此会话级设置；没有改用全局资源或 CodeMode 配置。");
+      throw new Error("Wand Agent 尚不支持此会话级设置；没有改用全局资源或 CodeMode 配置。");
     }
     if (resolution.engine !== "core") {
       // 写入裁决与启动参数用同一套能力边界：表达不出的字段/取值不落库。

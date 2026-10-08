@@ -937,20 +937,28 @@ export class ProcessManager extends EventEmitter {
       && !record.ptyBridge
       && typeof record.processId === "number"
       && record.processId > 0
-    ));
+    )).map((record) => ({ record, pid: record.processId as number, process: record.ptyProcess }));
     if (candidates.length === 0) return;
 
     this.ptyForegroundSampling = true;
     try {
-      const samples = await this.probePtyForegrounds(candidates.map((record) => record.processId as number));
+      const samples = await this.probePtyForegrounds(candidates.map(({ pid }) => pid));
       if (!samples || this.disposed) return;
-      for (const record of candidates) {
-        if (this.sessions.get(record.id) !== record) continue;
-        const next = samples.get(record.processId as number);
+      for (const { record, pid, process } of candidates) {
+        // ps is asynchronous: a stopped/replaced terminal must not inherit an old probe.
+        if (this.sessions.get(record.id) !== record || record.status !== "running"
+          || record.ptyProcess !== process || record.processId !== pid) continue;
+        const next = samples.get(pid);
         if (next === undefined || record.ptyForeground === next) continue;
+        const wasForeground = record.ptyForeground === true;
         record.ptyForeground = next;
         // CLI 退回提示符：这一轮立刻结束，不必再等静默窗口。
         if (!next) this.closePtyTurn(record);
+        // 空白终端里的手动命令也有运行事实，但没有 provider 回合边界。
+        // 不复用 ptyBusy，避免一次前台切换冒充 AI 成功完成；静默命令也保持活动。
+        if (!record.provider && wasForeground !== next) {
+          this.emitEvent({ type: "status", sessionId: record.id, data: { ptyCommandRunning: next } });
+        }
       }
     } catch {
       // 探测失败只意味着这一轮没有新信息，保留上次结论。
@@ -1331,6 +1339,7 @@ export class ProcessManager extends EventEmitter {
   /** Stop all live work and flush pending state before storage is closed. */
   dispose(): void {
     if (this.disposed) return;
+    this.terminalHost.flush?.();
     this.disposed = true;
     // 静默心跳不跨服务关闭存活；每个会话的 timer 也在 cleanupRecord 里单独撤销。
     this.ptyHeartbeat.dispose();
@@ -1427,7 +1436,7 @@ export class ProcessManager extends EventEmitter {
 
   async start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean; worktreeEnabled?: boolean; provider?: SessionProvider; model?: string; reuseId?: string; cols?: number; rows?: number; thinkingEffort?: SessionSnapshot["thinkingEffort"]; sessionSource?: SessionSource; automationId?: string; workspaceId?: string; workspaceTaskId?: string; interactiveShell?: boolean; systemPrompt?: string } & Pick<SessionSnapshot, "employeeId" | "employeeName" | "employeeAvatar">): Promise<SessionSnapshot> {
     if (this.disposed) throw new Error("ProcessManager has been disposed.");
-    if (isOpenRouterFreeSelector(opts?.model)) throw new Error("免费分组仅支持 one 的 Agent 结构化对话。");
+    if (isOpenRouterFreeSelector(opts?.model)) throw new Error("免费分组仅支持 Pi 结构化对话。");
     if (!opts?.interactiveShell) this.assertCommandAllowed(command);
 
     const groupProvider = opts?.interactiveShell ? undefined : opts?.provider ?? inferProviderFromCommand(command);
@@ -1468,7 +1477,7 @@ export class ProcessManager extends EventEmitter {
     const preferredModels = groupProvider ? resolveModelGroupModels(this.config.modelGroups, groupProvider, selector, {
       preferDefault: !requested || requested === "default",
     }) : [requested ?? ""];
-    if (preferredModels.some(isOpenRouterFreeSelector)) throw new Error("免费模型分组仅支持 one 的 Agent 结构化对话。");
+    if (preferredModels.some(isOpenRouterFreeSelector)) throw new Error("免费模型分组仅支持 Pi 结构化对话。");
     const baseCwd = resolveSessionCwd(cwd, this.config.defaultCwd);
 
     const id = opts?.reuseId || randomUUID();
@@ -1984,6 +1993,7 @@ export class ProcessManager extends EventEmitter {
 
   /** Return only a session owned by this manager, without the SQLite fallback used by get(). */
   getOwned(id: string): SessionSnapshot | null {
+    this.terminalHost.flush?.();
     const record = this.sessions.get(id);
     if (!record) return null;
     const result = this.snapshot(record);
@@ -2008,7 +2018,7 @@ export class ProcessManager extends EventEmitter {
     const members = resolveModelGroupModels(this.config.modelGroups, record.provider ?? "claude", selector, {
       preferDefault: !normalized || normalized === "default",
     });
-    if (members.some(isOpenRouterFreeSelector)) throw new Error("免费分组仅支持 one 的 Agent 结构化对话。");
+    if (members.some(isOpenRouterFreeSelector)) throw new Error("免费分组仅支持 Pi 结构化对话。");
     record.selectedModel = normalized;
     if (record.providerCliActive && record.provider === "claude" && record.status === "running" && record.ptyProcess) {
       const value = members[0] && members[0] !== "default" ? members[0] : "default";
@@ -2208,6 +2218,7 @@ export class ProcessManager extends EventEmitter {
   }
 
   getTerminalState(id: string): PtyTerminalSnapshot | null {
+    this.terminalHost.flush?.();
     const record = this.sessions.get(id);
     if (!record) return null;
     if (!record.terminalState) {
@@ -2514,6 +2525,8 @@ export class ProcessManager extends EventEmitter {
       providerCliActive: record.providerCliActive,
       providerCliExitCode: record.providerCliExitCode,
       ptyBusy: record.ptyBridge ? record.ptyBridge.isResponding() : record.ptyBusy === true,
+      ptyCommandRunning: record.status === "running" && record.ptyProcess !== null
+        && !record.provider && record.ptyForeground === true,
       // 与 ptyBusy 同生命周期的本轮锚点。运行时事实：存储没有对应列，重启后为 null。
       ptyTurnStartedAt: record.ptyTurnStartedAt ?? null,
       ptyLastActivityAt: record.ptyLastActivityAt ?? null,

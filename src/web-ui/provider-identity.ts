@@ -2,6 +2,8 @@
 // 这里只补充浏览器层特有的品牌 logo 与 HTML 渲染。
 import {
   SESSION_PROVIDERS as PROVIDER_IDS,
+  PROVIDER_LABELS,
+  WAND_AGENT_LABEL,
   inferProviderFromCommand,
   normalizeProviderId,
   type SessionProvider,
@@ -14,6 +16,7 @@ export {
   isNativeThinkingEffort,
   NATIVE_THINKING_EFFORT_PATTERN,
   PROVIDER_LABELS,
+  WAND_AGENT_LABEL,
 } from "../provider-catalog.js";
 export { PROVIDER_IDS, normalizeProviderId };
 
@@ -21,6 +24,55 @@ export type ProviderId = SessionProvider;
 
 /** 兼容旧名：浏览器层的调用点叫 inferProviderIdFromCommand。 */
 export const inferProviderIdFromCommand = inferProviderFromCommand;
+
+/** 同一 provider 的不同执行路径：CLI 起外部进程，SDK 在 Wand 进程内跑（目前只有 pi 两种都有）。 */
+export type AgentToolEngine = "cli" | "sdk";
+
+/**
+ * 一条可选的执行工具。
+ *
+ * `pi` 与 `wand-agent` 共享同一个 provider（都是 pi），但执行方式不同：
+ * 前者起 Pi CLI 进程（结构化 JSON / PTY），后者用进程内 SDK harness。
+ * 所以 UI 上的「工具」比 provider 多一个维度，不能只拿 provider 当选项值。
+ */
+export interface AgentToolOption {
+  id: string;
+  provider: ProviderId;
+  engine?: AgentToolEngine;
+  label: string;
+  description: string;
+}
+
+/** Wand Agent（进程内 SDK）的选项 id；不是 provider 名，只是一个 UI 侧的稳定标识。 */
+export const WAND_AGENT_TOOL_ID = "wand-agent";
+
+/** 执行工具清单：顺序即 UI 顺序，与 provider-catalog 的 SESSION_PROVIDERS 保持一致。 */
+export const AGENT_TOOL_OPTIONS: readonly AgentToolOption[] = [
+  { id: "claude", provider: "claude", label: PROVIDER_LABELS.claude, description: "Claude Code" },
+  { id: "codex", provider: "codex", label: PROVIDER_LABELS.codex, description: "OpenAI Codex CLI" },
+  { id: "opencode", provider: "opencode", label: PROVIDER_LABELS.opencode, description: "OpenCode CLI" },
+  { id: "grok", provider: "grok", label: PROVIDER_LABELS.grok, description: "Grok Build CLI" },
+  { id: "qoder", provider: "qoder", label: PROVIDER_LABELS.qoder, description: "Qoder CLI" },
+  { id: "pi", provider: "pi", engine: "cli", label: PROVIDER_LABELS.pi, description: "Pi CLI：结构化 JSON 或 PTY 终端" },
+  { id: WAND_AGENT_TOOL_ID, provider: "pi", engine: "sdk", label: WAND_AGENT_LABEL,
+    description: "Wand 自带 Agent：进程内 SDK 执行，只支持结构化会话" },
+  { id: "gemini", provider: "gemini", label: PROVIDER_LABELS.gemini, description: "Gemini CLI" },
+];
+
+/** 按选项 id 取执行工具；认不出来时返回 null（调用方自己决定回退）。 */
+export function agentToolOption(id: string | null | undefined): AgentToolOption | null {
+  if (!id) return null;
+  return AGENT_TOOL_OPTIONS.find((option) => option.id === id) ?? null;
+}
+
+/**
+ * 由 provider + 引擎反推选项 id。
+ * 缺省引擎视为 CLI：历史上只有 pi 有两条路，其他 provider 只有 CLI。
+ */
+export function agentToolIdFor(provider: ProviderId, engine?: AgentToolEngine | null): string {
+  if (provider === "pi" && engine === "sdk") return WAND_AGENT_TOOL_ID;
+  return provider;
+}
 
 const PROVIDER_ID_SET: ReadonlySet<string> = new Set(PROVIDER_IDS);
 

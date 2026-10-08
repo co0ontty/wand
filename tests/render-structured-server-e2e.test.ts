@@ -61,11 +61,12 @@ test("S1 isolated Web restart recovers a v2-owned CLI without changing PID or DT
   const bin = path.join(root, "bin");
   mkdirSync(bin);
   const fakeCli = path.join(bin, "pi");
-  writeFileSync(fakeCli, `#!/usr/bin/env node
+  writeFileSync(fakeCli, `#!${process.execPath}
 const line = (event) => process.stdout.write(JSON.stringify(event) + "\\n");
 line({type:"session",id:"fixture-session"});
 setTimeout(() => line({type:"message_update",assistantMessageEvent:{type:"text_delta",delta:"before "}}), 100);
 const fs = require("node:fs");
+fs.writeFileSync(${JSON.stringify(path.join(root, "fake-cli.started"))}, "fixture");
 const check = setInterval(() => {
   if (!fs.existsSync("resume.marker")) return;
   clearInterval(check);
@@ -77,9 +78,12 @@ setTimeout(() => process.exit(2), 15000).unref();
   chmodSync(fakeCli, 0o755);
   writeFileSync(configPath, JSON.stringify({ host: "127.0.0.1", port, password,
     defaultCwd: root, defaultMode: "assist",
-    render: { engine: "legacy" }, structured: { processHost: "rust" } }), { mode: 0o600 });
+    render: { engine: "legacy" }, structured: { processHost: "rust" }, harness: { engine: "cli" } }), { mode: 0o600 });
+  // This is a fake CLI ownership test, never a real Core/model execution. Deep
+  // PATH repair is independent of shell-env recovery, so disable both before
+  // startup; otherwise the real pi can move ahead of the fixture executable.
   const env = { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`,
-    WAND_STRUCTURED_RENDER_BIN: RUST_BIN };
+    WAND_SHELL_ENV_DISABLE: "1", WAND_PATH_REPAIR_DEEP_DISABLE: "1", WAND_STRUCTURED_RENDER_BIN: RUST_BIN };
   delete env.NODE_TEST_CONTEXT;
   delete env.WAND_TEST_MODE;
   let web: ChildProcess | null = null;
@@ -112,17 +116,33 @@ setTimeout(() => process.exit(2), 15000).unref();
   let token = await login();
   const created = await fetch(`${base}/api/structured-sessions`, { method: "POST",
     headers: { "content-type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ cwd: root, provider: "pi", mode: "assist", prompt: "fixture",
+    body: JSON.stringify({ cwd: root, provider: "pi", engine: "cli", runner: "pi-cli-json", model: "default", mode: "assist",
+      systemPrompt: "Isolated fake CLI fixture; no network or real models.",
       respondImmediately: true }) });
   assert.equal(created.status, 201);
-  const snapshot = await created.json() as { id: string };
+  const snapshot = await created.json() as { id: string; runner?: string; structuredState?: { engine?: string } };
   assert.ok(snapshot.id);
+  // Verify the execution lane before submitting even the fixture prompt.
+  assert.equal(snapshot.runner, "pi-cli-json");
+  assert.notEqual(snapshot.structuredState?.engine, "core", "fake CLI fixture must never enter the real Core/model lane");
+  const accepted = await fetch(`${base}/api/sessions/${snapshot.id}/input`, { method: "POST",
+    headers: { "content-type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ input: "fixture", respondImmediately: true }) });
+  assert.equal(accepted.status, 202);
   const session = async (): Promise<{ output: string; structuredState?: { inFlight: boolean } }> => {
     const result = await fetch(`${base}/api/sessions/${snapshot.id}`, { headers: { Authorization: `Bearer ${token}` } });
     assert.equal(result.status, 200);
     return result.json() as Promise<{ output: string; structuredState?: { inFlight: boolean } }>;
   };
-  await waitFor(async () => (await session()).output.includes("before "));
+  try {
+    await waitFor(async () => (await session()).output.includes("before "));
+  } catch (error) {
+    const state = await session();
+    t.diagnostic(JSON.stringify({ fakeCliStarted: existsSync(path.join(root, "fake-cli.started")),
+      outputChars: state.output.length, inFlight: state.structuredState?.inFlight }));
+    throw error;
+  }
+  assert.ok(existsSync(path.join(root, "fake-cli.started")), "only the fixture executable may satisfy this test");
   v2 = new RenderStructuredClient(configPath);
   await v2.connect();
   const initial = await v2.attachRun(`structured:${snapshot.id}`);

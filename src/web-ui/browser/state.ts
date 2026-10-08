@@ -1,6 +1,7 @@
 import type { AppState } from "./types";
 import { ComposerQueueClock, ComposerStore } from "./composer.js";
 import { ChatRenderCache } from "./chat-render-cache.js";
+import { CHAT_INITIAL_MESSAGE_COUNT } from "../chat-history-window.js";
 import { PROVIDER_IDS, isNativeThinkingEffort } from "../provider-identity";
 
 export const composer = new ComposerStore({
@@ -225,7 +226,6 @@ export var state: AppState = {
     }
   })(),
   terminalBaseFontSize: 13,
-  keyboardPopupOpen: false,
   filePanelOpen: (function() {
     try {
       return localStorage.getItem("wand-file-panel-open") === "true";
@@ -275,37 +275,11 @@ export var state: AppState = {
   lastRenderedMsgCount: 0,
   lastRenderedEmpty: null,
   renderPending: false,
-  chatPageSize: 20,
-  chatRenderedCount: 20,
+  chatPageSize: CHAT_INITIAL_MESSAGE_COUNT,
+  chatRenderedCount: CHAT_INITIAL_MESSAGE_COUNT,
+  chatRenderWindowMessageCount: 0,
   currentTask: null, // Current task title from Claude
   terminalInteractive: false,
-  modifiers: { ctrl: false, alt: false, shift: false },
-  // ── 终端悬浮摇杆遥控器（手机端 PTY 遥控）状态 ──
-  // joystickPos 持久化球球位置 {right, bottom}（localStorage wand-ball-pos）
-  joystickPos: (function() {
-    try {
-      var saved = localStorage.getItem("wand-ball-pos");
-      if (!saved) return null;
-      var parsed = JSON.parse(saved);
-      return parsed && typeof parsed === "object" ? parsed : null;
-    } catch (e) {
-      return null;
-    }
-  })(),
-  joystickPinnedOpen: false,      // 钉住面板是否展开（不持久化，切会话复位）
-  joystickRootEl: null,           // 以下均为运行期句柄，teardown 复位
-  joystickPanelEl: null,
-  joystickBackdropEl: null,
-  joystickBallEl: null,
-  joystickPointerId: null,
-  joystickGesture: null,          // null|'pending'|'move'
-  joystickPressStart: null,       // {x, y}
-  joystickDragOffset: null,       // {x, y} 手指相对球心的抓取偏移
-  joystickDragPoint: null,        // {x, y} 最近一次指针坐标
-  joystickDragFrame: null,        // requestAnimationFrame 句柄（合并每帧一次写样式）
-  joystickMoveHandler: null,
-  joystickUpHandler: null,
-  joystickResizeHandler: null,
   claudeHistory: [],
   claudeHistoryLoaded: false,
   claudeHistoryExpanded: false,

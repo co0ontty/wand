@@ -58,12 +58,15 @@ interface LegacySession {
   permissionBlocked?: boolean;
   pendingEscalation?: unknown;
   ptyBusy?: boolean;
+  ptyCommandRunning?: boolean;
   runner?: string;
   archived?: boolean;
   providerCliActive?: boolean;
   structuredState?: {
     inFlight?: boolean;
     phase?: "responding" | "background";
+    /** 服务端裁决的执行引擎：core = Wand Agent（进程内 SDK）。 */
+    engine?: string | null;
     turnStartedAt?: string | null;
     lastActivityAt?: string | null;
   } | null;
@@ -164,7 +167,8 @@ function sessionStatusLabel(session: LegacySession): string {
   if (isSessionJustCompleted(session)) return "刚完成";
   const status = stringValue(session.status, "idle");
   // provider CLI 进程活着但本轮已结束 → 空闲而不是运行中
-  if (isIdleAtPrompt(kind, status, session.provider ?? "", Boolean(session.ptyBusy))) return "空闲";
+  if (isIdleAtPrompt(kind, status, session.provider ?? "", Boolean(session.ptyBusy))
+    || (kind === "pty" && !session.provider && status === "running" && !session.ptyCommandRunning)) return "空闲";
   return STATUS_LABELS[status] ?? status;
 }
 
@@ -174,7 +178,8 @@ function sessionStatusTone(session: LegacySession): string {
   if (kind === "structured" && session.structuredState?.inFlight) return "running";
   if (isSessionJustCompleted(session)) return "just-completed";
   const status = stringValue(session.status);
-  if (isIdleAtPrompt(kind, status, session.provider ?? "", Boolean(session.ptyBusy))) return "idle";
+  if (isIdleAtPrompt(kind, status, session.provider ?? "", Boolean(session.ptyBusy))
+    || (kind === "pty" && !session.provider && status === "running" && !session.ptyCommandRunning)) return "idle";
   return status;
 }
 
@@ -210,10 +215,16 @@ function sessionToVm(
   const source = isAutomation(session) ? "automation" : "wand";
   const activity = computeRunningSignal(session);
 
+  // 同一 provider 的两条执行路径要能分辨：Pi CLI 与 Wand Agent（进程内 SDK）。
+  const engine = explicitProvider === "pi" && kind === "structured"
+    ? (session.structuredState?.engine === "core" ? "sdk" as const : "cli" as const)
+    : undefined;
+
   return {
     id,
     source,
     provider,
+    ...(engine ? { engine } : {}),
     kind,
     title: sessionTitle(session),
     description: stringValue(session.description),

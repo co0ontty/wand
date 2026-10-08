@@ -135,7 +135,7 @@ function parseEmployeeCandidate(raw: unknown, allowed: SessionProvider[]): WandT
     throw new SiliconEmployeeDraftError("执行引擎无效。", "DRAFT_INVALID_ENGINE", "engine");
   }
   if (engine === "sdk" && provider !== "pi") {
-    throw new SiliconEmployeeDraftError("SDK 执行引擎仅支持 Pi 结构化会话。", "DRAFT_INVALID_ENGINE", "engine");
+    throw new SiliconEmployeeDraftError("Wand Agent 仅支持结构化会话。", "DRAFT_INVALID_ENGINE", "engine");
   }
   return {
     provider,

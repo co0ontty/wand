@@ -8,6 +8,7 @@ import type {
   WandTaskPriority,
   WandTaskStatus,
 } from "../../../task-types";
+import { AGENT_TOOL_OPTIONS, WAND_AGENT_LABEL, agentToolIdFor, agentToolOption } from "../../provider-identity";
 import {
   DEFAULT_WAND_TASK_AGENT_KIND,
   DEFAULT_WAND_TASK_AGENT_MODE,
@@ -42,7 +43,7 @@ export const ISSUE_AGENT_PROVIDERS: ReadonlyArray<{
   { value: "opencode", label: "OpenCode", description: "OpenCode CLI" },
   { value: "grok", label: "Grok", description: "Grok Build CLI" },
   { value: "qoder", label: "Qoder", description: "Qoder CLI" },
-  { value: "pi", label: "one 的 Agent", description: "内置多模型 Agent" },
+  { value: "pi", label: "Pi", description: "内置多模型 Agent" },
   { value: "gemini", label: "Gemini", description: "Gemini CLI" },
 ];
 
@@ -68,6 +69,42 @@ export const ISSUE_AGENT_MODES: ReadonlyArray<{
 ];
 
 export const ISSUE_AGENT_DEFAULT_MODEL = MODEL_CATALOG_DEFAULT_VALUE;
+
+/**
+ * 指派下拉的执行工具清单。
+ * 与新建会话共用 `AGENT_TOOL_OPTIONS`：Pi（CLI）与 Wand Agent（进程内 SDK）是两条独立选项，
+ * 不能只列 provider —— 否则两者会共用一个名字。
+ */
+export const ISSUE_AGENT_TARGETS: ReadonlyArray<{
+  value: string;
+  provider: IssueAgentProvider;
+  label: string;
+}> = AGENT_TOOL_OPTIONS.map((option) => ({
+  value: option.id,
+  provider: option.provider,
+  label: option.label,
+}));
+
+/** agent → 指派下拉的当前值（provider + 引擎）。 */
+export function issueAgentTargetValue(agent: WandTaskAgent): string {
+  return agentToolIdFor(agent.provider, agent.engine);
+}
+
+/**
+ * 指派下拉目标 → agent：目标是「provider + 引擎」，Wand Agent 用 pi provider + sdk 引擎。
+ * 认不出的值仍按 provider 处理，兼容老客户端传裸 provider 名。
+ */
+export function withIssueAgentTarget(
+  agent: WandTaskAgent,
+  target: string,
+  catalog: IssueModelCatalog | null,
+): WandTaskAgent {
+  const option = agentToolOption(target);
+  if (!option) return withIssueAgentProvider(agent, target as IssueAgentProvider, catalog);
+  const next = withIssueAgentProvider(agent, option.provider, catalog);
+  const engine = option.engine === "sdk" && next.kind === "structured" ? "sdk" as const : undefined;
+  return { ...next, engine };
+}
 
 /** 当前 provider 支持的工作模式选项；Codex 只支持全限一种。 */
 export function issueAgentModeOptions(provider: IssueAgentProvider): WandSelectOption[] {
@@ -220,6 +257,16 @@ export function issueAgentProviderLabel(provider: string | null | undefined): st
 }
 
 /**
+ * 执行工具展示名：Pi 与 Wand Agent 共用 `pi` provider，标签必须按引擎分开，
+ * 否则跑进程内 SDK 的会话会被显示成 Pi CLI。
+ * 只拿到 provider 字符串的历史调用点仍然等于 provider 名。
+ */
+export function issueAgentLabel(provider: string | null | undefined, engine?: string | null): string {
+  if (provider === "pi" && engine === "sdk") return WAND_AGENT_LABEL;
+  return issueAgentProviderLabel(provider);
+}
+
+/**
  * 「CLI · 模型」一行：`default` 哨兵不是模型名，换成服务端默认模型的具体名字；
  * 解析不到名字就只留 CLI，不写「默认模型」这种占位。
  */
@@ -327,9 +374,11 @@ export function isIssueAgentProvider(value: string | null | undefined): value is
   return ISSUE_AGENT_PROVIDERS.some((entry) => entry.value === value);
 }
 
-/** 看板会话按 CLI 工具分组；同一任务可以派给多个 Agent。 */
+/** 看板会话按「执行工具」分组：同一 provider 的 Pi CLI 与 Wand Agent 是两组。 */
 export interface IssueAgentGroup {
   provider: string;
+  /** 组内执行引擎；`sdk` = Wand Agent。CLI 组不设该字段。 */
+  engine?: "cli" | "sdk";
   agent: WandTaskAgent | null;
   sessions: Array<{
     id: string;
@@ -340,6 +389,7 @@ export interface IssueAgentGroup {
     thinkingEffort: string;
     mode?: string;
     sessionKind?: string;
+    engine?: "cli" | "sdk";
   }>;
 }
 
@@ -356,12 +406,16 @@ function agentFromSession(session: IssueAgentGroup["sessions"][number]): WandTas
     ? session.thinkingEffort
     : "off";
   const mode = normalizeWandTaskAgentMode(session.provider, session.mode);
+  const kind = session.sessionKind === "pty" ? "pty" : DEFAULT_WAND_TASK_AGENT_KIND;
   return {
     provider: session.provider,
     model: session.model.trim() || ISSUE_AGENT_DEFAULT_MODEL,
     thinkingEffort,
     mode,
-    kind: session.sessionKind === "pty" ? "pty" : DEFAULT_WAND_TASK_AGENT_KIND,
+    kind,
+    // Wand Agent 会话在面板上要认得出是引擎而不是普通 Pi CLI。
+    ...(session.provider === "pi" && session.engine === "sdk" && kind === "structured"
+      ? { engine: "sdk" as const } : {}),
   };
 }
 
@@ -375,22 +429,33 @@ export function groupIssueSessionsByAgent(
 ): IssueAgentGroup[] {
   const groups: IssueAgentGroup[] = [];
   const index = new Map<string, IssueAgentGroup>();
-  const ensure = (provider: string, agent: WandTaskAgent | null): IssueAgentGroup => {
-    const key = provider || "session";
+  const ensure = (
+    provider: string,
+    agent: WandTaskAgent | null,
+    engine?: "cli" | "sdk",
+  ): IssueAgentGroup => {
+    const resolvedEngine = engine ?? (agent?.engine === "sdk" ? "sdk" : undefined);
+    const key = `${provider || "session"}:${resolvedEngine ?? "cli"}`;
     const existing = index.get(key);
     if (existing) {
       if (!existing.agent && agent) existing.agent = agent;
       return existing;
     }
-    const group: IssueAgentGroup = { provider: key, agent, sessions: [] };
+    const group: IssueAgentGroup = {
+      provider: provider || "session",
+      ...(resolvedEngine ? { engine: resolvedEngine } : {}),
+      agent,
+      sessions: [],
+    };
     index.set(key, group);
     groups.push(group);
     return group;
   };
-  for (const agent of assignedAgents(assigned)) ensure(agent.provider, agent);
+  for (const agent of assignedAgents(assigned)) ensure(agent.provider, agent, agent.engine);
   for (const session of sessions) {
     const agent = agentFromSession(session);
-    ensure(agent?.provider ?? session.provider, agent).sessions.push(session);
+    const engine = session.engine ?? (agent?.engine === "sdk" ? "sdk" : undefined);
+    ensure(agent?.provider ?? session.provider, agent, engine).sessions.push(session);
   }
   return groups;
 }

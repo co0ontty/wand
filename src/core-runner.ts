@@ -357,7 +357,7 @@ export class CoreRunner implements StructuredRunnerAdapter {
     const session = context.session;
     if (session.piSettings?.resources || session.piSettings?.codemodeOverride
       || session.piSettings?.autoResources || session.piSettings?.lockedSkills?.length) {
-      return "当前 SDK 候选尚不支持会话级 Skills / MCP 选择，没有改用全局资源。";
+      return "Wand Agent 尚不支持会话级 Skills / MCP 选择，没有改用全局资源。";
     }
     const injectedStreamFn = this.options.streamFn;
     // 测试环境必须显式注入模型缝隙：避免单测无意中发出真实付费请求（或挂在网络上）。

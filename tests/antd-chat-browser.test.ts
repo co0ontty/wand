@@ -285,7 +285,8 @@ export async function runFocusBrowser({ root = resolve(import.meta.dirname, ".."
         // Observational repair/baseline comparison only, never a B01/matrix pass.
         responsePlans.push({defer:true,input:{file_path:"fixture.txt"},pending:true,resultAvailable:false});
         await evaluate('h.fresh([{role:"assistant",uuid:"pending",content:[{type:"thinking",thinking:""},{type:"tool_use",id:"pending-read",name:"Bash",input:{},activity:{kind:"run_command",fileKey:"same-file"}}]}],{status:"running",structuredState:{inFlight:true}})');
-        await click(summary);await click(entry);await wait('!!document.querySelector(".chat-activity-loading")',"probe loading");await evaluate("h.frames()");
+        if (await evaluate('document.querySelector("button.chat-process-summary").getAttribute("aria-expanded")==="false"')) await click(summary);
+        await click(entry);await wait('!!document.querySelector(".chat-activity-loading")',"probe loading");await evaluate("h.frames()");
         const snapshot='(()=>{const n=document.querySelector(".chat-call[data-tool-ids] button.chat-call-button"),r=document.querySelector(".chat-messages");return {rect:n.getBoundingClientRect().toJSON(),text:n.textContent,scrollTop:r.scrollTop,clientHeight:r.clientHeight,scrollHeight:r.scrollHeight,flexDirection:getComputedStyle(r).flexDirection,activeTag:document.activeElement.tagName,documentScroll:document.scrollingElement.scrollTop}})()';
         const before=await evaluate(snapshot);await evaluate('window.probeEntry=document.querySelector(".chat-call[data-tool-ids] button.chat-call-button");');
         assert.equal(deferred.length,1);deferred.shift()();await wait('!!document.querySelector(".chat-activity-pending-detail")',"probe pending");await evaluate("h.frames()");
@@ -551,7 +552,9 @@ async function runExtended({ evaluate: e, send, click, key, wait, mode, result, 
   plans.push({defer:true,input:{file_path:"fixture.txt"},pending:true,resultAvailable:false});
   await e(`(async()=>{window.pendingTurns=[{role:"assistant",uuid:"pending",content:[{type:"thinking",thinking:""},{type:"tool_use",id:"pending-read",name:"Bash",input:{},activity:{kind:"run_command",fileKey:"same-file"}}]}];await h.fresh(pendingTurns,{status:"running",structuredState:{inFlight:true}});})()`);
   assert.equal(result.requests.length,requestsBefore,"unopened entries do not prefetch");
-  await click(summary);await click(entry);await wait('document.querySelector(".chat-activity-loading")?.textContent.includes("加载详情")',"loading state");
+  // Running activity is already auto-expanded; do not close it before trying its real entry.
+  if (await e('document.querySelector("button.chat-process-summary").getAttribute("aria-expanded")==="false"')) await click(summary);
+  await click(entry);await wait('document.querySelector(".chat-activity-loading")?.textContent.includes("加载详情")',"loading state");
   await e("h.frames()");await e(`window.o=h.watch(${JSON.stringify(entry)});`);assert.equal(deferred.length,1);deferred.shift()();
   await wait('!!document.querySelector(".chat-activity-pending-detail")',"pending detail");await e("h.frames()");
   observed=await e('o.result()');record("A06-observation","loading→pending mandatory geometry observation",observed);checkStable(observed);record("A06","loading→pending retains actual entry",observed);

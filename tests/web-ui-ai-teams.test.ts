@@ -554,7 +554,7 @@ test("[T7] 团队只在「已选中已有项目」时可选，global 与未选�
 });
 
 test("[T7] 团队是 picker 自己的选择态，没有撑宽 WorkspaceSessionTarget", () => {
-  assert.match(workspaceTypesSource, /export type WorkspaceSessionTarget = WorkspaceProvider \| "shell";/);
+  assert.match(workspaceTypesSource, /export type WorkspaceSessionTarget = WorkspaceProvider \| "shell" \| typeof WAND_AGENT_TOOL_ID;/);
   assert.doesNotMatch(workspaceTypesSource, /export type WorkspaceSessionTarget[^;]*team/, "types.ts 只加新类型，不动联合");
   assert.match(workspaceTypesSource, /export interface WorkspaceTeamOption/);
 
@@ -1455,7 +1455,7 @@ test("[署名] 技术签名仍可解析，但群聊发言只突出成员名字",
   assert.equal(agentSignatureLabel({ provider: "codex", model: "gpt-5.2", thinkingEffort: "deep" }), "Codex · gpt-5.2 · 深入");
   assert.equal(agentSignatureLabel({ provider: "opencode", model: "  ", thinkingEffort: "opencode:minimal" }), "OpenCode · 最低",
     "CLI 原生档位走 compactThinkingLabel");
-  assert.equal(agentSignatureLabel({ provider: "pi" }), "one 的 Agent", "老服务端没有 model / effort 时只剩 provider");
+  assert.equal(agentSignatureLabel({ provider: "pi" }), "Pi", "老服务端没有 model / effort 时只剩 provider");
   assert.equal(agentSignatureLabel({ provider: null, model: null, thinkingEffort: null }), "", "全缺就不给芯片");
   assert.equal(agentSignatureLabel({ model: "glm-4.7" }), "glm-4.7", "只有模型也不能冒出前导分隔符");
   assert.doesNotMatch(agentSignatureLabel({ provider: "claude", model: undefined, thinkingEffort: undefined }), /undefined|·\s*$|\s·/, "不出现 undefined 或多余分隔符");

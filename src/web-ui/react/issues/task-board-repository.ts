@@ -36,6 +36,8 @@ export interface IssueSessionSummary {
   thinkingEffort: string;
   /** 会话实际跑的执行模式；旧会话可能为空。 */
   mode?: string;
+  /** 执行引擎：`sdk` = Wand Agent（进程内），`cli`（或缺失）= Pi CLI。 */
+  engine?: "cli" | "sdk";
 }
 
 export interface IssueDispatchResult {

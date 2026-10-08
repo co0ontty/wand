@@ -52,7 +52,7 @@ NODE
 
 # A standalone downloaded install.sh has no .nvmrc beside it. In a checkout,
 # use the same pin as build/CI; keep the standalone fallback in sync.
-REQUIRED_NODE_VERSION="26.10.0"
+REQUIRED_NODE_VERSION="24.21.0"
 NODE_VERSION_FILE="$(dirname "${BASH_SOURCE[0]}")/.nvmrc"
 if [[ -f "$NODE_VERSION_FILE" ]]; then
   REQUIRED_NODE_VERSION="$(<"$NODE_VERSION_FILE")"

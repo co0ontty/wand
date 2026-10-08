@@ -268,6 +268,7 @@ function chatAuthor(
     avatar: member.avatar && !member.avatar.startsWith("data:") ? member.avatar : undefined,
     leader: member.isLeader || undefined,
     provider: used?.provider ?? member.agent.provider,
+    engine: used?.engine,
     model: used?.model?.trim() || undefined,
     thinkingEffort: used?.thinkingEffort || undefined,
     sessionId: sessionId ?? undefined,

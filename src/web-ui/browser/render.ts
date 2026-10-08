@@ -34,8 +34,9 @@ export function resetChatRenderCache(options?: any) {
   state.lastRenderedMsgCount = 0;
   state.lastRenderedEmpty = null;
   state.renderPending = false;
-  state.chatRenderedCount = state.chatPageSize;
   if (!opts.preserveStickState) {
+    state.chatRenderedCount = state.chatPageSize;
+    state.chatRenderWindowMessageCount = 0;
     invalidateChatInteraction();
     state.askUserSelections = {};
   }
@@ -495,6 +496,7 @@ export function renderAppShell() {
           // 垂直排列，一行一个液态玻璃气泡（编号 + 文本 + 立即/删除）。
           // updateQueueBar() 在 queuedMessages 非空时去掉 hidden。
           '<div id="queue-bar-host" class="queue-bar-host" hidden></div>' +
+          '<div id="terminal-shortcuts" class="terminal-shortcuts" hidden></div>' +
           // 输入主行：正文独占上层书写区域；下层按参考布局分为
           // 「添加 / 权限」与「模型 / 思考 / 发送」两组，键盘顺序与视觉顺序一致。
           '<div class="input-composer-row" data-pi-composer="">' +

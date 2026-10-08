@@ -268,7 +268,7 @@ test("系统员工只有 SDK 候选时不回退到默认 provider", async () => 
   assert.equal(context.cliCandidates, undefined);
   await assert.rejects(
     callConfiguredAiText({ system: "s", prompt: "p" }, process.cwd(), "中文", context),
-    /已跳过 SDK 候选/,
+    /已跳过 Wand Agent/,
   );
 });
 test("角色设定只做前缀，任务自己的输出格式仍排在后面", () => {

@@ -20,6 +20,9 @@ export interface ComposerConfigState {
   readonly modelRefreshing: boolean;
   readonly thinkingValue: string;
   readonly thinkingLabel: string;
+  readonly toolVisible?: boolean;
+  readonly toolStatus?: string;
+  readonly toolDisabled?: boolean;
 }
 
 export interface ComposerConfigMount extends ComposerConfigState {
@@ -38,6 +41,9 @@ function sameState(a: ComposerConfigState, b: ComposerConfigState): boolean {
     && a.modelRefreshing === b.modelRefreshing
     && a.thinkingValue === b.thinkingValue
     && a.thinkingLabel === b.thinkingLabel
+    && a.toolVisible === b.toolVisible
+    && a.toolStatus === b.toolStatus
+    && a.toolDisabled === b.toolDisabled
 }
 
 /**

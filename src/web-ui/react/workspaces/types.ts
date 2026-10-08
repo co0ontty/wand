@@ -2,11 +2,29 @@
 // provider 联合沿用浏览器层共享的 provider-identity（不把服务端 types 拉进浏览器 bundle）。
 
 import type { ProviderId } from "../../provider-identity";
+import { WAND_AGENT_TOOL_ID } from "../../provider-identity";
 
 export type WorkspaceProvider = ProviderId;
 
-/** A task work window can run an Agent CLI or a bare login shell. */
-export type WorkspaceSessionTarget = WorkspaceProvider | "shell";
+/**
+ * 能在任务窗口里跑起来的一项：CLI 工具、Wand Agent（进程内 SDK）或裸 Shell。
+ * Wand Agent 与 Pi 共用 pi provider，但在 UI 上是两个可选项，所以用选项 id 当 target。
+ */
+export type WorkspaceSessionTarget = WorkspaceProvider | "shell" | typeof WAND_AGENT_TOOL_ID;
+
+/**
+ * target → provider。Wand Agent 也用 pi provider 开会话，只是引擎是进程内 SDK。
+ * Shell 没有 provider，返回空串。
+ */
+export function workspaceTargetProvider(target: WorkspaceSessionTarget): WorkspaceProvider | "" {
+  if (target === "shell") return "";
+  return target === WAND_AGENT_TOOL_ID ? "pi" : target;
+}
+
+/** target → 执行引擎；只有 Wand Agent 走 SDK，其余都是 CLI。 */
+export function workspaceTargetEngine(target: WorkspaceSessionTarget): "cli" | "sdk" | undefined {
+  return target === WAND_AGENT_TOOL_ID ? "sdk" : undefined;
+}
 
 /** Agent 窗口的运行形态；空白终端固定为 PTY。 */
 export type WorkspaceSessionKind = "structured" | "pty";
@@ -80,6 +98,8 @@ export interface WorkspaceSessionSummary {
   startedAt?: string;
   workspaceTaskId?: string;
   ptyBusy?: boolean;
+  /** 空白终端中仍有前台命令；不是 provider 的生成回合。 */
+  ptyCommandRunning?: boolean;
   /** 已归档：从正常列表收起，进「已归档」区，可恢复；归档 7 天后由保留期清理。 */
   archived?: boolean;
   archivedAt?: string | null;
@@ -272,6 +292,8 @@ export interface RecentPath {
 
 export interface NewProjectDefaults {
   defaultProvider: WorkspaceProvider;
+  /** 默认执行引擎；只对 pi 有意义（`sdk` = Wand Agent）。 */
+  defaultEngine?: "cli" | "sdk";
   defaultCwd: string;
   defaultSessionKind: WorkspaceSessionKind;
   defaultTaskWorktree: boolean;

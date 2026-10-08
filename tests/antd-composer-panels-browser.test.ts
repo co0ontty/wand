@@ -319,18 +319,83 @@ export async function runPanels(matrix = modes) {
       assert.equal(await e("document.getElementById('todo-progress').classList.contains('hidden') && !document.getElementById('todo-progress-body').classList.contains('expanded')"), true, "new turn retires the previous checklist");
       record("todo inside/outside/Escape and completed turn", { nativeFocusRestored: true, pendingFallback: true, completeHidden: true, newTurnHidden: true });
 
-      await e("p.terminal()"); await click(".wand-joystick-ball");
-      await wait("p.state.joystickPinnedOpen===true", "native terminal panel opened");
+      await e("p.terminal()");
+      assert.equal(await e("document.querySelectorAll('.wand-joystick-root').length"), 0);
+      const row = await e(`(()=>{const h=document.getElementById('terminal-shortcuts'),r=h.getBoundingClientRect(),input=document.getElementById('input-box').getBoundingClientRect();return {count:document.querySelectorAll('#terminal-shortcuts').length,above:r.bottom<=input.top,singleLine:new Set([...h.querySelectorAll('button')].map(b=>b.getBoundingClientRect().top)).size===1,contained:r.left>=0&&r.right<=innerWidth,scrollable:h.scrollWidth>h.clientWidth};})()`);
+      assert.equal(row.count, 1); assert.equal(row.above, true); assert.equal(row.singleLine, true); assert.equal(row.contained, true);
+      if (mode === "390px") assert.equal(row.scrollable, true);
+      await click("#input-box");
       const terminalStart = result.requests.length;
-      const keys = ["up", "left", "down", "right", "enter", "ctrl_c", "escape", "shift_tab"];
-      for (const key of keys) { await click(`.wjp-key[data-key="${key}"]`); await wait(`p.state.messageQueue.length===0`, "PTY key transport settled"); }
+      const keys = ["escape", "tab", "shift_tab", "ctrl_c", "up", "down", "left", "right", "enter"];
+      for (const key of keys) {
+        await click(`[data-terminal-key="${key}"]`);
+        await wait("p.state.messageQueue.length===0", "PTY key transport settled");
+        assert.equal(await e("document.activeElement===document.getElementById('input-box')"), true, "shortcut preserves input focus");
+      }
       const inputs = result.requests.slice(terminalStart).filter((operation: any) => operation.path.endsWith("/input"));
-      assert.deepEqual(inputs.map((operation: any) => operation.body.shortcutKey), keys);
-      assert.deepEqual(inputs.map((operation: any) => operation.body.input), ["\u001b[A", "\u001b[D", "\u001b[B", "\u001b[C", "\r", "\u0003", "\u001b", "\u001b[Z"]);
+      assert.deepEqual(inputs.map((operation: any) => operation.body.shortcutKey), keys.map(key => key === "enter" ? "enter_text" : key));
+      assert.deepEqual(inputs.map((operation: any) => operation.body.input), ["\u001b", "\t", "\u001b[Z", "\u0003", "\u001b[A", "\u001b[B", "\u001b[D", "\u001b[C", "\r"]);
       assert.ok(inputs.every((operation: any) => operation.body.view === "terminal"));
-      await click(".wjp-close"); assert.equal(await e("p.state.joystickPinnedOpen"), false);
-      const panelCount = await e("document.querySelectorAll('.wand-joystick-panel').length"); assert.equal(panelCount, 1, "repeated initialization preserves one real panel");
-      record("terminal each key dispatches once", { keys, sequences: inputs.map((operation: any) => operation.body.input), uniquePanel: panelCount });
+      record("PTY shortcuts stay in one input row and dispatch once without stealing focus", { ...row, keys });
+
+      // Actual keyboard input uses the production input/IME handlers, not the shortcut callback.
+      const typingStart = result.requests.length;
+      await send("Input.insertText", { text: "a" });
+      await wait("p.state.messageQueue.length===0 && document.getElementById('input-box').value===''", "direct typing drained");
+      await send("Input.imeSetComposition", { text: "ni", selectionStart: 2, selectionEnd: 2 });
+      await e("p.frames()");
+      assert.deepEqual(result.requests.slice(typingStart).filter((op: any) => op.path.endsWith("/input")).map((op: any) => op.body.input), ["a"], "IME partial text is never sent");
+      await send("Input.insertText", { text: "你" });
+      await wait("!p.state.composerComposing && p.state.messageQueue.length===0", "IME committed");
+      await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+      await wait("p.state.messageQueue.length===0", "physical Enter settled");
+      const typed = result.requests.slice(typingStart).filter((op: any) => op.path.endsWith("/input")).map((op: any) => op.body.input);
+      assert.deepEqual(typed, ["a", "你", "\r"]);
+      // Shortcut buttons remain keyboard accessible without leaking a second key to the PTY.
+      await e("document.querySelector('[data-terminal-key=tab]').focus();document.addEventListener('keydown',p.captureTerminalInput,true)");
+      const keyboardStart = result.requests.length;
+      await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+      await wait("p.state.messageQueue.length===0", "keyboard shortcut activation settled");
+      assert.deepEqual(result.requests.slice(keyboardStart).filter((op: any) => op.path.endsWith("/input")).map((op: any) => op.body.input), ["\t"]);
+      await e("document.removeEventListener('keydown',p.captureTerminalInput,true)");
+      record("PTY keyboard passthrough and IME remain single delivery", { typed, keyboardActivation: true });
+
+      // A native touch tap must keep the composer and keyboard focused.
+      await click("#input-box");
+      await send("Emulation.setTouchEmulationEnabled", { enabled: true });
+      const touch = await point('[data-terminal-key="escape"]');
+      await send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: touch.x, y: touch.y }] });
+      await send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await e("p.frames()");
+      assert.equal(await e("document.activeElement===document.getElementById('input-box')"), true);
+      await send("Emulation.setTouchEmulationEnabled", { enabled: false });
+      await wait("p.state.messageQueue.length===0", "touch shortcut settled");
+
+      // Enter with pending text is two packets even if the user switches sessions before it drains.
+      const splitStart = result.requests.length;
+      await e("p.state.inputQueue=new Promise(resolve=>window.releasePtyInput=resolve);document.getElementById('input-box').value='held text'");
+      await click('[data-terminal-key="enter"]');
+      await e("p.state.sessions.push({...p.state.sessions[0],id:'panels-other'});p.state.selectedId='panels-other';window.releasePtyInput()");
+      await wait("p.state.messageQueue.length===0", "captured-session submission settled");
+      const split = result.requests.slice(splitStart).filter((op: any) => op.path.endsWith("/input"));
+      assert.deepEqual(split.map((op: any) => op.body.input), ["held text", "\r"]);
+      assert.ok(split.every((op: any) => op.path === "/api/sessions/panels-A/input"));
+      await e("p.state.selectedId='panels-A'");
+      record("touch focus and two-packet Enter preserve session ownership", { touchFocus: true, twoPackets: true, sessionBound: true });
+
+      await e("p.state.sessions[0].sessionKind='structured';p.updateTerminalShortcuts()");
+      assert.equal(await e("document.getElementById('terminal-shortcuts').hidden"), true);
+      await e("p.state.sessions[0].sessionKind='pty';p.state.sessions[0].status='exited';p.updateTerminalShortcuts()");
+      assert.equal(await e("[...document.querySelectorAll('[data-terminal-key]')].every(b=>b.disabled)"), true);
+      await e("p.state.sessions[0].status='running';document.documentElement.classList.add('is-wand-native-input');p.updateTerminalShortcuts()");
+      assert.equal(await e("document.getElementById('terminal-shortcuts').hidden"), true);
+      await e("document.documentElement.classList.remove('is-wand-native-input');p.state.selectedId=null;p.updateTerminalShortcuts()");
+      assert.equal(await e("document.getElementById('terminal-shortcuts').hidden"), true);
+      await e("p.state.selectedId='panels-A';p.updateTerminalShortcuts()");
+      assert.equal(await e("document.querySelectorAll('[data-terminal-key]').length"), 9);
+      record("structured, absent, stopped and native-input sessions stay guarded", { guarded: true });
 
       await e("p.notification(false);void 0"); await click(".notification-bubble-close");
       await wait("!document.querySelector('.notification-bubble')", "notification close removes mounted root");
@@ -346,7 +411,7 @@ export async function runPanels(matrix = modes) {
     assert.deepEqual(result.dialogs, [], "no native alert/confirm/prompt is opened");
     assert.deepEqual(result.exceptions, []); assert.deepEqual(result.errors, []); result.ok = true;
   } catch (error) {
-    result.failure = String(error); if (evaluate) try { result.diagnostic = await evaluate("({active:document.activeElement?.outerHTML,queue:window.p?.queueTexts(),todo:document.getElementById('todo-progress-body')?.outerHTML,joystick:document.querySelector('.wand-joystick-panel')?.outerHTML})"); } catch {}
+    result.failure = String(error); if (evaluate) try { result.diagnostic = await evaluate("({active:document.activeElement?.outerHTML,queue:window.p?.queueTexts(),todo:document.getElementById('todo-progress-body')?.outerHTML,shortcuts:document.getElementById('terminal-shortcuts')?.outerHTML})"); } catch {}
     throw error;
   } finally {
     const output = resolve(root, "output/web-ui-library-migration/composer-panels/browser.json");

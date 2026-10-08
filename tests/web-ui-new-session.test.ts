@@ -547,3 +547,46 @@ test("新会话页的团队直发：不建会话、本轮说明必填、按已�
   assert.match(host, /teams=\{teamContext \? teamOptions : null\}/);
   assert.match(host, /const teamWorkspaceId = form\?\.workspaceTaskId/);
 });
+
+test("执行引擎跟 provider 一起记住：选过 Wand Agent 下次仍预选它", async () => {
+  const writes: Array<Record<string, unknown>> = [];
+  const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url === "/api/settings/config") {
+      writes.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+      return json({ ok: true });
+    }
+    if (url === "/api/config") {
+      return json({
+        defaultProvider: "pi",
+        defaultSessionKind: "structured",
+        defaultMode: "managed",
+        defaultCwd: "/repo",
+        defaultEngine: "sdk",
+      });
+    }
+    if (url === "/api/recent-paths") return json([]);
+    throw new Error(`Unexpected fetch ${url}`);
+  }) as typeof fetch;
+  const repository = new HttpNewSessionRepository(fetchImpl);
+
+  await repository.savePreferences({ defaultProvider: "pi", defaultEngine: "sdk" });
+  assert.deepEqual(writes, [{ defaultProvider: "pi", defaultEngine: "sdk" }], "引擎必须跟 provider 一起提交");
+
+  const loaded = await repository.load();
+  assert.equal(loaded.config.defaultProvider, "pi");
+  assert.equal(loaded.config.defaultEngine, "sdk", "Wand Agent 的选择读回来还是 sdk");
+});
+
+test("老服务端没有 defaultEngine 时按 Pi CLI 处理，不冒充 Wand Agent", async () => {
+  const fetchImpl = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === "/api/config") {
+      return json({ defaultProvider: "pi", defaultSessionKind: "structured", defaultMode: "managed", defaultCwd: "/repo" });
+    }
+    if (url === "/api/recent-paths") return json([]);
+    throw new Error(`Unexpected fetch ${url}`);
+  }) as typeof fetch;
+  const loaded = await new HttpNewSessionRepository(fetchImpl).load();
+  assert.equal(loaded.config.defaultEngine, "cli");
+});

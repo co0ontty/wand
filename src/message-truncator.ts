@@ -55,6 +55,14 @@ export interface BlockWindowedMessages extends WindowedMessages {
  */
 export const MESSAGE_FIRST_PAINT_BYTES = 1024 * 1024;
 
+/** Explicit small-page clients may narrow, never enlarge, the transport budget. */
+export function messageWindowByteBudget(value: unknown): number {
+  const parsed = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : value;
+  return typeof parsed === "number" && Number.isSafeInteger(parsed) && parsed > 0
+    ? Math.min(MESSAGE_FIRST_PAINT_BYTES, Math.max(16 * 1024, parsed))
+    : MESSAGE_FIRST_PAINT_BYTES;
+}
+
 /**
  * 吸附回退的额外载荷上限：折叠段往回吃掉的体积超过它就改为跳过整段，
  * 而不是把整段拉进首屏（窗口的目标是压住首屏载荷，吸附不能反过来把它撑大）。
@@ -224,6 +232,7 @@ export function alignedBlockStart(
   cardDefaults: CardExpandDefaults,
   rawStart: number,
   forwardLimit: number = content.length,
+  maxSnapBackBytes: number = MAX_BLOCK_SNAP_BACK_BYTES,
 ): number {
   const total = content.length;
   const start = Math.min(Math.max(rawStart, 0), total);
@@ -246,11 +255,18 @@ export function alignedBlockStart(
     cursor = next;
   }
   const snapBackBytes = contentTransportBytes(content.slice(cursor, start), cardDefaults);
-  if (snapBackBytes <= MAX_BLOCK_SNAP_BACK_BYTES) return cursor;
+  if (snapBackBytes <= maxSnapBackBytes) return cursor;
 
   // 折叠段太长：不再往回吃，跳到该段之后，保证首屏载荷不因吸附膨胀。
   const skipped = collapsed[cursor] ? collapsedRunEnd(collapsed, cursor) : cursor;
-  if (skipped >= total) return 0;
+  if (skipped >= total) {
+    if (maxSnapBackBytes >= MAX_BLOCK_SNAP_BACK_BYTES) return 0;
+    // Opted-in small pages must not absorb an entire huge closed timeline.
+    // Keep a boundary tool_result paired with its call, even if that single
+    // semantic unit is larger than the soft byte budget.
+    const head = content[start];
+    return head?.type === "tool_result" ? useIndexById.get(head.tool_use_id) ?? start : start;
+  }
   // 跳不到更晚的位置（只可能还是往回吃）或超过本页末尾时保持原切点。
   if (skipped <= start || skipped >= forwardLimit) return start;
   return skipped;
@@ -285,6 +301,7 @@ export function blockWindowMessagesForTransport(
   cardDefaults: CardExpandDefaults,
   blockBudget: number = MESSAGE_BLOCK_WINDOW,
   byteBudget: number = MESSAGE_FIRST_PAINT_BYTES,
+  strictByteBudget = false,
 ): BlockWindowedMessages {
   const turns = all ?? [];
   const total = turns.length;
@@ -345,7 +362,8 @@ export function blockWindowMessagesForTransport(
   // 最旧入窗 turn 的切点吸附到干净边界：不切开折叠的工具段，也不留下无头 tool_result。
   const headContent = turns[startTurn].content;
   const startOffset = leadingBlockOffset > 0
-    ? alignedBlockStart(headContent, cardDefaults, leadingBlockOffset)
+    ? alignedBlockStart(headContent, cardDefaults, leadingBlockOffset, headContent.length,
+      strictByteBudget ? Math.min(MAX_BLOCK_SNAP_BACK_BYTES, byteBudget) : MAX_BLOCK_SNAP_BACK_BYTES)
     : 0;
 
   const windowedTurns: ConversationTurn[] = [];

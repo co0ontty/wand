@@ -85,21 +85,21 @@ test("侧栏报错只在内容变化时通知订阅者，重报不换 retry 引�
   }
 });
 
-test("加载失败收成品牌区右侧徽标，完整原因留在提示里", () => {
+test("加载失败留在头部独立状态行，不挤占品牌与操作区", () => {
   reportSidebarListError({ kind: "load", message: "无法加载任务列表：连接被拒绝。", retry: async () => {} });
-  let header = "";
+  let html = "";
   try {
-    header = renderSidebar().match(/<div[^>]*class="[^"]*sidebar-header-main[^"]*"[^>]*>[\s\S]*?<\/div>/)?.[0] ?? "";
+    html = renderSidebar();
   } finally {
     reportSidebarListError(null);
   }
-  assert.match(header, /class="[^"]*\bsidebar-list-error\b/, "徽标要贴在 logo 与 Wand 右侧");
-  assert.match(header, /加载失败/);
-  assert.match(header, /无法加载任务列表：连接被拒绝。｜点击重新加载/);
-  assert.ok(
-    header.indexOf("sidebar-title") < header.indexOf("sidebar-list-error"),
-    "徽标排在标题之后",
-  );
+  const status = html.match(/<div[^>]*class="[^"]*\bsidebar-status\b[^"]*"[^>]*>[\s\S]*?<\/div>/)?.[0] ?? "";
+  const brand = html.match(/<div[^>]*class="[^"]*sidebar-header-main[^"]*"[^>]*>[\s\S]*?<\/div>/)?.[0] ?? "";
+  assert.match(status, /class="[^"]*\bsidebar-list-error\b/, "头部状态行承载可重试的错误徽标");
+  assert.match(status, /加载失败/);
+  assert.match(status, /无法加载任务列表：连接被拒绝。｜点击重新加载/);
+  assert.doesNotMatch(brand, /sidebar-list-error/, "错误不挤动品牌与首行按钮");
+  assert.ok(html.indexOf("sidebar-title") < html.indexOf("sidebar-list-error"), "状态行位于品牌之后");
   assert.doesNotMatch(renderSidebar(), /sidebar-list-error/);
 });
 

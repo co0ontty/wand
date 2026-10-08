@@ -78,27 +78,32 @@ export function installWandThemeTokens(target: Document = document): void {
   target.head.appendChild(sheet);
 }
 
-function cssToken(name: string, fallback: string): string {
-  return typeof document === "undefined" ? fallback
-    : getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
-}
-
 /** Install at each React root, including roots created for legacy-owned host nodes. */
 export function WandUiProvider({ children }: { children: React.ReactNode }) {
   React.useInsertionEffect(() => installWandThemeTokens(), []);
   const portal = usePortalContainer();
   const reduced = useReducedMotion();
-  const theme = React.useMemo<ThemeConfig>(() => ({ ...wandTheme, token: {
-    // rc-trigger needs the motion lifecycle to complete popup alignment. Keep
-    // that lifecycle with instantaneous durations; the reduced-motion sheet
-    // removes visual translation/scale without disabling alignment callbacks.
-    ...wandTheme.token, motion: true,
-    motionDurationFast: reduced ? "0.00001s" : cssToken("--motion-fast", "0.12s"),
-    motionDurationMid: reduced ? "0.00001s" : cssToken("--motion-normal", "0.22s"),
-    motionDurationSlow: reduced ? "0.00001s" : cssToken("--motion-normal", "0.22s"),
-    motionEaseInOut: cssToken("--ease-in-out-smooth", "ease-in-out"),
-    motionEaseOut: cssToken("--ease-out-expo", "ease-out"),
-  } }), [reduced]);
+  const theme = React.useMemo<ThemeConfig>(() => {
+    const styles = typeof document === "undefined" ? null : getComputedStyle(document.documentElement);
+    const cssToken = (name: string, fallback: string): string => styles?.getPropertyValue(name).trim() || fallback;
+    return { ...wandTheme,
+      // Independent legacy roots use the same theme. Ant's generated per-root
+      // CSS-variable keys otherwise inject hundreds of identical styles on a
+      // long timeline. Keep reduced motion in its own namespace during updates.
+      cssVar: { key: reduced ? "wand-ui-reduced" : "wand-ui" },
+      token: {
+        // rc-trigger needs the motion lifecycle to complete popup alignment. Keep
+        // that lifecycle with instantaneous durations; the reduced-motion sheet
+        // removes visual translation/scale without disabling alignment callbacks.
+        ...wandTheme.token, motion: true,
+        motionDurationFast: reduced ? "0.00001s" : cssToken("--motion-fast", "0.12s"),
+        motionDurationMid: reduced ? "0.00001s" : cssToken("--motion-normal", "0.22s"),
+        motionDurationSlow: reduced ? "0.00001s" : cssToken("--motion-normal", "0.22s"),
+        motionEaseInOut: cssToken("--ease-in-out-smooth", "ease-in-out"),
+        motionEaseOut: cssToken("--ease-out-expo", "ease-out"),
+      },
+    };
+  }, [reduced]);
   return <ThemeInstalled.Provider value={true}>
     <XProvider locale={{ ...zhCN, ...xZhCN }} theme={theme}
       getPopupContainer={() => portal ?? document.body}>

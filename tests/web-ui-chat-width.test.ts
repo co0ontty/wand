@@ -165,4 +165,7 @@ test("width toggle breakpoint matches the stylesheet media query", () => {
   assert.match(css, /\.chat-width-toggle \{ display: none; \}/);
   assert.match(css, /html\[data-chat-width="column"\]:not\(\.is-wand-app\) :is\(\.chat-messages, \.chat-running-bar, \.input-panel\)/,
     "message and composer widths share one column rule while native shells keep their layout");
+  // 原生壳（html.is-wand-app）里那条居中列规则本来就不生效，开关不能再显示成空动作。
+  assert.match(css, /html\.is-wand-app \.chat-width-toggle \{ display: none; \}/,
+    "the native shell never shows a control that cannot change its layout");
 });

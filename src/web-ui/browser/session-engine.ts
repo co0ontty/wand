@@ -7,14 +7,15 @@ import { parseJsonResponse } from "../react/http-adapter";
 import { publishWandModelCatalog, startWandModelCatalogPolling } from "../react/model-catalog";
 import { compactThinkingLabel, dynamicThinkingChoices } from "../thinking-efforts";
 import { getErrorMessage } from "../../error-utils.js";
+import { CHAT_HISTORY_BLOCK_BUDGET, CHAT_HISTORY_BYTE_BUDGET } from "../chat-history-window.js";
 
 import { mergeBlockWindowedMessages, mergeWindowedMessages, type MessageMergeSource } from "./message-reconciliation";
 import { clearActivityDetailState, ensureChatMessagesContainer, extractToolResultText, parseMessages, renderChat, scheduleChatRender } from "./chat-render";
-import { bindChatScrollListener, normalizeStructuredSnapshot, persistSelectedId, restoreStructuredQueue, saveStructuredQueue, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession, updateChatUnreadBubble } from "./chat-scroll";
+import { bindChatScrollListener, normalizeStructuredSnapshot, persistSelectedId, restoreStructuredQueue, saveStructuredQueue, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession, updateChatUnreadBubble, setChatHistoryLoadState } from "./chat-scroll";
 import "./events";
 import { isSidebarDrawerLayout, terminalZoomFromKeyboard, updateFilePanelCwd, updateLayoutState } from "./file-browser";
 import { loadGitStatus, restoreGitStatusForSession } from "./git-commit";
-import { autoResizeInput, buildMessagesForRender, canAutoResumeSession, captureTerminalInput, closeKeyboardPopup, flushCrossSessionQueue, focusInputBox, getControlInput, hasActiveTerminalSelection, hideMiniKeyboard, isImeKeyboardEvent, queueDirectInput, reconcileInteractiveState, renderCrossSessionQueue, sendInputFromBox, setTerminalInteractive, shouldCaptureTerminalEvent, stopCrossSessionQueueTicker, stopSession, switchToSessionView, updateInteractiveControls, updateStructuredQueueCounter } from "./input";
+import { autoResizeInput, buildMessagesForRender, canAutoResumeSession, captureTerminalInput, flushCrossSessionQueue, focusInputBox, getControlInput, hasActiveTerminalSelection, isImeKeyboardEvent, queueDirectInput, reconcileInteractiveState, renderCrossSessionQueue, sendInputFromBox, setTerminalInteractive, shouldCaptureTerminalEvent, stopCrossSessionQueueTicker, stopSession, switchToSessionView, updateInteractiveControls, updateStructuredQueueCounter } from "./input";
 import { _apkVersion, _hasNativeBridge, _macAppVersion, _syncWakeLock, hideError, showError, showToast } from "./notifications";
 import { getEffectiveCwd, render, resetChatRenderCache } from "./render";
 import { initTerminal, maybeScrollTerminalToBottom, syncTerminalBuffer, waitForTerminalSettled } from "./terminal";
@@ -36,7 +37,8 @@ import {
   normalizeAvailableComposerValue,
   normalizeComposerModelValue,
 } from "./composer-select-values";
-import { PROVIDER_IDS, inferProviderIdFromCommand, isNativeThinkingEffort, providerCliCommand } from "../provider-identity";
+import { AGENT_TOOL_OPTIONS, agentToolOption, PROVIDER_IDS, inferProviderIdFromCommand, isNativeThinkingEffort, providerCliCommand } from "../provider-identity";
+import { canSwitchSessionTool, sessionToolId } from "./session-tool-switch.js";
 import { hasPooledTerminal, isPooledTerminalBracketedPasteMode } from "./terminal-pool";
 import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExtension, isClipboardImageMimeType } from "./pty-paste";
 
@@ -244,7 +246,6 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         stopPolling();
         stopCrossSessionQueueTicker();
         setTerminalInteractive(false);
-        hideMiniKeyboard();
         teardownTerminal();
         state.config = null;
         state.selectedId = null;
@@ -382,6 +383,49 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
       var sessionConfigMutationTails = Object.create(null);
       var sessionConfigMutationRevisions = Object.create(null);
       var pendingSessionConfig = Object.create(null);
+      const sessionToolSwitches = new Map<string, { pending: boolean; status: string; failed: boolean }>();
+
+      export async function onChatToolChange(toolId: string): Promise<void> {
+        const session = getSelectedSession();
+        const tool = agentToolOption(toolId);
+        if (!tool || !canSwitchSessionTool(session, state.currentMessages?.length) || getPendingSessionConfig(session.id)
+          || sessionToolSwitches.get(session.id)?.pending || sessionToolId(session) === toolId) return;
+        const operation = { pending: true, status: "正在切换工具…", failed: false };
+        sessionToolSwitches.set(session.id, operation);
+        refreshAllChatModeTrios();
+        updateInteractiveControls();
+        try {
+          const outcome = await enqueueSessionConfigMutation(session.id, async function() {
+            const response = await compactSessionFetch("/api/sessions/" + encodeURIComponent(session.id) + "/provider", {
+              method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ provider: tool.provider, engine: tool.engine }),
+            });
+            const data = await parseJsonResponse<any>(response);
+            if (data.id !== session.id || data.employeeId !== session.employeeId || sessionToolId(data) !== toolId) {
+              throw new Error("未收到有效的工具切换回执，请刷新会话核对。");
+            }
+            return data;
+          });
+          // A response may update its own still-existing session, never resurrect a deleted one or touch a new draft.
+          if (outcome.latest && state.sessions.some(function(item) { return item.id === session.id; })) {
+            updateSessionSnapshot(outcome.data);
+            clearPendingSessionConfig(session.id);
+            if (state.selectedId === session.id) {
+              state.sessionTool = tool.provider;
+              state.chatMode = outcome.data.mode;
+            }
+            operation.status = "已切换为 " + tool.label;
+            updateSessionsList();
+          }
+        } catch (failure) {
+          operation.failed = true;
+          operation.status = getErrorMessage((failure as any)?.error ?? failure, "切换工具失败，请刷新核对。");
+        } finally {
+          operation.pending = false;
+          refreshAllChatModeTrios();
+          updateInteractiveControls();
+        }
+      }
 
       function getPendingSessionConfig(sessionId) {
         return sessionId ? pendingSessionConfig[sessionId] || null : null;
@@ -487,6 +531,12 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
 
       export function refreshComposerConfigControls(session, mode, model, thinking) {
         var preferredTool = getPreferredTool();
+        for (const [id, operation] of sessionToolSwitches) {
+          if (!operation.pending && !state.sessions.some(function(item) { return item.id === id; })) sessionToolSwitches.delete(id);
+        }
+        const toolSwitch = sessionToolSwitches.get(session?.id);
+        const toolVisible = canSwitchSessionTool(session, state.currentMessages?.length);
+        const toolDisabled = !!toolSwitch?.pending;
         var modelOptions = getChatModelSelectOptions(model, session);
         var normalizedModel = normalizeComposerModelValue(model);
         var thinkingOptions = getThinkingSelectOptions(thinking, session);
@@ -502,7 +552,10 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
               groupTitle: "模式 " + modeLabel + " · 模型 " + modelFullLabel + " · 思考 " + thinkingLabel,
               modeLabel: modeLabel,
               modelFullLabel: modelFullLabel,
-              modelRefreshing: !!state.modelsRefreshing,
+              modelRefreshing: !!state.modelsRefreshing || toolDisabled,
+              toolVisible,
+              toolStatus: toolSwitch?.status,
+              toolDisabled,
               thinkingValue: normalizedThinking,
               thinkingLabel: thinkingLabel,
             };
@@ -511,9 +564,17 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         });
         syncBrowserComposerSelects({
           resolve: function(control) {
+            if (control === "tool") {
+              const id = sessionToolId(session);
+              return { value: id, options: AGENT_TOOL_OPTIONS.map(function(tool) { return { value: tool.id, label: tool.label }; }),
+                ariaLabel: "更换执行工具", displayValue: toolDisabled ? "切换中…" : toolSwitch?.failed ? "切换失败" : agentToolOption(id)?.label,
+                displayTitle: toolSwitch?.status || agentToolOption(id)?.description,
+                disabled: toolDisabled || !!getPendingSessionConfig(session?.id) };
+            }
             if (control === "mode") {
               return {
                 value: mode,
+                disabled: toolDisabled,
                 options: getSupportedModes(preferredTool).map(function(item) {
                   return { value: item, label: getModeLabel(item) };
                 }),
@@ -525,6 +586,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
             if (control === "model") {
               return {
                 value: normalizedModel,
+                disabled: toolDisabled,
                 options: modelOptions,
                 ariaLabel: "模型",
                 placeholder: modelLabel,
@@ -535,6 +597,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
             }
             return {
               value: normalizedThinking,
+              disabled: toolDisabled,
               options: thinkingOptions,
               ariaLabel: "思考深度",
               placeholder: thinkingLabel,
@@ -542,7 +605,8 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
             };
           },
           onValueChange: function(control, value, scope) {
-            if (control === "mode") onChatModeChange(value);
+            if (control === "tool") void onChatToolChange(value);
+            else if (control === "mode") onChatModeChange(value);
             else if (control === "model") onChatModelChange(value);
             else onChatThinkingChange(value);
             if (scope === "all") {
@@ -969,6 +1033,8 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           mode: modeOverride || state.chatMode || (state.config && state.config.defaultMode) || "default",
           provider: provider,
           runner: structuredRunner,
+          // 引擎只对 pi 有意义：Wand Agent（sdk）走进程内 harness，不传就是 Pi CLI。
+          engine: extra && extra.engine ? extra.engine : undefined,
           prompt: prompt || undefined,
           worktreeEnabled: worktreeEnabled === true,
           model: modelPref || undefined,
@@ -1087,7 +1153,9 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           type: "subscribe",
           mode: hasPooledTerminal(sessionId) ? "add" : "replace",
           sessionId: sessionId,
-          blockBudget: 60,
+          blockBudget: CHAT_HISTORY_BLOCK_BUDGET,
+          byteBudget: CHAT_HISTORY_BYTE_BUDGET,
+          omitStructuredOutput: true,
           compactTools: true,
           capabilities: { ptyAck: true },
         }));
@@ -1321,8 +1389,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         // querySelector 一律为 null，写入本身就是空操作。
         if (!selectedSession) {
           setTerminalInteractive(false);
-          hideMiniKeyboard();
-          closeKeyboardPopup();
+          updateInteractiveControls();
         }
         updateAutoApproveIndicator();
 
@@ -1386,7 +1453,8 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         var sess = state.sessions.find(function(s) { return s.id === id; });
         var url = "/api/sessions/" + id;
         if (shouldRequestChatFormat(sess)) {
-          url += "?format=chat&blockBudget=60";
+          url += "?format=chat&blockBudget=" + CHAT_HISTORY_BLOCK_BUDGET
+            + "&byteBudget=" + CHAT_HISTORY_BYTE_BUDGET + "&output=omit";
         }
         return compactSessionFetch(url, { credentials: "same-origin" })
           .then(async function(res) {
@@ -1474,11 +1542,15 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         var blockOffset = (typeof sess.leadingBlockOffset === "number") ? sess.leadingBlockOffset : 0;
         if (offset <= 0 && blockOffset <= 0) return false; // 已经到最早一块
         var request = {};
+        var epoch = state.chatRenderEpoch || 0;
+        var progressed = false;
         earlierMessageRequests.set(id, request);
+        setChatHistoryLoadState(id, epoch, "loading");
         var url = blockOffset > 0
           ? "/api/sessions/" + encodeURIComponent(id) + "/messages?turn=" + offset
-            + "&blockOffset=" + blockOffset + "&blockLimit=60"
-          : "/api/sessions/" + encodeURIComponent(id) + "/messages?before=" + offset + "&blockBudget=60";
+            + "&blockOffset=" + blockOffset + "&blockLimit=" + CHAT_HISTORY_BLOCK_BUDGET
+          : "/api/sessions/" + encodeURIComponent(id) + "/messages?before=" + offset + "&blockBudget=" + CHAT_HISTORY_BLOCK_BUDGET;
+        url += "&byteBudget=" + CHAT_HISTORY_BYTE_BUDGET;
         compactSessionFetch(url,
           { credentials: "same-origin" })
           .then(function(res) { return parseJsonResponse<any>(res); })
@@ -1497,11 +1569,11 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
               sess.messages = turns;
               sess.leadingBlockOffset = data.blockOffset;
               sess.leadingBlockTotal = data.blockTotal;
+              progressed = true;
               sessionReads.record({ id: id, messages: turns,
                 leadingBlockOffset: data.blockOffset, leadingBlockTotal: data.blockTotal });
               if (id === state.selectedId) {
                 state.currentMessages = buildMessagesForRender(sess, getPreferredMessages(sess, sess.output, false));
-                state.chatRenderedCount = state.currentMessages.length;
                 renderChat(true);
               }
               return;
@@ -1517,20 +1589,29 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
               sess.leadingBlockOffset = data.leadingBlockOffset;
               sess.leadingBlockTotal = data.leadingBlockTotal;
               if (typeof data.total === "number") sess.messageTotal = data.total;
+              progressed = true;
               sessionReads.record({ id: id, messages: sess.messages, messageOffset: sess.messageOffset,
                 messageTotal: sess.messageTotal, leadingBlockOffset: sess.leadingBlockOffset,
                 leadingBlockTotal: sess.leadingBlockTotal });
               if (id === state.selectedId) {
                 state.currentMessages = buildMessagesForRender(sess, getPreferredMessages(sess, sess.output, false));
-                // 已加载的全部展开（新拉的更早消息也要可见）。
-                state.chatRenderedCount = state.currentMessages.length;
+                // The renderer grows the current window by this page's delta,
+                // preserving the earliest visible row and the reading anchor.
                 renderChat(true);
               }
             }
           })
-          .catch(function() { /* 静默：下次触底重试 */ })
+          .catch(function() { /* Retain the current page and offer an explicit retry. */ })
           .finally(function() {
-            if (earlierMessageRequests.get(id) === request) earlierMessageRequests.delete(id);
+            if (earlierMessageRequests.get(id) !== request) return;
+            earlierMessageRequests.delete(id);
+            var latest = state.sessions.find(function(session) { return session.id === id; });
+            // A resync may have replaced this cursor during IO. Its new page
+            // must not inherit the old request's failure indicator.
+            if (progressed || latest && (latest.messageOffset || 0) === offset
+              && (latest.leadingBlockOffset || 0) === blockOffset) {
+              setChatHistoryLoadState(id, epoch, progressed ? "idle" : "failed");
+            }
           });
         return true;
       }
@@ -2067,6 +2148,8 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           workspaceId?: string;
           workspaceTaskId?: string;
           provider?: string;
+          /** 仅 pi：`sdk` 表示 Wand Agent（进程内 SDK），缺省是 Pi CLI。 */
+          engine?: "cli" | "sdk";
           shell?: boolean;
           kind?: "structured" | "pty";
           mode?: string;
@@ -2095,6 +2178,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
               workspaceId: options && options.workspaceId,
               workspaceTaskId: options && options.workspaceTaskId,
               provider: provider,
+              engine: options && options.engine,
               model: pickedModel || undefined,
               systemPrompt: options && options.systemPrompt,
               employeeId: options && options.employeeId,
@@ -2717,6 +2801,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
 
       export function canSendComposer(value, sessionId?) {
         var id = sessionId === undefined ? state.selectedId : sessionId;
+        if (sessionToolSwitches.get(id)?.pending) return false;
         return !!String(value || "").trim() || getPendingAttachments(id).length > 0;
       }
 

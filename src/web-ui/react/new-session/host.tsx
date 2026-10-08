@@ -20,13 +20,14 @@ import {
 } from "../model-catalog";
 import { useWandModelCatalog } from "../use-model-catalog";
 import { useProviderUsage } from "../provider-usage";
-import { WandButton, WandDialogSurface, WandSelect } from "../ui";
+import { WandButton, WandDialogSurface, WandIcon, WandSelect } from "../ui";
 import {
   UnifiedExecutionSubjectPicker,
 } from "../workspaces/unified-execution-subject-picker.js";
 import { useSiliconEmployees } from "../agents/employee-repository.js";
 import { EmployeeAvatar } from "../agents/employee-avatar.js";
 import { ProviderLogo } from "../provider-logo.js";
+import { AGENT_TOOL_OPTIONS, agentToolIdFor, agentToolOption } from "../../provider-identity";
 import { aiTeamPickerOption, aiTeamsRepository, useAiTeamList } from "../ai-teams/repository";
 import { taskBoardController } from "../issues/task-board-controller";
 import { notifyTasksChanged } from "../task-changes";
@@ -55,19 +56,16 @@ export interface NewSessionHostProps {
   repository?: NewSessionRepository;
 }
 
-const PROVIDERS: ReadonlyArray<{
-  value: NewSessionProvider;
-  label: string;
-  description: string;
-}> = [
-  { value: "claude", label: "Claude", description: "完整 Claude 会话能力" },
-  { value: "codex", label: "Codex", description: "结构化 JSONL 或 PTY 会话" },
-  { value: "opencode", label: "OpenCode", description: "多模型结构化或 PTY 会话" },
-  { value: "grok", label: "Grok", description: "Grok Build 结构化或 PTY 会话" },
-  { value: "qoder", label: "Qoder", description: "Qoder CLI 结构化或 PTY 会话" },
-  { value: "pi", label: "one 的 Agent", description: "内置多模型结构化 Agent 或 Pi 终端" },
-  { value: "gemini", label: "Gemini", description: "Gemini CLI 结构化或 PTY 会话" },
-];
+/**
+ * 工具清单直接用浏览器层的唯一真源：Pi（CLI）与 Wand Agent（进程内 SDK）是两条独立选项，
+ * 不再在这个文件里维护第二份 provider 列表。
+ */
+
+/** 当前表单选中的执行工具（provider + 引擎）；找不到时返回 null，调用方回落到 provider 名。 */
+function selectedTool(form: NewSessionForm | null) {
+  if (!form) return null;
+  return agentToolOption(agentToolIdFor(form.provider, form.engine));
+}
 
 const MODES: ReadonlyArray<{
   value: NewSessionMode;
@@ -200,8 +198,11 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
         if (abort.signal.aborted) return;
         const context = runtime?.getContext();
         setDefaults(loaded);
+        const initialProvider = loaded.config.defaultProvider;
         setForm({
-          provider: loaded.config.defaultProvider,
+          provider: initialProvider,
+          // 上次用的是 Wand Agent 就继续预选它；其他 provider 不带引擎维度。
+          engine: initialProvider === "pi" ? loaded.config.defaultEngine ?? "cli" : undefined,
           employeeId: controller.initialKind === "shell" ? undefined : controller.initialEmployeeId || undefined,
           kind: controller.initialKind
             ? controller.initialKind
@@ -254,20 +255,26 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
     };
   }, [controller.open, form?.cwd, repository, suggestionsActive]);
 
-  const selectProvider = useCallback((provider: NewSessionProvider) => {
-    if (!defaults) return;
+  const selectTool = useCallback((toolId: string) => {
+    const option = agentToolOption(toolId);
+    if (!defaults || !option) return;
+    const provider = option.provider;
+    const engine = option.engine;
     // 模型跟着 provider 走：切过去时预选该 provider 上次用过的模型。
     const remembered = preferredModel(newSessionStore.getRuntime()?.getContext().selectedModels?.[provider]);
     setForm((current) => current ? {
       ...current,
       provider,
+      engine,
+      // Wand Agent 只跑结构化会话：切过去时把形态一起纠正，不留一个跑不了的组合。
+      kind: engine === "sdk" ? "structured" : current.kind,
       model: remembered,
       mode: safeMode(provider, current.mode, defaults.config.defaultMode),
     } : current);
     const currentMode = form
       ? safeMode(provider, form.mode, defaults.config.defaultMode)
       : safeMode(provider, defaults.config.defaultMode, defaults.config.defaultMode);
-    void repository.savePreferences({ defaultProvider: provider, defaultMode: currentMode })
+    void repository.savePreferences({ defaultProvider: provider, defaultEngine: engine ?? "cli", defaultMode: currentMode })
       .catch((saveError) => console.warn("[wand] Failed to persist new-session defaults", saveError));
   }, [defaults, form, repository]);
 
@@ -402,6 +409,9 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
       void repository.savePreferences({
         ...(request.kind === "shell" ? {} : {
           ...(!form.employeeId ? { defaultProvider: request.provider } : {}),
+          // 引擎跟 provider 一起记：下次打开还预选 Wand Agent 而不是悄悄回到 Pi CLI。
+          ...(request.kind === "structured" && request.provider === "pi"
+            ? { defaultEngine: form.engine ?? "cli" } : {}),
           defaultSessionKind: request.kind,
           defaultMode: request.mode,
         }),
@@ -499,7 +509,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                       </Flex>
                       <Typography.Text type="secondary" ellipsis style={{ fontSize: 12 }}>
                         {form.specifiedCli
-                          ? `工具：${PROVIDERS.find((p) => p.value === form.provider)?.label || form.provider} · 模型：${preferredModel(form.model)}`
+                          ? `工具：${selectedTool(form)?.label || form.provider} · 模型：${preferredModel(form.model)}`
                           : "默认走员工派发流程 · 智能匹配工具链"}
                       </Typography.Text>
                     </Flex>
@@ -533,7 +543,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                   >
                     <Form.Item label="选择执行工具" style={{ marginBottom: 0 }}>
                       <Radio.Group
-                        value={form.specifiedCli ? form.provider : "default_dispatch"}
+                        value={form.specifiedCli ? agentToolIdFor(form.provider, form.engine) : "default_dispatch"}
                         disabled={submitting}
                         style={{ width: "100%" }}
                         onChange={(event) => {
@@ -541,8 +551,8 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                           if (val === "default_dispatch") {
                             setForm((current) => current ? { ...current, specifiedCli: false } : current);
                           } else {
-                            setForm((current) => current ? { ...current, provider: val, specifiedCli: true } : current);
-                            selectProvider(val as NewSessionProvider);
+                            setForm((current) => current ? { ...current, specifiedCli: true } : current);
+                            selectTool(val);
                           }
                         }}
                       >
@@ -561,14 +571,16 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                               </Flex>
                             </Flex>
                           </Radio>
-                          {PROVIDERS.map((provider) => (
-                            <Radio key={provider.value} value={provider.value}>
+                          {AGENT_TOOL_OPTIONS.map((tool) => (
+                            <Radio key={tool.id} value={tool.id}>
                               <Flex align="center" gap={8}>
-                                <ProviderLogo provider={provider.value} className="wand-subject-provider" />
+                                {tool.engine === "sdk"
+                                  ? <WandIcon name="spark" size={20}/>
+                                  : <ProviderLogo provider={tool.provider} className="wand-subject-provider" />}
                                 <Flex vertical>
-                                  <Typography.Text strong>{provider.label}</Typography.Text>
+                                  <Typography.Text strong>{tool.label}</Typography.Text>
                                   <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                    {provider.description}
+                                    {tool.description}
                                   </Typography.Text>
                                 </Flex>
                               </Flex>
@@ -633,7 +645,8 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                   ? { type: "team", id: form.teamId }
                   : form.employeeId
                     ? { type: "employee", id: form.employeeId }
-                    : { type: "cli", id: form.kind === "shell" ? "shell" : form.provider }}
+                    : { type: "cli", id: form.kind === "shell" ? "shell" : form.provider,
+                        ...(form.engine ? { engine: form.engine } : {}) }}
                 kind={form.kind === "shell" ? "pty" : form.kind}
                 model={form.model}
                 showModel={false}
@@ -656,7 +669,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                       setForm((current) => current
                         ? { ...current, teamId: undefined, employeeId: undefined, kind: current.kind === "shell" ? "pty" : current.kind, specifiedCli: undefined }
                         : current);
-                      selectProvider(subj.id as NewSessionProvider);
+                      selectTool(agentToolIdFor(subj.id as NewSessionProvider, subj.engine));
                     }
                   } else if (subj.type === "employee") {
                     setForm((current) => current
@@ -724,10 +737,10 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                 {form.teamId
                   ? `${selectedTeam?.name ?? "AI 团队"} · 团队开工`
                   : form.employeeId
-                  ? `${selectedEmployee?.name || "硅基员工"} · ${form.specifiedCli ? `${PROVIDERS.find((p) => p.value === form.provider)?.label || form.provider} · 结构化对话` : "员工派发流程"}`
+                  ? `${selectedEmployee?.name || "硅基员工"} · ${form.specifiedCli ? `${selectedTool(form)?.label || form.provider} · 结构化对话` : "员工派发流程"}`
                   : form.kind === "shell"
                     ? "空白终端 · Shell"
-                    : `${PROVIDERS.find((provider) => provider.value === form.provider)?.label} · ${form.kind === "structured" ? "结构化" : "PTY"}`}
+                    : `${selectedTool(form)?.label ?? form.provider} · ${form.kind === "structured" ? "结构化" : "PTY"}`}
               </Typography.Text>
               <Typography.Text ellipsis title={effectiveCwd}>{effectiveCwd}</Typography.Text>
               <Typography.Text type="secondary">

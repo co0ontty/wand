@@ -64,7 +64,7 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
       if (url.pathname === "/api/tasks" && failList) { res.statusCode = 503; res.end(JSON.stringify({ error: "列表同步失败" })); return; }
       const payload = url.pathname === "/api/tasks" ? { groups }
         : url.pathname === "/api/silicon-employees" ? { employees: [] }
-        : url.pathname === "/api/attention" ? { items: [] }
+        : url.pathname === "/api/attention" ? { items: [{ id: "sidebar-alert", title: "会话需要处理", detail: "验证状态提示不挤动主导航", sessionId: "s1" }] }
         : url.pathname === "/api/ai-team-runs" ? { runs: [] }
         : url.pathname === "/api/conversations" ? { conversations: [] }
         : url.pathname === "/api/ai-teams" ? []
@@ -116,6 +116,27 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
           await browser.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...point, button: "left", clickCount: 1 });
           await browser.settle();
         };
+        const headerGeometry = `(()=>{const rect=s=>document.querySelector(s).getBoundingClientRect().toJSON();return {nav:rect('.conversation-navigation'),more:rect('#sidebar-more-btn'),footer:rect('.sidebar-footer'),width:rect('#sessions-drawer').width}})()`;
+        const workspaceHeader = await browser.evaluate(headerGeometry);
+        await browser.click('.conversation-navigation [data-stretch-value="chats"]');
+        await browser.wait('fixture.conversation.getSnapshot().mode === "chats"');
+        await browser.settle();
+        const chatHeader = await browser.evaluate(headerGeometry);
+        assert.equal(chatHeader.nav.y, workspaceHeader.nav.y, `${mode}: switching modes keeps navigation anchored`);
+        assert.equal(chatHeader.more.y, workspaceHeader.more.y, `${mode}: header buttons do not jump`);
+        assert.equal(chatHeader.more.height, 44, `${mode}: header actions have touch-sized targets`);
+        assert.ok(chatHeader.footer.height <= 64, `${mode}: footer does not consume a second row`);
+        assert.equal(chatHeader.width, Math.min(320, width - 24));
+        await browser.click('.conversation-search-input input');
+        await browser.send("Input.insertText", { text: "搜索检查" });
+        await browser.wait('document.querySelector(".conversation-search-input input").value === "搜索检查"');
+        const searchGeometry = await browser.evaluate(`(()=>{const input=document.querySelector('.conversation-search-host'),clear=document.querySelector('[aria-label="清空搜索"]');const a=input.getBoundingClientRect(),b=clear.getBoundingClientRect();return {contained:b.x>=a.x&&b.right<=a.right,width:a.width}})()`);
+        assert.equal(searchGeometry.contained, true, `${mode}: clear action is inside the search field`);
+        await browser.click('[aria-label="清空搜索"]');
+        assert.equal(await browser.evaluate('document.activeElement === document.querySelector(".conversation-search-input input") && document.activeElement.value === ""'), true, `${mode}: clearing preserves typing focus`);
+        await browser.click('.conversation-navigation [data-stretch-value="tasks"]');
+        await browser.wait('fixture.conversation.getSnapshot().mode === "tasks"');
+        await browser.settle();
         const initial = await browser.evaluate(`(()=>{const v=${visible}; const root=document.querySelector('#sessions-drawer');return {recent:v(root.querySelector('.sidebar-recent')),loose:v(root.querySelector('.workspace-session[data-session-id=loose]')),sandbox:v(root.querySelector('.workspace-session[data-session-id=sandbox]')),standaloneFold:root.textContent.includes('未分组任务'),singleAction:root.querySelector('.workspace-session[data-session-id=loose]').querySelectorAll('button').length,overflow:root.scrollWidth>root.clientWidth+1,childNameWidth:root.querySelector('.workspace-session[data-session-id=s2] .workspace-session-name').getBoundingClientRect().width,t2:root.querySelector('[data-workspace-task-id=t2] .workspace-task-chevron-btn').getAttribute('aria-expanded')}})()`);
         assert.equal(initial.recent, false); assert.equal(initial.loose, true); assert.equal(initial.sandbox, true);
         assert.equal(initial.standaloneFold, false); assert.equal(initial.singleAction, 1); assert.equal(initial.overflow, false);

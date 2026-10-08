@@ -10,7 +10,7 @@ import { filePreviewController } from "../file-preview/controller";
 import { MarkdownPreview } from "../file-preview/markdown";
 import { formatFilePreviewSize } from "../file-preview/model";
 import { HttpResponseError, jsonBody, requestJson } from "../http-adapter";
-import { issueAgentEffortLabel, issueAgentProviderLabel } from "../issues/task-board-agent";
+import { issueAgentEffortLabel, issueAgentLabel } from "../issues/task-board-agent";
 import { wandModelDisplayName, type WandModelCatalog } from "../model-catalog";
 import {
   WandBrandMark,
@@ -330,6 +330,8 @@ export function chatTimeMarker(
  */
 export interface AgentSignature {
   provider?: string | null;
+  /** 执行引擎：`sdk` = Wand Agent（进程内 SDK）；缺省 = 命令行。 */
+  engine?: string | null;
   model?: string | null;
   thinkingEffort?: string | null;
 }
@@ -348,7 +350,7 @@ export function agentSignatureLabel(
   catalog?: WandModelCatalog | null,
 ): string {
   const parts: string[] = [];
-  if (agent.provider) parts.push(issueAgentProviderLabel(agent.provider));
+  if (agent.provider) parts.push(issueAgentLabel(agent.provider, agent.engine));
   const model = wandModelDisplayName(catalog ?? null, agent.provider, agent.model);
   if (model) parts.push(model);
   const effort = agent.thinkingEffort?.trim() ?? "";

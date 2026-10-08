@@ -55,6 +55,8 @@ export interface RenderResponse {
   error?: { code: RenderErrorCode; message: string };
 }
 
+// Data chunks may combine multiple PTY reads; seq is allocated once per emitted
+// journal chunk, never skipped to represent a locally coalesced set of frames.
 export type RenderEvent =
   | { event: "data"; sessionId: string; incarnationId: string; data: string; seq: number }
   | { event: "exit"; sessionId: string; incarnationId: string; exitCode: number | null; signal: number | null }

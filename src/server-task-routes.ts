@@ -208,7 +208,7 @@ export function parseTaskAgent(
   const rawEngine = body.engine === undefined || body.engine === null || body.engine === "" ? "cli" : body.engine;
   if (!isWandTaskAgentEngine(rawEngine)) throw new Error("执行引擎无效。");
   if (rawEngine === "sdk" && (provider !== "pi" || rawKind !== "structured")) {
-    throw new Error("SDK 执行引擎仅支持 Pi 结构化会话。");
+    throw new Error("Wand Agent 仅支持结构化会话。");
   }
   const engine: WandTaskAgentEngine | undefined = rawEngine === "sdk" ? rawEngine : undefined;
   return { provider, model, thinkingEffort, mode, kind: rawKind, ...(engine ? { engine } : {}) };
@@ -253,6 +253,8 @@ function taskSessionSummary(session: SessionSnapshot) {
     thinkingEffort: session.thinkingEffort || "off",
     // 会话实际跑的执行模式；旧会话没有该字段时留空，前端回落到任务上的配置。
     mode: session.mode || "",
+    // 执行引擎：core = Wand Agent（进程内 SDK）；pi 会话没跑过时按 CLI 读。
+    engine: session.provider === "pi" ? (session.structuredState?.engine === "core" ? "sdk" : "cli") : undefined,
     employeeId: session.employeeId,
     employeeName: session.employeeName,
     employeeAvatar: session.employeeAvatar,

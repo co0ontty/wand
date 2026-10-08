@@ -17,7 +17,8 @@ test("PTY activity distinguishes live provider turns from retained shells", () =
     assert.equal(computeRunningSignal({ status: "running", provider, ptyBusy: true }).active, true);
     assert.equal(computeRunningSignal({ status: "running", provider, ptyBusy: true, providerCliActive: false }).active, false);
   }
-  assert.equal(computeRunningSignal({ status: "running" }).ptyRunning, true);
+  assert.equal(computeRunningSignal({ status: "running" }).ptyRunning, false);
+  assert.equal(computeRunningSignal({ status: "running", ptyCommandRunning: true, providerCliActive: false }).ptyRunning, true);
   assert.equal(computeRunningSignal({ status: "exited", ptyBusy: true }).active, false);
 });
 

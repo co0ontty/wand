@@ -188,7 +188,7 @@ test("all restart paths share the pre-stop guard; a guard error never falls thro
   assert.ok(stop && ensure);
   assert.match(ensure, /stop_service_for_install/);
   assert.doesNotMatch(ensure, /run_privileged.*service:stop/);
-  assert.match(startScript, /restart-only\)\s+ensure_service_installed_and_running/);
+  assert.match(startScript, /restart-only\)\s+trap restore_stopped_service EXIT\s+ensure_service_installed_and_running/);
   assert.match(stop, /WAND_CORE_WAIT_TIMEOUT:-0/);
   for (const guardExit of [1, 2, 127, 130]) {
     const result = spawnSync("bash", ["-c", `set -euo pipefail

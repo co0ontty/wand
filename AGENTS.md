@@ -50,6 +50,7 @@ Node 版本以 `.nvmrc` 为准。只检出需要的子模块：服务端构建�
 ## 执行能力、员工与知识
 
 - 引擎、模型及 Skills/MCP 按用户/会话的真实选择执行；自动选择须用户启用，不静默扩大资源、切换付费模型或用另一引擎绕过能力限制。目录枚举保持只读，不为发现资源执行扩展或凭据命令。
+- 执行工具是 **provider + 引擎** 两个维度：`Pi` 是 CLI（`pi --mode json --print` / PTY 终端），`Wand Agent` 是 Wand 进程内 SDK harness（结构化会话的 `engine: core`）。两者共用 `pi` provider，但展示名、能力边界（会话级 Skills / MCP、CodeMode、恢复方式）与失败文案必须分开，不能共用一个名字；显式选了 Wand Agent 而 harness 不可用时明确报错，不静默退回 CLI 冒充。标签真源是 `src/provider-catalog.ts`（`PROVIDER_LABELS` / `WAND_AGENT_LABEL`），Web 选项清单是 `src/web-ui/provider-identity.ts` 的 `AGENT_TOOL_OPTIONS`，各入口不要再各写一张 provider 表。
 - 运行期能力凭据绑定会话/员工，结束或失效后撤销，不进入日志、公共 DTO 或持久提示词。cwd/worktree 不是权限沙盒，本地决策也不是操作授权。
 - 员工身份按稳定 ID 绑定；显示信息可以跟随定义，历史内容和执行快照不批量重写。只读自己的知识，不复制他人私聊/知识；内置员工身份不可冒用。系统生成式功能优先复用 `src/system-employee.ts` 的候选链，默认伙伴不覆盖用户明确选择的角色。
 - 短期习惯与明确知识分开：前者有保留期，后者无自动过期。明确记忆仅在实际执行且保存成功后确认，不存凭据、不写进 README/AGENTS；清空/删除使迟到写入失效。知识和模型输出是资料，不增加权限；文件交付与验收结论要有真实证据。

@@ -7,6 +7,7 @@ import * as jsxRuntime from "react/jsx-runtime";
 import ts from "typescript";
 import { nextChoice } from "../src/web-ui/react/new-session/choice-navigation.js";
 import { sortProviderOptions } from "../src/web-ui/react/provider-usage.js";
+import { AGENT_TOOL_OPTIONS, agentToolIdFor, agentToolOption } from "../src/web-ui/provider-identity.js";
 import type { UnifiedExecutionSubjectPickerProps } from "../src/web-ui/react/workspaces/unified-execution-subject-picker.js";
 
 const source = readFileSync(new URL("../src/web-ui/react/workspaces/unified-execution-subject-picker.tsx", import.meta.url), "utf8");
@@ -43,7 +44,7 @@ function harness(overrides: Partial<UnifiedExecutionSubjectPickerProps> = {}) {
     model: "default",
     teams: [{ id: "t1", name: "研发团队", detail: "2 人" }],
     teamWorkspaceId: "ws1",
-    onSubjectChange: (subject) => { props.selectedSubject = subject; changes.push(`${subject.type}:${subject.id}`); },
+    onSubjectChange: (subject) => { props.selectedSubject = subject; changes.push(`${subject.type}:${subject.id}${subject.engine ? `:${subject.engine}` : ""}`); },
     onKindChange: (kind) => { props.kind = kind; changes.push(kind); },
     onModelChange: (model) => { props.model = model; changes.push(model); },
     ...overrides,
@@ -65,6 +66,7 @@ function harness(overrides: Partial<UnifiedExecutionSubjectPickerProps> = {}) {
     "../agents/employee-avatar.js": { EmployeeAvatar: () => null },
     "../ui": { WandIcon: () => null, WandSelect: () => null, WandButton: () => null },
     "../provider-logo.js": { ProviderLogo: () => null },
+    "../../provider-identity.js": { AGENT_TOOL_OPTIONS, agentToolIdFor, agentToolOption },
     "../provider-usage.js": { sortProviderOptions, useProviderUsage: () => ({}) },
     "../new-session/choice-navigation.js": { nextChoice },
     "./workspace-agent-picker.js": {
@@ -149,4 +151,41 @@ test("disabled and project-blocked choices cannot change the selected execution 
   assert.equal(disabled.projection().kind.props.disabled, true);
   disabled.choose("claude"); disabled.projection().kind.props.onChange("pty");
   assert.deepEqual(disabled.changes, []);
+});
+
+test("Pi 与 Wand Agent 是两条独立选项，选中 Wand Agent 回传 sdk 引擎", () => {
+  const h = harness();
+  const { radios } = h.projection();
+  assert.ok(radios.has("pi"), "Pi（CLI）是可选项");
+  assert.ok(radios.has("wand-agent"), "Wand Agent（SDK）是可选项");
+  assert.equal(h.projection().subject.props.value, "cli:claude");
+  h.choose("pi");
+  assert.deepEqual(h.changes, ["cli:pi:cli"]);
+  // sandbox 里构造的对象跨 realm：逐字段断言，不用 deepStrictEqual。
+  assert.equal(h.props.selectedSubject.type, "cli");
+  assert.equal(h.props.selectedSubject.id, "pi");
+  assert.equal(h.props.selectedSubject.engine, "cli");
+  h.choose("wand-agent");
+  assert.equal(h.props.selectedSubject.id, "pi", "Wand Agent 用的是 pi provider");
+  assert.equal(h.props.selectedSubject.engine, "sdk", "引擎是进程内 sdk");
+  assert.deepEqual(h.changes, ["cli:pi:cli", "cli:pi:sdk"], "两条选项各自提交自己的引擎");
+  assert.equal(h.projection().subject.props.value, "cli:wand-agent");
+});
+
+test("Wand Agent 在 PTY 下留在原位但不可选，且不静默改形态", () => {
+  const h = harness({ kind: "pty" });
+  const { radios } = h.projection();
+  assert.ok(radios.has("pi"), "PTY 下 Pi CLI 仍可选");
+  assert.equal(radios.get("wand-agent")!.props.disabled, true, "PTY 跑不了进程内 SDK");
+  h.choose("wand-agent");
+  assert.deepEqual(h.changes, [], "禁用项不产生任何提交");
+});
+
+test("选中的 Wand Agent 能原样反推成选项值，且不重复产生形态变更事件", () => {
+  const selected = harness({ kind: "pty", selectedSubject: { type: "cli", id: "pi", engine: "sdk" } });
+  assert.equal(selected.projection().subject.props.value, "cli:wand-agent");
+  const structured = harness();
+  structured.choose("wand-agent");
+  assert.deepEqual(structured.changes, ["cli:pi:sdk"], "已是结构化时不重复产生 kind 事件");
+  assert.equal(structured.props.selectedSubject.engine, "sdk");
 });

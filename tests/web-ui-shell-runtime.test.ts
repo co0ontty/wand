@@ -163,7 +163,8 @@ test("PTY running indicators stop when the provider exits into its retained shel
   assert.equal(computeRunningSignal({ status: "running", provider: "claude", ptyBusy: true, providerCliActive: false }).active, false);
   assert.equal(computeRunningSignal({ status: "running", provider: "claude", ptyBusy: false }).active, false);
   assert.equal(computeRunningSignal({ status: "running", provider: "claude", ptyBusy: true }).active, true);
-  assert.equal(computeRunningSignal({ status: "running" }).active, true);
+  assert.equal(computeRunningSignal({ status: "running" }).active, false, "a live shell is not work");
+  assert.equal(computeRunningSignal({ status: "running", ptyCommandRunning: true, providerCliActive: false }).active, true);
   assert.match(sessions, /capabilities: \{ ptyAck: true \}/);
 });
 
@@ -214,7 +215,7 @@ test("PTY terminal interaction keeps a usable web composer and only the native e
   // #input-box 自己拥有按键（逐字透传走 input 事件），不能再被 keydown 捕获重复发送。
   assert.match(input, /if \(target\.closest && target\.closest\("#input-box"\)\) return false;/);
   // Enter 提交：先文本（若有）后单独 "\r"，符合 PTY 输入契约。
-  assert.match(input, /queueDirectInput\("\\r", "enter_text"\)/);
+  assert.match(input, /queueDirectInput\("\\r", "enter_text", passthroughView, passthroughSessionId\)/);
   // 直通模式下退格翻译成 \x7f 送给 PTY，而不是在空 textarea 里做本地删除。
   assert.match(sessions, /state\.terminalInteractive\s*&& !document\.documentElement\.classList\.contains\("is-wand-embed-terminal"\)[\s\S]*?String\.fromCharCode\(127\), "backspace"/);
 });

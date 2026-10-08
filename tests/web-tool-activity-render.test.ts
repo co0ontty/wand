@@ -7,7 +7,7 @@ import * as toolActivity from "../src/web-ui/browser/tool-activity.js";
 import * as toolDetail from "../src/web-ui/browser/tool-activity-detail.js";
 
 function renderActivity(
-  blocks: unknown[], pendingCommandId = "cmd", expanded = false,
+  blocks: unknown[], pendingCommandId = "cmd", expanded: boolean | null = false,
   live = true, latestAssistantIndex = 1,
 ): string {
   const source = readFileSync(new URL("../src/web-ui/browser/chat-render.ts", import.meta.url), "utf8") + `
@@ -209,6 +209,30 @@ test("only the newest unfinished call or the last round is live, never both", ()
   // 历史段没有活跃条目：位置猜测也不该点亮最后一轮。
   assert.equal(toolActivity.activityLiveRow(items, "run", false), null);
   assert.equal(toolActivity.activityLiveRow(items, null, false), null);
+});
+
+test("latest running activity defaults open without writing a manual preference", () => {
+  const blocks = [{ type: "tool_use", id: "cmd", name: "Bash", activity: { kind: "run_command" } }];
+  assert.match(renderActivity(blocks, "cmd", null), /data-live="true"[^>]*data-expanded="true"/);
+  assert.match(renderActivity(blocks, "", null), /data-live="true"[^>]*data-expanded="true"/,
+    "a returned call does not fold the timeline while this trailing group is still streaming");
+  assert.match(renderActivity(blocks, "", null, false), /data-live="false"[^>]*data-expanded="false"/);
+  assert.match(renderActivity(blocks, "cmd", null, true, 2), /data-live="false"[^>]*data-expanded="false"/,
+    "older groups are not opened just because the session is running");
+  assert.match(renderActivity(blocks, "cmd", false), /data-live="true"[^>]*data-expanded="false"/,
+    "manual collapse wins over the running default");
+  assert.match(renderActivity(blocks, "", true, false), /data-live="false"[^>]*data-expanded="true"/,
+    "manual inspection keeps a completed group open");
+});
+
+test("only the trailing activity group opens automatically", () => {
+  const html = renderActivity([
+    { type: "thinking", thinking: "Earlier thought" },
+    { type: "text", text: "接下来继续" },
+    { type: "thinking", thinking: "Current thought" },
+  ], "", null);
+  assert.deepEqual([...html.matchAll(/data-live="(true|false)"[^>]*data-expanded="(true|false)"/g)]
+    .map(match => [match[1], match[2]]), [["false", "false"], ["true", "true"]]);
 });
 
 test("the compact summary keeps the only running mark, expanded or not", () => {

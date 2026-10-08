@@ -8,8 +8,7 @@ import {
   issueAgentEffortOptions,
   issueAgentModeOptions,
   issueAgentModelOptions,
-  withIssueAgentProvider,
-  type IssueAgentProvider,
+  withIssueAgentTarget,
   type IssueModelCatalog,
 } from "./task-board-agent";
 
@@ -20,7 +19,7 @@ export const DISPATCH_VALUE = "dispatch:";
 
 /** CLI 工具下拉的候选：CLI 在前，团队接在后面，值带 "team:" 前缀区分。 */
 export function agentTargetOptions(
-  providerOptions: Array<{ value: IssueAgentProvider; label: string }>,
+  providerOptions: Array<{ value: string; label: string }>,
   teams: ReadonlyArray<AiTeam> | null | undefined,
   employees?: ReadonlyArray<SiliconEmployee> | null,
   options: { includeDispatch?: boolean } = {},
@@ -51,8 +50,8 @@ export function agentTargetEmployeeId(value: string): string {
 }
 
 const AGENT_ENGINE_OPTIONS: ReadonlyArray<{ value: WandTaskAgentEngine; label: string }> = [
-  { value: "cli", label: "CLI" },
-  { value: "sdk", label: "SDK（Pi 员工会话）" },
+  { value: "cli", label: "Pi CLI" },
+  { value: "sdk", label: "Wand Agent" },
 ];
 
 const AGENT_KIND_OPTIONS = [
@@ -68,7 +67,7 @@ export function AgentField({ label, children }: { label: string; children: React
 /**
  * CLI 工具 / 模型 / 思考深度 / 工作模式（可选会话形态）这一组执行配置控件。
  * 任务看板的指派面板与 AI 团队成员编辑共用，保证两处的可选项与联动规则一致。
- * SDK 执行引擎只在员工/团队候选编辑器中开放。
+ * SDK（Wand Agent）执行引擎只在员工/团队候选编辑器中开放。
  */
 export function AgentFields({
   agent,
@@ -88,7 +87,7 @@ export function AgentFields({
 }: {
   agent: WandTaskAgent;
   catalog: IssueModelCatalog | null;
-  providerOptions: Array<{ value: IssueAgentProvider; label: string }> | null;
+  providerOptions: Array<{ value: string; label: string }> | null;
   disabled?: boolean;
   ariaPrefix: string;
   showKind?: boolean;
@@ -112,7 +111,7 @@ export function AgentFields({
       if (agent.kind !== "structured") onChange({ ...agent, kind: "structured" });
       return;
     }
-    onChange(withIssueAgentProvider(agent, value as WandTaskAgent["provider"], catalog));
+    onChange(withIssueAgentTarget(agent, value, catalog));
   };
   return <>
     <AgentField label={onTeamChange || onEmployeeChange ? "指派给" : "CLI 工具"}>

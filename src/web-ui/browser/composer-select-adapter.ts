@@ -29,7 +29,7 @@ export interface BrowserComposerSelectConfig {
 }
 
 function isControl(value: string | undefined): value is ComposerSelectControl {
-  return value === "mode" || value === "model" || value === "thinking";
+  return value === "mode" || value === "model" || value === "thinking" || value === "tool";
 }
 
 function isScope(value: string | undefined): value is ComposerSelectScope {

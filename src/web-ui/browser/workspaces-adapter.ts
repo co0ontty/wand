@@ -33,6 +33,7 @@ import type {
   TaskLayoutSaveOptions,
   Workspace,
 } from "../react/workspaces/types";
+import { workspaceTargetEngine, workspaceTargetProvider } from "../react/workspaces/types";
 
 let uninstall: (() => void) | null = null;
 let openTaskGeneration = 0;
@@ -190,7 +191,8 @@ export function installWorkspacesLegacyAdapter(): void {
         workspaceId: payload.workspaceId,
         workspaceTaskId: payload.taskId,
         shell: payload.target === "shell",
-        provider: payload.target === "shell" ? undefined : payload.target,
+        provider: workspaceTargetProvider(payload.target) || undefined,
+        engine: workspaceTargetEngine(payload.target),
         kind: payload.target === "shell" ? "pty" : (payload.kind ?? "structured"),
         model: payload.model,
         employeeId: payload.employeeId,

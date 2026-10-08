@@ -21,7 +21,7 @@ import {
   workspaceSessionProvider,
 } from "../src/web-ui/react/workspaces/session-order.js";
 import type { LayoutNode, PaneTab } from "../src/web-ui/react/workspaces/types.js";
-import { WORKSPACE_AGENT_OPTIONS } from "../src/web-ui/react/workspaces/workspace-agent-dialog.js";
+import { WORKSPACE_AGENT_OPTIONS } from "../src/web-ui/react/workspaces/workspace-agent-picker.js";
 import {
   isDirectoryExpanded,
   isTaskSessionsExpanded,
@@ -146,7 +146,7 @@ test("workspace sessions use chronological tab order and stable labels", () => {
 test("new task conversations offer every supported Agent provider", () => {
   assert.deepEqual(
     WORKSPACE_AGENT_OPTIONS.map((option) => option.value),
-    ["claude", "codex", "opencode", "grok", "qoder", "pi", "gemini", "shell"],
+    ["claude", "codex", "opencode", "grok", "qoder", "pi", "wand-agent", "gemini", "shell"],
   );
   assert.equal(WORKSPACE_AGENT_OPTIONS.at(-1)?.label, "空白终端");
   const source = readFileSync(new URL("../src/web-ui/react/workspaces/workspace-agent-picker.tsx", import.meta.url), "utf8");
@@ -204,7 +204,8 @@ test("clicking a session inside the open task skips the task reopen", () => {
 test("new task dialog unifies through newSessionController to eliminate duplicate dialogs", () => {
   const host = readFileSync(new URL("../src/web-ui/react/workspaces/host.tsx", import.meta.url), "utf8");
   assert.match(host, /newSessionController\.open/);
-  assert.match(host, /workspacesController\.close/);
+  assert.match(host, /workspacesStore\.consumeOpen/);
+  assert.doesNotMatch(host, /workspacesController\.close/, "handoff must not immediately close the new form");
   const panel = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
   assert.match(panel, /newSessionController\.open\(\{\s*initialCwd: group\.global \? undefined : group\.workspaceCwd,/);
 });
@@ -895,6 +896,24 @@ test("workspaces controller keeps the dialog state stable while submitting", asy
   } finally {
     uninstall();
   }
+});
+
+test("legacy workspace handoff consumes its request without closing or reinitializing the canonical session form", async () => {
+  const { workspacesController, workspacesStore } = await import("../src/web-ui/react/workspaces/controller.js");
+  const { newSessionController, newSessionStore, configureNewSessionRuntime } = await import("../src/web-ui/react/new-session/controller.js");
+  const uninstall = configureNewSessionRuntime({ onOpen() {}, onClose() {} } as never);
+  try {
+    workspacesController.open("/workspace/handed-off");
+    const revision = newSessionStore.getSnapshot().revision;
+    workspacesStore.consumeOpen();
+    assert.equal(workspacesStore.getSnapshot().open, false);
+    assert.equal(newSessionController.isOpen(), true);
+    assert.equal(newSessionStore.getSnapshot().initialCwd, "/workspace/handed-off");
+    assert.equal(newSessionStore.getSnapshot().revision, revision, "handoff keeps all live form choices");
+    assert.equal(workspacesController.isOpen(), true, "compatibility API still sees the canonical form");
+    newSessionController.close();
+    assert.equal(workspacesController.isOpen(), false);
+  } finally { uninstall(); }
 });
 
 test("danger 语义不再被静默降级，批量失败的原因留在原位", () => {
