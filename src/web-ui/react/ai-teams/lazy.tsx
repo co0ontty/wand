@@ -76,6 +76,7 @@ import {
 } from "./avatar";
 import { useSiliconEmployees, siliconEmployeesRepository, notifySiliconEmployeeDefinitionChanged } from "../agents/employee-repository.js";
 import { employeeAvatarProvider, employeeCliLabel } from "../agents/employee-identity.js";
+import { installEmployeeStyles } from "../agents/styles.js";
 import { ProviderLogo } from "../provider-logo.js";
 import { teamChatComposer } from "./composer-bridge";
 import { aiTeamsRepository, subscribeAiTeamDefinitionChanges, subscribeAiTeamRunChanges } from "./repository";
@@ -120,6 +121,7 @@ const AI_TEAMS_HOST: Record<string, object> = {
   "issues/task-board-repository": { taskBoardRepository },
   "agents/employee-repository": { useSiliconEmployees, siliconEmployeesRepository, notifySiliconEmployeeDefinitionChanged },
   "agents/employee-identity": { employeeAvatarProvider, employeeCliLabel },
+  "agents/styles": { installEmployeeStyles },
   "provider-logo": { ProviderLogo },
   "model-catalog": { subscribeWandModelCatalog, wandModelDisplayName },
   "use-model-catalog": { useWandModelCatalog },

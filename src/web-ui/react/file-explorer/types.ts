@@ -26,6 +26,7 @@ export interface FileExplorerListResult {
 export interface FileExplorerSearchResult {
   ok: boolean;
   results?: FileExplorerEntry[];
+  truncated?: boolean;
   failure?: FilePreviewFailure;
 }
 
@@ -38,7 +39,7 @@ export interface FileExplorerMutationResult {
 
 export interface FileExplorerRepository {
   list(dirPath: string, signal?: AbortSignal): Promise<FileExplorerListResult>;
-  search(query: string, cwd: string, signal?: AbortSignal): Promise<FileExplorerSearchResult>;
+  search(query: string, cwd: string, signal?: AbortSignal, includeGenerated?: boolean): Promise<FileExplorerSearchResult>;
   createFile(path: string): Promise<FileExplorerMutationResult>;
   createDir(path: string): Promise<FileExplorerMutationResult>;
   rename(from: string, to: string): Promise<FileExplorerMutationResult>;
@@ -66,6 +67,8 @@ export interface FileExplorerSnapshot {
   searchQuery: string;
   searchResults: FileExplorerEntry[] | null;
   searchFilter: FileExplorerSearchFilter;
+  includeGenerated: boolean;
+  searchTruncated: boolean;
   /** Wall-clock duration of the last completed search, in milliseconds. */
   searchDurationMs: number | null;
   searching: boolean;
@@ -87,6 +90,7 @@ export type FileExplorerCommand =
   | { type: "reveal.done" }
   | { type: "search.start"; query: string }
   | { type: "search.filter"; filter: FileExplorerSearchFilter }
+  | { type: "search.scope"; includeGenerated: boolean }
   | { type: "search.clear" }
   | { type: "create.file"; dir: string; name: string }
   | { type: "create.dir"; dir: string; name: string }

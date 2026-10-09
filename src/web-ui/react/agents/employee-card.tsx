@@ -13,6 +13,7 @@ import { issueAgentProviderModelLine, type IssueModelCatalog } from "../issues/t
 import type { ProviderOptions } from "./candidate-editor.js";
 import type { WandTaskAgent } from "../../../task-types.js";
 import { candidateListError } from "./candidate-list.js";
+import { installEmployeeStyles } from "./styles.js";
 
 export function EmployeeCard({
   employee,
@@ -39,6 +40,7 @@ export function EmployeeCard({
   onDirtyChange?(dirty: boolean): void;
   onSavingChange?(saving: boolean): void;
 }): React.ReactElement {
+  React.useEffect(() => { installEmployeeStyles(); }, []);
   const [editing, setEditing] = React.useState(editorOnly);
   const triggerRef = React.useRef<HTMLButtonElement>(null);
   const [draft, setDraft] = React.useState<SiliconEmployee>(employee);
@@ -135,11 +137,11 @@ export function EmployeeCard({
         aria-expanded={editing}
         onClick={onToggle}
       >
-        <EmployeeAvatar employee={employee} size="lg" />
+        <EmployeeAvatar employee={employee} size="md" />
         <Flex vertical gap={2} className="wand-team-member-copy" style={{ flex: 1, minWidth: 0 }}>
           <Flex align="center" wrap gap={6}>
             <Typography.Text strong>{employee.name}</Typography.Text>
-            {isSystem ? <Tag color="gold" className="wand-employee-system-tag">{tag}</Tag> : null}
+            {isSystem ? <Tag className="wand-employee-system-tag">{tag}</Tag> : null}
             {isArchived ? <Tag className="wand-employee-archived-tag">已归档</Tag> : null}
           </Flex>
           {!isSystem ? <Flex align="center" gap={4} wrap className="wand-employee-tags" aria-label={`员工标签：${tags.join("、") || "暂无"}`}>

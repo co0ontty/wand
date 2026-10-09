@@ -35,16 +35,17 @@ test("home coalesces notifications with a trailing read and preserves task draft
     configureTeamChatComposerRuntime({read:id=>composer.read(id),edit:(id,c)=>composer.edit(id,c),subscribe:f=>composer.subscribe(f),submit:(id,text,f)=>composer.submit(id,text,f),transfer:(a,b,r)=>composer.transfer(a,b,r)});
     const initialDirectoryCase=new URLSearchParams(location.search).has('initial-directory');
     if(!initialDirectoryCase)conversationUi.select(${JSON.stringify(id)});
-    globalThis.homeFixture={state:()=>conversationUi.getSnapshot(),notify:()=>{for(let n=0;n<20;n++)notifyAiTeamRunChanged({runId:'fixture',taskId:'fixture'});}};
+    globalThis.homeFixture={state:()=>conversationUi.getSnapshot(),select:id=>conversationUi.select(id),openedSession:null,notify:()=>{for(let n=0;n<20;n++)notifyAiTeamRunChanged({runId:'fixture',taskId:'fixture'});}};
     function App(){const[visible,setVisible]=React.useState(!initialDirectoryCase);return <><div style={{position:'fixed',bottom:0,left:0,zIndex:30000}}>
       <button id="fixture-directory" onClick={()=>{conversationUi.directory(true);setVisible(true);}}>目录测试入口</button>
       <button id="fixture-visibility" onClick={()=>setVisible(v=>!v)}>可见性测试入口</button></div>
-      <ConversationHome visible={visible} sidebarOpen={false} onOpenSession={()=>{}}/></>}
+      <ConversationHome visible={visible} sidebarOpen={false} onOpenSession={id=>{globalThis.homeFixture.openedSession=id;}}/></>}
     createRoot(document.getElementById('root')).render(<PortalContainerProvider container={document.getElementById('portals')}><WandUiProvider><App/></WandUiProvider></PortalContainerProvider>);
   ` }, bundle: true, platform: "browser", format: "iife", jsx: "automatic", outfile: join(temp, "app.js"), logLevel: "warning", define: { "process.env.NODE_ENV": '"production"' } });
   let version = 1, detailRequests = 0, active = 0, maxActive = 0;
   let releaseFirst: (() => void) | null = null, projectFailure = true, projectRequests = 0, writes = 0;
   let holdEmployees = true;
+  let showPriorWork = false;
   const releaseEmployees: Array<() => void> = [];
   const app = express();
   app.use((req, _res, next) => { if (req.method !== "GET") writes++; next(); });
@@ -55,7 +56,11 @@ test("home coalesces notifications with a trailing read and preserves task draft
     active--; res.json(snapshot);
   });
   app.get("/api/workspaces", (_req, res) => { projectRequests++; projectFailure ? res.status(503).json({ error: "工作项目读取失败（503 测试替身），请重试。" }) : res.json(h.storage.listWorkspaces()); });
-  app.get("/api/conversations/dm_e_wand_default", (_req, res) => res.json(h.service.detail("dm_e_wand_default")));
+  app.get("/api/conversations/dm_e_wand_default", (_req, res) => res.json({ ...h.service.detail("dm_e_wand_default"), ...(showPriorWork ? { messages: [{
+    role: "assistant", content: [], conversationId: "dm_e_wand_default", messageId: "prior-work-fixture", createdAt: new Date().toISOString(),
+    sessionLink: { sessionId: "prior-work-session-fixture", title: "改进输入区与键盘访问".repeat(8) },
+    sessionPreview: { status: "done", text: "仅用于验证已有工作入口的只读替身。" },
+  }] } : {}) }));
   app.get("/api/silicon-employees", async (_req, res) => {
     if (holdEmployees) await new Promise<void>(done => { releaseEmployees.push(done); });
     res.json({ employees: h.storage.listSiliconEmployees({ includeArchived: true }) });
@@ -140,11 +145,33 @@ test("home coalesces notifications with a trailing read and preserves task draft
     await browser.click('#conversation-task-panel .ant-alert button');
     await browser.wait("!document.querySelector('#conversation-task-panel .ant-alert')", "project retry success");
     assert.equal(await browser.evaluate("document.querySelector('.conversation-sender textarea').value"), "待保留任务草稿");
-    assert.equal(await browser.evaluate("document.querySelector('[aria-label=\"任务 title\"]').value"), "待保留任务草稿");
+    assert.equal(await browser.evaluate("document.querySelector('[aria-label=\"任务名称\"]').value"), "待保留任务草稿");
     assert.equal(await browser.evaluate("document.querySelector('[aria-label=\"工作项目\"]').disabled"), false);
     assert.equal(projectRequests, 2); assert.equal(writes, 0); assert.equal(h.sent.length, 0); assert.equal(h.executions.length, 0);
     assert.deepEqual(browser.errors, []);
     results.projects = { requests: projectRequests, draftPreserved: true, writes, executionCount: h.executions.length };
+    showPriorWork = true;
+    await browser.key("Escape");
+    await browser.evaluate("homeFixture.select('dm_e_wand_default')");
+    await browser.wait("!!document.querySelector('.conversation-continue-work')", "prior direct work continuation displayed");
+    await browser.click('.conversation-sender textarea'); await browser.send("Input.insertText", { text: "待发送的新工作草稿" });
+    const continuationViewports = [];
+    for (const width of [1280, 390, 320]) {
+      await browser.send("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: false });
+      await browser.settle();
+      assert.match(await browser.evaluate("document.querySelector('.conversation-receiver').textContent"), /新工作.*发给/);
+      assert.match(await browser.evaluate("document.querySelector('.conversation-continue-work').textContent"), /继续上一项.*改进输入区/);
+      assert.equal(await browser.evaluate("document.documentElement.scrollWidth<=innerWidth+1"), true, "long continuation title does not overflow");
+      await browser.evaluate("homeFixture.openedSession=null");
+      await browser.click('.conversation-continue-work');
+      assert.equal(await browser.evaluate("homeFixture.openedSession"), "prior-work-session-fixture");
+      assert.equal(await browser.evaluate("document.querySelector('.conversation-sender textarea').value"), "待发送的新工作草稿");
+      await browser.screenshot(join(output, `direct-work-${width}.png`));
+      continuationViewports.push({ width, targetVisible: true, exactSessionOpened: true, newDraftPreserved: true });
+    }
+    assert.equal(writes, 0); assert.equal(h.sent.length, 0); assert.equal(h.executions.length, 0);
+    assert.deepEqual(browser.errors, []);
+    results.continuation = continuationViewports;
     writeFileSync(join(output, "result.json"), JSON.stringify({ passed: true, scope: "source components + isolated SQLite/HTTP + actual Chrome; not installed-service acceptance", ...results }, null, 2));
   } catch (cause) {
     writeFileSync(join(output, "result.json"), JSON.stringify({ passed: false, ...results, error: String(cause), pageErrors: browser?.errors }, null, 2));

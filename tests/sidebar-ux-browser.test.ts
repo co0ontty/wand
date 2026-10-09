@@ -163,15 +163,15 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
           await browser.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x, y: point.y, button: "left", clickCount: 1 });
           await browser.settle();
         };
-        const headerGeometry = `(()=>{const rect=s=>document.querySelector(s).getBoundingClientRect().toJSON();return {nav:rect('.conversation-navigation'),more:rect('#sidebar-more-btn'),footer:rect('#settings-button'),width:rect('#sessions-drawer').width}})()`;
+        const headerGeometry = `(()=>{const rect=s=>document.querySelector(s).getBoundingClientRect().toJSON();return {nav:rect('.conversation-navigation'),footer:rect('#settings-button'),width:rect('#sessions-drawer').width}})()`;
         const workspaceHeader = await browser.evaluate(headerGeometry);
         await browser.click('.conversation-navigation [data-stretch-value="chats"]');
         await browser.wait('fixture.conversation.getSnapshot().mode === "chats"');
         await browser.settle();
         const chatHeader = await browser.evaluate(headerGeometry);
         assert.equal(chatHeader.nav.y, workspaceHeader.nav.y, `${mode}: switching modes keeps navigation anchored`);
-        assert.equal(chatHeader.more.y, workspaceHeader.more.y, `${mode}: header buttons do not jump`);
-        assert.equal(chatHeader.more.height, 44, `${mode}: header actions have touch-sized targets`);
+        assert.equal(chatHeader.footer.y, workspaceHeader.footer.y, `${mode}: account button stays anchored`);
+        assert.equal(chatHeader.footer.height, 44, `${mode}: account action has a touch-sized target`);
         assert.ok(chatHeader.footer.height <= 64, `${mode}: footer does not consume a second row`);
         assert.equal(chatHeader.width, Math.min(344, width - 24));
         const rail = await browser.evaluate(`(()=>{const rail=document.querySelector('.sidebar-navigation-rail'),r=rail.getBoundingClientRect(),avatar=document.querySelector('#settings-button').getBoundingClientRect();return {width:r.width,avatarBottom:avatar.bottom,railBottom:r.bottom,buttons:[...rail.querySelectorAll('.conversation-navigation button')].map(n=>({label:n.getAttribute('aria-label'),x:n.getBoundingClientRect().x,size:n.getBoundingClientRect().width})),profile:document.querySelector('#settings-button').title}})()`);
@@ -195,7 +195,7 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
         await browser.wait('!document.querySelector("#sidebar-notifications")', "outside click closes notifications");
         // The chat list uses the very same native menu and keyboard/confirmation protocol.
         await browser.wait('!!document.querySelector(".conversation-row")');
-        const density = await browser.evaluate(`(()=>{const row=document.querySelector('.conversation-row'),avatar=row.querySelector('.ant-avatar'),body=document.querySelector('.sidebar-body'),title=document.querySelector('[data-conversation-id="dense-0"] .conversation-row-title');return {row:row.getBoundingClientRect().height,avatar:avatar.getBoundingClientRect().width,scrolls:body.scrollHeight>body.clientHeight,truncated:title.scrollWidth>title.clientWidth,overflow:body.scrollWidth>body.clientWidth+1,labels:[...document.querySelectorAll('.sidebar-nav-label')].map(n=>n.textContent)}})()`);
+        const density = await browser.evaluate(`(()=>{const row=document.querySelector('.conversation-row'),avatar=row.querySelector('.ant-avatar'),body=document.querySelector('.sidebar-body'),title=document.querySelector('[data-conversation-id="dense-0"] .conversation-row-title');return {row:row.getBoundingClientRect().height,avatar:avatar.getBoundingClientRect().width,scrolls:body.scrollHeight>body.clientHeight,truncated:title.scrollWidth>title.clientWidth,overflow:body.scrollWidth>body.clientWidth+1,labels:[...document.querySelectorAll('.conversation-navigation .sidebar-nav-label')].map(n=>n.textContent)}})()`);
         assert.equal(density.row, 56, `${mode}: compact conversation row`);
         assert.equal(density.avatar, 32, `${mode}: small identity image`);
         assert.equal(density.scrolls, true, `${mode}: large list scrolls inside the sidebar`);

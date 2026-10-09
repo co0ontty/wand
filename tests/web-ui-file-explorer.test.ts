@@ -40,7 +40,7 @@ class MemoryFileExplorerRepository implements FileExplorerRepository {
     return { ok: true, entries: this.listings.get(dirPath) ?? [], truncated: false, total: this.listings.get(dirPath)?.length ?? 0 };
   }
 
-  async search(query: string): Promise<FileExplorerSearchResult> {
+  async search(query: string, _cwd?: string, _signal?: AbortSignal, _includeGenerated?: boolean): Promise<FileExplorerSearchResult> {
     void query;
     return { ok: true, results: [] };
   }
@@ -105,6 +105,33 @@ test("file search failure stays distinct from a successful empty result", async 
   await controller.execute({ type: "search.start", query: "note" });
   assert.equal(store.getSnapshot().searchError, "");
   assert.deepEqual(store.getSnapshot().searchResults, []);
+});
+
+test("file search scope defaults to project files, refetches and invalidates old results", async () => {
+  const repo = new MemoryFileExplorerRepository({ "/app": [] });
+  const calls: boolean[] = [];
+  let completeOld: (() => void) | undefined;
+  repo.search = async (_query, _cwd, _signal, includeGenerated) => {
+    calls.push(Boolean(includeGenerated));
+    if (calls.length === 2) await new Promise<void>((resolve) => { completeOld = resolve; });
+    return { ok: true, results: [entry(includeGenerated ? "/app/node_modules/a.ts" : "/app/a.ts", "file")], truncated: Boolean(includeGenerated) };
+  };
+  const { controller, store } = createFileExplorerModule({ repository: repo });
+  controller.setRoot("/app");
+  assert.equal(store.getSnapshot().includeGenerated, false);
+  await controller.execute({ type: "search.start", query: "a" });
+  const old = controller.execute({ type: "search.start", query: "ab" });
+  await waitFor(() => Boolean(completeOld), 700);
+  const next = controller.execute({ type: "search.scope", includeGenerated: true });
+  assert.equal(store.getSnapshot().searchResults, null);
+  completeOld?.();
+  await Promise.all([old, next]);
+  assert.deepEqual(calls, [false, false, true]);
+  assert.equal(store.getSnapshot().searchResults?.[0]?.path, "/app/node_modules/a.ts");
+  assert.equal(store.getSnapshot().searchTruncated, true);
+  await controller.execute({ type: "search.clear" });
+  assert.equal(store.getSnapshot().searchTruncated, false);
+  assert.equal(store.getSnapshot().includeGenerated, true);
 });
 
 function waitFor(predicate: () => boolean, timeoutMs = 200): Promise<void> {

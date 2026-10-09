@@ -275,6 +275,13 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
       await clickText("基本配置","tab");
       assert.equal(await evaluate('document.querySelector("#settings-host").value'),"newer.example",`${mode}: unrelated model save retains draft`);
       await clickText("AI 与模型","tab");
+      await wait('document.body.innerText.includes("全局默认用于之后新建的会话")');
+      assert.equal(await evaluate('document.querySelector("#settings-openrouter-key").type'), "password", `${mode}: secret starts masked`);
+      await click('[aria-controls="settings-openrouter-key"][aria-label="显示敏感内容"]');
+      assert.equal(await evaluate('document.querySelector("#settings-openrouter-key").type'), "text", `${mode}: explicit reveal`);
+      await key("Tab");
+      await click('[aria-controls="settings-openrouter-key"][aria-label="隐藏敏感内容"]');
+      assert.equal(await evaluate('document.querySelector("#settings-openrouter-key").type'), "password", `${mode}: re-mask`);
       await enter("#settings-openrouter-key","local-fixture-input"); await clickText("保存并同步");
       await wait('document.body.innerText.includes("本地验证失败")');
       assert.equal(await evaluate('document.querySelector("#settings-openrouter-key").value.length>0'),true,`${mode}: credential draft retained on failure`);

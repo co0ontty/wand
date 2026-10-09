@@ -10,6 +10,7 @@ import { piSkillMode, piSkillModePatch } from "../../../pi-session-settings.js";
 import { piSettingsRepository } from "./repository";
 import { WandIcon, WandSearchField, WandSelect, isWandPopupOwnedBy } from "../ui";
 import type { PiResourceItem, PiResourceSelection, PiSessionSettingsPatch, PiSettingsResponse } from "../../../pi-session-settings.js";
+import { agentToolDisplayName } from "../../provider-identity.js";
 
 const panelId = (mount: PiSettingsMount): string => `wand-pi-settings-panel-${mount.sessionId}`;
 const LOADING_MESSAGE = "正在读取会话功能与 Skills / MCP…";
@@ -18,13 +19,19 @@ const CODEMODE_OPTIONS = [
   { value: "on", label: "启用" }, { value: "only", label: "仅 CodeMode" },
 ];
 
+export function piSettingsScope(data: PiSettingsResponse): string {
+  return data.engine === "cli"
+    ? "影响当前会话的下一轮，并记为之后新建 Pi CLI 会话的默认；其他已有会话不变。"
+    : "仅影响当前 Wand Agent 会话的下一轮；不会改动全局默认或其他会话。";
+}
+
 export function panelNotes(data: PiSettingsResponse | null): string[] {
   if (!data) return [];
   if (!data.resourceCatalog) return ["当前服务端尚不支持 Skills / MCP 选择，请更新服务端。"];
   if (!data.resourceCatalog.supported) return [data.resourceCatalog.reason || "此会话不支持 Skills / MCP 选择。"];
   if (!data.settings.resources) return ["旧会话仍沿用 Pi 自动发现；勾选任意项或点击「改为仅选定资源」后，下一轮才停止加载未选项。基础工具不受影响。"];
   return [data.skillLocksAvailable ? "Skills 三档：关 → 开 → 开并锁定。锁定项始终开启，未锁定项由自动配置选择；左滑回「开」解锁。" : "当前服务端不支持 Skill 锁定，请更新服务端。",
-    "设置会成为新建 Pi 会话的默认，每个会话各自保存；基础工具保持现有配置，MCP 手选项保留。",
+    "基础工具保持现有配置，MCP 手选项保留。",
     "选择不是文件系统沙箱；旧会话历史中已读过的技能内容不会被删除。"];
 }
 
@@ -32,8 +39,8 @@ function PiSettingsToggle({ mount }: { mount: PiSettingsMount }): React.ReactEle
   const open = mount.open;
   return <WandButton kind="ghost" type="button" className="btn-circle btn-circle-action composer-pi-settings-toggle"
     data-open={open ? "true" : "false"} aria-expanded={open} aria-controls={panelId(mount)}
-    aria-label={open ? "收起 Pi 会话设置" : "Pi 会话设置：CodeMode / Skills / MCP"}
-    title={open ? "收起 Pi 会话设置" : "Pi 会话设置：CodeMode / Skills / MCP"}
+    aria-label={open ? "收起会话功能设置" : "会话功能设置：CodeMode / Skills / MCP"}
+    title={open ? "收起会话功能设置" : "会话功能设置：CodeMode / Skills / MCP"}
     onClick={() => { piSettingsController.toggle(mount.sessionId); }}>
     <WandIcon name={open ? "close" : "gear"} size={17} strokeWidth={1.9}/>
   </WandButton>;
@@ -81,7 +88,7 @@ export function PiSettingsPanel({ mount }: { mount: PiSettingsMount }): React.Re
     piSettingsRepository.load(mount.sessionId, controller.signal).then((result) => {
       if (!ownsRequest(revision, controller.signal)) return;
       setLoad({ key: requestKey, phase: "ready", data: result,
-        message: result.resourceCatalog?.supported ? "修改后从下一轮生效，不中断当前任务；并成为新建 Pi 会话的默认"
+        message: result.resourceCatalog?.supported ? "选择后自动保存，从下一轮生效；不打断当前执行。"
           : result.resourceCatalog?.reason || "请更新服务端以选择 Skills / MCP" });
     }).catch((error: unknown) => {
       if (!ownsRequest(revision, controller.signal)) return;
@@ -146,7 +153,7 @@ export function PiSettingsPanel({ mount }: { mount: PiSettingsMount }): React.Re
         throw new Error("服务端未确认 CodeMode 设置，请重新读取核对。");
       }
       setLoad({ key: requestKey, phase: "saved", data: { ...data, settings: result.settings },
-        message: "已保存 · 下一轮生效，并成为新建 Pi 会话的默认" });
+        message: "已保存 · 从下一轮生效" });
       mount.onSaved(mount.sessionId, result.settings);
       return true;
     } catch (error) {
@@ -196,9 +203,10 @@ export function PiSettingsPanel({ mount }: { mount: PiSettingsMount }): React.Re
   }
   return <WandUiBoundary><div className={`wand-pi-settings wand-pi-settings-inner${mount.open ? " is-open" : ""}`} hidden={!mount.open} aria-hidden={!mount.open} inert={!mount.open}
     style={{ pointerEvents: "auto" }} id={panelId(mount)} ref={panelRef} role="region" aria-labelledby={`${panelId(mount)}-title`} data-wand-ui-root="">
-    <Card size="small" title={<span id={`${panelId(mount)}-title`}>Pi 会话设置</span>}
-      extra={<WandButton kind="ghost" type="button" aria-label="关闭 Pi 设置" onClick={() => { piSettingsController.dismiss(); mount.returnFocus(); }}><WandIcon name="close" size={15}/></WandButton>}>
+    <Card size="small" title={<span id={`${panelId(mount)}-title`}>{data ? agentToolDisplayName("pi", data.engine) : "会话"} 功能设置</span>}
+      extra={<WandButton kind="ghost" type="button" aria-label="关闭会话功能设置" onClick={() => { piSettingsController.dismiss(); mount.returnFocus(); }}><WandIcon name="close" size={15}/></WandButton>}>
       <Flex vertical gap={12}>
+        {data && <Typography.Text type="secondary" className="wand-pi-settings-scope">{piSettingsScope(data)}</Typography.Text>}
         <Alert type={phase === "failed" ? "error" : phase === "saved" ? "success" : "info"} title={message}
           className="wand-pi-settings-feedback" role="status" aria-live="polite" data-phase={phase}
           action={phase === "failed" && !data ? <WandButton kind="ghost" type="button" onClick={() => setReload((n) => n + 1)}>重试</WandButton> : undefined}/>

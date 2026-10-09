@@ -1,4 +1,4 @@
-import { normalizeProviderId, providerDisplayName, renderProviderLogoMarkup, type ProviderId } from "../../provider-identity.js";
+import { agentToolDisplayName, normalizeProviderId, renderProviderLogoMarkup, type AgentToolEngine, type ProviderId } from "../../provider-identity.js";
 
 /** 会话的实际 CLI 优先；只有没有会话时才显示员工的首选候选。 */
 export function employeeAvatarProvider(
@@ -8,8 +8,9 @@ export function employeeAvatarProvider(
   return normalizeProviderId(provider === undefined ? employee.agents?.[0]?.provider : provider);
 }
 
-export function employeeCliLabel(provider: ProviderId): string {
-  return `${providerDisplayName(provider)} CLI`;
+export function employeeCliLabel(provider: ProviderId, engine?: AgentToolEngine | "core"): string {
+  const label = agentToolDisplayName(provider, engine);
+  return provider === "pi" && (engine === "sdk" || engine === "core") ? label : `${label} CLI`;
 }
 
 /** 与 React 员工头像共用样式，供普通聊天的 vanilla renderer 使用。 */

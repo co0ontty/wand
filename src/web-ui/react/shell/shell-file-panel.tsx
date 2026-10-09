@@ -37,6 +37,14 @@ export function ShellFilePanel({ explorerRef, suspended = false }: ShellFilePane
   // setCwd 往往与当前值相同（输入期间 onChange 已经同步过），用 ref 存
   // 时那次 setState 会被 React bail-out，root 就不会跟着变。
   const [committedCwd, setCommittedCwd] = React.useState(snapshotCwd);
+  const [overlayLayout, setOverlayLayout] = React.useState(() => typeof window !== "undefined" && window.innerWidth < 1280);
+  React.useEffect(() => {
+    const media = window.matchMedia("(max-width: 1279px)");
+    const update = (): void => setOverlayLayout(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
   const editingCwd = React.useRef(false);
   const triggerRef = React.useRef<HTMLElement | null>(null);
   const returnFocus = React.useRef(false);
@@ -74,13 +82,13 @@ export function ShellFilePanel({ explorerRef, suspended = false }: ShellFilePane
         id="file-panel-backdrop"
         className={classNames("file-panel-backdrop", snapshot.layout.filePanelBackdropVisible && "open")}
         aria-hidden="true"
-        onClick={() => void dispatch({ type: "layout.files.close" })}
+        onClick={closePanel}
         hidden
       />
       <div className="file-explorer legacy-file-explorer-host" id="file-explorer" ref={explorerRef} hidden aria-hidden="true" />
       <Drawer forceRender open={snapshot.layout.filePanelOpen && !suspended} title="文件" size={snapshot.viewport.mobile ? "100%" : 360}
         rootClassName="wand-file-drawer"
-        mask={snapshot.layout.filePanelBackdropVisible} keyboard={snapshot.layout.filePanelOpen} onClose={closePanel} focusable={{ focusTriggerAfterClose: false }}
+        mask={overlayLayout || snapshot.layout.filePanelBackdropVisible} keyboard={snapshot.layout.filePanelOpen} onClose={closePanel} focusable={{ focusTriggerAfterClose: false }}
         afterOpenChange={(shown) => {
           if (shown || !returnFocus.current) return;
           returnFocus.current = false;
@@ -89,7 +97,7 @@ export function ShellFilePanel({ explorerRef, suspended = false }: ShellFilePane
             triggerRef.current?.focus({ preventScroll: true });
           }
         }}
-        closable={false} styles={{ body: { padding: 12, display: "flex", flexDirection: "column", minHeight: 0 }, header: { paddingTop: "max(16px, var(--wand-safe-top, 0px))" } }}
+        closable={false} styles={{ body: { padding: 12, display: "flex", flexDirection: "column", minHeight: 0 }, header: { padding: "12px", paddingTop: "max(12px, var(--wand-safe-top, 0px))" } }}
         drawerRender={(node) => <div id="file-side-panel" className={classNames("file-side-panel", snapshot.layout.filePanelOpen && "open")} style={{ height: "100%" }}>{node}</div>}
         extra={<Flex align="center" gap="small" className="file-side-panel-header-actions">
             <WandIconButton
@@ -146,7 +154,10 @@ export function ShellFilePanel({ explorerRef, suspended = false }: ShellFilePane
                 editingCwd.current = true;
                 event.currentTarget.select();
               }}
-              onChange={(event) => setCwd(event.currentTarget.value)}
+              onChange={(event) => {
+                editingCwd.current = true;
+                setCwd(event.currentTarget.value);
+              }}
               onBlur={() => {
                 editingCwd.current = false;
                 commitCwd();
@@ -160,9 +171,12 @@ export function ShellFilePanel({ explorerRef, suspended = false }: ShellFilePane
                   event.currentTarget.blur();
                 } else if (event.key === "Escape") {
                   event.preventDefault();
-                  editingCwd.current = false;
+                  event.stopPropagation();
                   setCwd(committedCwd);
-                  event.currentTarget.blur();
+                  const input = event.currentTarget;
+                  requestAnimationFrame(() => {
+                    if (input.isConnected && document.activeElement === input) input.select();
+                  });
                 }
               }}
             />

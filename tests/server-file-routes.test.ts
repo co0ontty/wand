@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, lstatSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
@@ -10,6 +10,7 @@ import express from "express";
 
 import { jsonErrorHandler } from "../src/express-async.js";
 import { registerFileRoutes } from "../src/server-file-routes.js";
+import { runGitAsync } from "../src/git-utils.js";
 import { WandStorage } from "../src/storage.js";
 
 test("extracted file routes preserve directory, preview, write, range, recent, and search behavior", async () => {
@@ -205,7 +206,46 @@ test("extracted file routes preserve directory, preview, write, range, recent, a
     const outsideBody = await outsideCwd.json() as { results: Array<{ name: string }> };
     assert.ok(outsideBody.results.some((item) => item.name === "sample.txt"));
 
-    const blocked = await fetch(`${baseUrl}/api/file-search?q=passwd&cwd=${encodeURIComponent("/etc")}`);
+    // Dependencies are opt-in and cannot consume the result budget ahead of project files.
+    for (const dir of ["src", "node_modules/pkg", "dist", ".git", ".wand", ".wand-uploads", ".wand-team"]) {
+      mkdirSync(path.join(root, dir), { recursive: true });
+      writeFileSync(path.join(root, dir, "needle.ts"), "fixture");
+    }
+    const find = async (extra = "") => {
+      const response = await fetch(`${baseUrl}/api/file-search?q=needle&cwd=${encodeURIComponent(root)}${extra}`);
+      assert.equal(response.status, 200);
+      return response.json() as Promise<{ results: Array<{ path: string }>; truncated: boolean }>;
+    };
+    const projectOnly = await find();
+    assert.deepEqual(projectOnly.results.map((item) => path.relative(root, item.path)), ["src/needle.ts"]);
+    assert.equal(projectOnly.truncated, false);
+    const withGenerated = await find("&includeGenerated=true");
+    assert.equal(path.relative(root, withGenerated.results[0]!.path), "src/needle.ts");
+    assert.deepEqual(new Set(withGenerated.results.map((item) => path.relative(root, item.path))), new Set(["src/needle.ts", "dist/needle.ts", "node_modules/pkg/needle.ts"]));
+    for (const result of [projectOnly, withGenerated]) {
+      assert.equal(result.results.some((item) => path.relative(root, item.path).split(path.sep).includes(".wand")), false, "Wand internal files stay excluded in both search scopes");
+    }
+    const bounded = await find("&includeGenerated=true&limit=1");
+    assert.deepEqual(bounded.results.map((item) => path.relative(root, item.path)), ["src/needle.ts"]);
+    assert.equal(bounded.truncated, true);
+    const shallow = await find("&includeGenerated=true&depth=0");
+    assert.deepEqual(shallow.results, []);
+    const emptySearch = await fetch(`${baseUrl}/api/file-search?q=&cwd=${encodeURIComponent(root)}&includeGenerated=true`);
+    assert.deepEqual((await emptySearch.json()).results, []);
+    writeFileSync(path.join(root, "README.md"), "root documentation");
+    writeFileSync(path.join(root, "src", "README.md"), "nested documentation");
+    const readmes = await fetch(`${baseUrl}/api/file-search?q=README&cwd=${encodeURIComponent(root)}&limit=1`);
+    assert.equal((await readmes.json()).results[0]?.path, path.join(root, "README.md"));
+    await runGitAsync(["init", "--quiet"], root);
+    writeFileSync(path.join(root, ".gitignore"), "ignored/\nprivate-note.txt\n");
+    mkdirSync(path.join(root, "ignored"));
+    writeFileSync(path.join(root, "ignored", "needle.ts"), "ignored");
+    writeFileSync(path.join(root, "private-note.txt"), "ignored");
+    assert.deepEqual((await find()).results.map((item) => path.relative(root, item.path)), ["src/needle.ts"]);
+    const ignoredFile = await fetch(`${baseUrl}/api/file-search?q=private-note&cwd=${encodeURIComponent(root)}`);
+    assert.deepEqual((await ignoredFile.json()).results, []);
+
+    const blocked = await fetch(`${baseUrl}/api/file-search?q=passwd&cwd=${encodeURIComponent("/etc")}&includeGenerated=true`);
     assert.equal(blocked.status, 403);
 
     // ── File management routes (create / dir-create / rename / delete) ──

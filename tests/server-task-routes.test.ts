@@ -437,6 +437,9 @@ test("dispatching an issue creates a structured session in the issue workspace a
     // agent 未指定 mode 时落到标准模式，不再是旧的 "agent"。
     assert.equal(payload.session.mode, "default");
     assert.ok(registry.get(payload.session.id));
+    const defaultsAfterDispatch = await fetch(`${url}/api/wand-task-agent-defaults`)
+      .then(jsonOf<{ thinkingEffort: string }>);
+    assert.equal(defaultsAfterDispatch.thinkingEffort, "off", "ordinary dispatch must not overwrite future defaults");
 
     const again = await fetch(`${url}/api/wand-tasks/${issue.id}/dispatch`, {
       method: "POST",
@@ -682,7 +685,7 @@ test("marking a board task done keeps it in done instead of archiving", async ()
   });
 });
 
-test("task board remembers last selected agent defaults", async () => {
+test("task execution choices preserve future defaults unless explicitly opted in", async () => {
   await withHarness(async ({ url }) => {
     const initial = await fetch(`${url}/api/wand-task-agent-defaults`)
       .then(jsonOf<{ provider: string; model: string; thinkingEffort: string; mode: string; kind: string }>);
@@ -709,9 +712,9 @@ test("task board remembers last selected agent defaults", async () => {
     }).then(jsonOf<{ id: string }>);
     const afterCreate = await fetch(`${url}/api/wand-task-agent-defaults`)
       .then(jsonOf<{ provider: string }>);
-    assert.equal(afterCreate.provider, "codex");
+    assert.equal(afterCreate.provider, "pi", "creating a task must not overwrite future defaults");
 
-    // 显式指定工作模式会写回任务与“上次选择”。
+    // 修改本任务的执行配置也不会改变后续默认。
     await fetch(`${url}/api/wand-tasks/${created.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -719,9 +722,27 @@ test("task board remembers last selected agent defaults", async () => {
     });
     const afterPatch = await fetch(`${url}/api/wand-task-agent-defaults`)
       .then(jsonOf<{ provider: string; thinkingEffort: string; mode: string }>);
-    assert.equal(afterPatch.provider, "grok");
-    assert.equal(afterPatch.thinkingEffort, "standard");
-    assert.equal(afterPatch.mode, "managed");
+    assert.equal(afterPatch.provider, "pi");
+    assert.equal(afterPatch.thinkingEffort, "deep");
+    assert.equal(afterPatch.mode, "full-access");
+    // Explicit opt-in is committed only after a valid task is created.
+    const requested = { provider: "claude", model: "sonnet", thinkingEffort: "standard", mode: "managed" };
+    const rejected = await fetch(`${url}/api/wand-tasks`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agent: requested, rememberAgentDefaults: true }),
+    });
+    assert.equal(rejected.status, 400);
+    assert.deepEqual(await fetch(`${url}/api/wand-task-agent-defaults`).then(jsonOf), saved);
+    await fetch(`${url}/api/wand-tasks`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "只用于本任务", agent: requested, rememberAgentDefaults: false }),
+    }).then(jsonOf);
+    assert.deepEqual(await fetch(`${url}/api/wand-task-agent-defaults`).then(jsonOf), saved);
+    const optedIn = await fetch(`${url}/api/wand-tasks`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "保存后续默认", agent: requested, rememberAgentDefaults: true }),
+    }).then(jsonOf<{ agent: unknown }>);
+    assert.deepEqual(await fetch(`${url}/api/wand-task-agent-defaults`).then(jsonOf), optedIn.agent);
 
     // 老客户端 PUT 默认选项不带 mode：沿用已保存模式，不能把全局默认复位成标准。
     const defaultsWithoutMode = await fetch(`${url}/api/wand-task-agent-defaults`, {

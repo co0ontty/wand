@@ -7,17 +7,7 @@ import {
   type SiliconEmployee,
 } from "../../../ai-team-types.js";
 import { EmployeeAvatar } from "../agents/employee-avatar.js";
-
-function providerLabel(provider: string): string {
-  return provider === "claude" ? "Claude"
-    : provider === "codex" ? "Codex"
-      : provider === "opencode" ? "OpenCode"
-        : provider === "grok" ? "Grok"
-          : provider === "qoder" ? "Qoder"
-            : provider === "pi" ? "Pi"
-              : provider === "gemini" ? "Gemini"
-                : provider;
-}
+import { agentToolDisplayName } from "../../provider-identity.js";
 
 /**
  * 设置页里「系统 AI」的执行者投影：Wand 自有 AI 调用由内置「系统运维」员工执行，
@@ -47,13 +37,14 @@ export function SystemAiOwnerSummary({
               <span className="wand-settings-library-route-rank" aria-label={`优先 ${index + 1}`}>
                 {String(index + 1).padStart(2, "0")}
               </span>
-              {providerLabel(agent.provider)}
+              {agentToolDisplayName(agent.provider, agent.engine)}
               {agent.model && agent.model !== "default" ? ` · ${agent.model}` : " · 默认模型"}
+              {agent.engine === "sdk" ? <Tag>系统 AI 跳过</Tag> : null}
             </li>
-          )) : <li className="wand-settings-library-system-ai-chain-empty">正在读取执行候选…</li>}
+          )) : <li className="wand-settings-library-system-ai-chain-empty">{employee ? "尚未配置执行候选，请到「团队 → 员工」添加。" : "正在读取执行候选…"}</li>}
         </ol>
         <span className="wand-settings-library-system-ai-hint">
-          名字、职责与角色设定由服务端固定；候选与顺序在「AI 团队 → 硅基员工 → {name}」里调整。
+          系统 AI 内部调用会跳过 SDK 候选；候选与顺序在「团队 → 员工」列表的「{name}」中调整。
         </span>
       </div>
     </div>

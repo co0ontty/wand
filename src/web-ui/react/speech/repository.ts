@@ -3,6 +3,10 @@ import { encodeSpeechWav } from "../../speech-audio.js";
 import { requestJson } from "../http-adapter";
 
 export type SpeechMode = "server" | "local";
+export function speechInputDescription(mode: SpeechMode): string {
+  return mode === "local" ? "浏览器端侧识别，音频不上传。识别结果填入草稿，核对后发送。"
+    : "音频发送到当前连接的 Wand 主机，由本机模型转写，不调用第三方云端语音识别。结果填入草稿，核对后发送。";
+}
 export const SPEECH_MODE_KEY = "wand.voiceRecognitionMode";
 export function readSpeechMode(): SpeechMode {
   try { return localStorage.getItem(SPEECH_MODE_KEY) === "local" ? "local" : "server"; } catch { return "server"; }
@@ -47,7 +51,7 @@ export interface BrowserSpeechCallbacks {
   onPartial(text: string): void;
   onStatus(status: string): void;
   onProcessing(): void;
-  onFinal(text: string): void;
+  onFinal(text: string, notice?: string): void;
   onError(message: string): void;
 }
 
@@ -149,13 +153,15 @@ export class BrowserSpeechInput {
       const wav = encodeSpeechWav(channels, decoded.sampleRate);
       await decoder.close(); this.decoder = null;
       this.finalTimer = setTimeout(() => this.fail("服务端识别超时，请选择较小模型后重试。"), 125_000);
-      const result = await requestJson<SpeechResult>("/api/speech/transcribe", { method: "POST", headers: { "content-type": "audio/wav" }, body: wav, signal: this.abort.signal });
+      // Newer connected servers may return a notice; the current server does not
+      // require or enable text processing as part of this response contract.
+      const result = await requestJson<SpeechResult & { optimizationError?: string }>("/api/speech/transcribe", { method: "POST", headers: { "content-type": "audio/wav" }, body: wav, signal: this.abort.signal });
       if (typeof result.text !== "string" || result.text.length > 8000) throw new Error("服务端转写结果无效。");
-      this.deliver(result.text);
+      this.deliver(result.text, result.optimizationError);
     } catch (error) { if (!this.done) this.fail(error instanceof Error ? error.message : "语音识别失败。"); }
   }
   private stopTracks(): void { this.stream?.getTracks().forEach((track) => track.stop()); this.stream = null; }
-  private deliver(text: string): void { if (this.done) return; this.cancel(); this.callbacks.onFinal(text.trim()); }
+  private deliver(text: string, notice?: string): void { if (this.done) return; this.cancel(); this.callbacks.onFinal(text.trim(), notice); }
   private fail(message: string): void { if (this.done) return; this.cancel(); this.callbacks.onError(message); }
   cancel(): void {
     if (this.done) return;

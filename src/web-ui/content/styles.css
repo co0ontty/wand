@@ -185,10 +185,10 @@ html.is-wand-app .chat-width-toggle { display: none; }
 /* 页面层（对话 / 看板 / 编辑器）盖住主区时，遗留槽位整体不再可见：#output 等仍留在 DOM
    （终端实例不重建、几何不塌），但它们内部的浮层不再按自己的 z-index 浮到页面上方。 */
 .main-content-page-layer > :is(#output, #chat-output, .input-panel, .workspace-mobile-navigation, .workspace-window) { visibility:hidden; }
-/* 桌面文件抽屉是 360px 无遮罩浮层（mobile<=768 才是 100% + 遮罩）。不主区让位，抽屉会盖住
-   主区右侧 360px：实测编辑器页面层 121​6px 被遮 212px、终端工具/发送按钮压在抽屉下面点不到。
-   主区 box-sizing 是 border-box，用透明边框（而不是 padding）能同时约束静态内容和 inset:0 的绝对层。 */
-@media (min-width: 769px) { .main-content.file-panel-open { border-right: 360px solid transparent; } }
+/* Wide desktops dock a 360px file panel beside the 56px navigation rail.
+   Below 1280px the file Drawer owns a masked overlay, preserving readable content width.
+   The transparent border also bounds absolute page layers without covering their actions. */
+@media (min-width: 1280px) { .main-content.file-panel-open { border-right: 360px solid transparent; } }
 .sidebar .sidebar-feature-nav[hidden] { display:none; }
 .conversation-composer .ant-sender { width:100%; }
 .conversation-search-input { background:var(--bg-primary); }

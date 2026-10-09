@@ -7,7 +7,7 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { defaultPiSessionSettings, NO_PI_SETTINGS_CONTROLS, piSettingsControls, type PiSettingsResponse } from "../src/pi-session-settings.js";
 import { PiSettingsController, type PiSettingsMount } from "../src/web-ui/react/pi-settings/controller.js";
-import { panelNotes, PiSettingsPanel } from "../src/web-ui/react/pi-settings/host.js";
+import { panelNotes, piSettingsScope, PiSettingsPanel } from "../src/web-ui/react/pi-settings/host.js";
 import { piSettingsRepository } from "../src/web-ui/react/pi-settings/repository.js";
 import { PiSkillSwitch } from "../src/web-ui/react/pi-settings/skill-switch.js";
 
@@ -146,6 +146,14 @@ test("panel notes describe resource isolation and never claim filesystem sandbox
   assert.ok(panelNotes(selected).some((note) => note.includes("旧会话历史")));
   assert.ok(panelNotes({ ...selected, settings: defaultPiSessionSettings() }).some((note) => note.includes("仍沿用 Pi 自动发现")));
   assert.deepEqual(panelNotes(null), []);
+});
+
+test("session settings distinguish current-session overrides from remembered Pi CLI defaults", () => {
+  assert.match(piSettingsScope(response()), /当前会话的下一轮.*新建 Pi CLI 会话的默认.*其他已有会话不变/);
+  const sdk = piSettingsScope(response({ engine: "core" }));
+  assert.match(sdk, /仅影响当前 Wand Agent 会话/);
+  assert.match(sdk, /不会改动全局默认或其他会话/);
+  assert.doesNotMatch(sdk, /新建.*默认/);
 });
 
 test("逐项可用性：新服务端按 controls，旧服务端退回它当时真实支持的能力", () => {

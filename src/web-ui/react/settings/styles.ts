@@ -28,6 +28,40 @@ const css = String.raw`
 .wand-settings-library-env-value,.wand-settings-library-default-summary,.wand-settings-library-connect-code,.wand-settings-library-section a,.wand-settings-library-preset-list code { overflow-wrap:anywhere; }
 .wand-settings-library-connect-code-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .wand-settings-library-env-toolbar,.wand-settings-library-app-access-form { display:flex; gap:16px; align-items:center; flex-wrap:wrap; margin-bottom:16px; }
+
+/* Settings keep one section surface; field groups carry hierarchy without nested cards. */
+.wand-settings-library-page-heading { padding:12px 20px; }
+.wand-settings-library-page-heading h1 { font-size:18px; }
+.wand-settings-library-page:not([data-compact=true]) .wand-settings-library-directory { width:216px; }
+.wand-settings-library-directory .ant-menu-item { min-height:44px; padding-block:8px; }
+.wand-settings-library-nav-copy { gap:2px; }
+.wand-settings-library-page[data-compact=true] .wand-settings-library-directory .ant-menu-item { min-height:52px; }
+.wand-settings-library-detail-content { max-width:720px; padding:20px 24px 28px; container:wandsettings / inline-size; }
+.wand-settings-library-panel-heading { gap:4px; margin-bottom:4px; }
+.wand-settings-library-panel-heading h2 { font-size:18px; }
+.wand-settings-library-panel-heading p { font-size:13px; line-height:1.55; }
+.wand-settings-library-panel { gap:12px; }
+.wand-settings-library-section>.ant-card-head { min-height:42px; padding-inline:16px; }
+.wand-settings-library-section>.ant-card-head .ant-card-head-title { padding-block:10px; font-size:14px; }
+.wand-settings-library-section>.ant-card-body { padding:16px; }
+.wand-settings-library-section>.ant-card-body>p { margin-bottom:12px; font-size:13px; line-height:1.55; }
+.wand-settings-library-section-body { gap:12px; }
+.wand-settings-library-grid,.wand-settings-library-default-row { grid-template-columns:minmax(0,1fr); gap:12px 16px; }
+.wand-settings-library-field .ant-form-item-label { padding-bottom:4px; }
+.wand-settings-library-field .ant-form-item-explain { font-size:12px; line-height:1.5; }
+.wand-settings-library-secret-toggle.ant-btn { height:24px; min-height:24px; padding-inline:6px; font-size:12px; }
+.wand-settings-library-system-ai-owner-copy { min-width:0; overflow-wrap:anywhere; }
+.wand-settings-library-system-ai-chain { list-style:none; padding:0; margin:8px 0; }
+.wand-settings-library-system-ai-chain li { padding-block:3px; font-size:13px; }
+@container wandsettings (min-width:560px) {
+  .wand-settings-library-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@container wandsettings (min-width:620px) {
+  .wand-settings-library-default-row { grid-template-columns:repeat(3,minmax(0,1fr)); }
+}
+@media (pointer:coarse) {
+  .wand-settings-library-secret-toggle.ant-btn { min-height:32px; min-width:44px; }
+}
 `;
 
 export function installSettingsLibraryStyles(): void {

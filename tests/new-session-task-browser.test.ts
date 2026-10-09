@@ -55,6 +55,28 @@ window.openForm=options=>newSessionController.open(options);createRoot(document.
       };
       try {
         await b.wait('!!window.openForm');
+        await b.evaluate("openForm({initialCwd:'/project',workspaceId:'project'})");
+        await b.wait('!!document.querySelector(".wand-new-session-summary")');
+        assert.ok(await b.evaluate("document.querySelector('.wand-new-session-summary').innerText.includes('模型')"));
+        assert.ok(await b.evaluate("!!document.querySelector('[aria-label=执行模式]')"), "permissions remain visible without expanding details");
+        assert.equal(await b.evaluate("document.querySelectorAll('.wand-new-session-subject-collapse input[type=radio]').length"), 0, "long execution list is initially collapsed");
+        await b.click('.wand-new-session-subject-collapse .ant-collapse-header');
+        await b.wait('!!document.querySelector("[aria-label=搜索执行对象]")');
+        await b.click('[aria-label=搜索执行对象]'); await b.send("Input.insertText", { text: "没有这个对象" });
+        await b.wait("document.body.innerText.includes('没有匹配的执行对象')");
+        assert.equal(await b.evaluate("document.querySelector('.wand-new-session-summary').innerText.includes('Claude')"), true, "search does not change the selected execution object");
+        await b.key("Escape");
+        assert.equal(await b.evaluate("document.querySelector('[aria-label=搜索执行对象]').value"), "");
+        assert.equal(await b.evaluate("document.activeElement.getAttribute('aria-label')"), "搜索执行对象");
+        await b.send("Input.insertText", { text: "codex" });
+        await b.wait(`!!document.querySelector('label:has(input[value="cli:codex"])')`);
+        await b.click('label:has(input[value="cli:codex"])');
+        await b.wait("document.querySelector('.wand-new-session-summary').innerText.includes('full access')");
+        assert.ok(await b.evaluate("document.querySelector('.wand-new-session-summary').innerText.includes('关闭 Codex 的沙盒限制')"));
+        assert.equal(sessionCreates, 0, "changing execution choices never starts an AI session");
+        await b.screenshot(`output/task-session-20261009/refined-${width}-permission.png`);
+        await b.click('[aria-label="关闭新建会话"]');
+        await b.wait('!document.querySelector("[data-testid=new-session-dialog]")');
         await b.evaluate("openForm({initialKind:'shell',initialCwd:'/project',workspaceId:'project'})");
         await b.wait('!!document.querySelector("[aria-label=所属任务]")');
         await select("新建任务"); await b.wait('!!document.querySelector("#wand-new-session-task-name")');

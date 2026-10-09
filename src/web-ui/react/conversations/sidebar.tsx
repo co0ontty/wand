@@ -27,7 +27,7 @@ export function ConversationNavigation({ activePage, teamAttention, onNavigate }
     { value: "chats", label: "对话", icon: "chat" },
     { value: "tasks", label: "工作区", icon: "folder" },
     { value: "board", label: "任务看板", icon: "board", id: "task-board-button" },
-    { value: "teams", label: "团队", icon: "parallel", id: "ai-teams-button" },
+    { value: "teams", label: "团队", icon: "users", id: "ai-teams-button" },
     { value: "contacts", label: "通讯录", icon: "user" },
   ] as const;
   return <Flex component="nav" vertical gap={4} className="conversation-navigation" aria-label="功能导航">
@@ -107,8 +107,18 @@ export function filterConversationList<
   });
 }
 
+/** Totals always describe the archive tier, while matches describe the current query. */
+export function conversationListCounts<
+  T extends { title: string; preview: string; dissolvedAt?: string | null; tasks: ReadonlyArray<{ task: { title: string; status: string } }> },
+>(items: readonly T[], filter: ConversationListFilter, query: string): { total: number; active: number; archived: number; scope: number; matches: number } {
+  const archived = items.filter(isConversationArchived).length;
+  const active = items.length - archived;
+  return { total: items.length, active, archived, scope: filter === "archived" ? archived : filter === "active" ? active : items.length,
+    matches: filterConversationList(items, filter, query).length };
+}
+
 export function ConversationSidebarList({ compact, enabled = true, onNavigate }: { compact: boolean; enabled?: boolean; onNavigate(): void }): React.ReactElement {
-  const { items, error, refresh } = useConversations();
+  const { items, error, loaded, refresh } = useConversations();
   const ui = useConversationUi();
   const query = (ui.filters["list-query"] ?? "").trim().toLowerCase();
   const [filter, setFilter] = React.useState<ConversationListFilter>("all");
@@ -123,6 +133,9 @@ export function ConversationSidebarList({ compact, enabled = true, onNavigate }:
     return Number(!!b.pinnedAt) - Number(!!a.pinnedAt) || (b.pinnedAt ?? "").localeCompare(a.pinnedAt ?? "") || (left < 0 ? items.length : left) - (right < 0 ? items.length : right);
   });
   const rows = filterConversationList(sorted, filter, query);
+  const counts = conversationListCounts(items, filter, query);
+  const countLabel = loaded ? `${conversationListFilterLabel(filter)}共 ${counts.scope} 个对话${query ? `，搜索匹配 ${counts.matches} 个` : ""}；全部 ${counts.total}，未归档 ${counts.active}，已归档 ${counts.archived}`
+    : error ? "对话数量尚未加载" : "正在读取对话数量";
   const select = (id: string): void => { conversationUi.select(id); onNavigate(); };
   const update = async (item: ConversationSummary, patch: { pinned?: boolean; dissolved?: boolean }): Promise<void> => {
     setActionError("");
@@ -146,7 +159,7 @@ export function ConversationSidebarList({ compact, enabled = true, onNavigate }:
       <WandSearchField inputRef={searchInput} className="conversation-search-input" label="搜索对话或任务"
         value={ui.filters["list-query"] ?? ""} onValueChange={value => conversationUi.filter("list-query", value)}/>
     </div>
-    <Flex justify="space-between" align="center" gap={4} className="conversation-list-section"><Typography.Text type="secondary" className="conversation-list-count" aria-label={`${conversationListFilterLabel(filter)}，${rows.length} 个对话`}>{rows.length} 个对话</Typography.Text>
+    <Flex justify="space-between" align="center" gap={4} className="conversation-list-section"><Typography.Text type="secondary" className="conversation-list-count" title={countLabel} aria-label={countLabel}>{loaded ? query ? `匹配 ${counts.matches} / ${counts.scope}` : `${counts.scope} 个对话` : error ? "数量未加载" : "读取中…"}</Typography.Text>
       <WandStretchTabs className="conversation-list-filter" ariaLabel="对话归档筛选"
         tabs={[{ value: "all", label: "全部" }, { value: "active", label: "未归档" }, { value: "archived", label: "已归档" }]}
         value={filter} onValueChange={(value) => setFilter(value as ConversationListFilter)}/></Flex></div> : null}
@@ -155,7 +168,7 @@ export function ConversationSidebarList({ compact, enabled = true, onNavigate }:
     {rows.map(item => <ConversationListRow key={item.id} item={item} compact={compact} query={query}
       enabled={enabled} filter={filter} selected={ui.selectedId === item.id && ui.active !== false} onSelect={() => select(item.id)}
       onUpdate={patch => update(item, patch)} onRemove={() => remove(item)}/>) }
-    {!rows.length ? <div className="conversation-list-empty" role="status"><WandIcon name={query ? "search" : "chat"} size={20}/><Typography.Paragraph type="secondary">{query ? "没有匹配的对话或任务"
+    {loaded && !rows.length ? <div className="conversation-list-empty" role="status"><WandIcon name={query ? "search" : "chat"} size={20}/><Typography.Paragraph type="secondary">{query ? "没有匹配的对话或任务"
       : filter === "archived" ? "还没有已归档的对话，解散群聊或归档任务后会出现在这里。"
       : filter === "active" ? "还没有未归档的对话。"
       : "还没有对话，可以从通讯录找一位员工。"}</Typography.Paragraph>{query ? <WandButton kind="ghost" size="small" onClick={() => { conversationUi.filter("list-query", ""); searchInput.current?.focus({ preventScroll: true }); }}>清空搜索</WandButton> : null}</div> : null}

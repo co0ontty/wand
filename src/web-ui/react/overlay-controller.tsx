@@ -20,6 +20,8 @@ export interface OverlayDialogOptions<T> {
     label?: string;
   };
   dismissable?: boolean;
+  /** A caller with a stable focus lease can disable the library's captured trigger. */
+  focusTriggerAfterClose?: boolean;
 }
 
 export type OverlayDialogResult<T> =

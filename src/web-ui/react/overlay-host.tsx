@@ -84,6 +84,7 @@ export function OverlayHost({ portalContainer, settingsPresentation = "workspace
           actions={dialog.options.actions}
           input={dialog.options.input}
           dismissable={dialog.options.dismissable}
+          focusTriggerAfterClose={dialog.options.focusTriggerAfterClose}
           onAction={(action, inputValue) => {
             overlayStore.completeDialog(dialog.id, {
               dismissed: false,

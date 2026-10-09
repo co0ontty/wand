@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Alert, Card, Flex, Space, Tag, Typography, Tooltip } from "antd";
+import { Alert, Flex, Space, Tag, Typography, Tooltip } from "antd";
 import type { WandTaskAgent } from "../../../task-types.js";
 import { WandButton, WandIcon, WandIconButton } from "../ui";
 import {
@@ -14,6 +14,7 @@ import {
 import { AgentFields } from "../issues/agent-fields.js";
 import type { IssueAgentProvider, IssueModelCatalog } from "../issues/task-board-agent.js";
 import { AI_TEAM_MAX_CANDIDATES } from "../../../ai-team-types.js";
+import { installEmployeeStyles } from "./styles.js";
 
 export type ProviderOptions = Array<{ value: IssueAgentProvider; label: string }> | null;
 
@@ -44,7 +45,7 @@ export interface CandidateRowProps {
   onRemove(): void;
 }
 
-/** 一行候选：卡片与操作钮都用通用控件外观，顺序（即降级顺序）仍由候选数组决定。 */
+/** 一行候选：连续行与分隔线表达顺序，控件复用公共 owner。 */
 export function CandidateEditorRow({
   id,
   agent,
@@ -64,16 +65,14 @@ export function CandidateEditorRow({
   const label = candidateLabel(index);
 
   return (
-    <Card
-      size="small"
-      hoverable
+    <div
       data-candidate-id={id}
       className="wand-team-candidate"
       data-candidate-index={index}
       data-duplicate={duplicate || undefined}
     >
       <Flex align="start" gap={8} wrap className="wand-team-candidate-inner">
-        <Tag color={duplicate ? "error" : index === 0 ? "orange" : undefined} className="wand-team-candidate-tag">{label}</Tag>
+        <Tag color={duplicate ? "error" : undefined} className="wand-team-candidate-tag">{label}</Tag>
         <Flex wrap gap={8} className="wand-ai-team-member-agent" style={{ flex: "1 1 200px", minWidth: 0 }}>
           <AgentFields
             agent={agent}
@@ -120,7 +119,7 @@ export function CandidateEditorRow({
           </Tooltip>
         </Space>
       </Flex>
-    </Card>
+    </div>
   );
 }
 
@@ -147,6 +146,7 @@ export function CandidatesListEditor({
   decisionOnly?: boolean;
   onChange(agents: WandTaskAgent[]): void;
 }): React.ReactElement {
+  React.useEffect(() => { installEmployeeStyles(); }, []);
   const containerRef = React.useRef<HTMLDivElement>(null);
   const prevPositions = React.useRef<Map<string, number>>(new Map());
 
@@ -235,7 +235,7 @@ export function CandidatesListEditor({
   };
 
   return (
-    <Card size="small"
+    <section
       className="wand-team-candidates"
       role="group"
       aria-label={`${label} 的执行候选`}
@@ -289,6 +289,6 @@ export function CandidatesListEditor({
         ) : null}
       </Flex>
       </Flex>
-    </Card>
+    </section>
   );
 }

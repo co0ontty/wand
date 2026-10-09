@@ -71,6 +71,7 @@ export type WandIconName =
   | "trash"
   | "unlock"
   | "user"
+  | "users"
   | "up"
   | "video"
   | "warning"
@@ -127,6 +128,8 @@ export function WandIcon({
       return <svg {...common}><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>;
     case "user":
       return <svg {...common}><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg>;
+    case "users":
+      return <svg {...common}><circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6M21 20v-2a6 6 0 0 0-4-5.7"/></svg>;
     case "binary":
       return <svg {...common}><path d="M12 3l8 9-8 9-8-9 8-9z"/></svg>;
     case "board":

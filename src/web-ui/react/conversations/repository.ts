@@ -80,13 +80,14 @@ export const conversationsRepository = {
   },
 };
 
-export function useConversations(): { items: ConversationSummary[]; error: string; refresh(): void } {
+export function useConversations(): { items: ConversationSummary[]; error: string; loaded: boolean; refresh(): void } {
   const [items, setItems] = React.useState<ConversationSummary[]>([]);
   const [error, setError] = React.useState("");
+  const [loaded, setLoaded] = React.useState(false);
   const epoch = React.useRef(0);
   const load = React.useCallback(async () => {
     const current = ++epoch.current;
-    try { const next = await conversationsRepository.list(); if (current === epoch.current) { setItems(next); setError(""); } }
+    try { const next = await conversationsRepository.list(); if (current === epoch.current) { setItems(next); setLoaded(true); setError(""); } }
     catch (cause) { if (current === epoch.current) setError(cause instanceof Error ? cause.message : "对话列表读取失败。"); }
   }, []);
   React.useEffect(() => {
@@ -95,5 +96,5 @@ export function useConversations(): { items: ConversationSummary[]; error: strin
     const timer = window.setInterval(() => { if (!document.hidden) void load(); }, 6000);
     return () => { ++epoch.current; listeners.delete(load); unsubscribes.forEach((f) => f()); clearInterval(timer); };
   }, [load]);
-  return { items, error, refresh: () => { void load(); } };
+  return { items, error, loaded, refresh: () => { void load(); } };
 }

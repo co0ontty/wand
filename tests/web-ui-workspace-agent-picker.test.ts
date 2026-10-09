@@ -7,7 +7,7 @@ import * as jsxRuntime from "react/jsx-runtime";
 import ts from "typescript";
 import { nextChoice } from "../src/web-ui/react/new-session/choice-navigation.js";
 import { sortProviderOptions } from "../src/web-ui/react/provider-usage.js";
-import { AGENT_TOOL_OPTIONS, agentToolIdFor, agentToolOption } from "../src/web-ui/provider-identity.js";
+import { AGENT_TOOL_OPTIONS, agentToolDisplayName, agentToolIdFor, agentToolOption } from "../src/web-ui/provider-identity.js";
 import type { UnifiedExecutionSubjectPickerProps } from "../src/web-ui/react/workspaces/unified-execution-subject-picker.js";
 
 const source = readFileSync(new URL("../src/web-ui/react/workspaces/unified-execution-subject-picker.tsx", import.meta.url), "utf8");
@@ -58,15 +58,17 @@ function harness(overrides: Partial<UnifiedExecutionSubjectPickerProps> = {}) {
     useRef: (initial: unknown) => ({ current: initial }),
   };
   const dependencies: Record<string, unknown> = {
+    "../new-session/layout.js": {},
+    "../ui/popup-lifecycle.js": { usePopupDismiss: () => {} },
     antd: { Radio: Object.assign(() => null, { Group: () => null }), Segmented: () => null, Alert: () => null, Spin: () => null, Flex: () => null, Form: { Item: () => null }, Typography: { Text: () => null, Paragraph: () => null } },
     "../theme": { WandUiBoundary: () => null },
     "../shell/sidebar-styles": { installSidebarStyles: () => {} },
     react,
     "react/jsx-runtime": jsxRuntime,
     "../agents/employee-avatar.js": { EmployeeAvatar: () => null },
-    "../ui": { WandIcon: () => null, WandSelect: () => null, WandButton: () => null },
+    "../ui": { WandIcon: () => null, WandSelect: () => null, WandButton: () => null, WandSearchField: () => null },
     "../provider-logo.js": { ProviderLogo: () => null },
-    "../../provider-identity.js": { AGENT_TOOL_OPTIONS, agentToolIdFor, agentToolOption },
+    "../../provider-identity.js": { AGENT_TOOL_OPTIONS, agentToolDisplayName, agentToolIdFor, agentToolOption },
     "../provider-usage.js": { sortProviderOptions, useProviderUsage: () => ({}) },
     "../new-session/choice-navigation.js": { nextChoice },
     "./workspace-agent-picker.js": {
@@ -115,7 +117,8 @@ function harness(overrides: Partial<UnifiedExecutionSubjectPickerProps> = {}) {
     if (current.subject.props.disabled || choice.props.disabled) return;
     current.subject.props.onChange({ target: { value: choice.props.value } });
   }
-  return { props, changes, projection, choose };
+  return { props, changes, projection, choose,
+    matchesQuery: (query: string, ...fields: string[]) => (exports as unknown as { matchesExecutionSubjectQuery(query: string, ...fields: string[]): boolean }).matchesExecutionSubjectQuery(query, ...fields) };
 }
 
 test("structured subjects use the library radio group with real employee/team/CLI identities", () => {
@@ -124,7 +127,7 @@ test("structured subjects use the library radio group with real employee/team/CL
   assert.ok(radios.has("e1"));
   assert.equal(radios.has("e2"), false, "archived employees are not assignable");
   assert.ok(radios.has("t1")); assert.ok(radios.has("claude"));
-  assert.equal(subject.props["aria-label"], "执行主体");
+  assert.equal(subject.props["aria-label"], "执行对象");
   assert.equal(subject.props.value, "cli:claude");
   assert.equal(kind.props["aria-label"], "会话类型");
   h.choose("e1"); h.choose("t1");
@@ -188,4 +191,17 @@ test("选中的 Wand Agent 能原样反推成选项值，且不重复产生形�
   structured.choose("wand-agent");
   assert.deepEqual(structured.changes, ["cli:pi:sdk"], "已是结构化时不重复产生 kind 事件");
   assert.equal(structured.props.selectedSubject.engine, "sdk");
+});
+
+
+test("execution subject search matches grouped names, duties and tools without changing selection", () => {
+  const h = harness();
+  assert.equal(h.matchesQuery("设计 界面", "硅基员工", "设计师", "界面设计"), true);
+  assert.equal(h.matchesQuery("WAND agent", "执行工具", "Wand Agent", "进程内 SDK"), true);
+  assert.equal(h.matchesQuery("pi sdk", "执行工具", "Pi", "CLI JSON"), false);
+  assert.equal(h.matchesQuery("团队 研发", "AI 团队", "研发团队"), true);
+  assert.equal(h.matchesQuery("不存在", "设计师"), false);
+  assert.equal(h.matchesQuery("  ", "设计师"), true);
+  assert.equal(h.props.selectedSubject.id, "claude");
+  assert.deepEqual(h.changes, []);
 });
