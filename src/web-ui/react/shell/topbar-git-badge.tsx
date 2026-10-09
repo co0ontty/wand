@@ -30,7 +30,7 @@ export function TopbarGitBadge({ id = "topbar-git-badge", className }: TopbarGit
     <WandButton
       id={id}
       className={className}
-      kind="soft"
+      kind="ghost"
       size="small"
       title={title}
       aria-label="快捷提交"

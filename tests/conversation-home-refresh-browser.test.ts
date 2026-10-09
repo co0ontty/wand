@@ -8,10 +8,11 @@ import { build } from "esbuild";
 import express from "express";
 import { conversationHarness } from "./helpers/conversation-harness.js";
 import { openBrowser } from "./helpers/sidebar-ux-browser.mjs";
+import { installLayoutShiftObserver, runPageLayoutQa } from "./helpers/page-layout-qa.js";
 
 /** Source component + isolated real SQLite/API fixture; never installed-service acceptance. */
 test("home coalesces notifications with a trailing read and preserves task drafts across readonly project retry", {
-  skip: process.env.WAND_CONVERSATIONS_BROWSER !== "1", timeout: 120_000,
+  skip: process.env.WAND_CONVERSATIONS_BROWSER !== "1", timeout: 180_000,
 }, async t => {
   const root = resolve(import.meta.dirname, "..");
   const temp = mkdtempSync(join(tmpdir(), "wand-home-refresh-"));
@@ -34,11 +35,12 @@ test("home coalesces notifications with a trailing read and preserves task draft
     const composer=new ComposerStore({storage:()=>localStorage,isUnloading:()=>false,disposeAttachment:()=>{}});
     configureTeamChatComposerRuntime({read:id=>composer.read(id),edit:(id,c)=>composer.edit(id,c),subscribe:f=>composer.subscribe(f),submit:(id,text,f)=>composer.submit(id,text,f),transfer:(a,b,r)=>composer.transfer(a,b,r)});
     const initialDirectoryCase=new URLSearchParams(location.search).has('initial-directory');
-    if(!initialDirectoryCase)conversationUi.select(${JSON.stringify(id)});
+    const qualityCase=new URLSearchParams(location.search).has('quality-dm');
+    if(!initialDirectoryCase)conversationUi.select(qualityCase?'dm_e_wand_default':${JSON.stringify(id)});
     globalThis.homeFixture={state:()=>conversationUi.getSnapshot(),select:id=>conversationUi.select(id),openedSession:null,notify:()=>{for(let n=0;n<20;n++)notifyAiTeamRunChanged({runId:'fixture',taskId:'fixture'});}};
-    function App(){const[visible,setVisible]=React.useState(!initialDirectoryCase);return <><div style={{position:'fixed',bottom:0,left:0,zIndex:30000}}>
+    function App(){const[visible,setVisible]=React.useState(!initialDirectoryCase);return <>{!qualityCase&&<div style={{position:'fixed',bottom:0,left:0,zIndex:30000}}>
       <button id="fixture-directory" onClick={()=>{conversationUi.directory(true);setVisible(true);}}>目录测试入口</button>
-      <button id="fixture-visibility" onClick={()=>setVisible(v=>!v)}>可见性测试入口</button></div>
+      <button id="fixture-visibility" onClick={()=>setVisible(v=>!v)}>可见性测试入口</button></div>}
       <ConversationHome visible={visible} sidebarOpen={false} onOpenSession={id=>{globalThis.homeFixture.openedSession=id;}}/></>}
     createRoot(document.getElementById('root')).render(<PortalContainerProvider container={document.getElementById('portals')}><WandUiProvider><App/></WandUiProvider></PortalContainerProvider>);
   ` }, bundle: true, platform: "browser", format: "iife", jsx: "automatic", outfile: join(temp, "app.js"), logLevel: "warning", define: { "process.env.NODE_ENV": '"production"' } });
@@ -79,6 +81,7 @@ test("home coalesces notifications with a trailing read and preserves task draft
   const results: Record<string, unknown> = {};
   try {
     browser = await openBrowser("about:blank", 1280, 900);
+    if (process.env.WAND_CONVERSATION_LAYOUT_QA === "1") await installLayoutShiftObserver(browser.send);
     await browser.send("Page.navigate", { url: `http://127.0.0.1:${address.port}/?initial-directory` });
     await browser.wait("document.querySelector('.conversation-root')?.hidden===true", "hidden initial home with no receiver");
     for (let n = 0; n < 150 && !releaseEmployees.length; n++) await pause(40);
@@ -172,6 +175,23 @@ test("home coalesces notifications with a trailing read and preserves task draft
     assert.equal(writes, 0); assert.equal(h.sent.length, 0); assert.equal(h.executions.length, 0);
     assert.deepEqual(browser.errors, []);
     results.continuation = continuationViewports;
+    if (process.env.WAND_CONVERSATION_LAYOUT_QA === "1") {
+      const qualityCases = [320, 390, 639, 640, 768, 1024, 1440, 1920].map(width => ({ width, reducedMotion: false, condition: "long prior-work title and asynchronously loaded conversation", prepare: async () => {
+        await browser!.send("Page.navigate", { url: `http://127.0.0.1:${address.port}/?quality-dm` });
+        await browser!.wait("!!document.querySelector('.conversation-continue-work')", "quality conversation data ready");
+      } }));
+      const layoutQa = await runPageLayoutQa({ page: "conversation", artifact: join(root, "output/sidebar-refinement/layout-qa/chat"),
+        driver: { send: browser.send, evaluate: browser.evaluate, wait: browser.wait },
+        cases: [...qualityCases, { ...qualityCases[1], width: 1280, zoomEquivalent: true, safeArea: true, condition: "200% equivalent reflow and simulated safe area" }],
+        rootSelector: ".conversation-root", titleSelector: ".conversation-heading-title", secondarySelector: ".conversation-execution-summary",
+        buttonSelector: ".conversation-submit", limitations: ["Source components with isolated SQLite/HTTP; not installed-service acceptance", "Equivalent zoom and safe-area simulation; not actual browser zoom or physical device", "No screen reader or field CLS measurement"] });
+      results.layoutQa = layoutQa;
+      for (const record of layoutQa) {
+        assert.deepEqual(record.issues, [], `layout issues at ${record.width}px`);
+        assert.ok(record.evidence.performance.maxSessionWindowCls < 0.1, `CLS ${record.evidence.performance.maxSessionWindowCls} at ${record.width}px`);
+      }
+      assert.equal(writes, 0); assert.equal(h.sent.length, 0); assert.equal(h.executions.length, 0);
+    }
     writeFileSync(join(output, "result.json"), JSON.stringify({ passed: true, scope: "source components + isolated SQLite/HTTP + actual Chrome; not installed-service acceptance", ...results }, null, 2));
   } catch (cause) {
     writeFileSync(join(output, "result.json"), JSON.stringify({ passed: false, ...results, error: String(cause), pageErrors: browser?.errors }, null, 2));

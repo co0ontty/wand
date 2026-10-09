@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 import { build } from "esbuild";
 import express from "express";
+import { peopleContrastExpression } from "./helpers/people-layout-contrast.js";
 
 /** Production directory/editor, isolated HTTP fixture, actual Chrome pointer/keyboard events. */
 test("directory distinguishes resource failures, search misses, and unselected templates without clearing drafts", {
@@ -91,6 +92,7 @@ test("directory distinguishes resource failures, search misses, and unselected t
     };
     const type = async (selector: string, text: string): Promise<void> => { await click(selector); await send("Input.insertText", { text }); };
     const shot = async (name: string): Promise<void> => {
+      await pause(300);
       const image = await send("Page.captureScreenshot", { format: "png" }); writeFileSync(join(evidence, `${name}.png`), Buffer.from(image.data, "base64"));
     };
     const directoryFits = async (label: string): Promise<void> => {
@@ -104,7 +106,7 @@ test("directory distinguishes resource failures, search misses, and unselected t
       assert.deepEqual(clippedDetail, [], "expanded template details remain readable within their container");
     };
     await send("Page.enable"); await send("Runtime.enable");
-    for (const width of [1440, 390, 320]) {
+    for (const width of (process.env.WAND_PEOPLE_LAYOUT_QA === "1" ? [320,390,639,640,768,1440,1920] : [1440,390,320])) {
       fixture = { employeeFail: true, teamFail: true, empty: false };
       await send("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: false });
       await send("Page.navigate", { url: `${origin}/?width=${width}` });
@@ -172,6 +174,18 @@ test("directory distinguishes resource failures, search misses, and unselected t
       await shot(`${width}-draft-preserved`);
       for (const eventType of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type: eventType, key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
       await wait("document.querySelector('[aria-label=\"发起群聊\"]')!==null");
+      await click('.conversation-directory [data-stretch-value="employees"]');
+      // The directory includes archived employees; the group's active-only reload
+      // intentionally does not replace that separate repository snapshot.
+      if (await evaluate("!!document.querySelector('.conversation-directory .ant-alert')")) await click('.conversation-directory .ant-alert button');
+      await wait("!!document.querySelector('.conversation-contact-row')");
+      const density = await evaluate(`(()=>{const root=document.querySelector('.conversation-directory'),header=root.querySelector('.conversation-directory-header'),body=root.querySelector('.conversation-directory-body'),avatar=root.querySelector('.conversation-contact-row .wand-employee-avatar>.ant-avatar');return {avatarWidth:avatar.getBoundingClientRect().width,headerInset:parseFloat(getComputedStyle(header).paddingLeft),bodyInset:parseFloat(getComputedStyle(body).paddingLeft)};})()`);
+      assert.equal(density.avatarWidth, 32, "directory retains identity in compact 32px avatars");
+      assert.equal(density.headerInset, density.bodyInset, "directory header and content share the page inset");
+      const contrast = await evaluate(peopleContrastExpression([".conversation-directory-header h2", ".conversation-contact-name", ".conversation-contact-duty"]));
+      assert.equal(contrast.length,3,"directory title, identity and duty computed colors captured");
+      assert.ok(contrast.every((sample:any)=>sample.ratio>=4.5),"directory title and secondary text meet AA on actual solid backgrounds");
+      await shot(`${width}-contacts`);
       fixture = { employeeFail: false, teamFail: false, empty: true };
       await send("Page.navigate", { url: `${origin}/?empty=${width}` });
       await wait("document.body?.innerText.includes('还没有员工')");
@@ -179,7 +193,7 @@ test("directory distinguishes resource failures, search misses, and unselected t
       await wait("document.body.innerText.includes('还没有团队模板')");
       assert.equal(await evaluate("!!document.querySelector('.ant-alert')"), false);
       await shot(`${width}-empty`);
-      rows.push({ width, failureDistinct: true, queryPreserved: true, clearButtonNamed: true, draftPreserved: true, unselectedDistinct: true, ownedPopup: true, emptyDistinct: true, longTemplateFitsCollapsedAndExpanded: true });
+      rows.push({ width,density,contrast,failureDistinct: true, queryPreserved: true, clearButtonNamed: true, draftPreserved: true, unselectedDistinct: true, ownedPopup: true, emptyDistinct: true, longTemplateFitsCollapsedAndExpanded: true });
     }
     assert.equal(writes, 0, "read-only recovery does not submit work");
     assert.deepEqual(errors, [], "no browser exceptions");

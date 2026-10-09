@@ -1,4 +1,5 @@
 import { cssEvidenceCapture } from "./helpers/antd-css-evidence.js";
+import { installLayoutShiftObserver, runPageLayoutQa } from "./helpers/page-layout-qa.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { spawn } from "node:child_process";
@@ -18,6 +19,7 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
   let access = "admin", failSave = false, holdSave = false;
   let qrFail = true, qrRequests = 0;
   let releaseSave: (() => void) | undefined;
+  let qaLoadMode = "normal";
   const commands: Array<{path: string; value: any}> = [];
   let config: Record<string, any> = {
     host: "127.0.0.1", port: 3000, https: false, defaultMode: "default", defaultCwd: "/tmp",
@@ -31,7 +33,7 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
   };
   const models = { models: [{id:"default",label:"默认"},{id:"first",label:"首选模型"},{id:"second",label:"备用模型"}],
     codexModels:[{id:"codex-first",label:"Codex First"}], freeModels:[], piModels:[] };
-  const about = () => ({packageName:"wand-local", version:"4.83.1", nodeVersion:">=26", updateChannel:"stable",
+  const about = () => ({packageName:qaLoadMode === "long" ? "超长软件包名称 LongPackageIdentifier".repeat(20) : "wand-local", version:"4.83.1", nodeVersion:">=26", updateChannel:"stable",
     build:{}, androidApk:{enabled:true},macosDmg:{enabled:true},iosIpa:{enabled:true},
     config, desiredConfig:config, activeConfig:config, githubConnector:{connected:false},
     autoUpdate:{}, openRouter:{configured:false,modelCount:0,lastError:null}});
@@ -56,6 +58,8 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
     const path = new URL(request.url!, "http://localhost").pathname;
     if (path.startsWith("/api/")) {
       response.setHeader("content-type", "application/json");
+      if (path === "/api/settings" && qaLoadMode === "loading") { await new Promise<void>(resolve=>setTimeout(resolve,10_000)); }
+      if (path === "/api/settings" && qaLoadMode === "error") { response.statusCode=500;response.end(JSON.stringify({error:"Fixture settings load failed — 设置未修改"}));return; }
       if (path === "/api/settings" && access !== "admin") { response.statusCode=403; response.end(JSON.stringify({error:"管理权限不足"})); return; }
       let value: any = {};
       if (request.method === "POST") {
@@ -157,6 +161,34 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
       await send("Input.dispatchKeyEvent", { type: "keyUp", key, code: key });
     };
     await send("Page.enable"); await send("Runtime.enable");
+    if (process.env.WAND_PAGE_LAYOUT_QA === "1") {
+      await installLayoutShiftObserver(send);
+      const prepare=async(condition:string)=>{
+        qaLoadMode=condition;holdSave=false;
+        await evaluate("window.__wandFixtureBeforeNavigation=true");
+        await send("Page.navigate",{url:origin});
+        await wait("!window.__wandFixtureBeforeNavigation && !!document.querySelector('[data-testid=settings-page]')");
+        if(condition === "loading") {await wait("!!document.querySelector('[aria-label=正在加载设置]')");return;}
+        if(condition === "error") {await wait("document.body.innerText.includes('Fixture settings load failed')");return;}
+        await wait("!!document.querySelector('#settings-host')");
+        if(condition === "long") {await evaluate("settingsHarness.open('about')");await wait("document.body.innerText.includes('LongPackageIdentifier')");}
+        if(condition === "empty") {
+          if(await evaluate("!!document.querySelector('[aria-label=返回设置目录]')"))await click('[aria-label="返回设置目录"]');
+          await click('[aria-label="查找设置分组"]');await send("Input.insertText",{text:"不存在的设置 unmatched-no-result"});await wait("document.body.innerText.includes('没有匹配的设置分组')");
+        }
+        if(condition === "disabled") {holdSave=true;await clickText("保存基本配置");await wait("!!document.querySelector('.wand-settings-library-save-bar button:disabled')");}
+      };
+      const widths=[320,390,639,640,768,1024,1440,1920];
+      const cases=widths.flatMap(width=>["normal","long"].map(condition=>({width,condition,reducedMotion:false,prepare:()=>prepare(condition)})));
+      const extra=[320,1024].flatMap(width=>["loading","empty","error","disabled"].map(condition=>({width,condition,prepare:()=>prepare(condition)})));
+      const records=await runPageLayoutQa({page:"settings",artifact:join(root,"output/sidebar-refinement/order-pages-qa"),driver:{send,evaluate,wait},cases:[...cases,...extra,{width:390,condition:"safe-area",safeArea:true,prepare:()=>prepare("long")},{width:1280,condition:"zoom-200-equivalent",zoomEquivalent:true,prepare:()=>prepare("normal")}],rootSelector:".wand-settings-library-page",titleSelector:".wand-settings-library-page-heading h1",secondarySelector:".wand-settings-library-overview,.wand-settings-library-panel-heading p,.wand-settings-library-nav-description",buttonSelector:".wand-settings-library-save-bar button:not(:disabled) span,.wand-settings-library-access-page button span",disabledSelector:".wand-settings-library-save-bar button:disabled",limitations:["Safe-area tokens are emulated; the outer workspace shell is not mounted","API loading is intentionally delayed; no actual service configuration is written"]});
+      releaseSave?.();holdSave=false;
+      assert.deepEqual(browserErrors,[],"layout QA has no browser runtime exceptions");
+      assert.deepEqual(records.flatMap(r=>r.issues.map((issue:string)=>`${r.width}/${r.condition}: ${issue}`)),[],"checked geometry, contrast and accessible names");
+      assert.ok(records.every(r=>r.evidence.performance.maxSessionWindowCls<=0.1),"isolated settings initial-load CLS stays below 0.1");
+      console.log(`Settings layout QA: ${records.length} cases; ${records.filter(r=>r.issues.length).length} with findings`);
+      return;
+    }
     const tabs = ["我的资料","连接器","基本配置","AI 与模型","通知","显示","安全","命令预设","关于"];
     for (const mode of process.env.WAND_SETTINGS_TEST_MODES?.split(",") ?? ["desktop","mobile","native","rollback","reduced-motion"]) {
       access="admin"; failSave=false;

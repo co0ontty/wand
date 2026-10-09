@@ -37,5 +37,5 @@ export function ComposerSender({ input, resize, projection }: { input: HTMLTextA
   React.useSyncExternalStore(projection.subscribe, projection.revision, () => 0);
   return <InputContext.Provider value={{ input, resize, projection }}><Sender value={projection.text()}
     placeholder={input.placeholder} components={components} suffix={false} autoSize={false} onKeyDown={() => false}
-    styles={{ root: { border: 0, boxShadow: "none", borderRadius: 0 }, content: { padding: 0 } }}/></InputContext.Provider>;
+    styles={{ root: { border: 0, boxShadow: "none", borderRadius: 0, background: "transparent" }, content: { padding: 0 } }}/></InputContext.Provider>;
 }

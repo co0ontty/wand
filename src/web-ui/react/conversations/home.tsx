@@ -89,6 +89,9 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
   const pendingDetail = React.useRef<{ id: string; promise: Promise<void>; dirty: boolean } | null>(null);
   const projectsEpoch = React.useRef(0);
   const selected = detail?.id === id ? detail : null;
+  // The service defines DM identities as dm_<employee id>; reserve the known
+  // direct-work context while its detail arrives, without projecting fake data.
+  const directContextPending = !selected && id.startsWith("dm_e_") && !loadError;
   const target = ui.targets[id] ?? null;
   const filter = ui.filters[id] ?? "";
   const draftKey = conversationDraftKey(id, target);
@@ -305,13 +308,13 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
       <Flex ref={membersAnchor} align="center" justify="space-between" gap={8} className="conversation-heading" style={{ position: "relative", flexShrink: 0 }}>
         <Flex align="center" gap={8} style={{ minWidth: 0 }}>
           {onOpenSidebar ? <WandIconButton style={{ width: 44, height: 44 }} aria-label={sidebarOpen ? "关闭列表" : "打开列表"} onClick={onOpenSidebar}><SidebarToggleIcon open={sidebarOpen}/></WandIconButton> : null}
-          {employee ? <WandIconButton className="conversation-avatar-button" aria-label={`查看${employee.name}的资料`} onClick={event => employeeProfile.open(employee, event.currentTarget)}><EmployeeAvatar employee={employee} size="md"/></WandIconButton> : selected?.team ? <WandIconButton className="conversation-avatar-button" aria-label="查看群资料" aria-expanded={members} aria-controls="conversation-members-panel" onClick={event => toggleMembers(event.currentTarget)}><ConversationGroupAvatar title={selected.title} size={32}/></WandIconButton> : null}
+          {employee ? <WandIconButton className="conversation-avatar-button" aria-label={`查看${employee.name}的资料`} onClick={event => employeeProfile.open(employee, event.currentTarget)}><EmployeeAvatar employee={employee} size="md"/></WandIconButton> : selected?.team ? <WandIconButton className="conversation-avatar-button" aria-label="查看群资料" aria-expanded={members} aria-controls="conversation-members-panel" onClick={event => toggleMembers(event.currentTarget)}><ConversationGroupAvatar title={selected.title} size={32}/></WandIconButton> : id && !selected ? <span className="conversation-avatar-placeholder" aria-hidden="true"/> : null}
           <div className="conversation-heading-copy">
             <WandButton kind="ghost" className="conversation-heading-title" title={selected?.title ?? employee?.name} aria-expanded={selected?.kind === "group" ? members : undefined} aria-controls={selected?.kind === "group" ? "conversation-members-panel" : undefined} onClick={event => employee ? employeeProfile.open(employee, event.currentTarget) : toggleMembers(event.currentTarget)}>{selected?.title ?? employee?.name ?? "选择一位员工，开始聊天"}</WandButton>
             <Typography.Text type="secondary" className="conversation-heading-context">{selected?.kind === "group" ? `群聊 · 我 + ${selected.team?.members.length ?? 0} 位员工` : employee ? `私聊${employee.id === DEFAULT_EMPLOYEE_ID ? " · 默认伙伴" : ""}` : "选择接收对象后发送"}</Typography.Text>
           </div>
         </Flex>
-        {selected?.kind === "group" ? <WandButton aria-expanded={members} aria-controls="conversation-members-panel" onClick={event => toggleMembers(event.currentTarget)}>成员</WandButton> : null}
+        {selected?.kind === "group" ? <WandButton kind="ghost" aria-expanded={members} aria-controls="conversation-members-panel" onClick={event => toggleMembers(event.currentTarget)}>成员</WandButton> : null}
         <ConversationPanel open={members} owner="conversation-members-panel" anchorRef={membersAnchor} triggerRef={membersTrigger} onClose={() => { setMembers(false); setInvite(false); }}>
           <Typography.Text strong>当前群成员：我 + {selected?.team?.members.length ?? 0} 位员工</Typography.Text>
           {selected?.sourceTemplateId ? <Typography.Paragraph type="secondary">来自团队模板 · {selected.team?.name}</Typography.Paragraph> : null}
@@ -378,10 +381,10 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
       </Flex> : null}
       <div className="conversation-composer" hidden={!!selected?.dissolvedAt}>
         <Flex align="center" justify="space-between" gap={8}><Typography.Text className="conversation-receiver" title={receiver}>{receiver}</Typography.Text>{layer === "task" ? <WandButton size="small" onClick={() => setLayer("closed")}>取消派发</WandButton> : null}</Flex>
-        {selected?.kind === "dm" && layer !== "task" ? <div className="conversation-work-choice">
+        {directContextPending && layer !== "task" ? <div className="conversation-work-choice-pending" role="status">正在读取执行配置…</div> : selected?.kind === "dm" && layer !== "task" ? <div className="conversation-work-choice">
           <Typography.Text type="secondary" className="conversation-input-hint">每次发送创建独立工作；补充旧工作请进入对应会话。</Typography.Text>
           {previousWork ? <WandButton size="small" kind="ghost" className="conversation-continue-work" aria-label={`继续工作：${previousWork.title}`} title={`打开会话：${previousWork.title}；当前新工作草稿会保留`} onClick={() => onOpenSession(previousWork.sessionId)}>继续上一项 · {previousWork.title}</WandButton> : null}
-          <Typography.Text className="conversation-execution-summary" title="这是员工的首选执行配置；实际执行工具可按其候选顺序降级。目录沿用全局默认或本页临时目录。">{directWorkPreference(employee?.agents[0])} · {chatCwd ? "使用临时目录" : "沿用默认目录"}</Typography.Text>
+          <Typography.Text type="secondary" className="conversation-execution-summary" title="这是员工的首选执行配置；实际执行工具可按其候选顺序降级。目录沿用全局默认或本页临时目录。">{directWorkPreference(employee?.agents[0])} · {chatCwd ? "使用临时目录" : "沿用默认目录"}</Typography.Text>
         </div> : null}
         {chatCwd && layer !== "task" && !target ? <Typography.Text type="secondary" className="conversation-cwd-summary">临时目录：{chatCwd} · 本页聊天共用</Typography.Text> : null}
         <div className="conversation-feedback" hidden={!feedback && !selected?.unavailableReason && !unknown && !draft.recovery && activeRun?.run.status !== "awaiting_approval" && !(feedbackAction === "approve" && phase !== "idle") && !(id && !draft.text && !draft.attachments.length && teamChatComposer.read(conversationDraftKey("", null)).text)} role="status" aria-live="polite"><Typography.Text type={phase === "failed" || phase === "unknown" || selected?.unavailableReason ? "danger" : "secondary"}>

@@ -1,6 +1,8 @@
 /** Library visuals are installed by Ant Design/X. Only portal, safe-area,
  * layout and accessibility adaptations belong here. */
 export const foundationStyles = String.raw`
+:root { --wand-page-inset:20px; --wand-page-title-size:18px; --wand-page-toolbar-height:36px; --wand-page-header-height:56px; }
+@media (max-width:639px) { :root { --wand-page-inset:12px; } }
 #overlay-root { isolation: isolate; position: fixed; inset: 0; z-index: 20000; pointer-events: none; }
 .wand-ui-mount { display: contents; }
 .wand-ui-portals { position: fixed; inset: 0; pointer-events: none; }

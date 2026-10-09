@@ -33,8 +33,8 @@ test("git commit, branch, and merge glyphs stay visually distinct", () => {
 test("WandIcon stamps a data-icon matching the semantic name", () => {
   const html = renderToStaticMarkup(createElement(WandIcon, { name: "gear", size: 16 }));
   assert.match(html, /data-icon="gear"/);
-  assert.match(html, /<circle cx="12" cy="12" r="6"/);
-  assert.match(html, /<circle cx="12" cy="12" r="2\.5"/);
+  assert.match(html, /<circle cx="12" cy="12" r="3"/);
+  assert.doesNotMatch(html, /M12 3v3M12 18v3/);
   assert.doesNotMatch(html, /M12\.22 2h-\.44/);
 });
 

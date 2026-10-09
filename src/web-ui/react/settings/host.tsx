@@ -8,7 +8,7 @@ import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import * as React from "react";
 import { useSyncExternalStore } from "react";
 import { wandOverlay } from "../overlay-controller";
-import { WandBadge, WandButton, WandIcon } from "../ui";
+import { WandBadge, WandButton, WandIcon, WandIconButton } from "../ui";
 import { hasOpenPopupSurface } from "../ui/popup-lifecycle";
 import { settingsController, settingsStore } from "./controller";
 import { SettingsDirectory, SETTINGS_SECTIONS } from "./navigation";
@@ -26,6 +26,9 @@ import {
 } from "./tabs";
 import { SettingsActionButton, SettingsField, SettingsStatus, SettingsTextInput } from "./fields";
 import type { SettingsRepository, SettingsSnapshot, SettingsTab } from "./types";
+
+// Install feature geometry before its first render, as the task-page owner does.
+if (typeof document !== "undefined") installSettingsLibraryStyles();
 
 export interface SettingsHostProps {
   repository?: SettingsRepository;
@@ -166,7 +169,6 @@ export function SettingsHost({
   showRestart = () => {},
   presentation = "workspace",
 }: SettingsHostProps) {
-  useEffect(() => { installSettingsLibraryStyles(); }, []);
   const pageRef = useRef<HTMLElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
   const directoryRef = useRef<HTMLElement>(null);
@@ -316,22 +318,27 @@ export function SettingsHost({
     hidden={!isOpen} inert={!isOpen} aria-labelledby="settings-page-title">
     <header className="wand-settings-library-page-heading">
       <div className="wand-settings-library-page-title">
-        {compact && controller.detail ? <WandButton kind="ghost" aria-label="返回设置目录" onClick={() => settingsStore.showDirectory()}>
-          <WandIcon name="back" size={18}/><span>设置</span>
-        </WandButton> : presentation === "workspace" ? <WandButton kind="ghost" aria-label="返回工作台" onClick={() => settingsController.close()}>
-          <WandIcon name="back" size={18}/><span>返回</span>
-        </WandButton> : null}
+        {compact && controller.detail ? <WandIconButton aria-label="返回设置目录" title="返回设置目录" onClick={() => settingsStore.showDirectory()}>
+          <WandIcon name="chevronLeft" size={18}/>
+        </WandIconButton> : presentation === "workspace" ? <WandIconButton aria-label="返回工作台" title="返回工作台" onClick={() => settingsController.close()}>
+          <WandIcon name="chevronLeft" size={18}/>
+        </WandIconButton> : null}
         <h1 id="settings-page-title" ref={titleRef} tabIndex={-1}>{title}</h1>
       </div>
-      {snapshot ? <SettingsOverview snapshot={snapshot} clientAuth={clientAuth}/> : null}
+      {snapshot ? <SettingsOverview snapshot={snapshot} clientAuth={clientAuth}/>
+        : <section className="wand-settings-library-overview" aria-label="设置加载状态">
+          <span>{loading ? "正在加载设置…" : "连接信息暂不可用"}</span>
+        </section>}
     </header>
     {loadError && snapshot ? <div className="wand-settings-library-refresh-error">
       <SettingsStatus tone="error"><span>刷新设置失败，当前内容已保留。{loadError}</span>
         <WandButton size="small" disabled={loading} aria-busy={loading} onClick={() => void refresh()}>重新加载</WandButton>
       </SettingsStatus>
     </div> : null}
-    {loginRequired && !clientAuth ? <div className="wand-settings-library-access-page"><ConnectedAppAccess repository={repository} signedOut allowEmptyPassword
-      onAuthenticated={onAuthenticated}/></div> : snapshot && contentByTab ? <div className="wand-settings-library-page-content">
+    {loginRequired && !clientAuth ? <div className="wand-settings-library-page-content">
+      <div className="wand-settings-library-access-page"><ConnectedAppAccess repository={repository} signedOut allowEmptyPassword
+        onAuthenticated={onAuthenticated}/></div>
+    </div> : snapshot && contentByTab ? <div className="wand-settings-library-page-content">
       <nav ref={directoryRef} className="wand-settings-library-directory" aria-label="设置目录" hidden={!directoryVisible}>
         <SettingsDirectory available={available} selected={selectedTab} query={query} onQuery={setQuery} onSelect={select}/>
         {snapshot.access === "read-only" && !loginRequired && !clientAuth ? <Collapse className="wand-settings-library-access"
@@ -345,9 +352,22 @@ export function SettingsHost({
           <div className="wand-settings-library-detail-content">{contentByTab[tab]}</div>
         </div>)}
       </div>
-    </div> : loading ? <div className="wand-settings-library-access-page"><SettingsLoading/></div> : loadError ? <div
-      className="wand-settings-library-access-page" role="alert"><p>{loadError}</p>
-      <WandButton kind="primary" onClick={() => void load()}>重试加载设置</WandButton>
+    </div> : loading ? <div className="wand-settings-library-page-content" aria-busy="true">
+      <nav className="wand-settings-library-directory" aria-label="设置目录" hidden={!directoryVisible}>
+        <SettingsLoading/>
+      </nav>
+      <div className="wand-settings-library-details" hidden={compact && !controller.detail}>
+        <div className="wand-settings-library-detail-scroll"><div className="wand-settings-library-detail-content">
+          <SettingsLoading/>
+        </div></div>
+      </div>
+    </div> : loadError ? <div className="wand-settings-library-page-content">
+      <nav className="wand-settings-library-directory" aria-hidden="true" hidden={!directoryVisible}/>
+      <div className="wand-settings-library-details"><div className="wand-settings-library-detail-scroll">
+        <div className="wand-settings-library-detail-content" role="alert"><p>{loadError}</p>
+          <WandButton kind="primary" onClick={() => void load()}>重试加载设置</WandButton>
+        </div>
+      </div></div>
     </div> : null}
   </Tag></WandUiProvider>;
 }

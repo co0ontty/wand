@@ -163,6 +163,12 @@ export function CandidatesListEditor({
   React.useLayoutEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+    // Collapse force-renders its editor while closed. Hidden coordinates are not
+    // a reorder origin: replaying them on disclosure sends fields above the card.
+    if (container.closest("[inert], [hidden]") || container.getBoundingClientRect().height === 0) {
+      prevPositions.current.clear();
+      return;
+    }
 
     const children = Array.from(container.children).filter(
       (node): node is HTMLElement => node instanceof HTMLElement && node.hasAttribute("data-candidate-id"),

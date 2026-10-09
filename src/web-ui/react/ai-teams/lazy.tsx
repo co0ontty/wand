@@ -273,7 +273,7 @@ export function ConversationMessages(props: ConversationMessagesProps): React.Re
   const { chunk, error, retry } = useAiTeamsChunk(props.active !== false);
   if (chunk) return <chunk.ConversationMessages {...props}/>;
   if (props.active === false) return <></>;
-  return <div role="status">{error || "正在读取消息组件…"}{error ? <WandButton onClick={retry}>重试</WandButton> : null}</div>;
+  return <div className="conversation-messages-loading" role="status" style={{ minHeight: 144, display: "flex", alignItems: "center" }}>{error || "正在读取消息组件…"}{error ? <WandButton onClick={retry}>重试</WandButton> : null}</div>;
 }
 
 /** 群聊页：侧栏点群聊条目进入，脚本到位前显示占位，失败可重试。 */

@@ -2,20 +2,37 @@ import { installStyleSheet } from "./styles";
 
 export function installChatComposerStyles(): void {
   installStyleSheet("wand-chat-composer-layout", String.raw`
-.conversation-heading { min-height:56px; padding-block:6px; }
-.conversation-heading-title { font-size:14px; }
-.conversation-heading > .ant-btn { min-height:32px; }
+.composer-surface,
+.conversation-root .conversation-sender.ant-sender {
+  min-width:0; border:0; border-block-start:1px solid var(--border-subtle);
+  border-radius:0; background:transparent; box-shadow:none; padding-block-start:10px;
+}
+.composer-surface:has(textarea:focus),
+.conversation-root .conversation-sender.ant-sender:has(textarea:focus) {
+  border-block-start-color:var(--accent);
+}
+.composer-surface:has(textarea:focus)::before,
+.conversation-root .conversation-sender.ant-sender:has(textarea:focus)::before {
+  content:""; position:absolute; inset-block-start:0; inset-inline:0; height:2px;
+  background:var(--accent); pointer-events:none;
+}
+.composer-surface { position:relative; }
+.composer-surface .ant-sender { background:transparent; }
+.conversation-root .conversation-sender .ant-sender-content { padding:0; background:transparent; }
+.conversation-root .conversation-sender .ant-sender-input { padding:0; font:inherit; line-height:1.5; caret-color:var(--accent); }
+.conversation-root .conversation-sender .ant-sender-footer { padding:6px 0 0; background:transparent; }
+.conversation-root .conversation-sender .ant-sender-suffix { background:transparent; }
+.conversation-root .conversation-sender.ant-sender:focus-within { box-shadow:none; }
 .conversation-root .conversation-composer-control.ant-btn { width:32px; height:32px; min-width:32px; flex:none; padding:0; }
 .conversation-root .conversation-submit.ant-btn { border-radius:var(--control-radius); }
 .conversation-root .conversation-action-row { min-height:36px; height:auto; gap:8px; }
-.conversation-root .conversation-sender .ant-sender-footer { padding:0 10px 8px; }
 .conversation-root .conversation-input-hint { line-height:18px; }
 .conversation-root .conversation-work-choice { display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; margin-block:2px 4px; }
 .conversation-work-choice .ant-btn { height:24px; padding:0 6px; font-size:12px; }
 .conversation-work-choice .conversation-continue-work { min-width:0; max-width:100%; overflow:hidden; }
 .conversation-continue-work > span { min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
-.conversation-root .conversation-execution-summary { font-size:11px; line-height:18px; color:var(--text-secondary); overflow-wrap:anywhere; }
-.conversation-root .conversation-cwd-summary { font-size:11px; line-height:18px; }
+.conversation-root .conversation-execution-summary { font-size:12px; line-height:20px; color:var(--text-secondary); overflow-wrap:anywhere; }
+.conversation-root .conversation-cwd-summary { font-size:12px; line-height:20px; }
 .conversation-action-menu { display:flex; flex-direction:column; align-items:stretch; gap:8px; }
 .conversation-action-menu[hidden] { display:none; }
 .conversation-action-menu .ant-typography { font-size:12px; line-height:1.5; margin:0; }

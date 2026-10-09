@@ -14,7 +14,7 @@ const SECONDARY_TEXT_COLOR = "#6b5e54";
 
 export const wandTheme: ThemeConfig = {
   token: {
-    colorPrimary: "#b8562f", colorInfo: "#b8562f", colorSuccess: "#4f7a58",
+    colorPrimary: "#b8562f", colorPrimaryBorder: "#b8562f", lineWidthFocus: 2, controlOutline: "#b8562f", controlOutlineWidth: 2, colorInfo: "#b8562f", colorSuccess: "#4f7a58",
     // Keep native danger text, light surfaces and solid white labels readable.
     colorError: "#b7342e", colorErrorHover: "#9f2a25", colorErrorActive: "#87201d",
     colorErrorBg: "#fff1ee", colorErrorBgHover: "#ffe9e4",
@@ -48,7 +48,7 @@ export function installWandThemeTokens(target: Document = document): void {
     "bg-hover": token.colorFillTertiary, "bg-active": token.colorFillSecondary,
     "border-subtle": token.colorBorderSecondary, "border-default": token.colorBorder,
     "border-strong": token.colorTextTertiary, "border": token.colorBorder,
-    "border-focus": token.colorPrimaryBorder,
+    "border-focus": token.colorPrimary,
     "text-primary": token.colorText, "text-secondary": token.colorTextSecondary,
     "text-tertiary": token.colorTextTertiary, "text-muted": token.colorTextSecondary,
     "text-inverse": token.colorTextLightSolid, "text-link": token.colorLink,
