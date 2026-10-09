@@ -158,7 +158,7 @@ test("task arrow, rail and peek share the projection through Ant layout and cont
   assert.match(panel, /onClick=\{\(\) => setDisplayMode\("full"\)\}/);
   assert.match(panel, /nativeEvent.isComposing/);
   assert.match(shell, /<Layout.Sider/);
-  assert.match(shell, /width="min\(376px, calc\(100vw - 24px\)\)" collapsedWidth=\{128\}/);
+  assert.match(shell, /width="min\(344px, calc\(100vw - 24px\)\)" collapsedWidth=\{112\}/);
   const peek = source("src/web-ui/react/shell/sidebar-peek.tsx");
   assert.match(peek, /<Card size="small"/);
   assert.match(peek, /width: "min\(320px, calc\(100vw - 144px\)\)"/);

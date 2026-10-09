@@ -593,7 +593,7 @@ export function ShellSidebar() {
   const teamAttention = useAiTeamAttentionCount();
   const profile = useUserProfile();
   const profileName = profile.name || DEFAULT_USER_DISPLAY_NAME;
-  const profileFace = avatarFaceParts({ id: "user", name: profileName, avatar: profile.avatar }, 32);
+  const profileFace = avatarFaceParts({ id: "user", name: profileName, avatar: profile.avatar }, 28);
   const [moreOpen, setMoreOpen] = React.useState(false);
   const presentation = useSidebarPresentation();
   const { query: searchQuery, setQuery: setSearchQuery } = presentation;
@@ -718,7 +718,7 @@ export function ShellSidebar() {
         onClick={() => void dispatch({ type: "layout.drawer.close" })}
       />
       <Layout.Sider id="sessions-drawer" ref={drawerRef as React.RefObject<HTMLDivElement | null>} className={sidebarClass}
-        width="min(376px, calc(100vw - 24px))" collapsedWidth={128} collapsed={narrow} theme="light"
+        width="min(344px, calc(100vw - 24px))" collapsedWidth={112} collapsed={narrow} theme="light"
         style={{ position: overlay ? "fixed" : "relative", top: overlay ? "var(--wand-safe-top, 0px)" : undefined, bottom: overlay ? "var(--wand-safe-bottom, 0px)" : undefined, left: 0, display: visible ? undefined : "none", zIndex: overlay ? 20000 : 2, height: "100%", overflow: "visible" }}
         styles={{ body: { display: "flex", flexDirection: "row", height: "100%", minHeight: 0 } }}
         aria-label="主导航与会话列表" role={overlay ? "dialog" : undefined}
@@ -840,11 +840,11 @@ export function ShellSidebar() {
           <WandIconButton kind={settings.open ? "soft" : "ghost"} aria-current={settings.open ? "page" : undefined}
             id="settings-button" className="sidebar-profile-button" title={`${profileName} · 设置`} aria-label="设置"
             onClick={() => { setAttentionOpen(false); navigate({ type: "settings.open" }); }}>
-            <Avatar size={32} src={profileFace.src} style={profileFace.style} icon={profileFace.icon}/>
+            <Avatar size={28} src={profileFace.src} style={profileFace.style} icon={profileFace.icon}/>
           </WandIconButton>
         </Flex>
         <Flex vertical className="sidebar-list-panel">
-          <Flex vertical gap="small" className="sidebar-header" style={{ padding: narrow ? "12px 8px" : "12px 16px", flexShrink: 0 }}>
+          <Flex vertical gap="small" className="sidebar-header" style={{ padding: narrow ? "8px 4px" : "10px 12px", flexShrink: 0 }}>
             <Flex vertical={narrow} align="center" justify="space-between" gap="small" className="sidebar-header-primary">
               <Flex align="center" gap="small" className="sidebar-header-main">
                 <Typography.Text strong className="sidebar-title" hidden={narrow} style={{ whiteSpace: "nowrap" }}>{conversationState.mode === "tasks" ? "工作区" : "对话"}</Typography.Text>
@@ -877,7 +877,7 @@ export function ShellSidebar() {
               </Flex>
             </Flex>
           </Flex>
-          <Flex hidden={conversationState.mode !== "tasks"} vertical className="sidebar-feature-nav" style={{ padding: narrow ? "0 8px 8px" : "0 16px 12px", flexShrink: 0 }}>
+          <Flex hidden={conversationState.mode !== "tasks"} vertical className="sidebar-feature-nav" style={{ padding: narrow ? "0 4px 8px" : "0 12px 8px", flexShrink: 0 }}>
             <WandButton id="drawer-new-session-button" className="sidebar-new-task" kind="primary" title={primaryAction.label}
               aria-label={primaryAction.ariaLabel} onClick={() => navigate(primaryAction.action)}>
               <WandIcon name="plus" size={18}/><span hidden={narrow}>{primaryAction.label}</span>
