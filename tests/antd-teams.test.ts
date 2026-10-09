@@ -74,7 +74,7 @@ test("team chat messages render through the shared X bubble surface", () => {
   assert.match(html, /chat-notice/, "系统提示行仍是居中 notice");
   // 超过阈值的正文只渲染预览，展开入口是整条发言的弹层。
   const source = owned("ai-teams/team-chat-view.tsx");
-  assert.match(source, /<Bubble\s+className=\{shape === "document" \? "team-chat-doc" : "team-chat-bubble"\}/);
+  assert.match(source, /<ChatMessage\s+className=\{shape === "document" \? "team-chat-doc" : "team-chat-bubble"\}/);
   assert.match(source, /data-shape=\{shape\}/);
   assert.match(source, /footer=\{truncated && onExpand \? <WandButton/);
 });

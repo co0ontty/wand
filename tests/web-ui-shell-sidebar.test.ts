@@ -368,13 +368,15 @@ test("sidebar temporary tools preserve the page while navigation leaves it", () 
   }
 });
 
-test("ShellSidebar keeps creation above the directory task tree and settings in the footer", () => {
+test("ShellSidebar keeps creation above the directory task tree and profile settings at the rail bottom", () => {
   const html = renderSidebar(fixture());
   const createIndex = html.indexOf('id="drawer-new-session-button"');
   const treeIndex = html.indexOf('class="workspaces-panel"');
   assert.ok(createIndex > 0 && createIndex < treeIndex);
   assert.ok(html.indexOf("sidebar-feature-nav") < createIndex);
-  assert.ok(html.indexOf('id="settings-button"') > html.indexOf('sidebar-footer'));
+  assert.ok(html.indexOf('id="settings-button"') < html.indexOf('sidebar-list-panel'));
+  assert.match(html, /sidebar-profile-button/);
+  assert.match(html, /sidebar-navigation-rail/);
   assert.equal(html.match(/id="drawer-new-session-button"/g)?.length, 1);
   assert.doesNotMatch(html, /aria-label="新建项目"/);
   assert.doesNotMatch(html, /aria-label="独立任务"/);
@@ -393,7 +395,7 @@ test("ShellSidebar keeps secondary tools in the closed overflow menu", () => {
   const html = renderSidebar(fixture());
   assert.match(html, /class="sidebar-brand-mark"/);
   assert.match(html, /id="task-board-button"/);
-  assert.match(html, />任务看板<\/span>/);
+  assert.match(html, /aria-label="任务看板"/);
   assert.match(html, /id="sidebar-more-btn"/);
   for (const id of ["missions-button", "github-issues-button", "logout-button"]) {
     assert.doesNotMatch(html, new RegExp(`id="${id}"`));

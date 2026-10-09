@@ -44,7 +44,7 @@ export function SidebarPeek({
       id="sidebar-peek"
       ref={surfaceRef}
       className={classNames("sidebar-peek", open && "open")}
-      style={{ position: "absolute", top, left: "100%", marginLeft: 8, width: "min(320px, calc(100vw - 88px))", maxHeight: `calc(100dvh - ${top + 12}px)`, zIndex: 20020, visibility: open ? "visible" : "hidden", pointerEvents: open ? undefined : "none", overflow: "hidden" }}
+      style={{ position: "absolute", top, left: "100%", marginLeft: 8, width: "min(320px, calc(100vw - 144px))", maxHeight: `calc(100dvh - ${top + 12}px)`, zIndex: 20020, visibility: open ? "visible" : "hidden", pointerEvents: open ? undefined : "none", overflow: "hidden" }}
       styles={{ body: { display: "flex", flexDirection: "column", minHeight: 0, maxHeight: `calc(100dvh - ${top + 40}px)` } }}
       data-open={open || undefined}
       aria-label={title}

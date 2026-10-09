@@ -854,7 +854,8 @@ test("sidebar directory tree indents every level without extra re-renders", () =
   // The /api/tasks poll hands back fresh objects every few seconds; folding must
   // be memoized by content or 40-session directories re-render on a timer.
   const panel = sourceText("src/web-ui/react/workspaces/workspaces-panel.tsx");
-  assert.match(panel, /const groups = sourceGroups/);
+  assert.match(panel, /const groups = React\.useMemo\(/);
+  assert.match(panel, /\[sourceGroups, sessionTitleGenerating\]/);
   assert.doesNotMatch(panel, /createUnnamedTaskFlattener/);
   assert.match(panel, /useTaskGroups\(refreshTick\)/);
   const directoryStore = sourceText("src/web-ui/react/workspaces/task-groups-store.ts");
@@ -977,7 +978,7 @@ test("工作区与最近会话互斥展示，不重复堆叠同一批会话", ()
     "utf8",
   );
   // 归属分组只有一个真源（sidebar-recent.ts），面板只做过滤与转发。
-  assert.match(panel, /collectRecentEntries\(sourceGroups\)/);
+  assert.match(panel, /collectRecentEntries\(groups\)/);
   assert.match(panel, /<SidebarRecentSection\b[\s\S]*?entries=\{visibleRecentEntries\}/);
   assert.match(panel, /filterRecentEntries\(recentEntries, \{[\s\S]*?activeOnly: displayMode === "active",/);
   // 同一列表位置切换组织方式；按目录为默认，不把折叠行为冒充数据筛选。

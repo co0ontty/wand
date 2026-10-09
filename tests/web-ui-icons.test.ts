@@ -48,7 +48,7 @@ test("icon geometry remains explicit inside Appica buttons and navigation", () =
   assert.notEqual(board, clipboard);
 });
 
-test("sidebar navigation maps settings and task board to distinct glyphs", () => {
+test("sidebar navigation uses the personal avatar for settings and distinct destination glyphs", () => {
   const selected: UiSessionVm = {
     id: "session-1",
     source: "wand",
@@ -112,7 +112,8 @@ test("sidebar navigation maps settings and task board to distinct glyphs", () =>
     // Appica's NavigationLink marks the icon slot with `data-icon="start"` (that is
     // what its `has-data-[icon=start]` padding reads), so the semantic glyph name
     // lives on `data-wand-icon`.
-    assert.match(html, /id="settings-button"[^>]*>[\s\S]*?data-wand-icon="gear"/);
+    assert.match(html, /id="settings-button"[^>]*class="[^"]*sidebar-profile-button/);
+    assert.match(html, /sidebar-profile-button[^>]*>[\s\S]*?ant-avatar/);
     assert.match(html, /id="task-board-button"[^>]*>[\s\S]*?data-wand-icon="board"/);
     assert.match(html, /id="file-panel-toggle-btn"[^>]*>[\s\S]*?data-wand-icon="explorer"/);
     assert.doesNotMatch(html, /data-icon="inbox"/);

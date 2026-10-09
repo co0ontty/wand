@@ -56,9 +56,11 @@ const lazy = getAiTeamsChunk();
 // budget into these files. The optional team chunk has its own limit.
 const BUDGET = {
   html: 4_096,
-  // 未分组 Tab 的迟到焦点与 worktree 归属修正：939988→940055 B（+67 B）。
-  // 仅主包上限增加 96 B；保留下面的首屏总预算与全部资源计数。
-  js: 940_096,
+  // 工作区新建会话增加任务选择、名称和失败重试绑定：约增加 1 KB gzip（0.1%）。
+  // 主包预留这一功能的 1472 B；首屏总预算、按需包与全部资源计数保持。
+  // 顶部组件更新入口、确认中断与失败反馈：本轮实测主包 941931 B。
+  // 增加 1472 B（0.16%）额度；首屏总预算、按需包与缓存契约保持。
+  js: 943_040,
   css: 110_000,
   firstLoad: 1_140_000,
   // The team chunk now also contains employee management and candidate editors.

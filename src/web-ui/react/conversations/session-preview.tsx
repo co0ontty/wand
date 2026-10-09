@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Bubble } from "@ant-design/x";
+import { ChatMessage } from "../chat/message";
 import { Flex, Typography, theme } from "antd";
 import type { ConversationTurn } from "../../../types.js";
 import type { ConversationSessionUpdate } from "../../../conversation-types.js";
@@ -48,7 +48,7 @@ export function ConversationSessionReply({ turn, active, onOpen, children }: {
     if (readerStayed && distanceToTail <= CONVERSATION_TAIL_PX) element.scrollTop = element.scrollHeight;
     geometry.current = { scrollHeight: element.scrollHeight, clientHeight: element.clientHeight, scrollTop: element.scrollTop };
   }, [text]);
-  return <Bubble className="conversation-session-reply" data-session-id={sessionId} placement="start" variant="filled"
+  return <ChatMessage className="conversation-session-reply" data-session-id={sessionId} surface="preview"
     // IM 层的回复是「装着这条会话转录的气泡」：宽度按聊天气泡收口（不铺满整页），
     // 内容按转录自然增长，只有超过上限才在气泡内部滚动。
     styles={{ root: { width: "min(100%, 620px)", minWidth: 0, flexShrink: 0 }, body: { width: "100%" },

@@ -1,6 +1,7 @@
+import { ChatMessage } from "../chat/message";
 import * as React from "react";
 import { Alert, Avatar, Button, Card, Collapse, Flex, List, Tag, Tooltip, Typography } from "antd";
-import { Bubble, FileCard, Sender, Think } from "@ant-design/x";
+import { FileCard, Sender, Think } from "@ant-design/x";
 import type { AgentActivityState } from "../../../mission-types";
 import { AI_TEAM_DETAIL_CHAT_TURNS, type AiTeamLiveStep, type AiTeamRun,
   type AiTeamRunDetail, type AiTeamStep, type AiTeam } from "../../../ai-team-types";
@@ -731,21 +732,17 @@ function MessageBody({
   const body = parsed.paths.length && parsed.body.trim() === "请查看附件。" ? "" : parsed.body;
   const truncated = needsCollapse(body);
   const list = assignments ?? [];
-  return <Bubble
+  return <ChatMessage
     className={shape === "document" ? "team-chat-doc" : "team-chat-bubble"}
     data-shape={shape}
-    placement={side}
-    variant={shape === "document" ? "outlined" : "filled"}
+    own={side === "end"}
+    surface={shape === "document" ? "document" : "message"}
     content={<>
       <ChatAttachments paths={parsed.paths}/>
       {body.trim()
         ? truncated
           ? <p className="team-chat-preview"><MentionText text={collapsedPreview(body)} names={names} source={body}/></p>
-          : shape === "document"
-            // 长正文（文档卡）走 Markdown：与 Android 的 `document -> MarkdownText` 同口径，
-            // 报告里的清单/代码块不再当作原文铺开；气泡是短发言，仍照原文铺文本。
-            ? <div className="team-chat-doc-text"><ChatMessageBody text={body} names={names}/></div>
-            : <pre className="team-chat-bubble-text"><MentionText text={body} names={names}/></pre>
+          : <div className="team-chat-doc-text"><ChatMessageBody text={body} names={names}/></div>
         : list.length === 0 && parsed.paths.length === 0
           ? <p className="team-chat-preview team-chat-msg-empty">{CHAT_EMPTY_BODY}</p>
           : null}
@@ -1568,7 +1565,7 @@ export function ConversationMessages({ turns, taskLabels, group = true, ready = 
               {turn.author?.sessionId && onOpenSession ? <WandButton kind="ghost" className="chat-author-link" title={`${name} · 查看本轮执行窗口${signature ? ` · ${signature}` : ""}`}
                 onClick={() => onOpenSession(turn.author!.sessionId!)}>{name}</WandButton> : <span>{name}</span>}
             </div> : null}
-            <Bubble placement={self ? "end" : "start"} content={<>
+            <ChatMessage own={self} content={<>
               {!group && !self && turn.author?.sessionId && onOpenSession ? <WandButton kind="ghost" className="conversation-execution" title={signature || undefined}
                 onClick={() => onOpenSession(turn.author!.sessionId!)}>查看本轮执行窗口</WandButton> : null}
               {target ? <Tag>{taskLabels[target.taskId] ?? target.taskId}</Tag> : null}

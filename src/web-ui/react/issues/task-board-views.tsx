@@ -717,9 +717,11 @@ export function TaskBoardGantt({
           <Typography.Text strong style={{ alignSelf: "center", paddingInline: 8 }}>任务</Typography.Text>
           <div>
             <div className="task-board-gantt-months" style={{ display: "grid", gridTemplateColumns: timelineColumns }}>
-              {months.map((month) => <Typography.Text strong key={month.key}
-                style={{ gridColumn: `${month.start + 1} / span ${month.days}`, borderLeft: "1px solid var(--border-subtle)", padding: "4px 8px", whiteSpace: "nowrap" }}>
-                {month.key.slice(0, 4)}年{Number(month.key.slice(5))}月
+              {months.map((month) => <Typography.Text strong key={month.key} ellipsis
+                title={`${month.key.slice(0, 4)}年${Number(month.key.slice(5))}月`}
+                aria-label={`${month.key.slice(0, 4)}年${Number(month.key.slice(5))}月`}
+                style={{ gridColumn: `${month.start + 1} / span ${month.days}`, minWidth: 0, borderLeft: "1px solid var(--border-subtle)", padding: "4px", whiteSpace: "nowrap" }}>
+                {month.days < 4 ? `${Number(month.key.slice(5))}月` : `${month.key.slice(0, 4)}年${Number(month.key.slice(5))}月`}
               </Typography.Text>)}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: timelineColumns, textAlign: "center" }}>

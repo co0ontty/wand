@@ -210,7 +210,10 @@ function TaskSessionItem({
             ? <TeamChatSessionMark teamChat={session.teamChat}/>
             : <SessionProviderMark session={session} size={14}/>}</Badge>
         </span>
-        <span style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} className="workspace-session-name">{label}</span>
+        <span style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} className={classNames("workspace-session-name", session.titleGenerating && "title-generating")}
+          aria-busy={session.titleGenerating || undefined}
+          aria-label={session.titleGenerating ? `${label}，AI 正在生成标题` : undefined}
+          title={session.titleGenerating ? "AI 正在生成标题" : undefined}>{label}</span>
         {session.teamStep ? (
           <span
             className="workspace-session-kind workspace-session-kind-team"
@@ -1127,6 +1130,7 @@ export function CompactDirectoryRail({
 function SidebarWorkspacesPanel({
   selectedSessionId = null,
   sessionTitles = null,
+  sessionTitleGenerating = null,
   extraGroups = null,
   compact = false,
   directoryId,
@@ -1141,6 +1145,8 @@ function SidebarWorkspacesPanel({
   selectedSessionId?: string | null;
   /** 实时会话标题（WS 已生成的命令摘要），覆盖轮询列表里的旧 title。 */
   sessionTitles?: Readonly<Record<string, string>> | null;
+  /** WS 的生成状态同时覆盖目录树和最近会话，不等待列表轮询。 */
+  sessionTitleGenerating?: Readonly<Record<string, boolean>> | null;
   /** 侧栏附加分组（原生历史 / 自动化等），渲染在任务列表之后。 */
   extraGroups?: React.ReactNode;
   /** 窄栏模式下保留项目 → 任务的紧凑目录层级。 */
@@ -1190,7 +1196,22 @@ function SidebarWorkspacesPanel({
 
   const { groups: sourceGroups, loading, error, reload } = useTaskGroups(refreshTick);
   // Every task is a visible container, including empty and legacy unnamed tasks.
-  const groups = sourceGroups;
+  const groups = React.useMemo(() => {
+    if (!sessionTitleGenerating) return sourceGroups;
+    const project = (session: WorkspaceSessionSummary): WorkspaceSessionSummary => (
+      session.id in sessionTitleGenerating
+        ? { ...session, titleGenerating: sessionTitleGenerating[session.id] }
+        : session
+    );
+    return sourceGroups.map((group) => ({ ...group,
+      standaloneSessions: group.standaloneSessions.map(project),
+      archivedSessions: group.archivedSessions?.map(project),
+      tasks: group.tasks.map((task) => ({ ...task,
+        sessions: task.sessions.map(project),
+        archivedSessions: task.archivedSessions?.map(project),
+      })),
+    }));
+  }, [sourceGroups, sessionTitleGenerating]);
   // 报错只由侧栏主树上报（窄栏 rail 自己显示「!」，悬浮预览树不接管头部徽标）。
   const reportsHeaderError = !compact && directoryId === undefined;
   React.useEffect(() => {
@@ -1370,7 +1391,7 @@ function SidebarWorkspacesPanel({
   const { employees } = contacts;
   // 最近对话：目录树里的全部会话拍平后按归属分组（口径见 sidebar-recent.ts），
   // 搜索与「在跑」档在同一个入口过滤，再用同一份结果渲染。
-  const recentEntries = React.useMemo(() => collectRecentEntries(sourceGroups), [sourceGroups]);
+  const recentEntries = React.useMemo(() => collectRecentEntries(groups), [groups]);
   const visibleRecentEntries = React.useMemo(() => filterRecentEntries(recentEntries, {
     query: searchQuery,
     employees,
@@ -1656,7 +1677,7 @@ function SidebarWorkspacesPanel({
                       const group = groups.find((candidate) => candidate.tasks.some((item) => item.id === task.id));
                       newSessionController.open({
                         initialCwd: task.cwd || group?.workspaceCwd,
-                        workspaceId: group?.workspaceId,
+                        workspaceId: task.workspaceId,
                         workspaceTaskId: task.id,
                         taskName: task.name,
                       });

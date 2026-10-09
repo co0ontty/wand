@@ -61,18 +61,21 @@ test("the task welcome glyph is a visible Ant Result icon", () => {
   assert.match(mark, /width: 24, height: 24/);
 });
 
-test("web sidebar uses a create row, two destinations, and a marked session tree", () => {
+test("web sidebar uses a persistent icon rail, profile settings and a separate session tree", () => {
   const sidebar = readFileSync(new URL("../src/web-ui/react/shell/shell-sidebar.tsx", import.meta.url), "utf8");
+  const navigation = readFileSync(new URL("../src/web-ui/react/conversations/sidebar.tsx", import.meta.url), "utf8");
   const tree = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
-  assert.match(sidebar, /<Flex hidden=\{conversationState\.mode !== "tasks"\} component="nav" vertical gap="small" className="sidebar-feature-nav"/);
-  assert.ok(sidebar.indexOf('id="drawer-new-session-button"') < sidebar.indexOf('id="task-board-button"'));
-  assert.match(sidebar, /<Flex vertical=\{narrow\} gap="small">/);
-  assert.match(sidebar, /id="task-board-button"/);
-  assert.match(sidebar, /id="ai-teams-button"/);
-  assert.match(sidebar, /<Badge count=\{teamAttention\}/);
+  assert.match(sidebar, /sidebar-navigation-rail/);
+  assert.match(sidebar, /sidebar-profile-button/);
+  assert.match(sidebar, /<HomeAttentionBadge compact/);
+  assert.match(sidebar, /<DaemonUpdateNotice compact/);
+  assert.ok(sidebar.indexOf("<ConversationNavigation") < sidebar.indexOf("sidebar-list-panel"));
+  assert.ok(sidebar.indexOf('id="drawer-new-session-button"') < sidebar.indexOf('className="sidebar-body"'));
+  assert.match(navigation, /component="nav" vertical/);
+  for (const label of ["对话", "工作区", "任务看板", "团队", "通讯录"]) assert.ok(navigation.includes(`label: "${label}"`));
+  assert.match(navigation, /<Badge count=\{teamAttention\}/);
   assert.match(tree, /paddingInlineStart: 8.*className="workspace-tasks"/);
   assert.match(tree, /<Badge dot=\{glow !== "none"\}/);
-  assert.match(sidebar, /<span hidden=\{narrow\}>任务看板<\/span>/);
 });
 
 test("row actions preserve title width and keyboard access", () => {

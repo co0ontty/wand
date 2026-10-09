@@ -19,6 +19,7 @@ test("sidebar hierarchy, menu ownership, navigation and responsive geometry", {
   const source = `import * as React from "react";
 import { createRoot } from "react-dom/client";
 import { ShellSidebar } from "./src/web-ui/react/shell/shell-sidebar";
+import { ShellTopbar } from "./src/web-ui/react/shell/shell-topbar";
 import { MemoryUiAdapter } from "./src/web-ui/react/shell/ui-store";
 import { UiStoreProvider } from "./src/web-ui/react/shell/ui-store-react";
 import { WandUiProvider } from "./src/web-ui/react/theme";
@@ -33,7 +34,7 @@ installReactUiStyles();
 const mobile = innerWidth < 600;
 let snapshot = {auth:{phase:"authenticated"},viewport:{mobile,online:true,embedTerminal:false,nativeInput:false},capabilities:{backToNative:false,switchServer:false},
 layout:{sessionsDrawerOpen:true,sidebarPinned:true,sidebarCollapsed:false,sidebarDrawer:mobile,sidebarAnchored:!mobile,sessionsBackdropVisible:mobile,filePanelOpen:false,filePanelBackdropVisible:false,topbarMoreOpen:false,currentView:"chat"},
-selected:{id:"s1",workspaceId:"w1",workspaceTaskId:"t1"},sidebar:{groups:[],interactiveCount:4,totalCount:4,manageMode:false,selectedCount:0},
+selected:{id:"s1",source:"wand",provider:"pi",kind:"structured",workspaceId:"w1",workspaceTaskId:"t1"},sidebar:{groups:[],interactiveCount:4,totalCount:4,manageMode:false,selectedCount:0},
 topbar:{title:"",description:"",statusLabel:"",statusTone:"idle",cwd:"/work/atlas",currentTask:"",titleGenerating:false,git:null},legacyVisibility:{terminal:false,chat:true,blank:false,composer:true}};
 const memory = new MemoryUiAdapter(snapshot);
 const update = (layout)=>{snapshot={...snapshot,layout:{...snapshot.layout,...layout}};memory.setSnapshot(snapshot,{sync:true});};
@@ -44,7 +45,7 @@ configureNewSessionRuntime({onOpen(){},onClose(){}});
 function DialogHost(){const state=React.useSyncExternalStore(overlayStore.subscribe,overlayStore.getSnapshot,overlayStore.getSnapshot);const dialog=state.activeDialog;
   return dialog?<WandDialog key={dialog.id} open title={dialog.options.title} description={dialog.options.description} tone={dialog.options.tone} icon={dialog.options.icon} actions={dialog.options.actions} input={dialog.options.input} dismissable={dialog.options.dismissable} onAction={(action,inputValue)=>overlayStore.completeDialog(dialog.id,{dismissed:false,action,inputValue})} onDismiss={()=>overlayStore.completeDialog(dialog.id,{dismissed:true})}/>:null;}
 conversationUi.mode("tasks");
-createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvider store={store}><ShellSidebar/><DialogHost/></UiStoreProvider></WandUiProvider>);`;
+createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvider store={store}><ShellSidebar/><div style={{flex:1,minWidth:0}}><ShellTopbar/></div><DialogHost/></UiStoreProvider></WandUiProvider>);`;
   await build({ stdin: { contents: source, resolveDir: root, loader: "tsx" }, bundle: true, format: "iife", platform: "browser", jsx: "automatic", outfile: join(temp, "app.js"), define: { "process.env.NODE_ENV": '"production"' } });
   const session = (id: string, title: string, extra = {}) => ({ id, title, provider: "pi", kind: "structured", cwd: "/work/atlas", status: "idle", startedAt: "2026-10-07T08:00:00Z", ...extra });
   const task = (id: string, name: string, sessions: unknown[]) => ({ id, name, workspaceId: "w1", cwd: "/work/atlas", sessions, status: "active", createdAt: "2026-10-07T08:00:00Z" });
@@ -83,7 +84,7 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
         : url.pathname === "/api/ai-team-runs" ? { runs: [] }
         : url.pathname === "/api/conversations" ? { conversations }
         : url.pathname === "/api/ai-teams" ? []
-        : url.pathname === "/api/config" ? {} : {};
+        : url.pathname === "/api/config" ? { userProfile: { name: "测试用户", avatar: "cat:2" } } : {};
       res.end(JSON.stringify(payload)); return;
     }
     if (url.pathname === "/app.js") { res.setHeader("content-type", "text/javascript"); res.end(readFileSync(join(temp, "app.js"))); return; }
@@ -107,6 +108,32 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
         await browser.wait('!!document.querySelector(".workspace-session")');
         if (mode === "native") await browser.evaluate('document.documentElement.classList.add("is-wand-app"); true');
         await browser.settle();
+        // Title generation follows WS state in both chrome and task rows, with no layout shift.
+        await browser.evaluate(`(()=>{const s=fixture.memory.getSnapshot();fixture.memory.setSnapshot({...s,
+          topbar:{...s.topbar,title:"侧边栏布局与交互检查",titleGenerating:true},
+          sidebar:{...s.sidebar,groups:[{kind:"wand",label:"Wand 会话",expanded:true,entries:[{id:"s1",source:"wand",title:"侧边栏布局与交互检查",titleGenerating:true}]}]}
+        },{sync:true});return true})()`);
+        await browser.wait(`!!document.querySelector('.workspace-session[data-session-id="s1"] .title-generating')`);
+        const titleRect = await browser.evaluate('document.querySelector(".topbar-session-title").getBoundingClientRect().toJSON()');
+        const motion = await browser.evaluate(`(()=>{const n=document.querySelector('.workspace-session[data-session-id="s1"] .title-generating');return {busy:n.getAttribute('aria-busy'),label:n.getAttribute('aria-label'),animation:getComputedStyle(n,'::after').animationName,overflow:document.documentElement.scrollWidth>innerWidth}})()`);
+        assert.equal(motion.busy, "true"); assert.match(motion.label, /AI 正在生成标题/);
+        assert.equal(motion.animation, mode === "reduced" ? "none" : "session-title-generate");
+        assert.equal(motion.overflow, false);
+        if (process.env.WAND_TITLE_MOTION_ONLY === "1") {
+          await browser.click('.sidebar-view-switch [data-stretch-value=recent]');
+          await browser.wait(`!!document.querySelector('.sidebar-recent [data-session-id="s1"] .title-generating')`);
+          assert.equal(await browser.evaluate(`document.querySelector('.sidebar-recent [data-session-id="s1"] .title-generating').getAttribute('aria-busy')`), "true");
+          await browser.click('.sidebar-view-switch [data-stretch-value=directory]');
+        }
+        await browser.evaluate(`(()=>{const s=fixture.memory.getSnapshot();fixture.memory.setSnapshot({...s,topbar:{...s.topbar,titleGenerating:false},sidebar:{...s.sidebar,groups:s.sidebar.groups.map(g=>({...g,entries:g.entries.map(e=>({...e,titleGenerating:false}))}))}},{sync:true});return true})()`);
+        await browser.wait('!document.querySelector(".title-generating")');
+        const completedRect = await browser.evaluate('document.querySelector(".topbar-session-title").getBoundingClientRect().toJSON()');
+        assert.equal(completedRect.width, titleRect.width); assert.equal(completedRect.height, titleRect.height);
+        if (process.env.WAND_TITLE_MOTION_ONLY === "1") {
+          await browser.screenshot(join(artifacts, `title-motion-${mode}.png`));
+          reports.push({ mode, motion, noLayoutShift: true, stopsOnCompletion: true });
+          continue;
+        }
         const visible = `(n)=>!!n && n.getClientRects().length>0 && !n.closest('[inert],[hidden],[aria-hidden="true"]') && getComputedStyle(n).visibility!=="hidden"`;
         // 关闭后的 Modal 容器会留在 DOM 里，选择器必须只认当前可见的那一个。
         const VISIBLE_DIALOG = "[...document.querySelectorAll('[data-wand-dialog-surface]')].find(n=>n.getClientRects().length>0)??null";
@@ -133,7 +160,7 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
           await browser.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x, y: point.y, button: "left", clickCount: 1 });
           await browser.settle();
         };
-        const headerGeometry = `(()=>{const rect=s=>document.querySelector(s).getBoundingClientRect().toJSON();return {nav:rect('.conversation-navigation'),more:rect('#sidebar-more-btn'),footer:rect('.sidebar-footer'),width:rect('#sessions-drawer').width}})()`;
+        const headerGeometry = `(()=>{const rect=s=>document.querySelector(s).getBoundingClientRect().toJSON();return {nav:rect('.conversation-navigation'),more:rect('#sidebar-more-btn'),footer:rect('#settings-button'),width:rect('#sessions-drawer').width}})()`;
         const workspaceHeader = await browser.evaluate(headerGeometry);
         await browser.click('.conversation-navigation [data-stretch-value="chats"]');
         await browser.wait('fixture.conversation.getSnapshot().mode === "chats"');
@@ -143,7 +170,26 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
         assert.equal(chatHeader.more.y, workspaceHeader.more.y, `${mode}: header buttons do not jump`);
         assert.equal(chatHeader.more.height, 44, `${mode}: header actions have touch-sized targets`);
         assert.ok(chatHeader.footer.height <= 64, `${mode}: footer does not consume a second row`);
-        assert.equal(chatHeader.width, Math.min(320, width - 24));
+        assert.equal(chatHeader.width, Math.min(376, width - 24));
+        const rail = await browser.evaluate(`(()=>{const rail=document.querySelector('.sidebar-navigation-rail'),r=rail.getBoundingClientRect(),avatar=document.querySelector('#settings-button').getBoundingClientRect();return {width:r.width,avatarBottom:avatar.bottom,railBottom:r.bottom,buttons:[...rail.querySelectorAll('.conversation-navigation button')].map(n=>({label:n.getAttribute('aria-label'),x:n.getBoundingClientRect().x,size:n.getBoundingClientRect().width})),profile:document.querySelector('#settings-button').title}})()`);
+        assert.equal(rail.width, 56);
+        assert.ok(rail.railBottom - rail.avatarBottom <= 9, `${mode}: profile stays at the bottom`);
+        assert.equal(new Set(rail.buttons.map(b => b.x)).size, 1, `${mode}: destinations form a vertical rail`);
+        assert.ok(rail.buttons.every(b => b.size === 44));
+        assert.equal(rail.profile, "测试用户 · 设置");
+        assert.deepEqual(rail.buttons.map(b => b.label), ["对话", "工作区", "任务看板", "团队", "通讯录"]);
+        await browser.click('.sidebar-notification-button');
+        await browser.wait('!!document.querySelector("#sidebar-notifications .wand-attention-item")', "notifications open from rail");
+        await browser.click('#sidebar-notifications strong');
+        assert.equal(await browser.evaluate('document.querySelector(".sidebar-notification-button").getAttribute("aria-expanded")'), "true", "clicking notification content leaves it open");
+        await browser.key("Escape");
+        await browser.wait('!document.querySelector("#sidebar-notifications")');
+        assert.equal(await browser.evaluate('document.activeElement===document.querySelector(".sidebar-notification-button")'), true, await browser.evaluate('document.activeElement.outerHTML.slice(0,500)'));
+        assert.equal(await browser.evaluate('fixture.memory.getSnapshot().layout.sessionsDrawerOpen'), true, "notification Escape preserves the drawer");
+        await browser.click('.sidebar-notification-button');
+        await browser.wait('!!document.querySelector("#sidebar-notifications")');
+        await browser.click('.sidebar-title');
+        await browser.wait('!document.querySelector("#sidebar-notifications")', "outside click closes notifications");
         // The chat list uses the very same native menu and keyboard/confirmation protocol.
         await browser.wait('!!document.querySelector(".conversation-row")');
         await browser.click('.conversation-row', "right");

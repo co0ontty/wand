@@ -54,6 +54,8 @@ export interface NewSessionForm {
   specifiedCli?: boolean;
   workspaceId?: string;
   workspaceTaskId?: string;
+  /** Defined (including empty text) when creating a named task before its first session. */
+  taskName?: string;
 }
 
 export interface NewSessionPreferencePatch {

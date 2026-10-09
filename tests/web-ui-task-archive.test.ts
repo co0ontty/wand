@@ -95,7 +95,9 @@ test("board cards archive by dragging into the archive zone and restore by dragg
   assert.match(host, /onRestore=\{\(\) => \{/);
   assert.match(host, /<Card size="small"[\s\S]*?borderColor: archiveDrop \? "var\(--accent\)"/);
   assert.match(host, /<Alert className="task-board-archive-hint" type=\{archiveDrop \? "info" : "warning"\}/);
-  assert.doesNotMatch(styles, /\.task-board-archive-zone/);
+  // Scrolling and flex placement belong to the host; Card/Alert retain the surface visuals.
+  assert.match(styles, /\.task-board-archive-zone\s*\{[^}]*flex-shrink:0/);
+  assert.doesNotMatch(styles, /\.task-board-archive-zone\s*\{[^}]*\b(background|border|box-shadow):/);
 });
 
 test("archived sessions leave the normal sidebar list and stay restorable in their own fold", async () => {

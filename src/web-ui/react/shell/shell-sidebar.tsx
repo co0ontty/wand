@@ -1,4 +1,4 @@
-import { Badge, Checkbox, Flex, Layout, Tag, Typography } from "antd";
+import { Avatar, Checkbox, Flex, Layout, Tag, Typography } from "antd";
 import { WandUiBoundary } from "../theme";
 import { ImSidebarGroup } from "./im-sidebar-group";
 import { WandBrandMark } from "../ui/brand-mark";
@@ -14,6 +14,9 @@ import { conversationUi, useConversationUi } from "../conversations/state";
 import { ConversationNavigation, ConversationSidebarList, ConversationSidebarTools } from "../conversations/sidebar";
 import { SidebarPresentationContext, useSidebarPresentation } from "../workspaces/sidebar-display-mode";
 import { sidebarSafeError } from "../workspaces/sidebar-safe-error";
+import { useUserProfile } from "../user-profile-repository";
+import { avatarFaceParts } from "../ai-teams/avatar";
+import { DEFAULT_USER_DISPLAY_NAME } from "../../../user-profile.js";
 import { SidebarToggleIcon } from "./sidebar-toggle-icon";
 import { DaemonUpdateNotice } from "./daemon-update-notice";
 import {
@@ -36,7 +39,7 @@ import {
 } from "../workspaces/sidebar-list-error";
 
 import { taskBoardController, taskBoardStore } from "../issues/task-board-controller";
-import { HomeAttentionBadge, HomeAttentionPanel } from "../attention/home-attention";
+import { HomeAttentionBadge } from "../attention/home-attention";
 import { useAiTeamAttentionCount } from "../ai-teams/repository";
 import { SidebarPeek } from "./sidebar-peek";
 import { useHoverPointer, useSidebarPeek } from "./use-sidebar-peek";
@@ -348,6 +351,7 @@ function SessionEntry({
                   entry.titleGenerating && "title-generating",
                 )}
                 aria-busy={entry.titleGenerating || undefined}
+                aria-label={entry.titleGenerating ? `${entry.title}，AI 正在生成标题` : undefined}
                 style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
               >
                 {entry.title}
@@ -434,7 +438,7 @@ const SIDEBAR_ERROR_LABELS: Readonly<Record<SidebarListErrorKind, string>> = {
 };
 
 /**
- * 任务列表的加载 / 同步报错不占列表位置，收成品牌区右侧这一枚内容自适应徽标：
+ * 任务列表的加载 / 同步报错在导航栏显示重试图标：
  * 完整原因留在 tooltip，点击就地重试，成功后徽标自行消失。
  */
 function SidebarListErrorBadge() {
@@ -459,8 +463,7 @@ function SidebarListErrorBadge() {
         void error.retry().finally(() => setRetrying(false));
       }}
     >
-      <WandIcon name="refresh" size={11} className="sidebar-list-error-icon"/>
-      <span className="sidebar-list-error-label">{label}</span>
+      <WandIcon name="refresh" size={18} className="sidebar-list-error-icon"/>
     </WandButton>
   );
 }
@@ -588,6 +591,9 @@ export function ShellSidebar() {
   const taskBoard = React.useSyncExternalStore(taskBoardStore.subscribe, taskBoardStore.getSnapshot, taskBoardStore.getSnapshot);
   const settings = React.useSyncExternalStore(settingsStore.subscribe, settingsStore.getSnapshot, settingsStore.getSnapshot);
   const teamAttention = useAiTeamAttentionCount();
+  const profile = useUserProfile();
+  const profileName = profile.name || DEFAULT_USER_DISPLAY_NAME;
+  const profileFace = avatarFaceParts({ id: "user", name: profileName, avatar: profile.avatar }, 32);
   const [moreOpen, setMoreOpen] = React.useState(false);
   const presentation = useSidebarPresentation();
   const { query: searchQuery, setQuery: setSearchQuery } = presentation;
@@ -658,10 +664,10 @@ export function ShellSidebar() {
   React.useEffect(() => {
     setMoreOpen(false);
   }, [visible, narrow, conversationState.mode, conversationState.directory]);
-  // 窄栏放不下清单，收成窄条时一并收起，展开窄栏不会停在半开状态。
+  // 收起抽屉时同步关闭通知浮层；压缩列表不影响导航入口。
   React.useEffect(() => {
-    if (narrow || !visible) setAttentionOpen(false);
-  }, [narrow, visible]);
+    if (!visible) setAttentionOpen(false);
+  }, [visible]);
   const extraGroups = snapshot.sidebar.groups
     .filter((group) => group.kind === "history")
     .map((group) => ({
@@ -695,6 +701,9 @@ export function ShellSidebar() {
       sessionTitles={Object.fromEntries(snapshot.sidebar.groups.flatMap((group) => (
         group.entries.map((entry) => [entry.id, entry.title] as const)
       )))}
+      sessionTitleGenerating={Object.fromEntries(snapshot.sidebar.groups.flatMap((group) => (
+        group.entries.map((entry) => [entry.id, entry.titleGenerating] as const)
+      )))}
       extraGroups={extraGroups}
     />
   );
@@ -709,213 +718,215 @@ export function ShellSidebar() {
         onClick={() => void dispatch({ type: "layout.drawer.close" })}
       />
       <Layout.Sider id="sessions-drawer" ref={drawerRef as React.RefObject<HTMLDivElement | null>} className={sidebarClass}
-        width="min(320px, calc(100vw - 24px))" collapsedWidth={72} collapsed={narrow} theme="light"
+        width="min(376px, calc(100vw - 24px))" collapsedWidth={128} collapsed={narrow} theme="light"
         style={{ position: overlay ? "fixed" : "relative", top: overlay ? "var(--wand-safe-top, 0px)" : undefined, bottom: overlay ? "var(--wand-safe-bottom, 0px)" : undefined, left: 0, display: visible ? undefined : "none", zIndex: overlay ? 20000 : 2, height: "100%", overflow: "visible" }}
-        styles={{ body: { display: "flex", flexDirection: "column", height: "100%", minHeight: 0 } }}
+        styles={{ body: { display: "flex", flexDirection: "row", height: "100%", minHeight: 0 } }}
         aria-label="主导航与会话列表" role={overlay ? "dialog" : undefined}
         aria-modal={overlay || undefined} aria-hidden={!visible || undefined}
         inert={!visible} tabIndex={-1} {...peek.triggerBindings}>
-        <Flex vertical gap="small" className="sidebar-header" style={{ padding: narrow ? "12px 8px" : "12px 16px", flexShrink: 0 }}>
-          <Flex vertical={narrow} align="center" justify="space-between" gap="small" className="sidebar-header-primary">
-            <Flex align="center" gap="small" className="sidebar-header-main">
-              <WandBrandMark className="sidebar-brand-mark" style={{ width: 24, height: 24 }} />
-              <Typography.Text strong className="sidebar-title" hidden={narrow} style={{ whiteSpace: "nowrap" }}>Wand</Typography.Text>
+        <Flex vertical align="center" className="sidebar-navigation-rail">
+          <div className="sidebar-rail-scroll">
+            <WandBrandMark className="sidebar-brand-mark" style={{ width: 24, height: 24 }} />
+            <ConversationNavigation activePage={settings.open ? null : taskBoard.open ? taskBoard.page === "board" ? "board" : "teams"
+              : conversationState.directory ? "contacts" : conversationState.mode} teamAttention={teamAttention}
+              onNavigate={(page) => {
+                setAttentionOpen(false);
+                settingsController.close();
+                peek.close();
+                if (page === "board" || page === "teams") {
+                  taskBoardController.open(snapshot.selected?.workspaceId ?? "", snapshot.selected?.id ?? "", page === "teams" ? "teams" : "board");
+                } else {
+                  taskBoardController.close();
+                  if (page === "contacts") conversationUi.directory(true);
+                  else {
+                    conversationUi.mode(page);
+                    if (page === "chats") conversationUi.show();
+                    else conversationUi.suspend();
+                  }
+                }
+                if (page !== "chats" && page !== "tasks") dismissSidebarSurfaces();
+              }}/>
+            <Flex vertical align="center" gap={4} className="sidebar-rail-notices">
+              <HomeAttentionBadge compact open={attentionOpen} onToggle={() => setAttentionOpen(value => !value)} />
+              <SidebarListErrorBadge />
+              <DaemonUpdateNotice compact visible={visible} />
             </Flex>
-            <Flex align="center" gap={4} vertical={narrow} className="sidebar-header-actions">
-              <div hidden={conversationState.mode !== "chats"}><ConversationSidebarTools enabled={visible && conversationState.mode === "chats"}
-                onCreateSession={() => navigate(primaryAction.action)}
-                onNavigate={() => { taskBoardController.close(); dismissSidebarSurfaces(); }}/></div>
-              <div className="sidebar-header-more">
-                <WandDropdownMenu
-                  open={moreOpen}
-                  onOpenChange={setMoreOpen}
-                  modal={false}
-                >
-                  <WandDropdownMenuTrigger
-                    render={(
-                      <WandIconButton
-                        id="sidebar-more-btn"
-                        className="sidebar-more-trigger"
-                        kind="ghost"
-                        size="medium"
-                        title="更多操作"
-                        aria-label="侧栏更多操作"
-                      >
-                        <WandIcon name="more" size={18}/>
-                      </WandIconButton>
-                    )}
-                  />
-                  <WandDropdownMenuContent
-                    id="sidebar-overflow-menu"
-                    className="sidebar-tools-menu"
-                    aria-label="侧栏更多操作"
-                    align="end"
-                    sideOffset={6}
-                  >
-                    <WandDropdownMenuItem
-                      id="missions-button"
-                      icon="zap"
-                      onClick={() => {
-                        setMoreOpen(false);
-                        navigate({ type: "missions.open" });
-                      }}
+            <div className="sidebar-header-more">
+              <WandDropdownMenu
+                open={moreOpen}
+                onOpenChange={setMoreOpen}
+                modal={false}
+              >
+                <WandDropdownMenuTrigger
+                  render={(
+                    <WandIconButton
+                      id="sidebar-more-btn"
+                      className="sidebar-more-trigger"
+                      kind="ghost"
+                      size="medium"
+                      title="更多操作"
+                      aria-label="侧栏更多操作"
                     >
-                      并行任务
-                    </WandDropdownMenuItem>
-                    <WandDropdownMenuItem
-                      id="github-issues-button"
-                      icon="git"
-                      onClick={() => {
-                        setMoreOpen(false);
-                        peek.close();
-                        if (overlay) void dispatch({ type: "layout.drawer.close" });
-                        window.__wandReactGithubIssues?.open(snapshot.selected?.id ?? "");
-                      }}
-                    >
-                      GitHub 议题
-                    </WandDropdownMenuItem>
-                    <WandDropdownMenuSeparator/>
-                    <WandDropdownMenuItem
-                      id="sidebar-home-btn"
-                      icon="home"
-                      onClick={() => {
-                        setMoreOpen(false);
-                        navigate({ type: "nav.home" });
-                      }}
-                    >
-                      返回对话
-                    </WandDropdownMenuItem>
-                    <WandDropdownMenuItem
-                      id="sidebar-refresh-btn"
-                      icon="refresh"
-                      onClick={() => {
-                        setMoreOpen(false);
-                        void dispatch({ type: "nav.refresh" });
-                      }}
-                    >
-                      刷新页面
-                    </WandDropdownMenuItem>
-                    <WandDropdownMenuSeparator/>
-                    <WandDropdownMenuItem
-                      id="logout-button"
-                      icon="logout"
-                      tone="danger"
-                      onClick={() => {
-                        setMoreOpen(false);
-                        void confirmSidebarLogout(() => navigate({ type: "auth.logout" }));
-                      }}
-                    >
-                      退出登录
-                    </WandDropdownMenuItem>
-                  </WandDropdownMenuContent>
-                </WandDropdownMenu>
-              </div>
-              {!snapshot.layout.sidebarDrawer && (
-                <SidebarCompactToggle
-                  active={narrow}
-                  onToggle={() => {
-                    peek.close();
-                    void dispatch({ type: "layout.drawer.collapse" });
-                  }}
+                      <WandIcon name="more" size={18}/>
+                    </WandIconButton>
+                  )}
                 />
-              )}
-              {snapshot.layout.sidebarDrawer && (
-                <WandIconButton
-                  id="close-drawer-button"
-                  className="sidebar-close"
-                  aria-label="关闭侧栏"
-                  title="关闭侧栏"
-                  size="medium"
-                  onClick={() => void dispatch({ type: "layout.drawer.close" })}
+                <WandDropdownMenuContent
+                  id="sidebar-overflow-menu"
+                  className="sidebar-tools-menu"
+                  aria-label="侧栏更多操作"
+                  align="end"
+                  sideOffset={6}
                 >
-                  <SidebarToggleIcon open/>
-                </WandIconButton>
-              )}
-            </Flex>
-          </Flex>
-          {!narrow && <Flex gap={4} wrap className="sidebar-status">
-            <SidebarListErrorBadge />
-            <HomeAttentionBadge open={attentionOpen} onToggle={() => setAttentionOpen((value) => !value)} />
-          </Flex>}
-        </Flex>
-        <HomeAttentionPanel open={attentionOpen && !narrow} onClose={() => setAttentionOpen(false)} />
-        <div style={{ padding: narrow ? "0 4px 8px" : "0 12px 8px" }}><ConversationNavigation compact={narrow} onDirectory={() => { settingsController.close(); taskBoardController.close(); conversationUi.directory(true); dismissSidebarSurfaces(); }}/></div>
-        <Flex hidden={conversationState.mode !== "tasks"} component="nav" vertical gap="small" className="sidebar-feature-nav" aria-label="功能菜单" style={{ padding: narrow ? "0 8px 8px" : "0 16px 12px", flexShrink: 0 }}>
-          <WandButton id="drawer-new-session-button" className="sidebar-new-task" kind="primary" title={primaryAction.label}
-            aria-label={primaryAction.ariaLabel} onClick={() => navigate(primaryAction.action)}>
-            <WandIcon name="plus" size={18}/><span hidden={narrow}>{primaryAction.label}</span>
-          </WandButton>
-          <Flex vertical={narrow} gap="small">
-            <WandButton id="task-board-button" title="任务看板" kind={taskBoard.open && taskBoard.page !== "teams" ? "soft" : "ghost"}
-              aria-current={taskBoard.open && taskBoard.page !== "teams" ? "page" : undefined}
-              style={{ flex: narrow ? undefined : 1 }} onClick={() => {
-                peek.close();
-                if (overlay) void dispatch({ type: "layout.drawer.close" });
-                taskBoardController.open(snapshot.selected?.workspaceId ?? "", snapshot.selected?.id ?? "");
-                settingsController.close();
-              }}>
-              <WandIcon name="board" size={18}/><span hidden={narrow}>任务看板</span>
-            </WandButton>
-            <WandButton id="ai-teams-button" title="员工与团队模板" kind={taskBoard.open && taskBoard.page === "teams" ? "soft" : "ghost"}
-              aria-current={taskBoard.open && taskBoard.page === "teams" ? "page" : undefined}
-              style={{ flex: narrow ? undefined : 1 }} onClick={() => {
-                peek.close();
-                if (overlay) void dispatch({ type: "layout.drawer.close" });
-                taskBoardController.open(snapshot.selected?.workspaceId ?? "", snapshot.selected?.id ?? "", "teams");
-                settingsController.close();
-              }}>
-              <Badge count={teamAttention} size="small"><WandIcon name="parallel" size={18}/></Badge><span hidden={narrow}>员工与团队模板</span>
-            </WandButton>
-          </Flex>
-        </Flex>
-        <div className="sidebar-body" ref={bodyRef} style={{ flex: 1, minHeight: 0, overflow: "auto", padding: narrow ? 4 : "0 8px" }}>
-          <div id="sessions-panel">
-            <div className="sessions-list" id="sessions-list">
-              <SidebarProjectionSwap value={conversationState.mode}>
-                <div hidden={conversationState.mode !== "chats"} inert={conversationState.mode !== "chats"}><ConversationSidebarList compact={narrow} enabled={visible && conversationState.mode === "chats"} onNavigate={() => { taskBoardController.close(); dismissSidebarSurfaces(); }}/></div>
-                <div hidden={conversationState.mode !== "tasks"} inert={conversationState.mode !== "tasks"}>{taskTree(narrow)}</div>
-              </SidebarProjectionSwap>
+                  <WandDropdownMenuItem
+                    id="missions-button"
+                    icon="zap"
+                    onClick={() => {
+                      setMoreOpen(false);
+                      navigate({ type: "missions.open" });
+                    }}
+                  >
+                    并行任务
+                  </WandDropdownMenuItem>
+                  <WandDropdownMenuItem
+                    id="github-issues-button"
+                    icon="git"
+                    onClick={() => {
+                      setMoreOpen(false);
+                      peek.close();
+                      if (overlay) void dispatch({ type: "layout.drawer.close" });
+                      window.__wandReactGithubIssues?.open(snapshot.selected?.id ?? "");
+                    }}
+                  >
+                    GitHub 议题
+                  </WandDropdownMenuItem>
+                  <WandDropdownMenuSeparator/>
+                  <WandDropdownMenuItem
+                    id="sidebar-home-btn"
+                    icon="home"
+                    onClick={() => {
+                      setMoreOpen(false);
+                      navigate({ type: "nav.home" });
+                    }}
+                  >
+                    返回对话
+                  </WandDropdownMenuItem>
+                  <WandDropdownMenuItem
+                    id="sidebar-refresh-btn"
+                    icon="refresh"
+                    onClick={() => {
+                      setMoreOpen(false);
+                      void dispatch({ type: "nav.refresh" });
+                    }}
+                  >
+                    刷新页面
+                  </WandDropdownMenuItem>
+                  <WandDropdownMenuSeparator/>
+                  <WandDropdownMenuItem
+                    id="logout-button"
+                    icon="logout"
+                    tone="danger"
+                    onClick={() => {
+                      setMoreOpen(false);
+                      void confirmSidebarLogout(() => navigate({ type: "auth.logout" }));
+                    }}
+                  >
+                    退出登录
+                  </WandDropdownMenuItem>
+                </WandDropdownMenuContent>
+              </WandDropdownMenu>
             </div>
           </div>
-        </div>
-        {/* 首次悬停才挂载，之后常驻（关闭态用 CSS visibility 藏起来）：
-            既不预览就多跑一份任务树轮询，也不会每次悬停都重新拉一次。 */}
-        {narrow && hoverPointer && peek.mounted && peekDirectory ? (
-          <SidebarPeek
-            title={peekDirectory.name}
-            top={peekDirectory.top}
-            open={peek.open}
-            surfaceRef={peekSurfaceRef}
-            onExpand={() => {
-              peek.close();
-              void dispatch({ type: "layout.drawer.collapse" });
-            }}
-            {...peek.surfaceBindings}
-          >
-            {/* 仅渲染当前目录，不复制 legacy DOM id。 */}
-            <div className="sessions-list">{taskTree(false, peekDirectory.id)}</div>
-          </SidebarPeek>
-        ) : null}
-        {!narrow && <div style={{ paddingInline: 8, flexShrink: 0 }}><DaemonUpdateNotice /></div>}
-        <Flex vertical={narrow} align="center" justify="space-between" gap="small" className="sidebar-footer" style={{ flexShrink: 0, padding: narrow ? 8 : "8px 16px", borderTop: "1px solid var(--border-subtle)" }}>
-          <Flex component="nav" wrap gap={4} vertical={narrow} className="sidebar-footer-actions" aria-label="侧栏快捷操作">
-            <WandButton kind={settings.open ? "soft" : "ghost"} aria-current={settings.open ? "page" : undefined} id="settings-button" title="设置" aria-label="设置" onClick={() => navigate({ type: "settings.open" })}>
-              <WandIcon name="gear" size={16}/><span hidden={narrow}>设置</span>
-            </WandButton>
-            {snapshot.layout.sidebarDrawer && <WandIconButton id="file-panel-toggle-btn" title="查看文件" aria-label="文件"
-              aria-pressed={snapshot.layout.filePanelOpen} onClick={() => navigate({ type: "layout.files.toggle" })}>
-              <WandIcon name="explorer" size={16}/><span>文件</span>
-            </WandIconButton>}
-            {snapshot.capabilities.backToNative && <WandIconButton id="back-to-native-button" title="返回 App 原生界面" aria-label="返回 App"
-              onClick={() => navigate({ type: "native.back" })}>
-              <WandIcon name="back" size={16}/><span hidden={narrow}>返回App</span>
-            </WandIconButton>}
-            {snapshot.capabilities.switchServer && <WandIconButton id="switch-server-button" title="切换服务器" aria-label="切换服务器"
-              onClick={() => navigate({ type: "native.switchServer" })}>
-              <WandIcon name="server" size={16}/><span hidden={narrow}>切换</span>
-            </WandIconButton>}
+          <WandIconButton kind={settings.open ? "soft" : "ghost"} aria-current={settings.open ? "page" : undefined}
+            id="settings-button" className="sidebar-profile-button" title={`${profileName} · 设置`} aria-label="设置"
+            onClick={() => { setAttentionOpen(false); navigate({ type: "settings.open" }); }}>
+            <Avatar size={32} src={profileFace.src} style={profileFace.style} icon={profileFace.icon}/>
+          </WandIconButton>
+        </Flex>
+        <Flex vertical className="sidebar-list-panel">
+          <Flex vertical gap="small" className="sidebar-header" style={{ padding: narrow ? "12px 8px" : "12px 16px", flexShrink: 0 }}>
+            <Flex vertical={narrow} align="center" justify="space-between" gap="small" className="sidebar-header-primary">
+              <Flex align="center" gap="small" className="sidebar-header-main">
+                <Typography.Text strong className="sidebar-title" hidden={narrow} style={{ whiteSpace: "nowrap" }}>{conversationState.mode === "tasks" ? "工作区" : "对话"}</Typography.Text>
+              </Flex>
+              <Flex align="center" gap={4} vertical={narrow} className="sidebar-header-actions">
+                <div hidden={conversationState.mode !== "chats"}><ConversationSidebarTools enabled={visible && conversationState.mode === "chats"}
+                  onCreateSession={() => navigate(primaryAction.action)}
+                  onNavigate={() => { taskBoardController.close(); dismissSidebarSurfaces(); }}/></div>
+                {!snapshot.layout.sidebarDrawer && (
+                  <SidebarCompactToggle
+                    active={narrow}
+                    onToggle={() => {
+                      peek.close();
+                      void dispatch({ type: "layout.drawer.collapse" });
+                    }}
+                  />
+                )}
+                {snapshot.layout.sidebarDrawer && (
+                  <WandIconButton
+                    id="close-drawer-button"
+                    className="sidebar-close"
+                    aria-label="关闭侧栏"
+                    title="关闭侧栏"
+                    size="medium"
+                    onClick={() => void dispatch({ type: "layout.drawer.close" })}
+                  >
+                    <SidebarToggleIcon open/>
+                  </WandIconButton>
+                )}
+              </Flex>
+            </Flex>
           </Flex>
-          <Typography.Text type="secondary" className="sidebar-footer-caption" hidden={narrow} style={{ fontSize: 12, whiteSpace: "nowrap" }}>本机工作台</Typography.Text>
+          <Flex hidden={conversationState.mode !== "tasks"} vertical className="sidebar-feature-nav" style={{ padding: narrow ? "0 8px 8px" : "0 16px 12px", flexShrink: 0 }}>
+            <WandButton id="drawer-new-session-button" className="sidebar-new-task" kind="primary" title={primaryAction.label}
+              aria-label={primaryAction.ariaLabel} onClick={() => navigate(primaryAction.action)}>
+              <WandIcon name="plus" size={18}/><span hidden={narrow}>{primaryAction.label}</span>
+            </WandButton>
+          </Flex>
+          <div className="sidebar-body" ref={bodyRef} style={{ flex: 1, minHeight: 0, overflow: "auto", padding: narrow ? 4 : "0 8px" }}>
+            <div id="sessions-panel">
+              <div className="sessions-list" id="sessions-list">
+                <SidebarProjectionSwap value={conversationState.mode}>
+                  <div hidden={conversationState.mode !== "chats"} inert={conversationState.mode !== "chats"}><ConversationSidebarList compact={narrow} enabled={visible && conversationState.mode === "chats"} onNavigate={() => { taskBoardController.close(); dismissSidebarSurfaces(); }}/></div>
+                  <div hidden={conversationState.mode !== "tasks"} inert={conversationState.mode !== "tasks"}>{taskTree(narrow)}</div>
+                </SidebarProjectionSwap>
+              </div>
+            </div>
+          </div>
+          {/* 首次悬停才挂载，之后常驻（关闭态用 CSS visibility 藏起来）：
+              既不预览就多跑一份任务树轮询，也不会每次悬停都重新拉一次。 */}
+          {narrow && hoverPointer && peek.mounted && peekDirectory ? (
+            <SidebarPeek
+              title={peekDirectory.name}
+              top={peekDirectory.top}
+              open={peek.open}
+              surfaceRef={peekSurfaceRef}
+              onExpand={() => {
+                peek.close();
+                void dispatch({ type: "layout.drawer.collapse" });
+              }}
+              {...peek.surfaceBindings}
+            >
+              {/* 仅渲染当前目录，不复制 legacy DOM id。 */}
+              <div className="sessions-list">{taskTree(false, peekDirectory.id)}</div>
+            </SidebarPeek>
+          ) : null}
+          {(snapshot.layout.sidebarDrawer || snapshot.capabilities.backToNative || snapshot.capabilities.switchServer) && <Flex vertical={narrow} align="center" justify="space-between" gap="small" className="sidebar-footer" style={{ flexShrink: 0, padding: narrow ? 8 : "8px 16px", borderTop: "1px solid var(--border-subtle)" }}>
+            <Flex component="nav" wrap gap={4} vertical={narrow} className="sidebar-footer-actions" aria-label="侧栏快捷操作">
+              {snapshot.layout.sidebarDrawer && <WandIconButton id="file-panel-toggle-btn" title="查看文件" aria-label="文件"
+                aria-pressed={snapshot.layout.filePanelOpen} onClick={() => navigate({ type: "layout.files.toggle" })}>
+                <WandIcon name="explorer" size={16}/><span>文件</span>
+              </WandIconButton>}
+              {snapshot.capabilities.backToNative && <WandIconButton id="back-to-native-button" title="返回 App 原生界面" aria-label="返回 App"
+                onClick={() => navigate({ type: "native.back" })}>
+                <WandIcon name="back" size={16}/><span hidden={narrow}>返回App</span>
+              </WandIconButton>}
+              {snapshot.capabilities.switchServer && <WandIconButton id="switch-server-button" title="切换服务器" aria-label="切换服务器"
+                onClick={() => navigate({ type: "native.switchServer" })}>
+                <WandIcon name="server" size={16}/><span hidden={narrow}>切换</span>
+              </WandIconButton>}
+            </Flex>
+          </Flex>}
         </Flex>
       </Layout.Sider>
     </SidebarPresentationContext.Provider>

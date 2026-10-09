@@ -85,7 +85,7 @@ test("侧栏报错只在内容变化时通知订阅者，重报不换 retry 引�
   }
 });
 
-test("加载失败留在头部独立状态行，不挤占品牌与操作区", () => {
+test("加载失败在导航栏显示重试图标，不挤占列表头部", () => {
   reportSidebarListError({ kind: "load", message: "无法加载任务列表：连接被拒绝。", retry: async () => {} });
   let html = "";
   try {
@@ -93,13 +93,13 @@ test("加载失败留在头部独立状态行，不挤占品牌与操作区", ()
   } finally {
     reportSidebarListError(null);
   }
-  const status = html.match(/<div[^>]*class="[^"]*\bsidebar-status\b[^"]*"[^>]*>[\s\S]*?<\/div>/)?.[0] ?? "";
+  const status = html.match(/<div[^>]*class="[^"]*\bsidebar-rail-notices\b[^"]*"[^>]*>[\s\S]*?<\/div>/)?.[0] ?? "";
   const brand = html.match(/<div[^>]*class="[^"]*sidebar-header-main[^"]*"[^>]*>[\s\S]*?<\/div>/)?.[0] ?? "";
-  assert.match(status, /class="[^"]*\bsidebar-list-error\b/, "头部状态行承载可重试的错误徽标");
+  assert.match(status, /class="[^"]*\bsidebar-list-error\b/, "导航栏承载可重试的错误图标");
   assert.match(status, /加载失败/);
   assert.match(status, /无法加载任务列表：连接被拒绝。｜点击重新加载/);
   assert.doesNotMatch(brand, /sidebar-list-error/, "错误不挤动品牌与首行按钮");
-  assert.ok(html.indexOf("sidebar-title") < html.indexOf("sidebar-list-error"), "状态行位于品牌之后");
+  assert.ok(html.indexOf("sidebar-list-error") < html.indexOf("sidebar-list-panel"), "错误图标位于独立导航栏");
   assert.doesNotMatch(renderSidebar(), /sidebar-list-error/);
 });
 
@@ -111,7 +111,7 @@ test("未同步保留旧行，首次失败提供原位错误与重试", () => {
   } finally {
     reportSidebarListError(null);
   }
-  assert.match(html, /class="[^"]*\bsidebar-list-error\b[^"]*"[^>]*>[\s\S]*?未同步/);
+  assert.match(html, /aria-label="未同步：列表暂未同步，正在显示上次结果。，点击重新加载"/);
 
   const panel = readFileSync(path.join(root, "src/web-ui/react/workspaces/workspaces-panel.tsx"), "utf8");
   assert.match(panel, /sidebar-load-error/);

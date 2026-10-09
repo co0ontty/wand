@@ -283,6 +283,13 @@ export class RenderDaemonClient implements TerminalHost {
     await this.request("shutdown", { mode: "drain" });
   }
 
+  /** Explicit confirmed maintenance only; does not shut down the daemon itself. */
+  async interruptMaintenanceSessions(): Promise<void> {
+    const sessions = await this.listSessions();
+    await Promise.all(sessions.filter(session => session.status === "running")
+      .map(session => this.request("kill", { sessionId: session.sessionId, signal: "SIGTERM" })));
+  }
+
   connect(): Promise<void> {
     if (this.disposed) return Promise.reject(new Error("Render client disposed"));
     if (this.connecting) return this.connecting;

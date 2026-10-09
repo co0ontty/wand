@@ -92,14 +92,13 @@ import {
   TaskBoardListView,
   TaskBoardPriorityChip,
   TaskBoardProcessingRow,
-  TaskBoardProgressRow,
   TaskBoardProjectChip,
   TaskBoardStatusGlyph,
   useExpansionFocusReturn,
 } from "./task-board-views";
 import { wandOverlay } from "../overlay-controller";
 import { confirmDiscardTaskDraft } from "../task-draft-guard";
-import { readTaskBoardViewState, writeTaskBoardViewState } from "./task-board-view-state";
+import { readTaskBoardViewState, writeTaskBoardViewState, sortTaskBoardTasks, TASK_BOARD_SORTS, type TaskBoardSort } from "./task-board-view-state";
 import { createGeneratedTitlePoller, type GeneratedTitlePoller } from "./generated-title-poll";
 
 interface DraftState {
@@ -166,6 +165,7 @@ export function TaskBoardHost({
   const [notice, setNotice] = React.useState("");
   const [query, setQuery] = React.useState(restored.query);
   const [view, setView] = React.useState<IssueBoardView>(restored.view);
+  const [sort, setSort] = React.useState<TaskBoardSort>(restored.sort);
   const [display, setDisplay] = React.useState<IssueBoardDisplay>(DEFAULT_ISSUE_BOARD_DISPLAY);
   const [filters, setFilters] = React.useState<IssueBoardFilters>(restored.filters);
   const [ganttZoom, setGanttZoom] = React.useState<IssueGanttZoom>("week");
@@ -208,7 +208,12 @@ export function TaskBoardHost({
   const workspaceGenerationRef = React.useRef(0);
   const titleRef = React.useRef<HTMLTextAreaElement>(null);
   const searchRef = React.useRef<HTMLInputElement>(null);
+  const columnScrollRefs = React.useRef<Partial<Record<WandTaskStatus, HTMLElement>>>({});
   const titlePollerRef = React.useRef<GeneratedTitlePoller | null>(null);
+
+  React.useLayoutEffect(() => {
+    for (const column of Object.values(columnScrollRefs.current)) if (column) column.scrollTop = 0;
+  }, [sort]);
 
   React.useEffect(() => {
     if (!notice) return;
@@ -575,7 +580,7 @@ export function TaskBoardHost({
   const selected = tasks.find((task) => task.id === selectedId) ?? null;
   const selectedChildren = selected ? tasks.filter((task) => task.parentTaskId === selected.id) : [];
   const archiveOpen = issueArchiveFolderOpen(collapsedList.archived, query, filters);
-  const visible = filterIssues(tasks, query, filterWorkspaceId, filters, archiveOpen);
+  const visible = sortTaskBoardTasks(filterIssues(tasks, query, filterWorkspaceId, filters, archiveOpen), sort);
   const grouped = groupIssuesByStatus(visible);
   const archiveCount = filterIssues(tasks, query, filterWorkspaceId, filters, true)
     .filter((task) => task.status === "archived").length;
@@ -642,8 +647,8 @@ export function TaskBoardHost({
   }, [selected?.id, selected?.agent, selected?.executionSubject?.type, selected?.executionSubject?.id]);
 
   React.useEffect(() => {
-    writeTaskBoardViewState({ view, query, workspaceId: filterWorkspaceId, filters });
-  }, [view, query, filterWorkspaceId, filters]);
+    writeTaskBoardViewState({ view, query, workspaceId: filterWorkspaceId, filters, sort });
+  }, [view, query, filterWorkspaceId, filters, sort]);
 
   // 展开态只属于「当前这一屏看板」：换视图、改筛选或搜索、进完整详情、重开面板时一律收起，
   // 不留半开（卡片可能已经不在这一列里了）。
@@ -747,7 +752,13 @@ export function TaskBoardHost({
         });
       }}
       data-task-id={task.id}
-      draggable
+      draggable={!busy}
+      onKeyDown={(event) => {
+        if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+        event.preventDefault();
+        const rect = event.currentTarget.getBoundingClientRect();
+        setContextMenu({ taskId: task.id, x: rect.left + 16, y: rect.top + 32 });
+      }}
       onDragStart={(event) => {
         if (event.target !== event.currentTarget) return;
         // 拖走的是展开中的卡片时先收起，别让面板跟着卡片进列。
@@ -767,6 +778,7 @@ export function TaskBoardHost({
     >
       <Card size="small" styles={{ body: { padding: 12 } }} loading={busy}>
       <Flex vertical gap="small">
+      <Flex align="flex-start" gap={4} className="task-board-card-heading">
       <WandButton kind="ghost"
         type="button"
         ref={bindCardTrigger(task.id)}
@@ -777,10 +789,14 @@ export function TaskBoardHost({
         aria-label={`${expanded ? "收起" : "展开"} ${task.identifier}: ${task.title}`}
         onClick={() => setExpandedTaskId((current) => current === task.id ? "" : task.id)}
       ><Typography.Text strong id={`task-${task.id}-title`}>{task.title || "未命名任务"}</Typography.Text></WandButton>
-      {display.body && task.description && task.sessions.length === 0 && !task.agent
+      <WandIconButton className="task-board-card-menu" aria-label={`任务菜单 ${task.identifier}`} disabled={busy}
+        onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setContextMenu({ taskId: task.id, x: rect.left, y: rect.bottom }); }}>
+        <WandIcon name="more" size={16}/>
+      </WandIconButton>
+      </Flex>
+      {display.body && task.description && !expanded
         ? <p className="task-board-card-body">{task.description}</p>
         : null}
-      <TaskBoardProgressRow task={task}/>
       <Flex wrap gap={4} align="center" className="task-board-card-meta" aria-label="任务属性">
         <span className="task-board-card-id">{task.identifier}</span>
         {parent && <span className="task-board-chip is-parent" title={`归属 ${parent.identifier} · ${parent.title}`}>
@@ -804,7 +820,7 @@ export function TaskBoardHost({
       </Flex>
       {sessionDropTarget === task.id && <Alert type="info" showIcon title="移入此任务 · 运行目录不变"/>}
       {task.sessions.length > 0 && <Flex vertical gap={4} className="task-board-session-list" style={{ display: expanded ? "none" : undefined }} aria-label={`${task.title} 的会话`}>
-        {task.sessions.map((session) => <Flex key={session.id} align="center" justify="space-between" gap={4} className="task-board-session-row" style={{ minWidth: 0 }}
+        {task.sessions.slice(0, 2).map((session) => <Flex key={session.id} align="center" justify="space-between" gap={4} className="task-board-session-row" style={{ minWidth: 0 }}
           data-session-id={session.id} draggable={!busy}
           onDragStart={(event) => { event.stopPropagation(); startSessionDrag(event.dataTransfer, session.id); }}>
           <WandButton kind="ghost" type="button" className="task-board-session-open" style={{ flex: 1, minWidth: 0, justifyContent: "flex-start" }} title={`${session.title}\n${session.cwd}`}
@@ -813,6 +829,7 @@ export function TaskBoardHost({
           </WandButton>
           <SessionMoveButton sessionId={session.id} taskId={task.workspaceTaskId ?? undefined}/>
         </Flex>)}
+        {task.sessions.length > 2 && <WandButton kind="ghost" size="small" className="task-board-session-more" onClick={() => setExpandedTaskId(task.id)}>查看全部 {task.sessions.length} 个会话</WandButton>}
       </Flex>}
       {task.status === "doing"
         ? <TaskBoardProcessingRow task={task} onOpenSession={onOpenSession}/>
@@ -836,12 +853,13 @@ export function TaskBoardHost({
     return <section
       key={status}
       className={classNames("task-board-column", `is-${status}`, dropStatus === status && "is-drop-target")}
-      style={{ flex: "1 0 280px", minWidth: 0, maxWidth: 420 }}
+      style={{ flex: "1 0 280px", minWidth: 0 }}
       aria-labelledby={`column-${status}`}
-      onDragEnter={(event) => { if (!isSessionDrag(event.dataTransfer)) setDropStatus(status); }}
+      onDragEnter={(event) => { if (isTaskDrag(event.dataTransfer)) setDropStatus(status); }}
       onDragOver={(event) => {
-        if (isSessionDrag(event.dataTransfer)) return;
+        if (!isTaskDrag(event.dataTransfer)) return;
         event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
         setDropStatus(status);
       }}
       onDragLeave={(event) => {
@@ -854,13 +872,14 @@ export function TaskBoardHost({
         const id = draggedTaskId(event.dataTransfer);
         setDropStatus("");
         setDraggedId("");
-        if (id) void dropTask(status, id);
+        if (id && tasks.some((task) => task.id === id)) void dropTask(status, id);
       }}
     >
       <Flex component="header" align="center" justify="space-between" gap="small" className="task-board-column-head">
         <Flex align="center" gap="small" className="task-board-column-heading">
           <TaskBoardStatusGlyph status={status}/>
-          <Typography.Title level={5} id={`column-${status}`} style={{ margin: 0 }}>{column.label}{items.length > 0 ? ` ${items.length}` : ""}</Typography.Title>
+          <Typography.Title level={5} id={`column-${status}`} style={{ margin: 0 }}>{column.label}</Typography.Title>
+          <span className="task-board-column-count">{items.length}</span>
         </Flex>
         <div className="task-board-column-actions">
           <WandIconButton
@@ -873,7 +892,7 @@ export function TaskBoardHost({
           </WandIconButton>
         </div>
       </Flex>
-      <Flex vertical gap="small" className="task-board-column-list">
+      <Flex vertical gap="small" className="task-board-column-list" ref={(node) => { columnScrollRefs.current[status] = node ?? undefined; }}>
         {loading && tasks.length === 0
           ? <>
               <WandSkeleton className="task-board-skeleton"/>
@@ -888,7 +907,7 @@ export function TaskBoardHost({
   };
 
   return <Flex component="section" vertical gap="middle" className="task-board-native-page" aria-label="任务管理"
-    style={{ position: "absolute", inset: 0, zIndex: 8, overflow: "auto", padding: 16, background: "var(--bg-primary)", minWidth: 0 }}>
+    data-view={view} data-detail={Boolean(selected)}>
     <Flex component="header" wrap align="center" justify="space-between" gap="small" className="task-board-workspace-header">
       <Flex align="center" gap="small" className="task-board-kicker">
         {onOpenSidebar ? (
@@ -918,15 +937,14 @@ export function TaskBoardHost({
             ]}
           /> : <>
             <h1>任务看板</h1>
-            <p>安排工作，跟进执行，确认结果。</p>
           </>}
         </div>
       </Flex>
       <Flex wrap gap="small" className="task-board-header-actions">
         {!selected && <>
-          <WandButton kind="ghost" size="small" disabled={loading} onClick={() => void reload()} aria-label="刷新任务">
-            <WandIcon name="refresh" slot="start"/>刷新
-          </WandButton>
+          <WandIconButton disabled={loading} onClick={() => void reload()} aria-label="刷新任务" title="刷新任务">
+            <WandIcon name="refresh"/>
+          </WandIconButton>
           <WandButton
             className="task-board-create-button"
             kind="primary"
@@ -955,6 +973,7 @@ export function TaskBoardHost({
 
       <Flex wrap align="center" gap="small" className="task-board-toolbar-controls">
         <WandSelect
+          className="task-board-workspace-filter"
           value={filterWorkspaceId || "__all__"}
           options={[{ value: "__all__", label: "所有目录" }, ...workspaces.map((workspace) => ({ value: workspace.id, label: workspace.name }))]}
           ariaLabel="筛选工作目录"
@@ -962,7 +981,8 @@ export function TaskBoardHost({
           searchPlaceholder="搜索目录"
           onValueChange={(value) => setFilterWorkspaceId(value === "__all__" ? "" : value)}
         />
-        <WandSearchField inputRef={searchRef} label="搜索任务" value={query} onValueChange={setQuery}/>
+        <WandSearchField inputRef={searchRef} className="task-board-search" label="搜索任务" placeholder="搜索标题、编号或正文" value={query} onValueChange={setQuery}/>
+        <WandSelect className="task-board-sort" ariaLabel="任务排序" value={sort} options={TASK_BOARD_SORTS} onValueChange={(value) => setSort(value as TaskBoardSort)}/>
           {(view === "board" || view === "list" || view === "gantt") && <TaskBoardFilterMenu
             tasks={tasks}
             filters={filters}
@@ -973,6 +993,11 @@ export function TaskBoardHost({
     </Flex>}
     {!selected && <Flex wrap align="center" justify="space-between" gap="small" className="task-board-result-summary" role="status">
       <span>{loading ? "正在同步任务…" : `共 ${visible.length} 个任务`}{(query || filterActive || filterWorkspaceId) ? " · 已筛选" : ""}</span>
+      <Flex wrap gap={4} className="task-board-active-filters">
+        {filters.statuses.map((status) => <WandButton kind="ghost" size="small" key={status} aria-label={`移除状态筛选 ${columnOf(status).label}`} onClick={() => setFilters({ ...filters, statuses: filters.statuses.filter((entry) => entry !== status) })}>{status === "archived" ? "归档任务" : columnOf(status).label}<WandIcon name="close" size={12}/></WandButton>)}
+        {filters.priorities.map((priority) => <WandButton kind="ghost" size="small" key={priority} aria-label={`移除优先级筛选 ${priority}`} onClick={() => setFilters({ ...filters, priorities: filters.priorities.filter((entry) => entry !== priority) })}>{ISSUE_PRIORITIES.find((entry) => entry.value === priority)?.label}<WandIcon name="close" size={12}/></WandButton>)}
+        {filters.labels.map((label) => <WandButton kind="ghost" size="small" key={label} aria-label={`移除标签筛选 ${label}`} onClick={() => setFilters({ ...filters, labels: filters.labels.filter((entry) => entry !== label) })}>{label}<WandIcon name="close" size={12}/></WandButton>)}
+      </Flex>
       {(query || filterActive || filterWorkspaceId) && <WandButton kind="ghost" size="small" onClick={() => {
         setQuery(""); setFilters(EMPTY_ISSUE_FILTERS); setFilterWorkspaceId(""); searchRef.current?.focus();
       }}>清除筛选</WandButton>}
@@ -1043,8 +1068,8 @@ export function TaskBoardHost({
       onHideCompleted={setGanttHideCompleted}
       onOpen={setSelectedId}
     /> : <Flex vertical gap="middle" className={classNames("task-board-layout", otherColumns.length > 0 && "has-other-tasks")}>
-      <div className="task-board-scroll" style={{ overflowX: "auto", minWidth: 0 }}>
-        <Flex gap="middle" align="stretch" className="task-board-board" style={{ minWidth: Math.max(mainColumns.length, 1) * 280 }}>
+      <div className="task-board-scroll" tabIndex={0} aria-label="任务状态列">
+        <Flex gap="middle" align="stretch" className="task-board-board" style={{ minWidth: Math.max(mainColumns.length, 1) * 280, "--task-board-columns": Math.max(mainColumns.length, 1) } as React.CSSProperties}>
           {mainColumns.map((column) => renderColumn(column.status))}
         </Flex>
       </div>
@@ -1054,7 +1079,7 @@ export function TaskBoardHost({
       {archiveCount > 0 || draggedId ? (
         <Card size="small"
           styles={{ body: { padding: 12 } }}
-          style={{ marginTop: 12, borderColor: archiveDrop ? "var(--accent)" : undefined }}
+          style={{ borderColor: archiveDrop ? "var(--accent)" : undefined }}
           className={classNames(
             "task-board-archive-zone",
             draggedId && "is-dragging-task",

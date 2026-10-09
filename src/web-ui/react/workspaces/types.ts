@@ -91,6 +91,7 @@ export interface WorkspaceSessionSummary {
   runner?: string;
   command?: string;
   title?: string;
+  titleGenerating?: boolean;
   status?: string;
   completionRevision?: number;
   viewedCompletionRevision?: number;

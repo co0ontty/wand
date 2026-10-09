@@ -1,10 +1,10 @@
-import { List } from "antd";
+import { Badge, List, Typography } from "antd";
 import { WandUiBoundary } from "../theme";
 import { SidebarDisclosure } from "../workspaces/sidebar-disclosure";
 import * as React from "react";
 import type { AttentionItem } from "../../../attention";
 import { taskBoardController } from "../issues/task-board-controller";
-import { WandButton, WandIcon } from "../ui";
+import { WandButton, WandIcon, WandIconButton, WandPopover } from "../ui";
 import { classNames } from "../ui/class-names";
 import { useUiDispatch, useUiStoreSnapshot } from "../shell/ui-store-react";
 import { refreshAttention, useAttentionItems } from "./attention-store";
@@ -56,11 +56,28 @@ function AttentionList({
  * 侧栏头部那枚报错徽标。报错不罗列：这里只显示条数，点开由调用方
  * 在同一个位置的下方就地展开清单（`HomeAttentionPanel`）。
  */
-export function HomeAttentionBadge({ open, onToggle }: {
+export function HomeAttentionBadge({ open, onToggle, compact = false }: {
+  readonly compact?: boolean;
   readonly open: boolean;
   readonly onToggle: () => void;
 }): React.ReactElement | null {
   const items = useAttentionItemsLive();
+  const dispatch = useUiDispatch();
+  const trigger = React.useRef<HTMLButtonElement>(null);
+  if (compact) return <WandPopover open={open} onOpenChange={(next) => {
+    if (next !== open) onToggle();
+    if (!next) trigger.current?.focus({ preventScroll: true });
+  }}
+    side="right" align="start" contentId="sidebar-notifications" ariaLabel="通知" trigger={
+      <WandIconButton ref={trigger} className="sidebar-notification-button" title="通知" aria-label={items.length ? `通知，${items.length} 个报错` : "通知"}
+        aria-expanded={open} aria-controls="sidebar-notifications" kind="ghost">
+        <Badge count={items.length} size="small"><WandIcon name="bell" size={20}/></Badge>
+      </WandIconButton>}>
+    <div className="sidebar-notification-content"><Typography.Text strong>通知</Typography.Text>
+      {items.length ? <AttentionList items={items} onOpen={item => openAttention(item, dispatch, onToggle)}/>
+        : <Typography.Paragraph type="secondary">暂无需要处理的通知</Typography.Paragraph>}
+    </div>
+  </WandPopover>;
   if (items.length === 0) return null;
   const label = `${items.length} 个报错`;
   const hint = open ? `${label}，收起清单` : `${label}，点开查看`;

@@ -21,9 +21,9 @@ export function WorkspacesHost({ repository: _repository = httpWorkspacesReposit
 
   useEffect(() => {
     if (!controller.open) return;
-    if (!newSessionController.isOpen()) newSessionController.open({ initialCwd: controller.initialCwd });
+    if (!newSessionController.isOpen()) newSessionController.open({ initialCwd: controller.initialCwd, newTask: controller.initialKind === "task" });
     workspacesStore.consumeOpen();
-  }, [controller.initialCwd, controller.open]);
+  }, [controller.initialCwd, controller.initialKind, controller.open]);
 
   return null;
 }

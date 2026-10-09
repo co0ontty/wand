@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 import * as React from "react";
 import { createPortal } from "react-dom";
-import { Bubble } from "@ant-design/x";
+import { ChatMessage } from "../chat/message";
 import { WandUiBoundary } from "../theme";
 import {
   composerVoiceController,
@@ -11,8 +11,8 @@ import {
 /** Recording gestures and transcription revisions remain owned by the browser controller. */
 export function ComposerVoiceBubble({ mount }: { mount: ComposerVoiceMount }): React.ReactElement {
   return <WandUiBoundary><div id="voice-transcript-bubble" aria-live="polite">
-    <Bubble content={mount.transcript || mount.status} footer={mount.transcript ? mount.status : undefined}
-      variant="outlined"/>
+    <ChatMessage content={mount.transcript || mount.status} footer={mount.transcript ? mount.status : undefined}
+      surface="document"/>
   </div></WandUiBoundary>;
 }
 

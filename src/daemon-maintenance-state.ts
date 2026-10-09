@@ -2,6 +2,8 @@
 export interface DaemonMaintenanceStatus {
   pending: boolean;
   phase: "idle" | "waiting" | "updating" | "retrying";
+  /** HTTP view only; lifecycle status has no caller-specific permissions. */
+  canForceUpdate?: boolean;
 }
 
 export function daemonMaintenanceMessage(status: DaemonMaintenanceStatus): string {

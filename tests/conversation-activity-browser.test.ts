@@ -127,9 +127,9 @@ test("IM execution cards keep answers, approvals and stop bound to their source 
   assert.equal(await evaluate("document.querySelector('.conversation-question input[value=\"测试环境\"]').checked"), true);
   await clickText("提交并继续"); await wait("!document.querySelector('.conversation-question')");
   assert.deepEqual(requests[0], { id: "A", path: "/api/sessions/A/input", body: { input: "测试环境；只读检查", view: "chat", respondImmediately: true } });
-  await click(".conversation-turn-activity > .ant-collapse .ant-collapse-header");
-  await wait("!!document.querySelector('.conversation-tool-activity .ant-collapse-header')");
-  await click(".conversation-tool-activity .ant-collapse-header");
+  await click(".conversation-turn-activity .chat-process-summary");
+  await wait("!!document.querySelector('.conversation-tool-activity .chat-call-button')");
+  await click(".conversation-tool-activity .chat-call-button");
   await wait("document.body.innerText.includes('来自 A 的结果')");
   await screenshot("desktop-result");
   await click("#open-B"); await wait("!!document.querySelector('[data-activity-session=" + '"B"' + "]')");

@@ -543,7 +543,7 @@ test("新会话页的团队直发：不建会话、本轮说明必填、按已�
   // 直发只发 note + workspaceId（cwd 由服务端按项目解析）。
   assert.match(host, /aiTeamsRepository\.startDirect\(teamId, \{ note, workspaceId \}\)/);
   // 团队只在「非任务上下文」时提供，且要一个已存在的项目 id。
-  assert.match(host, /const teamContext = Boolean\(controller\.open && form && !form\.workspaceTaskId\)/);
+  assert.match(host, /const teamContext = Boolean\(controller\.open && form && !form\.workspaceTaskId && form\.taskName === undefined\)/);
   assert.match(host, /teams=\{teamContext \? teamOptions : null\}/);
   assert.match(host, /const teamWorkspaceId = form\?\.workspaceTaskId/);
 });
@@ -589,4 +589,31 @@ test("老服务端没有 defaultEngine 时按 Pi CLI 处理，不冒充 Wand Age
   }) as typeof fetch;
   const loaded = await new HttpNewSessionRepository(fetchImpl).load();
   assert.equal(loaded.config.defaultEngine, "cli");
+});
+
+test("named task resolves before session creation and accepted binding is reused on retry", async () => {
+  const { resolveNewSessionTask } = await import("../src/web-ui/react/new-session/task-creation.ts");
+  const calls: unknown[] = [];
+  const task = { id: "created-task", workspaceId: "project", cwd: "/repo", name: "目标" } as any;
+  const repository = {
+    createTask: async (id: string, request: unknown) => { calls.push({ id, request }); return task; },
+    createStandaloneTask: async (request: unknown) => { calls.push({ request }); return { ...task, workspaceId: "global" }; },
+  };
+  const form = { provider: "claude", kind: "structured", cwd: "/repo", mode: "default", worktreeEnabled: false,
+    model: "default", workspaceId: "project", taskName: "  目标  " } as const;
+  await assert.rejects(resolveNewSessionTask({ ...form, taskName: "   " }, "/repo", repository), /请输入任务名称/);
+  assert.equal(calls.length, 0, "empty name does not create a task");
+  const resolved = await resolveNewSessionTask(form, "/repo", repository);
+  assert.equal(resolved.workspaceTaskId, task.id);
+  assert.equal(resolved.cwd, task.cwd);
+  assert.equal(resolved.taskName, "目标");
+  assert.deepEqual(calls, [{ id: "project", request: { name: "目标", cwd: "/repo", worktree: false } }]);
+  assert.equal(await resolveNewSessionTask(resolved, "/repo", repository), resolved);
+  assert.equal(calls.length, 1, "retry reuses the created task");
+  const standalone = await resolveNewSessionTask({ ...form, workspaceId: undefined }, "/outside", repository);
+  assert.equal(standalone.workspaceId, "global");
+  assert.deepEqual(calls[1], { request: { name: "目标", cwd: "/outside", worktree: false } });
+  await assert.rejects(resolveNewSessionTask(form, "/repo", {
+    ...repository, createTask: async () => { throw new Error("task rejected"); },
+  }), /task rejected/);
 });

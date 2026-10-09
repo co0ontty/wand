@@ -155,8 +155,9 @@ test("群聊名称单独跟随任务版本，不被运行快照和团队名覆�
   assert.equal(mergeTeamChatDetail(merged, detail).chatTitle, renamed.chatTitle, "迟到请求不能回退群名");
   assert.equal(mergeTeamChatDetail(merged, { ...detail, chatTitle: undefined }).chatTitle, renamed.chatTitle);
   const page = read("react/ai-teams/team-chat-page.tsx");
-  assert.match(page, /label: visibleDetail\?\.chatTitle \|\| "任务处理群"/);
-  assert.match(page, /subscribeTaskChanges/);
+  assert.match(page, /conversationUi.openTask/);
+  assert.match(read("react/conversations/home.tsx"), /selected\?\.title \?\? employee\?\.name/);
+  assert.match(read("react/conversations/repository.ts"), /subscribeTaskChanges/);
 });
 
 test("群聊只把明确拒收判为可恢复草稿，未知送达留未确认", () => {
@@ -171,7 +172,7 @@ test("AI teams live on their own sidebar page, not in settings", () => {
   const sidebar = read("react/shell/shell-sidebar.tsx");
   const main = read("react/shell/shell-main-content.tsx");
   const settings = read("react/settings/host.tsx");
-  assert.match(sidebar, /taskBoardController\.open\([^)]*"teams"\)/);
+  assert.match(sidebar, /taskBoardController\.open\([^;]*page === "teams" \? "teams" : "board"\)/);
   assert.match(main, /taskBoard\.page === "teams" \? <AiTeamsPage/);
   assert.doesNotMatch(settings, /ai-teams/);
   assert.equal(isTaskBoardView("?view=teams"), true);
@@ -202,38 +203,22 @@ test("团队页与群聊页头部：返回箭头只在列表态出现，收起�
   assert.doesNotMatch(teams, /\{selected \? <WandIconButton/);
 
   const chat = read("react/ai-teams/team-chat-page.tsx");
-  // 群聊页是页面级面包屑（variant="title"，末段即 h1），首段回任务看板；箭头的落点不同（回进入前的会话），
-  // 所以两个出口都保留，但文案要跟着落点走，不再写「返回工作区」。
-  assert.match(chat, /<WandBreadcrumb\n\s*variant="title"\n\s*className="wand-team-chat-crumb"/);
-  assert.match(chat, /\{ label: "任务看板", onNavigate: \(\) => taskBoardController\.open\("", "", "board"\) \}/);
   assert.match(chat, /aria-label="返回上一会话"/);
   assert.doesNotMatch(chat, /aria-label="返回工作区"/);
-  // 「完整会话记录」只在真的挂了 chat 会话、且外层给了打开会话的回调时才出现，避免点了没反应的死按钮。
-  assert.match(chat, /\{visibleDetail\.run\.chatSessionId && onOpenSession \? <WandButton/);
-  assert.match(chat, /onOpenSession\(visibleDetail\.run\.chatSessionId!\)/);
-  // 顶栏只保留群状态；停止入口仍由群聊输入栏承接，避免首屏重复操作。
-  assert.doesNotMatch(chat, /aria-label="停止团队"/);
+  assert.match(chat, /error && sessionId && onOpenSession/);
+  assert.match(chat, /onOpenSession\(sessionId\)/);
+  assert.doesNotMatch(chat, /<TeamChatView|stopRunId|setInterval/);
   assert.match(chatSource, /const stopRunId = run\.id;[\s\S]*aiTeamsRepository\.stop\(stopRunId\)/);
-  // 群聊页用的是 title 变体，样式里不该再留 compact 变体的死选择器。
-  const chatStyles = read("react/ai-teams/styles.ts");
-  assert.doesNotMatch(chatStyles, /\.wand-team-chat-crumb\.is-compact/);
 });
 
-test("群聊页对话区下方展示工作任务二级目录", () => {
+test("旧运行入口精确打开统一对话及任务，不再持有第二套聊天和目录", () => {
   const page = read("react/ai-teams/team-chat-page.tsx");
-  // 目录沉在对话区下方，数据来自已加载的 detail（run/steps），运行推进仍走 ai-team-run 通知，不轮询。
-  assert.match(page, /<WorkTaskTree detail=\{visibleDetail\} onOpenSession=\{onOpenSession\}\/>/);
-  assert.match(page, /detail\.steps\.filter\(\(step\) => step\.kind === "work"\)/, "一级只列派发给成员的工作步骤");
-  assert.match(page, /<TeamAvatar member=\{member\}[\s\S]*?state=\{stepAvatarState\(step\.status\)\}/, "二级带归属成员头像");
-  assert.match(page, /onOpenSession\(step\.sessionId!\)/, "二级里的会话跳转复用群聊页成员跳转路径");
-  assert.match(page, /负责人还没有派发工作任务/, "无工作步骤时显示空态，不报错");
-  assert.doesNotMatch(page, /setInterval|setTimeout\([^)]*load/, "本页不引入轮询：状态更新靠 ai-team-run 通知");
-  assert.match(page, /<Card size="small" className="wand-team-work-tasks"/, "工作任务壳使用 Ant Card");
-  assert.match(page, /<Collapse ghost bordered=\{false\} activeKey=\{open \? \["step"\] : \[\]\}/, "原位展开由受控 Ant Collapse 接管");
-  assert.match(page, /forceRender: true/, "收起不会销毁步骤详情");
-  assert.match(page, /inert=\{!open\}/, "关闭的详情不可聚焦");
-  assert.match(page, /<Descriptions size="small" column=\{1\}/, "状态和报告文件交给库详情布局");
-  assert.doesNotMatch(read("react/ai-teams/styles.ts"), /\.wand-team-work-(?:body|head|item)\s*\{/, "不保留旧展开与卡片外观");
+  assert.match(page, /conversationForRun\(detail.run\)/);
+  assert.match(page, /conversationUi.openTask\(id, detail.run.taskId/);
+  assert.match(page, /selection !== conversationUi.selectionRevision\(\)/);
+  assert.doesNotMatch(page, /<TeamChatView|WorkTaskTree|setInterval|setTimeout/);
+  const home = read("react/conversations/home.tsx");
+  assert.match(home, /ConversationMessages/);
 });
 
 test("team page edits members with the shared agent fields; only one leader", () => {
@@ -576,10 +561,10 @@ test("[T7] 侧栏新建任务与项目欢迎页都接了团队旁路，任务上
   // 团队要一个已存在的项目 id，所以按所选目录对项目；任务上下文不给团队（那张卡已经在了）。
   assert.match(newSessionSource, /const teamWorkspaceId = form\?\.workspaceTaskId\s*\n?\s*\? ""\s*\n?\s*: usableTeamWorkspaceId\(form\?\.workspaceId \?\? matchedProject\?\.id, matchedProject\?\.kind\)/);
   assert.match(newSessionSource, /teams=\{teamContext \? teamOptions : null\}[\s\S]*?teamWorkspaceId=\{teamWorkspaceId\}/);
-  assert.match(newSessionSource, /const teamContext = Boolean\(controller\.open && form && !form\.workspaceTaskId\)/);
+  assert.match(newSessionSource, /const teamContext = Boolean\(controller\.open && form && !form\.workspaceTaskId && form\.taskName === undefined\)/);
   assert.match(newSessionSource, /try \{\n      \/\/[^\n]*\n      if \(form\.teamId\) \{[\s\S]*?await startDirectTeamRun\(form\);\n        return;/);
   // 桥接本身不再自己建任务卡，也不再重复一份团队逻辑。
-  assert.match(hostSource, /newSessionController\.open\(\{ initialCwd: controller\.initialCwd \}\)/);
+  assert.match(hostSource, /newSessionController\.open\(\{ initialCwd: controller\.initialCwd, newTask: controller\.initialKind === "task" \}\)/);
   assert.doesNotMatch(hostSource, /startDirect|teamWorkspaceId|usableTeamWorkspaceId/);
   // 项目欢迎页：workspaceId 是当前项目；global 项目不下发团队候选。
   const main = read("react/shell/shell-main-content.tsx");
@@ -708,7 +693,6 @@ test("[T8] team-chat-view 进 chunk、主包不含它，借的模块靠注册表
   assert.deepEqual(importers.sort(), [
     "src/web-ui/react/ai-teams/chunk-entry.ts",
     "src/web-ui/react/ai-teams/lazy.tsx",
-    "src/web-ui/react/ai-teams/team-chat-page.tsx",
     "src/web-ui/react/ai-teams/teams-page.tsx",
     "src/web-ui/react/issues/team-run-panel.tsx",
   ]);
@@ -898,28 +882,15 @@ test("[T8] 群聊输入框占位文案不等于任何引导语：空输入框同
   assert.match(body, /className="task-board-team-chat-hint"/, "引导语仍走 <p>，「回复『批准』即开工」要一直看得见");
 });
 
-test("[T8] 群聊页按 chat 会话跟随新运行：接着开一轮后状态与步骤不停在旧的一轮", () => {
+test("[T8] 运行路由将刷新和后续轮次交给统一对话，迟到请求不能覆盖导航", () => {
   const page = read("react/ai-teams/team-chat-page.tsx");
-  assert.match(read("react/ai-teams/repository.ts"), /runsForChat\(taskId: string, chatSessionId: string\)/);
-  assert.match(page, /runsForChat\(detail\.run\.taskId, chatSessionId\)/);
-  assert.match(page, /taskBoardController\.open\("", "", "teamchat", newer\)/, "原地切到新运行（地址栏 replace）");
-  assert.match(page, /change\.runId === runId \|\| \(taskId && change\.taskId === taskId\)/, "新运行的 runId 不同，得按任务 id 收通知");
-  assert.match(page, /newerRunIdOnSameChat\(next\)/, "重拉时也判一次，不停在旧运行的 chatTurns 上");
-  // 跟随只在同一个群聊会话内生效，别的 chat 不属于这一页。
-  assert.match(page, /runs\.filter\(\(run\) => run\.chatSessionId === chatSessionId\)|sameChat\[0\]/);
-  assert.match(page, /const epoch = \+\+loadEpochRef\.current;/);
-  assert.match(page, /epoch !== loadEpochRef\.current \|\| currentRunRef\.current !== runId/,
-    "旧的详情请求与同 chat 查询都不能盖过后来的导航");
-  assert.match(page, /continuingRunRef\.current = newer;\s*taskBoardController\.open\("", "", "teamchat", newer\)/,
-    "自动跟随后保留旧 View，直到新 run 详情到达");
-  assert.match(page, /if \(continuingRunRef\.current !== runId\) \{\s*continuingRunRef\.current = "";\s*setDetail\(null\);/,
-    "手动切到别的群聊仍卸载旧 View");
-  assert.match(page, /if \(next\.run\.id === currentRunRef\.current\) \{\s*setDetail\(\(current\) => mergeTeamChatDetail\(current, next\)\);/,
-    "旧 View 异步回包不能把新 run 拉回去");
-  assert.match(page, /setDetail\(\(current\) => mergeTeamChatDetail\(current, next\)\)/,
-    "页面同 run 的并发重拉只合入较新的详情");
-  assert.match(page, /staleRun=\{showingPreviousRun\}/,
-    "跟随新 run 的过渡期保留旧输入，但禁止旧 run 的发送和停止");
+  assert.match(page, /conversationUi.openTask\(id, detail.run.taskId/);
+  assert.match(page, /selection !== conversationUi.selectionRevision\(\)/);
+  assert.match(page, /active = false/);
+  assert.doesNotMatch(page, /<TeamChatView|setDetail|runsForChat/);
+  const repository = read("react/conversations/repository.ts");
+  assert.match(repository, /subscribeAiTeamRunChanges/);
+  assert.match(repository, /subscribeTaskChanges/);
 });
 
 test("[T8] 乐观临时行：ACK 服务端指纹优先；无 ACK 才用已见基线和有界时间窗", () => {

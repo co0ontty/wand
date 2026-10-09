@@ -1,3 +1,7 @@
+import { useConversationActivity } from "../conversations/activity";
+import { conversationForRun } from "../conversations/run-route";
+import { conversationsRepository } from "../conversations/repository";
+import { ChatMessage } from "../chat/message";
 import { Alert, Flex, Spin } from "antd";
 import * as React from "react";
 import * as jsxRuntime from "react/jsx-runtime";
@@ -86,6 +90,7 @@ import type { DecisionChainEditorProps } from "../settings/decision-chain-editor
  * tests/web-ui-ai-teams.test.ts 会逐个名字核对。
  */
 const AI_TEAMS_HOST: Record<string, object> = {
+  "conversations/activity": { useConversationActivity },
   "react": React,
   "react/jsx-runtime": jsxRuntime,
   "errors": { failureMessage },
@@ -95,6 +100,7 @@ const AI_TEAMS_HOST: Record<string, object> = {
   "composer-attachments/host": { ComposerAttachmentList },
   "composer-popover/action": { ComposerPopoverAction },
   "chat/running-status-bar": { RunningStatusBar },
+  "chat/message": { ChatMessage },
   "file-preview/controller": { filePreviewController },
   "file-preview/markdown": { MarkdownPreview },
   "file-preview/model": { formatFilePreviewSize },
@@ -131,6 +137,8 @@ const AI_TEAMS_HOST: Record<string, object> = {
   "styles": { installStyleSheet },
   "task-changes": { subscribeTaskChanges },
   "conversations/state": { conversationUi },
+  "conversations/repository": { conversationsRepository },
+  "conversations/run-route": { conversationForRun },
   "conversations/presentation": { appendedConversationKeys, CONVERSATION_TAIL_PX, conversationClock, conversationDay, conversationMessageKey, joinsConversationBubble },
   "user-profile-repository": { currentUserAuthor, selfAuthorFor, userProfileStore, useUserProfile },
   "ui": {

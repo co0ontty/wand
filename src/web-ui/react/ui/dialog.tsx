@@ -7,6 +7,7 @@ import { findDialogFocusTarget, watchDialogAutofocus } from "./dialog-focus";
 import { handleDialogOpenChange } from "./dialog-open-change";
 import { WandIcon, type WandIconName } from "./icons";
 import { usePortalContainer } from "./portal-context";
+import { usePopupDismiss } from "./popup-lifecycle";
 import { WandUiBoundary } from "../theme";
 
 export type WandDialogTone = "info" | "warning" | "danger" | "success" | "question";
@@ -76,6 +77,7 @@ export function WandDialogSurface({ open, title, description, children, width = 
   const contentRef = useRef<HTMLDivElement>(null);
   const openedAt = useRef(0);
   const stopDeferredFocus = useRef<(() => void) | null>(null);
+  usePopupDismiss(open, () => { if (dismissable) onOpenChange(false); });
   useEffect(() => {
     if (open) openedAt.current = performance.now();
     return () => { stopDeferredFocus.current?.(); stopDeferredFocus.current = null; };
@@ -89,7 +91,7 @@ export function WandDialogSurface({ open, title, description, children, width = 
     if (container && !preferred) stopDeferredFocus.current = watchDialogAutofocus(container, fallback);
   };
   return <WandUiBoundary><Modal open={open} centered footer={null} destroyOnHidden
-    getContainer={portal ?? undefined} aria-describedby={description ? descriptionId : undefined} keyboard={dismissable} closable={false}
+    getContainer={portal ?? undefined} aria-describedby={description ? descriptionId : undefined} keyboard={false} closable={false}
     mask={{ closable: dismissable }} width={width} styles={styles} zIndex={zIndex} focusable={{ focusTriggerAfterClose: !onAfterClose }}
     afterClose={onAfterClose}
     classNames={{ container: className, mask: overlayClassName }}

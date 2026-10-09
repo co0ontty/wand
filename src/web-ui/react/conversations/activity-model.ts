@@ -50,7 +50,9 @@ export function pendingActivityQuestions(session: ActivitySession): ToolUseBlock
   return [];
 }
 
-export function activitySessionOwners(detail: ConversationDetail | null, target: ConversationTarget = null): Map<string, string> {
+export type ConversationActivityDetail = Pick<ConversationDetail, "id" | "kind" | "title" | "communicationSessionId" | "messages" | "runDetails" | "dissolvedAt" | "deleting">;
+
+export function activitySessionOwners(detail: ConversationActivityDetail | null, target: ConversationTarget = null): Map<string, string> {
   const owners = new Map<string, string>();
   if (!detail || detail.dissolvedAt || detail.deleting) return owners;
   if (detail.communicationSessionId && !target) owners.set(detail.communicationSessionId, detail.kind === "dm" ? detail.title : "群聊负责人");

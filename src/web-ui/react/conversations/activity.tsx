@@ -1,14 +1,15 @@
 import * as React from "react";
 import { Alert, Checkbox, Flex, Input, Radio, Typography } from "antd";
-import type { ConversationDetail, ConversationTarget } from "../../../conversation-types.js";
+import type { ConversationTarget } from "../../../conversation-types.js";
 import type { ConversationTurn, ToolResultBlock, ToolUseBlock } from "../../../types.js";
+import { ChatActivity, ChatActivityEntry } from "../chat/activity.js";
 import { installChatSurfaceStyles } from "../chat/presentation.js";
 import { RunningStatusBar } from "../chat/running-status-bar.js";
 import { WandButton } from "../ui/index.js";
 import { computeRunningSignal } from "../../session-activity.js";
 import { conversationActivityRepository as repository } from "./activity-repository.js";
 import { activityAnswerText, activityQuestions, activityResultText, activityResults, activityRunning, activitySessionOwners,
-  activitySource, activityStopAnchor, activityToolKey, pendingActivityQuestions, type ActivityOperation, type ActivitySession } from "./activity-model.js";
+  activitySource, activityStopAnchor, activityToolKey, pendingActivityQuestions, type ActivityOperation, type ActivitySession, type ConversationActivityDetail } from "./activity-model.js";
 
 const detailStyle: React.CSSProperties = { whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: 240, overflow: "auto", margin: 0 };
 function readable(value: unknown): string {
@@ -20,12 +21,6 @@ function readable(value: unknown): string {
 function ActivityMark({ running }: { running: boolean }): React.ReactElement {
   return <span className="chat-process-summary-dot" data-running={running ? "" : undefined} aria-hidden="true">
     {Array.from({ length: 9 }, (_, index) => <i key={index}/>)}
-  </span>;
-}
-
-function DisclosureChevron({ expanded }: { expanded: boolean }): React.ReactElement {
-  return <span className="chat-disclosure-chevron" data-expanded={expanded} aria-hidden="true">
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
   </span>;
 }
 
@@ -98,26 +93,16 @@ function ActivityTool({ block, result, source, session, canAnswer, submit }: {
   const resultExcerpt = result?.preview || (result ? activityResultText(result) : "");
   return <div className="chat-call chat-call-inline conversation-tool-activity" data-status={status} data-expanded={open ? "true" : "false"}
     data-tool-source={source ?? undefined} data-tool-id={block.id}>
-    <span className="chat-call-mark" data-status={status} aria-hidden="true"/>
-    <button type="button" className="chat-call-button chat-call-button-plain" aria-expanded={open} aria-label={`${label}，${statusLabel}`}
-      onClick={() => setOpen(current => !current)}>
-      <span className="chat-call-copy">
-        <span className="chat-call-line">
-          <time className="chat-call-time" dateTime={block.activity?.occurredAt || undefined}>{activityRowClock(block.activity?.occurredAt)}</time>
-          <span className="chat-call-label" title={label}>{label}</span>
-        </span>
-        <span className="chat-call-preview" title={inputExcerpt || undefined}>{inputExcerpt}</span>
-        <span className="chat-call-result" data-error={status === "error" ? "" : undefined} title={resultExcerpt || undefined}>{resultExcerpt}</span>
-      </span>
-      <DisclosureChevron expanded={open}/>
-    </button>
-    <div className="chat-disclosure-body" data-expanded={open} inert={!open} aria-hidden={!open}>{open ? <div className="chat-activity-detail-content">
+    <ChatActivityEntry expanded={open} status={status} label={label} stateLabel={statusLabel}
+      clock={activityRowClock(block.activity?.occurredAt)} occurredAt={block.activity?.occurredAt}
+      preview={inputExcerpt} result={resultExcerpt} tool onToggle={() => setOpen(current => !current)}>
+      {open ? <div className="chat-activity-detail-content">
       {loading ? <Typography.Text type="secondary" role="status">正在读取详情…</Typography.Text> : null}
       {error ? <Typography.Text type="danger" role="alert">{error}<WandButton size="small" onClick={() => setRetry(value => value + 1)}>重新读取</WandButton></Typography.Text> : null}
       <div className="chat-activity-detail-section"><h4>调用输入</h4><pre tabIndex={0}>{readable(full?.input ?? block.input)}</pre></div>
       {result || full && !full.pending ? <div className="chat-activity-detail-section"><h4>结果</h4><pre tabIndex={0}>{readable(full && !full.pending ? full.content : result ? activityResultText(result) : "")}</pre></div> : null}
       {questions.length && !canAnswer ? <Typography.Text type="secondary">{result ? "此问题已有回答。" : "历史问题记录；只有当前等待回答的请求可以提交。"}</Typography.Text> : null}
-    </div> : null}</div>
+    </div> : null}</ChatActivityEntry>
     {canAnswer && session ? <QuestionCard key={`${session.id}:${block.id}:${JSON.stringify(questions)}`} block={block} session={session} canAnswer={canAnswer} submit={submit}/> : null}
   </div>;
 }
@@ -136,8 +121,7 @@ function TurnActivity({ turn, source, results, session, live, submit }: {
   const runningCall = live && blocks.some((block, index) => index === blocks.length - 1 && block.type === "tool_use" && !(source && results.get(activityToolKey(source, block.id))));
   const runningThinking = live && blocks.some((block, index) => index === blocks.length - 1 && block.type === "thinking");
   return <div className={`chat-activity chat-activity-inline conversation-turn-activity${runningCall ? " is-command-running" : ""}${runningThinking ? " is-thinking-running" : ""}`} data-expanded={open ? "true" : "false"}>
-    <button type="button" className="chat-process-summary chat-process-summary-plain" aria-expanded={open}
-      onClick={() => setExpanded(current => !(current ?? live))}>
+    <ChatActivity expanded={open} onToggle={() => setExpanded(current => !(current ?? live))} summary={<>
       {live ? <ActivityMark running/> : null}
       <span className="chat-activity-meta">
         <span className="chat-activity-meta-item">{turn.completedAt ? "处理结束" : "执行过程"}</span>
@@ -145,15 +129,14 @@ function TurnActivity({ turn, source, results, session, live, submit }: {
         <span className="chat-activity-meta-item">{blocks.length} 条记录</span>
         {duration > 0 ? <><span className="chat-activity-separator" aria-hidden="true">·</span><span className="chat-activity-meta-item">{Math.ceil(duration / 1000)} 秒</span></> : null}
       </span>
-      <DisclosureChevron expanded={open}/>
-    </button>
+    </>}>
     {open ? <div className="chat-activity-rows">
       {blocks.map((block, index) => block.type === "thinking"
         ? <ActivityThinkingRow key={`thinking:${index}`} thinking={block.thinking} clock={activityRowClock(block.occurredAt)}
             running={!!runningThinking && index === blocks.length - 1}/>
         : block.type === "tool_use" ? <ActivityTool key={`${source}:${block.id}`} block={block} source={source} session={session}
             result={source ? results.get(activityToolKey(source, block.id)) : undefined} canAnswer={false} submit={submit}/> : null)}
-    </div> : null}
+    </div> : null}</ChatActivity>
     {questionBlocks.map(block => session ? <QuestionCard key={`${source}:${block.id}:${JSON.stringify(activityQuestions(block))}`} block={block} session={session} canAnswer submit={submit}/> : null)}
   </div>;
 }
@@ -163,26 +146,16 @@ function ActivityThinkingRow({ thinking, clock, running }: { thinking: string; c
   const [open, setOpen] = React.useState(false);
   const excerpt = thinking.replace(/\s+/g, " ").trim().slice(0, 180);
   return <div className="chat-call chat-call-inline" data-status={running ? "running" : "complete"} data-thinking-entry="true" data-expanded={open ? "true" : "false"}>
-    <span className="chat-call-mark" data-status={running ? "running" : "complete"} aria-hidden="true"/>
-    <button type="button" className="chat-call-button chat-call-button-plain" aria-expanded={open} aria-label={`思考过程，${running ? "运行中" : "已结束"}`}
-      onClick={() => setOpen(current => !current)}>
-      <span className="chat-call-copy">
-        <span className="chat-call-line">
-          <time className="chat-call-time" dateTime={clock || undefined}>{clock}</time>
-          <span className="chat-call-label">思考过程</span>
-        </span>
-        <span className="chat-call-preview" title={excerpt || undefined}>{excerpt}</span>
-      </span>
-      <DisclosureChevron expanded={open}/>
-    </button>
-    <div className="chat-disclosure-body" data-expanded={open} inert={!open} aria-hidden={!open}>{open ? <div className="chat-activity-detail-content">
+    <ChatActivityEntry expanded={open} status={running ? "running" : "complete"} label="思考过程" stateLabel={running ? "运行中" : "已结束"}
+      clock={clock} preview={excerpt} onToggle={() => setOpen(current => !current)}>
+      {open ? <div className="chat-activity-detail-content">
       <div className="chat-activity-detail-section"><h4>思考</h4><pre tabIndex={0}>{thinking || "模型未提供可显示的思考正文。"}</pre></div>
-    </div> : null}</div>
+    </div> : null}</ChatActivityEntry>
   </div>;
 }
 
 export function useConversationActivity({ detail, active, target = null, onRefresh }: {
-  detail: ConversationDetail | null; active: boolean; target?: ConversationTarget; onRefresh?(): void;
+  detail: ConversationActivityDetail | null; active: boolean; target?: ConversationTarget; onRefresh?(): void;
 }): { renderActivity(turn: ConversationTurn, index: number): React.ReactNode; controls: React.ReactNode } {
   React.useSyncExternalStore(repository.subscribe, repository.revision, repository.revision);
   const owners = activitySessionOwners(detail, target);

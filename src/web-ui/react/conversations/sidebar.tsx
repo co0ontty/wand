@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Avatar, Flex, Typography } from "antd";
+import { Avatar, Badge, Flex, Typography } from "antd";
 import type { ConversationSummary } from "../../../conversation-types.js";
 import { employeeProfile } from "../agents/employee-profile";
 import { wandOverlay } from "../overlay-controller";
@@ -15,24 +15,29 @@ import { ConversationMorphIcon, ConversationPanel } from "./controls";
 import { GroupEditor } from "./group-editor";
 import { useUserProfile } from "../user-profile-repository";
 
-export function ConversationNavigation({ compact = false, onDirectory }: { compact?: boolean; onDirectory(): void }): React.ReactElement {
-  const state = useConversationUi();
-  const selected = state.directory ? "contacts" : state.mode;
-  const navigate = (value: string): void => {
-    if (value === "contacts") { onDirectory(); return; }
-    if (state.directory) value === "chats" ? conversationUi.show() : conversationUi.suspend();
-    conversationUi.mode(value as "chats" | "tasks");
-  };
+export type ConversationNavigationPage = "chats" | "tasks" | "board" | "teams" | "contacts";
+
+/** Global destinations stay in the left rail, independent of the current list. */
+export function ConversationNavigation({ activePage, teamAttention, onNavigate }: {
+  activePage: ConversationNavigationPage | null;
+  teamAttention: number;
+  onNavigate(page: ConversationNavigationPage): void;
+}): React.ReactElement {
   const entries = [
-    { value: "chats", label: "对话", icon: "chat" as const },
-    { value: "tasks", label: "工作区", icon: "folder" as const },
-    { value: "contacts", label: "通讯录", icon: "parallel" as const },
-  ];
-  return <Flex align="center" vertical={compact} gap={4} className="conversation-navigation" aria-label="首页列表导航">
-    {compact ? entries.map(entry => <WandIconButton key={entry.value} aria-label={entry.label} title={entry.label}
-      kind={selected === entry.value ? "soft" : "ghost"} aria-pressed={selected === entry.value}
-      onClick={() => navigate(entry.value)}><WandIcon name={entry.icon}/></WandIconButton>) :
-      <WandStretchTabs value={selected} onValueChange={navigate} ariaLabel="对话或工作区" tabs={entries}/>}
+    { value: "chats", label: "对话", icon: "chat" },
+    { value: "tasks", label: "工作区", icon: "folder" },
+    { value: "board", label: "任务看板", icon: "board", id: "task-board-button" },
+    { value: "teams", label: "团队", icon: "parallel", id: "ai-teams-button" },
+    { value: "contacts", label: "通讯录", icon: "user" },
+  ] as const;
+  return <Flex component="nav" vertical gap={4} className="conversation-navigation" aria-label="功能导航">
+    {entries.map(entry => <WandIconButton key={entry.value} id={"id" in entry ? entry.id : undefined}
+      data-stretch-value={entry.value} aria-label={entry.label} title={entry.label}
+      kind={activePage === entry.value ? "soft" : "ghost"} aria-current={activePage === entry.value ? "page" : undefined}
+      aria-pressed={activePage === entry.value} onClick={() => onNavigate(entry.value)}>
+      {entry.value === "teams" ? <Badge count={teamAttention} size="small"><WandIcon name={entry.icon} size={20}/></Badge>
+        : <WandIcon name={entry.icon} size={20}/>}
+    </WandIconButton>)}
   </Flex>;
 }
 

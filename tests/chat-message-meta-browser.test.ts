@@ -21,12 +21,12 @@ function textContrast(text: string, background: string): number {
 }
 
 // Real production renderer and Ant components. Synthetic messages only; no provider requests.
-test("chat bubbles keep reply text, usage and timing together across live patches", {
+test("canonical messages preserve body, compact metadata and optional usage across live patches", {
   skip: process.env.WAND_CHAT_BROWSER !== "1", timeout: 180_000,
 }, async () => {
   const root = resolve(import.meta.dirname, "..");
   const temp = mkdtempSync(join(tmpdir(), "wand-chat-meta-"));
-  const evidence = join(root, "output/chat-layout-meta-20261007/browser");
+  const evidence = process.env.WAND_CHAT_EVIDENCE_DIR || join(root, "output/chat-layout-meta-20261007/browser");
   mkdirSync(evidence, { recursive: true });
   await build({ stdin: { resolveDir: root, loader: "tsx", contents: `
     import "./tests/helpers/realtime-refresh-focus-harness.ts";
@@ -117,48 +117,50 @@ test("chat bubbles keep reply text, usage and timing together across live patche
       await wait("!!window.focusRefreshHarness");
       await evaluate(`(async()=>{ window.h=window.focusRefreshHarness; window.metaTurns=${JSON.stringify(fixtures)};
         window.openedAuthor=null;window.__openAuthorSession=id=>{window.openedAuthor=id;};await h.fresh(metaTurns); })()`);
+      await evaluate("document.querySelector('.chat-message[data-msg-index=\"1\"] .turn-usage-disclosure .ant-collapse-header').click()");
+      await wait("!!document.querySelector('.chat-message[data-msg-index=\"1\"] .turn-usage-number')");
+      await evaluate("document.querySelector('.chat-message[data-msg-index=\"3\"] .turn-usage-disclosure .ant-collapse-header').click()");
+      await wait("!!document.querySelector('.chat-message[data-msg-index=\"3\"] .turn-usage-number')");
       const shape = await evaluate(`(()=>{
         const row=document.querySelector('.chat-message[data-msg-index="1"]');
         const surface=row.querySelector('.ant-bubble-content'); const body=row.querySelector('.chat-message-content');
-        const stats=row.querySelector('.chat-message-stats'); const texts=[...stats.querySelectorAll('.ant-typography')];
+        const stats=row.querySelector('.turn-usage-disclosure'); const texts=[...stats.querySelectorAll('.turn-usage-number')];
         const time=row.querySelector('.chat-message-time time'); const r=surface.getBoundingClientRect(),b=body.getBoundingClientRect();
-        return { variant:surface.className, footerInside:surface.contains(stats), bodyInside:surface.contains(body),
+        return { variant:surface.className, footerInside:row.querySelector('.ant-bubble-body').contains(stats), bodyInside:surface.contains(body),
           bodyFits:b.left>=r.left&&b.right<=r.right+1&&b.top>=r.top&&b.bottom<=r.bottom+1,
           fontSizes:texts.map(n=>getComputedStyle(n).fontSize), colors:texts.map(n=>getComputedStyle(n).color),
           usage:row.querySelector('.turn-usage-summary').textContent, time:time.textContent,
           duration:row.querySelector('.chat-message-time').textContent, clockIso:time.dateTime,
           usageLines:row.querySelectorAll('.turn-usage-summary').length,
           oversizedIcons:row.querySelectorAll('.turn-usage-icon').length,
-          avatarWidth:row.querySelector('.ant-avatar')?.getBoundingClientRect().width,
+          avatarWidth:row.querySelector('.assistant-author-avatar')?.getBoundingClientRect().width,
           overflow:document.documentElement.scrollWidth>innerWidth+1,
           secondary:getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim(),
-          background:getComputedStyle(surface).backgroundColor };
+          background:(()=>{let n=stats;while(n){const c=getComputedStyle(n).backgroundColor;if(!c.endsWith(', 0)')&&c!=='transparent')return c;n=n.parentElement;}return 'rgb(255, 255, 255)';})() };
       })()`);
-      assert.match(shape.variant, /ant-bubble-content-outlined/);
-      assert.equal(shape.footerInside && shape.bodyInside && shape.bodyFits, true, `${mode}: text and statistics belong to the bubble`);
+      assert.match(shape.variant, /ant-bubble-content-borderless/);
+      assert.equal(shape.footerInside && shape.bodyInside && shape.bodyFits, true, `${mode}: text and optional statistics belong to the shared message`);
       assert.equal(new Set(shape.fontSizes).size, 1, `${mode}: statistics have one type scale`);
       assert.equal(shape.fontSizes[0], "12px");
       assert.equal(new Set(shape.colors).size, 1, `${mode}: statistics have one semantic color`);
       assert.ok(textContrast(shape.colors[0], shape.background) >= 4.5, `${mode}: small statistics remain readable`);
       assert.match(shape.usage, /输入 12\.3k/); assert.match(shape.usage, /输出 678/);
       assert.match(shape.duration, /耗时 39 秒/); assert.equal(shape.clockIso, "2026-10-07T09:00:41Z");
-      assert.equal(shape.usageLines, 1); assert.equal(shape.oversizedIcons, 0, "native text replaces the unbounded raw SVG");
-      assert.equal(shape.avatarWidth, 32); assert.equal(shape.overflow, false);
+      assert.equal(shape.usageLines, 1); assert.equal(shape.oversizedIcons, 1, "one bounded usage icon");
+      assert.equal(shape.avatarWidth, 26); assert.equal(shape.overflow, false);
       if (process.env.WAND_CHAT_META_SCREENSHOTS !== "0") await screenshot(mode);
-      const authorPoint = await evaluate(`(()=>{const n=document.querySelector('.chat-message[data-msg-index="1"] .chat-author-link');
-        n.scrollIntoView({block:'nearest'});const r=n.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`);
-      for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, ...authorPoint, button: "left", clickCount: 1 });
-      assert.equal(await evaluate("window.openedAuthor"), "fixture-source-session", "native identity button retains the source session action");
+      assert.equal(await evaluate("document.querySelector('.chat-message[data-msg-index=\"1\"] [data-chat-renderer]').dataset.chatRenderer"), "canonical");
+      assert.ok(await evaluate("!!document.querySelector('.chat-message[data-msg-index=\"1\"] .assistant-author-name').textContent"));
 
       // Estimated -> final, added/removed usage, and completion all patch the same native Bubble.
       const settled = await evaluate(`(async()=>{
         const row=document.querySelector('.chat-message[data-msg-index="3"]'); const bubble=row.querySelector('.ant-bubble');
-        const body=row.querySelector('.chat-message-content'); const input=row.querySelector('.turn-usage-summary .ant-typography');
+        const body=row.querySelector('.chat-message-content'); const input=row.querySelector('.turn-usage-summary .turn-usage-number');
         metaTurns[3]={...metaTurns[3],completedAt:'2026-10-07T09:01:14Z',usage:{inputTokens:900,outputTokens:240,estimated:false},
           content:[{type:'text',text:'实时统计已核对，服务端最终用量已返回。'}]};
         h.publish(metaTurns); h.doRenderChat(false); await h.frames();
         return {sameRow:row===document.querySelector('.chat-message[data-msg-index="3"]'),sameBubble:bubble===row.querySelector('.ant-bubble'),
-          sameBody:body===row.querySelector('.chat-message-content'),sameInput:input===row.querySelector('.turn-usage-summary .ant-typography'),
+          sameBody:body===row.querySelector('.chat-message-content'),sameInput:input===row.querySelector('.turn-usage-summary .turn-usage-number'),
           text:row.textContent,usageLines:row.querySelectorAll('.turn-usage-summary').length};
       })()`);
       assert.equal(settled.sameRow && settled.sameBubble && settled.sameBody && settled.sameInput, true, `${mode}: stable owned nodes`);
@@ -170,16 +172,16 @@ test("chat bubbles keep reply text, usage and timing together across live patche
         return {usage:row.querySelectorAll('.turn-usage-summary').length,duration:row.querySelector('.chat-message-time').textContent};
       })()`);
       assert.equal(missing.usage, 0); assert.doesNotMatch(missing.duration, /耗时/);
-      await evaluate(`(async()=>{metaTurns[3].usage={inputTokens:10,outputTokens:20};h.publish(metaTurns);h.doRenderChat(false);await h.frames();})()`);
+      await evaluate(`(async()=>{metaTurns[3].usage={inputTokens:10,outputTokens:20};h.publish(metaTurns);h.doRenderChat(false);await h.frames();document.querySelector('.chat-message[data-msg-index="3"] .turn-usage-disclosure .ant-collapse-header').click();await h.frames();})()`);
       assert.equal(await evaluate("document.querySelectorAll('.chat-message[data-msg-index=\"3\"] .turn-usage-summary').length"), 1, "late usage creates only one footer, not a duplicate inside the body");
       // The existing disclosure still hides/reveals body and statistics together.
       const disclosure = '.chat-message[data-msg-index="3"] .assistant-reply-disclosure';
       await evaluate(`document.querySelector(${JSON.stringify(disclosure)}).click()`);
-      assert.equal(await evaluate("document.querySelector('.chat-message[data-msg-index=\"3\"] .chat-message-stats').checkVisibility({checkVisibilityCSS:true})"), false);
+      assert.equal(await evaluate("document.querySelector('.chat-message[data-msg-index=\"3\"] .turn-usage-disclosure').checkVisibility({checkVisibilityCSS:true})"), false);
       await evaluate(`document.querySelector(${JSON.stringify(disclosure)}).click()`);
-      assert.equal(await evaluate("document.querySelector('.chat-message[data-msg-index=\"3\"] .chat-message-stats').checkVisibility({checkVisibilityCSS:true})"), true);
+      assert.equal(await evaluate("document.querySelector('.chat-message[data-msg-index=\"3\"] .turn-usage-disclosure').checkVisibility({checkVisibilityCSS:true})"), true);
       const plain = await evaluate(`(async()=>{await h.fresh([{role:'assistant',uuid:'plain-metadata',content:[{type:'text',text:'没有统计信息的回复。'}]}]);
-        const row=document.querySelector('.chat-message[data-msg-index="0"]');return {footer:row.querySelectorAll('.chat-message-stats').length,text:row.textContent};})()`);
+        const row=document.querySelector('.chat-message[data-msg-index="0"]');return {footer:row.querySelectorAll('.turn-usage-disclosure').length,text:row.textContent};})()`);
       assert.equal(plain.footer, 0, "absent metadata never reserves an empty footer");
       assert.match(plain.text, /没有统计信息/);
       // The provider corner mark must never replace the employee's actual face.

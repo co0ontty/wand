@@ -68,7 +68,7 @@ test("Ant Design task pages preserve date-only, portals, draft refs and owned fo
     const noop = () => {};
     const agent = { provider:"claude", model:"default", thinkingEffort:"default", mode:"default", kind:"structured" };
     const task = { id:"t1", identifier:"TASK-1", title:"Actual task card", description:("Full inline description with details. ").repeat(60), labels:["UI","Regression","Complete"], workspaceId:"w1", workspaceTaskId:"wt1", workspace:{id:"w1",name:"Project",cwd:"/tmp"}, milestone:{id:"m1",name:"Iteration"}, milestoneId:"m1", status:"doing", priority:"high", dueDate:"2028-02-29", parentTaskId:null, createdAt:"2026-01-01", updatedAt:"2026-01-01", sortOrder:0, sessions:[{id:"s1",provider:"codex",model:"gpt-5",title:"Real session " + "long-unbroken-directory-name/".repeat(12),status:"idle",sessionKind:"structured",cwd:"/tmp/worktree",thinkingEffort:"high"}], agent:null };
-    window.tasks = { selection:"", date:"", refs:false, chosen:"", saved:null, requests:[], deferred:null, employees:[], teams:[{id:"audit-team",name:"审计团队",description:"只读验收",instructions:"",requirePlanApproval:true,maxSteps:8,createdAt:"2026-01-01",updatedAt:"2026-01-01",members:[{id:"m1",name:"负责人",duty:"拆解与验收",isLeader:true,agents:[agent],agent}]}], board:null, teamRun:null };
+    window.tasks = { selection:"", date:"", refs:false, chosen:"", saved:null, requests:[], deferred:null, employees:[], teams:[{id:"audit-team",name:"审计团队",description:"只读验收",instructions:"",requirePlanApproval:true,maxSteps:8,createdAt:"2026-01-01",updatedAt:"2026-01-01",members:[{id:"m1",name:"负责人",duty:"拆解与验收",isLeader:true,agents:[agent],agent}]}], board:null, baseTask:task, boardTasks:null, teamRun:null };
     window.tasks.board = () => taskBoardStore.getSnapshot();
     const milestones = [{id:"m1",name:"Iteration",workspaceId:"w1",isDefault:false,taskCount:1},{id:"m0",name:"Default",workspaceId:null,isDefault:true,taskCount:0}];
     globalThis.fetch = async (input, init) => {
@@ -84,7 +84,7 @@ test("Ant Design task pages preserve date-only, portals, draft refs and owned fo
       let data = url.includes("provider-usage")?{}:url.includes("silicon-employees")?{employees:window.tasks.employees}:url.includes("ai-teams")?window.tasks.teams:url.includes("workspaces")?[{id:"w-audit",name:"Audit project",cwd:"/tmp",kind:"project"}]:url.includes("wand-milestones")?{milestones}:url.includes("team-runs")?[]:url.includes("models")?{models:[{id:"default",label:"Default"},{id:"alpha",label:"Alpha"}]}:{};
       return new Response(JSON.stringify(data), {status:200,headers:{"content-type":"application/json"}});
     };
-    Object.assign(taskBoardRepository,{list:async()=>[task,{...task,id:"old",identifier:"TASK-2",title:"Archived",status:"archived"}],workspaces:async()=>[{id:"w1",name:"Project",cwd:"/tmp"}],models:async()=>({models:[{id:"default",label:"Default"}]}),agentDefaults:async()=>agent,saveAgentDefaults:async()=>{},create:async input=>new Promise(resolve=>{window.tasks.createReceipt=()=>resolve({...task,...input,id:"new"})})});
+    Object.assign(taskBoardRepository,{list:async()=>window.tasks.boardTasks??[task,{...task,id:"old",identifier:"TASK-2",title:"Archived",status:"archived"}],workspaces:async()=>[{id:"w1",name:"Project",cwd:"/tmp"}],models:async()=>({models:[{id:"default",label:"Default"}]}),agentDefaults:async()=>agent,saveAgentDefaults:async()=>{},create:async input=>new Promise(resolve=>{window.tasks.createReceipt=()=>resolve({...task,...input,id:"new"})})});
     Object.assign(issuesRepository,{list:async()=>[{number:1,title:"Library migration",state:"open",labels:[{name:"UI"}]}],bindings:async()=>({bindings:[]}),create:async()=>new Promise(resolve=>{window.tasks.issueReceipt=()=>resolve({number:2})})});
     configureNewSessionRuntime({onOpen:noop,onClose:noop,getContext:()=>({effectiveCwd:"/tmp",selectedModels:{}}),rememberModel:noop,prepareCreate:async()=>({}),completeCreate:async()=>{}});
     const newRepo={load:async()=>({config:{defaultProvider:"claude",defaultSessionKind:"structured",defaultMode:"default",defaultCwd:"/tmp"},recentPaths:[{path:"/tmp",name:"tmp"}]}),suggestPaths:async()=>[{path:"/tmp/project",name:"project"}],savePreferences:async()=>{},create:async()=>{throw Error("Local rejection keeps inputs");}};
@@ -350,6 +350,30 @@ test("Ant Design task pages preserve date-only, portals, draft refs and owned fo
       await key('Escape'); await wait("document.querySelector('.task-board-card-open').getAttribute('aria-expanded')==='false'");
       assert.equal(await evaluate("document.activeElement===document.querySelector('.task-board-card-open')"), true, `${mode}: Escape collapse keeps focus on the card trigger`);
       await settle(); await screenshot(`${mode}-board`);
+      await click('[aria-label="任务菜单 TASK-1"]');
+      await wait("!!document.querySelector('[data-wand-popup-owner=task-board-context] [role=menuitem]')");
+      await key('Escape'); await wait("!document.querySelector('[data-wand-popup-owner=task-board-context]')");
+      assert.equal(await evaluate("!!document.querySelector('[data-task-id=t1]')"), true, `${mode}: menu Escape retains board`);
+      await evaluate("document.querySelector('.task-board-card-open').focus()");
+      await send('Input.dispatchKeyEvent',{type:'keyDown',key:'F10',code:'F10',modifiers:8,windowsVirtualKeyCode:121});
+      await wait("!!document.querySelector('[data-wand-popup-owner=task-board-context]')");
+      await key('Escape'); await wait("!document.querySelector('[data-wand-popup-owner=task-board-context]')");
+      await evaluate("tasks.boardTasks=Array.from({length:14},(_,i)=>({...tasks.baseTask,id:'sample-'+i,identifier:'SAMPLE-'+i,title:'合成验收任务 '+i,description:'用于验证列滚动与排序的合成样本',priority:i===8?'urgent':'low',dueDate:i===8?'2026-10-10':null,sessions:i===0?Array.from({length:4},(_,j)=>({...tasks.baseTask.sessions[0],id:'sample-session-'+j})):[]}))");
+      await click('[aria-label="刷新任务"]'); await wait("document.querySelectorAll('.task-board-column.is-doing [data-task-id]').length===14");
+      const columnGeometry = await evaluate("(()=>{const c=document.querySelector('.task-board-column.is-doing'),l=c.querySelector('.task-board-column-list'),h=c.querySelector('header'),p=document.querySelector('.task-board-native-page');const before=h.getBoundingClientRect().y;l.scrollTop=120;return{overflow:l.scrollHeight>l.clientHeight,headStable:before===h.getBoundingClientRect().y,pageOverflow:p.scrollWidth>p.clientWidth,columnWidth:c.getBoundingClientRect().width,pageWidth:p.clientWidth,previewCount:c.querySelector('[data-task-id=sample-0]').querySelectorAll('.task-board-session-row').length}})()");
+      assert.equal(columnGeometry.overflow, true, `${mode}: long columns scroll internally`);
+      assert.equal(columnGeometry.headStable, true);
+      assert.equal(columnGeometry.pageOverflow, false, `${mode}: horizontal scrolling stays inside the board`);
+      assert.equal(columnGeometry.previewCount, 2, `${mode}: multiple sessions have a bounded preview`);
+      if(mode==='mobile')assert.ok(columnGeometry.columnWidth<columnGeometry.pageWidth, 'mobile leaves the adjacent column discoverable');
+      await click('.task-board-sort');
+      await click('[data-wand-popup-owner="任务排序"] [role=option][title="优先级优先"]');
+      await wait("document.querySelector('.task-board-column.is-doing [data-task-id]')?.dataset.taskId==='sample-8'");
+      assert.equal(await evaluate("document.querySelector('.task-board-column.is-doing .task-board-column-list').scrollTop"), 0, `${mode}: sorted leading tasks are visible`);
+      assert.equal(await evaluate("JSON.parse(sessionStorage.getItem('wand.task-board.view-state')).sort"), 'priority');
+      await settle(); await screenshot(`${mode}-board-dense`);
+      await click('.task-board-sort'); await click('[data-wand-popup-owner="任务排序"] [role=option][title="默认顺序"]');
+      await evaluate('tasks.boardTasks=null'); await click('[aria-label="刷新任务"]'); await wait("!!document.querySelector('[data-task-id=t1]')");
       // 其余视图分支同样过一遍库组件：列表行、概览指标卡、甘特图。
       await clickTab("列表"); await wait("!!document.querySelector('.task-board-list-row.ant-card')");
       assert.equal(await evaluate("!!document.querySelector('.task-board-list-title.ant-btn') && !!document.querySelector('.task-board-list-row .ant-tag')"), true, `${mode}: list rows use the library`);
@@ -367,6 +391,8 @@ test("Ant Design task pages preserve date-only, portals, draft refs and owned fo
       const gantt = await evaluate("(()=>{const row=document.querySelector('.task-board-gantt-row');return {height:row.getBoundingClientRect().height,months:document.querySelector('.task-board-gantt-months').textContent,today:!!document.querySelector('.task-board-gantt [aria-current=date]'),line:!!document.querySelector('.task-board-gantt-today-line')}})()");
       assert.equal(gantt.height, 48, `${mode}: one task occupies one compact row`);
       assert.match(gantt.months, /年.*月/);
+      const monthLabels = await evaluate("Array.from(document.querySelectorAll('.task-board-gantt-months .ant-typography')).map((n,i,a)=>({label:n.getAttribute('aria-label'),title:n.title,overflow:getComputedStyle(n).overflow,overlap:!!a[i+1]&&n.getBoundingClientRect().right>a[i+1].getBoundingClientRect().left+1}))");
+      assert.ok(monthLabels.every((month) => month.title === month.label && /年.*月/.test(month.label) && month.overflow === 'hidden' && !month.overlap), `${mode}: narrow month segments preserve full labels without overlap`);
       assert.equal(gantt.today && gantt.line, true, `${mode}: dates are anchored to today`);
       await screenshot(`${mode}-gantt`);
       await clickTab("看板"); await wait("!!document.querySelector('[data-task-id=t1]')"); await settle();
@@ -375,8 +401,11 @@ test("Ant Design task pages preserve date-only, portals, draft refs and owned fo
       await click('.task-board-filter-menu .ant-checkbox-wrapper');
       assert.equal(await evaluate("!!document.querySelector('.task-board-filter-clear,button') && document.body.innerText.includes('清除筛选')"), true, `${mode}: filter applies in place`);
       await key("Escape"); await wait("!document.querySelector('.task-board-filter-menu')");
+      assert.equal(await evaluate("!!document.querySelector('[aria-label^=\"移除状态筛选\"]')"), true, `${mode}: selected filters remain visible after closing the popup`);
+      await click('[aria-label^="移除状态筛选"]');
+      await wait("!document.querySelector('[aria-label^=\"移除状态筛选\"]')");
       // 看板筛选会持久化，清掉再跑下一种视口，避免下一种模式开局就是被筛选过的空列表。
-      await clickText("清除筛选"); await wait("!document.body.innerText.includes('清除筛选')");
+      await wait("!document.body.innerText.includes('清除筛选')");
       await wait("!!document.querySelector('[data-task-id=t1]')");
       await click('[aria-label="新建任务"]'); await wait("!!document.querySelector('.task-board-create-title-input')");
       await click('.task-board-create-title-input'); await send('Input.insertText',{text:'Submitted title'});

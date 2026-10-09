@@ -50,6 +50,25 @@ test("1→2→1 and filtered one-session employee keep the same identity and act
   assert.match(renderRecent(1, scope({ mode: "active" })), /im-sidebar-group-title[^"]*"[^>]*>[\s\S]*?华杰/);
 });
 
+test("recent employee groups omit CLI badges while child sessions retain actual tool logos", () => {
+  const entries = ["codex", "pi"].map((provider, index) => ({
+    group, taskName: "侧栏优化", session: { id: `mixed-${index}`, employeeId: "employee-1",
+      employeeName: "华杰", employeeAvatar: "cat:2", provider, status: "idle" },
+  }));
+  for (const employees of [[], [{ id: "employee-1", name: "华杰", avatar: "cat:2",
+    agents: [{ provider: "codex" }, { provider: "pi" }] }]]) {
+    const html = renderToStaticMarkup(createElement(SidebarPresentationContext.Provider, { value: scope() },
+      createElement(SidebarRecentSection, { entries, employees, displayMode: "full",
+        selectedSessionId: null, now: 0, onOpen() {} })));
+    assert.match(html, /wand-employee-avatar/);
+    assert.doesNotMatch(html, /wand-employee-avatar-provider/);
+    for (const provider of ["codex", "pi"]) {
+      assert.equal(html.split(`data-provider-logo="${provider}"`).length - 1, 1,
+        "only the actual child session shows its tool");
+    }
+  }
+});
+
 test("temporary folds and search do not inherit or overwrite normal collapsed choices", () => {
   const normal = { "recent.employee:employee-1": true };
   assert.match(renderRecent(1, scope({ mode: "folded", normal })), /aria-expanded="false"/);
@@ -139,10 +158,10 @@ test("task arrow, rail and peek share the projection through Ant layout and cont
   assert.match(panel, /onClick=\{\(\) => setDisplayMode\("full"\)\}/);
   assert.match(panel, /nativeEvent.isComposing/);
   assert.match(shell, /<Layout.Sider/);
-  assert.match(shell, /width="min\(320px, calc\(100vw - 24px\)\)" collapsedWidth=\{72\}/);
+  assert.match(shell, /width="min\(376px, calc\(100vw - 24px\)\)" collapsedWidth=\{128\}/);
   const peek = source("src/web-ui/react/shell/sidebar-peek.tsx");
   assert.match(peek, /<Card size="small"/);
-  assert.match(peek, /width: "min\(320px, calc\(100vw - 88px\)\)"/);
+  assert.match(peek, /width: "min\(320px, calc\(100vw - 144px\)\)"/);
   assert.match(panel, /<Flex align="center" gap=\{4\}/);
   assert.match(panel, /hidden=\{!searchVisible\} inert=\{!searchVisible \|\| undefined\}/);
 

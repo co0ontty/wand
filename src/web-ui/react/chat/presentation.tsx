@@ -1,8 +1,10 @@
 import * as React from "react";
+import { ChatMessage } from "./message";
+import { ChatActivity, ChatActivityEntry, ChatDisclosureBody as DisclosureBody, ChatDisclosureChevron as DisclosureChevron } from "./activity";
 import { createRoot, type Root } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { Alert, Badge, Button, Card, Collapse, Flex, Tag, Timeline, Typography, theme } from "antd";
-import { Bubble, FileCard, Think, ThoughtChain } from "@ant-design/x";
+import { FileCard, Think, ThoughtChain } from "@ant-design/x";
 import { EmployeeAvatar } from "../agents/employee-avatar";
 import { WandIcon } from "../ui";
 import { WandUiProvider } from "../theme";
@@ -116,14 +118,6 @@ function preserveDisclosurePosition(control: HTMLElement, change: () => void): v
   for (const event of ["wheel", "touchstart", "pointerdown", "keydown", "focusin"]) scroller.addEventListener(event, cancel, { passive: true });
   disclosureAnchors.set(scroller, cancel);
 }
-function DisclosureChevron({ expanded }: { expanded: boolean }): React.ReactElement {
-  return <span className="chat-disclosure-chevron" data-expanded={expanded} aria-hidden="true"><WandIcon name="chevronDown" size={13}/></span>;
-}
-function DisclosureBody({ expanded, children }: { expanded: boolean; children: React.ReactNode }): React.ReactElement {
-  return <div className="chat-disclosure-body" data-expanded={expanded} inert={!expanded} aria-hidden={!expanded}>
-    <div>{children}</div>
-  </div>;
-}
 function businessBody(node?: HTMLElement): React.ReactNode {
   return <Typography><OwnedNode node={node}/></Typography>;
 }
@@ -204,7 +198,7 @@ function ChatBubble({ element, slots }: { element: HTMLElement; slots: Map<strin
       (window as any).__turnUsageSetExpanded?.(usageKey, expanded);
     }}
     items={[{ key: "usage", label: "本轮用量", children: usageValues }]}/> : null;
-  return <Bubble placement={user ? "end" : "start"} variant={user ? "filled" : "borderless"} shape="corner"
+  return <ChatMessage own={user}
     // 助手的回复头部（时间 + 署名 + 收起）由 presentAssistantReply 持有，这里不再重复一份时间行。
     header={user ? timeRow : undefined}
     // 助手回复不设阅读栏宽：横向用满可用宽度（对齐 Android 回复正文），只有自己的发言按气泡收口。
@@ -290,10 +284,10 @@ function renderProjection(element: HTMLElement, projection: Projection): void {
     // 缩略统计行是全段唯一的动态 loading，展开时也不让位；时间线行不再另起一份。
     // 运行标记是业务标记（九点流动标记）而不是库的 Spin：标记随 imperative 标记一起进出，
     // 运行态由 .chat-activity.is-*-running 表达，同一实例里展开，不做两套图标切换。
-    content = <><Button type="text" block className="chat-process-summary" aria-expanded={expanded}
-      onClick={event => preserveDisclosurePosition(event.currentTarget, () => { (window as any).__activityToggle(event.currentTarget); renderProjection(element, projection); })}>
-      <OwnedNode node={summary}/><DisclosureChevron expanded={expanded}/>
-    </Button><DisclosureBody expanded={expanded}><OwnedNode node={slots.get("chat-activity-menu")}/></DisclosureBody></>;
+    content = <ChatActivity expanded={expanded} summary={<OwnedNode node={summary}/>}
+      onToggle={event => preserveDisclosurePosition(event.currentTarget, () => { (window as any).__activityToggle(event.currentTarget); renderProjection(element, projection); })}>
+      <OwnedNode node={slots.get("chat-activity-menu")}/>
+    </ChatActivity>;
   } else if (projection.kind === "call") {
     const seed = slots.get("chat-call-button");
     const detail = slots.get("chat-call-detail");
@@ -306,24 +300,11 @@ function renderProjection(element: HTMLElement, projection: Projection): void {
     // 输入/结果两行摘录对工具调用**常驻**（哪怕还没结果），每行还留一行高度：
     // 迟到的结果只补文字，不把行撑出来（对齐 Android ToolActivityEntryRow 的触发区几何）。
     const showsToolRows = !thinking && element.hasAttribute("data-tool-ids");
-    content = <ThoughtChain line={false} styles={{ itemHeader: { padding: 0 }, itemIcon: { width: 12, minWidth: 12, marginInlineEnd: 8, alignSelf: "flex-start", marginTop: 14 }, itemContent: { marginTop: 0, marginBottom: 0, padding: 0, background: "transparent" } }} items={[{
-      key: element.dataset.entryKey,
-      // Only the summary animates. Rows carry a static status dot, and the state is read from colour.
-      icon: <span className="chat-call-mark" data-status={status} aria-hidden="true"/>,
-      title: <Button type="text" block className="chat-call-button" aria-expanded={open}
-        aria-label={`${seed?.dataset.label || "工具调用"}，${stateLabel}`}
-        onClick={event => preserveDisclosurePosition(event.currentTarget, () => { (window as any).__activityEntryToggle(event.currentTarget); renderProjection(element, projection); })}>
-        <span className="chat-call-copy"><span className="chat-call-line">
-          {seed?.dataset.time && <time className="chat-call-time" dateTime={seed.dataset.occurredAt}>{seed.dataset.time}</time>}
-          <span className="chat-call-label" title={seed?.dataset.label}>{seed?.dataset.label || "工具调用"}</span></span>
-          {showsToolRows ? <span className="chat-call-preview" title={inputPreview || undefined}>{inputPreview}</span>
-            : inputPreview ? <span className="chat-call-preview" title={inputPreview}>{inputPreview}</span> : null}
-          {showsToolRows ? <span className="chat-call-result" data-error={status === "error" ? "" : undefined} title={resultPreview || undefined}>{resultPreview}</span> : null}
-        </span><DisclosureChevron expanded={open}/>
-      </Button>,
-      content: <DisclosureBody expanded={open}>{businessBody(detail)}</DisclosureBody>,
-      collapsible: false,
-    }]}/>;
+    content = <ChatActivityEntry expanded={open} status={status} label={seed?.dataset.label || "工具调用"} stateLabel={stateLabel}
+      clock={seed?.dataset.time} occurredAt={seed?.dataset.occurredAt} preview={inputPreview} result={resultPreview} tool={showsToolRows}
+      onToggle={event => preserveDisclosurePosition(event.currentTarget, () => { (window as any).__activityEntryToggle(event.currentTarget); renderProjection(element, projection); })}>
+      {businessBody(detail)}
+    </ChatActivityEntry>;
   } else if (projection.kind === "agent") {
     const seed = slots.get("agent-run-summary");
     const expanded = element.dataset.expanded === "true";

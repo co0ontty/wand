@@ -230,7 +230,8 @@ export function ShellTopbarChrome({ snapshot, onAction, onMoreOpenChange, elapse
           <>
             <Typography.Text ellipsis
               className={classNames("topbar-session-title", snapshot.topbar.titleGenerating && "title-generating")}
-              title={[snapshot.topbar.title, snapshot.topbar.description].filter(Boolean).join("\n")}
+              title={[snapshot.topbar.title, snapshot.topbar.titleGenerating && "AI 正在生成标题", snapshot.topbar.description].filter(Boolean).join("\n")}
+              aria-label={snapshot.topbar.titleGenerating ? `${snapshot.topbar.title}，AI 正在生成标题` : undefined}
               aria-busy={snapshot.topbar.titleGenerating || undefined}
               style={{ flex: "1 1 180px", minWidth: 0, maxWidth: 520, fontWeight: "var(--font-weight-semibold)" }}
             >

@@ -9,6 +9,7 @@ export interface ImSidebarItemProps {
   id: string;
   avatarNode?: React.ReactNode;
   title: string;
+  titleGenerating?: boolean;
   state: SidebarSessionState;
   glow?: GlowStatus;
   summary: string;
@@ -17,7 +18,7 @@ export interface ImSidebarItemProps {
 }
 
 export function ImSidebarItem({
-  id, avatarNode, title, state, glow, summary, active = false, onClick,
+  id, avatarNode, title, titleGenerating = false, state, glow, summary, active = false, onClick,
 }: ImSidebarItemProps): React.ReactElement {
   const effectiveGlow = glow ?? (
     state.label === "运行中" ? "running"
@@ -45,7 +46,9 @@ export function ImSidebarItem({
         <Badge dot={effectiveGlow !== "none"} color={sidebarGlowColor(effectiveGlow)}>{avatarNode}</Badge>
       </span>
       <Flex vertical className="im-sidebar-item-body" style={{ minWidth: 0, textAlign: "start", flex: 1 }}>
-        <Typography.Text ellipsis className="im-sidebar-item-name">{title}</Typography.Text>
+        <Typography.Text ellipsis className={classNames("im-sidebar-item-name", titleGenerating && "title-generating")}
+          aria-busy={titleGenerating || undefined} aria-label={titleGenerating ? `${title}，AI 正在生成标题` : undefined}
+          title={titleGenerating ? "AI 正在生成标题" : undefined}>{title}</Typography.Text>
         <Typography.Text ellipsis type="secondary" id={descriptionId} className="im-sidebar-item-summary" style={{ fontSize: 12 }}>{summary}</Typography.Text>
       </Flex>
     </WandButton>

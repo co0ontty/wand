@@ -51,6 +51,8 @@ import type {
   NewSessionRepository,
 } from "./types";
 import { describeError } from "../errors";
+import { NewSessionTaskField } from "./task-field";
+import { resolveNewSessionTask } from "./task-creation";
 
 export interface NewSessionHostProps {
   repository?: NewSessionRepository;
@@ -176,6 +178,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
   const [form, setForm] = useState<NewSessionForm | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const submitLock = useRef(false);
   const [error, setError] = useState("");
   const [suggestions, setSuggestions] = useState<NewSessionDefaults["recentPaths"]>([]);
   const [suggestionsActive, setSuggestionsActive] = useState(false);
@@ -193,7 +196,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
   const teamNoteRef = useRef<HTMLTextAreaElement | null>(null);
   const [projects, setProjects] = useState<Workspace[]>([]);
   // 任务上下文（`workspaceTaskId`）不给团队：那张卡已经在了，从这里开团只会多建一张卡（§5.1）。
-  const teamContext = Boolean(controller.open && form && !form.workspaceTaskId);
+  const teamContext = Boolean(controller.open && form && !form.workspaceTaskId && form.taskName === undefined);
   const teams = useAiTeamList(teamContext);
   const teamOptions = useMemo(() => teams?.map(aiTeamPickerOption) ?? null, [teams]);
 
@@ -236,6 +239,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
           specifiedCli: false,
           workspaceId: controller.workspaceId || undefined,
           workspaceTaskId: controller.workspaceTaskId || undefined,
+          taskName: controller.newTask ? "" : undefined,
         });
         if (!context) setError("新建会话运行环境尚未就绪，请刷新页面后重试。");
       })
@@ -246,7 +250,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
         if (!abort.signal.aborted) setLoading(false);
       });
     return () => abort.abort();
-  }, [controller.initialCwd, controller.initialEmployeeId, controller.initialKind, controller.open, controller.revision, controller.taskName, controller.workspaceId, controller.workspaceTaskId, repository]);
+  }, [controller.initialCwd, controller.initialEmployeeId, controller.initialKind, controller.open, controller.revision, controller.taskName, controller.workspaceId, controller.workspaceTaskId, controller.newTask, repository]);
 
   // 项目列表只在需要团队直发时读一次：拿不到就当成「没有可开工的项目」，CLI/员工会话不受影响。
   useEffect(() => {
@@ -407,13 +411,14 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (!form || !defaults || submitting) return;
+    if (!form || !defaults || submitLock.current) return;
     const runtime = newSessionStore.getRuntime();
     if (!runtime) {
       setError("新建会话运行环境尚未就绪，请刷新页面后重试。");
       return;
     }
     newSessionController.setDismissable(false);
+    submitLock.current = true;
     setSubmitting(true);
     setError("");
     try {
@@ -422,7 +427,13 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
         await startDirectTeamRun(form);
         return;
       }
-      const request = buildCreateRequest(form, defaults.config, runtime.getContext());
+      const boundForm = await resolveNewSessionTask(form, projectCwd, httpWorkspacesRepository);
+      if (boundForm !== form) {
+        // Keep the accepted task binding if session creation fails, so retry never creates another task.
+        setForm(boundForm);
+        notifyTasksChanged();
+      }
+      const request = buildCreateRequest(boundForm, defaults.config, runtime.getContext());
       const dimensions = await runtime.prepareCreate(request.kind, request);
       if (request.kind !== "structured") Object.assign(request, dimensions);
       void repository.savePreferences({
@@ -441,6 +452,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
     } catch (createError) {
       setError(describeError(createError, creationFallback(form)));
     } finally {
+      submitLock.current = false;
       newSessionController.setDismissable(true);
       setSubmitting(false);
     }
@@ -460,6 +472,8 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
       {loading || (controller.open && providerUsage === null) ? <Spin tip="正在加载新建会话配置…"><div style={{ minHeight: 100 }} role="status">正在加载新建会话配置…</div></Spin> : form && defaults ? (
         <TaskForm noValidate aria-busy={submitting} onSubmit={(event) => void submit(event)}>
           <Flex vertical gap={16}>
+            {!form.teamId ? <NewSessionTaskField form={form} initialName={controller.taskName}
+              disabled={submitting} cwd={projectCwd} onChange={setForm}/> : null}
             {form.employeeId ? (
               <div className="wand-new-session-employee-section">
                 <Flex
@@ -712,12 +726,12 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                 aria-describedby="wand-new-session-team-note-hint" placeholder="一句话说清要他们做什么"
                 onChange={(event) => setTeamNote(event.currentTarget.value)}/>
             </Form.Item> : null}
-            <Form.Item htmlFor="wand-new-session-cwd" label="工作目录" extra={<Typography.Text id="wand-new-session-cwd-hint" type="secondary">留空则使用当前目录，支持路径自动补全。</Typography.Text>}>
-              <AutoComplete style={{ width: "100%" }} value={form.cwd} disabled={submitting}
+            <Form.Item htmlFor="wand-new-session-cwd" label="工作目录" extra={<Typography.Text id="wand-new-session-cwd-hint" type="secondary">{form.workspaceTaskId ? "使用所选任务的运行目录；切换任务可更换目录。" : "留空则使用当前目录，支持路径自动补全。"}</Typography.Text>}>
+              <AutoComplete style={{ width: "100%" }} value={form.cwd} disabled={submitting || Boolean(form.workspaceTaskId)}
                 open={suggestionsActive && suggestions.length > 0}
                 options={suggestions.map((item) => ({ value: item.path, label: <Flex vertical><Typography.Text strong>{item.name}</Typography.Text><Typography.Text type="secondary">{item.path}</Typography.Text></Flex> }))}
-                onChange={(cwd) => setForm({ ...form, cwd })}
-                onSelect={(cwd) => { setForm({ ...form, cwd }); setSuggestionsActive(false); }}
+                onChange={(cwd) => setForm({ ...form, cwd, workspaceId: undefined })}
+                onSelect={(cwd) => { setForm({ ...form, cwd, workspaceId: undefined }); setSuggestionsActive(false); }}
                 onFocus={() => setSuggestionsActive(true)} onBlur={() => setSuggestionsActive(false)}>
                 <WandInput id="wand-new-session-cwd" type="text"
                   placeholder={newSessionStore.getRuntime()?.getContext().effectiveCwd || defaults.config.defaultCwd}
@@ -726,8 +740,9 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
               </AutoComplete>
               {defaults.recentPaths.length > 0 ? <Space wrap aria-label="最近使用的工作目录" style={{ marginTop: 8 }}>
                 {defaults.recentPaths.map((item) => <WandButton kind={form.cwd === item.path ? "outline" : "ghost"} size="small"
+                  disabled={submitting || Boolean(form.workspaceTaskId)}
                   key={item.path} type="button" title={item.path} aria-pressed={form.cwd === item.path}
-                  onClick={() => setForm({ ...form, cwd: item.path })}>
+                  onClick={() => setForm({ ...form, cwd: item.path, workspaceId: undefined })}>
                   <Typography.Text ellipsis style={{ maxWidth: 180 }}>{item.path}</Typography.Text>
                 </WandButton>)}
               </Space> : null}

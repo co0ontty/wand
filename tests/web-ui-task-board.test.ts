@@ -51,7 +51,7 @@ import {
   TASK_BOARD_VIEW_PARAM,
   taskBoardSearch,
 } from "../src/web-ui/react/issues/task-board-controller.ts";
-import { parseTaskBoardViewState } from "../src/web-ui/react/issues/task-board-view-state.ts";
+import { parseTaskBoardViewState, sortTaskBoardTasks } from "../src/web-ui/react/issues/task-board-view-state.ts";
 import { sidebarActionLeavesPage } from "../src/web-ui/react/shell/shell-sidebar.tsx";
 
 test("board browsing state restores valid filters and rejects stale or malformed values", () => {
@@ -65,6 +65,21 @@ test("board browsing state restores valid filters and rejects stale or malformed
   assert.deepEqual(restored.filters, { statuses: ["doing"], priorities: ["high"], labels: ["UI"] });
   assert.equal(parseTaskBoardViewState({ view: "removed-view" }).view, "board");
   assert.deepEqual(parseTaskBoardViewState(null).filters, EMPTY_ISSUE_FILTERS);
+  assert.equal(parseTaskBoardViewState({ sort: "due" }).sort, "due");
+  assert.equal(parseTaskBoardViewState({ sort: "unknown" }).sort, "manual");
+});
+
+test("board sorting keeps stable ties, undated tasks last and source order intact", () => {
+  const tasks = [
+    { id: "a", priority: "low" as const, dueDate: null, updatedAt: "2026-10-09" },
+    { id: "b", priority: "urgent" as const, dueDate: "2026-10-11", updatedAt: "2026-10-07" },
+    { id: "c", priority: "urgent" as const, dueDate: "2026-10-10", updatedAt: "2026-10-08" },
+  ];
+  assert.equal(sortTaskBoardTasks(tasks, "manual"), tasks);
+  assert.deepEqual(sortTaskBoardTasks(tasks, "priority").map((task) => task.id), ["b", "c", "a"]);
+  assert.deepEqual(sortTaskBoardTasks(tasks, "due").map((task) => task.id), ["c", "b", "a"]);
+  assert.deepEqual(sortTaskBoardTasks(tasks, "updated").map((task) => task.id), ["a", "c", "b"]);
+  assert.deepEqual(tasks.map((task) => task.id), ["a", "b", "c"]);
 });
 
 test("issue model catalog normalizes every provider and keeps a default option", () => {
@@ -462,7 +477,8 @@ test("task board is a first-class view=taskboard route that does not unmount the
   assert.match(main, /onBack=\{\(\) => taskBoardController\.close\(\)\}/);
 
   // 路由层由组件自身覆盖主区，LegacyHost 槽位仍常驻。
-  assert.match(host, /<Flex component="section"[\s\S]*?className="task-board-native-page"[\s\S]*?position: "absolute", inset: 0, zIndex: 8/);
+  assert.match(host, /<Flex component="section"[\s\S]*?className="task-board-native-page"/);
+  assert.match(readFileSync(new URL("../src/web-ui/content/styles.css", import.meta.url), "utf8"), /\.task-board-native-page\s*\{[^}]*position:absolute; inset:0; z-index:8/);
   assert.match(main, /id="output"[\s\S]*?snapshot\.legacyVisibility\.terminal/);
   assert.match(main, /ref=\{legacyRefs\?\.composer\}[\s\S]*?snapshot\.legacyVisibility\.composer/);
 
@@ -475,8 +491,9 @@ test("task board is a first-class view=taskboard route that does not unmount the
   assert.match(sidebar, /const navigateFromTree = \(\): void => \{\s*settingsController\.close\(\);\s*taskBoardController\.close\(\)/);
   assert.match(sidebar, /onNavigate=\{navigateFromTree\}/);
   // 功能导航既有库按钮高亮，也保留当前页语义。
-  assert.match(sidebar, /id="task-board-button"[\s\S]*?aria-current=\{taskBoard\.open && taskBoard\.page !== "teams" \? "page" : undefined\}/);
-  assert.match(sidebar, /id="ai-teams-button"[\s\S]*?aria-current=\{taskBoard\.open && taskBoard\.page === "teams" \? "page" : undefined\}/);
+  assert.match(sidebar, /activePage=\{settings\.open \? null : taskBoard\.open \? taskBoard\.page === "board" \? "board" : "teams"/);
+  const navigation = readFileSync(new URL("../src/web-ui/react/conversations/sidebar.tsx", import.meta.url), "utf8");
+  assert.match(navigation, /aria-current=\{activePage === entry\.value \? "page" : undefined\}/);
   // 同一功能只留一个可见入口：箭头只在未选中任务时出现（返回工作区），选中任务后返回交给面包屑首段。
   assert.match(host, /\{!selected \? <WandIconButton/);
   assert.match(host, /aria-label="返回工作区"/);
@@ -597,7 +614,8 @@ test("看板卡片点击就地展开，不再把整块看板换成详情页（�
   assert.match(detail, /forceRender: true/);
   assert.match(detail, /<Descriptions size="small" column=\{1\} items=\{fields\}/);
   assert.match(card, /<Card size="small"/);
-  assert.doesNotMatch(styles, /\.task-board-card-detail/);
+  // Host spacing may style the inner content; visibility and animation stay in Ant Collapse.
+  assert.doesNotMatch(styles, /\.task-board-card-detail\s*\{[^}]*\b(display|height|opacity|animation):/);
   // 完整版与简版会话保留同一份数据，展开时只显示完整版。
   assert.match(card, /className="task-board-session-list" style=\{\{ display: expanded \? "none" : undefined \}\}/);
 });

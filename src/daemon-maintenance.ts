@@ -65,6 +65,8 @@ export interface DaemonMaintenanceTarget {
   inspect(includeInventory?: boolean): Promise<DaemonInspection>;
   /** Must recheck identity and use graceful shutdown, never a force-kill. */
   restart(expected: DaemonInspection): Promise<void>;
+  /** Explicit manual update only: interrupt authenticated live inventory. */
+  interrupt?(expected: DaemonInspection): Promise<void>;
 }
 
 export interface DaemonMaintenanceOptions {
@@ -73,6 +75,8 @@ export interface DaemonMaintenanceOptions {
   /** Includes Core, starting runs, final checkpoints and queued input. */
   busy(): boolean;
   beginCoreDrain(): () => void;
+  stopExecutions?(): void;
+  coreBusy?(): boolean;
   available(): boolean;
   log(error: unknown): void;
   now?: () => number;
@@ -87,6 +91,7 @@ export class DaemonMaintenance {
   private stopped = false;
   private idleSince: number | null = null;
   private failures = 0;
+  private forcing: Promise<DaemonMaintenanceStatus> | null = null;
 
   constructor(private readonly options: DaemonMaintenanceOptions) {}
 
@@ -106,6 +111,7 @@ export class DaemonMaintenance {
 
   check(): Promise<void> {
     if (this.stopped) return Promise.resolve();
+    if (this.forcing) return this.forcing.then(() => {}, () => {});
     if (this.flight) return this.flight;
     this.flight = this.inspectAndUpdate().catch((error) => {
       this.idleSince = null;
@@ -122,6 +128,61 @@ export class DaemonMaintenance {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     await this.flight;
+    await this.forcing?.catch(() => {});
+  }
+
+  /** Never used by polling. The caller must authenticate and confirm interruption. */
+  forceUpdate(): Promise<DaemonMaintenanceStatus> {
+    if (this.forcing) return this.forcing;
+    const previous = this.flight;
+    this.forcing = (async () => {
+      await previous;
+      const o = this.options;
+      if (this.stopped || !o.available()) throw new Error("当前无法更新，请稍后重试。");
+      return o.admission.exclusive(async () => {
+        if (this.stopped || !o.available()) throw new Error("当前无法更新，请稍后重试。");
+        const releaseCore = o.beginCoreDrain();
+        try {
+          let fresh = await Promise.all(o.targets.map(target => target.inspect()));
+          if (!fresh.some(snapshot => snapshot.pending)) {
+            this.state = { pending: false, phase: "idle" };
+            return this.status();
+          }
+          this.state = { pending: true, phase: "waiting" };
+          if (fresh.some(snapshot => snapshot.running === null)) throw new Error("底层组件执行清单不可用，请稍后重试。");
+          this.state = { pending: true, phase: "updating" };
+          // Keep accepted input queues and history; invalidate active callbacks
+          // through their managers before interrupting daemon-owned executions.
+          o.stopExecutions?.();
+          const interrupted = await Promise.allSettled(o.targets.map((target, i) => target.interrupt?.(fresh[i])));
+          for (const result of interrupted) if (result.status === "rejected") throw result.reason;
+          const deadline = Date.now() + 10_000;
+          while (fresh.some(snapshot => snapshot.running !== 0) || o.coreBusy?.()) {
+            if (Date.now() >= deadline || this.stopped || !o.available()) {
+              throw new Error("执行尚未停止，更新未完成。系统会在空闲后自动重试。");
+            }
+            await new Promise(resolve => setTimeout(resolve, 50));
+            fresh = await Promise.all(o.targets.map(target => target.inspect()));
+          }
+          for (let i = 0; i < fresh.length; i++) {
+            if (this.stopped || !o.available()) throw new Error("更新已暂停，请稍后重试。");
+            if (fresh[i].pending) await o.targets[i].restart(fresh[i]);
+          }
+          const after = await Promise.all(o.targets.map(target => target.inspect()));
+          if (after.some(snapshot => snapshot.pending)) throw new Error("底层组件更新未完成，请稍后重试。");
+          this.state = { pending: false, phase: "idle" };
+          this.failures = 0;
+          return this.status();
+        } catch (error) {
+          if (this.state.pending) this.state = { pending: true, phase: "retrying" };
+          throw error;
+        } finally {
+          this.idleSince = null;
+          releaseCore();
+        }
+      });
+    })().finally(() => { this.forcing = null; });
+    return this.forcing;
   }
 
   private async inspectAndUpdate(): Promise<void> {

@@ -8,6 +8,7 @@ import ts from "typescript";
 import { employeeAvatarProvider, renderEmployeeCliBadge } from "../src/web-ui/react/agents/employee-identity.js";
 import { PROVIDER_IDS } from "../src/web-ui/provider-identity.js";
 import { EmployeeAvatar } from "../src/web-ui/react/agents/employee-avatar.js";
+import { SidebarEmployeeAvatar } from "../src/web-ui/react/workspaces/sidebar-employee-avatar.js";
 
 const employee = { id: "e_cli", name: "员工", avatar: "cat:2", agents: [{ provider: "codex" }, { provider: "pi" }] };
 const source = readFileSync(new URL("../src/web-ui/browser/chat-render.ts", import.meta.url), "utf8");
@@ -45,6 +46,21 @@ test("uploaded employee avatars retain their image and missing CLI has no generi
   const noCli = renderToStaticMarkup(createElement(EmployeeAvatar, { employee: upload, provider: "terminal" }));
   assert.doesNotMatch(noCli, /wand-employee-avatar-provider|data-provider-logo/);
   assert.equal(renderEmployeeCliBadge('unknown" onclick="evil'), "");
+});
+
+test("recent sidebar employee avatars show identity without a preferred CLI badge", () => {
+  for (const avatar of ["", "cat:2", "data:image/png;base64,AAA"]) {
+    for (const agents of [[], [{ provider: "codex" }], employee.agents]) {
+      const html = renderToStaticMarkup(createElement(SidebarEmployeeAvatar, {
+        employee: { ...employee, avatar, agents },
+      }));
+      assert.match(html, /wand-employee-avatar/);
+      assert.doesNotMatch(html, /wand-employee-avatar-provider|data-provider-logo/);
+      if (avatar.startsWith("data:")) assert.ok(html.includes(avatar));
+      else if (avatar.startsWith("cat:")) assert.match(html, /<svg/);
+      else assert.match(html, /wand-generated-avatar-glyph/);
+    }
+  }
 });
 
 test("contact presence indicator remains visible without covering the CLI badge", () => {

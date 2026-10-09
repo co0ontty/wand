@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 
-test("daemon notice follows server phases without stealing focus or requesting manual action", {
+test("header daemon notice preserves focus and confirms manual update, including failure and compact mode", {
   skip: process.env.WAND_DAEMON_BROWSER !== "1",
 }, () => {
   const result = spawnSync(process.execPath, ["tests/helpers/daemon-maintenance-browser.mjs"], {

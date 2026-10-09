@@ -127,6 +127,7 @@ import { TerminalDaemonClient } from "./terminal-daemon-client.js";
 import { createUpgradeAwareTerminalHost } from "./render-host.js";
 import { DaemonAdmission, DaemonMaintenance } from "./daemon-maintenance.js";
 import { createDaemonMaintenanceTargets } from "./daemon-maintenance-targets.js";
+import { registerDaemonMaintenanceRoutes } from "./server-daemon-maintenance-routes.js";
 import { terminalDaemonBuildIsCurrent } from "./terminal-daemon-build.js";
 import { createUpgradeAwareStructuredHost } from "./render-structured-host.js";
 import type { TerminalHost } from "./terminal-host.js";
@@ -584,6 +585,15 @@ export async function startServer(
       || [...processes.list(), ...structuredSessions.list()].some((session) =>
         session.status === "running" || session.structuredState?.inFlight === true || (session.queuedMessages?.length ?? 0) > 0),
     beginCoreDrain: () => structuredSessions.beginCoreRestartDrain(),
+    coreBusy: () => structuredSessions.getCoreTurnStatus().hasActiveTurns,
+    stopExecutions: () => {
+      for (const session of structuredSessions.list()) {
+        if (session.status === "running" || session.structuredState?.inFlight) structuredSessions.stop(session.id);
+      }
+      for (const session of processes.list()) {
+        if (session.status === "running") processes.stop(session.id);
+      }
+    },
     available: () => !shuttingDown && !updateState.updateInFlight && !updateState.providerCliUpdateInFlight
       && terminalDaemonBuildIsCurrent(),
     log: (error) => wandError("底层组件自动更新暂缓，将稍后重试", getErrorMessage(error)),
@@ -834,9 +844,12 @@ export async function startServer(
 
   registerDecisionRoutes(app, { storage, decisions: decisionExpert, requireAuth, requireSessions });
   app.use("/api", requireAuth);
-  app.get("/api/daemon-maintenance", (_req, res) => {
-    res.set("Cache-Control", "no-store").json(daemonMaintenance.status());
-  });
+  registerDaemonMaintenanceRoutes(app, { requireAdmin, maintenance: daemonMaintenance,
+    canForceUpdate: req => {
+      const principal = requestPrincipals.get(req);
+      return !!principal && principalHasScope(principal, "admin");
+    },
+    log: error => wandError("底层组件强制更新未完成", getErrorMessage(error)) });
 
   // Connected apps receive only the route families used by native clients and
   // the browser extension. Browser-admin sessions implicitly satisfy all scopes.

@@ -11,13 +11,33 @@ import {
   type AiTeamStep,
 } from "../ai-teams/repository";
 import { TeamAvatar, TeamAvatarStack, type TeamAvatarState } from "../ai-teams/avatar";
-import { displayTeamOf, mergeTeamChatDetail, TeamChatView } from "../ai-teams/team-chat-view";
+import { displayTeamOf, displayChatTurn, mergeTeamChatDetail, ConversationMessages } from "../ai-teams/team-chat-view";
+import type { ConversationActivityDetail } from "../conversations/activity-model";
+import { useConversationActivity } from "../conversations/activity";
 import { TeamDeliveryCard } from "../ai-teams/team-delivery";
 import { failureMessage } from "../errors";
 import { issueAgentProviderLabel } from "./task-board-agent";
 import { taskBoardController } from "./task-board-controller";
 import { MOTION_DWELL_FAILED_MS, MOTION_DWELL_SENT_MS } from "../ui/motion-tokens";
 import { WandBadge, WandButton, WandIcon } from "../ui";
+
+/** Task details project the same transcript; replying opens its owning conversation. */
+function RunConversation({ detail, active, onOpenSession }: { detail: AiTeamRunDetail; active: boolean; onOpenSession?: (id: string) => void }): React.ReactElement {
+  const team = displayTeamOf(detail);
+  const projection = React.useMemo(() => ({ id: detail.run.conversationId || `run:${detail.run.id}`, kind: "group", title: detail.chatTitle || team.name,
+    communicationSessionId: detail.run.chatSessionId, runDetails: [detail],
+    messages: (detail.chatTurns ?? []).map(turn => displayChatTurn(turn, team)),
+  }) satisfies ConversationActivityDetail, [detail, team]);
+  const activity = useConversationActivity({ detail: projection, active });
+  return <Flex vertical gap={8} style={{ minHeight: 0 }}>
+    <WandButton onClick={() => taskBoardController.open("", "", "teamchat", detail.run.id)}>打开对话并回复</WandButton>
+    <div className="conversation-message-scroll" style={{ maxHeight: "60dvh", overflow: "auto" }}>
+      <ConversationMessages turns={projection.messages} taskLabels={{ [detail.run.taskId]: detail.chatTitle || "任务" }} active={active}
+        mentionNames={team.members.map(member => member.name)} renderActivity={activity.renderActivity}
+        onOpenSession={onOpenSession} onOpenConversation={() => taskBoardController.open("", "", "teamchat", detail.run.id)}/>
+    </div>{activity.controls}
+  </Flex>;
+}
 
 type BadgeTone = "neutral" | "accent" | "info" | "success" | "warning";
 
@@ -400,7 +420,7 @@ export function TeamRunView({
       items={RUN_VIEWS.map((tab) => ({ key: tab.value, label: tab.label, forceRender: true, children:
         <div className="task-board-team-view" data-view={tab.value}
           data-hidden={activeView !== tab.value || undefined} inert={activeView !== tab.value}>
-        {tab.value === "chat" ? <TeamChatView detail={detail} onChange={onChange} onOpenSession={onOpenSession}/> : null}
+        {tab.value === "chat" ? <RunConversation detail={detail} active={activeView === "chat"} onOpenSession={onOpenSession}/> : null}
         {tab.value === "timeline" ? <Timeline className="task-board-team-steps" items={shown.map((step) => ({ key: step.id, color: step.status === "failed" ? "red" : step.status === "done" ? "green" : "blue", children: row(step) }))}/> : null}
         {tab.value === "members" ? <Flex vertical gap={14} className="task-board-team-groups">
           {members.map((member) => {

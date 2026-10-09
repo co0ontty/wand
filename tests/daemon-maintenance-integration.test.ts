@@ -107,3 +107,47 @@ test("real terminald protects PTY + structured runs, then updates automatically 
     env: { PATH: process.env.PATH ?? "" }, name: "xterm", cols: 80, rows: 24 });
   assert.ok(next.process.pid > 0, "original host reference accepts starts after replacement");
 });
+
+test("confirmed manual maintenance interrupts real terminald PTY and structured inventories and reopens admission", { timeout: 20_000 }, async (t) => {
+  if (process.platform === "win32") return t.skip("POSIX shell fixture");
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-manual-daemon-"));
+  const configPath = path.join(root, "config.json");
+  const child = spawn(process.execPath, ["--import", "tsx", path.join(import.meta.dirname, "fixtures/terminal-daemon-entry.ts"), configPath],
+    { stdio: "ignore", env: process.env });
+  let client: TerminalDaemonClient | null = null;
+  t.after(async () => {
+    client?.disconnect();
+    if (child.exitCode === null && child.signalCode === null) { const exit = once(child, "exit"); child.kill("SIGTERM"); await exit; }
+    rmSync(root, { recursive: true, force: true });
+  });
+  client = await waitFor(() => connectExistingTerminalHost(configPath));
+  const stable = client;
+  await stable.createOrAttach({ sessionId: "manual-shell", file: "/bin/sh", args: [], cwd: root,
+    env: { PATH: process.env.PATH ?? "" }, name: "xterm", cols: 80, rows: 24 });
+  await stable.spawnStructured({ runId: "manual-cli", file: process.execPath,
+    args: ["-e", "setTimeout(()=>{}, 30000)"], cwd: root, env: { PATH: process.env.PATH ?? "" } });
+  const [target] = await createDaemonMaintenanceTargets(configPath, { host: stable, legacyHost: stable, renderHost: null }, null);
+  const inspect = target.inspect;
+  let pending = true, replacements = 0;
+  // Exercise the production authenticated interrupt RPCs, using a simulated
+  // version replacement so this test never touches installed daemons/binaries.
+  target.inspect = async full => ({ ...await inspect(full), pending });
+  target.restart = async () => {
+    assert.equal(countRunningDaemonEntries(await stable.request("list")), 0);
+    assert.equal(countRunningDaemonEntries(await stable.request("structuredList")), 0);
+    replacements++; pending = false;
+  };
+  const admission = new DaemonAdmission();
+  const worker = new DaemonMaintenance({ targets: [target], admission, busy: () => true,
+    available: () => true, beginCoreDrain: () => () => {}, log: () => {} });
+  t.after(() => worker.stop());
+  await worker.check(); assert.equal(replacements, 0);
+  assert.deepEqual(await worker.forceUpdate(), { pending: false, phase: "idle" });
+  assert.equal(replacements, 1);
+  assert.equal(child.exitCode, null, "interruption does not itself shut down the daemon");
+  await admission.run(async () => {
+    const next = await stable.createOrAttach({ sessionId: "after-manual", file: "/bin/sh", args: ["-c", "printf ready"], cwd: root,
+      env: { PATH: process.env.PATH ?? "" }, name: "xterm", cols: 80, rows: 24 });
+    assert.ok(next.process.pid > 0);
+  });
+});

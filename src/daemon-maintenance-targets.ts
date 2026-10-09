@@ -61,6 +61,7 @@ export function persistentDaemonTarget(options: {
   checkpointPath: string;
   snapshot(includeInventory?: boolean): Promise<OwnerSnapshot>;
   shutdown(snapshot: OwnerSnapshot): Promise<boolean | void>;
+  interrupt?(): Promise<void>;
   ensure(): Promise<void>;
   reconnect(): Promise<void>;
 }): DaemonMaintenanceTarget {
@@ -78,6 +79,14 @@ export function persistentDaemonTarget(options: {
       const snapshot = await options.snapshot(includeInventory);
       if (!snapshot.pending && readCheckpoint(options.checkpointPath)) unlinkSync(options.checkpointPath);
       return snapshot;
+    },
+    async interrupt(expected) {
+      const current = await options.snapshot();
+      if (current.identity !== expected.identity) throw new Error(`${options.name} owner changed`);
+      if (current.running !== 0) {
+        if (!options.interrupt) throw new Error(`${options.name} cannot interrupt running executions`);
+        await options.interrupt();
+      }
     },
     async restart(expected) {
       const current = await options.snapshot();
@@ -129,6 +138,7 @@ export async function createDaemonMaintenanceTargets(
           pending: shouldUpgradeRenderDaemon(hello.version, version, 0), running: includeInventory ? countRunningDaemonEntries(sessions) : null };
       },
       shutdown: () => render.requestShutdownDrain(),
+      interrupt: () => render.interruptMaintenanceSessions(),
       async ensure() { const client = await createRenderTerminalHost(configPath, { binaryPath: binary ?? undefined }); client.disconnect(); },
       reconnect: () => render.connect(),
     }));
@@ -162,6 +172,16 @@ export async function createDaemonMaintenanceTargets(
           process.kill(snapshot.pid, "SIGTERM");
         }
       },
+      async interrupt() {
+        const sessions = await legacy.request("list") as { sessionId: string; status: string }[];
+        const runs = await legacy.request("structuredList") as { runId: string; status: string }[];
+        await Promise.all([
+          ...sessions.filter(session => session.status === "running")
+            .map(session => legacy.request("kill", { sessionId: session.sessionId, signal: "SIGTERM" })),
+          ...runs.filter(run => run.status === "running")
+            .map(run => legacy.request("structuredKill", { runId: run.runId, signal: "SIGTERM" })),
+        ]);
+      },
       async ensure() { const client = await createTerminalHost(configPath); client.disconnect(); },
       reconnect: () => legacy.connect(),
     }));
@@ -180,6 +200,11 @@ export async function createDaemonMaintenanceTargets(
           running: result ? countRunningDaemonEntries(result.runs) : null };
       },
       async shutdown() { await structured.request("shutdown", { mode: "drain" }); },
+      async interrupt() {
+        const { runs } = await structured.request("list") as { runs: { runId: string; status: string }[] };
+        await Promise.all(runs.filter(run => run.status === "running")
+          .map(run => structured.request("interrupt", { runId: run.runId, signal: "SIGTERM" })));
+      },
       async ensure() { const client = await startStructuredRenderHost(configPath); client.disconnect(); },
       reconnect: () => structured.connect(),
     }));

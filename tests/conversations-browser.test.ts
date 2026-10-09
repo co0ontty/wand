@@ -76,6 +76,7 @@ async function runConversationBrowser(t: TestContext, mentions: boolean): Promis
     import { PortalContainerProvider } from "./src/web-ui/react/ui";
     import { ComposerStore } from "./src/web-ui/browser/composer";
     import { configureTeamChatComposerRuntime } from "./src/web-ui/react/ai-teams/composer-bridge";
+    import { taskBoardController } from "./src/web-ui/react/issues/task-board-controller";
     import { conversationUi } from "./src/web-ui/react/conversations/state";
     import { notifyAiTeamStepLive } from "./src/web-ui/react/ai-teams/repository";
     import { notifyConversationSessionPreview } from "./src/web-ui/react/conversations/session-preview";
@@ -100,7 +101,7 @@ async function runConversationBrowser(t: TestContext, mentions: boolean): Promis
         store.setSnapshot(snapshot);
       }
     };
-    globalThis.conversationFixture = { composer, conversationUi, store, live: notifyAiTeamStepLive, sessionLive: notifyConversationSessionPreview, roots: null,
+    globalThis.conversationFixture = { composer, conversationUi, taskBoardController, store, live: notifyAiTeamStepLive, sessionLive: notifyConversationSessionPreview, roots: null,
       // 模拟“已经有选中的 PTY 会话且当前是终端视图”：页面层盖住主区时的遗留槽位可见性靠它回归。
       setLegacyTerminal(active) { snapshot = { ...snapshot, legacyVisibility: { ...snapshot.legacyVisibility, terminal: !!active } }; store.setSnapshot(snapshot); } };
     createRoot(document.getElementById("root")).render(<PortalContainerProvider container={document.getElementById("portals")}>
@@ -123,6 +124,9 @@ async function runConversationBrowser(t: TestContext, mentions: boolean): Promis
   app.get("/api/workspaces", (_req, res) => res.json(h.storage.listWorkspaces()));
   app.get("/api/tasks", (_req, res) => res.json([]));
   app.get("/api/ai-team-runs", (_req, res) => res.json([]));
+  app.get("/api/ai-team-runs/:id", (req, res) => {
+    try { res.json(h.runner.detail(req.params.id)); } catch { res.status(404).json({ error: "运行不存在" }); }
+  });
   app.get("/api/attention", (_req, res) => res.json({ items: [] }));
   app.get("/api/*", (_req, res) => res.json({}));
   app.get("/app.js", (_req, res) => res.type("js").send(readFileSync(join(temp, "app.js"))));
@@ -278,7 +282,7 @@ async function runConversationBrowser(t: TestContext, mentions: boolean): Promis
       await wait("document.querySelector('#conversation-create-panel')?.getAttribute('data-open')==='true'");
       await click('#conversation-create-panel button');
       await wait("Array.from(document.querySelectorAll('[aria-label=\"选择员工\"]')).some(n=>n.getClientRects().length)");
-      await click('#conversation-create-panel .ant-select');
+      await click('#conversation-create-panel .ant-select input');
       await send("Input.insertText", { text: "员工 2" });
       await wait("Array.from(document.querySelectorAll('.ant-select-item-option')).some(n=>n.textContent.includes('员工 2'))");
       await click('.ant-select-item-option');
@@ -337,20 +341,20 @@ async function runConversationBrowser(t: TestContext, mentions: boolean): Promis
     const activitySection = '.conversation-turn-activity';
     assert.equal(await evaluate(`!!document.querySelector(${JSON.stringify(activitySection)})`), true, "the IM page renders the turn transcript");
     const collapsedActivity = await evaluate(`(()=>{const block=document.querySelector(${JSON.stringify(activitySection)});
-      const summary=block.querySelector('.chat-process-summary-plain');
+      const summary=block.querySelector('.chat-process-summary');
       return {expanded:summary?.getAttribute('aria-expanded'),rows:block.querySelectorAll('.chat-call-inline').length,legacyCollapse:!!block.querySelector('.ant-collapse')}})()`);
     assert.equal(collapsedActivity.expanded, "false", "the transcript summary starts collapsed while the turn is idle");
     assert.equal(collapsedActivity.legacyCollapse, false, "the IM transcript drops its own collapse chrome");
     assert.equal(collapsedActivity.rows, 0, "collapsed rows stay unrendered");
-    await click(`${activitySection} .chat-process-summary-plain`);
+    await click(`${activitySection} .chat-process-summary`);
     await pause(150);
     const activityRows = await evaluate(`(()=>{const block=document.querySelector(${JSON.stringify(activitySection)});
       const rows=[...block.querySelectorAll('.chat-call-inline')];
       const tool=rows.find(row=>row.dataset.toolId);
       const thinking=rows.find(row=>row.dataset.thinkingEntry==="true");
       const mark=tool?.querySelector('.chat-call-mark');
-      return {rows:rows.length,summary:block.querySelector('.chat-process-summary-plain')?.innerText||'',
-        expanded:block.querySelector('.chat-process-summary-plain')?.getAttribute('aria-expanded'),
+      return {rows:rows.length,summary:block.querySelector('.chat-process-summary')?.innerText||'',
+        expanded:block.querySelector('.chat-process-summary')?.getAttribute('aria-expanded'),
         markColor:mark?getComputedStyle(mark).backgroundColor:'', label:tool?.querySelector('.chat-call-label')?.innerText||'',
         clock:tool?.querySelector('.chat-call-time')?.innerText||'', input:tool?.querySelector('.chat-call-preview')?.innerText||'',
         result:tool?.querySelector('.chat-call-result')?.innerText||'', thinkingLabel:thinking?.querySelector('.chat-call-label')?.innerText||''}})()`);
@@ -407,6 +411,13 @@ async function runConversationBrowser(t: TestContext, mentions: boolean): Promis
     await click('.conversation-task-detail button');
     assert.deepEqual(await evaluate("conversationFixture.conversationUi.getSnapshot().targets[conversationFixture.conversationUi.getSnapshot().selectedId]"), targetBeforeHistory);
     rows.push({ mode: "explicit-group", exactTaskNavigation: true });
+    const executionsBeforeAlias = h.sent.length + h.executions.length;
+    await evaluate(`conversationFixture.taskBoardController.open("", "", "teamchat", ${JSON.stringify(dispatched.runId)})`);
+    await wait(`!document.querySelector('.wand-team-chat-page') && conversationFixture.conversationUi.getSnapshot().selectedId===${JSON.stringify(dispatchedId)}`);
+    assert.equal(await evaluate(`conversationFixture.conversationUi.getSnapshot().filters[${JSON.stringify(dispatchedId)}]`), dispatched.taskId);
+    assert.equal(h.sent.length + h.executions.length, executionsBeforeAlias, "run aliases only navigate; never replay execution");
+    rows.push({ mode: "legacy-run-alias", canonicalConversation: true, exactTask: true, noExecution: true });
+
     }
     if (mentions) for (const mode of ["desktop", "mobile", "reduced", "native-rollback"]) {
       const mobile = mode === "mobile" || mode === "native-rollback";
@@ -564,9 +575,10 @@ async function runConversationBrowser(t: TestContext, mentions: boolean): Promis
       assert.equal((await streamShape()).tailGap, 0, "回到会话时落在尾部，不停在上面（换会话不许把清空后的位置写回存档）");
       // 内容比视口短时必须贴底：聊天记录从底部往上长，不在顶部留一片空场。
       await evaluate(`conversationFixture.conversationUi.select('dm_e_test_1')`);
-      await wait("document.querySelector('.conversation-heading-title')?.textContent==='员工 1' && !document.querySelector('.conversation-empty')");
+      await wait("document.querySelector('.conversation-heading-title')?.textContent==='员工 1' && !!document.querySelector('.conversation-stream')");
       await pause(400);
-      assert.equal(await evaluate("document.querySelector('.conversation-message-scroll').innerText.trim()"), "", "empty conversations do not insert tutorial messages");
+      assert.equal(await evaluate("document.querySelector('.conversation-stream').innerText.trim()"), "", "empty conversations do not invent transcript messages");
+      assert.equal(await evaluate("document.querySelector('.conversation-empty')?.getAttribute('role')"), "status", "empty guidance is a separate status, never a chat message renderer");
       assert.equal(await evaluate("document.querySelector('.conversation-sender textarea').placeholder"), "输入消息…");
       const emptyShape = await streamShape();
       assert.equal(emptyShape.scrollable, false, "空会话用来核对短内容贴底");
@@ -585,8 +597,8 @@ async function runConversationBrowser(t: TestContext, mentions: boolean): Promis
       await click('.conversation-heading .conversation-avatar-button');
       await wait("document.querySelector('.object-profile-name')?.textContent==='员工 1'");
       const textClick = async (text: string, selector = 'button,[role=menuitem]') => {
-        await wait(`Array.from(document.querySelectorAll(${JSON.stringify(selector)})).some(n=>n.textContent.replace(/\\s/g,'')===${JSON.stringify(text.replace(/\s/g, ""))}&&n.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}))`);
-        await evaluate(`Array.from(document.querySelectorAll('[data-test-click]')).forEach(n=>n.removeAttribute('data-test-click')); Array.from(document.querySelectorAll(${JSON.stringify(selector)})).find(n=>n.textContent.replace(/\\s/g,'')===${JSON.stringify(text.replace(/\s/g, ""))}&&n.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}))?.setAttribute('data-test-click','yes')`);
+        await wait(`Array.from(document.querySelectorAll(${JSON.stringify(selector)})).some(n=>n.textContent.replace(/\\s/g,'').replace(/…$/,'')===${JSON.stringify(text.replace(/\s/g, ""))}&&n.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}))`);
+        await evaluate(`Array.from(document.querySelectorAll('[data-test-click]')).forEach(n=>n.removeAttribute('data-test-click')); Array.from(document.querySelectorAll(${JSON.stringify(selector)})).find(n=>n.textContent.replace(/\\s/g,'').replace(/…$/,'')===${JSON.stringify(text.replace(/\s/g, ""))}&&n.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}))?.setAttribute('data-test-click','yes')`);
         await click('[data-test-click=yes]');
       };
       await textClick("编辑", '.wand-object-profile-drawer button');

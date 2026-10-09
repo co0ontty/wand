@@ -212,6 +212,7 @@ function RecentConversationGroup({
       <ImSidebarItem
         id={session.id}
         title={label}
+        titleGenerating={session.titleGenerating}
         avatarNode={<SecondaryRowMark entry={entry} group={group}/>}
         state={sidebarSessionState(session)}
         glow={sessionGlowStatus(session)}

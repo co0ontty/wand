@@ -294,6 +294,7 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
           : undefined}
         onOpenSession={(sessionId) => {
           taskBoardController.close();
+          conversationUi.suspend();
           // 群聊里点成员名字：同样带上任务上下文打开该成员的会话。
           void openSessionWithOwningTask(sessionId, (id) => {
             void dispatch({ type: "session.select", id });
@@ -307,6 +308,7 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
           : undefined}
         onOpenSession={(sessionId) => {
           taskBoardController.close();
+          conversationUi.suspend();
           void openSessionWithOwningTask(sessionId, (id) => {
             void dispatch({ type: "session.select", id });
           });
@@ -319,6 +321,7 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
           : undefined}
         onOpenSession={(sessionId) => {
           taskBoardController.close();
+          conversationUi.suspend();
           // 看板卡片里的会话也要带上任务上下文，否则顶部标签栏（含「＋」）不出现。
           void openSessionWithOwningTask(sessionId, (id) => {
             void dispatch({ type: "session.select", id });

@@ -10,6 +10,7 @@ export interface NewSessionControllerSnapshot {
   workspaceId: string;
   workspaceTaskId: string;
   taskName: string;
+  newTask: boolean;
   revision: number;
 }
 
@@ -20,6 +21,7 @@ export interface NewSessionOpenOptions {
   workspaceId?: string;
   workspaceTaskId?: string;
   taskName?: string;
+  newTask?: boolean;
 }
 
 export interface WandNewSessionController {
@@ -43,6 +45,7 @@ let snapshot: NewSessionControllerSnapshot = {
   workspaceId: "",
   workspaceTaskId: "",
   taskName: "",
+  newTask: false,
   revision: 0,
 };
 const listeners = new Set<Listener>();
@@ -55,6 +58,7 @@ function publish(
   workspaceId = "",
   workspaceTaskId = "",
   taskName = "",
+  newTask = false,
 ): void {
   snapshot = {
     open,
@@ -65,6 +69,7 @@ function publish(
     workspaceId: open ? workspaceId.trim() : "",
     workspaceTaskId: open ? workspaceTaskId.trim() : "",
     taskName: open ? taskName.trim() : "",
+    newTask: open && newTask,
     revision: snapshot.revision + 1,
   };
   for (const listener of listeners) listener();
@@ -90,6 +95,7 @@ export const newSessionController: WandNewSessionController = {
       options.workspaceId,
       options.workspaceTaskId,
       options.taskName,
+      options.newTask,
     );
     return true;
   },

@@ -5,6 +5,14 @@ export function installSidebarStyles(): void {
   installStyleSheet("wand-sidebar-layout", String.raw`
 .sidebar-visually-hidden { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; border:0; }
 .workspaces-panel { position:relative; }
+.sidebar-navigation-rail { width:56px; flex:none; min-height:0; padding:12px 6px 8px; border-inline-end:1px solid var(--border-subtle); background:var(--bg-secondary); }
+.sidebar-rail-scroll { width:100%; flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; scrollbar-width:none; }
+.sidebar-rail-scroll > .sidebar-brand-mark { display:block; margin:10px auto 18px; }
+.sidebar-list-panel { flex:1; min-width:0; min-height:0; }
+.sidebar-navigation-rail :is(.wand-ui-icon-button,.sidebar-list-error,[data-daemon-update-status]) { width:44px; min-width:44px; height:44px; padding:0; flex:none; }
+.sidebar-rail-notices { margin-block:12px 4px; padding-block-start:12px; border-block-start:1px solid var(--border-subtle); }
+.sidebar-profile-button { margin-block-start:8px; }
+.sidebar-notification-content { width:min(280px, calc(100vw - 64px)); max-height: min(480px, 65dvh); overflow:auto; }
 /* A continuous directory list, with one indent per real ownership boundary. */
 .sidebar .conversation-navigation { width:100%; }
 .sidebar:not(.collapsed) .conversation-navigation > .wand-ui-stretch-tabs,

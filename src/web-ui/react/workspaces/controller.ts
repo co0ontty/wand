@@ -50,7 +50,7 @@ export interface WandWorkspacesController {
 
 export const workspacesController: WandWorkspacesController = {
   open(initialCwd?: string, kind: WorkspaceCreationKind = "task"): boolean {
-    newSessionController.open({ initialCwd });
+    newSessionController.open({ initialCwd, newTask: kind === "task" });
     runtime?.onOpen();
     publish({ open: true, dismissable: true, initialCwd: initialCwd ?? "", initialKind: kind });
     return true;

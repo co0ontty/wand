@@ -8,6 +8,7 @@ export type WandIconName =
   | "archive"
   | "audio"
   | "back"
+  | "bell"
   | "binary"
   | "board"
   | "brain"
@@ -69,6 +70,7 @@ export type WandIconName =
   | "terminal"
   | "trash"
   | "unlock"
+  | "user"
   | "up"
   | "video"
   | "warning"
@@ -121,6 +123,10 @@ export function WandIcon({
       return <svg {...common}><path d="M9 18V5l11-2v13"/><circle cx="7" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>;
     case "back":
       return <svg {...common}><rect x="9" y="3" width="12" height="18" rx="2"/><path d="M15 18h.01"/><path d="M6 8L2 12l4 4M2 12h8"/></svg>;
+    case "bell":
+      return <svg {...common}><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>;
+    case "user":
+      return <svg {...common}><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg>;
     case "binary":
       return <svg {...common}><path d="M12 3l8 9-8 9-8-9 8-9z"/></svg>;
     case "board":
