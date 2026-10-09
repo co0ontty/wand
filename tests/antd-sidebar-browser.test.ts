@@ -254,6 +254,7 @@ createRoot(document.getElementById("root")).render(<Fixture/>);
       await wait("!document.querySelector('[data-testid=new-session-dialog]')");
       if (mode === "mobile") await click('#sessions-toggle-button');
       if (mode === "mobile") await click('#close-drawer-button');
+      await evaluate("document.querySelector('#fixture-agent').style.display='none';true");
       await click('#fixture-profile');
       await wait("document.querySelector('#object-profile-panel').classList.contains('open')");
       await click('[aria-label="关闭资料面板"]');
@@ -261,6 +262,8 @@ createRoot(document.getElementById("root")).render(<Fixture/>);
       await click('#fixture-profile');
       await key("Escape");
       await wait("!document.querySelector('#object-profile-panel').classList.contains('open') && document.activeElement.matches('#fixture-profile')");
+      // Fixture-only launchers must not cover the production mobile footer or splitter.
+      await evaluate("document.querySelector('#fixture-profile').style.display='none';true");
       await click('#topbar-file-button');
       await click('#file-explorer-cwd');
       await send("Input.insertText", {text:"/workspace/other"});
@@ -358,14 +361,22 @@ createRoot(document.getElementById("root")).render(<Fixture/>);
       await key("Escape");
       await wait("!document.querySelector('[data-testid=new-session-dialog]')");
       if (mode === "mobile") await click('[aria-label="打开任务"]');
+      const accountBefore = mode === "mobile" ? await evaluate("({drawerOpen:sidebar.memory.getSnapshot().layout.sessionsDrawerOpen,contains:document.querySelector('#sessions-drawer').contains(document.querySelector('#settings-button')),popupOwner:document.querySelector('#settings-button').closest('[data-wand-popup-owner]')?.getAttribute('data-wand-popup-owner')??null,rail:document.querySelector('#settings-button').closest('.sidebar-navigation-rail')?.className??null})") : null;
       await click('#settings-button');
       await wait("!!document.querySelector('.sidebar-tools-menu .ant-dropdown-menu')");
+      const accountOpened = mode === "mobile" ? await evaluate("sidebar.memory.getSnapshot().layout.sessionsDrawerOpen") : null;
       await key("Escape");
-      await wait("document.activeElement.id==='settings-button'");
+      await wait("document.activeElement.id==='settings-button' && !document.querySelector('.sidebar-tools-menu .ant-dropdown-menu')");
+      if (mode === "mobile") {
+        const accountEscaped = await evaluate("sidebar.memory.getSnapshot().layout.sessionsDrawerOpen");
+        evidence.push({mode,accountOwner:{before:accountBefore,opened:accountOpened,escaped:accountEscaped}});
+        assert.equal(accountBefore.drawerOpen && accountOpened && accountEscaped, true, `${mode}: account menu Escape preserves its parent sidebar`);
+      }
       await click('#back-to-native-button');
       assert.equal(await evaluate("sidebar.memory.actionLog.some(action=>action.type==='native.back')"), true, `${mode}: native back action`);
       assert.equal(await evaluate("sidebar.slots.length===4 && sidebar.slots.every(node=>node.isConnected)"), true, `${mode}: stable legacy nodes`);
       if (mode === "mobile") await wait("!sidebar.memory.getSnapshot().layout.sessionsDrawerOpen");
+      await evaluate("document.querySelector('#fixture-agent').style.display='';true");
       await click('#fixture-agent');
       await wait("!!document.querySelector('[data-testid=workspace-agent-dialog] .ant-radio-group')");
       await clickUntil('[data-testid="workspace-agent-dialog"] input[value="employee:employee:real"]',
@@ -388,6 +399,7 @@ createRoot(document.getElementById("root")).render(<Fixture/>);
       await key("Escape");
       await wait("!document.querySelector('[data-testid=workspace-agent-dialog]')");
       assert.equal(await evaluate("document.activeElement.id==='fixture-agent'"), true, `${mode}: library modal focus return`);
+      await evaluate("document.querySelector('#fixture-agent').style.display='none';true");
       if (mode === "mobile") await evaluate("sidebar.update({sessionsDrawerOpen:false});true");
       for (const direction of ["h", "v"]) {
         await evaluate(`sidebar.openSplit(${JSON.stringify(direction)});true`);
