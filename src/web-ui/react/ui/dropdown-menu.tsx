@@ -45,6 +45,21 @@ const MenuRegistration = React.createContext<RegisterItem | null>(null);
 export function WandDropdownMenu({ children, contextTrigger, triggers = ["click"], open, defaultOpen = false, onOpenChange }: WandDropdownMenuProps) {
   const portal = usePortalContainer();
   const triggerRef = React.useRef<HTMLElement>(null);
+  const popupRef = React.useRef<HTMLDivElement | null>(null);
+  const selectionFocusTarget = React.useRef<HTMLElement | null>(null);
+  const bindPopup = React.useCallback((node: HTMLDivElement | null) => {
+    const previous = popupRef.current;
+    popupRef.current = node;
+    if (node || !previous) return;
+    const target = selectionFocusTarget.current;
+    selectionFocusTarget.current = null;
+    // Wait for the selected menu to leave its popup owner. A newly opened dialog
+    // or another popup keeps its focus; only abandoned menu/body focus returns.
+    const active = document.activeElement;
+    if (target?.isConnected && (active === document.body || (active && previous.contains(active)))) {
+      target.focus({ preventScroll: true });
+    }
+  }, []);
   const [internalOpen, setInternalOpen] = React.useState(defaultOpen);
   const [registeredItems, setRegisteredItems] = React.useState<Map<string, RegisteredItem>>(() => new Map());
   const register = React.useCallback<RegisterItem>((key, item, marker) => {
@@ -52,7 +67,10 @@ export function WandDropdownMenu({ children, contextTrigger, triggers = ["click"
     return () => setRegisteredItems(previous => { const next = new Map(previous); next.delete(key); return next; });
   }, []);
   const shown = open ?? internalOpen;
-  const change = (next: boolean): void => { setInternalOpen(next); onOpenChange?.(next); };
+  const change = (next: boolean): void => {
+    if (next) selectionFocusTarget.current = null;
+    setInternalOpen(next); onOpenChange?.(next);
+  };
   const parts = React.Children.toArray(children).filter(React.isValidElement);
   const trigger = parts.find(part => part.type === WandDropdownMenuTrigger) as React.ReactElement<WandDropdownMenuTriggerProps> | undefined;
   const content = parts.find(part => part.type === WandDropdownMenuContent) as React.ReactElement<WandDropdownMenuContentProps> | undefined;
@@ -71,8 +89,11 @@ export function WandDropdownMenu({ children, contextTrigger, triggers = ["click"
         if (!a.marker || !b.marker) return 0;
         const position = a.marker.compareDocumentPosition(b.marker);
         return position & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : position & Node.DOCUMENT_POSITION_PRECEDING ? 1 : 0;
-      }).map(entry => entry.item), selectable: false, onClick: () => change(false) }}
-      popupRender={menu => <div {...attributes} data-wand-popup-owner={popupOwner ?? attributes.id}>{menu}</div>}>
+      }).map(entry => entry.item), selectable: false, onClick: () => {
+        selectionFocusTarget.current = triggerRef.current;
+        change(false);
+      } }}
+      popupRender={menu => <div {...attributes} ref={bindPopup} data-wand-popup-owner={popupOwner ?? attributes.id}>{menu}</div>}>
       {contextTrigger ?? React.cloneElement(trigger!, { "aria-haspopup": "menu", "aria-expanded": shown, "aria-controls": attributes.id })}
     </Dropdown>
   </WandUiBoundary>;

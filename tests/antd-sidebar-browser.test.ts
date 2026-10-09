@@ -29,6 +29,9 @@ import { conversationUi } from "./src/web-ui/react/conversations/state";
 import { NewSessionHost } from "./src/web-ui/react/new-session/host";
 import { employeeProfile } from "./src/web-ui/react/agents/employee-profile";
 import { configureNewSessionRuntime } from "./src/web-ui/react/new-session/controller";
+// SessionPane validates vendor readiness before calling the mock terminal runtime below.
+// The runtime owns fixture DOM; these markers satisfy the canonical loader contract only.
+globalThis.XTermLib = { Terminal: class FixtureTerminal {}, FitAddon: class FixtureFitAddon {} };
 conversationUi.mode("tasks"); conversationUi.suspend();
 configureNewSessionRuntime({onOpen(){},onClose(){},getContext(){return {effectiveCwd:"/workspace/wand"};},rememberModel(){},prepareCreate:async()=>({}),completeCreate:async()=>{}});
 import { UnifiedExecutionSubjectPicker } from "./src/web-ui/react/workspaces/unified-execution-subject-picker";
@@ -53,6 +56,7 @@ const store = { getSnapshot:()=>memory.getSnapshot(),subscribe:(cb)=>memory.subs
   if(action.type==="layout.files.close")sidebar.update({filePanelOpen:false,filePanelBackdropVisible:false});
   if(action.type==="layout.drawer.toggle")sidebar.update({sessionsDrawerOpen:!snapshot.layout.sessionsDrawerOpen});
   if(action.type==="layout.drawer.collapse")sidebar.update({sidebarCollapsed:!snapshot.layout.sidebarCollapsed});
+  if(action.type==="topbar.menu.toggle")sidebar.update({topbarMoreOpen:!snapshot.layout.topbarMoreOpen});
 }};
 configureWorkspacesRuntime({effectiveCwd(){return "/workspace/wand";},onOpen(){},onClose(){},modelPreference(){return "";},rememberModelPreference(){},toast(){},selectSession(id){sidebar.selections.push(id);},openTask(payload){setActiveWorkspaceContext({...payload,layout:null});},openWorkspace(){},closeWorkspace(){clearActiveWorkspaceContext();},refreshSessions:async()=>{},saveTaskLayout(layout){sidebar.layoutSaves.push(layout);setActiveWorkspaceContext({layout});},mountSessionTerminal(id,node){sidebar.terminalMounts.push(id);node.dataset.sessionId=id;let terminal=sidebar.terminalNodes.get(id);if(!terminal){terminal=document.createElement('div');terminal.dataset.poolTerminal=id;sidebar.terminalNodes.set(id,terminal);}node.append(terminal);return true;},unmountSessionTerminal(id){sidebar.terminalDisposals.push(id);sidebar.terminalNodes.get(id)?.remove();sidebar.terminalNodes.delete(id);sidebar.terminalScales.delete(id);},disposeAllSessionTerminals(){sidebar.disposeAllCalls++;sidebar.terminalNodes.forEach(node=>node.remove());sidebar.terminalNodes.clear();sidebar.terminalScales.clear();},getSessionTerminalScale(id){return sidebar.terminalScales.get(id)??1;},setSessionTerminalScale(id,scale){sidebar.terminalScales.set(id,scale);return scale;},closeTaskSessions:async()=>false,startWorktreeMergeAgent:async(payload)=>{sidebar.worktreeRequests.push(payload);throw Error("合并启动本地拒收");}});
 function DraftDialog(){const state=React.useSyncExternalStore(overlayStore.subscribe,overlayStore.getSnapshot,overlayStore.getSnapshot);const dialog=state.activeDialog;return dialog ? <WandDialog open {...dialog.options} onAction={(action,inputValue)=>overlayStore.completeDialog(dialog.id,{dismissed:false,action,inputValue})} onDismiss={()=>overlayStore.completeDialog(dialog.id,{dismissed:true})}/> : null;}
@@ -393,7 +397,11 @@ createRoot(document.getElementById("root")).render(<Fixture/>);
         await wait("document.querySelector('.ws-split [role=separator]').getAttribute('aria-valuenow')==='50'");
         if (direction === "v") {
           await wait("document.querySelector('.ws-pane-scale-value').textContent==='125%'");
-          assert.equal(await evaluate("sidebar.terminalScales.get('s1')===1.25 && sidebar.originalTerminals.every(node=>node.isConnected && sidebar.terminalNodes.get(node.dataset.poolTerminal)===node)"), true, `${mode}: direction remount retains terminal DOM identity and per-session zoom`);
+          const terminalLease = await evaluate("({scale:sidebar.terminalScales.get('s1'),original:sidebar.originalTerminals.map(node=>({id:node.dataset.poolTerminal,connected:node.isConnected,same:sidebar.terminalNodes.get(node.dataset.poolTerminal)===node,parent:node.parentElement?.className})),current:Array.from(document.querySelectorAll('[data-pool-terminal]')).map(node=>({id:node.dataset.poolTerminal,parent:node.parentElement?.className})),mounts:sidebar.terminalMounts,disposals:sidebar.terminalDisposals,disposeAll:sidebar.disposeAllCalls})");
+          evidence.push({mode,terminalLease});
+          assert.equal(terminalLease.original.length, 2, `${mode}: both terminal DOM nodes were mounted before remount`);
+          assert.equal(terminalLease.current.length, 2, `${mode}: both terminal DOM nodes remain attached after remount`);
+          assert.equal(await evaluate("sidebar.terminalScales.get('s1')===1.25 && sidebar.originalTerminals.every(node=>node.isConnected && sidebar.terminalNodes.get(node.dataset.poolTerminal)===node)"), true, `${mode}: direction remount retains terminal DOM identity and per-session zoom: ${JSON.stringify(terminalLease)}`);
         }
         const start = await evaluate(`(()=>{const splitter=document.querySelector('.ws-split'),sash=splitter.querySelector('[role=separator]'),r=sash.getBoundingClientRect(),bounds=splitter.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,hit=document.elementFromPoint(x,y);return {x,y,delta:Math.min(140,(${JSON.stringify(direction)}==='h'?bounds.width:bounds.height)*0.2),saves:sidebar.layoutSaves.length,orientation:sash.getAttribute('aria-orientation'),bounds:bounds.toJSON(),matched:sash===hit||sash.contains(hit),hit:hit?.outerHTML.slice(0,200),ancestors:Array.from((function*(node){while(node){yield node;node=node.parentElement;}})(sash)).map(n=>({class:n.className,rect:n.getBoundingClientRect().toJSON()}))}})()`);
         assert.ok(start.bounds.width > 160 && start.bounds.height > 160, `${mode}: ${direction} split uses available main surface`);
@@ -418,7 +426,9 @@ createRoot(document.getElementById("root")).render(<Fixture/>);
           await click('.ws-pane [aria-label="放大终端"]');
           await wait("document.querySelector('.ws-pane-scale-value').textContent==='125%'");
           assert.equal(await evaluate("sidebar.terminalScales.get('s1')"), 1.25, `${mode}: real zoom control updates the session scale`);
+          await wait("document.querySelectorAll('[data-pool-terminal]').length===2");
           await evaluate("sidebar.originalTerminals=Array.from(document.querySelectorAll('[data-pool-terminal]'));true");
+          assert.equal(await evaluate("sidebar.originalTerminals.length"), 2, `${mode}: remount starts with two real fixture terminal nodes`);
         }
       }
       const disposeAllBefore = await evaluate("sidebar.disposeAllCalls");
@@ -426,7 +436,25 @@ createRoot(document.getElementById("root")).render(<Fixture/>);
       await wait(`!document.querySelector('.workspace-window') && sidebar.disposeAllCalls>${disposeAllBefore} && sidebar.terminalNodes.size===0 && sidebar.terminalScales.size===0`);
       evidence.push({mode,sourceBundleSha256,globalCssSha256,terminalLease:"real zoom control to 125%; direction remount retains same stub terminal nodes and scale; genuine split exit disposes nodes and preferences. Real terminal-pool preservation is covered by the integration owner's pool unit tests."});
       const obsolete = await evaluate(`Object.fromEntries(['details','summary','.sidebar-disclosure','.sidebar-disclosure-inner','.workspace-manage-check','.session-manage-check','.wand-new-session-choice','.chat-width-toggle-option','.im-sidebar-item','.im-sidebar-group-toggle','.workspace-worktree-bubble','.workspace-worktree-bubble-check','.workspace-worktree-dialog'].map(selector=>[selector,document.querySelectorAll(selector).length]))`);
-      assert.equal(await evaluate("!!document.querySelector('.ant-collapse') && !!document.querySelector('.chat-width-toggle .ant-segmented')"), true, `${mode}: actual Ant controls`);
+      assert.equal(await evaluate("!!document.querySelector('.ant-collapse')"), true, `${mode}: task disclosure uses the actual Ant control`);
+      // In baseline 4a the standalone session's width preference already lives in its menu; the
+      // inline task-window Segmented leaves the DOM when closeSplit clears its context.
+      await click('#topbar-more-button');
+      await wait("!!document.querySelector('#topbar-more-menu [role=menuitem]')");
+      if (mode !== "mobile" && mode !== "native") {
+        await wait("document.querySelectorAll('#topbar-more-menu [data-chat-width-mode]').length===2");
+        await click('#topbar-more-menu [data-chat-width-mode="column"]');
+        await wait("document.documentElement.dataset.chatWidth==='column' && !document.querySelector('#topbar-more-menu') && document.activeElement.id==='topbar-more-button'");
+        assert.equal(await evaluate("localStorage.getItem('wand-chat-width')"), 'column', `${mode}: current-session menu commits the local width preference`);
+        await click('#topbar-more-button');
+        await wait("!!document.querySelector('#topbar-more-menu [data-chat-width-mode=full]')");
+        await click('#topbar-more-menu [data-chat-width-mode="full"]');
+        await wait("document.documentElement.dataset.chatWidth==='full' && !document.querySelector('#topbar-more-menu') && document.activeElement.id==='topbar-more-button'");
+      } else {
+        assert.equal(await evaluate("document.querySelectorAll('#topbar-more-menu [data-chat-width-mode]').length"), 0, `${mode}: width preference remains scoped to supported desktop chat surfaces`);
+        await key('Escape');
+        await wait("!document.querySelector('#topbar-more-menu') && document.activeElement.id==='topbar-more-button'");
+      }
       evidence.push({ mode, obsolete, clickRetries: clickRetries.slice(retriesBefore), reduced: await evaluate("matchMedia('(prefers-reduced-motion: reduce)').matches"), interactions: ["production ShellApp and repository projection", "native history resume identity", "canonical new-session Input/directory AutoComplete keyboard/Escape; retired task form no longer mounted", "profile explicit/Escape focus return", "file path Input IME/Enter", "search focus/filter/Escape", "current root navigation and employee picker below", "directory ArrowRight", "controlled task Collapse", "Ant Menu/Escape/refocus", "Ant Checkbox bulk selection", "worktree selection/disabled/start failure and Escape", "owned peek menu clicks and rename Escape focus", "Ant Tabs keyboard selection", "native back action", "stable legacy hosts", "employee identity survives late preferences", "failed start keeps choices", "PTY capability downgrade", "platform arrow navigation within the library radio group", "Ant Modal focus return", "Ant Splitter horizontal and vertical real pointer drag saves ratio and preserves terminal ownership"] });
       if (mode === "desktop" || mode === "mobile") {
         if (mode === "mobile") { await click('#sessions-toggle-button'); await wait("document.querySelector('#sessions-drawer').classList.contains('open')"); await pause(350); }

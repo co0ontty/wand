@@ -602,7 +602,7 @@ export function ShellSidebar() {
   const [attentionOpen, setAttentionOpen] = React.useState(false);
   // Secondary management surfaces borrow the list space without changing the user's pinned/collapsed preference.
   const contextRail = !snapshot.layout.sidebarDrawer && (settings.open || conversationState.directory
-    || snapshot.layout.filePanelOpen);
+    || (taskBoard.open && taskBoard.page === "teams") || snapshot.layout.filePanelOpen);
   const narrow = !snapshot.layout.sidebarDrawer && snapshot.layout.sidebarPinned && snapshot.layout.sidebarCollapsed;
   const sidebarClass = classNames(
     "sidebar sidebar-refined",
