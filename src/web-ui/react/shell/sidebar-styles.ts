@@ -5,13 +5,21 @@ export function installSidebarStyles(): void {
   installStyleSheet("wand-sidebar-layout", String.raw`
 .sidebar-visually-hidden { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; border:0; }
 .workspaces-panel { position:relative; }
-.sidebar-navigation-rail { width:56px; flex:none; min-height:0; padding:12px 6px 8px; border-inline-end:1px solid var(--border-subtle); background:var(--bg-secondary); }
-.sidebar-rail-scroll { width:100%; flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; scrollbar-width:none; }
-.sidebar-rail-scroll > .sidebar-brand-mark { display:block; margin:10px auto 18px; }
+.sidebar-navigation-rail { width:56px; flex:none; min-height:0; padding:8px 4px; border-inline-end:1px solid var(--border-subtle); background:var(--bg-secondary); }
+.sidebar-rail-scroll { width:100%; flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; }
+.sidebar-rail-scroll > .sidebar-brand-mark { display:block; margin:8px auto 16px; }
 .sidebar-list-panel { flex:1; min-width:0; min-height:0; }
+.sidebar-list-panel[hidden] { display:none; }
+.sidebar.context-rail .sidebar-navigation-rail { border-inline-end:1px solid var(--border-subtle); }
 .sidebar-navigation-rail :is(.wand-ui-icon-button,.sidebar-list-error,[data-daemon-update-status]) { width:44px; min-width:44px; height:44px; padding:0; flex:none; }
+.sidebar .conversation-navigation .wand-ui-icon-button { height:48px; display:flex; flex-direction:column; gap:3px; border-radius:var(--control-radius); color:var(--text-secondary); }
+.sidebar .conversation-navigation .wand-ui-icon-button[aria-current="page"] { color:var(--accent-active); background:var(--accent-muted); }
+.sidebar-nav-icon { display:flex; height:20px; align-items:center; justify-content:center; }
+.sidebar-nav-label { font-size:10px; line-height:14px; font-weight:500; }
+.sidebar .wand-ui-button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.sidebar-list-panel { background:var(--bg-surface); border-inline-end:1px solid var(--border-subtle); }
 .sidebar-rail-notices { margin-block:12px 4px; padding-block-start:12px; border-block-start:1px solid var(--border-subtle); }
-.sidebar-profile-button { margin-block-start:8px; }
+.sidebar .sidebar-profile-button { margin-block-start:8px; display:flex; flex-direction:column; gap:3px; color:var(--text-secondary); }
 .sidebar-notification-content { width:min(280px, calc(100vw - 64px)); max-height: min(480px, 65dvh); overflow:auto; }
 /* A continuous directory list, with one indent per real ownership boundary. */
 .sidebar .conversation-navigation { width:100%; }
@@ -21,10 +29,12 @@ export function installSidebarStyles(): void {
 .sidebar:not(.collapsed) .conversation-navigation .ant-segmented-item { flex:1; text-align:center; }
 .sidebar .sidebar-body { overscroll-behavior:contain; scrollbar-gutter:stable; }
 /* Keep navigation and header actions anchored when switching list modes. */
-.sidebar-header-primary { min-height:44px; }
+.sidebar-header-primary { min-height:32px; }
 .sidebar-header-main { min-width:0; }
 .sidebar-header-actions { flex-shrink:0; }
-.sidebar-header-actions :is(.sidebar-more-trigger,.sidebar-compact-toggle,.sidebar-close) { width:44px; min-width:44px; height:44px; }
+.sidebar-header-actions :is(.sidebar-more-trigger,.sidebar-compact-toggle,.sidebar-close,.conversation-create-button) { width:32px; min-width:32px; height:32px; padding:0; }
+.sidebar-title { font-size:14px; letter-spacing:.02em; }
+.sidebar-new-task.ant-btn { height:34px; font-size:13px; }
 .sidebar-status:empty { display:none; }
 .sidebar-footer-actions { min-width:0; }
 .sidebar-footer:has(#back-to-native-button,#switch-server-button) { flex-wrap:wrap; }
@@ -38,16 +48,19 @@ export function installSidebarStyles(): void {
 .sidebar-search-input input::-webkit-search-cancel-button { display:none; }
 .sidebar-disclosure-chevron { display:inline-flex; flex-shrink:0; transform:rotate(-90deg); transition:transform var(--motion-fast) var(--ease-in-out-smooth); }
 .sidebar-disclosure-chevron[data-open="true"] { transform:rotate(0deg); }
-.sidebar .workspace-row-main { min-height:48px; }
+.sidebar .workspace-row-main { min-height:44px; }
 .sidebar .workspace-row-title { font-weight:600; }
 .sidebar .workspace-row-path { display:block; max-width:100%; line-height:1.5; }
 .sidebar .workspace-row-count, .sidebar .workspace-task-count { color:var(--text-secondary); font-size:12px; font-variant-numeric:tabular-nums; }
 .sidebar .workspace-tasks, .sidebar .workspace-task-sessions { margin-inline-start:14px; border-inline-start:1px solid var(--border-subtle); }
 .sidebar .workspace-task-main, .sidebar .workspace-session-main { min-height:36px; }
-.sidebar .workspace-session-name { font-size:14px; }
+.sidebar .workspace-session-name { font-size:13px; }
 .sidebar .workspace-session-kind { color:var(--text-secondary); font-size:11px; }
 .sidebar .workspace-loose-label { display:block; padding:8px 6px 4px; font-size:12px; }
-.sidebar .workspace-loose-session-list { display:flex; flex-direction:column; gap:4px; }
+.sidebar .workspace-loose-session-list { display:flex; flex-direction:column; gap:2px; }
+.sidebar .sidebar-list-title { font-size:12px; color:var(--text-secondary); }
+.sidebar .sidebar-view-switch .ant-segmented-item-label { padding-inline:8px; font-size:12px; }
+.sidebar .sidebar-body { scroll-padding-block:100px 12px; }
 .sidebar :is(.workspace-task-action,.workspace-task-chevron-btn) { width:28px; min-width:28px; height:32px; padding:0; flex-shrink:0; }
 /* Only geometry and context: Dropdown owns the surface, divider, hover and danger states. */
 .sidebar-menu-heading { display:grid; gap:2px; min-width:0; padding-block:2px; }
@@ -62,6 +75,8 @@ export function installSidebarStyles(): void {
 .sidebar [data-sidebar-menu-open="true"] { border-radius:var(--control-radius); background:var(--bg-active); }
 .sidebar .sidebar-footer-actions { align-items:center; }
 @media (pointer:coarse) {
+  .sidebar-header-actions :is(.sidebar-compact-toggle,.sidebar-close,.conversation-create-button) { width:44px; min-width:44px; height:44px; }
+  .sidebar-new-task.ant-btn { min-height:44px; }
   .sidebar :is(.workspace-task-action,.workspace-task-chevron-btn) { width:32px; min-width:32px; height:44px; }
   .sidebar .workspace-task-main, .sidebar .workspace-session-main { min-height:44px; }
   :is(.sidebar-row-menu,.sidebar-menu-submenus) :is(.ant-dropdown-menu-item,.ant-dropdown-menu-submenu-title) { min-height:44px; }

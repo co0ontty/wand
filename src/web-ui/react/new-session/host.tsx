@@ -1,4 +1,6 @@
 import "../issues/library-layout";
+import "./layout.js";
+import { hasAutomaticPermissions, modeHint } from "./permission-summary.js";
 import { Alert, AutoComplete, Collapse, Flex, Form, Radio, Space, Spin, Typography } from "antd";
 import { TaskForm, TaskTextArea } from "../issues/form-controls";
 import { WandInput } from "../ui";
@@ -27,7 +29,7 @@ import {
 import { useSiliconEmployees } from "../agents/employee-repository.js";
 import { EmployeeAvatar } from "../agents/employee-avatar.js";
 import { ProviderLogo } from "../provider-logo.js";
-import { AGENT_TOOL_OPTIONS, agentToolIdFor, agentToolOption } from "../../provider-identity";
+import { AGENT_TOOL_OPTIONS, agentToolIdFor, agentToolOption, agentToolDisplayName } from "../../provider-identity";
 import { aiTeamPickerOption, aiTeamsRepository, useAiTeamList } from "../ai-teams/repository";
 import { taskBoardController } from "../issues/task-board-controller";
 import { notifyTasksChanged } from "../task-changes";
@@ -89,44 +91,6 @@ function preferredModel(selected?: string | null): string {
   return (selected ?? "").trim() || MODEL_CATALOG_DEFAULT_VALUE;
 }
 
-function modeHint({ provider, mode, kind, engine }: NewSessionForm): string {
-  if (provider === "codex") {
-    return "Codex 自动批准工具调用，并关闭 Codex 的沙盒限制。";
-  }
-  if (provider === "opencode") {
-    return mode === "full-access" || mode === "managed" || mode === "auto-edit"
-      ? "OpenCode 自动批准未显式拒绝的权限请求。"
-      : kind === "structured"
-        ? "OpenCode 使用自身权限配置；对话中未批准的工具调用会被拒绝。"
-        : "OpenCode 使用自身权限配置，在终端中处理权限确认。";
-  }
-  if (provider === "grok") {
-    return mode === "full-access" || mode === "managed"
-      ? "Grok 自动批准工具权限请求。"
-      : "Grok 使用自身权限配置；需要确认的操作可能等待或被阻止。";
-  }
-  if (provider === "qoder") {
-    return "Qoder 在所有模式下都跳过工具权限确认。";
-  }
-  if (provider === "pi") {
-    return engine === "sdk"
-      ? "Wand Agent 在 Wand 内执行，使用当前会话配置的工具与扩展。"
-      : "Pi CLI 使用自身工具与扩展配置；这里的模式不会增加逐项权限确认。";
-  }
-  if (provider === "gemini") {
-    if (mode === "full-access" || mode === "managed" || (kind === "pty" && mode === "auto-edit")) {
-      return "Gemini 自动批准全部工具调用。";
-    }
-    if (mode === "auto-edit") return "Gemini 自动批准编辑工具；其他工具仍遵循自身权限配置。";
-    return kind === "structured"
-      ? "Gemini 使用自身权限配置；对话中未批准的工具调用会被拒绝。"
-      : "Gemini 使用自身权限配置，在终端中处理权限确认。";
-  }
-  if (mode === "full-access") return "Claude 自动批准工具权限请求，可连续执行修改。";
-  if (mode === "auto-edit") return "Claude 自动批准文件编辑；其他工具按当前会话权限策略处理。";
-  if (mode === "managed") return "Claude 按目标连续执行，并自动批准工具权限请求；缺少必要信息或工具失败时仍可能停止。";
-  return "Claude 保留工具执行方式，操作请求按当前会话权限策略处理。";
-}
 
 function protocolHint(form: NewSessionForm): string {
   if (form.kind === "pty") return "终端使用 PTY，直接呈现命令行工具的交互界面与原始输出。";
@@ -183,12 +147,18 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
   const [suggestions, setSuggestions] = useState<NewSessionDefaults["recentPaths"]>([]);
   const [suggestionsActive, setSuggestionsActive] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [subjectPickerOpen, setSubjectPickerOpen] = useState(false);
+  const [recentPathsOpen, setRecentPathsOpen] = useState(false);
   // 目录和使用次数都在打开后请求（登录前会 401）；加载完才展示选项，避免排序跳动。
   const modelCatalog = useWandModelCatalog(controller.open);
   const providerUsage = useProviderUsage(controller.open);
   const { employees } = useSiliconEmployees({ includeArchived: true, enabled: controller.open });
   const [customizingCli, setCustomizingCli] = useState(false);
   const modeRefs = useRef<Partial<Record<NewSessionMode, HTMLInputElement | null>>>({});
+  const employeeToolButtonRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (form?.employeeId) employeeToolButtonRef.current?.focus({ preventScroll: true });
+  }, [form?.employeeId]);
   // 团队直发：
   // - 说明是服务端必填的开工输入（`boundedText(note, 1, …)`），所以只有选团队时才长这个框；
   // - 团队开工要一个**已存在**的 project id，而这一页只拿得到目录文本，所以按目录对一次项目列表。
@@ -212,6 +182,8 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
     setSuggestions([]);
     setSuggestionsActive(false);
     setAdvancedOpen(false);
+    setSubjectPickerOpen(false);
+    setRecentPathsOpen(false);
     setCustomizingCli(false);
     setTeamNote("");
     void repository.load({ signal: abort.signal })
@@ -335,6 +307,35 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
   const selectedMode = form ? MODES.find((mode) => mode.value === form.mode) : undefined;
   const selectedEmployee = form?.employeeId ? employees.find((emp) => emp.id === form.employeeId) : null;
   const selectedTeam = form?.teamId ? teams?.find((team) => team.id === form.teamId) ?? null : null;
+  const employeeCandidates = selectedEmployee?.agents ?? [];
+  const permissionWarning = Boolean(form && !form.teamId && (form.employeeId && !form.specifiedCli
+    ? employeeCandidates.some((candidate) => hasAutomaticPermissions(candidate))
+    : hasAutomaticPermissions(form)));
+  const subjectSummary = form?.teamId ? selectedTeam?.name ?? "AI 团队"
+    : form?.employeeId ? selectedEmployee?.name ?? "硅基员工"
+    : form?.kind === "shell" ? "空白终端"
+    : selectedTool(form)?.label ?? form?.provider ?? "";
+  const modelSummary = !form || form.kind === "shell" ? "不使用模型" : form.teamId ? "跟随成员员工配置"
+    : form.employeeId && !form.specifiedCli ? employeeCandidates.length
+      ? employeeCandidates.map((candidate) => `${agentToolDisplayName(candidate.provider, candidate.engine)} · ${candidate.model === MODEL_CATALOG_DEFAULT_VALUE ? "服务端默认" : candidate.model}`).join("；")
+      : "跟随员工配置"
+    : preferredModel(form.model) === MODEL_CATALOG_DEFAULT_VALUE ? "跟随服务端默认" : preferredModel(form.model);
+  const permissionSummary = !form ? "" : form.teamId ? "跟随成员员工配置"
+    : form.employeeId && !form.specifiedCli ? `跟随员工候选配置${permissionWarning ? " · 含自动授权" : ""}`
+    : form.kind === "shell" ? "系统 Shell 权限"
+    : `${selectedMode?.label ?? "标准"}${form.mode === "full-access" ? " · full access" : permissionWarning ? " · 自动授权" : ""}`;
+  const permissionDetail = !form ? "" : form.teamId
+    ? "负责人拆解任务，各成员使用自己的工具与权限配置。"
+    : form.employeeId && !form.specifiedCli
+      ? employeeCandidates.length ? employeeCandidates.map((candidate) => {
+        const label = candidate.provider === "codex" ? "完全访问 · full access" : MODES.find((mode) => mode.value === candidate.mode)?.label ?? "标准";
+        return `${agentToolDisplayName(candidate.provider, candidate.engine)} · ${label}`;
+      }).join("；") + (employeeCandidates.some((candidate) => candidate.provider === "codex")
+        ? "。Codex 自动批准工具调用并关闭沙盒限制；工作目录不是权限沙盒。"
+        : permissionWarning ? "。部分候选使用自动授权，启动会沿用所用候选的权限；工作目录不是权限沙盒。"
+          : "。启动会沿用所用候选的权限，工作目录不是权限沙盒。") : "员工配置尚未加载；启动时使用该员工的工具与权限配置。"
+    : form.kind === "shell" ? "直接使用系统 Shell，不启动 AI 工具；工作目录不是权限沙盒。"
+    : `${modeHint(form)} 工作目录不是权限沙盒。`;
   // 目录改了也要重新对项目：手输目录和对不上项目的目录都拿不到 teamWorkspaceId，整组就禁用。
   // 留空时用真正会生效的目录（运行时当前目录或服务端默认），不让「什么都没填」把团队卡死。
   const projectCwd = form?.cwd.trim()
@@ -411,6 +412,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
+    if ((event.nativeEvent as Event & { isComposing?: boolean }).isComposing) return;
     if (!form || !defaults || submitLock.current) return;
     const runtime = newSessionStore.getRuntime();
     if (!runtime) {
@@ -463,7 +465,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
       open={controller.open}
       onOpenChange={(open) => { if (!open) newSessionController.close(); }}
       title={controller.taskName ? `新对话 · ${controller.taskName}` : "新对话"}
-      description="选择由谁执行、使用对话还是终端，再确认工作目录。"
+      description="确认执行对象、工作目录与权限后启动。工具、会话类型与模式会记为下次新建偏好。"
       className="wand-task-library-dialog wand-new-session-library-dialog"
       closeLabel="关闭新建会话"
       testId="new-session-dialog"
@@ -471,9 +473,49 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
     >
       {loading || (controller.open && providerUsage === null) ? <Spin tip="正在加载新建会话配置…"><div style={{ minHeight: 100 }} role="status">正在加载新建会话配置…</div></Spin> : form && defaults ? (
         <TaskForm noValidate aria-busy={submitting} onSubmit={(event) => void submit(event)}>
-          <Flex vertical gap={16}>
+          <Flex vertical gap={12}>
+            <section className="wand-new-session-summary" aria-label="本次启动配置" aria-live="polite">
+              <dl>
+                <div><dt>执行对象</dt><dd title={subjectSummary}>{subjectSummary}{form.kind === "shell" ? " · Shell" : form.kind === "structured" ? " · 对话" : " · 终端"}</dd></div>
+                <div><dt>模型</dt><dd title={modelSummary}>{modelSummary}</dd></div>
+                <div><dt>工作目录</dt><dd title={effectiveCwd}>{effectiveCwd}</dd></div>
+                <div><dt>权限</dt><dd className={permissionWarning ? "wand-new-session-permission-warning" : undefined}>{permissionSummary}</dd></div>
+              </dl>
+              <Typography.Paragraph className="wand-new-session-permission-detail" type={permissionWarning ? "danger" : "secondary"}>{permissionDetail}</Typography.Paragraph>
+            </section>
             {!form.teamId ? <NewSessionTaskField form={form} initialName={controller.taskName}
               disabled={submitting} cwd={projectCwd} onChange={setForm}/> : null}
+            <div className={`wand-new-session-primary-fields${form.kind === "shell" || form.employeeId || form.teamId ? " is-single" : ""}`}>
+            <Form.Item htmlFor="wand-new-session-cwd" label="工作目录" extra={<Typography.Text id="wand-new-session-cwd-hint" type="secondary">{form.workspaceTaskId ? "使用所选任务的运行目录；切换任务可更换目录。" : "留空则使用当前目录，支持路径自动补全。"}</Typography.Text>}>
+              <AutoComplete style={{ width: "100%" }} value={form.cwd} disabled={submitting || Boolean(form.workspaceTaskId)}
+                open={suggestionsActive && suggestions.length > 0}
+                options={suggestions.map((item) => ({ value: item.path, label: <Flex vertical><Typography.Text strong>{item.name}</Typography.Text><Typography.Text type="secondary">{item.path}</Typography.Text></Flex> }))}
+                onChange={(cwd) => setForm({ ...form, cwd, workspaceId: undefined })}
+                onSelect={(cwd) => { setForm({ ...form, cwd, workspaceId: undefined }); setSuggestionsActive(false); }}
+                onFocus={() => setSuggestionsActive(true)} onBlur={() => setSuggestionsActive(false)}>
+                <WandInput id="wand-new-session-cwd" type="text"
+                  placeholder={newSessionStore.getRuntime()?.getContext().effectiveCwd || defaults.config.defaultCwd}
+                  autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
+                  aria-invalid={error.includes("目录") || undefined} aria-describedby="wand-new-session-cwd-hint"/>
+              </AutoComplete>
+              {defaults.recentPaths.length > 0 ? <Collapse className="wand-new-session-recent-paths" ghost size="small" activeKey={recentPathsOpen ? ["recent"] : []}
+                onChange={(keys) => setRecentPathsOpen(keys.includes("recent"))}
+                items={[{ key: "recent", label: `最近使用的目录 · ${defaults.recentPaths.length}`, children: <Space wrap aria-label="最近使用的工作目录">
+                {defaults.recentPaths.map((item) => <WandButton kind={form.cwd === item.path ? "outline" : "ghost"} size="small"
+                  disabled={submitting || Boolean(form.workspaceTaskId)}
+                  key={item.path} type="button" title={item.path} aria-pressed={form.cwd === item.path}
+                  onClick={() => setForm({ ...form, cwd: item.path, workspaceId: undefined })}>
+                  <Typography.Text ellipsis style={{ maxWidth: 180 }}>{item.path}</Typography.Text>
+                </WandButton>)}
+              </Space> }]}/> : null}
+            </Form.Item>
+            {form.kind !== "shell" && !form.employeeId && !form.teamId ? <Form.Item label="模型" extra="所选模型随会话启动一起提交；「跟随服务端默认」沿用服务端配置的默认模型。">
+              <WandSelect value={preferredModel(form.model)}
+                options={wandModelOptions(modelCatalog, form.provider).filter((option) => form.kind === "structured" || !option.value.startsWith("wand-openrouter-free/"))}
+                ariaLabel="模型" searchable searchPlaceholder="搜索模型" disabled={submitting}
+                className="wand-new-session-model-select" onValueChange={selectModel}/>
+            </Form.Item> : null}
+            </div>
             {form.employeeId ? (
               <div className="wand-new-session-employee-section">
                 <Flex
@@ -482,19 +524,15 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                   gap={12}
                   className="wand-new-session-logo-bar"
                   style={{
-                    padding: "12px 16px",
-                    borderRadius: 8,
-                    border: "1px solid var(--wand-border-subtle, rgba(255, 255, 255, 0.08))",
-                    background: "var(--wand-bg-card, rgba(255, 255, 255, 0.03))",
-                    cursor: "pointer",
-                    transition: "all 0.2s ease",
+                    padding: "8px 0",
+                    borderBottom: "1px solid var(--border-subtle)",
                   }}
-                  onClick={() => setCustomizingCli(!customizingCli)}
                 >
                   <Flex align="center" gap={12} style={{ minWidth: 0, flex: 1 }}>
                     <button
                       type="button"
                       className="wand-new-session-logo-toggle"
+                      ref={employeeToolButtonRef}
                       title={customizingCli ? "收起工具切换" : "切换执行工具和模型"}
                       aria-label={customizingCli ? "收起工具切换" : "切换执行工具和模型"}
                       aria-expanded={customizingCli}
@@ -515,12 +553,12 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                       <EmployeeAvatar
                         employee={selectedEmployee || { id: form.employeeId, name: "员工" }}
                         provider={form.specifiedCli ? form.provider : undefined}
-                        size="lg"
+                        size="md"
                       />
                     </button>
                     <Flex vertical style={{ minWidth: 0, flex: 1 }}>
                       <Flex align="center" gap={8}>
-                        <Typography.Text strong ellipsis style={{ fontSize: 15 }}>
+                        <Typography.Text strong ellipsis style={{ fontSize: 13 }}>
                           {selectedEmployee?.name || "硅基员工"}
                         </Typography.Text>
                         <Typography.Text
@@ -529,12 +567,8 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                             fontSize: 12,
                             padding: "1px 6px",
                             borderRadius: 4,
-                            background: form.specifiedCli
-                              ? "var(--wand-brand-bg, rgba(99, 102, 241, 0.15))"
-                              : "var(--wand-bg-tag, rgba(255, 255, 255, 0.08))",
-                            color: form.specifiedCli
-                              ? "var(--wand-brand, #818cf8)"
-                              : "inherit",
+                            background: form.specifiedCli ? "var(--accent-muted)" : "var(--bg-secondary)",
+                            color: form.specifiedCli ? "var(--accent)" : "var(--text-secondary)",
                           }}
                         >
                           {form.specifiedCli ? "已指定工具" : "按员工配置启动"}
@@ -557,7 +591,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                       setCustomizingCli(!customizingCli);
                     }}
                   >
-                    {customizingCli ? "收起" : "指定 CLI / 模型"}
+                    {customizingCli ? "收起" : "指定工具 / 模型"}
                   </WandButton>
                 </Flex>
 
@@ -568,10 +602,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                     className="wand-new-session-custom-cli-panel"
                     style={{
                       marginTop: 8,
-                      padding: "12px 14px",
-                      borderRadius: 8,
-                      border: "1px dashed var(--wand-border-subtle, rgba(255, 255, 255, 0.12))",
-                      background: "var(--wand-bg-panel, rgba(0, 0, 0, 0.1))",
+                      padding: "8px 0",
                     }}
                   >
                     <Form.Item label="选择执行工具" style={{ marginBottom: 0 }}>
@@ -589,7 +620,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                           }
                         }}
                       >
-                        <Flex vertical gap={8}>
+                        <div className="wand-execution-subject-grid">
                           <Radio value="default_dispatch">
                             <Flex align="center" gap={8}>
                               <EmployeeAvatar
@@ -608,7 +639,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                             <Radio key={tool.id} value={tool.id}>
                               <Flex align="center" gap={8}>
                                 {tool.engine === "sdk"
-                                  ? <WandIcon name="spark" size={20}/>
+                                  ? <WandIcon name="spark" size={18}/>
                                   : <ProviderLogo provider={tool.provider} className="wand-subject-provider" />}
                                 <Flex vertical>
                                   <Typography.Text strong>{tool.label}</Typography.Text>
@@ -619,7 +650,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                               </Flex>
                             </Radio>
                           ))}
-                        </Flex>
+                        </div>
                       </Radio.Group>
                     </Form.Item>
 
@@ -652,6 +683,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                         onClick={() => {
                           setForm((current) => current ? { ...current, employeeId: undefined, specifiedCli: undefined } : current);
                           setCustomizingCli(false);
+                          setSubjectPickerOpen(true);
                         }}
                       >
                         选择其他执行者
@@ -673,7 +705,9 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                 ) : null}
               </div>
             ) : (
-              <UnifiedExecutionSubjectPicker
+              <Collapse className="wand-new-session-subject-collapse" destroyOnHidden activeKey={subjectPickerOpen ? ["subject"] : []}
+                onChange={(keys) => setSubjectPickerOpen(keys.includes("subject"))}
+                items={[{ key: "subject", label: "更换执行对象与会话类型", children: <UnifiedExecutionSubjectPicker
                 selectedSubject={form.teamId
                   ? { type: "team", id: form.teamId }
                   : form.employeeId
@@ -717,7 +751,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                   selectKind(nextKind);
                 }}
                 onModelChange={(nextModel) => selectModel(nextModel)}
-              />
+              /> }]}/>
             )}
             {form.teamId ? <Form.Item label="本轮说明" htmlFor="wand-new-session-team-note"
               extra={<Typography.Text id="wand-new-session-team-note-hint" type="secondary">团队按这句话拆解与验收；开工后首屏直接进群聊页看进展。</Typography.Text>}>
@@ -726,74 +760,24 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                 aria-describedby="wand-new-session-team-note-hint" placeholder="一句话说清要他们做什么"
                 onChange={(event) => setTeamNote(event.currentTarget.value)}/>
             </Form.Item> : null}
-            <Form.Item htmlFor="wand-new-session-cwd" label="工作目录" extra={<Typography.Text id="wand-new-session-cwd-hint" type="secondary">{form.workspaceTaskId ? "使用所选任务的运行目录；切换任务可更换目录。" : "留空则使用当前目录，支持路径自动补全。"}</Typography.Text>}>
-              <AutoComplete style={{ width: "100%" }} value={form.cwd} disabled={submitting || Boolean(form.workspaceTaskId)}
-                open={suggestionsActive && suggestions.length > 0}
-                options={suggestions.map((item) => ({ value: item.path, label: <Flex vertical><Typography.Text strong>{item.name}</Typography.Text><Typography.Text type="secondary">{item.path}</Typography.Text></Flex> }))}
-                onChange={(cwd) => setForm({ ...form, cwd, workspaceId: undefined })}
-                onSelect={(cwd) => { setForm({ ...form, cwd, workspaceId: undefined }); setSuggestionsActive(false); }}
-                onFocus={() => setSuggestionsActive(true)} onBlur={() => setSuggestionsActive(false)}>
-                <WandInput id="wand-new-session-cwd" type="text"
-                  placeholder={newSessionStore.getRuntime()?.getContext().effectiveCwd || defaults.config.defaultCwd}
-                  autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
-                  aria-invalid={error.includes("目录") || undefined} aria-describedby="wand-new-session-cwd-hint"/>
-              </AutoComplete>
-              {defaults.recentPaths.length > 0 ? <Space wrap aria-label="最近使用的工作目录" style={{ marginTop: 8 }}>
-                {defaults.recentPaths.map((item) => <WandButton kind={form.cwd === item.path ? "outline" : "ghost"} size="small"
-                  disabled={submitting || Boolean(form.workspaceTaskId)}
-                  key={item.path} type="button" title={item.path} aria-pressed={form.cwd === item.path}
-                  onClick={() => setForm({ ...form, cwd: item.path, workspaceId: undefined })}>
-                  <Typography.Text ellipsis style={{ maxWidth: 180 }}>{item.path}</Typography.Text>
-                </WandButton>)}
-              </Space> : null}
-            </Form.Item>
-            {form.kind !== "shell" && !form.employeeId && !form.teamId ? <Form.Item label="模型" extra="所选模型随会话启动一起提交；「跟随服务端默认」沿用服务端配置的默认模型。">
-              <WandSelect value={preferredModel(form.model)}
-                options={wandModelOptions(modelCatalog, form.provider).filter((option) => form.kind === "structured" || !option.value.startsWith("wand-openrouter-free/"))}
-                ariaLabel="模型" searchable searchPlaceholder="搜索模型" disabled={submitting}
-                className="wand-new-session-model-select" onValueChange={selectModel}/>
+            {!form.teamId && !(form.employeeId && !form.specifiedCli) && form.kind !== "shell" ? <Form.Item label="权限与执行模式" style={{ marginBottom: 0 }} extra="选择会记为下次新建会话的偏好，不改变已有会话。">
+              <Radio.Group aria-label="执行模式" value={form.mode} disabled={submitting} onChange={(event) => selectMode(event.target.value)}>
+                <Space wrap>{MODES.map((mode) => <Radio.Button key={mode.value} value={mode.value} disabled={!supported.has(mode.value)} title={mode.description}
+                  ref={(element) => { modeRefs.current[mode.value] = element?.input ?? null; }}
+                  onKeyDown={(event) => navigateChoice(event, form.mode, supportedModesForProvider, selectMode, modeRefs)}>{mode.label}</Radio.Button>)}</Space>
+              </Radio.Group>
             </Form.Item> : null}
             <Collapse activeKey={advancedOpen ? ["advanced"] : []}
               onChange={(keys) => setAdvancedOpen(keys.includes("advanced"))}
-              items={[{ key: "advanced", label: "高级选项", extra: <Typography.Text type="secondary">{form.teamId ? "按成员员工配置执行" : form.employeeId ? (form.specifiedCli ? selectedMode?.label ?? "标准" : "按员工工具链执行") : form.kind === "shell" ? "Shell 环境" : selectedMode?.label ?? "标准"}</Typography.Text>, children:
+              items={[{ key: "advanced", label: "执行说明", children:
                 form.teamId ? <Typography.Text type="secondary">团队开工不另选模式与模型：负责人拆解，成员各用自己的员工配置与候选链执行。</Typography.Text>
                 : form.employeeId && !form.specifiedCli ? <Typography.Text type="secondary">模型、权限与候选顺序由员工配置决定。可在硅基员工页修改。</Typography.Text>
-                : form.kind !== "shell" ? <Flex vertical gap={12}><Form.Item label="执行模式" style={{ marginBottom: 0 }}>
-                  <Radio.Group aria-label="执行模式" value={form.mode} disabled={submitting} onChange={(event) => selectMode(event.target.value)}>
-                    <Space wrap>{MODES.map((mode) => <Radio.Button key={mode.value} value={mode.value} disabled={!supported.has(mode.value)} title={mode.description}
-                      ref={(element) => { modeRefs.current[mode.value] = element?.input ?? null; }}
-                      onKeyDown={(event) => navigateChoice(event, form.mode, supportedModesForProvider, selectMode, modeRefs)}>{mode.label}</Radio.Button>)}</Space>
-                  </Radio.Group>
-                </Form.Item><Typography.Text type="secondary">{protocolHint(form)}</Typography.Text></Flex>
+                : form.kind !== "shell" ? <Typography.Text type="secondary">{protocolHint(form)}</Typography.Text>
                 : <Typography.Text type="secondary">空白终端使用服务端配置的登录 Shell，不应用 AI 权限模式。</Typography.Text>
               }]}/>
-            <Alert type="info" title="即将启动" description={<Flex vertical gap={4} aria-live="polite">
-              <Typography.Text strong>
-                {form.teamId
-                  ? `${selectedTeam?.name ?? "AI 团队"} · 团队开工`
-                  : form.employeeId
-                  ? `${selectedEmployee?.name || "硅基员工"} · ${form.specifiedCli ? `${selectedTool(form)?.label || form.provider} · 对话` : "按员工配置启动"}`
-                  : form.kind === "shell"
-                    ? "空白终端 · Shell"
-                    : `${selectedTool(form)?.label ?? form.provider} · ${form.kind === "structured" ? "对话" : "终端"}`}
-              </Typography.Text>
-              <Typography.Text ellipsis title={effectiveCwd}>{effectiveCwd}</Typography.Text>
-              <Typography.Text type="secondary">
-                {form.teamId
-                  ? teamNote.trim() || "还没写本轮说明"
-                  : form.employeeId
-                  ? form.specifiedCli
-                    ? `指定模型：${preferredModel(form.model)}`
-                    : "工具、模型与权限跟随员工配置"
-                  : form.kind === "shell"
-                    ? "直接使用系统 Shell，不启动 AI 工具"
-                    : `${selectedMode?.label ?? "标准"} · ${modeHint(form)}`}
-              </Typography.Text>
-              {form.employeeId && form.specifiedCli ? <Typography.Text type="secondary">{modeHint(form)}</Typography.Text> : null}
-            </Flex>}/>
             {error ? <Alert type="error" showIcon role="alert" title={error}/> : null}
             <Flex justify="flex-end" gap={8} className="wand-dialog-sticky-actions">
-              <WandButton kind="ghost" disabled={submitting} onClick={() => newSessionController.close()}>取消</WandButton>
+              <WandButton kind="ghost" type="button" disabled={submitting} onClick={() => newSessionController.close()}>取消</WandButton>
               <WandButton className="wand-new-session-submit" kind="primary" type="submit" disabled={submitting}>
                 {submitting ? (form.teamId ? "正在开工…" : "正在启动…") : form.teamId ? "直接开工" : form.kind === "shell" ? "启动空白终端" : form.employeeId ? "启动员工会话" : "启动会话"}
               </WandButton>

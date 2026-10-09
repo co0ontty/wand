@@ -48,6 +48,13 @@ test("uploaded employee avatars retain their image and missing CLI has no generi
   assert.equal(renderEmployeeCliBadge('unknown" onclick="evil'), "");
 });
 
+test("an SDK employee badge identifies Wand Agent rather than Pi CLI", () => {
+  const sdkEmployee = { ...employee, agents: [{ provider: "pi", engine: "sdk" as const }] };
+  const html = renderToStaticMarkup(createElement(EmployeeAvatar, { employee: sdkEmployee }));
+  assert.match(html, /aria-label="Wand Agent"/);
+  assert.doesNotMatch(html, /aria-label="Pi CLI"/);
+});
+
 test("recent sidebar employee avatars show identity without a preferred CLI badge", () => {
   for (const avatar of ["", "cat:2", "data:image/png;base64,AAA"]) {
     for (const agents of [[], [{ provider: "codex" }], employee.agents]) {

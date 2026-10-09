@@ -53,6 +53,7 @@ import type {
 import { failureMessage } from "../errors";
 import { compactThinkingLabel, dynamicThinkingChoices } from "../../thinking-efforts";
 import { MODEL_CATALOG_DEFAULT_VALUE } from "../model-catalog";
+import { AGENT_TOOL_OPTIONS } from "../../provider-identity";
 import { normalizeModels } from "./repository";
 import { sortProviderOptions, useProviderUsage } from "../provider-usage";
 import { useSiliconEmployees } from "../agents/employee-repository";
@@ -809,15 +810,9 @@ function ModelSuggestions({ id, models }: { id: string; models: SettingsModelOpt
 }
 
 /** CLI 工具下拉与任务指派 / 新建会话共用使用频率排序。 */
-const SESSION_PROVIDER_OPTIONS: ReadonlyArray<{ value: SettingsSessionProvider; label: string }> = [
-  { value: "claude", label: "Claude" },
-  { value: "codex", label: "Codex" },
-  { value: "opencode", label: "OpenCode" },
-  { value: "grok", label: "Grok" },
-  { value: "qoder", label: "Qoder" },
-  { value: "pi", label: "Pi" },
-  { value: "gemini", label: "Gemini" },
-];
+const SESSION_PROVIDER_OPTIONS: ReadonlyArray<{ value: SettingsSessionProvider; label: string }> =
+  AGENT_TOOL_OPTIONS.filter((option) => option.engine !== "sdk")
+    .map((option) => ({ value: option.provider, label: option.label }));
 
 /** 目录还没回来时的四档。CLI 档位到达后换成原生列表。 */
 const THINKING_EFFORT_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
@@ -1115,11 +1110,11 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot }: Se
 
       <SettingsSection
         title="新会话默认"
-        description="选 CLI 工具、模型和思考深度；模型留空表示跟随该 CLI 默认值，目录外的模型 ID 也能手输。"
+        description="全局默认用于之后新建的会话，不会改写已有会话已保存的配置或员工候选。未手动指定的思考档位跟随此默认；当前会话可在输入区单独调整。"
         action={<SettingsActionButton pending={pending === "models"} kind="secondary" onClick={() => void refreshModels()}>刷新模型列表</SettingsActionButton>}
       >
         <div className="wand-settings-library-default-row">
-          <SettingsField label="CLI 工具" hint="新建会话默认使用的工具">
+          <SettingsField label="CLI 工具" hint="仅新会话默认；Pi 指外部 CLI，Wand Agent 在任务或员工中选择。">
             <SettingsSelect
               id="settings-default-provider"
               ariaLabel="新会话默认 CLI 工具"
@@ -1142,7 +1137,7 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot }: Se
           <SettingsField
             label="默认模型"
             htmlFor={`settings-default-model-${form.defaultProvider}`}
-            hint={`${sessionProviderLabel(form.defaultProvider)} 的默认模型`}
+            hint={`${sessionProviderLabel(form.defaultProvider)} 新会话默认；留空跟随工具，支持手输模型 ID。`}
           >
             <DefaultModelControl
               provider={form.defaultProvider}

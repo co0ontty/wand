@@ -3,6 +3,7 @@ import { Alert, Flex, Typography } from "antd";
 import { employeeConversationId } from "../../../conversation-types.js";
 import { employeeProfile } from "../agents/employee-profile";
 import { EmployeeAvatar } from "../agents/employee-avatar";
+import { employeeCliLabel } from "../agents/employee-identity.js";
 import { useSiliconEmployees } from "../agents/employee-repository";
 import { useAiTeamListState } from "../ai-teams/repository";
 import { taskBoardController } from "../issues/task-board-controller";
@@ -10,8 +11,10 @@ import { WandButton, WandIconButton, WandSearchField, WandStretchTabs } from "..
 import { ConversationMorphIcon, ConversationPanel } from "./controls";
 import { GroupEditor, PresetDetails } from "./group-editor";
 import { conversationUi } from "./state";
+import { installDirectoryStyles } from "./directory-styles.js";
 
 export function ConversationDirectory({ onSelect }: { onSelect(id: string, focusComposer?: boolean): void }): React.ReactElement {
+  React.useEffect(() => { installDirectoryStyles(); }, []);
   const { employees, error, loading, reload } = useSiliconEmployees({ includeArchived: true });
   const teamSource = useAiTeamListState(true);
   const { teams } = teamSource;
@@ -27,31 +30,31 @@ export function ConversationDirectory({ onSelect }: { onSelect(id: string, focus
   const visibleEmployees = employees.filter(e => match(`${e.name} ${e.duty} ${e.id}`));
   const visibleTeams = teams.filter(t => match(`${t.name} ${t.description}`));
   return <Flex vertical className="conversation-directory" style={{ height: "100%", minHeight: 0 }}>
-    <Flex ref={anchor} align="center" justify="space-between" gap={8} className="conversation-directory-header" style={{ position: "relative", flexShrink: 0, padding: 16 }}>
-      <WandButton onClick={() => { setCreate(false); conversationUi.directory(false); }}>返回对话</WandButton><Typography.Text strong>通讯录</Typography.Text>
-      <WandIconButton ref={trigger} aria-label={create ? "关闭建群" : "发起群聊"} aria-expanded={create} style={{ width: 44, height: 44 }}
-        onClick={() => { setPresetId(""); setCreate(!create); }}><ConversationMorphIcon from="plus" to="close" active={create}/></WandIconButton>
+    <Flex ref={anchor} align="center" justify="space-between" gap={8} className="conversation-directory-header" style={{ position: "relative", flexShrink: 0 }}>
+      <Flex align="center" gap={8}><WandButton kind="ghost" size="small" onClick={() => { setCreate(false); conversationUi.directory(false); }}>返回对话</WandButton><Typography.Title level={2}>通讯录</Typography.Title></Flex>
+      <WandButton ref={trigger} kind="primary" size="small" aria-label={create ? "关闭建群" : "发起群聊"} aria-expanded={create}
+        onClick={() => { setPresetId(""); setCreate(!create); }}><ConversationMorphIcon from="plus" to="close" active={create}/>{create ? "关闭建群" : "发起群聊"}</WandButton>
       <ConversationPanel open={create} owner="directory-group-panel" anchorRef={anchor} triggerRef={trigger} onClose={() => setCreate(false)}>
         <GroupEditor open={create} owner="directory-group-panel" presetId={presetId || undefined} onCancel={() => setCreate(false)}
           onCreated={id => { setCreate(false); onSelect(id, true); }}/>
       </ConversationPanel>
     </Flex>
-    <Flex gap={8} align="center" wrap style={{ padding: "0 16px 8px" }}>
+    <Flex gap={8} align="center" wrap className="conversation-directory-toolbar">
       <WandStretchTabs value={tab} onValueChange={value => { setCreate(false); setTab(value); }} ariaLabel="通讯录分类"
         tabs={[{ value: "employees", label: "员工" }, { value: "presets", label: "团队模板" }]}/>
-      <WandSearchField label="搜索通讯录" placeholder="搜索员工或团队模板" value={query} onValueChange={setQuery}/>
-      <WandButton onClick={() => taskBoardController.open("", "", "teams")}>管理员工与团队模板</WandButton>
+      <div className="conversation-directory-search"><WandSearchField label="搜索通讯录" placeholder="搜索员工或团队模板" value={query} onValueChange={setQuery}/></div>
+      <WandButton kind="ghost" size="small" className="conversation-directory-manage" onClick={() => taskBoardController.open("", "", "teams")}>管理员工与团队模板</WandButton>
     </Flex>
-    <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 16 }}>
+    <div className="conversation-directory-body" style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
       {tab === "employees" ? <>
         {error ? <Alert type="error" showIcon role="alert" title="员工加载失败" description={error}
           action={<WandButton size="small" disabled={loading} onClick={reload}>重新加载员工</WandButton>}/> : null}
         {loading ? <Typography.Paragraph type="secondary" role="status">正在读取员工…</Typography.Paragraph> : null}
         {visibleEmployees.map(e => <Flex key={e.id} align="center" gap={12} className="conversation-contact-row">
-          <WandIconButton className="conversation-avatar-button" aria-label={`查看${e.name}的资料`} onClick={event => employeeProfile.open(e, event.currentTarget)}><EmployeeAvatar employee={e} size="chat"/></WandIconButton>
+          <WandIconButton className="conversation-avatar-button" aria-label={`查看${e.name}的资料`} onClick={event => employeeProfile.open(e, event.currentTarget)}><EmployeeAvatar employee={e} size="md"/></WandIconButton>
           <WandButton kind="ghost" className="conversation-contact-copy" onClick={() => onSelect(employeeConversationId(e.id))}>
-            <span><strong>{e.name}</strong><span className="conversation-contact-duty">{e.duty || "暂无职责说明"}{e.archivedAt ? " · 已归档" : ""}</span></span>
-          </WandButton><WandButton kind="ghost" onClick={event => employeeProfile.open(e, event.currentTarget)}>资料</WandButton>
+            <span><strong className="conversation-contact-name" title={e.name}>{e.name}</strong><span className="conversation-contact-duty" title={e.duty || "暂无职责说明"}>{e.duty || "暂无职责说明"}{e.archivedAt ? " · 已归档" : ""}</span>{e.agents[0] ? <span className="conversation-contact-engine">{employeeCliLabel(e.agents[0].provider, e.agents[0].engine)}{e.agents.length > 1 ? ` · ${e.agents.length - 1} 个备用` : ""}</span> : null}</span>
+          </WandButton><WandButton kind="ghost" size="small" onClick={event => employeeProfile.open(e, event.currentTarget)}>资料</WandButton>
         </Flex>)}
         {!loading && !error && employees.length > 0 && !visibleEmployees.length ? <Typography.Paragraph type="secondary" role="status">没有匹配的员工，试试其他名称或清空搜索。</Typography.Paragraph> : null}
         {!loading && !error && !employees.length ? <Typography.Paragraph type="secondary">还没有员工，可以通过管理入口创建。</Typography.Paragraph> : null}

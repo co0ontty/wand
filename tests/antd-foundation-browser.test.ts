@@ -56,7 +56,9 @@ test("Ant Design foundation preserves popup ownership, focus, keyboard and progr
         <WandButton id="show-dialog" onClick={() => setDialog(true)}>Dialog</WandButton>
         <WandButton id="show-prompt" onClick={() => setPrompt(true)}>Prompt</WandButton>
         <WandDropdownMenu><WandDropdownMenuTrigger render={<WandButton id="show-menu">Menu</WandButton>}/>
-          <WandDropdownMenuContent id="test-menu" aria-label="Actions"><ExtraMenuItems/></WandDropdownMenuContent></WandDropdownMenu>
+          <WandDropdownMenuContent id="test-menu" aria-label="Actions"><ExtraMenuItems/>
+            <WandDropdownMenuItem id="menu-dialog" onSelect={() => setDialog(true)}>Open dialog</WandDropdownMenuItem>
+          </WandDropdownMenuContent></WandDropdownMenu>
         <WandPopover trigger={<WandButton id="show-popover">Popover</WandButton>} contentId="test-popover" contentRole="dialog">
           <WandInput aria-label="Popover input"/></WandPopover>
         <WandSearchField label="Filter" value={search} onValueChange={setSearch} onSearch={next => { window.foundation.search = next; }}/>
@@ -172,6 +174,10 @@ test("Ant Design foundation preserves popup ownership, focus, keyboard and progr
       await click('#menu-disabled');
       assert.equal(await evaluate("!foundation.menu && !!document.getElementById('menu-last')"), true, `${mode}: disabled menu action`);
       await click('#menu-last'); await wait("foundation.menu === 'last'");
+      await wait("!document.getElementById('test-menu') && document.activeElement.id === 'show-menu'");
+      await click('#show-menu'); await click('#menu-dialog');
+      await wait("!document.getElementById('test-menu') && document.querySelector('[aria-label=\"Dialog input\"]') === document.activeElement");
+      await key("Escape"); await wait("!document.querySelector('[data-testid=feature-dialog]')");
       await click('#show-popover'); await wait("!!document.getElementById('test-popover')");
       await click('[aria-label="Popover input"]'); await key("Escape"); await wait("!document.getElementById('test-popover')");
       await click('#show-dialog'); await wait("document.querySelector('[aria-label=\"Dialog input\"]') === document.activeElement");
@@ -202,7 +208,7 @@ test("Ant Design foundation preserves popup ownership, focus, keyboard and progr
       const primitives = await evaluate(`({buttons:document.querySelectorAll('.ant-btn').length, appicaSlots:document.querySelectorAll('[data-slot="dialog-content"],[data-slot="dialog-backdrop"],[data-slot="select-trigger"],[data-slot="combobox-trigger"],[data-slot="toast-root"]').length, popupsHidden:!document.querySelector('.wand-ui-select-content input'), x:!!document.querySelector('.ant-bubble')||!!document.querySelector('.antx-bubble'), overflow:document.documentElement.scrollWidth > innerWidth, reduced:matchMedia('(prefers-reduced-motion: reduce)').matches})`);
       assert.equal(primitives.appicaSlots, 0); assert.equal(primitives.overflow, false, `${mode}: no horizontal overflow`);
       console.log(`Foundation browser passed: ${mode}`);
-      evidence.push({ mode, ...primitives, scrollbar, highContrast, interactions: ["search and option portal ownership", "outside press", "Escape focus", "composed menu action", "popover keyboard close", "dialog autofocus", "nested popup Escape", "IME prompt acceptance", "pre-mount toast queue/dismiss", "disabled menu action", "switch", "Segmented Home/End"] });
+      evidence.push({ mode, ...primitives, scrollbar, highContrast, interactions: ["search and option portal ownership", "outside press", "Escape focus", "composed menu action", "menu selection restores trigger focus", "menu dialog action preserves dialog focus", "popover keyboard close", "dialog autofocus", "nested popup Escape", "IME prompt acceptance", "pre-mount toast queue/dismiss", "disabled menu action", "switch", "Segmented Home/End"] });
     }
     assert.deepEqual(browserErrors, [], "no browser runtime exceptions");
     mkdirSync(artifact, { recursive: true });

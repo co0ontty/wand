@@ -40,6 +40,7 @@ async function runSearchBrowser(t: TestContext): Promise<void> {
     import { ComposerStore } from "./src/web-ui/browser/composer";
     import { configureTeamChatComposerRuntime } from "./src/web-ui/react/ai-teams/composer-bridge";
     import { conversationUi } from "./src/web-ui/react/conversations/state";
+    import { notifyConversationChanges } from "./src/web-ui/react/conversations/repository";
     import "./src/web-ui/react/ai-teams/chunk-entry";
     installReactUiStyles();
     const composer = new ComposerStore({ storage: () => localStorage, isUnloading: () => false, disposeAttachment: () => {} });
@@ -60,14 +61,21 @@ async function runSearchBrowser(t: TestContext): Promise<void> {
         store.setSnapshot(snapshot);
       }
     };
-    globalThis.conversationFixture = { composer, conversationUi, store };
+    globalThis.conversationFixture = { composer, conversationUi, store, notifyConversationChanges };
     createRoot(document.getElementById("root")).render(<PortalContainerProvider container={document.getElementById("portals")}>
       <WandUiProvider><UiStoreProvider store={store}><div style={{height:"100dvh",display:"flex",minHeight:0}}><ShellSidebar/><ShellMainContent/></div></UiStoreProvider></WandUiProvider>
     </PortalContainerProvider>);
   `;
   await build({ stdin: { contents: source, resolveDir: root, loader: "tsx" }, bundle: true, format: "iife", platform: "browser", jsx: "automatic",
     outfile: join(temp, "app.js"), logLevel: "warning", define: { "process.env.NODE_ENV": '"production"' } });
-  const app = express(); app.use(express.json()); registerConversationRoutes(app, h.service);
+  const app = express(); app.use(express.json());
+  let holdListRead = true, failListRead = false;
+  const pendingListReads: Array<() => void> = [];
+  app.get("/api/conversations", (_req, res, next) => {
+    if (failListRead) { res.status(503).json({ error: "测试列表刷新失败" }); return; }
+    if (holdListRead) pendingListReads.push(() => failListRead ? res.status(503).json({ error: "测试列表刷新失败" }) : next()); else next();
+  });
+  registerConversationRoutes(app, h.service);
   app.get("/api/silicon-employees", (_req, res) => res.json({ employees: h.storage.listSiliconEmployees({ includeArchived: true }) }));
   app.get("/api/ai-teams", (_req, res) => res.json(h.storage.listAiTeams()));
   app.get("/api/workspaces", (_req, res) => res.json(h.storage.listWorkspaces()));
@@ -176,16 +184,28 @@ async function runSearchBrowser(t: TestContext): Promise<void> {
       await wait("!!document.querySelector('.conversation-search-host')");
       if (scenario.drawer) await click('[aria-label="打开列表"]');
       await evaluate("conversationFixture.conversationUi.filter('list-query','')");
+      if (holdListRead) {
+        assert.equal(await evaluate("document.querySelector('.conversation-list-count').textContent"), "读取中…", "an unresolved first read is not reported as zero conversations");
+        assert.equal(await evaluate("!!document.querySelector('.conversation-list-empty')"), false, "loading is not a successful empty list");
+        failListRead = true; holdListRead = false; pendingListReads.splice(0).forEach(next => next());
+        await wait("document.querySelector('.conversation-list-count').textContent==='数量未加载'");
+        assert.equal(await evaluate("!!document.querySelector('.conversation-list-empty')"), false, "a failed first read does not claim an empty list");
+        failListRead = false;
+        await evaluate("conversationFixture.notifyConversationChanges()");
+      }
       await wait("document.querySelectorAll('.conversation-sidebar-list .conversation-row').length>1");
       const allRows = (await searchState()).rows;
+      assert.equal(await evaluate("document.querySelector('.conversation-list-count').textContent"), `${allRows} 个对话`);
       const opened = await geometry();
       assert.ok(opened.input.width >= 160, `${scenario.name}: always-visible search has usable width`);
       assert.ok(opened.input.left >= opened.sidebar.left && opened.input.right <= opened.sidebar.right);
       assert.equal(await evaluate("document.documentElement.scrollWidth<=innerWidth+1"), true);
+      await evaluate("Promise.all(document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity).map(a=>a.finished.catch(()=>{})))");
       const toolsBefore = await rect('.sidebar-header-actions');
       await click('.conversation-search-input input');
       await send("Input.insertText", { text: "边界甲" });
       await wait("document.querySelectorAll('.conversation-sidebar-list .conversation-row').length===1");
+      assert.equal(await evaluate("document.querySelector('.conversation-list-count').textContent"), `匹配 1 / ${allRows}`, "search matches never replace the tier total");
       assert.equal(await evaluate("document.querySelector('.conversation-row-title').textContent.includes('边界甲')"), true);
       assert.deepEqual(await rect('.sidebar-header-actions'), toolsBefore, "search never hides or moves the header actions");
       await shot(`${scenario.name}-01-filtered`);
@@ -196,11 +216,22 @@ async function runSearchBrowser(t: TestContext): Promise<void> {
       assert.equal(composingEscape.value, "边界甲"); assert.equal(composingEscape.consumed, false);
       await send("Input.insertText", { text: "不存在" });
       await wait("document.querySelectorAll('.conversation-sidebar-list .conversation-row').length===0");
+      assert.equal(await evaluate("document.querySelector('.conversation-list-count').textContent"), `匹配 0 / ${allRows}`);
       assert.equal((await searchState()).empty, true);
       await click('[aria-label="清空搜索"]');
       await wait("document.querySelector('.conversation-search-input input')?.value===''");
       assert.equal((await searchState()).focused, true);
       assert.equal((await searchState()).rows, allRows);
+      if (scenario.name === "desktop-1440") {
+        failListRead = true;
+        await evaluate("conversationFixture.notifyConversationChanges()");
+        await wait("document.querySelector('.conversation-sidebar-list [role=status]')?.textContent.includes('测试列表刷新失败')");
+        assert.equal((await searchState()).rows, allRows, "a failed refresh keeps the last confirmed list");
+        assert.equal(await evaluate("document.querySelector('.conversation-list-count').textContent"), `${allRows} 个对话`, "a failed refresh keeps confirmed totals");
+        failListRead = false;
+        await evaluate("conversationFixture.notifyConversationChanges()");
+        await wait("!document.querySelector('.conversation-sidebar-list').textContent.includes('测试列表刷新失败')");
+      }
       await send("Input.insertText", { text: "边界乙" });
       await key("Escape");
       await wait("document.querySelector('.conversation-search-input input')?.value===''");

@@ -71,6 +71,7 @@ export type WandIconName =
   | "trash"
   | "unlock"
   | "user"
+  | "users"
   | "up"
   | "video"
   | "warning"
@@ -126,17 +127,19 @@ export function WandIcon({
     case "bell":
       return <svg {...common}><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>;
     case "user":
-      return <svg {...common}><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg>;
+      return <svg {...common}><circle cx="12" cy="7.5" r="3.5"/><path d="M5 20v-1a7 7 0 0 1 14 0v1"/></svg>;
+    case "users":
+      return <svg {...common}><circle cx="9" cy="7.5" r="3"/><path d="M3.5 20v-1a5.5 5.5 0 0 1 11 0v1M16 5a3 3 0 0 1 0 5.5M20.5 20v-1a5.5 5.5 0 0 0-3.5-5.1"/></svg>;
     case "binary":
       return <svg {...common}><path d="M12 3l8 9-8 9-8-9 8-9z"/></svg>;
     case "board":
-      return <svg {...common}><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16M6 8v4M12 8v7M18 8v2"/></svg>;
+      return <svg {...common}><rect x="3.5" y="4" width="4" height="12" rx="1"/><rect x="10" y="4" width="4" height="16" rx="1"/><rect x="16.5" y="4" width="4" height="8" rx="1"/></svg>;
     case "brain":
-      return <svg {...common}><path d="M9.5 4.5a3 3 0 0 0-4.7 3.1 3.3 3.3 0 0 0 .3 6.1A3 3 0 0 0 8 19h1.5V4.5z"/><path d="M14.5 4.5a3 3 0 0 1 4.7 3.1 3.3 3.3 0 0 1-.3 6.1A3 3 0 0 1 16 19h-1.5V4.5z"/><path d="M9.5 8H7.8"/><path d="M14.5 8h1.7"/><path d="M9.5 13H7.6"/><path d="M14.5 13h1.9"/></svg>;
+      return <svg {...common}><path d="M12 5a3 3 0 0 0-5.8 1A4 4 0 0 0 4 13a4 4 0 0 0 8 5V5Zm0 0a3 3 0 0 1 5.8 1A4 4 0 0 1 20 13a4 4 0 0 1-8 5M8 10l4 2 4-2"/></svg>;
     case "branch":
       return <svg {...common}><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7M18 10.5c0 4-6 2.5-6 6.5"/></svg>;
     case "chat":
-      return <svg {...common}><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 4V6a2 2 0 0 1 2-2z"/></svg>;
+      return <svg {...common}><path d="M5.5 4h13a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5.5 3V6a2 2 0 0 1 2-2Z"/><path d="M8 9h8"/></svg>;
     case "check":
       return <svg {...common}><path d="M20 6L9 17l-5-5"/></svg>;
     case "chevron":
@@ -156,7 +159,7 @@ export function WandIcon({
     case "copy":
       return <svg {...common}><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>;
     case "cpu":
-      return <svg {...common}><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M9 1v3"/><path d="M15 1v3"/><path d="M9 20v3"/><path d="M15 20v3"/><path d="M20 9h3"/><path d="M20 15h3"/><path d="M1 9h3"/><path d="M1 15h3"/><rect x="10" y="10" width="4" height="4" rx="1"/></svg>;
+      return <svg {...common}><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="10" y="10" width="4" height="4" rx=".5"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/></svg>;
     case "download":
       return <svg {...common}><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>;
     case "edit":
@@ -164,18 +167,18 @@ export function WandIcon({
     case "enter":
       return <svg {...common}><path d="M9 10l-5 5 5 5"/><path d="M4 15h11a5 5 0 005-5V4"/></svg>;
     case "explorer":
-      return <svg {...common}><path d="M8 3h7l4 4v11a2 2 0 01-2 2H8a2 2 0 01-2-2V5a2 2 0 012-2z"/><path d="M15 3v4h4"/><path d="M3 9h7l2 2v8a1 1 0 01-1 1H4a1 1 0 01-1-1z"/></svg>;
+      return <svg {...common}><path d="M14 3.5H6.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V9L14 3.5ZM14 3.5V9h5.5M8.5 13h7M8.5 16.5h5"/></svg>;
     case "eye":
       return <svg {...common}><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>;
     case "file":
       return <svg {...common}><path d="M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V9z"/><path d="M14 3v6h6"/></svg>;
     case "folder":
-      return <svg {...common}><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>;
+      return <svg {...common}><path d="M20.5 18a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2H10l2 3h6.5a2 2 0 0 1 2 2v9Z"/></svg>;
     case "gear":
       return (
         <svg {...common}>
+          <path d="m9.5 3-.6 2.5-2.2 1.3-2.5-.7-2.5 4.3 1.9 1.8v2.6l-1.9 1.8 2.5 4.3 2.5-.7 2.2 1.3.6 2.5h5l.6-2.5 2.2-1.3 2.5.7 2.5-4.3-1.9-1.8v-2.6l1.9-1.8-2.5-4.3-2.5.7-2.2-1.3L14.5 3Z" transform="translate(2 1) scale(.833333)"/>
           <circle cx="12" cy="12" r="3"/>
-          <path d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 00.73 2.73l.15.1a2 2 0 011 1.72v.51a2 2 0 01-1 1.74l-.15.09a2 2 0 00-.73 2.73l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 00-.73-2.73l-.15-.08a2 2 0 01-1-1.74v-.5a2 2 0 011-1.74l.15-.09a2 2 0 00.73-2.73l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z"/>
         </svg>
       );
     case "git":

@@ -21,6 +21,8 @@ test("viewer hosts run on Ant Design in real Chrome", { timeout: 300_000, skip: 
   const temporary = mkdtempSync(join(tmpdir(), "wand-antd-viewers-"));
   const artifact = join(root, "output/style-ant-next/viewers");
   const restartOnly = process.env.WAND_VIEWERS_RESTART_ONLY === "1";
+  const explorerOnly = process.env.WAND_VIEWERS_EXPLORER_ONLY === "1";
+  const evidenceName = explorerOnly ? "explorer-browser.json" : restartOnly ? "restart-browser.json" : "viewers-browser.json";
   const browserErrors: string[] = [];
   const evidence: Array<Record<string, unknown>> = [];
   const source = `
@@ -131,6 +133,8 @@ test("viewer hosts run on Ant Design in real Chrome", { timeout: 300_000, skip: 
   ].join("\n");
 
   let failNextWrite = false;
+  let holdNextWrite = false;
+  let resumeWrite: (() => void) | null = null;
   const failLoads = new Set<string>();
   const writtenFiles = new Map<string, string>();
   const server = createServer(async (request, response) => {
@@ -139,14 +143,20 @@ test("viewer hosts run on Ant Design in real Chrome", { timeout: 300_000, skip: 
       response.writeHead(status, { "content-type": "application/json" });
       response.end(JSON.stringify(value));
     };
-    if (url.pathname === "/fixture/reset") { failNextWrite = false; failLoads.clear(); writtenFiles.clear(); return json({ ok: true }); }
+    if (url.pathname === "/fixture/reset") { failNextWrite = false; holdNextWrite = false; resumeWrite?.(); resumeWrite = null; failLoads.clear(); writtenFiles.clear(); return json({ ok: true }); }
     if (url.pathname === "/fixture/fail-next-save") { failNextWrite = true; return json({ ok: true }); }
+    if (url.pathname === "/fixture/hold-next-save") { holdNextWrite = true; return json({ ok: true }); }
+    if (url.pathname === "/fixture/release-save") { resumeWrite?.(); resumeWrite = null; return json({ ok: true }); }
     if (url.pathname === "/fixture/fail-next-load") { failLoads.add(url.searchParams.get("path") ?? ""); return json({ ok: true }); }
     if (url.pathname === "/api/file-write") {
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(chunk);
       const body = JSON.parse(Buffer.concat(chunks).toString());
       if (failNextWrite) { failNextWrite = false; return json({ error: "测试保存失败，请重试" }, 503); }
+      if (holdNextWrite) {
+        holdNextWrite = false;
+        await new Promise<void>((resolve) => { resumeWrite = resolve; });
+      }
       writtenFiles.set(body.path, body.content);
       return json({ path: body.path, size: Buffer.byteLength(body.content), mtime: "fixture-saved" });
     }
@@ -166,9 +176,11 @@ test("viewer hosts run on Ant Design in real Chrome", { timeout: 300_000, skip: 
     }
     if (url.pathname === "/api/directory") return json({ items: tree[url.searchParams.get("q") ?? ""] ?? [] });
     if (url.pathname === "/api/file-search") {
-      return json({ results: [
+      const generated = url.searchParams.get("includeGenerated") === "true";
+      return json({ truncated: generated, results: [
         { path: "/app/src/index.ts", name: "index.ts", type: "file", size: 18 },
         { path: "/app/src", name: "src", type: "dir" },
+        ...(generated ? [{ path: "/app/node_modules/index.ts", name: "index.ts", type: "file" }] : []),
       ] });
     }
     if (url.pathname === "/api/file-preview") {
@@ -341,6 +353,7 @@ test("viewer hosts run on Ant Design in real Chrome", { timeout: 300_000, skip: 
         await evaluate("document.querySelector('[role=treeitem][aria-label=\"a.ts\"]').focus()");
         await rightClick('[role=treeitem][aria-label="a.ts"]');
         await wait("!!document.querySelector('.wand-explorer-context-menu')");
+        assert.equal(await evaluate("document.querySelector('#wand-react-ui-portals').contains(document.querySelector('.wand-explorer-context-menu'))"), true, "文件菜单通过共享 Portal 渲染");
         assert.equal(await evaluate("document.querySelectorAll('.wand-explorer-context-menu .wand-ui-menu-item.ant-btn').length >= 8"), true, `${mode}: 菜单行是库按钮`);
         assert.equal(await evaluate("!!document.querySelector('.wand-explorer-context-menu .wand-ui-menu-separator.ant-divider')"), true, "分隔线是库组件");
         await wait("document.activeElement.classList.contains('wand-ui-menu-item')");
@@ -348,6 +361,10 @@ test("viewer hosts run on Ant Design in real Chrome", { timeout: 300_000, skip: 
         await key("ArrowDown");
         assert.equal(await evaluate("document.activeElement.classList.contains('wand-ui-menu-item')"), true, "方向键在菜单行间走位");
         assert.notEqual(await evaluate("document.activeElement.textContent"), firstItemText, "方向键真的移动了焦点");
+        await key("End");
+        assert.equal(await evaluate("document.activeElement.textContent.replaceAll(' ', '')"), "删除", "End 到达菜单末项");
+        await key("Home");
+        assert.equal(await evaluate("document.activeElement.textContent"), firstItemText, "Home 返回菜单首项");
         await key("Escape");
         await wait("!document.querySelector('.wand-explorer-context-menu')");
         await wait("document.activeElement.getAttribute('aria-label') === 'a.ts'");
@@ -366,6 +383,13 @@ test("viewer hosts run on Ant Design in real Chrome", { timeout: 300_000, skip: 
         await type("index");
         await wait("!!document.querySelector('.wand-explorer-search-panel')");
         await wait("document.querySelectorAll('.wand-explorer-result[role=option]').length === 2");
+        assert.equal(await evaluate("document.querySelector('.wand-explorer-search-scope input').checked"), false, "默认只搜索项目文件");
+        await click('.wand-explorer-search-scope .ant-checkbox-wrapper');
+        await wait("document.querySelectorAll('.wand-explorer-result[role=option]').length === 3");
+        assert.equal(await evaluate("document.querySelector('.wand-explorer-search-limit').textContent.includes('继续查找')"), true, "截断反馈提供继续查找方式");
+        await screenshot(`file-search-scope-${mode}`);
+        await click('.wand-explorer-search-scope .ant-checkbox-wrapper');
+        await wait("document.querySelectorAll('.wand-explorer-result[role=option]').length === 2");
         assert.equal(
           await evaluate("document.querySelector('.wand-explorer-search-filters').className.includes('ant-segmented')"),
           true,
@@ -379,6 +403,14 @@ test("viewer hosts run on Ant Design in real Chrome", { timeout: 300_000, skip: 
         assert.equal(await evaluate("document.activeElement.getAttribute('aria-label') === '搜索文件'"), true, "点筛选后焦点回到搜索框");
         await key("Escape");
         await wait("!document.querySelector('.wand-explorer-search-panel')");
+        assert.equal(await evaluate("document.activeElement.getAttribute('aria-label') === '搜索文件'"), true, "Esc 清空保留搜索焦点");
+        assert.equal(await evaluate("document.querySelectorAll('.wand-explorer-row[role=treeitem]').length > 0"), true, "清空后恢复文件树");
+        if (explorerOnly) {
+          evidence.push({ mode, scope: "file explorer", generatedScope: true, truncatedFeedback: true, portalMenu: true, keyboardAndClear: true });
+          await screenshot(`file-tree-${mode}`);
+          console.log(`File explorer browser passed: ${mode}`);
+          continue;
+        }
 
         // ---- code editor ----
         assert.equal(await window_open("/app/a.ts"), true, "编辑器打开文件");
@@ -479,7 +511,14 @@ test("viewer hosts run on Ant Design in real Chrome", { timeout: 300_000, skip: 
         await wait("!!document.querySelector('.wand-file-preview-inline-error.ant-alert')");
         assert.equal(await evaluate("window.viewers.previewSnapshot().draft"), previewDraft, `${mode}: failed attachment save keeps draft`);
         assert.equal(await evaluate("window.viewers.previewSnapshot().editing && window.viewers.previewSnapshot().dirty"), true);
+        await evaluate("fetch('/fixture/hold-next-save')");
         await click('.wand-file-preview-edit-actions .ant-btn', "保存");
+        await wait("window.viewers.previewSnapshot().saving");
+        await key("Escape");
+        assert.equal(await evaluate("window.viewers.previewSnapshot().open && window.viewers.previewSnapshot().editing && window.viewers.previewSnapshot().saving"), true, `${mode}: Escape during save retains editing preview`);
+        assert.equal(await evaluate("window.viewers.previewSnapshot().draft"), previewDraft, `${mode}: Escape during save retains draft`);
+        assert.equal(await evaluate("document.querySelectorAll('.wand-ui-dialog-actions .ant-btn').length"), 0, `${mode}: saving does not open discard confirmation`);
+        await evaluate("fetch('/fixture/release-save')");
         await wait("!window.viewers.previewSnapshot().dirty && !document.querySelector('.wand-file-preview-inline-error')");
         await screenshot(`file-preview-${mode}`);
         await click('.wand-file-preview-editor textarea');
@@ -671,17 +710,18 @@ test("viewer hosts run on Ant Design in real Chrome", { timeout: 300_000, skip: 
 
     assert.deepEqual(browserErrors, [], "no browser runtime exceptions");
     mkdirSync(artifact, { recursive: true });
-    writeFileSync(join(artifact, restartOnly ? "restart-browser.json" : "viewers-browser.json"), JSON.stringify({
+    writeFileSync(join(artifact, evidenceName), JSON.stringify({
       passed: true,
-      scope: "Viewer lane hosts mounted from production source in real Chrome against a stub HTTP surface",
+      scope: explorerOnly ? "File explorer mounted from production source in real Chrome against an isolated stub HTTP surface" : "Viewer lane hosts mounted from production source in real Chrome against a stub HTTP surface",
       evidence,
       browserErrors,
     }, null, 2));
   } catch (error) {
     mkdirSync(artifact, { recursive: true });
-    writeFileSync(join(artifact, restartOnly ? "restart-browser.json" : "viewers-browser.json"), JSON.stringify({ passed: false, evidence, browserErrors, error: String(error) }, null, 2));
+    writeFileSync(join(artifact, evidenceName), JSON.stringify({ passed: false, evidence, browserErrors, error: String(error) }, null, 2));
     throw error;
   } finally {
+    resumeWrite?.();
     socket?.close();
     if (chrome.exitCode === null) {
       const stopped = once(chrome, "exit");

@@ -1,8 +1,9 @@
-import { Alert, Button, Card, Empty, Flex, Progress, Segmented, Spin, Tag, Typography } from "antd";
+import { Alert, Button, Card, Checkbox, Empty, Flex, Progress, Segmented, Spin, Tag, Typography } from "antd";
 import * as React from "react";
 import { useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import { wandOverlay } from "../overlay-controller";
-import { WandButton, WandIconButton, WandInput, WandMenuItem, WandMenuSeparator, WandSearchField } from "../ui";
+import { WandButton, WandIconButton, WandInput, WandMenuItem, WandMenuSeparator, WandSearchField, usePortalContainer } from "../ui";
 import { copyTextToPlatformClipboard } from "../file-preview/platform-adapter";
 import { codeEditorController, codeEditorStore } from "../code-editor/controller";
 import { nextFolderPickerIndex, type FolderPickerNavigationKey } from "../folder-picker/model";
@@ -420,13 +421,20 @@ function ContextMenu({
   onAction(action: string): void;
 }) {
   const ref = React.useRef<HTMLDivElement>(null);
+  const portal = usePortalContainer();
   const buttons = React.useRef(new Map<string, HTMLButtonElement>());
   const focusOrigin = React.useRef(document.activeElement);
+  React.useLayoutEffect(() => {
+    [...buttons.current.values()].find((button) => !button.disabled)?.focus({ preventScroll: true });
+  }, []);
   React.useEffect(() => {
     const handle = (event: MouseEvent) => {
       if (ref.current && !ref.current.contains(event.target as Node)) onClose();
     };
-    const scroll = () => onClose();
+    const scroll = (event: Event) => {
+      if (event.target instanceof Node && ref.current?.contains(event.target)) return;
+      onClose();
+    };
     window.addEventListener("mousedown", handle, true);
     window.addEventListener("scroll", scroll, true);
     return () => {
@@ -438,7 +446,7 @@ function ContextMenu({
   const vw = typeof window !== "undefined" ? window.innerWidth : 1024;
   const vh = typeof window !== "undefined" ? window.innerHeight : 768;
   const left = Math.min(state.x, vw - 184);
-  const top = Math.min(state.y, vh - 320);
+  const top = Math.min(state.y, vh - 400);
 
   const entry = state.entry;
   const isDir = entry?.type === "dir";
@@ -448,34 +456,37 @@ function ContextMenu({
     <WandMenuItem
       label={label}
       tone={opts.danger ? "danger" : "default"}
-      autoFocus={action === "newFile"}
       ref={(node) => {
         if (node) buttons.current.set(action, node);
         else buttons.current.delete(action);
       }}
       disabled={opts.disabled}
-      onClick={() => { onAction(action); }}
+      onClick={() => {
+        if (focusOrigin.current instanceof HTMLElement && focusOrigin.current.isConnected) focusOrigin.current.focus({ preventScroll: true });
+        onAction(action);
+      }}
     />
   );
 
-  return (
+  return createPortal(
     <Card
       ref={ref}
       size="small" styles={{ body: { padding: 4 } }}
       className="wand-explorer-context-menu"
-      style={{ position: "fixed", zIndex: 1000, width: 180, left: Math.max(8, left), top: Math.max(8, top) }}
+      style={{ position: "fixed", zIndex: 1100, pointerEvents: "auto", width: 180, maxHeight: "calc(100dvh - 16px)", overflowY: "auto", overscrollBehavior: "contain", left: Math.max(8, left), top: Math.max(8, top) }}
       role="menu"
       aria-label="文件操作"
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           event.preventDefault();
+          event.stopPropagation();
           onClose();
           if (focusOrigin.current instanceof HTMLElement) focusOrigin.current.focus();
-        } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
           event.preventDefault();
           const items = [...buttons.current.values()].filter((item) => !item.disabled);
           const index = items.indexOf(document.activeElement as HTMLButtonElement);
-          const next = index + (event.key === "ArrowDown" ? 1 : -1);
+          const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : index + (event.key === "ArrowDown" ? 1 : -1);
           items[(next + items.length) % items.length]?.focus();
         }
       }}
@@ -501,7 +512,7 @@ function ContextMenu({
           {item("复制目录路径", "copyPath")}
         </>
       )}
-    </Card>
+    </Card>, portal ?? document.body
   );
 }
 
@@ -557,9 +568,9 @@ function SearchPanel({
   return (
     <Flex vertical className="wand-explorer-search-panel" style={{ flex: 1, minHeight: 0 }}>
       {showSummary && (
-        <Flex wrap align="center" gap="small" className="wand-explorer-search-summary" style={{ padding: 8 }}>
+        <Flex wrap align="center" gap={6} className="wand-explorer-search-summary" style={{ padding: "8px 0" }}>
           <Typography.Text className="wand-explorer-search-count">
-            {snapshot.searching ? "搜索中" : `${counts.all} 项结果`}
+            {snapshot.searching ? "搜索中" : `${counts.all} 项结果${snapshot.searchTruncated ? " · 已截断" : ""}`}
           </Typography.Text>
           {!snapshot.searching && snapshot.searchDurationMs !== null && counts.all > 0 && (
             <Typography.Text type="secondary" className="wand-explorer-search-duration">{snapshot.searchDurationMs} ms</Typography.Text>
@@ -590,14 +601,16 @@ function SearchPanel({
           />
         </Flex>
       )}
+      {!snapshot.searching && snapshot.searchTruncated && <Typography.Text type="secondary" className="wand-explorer-search-limit" role="status">
+        结果已截断。输入更完整名称，或进入子目录继续查找。
+      </Typography.Text>}
       {snapshot.searching && (
         <Progress className="wand-explorer-search-progress" percent={100} showInfo={false}
           size="small" status="active" aria-label="正在搜索文件"/>
       )}
 
       {snapshot.searchError ? (
-        <Alert className="wand-file-explorer-empty" type="error" showIcon title="读取失败" description={<Flex vertical gap="small">
-          <p className="wand-file-explorer-empty-title">搜索失败</p>
+        <Alert className="wand-file-explorer-empty" type="error" showIcon title="搜索失败" description={<Flex vertical gap="small">
           <p className="wand-file-explorer-empty-hint">{snapshot.searchError}</p>
           <WandButton kind="ghost" size="small" onClick={onRetry}>重试搜索</WandButton>
         </Flex>} />
@@ -605,7 +618,7 @@ function SearchPanel({
         <Flex vertical id={listId} className="wand-explorer-results" role="listbox" aria-label="搜索结果" style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
           {groups.map((group) => (
             <div className="wand-explorer-search-group" role="group" aria-label={group.label} key={group.key}>
-              <Card size="small" className="wand-explorer-search-group-label" title={<Typography.Text ellipsis className="wand-explorer-search-group-path">{group.label}</Typography.Text>} extra={<Typography.Text type="secondary" className="wand-explorer-search-group-count">{group.entries.length}</Typography.Text>} styles={{ body: { display: "none" } }} style={{ position: "sticky", top: 0, zIndex: 1 }}><span/></Card>
+              <Card size="small" variant="borderless" className="wand-explorer-search-group-label" title={<Typography.Text ellipsis className="wand-explorer-search-group-path">{group.label}</Typography.Text>} extra={<Typography.Text type="secondary" className="wand-explorer-search-group-count">{group.entries.length}</Typography.Text>} styles={{ body: { display: "none" }, header: { minHeight: 28, padding: "0 8px", fontSize: 12 } }} style={{ position: "sticky", top: 0, zIndex: 1, borderRadius: 0, background: "var(--bg-secondary)" }}><span/></Card>
               {group.entries.map((entry) => {
                 const index = indexByPath.get(entry.path) ?? -1;
                 const active = index === activeIndex;
@@ -613,7 +626,7 @@ function SearchPanel({
                 return (
                   <Button
                     block type={active ? "primary" : "text"}
-                    style={{ justifyContent: "flex-start", gap: 6 }}
+                    size="small" style={{ justifyContent: "flex-start", gap: 6, fontSize: 13 }}
                     key={entry.path}
                     id={`${listId}-option-${index}`}
                     ref={(node) => {
@@ -664,7 +677,7 @@ function SearchPanel({
         <Empty className="wand-file-explorer-empty" description={null}>
           <p className="wand-file-explorer-empty-title">没有匹配「{query}」的文件</p>
           <p className="wand-file-explorer-empty-hint">
-            只匹配名称；已跳过 .git、node_modules、dist 等目录，最多向下 5 层。
+            {snapshot.includeGenerated ? "按名称搜索，包含依赖与生成目录；最多向下 5 层。" : "按名称搜索项目文件；可勾选上方选项包含依赖与生成目录。"}
           </p>
           <WandButton kind="ghost" size="small" onClick={onClear}>清除搜索</WandButton>
         </Empty>
@@ -800,8 +813,8 @@ export function FileExplorerHost({ root }: { root: string }) {
     }
     if (action === "delete" && entry) { void dispatch.execute({ type: "delete", path: entry.path }); return; }
     if (action === "refresh") { void dispatch.execute({ type: "refresh", dir: ctx.dir }); return; }
-    if (action === "copyPath" && entry) {
-      const ok = await copyText(entry.path);
+    if (action === "copyPath") {
+      const ok = await copyText(entry?.path ?? ctx.dir);
       notify(ok ? "已复制路径" : "复制失败", ok ? "success" : "error");
       return;
     }
@@ -867,7 +880,7 @@ export function FileExplorerHost({ root }: { root: string }) {
         event.preventDefault();
         setContextMenu({ x: event.clientX, y: event.clientY, entry: null, dir: snapshot.activeDir || snapshot.root });
       }}>
-        <Flex align="center" gap={4} className="wand-file-explorer-toolbar" style={{ padding: 8, flexShrink: 0 }}>
+        <Flex align="center" gap={4} className="wand-file-explorer-toolbar" style={{ padding: "4px 0 8px", flexShrink: 0 }}>
           <Flex className="wand-file-explorer-search" style={{ flex: 1, minWidth: 0 }} onKeyDown={handleSearchKeyDown}>
             <WandSearchField
               value={searchInput}
@@ -896,6 +909,13 @@ export function FileExplorerHost({ root }: { root: string }) {
             onClick={() => setPendingCreate({ dir: snapshot.activeDir || snapshot.root, kind: "dir" })}
           ><ExplorerIcon name="newFolder" size={15}/></WandIconButton>
         </Flex>
+        <Flex align="center" className="wand-explorer-search-scope">
+          <Checkbox disabled={!snapshot.root} checked={snapshot.includeGenerated}
+            onChange={(event) => void dispatch.execute({ type: "search.scope", includeGenerated: event.target.checked })}>
+            包含依赖与生成目录
+          </Checkbox>
+          <Typography.Text type="secondary" title="按名称匹配当前目录及向下 5 层，最多返回 80 项；项目文件优先。">名称 · 5 层</Typography.Text>
+        </Flex>
         {searchMode ? (
           <SearchPanel
             snapshot={snapshot}
@@ -912,7 +932,7 @@ export function FileExplorerHost({ root }: { root: string }) {
             onFilter={(filter) => {
               void dispatch.execute({ type: "search.filter", filter });
             }}
-            onClear={() => void dispatch.execute({ type: "search.clear" })}
+            onClear={() => { void dispatch.execute({ type: "search.clear" }); searchInputRef.current?.focus(); }}
             onRetry={() => void dispatch.execute({ type: "search.start", query: searchInput })}
           />
         ) : (

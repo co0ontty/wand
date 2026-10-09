@@ -6,6 +6,7 @@ import {
   WAND_AGENT_LABEL,
   inferProviderFromCommand,
   normalizeProviderId,
+  providerDisplayName,
   type SessionProvider,
 } from "../provider-catalog.js";
 
@@ -72,6 +73,13 @@ export function agentToolOption(id: string | null | undefined): AgentToolOption 
 export function agentToolIdFor(provider: ProviderId, engine?: AgentToolEngine | null): string {
   if (provider === "pi" && engine === "sdk") return WAND_AGENT_TOOL_ID;
   return provider;
+}
+
+/** 展示执行对象时同时识别 provider 与引擎，不能把 SDK harness 标成 Pi CLI。 */
+export function agentToolDisplayName(provider: unknown, engine?: AgentToolEngine | "core" | null): string {
+  return normalizeProviderId(provider) === "pi" && (engine === "sdk" || engine === "core")
+    ? WAND_AGENT_LABEL
+    : providerDisplayName(provider);
 }
 
 const PROVIDER_ID_SET: ReadonlySet<string> = new Set(PROVIDER_IDS);

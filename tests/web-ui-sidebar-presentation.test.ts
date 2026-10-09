@@ -158,7 +158,7 @@ test("task arrow, rail and peek share the projection through Ant layout and cont
   assert.match(panel, /onClick=\{\(\) => setDisplayMode\("full"\)\}/);
   assert.match(panel, /nativeEvent.isComposing/);
   assert.match(shell, /<Layout.Sider/);
-  assert.match(shell, /width="min\(376px, calc\(100vw - 24px\)\)" collapsedWidth=\{128\}/);
+  assert.match(shell, /width=\{contextRail \? 56 : "min\(344px, calc\(100vw - 24px\)\)"\} collapsedWidth=\{112\}/);
   const peek = source("src/web-ui/react/shell/sidebar-peek.tsx");
   assert.match(peek, /<Card size="small"/);
   assert.match(peek, /width: "min\(320px, calc\(100vw - 144px\)\)"/);
@@ -440,7 +440,7 @@ test("sidebar review regression: real browser cascade and peek unmount focus", {
     evidence.coarseRail = await evaluate(`({ source: measureRect('.sidebar-compact-toggle'),
       directory: measureRect('.sidebar-collapsed-rail-task'), newTask: measureRect('#drawer-new-session-button'),
       board: measureRect('#task-board-button'), team: measureRect('#ai-teams-button'),
-      settings: measureRect('#settings-button'), more: measureRect('#sidebar-more-btn') })`);
+      settings: measureRect('#settings-button') })`);
     await screenshot("coarse-rail-source-dom");
     await page("Emulation.setTouchEmulationEnabled", { enabled: false });
     await waitFor("matchMedia('(pointer: fine)').matches");

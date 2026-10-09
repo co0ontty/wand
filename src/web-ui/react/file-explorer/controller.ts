@@ -85,6 +85,8 @@ export function createFileExplorerModule(options: FileExplorerModuleOptions): Fi
     searchQuery: "",
     searchResults: null,
     searchFilter: "all",
+    includeGenerated: false,
+    searchTruncated: false,
     searchDurationMs: null,
     searching: false,
     revealPath: null,
@@ -157,6 +159,7 @@ export function createFileExplorerModule(options: FileExplorerModuleOptions): Fi
         searching: false,
         searchError: "",
         searchDurationMs: null,
+        searchTruncated: false,
         revealPath: null,
       });
     }
@@ -172,6 +175,7 @@ export function createFileExplorerModule(options: FileExplorerModuleOptions): Fi
         searchQuery: query,
         searchResults: null,
         searchDurationMs: null,
+        searchTruncated: false,
         searching: false,
         searchError: "",
       });
@@ -179,7 +183,7 @@ export function createFileExplorerModule(options: FileExplorerModuleOptions): Fi
     }
     const abort = new AbortController();
     searchAbort = abort;
-    publish({ searchQuery: query, searching: true, searchError: "", revealPath: null });
+    publish({ searchQuery: query, searching: true, searchResults: null, searchTruncated: false, searchError: "", revealPath: null });
     await new Promise<void>((resolve) => {
       const timer = setTimeout(resolve, 300);
       abort.signal.addEventListener("abort", () => {
@@ -190,12 +194,13 @@ export function createFileExplorerModule(options: FileExplorerModuleOptions): Fi
     if (abort.signal.aborted) return;
     const startedAt = Date.now();
     try {
-      const result = await options.repository.search(query.trim(), snapshot.root, abort.signal);
+      const result = await options.repository.search(query.trim(), snapshot.root, abort.signal, snapshot.includeGenerated);
       if (abort.signal.aborted) return;
       publish({
         searching: false,
         searchResults: result.ok && result.results ? result.results : [],
         searchDurationMs: result.ok ? Date.now() - startedAt : null,
+        searchTruncated: Boolean(result.ok && result.truncated),
         searchError: result.ok ? "" : failureMessage(result.failure, "搜索文件失败，请重试。"),
       });
     } catch (error) {
@@ -216,6 +221,7 @@ export function createFileExplorerModule(options: FileExplorerModuleOptions): Fi
       searchQuery: "",
       searchResults: null,
       searchDurationMs: null,
+      searchTruncated: false,
       searching: false,
       searchError: "",
     });
@@ -329,6 +335,12 @@ export function createFileExplorerModule(options: FileExplorerModuleOptions): Fi
       case "search.filter": {
         if (snapshot.searchFilter === command.filter) return true;
         publish({ searchFilter: command.filter });
+        return true;
+      }
+      case "search.scope": {
+        if (snapshot.includeGenerated === command.includeGenerated) return true;
+        publish({ includeGenerated: command.includeGenerated });
+        await runSearch(snapshot.searchQuery);
         return true;
       }
       case "search.clear": {

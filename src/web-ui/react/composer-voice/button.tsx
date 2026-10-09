@@ -1,5 +1,5 @@
 import * as React from "react";
-import { BrowserSpeechInput, readSpeechMode } from "../speech/repository";
+import { BrowserSpeechInput, readSpeechMode, speechInputDescription } from "../speech/repository";
 import { WandIconButton } from "../ui";
 import { ConversationMorphIcon } from "../conversations/controls";
 import { bindIdleSpeechInput } from "../speech/hold-input";
@@ -55,10 +55,10 @@ export function ComposerSpeechButton({ ownerKey, revision, disabled, inputPlaceh
         gesture.current.pointerId = null;
         setPhase("processing");
       },
-      onFinal: (text) => {
+      onFinal: (text, notice) => {
         if (active.current?.input !== input) return;
         active.current = null; setPhase("idle");
-        onStatus(text ? "" : "未识别到语音，请重新按住说话。");
+        onStatus(text ? notice || "" : "未识别到语音，请重新按住说话。");
         if (text && current.current.ownerKey === key && current.current.revision === capturedRevision) commit(text, capturedRevision);
       },
       onError: (message) => { if (active.current?.input === input) { active.current = null; setPhase("idle"); onStatus(message); } },
@@ -85,8 +85,8 @@ export function ComposerSpeechButton({ ownerKey, revision, disabled, inputPlaceh
     return () => { binding.dispose(); if (idleInput.current === binding) idleInput.current = null; };
   }, [ownerKey, cancel]);
   React.useLayoutEffect(() => { idleInput.current?.sync(inputPlaceholder); }, [revision, disabled, inputPlaceholder]);
-  return <WandIconButton ref={button} aria-label={phase === "processing" ? "取消语音识别" : phase === "recording" ? "松开结束，上滑取消" : "按住语音输入"}
-    aria-pressed={phase === "recording"} aria-busy={phase === "processing"} disabled={disabled} style={{ width: 44, height: 44, touchAction: "none" }}
+  return <WandIconButton ref={button} className="conversation-composer-control" title={speechInputDescription(readSpeechMode())} aria-label={phase === "processing" ? "取消语音识别" : phase === "recording" ? "松开结束，上滑取消" : "按住语音输入"}
+    aria-pressed={phase === "recording"} aria-busy={phase === "processing"} disabled={disabled} style={{ touchAction: "none" }}
     onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); gesture.current = { y: event.clientY, cancelled: false, pointerId: event.pointerId }; begin(); }}
     onPointerMove={event => { if (phase !== "recording") return; gesture.current.cancelled = gesture.current.y - event.clientY > 60; onStatus(gesture.current.cancelled ? "松开取消" : liveStatus.current); }}
     onPointerUp={event => { event.preventDefault(); finish(); }} onPointerCancel={cancel}

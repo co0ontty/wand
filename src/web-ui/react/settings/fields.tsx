@@ -76,6 +76,7 @@ export function SettingsTextInput({
   max?: number;
   list?: string;
 }) {
+  const [revealed, setRevealed] = useState(false);
   if (type === "number") {
     return <InputNumber id={id} value={value === "" ? null : String(value)} stringMode
       className="wand-settings-library-number" min={min === undefined ? undefined : String(min)} max={max === undefined ? undefined : String(max)} disabled={disabled}
@@ -83,10 +84,14 @@ export function SettingsTextInput({
       aria-invalid={invalid || undefined} autoComplete={autoComplete}
       onChange={(next) => onChange(next === null ? "" : String(next))} />;
   }
-  return <Input id={id} type={type} value={value} placeholder={placeholder}
+  return <Input id={id} type={type === "password" && revealed ? "text" : type} value={value} placeholder={placeholder}
     disabled={disabled} status={invalid ? "error" : undefined}
     aria-invalid={invalid || undefined} autoComplete={autoComplete} list={list}
-    spellCheck={false} onChange={(event) => onChange(event.currentTarget.value)} />;
+    spellCheck={false} suffix={type === "password" ? <WandButton type="button" kind="ghost"
+      className="wand-settings-library-secret-toggle" disabled={disabled}
+      aria-controls={id} aria-pressed={revealed} aria-label={revealed ? "隐藏敏感内容" : "显示敏感内容"}
+      onClick={() => setRevealed((current) => !current)}>{revealed ? "隐藏" : "显示"}</WandButton> : undefined}
+    onChange={(event) => onChange(event.currentTarget.value)} />;
 }
 
 export function SettingsSelect({

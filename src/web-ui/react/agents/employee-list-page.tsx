@@ -109,7 +109,7 @@ export function EmployeeListPage({
   };
 
   return (
-    <Flex vertical gap={16} className="wand-teams-list wand-employee-list">
+    <Flex vertical gap={16} className="wand-employee-list">
       <Flex component="header" wrap align="center" justify="space-between" gap={12} className="wand-teams-toolbar">
         <Flex className="wand-teams-toolbar-search" style={{ flex: "1 1 240px", maxWidth: 400, minWidth: 0 }}>
           <WandSearchField

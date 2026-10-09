@@ -509,7 +509,8 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         agent: assignedAgent,
         executionSubject,
       });
-      if (agent) writeTaskBoardLastAgent(storage, agent);
+      // Task execution settings stay local unless the caller explicitly saves future defaults.
+      if (body.rememberAgentDefaults === true && agent) writeTaskBoardLastAgent(storage, agent);
       if (titleSource === "auto") {
         refreshAutoBoardTaskTitles(storage, {
           cwd: workspaceId ? storage.getWorkspace(workspaceId)?.cwd : undefined,
@@ -601,7 +602,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         res.status(404).json({ error: "未找到该任务。" });
         return;
       }
-      if (body.agent !== undefined && patch.agent) writeTaskBoardLastAgent(storage, patch.agent);
+      if (body.rememberAgentDefaults === true && patch.agent) writeTaskBoardLastAgent(storage, patch.agent);
       res.json(dto(storage.getWandTask(task.id) ?? task));
     } catch (error) {
       sendRouteError(res, error, "无法更新任务。");
@@ -781,7 +782,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         executionSubject: usedSubject,
         status: task.status === "todo" ? "doing" : task.status,
       });
-      if (!employee) writeTaskBoardLastAgent(storage, agent);
+      if (body.rememberAgentDefaults === true && !employee) writeTaskBoardLastAgent(storage, agent);
       // 派发也算一轮迭代里的改动意图：直接把任务的标题 / 描述记进迭代记录。
       recordIterationPromptForTask(storage, {
         sessionId: session.id,

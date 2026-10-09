@@ -504,7 +504,8 @@ test("[T6] 成员卡一行一候选：复用 AgentFields，双写 agents/agent�
   assert.match(editor, /candidateLabel\(index\)/);
   // 旧的单候选写法不该还留在成员卡上。
   assert.doesNotMatch(compact, /onChange\(\{ agent, agents: \[agent\] \}\)/);
-  assert.match(editor, /<Card size="small"/);
+  assert.match(editor, /<section\s+className="wand-team-candidates"/, "候选作为连续行分组，不嵌套卡片");
+  assert.doesNotMatch(editor, /<Card/);
   assert.match(editor, /<Flex vertical gap=\{8\} ref=\{containerRef\}/, "候选 stable FLIP refs 留在库 Flex 容器");
 });
 
@@ -744,6 +745,7 @@ test("[T8] 主包用到的 chunk 类名必须在主包样式池里另有定义",
 
   const mainSheets = [
     read("content/styles.css"),
+    read("react/agents/styles.ts"),
     ...tsSources(new URL("../src/web-ui/react/styles/", import.meta.url)).map((file) => readFileSync(file, "utf8")),
   ].join("\n");
   const mainText = mainSources.map((file) => readFileSync(file, "utf8")).join("\n");

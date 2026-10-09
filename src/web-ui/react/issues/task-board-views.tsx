@@ -19,7 +19,6 @@ import {
   issueAgentEffortLabel,
   issueAgentLabel,
   issueAgentModeLabel,
-  issueAgentProviderLabel,
   issueAgentProviderModelLine,
   type IssueModelCatalog,
   issueBoardStats,
@@ -130,7 +129,7 @@ export function TaskBoardConversationButton({
     >
       <ProviderLogo provider={session.provider} className="task-board-agent-logo"/>
       <span>
-        <strong>{session.title || issueAgentProviderLabel(session.provider)}</strong>
+        <strong>{session.title || issueAgentLabel(session.provider)}</strong>
         <small>{issueAgentProviderModelLine({ provider: session.provider, model: session.model }, catalog)}</small>
       </span>
     </WandButton>)}
@@ -418,7 +417,7 @@ function TaskBoardListRow({
                       provider={session.provider}
                       className={classNames("task-board-agent-logo", glow !== "none" && `wand-logo-glow glow-${glow}`)}
                     />
-                    <span>{session.title || issueAgentProviderLabel(session.provider)}</span>
+                    <span>{session.title || issueAgentLabel(session.provider, session.engine)}</span>
                     <small>{sessionStatusLabel(session.status)}</small>
                     <code>{session.cwd}</code>
                   </WandButton>
@@ -461,7 +460,7 @@ export function TaskBoardCardDetail({
   const catalog = useWandModelCatalog();
   const agent = task.agent;
   const assignee = agent
-    ? `${issueAgentProviderLabel(agent.provider)} · ${issueAgentModeLabel(agent.mode)}`
+    ? `${issueAgentLabel(agent.provider, agent.engine)} · ${issueAgentModeLabel(agent.mode)}`
     : "未指派";
   const fields = [
     { key: "status", label: "状态", children: issueStatusLabel(task.status) },
@@ -491,7 +490,7 @@ export function TaskBoardCardDetail({
                   style={{ height: "auto", width: "100%", justifyContent: "flex-start", textAlign: "left", whiteSpace: "normal" }}>
                   <Badge status={glow === "failed" ? "error" : glow === "none" ? "default" : "processing"}><ProviderLogo provider={session.provider}/></Badge>
                   <Flex vertical align="flex-start" style={{ minWidth: 0 }}>
-                    <Typography.Text>{session.title || issueAgentProviderLabel(session.provider)}</Typography.Text>
+                    <Typography.Text>{session.title || issueAgentLabel(session.provider, session.engine)}</Typography.Text>
                     <Typography.Text type="secondary">{sessionStatusLabel(session.status)}</Typography.Text>
                     <Typography.Text code style={{ overflowWrap: "anywhere" }}>{session.cwd}</Typography.Text>
                   </Flex>
@@ -658,7 +657,7 @@ export function TaskBoardDashboard({
       {panel("即将到期", dueSoon.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有设置截止日期的任务"/> : <List size="small" dataSource={dueSoon} renderItem={(task) => <List.Item><WandButton kind="ghost" onClick={() => onOpen(task.id)} style={{ height: "auto", whiteSpace: "normal" }}><TaskBoardStatusGlyph status={task.status}/><span>{task.title}</span><Tag color={issueIsOverdue(task.dueDate, task.status) ? "error" : "default"}>{issueDueStamp(task.dueDate)}</Tag></WandButton></List.Item>}/>)}
       {panel("优先级", byPriority.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有优先级分布"/> : <List size="small" dataSource={byPriority} renderItem={(entry) => <List.Item><Flex vertical style={{ width: "100%" }}><Flex justify="space-between"><span>{entry.label}</span><span>{entry.count}</span></Flex><Progress status="normal" percent={Math.round(entry.count / Math.max(1, stats.total) * 100)} size="small" showInfo={false}/></Flex></List.Item>}/>)}
       {panel("标签", labels.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有标签"/> : <List size="small" dataSource={labels} renderItem={(entry) => <List.Item><TaskBoardLabelChip label={entry.label}/><Tag>{entry.count}</Tag></List.Item>}/>)}
-      {panel("最近会话", tasks.every((task) => task.sessions.length === 0) ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有派发会话"/> : <List size="small" dataSource={tasks.flatMap((task) => task.sessions.map((session) => ({ task, session }))).slice(0, 6)} renderItem={({ task, session }) => <List.Item><WandButton kind="ghost" onClick={() => onOpenSession?.(session.id)} style={{ height: "auto", whiteSpace: "normal" }}><ProviderLogo provider={session.provider}/><span>{task.title}</span><span>{issueAgentProviderLabel(session.provider)}</span></WandButton></List.Item>}/>)}
+      {panel("最近会话", tasks.every((task) => task.sessions.length === 0) ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有派发会话"/> : <List size="small" dataSource={tasks.flatMap((task) => task.sessions.map((session) => ({ task, session }))).slice(0, 6)} renderItem={({ task, session }) => <List.Item><WandButton kind="ghost" onClick={() => onOpenSession?.(session.id)} style={{ height: "auto", whiteSpace: "normal" }}><ProviderLogo provider={session.provider}/><span>{task.title}</span><span>{issueAgentLabel(session.provider, session.engine)}</span></WandButton></List.Item>}/>)}
     </Flex>
   </Flex>;
 }
@@ -829,7 +828,7 @@ export function TaskBoardAgentChip({
   if (!agent) return null;
   return <Tag className={classNames("task-board-chip is-agent", running && "is-running")}>
     <ProviderLogo provider={agent.provider} className="task-board-agent-logo"/>
-    {issueAgentProviderLabel(agent.provider)}
+    {issueAgentLabel(agent.provider, agent.engine)}
     {running ? <Badge status="processing"/> : null}
   </Tag>;
 }
@@ -888,7 +887,7 @@ export function TaskBoardAgentSessionList({
             onClick={() => onOpenSession?.(session.id)}
           >
             <span className={classNames("task-board-agent-session-status", issueSessionRunning(session.status) && "is-running")}/>
-            <strong>{session.title || issueAgentProviderLabel(session.provider)}</strong>
+            <strong>{session.title || issueAgentLabel(session.provider, session.engine)}</strong>
             <small>
               {[wandModelDisplayName(catalog ?? null, session.provider, session.model), sessionStatusLabel(session.status)]
                 .filter(Boolean)

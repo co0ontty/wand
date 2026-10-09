@@ -40,8 +40,8 @@ export function ConversationApprovalButton({ phase, disabled, onClick }: {
 export function ConversationSubmitButton({ phase, stops, disabled, label, onClick }: {
   phase: ConversationSubmitPhase; stops: boolean; disabled?: boolean; label: string; onClick(): void;
 }): React.ReactElement {
-  return <WandIconButton kind="primary" className="conversation-submit" aria-label={label} title={label}
-    disabled={disabled} onClick={onClick} style={{ width: 44, height: 44, flexShrink: 0 }}>
+  return <WandIconButton kind="primary" className="conversation-submit conversation-composer-control" aria-label={label} title={label}
+    disabled={disabled} onClick={onClick}>
     <span className="conversation-submit-slots" data-phase={phase}>
       <span data-slot="idle"><ConversationMorphIcon active={stops} from="up" to="stop"/></span>
       <span data-slot="sending"><WandIcon name="refresh"/></span>

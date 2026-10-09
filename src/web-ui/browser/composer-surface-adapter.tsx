@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { Card } from "../react/design-library";
 import { WandUiProvider } from "../react/theme";
+import { installChatComposerStyles } from "../react/chat-composer-styles";
 
 const roots = new Map<HTMLElement, Root>();
 
@@ -16,6 +17,7 @@ function OwnedChildren({ nodes }: { nodes: readonly ChildNode[] }): React.ReactE
 }
 
 export function mountComposerSurfaces(): void {
+  installChatComposerStyles();
   for (const [host, root] of roots) if (!host.isConnected) { root.unmount(); roots.delete(host); }
   for (const host of document.querySelectorAll<HTMLElement>(".input-composer, #composer-plus-popover")) {
     if (roots.has(host)) continue;
@@ -23,7 +25,10 @@ export function mountComposerSurfaces(): void {
     const active = document.activeElement as HTMLElement | null;
     const refocus = active && host.contains(active);
     const root = createRoot(host); roots.set(host, root);
-    flushSync(() => root.render(<WandUiProvider><Card size="small" className={host.classList.contains("input-composer") ? "composer-surface" : undefined}><OwnedChildren nodes={nodes}/></Card></WandUiProvider>));
+    const children = <OwnedChildren nodes={nodes}/>;
+    flushSync(() => root.render(<WandUiProvider>{host.classList.contains("input-composer")
+      ? <div className="composer-surface">{children}</div>
+      : <Card size="small">{children}</Card>}</WandUiProvider>));
     if (refocus) active.focus({ preventScroll: true });
   }
 }

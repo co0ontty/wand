@@ -7,7 +7,7 @@ import { SidebarRowMenu } from "../workspaces/sidebar-row-menu";
 import { EmployeeAvatar } from "../agents/employee-avatar";
 import { cachedSiliconEmployee } from "../agents/employee-repository";
 import { ConversationGroupAvatar } from "./avatar";
-import { WandButton, WandIcon, WandIconButton, WandInput, WandStretchTabs } from "../ui";
+import { WandButton, WandIcon, WandIconButton, WandSearchField, WandStretchTabs } from "../ui";
 import { conversationUi, useConversationUi } from "./state";
 import { conversationTaskStateLabel } from "./presentation";
 import { conversationsRepository, useConversations } from "./repository";
@@ -27,7 +27,7 @@ export function ConversationNavigation({ activePage, teamAttention, onNavigate }
     { value: "chats", label: "对话", icon: "chat" },
     { value: "tasks", label: "工作区", icon: "folder" },
     { value: "board", label: "任务看板", icon: "board", id: "task-board-button" },
-    { value: "teams", label: "团队", icon: "parallel", id: "ai-teams-button" },
+    { value: "teams", label: "团队", icon: "users", id: "ai-teams-button" },
     { value: "contacts", label: "通讯录", icon: "user" },
   ] as const;
   return <Flex component="nav" vertical gap={4} className="conversation-navigation" aria-label="功能导航">
@@ -35,8 +35,9 @@ export function ConversationNavigation({ activePage, teamAttention, onNavigate }
       data-stretch-value={entry.value} aria-label={entry.label} title={entry.label}
       kind={activePage === entry.value ? "soft" : "ghost"} aria-current={activePage === entry.value ? "page" : undefined}
       aria-pressed={activePage === entry.value} onClick={() => onNavigate(entry.value)}>
-      {entry.value === "teams" ? <Badge count={teamAttention} size="small"><WandIcon name={entry.icon} size={20}/></Badge>
-        : <WandIcon name={entry.icon} size={20}/>}
+      <span className="sidebar-nav-icon" aria-hidden="true">{entry.value === "teams" ? <Badge count={teamAttention} size="small"><WandIcon name={entry.icon} size={18}/></Badge>
+        : <WandIcon name={entry.icon} size={18}/>}</span>
+      <span className="sidebar-nav-label" aria-hidden="true">{entry.value === "board" ? "任务" : entry.label}</span>
     </WandIconButton>)}
   </Flex>;
 }
@@ -50,7 +51,7 @@ export function ConversationSidebarTools({ enabled, onNavigate, onCreateSession 
   const plus = React.useRef<HTMLButtonElement>(null);
   React.useEffect(() => { setPanel("closed"); }, [enabled, state.mode]);
   return <Flex ref={anchor} align="center" className="conversation-sidebar-tools" style={{ position: "relative" }}>
-    <WandIconButton ref={plus} style={{ width: 44, height: 44 }}
+    <WandIconButton ref={plus} className="conversation-create-button"
       aria-label={state.mode === "tasks" ? "新建会话" : panel === "closed" ? "对话操作" : "关闭对话操作"}
       aria-expanded={panel !== "closed"} aria-controls="conversation-create-panel"
       onClick={() => state.mode === "tasks" ? onCreateSession?.() : setPanel(panel === "closed" ? "menu" : "closed")}>
@@ -106,8 +107,18 @@ export function filterConversationList<
   });
 }
 
+/** Totals always describe the archive tier, while matches describe the current query. */
+export function conversationListCounts<
+  T extends { title: string; preview: string; dissolvedAt?: string | null; tasks: ReadonlyArray<{ task: { title: string; status: string } }> },
+>(items: readonly T[], filter: ConversationListFilter, query: string): { total: number; active: number; archived: number; scope: number; matches: number } {
+  const archived = items.filter(isConversationArchived).length;
+  const active = items.length - archived;
+  return { total: items.length, active, archived, scope: filter === "archived" ? archived : filter === "active" ? active : items.length,
+    matches: filterConversationList(items, filter, query).length };
+}
+
 export function ConversationSidebarList({ compact, enabled = true, onNavigate }: { compact: boolean; enabled?: boolean; onNavigate(): void }): React.ReactElement {
-  const { items, error, refresh } = useConversations();
+  const { items, error, loaded, refresh } = useConversations();
   const ui = useConversationUi();
   const query = (ui.filters["list-query"] ?? "").trim().toLowerCase();
   const [filter, setFilter] = React.useState<ConversationListFilter>("all");
@@ -116,11 +127,15 @@ export function ConversationSidebarList({ compact, enabled = true, onNavigate }:
   const [engaged, setEngaged] = React.useState(false);
   const order = React.useRef<string[]>([]);
   if (!engaged) order.current = items.map(item => item.id);
+  const positions = new Map(order.current.map((id, index) => [id, index]));
   const sorted = items.slice().sort((a, b) => {
-    const left = order.current.indexOf(a.id), right = order.current.indexOf(b.id);
+    const left = positions.get(a.id) ?? -1, right = positions.get(b.id) ?? -1;
     return Number(!!b.pinnedAt) - Number(!!a.pinnedAt) || (b.pinnedAt ?? "").localeCompare(a.pinnedAt ?? "") || (left < 0 ? items.length : left) - (right < 0 ? items.length : right);
   });
   const rows = filterConversationList(sorted, filter, query);
+  const counts = conversationListCounts(items, filter, query);
+  const countLabel = loaded ? `${conversationListFilterLabel(filter)}共 ${counts.scope} 个对话${query ? `，搜索匹配 ${counts.matches} 个` : ""}；全部 ${counts.total}，未归档 ${counts.active}，已归档 ${counts.archived}`
+    : error ? "对话数量尚未加载" : "正在读取对话数量";
   const select = (id: string): void => { conversationUi.select(id); onNavigate(); };
   const update = async (item: ConversationSummary, patch: { pinned?: boolean; dissolved?: boolean }): Promise<void> => {
     setActionError("");
@@ -140,14 +155,11 @@ export function ConversationSidebarList({ compact, enabled = true, onNavigate }:
   };
   return <div className="conversation-sidebar-list" onPointerEnter={() => setEngaged(true)} onPointerLeave={() => setEngaged(false)}
     onFocusCapture={() => setEngaged(true)} onBlurCapture={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setEngaged(false); }}>
-    {!compact ? <div className="conversation-list-tools"><Flex className="conversation-search-host" align="center" gap={4}>
-      <div className="conversation-search-input"><WandInput ref={searchInput} type="search" aria-label="搜索对话或任务" placeholder="搜索对话或任务"
-        startSlot={<WandIcon name="search" size={16}/>} endSlot={<span className="conversation-search-clear-space"/>}
-        value={ui.filters["list-query"] ?? ""} onChange={event => conversationUi.filter("list-query", event.currentTarget.value)}
-        onKeyDown={event => { if (event.key === "Escape" && !event.nativeEvent.isComposing) { event.preventDefault(); conversationUi.filter("list-query", ""); } }}/></div>
-      <WandIconButton aria-label="清空搜索" disabled={!query} onClick={() => { conversationUi.filter("list-query", ""); searchInput.current?.focus({ preventScroll: true }); }}><WandIcon name="close"/></WandIconButton>
-    </Flex>
-    <Flex justify="space-between" align="center" gap={4} className="conversation-list-section"><Typography.Text type="secondary">{conversationListFilterLabel(filter)}</Typography.Text>
+    {!compact ? <div className="conversation-list-tools"><div className="conversation-search-host">
+      <WandSearchField inputRef={searchInput} className="conversation-search-input" label="搜索对话或任务"
+        value={ui.filters["list-query"] ?? ""} onValueChange={value => conversationUi.filter("list-query", value)}/>
+    </div>
+    <Flex justify="space-between" align="center" gap={4} className="conversation-list-section"><Typography.Text type="secondary" className="conversation-list-count" title={countLabel} aria-label={countLabel}>{loaded ? query ? `匹配 ${counts.matches} / ${counts.scope}` : `${counts.scope} 个对话` : error ? "数量未加载" : "读取中…"}</Typography.Text>
       <WandStretchTabs className="conversation-list-filter" ariaLabel="对话归档筛选"
         tabs={[{ value: "all", label: "全部" }, { value: "active", label: "未归档" }, { value: "archived", label: "已归档" }]}
         value={filter} onValueChange={(value) => setFilter(value as ConversationListFilter)}/></Flex></div> : null}
@@ -156,10 +168,10 @@ export function ConversationSidebarList({ compact, enabled = true, onNavigate }:
     {rows.map(item => <ConversationListRow key={item.id} item={item} compact={compact} query={query}
       enabled={enabled} filter={filter} selected={ui.selectedId === item.id && ui.active !== false} onSelect={() => select(item.id)}
       onUpdate={patch => update(item, patch)} onRemove={() => remove(item)}/>) }
-    {!rows.length ? <Typography.Paragraph type="secondary">{query ? "没有匹配的对话或任务"
+    {loaded && !rows.length ? <div className="conversation-list-empty" role="status"><WandIcon name={query ? "search" : "chat"} size={20}/><Typography.Paragraph type="secondary">{query ? "没有匹配的对话或任务"
       : filter === "archived" ? "还没有已归档的对话，解散群聊或归档任务后会出现在这里。"
       : filter === "active" ? "还没有未归档的对话。"
-      : "还没有对话，可以从通讯录找一位员工。"}</Typography.Paragraph> : null}
+      : "还没有对话，可以从通讯录找一位员工。"}</Typography.Paragraph>{query ? <WandButton kind="ghost" size="small" onClick={() => { conversationUi.filter("list-query", ""); searchInput.current?.focus({ preventScroll: true }); }}>清空搜索</WandButton> : null}</div> : null}
   </div>;
 }
 
@@ -188,7 +200,7 @@ function ConversationListRow({ item, compact, query, enabled, filter, selected, 
     data-pinned={!!item.pinnedAt} data-archived={archived || undefined} data-conversation-id={item.id} aria-busy={busy || undefined}>
     <WandIconButton className="conversation-row-avatar conversation-avatar-button" aria-label={identity ? `查看${item.title}的资料` : `打开${item.title}`}
       onClick={event => identity ? employeeProfile.open(identity, event.currentTarget) : onSelect()}>
-      {employee ? <EmployeeAvatar employee={employee} size="chat"/> : item.kind === "group" ? <ConversationGroupAvatar title={item.title}/> : <Avatar size={48} icon={<WandIcon name="chat"/>}/>}</WandIconButton>
+      {employee ? <EmployeeAvatar employee={employee} size="md"/> : item.kind === "group" ? <ConversationGroupAvatar title={item.title} size={32}/> : <Avatar size={32} icon={<WandIcon name="chat" size={16}/>}/>}</WandIconButton>
     {!compact ? <WandButton kind="ghost" className="conversation-row-open" title={item.title} onClick={onSelect}>
       <span className="conversation-row-copy"><span className="conversation-row-topline"><span className="conversation-row-title">{item.title}</span>
         {formatConversationListTime(item.messageAt) ? <time className="conversation-row-time" dateTime={item.messageAt}>{formatConversationListTime(item.messageAt)}</time> : null}</span>

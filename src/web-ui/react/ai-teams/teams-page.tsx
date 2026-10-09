@@ -296,11 +296,11 @@ function MemberCard({
     data-open={open || undefined}
   >
     <WandButton kind="ghost" type="button" className="wand-team-member-head" style={{ width: "100%", height: "auto", minHeight: 56, textAlign: "start", alignItems: "center", gap: 12 }} aria-expanded={open} onClick={onToggle}>
-      <TeamAvatar member={member} size="lg" showProvider/>
+      <TeamAvatar member={member} size="md"/>
       <Flex vertical gap={2} className="wand-team-member-copy" style={{ flex: 1, minWidth: 0 }}>
-        <Flex align="center" wrap gap={6}><Typography.Text strong>{label}</Typography.Text>{member.isLeader ? <Tag color="gold">负责人</Tag> : null}</Flex>
-        <Typography.Text type="secondary" ellipsis>{member.duty || "还没写职责"}</Typography.Text>
-        <Typography.Text type="secondary" ellipsis className="wand-team-member-agent">
+        <Flex align="center" gap={6} className="wand-team-member-name-line"><Typography.Text strong ellipsis title={label}>{label}</Typography.Text>{member.isLeader ? <Tag>负责人</Tag> : null}</Flex>
+        <Typography.Text type="secondary" ellipsis title={member.duty || "还没写职责"}>{member.duty || "还没写职责"}</Typography.Text>
+        <Typography.Text type="secondary" ellipsis className="wand-team-member-agent" title={issueAgentProviderModelLine(member.agent, catalog)}>
           {issueAgentProviderModelLine(member.agent, catalog)}
         </Typography.Text>
       </Flex>
@@ -1230,7 +1230,6 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
           {visible.map((team) => {
             const state = teamState(team.id);
             const providers = [...new Set(team.members.map((member) => member.agent.provider))];
-            const glow = state === "running" ? "running" : state === "attention" ? "permission" : "none";
             return <div key={team.id}>
               <Card
                 size="small"
@@ -1247,15 +1246,16 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
                   void selectTeam(team.id);
                 }}
               >
-                <span className={`wand-teams-avatar-wrap${glow !== "none" ? ` wand-logo-glow glow-${glow}` : ""}`} data-glow={glow}>
-                  <TeamAvatarStack members={team.members} max={4}/>
-                </span>
                 <Flex vertical gap={2} className="wand-teams-card-copy" style={{ minWidth: 0 }}>
-                  <Typography.Text strong>{team.name}</Typography.Text>
-                  <Typography.Text type="secondary" ellipsis>{team.description || leaderFirst(team.members).map((member) => member.name).join(" · ")}</Typography.Text>
+                  <Flex align="center" gap={8} className="wand-teams-card-identity">
+                    <span className="wand-teams-avatar-wrap"><TeamAvatarStack members={team.members} max={2}/></span>
+                    <Typography.Text strong ellipsis title={team.name}>{team.name}</Typography.Text>
+                  </Flex>
+                  <Typography.Text type="secondary" ellipsis title={team.description || leaderFirst(team.members).map((member) => member.name).join(" · ")}>{team.description || leaderFirst(team.members).map((member) => member.name).join(" · ")}</Typography.Text>
                 </Flex>
                 <Flex className="wand-teams-card-meta">
                   <Typography.Text type="secondary" ellipsis>{team.members.length} 人 · {providers.map(issueAgentProviderLabel).join(" / ")}</Typography.Text>
+                  {state !== "idle" ? <Typography.Text className="wand-teams-card-status" type="secondary">{state === "running" ? "运行中" : "待处理"}</Typography.Text> : null}
                 </Flex>
               </Card>
               <TeamStartRow

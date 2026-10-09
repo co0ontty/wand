@@ -34,8 +34,8 @@ test("WandIcon stamps a data-icon matching the semantic name", () => {
   const html = renderToStaticMarkup(createElement(WandIcon, { name: "gear", size: 16 }));
   assert.match(html, /data-icon="gear"/);
   assert.match(html, /<circle cx="12" cy="12" r="3"/);
-  assert.match(html, /M12\.22 2h-\.44/);
-  assert.doesNotMatch(html, /M12 2v4M12 18v4/);
+  assert.doesNotMatch(html, /M12 3v3M12 18v3/);
+  assert.doesNotMatch(html, /M12\.22 2h-\.44/);
 });
 
 test("icon geometry remains explicit inside Appica buttons and navigation", () => {
@@ -48,7 +48,7 @@ test("icon geometry remains explicit inside Appica buttons and navigation", () =
   assert.notEqual(board, clipboard);
 });
 
-test("sidebar navigation uses the personal avatar for settings and distinct destination glyphs", () => {
+test("sidebar navigation uses simple settings and distinct destination glyphs", () => {
   const selected: UiSessionVm = {
     id: "session-1",
     source: "wand",
@@ -113,7 +113,7 @@ test("sidebar navigation uses the personal avatar for settings and distinct dest
     // what its `has-data-[icon=start]` padding reads), so the semantic glyph name
     // lives on `data-wand-icon`.
     assert.match(html, /id="settings-button"[^>]*class="[^"]*sidebar-profile-button/);
-    assert.match(html, /sidebar-profile-button[^>]*>[\s\S]*?ant-avatar/);
+    assert.match(html, /sidebar-profile-button[^>]*>[\s\S]*?data-wand-icon="gear"/);
     assert.match(html, /id="task-board-button"[^>]*>[\s\S]*?data-wand-icon="board"/);
     assert.match(html, /id="file-panel-toggle-btn"[^>]*>[\s\S]*?data-wand-icon="explorer"/);
     assert.doesNotMatch(html, /data-icon="inbox"/);

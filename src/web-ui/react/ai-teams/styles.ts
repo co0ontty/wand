@@ -3,6 +3,8 @@
 export const aiTeamsChunkStyles = String.raw`
 
 /* ---------- 团队页：左列表、右详情 ---------- */
+.task-board-native-page.wand-teams-page { padding:0; }
+.task-board-native-page.wand-teams-page>.wand-teams-layout { flex:1 1 auto; min-height:0; }
 .wand-teams-layout {
   display: grid;
   grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
@@ -15,7 +17,7 @@ export const aiTeamsChunkStyles = String.raw`
   flex-direction: column;
   gap: 10px;
   min-height: 0;
-  padding: 14px 14px 18px 28px;
+  padding: 16px var(--wand-page-inset,20px) 24px;
   overflow-y: auto;
   border-right: 1px solid var(--border-subtle);
 }
@@ -28,11 +30,31 @@ export const aiTeamsChunkStyles = String.raw`
   gap: 14px;
   min-width: 0;
   min-height: 0;
-  padding: 18px 28px 32px;
+  padding: 16px var(--wand-page-inset,20px) 32px;
   overflow-y: auto;
   animation: wand-settings-fade-in var(--transition-normal);
 }
 .wand-teams-detail > * { flex: 0 0 auto; width: 100%; max-width: 920px; }
+.wand-teams-page>.task-board-workspace-header { min-height:var(--wand-page-header-height,56px); padding:10px var(--wand-page-inset,20px) !important; }
+.wand-teams-page .task-board-heading-copy h3 { font-size:var(--wand-page-title-size,18px); }
+.wand-teams-page .task-board-heading-copy>.ant-typography:last-child:not(h3) { font-size:12px; }
+.wand-teams-page .task-board-header-actions { min-width:0; max-width:100%; flex:0 1 auto; }
+.wand-teams-card>.ant-card-body { padding:10px 12px; }
+.wand-teams-card-copy>.ant-typography,.wand-teams-card-meta>.ant-typography { font-size:12px; }
+.wand-teams-card-identity { min-width:0; margin-bottom:4px; }
+.wand-teams-card-identity>.ant-typography { min-width:0; flex:1; font-size:14px; }
+.wand-teams-card-identity .wand-teams-avatar-wrap { flex:0 0 auto; }
+.wand-teams-card-meta { gap:8px; justify-content:space-between; min-width:0; margin-top:4px; }
+.wand-teams-card-meta>.ant-typography:first-child { flex:1; min-width:0; }
+.wand-teams-card-status { flex:0 0 auto; }
+.wand-teams-card-status::before { content:""; display:inline-block; width:5px; height:5px; margin-inline-end:5px; border-radius:50%; vertical-align:2px; background:var(--success); }
+.wand-teams-card[data-state="attention"] .wand-teams-card-status::before { background:var(--warning); }
+.wand-teams-page .wand-team-member>.ant-card-body { padding:10px 12px; }
+.wand-teams-page .wand-team-member-head { gap:10px !important; padding:2px 0; }
+.wand-teams-page .wand-team-member-copy>.ant-typography { font-size:12px; }
+.wand-team-member-name-line { min-width:0; }
+.wand-team-member-name-line>.ant-typography { flex:1; min-width:0; font-size:14px; }
+.wand-team-member-name-line>.ant-tag { flex:0 0 auto; margin-inline-end:0; font-size:11px; line-height:18px; }
 .wand-teams-create-icon { transition: transform var(--transition-normal); }
 .task-board-create-button[aria-pressed="true"] .wand-teams-create-icon { transform: rotate(45deg); }
 
@@ -370,8 +392,8 @@ export const aiTeamsChunkStyles = String.raw`
 @media (max-width: 760px) {
   .wand-team-chat-body { padding: 0 14px 16px; }
   .wand-teams-layout { grid-template-columns: minmax(0, 1fr); }
-  .wand-teams-list { padding: 12px 14px; border-right: 0; }
-  .wand-teams-detail { padding: 14px 14px 28px; }
+  .wand-teams-list { border-right: 0; }
+  .wand-teams-detail { padding-bottom:28px; }
   .wand-teams-page[data-detail] .wand-teams-list { display: none; }
   .wand-teams-page:not([data-detail]) .wand-teams-detail { display: none; }
 
@@ -396,17 +418,10 @@ export const aiTeamsChunkStyles = String.raw`
 /* ---------- 硅基员工列表与卡片样式 ---------- */
 .wand-employees-layout {
   display: block !important;
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 16px 20px 40px;
+  margin: 0;
+  padding: 16px var(--wand-page-inset,20px) 40px;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
-.wand-employee-card.is-archived {
-  opacity: 0.65;
-}
-.wand-employee-card.is-system {
-  border-color: color-mix(in srgb, var(--accent) 38%, var(--border-subtle));
-  background: color-mix(in srgb, var(--accent) 4%, var(--bg-primary));
-}
+.wand-employees-layout>.wand-employee-list { max-width:1080px; }
 `;

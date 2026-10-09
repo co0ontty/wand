@@ -341,6 +341,11 @@ export function FilePreviewHost() {
       <WandDialogSurface
       open={snapshot.open}
       onOpenChange={(open) => { if (!open) run({ type: "close" }); }}
+      onEscape={() => {
+        if (snapshot.saving) return;
+        if (snapshot.editing) exitEdit();
+        else run({ type: "close" });
+      }}
       title={title}
       description={path || "查看文件内容与元数据。"}
       className="wand-ui-dialog-content wand-file-preview-dialog"

@@ -26,3 +26,16 @@ test("secondary descriptions and placeholders stay readable on the shared warm s
     assert.ok(ratio >= 4.5, `${token.colorTextSecondary} on ${background}: ${ratio.toFixed(2)}:1`);
   }
 });
+
+// Keyboard focus must remain distinguishable even on the selected navigation surface.
+test("shared keyboard focus uses an opaque AA non-text indicator", () => {
+  const token = theme.getDesignToken(wandTheme);
+  const foreground = luminance(rgb(token.controlOutline));
+  for (const background of [token.colorBgLayout, token.colorBgContainer, "#ebe0d3"]) {
+    const ratio = (luminance(rgb(background)) + 0.05) / (foreground + 0.05);
+    assert.ok(ratio >= 3, `${token.controlOutline} on ${background}: ${ratio.toFixed(2)}:1`);
+  }
+  assert.ok(token.controlOutlineWidth >= 2);
+  assert.equal(token.colorPrimaryBorder, token.controlOutline);
+  assert.equal(token.lineWidthFocus, 2);
+});

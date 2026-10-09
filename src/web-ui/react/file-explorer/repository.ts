@@ -94,8 +94,9 @@ class HttpFileExplorerRepository implements FileExplorerRepository {
     };
   }
 
-  async search(query: string, cwd: string, signal?: AbortSignal): Promise<FileExplorerSearchResult> {
+  async search(query: string, cwd: string, signal?: AbortSignal, includeGenerated = false): Promise<FileExplorerSearchResult> {
     const params = new URLSearchParams({ q: query, cwd, depth: "5", limit: "80" });
+    if (includeGenerated) params.set("includeGenerated", "true");
     const response = await this.fetchImpl(
       `/api/file-search?${params.toString()}`,
       { credentials: "same-origin", signal },
@@ -110,7 +111,7 @@ class HttpFileExplorerRepository implements FileExplorerRepository {
       const entry = isRecord(item) ? coerceEntry(item) : null;
       if (entry) results.push(entry);
     }
-    return { ok: true, results };
+    return { ok: true, results, truncated: Boolean(value.truncated) };
   }
 
   createFile(targetPath: string): Promise<FileExplorerMutationResult> {

@@ -61,6 +61,9 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
     memberVersion: 1, joinedVersions: {}, sessionId: null, communicationSessionId: null,
     createdAt: "2026-10-07T08:00:00Z", updatedAt: "2026-10-07T08:00:00Z", messageAt: "2026-10-07T08:00:00Z",
     tasks: [], preview: "右键、键盘与长按使用同一个菜单", unavailableReason: null, memberUnavailableReasons: {} }];
+  for (let index = 0; index < 40; index++) conversations.push({ ...conversations[0], id: `dense-${index}`,
+    title: `长名称会话 ${index}：核验桌面工具密度、完整名称访问与大量条目下的独立滚动`,
+    preview: "很长的最近消息摘要应当省略，不能挤掉日期、菜单与名称。" });
   let failList = false;
   let delayArchive = false;
   let releaseArchive: (() => void) | null = null;
@@ -160,17 +163,17 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
           await browser.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x, y: point.y, button: "left", clickCount: 1 });
           await browser.settle();
         };
-        const headerGeometry = `(()=>{const rect=s=>document.querySelector(s).getBoundingClientRect().toJSON();return {nav:rect('.conversation-navigation'),more:rect('#sidebar-more-btn'),footer:rect('#settings-button'),width:rect('#sessions-drawer').width}})()`;
+        const headerGeometry = `(()=>{const rect=s=>document.querySelector(s).getBoundingClientRect().toJSON();return {nav:rect('.conversation-navigation'),footer:rect('#settings-button'),width:rect('#sessions-drawer').width}})()`;
         const workspaceHeader = await browser.evaluate(headerGeometry);
         await browser.click('.conversation-navigation [data-stretch-value="chats"]');
         await browser.wait('fixture.conversation.getSnapshot().mode === "chats"');
         await browser.settle();
         const chatHeader = await browser.evaluate(headerGeometry);
         assert.equal(chatHeader.nav.y, workspaceHeader.nav.y, `${mode}: switching modes keeps navigation anchored`);
-        assert.equal(chatHeader.more.y, workspaceHeader.more.y, `${mode}: header buttons do not jump`);
-        assert.equal(chatHeader.more.height, 44, `${mode}: header actions have touch-sized targets`);
+        assert.equal(chatHeader.footer.y, workspaceHeader.footer.y, `${mode}: account button stays anchored`);
+        assert.equal(chatHeader.footer.height, 44, `${mode}: account action has a touch-sized target`);
         assert.ok(chatHeader.footer.height <= 64, `${mode}: footer does not consume a second row`);
-        assert.equal(chatHeader.width, Math.min(376, width - 24));
+        assert.equal(chatHeader.width, Math.min(344, width - 24));
         const rail = await browser.evaluate(`(()=>{const rail=document.querySelector('.sidebar-navigation-rail'),r=rail.getBoundingClientRect(),avatar=document.querySelector('#settings-button').getBoundingClientRect();return {width:r.width,avatarBottom:avatar.bottom,railBottom:r.bottom,buttons:[...rail.querySelectorAll('.conversation-navigation button')].map(n=>({label:n.getAttribute('aria-label'),x:n.getBoundingClientRect().x,size:n.getBoundingClientRect().width})),profile:document.querySelector('#settings-button').title}})()`);
         assert.equal(rail.width, 56);
         assert.ok(rail.railBottom - rail.avatarBottom <= 9, `${mode}: profile stays at the bottom`);
@@ -192,6 +195,13 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
         await browser.wait('!document.querySelector("#sidebar-notifications")', "outside click closes notifications");
         // The chat list uses the very same native menu and keyboard/confirmation protocol.
         await browser.wait('!!document.querySelector(".conversation-row")');
+        const density = await browser.evaluate(`(()=>{const row=document.querySelector('.conversation-row'),avatar=row.querySelector('.ant-avatar'),body=document.querySelector('.sidebar-body'),title=document.querySelector('[data-conversation-id="dense-0"] .conversation-row-title');return {row:row.getBoundingClientRect().height,avatar:avatar.getBoundingClientRect().width,scrolls:body.scrollHeight>body.clientHeight,truncated:title.scrollWidth>title.clientWidth,overflow:body.scrollWidth>body.clientWidth+1,labels:[...document.querySelectorAll('.conversation-navigation .sidebar-nav-label')].map(n=>n.textContent)}})()`);
+        assert.equal(density.row, 56, `${mode}: compact conversation row`);
+        assert.equal(density.avatar, 32, `${mode}: small identity image`);
+        assert.equal(density.scrolls, true, `${mode}: large list scrolls inside the sidebar`);
+        assert.equal(density.truncated, true, `${mode}: long name does not expand the list`);
+        assert.equal(density.overflow, false, `${mode}: no horizontal overflow`);
+        assert.deepEqual(density.labels, ["对话", "工作区", "任务", "团队", "通讯录"]);
         await browser.click('.conversation-row', "right");
         await browser.wait('!!document.querySelector(".conversation-row-menu")');
         await browser.screenshot(join(artifacts, `chat-menu-${mode}.png`));
@@ -209,10 +219,14 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
         await browser.wait('!document.querySelector(".conversation-row-menu")', "outside press closes the chat menu");
         await browser.send("Input.insertText", { text: "搜索检查" });
         await browser.wait('document.querySelector(".conversation-search-input input").value === "搜索检查"');
+        assert.equal(await browser.evaluate('!!document.querySelector(".conversation-list-empty[role=status]") && !document.querySelector(".conversation-row")'), true, `${mode}: no-results state is actionable`);
         const searchGeometry = await browser.evaluate(`(()=>{const input=document.querySelector('.conversation-search-host'),clear=document.querySelector('[aria-label="清空搜索"]');const a=input.getBoundingClientRect(),b=clear.getBoundingClientRect();return {contained:b.x>=a.x&&b.right<=a.right,width:a.width}})()`);
         assert.equal(searchGeometry.contained, true, `${mode}: clear action is inside the search field`);
         await browser.click('[aria-label="清空搜索"]');
         assert.equal(await browser.evaluate('document.activeElement === document.querySelector(".conversation-search-input input") && document.activeElement.value === ""'), true, `${mode}: clearing preserves typing focus`);
+        await browser.send("Input.insertText", { text: "没有这个会话" });
+        await browser.key("Escape");
+        assert.equal(await browser.evaluate('document.activeElement === document.querySelector(".conversation-search-input input") && document.activeElement.value === "" && fixture.memory.getSnapshot().layout.sessionsDrawerOpen'), true, `${mode}: search Escape preserves focus and the drawer`);
         await browser.click('.conversation-row', "right");
         await browser.wait('!!document.querySelector(".conversation-row-menu")');
         await browser.click('.conversation-navigation [data-stretch-value="tasks"]');

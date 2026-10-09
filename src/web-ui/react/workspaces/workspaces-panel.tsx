@@ -929,8 +929,8 @@ function TaskGroupSection({
             {!group.global && <Typography.Text type="secondary" ellipsis className="workspace-row-path" title={group.workspaceCwd}
               style={{ fontSize: 12 }}>{shortenWorkspacePath(group.workspaceCwd)}</Typography.Text>}
           </Flex>
-          <span className="workspace-row-count" aria-label={`${taskCount} 个任务，${group.standaloneSessions.length} 个独立会话`}>
-              {taskCount + group.standaloneSessions.length}
+          <span className="workspace-row-count" title={`当前列表：${taskCount} 个任务，${group.standaloneSessions.length} 个独立会话；已归档会话在下方单列`} aria-label={`当前显示 ${taskCount} 个任务，${group.standaloneSessions.length} 个独立会话`}>
+              {taskCount ? `${taskCount} 任务` : null}{taskCount && group.standaloneSessions.length ? " · " : null}{group.standaloneSessions.length || !taskCount ? `${group.standaloneSessions.length} 会话` : null}
           </span>
           <span className={`sidebar-head-activity tone-${groupActivity.tone}`} title={groupActivity.description}
             aria-label={groupActivity.description}>{groupActivity.label ? <Badge status={groupActivity.tone === "warning" ? "warning" : groupActivity.tone === "success" ? "success" : "processing"}/> : null}</span>
@@ -1538,7 +1538,7 @@ function SidebarWorkspacesPanel({
             </Flex>
           ) : directoryId === undefined ? (
             <>
-            <Flex vertical gap="small" style={{ paddingBlock: 8 }} className="sidebar-presentation-tools">
+            <Flex vertical gap="small" style={{ paddingTop: 4, paddingBottom: 8 }} className="sidebar-presentation-tools">
             <Flex align="center" gap={4} style={{ minWidth: 0 }} className={classNames("sidebar-list-heading", searchVisible && "is-searching")}>
               <div className="sidebar-search-slot">
               <Typography.Text strong className="sidebar-list-title" aria-hidden={searchVisible || undefined}>执行会话</Typography.Text>
@@ -1548,6 +1548,9 @@ function SidebarWorkspacesPanel({
                   className="sidebar-search-input"
                   type="search"
                   value={searchQuery}
+                  clearable={Boolean(searchQuery)}
+                  clearLabel="清空工作区搜索"
+                  onClear={() => { onSearchChange?.(""); searchInputRef.current?.focus({ preventScroll: true }); }}
                   placeholder={view === "recent" ? "搜索最近会话" : "搜索工作区、任务或会话"}
                   aria-label="搜索工作区、任务或会话"
                   tabIndex={searchVisible ? 0 : -1}
