@@ -485,6 +485,11 @@ test("Ant Design task pages preserve date-only, portals, draft refs and owned fo
       await focusIterationMode();
       await key('Home');
       await wait(`${iterationMode} === '迭代提示词'`);
+      assert.equal(await evaluate("document.body.innerText.includes('本项目全部无任务会话')"), true, `${mode}: archive scope is explicit`);
+      await click('#wand-quick-archive-tasks');
+      assert.equal(await evaluate("document.getElementById('wand-quick-archive-tasks').getAttribute('aria-checked')"), "true");
+      await click('#wand-quick-archive-tasks');
+      assert.equal(await evaluate("document.getElementById('wand-quick-archive-tasks').getAttribute('aria-checked')"), "false");
       await screenshot(`${mode}-quick`);
       await evaluate("tasks.show('merge')"); await wait("document.body.innerText.includes('Actual inspection row')");
       assert.equal(await evaluate("!!document.querySelector('.wand-worktree-commit-list.ant-list')"), true);

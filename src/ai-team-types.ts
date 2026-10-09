@@ -1,5 +1,6 @@
 import type { AgentActivityState } from "./mission-types.js";
 import { DECISION_EXPERT_KEY } from "./decision-expert-identity.js";
+import { SPEECH_POLISHER_KEY } from "./speech-polisher-identity.js";
 import type { AiTeamDeliverySummary } from "./ai-team-delivery-types.js";
 import type { WandTaskAgent } from "./task-types.js";
 import type { ConversationTurn } from "./types.js";
@@ -160,7 +161,7 @@ export function isDecisionExpertSiliconEmployee(employee: Pick<SiliconEmployee, 
 export function isBuiltinSiliconEmployee(
   employee: Pick<SiliconEmployee, "systemKey"> | null | undefined,
 ): boolean {
-  return isSystemSiliconEmployee(employee) || isDefaultSiliconEmployee(employee) || isDecisionExpertSiliconEmployee(employee);
+  return isSystemSiliconEmployee(employee) || isDefaultSiliconEmployee(employee) || isDecisionExpertSiliconEmployee(employee) || employee?.systemKey === SPEECH_POLISHER_KEY;
 }
 
 export const SILICON_EMPLOYEE_MAX_TAGS = 8;
@@ -170,7 +171,7 @@ export const SILICON_EMPLOYEE_TAG_MAX_CHARS = 20;
 export function siliconEmployeeTags(
   employee: Pick<SiliconEmployee, "systemKey" | "tags">,
 ): string[] {
-  if (isSystemSiliconEmployee(employee) || isDecisionExpertSiliconEmployee(employee)) return [SYSTEM_EMPLOYEE_TAG];
+  if (isSystemSiliconEmployee(employee) || isDecisionExpertSiliconEmployee(employee) || employee.systemKey === SPEECH_POLISHER_KEY) return [SYSTEM_EMPLOYEE_TAG];
   if (isDefaultSiliconEmployee(employee)) return [DEFAULT_EMPLOYEE_TAG];
   return employee.tags ?? [];
 }

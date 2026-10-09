@@ -130,3 +130,12 @@ test("download is explicit, size/hash checked, failure leaves no usable partial 
   assert.equal((await failed.service.status()).download?.phase, "failed");
   assert.deepEqual(readdirSync(failed.modelsDir), []);
 });
+
+test("automatic initialization checks CPU when the GPU cannot load; explicit GPU remains explicit", async t => {
+  const { service, log } = harness(t, "gpu-failure", { backend: "metal" });
+  await service.initializeModel("base", new AbortController().signal, "auto");
+  assert.equal((await service.status()).initialized, true);
+  assert.equal(service.settings().enabled, false);
+  assert.equal(readFileSync(log, "utf8").trim().split("\n").length, 2);
+  await assert.rejects(service.initializeModel("base", new AbortController().signal, "gpu"), (error: SpeechError) => error.code === "ENGINE_FAILED");
+});

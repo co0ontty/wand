@@ -34,6 +34,15 @@ export function registerLocalModelRoutes(app: Express, deps: {
       deps.models.setLayaEnabled(req.body.enabled); res.json(await deps.models.status());
     } catch (error) { next(error); }
   });
+  app.patch("/api/local-models/speech/settings", deps.requireAdmin, async (req, res, next) => {
+    try {
+      if (!req.body || Array.isArray(req.body) || Object.keys(req.body).length !== 1 || typeof req.body.enabled !== "boolean") {
+        throw new DecisionError("INVALID_REQUEST", "仅允许修改语音启用状态。");
+      }
+      await deps.models.setSpeechEnabled(req.body.enabled);
+      res.status(202).json(await deps.models.status());
+    } catch (error) { next(error); }
+  });
   const errors: ErrorRequestHandler = (error, _req, res, _next) => {
     if (error instanceof DecisionError || error instanceof SpeechError) { res.status(error.status).json({ error: error.message, code: error.code }); return; }
     res.status(500).json({ error: "本地模型管理失败，请刷新状态后重试。", code: "SETUP_FAILED" });

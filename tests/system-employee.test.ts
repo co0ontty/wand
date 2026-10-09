@@ -8,6 +8,7 @@ import express from "express";
 
 import { defaultConfig, loadConfigWithStorage } from "../src/config.js";
 import { DEFAULT_EMPLOYEE_ID } from "../src/ai-team-types.js";
+import { SPEECH_POLISHER_ID } from "../src/speech-polisher-identity.js";
 import { DECISION_EXPERT_ID, DECISION_EXPERT_KEY } from "../src/decision-expert-identity.js";
 import { jsonErrorHandler } from "../src/express-async.js";
 import { callConfiguredAiText, withOpsPersona } from "../src/git-quick-commit.js";
@@ -381,7 +382,7 @@ test("加载配置时幂等创建内置员工，并沿用用户已有的系统 A
     storage.saveSiliconEmployee({ ...decisionExpert, agents: decisionCandidates });
     storage.saveSiliconEmployee({ ...seeded!, agents: [CLAUDE, GROK] });
     await loadConfigWithStorage(join(root, "config.json"), storage);
-    assert.deepEqual(storage.listSiliconEmployees().map((employee) => employee.id), [SYSTEM_EMPLOYEE_ID, DEFAULT_EMPLOYEE_ID, DECISION_EXPERT_ID]);
+    assert.deepEqual(storage.listSiliconEmployees().map((employee) => employee.id), [SYSTEM_EMPLOYEE_ID, DEFAULT_EMPLOYEE_ID, DECISION_EXPERT_ID, SPEECH_POLISHER_ID]);
     assert.deepEqual(storage.getSystemSiliconEmployee()?.agents.map((agent) => agent.provider), ["claude", "grok"]);
     assert.equal(storage.getSystemSiliconEmployee(DECISION_EXPERT_KEY)?.id, decisionExpert.id);
     assert.deepEqual(storage.getSystemSiliconEmployee(DECISION_EXPERT_KEY)?.agents, decisionCandidates);

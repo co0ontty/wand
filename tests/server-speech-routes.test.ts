@@ -5,8 +5,9 @@ import express from "express";
 import { registerSpeechRoutes } from "../src/server-speech-routes.ts";
 import { SpeechError, type SpeechService } from "../src/speech-service.ts";
 import { SPEECH_MAX_WAV_BYTES } from "../src/speech-types.ts";
+import type { SpeechPolisherService } from "../src/speech-polisher-service.ts";
 
-async function harness(t: TestContext) {
+async function harness(t: TestContext, polisher?: Pick<SpeechPolisherService, "polish">) {
   let transcriptions = 0;
   let downloads = 0;
   const app = express();
@@ -16,6 +17,7 @@ async function harness(t: TestContext) {
     next();
   });
   registerSpeechRoutes(app, {
+    polisher,
     speech: { status: async () => ({ ready: true }), configure: () => {}, startDownload: async () => { downloads += 1; },
       transcribe: async (audio: Buffer) => { transcriptions += 1; if (audio.length < 44) throw new SpeechError("INVALID_AUDIO", "无效音频"); return { text: "转写" }; } } as unknown as SpeechService,
     requireSessions: (req, res, next) => { if (req.headers.authorization === "files") res.status(403).end(); else next(); },
@@ -39,6 +41,22 @@ test("speech endpoints require authentication/sessions; model download and confi
   assert.equal(counts().downloads, 0);
   assert.equal((await fetch(`${url}/api/speech/models/base/download`, { method: "POST", headers: { authorization: "admin" } })).status, 202);
   assert.equal(counts().downloads, 1);
+});
+
+test("转写自动交给口述整理师，失败仍交付原文", async t => {
+  let calls = 0;
+  const { url } = await harness(t, { polish: async (text, signal, budget) => {
+    calls++;
+    assert.equal(text, "转写"); assert.equal(signal?.aborted, false); assert.ok(budget! <= 45000);
+    if (calls === 2) throw new Error("unexpected model error");
+    return { text: "整理后的转写。", originalText: text, optimized: true, employeeId: "e_wand_speech_polisher", candidate: 0 };
+  } });
+  const send = () => fetch(`${url}/api/speech/transcribe`, { method: "POST", headers: { authorization: "app", "content-type": "audio/wav" }, body: Buffer.alloc(44) });
+  const first = await send(); assert.equal(first.status, 200);
+  assert.deepEqual(await first.json(), { text: "整理后的转写。", originalText: "转写", optimized: true, employeeId: "e_wand_speech_polisher", candidate: 0 });
+  const failed = await send(); assert.equal(failed.status, 200);
+  const original = await failed.json(); assert.equal(original.text, "转写"); assert.equal(original.originalText, "转写"); assert.equal(original.optimized, false);
+  assert.equal(calls, 2);
 });
 
 test("raw WAV route bounds uploads and returns structured safe errors", async (t) => {

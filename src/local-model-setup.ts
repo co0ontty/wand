@@ -9,6 +9,7 @@ import { ModelFileStore } from "./model-file-store.js";
 import { runModelSetup } from "./model-setup-process.js";
 import { speechModel } from "./speech-models.js";
 import type { SpeechService } from "./speech-service.js";
+import { speechSupport, type SpeechSupport } from "./speech-support.js";
 import { systemEnvValue } from "./env-utils.js";
 import { decisionHardware } from "./decision-hardware.js";
 import { DECISION_EXPERT_ID } from "./decision-expert-identity.js";
@@ -27,6 +28,7 @@ export interface LocalModelSetupDeps {
   run?: typeof runModelSetup;
   checkRuntime?: (python: string, signal: AbortSignal) => Promise<boolean>;
   timeoutMs?: number;
+  speechSupport?: (runtimeAvailable: boolean) => Promise<SpeechSupport>;
 }
 
 /** Deployment jobs only; existing inference owners retain their protocols, rate limits and capabilities. */
@@ -38,6 +40,8 @@ export class LocalModelSetupService {
   private readonly jobs = new Map<LocalModelKind, { abort: AbortController; promise: Promise<void> }>();
   private sequence = 0;
   private disposed = false;
+  private speechEnableRevision = 0;
+  private supportCache: { expires: number; runtimeAvailable: boolean; value: Promise<SpeechSupport> } | null = null;
   constructor(private readonly deps: LocalModelSetupDeps) {
     this.files = new ModelFileStore(deps.fetch);
     this.root = path.join(deps.configDir, "local-models", "laya");
@@ -68,6 +72,7 @@ export class LocalModelSetupService {
     const hardware = decisionHardware();
     const operation = this.operations.get("laya") ?? null;
     const selected = speech.models.find((value) => value.id === speech.settings.model);
+    const support = await this.speechSupport(speech.runtime.available);
     return {
       laya: { kind: "laya", label: "LAYA 本地决策", supported,
         reason: !supported ? hardware.message
@@ -75,11 +80,33 @@ export class LocalModelSetupService {
         enabled: decision.enabled, model: LAYA_REPOSITORY, modelSize: this.manifest.reduce((sum, file) => sum + file.size, 0),
         downloaded: model.downloaded, runtimeAvailable: !!python, initialized: decision.state === "ready", busy: this.jobs.has("laya") || decision.queued > 0 || decision.state === "loading",
         operation: operation ? { ...operation } : null, hardware, decisionEmployeeId: DECISION_EXPERT_ID },
-      speech: { kind: "speech", label: "服务端语音识别", supported: ["darwin", "linux", "win32"].includes(process.platform), reason: speech.reason,
+      speech: { kind: "speech", label: "服务端语音识别", supported: support.supported, supportReason: support.reason, reason: speech.reason,
         enabled: speech.settings.enabled, model: speech.settings.model, modelSize: selected?.size ?? 0,
         downloaded: selected?.downloaded ?? false, runtimeAvailable: speech.runtime.available, initialized: speech.initialized === true,
         busy: speech.busy || this.jobs.has("speech"), operation: this.operations.has("speech") ? { ...this.operations.get("speech")! } : null },
     };
+  }
+  private speechSupport(runtimeAvailable: boolean): Promise<SpeechSupport> {
+    if (!this.supportCache || this.supportCache.expires < Date.now() || this.supportCache.runtimeAvailable !== runtimeAvailable) {
+      this.supportCache = { expires: Date.now() + 30_000, runtimeAvailable, value: (this.deps.speechSupport ?? speechSupport)(runtimeAvailable) };
+    }
+    return this.supportCache.value;
+  }
+  async setSpeechEnabled(enabled: boolean): Promise<void> {
+    const revision = ++this.speechEnableRevision;
+    const settingsRevision = this.deps.speech.settingsRevision();
+    if (this.disposed) throw new DecisionError("UNAVAILABLE", "模型管理已关闭。", 503);
+    if (!enabled) {
+      this.cancel("speech");
+      this.deps.speech.configure({ enabled: false });
+      return;
+    }
+    const status = await this.deps.speech.status();
+    const support = await this.speechSupport(status.runtime.available);
+    if (revision !== this.speechEnableRevision || this.disposed || settingsRevision !== this.deps.speech.settingsRevision()) return;
+    if (!support.supported) throw new DecisionError("UNSUPPORTED", support.reason || "本机不支持语音识别。", 409);
+    if (status.busy || status.download?.phase === "downloading") throw new DecisionError("BUSY", "语音识别或模型下载正在进行，请稍后启用。", 409);
+    this.start("speech", "activate", {});
   }
   private parse(kind: LocalModelKind, raw: unknown): ModelSetupInput {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new DecisionError("INVALID_REQUEST", "模型操作参数无效。");
@@ -94,9 +121,10 @@ export class LocalModelSetupService {
     if (body.backend === "metal" && process.platform !== "darwin") throw new DecisionError("UNSUPPORTED", "Metal 仅适用于 macOS。");
     return body as ModelSetupInput;
   }
-  start(kind: LocalModelKind, action: "download" | "initialize", raw: unknown): void {
+  start(kind: LocalModelKind, action: "download" | "initialize" | "activate", raw: unknown): void {
     if (this.disposed) throw new DecisionError("UNAVAILABLE", "模型管理已关闭。", 503);
     if (kind === "laya" && !this.supported()) throw new DecisionError("UNSUPPORTED", `LAYA-MLX 需要 Apple Silicon macOS 与 Metal；${decisionHardware().message}`, 409);
+    if (kind === "laya" && action === "activate") throw new DecisionError("INVALID_REQUEST", "一键启用仅用于语音识别。");
     const input = this.parse(kind, raw);
     if (this.jobs.has(kind)) throw new DecisionError("BUSY", "该模型已有安装任务，请等待或取消。", 409);
     if (kind === "laya") this.deps.decisions.assertConfigurable();
@@ -115,10 +143,12 @@ export class LocalModelSetupService {
     const current = this.operations.get(kind);
     if (current?.id === id) this.operations.set(kind, { ...current, ...patch });
   }
-  private async work(kind: LocalModelKind, action: "download" | "initialize", input: ModelSetupInput, abort: AbortController, id: number): Promise<void> {
+  private async work(kind: LocalModelKind, action: "download" | "initialize" | "activate", input: ModelSetupInput, abort: AbortController, id: number): Promise<void> {
     const timer = setTimeout(() => abort.abort(), this.deps.timeoutMs ?? 30 * 60_000); timer.unref();
     const signal = abort.signal;
     const phase = (value: ModelSetupPhase, message: string): void => this.update(kind, id, { phase: value, message });
+    let activationMaintenance = false;
+    const settingsRevision = this.deps.speech.settingsRevision();
     try {
       if (kind === "laya") {
         let model = await this.layaModel(); signal.throwIfAborted();
@@ -161,7 +191,7 @@ export class LocalModelSetupService {
         }
       } else {
         const selected = input.model ?? this.deps.speech.settings().model;
-        if (action === "download") {
+        if (action === "download" || action === "activate") {
           phase("downloading", "下载并校验语音模型");
           await this.deps.speech.startDownload(selected);
           while (true) {
@@ -176,7 +206,13 @@ export class LocalModelSetupService {
               signal.addEventListener("abort", cancelled, { once: true });
             });
           }
-        } else {
+        }
+        if (action !== "download") {
+          if (action === "activate") {
+            signal.throwIfAborted();
+            this.deps.speech.acquireMaintenance();
+            activationMaintenance = true;
+          }
           const status = await this.deps.speech.status(); signal.throwIfAborted();
           const backend = input.backend === "auto" || !input.backend ? process.platform === "darwin" ? "metal" : "cpu" : input.backend;
           if (!status.models.find((value) => value.id === selected)?.downloaded) throw new Error("请先下载所选语音模型，再初始化。");
@@ -191,19 +227,24 @@ export class LocalModelSetupService {
                 (name, message) => phase(name === "verifying" ? "verifying" : "runtime", message));
             } finally { await rm(work, { recursive: true, force: true }).catch(() => {}); }
           }
-          phase("initializing", "加载所选语音模型并用合成静音检查，未启用识别或重启服务");
-          await this.deps.speech.initializeModel(selected, signal);
+          phase("initializing", action === "activate" ? "正在检查语音模型，完成后自动启用。" : "加载所选语音模型并用合成静音检查，未启用识别或重启服务");
+          await this.deps.speech.initializeModel(selected, signal, action === "activate" ? "auto" : undefined);
+          if (action === "activate") {
+            signal.throwIfAborted();
+            if (settingsRevision !== this.deps.speech.settingsRevision()) throw new DecisionError("SETTINGS_CHANGED", "语音设置已由其他操作修改，本次启用已取消。");
+            this.deps.speech.configure({ enabled: true, acceleration: "auto" });
+          }
         }
       }
       signal.throwIfAborted();
-      phase("completed", action === "download" ? "模型下载及完整性校验完成；可继续初始化" : "运行时和模型初始化检查完成；启用状态保持不变");
+      phase("completed", action === "activate" ? "服务端语音识别已启用。" : action === "download" ? "模型下载及完整性校验完成；可继续初始化" : "运行时和模型初始化检查完成；启用状态保持不变");
     } catch (error) {
       const cancelled = signal.aborted;
       const message = cancelled ? "安装任务已取消，完整文件保留，可重试" : error instanceof DecisionError || (error instanceof Error && /请先|校验|自定义|独立/.test(error.message))
         ? error.message : "安装或初始化失败，请检查网络、编译工具/Python版本、磁盘空间和平台能力，再重试。";
       this.update(kind, id, { phase: cancelled ? "cancelled" : "failed", message, ...(cancelled ? {} : { error: message }) });
-      if (kind === "speech" && action === "download" && cancelled) this.deps.speech.cancelDownload();
-    } finally { clearTimeout(timer); }
+      if (kind === "speech" && (action === "download" || action === "activate") && cancelled) this.deps.speech.cancelDownload();
+    } finally { if (activationMaintenance) this.deps.speech.releaseMaintenance(); clearTimeout(timer); }
   }
   private async checkRuntime(python: string, signal: AbortSignal): Promise<boolean> {
     if (this.deps.checkRuntime) return this.deps.checkRuntime(python, signal);

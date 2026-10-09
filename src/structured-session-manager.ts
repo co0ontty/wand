@@ -1385,11 +1385,9 @@ export class StructuredSessionManager {
     return updated;
   }
 
-  /** 归档会先停掉还在跑的回合，会话 ID 和 provider session id 都留着。 */
+  /** 归档只写标记，正在执行的回合和历史继续保留。 */
   setSessionArchived(id: string, archived: boolean): SessionSnapshot {
-    const current = archived && this.requireSession(id).status === "running"
-      ? this.stop(id)
-      : this.requireSession(id);
+    const current = this.requireSession(id);
     const archivedAt = archived ? new Date().toISOString() : null;
     const updated: SessionSnapshot = { ...current, archived, archivedAt };
     this.sessions.set(id, updated);

@@ -39,6 +39,8 @@ interface Harness {
   baseUrl: string;
   storage: WandStorage;
   config: ReturnType<typeof defaultConfig>;
+  sessions: SessionRegistry;
+  structured: StructuredSessionManager;
   close(): Promise<void>;
 }
 
@@ -65,6 +67,8 @@ async function startHarness(t: TestContext, root: string): Promise<Harness> {
     baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
     storage,
     config,
+    sessions,
+    structured,
     close: () => new Promise((done) => {
       processes.dispose();
       structured.dispose();
@@ -297,6 +301,79 @@ test("an empty iteration reports diff as the effective mode", async (t) => {
     assert.deepEqual(body.entries, []);
     assert.deepEqual(body.defaultEntryIds, []);
     assert.equal(body.effectiveMode, "diff");
+  } finally {
+    await harness.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("quick commit sweeps all standalone sessions in its project, preserving tasks, history and execution", async (t) => {
+  resetRepoKeyCache();
+  t.after(() => resetRepoKeyCache());
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-commit-standalone-"));
+  const repo = initRepo(path.join(root, "repo"));
+  const other = initRepo(path.join(root, "other"));
+  const harness = await startHarness(t, root);
+  const { baseUrl, storage, sessions, structured } = harness;
+  try {
+    const create = async (cwd: string) => {
+      const response = await fetch(`${baseUrl}/api/structured-sessions`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cwd, provider: "opencode", mode: "assist" }),
+      });
+      assert.equal(response.status, 201);
+      return await response.json() as { id: string };
+    };
+    const current = await create(repo);
+    const unselected = await create(`${repo}/`);
+    const foreign = await create(other);
+    const bound = await create(repo);
+    const archived = await create(repo);
+    sessions.setArchived(archived.id, true);
+    const archivedAt = sessions.get(archived.id)?.archivedAt;
+    const workspaceId = storage.getSessionWorkspace(current.id)!.workspaceId!;
+    const task = storage.createWorkspaceTask({ workspaceId, name: "No board card" });
+    storage.moveSessionToWorkspaceTask(bound.id, task.id);
+    // Restart-only history and an isolated worktree belong to the same project.
+    const source = sessions.get(current.id)!;
+    storage.saveSession({ ...source, id: "stored-pty", sessionKind: "pty", status: "exited",
+      output: "preserved transcript", messages: [] });
+    storage.saveSession({ ...source, id: "stored-worktree", cwd: path.join(root, "isolated"),
+      worktree: { repoRoot: repo, path: path.join(root, "isolated"), branch: "fixture", baseRef: "main" } });
+    storage.saveSession({ ...source, id: "stored-no-cwd", cwd: "" });
+    // Run no model: install a running snapshot and make any attempted stop fail loudly.
+    const rows = (structured as unknown as { sessions: Map<string, typeof source> }).sessions;
+    rows.set(unselected.id, { ...rows.get(unselected.id)!, status: "running" });
+    t.mock.method(structured, "stop", () => { throw new Error("archiving must not interrupt execution"); });
+    const commit = async (archiveRelatedTasks: boolean) => fetch(`${baseUrl}/api/sessions/${current.id}/quick-commit`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ autoMessage: false, customMessage: "standalone", mode: "diff",
+        entryIds: [], archiveRelatedTasks }),
+    });
+    assert.equal((await commit(true)).status, 409);
+    assert.equal(sessions.get(current.id)?.archived, false);
+    writeFileSync(path.join(repo, "tracked.txt"), "plain\n");
+    const plain = await commit(false);
+    assert.equal(plain.status, 200);
+    assert.deepEqual((await plain.json() as { archivedSessionIds: string[] }).archivedSessionIds, []);
+    assert.equal(sessions.get(unselected.id)?.archived, false);
+    writeFileSync(path.join(repo, "tracked.txt"), "archive\n");
+    const response = await commit(true);
+    assert.equal(response.status, 200);
+    const result = await response.json() as { archivedTaskIds: string[]; archivedSessionIds: string[]; archiveError?: string };
+    assert.equal(result.archiveError, undefined);
+    assert.deepEqual(result.archivedTaskIds, []);
+    assert.deepEqual(new Set(result.archivedSessionIds), new Set([current.id, unselected.id, "stored-pty", "stored-worktree"]));
+    assert.equal(sessions.get(unselected.id)?.status, "running");
+    assert.equal(storage.getSession("stored-pty")?.output, "preserved transcript");
+    assert.equal(sessions.get(foreign.id)?.archived, false);
+    assert.equal(sessions.get(bound.id)?.archived, false);
+    assert.equal(sessions.get("stored-no-cwd")?.archived, false);
+    assert.equal(sessions.get(archived.id)?.archivedAt, archivedAt);
+    writeFileSync(path.join(repo, "tracked.txt"), "again\n");
+    const again = await commit(true);
+    assert.equal(again.status, 200);
+    assert.deepEqual((await again.json() as { archivedSessionIds: string[] }).archivedSessionIds, []);
   } finally {
     await harness.close();
     rmSync(root, { recursive: true, force: true });

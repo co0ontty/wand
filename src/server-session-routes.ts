@@ -31,7 +31,7 @@ import {
 } from "./git-quick-commit.js";
 
 import { getErrorMessage } from "./error-utils.js";
-import { archiveCommitTasks } from "./commit-task-archive.js";
+import { archiveCommitTasks, archiveCommitStandaloneSessions } from "./commit-task-archive.js";
 import {
   buildIterationCommitContext,
   COMMIT_CONTEXT_MODE_PREF_KEY,
@@ -1287,6 +1287,7 @@ export function registerSessionRoutes(
         ? storage.markIterationPromptsConsumed(context.entryIds, result.commit.hash)
         : 0;
       let archivedTaskIds: string[] = [];
+      const archivedSessionIds: string[] = [];
       let archiveError: string | undefined;
       if (body.archiveRelatedTasks === true && result.ok && result.commit?.hash) {
         try {
@@ -1296,14 +1297,16 @@ export function registerSessionRoutes(
           archivedTaskIds = archiveCommitTasks(storage, snapshot, context.entryIds, {
             workspaceTaskId: openedTaskId || null,
           });
+          archiveCommitStandaloneSessions(storage, sessions, snapshot, archivedSessionIds);
         } catch (error) {
-          archiveError = getErrorMessage(error, "归档关联任务失败。");
+          archiveError = getErrorMessage(error, "归档任务与会话失败。");
           console.error("[QuickCommit] Failed to archive related tasks:", archiveError);
         }
       }
       res.json({
         ...result,
         archivedTaskIds,
+        archivedSessionIds,
         ...(archiveError ? { archiveError } : {}),
         commitContext: {
           source: commitMessageFromIteration(body) && context.digest ? "iteration" : "diff",
@@ -1921,7 +1924,7 @@ export function registerSessionRoutes(
     }
   });
 
-  // 归档会停止会话，但保留 Wand 会话 ID 和 provider session id。恢复时用这个 ID 续上。
+  // 归档只隐藏会话，保留运行进程、Wand 会话 ID 与 provider session id。
   app.post("/api/sessions/:id/archive", (req, res) => {
     try {
       const updated = sessions.setArchived(req.params.id, true);

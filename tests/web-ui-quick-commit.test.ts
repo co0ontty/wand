@@ -307,6 +307,7 @@ test("HTTP quick-commit repository normalizes status and preserves endpoint cont
         pushed: false,
         submoduleCommits: [{ path: "vendor/lib", hash: "123" }],
         archivedTaskIds: ["task-1"],
+        archivedSessionIds: ["session-1", "session-2"],
       });
     }
     if (url.endsWith("/git/push")) {
@@ -361,6 +362,7 @@ test("HTTP quick-commit repository normalizes status and preserves endpoint cont
   assert.equal(committed.commit?.hash, "abcdef123");
   assert.equal(committed.submoduleCommits.length, 1);
   assert.deepEqual(committed.archivedTaskIds, ["task-1"]);
+  assert.deepEqual(committed.archivedSessionIds, ["session-1", "session-2"]);
   const pushed = await repository.push("session/a", {
     pushCommits: true,
     pushTags: true,

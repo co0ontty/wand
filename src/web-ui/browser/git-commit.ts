@@ -3,7 +3,7 @@ import "./chat-render";
 import "./chat-scroll";
 import { showToast } from "./notifications";
 import "./render";
-import "./session-engine";
+import { refreshAll } from "./session-engine";
 import {
   configureQuickCommitRuntime,
   quickCommitController,
@@ -123,6 +123,7 @@ import { closeReactOverlays } from "./react-overlay-coordinator";
           closeReactOverlays(["quickCommit"]);
         },
         onClose: function() {},
+        onArchived: function() { void refreshAll(); },
         nextStatusRequestTime: nextGitStatusRequestTime,
         onStatusLoaded: function(sessionId: string, status: any, requestedAt?: number) {
           applyGitStatusSnapshot(sessionId, status, requestedAt);

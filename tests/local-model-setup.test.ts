@@ -15,7 +15,7 @@ import { SPEECH_MODELS, type SpeechModel } from "../src/speech-models.ts";
 const bytes = Buffer.from("fixed model fixture"), hash = createHash("sha256").update(bytes).digest("hex");
 const files: ModelFile[] = [{ path: "model.safetensors", size: bytes.length, sha256: hash }];
 const speechModel = { ...SPEECH_MODELS[1], size: bytes.length, sha256: hash } as SpeechModel;
-function harness(t: TestContext, extras: Record<string, unknown> = {}) {
+function harness(t: TestContext, extras: Record<string, unknown> = {}, speechExtras: ConstructorParameters<typeof SpeechService>[2] = {}) {
   const root = mkdtempSync(path.join(tmpdir(), "wand-model-setup-"));
   const model = path.join(root, "existing"); mkdirSync(model); writeFileSync(path.join(model, files[0]!.path), bytes);
   let config: LocalDecisionConfig = { enabled: false, pythonPath: process.execPath, modelPath: model };
@@ -24,7 +24,7 @@ function harness(t: TestContext, extras: Record<string, unknown> = {}) {
   const executable = path.join(root, "whisper-cli");
   writeFileSync(executable, `#!${process.execPath}\nconst fs=require('node:fs'),args=process.argv.slice(2);fs.writeFileSync(args[args.indexOf('-of')+1]+'.txt','');\n`, { mode: 0o700 });
   const speech = new SpeechService({ getPreference: (key, fallback) => pref.get(key) ?? fallback, setPreference: (key, value) => { pref.set(key, value); } }, root,
-    { executable, backend: "cpu", models: [speechModel] });
+    { executable, backend: "cpu", models: [speechModel], fetch: (async () => new Response(bytes)) as typeof fetch, ...speechExtras });
   mkdirSync(path.join(root, "speech", "models"), { recursive: true }); writeFileSync(path.join(root, "speech", "models", "ggml-base.bin"), bytes);
   const models = new LocalModelSetupService({ configDir: root, decisions, speech, layaFiles: files, supportedLaya: () => true,
     decisionConfig: () => config, configureDecision: (next) => { decisions.configure(next); config = next; },
@@ -117,4 +117,104 @@ test("unsupported LAYA is reported clearly without a fallback runtime or implici
   assert.equal((await h.models.status()).laya.supported, false);
   assert.throws(() => h.models.start("laya", "download", {}), /Apple Silicon/);
   assert.throws(() => h.models.setLayaEnabled(true), /不支持/);
+});
+
+test("one click activation reuses verified resources, checks model and persists enabled only after success", async t => {
+  const h = harness(t);
+  assert.equal(h.speech.settings().enabled, false);
+  await h.models.setSpeechEnabled(true);
+  assert.throws(() => h.models.start("speech", "initialize", {}), /安装任务/);
+  const value = await finish(h.models, "speech");
+  assert.equal(value.operation?.action, "activate");
+  assert.equal(value.operation?.phase, "completed");
+  assert.equal(value.enabled, true); assert.equal(value.initialized, true);
+  assert.equal((await h.speech.status()).ready, true);
+  await h.models.setSpeechEnabled(false);
+  assert.equal(h.speech.settings().enabled, false);
+});
+
+test("one click activation downloads missing model before initialization, and failed integrity never enables it", async t => {
+  for (const valid of [true, false]) {
+    const h = harness(t, {}, { fetch: (async () => new Response(valid ? bytes : Buffer.alloc(bytes.length))) as typeof fetch });
+    rmSync(path.join(h.root, "speech", "models", "ggml-base.bin"));
+    await h.models.setSpeechEnabled(true);
+    const value = await finish(h.models, "speech");
+    assert.equal(value.operation?.phase, valid ? "completed" : "failed");
+    assert.equal(value.enabled, valid); assert.equal(value.downloaded, valid);
+  }
+});
+
+test("disabling during initialization cancels activation and prevents a late success from re-enabling", async t => {
+  const h = harness(t);
+  let started!: () => void, release!: () => void;
+  const checking = new Promise<void>(r => { started = r; });
+  const late = new Promise<void>(r => { release = r; });
+  h.speech.initializeModel = async () => { started(); await late; };
+  await h.models.setSpeechEnabled(true); await checking;
+  await h.models.setSpeechEnabled(false); release();
+  const value = await finish(h.models, "speech");
+  assert.equal(value.operation?.phase, "cancelled");
+  assert.equal(value.enabled, false); assert.equal(value.busy, false);
+});
+
+test("initialization failures leave activation off and permit a later retry", async t => {
+  const h = harness(t);
+  const initialize = h.speech.initializeModel.bind(h.speech);
+  h.speech.initializeModel = async () => { throw Error("model load failed"); };
+  await h.models.setSpeechEnabled(true);
+  assert.equal((await finish(h.models, "speech")).operation?.phase, "failed");
+  assert.equal(h.speech.settings().enabled, false);
+  h.speech.initializeModel = initialize;
+  await h.models.setSpeechEnabled(true);
+  assert.equal((await finish(h.models, "speech")).enabled, true);
+});
+
+test("unsupported speech exposes its concrete prerequisite and rejects activation without downloading", async t => {
+  const h = harness(t, { speechSupport: async () => ({ supported: false, reason: "缺少 CMake" }) });
+  const value = (await h.models.status()).speech;
+  assert.equal(value.supported, false); assert.equal(value.supportReason, "缺少 CMake");
+  await assert.rejects(h.models.setSpeechEnabled(true), /CMake/);
+  assert.equal((await h.models.status()).speech.operation, null);
+  await h.models.setSpeechEnabled(false);
+});
+
+test("off invalidates an enabling request still checking host support", async t => {
+  let release!: () => void, started!: () => void;
+  const checking = new Promise<void>(r => { started = r; });
+  const wait = new Promise<void>(r => { release = r; });
+  const h = harness(t, { speechSupport: async () => { started(); await wait; return { supported: true, reason: null }; } });
+  const enable = h.models.setSpeechEnabled(true); await checking;
+  await h.models.setSpeechEnabled(false); release(); await enable;
+  assert.equal((await h.models.status()).speech.operation, null);
+  assert.equal(h.speech.settings().enabled, false);
+});
+
+test("activation installs a missing runtime using only the fixed installer before enabling", async t => {
+  let h!: ReturnType<typeof harness>, cli = "", installed = false;
+  h = harness(t, {
+    speechSupport: async () => ({ supported: true, reason: null }),
+    run: async (_executable: string, args: string[]) => {
+      assert.ok(args[0]!.endsWith("install-speech-runtime.js"));
+      assert.ok(args.includes("--events"));
+      writeFileSync(path.join(h.root, "whisper-cli"), cli, { mode: 0o700 }); installed = true;
+    },
+  });
+  cli = readFileSync(path.join(h.root, "whisper-cli"), "utf8"); rmSync(path.join(h.root, "whisper-cli"));
+  assert.equal((await h.speech.status()).runtime.available, false);
+  await h.models.setSpeechEnabled(true);
+  assert.equal((await finish(h.models, "speech")).enabled, true);
+  assert.equal(installed, true);
+});
+
+test("a native client changing speech settings invalidates a pending one click activation", async t => {
+  const h = harness(t);
+  let release!: () => void, started!: () => void;
+  const checking = new Promise<void>(r => { started = r; });
+  const late = new Promise<void>(r => { release = r; });
+  h.speech.initializeModel = async () => { started(); await late; };
+  await h.models.setSpeechEnabled(true); await checking;
+  h.speech.configure({ enabled: false, language: "zh" }); release();
+  const value = await finish(h.models, "speech");
+  assert.equal(value.enabled, false); assert.match(value.operation?.error || "", /其他操作修改/);
+  assert.equal(h.speech.settings().language, "zh");
 });

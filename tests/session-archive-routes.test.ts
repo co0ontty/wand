@@ -140,7 +140,7 @@ class FakePty extends EventEmitter {
   kill(): void { this.killed = true; this.emit("exit", { exitCode: 0 }); }
 }
 
-test("archiving a live PTY stops it and restoring relaunches the same session id", async (t) => {
+test("archiving and restoring a live PTY preserves the process; a stopped archive resumes the same id", async (t) => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-pty-archive-"));
   const originalSpawn = (pty as unknown as { spawn: typeof pty.spawn }).spawn;
   const spawned: FakePty[] = [];
@@ -179,17 +179,26 @@ test("archiving a live PTY stops it and restoring relaunches the same session id
     assert.equal(archived.status, 200);
     const archivedBody = await archived.json() as { archived: boolean; status: string; id: string; claudeSessionId: string | null };
     assert.equal(archivedBody.archived, true);
-    assert.equal(archivedBody.status, "stopped");
+    assert.equal(archivedBody.status, "running");
     assert.equal(archivedBody.id, "pty-1");
     assert.equal(archivedBody.claudeSessionId, "11111111-1111-4111-8111-111111111111");
-    assert.equal(spawned[0]?.killed, true);
+    assert.equal(spawned[0]?.killed, false);
 
     const restored = await fetch(`${base}/api/sessions/${started.id}/unarchive`, { method: "POST" });
     assert.equal(restored.status, 200, await restored.clone().text());
     const restoredBody = await restored.json() as { id: string; archived: boolean; command: string; status: string };
     assert.equal(restoredBody.id, "pty-1");
     assert.equal(restoredBody.archived, false);
-    assert.match(restoredBody.command, /11111111-1111-4111-8111-111111111111/);
+    assert.equal(restoredBody.command, "pi");
+    assert.equal(spawned.length, 1, "restoring a live archive must not spawn a duplicate process");
+    processes.stop(started.id);
+    sessions.setArchived(started.id, true);
+    const resumed = await fetch(`${base}/api/sessions/${started.id}/unarchive`, { method: "POST" });
+    assert.equal(resumed.status, 200);
+    const resumedBody = await resumed.json() as { id: string; command: string };
+    assert.equal(resumedBody.id, started.id);
+    assert.match(resumedBody.command, /11111111-1111-4111-8111-111111111111/);
+    assert.equal(spawned.length, 2);
     assert.equal(restoredBody.status, "running");
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));

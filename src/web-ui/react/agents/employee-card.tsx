@@ -1,5 +1,6 @@
 import * as React from "react";
 import { DECISION_EXPERT_KEY } from "../../../decision-expert-identity.js";
+import { SPEECH_POLISHER_KEY } from "../../../speech-polisher-identity.js";
 import { Flex, Alert, Card, Collapse, Input, Tag , Typography } from "antd";
 import { DEFAULT_EMPLOYEE_TAG, SYSTEM_EMPLOYEE_TAG, isBuiltinSiliconEmployee, isDefaultSiliconEmployee, parseSiliconEmployeeTagInput, siliconEmployeeTags, type SiliconEmployee } from "../../../ai-team-types.js";
 import { EmployeeMemory } from "./employee-memory.js";
@@ -171,6 +172,10 @@ export function EmployeeCard({
               title={<strong>{tag}</strong>}
               description={isDefault
                 ? "选择 CLI 或未选择员工时使用这个默认角色；你选的工具、模型与权限保持不变。内置标签、名字与基础设定固定，工作风格由短期记忆定期调整；下面的候选用于直接找这位员工或未配置工具的任务。"
+                : employee.systemKey === SPEECH_POLISHER_KEY
+                ? "服务端语音转写后自动整理文字，保留原意与关键细节；整理失败时保留原始转写。初始首选为 Wand Agent 免费分组，可在下面添加、调整候选顺序。内置身份与职责固定。"
+                : employee.systemKey === DECISION_EXPERT_KEY
+                ? "为建议提供有界判断，按下面的候选顺序使用本地决策或 Wand 免费分组；内置身份与职责固定，不可删除。"
                 : "Wand 内置员工：标签、名字、职责与角色设定由服务端固定，不可修改、不可删除；Wand 自己的 AI 调用（Commit、标题、提示词优化）都按下面的候选链执行。"}
             />
           ) : (

@@ -1,5 +1,6 @@
 import type { WandStorage } from "./storage.js";
 import type { SessionSnapshot } from "./types.js";
+import type { SessionRegistry } from "./session-registry.js";
 import { projectCwdForSession, normalizeProjectCwd } from "./workspace-binding.js";
 
 /**
@@ -52,4 +53,21 @@ export function archiveCommitTasks(
     eligible.push(id);
   }
   return storage.archiveWandTasks(eligible);
+}
+
+/** Sweep standalone chats in this project, including those absent from commit prompts. */
+export function archiveCommitStandaloneSessions(
+  storage: WandStorage,
+  sessions: Pick<SessionRegistry, "listSlim" | "setArchived">,
+  session: SessionSnapshot,
+  archivedSessionIds: string[],
+): void {
+  const directory = projectCwdForSession(session);
+  if (!directory) return;
+  for (const candidate of sessions.listSlim()) {
+    if (candidate.archived || projectCwdForSession(candidate) !== directory) continue;
+    // A workspace task remains a task even if it has no corresponding board card.
+    if (candidate.workspaceTaskId || cardIdForSession(storage, candidate.id)) continue;
+    if (sessions.setArchived(candidate.id, true)) archivedSessionIds.push(candidate.id);
+  }
 }

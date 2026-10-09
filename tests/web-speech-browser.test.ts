@@ -15,6 +15,7 @@ test("speech settings and real browser recording preserve selection, cancellatio
   const artifacts = join(root, "output/server-speech/browser"); mkdirSync(artifacts, { recursive: true });
   let settings = { enabled: true, model: "base", language: "auto", threads: 2, acceleration: "cpu" };
   let uploads = 0, delay = 0;
+  const setup = () => ({ laya: {}, speech: { supported: true, supportReason: null, enabled: settings.enabled, busy: false, operation: null } });
   const status = () => ({ settings, ready: settings.enabled, reason: settings.enabled ? null : "服务端识别未启用", maxDurationSeconds: 60, busy: false,
     runtime: { available: true, backend: "cpu", platform: "linux", arch: "x64" }, download: null,
     models: [{ id: "base", label: "Whisper Base", size: 147951465, description: "通用 CPU / Mac mini", downloaded: true }] });
@@ -32,6 +33,7 @@ test("speech settings and real browser recording preserve selection, cancellatio
         <ComposerSpeechButton ownerKey={key} revision={draft.revision} onStatus={setHint} onCommit={(text,expectedRevision)=>store.edit(key,{text:draft.text+' '+text,expectedRevision,persist:true})}/></div></WandUiProvider>}
     createRoot(document.getElementById('root')).render(<App/>);` }, bundle: true, platform: "browser", format: "iife", jsx: "automatic", outfile: join(temp, "app.js"), define: { "process.env.NODE_ENV": '"production"' } });
   const server = createServer(async (req, res) => {
+    if (req.url === "/api/local-models/status") { res.setHeader("content-type", "application/json"); res.end(JSON.stringify(setup())); return; }
     if (req.url?.startsWith("/api/speech")) {
       res.setHeader("content-type", "application/json");
       if (req.url === "/api/speech/settings") { let body = ""; for await (const chunk of req) body += chunk; settings = JSON.parse(body); }
@@ -80,7 +82,7 @@ test("speech settings and real browser recording preserve selection, cancellatio
       }
       await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x, y: cancel === true ? point.y - 80 : point.y, button: "left", clickCount: 1 }); };
     await send("Runtime.enable"); await send("Page.enable"); await send("Page.navigate", { url: origin });
-    await wait("document.getElementById('settings-speech-mode') && document.body.textContent.includes('运行时已安装')");
+    await wait("document.getElementById('settings-speech-mode') && document.body.textContent.includes('当前机器支持服务端语音识别')");
     for (const width of [1280, 390]) {
       await send("Emulation.setDeviceMetricsOverride", { width, height: 1000, deviceScaleFactor: 1, mobile: width === 390 });
       await sleep(250); assert.equal(await evaluate("document.documentElement.scrollWidth <= innerWidth"), true);

@@ -43,6 +43,7 @@ import {
   withIssueAgentProvider,
   groupIssueSessionsByAgent,
   issueAgentLabel,
+  issueAgentProviderModelLine,
   listIssueAgents,
 } from "../src/web-ui/react/issues/task-board-agent.ts";
 import {
@@ -698,6 +699,9 @@ test("Pi 与 Wand Agent 在任务面板上是两个标签、两个分组", () =>
   assert.equal(issueAgentLabel("pi", "cli"), "Pi");
   assert.equal(issueAgentLabel("pi"), "Pi", "拿不到引擎时仍按 Pi CLI");
   assert.equal(issueAgentLabel("claude", "sdk"), "Claude", "引擎只属于 pi，别的 provider 不受影响");
+  const sdk = { provider: "pi", model: "wand-openrouter-free/auto", engine: "sdk" };
+  assert.equal(issueAgentProviderModelLine(sdk, null), "Wand Agent · 免费分组");
+  assert.equal(issueAgentProviderModelLine({ ...sdk, engine: "cli" }, null), "Pi · 免费分组");
 
   const sessions: IssueSessionSummary[] = [
     { id: "cli-1", provider: "pi", sessionKind: "structured", title: "Pi 会话", status: "idle", cwd: "/w", model: "default", thinkingEffort: "off", engine: "cli" },

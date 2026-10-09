@@ -9,7 +9,7 @@ export const SETTINGS_SECTIONS: Record<SettingsTab, { label: string; description
   display: { label: "显示", description: "结果卡片的默认展开方式", keywords: "界面 折叠" },
   ai: { label: "AI 与模型", description: "默认工具、模型与候选分组", keywords: "Claude Codex Pi OpenRouter" },
   "local-models": { label: "本地模型", description: "离线决策与模型资源", keywords: "LAYA 下载 初始化" },
-  speech: { label: "语音输入", description: "识别模型与运行设备", keywords: "麦克风 语言 sherpa" },
+  speech: { label: "语音输入", description: "一键启用与本机支持情况", keywords: "麦克风 语言 sherpa" },
   general: { label: "基本配置", description: "服务连接、执行偏好与保留策略", keywords: "Host 端口 HTTPS Shell 环境 目录 归档 删除" },
   connectors: { label: "连接器", description: "GitHub 账号与仓库连接", keywords: "token Enterprise" },
   security: { label: "安全", description: "登录密码与 SSL 证书" },

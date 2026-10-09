@@ -15,7 +15,8 @@ test("model install/download/config require admin, status requires sessions and 
       const body = args[2] as Record<string, unknown>;
       if (Object.keys(body).some(key => !["model", "backend"].includes(key))) throw new DecisionError("INVALID_REQUEST", "不允许命令和路径");
       calls.push(args);
-    }, cancel: (kind: string) => calls.push(kind), setLayaEnabled: (enabled: boolean) => calls.push(enabled) } as unknown as LocalModelSetupService,
+    }, cancel: (kind: string) => calls.push(kind), setLayaEnabled: (enabled: boolean) => calls.push(enabled),
+      setSpeechEnabled: async (enabled: boolean) => { calls.push(["speech", enabled]); } } as unknown as LocalModelSetupService,
     requireSessions: (req, res, next) => { if (req.headers.authorization === "files") res.status(403).end(); else next(); },
     requireAdmin: (req, res, next) => { if (req.headers.authorization !== "admin") res.status(403).end(); else next(); },
   });
@@ -29,6 +30,7 @@ test("model install/download/config require admin, status requires sessions and 
   const status = await request("/status"); assert.equal(status.status, 200); assert.equal(status.headers.get("cache-control"), "no-store");
   for (const action of ["download", "initialize", "cancel"]) assert.equal((await request(`/laya/${action}`, "POST", "app", {})).status, 403);
   assert.equal((await request("/laya/settings", "PATCH", "app", { enabled: true })).status, 403);
+  assert.equal((await request("/speech/settings", "PATCH", "app", { enabled: true })).status, 403);
   assert.equal(calls.length, 0);
   assert.equal((await request("/laya/download", "POST", "admin", {})).status, 202);
   assert.equal((await request("/speech/initialize", "POST", "admin", { command: "sudo" })).status, 400);
@@ -36,4 +38,9 @@ test("model install/download/config require admin, status requires sessions and 
   assert.equal((await request("/laya/settings", "PATCH", "admin", { enabled: true, pythonPath: "/tmp/evil" })).status, 400);
   assert.equal((await request("/laya/settings", "PATCH", "admin", { enabled: false })).status, 200);
   assert.equal(calls.length, 2);
+  for (const body of [{ enabled: true, command: "sudo" }, { enabled: "true" }, [], {}]) {
+    assert.equal((await request("/speech/settings", "PATCH", "admin", body)).status, 400);
+  }
+  assert.equal((await request("/speech/settings", "PATCH", "admin", { enabled: true })).status, 202);
+  assert.deepEqual(calls.at(-1), ["speech", true]);
 });

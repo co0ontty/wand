@@ -4,7 +4,7 @@ export type LocalModelKind = "laya" | "speech";
 export type ModelSetupPhase = "downloading" | "verifying" | "runtime" | "initializing" | "completed" | "failed" | "cancelled";
 export interface ModelSetupOperation {
   id: number;
-  action: "download" | "initialize";
+  action: "download" | "initialize" | "activate";
   phase: ModelSetupPhase;
   message: string;
   received: number;
@@ -15,6 +15,7 @@ export interface LocalModelStatus {
   kind: LocalModelKind;
   label: string;
   supported: boolean;
+  supportReason?: string | null;
   reason: string | null;
   enabled: boolean;
   model: string;

@@ -267,14 +267,14 @@ export function issueAgentLabel(provider: string | null | undefined, engine?: st
 }
 
 /**
- * 「CLI · 模型」一行：`default` 哨兵不是模型名，换成服务端默认模型的具体名字；
- * 解析不到名字就只留 CLI，不写「默认模型」这种占位。
+ * 「执行工具 · 模型」一行：按引擎区分 Pi 与 Wand Agent；default 用实际模型名，
+ * 解析不到名字就只留工具名。
  */
 export function issueAgentProviderModelLine(
-  agent: { provider: string | null | undefined; model: string | null | undefined },
+  agent: { provider: string | null | undefined; model: string | null | undefined; engine?: string | null },
   catalog: IssueModelCatalog | null,
 ): string {
-  const provider = issueAgentProviderLabel(agent.provider);
+  const provider = issueAgentLabel(agent.provider, agent.engine);
   const model = wandModelDisplayName(catalog, agent.provider, agent.model);
   return model ? `${provider} · ${model}` : provider;
 }

@@ -69,24 +69,6 @@ function ModelInstallActions({ value, admin, model, backend, downloaded, onStatu
   </>;
 }
 
-export function SpeechModelSetupControls({ admin, model, downloaded, size, onResourcesChanged }: {
-  admin: boolean; model: string; downloaded: boolean; size: number; onResourcesChanged(): void;
-}) {
-  const state = useLocalModels();
-  const [backend, setBackend] = useState("auto");
-  const operation = state.status?.speech.operation;
-  useEffect(() => { if (operation?.phase === "completed") onResourcesChanged(); }, [operation?.id, operation?.phase, onResourcesChanged]);
-  return <>
-    <SettingsField label="运行时适配" hint="自动：Mac 使用 Metal，其他主机使用 CPU；CUDA 需服务器已有 Toolkit。">
-      <SettingsSelect id="settings-speech-runtime-backend" ariaLabel="语音运行时适配" value={backend} disabled={!admin || state.status?.speech.busy}
-        options={[{ value: "auto", label: "自动（按服务器平台）" }, { value: "cpu", label: "CPU（无需 GPU）" }, { value: "metal", label: "Mac Metal" }, { value: "cuda", label: "NVIDIA CUDA" }]} onChange={setBackend}/>
-    </SettingsField>
-    {state.status ? <ModelInstallActions value={{ ...state.status.speech, modelSize: size }} admin={admin} model={model} downloaded={downloaded} backend={backend}
-      onStatus={state.setStatus} onError={state.setError}/> : null}
-    {state.error ? <SettingsStatus tone="error">{state.error}</SettingsStatus> : null}
-  </>;
-}
-
 export function LocalModelsSettingsTab({ admin }: { admin: boolean }) {
   const state = useLocalModels();
   const [saving, setSaving] = useState(false);
@@ -113,11 +95,9 @@ export function LocalModelsSettingsTab({ admin }: { admin: boolean }) {
         <SettingsStatus tone="warning">LAYA 判断质量仍为实验性，高概率不代表正确。不得用它自动审批权限、删除数据或发布。</SettingsStatus>
       </> : <SettingsStatus>正在检查模型和运行时…</SettingsStatus>}
     </SettingsSection>
-    <SettingsSection title="语音模型下载与初始化" description="请在「语音输入」中选择 Tiny / Base / Small，再下载和初始化。Mac 默认 Metal，其他服务器默认 CPU；CUDA 要求已安装工具链。">
+    <SettingsSection title="服务端语音输入" description="在「语音输入」中开启即可，模型下载与运行环境准备会自动完成。">
       {state.status ? <>
         <Typography.Text type="secondary">Whisper {state.status.speech.model} · {state.status.speech.downloaded ? "模型校验通过" : "未下载"} · {state.status.speech.runtimeAvailable ? "运行时已安装" : "运行时未安装"}</Typography.Text>
-        <ModelInstallActions value={state.status.speech} admin={admin} model={state.status.speech.model}
-          onStatus={state.setStatus} onError={state.setError}/>
       </> : null}
       <SettingsStatus>只安装独立模型组件，不覆盖已有 Python 环境，不中断活动识别/决策，不重启 Wand 服务。</SettingsStatus>
     </SettingsSection>

@@ -130,8 +130,8 @@ export function TaskBoardConversationButton({
     >
       <ProviderLogo provider={session.provider} className="task-board-agent-logo"/>
       <span>
-        <strong>{session.title || issueAgentProviderLabel(session.provider)}</strong>
-        <small>{issueAgentProviderModelLine({ provider: session.provider, model: session.model }, catalog)}</small>
+        <strong>{session.title || issueAgentLabel(session.provider, session.engine)}</strong>
+        <small>{issueAgentProviderModelLine(session, catalog)}</small>
       </span>
     </WandButton>)}
   </WandPopover>;

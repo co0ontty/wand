@@ -30,6 +30,11 @@ export interface SpeechResult {
   text: string;
   model: string;
   backend: SpeechBackend;
+  originalText?: string;
+  optimized?: boolean;
+  optimizationError?: string;
+  employeeId?: string;
+  candidate?: number;
 }
 export const SPEECH_SAMPLE_RATE = 16_000;
 export const SPEECH_MAX_SECONDS = 60;

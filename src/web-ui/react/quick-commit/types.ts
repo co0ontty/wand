@@ -89,7 +89,7 @@ export interface QuickCommitInput {
   autoTag: boolean;
   push: boolean;
   submodule: boolean;
-  /** 提交成功后只归档本次关联且已完成的任务；默认关闭。 */
+  /** 提交成功后归档关联任务，并整理本项目全部无任务会话；默认关闭。 */
   archiveRelatedTasks?: boolean;
   /** 生成 message 的输入源；不传则用服务端记住的偏好。 */
   mode?: QuickCommitContextMode;
@@ -107,6 +107,7 @@ export interface QuickCommitResponse {
   pushError: string;
   submoduleCommits: readonly { path: string; hash: string }[];
   archivedTaskIds?: readonly string[];
+  archivedSessionIds?: readonly string[];
   archiveError?: string;
   /** 生成 message 用的输入源与条目；手写 message 时为 null。 */
   commitContext: { source: QuickCommitContextMode; entryIds: readonly string[] } | null;
@@ -157,6 +158,7 @@ type QuickCommitToastTone = "success" | "error" | "info";
 export interface QuickCommitRuntimeAdapter {
   onOpen(context: QuickCommitOpenContext): void;
   onClose(context: QuickCommitOpenContext): void;
+  onArchived?(): void;
   /** 与顶栏徽章共用单调递增的取数时刻，保证同毫秒请求和时钟回拨时仍能排除旧响应。 */
   nextStatusRequestTime(): number;
   /**

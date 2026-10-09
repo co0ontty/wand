@@ -2030,13 +2030,10 @@ export class ProcessManager extends EventEmitter {
   }
 
   /**
-   * 归档会先停掉还在跑的终端，但保留会话 ID 和 provider session id，恢复时用它们续上。
+   * 归档只写标记，保留正在运行的终端、会话 ID 和 provider session id。
    * 取消归档只清标记；重新拉起由恢复入口负责。
    */
   setSessionArchived(id: string, archived: boolean): SessionSnapshot {
-    if (archived && this.mustGet(id).status === "running") {
-      this.stop(id);
-    }
     const record = this.mustGet(id);
     record.archived = archived;
     record.archivedAt = archived ? (record.archivedAt ?? new Date().toISOString()) : null;

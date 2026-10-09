@@ -30,6 +30,8 @@ import { isThinkingEffort } from "./structured-provider-common.js";
 import { DEFAULT_EMPLOYEE_KEY } from "./ai-team-types.js";
 import { defaultEmployeeDefinition, legacyPtyRoleIdentity } from "./default-employee.js";
 import { DECISION_EXPERT_KEY } from "./decision-expert-identity.js";
+import { SPEECH_POLISHER_KEY } from "./speech-polisher-identity.js";
+import { speechPolisherDefinition } from "./speech-polisher-employee.js";
 import { decisionExpertDefinition } from "./decision-expert-employee.js";
 import { normalizeEmployeeKnowledge } from "./employee-knowledge-content.js";
 import { EMPLOYEE_KNOWLEDGE_MAX_ENTRIES, type EmployeeKnowledgeEntry } from "./employee-knowledge-types.js";
@@ -476,9 +478,13 @@ function parseQueuedMessages(raw: string | null): string[] | undefined {
 
 
 function parseWorktreeInfo(raw: string | null): SessionSnapshot["worktree"] | undefined {
-  const parsed = safeJsonParse<{ branch?: unknown; path?: unknown }>(raw);
+  const parsed = safeJsonParse<{ branch?: unknown; path?: unknown; baseRef?: unknown; repoRoot?: unknown }>(raw);
   if (parsed && typeof parsed.branch === "string" && typeof parsed.path === "string") {
-    return { branch: parsed.branch, path: parsed.path };
+    return {
+      branch: parsed.branch, path: parsed.path,
+      ...(typeof parsed.baseRef === "string" ? { baseRef: parsed.baseRef } : {}),
+      ...(typeof parsed.repoRoot === "string" ? { repoRoot: parsed.repoRoot } : {}),
+    };
   }
   return undefined;
 }
@@ -3276,6 +3282,18 @@ export class WandStorage {
   ensureDecisionExpertEmployee(): SiliconEmployee {
     const existing = this.getSystemSiliconEmployee(DECISION_EXPERT_KEY);
     const definition = decisionExpertDefinition(new Date().toISOString(), existing);
+    if (!existing || existing.name !== definition.name || existing.duty !== definition.duty || existing.prompt !== definition.prompt
+      || existing.avatar !== definition.avatar || existing.archivedAt || !existing.agents.length) {
+      this.saveSiliconEmployee(definition);
+      return definition;
+    }
+    return existing;
+  }
+
+  /** Seed the SDK free group once, then preserve independent user choices. */
+  ensureSpeechPolisherEmployee(): SiliconEmployee {
+    const existing = this.getSystemSiliconEmployee(SPEECH_POLISHER_KEY);
+    const definition = speechPolisherDefinition(new Date().toISOString(), existing);
     if (!existing || existing.name !== definition.name || existing.duty !== definition.duty || existing.prompt !== definition.prompt
       || existing.avatar !== definition.avatar || existing.archivedAt || !existing.agents.length) {
       this.saveSiliconEmployee(definition);

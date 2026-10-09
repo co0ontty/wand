@@ -75,6 +75,7 @@ export class SpeechService {
   private disposed = false;
   private maintenance = false;
   private readonly initialized = new Set<string>();
+  private configurationRevision = 0;
 
   constructor(private readonly storage: Pick<WandStorage, "getPreference" | "setPreference">, configDir: string,
     private readonly options: SpeechServiceOptions = {}) {
@@ -89,8 +90,10 @@ export class SpeechService {
   configure(patch: unknown): SpeechSettings {
     const settings = parseSpeechSettings(patch, this.settings());
     this.storage.setPreference(SPEECH_SETTINGS_KEY, settings);
+    this.configurationRevision += 1;
     return settings;
   }
+  settingsRevision(): number { return this.configurationRevision; }
   acquireMaintenance(): void {
     if (this.disposed) throw new SpeechError("UNAVAILABLE", "语音服务已关闭。", 503);
     if (this.active || this.downloadAbort || this.maintenance) throw new SpeechError("BUSY", "语音识别或模型下载正在进行，请稍后初始化。", 409);
@@ -99,7 +102,7 @@ export class SpeechService {
   releaseMaintenance(): void { this.maintenance = false; }
 
   /** Explicit admin health check loads the selected model using synthetic silence, without enabling it. */
-  async initializeModel(id: string, signal: AbortSignal): Promise<void> {
+  async initializeModel(id: string, signal: AbortSignal, acceleration = this.settings().acceleration): Promise<void> {
     const model = this.models.find((value) => value.id === id);
     if (!model) throw new SpeechError("INVALID_MODEL", "模型不存在。");
     const runtime = await this.runtime();
@@ -114,8 +117,14 @@ export class SpeechService {
       wav.write("data", 36); wav.writeUInt32LE(8000, 40);
       const input = path.join(directory, "check.wav"), output = path.join(directory, "check");
       await writeFile(input, wav, { mode: 0o600 });
-      await this.run(runtime.executable, ["-m", this.modelPath(model), "-f", input, "-of", output, "-otxt", "-nt", "-l", "en", "-t", String(this.settings().threads),
-        ...(this.settings().acceleration === "cpu" || runtime.backend === "cpu" ? ["-ng"] : [])], directory, signal, this.options.timeoutMs ?? 120_000);
+      const args = ["-m", this.modelPath(model), "-f", input, "-of", output, "-otxt", "-nt", "-l", "en", "-t", String(this.settings().threads)];
+      const cpu = acceleration === "cpu" || runtime.backend === "cpu";
+      try {
+        await this.run(runtime.executable, [...args, ...(cpu ? ["-ng"] : [])], directory, signal, this.options.timeoutMs ?? 120_000);
+      } catch (error) {
+        if (acceleration !== "auto" || cpu || signal.aborted || !(error instanceof SpeechError) || error.code !== "ENGINE_FAILED") throw error;
+        await this.run(runtime.executable, [...args, "-ng"], directory, signal, this.options.timeoutMs ?? 120_000);
+      }
       signal.throwIfAborted();
       if (this.disposed) throw new SpeechError("UNAVAILABLE", "语音服务已关闭。", 503);
       this.initialized.add(id);

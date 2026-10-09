@@ -1,97 +1,84 @@
 import * as React from "react";
-import { useCallback, useEffect, useState } from "react";
-import { Space } from "antd";
-import { SpeechModelSetupControls } from "./local-models-panel";
-import type { SpeechSettings, SpeechStatus } from "../../../speech-types.js";
+import { useEffect, useRef, useState } from "react";
+import { Progress } from "antd";
+import type { SpeechStatus } from "../../../speech-types.js";
+import type { LocalModelsStatus } from "../../../local-model-types.js";
 import { installLocalSpeech, localSpeechSupported, readSpeechMode, saveSpeechMode, type SpeechMode } from "../speech/repository";
 import { jsonBody, requestJson } from "../http-adapter";
-import { SettingsActionButton, SettingsField, SettingsGrid, SettingsSaveBar, SettingsSection, SettingsSelect, SettingsStatus, SettingsTextInput, SettingsToggle } from "./fields";
+import { SettingsActionButton, SettingsField, SettingsSection, SettingsSelect, SettingsStatus, SettingsToggle } from "./fields";
 
 export function SpeechSettingsTab({ admin }: { admin: boolean }) {
   const [mode, setMode] = useState<SpeechMode>(readSpeechMode);
   const [status, setStatus] = useState<SpeechStatus | null>(null);
-  const [draft, setDraft] = useState<SpeechSettings | null>(null);
+  const [models, setModels] = useState<LocalModelsStatus | null>(null);
   const [error, setError] = useState("");
-  const [pending, setPending] = useState("");
-  const [saved, setSaved] = useState(false);
-  const refreshResources = useCallback(() => {
-    void requestJson<SpeechStatus>("/api/speech/status").then(setStatus)
-      .catch((cause) => setError(cause instanceof Error ? cause.message : "读取语音状态失败。"));
+  const [loadError, setLoadError] = useState("");
+  const [pending, setPending] = useState(false);
+  const request = useRef(false);
+  const generation = useRef(0);
+  const mounted = useRef(true);
+  const operation = models?.speech.operation;
+  const working = !!operation && !["completed", "failed", "cancelled"].includes(operation.phase);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
   }, []);
   useEffect(() => {
     const abort = new AbortController();
-    void requestJson<SpeechStatus>("/api/speech/status", { signal: abort.signal }).then((next) => { setStatus(next); setDraft(next.settings); })
-      .catch((cause) => { if (!abort.signal.aborted) setError(cause instanceof Error ? cause.message : "无法读取语音设置。"); });
-    return () => abort.abort();
+    let timer: number;
+    async function refresh() {
+      const started = generation.current;
+      try {
+        const [nextStatus, nextModels] = await Promise.all([
+          requestJson<SpeechStatus>("/api/speech/status", { signal: abort.signal }),
+          requestJson<LocalModelsStatus>("/api/local-models/status", { signal: abort.signal }),
+        ]);
+        if (abort.signal.aborted) return;
+        // A poll begun before a user action cannot overwrite its response.
+        if (!request.current && started === generation.current) { setStatus(nextStatus); setModels(nextModels); setLoadError(""); }
+      } catch (cause) {
+        if (!abort.signal.aborted && !request.current && started === generation.current) setLoadError(cause instanceof Error ? cause.message : "无法读取语音状态。");
+      }
+      if (!abort.signal.aborted) timer = window.setTimeout(() => void refresh(), 1500);
+    }
+    void refresh();
+    return () => { abort.abort(); window.clearTimeout(timer); };
   }, []);
-  useEffect(() => {
-    if (status?.download?.phase !== "downloading") return;
-    const abort = new AbortController();
-    const timer = window.setTimeout(() => {
-      void requestJson<SpeechStatus>("/api/speech/status", { signal: abort.signal }).then(setStatus)
-        .catch((cause) => { if (!abort.signal.aborted) setError(cause instanceof Error ? cause.message : "读取下载进度失败。"); });
-    }, 2000);
-    return () => { window.clearTimeout(timer); abort.abort(); };
-  }, [status]);
-  async function action(key: string, perform: () => Promise<SpeechStatus | void>) {
-    setPending(key); setError(""); setSaved(false);
-    try { const next = await perform(); if (next) setStatus(next); setSaved(true); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : "操作失败，请重试。"); }
-    finally { setPending(""); }
+  async function act(perform: () => Promise<LocalModelsStatus | void>) {
+    if (request.current) return;
+    request.current = true; generation.current += 1; setPending(true); setError("");
+    try { const next = await perform(); if (mounted.current && next) setModels(next); }
+    catch (cause) { if (mounted.current) setError(cause instanceof Error ? cause.message : "操作失败，请重试。"); }
+    finally { request.current = false; if (mounted.current) setPending(false); }
   }
-  function edit(patch: Partial<SpeechSettings>) { if (draft) setDraft({ ...draft, ...patch }); setSaved(false); }
-  const selected = status?.models.find((model) => model.id === draft?.model);
+  const speech = models?.speech;
   return <>
-    <SettingsSection title="语音输入" description="选择只影响当前设备。按住麦克风录音，松手转写，上滑取消。">
+    <SettingsSection title="服务端语音输入" description="音频仅发送到当前 Wand 服务器，离线识别，不调用第三方云服务。">
+      <SettingsStatus tone={!speech ? "info" : speech.supported ? "success" : "warning"}>
+        {!speech ? "正在检查本机支持情况…" : speech.supported ? "当前机器支持服务端语音识别。" : `当前机器暂不支持：${speech.supportReason || speech.reason || "运行环境不可用。"}`}
+      </SettingsStatus>
+      <SettingsToggle label="启用服务端语音输入" checked={speech?.enabled === true || (working && operation?.action === "activate")}
+        disabled={!admin || !speech || pending || (!speech.supported && !speech.enabled) || (speech.busy && !working)}
+        description={working ? "准备中；关闭开关可取消。" : "首次启用会自动下载模型并准备运行环境，完成后即可使用。"}
+        onCheckedChange={(enabled) => void act(() => requestJson<LocalModelsStatus>("/api/local-models/speech/settings", jsonBody({ enabled }, "PATCH")))} />
+      {working ? <SettingsStatus>{operation.message}</SettingsStatus> : operation?.phase === "failed" ? <SettingsStatus tone="error">{operation.error || operation.message} 再次开启即可重试。</SettingsStatus>
+        : speech?.enabled ? <SettingsStatus tone={status?.ready ? "success" : "warning"}>{status?.ready ? "已启用，按住麦克风说话，松手转写；最长 60 秒。" : status?.reason || "正在确认识别状态…"}</SettingsStatus> : null}
+      {working && operation?.phase === "downloading" && operation.total ? <Progress percent={Math.floor(operation.received / operation.total * 100)} aria-label="语音模型下载进度" /> : null}
+      {!admin ? <SettingsStatus>启用或关闭需要服务器管理权限。</SettingsStatus> : null}
+      {error || loadError ? <SettingsStatus tone="error">{error || loadError}</SettingsStatus> : null}
+    </SettingsSection>
+    <SettingsSection title="此设备的识别方式" description="只影响当前设备，其他客户端保持各自的选择。">
       <SettingsField label="识别方式" htmlFor="settings-speech-mode">
         <SettingsSelect id="settings-speech-mode" ariaLabel="识别方式" value={mode} options={[
           { value: "server", label: "服务端识别" }, { value: "local", label: "客户端本地识别" },
         ]} onChange={(value) => { const next = value as SpeechMode; saveSpeechMode(next); setMode(next); }} />
       </SettingsField>
-      <SettingsStatus tone={mode === "server" ? status?.ready ? "success" : "warning" : localSpeechSupported() ? "info" : "warning"}>
-        {mode === "server" ? status?.ready ? "音频仅发送到当前 Wand 服务器，松手后离线转写；最长 60 秒。" : status?.reason || "正在检查服务端…"
-          : localSpeechSupported() ? "使用浏览器端侧语言包，不上传音频；缺少语言包时请先下载。" : "当前浏览器不支持端侧识别，请改用服务端识别或原生客户端；不会自动转云端。"}
-      </SettingsStatus>
-      {mode === "local" && localSpeechSupported() ? <SettingsActionButton kind="secondary" pending={pending === "local"} settled={saved ? "success" : error ? "error" : null}
-        onClick={() => action("local", installLocalSpeech)}>下载浏览器语言包</SettingsActionButton> : null}
-    </SettingsSection>
-    <SettingsSection title="服务端语音模型" description={status ? `当前服务器：${status.runtime.platform} / ${status.runtime.arch} · ${status.runtime.backend.toUpperCase()} 运行时${status.runtime.available ? "已安装" : "未安装"}` : "读取当前服务器配置"}
-      action={<SettingsActionButton kind="secondary" pending={pending === "refresh"} onClick={() => action("refresh", () => requestJson<SpeechStatus>("/api/speech/status"))}>刷新状态</SettingsActionButton>}>
-      {status && draft ? <>
-        <SettingsToggle label="启用服务端语音识别" checked={draft.enabled} disabled={!admin || !!pending}
-          description="只在本机服务器推理，不调用付费或第三方云识别。" onCheckedChange={(enabled) => edit({ enabled })} />
-        <SettingsGrid>
-          <SettingsField label="多语言模型" htmlFor="settings-speech-model">
-            <SettingsSelect id="settings-speech-model" ariaLabel="服务端语音模型" value={draft.model} disabled={!admin || !!pending}
-              options={status.models.map((model) => ({ value: model.id, label: `${model.label} · ${Math.round(model.size / 1024 / 1024)} MiB${model.downloaded ? " · 已下载" : ""}` }))}
-              onChange={(model) => edit({ model })} />
-          </SettingsField>
-          <SettingsField label="运行设备" htmlFor="settings-speech-acceleration">
-            <SettingsSelect id="settings-speech-acceleration" ariaLabel="语音运行设备" value={draft.acceleration} disabled={!admin || !!pending}
-              options={[{ value: "auto", label: "自动（GPU 不可用回退 CPU）" }, { value: "cpu", label: "CPU（无需 GPU）" }, { value: "gpu", label: "GPU（Metal / CUDA）" }]}
-              onChange={(acceleration) => edit({ acceleration: acceleration as SpeechSettings["acceleration"] })} />
-          </SettingsField>
-          <SettingsField label="识别语言" htmlFor="settings-speech-language">
-            <SettingsSelect id="settings-speech-language" ariaLabel="识别语言" value={draft.language} disabled={!admin || !!pending}
-              options={[{ value: "auto", label: "自动检测" }, { value: "zh", label: "中文" }, { value: "en", label: "English" }]}
-              onChange={(language) => edit({ language: language as SpeechSettings["language"] })} />
-          </SettingsField>
-          <SettingsField label="CPU 线程" htmlFor="settings-speech-threads" hint="1–16；低配置服务器建议 1–4。">
-            <SettingsTextInput id="settings-speech-threads" type="number" min={1} max={16} value={draft.threads} disabled={!admin || !!pending}
-              onChange={(threads) => edit({ threads: Number(threads) })} />
-          </SettingsField>
-        </SettingsGrid>
-        <Space wrap>
-          <span>{selected?.description}</span>
-        </Space>
-        <SpeechModelSetupControls admin={admin} model={draft.model} downloaded={selected?.downloaded ?? false} size={selected?.size ?? 0} onResourcesChanged={refreshResources}/>
-        {status.download?.error ? <SettingsStatus tone="error">{status.download.error}</SettingsStatus> : null}
-        {!status.runtime.available ? <SettingsStatus tone="warning">先下载模型，再点击「初始化运行时与模型」。需要服务器具备 Git、CMake 与 C++ 工具链；普通安装/构建不会自动下载。</SettingsStatus> : null}
-        {admin ? <SettingsSaveBar label="保存服务端语音设置" pending={pending === "save"} disabled={!!pending}
-          onSave={() => void action("save", async () => { const next = await requestJson<SpeechStatus>("/api/speech/settings", jsonBody(draft, "PATCH")); setDraft(next.settings); return next; })}
-          tone={error ? "error" : saved ? "success" : "info"} status={error || (saved ? "操作已完成。" : "设置对连接此服务器的客户端生效。模型与运行设备不会替换客户端本地模型。")}/> : <SettingsStatus>启用、配置与下载需要服务器管理权限；可在完整 Web 设置中管理。</SettingsStatus>}
+      {mode === "local" ? <>
+        <SettingsStatus tone={localSpeechSupported() ? "info" : "warning"}>
+          {localSpeechSupported() ? "使用浏览器端侧语言包，不上传音频。" : "当前浏览器不支持端侧识别，请使用服务端识别或原生客户端。"}
+        </SettingsStatus>
+        {localSpeechSupported() ? <SettingsActionButton kind="secondary" pending={pending} onClick={() => act(installLocalSpeech)}>下载浏览器语言包</SettingsActionButton> : null}
       </> : null}
-      {error && (!status || !admin) ? <SettingsStatus tone="error">{error}</SettingsStatus> : null}
     </SettingsSection>
   </>;
 }

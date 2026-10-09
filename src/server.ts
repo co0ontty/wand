@@ -47,6 +47,8 @@ import { recordRecentPath, registerFileRoutes } from "./server-file-routes.js";
 import { registerLocalPreviewRoutes } from "./server-local-preview-routes.js";
 import { registerSettingsRoutes } from "./server-settings-routes.js";
 import { registerSpeechRoutes } from "./server-speech-routes.js";
+import { SpeechPolisherService } from "./speech-polisher-service.js";
+import { SPEECH_POLISHER_KEY } from "./speech-polisher-identity.js";
 import { registerLocalModelRoutes } from "./server-local-model-routes.js";
 import { LocalModelSetupService } from "./local-model-setup.js";
 import { DecisionExpertService } from "./decision-expert-service.js";
@@ -430,6 +432,8 @@ export async function startServer(
   const storage = new WandStorage(resolveDatabasePath(configPath));
   const runtimeConfig = new RuntimeConfigState(config);
   const openRouter = new OpenRouterFreeModelsService(storage, options.openRouterFetch);
+  const speechPolisher = new SpeechPolisherService({ config, free: openRouter,
+    employee: () => storage.getSystemSiliconEmployee(SPEECH_POLISHER_KEY) });
   const authService = new AuthService(storage);
   const settingsAccess = new SettingsWebAccess();
   const decisions = new DecisionService(config.localDecision);
@@ -1038,7 +1042,7 @@ export async function startServer(
   registerWorkspaceRoutes(app, storage, sessionRegistry, { config });
   registerMissionRoutes(app, missions);
   registerUploadRoutes(app, sessionRegistry);
-  registerSpeechRoutes(app, { speech, requireSessions, requireAdmin });
+  registerSpeechRoutes(app, { speech, requireSessions, requireAdmin, polisher: speechPolisher });
   registerLocalModelRoutes(app, { models: localModels, requireSessions, requireAdmin });
 
   app.post("/api/optimize-prompt", asyncRoute(async (req, res) => {
@@ -1351,6 +1355,7 @@ export async function startServer(
       conversationService.dispose();
       localModels.dispose();
       speech.dispose();
+      speechPolisher.dispose();
       try { structuredSessions.dispose(); } catch { /* noop */ }
       aiTeams.dispose();
       try { structuredHosts.rustClient?.disconnect(); } catch { /* noop */ }
@@ -1645,6 +1650,7 @@ export async function startServer(
       conversationService.dispose();
       localModels.dispose();
       speech.dispose();
+      speechPolisher.dispose();
       try { structuredSessions.dispose(); } catch { /* best-effort shutdown */ }
       aiTeams.dispose();
       try { structuredHosts.rustClient?.disconnect(); } catch { /* best-effort shutdown */ }

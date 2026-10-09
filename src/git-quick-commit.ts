@@ -325,6 +325,7 @@ export interface QuickCommitAiOptions {
   employeeChannelOnly?: boolean;
   /** 整条候选链的时间上限；默认 CLI_CHAIN_BUDGET_MS。第一条消息里的调用要短得多。 */
   budgetMs?: number;
+  signal?: AbortSignal;
 }
 
 export class QuickCommitError extends Error {
@@ -380,7 +381,7 @@ async function callClaudeText(
   const stdout = await runCliText("claude", args, request.prompt, {
     cwd,
     timeoutMs: cliTextTimeoutMs(CLAUDE_MESSAGE_TIMEOUT_MS, opts),
-    inheritEnv: opts.inheritEnv,
+    inheritEnv: opts.inheritEnv, signal: opts.signal,
   });
   const text = stdout.trim();
   if (!text) throw new QuickCommitError("Claude 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
@@ -635,8 +636,9 @@ function runCliText(
   command: string,
   args: string[],
   prompt: string,
-  opts: { cwd: string; timeoutMs: number; inheritEnv?: boolean },
+  opts: { cwd: string; timeoutMs: number; inheritEnv?: boolean; signal?: AbortSignal },
 ): Promise<string> {
+  opts.signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: opts.cwd,
@@ -646,24 +648,32 @@ function runCliText(
     let stdout = "";
     let stderr = "";
     let settled = false;
+    const cancelled = (): void => {
+      if (settled) return;
+      settled = true; clearTimeout(timeout); child.kill("SIGTERM");
+      reject(opts.signal?.reason ?? new Error("AI 文本请求已取消。"));
+    };
+    const cleanup = (): void => { clearTimeout(timeout); opts.signal?.removeEventListener("abort", cancelled); };
     const timeout = setTimeout(() => {
       settled = true;
+      opts.signal?.removeEventListener("abort", cancelled);
       child.kill("SIGTERM");
       reject(new QuickCommitError(`${command} 调用超时。`, "CLAUDE_TIMEOUT"));
     }, opts.timeoutMs);
+    opts.signal?.addEventListener("abort", cancelled, { once: true });
     child.stdout?.on("data", (chunk) => { stdout += chunk.toString(); });
     child.stderr?.on("data", (chunk) => { stderr += chunk.toString(); });
     child.on("error", (error: NodeJS.ErrnoException) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timeout);
+      cleanup();
       const code = error.code === "ENOENT" ? "CLAUDE_CLI_MISSING" : "CLAUDE_CLI_FAILED";
       reject(new QuickCommitError(error.code === "ENOENT" ? `未找到 ${command} CLI。` : `${command} CLI 失败：${error.message}`, code));
     });
     child.on("close", (code) => {
+      cleanup();
       if (settled) return;
       settled = true;
-      clearTimeout(timeout);
       if (code === 0) {
         resolve(stdout);
         return;
@@ -683,7 +693,7 @@ function runCliText(
     child.stdin?.on("error", (error: NodeJS.ErrnoException) => {
       if (settled || !expectsStdin) return;
       settled = true;
-      clearTimeout(timeout);
+      cleanup();
       child.kill("SIGTERM");
       reject(new QuickCommitError(`${command} CLI stdin failed: ${error.code ?? "write error"}`, "CLAUDE_CLI_FAILED"));
     });
@@ -704,7 +714,7 @@ async function callCodexText(request: AiTextRequest, cwd: string, opts: CliAiTex
   const stdout = await runCliText("codex", args, contentWithSystemPrompt("codex", request), {
     cwd,
     timeoutMs: cliTextTimeoutMs(CODEX_MESSAGE_TIMEOUT_MS, opts),
-    inheritEnv: opts.inheritEnv,
+    inheritEnv: opts.inheritEnv, signal: opts.signal,
   });
   const text = extractCodexText(stdout);
   if (!text) {
@@ -722,7 +732,7 @@ async function callOpenCodeText(request: AiTextRequest, cwd: string, opts: CliAi
   const stdout = await runCliText("opencode", args, contentWithSystemPrompt("opencode", request), {
     cwd,
     timeoutMs: cliTextTimeoutMs(CODEX_MESSAGE_TIMEOUT_MS, opts),
-    inheritEnv: opts.inheritEnv,
+    inheritEnv: opts.inheritEnv, signal: opts.signal,
   });
   const text = extractOpenCodeText(stdout);
   if (!text) throw new QuickCommitError("OpenCode 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
@@ -733,7 +743,7 @@ async function callGrokText(request: AiTextRequest, cwd: string, opts: CliAiText
   const stdout = await runCliText("grok", buildGrokTextArgs(request, opts), "", {
     cwd,
     timeoutMs: cliTextTimeoutMs(CODEX_MESSAGE_TIMEOUT_MS, opts),
-    inheritEnv: opts.inheritEnv,
+    inheritEnv: opts.inheritEnv, signal: opts.signal,
   });
   const text = extractGrokText(stdout);
   if (!text) throw new QuickCommitError("Grok 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
@@ -744,7 +754,7 @@ async function callQoderText(request: AiTextRequest, cwd: string, opts: CliAiTex
   const stdout = await runCliText("qodercli", buildQoderTextArgs(request, opts), "", {
     cwd,
     timeoutMs: cliTextTimeoutMs(CODEX_MESSAGE_TIMEOUT_MS, opts),
-    inheritEnv: opts.inheritEnv,
+    inheritEnv: opts.inheritEnv, signal: opts.signal,
   });
   const text = extractQoderText(stdout);
   if (!text) throw new QuickCommitError("Qoder 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
@@ -753,7 +763,7 @@ async function callQoderText(request: AiTextRequest, cwd: string, opts: CliAiTex
 
 async function callPiText(request: AiTextRequest, cwd: string, opts: CliAiTextOptions): Promise<string> {
   const stdout = await runCliText("pi", buildPiTextArgs(request, opts), "", {
-    cwd, timeoutMs: cliTextTimeoutMs(CODEX_MESSAGE_TIMEOUT_MS, opts), inheritEnv: opts.inheritEnv,
+    cwd, timeoutMs: cliTextTimeoutMs(CODEX_MESSAGE_TIMEOUT_MS, opts), inheritEnv: opts.inheritEnv, signal: opts.signal,
   });
   const text = extractPiText(stdout);
   if (!text) throw new QuickCommitError("Pi 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
@@ -764,7 +774,7 @@ async function callGeminiText(request: AiTextRequest, cwd: string, opts: CliAiTe
   const stdout = await runCliText("gemini", buildGeminiTextArgs(opts), contentWithSystemPrompt("gemini", request), {
     cwd,
     timeoutMs: cliTextTimeoutMs(CODEX_MESSAGE_TIMEOUT_MS, opts),
-    inheritEnv: opts.inheritEnv,
+    inheritEnv: opts.inheritEnv, signal: opts.signal,
   });
   const text = extractGeminiText(stdout);
   if (!text) throw new QuickCommitError("Gemini 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
@@ -829,6 +839,7 @@ async function callCliCandidates<T>(
   opts: QuickCommitAiOptions,
   parseOutput: (raw: string) => T,
 ): Promise<T> {
+  opts.signal?.throwIfAborted();
   const { resolveModelGroupModels } = await import("./model-groups.js");
   const chain = (opts.cliCandidates?.length ? opts.cliCandidates : [singleCandidate(opts)])
     .flatMap((candidate) => resolveModelGroupModels(opts.modelGroups, candidate.provider, candidate.model,
@@ -846,6 +857,7 @@ async function callCliCandidates<T>(
   const attempts = installed.length ? installed : chain;
   const errors: string[] = [];
   for (const candidate of attempts) {
+    opts.signal?.throwIfAborted();
     if (Date.now() >= deadline) {
       errors.push("已超过等待上限");
       break;
@@ -858,6 +870,7 @@ async function callCliCandidates<T>(
       }
       return result;
     } catch (error) {
+      opts.signal?.throwIfAborted();
       errors.push(`${candidate.provider}: ${getGitErrorMessage(error)}`);
       // 不记录提示词、路径、CLI 原始响应或可能带鉴权信息的错误正文。
       const code = error instanceof QuickCommitError ? error.code : "INVALID_AI_RESULT";
@@ -869,7 +882,7 @@ async function callCliCandidates<T>(
 
 /**
  * Run a lightweight AI request through the system employee's CLI chain.
- * 所有 Wand 自有文本调用都走本机已安装的 CLI，没有任何直连 API 分支。
+ * 此入口只走本机 CLI；使用 SDK 的系统角色由各自的服务调用，不在这里冒充 CLI。
  * parseOutput 在候选链内解析/校验结果；失败后继续下一条，而非提前宣布成功。
  */
 export function callConfiguredAiText(

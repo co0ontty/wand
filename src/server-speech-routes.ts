@@ -1,12 +1,14 @@
 import express, { type Express, type RequestHandler, type ErrorRequestHandler } from "express";
 import { SpeechError, type SpeechService } from "./speech-service.js";
 import { SPEECH_MAX_WAV_BYTES } from "./speech-types.js";
+import type { SpeechPolisherService } from "./speech-polisher-service.js";
 
 /** Mounted behind /api authentication. Clients may transcribe, only admins configure/download. */
 export function registerSpeechRoutes(app: Express, deps: {
   speech: SpeechService;
   requireSessions: RequestHandler;
   requireAdmin: RequestHandler;
+  polisher?: Pick<SpeechPolisherService, "polish">;
 }): void {
   const noStore: RequestHandler = (_req, res, next) => { res.set("Cache-Control", "no-store"); next(); };
   app.use("/api/speech", noStore, deps.requireSessions);
@@ -33,13 +35,19 @@ export function registerSpeechRoutes(app: Express, deps: {
     next();
   };
   app.post("/api/speech/transcribe", admission, express.raw({ type: "audio/wav", limit: SPEECH_MAX_WAV_BYTES }), async (req, res, next) => {
+    const started = Date.now();
     const abort = new AbortController();
     const disconnected = (): void => { if (!res.writableEnded) abort.abort(); };
     res.once("close", disconnected);
     try {
       if (!Buffer.isBuffer(req.body)) throw new SpeechError("INVALID_AUDIO", "未收到 WAV 音频。");
       const result = await deps.speech.transcribe(req.body, abort.signal);
-      if (!res.destroyed) res.json(result);
+      const polished = deps.polisher ? await deps.polisher.polish(result.text, abort.signal, Math.min(45_000, 123_000 - (Date.now() - started))).catch(() => {
+        abort.signal.throwIfAborted();
+        return { text: result.text, originalText: result.text, optimized: false,
+          optimizationError: "口述整理暂不可用，已保留原始转写。" };
+      }) : null;
+      if (!res.destroyed) res.json({ ...result, ...(polished ?? {}) });
     } catch (error) { if (!res.destroyed) next(error); }
     finally { res.off("close", disconnected); }
   });
