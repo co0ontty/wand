@@ -604,6 +604,13 @@ import { setupVisualViewportHandlers } from "./viewport";
           voiceRecordBtn.addEventListener("pointermove", handleVoiceMove);
           voiceRecordBtn.addEventListener("pointerup", stopVoiceRecording);
           voiceRecordBtn.addEventListener("pointercancel", cancelVoiceRecording);
+          voiceRecordBtn.addEventListener("click", function(e) {
+            // Enter/Space and assistive activation have no pointerdown/up sequence.
+            if (e.detail !== 0) return;
+            if (voiceRecordBtn.getAttribute("aria-pressed") === "true") stopVoiceRecording(e);
+            else if (voiceRecordBtn.getAttribute("aria-busy") === "true") cancelVoiceRecording(e);
+            else startVoiceRecording(e);
+          });
           voiceRecordBtn.addEventListener("contextmenu", function(e) { e.preventDefault(); });
         }
 

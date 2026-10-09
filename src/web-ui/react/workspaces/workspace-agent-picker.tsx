@@ -70,8 +70,8 @@ export const WORKSPACE_KIND_OPTIONS: ReadonlyArray<{
   label: string;
   description: string;
 }> = [
-  { value: "structured", label: "结构化", description: "智能对话模式" },
-  { value: "pty", label: "PTY", description: "原始 CLI 终端" },
+  { value: "structured", label: "对话", description: "阅读回复、查看工具执行过程" },
+  { value: "pty", label: "终端", description: "使用命令行工具的交互界面" },
 ];
 
 export interface WorkspaceAgentPickerProps {

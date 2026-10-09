@@ -35,8 +35,9 @@ export class DecisionService {
   private readonly rates = new Map<string, { start: number; count: number }>();
   private completed = 0;
   private failed = 0;
+  private readonly initializations = new Set<{ resolve(): void; reject(error: DecisionError): void; clear(): void }>();
 
-  constructor(private readonly config: LocalDecisionConfig | undefined, private readonly options: DecisionServiceOptions = {}) {}
+  constructor(private config: LocalDecisionConfig | undefined, private readonly options: DecisionServiceOptions = {}) {}
 
   status(): { enabled: boolean; supported: boolean; configured: boolean; state: string; queued: number; completed: number; failed: number; experimental: true } {
     const supported = (this.options.supported ?? (() => process.platform === "darwin" && process.arch === "arm64"))();
@@ -45,6 +46,48 @@ export class DecisionService {
     return { enabled: this.config?.enabled === true, supported, configured,
       state: this.disposed ? "closed" : this.stopping ? "stopping" : this.child ? this.ready ? "ready" : "loading" : "stopped",
       queued: this.queue.length + Number(!!this.active), completed: this.completed, failed: this.failed, experimental: true };
+  }
+
+  assertConfigurable(): void {
+    if (this.active || this.queue.length || this.initializations.size || (this.child && !this.ready)) {
+      throw new DecisionError("BUSY", "本地决策正在执行或初始化，请等待后重试。", 409);
+    }
+    if (this.disposed) throw new DecisionError("UNAVAILABLE", "决策服务已关闭。", 503);
+  }
+
+  configure(config: LocalDecisionConfig): void {
+    this.assertConfigurable();
+    const changedRuntime = config.pythonPath !== this.config?.pythonPath || config.modelPath !== this.config?.modelPath;
+    if (changedRuntime || !config.enabled) this.stopWorker();
+    this.config = { ...config };
+    this.cooldownUntil = 0;
+  }
+
+  /** Explicit admin warm-up; it does not evaluate a user's task or implicitly enable the model. */
+  initialize(signal?: AbortSignal): Promise<void> {
+    const status = this.status();
+    if (this.disposed || !status.supported || !status.configured) throw new DecisionError("UNAVAILABLE", "LAYA 平台不支持或运行环境/模型尚未安装。", 503);
+    if (signal?.aborted) throw new DecisionError("CANCELLED", "初始化已取消。", 499);
+    if (this.ready) return Promise.resolve();
+    this.clearIdle();
+    return new Promise((resolve, reject) => {
+      const finish = (error?: DecisionError): void => {
+        if (!this.initializations.delete(waiter)) return;
+        waiter.clear();
+        if (error) reject(error); else resolve();
+        if (!this.initializations.size && !this.active && !this.queue.length) {
+          if (error) this.stopWorker(); else this.pump();
+        }
+      };
+      const abort = (): void => finish(new DecisionError("CANCELLED", "初始化已取消。", 499));
+      const timer = setTimeout(() => finish(new DecisionError("TIMEOUT", "LAYA 初始化超时，请检查运行环境和模型。", 504)), this.options.timeoutMs ?? 45_000);
+      const waiter = { resolve: () => finish(), reject: (error: DecisionError) => finish(error),
+        clear: () => { clearTimeout(timer); signal?.removeEventListener("abort", abort); } };
+      this.initializations.add(waiter);
+      signal?.addEventListener("abort", abort, { once: true });
+      if (signal?.aborted) { abort(); return; }
+      this.pump();
+    });
   }
 
   evaluate(value: unknown, caller: string, signal?: AbortSignal): Promise<DecisionResult> {
@@ -126,6 +169,7 @@ export class DecisionService {
   }
 
   private failWorker(error: DecisionError): void {
+    for (const waiter of [...this.initializations]) waiter.reject(error);
     const jobs = [...(this.active ? [this.active] : []), ...this.queue];
     this.active = null;
     this.queue = [];
@@ -136,7 +180,7 @@ export class DecisionService {
 
   private pump(): void {
     if (this.disposed || this.active || this.stopping) return;
-    if (!this.queue.length) {
+    if (!this.queue.length && !this.initializations.size) {
       if (this.child && !this.idleTimer) {
         this.idleTimer = setTimeout(() => this.stopWorker(), this.options.idleMs ?? 5 * 60_000);
         this.idleTimer.unref();
@@ -185,6 +229,7 @@ export class DecisionService {
     if (!this.ready) {
       if (message.type !== "ready" || message.protocol !== 1) throw new Error("Unexpected ready");
       this.ready = true;
+      for (const waiter of [...this.initializations]) waiter.resolve();
       this.pump();
       return;
     }

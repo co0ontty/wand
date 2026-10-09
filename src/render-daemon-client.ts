@@ -272,6 +272,17 @@ export class RenderDaemonClient implements TerminalHost {
     await this.request("shutdown", { mode: "now" });
   }
 
+  /** Fresh, authenticated inventory; never infer idleness from reconnect caches. */
+  async maintenanceSnapshot(includeInventory = true): Promise<{ hello: RenderHelloResult; sessions: TerminalSessionState[] | null }> {
+    const hello = await this.request("hello") as RenderHelloResult;
+    const sessions = includeInventory ? await this.listSessions() : null;
+    return { hello, sessions };
+  }
+
+  async requestShutdownDrain(): Promise<void> {
+    await this.request("shutdown", { mode: "drain" });
+  }
+
   connect(): Promise<void> {
     if (this.disposed) return Promise.reject(new Error("Render client disposed"));
     if (this.connecting) return this.connecting;

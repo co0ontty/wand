@@ -29,7 +29,9 @@ export type TerminalDaemonRequest = {
     | "structuredAttach"
     | "structuredList"
     | "structuredKill"
-    | "structuredForget";
+    | "structuredForget"
+    // Additive, capability-negotiated through hello; legacy v2 owners stay adoptable.
+    | "shutdownIfIdle";
   params?: Record<string, unknown>;
 };
 

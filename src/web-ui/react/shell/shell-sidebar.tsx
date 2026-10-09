@@ -14,6 +14,7 @@ import { ConversationNavigation, ConversationSidebarList, ConversationSidebarToo
 import { SidebarPresentationContext, useSidebarPresentation } from "../workspaces/sidebar-display-mode";
 import { sidebarSafeError } from "../workspaces/sidebar-safe-error";
 import { SidebarToggleIcon } from "./sidebar-toggle-icon";
+import { DaemonUpdateNotice } from "./daemon-update-notice";
 import {
   WandButton,
   WandDropdownMenu,
@@ -851,14 +852,14 @@ export function ShellSidebar() {
               }}>
               <WandIcon name="board" size={18}/><span hidden={narrow}>任务看板</span>
             </WandButton>
-            <WandButton id="ai-teams-button" title="AI 团队" kind={taskBoard.open && taskBoard.page === "teams" ? "soft" : "ghost"}
+            <WandButton id="ai-teams-button" title="员工与团队模板" kind={taskBoard.open && taskBoard.page === "teams" ? "soft" : "ghost"}
               aria-current={taskBoard.open && taskBoard.page === "teams" ? "page" : undefined}
               style={{ flex: narrow ? undefined : 1 }} onClick={() => {
                 peek.close();
                 if (overlay) void dispatch({ type: "layout.drawer.close" });
                 taskBoardController.open(snapshot.selected?.workspaceId ?? "", snapshot.selected?.id ?? "", "teams");
               }}>
-              <Badge count={teamAttention} size="small"><WandIcon name="parallel" size={18}/></Badge><span hidden={narrow}>AI 团队</span>
+              <Badge count={teamAttention} size="small"><WandIcon name="parallel" size={18}/></Badge><span hidden={narrow}>员工与团队模板</span>
             </WandButton>
           </Flex>
         </Flex>
@@ -866,7 +867,7 @@ export function ShellSidebar() {
           <div id="sessions-panel">
             <div className="sessions-list" id="sessions-list">
               <SidebarProjectionSwap value={conversationState.mode}>
-                <div hidden={conversationState.mode !== "chats"} inert={conversationState.mode !== "chats"}><ConversationSidebarList compact={narrow} onNavigate={() => { taskBoardController.close(); dismissSidebarSurfaces(); }}/></div>
+                <div hidden={conversationState.mode !== "chats"} inert={conversationState.mode !== "chats"}><ConversationSidebarList compact={narrow} enabled={visible && conversationState.mode === "chats"} onNavigate={() => { taskBoardController.close(); dismissSidebarSurfaces(); }}/></div>
                 <div hidden={conversationState.mode !== "tasks"} inert={conversationState.mode !== "tasks"}>{taskTree(narrow)}</div>
               </SidebarProjectionSwap>
             </div>
@@ -890,6 +891,7 @@ export function ShellSidebar() {
             <div className="sessions-list">{taskTree(false, peekDirectory.id)}</div>
           </SidebarPeek>
         ) : null}
+        {!narrow && <div style={{ paddingInline: 8, flexShrink: 0 }}><DaemonUpdateNotice /></div>}
         <Flex vertical={narrow} align="center" justify="space-between" gap="small" className="sidebar-footer" style={{ flexShrink: 0, padding: narrow ? 8 : "8px 16px", borderTop: "1px solid var(--border-subtle)" }}>
           <Flex component="nav" wrap gap={4} vertical={narrow} className="sidebar-footer-actions" aria-label="侧栏快捷操作">
             <WandButton kind="ghost" id="settings-button" title="设置" aria-label="设置" onClick={() => navigate({ type: "settings.open" })}>

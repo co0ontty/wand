@@ -6,7 +6,7 @@ colors:
   primary: "#b8562f"
   success: "#4f7a58"
   text: "#29241f"
-  secondaryText: "#81756a"
+  secondaryText: "#6b5e54"
   background: "#faf8f5"
   surface: "#fffdfa"
   border: "#ebe5dd"
@@ -35,9 +35,13 @@ Wand 面向管理本机终端、AI 会话和工作区的用户；桌面强调持
 
 运行时所有权在 `src/web-ui/react/theme.tsx` 的 `wandTheme`，本文镜像已实现值，不生成 token。`WandUiProvider` 将主题交给 Ant/X；`installWandThemeTokens` 将同一份 Ant design token 映射到浏览器/原生宿主的 `--bg-*`、`--text-*`、`--accent` 和语义别名。普通控件使用库状态色，终端保留自身背景与 ANSI 语义。
 
+次要文字、Ant 的 description 与 placeholder 共用暖色 `#6b5e54`，在浅色页面、灰白表面与暖色气泡中保持小字号可读。Web 当前没有独立深色控件主题；操作系统深色偏好下仍使用同一浅色工作台，终端按自身深色／ANSI 主题渲染，不将浅色页面的次要文字色套给终端文本。
+
 ## Typography
 
 正文与控件使用系统字体及中文回退，代码使用 Ant code font token。IM 消息正文 Web 15px / Android 15sp，行高约 1.5；列表名称 15px/原生 titleMedium、摘要 14px/原生 bodyMedium，时间 Web 12px / Android 11sp。标题、说明、状态使用 Typography 与其语义层级；长内容通过换行、ellipsis 的完整值入口或自有滚动区保持可达，不改输入内容。
+
+执行会话的回复作者、时间与折叠入口共用一行，Token／费用从本轮用量展开，保留用户偏好。
 
 ## Layout
 

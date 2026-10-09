@@ -27,6 +27,7 @@ import {
   getProviderDefaultModels,
   isExecutionMode,
   resolveConfigDir,
+  writePreferenceToStorage,
 } from "./config.js";
 import { ModelCatalogService, type ModelRefreshOptions } from "./models.js";
 import { defaultModelGroupSelector } from "./model-groups.js";
@@ -45,6 +46,10 @@ import { registerDecisionRoutes } from "./server-decision-routes.js";
 import { recordRecentPath, registerFileRoutes } from "./server-file-routes.js";
 import { registerLocalPreviewRoutes } from "./server-local-preview-routes.js";
 import { registerSettingsRoutes } from "./server-settings-routes.js";
+import { registerSpeechRoutes } from "./server-speech-routes.js";
+import { registerLocalModelRoutes } from "./server-local-model-routes.js";
+import { LocalModelSetupService } from "./local-model-setup.js";
+import { SpeechService } from "./speech-service.js";
 import {
   appTokenLoginPayload,
   buildStructuredChatPersonaPayload,
@@ -118,6 +123,9 @@ import { getStylesAsset } from "./web-ui/styles.js";
 import { WsBroadcastManager } from "./ws-broadcast.js";
 import { TerminalDaemonClient } from "./terminal-daemon-client.js";
 import { createUpgradeAwareTerminalHost } from "./render-host.js";
+import { DaemonAdmission, DaemonMaintenance } from "./daemon-maintenance.js";
+import { createDaemonMaintenanceTargets } from "./daemon-maintenance-targets.js";
+import { terminalDaemonBuildIsCurrent } from "./terminal-daemon-build.js";
 import { createUpgradeAwareStructuredHost } from "./render-structured-host.js";
 import type { TerminalHost } from "./terminal-host.js";
 import { checkPasswordRateLimit, recordFailedPassword, resetPasswordRateLimit } from "./middleware/rate-limit.js";
@@ -457,6 +465,18 @@ export async function startServer(
   // Clients receive its persisted snapshot via GET /api/models.
   const modelCatalog = new ModelCatalogService(getModelRefreshOptions);
   const configDir = resolveConfigDir(configPath);
+  const speech = new SpeechService(storage, configDir);
+  const localModels = new LocalModelSetupService({ configDir, speech, decisions,
+    decisionConfig: () => config.localDecision ?? { enabled: false, pythonPath: "", modelPath: "" },
+    configureDecision(next) {
+      decisions.assertConfigurable();
+      const candidate = runtimeConfig.createCandidate();
+      writePreferenceToStorage(candidate, storage, "localDecision", next);
+      decisions.configure(next);
+      runtimeConfig.commit(candidate, ["localDecision"]);
+      refreshDecisionRuntime();
+    },
+  });
   const distributionManager = new DistributionManager({
     configDir,
     configPath,
@@ -475,7 +495,8 @@ export async function startServer(
         binaryPath: config.render?.binaryPath,
         knownSessionIds: knownPtySessionIds,
       });
-  const terminalHost = ptyHosts.host;
+  const daemonAdmission = new DaemonAdmission();
+  const terminalHost = daemonAdmission.terminal(ptyHosts.host);
   let decisionRuntime: DecisionRuntimeAccess | null = null;
   let autoAssignEvaluate: DecisionRuntimeAccess["evaluate"];
   const processes = new ProcessManager(config, storage, configDir, terminalHost,
@@ -484,12 +505,13 @@ export async function startServer(
   // Production startup provides a daemon-backed host for structured CLI runs
   // even when Render owns every PTY. In-process hosts are for test injection.
   const legacyStructuredHost = ptyHosts.legacyHost
-    ?? (terminalHost instanceof TerminalDaemonClient ? terminalHost : null);
+    ?? (ptyHosts.host instanceof TerminalDaemonClient ? ptyHosts.host : null);
   const structuredHosts = await createUpgradeAwareStructuredHost(
     configPath, legacyStructuredHost, config.structured?.processHost,
   );
   const structuredSessions = new StructuredSessionManager(
-    storage, config, structuredLogger, {}, structuredHosts.host, () => decisionRuntime, openRouter,
+    storage, config, structuredLogger, {},
+    structuredHosts.host ? daemonAdmission.structured(structuredHosts.host) : undefined, () => decisionRuntime, openRouter,
     () => autoAssignEvaluate,
   );
   // core harness 预热：只读本机 Pi 认证与模型目录，不联网。失败不影响启动，
@@ -551,6 +573,17 @@ export async function startServer(
     structuredSessions.registerRelay(prefix, (sessionId, input) => forwardConversationRelay(conversationService, sessionId, input));
   }
   const updateState = new ServerUpdateState();
+  const daemonMaintenance = new DaemonMaintenance({
+    targets: testMode ? [] : await createDaemonMaintenanceTargets(configPath, ptyHosts, structuredHosts.rustClient, config.render?.binaryPath),
+    admission: daemonAdmission,
+    busy: () => structuredSessions.getCoreTurnStatus().hasActiveTurns
+      || [...processes.list(), ...structuredSessions.list()].some((session) =>
+        session.status === "running" || session.structuredState?.inFlight === true || (session.queuedMessages?.length ?? 0) > 0),
+    beginCoreDrain: () => structuredSessions.beginCoreRestartDrain(),
+    available: () => !shuttingDown && !updateState.updateInFlight && !updateState.providerCliUpdateInFlight
+      && terminalDaemonBuildIsCurrent(),
+    log: (error) => wandError("底层组件自动更新暂缓，将稍后重试", getErrorMessage(error)),
+  });
   const getUpdateChannel = (): "stable" | "beta" =>
     normalizeUpdateChannel(storage.getConfigValue("updateChannel"));
   let disconnectAuthenticatedSockets = (): void => {};
@@ -797,6 +830,9 @@ export async function startServer(
 
   registerDecisionRoutes(app, { storage, decisions, requireAuth, requireSessions });
   app.use("/api", requireAuth);
+  app.get("/api/daemon-maintenance", (_req, res) => {
+    res.set("Cache-Control", "no-store").json(daemonMaintenance.status());
+  });
 
   // Connected apps receive only the route families used by native clients and
   // the browser extension. Browser-admin sessions implicitly satisfy all scopes.
@@ -985,6 +1021,8 @@ export async function startServer(
   registerWorkspaceRoutes(app, storage, sessionRegistry, { config });
   registerMissionRoutes(app, missions);
   registerUploadRoutes(app, sessionRegistry);
+  registerSpeechRoutes(app, { speech, requireSessions, requireAdmin });
+  registerLocalModelRoutes(app, { models: localModels, requireSessions, requireAdmin });
 
   app.post("/api/optimize-prompt", asyncRoute(async (req, res) => {
     const body = (req.body ?? {}) as { text?: string; sessionId?: string };
@@ -1272,6 +1310,18 @@ export async function startServer(
     restartTimer.unref?.();
   }));
 
+  function refreshDecisionRuntime(): void {
+    const address = server.address();
+    const port = typeof address === "object" && address ? address.port : config.port;
+    const status = decisions.status();
+    const localHost = config.host === "::1" ? "[::1]" : config.host === "0.0.0.0" || config.host === "::" ? "127.0.0.1" : config.host;
+    decisionRuntime = config.localDecision?.enabled ? { url: `${protocol}://${localHost}:${port}`,
+      ...(activeSslCertPath ? { caPath: activeSslCertPath } : {}),
+      evaluate: (value, caller, signal) => decisions.evaluate(value, caller, signal) } : null;
+    autoAssignEvaluate = config.localDecision?.enabled && status.supported && status.configured
+      ? (value, caller, signal) => decisions.evaluate(value, caller, signal) : undefined;
+  }
+
   let bindAddr = config.host === "0.0.0.0" ? "0.0.0.0" : config.host;
   const collectedUrls: ServerUrl[] = [];
 
@@ -1282,6 +1332,8 @@ export async function startServer(
       openRouter.dispose();
       try { processes.dispose(); } catch { /* noop */ }
       conversationService.dispose();
+      localModels.dispose();
+      speech.dispose();
       try { structuredSessions.dispose(); } catch { /* noop */ }
       aiTeams.dispose();
       try { structuredHosts.rustClient?.disconnect(); } catch { /* noop */ }
@@ -1307,19 +1359,7 @@ export async function startServer(
       const address = server.address();
       const actualPort = typeof address === "object" && address ? address.port : config.port;
       bindAddr = `${config.host}:${actualPort}`;
-      const decisionStatus = decisions.status();
-      if (config.localDecision?.enabled) {
-        const localHost = config.host === "::1" ? "[::1]" : config.host === "0.0.0.0" || config.host === "::" ? "127.0.0.1" : config.host;
-        decisionRuntime = { url: `${protocol}://${localHost}:${actualPort}`,
-          ...(activeSslCertPath ? { caPath: activeSslCertPath } : {}),
-          // core 会话直接调进程内决策服务，不再绕出 HTTP + env token。
-          evaluate: (value, caller, signal) => decisions.evaluate(value, caller, signal) };
-      }
-      // 「智能分配」只要真正能跑（启用 + 平台/运行环境就绪）才由本地决策负责；
-      // 否则转给系统员工的一次性文本回退，而不是每次白等一个必然失败的调用。
-      if (config.localDecision?.enabled && decisionStatus.supported && decisionStatus.configured) {
-        autoAssignEvaluate = (value, caller, signal) => decisions.evaluate(value, caller, signal);
-      }
+      refreshDecisionRuntime();
       const scheme: "HTTP" | "HTTPS" = useHttps ? "HTTPS" : "HTTP";
       // 主 URL：本机回环；若绑定 0.0.0.0 再补一个对外提示。
       collectedUrls.push({ url: `${protocol}://127.0.0.1:${actualPort}`, scheme });
@@ -1398,6 +1438,10 @@ export async function startServer(
   // async route above is wrapped with asyncRoute, and this final middleware
   // keeps parser, synchronous middleware, and async failures JSON-shaped.
   app.use(jsonErrorHandler);
+
+  // Daemon-only maintenance does not restart Server, depend on npm auto-update
+  // preferences, or stop a live execution. Startup recovery is already attached.
+  if (!testMode) daemonMaintenance.start();
 
   // ── Auto-update logic ──
 
@@ -1540,6 +1584,7 @@ export async function startServer(
     if (closePromise) return closePromise;
     closePromise = (async () => {
       shuttingDown = true;
+      await daemonMaintenance.stop();
       decisions.dispose();
       openRouter.dispose();
       await userMemory.dispose();
@@ -1581,6 +1626,8 @@ export async function startServer(
 
       try { processes.dispose(); } catch { /* best-effort shutdown */ }
       conversationService.dispose();
+      localModels.dispose();
+      speech.dispose();
       try { structuredSessions.dispose(); } catch { /* best-effort shutdown */ }
       aiTeams.dispose();
       try { structuredHosts.rustClient?.disconnect(); } catch { /* best-effort shutdown */ }

@@ -17,7 +17,7 @@ const projection: SenderProjection = {
 
 export function mountComposerSender(resize: ResizeInput): void {
   mountComposerSurfaces();
-  installStyleSheet("wand-sender-owned-input", `[data-composer-sender] .ant-sender-input { min-height:1lh; width:100%; }`);
+  installStyleSheet("wand-sender-owned-input", `[data-composer-sender] .ant-sender-input { width:100%; }`);
   for (const [target, mount] of roots) if (!target.isConnected) { mount.root.unmount(); roots.delete(target); }
   const target = document.querySelector<HTMLElement>("[data-composer-sender]");
   if (!target) return;

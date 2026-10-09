@@ -72,11 +72,11 @@ const MODES: ReadonlyArray<{
   label: string;
   description: string;
 }> = [
-  { value: "managed", label: "托管", description: "全自动完成任务" },
+  { value: "managed", label: "托管", description: "按目标连续执行" },
   { value: "full-access", label: "完全访问", description: "自动确认权限" },
   { value: "auto-edit", label: "自动编辑", description: "自动确认修改" },
-  { value: "default", label: "标准", description: "逐步确认操作" },
-  { value: "native", label: "原生", description: "原生结构化输出" },
+  { value: "default", label: "标准", description: "使用工具默认权限配置" },
+  { value: "native", label: "原生", description: "保留工具原生执行方式" },
 ];
 
 /**
@@ -87,46 +87,64 @@ function preferredModel(selected?: string | null): string {
   return (selected ?? "").trim() || MODEL_CATALOG_DEFAULT_VALUE;
 }
 
-function modeHint(provider: NewSessionProvider, mode: NewSessionMode): string {
+function modeHint({ provider, mode, kind, engine }: NewSessionForm): string {
   if (provider === "codex") {
-    return "Codex 支持 PTY 终端与结构化（JSONL）两种会话，结构化模式按 full-access 启动。";
+    return "Codex 自动批准工具调用，并关闭 Codex 的沙盒限制。";
   }
   if (provider === "opencode") {
     return mode === "full-access" || mode === "managed" || mode === "auto-edit"
-      ? "OpenCode 将自动批准未显式拒绝的权限；支持 TUI 与 JSON 结构化会话。"
-      : "OpenCode 使用自身权限配置；结构化模式会自动拒绝未批准的权限请求。";
+      ? "OpenCode 自动批准未显式拒绝的权限请求。"
+      : kind === "structured"
+        ? "OpenCode 使用自身权限配置；对话中未批准的工具调用会被拒绝。"
+        : "OpenCode 使用自身权限配置，在终端中处理权限确认。";
   }
   if (provider === "grok") {
     return mode === "full-access" || mode === "managed"
-      ? "Grok 将以 always-approve 运行；支持 TUI 与 streaming-json 结构化会话。"
-      : "Grok 使用自身权限确认；支持 TUI 与 streaming-json 结构化会话。";
+      ? "Grok 自动批准工具权限请求。"
+      : "Grok 使用自身权限配置；需要确认的操作可能等待或被阻止。";
   }
   if (provider === "qoder") {
-    return "Qoder 一律以 yolo（bypass_permissions）启动，不再弹出权限确认；支持 TUI 与 stream-json 结构化会话。";
+    return "Qoder 在所有模式下都跳过工具权限确认。";
   }
-  if (provider === "pi") return "Pi 支持标准与托管模式；模型和 thinking 会传给 Pi CLI。";
+  if (provider === "pi") {
+    return engine === "sdk"
+      ? "Wand Agent 在 Wand 内执行，使用当前会话配置的工具与扩展。"
+      : "Pi CLI 使用自身工具与扩展配置；这里的模式不会增加逐项权限确认。";
+  }
   if (provider === "gemini") {
-    return mode === "full-access" || mode === "managed"
-      ? "Gemini 以 yolo（自动批准全部工具）运行；支持 TUI 与 stream-json 结构化会话。"
-      : mode === "auto-edit"
-        ? "Gemini 以 auto_edit（自动批准编辑工具）运行；支持 TUI 与 stream-json 结构化会话。"
-        : "Gemini 使用自身权限确认；结构化模式下未批准的工具调用会被拒绝。";
+    if (mode === "full-access" || mode === "managed" || (kind === "pty" && mode === "auto-edit")) {
+      return "Gemini 自动批准全部工具调用。";
+    }
+    if (mode === "auto-edit") return "Gemini 自动批准编辑工具；其他工具仍遵循自身权限配置。";
+    return kind === "structured"
+      ? "Gemini 使用自身权限配置；对话中未批准的工具调用会被拒绝。"
+      : "Gemini 使用自身权限配置，在终端中处理权限确认。";
   }
-  if (mode === "full-access") return "自动确认权限请求与高权限操作，适合你确认环境安全后的连续修改。";
-  if (mode === "auto-edit") return "保留交互式会话，同时更偏向直接编辑代码。";
-  if (mode === "native") return "调用 Claude 原生 API 输出，适合快速问答或一次性生成。";
-  if (mode === "managed") return "AI 自动完成所有工作，无需中途确认，适合有明确目标的任务。";
-  return "保留标准交互流程，适合手动确认每一步。";
+  if (mode === "full-access") return "Claude 自动批准工具权限请求，可连续执行修改。";
+  if (mode === "auto-edit") return "Claude 自动批准文件编辑；其他工具按当前会话权限策略处理。";
+  if (mode === "managed") return "Claude 按目标连续执行，并自动批准工具权限请求；缺少必要信息或工具失败时仍可能停止。";
+  return "Claude 保留工具执行方式，操作请求按当前会话权限策略处理。";
 }
 
-function creationFallback(provider: NewSessionProvider, kind: NewSessionKind): string {
+function protocolHint(form: NewSessionForm): string {
+  if (form.kind === "pty") return "终端使用 PTY，直接呈现命令行工具的交互界面与原始输出。";
+  if (form.engine === "sdk") return "Wand Agent 使用 Wand 进程内 SDK，不启动 Pi CLI。";
+  if (form.provider === "codex") return "对话解析 Codex 的 JSONL 事件。";
+  if (form.provider === "pi" || form.provider === "opencode") return "对话解析命令行工具的 JSON 事件。";
+  if (form.provider === "grok") return "对话解析 Grok 的 streaming-json 事件。";
+  return "对话解析命令行工具的 stream-json 事件。";
+}
+
+function creationFallback({ provider, kind, engine }: NewSessionForm): string {
   if (kind === "shell") return "无法启动空白终端，请检查服务端 Shell 配置。";
-  if (kind === "structured") return "无法启动结构化会话，请确认对应 Provider 已正确安装。";
+  if (engine === "sdk") return "无法启动 Wand Agent 对话，请检查服务端 Agent 配置与模型可用性。";
+  if (kind === "structured") return "无法启动对话，请检查所选工具是否可用及模型配置。";
   if (provider === "codex") return "无法启动 Codex 会话，请确认 codex 已正确安装并可在终端中执行。";
   if (provider === "opencode") return "无法启动 OpenCode 会话，请确认 opencode-ai 已正确安装。";
   if (provider === "grok") return "无法启动 Grok 会话，请确认 Grok Build CLI 已正确安装。";
   if (provider === "qoder") return "无法启动 Qoder 会话，请确认 @qoder-ai/qodercli 已正确安装。";
   if (provider === "pi") return "无法启动 Pi 会话，请确认 Pi CLI 已正确安装。";
+  if (provider === "gemini") return "无法启动 Gemini 会话，请确认 Gemini CLI 已正确安装。";
   return "无法启动 Claude 会话，请确认 Claude 已正确安装。";
 }
 
@@ -420,7 +438,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
       await runtime.completeCreate(request, created);
       newSessionController.close();
     } catch (createError) {
-      setError(describeError(createError, creationFallback(form.provider, form.kind)));
+      setError(describeError(createError, creationFallback(form)));
     } finally {
       newSessionController.setDismissable(true);
       setSubmitting(false);
@@ -432,7 +450,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
       open={controller.open}
       onOpenChange={(open) => { if (!open) newSessionController.close(); }}
       title={controller.taskName ? `新对话 · ${controller.taskName}` : "新对话"}
-      description="选择工具与工作目录，启动新的会话。"
+      description="选择由谁执行、使用对话还是终端，再确认工作目录。"
       className="wand-task-library-dialog wand-new-session-library-dialog"
       closeLabel="关闭新建会话"
       testId="new-session-dialog"
@@ -462,8 +480,8 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                     <button
                       type="button"
                       className="wand-new-session-logo-toggle"
-                      title={customizingCli ? "收起工具切换" : "点击切换 CLI 和模型"}
-                      aria-label={customizingCli ? "收起工具切换" : "点击切换 CLI 和模型"}
+                      title={customizingCli ? "收起工具切换" : "切换执行工具和模型"}
+                      aria-label={customizingCli ? "收起工具切换" : "切换执行工具和模型"}
                       aria-expanded={customizingCli}
                       style={{
                         background: "transparent",
@@ -504,13 +522,13 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                               : "inherit",
                           }}
                         >
-                          {form.specifiedCli ? "已指定 CLI" : "默认员工派发"}
+                          {form.specifiedCli ? "已指定工具" : "按员工配置启动"}
                         </Typography.Text>
                       </Flex>
                       <Typography.Text type="secondary" ellipsis style={{ fontSize: 12 }}>
                         {form.specifiedCli
                           ? `工具：${selectedTool(form)?.label || form.provider} · 模型：${preferredModel(form.model)}`
-                          : "默认走员工派发流程 · 智能匹配工具链"}
+                          : "按员工配置的工具与模型候选顺序启动"}
                       </Typography.Text>
                     </Flex>
                   </Flex>
@@ -566,7 +584,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                               <Flex vertical>
                                 <Typography.Text strong>员工默认派发</Typography.Text>
                                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                  按员工预设候选链自动选择最佳可用工具与模型
+                                  按员工配置的候选顺序尝试工具与模型
                                 </Typography.Text>
                               </Flex>
                             </Flex>
@@ -621,7 +639,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                           setCustomizingCli(false);
                         }}
                       >
-                        切换为其它主体
+                        选择其他执行者
                       </WandButton>
                       {form.specifiedCli ? (
                         <WandButton
@@ -724,23 +742,24 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
               items={[{ key: "advanced", label: "高级选项", extra: <Typography.Text type="secondary">{form.teamId ? "按成员员工配置执行" : form.employeeId ? (form.specifiedCli ? selectedMode?.label ?? "标准" : "按员工工具链执行") : form.kind === "shell" ? "Shell 环境" : selectedMode?.label ?? "标准"}</Typography.Text>, children:
                 form.teamId ? <Typography.Text type="secondary">团队开工不另选模式与模型：负责人拆解，成员各用自己的员工配置与候选链执行。</Typography.Text>
                 : form.employeeId && !form.specifiedCli ? <Typography.Text type="secondary">模型、权限与候选顺序由员工配置决定。可在硅基员工页修改。</Typography.Text>
-                : form.kind !== "shell" ? <Form.Item label="模式" style={{ marginBottom: 0 }} extra={modeHint(form.provider, form.mode)}>
+                : form.kind !== "shell" ? <Flex vertical gap={12}><Form.Item label="执行模式" style={{ marginBottom: 0 }}>
                   <Radio.Group aria-label="执行模式" value={form.mode} disabled={submitting} onChange={(event) => selectMode(event.target.value)}>
                     <Space wrap>{MODES.map((mode) => <Radio.Button key={mode.value} value={mode.value} disabled={!supported.has(mode.value)} title={mode.description}
                       ref={(element) => { modeRefs.current[mode.value] = element?.input ?? null; }}
                       onKeyDown={(event) => navigateChoice(event, form.mode, supportedModesForProvider, selectMode, modeRefs)}>{mode.label}</Radio.Button>)}</Space>
                   </Radio.Group>
-                </Form.Item> : <Typography.Text type="secondary">空白终端使用服务端配置的登录 Shell，不应用 AI 权限模式。</Typography.Text>
+                </Form.Item><Typography.Text type="secondary">{protocolHint(form)}</Typography.Text></Flex>
+                : <Typography.Text type="secondary">空白终端使用服务端配置的登录 Shell，不应用 AI 权限模式。</Typography.Text>
               }]}/>
             <Alert type="info" title="即将启动" description={<Flex vertical gap={4} aria-live="polite">
               <Typography.Text strong>
                 {form.teamId
                   ? `${selectedTeam?.name ?? "AI 团队"} · 团队开工`
                   : form.employeeId
-                  ? `${selectedEmployee?.name || "硅基员工"} · ${form.specifiedCli ? `${selectedTool(form)?.label || form.provider} · 结构化对话` : "员工派发流程"}`
+                  ? `${selectedEmployee?.name || "硅基员工"} · ${form.specifiedCli ? `${selectedTool(form)?.label || form.provider} · 对话` : "按员工配置启动"}`
                   : form.kind === "shell"
                     ? "空白终端 · Shell"
-                    : `${selectedTool(form)?.label ?? form.provider} · ${form.kind === "structured" ? "结构化" : "PTY"}`}
+                    : `${selectedTool(form)?.label ?? form.provider} · ${form.kind === "structured" ? "对话" : "终端"}`}
               </Typography.Text>
               <Typography.Text ellipsis title={effectiveCwd}>{effectiveCwd}</Typography.Text>
               <Typography.Text type="secondary">
@@ -749,11 +768,12 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                   : form.employeeId
                   ? form.specifiedCli
                     ? `指定模型：${preferredModel(form.model)}`
-                    : "按员工工具链顺序启动"
+                    : "工具、模型与权限跟随员工配置"
                   : form.kind === "shell"
-                    ? "不启动 CLI"
-                    : selectedMode?.label ?? "标准"}
+                    ? "直接使用系统 Shell，不启动 AI 工具"
+                    : `${selectedMode?.label ?? "标准"} · ${modeHint(form)}`}
               </Typography.Text>
+              {form.employeeId && form.specifiedCli ? <Typography.Text type="secondary">{modeHint(form)}</Typography.Text> : null}
             </Flex>}/>
             {error ? <Alert type="error" showIcon role="alert" title={error}/> : null}
             <Flex justify="flex-end" gap={8} className="wand-dialog-sticky-actions">

@@ -92,6 +92,11 @@ export class ComposerStore {
     };
   }
 
+  /** Check ownership without loading/recreating a draft (especially after deletion). */
+  isCurrentRevision(sessionId: string, revision: number): boolean {
+    return this.sessions.get(sessionId)?.revision === revision;
+  }
+
   private writeText(sessionId: string, session: ComposerSession, text: string, persist?: boolean): void {
     if (session.text !== text) session.revision = ++this.revision;
     session.text = text;

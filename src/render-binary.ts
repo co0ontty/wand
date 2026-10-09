@@ -172,8 +172,8 @@ export function resolveRenderBinaryPath(configPath: string): string | null {
  * `wand-render --version` —— 启动路径上不该无谓地执行一个进程。
  * 两种方式都失败时返回 null：调用方只要一个展示用版本号，拿不到不能影响启动。
  */
-export function readRenderBinaryVersion(binaryPath: string): Promise<string | null> {
-  const sidecar = readVersionSidecar(binaryPath);
+export function readRenderBinaryVersion(binaryPath: string, versionFile = path.join(path.dirname(binaryPath), "wand-render.version")): Promise<string | null> {
+  const sidecar = readVersionSidecar(versionFile);
   if (sidecar) return Promise.resolve(sidecar);
   return new Promise<string | null>((resolve) => {
     execFile(binaryPath, ["--version"], { timeout: VERSION_PROBE_TIMEOUT_MS }, (error, stdout) => {
@@ -188,9 +188,9 @@ export function readRenderBinaryVersion(binaryPath: string): Promise<string | nu
   });
 }
 
-function readVersionSidecar(binaryPath: string): string | null {
+function readVersionSidecar(versionFile: string): string | null {
   try {
-    const raw = readFileSync(path.join(path.dirname(binaryPath), "wand-render.version"), "utf8").trim();
+    const raw = readFileSync(versionFile, "utf8").trim();
     const version = /^(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.]+)?)$/.exec(raw);
     return version ? version[1] : null;
   } catch {

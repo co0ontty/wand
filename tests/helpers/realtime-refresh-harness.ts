@@ -8,6 +8,7 @@ import * as agentRuns from "../../src/web-ui/browser/agent-runs.js";
 import * as toolActivity from "../../src/web-ui/browser/tool-activity.js";
 import * as completionState from "../../src/session-completion-state.js";
 import { parseJsonResponse } from "../../src/web-ui/react/http-adapter.js";
+import { compactModelDisplayLabel } from "../../src/web-ui/browser/composer-select-values.js";
 
 const compiled = new Map<string, string>();
 const noop = () => {};
@@ -173,6 +174,7 @@ export function createRealtimeSessionHarness() {
     "./session-reads": { createSessionReads }, "./message-reconciliation": reconciliation,
     "../../session-completion-state.js": completionState,
     "../react/http-adapter": { parseJsonResponse },
+    "./composer-select-values": new Proxy({ compactModelDisplayLabel }, { get: (o: Record<string, unknown>, k: string) => o[k] ?? noop }),
     "./input": new Proxy({ buildMessagesForRender: (_s: any, turns: any) => turns }, { get: (o: any, k: string) => o[k] ?? noop }),
     "./chat-scroll": new Proxy({ normalizeStructuredSnapshot: (s: any) => s, stripRenderOnlyStructuredMessages: (m: any) => m }, { get: (o: any, k: string) => o[k] ?? noop }) };
   const engine = loadRealtimeBrowserModule("session-engine", dependencies, globals);

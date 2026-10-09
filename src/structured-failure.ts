@@ -13,7 +13,7 @@ export function classifyProviderRejection(message: string | null | undefined): P
   if (!text || /\b(?:408|409|5\d\d)\b|fetch failed|timed?\s*out|ECONN\w*|socket|network error/i.test(text)) return null;
   if (/insufficient[_ -](?:quota|credits|balance)|quota[_ -](?:exceeded|exhausted)|credit balance is too low|(?:usage|spending) limit (?:has been )?(?:reached|exceeded)|you have hit your usage limit/i.test(text)
     || /^(?:错误[：:]\s*)?(?:积分|额度|余额)(?:已)?(?:耗尽|用尽|不足)(?:[，,：:。.!！\s].*)?$/.test(text)) return "quota";
-  if (/\b(?:invalid_api_key|authentication_error|invalid api key|incorrect api key|unauthorized)\b/i.test(text)) return "authentication";
+  if (/\b(?:invalid_api_key|authentication_error|invalid api key|incorrect api key|unauthorized|forbidden)\b/i.test(text)) return "authentication";
   if (/\b(?:rate_limit_exceeded|rate_limit_error|rate limit exceeded|too many requests)\b/i.test(text)) return "rate-limit";
   if (/\b(?:model_not_found|model not found|unknown model)\b/i.test(text)) return "model-unavailable";
   return null;

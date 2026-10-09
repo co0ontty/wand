@@ -2,6 +2,8 @@ import { isClientSettingsPage } from "../../page.js";
 import { Alert, Form, Skeleton } from "antd";
 import { WandUiProvider } from "../theme";
 import { installSettingsLibraryStyles } from "./styles";
+import { SpeechSettingsTab } from "./speech-panel";
+import { LocalModelsSettingsTab } from "./local-models-panel";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import * as React from "react";
 import { useSyncExternalStore } from "react";
@@ -34,6 +36,8 @@ const TAB_LABELS: Record<SettingsTab, string> = {
   connectors: "连接器",
   general: "基本配置",
   ai: "AI 与模型",
+  speech: "语音输入",
+  "local-models": "本地模型",
   notifications: "通知",
   display: "显示",
   security: "安全",
@@ -46,6 +50,8 @@ const ADMIN_TAB_ORDER: SettingsTab[] = [
   "connectors",
   "general",
   "ai",
+  "local-models",
+  "speech",
   "notifications",
   "display",
   "security",
@@ -54,6 +60,8 @@ const ADMIN_TAB_ORDER: SettingsTab[] = [
 ];
 
 const CONNECTED_APP_TAB_ORDER: SettingsTab[] = [
+  "local-models",
+  "speech",
   "notifications",
   "about",
 ];
@@ -242,6 +250,8 @@ export function SettingsHost({
       connectors: <GithubSettingsTab {...props} />,
       general: <GeneralSettingsTab {...props} />,
       ai: <AiSettingsTab {...props} />,
+      speech: <SpeechSettingsTab admin={snapshot.access === "admin"} />,
+      "local-models": <LocalModelsSettingsTab admin={snapshot.access === "admin"} />,
       notifications: <NotificationSettingsTab {...props} />,
       display: <DisplaySettingsTab {...props} />,
       security: <SecuritySettingsTab {...props} />,
@@ -258,8 +268,8 @@ export function SettingsHost({
 
   const selectedTab = snapshot?.access === "admin"
     ? controller.tab
-    : controller.tab === "about"
-      ? "about"
+    : controller.tab === "about" || controller.tab === "speech" || controller.tab === "local-models"
+      ? controller.tab
       : "notifications";
 
   const onAuthenticated = (next: SettingsSnapshot): void => {

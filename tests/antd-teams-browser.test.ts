@@ -323,7 +323,7 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
       assert.equal(await evaluate("!!document.querySelector('.wand-teams-page button[aria-label=返回工作区]')"), true, `${mode}: selected team does not hide the employee page's back action`);
       await click(".wand-teams-page [data-stretch-value=teams]");
       await wait("!!document.querySelector('.wand-teams-page[data-detail]') && !!document.querySelector('.wand-team-member')");
-      await click('[aria-label="AI 团队导航"] button');
+      await click('[aria-label="团队模板导航"] button');
       await wait("!document.querySelector('.wand-teams-page[data-detail]')");
       await click(".wand-teams-page [data-stretch-value=employees]");
       await wait("!!document.querySelector('.wand-employee-list .wand-employee-card')");

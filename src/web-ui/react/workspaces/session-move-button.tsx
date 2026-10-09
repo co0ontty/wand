@@ -1,9 +1,7 @@
 import { useSidebarPopupOwner, useSidebarPopupState } from "./sidebar-popup-owner";
 import * as React from "react";
 import { WandIcon, WandIconButton, WandMenuItem, WandPopover } from "../ui";
-import { describeError } from "../errors";
-import { workspacesStore } from "./controller";
-import { httpWorkspacesRepository } from "./repository";
+import { useSessionMove } from "./session-move";
 import type { TaskDirectoryGroup } from "./types";
 
 /** Keyboard/touch alternative to dragging; destinations always come from the same task list. */
@@ -22,47 +20,9 @@ export function SessionMoveButton({ sessionId, taskId, className, intoNewTask, m
 }): React.ReactElement {
   const popupOwner = useSidebarPopupOwner();
   const [open, setOpen] = useSidebarPopupState();
-  const [targets, setTargets] = React.useState<Array<{ id: string; label: string }>>([]);
-  const [loading, setLoading] = React.useState(false);
-  const [busy, setBusy] = React.useState(false);
-  const [error, setError] = React.useState("");
-  React.useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    setLoading(true);
-    setError("");
-    void httpWorkspacesRepository.listTaskGroups().then(({ groups }) => {
-      if (cancelled) return;
-      setTargets(groups.flatMap((group) => group.tasks.filter((task) => task.id !== taskId)
-        .map((task) => ({ id: task.id, label: `${group.workspaceName} / ${task.name}` }))));
-    }).catch((cause) => {
-      if (!cancelled) setError(describeError(cause, "无法加载任务。"));
-    }).finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [open, taskId]);
-
-  const summarizeIntoNewTask = async (): Promise<void> => {
-    if (!intoNewTask) return;
-    setBusy(true);
-    setError("");
-    try {
-      // 合成目录和隐藏全局空间没有可建任务的项目实体，改用独立任务挂载会话所在目录。
-      const created = intoNewTask.synthetic || intoNewTask.global
-        ? await httpWorkspacesRepository.createStandaloneTask({
-          worktree: false, cwd: intoNewTask.workspaceCwd,
-        })
-        : await httpWorkspacesRepository.createTask(intoNewTask.workspaceId, { worktree: false });
-      await httpWorkspacesRepository.moveSession(created.id, sessionId);
-      setOpen(false);
-      onMoved?.();
-      workspacesStore.getRuntime()?.toast("已归纳为新任务，稍后按会话内容自动命名", "success");
-      await workspacesStore.getRuntime()?.refreshSessions();
-    } catch (cause) {
-      setError(describeError(cause, "无法归纳为新任务。"));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const { targets, loading, busy, error, move, summarize, retry } = useSessionMove({
+    sessionId, taskId, intoNewTask, open, onMoved: () => { setOpen(false); onMoved?.(); },
+  });
 
   return <WandPopover popupOwner={popupOwner} open={open} onOpenChange={setOpen} align="end" contentRole="menu"
     ariaLabel="移动会话到任务" className="workspace-session-move-menu"
@@ -72,18 +32,10 @@ export function SessionMoveButton({ sessionId, taskId, className, intoNewTask, m
       </WandIconButton>}>
     <p className="workspace-session-move-hint">移动归属 · 保留运行目录</p>
     {intoNewTask ? <WandMenuItem disabled={busy} label="归纳为新任务" icon="plus"
-      onClick={() => { void summarizeIntoNewTask(); }}/> : null}
-    {loading ? <p role="status">正在加载任务…</p> : error ? <p role="alert">{error}</p> : targets.length === 0
+      onClick={() => { void summarize(); }}/> : null}
+    {error ? <p role="alert">{error}<WandMenuItem label="重新加载任务" disabled={busy || loading} onClick={retry}/></p> : null}
+    {loading ? <p role="status">正在加载任务…</p> : targets.length === 0
       ? <p>请先创建另一个任务。</p> : targets.map((target) => <WandMenuItem key={target.id} disabled={busy} label={target.label} icon="folder"
-        onClick={() => {
-          setBusy(true);
-          void httpWorkspacesRepository.moveSession(target.id, sessionId).then(async () => {
-            setOpen(false);
-            onMoved?.();
-            workspacesStore.getRuntime()?.toast(`已移至 ${target.label}，运行目录不变`, "success");
-            await workspacesStore.getRuntime()?.refreshSessions();
-          }).catch((cause) => setError(describeError(cause, "无法移动会话。")))
-            .finally(() => setBusy(false));
-        }}/>)}
+        onClick={() => { void move(target.id); }}/>)}
   </WandPopover>;
 }

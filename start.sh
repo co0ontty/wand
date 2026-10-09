@@ -48,10 +48,9 @@ ACTION="install-and-restart"
 DO_BUILD=1
 DO_INSTALL=1
 PORT_OVERRIDE=""
-# 升级后 daemon（Render / legacy terminald）还是老进程：npm/start.sh 都不会动正在跑的
-# daemon（那里可能挂着用户的 shell）。默认只告警 + 给出命令；--restart-daemons 才真换。
+# npm/start.sh 默认保留 daemon（那里可能挂着用户的 shell）。只有组件自身有更新时，
+# Server 才会在全部会话结束后自动替换；显式参数仍用于运维。
 RESTART_DAEMONS="${WAND_RESTART_DAEMONS:-0}"
-DAEMON_PIDS_BEFORE=""
 SCOPE="${WAND_SERVICE_SCOPE:-system}"
 SERVICE_STOPPED_FOR_INSTALL=0
 
@@ -646,7 +645,7 @@ daemon_pids() {
 }
 
 restart_daemons_now() {
-  local pids pid
+  local pids="" pid
   pids="$(daemon_pids | tr '\n' ' ')"
   if [[ -z "${pids// /}" ]]; then
     return 0
@@ -811,7 +810,6 @@ if [[ "$DO_INSTALL" == "1" ]]; then
   PACK_DIR="$(mktemp -d)"
   msg "npm pack -> install -g --prefix $WAND_PREFIX"
   repair_global_package_permissions
-  DAEMON_PIDS_BEFORE="$(daemon_pids | tr '\n' ' ')"
   cleanup_npm_package_temps
   # dist was built explicitly above with the local debug version. Do not run
   # publish lifecycle hooks here: prepublishOnly rewrites package.json back to
@@ -835,23 +833,13 @@ if [[ "$DO_INSTALL" == "1" ]]; then
   verify_installed_beta
   verify_render_binary_installed
 
-  # npm 只换包，不动正在跑的 daemon（那里可能挂着用户的 shell）—— 所以升级后 daemon
-  # 依旧跑旧代码。2026-09-24 的事故就是这两个老进程没有端点自愈，socket 被临时目录
-  # 清理器删掉后永远回不来。默认只把状态和出路说清楚；--restart-daemons 才真换。
+  # 保留原 daemon 是正常行为，不代表组件过期。是否有更新由新 Server 比较组件
+  # 自身版本/构建并在 Web 提示，不能用「旧 PID 还活着」或 Wand 包版本变化代替。
   echo
   echo -e "  ${C_DIM}Daemons${C_RESET}"
   print_daemon_lines
   if [[ "$RESTART_DAEMONS" == "1" ]]; then
     msg "已请求重启 daemon：启动 Server 前由统一排空路径执行"
-  else
-    STALE_DAEMON_ALIVE=0
-    for pid in $DAEMON_PIDS_BEFORE; do
-      kill -0 "$pid" 2>/dev/null && STALE_DAEMON_ALIVE=1
-    done
-    if [[ "$STALE_DAEMON_ALIVE" == "1" ]]; then
-      warn "上面那些 daemon 是更新前启动的：还在跑旧代码（端点自愈、连接泄漏修复都不在里面）。"
-      warn "要换掉它们：${C_GREEN}./start.sh --restart-daemons${C_RESET}（会结束它们持有的 shell，可按 provider 原生 session id 恢复）。"
-    fi
   fi
 fi
 

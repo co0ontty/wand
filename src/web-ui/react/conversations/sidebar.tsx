@@ -3,7 +3,7 @@ import { Avatar, Flex, Typography } from "antd";
 import type { ConversationSummary } from "../../../conversation-types.js";
 import { employeeProfile } from "../agents/employee-profile";
 import { wandOverlay } from "../overlay-controller";
-import { WandDropdownMenu, WandDropdownMenuContent, WandDropdownMenuItem, WandDropdownMenuSeparator } from "../ui/dropdown-menu";
+import { SidebarRowMenu } from "../workspaces/sidebar-row-menu";
 import { EmployeeAvatar } from "../agents/employee-avatar";
 import { cachedSiliconEmployee } from "../agents/employee-repository";
 import { ConversationGroupAvatar } from "./avatar";
@@ -101,7 +101,7 @@ export function filterConversationList<
   });
 }
 
-export function ConversationSidebarList({ compact, onNavigate }: { compact: boolean; onNavigate(): void }): React.ReactElement {
+export function ConversationSidebarList({ compact, enabled = true, onNavigate }: { compact: boolean; enabled?: boolean; onNavigate(): void }): React.ReactElement {
   const { items, error, refresh } = useConversations();
   const ui = useConversationUi();
   const query = (ui.filters["list-query"] ?? "").trim().toLowerCase();
@@ -149,7 +149,7 @@ export function ConversationSidebarList({ compact, onNavigate }: { compact: bool
     {error ? <Typography.Text type="danger" role="status">{error}<WandButton size="small" onClick={refresh}>重新读取</WandButton></Typography.Text> : null}
     {actionError ? <Typography.Paragraph type="danger" role="alert">{actionError}</Typography.Paragraph> : null}
     {rows.map(item => <ConversationListRow key={item.id} item={item} compact={compact} query={query}
-      selected={ui.selectedId === item.id && ui.active !== false} onSelect={() => select(item.id)}
+      enabled={enabled} filter={filter} selected={ui.selectedId === item.id && ui.active !== false} onSelect={() => select(item.id)}
       onUpdate={patch => update(item, patch)} onRemove={() => remove(item)}/>) }
     {!rows.length ? <Typography.Paragraph type="secondary">{query ? "没有匹配的对话或任务"
       : filter === "archived" ? "还没有已归档的对话，解散群聊或归档任务后会出现在这里。"
@@ -158,8 +158,8 @@ export function ConversationSidebarList({ compact, onNavigate }: { compact: bool
   </div>;
 }
 
-function ConversationListRow({ item, compact, query, selected, onSelect, onUpdate, onRemove }: {
-  item: ConversationSummary; compact: boolean; query: string; selected: boolean; onSelect(): void;
+function ConversationListRow({ item, compact, query, enabled, filter, selected, onSelect, onUpdate, onRemove }: {
+  item: ConversationSummary; compact: boolean; query: string; enabled: boolean; filter: ConversationListFilter; selected: boolean; onSelect(): void;
   onUpdate(patch: { pinned?: boolean; dissolved?: boolean }): Promise<void>; onRemove(): Promise<void>;
 }): React.ReactElement {
   const employee = item.peerEmployeeId ? cachedSiliconEmployee(item.peerEmployeeId) : null;
@@ -169,23 +169,18 @@ function ConversationListRow({ item, compact, query, selected, onSelect, onUpdat
   const [expanded, setExpanded] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const row = React.useRef<HTMLDivElement>(null);
-  const timer = React.useRef<number | null>(null);
-  const pressed = React.useRef(false);
-  const clearPress = (): void => { if (timer.current !== null) clearTimeout(timer.current); timer.current = null; };
-  React.useEffect(() => clearPress, []);
+  React.useEffect(() => { setMenu(false); }, [enabled, compact, query, filter]);
   const action = async (run: () => Promise<void>): Promise<void> => {
     if (busy) return; setBusy(true); setMenu(false);
+    (row.current?.querySelector<HTMLElement>(".conversation-row-open")
+      ?? row.current?.querySelector<HTMLElement>("button"))?.focus({ preventScroll: true });
     try { await run(); } finally { setBusy(false); }
   };
   const tasks = query ? item.tasks.filter(task => task.task.title.toLowerCase().includes(query)) : item.tasks;
   const showTasks = !compact && !item.dissolvedAt && (expanded || !!query && tasks.length > 0);
   const archived = isConversationArchived(item);
   const contents = <div ref={row} className={`conversation-row conversation-row-${item.kind}`} aria-current={selected ? "page" : undefined}
-    data-pinned={!!item.pinnedAt} data-archived={archived || undefined} data-conversation-id={item.id} aria-busy={busy || undefined}
-    onKeyDown={event => { if (event.key === "ContextMenu" || event.shiftKey && event.key === "F10") { event.preventDefault(); setMenu(true); } }}
-    onPointerDown={event => { pressed.current = false; if (event.pointerType === "touch") timer.current = window.setTimeout(() => { pressed.current = true; setMenu(true); }, 500); }}
-    onPointerUp={clearPress} onPointerCancel={clearPress} onPointerMove={clearPress}
-    onClickCapture={event => { if (pressed.current) { pressed.current = false; event.preventDefault(); event.stopPropagation(); } }}>
+    data-pinned={!!item.pinnedAt} data-archived={archived || undefined} data-conversation-id={item.id} aria-busy={busy || undefined}>
     <WandIconButton className="conversation-row-avatar conversation-avatar-button" aria-label={identity ? `查看${item.title}的资料` : `打开${item.title}`}
       onClick={event => identity ? employeeProfile.open(identity, event.currentTarget) : onSelect()}>
       {employee ? <EmployeeAvatar employee={employee} size="chat"/> : item.kind === "group" ? <ConversationGroupAvatar title={item.title}/> : <Avatar size={48} icon={<WandIcon name="chat"/>}/>}</WandIconButton>
@@ -195,25 +190,41 @@ function ConversationListRow({ item, compact, query, selected, onSelect, onUpdat
         <span className="conversation-row-bottomline">{archived ? <span className="conversation-archived-tag">已归档</span> : null}<span className="conversation-row-preview">{item.dissolvedAt ? "群聊已解散 · 点击查看或恢复" : item.preview || (item.kind === "group" ? `${selfName} + ${item.team?.members.length ?? 0} 位员工` : "私聊")}</span>
           {item.pinnedAt ? <span className="conversation-pin" title="已置顶" aria-label="已置顶"><WandIcon name="pin" size={13}/></span> : null}</span>
       </span></WandButton> : null}
-    {!compact ? <WandIconButton className="conversation-row-more" aria-label={`${item.title}的菜单`} aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}><WandIcon name="more" size={16}/></WandIconButton> : null}
+    {!compact ? <WandIconButton className="conversation-row-more" aria-label={`${item.title}的菜单`} aria-haspopup="menu" aria-expanded={menu}
+      onClick={event => {
+        event.stopPropagation();
+        if (menu) { setMenu(false); return; }
+        const bounds = event.currentTarget.getBoundingClientRect();
+        event.currentTarget.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: bounds.right, clientY: bounds.bottom, button: 2 }));
+      }}><WandIcon name="more" size={16}/></WandIconButton> : null}
   </div>;
-  return <div className="conversation-list-item"><WandDropdownMenu open={menu} onOpenChange={setMenu} triggers={["contextMenu"]} contextTrigger={contents}>
-    <WandDropdownMenuContent id={`conversation-menu-${item.id}`} aria-label="对话菜单">
-      <WandDropdownMenuItem disabled={busy} onSelect={() => { onSelect(); }}>打开对话</WandDropdownMenuItem>
-      {identity ? <WandDropdownMenuItem onSelect={() => employeeProfile.open(identity, row.current?.querySelector("button") ?? null)}>查看员工资料</WandDropdownMenuItem> : null}
-      {<WandDropdownMenuItem disabled={busy} onSelect={() => void action(() => onUpdate({ pinned: !item.pinnedAt }))}>{item.pinnedAt ? "取消置顶" : "置顶"}</WandDropdownMenuItem>}
-      {!item.dissolvedAt && item.tasks.length > 0 ? <WandDropdownMenuItem onSelect={() => setExpanded(!expanded)}>{expanded ? "收起任务" : `查看 ${item.tasks.length} 个任务`}</WandDropdownMenuItem> : null}
-      <WandDropdownMenuSeparator/>
-      {item.kind === "group" ? <WandDropdownMenuItem disabled={busy} onSelect={() => void action(async () => {
+  return <div className="conversation-list-item"><SidebarRowMenu row={contents} rowRef={row} open={menu} disabled={!enabled}
+    onOpenChange={next => { if (!next || !busy) setMenu(next); }} label="对话菜单" title={item.title} className="conversation-row-menu"
+    menu={{ items: [
+      { key: "open", disabled: busy, icon: <WandIcon name="chat"/>, label: "打开对话" },
+      ...(identity ? [{ key: "profile", disabled: busy, icon: <WandIcon name="info"/>, label: "查看员工资料" }] : []),
+      { key: "pin", disabled: busy, icon: <WandIcon name="pin"/>, label: item.pinnedAt ? "取消置顶" : "置顶" },
+      ...(!item.dissolvedAt && item.tasks.length > 0 ? [{ key: "tasks", disabled: busy, icon: <WandIcon name="task"/>, label: expanded ? "收起任务" : `查看 ${item.tasks.length} 个任务` }] : []),
+      { key: "danger-divider", type: "divider" },
+      ...(item.kind === "group" ? [{ key: "dissolve", disabled: busy, icon: <WandIcon name={item.dissolvedAt ? "resume" : "archive"}/>, label: item.dissolvedAt ? "恢复群聊" : "解散群聊…" }] : []),
+      { key: "delete", disabled: busy, danger: true, icon: <WandIcon name="trash"/>, label: item.kind === "group" ? "删除群聊…" : "删除对话…" },
+    ], onClick: ({ key }) => {
+      if (busy) return;
+      setMenu(false);
+      if (key === "open") onSelect();
+      else if (key === "profile" && identity) employeeProfile.open(identity, row.current?.querySelector("button") ?? null);
+      else if (key === "tasks") setExpanded(!expanded);
+      else if (key === "pin") void action(() => onUpdate({ pinned: !item.pinnedAt }));
+      else if (key === "delete") void action(onRemove);
+      else if (key === "dissolve") void action(async () => {
         if (item.dissolvedAt) { await onUpdate({ dissolved: false }); return; }
         const answer = await wandOverlay.dialog({ title: `解散群聊「${item.title}」？`, description: "群聊将归档并保留在会话列表。历史记录和关联任务保留，恢复后可继续聊天。", actions: [
           { label: "取消", value: false, autoFocus: true }, { label: "解散群聊", value: true, kind: "danger" },
         ] });
         if (answer.dismissed !== true && answer.action) await onUpdate({ dissolved: true });
-      })}>{item.dissolvedAt ? "恢复群聊" : "解散群聊"}</WandDropdownMenuItem> : null}
-      <WandDropdownMenuItem disabled={busy} tone="danger" icon="trash" onSelect={() => void action(onRemove)}>{item.kind === "group" ? "删除群聊" : "删除对话"}</WandDropdownMenuItem>
-    </WandDropdownMenuContent>
-  </WandDropdownMenu>
+      });
+    } }}/>
+
     {!compact && !item.dissolvedAt && item.tasks.length > 0 ? <WandButton kind="ghost" className="conversation-task-toggle" aria-expanded={showTasks} onClick={() => setExpanded(!expanded)}>
       <WandIcon name="chevronDown" size={12}/>{item.tasks.length} 个任务{showTasks ? " · 收起" : ""}</WandButton> : null}
     {showTasks ? tasks.map(t => <WandButton key={t.task.id} kind="ghost" className="conversation-task-row" onClick={() => {

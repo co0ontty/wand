@@ -188,6 +188,7 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
     };
     let touchedDeployField = false;
     try {
+      if (Object.hasOwn(body, "localDecision")) throw new Error("请使用本地模型设置管理 LAYA；通用配置不接受运行时路径或命令。");
       if (body.modelGroups !== undefined && body.expectedModelGroups !== undefined
         && JSON.stringify(normalizeModelGroups(body.expectedModelGroups)) !== JSON.stringify(config.modelGroups ?? [])) {
         res.status(409).json({ error: "模型分组已在其他设备修改，请先刷新；当前草稿已保留。" });

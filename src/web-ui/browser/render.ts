@@ -506,6 +506,10 @@ export function renderAppShell() {
             '<span class="composer-attachments-host" data-composer-attachments-host="main"></span>' +
             '<div class="composer-main-row">' +
               '<div class="composer-input-wrap">' +
+                '<button data-antd-control class="prompt-optimize-btn" id="prompt-optimize-btn" type="button" title="优化提示词" aria-label="优化提示词">' +
+                  iconSvg("sparkle", { size: 15, strokeWidth: 1.9, cls: "prompt-optimize-icon" }) +
+                  '<span class="prompt-optimize-label">优化</span>' +
+                '</button>' +
                 '<div data-composer-sender><textarea id="input-box" class="input-textarea" aria-label="消息输入" placeholder="' + getComposerPlaceholder(selectedSession, state.terminalInteractive) + '" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="send">' + escapeHtml(currentDraft) + '</textarea></div>' +
               '</div>' +
               '<div class="composer-actions-left" role="group" aria-label="添加内容与权限">' +
@@ -544,11 +548,6 @@ export function renderAppShell() {
                   // React 外壳的 `replaceChildren()` 丢弃。
                   '<span class="composer-config-host" data-composer-config-host="runtime"></span>' +
                 '</div>' +
-                '<button data-antd-control class="prompt-optimize-btn" id="prompt-optimize-btn" type="button" title="优化提示词" aria-label="优化提示词">' +
-                  iconSvg("sparkle", { size: 15, strokeWidth: 1.9, cls: "prompt-optimize-icon" }) +
-                  '<span class="prompt-optimize-label">优化</span>' +
-                  '<span class="prompt-optimize-spinner" aria-hidden="true"></span>' +
-                '</button>' +
                 // 语音按钮位于输入框内部、发送按钮左侧；只在按钮自身处理长按。
                 '<button id="voice-record-btn" data-antd-control type="button" title="按住语音输入" aria-label="按住语音输入" aria-pressed="false"' + (state.terminalInteractive ? ' disabled' : '') + '>' +
                   iconSvg("mic", { size: 19, strokeWidth: 2 }) +

@@ -135,69 +135,36 @@ test("Android native terminal consumes Render snapshots over the PTY websocket",
   assert.ok(!source(screen).includes("WebView"), "Android PTY must not mount WebView");
 });
 
-test("Apple clients preserve mobile WebView and desktop native terminal contracts", () => {
-  includesAll("ios/Wand/WebContainerView.swift", [
-    "window.__wandIosNative = true",
-    'URLQueryItem(name: "session", value: sessionId)',
-    'URLQueryItem(name: "embed", value: "terminal")',
-    'URLQueryItem(name: "nativeInput", value: "1")',
-    'URLQueryItem(name: "passthrough", value: "1")',
-    "WandPlatform/iOS",
+test("Apple clients preserve native terminal, IME, replay and transport contracts", () => {
+  includesAll("ios/Wand/NativeTerminal.swift", [
+    "import SwiftTerm",
+    "TerminalView, TerminalViewDelegate",
+    "data.terminalState?.isReplayable != false",
+    "terminal.resize(cols: cols, rows: rows)",
+    "guard !restoring, !suppressingInput",
+    "buildTerminalPasteSequence(text, bracketed: bracketed)",
+    "func clipboardRead(source: TerminalView) -> Data? { nil }",
+    "socket.subscribe(sessionId: sessionId, ptyAck: true)",
+    "socket.acknowledgePty(bytes: event.ptyBytes ?? 0)",
   ]);
-  const iosBridge = "ios/Wand/WebBridge.swift";
-  if (source(iosBridge).includes("__wandNativeBackHooked")) {
-    // The pinned iOS submodule still installs the legacy native-back bridge.
-    includesAll("ios/Wand/WebContainerView.swift", [
-      "window.WandNative",
-      "terminal-scale-down-top",
-      "terminal-scale-label-top",
-      "terminal-scale-up-top",
-      "page-refresh-btn",
-      ".is-wand-embed-terminal .wand-joystick-root",
-      ".is-wand-embed-terminal .terminal-scroll-wrap",
-      ".is-wand-embed-terminal .input-panel",
-      ".is-wand-embed-terminal .notification-bubble",
-      ".terminal-container { background: var(--bg-terminal",
-      "__wandNativeTerminalTapInstalled",
-      "requestTerminalInput",
-      "restoreEmbeddedTerminalInput",
-      "refitEmbeddedTerminalViewport",
-      "suppressEmbeddedTerminalIme",
-    ]);
-    includesAll(iosBridge, [
-      "wand-ios-ime-state",
-      "__wandNativeBackHooked",
-    ]);
-  } else {
-    const container = "ios/Wand/WebContainerView.swift";
-    includesAll(container, [
-      "coordinator.installEndpointContentBoundary(",
-      "self.authenticateAndLoad(",
-      "WandAuth.loginWithToken(",
-      "cookieStore.setCookie(cookie)",
-      "webView.load(URLRequest(url: targetURL))",
-      "reconnectTask?.cancel()",
-      "cancelAutomaticReconnect()",
-      "refitEmbeddedTerminalViewport",
-    ]);
-    assertOrdered(container, "coordinator.installEndpointContentBoundary(", "self.authenticateAndLoad(");
-    assertOrdered(
-      container,
-      "cookieStore.setCookie(cookie)",
-      "webView.load(URLRequest(url: targetURL))",
-    );
-    includesAll(iosBridge, ["wand-ios-ime-state", "installEndpointContentBoundary("]);
-    includesAll("ios/Wand/PtyInputProtocol.swift", [
-      'PtyInputChunk(input: text, view: view, shortcutKey: "enter_text")',
-      'PtyInputChunk(input: "\\r", view: view, shortcutKey: "enter_text")',
-    ]);
-    includesAll("ios/Wand/WandSocket.swift", [
-      'case "resync_required":',
-      "requestResync()",
-      "lastSeqBySession[id] = seq",
-      "task?.cancel(with: .goingAway, reason: nil)",
-    ]);
-  }
+  includesAll("ios/Wand/WandSocket.swift", [
+    "WandEndpoint.webSocketURL(baseURL: baseURL)",
+    '"capabilities": ["ptyAck": ptyAck]',
+    '"type": "pty_input"',
+    '"type": "pty_resize"',
+    '"type": "pty_ack"',
+    'case "resync_required":',
+    "awaitingSnapshot",
+    "gen == self.generation",
+    "sendQueue.removeAll()",
+    "task?.cancel(with: .goingAway, reason: nil)",
+  ]);
+  includesAll("ios/Wand/PtyInputProtocol.swift", [
+    'PtyInputChunk(input: text, view: view, shortcutKey: "enter_text")',
+    'PtyInputChunk(input: "\\r", view: view, shortcutKey: "enter_text")',
+  ]);
+  assert.doesNotMatch(source("ios/Wand/SessionDestinationView.swift"), /WebContainerView|terminalWebModel|evaluateJavaScript/);
+  assertOrdered("ios/Wand/NativeTerminal.swift", "terminal.feedOutput(text)", "socket.acknowledgePty(bytes:");
   includesAll("ios/Wand/NativeComposer.swift", [
     "IMEAwareComposerTextView",
     "markedTextRange",
@@ -212,7 +179,8 @@ test("Apple clients preserve mobile WebView and desktop native terminal contract
   includesAll("ios/Wand/SessionDestinationView.swift", [
     "IMEAwareComposerTextView",
     "composerIsComposing",
-    "suppressEmbeddedTerminalIme",
+    "terminal.terminal.blurTerminal()",
+    "NativeTerminalSurface",
   ]);
   includesAll("macos/Wand/NativeTerminalView.swift", [
     "import SwiftTerm",
@@ -553,12 +521,20 @@ test("tool activity summaries stay consecutive and split when prose arrives", ()
   ]);
 
   includesAll("ios/Wand/ChatView.swift", [
-    "struct ActivityFoldCard",
-    // 展开态默认跟随「最新一段活动」，用户手动收放后不再被自动状态覆盖。
-    "_expanded = State(initialValue: group.newest)",
-    "activityWindowTail",
+    "collapseActivityItems(",
     "summarizeActivityItems",
   ]);
+  includesAll("ios/Wand/ChatActivityTimeline.swift", [
+    "struct ActivityFoldCard",
+    // Android/iOS 共用时序语义；自动展开服从网络偏好，用户手动收放后不再覆盖。
+    "group.newest && automaticTimeline",
+    "if !userToggled",
+    "activityTimelineOrder",
+    "ActivityTimelineEntry",
+    "api.fetchToolContent",
+    "pinned && inspecting.isEmpty",
+  ]);
+  assert.doesNotMatch(source("ios/Wand/ChatView.swift"), /thinking:.*hashValue/, "streamed thinking must keep a stable identity");
 
   includesAll("macos/Wand/ChatView.swift", [
     "struct ActivityFoldCard",
@@ -574,7 +550,7 @@ test("embedded passthrough terminal pins its width so fit cannot shrink it", () 
   // xterm 自身网格宽度反向决定，而 FitAddon 又按这个宽度反算列数 —— 自反馈会让终端
   // 每 fit 一次就更窄一点（表现为右侧铺不满并逐渐缩小）。两处都必须钉死宽度。
   const rulePattern = /\.is-wand-terminal-passthrough\s+\.terminal-scroll-wrap\s*\{[^}]*\}/;
-  for (const file of ["ios/Wand/WebContainerView.swift", "src/web-ui/content/styles.css"]) {
+  for (const file of ["src/web-ui/content/styles.css"]) {
     const rule = source(file).match(rulePattern);
     assert.ok(rule, `${file} must keep the passthrough .terminal-scroll-wrap rule`);
     assert.match(rule[0], /width:\s*100%/, `${file} must pin the passthrough wrap width`);

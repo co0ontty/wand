@@ -8,6 +8,8 @@ import * as React from "react";
  *
  * reduce-motion 不归零这两项：它们是「读结果的等待」，不是位移/缩放/淡入。
  */
+/** Hold-to-talk intent threshold, shared with native WandMotion.voiceHoldDelay (not an animation). */
+export const VOICE_HOLD_DELAY_MS = 180;
 export const MOTION_DWELL_SENT_MS = 720;
 export const MOTION_DWELL_FAILED_MS = 1500;
 

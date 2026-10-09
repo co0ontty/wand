@@ -1,9 +1,7 @@
-import { WandStretchTabs } from "../ui";
+import { WandDropdownMenuItem, WandDropdownMenuSeparator, WandIcon, WandStretchTabs } from "../ui";
 // 聊天内容宽度开关：铺满 / 居中两态的分段控件。
 //
-// 放在「第一屏就能看到」的位置——独立会话在顶栏右侧、任务里在标签栏右侧
-// （两处同一个组件、同一份 localStorage 状态）。刻意不做进设置面板：这个偏好
-// 是「现在读得累不累」的即时调节，藏进设置等于没有。
+// 独立会话从当前会话菜单切换，任务窗口沿用标签栏即时控件；两处共用设备偏好。
 //
 // 只有聊天视图真正在屏幕上时才出现（legacyVisibility.chat），PTY 终端没有可
 // 收窄的正文列；窄屏下由 CSS 隐藏（CHAT_WIDTH_MIN_VIEWPORT）。
@@ -11,7 +9,7 @@ import { WandStretchTabs } from "../ui";
 import * as React from "react";
 
 import { useUiStoreSnapshot } from "./ui-store-react";
-import { chatWidthStore, setChatWidthMode, type ChatWidthMode } from "./chat-width";
+import { CHAT_WIDTH_MIN_VIEWPORT, chatWidthStore, setChatWidthMode, type ChatWidthMode } from "./chat-width";
 import { classNames } from "../ui/class-names";
 
 interface ChatWidthOption {
@@ -49,4 +47,27 @@ export function ChatWidthToggle({ className }: { readonly className?: string }) 
       label: <span title={option.title}>{option.label}</span> }))}
     onValueChange={(value) => setChatWidthMode(value as ChatWidthMode)}
   />;
+}
+
+/** The session menu uses the same local preference as the task's inline control. */
+export function ChatWidthMenuItems() {
+  const snapshot = useUiStoreSnapshot();
+  const mode = React.useSyncExternalStore(chatWidthStore.subscribe, chatWidthStore.getSnapshot, chatWidthStore.getServerSnapshot);
+  const [available, setAvailable] = React.useState(false);
+  React.useEffect(() => {
+    const wide = window.matchMedia(`(min-width: ${CHAT_WIDTH_MIN_VIEWPORT}px)`);
+    const update = () => setAvailable(wide.matches && !document.documentElement.classList.contains("is-wand-app"));
+    update(); wide.addEventListener("change", update);
+    return () => wide.removeEventListener("change", update);
+  }, []);
+  if (!available || !snapshot.legacyVisibility.chat) return null;
+  return <>
+    <WandDropdownMenuSeparator/>
+    {CHAT_WIDTH_OPTIONS.map(option => <WandDropdownMenuItem key={option.mode}
+      title={option.title} data-chat-width-mode={option.mode}
+      hint={mode === option.mode ? <WandIcon name="check" size={14}/> : undefined}
+      onSelect={() => setChatWidthMode(option.mode)}>
+      聊天宽度：{option.label}
+    </WandDropdownMenuItem>)}
+  </>;
 }

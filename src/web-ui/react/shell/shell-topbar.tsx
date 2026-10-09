@@ -23,7 +23,8 @@ import {
   SHELL_WORKTREE_MERGE_LABEL,
   type ShellSidebarEntryActions,
 } from "./shell-sidebar";
-import { ChatWidthToggle } from "./chat-width-toggle";
+import { ChatWidthMenuItems } from "./chat-width-toggle";
+import { agentToolIdFor, agentToolOption, normalizeProviderId } from "../../provider-identity";
 import { SidebarToggleIcon } from "./sidebar-toggle-icon";
 import { SessionElapsed } from "./session-elapsed";
 import { useServerAnchoredClock } from "./use-server-anchored-clock";
@@ -169,8 +170,13 @@ export function ShellTopbar() {
   const dispatch = useUiDispatch();
   const selected = snapshot.selected;
   const moreOpen = snapshot.layout.topbarMoreOpen;
+  const menuOpenIntent = React.useRef(moreOpen);
+  React.useEffect(() => { menuOpenIntent.current = moreOpen; }, [moreOpen]);
   const selectedActions = selected ? getShellSidebarEntryActions(selected, false) : null;
   const topbarNow = useServerAnchoredClock(Boolean(selected?.turnActive));
+  const providerId = normalizeProviderId(selected?.provider);
+  const toolLabel = providerId ? agentToolOption(agentToolIdFor(providerId, selected?.engine))?.label : selected?.provider;
+  const cwdName = snapshot.topbar.cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || snapshot.topbar.cwd;
 
   // Selecting an item closes the menu through `onOpenChange`, so the action
   // itself is all that is left to dispatch here.
@@ -203,12 +209,11 @@ export function ShellTopbar() {
       <Flex align="center" gap="small" wrap className="topbar-center" style={{ flex: "1 1 200px", minWidth: "min(100%, 200px)" }}>
         {selected ? (
           <>
-            <Typography.Text type="secondary">{selected.provider}</Typography.Text>
             <Typography.Text ellipsis
               className={classNames("topbar-session-title", snapshot.topbar.titleGenerating && "title-generating")}
-              title={snapshot.topbar.description || selected.title}
+              title={[snapshot.topbar.title, snapshot.topbar.description].filter(Boolean).join("\n")}
               aria-busy={snapshot.topbar.titleGenerating || undefined}
-              style={{ flex: "1 1 120px", minWidth: 0, maxWidth: 260 }}
+              style={{ flex: "1 1 180px", minWidth: 0, maxWidth: 520, fontWeight: "var(--font-weight-semibold)" }}
             >
               {snapshot.topbar.title}
             </Typography.Text>
@@ -224,6 +229,7 @@ export function ShellTopbar() {
                 </span>
               )}
             </Tag>
+            <Typography.Text type="secondary" className="topbar-provider" title={toolLabel}>{toolLabel}</Typography.Text>
             <Typography.Text type="secondary"
               className={classNames("current-task", !snapshot.topbar.currentTask && "hidden")}
               id="current-task"
@@ -233,12 +239,13 @@ export function ShellTopbar() {
             </Typography.Text>
             {snapshot.topbar.cwd && (
               <Typography.Text type="secondary"
-                className="topbar-cwd tail-marquee-path"
+                className="topbar-cwd"
                 id="topbar-cwd"
-                title={snapshot.topbar.cwd}
-                style={{ maxWidth: 220, minWidth: 0, overflow: "hidden" }}
+                title={`工作目录：${snapshot.topbar.cwd}`}
+                aria-label={`工作目录：${snapshot.topbar.cwd}`}
+                style={{ maxWidth: 160, minWidth: 0, overflow: "hidden" }}
               >
-                <Typography.Text ellipsis className="tail-marquee-path-inner">{snapshot.topbar.cwd}</Typography.Text>
+                <Typography.Text ellipsis>{cwdName}</Typography.Text>
               </Typography.Text>
             )}
           </>
@@ -250,7 +257,6 @@ export function ShellTopbar() {
         )}
       </Flex>
       <Flex align="center" gap={4} className="topbar-right">
-        <ChatWidthToggle className="topbar-chat-width"/>
         <WandIconButton
           id="topbar-file-button"
           kind="ghost"
@@ -281,7 +287,12 @@ export function ShellTopbar() {
             <WandDropdownMenu
               open={moreOpen}
               onOpenChange={(open) => {
-                if (open !== moreOpen) void dispatch({ type: "topbar.menu.toggle" });
+                // Menu selection and the library may both report the same close.
+                // Dispatch the toggle once, before the external snapshot catches up.
+                if (open !== menuOpenIntent.current) {
+                  menuOpenIntent.current = open;
+                  void dispatch({ type: "topbar.menu.toggle" });
+                }
               }}
             >
               <WandDropdownMenuTrigger
@@ -305,6 +316,7 @@ export function ShellTopbar() {
                 sideOffset={6}
               >
                 <TopbarMoreMenu selected={selected} actions={selectedActions} onAction={runMoreAction}/>
+                <ChatWidthMenuItems/>
               </WandDropdownMenuContent>
             </WandDropdownMenu>
           </div>

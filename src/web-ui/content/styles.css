@@ -51,6 +51,14 @@ html.no-transition *, html.no-transition *::before, html.no-transition *::after 
 .chat-messages { flex: 1; min-width: 0; width: 100%; box-sizing: border-box; height: 100%; overflow: auto; display: flex; flex-direction: column-reverse; gap: 16px; padding: 16px; overflow-anchor: none; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .chat-message, .chat-activity, .chat-call, .agent-run { flex-shrink: 0; min-width: 0; }
 .chat-unread-divider { text-align: center; color: var(--text-secondary); font-size: var(--font-size-xs); }
+.main-header-row .topbar-center { gap:6px 10px; }
+.topbar-session-title { font-size:var(--font-size-sm); }
+.topbar-provider, .topbar-cwd { font-size:var(--font-size-xs); }
+.main-header-row .topbar-right { margin-inline-start:auto; }
+@media (pointer:coarse) {
+  .main-header-row .topbar-right .ant-btn { min-width:44px; min-height:44px; }
+  .chat-call-button.ant-btn, .chat-activity-retry.ant-btn, .chat-activity-file-open.ant-btn { min-height:44px; }
+}
 .chat-loading-more, .chat-empty { margin: auto; text-align: center; }
 .msg-copy-btn { visibility: hidden; }
 /* 持续可见的「正在执行」状态条：读数来自服务端本轮锚点，出现/消失只展开自身高度，
@@ -71,17 +79,35 @@ html.no-transition *, html.no-transition *::before, html.no-transition *::after 
 .chat-message-content pre, .chat-markdown pre { padding: 12px; background: var(--bg-secondary); border-radius: var(--radius-sm); }
 .chat-message-content :is(code, pre), .chat-markdown :is(code, pre) { font-family: var(--font-mono); }
 /* Native textarea, toolbar placement and imperative disclosure; visuals are Ant surfaces. */
-.input-panel { position: relative; flex-shrink: 0; padding: 8px 16px calc(8px + var(--input-safe-bottom) + var(--keyboard-offset, 0px)); }
+.input-panel { position: relative; flex-shrink: 0; box-sizing: border-box; padding: 16px max(16px, var(--wand-safe-right)) calc(8px + var(--input-safe-bottom) + var(--keyboard-offset, 0px)) max(16px, var(--wand-safe-left)); }
 .composer-top-row { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.composer-top-row:has(.todo-progress:not(.hidden), .structured-status-bar) { min-height: 32px; margin-block-end: 12px; }
+.todo-progress { flex: 1; min-width: 0; }
+.todo-progress-header.ant-btn { max-width: 100%; height: 32px; padding-inline: 6px; font-size: var(--font-size-xs); }
+.todo-progress-header.ant-btn > span, #todo-progress-summary { display: block; min-width: 0; max-width: 100%; }
+#todo-progress-ring, #todo-progress-counter, .todo-progress-chevron { flex: none; display: inline-flex; align-items: center; }
+#todo-progress-counter { font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+#todo-progress-task { min-width: 0; font-size: inherit; }
+.todo-progress-chevron { color: var(--text-secondary); transition: transform var(--motion-fast) var(--ease-out-expo); }
+.todo-progress-header[aria-expanded="true"] .todo-progress-chevron { transform: rotate(180deg); }
 .input-composer-row { position: relative; display: flex; gap: 8px; }
 .input-composer { position: relative; flex: 1; min-width: 0; }
 .composer-main-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; gap: 8px; }
-.composer-input-wrap { grid-column: 1 / -1; min-width: 0; }
+.composer-input-wrap { position: relative; grid-column: 1 / -1; min-width: 0; }
+.composer-surface:focus-within { border-color: var(--accent); }
+.composer-input-wrap .prompt-optimize-btn { position: absolute; inset-block-start: -24px; inset-inline-end: 0; z-index: 1; }
+.composer-input-wrap .prompt-optimize-btn.is-loading .prompt-optimize-icon { animation: composer-optimize-spin var(--motion-spin) linear infinite; }
+@keyframes composer-optimize-spin { to { transform: rotate(360deg); } }
 .composer-actions-left, .composer-actions-right, .composer-status-row, .composer-inline-config, .composer-config-controls { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .composer-actions-right { justify-content: flex-end; flex-wrap: wrap; }
 .composer-config-controls > [data-mode-control-pill] { min-width: 0; }
 .composer-badge-host, .composer-config-host, .composer-rail-host, .composer-voice-host, .composer-attachments-host, .composer-action-error-host, .plus-popover-items-host { display: contents; }
-.input-textarea { width: 100%; min-height: 36px; max-height: var(--input-max-height, 160px); resize: none; touch-action: pan-y; overscroll-behavior: contain; }
+.input-textarea { width: 100%; min-height: 36px; max-height: var(--input-max-height, 160px); resize: none; touch-action: pan-y; overscroll-behavior: contain; box-sizing: border-box; display: block; border: 0; padding: 0; outline: none; background: transparent; color: var(--text-primary); caret-color: var(--accent); font: inherit; }
+.input-textarea::placeholder { color: var(--text-secondary); }
+/* Only idle mobile input owns hold-to-talk; focused/nonempty input keeps native selection/scroll. */
+textarea[data-idle-speech] { touch-action: none; user-select: none; -webkit-user-select: none; }
+.input-textarea:disabled { color: var(--text-tertiary); cursor: not-allowed; }
+@media (prefers-reduced-motion: reduce) { .composer-input-wrap .prompt-optimize-btn.is-loading .prompt-optimize-icon { animation: none; } }
 .composer-status-line { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-secondary); font-size: var(--font-size-xs); }
 .composer-plus-popover { position: absolute; bottom: calc(100% - 8px); left: 16px; z-index: 50; width: min(360px, calc(100vw - 32px)); }
 .composer-plus-popover [data-composer-popover-host] { display: grid; gap: 4px; }
@@ -91,7 +117,10 @@ html.no-transition *, html.no-transition *::before, html.no-transition *::after 
 .queue-bar-host { position: absolute; bottom: calc(100% + 8px); right: 16px; width: min(360px, calc(100% - 32px)); max-height: 40dvh; overflow: auto; z-index: 40; }
 .queue-bar-item { touch-action: pan-y; }
 .queue-bar-item-sliding { transition: transform var(--motion-fast) var(--ease-in-out-smooth); }
-.structured-status-bar { display: flex; gap: 8px; color: var(--text-secondary); font-size: var(--font-size-xs); }
+.structured-status-bar { display: flex; align-items: center; flex: none; margin-inline-start: auto; gap: 6px; padding-inline: 6px; min-height: 32px; color: var(--text-secondary); font-size: var(--font-size-xs); white-space: nowrap; }
+.status-bar-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+.status-bar-timer { font-variant-numeric: tabular-nums; }
+.structured-status-bar.completed { color: var(--success); }
 .input-composer.is-terminal-interactive :is(.composer-status-row, .composer-inline-config, .prompt-optimize-btn, #voice-record-btn, .composer-attachments-host) { display: none; }
 .input-composer.is-terminal-interactive #send-input-button:not([data-phase="running"]) { display: none; }
 /* One PTY key row stays with the composer; Ant owns the key visuals. */
@@ -99,6 +128,7 @@ html.no-transition *, html.no-transition *::before, html.no-transition *::after 
 .terminal-shortcuts-row { width: max-content; }
 .terminal-shortcuts-row > button { flex: none; min-width: 36px; }
 @media (pointer: coarse), (max-width: 640px) {
+  .todo-progress-header.ant-btn { min-height: 44px; height: 44px; }
   .terminal-shortcuts-row > button { min-width: 44px; min-height: 44px; }
 }
 .notification-bubble { position: fixed; left: 50%; transform: translateX(-50%); width: min(440px, calc(100vw - 32px)); z-index: 20020; }
@@ -131,7 +161,16 @@ html.no-transition *, html.no-transition *::before, html.no-transition *::after 
    不会有任何变化 —— 所以除了窄屏隐藏，整个原生壳也隐藏这个开关，不给用户空动作。 */
 html.is-wand-app .chat-width-toggle { display: none; }
 @media (min-width: 1280px) { .chat-width-toggle { display: inline-flex; } html[data-chat-width="column"]:not(.is-wand-app) :is(.chat-messages, .chat-running-bar, .input-panel) { max-width: var(--chat-column-width); width: 100%; margin-inline: auto; } }
-@media (max-width: 640px) { .input-panel { padding-inline: 8px; } .composer-status-line, .composer-status-row [data-config-scope="mode"], [data-models-refresh-scope="runtime"], .login-page .left-spacer { display: none; } .input-textarea { --input-max-height: min(160px, 35dvh); } .composer-main-row { grid-template-columns: auto minmax(0, 1fr); } .composer-actions-left { align-self: end; } .composer-inline-config { flex-basis: 100%; justify-content: flex-end; } .composer-actions-right .ant-btn { flex-shrink: 0; } #send-input-button { min-width: 32px; } }
+@media (max-width: 640px) {
+  .composer-status-line:not([data-tone]), .composer-status-row [data-config-scope="mode"], [data-models-refresh-scope="runtime"], .login-page .left-spacer { display: none; }
+  .input-textarea { --input-max-height: min(160px, 35dvh); }
+  .composer-main-row { grid-template-columns: minmax(0, 1fr); }
+  .composer-actions-right { grid-column: 1; }
+  .composer-inline-config { flex-wrap: wrap; justify-content: flex-end; }
+  .composer-actions-right .ant-btn { flex-shrink: 0; }
+  .composer-input-wrap .prompt-optimize-btn { min-height: 32px; inset-block-start: -28px; }
+  #send-input-button { min-width: 32px; }
+}
 @media (prefers-color-scheme: dark) { .is-wand-embed-terminal { --bg-terminal: #17120f; } }
 @media (prefers-reduced-motion: reduce) { .login-visual-scene * { animation: none !important; } html:not(.is-wand-app) *, html:not(.is-wand-app) *::before, html:not(.is-wand-app) *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; } }
 
@@ -174,9 +213,10 @@ html.is-wand-app .chat-width-toggle { display: none; }
 .conversation-message-scroll > *, .conversation-composer { width:100%; max-width:var(--chat-column-width); margin-inline:auto; }
 .conversation-empty { padding-block:24px; }
 .conversation-composer { flex-shrink:0; position:relative; padding:8px 16px max(8px,var(--wand-safe-bottom,0px)); border-top:1px solid var(--border-subtle); background:var(--bg-primary); }
-.conversation-receiver { display:block; min-height:20px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:12px; color:var(--text-secondary); }
-.conversation-feedback { min-height:44px; overflow:hidden; display:flex; align-items:center; flex-wrap:wrap; gap:4px; }
-.conversation-feedback > .ant-typography { flex:1; min-width:0; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.conversation-receiver { display:block; flex:1; min-width:0; min-height:20px; white-space:normal; overflow-wrap:anywhere; font-size:12px; color:var(--text-secondary); }
+.conversation-cwd-summary { display:block; font-size:12px; overflow-wrap:anywhere; }
+.conversation-feedback { min-height:44px; max-height:25dvh; overflow:auto; display:flex; align-items:center; flex-wrap:wrap; gap:4px; }
+.conversation-feedback > .ant-typography { flex:1; min-width:min(100%,200px); white-space:pre-wrap; overflow-wrap:anywhere; }
 .conversation-action-row { height:44px; flex-shrink:0; }
 /* 操作行是发送器自己的 footer，与正文同属一张输入面板，不再单独占一条工具栏。 */
 .conversation-sender .ant-sender-footer { padding:0 12px 10px; }
@@ -186,6 +226,12 @@ html.is-wand-app .chat-width-toggle { display: none; }
 .conversation-task-context .ant-typography { min-width:0; overflow-wrap:anywhere; }
 .conversation-approval { align-self:flex-start; min-width:96px; height:44px; }
 .conversation-input-hint { font-size:var(--font-size-xs); }
+@media (pointer:coarse) {
+  .conversation-heading-title { min-height:44px; height:auto; }
+  .conversation-root .conversation-more.ant-btn,
+  .conversation-root .conversation-task-toggle.ant-btn,
+  .conversation-root .conversation-task-row.ant-btn { min-height:44px; }
+}
 .conversation-feedback[hidden] { display:none; }
 .conversation-morph-icon { position:relative; display:inline-block; flex-shrink:0; }
 .conversation-morph-icon > span { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; transition:opacity var(--motion-morph) var(--ease-out-expo), transform var(--motion-morph) var(--ease-out-expo); }

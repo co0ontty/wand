@@ -20,7 +20,9 @@ test("real Chrome tool timeline auto-expands, follows new calls and preserves ma
   assert.equal(report.cases.length, 24);
   assert.equal(report.cases.filter((entry: any) => entry.case === "live-auto-expand" && entry.ok).length, 6);
   assert.equal(report.cases.filter((entry: any) => entry.case === "automatic-resource-notice" && entry.ok).length, 6);
-  assert.equal(report.cases.filter((entry: any) => entry.rows === 40 && entry.panelHeight === 200).length, 6);
+  // 面板高度按会话视口派生（120–240 之间），不是某个固定像素值。
+  assert.equal(report.cases.filter((entry: any) => entry.rows === 40
+    && entry.panelHeight === Math.round(Math.max(120, Math.min(240, entry.viewportHeight / 3)))).length, 6);
   assert.ok(report.cases.filter((entry: any) => entry.rows === 40)
     .every((entry: any) => entry.decisionIndependent && entry.decisionPendingErrorAndOrphan && entry.decisionFeedbackStable
       && entry.decisionDefaultCollapsed && entry.decisionHeaderStable));

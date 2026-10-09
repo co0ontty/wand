@@ -21,7 +21,9 @@ import { ensureTerminalFit, scheduleClosedViewportBaselineWindow, syncAppViewpor
 import { paintTerminalPanel } from "./terminal-panel-adapter";
 import "./websocket";
 import { buildPtyAttachmentChunks, isImageAttachmentSource } from "./pty-paste";
-import { notifyLegacyUiChange } from "./ui-store-bridge";
+import { notifyLegacyUiChange, subscribeLegacyUiChange } from "./ui-store-bridge";
+import { BrowserSpeechInput, readSpeechMode } from "../react/speech/repository";
+import { bindIdleSpeechInput } from "../react/speech/hold-input";
 import { PROVIDER_IDS, PROVIDER_LABELS, inferProviderIdFromCommand } from "../provider-identity";
 import { syncBrowserComposerRail } from "./composer-rail-adapter";
 import { syncBrowserComposerPopover } from "./composer-popover-adapter";
@@ -38,117 +40,136 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
       "X-Wand-Tool-Projection": "compact" } });
 }
 
-      // 改为在识别回调里调用 updateVoiceTranscript(累积文本) 即可，交互层不用动。
-      // ─────────────────────────────────────────────────────────────────
-      // 气泡的可见性与文案由 React 渲染（见 composer-voice 组件）；legacy 只维护
-      // 录音状态与录制按钮 DOM。`bubbleVisible` 取代了原来自行切的 .hidden class。
+      // Hardware/request lifecycle lives in BrowserSpeechInput; drafts remain in ComposerStore.
       var voiceState = { recording: false, canceling: false, transcript: "", startY: 0, bubbleVisible: false, status: "" };
-      var VOICE_CANCEL_THRESHOLD = 60; // 按住后上滑超过该像素进入"松开取消"态
-
-      // 把录音状态发布给 React 气泡。
-      function syncVoiceBubble() {
-        syncBrowserComposerVoice({
-          visible: voiceState.bubbleVisible,
-          canceling: voiceState.canceling,
-          transcript: voiceState.transcript,
-          status: voiceState.status,
-        });
+      var VOICE_CANCEL_THRESHOLD = 60;
+      var voiceSession: BrowserSpeechInput | null = null;
+      var voiceCapture: { sessionId: string; revision: number; text: string } | null = null;
+      var voiceErrorTimer: ReturnType<typeof setTimeout> | null = null;
+      var voiceLifecycleBound = false;
+      var idleVoiceInput: { input: HTMLTextAreaElement; binding: ReturnType<typeof bindIdleSpeechInput> } | null = null;
+      function syncIdleVoiceInput(input: HTMLTextAreaElement) {
+        if (!input) return;
+        if (idleVoiceInput?.input !== input) {
+          idleVoiceInput?.binding.dispose();
+          const binding = bindIdleSpeechInput(input, {
+            enabled: () => !!state.selectedId && !state.terminalInteractive && !(state.promptOptimizeRequest?.sessionId === state.selectedId),
+            begin: startVoiceRecording, move: handleVoiceMove, finish: stopVoiceRecording,
+            cancel: () => cancelVoiceRecording(null),
+          });
+          idleVoiceInput = { input, binding };
+        }
+        const session = state.sessions.find((item) => item.id === state.selectedId);
+        idleVoiceInput.binding.sync(getComposerPlaceholder(session, state.terminalInteractive));
       }
 
-      // STT 唯一注入点：写入累积文字并刷新气泡内容。
-      // 网页端目前没有可用的语音识别后端（移动端走原生客户端的端侧 STT）；
-      // 真正接入网页 STT 时，在识别回调里调用本函数累积文本即可，交互层不用动。
+      function syncVoiceBubble() {
+        syncBrowserComposerVoice({ visible: voiceState.bubbleVisible, canceling: voiceState.canceling,
+          transcript: voiceState.transcript, status: voiceState.status });
+      }
       export function updateVoiceTranscript(text) {
         voiceState.transcript = text || "";
         syncVoiceBubble();
       }
-
+      function bindVoiceLifecycle() {
+        if (voiceLifecycleBound) return;
+        voiceLifecycleBound = true;
+        window.addEventListener("pagehide", () => cancelVoiceRecording(null));
+        window.addEventListener("wand-voice-settings-change", () => cancelVoiceRecording(null));
+        document.addEventListener("visibilitychange", () => { if (document.hidden) cancelVoiceRecording(null); });
+        document.addEventListener("keydown", (event) => { if (event.key === "Escape") cancelVoiceRecording(null); });
+        const rejectStale = () => {
+          if (voiceCapture && (state.selectedId !== voiceCapture.sessionId || state.terminalInteractive
+            || !composerStore.isCurrentRevision(voiceCapture.sessionId, voiceCapture.revision))) cancelVoiceRecording(null);
+        };
+        composerStore.subscribe(rejectStale);
+        subscribeLegacyUiChange(rejectStale);
+      }
       export function startVoiceRecording(e) {
-        if (state.terminalInteractive
-          || voiceState.recording
-          || (state.promptOptimizeRequest
-            && state.promptOptimizeRequest.sessionId === state.selectedId)) return;
+        if (state.terminalInteractive || !state.selectedId || voiceSession
+          || (state.promptOptimizeRequest && state.promptOptimizeRequest.sessionId === state.selectedId)) return;
+        bindVoiceLifecycle();
+        if (voiceErrorTimer) { clearTimeout(voiceErrorTimer); voiceErrorTimer = null; }
         if (e) {
           e.preventDefault();
-          voiceState.startY = (typeof e.clientY === "number") ? e.clientY : 0;
-          // 指针捕获：手指/鼠标移出按钮范围也能继续收到 move / up
-          try {
-            if (e.pointerId !== undefined && e.currentTarget && e.currentTarget.setPointerCapture) {
-              e.currentTarget.setPointerCapture(e.pointerId);
-            }
-          } catch (_) {}
+          voiceState.startY = typeof e.clientY === "number" ? e.clientY : 0;
+          try { if (e.pointerId !== undefined) e.currentTarget?.setPointerCapture?.(e.pointerId); } catch (_) {}
         }
+        const draft = composerStore.read(state.selectedId);
+        const capture = { sessionId: state.selectedId, revision: draft.revision, text: draft.text };
+        voiceCapture = capture;
         voiceState.recording = true;
         voiceState.canceling = false;
         voiceState.transcript = "";
-        var btn = document.getElementById("voice-record-btn");
-        if (btn) {
-          btn.classList.add("is-recording");
-          btn.setAttribute("aria-pressed", "true");
-          btn.setAttribute("title", "松开结束 · 上滑取消");
-        }
         voiceState.bubbleVisible = true;
-        voiceState.status = "网页端暂不支持语音输入，请使用 App";
-        // 网页端暂无语音识别后端：给出明确提示，不再用假样本骗用户。
-        // 语音输入请使用 App（原生客户端走端侧 STT）。
-        updateVoiceTranscript("");
+        voiceState.status = "正在准备麦克风…";
+        var btn = document.getElementById("voice-record-btn");
+        btn?.classList.add("is-recording");
+        btn?.setAttribute("aria-pressed", "true");
+        btn?.setAttribute("title", "松开结束 · 上滑取消");
+        const session = new BrowserSpeechInput(readSpeechMode(), {
+          onPartial: updateVoiceTranscript,
+          onStatus(status) { if (voiceSession === session) { voiceState.status = status; syncVoiceBubble(); } },
+          onProcessing() {
+            if (voiceSession !== session) return;
+            if (voiceState.canceling) { cancelVoiceRecording(null); return; }
+            voiceState.recording = false; btn?.setAttribute("aria-busy", "true"); btn?.setAttribute("aria-pressed", "false");
+          },
+          onFinal(text) {
+            if (voiceSession !== session) return;
+            voiceSession = null; voiceCapture = null;
+            resetVoiceRecordingUI();
+            commitVoiceTranscript(text, capture);
+          },
+          onError(message) {
+            if (voiceSession !== session) return;
+            voiceSession = null; voiceCapture = null;
+            resetVoiceRecordingUI();
+            voiceState.status = message; voiceState.bubbleVisible = true; syncVoiceBubble();
+            voiceErrorTimer = setTimeout(resetVoiceRecordingUI, MOTION_DWELL_FAILED_MS);
+          },
+        });
+        voiceSession = session;
+        syncVoiceBubble();
+        void session.start();
       }
-
       export function handleVoiceMove(e) {
         if (!voiceState.recording || !e) return;
-        var dy = voiceState.startY - (typeof e.clientY === "number" ? e.clientY : voiceState.startY);
-        var shouldCancel = dy > VOICE_CANCEL_THRESHOLD;
+        const shouldCancel = voiceState.startY - (typeof e.clientY === "number" ? e.clientY : voiceState.startY) > VOICE_CANCEL_THRESHOLD;
         if (shouldCancel === voiceState.canceling) return;
         voiceState.canceling = shouldCancel;
         voiceState.status = shouldCancel ? "松开手指 取消" : "正在聆听…上滑取消";
         syncVoiceBubble();
       }
-
       export function stopVoiceRecording(e) {
         if (!voiceState.recording) return;
-        if (e) e.preventDefault();
-        voiceState.recording = false;
-        var commit = !voiceState.canceling && !!voiceState.transcript.trim();
-        var text = voiceState.transcript;
-        resetVoiceRecordingUI();
-        if (commit) {
-          commitVoiceTranscript(text);
-        }
+        e?.preventDefault();
+        if (voiceState.canceling) cancelVoiceRecording(e);
+        else voiceSession?.finish();
       }
-
       export function cancelVoiceRecording(e) {
-        if (!voiceState.recording) return;
-        voiceState.canceling = true;
-        stopVoiceRecording(e);
+        e?.preventDefault();
+        voiceSession?.cancel(); voiceSession = null; voiceCapture = null;
+        if (voiceErrorTimer) { clearTimeout(voiceErrorTimer); voiceErrorTimer = null; }
+        resetVoiceRecordingUI();
       }
-
-      // 复位录音相关 UI（按钮 + 气泡），不改变是否处于语音模式。
       function resetVoiceRecordingUI() {
-        voiceState.canceling = false;
-        var btn = document.getElementById("voice-record-btn");
-        if (btn) {
-          btn.classList.remove("is-recording");
-          btn.setAttribute("aria-pressed", "false");
-          btn.setAttribute("title", "按住语音输入");
-        }
+        voiceState.recording = false; voiceState.canceling = false;
+        const btn = document.getElementById("voice-record-btn");
+        btn?.classList.remove("is-recording"); btn?.setAttribute("aria-pressed", "false");
+        btn?.removeAttribute("aria-busy"); btn?.setAttribute("title", "按住语音输入");
         voiceState.bubbleVisible = false;
         syncVoiceBubble();
       }
-
-      // 把识别文字填回输入框（追加在已有草稿后、不覆盖），光标停末尾。
-      // 复用 setDraftValue + autoResizeInput，与提示词优化填回 textarea 同一套范式。
-      function commitVoiceTranscript(text) {
-        if (state.promptOptimizeRequest
-          && state.promptOptimizeRequest.sessionId === state.selectedId) return;
-        var clean = (text || "").trim();
-        if (!clean) return;
-        var box = document.getElementById("input-box") as HTMLInputElement | null;
+      function commitVoiceTranscript(text: string, capture: { sessionId: string; revision: number; text: string }) {
+        const clean = text.trim();
+        if (!clean || state.selectedId !== capture.sessionId) return;
+        const joined = capture.text ? capture.text.replace(/\s+$/, "") + " " + clean : clean;
+        if (!composerStore.edit(capture.sessionId, { text: joined, expectedRevision: capture.revision, persist: true })) return;
+        const box = document.getElementById("input-box") as HTMLTextAreaElement | null;
         if (!box) return;
-        var existing = box.value || "";
-        var joined = existing ? existing.replace(/\s+$/, "") + " " + clean : clean;
         box.value = joined;
-        setDraftValue(joined, true);
-        autoResizeInput(box); // 内部会 syncComposerHasText
+        autoResizeInput(box);
         try { box.setSelectionRange(joined.length, joined.length); } catch (_) {}
       }
 
@@ -1186,6 +1207,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
       var composerResultPhase: ComposerSendPhase | null = null;
       var composerResultText = "";
       var composerResultTimer = 0;
+      const composerStops = new Set<string>();
 
       function composerResultDwellMs(phase: ComposerSendPhase) {
         // 失败要读完原因，驻留必须 ≥ 成功；数值只从 motion-tokens 取，页面不写字面毫秒。
@@ -1209,10 +1231,8 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
       }
 
       function composerIdleHint(isCodex) {
-        // Codex 会话顺带解释 chat / terminal 两种视图的差别（原 .input-hint 的文案分叉）。
-        return isCodex
-          ? "Enter 发送 · chat 为解析视图，terminal 为原始输出"
-          : COMPOSER_IDLE_HINT;
+        void isCodex;
+        return COMPOSER_IDLE_HINT;
       }
 
       // 相位 → DOM：glyph 交叉淡入靠宿主 data-phase，可读名称靠 title / aria-label，
@@ -2447,6 +2467,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           // 「停止」是这一相位下唯一的动作，原来那颗独立停止按钮从来没有禁用逻辑；
           // 空草稿不算「不能点」，否则在跑会话的唯一出口又被发条件锁死。
           if (sendPhase === "running") sendDisabled = false;
+          if (state.selectedId && composerStops.has(state.selectedId)) sendDisabled = true;
           sendBtn.disabled = sendDisabled;
           sendBtn.setAttribute("aria-disabled", sendBtn.disabled ? "true" : "false");
           sendBtn.setAttribute("data-phase", sendPhase);
@@ -2711,11 +2732,13 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
       }
 
       export function stopSession() {
-        if (!state.selectedId) return;
+        if (!state.selectedId || composerStops.has(state.selectedId)) return;
         // 二次确认：停止正在运行的任务是不可逆的中断，按钮 / Esc / Ctrl+C 三个入口
         // 都会走到这里，统一弹一次确认，避免误触取消正在跑的任务。
         var id = state.selectedId;
-        wandConfirm(t("stop.confirm.message"), {
+        composerStops.add(id);
+        updateInteractiveControls();
+        return wandConfirm(t("stop.confirm.message"), {
           title: t("stop.confirm.title"),
           danger: true,
           okLabel: t("stop.confirm.ok"),
@@ -2724,16 +2747,33 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           if (!ok) return;
           // 确认期间用户可能切走会话，沿用确认时捕获的 id，避免停错会话。
           if (state.selectedId !== id) return;
-          compactSessionFetch("/api/sessions/" + id + "/stop", { method: "POST", credentials: "same-origin" })
-            .then(function(res) {
-              if (!res.ok) throw new Error("无法停止当前回复（HTTP " + res.status + "）。");
-              // 停止的结果在原位读：按钮已从「停止」变回「发送」，状态行说明结论。
-              flashComposerDone("已停止当前回复。");
-              return refreshAll();
-            })
-            .catch(function(error) {
-              flashComposerFailed(getErrorMessage(error, "无法停止当前回复。"));
-            });
+          var session = state.sessions.find(function(candidate) { return candidate.id === id; });
+          if (!session) return;
+          // The composer cancels a turn. Ending the PTY would also kill its shell
+          // and disable all subsequent input, so use the existing Ctrl+C path.
+          var stopping = isStructuredSession(session)
+            ? compactSessionFetch("/api/sessions/" + id + "/stop", { method: "POST", credentials: "same-origin" })
+              .then(function(res) { return parseJsonResponse<any>(res); })
+              .then(function(snapshot) {
+                if (!snapshot || snapshot.id !== id) throw new Error("停止回复返回了无效的会话状态。");
+                updateSessionSnapshot(snapshot);
+              })
+            : queueDirectInput(getControlInput("ctrl_c"), "ctrl_c", "chat", id);
+          return stopping.then(function() {
+            if (state.selectedId === id) flashComposerDone("已请求停止当前回复。");
+            // The acknowledgement releases the action; a slow list refresh must
+            // not keep the next turn's stop button locked.
+            void refreshAll();
+          });
+        }).catch(function(error) {
+          if (state.selectedId === id) {
+            flashComposerFailed(getErrorMessage(error, "无法停止当前回复。"));
+          } else {
+            showToast(getErrorMessage(error, "无法停止原会话的回复。"), "error");
+          }
+        }).finally(function() {
+          composerStops.delete(id);
+          updateInteractiveControls();
         });
       }
 
@@ -3063,6 +3103,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
 
       export function refreshInputBoxState(inputBox) {
         syncInputBoxForCurrentState(inputBox);
+        syncIdleVoiceInput(inputBox);
       }
 
       export function shouldAdjustForKeyboard(vv, inputBox) {

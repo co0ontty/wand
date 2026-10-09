@@ -103,6 +103,6 @@ test("native applications use the Android artwork instead of W or magic-wand mar
   assert.match(android, /painterResource\(R.drawable.ic_launcher_foreground\)/);
   assert.match(android, /painterResource\(R.drawable.ic_launcher_background\)/);
   assert.doesNotMatch(android, /WandIcons.sparkle/);
-  assert.match(source("ios/WandWidgets/WandWidgetsBundle.swift"), /Image\("WandLogo"\)/);
+  assert.match(source("ios/Wand/SessionActivityViews.swift"), /Image\("WandLogo"\)/);
   assert.match(source("ios/Wand.xcodeproj/project.pbxproj"), /scripts\/wand-logo.json/);
 });

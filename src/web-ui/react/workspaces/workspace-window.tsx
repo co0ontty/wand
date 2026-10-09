@@ -1,5 +1,6 @@
 import { WandButton } from "../ui";
-import { Empty, Flex, Splitter, Typography } from "../design-library";
+import { Alert, Empty, Flex, Spin, Splitter, Typography } from "../design-library";
+import { ensureTerminalLibrary } from "../../vendor-loader.js";
 // 活动工作窗口为 split 时取代单例终端槽位：split 节点递归渲染两个窗格和可拖拽 sash，
 // pane 节点只显示窗格标题/窗口控制（不是第二层 Tab）。终端实例来自 terminal-pool，
 // 每个 session 独立路由 input/output/resize，并拥有自己的缩放比例。
@@ -64,13 +65,23 @@ const pendingTerminalUnmounts = new Map<string, () => void>();
 
 function SessionPane({ sessionId }: { sessionId: string }) {
   const ref = React.useRef<HTMLDivElement>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState("");
+  const [attempt, setAttempt] = React.useState(0);
   React.useEffect(() => {
     const rt = runtime();
     const node = ref.current;
     if (!rt || !node) return;
     pendingTerminalUnmounts.delete(sessionId);
-    rt.mountSessionTerminal(sessionId, node);
+    let cancelled = false;
+    setLoading(true); setError("");
+    void ensureTerminalLibrary().then(() => {
+      if (cancelled || !node.isConnected) return;
+      if (rt.mountSessionTerminal(sessionId, node)) setLoading(false);
+      else { setLoading(false); setError("终端未能打开，请重试。"); }
+    }).catch(() => { if (!cancelled) { rt.unmountSessionTerminal(sessionId); setLoading(false); setError("终端组件加载失败，请重试。"); } });
     return () => {
+      cancelled = true;
       // A Splitter direction change replaces panel containers in one commit.
       // Let the new pane move the existing terminal before releasing its lease.
       const dispose = () => rt.unmountSessionTerminal(sessionId);
@@ -81,8 +92,10 @@ function SessionPane({ sessionId }: { sessionId: string }) {
         dispose();
       });
     };
-  }, [sessionId]);
-  return <div className="ws-session-pane" ref={ref} style={{ height: "100%", width: "100%", position: "relative" }} />;
+  }, [sessionId, attempt]);
+  return <div className="ws-session-pane" ref={ref} style={{ height: "100%", width: "100%", position: "relative" }}>
+    {error ? <Alert type="error" showIcon title={error} action={<WandButton onClick={() => setAttempt(value => value + 1)}>重试</WandButton>}/> : loading ? <Flex align="center" justify="center" gap={8} role="status" style={{ height: "100%" }}><Spin size="small"/>正在加载终端…</Flex> : null}
+  </div>;
 }
 
 function PaneEmpty() {

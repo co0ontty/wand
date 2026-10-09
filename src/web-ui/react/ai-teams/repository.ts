@@ -104,6 +104,7 @@ const runUrl = (runId: string, suffix = ""): string => `/api/ai-team-runs/${enco
 let teamList: AiTeam[] | null = null;
 let teamListPending: Promise<AiTeam[]> | null = null;
 let teamListVersion = 0;
+const teamListCacheListeners = new Set<() => void>();
 
 function invalidateTeamList(): void {
   teamListVersion++;
@@ -122,7 +123,10 @@ export const aiTeamsRepository = {
       const version = teamListVersion;
       const pending = requestJson<AiTeam[]>("/api/ai-teams")
         .then((list) => {
-          if (version === teamListVersion) teamList = list;
+          if (version === teamListVersion) {
+            teamList = list;
+            for (const listener of teamListCacheListeners) listener();
+          }
           return list;
         })
         .finally(() => {
@@ -268,6 +272,46 @@ export function useAiTeamList(enabled: boolean): AiTeam[] | null {
     return () => { alive = false; };
   }, [enabled]);
   return teams;
+}
+
+/** Resource management keeps load failures distinct from an empty candidate list. */
+export function useAiTeamListState(enabled: boolean): {
+  teams: AiTeam[];
+  loading: boolean;
+  error: string | null;
+  reload(): void;
+} {
+  const [teams, setTeams] = React.useState<AiTeam[]>(() => teamList ?? []);
+  const [loading, setLoading] = React.useState(enabled && !teamList);
+  const [error, setError] = React.useState<string | null>(null);
+  const active = React.useRef(false);
+  const enabledRef = React.useRef(enabled);
+  const generation = React.useRef(0);
+  enabledRef.current = enabled;
+  const reload = React.useCallback(() => {
+    if (!active.current || !enabledRef.current) return;
+    const request = ++generation.current;
+    const current = (): boolean => active.current && enabledRef.current && generation.current === request;
+    setLoading(true);
+    aiTeamsRepository.list().then(
+      (list) => { if (current()) { setTeams(list); setError(null); } },
+      (cause) => { if (current()) setError(cause instanceof Error ? cause.message : "请稍后重试。"); },
+    ).finally(() => { if (current()) setLoading(false); });
+  }, []);
+  React.useEffect(() => {
+    if (!enabled) { setLoading(false); return undefined; }
+    active.current = true;
+    const updateFromCache = (): void => {
+      if (!active.current || !enabledRef.current || !teamList) return;
+      setTeams(teamList);
+      setError(null);
+    };
+    teamListCacheListeners.add(updateFromCache);
+    reload();
+    const unsubscribe = subscribeAiTeamDefinitionChanges(reload);
+    return () => { active.current = false; generation.current++; teamListCacheListeners.delete(updateFromCache); unsubscribe(); };
+  }, [enabled, reload]);
+  return { teams, loading, error, reload };
 }
 
 /** 侧栏角标：等你批准计划或回复负责人的运行数。启动拉一次，之后跟着运行通知刷新。 */

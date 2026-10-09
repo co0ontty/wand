@@ -8,6 +8,7 @@ import { StringDecoder } from "node:string_decoder";
 import pty from "node-pty";
 
 import { keepUnixSocketAlive } from "./unix-socket-keepalive.js";
+import { TERMINAL_DAEMON_BUILD_ID } from "./terminal-daemon-build.js";
 import { ensureNodePtyHelperExecutable } from "./ensure-node-pty-helper.js";
 import { signalNumberFromName } from "./signal-utils.js";
 import {
@@ -157,6 +158,7 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
   const sessions = new Map<string, DaemonSession>();
   const clients = new Set<DaemonClient>();
   const structuredRuns = new Map<string, DaemonStructuredRun>();
+  let retiring = false;
 
   const send = (socket: net.Socket, message: TerminalDaemonResponse | TerminalDaemonEvent): void => {
     if (!socket.destroyed && socket.writable) socket.write(`${JSON.stringify(message)}\n`);
@@ -430,12 +432,24 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
       const params = request.params ?? {};
       switch (request.method) {
         case "hello":
-          result = { protocolVersion: TERMINAL_DAEMON_PROTOCOL_VERSION, pid: process.pid };
+          result = { protocolVersion: TERMINAL_DAEMON_PROTOCOL_VERSION, pid: process.pid,
+            buildId: TERMINAL_DAEMON_BUILD_ID, shutdownIfIdle: true };
           break;
+        case "shutdownIfIdle": {
+          const busy = [...sessions.values(), ...structuredRuns.values()].some((entry) => entry.status === "running");
+          result = { accepted: !busy };
+          if (!busy && !retiring) {
+            // The idle check and admission closure happen in the same event-loop turn.
+            retiring = true;
+            setTimeout(shutdown, 25).unref();
+          }
+          break;
+        }
         case "list":
           result = Array.from(sessions.values(), serialize);
           break;
         case "createOrAttach":
+          if (retiring) throw new Error("Terminal daemon is updating");
           result = createOrAttach(params as unknown as TerminalDaemonCreateParams);
           break;
         case "write": {
@@ -469,6 +483,7 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
           result = { ok: true };
           break;
         case "structuredSpawn":
+          if (retiring) throw new Error("Terminal daemon is updating");
           result = structuredSpawn(params as unknown as StructuredSpawnRequest);
           break;
         case "structuredAttach": {
@@ -492,6 +507,8 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
           structuredForget(String(params.runId ?? ""));
           result = { ok: true };
           break;
+        default:
+          throw new Error("Unsupported terminal daemon method");
       }
       send(client.socket, { kind: "response", id: request.id, ok: true, result });
     } catch (error) {

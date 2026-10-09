@@ -150,7 +150,8 @@ test("new task conversations offer every supported Agent provider", () => {
   );
   assert.equal(WORKSPACE_AGENT_OPTIONS.at(-1)?.label, "空白终端");
   const source = readFileSync(new URL("../src/web-ui/react/workspaces/workspace-agent-picker.tsx", import.meta.url), "utf8");
-  assert.match(source, /value: "structured".*智能对话模式/s);
+  assert.match(source, /value: "structured", label: "对话"/);
+  assert.match(source, /value: "pty", label: "终端"/);
   assert.match(source, /UnifiedExecutionSubjectPicker/);
   assert.match(readFileSync(new URL("../src/web-ui/react/workspaces/unified-execution-subject-picker.tsx", import.meta.url), "utf8"), /会话类型/);
 });
@@ -305,7 +306,7 @@ test("task list treats directories as group headers and exposes per-terminal del
   assert.match(panel, /workspace-row-count/);
   assert.match(panel, /删除终端/);
   assert.match(panel, /onDeleteSession/);
-  assert.match(panel, /<SidebarRowMenu row=\{row\}/);
+  assert.match(panel, /<SidebarSessionMenu row=\{row\}/);
   assert.doesNotMatch(panel, /workspace-session-action more/);
   assert.match(panel, /<Flex vertical gap=\{4\} style=\{\{ paddingInlineStart: 8 \}\} className="workspace-tasks"/);
   // Row chrome (cursor, padding, hover wash) is Appica's NavigationLink now;
@@ -316,7 +317,7 @@ test("task list treats directories as group headers and exposes per-terminal del
   assert.match(panel, /className="workspace-task-menu"/);
   assert.match(panel, /删除目录/);
   assert.match(panel, /handleDeleteDirectory/);
-  assert.match(panel, /className="workspace-task-menu-item danger"/);
+  assert.match(panel, /danger: true[^\n]*label: "删除目录…"/);
   assert.doesNotMatch(panel, /role="button"[\s\S]{0,500}workspace-task-action/);
   assert.doesNotMatch(panel, /isolated \? "隔离" : "共享"/);
   assert.doesNotMatch(panel, /if \(!collapsible\) return/);
@@ -325,10 +326,11 @@ test("task list treats directories as group headers and exposes per-terminal del
   // Library row chrome remains; destructive actions live in the menu with explicit confirmation.
   assert.match(panel, /className="workspace-session-main"/);
   assert.match(panel, /<Flex align="center" gap=\{4\} style=\{\{ minWidth: 0, width: "100%" \}\} className=\{classNames\(/);
-  assert.match(panel, /className="workspace-session-menu"/);
+  const sessionMenu = readFileSync(new URL("../src/web-ui/react/workspaces/sidebar-session-menu.tsx", import.meta.url), "utf8");
+  assert.match(sessionMenu, /className="workspace-session-menu"/);
   assert.doesNotMatch(panel, /workspace-row-folder|workspace-task-marker/);
-  assert.match(panel, /confirmSessionDelete/);
-  assert.match(panel, /<ClearSessionsButton count=\{totalSessionCount\} label=\{`任务/,
+  assert.match(sessionMenu, /confirmSessionDelete/);
+  assert.match(panel, /confirmClearSessions\(key === "clear" \? totalSessionCount : teamSplit.history.length/,
     "clearing a task must count team sessions too; its delete scope includes them");
   // 删除确认只有一个来源：公共确认模块，各列表不再各写一套内联确认。
   const sessionDelete = readFileSync(new URL("../src/web-ui/react/workspaces/session-delete-confirm.ts", import.meta.url), "utf8");

@@ -71,6 +71,12 @@ ${route === "restart" ? restartBranch : "ensure_service_installed_and_running"}
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 
+test("installing a Server package does not infer a daemon update from surviving PIDs", () => {
+  const installBody = source.slice(source.lastIndexOf('if [[ "$DO_INSTALL" == "1" ]]'));
+  assert.doesNotMatch(installBody, /STALE_DAEMON_ALIVE|DAEMON_PIDS_BEFORE/);
+  assert.doesNotMatch(installBody, /底层组件将在所有会话结束后自动更新|部分功能可能暂时异常/);
+});
+
 test("ordinary Server restart drains Core but never restarts daemon owners", () => {
   const result = runLifecycle();
   assert.equal(result.status, 0, result.stderr);

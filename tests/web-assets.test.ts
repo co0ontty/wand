@@ -36,7 +36,10 @@ test("the shell transfers only HTML repeatedly and serves versioned, cacheable a
     const jsSrc = html.match(/src="(\/assets\/app\.js\?v=[a-f0-9]{16})"/)?.[1];
     assert.ok(cssHref && jsSrc);
     assert.ok(html.indexOf("/vendor/xterm/xterm.css") < html.indexOf(cssHref));
-    assert.ok(html.indexOf("/vendor/qrcode/qrcode.bundle.js") < html.indexOf(jsSrc));
+    assert.match(html, /name="wand-qrcode-script" content="\/vendor\/qrcode\/qrcode\.bundle\.js\?v=[a-f0-9]{8}"/);
+    assert.match(html, /name="wand-xterm-script" content="\/vendor\/xterm\/xterm\.bundle\.js\?v=[a-f0-9]{8}"/);
+    assert.doesNotMatch(html, /<script src="\/vendor\//);
+    assert.doesNotMatch(html, /maximum-scale|user-scalable/);
 
     for (const [url, type, cache] of [
       [jsSrc, "javascript", "private"],

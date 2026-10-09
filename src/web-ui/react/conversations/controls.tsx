@@ -69,8 +69,8 @@ export function ConversationPanel({ open, owner, anchorRef, triggerRef, onClose,
       if (anchorRef.current?.contains(event.target as Node) || isWandPopupOwnedBy(event.target, owner)) return;
       close.current();
     };
-    document.addEventListener("pointerdown", outside);
-    return () => { document.removeEventListener("pointerdown", outside); };
+    document.addEventListener("pointerdown", outside, true);
+    return () => { document.removeEventListener("pointerdown", outside, true); };
   }, [open, anchorRef, triggerRef, owner]);
   React.useLayoutEffect(() => {
     const anchor = anchorRef.current, panel = ref.current;
@@ -97,14 +97,16 @@ export function ConversationPanel({ open, owner, anchorRef, triggerRef, onClose,
     // the panel's visibility transition runs. Focus only after it is visible;
     // when needed, use the actual animation completion instead of a fixed delay.
     let focusCancelled = false;
+    let focused = false;
     let focusFrame = 0;
     const focusVisibleControl = (): boolean => {
-      if (focusCancelled) return false;
+      if (focusCancelled || focused) return focused;
       const control = Array.from(panel.querySelectorAll<HTMLElement>("input,button,[tabindex='0']"))
         .find(node => !node.matches(":disabled") && !node.closest("[hidden],[inert]")
           && node.getClientRects().length && getComputedStyle(node).visibility === "visible");
       control?.focus({ preventScroll: true });
-      return !!control && document.activeElement === control;
+      focused = !!control && document.activeElement === control;
+      return focused;
     };
     focusFrame = requestAnimationFrame(() => {
       if (focusVisibleControl() || focusCancelled) return;
@@ -115,6 +117,12 @@ export function ConversationPanel({ open, owner, anchorRef, triggerRef, onClose,
       });
     });
     const cancelPendingFocus = (): void => { focusCancelled = true; cancelAnimationFrame(focusFrame); };
+    // Async options may make the first eligible control available after the opening animation.
+    const focusObserver = new MutationObserver(() => {
+      if (focusCancelled || focused) return;
+      cancelAnimationFrame(focusFrame); focusFrame = requestAnimationFrame(focusVisibleControl);
+    });
+    focusObserver.observe(panel, { childList: true, subtree: true, attributes: true, attributeFilter: ["disabled", "hidden", "inert"] });
     // A newer pointer/keyboard action owns focus, including during the animation.
     document.addEventListener("pointerdown", cancelPendingFocus, true);
     document.addEventListener("keydown", cancelPendingFocus, true);
@@ -124,6 +132,7 @@ export function ConversationPanel({ open, owner, anchorRef, triggerRef, onClose,
     window.addEventListener("scroll", place, true);
     return () => {
       cancelPendingFocus();
+      focusObserver.disconnect();
       document.removeEventListener("pointerdown", cancelPendingFocus, true);
       document.removeEventListener("keydown", cancelPendingFocus, true);
       observer.disconnect(); window.removeEventListener("resize", place); window.removeEventListener("scroll", place, true);

@@ -1,9 +1,9 @@
 import * as React from "react";
-import { Checkbox, Descriptions, Flex, List, Typography } from "antd";
+import { Alert, Checkbox, Descriptions, Flex, List, Typography } from "antd";
 import type { AiTeam, AiTeamMember, SiliconEmployee } from "../../../ai-team-types.js";
 import type { ConversationSummary } from "../../../conversation-types.js";
 import { useSiliconEmployees } from "../agents/employee-repository";
-import { useAiTeamList } from "../ai-teams/repository";
+import { useAiTeamListState } from "../ai-teams/repository";
 import { EmployeeAvatar } from "../agents/employee-avatar";
 import { WandButton, WandInput, WandSelect, WandStretchTabs } from "../ui";
 import { WandMultiSelect } from "../ui/multi-select";
@@ -19,7 +19,7 @@ export function PresetDetails({ team }: { team: AiTeam }): React.ReactElement {
         <Typography.Text type="secondary">{m.duty || "未填写职责"}{m.employeeId ? "" : " · 未绑定通讯录 · 既有配置"}</Typography.Text></Flex>
     </List.Item>}/>
     <Descriptions size="small" column={1} items={[
-      { key: "approval", label: "首轮审批", children: team.requirePlanApproval ? "需用户批准" : "按预设自动开工" },
+      { key: "approval", label: "首轮审批", children: team.requirePlanApproval ? "需用户批准" : "按模板自动开工" },
       { key: "steps", label: "步数上限", children: team.maxSteps },
       { key: "instructions", label: "协作指令", children: <span style={{ whiteSpace: "pre-wrap" }}>{team.instructions || "未设置"}</span> },
     ]}/>
@@ -35,8 +35,9 @@ export interface GroupEditorProps {
   onCreated(id: string): void;
 }
 export function GroupEditor({ owner, open, presetId, inviteTo, onCancel, onCreated }: GroupEditorProps): React.ReactElement {
-  const { employees, error: employeesError } = useSiliconEmployees({ includeArchived: true });
-  const teams = useAiTeamList(true);
+  const { employees, error: employeesError, loading: employeesLoading, reload: reloadEmployees } = useSiliconEmployees({ includeArchived: true, enabled: open });
+  const teamSource = useAiTeamListState(open);
+  const { teams } = teamSource;
   const [tab, setTab] = React.useState("employees");
   const [employeeIds, setEmployeeIds] = React.useState<string[]>([]);
   const [templateId, setTemplateId] = React.useState(presetId ?? "");
@@ -125,25 +126,34 @@ export function GroupEditor({ owner, open, presetId, inviteTo, onCancel, onCreat
   const preview = teams?.find(t => t.id === previewId);
   return <Flex vertical gap={8} className="conversation-group-editor" aria-label={inviteTo ? "邀请成员" : "发起群聊"}>
     <Typography.Text strong>{inviteTo ? "邀请成员" : "发起群聊"}</Typography.Text>
-    <Typography.Text type="secondary">我 + {size} 位员工（最多 8 位）{inviteTo ? ` · 本群负责人保持为${leader}` : " · 仅此群，不修改预设"}</Typography.Text>
-    <WandStretchTabs value={tab} onValueChange={setTab} ariaLabel="成员来源" tabs={[{ value: "employees", label: "员工" }, { value: "presets", label: "预设小组" }]}/>
+    <Typography.Text type="secondary">我 + {size} 位员工（最多 8 位）{inviteTo ? ` · 本群负责人保持为${leader}` : " · 本次名单调整只影响此群"}</Typography.Text>
+    <WandStretchTabs value={tab} onValueChange={setTab} ariaLabel="成员来源" tabs={[{ value: "employees", label: "员工" }, { value: "presets", label: "团队模板" }]}/>
     <div className="conversation-editor-scroll">
       {tab === "employees" ? <>
+        {employeesError ? <Alert type="error" showIcon role="alert" title="员工加载失败" description={employeesError}
+          action={<WandButton size="small" disabled={employeesLoading} onClick={reloadEmployees}>重新加载员工</WandButton>}/> : null}
+        {employeesLoading ? <Typography.Text type="secondary" role="status">正在读取员工…</Typography.Text> : null}
         <WandMultiSelect value={employeeIds} onChange={setEmployeeIds} ariaLabel="选择员工" popupOwner={owner}
+          disabled={employeesLoading && !allEmployees.length}
           options={allEmployees.map(e => ({ value: e.id, label: `${e.name} · ${e.duty} · ${e.id.slice(-6)}`,
             disabled: !!e.archivedAt || currentKeys.has(e.id) || (!employeeIds.includes(e.id) && size >= 8) }))}/>
-        {!allEmployees.length ? <Typography.Text type="secondary">{employeesError || "还没有员工，请到通讯录创建。"}</Typography.Text> : null}
+        {!employeesLoading && !employeesError && !allEmployees.length ? <Typography.Text type="secondary">还没有员工，请到员工管理创建。</Typography.Text> : null}
       </> : <>
-        <WandSelect value={previewId} onValueChange={setPreviewId} ariaLabel="选择预设小组" searchable popupOwner={owner}
-          options={(teams ?? []).map(t => ({ value: t.id, label: `${t.name} · ${t.members.length} 位员工` }))}/>
-        {preview ? <><PresetDetails team={preview}/><WandButton onClick={() => choosePreset(preview.id)}>使用这个预设</WandButton></> : <Typography.Text type="secondary">还没有预设小组</Typography.Text>}
+        {teamSource.error ? <Alert type="error" showIcon role="alert" title="团队模板加载失败" description={teamSource.error}
+          action={<WandButton size="small" disabled={teamSource.loading} onClick={teamSource.reload}>重新加载团队模板</WandButton>}/> : null}
+        {teamSource.loading ? <Typography.Text type="secondary" role="status">正在读取团队模板…</Typography.Text> : null}
+        <WandSelect value={previewId} onValueChange={setPreviewId} ariaLabel="选择团队模板" placeholder="选择一个团队模板" searchable searchPlaceholder="搜索团队模板" popupOwner={owner}
+          disabled={teamSource.loading && !teams.length} options={teams.map(t => ({ value: t.id, label: `${t.name} · ${t.members.length} 位员工` }))}/>
+        {preview ? <><PresetDetails team={preview}/><WandButton onClick={() => choosePreset(preview.id)}>使用这个模板</WandButton></> : !teamSource.loading && !teamSource.error ? <Typography.Text type="secondary">
+          {teams.length ? previewId ? "此团队模板已不可用，请重新选择。" : "选择一个团队模板，查看成员与协作规则。" : "还没有团队模板，可以直接选择员工发起群聊。"}
+        </Typography.Text> : null}
         {replaceId ? <Flex vertical gap={8}><Typography.Text>替换本次群名单？原模板不变。</Typography.Text><Flex gap={8}>
           <WandButton onClick={() => usePreset(replaceId)}>确认替换</WandButton><WandButton onClick={() => setReplaceId("")}>保留原名单</WandButton>
         </Flex></Flex> : null}
       </>}
       {selectedMembers.map(m => {
         const employee: SiliconEmployee | undefined = allEmployees.find(e => e.id === m.employeeId);
-        const reason = m.employeeId ? !employee ? "绑定员工不存在，需显式移除/替换" : employee.archivedAt ? "已归档，需显式移除/替换" : "" : "未绑定通讯录 · 既有配置";
+        const reason = m.employeeId ? !employee ? employeesLoading ? "正在读取员工资料…" : employeesError ? "员工资料加载失败，请重试后核对。" : "绑定员工不存在，需显式移除/替换" : employee.archivedAt ? "已归档，需显式移除/替换" : "" : "未绑定通讯录 · 既有配置";
         const selectedKey = m.employeeId ?? m.id;
         return <Flex key={m.id} vertical gap={4} style={{ paddingBlock: 8 }}>
           <Flex align="center" gap={8}>{employee ? <EmployeeAvatar employee={employee} size="sm"/> : null}<Typography.Text>{m.name}</Typography.Text>

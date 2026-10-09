@@ -284,13 +284,13 @@ test("Ant Design task pages preserve date-only, portals, draft refs and owned fo
           evidence.push({mode,state,selectors,...sample});
         };
         await evaluate("tasks.show('new')");await wait("document.body.innerText.includes('还没有硅基员工')");await audit('new-empty');
-        await clickTab("PTY");await wait("!document.querySelector('[data-testid=new-session-dialog] [role=group][aria-label=硅基员工]')");await audit('new-pty');
+        await clickTab("终端");await wait("!document.querySelector('[data-testid=new-session-dialog] [role=group][aria-label=硅基员工]')");await audit('new-pty');
         await key("Escape");await wait("!document.querySelector('[data-testid=new-session-dialog]')");
         await evaluate("tasks.show('subject')");await wait("document.body.innerText.includes('还没有硅基员工')");await audit('workspace-empty');
         await click('#subject-fill');await wait("!!document.querySelector('input[value=\"employee:audit-employee\"]') && !!document.querySelector('input[value=\"team:audit-team\"]')");await audit('workspace-filled');
         await click('label:has(input[value="employee:audit-employee"])');await wait("document.querySelector('input[value=\"employee:audit-employee\"]').checked");await audit('workspace-employee');
-        await clickTab("PTY");await wait("!document.querySelector('input[value^=\"employee:\"]') && !document.querySelector('input[value^=\"team:\"]')");await audit('workspace-pty');
-        await clickTab("结构化");await click('label:has(input[value="team:audit-team"])');await wait("document.querySelector('input[value=\"team:audit-team\"]').checked");await audit('workspace-team');
+        await clickTab("终端");await wait("!document.querySelector('input[value^=\"employee:\"]') && !document.querySelector('input[value^=\"team:\"]')");await audit('workspace-pty');
+        await clickTab("对话");await click('label:has(input[value="team:audit-team"])');await wait("document.querySelector('input[value=\"team:audit-team\"]').checked");await audit('workspace-team');
         await click('#subject-project');await wait("document.querySelector('input[value=\"team:audit-team\"]').disabled");await audit('workspace-team-blocked');
         await click('#subject-project');await wait("!document.querySelector('input[value=\"team:audit-team\"]').disabled");await audit('workspace-team-available');
         await evaluate("tasks.show('new')");await wait("!!document.querySelector('[data-testid=new-session-dialog] input[value=\"employee:audit-employee\"]')");

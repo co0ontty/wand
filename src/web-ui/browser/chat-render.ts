@@ -27,6 +27,8 @@ import { activityLiveRow, commandOccurredAt, currentToolActivity, formatActivity
 import { isDecisionToolCall } from "../../decision-tool.js";
 import { activityDetailText, activityFilePath, activityOpensFile } from "./tool-activity-detail.js";
 import { clearActivityTimelines, holdActivityTimeline, syncActivityTimelines } from "./tool-activity-timeline.js";
+import { extractToolResultImages, extractToolResultText, toolResultPreview } from "./tool-result-display.js";
+export { extractToolResultImages, extractToolResultText } from "./tool-result-display.js";
 import {
   agentRunAccentSeed,
   agentRunAgentTitle,
@@ -315,7 +317,7 @@ function isGroupedChatMessage(messages: any[], index: number): boolean {
     && currentTime - previousTime < 60 * 60_000;
 }
 
-function buildRoundUsage(messages: any[]): Record<number, any> {
+function buildRoundUsage(messages: any[], agentRuns: ReturnType<typeof collectAgentRuns>): Record<number, any> {
   var result: Record<number, any> = {};
   var empty = function() { return { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0,
     cacheCreationInputTokens: 0, reasoningOutputTokens: 0, totalCostUsd: 0, estimated: false }; };
@@ -327,7 +329,12 @@ function buildRoundUsage(messages: any[]): Record<number, any> {
       if (lastAssistant >= 0 && hasUsage) result[lastAssistant] = acc;
       acc = empty(); hasUsage = false; lastAssistant = -1;
     } else if (message.role === "assistant") {
-      lastAssistant = index;
+      // Child-only transcript rows and result-only rows are hidden after being
+      // folded into their owner. Keep the footer on the last visible reply/run.
+      var content = Array.isArray(message.content) ? message.content : [];
+      if (agentRuns.runsByMessageIndex.has(index) || content.length === 0 || content.some(function(block, blockIndex) {
+        return block?.type !== "tool_result" && !agentRuns.ownerByBlockKey.has(agentRunBlockKey(index, blockIndex));
+      })) lastAssistant = index;
       if (message.usage) {
         hasUsage = true;
         Object.keys(acc).forEach(function(key) {
@@ -587,7 +594,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         var hasOlderMessages = visibleOffset > 0 || hasServerOlder;
 
         var msgCount = messages.length;
-        var roundUsageByIndex = buildRoundUsage(allMessages);
+        var roundUsageByIndex = buildRoundUsage(allMessages, agentRunIndex);
         var systemInfo = shouldExtractPtySystemInfo(selectedSession)
           ? extractPtySystemInfo(selectedSession.output, messages) : [];
         var cache = state.chatRenderCache || (state.chatRenderCache = new ChatRenderCache());
@@ -2710,9 +2717,14 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
               (detail.pending && running ? "执行中，等待结果…" : "本次调用尚未返回结果") + '</div>';
           } else {
             var resultText = activityDetailText(extractToolResultText(detail.content));
+            var resultImages = extractToolResultImages(detail.content);
             content += '<section class="chat-activity-detail-section' + (detail.is_error ? ' is-error' : '') +
-              '"><h4>' + (detail.is_error ? '错误输出' : '工具输出') + '</h4><pre>' +
-              escapeHtml(resultText || (detail.is_error ? '工具执行失败，未返回错误详情' : '工具已完成，没有文本输出')) + '</pre></section>';
+              '"><h4>' + (detail.is_error ? '错误输出' : '工具输出') + '</h4>' +
+              (resultText || !resultImages.length ? '<pre>' + escapeHtml(resultText || (detail.is_error ? '工具执行失败，未返回错误详情' : '工具已完成，没有文本输出')) + '</pre>' : '') +
+              resultImages.map(function(image) {
+                return inlineToolImage(image.src, "工具返回图片",
+                  'onclick="event.stopPropagation(); if(window.__openImageViewer)window.__openImageViewer(this.src, this.alt);" ');
+              }).join('') + '</section>';
           }
         }
         return content;
@@ -2766,7 +2778,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
           var inputPreview = isThinking ? "" : block.preview || "";
           // Task receipts repeat the title/status already shown by the progress owner.
           // Full receipts remain available on demand, including errors.
-          var resultPreview = isPlanTool(block) && !result?.is_error ? "" : result?.preview || "";
+          var resultPreview = isPlanTool(block) && !result?.is_error ? "" : toolResultPreview(result);
           var detailHtml = "";
           if (entryOpen && expanded) {
             detailHtml = isThinking
@@ -2897,9 +2909,10 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         if (!row) return;
         var key = row.getAttribute("data-entry-key") || "";
         var group = row.closest(".chat-activity");
-        if (group) holdActivityTimeline(group);
         var detail = row.querySelector(".chat-call-detail");
         var nowExpanded = row.getAttribute("data-expanded") !== "true";
+        // Only opening a detail is a reading choice; closing it must release the drawer.
+        if (group && nowExpanded) holdActivityTimeline(group);
         row.setAttribute("data-expanded", nowExpanded ? "true" : "false");
         btn.setAttribute("aria-expanded", nowExpanded ? "true" : "false");
         if (detail) {
@@ -2911,6 +2924,8 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
           activityDetailOpen.delete(key);
           activityEntryStates.delete(key);
           refreshChatPresentation(row);
+          var viewport = row.closest(".chat-messages");
+          if (viewport) syncActivityTimelines(viewport);
           return;
         }
         activityDetailOpen.add(key);
@@ -3053,7 +3068,12 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         var role = msg.role;
         var messageKey = renderMessageKey(msg, messageIndex);
         var timeHtml = renderChatMessageTime(msg);
-        var usageHtml = role === "assistant" ? renderUsageSummaryHtml(roundUsage) : "";
+        // Only a confirmed message ID can restore this reading preference after remount.
+        // Imperative row ownership keys deliberately change with the view lease.
+        var usageMessageKey = [msg.uuid, msg.id, msg.messageId, msg.turnId].some(function(id) {
+          return typeof id === "string" && id.length > 0;
+        }) ? getMessageKey(msg, messageIndex) : messageKey;
+        var usageHtml = role === "assistant" ? renderUsageSummaryHtml(roundUsage, usageMessageKey) : "";
         var resourceLabel = role === "assistant" && typeof msg.resourceSelection?.label === "string"
           ? msg.resourceSelection.label.slice(0, 1024) : "";
         var resourceHtml = resourceLabel ? '<div class="chat-resource-selection" role="status">' + escapeHtml(resourceLabel) + '</div>' : "";
@@ -3131,15 +3151,21 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         '</div>';
       }
 
-      function renderUsageSummaryHtml(usage) {
+      (window as any).__turnUsageSetExpanded = function(key: string, expanded: boolean) {
+        setPersistedExpandState(key, expanded);
+      };
+
+      function renderUsageSummaryHtml(usage, messageKey) {
         var metrics = chatUsageMetrics(usage);
         if (!metrics.length) return "";
         var parts = metrics.map(function(metric) { return metric.label + " " + metric.value; });
-        return '<div class="turn-usage-summary' + (usage.estimated === true ? ' is-estimated' : '') + '" role="status" aria-live="polite" aria-label="本轮用量（Token） ' + escapeHtml(parts.join("，")) + '">' +
+        var expandKey = buildExpandKey("turn-usage", [state.selectedId, messageKey]);
+        return '<div class="turn-usage-summary' + (usage.estimated === true ? ' is-estimated' : '') + '" data-expand-key="' + escapeHtml(expandKey) + '" data-expanded="' + (getPersistedExpandState(expandKey) === true ? 'true' : 'false') + '" aria-label="本轮用量（Token） ' + escapeHtml(parts.join("，")) + '">' +
           '<svg class="turn-usage-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" aria-hidden="true"><path d="M2.5 13.5h11M4 11V7.5M8 11V3M12 11V5.5"/></svg>' +
           '<span class="turn-usage-values">' + metrics.map(function(metric) {
             return '<span class="turn-usage-value" data-chat-key="usage:' + metric.key + '" title="' + escapeHtml(metric.title) + '">' +
-              escapeHtml(metric.label + " " + metric.value) + '</span>';
+              '<span class="turn-usage-label">' + escapeHtml(metric.label) + '</span> ' +
+              '<span class="turn-usage-number">' + escapeHtml(metric.value) + '</span></span>';
           }).join("") + '</span></div>';
       }
       // 用户上传附件时，客户端用 buildAttachmentPrefix 在 prompt 前注入一段
@@ -3283,6 +3309,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         return '<div class="inline-tool-image" data-image-state="loading" onclick="event.stopPropagation();">' +
           '<span class="inline-tool-image-loading"><span class="inline-tool-image-spinner" aria-hidden="true"></span>图片加载中</span>' +
           '<img class="inline-tool-image-thumb" loading="lazy" src="' + escapeHtml(src) + '" alt="' + escapeHtml(alt) + '" ' +
+            (attributes.includes('onclick=') ? 'role="button" tabindex="0" aria-label="查看' + escapeHtml(alt) + '" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click();}" ' : '') +
             attributes +
             'onload="__inlineToolImageState(this,\'ready\')" ' +
             'onerror="__inlineToolImageState(this,\'error\')" />' +
@@ -3520,54 +3547,6 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
           '</div>' +
         '</div>';
       }
-      // tool_result 里可能内联 image content block（Anthropic 原生支持
-      // `[{type:"image", source:{type:"base64", media_type, data}}]`，Read 读图片 /
-      // 截图 / view_image 等都会走到这里）。老逻辑把整个数组 JSON.stringify 出来，
-      // 用户看到的是一大坨 base64。这里把图片块抽成可直接 <img> 的 data URI。
-      export function extractToolResultImages(content) {
-        if (!Array.isArray(content)) return [];
-        var images = [];
-        for (var i = 0; i < content.length; i++) {
-          var item = content[i];
-          if (!item || typeof item !== "object") continue;
-          var src = "";
-          if (item.type === "image") {
-            var source = item.source || {};
-            if (source.type === "base64" && source.data) {
-              src = "data:" + (source.media_type || "image/png") + ";base64," + source.data;
-            } else if (typeof source.url === "string") {
-              src = source.url;
-            } else if (typeof item.url === "string") {
-              src = item.url;
-            }
-          } else if (item.type === "image_url") {
-            var imageUrl = item.image_url;
-            src = typeof imageUrl === "string" ? imageUrl : (imageUrl && imageUrl.url) || "";
-          }
-          if (src) images.push({ src: src });
-        }
-        return images;
-      }
-
-      export function extractToolResultText(content) {
-        if (!content) return "";
-        if (typeof content === "string") return content;
-        if (Array.isArray(content)) {
-          return content.map(function(item) {
-            if (!item || typeof item !== "object") return "";
-            if (item.type === "text" && typeof item.text === "string") return item.text;
-            // 图片块已经由 extractToolResultImages 单独渲染，不要把 base64 塞进正文。
-            if (item.type === "image" || item.type === "image_url") return "";
-            try {
-              return JSON.stringify(item);
-            } catch (e) {
-              return "";
-            }
-          }).filter(Boolean).join("\n");
-        }
-        return "";
-      }
-
       function renderDiffTool(block, toolResult, toolName, messageKey, index, options?: any) {
         var opts = options || {};
         var inputData = block.input || {};
@@ -3761,7 +3740,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
 
       function renderToolPreview(block, result, includeInput = true) {
         var input = includeInput ? block.preview || "" : "";
-        var output = result?.preview || "";
+        var output = toolResultPreview(result);
         if (!input && !output) return "";
         return '<div class="tool-preview' + (result?.is_error ? ' is-error' : '') + '">' +
           (input ? '<div class="tool-preview-input">' + escapeHtml(input) + '</div>' : '') +

@@ -87,7 +87,7 @@ async function connectExisting(configPath: string): Promise<RenderStructuredClie
   }
 }
 
-async function startV2(configPath: string): Promise<RenderStructuredClient> {
+export async function startStructuredRenderHost(configPath: string): Promise<RenderStructuredClient> {
   const existing = await connectExisting(configPath);
   if (existing) return existing;
   const paths = structuredRenderPaths(configPath);
@@ -206,7 +206,7 @@ export async function createUpgradeAwareStructuredHost(
   if (process.env.WAND_TEST_MODE === "1" || process.env.NODE_TEST_CONTEXT) {
     return { host: legacy ?? undefined, rustClient: null };
   }
-  const rustClient = processHost === "rust" ? await startV2(configPath) : await connectExisting(configPath);
+  const rustClient = processHost === "rust" ? await startStructuredRenderHost(configPath) : await connectExisting(configPath);
   if (!rustClient && !legacy) return { host: undefined, rustClient: null };
   return { host: new CompositeStructuredExecHost(legacy, rustClient, processHost), rustClient };
 }

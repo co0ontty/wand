@@ -159,173 +159,189 @@ export function createPooledTerminal(sessionId: string, container: HTMLElement):
   wrap.dataset.ptySessionId = sessionId;
   container.appendChild(wrap);
 
-  const term = new XTermLib.Terminal({
-    cols: 120,
-    rows: 36,
-    allowProposedApi: true,
-    convertEol: false,
-    cursorBlink: false,
-    disableStdin: false,
-    fontFamily: terminalFontFamily(),
-    fontSize: terminalFontSize(getPooledTerminalScale(sessionId)),
-    lineHeight: 1.25,
-    scrollback: 5000,
-    theme: {
-      background: "#17120f",
-      foreground: "#f4eee6",
-      cursor: "#d88d60",
-      selectionBackground: "rgba(216, 141, 96, 0.3)",
-    },
-  });
-  const fitAddon = new XTermLib.FitAddon();
-  let unicodeAddon: any = null;
+  let partialTerminal: any = null, partialFit: any = null;
+  let partialObserver: ResizeObserver | null = null;
   try {
-    if (XTermLib.Unicode11Addon) {
-      unicodeAddon = new XTermLib.Unicode11Addon();
-      term.loadAddon(unicodeAddon);
-      term.unicode.activeVersion = "11";
-    }
-  } catch { /* optional */ }
-  term.loadAddon(fitAddon);
-  term.open(wrap);
-
-  // 先按真实容器尺寸 fit，再回放 ANSI 历史。否则 120 列历史会在窄窗格中被
-  // xterm 二次折行，出现竖排字符和破碎 banner。
-  try { fitTerminalToContainer(term, fitAddon); } catch { /* ResizeObserver 会在布局稳定后补一次 */ }
-
-  term.onData((data: string) => sendInput(sessionId, data));
-  term.onBinary((data: string) => {
-    if (state.terminalInteractive) sendInput(sessionId, data);
-  });
-  term.onResize((size: { cols: number; rows: number }) => sendResize(sessionId, size.cols, size.rows));
-
-  const resizeObserver = new ResizeObserver(() => {
-    const current = pool.get(sessionId);
-    if (current) fitAndSync(current);
-  });
-  resizeObserver.observe(container);
-
-  // Wheel handling is installed in the capture phase for the same reason as
-  // the main terminal: relying on xterm's native viewport scroll is not
-  // consistent when the pane layout hides the browser scrollbar.
-  const wheelPagingState: TerminalWheelPagingState = {
-    direction: 0,
-    accumulatedPixels: 0,
-    lastEventAt: 0,
-    lastPageAt: 0,
-  };
-  const wheelScrollState: TerminalWheelScrollState = {
-    accumulatedPixels: 0,
-    lastEventAt: 0,
-  };
-  const loadOlder = (): void => {
-    const current = pool.get(sessionId);
-    if (!current || current.autoFollow || current.disposed || term.buffer.active.type !== "normal"
-      || term.buffer.active.viewportY > 12) return;
-    void loadTerminalHistory(sessionId, async (snapshot) => {
-      if (pool.get(sessionId) !== current) return false;
-      restorePooledTerminalState(sessionId, snapshot, "", true);
-      await current.writeQueue;
-      return pool.get(sessionId) === current;
+    const term = new XTermLib.Terminal({
+      cols: 120,
+      rows: 36,
+      allowProposedApi: true,
+      convertEol: false,
+      cursorBlink: false,
+      disableStdin: false,
+      fontFamily: terminalFontFamily(),
+      fontSize: terminalFontSize(getPooledTerminalScale(sessionId)),
+      lineHeight: 1.25,
+      scrollback: 5000,
+      theme: {
+        background: "#17120f",
+        foreground: "#f4eee6",
+        cursor: "#d88d60",
+        selectionBackground: "rgba(216, 141, 96, 0.3)",
+      },
     });
-  };
-  const terminalCellHeight = (): number => {
+    partialTerminal = term;
+    const fitAddon = new XTermLib.FitAddon();
+    partialFit = fitAddon;
+    let unicodeAddon: any = null;
     try {
-      const screen = wrap.querySelector(".xterm-screen") as HTMLElement | null;
-      if (screen && term.rows > 0) {
-        const measured = screen.clientHeight / term.rows;
-        if (measured > 4) return measured;
+      if (XTermLib.Unicode11Addon) {
+        unicodeAddon = new XTermLib.Unicode11Addon();
+        term.loadAddon(unicodeAddon);
+        term.unicode.activeVersion = "11";
       }
-    } catch { /* use fallback */ }
-    return Math.max(1, terminalFontSize(getPooledTerminalScale(sessionId)) * 1.25);
-  };
-  const zoomWheelState: TerminalZoomWheelState = { accumulatedPixels: 0 };
-  installTerminalPinchZoom(wrap, (direction) => {
-    setPooledTerminalScale(sessionId, getPooledTerminalScale(sessionId) + direction * 0.25);
-  });
-  wrap.addEventListener("wheel", (event: WheelEvent) => {
-    if (event.ctrlKey || event.metaKey) {
+    } catch { /* optional */ }
+    term.loadAddon(fitAddon);
+    term.open(wrap);
+
+    // 先按真实容器尺寸 fit，再回放 ANSI 历史。否则 120 列历史会在窄窗格中被
+    // xterm 二次折行，出现竖排字符和破碎 banner。
+    try { fitTerminalToContainer(term, fitAddon); } catch { /* ResizeObserver 会在布局稳定后补一次 */ }
+
+    term.onData((data: string) => sendInput(sessionId, data));
+    term.onBinary((data: string) => {
+      if (state.terminalInteractive) sendInput(sessionId, data);
+    });
+    term.onResize((size: { cols: number; rows: number }) => sendResize(sessionId, size.cols, size.rows));
+
+    const resizeObserver = new ResizeObserver(() => {
+      const current = pool.get(sessionId);
+      if (current) fitAndSync(current);
+    });
+    partialObserver = resizeObserver;
+    resizeObserver.observe(container);
+
+    // Wheel handling is installed in the capture phase for the same reason as
+    // the main terminal: relying on xterm's native viewport scroll is not
+    // consistent when the pane layout hides the browser scrollbar.
+    const wheelPagingState: TerminalWheelPagingState = {
+      direction: 0,
+      accumulatedPixels: 0,
+      lastEventAt: 0,
+      lastPageAt: 0,
+    };
+    const wheelScrollState: TerminalWheelScrollState = {
+      accumulatedPixels: 0,
+      lastEventAt: 0,
+    };
+    const loadOlder = (): void => {
+      const current = pool.get(sessionId);
+      if (!current || current.autoFollow || current.disposed || term.buffer.active.type !== "normal"
+        || term.buffer.active.viewportY > 12) return;
+      void loadTerminalHistory(sessionId, async (snapshot) => {
+        if (pool.get(sessionId) !== current) return false;
+        restorePooledTerminalState(sessionId, snapshot, "", true);
+        await current.writeQueue;
+        return pool.get(sessionId) === current;
+      });
+    };
+    const terminalCellHeight = (): number => {
+      try {
+        const screen = wrap.querySelector(".xterm-screen") as HTMLElement | null;
+        if (screen && term.rows > 0) {
+          const measured = screen.clientHeight / term.rows;
+          if (measured > 4) return measured;
+        }
+      } catch { /* use fallback */ }
+      return Math.max(1, terminalFontSize(getPooledTerminalScale(sessionId)) * 1.25);
+    };
+    const zoomWheelState: TerminalZoomWheelState = { accumulatedPixels: 0 };
+    installTerminalPinchZoom(wrap, (direction) => {
+      setPooledTerminalScale(sessionId, getPooledTerminalScale(sessionId) + direction * 0.25);
+    });
+    wrap.addEventListener("wheel", (event: WheelEvent) => {
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        const zoomStep = consumeTerminalZoomWheel(event, zoomWheelState);
+        if (zoomStep !== 0) {
+          setPooledTerminalScale(sessionId, getPooledTerminalScale(sessionId) + zoomStep * 0.25);
+        }
+        return;
+      }
+      if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+
       event.preventDefault();
       event.stopPropagation();
-      const zoomStep = consumeTerminalZoomWheel(event, zoomWheelState);
-      if (zoomStep !== 0) {
-        setPooledTerminalScale(sessionId, getPooledTerminalScale(sessionId) + zoomStep * 0.25);
+      if (term.buffer.active.type === "alternate") {
+        const direction = consumeTerminalWheelPage(
+          event,
+          wheelPagingState,
+          container.clientHeight || term.rows * terminalCellHeight(),
+        );
+        const sequence = terminalWheelPageSequence(direction);
+        if (sequence) sendInput(sessionId, sequence);
+        return;
       }
-      return;
-    }
-    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
 
-    event.preventDefault();
-    event.stopPropagation();
-    if (term.buffer.active.type === "alternate") {
-      const direction = consumeTerminalWheelPage(
+      if (event.deltaY < 0) {
+        // A user scrolling up is reading history; subsequent output must not
+        // keep snapping this pane back to the newest line.
+        const current = pool.get(sessionId);
+        if (current) current.autoFollow = false;
+      }
+      const lines = consumeTerminalWheelLines(
         event,
-        wheelPagingState,
+        wheelScrollState,
+        terminalCellHeight(),
         container.clientHeight || term.rows * terminalCellHeight(),
       );
-      const sequence = terminalWheelPageSequence(direction);
-      if (sequence) sendInput(sessionId, sequence);
-      return;
-    }
+      if (lines !== 0) term.scrollLines(lines);
+      if (event.deltaY < 0) loadOlder();
+      if (term.buffer.active.viewportY >= term.buffer.active.baseY) {
+        const current = pool.get(sessionId);
+        if (current) current.autoFollow = true;
+      }
+    }, { capture: true, passive: false });
 
-    if (event.deltaY < 0) {
-      // A user scrolling up is reading history; subsequent output must not
-      // keep snapping this pane back to the newest line.
+    term.onScroll(() => {
       const current = pool.get(sessionId);
-      if (current) current.autoFollow = false;
-    }
-    const lines = consumeTerminalWheelLines(
-      event,
+      if (current && term.buffer.active.viewportY >= term.buffer.active.baseY) current.autoFollow = true;
+    });
+
+    const handle: PooledTerminal = {
+      sessionId,
+      terminal: term,
+      fitAddon,
+      wrap,
+      container,
+      resizeObserver,
+      writeQueue: Promise.resolve(),
+      wheelPagingState,
       wheelScrollState,
-      terminalCellHeight(),
-      container.clientHeight || term.rows * terminalCellHeight(),
-    );
-    if (lines !== 0) term.scrollLines(lines);
-    if (event.deltaY < 0) loadOlder();
-    if (term.buffer.active.viewportY >= term.buffer.active.baseY) {
-      const current = pool.get(sessionId);
-      if (current) current.autoFollow = true;
+      autoFollow: true,
+      restoreGeneration: 0,
+      disposed: false,
+    };
+    pool.set(sessionId, handle);
+
+    // 优先恢复服务端的 xterm 序列化快照。它记录了原始 cols/rows 与 resize
+    // 操作，能在 fit 到半宽窗格前保持 ANSI 光标语义；raw output 只作旧会话兜底。
+    const session = (state.sessions as Array<{ id?: string; output?: string; terminalState?: unknown }>)
+      .find((item) => item.id === sessionId);
+    const cachedState = state.terminalStatesBySession?.[sessionId];
+    if (!restorePooledTerminalState(sessionId, session?.terminalState ?? cachedState, session?.output || "")) {
+      replacePooledTerminalOutput(sessionId, session?.output || "");
     }
-  }, { capture: true, passive: false });
 
-  term.onScroll(() => {
-    const current = pool.get(sessionId);
-    if (current && term.buffer.active.viewportY >= term.buffer.active.baseY) current.autoFollow = true;
-  });
+    // 订阅该会话的实时输出（服务端支持多会话并发订阅）。
+    sendJson({ type: "subscribe", mode: "add", sessionId, compactTools: true,
+      capabilities: { ptyAck: true } });
 
-  const handle: PooledTerminal = {
-    sessionId,
-    terminal: term,
-    fitAddon,
-    wrap,
-    container,
-    resizeObserver,
-    writeQueue: Promise.resolve(),
-    wheelPagingState,
-    wheelScrollState,
-    autoFollow: true,
-    restoreGeneration: 0,
-    disposed: false,
-  };
-  pool.set(sessionId, handle);
-
-  // 优先恢复服务端的 xterm 序列化快照。它记录了原始 cols/rows 与 resize
-  // 操作，能在 fit 到半宽窗格前保持 ANSI 光标语义；raw output 只作旧会话兜底。
-  const session = (state.sessions as Array<{ id?: string; output?: string; terminalState?: unknown }>)
-    .find((item) => item.id === sessionId);
-  const cachedState = state.terminalStatesBySession?.[sessionId];
-  if (!restorePooledTerminalState(sessionId, session?.terminalState ?? cachedState, session?.output || "")) {
-    replacePooledTerminalOutput(sessionId, session?.output || "");
+    // React/flex 布局通常要到下一帧才稳定。无论 fit 是否改变 xterm 尺寸，都显式
+    // 把当前 cols/rows 发给 PTY，避免“前端已半宽、后端仍是合并前全宽”的换行错位。
+    scheduleFitAndSync(handle);
+    return true;
+  } catch (error) {
+    if (pool.has(sessionId)) disposePooledTerminal(sessionId);
+    else {
+      partialObserver?.disconnect();
+      try { partialFit?.dispose?.(); } catch { /* preserve the mount error */ }
+      try { partialTerminal?.dispose?.(); } catch { /* preserve the mount error */ }
+      wrap.remove();
+    }
+    throw error;
   }
-
-  // 订阅该会话的实时输出（服务端支持多会话并发订阅）。
-  sendJson({ type: "subscribe", mode: "add", sessionId, compactTools: true,
-    capabilities: { ptyAck: true } });
-
-  // React/flex 布局通常要到下一帧才稳定。无论 fit 是否改变 xterm 尺寸，都显式
-  // 把当前 cols/rows 发给 PTY，避免“前端已半宽、后端仍是合并前全宽”的换行错位。
-  scheduleFitAndSync(handle);
-  return true;
 }
 
 /** WebSocket 重连后，服务端会清掉旧连接的订阅；恢复全部可见池终端。 */

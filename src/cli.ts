@@ -215,12 +215,15 @@ async function main(): Promise<void> {
         || !existsSync(pythonPath) || !existsSync(join(modelPath, "model.safetensors")))) {
         throw new Error("用法：wand decision:configure --python <Python绝对路径> --model <已下载模型目录>；或 --disable。");
       }
-      const { config } = await loadConfigForCli(configPath);
-      config.localDecision = disabling
-        ? { enabled: false, pythonPath: config.localDecision?.pythonPath ?? "", modelPath: config.localDecision?.modelPath ?? "" }
-        : { enabled: true, pythonPath, modelPath };
-      await saveConfig(configPath, config);
-      process.stdout.write("本地决策配置已保存，重启 Wand 服务后生效。未修改系统 Python，也未下载模型。\n");
+      const { config, dbPath } = await loadConfigForCli(configPath);
+      const { WandStorage } = await import("./storage.js");
+      const storage = new WandStorage(dbPath);
+      try {
+        writePreferenceToStorage(config, storage, "localDecision", disabling
+          ? { enabled: false, pythonPath: config.localDecision?.pythonPath ?? "", modelPath: config.localDecision?.modelPath ?? "" }
+          : { enabled: true, pythonPath, modelPath });
+      } finally { storage.close(); }
+      process.stdout.write("本地决策配置已保存，CLI 修改需重启 Wand 服务后生效；设置页管理可热更新。未修改系统 Python，也未下载模型。\n");
       break;
     }
     case "decision:skills": {

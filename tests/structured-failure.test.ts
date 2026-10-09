@@ -76,8 +76,10 @@ function fixture(t: TestContext) {
 for (const [message, kind] of [
   ["积分已耗尽，调用失败", "quota"], ["insufficient_quota", "quota"], ["Your credit balance is too low", "quota"],
   ["Codex error: The usage limit has been reached", "quota"], ["Invalid API key", "authentication"],
+  ["Forbidden", "authentication"], ["HTTP 403: Forbidden", "authentication"], ["403 forbidden", "authentication"],
   ["rate_limit_exceeded", "rate-limit"], ["model_not_found", "model-unavailable"],
   ["fetch failed", null], ["HTTP 503: insufficient_quota", null], ["408 request timed out", null],
+  ["HTTP 503: Forbidden", null], ["Forbidden: fetch failed", null], ["408 Forbidden", null], ["409 Forbidden", null],
   ["409 conflict", null], ["工具输出：积分已耗尽，调用失败", null],
 ] as const) {
   test(`provider refusal classifier: ${message}`, () => assert.equal(classifyProviderRejection(message), kind));
@@ -98,23 +100,25 @@ test("normalized refusal facts distinguish metadata from progress, unknown deliv
   assert.equal(classifyStructuredFailure(result({ primaryError: "local rejection", inputAccepted: false }), { output: true })?.retryable, false);
 });
 
-for (const mode of ["refusal", "text", "thinking", "tool", "earlier-reply", "usage", "unknown", "noise"] as const) {
+for (const mode of ["refusal", "text", "thinking", "tool", "earlier-reply", "usage", "unknown", "noise",
+  "forbidden", "forbidden-tool", "forbidden-usage"] as const) {
   test(`real Pi protocol refusal evidence: ${mode}`, async (t) => {
     const f = fixture(t);
     const extra: Array<object | string> = mode === "text" ? [{ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "partial" } }]
       : mode === "thinking" ? [{ type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "plan" } }]
-      : mode === "tool" ? [{ type: "tool_execution_start", toolCallId: "work", toolName: "bash", args: {} }]
+      : mode === "tool" || mode === "forbidden-tool" ? [{ type: "tool_execution_start", toolCallId: "work", toolName: "bash", args: {} }]
       : mode === "earlier-reply" ? [{ type: "message_end", message: { ...reply, content: [], usage: { input: 1, output: 0 } } }]
       : mode === "noise" ? ["unknown non-protocol output"] : [];
-    const message = mode === "unknown" ? rejection("fetch failed") : mode === "usage"
-      ? { ...rejection(), usage: { input: 1, output: 0 } } : rejection();
+    const refusal = rejection(mode.startsWith("forbidden") ? "Forbidden" : undefined);
+    const message = mode === "unknown" ? rejection("fetch failed") : mode === "usage" || mode === "forbidden-usage"
+      ? { ...refusal, usage: { input: 1, output: 0 } } : refusal;
     const runner = replayPi(f.agentDir, () => [...extra, ...events(message)]);
     const execution = runner.start({ session: { id: "fixture", provider: "pi", cwd: f.root,
       piSettings: defaultPiCliSessionSettings(), claudeSessionId: null } as SessionSnapshot, prompt: "fixture", env: {} },
     { isActive: () => true, onUpdate() {} });
     const got = await execution.completion;
-    assert.equal(got.rejection, mode === "refusal" ? "quota" : undefined);
-    assert.equal(classifyStructuredFailure(got)?.retryable, mode === "refusal");
+    assert.equal(got.rejection, mode === "refusal" ? "quota" : mode === "forbidden" ? "authentication" : undefined);
+    assert.equal(classifyStructuredFailure(got)?.retryable, mode === "refusal" || mode === "forbidden");
     assert.equal(got.exitCode, 0, "protocol error does not require a nonzero process exit");
   });
 }
@@ -146,6 +150,36 @@ test("ordinary employee: Pi quota refusal with locked Skills/auto-selection swit
   assert.equal(notices.filter((event) => event.type === "ended").length, 1, "do not publish a failed ending before fallback finishes");
   assert.ok(!notices.some((event) => (event.data as any)?.status === "failed"));
   await assert.rejects(manager.sendMessage(session.id, "synthetic task", { idempotencyKey: "exact-input" }), /重复/);
+  assert.equal(backups.length, 1);
+});
+
+test("ordinary employee: an initial Forbidden with locked Skills uses the configured Codex backup without a failed ending", async (t) => {
+  const f = fixture(t); let piStarts = 0;
+  const backups: StructuredRunnerContext[] = [];
+  const manager = f.manager(replayPi(f.agentDir, () => events(rejection("Forbidden")), () => piStarts++), { start(context) {
+    backups.push(context);
+    return { args: [], pid: null, spawnedAt: "", interrupt() {}, completion: Promise.resolve(success()) };
+  } });
+  const session = manager.createSession({ cwd: f.root, provider: "pi", mode: "managed", model: "primary",
+    employeeId: "fixture", systemPrompt: "Retain this employee role",
+    employeeCandidates: [candidate("pi", "primary"), candidate("codex")], employeeCandidateIndex: 0 });
+  const inventory = await discoverPiResources(f.config, f.root);
+  const skillId = inventory.catalog.skills[0]!.id;
+  manager.setPiSettings(session.id, { resources: { skills: [skillId], mcpServers: [] }, lockedSkills: [skillId],
+    autoResources: true, localDecision: false });
+  const notices: ProcessEvent[] = []; manager.setEventEmitter((event) => notices.push(event));
+  const finished = await manager.sendMessage(session.id, "synthetic sidebar task", { idempotencyKey: "forbidden-input" });
+  assert.equal(piStarts, 1); assert.equal(backups.length, 1);
+  assert.equal(backups[0]!.session.piSettings, undefined);
+  assert.equal(backups[0]!.session.claudeSessionId, null);
+  assert.equal(backups[0]!.session.systemPrompt, "Retain this employee role");
+  assert.equal(finished.status, "idle"); assert.equal(finished.provider, "codex");
+  assert.equal(finished.employeeCandidateIndex, 1);
+  assert.equal(finished.messages?.filter((turn) => turn.role === "user").length, 1);
+  assert.doesNotMatch(JSON.stringify(finished.messages), /Forbidden/);
+  assert.equal(notices.filter((event) => event.type === "ended").length, 1);
+  assert.ok(!notices.some((event) => (event.data as { status?: string } | undefined)?.status === "failed"));
+  await assert.rejects(manager.sendMessage(session.id, "synthetic sidebar task", { idempotencyKey: "forbidden-input" }), /重复/);
   assert.equal(backups.length, 1);
 });
 

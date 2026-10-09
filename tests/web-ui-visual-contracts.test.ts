@@ -84,7 +84,7 @@ test("row actions preserve title width and keyboard access", () => {
   assert.match(rowMenu, /onTouchEnd:/);
   assert.match(tree, /className="workspace-task-name"/);
   assert.match(tree, /minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis"/);
-  assert.match(tree, /aria-label=\{`任务 \$\{task.name\} 的更多操作`\}/);
+  assert.match(tree, /label=\{`任务 \$\{task.name\} 的更多操作`\}/);
   assert.doesNotMatch(styles, /:hover \.workspace-row-actions|workspace-row-actions[^}]*opacity: 0/);
 });
 
@@ -185,9 +185,9 @@ test("发送与停止是同一颗按钮的相位模型，结果原位显示不�
     assert.ok(submitChain.includes(call), `提交链路缺 ${call}`);
   }
   assert.doesNotMatch(submitChain, /showToast\(/, "提交链路的失败原因留在原位，不叠气泡");
-  const stopBlock = inputSrc.slice(inputSrc.indexOf("export function stopSession"), inputSrc.indexOf("export function stopSession") + 1600);
-  assert.match(stopBlock, /flashComposerDone\("已停止/, "停止结果留在原位");
-  assert.doesNotMatch(stopBlock, /showToast\(/, "停止的成功/失败都不借气泡");
+  const stopBlock = inputSrc.slice(inputSrc.indexOf("export function stopSession"), inputSrc.indexOf("export function deleteSession"));
+  assert.match(stopBlock, /if \(state\.selectedId === id\) flashComposerDone\(/, "停止结果留在原会话的输入区");
+  assert.match(stopBlock, /if \(state\.selectedId === id\)\s*\{\s*flashComposerFailed\(/, "当前会话的停止失败仍显示在原位");
 
   // ③ 快捷键教学文案的活宿主：空闲时常驻在原位结果行里（.input-hint 从未有宿主）。
   assert.match(engineSrc, /export const COMPOSER_IDLE_HINT = "Enter 发送 · Shift\+Enter 换行";/);

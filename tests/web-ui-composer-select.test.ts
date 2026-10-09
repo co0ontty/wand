@@ -10,10 +10,18 @@ import {
 } from "../src/web-ui/react/composer-select/controller.ts";
 import { filterSelectOptions, WandSelect } from "../src/web-ui/react/ui/select.tsx";
 import {
+  compactModelDisplayLabel,
   modelDisplayName,
   normalizeAvailableComposerValue,
   normalizeComposerModelValue,
 } from "../src/web-ui/browser/composer-select-values.ts";
+
+test("model labels omit repeated names while retaining genuinely different IDs", () => {
+  assert.equal(compactModelDisplayLabel("GPT-6.1-Sol · gpt-6.1-sol"), "GPT-6.1-Sol");
+  assert.equal(compactModelDisplayLabel("GPT-6.1-Sol · gpt-6.1-sol · 已验证"), "GPT-6.1-Sol · 已验证");
+  assert.equal(compactModelDisplayLabel("Claude Opus · claude-opus-4-1"), "Claude Opus · claude-opus-4-1");
+  assert.equal(compactModelDisplayLabel("provider/variant"), "provider/variant");
+});
 
 test("composer select controller publishes immutable portal mount snapshots", () => {
   const controller = new ComposerSelectController();

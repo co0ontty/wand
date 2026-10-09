@@ -21,6 +21,8 @@ export type SettingsTab =
   | "general"
   | "connectors"
   | "ai"
+  | "speech"
+  | "local-models"
   | "notifications"
   | "security"
   | "presets"

@@ -63,7 +63,7 @@ export function ConversationSessionReply({ turn, active, onOpen, children }: {
         <Typography.Text role="status" type={preview?.status === "failed" ? "danger" : "secondary"}>
           {conversationSessionPreviewLabels[preview?.status ?? "starting"]}
         </Typography.Text>
-        <WandButton size="small" disabled={unavailable} onClick={onOpen}>查看会话</WandButton>
+        <WandButton size="small" disabled={unavailable} onClick={onOpen}>打开并继续</WandButton>
       </Flex>
     </>}/>;
 }

@@ -1,4 +1,6 @@
 import { OpenRouterSettingsPanel } from "./openrouter-panel";
+import { DaemonUpdateNotice } from "../shell/daemon-update-notice";
+import { ensureQrCodeLibrary } from "../../vendor-loader.js";
 import { ModelGroupsSettingsPanel } from "./model-groups-panel";
 import {
   type Dispatch,
@@ -11,7 +13,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import * as React from "react";
-import { Card, Empty, Form, Slider, Table, Tag, Upload } from "antd";
+import { Card, Collapse, Empty, Form, Slider, Table, Tag, Upload } from "antd";
 import { WandBadge, WandButton, WandDialogSurface, WandIcon, WandSearchField } from "../ui";
 import { MOTION_DWELL_RESULT_SENTENCE_MS } from "../ui/motion-tokens";
 import { settingsStore } from "./controller";
@@ -114,34 +116,39 @@ function ConnectCodePanel({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [qrError, setQrError] = useState("");
+  const [qrAttempt, setQrAttempt] = useState(0);
+  const [qrLoading, setQrLoading] = useState(false);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!code || !canvas) {
       setQrError("");
-      return;
-    }
-    const library = window.QRCodeLib;
-    if (!library || typeof library.toCanvas !== "function") {
-      setQrError("二维码库未加载，可复制连接码。");
+      setQrLoading(false);
       return;
     }
     let cancelled = false;
+    canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
     setQrError("");
-    try {
+    setQrLoading(true);
+    void ensureQrCodeLibrary().then((library) => {
+      if (cancelled) return;
       library.toCanvas(canvas, code, {
         width: 220,
         margin: 2,
         errorCorrectionLevel: "M",
         color: { dark: "#1f1b17", light: "#ffffff" },
       }, (error: unknown) => {
-        if (!cancelled && error) setQrError("二维码生成失败，可复制连接码。");
+        if (cancelled) return;
+        setQrLoading(false);
+        if (error) setQrError("二维码生成失败，可复制连接码或重试。");
       });
-    } catch {
-      if (!cancelled) setQrError("二维码生成失败，可复制连接码。");
-    }
+    }).catch(() => {
+      if (cancelled) return;
+      setQrLoading(false);
+      setQrError("二维码加载或生成失败，可复制连接码或重试。");
+    });
     return () => { cancelled = true; };
-  }, [code]);
+  }, [code, qrAttempt]);
 
   async function copyCode() {
     if (!code) return;
@@ -156,7 +163,8 @@ function ConnectCodePanel({
           <div className="wand-settings-library-connect-qr" data-testid="settings-connect-qr">
             <canvas ref={canvasRef} aria-label="App 连接二维码" />
           </div>
-          {qrError ? <SettingsStatus tone="warning">{qrError}</SettingsStatus> : null}
+          {qrLoading ? <SettingsStatus tone="info">正在生成连接二维码…</SettingsStatus> : null}
+          {qrError ? <SettingsStatus tone="warning">{qrError}<WandButton kind="ghost" size="small" onClick={() => setQrAttempt((attempt) => attempt + 1)}>重试二维码</WandButton></SettingsStatus> : null}
           <div className="wand-settings-library-connect-code-row">
             <code className="wand-settings-library-connect-code" aria-label="App 连接码">{code}</code>
             <WandButton kind="secondary" onClick={() => void copyCode()}>复制连接码</WandButton>
@@ -262,6 +270,7 @@ export function AboutSettingsTab({ snapshot, repository, refresh, toast, showRes
       <header className="wand-settings-library-panel-heading">
         <h2>关于 Wand</h2><p>查看版本信息、更新状态和客户端连接方式。</p>
       </header>
+      <DaemonUpdateNotice />
       <SettingsSection title="版本信息">
         <Table size="small" showHeader={false} pagination={false} rowKey="label"
           columns={[{ dataIndex: "label" }, { dataIndex: "value" }]}
@@ -380,10 +389,12 @@ export function GithubSettingsTab({ snapshot, repository, refresh, setSnapshot }
   const [pending, setPending] = useState("");
   const [status, setStatus] = useState("");
   const [tone, setTone] = useState<StatusTone>("info");
+  const [enterpriseOpen, setEnterpriseOpen] = useState(Boolean(snapshot.github.apiUrl && snapshot.github.apiUrl !== "https://api.github.com"));
 
   useEffect(() => {
     setApiUrl(snapshot.github.apiUrl || "https://api.github.com");
     setToken("");
+    setEnterpriseOpen(Boolean(snapshot.github.apiUrl && snapshot.github.apiUrl !== "https://api.github.com"));
   }, [snapshot.github]);
 
   async function connect(): Promise<boolean | void> {
@@ -433,7 +444,7 @@ export function GithubSettingsTab({ snapshot, repository, refresh, setSnapshot }
   return (
     <section className="wand-settings-library-panel" aria-label="连接器">
       <header className="wand-settings-library-panel-heading">
-        <h2>连接器</h2><p>连接外部服务，让 Wand 可以在你的授权范围内读取和处理协作数据。</p>
+        <h2>连接器</h2><p>当前支持 GitHub，用于仓库、Issue 和 Pull Request 的协作操作。</p>
       </header>
       <SettingsSection title="GitHub" description="使用 Fine-grained Token，建议只授权需要操作的仓库和权限。">
         <div className="wand-settings-library-update-deck">
@@ -448,10 +459,14 @@ export function GithubSettingsTab({ snapshot, repository, refresh, setSnapshot }
           <SettingsField label="Fine-grained Token" htmlFor="settings-github-token" hint="保存后不会再次显示；留空不会覆盖已有 Token。">
             <SettingsTextInput id="settings-github-token" type="password" autoComplete="new-password" value={token} disabled={!!pending} placeholder={connector.connected ? "输入新 Token 以轮换" : "github_pat_…"} onChange={setToken} />
           </SettingsField>
-          <SettingsField label="GitHub API 地址" htmlFor="settings-github-api-url" hint="GitHub.com 使用默认地址；GitHub Enterprise 可填对应 API 地址。">
-            <SettingsTextInput id="settings-github-api-url" type="url" autoComplete="url" value={apiUrl} disabled={!!pending} placeholder="https://api.github.com" onChange={setApiUrl} />
-          </SettingsField>
         </SettingsGrid>
+        <Collapse activeKey={enterpriseOpen ? ["enterprise"] : []}
+          onChange={(keys) => setEnterpriseOpen(keys.includes("enterprise"))}
+          items={[{ key: "enterprise", label: "GitHub Enterprise / 高级连接", children:
+            <SettingsField label="GitHub API 地址" htmlFor="settings-github-api-url" hint="GitHub.com 使用默认地址；只有连接自建 GitHub Enterprise 时才需要修改。">
+              <SettingsTextInput id="settings-github-api-url" type="url" autoComplete="url" value={apiUrl} disabled={!!pending} placeholder="https://api.github.com" onChange={setApiUrl} />
+            </SettingsField>
+          }]} />
         {connector.connected && connector.scopes.length ? <SettingsStatus tone="info">Token 权限：{connector.scopes.join("、")}</SettingsStatus> : null}
         <div className="wand-settings-library-button-row">
           <SettingsActionButton pending={pending === "connect"} kind="primary" successLabel="已连接" onClick={() => connect()}>{connector.connected ? "验证并轮换 Token" : "连接 GitHub"}</SettingsActionButton>
@@ -662,9 +677,9 @@ export function GeneralSettingsTab({ snapshot, repository, refresh }: SettingsTa
   return (
     <section className="wand-settings-library-panel" aria-label="基本配置">
       <header className="wand-settings-library-panel-heading">
-        <h2>基本配置</h2><p>配置服务连接、执行方式和工作目录。</p>
+        <h2>基本配置</h2><p>此页设置作用于当前 Wand 服务及其新建会话；保存会同时应用本页的保留策略。</p>
       </header>
-      <SettingsSection title="服务连接" description="部署字段保存后可能需要重启服务。">
+      <SettingsSection title="服务连接（部署设置）" description="Host、端口和 HTTPS 保存后需重启服务才生效，可能改变浏览器和 App 的连接地址。">
         <SettingsGrid>
           <SettingsField label="Host" htmlFor="settings-host" error={errors.host}>
             <SettingsTextInput id="settings-host" value={form.host} invalid={!!errors.host} onChange={(value) => update("host", value)} />
@@ -681,17 +696,18 @@ export function GeneralSettingsTab({ snapshot, repository, refresh }: SettingsTa
         />
       </SettingsSection>
 
-      <SettingsSection title="执行偏好" description="应用于之后创建的新会话。">
+      <SettingsSection title="执行偏好" description="默认模式用于新会话；回复语言和环境配置在工具下一次启动时应用。">
         <SettingsGrid>
           <SettingsField label="默认模式">
             <SettingsSelect id="settings-default-mode" ariaLabel="默认执行模式" value={form.defaultMode} options={MODE_OPTIONS} onChange={(value) => update("defaultMode", value as SettingsGeneralInput["defaultMode"])} />
           </SettingsField>
-          <SettingsField label="界面语言">
+          <SettingsField label="AI 回复语言" hint="指定 AI 回复语言，在工具下一次启动时应用；部分工具状态文案也跟随此偏好，网页尚未完整支持语言切换。">
             <SettingsSelect
               id="settings-language"
-              ariaLabel="界面语言"
-              value={form.language || "auto"}
-              options={[{ value: "auto", label: "自动" }, { value: "zh-CN", label: "简体中文" }, { value: "en", label: "English" }]}
+              ariaLabel="AI 回复语言"
+              value={form.language === "zh-CN" ? "中文" : form.language === "en" ? "English" : form.language || "auto"}
+              options={[{ value: "auto", label: "跟随工具默认" }, { value: "中文", label: "简体中文" }, { value: "English", label: "English" },
+                ...(!["", "中文", "English", "zh-CN", "en"].includes(form.language) ? [{ value: form.language, label: form.language }] : [])]}
               onChange={(value) => update("language", value === "auto" ? "" : value)}
             />
           </SettingsField>
@@ -705,7 +721,7 @@ export function GeneralSettingsTab({ snapshot, repository, refresh }: SettingsTa
         <WandButton kind="secondary" onClick={() => settingsStore.setNested("environment")}>查看将注入的环境变量</WandButton>
       </SettingsSection>
 
-      <SettingsSection title="工作环境">
+      <SettingsSection title="工作环境" description="默认目录用于新会话；Shell 修改需重启服务后生效。">
         <SettingsGrid>
           <SettingsField label="默认工作目录" htmlFor="settings-default-cwd">
             <SettingsTextInput id="settings-default-cwd" value={form.defaultCwd} placeholder="/home/user" onChange={(value) => update("defaultCwd", value)} />
@@ -716,16 +732,16 @@ export function GeneralSettingsTab({ snapshot, repository, refresh }: SettingsTa
         </SettingsGrid>
       </SettingsSection>
 
-      <SettingsSection title="任务保留" description="看板任务、团队运行和会话使用同一套天数。正在运行的会跳过。">
+      <SettingsSection title="任务与会话保留" description="看板任务、会话和已结束的团队运行共用此策略；正在处理工作的会跳过。保存本页后立即扫描。">
         <SettingsToggle
-          label="自动归档空闲任务"
-          description="连续没有更新、打开或会话活动达到设定天数后，移入归档。手动归档不受影响。"
+          label="自动归档空闲任务与会话"
+          description="达到空闲天数后移入归档；空闲终端可能被停止。归档内容仍可恢复，手动归档不受影响。"
           checked={form.taskRetention.autoArchiveEnabled}
           onCheckedChange={(checked) => updateRetention("autoArchiveEnabled", checked)}
         />
         <SettingsToggle
-          label="自动删除已归档任务"
-          description="归档后超过设定天数仍未恢复，则删除任务并清理它的 worktree。会话只解除关联，不立刻删除。"
+          label="自动删除到期内容"
+          description="删除超过保留天数的归档任务、会话及已结束团队运行；任务的 worktree 也会清理。删除后的内容无法恢复。"
           checked={form.taskRetention.autoDeleteEnabled}
           onCheckedChange={(checked) => updateRetention("autoDeleteEnabled", checked)}
         />
@@ -742,7 +758,7 @@ export function GeneralSettingsTab({ snapshot, repository, refresh }: SettingsTa
               onChange={(value) => updateRetention("autoArchiveDays", value.trim() === "" ? Number.NaN : Number(value))}
             />
           </SettingsField>
-          <SettingsField label="归档后天数" htmlFor="settings-task-delete-days" error={errors.autoDeleteDays} hint={`从归档时间起算，${TASK_RETENTION_MIN_DAYS}–${TASK_RETENTION_MAX_DAYS} 天`}>
+          <SettingsField label="归档后天数" htmlFor="settings-task-delete-days" error={errors.autoDeleteDays} hint={`任务与会话从归档时间起算；已结束团队运行从最后活动起算。${TASK_RETENTION_MIN_DAYS}–${TASK_RETENTION_MAX_DAYS} 天。`}>
             <SettingsTextInput
               id="settings-task-delete-days"
               type="number"
@@ -755,6 +771,12 @@ export function GeneralSettingsTab({ snapshot, repository, refresh }: SettingsTa
             />
           </SettingsField>
         </SettingsGrid>
+        <SettingsStatus tone={form.taskRetention.autoDeleteEnabled ? "warning" : "info"}>
+          点击“保存基本配置”后立即按当前策略扫描，即使本次只修改了其他字段。
+          {form.taskRetention.autoDeleteEnabled
+            ? `自动删除已开启：归档任务与会话满 ${retentionDayError(form.taskRetention.autoDeleteDays, "归档后天数") ? "设定" : form.taskRetention.autoDeleteDays} 天、已结束团队运行达到保留天数时可能立即删除。请在保存前核对天数。`
+            : "自动删除已关闭；已归档内容会继续保留。"}
+        </SettingsStatus>
       </SettingsSection>
 
       <SettingsSaveBar label="保存基本配置" pending={pending} onSave={() => void save()} status={status} tone={tone} />

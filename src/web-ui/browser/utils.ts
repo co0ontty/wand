@@ -2,6 +2,7 @@ import { state } from "./state";
 import "./i18n";
 import { isStructuredSession } from "./session-engine";
 import { escapeHtml } from "./text-escape";
+import { turnStartedAtMs } from "../running-activity.js";
 
 export { escapeHtml };
 export { computeRunningSignal } from "../session-activity";
@@ -48,10 +49,10 @@ export function renderStructuredStatusBar(chatMessages: any, session: any) {
     : "回复中";
 
   if (isInFlight) {
-    // Start timer if not already running
-    if (!state._statusBarTimerId) {
-      state._statusBarStartTime = Date.now();
-    }
+    // Refresh/reconnect must retain the server's turn clock. Missing anchors
+    // show the phase alone rather than inventing a duration from page mount.
+    var startedAt = turnStartedAtMs(session);
+    state._statusBarStartTime = startedAt ?? 0;
 
     // Add glow to input composer
     if (composer) composer.classList.add("in-flight");
@@ -73,17 +74,25 @@ export function renderStructuredStatusBar(chatMessages: any, session: any) {
       existing.querySelector(".status-bar-label")!.textContent = inFlightLabel;
       var dot = existing.querySelector(".status-bar-dot") as HTMLElement;
       if (dot) dot.style.display = "";
-      state._statusBarStartTime = Date.now();
     }
     var activeLabel = existing && existing.querySelector(".status-bar-label");
     if (activeLabel) activeLabel.textContent = inFlightLabel;
+    var activeTimer = existing && existing.querySelector<HTMLElement>(".status-bar-timer");
+    if (activeTimer) {
+      activeTimer.hidden = startedAt === null;
+      if (startedAt !== null) activeTimer.textContent = (Math.max(0, Date.now() - startedAt) / 1000).toFixed(1) + "s";
+    }
+    if (startedAt === null) {
+      clearInterval(state._statusBarTimerId);
+      state._statusBarTimerId = null;
+    }
 
     // Start interval to update timer
-    if (!state._statusBarTimerId) {
+    if (!state._statusBarTimerId && startedAt !== null) {
       state._statusBarTimerId = setInterval(function() {
         var bar = document.querySelector(".structured-status-bar:not(.completed)");
         if (!bar) { clearInterval(state._statusBarTimerId); state._statusBarTimerId = null; return; }
-        var elapsed = ((Date.now() - state._statusBarStartTime) / 1000).toFixed(1);
+        var elapsed = (Math.max(0, Date.now() - state._statusBarStartTime) / 1000).toFixed(1);
         var timerEl = bar.querySelector(".status-bar-timer");
         if (timerEl) timerEl.textContent = elapsed + "s";
       }, 100);
@@ -106,6 +115,7 @@ export function renderStructuredStatusBar(chatMessages: any, session: any) {
       var clock = pad(finishedAt.getHours()) + ":" + pad(finishedAt.getMinutes()) + ":" + pad(finishedAt.getSeconds());
       var timerEl = existing.querySelector(".status-bar-timer") as HTMLElement | null;
       if (timerEl) {
+        timerEl.hidden = false;
         timerEl.textContent = clock;
         timerEl.title = "耗时 " + elapsed + "s";
       }
@@ -114,7 +124,7 @@ export function renderStructuredStatusBar(chatMessages: any, session: any) {
       state._statusBarStartTime = 0;
       // Remove after animation ends
       setTimeout(function() {
-        if (existing!.parentNode) existing!.remove();
+        if (existing!.classList.contains("completed") && existing!.parentNode) existing!.remove();
       }, 3000);
     }
   }

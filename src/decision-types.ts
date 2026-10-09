@@ -1,3 +1,5 @@
+import { isAbsolute } from "node:path";
+
 export const DECISION_MAX_BYTES = 32 * 1024;
 export const DECISION_MAX_QUESTIONS = 8;
 export const DECISION_MAX_OPTIONS = 8;
@@ -7,6 +9,17 @@ export interface LocalDecisionConfig {
   enabled: boolean;
   pythonPath: string;
   modelPath: string;
+}
+
+export function parseLocalDecisionConfig(value: unknown): LocalDecisionConfig {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("本地决策配置无效。");
+  const input = value as Record<string, unknown>;
+  if (Object.keys(input).some((key) => !["enabled", "pythonPath", "modelPath"].includes(key))
+    || typeof input.enabled !== "boolean" || typeof input.pythonPath !== "string" || typeof input.modelPath !== "string"
+    || (input.pythonPath !== "" && !isAbsolute(input.pythonPath)) || (input.modelPath !== "" && !isAbsolute(input.modelPath))) {
+    throw new Error("本地决策需有效的启用状态及受信任的绝对路径。");
+  }
+  return { enabled: input.enabled, pythonPath: input.pythonPath, modelPath: input.modelPath };
 }
 
 export interface DecisionQuestion {

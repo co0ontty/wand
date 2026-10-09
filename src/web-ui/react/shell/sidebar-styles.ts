@@ -41,12 +41,25 @@ export function installSidebarStyles(): void {
 .sidebar .workspace-loose-label { display:block; padding:8px 6px 4px; font-size:12px; }
 .sidebar .workspace-loose-session-list { display:flex; flex-direction:column; gap:4px; }
 .sidebar :is(.workspace-task-action,.workspace-task-chevron-btn) { width:28px; min-width:28px; height:32px; padding:0; flex-shrink:0; }
-.sidebar .workspace-task-menu, .sidebar .workspace-menu-context { min-width:0; }
-.workspace-menu-context { max-width:240px; overflow-wrap:anywhere; color:var(--text-secondary); font-size:12px; padding:4px 8px 8px; }
+/* Only geometry and context: Dropdown owns the surface, divider, hover and danger states. */
+.sidebar-menu-heading { display:grid; gap:2px; min-width:0; padding-block:2px; }
+.sidebar-menu-heading strong, .sidebar-menu-heading span { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sidebar-menu-heading strong { color:var(--text-primary); font-weight:var(--font-weight-semibold); }
+.sidebar-menu-heading span { color:var(--text-secondary); font-size:var(--font-size-xs); }
+.sidebar-menu-error { color:var(--danger); white-space:normal; overflow-wrap:anywhere; }
+:is(.sidebar-row-menu,.sidebar-menu-submenus) .ant-dropdown-menu { max-width:min(288px, calc(100vw - 24px)); }
+.sidebar-menu-submenus .ant-dropdown-menu-submenu-popup { min-width:min(224px, calc(100vw - 24px)); max-width:min(288px, calc(100vw - 24px)); }
+.sidebar-menu-submenus .ant-dropdown-menu { max-height:min(360px, calc(100dvh - 24px)); overflow-y:auto; overscroll-behavior:contain; }
+:is(.sidebar-row-menu,.sidebar-menu-submenus) :is(.ant-dropdown-menu-item,.ant-dropdown-menu-submenu-title) { height:auto; min-height:32px; }
+.sidebar [data-sidebar-menu-open="true"] { border-radius:var(--control-radius); background:var(--bg-active); }
 .sidebar .sidebar-footer-actions { align-items:center; }
 @media (pointer:coarse) {
   .sidebar :is(.workspace-task-action,.workspace-task-chevron-btn) { width:32px; min-width:32px; height:44px; }
   .sidebar .workspace-task-main, .sidebar .workspace-session-main { min-height:44px; }
+  :is(.sidebar-row-menu,.sidebar-menu-submenus) :is(.ant-dropdown-menu-item,.ant-dropdown-menu-submenu-title) { min-height:44px; }
+}
+@media (max-width:640px) {
+  :is(.sidebar-row-menu,.sidebar-menu-submenus) :is(.ant-dropdown-menu-item,.ant-dropdown-menu-submenu-title) { min-height:44px; }
 }
 @media (prefers-reduced-motion:reduce) { .sidebar-list-title, .sidebar-search-expand, .sidebar-disclosure-chevron { transition:none; } }
 .sidebar-full-list { opacity:1; visibility:visible; transition:opacity var(--motion-fast) var(--ease-in-out-smooth), visibility var(--motion-normal) var(--ease-in-out-smooth); }

@@ -104,10 +104,10 @@ export function UnifiedExecutionSubjectPicker({
     onKindChange(nextKind);
     if (nextKind === "pty" && (selectedSubject.type === "employee" || selectedSubject.type === "team")) {
       onSubjectChange({ type: "cli", id: lastCliProvider });
-      setSwitchedNotice("已切回 CLI：PTY 不支持员工 / 团队。");
+      setSwitchedNotice("已切回命令行工具：终端不支持员工和团队。");
     } else if (nextKind === "pty" && selectedSubject.engine === "sdk") {
       onSubjectChange({ type: "cli", id: selectedSubject.id });
-      setSwitchedNotice("已切回 Pi CLI：Wand Agent 只跑结构化会话。");
+      setSwitchedNotice("已切回 Pi CLI：Wand Agent 仅支持对话。");
     } else {
       setSwitchedNotice(null);
     }
@@ -147,7 +147,7 @@ export function UnifiedExecutionSubjectPicker({
               if (choice) {
                 if (choice.structuredOnly && kind !== "structured") {
                   onKindChange("structured");
-                  setSwitchedNotice(choice.id === "wand-agent" ? "Wand Agent 使用结构化会话。" : null);
+                  setSwitchedNotice(choice.id === "wand-agent" ? "Wand Agent 使用对话界面。" : null);
                 } else {
                   setSwitchedNotice(null);
                 }
@@ -181,12 +181,12 @@ export function UnifiedExecutionSubjectPicker({
             {teamBlocked ? <p role="status">{TEAM_NEEDS_PROJECT_HINT}</p> : null}
           </Flex> : null}
           <Flex vertical gap={8} role="group" aria-label="CLI 工具">
-            <Typography.Text strong>CLI 工具</Typography.Text>
+            <Typography.Text strong>执行工具</Typography.Text>
             {targetOptions.map((option) => {
               // PTY 下 Wand Agent 留在原位、只置灰：列表项不因形态切换而跳动。
               const unavailable = option.structuredOnly && isPty;
               return <Radio key={option.id} value={`cli:${option.id}`} disabled={disabled || unavailable}
-                title={unavailable ? "Wand Agent 只跑结构化会话" : undefined}>
+                title={unavailable ? "Wand Agent 仅支持对话" : undefined}>
                 {choiceLabel(option.id === "shell" ? <WandIcon name="terminal" size={20}/>
                   : option.engine === "sdk" ? <WandIcon name="spark" size={20}/>
                   : <ProviderLogo provider={option.provider} className="wand-subject-provider"/>,
@@ -196,7 +196,7 @@ export function UnifiedExecutionSubjectPicker({
           </Flex>
           </Flex>
         </Radio.Group>
-        {isPty ? <Typography.Paragraph type="secondary">PTY 是纯 CLI 终端，员工、团队与 Wand Agent 只在结构化模式下生效。</Typography.Paragraph> : null}
+        {isPty ? <Typography.Paragraph type="secondary">终端直接使用命令行工具。要使用员工、团队或 Wand Agent，请选择“对话”。</Typography.Paragraph> : null}
       </Form.Item>
       {showModel && selectedSubject.type === "cli" && selectedSubject.id !== "shell" ? (
         <Form.Item label="模型" extra="所选模型随会话启动一起提交；「跟随服务端默认」沿用服务端配置的默认模型。">

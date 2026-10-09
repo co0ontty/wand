@@ -94,7 +94,9 @@ test("F1–F5 conversation defect regression in real Chrome", { skip: process.en
     };
     const escape = async () => { for (const type of ["keyDown", "keyUp"]) await cdp("Input.dispatchKeyEvent", { type, key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 }); await pause(50); };
     const selectEmployee = async (owner: string, employee: number) => {
-      await click(`#${owner} .ant-select`); await cdp("Input.insertText", { text: `员工 ${employee}` });
+      await click(`#${owner} .ant-select input`);
+      await wait(`document.activeElement===document.querySelector(${JSON.stringify(`#${owner} .ant-select input`)})`);
+      await cdp("Input.insertText", { text: `员工 ${employee}` });
       await wait(`!!${node(`[data-wand-popup-owner="${owner}"] .ant-select-item-option`)}`);
       await click(`[data-wand-popup-owner="${owner}"] .ant-select-item-option`);
       await escape();
@@ -133,22 +135,37 @@ test("F1–F5 conversation defect regression in real Chrome", { skip: process.en
       const group = await evaluate('fixture.ui.getSnapshot().selectedId');
       assert.equal(await evaluate('document.activeElement===document.querySelector(".conversation-sender textarea")'), !mobile, "F4 success focus only after desktop layout");
       rows.push({ mode, F2: "one accepted group, same box and locked success", F4: !mobile ? "composer focused after layout" : "no automatic composer focus", submitBox });
+      await click('.conversation-heading-title');
+      await wait('document.querySelector("#conversation-members-panel").dataset.open==="true"');
+      assert.equal(await evaluate('document.querySelector(".conversation-heading-title").getAttribute("aria-expanded")'), "true");
+      assert.equal(await evaluate('document.querySelector(".conversation-heading-title").getAttribute("aria-controls")'), "conversation-members-panel");
+      await escape();
+      assert.equal(await evaluate('document.querySelector(".conversation-heading-title").getAttribute("aria-expanded")'), "false");
+      assert.equal(await evaluate('document.activeElement===document.querySelector(".conversation-heading-title")'), true, "Escape restores the actual title trigger");
+      rows.push({ mode, titleMembersAriaAndFocus: true });
       try {
       await click('.conversation-heading >button[aria-expanded="false"]');
       await wait('document.querySelector("#conversation-members-panel").dataset.open==="true"');
       await click('#conversation-members-panel button[aria-expanded="false"]');
       await wait('document.querySelector("#conversation-invite-panel").dataset.open==="true"');
-      await click('#conversation-invite-panel .ant-select'); await cdp("Input.insertText", { text: "员工 2" });
+      await click('#conversation-invite-panel .ant-select input');
+      await wait('document.activeElement===document.querySelector("#conversation-invite-panel .ant-select input")');
+      await cdp("Input.insertText", { text: "员工 2" });
       await wait(`!!${node('.ant-select-item-option')}`); await click('.ant-select-item-option');
       assert.equal(await evaluate('document.querySelector("#conversation-members-panel").dataset.open'), "true");
       assert.equal(await evaluate('document.querySelector("#conversation-invite-panel").dataset.open'), "true");
-      await escape(); assert.equal(await evaluate('document.querySelector("#conversation-invite-panel").dataset.open'), "true");
-      await escape(); assert.equal(await evaluate('document.querySelector("#conversation-invite-panel").dataset.open'), "false");
-      assert.equal(await evaluate('document.querySelector("#conversation-members-panel").dataset.open'), "true");
+      await escape(); assert.equal(await evaluate('document.querySelector("#conversation-invite-panel").dataset.open'), "true", "F3 first Escape closes only employee dropdown, keeping invitation open");
+      await escape(); assert.equal(await evaluate('document.querySelector("#conversation-invite-panel").dataset.open'), "false", "F3 second Escape closes invitation");
+      assert.equal(await evaluate('document.querySelector("#conversation-members-panel").dataset.open'), "true", "F3 second Escape keeps enclosing members open");
+      const sentBeforeOutside = h.sent.length, executionsBeforeOutside = h.executions.length;
+      assert.equal(await evaluate('document.querySelector(".conversation-sender textarea").value'), "", "F3 outside target is the empty sender");
+      if (mobile) assert.equal(await evaluate('document.querySelector(".conversation-sender textarea").hasAttribute("data-idle-speech")'), true, "F3 mobile outside target has idle speech pointer capture");
       await click('.conversation-sender textarea');
-      assert.equal(await evaluate('document.querySelector("#conversation-members-panel").dataset.open'), "false");
+      assert.equal(await evaluate('document.querySelector("#conversation-members-panel").dataset.open'), "false", "F3 pointer outside closes remaining members panel");
       assert.equal(await evaluate('document.activeElement===document.querySelector(".conversation-sender textarea")'), true, "outside point keeps its own focus");
-      rows.push({ mode, F3: "nested search/candidate and layered Escape/outside passed" });
+      assert.equal(h.sent.length, sentBeforeOutside, "F3 outside input click does not send a message");
+      assert.equal(h.executions.length, executionsBeforeOutside, "F3 outside input click does not start execution");
+      rows.push({ mode, F3: "nested search/candidate and layered Escape/outside passed", mobileEmptySenderOutside: mobile, outsideKeptFocus: true, outsideSentMessages: 0 });
       } catch (error) {
         failures.push(`${mode} F3: ${String(error)}`);
         rows.push({ mode, F3: "blocked actual input hit; no second product repair", error: String(error) });
@@ -181,7 +198,9 @@ test("F1–F5 conversation defect regression in real Chrome", { skip: process.en
         await wait('!document.querySelector(".conversation-approval")');
         rows.push({ F5: "same approval instance and box: rejection, loading, approved, result; send slot idle", approvalBox });
         // F1 UI projects accepted startup failure into the real group and explicitly continues the original task.
-        await evaluate('fixture.ui.select("dm_e_test_1")'); await wait('document.querySelector(".conversation-receiver").textContent.includes("员工 1")');
+        const firstTaskGroup = await h.service.createGroup(randomUUID(), { name: "首次任务启动失败替身", employeeIds: ["e_test_1"] });
+        await evaluate(`fixture.ui.select(${JSON.stringify(firstTaskGroup.conversationId)})`);
+        await wait('document.querySelector(".conversation-heading-title").textContent.includes("首次任务启动失败替身")');
         await click('.conversation-sender textarea'); await cdp("Input.insertText", { text: "接受后失败原任务" });
         await click('[aria-label="更多聊天操作"]'); await click('#conversation-task-panel button');
         await wait('!!document.activeElement?.closest("#conversation-task-panel") && !document.activeElement.closest("[hidden],[inert]")');
@@ -190,7 +209,10 @@ test("F1–F5 conversation defect regression in real Chrome", { skip: process.en
         await click('[data-wand-popup-owner="conversation-task-panel"] [role="option"]');
         const relay = h.structured.createRelaySession; h.structured.createRelaySession = () => { throw new Error("明确替身relay启动失败"); };
         const taskCount = h.storage.listWandTasks().length, calls = h.executions.length;
-        await click('[aria-label="派发任务"]'); await wait('fixture.ui.getSnapshot().selectedId.startsWith("group_")');
+        await click('[aria-label="派发任务"]'); await wait('fixture.ui.getSnapshot().selectedId.startsWith("group_")').catch(async error => {
+          console.log("dispatch diagnostics", await evaluate('({selected:fixture.ui.getSnapshot().selectedId,feedback:document.querySelector(".conversation-feedback")?.textContent,phase:document.querySelector(".conversation-submit-slots")?.dataset.phase,project:document.querySelector("[aria-label=工作项目]")?.textContent,input:document.querySelector(".conversation-sender textarea")?.value,disabled:document.querySelector("[aria-label=派发任务]")?.disabled,details:document.querySelector(".conversation-heading-context")?.textContent})'));
+          throw error;
+        });
         const failedGroup = await evaluate('fixture.ui.getSnapshot().selectedId');
         assert.equal(h.service.detail(failedGroup).tasks[0]?.startup?.state, "failed");
         assert.equal(h.storage.listWandTasks().length, taskCount + 1); assert.equal(h.executions.length, calls);
@@ -198,7 +220,10 @@ test("F1–F5 conversation defect regression in real Chrome", { skip: process.en
         await click('.conversation-task-index button'); await click('.conversation-task-drawer .ant-collapse-header'); await wait('document.querySelector(".conversation-task-details").textContent.includes("明确替身relay启动失败")');
         h.structured.createRelaySession = relay;
         await click('[aria-label="继续任务 接受后失败原任务"]');
-        await wait('!!document.activeElement?.closest("#conversation-task-panel") && !document.activeElement.closest("[hidden],[inert]")');
+        await wait('!!document.activeElement?.closest("#conversation-task-panel") && !document.activeElement.closest("[hidden],[inert]")').catch(async error => {
+          rows.push({ F1ContinueFocus: await evaluate('({panelOpen:document.querySelector("#conversation-task-panel")?.dataset.open,activeTag:document.activeElement?.tagName,activeOwner:document.activeElement?.closest("[data-wand-popup-owner]")?.getAttribute("data-wand-popup-owner"),drawerOpen:document.querySelector(".conversation-task-drawer")?.className,controls:Array.from(document.querySelectorAll("#conversation-task-panel input,#conversation-task-panel button")).map(n=>({label:n.getAttribute("aria-label"),disabled:n.disabled,visible:n.checkVisibility()}))})') });
+          throw error;
+        });
         await click('.conversation-sender textarea');
         assert.equal(await evaluate(`!!document.querySelector('[aria-label="确认继续此任务"]')`), true, "editing task input preserves dispatch mode");
         await click('[aria-label="确认继续此任务"]'); await wait('document.querySelector(".conversation-task-context")?.textContent.includes("接受后失败原任务")');

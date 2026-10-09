@@ -24,7 +24,7 @@ const ComposerInput = React.forwardRef<any, any>((props, ref) => {
       if (parent.moveBefore) parent.moveBefore(input, null);
       else { parent.appendChild(input); if (active) { input.focus({ preventScroll: true }); input.setSelectionRange(start, end); } }
     }
-    input.className = props.className || "";
+    input.classList.add("input-textarea", ...String(props.className || "").split(/\s+/).filter(Boolean));
     if (input.value !== props.value && !projection.isComposing()) input.value = props.value || "";
     resize(input);
   }, [input, props.value, props.className, resize]);
@@ -36,6 +36,6 @@ const components = { input: ComposerInput };
 export function ComposerSender({ input, resize, projection }: { input: HTMLTextAreaElement; resize: ResizeInput; projection: SenderProjection }): React.ReactElement {
   React.useSyncExternalStore(projection.subscribe, projection.revision, () => 0);
   return <InputContext.Provider value={{ input, resize, projection }}><Sender value={projection.text()}
-    placeholder={input.placeholder} components={components} suffix={false} autoSize={false} onKeyDown={() => false}/></InputContext.Provider>;
+    placeholder={input.placeholder} components={components} suffix={false} autoSize={false} onKeyDown={() => false}
+    styles={{ root: { border: 0, boxShadow: "none", borderRadius: 0 }, content: { padding: 0 } }}/></InputContext.Provider>;
 }
-

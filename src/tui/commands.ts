@@ -886,7 +886,7 @@ function staleDaemonNote(configPath: string): string | null {
   if (!binaryVersion) return null;
   if (daemonVersion && compareSemver(daemonVersion, binaryVersion) >= 0) return null;
   const shown = daemonVersion ? `Render ${daemonVersion}` : "Render daemon";
-  return `；但 ${shown} 仍在跑（装好的二进制是 ${binaryVersion}），它要重启才会用上新代码：./start.sh --restart-daemons`;
+  return `；底层组件将在所有会话结束后自动更新（${shown} → ${binaryVersion}）。等待期间部分功能可能暂时异常，无需操作`;
 }
 
 /** daemon 端点状态摘要，给服务命令的 detail 用。 */

@@ -198,7 +198,7 @@ test("团队页与群聊页头部：返回箭头只在列表态出现，收起�
   // 未选中团队时页面标题是「AI 团队」，退出靠箭头；选中后同一功能只留面包屑首段，箭头必须收起。
   // 员工页（pageMode === "employees"）是另一个一级页面，同样保留箭头，所以条件里多一个分叉。
   assert.match(teams, /\{pageMode === "employees" \|\| !selected \? <WandIconButton[\s\S]{0,160}aria-label="返回工作区"/);
-  assert.match(teams, /\{ label: "AI 团队", onNavigate: \(\) => \{ void leaveDetail\(\); \} \}/);
+  assert.match(teams, /\{ label: "团队模板", onNavigate: \(\) => \{ void leaveDetail\(\); \} \}/);
   assert.doesNotMatch(teams, /\{selected \? <WandIconButton/);
 
   const chat = read("react/ai-teams/team-chat-page.tsx");
@@ -624,7 +624,7 @@ test("[T7] 团队列表轻缓存：运行通知不失效，团队页保存才失
   assert.match(list, /if \(teamList\) return Promise\.resolve\(teamList\)/);
   assert.match(list, /if \(!teamListPending\)/, "并发只发一次请求");
   assert.match(list, /if \(teamListPending === pending\) teamListPending = null/, "旧请求不能清掉新请求");
-  assert.match(list, /if \(version === teamListVersion\) teamList = list/, "改名期间返回的旧名单不回填缓存");
+  assert.match(list, /if \(version === teamListVersion\) \{\s*teamList = list;/, "改名期间返回的旧名单不回填缓存");
   assert.match(body, /function invalidateTeamList\(\): void/, "定义变更共用失效入口");
   const runNotify = body.slice(body.indexOf("export function notifyAiTeamRunChanged"),
     body.indexOf("type TeamListener"));
@@ -1530,7 +1530,7 @@ test("团队详情：草稿未保存时，每个离开入口都先确认，取�
   // 三个入口共用同一段守卫：面包屑父段、「新建团队」收起、「换一个模板」。
   assert.match(teams, /const confirmDiscardTeamDraft = async \(\): Promise<boolean> => \{\s*if \(teamDraftPending\.current\) return false;\s*if \(!teamDraftDirty\.current\) return true;/);
   assert.match(teams, /const leaveDetail = async \(\): Promise<void> => \{\s*if \(!await confirmDiscardTeamDraft\(\)\) return;/);
-  assert.match(teams, /\{ label: "AI 团队", onNavigate: \(\) => \{ void leaveDetail\(\); \} \}/);
+  assert.match(teams, /\{ label: "团队模板", onNavigate: \(\) => \{ void leaveDetail\(\); \} \}/);
   assert.match(teams, /onClick=\{\(\) => \(creating \? void leaveDetail\(\) : void startCreate\(\)\)\}/);
   assert.match(teams, /aria-label="换一个模板" onClick=\{\(\) => \{ void backToTemplates\(\); \}\}/);
   assert.doesNotMatch(teams, /onClick=\{\(\) => setTemplate\(null\)\}/);
@@ -1544,7 +1544,7 @@ test("团队详情：草稿未保存时，每个离开入口都先确认，取�
   assert.match(teams, /if \(pageMode === "teams" && selectedId\) \{\s*\/\/[^\n]*\n\s*\/\/[^\n]*\n\s*void leaveDetail\(\);\s*return;/);
   assert.doesNotMatch(teams, /if \(selectedId\) \{\s*setSelectedId\(""\);/);
   // 取消（含关掉浮层）不丢：默认焦点在「继续编辑」，丢弃才是 danger。
-  assert.match(teams, /title: "放弃未保存的团队改动？"/);
+  assert.match(teams, /title: "放弃未保存的团队模板改动？"/);
   assert.match(teams, /\{ label: "继续编辑", value: false, autoFocus: true \}/);
   assert.match(teams, /\{ label: "放弃改动", value: true, kind: "danger" \}/);
   assert.match(teams, /return answer\.dismissed === false && answer\.action === true;/);

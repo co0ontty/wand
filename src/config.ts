@@ -12,6 +12,7 @@ import { isThinkingEffort } from "./structured-provider-common.js";
 import { normalizeModelGroups } from "./model-groups.js";
 import { normalizeUserProfile, parseUserProfile } from "./user-profile.js";
 import { defaultTaskRetention, normalizeTaskRetention, parseTaskRetention } from "./task-retention.js";
+import { parseLocalDecisionConfig } from "./decision-types.js";
 
 const DEFAULT_CONFIG_DIR = ".wand";
 const DEFAULT_CONFIG_FILE = "config.json";
@@ -48,6 +49,7 @@ export const PREFERENCE_KEYS = [
   "inheritEnv",
   "taskRetention",
   "userProfile",
+  "localDecision",
 ] as const satisfies readonly (keyof WandConfig)[];
 
 export type PreferenceKey = (typeof PREFERENCE_KEYS)[number];
@@ -435,6 +437,10 @@ export function applyStoragePreferences(config: WandConfig, storage: WandStorage
   if (storage.hasPreference(preferenceStorageKey("userProfile"))) {
     config.userProfile = normalizeUserProfile(storage.getPreference<unknown>(preferenceStorageKey("userProfile"), null));
   }
+  if (storage.hasPreference(preferenceStorageKey("localDecision"))) {
+    try { config.localDecision = parseLocalDecisionConfig(storage.getPreference<unknown>(preferenceStorageKey("localDecision"), defaults.localDecision)); }
+    catch { config.localDecision = { ...defaults.localDecision! }; }
+  }
   return config;
 }
 
@@ -455,6 +461,12 @@ export function writePreferenceToStorage(
     return;
   }
   switch (key) {
+    case "localDecision": {
+      const decision = parseLocalDecisionConfig(value);
+      storage.setPreference(dbKey, decision);
+      config.localDecision = decision;
+      break;
+    }
     case "modelGroups": {
       const groups = normalizeModelGroups(value);
       storage.setPreference(dbKey, groups);

@@ -21,8 +21,6 @@ import type { RenderEngine } from "./types.js";
 const RENDER_READY_TIMEOUT_MS = 5_000;
 /** 自愈 revive 的最小间隔：重连退避可能很密集，窗口内只 spawn 一次。 */
 const RENDER_REVIVE_BACKOFF_MS = 5_000;
-/** 空闲 daemon 升级时等它退出的上限（超过就当升级失败，交给上层决定）。 */
-const RENDER_SHUTDOWN_TIMEOUT_MS = 5_000;
 /** 陈留 socket 的二次确认间隔（避开「刚 bind、还没 accept」的启动窗口）。 */
 const RENDER_STALE_PROBE_DELAY_MS = 250;
 
@@ -285,9 +283,8 @@ export async function createRenderTerminalHost(
   options: { binaryPath?: string; knownSessionIds?: readonly string[] } = {},
 ): Promise<RenderDaemonClient> {
   const binaryPath = options.binaryPath ?? resolveRenderBinaryPath(configPath);
-  // adopt 到的是已经在跑的 daemon：它可能是 npm 升级前启动的旧二进制。
-  const adopt = (client: RenderDaemonClient): Promise<RenderDaemonClient> =>
-    upgradeRenderDaemonIfIdle(configPath, binaryPath, options.knownSessionIds, client);
+  // Adoption never restarts an owner. The server maintenance worker waits for
+  // every execution family and closes admission before replacing idle daemons.
   const paths = renderPaths(configPath);
   const endpointExists = process.platform !== "win32" && existsSync(paths.socketPath);
   // 已经 adopt 过的客户端需要能自己把 daemon 拉回来：adopt 完 binaryPath 就丢了，
@@ -296,11 +293,11 @@ export async function createRenderTerminalHost(
 
   if (endpointExists) {
     const adopted = await connectExistingRenderClient(configPath, options.knownSessionIds, reviveDaemon);
-    if (adopted) return adopt(adopted);
+    if (adopted) return adopted;
     if (await isSocketListening(paths.socketPath)) {
       // 有人监听却拒绝 adopt（协议版本不符 / token 不符）：这是错误配置，必须报出来而不是绕开。
       const starting = await waitForRender(configPath, RENDER_READY_TIMEOUT_MS, options.knownSessionIds, reviveDaemon);
-      if (starting) return adopt(starting);
+      if (starting) return starting;
       throw new Error(
         `A Render daemon is listening on ${paths.socketPath} but rejected adoption. Refusing to spawn a competing Render; ` +
         "check the protocol version/token of the running binary, or stop it first.",
@@ -318,7 +315,7 @@ export async function createRenderTerminalHost(
   const livePid = readLiveRenderPid(paths.pidPath);
   if (livePid !== null) {
     const starting = await waitForRender(configPath, RENDER_READY_TIMEOUT_MS, options.knownSessionIds, reviveDaemon);
-    if (starting) return adopt(starting);
+    if (starting) return starting;
     throw new Error(
       `Render process ${livePid} is alive but its socket ${paths.socketPath} is unavailable; refusing to spawn a second daemon.`,
     );
@@ -340,61 +337,6 @@ export function shouldUpgradeRenderDaemon(
   if (!daemonVersion || !binaryVersion) return false;
   if (compareSemver(daemonVersion, binaryVersion) >= 0) return false;
   return sessionCount === 0;
-}
-
-/**
- * 装好的二进制比正在跑的 daemon 新时怎么办。
- *
- * npm 升级 / `./start.sh` 都不会重启正在跑的 daemon（不能杀别人的 PTY），所以升级后
- * 一直在跑旧代码 —— 2026-09-24 的线上事故就是这么来的：端点自愈是 9/23 21:26 补上的，
- * 但 terminald 是 9/19 启的老进程、Render 是 9/23 10:49 的老二进制，socket 被临时目录
- * 清理器删掉后永远回不来。
- *
- * 所以：daemon 空闲（没有 PTY）就直接把它换到新二进制上 —— 升级完就好；
- * 还有会话就只大声告警，让人在会话结束后跑 `./start.sh --restart-daemons`。
- */
-async function upgradeRenderDaemonIfIdle(
-  configPath: string,
-  binaryPath: string | null,
-  knownSessionIds: readonly string[] | undefined,
-  client: RenderDaemonClient,
-): Promise<RenderDaemonClient> {
-  if (!binaryPath) return client;
-  const daemonVersion = client.version;
-  if (!daemonVersion) return client;
-  const binaryVersion = await readRenderBinaryVersion(binaryPath);
-  if (!binaryVersion || compareSemver(daemonVersion, binaryVersion) >= 0) return client;
-  const sessions = client.sessionCount;
-  if (!shouldUpgradeRenderDaemon(daemonVersion, binaryVersion, sessions)) {
-    process.stderr.write(
-      `[wand] WARNING: Render daemon ${daemonVersion} is older than the installed binary ${binaryVersion} but still owns ` +
-      `${sessions} PTY session(s); it keeps running the old code. Restart it when those sessions are done: ./start.sh --restart-daemons\n`,
-    );
-    return client;
-  }
-  try {
-    await client.requestShutdownNow();
-    client.disconnect();
-    await waitForRenderProcessExit(renderPaths(configPath).pidPath, RENDER_SHUTDOWN_TIMEOUT_MS);
-    const upgraded = await spawnDetachedRender(configPath, binaryPath, knownSessionIds);
-    process.stderr.write(`[wand] Render daemon upgraded ${daemonVersion} -> ${binaryVersion} (it was idle).\n`);
-    return upgraded;
-  } catch (error) {
-    // 已经让它收摊了：回不去旧 client，报清楚并让上层（auto 模式）回退 legacy。
-    throw new Error(
-      `Render daemon ${daemonVersion} was stopped for an upgrade to ${binaryVersion} but the replacement did not come up: ` +
-      getErrorMessage(error),
-    );
-  }
-}
-
-/** 等旧 daemon 真的退出（新 daemon 会因为 pid 活着而拒绝启动）。 */
-async function waitForRenderProcessExit(pidPath: string, timeoutMs: number): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (readLiveRenderPid(pidPath) === null) return;
-    await new Promise<void>((resolve) => setTimeout(resolve, 50));
-  }
 }
 
 /**

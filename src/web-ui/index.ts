@@ -20,7 +20,9 @@ export function renderApp(configPath: string, page: "console" | "settings" = "co
 <html lang="zh-CN"${page === "settings" ? ` data-wand-page="settings" data-wand-settings-auth="${settingsAuth}"` : ""}>
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+  <meta name="wand-xterm-script" content="${xtermSrc}" />
+  <meta name="wand-qrcode-script" content="${qrcodeSrc}" />
   <title>${page === "settings" ? "Wand 设置" : "Wand Console"}</title>
   <link rel="icon" type="image/svg+xml" href="${WAND_FAVICON_URL}" />
   <meta name="description" content="Local CLI Console for Vibe Coding - Manage terminal sessions from your browser" />
@@ -34,8 +36,6 @@ export function renderApp(configPath: string, page: "console" | "settings" = "co
 <body>
   <div id="app"></div>
   <div id="overlay-root" data-wand-ui-root></div>
-<script src="${xtermSrc}"></script>
-<script src="${qrcodeSrc}"></script>
 <script src="${scriptSrc}"></script>
 </body>
 </html>`;

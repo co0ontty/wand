@@ -27,6 +27,7 @@ export function ComposerPopoverItems({ mount }: { mount: ComposerPopoverMount })
         id="terminal-interactive-toggle-top"
         type="button"
         aria-pressed={mount.interactiveOn ? "true" : "false"}
+        title="终端交互开启时，键盘直通原始终端；关闭后在对话中阅读解析后的输出"
         onClick={() => mount.onToggleInteractive()}
       >
         <WandIcon name="keyboard" size={14} strokeWidth={1.8} className="plus-popover-icon" />

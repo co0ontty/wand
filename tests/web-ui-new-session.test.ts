@@ -471,7 +471,7 @@ test("新会话对话框支持员工默认派发与指定 CLI 及模型", () => 
   assert.match(host, /wand-new-session-employee-section/);
   assert.match(host, /wand-new-session-logo-bar/);
   assert.match(host, /EmployeeAvatar[\s\S]*selectedEmployee/);
-  assert.match(host, /默认走员工派发流程/);
+  assert.match(host, /按员工配置的工具与模型候选顺序启动/);
   assert.match(host, /customizingCli/);
   assert.match(host, /选择执行工具/);
   assert.match(host, /指定模型/);

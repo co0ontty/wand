@@ -143,18 +143,17 @@ test("storage failures fall back to full instead of throwing", async () => {
   }
 });
 
-test("both shell chrome rows render the same width toggle", () => {
+test("session menu and task width control share the same preference owner", () => {
   const topbar = readFileSync(path.join(root, "src/web-ui/react/shell/shell-topbar.tsx"), "utf8");
   const tabbar = readFileSync(
     path.join(root, "src/web-ui/react/workspaces/workspace-tab-bar.tsx"),
     "utf8",
   );
-  for (const [name, source] of [["ShellTopbar", topbar], ["WorkspaceTabBar", tabbar]] as const) {
-    assert.match(source, /<ChatWidthToggle\b/, `${name} 必须挂上和另一处相同的开关`);
-  }
-  // 两处都只传类名，状态与持久化逻辑只存在一份。
-  assert.match(topbar, /<ChatWidthToggle className="topbar-chat-width"\/>/);
+  assert.match(topbar, /<ChatWidthMenuItems\/>/);
   assert.match(tabbar, /<ChatWidthToggle className="workspace-tab-chat-width"\/>/);
+  const controls = readFileSync(path.join(root, "src/web-ui/react/shell/chat-width-toggle.tsx"), "utf8");
+  assert.match(controls, /export function ChatWidthMenuItems/);
+  assert.match(controls, /onSelect=\{\(\) => setChatWidthMode\(option\.mode\)\}/);
 });
 
 test("width toggle breakpoint matches the stylesheet media query", () => {

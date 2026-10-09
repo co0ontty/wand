@@ -9,6 +9,7 @@ import { parseJsonResponse } from "../src/web-ui/react/http-adapter.js";
 import { getErrorMessage } from "../src/error-utils.js";
 import * as completionState from "../src/session-completion-state.js";
 import * as chatHistoryWindow from "../src/web-ui/chat-history-window.js";
+import { compactModelDisplayLabel } from "../src/web-ui/browser/composer-select-values.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -40,6 +41,9 @@ function harness() {
     "../../session-completion-state.js": completionState,
     "../react/http-adapter": { parseJsonResponse },
     "../../error-utils.js": { getErrorMessage },
+    "./composer-select-values": new Proxy({ compactModelDisplayLabel }, {
+      get: (obj: Record<string, unknown>, key: string) => obj[key] ?? noop,
+    }),
     "./notifications": new Proxy(
       { showToast: (message: string, tone?: string) => { toasts.push({ message, tone }); } },
       { get: (obj: Record<string, unknown>, key: string) => obj[key] ?? noop },

@@ -67,7 +67,7 @@ function paint(host: HTMLElement, source: HTMLButtonElement, projection: ButtonP
   }
   flushSync(() => projection.root.render(<WandUiProvider><Button {...attrs} htmlType="button" size="small"
     block={source.classList.contains("ask-user-option")}
-    type={source.dataset.antdControl === "primary" || source.classList.contains("ask-user-option") && source.classList.contains("selected") ? "primary" : "default"} disabled={source.disabled}
+    type={source.dataset.antdControl === "primary" || source.classList.contains("ask-user-option") && source.classList.contains("selected") ? "primary" : source.id === "todo-progress-toggle" ? "text" : "default"} disabled={source.disabled}
     className={source.className || undefined} ref={button => {
       if (!button) return;
       for (const action of nativeActions) button.setAttribute(action.name, action.value);
@@ -106,7 +106,7 @@ export function mountBrowserButtons(container: ParentNode): void {
   installStyleSheet("wand-browser-control-motion", `
     /* These actions carry business summaries, not a one-line button label. */
     .ant-btn.agent-run-summary, .ant-btn.agent-run-agent, .ant-btn.ask-user-option { height:auto; white-space:normal; }
-    .ant-btn.agent-run-summary > span, .ant-btn.agent-run-agent > span { display:flex; align-items:center; gap:8px; width:100%; min-width:0; }
+    .ant-btn.agent-run-summary > span:not([class]), .ant-btn.agent-run-agent > span:not([class]) { display:flex; align-items:center; gap:8px; width:100%; min-width:0; }
     .ant-btn.code-copy { width:80px; flex-shrink:0; }
   `);
   for (const [host, projection] of roots) if (!host.isConnected) { projection.root.unmount(); roots.delete(host); }

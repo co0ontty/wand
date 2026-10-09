@@ -130,7 +130,10 @@ test("ShellTopbar SSR preserves title, status, cwd, git, and menu contracts", ()
   assert.doesNotMatch(html, /<button[^>]*id="topbar-cwd"/);
   assert.equal((html.match(/id="topbar-more-button"/g) ?? []).length, 1);
   assert.equal((html.match(/aria-label="当前会话操作"/g) ?? []).length, 1);
-  assert.match(html, /class="[^"]*\btopbar-cwd tail-marquee-path\b/);
+  assert.match(html, /title="工作目录：\/workspace\/wand"/);
+  assert.match(html, /aria-label="工作目录：\/workspace\/wand"/);
+  assert.match(html, />wand<\/span>/);
+  assert.match(html, />Codex<\/span>/);
   assert.match(html, /class="topbar-git-branch">codex\/chrome</);
   assert.match(html, /class="topbar-git-count">·3</);
   // Appica's icon button reports its pressed state through `data-pressed`.
@@ -144,16 +147,14 @@ test("ShellTopbar SSR preserves title, status, cwd, git, and menu contracts", ()
   assert.doesNotMatch(html, /chat-width-toggle/);
 });
 
-test("ShellTopbar exposes the chat width toggle while a chat is on screen", () => {
+test("ShellTopbar keeps a session menu instead of a permanent width control", () => {
   const chat = renderWithStore(
     createElement(ShellTopbar),
     fixture({ legacyVisibility: { terminal: false, chat: true, blank: false, composer: true } }),
   );
-  assert.match(chat, /aria-label="聊天内容宽度"/);
-  assert.match(chat, /ant-segmented/);
-  assert.match(chat, /data-stretch-value="full"/);
-  assert.match(chat, /data-stretch-value="column"/);
-  assert.match(chat, /ant-segmented-item-selected[^>]*>[\s\S]*?data-stretch-value="full"/);
+  assert.match(chat, /aria-label="当前会话操作"/);
+  assert.doesNotMatch(chat, /ant-segmented/);
+  assert.match(readFileSync(new URL("../src/web-ui/react/shell/shell-topbar.tsx", import.meta.url), "utf8"), /<ChatWidthMenuItems\/>/);
 
 });
 

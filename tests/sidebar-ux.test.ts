@@ -18,14 +18,15 @@ test("最近会话的会话行与目录树共用同一批右键动作", () => {
   const confirm = readFileSync(
     new URL("../src/web-ui/react/workspaces/session-delete-confirm.ts", import.meta.url), "utf8",
   );
-  // 两个视图在同一个抽屉里展示同一批会话，右键能力必须一致。
-  assert.match(recent, /<SidebarRowMenu[\s\S]*?className="workspace-session-menu"/);
-  assert.match(recent, /<SessionMoveButton menuItem/);
-  assert.match(recent, /label: archived \? "恢复会话" : "归档会话"/);
-  // 删除统一走公共确认，不在列表里各写一套内联确认。
-  assert.match(recent, /confirmSessionDelete/);
+  const sessionMenu = readFileSync(new URL("../src/web-ui/react/workspaces/sidebar-session-menu.tsx", import.meta.url), "utf8");
+  // 两个视图调用同一组件，而不是各自维护一张菜单。
+  assert.match(recent, /<SidebarSessionMenu/);
+  assert.match(panel, /<SidebarSessionMenu row=\{row\}/);
+  assert.match(sessionMenu, /label: "打开会话"/);
+  assert.match(sessionMenu, /label: "移动到任务"/);
+  assert.match(sessionMenu, /archived \? "恢复会话" : "归档会话"/);
+  assert.match(sessionMenu, /confirmSessionDelete\(label\)/);
   assert.doesNotMatch(recent, /wandOverlay\.dialog/);
-  assert.match(panel, /confirmSessionDelete/);
   assert.match(confirm, /无法撤销。任务和其他会话保留/);
   assert.match(confirm, /kind: "danger"/);
   assert.match(confirm, /answer\.dismissed !== true && Boolean\(answer\.action\)/);
@@ -37,7 +38,7 @@ test("最近会话的会话行与目录树共用同一批右键动作", () => {
 test("row context menu adds no action button and exposes keyboard/touch affordances", () => {
   const html = renderToStaticMarkup(createElement(SidebarRowMenu, {
     open: false, onOpenChange() {}, label: "测试会话操作", row: createElement("button", null, "测试会话"),
-    children: createElement("button", null, "删除会话"),
+    menu: { items: [{ key: "delete", label: "删除会话", danger: true }] },
   }));
   assert.equal((html.match(/<button\b/g) ?? []).length, 1);
   assert.match(html, /aria-haspopup="menu"/);

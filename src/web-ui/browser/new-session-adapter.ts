@@ -17,7 +17,8 @@ import {
   updateDrawerState,
 } from "./session-engine";
 import { state, writeStoredBoolean } from "./state";
-import { saveWorkingDir } from "./terminal";
+import { initTerminal, saveWorkingDir } from "./terminal";
+import { ensureTerminalLibrary } from "../vendor-loader.js";
 import { closeReactOverlays } from "./react-overlay-coordinator";
 import { notifyTasksChanged } from "../react/task-changes";
 import { taskDetailStore } from "../react/workspaces/task-detail-store";
@@ -60,6 +61,9 @@ const legacyRuntime: NewSessionRuntimeAdapter = {
 
   async prepareCreate(kind) {
     if (kind === "structured") return {};
+    // Explicit PTY creation needs measured initial dimensions even on a blank/structured page.
+    await ensureTerminalLibrary();
+    initTerminal({ prepare: true });
     await ensureTerminalReady();
     try {
       state.terminal?.remeasure?.();

@@ -1,4 +1,4 @@
-import { Flex, Menu, Skeleton, Typography } from "antd";
+import { Flex, Skeleton, Typography } from "antd";
 import { WandUiBoundary } from "../theme";
 import * as React from "react";
 
@@ -9,9 +9,7 @@ import { classNames } from "../ui/class-names";
 import { ImSidebarGroup } from "../shell/im-sidebar-group";
 import { ImSidebarItem } from "../shell/im-sidebar-item";
 import { SessionProviderMark, TeamChatSessionMark } from "./session-mark";
-import { SidebarRowMenu } from "./sidebar-row-menu";
-import { SessionMoveButton } from "./session-move-button";
-import { confirmSessionDelete } from "./session-delete-confirm";
+import { SidebarSessionMenu } from "./sidebar-session-menu";
 import { sidebarSessionLabel } from "./session-order";
 import { SidebarDisclosure, useSidebarExpansion, anchorSidebarDisclosure } from "./sidebar-disclosure";
 import { sidebarSessionState, sidebarAggregateState, sessionGlowStatus } from "./sidebar-session-state";
@@ -204,26 +202,12 @@ function RecentConversationGroup({
   disabled?: boolean;
 }): React.ReactElement {
   const [open, setOpen] = useSidebarExpansion(`recent.${group.key}`);
-  const [menuSessionId, setMenuSessionId] = React.useState<string | null>(null);
-  const [busy, setBusy] = React.useState(false);
   const activity = sidebarAggregateState(group.entries.map((entry) => entry.session));
-  // 右键菜单与目录树是同一批动作；确认走公共对话框，不复制一套内联确认。
   const hasMenu = Boolean(onArchiveSession || onDeleteSession);
-  const confirmDelete = async (session: WorkspaceSessionSummary, label: string): Promise<void> => {
-    if (!await confirmSessionDelete(label)) return;
-    setBusy(true);
-    try {
-      await onDeleteSession?.(session, label);
-      setMenuSessionId(null);
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const rows = group.entries.map((entry, index) => {
     const session = entry.session;
     const label = sidebarSessionLabel(session, index, liveTitles?.[session.id]);
-    const archived = session.archived === true;
     const item = (
       <ImSidebarItem
         id={session.id}
@@ -238,47 +222,13 @@ function RecentConversationGroup({
     );
     if (!hasMenu) return <React.Fragment key={session.id}>{item}</React.Fragment>;
     return (
-      <SidebarRowMenu
-        key={session.id}
-        row={<div className="sidebar-recent-row">{item}</div>}
-        open={menuSessionId === session.id}
-        disabled={disabled || busy}
-        onOpenChange={(next) => setMenuSessionId(next ? session.id : null)}
-        label={`会话 ${label} 的操作`}
-        className="workspace-session-menu"
-      >
-        {!archived && (
-          <SessionMoveButton menuItem sessionId={session.id} taskId={session.workspaceTaskId}
-            intoNewTask={session.workspaceTaskId ? undefined : entry.group}
-            onMoved={() => setMenuSessionId(null)}/>
-        )}
-        <Menu selectable={false} items={[
-          ...(onArchiveSession ? [{
-            key: "archive", disabled: busy, icon: <WandIcon name={archived ? "resume" : "archive"}/>,
-            label: archived ? "恢复会话" : "归档会话",
-          }] : []),
-          ...(onDeleteSession ? [{
-            key: "delete", disabled: busy, danger: true, icon: <WandIcon name="trash"/>,
-            label: "删除会话…",
-          }] : []),
-        ]} onClick={({ key }) => {
-          if (key === "archive") {
-            void (async () => {
-              setBusy(true);
-              try {
-                await onArchiveSession?.(session.id, !archived);
-                setMenuSessionId(null);
-              } finally {
-                setBusy(false);
-              }
-            })();
-          } else if (key === "delete") {
-            // 同目录树：确认层打开时不再留着行菜单。
-            setMenuSessionId(null);
-            void confirmDelete(session, label);
-          }
-        }}/>
-      </SidebarRowMenu>
+      <SidebarSessionMenu key={session.id} row={<div className="sidebar-recent-row">{item}</div>}
+        session={session} label={label} disabled={disabled}
+        intoNewTask={session.workspaceTaskId ? undefined : entry.group}
+        onOpen={() => onOpen(entry)}
+        onArchive={onArchiveSession ? archived => onArchiveSession(session.id, archived) : undefined}
+        onDelete={onDeleteSession ? () => onDeleteSession(session, label) : undefined}/>
+
     );
   });
 

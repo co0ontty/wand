@@ -2,7 +2,7 @@ import { getPersistedExpandState, setPersistedExpandState } from "./chat-scroll.
 
 interface TimelineReading {
   expanded: boolean;
-  pinned: boolean;
+  paused: boolean;
   expectedTop: number;
 }
 
@@ -15,12 +15,15 @@ function keepOpen(group: HTMLElement): void {
   if (key && getPersistedExpandState(key) !== true) setPersistedExpandState(key, true);
 }
 
-/** Inspecting a row is an explicit reading choice, just like Android onInspect. */
+function isAtTail(timeline: HTMLElement): boolean {
+  return timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop <= 2;
+}
+
+/** Opening a row is an explicit reading choice, just like Android onInspect, and makes
+ * the open state a user choice. The freeze itself comes from the open detail, so closing
+ * it releases the drawer without leaving a pause behind. */
 export function holdActivityTimeline(group: HTMLElement): void {
   keepOpen(group);
-  const timeline = group.querySelector<HTMLElement>(".chat-activity-timeline");
-  const current = timeline && reading.get(timeline);
-  if (current) current.pinned = false;
 }
 
 export function clearActivityTimelines(): void {
@@ -49,17 +52,18 @@ export function syncActivityTimelines(root: HTMLElement): void {
     const expanded = group.dataset.expanded === "true";
     let current = reading.get(timeline);
     if (!expanded) {
-      if (current) current.expanded = false;
+      // A closed drawer holds no reading state: the next open starts at the newest row.
+      if (current) { current.expanded = false; current.paused = false; }
       continue;
     }
     if (!current) {
-      current = { expanded: false, pinned: false, expectedTop: timeline.scrollTop };
+      current = { expanded: false, paused: false, expectedTop: timeline.scrollTop };
       reading.set(timeline, current);
       const position = current;
       const pause = () => {
         if (group.dataset.expanded !== "true") return;
         keepOpen(group);
-        position.pinned = false;
+        position.paused = true;
       };
       timeline.addEventListener("wheel", event => { if (event.deltaY) pause(); }, { passive: true });
       timeline.addEventListener("touchstart", pause, { passive: true });
@@ -70,17 +74,21 @@ export function syncActivityTimelines(root: HTMLElement): void {
       });
       timeline.addEventListener("scroll", () => {
         if (group.dataset.expanded !== "true" || Math.abs(timeline.scrollTop - position.expectedTop) <= 1) return;
-        // Ignore our own tail writes and DOM morph/anchor corrections. A user's
-        // scroll can resume following at the bottom, unless a detail is open.
+        // Reading intent is recorded at the input event: a wheel that the tail write
+        // cancels in the same frame never reaches this handler. A browser clamp after
+        // a row reflow or panel animation always lands on the tail, so it only ever
+        // releases the pause here, never creates one.
         position.expectedTop = timeline.scrollTop;
-        position.pinned = timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop <= 2;
-        keepOpen(group);
+        position.paused = !isAtTail(timeline);
+        if (position.paused) keepOpen(group);
       }, { passive: true });
     }
-    if (!current.expanded) current.pinned = group.dataset.live === "true";
     current.expanded = true;
     const inspecting = !!group.querySelector('.chat-call[data-expanded="true"]');
-    if (current.pinned && !inspecting && !group.closest("[inert]")) {
+    // Re-derived every frame instead of latched on the open transition, so a live drawer
+    // the user never touched cannot drift away from the newest row for good.
+    const following = !current.paused || isAtTail(timeline);
+    if (group.dataset.live === "true" && following && !inspecting && !group.closest("[inert]")) {
       timeline.scrollTop = timeline.scrollHeight;
     }
     current.expectedTop = timeline.scrollTop;

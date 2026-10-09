@@ -20,6 +20,11 @@ export function notifyLegacyUiChange(reason?: string): void {
   for (const listener of [...legacyChangeListeners]) listener(reason);
 }
 
+export function subscribeLegacyUiChange(listener: LegacyChangeListener): () => void {
+  legacyChangeListeners.add(listener);
+  return () => { legacyChangeListeners.delete(listener); };
+}
+
 function browserEnvironment(): LegacySnapshotEnvironment {
   const nativeBridge = typeof WandNative === "undefined" ? undefined : WandNative;
   return {

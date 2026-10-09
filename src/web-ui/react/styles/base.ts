@@ -5,7 +5,7 @@ export const foundationStyles = String.raw`
 .wand-ui-mount { display: contents; }
 .wand-ui-portals { position: fixed; inset: 0; pointer-events: none; }
 /* Notification lists cover the viewport; only the actual notice owns clicks. */
-.wand-ui-portals :is(.ant-modal-wrap, .ant-dropdown, .ant-select-dropdown, .ant-popover, .ant-notification-notice) { pointer-events: auto; }
+.wand-ui-portals :is(.ant-modal-wrap, .ant-dropdown, .ant-dropdown-menu-submenu-popup, .ant-select-dropdown, .ant-popover, .ant-notification-notice) { pointer-events: auto; }
 .wand-ui-dialog-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .wand-ui-dialog-description { white-space: pre-wrap; font-weight: normal; }
 .wand-ui-dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 20px; }
@@ -74,7 +74,7 @@ export const reducedMotionStyles = String.raw`
 @media (prefers-reduced-motion: reduce) {
   /* The global duration blanket otherwise creates a transition of left/top on
      library popups. rc-trigger measures those coordinates synchronously. */
-  :is(.ant-dropdown, .ant-popover, .ant-picker-dropdown, .ant-select-dropdown) {
+  :is(.ant-dropdown, .ant-dropdown-menu-submenu-popup, .ant-popover, .ant-picker-dropdown, .ant-select-dropdown) {
     transition-property: none !important;
     animation-duration: 0.01ms !important;
     transform: none !important;

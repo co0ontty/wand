@@ -10,11 +10,11 @@ import { openBrowser } from "./helpers/sidebar-ux-browser.mjs";
 
 // Real production controls and Chrome input; repository fixtures never execute a model.
 test("sidebar hierarchy, menu ownership, navigation and responsive geometry", {
-  skip: process.env.WAND_SIDEBAR_UX_BROWSER !== "1", timeout: 180_000,
+  skip: process.env.WAND_SIDEBAR_UX_BROWSER !== "1", timeout: 600_000,
 }, async () => {
   const root = resolve(import.meta.dirname, "..");
   const temp = mkdtempSync(join(tmpdir(), "wand-sidebar-ux-test-"));
-  const artifacts = join(root, "output/sidebar-ux");
+  const artifacts = join(root, process.env.WAND_SIDEBAR_UX_OUTPUT ?? "output/sidebar-ux");
   mkdirSync(artifacts, { recursive: true });
   const source = `import * as React from "react";
 import { createRoot } from "react-dom/client";
@@ -24,6 +24,7 @@ import { UiStoreProvider } from "./src/web-ui/react/shell/ui-store-react";
 import { WandUiProvider } from "./src/web-ui/react/theme";
 import { installReactUiStyles } from "./src/web-ui/react/styles";
 import { configureWorkspacesRuntime } from "./src/web-ui/react/workspaces/controller";
+import { setActiveWorkspaceContext } from "./src/web-ui/react/workspaces/workspace-context";
 import { newSessionController, newSessionStore, configureNewSessionRuntime } from "./src/web-ui/react/new-session/controller";
 import { conversationUi } from "./src/web-ui/react/conversations/state";
 import { overlayStore } from "./src/web-ui/react/overlay-controller";
@@ -36,9 +37,9 @@ selected:{id:"s1",workspaceId:"w1",workspaceTaskId:"t1"},sidebar:{groups:[],inte
 topbar:{title:"",description:"",statusLabel:"",statusTone:"idle",cwd:"/work/atlas",currentTask:"",titleGenerating:false,git:null},legacyVisibility:{terminal:false,chat:true,blank:false,composer:true}};
 const memory = new MemoryUiAdapter(snapshot);
 const update = (layout)=>{snapshot={...snapshot,layout:{...snapshot.layout,...layout}};memory.setSnapshot(snapshot,{sync:true});};
-window.fixture={memory,update,selected:[],creation:()=>newSessionStore.getSnapshot(),closeCreation:()=>newSessionController.close(),conversation:conversationUi};
+window.fixture={memory,update,selected:[],closed:0,setContext:setActiveWorkspaceContext,creation:()=>newSessionStore.getSnapshot(),closeCreation:()=>newSessionController.close(),conversation:conversationUi};
 const store={getSnapshot:()=>memory.getSnapshot(),subscribe:memory.subscribe.bind(memory),dispatch(action){memory.dispatch(action);if(action.type==="layout.drawer.collapse")update({sidebarCollapsed:!snapshot.layout.sidebarCollapsed});if(action.type==="layout.drawer.close")update({sessionsDrawerOpen:false,sessionsBackdropVisible:false});if(action.type==="workspace.new")newSessionController.open();}};
-configureWorkspacesRuntime({selectSession(id){fixture.selected.push(id);},openTask(payload){fixture.selected.push(payload.preferredSessionId||payload.taskId);},openWorkspace(){},closeWorkspace(){},refreshSessions:async()=>{},toast(){},onOpen(){},onClose(){}});
+configureWorkspacesRuntime({selectSession(id){fixture.selected.push(id);},openTask(payload){fixture.selected.push(payload.preferredSessionId||payload.taskId);},openWorkspace(){},closeWorkspace(){fixture.closed++;},refreshSessions:async()=>{},toast(){},onOpen(){},onClose(){}});
 configureNewSessionRuntime({onOpen(){},onClose(){}});
 function DialogHost(){const state=React.useSyncExternalStore(overlayStore.subscribe,overlayStore.getSnapshot,overlayStore.getSnapshot);const dialog=state.activeDialog;
   return dialog?<WandDialog key={dialog.id} open title={dialog.options.title} description={dialog.options.description} tone={dialog.options.tone} icon={dialog.options.icon} actions={dialog.options.actions} input={dialog.options.input} dismissable={dialog.options.dismissable} onAction={(action,inputValue)=>overlayStore.completeDialog(dialog.id,{dismissed:false,action,inputValue})} onDismiss={()=>overlayStore.completeDialog(dialog.id,{dismissed:true})}/>:null;}
@@ -54,19 +55,33 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
     ], standaloneSessions: [session("loose", "目录内的独立会话")] },
     { workspaceId: "synthetic:/work/sandbox", workspaceName: "Sandbox 试验目录", workspaceCwd: "/work/sandbox", synthetic: true, tasks: [], standaloneSessions: [session("sandbox", "临时验证会话", { cwd: "/work/sandbox" })] },
   ];
+  const conversations = [{ id: "group-menu", owner: "local-owner", kind: "group", peerEmployeeId: null,
+    name: "菜单交互验证群", nameSource: "custom", title: "菜单交互验证群", sourceTemplateId: null, team: null,
+    memberVersion: 1, joinedVersions: {}, sessionId: null, communicationSessionId: null,
+    createdAt: "2026-10-07T08:00:00Z", updatedAt: "2026-10-07T08:00:00Z", messageAt: "2026-10-07T08:00:00Z",
+    tasks: [], preview: "右键、键盘与长按使用同一个菜单", unavailableReason: null, memberUnavailableReasons: {} }];
   let failList = false;
+  let delayArchive = false;
+  let releaseArchive: (() => void) | null = null;
+  let releaseTaskArchive: (() => void) | null = null;
   const mutations: string[] = [];
   const server = createServer((req, res) => {
     const url = new URL(req.url!, "http://local");
     if (url.pathname.startsWith("/api/")) {
       res.setHeader("content-type", "application/json");
-      if (req.method !== "GET") { mutations.push(`${req.method} ${url.pathname}`); res.statusCode = 503; res.end(JSON.stringify({ error: "明确测试失败，请重试" })); return; }
+      if (req.method !== "GET") {
+        mutations.push(`${req.method} ${url.pathname}`);
+        const reject = (): void => { res.statusCode = 503; res.end(JSON.stringify({ error: "明确测试失败，请重试" })); };
+        if (delayArchive && url.pathname === "/api/sessions/batch-archive") { releaseArchive = reject; return; }
+        if (url.pathname === "/api/workspace-tasks/t1/archive") { releaseTaskArchive = () => res.end(JSON.stringify({ id: "t1" })); return; }
+        reject(); return;
+      }
       if (url.pathname === "/api/tasks" && failList) { res.statusCode = 503; res.end(JSON.stringify({ error: "列表同步失败" })); return; }
       const payload = url.pathname === "/api/tasks" ? { groups }
         : url.pathname === "/api/silicon-employees" ? { employees: [] }
         : url.pathname === "/api/attention" ? { items: [{ id: "sidebar-alert", title: "会话需要处理", detail: "验证状态提示不挤动主导航", sessionId: "s1" }] }
         : url.pathname === "/api/ai-team-runs" ? { runs: [] }
-        : url.pathname === "/api/conversations" ? { conversations: [] }
+        : url.pathname === "/api/conversations" ? { conversations }
         : url.pathname === "/api/ai-teams" ? []
         : url.pathname === "/api/config" ? {} : {};
       res.end(JSON.stringify(payload)); return;
@@ -83,6 +98,7 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
   try {
     for (const mode of process.env.WAND_SIDEBAR_UX_MODES?.split(",") ?? ["desktop", "mobile", "narrow", "native", "rollback", "reduced"]) {
       const width = mode === "mobile" ? 390 : mode === "narrow" ? 320 : 1280;
+      mutations.length = 0;
       const browser = await openBrowser("about:blank", width, 900);
       try {
         if (mode === "reduced") await browser.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
@@ -110,10 +126,11 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
         // 菜单项按文案定位后用真实鼠标事件点击：不依赖子元素顺序和动画中的命中测试。
         const clickMenuText = async (scope: string, text: string): Promise<void> => {
           await browser.settle();
-          const point = await browser.evaluate(`(()=>{const scope=${JSON.stringify(scope)};const node=[...document.querySelectorAll(scope+' .ant-menu-item,'+scope+' .wand-ui-menu-item')].find(n=>(n.innerText||'').includes(${JSON.stringify(text)}));if(!node)return null;const r=node.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+          const point = await browser.evaluate(`(()=>{const scope=${JSON.stringify(scope)};const node=[...document.querySelectorAll(scope+' [role=menuitem]')].find(n=>(n.innerText||'').includes(${JSON.stringify(text)}));if(!node)return null;const r=node.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,hit=document.elementFromPoint(x,y);return {x,y,hit:node===hit||node.contains(hit),actual:hit?.className,rect:r.toJSON()}})()`);
           assert.ok(point, `menu item exists: ${text}`);
-          await browser.send("Input.dispatchMouseEvent", { type: "mousePressed", ...point, button: "left", clickCount: 1 });
-          await browser.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...point, button: "left", clickCount: 1 });
+          assert.equal(point.hit, true, `menu action is actually reachable: ${text} (${JSON.stringify(point)})`);
+          await browser.send("Input.dispatchMouseEvent", { type: "mousePressed", x: point.x, y: point.y, button: "left", clickCount: 1 });
+          await browser.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x, y: point.y, button: "left", clickCount: 1 });
           await browser.settle();
         };
         const headerGeometry = `(()=>{const rect=s=>document.querySelector(s).getBoundingClientRect().toJSON();return {nav:rect('.conversation-navigation'),more:rect('#sidebar-more-btn'),footer:rect('.sidebar-footer'),width:rect('#sessions-drawer').width}})()`;
@@ -127,15 +144,34 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
         assert.equal(chatHeader.more.height, 44, `${mode}: header actions have touch-sized targets`);
         assert.ok(chatHeader.footer.height <= 64, `${mode}: footer does not consume a second row`);
         assert.equal(chatHeader.width, Math.min(320, width - 24));
+        // The chat list uses the very same native menu and keyboard/confirmation protocol.
+        await browser.wait('!!document.querySelector(".conversation-row")');
+        await browser.click('.conversation-row', "right");
+        await browser.wait('!!document.querySelector(".conversation-row-menu")');
+        await browser.screenshot(join(artifacts, `chat-menu-${mode}.png`));
+        assert.equal(await browser.evaluate('document.querySelectorAll(".conversation-row-menu .wand-ui-menu-item").length'), 0);
+        await browser.key("ArrowUp");
+        assert.match(await browser.evaluate('document.activeElement.textContent'), /删除群聊/);
+        await browser.key("Enter");
+        await browser.wait(`!!(${VISIBLE_DIALOG})`, "keyboard delete chat confirmation");
+        await browser.wait('!document.querySelector(".conversation-row-menu")');
+        await clickDialogAction("取消");
+        assert.equal(mutations.length, 0);
+        await browser.click('.conversation-row-more');
+        await browser.wait('!!document.querySelector(".conversation-row-menu")', "more button shares the context menu");
         await browser.click('.conversation-search-input input');
+        await browser.wait('!document.querySelector(".conversation-row-menu")', "outside press closes the chat menu");
         await browser.send("Input.insertText", { text: "搜索检查" });
         await browser.wait('document.querySelector(".conversation-search-input input").value === "搜索检查"');
         const searchGeometry = await browser.evaluate(`(()=>{const input=document.querySelector('.conversation-search-host'),clear=document.querySelector('[aria-label="清空搜索"]');const a=input.getBoundingClientRect(),b=clear.getBoundingClientRect();return {contained:b.x>=a.x&&b.right<=a.right,width:a.width}})()`);
         assert.equal(searchGeometry.contained, true, `${mode}: clear action is inside the search field`);
         await browser.click('[aria-label="清空搜索"]');
         assert.equal(await browser.evaluate('document.activeElement === document.querySelector(".conversation-search-input input") && document.activeElement.value === ""'), true, `${mode}: clearing preserves typing focus`);
+        await browser.click('.conversation-row', "right");
+        await browser.wait('!!document.querySelector(".conversation-row-menu")');
         await browser.click('.conversation-navigation [data-stretch-value="tasks"]');
         await browser.wait('fixture.conversation.getSnapshot().mode === "tasks"');
+        await browser.wait('!document.querySelector(".conversation-row-menu")', "hidden chat projection cannot leave a Portal menu behind");
         await browser.settle();
         const initial = await browser.evaluate(`(()=>{const v=${visible}; const root=document.querySelector('#sessions-drawer');return {recent:v(root.querySelector('.sidebar-recent')),loose:v(root.querySelector('.workspace-session[data-session-id=loose]')),sandbox:v(root.querySelector('.workspace-session[data-session-id=sandbox]')),standaloneFold:root.textContent.includes('未分组任务'),singleAction:root.querySelector('.workspace-session[data-session-id=loose]').querySelectorAll('button').length,overflow:root.scrollWidth>root.clientWidth+1,childNameWidth:root.querySelector('.workspace-session[data-session-id=s2] .workspace-session-name').getBoundingClientRect().width,t2:root.querySelector('[data-workspace-task-id=t2] .workspace-task-chevron-btn').getAttribute('aria-expanded')}})()`);
         assert.equal(initial.recent, false); assert.equal(initial.loose, true); assert.equal(initial.sandbox, true);
@@ -163,23 +199,50 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
           await browser.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
           const point = await browser.evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(sessionRow)}).getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`);
           await browser.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ ...point, id: 1 }] });
-          await browser.wait('!!document.querySelector(".workspace-session-menu .ant-menu")', "long press opens row menu");
+          await browser.wait('!!document.querySelector(".workspace-session-menu .ant-dropdown-menu")', "long press opens row menu");
+          await browser.evaluate(`document.querySelector(${JSON.stringify(sessionRow)}).dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:${point.x},clientY:${point.y},button:2}));true`);
+          await browser.settle();
+          assert.equal(await browser.evaluate('!!document.querySelector(".workspace-session-menu .ant-dropdown-menu")'), true, "the browser's own long-press contextmenu cannot toggle the menu closed");
           await browser.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
           await browser.settle();
           assert.equal(await browser.evaluate('fixture.selected.length'), 0, "long press must not also activate the session");
         } else await browser.click(sessionRow, "right");
-        await browser.wait('!!document.querySelector(".workspace-session-menu .ant-menu")');
-        await clickMenuText('.workspace-session-menu', '移动到任务');
-        await browser.wait('!!document.querySelector(".workspace-session-move-menu")');
-        assert.equal(await browser.evaluate('!!document.querySelector(".workspace-session-menu .ant-menu")'), true);
+        await browser.wait('!!document.querySelector(".workspace-session-menu .ant-dropdown-menu")');
+        await browser.settle();
+        const menuShape = await browser.evaluate(`(()=>{const menu=document.querySelector('.workspace-session-menu'),row=document.querySelector(${JSON.stringify(sessionRow)});const r=menu.getBoundingClientRect(),a=row.getBoundingClientRect();const heights=[...menu.querySelectorAll('[role=menuitem]')].map(n=>n.getBoundingClientRect().height);return {x:r.x,y:r.y,width:r.width,height:r.height,rowCenter:a.x+a.width/2,fits:r.x>=0&&r.y>=0&&r.right<=innerWidth&&r.bottom<=innerHeight,heights,focus:document.activeElement.textContent,customRows:menu.querySelectorAll('.wand-ui-menu-item').length}})()`);
+        assert.equal(menuShape.fits, true, `${mode}: menu remains inside the viewport`);
+        assert.equal(new Set(menuShape.heights).size, 1, `${mode}: every action has the same row height`);
+        assert.equal(menuShape.customRows, 0, "all actions use Ant's native menu rows");
+        assert.ok(menuShape.focus.includes("打开会话"), "menu focuses its first native action");
+        if (!["mobile", "narrow"].includes(mode)) assert.ok(Math.abs(menuShape.x - menuShape.rowCenter) <= 12, "right click is anchored to the cursor, not the row's left edge");
+        await browser.screenshot(join(artifacts, `menu-${mode}.png`));
+        await browser.key("ArrowDown");
+        assert.match(await browser.evaluate('document.activeElement.textContent'), /移动到任务/);
+        await browser.key("ArrowRight");
+        await browser.wait(`(${visible})(document.querySelector('.workspace-session-move-menu'))`, "ArrowRight opens the native move submenu");
+        await browser.settle();
+        const submenuShape = await browser.evaluate(`(()=>{const menu=document.querySelector('.workspace-session-move-menu'),r=menu.getBoundingClientRect(),root=document.querySelector('.workspace-session-menu').getBoundingClientRect();return {rect:r.toJSON(),root:root.toJSON(),fits:r.x>=0&&r.y>=0&&r.right<=innerWidth&&r.bottom<=innerHeight,owned:!!menu.closest('[data-wand-popup-owner]')}})()`);
+        assert.equal(submenuShape.fits, true, `${mode}: native submenu flips within the viewport (${JSON.stringify(submenuShape.rect)})`);
+        assert.ok(Math.abs(submenuShape.root.x - menuShape.x) <= 1 && Math.abs(submenuShape.root.y - menuShape.y) <= 1, "opening a submenu must not move the root menu");
+        assert.equal(submenuShape.owned, true, "the submenu belongs to this sidebar Portal");
+        await browser.screenshot(join(artifacts, `submenu-${mode}.png`));
+        assert.equal(await browser.evaluate('!!document.querySelector(".workspace-session-menu .ant-dropdown-menu")'), true);
         await browser.key("Escape");
-        await browser.wait('!document.querySelector(".workspace-session-move-menu")');
+        await browser.wait(`!(${visible})(document.querySelector('.workspace-session-move-menu'))`, "native submenu is hidden after Escape");
         await browser.key("Escape");
         await browser.wait('!document.querySelector(".workspace-session-menu")');
         assert.equal(await browser.evaluate('fixture.memory.getSnapshot().layout.sessionsDrawerOpen'), true, "nested Escape must leave the drawer open");
+        assert.equal(await browser.evaluate(`document.activeElement===document.querySelector('${sessionRow} .workspace-session-main')`), true, "Escape restores the row control, not an unfocusable wrapper");
         // 键盘路径用行内按钮的真实焦点 + Shift+F10；不依赖 Chrome 的修饰键残留状态。
-        await browser.evaluate(`(()=>{const row=document.querySelector('${sessionRow} .workspace-session-main');row.focus();row.dispatchEvent(new KeyboardEvent('keydown',{key:'F10',shiftKey:true,bubbles:true}));return document.activeElement===row;})()`);
-        await browser.wait('!!document.querySelector(".workspace-session-menu .ant-menu")');
+        const openKeyboardMenu = `(()=>{const row=document.querySelector('${sessionRow} .workspace-session-main');row.focus();row.dispatchEvent(new KeyboardEvent('keydown',{key:'F10',shiftKey:true,bubbles:true}));return true;})()`;
+        await browser.evaluate(openKeyboardMenu);
+        await browser.wait('!!document.querySelector(".workspace-session-menu .ant-dropdown-menu")');
+        await browser.settle();
+        await browser.key("Tab");
+        await browser.wait('!document.querySelector(".workspace-session-menu")', "Tab leaves the menu without trapping focus");
+        assert.equal(await browser.evaluate('!!document.activeElement.closest("#sessions-drawer") && document.activeElement !== document.body'), true);
+        await browser.evaluate(openKeyboardMenu);
+        await browser.wait('!!document.querySelector(".workspace-session-menu .ant-dropdown-menu")');
         await clickMenuText('.workspace-session-menu', '删除会话');
         await browser.wait(`!!(${VISIBLE_DIALOG})`, "tree delete confirmation");
         assert.equal(mutations.length, 0, "opening confirmation must not delete");
@@ -192,9 +255,9 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
         await browser.wait(`(${visible})(document.querySelector('.sidebar-recent'))`, "recent view");
         // 菜单经 Portal 渲染在抽屉之外，不能按侧栏祖先选择器取。
         await browser.click('.sidebar-recent .sidebar-recent-row', "right");
-        await browser.wait('!!document.querySelector(".workspace-session-menu .ant-menu")', "recent row context menu");
-        const recentItems = await browser.evaluate('Array.from(document.querySelectorAll(".workspace-session-menu .ant-menu-item, .workspace-session-menu .wand-ui-menu-item")).map(n=>n.innerText)');
-        assert.equal(recentItems.length, 3, "recent rows offer the same move/archive/delete actions as the tree");
+        await browser.wait('!!document.querySelector(".workspace-session-menu .ant-dropdown-menu")', "recent row context menu");
+        const recentItems = await browser.evaluate('Array.from(document.querySelectorAll(".workspace-session-menu .ant-dropdown-menu-item, .workspace-session-menu .ant-dropdown-menu-submenu-title")).filter(n=>!n.closest(".ant-dropdown-menu-submenu-popup")).map(n=>n.innerText)');
+        assert.equal(recentItems.length, 4, "recent rows offer the same open/move/archive/delete actions as the tree");
         assert.ok(recentItems.some((text) => text.includes("移动到任务")), "recent rows keep the move action");
         await clickMenuText('.workspace-session-menu', '删除会话');
         await browser.wait(`!!(${VISIBLE_DIALOG})`, "shared delete confirmation");
@@ -221,18 +284,93 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
         await browser.click('[aria-label="只看活动会话"]');
         // Task context actions remain available, without a plus or more button in the row.
         await browser.click('[data-workspace-task-id=t1] .workspace-task', "right");
-        await browser.wait('!!document.querySelector(".workspace-task-menu .ant-menu")');
+        await browser.wait('!!document.querySelector(".workspace-task-menu .ant-dropdown-menu")');
         await clickMenuText('.workspace-task-menu', '重命名任务');
         await browser.wait(`document.activeElement?.getAttribute('aria-label')==='重命名任务 完善消息交互'`);
         await browser.key("Escape");
         assert.equal(await browser.evaluate('!!document.querySelector("[data-workspace-task-id=t1]")'), true);
         // Synthetic directories are usable creation contexts, without a fabricated workspace ID.
         await browser.click('[data-sidebar-tree-directory-id="synthetic:/work/sandbox"] .workspace-row', "right");
-        await browser.wait('!!document.querySelector(".workspace-directory-menu .ant-menu")');
+        await browser.wait('!!document.querySelector(".workspace-directory-menu .ant-dropdown-menu")');
         await clickMenuText('.workspace-directory-menu', '在此新建会话');
         const creation = await browser.evaluate('fixture.creation()');
         assert.equal(creation.initialCwd, "/work/sandbox"); assert.equal(creation.workspaceId, "");
         await browser.evaluate('fixture.closeCreation();fixture.update({sessionsDrawerOpen:true,sessionsBackdropVisible:innerWidth<600});true');
+        // Destructive actions leave the menu before confirmation; cancellation is read-only.
+        await browser.click('[data-workspace-task-id=t1] .workspace-task', "right");
+        await clickMenuText('.workspace-task-menu', '清空所列会话');
+        await browser.wait(`!!(${VISIBLE_DIALOG})`, "clear task confirmation");
+        await browser.wait('!document.querySelector(".workspace-task-menu")', "no menu over the confirmation");
+        assert.match(await browser.evaluate(`(${VISIBLE_DIALOG}).innerText`), /全部 2 个会话.*无法撤销/);
+        await clickDialogAction("取消");
+        assert.equal(mutations.length, 0);
+        await browser.click('[data-sidebar-tree-directory-id=w1] .workspace-row', "right");
+        await browser.screenshot(join(artifacts, `directory-menu-${mode}.png`));
+        await clickMenuText('.workspace-directory-menu', '删除目录');
+        await browser.wait(`!!(${VISIBLE_DIALOG})`, "delete directory confirmation");
+        await browser.wait('!document.querySelector(".workspace-directory-menu")');
+        await clickDialogAction("取消");
+        assert.equal(mutations.length, 0);
+        // Explicit HTTP failures are visible, release the action lock and never execute a model.
+        await browser.click(sessionRow, "right");
+        await clickMenuText('.workspace-session-menu', '归档会话');
+        await browser.wait(`document.querySelector('.workspace-session-menu [role=alert]')?.textContent.includes('明确测试失败')`, "archive failure remains readable");
+        await browser.key("Escape");
+        if (mode === "desktop") {
+          delayArchive = true; releaseArchive = null;
+          await browser.click(sessionRow, "right");
+          await clickMenuText('.workspace-session-menu', '归档会话');
+          await browser.wait(`document.querySelector(${JSON.stringify(sessionRow)})?.getAttribute('aria-busy')==='true'`, "delayed archive started");
+          await browser.click('.sidebar-title');
+          await browser.wait('!document.querySelector(".workspace-session-menu")', "user dismissed a pending action");
+          assert.ok(releaseArchive, "the fixture owns the pending response");
+          (releaseArchive as () => void)(); delayArchive = false;
+          await browser.wait(`document.querySelector(${JSON.stringify(sessionRow)})?.getAttribute('aria-busy')!=='true'`, "late failure released the lock");
+          assert.equal(await browser.evaluate('!!document.querySelector(".workspace-session-menu")'), false, "late failure cannot reopen a dismissed menu");
+          await browser.click(sessionRow, "right");
+          await browser.wait(`document.querySelector('.workspace-session-menu [role=alert]')?.textContent.includes('明确测试失败')`, "failure remains available when the user reopens the row");
+          await browser.key("Escape");
+        }
+        await browser.click(sessionRow, "right");
+        await clickMenuText('.workspace-session-menu', '移动到任务');
+        await browser.wait(`(${visible})(document.querySelector('.workspace-session-move-menu'))`);
+        await clickMenuText('.workspace-session-move-menu', '整理交付文档');
+        await browser.wait(`document.querySelector('.workspace-session-move-menu [role=alert]')?.textContent.includes('明确测试失败')`, "move failure keeps a retryable target list");
+        assert.ok(await browser.evaluate(`document.querySelectorAll('.workspace-session-move-menu [role=menuitem]:not([aria-disabled=true])').length >= 2`));
+        assert.equal(await browser.evaluate(`(${visible})(document.querySelector('.workspace-session-move-menu'))`), true, "failure feedback is visible, not merely retained in a hidden submenu");
+        await browser.key("Escape"); await browser.key("Escape");
+        assert.equal(await browser.evaluate('fixture.memory.getSnapshot().layout.sessionsDrawerOpen'), true, "closing a failed move never dismisses the drawer");
+        if (mode === "desktop") {
+          await browser.evaluate("fixture.setContext({workspaceId:'w1',taskId:'t1'});true");
+          await browser.click('[data-workspace-task-id=t1] .workspace-task', "right");
+          await clickMenuText('.workspace-task-menu', '归档任务');
+          await browser.wait(`!!(${VISIBLE_DIALOG})`);
+          await clickDialogAction("确认归档任务");
+          assert.ok(releaseTaskArchive, "the fixture owns the pending task mutation");
+          await browser.evaluate("fixture.setContext({workspaceId:'w1',taskId:'t2'});true");
+          (releaseTaskArchive as () => void)();
+          await browser.wait("document.querySelector('[data-workspace-task-id=t1]').getAttribute('aria-busy')!=='true'", "task archive settled");
+          assert.equal(await browser.evaluate("fixture.closed"), 0, "a late archive must not close the newly opened task");
+        }
+        // Reduced height and the narrow right edge cannot make the last action unreachable.
+        await browser.send("Emulation.setDeviceMetricsOverride", { width, height: 420, deviceScaleFactor: 1, mobile: false });
+        await browser.click(sessionRow, "right");
+        await browser.wait('!!document.querySelector(".workspace-session-menu")', "short viewport context menu");
+        await browser.settle();
+        const edgeFits = await browser.evaluate(`(()=>{const r=document.querySelector('.workspace-session-menu').getBoundingClientRect();return r.x>=0&&r.y>=0&&r.right<=innerWidth&&r.bottom<=innerHeight})()`);
+        assert.equal(edgeFits, true, `${mode}: edge collision handling keeps the complete menu visible`);
+        await browser.screenshot(join(artifacts, `edge-menu-${mode}.png`));
+        await browser.key("Escape");
+        await browser.send("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: false });
+        if (mode === "mobile" || mode === "narrow") {
+          await browser.settle();
+          const point = await browser.evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(sessionRow)}).getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+          await browser.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ ...point, id: 1 }] });
+          await browser.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: point.x, y: point.y - 24, id: 1 }] });
+          await browser.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+          await browser.evaluate('new Promise(resolve=>setTimeout(resolve,550))');
+          assert.equal(await browser.evaluate('!!document.querySelector(".workspace-session-menu")'), false, "scrolling cancels a pending long press");
+        }
         if (mode === "desktop") {
           await browser.click('[aria-label="收起为窄栏"]');
           await browser.wait('document.querySelector("#sessions-drawer").classList.contains("collapsed")');
@@ -247,7 +385,8 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
           failList = false;
         }
         assert.deepEqual(browser.errors, []);
-        reports.push({ mode, initial, searchStable: true, menuOwnership: true, mutations: mutations.length });
+        reports.push({ mode, initial, searchStable: true, menuOwnership: true, menuShape, nativeSubmenu: submenuShape, confirmationsReadOnly: true, failureRecovery: true, lateFailureIsolation: mode === "desktop" ? true : null, edgeFits, mutations: mutations.length });
+        console.log(`sidebar menu scenario passed: ${mode}`);
       } catch (cause) {
         console.error({ mode, browserErrors: browser.errors, state: await browser.evaluate(`({body:document.body.innerText.slice(0,600),recent:!!document.querySelector('.sidebar-recent'),recentRect:document.querySelector('.sidebar-recent')?.getBoundingClientRect().toJSON()??null,view:document.querySelector('.sidebar-view-switch .ant-segmented-item-selected [data-stretch-value]')?.dataset.stretchValue??null,rows:document.querySelectorAll('.sidebar-recent-row').length,switches:document.querySelectorAll('.sidebar-view-switch').length})`) });
         throw cause;

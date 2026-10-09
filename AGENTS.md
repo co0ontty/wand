@@ -31,6 +31,7 @@ Node 版本以 `.nvmrc` 为准。只检出需要的子模块：服务端构建�
 - Render 协议见 `render/docs/render-protocol.md`；修改时同步 Rust 类型、`src/render-protocol.ts` 和协议版本，版本不匹配时拒绝启动。legacy 与 Rust daemon 不交叉领养，升级/回滚保留旧会话。相关验证入口为 `scripts/verify-render-e2e.sh` 与 `scripts/verify-render-upgrade-e2e.sh`，两者覆盖不同路径。
 - `render/` 是源码，`render-bin/` 是 CI 产物。修改源码与更新产物分开，不手改产物；子模块源码可拉取后再更新主仓指针。
 - CLI 恢复要登记运行所有权，停止/删除使迟到启动和旧回调失效；服务关闭只断开持久进程连接。Core 尚非独立持久运行时，安装、重启和更新须使用现有排空屏障；超时或状态不明时取消重启，不强杀。入口见 `src/core-status-cli.ts`、`src/relaunch.ts`、`start.sh`。
+- 已安装的底层组件更新由 `src/daemon-maintenance.ts` 等待所有执行与队列结束后自动处理；共享 spawn 屏障内复核真实 daemon 清单，不把 UI 空闲或缓存当作退出。未知送达不重复发 drain（旧 Render 第二次 drain 会强停），不走强杀脚本；状态接口只读，Web 提示无需用户操作。
 
 ## 数据与会话
 

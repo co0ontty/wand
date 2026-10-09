@@ -269,6 +269,10 @@ wand config:set port 9443
 | `language` | `""` | Claude 回复语言偏好（偏好项，存 SQLite） |
 | `publicOrigin` | 未设置 | 客户端应使用的公开访问地址，如 `https://home.example.com:8443`。TLS 在 L4 反代终止时必填 |
 
+### 语音识别
+
+Web、Android、iOS 可在语音输入设置中选择「服务端识别」或「客户端本地识别」。服务端使用按需安装的 whisper.cpp 多语言模型，支持无 GPU CPU 服务器、Mac mini Metal 与可选 CUDA；模型不随普通构建下载。部署、模型大小、鉴权和隐私边界见 [服务端语音识别](docs/server-speech.md)。
+
 ### 可选本地决策（实验性）
 
 Apple Silicon 服务端可共享一份离线 Laya-MLX，为结构化 CLI 提供通用选择、评分和是非判断。它不是聊天模型，也不负责授权或自动派工。

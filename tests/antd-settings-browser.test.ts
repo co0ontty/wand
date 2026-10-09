@@ -16,6 +16,7 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
   const browserErrors: string[] = [];
   const evidence: Array<Record<string, unknown>> = [];
   let access = "admin", failSave = false, holdSave = false;
+  let qrFail = true, qrRequests = 0;
   let releaseSave: (() => void) | undefined;
   const commands: Array<{path: string; value: any}> = [];
   let config: Record<string, any> = {
@@ -41,6 +42,7 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
     import { settingsController } from "./src/web-ui/react/settings/controller";
     import { installReactUiStyles } from "./src/web-ui/react/styles";
     installReactUiStyles();
+    Object.defineProperty(navigator, "clipboard", {value:{writeText:async()=>{window.fixtureCopies=(window.fixtureCopies||0)+1;}}});
     if (location.search.includes("native")) { document.documentElement.classList.add("is-wand-app","is-wand-ios");
       window.WandNative = {getAvailableSounds:()=>JSON.stringify([{id:"native-one",name:"原生铃声"}]),
         getNotificationSound:()=>"native-one", isHapticEnabled:()=>true, getPermission:()=>"denied",
@@ -72,7 +74,7 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
       const payload = path === "/api/settings" || path === "/api/settings/about" ? about()
         : path === "/api/models" ? models
         : path === "/api/provider-cli-updates" ? {items:[],autoUpdate:false}
-        : path === "/api/app-connect-code" ? {code:"",url:""}
+        : path === "/api/app-connect-code" ? {code:"local-browser-fixture",url:""}
         : path === "/api/silicon-employees" ? {employees:[]}
         : path === "/api/sessions/provider-usage" ? {claude:5,codex:2}
         : path === "/api/settings/env-preview" ? {inheritEnv:true,total:1,reveal:false,entries:[{name:"EXAMPLE",value:"masked",length:6,sensitive:false}]}
@@ -81,9 +83,15 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
       response.end(JSON.stringify(payload)); return;
     }
     if (path === "/app.js") { response.setHeader("content-type", "application/javascript"); response.end(readFileSync(join(temporary, "app.js"))); }
+    else if (path === "/fixture-qrcode.js") {
+      qrRequests += 1;
+      response.setHeader("content-type", "application/javascript");
+      if (qrFail) { response.statusCode=503; response.end(""); }
+      else response.end('window.QRCodeLib={toCanvas:(canvas,code,options,done)=>{window.fixtureQrDraws=(window.fixtureQrDraws||0)+1;done(null);}};');
+    }
     else if (path === "/styles.css") { response.setHeader("content-type", "text/css"); response.end(readFileSync(join(root, "src/web-ui/content/styles.css"))); }
     else if (path === "/tailwind.css") { response.setHeader("content-type", "text/css"); response.end(readFileSync(join(root, "src/web-ui/content/tailwind.css"))); }
-    else { response.setHeader("content-type", "text/html; charset=utf-8"); response.end('<!doctype html><html lang="zh-CN"><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/tailwind.css"><link rel="stylesheet" href="/styles.css"></head><body><div id="root"></div><div id="overlay-root"><div class="wand-ui-portals" id="wand-react-ui-portals"></div></div><script src="/app.js"></script></body></html>'); }
+    else { response.setHeader("content-type", "text/html; charset=utf-8"); response.end('<!doctype html><html lang="zh-CN"><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="wand-qrcode-script" content="/fixture-qrcode.js"><link rel="stylesheet" href="/tailwind.css"><link rel="stylesheet" href="/styles.css"></head><body><div id="root"></div><div id="overlay-root"><div class="wand-ui-portals" id="wand-react-ui-portals"></div></div><script src="/app.js"></script></body></html>'); }
   });
   server.listen(0, "127.0.0.1"); await once(server, "listening");
   const address = server.address(); assert.ok(address && typeof address === "object");
@@ -151,13 +159,26 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
     const tabs = ["我的资料","连接器","基本配置","AI 与模型","通知","显示","安全","命令预设","关于"];
     for (const mode of process.env.WAND_SETTINGS_TEST_MODES?.split(",") ?? ["desktop","mobile","native","rollback","reduced-motion"]) {
       access="admin"; failSave=false;
+      qrFail=true; const qrRequestBaseline=qrRequests;
       await send("Emulation.setDeviceMetricsOverride", {width:mode === "mobile" ? 390 : 1280,height:1000,deviceScaleFactor:1,mobile:false});
       await send("Emulation.setEmulatedMedia", {features:[{name:"prefers-reduced-motion",value:mode === "reduced-motion" ? "reduce" : "no-preference"}]});
       await evaluate("window.__wandFixtureBeforeNavigation = true");
       await send("Page.navigate", {url:origin+(mode === "rollback" ? "/?reactUi=0" : mode === "native" ? "/?native" : "/")});
       await wait("!window.__wandFixtureBeforeNavigation && document.readyState === 'complete'");
       await send("Page.bringToFront"); await wait('!!document.querySelector("#settings-host")');
+      await pause(550); // Let the canonical modal's opening geometry settle before scrolling deep fields.
       assert.equal(await evaluate('document.querySelector("#settings-host").classList.contains("ant-input")'),true);
+      assert.equal(qrRequests,qrRequestBaseline,`${mode}: ordinary settings do not load the optional QR library`);
+      assert.equal(await evaluate('document.body.innerText.includes("保存本页后立即扫描") && document.body.innerText.includes("自动删除已关闭")'),true,`${mode}: retention consequences are visible before saving`);
+      await click('[role="switch"][aria-label="自动删除到期内容"]');
+      await wait('document.body.innerText.includes("自动删除已开启")');
+      assert.equal(await evaluate('document.body.innerText.includes("满 30 天") && document.body.innerText.includes("删除后的内容无法恢复")'),true,`${mode}: enabled deletion has a prospective warning`);
+      await click('[role="switch"][aria-label="自动删除到期内容"]');
+      await wait('document.body.innerText.includes("自动删除已关闭")');
+      await click('[aria-label="AI 回复语言"]');
+      await wait('!!document.querySelector(".wand-ui-select-content [role=option][title=简体中文]")');
+      await click('.wand-ui-select-content [role=option][title=简体中文]');
+      assert.equal(await evaluate('!!document.querySelector("[data-testid=settings-dialog]") && document.body.innerText.includes("不更改网页界面语言")'),true,`${mode}: reply language uses the owned selector and names its scope`);
       await enter("#settings-host","draft.example"); failSave=true;
       await clickText("保存基本配置"); await wait('document.body.innerText.includes("保存失败，草稿已保留")');
       assert.equal(await evaluate('document.querySelector("#settings-host").value'),"draft.example",`${mode}: rejected save retains input`);
@@ -172,11 +193,30 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
       await enter("#settings-host","newer.example");
       holdSave=false; releaseSave(); releaseSave=undefined;
       await wait('document.body.innerText.includes("基本配置已保存")');
+      assert.equal(commands.at(-1)!.value.language,"中文",`${mode}: Chinese choice sends the language directive's canonical value`);
       assert.equal(await evaluate('document.querySelector("#settings-host").value'),"newer.example",`${mode}: late receipt retains newer draft`);
       const coverage: Array<Record<string,unknown>>=[];
       for (const tab of tabs) {
         await clickText(tab,"tab"); await pause(140);
         assert.equal(await evaluate(`!!document.querySelector('[role="tabpanel"]:not([aria-hidden="true"]) .wand-settings-library-panel')`),true,`${mode}: ${tab}`);
+        if (tab === "连接器") {
+          assert.equal(await evaluate('document.body.innerText.includes("当前支持 GitHub")'),true,`${mode}: connector purpose is explicit`);
+          assert.equal(await evaluate('(()=>{const n=document.getElementById("settings-github-api-url");return !n||n.getBoundingClientRect().height===0})()'),true,`${mode}: Enterprise address stays out of the ordinary connection form`);
+          await click('[role="tabpanel"]:not([aria-hidden="true"]) .ant-collapse-header');
+          await wait('!!document.getElementById("settings-github-api-url") && document.getElementById("settings-github-api-url").getBoundingClientRect().height>0');
+          assert.equal(await evaluate('document.getElementById("settings-github-api-url").value'),"https://api.github.com",`${mode}: expanding advanced settings preserves the default address`);
+          await click('[role="tabpanel"]:not([aria-hidden="true"]) .ant-collapse-header');
+          await wait('document.getElementById("settings-github-api-url").getBoundingClientRect().height===0');
+        }
+        if (tab === "关于") {
+          await wait('document.body.innerText.includes("二维码加载或生成失败")');
+          assert.equal(qrRequests,qrRequestBaseline+1,`${mode}: first QR use requests the library lazily`);
+          const copies=await evaluate('window.fixtureCopies||0');
+          await clickText("复制连接码"); await wait(`window.fixtureCopies===${copies+1}`);
+          qrFail=false;
+          await clickText("重试二维码"); await wait('(window.fixtureQrDraws||0)>0');
+          assert.equal(qrRequests,qrRequestBaseline+2,`${mode}: failed QR load can retry without blocking copy`);
+        }
         coverage.push({tab,...await evaluate(`({legacyControls:document.querySelectorAll('.wand-settings-input,.wand-settings-field,.wand-settings-section,.wand-model-group-disclosure,.wand-settings-range').length,antCards:document.querySelectorAll('.ant-card').length})`)});
         if (mode === "desktop" || mode === "mobile") {
           await evaluate("document.querySelector('.ant-tabs-body-holder').scrollTop=0");
@@ -201,7 +241,7 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
       await clickText("保存 AI 与模型配置"); await wait('document.body.innerText.includes("AI 与模型配置已保存")');
       assert.equal(commands.at(-1)!.value.defaultModel,"second");
       assert.equal(commands.at(-1)!.value.defaultCodexModel,"codex-first",`${mode}: other provider choice retained`);
-      await click('.ant-collapse-header'); await wait(`!!document.querySelector('[aria-label="下移模型 1"]')`);
+      await click('[role="tabpanel"]:not([aria-hidden="true"]) .ant-collapse-header'); await wait(`!!document.querySelector('[aria-label="下移模型 1"]')`);
       await click('[aria-label="下移模型 1"]');
       await wait("document.querySelector('.wand-settings-library-group-members li')?.textContent.includes('备用模型')");
       await wait("Array.from(document.querySelectorAll('button')).find(n=>n.innerText.trim()==='保存模型分组')?.disabled === false");
@@ -209,7 +249,7 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
       try { await wait('document.body.innerText.includes("模型分组与顺序已保存")'); }
       catch { throw new Error(`${mode}: group save did not settle; commands=${commands.length}; last=${commands.at(-1)?.value.modelGroups ? "modelGroups.save" : "other"}; alerts=${await evaluate("Array.from(document.querySelectorAll('.ant-alert')).map(n=>n.innerText).join('|')")}`); }
       assert.equal(commands.at(-1)!.value.modelGroups[0].models[0],"second");
-      await click('.ant-collapse-header');
+      await click('[role="tabpanel"]:not([aria-hidden="true"]) .ant-collapse-header');
       await wait(`(()=>{const n=document.querySelector('[aria-label="下移模型 1"]');return !n||n.getBoundingClientRect().height===0})()`);
       // Restore the fixture order for the next mode, without invoking any real service.
       config.modelGroups[0].models=["first","second"];
@@ -240,12 +280,16 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
       const result = await evaluate(`({antInputs:document.querySelectorAll('.ant-input,.ant-input-number').length,antCards:document.querySelectorAll('.ant-card').length,overflow:document.documentElement.scrollWidth>innerWidth,legacy:document.querySelectorAll('.wand-settings-input,.wand-settings-field,.wand-settings-section,.wand-settings-dialog,.wand-model-group-disclosure,.wand-settings-range').length})`);
       assert.equal(result.legacy,0); assert.equal(result.overflow,false,`${mode}: no horizontal overflow`);
       evidence.push({mode,tabs,coverage,...result,interactions:["failed general save retains draft","late save receipt retains newer draft","unrelated model save retains general draft","search and option Portal","nested Escape","all provider choices retained","model group order save","OpenRouter failure retains draft","keyboard Slider","controlled Upload","update check"]});
-      if (mode === "desktop" || mode === "mobile") { const shot=await send("Page.captureScreenshot",{format:"png"});mkdirSync(artifact,{recursive:true});writeFileSync(join(artifact,`settings-${mode}.png`),Buffer.from(shot.data,"base64")); }
+      if (mode === "desktop" || mode === "mobile") {
+        await evaluate(`(()=>{const s=document.createElement('style');s.id='settings-redact';s.textContent='input[type=password],.wand-settings-library-connect-code,[data-testid=settings-connect-qr]{visibility:hidden!important}';document.head.append(s)})()`);
+        const shot=await send("Page.captureScreenshot",{format:"png"});mkdirSync(artifact,{recursive:true});writeFileSync(join(artifact,`settings-${mode}.png`),Buffer.from(shot.data,"base64"));
+        await evaluate('document.getElementById("settings-redact").remove()');
+      }
       await key("Escape"); await wait('!document.querySelector("[data-testid=settings-dialog]")');
       access="read-only";
       await evaluate('settingsHarness.open("general")');
       await wait('!!document.querySelector("#settings-admin-password")');
-      assert.equal(await evaluate('document.querySelectorAll("[role=tab]").length'),2,`${mode}: connected App permissions`);
+      assert.deepEqual(await evaluate('Array.from(document.querySelectorAll("[role=tab]")).map(n=>n.innerText.trim())'),["本地模型","语音输入","通知","关于"],`${mode}: connected App cannot reach administrator settings`);
       assert.equal(await evaluate('!!document.querySelector("#settings-host")'),false);
       // Respect the shared modal's trailing outside-press guard after reopening.
       await pause(550);

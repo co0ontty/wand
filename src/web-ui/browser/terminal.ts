@@ -8,12 +8,14 @@ import { focusInputBox, hasActiveTerminalSelection, installNativeInputImeGuard, 
 import { showToast } from "./notifications";
 import "./render";
 import { copyToClipboard, isStructuredSession } from "./session-engine";
-import { ensureTerminalFit, initTerminalResizeHandle, observeTerminalResize, sendTerminalResize, startTerminalHealthCheck } from "./viewport";
+import { ensureTerminalFit, initTerminalResizeHandle, observeTerminalResize, sendTerminalResize, startTerminalHealthCheck, teardownTerminal } from "./viewport";
 import { fitTerminalToContainer } from "./terminal-fit";
 import "./i18n";
 import { consumeTerminalTouchPage, consumeTerminalWheelLines, consumeTerminalWheelPage, consumeTerminalZoomWheel, installTerminalPinchZoom, terminalWheelPageSequence, type TerminalTouchPagingState, type TerminalWheelPagingState, type TerminalWheelScrollState, type TerminalZoomWheelState } from "./terminal-wheel";
 import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
 import { cachedTerminalHistory, loadTerminalHistory, resetTerminalHistory } from "./terminal-history";
+import { ensureTerminalLibrary } from "../vendor-loader.js";
+import { mountBrowserButtons } from "./library-buttons";
 
       export function saveWorkingDir(path: string) {
         state.workingDir = path;
@@ -767,20 +769,77 @@ import { cachedTerminalHistory, loadTerminalHistory, resetTerminalHistory } from
         return wrote;
       }
 
-      export function initTerminal() {
+      let terminalLibraryPending = false;
+      let terminalLibraryFailedSession: string | null = null;
+      let terminalMount: { wrap: HTMLElement; release(): void } | null = null;
+      function prepareTerminalMeasurement(container: HTMLElement): () => void {
+        const parent = container.parentElement;
+        if (!parent || (container.offsetWidth > 0 && container.offsetHeight > 0)) return function() {};
+        const previous: Array<{ node: HTMLElement; property: string; value: string; priority: string }> = [];
+        const change = function(node: HTMLElement, property: string, value: string) {
+          previous.push({ node, property, value: node.style.getPropertyValue(property), priority: node.style.getPropertyPriority(property) });
+          node.style.setProperty(property, value, "important");
+        };
+        // Measure the future terminal flex slot in one synchronous turn. Keep it
+        // invisible and restore before paint; the current chat view stays selected.
+        change(container, "display", "flex");
+        change(container, "visibility", "hidden");
+        for (const sibling of Array.from(parent.children)) {
+          if (!(sibling instanceof HTMLElement) || sibling === container) continue;
+          if (sibling.id === "chat-output" || sibling.id === "blank-chat") change(sibling, "display", "none");
+          if (sibling.classList.contains("input-panel") && getComputedStyle(sibling).display === "none") {
+            change(sibling, "display", "flex");
+            change(sibling, "visibility", "hidden");
+          }
+        }
+        return function() {
+          for (const item of previous.reverse()) {
+            if (item.value) item.node.style.setProperty(item.property, item.value, item.priority);
+            else item.node.style.removeProperty(item.property);
+          }
+        };
+      }
+      export function initTerminal(options?: { prepare?: boolean }) {
+        // Session switching can remove the wrapper while fonts are still pending.
+        // Release that abandoned attempt before allowing the next mount to start.
+        if (terminalMount && !terminalMount.wrap.isConnected) terminalMount.release();
         var container = document.getElementById("output");
         if (!container || state.terminal || state.terminalInitializing) return;
+        var selectedSession = state.sessions.find(function(session) {
+          return session.id === state.selectedId;
+        });
+        if (!options?.prepare && (!selectedSession || isStructuredSession(selectedSession))) return;
+        if (!options?.prepare && terminalLibraryFailedSession && terminalLibraryFailedSession === state.selectedId) return;
         if (typeof XTermLib === "undefined" || !XTermLib.Terminal) {
-          state.terminalInitRetries = (state.terminalInitRetries || 0) + 1;
-          if (state.terminalInitRetries < 10) setTimeout(initTerminal, 200);
+          if (terminalLibraryPending || terminalLibraryFailedSession === state.selectedId) return;
+          terminalLibraryPending = true;
+          const loading = document.createElement("div");
+          loading.dataset.terminalLoadState = "loading"; loading.setAttribute("role", "status");
+          loading.textContent = "正在加载终端…"; container.replaceChildren(loading);
+          void ensureTerminalLibrary().then(() => { terminalLibraryPending = false; terminalLibraryFailedSession = null; initTerminal(options); }).catch(() => {
+            terminalLibraryPending = false;
+            if (state.terminal || terminalMount) return;
+            const failedSession = state.sessions.find(session => session.id === state.selectedId);
+            const failedContainer = document.getElementById("output");
+            terminalLibraryFailedSession = failedSession && !isStructuredSession(failedSession) ? failedSession.id : null;
+            if (failedContainer?.isConnected && terminalLibraryFailedSession) {
+              failedContainer.replaceChildren();
+              const message = document.createElement("div"); message.dataset.terminalLoadState = "error";
+              const retry = document.createElement("button");
+              retry.type = "button"; retry.dataset.antdControl = "default";
+              retry.textContent = "终端组件加载失败，点击重试";
+              message.appendChild(retry); failedContainer.appendChild(message);
+              mountBrowserButtons(failedContainer);
+              message.querySelector("button")?.addEventListener("click", () => { terminalLibraryFailedSession = null; initTerminal(); });
+            }
+          });
           return;
         }
         state.terminalInitRetries = 0;
         state.terminalInitializing = true;
+        container.querySelector("[data-terminal-load-state]")?.remove();
+        mountBrowserButtons(container);
 
-        var selectedSession = state.sessions.find(function(session) {
-          return session.id === state.selectedId;
-        });
         var shouldExposeTerminal = !!selectedSession
           && !isStructuredSession(selectedSession)
           && state.currentView === "terminal";
@@ -806,7 +865,50 @@ import { cachedTerminalHistory, loadTerminalHistory, resetTerminalHistory } from
         var baseFontSize = state.terminalBaseFontSize;
         var fontSize = Math.max(8, Math.round(baseFontSize * Number(state.terminalScale || 1)));
 
-        var term: any = new XTermLib.Terminal({
+        var term: any = null, fitAddon: any = null;
+        var released = false;
+        const mount = { wrap: termWrap, release: function() {
+          if (released) return;
+          released = true;
+          const ownsMount = terminalMount === mount;
+          if (ownsMount) terminalMount = null;
+          if (term && state.terminal === term) {
+            try { teardownTerminal(); } catch (_error) {
+              // The original mount error remains the useful failure. A throwing
+              // addon dispose must still release the instance references.
+              try { fitAddon?.dispose?.(); } catch (_disposeError) {}
+              try { term?.dispose?.(); } catch (_disposeError) {}
+              state.terminal = null;
+              state.terminalFitAddon = null;
+              termWrap.remove();
+            }
+            if ((window as any).__wandTerminal === term) (window as any).__wandTerminal = null;
+          } else {
+            try { fitAddon?.dispose?.(); } catch (_error) {}
+            try { term?.dispose?.(); } catch (_error) {}
+            termWrap.remove();
+          }
+          if (ownsMount && !state.terminal) state.terminalInitializing = false;
+        } };
+        terminalMount = mount;
+        const failMount = function(error: unknown) {
+          const currentAttempt = terminalMount === mount || (term && state.terminal === term);
+          mount.release();
+          if (currentAttempt) {
+            console.error("[wand] xterm init failed:", error);
+            const failedSession = state.sessions.find(session => session.id === state.selectedId);
+            if (container.isConnected && failedSession && !isStructuredSession(failedSession)) {
+              terminalLibraryFailedSession = failedSession.id;
+              const message = document.createElement("div"); message.dataset.terminalLoadState = "error";
+              const retry = document.createElement("button"); retry.type = "button"; retry.dataset.antdControl = "default";
+              retry.textContent = "终端未能打开，点击重试";
+              message.appendChild(retry); container.appendChild(message); mountBrowserButtons(container);
+              message.querySelector("button")?.addEventListener("click", () => { terminalLibraryFailedSession = null; initTerminal(); });
+            }
+          }
+        };
+        try {
+        term = new XTermLib.Terminal({
           cols: 120,
           rows: 36,
           allowProposedApi: true,
@@ -826,7 +928,7 @@ import { cachedTerminalHistory, loadTerminalHistory, resetTerminalHistory } from
             selectionBackground: "rgba(216, 141, 96, 0.3)"
           }
         });
-        var fitAddon = new XTermLib.FitAddon();
+        fitAddon = new XTermLib.FitAddon();
         var unicodeAddon = new XTermLib.Unicode11Addon();
         term.loadAddon(fitAddon);
         term.loadAddon(unicodeAddon);
@@ -837,6 +939,12 @@ import { cachedTerminalHistory, loadTerminalHistory, resetTerminalHistory } from
           : Promise.resolve();
 
         fontsReady.then(function() {
+          if (terminalMount !== mount || !termWrap.isConnected || document.getElementById("output") !== container) {
+            mount.release();
+            return;
+          }
+          const restoreMeasurement = options?.prepare ? prepareTerminalMeasurement(container) : function() {};
+          try {
           term.open(termWrap);
           term.registerLinkProvider({
             provideLinks: function(lineNumber: number, callback: (links: any[] | undefined) => void) {
@@ -1042,9 +1150,8 @@ import { cachedTerminalHistory, loadTerminalHistory, resetTerminalHistory } from
               }, delay);
             });
           }
-        }).catch(function(error) {
-          state.terminalInitializing = false;
-          try { term.dispose(); } catch (disposeError) {}
-          console.error("[wand] xterm init failed:", error);
-        });
+          if (terminalMount === mount) terminalMount = null;
+          } finally { restoreMeasurement(); }
+        }).catch(failMount);
+        } catch (error) { failMount(error); }
       }

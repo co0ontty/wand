@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Sender } from "@ant-design/x";
-import { Descriptions, Flex, Typography } from "antd";
+import { Alert, Descriptions, Flex, Spin, Typography } from "antd";
 import { DEFAULT_EMPLOYEE_ID, AI_TEAM_ACTIVE_RUN_STATUSES } from "../../../ai-team-types.js";
 import type { ConversationDetail, ConversationTarget } from "../../../conversation-types.js";
 import { conversationLeaderMention, conversationMentionToken } from "../../../conversation-mentions.js";
@@ -12,6 +12,7 @@ import { ConversationMessages, formatConversationAttachments } from "../ai-teams
 import { teamChatComposer } from "../ai-teams/composer-bridge";
 import { subscribeAiTeamRunChanges } from "../ai-teams/repository";
 import { ComposerAttachmentList } from "../composer-attachments/host";
+import { ComposerSpeechButton } from "../composer-voice/button";
 import { requestJson } from "../http-adapter";
 import { SidebarToggleIcon } from "../shell/sidebar-toggle-icon";
 import { SidebarProjectionSwap } from "../workspaces/sidebar-projection-swap";
@@ -55,6 +56,7 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
   const [loadError, setLoadError] = React.useState("");
   const [phase, setPhase] = React.useState<ConversationSubmitPhase>("idle");
   const [feedback, setFeedback] = React.useState("");
+  const [voiceStatus, setVoiceStatus] = React.useState("");
   const [feedbackAction, setFeedbackAction] = React.useState("");
   const [unknown, setUnknown] = React.useState<{ id: string; clearRevision: number | null } | null>(null);
   const [layer, setLayer] = React.useState<"closed" | "menu" | "task">("closed");
@@ -63,10 +65,11 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
   const [invite, setInvite] = React.useState(false);
   const [taskDetails, setTaskDetails] = React.useState(false);
   const taskTrigger = React.useRef<HTMLButtonElement>(null);
-  const [titleDetails, setTitleDetails] = React.useState(false);
   const [title, setTitle] = React.useState("");
   const [projectId, setProjectId] = React.useState("");
   const [projects, setProjects] = React.useState<Workspace[]>([]);
+  const [projectsLoading, setProjectsLoading] = React.useState(false);
+  const [projectsError, setProjectsError] = React.useState("");
   const [continueTaskId, setContinueTaskId] = React.useState("");
   const [capturedVersion, setCapturedVersion] = React.useState(1);
   const [chatCwd, setChatCwd] = React.useState("");
@@ -80,6 +83,8 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
   const inviteTrigger = React.useRef<HTMLButtonElement>(null);
   const scroll = React.useRef<HTMLDivElement>(null);
   const loadEpoch = React.useRef(0);
+  const pendingDetail = React.useRef<{ id: string; promise: Promise<void>; dirty: boolean } | null>(null);
+  const projectsEpoch = React.useRef(0);
   const selected = detail?.id === id ? detail : null;
   const target = ui.targets[id] ?? null;
   const filter = ui.filters[id] ?? "";
@@ -100,25 +105,49 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
   const busy = phase === "sending";
   const receiver = layer === "task" ? `${continueTaskId ? "继续此任务" : "派新任务"} · ${selected?.kind === "group" ? selected.title : employee?.name ?? "尚未选择"}`
     : target && selectedRun ? `${selectedRun.run.status === "awaiting_approval" ? "计划意见" : selectedRun.run.status === "waiting_user" ? "回复任务" : "补充任务"} · ${selected?.tasks.find(t => t.task.id === target.taskId)?.task.title} · 第 ${selectedRun.run.roundNumber ?? 1} 轮 · 发给负责人 ${selectedRun.run.team.members.find(m => m.isLeader)?.name ?? "未配置"}`
-      : selected?.kind === "group" ? mentionedLeader ? `@${mentionedLeader.name} · 本轮负责人` : "群内沟通 · @成员指定负责人" : `每条消息开启独立会话`;
+      : selected?.kind === "group" ? mentionedLeader ? `@${mentionedLeader.name} · 本轮负责人` : "群内沟通 · @成员指定负责人" : `发给 ${employee?.name ?? "当前员工"} · 开始新工作`;
   const load = React.useCallback(async () => {
-    if (!id || !visible) return;
+    if (!id || !visible || ui.directory) return;
+    if (pendingDetail.current?.id === id) { pendingDetail.current.dirty = true; return pendingDetail.current.promise; }
     const epoch = ++loadEpoch.current;
-    try { const next = await conversationsRepository.detail(id); if (epoch === loadEpoch.current && current.current.id === id) { setDetail(next); setLoadError(""); } }
-    catch (cause) { if (epoch === loadEpoch.current) setLoadError(cause instanceof Error ? cause.message : "读取对话失败。"); }
-  }, [id, visible]);
+    const promise = (async () => {
+      do {
+        if (pendingDetail.current?.id === id) pendingDetail.current.dirty = false;
+        try { const next = await conversationsRepository.detail(id); if (epoch === loadEpoch.current && current.current.id === id) { setDetail(next); setLoadError(""); } }
+        catch (cause) { if (epoch === loadEpoch.current) setLoadError(cause instanceof Error ? cause.message : "读取对话失败。"); }
+        // A notification during a GET needs one fresh read after it, not another concurrent GET.
+      } while (epoch === loadEpoch.current && pendingDetail.current?.dirty);
+    })().finally(() => { if (pendingDetail.current?.promise === promise) pendingDetail.current = null; });
+    pendingDetail.current = { id, promise, dirty: false };
+    return promise;
+  }, [id, visible, ui.directory]);
+  const loadProjects = React.useCallback(async () => {
+    const epoch = ++projectsEpoch.current;
+    setProjectsLoading(true); setProjectsError("");
+    try { const next = await requestJson<Workspace[]>("/api/workspaces"); if (epoch === projectsEpoch.current) setProjects(next); }
+    catch (cause) { if (epoch === projectsEpoch.current) setProjectsError(cause instanceof Error ? cause.message : "工作项目读取失败，请重试。"); }
+    finally { if (epoch === projectsEpoch.current) setProjectsLoading(false); }
+  }, []);
   const activity = useConversationActivity({ detail: selected, active: visible && !ui.directory, target, onRefresh: load });
   React.useEffect(() => {
-    if (!visible || loading || id) return;
+    if (!visible || ui.directory || loading || id) return;
     const fallback = employees.find(e => e.id === DEFAULT_EMPLOYEE_ID && !e.archivedAt && e.agents.length);
     if (fallback) conversationUi.select(`dm_${fallback.id}`);
-  }, [visible, loading, employees, id]);
-  React.useEffect(() => { void load(); const unsubscribe = subscribeAiTeamRunChanges(() => { void load(); });
+  }, [visible, ui.directory, loading, employees, id]);
+  React.useEffect(() => {
+    if (!visible || ui.directory) return;
+    void load(); const unsubscribe = subscribeAiTeamRunChanges(() => { if (!document.hidden) void load(); });
     const timer = setInterval(() => { if (!document.hidden) void load(); }, 3000);
-    return () => { ++loadEpoch.current; unsubscribe(); clearInterval(timer); };
-  }, [load]);
-  React.useEffect(() => { if (visible) void requestJson<Workspace[]>("/api/workspaces").then(setProjects).catch(() => {}); }, [visible]);
-  React.useEffect(() => { setLayer("closed"); setMembers(false); setInvite(false); setTaskDetails(false); setTitleDetails(false);
+    const resume = (): void => { if (!document.hidden) void load(); };
+    document.addEventListener("visibilitychange", resume);
+    return () => { ++loadEpoch.current; pendingDetail.current = null; unsubscribe(); clearInterval(timer); document.removeEventListener("visibilitychange", resume); };
+  }, [load, visible, ui.directory]);
+  React.useEffect(() => {
+    if (!visible || layer !== "task") return;
+    void loadProjects();
+    return () => { ++projectsEpoch.current; };
+  }, [visible, layer, loadProjects]);
+  React.useEffect(() => { setLayer("closed"); setMembers(false); setInvite(false); setTaskDetails(false);
     setPhase("idle"); setFeedbackAction(""); setFeedback(""); setUnknown(null); }, [id, target?.runId, visible]);
   React.useEffect(() => {
     if (!target || !selectedRun || AI_TEAM_ACTIVE_RUN_STATUSES.includes(selectedRun.run.status) || (feedbackAction === "approve" && phase !== "idle")) return;
@@ -167,6 +196,7 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
   }, [id, visible, ui.directory, ui.focusRequest?.revision, draftKey]);
   const select = (next: string, focusComposer = false): void => { setLayer("closed"); setMembers(false); setInvite(false); conversationUi.select(next, focusComposer); notifyConversationChanges(); };
   const taskMode = (taskId = ""): void => {
+    setProjectsLoading(true); setProjectsError("");
     setCapturedVersion(selected?.memberVersion ?? 1); setContinueTaskId(taskId);
     const task = selected?.tasks.find(t => t.task.id === taskId)?.task;
     setTitle(task?.title ?? draft.text.trim().split(/\r?\n/)[0].replace(/^\s*[-*#>]+\s*/, "").slice(0, 200));
@@ -212,6 +242,7 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
   const send = async (): Promise<void> => {
     if (busy || unknown || (feedbackAction === "approve" && phase !== "idle") || !id || !selected || selected.unavailableReason || (!draft.text.trim() && !draft.attachments.length)) return;
     if (mention && "error" in mention) { setFeedback(mention.error); return; }
+    if (layer === "task" && (projectsLoading || projectsError)) { setFeedback(projectsLoading ? "工作项目仍在加载，请稍候。" : "请先重试读取工作项目，任务草稿已保留。"); return; }
     if (layer === "task" && (!projectId || capturedVersion !== selected.memberVersion)) { setFeedback("请选择工作项目并核对当前群成员版本。"); return; }
     if (target && !activeRun && layer !== "task") { setFeedback("本轮已结束，请明确切回群内沟通。"); return; }
     const captured = scope, key = draftKey, isTask = layer === "task";
@@ -256,11 +287,13 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
   const taskLabels = Object.fromEntries(selected?.tasks.map(t => [t.task.id, t.task.title]) ?? []);
   const roster = conversationRoster(selected);
   const turns = selected?.messages.filter(t => !filter || t.conversationTarget?.taskId === filter || t.conversationLink?.taskId === filter) ?? [];
-  // A quiet conversation is not a tutorial. Only unresolved loading/errors or
-  // an empty filter need a notice; real messages and composer context stand alone.
+  // Only a genuinely empty conversation gets a first-use cue; never clear real history.
   const emptyNotice = turns.length || loadError ? "" : !selected
     ? directoryError || (loading ? "正在加载联系人…" : id ? "正在加载对话…" : "")
-    : filter ? "此任务暂无消息" : "";
+    : filter ? "此任务暂无消息" : selected.kind === "dm" ? "把要完成的事发给我；也可以从通讯录选择员工。" : "";
+  const toggleMembers = (trigger: HTMLButtonElement): void => {
+    membersTrigger.current = trigger; setMembers(!members); setInvite(false);
+  };
   const toolsOpen = layer === "menu" || layer === "task" && taskOptionsOpen;
   const primaryLabel = phase === "sending" ? "发送中" : phase === "sent" ? "已接受" : phase === "failed" ? "操作失败" : phase === "unknown" ? "送达未确认" : stops ? "停止本轮" : layer === "task" ? continueTaskId ? "确认继续此任务" : "派发任务" : "发送消息";
   return <section className="conversation-root" aria-label="聊天首页" hidden={!visible} inert={!visible}>
@@ -268,16 +301,16 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
       <Flex ref={membersAnchor} align="center" justify="space-between" gap={8} className="conversation-heading" style={{ position: "relative", flexShrink: 0 }}>
         <Flex align="center" gap={8} style={{ minWidth: 0 }}>
           {onOpenSidebar ? <WandIconButton style={{ width: 44, height: 44 }} aria-label={sidebarOpen ? "关闭列表" : "打开列表"} onClick={onOpenSidebar}><SidebarToggleIcon open={sidebarOpen}/></WandIconButton> : null}
-          {employee ? <WandIconButton className="conversation-avatar-button" aria-label={`查看${employee.name}的资料`} onClick={event => employeeProfile.open(employee, event.currentTarget)}><EmployeeAvatar employee={employee} size="chat"/></WandIconButton> : selected?.team ? <WandIconButton className="conversation-avatar-button" aria-label="查看群资料" onClick={() => { setMembers(!members); setInvite(false); }}><ConversationGroupAvatar title={selected.title} size={40}/></WandIconButton> : null}
+          {employee ? <WandIconButton className="conversation-avatar-button" aria-label={`查看${employee.name}的资料`} onClick={event => employeeProfile.open(employee, event.currentTarget)}><EmployeeAvatar employee={employee} size="chat"/></WandIconButton> : selected?.team ? <WandIconButton className="conversation-avatar-button" aria-label="查看群资料" aria-expanded={members} aria-controls="conversation-members-panel" onClick={event => toggleMembers(event.currentTarget)}><ConversationGroupAvatar title={selected.title} size={40}/></WandIconButton> : null}
           <div className="conversation-heading-copy">
-            <WandButton kind="ghost" className="conversation-heading-title" aria-expanded={titleDetails} onClick={event => employee ? employeeProfile.open(employee, event.currentTarget) : setMembers(!members)}>{selected?.title ?? employee?.name ?? "选择一位员工，开始聊天"}</WandButton>
+            <WandButton kind="ghost" className="conversation-heading-title" title={selected?.title ?? employee?.name} aria-expanded={selected?.kind === "group" ? members : undefined} aria-controls={selected?.kind === "group" ? "conversation-members-panel" : undefined} onClick={event => employee ? employeeProfile.open(employee, event.currentTarget) : toggleMembers(event.currentTarget)}>{selected?.title ?? employee?.name ?? "选择一位员工，开始聊天"}</WandButton>
             <Typography.Text type="secondary" className="conversation-heading-context">{selected?.kind === "group" ? `群聊 · 我 + ${selected.team?.members.length ?? 0} 位员工` : employee ? `私聊${employee.id === DEFAULT_EMPLOYEE_ID ? " · 默认伙伴" : ""}` : "选择接收对象后发送"}</Typography.Text>
           </div>
         </Flex>
-        {selected?.kind === "group" ? <WandButton ref={membersTrigger} aria-expanded={members} onClick={() => { setMembers(!members); setInvite(false); }}>成员</WandButton> : null}
+        {selected?.kind === "group" ? <WandButton aria-expanded={members} aria-controls="conversation-members-panel" onClick={event => toggleMembers(event.currentTarget)}>成员</WandButton> : null}
         <ConversationPanel open={members} owner="conversation-members-panel" anchorRef={membersAnchor} triggerRef={membersTrigger} onClose={() => { setMembers(false); setInvite(false); }}>
           <Typography.Text strong>当前群成员：我 + {selected?.team?.members.length ?? 0} 位员工</Typography.Text>
-          {selected?.sourceTemplateId ? <Typography.Paragraph type="secondary">来自预设 · {selected.team?.name}</Typography.Paragraph> : null}
+          {selected?.sourceTemplateId ? <Typography.Paragraph type="secondary">来自团队模板 · {selected.team?.name}</Typography.Paragraph> : null}
           {selected?.team?.members.map(m => <Flex key={m.id} vertical gap={4} style={{ paddingBlock: 8 }}>
             <Flex gap={8} align="center">{m.employeeId ? <WandIconButton className="conversation-avatar-button" aria-label={`查看${m.name}的资料`} onClick={event => { setMembers(false); employeeProfile.open({ id: m.employeeId!, name: m.name, avatar: m.avatar }, event.currentTarget); }}><EmployeeAvatar employee={{ id: m.employeeId, name: m.name, avatar: m.avatar }} size="chat"/></WandIconButton> : null}<Typography.Text strong>{m.name}{m.isLeader ? " · 负责人" : ""}</Typography.Text></Flex><Typography.Text>{m.duty}</Typography.Text>
             <Typography.Text type="secondary">加入版本 {selected.joinedVersions[m.employeeId ?? `${m.legacyTemplateId}:${m.legacyMemberId}`]} · {selected.memberUnavailableReasons[m.id] || "后续新派工可用"}</Typography.Text>
@@ -298,8 +331,6 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
           </Flex>
         </ConversationPanel>
       </Flex>
-      <div className="conversation-inline-detail" data-open={titleDetails} inert={!titleDetails}><div><Typography.Text>{selected?.title ?? employee?.name ?? "尚未选择"}</Typography.Text>
-        <Typography.Text type="secondary">{selected?.kind === "group" ? `${(selected.team?.members.length ?? 0) + 1} 人 · ${selected.team?.members.length} 位员工` : `私聊${employee?.id === DEFAULT_EMPLOYEE_ID ? " · 默认伙伴" : ""}`}</Typography.Text></div></div>
       {selected?.kind === "group" ? <Flex align="center" gap={8} className="conversation-task-index">
         <WandButton ref={taskTrigger} aria-expanded={taskDetails} onClick={() => setTaskDetails(true)}>群任务 · {selected.tasks.length}</WandButton>
         <Typography.Text type="secondary" ellipsis>{selected.dissolvedAt ? "群聊已解散 · 执行记录" : selected.tasks.some(t => t.task.status !== "archived" && ["waiting_user", "awaiting_approval"].includes(t.runs[0]?.status))
@@ -342,8 +373,10 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
         {activeRun?.run.status === "waiting_user" && activeRun.run.statusDetail.includes("步数上限") ? <WandButton className="conversation-approval" disabled={busy || !!unknown} onClick={() => void act("continue")}>明确增加本轮步数</WandButton> : null}
       </Flex> : null}
       <div className="conversation-composer" hidden={!!selected?.dissolvedAt}>
-        <Flex align="center" justify="space-between" gap={8}><Typography.Text className="conversation-receiver">{receiver}</Typography.Text>{layer === "task" ? <WandButton size="small" onClick={() => setLayer("closed")}>取消派发</WandButton> : null}</Flex>
-        <div className="conversation-feedback" hidden={!feedback && !selected?.unavailableReason && !unknown && !draft.recovery && !(id && !draft.text && !draft.attachments.length && teamChatComposer.read(conversationDraftKey("", null)).text)} role="status" aria-live="polite"><Typography.Text type={phase === "failed" || phase === "unknown" || selected?.unavailableReason ? "danger" : "secondary"}>
+        <Flex align="center" justify="space-between" gap={8}><Typography.Text className="conversation-receiver" title={receiver}>{receiver}</Typography.Text>{layer === "task" ? <WandButton size="small" onClick={() => setLayer("closed")}>取消派发</WandButton> : null}</Flex>
+        {selected?.kind === "dm" && layer !== "task" ? <Typography.Text type="secondary" className="conversation-input-hint">新消息开始新工作；补充上一项请打开对应会话。</Typography.Text> : null}
+        {chatCwd && layer !== "task" && !target ? <Typography.Text type="secondary" className="conversation-cwd-summary">临时目录：{chatCwd} · 本页聊天共用</Typography.Text> : null}
+        <div className="conversation-feedback" hidden={!feedback && !selected?.unavailableReason && !unknown && !draft.recovery && activeRun?.run.status !== "awaiting_approval" && !(feedbackAction === "approve" && phase !== "idle") && !(id && !draft.text && !draft.attachments.length && teamChatComposer.read(conversationDraftKey("", null)).text)} role="status" aria-live="polite"><Typography.Text type={phase === "failed" || phase === "unknown" || selected?.unavailableReason ? "danger" : "secondary"}>
           {feedback || selected?.unavailableReason || ""}</Typography.Text>{unknown ? <WandButton size="small" onClick={() => void reconcile()}>核对请求</WandButton> : null}
           {draft.recovery ? <WandButton size="small" onClick={() => teamChatComposer.edit(draftKey, { recoverCapture: true })}>恢复本次未发送草稿</WandButton> : null}
           {id && !draft.text && !draft.attachments.length && teamChatComposer.read(conversationDraftKey("", null)).text ? <WandButton size="small" onClick={() => {
@@ -352,6 +385,7 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
         </div>
         {draft.attachments.length ? <ComposerAttachmentList items={draft.attachments.map((a, index) => ({ index, name: a.name, sizeLabel: `${a.size} B`, previewUrl: a.previewUrl ?? null }))}
           onRemove={index => teamChatComposer.edit(draftKey, { removeAttachment: index })}/> : null}
+        {voiceStatus ? <Typography.Text type="secondary" role="status" aria-live="polite" ellipsis>{voiceStatus}</Typography.Text> : null}
         <Sender ref={sender} value={draft.text} className="conversation-sender" placeholder={layer === "task" ? "描述任务要求…" : "输入消息…"} autoSize={{ minRows: 1, maxRows: 5 }} suffix={false}
           onPaste={e => { if (e.clipboardData.files.length) { e.preventDefault(); addFiles(e.clipboardData.files); } }}
           onChange={text => teamChatComposer.edit(draftKey, { text })} onSubmit={() => void send()} submitType="enter"
@@ -363,20 +397,27 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
           <Flex align="center" gap={4}><WandIconButton ref={toolsTrigger} style={{ width: 44, height: 44 }} aria-label={toolsOpen ? "关闭聊天操作" : layer === "task" ? "任务选项" : "更多聊天操作"}
             aria-expanded={toolsOpen} onClick={() => layer === "task" ? setTaskOptionsOpen(!taskOptionsOpen) : setLayer(layer === "closed" ? "menu" : "closed")}><ConversationMorphIcon from="plus" to="close" active={toolsOpen}/></WandIconButton>
             <WandIconButton style={{ width: 44, height: 44 }} aria-label="添加附件" onClick={() => { if (layer === "task") setTaskOptionsOpen(false); else setLayer("closed"); inputFiles.current?.click(); }}><WandIcon name="paperclip"/></WandIconButton>
+            <ComposerSpeechButton ownerKey={`${draftKey}:${scope}`} revision={draft.revision} inputPlaceholder={layer === "task" ? "描述任务要求…" : "输入消息…"} disabled={!visible || busy || !!selected?.dissolvedAt || !!selected?.unavailableReason}
+              onStatus={setVoiceStatus} onCommit={(text, expectedRevision) => teamChatComposer.edit(draftKey, {
+                text: draft.text ? draft.text.replace(/\s+$/, "") + " " + text : text, expectedRevision, persist: true,
+              })}/>
             <Typography.Text type="secondary" className="conversation-input-hint">Enter 发送 · Shift+Enter 换行</Typography.Text></Flex>
           <ConversationSubmitButton phase={feedbackAction === "approve" ? "idle" : phase} stops={stops} label={feedbackAction === "approve" ? "发送消息" : primaryLabel} disabled={busy || !!unknown || (feedbackAction === "approve" && phase !== "idle") || !id || !selected || !!selected.unavailableReason || (!stops && !draft.text.trim() && !draft.attachments.length)} onClick={() => void (stops ? act("stop") : send())}/>
           <ConversationPanel open={toolsOpen} owner="conversation-task-panel" focusKey={layer} anchorRef={toolsAnchor} triggerRef={toolsTrigger} direction="up" onClose={() => layer === "task" ? setTaskOptionsOpen(false) : setLayer("closed")}>
-            <div hidden={layer !== "menu"}>{selected?.kind === "group" ? <WandButton disabled={!id} onClick={() => taskMode()}>派新任务</WandButton> : null}
+            <div hidden={layer !== "menu"}>{selected?.kind === "group" ? <WandButton disabled={!id || !!selected.unavailableReason} onClick={() => taskMode()}>派新任务</WandButton> : null}
               {selected?.kind === "dm" && employee ? <WandButton onClick={event => { setLayer("closed"); employeeProfile.open(employee, event.currentTarget); }}>员工执行配置</WandButton> : null}
               <WandButton disabled={!selected?.communicationSessionId} onClick={() => { setLayer("closed"); if (selected?.communicationSessionId) onOpenSession(selected.communicationSessionId); }}>{selected?.kind === "dm" ? "历史私聊执行窗口" : "会话工具 / 资源设置"}</WandButton>
-              <WandInput aria-label="聊天目录（仅缺配置时需要）" placeholder="聊天目录（缺默认配置时选择）" value={chatCwd} onChange={e => setChatCwd(e.currentTarget.value)}/>
+              <WandInput aria-label="临时聊天目录（本页共用）" placeholder="留空沿用员工或项目目录" value={chatCwd} onChange={e => setChatCwd(e.currentTarget.value)}/>
+              <Typography.Text type="secondary">用于本页新消息，可覆盖默认目录；切换联系人仍保留，不修改员工配置。</Typography.Text>
+              {chatCwd ? <WandButton onClick={() => setChatCwd("")}>清除临时目录</WandButton> : null}
             </div>
             <div hidden={layer !== "task"}><Typography.Text strong>{continueTaskId ? "确认继续此任务" : "派新任务"}</Typography.Text>
               <WandInput aria-label="任务 title" value={title} disabled={!!continueTaskId} onChange={e => setTitle(e.currentTarget.value)}/>
-              <WandSelect ariaLabel="工作项目" popupOwner="conversation-task-panel" searchable value={projectId} onValueChange={setProjectId}
+              {projectsLoading ? <Flex align="center" gap={8} role="status"><Spin size="small"/>正在读取工作项目…</Flex> : projectsError ? <Alert type="error" showIcon title={projectsError} action={<WandButton size="small" onClick={() => void loadProjects()}>只读重试</WandButton>}/> : !projects.some(p => p.kind !== "global" && !!p.cwd) ? <Typography.Text type="secondary" role="status">还没有可用的工作项目，请先在工作区创建项目。</Typography.Text> : null}
+              <WandSelect ariaLabel="工作项目" popupOwner="conversation-task-panel" searchable value={projectId} onValueChange={setProjectId} disabled={projectsLoading || !!projectsError}
                 options={projects.filter(p => p.kind !== "global" && !!p.cwd).map(p => ({ value: p.id, label: p.name }))}/>
               <Descriptions size="small" column={1} items={[{ key: "members", label: "执行名单", children: selected?.team ? `我 + ${selected.team.members.map(m => m.name).join("、")} · 本轮负责人 ${mentionedLeader?.name ?? leader?.name}` : `我 + ${employee?.name}（负责人 / 执行者）` },
-                { key: "version", label: "成员版本", children: capturedVersion }, { key: "approval", label: "计划审批", children: selected?.team?.requirePlanApproval === false ? "沿用预设自动开工" : "需用户明确批准" }]}/>
+                { key: "version", label: "成员版本", children: capturedVersion }, { key: "approval", label: "计划审批", children: selected?.team?.requirePlanApproval === false ? "沿用团队模板自动开工" : "需用户明确批准" }]}/>
             </div>
           </ConversationPanel>
         </Flex>}/>

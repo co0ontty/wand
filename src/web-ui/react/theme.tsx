@@ -10,10 +10,14 @@ import { usePortalContainer } from "./ui/portal-context";
 const ThemeInstalled = React.createContext(false);
 
 /** The approved demo palette; ordinary control geometry remains library-owned. */
+const SECONDARY_TEXT_COLOR = "#6b5e54";
+
 export const wandTheme: ThemeConfig = {
   token: {
     colorPrimary: "#b8562f", colorInfo: "#b8562f", colorSuccess: "#4f7a58",
-    colorText: "#29241f", colorTextSecondary: "#81756a", colorBgLayout: "#faf8f5",
+    colorText: "#29241f", colorTextSecondary: SECONDARY_TEXT_COLOR,
+    colorTextDescription: SECONDARY_TEXT_COLOR, colorTextPlaceholder: SECONDARY_TEXT_COLOR,
+    colorBgLayout: "#faf8f5",
     colorBgContainer: "#fffdfa", colorBorderSecondary: "#ebe5dd", borderRadius: 8,
     fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif',
     fontSize: 14, fontSizeSM: 12, zIndexPopupBase: 20010,

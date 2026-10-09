@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { Badge, Card, Flex, List, Progress, Typography } from "../react/design-library";
 import { WandUiProvider } from "../react/theme";
+import { WandIcon } from "../react/ui";
 import { normalizeTodoStatus, summarizeTodoProgress, type TodoEntry } from "./todo-progress";
 
 const roots = new Map<HTMLElement, Root>();
@@ -20,13 +21,14 @@ export function paintTodoProgress(todos: readonly TodoEntry[]): void {
   const percent = Math.round(summary.ratio * 100);
   const toggle = document.getElementById("todo-progress-summary");
   const content = document.getElementById("todo-progress-content");
-  if (toggle) paint(toggle, <Flex align="center" gap="small" style={{ minWidth: 0 }}>
-    <span id="todo-progress-ring"><Progress type="circle" size={24} percent={percent} showInfo={false}/></span>
+  if (toggle) paint(toggle, <Flex align="center" gap={6} style={{ minWidth: 0 }}>
+    <span id="todo-progress-ring"><Progress type="circle" size={16} percent={percent} showInfo={false}/></span>
     <span id="todo-progress-counter" aria-live="polite">{count}</span>
-    <Typography.Text id="todo-progress-task" ellipsis>{summary.activeTask || "准备中…"}</Typography.Text>
+    <Typography.Text id="todo-progress-task" type="secondary" ellipsis title={summary.activeTask || "准备中…"}>{summary.activeTask || "准备中…"}</Typography.Text>
+    <span className="todo-progress-chevron" aria-hidden="true"><WandIcon name="chevronDown" size={12}/></span>
   </Flex>);
   if (content) paint(content, <Card size="small" title="待办进度" extra={<span id="todo-progress-panel-count">{count}</span>}>
-    <div id="todo-progress-fill"><Progress percent={percent} steps={summary.total} size="small" showInfo={false}/></div>
+    <div id="todo-progress-fill"><Progress percent={percent} size="small" showInfo={false}/></div>
     <List id="todo-progress-list" dataSource={[...todos]} renderItem={todo => {
       const status = normalizeTodoStatus(todo.status);
       return <List.Item aria-current={status === "in_progress" ? "step" : undefined}>

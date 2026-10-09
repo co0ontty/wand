@@ -35,8 +35,15 @@ export async function runLiveTimelineCases({ e, send, click, wait, mode, report 
   // Real wheel input pauses following and makes the open state a user choice.
   const point = await e("(()=>{const r=liveTimeline.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()");
   const oldTop = await e("liveTimeline.scrollTop");
-  await send("Input.dispatchMouseEvent", { type:"mouseWheel", ...point, deltaX:0, deltaY:-180 });
-  await wait(`liveTimeline.scrollTop<${oldTop - 10}`);
+  // One synthetic wheel can land while the drawer is still settling its geometry; a
+  // real user keeps scrolling. Genuine input events stay the only pause trigger.
+  let scrolled = false;
+  for (let attempt = 0; attempt < 3 && !scrolled; attempt++) {
+    await send("Input.dispatchMouseEvent", { type:"mouseWheel", ...point, deltaX:0, deltaY:-120 });
+    await e("new Promise(r=>setTimeout(r,150))");
+    scrolled = await e(`liveTimeline.scrollTop<${oldTop - 10}`);
+  }
+  assert.ok(scrolled, "a real wheel moves the drawer off the tail");
   await e("h.settle()");
   const readingTop = await e("liveTimeline.scrollTop");
   const outerTop = await e("document.querySelector('.chat-messages').scrollTop");
@@ -50,6 +57,24 @@ export async function runLiveTimelineCases({ e, send, click, wait, mode, report 
   assert.equal(await e("liveGroup.dataset.expanded"), "false", "manual collapse survives new output");
   await click("button.chat-process-summary"); await e("h.settle()");
   assert.ok(await e("liveTimeline.scrollHeight-liveTimeline.clientHeight-liveTimeline.scrollTop<=2"), "reopening the live drawer starts from latest");
+
+  // Inspecting a detail pauses the drawer; closing it must not stay paused forever.
+  await e(`(()=>{const last=[...liveTimeline.querySelectorAll(".chat-call-button")].pop();last.id="probe-row"})()`);
+  await click("#probe-row");
+  await wait('document.querySelector(\'.chat-call[data-expanded="true"]\')');
+  await e("h.settle()");
+  const inspectingTop = await e("liveTimeline.scrollTop");
+  await e(`(async()=>{liveTurns[0].content.push(liveCall(27));h.publish(liveTurns,true);await h.settle()})()`);
+  assert.ok(Math.abs(await e("liveTimeline.scrollTop") - inspectingTop) <= 1, "an open detail freezes the drawer");
+  await click("#probe-row"); await e("h.settle()");
+  await e(`(async()=>{liveTurns[0].content.push(liveCall(28));h.publish(liveTurns,true);await h.settle()})()`);
+  assert.ok(await e("liveTimeline.scrollHeight-liveTimeline.clientHeight-liveTimeline.scrollTop<=2"), "closing a detail resumes tail following");
+
+  // Row reflow is layout noise, not reading intent: the live drawer stays at the tail.
+  await e(`(async()=>{liveTurns[0].content=liveTurns[0].content.map((b,i)=>({...b,
+    preview:"npm run check · " + i + " · " + "一段会改变行高的很长很长的命令输出摘要".repeat(2)}));
+  h.publish(liveTurns,true);await h.settle()})()`);
+  assert.ok(await e("liveTimeline.scrollHeight-liveTimeline.clientHeight-liveTimeline.scrollTop<=2"), "row reflow keeps the live drawer at the tail");
 
   // Inspecting a detail also freezes the drawer, even without scrolling first.
   await e(`(async()=>{await h.fresh([{role:'assistant',uuid:${JSON.stringify("inspect-" + mode)},content:[liveCall(30)]}],true)})()`);

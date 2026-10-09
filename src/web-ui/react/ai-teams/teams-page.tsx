@@ -439,14 +439,14 @@ export function TeamEditor({
     try {
       const saved = team ? await aiTeamsRepository.update(team.id, teamRequestInput(draft)) : await aiTeamsRepository.create(teamRequestInput(draft));
       setDraft(inputOf(saved));
-      setStatus(team ? "已保存。" : "团队已创建。");
+      setStatus(team ? "已保存。" : "团队模板已创建。");
       setTone("success");
       onSaved(saved, !team);
     } catch (cause) {
       const rejected = teamSaveDefinitelyRejected(cause);
       setUnknownSave(!rejected);
-      setStatus(rejected ? failureMessage(cause, "保存团队失败。")
-        : "保存结果尚未确认，草稿保留。请先核对团队列表，不要重复保存。");
+      setStatus(rejected ? failureMessage(cause, "保存团队模板失败。")
+        : "保存结果尚未确认，草稿保留。请先核对团队模板列表，不要重复保存。");
       setTone("error");
     } finally {
       setPending(false);
@@ -456,11 +456,11 @@ export function TeamEditor({
   async function remove(): Promise<boolean | void> {
     if (!team) return;
     const answer = await wandOverlay.dialog({
-      title: `删除团队「${team.name}」？`,
+      title: `删除团队模板「${team.name}」？`,
       description: "已经开始的运行不受影响，会按启动时的团队快照继续。",
       actions: [
         { label: "取消", value: false, autoFocus: true },
-        { label: "删除团队", value: true, kind: "danger" },
+        { label: "删除团队模板", value: true, kind: "danger" },
       ],
     });
     if (answer.dismissed === true || !answer.action) return;
@@ -469,7 +469,7 @@ export function TeamEditor({
       await aiTeamsRepository.remove(team.id);
       onDeleted(team.id);
     } catch (cause) {
-      setStatus(failureMessage(cause, "删除团队失败。"));
+      setStatus(failureMessage(cause, "删除团队模板失败。"));
       setTone("error");
       return false;
     } finally {
@@ -541,7 +541,7 @@ export function TeamEditor({
       <Flex className="wand-team-section-head" justify="space-between" align="baseline" gap={8} wrap><Typography.Title level={5} style={{ margin: 0 }}>协作设置</Typography.Title></Flex>
       <Flex className="wand-ai-team-editor-grid" gap={12} wrap>
         <div className="wand-ai-team-editor-cell">
-        <SettingsField label="团队名" htmlFor={`${idPrefix}-name`}>
+        <SettingsField label="团队模板名称" htmlFor={`${idPrefix}-name`}>
           <Input
             id={`${idPrefix}-name`}
             value={draft.name}
@@ -573,7 +573,7 @@ export function TeamEditor({
         <Input
           id={`${idPrefix}-description`}
           value={draft.description}
-          placeholder="可选：这个团队擅长什么"
+          placeholder="可选：这组员工擅长什么"
           disabled={busy}
           onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))}
         />
@@ -610,10 +610,10 @@ export function TeamEditor({
         disabled={pending || unknownSave}
         onClick={remove}
       >
-        删除团队
+        删除团队模板
       </SettingsActionButton> : null}
       <SettingsSaveBar
-        label={team ? "保存团队" : "创建团队"}
+        label={team ? "保存团队模板" : "创建团队模板"}
         pending={pending}
         disabled={deleting || unknownSave}
         onSave={() => void save()}
@@ -929,7 +929,7 @@ const FILTER_TABS = [
 
 const PAGE_MODE_TABS = [
   { value: "employees", label: "员工" },
-  { value: "teams", label: "团队" },
+  { value: "teams", label: "团队模板" },
 ];
 
 export interface AiTeamsPageProps {
@@ -953,6 +953,7 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
   const [pageMode, setPageMode] = React.useState<"employees" | "teams">("employees");
   const [runs, setRuns] = React.useState<AiTeamRunSummary[]>([]);
   const [loadError, setLoadError] = React.useState("");
+  const [teamsLoading, setTeamsLoading] = React.useState(true);
   const [catalog, setCatalog] = React.useState<IssueModelCatalog | null>(null);
   const [defaultAgent, setDefaultAgent] = React.useState<WandTaskAgent>(() => createDefaultIssueAgent());
   const [selectedId, setSelectedId] = React.useState("");
@@ -973,13 +974,16 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
   }, [teamRoute.page, teamRoute.teamId, teamRoute.revision]);
 
   const loadTeams = React.useCallback(async () => {
+    setTeamsLoading(true);
     try {
       const list = await aiTeamsRepository.list();
       setTeams(list);
       setLoadError("");
       setSelectedId((current) => current || (window.matchMedia("(max-width: 760px)").matches ? "" : list[0]?.id ?? ""));
     } catch (cause) {
-      setLoadError(failureMessage(cause, "团队列表加载失败。"));
+      setLoadError(failureMessage(cause, "团队模板加载失败。"));
+    } finally {
+      setTeamsLoading(false);
     }
   }, []);
 
@@ -1071,7 +1075,7 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
     if (teamDraftPending.current) return false;
     if (!teamDraftDirty.current) return true;
     const answer = await wandOverlay.dialog({
-      title: "放弃未保存的团队改动？",
+      title: "放弃未保存的团队模板改动？",
       description: "名称、成员和各自的 CLI / 模型 / 执行模式改动还没保存，离开后回到上次保存的内容。",
       actions: [
         { label: "继续编辑", value: false, autoFocus: true },
@@ -1121,7 +1125,7 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
     setDetailTab("runs");
   };
 
-  return <Flex component="section" vertical className="task-board-native-page wand-teams-page" aria-label="硅基员工与 AI 团队" style={{ position: "absolute", inset: 0, zIndex: 8, overflow: "hidden", minWidth: 0, minHeight: 0, background: "var(--bg-primary)" }} data-detail={detailOpen || undefined}>
+  return <Flex component="section" vertical className="task-board-native-page wand-teams-page" aria-label="员工与团队模板" style={{ position: "absolute", inset: 0, zIndex: 8, overflow: "hidden", minWidth: 0, minHeight: 0, background: "var(--bg-primary)" }} data-detail={detailOpen || undefined}>
     <Flex component="header" wrap align="center" justify="space-between" gap="small" className="task-board-workspace-header" style={{ flexShrink: 0, padding: 16 }}>
       <Flex align="center" gap="small" className="task-board-kicker" style={{ minWidth: 0 }}>
         {onOpenSidebar ? <WandIconButton
@@ -1142,14 +1146,14 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
         <div className="task-board-heading-copy">
           {pageMode === "teams" && selected ? <WandBreadcrumb
             variant="title"
-            ariaLabel="AI 团队导航"
+            ariaLabel="团队模板导航"
             items={[
-              { label: "AI 团队", onNavigate: () => { void leaveDetail(); } },
+              { label: "团队模板", onNavigate: () => { void leaveDetail(); } },
               { label: selected.name },
             ]}
           /> : <>
-            <Typography.Title level={3} style={{ margin: 0 }}>{pageMode === "employees" ? "硅基员工" : "AI 团队"}</Typography.Title>
-            <Typography.Paragraph type="secondary" style={{ margin: 0 }}>{pageMode === "employees" ? "定义专属角色与工具链降级顺序，以对话方式协作完成工作。" : "负责人拆解分派，成员各用自己的 CLI 协作完成。"}</Typography.Paragraph>
+            <Typography.Title level={3} style={{ margin: 0 }}>{pageMode === "employees" ? "员工" : "团队模板"}</Typography.Title>
+            <Typography.Paragraph type="secondary" style={{ margin: 0 }}>{pageMode === "employees" ? "设置员工的职责与工具，再从通讯录发起对话。" : "保存成员与协作规则，用于发起群聊或直接开工。"}</Typography.Paragraph>
           </>}
         </div>
       </Flex>
@@ -1157,7 +1161,7 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
         <WandStretchTabs
           tabs={PAGE_MODE_TABS}
           value={pageMode}
-          ariaLabel="切换员工或团队"
+          ariaLabel="切换员工或团队模板"
           onValueChange={(val) => {
             void confirmDiscardTeamDraft().then((allowed) => {
               if (allowed) {
@@ -1184,7 +1188,7 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
               onClick={() => (creating ? void leaveDetail() : void startCreate())}
             >
               <WandIcon name="plus" slot="start" className="wand-teams-create-icon"/>
-              <span>新建团队</span>
+              <span>新建团队模板</span>
             </WandButton>
           </>
         ) : null}
@@ -1205,8 +1209,8 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
       </div>
     ) : (
     <div className="wand-teams-layout">
-      <aside className="wand-teams-list" aria-label="团队列表">
-        <WandSearchField value={query} onValueChange={setQuery} label="搜索团队或成员"/>
+      <aside className="wand-teams-list" aria-label="团队模板列表">
+        <WandSearchField value={query} onValueChange={setQuery} label="搜索团队模板或成员"/>
         <WandStretchTabs
           tabs={FILTER_TABS}
           value={filter}
@@ -1219,8 +1223,9 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
           showIcon
           role="alert"
           title={loadError}
-          action={<WandButton kind="ghost" size="small" onClick={() => void loadTeams()}>重新加载</WandButton>}
+          action={<WandButton kind="ghost" size="small" disabled={teamsLoading} onClick={() => void loadTeams()}>重新加载团队模板</WandButton>}
         /> : null}
+        {teamsLoading ? <Typography.Paragraph type="secondary" role="status">正在读取团队模板…</Typography.Paragraph> : null}
         <Flex vertical gap={6} className="wand-teams-cards">
           {visible.map((team) => {
             const state = teamState(team.id);
@@ -1263,10 +1268,10 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
               />
             </div>;
           })}
-          {teams !== null && visible.length === 0 ? <Empty
+          {!teamsLoading && !loadError && teams !== null && visible.length === 0 ? <Empty
             className="wand-teams-empty"
             image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description={teams.length === 0 ? "还没有团队。" : "没有匹配的团队。"}
+            description={teams.length === 0 ? "还没有团队模板。" : "没有匹配的团队模板。"}
           >
             {teams.length === 0 ? <WandButton kind="soft" size="small" onClick={() => { void startCreate(); }}>从模板创建</WandButton> : null}
           </Empty> : null}
@@ -1309,7 +1314,7 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
               <WandIcon name="chevronLeft"/>
             </WandIconButton>
             <div>
-              <Typography.Title level={4} style={{ margin: 0 }}>新建团队</Typography.Title>
+              <Typography.Title level={4} style={{ margin: 0 }}>新建团队模板</Typography.Title>
               <Typography.Text type="secondary">模板：{template.name}</Typography.Text>
             </div>
           </Flex>
@@ -1359,7 +1364,7 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
         </> : <Empty
           className="wand-teams-empty is-detail"
           image={<WandIcon name="parallel" size={28}/>}
-          description="选一个团队，或新建一个。"
+          description={teamsLoading && !teams ? "正在读取团队模板…" : loadError && !teams ? "请先重新加载团队模板。" : "选一个团队模板，或新建一个。"}
         />}
       </div>
     </div>

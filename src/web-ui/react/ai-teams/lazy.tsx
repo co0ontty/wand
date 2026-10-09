@@ -196,19 +196,19 @@ function loadAiTeamsChunk(): Promise<AiTeamsChunk> {
   return pending;
 }
 
-function useAiTeamsChunk(): { chunk: AiTeamsChunk | null; error: string; retry: () => void } {
+function useAiTeamsChunk(enabled = true): { chunk: AiTeamsChunk | null; error: string; retry: () => void } {
   const [chunk, setChunk] = React.useState<AiTeamsChunk | null>(loaded);
   const [error, setError] = React.useState("");
   const [attempt, setAttempt] = React.useState(0);
   React.useEffect(() => {
-    if (chunk) return undefined;
+    if (chunk || !enabled) return undefined;
     let alive = true;
     loadAiTeamsChunk().then(
       (next) => { if (alive) setChunk(next); },
       (reason: unknown) => { if (alive) setError(failureMessage(reason, "AI 团队加载失败")); },
     );
     return () => { alive = false; };
-  }, [chunk, attempt]);
+  }, [chunk, attempt, enabled]);
   const retry = React.useCallback(() => {
     setError("");
     setAttempt((value) => value + 1);
@@ -239,8 +239,9 @@ export async function formatConversationAttachments(files: readonly { savedPath:
 }
 
 export function ConversationMessages(props: ConversationMessagesProps): React.ReactElement {
-  const { chunk, error, retry } = useAiTeamsChunk();
+  const { chunk, error, retry } = useAiTeamsChunk(props.active !== false);
   if (chunk) return <chunk.ConversationMessages {...props}/>;
+  if (props.active === false) return <></>;
   return <div role="status">{error || "正在读取消息组件…"}{error ? <WandButton onClick={retry}>重试</WandButton> : null}</div>;
 }
 

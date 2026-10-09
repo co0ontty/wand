@@ -1,4 +1,5 @@
 import { composer, state, writeStoredBoolean } from "./state";
+import { ensureTerminalLibrary } from "../vendor-loader.js";
 import { handlePiSettingsKeydown } from "./pi-settings-adapter";
 import { createSessionReads } from "./session-reads";
 import { createSessionCompletionViewIntent, isSessionJustCompleted, mergeSessionCompletionState } from "../../session-completion-state.js";
@@ -33,6 +34,7 @@ import { syncBrowserComposerSelects } from "./composer-select-adapter";
 import { syncBrowserComposerConfig } from "./composer-config-adapter";
 import { syncBrowserComposerAttachments } from "./composer-attachments-adapter";
 import {
+  compactModelDisplayLabel,
   modelDisplayName,
   normalizeAvailableComposerValue,
   normalizeComposerModelValue,
@@ -499,7 +501,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
 
       export function getShortModelLabel(model, session) {
         // getModelDisplayLabel 永不返回空串，所以这里直接用它的结果做压缩。
-        var label = getModelDisplayLabel(model, session);
+        var label = compactModelDisplayLabel(getModelDisplayLabel(model, session));
         var cutAt = label.search(/[（(]/);
         if (cutAt > 0) label = label.slice(0, cutAt).trim();
         var slash = label.lastIndexOf("/");
@@ -699,7 +701,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         for (var i = 0; i < models.length; i++) {
           var m = models[i];
           if (m.id === "default") continue;
-          var label = m.label || m.id;
+          var label = compactModelDisplayLabel(m.label || m.id);
           var suffix = getProviderForSession(session) === "claude"
             ? m.availability === "verified"
               ? " · 已验证"
@@ -2083,13 +2085,14 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
       // → 服务端兜底 120/36 → Claude 按 120 列画 banner/box → 浏览器实际渲
       // 染宽 ≠ 120 → 横线断行（图 1 现象）。带 2s 兜底超时，避免
       // initTerminal 失败时 UI 永久卡在"创建会话"按钮。
-      export function ensureTerminalReady() {
+      export async function ensureTerminalReady() {
         if (state.terminal && state.terminal.cols) return Promise.resolve();
+        await ensureTerminalLibrary();
         return new Promise<void>(function(resolve) {
           var done = false;
           var settle = function() { if (!done) { done = true; resolve(); } };
           var hardTimeout = setTimeout(settle, 2000);
-          try { initTerminal(); } catch (e) {}
+          try { initTerminal({ prepare: true }); } catch (e) {}
           requestAnimationFrame(function() {
             requestAnimationFrame(function() {
               if (state.terminal && state.terminal.cols) {
@@ -2197,13 +2200,13 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           state.chatMode = getSafeModeForTool(provider, state.chatMode);
         }
         var body: Record<string, unknown> = shell
-          ? withTerminalDimensions({
+          ? {
               shell: true,
               cwd: cwd,
               mode: defaultMode,
               sessionSource: "interactive",
-            })
-          : withTerminalDimensions({
+            }
+          : {
               command: providerCliCommand(provider),
               provider: provider,
               cwd: cwd,
@@ -2213,7 +2216,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
               initialInput: options && options.initialInput,
               systemPrompt: options && options.systemPrompt,
               sessionSource: "interactive",
-            });
+            };
         if (options && options.workspaceId) body.workspaceId = options.workspaceId;
         if (options && options.workspaceTaskId) body.workspaceTaskId = options.workspaceTaskId;
         return ensureTerminalReady().then(function() {
@@ -2221,7 +2224,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
             method: "POST",
             headers: { "Content-Type": "application/json" },
             credentials: "same-origin",
-            body: JSON.stringify(body),
+            body: JSON.stringify(withTerminalDimensions(body)),
           });
         })
           .then(function(res) { return res.json(); })

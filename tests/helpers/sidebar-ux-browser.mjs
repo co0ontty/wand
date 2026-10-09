@@ -48,7 +48,9 @@ export async function openBrowser(url, width = 1440, height = 1000) {
       throw new Error("Browser condition missing: " + label);
     };
     const settle = async () => {
-      await evaluate("document.fonts.ready.then(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))))");
+      // rc-trigger stages visibility, measurement, alignment and motion across frames.
+      // Two frames can observe a submenu before its CSS/align prepare phase completes.
+      await evaluate("document.fonts.ready.then(()=>new Promise(resolve=>{let count=0;function frame(){if(++count>=6)resolve();else requestAnimationFrame(frame)}requestAnimationFrame(frame)}))");
       for (let i = 0; i < 100; i++) {
         if (!await evaluate("document.getAnimations().some(a=>a.playState==='running'&&Number.isFinite(a.effect?.getComputedTiming().endTime))")) return;
         await pause(30);
@@ -56,7 +58,10 @@ export async function openBrowser(url, width = 1440, height = 1000) {
     };
     const click = async (selector, button = "left") => {
       await settle();
-      const rect = await evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n)return null;n.scrollIntoView({block:'nearest'});const r=n.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+      await evaluate(`document.querySelector(${JSON.stringify(selector)})?.scrollIntoView({block:'nearest'});true`);
+      // Native context menus close on scroll. Deliver the scroll event before opening one.
+      await settle();
+      const rect = await evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n)return null;const r=n.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
       assert.ok(rect, "Click target exists: " + selector);
       await send("Input.dispatchMouseEvent", { type: "mousePressed", ...rect, button, clickCount: 1 });
       await send("Input.dispatchMouseEvent", { type: "mouseReleased", ...rect, button, clickCount: 1 });

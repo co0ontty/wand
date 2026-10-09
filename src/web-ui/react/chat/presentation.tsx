@@ -175,21 +175,35 @@ function ChatBubble({ element, slots }: { element: HTMLElement; slots: Map<strin
   const timing = slots.get("chat-message-time");
   const clock = timing?.querySelector("time");
   const duration = textOf(timing, ".chat-message-duration");
-  const usageIcon = usage?.querySelector<HTMLElement>(".turn-usage-icon");
   const values = Array.from(usage?.querySelectorAll<HTMLElement>(".turn-usage-value") || []);
+  const usageKey = usage?.dataset.expandKey || "";
+  const [usageExpanded, setUsageExpanded] = React.useState(usage?.dataset.expanded === "true");
+  React.useEffect(() => setUsageExpanded(usage?.dataset.expanded === "true"), [usageKey, usage?.dataset.expanded]);
   // Android ChatMessageTime：时间行在正文之上，自己的发言靠右；等宽字体、次要色。
   const timeRow = timing ? <span className="chat-message-time">
     {duration ? <span className="chat-message-duration">{duration}</span> : null}
     <time dateTime={clock?.getAttribute("datetime") || undefined} title={timing.title}
       aria-label={clock?.getAttribute("aria-label") || undefined}>{textOf(clock || timing)}</time>
   </span> : null;
-  // Android UsageSummaryRow：回复尾部独立一行的小字用量，不再和时间挤在同一行。
-  const usageRow = usage ? <span className="turn-usage-summary" role="status" aria-live="polite"
+  // Token details remain available without taking a full statistics row on every reply.
+  const usageValues = usage ? <span className="turn-usage-summary" role="status" aria-live="polite"
     aria-label={usage.getAttribute("aria-label") || undefined}>
-    {usageIcon ? <OwnedNode node={usageIcon}/> : null}
-    {values.length ? values.map(value => <span key={value.dataset.chatKey} className="turn-usage-value" title={value.title}>{textOf(value)}</span>)
+    <span className="turn-usage-icon" aria-hidden="true"><WandIcon name="sigma" size={13}/></span>
+    {values.length ? values.map(value => <span key={value.dataset.chatKey} className="turn-usage-value" title={value.title}>
+      <span className="turn-usage-label">{textOf(value, ".turn-usage-label")}</span>{" "}
+      <span className="turn-usage-number">{textOf(value, ".turn-usage-number") || textOf(value)}</span>
+    </span>)
       : <span className="turn-usage-value">{textOf(usage)}</span>}
   </span> : null;
+  const usageRow = usage ? <Collapse ghost size="small" className="turn-usage-disclosure"
+    activeKey={usageExpanded ? ["usage"] : []}
+    onChange={keys => {
+      const expanded = keys.includes("usage");
+      setUsageExpanded(expanded);
+      usage.dataset.expanded = String(expanded);
+      (window as any).__turnUsageSetExpanded?.(usageKey, expanded);
+    }}
+    items={[{ key: "usage", label: "本轮用量", children: usageValues }]}/> : null;
   return <Bubble placement={user ? "end" : "start"} variant={user ? "filled" : "borderless"} shape="corner"
     // 助手的回复头部（时间 + 署名 + 收起）由 presentAssistantReply 持有，这里不再重复一份时间行。
     header={user ? timeRow : undefined}
@@ -313,47 +327,53 @@ function renderProjection(element: HTMLElement, projection: Projection): void {
   } else if (projection.kind === "agent") {
     const seed = slots.get("agent-run-summary");
     const expanded = element.dataset.expanded === "true";
-    content = <Card size="small" styles={{ body: expanded ? undefined : { display: "none" } }} title={<Button type="text" block className="agent-run-summary" aria-expanded={expanded}
+    content = <Card size="small" className="agent-run-surface" styles={{ body: expanded ? undefined : { display: "none" } }} title={<Button type="text" block className="agent-run-summary" aria-expanded={expanded}
       aria-label={element.getAttribute("aria-label") || undefined} aria-controls={slots.get("agent-run-body")?.id}
       onClick={event => preserveDisclosurePosition(event.currentTarget, () => (window as any).__agentRunToggle(event, event.currentTarget))}>
-      <Flex vertical gap="small" align="start"><Flex gap="small" align="center" wrap><Badge status={statusColor(element.dataset.status)}/>
-        <Typography.Text strong>{textOf(seed, ".agent-run-title")}</Typography.Text>
-        {textOf(seed, ".agent-run-topic") && <Typography.Text type="secondary">{textOf(seed, ".agent-run-topic")}</Typography.Text>}
-        {textOf(seed, ".agent-run-type-chip") && <Tag>{textOf(seed, ".agent-run-type-chip")}</Tag>}
-        {textOf(seed, ".agent-run-status-label") && <Tag color={statusColor(element.dataset.status)}>{textOf(seed, ".agent-run-status-label")}</Tag>}
-        <WandIcon name={expanded ? "chevronUp" : "chevronDown"} size={13}/></Flex>
-        {textOf(seed, ".agent-run-latest") && <Typography.Text type="secondary">{textOf(seed, ".agent-run-latest")}</Typography.Text>}
-      </Flex>
+      <Badge status={statusColor(element.dataset.status)}/>
+      <span className="agent-run-summary-copy">
+        <span className="agent-run-summary-line"><Typography.Text strong className="agent-run-title">{textOf(seed, ".agent-run-title")}</Typography.Text>
+          {textOf(seed, ".agent-run-status-label") && <Typography.Text type={element.dataset.status === "failed" ? "danger" : "secondary"} className="agent-run-status-label">{textOf(seed, ".agent-run-status-label")}</Typography.Text>}
+        </span>
+        {(textOf(seed, ".agent-run-topic") || textOf(seed, ".agent-run-type-chip")) && <span className="agent-run-context">
+          {textOf(seed, ".agent-run-topic") && <span>{textOf(seed, ".agent-run-topic")}</span>}
+          {textOf(seed, ".agent-run-type-chip") && <span>{textOf(seed, ".agent-run-type-chip")}</span>}
+        </span>}
+        {textOf(seed, ".agent-run-latest") && <Typography.Text type="secondary" className="agent-run-latest" title={textOf(seed, ".agent-run-latest")}>{textOf(seed, ".agent-run-latest")}</Typography.Text>}
+      </span>
+      <DisclosureChevron expanded={expanded}/>
     </Button>}><OwnedNode node={slots.get("agent-run-body")}/></Card>;
   } else if (projection.kind === "agent-rail") {
     const selected = element.closest(".agent-run")?.querySelector<HTMLElement>(".agent-run-detail-panel.is-selected")?.dataset.agentTaskId;
-    content = <Flex gap="small" wrap>{Array.from(slots).map(([key, seed]) => {
+    content = <Flex vertical gap={4}>{Array.from(slots).map(([key, seed]) => {
       const active = selected === key;
       const label = textOf(seed, ".agent-run-agent-copy strong") || textOf(seed);
       const status = Array.from(seed.querySelector(".agent-run-agent-status")?.classList || []).find(name => name.startsWith("is-"))?.slice(3);
-      return <Button key={key} size="small" type={active ? "primary" : "default"} className={"agent-run-agent" + (active ? " is-selected" : "")}
+      return <Button key={key} size="small" type="text" block className={"agent-run-agent" + (active ? " is-selected" : "")}
         id={seed.id} role="tab" aria-controls={seed.getAttribute("aria-controls") || undefined} aria-selected={active} tabIndex={active ? 0 : -1}
         data-agent-task-id={key} data-agent-run-id={element.closest<HTMLElement>(".agent-run")?.dataset.agentRunId}
         onClick={event => (window as any).__agentRunSelect(event, event.currentTarget)}
         onKeyDown={event => (window as any).__agentRunSelect(event, event.currentTarget)}>
-        <Flex gap="small" align="center"><Badge status={statusColor(status)} color={seed.style.getPropertyValue("--agent-color") || undefined}/>{label}{textOf(seed, ".agent-run-agent-type") && <Tag>{textOf(seed, ".agent-run-agent-type")}</Tag>}
-          {textOf(seed, ".agent-run-agent-status") && <Tag color={statusColor(status)}>{textOf(seed, ".agent-run-agent-status")}</Tag>}</Flex>
+        <Badge status={statusColor(status)} color={status === "running" || status === "background" ? seed.style.getPropertyValue("--agent-color") || undefined : undefined}
+          aria-label={seed.querySelector(".agent-run-agent-status")?.getAttribute("aria-label") || undefined}/>
+        <span className="agent-run-agent-copy"><span className="agent-run-agent-name" title={label}>{label}</span>
+          {textOf(seed, ".agent-run-agent-type") && <span className="agent-run-agent-type">{textOf(seed, ".agent-run-agent-type")}</span>}
+        </span>
+        {textOf(seed, ".agent-run-agent-status") && <Typography.Text type={status === "failed" ? "danger" : "secondary"} className="agent-run-agent-status">{textOf(seed, ".agent-run-agent-status")}</Typography.Text>}
       </Button>;
     })}</Flex>;
   } else if (projection.kind === "agent-detail") {
     const head = slots.get("agent-run-detail-head");
     const state = head?.querySelector(".agent-run-detail-state");
-    const status = Array.from(state?.classList || []).find(name => name.startsWith("is-"))?.slice(3);
-    content = <Flex vertical gap="middle"><Flex gap="small" align="center" wrap><Badge status={statusColor(status)}/>
-      <Typography.Text strong>{textOf(head, ".agent-run-detail-task")}</Typography.Text>
-      {textOf(head, ".agent-run-type-chip") && <Tag>{textOf(head, ".agent-run-type-chip")}</Tag>}
+    content = <Flex vertical gap="small"><Flex className="agent-run-detail-heading" gap="small" align="center" wrap aria-label={state?.getAttribute("aria-label") || undefined}>
+      <Typography.Text strong className="agent-run-detail-task">{textOf(head, ".agent-run-detail-task")}</Typography.Text>
       {head?.querySelector<HTMLElement>(".pi-execution-open") && <Button size="small" className="pi-execution-open" data-tool-id={head.querySelector<HTMLElement>(".pi-execution-open")?.dataset.toolId}
         onClick={event => (window as any).__piExecutionOpen(event, event.currentTarget)}>{textOf(head, ".pi-execution-open")}</Button>}
     </Flex><OwnedNode node={slots.get("agent-run-agent-body")}/></Flex>;
   } else if (projection.kind === "agent-process") {
     projection.expanded ??= element.dataset.expanded === "true";
     element.dataset.expanded = String(projection.expanded);
-    content = <Collapse size="small" activeKey={projection.expanded ? ["process"] : []} destroyOnHidden={false}
+    content = <Collapse size="small" ghost activeKey={projection.expanded ? ["process"] : []} destroyOnHidden={false}
       classNames={{ header: "agent-run-process-summary" }} onChange={keys => {
         const control = element.querySelector<HTMLElement>(".agent-run-process-summary")!;
         preserveDisclosurePosition(control, () => { projection.expanded = keys.includes("process"); renderProjection(element, projection); });
@@ -366,10 +386,10 @@ function renderProjection(element: HTMLElement, projection: Projection): void {
     }))}/>;
   } else if (projection.kind === "agent-result" || projection.kind === "agent-receipt") {
     const receipt = projection.kind === "agent-receipt";
-    content = <Card size="small" title={<Typography.Text type={element.classList.contains("is-error") ? "danger" : undefined}>
-      {textOf(slots.get("agent-run-result-label"))}</Typography.Text>}>
+    content = <Flex vertical gap={6} className="agent-run-output"><Typography.Text className="agent-run-output-label" type={element.classList.contains("is-error") ? "danger" : "secondary"}>
+      {textOf(slots.get("agent-run-result-label"))}</Typography.Text>
       {receipt ? <>{businessBody(slots.get("agent-run-receipt-rows"))}{businessBody(slots.get("agent-run-receipt-body"))}</> : businessBody(slots.get("agent-run-result-content"))}
-    </Card>;
+    </Flex>;
   } else if (projection.kind === "question") {
     content = <Card size="small" title={textOf(slots.get("ask-user-title"))}><Flex vertical gap="small"><OwnedNode node={slots.get("ask-user-options")}/></Flex></Card>;
   } else if (projection.kind === "answer") {
@@ -423,12 +443,8 @@ export function presentAssistantReply(element: HTMLElement, key: string, preview
   }
   let root = replies.get(host);
   if (!root) { root = createRoot(host); replies.set(host, root); }
-  // Android TurnView：时间行在上，署名行（头像 + 名字 + 展开/收起）在下，正文与用量在头部之后。
+  // One reply metadata row keeps the body prominent; the source owner keeps its fold preference.
   flushSync(() => root!.render(<WandUiProvider><div className="assistant-reply-head">
-    {meta?.time ? <span className="chat-message-time">
-      {meta.duration ? <span className="chat-message-duration">耗时 {meta.duration}</span> : null}
-      <time dateTime={meta.dateTime || undefined}>{meta.time}</time>
-    </span> : null}
     <Button type="text" block className="assistant-reply-disclosure"
       data-expand-key={key} aria-expanded={expanded} aria-label={`${authorName} 的回复，${expanded ? "收起" : "展开"}`}
       onClick={event => preserveDisclosurePosition(event.currentTarget, () => {
@@ -443,6 +459,10 @@ export function presentAssistantReply(element: HTMLElement, key: string, preview
         <span className="assistant-author-name">{authorName}</span>
       </span>
       {!expanded && preview ? <span className="assistant-author-preview" title={preview}>{preview}</span> : <span className="assistant-author-space"/>}
+      {meta?.time ? <span className="chat-message-time" title={meta.duration ? `耗时 ${meta.duration}` : undefined}>
+        {meta.duration ? <span className="chat-message-duration">耗时 {meta.duration}</span> : null}
+        <time dateTime={meta.dateTime || undefined}>{meta.time}</time>
+      </span> : null}
       <span className="assistant-reply-action">{expanded ? "收起" : "展开"}</span>
       <DisclosureChevron expanded={expanded}/>
     </Button>
@@ -607,7 +627,8 @@ const CHAT_SURFACE_STYLES = `
     .inline-tool-image-loading { display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border:1px dashed var(--border-subtle); border-radius:var(--radius-md); color:var(--text-secondary); font-size:var(--font-size-2xs); }
     .inline-tool-image-spinner { width:12px; height:12px; border-radius:50%; border:2px solid color-mix(in srgb,currentColor 22%,transparent); border-top-color:currentColor; animation:wand-tool-icon-spin var(--motion-spin) linear infinite; }
     .inline-tool-image[data-image-state="ready"] .inline-tool-image-loading { display:none; }
-    .inline-tool-image-thumb { max-height:320px; object-fit:contain; object-position:left center; }
+    .inline-tool-image-thumb { max-width:100%; max-height:320px; object-fit:contain; object-position:left center; cursor:pointer; }
+    .inline-tool-image-thumb:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
     .chat-tool-card, .inline-terminal, .inline-diff, .agent-run { width:100%; min-width:0; }
     .chat-tool-trigger.ant-btn { height:40px; min-width:0; justify-content:flex-start; text-align:left; gap:8px; padding:6px 8px; }
     /* Android ToolCard 头部：34dp 状态图标槽 + 标题/摘要两行 + 箭头，去掉右侧状态字样。 */
@@ -637,14 +658,14 @@ const CHAT_SURFACE_STYLES = `
     .ant-btn.agent-run-summary, .ant-btn.agent-run-agent { height:auto; text-align:left; white-space:normal; }
     /* 头部（时间 + 署名）与正文都占满整行；正文不再压成窄阅读栏。 */
     .assistant-reply-host { font-size:var(--font-size-sm); width:100%; min-width:0; }
-    /* Android TurnView：时间行在上，署名行（头像 + 名字 + 展开/收起）在下，正文与用量在头部之后。 */
+    /* Metadata shares one compact row; full time/duration stays available on the clock. */
     .assistant-reply-head { display:flex; flex-direction:column; gap:6px; width:100%; min-width:0; }
     .chat-message-time { display:inline-flex; align-items:center; gap:8px; padding:2px 8px; font-family:var(--font-mono); font-size:var(--font-size-2xs); font-weight:var(--font-weight-medium); color:var(--text-secondary); font-variant-numeric:tabular-nums; }
     .chat-message.user .ant-bubble-header { display:flex; justify-content:flex-end; }
     .assistant-reply-disclosure.ant-btn { height:auto; min-height:44px; padding:5px 8px; border-radius:var(--radius-md); justify-content:flex-start; gap:8px; text-align:left; color:var(--text-primary); }
     /* 收起态用弱底色交代「这里折起来了」，展开态回到透明标题行（对齐 Android AssistantReplyHeader）。 */
     .chat-message.assistant-reply-collapsed .assistant-reply-disclosure.ant-btn { background:color-mix(in srgb,var(--bg-secondary) 58%,transparent); }
-    .assistant-author { display:inline-flex; align-items:center; gap:8px; flex:none; min-width:0; }
+    .assistant-author { display:inline-flex; align-items:center; gap:8px; flex:0 1 auto; min-width:0; }
     .assistant-author-avatar { display:grid; place-items:center; width:26px; height:26px; flex:none; }
     .assistant-author-avatar .ant-avatar { border-radius:50%; }
     .assistant-author-spark { display:grid; place-items:center; width:26px; height:26px; border-radius:50%; background:color-mix(in srgb,var(--accent) 14%,transparent); color:var(--accent); }
@@ -653,8 +674,39 @@ const CHAT_SURFACE_STYLES = `
     .assistant-author-space { flex:1; min-width:0; }
     .assistant-reply-action { flex:none; font-size:var(--font-size-2xs); font-weight:var(--font-weight-semibold); color:var(--text-primary); }
     /* Android UsageSummaryRow：回复尾部独立一行的小字用量（等宽、次要色、左对齐）。 */
-    .turn-usage-summary { display:inline-flex; align-items:center; flex-wrap:wrap; gap:6px 10px; padding:2px; font-family:var(--font-mono); font-size:var(--font-size-2xs); color:var(--text-muted); font-variant-numeric:tabular-nums; }
-    .turn-usage-icon { flex:none; width:13px; height:13px; color:var(--text-muted); }
+    .turn-usage-summary { display:inline-flex; align-items:center; flex-wrap:wrap; gap:4px 14px; padding:4px 0; font-size:var(--font-size-xs); color:var(--text-secondary); font-variant-numeric:tabular-nums; }
+    .turn-usage-icon { display:inline-flex; flex:none; width:13px; height:13px; color:var(--text-secondary); }
+    .turn-usage-value { display:inline-flex; align-items:baseline; gap:5px; white-space:nowrap; }
+    .turn-usage-number { font-family:var(--font-mono); color:var(--text-primary); }
+    .turn-usage-disclosure.ant-collapse { width:100%; }
+    .turn-usage-disclosure.ant-collapse > .ant-collapse-item > .ant-collapse-header { padding:4px 0; color:var(--text-secondary); font-size:var(--font-size-xs); }
+    .turn-usage-disclosure.ant-collapse > .ant-collapse-item > .ant-collapse-content > .ant-collapse-content-box { padding:0; }
+    @media (pointer:coarse) {
+      .turn-usage-disclosure.ant-collapse > .ant-collapse-item > .ant-collapse-header { min-height:44px; box-sizing:border-box; align-items:center; }
+      .chat-message-time { padding-inline:0; }
+    }
+    .agent-run-surface .ant-card-head { min-height:0; padding:0; }
+    .agent-run-surface .ant-card-head-title { padding:0; }
+    .agent-run-summary.ant-btn { padding:10px 12px; gap:8px; align-items:flex-start; border-radius:var(--radius-md); }
+    .agent-run-summary > .ant-badge { padding-block-start:3px; }
+    .agent-run-summary-copy { display:flex; flex-direction:column; gap:4px; flex:1; min-width:0; }
+    .agent-run-summary-line { display:flex; align-items:baseline; gap:8px; min-width:0; }
+    .agent-run-title { flex:1; min-width:0; overflow-wrap:anywhere; font-size:var(--font-size-xs); font-weight:500; }
+    .agent-run-status-label, .agent-run-agent-status { flex:none; font-size:var(--font-size-xs); }
+    .agent-run-context { display:flex; gap:8px; flex-wrap:wrap; font-size:var(--font-size-2xs); font-weight:400; color:var(--text-secondary); }
+    .agent-run-latest { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--font-size-xs); font-weight:400; }
+    .agent-run-summary .chat-disclosure-chevron { padding-block-start:3px; }
+    .agent-run-agent.ant-btn { padding:6px 8px; gap:8px; align-items:center; }
+    .agent-run-agent.is-selected { background:var(--bg-secondary); }
+    .agent-run-agent-copy { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; text-align:start; }
+    .agent-run-agent-name { font-size:var(--font-size-xs); overflow-wrap:anywhere; }
+    .agent-run-agent-type, .agent-run-output-label { font-size:var(--font-size-2xs); color:var(--text-secondary); }
+    .agent-run-detail-task { min-width:0; overflow-wrap:anywhere; font-size:var(--font-size-xs); }
+    .agent-run-output { min-width:0; overflow-wrap:anywhere; }
+    .agent-run-process .ant-collapse-header { padding:6px 0 !important; color:var(--text-secondary); font-size:var(--font-size-xs); }
+    .agent-run-process .ant-collapse-content-box { padding-inline:0 !important; }
+    .agent-run-receipt-row { display:flex; flex-wrap:wrap; gap:4px 8px; font-size:var(--font-size-xs); }
+    .agent-run-receipt-row code { overflow-wrap:anywhere; }
     /* 自己的发言：品牌色 13% 拼接底 + 品牌色 24% 描边 + 右下小圆角尾巴（对齐 Android UserBubble）。 */
     .chat-message.user .ant-bubble-content { padding:8px 13px; /* 15px/21px：与 Android UserBubble 同一档正文 */ border-radius:20px 20px 6px 20px; border:1px solid color-mix(in srgb,var(--accent) 24%,transparent); background:color-mix(in srgb,var(--accent) 13%,var(--bg-surface)); font-size:15px; line-height:21px; }
     .chat-resource-selection { font-size:var(--font-size-xs); overflow-wrap:anywhere; }

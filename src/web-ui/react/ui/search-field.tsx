@@ -39,7 +39,7 @@ export function WandSearchField({
   };
   return <WandInput className={classNames("wand-ui-search", className)}
       startSlot={<WandIcon name="search" size={16}/>}
-      clearable={Boolean(value)} onClear={clear}
+      clearable={Boolean(value)} clearLabel="清空搜索" onClear={clear}
       ref={ref}
       type="search"
       aria-label={label}

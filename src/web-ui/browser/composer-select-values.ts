@@ -26,6 +26,13 @@ export interface ComposerModelEntry {
 
 export const MODEL_DEFAULT_VALUE = "default";
 
+/** Keep a distinct model ID, but do not repeat the same name with different casing. */
+export function compactModelDisplayLabel(label: string): string {
+  const parts = label.split(/\s+·\s+/);
+  if (parts.length > 1 && parts[0].trim().toLocaleLowerCase() === parts[1].trim().toLocaleLowerCase()) parts.splice(1, 1);
+  return parts.join(" · ");
+}
+
 /** 「跟随 X 默认」这种没写明模型的文案不算名字，其余去掉「（X 默认）」尾巴后就是 CLI 报出来的默认模型。 */
 const GENERIC_DEFAULT_MODEL_LABEL = /^跟随.*默认$/;
 const TRAILING_DEFAULT_NOTE = /\s*[（(][^（()）]*默认[^（()）]*[）)]\s*$/;

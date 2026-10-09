@@ -1,7 +1,8 @@
 import { SidebarPopupOwnerContext, SidebarSurfacesContext, useSidebarPopupOwner, useSidebarPopupState } from "./sidebar-popup-owner";
 import { ConversationMorphIcon } from "../conversations/controls";
 import { SidebarRowMenu } from "./sidebar-row-menu";
-import { confirmSessionDelete } from "./session-delete-confirm";
+import { SidebarSessionMenu } from "./sidebar-session-menu";
+import { confirmSidebarAction, confirmClearSessions } from "./sidebar-menu-confirm";
 import { Badge, Checkbox, Flex, Menu, Skeleton, Typography } from "antd";
 import { WandUiBoundary } from "../theme";
 import * as React from "react";
@@ -55,7 +56,6 @@ import { findSessionTask } from "./session-task-lookup";
 import { subscribeTaskChanges } from "../task-changes";
 import { groupSessionsByArchive } from "./session-archive";
 import { draggedSessionId, isSessionDrag, startSessionDrag } from "./session-drag";
-import { SessionMoveButton } from "./session-move-button";
 import {
   EMPTY_SIDEBAR_MANAGE_SELECTION,
   collectManagedIds,
@@ -216,9 +216,6 @@ function TaskSessionItem({
   /** 未分组会话所在的目录组：给出「归纳为新任务」入口；任务内的会话不传。 */
   intoNewTask?: TaskDirectoryGroup;
 }) {
-  const [menuOpen, setMenuOpen] = useSidebarPopupState();
-  const [actionError, setActionError] = React.useState("");
-  const [busy, setBusy] = React.useState(false);
   const isArchived = session.archived === true;
   const label = sidebarSessionLabel(session, index, liveTitle);
   const rowTitle = session.teamStep
@@ -227,32 +224,6 @@ function TaskSessionItem({
   const state = sidebarSessionState(session);
   const glow = sessionGlowStatus(session);
   const activate = manageMode ? (onToggleSelect ?? onOpen) : onOpen;
-  const runArchive = (archived: boolean): void => {
-    if (busy || !onArchive) return;
-    setBusy(true);
-    setActionError("");
-    void onArchive(archived)
-      .then(() => setMenuOpen(false))
-      .catch((cause) => setActionError(describeError(cause, archived ? "无法归档会话。" : "无法恢复会话。")))
-      .finally(() => setBusy(false));
-  };
-  const runDelete = React.useCallback(async (): Promise<void> => {
-    if (busy) return;
-    // 确认层是新的交互面：先收起行菜单，别让它压在对话框上（窄屏会盖住按钮）。
-    setMenuOpen(false);
-    if (!await confirmSessionDelete(label)) return;
-    setBusy(true);
-    setActionError("");
-    try {
-      await onDelete();
-      setMenuOpen(false);
-    } catch (cause) {
-      setActionError(describeError(cause, "无法删除会话。"));
-    } finally {
-      setBusy(false);
-    }
-  }, [busy, label, onDelete]);
-
   const row = (
     <Flex align="center" gap={4} style={{ minWidth: 0, width: "100%" }} className={classNames(
       "workspace-session",
@@ -262,7 +233,7 @@ function TaskSessionItem({
       manageMode && selected && "selected",
     )}
       data-session-id={session.id}
-      draggable={!manageMode && !busy && !isArchived}
+      draggable={!manageMode && !isArchived}
       onDragStart={(event) => {
         event.stopPropagation();
         startSessionDrag(event.dataTransfer, session.id);
@@ -303,17 +274,9 @@ function TaskSessionItem({
       </WandNavigationLink>
     </Flex>
   );
-  return <SidebarRowMenu row={row} open={menuOpen} disabled={manageMode}
-        onOpenChange={(next) => { if (!busy) { setMenuOpen(next); setActionError(""); } }}
-        label={`会话 ${label} 的操作`} className="workspace-session-menu">
-        {!isArchived && <SessionMoveButton menuItem sessionId={session.id} taskId={session.workspaceTaskId}
-          intoNewTask={session.workspaceTaskId ? undefined : intoNewTask} onMoved={() => setMenuOpen(false)}/>}
-        <Menu selectable={false} items={[
-          ...(onArchive ? [{ key: "archive", disabled: busy, icon: <WandIcon name={isArchived ? "resume" : "archive"}/>, label: isArchived ? "恢复会话" : "归档会话" }] : []),
-          { key: "delete", disabled: busy, danger: true, icon: <WandIcon name="trash"/>, label: "删除会话…" },
-        ]} onClick={({ key }) => { void (key === "archive" ? runArchive(!isArchived) : runDelete()); }}/>
-        {actionError && <Typography.Paragraph type="danger" role="alert" style={{ maxWidth: 240 }}>{actionError}</Typography.Paragraph>}
-      </SidebarRowMenu>;
+  return <SidebarSessionMenu row={row} session={session} label={label} disabled={manageMode}
+    intoNewTask={session.workspaceTaskId ? undefined : intoNewTask}
+    onOpen={onOpen} onArchive={onArchive} onDelete={onDelete}/>;
 }
 
 // ── 任务行 ──
@@ -441,7 +404,6 @@ function TaskItem({
   const [teamOpen, setTeamOpen] = useSidebarExpansion(`team.${task.id}`, true);
   const [teamHistoryOpen, setTeamHistoryOpen] = useSidebarExpansion(`teamhistory.${task.id}`, true);
   const [dropTarget, setDropTarget] = React.useState(false);
-  const [confirming, setConfirming] = React.useState<"archive" | "delete" | false>(false);
   const [taskMenuOpen, setTaskMenuOpen] = useSidebarPopupState();
   const taskMenuTrigger = React.useRef<HTMLElement>(null);
   const [taskActionError, setTaskActionError] = React.useState("");
@@ -450,7 +412,7 @@ function TaskItem({
   const [renameValue, setRenameValue] = React.useState(task.name);
   React.useLayoutEffect(() => {
     if (wasRenaming.current && !renaming && document.activeElement === document.body) {
-      taskMenuTrigger.current?.focus({ preventScroll: true });
+      taskMenuTrigger.current?.querySelector<HTMLElement>(".workspace-task-main")?.focus({ preventScroll: true });
     }
     wasRenaming.current = renaming;
   }, [renaming]);
@@ -502,6 +464,29 @@ function TaskItem({
     } finally {
       setBusy(false);
     }
+  };
+
+  const runTaskAction = async (key: "archive" | "delete" | "clear" | "clear-history"): Promise<void> => {
+    if (busy) return;
+    setBusy(true); setTaskActionError(""); setTaskMenuOpen(false);
+    try {
+      const confirmed = key === "clear" || key === "clear-history"
+        ? await confirmClearSessions(key === "clear" ? totalSessionCount : teamSplit.history.length,
+          `任务「${task.name}」${key === "clear-history" ? "已结束的团队会话" : ""}`, taskMenuTrigger.current,
+          key === "clear-history" ? `将删除这一轮协作留下的 ${teamSplit.history.length} 个成员会话，无法撤销。你自己的会话和任务都会保留。` : undefined)
+        : await confirmSidebarAction({ title: `${key === "archive" ? "归档" : "删除"}「${task.name}」？`,
+          description: key === "archive" ? "任务从侧栏移到看板归档，保留会话和 Worktree，不停止正在执行的工作。"
+            : "将删除任务、所属会话并清理 Worktree，无法撤销。", action: key === "archive" ? "确认归档任务" : "确认删除任务",
+          danger: key === "delete", trigger: taskMenuTrigger.current });
+      if (!confirmed) return;
+      if (key === "archive") await onArchive();
+      else if (key === "delete") await onDelete();
+      else if (key === "clear") await onClearSessions();
+      else await onClearTeamHistory(teamSplit.history.map(session => session.id));
+    } catch (cause) {
+      setTaskActionError(describeError(cause, "无法处理任务，请重试。"));
+      if (taskMenuTrigger.current?.contains(document.activeElement)) setTaskMenuOpen(true);
+    } finally { setBusy(false); }
   };
 
   if (renaming) {
@@ -574,8 +559,9 @@ function TaskItem({
       }}>
       {dropTarget && <span className="workspace-task-drop-hint">移入此任务 · 运行目录不变</span>}
       <SidebarRowMenu open={taskMenuOpen} disabled={manageMode} rowRef={taskMenuTrigger}
-        onOpenChange={(next) => { if (!busy) { setTaskMenuOpen(next); setConfirming(false); setTaskActionError(""); } }}
-        label={`任务 ${task.name} 的更多操作`} className="workspace-task-menu"
+        onOpenChange={(next) => { if (!next || !busy) setTaskMenuOpen(next); }}
+        label={`任务 ${task.name} 的更多操作`} title={task.name} description={isolated ? "隔离任务 · 保留 Worktree 的归档" : undefined}
+        error={taskActionError} className="workspace-task-menu"
         row={<Flex align="center" gap={4} style={{ minWidth: 0 }} className={classNames(
         "workspace-task",
         isActive && "active",
@@ -607,46 +593,23 @@ function TaskItem({
         </span>
         <span className={`sidebar-head-activity tone-${taskAggregate.tone}`} title={taskAggregate.description}
           aria-label={taskAggregate.description}>{taskAggregate.label ? <Badge status={taskAggregate.tone === "warning" ? "warning" : taskAggregate.tone === "success" ? "success" : "processing"}/> : null}</span>
-      </Flex>}>
-        {confirming ? <Flex vertical gap="small" style={{ maxWidth: 260 }}>
-          <Typography.Text strong>{confirming === "archive" ? "归档" : "删除"}「{task.name}」？</Typography.Text>
-          <Typography.Text type="secondary">{confirming === "archive"
-            ? "任务从侧栏移到看板归档，保留会话和 Worktree，不停止正在执行的工作。"
-            : "将删除任务、所属会话并清理 Worktree，无法撤销。"}</Typography.Text>
-          <Flex justify="flex-end" gap="small">
-            <WandButton kind="ghost" size="small" disabled={busy} onClick={() => setConfirming(false)}>取消</WandButton>
-            <WandButton kind={confirming === "delete" ? "danger" : "secondary"} size="small" disabled={busy}
-              onClick={async () => {
-                if (busy) return;
-                setBusy(true); setTaskActionError("");
-                try {
-                  if (confirming === "archive") await onArchive(); else await onDelete();
-                  setTaskMenuOpen(false); setConfirming(false);
-                } catch (cause) {
-                  setTaskActionError(describeError(cause, confirming === "archive" ? "无法归档任务。" : "无法删除任务。"));
-                } finally { setBusy(false); }
-              }}>{busy ? "正在处理…" : confirming === "archive" ? "确认归档任务" : "确认删除任务"}</WandButton>
-          </Flex>
-        </Flex> : <>
-          <Menu selectable={false} aria-label={`任务 ${task.name} 的更多操作`}
-            items={[
-              { key: "new", icon: <WandIcon name="plus" size={13}/>, label: "新建会话" },
-              { key: "rename", icon: <WandIcon name="edit" size={13}/>, label: "重命名任务" },
-              { key: "archive", icon: <WandIcon name="archive" size={13}/>, label: isolated ? "归档任务（保留 Worktree）" : "归档任务" },
-              ...(isolated ? [{ key: "delete", danger: true, icon: <WandIcon name="trash" size={13}/>, label: "删除任务并清理 Worktree" }] : []),
-            ]}
-            onClick={({ key }) => {
-              if (key === "new") { setTaskMenuOpen(false); onRequestNewSession(); }
-              else if (key === "rename") { setTaskMenuOpen(false); setRenameValue(task.name); setRenameError(""); setRenaming(true); }
-              else if (key === "archive" || key === "delete") setConfirming(key);
-            }}/>
-          <ClearSessionsButton count={totalSessionCount} label={`任务「${task.name}」`} onClear={onClearSessions}/>
-          <ClearSessionsButton count={teamSplit.history.length} label={`任务「${task.name}」已结束的团队会话`}
-            detail={`将删除这一轮协作留下的 ${teamSplit.history.length} 个成员会话，你自己的会话和任务都会保留。`}
-            onClear={() => onClearTeamHistory(teamSplit.history.map((session) => session.id))}/>
-        </>}
-        {taskActionError && <Typography.Paragraph type="danger" role="alert">{taskActionError}</Typography.Paragraph>}
-      </SidebarRowMenu>
+      </Flex>} menu={{ items: [
+        { key: "open", disabled: busy, icon: <WandIcon name="task"/>, label: "打开任务" },
+        { key: "new", disabled: busy, icon: <WandIcon name="plus"/>, label: "新建会话" },
+        { key: "rename", disabled: busy, icon: <WandIcon name="edit"/>, label: "重命名任务" },
+        { key: "archive", disabled: busy, icon: <WandIcon name="archive"/>, label: isolated ? "归档任务（保留 Worktree）" : "归档任务" },
+        ...(totalSessionCount || isolated ? [{ key: "danger-divider", type: "divider" as const }] : []),
+        ...(totalSessionCount ? [{ key: "clear", disabled: busy, danger: true, icon: <WandIcon name="terminal"/>, label: `清空所列会话（${totalSessionCount}）` }] : []),
+        ...(teamSplit.history.length ? [{ key: "clear-history", disabled: busy, danger: true, icon: <WandIcon name="archive"/>, label: `清理团队历史（${teamSplit.history.length}）` }] : []),
+        ...(isolated ? [{ key: "delete", disabled: busy, danger: true, icon: <WandIcon name="trash"/>, label: "删除任务并清理 Worktree…" }] : []),
+      ], onClick: ({ key }) => {
+        if (busy) return;
+        if (key === "open") { setTaskMenuOpen(false); onOpen(); }
+        else if (key === "new") { setTaskMenuOpen(false); onRequestNewSession(); }
+        else if (key === "rename") { setTaskMenuOpen(false); setRenameValue(task.name); setRenameError(""); setRenaming(true); }
+        else if (key === "archive" || key === "delete" || key === "clear" || key === "clear-history") void runTaskAction(key);
+      } }}/>
+
       <SidebarDisclosure id={sessionsId} open={open}>
         {totalSessionCount === 0 && !manageMode && <WandButton kind="ghost" type="button" className="workspace-task-empty"
           onClick={onRequestNewSession}><WandIcon name="plus" size={12}/>添加会话，或拖入已有会话</WandButton>}
@@ -758,56 +721,6 @@ function TaskItem({
   );
 }
 
-function ClearSessionsButton({ count, label, onClear, detail }: {
-  count: number;
-  label: string;
-  onClear(): Promise<void>;
-  /** 覆盖确认文案的第二行；默认说明会连正在运行的会话一起删。 */
-  detail?: string;
-}) {
-  const [open, setOpen] = useSidebarPopupState();
-  const [busy, setBusy] = React.useState(false);
-  const popupOwner = useSidebarPopupOwner();
-  const unit = "会话";
-  if (count === 0) return null;
-  return (
-    <WandPopover
-      popupOwner={popupOwner}
-      open={open}
-      onOpenChange={(next) => { if (!busy) setOpen(next); }}
-      align="end"
-      ariaLabel={`清空${label}的${unit}`}
-      className="workspace-clear-popover"
-      trigger={(
-        <WandButton kind="ghost" type="button" role="menuitem"
-          className="workspace-task-menu-item danger" title={`清空${label}的 ${count} 个${unit}`}
-          aria-label={`清空${label}的 ${count} 个${unit}`}>
-          <WandIcon name="terminal" size={13}/>
-          <span>{detail ? "清理团队历史" : "清空所列会话"}（{count}）</span>
-        </WandButton>
-      )}
-    >
-      <strong>清空{label}的{unit}？</strong>
-      <p>{detail ?? `将删除当前列出的全部 ${count} 个会话，包括正在运行的会话。任务和工作区会保留。`}</p>
-      <Flex justify="flex-end" gap="small" className="workspace-clear-popover-actions">
-        <WandButton kind="ghost" size="small" disabled={busy} onClick={() => setOpen(false)}>取消</WandButton>
-        <WandButton kind="danger" size="small" disabled={busy} onClick={async () => {
-          if (busy) return;
-          setBusy(true);
-          try {
-            await onClear();
-            setOpen(false);
-          } catch (cause) {
-            toast(describeError(cause, "无法清空终端。"), "danger");
-          } finally {
-            setBusy(false);
-          }
-        }}>{busy ? "正在清空…" : "确认清空"}</WandButton>
-      </Flex>
-    </WandPopover>
-  );
-}
-
 // ── 目录分组 ──
 
 function TaskGroupSection({
@@ -854,15 +767,15 @@ function TaskGroupSection({
 }) {
   const [directoryOpen, setDirectoryOpen] = useSidebarExpansion(`project.${group.workspaceId}`, false, true);
   const [worktreeDialogOpen, setWorktreeDialogOpen] = React.useState(false);
-  const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
+  const [directoryActionError, setDirectoryActionError] = React.useState("");
   const [menuOpen, setMenuOpen] = useSidebarPopupState();
   const [renamingDirectory, setRenamingDirectory] = React.useState(false);
   const directoryMenuTrigger = React.useRef<HTMLElement>(null);
   const wasRenamingDirectory = React.useRef(false);
   React.useLayoutEffect(() => {
     if (wasRenamingDirectory.current && !renamingDirectory && document.activeElement === document.body) {
-      directoryMenuTrigger.current?.focus({ preventScroll: true });
+      directoryMenuTrigger.current?.querySelector<HTMLElement>(".workspace-row-main")?.focus({ preventScroll: true });
     }
     wasRenamingDirectory.current = renamingDirectory;
   }, [renamingDirectory]);
@@ -909,7 +822,7 @@ function TaskGroupSection({
   // 归档是软删除：终端不杀、worktree 不清理，只从侧栏隐藏并移到看板归档。
   const handleArchiveTask = async (task: TaskSummary) => {
     await httpWorkspacesRepository.archiveTask(task.id);
-    if (activeTaskId === task.id) runtime()?.closeWorkspace();
+    if (workspaceContextStore.getSnapshot().taskId === task.id) runtime()?.closeWorkspace();
     toast(`已归档任务「${task.name}」，可在任务看板的归档任务中恢复。`, "info");
     await onTasksChanged();
   };
@@ -917,26 +830,27 @@ function TaskGroupSection({
   const handleDeleteTask = async (task: TaskSummary) => {
     await httpWorkspacesRepository.deleteTask(task.id, true);
     await runtime()?.refreshSessions();
-    if (activeTaskId === task.id) runtime()?.closeWorkspace();
+    if (workspaceContextStore.getSnapshot().taskId === task.id) runtime()?.closeWorkspace();
     toast(`已删除任务「${task.name}」`, "info");
     await onTasksChanged();
   };
 
   const handleDeleteDirectory = async () => {
     if (!canDelete || deleting) return;
-    setDeleting(true);
+    setDeleting(true); setMenuOpen(false); setDirectoryActionError("");
     try {
+      if (!await confirmSidebarAction({ title: `删除目录「${group.workspaceName}」？`,
+        description: "将删除此目录及其全部任务、终端和任务 Worktree，无法撤销。",
+        action: "确认删除目录", trigger: directoryMenuTrigger.current })) return;
       await httpWorkspacesRepository.remove(group.workspaceId, true);
       await runtime()?.refreshSessions();
-      if (activeWorkspaceId === group.workspaceId) runtime()?.closeWorkspace();
+      if (workspaceContextStore.getSnapshot().workspaceId === group.workspaceId) runtime()?.closeWorkspace();
       toast(`已删除目录「${group.workspaceName}」`, "info");
       await onTasksChanged();
     } catch (cause) {
-      toast(describeError(cause, "无法删除目录。"), "danger");
-    } finally {
-      setDeleting(false);
-      setConfirmingDelete(false);
-    }
+      setDirectoryActionError(describeError(cause, "无法删除目录。"));
+      if (directoryMenuTrigger.current?.contains(document.activeElement)) setMenuOpen(true);
+    } finally { setDeleting(false); }
   };
 
   const handleStartMergeAgent = async (brief: WorkspaceMergeAgentBrief) => {
@@ -973,6 +887,21 @@ function TaskGroupSection({
 
   const taskCount = group.tasks.length;
   const groupSelected = manageMode && selection ? isManagedGroupSelected(selection, group) : false;
+  const clearSessionIds = [...new Set([...group.tasks.flatMap(task => task.sessions.map(session => session.id)),
+    ...group.standaloneSessions.map(session => session.id)])];
+  const handleClearDirectory = async (): Promise<void> => {
+    if (deleting) return;
+    setDeleting(true); setMenuOpen(false); setDirectoryActionError("");
+    try {
+      if (!await confirmClearSessions(clearSessionIds.length, `目录「${group.workspaceName}」`, directoryMenuTrigger.current)) return;
+      const context = workspaceContextStore.getSnapshot();
+      const activeTask = group.tasks.find(task => task.id === context.taskId) ?? null;
+      await handleDeleteSessions(clearSessionIds, activeTask, `已清空目录「${group.workspaceName}」的终端`);
+    } catch (cause) {
+      setDirectoryActionError(describeError(cause, "无法清空终端。"));
+      if (directoryMenuTrigger.current?.contains(document.activeElement)) setMenuOpen(true);
+    } finally { setDeleting(false); }
+  };
 
   return (
     <section
@@ -1018,8 +947,9 @@ function TaskGroupSection({
         </form>
       ) : null}
       {!preview && <SidebarRowMenu open={menuOpen} disabled={manageMode || group.global || renamingDirectory} rowRef={directoryMenuTrigger}
-        onOpenChange={(next) => { if (!deleting) { setMenuOpen(next); setConfirmingDelete(false); } }}
-        label={`目录 ${group.workspaceName} 的更多操作`} className="workspace-directory-menu"
+        onOpenChange={(next) => { if (!next || !deleting) setMenuOpen(next); }}
+        label={`目录 ${group.workspaceName} 的更多操作`} title={group.workspaceName} description={shortenWorkspacePath(group.workspaceCwd)}
+        error={directoryActionError} className="workspace-directory-menu"
         row={<Flex align="center" gap={4} style={{ minWidth: 0 }} className={classNames("workspace-row", renamingDirectory && "is-renaming")} hidden={renamingDirectory}>
         <WandNavigationLink style={{ flex: 1, minWidth: 0, height: "auto", whiteSpace: "normal", justifyContent: "flex-start", textAlign: "start", padding: 6 }}
           className="workspace-row-main"
@@ -1049,70 +979,26 @@ function TaskGroupSection({
           <span className={`sidebar-head-activity tone-${groupActivity.tone}`} title={groupActivity.description}
             aria-label={groupActivity.description}>{groupActivity.label ? <Badge status={groupActivity.tone === "warning" ? "warning" : groupActivity.tone === "success" ? "success" : "processing"}/> : null}</span>
         </WandNavigationLink>
-      </Flex>}>
-          <div className="workspace-menu-context" title={group.workspaceCwd}>{shortenWorkspacePath(group.workspaceCwd)}</div>
-          <Menu selectable={false} aria-label={`目录 ${group.workspaceName} 的更多操作`}
-            items={[
-              { key: "new", icon: <WandIcon name="plus" size={13}/>, label: "在此新建会话" },
-              ...(canRenameDirectory ? [{ key: "rename", icon: <WandIcon name="edit" size={13}/>, label: "重命名目录" }] : []),
-              ...(group.tasks.some((task) => task.worktree) ? [{ key: "merge", icon: <WandIcon name="merge" size={13}/>, label: "查看并合并 Worktree" }] : []),
-              ...(canDelete && !confirmingDelete ? [{ key: "delete", danger: true, disabled: deleting, icon: <WandIcon name="trash" size={13}/>, label: "删除目录" }] : []),
-            ]}
-            onClick={({ key, domEvent }) => {
-              domEvent.stopPropagation();
-              if (key === "new") {
-                setMenuOpen(false); onOpenDialog?.();
-                newSessionController.open({ initialCwd: group.workspaceCwd,
-                  ...(group.synthetic || group.global ? {} : { workspaceId: group.workspaceId }) });
-              } else if (key === "rename") {
-                setMenuOpen(false); setDirectoryNameValue(group.workspaceName); setDirectoryNameError(""); setRenamingDirectory(true);
-              } else if (key === "merge") { setMenuOpen(false); setWorktreeDialogOpen(true); }
-              else if (key === "delete") setConfirmingDelete(true);
-            }}/>
-          <ClearSessionsButton
-            count={new Set([...group.tasks.flatMap((task) => task.sessions.map((session) => session.id)),
-              ...group.standaloneSessions.map((session) => session.id)]).size}
-            label={`目录「${group.workspaceName}」`}
-            onClear={async () => {
-              const context = workspaceContextStore.getSnapshot();
-              const activeTask = group.tasks.find((task) => task.id === context.taskId) ?? null;
-              const ids = [...group.tasks.flatMap((task) => task.sessions.map((session) => session.id)),
-                ...group.standaloneSessions.map((session) => session.id)];
-              await handleDeleteSessions(ids, activeTask, `已清空目录「${group.workspaceName}」的终端`);
-            }}
-          />
-          {canDelete && confirmingDelete ? (
-            <Flex vertical gap="small" className="workspace-menu-confirm">
-              <p>删除「{group.workspaceName}」及其全部任务、终端和任务 Worktree？</p>
-              <WandButton kind="ghost"
-                type="button"
-                className="workspace-task-menu-item danger"
-                title="确认删除目录及其任务"
-                aria-label={`确认删除目录 ${group.workspaceName}`}
-                disabled={deleting}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void handleDeleteDirectory();
-                }}
-              >
-                <WandIcon name="trash" size={13}/><span>{deleting ? "正在删除…" : "确认删除目录"}</span>
-              </WandButton>
-              <WandButton kind="ghost"
-                type="button"
-                className="workspace-task-menu-item"
-                title="取消删除"
-                aria-label="取消删除目录"
-                disabled={deleting}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setConfirmingDelete(false);
-                }}
-              >
-                <WandIcon name="close" size={13}/><span>取消</span>
-              </WandButton>
-            </Flex>
-          ) : null}
-      </SidebarRowMenu>}
+      </Flex>} menu={{ items: [
+        { key: "new", disabled: deleting, icon: <WandIcon name="plus"/>, label: "在此新建会话" },
+        ...(canRenameDirectory ? [{ key: "rename", disabled: deleting, icon: <WandIcon name="edit"/>, label: "重命名目录" }] : []),
+        ...(group.tasks.some(task => task.worktree) ? [{ key: "merge", disabled: deleting, icon: <WandIcon name="merge"/>, label: "查看并合并 Worktree" }] : []),
+        ...(clearSessionIds.length || canDelete ? [{ key: "danger-divider", type: "divider" as const }] : []),
+        ...(clearSessionIds.length ? [{ key: "clear", disabled: deleting, danger: true, icon: <WandIcon name="terminal"/>, label: `清空所列会话（${clearSessionIds.length}）` }] : []),
+        ...(canDelete ? [{ key: "delete", disabled: deleting, danger: true, icon: <WandIcon name="trash"/>, label: "删除目录…" }] : []),
+      ], onClick: ({ key, domEvent }) => {
+        domEvent.stopPropagation();
+        if (deleting) return;
+        if (key === "new") {
+          setMenuOpen(false); onOpenDialog?.();
+          newSessionController.open({ initialCwd: group.workspaceCwd,
+            ...(group.synthetic || group.global ? {} : { workspaceId: group.workspaceId }) });
+        } else if (key === "rename") {
+          setMenuOpen(false); setDirectoryNameValue(group.workspaceName); setDirectoryNameError(""); setRenamingDirectory(true);
+        } else if (key === "merge") { setMenuOpen(false); setWorktreeDialogOpen(true); }
+        else if (key === "delete") void handleDeleteDirectory();
+        else if (key === "clear") void handleClearDirectory();
+      } }}/>}
       <SidebarDisclosure id={tasksId} open={open}>
         <Flex vertical gap={4} style={{ paddingInlineStart: 8 }} className="workspace-tasks">
           {taskCount === 0 && group.standaloneSessions.length === 0 && !group.synthetic && (

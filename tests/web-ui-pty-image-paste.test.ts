@@ -182,7 +182,7 @@ test("terminal view keeps the attachment button and one waiting batch per pick",
   // Ant surfaces keep the attachment controls and native input in one grid.
   // 桌面正文占弹性轨道、两个控件组在下一行；窄屏把控件组收进第一列，两条轨道不变。
   assert.match(css, /\.composer-main-row \{ display: grid;[^}]*grid-template-columns: minmax\(0, 1fr\) auto/);
-  assert.match(css, /\.composer-main-row \{ grid-template-columns: auto minmax\(0, 1fr\)/);
+  assert.match(css, /\.composer-main-row \{ grid-template-columns: minmax\(0, 1fr\)/);
   assert.doesNotMatch(css, /\.input-composer\.is-terminal-interactive \.composer-actions-left[^{}]*\{[^}]*display: none/);
   assert.match(css, /\.input-composer\.is-terminal-interactive :is\([^)]*\.composer-inline-config/);
   assert.match(css, /\.composer-plus-popover \{ position: absolute; bottom: calc\(100% - 8px\)/);
