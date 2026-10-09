@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { confirmSidebarLogout } from "../src/web-ui/react/shell/shell-sidebar.js";
+import { taskBoardController } from "../src/web-ui/react/issues/task-board-controller.js";
 import { overlayStore } from "../src/web-ui/react/overlay-controller.js";
 
 import {
@@ -501,3 +502,16 @@ function localeFormattableSources(dir: string, into: string[] = []): string[] {
   }
   return into;
 }
+
+
+test("team and employee management borrows the list space without changing the sidebar preference", () => {
+  const snapshot = fixture({ layout: { ...fixture().layout, sidebarDrawer: false, sidebarCollapsed: true } });
+  try {
+    taskBoardController.open("", "", "teams");
+    const html = renderSidebar(snapshot);
+    assert.match(html, /context-rail/);
+    assert.match(html, /sidebar-list-panel[^>]*hidden/);
+    assert.match(html, /width:56px/);
+  } finally { taskBoardController.close(); }
+  assert.match(renderSidebar(snapshot), /sidebar-refined[^\"]*collapsed/);
+});
