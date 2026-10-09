@@ -29,6 +29,8 @@ import {
 import { isThinkingEffort } from "./structured-provider-common.js";
 import { DEFAULT_EMPLOYEE_KEY } from "./ai-team-types.js";
 import { defaultEmployeeDefinition, legacyPtyRoleIdentity } from "./default-employee.js";
+import { DECISION_EXPERT_KEY } from "./decision-expert-identity.js";
+import { decisionExpertDefinition } from "./decision-expert-employee.js";
 import { normalizeEmployeeKnowledge } from "./employee-knowledge-content.js";
 import { EMPLOYEE_KNOWLEDGE_MAX_ENTRIES, type EmployeeKnowledgeEntry } from "./employee-knowledge-types.js";
 import {
@@ -3266,6 +3268,18 @@ export class WandStorage {
     ) {
       this.saveSiliconEmployee(locked);
       return locked;
+    }
+    return existing;
+  }
+
+  /** Stable built-in decision employee; seed once and retain the user's ordered call chain. */
+  ensureDecisionExpertEmployee(): SiliconEmployee {
+    const existing = this.getSystemSiliconEmployee(DECISION_EXPERT_KEY);
+    const definition = decisionExpertDefinition(new Date().toISOString(), existing);
+    if (!existing || existing.name !== definition.name || existing.duty !== definition.duty || existing.prompt !== definition.prompt
+      || existing.avatar !== definition.avatar || existing.archivedAt || !existing.agents.length) {
+      this.saveSiliconEmployee(definition);
+      return definition;
     }
     return existing;
   }
