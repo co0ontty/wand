@@ -1538,7 +1538,7 @@ function SidebarWorkspacesPanel({
             </Flex>
           ) : directoryId === undefined ? (
             <>
-            <Flex vertical gap="small" style={{ paddingBlock: 8 }} className="sidebar-presentation-tools">
+            <Flex vertical gap="small" style={{ paddingTop: 4, paddingBottom: 8 }} className="sidebar-presentation-tools">
             <Flex align="center" gap={4} style={{ minWidth: 0 }} className={classNames("sidebar-list-heading", searchVisible && "is-searching")}>
               <div className="sidebar-search-slot">
               <Typography.Text strong className="sidebar-list-title" aria-hidden={searchVisible || undefined}>执行会话</Typography.Text>
@@ -1548,6 +1548,9 @@ function SidebarWorkspacesPanel({
                   className="sidebar-search-input"
                   type="search"
                   value={searchQuery}
+                  clearable={Boolean(searchQuery)}
+                  clearLabel="清空工作区搜索"
+                  onClear={() => { onSearchChange?.(""); searchInputRef.current?.focus({ preventScroll: true }); }}
                   placeholder={view === "recent" ? "搜索最近会话" : "搜索工作区、任务或会话"}
                   aria-label="搜索工作区、任务或会话"
                   tabIndex={searchVisible ? 0 : -1}
