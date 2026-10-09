@@ -15,7 +15,18 @@ export function popupOffset(side: PopupSide, distance: number): [number, number]
   return side === "left" ? [-distance, 0] : side === "right" ? [distance, 0] : [0, side === "top" ? -distance : distance];
 }
 
-const dismissStack: Array<() => void> = [];
+export type PopupDismissPriority = "normal" | "blocking";
+interface PopupDismissLease { dismiss(): void; priority: PopupDismissPriority }
+const dismissStack: PopupDismissLease[] = [];
+
+function topDismissLease(): PopupDismissLease | undefined {
+  // Service recovery owns input even if an ordinary dialog mounts afterwards.
+  // Ordinary menus/dialogs retain registration order; visual z-index is not a dismissal policy.
+  for (let index = dismissStack.length - 1; index >= 0; index -= 1) {
+    if (dismissStack[index]?.priority === "blocking") return dismissStack[index];
+  }
+  return dismissStack.at(-1);
+}
 
 /** Page navigation yields Escape to an open Portal surface. */
 export function hasOpenPopupSurface(): boolean {
@@ -26,20 +37,21 @@ function dismissTopPopup(event: KeyboardEvent): void {
   if (event.key !== "Escape" || event.isComposing || !dismissStack.length) return;
   event.preventDefault();
   event.stopImmediatePropagation();
-  dismissStack.at(-1)?.();
+  topDismissLease()?.dismiss();
 }
 
-function dismissTopOnHistory(): void { dismissStack.at(-1)?.(); }
+function dismissTopOnHistory(): void { topDismissLease()?.dismiss(); }
 
 /** Escape/back closes only the top popup; the enclosing dialog keeps its focus lease. */
-export function registerPopupDismiss(dismiss: () => void): () => void {
+export function registerPopupDismiss(dismiss: () => void, priority: PopupDismissPriority = "normal"): () => void {
   if (!dismissStack.length) {
     document.addEventListener("keydown", dismissTopPopup, true);
     window.addEventListener("popstate", dismissTopOnHistory);
   }
-  dismissStack.push(dismiss);
+  const lease = { dismiss, priority };
+  dismissStack.push(lease);
   return () => {
-    const index = dismissStack.indexOf(dismiss);
+    const index = dismissStack.indexOf(lease);
     if (index >= 0) dismissStack.splice(index, 1);
     if (!dismissStack.length) {
       document.removeEventListener("keydown", dismissTopPopup, true);
@@ -69,8 +81,8 @@ export function isWandPopupOwnedBy(target: EventTarget | null, owner: string): b
 }
 
 /** Updating a callback must not reorder an already open popup's dismissal lease. */
-export function usePopupDismiss(open: boolean, dismiss: () => void): void {
+export function usePopupDismiss(open: boolean, dismiss: () => void, priority: PopupDismissPriority = "normal"): void {
   const latest = useRef(dismiss);
   latest.current = dismiss;
-  useEffect(() => open ? registerPopupDismiss(() => latest.current()) : undefined, [open]);
+  useEffect(() => open ? registerPopupDismiss(() => latest.current(), priority) : undefined, [open, priority]);
 }

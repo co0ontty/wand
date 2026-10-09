@@ -7,7 +7,7 @@ import { findDialogFocusTarget, watchDialogAutofocus } from "./dialog-focus";
 import { handleDialogOpenChange } from "./dialog-open-change";
 import { WandIcon, type WandIconName } from "./icons";
 import { usePortalContainer } from "./portal-context";
-import { usePopupDismiss } from "./popup-lifecycle";
+import { usePopupDismiss, type PopupDismissPriority } from "./popup-lifecycle";
 import { WandUiBoundary } from "../theme";
 
 export type WandDialogTone = "info" | "warning" | "danger" | "success" | "question";
@@ -34,6 +34,7 @@ export interface WandDialogProps<T> {
   actions: ReadonlyArray<WandDialogAction<T>>;
   input?: WandDialogInput;
   dismissable?: boolean;
+  focusTriggerAfterClose?: boolean;
   onAction(value: T, inputValue?: string): void;
   onDismiss(): void;
 }
@@ -57,6 +58,11 @@ export interface WandDialogSurfaceProps {
   testId?: string;
   dismissable?: boolean;
   onOpenChange(open: boolean): void;
+  /** Route Escape/back through the feature's existing dirty/saving guard. */
+  onEscape?(): void;
+  /** Explicit input-blocking state, independent of visual stacking. */
+  dismissalPriority?: PopupDismissPriority;
+  focusTriggerAfterClose?: boolean;
   /** Controllers with an explicit return-focus lease settle it after library dismissal. */
   onAfterClose?(): void;
 }
@@ -71,13 +77,13 @@ export function WandDialogSurface({ open, title, description, children, width = 
   className = "wand-ui-dialog-content", overlayClassName = "wand-ui-dialog-overlay",
   titleClassName = "wand-ui-dialog-title", descriptionClassName = "wand-ui-dialog-description",
   headerClassName = "wand-ui-dialog-heading", closeLabel = "关闭", closeContent = <WandIcon name="close" size={18}/>,
-  testId, showClose = true, dismissable = true, onOpenChange, onAfterClose }: WandDialogSurfaceProps) {
+  testId, showClose = true, dismissable = true, onOpenChange, onEscape, dismissalPriority = "normal", focusTriggerAfterClose, onAfterClose }: WandDialogSurfaceProps) {
   const portal = usePortalContainer();
   const descriptionId = React.useId();
   const contentRef = useRef<HTMLDivElement>(null);
   const openedAt = useRef(0);
   const stopDeferredFocus = useRef<(() => void) | null>(null);
-  usePopupDismiss(open, () => { if (dismissable) onOpenChange(false); });
+  usePopupDismiss(open, () => { if (onEscape) onEscape(); else if (dismissable) onOpenChange(false); }, dismissalPriority);
   useEffect(() => {
     if (open) openedAt.current = performance.now();
     return () => { stopDeferredFocus.current?.(); stopDeferredFocus.current = null; };
@@ -92,7 +98,7 @@ export function WandDialogSurface({ open, title, description, children, width = 
   };
   return <WandUiBoundary><Modal open={open} centered footer={null} destroyOnHidden
     getContainer={portal ?? undefined} aria-describedby={description ? descriptionId : undefined} keyboard={false} closable={false}
-    mask={{ closable: dismissable }} width={width} styles={styles} zIndex={zIndex} focusable={{ focusTriggerAfterClose: !onAfterClose }}
+    mask={{ closable: dismissable }} width={width} styles={styles} zIndex={zIndex} focusable={{ focusTriggerAfterClose: focusTriggerAfterClose ?? !onAfterClose }}
     afterClose={onAfterClose}
     classNames={{ container: className, mask: overlayClassName }}
     onCancel={event => {
@@ -115,7 +121,7 @@ export function WandDialogSurface({ open, title, description, children, width = 
 }
 
 export function WandDialog<T>({ open, title, description, tone = "info", icon, actions, input,
-  dismissable = true, onAction, onDismiss }: WandDialogProps<T>) {
+  dismissable = true, focusTriggerAfterClose, onAction, onDismiss }: WandDialogProps<T>) {
   const inputRef = useRef<HTMLInputElement>(null);
   const composing = useRef(false);
   const [inputValue, setInputValue] = useState(input?.value ?? "");
@@ -132,6 +138,7 @@ export function WandDialog<T>({ open, title, description, tone = "info", icon, a
   const resolvedIcon = icon == null || ["", "i", "!", "✓", "?"].includes(String(icon))
     ? <WandIcon name={defaultIcons[tone]} size={18}/> : icon;
   return <WandDialogSurface open={open} title={title} description={description} dismissable={dismissable} showClose={false}
+    focusTriggerAfterClose={focusTriggerAfterClose}
     onOpenChange={shown => { if (!shown) onDismiss(); }}>
     <div aria-hidden="true" className="wand-ui-dialog-icon">{resolvedIcon}</div>
     {input && <WandInput ref={inputRef} data-wand-autofocus="true" aria-label={input.label ?? title}

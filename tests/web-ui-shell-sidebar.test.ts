@@ -29,8 +29,9 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 test("sidebar logout waits for explicit confirmation and leaves cancellation in place", async () => {
   let exits = 0;
+  let cancellations = 0;
   for (const result of [{ dismissed: true }, { dismissed: false, action: false }, { dismissed: false, action: true }] as const) {
-    const pending = confirmSidebarLogout(() => { exits++; });
+    const pending = confirmSidebarLogout(() => { exits++; }, () => { cancellations++; });
     const dialog = overlayStore.getSnapshot().activeDialog;
     assert.ok(dialog);
     assert.equal(exits, 0, "opening the dialog must not log out");
@@ -39,6 +40,7 @@ test("sidebar logout waits for explicit confirmation and leaves cancellation in 
     overlayStore.completeDialog(dialog.id, result);
     await pending;
     assert.equal(exits, !result.dismissed && result.action ? 1 : 0);
+    assert.equal(cancellations, !result.dismissed && result.action ? 2 : result.dismissed ? 1 : 2);
   }
 });
 
@@ -128,8 +130,8 @@ function fixture(overrides: Partial<UiSnapshotData> = {}): UiSnapshotData {
       sidebarDrawer: true,
       sidebarAnchored: true,
       sessionsBackdropVisible: true,
-      filePanelOpen: true,
-      filePanelBackdropVisible: true,
+      filePanelOpen: false,
+      filePanelBackdropVisible: false,
       topbarMoreOpen: false,
       currentView: "terminal",
     },
@@ -233,7 +235,6 @@ test("ShellSidebar SSR preserves native ids, key classes, groups, and action con
     "file-panel-toggle-btn",
     "settings-button",
     "back-to-native-button",
-    "sidebar-more-btn",
   ];
 
   for (const id of requiredIds) {
@@ -252,7 +253,7 @@ test("ShellSidebar SSR preserves native ids, key classes, groups, and action con
   assert.match(html, /<aside(?=[^>]*id="sessions-drawer")(?=[^>]*class="[^"]*sidebar sidebar-refined open[^"]*")/);
   assert.match(html, /id="sessions-drawer-backdrop" class="drawer-backdrop open"/);
   // Ant Button reports the selected file action through its accessible pressed state.
-  assert.match(html, /id="file-panel-toggle-btn"[^>]*aria-pressed="true"/);
+  assert.match(html, /id="file-panel-toggle-btn"[^>]*aria-pressed="false"/);
   assert.match(html, /ant-layout-sider/);
   // 自动化会话不再占用侧栏底部；原生历史仍可达。
   assert.doesNotMatch(html, /class="automation-session-group"/);
@@ -391,12 +392,30 @@ test("mobile drawer ignores the desktop compact preference", () => {
   assert.doesNotMatch(html, /aria-label="新建项目"/);
 });
 
-test("ShellSidebar keeps secondary tools in the closed overflow menu", () => {
+test("a desktop file panel borrows the list space without changing the compact preference", () => {
+  const base = fixture();
+  const open = fixture({
+    viewport: { ...base.viewport, mobile: false },
+    layout: { ...base.layout, sidebarDrawer: false, sidebarCollapsed: true, filePanelOpen: true },
+  });
+  const html = renderSidebar(open);
+  assert.match(html, /sidebar-refined[^\"]*context-rail/);
+  assert.match(html, /width:56px/);
+  assert.match(html, /sidebar-list-panel[^>]*hidden=\"\" inert=\"\"/);
+  assert.equal(open.layout.sidebarCollapsed, true);
+  const restored = renderSidebar(fixture({ ...open, layout: { ...open.layout, filePanelOpen: false } }));
+  assert.match(restored, /sidebar-refined[^\"]*collapsed/);
+  assert.doesNotMatch(restored, /context-rail/);
+});
+
+test("ShellSidebar removes redundant tools and retains a closed account menu", () => {
   const html = renderSidebar(fixture());
   assert.match(html, /class="sidebar-brand-mark"/);
   assert.match(html, /id="task-board-button"/);
   assert.match(html, /aria-label="任务看板"/);
-  assert.match(html, /id="sidebar-more-btn"/);
+  assert.match(html, /aria-label="账户与设置"/);
+  const source = readFileSync(new URL("../src/web-ui/react/shell/shell-sidebar.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /missions-button|github-issues-button|sidebar-home-btn|sidebar-refresh-btn/);
   for (const id of ["missions-button", "github-issues-button", "logout-button"]) {
     assert.doesNotMatch(html, new RegExp(`id="${id}"`));
   }

@@ -84,7 +84,7 @@ test("Ant Design task pages preserve date-only, portals, draft refs and owned fo
       let data = url.includes("provider-usage")?{}:url.includes("silicon-employees")?{employees:window.tasks.employees}:url.includes("ai-teams")?window.tasks.teams:url.includes("workspaces")?[{id:"w-audit",name:"Audit project",cwd:"/tmp",kind:"project"}]:url.includes("wand-milestones")?{milestones}:url.includes("team-runs")?[]:url.includes("models")?{models:[{id:"default",label:"Default"},{id:"alpha",label:"Alpha"}]}:{};
       return new Response(JSON.stringify(data), {status:200,headers:{"content-type":"application/json"}});
     };
-    Object.assign(taskBoardRepository,{list:async()=>window.tasks.boardTasks??[task,{...task,id:"old",identifier:"TASK-2",title:"Archived",status:"archived"}],workspaces:async()=>[{id:"w1",name:"Project",cwd:"/tmp"}],models:async()=>({models:[{id:"default",label:"Default"}]}),agentDefaults:async()=>agent,saveAgentDefaults:async()=>{},create:async input=>new Promise(resolve=>{window.tasks.createReceipt=()=>resolve({...task,...input,id:"new"})})});
+    Object.assign(taskBoardRepository,{list:async()=>window.tasks.boardTasks??[task,{...task,id:"old",identifier:"TASK-2",title:"Archived",status:"archived"}],workspaces:async()=>[{id:"w1",name:"Project",cwd:"/tmp"}],models:async()=>({models:[{id:"default",label:"Default"}]}),agentDefaults:async()=>window.tasks.agentDefaults??agent,saveAgentDefaults:async()=>{throw Error("Implicit defaults mutation")},create:async input=>new Promise(resolve=>{window.tasks.createdInputs??=[];window.tasks.createdInputs.push(input);window.tasks.createReceipt=()=>{if(input.rememberAgentDefaults)window.tasks.agentDefaults=input.agent;resolve({...task,...input,id:"new"})}})});
     Object.assign(issuesRepository,{list:async()=>[{number:1,title:"Library migration",state:"open",labels:[{name:"UI"}]}],bindings:async()=>({bindings:[]}),create:async()=>new Promise(resolve=>{window.tasks.issueReceipt=()=>resolve({number:2})})});
     configureNewSessionRuntime({onOpen:noop,onClose:noop,getContext:()=>({effectiveCwd:"/tmp",selectedModels:{}}),rememberModel:noop,prepareCreate:async()=>({}),completeCreate:async()=>{}});
     const newRepo={load:async()=>({config:{defaultProvider:"claude",defaultSessionKind:"structured",defaultMode:"default",defaultCwd:"/tmp"},recentPaths:[{path:"/tmp",name:"tmp"}]}),suggestPaths:async()=>[{path:"/tmp/project",name:"project"}],savePreferences:async()=>{},create:async()=>{throw Error("Local rejection keeps inputs");}};
@@ -331,6 +331,13 @@ test("Ant Design task pages preserve date-only, portals, draft refs and owned fo
       assert.equal(await evaluate("!!document.querySelector('[data-testid=task-controls]')"), true, `${mode}: milestone Escape retains parent`);
       await screenshot(`${mode}-controls`);
       await evaluate("tasks.show('board')"); await wait("!!document.querySelector('[data-task-id=t1]')"); await settle();
+      const countBefore = await evaluate("document.querySelector('.task-board-result-summary').textContent");
+      assert.match(countBefore, /活动 1 · 归档 1/);
+      await click('.task-board-archive-header');
+      await wait("document.querySelector('.task-board-archive-header').getAttribute('aria-expanded')==='true'");
+      assert.equal(await evaluate("document.querySelector('.task-board-result-summary').textContent"), countBefore, `${mode}: archive disclosure preserves counts`);
+      await click('.task-board-archive-header');
+      await wait("document.querySelector('.task-board-archive-header').getAttribute('aria-expanded')==='false'");
       assert.equal(await evaluate("!!document.querySelector('.task-board-archive-hint')"), false, `${mode}: empty columns do not contain an archive drop hint`);
       await evaluate("document.querySelector('[data-task-id=t1]').dispatchEvent(new DragEvent('dragstart',{bubbles:true,dataTransfer:new DataTransfer()}))");
       await wait("!!document.querySelector('.task-board-archive-zone')");
@@ -408,15 +415,64 @@ test("Ant Design task pages preserve date-only, portals, draft refs and owned fo
       await wait("!document.body.innerText.includes('清除筛选')");
       await wait("!!document.querySelector('[data-task-id=t1]')");
       await click('[aria-label="新建任务"]'); await wait("!!document.querySelector('.task-board-create-title-input')");
+      assert.equal(await evaluate("document.querySelector('[aria-label=\"同时设为以后默认\"]').getAttribute('aria-checked')"), "false", `${mode}: future defaults opt-in starts unchecked`);
+      const formGrid = await evaluate("(()=>{const n=document.querySelector('.task-board-create-properties');return{columns:getComputedStyle(n).gridTemplateColumns.split(' ').length,overflow:n.scrollWidth>n.clientWidth}})()");
+      assert.equal(formGrid.columns, mode === 'mobile' ? 1 : 2);
+      assert.equal(formGrid.overflow, false);
+      // Changing and cancelling execution settings must leave later defaults untouched.
+      await click('[aria-label="运行模式"]');
+      await click('[data-wand-popup-owner="运行模式"] [role=option][title="完全访问"]');
+      await wait("!!document.querySelector('.task-board-create-permission-note')");
+      assert.equal(await evaluate("!!tasks.agentDefaults"), false);
+      await key('Escape'); await wait("!document.querySelector('.task-board-create-title-input')");
+      await click('[aria-label="新建任务"]'); await wait("!!document.querySelector('.task-board-create-title-input')");
+      assert.equal(await evaluate("document.querySelector('[aria-label=\"运行模式\"]').textContent"), '标准', `${mode}: cancelling execution choices preserves later defaults`);
+      await click('[aria-label="运行模式"]');
+      await click('[data-wand-popup-owner="运行模式"] [role=option][title="完全访问"]');
+      await wait("!!document.querySelector('.task-board-create-permission-note')");
+      await settle();
+      await wait("document.querySelector('.task-board-create-title-input').getBoundingClientRect().width>0 && getComputedStyle(document.querySelector('.ant-modal-wrap')).visibility!=='hidden'");
+      await click('.task-board-create-title-input');
+      await screenshot(`${mode}-create-task`);
       await click('.task-board-create-title-input'); await send('Input.insertText',{text:'Submitted title'});
       await wait("document.querySelector('.task-board-create-title-input').value==='Submitted title' && !document.querySelector('.task-board-create-submit').disabled");
       await click('.task-board-create-submit'); await wait("!!tasks.createReceipt");
       await click('.task-board-create-title-input'); await send('Input.insertText',{text:' revised'});
       await evaluate("tasks.createReceipt()");
       await wait("document.querySelector('.task-board-create-title-input')?.value==='Submitted title revised'");
+      assert.equal(await evaluate("tasks.createdInputs[0].rememberAgentDefaults"), false, `${mode}: unchecked create preserves defaults`);
+      assert.equal(await evaluate("!!tasks.agentDefaults"), false);
+      await click('[aria-label="同时设为以后默认"]');
+      await click('.task-board-create-submit');
+      await wait("tasks.createdInputs.length===2");
+      assert.equal(await evaluate("!!tasks.agentDefaults"), false, `${mode}: opt-in waits for accepted create`);
+      await evaluate("tasks.createReceipt()");
+      await wait("!document.querySelector('.task-board-create-title-input')");
+      assert.equal(await evaluate("tasks.createdInputs[1].rememberAgentDefaults"), true);
+      assert.deepEqual(await evaluate("tasks.agentDefaults"), await evaluate("tasks.createdInputs[1].agent"));
+      await click('[aria-label="新建任务"]');
+      await wait("!!document.querySelector('.task-board-create-title-input')");
+      assert.equal(await evaluate("document.querySelector('[aria-label=\"同时设为以后默认\"]').getAttribute('aria-checked')"), 'false', `${mode}: each new task requires fresh opt-in`);
+      await key('Escape');
+      await wait("!document.querySelector('.task-board-create-title-input')");
+      // Empty dataset and filtered dataset offer different next actions.
+      await evaluate('tasks.boardTasks=[]'); await click('[aria-label="刷新任务"]');
+      await wait("document.querySelector('.task-board-no-results h2')?.textContent==='还没有创建任务'");
+      await click('[aria-label="搜索任务"]'); await send('Input.insertText',{text:'unmatched'});
+      await wait("document.querySelector('.task-board-no-results h2')?.textContent==='没有找到匹配的任务'");
+      await clickText('清除筛选');
+      await wait("document.querySelector('.task-board-no-results h2')?.textContent==='还没有创建任务'");
+      await evaluate('tasks.boardTasks=[{...tasks.baseTask,id:"archived-only",status:"archived"}]'); await click('[aria-label="刷新任务"]');
+      await wait("document.body.innerText.includes('当前没有活动任务')");
+      assert.match(await evaluate("document.querySelector('.task-board-result-summary').textContent"), /活动 0 · 归档 1/);
+      await clickText('展开归档');
+      await wait("document.querySelector('.task-board-archive-header')?.getAttribute('aria-expanded')==='true'");
+      assert.match(await evaluate("document.querySelector('.task-board-result-summary').textContent"), /活动 0 · 归档 1/);
+      await evaluate('tasks.boardTasks=null'); await click('[aria-label="刷新任务"]');
+      await wait("!!document.querySelector('[data-task-id=t1]')");
       }
       if (boardOnly) {
-        evidence.push({ mode, workflows: ["independent archive destination", "description disclosure", "status and risk grouping", "month and today markers", "compact Gantt rows"] });
+        evidence.push({ mode, workflows: ["independent archive destination", "description disclosure", "status and risk grouping", "month and today markers", "compact Gantt rows", "stable active/archive counts", "explicit future-default opt-in", "grouped responsive task form", "first-use/filtered/archive-only empty states"] });
         console.log(`Task board browser passed: ${mode}`);
         continue;
       }

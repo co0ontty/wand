@@ -22,7 +22,7 @@ import { paintTerminalPanel } from "./terminal-panel-adapter";
 import "./websocket";
 import { buildPtyAttachmentChunks, isImageAttachmentSource } from "./pty-paste";
 import { notifyLegacyUiChange, subscribeLegacyUiChange } from "./ui-store-bridge";
-import { BrowserSpeechInput, readSpeechMode } from "../react/speech/repository";
+import { BrowserSpeechInput, readSpeechMode, speechInputDescription } from "../react/speech/repository";
 import { bindIdleSpeechInput } from "../react/speech/hold-input";
 import { PROVIDER_IDS, PROVIDER_LABELS, inferProviderIdFromCommand } from "../provider-identity";
 import { syncBrowserComposerRail } from "./composer-rail-adapter";
@@ -115,11 +115,13 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
             if (voiceState.canceling) { cancelVoiceRecording(null); return; }
             voiceState.recording = false; btn?.setAttribute("aria-busy", "true"); btn?.setAttribute("aria-pressed", "false");
           },
-          onFinal(text) {
+          onFinal(text, notice) {
             if (voiceSession !== session) return;
             voiceSession = null; voiceCapture = null;
             resetVoiceRecordingUI();
+            const destinationCurrent = state.selectedId === capture.sessionId && composerStore.read(capture.sessionId).revision === capture.revision;
             commitVoiceTranscript(text, capture);
+            if (notice && destinationCurrent) { voiceState.status = notice; voiceState.bubbleVisible = true; syncVoiceBubble(); }
           },
           onError(message) {
             if (voiceSession !== session) return;
@@ -157,7 +159,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         voiceState.recording = false; voiceState.canceling = false;
         const btn = document.getElementById("voice-record-btn");
         btn?.classList.remove("is-recording"); btn?.setAttribute("aria-pressed", "false");
-        btn?.removeAttribute("aria-busy"); btn?.setAttribute("title", "按住语音输入");
+        btn?.removeAttribute("aria-busy"); btn?.setAttribute("title", speechInputDescription(readSpeechMode()));
         voiceState.bubbleVisible = false;
         syncVoiceBubble();
       }

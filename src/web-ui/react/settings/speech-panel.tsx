@@ -53,7 +53,7 @@ export function SpeechSettingsTab({ admin }: { admin: boolean }) {
   }
   const speech = models?.speech;
   return <>
-    <SettingsSection title="服务端语音输入" description="音频仅发送到当前 Wand 服务器，离线识别，不调用第三方云服务。">
+    <SettingsSection title="服务端语音输入" description="音频发送到当前连接的 Wand 主机，由本机 whisper.cpp 模型转写。转写文字可交给「口述整理师」配置的模型整理，是否发送至外部服务取决于其模型配置。">
       <SettingsStatus tone={!speech ? "info" : speech.supported ? "success" : "warning"}>
         {!speech ? "正在检查本机支持情况…" : speech.supported ? "当前机器支持服务端语音识别。" : `当前机器暂不支持：${speech.supportReason || speech.reason || "运行环境不可用。"}`}
       </SettingsStatus>
@@ -67,7 +67,7 @@ export function SpeechSettingsTab({ admin }: { admin: boolean }) {
       {!admin ? <SettingsStatus>启用或关闭需要服务器管理权限。</SettingsStatus> : null}
       {error || loadError ? <SettingsStatus tone="error">{error || loadError}</SettingsStatus> : null}
     </SettingsSection>
-    <SettingsSection title="此设备的识别方式" description="只影响当前设备，其他客户端保持各自的选择。">
+    <SettingsSection title="此设备的识别方式" description="只影响当前设备，其他客户端保持各自的选择。识别结果写入输入草稿，由你确认后发送。">
       <SettingsField label="识别方式" htmlFor="settings-speech-mode">
         <SettingsSelect id="settings-speech-mode" ariaLabel="识别方式" value={mode} options={[
           { value: "server", label: "服务端识别" }, { value: "local", label: "客户端本地识别" },
@@ -75,7 +75,7 @@ export function SpeechSettingsTab({ admin }: { admin: boolean }) {
       </SettingsField>
       {mode === "local" ? <>
         <SettingsStatus tone={localSpeechSupported() ? "info" : "warning"}>
-          {localSpeechSupported() ? "使用浏览器端侧语言包，不上传音频。" : "当前浏览器不支持端侧识别，请使用服务端识别或原生客户端。"}
+          {localSpeechSupported() ? "使用浏览器端侧语言包，音频不上传，也不调用口述整理师。语言包不可用时会报错，不自动切换到云端识别。" : "当前浏览器不支持端侧识别，不会自动切换识别方式。请手动选择服务端识别或使用原生客户端。"}
         </SettingsStatus>
         {localSpeechSupported() ? <SettingsActionButton kind="secondary" pending={pending} onClick={() => act(installLocalSpeech)}>下载浏览器语言包</SettingsActionButton> : null}
       </> : null}

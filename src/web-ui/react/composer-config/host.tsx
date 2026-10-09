@@ -27,7 +27,7 @@ export function ComposerConfigControl({ mount }: { mount: ComposerConfigMount })
   const { scope } = mount;
   const showMode = scope !== "runtime";
   const showRuntime = scope !== "mode";
-  const showModelRefresh = scope !== "mode";
+  const showAdvanced = scope === "all";
 
   return (
     <Flex align="center" gap={6} wrap style={{ flex: showRuntime ? 1 : undefined, minWidth: 0 }}
@@ -38,7 +38,7 @@ export function ComposerConfigControl({ mount }: { mount: ComposerConfigMount })
       title={mount.groupTitle}
     >
       {showRuntime && mount.toolVisible && (
-        <span data-mode-control-pill="tool" style={{ display: "inline-flex", width: 136, flexShrink: 0 }}
+        <span data-mode-control-pill="tool" style={{ display: "inline-flex", width: 120, flexShrink: 0 }}
           aria-live="polite" aria-busy={mount.toolDisabled || undefined} title={mount.toolStatus}>
           {selectHost(scope, "tool")}
         </span>
@@ -46,7 +46,7 @@ export function ComposerConfigControl({ mount }: { mount: ComposerConfigMount })
       {showMode && (
         <span
           data-mode-control-pill="mode"
-          title={`模式：${mount.modeLabel}`}
+          title={`模式：${mount.modeLabel}${mount.modeLabel === "完全访问" ? "；请核对执行任务与工作目录后发送" : ""}`}
         >
           {selectHost(scope, "mode")}
         </span>
@@ -55,12 +55,12 @@ export function ComposerConfigControl({ mount }: { mount: ComposerConfigMount })
         <>
           <span
             data-mode-control-pill="model"
-            style={{ minWidth: 144 }}
+            style={{ minWidth: 120 }}
             title={`模型：${mount.modelFullLabel}`}
           >
             {selectHost(scope, "model")}
           </span>
-          {showModelRefresh && (
+          {showAdvanced && (
             <WandIconButton
               type="button"
               data-models-refresh=""
@@ -74,14 +74,14 @@ export function ComposerConfigControl({ mount }: { mount: ComposerConfigMount })
               <WandIcon name="refresh" size={13} strokeWidth={1.9} />
             </WandIconButton>
           )}
-          <span
+          {showAdvanced && <span
             data-mode-control-pill="thinking"
-            style={{ minWidth: 80 }}
+            style={{ minWidth: 68 }}
             data-thinking={mount.thinkingValue}
             title={`思考深度：${mount.thinkingLabel}`}
           >
             {selectHost(scope, "thinking")}
-          </span>
+          </span>}
         </>
       )}
     </Flex>

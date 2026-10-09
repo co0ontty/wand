@@ -21,6 +21,7 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
   const artifact = join(root, "output/web-ui-library-migration/lanes/teams");
   const browserErrors: string[] = [];
   const evidence: Array<Record<string, unknown>> = [];
+  const employeesOnly = process.env.WAND_TEAMS_BROWSER_SCOPE === "employees";
   const posts: Array<Record<string, unknown>> = [];
   const source = `
     import * as React from "react";
@@ -31,6 +32,8 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
     import { aiTeamsChunkStyles } from "./src/web-ui/react/ai-teams/styles";
     import { AiTeamsPage } from "./src/web-ui/react/ai-teams/teams-page";
     import { TeamChatPage } from "./src/web-ui/react/ai-teams/team-chat-page";
+    import { TeamChatView } from "./src/web-ui/react/ai-teams/team-chat-view";
+    import { conversationUi } from "./src/web-ui/react/conversations/state";
     import { configureTeamChatComposerRuntime } from "./src/web-ui/react/ai-teams/composer-bridge";
     import { notifyAiTeamStepLive } from "./src/web-ui/react/ai-teams/repository";
     import * as dispatchRoster from "./src/web-ui/react/team-dispatch/roster";
@@ -66,18 +69,28 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
     });
 
     function App() {
-      const [mode, setMode] = React.useState(globalThis.location.hash === "#chat" ? "chat" : "teams");
+      const readMode = () => globalThis.location.hash === "#chat" ? "chat" : globalThis.location.hash === "#route" ? "route" : "teams";
+      const [mode, setMode] = React.useState(readMode);
+      const [detail, setDetail] = React.useState(null);
       React.useEffect(() => {
-        const onHash = () => setMode(globalThis.location.hash === "#chat" ? "chat" : "teams");
+        const onHash = () => setMode(readMode());
         globalThis.addEventListener("hashchange", onHash);
         return () => globalThis.removeEventListener("hashchange", onHash);
       }, []);
-      return mode === "chat"
-        ? <TeamChatPage runId="run-a" onOpenSession={() => undefined}/>
-        : <AiTeamsPage/>;
+      React.useEffect(() => {
+        if (mode !== "chat") return;
+        let active = true;
+        fetch("/api/ai-team-runs/run-a").then(response => response.json()).then(value => { if (active) setDetail(value); });
+        return () => { active = false; };
+      }, [mode]);
+      // The old run route now hands off to the canonical conversation. Keep its routing
+      // contract separate from the exported chat renderer's component regression.
+      return mode === "route" ? <TeamChatPage runId="run-a" onOpenSession={() => undefined}/>
+        : mode === "chat" ? detail ? <TeamChatView detail={detail} onChange={setDetail} onOpenSession={() => undefined}/> : null
+          : <AiTeamsPage/>;
     }
 
-    globalThis.teamsFixture = { fixture, notifyAiTeamStepLive,
+    globalThis.teamsFixture = { fixture, notifyAiTeamStepLive, routeState: conversationUi.getSnapshot,
       pushLive: steps => notifyAiTeamStepLive({ runId: "run-a", steps }) };
     const portal = document.getElementById("wand-react-ui-portals");
     createRoot(document.getElementById("root")).render(
@@ -141,6 +154,7 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
     },
   };
 
+  let routeLinked = true;
   const server = createServer((request, response) => {
     const url = request.url ?? "/";
     const send = (value: unknown, status = 200): void => {
@@ -168,12 +182,16 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
       team("team-b", "调研小组", [member("m-lead", "负责人", true)]),
     ]);
     if (url.startsWith("/api/ai-team-runs/run-a/live")) return send({ runId: "run-a", steps: [] });
-    if (url.startsWith("/api/ai-team-runs/run-a")) return send(detail);
+    if (url.startsWith("/api/ai-team-runs/run-a")) return send({ ...detail,
+      run: { ...detail.run, ...(routeLinked ? { conversationId: "conversation-a" } : {}) } });
     if (url.startsWith("/api/ai-team-runs")) return send([]);
     if (url.startsWith("/api/workspaces")) return send([]);
     if (url.startsWith("/api/models")) return send({ providers: [] });
     if (url.startsWith("/api/silicon-employees")) return send({ employees });
     if (url.startsWith("/api/provider-usage")) return send({});
+    if (url.startsWith("/api/conversations")) return send({ conversations: routeLinked ? [{
+      id: "conversation-a", kind: "group", sessionId: "relay-a", tasks: [],
+    }] : [] });
     if (url.startsWith("/api/structured-sessions") && request.method === "POST") {
       let body = "";
       request.on("data", (chunk) => { body += chunk; });
@@ -341,6 +359,11 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
       await wait("document.querySelectorAll('.wand-employee-list .wand-employee-card').length === 1");
       await click(".wand-employee-list .wand-team-member-head");
       await wait("!!document.querySelector('.wand-employee-list .ant-card[data-open] input#employee-emp-active-name')");
+      assert.equal(await evaluate("document.querySelectorAll('.wand-employee-card[data-open] .wand-team-candidate.ant-card').length"), 0,
+        `${mode}: 员工候选不嵌套卡片`);
+      assert.equal(await evaluate("Array.from(document.querySelectorAll('.wand-employee-card[data-open] .wand-team-candidate')).every(row => parseFloat(getComputedStyle(row).borderBottomWidth) === 1)"), true,
+        `${mode}: 员工候选连续细分隔`);
+      await screenshot(`employees-${mode}`);
       assert.equal(await evaluate(`(()=>{const n=document.querySelector('#employee-emp-active-name');
         return n.tagName === 'INPUT' && n.closest('.ant-input') !== null || n.classList.contains('ant-input')})()`), true,
         `${mode}: 员工名是通用输入框`);
@@ -365,6 +388,11 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
       await click(".wand-employee-list .ant-collapse-header");
       await pause(200);
 
+      if (employeesOnly) {
+        assert.equal(await evaluate("document.documentElement.scrollWidth <= innerWidth + 1"), true, `${mode}: 员工页无横向溢出`);
+        continue;
+      }
+
       // ---- 团队页：卡片 + 详情 + 成员编辑 ----
       await click(".wand-teams-page [data-stretch-value=teams]");
       await wait("document.querySelectorAll('.wand-teams-cards .wand-teams-card').length === 2");
@@ -385,7 +413,9 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
       await click(".wand-team-member[data-open] .wand-team-candidates-foot .wand-ui-button");
       await wait(`document.querySelectorAll('.wand-team-member[data-open] .wand-team-candidate').length === ${scoreBefore + 1}`);
       assert.equal(await evaluate("document.querySelectorAll('.wand-team-member[data-open] .wand-team-candidate.ant-card').length"),
-        scoreBefore + 1, `${mode}: 候选行也是通用卡片`);
+        0, `${mode}: 候选使用连续行而非嵌套卡片`);
+      assert.equal(await evaluate("Array.from(document.querySelectorAll('.wand-team-member[data-open] .wand-team-candidate')).every(row => parseFloat(getComputedStyle(row).borderBottomWidth) === 1)"),
+        true, `${mode}: 候选行有稳定细分隔`);
       assert.equal(await evaluate("!!document.querySelector('.wand-team-member[data-open] .wand-team-candidate .ant-tag')"), true,
         `${mode}: 候选位次用通用标签`);
       assert.equal(await evaluate("matchMedia('(prefers-reduced-motion: reduce)').matches"), mode === "reduced-motion",
@@ -428,7 +458,20 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
     }
 
     // ---- 群聊页：X 展示 + composer bridge 所有权 + 键盘/Portal 契约 ----
-    for (const mode of (process.env.WAND_TEAMS_TEST_MODES?.split(",") ?? ["desktop", "mobile", "reduced-motion"])) {
+    if (!employeesOnly) {
+      routeLinked = false;
+      await send("Page.navigate", { url: `${origin}/?route=unlinked#route` });
+      await wait("document.body.innerText.includes('此运行尚未关联群对话')");
+      assert.equal(await evaluate("!!document.querySelector('[role=alert]')"), true, "无关联旧运行展示可恢复错误");
+      assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).some(button => button.textContent.replace(/\\s/g, '').includes('重试'))"), true);
+      assert.equal(await evaluate("!!document.querySelector('.task-board-team-chat-input')"), false, "无关联运行不提供可发送输入");
+      routeLinked = true;
+      await send("Page.navigate", { url: `${origin}/?route=linked#route` });
+      await wait("globalThis.teamsFixture?.routeState().selectedId === 'conversation-a'");
+      assert.deepEqual(await evaluate("globalThis.teamsFixture.routeState().targets['conversation-a']"), { taskId: "task-a", runId: "run-a" });
+      evidence.push({ mode: "old-run-route", unlinked: "retryable error and no composer", linked: "explicit conversation/task/run handoff" });
+    }
+    for (const mode of (employeesOnly ? [] : process.env.WAND_TEAMS_TEST_MODES?.split(",") ?? ["desktop", "mobile", "reduced-motion"])) {
     await send("Emulation.setDeviceMetricsOverride", { width: mode === "mobile" ? 390 : 1280, height: 1000, deviceScaleFactor: 1, mobile: false });
     await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: mode === "reduced-motion" ? "reduce" : "no-preference" }] });
     await evaluate("window.__wandFixtureBeforeNavigation = true");
@@ -547,13 +590,13 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
     evidence.push({ mode: "retired-css", selectorsChecked: RETIRED_SELECTORS.length, matches: 0 });
     assert.deepEqual(browserErrors, [], "no browser runtime exceptions");
     mkdirSync(artifact, { recursive: true });
-    writeFileSync(join(artifact, "teams-browser.json"), JSON.stringify({
+    writeFileSync(join(artifact, employeesOnly ? "employees-browser.json" : "teams-browser.json"), JSON.stringify({
       passed: true, evidence, browserErrors,
-      scope: "Lane gate in real Chrome against canned local API data; installed-service acceptance stays integration-owned",
+      scope: `${employeesOnly ? "Employee list/editor/create disclosure only" : "Teams full lane gate"} in real Chrome against canned local API data; installed-service acceptance stays integration-owned`,
     }, null, 2));
   } catch (error) {
     mkdirSync(artifact, { recursive: true });
-    writeFileSync(join(artifact, "teams-browser.json"), JSON.stringify({ passed: false, evidence, browserErrors, error: String(error) }, null, 2));
+    writeFileSync(join(artifact, employeesOnly ? "employees-browser.json" : "teams-browser.json"), JSON.stringify({ passed: false, evidence, browserErrors, error: String(error) }, null, 2));
     throw error;
   } finally {
     socket?.close();

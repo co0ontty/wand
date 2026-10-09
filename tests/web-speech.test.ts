@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { encodeSpeechWav } from "../src/web-ui/speech-audio.ts";
-import { BrowserSpeechInput, localSpeechSupported } from "../src/web-ui/react/speech/repository.ts";
+import { BrowserSpeechInput, localSpeechSupported, speechInputDescription } from "../src/web-ui/react/speech/repository.ts";
 import { validateSpeechWav } from "../src/speech-service.ts";
 
 function callbacks() {
@@ -79,4 +79,39 @@ test("not-ready servers are reported without opening the microphone or changing 
   });
   try { const events = callbacks(); await new BrowserSpeechInput("server", events.value).start(); assert.equal(mic, 0); assert.deepEqual(events.errors, ["模型未下载"]); }
   finally { restore(); }
+});
+
+test("server speech preserves the transcript and reports text-polishing failure at its composer owner", async () => {
+  let uploads = 0, stopped = 0;
+  const restore = globals({ window: { isSecureContext: true },
+    navigator: { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop: () => { stopped += 1; } }] }) } },
+    MediaRecorder: class {
+      state = "inactive"; mimeType = "audio/webm";
+      ondataavailable: ((event: { data: Blob }) => void) | null = null;
+      onstop: (() => void) | null = null;
+      start() { this.state = "recording"; }
+      stop() { this.state = "inactive"; this.ondataavailable?.({ data: new Blob(["test-audio"]) }); this.onstop?.(); }
+    },
+    AudioContext: class { async decodeAudioData() { return { numberOfChannels: 1, sampleRate: 16000, getChannelData: () => new Float32Array(1600).fill(.25) }; } async close() {} },
+    fetch: async (url: string) => {
+      if (url.includes("transcribe")) { uploads += 1; return new Response(JSON.stringify({ text: "保留的原始转写", optimizationError: "口述整理失败，已保留原始转写。" }), { headers: { "content-type": "application/json" } }); }
+      return new Response(JSON.stringify({ ready: true }), { headers: { "content-type": "application/json" } });
+    },
+  });
+  try {
+    const events = callbacks(); let notice: string | undefined;
+    const input = new BrowserSpeechInput("server", { ...events.value, onFinal(text, value) { events.finals.push(text); notice = value; } });
+    await input.start(); input.finish();
+    for (let index = 0; index < 10 && !events.finals.length; index++) await new Promise(resolve => setTimeout(resolve, 0));
+    assert.deepEqual(events.finals, ["保留的原始转写"]);
+    assert.equal(notice, "口述整理失败，已保留原始转写。");
+    assert.equal(uploads, 1); assert.equal(stopped, 1); assert.deepEqual(events.errors, []);
+  } finally { restore(); }
+});
+
+test("speech descriptions distinguish audio location, optional text processing and review before sending", () => {
+  assert.match(speechInputDescription("local"), /浏览器端侧识别，音频不上传/);
+  assert.doesNotMatch(speechInputDescription("local"), /口述整理师/);
+  assert.match(speechInputDescription("server"), /当前 Wand 主机.*本地转写.*文字.*配置的模型/);
+  assert.match(speechInputDescription("server"), /草稿，核对后发送/);
 });

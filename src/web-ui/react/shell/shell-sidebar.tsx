@@ -1,4 +1,4 @@
-import { Avatar, Checkbox, Flex, Layout, Tag, Typography } from "antd";
+import { Checkbox, Flex, Layout, Tag, Typography } from "antd";
 import { WandUiBoundary } from "../theme";
 import { ImSidebarGroup } from "./im-sidebar-group";
 import { WandBrandMark } from "../ui/brand-mark";
@@ -15,7 +15,6 @@ import { ConversationNavigation, ConversationSidebarList, ConversationSidebarToo
 import { SidebarPresentationContext, useSidebarPresentation } from "../workspaces/sidebar-display-mode";
 import { sidebarSafeError } from "../workspaces/sidebar-safe-error";
 import { useUserProfile } from "../user-profile-repository";
-import { avatarFaceParts } from "../ai-teams/avatar";
 import { DEFAULT_USER_DISPLAY_NAME } from "../../../user-profile.js";
 import { SidebarToggleIcon } from "./sidebar-toggle-icon";
 import { DaemonUpdateNotice } from "./daemon-update-notice";
@@ -498,9 +497,10 @@ export function sidebarActionLeavesPage(action: UiAction): boolean {
   }
 }
 
-export async function confirmSidebarLogout(onConfirm: () => void): Promise<void> {
+export async function confirmSidebarLogout(onConfirm: () => void, onCancel?: () => void): Promise<void> {
   const answer = await wandOverlay.dialog({
     title: "退出登录？",
+    focusTriggerAfterClose: false,
     description: "退出后需要重新连接。正在运行的任务会继续执行。",
     actions: [
       { label: "取消", value: false, autoFocus: true },
@@ -508,6 +508,7 @@ export async function confirmSidebarLogout(onConfirm: () => void): Promise<void>
     ],
   });
   if (answer.dismissed !== true && answer.action) onConfirm();
+  else onCancel?.();
 }
 
 
@@ -593,18 +594,22 @@ export function ShellSidebar() {
   const teamAttention = useAiTeamAttentionCount();
   const profile = useUserProfile();
   const profileName = profile.name || DEFAULT_USER_DISPLAY_NAME;
-  const profileFace = avatarFaceParts({ id: "user", name: profileName, avatar: profile.avatar }, 28);
   const [moreOpen, setMoreOpen] = React.useState(false);
+  const accountTriggerRef = React.useRef<HTMLButtonElement>(null);
   const presentation = useSidebarPresentation();
   const { query: searchQuery, setQuery: setSearchQuery } = presentation;
   // 报错清单默认收起：头部徽标只显示条数，点开才在下方就地展开。
   const [attentionOpen, setAttentionOpen] = React.useState(false);
+  // Secondary management surfaces borrow the list space without changing the user's pinned/collapsed preference.
+  const contextRail = !snapshot.layout.sidebarDrawer && (settings.open || conversationState.directory
+    || snapshot.layout.filePanelOpen);
   const narrow = !snapshot.layout.sidebarDrawer && snapshot.layout.sidebarPinned && snapshot.layout.sidebarCollapsed;
   const sidebarClass = classNames(
     "sidebar sidebar-refined",
     snapshot.layout.sessionsDrawerOpen && "open",
     !snapshot.layout.sidebarDrawer && snapshot.layout.sidebarAnchored && "pinned",
-    narrow && "collapsed",
+    narrow && !contextRail && "collapsed",
+    contextRail && "context-rail",
   );
   const primaryAction = getShellSidebarPrimaryAction();
   const visible = snapshot.layout.sessionsDrawerOpen
@@ -626,7 +631,7 @@ export function ShellSidebar() {
     setPeekDirectory((current) => current?.id === id && current.name === name && current.top === top
       ? current : { id, name, top });
   }, [drawerRef]);
-  const peek = useSidebarPeek(visible && narrow && hoverPointer && !moreOpen, drawerRef, peekSurfaceRef, selectPeekDirectory);
+  const peek = useSidebarPeek(visible && !contextRail && narrow && hoverPointer && !moreOpen, drawerRef, peekSurfaceRef, selectPeekDirectory);
   const scrollPositions = React.useRef<Record<string, number>>({ ...conversationState.scrolls });
   React.useLayoutEffect(() => {
     const body = bodyRef.current;
@@ -663,7 +668,7 @@ export function ShellSidebar() {
   };
   React.useEffect(() => {
     setMoreOpen(false);
-  }, [visible, narrow, conversationState.mode, conversationState.directory]);
+  }, [visible, narrow, contextRail, conversationState.mode, conversationState.directory]);
   // 收起抽屉时同步关闭通知浮层；压缩列表不影响导航入口。
   React.useEffect(() => {
     if (!visible) setAttentionOpen(false);
@@ -695,7 +700,7 @@ export function ShellSidebar() {
       onNavigate={navigateFromTree}
       onOpenDialog={dismissSidebarSurfaces}
       searchQuery={searchQuery}
-      surfacesEnabled={directoryId ? visible && peek.open : visible && !narrow && conversationState.mode === "tasks"}
+      surfacesEnabled={directoryId ? visible && peek.open : visible && !narrow && !contextRail && conversationState.mode === "tasks"}
       onSearchChange={setSearchQuery}
       selectedSessionId={snapshot.selected?.id ?? null}
       sessionTitles={Object.fromEntries(snapshot.sidebar.groups.flatMap((group) => (
@@ -718,7 +723,7 @@ export function ShellSidebar() {
         onClick={() => void dispatch({ type: "layout.drawer.close" })}
       />
       <Layout.Sider id="sessions-drawer" ref={drawerRef as React.RefObject<HTMLDivElement | null>} className={sidebarClass}
-        width="min(344px, calc(100vw - 24px))" collapsedWidth={112} collapsed={narrow} theme="light"
+        width={contextRail ? 56 : "min(344px, calc(100vw - 24px))"} collapsedWidth={112} collapsed={narrow && !contextRail} theme="light"
         style={{ position: overlay ? "fixed" : "relative", top: overlay ? "var(--wand-safe-top, 0px)" : undefined, bottom: overlay ? "var(--wand-safe-bottom, 0px)" : undefined, left: 0, display: visible ? undefined : "none", zIndex: overlay ? 20000 : 2, height: "100%", overflow: "visible" }}
         styles={{ body: { display: "flex", flexDirection: "row", height: "100%", minHeight: 0 } }}
         aria-label="主导航与会话列表" role={overlay ? "dialog" : undefined}
@@ -751,106 +756,39 @@ export function ShellSidebar() {
               <SidebarListErrorBadge />
               <DaemonUpdateNotice compact visible={visible} />
             </Flex>
-            <div className="sidebar-header-more">
-              <WandDropdownMenu
-                open={moreOpen}
-                onOpenChange={setMoreOpen}
-                modal={false}
-              >
-                <WandDropdownMenuTrigger
-                  render={(
-                    <WandIconButton
-                      id="sidebar-more-btn"
-                      className="sidebar-more-trigger"
-                      kind="ghost"
-                      size="medium"
-                      title="更多操作"
-                      aria-label="侧栏更多操作"
-                    >
-                      <WandIcon name="more" size={18}/>
-                    </WandIconButton>
-                  )}
-                />
-                <WandDropdownMenuContent
-                  id="sidebar-overflow-menu"
-                  className="sidebar-tools-menu"
-                  aria-label="侧栏更多操作"
-                  align="end"
-                  sideOffset={6}
-                >
-                  <WandDropdownMenuItem
-                    id="missions-button"
-                    icon="zap"
-                    onClick={() => {
-                      setMoreOpen(false);
-                      navigate({ type: "missions.open" });
-                    }}
-                  >
-                    并行任务
-                  </WandDropdownMenuItem>
-                  <WandDropdownMenuItem
-                    id="github-issues-button"
-                    icon="git"
-                    onClick={() => {
-                      setMoreOpen(false);
-                      peek.close();
-                      if (overlay) void dispatch({ type: "layout.drawer.close" });
-                      window.__wandReactGithubIssues?.open(snapshot.selected?.id ?? "");
-                    }}
-                  >
-                    GitHub 议题
-                  </WandDropdownMenuItem>
-                  <WandDropdownMenuSeparator/>
-                  <WandDropdownMenuItem
-                    id="sidebar-home-btn"
-                    icon="home"
-                    onClick={() => {
-                      setMoreOpen(false);
-                      navigate({ type: "nav.home" });
-                    }}
-                  >
-                    返回对话
-                  </WandDropdownMenuItem>
-                  <WandDropdownMenuItem
-                    id="sidebar-refresh-btn"
-                    icon="refresh"
-                    onClick={() => {
-                      setMoreOpen(false);
-                      void dispatch({ type: "nav.refresh" });
-                    }}
-                  >
-                    刷新页面
-                  </WandDropdownMenuItem>
-                  <WandDropdownMenuSeparator/>
-                  <WandDropdownMenuItem
-                    id="logout-button"
-                    icon="logout"
-                    tone="danger"
-                    onClick={() => {
-                      setMoreOpen(false);
-                      void confirmSidebarLogout(() => navigate({ type: "auth.logout" }));
-                    }}
-                  >
-                    退出登录
-                  </WandDropdownMenuItem>
-                </WandDropdownMenuContent>
-              </WandDropdownMenu>
-            </div>
           </div>
-          <WandIconButton kind={settings.open ? "soft" : "ghost"} aria-current={settings.open ? "page" : undefined}
-            id="settings-button" className="sidebar-profile-button" title={`${profileName} · 设置`} aria-label="设置"
-            onClick={() => { setAttentionOpen(false); navigate({ type: "settings.open" }); }}>
-            <Avatar size={28} src={profileFace.src} style={profileFace.style} icon={profileFace.icon}/>
-          </WandIconButton>
+          <WandDropdownMenu open={moreOpen} onOpenChange={setMoreOpen} modal={false}>
+            <WandDropdownMenuTrigger ref={accountTriggerRef} render={(
+              <WandIconButton kind={settings.open ? "soft" : "ghost"} aria-current={settings.open ? "page" : undefined}
+                id="settings-button" className="sidebar-profile-button" title={`${profileName} · 设置`} aria-label="账户与设置">
+                <WandIcon name="gear" size={18}/>
+                <span className="sidebar-nav-label" aria-hidden="true">设置</span>
+              </WandIconButton>
+            )}/>
+            <WandDropdownMenuContent id="sidebar-account-menu" className="sidebar-tools-menu" aria-label="账户与设置"
+              side="right" align="end" sideOffset={6}>
+              <WandDropdownMenuItem id="sidebar-settings-entry" icon="gear"
+                onClick={() => { setMoreOpen(false); setAttentionOpen(false); navigate({ type: "settings.open" }); }}>
+                设置
+              </WandDropdownMenuItem>
+              <WandDropdownMenuSeparator/>
+              <WandDropdownMenuItem id="logout-button" icon="logout" tone="danger"
+                onClick={() => { setMoreOpen(false); void confirmSidebarLogout(() => navigate({ type: "auth.logout" }), () => {
+                  requestAnimationFrame(() => accountTriggerRef.current?.focus({ preventScroll: true }));
+                }); }}>
+                退出登录
+              </WandDropdownMenuItem>
+            </WandDropdownMenuContent>
+          </WandDropdownMenu>
         </Flex>
-        <Flex vertical className="sidebar-list-panel">
+        <Flex vertical className="sidebar-list-panel" hidden={contextRail} inert={contextRail}>
           <Flex vertical gap="small" className="sidebar-header" style={{ padding: narrow ? "8px 4px" : "10px 12px", flexShrink: 0 }}>
             <Flex vertical={narrow} align="center" justify="space-between" gap="small" className="sidebar-header-primary">
               <Flex align="center" gap="small" className="sidebar-header-main">
                 <Typography.Text strong className="sidebar-title" hidden={narrow} style={{ whiteSpace: "nowrap" }}>{conversationState.mode === "tasks" ? "工作区" : "对话"}</Typography.Text>
               </Flex>
               <Flex align="center" gap={4} vertical={narrow} className="sidebar-header-actions">
-                <div hidden={conversationState.mode !== "chats"}><ConversationSidebarTools enabled={visible && conversationState.mode === "chats"}
+                <div hidden={conversationState.mode !== "chats"}><ConversationSidebarTools enabled={visible && !contextRail && conversationState.mode === "chats"}
                   onCreateSession={() => navigate(primaryAction.action)}
                   onNavigate={() => { taskBoardController.close(); dismissSidebarSurfaces(); }}/></div>
                 {!snapshot.layout.sidebarDrawer && (
@@ -887,7 +825,7 @@ export function ShellSidebar() {
             <div id="sessions-panel">
               <div className="sessions-list" id="sessions-list">
                 <SidebarProjectionSwap value={conversationState.mode}>
-                  <div hidden={conversationState.mode !== "chats"} inert={conversationState.mode !== "chats"}><ConversationSidebarList compact={narrow} enabled={visible && conversationState.mode === "chats"} onNavigate={() => { taskBoardController.close(); dismissSidebarSurfaces(); }}/></div>
+                  <div hidden={conversationState.mode !== "chats"} inert={conversationState.mode !== "chats"}><ConversationSidebarList compact={narrow} enabled={visible && !contextRail && conversationState.mode === "chats"} onNavigate={() => { taskBoardController.close(); dismissSidebarSurfaces(); }}/></div>
                   <div hidden={conversationState.mode !== "tasks"} inert={conversationState.mode !== "tasks"}>{taskTree(narrow)}</div>
                 </SidebarProjectionSwap>
               </div>

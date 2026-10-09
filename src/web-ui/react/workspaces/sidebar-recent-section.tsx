@@ -312,7 +312,7 @@ function GroupMark({
     return <SidebarEmployeeAvatar employee={employee}/>;
   }
   if (session?.teamChat) return <TeamChatSessionMark teamChat={session.teamChat}/>;
-  if (group.kind === "team") return <WandIcon name="parallel" size={18}/>;
+  if (group.kind === "team") return <WandIcon name="users" size={18}/>;
   if (session) return <SessionProviderMark session={session} size={18} className="sidebar-recent-provider"/>;
   return <WandIcon name="terminal" size={18} className="sidebar-recent-provider"/>;
 }
@@ -327,7 +327,7 @@ function SecondaryRowMark({
 }): React.ReactElement {
   const session = entry.session;
   if (session.teamChat) return <TeamChatSessionMark teamChat={session.teamChat}/>;
-  if (group.kind === "team") return <WandIcon name="parallel" size={14} className="sidebar-recent-provider"/>;
+  if (group.kind === "team") return <WandIcon name="users" size={14} className="sidebar-recent-provider"/>;
   return <SessionProviderMark session={session} size={14} className="sidebar-recent-provider"/>;
 }
 

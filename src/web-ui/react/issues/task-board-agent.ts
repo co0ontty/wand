@@ -8,7 +8,7 @@ import type {
   WandTaskPriority,
   WandTaskStatus,
 } from "../../../task-types";
-import { AGENT_TOOL_OPTIONS, WAND_AGENT_LABEL, agentToolIdFor, agentToolOption } from "../../provider-identity";
+import { AGENT_TOOL_OPTIONS, agentToolDisplayName, agentToolIdFor, agentToolOption } from "../../provider-identity";
 import {
   DEFAULT_WAND_TASK_AGENT_KIND,
   DEFAULT_WAND_TASK_AGENT_MODE,
@@ -43,7 +43,7 @@ export const ISSUE_AGENT_PROVIDERS: ReadonlyArray<{
   { value: "opencode", label: "OpenCode", description: "OpenCode CLI" },
   { value: "grok", label: "Grok", description: "Grok Build CLI" },
   { value: "qoder", label: "Qoder", description: "Qoder CLI" },
-  { value: "pi", label: "Pi", description: "内置多模型 Agent" },
+  { value: "pi", label: "Pi", description: "Pi CLI 多模型工具" },
   { value: "gemini", label: "Gemini", description: "Gemini CLI" },
 ];
 
@@ -64,7 +64,7 @@ export const ISSUE_AGENT_MODES: ReadonlyArray<{
   description: string;
 }> = [
   { value: "managed", label: "托管", description: "全自动完成任务，不再逐条确认" },
-  { value: "full-access", label: "全限", description: "自动确认权限，适合确认环境后的连续修改" },
+  { value: "full-access", label: "完全访问", description: "自动确认权限，适合确认环境后的连续修改" },
   { value: "default", label: "标准", description: "逐步确认操作" },
 ];
 
@@ -262,8 +262,8 @@ export function issueAgentProviderLabel(provider: string | null | undefined): st
  * 只拿到 provider 字符串的历史调用点仍然等于 provider 名。
  */
 export function issueAgentLabel(provider: string | null | undefined, engine?: string | null): string {
-  if (provider === "pi" && engine === "sdk") return WAND_AGENT_LABEL;
-  return issueAgentProviderLabel(provider);
+  if (provider === "session" || provider === "shell") return "终端";
+  return agentToolDisplayName(provider, engine === "sdk" || engine === "core" ? engine : "cli");
 }
 
 /**
@@ -814,4 +814,20 @@ export function formatIssueStamp(value: string | null | undefined): string {
     return /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${Number(value.slice(5, 7))}/${Number(value.slice(8, 10))}` : value;
   }
   return `${date.getMonth() + 1}/${date.getDate()}`;
+}
+
+/** Count/empty-state meaning is independent of archive disclosure. */
+export function issueBoardEmptyState(total: number, active: number, archived: number, filtered: boolean): {
+  kind: "filtered" | "first" | "inactive"; title: string; description: string;
+} {
+  if (filtered && active + archived === 0) return {
+    kind: "filtered", title: "没有找到匹配的任务", description: "试试其他关键词，或清除筛选查看全部任务。",
+  };
+  if (total === 0) return {
+    kind: "first", title: "还没有创建任务", description: "记录要完成的工作；创建任务后再按需启动执行。",
+  };
+  return {
+    kind: "inactive", title: "当前没有活动任务", description: archived > 0
+      ? `有 ${archived} 个归档任务，可展开归档查看历史。` : "这个范围内还没有任务，可以新建任务并选择执行对象。",
+  };
 }

@@ -19,11 +19,22 @@ export function splitArchivedSessions<T extends { archived?: boolean }>(
   return { active, archived };
 }
 
+/** Main sessions win over a stale archive entry during archive/restore refreshes. */
+function normalizeSessions(sessions: readonly WorkspaceSessionSummary[], existing: readonly WorkspaceSessionSummary[] = []): { active: WorkspaceSessionSummary[]; archived: WorkspaceSessionSummary[] } {
+  const unique = new Map<string, WorkspaceSessionSummary>();
+  for (const session of sessions) if (!unique.has(session.id)) unique.set(session.id, session);
+  const { active, archived } = splitArchivedSessions([...unique.values()]);
+  for (const session of existing) {
+    if (unique.has(session.id)) continue;
+    unique.set(session.id, session);
+    archived.push(session);
+  }
+  return { active, archived };
+}
+
 function splitTaskSessions(task: TaskSummary): TaskSummary {
-  const { active, archived } = splitArchivedSessions<WorkspaceSessionSummary>(task.sessions);
-  if (archived.length === 0) return task;
-  const existing = task.archivedSessions ?? [];
-  return { ...task, sessions: active, archivedSessions: [...archived, ...existing] };
+  const { active, archived } = normalizeSessions(task.sessions, task.archivedSessions);
+  return { ...task, sessions: active, archivedSessions: archived };
 }
 
 /** 把每个目录组的任务与未分组会话拆成「活跃 / 归档」两摞，归档的不进正常列表。 */
@@ -31,14 +42,13 @@ export function groupSessionsByArchive(
   groups: readonly TaskDirectoryGroup[],
 ): TaskDirectoryGroup[] {
   return groups.map((group) => {
-    const standalone = splitArchivedSessions<WorkspaceSessionSummary>(group.standaloneSessions);
-    const archivedStandalone = [...standalone.archived, ...(group.archivedSessions ?? [])];
+    const standalone = normalizeSessions(group.standaloneSessions, group.archivedSessions);
     const next: TaskDirectoryGroup = {
       ...group,
       tasks: group.tasks.map(splitTaskSessions),
       standaloneSessions: standalone.active,
+      archivedSessions: standalone.archived,
     };
-    if (archivedStandalone.length > 0) next.archivedSessions = archivedStandalone;
     return next;
   });
 }

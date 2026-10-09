@@ -75,7 +75,7 @@ test("ShellSidebar drives the peek from hover/focus on the collapsed rail", () =
   );
 
   // 展开后的完整侧栏不再挂第二份目录树：启用条件绑定在窄栏上。
-  assert.match(source, /useSidebarPeek\(visible && narrow && hoverPointer && !moreOpen, drawerRef, peekSurfaceRef, selectPeekDirectory\)/);
+  assert.match(source, /useSidebarPeek\(visible && !contextRail && narrow && hoverPointer && !moreOpen, drawerRef, peekSurfaceRef, selectPeekDirectory\)/);
   assert.match(source, /narrow && hoverPointer && peek\.mounted/);
   assert.match(source, /\.\.\.peek\.triggerBindings/);
   assert.match(source, /\.\.\.peek\.surfaceBindings/);

@@ -14,13 +14,13 @@ export function EmployeeAvatar({
   size = "md",
   className = "",
 }: {
-  employee: { id: string; name: string; avatar?: string; agents?: ReadonlyArray<{ provider?: string }> };
+  employee: { id: string; name: string; avatar?: string; agents?: ReadonlyArray<{ provider?: string; engine?: "cli" | "sdk" }> };
   provider?: string;
   size?: "sm" | "md" | "lg" | "xl" | "chat";
   className?: string;
 }): React.ReactElement {
   const cli = employeeAvatarProvider(employee, provider);
-  const cliLabel = cli ? employeeCliLabel(cli) : "";
+  const cliLabel = cli ? employeeCliLabel(cli, provider === undefined ? employee.agents?.[0]?.engine : undefined) : "";
   const pixelSize = { sm: 26, md: 32, lg: 44, xl: 72, chat: 40 }[size];
   const face = avatarFaceParts(employee, pixelSize);
   return <WandUiBoundary><Badge className={`wand-team-avatar wand-employee-avatar ${className}`.trim()} data-size={size}

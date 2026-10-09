@@ -81,6 +81,8 @@ export const taskBoardRepository = {
     parentTaskId?: string | null;
     agent?: WandTaskAgent | null;
     executionSubject?: TaskExecutionSubject | null;
+    /** Only an explicit choice changes the defaults for future tasks. */
+    rememberAgentDefaults?: boolean;
   }): Promise<WandTaskListed> {
     return mutateTask("/api/wand-tasks", jsonBody(input));
   },

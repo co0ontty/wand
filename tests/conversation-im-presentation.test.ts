@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { formatConversationListTime, conversationListFilterLabel, filterConversationList, isConversationArchived } from "../src/web-ui/react/conversations/sidebar.js";
+import { formatConversationListTime, conversationListFilterLabel, conversationListCounts, filterConversationList, isConversationArchived } from "../src/web-ui/react/conversations/sidebar.js";
 
 const now = new Date(2026, 9, 7, 16, 30);
 test("conversation list clock projects real timestamps and omits missing/invalid values", () => {
@@ -89,4 +89,16 @@ test("IM task rows report archived tasks as archived, never as a live run status
   assert.equal(conversationTaskStateLabel({ task: { status: "doing" }, runs: [{ status: "waiting_user" }] }), "等你回复");
   assert.equal(conversationTaskStateLabel({ task: { status: "doing" }, runs: [] }), "待开工");
   assert.equal(conversationTaskStateLabel({ task: { status: "doing" }, runs: [], startup: { state: "failed" } }), "启动失败");
+});
+
+test("archive totals stay independent of search while matches describe the selected tier", () => {
+  const items = [listItem({ title: "发布检查" }), listItem({ title: "设计检查" }), listItem({ title: "归档发布检查", dissolvedAt: "2026-10-09T12:00:00Z" })];
+  assert.deepEqual(conversationListCounts(items, "all", "检查"), { total: 3, active: 2, archived: 1, scope: 3, matches: 3 });
+  assert.deepEqual(conversationListCounts(items, "all", "不存在"), { total: 3, active: 2, archived: 1, scope: 3, matches: 0 });
+  assert.deepEqual(conversationListCounts(items, "active", " 发布 "), { total: 3, active: 2, archived: 1, scope: 2, matches: 1 });
+  assert.deepEqual(conversationListCounts(items, "archived", "设计"), { total: 3, active: 2, archived: 1, scope: 1, matches: 0 });
+  assert.deepEqual(conversationListCounts([], "all", ""), { total: 0, active: 0, archived: 0, scope: 0, matches: 0 });
+  // Counts change only with actual data, not when a different archive tier is selected.
+  const restored = items.map(item => ({ ...item, dissolvedAt: null }));
+  assert.deepEqual(conversationListCounts(restored, "archived", ""), { total: 3, active: 3, archived: 0, scope: 0, matches: 0 });
 });

@@ -1,11 +1,13 @@
+import "../new-session/layout.js";
 import { Alert, Flex, Form, Radio, Segmented, Spin, Typography } from "antd";
 import { WandUiBoundary } from "../theme";
 import * as React from "react";
 import { EmployeeAvatar } from "../agents/employee-avatar.js";
-import { WandButton, WandIcon, WandSelect } from "../ui";
+import { WandButton, WandIcon, WandSelect, WandSearchField } from "../ui";
+import { usePopupDismiss } from "../ui/popup-lifecycle.js";
 import { ProviderLogo } from "../provider-logo.js";
 import { sortProviderOptions, useProviderUsage } from "../provider-usage.js";
-import { AGENT_TOOL_OPTIONS, agentToolIdFor, type AgentToolEngine } from "../../provider-identity.js";
+import { AGENT_TOOL_OPTIONS, agentToolDisplayName, agentToolIdFor, type AgentToolEngine } from "../../provider-identity.js";
 import type {
   WorkspaceProvider,
   WorkspaceSessionKind,
@@ -66,6 +68,12 @@ export interface UnifiedExecutionSubjectPickerProps {
   onModelChange(model: string): void;
 }
 
+/** Local AND search preserves source identities and never alters the selected subject. */
+export function matchesExecutionSubjectQuery(query: string, ...fields: string[]): boolean {
+  const text = fields.join(" ").toLocaleLowerCase();
+  return query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean).every((word) => text.includes(word));
+}
+
 export function UnifiedExecutionSubjectPicker({
   selectedSubject,
   kind,
@@ -87,6 +95,20 @@ export function UnifiedExecutionSubjectPicker({
     (option) => option.provider,
   );
   const teamBlocked = teamWorkspaceId === "";
+  const [query, setQuery] = React.useState("");
+  const searchRef = React.useRef<HTMLInputElement | null>(null);
+  React.useEffect(() => {
+    searchRef.current?.focus({ preventScroll: true });
+  }, []);
+  usePopupDismiss(Boolean(query), () => {
+    setQuery("");
+    searchRef.current?.focus({ preventScroll: true });
+  });
+  const matchingEmployees = employees.filter((employee) => !employee.archivedAt && matchesExecutionSubjectQuery(query,
+    "硅基员工", employee.name, employee.duty, ...employee.agents.map((candidate) => agentToolDisplayName(candidate.provider, candidate.engine))));
+  const matchingTeams = teams?.filter((team) => matchesExecutionSubjectQuery(query, "AI 团队", team.name, team.detail ?? "")) ?? [];
+  const matchingTools = targetOptions.filter((tool) => matchesExecutionSubjectQuery(query, "执行工具 CLI", tool.label, tool.description));
+  const hasMatches = matchingTools.length > 0 || (kind !== "pty" && (matchingEmployees.length > 0 || matchingTeams.length > 0));
 
   const [lastCliProvider, setLastCliProvider] = React.useState<WorkspaceSessionTarget>("claude");
   const [switchedNotice, setSwitchedNotice] = React.useState<string | null>(null);
@@ -120,23 +142,25 @@ export function UnifiedExecutionSubjectPicker({
     : "";
 
   const choiceLabel = (identity: React.ReactNode, title: string, detail?: string) => (
-    <Flex align="center" gap={8}>
-      {identity}<Flex vertical><Typography.Text strong>{title}</Typography.Text>{detail ? <Typography.Text type="secondary">{detail}</Typography.Text> : null}</Flex>
+    <Flex align="center" gap={8} className="wand-execution-subject-label">
+      {identity}<Flex vertical style={{ minWidth: 0 }}><Typography.Text strong ellipsis title={title}>{title}</Typography.Text>{detail ? <Typography.Text type="secondary" ellipsis title={detail}>{detail}</Typography.Text> : null}</Flex>
     </Flex>
   );
   return <WandUiBoundary>
-    <Flex vertical gap={16}>
+    <Flex vertical gap={12} className="wand-execution-subject-picker">
       <Form.Item label="会话类型">
         <Segmented block aria-label="会话类型" value={kind} disabled={disabled}
           options={WORKSPACE_KIND_OPTIONS.map((option) => ({ value: option.value,
             label: <span title={option.description}>{option.label}</span> }))}
           onChange={(value) => handleKindSelect(value as WorkspaceSessionKind)}/>
       </Form.Item>
-      <Form.Item label="执行主体">
+      <Form.Item label="执行对象">
+        <WandSearchField value={query} onValueChange={setQuery} disabled={disabled}
+          inputRef={searchRef} label="搜索执行对象" placeholder="搜索员工、团队或工具"/>
         {switchedNotice ? <Alert type="warning" showIcon title={switchedNotice}/> : null}
         <Radio.Group value={`${selectedSubject.type}:${selectedSubject.type === "cli" ? selectedToolId : selectedSubject.id}`}
           disabled={disabled}
-          aria-label="执行主体" style={{ width: "100%" }}
+          aria-label="执行对象" style={{ width: "100%" }}
           onChange={(event) => {
             const value = String(event.target.value), separator = value.indexOf(":");
             const type = value.slice(0, separator) as ExecutionSubjectType;
@@ -157,43 +181,44 @@ export function UnifiedExecutionSubjectPicker({
             }
             onSubjectChange({ type, id });
           }}>
-          <Flex vertical gap={16}>
-          {!isPty ? <Flex vertical gap={8} role="group" aria-label="硅基员工">
+          <Flex vertical gap={12}>
+          {!isPty && (!query.trim() || matchingEmployees.length > 0) ? <Flex vertical gap={8} role="group" aria-label="硅基员工">
             <Typography.Text strong>硅基员工</Typography.Text>
             {employeesLoading ? <Spin size="small"/> : null}
-            {employees.filter((emp) => !emp.archivedAt).map((emp) => (
+            <div className="wand-execution-subject-grid">{matchingEmployees.map((emp) => (
               <Radio key={emp.id} value={`employee:${emp.id}`}>
                 {choiceLabel(<EmployeeAvatar employee={emp} size="md"/>, emp.name,
-                  emp.duty || (emp.agents[0] ? `首选: ${emp.agents[0].provider}` : "智能助手"))}
+                  emp.duty || (emp.agents[0] ? `首选：${agentToolDisplayName(emp.agents[0].provider, emp.agents[0].engine)}` : "智能助手"))}
               </Radio>
-            ))}
+            ))}</div>
             {!employeesLoading && employees.every((emp) => Boolean(emp.archivedAt)) ? (
               <div><span>还没有硅基员工</span><WandButton kind="ghost"
                 onClick={() => taskBoardController.open("", "", "teams")}>创建员工</WandButton></div>
             ) : null}
           </Flex> : null}
-          {!isPty && teams && teams.length > 0 ? <Flex vertical gap={8} role="group" aria-label="AI 团队">
+          {!isPty && matchingTeams.length > 0 ? <Flex vertical gap={8} role="group" aria-label="AI 团队">
             <Typography.Text strong>AI 团队</Typography.Text>
-            {teams.map((team) => <Radio key={team.id} value={`team:${team.id}`}
+            <div className="wand-execution-subject-grid">{matchingTeams.map((team) => <Radio key={team.id} value={`team:${team.id}`}
               disabled={disabled || teamBlocked} title={teamBlocked ? TEAM_NEEDS_PROJECT_HINT : undefined}>
-              {choiceLabel(<WandIcon name="parallel" size={20}/>, team.name, team.detail)}
-            </Radio>)}
+              {choiceLabel(<WandIcon name="parallel" size={18}/>, team.name, team.detail)}
+            </Radio>)}</div>
             {teamBlocked ? <p role="status">{TEAM_NEEDS_PROJECT_HINT}</p> : null}
           </Flex> : null}
-          <Flex vertical gap={8} role="group" aria-label="CLI 工具">
+          {matchingTools.length > 0 ? <Flex vertical gap={8} role="group" aria-label="CLI 工具">
             <Typography.Text strong>执行工具</Typography.Text>
-            {targetOptions.map((option) => {
+            <div className="wand-execution-subject-grid">{matchingTools.map((option) => {
               // PTY 下 Wand Agent 留在原位、只置灰：列表项不因形态切换而跳动。
               const unavailable = option.structuredOnly && isPty;
               return <Radio key={option.id} value={`cli:${option.id}`} disabled={disabled || unavailable}
                 title={unavailable ? "Wand Agent 仅支持对话" : undefined}>
-                {choiceLabel(option.id === "shell" ? <WandIcon name="terminal" size={20}/>
-                  : option.engine === "sdk" ? <WandIcon name="spark" size={20}/>
+                {choiceLabel(option.id === "shell" ? <WandIcon name="terminal" size={18}/>
+                  : option.engine === "sdk" ? <WandIcon name="spark" size={18}/>
                   : <ProviderLogo provider={option.provider} className="wand-subject-provider"/>,
                   option.label, option.description)}
               </Radio>;
-            })}
-          </Flex>
+            })}</div>
+          </Flex> : null}
+          {!hasMatches ? <Typography.Text type="secondary" role="status">没有匹配的执行对象，请更换关键词或清空搜索。</Typography.Text> : null}
           </Flex>
         </Radio.Group>
         {isPty ? <Typography.Paragraph type="secondary">终端直接使用命令行工具。要使用员工、团队或 Wand Agent，请选择“对话”。</Typography.Paragraph> : null}

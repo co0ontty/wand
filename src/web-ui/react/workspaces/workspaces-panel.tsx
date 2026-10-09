@@ -929,8 +929,8 @@ function TaskGroupSection({
             {!group.global && <Typography.Text type="secondary" ellipsis className="workspace-row-path" title={group.workspaceCwd}
               style={{ fontSize: 12 }}>{shortenWorkspacePath(group.workspaceCwd)}</Typography.Text>}
           </Flex>
-          <span className="workspace-row-count" aria-label={`${taskCount} 个任务，${group.standaloneSessions.length} 个独立会话`}>
-              {taskCount + group.standaloneSessions.length}
+          <span className="workspace-row-count" title={`当前列表：${taskCount} 个任务，${group.standaloneSessions.length} 个独立会话；已归档会话在下方单列`} aria-label={`当前显示 ${taskCount} 个任务，${group.standaloneSessions.length} 个独立会话`}>
+              {taskCount ? `${taskCount} 任务` : null}{taskCount && group.standaloneSessions.length ? " · " : null}{group.standaloneSessions.length || !taskCount ? `${group.standaloneSessions.length} 会话` : null}
           </span>
           <span className={`sidebar-head-activity tone-${groupActivity.tone}`} title={groupActivity.description}
             aria-label={groupActivity.description}>{groupActivity.label ? <Badge status={groupActivity.tone === "warning" ? "warning" : groupActivity.tone === "success" ? "success" : "processing"}/> : null}</span>

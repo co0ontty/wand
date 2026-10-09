@@ -12,6 +12,7 @@ import {
   createDefaultIssueAgent,
   EMPTY_ISSUE_FILTERS,
   filterIssues,
+  issueBoardEmptyState,
   groupIssuesByStatus,
   ISSUE_AGENT_MODES,
   ISSUE_AGENT_PROVIDERS,
@@ -142,9 +143,9 @@ test("dispatch guard only accepts supported providers with a model, effort, and 
 
 test("work mode options cover managed, full-access, and standard", () => {
   assert.deepEqual(ISSUE_AGENT_MODES.map((entry) => entry.value), ["managed", "full-access", "default"]);
-  assert.deepEqual(ISSUE_AGENT_MODES.map((entry) => entry.label), ["托管", "全限", "标准"]);
+  assert.deepEqual(ISSUE_AGENT_MODES.map((entry) => entry.label), ["托管", "完全访问", "标准"]);
   assert.equal(issueAgentModeLabel("managed"), "托管");
-  assert.equal(issueAgentModeLabel("full-access"), "全限");
+  assert.equal(issueAgentModeLabel("full-access"), "完全访问");
   assert.equal(issueAgentModeLabel("default"), "标准");
   // 旧任务 / 未知值回落到标准，不显示空标签。
   assert.equal(issueAgentModeLabel(undefined), "标准");
@@ -235,7 +236,8 @@ test("native board host talks to the Wand task API instead of the removed taskbo
   assert.match(host, /window\.setInterval\(\(\) => \{ void loadWorkspaces\(\); void reload\(true\); \}, createOpen \? 2_000 : 6_000\)/);
   assert.match(host, /subscribeTaskChanges/);
   assert.match(host, /taskBoardRepository\.agentDefaults\(/);
-  assert.match(host, /saveAgentDefaults\(/);
+  assert.match(host, /rememberAgentDefaults: subject\.type === "cli" && rememberCreateDefaults/);
+  assert.doesNotMatch(host, /taskBoardRepository\.saveAgentDefaults\(/);
   assert.match(host, /WandSelect/);
   assert.match(host, /issueWorkspaceOptions/);
   assert.doesNotMatch(host, /iframe/);
@@ -258,8 +260,8 @@ test("only the doing column creates and assigns in one step", () => {
   // 创建链路和新建对话框共用同一个判定，避免「按钮写创建并指派但没派发」这类不一致。
   assert.match(host, /issueCreateDispatches\(draft\.status\) && submitDescription && \(employee \|\| isDispatchableIssueAgent\(draft\.agent\)\)/);
   assert.match(host, /const createDispatches = issueCreateDispatches\(draft\.status\)/);
-  // 运行模式始终可选：即使只创建任务，也要把工作模式写进全局默认。
-  assert.match(host, /<Card size="small" className="task-board-create-assign" aria-label=\{createDispatches \? "第一次指派" : "Agent 与运行模式"\}>/);
+  // 运行模式属于本任务，保存以后默认必须显式选择。
+  assert.match(host, /<Card size="small" className="task-board-create-assign task-board-form-section" aria-label=\{createDispatches \? "第一次指派" : "Agent 与运行模式"\}>/);
   // 只创建时不出现「创建并指派」的按钮文案。
   assert.match(host, /createDispatches && draft\.description\.trim\(\) \? "创建并指派" : "创建任务"/);
   assert.match(host, /只创建任务，不指派 Agent/);
@@ -274,8 +276,8 @@ test("create form can assign the first agent from the description", () => {
   assert.match(composer, /可选/);
   assert.match(composer, /按描述自动生成/);
   assert.match(host, /指定项目目录/);
-  assert.match(composer, /第一次指派给谁/);
-  assert.match(composer, /第一次指派的思考深度/);
+  assert.match(composer, /任务执行对象/);
+  assert.match(composer, /任务思考深度/);
   assert.match(composer, /ariaLabel="运行模式"/);
   assert.match(composer, /issueAgentModeOptions\(draft\.agent\.provider\)/);
   assert.match(host, /作为第一个 Agent 的指派内容/);
@@ -717,4 +719,19 @@ test("Pi 与 Wand Agent 在任务面板上是两个标签、两个分组", () =>
     sessions, assigned: null, catalog: null,
   }));
   assert.match(markup, /Wand Agent/, "指派记录里要能看出跑的是 Wand Agent");
+});
+
+
+test("task board distinguishes first-use, inactive and filtered empty states", () => {
+  assert.equal(issueBoardEmptyState(0, 0, 0, false).kind, "first");
+  assert.equal(issueBoardEmptyState(8, 0, 0, false).kind, "inactive");
+  assert.match(issueBoardEmptyState(8, 0, 8, false).description, /8 个归档任务/);
+  assert.equal(issueBoardEmptyState(8, 0, 0, true).kind, "filtered");
+  const host = readFileSync(new URL("../src/web-ui/react/issues/task-board-host.tsx", import.meta.url), "utf8");
+  assert.match(host, /活动 \$\{activeCount\} · 归档 \$\{archiveCount\}/);
+  assert.match(host, /const matchedTasks = filterIssues\(tasks, query, filterWorkspaceId, filters, true\)/);
+  assert.doesNotMatch(host, /共 \$\{visible\.length\} 个任务/);
+  assert.match(host, /rememberCreateDefaults, setRememberCreateDefaults\] = React\.useState\(false\)/);
+  const form = host.slice(host.indexOf("task-board-native-composer"));
+  assert.doesNotMatch(form, /rememberAgent\(/, "changing fields must not mutate global defaults");
 });

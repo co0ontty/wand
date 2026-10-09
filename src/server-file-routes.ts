@@ -13,6 +13,7 @@ import { asyncRoute } from "./express-async.js";
 import { sendRouteError } from "./server-request.js";
 import { isBlockedFolderPath, isPathWithinBase, normalizeFolderPath } from "./middleware/path-safety.js";
 import { parseBoundedInteger } from "./request-limits.js";
+import { runGitRawAsync } from "./git-utils.js";
 import type { WandStorage } from "./storage.js";
 import type {
   DirectoryListing,
@@ -610,7 +611,10 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
     const cwd = typeof req.query.cwd === "string" ? req.query.cwd : defaultCwd;
     const maxDepth = parseBoundedInteger(req.query.depth, 5, 0, 8);
     const maxResults = parseBoundedInteger(req.query.limit, 50, 1, 200);
-    const ignoredDirectories = new Set([".git", "node_modules", ".next", "dist", "build", "coverage", ".wand-uploads", ".wand-team"]);
+    const includeGenerated = req.query.includeGenerated === "true";
+    // Internal metadata remains excluded even when the user opts into generated files.
+    const ignoredDirectories = new Set([".git", ".wand", ".wand-uploads", ".wand-team"]);
+    const generatedDirectories = new Set(["node_modules", ".next", "dist", "build", "coverage"]);
     const maxVisitedEntries = 20_000;
     let resolvedCwd: string;
     try {
@@ -629,34 +633,61 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
     }
 
     try {
-      const results: Array<{ path: string; name: string; type: "dir" | "file"; matchScore: number }> = [];
+      let gitIgnored = new Set<string>();
+      try {
+        const ignored = await runGitRawAsync(["ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"], resolvedCwd, { timeout: 2_000, maxBuffer: 2 * 1024 * 1024 });
+        gitIgnored = new Set(ignored.split("\0").filter(Boolean).map((entry) => path.resolve(resolvedCwd, entry.replace(/\/$/, ""))));
+      } catch {
+        // Ordinary directories and hosts without Git still retain the existing known-directory exclusions.
+      }
+      const results: Array<{ path: string; name: string; type: "dir" | "file"; matchScore: number; generated: boolean; depth: number }> = [];
+      const deferred: Array<{ path: string; name: string; depth: number }> = [];
       const queryLower = query.toLowerCase();
       let visitedEntries = 0;
-      async function searchDir(dirPath: string, currentDepth: number): Promise<void> {
-        if (currentDepth > maxDepth || results.length >= maxResults || visitedEntries >= maxVisitedEntries) return;
-        const entries = await readdir(dirPath, { withFileTypes: true });
-        for (const entry of entries) {
-          if (results.length >= maxResults || visitedEntries >= maxVisitedEntries) break;
-          visitedEntries += 1;
-          if (entry.isDirectory() && ignoredDirectories.has(entry.name)) continue;
-          const entryPath = path.join(dirPath, entry.name);
-          const matchIndex = entry.name.toLowerCase().indexOf(queryLower);
-          if (matchIndex !== -1) {
-            results.push({
-              path: entryPath,
-              name: entry.name,
-              type: entry.isDirectory() ? "dir" : "file",
-              matchScore: matchIndex,
-            });
+      async function searchDir(dirPath: string, currentDepth: number, generated = false): Promise<void> {
+        const directories = [{ path: dirPath, depth: currentDepth }];
+        for (let index = 0; index < directories.length && visitedEntries < maxVisitedEntries; index += 1) {
+          const directory = directories[index]!;
+          if (directory.depth > maxDepth) continue;
+          const entries = await readdir(directory.path, { withFileTypes: true });
+          for (const entry of entries) {
+            if (visitedEntries >= maxVisitedEntries) break;
+            visitedEntries += 1;
+            if (entry.isDirectory() && ignoredDirectories.has(entry.name)) continue;
+            const entryPath = path.join(directory.path, entry.name);
+            if (!generated && entry.isDirectory() && generatedDirectories.has(entry.name)) {
+              if (includeGenerated) deferred.push({ path: entryPath, name: entry.name, depth: directory.depth + 1 });
+              continue;
+            }
+            if (!generated && gitIgnored.has(entryPath)) continue;
+            const matchIndex = entry.name.toLowerCase().indexOf(queryLower);
+            if (matchIndex !== -1) {
+              results.push({
+                path: entryPath,
+                name: entry.name,
+                type: entry.isDirectory() ? "dir" : "file",
+                matchScore: matchIndex,
+                generated,
+                depth: directory.depth,
+              });
+            }
+            if (entry.isDirectory() && directory.depth < maxDepth) directories.push({ path: entryPath, depth: directory.depth + 1 });
           }
-          if (entry.isDirectory()) await searchDir(entryPath, currentDepth + 1);
         }
       }
       await searchDir(resolvedCwd, 0);
-      results.sort((a, b) => a.matchScore !== b.matchScore
-        ? a.matchScore - b.matchScore
-        : a.name.localeCompare(b.name));
-      res.json({ results: results.slice(0, maxResults), query, cwd: resolvedCwd });
+      // Complete the project-file pass before dependencies can consume the bounded result budget.
+      for (const directory of deferred) {
+        if (visitedEntries >= maxVisitedEntries) break;
+        const matchScore = directory.name.toLowerCase().indexOf(queryLower);
+        if (matchScore !== -1) results.push({ path: directory.path, name: directory.name, type: "dir", matchScore, generated: true, depth: directory.depth - 1 });
+        await searchDir(directory.path, directory.depth, true);
+      }
+      results.sort((a, b) => Number(a.generated) - Number(b.generated)
+        || Number(b.name.toLowerCase() === queryLower) - Number(a.name.toLowerCase() === queryLower)
+        || a.depth - b.depth || a.matchScore - b.matchScore || a.name.localeCompare(b.name));
+      res.json({ results: results.slice(0, maxResults), query, cwd: resolvedCwd,
+        truncated: results.length > maxResults || visitedEntries >= maxVisitedEntries });
     } catch (error) {
       sendRouteError(res, error, "搜索失败。可能原因：路径不存在或权限不足。");
     }

@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { Card } from "../react/design-library";
 import { WandUiProvider } from "../react/theme";
+import { installChatComposerStyles } from "../react/chat-composer-styles";
 
 const roots = new Map<HTMLElement, Root>();
 
@@ -16,6 +17,7 @@ function OwnedChildren({ nodes }: { nodes: readonly ChildNode[] }): React.ReactE
 }
 
 export function mountComposerSurfaces(): void {
+  installChatComposerStyles();
   for (const [host, root] of roots) if (!host.isConnected) { root.unmount(); roots.delete(host); }
   for (const host of document.querySelectorAll<HTMLElement>(".input-composer, #composer-plus-popover")) {
     if (roots.has(host)) continue;

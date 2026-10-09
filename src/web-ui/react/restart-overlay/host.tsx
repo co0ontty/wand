@@ -42,17 +42,9 @@ export function RestartOverlayHost({
         (manualRefreshButton.current ?? liveStatus.current)?.focus({ preventScroll: true });
       }
     };
-    const retainEscape = (event: globalThis.KeyboardEvent): void => {
-      if (event.key !== "Escape" || !content.current) return;
-      // Portal escape ownership also follows mount order rather than z-index.
-      event.preventDefault();
-      event.stopPropagation();
-    };
     owner.addEventListener("focusin", retainFocus, true);
-    owner.addEventListener("keydown", retainEscape, true);
     return () => {
       owner.removeEventListener("focusin", retainFocus, true);
-      owner.removeEventListener("keydown", retainEscape, true);
     };
   }, [snapshot.open]);
 
@@ -82,6 +74,7 @@ export function RestartOverlayHost({
         testId="restart-overlay"
         showClose={false}
         dismissable={false}
+        dismissalPriority="blocking"
       >
         <Flex ref={content} vertical align="center" gap="middle" className="wand-restart-body" aria-busy={busy} style={{ paddingBlock: 24 }}>
           {snapshot.phase !== "timed-out" ? (

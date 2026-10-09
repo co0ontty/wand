@@ -9,6 +9,8 @@ export function installSidebarStyles(): void {
 .sidebar-rail-scroll { width:100%; flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; }
 .sidebar-rail-scroll > .sidebar-brand-mark { display:block; margin:8px auto 16px; }
 .sidebar-list-panel { flex:1; min-width:0; min-height:0; }
+.sidebar-list-panel[hidden] { display:none; }
+.sidebar.context-rail .sidebar-navigation-rail { border-inline-end:1px solid var(--border-subtle); }
 .sidebar-navigation-rail :is(.wand-ui-icon-button,.sidebar-list-error,[data-daemon-update-status]) { width:44px; min-width:44px; height:44px; padding:0; flex:none; }
 .sidebar .conversation-navigation .wand-ui-icon-button { height:48px; display:flex; flex-direction:column; gap:3px; border-radius:var(--control-radius); color:var(--text-secondary); }
 .sidebar .conversation-navigation .wand-ui-icon-button[aria-current="page"] { color:var(--accent-active); background:var(--accent-muted); }
@@ -17,7 +19,7 @@ export function installSidebarStyles(): void {
 .sidebar .wand-ui-button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 .sidebar-list-panel { background:var(--bg-surface); border-inline-end:1px solid var(--border-subtle); }
 .sidebar-rail-notices { margin-block:12px 4px; padding-block-start:12px; border-block-start:1px solid var(--border-subtle); }
-.sidebar-profile-button { margin-block-start:8px; }
+.sidebar .sidebar-profile-button { margin-block-start:8px; display:flex; flex-direction:column; gap:3px; color:var(--text-secondary); }
 .sidebar-notification-content { width:min(280px, calc(100vw - 64px)); max-height: min(480px, 65dvh); overflow:auto; }
 /* A continuous directory list, with one indent per real ownership boundary. */
 .sidebar .conversation-navigation { width:100%; }

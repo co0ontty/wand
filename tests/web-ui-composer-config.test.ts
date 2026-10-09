@@ -50,14 +50,13 @@ test("mode 作用域只渲染模式 chip", () => {
   assert.doesNotMatch(html, /data-models-refresh/);
 });
 
-test("runtime 作用域渲染模型与思考，含刷新按钮", () => {
+test("runtime 保留模型快捷控制，思考与刷新收于完整执行选项", () => {
   const html = render(mountFor("runtime"));
   assert.match(html, /aria-label="模型与思考设置"/);
   assert.doesNotMatch(html, /data-mode-control-pill="mode"/);
   assert.match(html, /data-mode-control-pill="model"/);
-  assert.match(html, /data-mode-control-pill="thinking"/);
-  assert.match(html, /data-models-refresh=""/);
-  assert.match(html, /data-models-refresh-scope="runtime"/);
+  assert.doesNotMatch(html, /data-mode-control-pill="thinking"/);
+  assert.doesNotMatch(html, /data-models-refresh=""/);
 });
 
 test("all 作用域渲染三件套", () => {
@@ -94,7 +93,7 @@ test("blank tool selector reuses the stable scoped host without appearing on oth
 });
 
 test("刷新中的模型按钮进入 busy 态", () => {
-  const html = render(mountFor("runtime", { modelRefreshing: true }));
+  const html = render(mountFor("all", { modelRefreshing: true }));
   assert.match(html, /ant-btn/);
   assert.match(html, /aria-busy="true"/);
   assert.match(html, /disabled/);

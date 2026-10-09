@@ -1,4 +1,5 @@
 import { isStandaloneSettingsPage } from "../page.js";
+import { readSpeechMode, speechInputDescription } from "../react/speech/repository";
 import { clearNoticeView, paintBootNotice, paintOfflineNotice } from "./notice-view-adapter";
 import { composer, state, writeStoredBoolean } from "./state";
 import { invalidateChatInteraction } from "./chat-render-focus.js";
@@ -514,8 +515,11 @@ export function renderAppShell() {
               '</div>' +
               '<div class="composer-actions-left" role="group" aria-label="添加内容与权限">' +
                 // 加号按钮 —— 点击向上展开 popover：附件 / 终端交互 / 三件套（模式·模型·思考）
-                '<button id="attach-btn" data-antd-control class="composer-attach-trigger" type="button" title="更多" aria-label="更多操作" aria-haspopup="dialog" aria-controls="composer-plus-popover" aria-expanded="false">' +
+                '<button id="attach-btn" data-antd-control class="composer-attach-trigger" type="button" title="附件与执行选项（思考深度、模型和权限）" aria-label="更多操作" aria-haspopup="dialog" aria-controls="composer-plus-popover" aria-expanded="false">' +
                   iconSvg("plus", { size: 18, strokeWidth: 2.2 }) +
+                '</button>' +
+                '<button id="voice-record-btn" data-antd-control type="button" title="' + escapeHtml(speechInputDescription(readSpeechMode())) + '" aria-label="按住语音输入" aria-pressed="false"' + (state.terminalInteractive ? ' disabled' : '') + '>' +
+                  iconSvg("mic", { size: 18, strokeWidth: 1.8 }) +
                 '</button>' +
                 // tabindex="-1": 把 file input 移出 iOS Safari 表单导航链，避免软键盘顶部工具条出现 ⌃ ⌄ ✓。
                 '<input type="file" id="file-upload-input" multiple tabindex="-1" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;clip:rect(0,0,0,0);pointer-events:none">' +
@@ -548,10 +552,6 @@ export function renderAppShell() {
                   // React 外壳的 `replaceChildren()` 丢弃。
                   '<span class="composer-config-host" data-composer-config-host="runtime"></span>' +
                 '</div>' +
-                // 语音按钮位于输入框内部、发送按钮左侧；只在按钮自身处理长按。
-                '<button id="voice-record-btn" data-antd-control type="button" title="按住语音输入" aria-label="按住语音输入" aria-pressed="false"' + (state.terminalInteractive ? ' disabled' : '') + '>' +
-                  iconSvg("mic", { size: 19, strokeWidth: 2 }) +
-                '</button>' +
                 // 「立即发送」按钮已下线 —— 默认行为永远是排队（气泡），想插队点输入框上方那条气泡。
                 // 输入控制器只更新data-phase；Ant投影单个发送/停止/结果图标。
                 '<button id="send-input-button" data-antd-control="primary" type="button" data-phase="idle" title="发送" aria-label="发送消息"></button>' +
@@ -571,6 +571,7 @@ export function renderAppShell() {
             // CLI 启动参数会作为后续轮次 / 新会话默认值生效。
             '<div class="plus-popover-sep" aria-hidden="true"></div>' +
             '<div class="plus-popover-trio-wrap">' +
+              '<p class="composer-settings-scope">执行选项 · 应用于当前会话；模型和思考深度同时记为此设备的新会话偏好。已启动的终端参数保持不变。</p>' +
               '<span class="composer-config-host" data-composer-config-host="all"></span>' +
             '</div>' +
           '</div>' +
