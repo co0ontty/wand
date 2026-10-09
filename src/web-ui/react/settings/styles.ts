@@ -30,17 +30,22 @@ const css = String.raw`
 .wand-settings-library-env-toolbar,.wand-settings-library-app-access-form { display:flex; gap:16px; align-items:center; flex-wrap:wrap; margin-bottom:16px; }
 
 /* Settings keep one section surface; field groups carry hierarchy without nested cards. */
-.wand-settings-library-page-heading { padding:12px 20px; }
-.wand-settings-library-page-heading h1 { font-size:18px; }
+.wand-settings-library-page-heading { min-height:var(--wand-page-header-height,56px); box-sizing:border-box; padding:8px var(--wand-page-inset,20px); gap:8px 16px; background:var(--bg-primary); }
+.wand-settings-library-page-title { gap:8px; }
+.wand-settings-library-page-title .wand-ui-icon-button { width:var(--wand-page-toolbar-height,36px); min-height:var(--wand-page-toolbar-height,36px); padding:0; flex-shrink:0; }
+.wand-settings-library-page-heading h1 { font-size:var(--wand-page-title-size,18px); }
 .wand-settings-library-page:not([data-compact=true]) .wand-settings-library-directory { width:216px; }
 .wand-settings-library-directory .ant-menu-item { min-height:44px; padding-block:8px; }
 .wand-settings-library-nav-copy { gap:2px; }
 .wand-settings-library-page[data-compact=true] .wand-settings-library-directory .ant-menu-item { min-height:52px; }
-.wand-settings-library-detail-content { max-width:720px; padding:20px 24px 28px; container:wandsettings / inline-size; }
+.wand-settings-library-detail-content { max-width:760px; margin-inline:0; padding:20px var(--wand-page-inset,20px) 28px; container:wandsettings / inline-size; }
+.wand-settings-library-page[data-compact=true] .wand-settings-library-page-heading { padding:8px var(--wand-page-inset,12px); }
+.wand-settings-library-page[data-compact=true] .wand-settings-library-detail-content { padding:16px var(--wand-page-inset,12px) 24px; }
+.wand-settings-library-page[data-compact=true] .wand-settings-library-page-title .wand-ui-icon-button { min-height:var(--wand-page-toolbar-height,36px); }
 .wand-settings-library-panel-heading { gap:4px; margin-bottom:4px; }
 .wand-settings-library-panel-heading h2 { font-size:18px; }
 .wand-settings-library-panel-heading p { font-size:13px; line-height:1.55; }
-.wand-settings-library-panel { gap:12px; }
+.wand-settings-library-panel { gap:16px; }
 .wand-settings-library-section>.ant-card-head { min-height:42px; padding-inline:16px; }
 .wand-settings-library-section>.ant-card-head .ant-card-head-title { padding-block:10px; font-size:14px; }
 .wand-settings-library-section>.ant-card-body { padding:16px; }

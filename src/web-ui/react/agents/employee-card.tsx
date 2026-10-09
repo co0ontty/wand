@@ -139,22 +139,21 @@ export function EmployeeCard({
       >
         <EmployeeAvatar employee={employee} size="md" />
         <Flex vertical gap={2} className="wand-team-member-copy" style={{ flex: 1, minWidth: 0 }}>
-          <Flex align="center" wrap gap={6}>
-            <Typography.Text strong>{employee.name}</Typography.Text>
+          <Flex align="center" gap={6} className="wand-employee-name-line">
+            <Typography.Text strong ellipsis title={employee.name}>{employee.name}</Typography.Text>
             {isSystem ? <Tag className="wand-employee-system-tag">{tag}</Tag> : null}
             {isArchived ? <Tag className="wand-employee-archived-tag">已归档</Tag> : null}
           </Flex>
-          {!isSystem ? <Flex align="center" gap={4} wrap className="wand-employee-tags" aria-label={`员工标签：${tags.join("、") || "暂无"}`}>
-            {tags.length ? tags.map((label) => <Tag key={label}>{label}</Tag>)
-              : <Typography.Text type="secondary">暂无标签</Typography.Text>}
-          </Flex> : null}
-          <Typography.Text type="secondary" ellipsis>{employee.duty || "还没写职责"}</Typography.Text>
-          <Typography.Text type="secondary" ellipsis className="wand-team-member-agent">
-            {employee.agents[0]
-              ? issueAgentProviderModelLine(employee.agents[0], catalog)
-              : "未配置候选"}
-            {employee.agents.length > 1 ? ` (+${employee.agents.length - 1} 个备用)` : null}
-          </Typography.Text>
+          <Typography.Text type="secondary" ellipsis title={employee.duty || "还没写职责"}>{employee.duty || "还没写职责"}</Typography.Text>
+          <Flex align="center" gap={8} className="wand-employee-meta-line">
+            <Typography.Text type="secondary" ellipsis className="wand-team-member-agent" title={employee.agents[0] ? issueAgentProviderModelLine(employee.agents[0], catalog) : "未配置候选"}>
+              {employee.agents[0]
+                ? issueAgentProviderModelLine(employee.agents[0], catalog)
+                : "未配置候选"}
+              {employee.agents.length > 1 ? ` (+${employee.agents.length - 1} 个备用)` : null}
+            </Typography.Text>
+            {!isSystem && tags.length ? <Typography.Text type="secondary" ellipsis className="wand-employee-tags" title={`员工标签：${tags.join("、")}`} aria-label={`员工标签：${tags.join("、")}`}>{tags.join(" · ")}</Typography.Text> : null}
+          </Flex>
         </Flex>
         <WandIcon name="chevronDown" size={14} />
       </WandButton> : null}

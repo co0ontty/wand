@@ -1,4 +1,5 @@
 import { cssEvidenceCapture } from "./helpers/antd-css-evidence.js";
+import { installLayoutShiftObserver, runPageLayoutQa } from "./helpers/page-layout-qa.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { spawn } from "node:child_process";
@@ -84,7 +85,7 @@ test("Ant Design task pages preserve date-only, portals, draft refs and owned fo
       let data = url.includes("provider-usage")?{}:url.includes("silicon-employees")?{employees:window.tasks.employees}:url.includes("ai-teams")?window.tasks.teams:url.includes("workspaces")?[{id:"w-audit",name:"Audit project",cwd:"/tmp",kind:"project"}]:url.includes("wand-milestones")?{milestones}:url.includes("team-runs")?[]:url.includes("models")?{models:[{id:"default",label:"Default"},{id:"alpha",label:"Alpha"}]}:{};
       return new Response(JSON.stringify(data), {status:200,headers:{"content-type":"application/json"}});
     };
-    Object.assign(taskBoardRepository,{list:async()=>window.tasks.boardTasks??[task,{...task,id:"old",identifier:"TASK-2",title:"Archived",status:"archived"}],workspaces:async()=>[{id:"w1",name:"Project",cwd:"/tmp"}],models:async()=>({models:[{id:"default",label:"Default"}]}),agentDefaults:async()=>window.tasks.agentDefaults??agent,saveAgentDefaults:async()=>{throw Error("Implicit defaults mutation")},create:async input=>new Promise(resolve=>{window.tasks.createdInputs??=[];window.tasks.createdInputs.push(input);window.tasks.createReceipt=()=>{if(input.rememberAgentDefaults)window.tasks.agentDefaults=input.agent;resolve({...task,...input,id:"new"})}})});
+    Object.assign(taskBoardRepository,{list:async()=>{if(window.tasks.qaError)throw Error("Fixture list load failed — 草稿与数据未修改");if(window.tasks.qaLoading)return new Promise(resolve=>{window.tasks.qaRelease=()=>resolve([task])});return window.tasks.boardTasks??[task,{...task,id:"old",identifier:"TASK-2",title:"Archived",status:"archived"}]},workspaces:async()=>[{id:"w1",name:"Project",cwd:"/tmp"}],models:async()=>({models:[{id:"default",label:"Default"}]}),agentDefaults:async()=>window.tasks.agentDefaults??agent,saveAgentDefaults:async()=>{throw Error("Implicit defaults mutation")},create:async input=>new Promise(resolve=>{window.tasks.createdInputs??=[];window.tasks.createdInputs.push(input);window.tasks.createReceipt=()=>{if(input.rememberAgentDefaults)window.tasks.agentDefaults=input.agent;resolve({...task,...input,id:"new"})}})});
     Object.assign(issuesRepository,{list:async()=>[{number:1,title:"Library migration",state:"open",labels:[{name:"UI"}]}],bindings:async()=>({bindings:[]}),create:async()=>new Promise(resolve=>{window.tasks.issueReceipt=()=>resolve({number:2})})});
     configureNewSessionRuntime({onOpen:noop,onClose:noop,getContext:()=>({effectiveCwd:"/tmp",selectedModels:{}}),rememberModel:noop,prepareCreate:async()=>({}),completeCreate:async()=>{}});
     const newRepo={load:async()=>({config:{defaultProvider:"claude",defaultSessionKind:"structured",defaultMode:"default",defaultCwd:"/tmp"},recentPaths:[{path:"/tmp",name:"tmp"}]}),suggestPaths:async()=>[{path:"/tmp/project",name:"project"}],savePreferences:async()=>{},create:async()=>{throw Error("Local rejection keeps inputs");}};
@@ -259,6 +260,42 @@ test("Ant Design task pages preserve date-only, portals, draft refs and owned fo
       await send("Input.dispatchKeyEvent", { type: "keyUp", key, code: key });
     };
     await send("Page.enable"); await send("Runtime.enable");
+    if (process.env.WAND_PAGE_LAYOUT_QA === "1") {
+      await installLayoutShiftObserver(send);
+      const prepare = async (condition: string) => {
+        await evaluate("window.__wandFixtureBeforeNavigation=true");
+        await send("Page.navigate",{url:origin});
+        await wait("!window.__wandFixtureBeforeNavigation && !!window.tasks?.show && !!document.querySelector('[data-testid=task-controls]')");
+        await evaluate(`(()=>{tasks.qaError=${condition === "error"};tasks.qaLoading=${condition === "loading"};
+          if(${condition === "empty"})tasks.boardTasks=[];
+          if(${condition === "long"})tasks.boardTasks=[{...tasks.baseTask,title:'跨页面布局与长英文名称 LongUnbrokenIdentifier'.repeat(6),workspace:{...tasks.baseTask.workspace,name:'超长项目 ProjectDirectoryWithoutBreak'.repeat(8)},milestone:{...tasks.baseTask.milestone,name:'跨团队里程碑 ReleaseCandidate'.repeat(8)},description:'中英混排描述 LongDescriptionWithNoBreak'.repeat(20)}];
+          tasks.show('board')})()`);
+        await wait(condition === "loading" ? "!!document.querySelector('.task-board-skeleton')" : condition === "error" ? "document.body.innerText.includes('Fixture list load failed')" : "!!document.querySelector('.task-board-native-page') && !document.querySelector('.task-board-skeleton')");
+        if(condition === "long")await evaluate("(()=>{const scroller=document.querySelector('.task-board-scroll'),column=document.querySelector('.task-board-column.is-doing');if(scroller&&column)scroller.scrollLeft=column.offsetLeft-scroller.offsetLeft})()");
+      };
+      const widths=[320,390,639,640,768,1024,1440,1920];
+      const cases=widths.flatMap(width=>["normal","long"].map(condition=>({width,condition,reducedMotion:false,prepare:()=>prepare(condition)})));
+      const extra=[320,1024].flatMap(width=>["loading","empty","error"].map(condition=>({width,condition,prepare:()=>prepare(condition)})));
+      const records=await runPageLayoutQa({page:"tasks",artifact:join(root,"output/sidebar-refinement/order-pages-qa"),driver:{send,evaluate,wait},cases:[...cases,...extra,{width:390,condition:"safe-area",safeArea:true,prepare:()=>prepare("long")},{width:1280,condition:"zoom-200-equivalent",zoomEquivalent:true,prepare:()=>prepare("long")}],rootSelector:".task-board-native-page",titleSelector:".task-board-heading-copy h1",secondarySelector:".task-board-result-summary,.task-board-column-empty,.task-board-card-id,.task-board-card-body",buttonSelector:".task-board-create-button span",disabledSelector:".task-board-header-actions button:disabled",limitations:["Board column horizontal scrolling is intentional; outer app shell/safe-area ownership is not mounted"]});
+      if(process.env.WAND_PAGE_LAYOUT_QA_SAMPLE === "1") {
+        const titleProbe="(()=>{const n=document.querySelector('.task-board-card-title'),b=n.closest('button'),s=getComputedStyle(n);return{height:n.getBoundingClientRect().height,lineHeight:Number.parseFloat(s.lineHeight),lineClamp:s.webkitLineClamp,fullTitle:b.title===n.textContent,fullAccessibleName:b.getAttribute('aria-label').includes(n.textContent),textLength:n.textContent.length}})()";
+        const collapsed=await evaluate(titleProbe);
+        assert.ok(collapsed.height<=collapsed.lineHeight*3+1,"closed card title is limited to three lines");
+        assert.equal(collapsed.fullTitle,true);assert.equal(collapsed.fullAccessibleName,true);
+        await click('.task-board-card-open');await wait("!!document.querySelector('.task-board-card.is-open')");
+        const expanded=await evaluate(titleProbe);assert.ok(expanded.height>expanded.lineHeight*3,"expanded title reveals full text");
+        const shot=await send("Page.captureScreenshot",{format:"png"});
+        const target=join(root,"output/sidebar-refinement/order-pages-qa/final-sample");
+        writeFileSync(join(target,"tasks-320-long-expanded.png"),Buffer.from(shot.data,"base64"));
+        await key("Escape");await wait("!document.querySelector('.task-board-card.is-open')");
+        writeFileSync(join(target,"task-title-clamp.json"),JSON.stringify({collapsed,expanded,escapeRestoredCollapsed:true,scope:"Production task card in isolated Chrome, no task mutation"},null,2));
+      }
+      assert.deepEqual(browserErrors,[],"layout QA has no browser runtime exceptions");
+      assert.deepEqual(records.flatMap(r=>r.issues.map((issue:string)=>`${r.width}/${r.condition}: ${issue}`)),[],"checked geometry, contrast and accessible names");
+      assert.ok(records.every(r=>r.evidence.performance.maxSessionWindowCls<=0.1),"isolated task initial-load CLS stays below 0.1");
+      console.log(`Task layout QA: ${records.length} cases; ${records.filter(r=>r.issues.length).length} with findings`);
+      return;
+    }
     const featureOnly = process.env.WAND_TASKS_FEATURE_ONLY === "1";
     const inventory = featureOnly ? ["new", "folder", "quick", "merge", "missions", "dispatch", "pi"]
       : ["controls", "board", "github", "new", "folder", "quick", "merge", "missions", "dispatch", "pi", "team"];

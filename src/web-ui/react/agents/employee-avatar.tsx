@@ -22,10 +22,11 @@ export function EmployeeAvatar({
   const cli = employeeAvatarProvider(employee, provider);
   const cliLabel = cli ? employeeCliLabel(cli, provider === undefined ? employee.agents?.[0]?.engine : undefined) : "";
   const pixelSize = { sm: 26, md: 32, lg: 44, xl: 72, chat: 40 }[size];
+  const providerSize = pixelSize <= 32 ? 14 : 18;
   const face = avatarFaceParts(employee, pixelSize);
   return <WandUiBoundary><Badge className={`wand-team-avatar wand-employee-avatar ${className}`.trim()} data-size={size}
     title={employee.name} offset={[0, pixelSize]}
-    count={cli ? <span role="img" aria-label={cliLabel} title={cliLabel} className="wand-employee-avatar-provider"><Avatar size={18} shape="square" icon={<ProviderLogo provider={cli}/>} /></span> : undefined}>
+    count={cli ? <span role="img" aria-label={cliLabel} title={cliLabel} className="wand-employee-avatar-provider"><Avatar size={providerSize} shape="square" icon={<ProviderLogo provider={cli}/>} /></span> : undefined}>
     <Avatar shape="square" size={pixelSize} src={face.src} style={face.style} icon={face.icon}/>
   </Badge></WandUiBoundary>;
 }

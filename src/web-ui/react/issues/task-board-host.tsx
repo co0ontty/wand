@@ -790,8 +790,9 @@ export function TaskBoardHost({
         aria-expanded={expanded}
         aria-controls={`task-card-detail-${task.id}`}
         aria-label={`${expanded ? "收起" : "展开"} ${task.identifier}: ${task.title}`}
+        title={task.title || "未命名任务"}
         onClick={() => setExpandedTaskId((current) => current === task.id ? "" : task.id)}
-      ><Typography.Text strong id={`task-${task.id}-title`}>{task.title || "未命名任务"}</Typography.Text></WandButton>
+      ><Typography.Text strong className="task-board-card-title" id={`task-${task.id}-title`}>{task.title || "未命名任务"}</Typography.Text></WandButton>
       <WandIconButton className="task-board-card-menu" aria-label={`任务菜单 ${task.identifier}`} disabled={busy}
         onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setContextMenu({ taskId: task.id, x: rect.left, y: rect.bottom }); }}>
         <WandIcon name="more" size={16}/>
@@ -951,7 +952,7 @@ export function TaskBoardHost({
           <WandButton
             className="task-board-create-button"
             kind="primary"
-            size="small"
+            size="medium"
             aria-label="新建任务"
             title="新建任务 (C)"
             onClick={() => openCreate("todo")}
@@ -975,6 +976,7 @@ export function TaskBoardHost({
       />}
 
       <Flex wrap align="center" gap="small" className="task-board-toolbar-controls">
+        <WandSearchField inputRef={searchRef} className="task-board-search" label="搜索任务" placeholder="搜索标题、编号或正文" value={query} onValueChange={setQuery}/>
         <WandSelect
           className="task-board-workspace-filter"
           value={filterWorkspaceId || "__all__"}
@@ -984,7 +986,6 @@ export function TaskBoardHost({
           searchPlaceholder="搜索目录"
           onValueChange={(value) => setFilterWorkspaceId(value === "__all__" ? "" : value)}
         />
-        <WandSearchField inputRef={searchRef} className="task-board-search" label="搜索任务" placeholder="搜索标题、编号或正文" value={query} onValueChange={setQuery}/>
         <WandSelect className="task-board-sort" ariaLabel="任务排序" value={sort} options={TASK_BOARD_SORTS} onValueChange={(value) => setSort(value as TaskBoardSort)}/>
           {(view === "board" || view === "list" || view === "gantt") && <TaskBoardFilterMenu
             tasks={tasks}

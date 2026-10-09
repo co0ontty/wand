@@ -133,7 +133,7 @@ export function WandIcon({
     case "binary":
       return <svg {...common}><path d="M12 3l8 9-8 9-8-9 8-9z"/></svg>;
     case "board":
-      return <svg {...common}><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M12 4v16M7 8v4M16.5 8v7"/></svg>;
+      return <svg {...common}><rect x="3.5" y="4" width="4" height="12" rx="1"/><rect x="10" y="4" width="4" height="16" rx="1"/><rect x="16.5" y="4" width="4" height="8" rx="1"/></svg>;
     case "brain":
       return <svg {...common}><path d="M12 5a3 3 0 0 0-5.8 1A4 4 0 0 0 4 13a4 4 0 0 0 8 5V5Zm0 0a3 3 0 0 1 5.8 1A4 4 0 0 1 20 13a4 4 0 0 1-8 5M8 10l4 2 4-2"/></svg>;
     case "branch":
@@ -177,8 +177,8 @@ export function WandIcon({
     case "gear":
       return (
         <svg {...common}>
-          <circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2.5"/>
-          <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/>
+          <path d="m9.5 3-.6 2.5-2.2 1.3-2.5-.7-2.5 4.3 1.9 1.8v2.6l-1.9 1.8 2.5 4.3 2.5-.7 2.2 1.3.6 2.5h5l.6-2.5 2.2-1.3 2.5.7 2.5-4.3-1.9-1.8v-2.6l1.9-1.8-2.5-4.3-2.5.7-2.2-1.3L14.5 3Z" transform="translate(2 1) scale(.833333)"/>
+          <circle cx="12" cy="12" r="3"/>
         </svg>
       );
     case "git":

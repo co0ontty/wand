@@ -54,7 +54,7 @@ test("page mode bypasses home bootstrap and only mounts settings plus its suppor
 test("an expired page session offers admin login in place and never navigates back to home", () => {
   const host = source("src/web-ui/react/settings/host.tsx");
   assert.match(host, /presentation === "page" && \(error as Error & \{ status\?: number \}\)\.status === 401/);
-  assert.match(host, /loginRequired && !clientAuth \? <div[^>]*><ConnectedAppAccess repository=\{repository\} signedOut allowEmptyPassword/);
+  assert.match(host, /loginRequired && !clientAuth \? <div className="wand-settings-library-page-content">[\s\S]*?<ConnectedAppAccess repository=\{repository\} signedOut allowEmptyPassword/);
   assert.match(host, /setLoginRequired\(false\)/);
   assert.doesNotMatch(host, /window\.location|location\.href|settings-button|trigger\.click/);
   assert.match(host, /snapshot\.access === "read-only" && !loginRequired && !clientAuth/);

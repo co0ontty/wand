@@ -272,7 +272,9 @@ export async function runPanels(matrix = modes) {
       assert.equal(await e("window.handleNativeBack()"), true);
       await wait("dialogOutcome?.value===null && !document.querySelector('[data-wand-owned-dialog-root]')", "native back cancels independent fallback");
       assert.equal(await e("portalBefore.isConnected && document.getElementById('wand-react-ui-portals')===portalBefore && Array.from(document.querySelectorAll('.ant-notification-notice')).some(node=>node.textContent.includes('Owned portal lease'))"), true, "owned unmount preserves shared portal and its unrelated notice");
-      await click(".ant-notification-notice-close");
+      const ownedNoticeClose = ".ant-notification-notice-info .ant-notification-notice-close";
+      assert.equal(await e(`document.querySelectorAll(${JSON.stringify(ownedNoticeClose)}).length`), 1, "the owned notice has one real close action even while previous warnings remain");
+      await click(ownedNoticeClose);
       await wait("!Array.from(document.querySelectorAll('.ant-notification-notice')).some(node=>node.textContent.includes('Owned portal lease'))", "the preserved shared notice remains interactive");
       await e("window.__wandReactUi.dialog=options=>{p.rawOverlay.dialog(options);return Promise.reject(Error('Synthetic async bridge failure'));};window.dialogOutcome='pending';p.dialog('owned').then(value=>{window.dialogOutcome={value};});void 0");
       await wait(`document.querySelectorAll('[data-wand-owned-dialog-root]').length===1 && !!document.querySelector(${JSON.stringify(ownedInput)})`, "one fallback after rejected published request");
@@ -302,8 +304,8 @@ export async function runPanels(matrix = modes) {
       assert.equal(await e("document.getElementById('todo-progress-task').textContent"), "正在处理");
       await click("#todo-progress-toggle");
       await wait("document.getElementById('todo-progress-body').classList.contains('expanded')", "native Todo disclosure");
-      const progress = await e(`(()=>{const b=document.getElementById('todo-progress-body'),c=document.querySelector('.chat-messages');return {open:document.getElementById('todo-progress-toggle').getAttribute('aria-expanded'),count:b.querySelectorAll('.ant-list-item').length,current:b.querySelector('[aria-current=step]')?.textContent,circle:document.querySelector('#todo-progress-ring [role=progressbar]')?.getAttribute('aria-valuenow'),padding:parseFloat(c.style.paddingBottom),height:b.offsetHeight,steps:document.querySelectorAll('#todo-progress-fill .ant-progress-steps-item').length};})()`);
-      assert.equal(progress.open, "true"); assert.equal(progress.count, 3); assert.equal(progress.current, "Working"); assert.equal(progress.circle, "33"); assert.equal(progress.steps, 3); assert.ok(progress.padding >= progress.height);
+      const progress = await e(`(()=>{const b=document.getElementById('todo-progress-body'),c=document.querySelector('.chat-messages');return {open:document.getElementById('todo-progress-toggle').getAttribute('aria-expanded'),count:b.querySelectorAll('.ant-list-item').length,current:b.querySelector('[aria-current=step]')?.textContent,circle:document.querySelector('#todo-progress-ring [role=progressbar]')?.getAttribute('aria-valuenow'),padding:parseFloat(c.style.paddingBottom),height:b.offsetHeight,linear:document.querySelector('#todo-progress-fill [role=progressbar]')?.getAttribute('aria-valuenow'),track:document.querySelector('#todo-progress-fill .ant-progress-track')?.style.width};})()`);
+      assert.equal(progress.open, "true"); assert.equal(progress.count, 3); assert.equal(progress.current, "Working"); assert.equal(progress.circle, "33"); assert.equal(progress.linear, "33"); assert.equal(progress.track, "33%"); assert.ok(progress.padding >= progress.height);
       record("todo real progress and reading clearance", progress);
       await click("#todo-progress-content .ant-list-item"); assert.equal(await e("document.getElementById('todo-progress-body').classList.contains('expanded')"), true, "inside list preserves expansion");
       await click("#input-box"); assert.equal(await e("document.getElementById('todo-progress-toggle').getAttribute('aria-expanded')"), "false", "outside pointer closes");

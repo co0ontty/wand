@@ -208,7 +208,7 @@ export function ShellTopbarChrome({ snapshot, onAction, onMoreOpenChange, elapse
       "main-header-row",
       (selected?.turnActive || selected?.permissionBlocked) && "is-running",
       selected?.permissionBlocked && "is-permission-blocked",
-    )} style={{ flexShrink: 0, padding: "8px 12px", borderBottom: "1px solid var(--border-subtle)" }}>
+    )} style={{ flexShrink: 0, padding: "8px var(--wand-page-inset, 20px)", borderBottom: "1px solid var(--border-subtle)" }}>
       <Flex align="center" gap="small" className="topbar-left">
         {(snapshot.layout.sidebarDrawer || !snapshot.layout.sidebarAnchored) && (
           <WandIconButton
@@ -225,18 +225,28 @@ export function ShellTopbarChrome({ snapshot, onAction, onMoreOpenChange, elapse
         )}
         {!snapshot.layout.sidebarAnchored && <WandBrandMark className="topbar-brand" style={{ width: 24, height: 24 }}/>}
       </Flex>
-      <Flex align="center" gap="small" wrap className="topbar-center" style={{ flex: "1 1 200px", minWidth: "min(100%, 200px)" }}>
+      <Flex vertical gap={2} className="topbar-center" style={{ flex: "1 1 0", minWidth: 0 }}>
         {selected ? (
           <>
+            <Flex align="center" gap={8} className="topbar-title-row">
             <Typography.Text ellipsis
               className={classNames("topbar-session-title", snapshot.topbar.titleGenerating && "title-generating")}
               title={[snapshot.topbar.title, snapshot.topbar.titleGenerating && "AI 正在生成标题", snapshot.topbar.description].filter(Boolean).join("\n")}
               aria-label={snapshot.topbar.titleGenerating ? `${snapshot.topbar.title}，AI 正在生成标题` : undefined}
               aria-busy={snapshot.topbar.titleGenerating || undefined}
-              style={{ flex: "1 1 180px", minWidth: 0, maxWidth: 520, fontWeight: "var(--font-weight-semibold)" }}
+              style={{ minWidth: 0, maxWidth: 520, fontWeight: "var(--font-weight-semibold)" }}
             >
               {snapshot.topbar.title}
             </Typography.Text>
+            <Typography.Text
+              className={classNames("current-task", !snapshot.topbar.currentTask && "hidden")}
+              id={chromeId("current-task")}
+              title={snapshot.topbar.currentTask || undefined} hidden={!snapshot.topbar.currentTask}
+            >
+              {snapshot.topbar.currentTask}
+            </Typography.Text>
+            </Flex>
+            <Flex align="center" gap={8} wrap className="topbar-metadata">
             <Tag
               className={classNames("session-status-pill", snapshot.topbar.statusTone)}
               title={snapshot.topbar.statusLabel}
@@ -250,13 +260,6 @@ export function ShellTopbarChrome({ snapshot, onAction, onMoreOpenChange, elapse
               )}
             </Tag>
             <Typography.Text type="secondary" className="topbar-provider" title={toolLabel}>{toolLabel}</Typography.Text>
-            <Typography.Text type="secondary"
-              className={classNames("current-task", !snapshot.topbar.currentTask && "hidden")}
-              id={chromeId("current-task")}
-              title={snapshot.topbar.currentTask || undefined} hidden={!snapshot.topbar.currentTask}
-            >
-              {snapshot.topbar.currentTask}
-            </Typography.Text>
             {snapshot.topbar.cwd && (
               <Typography.Text type="secondary"
                 className="topbar-cwd"
@@ -268,6 +271,7 @@ export function ShellTopbarChrome({ snapshot, onAction, onMoreOpenChange, elapse
                 <Typography.Text ellipsis>{cwdName}</Typography.Text>
               </Typography.Text>
             )}
+            </Flex>
           </>
         ) : (
           <>
