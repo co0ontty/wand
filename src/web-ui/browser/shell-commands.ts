@@ -117,9 +117,10 @@ export function createBrowserShellCommands(): LegacyUiCommands {
     quickStartCodexTerminal: () => quickStart("codex"),
     quickStartOpenCodeTerminal: () => quickStart("opencode"),
     quickStartStructuredSession: quickStartStructured,
-    selectSession: (id) => {
-      selectSession(id);
+    selectSession: (id, options) => {
+      const selected = selectSession(id, options);
       dismissDrawerIfOverlay();
+      return selected;
     },
     resumeSession: (id) => resumeSessionFromList(id).then((value: unknown) => {
       dismissDrawerIfOverlay();

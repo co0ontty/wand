@@ -45,7 +45,7 @@ function silenceBadgeText(selected: UiSessionVm | null, now: number): string {
 }
 import { TopbarGitBadge } from "./topbar-git-badge";
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
-import type { UiAction, UiSessionVm } from "./ui-store";
+import type { UiAction, UiSessionVm, UiSnapshotData } from "./ui-store";
 
 void React;
 
@@ -168,22 +168,41 @@ export function TopbarMoreMenu({ selected, actions, onAction }: TopbarMoreMenuPr
 export function ShellTopbar() {
   const snapshot = useUiStoreSnapshot();
   const dispatch = useUiDispatch();
-  const selected = snapshot.selected;
   const moreOpen = snapshot.layout.topbarMoreOpen;
   const menuOpenIntent = React.useRef(moreOpen);
   React.useEffect(() => { menuOpenIntent.current = moreOpen; }, [moreOpen]);
-  const selectedActions = selected ? getShellSidebarEntryActions(selected, false) : null;
+  const selected = snapshot.selected;
   const topbarNow = useServerAnchoredClock(Boolean(selected?.turnActive));
+  return <ShellTopbarChrome snapshot={snapshot} onAction={dispatch}
+    onMoreOpenChange={(open) => {
+      if (open !== menuOpenIntent.current) {
+        menuOpenIntent.current = open;
+        void dispatch({ type: "topbar.menu.toggle" });
+      }
+    }}
+    elapsed={selected?.turnActive ? <SessionElapsed anchor={selected.turnStartedAt}/> : null}
+    silence={selected ? silenceBadgeText(selected, topbarNow) : ""}
+    gitBadge={<TopbarGitBadge/>}/>;
+}
+
+/** Static chrome shared by the live shell and invisible creation measurement. */
+export function ShellTopbarChrome({ snapshot, onAction, onMoreOpenChange, elapsed, silence = "", gitBadge, measurement = false }: {
+  snapshot: Readonly<UiSnapshotData>;
+  onAction?: (action: UiAction) => void | Promise<unknown>;
+  onMoreOpenChange?: (open: boolean) => void;
+  elapsed?: React.ReactNode;
+  silence?: string;
+  gitBadge?: React.ReactNode;
+  measurement?: boolean;
+}) {
+  const selected = snapshot.selected;
+  const moreOpen = snapshot.layout.topbarMoreOpen;
+  const selectedActions = selected ? getShellSidebarEntryActions(selected, false) : null;
   const providerId = normalizeProviderId(selected?.provider);
   const toolLabel = providerId ? agentToolOption(agentToolIdFor(providerId, selected?.engine))?.label : selected?.provider;
   const cwdName = snapshot.topbar.cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || snapshot.topbar.cwd;
-
-  // Selecting an item closes the menu through `onOpenChange`, so the action
-  // itself is all that is left to dispatch here.
-  const runMoreAction = (action: UiAction) => {
-    void dispatch(action);
-  };
-
+  const chromeId = (value: string) => measurement ? undefined : value;
+  const runMoreAction = (action: UiAction) => { void onAction?.(action); };
   return (
     <Flex align="center" gap="small" wrap className={classNames(
       "main-header-row",
@@ -193,13 +212,13 @@ export function ShellTopbar() {
       <Flex align="center" gap="small" className="topbar-left">
         {(snapshot.layout.sidebarDrawer || !snapshot.layout.sidebarAnchored) && (
           <WandIconButton
-            id="sessions-toggle-button"
+            id={chromeId("sessions-toggle-button")}
             className={classNames("floating-sidebar-toggle", snapshot.layout.sessionsDrawerOpen && "active")}
             aria-label={snapshot.layout.sessionsDrawerOpen ? "关闭会话侧栏" : "打开会话侧栏"}
             aria-expanded={snapshot.layout.sessionsDrawerOpen}
-            aria-controls="sessions-drawer"
+            aria-controls={measurement ? undefined : "sessions-drawer"}
             data-pressed={snapshot.layout.sessionsDrawerOpen || undefined}
-            onClick={() => void dispatch({ type: "layout.drawer.toggle" })}
+            onClick={() => void onAction?.({ type: "layout.drawer.toggle" })}
           >
             <SidebarToggleIcon open={snapshot.layout.sessionsDrawerOpen} size={18}/>
           </WandIconButton>
@@ -222,17 +241,17 @@ export function ShellTopbar() {
               title={snapshot.topbar.statusLabel}
             >
               <span className="session-status-text">{snapshot.topbar.statusLabel}</span>
-              {selected.turnActive && <SessionElapsed anchor={selected.turnStartedAt}/>}
-              {selected.turnActive && silenceBadgeText(selected, topbarNow) && (
-                <span className="session-status-silent" title={silenceBadgeText(selected, topbarNow) || undefined}>
-                  {silenceBadgeText(selected, topbarNow)}
+              {selected.turnActive && elapsed}
+              {selected.turnActive && silence && (
+                <span className="session-status-silent" title={silence || undefined}>
+                  {silence}
                 </span>
               )}
             </Tag>
             <Typography.Text type="secondary" className="topbar-provider" title={toolLabel}>{toolLabel}</Typography.Text>
             <Typography.Text type="secondary"
               className={classNames("current-task", !snapshot.topbar.currentTask && "hidden")}
-              id="current-task"
+              id={chromeId("current-task")}
               title={snapshot.topbar.currentTask || undefined} hidden={!snapshot.topbar.currentTask}
             >
               {snapshot.topbar.currentTask}
@@ -240,7 +259,7 @@ export function ShellTopbar() {
             {snapshot.topbar.cwd && (
               <Typography.Text type="secondary"
                 className="topbar-cwd"
-                id="topbar-cwd"
+                id={chromeId("topbar-cwd")}
                 title={`工作目录：${snapshot.topbar.cwd}`}
                 aria-label={`工作目录：${snapshot.topbar.cwd}`}
                 style={{ maxWidth: 160, minWidth: 0, overflow: "hidden" }}
@@ -252,53 +271,46 @@ export function ShellTopbar() {
         ) : (
           <>
             <span className="topbar-tagline">{snapshot.topbar.title || "Wand 控制台"}</span>
-            <span className="current-task hidden" id="current-task"/>
+            <span className="current-task hidden" id={chromeId("current-task")}/>
           </>
         )}
       </Flex>
       <Flex align="center" gap={4} className="topbar-right">
         <WandIconButton
-          id="topbar-file-button"
+          id={chromeId("topbar-file-button")}
           kind="ghost"
           size="medium"
           aria-label="文件"
           aria-pressed={snapshot.layout.filePanelOpen}
           data-pressed={snapshot.layout.filePanelOpen || undefined}
           title="查看文件（可修改路径）"
-          onClick={() => void dispatch({ type: "layout.files.toggle" })}
+          onClick={() => void onAction?.({ type: "layout.files.toggle" })}
         >
           <WandIcon name="explorer" size={18}/>
         </WandIconButton>
         <WandIconButton
-          id="topbar-local-preview-button"
+          id={chromeId("topbar-local-preview-button")}
           kind="ghost"
           size="medium"
           aria-label="本地预览"
           title="打开本机 Web 服务或 HTML 文件"
-          onClick={() => localPreviewController.show()}
+          onClick={measurement ? undefined : () => localPreviewController.show()}
         >
           <WandIcon name="eye" size={18}/>
         </WandIconButton>
-        <span id="topbar-git-slot" className="topbar-git-slot">
-          <TopbarGitBadge/>
+        <span id={chromeId("topbar-git-slot")} className="topbar-git-slot">
+          {gitBadge}
         </span>
         {selected && (
           <div className="topbar-more-wrap">
-            <WandDropdownMenu
+            {measurement ? <WandIconButton kind="ghost" size="medium"><WandIcon name="more" size={18}/></WandIconButton> : <WandDropdownMenu
               open={moreOpen}
-              onOpenChange={(open) => {
-                // Menu selection and the library may both report the same close.
-                // Dispatch the toggle once, before the external snapshot catches up.
-                if (open !== menuOpenIntent.current) {
-                  menuOpenIntent.current = open;
-                  void dispatch({ type: "topbar.menu.toggle" });
-                }
-              }}
+              onOpenChange={onMoreOpenChange}
             >
               <WandDropdownMenuTrigger
                 render={(
                   <WandIconButton
-                    id="topbar-more-button"
+                    id={chromeId("topbar-more-button")}
                     kind="ghost"
                     size="medium"
                     aria-label="当前会话操作"
@@ -310,7 +322,7 @@ export function ShellTopbar() {
                 )}
               />
               <WandDropdownMenuContent
-                id="topbar-more-menu"
+                id={chromeId("topbar-more-menu")}
                 aria-label="当前会话"
                 align="end"
                 sideOffset={6}
@@ -318,7 +330,7 @@ export function ShellTopbar() {
                 <TopbarMoreMenu selected={selected} actions={selectedActions} onAction={runMoreAction}/>
                 <ChatWidthMenuItems/>
               </WandDropdownMenuContent>
-            </WandDropdownMenu>
+            </WandDropdownMenu>}
           </div>
         )}
       </Flex>

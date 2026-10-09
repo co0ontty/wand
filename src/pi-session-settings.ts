@@ -209,6 +209,7 @@ export interface PiSettingsResponse {
   recommendationReason?: string;
   autoResourcesAvailable?: boolean;
   autoResourcesReason?: string;
+  decisionAdvisor?: { notice: string | null; employeeId: string; hardware: import("./decision-hardware.js").DecisionHardwareAssessment };
   /** Older automatic-resource servers do not infer CodeMode. */
   autoCodemodeAvailable?: boolean;
   /** Absent on older servers; clients must not pretend skill locks are supported. */

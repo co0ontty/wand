@@ -49,6 +49,7 @@ export interface UiSessionVm {
   /** Present when the session belongs to a named workspace task. */
   workspaceId?: string;
   workspaceTaskId?: string;
+  archived?: boolean;
   worktree?: Readonly<{
     enabled: boolean;
     branch?: string;
@@ -150,7 +151,7 @@ export type UiAction =
   | { type: "session.quickStart.codex" }
   | { type: "session.quickStart.opencode" }
   | { type: "session.quickStart.structured" }
-  | { type: "session.select"; id: string }
+  | { type: "session.select"; id: string; focusInput?: boolean }
   | { type: "session.resume"; id: string }
   | { type: "session.resumeHistory"; provider: UiNativeHistoryProvider; id: string; cwd: string }
   | { type: "session.delete"; target: UiManageTarget; id: string }

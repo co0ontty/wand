@@ -120,7 +120,8 @@ test("archived sessions leave the normal sidebar list and stay restorable in the
 
   const panel = source("src/web-ui/react/workspaces/workspaces-panel.tsx");
   // 分拆只在数据加载后做一次，归档区可展开、可恢复，批量归档走的是同一套逻辑。
-  assert.match(panel, /groupSessionsByArchive\(page\.groups\)/);
+  assert.match(panel, /useTaskGroups\(refreshTick\)/);
+  assert.match(source("src/web-ui/react/workspaces/task-groups-store.ts"), /groupSessionsByArchive\(page\.groups\)/);
   assert.match(panel, /<ArchivedSessionsFold/);
   assert.match(panel, /batchArchiveSessions\(resolved\.sessionIds, true\)/);
   assert.match(panel, /httpWorkspacesRepository\.batchArchiveSessions\(ids, archived\)/);

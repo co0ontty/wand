@@ -12,6 +12,16 @@
 - `localDecision` 作为现有 SQLite 偏好存储；旧 JSON 值幂等迁移、用户旧 paths/enabled 保留，CLI `decision:configure` 写同一偏好。设置内更新立即生效，CLI 修改仍需普通安全重启。通用 `/api/settings/config` 不接受 `localDecision` 的路径/命令，专用管理入口只接受启用 boolean。
 - 仍是实验性辅助判断。高概率不等于正确，更不是权限批准、数据删除、发布或付款授权。
 
+## 决策专家
+
+系统员工「决策专家」（稳定 ID `e_wand_decision_expert`）负责有界选择、评分和是非判断。默认首选 `wand-decision/laya`，备用 `wand-openrouter-free/auto`；重启播种不覆盖用户已有候选顺序。身份、名称、人设和系统标签锁定，调用链可编辑。
+
+建议前检查当前服务器平台、CPU 和内存：LAYA 需要 Apple Silicon macOS / Metal、至少约 8 GiB 物理内存和 4 个 CPU 核。空闲内存只展示，不因 macOS 可回收缓存误判；Metal 的实际可用性由显式模型初始化验证。性能不足或平台不支持时不启动本地推理，明确提示原因，并提供「配置决策专家调用链」入口。
+
+此员工的候选只接受 LAYA 和 Wand 免费分组（含分组中的明确免费模型）；不是聊天模型选择器，不接受付费模型或 CLI 冒充本地执行。免费备用要求现有免费池已配置，调用前再次校验价格为零，无工具、严格 JSON 输出；已发出的免费请求失败或结果无效不自动重放。整个建议请求有 45 秒预算和取消链路。
+
+决策 API、会话资源建议、自动配置和临时派工建议复用该员工；建议与实际开工仍分开，会话明确关闭决策/自动配置时保持关闭。启用 LAYA、编辑调用链、下载模型各自独立。不能以高概率或员工建议代替用户授权。
+
 ## 语音
 
 Tiny / Base / Small 通过已有 `SpeechService` 下载和转写，不合并到 LAYA worker。初始化需要模型先下载；可选择自动 / CPU / Metal / CUDA，Mac 自动使用 Metal，其它主机自动 CPU。

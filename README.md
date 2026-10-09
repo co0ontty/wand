@@ -271,7 +271,7 @@ wand config:set port 9443
 
 ### 语音识别
 
-Web、Android、iOS 可在语音输入设置中选择「服务端识别」或「客户端本地识别」。服务端使用按需安装的 whisper.cpp 多语言模型，支持无 GPU CPU 服务器、Mac mini Metal 与可选 CUDA；模型不随普通构建下载。部署、模型大小、鉴权和隐私边界见 [服务端语音识别](docs/server-speech.md)。
+Web、Android、iOS 可在语音输入设置中选择「服务端识别」或「客户端本地识别」。服务端使用按需安装的 whisper.cpp 多语言模型，支持无 GPU CPU 服务器、Mac mini Metal 与可选 CUDA；模型不随普通构建下载。部署、模型大小、鉴权和隐私边界见 [服务端语音识别](docs/server-speech.md)。设置内下载/初始化 LAYA 与语音模型，以及「决策专家」的本机性能检查和默认本地/免费调用链，见 [本地模型管理](docs/local-model-setup.md)。
 
 ### 可选本地决策（实验性）
 

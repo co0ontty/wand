@@ -21,6 +21,9 @@ import { notifyTasksChanged } from "../task-changes";
 import { AiTeamsPage, TeamChatPage } from "../ai-teams/lazy";
 import { SidebarToggleIcon } from "./sidebar-toggle-icon";
 import { ShellTopbar } from "./shell-topbar";
+import { SettingsHost } from "../settings/host";
+import { settingsStore } from "../settings/controller";
+import { restartOverlayController } from "../restart-overlay/controller";
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
 import type { UiSnapshotData } from "./ui-store";
 import { ConversationHome } from "../conversations/home";
@@ -210,6 +213,7 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
   const editor = React.useSyncExternalStore(
     codeEditorStore.subscribe, codeEditorStore.getSnapshot, codeEditorStore.getSnapshot,
   );
+  const settings = React.useSyncExternalStore(settingsStore.subscribe, settingsStore.getSnapshot, settingsStore.getSnapshot);
   const snapshot = useUiStoreSnapshot();
   const conversationState = useConversationUi();
   const dispatch = useUiDispatch();
@@ -225,18 +229,18 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
   // #output 本身仍保留在 DOM（单例终端实例仍挂在上面，仅不可见），退出分屏后
   // 用缓冲 output 重置即可恢复，无需重建终端。
   const inSplit = !!context.taskId && activeWorkWindow(context.layout)?.layout.type === "split";
-  const conversationVisible = !taskBoard.open && !editor.open && (conversationState.active === true
+  const conversationVisible = !settings.open && !taskBoard.open && !editor.open && (conversationState.active === true
     || (conversationState.active === null && !inSplit && !snapshot.selected && !context.workspaceId));
   // 对话 / 看板 / 编辑器都是盖满主区的绝对定位页面层。它们在上面时，遗留槽位不能只是
   // 「被盖住」：#output / #chat-output / 输入区里的浮层仍然按自己的 z-index 参与主区堆叠
   // （终端缩放 11、终端拖拽把手 12、未读气泡 20、排队气泡 40、待办浮层 50 都高于页面层的 8），
   // 会直接浮到私聊页上。这里统一收口成 page layer，可见性交给同一条样式规则处理。
-  const pageLayerOpen = conversationVisible || taskBoard.open || editor.open;
+  const pageLayerOpen = settings.open || conversationVisible || taskBoard.open || editor.open;
 
   return (
-    <Flex component="main" vertical inert={snapshot.layout.sessionsBackdropVisible} className={`main-content${snapshot.layout.filePanelOpen ? " file-panel-open" : ""}${inSplit ? " main-content-in-split" : ""}${conversationVisible ? " main-content-conversation" : ""}${taskBoard.open ? " task-board-main-content" : ""}${pageLayerOpen ? " main-content-page-layer" : ""}`} style={{ flex: 1, minWidth: 0, minHeight: 0, position: "relative", overflow: "hidden" }}>
+    <Flex component="main" vertical inert={snapshot.layout.sessionsBackdropVisible} className={`main-content${snapshot.layout.filePanelOpen && !settings.open ? " file-panel-open" : ""}${inSplit ? " main-content-in-split" : ""}${conversationVisible ? " main-content-conversation" : ""}${taskBoard.open ? " task-board-main-content" : ""}${pageLayerOpen ? " main-content-page-layer" : ""}`} style={{ flex: 1, minWidth: 0, minHeight: 0, position: "relative", overflow: "hidden" }}>
       {/* 任务内由标签条承担主区导航；不再叠一层重复的会话标题栏。 */}
-      {context.taskId ? null : <div style={{ display: "contents" }} inert={conversationVisible} aria-hidden={conversationVisible}><ShellTopbar/></div>}
+      {context.taskId ? null : <div style={{ display: "contents", visibility: settings.open ? "hidden" : undefined }} inert={conversationVisible || settings.open} aria-hidden={conversationVisible || settings.open}><ShellTopbar/></div>}
       {context.taskId && snapshot.layout.sidebarDrawer && (
         <Flex component="nav" align="center" gap="small" className="workspace-mobile-navigation" aria-label="任务导航" style={{ flexShrink: 0, padding: "6px 12px" }}>
           <WandIconButton
@@ -250,12 +254,12 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
           <Typography.Text ellipsis title={context.taskName}>{context.taskName || "任务"}</Typography.Text>
         </Flex>
       )}
-      <ShellFilePanel explorerRef={legacyRefs?.fileExplorer}/>
-      <div style={{ display: "contents" }} inert={conversationVisible} aria-hidden={conversationVisible}><WorkspaceTabBar/></div>
+      <ShellFilePanel explorerRef={legacyRefs?.fileExplorer} suspended={settings.open}/>
+      <div style={{ display: "contents", visibility: settings.open ? "hidden" : undefined }} inert={conversationVisible || settings.open} aria-hidden={conversationVisible || settings.open}><WorkspaceTabBar/></div>
       <div id="output" inert={pageLayerOpen} className={classes.terminal} ref={legacyRefs?.terminal} style={{ flex: 1, minHeight: 0, position: "relative", overflow: "hidden", display: snapshot.legacyVisibility.terminal && !inSplit ? "flex" : "none" }}/>
       <div id="chat-output" inert={pageLayerOpen} className={classes.chat} ref={legacyRefs?.chat} style={{ flex: 1, minHeight: 0, position: "relative", overflow: "hidden", display: snapshot.legacyVisibility.chat && !inSplit ? "flex" : "none", flexDirection: "column" }}/>
       <ShellBlankChat
-        className={`${classes.blank}${inSplit || conversationVisible ? " hidden" : ""}`}
+        className={`${classes.blank}${inSplit || conversationVisible || settings.open ? " hidden" : ""}`}
         queueRef={legacyRefs?.crossSessionQueue}
         workspaceTask={context.taskId && context.workspaceId ? {
           workspaceId: context.workspaceId,
@@ -271,8 +275,8 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
         } : undefined}
       />
       <div inert={pageLayerOpen} className={classes.composer} ref={legacyRefs?.composer} style={{ flexShrink: 0, position: "relative", display: snapshot.legacyVisibility.composer && !inSplit ? undefined : "none" }}/>
-      {inSplit ? <div style={{ display: "contents" }} inert={conversationVisible} aria-hidden={conversationVisible}><WorkspaceWindow/></div> : null}
-      <CodeEditorHost/>
+      {inSplit ? <div style={{ display: "contents" }} inert={conversationVisible || settings.open} aria-hidden={conversationVisible || settings.open}><WorkspaceWindow/></div> : null}
+      <div style={{ display: "contents", visibility: settings.open ? "hidden" : undefined }} inert={settings.open} aria-hidden={settings.open}><CodeEditorHost/></div>
       <ConversationHome visible={conversationVisible} sidebarOpen={snapshot.layout.sessionsDrawerOpen}
         onOpenSidebar={snapshot.layout.sidebarDrawer ? () => void dispatch({ type: "layout.drawer.toggle" }) : undefined}
         onOpenSession={id => {
@@ -280,6 +284,7 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
           void openSessionWithOwningTask(id, selectedId => { void dispatch({ type: "session.select", id: selectedId }); });
         }}/>
       {/* 看板是独立路由，不能替换 <main>：#output 等 LegacyHost 槽位必须一直挂着。 */}
+      <div style={{ display: "contents", visibility: settings.open ? "hidden" : undefined }} inert={settings.open} aria-hidden={settings.open}>
       {taskBoard.open && taskBoard.page === "teamchat" ? <TeamChatPage
         runId={taskBoard.runId}
         sidebarOpen={snapshot.layout.sessionsDrawerOpen}
@@ -320,6 +325,8 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
           });
         }}
       /> : null}
+      </div>
+      <SettingsHost showRestart={() => restartOverlayController.showRestart()}/>
     </Flex>
   );
 }

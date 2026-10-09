@@ -2,7 +2,7 @@
 // 所属任务的工作区上下文：顶部标签栏（含「＋ 新建会话」）与主区的任务态都以它为准，
 // 否则主区只剩一条裸会话标题——既没有标签，也没有新建会话的入口。
 // 侧栏点击走的是同一条恢复路径（workspaces-panel 的 openSession），这里补上看板、
-// 页面刷新等入口缺的那一步；会话不属于任何任务时保持原行为。
+// 页面刷新等入口缺的那一步；未分组会话先退出旧任务，再进入它实际所属目录。
 
 import { workspacesStore } from "./controller";
 import { httpWorkspacesRepository } from "./repository";
@@ -58,7 +58,7 @@ export function taskOpenPayload(found: SessionOwningTask, preferredSessionId?: s
  * 打开会话，并在必要时先恢复它所属任务的工作区上下文。
  *
  * @param sessionId 目标会话 id。
- * @param openFallback 会话不属于任何任务、属于当前已打开任务、或恢复失败时的
+ * @param openFallback 会话未在目录中找到、属于当前已打开任务、或恢复失败时的
  *   兜底打开方式（保持调用方原有行为）。
  */
 export async function openSessionWithOwningTask(
@@ -74,8 +74,26 @@ export async function openSessionWithOwningTask(
   try {
     const page = await httpWorkspacesRepository.listTaskGroups();
     const found = findSessionOwningTask(page.groups, id);
+    if (!found) {
+      const group = page.groups.find((candidate) => candidate.standaloneSessions.some((session) => session.id === id && !session.teamChat));
+      if (!group) {
+        openFallback(sessionId);
+        return;
+      }
+      if (group.synthetic || group.global) runtime.closeWorkspace();
+      else runtime.openWorkspace({
+        id: group.workspaceId,
+        name: group.workspaceName,
+        cwd: group.workspaceCwd,
+        layout: null,
+        createdAt: group.createdAt ?? "",
+        lastOpenedAt: null,
+      });
+      runtime.selectSession(id);
+      return;
+    }
     // 已在该任务里：上下文无需切换，直接选中会话，避免重复 flush/重载布局。
-    if (!found || workspaceContextStore.getSnapshot().taskId === found.task.id) {
+    if (workspaceContextStore.getSnapshot().taskId === found.task.id) {
       openFallback(sessionId);
       return;
     }

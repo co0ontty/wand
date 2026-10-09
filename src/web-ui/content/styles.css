@@ -247,6 +247,7 @@ html.is-wand-app .chat-width-toggle { display: none; }
 .conversation-form-feedback { height:44px; overflow:auto; }
 .conversation-form-submit { min-width:96px; width:96px; height:44px; }
 .conversation-panel :is(.wand-ui-select-trigger,.ant-input-affix-wrapper) { max-width:100%; }
+.conversation-panel .wand-ui-select-value { min-width:0; overflow:hidden; text-overflow:ellipsis; }
 .conversation-inline-detail { display:grid; grid-template-rows:0fr; opacity:0; transition:grid-template-rows var(--motion-normal) var(--ease-out-expo), opacity var(--motion-fast) var(--ease-in-out-smooth); flex-shrink:0; }
 .conversation-inline-detail[data-open="true"] { grid-template-rows:1fr; opacity:1; }
 .conversation-inline-detail > div { min-height:0; overflow:hidden; }
@@ -260,7 +261,9 @@ html.is-wand-app .chat-width-toggle { display: none; }
 .conversation-task-chip[data-archived] { display:inline-flex; align-items:center; gap:6px; }
 .conversation-task-detail { padding-block:8px; border-bottom:1px solid var(--border-subtle); overflow-wrap:anywhere; }
 .conversation-contact-row { min-height:72px; }
-.conversation-preset-row { width:100%; min-height:72px; height:auto; text-align:start; }
+.conversation-preset-row.ant-btn { width:100%; min-width:0; min-height:72px; height:auto; text-align:start; justify-content:flex-start; white-space:normal; }
+.conversation-preset-row > .ant-flex { min-width:0; max-width:100%; }
+.conversation-preset-row .ant-typography { min-width:0; overflow-wrap:anywhere; }
 .conversation-sidebar-list { display:flex; flex-direction:column; gap:2px; }
 .conversation-row { width:100%; min-height:76px; height:auto; padding:10px 8px; text-align:start; display:flex; align-items:center; gap:10px; border-radius:var(--radius-md); }
 .conversation-row[aria-current="page"] { background:var(--accent-muted); }
@@ -362,3 +365,43 @@ html.is-wand-app .chat-width-toggle { display: none; }
 .conversation-restore-link.ant-btn { color:var(--accent); text-decoration:underline; padding-inline:4px; }
 
 @media (max-width:640px) { .conversation-input-hint { display:none; } .conversation-heading { padding-inline:8px; } .conversation-composer { padding-inline:8px; } .conversation-task-index { padding-inline:8px; } .conversation-search-input .ant-input-affix-wrapper, .conversation-search-host > .ant-btn { height:44px; } .conversation-message-scroll { padding:12px; } }
+
+/* Settings occupy the shell content area; Ant owns their controls. */
+.wand-settings-library-page { position:absolute; inset:0; z-index:8; box-sizing:border-box; display:flex; flex-direction:column; min-width:0; min-height:0; overflow:hidden; overscroll-behavior:contain; pointer-events:auto; color:var(--text-primary); background:var(--bg-primary); }
+.wand-settings-library-page [hidden],.wand-settings-library-page[hidden] { display:none; }
+.wand-settings-library-page-heading { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px 24px; flex-shrink:0; padding:18px 24px; border-bottom:1px solid var(--border); background:var(--bg-secondary); }
+.wand-settings-library-page-title { display:flex; align-items:center; gap:12px; min-width:0; }
+.wand-settings-library-page-heading h1 { margin:0; font-size:20px; line-height:1.4; font-weight:600; overflow-wrap:anywhere; }
+.wand-settings-library-page-heading h1:focus { outline:none; }
+.wand-settings-library-page-content { display:flex; flex:1; min-width:0; min-height:0; }
+.wand-settings-library-directory { width:252px; flex-shrink:0; overflow:auto; overscroll-behavior:contain; padding:16px 8px; border-right:1px solid var(--border); background:var(--bg-secondary); }
+.wand-settings-library-search { padding:0 8px 12px; position:sticky; top:-16px; z-index:1; background:var(--bg-secondary); }
+.wand-settings-library-directory .ant-menu { background:transparent; border-inline-end:none; }
+.wand-settings-library-directory .ant-menu-item { height:auto; min-height:52px; line-height:1.4; padding-block:10px; white-space:normal; }
+.wand-settings-library-directory .ant-menu-item-group-title { padding-top:20px; padding-bottom:6px; color:var(--text-secondary); font-size:12px; }
+.wand-settings-library-nav-item { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.wand-settings-library-nav-copy { display:flex; flex-direction:column; gap:4px; min-width:0; overflow-wrap:anywhere; }
+.wand-settings-library-nav-description { font-size:12px; color:var(--text-secondary); }
+.wand-settings-library-nav-item>svg { display:none; flex-shrink:0; }
+.wand-settings-library-details { flex:1; min-width:0; min-height:0; }
+.wand-settings-library-detail-scroll { height:100%; overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable; }
+.wand-settings-library-detail-content { max-width:880px; margin-inline:auto; padding:28px 32px 32px; }
+.wand-settings-library-panel-heading { display:flex; flex-direction:column; gap:8px; margin-bottom:8px; }
+.wand-settings-library-panel-heading h2 { font-size:22px; line-height:1.4; font-weight:600; }
+.wand-settings-library-panel-heading p { color:var(--text-secondary); line-height:1.65; max-width:72ch; }
+.wand-settings-library-section>.ant-card-body>p { color:var(--text-secondary); line-height:1.65; margin-bottom:16px; }
+.wand-settings-library-access { margin-top:24px; border-top:1px solid var(--border); }
+.wand-settings-library-access-page { width:100%; max-width:800px; margin-inline:auto; padding:24px; overflow:auto; }
+.wand-settings-library-refresh-error { padding:12px 24px; }
+.wand-settings-library-page[data-presentation=page] { padding-top:var(--wand-safe-top,0px); padding-bottom:var(--wand-safe-bottom,0px); padding-inline:var(--wand-safe-left,0px) var(--wand-safe-right,0px); }
+.wand-settings-library-page[data-compact=true] .wand-settings-library-page-heading { padding:12px 16px; gap:8px; }
+.wand-settings-library-page[data-compact=true] .wand-settings-library-overview { width:100%; font-size:12px; }
+.wand-settings-library-page[data-compact=true] .wand-settings-library-directory { width:100%; border-right:0; padding:16px 8px 24px; }
+.wand-settings-library-page[data-compact=true] .wand-settings-library-nav-item>svg { display:block; transform:rotate(-90deg); }
+.wand-settings-library-page[data-compact=true] .wand-settings-library-nav-description { font-size:13px; }
+.wand-settings-library-page[data-compact=true] .wand-settings-library-directory .ant-menu-item { min-height:64px; }
+.wand-settings-library-page[data-compact=true] .wand-settings-library-detail-content { padding:20px 16px 24px; }
+.wand-settings-library-page[data-compact=true] .wand-settings-library-panel-heading h2 { display:none; }
+.wand-settings-library-page[data-compact=true] .ant-card-head { padding-inline:16px; }
+.wand-settings-library-page[data-compact=true] .ant-card-body { padding:16px; }
+.wand-settings-library-page[data-compact=true] .wand-settings-library-page-title .ant-btn { min-height:40px; }

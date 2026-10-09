@@ -674,7 +674,20 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         });
       }
 
-      export function switchToSessionView(sessionId) {
+      var sessionViewRevision = 0;
+
+      /** A delayed read may focus only the view and native control that initiated it. */
+      export function captureSessionViewFocus(sessionId) {
+        var revision = sessionViewRevision;
+        var activeElement = document.activeElement;
+        return function() {
+          return state.selectedId === sessionId && sessionViewRevision === revision
+            && (document.activeElement === activeElement || document.activeElement === document.body);
+        };
+      }
+
+      export function switchToSessionView(sessionId, options?: { focusInput?: boolean }) {
+        sessionViewRevision++;
         var session = state.sessions.find(function(s) { return s.id === sessionId; });
         var structured = isStructuredSession(session);
 
@@ -697,16 +710,16 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         applyCurrentView();
         reconcileInteractiveState();
         restoreComposerStateForSession(sessionId);
-        if (state.terminalInteractive) {
+        if (options?.focusInput !== false && state.terminalInteractive) {
           // Desktop terminal pages should be ready for the next keystroke.
           // Touch devices wait for an explicit tap so merely opening a session
           // never summons the software keyboard.
           if (!isTouchDevice()) focusTerminalInteractionTarget();
-        } else {
+        } else if (options?.focusInput !== false) {
           focusInputBox(true);
         }
         if (!structured && session && canAutoResumeSession(session)) {
-          resumeTerminalPageSession(session);
+          resumeTerminalPageSession(session, options);
         }
         // Container just flipped from hidden -> visible (or geometry changed
         // because chat/terminal panels swapped). Refit now so the terminal
@@ -717,8 +730,9 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
 
       var terminalPageResumeSessionId = null;
 
-      function resumeTerminalPageSession(session) {
+      function resumeTerminalPageSession(session, options?: { focusInput?: boolean }) {
         if (!session || terminalPageResumeSessionId === session.id || !canAutoResumeSession(session)) return;
+        var ownsFocus = captureSessionViewFocus(session.id);
         terminalPageResumeSessionId = session.id;
         resumeSession(session.id)
           .then(function(data) {
@@ -727,8 +741,9 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
             updateSessionsList();
             subscribeToSession(data.id);
             return loadOutput(data.id).then(function() {
+              if (state.selectedId !== session.id) return;
               reconcileInteractiveState();
-              if (state.terminalInteractive && !isTouchDevice()) focusTerminalInteractionTarget();
+              if (options?.focusInput !== false && ownsFocus() && state.terminalInteractive && !isTouchDevice()) focusTerminalInteractionTarget();
             });
           })
           .finally(function() {
@@ -1880,6 +1895,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           return Promise.resolve(null);
         }
 
+        var ownsFocus = captureSessionViewFocus(session.id);
         // 静默恢复：不再弹 "正在恢复历史会话…" 提示，让用户发送动作看起来无缝。
         return resumeSession(session.id).then(function(data) {
           if (!data) return null;
@@ -1887,7 +1903,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           updateSessionsList();
           subscribeToSession(data.id);
           return loadOutput(data.id).then(function() {
-            focusInputBox(true);
+            if (ownsFocus()) focusInputBox(true);
             // PTY 冷启动：先等 CLI 画出自己的 TUI 再让调用方写入，否则粘贴序列会被
             // 当成字面量（见 waitForProviderPaint）。结构化会话没有这一步。
             if (isStructuredSession(data)) return data;

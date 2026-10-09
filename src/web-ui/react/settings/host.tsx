@@ -1,15 +1,17 @@
 import { isClientSettingsPage } from "../../page.js";
-import { Alert, Form, Skeleton } from "antd";
+import { Alert, Collapse, Form, Skeleton } from "antd";
 import { WandUiProvider } from "../theme";
 import { installSettingsLibraryStyles } from "./styles";
 import { SpeechSettingsTab } from "./speech-panel";
 import { LocalModelsSettingsTab } from "./local-models-panel";
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as React from "react";
 import { useSyncExternalStore } from "react";
 import { wandOverlay } from "../overlay-controller";
-import { WandBadge, WandButton, WandDialogSurface, WandTabs } from "../ui";
+import { WandBadge, WandButton, WandIcon } from "../ui";
+import { hasOpenPopupSurface } from "../ui/popup-lifecycle";
 import { settingsController, settingsStore } from "./controller";
+import { SettingsDirectory, SETTINGS_SECTIONS } from "./navigation";
 import { httpSettingsRepository } from "./repository";
 import {
   AboutSettingsTab,
@@ -28,22 +30,8 @@ import type { SettingsRepository, SettingsSnapshot, SettingsTab } from "./types"
 export interface SettingsHostProps {
   repository?: SettingsRepository;
   showRestart?: () => void;
-  presentation?: "dialog" | "page";
+  presentation?: "workspace" | "page";
 }
-
-const TAB_LABELS: Record<SettingsTab, string> = {
-  profile: "我的资料",
-  connectors: "连接器",
-  general: "基本配置",
-  ai: "AI 与模型",
-  speech: "语音输入",
-  "local-models": "本地模型",
-  notifications: "通知",
-  display: "显示",
-  security: "安全",
-  presets: "命令预设",
-  about: "关于",
-};
 
 const ADMIN_TAB_ORDER: SettingsTab[] = [
   "profile",
@@ -79,11 +67,8 @@ function SettingsOverview({ snapshot, clientAuth = false }: { snapshot: Settings
   return (
     <section className="wand-settings-library-overview" aria-label="当前设置概览">
       <div className="wand-settings-library-overview-pills">
-        <WandBadge tone="success">{clientAuth ? "客户端连接" : snapshot.access === "admin" ? "管理员连接" : "App 连接"}</WandBadge>
-        <WandBadge tone={snapshot.about.updateChannel === "beta" ? "warning" : "info"}>
-          {snapshot.about.updateChannel === "beta" ? "Beta 通道" : "Stable 通道"}
-        </WandBadge>
-        <WandBadge tone="accent">{PLATFORM_LABELS[snapshot.platform.kind]}</WandBadge>
+        <span>{clientAuth ? "客户端连接" : snapshot.access === "admin" ? "管理员" : "App 连接"} · {PLATFORM_LABELS[snapshot.platform.kind]}</span>
+        {snapshot.about.updateChannel === "beta" ? <WandBadge tone="warning">Beta</WandBadge> : null}
       </div>
       <code>v{version.replace(/^v/, "")}</code>
     </section>
@@ -179,28 +164,22 @@ function ConnectedAppAccess({
 export function SettingsHost({
   repository = httpSettingsRepository,
   showRestart = () => {},
-  presentation = "dialog",
+  presentation = "workspace",
 }: SettingsHostProps) {
   useEffect(() => { installSettingsLibraryStyles(); }, []);
-  const [horizontalTabs, setHorizontalTabs] = useState(() => (
-    typeof window !== "undefined" && typeof window.matchMedia === "function"
-      && window.matchMedia("(max-width: 760px)").matches
-  ));
-  useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
-    const media = window.matchMedia("(max-width: 760px)");
-    const sync = (): void => setHorizontalTabs(media.matches);
-    sync();
-    media.addEventListener("change", sync);
-    return () => media.removeEventListener("change", sync);
-  }, []);
+  const pageRef = useRef<HTMLElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const directoryRef = useRef<HTMLElement>(null);
+  const [compact, setCompact] = useState(() => typeof window !== "undefined" && window.innerWidth < 720);
+  const [query, setQuery] = useState("");
+  const [visited, setVisited] = useState<SettingsTab[]>([]);
   const controller = useSyncExternalStore(
     settingsStore.subscribe,
     settingsStore.getSnapshot,
     settingsStore.getSnapshot,
   );
   const [snapshot, setSnapshot] = useState<SettingsSnapshot | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [loginRequired, setLoginRequired] = useState(false);
   const isOpen = presentation === "page" || controller.open;
@@ -242,10 +221,10 @@ export function SettingsHost({
     wandOverlay.toast(message, { tone });
   }, []);
 
-  const tabs = useMemo(() => {
-    if (!snapshot) return [];
+  const contentByTab = useMemo(() => {
+    if (!snapshot) return null;
     const props = { snapshot, repository, refresh, setSnapshot, toast, showRestart };
-    const contentByTab: Record<SettingsTab, ReactNode> = {
+    const panels: Record<SettingsTab, ReactNode> = {
       profile: <ProfileSettingsTab {...props} />,
       connectors: <GithubSettingsTab {...props} />,
       general: <GeneralSettingsTab {...props} />,
@@ -258,13 +237,10 @@ export function SettingsHost({
       presets: <PresetSettingsTab {...props} />,
       about: <AboutSettingsTab {...props} />,
     };
-    const order = snapshot.access === "admin" ? ADMIN_TAB_ORDER : CONNECTED_APP_TAB_ORDER;
-    return order.map((value) => ({
-      value,
-      label: TAB_LABELS[value],
-      content: contentByTab[value],
-    }));
+    return panels;
   }, [refresh, repository, showRestart, snapshot, toast]);
+
+  const available = snapshot?.access === "admin" ? ADMIN_TAB_ORDER : CONNECTED_APP_TAB_ORDER;
 
   const selectedTab = snapshot?.access === "admin"
     ? controller.tab
@@ -277,68 +253,101 @@ export function SettingsHost({
     setLoginRequired(false);
     setSnapshot(next);
   };
-  const content = (
-    <>
-          {loginRequired && !clientAuth ? <ConnectedAppAccess repository={repository} signedOut allowEmptyPassword
-            onAuthenticated={onAuthenticated} /> : null}
-          {snapshot ? (
-            <>
-              <SettingsOverview snapshot={snapshot} clientAuth={clientAuth} />
-              {loadError ? (
-                <div className="wand-settings-library-refresh-error">
-                  <SettingsStatus tone="error">
-                    <span>刷新设置失败，当前内容已保留。{loadError}</span>
-                    <WandButton size="small" disabled={loading} aria-busy={loading} onClick={() => void refresh()}>
-                      重新加载
-                    </WandButton>
-                  </SettingsStatus>
-                </div>
-              ) : null}
-              {snapshot.access === "read-only" && !loginRequired && !clientAuth ? (
-                <ConnectedAppAccess
-                  repository={repository}
-                  allowEmptyPassword={presentation === "page"}
-                  onAuthenticated={onAuthenticated}
-                />
-              ) : null}
-              <WandTabs
-                className="wand-settings-library-tabs"
-                ariaLabel="设置分组"
-                orientation={horizontalTabs ? "horizontal" : "vertical"}
-                value={selectedTab}
-                tabs={tabs}
-                onValueChange={(value) => settingsStore.setTab(value as SettingsTab)}
-              />
-            </>
-          ) : loading ? (
-            <SettingsLoading />
-          ) : loadError ? (
-            <div className="wand-settings-library-load-error" role="alert">
-              <p>{loadError}</p>
-              <WandButton kind="primary" onClick={() => void load()}>重试加载设置</WandButton>
-            </div>
-          ) : null}
-    </>
-  );
-  if (presentation === "page") {
-    return <WandUiProvider><main className="wand-settings-library-page" data-testid="settings-page"
-      aria-labelledby="settings-page-title">
-      <header className="wand-settings-library-page-heading"><h1 id="settings-page-title">系统设置</h1></header>
-      <div className="wand-settings-library-page-content">{content}</div>
-    </main></WandUiProvider>;
-  }
-  return (
-    <WandUiProvider><WandDialogSurface
-      open={controller.open}
-      onOpenChange={(open) => { if (!open) settingsController.close(); }}
-      title="系统设置"
-      className="wand-settings-library-dialog"
-      overlayClassName="wand-settings-library-overlay"
-      titleClassName="wand-settings-library-title"
-      descriptionClassName="wand-settings-library-description"
-      headerClassName="wand-settings-library-header"
-      closeLabel="关闭设置"
-      testId="settings-dialog"
-    >{content}</WandDialogSurface></WandUiProvider>
-  );
+  useLayoutEffect(() => {
+    if (!isOpen || !pageRef.current) return;
+    const page = pageRef.current;
+    const sync = (): void => {
+      const value = page.clientWidth < 720;
+      setCompact(value);
+      settingsStore.setCompact(value);
+    };
+    sync();
+    const observer = new ResizeObserver(sync);
+    observer.observe(page);
+    return () => observer.disconnect();
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!snapshot || (compact && !controller.detail)) return;
+    setVisited((current) => current.includes(selectedTab) ? current : [...current, selectedTab]);
+  }, [snapshot, compact, controller.detail, selectedTab]);
+
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    titleRef.current?.focus({ preventScroll: true });
+    return () => {
+      if (presentation === "workspace" && (pageRef.current?.contains(document.activeElement) || document.activeElement === document.body)) {
+        trigger?.focus({ preventScroll: true });
+      }
+    };
+  }, [isOpen, presentation]);
+
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    if (!compact || controller.detail) titleRef.current?.focus({ preventScroll: true });
+    else directoryRef.current?.querySelector<HTMLElement>(".ant-menu-item-selected")?.focus({ preventScroll: true });
+  }, [isOpen, compact, controller.detail, selectedTab]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
+      // Inspect nested ownership before the child's Escape handler changes its state.
+      if (settingsStore.getSnapshot().nested !== null || hasOpenPopupSurface()) return;
+      if (compact && controller.detail) settingsStore.showDirectory();
+      else if (presentation === "workspace") settingsController.close();
+      else return;
+      event.preventDefault();
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [isOpen, compact, controller.detail, presentation]);
+
+  const select = (tab: SettingsTab): void => {
+    setVisited((current) => current.includes(tab) ? current : [...current, tab]);
+    settingsStore.setTab(tab);
+  };
+  const directoryVisible = !compact || !controller.detail;
+  const title = compact && controller.detail ? SETTINGS_SECTIONS[selectedTab].label : "系统设置";
+  const Tag = presentation === "page" ? "main" : "section";
+  return <WandUiProvider><Tag ref={pageRef} className="wand-settings-library-page" data-testid="settings-page"
+    data-presentation={presentation} data-compact={compact} data-detail={controller.detail}
+    hidden={!isOpen} inert={!isOpen} aria-labelledby="settings-page-title">
+    <header className="wand-settings-library-page-heading">
+      <div className="wand-settings-library-page-title">
+        {compact && controller.detail ? <WandButton kind="ghost" aria-label="返回设置目录" onClick={() => settingsStore.showDirectory()}>
+          <WandIcon name="back" size={18}/><span>设置</span>
+        </WandButton> : presentation === "workspace" ? <WandButton kind="ghost" aria-label="返回工作台" onClick={() => settingsController.close()}>
+          <WandIcon name="back" size={18}/><span>返回</span>
+        </WandButton> : null}
+        <h1 id="settings-page-title" ref={titleRef} tabIndex={-1}>{title}</h1>
+      </div>
+      {snapshot ? <SettingsOverview snapshot={snapshot} clientAuth={clientAuth}/> : null}
+    </header>
+    {loadError && snapshot ? <div className="wand-settings-library-refresh-error">
+      <SettingsStatus tone="error"><span>刷新设置失败，当前内容已保留。{loadError}</span>
+        <WandButton size="small" disabled={loading} aria-busy={loading} onClick={() => void refresh()}>重新加载</WandButton>
+      </SettingsStatus>
+    </div> : null}
+    {loginRequired && !clientAuth ? <div className="wand-settings-library-access-page"><ConnectedAppAccess repository={repository} signedOut allowEmptyPassword
+      onAuthenticated={onAuthenticated}/></div> : snapshot && contentByTab ? <div className="wand-settings-library-page-content">
+      <nav ref={directoryRef} className="wand-settings-library-directory" aria-label="设置目录" hidden={!directoryVisible}>
+        <SettingsDirectory available={available} selected={selectedTab} query={query} onQuery={setQuery} onSelect={select}/>
+        {snapshot.access === "read-only" && !loginRequired && !clientAuth ? <Collapse className="wand-settings-library-access"
+          ghost items={[{ key: "admin", label: "登录管理设置", children: <ConnectedAppAccess repository={repository}
+            allowEmptyPassword={presentation === "page"} onAuthenticated={onAuthenticated}/> }]}/> : null}
+      </nav>
+      <div className="wand-settings-library-details" hidden={compact && !controller.detail}>
+        {available.filter((tab) => visited.includes(tab) || (!compact || controller.detail) && tab === selectedTab).map((tab) => <div
+          key={tab} className="wand-settings-library-detail-scroll" data-settings-panel={tab}
+          hidden={tab !== selectedTab} inert={tab !== selectedTab} role="region" aria-label={SETTINGS_SECTIONS[tab].label}>
+          <div className="wand-settings-library-detail-content">{contentByTab[tab]}</div>
+        </div>)}
+      </div>
+    </div> : loading ? <div className="wand-settings-library-access-page"><SettingsLoading/></div> : loadError ? <div
+      className="wand-settings-library-access-page" role="alert"><p>{loadError}</p>
+      <WandButton kind="primary" onClick={() => void load()}>重试加载设置</WandButton>
+    </div> : null}
+  </Tag></WandUiProvider>;
 }

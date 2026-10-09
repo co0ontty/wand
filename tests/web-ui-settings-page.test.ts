@@ -45,16 +45,16 @@ test("page mode bypasses home bootstrap and only mounts settings plus its suppor
   for (const signature of ["renderBootLoading()", "restoreLoginSession()", "render(options?: any)"]) {
     assert.ok(render.includes(`export function ${signature} {\n  if (isStandaloneSettingsPage()) return;`));
   }
-  assert.match(source("src/web-ui/react/index.tsx"), /settingsPresentation=\{standaloneSettings \? "page" : "dialog"\}/);
-  assert.match(source("src/web-ui/react/overlay-host.tsx"), /settingsPresentation === "dialog" \? <>/);
-  const css = source("src/web-ui/react/settings/styles.ts");
-  assert.match(css, /\.wand-settings-library-page \{[^}]*inset:0;[^}]*overflow:auto;[^}]*pointer-events:auto/);
+  assert.match(source("src/web-ui/react/index.tsx"), /settingsPresentation=\{standaloneSettings \? "page" : "workspace"\}/);
+  assert.match(source("src/web-ui/react/overlay-host.tsx"), /settingsPresentation === "workspace" \? <>/);
+  const css = source("src/web-ui/content/styles.css");
+  assert.match(css, /\.wand-settings-library-page \{[^}]*inset:0;[^}]*overflow:hidden;[^}]*pointer-events:auto/);
 });
 
 test("an expired page session offers admin login in place and never navigates back to home", () => {
   const host = source("src/web-ui/react/settings/host.tsx");
   assert.match(host, /presentation === "page" && \(error as Error & \{ status\?: number \}\)\.status === 401/);
-  assert.match(host, /loginRequired && !clientAuth \? <ConnectedAppAccess repository=\{repository\} signedOut allowEmptyPassword/);
+  assert.match(host, /loginRequired && !clientAuth \? <div[^>]*><ConnectedAppAccess repository=\{repository\} signedOut allowEmptyPassword/);
   assert.match(host, /setLoginRequired\(false\)/);
   assert.doesNotMatch(host, /window\.location|location\.href|settings-button|trigger\.click/);
   assert.match(host, /snapshot\.access === "read-only" && !loginRequired && !clientAuth/);
@@ -63,7 +63,7 @@ test("an expired page session offers admin login in place and never navigates ba
 
 test("the profile tab is the first admin section and reuses the shared avatar picker", () => {
   const host = source("src/web-ui/react/settings/host.tsx");
-  assert.match(host, /profile: "我的资料"/, "分组标签有名字");
+  assert.match(source("src/web-ui/react/settings/navigation.tsx"), /profile: \{ label: "我的资料"/, "分组标签有名字");
   assert.match(host, /const ADMIN_TAB_ORDER: SettingsTab\[\] = \[\s*"profile",/, "管理员进设置先看到自己的资料");
   assert.match(host, /profile: <ProfileSettingsTab \{\.\.\.props\} \/>/);
   const tabs = source("src/web-ui/react/settings/tabs.tsx");

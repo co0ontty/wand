@@ -15,12 +15,14 @@ import {
   selectSession,
   setChatModelForProvider,
   updateDrawerState,
+  withTerminalDimensions,
 } from "./session-engine";
 import { state, writeStoredBoolean } from "./state";
 import { initTerminal, saveWorkingDir } from "./terminal";
 import { ensureTerminalLibrary } from "../vendor-loader.js";
 import { closeReactOverlays } from "./react-overlay-coordinator";
 import { notifyTasksChanged } from "../react/task-changes";
+import { conversationUi } from "../react/conversations/state";
 import { taskDetailStore } from "../react/workspaces/task-detail-store";
 import { workspaceContextStore } from "../react/workspaces/workspace-context";
 import { workspacesStore } from "../react/workspaces/controller";
@@ -59,21 +61,13 @@ const legacyRuntime: NewSessionRuntimeAdapter = {
     setChatModelForProvider(provider, model || "");
   },
 
-  async prepareCreate(kind) {
+  async prepareCreate(kind, request) {
     if (kind === "structured") return {};
     // Explicit PTY creation needs measured initial dimensions even on a blank/structured page.
     await ensureTerminalLibrary();
     initTerminal({ prepare: true });
     await ensureTerminalReady();
-    try {
-      state.terminal?.remeasure?.();
-    } catch (_error) {}
-    const cols = state.terminal?.cols;
-    const rows = state.terminal?.rows;
-    return {
-      cols: typeof cols === "number" && Number.isFinite(cols) && cols > 0 ? cols : undefined,
-      rows: typeof rows === "number" && Number.isFinite(rows) && rows > 0 ? rows : undefined,
-    };
+    return withTerminalDimensions({}, { kind, provider: request?.kind === "pty" ? request.provider : undefined, command: request?.kind === "pty" ? request.command : undefined, cwd: request?.cwd || getEffectiveCwd(), workspaceTaskId: request?.workspaceTaskId });
   },
 
   async completeCreate(request: NewSessionCreateRequest, created: NewSessionCreated): Promise<void> {
@@ -100,6 +94,8 @@ const legacyRuntime: NewSessionRuntimeAdapter = {
       }
       notifyTasksChanged();
     }
+    // The form is a temporary overlay; only accepted creation leaves the chat.
+    conversationUi.suspend();
     selectSession(created.id);
     dismissDrawerIfOverlay();
     window.setTimeout(() => focusInputBox(true), 0);

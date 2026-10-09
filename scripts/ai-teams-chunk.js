@@ -25,6 +25,7 @@ const CHUNK_FILES = new Set([
   path.join(REACT_ROOT, "ai-teams", "team-chat-page.tsx"),
   path.join(REACT_ROOT, "ai-teams", "styles.ts"),
   path.join(REACT_ROOT, "issues", "team-run-panel.tsx"),
+  path.join(REACT_ROOT, "settings", "decision-chain-editor.tsx"),
   path.join(REACT_ROOT, "agents", "candidate-list.ts"),
   path.join(REACT_ROOT, "agents", "candidate-editor.tsx"),
   path.join(REACT_ROOT, "agents", "employee-avatar.tsx"),

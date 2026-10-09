@@ -49,6 +49,8 @@ import { registerSettingsRoutes } from "./server-settings-routes.js";
 import { registerSpeechRoutes } from "./server-speech-routes.js";
 import { registerLocalModelRoutes } from "./server-local-model-routes.js";
 import { LocalModelSetupService } from "./local-model-setup.js";
+import { DecisionExpertService } from "./decision-expert-service.js";
+import { DECISION_EXPERT_KEY } from "./decision-expert-identity.js";
 import { SpeechService } from "./speech-service.js";
 import {
   appTokenLoginPayload,
@@ -430,6 +432,8 @@ export async function startServer(
   const authService = new AuthService(storage);
   const settingsAccess = new SettingsWebAccess();
   const decisions = new DecisionService(config.localDecision);
+  const decisionExpert = new DecisionExpertService({ local: decisions, free: openRouter, config,
+    employee: () => storage.getSystemSiliconEmployee(DECISION_EXPERT_KEY) });
   // 默认模型优先读存储（UI 改设置后实时生效），未设置时由 getPreference 回落到 config。
   const getCurrentDefaultModels = (): { claude: string; codex: string; opencode: string; grok: string; qoder: string; pi: string; gemini: string } => ({
     claude: storage.getPreference("pref:defaultModel", config.defaultModel ?? ""),
@@ -828,7 +832,7 @@ export async function startServer(
     res.set("Cache-Control", "no-store").json({ hasActiveTurns, activeTurnCount });
   });
 
-  registerDecisionRoutes(app, { storage, decisions, requireAuth, requireSessions });
+  registerDecisionRoutes(app, { storage, decisions: decisionExpert, requireAuth, requireSessions });
   app.use("/api", requireAuth);
   app.get("/api/daemon-maintenance", (_req, res) => {
     res.set("Cache-Control", "no-store").json(daemonMaintenance.status());
@@ -978,7 +982,7 @@ export async function startServer(
     notifyTeamChanged: (teamId) => notifyAiTeamRun({ kind: "ai-team-definition", teamId }),
   });
   // 无指派派工：本地决策模型建议名单 → 确认开工（不自动派工，见 AGENTS）。
-  registerTeamDispatchRoutes(app, { storage, runner: aiTeams, decisions });
+  registerTeamDispatchRoutes(app, { storage, runner: aiTeams, decisions: decisionExpert });
   registerSiliconEmployeeRoutes(app, {
     storage,
     config,
@@ -1016,7 +1020,7 @@ export async function startServer(
 
   registerSessionRoutes(app, processes, structuredSessions, storage, config.defaultMode, config, sessionRegistry, (cwd) => {
     recordRecentPath(storage, cwd);
-  }, (event) => wsManager.emitEvent(event), decisions);
+  }, (event) => wsManager.emitEvent(event), decisionExpert);
   registerClaudeHistoryRoutes(app, processes, storage);
   registerWorkspaceRoutes(app, storage, sessionRegistry, { config });
   registerMissionRoutes(app, missions);
@@ -1313,13 +1317,13 @@ export async function startServer(
   function refreshDecisionRuntime(): void {
     const address = server.address();
     const port = typeof address === "object" && address ? address.port : config.port;
-    const status = decisions.status();
+    const status = decisionExpert.status();
     const localHost = config.host === "::1" ? "[::1]" : config.host === "0.0.0.0" || config.host === "::" ? "127.0.0.1" : config.host;
-    decisionRuntime = config.localDecision?.enabled ? { url: `${protocol}://${localHost}:${port}`,
+    decisionRuntime = status.enabled ? { url: `${protocol}://${localHost}:${port}`,
       ...(activeSslCertPath ? { caPath: activeSslCertPath } : {}),
-      evaluate: (value, caller, signal) => decisions.evaluate(value, caller, signal) } : null;
-    autoAssignEvaluate = config.localDecision?.enabled && status.supported && status.configured
-      ? (value, caller, signal) => decisions.evaluate(value, caller, signal) : undefined;
+      evaluate: (value, caller, signal) => decisionExpert.evaluate(value, caller, signal) } : null;
+    autoAssignEvaluate = status.enabled
+      ? (value, caller, signal) => decisionExpert.evaluate(value, caller, signal) : undefined;
   }
 
   let bindAddr = config.host === "0.0.0.0" ? "0.0.0.0" : config.host;

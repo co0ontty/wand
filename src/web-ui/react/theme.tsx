@@ -15,6 +15,12 @@ const SECONDARY_TEXT_COLOR = "#6b5e54";
 export const wandTheme: ThemeConfig = {
   token: {
     colorPrimary: "#b8562f", colorInfo: "#b8562f", colorSuccess: "#4f7a58",
+    // Keep native danger text, light surfaces and solid white labels readable.
+    colorError: "#b7342e", colorErrorHover: "#9f2a25", colorErrorActive: "#87201d",
+    colorErrorBg: "#fff1ee", colorErrorBgHover: "#ffe9e4",
+    colorErrorBgFilledHover: "#ffe7e2", colorErrorBgActive: "#ffddd6",
+    colorErrorBorder: "#d87c70", colorErrorBorderHover: "#b7342e",
+    colorErrorText: "#b7342e", colorErrorTextHover: "#9f2a25", colorErrorTextActive: "#87201d",
     colorText: "#29241f", colorTextSecondary: SECONDARY_TEXT_COLOR,
     colorTextDescription: SECONDARY_TEXT_COLOR, colorTextPlaceholder: SECONDARY_TEXT_COLOR,
     colorBgLayout: "#faf8f5",
@@ -119,4 +125,15 @@ export function WandUiProvider({ children }: { children: React.ReactNode }) {
 /** Public primitives remain usable in independently mounted legacy React roots. */
 export function WandUiBoundary({ children }: { children: React.ReactNode }) {
   return React.useContext(ThemeInstalled) ? children : <WandUiProvider>{children}</WandUiProvider>;
+}
+
+/** Static hidden geometry projections use the same tokens without media subscriptions. */
+export function WandUiMeasurementProvider({ children }: { children: React.ReactNode }) {
+  return <ThemeInstalled.Provider value={true}>
+    <XProvider locale={{ ...zhCN, ...xZhCN }} theme={{ ...wandTheme,
+      cssVar: { key: "wand-ui-measurement" }, token: { ...wandTheme.token, motion: false },
+    }}>
+      {children}
+    </XProvider>
+  </ThemeInstalled.Provider>;
 }

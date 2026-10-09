@@ -32,10 +32,10 @@ import { GithubIssuesHost } from "./issues/host";
 
 export interface OverlayHostProps {
   portalContainer: HTMLElement;
-  settingsPresentation?: "dialog" | "page";
+  settingsPresentation?: "workspace" | "page";
 }
 
-export function OverlayHost({ portalContainer, settingsPresentation = "dialog" }: OverlayHostProps) {
+export function OverlayHost({ portalContainer, settingsPresentation = "workspace" }: OverlayHostProps) {
   const current = useSyncExternalStore(
     overlayStore.subscribe,
     overlayStore.getSnapshot,
@@ -45,7 +45,7 @@ export function OverlayHost({ portalContainer, settingsPresentation = "dialog" }
 
   return (
     <PortalContainerProvider container={portalContainer}>
-      {settingsPresentation === "dialog" ? <>
+      {settingsPresentation === "workspace" ? <>
       <ComposerSelectHost />
       <ComposerConfigHost />
       <PiSettingsHost />
@@ -60,8 +60,8 @@ export function OverlayHost({ portalContainer, settingsPresentation = "dialog" }
       <WorkspacesHost />
       <GithubIssuesHost />
       </> : null}
-      <SettingsHost presentation={settingsPresentation} showRestart={() => restartOverlayController.showRestart()} />
-      {settingsPresentation === "dialog" ? <>
+      {settingsPresentation === "page" ? <SettingsHost presentation="page" showRestart={() => restartOverlayController.showRestart()} /> : null}
+      {settingsPresentation === "workspace" ? <>
       <NewSessionHost />
       <FolderPickerHost />
       <QuickCommitHost />

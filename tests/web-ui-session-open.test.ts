@@ -65,6 +65,8 @@ test("opening a session from the board restores its task context before selectin
   const payloads: unknown[] = [];
   const runtime = new Proxy({
     openTask: (payload: unknown) => { calls.push("openTask"); payloads.push(payload); },
+    openWorkspace: (payload: unknown) => { calls.push("openWorkspace"); payloads.push(payload); clearActiveWorkspaceContext(); },
+    closeWorkspace: () => { calls.push("closeWorkspace"); clearActiveWorkspaceContext(); },
     selectSession: (id: string) => { calls.push(`selectSession:${id}`); },
   } as unknown as WorkspacesRuntimeAdapter, {
     get: (target, key) => (key in target ? Reflect.get(target, key) : () => {}),
@@ -94,12 +96,30 @@ test("opening a session from the board restores its task context before selectin
     await openSessionWithOwningTask("session-1", fallback);
     assert.deepEqual(calls, ["fallback:session-1"]);
 
-    // 未分组会话与未知会话保持调用方原有行为。
-    clearActiveWorkspaceContext();
+    // 项目中的未分组会话退出旧任务，并进入真实项目；未知会话仍走调用方兜底。
+    setActiveWorkspaceContext({ taskId: "task-1" });
     calls.length = 0;
+    payloads.length = 0;
     await openSessionWithOwningTask("session-loose", fallback);
     await openSessionWithOwningTask("session-missing", fallback);
-    assert.deepEqual(calls, ["fallback:session-loose", "fallback:session-missing"]);
+    assert.deepEqual(calls, ["openWorkspace", "selectSession:session-loose", "fallback:session-missing"]);
+    assert.deepEqual(payloads, [{ id: "workspace-1", name: "项目 A", cwd: "/repo", layout: null, createdAt: "", lastOpenedAt: null }]);
+
+    for (const variant of [{ synthetic: true }, { global: true }]) {
+      setActiveWorkspaceContext({ taskId: "task-1" });
+      globalThis.fetch = async () => jsonResponse({ groups: [{ ...groupsFixture()[0], ...variant }] });
+      calls.length = 0;
+      await openSessionWithOwningTask("session-loose", fallback);
+      assert.deepEqual(calls, ["closeWorkspace", "selectSession:session-loose"]);
+    }
+
+    // 群聊 relay 保留原入口，不把它作为终端未分组会话重开目录。
+    const relayGroup = groupsFixture()[0];
+    relayGroup.standaloneSessions = [{ id: "relay", teamChat: { teamId: "team", runId: "run", teamName: "团队", memberCount: 2 } }];
+    globalThis.fetch = async () => jsonResponse({ groups: [relayGroup] });
+    calls.length = 0;
+    await openSessionWithOwningTask("relay", fallback);
+    assert.deepEqual(calls, ["fallback:relay"]);
 
     // 任务列表拿不到时也必须能打开会话。
     globalThis.fetch = async () => jsonResponse({ error: "boom" }, 500);

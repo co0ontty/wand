@@ -7,11 +7,14 @@ import test from "node:test";
 import express from "express";
 
 import { defaultConfig, loadConfigWithStorage } from "../src/config.js";
+import { DEFAULT_EMPLOYEE_ID } from "../src/ai-team-types.js";
+import { DECISION_EXPERT_ID, DECISION_EXPERT_KEY } from "../src/decision-expert-identity.js";
 import { jsonErrorHandler } from "../src/express-async.js";
 import { callConfiguredAiText, withOpsPersona } from "../src/git-quick-commit.js";
 import { registerSiliconEmployeeRoutes } from "../src/server-employee-routes.js";
 import { resolveSystemAiContext } from "../src/session-ai-context.js";
 import {
+  SYSTEM_EMPLOYEE_ID,
   SYSTEM_EMPLOYEE_KEY,
   SYSTEM_EMPLOYEE_NAME,
   SYSTEM_EMPLOYEE_PROMPT,
@@ -372,10 +375,16 @@ test("加载配置时幂等创建内置员工，并沿用用户已有的系统 A
     assert.deepEqual(seeded?.agents.map((agent) => [agent.provider, agent.model]), [["grok", "grok-4.5"]]);
 
     // 再加载一次不会重复创建内置员工，也不会覆盖用户改过的候选顺序。
+    const decisionExpert = storage.getSystemSiliconEmployee(DECISION_EXPERT_KEY)!;
+    assert.equal(decisionExpert.id, DECISION_EXPERT_ID);
+    const decisionCandidates = decisionExpert.agents.slice().reverse();
+    storage.saveSiliconEmployee({ ...decisionExpert, agents: decisionCandidates });
     storage.saveSiliconEmployee({ ...seeded!, agents: [CLAUDE, GROK] });
     await loadConfigWithStorage(join(root, "config.json"), storage);
-    assert.deepEqual(storage.listSiliconEmployees().map((employee) => employee.id), ["e_wand_ops", "e_wand_default"]);
+    assert.deepEqual(storage.listSiliconEmployees().map((employee) => employee.id), [SYSTEM_EMPLOYEE_ID, DEFAULT_EMPLOYEE_ID, DECISION_EXPERT_ID]);
     assert.deepEqual(storage.getSystemSiliconEmployee()?.agents.map((agent) => agent.provider), ["claude", "grok"]);
+    assert.equal(storage.getSystemSiliconEmployee(DECISION_EXPERT_KEY)?.id, decisionExpert.id);
+    assert.deepEqual(storage.getSystemSiliconEmployee(DECISION_EXPERT_KEY)?.agents, decisionCandidates);
   } finally {
     storage.close();
     rmSync(root, { recursive: true, force: true });

@@ -4,6 +4,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import vm from "node:vm";
+import { transformSync } from "esbuild";
+import ts from "typescript";
+import { minifyJs } from "../scripts/minify-web-assets.js";
 import {
   createBrowserStyleMinificationPlugin,
   isBrowserStyleFile,
@@ -22,6 +25,9 @@ const REAL_STYLE_FILES = [
   "src/web-ui/react/local-preview/styles.ts",
   "src/web-ui/react/styles/base.ts",
   "src/web-ui/react/styles/features.ts",
+  "src/web-ui/react/shell/sidebar-styles.ts",
+  "src/web-ui/react/issues/library-layout.ts",
+  "src/web-ui/react/chat/presentation.tsx",
 ];
 
 test("static String.raw CSS templates are replaced with a minified string literal", () => {
@@ -39,6 +45,33 @@ test("templates with interpolation are never evaluated or changed", () => {
   const { code, replaced } = minifyStringRawCssTemplates(source, "features.ts");
   assert.equal(code, source);
   assert.equal(replaced, 0);
+});
+
+test("the exact chat TSX module preserves JSX and dynamic templates while minifying static CSS", () => {
+  const file = path.join(root, "src/web-ui/react/chat/presentation.tsx");
+  const source =
+    'const tone = "red";\n' +
+    'const view = <span title="String.raw">文字</span>;\n' +
+    "const css = String.raw`.a { display: flex; }`;\n" +
+    'const dynamic = String.raw`.b { color: ${tone}; }`;\n' +
+    "globalThis.__out = [view.props.title, view.children.join(\"\"), dynamic, css];\n";
+  const { code, replaced, skipped, values } = minifyStringRawCssTemplates(source, file);
+  assert.equal(replaced, 1);
+  assert.equal(skipped, 0);
+  assert.ok(code.includes('<span title="String.raw">文字</span>'));
+  assert.ok(code.includes('String.raw`.b { color: ${tone}; }`'));
+  const run = (input: string): unknown[] => {
+    const sandbox = vm.createContext({
+      h: (tag: string, props: Record<string, unknown>, ...children: unknown[]) => ({ tag, props, children }),
+    });
+    vm.runInContext(transformSync(input, { loader: "tsx", jsxFactory: "h" }).code, sandbox);
+    return Array.from(sandbox.__out);
+  };
+  const before = run(source);
+  const after = run(code);
+  assert.deepEqual(after.slice(0, 3), before.slice(0, 3));
+  assert.equal(after[3], values[0]);
+  assert.match(String(after[3]), /\.a\{display:flex\}/);
 });
 
 test("unrelated strings, templates and regexes stay untouched", () => {
@@ -118,6 +151,9 @@ test("filename guard is anchored to this repo's real react root", () => {
     "src/web-ui/react/file-preview/markdown-styles.ts",
     "src/web-ui/react/styles/base.ts",
     "src/web-ui/react/styles/features.ts",
+    "src/web-ui/react/shell/sidebar-styles.ts",
+    "src/web-ui/react/issues/library-layout.ts",
+    "src/web-ui/react/chat/presentation.tsx",
   ];
   for (const rel of projectPositives) {
     assert.equal(isBrowserStyleFile(rel), true, rel);
@@ -128,6 +164,14 @@ test("filename guard is anchored to this repo's real react root", () => {
     "src/web-ui/react/styles/helpers.ts",
     "src/web-ui/react/styles/deep/nested/base.ts",
     "src/web-ui/react/foo/other.ts",
+    "src/web-ui/react/foo/sidebar-styles.ts",
+    "src/web-ui/react/foo/library-layout.ts",
+    "src/web-ui/react/issues/nested/library-layout.ts",
+    "src/web-ui/react/issues/library-layout.tsx",
+    "src/web-ui/react/foo/presentation.tsx",
+    "src/web-ui/react/chat/nested/presentation.tsx",
+    "src/web-ui/react/chat/presentation.ts",
+    "src/web-ui/react/chat/styles.tsx",
     "src/server.ts",
     "src/web-ui/browser/styles.ts",
     "src/web-ui/reactx/styles.ts",
@@ -135,6 +179,8 @@ test("filename guard is anchored to this repo's real react root", () => {
     // dependency/vendor mirrors and sibling clones are not this project.
     "/repo/src/web-ui/react/foo/styles.ts",
     "/repo/src/web-ui/react/styles/base.ts",
+    "/repo/src/web-ui/react/issues/library-layout.ts",
+    "/repo/src/web-ui/react/chat/presentation.tsx",
   ];
   for (const rel of negatives) {
     assert.equal(isBrowserStyleFile(rel), false, rel);
@@ -143,6 +189,8 @@ test("filename guard is anchored to this repo's real react root", () => {
     path.join(root, "node_modules/pkg/src/web-ui/react/styles/base.ts"),
     path.join(root, "vendor/mirror/src/web-ui/react/foo/styles.ts"),
     path.join(root, "src/web-ui/react/node_modules/pkg/styles.ts"),
+    path.join(root, "src/web-ui/react/node_modules/pkg/chat/presentation.tsx"),
+    path.join(root, "vendor/mirror/src/web-ui/react/chat/presentation.tsx"),
     path.resolve(root, "..", "sibling-clone/src/web-ui/react/styles/features.ts"),
     path.join(root, "src/server.ts"),
   ]) {
@@ -164,7 +212,55 @@ test("real source style files are transformed in memory but untouched on disk", 
     assert.ok(code.length < before.length, rel);
     totalReplaced += replaced;
   }
-  assert.equal(totalReplaced, 13);
+  assert.equal(totalReplaced, 16);
+});
+
+test("the real chat raw template has identical cooked value and unchanged CSS minification semantics", () => {
+  const full = path.join(root, "src/web-ui/react/chat/presentation.tsx");
+  const before = readFileSync(full, "utf8");
+  const source = ts.createSourceFile(full, before, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const templates: ts.TaggedTemplateExpression[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === "CHAT_SURFACE_STYLES") {
+      assert.ok(node.initializer && ts.isTaggedTemplateExpression(node.initializer));
+      templates.push(node.initializer);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  assert.equal(templates.length, 1);
+  const tagged = templates[0];
+  assert.equal(tagged.tag.getText(source), "String.raw");
+  assert.ok(ts.isNoSubstitutionTemplateLiteral(tagged.template));
+  const raw = before.slice(tagged.template.getStart(source) + 1, tagged.template.getEnd() - 1);
+  assert.equal(raw.includes("\\"), false, "String.raw conversion cannot change escape semantics");
+  assert.equal(raw, tagged.template.text);
+  const plainValue = executeBundle(`globalThis.__css = ${tagged.template.getText(source)};`).__css;
+  const rawValue = executeBundle(`globalThis.__css = ${tagged.getText(source)};`).__css;
+  assert.equal(rawValue, plainValue, "adding the tag leaves the development stylesheet byte-identical");
+  const expected = transformSync(String(plainValue), { loader: "css", minify: true, legalComments: "none" });
+  assert.equal(expected.warnings.length, 0);
+  const result = minifyStringRawCssTemplates(before, full);
+  assert.equal(result.replaced, 1);
+  assert.equal(result.skipped, 0);
+  assert.deepEqual(result.values, [expected.code]);
+  assert.match(result.values[0], /@keyframes wand-activity-mark-flow/);
+  assert.match(result.values[0], /prefers-reduced-motion:\s*reduce/);
+  assert.match(result.values[0], /--chat-call-dot-center:/);
+  assert.equal(readFileSync(full, "utf8"), before);
+});
+
+test("UTF-8 script minification preserves text, regexes, surrogates and runtime placeholders", () => {
+  const value = "中文🪄\u2028\u2029\ud800";
+  const source = `globalThis.result = ${JSON.stringify(value)}; globalThis.matches = /中文/u.test("中文"); globalThis.config = "\u0024{wandConfigPath}";`;
+  const code = minifyJs(source);
+  const sandbox = vm.createContext({});
+  vm.runInContext(code, sandbox);
+  assert.equal(sandbox.result, value);
+  assert.equal(sandbox.matches, true);
+  assert.equal(sandbox.config, "${wandConfigPath}");
+  assert.ok(code.includes('"${wandConfigPath}"'), "runtime injection still finds its exact string literal");
+  assert.ok(Buffer.byteLength(code) < Buffer.byteLength(source));
 });
 
 test("plugin exposes the expected esbuild plugin shape", () => {
@@ -330,17 +426,22 @@ test("pool identifier avoids names already present in the emitted code", () => {
   assert.equal(context.__keep, "sentinel");
 });
 
-test("plugin records minified CSS candidates in memory without touching disk", async () => {
-  type LoadHandler = (args: { path: string }) => Promise<{ contents?: string } | null>;
+test("plugin records minified CSS candidates with only the exact chat TSX loader", async () => {
+  type LoadHandler = (args: { path: string }) => Promise<{ contents?: string; loader?: string } | null>;
   const candidates = new Set<string>();
   const plugin = createBrowserStyleMinificationPlugin(candidates);
   let load: LoadHandler | undefined;
+  let filter: RegExp | undefined;
   plugin.setup({
-    onLoad: (_options: unknown, handler: LoadHandler) => {
+    onLoad: (options: { filter: RegExp }, handler: LoadHandler) => {
+      filter = options.filter;
       load = handler;
     },
   } as unknown as Parameters<typeof plugin.setup>[0]);
   assert.ok(load !== undefined);
+  assert.ok(filter?.test("presentation.tsx"));
+  assert.ok(filter?.test("library-layout.ts"));
+  assert.equal(filter?.test("presentation.tsxx"), false);
 
   const expected = new Set<string>();
   for (const rel of REAL_STYLE_FILES) {
@@ -348,6 +449,7 @@ test("plugin records minified CSS candidates in memory without touching disk", a
     const before = readFileSync(full, "utf8");
     const result = await load({ path: full });
     assert.ok(typeof result?.contents === "string", rel);
+    assert.equal(result.loader, rel === "src/web-ui/react/chat/presentation.tsx" ? "tsx" : "ts", rel);
     assert.equal(readFileSync(full, "utf8"), before, `${rel} must not be written to disk`);
     for (const value of minifyStringRawCssTemplates(before, full).values) {
       assert.ok(value.length > 0, rel);
@@ -356,6 +458,9 @@ test("plugin records minified CSS candidates in memory without touching disk", a
   }
   const outside = await load({ path: path.join(root, "src/web-ui/browser/main.ts") });
   assert.equal(outside, null);
+  for (const rel of ["src/web-ui/react/issues/library-layout.tsx", "src/web-ui/react/foo/presentation.tsx", "src/web-ui/react/chat/nested/presentation.tsx", "src/web-ui/react/chat/styles.tsx"]) {
+    assert.equal(await load({ path: path.join(root, rel) }), null, rel);
+  }
   assert.deepEqual([...candidates].sort(), [...expected].sort());
 });
 
@@ -368,7 +473,7 @@ test("all remaining real style fragments pool with identical runtime values", ()
     assert.equal(readFileSync(full, "utf8"), before, `${rel} must not be written to disk`);
     values.push(...fileValues);
   }
-  assert.equal(values.length, 13);
+  assert.equal(values.length, 16);
   const source = emittedBundle(values);
   const { code, pooled, poolSize } = poolEmittedCssStringLiterals(source, new Set(values));
   assert.equal(pooled, values.length);

@@ -732,20 +732,29 @@ test("task list keeps created order and puts new folders and tasks first", async
   }
 });
 
-test("cheap /api/tasks revision skips rebuilding groups when unchanged", async () => {
+test("empty /api/tasks revision bootstraps the envelope and unchanged reads skip rebuilding groups", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-tasks-revision-"));
   const storage = new WandStorage(path.join(root, "wand.db"));
   const { baseUrl, close } = await startWorkspaceApp(storage);
   try {
-    const first = await fetch(`${baseUrl}/api/tasks?revision=missing`);
+    const loadSessionsSlim = storage.loadSessionsSlim.bind(storage);
+    let directoryReads = 0;
+    storage.loadSessionsSlim = () => { directoryReads++; return loadSessionsSlim(); };
+    const first = await fetch(`${baseUrl}/api/tasks?revision=`);
     assert.equal(first.status, 200);
     const body = await first.json() as { unchanged?: boolean; revision?: string; groups?: unknown[] };
     assert.equal(body.unchanged, false);
     assert.ok(typeof body.revision === "string" && body.revision.length > 0);
+    assert.ok(Array.isArray(body.groups));
+    assert.ok(directoryReads > 0);
+    const initialDirectoryReads = directoryReads;
     const second = await fetch(`${baseUrl}/api/tasks?revision=${encodeURIComponent(body.revision)}`);
     const again = await second.json() as { unchanged?: boolean; groups?: unknown[] };
     assert.equal(again.unchanged, true);
     assert.deepEqual(again.groups, []);
+    assert.equal(directoryReads, initialDirectoryReads, "matching revision does not load and rebuild the directory");
+    const legacy = await fetch(`${baseUrl}/api/tasks`).then(response => response.json());
+    assert.ok(Array.isArray(legacy), "clients that omit revision still receive the legacy array");
   } finally {
     await close();
     rmSync(root, { recursive: true, force: true });

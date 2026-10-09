@@ -544,7 +544,7 @@ export function installChatSurfaceStyles(): void {
   installStyleSheet("wand-chat-library-layout", CHAT_SURFACE_STYLES);
 }
 
-const CHAT_SURFACE_STYLES = `
+const CHAT_SURFACE_STYLES = String.raw`
     .chat-message[data-x-presentation="bubble"], .chat-activity[data-x-presentation] { display:block; width:100%; min-width:0; padding:0; }
     .chat-message.assistant-reply-collapsed > :not(.assistant-reply-host) { display:none; }
     .chat-message-text, .chat-activity-thinking-content { white-space:pre-wrap; overflow-wrap:anywhere; }

@@ -2,7 +2,7 @@ import { installStyleSheet } from "../styles";
 
 // Business layout only; Ant Design owns the control chrome and state visuals.
 export function installSidebarStyles(): void {
-  installStyleSheet("wand-sidebar-layout", `
+  installStyleSheet("wand-sidebar-layout", String.raw`
 .sidebar-visually-hidden { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; border:0; }
 .workspaces-panel { position:relative; }
 /* A continuous directory list, with one indent per real ownership boundary. */

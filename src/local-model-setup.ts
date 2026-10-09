@@ -10,6 +10,8 @@ import { runModelSetup } from "./model-setup-process.js";
 import { speechModel } from "./speech-models.js";
 import type { SpeechService } from "./speech-service.js";
 import { systemEnvValue } from "./env-utils.js";
+import { decisionHardware } from "./decision-hardware.js";
+import { DECISION_EXPERT_ID } from "./decision-expert-identity.js";
 import type { LocalModelKind, LocalModelsStatus, ModelSetupInput, ModelSetupOperation, ModelSetupPhase } from "./local-model-types.js";
 
 export interface LocalModelSetupDeps {
@@ -41,7 +43,7 @@ export class LocalModelSetupService {
     this.root = path.join(deps.configDir, "local-models", "laya");
     this.manifest = deps.layaFiles ?? LAYA_FILES;
   }
-  private supported(): boolean { return (this.deps.supportedLaya ?? (() => process.platform === "darwin" && process.arch === "arm64"))(); }
+  private supported(): boolean { return (this.deps.supportedLaya ?? (() => decisionHardware().suitable))(); }
   private managedModel(): string { return path.join(this.root, "model"); }
   private async layaModel(): Promise<{ modelPath: string; downloaded: boolean }> {
     const current = this.deps.decisionConfig().modelPath;
@@ -63,15 +65,16 @@ export class LocalModelSetupService {
     const [model, python, speech] = await Promise.all([this.layaModel(), this.python(), this.deps.speech.status()]);
     const decision = this.deps.decisions.status();
     const supported = this.supported();
+    const hardware = decisionHardware();
     const operation = this.operations.get("laya") ?? null;
     const selected = speech.models.find((value) => value.id === speech.settings.model);
     return {
       laya: { kind: "laya", label: "LAYA 本地决策", supported,
-        reason: !supported ? "LAYA-MLX 当前仅支持 Apple Silicon macOS / Metal；不是聊天或授权模型。"
+        reason: !supported ? hardware.message
           : !model.downloaded ? "模型尚未下载或完整性校验失败。" : !python ? "独立 Python/MLX 运行时尚未初始化。" : null,
         enabled: decision.enabled, model: LAYA_REPOSITORY, modelSize: this.manifest.reduce((sum, file) => sum + file.size, 0),
         downloaded: model.downloaded, runtimeAvailable: !!python, initialized: decision.state === "ready", busy: this.jobs.has("laya") || decision.queued > 0 || decision.state === "loading",
-        operation: operation ? { ...operation } : null },
+        operation: operation ? { ...operation } : null, hardware, decisionEmployeeId: DECISION_EXPERT_ID },
       speech: { kind: "speech", label: "服务端语音识别", supported: ["darwin", "linux", "win32"].includes(process.platform), reason: speech.reason,
         enabled: speech.settings.enabled, model: speech.settings.model, modelSize: selected?.size ?? 0,
         downloaded: selected?.downloaded ?? false, runtimeAvailable: speech.runtime.available, initialized: speech.initialized === true,
@@ -93,7 +96,7 @@ export class LocalModelSetupService {
   }
   start(kind: LocalModelKind, action: "download" | "initialize", raw: unknown): void {
     if (this.disposed) throw new DecisionError("UNAVAILABLE", "模型管理已关闭。", 503);
-    if (kind === "laya" && !this.supported()) throw new DecisionError("UNSUPPORTED", "LAYA-MLX 需要 Apple Silicon macOS 与 Metal。", 409);
+    if (kind === "laya" && !this.supported()) throw new DecisionError("UNSUPPORTED", `LAYA-MLX 需要 Apple Silicon macOS 与 Metal；${decisionHardware().message}`, 409);
     const input = this.parse(kind, raw);
     if (this.jobs.has(kind)) throw new DecisionError("BUSY", "该模型已有安装任务，请等待或取消。", 409);
     if (kind === "laya") this.deps.decisions.assertConfigurable();

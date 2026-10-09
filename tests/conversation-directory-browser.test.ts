@@ -17,8 +17,8 @@ test("directory distinguishes resource failures, search misses, and unselected t
   const evidence = join(process.env.WAND_CONVERSATION_EVIDENCE_DIR || join(root, "output/web-ux-implementation-20261009"), "directory-browser");
   mkdirSync(evidence, { recursive: true });
   const employee = { id: "e_directory", name: "研发员工", duty: "维护 Web", prompt: "fixture", avatar: "cat:0", agents: [], tags: [] };
-  const team = { id: "t_directory", name: "研发模板", description: "维护应用", instructions: "fixture", maxSteps: 8, requirePlanApproval: true,
-    members: [{ id: "m_directory", employeeId: employee.id, name: employee.name, duty: employee.duty, isLeader: true,
+  const team = { id: "t_directory", name: "研发模板 · 跨端界面与性能改进工作组 " + "long-template-identifier".repeat(4), description: "维护应用", instructions: "fixture-instruction".repeat(16), maxSteps: 8, requirePlanApproval: true,
+    members: [{ id: "m_directory", employeeId: employee.id, name: "负责 Web 与安卓客户端交互体验的研发员工 " + "long-leader-identifier".repeat(4), duty: employee.duty, isLeader: true,
       agent: { provider: "codex", model: "default" } }] };
   let fixture = { employeeFail: true, teamFail: true, empty: false };
   let writes = 0;
@@ -93,8 +93,18 @@ test("directory distinguishes resource failures, search misses, and unselected t
     const shot = async (name: string): Promise<void> => {
       const image = await send("Page.captureScreenshot", { format: "png" }); writeFileSync(join(evidence, `${name}.png`), Buffer.from(image.data, "base64"));
     };
+    const directoryFits = async (label: string): Promise<void> => {
+      const layout = await evaluate(`(()=>{const root=document.querySelector('.conversation-directory');return Array.from(root.querySelectorAll('*'))
+        .filter(n=>n.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&!n.closest('[inert],[hidden]')&&/^(auto|scroll)$/.test(getComputedStyle(n).overflowX))
+        .map(n=>({clientWidth:n.clientWidth,scrollWidth:n.scrollWidth}));})()`);
+      assert.ok(layout.length > 0, "directory retains its native scroll container");
+      assert.ok(layout.every((n: { clientWidth: number; scrollWidth: number }) => n.scrollWidth <= n.clientWidth + 1), label);
+      const clippedDetail = await evaluate(`Array.from(document.querySelectorAll('.conversation-inline-detail[data-open="true"] *'))
+        .filter(n=>n.clientWidth>0&&n.clientHeight>0&&n.scrollWidth>n.clientWidth+1).map(n=>({tag:n.tagName,classes:n.className,clientWidth:n.clientWidth,scrollWidth:n.scrollWidth}))`);
+      assert.deepEqual(clippedDetail, [], "expanded template details remain readable within their container");
+    };
     await send("Page.enable"); await send("Runtime.enable");
-    for (const width of [1440, 390]) {
+    for (const width of [1440, 390, 320]) {
       fixture = { employeeFail: true, teamFail: true, empty: false };
       await send("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: false });
       await send("Page.navigate", { url: `${origin}/?width=${width}` });
@@ -109,6 +119,13 @@ test("directory distinguishes resource failures, search misses, and unselected t
       await wait("document.body.innerText.includes('正在读取团队模板')");
       await wait("document.querySelectorAll('.conversation-preset-row').length===1");
       assert.equal(await evaluate("document.querySelector('[aria-label=\"搜索通讯录\"]').value"), "研发", "retry preserves search");
+      await directoryFits("collapsed long template title and leader do not overflow the directory");
+      await click('.conversation-preset-row');
+      await wait("document.querySelector('.conversation-inline-detail')?.dataset.open==='true'");
+      await pause(300);
+      await directoryFits("expanded long template instructions do not overflow the directory");
+      await click('.conversation-preset-row');
+      await wait("document.querySelector('.conversation-inline-detail')?.dataset.open==='false'");
       await type('[aria-label="搜索通讯录"]', "不存在");
       await wait("document.body.innerText.includes('没有匹配的团队模板')");
       const accessibility = await send("Accessibility.getFullAXTree");
@@ -147,6 +164,11 @@ test("directory distinguishes resource failures, search misses, and unselected t
       await wait("!document.querySelector('.wand-ui-select-content')");
       assert.equal(await evaluate("document.querySelector('.conversation-panel').dataset.open"), "true", "owned option keeps parent open");
       assert.equal(await evaluate("document.documentElement.scrollWidth<=innerWidth+1"), true);
+      const groupLayout = await evaluate(`Array.from(document.querySelectorAll('.conversation-group-editor *')).filter(n=>n.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})&&!n.closest('[inert],[hidden]')&&n.clientWidth>0&&!n.classList.contains('wand-ui-select-value'))
+        .map(n=>({tag:n.tagName,classes:n.className,clientWidth:n.clientWidth,scrollWidth:n.scrollWidth,overflowX:getComputedStyle(n).overflowX,minWidth:getComputedStyle(n).minWidth,whiteSpace:getComputedStyle(n).whiteSpace}))
+        .filter(n=>n.scrollWidth>n.clientWidth+1)`);
+      assert.deepEqual(groupLayout, [], "long selected template remains readable without horizontal overflow in the group editor");
+      assert.equal(await evaluate(`document.querySelector('[aria-label="选择团队模板"]').title.includes(${JSON.stringify(team.name)})`), true, "native selector title retains the entire selected template name");
       await shot(`${width}-draft-preserved`);
       for (const eventType of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type: eventType, key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
       await wait("document.querySelector('[aria-label=\"发起群聊\"]')!==null");
@@ -157,7 +179,7 @@ test("directory distinguishes resource failures, search misses, and unselected t
       await wait("document.body.innerText.includes('还没有团队模板')");
       assert.equal(await evaluate("!!document.querySelector('.ant-alert')"), false);
       await shot(`${width}-empty`);
-      rows.push({ width, failureDistinct: true, queryPreserved: true, clearButtonNamed: true, draftPreserved: true, unselectedDistinct: true, ownedPopup: true, emptyDistinct: true });
+      rows.push({ width, failureDistinct: true, queryPreserved: true, clearButtonNamed: true, draftPreserved: true, unselectedDistinct: true, ownedPopup: true, emptyDistinct: true, longTemplateFitsCollapsedAndExpanded: true });
     }
     assert.equal(writes, 0, "read-only recovery does not submit work");
     assert.deepEqual(errors, [], "no browser exceptions");

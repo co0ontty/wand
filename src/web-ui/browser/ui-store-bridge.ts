@@ -25,7 +25,7 @@ export function subscribeLegacyUiChange(listener: LegacyChangeListener): () => v
   return () => { legacyChangeListeners.delete(listener); };
 }
 
-function browserEnvironment(): LegacySnapshotEnvironment {
+export function browserEnvironment(): LegacySnapshotEnvironment {
   const nativeBridge = typeof WandNative === "undefined" ? undefined : WandNative;
   return {
     width: window.innerWidth,

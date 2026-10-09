@@ -5,9 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import express from "express";
-import { DEFAULT_EMPLOYEE_ID, DEFAULT_EMPLOYEE_KEY, DEFAULT_EMPLOYEE_NAME, isDefaultSiliconEmployee } from "../src/ai-team-types.js";
+import { DEFAULT_EMPLOYEE_ID, DEFAULT_EMPLOYEE_KEY, DEFAULT_EMPLOYEE_NAME, SYSTEM_EMPLOYEE_ID, isDefaultSiliconEmployee } from "../src/ai-team-types.js";
 import { defaultConfig, loadConfigWithStorage } from "../src/config.js";
 import { DEFAULT_EMPLOYEE_PROMPT } from "../src/default-employee.js";
+import { DECISION_EXPERT_ID, DECISION_EXPERT_KEY } from "../src/decision-expert-identity.js";
 import { dispatchAgentForTask } from "../src/agent-dispatch.js";
 import { recordIterationPrompt, whenIterationPromptsSettled } from "../src/iteration-log.js";
 import { registerSiliconEmployeeRoutes } from "../src/server-employee-routes.js";
@@ -54,10 +55,16 @@ test("default partner is seeded alongside ops, idempotent and preserves candidat
   assert.equal(role.prompt, DEFAULT_EMPLOYEE_PROMPT);
   assert.ok(isDefaultSiliconEmployee(role));
   assert.equal(storage.getSystemSiliconEmployee()?.prompt, SYSTEM_EMPLOYEE_PROMPT);
+  const decisionExpert = storage.getSystemSiliconEmployee(DECISION_EXPERT_KEY)!;
+  assert.equal(decisionExpert.id, DECISION_EXPERT_ID);
+  const decisionCandidates = decisionExpert.agents.slice().reverse();
+  storage.saveSiliconEmployee({ ...decisionExpert, agents: decisionCandidates });
   storage.saveSiliconEmployee({ ...role, agents: [CODEX, PI] });
   await loadConfigWithStorage(join(root, "config.json"), storage);
-  assert.equal(storage.listSiliconEmployees().length, 2);
+  assert.deepEqual(storage.listSiliconEmployees().map((employee) => employee.id), [SYSTEM_EMPLOYEE_ID, DEFAULT_EMPLOYEE_ID, DECISION_EXPERT_ID]);
   assert.deepEqual(storage.getDefaultSiliconEmployee()?.agents, [CODEX, PI]);
+  assert.equal(storage.getSystemSiliconEmployee(DECISION_EXPERT_KEY)?.id, decisionExpert.id);
+  assert.deepEqual(storage.getSystemSiliconEmployee(DECISION_EXPERT_KEY)?.agents, decisionCandidates);
 });
 
 test("memory strips secret lines, links, long keys and private paths before clipping", () => {

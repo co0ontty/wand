@@ -4,6 +4,8 @@ import { handlePiSettingsKeydown } from "./pi-settings-adapter";
 import { createSessionReads } from "./session-reads";
 import { createSessionCompletionViewIntent, isSessionJustCompleted, mergeSessionCompletionState } from "../../session-completion-state.js";
 import { notifyTasksChanged } from "../react/task-changes";
+import { workspacesStore } from "../react/workspaces/controller";
+import { workspaceContextStore } from "../react/workspaces/workspace-context";
 import { parseJsonResponse } from "../react/http-adapter";
 import { publishWandModelCatalog, startWandModelCatalogPolling } from "../react/model-catalog";
 import { compactThinkingLabel, dynamicThinkingChoices } from "../thinking-efforts";
@@ -16,10 +18,10 @@ import { bindChatScrollListener, normalizeStructuredSnapshot, persistSelectedId,
 import "./events";
 import { isSidebarDrawerLayout, terminalZoomFromKeyboard, updateFilePanelCwd, updateLayoutState } from "./file-browser";
 import { loadGitStatus, restoreGitStatusForSession } from "./git-commit";
-import { autoResizeInput, buildMessagesForRender, canAutoResumeSession, captureTerminalInput, flushCrossSessionQueue, focusInputBox, getControlInput, hasActiveTerminalSelection, isImeKeyboardEvent, queueDirectInput, reconcileInteractiveState, renderCrossSessionQueue, sendInputFromBox, setTerminalInteractive, shouldCaptureTerminalEvent, stopCrossSessionQueueTicker, stopSession, switchToSessionView, updateInteractiveControls, updateStructuredQueueCounter } from "./input";
+import { autoResizeInput, buildMessagesForRender, canAutoResumeSession, captureSessionViewFocus, captureTerminalInput, flushCrossSessionQueue, focusInputBox, getControlInput, hasActiveTerminalSelection, isImeKeyboardEvent, queueDirectInput, reconcileInteractiveState, renderCrossSessionQueue, sendInputFromBox, setTerminalInteractive, shouldCaptureTerminalEvent, stopCrossSessionQueueTicker, stopSession, switchToSessionView, updateInteractiveControls, updateStructuredQueueCounter } from "./input";
 import { _apkVersion, _hasNativeBridge, _macAppVersion, _syncWakeLock, hideError, showError, showToast } from "./notifications";
 import { getEffectiveCwd, render, resetChatRenderCache } from "./render";
-import { initTerminal, maybeScrollTerminalToBottom, syncTerminalBuffer, waitForTerminalSettled } from "./terminal";
+import { initTerminal, measureTerminalCreationDimensions, maybeScrollTerminalToBottom, syncTerminalBuffer, waitForTerminalSettled, type TerminalCreationContext } from "./terminal";
 import { collapseTodoProgress } from "./utils";
 import { ensureTerminalFit, scheduleTerminalResize, teardownTerminal } from "./viewport";
 import { startPolling, stopPolling, updateAutoApproveIndicator, updateTaskDisplay } from "./websocket";
@@ -1618,10 +1620,15 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         return true;
       }
 
-      export function selectSession(id) {
+      export function selectSession(id, options?: { focusInput?: boolean }) {
         var foundSession = state.sessions.find(function(item) { return item.id === id; });
         if (!foundSession) {
           return;
+        }
+        if (workspaceContextStore.getSnapshot().taskId && !foundSession.workspaceTaskId) {
+          // Canonical selection also serves quick-create and restored standalone sessions.
+          // Closing context cancels a late task restore without clearing this session's composer.
+          workspacesStore.getRuntime()?.closeWorkspace();
         }
         completionViewIntent.open(id);
         var previousSessionId = state.selectedId;
@@ -1667,7 +1674,8 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           setTerminalInteractive(false);
         }
         updateSessionsList();
-        switchToSessionView(id);
+        switchToSessionView(id, options);
+        var ownsFocus = captureSessionViewFocus(id);
         // switchToSessionView exposes #chat-output for structured sessions.
         // Render the cleared buffer synchronously before the async detail
         // request starts, otherwise the hidden chat DOM from the previous PTY
@@ -1678,7 +1686,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           updateFilePanelCwd(session);
         }
         var outputLoaded = loadOutput(id).then(function() {
-          if (state.selectedId === id) focusInputBox(true);
+          if (options?.focusInput !== false && ownsFocus()) focusInputBox(true);
         });
         subscribeToSession(id);
         // 切会话：先用缓存里的上一次结果顶上（没有就空着），再异步刷新，
@@ -1963,10 +1971,10 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         var controller = window.__wandReactSettings;
         if (controller && typeof controller.open === "function") {
           // WebKit does not focus buttons on click by default. Establish the
-          // invoking control explicitly so the dialog can restore it on close.
+          // invoking control explicitly so the settings page can restore it on return.
           var settingsTrigger = document.getElementById("settings-button");
           if (settingsTrigger) settingsTrigger.focus({ preventScroll: true });
-          controller.open("general");
+          controller.open();
           return;
         }
         // The rollback flag can disable the React island. Settings has no
@@ -2061,16 +2069,16 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
       // 直接落在正确尺寸下。否则 PTY 先按 cols=120 启动，Claude/Codex 会基于
       // 120 列输出 \x1b[120G 这类绝对列定位序列；等前端 remeasure 触发 resize
       // 时这些早期内容已经被以 80 等真实列数渲染，整条历史就错位。
-      export function withTerminalDimensions(body) {
+      export function withTerminalDimensions(body, context?: TerminalCreationContext) {
         if (!body || typeof body !== "object") return body;
         if (!state.terminal) return body;
-        try {
-          if (typeof state.terminal.remeasure === "function") {
-            state.terminal.remeasure();
-          }
-        } catch (e) {}
-        var cols = state.terminal.cols;
-        var rows = state.terminal.rows;
+        // A previously mounted terminal may be hidden and retain its old size.
+        // Purely measure the future slot; resizing it would send a resize to the
+        // old session merely because the user is creating a different session.
+        var measured;
+        try { measured = measureTerminalCreationDimensions(context); } catch (e) {}
+        var cols = measured?.cols ?? state.terminal.cols;
+        var rows = measured?.rows ?? state.terminal.rows;
         if (typeof cols === "number" && typeof rows === "number"
             && Number.isFinite(cols) && Number.isFinite(rows)
             && cols > 0 && rows > 0) {
@@ -2116,7 +2124,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
-          body: JSON.stringify(withTerminalDimensions({ command: command, provider: provider, cwd: defaultCwd, mode: defaultMode, sessionSource: "interactive" }))
+          body: JSON.stringify(withTerminalDimensions({ command: command, provider: provider, cwd: defaultCwd, mode: defaultMode, sessionSource: "interactive" }, { kind: "pty", provider: provider, command: command, cwd: defaultCwd }))
         });
         })
         .then(function(res) { return res.json(); })
@@ -2199,6 +2207,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           state.preferredCommand = provider;
           state.chatMode = getSafeModeForTool(provider, state.chatMode);
         }
+        var command = shell ? undefined : providerCliCommand(provider);
         var body: Record<string, unknown> = shell
           ? {
               shell: true,
@@ -2207,7 +2216,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
               sessionSource: "interactive",
             }
           : {
-              command: providerCliCommand(provider),
+              command: command,
               provider: provider,
               cwd: cwd,
               mode: defaultMode,
@@ -2224,7 +2233,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
             method: "POST",
             headers: { "Content-Type": "application/json" },
             credentials: "same-origin",
-            body: JSON.stringify(withTerminalDimensions(body)),
+            body: JSON.stringify(withTerminalDimensions(body, { kind: shell ? "shell" : "pty", provider: shell ? undefined : provider, command: command, cwd: cwd, workspaceTaskId: options?.workspaceTaskId })),
           });
         })
           .then(function(res) { return res.json(); })

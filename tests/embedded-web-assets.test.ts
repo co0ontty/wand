@@ -24,7 +24,7 @@ function md5(content: string): string {
 
 test("compressed embedded assets preserve all six published asset payloads", () => {
   const expectedScript = transformSync(readContent("scripts.js"), {
-    loader: "js", minify: true, legalComments: "none",
+    loader: "js", minify: true, legalComments: "none", charset: "utf8",
   }).code;
   const expectedStyles = transformSync(
     `${readContent("tailwind.css")}\n${readContent("styles.css")}`,

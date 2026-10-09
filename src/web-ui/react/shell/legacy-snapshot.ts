@@ -257,6 +257,7 @@ function sessionToVm(
     ...(session.claudeSessionId ? { claudeSessionId: session.claudeSessionId } : {}),
     ...(session.workspaceId ? { workspaceId: session.workspaceId } : {}),
     ...(session.workspaceTaskId ? { workspaceTaskId: session.workspaceTaskId } : {}),
+    ...(session.archived ? { archived: true } : {}),
     ...(worktreeEnabled ? {
       worktree: {
         enabled: true,

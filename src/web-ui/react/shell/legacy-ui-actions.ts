@@ -14,7 +14,7 @@ export interface LegacyUiCommands {
   quickStartCodexTerminal(): void | Promise<unknown>;
   quickStartOpenCodeTerminal(): void | Promise<unknown>;
   quickStartStructuredSession(): void | Promise<unknown>;
-  selectSession(id: string): void | Promise<unknown>;
+  selectSession(id: string, options?: { focusInput?: boolean }): void | Promise<unknown>;
   resumeSession(id: string): void | Promise<unknown>;
   resumeHistory(provider: UiNativeHistoryProvider, id: string, cwd: string): void | Promise<unknown>;
   deleteItem(target: UiManageTarget, id: string): void | Promise<unknown>;
@@ -60,7 +60,9 @@ export function applyLegacyUiAction(
     case "session.quickStart.codex": return commands.quickStartCodexTerminal();
     case "session.quickStart.opencode": return commands.quickStartOpenCodeTerminal();
     case "session.quickStart.structured": return commands.quickStartStructuredSession();
-    case "session.select": return commands.selectSession(action.id);
+    case "session.select": return action.focusInput === false
+      ? commands.selectSession(action.id, { focusInput: false })
+      : commands.selectSession(action.id);
     case "session.resume": return commands.resumeSession(action.id);
     case "session.resumeHistory": return commands.resumeHistory(action.provider, action.id, action.cwd);
     case "session.delete": return commands.deleteItem(action.target, action.id);

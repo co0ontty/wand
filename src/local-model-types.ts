@@ -24,6 +24,8 @@ export interface LocalModelStatus {
   initialized: boolean;
   busy: boolean;
   operation: ModelSetupOperation | null;
+  hardware?: import("./decision-hardware.js").DecisionHardwareAssessment;
+  decisionEmployeeId?: string;
 }
 export interface LocalModelsStatus { laya: LocalModelStatus; speech: LocalModelStatus; }
 export interface ModelSetupInput {

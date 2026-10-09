@@ -53,8 +53,7 @@ import {
 import { SidebarRecentSection } from "./sidebar-recent-section";
 import { nonTeamSessions, splitTeamSessions } from "./team-sessions";
 import { findSessionTask } from "./session-task-lookup";
-import { subscribeTaskChanges } from "../task-changes";
-import { groupSessionsByArchive } from "./session-archive";
+import { useTaskGroups } from "./task-groups-store";
 import { draggedSessionId, isSessionDrag, startSessionDrag } from "./session-drag";
 import {
   EMPTY_SIDEBAR_MANAGE_SELECTION,
@@ -125,52 +124,6 @@ async function removeSessions(sessionIds: readonly string[], task: TaskSummary |
   } finally {
     await rt?.refreshSessions();
   }
-}
-
-// ── 数据 hook：任务聚合列表（服务端已按目录组好）──
-
-function useTaskGroups(refreshKey: number): {
-  groups: TaskDirectoryGroup[];
-  loading: boolean;
-  error: string;
-  reload: () => Promise<void>;
-} {
-  const [groups, setGroups] = React.useState<TaskDirectoryGroup[]>([]);
-  const [loading, setLoading] = React.useState(true);
-  const [error, setError] = React.useState("");
-  const generationRef = React.useRef(0);
-  const revisionRef = React.useRef<string | undefined>(undefined);
-
-  const reload = React.useCallback(async (): Promise<void> => {
-    const generation = ++generationRef.current;
-    setLoading(true);
-    try {
-      const page = await httpWorkspacesRepository.listTaskGroups(revisionRef.current);
-      if (generation !== generationRef.current) return;
-      if (page.revision) revisionRef.current = page.revision;
-      if (!page.unchanged) setGroups(groupSessionsByArchive(page.groups));
-      setError("");
-    } catch (fetchError) {
-      if (generation === generationRef.current) {
-        setError(sidebarSafeError(describeError(fetchError, "无法加载任务列表。")));
-      }
-    } finally {
-      if (generation === generationRef.current) setLoading(false);
-    }
-  }, []);
-
-  React.useEffect(() => {
-    void reload();
-    const interval = window.setInterval(() => void reload(), 6_000);
-    const unsubscribe = subscribeTaskChanges(() => void reload());
-    return () => {
-      unsubscribe();
-      window.clearInterval(interval);
-      generationRef.current += 1;
-    };
-  }, [reload, refreshKey]);
-
-  return { groups, loading, error, reload };
 }
 
 import { useSiliconEmployees } from "../agents/employee-repository.js";
@@ -1388,6 +1341,8 @@ function SidebarWorkspacesPanel({
         createdAt: "",
         lastOpenedAt: null,
       });
+    } else {
+      rt.closeWorkspace();
     }
     rt.selectSession(session.id);
   }, [onNavigate, openTask, sourceGroups]);

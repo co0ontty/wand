@@ -387,7 +387,7 @@ test("React style installation keeps foundation and business layers behind one i
   assert.match(source("src/web-ui/react/folder-picker/options.tsx"), /<List/);
   const layout = source("src/web-ui/react/issues/library-layout.ts");
   assert.match(layout, /\.ant-modal:has\(\.wand-task-library-dialog\)/);
-  assert.match(source("src/web-ui/react/settings/styles.ts"), /wand-settings-library-dialog/);
+  assert.match(source("src/web-ui/react/settings/styles.ts"), /wand-settings-library-nested-dialog/);
 
   const cascade = [
     "foundationStyles",

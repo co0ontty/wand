@@ -4,6 +4,7 @@ import { ImSidebarGroup } from "./im-sidebar-group";
 import { WandBrandMark } from "../ui/brand-mark";
 import { wandOverlay } from "../overlay-controller";
 import * as React from "react";
+import { settingsController, settingsStore } from "../settings/controller";
 import { isSessionJustCompleted } from "../../../session-completion-state.js";
 import { WAND_AGENT_LABEL, normalizeProviderId, providerDisplayName } from "../../provider-identity";
 import { ProviderLogo } from "../provider-logo";
@@ -585,6 +586,7 @@ export function ShellSidebar() {
   const conversationState = useConversationUi();
   const dispatch = useUiDispatch();
   const taskBoard = React.useSyncExternalStore(taskBoardStore.subscribe, taskBoardStore.getSnapshot, taskBoardStore.getSnapshot);
+  const settings = React.useSyncExternalStore(settingsStore.subscribe, settingsStore.getSnapshot, settingsStore.getSnapshot);
   const teamAttention = useAiTeamAttentionCount();
   const [moreOpen, setMoreOpen] = React.useState(false);
   const presentation = useSidebarPresentation();
@@ -633,13 +635,14 @@ export function ShellSidebar() {
   };
   const navigate = (action: UiAction): void => {
     // 设置、创建表单和辅助面板只暂时覆盖当前页面，取消后仍留在原视图。
-    if (sidebarActionLeavesPage(action)) { taskBoardController.close(); conversationUi.suspend(); }
+    if (sidebarActionLeavesPage(action)) { settingsController.close(); taskBoardController.close(); conversationUi.suspend(); }
     if (action.type === "nav.home") conversationUi.show();
     dismissSidebarSurfaces();
     void dispatch(action);
   };
   // 真正打开任务 / 会话时离开看板；树内创建表单复用临时弹层入口。
   const navigateFromTree = (): void => {
+    settingsController.close();
     taskBoardController.close();
     conversationUi.suspend();
     dismissSidebarSurfaces();
@@ -836,7 +839,7 @@ export function ShellSidebar() {
           </Flex>}
         </Flex>
         <HomeAttentionPanel open={attentionOpen && !narrow} onClose={() => setAttentionOpen(false)} />
-        <div style={{ padding: narrow ? "0 4px 8px" : "0 12px 8px" }}><ConversationNavigation compact={narrow} onDirectory={() => { taskBoardController.close(); conversationUi.directory(true); dismissSidebarSurfaces(); }}/></div>
+        <div style={{ padding: narrow ? "0 4px 8px" : "0 12px 8px" }}><ConversationNavigation compact={narrow} onDirectory={() => { settingsController.close(); taskBoardController.close(); conversationUi.directory(true); dismissSidebarSurfaces(); }}/></div>
         <Flex hidden={conversationState.mode !== "tasks"} component="nav" vertical gap="small" className="sidebar-feature-nav" aria-label="功能菜单" style={{ padding: narrow ? "0 8px 8px" : "0 16px 12px", flexShrink: 0 }}>
           <WandButton id="drawer-new-session-button" className="sidebar-new-task" kind="primary" title={primaryAction.label}
             aria-label={primaryAction.ariaLabel} onClick={() => navigate(primaryAction.action)}>
@@ -849,6 +852,7 @@ export function ShellSidebar() {
                 peek.close();
                 if (overlay) void dispatch({ type: "layout.drawer.close" });
                 taskBoardController.open(snapshot.selected?.workspaceId ?? "", snapshot.selected?.id ?? "");
+                settingsController.close();
               }}>
               <WandIcon name="board" size={18}/><span hidden={narrow}>任务看板</span>
             </WandButton>
@@ -858,6 +862,7 @@ export function ShellSidebar() {
                 peek.close();
                 if (overlay) void dispatch({ type: "layout.drawer.close" });
                 taskBoardController.open(snapshot.selected?.workspaceId ?? "", snapshot.selected?.id ?? "", "teams");
+                settingsController.close();
               }}>
               <Badge count={teamAttention} size="small"><WandIcon name="parallel" size={18}/></Badge><span hidden={narrow}>员工与团队模板</span>
             </WandButton>
@@ -894,7 +899,7 @@ export function ShellSidebar() {
         {!narrow && <div style={{ paddingInline: 8, flexShrink: 0 }}><DaemonUpdateNotice /></div>}
         <Flex vertical={narrow} align="center" justify="space-between" gap="small" className="sidebar-footer" style={{ flexShrink: 0, padding: narrow ? 8 : "8px 16px", borderTop: "1px solid var(--border-subtle)" }}>
           <Flex component="nav" wrap gap={4} vertical={narrow} className="sidebar-footer-actions" aria-label="侧栏快捷操作">
-            <WandButton kind="ghost" id="settings-button" title="设置" aria-label="设置" onClick={() => navigate({ type: "settings.open" })}>
+            <WandButton kind={settings.open ? "soft" : "ghost"} aria-current={settings.open ? "page" : undefined} id="settings-button" title="设置" aria-label="设置" onClick={() => navigate({ type: "settings.open" })}>
               <WandIcon name="gear" size={16}/><span hidden={narrow}>设置</span>
             </WandButton>
             {snapshot.layout.sidebarDrawer && <WandIconButton id="file-panel-toggle-btn" title="查看文件" aria-label="文件"

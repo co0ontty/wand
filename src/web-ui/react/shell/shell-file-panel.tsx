@@ -23,11 +23,12 @@ export function getParentFilePanelCwd(raw: string): string {
 }
 
 export interface ShellFilePanelProps {
+  suspended?: boolean;
   /** Stable bridge root; FileExplorerHost owns the file tree's React children. */
   explorerRef?: React.Ref<HTMLDivElement>;
 }
 
-export function ShellFilePanel({ explorerRef }: ShellFilePanelProps = {}) {
+export function ShellFilePanel({ explorerRef, suspended = false }: ShellFilePanelProps = {}) {
   const snapshot = useUiStoreSnapshot();
   const dispatch = useUiDispatch();
   const snapshotCwd = normalizeFilePanelCwd(snapshot.topbar.cwd) || "/";
@@ -77,7 +78,7 @@ export function ShellFilePanel({ explorerRef }: ShellFilePanelProps = {}) {
         hidden
       />
       <div className="file-explorer legacy-file-explorer-host" id="file-explorer" ref={explorerRef} hidden aria-hidden="true" />
-      <Drawer forceRender open={snapshot.layout.filePanelOpen} title="文件" size={snapshot.viewport.mobile ? "100%" : 360}
+      <Drawer forceRender open={snapshot.layout.filePanelOpen && !suspended} title="文件" size={snapshot.viewport.mobile ? "100%" : 360}
         rootClassName="wand-file-drawer"
         mask={snapshot.layout.filePanelBackdropVisible} keyboard={snapshot.layout.filePanelOpen} onClose={closePanel} focusable={{ focusTriggerAfterClose: false }}
         afterOpenChange={(shown) => {

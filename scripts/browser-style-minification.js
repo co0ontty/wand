@@ -21,16 +21,31 @@ const STYLES_DIR_BASENAMES = new Set(["base.ts", "features.ts"]);
 // sibling clones whose paths merely happen to contain "src/web-ui/react/".
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REACT_ROOT = path.join(PROJECT_ROOT, "src", "web-ui", "react");
+const CHAT_SURFACE_STYLE_FILE = path.join(REACT_ROOT, "chat", "presentation.tsx");
+const EXACT_REACT_STYLE_PATHS = new Set([
+  path.join("shell", "sidebar-styles.ts"),
+  path.join("issues", "library-layout.ts"),
+  path.join("chat", "presentation.tsx"),
+]);
+
+function projectFilePath(filePath) {
+  return path.isAbsolute(filePath) ? path.normalize(filePath) : path.join(PROJECT_ROOT, filePath);
+}
+
+function isChatSurfaceStyleFile(filePath) {
+  return projectFilePath(filePath) === CHAT_SURFACE_STYLE_FILE;
+}
 
 /** Strict filename guard: only the known React style modules may be rewritten. */
 export function isBrowserStyleFile(filePath) {
-  const abs = path.isAbsolute(filePath) ? path.normalize(filePath) : path.join(PROJECT_ROOT, filePath);
+  const abs = projectFilePath(filePath);
   const rel = path.relative(REACT_ROOT, abs);
   if (!rel || rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) return false;
   const segments = rel.split(path.sep);
   if (segments.includes("node_modules")) return false;
   const base = segments[segments.length - 1];
   const parent = segments.length > 1 ? segments[segments.length - 2] : "";
+  if (EXACT_REACT_STYLE_PATHS.has(rel)) return true;
   if (DIRECT_BASENAMES.has(base)) return true;
   return parent === "styles" && STYLES_DIR_BASENAMES.has(base);
 }
@@ -105,7 +120,9 @@ export function minifyStringRawCssTemplates(sourceText, filePath = "module.ts") 
     sourceText,
     ts.ScriptTarget.Latest,
     true,
-    ts.ScriptKind.TS,
+    // Only the explicitly owned chat surface module mixes JSX with static CSS.
+    // Other TSX files never enter the plugin's filename guard.
+    isChatSurfaceStyleFile(filePath) ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
   );
   const { edits, skipped } = collectCssTemplateEdits(sourceFile, filePath);
   let code = sourceText;
@@ -128,7 +145,7 @@ export function createBrowserStyleMinificationPlugin(cssCandidates) {
   return {
     name: "browser-style-minification",
     setup(build) {
-      build.onLoad({ filter: /\.ts$/ }, async (args) => {
+      build.onLoad({ filter: /\.tsx?$/ }, async (args) => {
         if (!isBrowserStyleFile(args.path)) return null;
         const source = await readFile(args.path, "utf8");
         const { code, values } = minifyStringRawCssTemplates(source, args.path);
@@ -137,7 +154,7 @@ export function createBrowserStyleMinificationPlugin(cssCandidates) {
             if (value.length > 0) cssCandidates.add(value);
           }
         }
-        return { contents: code, loader: "ts" };
+        return { contents: code, loader: isChatSurfaceStyleFile(args.path) ? "tsx" : "ts" };
       });
     },
   };

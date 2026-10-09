@@ -300,6 +300,7 @@ test("ai-teams chunk borrows every shared import from the main-bundle host regis
     "ai-teams/team-chat-page": "react/ai-teams/team-chat-page.tsx",
     "ai-teams/styles": "react/ai-teams/styles.ts",
     "issues/team-run-panel": "react/issues/team-run-panel.tsx",
+    "settings/decision-chain-editor": "react/settings/decision-chain-editor.tsx",
     "agents/candidate-list": "react/agents/candidate-list.ts",
     "agents/candidate-editor": "react/agents/candidate-editor.tsx",
     "agents/employee-avatar": "react/agents/employee-avatar.tsx",

@@ -12,6 +12,8 @@ import {
   type SiliconEmployeeDraft,
 } from "./ai-team-types.js";
 import { getErrorMessage } from "./error-utils.js";
+import { DECISION_EXPERT_KEY, isLocalDecisionModel } from "./decision-expert-identity.js";
+import { OPENROUTER_FREE_SELECTOR, isOpenRouterFreeSelector } from "./openrouter-free-selection.js";
 import { asyncRoute } from "./express-async.js";
 import { bodyObject, sendRouteError, text } from "./server-request.js";
 import { parseTaskAgent } from "./server-task-routes.js";
@@ -141,6 +143,10 @@ export function parseSystemEmployeeAgents(value: unknown, existing: SiliconEmplo
     const parsed = parseTaskAgent(rawAgent ?? {});
     if (!parsed) throw new Error("请选择有效的 CLI 工具或 Wand Agent。");
     if (parsed.kind !== "structured") throw new Error("硅基员工只支持结构化会话。");
+    if (existing.systemKey === DECISION_EXPERT_KEY && (parsed.provider !== "pi" || parsed.engine !== "sdk"
+      || !(isLocalDecisionModel(parsed.model) || parsed.model === OPENROUTER_FREE_SELECTOR || isOpenRouterFreeSelector(parsed.model)))) {
+      throw new Error("决策专家仅支持 LAYA 或 Wand 免费分组的决策候选；请使用 Wand 内部执行入口。");
+    }
     return parsed;
   });
   if (new Set(agents.map(agentKey)).size !== agents.length) {

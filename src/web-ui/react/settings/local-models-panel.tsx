@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Progress, Space, Typography } from "antd";
 import type { LocalModelKind, LocalModelsStatus, LocalModelStatus } from "../../../local-model-types.js";
 import { jsonBody, requestJson } from "../http-adapter";
+import { DecisionChainEditor } from "../ai-teams/lazy";
 import { SettingsActionButton, SettingsField, SettingsSection, SettingsSelect, SettingsStatus, SettingsToggle } from "./fields";
 
 function useLocalModels() {
@@ -100,6 +101,10 @@ export function LocalModelsSettingsTab({ admin }: { admin: boolean }) {
     <SettingsSection title="LAYA 本地决策模型" description="用于有界选择、评分与是非判断，不是聊天模型，也不代替授权。当前仅支持 Apple Silicon macOS / Metal。"
       action={<SettingsActionButton kind="secondary" onClick={() => state.refresh()}>刷新状态</SettingsActionButton>}>
       {laya ? <>
+        {laya.hardware ? <SettingsStatus tone={laya.hardware.suitable ? "info" : "warning"}>
+          {laya.hardware.message}（内存 {laya.hardware.memoryGiB} GiB · CPU {laya.hardware.cpuCount} 核）
+        </SettingsStatus> : null}
+        <DecisionChainEditor admin={admin}/>
         <Typography.Text type="secondary">{laya.model} · {Math.round(laya.modelSize / 1024 / 1024)} MiB · {laya.downloaded ? "模型校验通过" : "模型未就绪"} · {laya.runtimeAvailable ? "已有运行时" : "运行时未安装"}</Typography.Text>
         <SettingsToggle label="启用 LAYA 本地决策" checked={laya.enabled} disabled={!admin || !laya.supported || laya.busy || saving || !laya.downloaded || !laya.runtimeAvailable}
           description="下载与初始化不会自动启用；也不会改变会话的工具、费用、技能或派工权限。" onCheckedChange={value => void enabled(value)}/>

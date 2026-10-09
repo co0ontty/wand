@@ -7,7 +7,11 @@ import type { StructuredSessionManager } from "./structured-session-manager.js";
 import type { SessionRegistry } from "./session-registry.js";
 import type { WandConfig } from "./types.js";
 
-export type PiRecommendationRuntime = Pick<DecisionService, "evaluate" | "status">;
+export type PiRecommendationRuntime = Pick<DecisionService, "evaluate"> & {
+  status(): ReturnType<DecisionService["status"]> & Partial<{
+    notice: string | null; employeeId: string; hardware: import("./decision-hardware.js").DecisionHardwareAssessment;
+  }>;
+};
 
 /** Uses the parent's login + sessions-scope middleware; inference-only tokens cannot enter this route. */
 export function registerPiRecommendationRoute(app: Express, deps: {
@@ -35,7 +39,8 @@ export function registerPiRecommendationRoute(app: Express, deps: {
       }
       const status = deps.decisions?.status();
       if (!deps.decisions || !status?.enabled || !status.supported || !status.configured || settings.localDecision === false) {
-        throw new DecisionError("UNAVAILABLE", "本地决策未启用或不可用，原选择未改变。", 503);
+        const notice = status && "notice" in status && typeof status.notice === "string" ? status.notice : "本地决策未启用或不可用，原选择未改变；请配置「决策专家」调用链。";
+        throw new DecisionError("UNAVAILABLE", notice, 503);
       }
       const input = parsePiRecommendationRequest(req.body);
       if (active.has(id)) throw new DecisionError("BUSY", "本会话正在推荐，请等待当前请求完成。", 409);
@@ -52,7 +57,8 @@ export function registerPiRecommendationRoute(app: Express, deps: {
         throw new DecisionError("CANCELLED", "会话已变化，请重新打开设置面板。", 409);
       }
       if (abort.signal.aborted) throw new DecisionError("TIMEOUT", "推荐已取消或超时，原选择未改变。", 504);
-      if (!res.destroyed) res.json(result);
+      const advisor = deps.decisions.status();
+      if (!res.destroyed) res.json({ ...result, ...("hardware" in advisor ? { decisionAdvisor: advisor } : {}) });
     } catch (error) {
       if (res.destroyed) return;
       const failure = error instanceof DecisionError ? error

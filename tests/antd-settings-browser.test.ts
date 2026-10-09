@@ -12,7 +12,7 @@ import { build } from "esbuild";
 test("settings tabs use Ant controls and preserve draft, ordering, permission and popup contracts", { timeout: 180_000, skip: process.env.WAND_SETTINGS_BROWSER !== "1" }, async () => {
   const root = resolve(import.meta.dirname, "..");
   const temporary = mkdtempSync(join(tmpdir(), "wand-antd-settings-"));
-  const artifact = join(root, "output/web-ui-library-migration/settings");
+  const artifact = join(root, "output/settings-page-20261009/browser");
   const browserErrors: string[] = [];
   const evidence: Array<Record<string, unknown>> = [];
   let access = "admin", failSave = false, holdSave = false;
@@ -141,7 +141,8 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
       for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, ...point, button: "left", clickCount: 1 });
     };
     const clickText = async (text: string, role = "button"): Promise<void> => {
-      await evaluate(`(()=>{const n=Array.from(document.querySelectorAll(${JSON.stringify(role === "tab" ? '[role="tab"]' : 'button')})).find(n=>n.innerText.trim()===${JSON.stringify(text)});if(!n)throw Error("Missing action: "+${JSON.stringify(text)});n.setAttribute("data-settings-test-target","true")})()`);
+      if (role === "tab" && await evaluate('!!document.querySelector("[aria-label=返回设置目录]")?.getClientRects().length')) await click('[aria-label="返回设置目录"]');
+      await evaluate(`(()=>{const n=Array.from(document.querySelectorAll(${JSON.stringify(role === "tab" ? '[role="menuitem"]' : 'button')})).find(n=>n.getClientRects().length&&(n.querySelector('.wand-settings-library-nav-copy>span')?.innerText||n.innerText).trim()===${JSON.stringify(text)});if(!n)throw Error("Missing action: "+${JSON.stringify(text)});n.setAttribute("data-settings-test-target","true")})()`);
       if (role === "tab") await evaluate('document.querySelector("[data-settings-test-target]").focus({preventScroll:true})');
       try { await click('[data-settings-test-target="true"]'); }
       catch (error) { throw new Error(`Cannot click ${role}: ${text}: ${String(error)}; layout=${await evaluate(`JSON.stringify(Array.from(document.querySelectorAll('.ant-modal-body,.wand-settings-library-tabs,.ant-tabs-body-holder,[data-settings-test-target]')).map(n=>({tag:n.tagName,cls:n.className,rect:n.getBoundingClientRect().toJSON(),scroll:n.scrollTop,scrollHeight:n.scrollHeight,overflow:getComputedStyle(n).overflow,display:getComputedStyle(n).display,height:getComputedStyle(n).height})))`)} `); }
@@ -166,7 +167,8 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
       await send("Page.navigate", {url:origin+(mode === "rollback" ? "/?reactUi=0" : mode === "native" ? "/?native" : "/")});
       await wait("!window.__wandFixtureBeforeNavigation && document.readyState === 'complete'");
       await send("Page.bringToFront"); await wait('!!document.querySelector("#settings-host")');
-      await pause(550); // Let the canonical modal's opening geometry settle before scrolling deep fields.
+      assert.equal(await evaluate('document.querySelectorAll(".ant-modal-wrap").length'),0,`${mode}: settings open as a page`);
+      assert.equal(await evaluate('document.querySelector("[data-testid=settings-page]").getBoundingClientRect().height'),1000,`${mode}: settings fill the content height`);
       assert.equal(await evaluate('document.querySelector("#settings-host").classList.contains("ant-input")'),true);
       assert.equal(qrRequests,qrRequestBaseline,`${mode}: ordinary settings do not load the optional QR library`);
       assert.equal(await evaluate('document.body.innerText.includes("保存本页后立即扫描") && document.body.innerText.includes("自动删除已关闭")'),true,`${mode}: retention consequences are visible before saving`);
@@ -178,7 +180,7 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
       await click('[aria-label="AI 回复语言"]');
       await wait('!!document.querySelector(".wand-ui-select-content [role=option][title=简体中文]")');
       await click('.wand-ui-select-content [role=option][title=简体中文]');
-      assert.equal(await evaluate('!!document.querySelector("[data-testid=settings-dialog]") && document.body.innerText.includes("不更改网页界面语言")'),true,`${mode}: reply language uses the owned selector and names its scope`);
+      assert.equal(await evaluate('!!document.querySelector("[data-testid=settings-page]").getClientRects().length && document.body.innerText.includes("网页尚未完整支持语言切换")'),true,`${mode}: reply language uses the owned selector and names its scope`);
       await enter("#settings-host","draft.example"); failSave=true;
       await clickText("保存基本配置"); await wait('document.body.innerText.includes("保存失败，草稿已保留")');
       assert.equal(await evaluate('document.querySelector("#settings-host").value'),"draft.example",`${mode}: rejected save retains input`);
@@ -195,17 +197,34 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
       await wait('document.body.innerText.includes("基本配置已保存")');
       assert.equal(commands.at(-1)!.value.language,"中文",`${mode}: Chinese choice sends the language directive's canonical value`);
       assert.equal(await evaluate('document.querySelector("#settings-host").value'),"newer.example",`${mode}: late receipt retains newer draft`);
+      const generalScroll = await evaluate('document.querySelector("[data-settings-panel=general]").scrollTop');
+      await clickText("显示", "tab");
+      await clickText("基本配置", "tab");
+      assert.equal(await evaluate('document.querySelector("#settings-host").value'), "newer.example", `${mode}: switching sections preserves the unsaved input`);
+      assert.equal(await evaluate('document.querySelector("[data-settings-panel=general]").scrollTop'), generalScroll, `${mode}: switching sections restores their scroll position`);
+      if (mode === "mobile") await click('[aria-label="返回设置目录"]');
+      await enter('[aria-label="查找设置分组"]', "SSL");
+      assert.deepEqual(await evaluate('Array.from(document.querySelectorAll("[role=menuitem] .wand-settings-library-nav-copy>span:first-child")).map(n=>n.innerText.trim())'), ["安全"], `${mode}: search includes each section's purpose`);
+      await enter('[aria-label="查找设置分组"]', "没有这个设置");
+      assert.equal(await evaluate('document.body.innerText.includes("没有匹配的设置分组")'), true, `${mode}: search has an honest no-match state`);
+      await click('[aria-label="清空搜索"]');
+      assert.equal(await evaluate('document.activeElement.getAttribute("aria-label")'), "查找设置分组", `${mode}: clearing search retains focus`);
+      if (mode === "desktop" || mode === "mobile") {
+        const shot = await send("Page.captureScreenshot", { format: "png" });
+        mkdirSync(artifact, { recursive: true });
+        writeFileSync(join(artifact, `settings-${mode}-directory.png`), Buffer.from(shot.data, "base64"));
+      }
       const coverage: Array<Record<string,unknown>>=[];
       for (const tab of tabs) {
         await clickText(tab,"tab"); await pause(140);
-        assert.equal(await evaluate(`!!document.querySelector('[role="tabpanel"]:not([aria-hidden="true"]) .wand-settings-library-panel')`),true,`${mode}: ${tab}`);
+        assert.equal(await evaluate(`!!document.querySelector('[data-settings-panel]:not([hidden]) .wand-settings-library-panel')`),true,`${mode}: ${tab}`);
         if (tab === "连接器") {
           assert.equal(await evaluate('document.body.innerText.includes("当前支持 GitHub")'),true,`${mode}: connector purpose is explicit`);
           assert.equal(await evaluate('(()=>{const n=document.getElementById("settings-github-api-url");return !n||n.getBoundingClientRect().height===0})()'),true,`${mode}: Enterprise address stays out of the ordinary connection form`);
-          await click('[role="tabpanel"]:not([aria-hidden="true"]) .ant-collapse-header');
+          await click('[data-settings-panel]:not([hidden]) .ant-collapse-header');
           await wait('!!document.getElementById("settings-github-api-url") && document.getElementById("settings-github-api-url").getBoundingClientRect().height>0');
           assert.equal(await evaluate('document.getElementById("settings-github-api-url").value'),"https://api.github.com",`${mode}: expanding advanced settings preserves the default address`);
-          await click('[role="tabpanel"]:not([aria-hidden="true"]) .ant-collapse-header');
+          await click('[data-settings-panel]:not([hidden]) .ant-collapse-header');
           await wait('document.getElementById("settings-github-api-url").getBoundingClientRect().height===0');
         }
         if (tab === "关于") {
@@ -219,7 +238,7 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
         }
         coverage.push({tab,...await evaluate(`({legacyControls:document.querySelectorAll('.wand-settings-input,.wand-settings-field,.wand-settings-section,.wand-model-group-disclosure,.wand-settings-range').length,antCards:document.querySelectorAll('.ant-card').length})`)});
         if (mode === "desktop" || mode === "mobile") {
-          await evaluate("document.querySelector('.ant-tabs-body-holder').scrollTop=0");
+          await evaluate("document.querySelector('[data-settings-panel]:not([hidden])').scrollTop=0");
           // Mask credentials and connection artifacts even when this fixture contains no real ones.
           await evaluate(`(()=>{const s=document.createElement('style');s.id='settings-redact';s.textContent='input[type=password],.wand-settings-library-connect-code,[data-testid=settings-connect-qr]{visibility:hidden!important}';document.head.append(s)})()`);
           const shot=await send("Page.captureScreenshot",{format:"png"});mkdirSync(artifact,{recursive:true});
@@ -231,25 +250,25 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
       await clickText("查看将注入的环境变量"); await wait('!!document.querySelector("[data-testid=settings-environment-dialog] .ant-table")');
       await click('[data-testid=settings-environment-dialog] [aria-label="搜索变量名"]');
       await key("Escape"); await wait('!document.querySelector("[data-testid=settings-environment-dialog]")');
-      assert.equal(await evaluate('!!document.querySelector("[data-testid=settings-dialog]")'),true,`${mode}: nested Escape`);
+      assert.equal(await evaluate('!!document.querySelector("[data-testid=settings-page]").getClientRects().length'),true,`${mode}: nested Escape`);
       await clickText("AI 与模型","tab");
       await click('[aria-label="Claude 默认模型"]'); await wait('!!document.querySelector(".wand-ui-select-content input")');
       await click('.wand-ui-select-content input'); await send("Input.insertText",{text:"备用"});
       await wait('document.querySelectorAll(".wand-ui-select-content [role=option]").length===1');
       await click('.wand-ui-select-content [role=option]');
-      assert.equal(await evaluate('!!document.querySelector("[data-testid=settings-dialog]")'),true,`${mode}: option portal stays owned`);
+      assert.equal(await evaluate('!!document.querySelector("[data-testid=settings-page]").getClientRects().length'),true,`${mode}: option portal stays owned`);
       await clickText("保存 AI 与模型配置"); await wait('document.body.innerText.includes("AI 与模型配置已保存")');
       assert.equal(commands.at(-1)!.value.defaultModel,"second");
       assert.equal(commands.at(-1)!.value.defaultCodexModel,"codex-first",`${mode}: other provider choice retained`);
-      await click('[role="tabpanel"]:not([aria-hidden="true"]) .ant-collapse-header'); await wait(`!!document.querySelector('[aria-label="下移模型 1"]')`);
+      await click('[data-settings-panel]:not([hidden]) .ant-collapse-header'); await wait(`!!document.querySelector('[aria-label="下移模型 1"]')`);
       await click('[aria-label="下移模型 1"]');
-      await wait("document.querySelector('.wand-settings-library-group-members li')?.textContent.includes('备用模型')");
+      await wait("document.querySelector('.wand-settings-library-group-members[aria-label=\"编程分组 的模型顺序\"] li')?.textContent.includes('备用模型')");
       await wait("Array.from(document.querySelectorAll('button')).find(n=>n.innerText.trim()==='保存模型分组')?.disabled === false");
       await clickText("保存模型分组");
       try { await wait('document.body.innerText.includes("模型分组与顺序已保存")'); }
       catch { throw new Error(`${mode}: group save did not settle; commands=${commands.length}; last=${commands.at(-1)?.value.modelGroups ? "modelGroups.save" : "other"}; alerts=${await evaluate("Array.from(document.querySelectorAll('.ant-alert')).map(n=>n.innerText).join('|')")}`); }
       assert.equal(commands.at(-1)!.value.modelGroups[0].models[0],"second");
-      await click('[role="tabpanel"]:not([aria-hidden="true"]) .ant-collapse-header');
+      await click('[data-settings-panel]:not([hidden]) .ant-collapse-header');
       await wait(`(()=>{const n=document.querySelector('[aria-label="下移模型 1"]');return !n||n.getBoundingClientRect().height===0})()`);
       // Restore the fixture order for the next mode, without invoking any real service.
       config.modelGroups[0].models=["first","second"];
@@ -285,16 +304,20 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
         const shot=await send("Page.captureScreenshot",{format:"png"});mkdirSync(artifact,{recursive:true});writeFileSync(join(artifact,`settings-${mode}.png`),Buffer.from(shot.data,"base64"));
         await evaluate('document.getElementById("settings-redact").remove()');
       }
-      await key("Escape"); await wait('!document.querySelector("[data-testid=settings-dialog]")');
+      if (mode === "mobile") { await key("Escape"); await wait('!!document.querySelector("[aria-label=设置目录]").getClientRects().length'); }
+      await key("Escape"); await wait('!document.querySelector("[data-testid=settings-page]").getClientRects().length');
       access="read-only";
       await evaluate('settingsHarness.open("general")');
+      await wait('!document.querySelector("#settings-host")');
+      if (mode === "mobile") await click('[aria-label="返回设置目录"]');
+      await click('.wand-settings-library-access .ant-collapse-header');
       await wait('!!document.querySelector("#settings-admin-password")');
-      assert.deepEqual(await evaluate('Array.from(document.querySelectorAll("[role=tab]")).map(n=>n.innerText.trim())'),["本地模型","语音输入","通知","关于"],`${mode}: connected App cannot reach administrator settings`);
+      assert.deepEqual(await evaluate('Array.from(document.querySelectorAll("[role=menuitem] .wand-settings-library-nav-copy>span:first-child")).map(n=>n.innerText.trim())'),["通知","本地模型","语音输入","关于"],`${mode}: connected App cannot reach administrator settings`);
       assert.equal(await evaluate('!!document.querySelector("#settings-host")'),false);
-      // Respect the shared modal's trailing outside-press guard after reopening.
-      await pause(550);
       for(const type of ["mousePressed","mouseReleased"]) await send("Input.dispatchMouseEvent",{type,x:5,y:5,button:"left",clickCount:1});
-      await wait('!document.querySelector("[data-testid=settings-dialog]")');
+      assert.equal(await evaluate('!!document.querySelector("[data-testid=settings-page]").getClientRects().length'),true,`${mode}: clicking page space does not dismiss settings`);
+      await click('[aria-label="返回工作台"]');
+      await wait('!document.querySelector("[data-testid=settings-page]").getClientRects().length');
     }
     assert.deepEqual(browserErrors,[],"no browser runtime exceptions");
     mkdirSync(artifact,{recursive:true});

@@ -36,7 +36,8 @@ export interface DecisionResult {
   answers: Record<string, Record<string, unknown>>;
   usage: { input_tokens: number; output_tokens: number; truncated?: boolean };
   experimental: true;
-  runtime: "laya-mlx";
+  runtime: "laya-mlx" | "decision-expert";
+  executor?: { employeeId: string; candidate: number; source: "local" | "free-group" };
 }
 
 export class DecisionError extends Error {
@@ -101,7 +102,8 @@ export function parseDecisionRequest(value: unknown): DecisionRequest {
   return JSON.parse(JSON.stringify({ state: value.state, questions })) as DecisionRequest;
 }
 
-export function parseDecisionResult(raw: unknown, request: DecisionRequest): DecisionResult {
+export function parseDecisionResult(raw: unknown, request: DecisionRequest,
+  identity: { model: string; runtime: DecisionResult["runtime"] } = { model: DECISION_CHECKPOINT, runtime: "laya-mlx" }): DecisionResult {
   const fail = (): never => { throw new DecisionError("INVALID_RESULT", "决策引擎返回了无效结果。", 502); };
   if (!record(raw) || !record(raw.answers) || !record(raw.usage)) return fail();
   const answers = raw.answers;
@@ -126,8 +128,9 @@ export function parseDecisionResult(raw: unknown, request: DecisionRequest): Dec
     }
   }
   if (!Number.isSafeInteger(raw.usage.input_tokens) || (raw.usage.input_tokens as number) < 0
-    || (raw.usage.input_tokens as number) > DECISION_MAX_QUESTIONS * 1024 || raw.usage.output_tokens !== 0
-    || raw.usage.truncated !== false) return fail();
-  return { model: DECISION_CHECKPOINT, answers: answers as DecisionResult["answers"],
-    usage: raw.usage as DecisionResult["usage"], experimental: true, runtime: "laya-mlx" };
+    || (identity.runtime === "laya-mlx" && (raw.usage.input_tokens as number) > DECISION_MAX_QUESTIONS * 1024)
+    || !Number.isSafeInteger(raw.usage.output_tokens) || (raw.usage.output_tokens as number) < 0
+    || (identity.runtime === "laya-mlx" && raw.usage.output_tokens !== 0) || raw.usage.truncated !== false) return fail();
+  return { model: identity.model, answers: answers as DecisionResult["answers"],
+    usage: raw.usage as DecisionResult["usage"], experimental: true, runtime: identity.runtime };
 }

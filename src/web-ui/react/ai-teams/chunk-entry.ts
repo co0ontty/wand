@@ -6,10 +6,12 @@ import { TeamChatPage } from "./team-chat-page";
 import { aiTeamsChunkStyles } from "./styles";
 import { TaskTeamRunPanel } from "../issues/team-run-panel";
 import { installStyleSheet } from "../styles";
+import { DecisionChainEditor } from "../settings/decision-chain-editor";
 
 installStyleSheet("wand-ai-teams-styles", aiTeamsChunkStyles);
 
 (globalThis as { __wandAiTeamsChunk?: unknown }).__wandAiTeamsChunk = {
+  DecisionChainEditor,
   AiTeamsPage,
   TaskTeamRunPanel,
   TeamChatView,

@@ -327,9 +327,10 @@ export async function startTeamDispatch(request: TeamDispatchStartRequest): Prom
 
 /** 决策服务可用性：不可用时明确报错，绝不编造名单。 */
 export function assertDispatchDecisionReady(decisions: {
-  status(): { enabled: boolean; supported: boolean; configured: boolean };
+  status(): { enabled: boolean; supported: boolean; configured: boolean; notice?: string | null };
 }): void {
   const status = decisions.status();
+  if ((!status.enabled || !status.supported || !status.configured) && status.notice) throw new Error(status.notice);
   if (!status.enabled) throw new Error("本地决策未启用（localDecision.enabled=false），无法用决策模型选人。");
   if (!status.supported) throw new Error("本地决策在当前平台不可用（首期只支持 macOS arm64），无法用决策模型选人。");
   if (!status.configured) throw new Error("本地决策运行环境未配置（pythonPath / modelPath），无法用决策模型选人。");

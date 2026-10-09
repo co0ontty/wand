@@ -236,7 +236,7 @@ test("ShellFilePanel keeps the legacy slot outside its client Drawer portal", ()
   assert.match(html, /id="file-panel-backdrop"/);
   assert.match(html, /<div class="file-explorer legacy-file-explorer-host" id="file-explorer" hidden="" aria-hidden="true"><\/div>/);
   const source = readFileSync(new URL("../src/web-ui/react/shell/shell-file-panel.tsx", import.meta.url), "utf8");
-  assert.match(source, /<Drawer forceRender open=\{snapshot\.layout\.filePanelOpen\}/);
+  assert.match(source, /<Drawer forceRender open=\{snapshot\.layout\.filePanelOpen && !suspended\}/);
   for (const id of ["file-side-panel", "file-explorer-refresh", "file-side-panel-close", "file-explorer-up", "file-explorer-cwd"]) {
     assert.match(source, new RegExp(`id="${id}"`), `missing #${id}`);
   }

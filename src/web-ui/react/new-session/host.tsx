@@ -422,8 +422,9 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
         await startDirectTeamRun(form);
         return;
       }
-      const dimensions = await runtime.prepareCreate(form.kind);
-      const request = buildCreateRequest(form, defaults.config, runtime.getContext(), dimensions);
+      const request = buildCreateRequest(form, defaults.config, runtime.getContext());
+      const dimensions = await runtime.prepareCreate(request.kind, request);
+      if (request.kind !== "structured") Object.assign(request, dimensions);
       void repository.savePreferences({
         ...(request.kind === "shell" ? {} : {
           ...(!form.employeeId ? { defaultProvider: request.provider } : {}),

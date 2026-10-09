@@ -56,7 +56,9 @@ const lazy = getAiTeamsChunk();
 // budget into these files. The optional team chunk has its own limit.
 const BUDGET = {
   html: 4_096,
-  js: 940_000,
+  // 未分组 Tab 的迟到焦点与 worktree 归属修正：939988→940055 B（+67 B）。
+  // 仅主包上限增加 96 B；保留下面的首屏总预算与全部资源计数。
+  js: 940_096,
   css: 110_000,
   firstLoad: 1_140_000,
   // The team chunk now also contains employee management and candidate editors.

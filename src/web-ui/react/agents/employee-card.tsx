@@ -1,4 +1,5 @@
 import * as React from "react";
+import { DECISION_EXPERT_KEY } from "../../../decision-expert-identity.js";
 import { Flex, Alert, Card, Collapse, Input, Tag , Typography } from "antd";
 import { DEFAULT_EMPLOYEE_TAG, SYSTEM_EMPLOYEE_TAG, isBuiltinSiliconEmployee, isDefaultSiliconEmployee, parseSiliconEmployeeTagInput, siliconEmployeeTags, type SiliconEmployee } from "../../../ai-team-types.js";
 import { EmployeeMemory } from "./employee-memory.js";
@@ -230,6 +231,7 @@ export function EmployeeCard({
 
           <CandidatesListEditor
             agents={draft.agents}
+            decisionOnly={employee.systemKey === DECISION_EXPERT_KEY}
             label={draft.name || "员工"}
             catalog={catalog}
             providerOptions={providerOptions}

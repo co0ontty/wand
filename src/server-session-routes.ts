@@ -811,7 +811,7 @@ export function registerSessionRoutes(
     const archived = snapshot.archived;
     const modifiable = !archived;
     const goalAvailable = installed.some((item) => item.goal);
-    const localDecisionAvailable = config.localDecision?.enabled === true;
+    const localDecisionAvailable = config.localDecision?.enabled === true || decisions?.status().enabled === true;
     const inventory = await discoverPiResources(config, snapshot.cwd);
     const resourceCatalog = { ...inventory.catalog, supported: modifiable && !sdk && inventory.catalog.supported,
       reason: archived ? "请先恢复已归档的会话。" : sdk ? "Wand Agent 尚不支持 Skills / MCP 会话选择。" : inventory.catalog.reason };
@@ -831,10 +831,12 @@ export function registerSessionRoutes(
       && status?.enabled === true && status.supported && status.configured;
     const recommendationReason = !resourceCatalog.supported ? resourceCatalog.reason
       : settings.localDecision === false ? "本会话已关闭本地决策。"
-      : !recommendationAvailable ? "本地决策未启用或运行环境不可用。" : "";
+      : !recommendationAvailable ? status && "notice" in status && typeof status.notice === "string" ? status.notice : "本地决策未启用或运行环境不可用；请配置「决策专家」调用链。" : "";
     return { recommendationAvailable, recommendationReason,
       autoResourcesAvailable: recommendationAvailable, autoResourcesReason: recommendationReason,
       autoCodemodeAvailable: recommendationAvailable, skillLocksAvailable: resourceCatalog.supported,
+      ...(status?.hardware && typeof status.employeeId === "string" ? { decisionAdvisor: {
+        notice: status.notice ?? null, employeeId: status.employeeId, hardware: status.hardware } } : {}),
       settings: effectivePiSessionSettings(settings, resolution.engine), engine: resolution.engine,
       available: sdk && modifiable, toolsAvailable: !sdk && modifiable,
       reason: archived ? "请先恢复已归档的会话。" : resolution.reason,

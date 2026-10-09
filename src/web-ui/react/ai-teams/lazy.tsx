@@ -1,6 +1,8 @@
 import { Alert, Flex, Spin } from "antd";
 import * as React from "react";
 import * as jsxRuntime from "react/jsx-runtime";
+import { DECISION_EXPERT_NAME } from "../../../decision-expert-identity.js";
+import { AGENT_TOOL_OPTIONS } from "../../provider-identity";
 import { failureMessage } from "../errors";
 import { ComposerAttachmentList } from "../composer-attachments/host";
 import { ComposerPopoverAction } from "../composer-popover/action";
@@ -31,6 +33,7 @@ import {
   SettingsActionButton,
   SettingsField,
   SettingsSaveBar,
+  SettingsStatus,
   SettingsTextInput,
   SettingsToggle,
 } from "../settings/fields";
@@ -75,6 +78,7 @@ import { aiTeamsRepository, subscribeAiTeamDefinitionChanges, subscribeAiTeamRun
 import type { ConversationMessagesProps, TeamChatViewProps } from "./team-chat-view";
 import type { TeamChatPageProps } from "./team-chat-page";
 import type { AiTeamsPageProps } from "./teams-page";
+import type { DecisionChainEditorProps } from "../settings/decision-chain-editor";
 
 /**
  * 按需脚本 content/ai-teams.js 向主包借的模块。键是相对 src/web-ui/react 的模块路径，
@@ -119,6 +123,7 @@ const AI_TEAMS_HOST: Record<string, object> = {
     SettingsActionButton,
     SettingsField,
     SettingsSaveBar,
+    SettingsStatus,
     SettingsTextInput,
     SettingsToggle,
   },
@@ -144,6 +149,7 @@ const AI_TEAMS_HOST: Record<string, object> = {
 };
 
 interface AiTeamsChunk {
+  DecisionChainEditor: React.ComponentType<DecisionChainEditorProps>;
   AiTeamsPage: React.ComponentType<AiTeamsPageProps>;
   TaskTeamRunPanel: React.ComponentType<TaskTeamRunPanelProps>;
   TeamChatView: React.ComponentType<TeamChatViewProps>;
@@ -214,6 +220,21 @@ function useAiTeamsChunk(enabled = true): { chunk: AiTeamsChunk | null; error: s
     setAttempt((value) => value + 1);
   }, []);
   return { chunk, error, retry };
+}
+
+/** The settings trigger is eager; candidate editing reuses the existing team chunk. */
+export function DecisionChainEditor({ admin }: { admin: boolean }): React.ReactElement {
+  const [open, setOpen] = React.useState(false);
+  const { chunk, error, retry } = useAiTeamsChunk(open);
+  return <>
+    <WandButton kind="secondary" onClick={() => setOpen(true)}>配置「决策专家」调用链</WandButton>
+    {chunk ? <chunk.DecisionChainEditor admin={admin} open={open} onOpenChange={setOpen}
+      providerOptions={AGENT_TOOL_OPTIONS.filter(option => option.engine !== "sdk").map(option => ({ value: option.provider, label: option.label }))}/>
+      : <WandDialogSurface open={open} onOpenChange={setOpen} title={`${DECISION_EXPERT_NAME} · 调用链`}>
+        {error ? <SettingsStatus tone="error">调用链编辑器加载失败。<WandButton kind="soft" onClick={retry}>重试</WandButton></SettingsStatus>
+          : <div role="status" aria-busy="true"><Spin/>正在加载调用链编辑器…</div>}
+      </WandDialogSurface>}
+  </>;
 }
 
 /** 团队页：首次打开时拉取 ai-teams.js，期间显示占位，失败可重试。 */

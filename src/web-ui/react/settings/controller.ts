@@ -6,6 +6,7 @@ export interface SettingsControllerSnapshot {
   open: boolean;
   tab: SettingsTab;
   nested: SettingsNestedView;
+  detail: boolean;
   revision: number;
 }
 
@@ -21,12 +22,14 @@ type Listener = () => void;
 
 let snapshot: SettingsControllerSnapshot = {
   open: false,
-  tab: "general",
+  tab: "profile",
   nested: null,
+  detail: false,
   revision: 0,
 };
 
 const listeners = new Set<Listener>();
+let compact = false;
 
 function publish(next: Omit<SettingsControllerSnapshot, "revision">): void {
   snapshot = { ...next, revision: snapshot.revision + 1 };
@@ -34,18 +37,22 @@ function publish(next: Omit<SettingsControllerSnapshot, "revision">): void {
 }
 
 export const settingsController: WandSettingsController = {
-  open(tab = "general"): void {
-    publish({ open: true, tab, nested: null });
+  open(tab): void {
+    publish({ open: true, tab: tab ?? "profile", nested: null, detail: tab !== undefined });
   },
 
   close(): void {
     if (!snapshot.open && snapshot.nested === null) return;
-    publish({ open: false, tab: "general", nested: null });
+    publish({ ...snapshot, open: false, nested: null, detail: false });
   },
 
   closeTopmost(): boolean {
     if (snapshot.nested !== null) {
       publish({ ...snapshot, nested: null });
+      return true;
+    }
+    if (snapshot.open && snapshot.detail && compact) {
+      settingsStore.showDirectory();
       return true;
     }
     return this.closeIfOpen();
@@ -73,9 +80,16 @@ export const settingsStore = {
   },
 
   setTab(tab: SettingsTab): void {
-    if (snapshot.tab === tab) return;
-    publish({ ...snapshot, tab });
+    if (snapshot.tab === tab && snapshot.detail) return;
+    publish({ ...snapshot, tab, detail: true });
   },
+
+  showDirectory(): void {
+    if (!snapshot.detail) return;
+    publish({ ...snapshot, detail: false, nested: null });
+  },
+
+  setCompact(value: boolean): void { compact = value; },
 
   setNested(nested: SettingsNestedView): void {
     if (snapshot.nested === nested) return;

@@ -6,7 +6,7 @@ import { DecisionError } from "./decision-types.js";
 /** Mounted before generic /api auth so inference-only capabilities cannot authorize any other route. */
 export function registerDecisionRoutes(app: Express, deps: {
   storage: WandStorage;
-  decisions: DecisionService;
+  decisions: Pick<DecisionService, "status" | "evaluate">;
   requireAuth: RequestHandler;
   requireSessions: RequestHandler;
 }): void {

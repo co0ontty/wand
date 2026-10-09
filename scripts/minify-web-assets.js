@@ -5,7 +5,9 @@ import { transformSync } from "esbuild";
  * 因此 scripts.ts 注入用的 ${wandConfigPath} 占位符（在双引号字符串里）会原样保留。
  */
 export function minifyJs(code) {
-  return transformSync(code, { loader: "js", minify: true, legalComments: "none" }).code;
+  // Served scripts and the document use UTF-8; keep text literal values intact
+  // without expanding every Chinese character into an ASCII escape.
+  return transformSync(code, { loader: "js", minify: true, legalComments: "none", charset: "utf8" }).code;
 }
 
 /** minify CSS（styles.css）。 */

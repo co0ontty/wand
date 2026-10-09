@@ -6,7 +6,7 @@
 import type { TaskWindowLayout, WorkspaceProvider } from "./types";
 
 export interface ActiveWorkspaceContext {
-  /** 当前活动项目 id；无则为 null（标签栏隐藏）。 */
+  /** 当前活动项目 id；无则为 null。未分组标签由服务端目录归属投影。 */
   workspaceId: string | null;
   workspaceName: string;
   /** 当前活动任务 id；任务粒度的标签栏以此为键拉取会话列表。 */
@@ -61,7 +61,7 @@ export function setActiveWorkspaceContext(next: Partial<ActiveWorkspaceContext>)
   for (const listener of listeners) listener();
 }
 
-/** 关闭工作空间窗口（标签栏「×」）时清空，标签栏随之隐藏。 */
+/** 关闭任务上下文；当前未分组会话仍可显示自己的会话标签。 */
 export function clearActiveWorkspaceContext(): void {
   if (context === EMPTY) return;
   context = EMPTY;

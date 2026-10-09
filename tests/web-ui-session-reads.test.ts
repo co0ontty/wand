@@ -36,6 +36,8 @@ function harness() {
   const fallback = new Proxy({}, { get: () => noop });
   const dependencies: Record<string, unknown> = {
     "./state": { composer, state, writeStoredBoolean: noop },
+    "../react/workspaces/controller": { workspacesStore: { getRuntime: () => null } },
+    "../react/workspaces/workspace-context": { workspaceContextStore: { getSnapshot: () => ({ taskId: null }) } },
     "../chat-history-window.js": chatHistoryWindow,
     "./session-reads": { createSessionReads },
     "../../session-completion-state.js": completionState,
@@ -379,6 +381,7 @@ for (const kind of ["new-session", "missions"]) {
     const dependencies: Record<string, unknown> = {
       "./state": { state },
       "../react": { configureNewSessionRuntime: (value: unknown) => { runtime = value; return noop; } },
+      "../react/conversations/state": { conversationUi: { suspend: noop } },
       "../react/missions/controller": { configureMissionsRuntime: (value: unknown) => { runtime = value; return noop; } },
       "./session-engine": new Proxy({}, { get: (_, key) => {
         if (key === "loadSessions") return async (options: any) => {

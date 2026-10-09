@@ -6,6 +6,7 @@ import { OverlayHost } from "./overlay-host";
 import { installReactUiStyles } from "./styles";
 import { wandOverlay, type WandOverlay } from "./overlay-controller";
 import { settingsController } from "./settings/controller";
+import { installSettingsHistory } from "./settings/history";
 import { newSessionController } from "./new-session/controller";
 import { folderPickerController } from "./folder-picker/controller";
 import { quickCommitController } from "./quick-commit/controller";
@@ -79,12 +80,13 @@ export function startReactUi(): WandOverlay | null {
   const standaloneSettings = isStandaloneSettingsPage();
 
   if (!activeRoot) {
+    if (!standaloneSettings) installSettingsHistory();
     installReactUiStyles();
     const mount = getOrCreateChild(overlayRoot, REACT_MOUNT_ID, "wand-ui-mount");
     const portals = getOrCreateChild(overlayRoot, REACT_UI_PORTALS_ID, "wand-ui-portals");
     activeRoot = createRoot(mount);
     activeRoot.render(<WandUiProvider><OverlayHost portalContainer={portals}
-      settingsPresentation={standaloneSettings ? "page" : "dialog"} /></WandUiProvider>);
+      settingsPresentation={standaloneSettings ? "page" : "workspace"} /></WandUiProvider>);
   }
 
   if (standaloneSettings) window.__wandReactSettings = settingsController;

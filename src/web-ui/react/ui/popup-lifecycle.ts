@@ -16,6 +16,12 @@ export function popupOffset(side: PopupSide, distance: number): [number, number]
 }
 
 const dismissStack: Array<() => void> = [];
+
+/** Page navigation yields Escape to an open Portal surface. */
+export function hasOpenPopupSurface(): boolean {
+  return dismissStack.length > 0 || Array.from(document.querySelectorAll("[role=dialog],[data-wand-dialog-surface],.ant-select-dropdown,.ant-dropdown,.ant-popover"))
+    .some((element) => element.getClientRects().length && getComputedStyle(element).visibility !== "hidden");
+}
 function dismissTopPopup(event: KeyboardEvent): void {
   if (event.key !== "Escape" || event.isComposing || !dismissStack.length) return;
   event.preventDefault();

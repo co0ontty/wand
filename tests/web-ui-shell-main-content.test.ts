@@ -185,10 +185,10 @@ test("ShellMainContent uses UiStore actions and no forbidden legacy seam", () =>
   assert.match(source, /<div id="chat-output" inert=\{pageLayerOpen\} className=\{classes\.chat\} ref=\{legacyRefs\?\.chat\}[^>]*\/>/);
   assert.match(source, /<div inert=\{pageLayerOpen\} className=\{classes\.composer\} ref=\{legacyRefs\?\.composer\}[^>]*\/>/);
   assert.match(source, /id="cross-session-queue-host" ref=\{queueRef\}/);
-  assert.match(source, /context\.taskId \? null : <div[^>]*inert=\{conversationVisible\}[^>]*><ShellTopbar\/>/);
+  assert.match(source, /context\.taskId \? null : <div[^>]*inert=\{conversationVisible \|\| settings\.open\}[^>]*><ShellTopbar\/>/);
   assert.match(source, /<WorkspaceTabBar\/>/);
   assert.doesNotMatch(source, /inSplit \? null : <WorkspaceTabBar\/>/);
-  assert.match(source, /const pageLayerOpen = conversationVisible \|\| taskBoard\.open \|\| editor\.open/);
+  assert.match(source, /const pageLayerOpen = settings\.open \|\| conversationVisible \|\| taskBoard\.open \|\| editor\.open/);
   // 任务管理是叠层路由，不能替换 <main>，否则 #output 被卸载后会话回不去。
   assert.match(source, /taskBoard\.open \? <TaskBoardHost/);
   assert.doesNotMatch(source, /if \(taskBoard\.open\) \{\s*return <main/s);

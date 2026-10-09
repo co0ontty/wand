@@ -21,15 +21,26 @@ test("local model settings use native controls for download/init/progress/retry 
       model: "base", modelSize: 147951465, downloaded: true, runtimeAvailable: false, initialized: false, busy: false, operation: null },
   };
   const calls: Array<{ path: string; body: unknown }> = [];
+  const expert = { id: "e_wand_decision_expert", name: "决策专家", systemKey: "wand-decision-expert", duty: "有界选择", prompt: "判断", avatar: "", createdAt: "now", updatedAt: "now",
+    agents: [{ provider: "pi", engine: "sdk", model: "wand-decision/laya", mode: "default", kind: "structured", thinkingEffort: "off" },
+      { provider: "pi", engine: "sdk", model: "wand-openrouter-free/auto", mode: "default", kind: "structured", thinkingEffort: "off" }] };
   await build({ stdin: { resolveDir: root, loader: "tsx", contents: `
     import * as React from 'react'; import {createRoot} from 'react-dom/client';
     import {WandUiProvider} from './src/web-ui/react/theme'; import {installReactUiStyles} from './src/web-ui/react/styles';
     import {installSettingsLibraryStyles} from './src/web-ui/react/settings/styles';
     import {LocalModelsSettingsTab} from './src/web-ui/react/settings/local-models-panel';
-    installReactUiStyles(); installSettingsLibraryStyles();
+    import {installSharedLibraryBridge} from './src/web-ui/react/library-bridge';
+    installSharedLibraryBridge(); installReactUiStyles(); installSettingsLibraryStyles();
     createRoot(document.getElementById('root')).render(<WandUiProvider><LocalModelsSettingsTab admin={!location.search.includes('readonly')}/></WandUiProvider>);
   ` }, bundle: true, platform: "browser", format: "iife", jsx: "automatic", outfile: join(temp, "app.js"), define: { "process.env.NODE_ENV": '"production"' } });
   const server = createServer(async (req, res) => {
+    if (req.url?.startsWith("/assets/ai-teams.js")) { res.setHeader("content-type", "application/javascript"); res.end(readFileSync(join(root, "src/web-ui/content/ai-teams.js"))); return; }
+    if (req.url === "/api/silicon-employees/e_wand_decision_expert") {
+      res.setHeader("content-type", "application/json");
+      if (req.method === "PUT") { let text = ""; for await (const chunk of req) text += chunk; const body = JSON.parse(text); calls.push({ path: req.url, body }); expert.agents = body.agents; }
+      res.end(JSON.stringify(expert)); return;
+    }
+    if (req.url === "/api/models") { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ models: [], piModels: [] })); return; }
     if (req.url?.startsWith("/api/local-models")) {
       res.setHeader("content-type", "application/json");
       if (req.method !== "GET") {
@@ -52,7 +63,7 @@ test("local model settings use native controls for download/init/progress/retry 
       }
       res.end(JSON.stringify(status)); return;
     }
-    if (req.url === "/app.js") { res.setHeader("content-type", "text/javascript"); res.end(readFileSync(join(temp, "app.js"))); return; }
+    if (req.url === "/app.js") { res.setHeader("content-type", "text/javascript"); res.end(readFileSync(join(temp, "app.js"), "utf8").replaceAll("${aiTeamsChunkSrc}", "/assets/ai-teams.js")); return; }
     if (req.url === "/styles.css") { res.setHeader("content-type", "text/css"); res.end(readFileSync(join(root, "src/web-ui/content/styles.css"))); return; }
     res.setHeader("content-type", "text/html; charset=utf-8"); res.end('<html lang="zh-CN"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/styles.css"><style>body{margin:0}#root{max-width:840px;padding:16px;margin:auto}</style><div id="root"></div><script src="/app.js"></script></html>');
   });
@@ -74,11 +85,16 @@ test("local model settings use native controls for download/init/progress/retry 
       const callback = pending.get(value.id); if (callback) { pending.delete(value.id); value.error ? callback.reject(Error(JSON.stringify(value.error))) : callback.resolve(value.result); } });
     const send = (method: string, params = {}) => new Promise<any>((resolve, reject) => { const id = ++sequence; pending.set(id, { resolve, reject }); socket!.send(JSON.stringify({ id, method, params })); });
     const evaluate = async (expression: string) => { const result = await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }); if (result.exceptionDetails) throw Error(JSON.stringify(result.exceptionDetails)); return result.result.value; };
-    const wait = async (expression: string) => { for (let i = 0; i < 250; i += 1) { if (await evaluate(expression)) return; await sleep(40); } throw Error(`Missing ${expression}: ${await evaluate("document.body.innerText")}`); };
+    const wait = async (expression: string) => { for (let i = 0; i < 250; i += 1) { if (await evaluate(expression)) return; await sleep(40); } throw Error(`Missing ${expression}: ${await evaluate("document.body.innerText")}\nBrowser exceptions: ${errors.join("\n")}`); };
     const clickText = async (text: string) => {
       await wait(`[...document.querySelectorAll('button')].some(n=>!n.disabled&&n.innerText.trim()===${JSON.stringify(text)})`);
       const point = await evaluate(`(()=>{const node=[...document.querySelectorAll('button')].find(n=>n.innerText.trim()===${JSON.stringify(text)});if(!node||node.disabled)throw Error('button missing/disabled');node.scrollIntoView({block:'center',behavior:'instant'});const r=node.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
       for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, ...point, button: "left", clickCount: 1 }); };
+    const clickElement = async (expression: string) => {
+      await wait(`!!(${expression})`);
+      const point = await evaluate(`(()=>{const node=${expression};node.scrollIntoView({block:'center',behavior:'instant'});const r=node.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+      for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, ...point, button: "left", clickCount: 1 });
+    };
     await send("Runtime.enable"); await send("Page.enable"); await send("Page.navigate", { url: origin });
     await wait("document.body.textContent.includes('模型未就绪')");
     for (const width of [1280, 390]) {
@@ -96,11 +112,28 @@ test("local model settings use native controls for download/init/progress/retry 
     assert.equal(status.laya.enabled, false);
     await evaluate("document.querySelector('[role=switch][aria-label=\"启用 LAYA 本地决策\"]').click()");
     await wait("document.querySelector('[role=switch]').getAttribute('aria-checked')==='true'"); assert.equal(status.laya.enabled, true);
+    status.laya.hardware = { suitable: false, code: "memory", message: "当前机器性能不够，请配置「决策专家」调用链。", memoryGiB: 4, availableGiB: 1, cpuCount: 2, minimumMemoryGiB: 8 };
+    status.laya.supported = false;
+    await clickText("刷新状态"); await wait("document.body.textContent.includes('当前机器性能不够')");
+    await clickText("配置「决策专家」调用链");
+    await wait("document.body.textContent.includes('Wand 本地决策模型 · LAYA')");
+    assert.equal(await evaluate("document.body.textContent.includes('免费分组')"), true);
+    const primary = "document.querySelector('[aria-label=\"决策专家 首选模型\"]')";
+    await clickElement(primary);
+    await clickElement("[...document.querySelectorAll('[role=option]')].find(n=>n.textContent==='Wand 免费分组')");
+    await wait("document.querySelector('[data-candidate-index=\"0\"]').textContent.includes('Wand 免费分组')");
+    assert.equal(await evaluate("!!document.querySelector('[data-candidate-index=\"0\"]')"), true, "portal choice must not close the parent");
+    await clickElement(primary);
+    await clickElement("[...document.querySelectorAll('[role=option]')].find(n=>n.textContent==='Wand 本地决策模型 · LAYA')");
+    await wait("document.querySelector('[data-candidate-index=\"0\"]').textContent.includes('Wand 本地决策模型 · LAYA')");
+    await clickText("保存调用链"); await wait("document.body.textContent.includes('调用链已保存')");
+    assert.deepEqual((calls[calls.length - 1]!.body as any).agents.map((agent: any) => agent.model), ["wand-decision/laya", "wand-openrouter-free/auto"]);
+    await evaluate("document.querySelector('[aria-label=\"关闭\"]').click()");
     const before = calls.length;
     await send("Page.navigate", { url: origin + "/?readonly" }); await wait("document.body.textContent.includes('当前连接可查看实际状态')");
     assert.equal(await evaluate("[...document.querySelectorAll('button')].filter(n=>n.innerText.includes('初始化运行时')||n.innerText.includes('模型已下载')).every(n=>n.disabled)"), true);
     assert.equal(calls.length, before); assert.deepEqual(errors, []);
-    writeFileSync(join(output, "evidence.json"), JSON.stringify({ actualBrowser: "Chrome headless", mockedServer: true, cases: ["desktop/narrow no overflow", "download progress", "failed init and retry", "init does not enable", "explicit enable", "read-only cannot install"], calls }, null, 2));
+    writeFileSync(join(output, "evidence.json"), JSON.stringify({ actualBrowser: "Chrome headless", mockedServer: true, cases: ["desktop/narrow no overflow", "download progress", "failed init and retry", "init does not enable", "explicit enable", "read-only cannot install", "hardware warning", "decision expert default local/free chain shown and saved", "switch free/local through portal without closing parent"], calls }, null, 2));
   } finally { socket?.close(); const closed = once(chrome, "close"); chrome.kill(); await closed;
     await new Promise<void>(r => server.close(() => r())); rmSync(temp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); }
 });

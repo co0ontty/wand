@@ -1,4 +1,5 @@
 import { state } from "./state";
+import { browserEnvironment } from "./ui-store-bridge";
 import "./utils";
 import "./chat-render";
 import { adjustTerminalScale } from "./file-browser";
@@ -9,7 +10,13 @@ import { showToast } from "./notifications";
 import "./render";
 import { copyToClipboard, isStructuredSession } from "./session-engine";
 import { ensureTerminalFit, initTerminalResizeHandle, observeTerminalResize, sendTerminalResize, startTerminalHealthCheck, teardownTerminal } from "./viewport";
-import { fitTerminalToContainer } from "./terminal-fit";
+import { fitTerminalToContainer, proposeTerminalDimensions } from "./terminal-fit";
+import { conversationUi } from "../react/conversations/state";
+import { deriveLegacyUiSnapshot } from "../react/shell/legacy-snapshot";
+import { measureTerminalCreationTopbar, measureTerminalCreationWorkspaceTabbar, measureTerminalCreationStandaloneTabbar, prepareTerminalCreationComposer } from "../react/shell/terminal-creation-measurement";
+import { workspaceContextStore } from "../react/workspaces/workspace-context";
+import { taskDetailStore } from "../react/workspaces/task-detail-store";
+import type { WorkspaceProvider } from "../react/workspaces/types";
 import "./i18n";
 import { consumeTerminalTouchPage, consumeTerminalWheelLines, consumeTerminalWheelPage, consumeTerminalZoomWheel, installTerminalPinchZoom, terminalWheelPageSequence, type TerminalTouchPagingState, type TerminalWheelPagingState, type TerminalWheelScrollState, type TerminalZoomWheelState } from "./terminal-wheel";
 import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
@@ -772,34 +779,146 @@ import { mountBrowserButtons } from "./library-buttons";
       let terminalLibraryPending = false;
       let terminalLibraryFailedSession: string | null = null;
       let terminalMount: { wrap: HTMLElement; release(): void } | null = null;
-      function prepareTerminalMeasurement(container: HTMLElement): () => void {
+      export interface TerminalCreationContext {
+        kind: "shell" | "pty";
+        provider?: string;
+        command?: string;
+        cwd?: string;
+        workspaceTaskId?: string;
+      }
+      function prepareTerminalMeasurement(container: HTMLElement, context?: TerminalCreationContext): () => void {
         const parent = container.parentElement;
-        if (!parent || (container.offsetWidth > 0 && container.offsetHeight > 0)) return function() {};
+        if (!parent || (!context && container.offsetWidth > 0 && container.offsetHeight > 0)) return function() {};
+        const temporaryNodes: HTMLElement[] = [];
+        const presentations: Array<() => void> = [];
         const previous: Array<{ node: HTMLElement; property: string; value: string; priority: string }> = [];
         const change = function(node: HTMLElement, property: string, value: string) {
           previous.push({ node, property, value: node.style.getPropertyValue(property), priority: node.style.getPropertyPriority(property) });
           node.style.setProperty(property, value, "important");
         };
-        // Measure the future terminal flex slot in one synchronous turn. Keep it
-        // invisible and restore before paint; the current chat view stays selected.
-        change(container, "display", "flex");
-        change(container, "visibility", "hidden");
-        for (const sibling of Array.from(parent.children)) {
-          if (!(sibling instanceof HTMLElement) || sibling === container) continue;
-          if (sibling.id === "chat-output" || sibling.id === "blank-chat") change(sibling, "display", "none");
-          if (sibling.classList.contains("input-panel") && getComputedStyle(sibling).display === "none") {
-            change(sibling, "display", "flex");
-            change(sibling, "visibility", "hidden");
-          }
-        }
-        return function() {
-          for (const item of previous.reverse()) {
-            if (item.value) item.node.style.setProperty(item.property, item.value, item.priority);
-            else item.node.style.removeProperty(item.property);
+        const reserveSpace = function(height: number) {
+          if (!(height > 0)) return;
+          const spacer = document.createElement("div"); spacer.dataset.terminalCreationSpace = "true";
+          Object.assign(spacer.style, { height: `${height}px`, flexShrink: "0", visibility: "hidden" });
+          temporaryNodes.push(spacer); parent.insertBefore(spacer, container);
+        };
+        const restore = function() {
+          try { for (const release of presentations) release(); } finally {
+            for (const node of temporaryNodes) node.remove();
+            for (const item of previous.reverse()) {
+              if (item.value) item.node.style.setProperty(item.property, item.value, item.priority);
+              else item.node.style.removeProperty(item.property);
+            }
           }
         };
+        try {
+          // Measure the future terminal flex slot in one synchronous turn. Keep it
+          // invisible and restore before paint; the current chat view stays selected.
+          change(container, "display", "flex");
+          change(container, "visibility", "hidden");
+          if (context) {
+            const topbar = parent.querySelector<HTMLElement>(".main-header-row");
+            if (topbar || !context.workspaceTaskId) {
+              const id = "terminal-creation-measurement";
+              const snapshot = deriveLegacyUiSnapshot({ ...state,
+                selectedId: id, currentTask: null, gitStatus: null, currentView: "terminal",
+                sessions: [{ id, sessionKind: "pty", status: "running", cwd: context.cwd || state.workingDir,
+                  provider: context.kind === "shell" ? undefined : context.provider,
+                  command: context.command || (context.kind === "shell" ? "Shell" : context.provider),
+                }],
+              }, browserEnvironment());
+              const height = measureTerminalCreationTopbar(snapshot, parent.clientWidth);
+              if (height > 0 && topbar) {
+                change(topbar, "box-sizing", "border-box");
+                change(topbar, "height", `${height}px`);
+                change(topbar, "min-height", `${height}px`);
+                change(topbar, "max-height", `${height}px`);
+              } else if (!topbar) {
+                reserveSpace(height);
+              }
+            }
+          }
+          // A first window replaces the main header in an already active task.
+          // Only predict the evidenced empty-task transition, never an old split
+          // or an unknown task detail; this read cannot fetch or persist layout.
+          const activeTask = context?.workspaceTaskId ? workspaceContextStore.getSnapshot() : null;
+          const taskDetail = activeTask?.taskId ? taskDetailStore.getSnapshot(activeTask.taskId) : null;
+          const taskLayout = activeTask?.layout ?? taskDetail?.layout;
+          if (context && activeTask?.taskId === context.workspaceTaskId && taskDetail?.sessions.length === 0
+              && (!taskLayout || taskLayout.windows.length === 0)
+              && !parent.querySelector(".main-header-row, .workspace-tab-bar")) {
+            const height = measureTerminalCreationWorkspaceTabbar({
+              mobile: deriveLegacyUiSnapshot(state, browserEnvironment()).viewport.mobile, taskName: activeTask.taskName,
+              session: { id: "terminal-creation-measurement", sessionKind: "pty", status: "running",
+                provider: context.kind === "shell" ? undefined : context.provider as WorkspaceProvider | undefined,
+                command: context.command || (context.kind === "shell" ? "Shell" : context.provider),
+                cwd: context.cwd, workspaceTaskId: activeTask.taskId,
+              },
+            }, parent.clientWidth);
+            reserveSpace(height);
+          }
+          if (context && !context.workspaceTaskId) {
+            const standalone = parent.querySelector<HTMLElement>('[data-session-tabs="standalone"]');
+            const height = measureTerminalCreationStandaloneTabbar({
+              mobile: deriveLegacyUiSnapshot(state, browserEnvironment()).viewport.mobile,
+              session: { id: "terminal-creation-measurement", sessionKind: "pty", status: "running",
+                provider: context.kind === "shell" ? undefined : context.provider as WorkspaceProvider | undefined,
+                command: context.command || (context.kind === "shell" ? "Shell" : context.provider), cwd: context.cwd,
+              },
+            }, parent.clientWidth);
+            if (standalone) {
+              // A selected standalone session already owns this native flex row.
+              // Reuse its slot; native Tabs may still be settling after a resize.
+              if (getComputedStyle(standalone).display === "none") change(standalone, "display", "flex");
+              change(standalone, "visibility", "hidden");
+              if (height > 0) {
+                change(standalone, "box-sizing", "border-box");
+                change(standalone, "height", `${height}px`);
+                change(standalone, "min-height", `${height}px`);
+                change(standalone, "max-height", `${height}px`);
+              }
+            } else {
+              reserveSpace(height);
+            }
+            for (const oldTaskChrome of parent.querySelectorAll<HTMLElement>(".workspace-mobile-navigation, .workspace-tab-bar:not([data-session-tabs='standalone']), .workspace-window")) change(oldTaskChrome, "display", "none");
+          }
+          for (const sibling of Array.from(parent.children)) {
+            if (!(sibling instanceof HTMLElement) || sibling === container) continue;
+            if (sibling.id === "chat-output" || sibling.id === "blank-chat") change(sibling, "display", "none");
+            if (sibling.classList.contains("input-panel")) {
+              if (document.documentElement.classList.contains("is-wand-embed-terminal")
+                  && document.documentElement.classList.contains("is-wand-native-input")) continue;
+              if (getComputedStyle(sibling).display === "none") {
+                change(sibling, "display", "block");
+                change(sibling, "visibility", "hidden");
+              }
+              if (context) {
+                change(sibling, "visibility", "hidden");
+                presentations.push(prepareTerminalCreationComposer(sibling));
+              }
+            }
+          }
+        } catch (error) {
+          restore();
+          throw error;
+        }
+        return restore;
+      }
+      /** Measure a new session's future slot without resizing the current PTY. */
+      export function measureTerminalCreationDimensions(context?: TerminalCreationContext) {
+        const container = document.getElementById("output");
+        if (!container || !state.terminal) return null;
+        const restoreMeasurement = prepareTerminalMeasurement(container, context);
+        try {
+          return proposeTerminalDimensions(state.terminal);
+        } finally {
+          restoreMeasurement();
+        }
       }
       export function initTerminal(options?: { prepare?: boolean }) {
+        // The conversation owner changes synchronously before React commits.
+        // DOM inert alone can still describe the previous view during navigation.
+        if (!options?.prepare && conversationUi.getSnapshot().active === true) return;
         // Session switching can remove the wrapper while fonts are still pending.
         // Release that abandoned attempt before allowing the next mount to start.
         if (terminalMount && !terminalMount.wrap.isConnected) terminalMount.release();
@@ -939,7 +1058,8 @@ import { mountBrowserButtons } from "./library-buttons";
           : Promise.resolve();
 
         fontsReady.then(function() {
-          if (terminalMount !== mount || !termWrap.isConnected || document.getElementById("output") !== container) {
+          if (terminalMount !== mount || !termWrap.isConnected || document.getElementById("output") !== container
+              || (!options?.prepare && conversationUi.getSnapshot().active === true)) {
             mount.release();
             return;
           }

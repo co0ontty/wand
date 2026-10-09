@@ -1,6 +1,8 @@
 import * as React from "react";
 import { Flex, Typography } from "antd";
 import { WandSwitch } from "../ui";
+import { DecisionChainEditor } from "../ai-teams/lazy";
+import { SettingsStatus } from "../settings/fields";
 import type { PiSessionSettingsPatch, PiSettingsResponse } from "../../../pi-session-settings.js";
 
 /** Settings opt-in only. Prompt matching is owned by the submitted server runner. */
@@ -19,6 +21,10 @@ export function PiAutoResourcesControl({ data, disabled, save }: {
         disabled={disabled || (!available && !enabled)} onCheckedChange={(checked) => { void save({ autoResources: checked }); }}/>
     </Flex>
     <Typography.Text type="secondary">{available ? "仅本会话 · 本轮配置显示在小字消息中；失败沿用原配置，MCP 目前只按明确点名选择。" : reason}</Typography.Text>
+    {data.decisionAdvisor?.notice ? <>
+      <SettingsStatus tone="warning">{data.decisionAdvisor.notice}</SettingsStatus>
+      <DecisionChainEditor admin={!disabled}/>
+    </> : null}
     {available && !data.autoCodemodeAvailable && <Typography.Text type="secondary">当前服务端仅自动选择 Skills / MCP；CodeMode 自动判断需更新服务端。</Typography.Text>}
   </Flex>;
 }

@@ -1,5 +1,7 @@
 import { Flex, Form, Typography } from "antd";
 import * as React from "react";
+import { isLocalDecisionModel, WAND_LOCAL_DECISION_MODEL, WAND_LOCAL_DECISION_LABEL } from "../../../decision-expert-identity.js";
+import { OPENROUTER_FREE_SELECTOR, OPENROUTER_FREE_GROUP, isOpenRouterFreeSelector } from "../../../openrouter-free-selection.js";
 import type { AiTeam, SiliconEmployee } from "../../../ai-team-types";
 import type { WandTaskAgent, WandTaskAgentEngine } from "../../../task-types";
 import { TeamAvatarStack } from "../ai-teams/avatar";
@@ -77,6 +79,7 @@ export function AgentFields({
   ariaPrefix,
   showKind = false,
   allowSdkEngine = false,
+  decisionOnly = false,
   teams,
   teamId = "",
   onTeamChange,
@@ -92,6 +95,7 @@ export function AgentFields({
   ariaPrefix: string;
   showKind?: boolean;
   allowSdkEngine?: boolean;
+  decisionOnly?: boolean;
   teams?: ReadonlyArray<AiTeam> | null;
   teamId?: string;
   onTeamChange?(teamId: string): void;
@@ -100,6 +104,11 @@ export function AgentFields({
   onEmployeeChange?(employeeId: string): void;
   onChange(agent: WandTaskAgent): void;
 }): React.ReactElement {
+  if (decisionOnly) return <AgentField label="决策模型"><WandSelect value={agent.model}
+    options={[{ value: WAND_LOCAL_DECISION_MODEL, label: WAND_LOCAL_DECISION_LABEL }, { value: OPENROUTER_FREE_SELECTOR, label: `Wand ${OPENROUTER_FREE_GROUP}` },
+      ...issueAgentModelOptions(catalog, "pi").filter(option => option.value !== OPENROUTER_FREE_SELECTOR && isOpenRouterFreeSelector(option.value))]}
+    ariaLabel={`${ariaPrefix}模型`} disabled={disabled} className="task-board-native-select"
+    onValueChange={model => onChange({ ...agent, model, provider: "pi", engine: "sdk", kind: "structured", mode: "default", thinkingEffort: "off" })}/></AgentField>;
   const team = teamId ? teams?.find((item) => item.id === teamId) ?? null : null;
   const employee = employeeId ? employees?.find((item) => item.id === employeeId) ?? null : null;
   const selectTarget = (value: string): void => {
@@ -166,7 +175,11 @@ function AgentModelFields({
     <AgentField label="模型">
       <WandSelect
         value={agent.model}
-        options={issueAgentModelOptions(catalog, agent.provider)}
+        options={isLocalDecisionModel(agent.model)
+          ? [{ value: WAND_LOCAL_DECISION_MODEL, label: WAND_LOCAL_DECISION_LABEL }, ...issueAgentModelOptions(catalog, agent.provider)]
+          : agent.model === OPENROUTER_FREE_SELECTOR && !issueAgentModelOptions(catalog, agent.provider).some(option => option.value === OPENROUTER_FREE_SELECTOR)
+            ? [{ value: OPENROUTER_FREE_SELECTOR, label: `Wand ${OPENROUTER_FREE_GROUP}` }, ...issueAgentModelOptions(catalog, agent.provider)]
+            : issueAgentModelOptions(catalog, agent.provider)}
         ariaLabel={`${ariaPrefix}模型`}
         searchable
         searchPlaceholder="搜索模型"

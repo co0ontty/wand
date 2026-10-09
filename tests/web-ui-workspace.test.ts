@@ -172,24 +172,28 @@ test("opening an empty workspace task keeps creation user-driven", () => {
 
 test("empty task tab bar yields to the full-page CLI desktop", () => {
   const source = readFileSync(new URL("../src/web-ui/react/workspaces/workspace-tab-bar.tsx", import.meta.url), "utf8");
-  assert.match(source, /!context\.taskId \|\| taskLayout\.windows\.length === 0/);
+  assert.match(source, /if \(!context\.taskId\) return <StandaloneSessionTabBar\/>/);
+  assert.match(source, /if \(taskLayout\.windows\.length === 0\) return null/);
   assert.doesNotMatch(source, /该任务还没有工作窗口/);
 });
 
 test("task tab bar and standalone topbar share one quick-commit badge", () => {
   const tabBar = readFileSync(new URL("../src/web-ui/react/workspaces/workspace-tab-bar.tsx", import.meta.url), "utf8");
+  const tabChrome = readFileSync(new URL("../src/web-ui/react/workspaces/workspace-tab-chrome.tsx", import.meta.url), "utf8");
   const topbar = readFileSync(new URL("../src/web-ui/react/shell/shell-topbar.tsx", import.meta.url), "utf8");
   const badge = readFileSync(new URL("../src/web-ui/react/shell/topbar-git-badge.tsx", import.meta.url), "utf8");
   const styles = readFileSync(new URL("../src/web-ui/content/styles.css", import.meta.url), "utf8");
   // 任务里主区顶部是标签栏而不是顶栏（ShellMainContent 在任务态不挂 ShellTopbar），
   // 徽章必须两个宿主都有，否则进任务后快捷提交入口就没了。
-  assert.match(topbar, /<span id="topbar-git-slot" className="topbar-git-slot">\s*<TopbarGitBadge\/>/);
+  assert.match(topbar, /gitBadge=\{<TopbarGitBadge\/>\}/);
+  assert.match(topbar, /<span id=\{chromeId\("topbar-git-slot"\)\} className="topbar-git-slot">\s*\{gitBadge\}/);
   assert.doesNotMatch(topbar, /id="topbar-git-badge"/, "顶栏不再自带一份内联徽章");
   assert.match(tabBar, /<TopbarGitBadge id="workspace-tab-git-badge" className="workspace-tab-git"\/>/);
   assert.match(badge, /id = "topbar-git-badge"/, "默认保留顶栏的 DOM id");
   assert.match(badge, /dispatch\(\{ type: "topbar\.gitCommit" \}\)/);
   assert.match(badge, /if \(!git\) return null;/, "非 git 会话 / 首页不显示徽章");
-  assert.match(tabBar, /<Flex align="center" gap=\{4\} wrap=\{!mobile\} className="workspace-tab-bar"/);
+  assert.match(tabBar, /<WorkspaceTabBarChrome mobile=\{mobile\} taskName=\{context.taskName\}/);
+  assert.match(tabChrome, /<Flex align="center" gap=\{4\} wrap=\{!mobile\} className="workspace-tab-bar"/);
 });
 
 test("clicking a session inside the open task skips the task reopen", () => {
@@ -336,9 +340,11 @@ test("task list treats directories as group headers and exposes per-terminal del
   const sessionDelete = readFileSync(new URL("../src/web-ui/react/workspaces/session-delete-confirm.ts", import.meta.url), "utf8");
   assert.match(sessionDelete, /无法撤销。任务和其他会话保留/);
   const tabs = readFileSync(new URL("../src/web-ui/react/workspaces/workspace-tab-bar.tsx", import.meta.url), "utf8");
-  assert.match(tabs, /type="editable-card"/);
-  assert.match(tabs, /onEdit=/);
-  assert.match(tabs, /aria-label=\{`任务 \$\{context.taskName\} 的工作窗口标签`\}/);
+  const tabChrome = readFileSync(new URL("../src/web-ui/react/workspaces/workspace-tab-chrome.tsx", import.meta.url), "utf8");
+  assert.match(tabChrome, /type="editable-card"/);
+  assert.match(tabChrome, /onEdit=/);
+  assert.match(tabChrome, /aria-label=\{standalone \? "未分组会话标签" : `任务 \$\{taskName\} 的工作窗口标签`\}/);
+  assert.match(tabs, /<WorkspaceTabBarChrome mobile=\{mobile\} taskName=\{context.taskName\}/);
 });
 
 test("task sessions prioritize the active or only task and standalone sessions have no fake task fold", () => {
@@ -364,10 +370,11 @@ test("task sessions prioritize the active or only task and standalone sessions h
 test("task session rows and work-window tabs render each CLI logo", () => {
   const panel = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
   const tabs = readFileSync(new URL("../src/web-ui/react/workspaces/workspace-tab-bar.tsx", import.meta.url), "utf8");
+  const tabChrome = readFileSync(new URL("../src/web-ui/react/workspaces/workspace-tab-chrome.tsx", import.meta.url), "utf8");
   const input = readFileSync(new URL("../src/web-ui/browser/input.ts", import.meta.url), "utf8");
   const processManager = readFileSync(new URL("../src/process-manager.ts", import.meta.url), "utf8");
   assert.match(panel, /SessionProviderMark session=\{session\}/);
-  assert.match(tabs, /SessionProviderMark session=\{presentation\.session\}/);
+  assert.match(tabChrome, /SessionProviderMark session=\{presentation\.session\}/);
   assert.match(tabs, /listSessionLabel\(meta\.session, meta\.index\)/);
   assert.match(input, /index === 0 \|\| index === sequence\.length - 1/);
   assert.match(processManager, /consumePtyInputForTopic\(record\.ptyTopicDraft, input, view, shortcutKey\)/);
@@ -849,7 +856,9 @@ test("sidebar directory tree indents every level without extra re-renders", () =
   const panel = sourceText("src/web-ui/react/workspaces/workspaces-panel.tsx");
   assert.match(panel, /const groups = sourceGroups/);
   assert.doesNotMatch(panel, /createUnnamedTaskFlattener/);
-  assert.match(panel, /subscribeTaskChanges/);
+  assert.match(panel, /useTaskGroups\(refreshTick\)/);
+  const directoryStore = sourceText("src/web-ui/react/workspaces/task-groups-store.ts");
+  assert.match(directoryStore, /subscribeTaskChanges/);
 });
 
 test("workspaces controller keeps the dialog state stable while submitting", async () => {

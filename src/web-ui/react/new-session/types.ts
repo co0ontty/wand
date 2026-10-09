@@ -149,6 +149,6 @@ export interface NewSessionRuntimeAdapter {
   getContext(): NewSessionRuntimeContext;
   /** 用户在对话框里选了模型：写回按 provider 的记忆，下次打开默认沿用。 */
   rememberModel(provider: NewSessionProvider, model: string): void;
-  prepareCreate(kind: NewSessionKind): Promise<NewSessionTerminalDimensions>;
+  prepareCreate(kind: NewSessionKind, request?: NewSessionCreateRequest): Promise<NewSessionTerminalDimensions>;
   completeCreate(request: NewSessionCreateRequest, created: NewSessionCreated): Promise<void>;
 }

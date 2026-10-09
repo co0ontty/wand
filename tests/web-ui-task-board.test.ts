@@ -471,8 +471,8 @@ test("task board is a first-class view=taskboard route that does not unmount the
   assert.equal(sidebarActionLeavesPage({ type: "session.select", id: "session-1" }), true);
   assert.equal(sidebarActionLeavesPage({ type: "settings.open" }), false);
   assert.equal(sidebarActionLeavesPage({ type: "workspace.new" }), false);
-  assert.match(sidebar, /if \(sidebarActionLeavesPage\(action\)\) \{ taskBoardController\.close\(\); conversationUi\.suspend\(\)/);
-  assert.match(sidebar, /const navigateFromTree = \(\): void => \{\s*taskBoardController\.close\(\)/);
+  assert.match(sidebar, /if \(sidebarActionLeavesPage\(action\)\) \{ settingsController\.close\(\); taskBoardController\.close\(\); conversationUi\.suspend\(\)/);
+  assert.match(sidebar, /const navigateFromTree = \(\): void => \{\s*settingsController\.close\(\);\s*taskBoardController\.close\(\)/);
   assert.match(sidebar, /onNavigate=\{navigateFromTree\}/);
   // 功能导航既有库按钮高亮，也保留当前页语义。
   assert.match(sidebar, /id="task-board-button"[\s\S]*?aria-current=\{taskBoard\.open && taskBoard\.page !== "teams" \? "page" : undefined\}/);
