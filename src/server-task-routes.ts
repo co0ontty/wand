@@ -282,12 +282,16 @@ function scheduleWandTaskTitleGeneration(
   const cwd = options.cwd || options.config?.defaultCwd || process.cwd();
   const run = async (): Promise<void> => {
     try {
+      const pending = storage.getWandTask(taskId);
+      // 排队期间可能移走 Agent，只剩空白终端；此时也不应再启动总结。
+      if (!pending || !taskAutoNameSourceText(storage, pending)) return;
       const title = await generateTitle(source, cwd, options.config?.language ?? "", taskTitleAiOptions(options.config, storage, options.free));
       const current = storage.getWandTask(taskId);
       // 用户已经自己写了标题（原生端 / 面板编辑）就不要覆盖。
       if (!current || current.titleSource !== "auto") return;
       // 命名输入已经变了（新增会话 / 会话内容更新）：这次是过期结果，交给下一轮。
       if (current.autoTitleSignature !== signature) return;
+      if (!taskAutoNameSourceText(storage, current)) return;
       const clipped = title.slice(0, TASK_TITLE_MAX_LENGTH);
       if (!clipped || clipped === current.title) return;
       storage.updateWandTask(taskId, { title: clipped });

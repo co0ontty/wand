@@ -42,7 +42,7 @@ import { describePtySpawnFailure } from "./ensure-node-pty-helper.js";
 import type { EmployeeTextDeps } from "./employee-text.js";
 import { resolveSessionProvider, resolveSystemAiContext } from "./session-ai-context.js";
 import { resolveSessionCwd } from "./session-cwd.js";
-import { inferProviderFromCommand, providerCliCommand } from "./session-provider.js";
+import { inferProviderFromCommand, isSessionProvider, providerCliCommand } from "./session-provider.js";
 import { RETENTION_IDLE_MS } from "./retention.js";
 import { PtyTerminalState, type PtyTerminalSnapshot, type PtyHistoryPage } from "./pty-terminal-state.js";
 import { isPtySubmitInput } from "./pty-turn-activity.js";
@@ -2647,6 +2647,8 @@ export class ProcessManager extends EventEmitter {
     if (this.disposed || !prompt || !record) return;
     // 迭代提示词记录：和会话标题共用同一套「有没有信息量」判断，用户不用多做一步。
     recordIterationPrompt(this.storage, record, prompt, "session");
+    // 空白终端只执行 Shell 命令，不生成会话标题或调用系统员工总结。
+    if (!isSessionProvider(record.provider)) return;
     const blockedTitles = sessionTopicBlocklistForSnapshot(record, this.storage);
     // CLI 自己起了名字就归它，模型标题与输入首行都不再覆盖；取不到原生标题才走系统硅基员工。
     const hasNativeTitle = this.nativeTitles.has(id);
