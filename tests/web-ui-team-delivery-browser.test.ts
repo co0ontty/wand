@@ -27,7 +27,8 @@ test("real Chrome synthetic delivery context: anchored disclosures, public previ
     }
   }
   for (const key of ["taskRequestGeneration", "actionReceiptInvalidatesOldGet", "taskSwitchProtected", "oldActionProtected",
-    "replyRevisionProtected", "statusDraftPreserved"]) assert.equal(report[key], true, key);
+    "replyRevisionProtected", "statusDraftPreserved", "canonicalContextVisible", "relayActivityLoaded",
+    "runHistoryOldGetProtected", "runHistoryClosedScopeProtected"]) assert.equal(report[key], true, key);
   assert.deepEqual(report.executionModes.map((row: { mode: string }) => row.mode), ["desktop", "390px", "reduce-motion"]);
   for (const row of report.executionModes) {
     for (const key of ["timeline", "editorNodePreserved", "draftPreserved", "hiddenPaneInert", "skippedList", "escapeFocus", "noOverflow"]) {

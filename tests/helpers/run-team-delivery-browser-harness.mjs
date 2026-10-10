@@ -17,6 +17,20 @@ await build({ entryPoints: [join(import.meta.dirname, "team-delivery-browser-har
   define: { "process.env.NODE_ENV": '"production"' } });
 let filesRead = 0, knowledgeReads = 0;
 let details = { "run-a": teamDeliveryFixture(), "run-b": teamDeliveryFixture("task-b", "run-b") };
+// Repository hosts now project the canonical transcript, rather than the legacy
+// TeamChatView announcement. Keep actual task-associated messages in their DTOs.
+function appendContext(detail, text) {
+  detail.chatTitle = text;
+  // Deliberately equal title timestamps also exercise request generations: a
+  // late GET/action receipt must not restore a superseded task label.
+  detail.chatTitleUpdatedAt = "2026-10-03T10:00:00.000Z";
+  detail.chatTurns.push({
+    messageId: `${detail.run.id}:${detail.chatTurns.length}`,
+    role: "assistant", content: [{ type: "text", text }],
+    conversationTarget: { taskId: detail.run.taskId, runId: detail.run.id },
+    createdAt: detail.run.updatedAt, completedAt: detail.run.updatedAt,
+  });
+}
 let holdNext = false, holdReply = false;
 const held = [];
 const calls = [];
@@ -30,6 +44,9 @@ const server = createServer(async (req, res) => {
     res.end(JSON.stringify({ kind: "text", path, name: path.split("/").at(-1), ext: ".md", size: 100,
       content: "# 公共预览正文\n这是点击后才读取的真实合成文件响应" }));
   } else if (req.url.includes("knowledge")) { knowledgeReads++; res.end("{}");
+  } else if (/^\/api\/sessions\/(relay-[ab]|step-session)\?/.test(req.url)) {
+    const id = new URL(req.url, "http://localhost").pathname.split("/").at(-1);
+    res.end(JSON.stringify({ id, status: "idle", messages: [] }));
   } else if (req.url.includes("/team-runs")) {
     const id = req.url.includes("task-b") ? "run-b" : "run-a";
     res.end(JSON.stringify([details[id].run]));
@@ -107,6 +124,14 @@ try {
   };
   const rect = (selector) => evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return[r.x,r.y+scrollY,r.width,r.height]})()`);
   const publish = (detail) => evaluate(`window.deliveryHarness.setDetail(${JSON.stringify(detail)})`);
+  const panelChat = '#panel .task-board-team-view[data-view="chat"] .conversation-stream';
+  const runsChat = '#runs .task-board-team-view[data-view="chat"] .conversation-stream';
+  const visibleContext = async (selector, title) => {
+    await wait(`document.querySelector(${JSON.stringify(selector)})?.textContent.includes(${JSON.stringify(title)})`);
+    assert.equal(await evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});return n.checkVisibility() && !n.closest('[inert]') && n.closest('[role=tabpanel]').getAttribute('aria-hidden')==='false'})()`), true, "canonical context is actually visible and interactive");
+    assert.equal(await evaluate(`Array.from(document.querySelectorAll(${JSON.stringify(selector)}+' .ant-tag')).some(n=>n.textContent===${JSON.stringify(title)})`), true, "current task label belongs to the visible transcript");
+    assert.equal(await evaluate('document.body.textContent.includes("部分执行状态暂时无法读取")'), false, "relay fixture supplies the current activity contract");
+  };
   await send("Runtime.enable"); await send("Page.enable");
   await send("Network.enable"); await send("Network.setCacheDisabled", { cacheDisabled: true });
   for (const mode of ["desktop", "390px", "reduce-motion"]) {
@@ -206,14 +231,17 @@ try {
   }
   // Real repository requests against the synthetic HTTP server exercise TaskTeamRunPanel's generations.
   details = { "run-a": teamDeliveryFixture(), "run-b": teamDeliveryFixture("task-b", "run-b") };
-  details["run-b"].delivery.headline = "任务B结果";
-  await send("Page.navigate", { url: origin + "/?panel=1" }); await wait('!!document.querySelector("#panel .team-chat-context")');
+  details["run-b"].run.chatSessionId = "relay-b";
+  appendContext(details["run-a"], "任务A上下文");
+  appendContext(details["run-b"], "任务B结果");
+  await send("Page.navigate", { url: origin + "/?panel=1" }); await visibleContext(panelChat, "任务A上下文");
   holdNext = true; await evaluate('window.deliveryHarness.refresh()');
   for (let n = 0; n < 100 && !held.length; n++) await sleep(25); assert.equal(held.length, 1);
   details["run-a"].run.updatedAt = "2026-10-03T10:03:00Z"; details["run-a"].delivery.headline = "任务A新结果";
-  await evaluate('window.deliveryHarness.refresh()'); await wait('document.querySelector(".team-chat-context").textContent.includes("任务A新结果")');
+  appendContext(details["run-a"], "任务A新结果");
+  await evaluate('window.deliveryHarness.refresh()'); await visibleContext(panelChat, "任务A新结果");
   held.splice(0).forEach((release) => release()); await sleep(300);
-  assert.ok((await evaluate('document.querySelector(".team-chat-context").textContent')).includes("任务A新结果"));
+  await visibleContext(panelChat, "任务A新结果");
   // Status notifications preserve the original approval/reply draft.
   await text('textarea[aria-label="回复负责人"]', "任务回复草稿");
   details["run-a"].run.status = "awaiting_approval"; details["run-a"].run.updatedAt = "2026-10-03T10:04:00Z";
@@ -231,44 +259,46 @@ try {
   holdNext = true; await evaluate('window.deliveryHarness.refresh()');
   for (let n = 0; n < 100 && !held.length; n++) await sleep(25); assert.equal(held.length, 1);
   details["run-a"].delivery.headline = "操作回执的新结果";
+  appendContext(details["run-a"], "操作回执的新结果");
   await wait(`Array.from(document.querySelectorAll('.task-board-team-respond button')).some(n=>n.textContent.includes('发送回复'))`);
   await clickText(".task-board-team-respond", "发送回复");
-  await wait('document.querySelector(".team-chat-context").textContent.includes("操作回执的新结果")');
+  await visibleContext(panelChat, "操作回执的新结果");
   held.splice(0).forEach((release) => release()); await sleep(300);
-  assert.ok((await evaluate('document.querySelector(".team-chat-context").textContent')).includes("操作回执的新结果"));
+  await visibleContext(panelChat, "操作回执的新结果");
   holdNext = true; await evaluate('window.deliveryHarness.refresh()');
   for (let n = 0; n < 100 && !held.length; n++) await sleep(25); assert.equal(held.length, 1);
-  await evaluate('window.deliveryHarness.setTaskId("task-b")'); await wait('document.querySelector(".team-chat-context")?.textContent.includes("任务B结果")');
+  await evaluate('window.deliveryHarness.setTaskId("task-b")'); await visibleContext(panelChat, "任务B结果");
   held.splice(0).forEach((release) => release()); await sleep(300);
-  assert.ok((await evaluate('document.querySelector(".team-chat-context").textContent')).includes("任务B结果"));
+  await visibleContext(panelChat, "任务B结果");
   // Old action acknowledgement must not inject the other task after switching scope.
   await evaluate('window.deliveryHarness.setTaskId("task-a")'); await wait('!!document.querySelector("textarea[aria-label=回复负责人]")');
   await text('textarea[aria-label="回复负责人"]', "旧任务回复"); holdReply = true;
   await clickText(".task-board-team-respond", "发送回复");
   for (let n = 0; n < 100 && !held.length; n++) await sleep(25); assert.equal(held.length, 1);
-  await evaluate('window.deliveryHarness.setTaskId("task-b")'); await wait('document.querySelector(".team-chat-context")?.textContent.includes("任务B结果")');
+  await evaluate('window.deliveryHarness.setTaskId("task-b")'); await visibleContext(panelChat, "任务B结果");
   held.splice(0).forEach((release) => release()); holdReply = false; await sleep(300);
-  assert.ok((await evaluate('document.querySelector(".team-chat-context").textContent')).includes("任务B结果"));
+  await visibleContext(panelChat, "任务B结果");
   // The team's run-history host is another consumer of the same delivery; its old GETs are scoped too.
   await send("Page.navigate", { url: origin + "/?runs=1" });
   await wait('!!document.querySelector("#runs .wand-team-run-head")');
   await click("#runs .wand-team-run-head");
-  await wait('!!document.querySelector("#runs .team-chat-context")');
+  await visibleContext(runsChat, "操作回执的新结果");
   holdNext = true; await evaluate('window.deliveryHarness.refresh()');
   for (let n = 0; n < 100 && !held.length; n++) await sleep(25); assert.equal(held.length, 1);
   details["run-a"].run.updatedAt = "2026-10-03T10:06:00Z";
   details["run-a"].delivery.headline = "运行记录的新交付";
+  appendContext(details["run-a"], "运行记录的新交付");
   await evaluate('window.deliveryHarness.refresh()');
-  await wait('document.querySelector("#runs .team-chat-context").textContent.includes("运行记录的新交付")');
+  await visibleContext(runsChat, "运行记录的新交付");
   held.splice(0).forEach((release) => release()); await sleep(300);
-  assert.ok((await evaluate('document.querySelector("#runs .team-chat-context").textContent')).includes("运行记录的新交付"));
+  await visibleContext(runsChat, "运行记录的新交付");
   holdNext = true; await evaluate('window.deliveryHarness.refresh()');
   for (let n = 0; n < 100 && !held.length; n++) await sleep(25); assert.equal(held.length, 1);
   await click("#runs .wand-team-run-head");
   held.splice(0).forEach((release) => release()); await sleep(300);
-  assert.equal(await evaluate('document.querySelector("#runs .team-chat-context")'), null);
+  assert.equal(await evaluate(`document.querySelector(${JSON.stringify(runsChat)})`), null);
   await click("#runs .wand-team-run-head");
-  await wait('document.querySelector("#runs .team-chat-context")?.textContent.includes("运行记录的新交付")');
+  await visibleContext(runsChat, "运行记录的新交付");
   const executionModes = [];
   for (const mode of ["desktop", "390px", "reduce-motion"]) {
     await send("Emulation.setDeviceMetricsOverride", { width: mode === "390px" ? 390 : 1280, height: 1000, deviceScaleFactor: 1, mobile: false });
@@ -306,6 +336,7 @@ try {
   assert.equal(knowledgeReads, 0); assert.equal(errors, 0);
   console.log(JSON.stringify({ ok: true, fixture: "synthetic, not live acceptance", results, executionModes,
     runHistoryOldGetProtected: true, runHistoryClosedScopeProtected: true,
+    canonicalContextVisible: true, relayActivityLoaded: calls.some(url=>url.startsWith("/api/sessions/relay-a?")),
     taskRequestGeneration: true, actionReceiptInvalidatesOldGet: true, taskSwitchProtected: true, oldActionProtected: true, replyRevisionProtected: true,
     statusDraftPreserved: true, filesRead, knowledgeReads, errors }));
 } finally {
