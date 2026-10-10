@@ -218,3 +218,52 @@ test("a native client changing speech settings invalidates a pending one click a
   assert.equal(value.enabled, false); assert.match(value.operation?.error || "", /其他操作修改/);
   assert.equal(h.speech.settings().language, "zh");
 });
+
+test("status reads enabled settings after asynchronous resource probes", async t => {
+  const h = harness(t);
+  let started!: () => void, releaseInitialization!: () => void;
+  const initializing = new Promise<void>(resolve => { started = resolve; });
+  const initialization = new Promise<void>(resolve => { releaseInitialization = resolve; });
+  h.speech.initializeModel = async () => { started(); await initialization; };
+  await h.models.setSpeechEnabled(true);
+  await initializing;
+  const internal = h.speech as unknown as { runtime: () => Promise<unknown> };
+  const runtime = internal.runtime.bind(h.speech);
+  let captured!: () => void, releaseRuntime!: () => void;
+  const snapshotStarted = new Promise<void>(resolve => { captured = resolve; });
+  const continueSnapshot = new Promise<void>(resolve => { releaseRuntime = resolve; });
+  internal.runtime = async () => { captured(); await continueSnapshot; return runtime(); };
+  const snapshot = h.models.status();
+  await snapshotStarted;
+  releaseInitialization();
+  for (let n = 0; n < 100 && !h.speech.settings().enabled; n++) await new Promise(resolve => setTimeout(resolve, 1));
+  assert.equal(h.speech.settings().enabled, true);
+  await new Promise(resolve => setTimeout(resolve, 1));
+  releaseRuntime();
+  const status = (await snapshot).speech;
+  assert.equal(status.operation?.phase, "completed");
+  assert.equal(status.busy, false);
+  assert.equal(status.enabled, true);
+});
+
+test("speech status uses settings changed while resources were being probed", async t => {
+  const h = harness(t);
+  const internal = h.speech as unknown as { runtime: () => Promise<unknown> };
+  const runtime = internal.runtime.bind(h.speech);
+  let started!: () => void, release!: () => void;
+  const probing = new Promise<void>(resolve => { started = resolve; });
+  const proceed = new Promise<void>(resolve => { release = resolve; });
+  internal.runtime = async () => { started(); await proceed; return runtime(); };
+  const snapshot = h.speech.status();
+  await probing;
+  h.speech.configure({ enabled: true, acceleration: "gpu", language: "zh" });
+  release();
+  const status = await snapshot;
+  assert.equal(status.settings.enabled, true);
+  assert.equal(status.settings.acceleration, "gpu");
+  assert.equal(status.settings.language, "zh");
+  assert.equal(status.runtime.available, true);
+  assert.equal(status.runtime.backend, "cpu");
+  assert.equal(status.ready, false);
+  assert.match(status.reason || "", /CPU/);
+});

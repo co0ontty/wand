@@ -173,10 +173,10 @@ export class SpeechService {
   }
 
   async status(): Promise<SpeechStatus> {
-    const settings = this.settings();
     const runtime = await this.runtime();
     const models = await Promise.all(this.models.map(async (model) => ({ id: model.id, label: model.label,
       description: model.description, size: model.size, downloaded: await this.modelReady(model) })));
+    const settings = this.settings();
     const reason = this.disposed ? "语音服务已关闭。" : this.maintenance ? "语音运行时正在初始化，请稍后重试。" : !settings.enabled ? "服务端识别未启用，请在管理设置中启用。"
       : !runtime.executable ? "服务端尚未安装 whisper.cpp，请在服务器运行语音运行时安装脚本。"
       : !models.find((model) => model.id === settings.model)?.downloaded ? "服务端模型尚未下载或校验失败，请在管理设置中下载。"
