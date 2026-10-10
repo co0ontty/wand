@@ -10,7 +10,7 @@ test("real Chrome plush avatar editing, animation, accessibility and render budg
   // run automatically when Chrome is installed rather than hiding behind opt-in.
   skip: process.env.WAND_BROWSER_E2E !== "1" && !existsSync(chrome),
   timeout: 180_000,
-}, async () => {
+}, async (t) => {
   const child = spawn(process.execPath, ["tests/helpers/run-plush-avatar-browser-harness.mjs"], {
     cwd: new URL("..", import.meta.url), env: process.env, stdio: ["ignore", "pipe", "pipe"],
   });
@@ -18,5 +18,6 @@ test("real Chrome plush avatar editing, animation, accessibility and render budg
   child.stdout.on("data", chunk => { output += chunk; });
   child.stderr.on("data", chunk => { output += chunk; });
   const code = await new Promise(resolve => child.on("close", resolve));
+  for (const line of output.split("\n").filter(line => line.startsWith('{"browserMotionFixture":'))) t.diagnostic(line);
   assert.equal(code, 0, output);
 });

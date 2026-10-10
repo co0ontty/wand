@@ -43,9 +43,8 @@ const server=createServer((request,response)=>{
 });server.listen(0,'127.0.0.1');await once(server,'listening');const origin=`http://127.0.0.1:${server.address().port}`;
 const browsers=[];
 const open=async(scenario,{gpu=false,reduced=false}={})=>{
- const b=await openPlushBrowser(960,1100,gpu);browsers.push(b);
+ const b=await openPlushBrowser(960,1100,gpu,reduced?'reduce':'no-preference');browsers.push(b);
  browserErrors.push(b.errors);
- if(reduced)await b.send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
  await b.send('Page.navigate',{url:`${origin}/?scenario=${scenario}`});await b.wait('!!window.loaderFixture');return b;
 };
 const mark=async b=>b.evaluate("(()=>{window.__loaderCanvas=document.querySelector('.avatar-stage canvas');window.__loaderRoot=document.querySelector('.avatar-stage [data-plush-avatar]');return true})()");

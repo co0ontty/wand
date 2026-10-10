@@ -47,7 +47,8 @@ export async function recordMotion(browser, name = "avatar-motion") {
   return { frames: samples.length, duration: samples.at(-1).time-samples[0].time, video, timing: "Actual Chrome screencast timestamps preserved" };
 }
 
-export async function openPlushBrowser(width = 1280, height = 960, fallback = false) {
+export async function openPlushBrowser(width = 1280, height = 960, fallback = false, motion = "system") {
+  assert.ok(["system", "no-preference", "reduce"].includes(motion), "Known motion test preference");
   const temp = mkdtempSync(join(tmpdir(), "wand-plush-chrome-"));
   const chrome = spawn(process.env.CHROME_BIN || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", [
     "--headless=new", "--no-first-run", "--remote-allow-origins=*",
@@ -108,6 +109,12 @@ export async function openPlushBrowser(width = 1280, height = 960, fallback = fa
       writeFileSync(path, Buffer.from(shot.data, "base64"));
     };
     await send("Runtime.enable"); await send("Page.enable"); await send("Network.enable");
+    if (motion !== "system") {
+      const observedReducedMotion = await evaluate("matchMedia('(prefers-reduced-motion: reduce)').matches");
+      console.log(JSON.stringify({ browserMotionFixture: motion, observedSystemReducedMotion: observedReducedMotion }));
+      await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: motion }] });
+      assert.equal(await evaluate("matchMedia('(prefers-reduced-motion: reduce)').matches"), motion === "reduce");
+    }
     await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
     return { send, evaluate, wait, settle, click, clickText, key, screenshot, errors, events,
       async close() {
@@ -192,7 +199,8 @@ export async function runPlushBrowser() {
   });
   server.listen(0, "127.0.0.1"); await once(server, "listening");
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const browser = await openPlushBrowser();
+  // Motion cases need an explicit preference; reduced-motion is exercised separately below.
+  const browser = await openPlushBrowser(1280, 960, false, "no-preference");
   const e = browser.evaluate;
   const scopedText = async (text, scope = "#standalone") => {
     const selector = await e(`(()=>{const n=[...document.querySelectorAll(${JSON.stringify(scope + " button")})].find(n=>n.textContent.trim()===${JSON.stringify(text)}&&n.getClientRects().length);if(!n)throw Error('Missing scoped button');n.dataset.plushTest='scope';return '[data-plush-test=scope]'})()`);

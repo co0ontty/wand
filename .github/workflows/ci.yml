@@ -28,8 +28,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           # 跨端源码契约用例会读 android/ios/macos 源码，render-bin 提供固定
-          # Render 产物（render-e2e 用例）。render（Rust 源码）测试时不需要，但它
-          # 与产物指针独立，一起检出成本很低。
+          # Render 发布产物。压力契约使用下面从固定 render 源码编译的 release
+          # 二进制；dist/native 的现有发布产物仍由独立兼容用例验证。
           submodules: recursive
 
       - name: Set up Node.js
@@ -59,6 +59,21 @@ jobs:
       - name: Typecheck and bundle
         run: npm run check
 
+      - name: Cache pinned Render build
+        uses: actions/cache@v4
+        with:
+          path: render/target
+          key: render-ci-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('render/Cargo.lock', 'render/Cargo.toml', 'render/crates/**') }}
+
+      - name: Build pinned Render for protocol tests
+        run: |
+          set -euo pipefail
+          git -C render diff --exit-code
+          cargo build --locked --release --manifest-path render/Cargo.toml -p wand-renderd
+          test -x render/target/release/wand-render
+          # Stage unchanged release artifacts for the distinct package compatibility tests.
+          node scripts/stage-render-binaries.js --all --strict
+
       # 真实的 Chrome CDP 用例；macOS runner 预装 Google Chrome。
       # 浏览器回归在本地默认跳过，CI 在这里显式打开。
       # 保留所有 test 文件，在同一 runner 分给 1 个 Chrome worker 与 2 个 unit worker。
@@ -66,3 +81,4 @@ jobs:
         run: node scripts/check-node-version.js && node scripts/run-ci-tests.js
         env:
           WAND_BROWSER_E2E: "1"
+          WAND_RENDER_BIN: ${{ github.workspace }}/render/target/release/wand-render
