@@ -1,0 +1,1 @@
+{"extends":"../../../tsconfig.react.json","compilerOptions":{"baseUrl":"../../..","paths":{"@wand/*":["./*"]}},"include":["main.tsx","../../../src/web-ui/browser/types.ts"]}

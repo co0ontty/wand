@@ -1,5 +1,5 @@
 import * as React from "react";
-import { parsePlushAvatar, resolvePlushAvatar } from "../../../plush-avatar.js";
+import { parsePlushAvatar, parsePlushCatAvatar, resolveEmployeeAvatar } from "../../../plush-avatar.js";
 import { PlushAvatar } from "../avatars/plush-avatar.js";
 import { Avatar, Badge } from "antd";
 import { WandUiBoundary } from "../theme";
@@ -62,7 +62,7 @@ export interface AvatarFaceParts {
 }
 
 export function avatarFaceParts(identity: AvatarIdentity, size: number): AvatarFaceParts {
-  const plush = parsePlushAvatar(identity.avatar ?? "");
+  const plush = parsePlushCatAvatar(identity.avatar ?? "") ?? parsePlushAvatar(identity.avatar ?? "");
   if (plush) return { style: { background: "transparent" }, icon: <PlushAvatar config={plush} size={size}/> };
   const face: AvatarFace = avatarFace(identity) ?? { kind: "generated", face: generatedAvatarFace(identity) };
   if (face.kind === "upload") return { src: face.src };
@@ -93,7 +93,7 @@ export function TeamAvatar({
   const pixelSize = { sm: 26, md: 32, lg: 44 }[size];
   const stateColor = state === "done" ? "var(--success)" : state === "failed" ? "var(--danger)"
     : state === "waiting" ? "var(--warning)" : state === "working" ? "var(--info)" : undefined;
-  const plush = member.employeeId ? resolvePlushAvatar({ ...member, id: member.employeeId }) : null;
+  const plush = member.employeeId ? resolveEmployeeAvatar({ ...member, id: member.employeeId }) : null;
   const face: AvatarFaceParts = plush ? { style: { background: "transparent" }, icon: <PlushAvatar config={plush} size={pixelSize}/> }
     : avatarFaceParts(member, pixelSize);
   return <WandUiBoundary><Badge

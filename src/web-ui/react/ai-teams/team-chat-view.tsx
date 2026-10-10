@@ -26,7 +26,7 @@ import {
 } from "../ui";
 import { ComposerAttachmentList } from "../composer-attachments/host";
 import { GeneratedAvatarGlyph, PixelCat, TeamAvatar, avatarFace, generatedAvatarBackground, type GeneratedAvatarFace } from "./avatar";
-import { encodePlushAvatar, parsePlushAvatar, resolvePlushAvatar, type PlushAvatarConfig } from "../../../plush-avatar.js";
+import { encodePlushAvatar, encodePlushCatAvatar, isPlushCatAvatar, parsePlushAvatar, parsePlushCatAvatar, resolveEmployeeAvatar, type PlushRenderConfig } from "../../../plush-avatar.js";
 import { PlushAvatar } from "../avatars/plush-avatar.js";
 import { EmployeeAvatar } from "../agents/employee-avatar.js";
 import { appendedConversationKeys, CONVERSATION_TAIL_PX, conversationClock, conversationDay, conversationMessageKey, joinsConversationBubble } from "../conversations/presentation";
@@ -196,8 +196,8 @@ export function displayChatTurn(turn: ConversationTurn, team: AiTeam): Conversat
   if (!author?.id) return turn;
   const member = team.members.find((item) => item.id === author.id);
   if (!member) return turn;
-  const plush = member.employeeId ? resolvePlushAvatar({ ...member, id: member.employeeId }) : null;
-  const avatar = plush ? encodePlushAvatar(plush) : member.avatar;
+  const plush = member.employeeId ? resolveEmployeeAvatar({ ...member, id: member.employeeId }) : null;
+  const avatar = plush ? isPlushCatAvatar(plush) ? encodePlushCatAvatar(plush) : encodePlushAvatar(plush) : member.avatar;
   if (member.name === author.name && avatar === author.avatar) return turn;
   return { ...turn, author: { ...author, name: member.name, avatar } };
 }
@@ -510,7 +510,7 @@ export function collapsedPreview(text: string): string {
 
 /** 一条发言的头像来源（设计 §5.2）：上传图 > 显式毛色 > 按身份生成 > 默认 APP logo。 */
 export type ChatAvatarSpec =
-  | { kind: "plush"; config: PlushAvatarConfig }
+  | { kind: "plush"; config: PlushRenderConfig }
   | { kind: "upload"; src: string }
   | { kind: "cat"; coat: number }
   | { kind: "generated"; face: GeneratedAvatarFace }
@@ -521,7 +521,7 @@ export function chatAvatarSpec(
 ): ChatAvatarSpec {
   // 能定位到成员身份才给脸（显式 `cat:<n>` 走像素猫，其余按身份生成，与团队页/工位同一张脸）；
   // 「我」和没有署名的发言才回落成默认 APP logo。
-  const plush = parsePlushAvatar(author?.avatar ?? "");
+  const plush = parsePlushCatAvatar(author?.avatar ?? "") ?? parsePlushAvatar(author?.avatar ?? "");
   if (plush) return { kind: "plush", config: plush };
   return avatarFace({ id: author?.id ?? "", name: author?.name ?? "", avatar: author?.avatar ?? "" })
     ?? { kind: "brand" };

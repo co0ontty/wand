@@ -6,6 +6,7 @@ import {
   isSystemSiliconEmployee,
   type SiliconEmployee,
 } from "./ai-team-types.js";
+import { fixedEmployeeAvatar } from "./fixed-employee-avatar.js";
 import { isSessionProvider } from "./session-provider.js";
 import { DEFAULT_WAND_TASK_AGENT_KIND, DEFAULT_WAND_TASK_AGENT_MODE, normalizeWandTaskAgentMode, type WandTaskAgent } from "./task-types.js";
 import type { AiCliCandidate, SessionProvider } from "./types.js";
@@ -23,8 +24,8 @@ export {
  * 内置的「系统运维」员工。
  *
  * Wand 自己的 AI 调用（commit message / tag、提示词优化、会话与任务标题、
- * 员工起草）都通过这位员工的候选链执行：名字、职责与人设写死在代码里，不可编辑、不可归档、
- * 不可删除；只有执行候选（工具 + 引擎 + 模型 + 思考深度，按顺序降级）由用户维护。
+ * 员工起草）都通过这位员工的候选链执行：身份和头像固定，不可归档、不可删除；
+ * 名字、职责、人设与执行候选（工具 + 引擎 + 模型 + 思考深度）由用户维护。
  */
 export const SYSTEM_EMPLOYEE_DUTY = "Wand 系统运维：服务与 CLI 线路、更新分发、仓库与会话操作，Wand 自有 AI 任务的执行者。";
 
@@ -73,11 +74,10 @@ export function systemEmployeeSeedAgents(seed: SystemEmployeeSeed = {}): WandTas
 export function systemEmployeeDefinition(agents: WandTaskAgent[], now: string, existing?: SiliconEmployee | null): SiliconEmployee {
   return {
     id: existing?.id ?? SYSTEM_EMPLOYEE_ID,
-    name: SYSTEM_EMPLOYEE_NAME,
-    duty: SYSTEM_EMPLOYEE_DUTY,
-    prompt: SYSTEM_EMPLOYEE_PROMPT,
-    // 空头像 = 按 id/name 稳定派生一只像素猫，与用户员工同一套。
-    avatar: "",
+    name: existing?.name ?? SYSTEM_EMPLOYEE_NAME,
+    duty: existing?.duty ?? SYSTEM_EMPLOYEE_DUTY,
+    prompt: existing?.prompt ?? SYSTEM_EMPLOYEE_PROMPT,
+    avatar: existing?.avatar ?? fixedEmployeeAvatar({ id: SYSTEM_EMPLOYEE_ID, systemKey: SYSTEM_EMPLOYEE_KEY })!,
     agents: agents.length ? agents : systemEmployeeSeedAgents(),
     systemKey: SYSTEM_EMPLOYEE_KEY,
     tags: [SYSTEM_EMPLOYEE_TAG],

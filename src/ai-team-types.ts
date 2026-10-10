@@ -93,13 +93,13 @@ export interface SiliconEmployee {
   name: string;
   duty: string; // 一句话职责：侧栏/选择器/署名都用它
   prompt: string; // 角色设定；建会话时走 SessionSnapshot.systemPrompt（不拼进首条用户消息）
-  avatar: string; // 与 ai-teams 同口径："" | "cat:<n>" | "data:image/…"
+  avatar: string; // "" | legacy cat | plush:v1:… | plush-cat:v1:silver|orange | uploaded image
   agents: WandTaskAgent[]; // 1..4 项，顺序 = 降级顺序（首选在前）
   /** 内置标签按 systemKey 固定；普通员工的标签由用户维护。旧客户端可不传。 */
   tags?: string[];
   /**
-   * 非空 = Wand 内置员工（如 "wand-ops" 系统运维）：名字/职责/人设/头像锁定，
-   * 不可归档、不可删除，只有执行候选由用户维护。
+   * 非空 = Wand 内置身份、标签，不可归档、不可删除。
+   * 两个固定猫头像员工可编辑资料/人设/候选；其他内置员工保留既有资料锁定策略。
    */
   systemKey?: string;
   archivedAt?: string; // 归档后不出现在选择器；其历史会话仍可打开

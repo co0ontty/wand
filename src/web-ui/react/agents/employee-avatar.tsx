@@ -7,7 +7,7 @@ import { SILICON_EMPLOYEE_AVATAR_MAX_CHARS } from "../../../ai-team-types.js";
 import { employeeAvatarProvider, employeeCliLabel } from "./employee-identity.js";
 import { ProviderLogo } from "../provider-logo.js";
 import { PlushAvatar } from "../avatars/plush-avatar.js";
-import { defaultPlushAvatar, encodePlushAvatar, resolvePlushAvatar, PLUSH_SHAPES, PLUSH_COLORS, PLUSH_GLASSES, PLUSH_HATS, type PlushAvatarConfig } from "../../../plush-avatar.js";
+import { defaultPlushAvatar, encodePlushAvatar, resolvePlushAvatar, resolveEmployeeAvatar, PLUSH_SHAPES, PLUSH_COLORS, PLUSH_GLASSES, PLUSH_HATS, type PlushAvatarConfig } from "../../../plush-avatar.js";
 import { usePopupDismiss } from "../ui/popup-lifecycle.js";
 import { installAvatarEditorStyles } from "./employee-avatar-styles.js";
 
@@ -23,7 +23,7 @@ export function EmployeeAvatar({ employee, provider, size = "md", className = ""
   const cliLabel = cli ? employeeCliLabel(cli, provider === undefined ? employee.agents?.[0]?.engine : undefined) : "";
   const pixelSize = { sm: 26, md: 32, lg: 44, xl: 72, chat: 40 }[size];
   const providerSize = pixelSize <= 32 ? 14 : 18;
-  const plush = resolvePlushAvatar(employee);
+  const plush = resolveEmployeeAvatar(employee);
   const face = plush ? null : avatarFaceParts(employee, pixelSize);
   return <WandUiBoundary><Badge className={`wand-team-avatar wand-employee-avatar ${className}`.trim()} data-size={size}
     title={employee.name} offset={[0, pixelSize]}

@@ -1,7 +1,7 @@
-import type { PlushAvatarConfig } from "../../../plush-avatar.js";
+import type { PlushRenderConfig } from "../../../plush-avatar.js";
 
 export interface PlushRenderOptions {
-  config: PlushAvatarConfig;
+  config: PlushRenderConfig;
   size: number;
   speaking: boolean;
   interactive: boolean;

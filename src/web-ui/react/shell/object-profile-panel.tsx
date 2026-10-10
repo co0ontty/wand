@@ -5,8 +5,8 @@ import { PopupOwnerProvider, usePortalContainer } from "../ui/portal-context";
 import { WandIcon, WandButton } from "../ui/index.js";
 import { EmployeeAvatar } from "../agents/employee-avatar.js";
 import { EmployeeCard } from "../agents/employee-card.js";
-import { siliconEmployeesRepository } from "../agents/employee-repository.js";
-import { isBuiltinSiliconEmployee, siliconEmployeeTags } from "../../../ai-team-types.js";
+import { siliconEmployeesRepository, employeeUpdateInput } from "../agents/employee-repository.js";
+import { siliconEmployeeTags } from "../../../ai-team-types.js";
 import { isWandPopupOwnedBy } from "../ui/popup-lifecycle.js";
 import type { SiliconEmployee } from "../../../ai-team-types.js";
 import type { UiSessionVm } from "./ui-store.js";
@@ -99,7 +99,7 @@ export function ObjectProfilePanel({
       open={open}
       getContainer={container}
       title={editing ? "编辑员工资料" : isEmployee ? "员工资料" : "会话详情"}
-      size={mobile ? "100%" : 420}
+      size={mobile ? "100%" : editing ? Math.min(1120, window.innerWidth - 48) : 420}
       mask={mobile || editing}
       keyboard={false}
       focusable={{ focusTriggerAfterClose: false }}
@@ -130,11 +130,8 @@ export function ObjectProfilePanel({
         {editing && employee ? <EmployeeCard key={employee.id} employee={employee} catalog={catalog}
           providerOptions={ISSUE_AGENT_PROVIDERS.map(({ value, label }) => ({ value, label }))}
           editorOnly onDirtyChange={setDirty} onSavingChange={setSaving}
-          onCancel={() => dirty ? setDiscard("view") : setEditing(false)} onSave={async patch => {
-            const updated = await siliconEmployeesRepository.update(employee!.id, isBuiltinSiliconEmployee(employee!)
-              ? { agents: patch.agents ?? employee!.agents }
-              : { name: patch.name ?? employee!.name, duty: patch.duty ?? employee!.duty, prompt: patch.prompt ?? employee!.prompt,
-                avatar: patch.avatar ?? employee!.avatar, tags: patch.tags ?? employee!.tags ?? [], agents: patch.agents ?? employee!.agents });
+          onCancel={() => { setDirty(false); setEditing(false); }} onSave={async patch => {
+            const updated = await siliconEmployeesRepository.update(employee!.id, employeeUpdateInput(employee!, patch));
             setSavedEmployee(updated); setSaving(false); setDirty(false); setEditing(false);
           }}/> : <Flex vertical gap="large" className="object-profile-body">
           {loading ? <Spin tip="正在读取员工资料"><div style={{ height: 60 }}/></Spin> : null}

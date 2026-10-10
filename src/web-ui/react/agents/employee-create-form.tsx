@@ -18,6 +18,8 @@ export function EmployeeCreateForm({
   providerOptions,
   onSave,
   onCancel,
+  onDirtyChange,
+  onSavingChange,
 }: {
   catalog: IssueModelCatalog | null;
   providerOptions: ProviderOptions;
@@ -30,6 +32,8 @@ export function EmployeeCreateForm({
     agents: WandTaskAgent[];
   }): Promise<void>;
   onCancel(): void;
+  onDirtyChange?(dirty: boolean): void;
+  onSavingChange?(saving: boolean): void;
 }): React.ReactElement {
   const [expectation, setExpectation] = React.useState("");
   const [advanced, setAdvanced] = React.useState(false);
@@ -42,6 +46,11 @@ export function EmployeeCreateForm({
   const [saving, setSaving] = React.useState(false);
   const [filling, setFilling] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
+  const initialAgents = React.useRef(JSON.stringify(agents));
+  const dirty = Boolean(expectation || name || duty || prompt || avatar || tagInput) || JSON.stringify(agents) !== initialAgents.current;
+  React.useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
+  React.useEffect(() => { onSavingChange?.(saving || filling); }, [saving, filling, onSavingChange]);
 
   const failureMessage = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
 

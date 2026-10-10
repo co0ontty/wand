@@ -1,304 +1,101 @@
 import * as React from "react";
-import { DECISION_EXPERT_KEY } from "../../../decision-expert-identity.js";
-import { SPEECH_POLISHER_KEY } from "../../../speech-polisher-identity.js";
-import { Flex, Alert, Card, Collapse, Input, Tag , Typography } from "antd";
-import { DEFAULT_EMPLOYEE_TAG, SYSTEM_EMPLOYEE_TAG, isBuiltinSiliconEmployee, isDefaultSiliconEmployee, parseSiliconEmployeeTagInput, siliconEmployeeTags, type SiliconEmployee } from "../../../ai-team-types.js";
-import { EmployeeMemory } from "./employee-memory.js";
-import { EmployeeKnowledge } from "./employee-knowledge.js";
-import { EmployeeTagsField } from "./employee-tags-field.js";
-import { WandButton, WandIcon } from "../ui";
-import { SettingsField } from "../settings/fields.js";
-import { CandidatesListEditor } from "./candidate-editor.js";
-import { EmployeeAvatar, EmployeeAvatarPicker } from "./employee-avatar.js";
-import { issueAgentProviderModelLine, type IssueModelCatalog } from "../issues/task-board-agent.js";
-import type { ProviderOptions } from "./candidate-editor.js";
-import type { WandTaskAgent } from "../../../task-types.js";
+import { Alert, Input } from "antd";
+import { isBuiltinSiliconEmployee, isDefaultSiliconEmployee, parseSiliconEmployeeTagInput, siliconEmployeeTags, type SiliconEmployee } from "../../../ai-team-types.js";
+import { isFixedAvatarEmployee } from "../../../fixed-employee-avatar.js";
+import { WandButton, WandIcon, WandInput } from "../ui";
+import { EmployeeAvatar } from "./employee-avatar.js";
+import { EmployeeAvatarWorkspace } from "./employee-avatar-workspace.js";
+import { CandidatesListEditor, type ProviderOptions } from "./candidate-editor.js";
 import { candidateListError } from "./candidate-list.js";
-import { installEmployeeStyles } from "./styles.js";
+import { EmployeeKnowledge } from "./employee-knowledge.js";
+import { EmployeeMemory } from "./employee-memory.js";
+import { EmployeeTagsField } from "./employee-tags-field.js";
+import type { IssueModelCatalog } from "../issues/task-board-agent.js";
+import { installEmployeeProfileStyles } from "../styles/employee-profile.js";
 
-export function EmployeeCard({
-  employee,
-  catalog,
-  providerOptions,
-  onSave,
-  onArchive,
-  onUnarchive,
-  onDelete,
-  editorOnly = false,
-  onCancel,
-  onDirtyChange,
-  onSavingChange,
-}: {
-  employee: SiliconEmployee;
-  catalog: IssueModelCatalog | null;
-  providerOptions: ProviderOptions;
-  onSave(patch: Partial<SiliconEmployee>): Promise<void>;
-  onArchive?(): Promise<void>;
-  onUnarchive?(): Promise<void>;
-  onDelete?(): Promise<void>;
-  editorOnly?: boolean;
-  onCancel?(): void;
-  onDirtyChange?(dirty: boolean): void;
-  onSavingChange?(saving: boolean): void;
+const sections = [{ id: "identity", label: "个人资料", icon: "user" }, { id: "role", label: "职责与角色", icon: "clipboard" }, { id: "tools", label: "执行候选", icon: "cpu" }, { id: "appearance", label: "头像", icon: "image" }, { id: "advanced", label: "高级设置", icon: "gear" }] as const;
+
+export function EmployeeCard({ employee, catalog, providerOptions, onSave, onArchive, onUnarchive, onDelete, onCancel, onDirtyChange, onSavingChange }: {
+  employee: SiliconEmployee; catalog: IssueModelCatalog | null; providerOptions: ProviderOptions;
+  onSave(patch: Partial<SiliconEmployee>): Promise<void>; onArchive?(): Promise<void>; onUnarchive?(): Promise<void>; onDelete?(): Promise<void>;
+  editorOnly?: boolean; onCancel?(): void; onDirtyChange?(dirty: boolean): void; onSavingChange?(saving: boolean): void;
 }): React.ReactElement {
-  React.useEffect(() => { installEmployeeStyles(); }, []);
-  const [editing, setEditing] = React.useState(editorOnly);
-  const triggerRef = React.useRef<HTMLButtonElement>(null);
-  const [draft, setDraft] = React.useState<SiliconEmployee>(employee);
-  const [submitting, setSaving] = React.useState(false);
-  const [avatarProcessing, setAvatarProcessing] = React.useState(false);
-  const saving = submitting || avatarProcessing;
+  const [baseline, setBaseline] = React.useState(employee);
+  const [draft, setDraft] = React.useState(employee);
   const [tagInput, setTagInput] = React.useState(() => siliconEmployeeTags(employee).join("，"));
+  const [step, setStep] = React.useState("identity");
+  const [avatarOpen, setAvatarOpen] = React.useState(true);
+  const [submitting, setSubmitting] = React.useState(false);
+  const [uploading, setUploading] = React.useState(false);
+  const [avatarRevision, resetAvatarWorkspace] = React.useReducer(value => value + 1, 0);
+  const [error, setError] = React.useState("");
+  const [notice, setNotice] = React.useState("");
   const [saveStatus, setSaveStatus] = React.useState<"idle" | "saved" | "failed">("idle");
-  const [error, setError] = React.useState<string | null>(null);
-
-  React.useEffect(() => {
-    if (!editing) {
-      setDraft(employee);
-      setTagInput(siliconEmployeeTags(employee).join("，"));
-    }
-  }, [employee, editing]);
-  React.useEffect(() => {
-    onDirtyChange?.(JSON.stringify(draft) !== JSON.stringify(employee) || tagInput !== siliconEmployeeTags(employee).join("，"));
-  }, [draft, tagInput, employee, onDirtyChange]);
+  const nameInput = React.useRef<HTMLInputElement>(null);
+  const avatarTrigger = React.useRef<HTMLButtonElement>(null);
+  const fixed = isFixedAvatarEmployee(employee);
+  const builtin = isBuiltinSiliconEmployee(employee);
+  const lockedProfile = builtin && !fixed;
+  const dirty = JSON.stringify(draft) !== JSON.stringify(baseline) || tagInput !== siliconEmployeeTags(baseline).join("，");
+  const dirtyRef = React.useRef(dirty); dirtyRef.current = dirty;
+  const saving = submitting || uploading;
+  React.useEffect(() => { installEmployeeProfileStyles(); }, []);
+  React.useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
   React.useEffect(() => { onSavingChange?.(saving); }, [saving, onSavingChange]);
-
-  const onToggle = () => {
-    if (saving) return;
-    if (editorOnly) { onCancel?.(); return; }
-    setSaveStatus("idle");
-    setTagInput(siliconEmployeeTags(employee).join("，"));
-    if (editing) {
-      setDraft(employee);
-      setError(null);
-      setEditing(false);
-    } else {
-      setEditing(true);
-    }
+  React.useEffect(() => {
+    // Background knowledge updates must not overwrite an active form draft.
+    if (dirtyRef.current || submitting || uploading) return;
+    setBaseline(employee); setDraft(employee); setTagInput(siliconEmployeeTags(employee).join("，"));
+  }, [employee]);
+  const patch = (value: Partial<SiliconEmployee>) => { setDraft(current => ({ ...current, ...value })); setError(""); setNotice(""); setSaveStatus("idle"); };
+  const cancel = () => {
+    if (submitting) return;
+    resetAvatarWorkspace(); setUploading(false);
+    setDraft(baseline); setTagInput(siliconEmployeeTags(baseline).join("，")); setError(""); setNotice("已撤销本次修改"); setSaveStatus("idle");
+    onCancel?.();
   };
-
-  const handleSave = async () => {
-    if (saving) return;
-    setSaveStatus("failed");
-    const listErr = draft.agents.some((agent) => agent.kind !== "structured")
-      ? "硅基员工只能使用结构化候选。"
-      : candidateListError(draft.agents);
-    if (listErr) {
-      setError(listErr);
-      return;
-    }
-    if (!draft.name.trim()) {
-      setError("员工名字不能为空。");
-      return;
-    }
+  const save = async () => {
+    if (saving || !dirty) return;
+    const invalid = draft.agents.some(agent => agent.kind !== "structured") ? "硅基员工只能使用结构化候选。" : candidateListError(draft.agents);
+    if (invalid) { setSaveStatus("failed"); setStep("tools"); setError(invalid); return; }
+    if (!draft.name.trim()) { setSaveStatus("failed"); setStep("identity"); setError("员工名字不能为空。"); requestAnimationFrame(() => nameInput.current?.focus()); return; }
     try {
-      setSaving(true);
-      setError(null);
-      const tags = isBuiltinSiliconEmployee(employee)
-        ? siliconEmployeeTags(employee) : parseSiliconEmployeeTagInput(tagInput);
-      await onSave({ ...draft, tags });
-      setSaveStatus("saved");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setSaveStatus("failed");
-    } finally {
-      setSaving(false);
-    }
+      const tags = builtin ? siliconEmployeeTags(baseline) : parseSiliconEmployeeTagInput(tagInput);
+      const next = { ...draft, tags };
+      // Fixed identities accept partial profile edits: do not echo a generated prompt or a stale avatar.
+      const input: Partial<SiliconEmployee> = fixed ? {} : next;
+      if (fixed) for (const field of ["name", "duty", "prompt", "agents"] as const) {
+        if (JSON.stringify(next[field]) !== JSON.stringify(baseline[field])) Object.assign(input, { [field]: next[field] });
+      }
+      setSubmitting(true); setError(""); await onSave(input);
+      setBaseline(next); setDraft(next); setNotice("员工资料已保存"); setSaveStatus("saved");
+    } catch (cause) { setSaveStatus("failed"); setError(cause instanceof Error ? cause.message : "保存员工失败，请重试。"); }
+    finally { setSubmitting(false); }
   };
-
-  const isArchived = Boolean(employee.archivedAt);
-  const isSystem = isBuiltinSiliconEmployee(employee);
-  const isDefault = isDefaultSiliconEmployee(employee);
-  const tag = isDefault ? DEFAULT_EMPLOYEE_TAG : SYSTEM_EMPLOYEE_TAG;
-  const tags = siliconEmployeeTags(employee);
-  // `wand-team-member` 保留为编辑态业务钩子；展开与收起由 Ant Collapse 管理，
-  // 卡片自身外观由通用卡片承担；员工特有的归档/内置态另挂标记。
-  const cardCls = `wand-team-member wand-employee-card${isArchived ? " is-archived" : ""}${isSystem ? " is-system" : ""}`;
-
-  return (
-    <Card
-      size="small"
-      className={cardCls}
-      data-open={editing || undefined}
-      data-employee-id={employee.id}
-      onChange={() => { setSaveStatus("idle"); setError(null); }}
-      onKeyDown={(event) => {
-        if (event.key === "Escape" && !event.defaultPrevented && editing && !saving) {
-          event.preventDefault();
-          event.stopPropagation();
-          onToggle();
-          triggerRef.current?.focus();
-        }
-      }}
-    >
-      {!editorOnly ? <WandButton kind="ghost"
-        ref={triggerRef}
-        type="button"
-        className="wand-team-member-head" style={{ width: "100%", height: "auto", minHeight: 56, textAlign: "start", alignItems: "center", gap: 12 }}
-        aria-expanded={editing}
-        onClick={onToggle}
-      >
-        <EmployeeAvatar employee={employee} size="md" />
-        <Flex vertical gap={2} className="wand-team-member-copy" style={{ flex: 1, minWidth: 0 }}>
-          <Flex align="center" gap={6} className="wand-employee-name-line">
-            <Typography.Text strong ellipsis title={employee.name}>{employee.name}</Typography.Text>
-            {isSystem ? <Tag className="wand-employee-system-tag">{tag}</Tag> : null}
-            {isArchived ? <Tag className="wand-employee-archived-tag">已归档</Tag> : null}
-          </Flex>
-          <Typography.Text type="secondary" ellipsis title={employee.duty || "还没写职责"}>{employee.duty || "还没写职责"}</Typography.Text>
-          <Flex align="center" gap={8} className="wand-employee-meta-line">
-            <Typography.Text type="secondary" ellipsis className="wand-team-member-agent" title={employee.agents[0] ? issueAgentProviderModelLine(employee.agents[0], catalog) : "未配置候选"}>
-              {employee.agents[0]
-                ? issueAgentProviderModelLine(employee.agents[0], catalog)
-                : "未配置候选"}
-              {employee.agents.length > 1 ? ` (+${employee.agents.length - 1} 个备用)` : null}
-            </Typography.Text>
-            {!isSystem && tags.length ? <Typography.Text type="secondary" ellipsis className="wand-employee-tags" title={`员工标签：${tags.join("、")}`} aria-label={`员工标签：${tags.join("、")}`}>{tags.join(" · ")}</Typography.Text> : null}
-          </Flex>
-        </Flex>
-        <WandIcon name="chevronDown" size={14} />
-      </WandButton> : null}
-
-      {/* 就地展开编辑表单 */}
-      <Collapse bordered={false} ghost activeKey={editing ? ["editor"] : []}
-        styles={{ header: { display: "none" }, body: { padding: 0 } }}
-        items={[{ key: "editor", label: "成员编辑", showArrow: false, forceRender: true, children:
-          <div className="wand-team-member-body" inert={!editing}>
-        <Flex vertical gap={10} style={{ minWidth: 0, paddingTop: 10 }} className="wand-team-member-inner">
-          {isSystem ? (
-            <Alert
-              className="wand-employee-system-note"
-              type="info"
-              showIcon
-              title={<strong>{tag}</strong>}
-              description={isDefault
-                ? "选择 CLI 或未选择员工时使用这个默认角色；你选的工具、模型与权限保持不变。内置标签、名字与基础设定固定，工作风格由短期记忆定期调整；下面的候选用于直接找这位员工或未配置工具的任务。"
-                : employee.systemKey === SPEECH_POLISHER_KEY
-                ? "服务端语音转写后自动整理文字，保留原意与关键细节；整理失败时保留原始转写。初始首选为 Wand Agent 免费分组，可在下面添加、调整候选顺序。内置身份与职责固定。"
-                : employee.systemKey === DECISION_EXPERT_KEY
-                ? "为建议提供有界判断，按下面的候选顺序使用已配置工具与模型；内置身份与职责固定，不可删除。"
-                : "Wand 内置员工：标签、名字、职责与角色设定由服务端固定，不可修改、不可删除；Wand 自己的 AI 调用（Commit、标题、提示词优化）都按下面的候选链执行。"}
-            />
-          ) : (
-            <>
-              <SettingsField label="名字" htmlFor={`employee-${employee.id}-name`}>
-                <Input
-                  id={`employee-${employee.id}-name`}
-                  value={draft.name}
-                  placeholder="员工名字"
-                  disabled={saving}
-                  onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                />
-              </SettingsField>
-
-              <EmployeeTagsField id={`employee-${employee.id}-tags`} value={tagInput}
-                disabled={saving} onChange={setTagInput} />
-
-              <EmployeeAvatarPicker
-                onBusyChange={setAvatarProcessing}
-                avatar={draft.avatar}
-                employeeId={employee.id}
-                name={draft.name}
-                disabled={saving}
-                onChange={(avatar) => setDraft({ ...draft, avatar })}
-              />
-
-              <SettingsField label="职责" htmlFor={`employee-${employee.id}-duty`}>
-                <Input.TextArea
-                  id={`employee-${employee.id}-duty`}
-                  rows={2}
-                  value={draft.duty}
-                  placeholder="一句话职责：在侧栏、选择器和署名中显示"
-                  disabled={saving}
-                  onChange={(e) => setDraft({ ...draft, duty: e.target.value })}
-                />
-              </SettingsField>
-
-              <SettingsField label="角色设定 (Prompt)" htmlFor={`employee-${employee.id}-prompt`}>
-                <Input.TextArea
-                  id={`employee-${employee.id}-prompt`}
-                  rows={4}
-                  value={draft.prompt}
-                  placeholder="设定角色的专业能力、行为守则与交付习惯（创建会话时作为系统提示生效）"
-                  disabled={saving}
-                  onChange={(e) => setDraft({ ...draft, prompt: e.target.value })}
-                />
-              </SettingsField>
-            </>
-          )}
-
-          {isDefault ? <>
-            <EmployeeMemory active={editing} />
-            <SettingsField label="当前角色设定" htmlFor={`employee-${employee.id}-prompt`}>
-              <Input.TextArea id={`employee-${employee.id}-prompt`} rows={6} value={employee.prompt} readOnly />
-            </SettingsField>
-          </> : null}
-
-          <EmployeeKnowledge employeeId={employee.id} active={editing} />
-
-          <CandidatesListEditor
-            agents={draft.agents}
-            label={draft.name || "员工"}
-            catalog={catalog}
-            providerOptions={providerOptions}
-            disabled={saving}
-            structuredOnly
-            onChange={(agents: WandTaskAgent[]) => { setSaveStatus("idle"); setDraft({ ...draft, agents }); }}
-          />
-
-          <Flex justify="end" wrap gap={6} className="wand-team-member-actions">
-            <WandButton
-              kind="primary"
-              size="small"
-              className="wand-employee-save-submit"
-              aria-busy={saving || undefined}
-              disabled={saving}
-              onClick={handleSave}
-            >
-              {saving ? "保存中…" : saveStatus === "saved" ? "已保存" : saveStatus === "failed" ? "保存失败" : "保存修改"}
-            </WandButton>
-            <WandButton
-              kind="ghost"
-              size="small"
-              disabled={saving}
-              onClick={onToggle}
-            >
-              取消
-            </WandButton>
-            {isSystem || !onArchive || !onUnarchive ? null : isArchived ? (
-              <WandButton
-                kind="ghost"
-                size="small"
-                disabled={saving}
-                onClick={onUnarchive}
-              >
-                恢复
-              </WandButton>
-            ) : (
-              <WandButton
-                kind="ghost"
-                size="small"
-                disabled={saving}
-                onClick={onArchive}
-              >
-                归档
-              </WandButton>
-            )}
-            {isSystem || !onDelete ? null : (
-              <WandButton
-                kind="ghost"
-                size="small"
-                disabled={saving}
-                onClick={onDelete}
-              >
-                <WandIcon name="trash" size={14} slot="start" />
-                删除
-              </WandButton>
-            )}
-          </Flex>
-          {error ? <Alert className="wand-team-candidate-error" type="error" showIcon role="alert" title={error} /> : null}
-        </Flex>
-      </div> }]}/>
-    </Card>
-  );
+  const closeAvatar = () => { setAvatarOpen(false); if (step === "appearance") setStep("identity"); requestAnimationFrame(() => avatarTrigger.current?.focus()); };
+  const field = (label: string, id: string, children: React.ReactNode, hint?: string) => <div className="field"><label htmlFor={id}>{label}</label>{children}{hint && <small>{hint}</small>}</div>;
+  return <main className="profile wand-employee-card wand-team-member" data-employee-profile data-open="true" data-employee-id={employee.id}
+    onKeyDown={event => { if (event.key === "Escape" && !event.defaultPrevented && !event.nativeEvent.isComposing && !saving) { event.preventDefault(); event.stopPropagation(); cancel(); } }}>
+    <header className="profile-header"><div><span className="crumb">员工 <WandIcon name="chevron" size={12}/>个人资料</span><h2 title={draft.name}>{draft.name || "未命名员工"}</h2></div>
+      <div className="save-actions"><span className="dirty">{uploading ? "正在处理图片…" : dirty ? "有未保存修改" : "已保存"}</span><WandButton kind="ghost" onClick={cancel} disabled={submitting}>取消</WandButton><WandButton className="wand-employee-save-submit" kind="primary" onClick={() => void save()} disabled={!dirty || saving} aria-busy={submitting || undefined}>{submitting ? "保存中…" : saveStatus === "saved" ? "已保存" : saveStatus === "failed" ? "保存失败" : "保存修改"}</WandButton></div></header>
+    <nav className="profile-tabs" aria-label="资料分区">{sections.map(section => <button type="button" key={section.id} data-step={section.id} aria-current={step === section.id ? "page" : undefined} onClick={() => { setStep(section.id); if (section.id === "appearance") setAvatarOpen(true); }}><WandIcon name={section.icon} size={14}/>{section.label}</button>)}</nav>
+    {(error || notice) && <div className={`feedback ${error ? "error" : ""}`} role={error ? "alert" : "status"}>{error || notice}</div>}
+    <div className="profile-body" data-avatar-open={avatarOpen}><div className="editor" data-step={step}>
+      <div className="identity-summary"><EmployeeAvatar employee={draft} provider="" size="lg"/><div><strong>{draft.name}</strong><small>{siliconEmployeeTags(employee).join(" · ") || "硅基员工"}</small></div><WandButton ref={avatarTrigger} size="small" kind="ghost" onClick={() => { setAvatarOpen(true); setStep("appearance"); }}><WandIcon name={fixed || lockedProfile ? "lock" : "edit"} size={13}/>{fixed || lockedProfile ? "查看头像" : "编辑头像"}</WandButton></div>
+      {lockedProfile && <Alert type="info" title="内置员工" description="此员工的系统身份与基础资料固定；执行候选仍可编辑。"/>}
+      <section id="identity" className="form-section"><div className="section-heading"><h3>个人资料</h3><span>在工作台中识别这位员工</span></div><div className="identity-fields">
+        {field("员工名字", `employee-${employee.id}-name`, <WandInput ref={nameInput} id={`employee-${employee.id}-name`} value={draft.name} maxLength={40} disabled={saving || lockedProfile} onChange={event => patch({ name: event.target.value })}/>)}
+        <EmployeeTagsField id={`employee-${employee.id}-tags`} value={tagInput} disabled={saving || builtin} onChange={value => { setTagInput(value); setNotice(""); }}/></div></section>
+      <section id="role" className="form-section"><div className="section-heading"><h3>职责与角色</h3><span>定义工作范围与协作方式</span></div>
+        {field("一句话职责", `employee-${employee.id}-duty`, <Input.TextArea id={`employee-${employee.id}-duty`} value={draft.duty} rows={2} maxLength={2000} disabled={saving || lockedProfile} onChange={event => patch({ duty: event.target.value })}/>)}
+        {field("角色设定", `employee-${employee.id}-prompt`, <Input.TextArea id={`employee-${employee.id}-prompt`} value={draft.prompt} rows={5} maxLength={20000} disabled={saving || lockedProfile} onChange={event => patch({ prompt: event.target.value })}/>, "用于此员工之后的新工作；已有执行快照保持不变。")}</section>
+      <section id="tools" className="form-section"><CandidatesListEditor agents={draft.agents} label={draft.name || "员工"} catalog={catalog} providerOptions={providerOptions} disabled={saving} structuredOnly onChange={agents => patch({ agents })}/></section>
+      <section id="advanced" className="form-section"><details className="advanced-details" open={step === "advanced"}><summary>高级设置<span>身份与知识</span></summary><div className="advanced-content">
+        {field("员工 ID", `employee-${employee.id}-id`, <WandInput id={`employee-${employee.id}-id`} value={employee.id} readOnly/>)}
+        {isDefaultSiliconEmployee(employee) && <EmployeeMemory active={step === "advanced"}/>}
+        <EmployeeKnowledge employeeId={employee.id} active={step === "advanced"}/>
+        {!builtin && <div className="save-actions">{employee.archivedAt ? onUnarchive && <WandButton disabled={saving} onClick={() => void onUnarchive()}>恢复员工</WandButton> : onArchive && <WandButton disabled={saving} onClick={() => void onArchive()}>归档员工</WandButton>}{onDelete && <WandButton kind="danger" disabled={saving} onClick={() => void onDelete()}>删除员工</WandButton>}</div>}
+      </div></details></section>
+    </div>{avatarOpen && <EmployeeAvatarWorkspace key={avatarRevision} employee={draft} disabled={submitting || lockedProfile} onChange={avatar => patch({ avatar })} onBusyChange={setUploading} onClose={closeAvatar}/>}</div>
+  </main>;
 }

@@ -207,7 +207,7 @@ export async function runPlushBrowser() {
   try {
     await browser.send("Page.navigate", { url: origin });
     await browser.wait("!!document.querySelector('#standalone [data-plush-avatar][data-renderer=webgl]')", "actual WebGL avatar ready");
-    await browser.wait("!!document.querySelector('#employee-form .wand-team-member-head')");
+    await browser.wait("!!document.querySelector('#employee-form [data-employee-profile]')");
     const initial = await e("document.querySelector('#standalone [data-plush-avatar]').dataset.avatarConfig");
     assert.equal(await e("plushHarness.changes.length"), 0, "render defaults never writes");
     await browser.send("Page.reload"); await browser.wait("!!document.querySelector('#standalone [data-plush-avatar][data-renderer=webgl]')");
@@ -252,9 +252,8 @@ export async function runPlushBrowser() {
     await browser.wait("document.querySelector('#draft-value').textContent==='plush:v1:triangle:sage:gold:none'");
     assert.equal(requests.filter(r => r.method !== "GET").length, mutationsBeforeApply, "apply is draft-only");
     cases.push({ name: "shape/color/glasses/hat apply changes draft only; native arrow keyboard" });
-    await browser.click("#employee-form .wand-team-member-head"); await open("#employee-form");
+    await browser.click('#employee-form .identity-summary button');
     await choose("心形", "#employee-form"); await choose("珊瑚", "#employee-form"); await choose("无眼镜", "#employee-form"); await choose("无帽子", "#employee-form");
-    await browser.clickText("使用这个头像");
     assert.equal(await e("plushHarness.saves"), 0); assert.equal(stored.avatar, "");
     await browser.click("#employee-form .wand-employee-save-submit"); await browser.wait("plushHarness.saves===1");
     assert.equal(stored.avatar, "plush:v1:heart:coral:none:none");

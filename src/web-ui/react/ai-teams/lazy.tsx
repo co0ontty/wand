@@ -75,9 +75,11 @@ import {
   CAT_COATS, GeneratedAvatarGlyph, TeamAvatar, TeamAvatarStack, avatarFace, avatarFaceParts,
   generatedAvatarBackground, generatedAvatarFace, memberCoatIndex, PixelCat, shrinkAvatarImage,
 } from "./avatar";
-import { useSiliconEmployees, siliconEmployeesRepository, notifySiliconEmployeeDefinitionChanged } from "../agents/employee-repository.js";
+import { useSiliconEmployees, siliconEmployeesRepository, employeeUpdateInput, notifySiliconEmployeeDefinitionChanged } from "../agents/employee-repository.js";
 import { employeeAvatarProvider, employeeCliLabel } from "../agents/employee-identity.js";
 import { installAvatarEditorStyles } from "../agents/employee-avatar-styles.js";
+import { EmployeeAvatarWorkspace } from "../agents/employee-avatar-workspace.js";
+import { installEmployeeProfileStyles } from "../styles/employee-profile.js";
 import { installEmployeeStyles } from "../agents/styles.js";
 import { PlushAvatar } from "../avatars/plush-avatar.js";
 import { ProviderLogo } from "../provider-logo.js";
@@ -122,9 +124,11 @@ const AI_TEAMS_HOST: Record<string, object> = {
   },
   "issues/task-board-controller": { taskBoardController, taskBoardStore },
   "issues/task-board-repository": { taskBoardRepository },
-  "agents/employee-repository": { useSiliconEmployees, siliconEmployeesRepository, notifySiliconEmployeeDefinitionChanged },
+  "agents/employee-repository": { useSiliconEmployees, siliconEmployeesRepository, employeeUpdateInput, notifySiliconEmployeeDefinitionChanged },
   "agents/employee-identity": { employeeAvatarProvider, employeeCliLabel },
   "agents/styles": { installEmployeeStyles },
+  "agents/employee-avatar-workspace": { EmployeeAvatarWorkspace },
+  "styles/employee-profile": { installEmployeeProfileStyles },
   "provider-logo": { ProviderLogo },
   "model-catalog": { subscribeWandModelCatalog, wandModelDisplayName },
   "use-model-catalog": { useWandModelCatalog },

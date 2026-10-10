@@ -209,7 +209,7 @@ test("archived/deleted employees block new starts but old snapshots can continue
 test("default partner freezes base role without copying the short-term habit projection", (t) => {
   const { storage } = setup(t);
   const definition = defaultEmployeeDefinition([agent()], NOW);
-  const source = { getSiliconEmployee: () => ({ ...definition, prompt: DEFAULT_EMPLOYEE_PROMPT + "\nPRIVATE_HABIT" }) };
+  const source = { getSiliconEmployee: () => ({ ...definition, prompt: DEFAULT_EMPLOYEE_PROMPT + "\nPRIVATE_HABIT" }), getSiliconEmployeeDefinition: () => definition };
   const team = parseAiTeamInput(input(definition.id), null, NOW, source);
   const frozen = freezeTeamEmployees(team, source);
   assert.equal(teamMemberEmployee(frozen.members[0]!)!.prompt, DEFAULT_EMPLOYEE_PROMPT);

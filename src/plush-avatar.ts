@@ -42,6 +42,35 @@ export interface PlushAvatarConfig {
   hat: PlushHat;
 }
 
+/** Two explicit source-derived cat heads; geometric defaults and legacy pixels stay unchanged. */
+export interface PlushCatAvatarConfig {
+  version: 1;
+  kind: "cat";
+  coat: "silver" | "orange";
+}
+export type PlushRenderConfig = PlushAvatarConfig | PlushCatAvatarConfig;
+
+export function isPlushCatAvatar(config: PlushRenderConfig): config is PlushCatAvatarConfig {
+  return "kind" in config && config.kind === "cat";
+}
+
+export function parsePlushCatAvatar(value: string): PlushCatAvatarConfig | null {
+  if (value === "plush-cat:v1:silver") return { version: 1, kind: "cat", coat: "silver" };
+  if (value === "plush-cat:v1:orange") return { version: 1, kind: "cat", coat: "orange" };
+  return null;
+}
+
+export function encodePlushCatAvatar(config: PlushCatAvatarConfig): string {
+  const value = `plush-cat:v${config.version}:${config.coat}`;
+  if (config.kind !== "cat" || !parsePlushCatAvatar(value)) throw new Error("毛绒猫头像配置无效。");
+  return value;
+}
+
+/** Common identity projection; only an explicit cat value opts into this exception. */
+export function resolveEmployeeAvatar(identity: PlushAvatarIdentity): PlushRenderConfig | null {
+  return parsePlushCatAvatar(identity.avatar ?? "") ?? resolvePlushAvatar(identity);
+}
+
 export interface PlushAvatarIdentity {
   id?: string | null;
   name?: string | null;

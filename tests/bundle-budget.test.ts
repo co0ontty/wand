@@ -125,13 +125,29 @@ test("delivery overview fits only its on-demand allowance", (t) => {
 test("the raised lazy allowance still rejects oversized team chunks", (t) => {
   const fixture = budgetFixture();
   t.after(fixture.cleanup);
-  const lazy = chunkText(1_500);
+  const lazy = chunkText(1_560);
   const size = gzipSync(lazy).length;
-  assert.ok(size > 52_000, `fixture gzip size: ${size}`);
+  assert.ok(size > 54_000, `fixture gzip size: ${size}`);
   const result = fixture.run(lazy);
   assert.equal(result.status, 1);
   assert.match(String(result.stderr), /\[bundle-budget\] FAILED:/);
-  assert.match(String(result.stderr), /ai-teams\.js \(lazy\): \d+ B > 52000 B/);
+  assert.match(String(result.stderr), /ai-teams\.js \(lazy\): \d+ B > 54000 B/);
+});
+
+test("employee profile fits its lazy allowance without increasing first-load transfer", (t) => {
+  const fixture = budgetFixture();
+  t.after(fixture.cleanup);
+  const lazy = chunkText(1_520);
+  const size = gzipSync(lazy).length;
+  assert.ok(size > 52_000 && size <= 54_000, `fixture gzip size: ${size}`);
+  const small = fixture.run("");
+  const result = fixture.run(lazy);
+  assert.equal(small.status, 0, String(small.stderr));
+  assert.equal(result.status, 0, String(result.stderr));
+  const firstLoad = (stdout: unknown): string | undefined =>
+    String(stdout).match(/first load \(HTML \+ app \+ vendor\).*\((\d+) B\)/)?.[1];
+  assert.ok(firstLoad(small.stdout));
+  assert.equal(firstLoad(result.stdout), firstLoad(small.stdout));
 });
 
 test("无指派派工的名单面板只吃新的按需额度，不进主包", (t) => {

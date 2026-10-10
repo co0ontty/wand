@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { PLUSH_COLORS, type PlushAvatarConfig, type PlushShape } from "../../../plush-avatar.js";
+import { PLUSH_COLORS, isPlushCatAvatar, type PlushAvatarConfig, type PlushRenderConfig, type PlushCatAvatarConfig, type PlushShape } from "../../../plush-avatar.js";
 import type { PlushAvatarRuntime, PlushGlobals, PlushRenderOptions } from "./runtime-contract.js";
 
 // One GPU context for the entire application. Individual identity canvases only
@@ -41,7 +41,7 @@ function randomSource(seed: number): () => number {
   let value = seed >>> 0;
   return () => { value = (Math.imul(value, 1664525) + 1013904223) >>> 0; return value / 4294967296; };
 }
-function configSeed(config: PlushAvatarConfig): number {
+function configSeed(config: PlushRenderConfig): number {
   let hash = 2166136261;
   for (const char of JSON.stringify(config)) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
   return hash >>> 0;
@@ -133,7 +133,8 @@ function woolTexture(): THREE.CanvasTexture {
 }
 
 /** Thousands of actual tapered, bent 3D strands create a soft irregular silhouette. */
-function fiberGeometry(surface: THREE.BufferGeometry, color: THREE.Color, seed: number, count: number): THREE.BufferGeometry {
+function fiberGeometry(surface: THREE.BufferGeometry, color: THREE.Color, seed: number, count: number,
+  pigment?: (point: THREE.Vector3) => THREE.Color): THREE.BufferGeometry {
   const random = randomSource(seed);
   const positions = surface.getAttribute("position"), normals = surface.getAttribute("normal");
   const index = surface.getIndex()!;
@@ -171,13 +172,14 @@ function fiberGeometry(surface: THREE.BufferGeometry, color: THREE.Color, seed: 
     const midLeft = middle.clone().addScaledVector(side, width * 0.65);
     const midRight = middle.clone().addScaledVector(side, -width * 0.65);
     const variation = 0.70 + random() * 0.38;
+    const strandColor = pigment?.(root) ?? color;
     [left, right, midLeft, right, midRight, midLeft, midLeft, midRight, tip].forEach((point, vertex) => {
       vertices.push(point.x, point.y, point.z);
       strandNormals.push(normal.x, normal.y, normal.z);
       // Dark roots / softly lit tips give the pile depth, rather than a smooth
       // sphere with monochrome surface noise. The taper remains real geometry.
       const brightness = variation * (vertex === 8 ? 1.24 : vertex < 2 || vertex === 3 ? 0.78 : 1.08);
-      shades.push(color.r * brightness, color.g * brightness, color.b * brightness);
+      shades.push(strandColor.r * brightness, strandColor.g * brightness, strandColor.b * brightness);
     });
   }
   const geometry = new THREE.BufferGeometry();
@@ -189,6 +191,80 @@ function fiberGeometry(surface: THREE.BufferGeometry, color: THREE.Color, seed: 
 
 function tube(points: THREE.Vector3[], radius: number, material: THREE.Material): THREE.Mesh {
   return new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 24, radius, 6, false), material);
+}
+
+/** Source-derived plush cat exceptions: actual inflated head, ears, eye sockets and embroidery. */
+function createCatModel(config: PlushCatAvatarConfig, texture: THREE.Texture, preview: boolean): Model {
+  const root = new THREE.Group();
+  const silver = config.coat === "silver";
+  const coat = new THREE.Color(silver ? "#9dabb8" : "#f49335");
+  const dark = new THREE.Color(silver ? "#657789" : "#b85d18");
+  const pale = new THREE.Color(silver ? "#ced6dc" : "#ffd29a");
+  const pigment = new THREE.Color();
+  const colorAt = (point: THREE.Vector3) => {
+    const forehead = THREE.MathUtils.clamp((point.y - 0.15) * 0.55, 0, 0.3);
+    const chin = THREE.MathUtils.clamp((-point.y - 0.1) * 0.45, 0, 0.35);
+    return pigment.copy(coat).lerp(dark, forehead).lerp(pale, chin);
+  };
+  const surface = pillowGeometry("square");
+  const position = surface.getAttribute("position");
+  const colors: number[] = [];
+  const point = new THREE.Vector3();
+  for (let i = 0; i < position.count; i++) {
+    position.setXYZ(i, position.getX(i) * 1.08, position.getY(i) * 0.86 - 0.10, position.getZ(i));
+    const color = colorAt(point.fromBufferAttribute(position, i)); colors.push(color.r, color.g, color.b);
+  }
+  surface.computeVertexNormals(); surface.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  root.add(new THREE.Mesh(surface, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, bumpMap: texture, bumpScale: 0.023 })));
+  root.add(new THREE.Mesh(fiberGeometry(surface, coat, configSeed(config), preview ? 28_000 : 4_500, colorAt),
+    new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, side: THREE.DoubleSide })));
+  const wool = (geometry: THREE.BufferGeometry, color: THREE.Color, count: number) => {
+    const group = new THREE.Group();
+    group.add(new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color, roughness: 1, bumpMap: texture, bumpScale: 0.024 })));
+    group.add(new THREE.Mesh(fiberGeometry(geometry, color, configSeed(config) + count, count),
+      new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, side: THREE.DoubleSide })));
+    return group;
+  };
+  for (const direction of [-1, 1]) {
+    const ear = wool(pillowGeometry("triangle"), dark, preview ? 4_000 : 650);
+    ear.scale.set(0.30, 0.38, 0.40); ear.position.set(direction * 0.64, 0.69, -0.015); ear.rotation.z = direction * -0.12;
+    root.add(ear);
+    const inner = wool(pillowGeometry("triangle"), coat.clone().lerp(pale, 0.12), preview ? 1_800 : 300);
+    inner.scale.set(0.19, 0.27, 0.11); inner.position.set(direction * 0.64, 0.69, 0.25); inner.rotation.z = direction * -0.12;
+    root.add(inner);
+  }
+  const eyes: THREE.Mesh[] = [];
+  const sphere = () => new THREE.SphereGeometry(1, 28, 20);
+  for (const x of [-0.32, 0.32]) {
+    const white = new THREE.Mesh(sphere(), new THREE.MeshStandardMaterial({ color: "#faf8ee", roughness: 0.56 }));
+    white.position.set(x, 0.12, 0.635); white.scale.set(0.18, 0.145, 0.045); white.userData.restY = 0.145; root.add(white); eyes.push(white);
+    const pupil = new THREE.Mesh(sphere(), new THREE.MeshPhysicalMaterial({ color: silver ? "#3e8b59" : "#25211d", roughness: 0.28, clearcoat: 0.35 }));
+    pupil.position.set(x + Math.sign(x) * -0.027, 0.13, 0.679); pupil.scale.set(0.094, 0.108, 0.024); pupil.userData.restY = 0.108; root.add(pupil); eyes.push(pupil);
+    if (silver) {
+      const slit = new THREE.Mesh(sphere(), new THREE.MeshStandardMaterial({ color: "#1f3e2b", roughness: 0.5 }));
+      slit.position.set(pupil.position.x, 0.13, 0.700); slit.scale.set(0.019, 0.088, 0.009); slit.userData.restY = 0.088; root.add(slit); eyes.push(slit);
+    }
+    const shine = new THREE.Mesh(sphere(), new THREE.MeshBasicMaterial({ color: "#ffffff" }));
+    shine.position.set(pupil.position.x - 0.024, 0.174, 0.707); shine.scale.set(0.017, 0.025, 0.005); shine.userData.restY = 0.025;
+    root.add(shine); eyes.push(shine);
+  }
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 16), new THREE.MeshStandardMaterial({ color: "#ee889a", roughness: 0.68 }));
+  nose.position.set(0, -0.145, 0.660); nose.scale.set(0.112, 0.063, 0.035); root.add(nose);
+  const embroidery = new THREE.MeshStandardMaterial({ color: silver ? "#607183" : "#b16a29", roughness: 1 });
+  root.add(tube([new THREE.Vector3(0, -0.18, 0.679), new THREE.Vector3(0, -0.255, 0.681)], 0.013, embroidery));
+  const smile = tube([new THREE.Vector3(-0.15, -0.27, 0.672), new THREE.Vector3(-0.08, -0.31, 0.675),
+    new THREE.Vector3(0, -0.255, 0.681), new THREE.Vector3(0.08, -0.31, 0.675), new THREE.Vector3(0.15, -0.27, 0.672)], 0.013, embroidery);
+  root.add(smile);
+  const mouth = new THREE.Mesh(sphere(), new THREE.MeshStandardMaterial({ color: "#492c2b", roughness: 0.9 }));
+  mouth.position.set(0, -0.30, 0.677); mouth.scale.set(0.085, 0.032, 0.021); mouth.visible = false; root.add(mouth);
+  for (const direction of [-1, 1]) {
+    for (let stripe = 0; stripe < 2; stripe++) {
+      const marking = wool(new THREE.SphereGeometry(1, 20, 14), dark, preview ? 700 : 160);
+      marking.scale.set(0.055, 0.11, 0.020); marking.rotation.z = direction * -0.36;
+      marking.position.set(direction * (0.68 + stripe * 0.12), -0.24 + stripe * 0.075, 0.49 - stripe * 0.10); root.add(marking);
+    }
+  }
+  return { root, eyes, smile, mouth, ready: false, preparing: false };
 }
 
 function createModel(config: PlushAvatarConfig, texture: THREE.Texture, preview: boolean): Model {
@@ -454,7 +530,8 @@ class PlushEngine implements PlushAvatarRuntime {
     else {
       let model = this.models.get(key);
       if (!model) {
-        model = createModel(config, this.texture!, item.options.interactive || size >= 96); this.models.set(key, model);
+        model = isPlushCatAvatar(config) ? createCatModel(config, this.texture!, item.options.interactive || size >= 96)
+          : createModel(config, this.texture!, item.options.interactive || size >= 96); this.models.set(key, model);
         while (this.models.size > MODEL_LIMIT || (this.models.size > 1
           && [...this.models.values()].reduce((sum, entry) => sum + modelBytes(entry), 0) > MODEL_BYTES_LIMIT)) {
           const oldest = this.models.entries().next().value!;
@@ -483,10 +560,10 @@ class PlushEngine implements PlushAvatarRuntime {
       const phase = time ? time + item.phase : 0;
       model.root.rotation.set(time ? Math.sin(phase * 0.57) * 0.035 + item.tiltY : 0,
         -0.085 + (time ? Math.sin(phase * 0.65) * 0.10 + item.tiltX : 0), time ? Math.sin(phase * 0.47) * 0.025 : 0);
-      model.root.position.y = config.hat === "none" ? 0 : -0.13;
+      model.root.position.y = isPlushCatAvatar(config) ? -0.03 : config.hat === "none" ? 0 : -0.13;
       const blinkPhase = (phase + item.phase) % 5.4;
       const blink = time && !reducedMotion && blinkPhase < 0.16 ? Math.max(0.12, Math.abs(blinkPhase - 0.08) / 0.08) : 1;
-      for (const eye of model.eyes) eye.scale.y = 0.086 * blink;
+      for (const eye of model.eyes) eye.scale.y = (eye.userData.restY ?? 0.086) * blink;
       const talking = speaking && !reducedMotion && time !== 0;
       model.mouth.visible = talking; model.smile.visible = !talking;
       model.mouth.scale.y = 0.032 + (talking ? (Math.sin(phase * 13) * 0.5 + 0.5) * 0.053 : 0);

@@ -1,3 +1,4 @@
+import { isFixedAvatarEmployee } from "./fixed-employee-avatar.js";
 import { randomUUID } from "node:crypto";
 import type { Express, Response } from "express";
 
@@ -29,7 +30,7 @@ import {
   validateStructuredEmployeeDraft,
 } from "./silicon-employee-draft.js";
 import { SESSION_PROVIDERS } from "./session-provider.js";
-import { parsePlushAvatar } from "./plush-avatar.js";
+import { parsePlushAvatar, parsePlushCatAvatar } from "./plush-avatar.js";
 import { DEFAULT_WAND_TASK_AGENT_KIND } from "./task-types.js";
 import type { QuickCommitAiOptions } from "./git-quick-commit.js";
 import { EMPLOYEE_KNOWLEDGE_MAX_ENTRIES } from "./employee-knowledge-types.js";
@@ -98,7 +99,7 @@ function parseAvatar(value: unknown, name: string): string {
   }
   const avatar = text(value);
   if (!avatar || /^cat:\d{1,2}$/.test(avatar)) return avatar;
-  if (parsePlushAvatar(avatar)) return avatar;
+  if (parsePlushAvatar(avatar) || parsePlushCatAvatar(avatar)) return avatar;
   if (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(avatar)) {
     throw new Error(`员工「${name}」的头像格式无效。`);
   }
@@ -108,7 +109,7 @@ function parseAvatar(value: unknown, name: string): string {
   return avatar;
 }
 
-/** 内置员工的锁定字段：名字 / 职责 / 人设 / 头像写死在服务端，只有候选可改。 */
+/** Other built-ins keep profile locks; the two stable cat identities lock only avatar. */
 const SYSTEM_EMPLOYEE_LOCKED_FIELDS: ReadonlyArray<{ key: "name" | "duty" | "prompt" | "avatar"; label: string }> = [
   { key: "name", label: "名字" },
   { key: "duty", label: "职责" },
@@ -117,14 +118,14 @@ const SYSTEM_EMPLOYEE_LOCKED_FIELDS: ReadonlyArray<{ key: "name" | "duty" | "pro
 ];
 
 /**
- * 内置员工只接受 agents；其余字段即使前端遗漏地发上来也必须与服务端一致，
- * 不一致直接拒绝（静默忽略会让客户端以为改成功了）。
+ * 其他内置员工只接受 agents；固定猫头员工另外接受资料的部分更新。
+ * 锁定字段即使由旧客户端或直接 API 发来，也必须一致；不一致明确拒绝。
  */
 export function parseSystemEmployeeAgents(value: unknown, existing: SiliconEmployee): WandTaskAgent[] {
   const body = bodyObject(value);
-  for (const field of SYSTEM_EMPLOYEE_LOCKED_FIELDS) {
+  for (const field of SYSTEM_EMPLOYEE_LOCKED_FIELDS.filter((field) => !isFixedAvatarEmployee(existing) || field.key === "avatar")) {
     const incoming = body[field.key];
-    if (incoming === undefined || incoming === null) continue;
+    if (incoming === undefined || (incoming === null && !isFixedAvatarEmployee(existing))) continue;
     const current = existing[field.key];
     const isSame = typeof incoming === "string" && incoming === current;
     if (!isSame) {
@@ -135,11 +136,24 @@ export function parseSystemEmployeeAgents(value: unknown, existing: SiliconEmplo
   if (body.tags !== undefined && JSON.stringify(body.tags) !== JSON.stringify(siliconEmployeeTags(existing))) {
     throw new Error("该员工是内置的，标签不可修改。");
   }
+  if (isFixedAvatarEmployee(existing) && body.id !== undefined && body.id !== existing.id) throw new Error("该员工是内置的，身份不可修改。");
   if (body.systemKey !== undefined && body.systemKey !== existing.systemKey) {
     throw new Error("该员工是内置的，身份不可修改。");
   }
 
-  return parseEmployeeAgents(body.agents);
+  return isFixedAvatarEmployee(existing) && body.agents === undefined ? existing.agents : parseEmployeeAgents(body.agents);
+}
+
+/** Partial edits preserve omitted fields and the raw saved prompt, not a generated read projection. */
+export function parseFixedAvatarEmployeeInput(value: unknown, existing: SiliconEmployee, now: string): SiliconEmployee {
+  const body = bodyObject(value);
+  const agents = parseSystemEmployeeAgents(body, existing);
+  const name = body.name === undefined ? existing.name : boundedText(body.name, "员工名字", 1, 40);
+  const duty = body.duty === undefined ? existing.duty : text(body.duty);
+  const prompt = body.prompt === undefined ? existing.prompt : text(body.prompt);
+  if (duty.length > 2000) throw new Error("员工职责不能超过 2000 个字符。");
+  if (prompt.length > 20_000) throw new Error("员工设定 Prompt 不能超过 20000 个字符。");
+  return { ...existing, name, duty, prompt, agents, updatedAt: now };
 }
 
 /** One validation owner for every employee candidate list, including legacy single agents. */
@@ -368,9 +382,15 @@ export function registerSiliconEmployeeRoutes(
       const existing = storage.getSiliconEmployee(req.params.id);
       if (!existing) throw new Error(`硅基员工「${req.params.id}」不存在。`);
       const now = new Date().toISOString();
-      const employee = isBuiltinSiliconEmployee(existing)
-        ? { ...existing, agents: parseSystemEmployeeAgents(req.body, existing), updatedAt: now }
-        : parseSiliconEmployeeInput(req.body, existing, now);
+      const definition = storage.getSiliconEmployeeDefinition(existing.id)!;
+      const body = bodyObject(req.body);
+      // An unchanged projected prompt is an echo, not a request to persist generated preferences.
+      const input = body.prompt === existing.prompt ? { ...body, prompt: definition.prompt } : body;
+      const employee = isFixedAvatarEmployee(definition)
+        ? parseFixedAvatarEmployeeInput(input, definition, now)
+        : isBuiltinSiliconEmployee(existing)
+          ? { ...existing, agents: parseSystemEmployeeAgents(input, existing), updatedAt: now }
+          : parseSiliconEmployeeInput(input, existing, now);
       storage.saveSiliconEmployee(employee);
       notifyEmployee(employee.id);
       res.json(employee);
