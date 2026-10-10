@@ -131,7 +131,8 @@ jobs:
       # 先编译新增的协议测试 target，避免 IPA 构建绕过 WandTests。
       # scheme 为主应用、测试和 SwiftPM 资源统一产品目录；直接 -target
       # 会令 SwiftTerm 的资源 bundle 落到包 checkout 的 build/，应用找不到。
-      # 通用模拟器目的地不启动设备；排除资源目录以免 actool 依赖 runtime。
+      # 测试产物放 runner 临时目录：模拟器日志可能在命令退出后继续写入，
+      # 不能与 IPA 脚本会清空的 ios/build 共用。通用目的地不启动设备。
       - name: Build iOS tests
         if: steps.reuse_ipa.outputs.reused != 'true'
         working-directory: ios
@@ -142,7 +143,7 @@ jobs:
             -configuration Debug \
             -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath build/test-dd \
+            -derivedDataPath "$RUNNER_TEMP/wand-ios-test-dd" \
             EXCLUDED_SOURCE_FILE_NAMES=Assets.xcassets \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
@@ -170,7 +171,7 @@ jobs:
             -scheme Wand \
             -configuration Debug \
             -destination "platform=iOS Simulator,id=$DEVICE_ID" \
-            -derivedDataPath build/test-dd \
+            -derivedDataPath "$RUNNER_TEMP/wand-ios-test-dd" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             test
