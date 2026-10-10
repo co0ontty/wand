@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { defaultPlushAvatar, encodePlushAvatar } from "../src/plush-avatar.js";
+import { TeamAvatar } from "../src/web-ui/react/ai-teams/avatar.js";
 import { EmployeeAvatarPicker } from "../src/web-ui/react/agents/employee-avatar.js";
 import { installSharedLibraryBridge } from "../src/web-ui/react/library-bridge.js";
 
@@ -1720,4 +1722,29 @@ test("[v2] 旧数据降级：旧 roster / 旧开工 notice 与「（等第…）
   assert.equal(chatAvatarSpec(null).kind, "brand");
   assert.equal(reportTypeLabel(parseStepReport("普通发言")), "成员发言");
   assert.deepEqual(mentionSegments("依据 @查不到的名字 继续", ["实现者"]), [{ text: "依据 @查不到的名字 继续" }]);
+});
+
+
+test("bound team members share employee-default faces across task and chat views without changing stored turns", () => {
+  const member = { id: "m_bound", employeeId: "e_identity", name: "员工", avatar: "", duty: "开发", agent: { provider: "codex" }, isLeader: false } as AiTeamMember;
+  const raw: ConversationTurn = { role: "assistant", author: { id: member.id, name: member.name }, content: [{ type: "text", text: "原始正文" }] };
+  const fingerprint = chatTurnFingerprint(raw);
+  const team = { id: "t_bound", members: [member] } as AiTeam;
+  const expected = encodePlushAvatar(defaultPlushAvatar({ id: member.employeeId!, name: member.name }));
+  const visible = displayChatTurn(raw, team);
+  assert.equal(visible.author?.avatar, expected);
+  assert.equal(visible.author?.id, member.id);
+  assert.equal(chatTurnFingerprint(raw), fingerprint);
+  assert.equal(raw.author?.avatar, undefined, "projection never persists or mutates historical identity");
+  const html = renderToStaticMarkup(createElement(TeamAvatar, { member }));
+  const renderedConfig = (markup: string) => JSON.parse(markup.match(/data-avatar-config="([^\"]+)"/)![1]!.replace(/&quot;/g, '"'));
+  assert.deepEqual(renderedConfig(html), defaultPlushAvatar({ id: member.employeeId!, name: member.name }));
+  const otherTeamRole = renderToStaticMarkup(createElement(TeamAvatar, { member: { ...member, id: "m_other", name: "改名" } }));
+  assert.deepEqual(renderedConfig(otherTeamRole), renderedConfig(html), "real employee ID wins over team-role ID and mutable name");
+  const unbound = { ...member, employeeId: undefined };
+  assert.doesNotMatch(renderToStaticMarkup(createElement(TeamAvatar, { member: unbound })), /data-plush-avatar/);
+  for (const avatar of ["cat:2", "data:image/png;base64,AAA"]) {
+    const explicit = displayChatTurn(raw, { ...team, members: [{ ...member, avatar }] });
+    assert.equal(explicit.author?.avatar, avatar, "explicit legacy cat or uploaded photo remains intact");
+  }
 });

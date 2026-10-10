@@ -26,7 +26,7 @@ import {
 } from "../ui";
 import { ComposerAttachmentList } from "../composer-attachments/host";
 import { GeneratedAvatarGlyph, PixelCat, TeamAvatar, avatarFace, generatedAvatarBackground, type GeneratedAvatarFace } from "./avatar";
-import { parsePlushAvatar, type PlushAvatarConfig } from "../../../plush-avatar.js";
+import { encodePlushAvatar, parsePlushAvatar, resolvePlushAvatar, type PlushAvatarConfig } from "../../../plush-avatar.js";
 import { PlushAvatar } from "../avatars/plush-avatar.js";
 import { EmployeeAvatar } from "../agents/employee-avatar.js";
 import { appendedConversationKeys, CONVERSATION_TAIL_PX, conversationClock, conversationDay, conversationMessageKey, joinsConversationBubble } from "../conversations/presentation";
@@ -195,8 +195,11 @@ export function displayChatTurn(turn: ConversationTurn, team: AiTeam): Conversat
   const author = turn.author;
   if (!author?.id) return turn;
   const member = team.members.find((item) => item.id === author.id);
-  if (!member || (member.name === author.name && member.avatar === author.avatar)) return turn;
-  return { ...turn, author: { ...author, name: member.name, avatar: member.avatar } };
+  if (!member) return turn;
+  const plush = member.employeeId ? resolvePlushAvatar({ ...member, id: member.employeeId }) : null;
+  const avatar = plush ? encodePlushAvatar(plush) : member.avatar;
+  if (member.name === author.name && avatar === author.avatar) return turn;
+  return { ...turn, author: { ...author, name: member.name, avatar } };
 }
 
 export function teamOfficeMembers(detail: AiTeamRunDetail): TeamOfficeMember[] {
