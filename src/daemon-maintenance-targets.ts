@@ -177,7 +177,7 @@ export async function createDaemonMaintenanceTargets(
         const runs = await legacy.request("structuredList") as { runId: string; status: string }[];
         await Promise.all([
           ...sessions.filter(session => session.status === "running")
-            .map(session => legacy.request("kill", { sessionId: session.sessionId, signal: "SIGTERM" })),
+            .map(session => legacy.request("kill", { sessionId: session.sessionId, signal: "SIGHUP" })),
           ...runs.filter(run => run.status === "running")
             .map(run => legacy.request("structuredKill", { runId: run.runId, signal: "SIGTERM" })),
         ]);

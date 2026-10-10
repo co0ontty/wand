@@ -124,6 +124,12 @@ test("confirmed manual maintenance interrupts real terminald PTY and structured 
   const stable = client;
   await stable.createOrAttach({ sessionId: "manual-shell", file: "/bin/sh", args: [], cwd: root,
     env: { PATH: process.env.PATH ?? "" }, name: "xterm", cols: 80, rows: 24 });
+  // Wait until the interactive shell has installed its signal handlers; a signal
+  // sent during startup can hide a PTY that ignores SIGTERM once it is ready.
+  await waitFor(async () => {
+    const sessions = await stable.request("list") as { sessionId: string; output: string }[];
+    return sessions.some(session => session.sessionId === "manual-shell" && session.output.length > 0) ? true : null;
+  });
   await stable.spawnStructured({ runId: "manual-cli", file: process.execPath,
     args: ["-e", "setTimeout(()=>{}, 30000)"], cwd: root, env: { PATH: process.env.PATH ?? "" } });
   const [target] = await createDaemonMaintenanceTargets(configPath, { host: stable, legacyHost: stable, renderHost: null }, null);
