@@ -147,6 +147,69 @@ test("parseSiliconEmployeeInput validation", () => {
   }, null, now), /只支持结构化会话/);
 });
 
+test("employee avatar HTTP saves v1 plush configuration, rejects invalid values and keeps reads pure", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "wand-employee-avatar-http-"));
+  const storage = new WandStorage(join(root, "wand.db"));
+  const notified: string[] = [];
+  const app = express();
+  app.use(express.json());
+  registerSiliconEmployeeRoutes(app, { storage, notifyEmployeeChanged: id => notified.push(id) });
+  const server = createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  t.after(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    storage.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+  const request = async (route: string, method: string, body?: unknown) => {
+    const response = await fetch(`${base}${route}`, {
+      method, headers: { "content-type": "application/json" },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    return { status: response.status, json: await response.json() as Record<string, unknown> };
+  };
+  const avatar = "plush:v1:triangle:sage:gold:beret";
+  const created = await request("/api/silicon-employees", "POST", { ...employee(), avatar });
+  assert.equal(created.status, 201, JSON.stringify(created.json));
+  const id = created.json.id as string;
+  assert.equal(created.json.avatar, avatar);
+  assert.equal(storage.getSiliconEmployee(id)?.avatar, avatar);
+
+  const updated = await request(`/api/silicon-employees/${id}`, "PUT", {
+    ...created.json, avatar: "plush:v1:heart:coral:none:none",
+  });
+  assert.equal(updated.status, 200, JSON.stringify(updated.json));
+  const saved = storage.getSiliconEmployee(id);
+  const notificationCount = notified.length;
+  for (const invalid of [
+    "plush:v2:heart:coral:none:none", "plush:v1:triangle:unknown:gold:beret",
+    "plush:v1:heart:coral:none:none:extra", "plush:v1:heart:coral:none",
+    "https://example.com/face.png", "data:image/svg+xml;base64,AAA", { shape: "heart" },
+  ]) {
+    const rejected = await request(`/api/silicon-employees/${id}`, "PUT", { ...updated.json, avatar: invalid });
+    assert.equal(rejected.status, 400, JSON.stringify(invalid));
+    assert.match(String(rejected.json.error), /头像格式无效/);
+    assert.deepEqual(storage.getSiliconEmployee(id), saved, "rejected saves preserve the previous identity");
+  }
+  assert.equal(notified.length, notificationCount);
+
+  for (const compatible of ["cat:99", "data:image/png;base64,AAA", "data:image/jpeg;base64,BBB", "data:image/webp;base64,CCC", ""]) {
+    const result = await request(`/api/silicon-employees/${id}`, "PUT", { ...updated.json, avatar: compatible });
+    assert.equal(result.status, 200, JSON.stringify(result.json));
+    assert.equal(storage.getSiliconEmployee(id)?.avatar, compatible);
+  }
+  storage.saveSiliconEmployee(employee({ id: "e_corrupt_avatar", avatar: "plush:v99:corrupt" }));
+  const beforeRead = storage.listSiliconEmployees();
+  const beforeNotifications = notified.length;
+  const listed = await request("/api/silicon-employees", "GET");
+  assert.equal(listed.status, 200);
+  assert.deepEqual(storage.listSiliconEmployees(), beforeRead);
+  assert.equal(notified.length, beforeNotifications);
+  assert.equal(storage.getSiliconEmployee(id)?.avatar, "", "default avatar stays derived in the UI");
+  assert.equal(storage.getSiliconEmployee("e_corrupt_avatar")?.avatar, "plush:v99:corrupt", "GET performs no migration");
+});
+
 test("employee candidates keep configured order and skip an unavailable CLI", () => {
   const selected = selectEmployeeCandidate(employee(), (agent) => agent.provider === "pi");
   assert.equal(selected.index, 1);

@@ -87,6 +87,12 @@ try {
     { ...commonOptions, entryPoints: [AI_TEAMS_CHUNK_ENTRY], outfile: AI_TEAMS_CHUNK_OUTFILE },
     [createAiTeamsHostPlugin()],
   );
+  // Three.js and the procedural model stay out of the eagerly loaded shell.
+  // The small React identity adapter loads this content-versioned asset once.
+  await bundle({ ...commonOptions,
+    entryPoints: [path.join(root, "src", "web-ui", "react", "avatars", "renderer.ts")],
+    outfile: path.join(root, "src", "web-ui", "content", "plush-avatar.js"),
+  });
 } catch (error) {
   // esbuild's default logger already printed the build (or plugin) error;
   // rethrowing here would be silent, so surface non-build failures explicitly.

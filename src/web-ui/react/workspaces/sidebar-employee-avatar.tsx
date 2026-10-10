@@ -1,7 +1,7 @@
 import * as React from "react";
 import { EmployeeAvatar } from "../agents/employee-avatar";
 
-/** 侧栏头像只表达员工身份，不绑定某一种工具；上传损坏时回退到稳定的员工猫头像。 */
+/** 侧栏头像只表达员工身份，不绑定某一种工具；上传损坏时回退到稳定的几何毛绒头像。 */
 export function SidebarEmployeeAvatar({ employee }: {
   employee: React.ComponentProps<typeof EmployeeAvatar>["employee"];
 }): React.ReactElement {

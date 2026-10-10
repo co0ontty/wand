@@ -58,7 +58,7 @@ import { AGENT_TOOL_OPTIONS } from "../../provider-identity";
 import { normalizeModels } from "./repository";
 import { sortProviderOptions, useProviderUsage } from "../provider-usage";
 import { useSiliconEmployees } from "../agents/employee-repository";
-import { EmployeeAvatarPicker } from "../agents/employee-avatar";
+import { UserAvatarPicker } from "../agents/user-avatar-picker";
 import { SystemAiOwnerSummary } from "./system-ai-owner";
 import { isSystemSiliconEmployee } from "../../../ai-team-types.js";
 import {
@@ -1587,7 +1587,7 @@ export function ProfileSettingsTab({ snapshot, repository, refresh }: SettingsTa
           />
         </SettingsField>
         <SettingsField label="头像" hint="可以挑一只像素猫，或上传一张自己的图片。">
-          <EmployeeAvatarPicker
+          <UserAvatarPicker
             avatar={value.avatar}
             name={name || DEFAULT_USER_DISPLAY_NAME}
             disabled={pending}

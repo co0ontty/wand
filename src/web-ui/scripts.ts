@@ -27,21 +27,24 @@ function readScriptCache(): void {
   }
 }
 
-function injectRuntimeValues(source: string, configPath: string, chunkHash: string): string {
+function injectRuntimeValues(source: string, configPath: string, chunkHash: string, plushHash: string): string {
   return source
     // This is a JS string literal, not HTML text. JSON escaping also handles
     // quotes, backslashes and newlines in nonstandard configuration paths.
     .replace('"${wandConfigPath}"', JSON.stringify(configPath))
-    .replace("${aiTeamsChunkSrc}", `/assets/ai-teams.js?v=${chunkHash}`);
+    .replace("${aiTeamsChunkSrc}", `/assets/ai-teams.js?v=${chunkHash}`)
+    .replace("${plushAvatarChunkSrc}", `/assets/plush-avatar.js?v=${plushHash}`);
 }
 
 export function getScriptAsset(configPath: string, requestedHash?: string): VersionedWebAsset {
   readScriptCache();
-  const chunkHash = getAiTeamsChunk().hash;
+  const teamHash = getAiTeamsChunk().hash;
+  const plushHash = getPlushAvatarChunk().hash;
+  const chunkHash = `${teamHash}:${plushHash}`;
   if (!_scriptAsset || _scriptAsset.source !== _scriptCache
     || _scriptAsset.configPath !== configPath || _scriptAsset.chunkHash !== chunkHash) {
     _scriptAsset = {
-      ...versionWebAsset(injectRuntimeValues(_scriptCache, configPath, chunkHash)),
+      ...versionWebAsset(injectRuntimeValues(_scriptCache, configPath, teamHash, plushHash)),
       source: _scriptCache, configPath, chunkHash,
     };
   }
@@ -49,7 +52,7 @@ export function getScriptAsset(configPath: string, requestedHash?: string): Vers
     if (!_embeddedScriptAsset || _embeddedScriptAsset.configPath !== configPath) {
       _embeddedScriptAsset = {
         ...versionWebAsset(injectRuntimeValues(
-          EMBEDDED_WEB_ASSETS.scriptsJs, configPath, embeddedAiTeamsChunk.hash,
+          EMBEDDED_WEB_ASSETS.scriptsJs, configPath, embeddedAiTeamsChunk.hash, embeddedPlushAvatarChunk.hash,
         )),
         configPath,
       };
@@ -89,6 +92,23 @@ export function getAiTeamsChunk(requestedHash?: string): { content: string; hash
   }
   if (requestedHash === embeddedAiTeamsChunk.hash) return embeddedAiTeamsChunk;
   return _aiTeamsChunk;
+}
+
+const embeddedPlushAvatarChunk = withHash(EMBEDDED_WEB_ASSETS.plushAvatarJs);
+let plushAvatarChunk = embeddedPlushAvatarChunk;
+let plushAvatarChunkKey = "";
+
+/** Content-versioned WebGL runtime, retaining embedded bytes during an in-flight package replacement. */
+export function getPlushAvatarChunk(requestedHash?: string): { content: string; hash: string } {
+  const chunkPath = path.join(__dirname, "content", "plush-avatar.js");
+  try {
+    const stat = fs.statSync(chunkPath);
+    const key = `${stat.mtimeMs}:${stat.size}`;
+    if (key !== plushAvatarChunkKey) {
+      plushAvatarChunk = withHash(fs.readFileSync(chunkPath, "utf-8")); plushAvatarChunkKey = key;
+    }
+  } catch { /* Keep the process's last/embedded version during self-update. */ }
+  return requestedHash === embeddedPlushAvatarChunk.hash ? embeddedPlushAvatarChunk : plushAvatarChunk;
 }
 
 /** Blocking, content-versioned device preference bootstrap. */

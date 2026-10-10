@@ -1,4 +1,6 @@
 import * as React from "react";
+import { parsePlushAvatar } from "../../../plush-avatar.js";
+import { PlushAvatar } from "../avatars/plush-avatar.js";
 import { Avatar, Badge } from "antd";
 import { WandUiBoundary } from "../theme";
 import type { AiTeamMember } from "../../../ai-team-types";
@@ -60,6 +62,8 @@ export interface AvatarFaceParts {
 }
 
 export function avatarFaceParts(identity: AvatarIdentity, size: number): AvatarFaceParts {
+  const plush = parsePlushAvatar(identity.avatar ?? "");
+  if (plush) return { style: { background: "transparent" }, icon: <PlushAvatar config={plush} size={size}/> };
   const face: AvatarFace = avatarFace(identity) ?? { kind: "generated", face: generatedAvatarFace(identity) };
   if (face.kind === "upload") return { src: face.src };
   if (face.kind === "cat") return { icon: <PixelCat coat={face.coat}/> };

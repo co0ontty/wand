@@ -29,6 +29,7 @@ import {
   validateStructuredEmployeeDraft,
 } from "./silicon-employee-draft.js";
 import { SESSION_PROVIDERS } from "./session-provider.js";
+import { parsePlushAvatar } from "./plush-avatar.js";
 import { DEFAULT_WAND_TASK_AGENT_KIND } from "./task-types.js";
 import type { QuickCommitAiOptions } from "./git-quick-commit.js";
 import { EMPLOYEE_KNOWLEDGE_MAX_ENTRIES } from "./employee-knowledge-types.js";
@@ -92,8 +93,12 @@ function boundedText(value: unknown, label: string, min: number, max: number): s
 }
 
 function parseAvatar(value: unknown, name: string): string {
+  if (value !== undefined && value !== null && typeof value !== "string") {
+    throw new Error(`员工「${name}」的头像格式无效。`);
+  }
   const avatar = text(value);
   if (!avatar || /^cat:\d{1,2}$/.test(avatar)) return avatar;
+  if (parsePlushAvatar(avatar)) return avatar;
   if (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(avatar)) {
     throw new Error(`员工「${name}」的头像格式无效。`);
   }

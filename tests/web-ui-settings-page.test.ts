@@ -61,14 +61,18 @@ test("an expired page session offers admin login in place and never navigates ba
   assert.match(renderApp("/tmp/wand-settings-page/config.json", "settings", "client"), /data-wand-settings-auth="client"/);
 });
 
-test("the profile tab is the first admin section and reuses the shared avatar picker", () => {
+test("the profile tab stays first and preserves its supported photo and legacy avatar picker", () => {
   const host = source("src/web-ui/react/settings/host.tsx");
   assert.match(source("src/web-ui/react/settings/navigation.tsx"), /profile: \{ label: "我的资料"/, "分组标签有名字");
   assert.match(host, /const ADMIN_TAB_ORDER: SettingsTab\[\] = \[\s*"profile",/, "管理员进设置先看到自己的资料");
   assert.match(host, /profile: <ProfileSettingsTab \{\.\.\.props\} \/>/);
   const tabs = source("src/web-ui/react/settings/tabs.tsx");
   assert.match(tabs, /export function ProfileSettingsTab\(/);
-  assert.match(tabs, /<EmployeeAvatarPicker[\s\S]{0,200}avatar=\{value\.avatar\}/, "头像复用员工选择器，不另造一套");
+  assert.match(tabs, /<UserAvatarPicker[\s\S]{0,200}avatar=\{value\.avatar\}/, "个人资料保留其支持的头像格式");
+  const picker = source("src/web-ui/react/agents/user-avatar-picker.tsx");
+  assert.match(picker, /CAT_COATS\.map/);
+  assert.match(picker, /shrinkAvatarImage/);
+  assert.doesNotMatch(picker, /encodePlushAvatar/, "尚未支持捏脸格式的用户资料 API 不接受员工配置");
   assert.match(tabs, /type: "profile\.save", value/, "保存走语义命令");
   assert.match(tabs, /placeholder=\{DEFAULT_USER_DISPLAY_NAME\}/, "留空时提示默认署名");
 });

@@ -41,7 +41,7 @@ if (!existsSync(path.join(root, "dist", "web-ui", "index.js"))) {
 }
 
 const { renderApp } = await import("../dist/web-ui/index.js");
-const { getScriptAsset, getAiTeamsChunk, getThemePreloadAsset } = await import("../dist/web-ui/scripts.js");
+const { getScriptAsset, getAiTeamsChunk, getPlushAvatarChunk, getThemePreloadAsset } = await import("../dist/web-ui/scripts.js");
 const { getStylesAsset } = await import("../dist/web-ui/styles.js");
 const { EMBEDDED_WEB_ASSETS } = await import("../dist/web-ui/embedded-assets.js");
 
@@ -65,7 +65,10 @@ const BUDGET = {
   // 主包额度增加 9280 B（0.98%），首屏 1140000 B 与所有资源计数保持。
   // 五套本机主题与紧凑预览使主包 951390→953141 B gzip（+1751 B）。
   // 主题首屏资产另计 2185 B；仅主包增加 3072 B 额度，首载总预算保持 1140000 B。
-  js: 955_392,
+  // Geometric plush identity adapter, static fallback, and reversible picker:
+  // measured 960,390 B gzip (+4,998 B beyond prior allowance). +8,192 B
+  // leaves ~3KB headroom; Three.js/model stay in the separately metered lazy asset.
+  js: 963_584,
   css: 110_000,
   firstLoad: 1_140_000,
   // The team chunk now also contains employee management and candidate editors.
@@ -90,6 +93,10 @@ const BUDGET = {
   // （−1336 B），CSS 与 vendor 不变，首载 759486→762475 B（+2989 B）。三处共用一份规则，
   // 不再各自长；按需上限保持 48,000→52,000 B，主包/CSS/首载门限仍不放宽。
   lazy: 52_000,
+  // True 3D identity runtime (Three.js + model) is requested only for visible
+  // plush avatars. Measure it explicitly rather than hiding it in vendor bytes.
+  // Measured 145,152 B gzip with Three.js 0.186.1; ~6% headroom.
+  plush: 153_600,
 };
 const gzipBytes = (content) => gzipSync(Buffer.from(content, "utf8")).length;
 const rows = [
@@ -99,6 +106,7 @@ const rows = [
   ["theme.js (cached)", getThemePreloadAsset().content, 8_192],
   ...Object.entries(EMBEDDED_WEB_ASSETS.vendor).map(([name, asset]) => [name, asset.content, null]),
   ["ai-teams.js (lazy)", lazy.content, BUDGET.lazy],
+  ["plush-avatar.js (lazy)", getPlushAvatarChunk().content, BUDGET.plush],
 ];
 
 const kib = (bytes) => `${(bytes / 1024).toFixed(1)} KiB`;

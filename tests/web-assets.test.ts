@@ -72,9 +72,10 @@ test("the shell transfers only HTML repeatedly and serves versioned, cacheable a
     assert.ok(getScriptAsset(unusualPath).content.includes(JSON.stringify(unusualPath)),
       "paths with quotes and backslashes must remain valid JS string literals");
     assert.match(script, /\/assets\/ai-teams\.js\?v=[a-f0-9]{8}/);
+    assert.match(script, /\/assets\/plush-avatar\.js\?v=[a-f0-9]{8}/);
 
     for (const url of ["/assets/app.js?v=outdated", "/assets/app.css?v=outdated",
-      "/vendor/xterm/xterm.css?v=outdated", "/assets/ai-teams.js?v=outdated"]) {
+      "/vendor/xterm/xterm.css?v=outdated", "/assets/ai-teams.js?v=outdated", "/assets/plush-avatar.js?v=outdated"]) {
       const response = await fetch(`${base}${url}`);
       assert.equal(response.status, 200, `an old open page must stay usable: ${url}`);
       assert.equal(response.headers.get("cache-control"), "no-store");
@@ -86,12 +87,17 @@ test("the shell transfers only HTML repeatedly and serves versioned, cacheable a
     assert.equal(await oldCss.text(), EMBEDDED_WEB_ASSETS.stylesCss);
     assert.match(oldCss.headers.get("cache-control") ?? "", /immutable/);
     const chunkHash = createHash("md5").update(EMBEDDED_WEB_ASSETS.aiTeamsJs).digest("hex").slice(0, 8);
+    const plushHash = createHash("md5").update(EMBEDDED_WEB_ASSETS.plushAvatarJs).digest("hex").slice(0, 8);
     const embeddedJs = EMBEDDED_WEB_ASSETS.scriptsJs
       .replace('"${wandConfigPath}"', JSON.stringify(configPath))
-      .replace("${aiTeamsChunkSrc}", `/assets/ai-teams.js?v=${chunkHash}`);
+      .replace("${aiTeamsChunkSrc}", `/assets/ai-teams.js?v=${chunkHash}`)
+      .replace("${plushAvatarChunkSrc}", `/assets/plush-avatar.js?v=${plushHash}`);
     const oldJs = await fetch(`${base}/assets/app.js?v=${hashOf(embeddedJs)}`);
     assert.equal(await oldJs.text(), embeddedJs);
     assert.match(oldJs.headers.get("cache-control") ?? "", /private.*immutable/);
+    const oldPlush = await fetch(`${base}/assets/plush-avatar.js?v=${plushHash}`);
+    assert.equal(await oldPlush.text(), EMBEDDED_WEB_ASSETS.plushAvatarJs);
+    assert.match(oldPlush.headers.get("cache-control") ?? "", /immutable/);
   } finally {
     await handle.close();
     rmSync(dir, { recursive: true, force: true });

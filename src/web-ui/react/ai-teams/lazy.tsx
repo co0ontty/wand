@@ -65,6 +65,7 @@ import {
   WandDropdownMenuTrigger,
   WandIcon,
   WandIconButton,
+  WandPopover,
   WandSearchField,
   WandSelect,
   WandStretchTabs,
@@ -76,7 +77,9 @@ import {
 } from "./avatar";
 import { useSiliconEmployees, siliconEmployeesRepository, notifySiliconEmployeeDefinitionChanged } from "../agents/employee-repository.js";
 import { employeeAvatarProvider, employeeCliLabel } from "../agents/employee-identity.js";
+import { installAvatarEditorStyles } from "../agents/employee-avatar-styles.js";
 import { installEmployeeStyles } from "../agents/styles.js";
+import { PlushAvatar } from "../avatars/plush-avatar.js";
 import { ProviderLogo } from "../provider-logo.js";
 import { teamChatComposer } from "./composer-bridge";
 import { aiTeamsRepository, subscribeAiTeamDefinitionChanges, subscribeAiTeamRunChanges } from "./repository";
@@ -137,6 +140,8 @@ const AI_TEAMS_HOST: Record<string, object> = {
   },
   "shell/sidebar-toggle-icon": { SidebarToggleIcon },
   "styles": { installStyleSheet },
+  "avatars/plush-avatar": { PlushAvatar },
+  "agents/employee-avatar-styles": { installAvatarEditorStyles },
   "task-changes": { subscribeTaskChanges },
   "conversations/state": { conversationUi },
   "conversations/repository": { conversationsRepository },
@@ -146,7 +151,7 @@ const AI_TEAMS_HOST: Record<string, object> = {
   "ui": {
     WandBadge, WandBrandMark, WandBreadcrumb, WandButton, WandDialogSurface,
     WandDropdownMenu, WandDropdownMenuContent, WandDropdownMenuItem, WandDropdownMenuTrigger,
-    WandIcon, WandIconButton, WandSearchField, WandSelect, WandStretchTabs,
+    WandIcon, WandIconButton, WandPopover, WandSearchField, WandSelect, WandStretchTabs,
   },
   "ui/motion-tokens": { MOTION_DWELL_FAILED_MS, MOTION_DWELL_SENT_MS, useReducedMotion },
   "ai-teams/cat-coats": { CAT_COATS },

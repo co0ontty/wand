@@ -26,6 +26,9 @@ import {
 } from "../ui";
 import { ComposerAttachmentList } from "../composer-attachments/host";
 import { GeneratedAvatarGlyph, PixelCat, TeamAvatar, avatarFace, generatedAvatarBackground, type GeneratedAvatarFace } from "./avatar";
+import { parsePlushAvatar, type PlushAvatarConfig } from "../../../plush-avatar.js";
+import { PlushAvatar } from "../avatars/plush-avatar.js";
+import { EmployeeAvatar } from "../agents/employee-avatar.js";
 import { appendedConversationKeys, CONVERSATION_TAIL_PX, conversationClock, conversationDay, conversationMessageKey, joinsConversationBubble } from "../conversations/presentation";
 import { useReducedMotion } from "../ui/motion-tokens";
 import { teamChatComposer } from "./composer-bridge";
@@ -504,6 +507,7 @@ export function collapsedPreview(text: string): string {
 
 /** 一条发言的头像来源（设计 §5.2）：上传图 > 显式毛色 > 按身份生成 > 默认 APP logo。 */
 export type ChatAvatarSpec =
+  | { kind: "plush"; config: PlushAvatarConfig }
   | { kind: "upload"; src: string }
   | { kind: "cat"; coat: number }
   | { kind: "generated"; face: GeneratedAvatarFace }
@@ -514,6 +518,8 @@ export function chatAvatarSpec(
 ): ChatAvatarSpec {
   // 能定位到成员身份才给脸（显式 `cat:<n>` 走像素猫，其余按身份生成，与团队页/工位同一张脸）；
   // 「我」和没有署名的发言才回落成默认 APP logo。
+  const plush = parsePlushAvatar(author?.avatar ?? "");
+  if (plush) return { kind: "plush", config: plush };
   return avatarFace({ id: author?.id ?? "", name: author?.name ?? "", avatar: author?.avatar ?? "" })
     ?? { kind: "brand" };
 }
@@ -671,6 +677,7 @@ function MessageAvatar({ spec, size = "md" }: {
   spec: ChatAvatarSpec;
   size?: "md" | "sm";
 }): React.ReactElement {
+  if (spec.kind === "plush") return <PlushAvatar config={spec.config} size={size === "sm" ? 24 : 32} className="team-chat-avatar"/>;
   return <Avatar className="team-chat-avatar" shape="square" size={size === "sm" ? 24 : 32}
     data-kind={spec.kind} data-size={size} aria-hidden="true"
     src={spec.kind === "upload" ? spec.src : undefined}
@@ -1558,7 +1565,7 @@ export function ConversationMessages({ turns, taskLabels, group = true, ready = 
           data-presentation-id={key} data-im-arriving={arrivals.has(key) || undefined}
           onAnimationEnd={event => { if (event.target === event.currentTarget) setArrivals(current => { const next = new Set(current); next.delete(key); return next; }); }}>
           {group && !self ? <span className="conversation-peer-avatar" data-visible={lead}>{lead && turn.author && employeeIds[turn.author.id] && onOpenEmployee
-            ? <WandButton kind="ghost" className="conversation-avatar-button" aria-label={`查看${name}的资料`} onClick={event => onOpenEmployee({ id: employeeIds[turn.author!.id], name, avatar: turn.author?.avatar }, event.currentTarget)}><MessageAvatar spec={chatAvatarSpec(turn.author)}/></WandButton>
+            ? <WandButton kind="ghost" className="conversation-avatar-button" aria-label={`查看${name}的资料`} onClick={event => onOpenEmployee({ id: employeeIds[turn.author!.id], name, avatar: turn.author?.avatar }, event.currentTarget)}><EmployeeAvatar employee={{ id: employeeIds[turn.author.id], name, avatar: turn.author.avatar }} provider="" size="md"/></WandButton>
             : <MessageAvatar spec={chatAvatarSpec(turn.author)}/>}</span> : null}
           <div className="team-chat-msg-content">
             {group && !self && lead ? <div className="conversation-message-author" title={signature || undefined}>

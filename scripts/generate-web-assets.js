@@ -19,6 +19,7 @@ const assets = [
   ["qrcodeJs", path.join("vendor", "qrcode", "qrcode.bundle.js"), "application/javascript"],
   // 按需加载的 AI 团队脚本，bundle-browser.js 已按生产模式 minify，这里原样内嵌。
   ["aiTeamsJs", "ai-teams.js", "application/javascript"],
+  ["plushAvatarJs", "plush-avatar.js", "application/javascript"],
 ];
 
 const themePreload = minifyJs(await buildThemePreload(root));
@@ -53,6 +54,7 @@ export const EMBEDDED_WEB_ASSETS = {
   themePreloadJs: decode(${JSON.stringify(gzipSync(themePreload).toString("base64"))}),
   scriptsJs: decode(${JSON.stringify(entries.scriptsJs.base64)}),
   aiTeamsJs: decode(${JSON.stringify(entries.aiTeamsJs.base64)}),
+  plushAvatarJs: decode(${JSON.stringify(entries.plushAvatarJs.base64)}),
   stylesCss: decode(${JSON.stringify(entries.stylesCss.base64)}),
   vendor: {
     "/vendor/xterm/xterm.bundle.js": {

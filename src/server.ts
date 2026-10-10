@@ -122,7 +122,7 @@ import { DistributionManager } from "./distribution-manager.js";
 import { isLogBusActive, wandTuiLog } from "./tui/log-bus.js";
 import { EMBEDDED_WEB_ASSETS, type EmbeddedVendorAssetPath } from "./web-ui/embedded-assets.js";
 import { renderApp } from "./web-ui/index.js";
-import { getAiTeamsChunk, getScriptAsset, getThemePreloadAsset } from "./web-ui/scripts.js";
+import { getAiTeamsChunk, getPlushAvatarChunk, getScriptAsset, getThemePreloadAsset } from "./web-ui/scripts.js";
 import { getStylesAsset } from "./web-ui/styles.js";
 import { WsBroadcastManager } from "./ws-broadcast.js";
 import { TerminalDaemonClient } from "./terminal-daemon-client.js";
@@ -685,6 +685,11 @@ export async function startServer(
   });
   app.get("/assets/ai-teams.js", (req, res) => {
     const chunk = getAiTeamsChunk(requestedHash(req));
+    setAssetCache(req, res, chunk.hash, "public");
+    res.type("application/javascript").send(chunk.content);
+  });
+  app.get("/assets/plush-avatar.js", (req, res) => {
+    const chunk = getPlushAvatarChunk(requestedHash(req));
     setAssetCache(req, res, chunk.hash, "public");
     res.type("application/javascript").send(chunk.content);
   });

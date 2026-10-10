@@ -329,7 +329,9 @@ test("ai-teams chunk borrows every shared import from the main-bundle host regis
       if (Object.hasOwn(chunkFiles, key)) continue;
       const names = clause.replace(/[{}]/g, "").split(",").map((name) => name.trim())
         .filter((name) => name && !name.startsWith("type "));
-      if (key === "theme") {
+      const chunkPlugin = readFileSync(new URL("../scripts/ai-teams-chunk.js", import.meta.url), "utf8");
+      const sharedKeys = chunkPlugin.match(/SHARED_LIBRARY_KEYS = new Set\(\[([\s\S]*?)\]\)/)?.[1] ?? "";
+      if (sharedKeys.includes(`"${key}"`)) {
         const plugin = readFileSync(new URL("../scripts/ai-teams-chunk.js", import.meta.url), "utf8");
         assert.match(plugin, /SHARED_LIBRARY_KEYS\.has\(key\)[\s\S]*?namespace: "wand-shared-library"/);
         const library = globalThis.__wandSharedLibrary!(key) as Record<string, unknown>;
@@ -344,16 +346,16 @@ test("ai-teams chunk borrows every shared import from the main-bundle host regis
 
 // ---------- [T6] Web 动效 token + 成员多候选编辑 ----------
 
-test("员工头像选择器使用库圆钮与有界头像，选中状态仍可读", () => {
-  const markup = renderToStaticMarkup(createElement(EmployeeAvatarPicker, { avatar: "cat:2", name: "测试", disabled: false, onChange() {} }));
-  assert.match(markup, /role="group" aria-label="员工头像"/);
-  assert.equal((markup.match(/ant-btn-circle/g) ?? []).length, CAT_COATS.length + 1);
-  const coatButtons = markup.match(/<button[^>]*class="[^"]*wand-team-coat[^>]*>/g) ?? [];
-  assert.equal(coatButtons.length, CAT_COATS.length + 1);
-  assert.ok(coatButtons.every((button) => button.includes("ant-btn-sm")));
-  assert.equal((markup.match(/aria-pressed="true"/g) ?? []).length, 1);
+test("员工头像选择器保留已选旧头像并提供有界上传与显式捏脸入口", () => {
+  const markup = renderToStaticMarkup(createElement(EmployeeAvatarPicker, { avatar: "cat:2", name: "测试", employeeId: "e_preview", disabled: false, onChange() {} }));
+  assert.match(markup, /aria-label="员工头像"/);
+  assert.match(markup, /aria-label="编辑员工头像"/);
+  assert.match(markup, /已选像素头像/);
+  assert.match(markup, /上传/);
+  assert.match(markup, /捏脸/);
+  assert.match(markup, /accept="image\/png,image\/jpeg,image\/webp"/);
   assert.match(markup, /width="74%" height="74%"/);
-  assert.doesNotMatch(read("react/ai-teams/styles.ts"), /\.wand-team-coat\s*\{/);
+  assert.doesNotMatch(markup, /aria-label="捏脸"/, "preview panel mounts only after explicit opening");
 });
 
 test("新建员工默认填写期望与可选标签，角色字段收进可原位展开的高级配置", () => {

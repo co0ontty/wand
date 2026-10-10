@@ -197,6 +197,7 @@ export function EmployeeCard({
               <EmployeeAvatarPicker
                 onBusyChange={setAvatarProcessing}
                 avatar={draft.avatar}
+                employeeId={employee.id}
                 name={draft.name}
                 disabled={saving}
                 onChange={(avatar) => setDraft({ ...draft, avatar })}
