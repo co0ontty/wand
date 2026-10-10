@@ -99,7 +99,15 @@ test("native board creates an issue, dispatches an agent, and binds the real ses
   // codex CLI 替身：同样只从 stdin 读 prompt、按 codex exec --json 协议吐事件。
   const cli = path.join(binDir, "codex");
   writeFileSync(cli, `#!/bin/sh
-cat > "${captured}"
+case "$1" in
+  --version|-V|-v) printf '%s\\n' 'codex-cli 0.999.0'; exit 0 ;;
+  --help|-h) printf '%s\\n' 'codex exec --json'; exit 0 ;;
+esac
+if mkdir "${captured}.first" 2>/dev/null; then
+  cat > "${captured}"
+else
+  cat >/dev/null
+fi
 printf '%s\\n' \\
 '{"type":"thread.started","thread_id":"thread-e2e"}' \\
 '{"type":"item.completed","item":{"id":"m1","type":"agent_message","text":"已收到任务"}}' \\
