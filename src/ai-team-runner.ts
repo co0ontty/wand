@@ -8,6 +8,7 @@ import { buildAiTeamDeliverySummary } from "./ai-team-delivery.js";
 import type { SiliconEmployee } from "./ai-team-types.js";
 import {
   dispatchAgentForTask,
+  AgentDispatchPreflightError,
   resolveTaskDispatchTarget,
   sendToAgentSession,
   stopAgentSession,
@@ -1742,7 +1743,8 @@ export class AiTeamRunner {
       }
     } catch (error) {
       const message = getErrorMessage(error);
-      const kind = classifyCandidateFailure(message);
+      const rejected = error instanceof AgentDispatchPreflightError && error.failure.retryable;
+      const kind = rejected ? "input-rejected" : classifyCandidateFailure(message);
       if (agent && kind === "host-disabled") {
         // 进程级信号（agent-dispatch 的「当前服务未启用 … 会话」）：本次运行该 kind 的候选全部不再
         // 尝试，也不能当成「不可降级」直接吞掉——记进黑名单后交给既有失败出口。
@@ -1757,7 +1759,7 @@ export class AiTeamRunner {
         await this.degradeStep(run, running, { kind, reason: message }, proceed, buildPrompt);
         return;
       }
-      if (agent && step.kind === "work" && kind === "spawn-missing"
+      if (agent && step.kind === "work" && (kind === "spawn-missing" || (rejected && reusable === null))
         && (!member?.employeeId || reusable === null)
         && !existsSync(path.join(run.cwd, step.reportPath)) && !this.noDegrade.has(step.id)) {
         // §3.4 触发点 1：会话根本没起来，ENOENT 对 structured / pty 同样可靠（修正 B4 排除的是
@@ -1966,7 +1968,8 @@ export class AiTeamRunner {
         reason: `本服务未启用${agent.kind === "pty" ? "终端" : "结构化"}会话，候选 ${agent.provider} 不再尝试`,
       };
     }
-    if (state.providers.includes(agent.provider)) {
+    // Legacy provider entries mean a missing CLI executable, not every engine sharing its provider.
+    if (agent.engine !== "sdk" && state.providers.includes(agent.provider)) {
       return { kind: "spawn-missing", reason: `${agent.provider} CLI 不可用` };
     }
     const blocked = state.agents.find((item) => item.key === agentKey(agent));
@@ -1992,7 +1995,7 @@ export class AiTeamRunner {
   }
 
   /**
-   * 失败候选的黑名单记账（§3.4）：spawn-missing 封 provider、model-unknown 直接封五元组、
+   * 失败候选的黑名单记账（§3.4）：CLI spawn-missing 封 provider，SDK 只封具体候选；model-unknown 直接封五元组、
    * startup-timeout 累计到 STARTUP_TIMEOUT_STRIKES 才封。runtime-failure 这类不计入，
    * 一次写完一次落库。
    */
@@ -2000,6 +2003,11 @@ export class AiTeamRunner {
     const state = this.stateOf(runId);
     const key = agentKey(agent);
     if (kind === "spawn-missing") {
+      if (agent.engine === "sdk") {
+        if (state.agents.some((item) => item.key === key)) return;
+        this.saveState(runId, { ...state, agents: [...state.agents, { key, kind }] });
+        return;
+      }
       if (state.providers.includes(agent.provider)) return;
       this.saveState(runId, { ...state, providers: [...state.providers, agent.provider] });
       return;

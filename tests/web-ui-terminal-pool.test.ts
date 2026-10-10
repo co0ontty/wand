@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
+import { getWandTerminalTheme } from "../src/web-ui/react/theme.js";
 
 // 分屏终端池的缩放记录清理：sessionScales 是「窗格」级别的临时偏好，
 // 池实例释放时必须一起删掉，否则反复开关分屏会留下无界 Map，且同 id 重建
@@ -90,6 +91,8 @@ function harness(options?: { embed?: boolean }) {
     exports,
     require: (id: string) => ({
       "./state": { state },
+      "../react/theme": { getWandTerminalTheme },
+      "../react/theme-preference": { wandThemeStore: { subscribe: () => noop } },
       "./terminal": { clampClientTerminalOutput: (value: string) => value },
       "./terminal-fit": { fitTerminalToContainer: noop },
       "./terminal-wheel": {

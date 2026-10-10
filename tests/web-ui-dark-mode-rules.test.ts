@@ -97,10 +97,7 @@ test("styles.css 不再保留无人消费的 [data-theme=\"dark\"] 深色规则"
   );
   assert.match(source("src/web-ui/browser/queue-view-adapter.tsx"), /<Card size="small" className=\{`queue-bar/,
     "queue visuals now inherit the shared Ant theme");
-  assert.ok(
-    styles.includes("@media (prefers-color-scheme: dark)"),
-    "prefers-color-scheme 分支由 UA 触发，是活代码，不得当作死规则删除",
-  );
+  assert.doesNotMatch(styles, /prefers-color-scheme/, "用户选择的主题拥有终端背景，系统配色不再覆盖它");
 });
 
 test("全仓没有任何 data-theme 生产者（消费者选择器不算）", () => {

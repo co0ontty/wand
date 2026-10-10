@@ -38,9 +38,9 @@ export function DecisionChainEditor({ admin, open, onOpenChange, providerOptions
     finally { setPending(false); }
   }
   return <WandDialogSurface open={open} dismissable={!pending} onOpenChange={onOpenChange} title={`${DECISION_EXPERT_NAME} · 调用链`}>
-      <SettingsStatus>首选 LAYA，备用 Wand 免费分组。性能/平台不足时配置此调用链；无免费候选时停止，不转付费。</SettingsStatus>
+      <SettingsStatus>按配置顺序尝试工具与模型；不可用或明确未接受时继续下一项。LAYA 仅用于本地有界决策，免费分组仍核对免费价格。</SettingsStatus>
       {agents.length ? <CandidatesListEditor agents={agents} catalog={catalog} providerOptions={providerOptions}
-        disabled={!admin || pending} structuredOnly decisionOnly onChange={next => { setAgents(next); setSaved(false); }} label="决策专家"/> : null}
+        disabled={!admin || pending} structuredOnly onChange={next => { setAgents(next); setSaved(false); }} label="决策专家"/> : null}
       <SettingsActionButton kind="primary" pending={pending} disabled={!admin || !agents.length} settled={saved ? "success" : error ? "error" : null}
         onClick={save}>保存调用链</SettingsActionButton>
       {error ? <SettingsStatus tone="error">{error}</SettingsStatus> : saved ? <SettingsStatus tone="success">调用链已保存，内置身份与人设不变。</SettingsStatus> : null}

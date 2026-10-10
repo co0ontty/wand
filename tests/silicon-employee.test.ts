@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import express from "express";
 
 import { defaultConfig } from "../src/config.js";
+import { WAND_LOCAL_DECISION_MODEL } from "../src/decision-expert-identity.js";
 import { jsonErrorHandler } from "../src/express-async.js";
 import { whenIterationPromptsSettled } from "../src/iteration-log.js";
 import { ProcessManager } from "../src/process-manager.js";
@@ -14,7 +15,7 @@ import { registerSessionRoutes } from "../src/server-session-routes.js";
 import { registerTaskRoutes } from "../src/server-task-routes.js";
 import { registerWorkspaceRoutes } from "../src/server-workspace-routes.js";
 import { SessionRegistry } from "../src/session-registry.js";
-import { selectEmployeeCandidate } from "../src/silicon-employee-dispatch.js";
+import { employeeCandidateAvailable, selectEmployeeCandidate } from "../src/silicon-employee-dispatch.js";
 import { EMPLOYEE_CREATION_DEFAULTS_PREF, resolveSiliconEmployeeDefaults } from "../src/silicon-employee-defaults.js";
 import { StructuredSessionManager } from "../src/structured-session-manager.js";
 import { WandStorage } from "../src/storage.js";
@@ -153,14 +154,14 @@ test("employee candidates keep configured order and skip an unavailable CLI", ()
   assert.equal(selectEmployeeCandidate(employee(), () => false).index, 0);
 });
 
-test("普通任务派发跳过 SDK 候选，显式员工会话仍可选择 SDK", () => {
+test("员工候选不因触发入口跳过 SDK，并保留原始顺序", () => {
   const configured = { ...employee(), agents: [{ ...PI, engine: "sdk" as const }, CODEX] };
-  const cli = selectEmployeeCandidate(configured, () => true, { skipSdk: true });
-  assert.equal(cli.index, 1);
-  assert.equal(cli.agent.provider, "codex");
   const explicit = selectEmployeeCandidate(configured, () => true);
   assert.equal(explicit.index, 0);
   assert.equal(explicit.agent.engine, "sdk");
+  assert.equal(employeeCandidateAvailable(configured.agents[0]!), true, "SDK 不依赖 Pi CLI 安装");
+  const unavailable = selectEmployeeCandidate(configured, agent => agent.engine !== "sdk");
+  assert.equal(unavailable.index, 1, "仍可按真实可用性跳过尚未接受请求的候选");
 });
 test("employee HTTP create cannot replace an existing id; sessions and tasks retain identity snapshots", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "wand-employee-http-"));
@@ -314,6 +315,57 @@ test("employee HTTP create cannot replace an existing id; sessions and tasks ret
   assert.equal(oldCliDispatch.status, 202, JSON.stringify(oldCliDispatch.json));
   assert.deepEqual(storage.getWandTask(task.id)?.executionSubject, { type: "cli", id: "pi" });
 
+  // Only the engine decision is mocked. No request is submitted to a real model or CLI.
+  const resolveEngine = structured.resolveNewSessionPiEngine.bind(structured);
+  structured.resolveNewSessionPiEngine = engine => engine === "sdk"
+    ? { engine: "core", reason: "mock SDK ready" } : resolveEngine(engine);
+  const sdkEmployee = employee({ agents: [{ ...PI, engine: "sdk" }, CODEX] });
+  storage.saveSiliconEmployee(sdkEmployee);
+  const sdkSession = await request("/api/structured-sessions", "POST", {
+    cwd: root, employeeId: sdkEmployee.id, engine: "cli",
+  });
+  assert.equal(sdkSession.status, 201, JSON.stringify(sdkSession.json));
+  assert.equal(sdkSession.json?.employeeCandidateIndex, 0);
+  assert.equal((sdkSession.json?.structuredState as Record<string, unknown>)?.engine, "core",
+    "employee candidate, rather than a client engine override, determines execution");
+  const explicitCli = await request("/api/structured-sessions", "POST", {
+    cwd: root, employeeId: sdkEmployee.id, overrideCli: true, provider: "pi", engine: "cli",
+  });
+  assert.equal(explicitCli.status, 201, JSON.stringify(explicitCli.json));
+  assert.equal((explicitCli.json?.structuredState as Record<string, unknown>)?.engine, "cli",
+    "explicit manual tool selection remains authoritative");
+  const sdkDispatch = await request(`/api/wand-tasks/${task.id}/dispatch`, "POST", {
+    subject: { type: "employee", id: sdkEmployee.id }, prompt: "mock-only dispatch",
+  });
+  assert.equal(sdkDispatch.status, 202, JSON.stringify(sdkDispatch.json));
+  const sdkDispatchedId = (sdkDispatch.json?.session as Record<string, unknown>)?.id as string;
+  assert.equal(structured.get(sdkDispatchedId)?.employeeCandidateIndex, 0);
+  assert.equal(structured.get(sdkDispatchedId)?.structuredState?.engine, "core",
+    "task dispatch must not skip the preferred SDK candidate");
+  const defaultEmployee = storage.getDefaultSiliconEmployee()!;
+  storage.saveSiliconEmployee({ ...defaultEmployee, agents: sdkEmployee.agents });
+  const defaultTask = storage.createWandTask({ title: "默认员工 SDK 派发" });
+  const defaultDispatch = await request(`/api/wand-tasks/${defaultTask.id}/dispatch`, "POST", {
+    prompt: "mock-only default dispatch",
+  });
+  assert.equal(defaultDispatch.status, 202, JSON.stringify(defaultDispatch.json));
+  const defaultSessionId = (defaultDispatch.json?.session as Record<string, unknown>)?.id as string;
+  assert.equal(structured.get(defaultSessionId)?.structuredState?.engine, "core");
+  storage.saveSiliconEmployee(defaultEmployee);
+  structured.resolveNewSessionPiEngine = engine => {
+    if (engine === "sdk") throw new Error("mock Wand Agent unavailable");
+    return resolveEngine(engine);
+  };
+  const unavailableSdk = await request("/api/structured-sessions", "POST", {
+    cwd: root, employeeId: sdkEmployee.id,
+  });
+  assert.equal(unavailableSdk.status, 400);
+  assert.match(String(unavailableSdk.json?.error), /Wand Agent unavailable/);
+  assert.deepEqual(storage.getSiliconEmployee(sdkEmployee.id)?.agents, sdkEmployee.agents,
+    "unavailable SDK must not rewrite saved candidates or impersonate a CLI");
+  structured.resolveNewSessionPiEngine = resolveEngine;
+  storage.saveSiliconEmployee(employee());
+
   assert.equal((await request("/api/silicon-employees/e_test123/archive", "POST", {})).status, 200);
   const activeEmployees = (await request("/api/silicon-employees", "GET")).json?.employees as Array<{ id: string }>;
   assert.equal(activeEmployees.some((item) => item.id === "e_test123"), false);
@@ -358,8 +410,8 @@ test("a failed spawn falls back before acceptance; a CLI runtime failure never r
     storage.close();
     rmSync(root, { recursive: true, force: true });
   });
-  const make = () => manager.createSession({ cwd: root, mode: "full-access", provider: "codex",
-    employeeId: "e_test123", employeeName: "测试员工", employeeCandidates: [CODEX, PI], employeeCandidateIndex: 0 });
+  const make = (agents: SiliconEmployee["agents"] = [CODEX, PI]) => manager.createSession({ cwd: root, mode: "full-access", provider: "codex",
+    employeeId: "e_test123", employeeName: "测试员工", employeeCandidates: agents, employeeCandidateIndex: 0 });
   const first = make();
   await manager.sendMessage(first.id, "请完成任务");
   assert.equal(manager.get(first.id)?.provider, "pi");
@@ -375,6 +427,16 @@ test("a failed spawn falls back before acceptance; a CLI runtime failure never r
   assert.equal(manager.get(second.id)?.employeeCandidateIndex, 0);
   assert.equal(codexStarts, 2);
   assert.equal(piStarts, 1, "结果未知时不能重发到备用 CLI");
+
+  runtimeFailure = false;
+  const bounded = { ...PI, engine: "sdk" as const, model: WAND_LOCAL_DECISION_MODEL };
+  const third = make([CODEX, bounded, PI]);
+  await manager.sendMessage(third.id, "未接受时跳过不可聊天的模型");
+  assert.equal(manager.get(third.id)?.employeeCandidateIndex, 2, "跳过 LAYA 仍保留配置中的真实序号");
+  assert.equal(manager.get(third.id)?.selectedModel, null, "不把 LAYA selector 送到 Pi chat adapter");
+  assert.equal(manager.get(third.id)?.messages?.filter(turn => turn.role === "user").length, 1);
+  assert.equal(codexStarts, 3);
+  assert.equal(piStarts, 2, "只调用一次正常备用，没有虚构 LAYA 会话");
 });
 
 test("员工起草：解析模型输出、容忍围栏并收敛非法 provider", () => {

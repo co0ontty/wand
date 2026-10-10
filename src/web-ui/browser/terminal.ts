@@ -1,3 +1,5 @@
+import { getWandTerminalTheme } from "../react/theme";
+import { wandThemeStore } from "../react/theme-preference";
 import { state } from "./state";
 import { browserEnvironment } from "./ui-store-bridge";
 import "./utils";
@@ -23,6 +25,10 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
 import { cachedTerminalHistory, loadTerminalHistory, resetTerminalHistory } from "./terminal-history";
 import { ensureTerminalLibrary } from "../vendor-loader.js";
 import { mountBrowserButtons } from "./library-buttons";
+
+wandThemeStore.subscribe(() => {
+  if (state.terminal) state.terminal.options.theme = getWandTerminalTheme();
+});
 
       export function saveWorkingDir(path: string) {
         state.workingDir = path;
@@ -1040,12 +1046,7 @@ import { mountBrowserButtons } from "./library-buttons";
           fontSize: fontSize,
           lineHeight: 1.25,
           scrollback: 5000,
-          theme: {
-            background: "#17120f",
-            foreground: "#f4eee6",
-            cursor: "#d88d60",
-            selectionBackground: "rgba(216, 141, 96, 0.3)"
-          }
+          theme: getWandTerminalTheme()
         });
         fitAddon = new XTermLib.FitAddon();
         var unicodeAddon = new XTermLib.Unicode11Addon();
@@ -1065,6 +1066,7 @@ import { mountBrowserButtons } from "./library-buttons";
           }
           const restoreMeasurement = options?.prepare ? prepareTerminalMeasurement(container) : function() {};
           try {
+          term.options.theme = getWandTerminalTheme();
           term.open(termWrap);
           term.registerLinkProvider({
             provideLinks: function(lineNumber: number, callback: (links: any[] | undefined) => void) {

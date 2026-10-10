@@ -41,7 +41,7 @@ if (!existsSync(path.join(root, "dist", "web-ui", "index.js"))) {
 }
 
 const { renderApp } = await import("../dist/web-ui/index.js");
-const { getScriptAsset, getAiTeamsChunk } = await import("../dist/web-ui/scripts.js");
+const { getScriptAsset, getAiTeamsChunk, getThemePreloadAsset } = await import("../dist/web-ui/scripts.js");
 const { getStylesAsset } = await import("../dist/web-ui/styles.js");
 const { EMBEDDED_WEB_ASSETS } = await import("../dist/web-ui/embedded-assets.js");
 
@@ -63,7 +63,9 @@ const BUDGET = {
   // 紧凑执行表单、真实配置摘要、文件检索范围与草稿/浮层保护：
   // 本轮主包 949459 B gzip，相对 943040 B 上限增加 6419 B（0.68%）。
   // 主包额度增加 9280 B（0.98%），首屏 1140000 B 与所有资源计数保持。
-  js: 952_320,
+  // 五套本机主题与紧凑预览使主包 951390→953141 B gzip（+1751 B）。
+  // 主题首屏资产另计 2185 B；仅主包增加 3072 B 额度，首载总预算保持 1140000 B。
+  js: 955_392,
   css: 110_000,
   firstLoad: 1_140_000,
   // The team chunk now also contains employee management and candidate editors.
@@ -94,6 +96,7 @@ const rows = [
   ["HTML (repeat)", html, BUDGET.html],
   ["app.js (cached)", js.content, BUDGET.js],
   ["app.css (cached)", css.content, BUDGET.css],
+  ["theme.js (cached)", getThemePreloadAsset().content, 8_192],
   ...Object.entries(EMBEDDED_WEB_ASSETS.vendor).map(([name, asset]) => [name, asset.content, null]),
   ["ai-teams.js (lazy)", lazy.content, BUDGET.lazy],
 ];
@@ -115,7 +118,7 @@ for (const [name, content, limit] of rows) {
 const vendorBytes = [...sizes.entries()].filter(([name]) => name.startsWith("/vendor/"))
   .reduce((total, [, size]) => total + size, 0);
 const firstLoad = sizes.get("HTML (repeat)") + sizes.get("app.js (cached)")
-  + sizes.get("app.css (cached)") + vendorBytes;
+  + sizes.get("app.css (cached)") + sizes.get("theme.js (cached)") + vendorBytes;
 console.log(`  first load (HTML + app + vendor) gzip ${kib(firstLoad)} (${firstLoad} B)`);
 if (firstLoad > BUDGET.firstLoad) {
   failures.push(`first load: ${firstLoad} B > ${BUDGET.firstLoad} B (+${firstLoad - BUDGET.firstLoad} B)`);

@@ -176,7 +176,7 @@ export function EmployeeCard({
                 : employee.systemKey === SPEECH_POLISHER_KEY
                 ? "服务端语音转写后自动整理文字，保留原意与关键细节；整理失败时保留原始转写。初始首选为 Wand Agent 免费分组，可在下面添加、调整候选顺序。内置身份与职责固定。"
                 : employee.systemKey === DECISION_EXPERT_KEY
-                ? "为建议提供有界判断，按下面的候选顺序使用本地决策或 Wand 免费分组；内置身份与职责固定，不可删除。"
+                ? "为建议提供有界判断，按下面的候选顺序使用已配置工具与模型；内置身份与职责固定，不可删除。"
                 : "Wand 内置员工：标签、名字、职责与角色设定由服务端固定，不可修改、不可删除；Wand 自己的 AI 调用（Commit、标题、提示词优化）都按下面的候选链执行。"}
             />
           ) : (
@@ -237,7 +237,6 @@ export function EmployeeCard({
 
           <CandidatesListEditor
             agents={draft.agents}
-            decisionOnly={employee.systemKey === DECISION_EXPERT_KEY}
             label={draft.name || "员工"}
             catalog={catalog}
             providerOptions={providerOptions}

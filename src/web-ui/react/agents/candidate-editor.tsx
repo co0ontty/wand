@@ -39,7 +39,6 @@ export interface CandidateRowProps {
   duplicate: boolean;
   ariaPrefix: string;
   structuredOnly?: boolean;
-  decisionOnly?: boolean;
   onChange(next: WandTaskAgent): void;
   onMove(delta: number): void;
   onRemove(): void;
@@ -57,7 +56,6 @@ export function CandidateEditorRow({
   duplicate,
   ariaPrefix,
   structuredOnly = false,
-  decisionOnly = false,
   onChange,
   onMove,
   onRemove,
@@ -81,7 +79,6 @@ export function CandidateEditorRow({
             providerOptions={providerOptions}
             ariaPrefix={`${ariaPrefix} ${label}`}
             showKind={!structuredOnly}
-            decisionOnly={decisionOnly}
             allowSdkEngine
             onChange={(next) => onChange(structuredOnly ? { ...next, kind: "structured" } : next)}
           />
@@ -134,7 +131,6 @@ export function CandidatesListEditor({
   providerOptions,
   disabled,
   structuredOnly = false,
-  decisionOnly = false,
   onChange,
 }: {
   agents: WandTaskAgent[];
@@ -143,7 +139,6 @@ export function CandidatesListEditor({
   providerOptions: ProviderOptions;
   disabled: boolean;
   structuredOnly?: boolean;
-  decisionOnly?: boolean;
   onChange(agents: WandTaskAgent[]): void;
 }): React.ReactElement {
   React.useEffect(() => { installEmployeeStyles(); }, []);
@@ -267,7 +262,6 @@ export function CandidatesListEditor({
             duplicate={duplicates.includes(at)}
             ariaPrefix={label}
             structuredOnly={structuredOnly}
-            decisionOnly={decisionOnly}
             onChange={(next) => onChange(setCandidate(agents, at, next))}
             onMove={(delta) => moveRow(at, delta)}
             onRemove={() => removeRow(at)}

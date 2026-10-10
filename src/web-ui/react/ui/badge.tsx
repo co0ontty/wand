@@ -8,7 +8,7 @@ export interface WandBadgeProps extends React.ComponentPropsWithRef<"span"> {
   tone?: WandBadgeTone;
   size?: "xs" | "sm" | "md" | "lg" | "icon-sm" | "icon-md" | "icon-lg";
 }
-const colors = { neutral: undefined, accent: "#b8562f", info: "processing", success: "success", warning: "warning" };
+const colors = { neutral: undefined, accent: "var(--accent-solid)", info: "processing", success: "success", warning: "warning" };
 export function WandBadge({ className, tone = "neutral", size: _size, ...props }: WandBadgeProps) {
   return <WandUiBoundary><Tag {...props} color={colors[tone]} className={classNames("wand-ui-badge", `wand-ui-badge-${tone}`, className)}/></WandUiBoundary>;
 }

@@ -35,6 +35,7 @@ function budgetFixture(): { run: (lazy: string) => ReturnType<typeof spawnSync>;
   return {
     run(lazy) {
       writeFileSync(join(assets, "scripts.js"),
+        'export const getThemePreloadAsset = () => ({ content: "console.log(2)" });\n' +
         'export const getScriptAsset = () => ({ content: "console.log(1)" });\n' +
         `export const getAiTeamsChunk = () => ({ content: ${JSON.stringify(lazy)} });`);
       return spawnSync(process.execPath, [join(scripts, "check-bundle-budget.js")],

@@ -20,6 +20,7 @@ import { stampNewToolUseTimes } from "./tool-use-timestamps.js";
 import { buildChildEnv } from "./env-utils.js";
 import { getErrorMessage } from "./error-utils.js";
 import { getDefaultModelForProvider } from "./config.js";
+import { isLocalDecisionModel } from "./decision-expert-identity.js";
 import type { WandTaskAgent } from "./task-types.js";
 import { recordIterationPrompt } from "./iteration-log.js";
 import { startEmployeeKnowledgeRunner } from "./employee-knowledge.js";
@@ -630,7 +631,7 @@ export class StructuredSessionManager {
     runners: StructuredSessionManagerRunners = {},
     private readonly execHost?: StructuredExecHost,
     private readonly decisionRuntime: () => DecisionRuntimeAccess | null = () => null,
-    openRouter?: OpenRouterFreeModelsService,
+    private readonly openRouter?: OpenRouterFreeModelsService,
     /** 「智能分配」专用的本地决策入口：只有真正能跑时才注入，没注入则用系统员工回退。 */
     private readonly autoAssignEvaluate: () => DecisionRuntimeAccess["evaluate"] = () => undefined,
   ) {
@@ -1460,7 +1461,7 @@ export class StructuredSessionManager {
       input,
       cwd: session.cwd,
       language: this.config.language,
-      ai: resolveSystemAiContext(session, this.config, this.storage.getSystemSiliconEmployee()),
+      ai: resolveSystemAiContext(session, this.config, this.storage.getSystemSiliconEmployee(), this.openRouter),
       readNativeTitle: () => readNativeSessionTitle(
         resolveSessionProvider(session),
         session.claudeSessionId,
@@ -1661,7 +1662,9 @@ export class StructuredSessionManager {
     if (original.automationId?.startsWith("ai-team:") || !(error instanceof UnacceptedStructuredInputError)) return null;
     const candidates = original.employeeCandidates ?? [];
     const index = original.employeeCandidateIndex ?? 0;
-    const nextIndex = index + 1;
+    let nextIndex = index + 1;
+    // LAYA has no chat adapter; keep original candidate indices while skipping bounded-only models.
+    while (nextIndex < candidates.length && isLocalDecisionModel(candidates[nextIndex]!.model)) nextIndex += 1;
     if (!original.employeeId || (original.messages?.length ?? 0) !== 0 || original.claudeSessionId
       || !error.failure.retryable || nextIndex >= candidates.length) return null;
     const selected = candidates[index];
@@ -1847,7 +1850,7 @@ export class StructuredSessionManager {
           prompt,
           groups: this.config.modelGroups,
           evaluate: this.autoAssignEvaluate(),
-          ai: resolveSystemAiContext(session, this.config, this.storage.getSystemSiliconEmployee()),
+          ai: resolveSystemAiContext(session, this.config, this.storage.getSystemSiliconEmployee(), this.openRouter),
           cwd: session.cwd,
           language: this.config.language,
         });

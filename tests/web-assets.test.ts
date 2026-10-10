@@ -34,7 +34,9 @@ test("the shell transfers only HTML repeatedly and serves versioned, cacheable a
     assert.doesNotMatch(html, /<style\b|<script(?!\s+src=)/i);
     const cssHref = html.match(/href="(\/assets\/app\.css\?v=[a-f0-9]{16})"/)?.[1];
     const jsSrc = html.match(/src="(\/assets\/app\.js\?v=[a-f0-9]{16})"/)?.[1];
-    assert.ok(cssHref && jsSrc);
+    const themeSrc = html.match(/src="(\/assets\/theme\.js\?v=[a-f0-9]{16})"/)?.[1];
+    assert.ok(cssHref && jsSrc && themeSrc);
+    assert.ok(html.indexOf(themeSrc) < html.indexOf(cssHref));
     assert.ok(html.indexOf("/vendor/xterm/xterm.css") < html.indexOf(cssHref));
     assert.match(html, /name="wand-qrcode-script" content="\/vendor\/qrcode\/qrcode\.bundle\.js\?v=[a-f0-9]{8}"/);
     assert.match(html, /name="wand-xterm-script" content="\/vendor\/xterm\/xterm\.bundle\.js\?v=[a-f0-9]{8}"/);
@@ -44,6 +46,7 @@ test("the shell transfers only HTML repeatedly and serves versioned, cacheable a
     for (const [url, type, cache] of [
       [jsSrc, "javascript", "private"],
       [cssHref, "css", "public"],
+      [themeSrc, "javascript", "public"],
     ] as const) {
       const response = await fetch(`${base}${url}`);
       const content = await response.text();

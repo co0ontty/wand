@@ -39,6 +39,7 @@ import { getErrorMessage } from "./error-utils.js";
 import { TurnQuietHeartbeat } from "./turn-heartbeat.js";
 import { recordIterationPrompt } from "./iteration-log.js";
 import { describePtySpawnFailure } from "./ensure-node-pty-helper.js";
+import type { EmployeeTextDeps } from "./employee-text.js";
 import { resolveSessionProvider, resolveSystemAiContext } from "./session-ai-context.js";
 import { resolveSessionCwd } from "./session-cwd.js";
 import { inferProviderFromCommand, providerCliCommand } from "./session-provider.js";
@@ -753,6 +754,7 @@ function deriveSessionSummary(messages: ConversationTurn[]): string | undefined 
 
 
 export interface ProcessManagerOptions {
+  free?: EmployeeTextDeps["free"];
   /** Overrides the non-Claude PTY turn quiet window (tests use a short one). */
   ptyTurnIdleMs?: number;
   /** Overrides the foreground-process-group sampling interval (tests use a short one). */
@@ -773,6 +775,7 @@ export class ProcessManager extends EventEmitter {
   private readonly ptyForegroundSampleMs: number;
   /** Foreground probe; injectable so tests can drive it without a real process table. */
   private readonly probePtyForegrounds: typeof samplePtyForegrounds;
+  private readonly free: EmployeeTextDeps["free"];
   private readonly resolveDecisionEvaluate: NonNullable<ProcessManagerOptions["resolveDecisionEvaluate"]>;
   /** 24h archive scan timer */
   private archiveTimer: NodeJS.Timeout | null = null;
@@ -810,6 +813,7 @@ export class ProcessManager extends EventEmitter {
     this.ptyTurnIdleMs = options.ptyTurnIdleMs ?? PTY_TURN_IDLE_MS;
     this.ptyForegroundSampleMs = options.ptyForegroundSampleMs ?? PTY_FOREGROUND_SAMPLE_MS;
     this.probePtyForegrounds = options.samplePtyForegrounds ?? samplePtyForegrounds;
+    this.free = options.free;
     this.resolveDecisionEvaluate = options.resolveDecisionEvaluate ?? (() => undefined);
     this.terminalHost = terminalHost ?? new InProcessTerminalHost();
     this.logger = new SessionLogger(configDir || path.join(process.env.HOME || process.cwd(), ".wand"), config.shortcutLogMaxBytes);
@@ -1461,7 +1465,7 @@ export class ProcessManager extends EventEmitter {
           ai: resolveSystemAiContext({
             provider: groupProvider, runner: undefined, command: providerCliCommand(groupProvider),
             structuredState: undefined, selectedModel: null, thinkingEffort: opts?.thinkingEffort,
-          }, this.config, this.storage.getSystemSiliconEmployee()),
+          }, this.config, this.storage.getSystemSiliconEmployee(), this.free),
           cwd: resolveSessionCwd(cwd, this.config.defaultCwd),
           language: this.config.language,
         });
@@ -2660,7 +2664,7 @@ export class ProcessManager extends EventEmitter {
       input: prompt,
       cwd: record.cwd,
       language: this.config.language,
-      ai: resolveSystemAiContext(record, this.config, this.storage.getSystemSiliconEmployee()),
+      ai: resolveSystemAiContext(record, this.config, this.storage.getSystemSiliconEmployee(), this.free),
       readNativeTitle: () => readNativeSessionTitle(
         resolveSessionProvider(record),
         record.claudeSessionId,

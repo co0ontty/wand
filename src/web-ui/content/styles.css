@@ -48,7 +48,7 @@ html.no-transition *, html.no-transition *::before, html.no-transition *::after 
 .terminal-jump-bottom.visible, .chat-unread-bubble.visible { visibility: visible; }
 .is-wand-embed-terminal :is(.sidebar, .main-header-row, .blank-chat, .drawer-backdrop, .file-side-panel, .file-panel-backdrop, .terminal-scale-overlay, .terminal-resize-handle) { display: none !important; }
 .is-wand-embed-terminal .app-container { padding: 0 !important; }
-.is-wand-embed-terminal .main-content, html.is-wand-embed-terminal, .is-wand-embed-terminal body { background: var(--bg-terminal, #17120f); color-scheme: light dark; }
+.is-wand-embed-terminal .main-content, html.is-wand-embed-terminal, .is-wand-embed-terminal body { background: var(--bg-terminal, #17120f); color-scheme: inherit; }
 .is-wand-embed-terminal .terminal-scroll-wrap { --term-row-height: 17px !important; }
 .is-wand-embed-terminal.is-wand-terminal-passthrough .terminal-scroll-wrap { width: 100%; min-width: 0; }
 .is-wand-embed-terminal.is-wand-native-input .input-panel { display: none !important; }
@@ -184,7 +184,7 @@ html.is-wand-app .chat-width-toggle { display: none; }
   .composer-input-wrap .prompt-optimize-btn { min-height: 32px; inset-block-start: -28px; }
   #send-input-button { min-width: 32px; }
 }
-@media (prefers-color-scheme: dark) { .is-wand-embed-terminal { --bg-terminal: #17120f; } }
+
 @media (prefers-reduced-motion: reduce) { .login-visual-scene * { animation: none !important; } html:not(.is-wand-app) *, html:not(.is-wand-app) *::before, html:not(.is-wand-app) *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; } }
 
 /* Chat instances project the existing composer/runner owners. Geometry is state-invariant. */

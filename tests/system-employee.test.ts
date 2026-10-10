@@ -207,14 +207,17 @@ test("候选链：空模型跟随 provider 默认，PTY 候选与内部 AI 调�
   assert.deepEqual(systemEmployeeCliCandidates(null), []);
 });
 
-test("系统应用候选链会跳过员工中启用的 SDK", () => {
+test("系统应用候选链保留员工中启用的 SDK 和配置顺序", () => {
   const chain = systemEmployeeCliCandidates({
     agents: [
       { ...PI, engine: "sdk" },
       { ...CLAUDE, provider: "grok", model: "grok-4.5" },
     ],
   });
-  assert.deepEqual(chain, [{ provider: "grok", model: "grok-4.5", thinkingEffort: "off" }]);
+  assert.deepEqual(chain, [
+    { provider: "pi", engine: "sdk", model: undefined, thinkingEffort: "off" },
+    { provider: "grok", model: "grok-4.5", thinkingEffort: "off" },
+  ]);
 });
 test("系统 AI：CLI 模式按候选链取首个已安装工具，并带上运维人设", async () => {
   const root = mkdtempSync(join(tmpdir(), "wand-system-employee-chain-"));
@@ -264,15 +267,18 @@ function storageEmployee() {
   };
 }
 
-test("系统员工只有 SDK 候选时不回退到默认 provider", async () => {
+test("系统员工只有 SDK 候选时走 SDK，缺少免费分组不回退到默认 provider", async () => {
+  const free = { resolveForCall: async () => { throw new Error("offline free pool unavailable"); } };
   const context = resolveSystemAiContext(session(), { ...config, systemAiCli: "claude", systemAiModel: "fallback" }, {
-    ...storageEmployee(), agents: [{ ...PI, engine: "sdk" }],
-  });
+    ...storageEmployee(), agents: [{ ...PI, engine: "sdk", model: "wand-openrouter-free/auto" }],
+  }, free);
   assert.equal(context.employeeChannelOnly, true);
-  assert.equal(context.cliCandidates, undefined);
+  assert.deepEqual(context.cliCandidates, [{ provider: "pi", engine: "sdk", model: "wand-openrouter-free/auto", thinkingEffort: "off" }]);
+  assert.equal(context.provider, "pi");
+  assert.equal(context.employeeText?.free, free);
   await assert.rejects(
     callConfiguredAiText({ system: "s", prompt: "p" }, process.cwd(), "中文", context),
-    /已跳过 Wand Agent/,
+    /offline free pool unavailable/,
   );
 });
 test("角色设定只做前缀，任务自己的输出格式仍排在后面", () => {

@@ -7,7 +7,7 @@ import test from "node:test";
 import express from "express";
 import { defaultConfig } from "../src/config.js";
 import { jsonErrorHandler } from "../src/express-async.js";
-import { registerTaskRoutes, whenWandTaskTitlesSettled } from "../src/server-task-routes.js";
+import { readTaskBoardLastAgent, registerTaskRoutes, whenWandTaskTitlesSettled, writeTaskBoardLastAgent } from "../src/server-task-routes.js";
 import { SessionRegistry } from "../src/session-registry.js";
 import { registerWorkspaceRoutes } from "../src/server-workspace-routes.js";
 import { StructuredSessionManager } from "../src/structured-session-manager.js";
@@ -27,13 +27,13 @@ function start(
   manager: StructuredSessionManager,
   registry: SessionRegistry,
   config = defaultConfig(),
-  extra: Partial<Pick<Parameters<typeof registerTaskRoutes>[1] & object, "generateTitle" | "processes">> = {},
+  extra: Partial<Pick<Parameters<typeof registerTaskRoutes>[1] & object, "generateTitle" | "processes" | "free">> = {},
 ): Promise<Harness> {
   const app = express();
   app.use(express.json());
   registerTaskRoutes(app, { storage, sessions: registry, structured: manager, config, ...extra });
   registerWorkspaceRoutes(app, storage, registry, extra.generateTitle
-    ? { config, generateTitle: extra.generateTitle }
+    ? { config, generateTitle: extra.generateTitle, free: extra.free }
     : {});
   app.use(jsonErrorHandler);
   const server = createServer(app);
@@ -56,8 +56,9 @@ function start(
 async function withHarness(
   run: (ctx: Harness) => Promise<void>,
   options: {
-    generateTitle?: (description: string) => Promise<string>;
+    generateTitle?: Parameters<typeof registerTaskRoutes>[1]["generateTitle"];
     processes?: Parameters<typeof registerTaskRoutes>[1]["processes"];
+    free?: Parameters<typeof registerTaskRoutes>[1]["free"];
   } = {},
 ): Promise<void> {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-task-board-"));
@@ -68,9 +69,10 @@ async function withHarness(
   const registry = new SessionRegistry({ getOwned: () => null, listSlim: () => [] } as never, manager, storage);
   const harness = await start(storage, manager, registry, config, {
     ...(options.generateTitle
-      ? { generateTitle: ((description: string) => options.generateTitle!(description)) as never }
+      ? { generateTitle: options.generateTitle }
       : {}),
     ...(options.processes ? { processes: options.processes } : {}),
+    ...(options.free ? { free: options.free } : {}),
   });
   try {
     await run(harness);
@@ -84,6 +86,40 @@ async function withHarness(
 function jsonOf<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
 }
+
+test("自动标题把已配置 SDK 候选和免费服务传到执行入口，不提交真实模型请求", async () => {
+  const free = { async resolveForCall() { throw new Error("mock generator must not request a model"); } };
+  let received: import("../src/git-quick-commit.js").QuickCommitAiOptions | undefined;
+  await withHarness(async ({ storage, url }) => {
+    const system = storage.ensureSystemSiliconEmployee();
+    storage.saveSiliconEmployee({ ...system, agents: [{ provider: "pi", engine: "sdk", model: "wand-openrouter-free/auto",
+      thinkingEffort: "off", mode: "default", kind: "structured" }] });
+    const response = await fetch(`${url}/api/wand-tasks`, { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ description: "验证免费候选依赖传递" }) });
+    assert.equal(response.status, 201);
+    await whenWandTaskTitlesSettled();
+    assert.equal(received?.cliCandidates?.[0]?.engine, "sdk");
+    assert.equal(received?.cliCandidates?.[0]?.model, "wand-openrouter-free/auto");
+    assert.equal(received?.employeeText?.free, free);
+  }, { free, generateTitle: async (_source, _cwd, _language, ai) => {
+    received = ai;
+    return "mock标题";
+  } });
+});
+
+test("显式保存任务执行默认保留 SDK 引擎，旧缺省引擎仍为 CLI", async () => {
+  await withHarness(async ({ storage }) => {
+    const sdk = { provider: "pi" as const, engine: "sdk" as const, model: "openai-codex/gpt-6-luna",
+      thinkingEffort: "off" as const, mode: "default" as const, kind: "structured" as const };
+    writeTaskBoardLastAgent(storage, sdk);
+    assert.deepEqual(readTaskBoardLastAgent(storage), sdk);
+    const { engine: _engine, ...legacy } = sdk;
+    storage.setPreference("pref:taskBoardLastAgent", legacy);
+    assert.deepEqual(readTaskBoardLastAgent(storage), legacy);
+    writeTaskBoardLastAgent(storage, legacy);
+    assert.deepEqual(readTaskBoardLastAgent(storage), legacy);
+  });
+});
 
 function sessionSnapshot(overrides: Partial<SessionSnapshot>): SessionSnapshot {
   return {

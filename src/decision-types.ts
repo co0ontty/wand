@@ -34,10 +34,10 @@ export interface DecisionRequest {
 export interface DecisionResult {
   model: string;
   answers: Record<string, Record<string, unknown>>;
-  usage: { input_tokens: number; output_tokens: number; truncated?: boolean };
+  usage: { input_tokens: number; output_tokens: number; truncated?: boolean; available?: boolean };
   experimental: true;
   runtime: "laya-mlx" | "decision-expert";
-  executor?: { employeeId: string; candidate: number; source: "local" | "free-group" };
+  executor?: { employeeId: string; candidate: number; source: "local" | "free-group" | "cli" | "sdk" };
 }
 
 export class DecisionError extends Error {

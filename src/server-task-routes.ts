@@ -11,6 +11,7 @@ import { generateWandTaskTitle, provisionalTaskTitleFromDescription, TASK_TITLE_
 import { recordIterationPromptForTask } from "./iteration-log.js";
 import type { QuickCommitAiOptions } from "./git-quick-commit.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
+import type { OpenRouterFreeModelsService } from "./openrouter-free-models.js";
 import type { SessionRegistry } from "./session-registry.js";
 import type { StructuredSessionManager } from "./structured-session-manager.js";
 import type { ProcessManager } from "./process-manager.js";
@@ -52,6 +53,7 @@ export function writeTaskBoardLastAgent(storage: WandStorage, agent: WandTaskAge
     thinkingEffort: agent.thinkingEffort,
     mode: agent.mode,
     kind: agent.kind,
+    ...(agent.engine ? { engine: agent.engine } : {}),
   });
 }
 
@@ -62,6 +64,7 @@ export interface TaskRouteDependencies {
   /** PTY 会话创建入口；派发 `kind: "pty"` 的任务时使用。测试里可换成同步桩。 */
   processes?: ProcessManager;
   config?: WandConfig;
+  free?: Pick<OpenRouterFreeModelsService, "resolveForCall">;
   aiTeams?: AiTeamRunner;
   /** 可注入的任务标题生成器；测试里换成同步桩，避免真的起 CLI。 */
   generateTitle?: typeof generateWandTaskTitle;
@@ -273,17 +276,13 @@ function scheduleWandTaskTitleGeneration(
   taskId: string,
   source: string,
   signature: string,
-  options: {
-    cwd?: string;
-    config?: WandConfig;
-    generateTitle?: typeof generateWandTaskTitle;
-  },
+  options: AutoTaskTitleOptions,
 ): void {
   const generateTitle = options.generateTitle ?? generateWandTaskTitle;
   const cwd = options.cwd || options.config?.defaultCwd || process.cwd();
   const run = async (): Promise<void> => {
     try {
-      const title = await generateTitle(source, cwd, options.config?.language ?? "", taskTitleAiOptions(options.config, storage));
+      const title = await generateTitle(source, cwd, options.config?.language ?? "", taskTitleAiOptions(options.config, storage, options.free));
       const current = storage.getWandTask(taskId);
       // 用户已经自己写了标题（原生端 / 面板编辑）就不要覆盖。
       if (!current || current.titleSource !== "auto") return;
@@ -306,6 +305,7 @@ export function whenWandTaskTitlesSettled(): Promise<void> {
 
 export interface AutoTaskTitleOptions {
   config?: WandConfig;
+  free?: Pick<OpenRouterFreeModelsService, "resolveForCall">;
   /** 可注入的标题生成器；测试里换成同步桩，避免真的起 CLI。 */
   generateTitle?: typeof generateWandTaskTitle;
   /** 未从任务所属工作区解析到目录时的兜底 cwd。 */
@@ -339,12 +339,13 @@ export function refreshAutoBoardTaskTitles(storage: WandStorage, options: AutoTa
       cwd,
       config: options.config,
       generateTitle: options.generateTitle,
+      free: options.free,
     });
   }
 }
 
 /** 自动生成标题没有会话上下文，按「默认 provider + 默认模型」解析，与提示词优化一致。 */
-function taskTitleAiOptions(config?: WandConfig, storage?: WandStorage): QuickCommitAiOptions {
+function taskTitleAiOptions(config?: WandConfig, storage?: WandStorage, free?: AutoTaskTitleOptions["free"]): QuickCommitAiOptions {
   if (!config) return {};
   const provider = config.defaultProvider ?? "claude";
   const defaultSession = {
@@ -355,8 +356,7 @@ function taskTitleAiOptions(config?: WandConfig, storage?: WandStorage): QuickCo
     selectedModel: null,
     thinkingEffort: config.defaultThinkingEffort,
   };
-  // resolveSystemAiContext 按系统运维员工的 CLI 候选链解析（首个已安装的优先）。
-  return resolveSystemAiContext(defaultSession, config, storage?.getSystemSiliconEmployee() ?? null);
+  return resolveSystemAiContext(defaultSession, config, storage?.getSystemSiliconEmployee() ?? null, free);
 }
 
 export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): void {
@@ -366,7 +366,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
   app.get("/api/wand-tasks", (req, res) => {
     try {
       // 侧栏建的任务 / 后续新增的会话都会在这里补上自动标题。
-      refreshAutoBoardTaskTitles(storage, { config, generateTitle: deps.generateTitle });
+      refreshAutoBoardTaskTitles(storage, { config, generateTitle: deps.generateTitle, free: deps.free });
     } catch (error) {
       console.error("[WandTask] Failed to refresh auto task titles:", getErrorMessage(error));
     }
@@ -516,6 +516,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
           cwd: workspaceId ? storage.getWorkspace(workspaceId)?.cwd : undefined,
           config,
           generateTitle: deps.generateTitle,
+          free: deps.free,
         });
       }
       res.status(201).json(dto(storage.getWandTask(task.id) ?? task));
@@ -745,12 +746,12 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       if (subject?.type === "employee" && (!employee || employee.archivedAt)) {
         throw new Error("硅基员工不存在或已归档。");
       }
-      const selected = employee ? selectEmployeeCandidate(employee, undefined, { skipSdk: true }) : null;
+      const selected = employee ? selectEmployeeCandidate(employee) : null;
       const cliDefault = subject?.type === "cli"
         ? parseTaskAgent({ ...cliAgentForSubject(subject, task.agent), ...(body.kind === "pty" ? { kind: "pty" } : {}) })
         : null;
       const fallbackCandidate = !subject && body.agent === undefined && !task.agent
-        && !body.provider ? selectEmployeeCandidate(defaultRoleForCli(storage, config.defaultProvider), undefined, { skipSdk: true }).agent : null;
+        && !body.provider ? selectEmployeeCandidate(defaultRoleForCli(storage, config.defaultProvider)).agent : null;
       const fallbackAgent = fallbackCandidate && body.kind === "pty"
         ? { ...fallbackCandidate, kind: "pty" as const } : fallbackCandidate;
       const agent = selected?.agent ?? (body.agent === undefined

@@ -27,6 +27,8 @@ import {
   type AiTeamStep,
 } from "../src/ai-team-types.js";
 import { WandStorage } from "../src/storage.js";
+import { dispatchAgentForTask } from "../src/agent-dispatch.js";
+import { WAND_LOCAL_DECISION_MODEL } from "../src/decision-expert-identity.js";
 import type { WandTaskAgent } from "../src/task-types.js";
 import type { ConversationTurn, SessionSnapshot } from "../src/types.js";
 
@@ -1099,6 +1101,60 @@ test("[T3] a provider blacklisted by spawn-missing is skipped without another at
   assert.equal(steps.filter((step) => step.status === "skipped").length, 2, "每个跳过的候选都留痕");
   assert.equal(h.ops.opened.length, 2);
   assert.equal(h.ops.opened.at(-1)!.provider, "opencode");
+});
+
+test("[T3] a missing Pi CLI skips its CLI models but preserves the ordered SDK candidate", async (t) => {
+  const sdk = { ...candidate("pi", "sdk-ready"), engine: "sdk" as const };
+  const h = harness(t, { requirePlanApproval: false }, {
+    workerAgents: [candidate("pi", "cli-missing"), candidate("pi", "cli-second"), sdk],
+  });
+  h.ops.openFailure = agent => agent.provider === "pi" && agent.engine !== "sdk" ? "spawn pi ENOENT" : null;
+  const runId = await startAndPlan(h, [["m_dev", "按配置顺序执行"]]);
+  assert.deepEqual(h.ops.attempts.filter(item => item.provider === "pi").map(item => item.model), ["cli-missing", "sdk-ready"]);
+  assert.equal(runningStep(h, runId).dispatchInfo?.usedCandidate, 2);
+  assert.deepEqual(h.storage.getAiTeamRunState(runId).providers, ["pi"], "旧 provider 黑名单存储形式保留");
+  assert.equal(h.ops.opened.at(-1)?.model, "sdk-ready");
+  assert.equal(h.ops.opened.length, 2, "负责人和有效 SDK 各启动一次，不重复派发");
+});
+
+test("[T3] an SDK startup failure blocks its exact candidate without banning the Pi CLI", async (t) => {
+  const sdk = { ...candidate("pi", "sdk-missing"), engine: "sdk" as const };
+  const h = harness(t, { requirePlanApproval: false }, { workerAgents: [sdk, candidate("pi", "cli-ready")] });
+  h.ops.openFailure = agent => agent.engine === "sdk" ? "Wand Agent ENOENT" : null;
+  const runId = await startAndPlan(h, [["m_dev", "只重试未启动候选"]]);
+  assert.deepEqual(h.ops.attempts.filter(item => item.provider === "pi").map(item => item.model), ["sdk-missing", "cli-ready"]);
+  assert.equal(runningStep(h, runId).dispatchInfo?.usedCandidate, 1);
+  assert.deepEqual(h.storage.getAiTeamRunState(runId).providers, []);
+  assert.deepEqual(h.storage.getAiTeamRunState(runId).agents, [{ key: agentKey(sdk), kind: "spawn-missing" }]);
+  assert.equal(h.ops.opened.at(-1)?.model, "cli-ready");
+});
+
+test("[T3] a bounded-only LAYA candidate is rejected before inference and the next configured chat candidate starts once", async (t) => {
+  const h = harness(t, { requirePlanApproval: false }, {
+    workerAgents: [{ ...candidate("pi", WAND_LOCAL_DECISION_MODEL), engine: "sdk" }, candidate("pi", "chat-ready")],
+    models: () => [],
+  });
+  let inferenceStarts = 0;
+  const open = h.ops.open.bind(h.ops);
+  h.ops.open = async input => {
+    if (input.agent.model === WAND_LOCAL_DECISION_MODEL) {
+      // Exercise the real dispatch preflight with a forbidden mock adapter, not a catalog assumption.
+      await dispatchAgentForTask({ storage: h.storage, config: { defaultCwd: h.cwd } as never,
+        structured: { createSession() { inferenceStarts += 1; throw new Error("must not start LAYA chat"); } } as never,
+        processes: null }, { ...input, task: h.storage.getWandTask(h.taskId)!, automationId: "ai-team:bounded-test" });
+      assert.fail("LAYA preflight must reject before invoking the adapter");
+    }
+    return open(input);
+  };
+  const runId = await startAndPlan(h, [["m_dev", "按实际能力降级"]]);
+  assert.equal(inferenceStarts, 0);
+  assert.deepEqual(h.ops.attempts.filter(item => item.provider === "pi").map(item => item.model), ["chat-ready"]);
+  assert.equal(h.ops.opened.length, 2, "负责人和普通备用各开一次");
+  assert.equal(runningStep(h, runId).dispatchInfo?.usedCandidate, 1);
+  const skipped = h.storage.listAiTeamSteps(runId).filter(step => step.status === "skipped");
+  assert.equal(skipped.length, 1);
+  assert.equal(skipped[0]?.dispatchInfo?.skipped[0]?.errorKind, "input-rejected");
+  assert.match(skipped[0]?.report ?? "", /LAYA/);
 });
 
 test("[T3] the last candidate failing hands a single failed step back to the leader", async (t) => {

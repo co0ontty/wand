@@ -1,3 +1,5 @@
+import { getWandTerminalTheme } from "../react/theme";
+import { wandThemeStore } from "../react/theme-preference";
 // 终端实例池（工作空间「分屏」专用）。
 // 与 state.terminal 单例**完全隔离**：仅在用户显式分屏、<WorkspaceWindow/> 渲染多个窗格时
 // 才创建池实例。非工作空间 / 单窗格的默认 UI 仍走单例 state.terminal，本模块零影响。
@@ -115,6 +117,10 @@ export function setPooledTerminalScale(sessionId: string, value: number): number
   return scale;
 }
 
+wandThemeStore.subscribe(() => {
+  for (const handle of pool.values()) if (!handle.disposed) handle.terminal.options.theme = getWandTerminalTheme();
+});
+
 export function hasPooledTerminal(sessionId: string): boolean {
   return pool.has(sessionId);
 }
@@ -173,12 +179,7 @@ export function createPooledTerminal(sessionId: string, container: HTMLElement):
       fontSize: terminalFontSize(getPooledTerminalScale(sessionId)),
       lineHeight: 1.25,
       scrollback: 5000,
-      theme: {
-        background: "#17120f",
-        foreground: "#f4eee6",
-        cursor: "#d88d60",
-        selectionBackground: "rgba(216, 141, 96, 0.3)",
-      },
+      theme: getWandTerminalTheme(),
     });
     partialTerminal = term;
     const fitAddon = new XTermLib.FitAddon();

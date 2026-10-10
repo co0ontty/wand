@@ -15,6 +15,7 @@ import type { SessionSnapshot } from "../src/types.js";
 import { startServer } from "../src/server.js";
 import { resolveSystemAiContext } from "../src/session-ai-context.js";
 import { systemEmployeeDefinition } from "../src/system-employee.js";
+import { employeeTextCandidates } from "../src/employee-text.js";
 
 const group = (provider: ModelGroup["provider"] = "pi"): ModelGroup => ({ id: "coding", provider, name: "编程分组", models: ["first", "second"] });
 const state = (model = "first"): StructuredRunnerResult["state"] => ({ blocks: [], result: "", sessionId: null, model });
@@ -196,9 +197,14 @@ test("系统运维员工选模型分组，展开为保序的文本候选，其�
   const agents = [{ provider: "pi" as const, model: modelGroupSelector(group()), thinkingEffort: "off" as const,
     kind: "structured" as const, mode: "managed" as const }];
   const employee = systemEmployeeDefinition(agents, new Date().toISOString());
-  const context = resolveSystemAiContext(session(), { ...defaultConfig(), modelGroups: [group()] }, employee);
-  assert.deepEqual(context.cliCandidates?.map((entry) => entry.model), ["first", "second"]);
+  const config = { ...defaultConfig(), modelGroups: [group()] };
+  const context = resolveSystemAiContext(session(), config, employee);
+  assert.deepEqual(context.cliCandidates?.map((entry) => entry.model), [modelGroupSelector(group())]);
+  const candidates = employeeTextCandidates(employee.agents, config);
+  assert.deepEqual(candidates.map(({ agent, index }) => [agent.model, index]), [["first", 0], ["second", 0]]);
+  assert.deepEqual(context.cliCandidates?.map((entry) => entry.model), [modelGroupSelector(group())]);
   assert.deepEqual(employee.agents, agents);
+  assert.deepEqual(config.modelGroups, [group()]);
 });
 
 test("目录按工具投影单一分组选项，改名与排序改变 revision，不重复持久化目录", () => {

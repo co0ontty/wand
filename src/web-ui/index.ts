@@ -2,7 +2,7 @@
 
 import { EMBEDDED_WEB_ASSETS, type EmbeddedVendorAssetPath } from "./embedded-assets.js";
 import { getStylesAsset } from "./styles.js";
-import { getScriptAsset } from "./scripts.js";
+import { getScriptAsset, getThemePreloadAsset } from "./scripts.js";
 import { WAND_FAVICON_URL } from "./brand-identity.js";
 
 function vendorAssetUrl(relPath: EmbeddedVendorAssetPath): string {
@@ -26,10 +26,10 @@ export function renderApp(configPath: string, page: "console" | "settings" = "co
   <title>${page === "settings" ? "Wand 设置" : "Wand Console"}</title>
   <link rel="icon" type="image/svg+xml" href="${WAND_FAVICON_URL}" />
   <meta name="description" content="Local CLI Console for Vibe Coding - Manage terminal sessions from your browser" />
-  <meta name="theme-color" content="#f1eadf" media="(prefers-color-scheme: light)" />
-  <meta name="theme-color" content="#17120f" media="(prefers-color-scheme: dark)" />
+  <meta name="theme-color" content="#faf8f5" />
   <meta name="format-detection" content="telephone=no" />
   <meta name="msapplication-tap-highlight" content="no" />
+  <script src="/assets/theme.js?v=${getThemePreloadAsset().hash}"></script>
   <link rel="stylesheet" href="${xtermCssHref}" />
   <link rel="stylesheet" href="${stylesHref}" />
 </head>

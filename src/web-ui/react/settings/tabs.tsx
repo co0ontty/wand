@@ -1,3 +1,4 @@
+import { ThemePicker } from "./theme-picker";
 import { OpenRouterSettingsPanel } from "./openrouter-panel";
 import { DaemonUpdateNotice } from "../shell/daemon-update-notice";
 import { ensureQrCodeLibrary } from "../../vendor-loader.js";
@@ -1171,11 +1172,11 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot }: Se
 
       <SettingsSection
         title="系统 AI"
-        description="由内置「系统运维」员工执行：Commit message 与 tag、会话与任务标题、提示词优化、员工起草。全部走本机 CLI，按候选顺序降级。"
+        description="由内置「系统运维」员工执行：Commit message 与 tag、会话与任务标题、提示词优化、员工起草。使用员工已配置的工具与模型调用链。"
       >
         <SystemAiOwnerSummary employee={systemEmployee} />
         <SettingsStatus tone="info">
-          全部走本机 CLI：已安装的候选优先，失败自动换下一条。
+          按配置顺序尝试 CLI 或 Wand Agent；不可用的候选按原有规则继续，取消与超时会结束本次调用。
         </SettingsStatus>
       </SettingsSection>
 
@@ -1513,8 +1514,9 @@ export function DisplaySettingsTab({ snapshot, repository, refresh }: SettingsTa
   return (
     <section className="wand-settings-library-panel" aria-label="显示">
       <header className="wand-settings-library-panel-heading">
-        <h2>显示</h2><p>设置各类结果卡片的默认展开状态。</p>
+        <h2>显示</h2><p>调整本机配色与结果卡片的默认展开状态。</p>
       </header>
+      <ThemePicker />
       <SettingsSection title="默认展开的卡片">
         {CARD_OPTIONS.map((option) => (
           <SettingsToggle

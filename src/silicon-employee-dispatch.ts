@@ -3,27 +3,25 @@ import { providerCliInstalled } from "./session-provider.js";
 import type { WandTaskAgent } from "./task-types.js";
 import { isLocalDecisionModel } from "./decision-expert-identity.js";
 
-export interface EmployeeCandidateSelectionOptions {
-  /** 普通任务派发只走 CLI；显式员工会话可允许已配置的 SDK。 */
-  skipSdk?: boolean;
-}
-
 /** Match child-process PATH without starting a shell or trusting a client availability claim. */
 export function employeeCliAvailable(agent: WandTaskAgent, pathValue = process.env.PATH ?? ""): boolean {
   return providerCliInstalled(agent.provider, pathValue);
 }
 
-/** First installed candidate wins; when none is installed retain the preferred candidate for a recoverable failure. */
+/** SDK runs in-process; its availability is decided by the harness, not by a CLI executable. */
+export function employeeCandidateAvailable(agent: WandTaskAgent): boolean {
+  return agent.engine === "sdk" || employeeCliAvailable(agent);
+}
+
+/** First available candidate wins; when none is available retain the preferred candidate for a recoverable failure. */
 export function selectEmployeeCandidate(
   employee: Pick<SiliconEmployee, "agents">,
-  available: (agent: WandTaskAgent) => boolean = employeeCliAvailable,
-  options: EmployeeCandidateSelectionOptions = {},
+  available: (agent: WandTaskAgent) => boolean = employeeCandidateAvailable,
 ): { agent: WandTaskAgent; index: number } {
   // LAYA is invoked only by the bounded decision evaluator; never pass its selector to a chat CLI/harness.
-  const generative = employee.agents.filter((agent) => !isLocalDecisionModel(agent.model));
-  const candidates = options.skipSdk ? generative.filter((agent) => agent.engine !== "sdk") : generative;
-  if (!candidates.length) throw new Error("LAYA 仅支持有界决策，或员工没有可用 CLI 候选；请配置「决策专家」备用调用链。");
-  if (!candidates.length || candidates.some((agent) => agent.kind !== "structured")) {
+  const candidates = employee.agents.filter((agent) => !isLocalDecisionModel(agent.model));
+  if (!candidates.length) throw new Error("LAYA 仅支持有界决策，员工没有可用的对话候选；请配置备用调用链。");
+  if (candidates.some((agent) => agent.kind !== "structured")) {
     throw new Error("硅基员工没有可用的结构化执行候选。");
   }
   const index = candidates.findIndex((agent) => available(agent));

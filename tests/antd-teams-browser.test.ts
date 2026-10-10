@@ -1,3 +1,4 @@
+import { themeFixtureHtml } from "./helpers/theme-fixture.js";
 import { cssEvidenceCapture } from "./helpers/antd-css-evidence.js";
 import { peopleContrastExpression } from "./helpers/people-layout-contrast.js";
 import assert from "node:assert/strict";
@@ -213,11 +214,11 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
     }
     if (url.startsWith("/api/")) return send({});
     response.setHeader("content-type", "text/html; charset=utf-8");
-    response.end(`<!doctype html><html lang="zh-CN"><head><meta name="viewport" content="width=device-width,initial-scale=1">`
+    response.end(themeFixtureHtml(`<!doctype html><html lang="zh-CN"><head><meta name="viewport" content="width=device-width,initial-scale=1">`
       + `<link rel="stylesheet" href="/tailwind.css"><link rel="stylesheet" href="/styles.css">`
       + `<style>html,body{margin:0}</style></head><body><div id="root"></div>`
       + `<div id="overlay-root"><div class="wand-ui-portals" id="wand-react-ui-portals"></div></div>`
-      + `<script src="/app.js"></script></body></html>`);
+      + `<script src="/app.js"></script></body></html>`));
   });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -428,6 +429,18 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
       assert.equal(await evaluate(`(()=>{const s=document.querySelector('.wand-team-member[data-open] .wand-team-select .wand-ui-select-trigger');
         return !!s && Math.abs(s.getBoundingClientRect().width - s.parentElement.getBoundingClientRect().width) < 2})()`), true,
         `${mode}: 选择器铺满字段宽度`);
+      const candidateBounds = await evaluate(`Array.from(document.querySelectorAll('.wand-team-member[data-open] .wand-team-candidate [role=combobox]')).map(control=>{const r=control.getBoundingClientRect(),f=control.closest('.task-board-native-field').getBoundingClientRect(),c=control.closest('.wand-team-member').getBoundingClientRect();return {label:control.getAttribute('aria-label'),right:r.right,fieldRight:f.right,cardRight:c.right,overflow:control.scrollWidth>control.clientWidth+1};})`);
+      assert.ok(candidateBounds.every(control => control.right <= control.fieldRight + 1 && control.right <= control.cardRight + 1 && !control.overflow), `${mode}: candidate controls stay within both field and member card: ${JSON.stringify(candidateBounds)}`);
+      const candidateModel = '.wand-team-member[data-open] .wand-team-candidate [aria-label$="模型"]';
+      await click(candidateModel);
+      await wait("!!document.querySelector('.wand-ui-select-content input')");
+      const modelPopupBounds = await evaluate(`(()=>{const p=document.querySelector('.wand-ui-select-content'),r=p.getBoundingClientRect();return {left:r.left,right:r.right,width:r.width};})()`);
+      assert.ok(modelPopupBounds.left >= 0 && modelPopupBounds.right <= (mode === "mobile" ? 390 : 1280) + 1, `${mode}: model menu remains inside the viewport`);
+      await click('.wand-ui-select-content input');
+      assert.equal(await evaluate("!!document.querySelector('.wand-team-member[data-open]')"), true, `${mode}: searching the model menu preserves the editor`);
+      await key("Escape");
+      await wait("!document.querySelector('.wand-ui-select-content')");
+      assert.equal(await evaluate(`document.activeElement === document.querySelector('${candidateModel}')`), true, `${mode}: model Escape restores the model trigger`);
       const scoreBefore = await evaluate("document.querySelectorAll('.wand-team-member[data-open] .wand-team-candidate').length");
       await click(".wand-team-member[data-open] .wand-team-candidates-foot .wand-ui-button");
       await wait(`document.querySelectorAll('.wand-team-member[data-open] .wand-team-candidate').length === ${scoreBefore + 1}`);
@@ -480,7 +493,7 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
     if (!employeesOnly) {
       routeLinked = false;
       await send("Page.navigate", { url: `${origin}/?route=unlinked#route` });
-      await wait("document.body.innerText.includes('此运行尚未关联群对话')");
+      await wait("document.body?.innerText.includes('此运行尚未关联群对话')");
       assert.equal(await evaluate("!!document.querySelector('[role=alert]')"), true, "无关联旧运行展示可恢复错误");
       assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).some(button => button.textContent.replace(/\\s/g, '').includes('重试'))"), true);
       assert.equal(await evaluate("!!document.querySelector('.task-board-team-chat-input')"), false, "无关联运行不提供可发送输入");

@@ -1,7 +1,23 @@
 import { installStyleSheet } from "../styles";
 
-// Feature layout only; Ant Design and the shared warm theme own control chrome.
+// Feature layout only; Ant Design and the shared palette own control chrome.
 const css = String.raw`
+.wand-theme-picker { display:grid; grid-template-columns:repeat(auto-fit,minmax(104px,1fr)); gap:8px; width:100%; }
+.wand-theme-choice.ant-radio-wrapper { display:flex; align-items:flex-start; margin:0; padding:10px 8px; border:1px solid var(--border-subtle); border-radius:var(--radius-sm); background:var(--bg-surface); }
+.wand-theme-choice.ant-radio-wrapper-checked { border-color:var(--border-focus); background:var(--accent-muted); }
+.wand-theme-choice.ant-radio-wrapper:hover { border-color:var(--border-focus); }
+.wand-theme-choice.ant-radio-wrapper:focus-within { outline:2px solid var(--border-focus); outline-offset:2px; }
+.wand-theme-choice>.ant-radio { margin-top:2px; }
+.wand-theme-choice>span:last-child { flex:1; min-width:0; padding-inline-end:0; }
+.wand-theme-preview { display:block; position:relative; height:34px; border:1px solid; border-radius:3px; overflow:hidden; margin-bottom:7px; }
+.wand-theme-preview-sidebar { position:absolute; inset:0 auto 0 0; width:23%; }
+.wand-theme-preview-lines { position:absolute; inset:8px 8px 8px 34%; display:flex; flex-direction:column; gap:4px; }
+.wand-theme-preview-lines i { display:block; width:90%; height:2px; background:currentColor; opacity:.65; }
+.wand-theme-preview-lines i:last-child { width:60%; }
+.wand-theme-preview-selection { position:absolute; left:3px; top:9px; width:calc(23% - 6px); height:5px; border-radius:1px; }
+.wand-theme-choice-label { display:flex; flex-wrap:wrap; gap:0 6px; font-size:12px; line-height:18px; }
+.wand-theme-choice-status { color:var(--accent); min-height:18px; font-weight:500; }
+
 .ant-modal:has(.wand-settings-library-nested-dialog) { width: min(800px, calc(100vw - var(--wand-safe-left, 0px) - var(--wand-safe-right, 0px) - 32px)) !important; max-width:100%; }
 .wand-settings-library-overview { flex-shrink:0; }
 .wand-settings-library-nested-dialog .ant-modal-body { max-height: 72dvh; overflow: auto; }

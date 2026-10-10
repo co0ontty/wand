@@ -29,7 +29,7 @@ export function WandChip({ className, size = "md", variant = "soft", dismissible
   const dismiss = (): void => { setInternalOpen(false); onOpenChange?.(false); };
   return <WandUiBoundary><Tag className={classNames("wand-ui-chip", className)}
     closeIcon={<span aria-label={closeLabel}>×</span>} closable={!props.disabled}
-    color={kind === "primary" ? "#b8562f" : kind === "danger" ? "error" : undefined}
+    color={kind === "primary" ? "var(--accent-solid)" : kind === "danger" ? "error" : undefined}
     onClick={event => { onClick?.(event as unknown as React.MouseEvent<HTMLButtonElement>); if (!props.disabled) dismiss(); }}
     onClose={dismiss}>{children}</Tag></WandUiBoundary>;
 }

@@ -122,7 +122,7 @@ import { DistributionManager } from "./distribution-manager.js";
 import { isLogBusActive, wandTuiLog } from "./tui/log-bus.js";
 import { EMBEDDED_WEB_ASSETS, type EmbeddedVendorAssetPath } from "./web-ui/embedded-assets.js";
 import { renderApp } from "./web-ui/index.js";
-import { getAiTeamsChunk, getScriptAsset } from "./web-ui/scripts.js";
+import { getAiTeamsChunk, getScriptAsset, getThemePreloadAsset } from "./web-ui/scripts.js";
 import { getStylesAsset } from "./web-ui/styles.js";
 import { WsBroadcastManager } from "./ws-broadcast.js";
 import { TerminalDaemonClient } from "./terminal-daemon-client.js";
@@ -509,7 +509,7 @@ export async function startServer(
   let decisionRuntime: DecisionRuntimeAccess | null = null;
   let autoAssignEvaluate: DecisionRuntimeAccess["evaluate"];
   const processes = new ProcessManager(config, storage, configDir, terminalHost,
-    { resolveDecisionEvaluate: () => autoAssignEvaluate });
+    { resolveDecisionEvaluate: () => autoAssignEvaluate, free: openRouter });
   const structuredLogger = new SessionLogger(configDir, config.shortcutLogMaxBytes);
   // Production startup provides a daemon-backed host for structured CLI runs
   // even when Render owns every PTY. In-process hosts are for test injection.
@@ -672,6 +672,11 @@ export async function startServer(
     const asset = getStylesAsset(requestedHash(req));
     setAssetCache(req, res, asset.hash, "public");
     res.type("text/css").send(asset.content);
+  });
+  app.get("/assets/theme.js", (req, res) => {
+    const asset = getThemePreloadAsset();
+    setAssetCache(req, res, asset.hash, "public");
+    res.type("application/javascript").send(asset.content);
   });
   app.get("/assets/app.js", (req, res) => {
     const asset = getScriptAsset(configPath, requestedHash(req));
@@ -906,7 +911,7 @@ export async function startServer(
   app.use("/api/silicon-employees/:employeeId/knowledge", requireSessions);
   app.use(userMemoryOperationLog(storage));
   const userMemory = new UserMemoryService({
-    storage, config,
+    storage, config, free: openRouter,
     notifyChanged: (employeeId) => notifyAiTeamRun({ kind: "silicon-employee-definition", employeeId }),
   });
   registerUserMemoryRoutes(app, {
@@ -992,7 +997,7 @@ export async function startServer(
 
   registerGithubRoutes(app, { storage, requireAdmin, sessions: sessionRegistry });
   // 任务管理与 Missions 一样只需登录：原生 connected-app 也要能列/建/派发。
-  registerTaskRoutes(app, { storage, sessions: sessionRegistry, structured: structuredSessions, processes, config, aiTeams });
+  registerTaskRoutes(app, { storage, sessions: sessionRegistry, structured: structuredSessions, processes, config, aiTeams, free: openRouter });
   registerAiTeamRoutes(app, {
     storage,
     runner: aiTeams,
@@ -1003,6 +1008,7 @@ export async function startServer(
   registerSiliconEmployeeRoutes(app, {
     storage,
     config,
+    free: openRouter,
     notifyEmployeeChanged: (employeeId) => notifyAiTeamRun({ kind: "silicon-employee-definition", employeeId }),
   });
   registerAttentionRoutes(app, { sessions: sessionRegistry, runner: aiTeams });
@@ -1037,7 +1043,7 @@ export async function startServer(
 
   registerSessionRoutes(app, processes, structuredSessions, storage, config.defaultMode, config, sessionRegistry, (cwd) => {
     recordRecentPath(storage, cwd);
-  }, (event) => wsManager.emitEvent(event), decisionExpert);
+  }, (event) => wsManager.emitEvent(event), decisionExpert, openRouter);
   registerClaudeHistoryRoutes(app, processes, storage);
   registerWorkspaceRoutes(app, storage, sessionRegistry, { config });
   registerMissionRoutes(app, missions);
@@ -1053,7 +1059,7 @@ export async function startServer(
     if (typeof body.sessionId === "string" && body.sessionId.length > 0) {
       const snapshot = sessionRegistry.getLatest(body.sessionId);
       if (snapshot?.cwd) cwd = snapshot.cwd;
-      if (snapshot) ai = resolveSystemAiContext(snapshot, config, storage.getSystemSiliconEmployee());
+      if (snapshot) ai = resolveSystemAiContext(snapshot, config, storage.getSystemSiliconEmployee(), openRouter);
     }
     if (!ai) {
       const defaultSession = {
@@ -1064,7 +1070,7 @@ export async function startServer(
         selectedModel: null,
         thinkingEffort: config.defaultThinkingEffort,
       };
-      ai = resolveSystemAiContext(defaultSession, config, storage.getSystemSiliconEmployee());
+      ai = resolveSystemAiContext(defaultSession, config, storage.getSystemSiliconEmployee(), openRouter);
     }
     try {
       const optimized = await optimizePrompt(text, config.language ?? "", cwd, ai);

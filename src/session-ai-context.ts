@@ -1,8 +1,9 @@
+import type { EmployeeTextDeps } from "./employee-text.js";
 import { getDefaultModelForProvider } from "./config.js";
-import { resolveModelGroupModels, type ModelGroup } from "./model-groups.js";
+import type { ModelGroup } from "./model-groups.js";
 import { providerCliInstalled, isSessionProvider } from "./session-provider.js";
 import type { SiliconEmployee } from "./ai-team-types.js";
-import { isSystemSiliconEmployee, systemEmployeeCliCandidates } from "./system-employee.js";
+import { isSystemSiliconEmployee, systemEmployeeCandidates } from "./system-employee.js";
 import type { AiCliCandidate, SessionProvider, SessionSnapshot, WandConfig } from "./types.js";
 import { inferProviderFromCommand, inferProviderFromRunner } from "./session-provider.js";
 
@@ -13,9 +14,10 @@ export interface SessionAiContext {
   inheritEnv?: boolean;
   /** 内置「系统运维」员工的人设；作为系统提示前缀注入 Wand 自有 AI 调用。 */
   opsPersona?: string;
-  /** CLI 降级链（按顺序）。为空时只用 provider/model 这一次调用。 */
+  /** 员工执行链（按顺序）。为空时只用 provider/model 这一次调用。 */
   cliCandidates?: AiCliCandidate[];
-  /** 系统应用必须经员工 CLI 渠道；候选为空时禁止退回当前会话/默认 provider。 */
+  employeeText?: EmployeeTextDeps;
+  /** 系统应用必须经员工渠道；候选为空时禁止退回当前会话/默认 provider。 */
   employeeChannelOnly?: boolean;
   modelGroups?: ModelGroup[];
 }
@@ -67,30 +69,32 @@ export function resolveSessionAiContext(
 export function resolveSystemAiContext(
   snapshot: Parameters<typeof resolveSessionAiContext>[0],
   config: Parameters<typeof resolveSessionAiContext>[1]
-    & Pick<WandConfig, "systemAiCli" | "systemAiModel">,
+    & Pick<WandConfig, "systemAiCli" | "systemAiModel">
+    & Partial<Pick<WandConfig, "defaultCwd" | "harness">>,
   systemEmployee?: SiliconEmployee | null,
+  free?: EmployeeTextDeps["free"],
 ): SessionAiContext {
   const sessionContext = resolveSessionAiContext(snapshot, config);
   // 候选里的「跟随默认模型」在这里就换成具体的 Wand 默认模型：降级到下一个 provider
   // 时不能拿上一个 provider 的模型，也不能把决定权交给 CLI 自己的默认值。
-  const chain = systemEmployeeCliCandidates(systemEmployee).flatMap((candidate) =>
-    resolveModelGroupModels(config.modelGroups, candidate.provider,
-      candidate.model ?? normalizeModel(getDefaultModelForProvider(config, candidate.provider)), {
-        preferDefault: !candidate.model || candidate.model === "default",
-      })
-      .map((model) => ({ ...candidate, model: normalizeModel(model) })));
+  // Keep the configured chain here; model groups are expanded once at execution.
+  const chain = systemEmployeeCandidates(systemEmployee).map(candidate => ({
+    ...candidate,
+    model: candidate.model ?? normalizeModel(getDefaultModelForProvider(config, candidate.provider)),
+  }));
   const owned: SessionAiContext = {
     ...sessionContext,
     ...(chain.length ? { cliCandidates: chain } : {}),
+    ...(chain.some(candidate => candidate.engine === "sdk") ? { employeeText: { config, ...(free ? { free } : {}) } } : {}),
     ...(systemEmployee ? { employeeChannelOnly: true } : {}),
     ...(isSystemSiliconEmployee(systemEmployee) ? { opsPersona: systemEmployee!.prompt } : {}),
   };
   // 内置员工可用时，Wand 自有调用一律按它的候选链：provider/model 取首个已安装的
   // 候选（两条路都一致），整条链留给运行期降级。
   if (chain.length) {
-    const preferred = chain.find((candidate) => providerCliInstalled(candidate.provider)) ?? chain[0]!;
+    const preferred = chain.find((candidate) => candidate.engine === "sdk" || providerCliInstalled(candidate.provider)) ?? chain[0]!;
     owned.provider = preferred.provider;
-    owned.model = preferred.model ?? normalizeModel(getDefaultModelForProvider(config, preferred.provider));
+    owned.model = preferred.model;
     owned.thinkingEffort = preferred.thinkingEffort ?? config.defaultThinkingEffort;
   }
   if (chain.length) return owned;

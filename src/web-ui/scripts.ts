@@ -90,3 +90,9 @@ export function getAiTeamsChunk(requestedHash?: string): { content: string; hash
   if (requestedHash === embeddedAiTeamsChunk.hash) return embeddedAiTeamsChunk;
   return _aiTeamsChunk;
 }
+
+/** Blocking, content-versioned device preference bootstrap. */
+export function getThemePreloadAsset(): VersionedWebAsset {
+  return themePreloadAsset;
+}
+const themePreloadAsset = versionWebAsset(EMBEDDED_WEB_ASSETS.themePreloadJs);

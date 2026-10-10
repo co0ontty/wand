@@ -1,3 +1,4 @@
+import { themeFixtureHtml } from "./helpers/theme-fixture.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createServer } from "node:http";
@@ -93,7 +94,7 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
     if (url.pathname === "/app.js") { res.setHeader("content-type", "text/javascript"); res.end(readFileSync(join(temp, "app.js"))); return; }
     if (url.pathname.endsWith(".css")) { res.setHeader("content-type", "text/css"); res.end(readFileSync(join(root, "src/web-ui/content", url.pathname.slice(1)))); return; }
     res.setHeader("content-type", "text/html;charset=utf-8");
-    res.end('<!doctype html><html lang="zh-CN"><head><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/tailwind.css"><link rel="stylesheet" href="/styles.css"><style>html,body,#app,#root{height:100%;margin:0}#root{display:flex}</style></head><body><div id="app" data-react-shell="enabled"><div id="root"></div></div><div id="overlay-root"><div id="wand-react-ui-portals" class="wand-ui-portals"></div></div><script src="/app.js"></script></body></html>');
+    res.end(themeFixtureHtml('<!doctype html><html lang="zh-CN"><head><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/tailwind.css"><link rel="stylesheet" href="/styles.css"><style>html,body,#app,#root{height:100%;margin:0}#root{display:flex}</style></head><body><div id="app" data-react-shell="enabled"><div id="root"></div></div><div id="overlay-root"><div id="wand-react-ui-portals" class="wand-ui-portals"></div></div><script src="/app.js"></script></body></html>'));
   });
   server.listen(0, "127.0.0.1"); await once(server, "listening");
   const address = server.address(); assert.ok(address && typeof address === "object");
@@ -202,6 +203,26 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
         assert.equal(density.truncated, true, `${mode}: long name does not expand the list`);
         assert.equal(density.overflow, false, `${mode}: no horizontal overflow`);
         assert.deepEqual(density.labels, ["对话", "工作区", "任务", "团队", "通讯录"]);
+        const longConversation = '[data-conversation-id="dense-0"] .conversation-row-open';
+        const longPoint = await browser.evaluate(`(()=>{const r=document.querySelector('${longConversation}').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+        await browser.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...longPoint });
+        await browser.wait('!!document.querySelector(".ant-tooltip:not(.ant-tooltip-hidden) [role=tooltip]")', "truncated conversation hover exposes the full name");
+        await browser.settle();
+        assert.match(await browser.evaluate('document.querySelector(".ant-tooltip [role=tooltip]").textContent'), /长名称会话 0/);
+        const titleTipBounds = await browser.evaluate(`(()=>{const r=document.querySelector('.ant-tooltip:not(.ant-tooltip-hidden)').getBoundingClientRect();return {left:r.left,right:r.right,viewport:innerWidth};})()`);
+        assert.ok(titleTipBounds.left >= 0 && titleTipBounds.right <= titleTipBounds.viewport + 1, `${mode}: the complete name stays inside the viewport: ${JSON.stringify(titleTipBounds)}`);
+        await browser.screenshot(join(artifacts, `long-title-${mode}.png`));
+        await browser.key("Escape");
+        await browser.wait('!document.querySelector(".ant-tooltip:not(.ant-tooltip-hidden)")');
+        assert.equal(await browser.evaluate('fixture.memory.getSnapshot().layout.sessionsDrawerOpen'), true, "tooltip Escape preserves the drawer");
+        await browser.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 1, y: 1 });
+        await browser.evaluate(`document.querySelector('${longConversation}').focus();true`);
+        await browser.wait('!!document.querySelector(".ant-tooltip:not(.ant-tooltip-hidden)")', "keyboard focus exposes the full name");
+        await browser.key("Escape");
+        await browser.wait('!document.querySelector(".ant-tooltip:not(.ant-tooltip-hidden)")');
+        assert.equal(await browser.evaluate(`document.activeElement === document.querySelector('${longConversation}')`), true, "tooltip Escape keeps the row's focus");
+        await browser.key("Tab");
+        assert.equal(await browser.evaluate('document.activeElement.classList.contains("conversation-row-more")'), true, "the tooltip adds no tab stop");
         await browser.click('.conversation-row', "right");
         await browser.wait('!!document.querySelector(".conversation-row-menu")');
         await browser.screenshot(join(artifacts, `chat-menu-${mode}.png`));

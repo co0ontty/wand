@@ -76,7 +76,7 @@ export const reducedMotionStyles = String.raw`
 @media (prefers-reduced-motion: reduce) {
   /* The global duration blanket otherwise creates a transition of left/top on
      library popups. rc-trigger measures those coordinates synchronously. */
-  :is(.ant-dropdown, .ant-dropdown-menu-submenu-popup, .ant-popover, .ant-picker-dropdown, .ant-select-dropdown) {
+  :is(.ant-dropdown, .ant-dropdown-menu-submenu-popup, .ant-popover, .ant-tooltip, .ant-picker-dropdown, .ant-select-dropdown) {
     transition-property: none !important;
     animation-duration: 0.01ms !important;
     transform: none !important;

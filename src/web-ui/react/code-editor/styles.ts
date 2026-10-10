@@ -85,25 +85,25 @@ export const codeEditorStyles = String.raw`
   overflow: auto;
   scrollbar-gutter: stable;
 }
-.wand-code-editor-textarea::selection { background: rgba(37, 99, 235, 0.22); }
+.wand-code-editor-textarea::selection { background: var(--selection-bg); }
 .wand-code-editor-host.wrap .wand-code-editor-content,
 .wand-code-editor-host.wrap .wand-code-editor-textarea { white-space: pre-wrap; overflow-wrap: break-word; }
 
 /* syntax highlight (reuses file-preview palette) */
-.wand-code-editor-content .wand-file-preview-syntax-keyword { color: #8250df; }
-.wand-code-editor-content .wand-file-preview-syntax-string { color: #0a7d37; }
-.wand-code-editor-content .wand-file-preview-syntax-number { color: #b35900; }
-.wand-code-editor-content .wand-file-preview-syntax-comment { color: #6a737d; font-style: italic; }
-.wand-code-editor-content .wand-file-preview-syntax-operator { color: #b2085f; }
+.wand-code-editor-content .wand-file-preview-syntax-keyword { color: var(--syntax-keyword); }
+.wand-code-editor-content .wand-file-preview-syntax-string { color: var(--syntax-string); }
+.wand-code-editor-content .wand-file-preview-syntax-number { color: var(--syntax-number); }
+.wand-code-editor-content .wand-file-preview-syntax-comment { color: var(--syntax-comment); font-style: italic; }
+.wand-code-editor-content .wand-file-preview-syntax-operator { color: var(--syntax-operator); }
 
 /* find hits inside the syntax layer */
 .wand-code-editor-content mark.wand-code-editor-hit {
-  background: rgba(250, 204, 21, 0.42);
+  background: var(--find-highlight-bg);
   color: inherit;
   border-radius: 2px;
 }
 .wand-code-editor-content mark.wand-code-editor-hit.active {
-  background: rgba(249, 115, 22, 0.55);
-  box-shadow: 0 0 0 1px rgba(194, 65, 12, 0.55);
+  background: var(--find-active-bg);
+  box-shadow: 0 0 0 1px var(--warning);
 }
 `;

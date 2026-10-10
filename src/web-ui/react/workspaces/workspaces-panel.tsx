@@ -1,6 +1,7 @@
 import { SidebarPopupOwnerContext, SidebarSurfacesContext, useSidebarPopupOwner, useSidebarPopupState } from "./sidebar-popup-owner";
 import { ConversationMorphIcon } from "../conversations/controls";
 import { SidebarRowMenu } from "./sidebar-row-menu";
+import { SidebarLabelTooltip } from "./sidebar-label-tooltip";
 import { SidebarSessionMenu } from "./sidebar-session-menu";
 import { confirmSidebarAction, confirmClearSessions } from "./sidebar-menu-confirm";
 import { Badge, Checkbox, Flex, Menu, Skeleton, Typography } from "antd";
@@ -191,7 +192,7 @@ function TaskSessionItem({
         event.stopPropagation();
         startSessionDrag(event.dataTransfer, session.id);
       }}>
-      <WandNavigationLink style={{ flex: 1, minWidth: 0, width: "100%", height: "auto", whiteSpace: "normal", justifyContent: "flex-start", textAlign: "start", padding: 6 }}
+      <SidebarLabelTooltip title={`${label} · ${state.label} · ${rowTitle}`} selector=".workspace-session-name"><WandNavigationLink style={{ flex: 1, minWidth: 0, width: "100%", height: "auto", whiteSpace: "normal", justifyContent: "flex-start", textAlign: "start", padding: 6 }}
         className="workspace-session-main"
         orientation="vertical"
         size="sm"
@@ -227,7 +228,7 @@ function TaskSessionItem({
         ) : session.sessionKind === "pty" && (
           <span className="workspace-session-kind">终端</span>
         )}
-      </WandNavigationLink>
+      </WandNavigationLink></SidebarLabelTooltip>
     </Flex>
   );
   return <SidebarSessionMenu row={row} session={session} label={label} disabled={manageMode}
@@ -1577,7 +1578,7 @@ function SidebarWorkspacesPanel({
                     if (searchVisible) onSearchChange?.("");
                     setSearchOpen(!searchVisible);
                   }}
-                ><ConversationMorphIcon active={searchVisible} from="search" to="close" size={16}/></WandIconButton>
+                ><ConversationMorphIcon active={searchVisible} from="search" to="back" size={16}/></WandIconButton>
                 <WandPopover popupOwner={popupOwner} open={listMenuOpen} onOpenChange={setListMenuOpen} align="end"
                   ariaLabel="会话列表选项" contentRole="menu"
                   trigger={<WandIconButton title="列表选项" aria-label="会话列表选项"><WandIcon name="more" size={16}/></WandIconButton>}>

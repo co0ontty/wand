@@ -11,9 +11,8 @@ import {
   type SiliconEmployee,
   type SiliconEmployeeDraft,
 } from "./ai-team-types.js";
+import type { OpenRouterFreeModelsService } from "./openrouter-free-models.js";
 import { getErrorMessage } from "./error-utils.js";
-import { DECISION_EXPERT_KEY, isLocalDecisionModel } from "./decision-expert-identity.js";
-import { OPENROUTER_FREE_SELECTOR, isOpenRouterFreeSelector } from "./openrouter-free-selection.js";
 import { asyncRoute } from "./express-async.js";
 import { bodyObject, sendRouteError, text } from "./server-request.js";
 import { parseTaskAgent } from "./server-task-routes.js";
@@ -38,7 +37,7 @@ import type { WandTaskAgent } from "./task-types.js";
 import type { SessionProvider, WandConfig } from "./types.js";
 
 /** 员工起草没有会话上下文，按「默认 provider」解析，与任务标题 / 提示词优化一致。 */
-function employeeDraftAiOptions(storage: WandStorage, config?: WandConfig): QuickCommitAiOptions {
+function employeeDraftAiOptions(storage: WandStorage, config?: WandConfig, free?: Pick<OpenRouterFreeModelsService, "resolveForCall">): QuickCommitAiOptions {
   if (!config) return {};
   const provider: SessionProvider = config.defaultProvider ?? "claude";
   return resolveSystemAiContext(
@@ -52,6 +51,7 @@ function employeeDraftAiOptions(storage: WandStorage, config?: WandConfig): Quic
     },
     config,
     storage.getSystemSiliconEmployee(),
+    free,
   );
 }
 
@@ -134,19 +134,20 @@ export function parseSystemEmployeeAgents(value: unknown, existing: SiliconEmplo
     throw new Error("该员工是内置的，身份不可修改。");
   }
 
-  if (!Array.isArray(body.agents)) throw new Error("请提供执行候选数组（CLI / SDK）。");
-  if (body.agents.length === 0) throw new Error("至少需要一个执行候选。");
-  if (body.agents.length > AI_TEAM_MAX_CANDIDATES) {
+  return parseEmployeeAgents(body.agents);
+}
+
+/** One validation owner for every employee candidate list, including legacy single agents. */
+function parseEmployeeAgents(value: unknown): WandTaskAgent[] {
+  if (!Array.isArray(value)) throw new Error("请提供执行候选数组（CLI / SDK）。");
+  if (value.length === 0) throw new Error("至少需要一个执行候选。");
+  if (value.length > AI_TEAM_MAX_CANDIDATES) {
     throw new Error(`最多 ${AI_TEAM_MAX_CANDIDATES} 个执行候选。`);
   }
-  const agents = body.agents.map((rawAgent): WandTaskAgent => {
+  const agents = value.map((rawAgent): WandTaskAgent => {
     const parsed = parseTaskAgent(rawAgent ?? {});
     if (!parsed) throw new Error("请选择有效的 CLI 工具或 Wand Agent。");
     if (parsed.kind !== "structured") throw new Error("硅基员工只支持结构化会话。");
-    if (existing.systemKey === DECISION_EXPERT_KEY && (parsed.provider !== "pi" || parsed.engine !== "sdk"
-      || !(isLocalDecisionModel(parsed.model) || parsed.model === OPENROUTER_FREE_SELECTOR || isOpenRouterFreeSelector(parsed.model)))) {
-      throw new Error("决策专家仅支持 LAYA 或 Wand 免费分组的决策候选；请使用 Wand 内部执行入口。");
-    }
     return parsed;
   });
   if (new Set(agents.map(agentKey)).size !== agents.length) {
@@ -167,33 +168,12 @@ export function parseSiliconEmployeeInput(
   const prompt = text(body.prompt);
   if (prompt.length > 20_000) throw new Error("员工设定 Prompt 不能超过 20000 个字符。");
 
-  let agents: WandTaskAgent[];
-  if (Array.isArray(body.agents)) {
-    if (body.agents.length === 0) throw new Error("至少需要一个执行候选。");
-    if (body.agents.length > AI_TEAM_MAX_CANDIDATES) {
-      throw new Error(`最多 ${AI_TEAM_MAX_CANDIDATES} 个执行候选。`);
-    }
-    agents = body.agents.map((rawAgent): WandTaskAgent => {
-      const parsed = parseTaskAgent(rawAgent ?? {});
-      if (!parsed) throw new Error("请选择有效的 CLI 工具或 Wand Agent。");
-      if (parsed.kind !== "structured") throw new Error("硅基员工只支持结构化会话。");
-      return parsed;
-    });
-  } else if (body.agents !== undefined && body.agents !== null) {
-    throw new Error("候选执行配置必须是数组。");
-  } else if (body.agent !== undefined && body.agent !== null) {
-    const singleAgent = parseTaskAgent(body.agent);
-    if (!singleAgent) throw new Error("请选择有效的 CLI 工具或 Wand Agent。");
-    if (singleAgent.kind !== "structured") throw new Error("硅基员工只支持结构化会话。");
-    agents = [singleAgent];
-  } else {
-    throw new Error("至少需要一个执行候选。");
-  }
-
-  const seenKeys = new Set(agents.map(agentKey));
-  if (seenKeys.size !== agents.length) {
-    throw new Error("执行候选存在重复。");
-  }
+  let candidates: unknown;
+  if (Array.isArray(body.agents)) candidates = body.agents;
+  else if (body.agents !== undefined && body.agents !== null) throw new Error("候选执行配置必须是数组。");
+  else if (body.agent !== undefined && body.agent !== null) candidates = [body.agent];
+  else throw new Error("至少需要一个执行候选。");
+  const agents = parseEmployeeAgents(candidates);
 
   const avatar = parseAvatar(body.avatar, name);
   const tags = parseSiliconEmployeeTags(body.tags === undefined ? existing?.tags ?? [] : body.tags);
@@ -220,6 +200,7 @@ export function registerSiliconEmployeeRoutes(
     storage: WandStorage;
     notifyEmployeeChanged?: (employeeId: string) => void;
     config?: WandConfig;
+    free?: Pick<OpenRouterFreeModelsService, "resolveForCall">;
     /** 测试注入点：默认按系统 AI 配置真实调用模型。 */
     generateDraft?: (request: EmployeeDraftRequest) => Promise<SiliconEmployeeDraft>;
     /** 测试注入点：CLI 可用性探测。 */
@@ -246,7 +227,7 @@ export function registerSiliconEmployeeRoutes(
     return available.length ? available : [...SESSION_PROVIDERS];
   };
   const generateDraft = deps.generateDraft ?? ((request: EmployeeDraftRequest) =>
-    generateSiliconEmployeeDraft(request.expectation, employeeDraftAiOptions(storage, config), {
+    generateSiliconEmployeeDraft(request.expectation, employeeDraftAiOptions(storage, config, deps.free), {
       cwd: config?.defaultCwd || process.cwd(),
       language: config?.language ?? "",
       existingNames: request.existingNames,

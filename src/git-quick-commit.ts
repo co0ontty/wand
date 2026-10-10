@@ -1,6 +1,10 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { spawn } from "node:child_process";
 
+import { abortableEmployeeText, prepareEmployeeTextCandidate, type EmployeeTextDeps } from "./employee-text.js";
 import { buildChildEnv } from "./env-utils.js";
 import { buildLanguageDirective } from "./language-prompt.js";
 import { isSessionProvider, providerCliInstalled } from "./session-provider.js";
@@ -319,9 +323,11 @@ export interface QuickCommitAiOptions {
   inheritEnv?: boolean;
   /** 内置「系统运维」员工的角色设定：作为系统提示前缀注入。 */
   opsPersona?: string;
-  /** CLI 降级链（按顺序）；未设置时只用 provider/model 这一次调用。 */
+  /** 员工候选链（按顺序）；未设置时只用 provider/model 这一次调用。 */
   cliCandidates?: import("./types.js").AiCliCandidate[];
-  /** 系统应用必须经员工渠道；没有可用 CLI 候选时直接失败，不退回默认 provider。 */
+  /** SDK 使用当前实例配置与现有免费分组服务，不创建其他执行渠道。 */
+  employeeText?: EmployeeTextDeps;
+  /** 系统应用必须经员工渠道；没有可用候选时直接失败，不退回默认 provider。 */
   employeeChannelOnly?: boolean;
   /** 整条候选链的时间上限；默认 CLI_CHAIN_BUDGET_MS。第一条消息里的调用要短得多。 */
   budgetMs?: number;
@@ -589,6 +595,9 @@ function buildGrokTextArgs(request: AiTextRequest, opts: QuickCommitAiOptions, a
   if (effort) args.push("--effort", effort);
   args.push(...systemPromptArgsFrom("grok", request.system));
   if (allowTools) args.push("--always-approve");
+  else args.push("--tools", "", "--disallowed-tools",
+    "run_terminal_cmd,read_file,search_replace,grep,list_dir,web_search,web_fetch,todo_write,task,Agent",
+    "--deny", "MCPTool", "--disable-web-search", "--no-subagents");
   return args;
 }
 
@@ -616,6 +625,7 @@ function buildQoderTextArgs(request: AiTextRequest, opts: QuickCommitAiOptions, 
   if (effort) args.push("--reasoning-effort", effort);
   args.push(...systemPromptArgsFrom("qoder", request.system));
   if (allowTools) args.push("--permission-mode", "bypass_permissions");
+  else args.push("--tools", "", "--strict-mcp-config");
   return args;
 }
 
@@ -636,13 +646,14 @@ function runCliText(
   command: string,
   args: string[],
   prompt: string,
-  opts: { cwd: string; timeoutMs: number; inheritEnv?: boolean; signal?: AbortSignal },
+  opts: { cwd: string; timeoutMs: number; inheritEnv?: boolean; signal?: AbortSignal; env?: (base: NodeJS.ProcessEnv) => NodeJS.ProcessEnv },
 ): Promise<string> {
   opts.signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
+    const baseEnv = buildChildEnv(opts.inheritEnv !== false);
     const child = spawn(command, args, {
       cwd: opts.cwd,
-      env: buildChildEnv(opts.inheritEnv !== false),
+      env: opts.env ? opts.env(baseEnv) : baseEnv,
       stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "";
@@ -724,7 +735,8 @@ async function callCodexText(request: AiTextRequest, cwd: string, opts: CliAiTex
 }
 
 async function callOpenCodeText(request: AiTextRequest, cwd: string, opts: CliAiTextOptions): Promise<string> {
-  const args = ["run", "--format", "json"];
+  const agent = `wand-text-${randomUUID()}`;
+  const args = ["run", "--format", "json", "--pure", "--agent", agent];
   const model = opts.model?.trim();
   if (model && model !== "default") args.push("--model", model);
   const variant = thinkingEffortToOpenCodeVariant(opts.thinkingEffort ?? "off");
@@ -733,6 +745,16 @@ async function callOpenCodeText(request: AiTextRequest, cwd: string, opts: CliAi
     cwd,
     timeoutMs: cliTextTimeoutMs(CODEX_MESSAGE_TIMEOUT_MS, opts),
     inheritEnv: opts.inheritEnv, signal: opts.signal,
+    // A dedicated per-invocation agent and scalar deny replace rather than merge
+    // wildcard/specific allow rules. Preserve inherited provider/model config.
+    env: base => {
+      const configured = base.OPENCODE_CONFIG_CONTENT ? JSON.parse(base.OPENCODE_CONFIG_CONTENT) : {};
+      if (!configured || typeof configured !== "object" || Array.isArray(configured)) throw new Error("OpenCode 内联配置无效。");
+      return { ...base, OPENCODE_PERMISSION: JSON.stringify("deny"), OPENCODE_CONFIG_CONTENT: JSON.stringify({
+        ...configured, permission: "deny", autoupdate: false, share: "disabled",
+        agent: { ...configured.agent, [agent]: { mode: "primary", permission: "deny", prompt: "Return only the requested text. Do not use tools." } },
+      }) };
+    },
   });
   const text = extractOpenCodeText(stdout);
   if (!text) throw new QuickCommitError("OpenCode 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
@@ -770,18 +792,33 @@ async function callPiText(request: AiTextRequest, cwd: string, opts: CliAiTextOp
   return text;
 }
 
-async function callGeminiText(request: AiTextRequest, cwd: string, opts: CliAiTextOptions): Promise<string> {
-  const stdout = await runCliText("gemini", buildGeminiTextArgs(opts), contentWithSystemPrompt("gemini", request), {
-    cwd,
-    timeoutMs: cliTextTimeoutMs(CODEX_MESSAGE_TIMEOUT_MS, opts),
-    inheritEnv: opts.inheritEnv, signal: opts.signal,
-  });
-  const text = extractGeminiText(stdout);
-  if (!text) throw new QuickCommitError("Gemini 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
-  return text;
+export function assertGeminiTextCapability(): void {
+  // Gemini ignores supplemental admin policy when a central policy exists.
+  // Refuse that unsupported text-only path rather than launching without deny.
+  const systemPolicies = process.platform === "darwin" ? "/Library/Application Support/GeminiCli/policies"
+    : process.platform === "win32" ? join(process.env.ProgramData ?? "C:\\ProgramData", "gemini-cli", "policies") : "/etc/gemini-cli/policies";
+  if (existsSync(systemPolicies) && readdirSync(systemPolicies).some(file => file.endsWith(".toml"))) {
+    throw new QuickCommitError("Gemini 中央策略阻止注入纯文本工具边界，请配置可用的文本候选。", "AI_FALLBACK_FAILED");
+  }
 }
 
-async function callCliAiText(request: AiTextRequest, cwd: string, language: string, opts: CliAiTextOptions): Promise<string> {
+async function callGeminiText(request: AiTextRequest, cwd: string, opts: CliAiTextOptions): Promise<string> {
+  assertGeminiTextCapability();
+  const root = mkdtempSync(join(tmpdir(), "wand-gemini-text-"));
+  try {
+    const policy = join(root, "text-only.toml");
+    writeFileSync(policy, '[[rule]]\ntoolName = "*"\ndecision = "deny"\npriority = 999\n', { mode: 0o600 });
+    const args = [...buildGeminiTextArgs(opts), "--admin-policy", policy, "--extensions", "none", "--allowed-mcp-server-names", ""];
+    const stdout = await runCliText("gemini", args, contentWithSystemPrompt("gemini", request), {
+      cwd, timeoutMs: cliTextTimeoutMs(CODEX_MESSAGE_TIMEOUT_MS, opts), inheritEnv: opts.inheritEnv, signal: opts.signal,
+    });
+    const text = extractGeminiText(stdout);
+    if (!text) throw new QuickCommitError("Gemini 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
+    return text;
+  } finally { rmSync(root, { recursive: true, force: true }); }
+}
+
+export async function callCliAiText(request: AiTextRequest, cwd: string, language: string, opts: CliAiTextOptions): Promise<string> {
   const provider = defaultProvider(opts.provider);
   if (provider === "codex") {
     return callCodexText(request, cwd, opts);
@@ -832,7 +869,7 @@ function singleCandidate(opts: QuickCommitAiOptions): import("./types.js").AiCli
  * 只有一条候选时保持原行为（错误原样抛出，不摘要）。
  * 仅用于一次性文本生成；执行工具的任务不能使用这条无条件重试路径。
  */
-async function callCliCandidates<T>(
+async function callTextCandidates<T>(
   request: AiTextRequest,
   cwd: string,
   language: string,
@@ -841,19 +878,38 @@ async function callCliCandidates<T>(
 ): Promise<T> {
   opts.signal?.throwIfAborted();
   const { resolveModelGroupModels } = await import("./model-groups.js");
+  const modelGroups = opts.modelGroups ?? opts.employeeText?.config.modelGroups;
+  const seen = new Set<string>();
   const chain = (opts.cliCandidates?.length ? opts.cliCandidates : [singleCandidate(opts)])
-    .flatMap((candidate) => resolveModelGroupModels(opts.modelGroups, candidate.provider, candidate.model,
+    .flatMap((candidate) => resolveModelGroupModels(modelGroups, candidate.provider, candidate.model,
       { preferDefault: !candidate.model || candidate.model === "default" })
-      .map((model) => ({ ...candidate, model: model || undefined })));
+      .map((model) => ({ ...candidate, model: model || undefined })))
+    .filter(candidate => {
+      const key = JSON.stringify([candidate.provider, candidate.engine ?? "cli", candidate.model ?? "", candidate.thinkingEffort ?? opts.thinkingEffort]);
+      if (seen.has(key)) return false;
+      seen.add(key); return true;
+    });
   if (opts.employeeChannelOnly && !opts.cliCandidates?.length) {
-    throw new QuickCommitError("系统员工没有可用的 CLI 候选，已跳过 Wand Agent。", "AI_FALLBACK_FAILED");
+    throw new QuickCommitError("系统员工没有可用的执行候选。", "AI_FALLBACK_FAILED");
   }
   const deadline = Date.now() + Math.max(1, opts.budgetMs ?? CLI_CHAIN_BUDGET_MS);
-  if (chain.length === 1) {
-    return parseOutput(await callCliAiText(request, cwd, language, { ...candidateOptions(opts, chain[0]!), deadline }));
-  }
+  const call = async (candidate: import("./types.js").AiCliCandidate): Promise<string> => {
+    if (candidate.engine !== "sdk") return callCliAiText(request, cwd, language, { ...candidateOptions(opts, candidate), deadline });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(new QuickCommitError("Wand Agent 调用超时。", "CLAUDE_TIMEOUT")), Math.max(1, deadline - Date.now()));
+    const signal = opts.signal ? AbortSignal.any([opts.signal, controller.signal]) : controller.signal;
+    try {
+      const generate = await abortableEmployeeText(prepareEmployeeTextCandidate({
+        ...opts.employeeText,
+        config: { ...opts.employeeText?.config, defaultCwd: cwd, inheritEnv: opts.inheritEnv ?? opts.employeeText?.config.inheritEnv, modelGroups },
+      }, { ...candidate, model: candidate.model ?? "default", thinkingEffort: candidate.thinkingEffort ?? opts.thinkingEffort ?? "off", mode: "default", kind: "structured" }, request, signal), signal);
+      signal.throwIfAborted();
+      return await abortableEmployeeText(generate(), signal);
+    } finally { clearTimeout(timer); }
+  };
+  if (chain.length === 1) return parseOutput(await call(chain[0]!));
 
-  const installed = chain.filter((candidate) => providerCliInstalled(candidate.provider));
+  const installed = chain.filter((candidate) => candidate.engine === "sdk" || providerCliInstalled(candidate.provider));
   const attempts = installed.length ? installed : chain;
   const errors: string[] = [];
   for (const candidate of attempts) {
@@ -863,7 +919,7 @@ async function callCliCandidates<T>(
       break;
     }
     try {
-      const text = await callCliAiText(request, cwd, language, { ...candidateOptions(opts, candidate), deadline });
+      const text = await call(candidate);
       const result = await parseOutput(text);
       if (candidate !== attempts[0]) {
         console.info(`[SystemAi] 候选 ${chain.indexOf(candidate) + 1}/${chain.length} (${candidate.provider}) 成功`);
@@ -877,12 +933,12 @@ async function callCliCandidates<T>(
       console.warn(`[SystemAi] 候选 ${chain.indexOf(candidate) + 1}/${chain.length} (${candidate.provider}) 失败: ${code}`);
     }
   }
-  throw new QuickCommitError(`所有 CLI 候选均失败：${errors.join("；")}`, "AI_FALLBACK_FAILED");
+  throw new QuickCommitError(`所有执行候选均失败：${errors.join("；")}`, "AI_FALLBACK_FAILED");
 }
 
 /**
- * Run a lightweight AI request through the system employee's CLI chain.
- * 此入口只走本机 CLI；使用 SDK 的系统角色由各自的服务调用，不在这里冒充 CLI。
+ * Run a lightweight AI request through the system employee's configured chain.
+ * provider 与引擎由候选决定；SDK 与 CLI 均保留各自适配和身份。
  * parseOutput 在候选链内解析/校验结果；失败后继续下一条，而非提前宣布成功。
  */
 export function callConfiguredAiText(
@@ -905,7 +961,7 @@ export async function callConfiguredAiText(
   opts: QuickCommitAiOptions,
   parseOutput: (raw: string) => unknown = (raw) => raw,
 ): Promise<unknown> {
-  return callCliCandidates(withOpsPersona(request, opts.opsPersona), cwd, language, opts, parseOutput);
+  return callTextCandidates(withOpsPersona(request, opts.opsPersona), cwd, language, opts, parseOutput);
 }
 
 /** Read the unstaged + staged tree without touching the index. */

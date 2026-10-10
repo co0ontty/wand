@@ -3,6 +3,7 @@ import { Avatar, Badge, Flex, Typography } from "antd";
 import type { ConversationSummary } from "../../../conversation-types.js";
 import { employeeProfile } from "../agents/employee-profile";
 import { wandOverlay } from "../overlay-controller";
+import { SidebarLabelTooltip } from "../workspaces/sidebar-label-tooltip";
 import { SidebarRowMenu } from "../workspaces/sidebar-row-menu";
 import { EmployeeAvatar } from "../agents/employee-avatar";
 import { cachedSiliconEmployee } from "../agents/employee-repository";
@@ -201,12 +202,12 @@ function ConversationListRow({ item, compact, query, enabled, filter, selected, 
     <WandIconButton className="conversation-row-avatar conversation-avatar-button" aria-label={identity ? `查看${item.title}的资料` : `打开${item.title}`}
       onClick={event => identity ? employeeProfile.open(identity, event.currentTarget) : onSelect()}>
       {employee ? <EmployeeAvatar employee={employee} size="md"/> : item.kind === "group" ? <ConversationGroupAvatar title={item.title} size={32}/> : <Avatar size={32} icon={<WandIcon name="chat" size={16}/>}/>}</WandIconButton>
-    {!compact ? <WandButton kind="ghost" className="conversation-row-open" title={item.title} onClick={onSelect}>
+    {!compact ? <SidebarLabelTooltip title={item.title} selector=".conversation-row-title"><WandButton kind="ghost" className="conversation-row-open" title={item.title} onClick={onSelect}>
       <span className="conversation-row-copy"><span className="conversation-row-topline"><span className="conversation-row-title">{item.title}</span>
         {formatConversationListTime(item.messageAt) ? <time className="conversation-row-time" dateTime={item.messageAt}>{formatConversationListTime(item.messageAt)}</time> : null}</span>
         <span className="conversation-row-bottomline">{archived ? <span className="conversation-archived-tag">已归档</span> : null}<span className="conversation-row-preview">{item.dissolvedAt ? "群聊已解散 · 点击查看或恢复" : item.preview || (item.kind === "group" ? `${selfName} + ${item.team?.members.length ?? 0} 位员工` : "私聊")}</span>
           {item.pinnedAt ? <span className="conversation-pin" title="已置顶" aria-label="已置顶"><WandIcon name="pin" size={13}/></span> : null}</span>
-      </span></WandButton> : null}
+      </span></WandButton></SidebarLabelTooltip> : null}
     {!compact ? <WandIconButton className="conversation-row-more" aria-label={`${item.title}的菜单`} aria-haspopup="menu" aria-expanded={menu}
       onClick={event => {
         event.stopPropagation();
