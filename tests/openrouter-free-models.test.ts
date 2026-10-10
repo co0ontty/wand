@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import test from "node:test";
 import { defaultConfig } from "../src/config.js";
 import { ModelCatalogService } from "../src/models.js";
@@ -23,7 +24,7 @@ function mockOpenRouter(discovery: typeof fetch): typeof fetch {
     ? successfulProbe() : discovery(url, options);
 }
 function setup(fetchImpl: typeof fetch, now?: () => Date, handlesProbes = false) {
-  const dir = mkdtempSync(path.resolve("output/openrouter/service-test-"));
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wand-openrouter-service-test-"));
   const storage = new WandStorage(path.join(dir, "wand.db"));
   storage.setAppSecret("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
   const service = new OpenRouterFreeModelsService(storage, handlesProbes ? fetchImpl : mockOpenRouter(fetchImpl), now);
@@ -268,7 +269,7 @@ test("免费分组变化发布到模型目录；CLI 探测不会回写旧免费�
 
 test("设置接口仅管理员可管理 Key，普通客户端读到免费模型且所有状态不含密钥", async () => {
   process.env.WAND_TEST_MODE = "1";
-  const dir = mkdtempSync(path.resolve("output/openrouter/api-test-"));
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wand-openrouter-api-test-"));
   const handle = await startServer({ ...defaultConfig(), port: 0, https: false,
     password: "test-password", startupCommands: [], harness: { ...defaultConfig().harness!, engine: "cli" },
   }, path.join(dir, "config.json"), {

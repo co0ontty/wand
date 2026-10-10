@@ -529,7 +529,7 @@ test("服务重启：进程内 core 回合不会被当成可领养的 daemon 运
 
 test("选择免费分组后进程内 agent 自动分配并发出零价路由请求，无需 Pi 本地认证", async () => {
   const { OpenRouterFreeModelsService, OPENROUTER_FREE_SELECTOR } = await import("../src/openrouter-free-models.js");
-  const root = mkdtempSync(path.resolve("output/openrouter/core-test-"));
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-openrouter-core-test-"));
   const storage = new WandStorage(path.join(root, "wand.db"));
   const service = new OpenRouterFreeModelsService(storage, async (url) => String(url).endsWith("/chat/completions")
     ? Response.json({ choices: [{ finish_reason: "stop", message: { content: "免费模型验证" } }] })
@@ -576,7 +576,7 @@ test("选择免费分组后进程内 agent 自动分配并发出零价路由请�
 });
 
 test("Pi 主功能的免费分组不切换到 core SDK", async (t) => {
-  const root = mkdtempSync(path.resolve("output/openrouter/cli-free-group-"));
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-openrouter-cli-free-group-"));
   const storage = new WandStorage(path.join(root, "wand.db"));
   const pi: StructuredRunnerAdapter = {
     start() {
@@ -603,7 +603,7 @@ test("Pi 主功能的免费分组不切换到 core SDK", async (t) => {
 
 test("core 工具循环每次调用查价格，收费后切换免费替补且状态记录实际模型", async () => {
   const { OpenRouterFreeModelsService, OPENROUTER_FREE_PROVIDER } = await import("../src/openrouter-free-models.js");
-  const root = mkdtempSync(path.resolve("output/openrouter/core-price-loop-"));
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-openrouter-core-price-loop-"));
   const storage = new WandStorage(path.join(root, "wand.db"));
   let priceChecks = 0;
   let probes = 0;
@@ -647,7 +647,7 @@ test("core 工具循环每次调用查价格，收费后切换免费替补且状
 
 test("core 价格接口失败或没有免费替补时不发送推理请求", async () => {
   const { OpenRouterFreeModelsService, OPENROUTER_FREE_PROVIDER } = await import("../src/openrouter-free-models.js");
-  const root = mkdtempSync(path.resolve("output/openrouter/core-price-fail-"));
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-openrouter-core-price-fail-"));
   const storage = new WandStorage(path.join(root, "wand.db"));
   let phase = "initial";
   const service = new OpenRouterFreeModelsService(storage, async (url) => {
@@ -674,7 +674,7 @@ test("core 价格接口失败或没有免费替补时不发送推理请求", asy
 
 test("core 上下文压缩与正式回复分别检查价格，复用历史探测不重发测试消息", async () => {
   const { OpenRouterFreeModelsService, OPENROUTER_FREE_PROVIDER } = await import("../src/openrouter-free-models.js");
-  const root = mkdtempSync(path.resolve("output/openrouter/core-price-compact-"));
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-openrouter-core-price-compact-"));
   const storage = new WandStorage(path.join(root, "wand.db"));
   let checks = 0;
   let probes = 0;

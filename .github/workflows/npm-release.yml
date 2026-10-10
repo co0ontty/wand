@@ -28,6 +28,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
           registry-url: "https://registry.npmjs.org"
 
       - name: Extract version from tag
@@ -52,7 +54,7 @@ jobs:
           "
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --prefer-offline
 
       - name: Build
         run: npm run build
@@ -69,44 +71,4 @@ jobs:
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          set -uo pipefail
-          PKG="@co0ontty/wand"
-          VERSION="${{ steps.version.outputs.version }}"
-          published() { [ "$(npm view "${PKG}@${VERSION}" version 2>/dev/null || true)" = "${VERSION}" ]; }
-          latest_tagged() { [ "$(npm view "${PKG}" dist-tags.latest 2>/dev/null || true)" = "${VERSION}" ]; }
-          wait_for_publish() {
-            for check in 1 2 3 4 5 6; do
-              if published && latest_tagged; then
-                return 0
-              fi
-              delay=$((check * 10))
-              echo "Waiting for ${PKG}@${VERSION} to appear as latest (${check}/6); retrying in ${delay}s..."
-              sleep "${delay}"
-            done
-            return 1
-          }
-          if published; then
-            echo "${PKG}@${VERSION} already on npm; ensuring latest dist-tag."
-            npm dist-tag add "${PKG}@${VERSION}" latest
-            wait_for_publish
-            exit $?
-          fi
-          for attempt in 1 2 3 4 5; do
-            # 已完成构建与严格产物校验，不再触发 prepublishOnly 重复构建。
-            if npm publish --ignore-scripts --access public && wait_for_publish; then
-              exit 0
-            fi
-            if published; then
-              echo "${PKG}@${VERSION} exists after publish attempt; ensuring latest dist-tag."
-              npm dist-tag add "${PKG}@${VERSION}" latest
-              if wait_for_publish; then
-                exit 0
-              fi
-            fi
-            delay=$((attempt * 30))
-            echo "Publish attempt ${attempt} failed or did not propagate; retrying in ${delay}s..."
-            sleep "${delay}"
-          done
-          echo "All publish attempts failed." >&2
-          exit 1
+        run: node scripts/publish-npm.js "${{ steps.version.outputs.version }}" latest

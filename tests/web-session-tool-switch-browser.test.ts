@@ -14,6 +14,7 @@ test("blank session tool switching preserves engine, input ownership, geometry a
   const root = resolve(import.meta.dirname, "..");
   const temp = mkdtempSync(join(tmpdir(), "wand-tool-switch-browser-"));
   const output = join(root, "output/pi-engine-continuation-20261008");
+  mkdirSync(output, { recursive: true });
   const report: any = { ok: false, cases: [], requests: [], errors: [], evidence: "production composer/state + explicit HTTP doubles + real Chrome" };
   const blank = { id: "tool-A", provider: "pi", employeeId: "fixture-employee", status: "idle", sessionKind: "structured",
     runner: "pi-cli-json", cwd: "/tmp", mode: "default", messages: [], messageTotal: 0, queuedMessages: [], structuredState: { inFlight: false, engine: "cli" } };
