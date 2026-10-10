@@ -50,9 +50,9 @@ export async function recordMotion(browser, name = "avatar-motion") {
 export async function openPlushBrowser(width = 1280, height = 960, fallback = false) {
   const temp = mkdtempSync(join(tmpdir(), "wand-plush-chrome-"));
   const chrome = spawn(process.env.CHROME_BIN || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", [
-    "--headless=new", "--no-first-run", "--ignore-certificate-errors", "--remote-allow-origins=*",
+    "--headless=new", "--no-first-run", "--remote-allow-origins=*",
     "--remote-debugging-port=0", `--user-data-dir=${temp}/profile`,
-    ...(fallback ? ["--disable-webgl"] : ["--enable-unsafe-swiftshader"]), "about:blank",
+    ...(fallback ? ["--disable-webgl"] : []), "about:blank",
   ], { stdio: "ignore" });
   let socket;
   try {
@@ -344,6 +344,7 @@ export async function runPlushBrowser() {
     const fallback = await openPlushBrowser(390, 960, true);
     try {
       await fallback.send("Page.navigate", { url: origin }); await fallback.wait("!!document.querySelector('[data-plush-avatar][data-renderer=fallback]')");
+      assert.equal(await fallback.evaluate("document.querySelector('[data-plush-avatar][data-renderer=fallback]').dataset.fallbackReason"), "webgl-unavailable");
       assert.equal(await fallback.evaluate("document.documentElement.scrollWidth<=innerWidth"), true);
       await fallback.clickText("捏脸"); await fallback.wait("!!document.querySelector('#standalone [role=region]')");
       await fallback.click('#standalone input[aria-label="心形"]'); await fallback.click('#standalone input[aria-label="珊瑚"]');

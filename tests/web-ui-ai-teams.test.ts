@@ -352,7 +352,7 @@ test("员工头像选择器保留已选旧头像并提供有界上传与显式�
   const markup = renderToStaticMarkup(createElement(EmployeeAvatarPicker, { avatar: "cat:2", name: "测试", employeeId: "e_preview", disabled: false, onChange() {} }));
   assert.match(markup, /aria-label="员工头像"/);
   assert.match(markup, /aria-label="编辑员工头像"/);
-  assert.match(markup, /已选像素头像/);
+  assert.match(markup, /像素猫头像/);
   assert.match(markup, /上传/);
   assert.match(markup, /捏脸/);
   assert.match(markup, /accept="image\/png,image\/jpeg,image\/webp"/);

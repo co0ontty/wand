@@ -330,7 +330,7 @@ class PlushEngine implements PlushAvatarRuntime {
       else { for (const item of this.registrations) item.dirty = true; this.schedule(); }
     });
     (globalThis as PlushGlobals).__wandPlushDiagnostics = () => ({
-      contexts: this.renderer ? 1 : 0, createdContexts: this.createdContexts, registrations: this.registrations.size,
+      webglBlocked: this.blocked, contexts: this.renderer ? 1 : 0, createdContexts: this.createdContexts, registrations: this.registrations.size,
       visible: [...this.registrations].filter(item => item.visible).length,
       animated: [...this.registrations].filter(item => item.activity === "active").length,
       frames: this.totalFrames, renderMs: this.renderMs, maxRenderMs: this.maxRenderMs,
@@ -356,7 +356,7 @@ class PlushEngine implements PlushAvatarRuntime {
         event.preventDefault(); this.lost = true; this.contextGeneration++;
         for (const model of this.models.values()) { model.ready = false; model.preparing = false; }
         window.clearTimeout(this.timer); this.timer = 0;
-        for (const item of this.registrations) item.state("fallback", "fallback");
+        for (const item of this.registrations) item.state("fallback", "fallback", "context-lost");
       });
       renderer.domElement.addEventListener("webglcontextrestored", () => {
         if (this.renderer !== renderer) return;
@@ -371,7 +371,7 @@ class PlushEngine implements PlushAvatarRuntime {
   attach(canvas: HTMLCanvasElement, options: PlushRenderOptions, state: Registration["state"]): ReturnType<PlushAvatarRuntime["attach"]> {
     window.clearTimeout(this.releaseTimer);
     const context = canvas.getContext("2d", { alpha: true });
-    if (!context || !this.init()) { state("fallback", "fallback"); return { update() {}, dispose() {} }; }
+    if (!context || !this.init()) { state("fallback", "fallback", !context ? "canvas-unavailable" : this.lost ? "context-lost" : "webgl-unavailable"); return { update() {}, dispose() {} }; }
     const registration: Registration = { canvas, context, options, state, visible: false, dirty: true,
       lastFrame: 0, phase: configSeed(options.config) % 1000 / 100, frames: 0, activity: "", tiltX: 0, tiltY: 0 };
     this.registrations.add(registration); this.observer.observe(canvas);
@@ -429,7 +429,7 @@ class PlushEngine implements PlushAvatarRuntime {
       }
       if (performance.now() - start > FRAME_BUDGET_MS) { more = true; continue; }
       try { this.render(item, animate ? start / 1000 : 0); }
-      catch { item.state("fallback", "fallback"); item.dirty = false; item.visible = false; }
+      catch { item.state("fallback", "fallback", "render-failed"); item.dirty = false; item.visible = false; }
       more ||= animate;
     }
     if (more) this.schedule();
@@ -475,7 +475,7 @@ class PlushEngine implements PlushAvatarRuntime {
             this.maxCompileWaitMs = Math.max(this.maxCompileWaitMs, performance.now() - compileStart);
             this.schedule();
           }, () => {
-            if (this.models.get(key) === model) { model.preparing = false; item.visible = false; item.state("fallback", "fallback"); }
+            if (this.models.get(key) === model) { model.preparing = false; item.visible = false; item.state("fallback", "fallback", "shader-compile-failed"); }
           });
         }
         return;

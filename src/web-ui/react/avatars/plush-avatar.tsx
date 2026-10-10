@@ -2,7 +2,7 @@ import * as React from "react";
 import { PLUSH_COLORS, type PlushAvatarConfig } from "../../../plush-avatar.js";
 import { installStyleSheet } from "../styles.js";
 import { useReducedMotion } from "../ui/motion-tokens.js";
-import type { PlushAvatarRuntime, PlushGlobals, PlushRenderHandle } from "./runtime-contract.js";
+import type { PlushAvatarRuntime, PlushGlobals, PlushRenderHandle, PlushFallbackReason } from "./runtime-contract.js";
 
 const CHUNK_SRC = "${plushAvatarChunkSrc}";
 let pending: Promise<PlushAvatarRuntime> | null = null;
@@ -73,6 +73,7 @@ export function PlushAvatar({ config, size = 32, className = "", speaking = fals
   const reducedMotion = useReducedMotion();
   const [renderer, setRenderer] = React.useState<"loading" | "webgl" | "fallback">("loading");
   const [activity, setActivity] = React.useState("static");
+  const [fallbackReason, setFallbackReason] = React.useState<PlushFallbackReason | undefined>();
   const configKey = JSON.stringify(config);
   const latest = React.useRef({ config, size, speaking, interactive, reducedMotion });
   latest.current = { config, size, speaking, interactive, reducedMotion };
@@ -84,10 +85,10 @@ export function PlushAvatar({ config, size = 32, className = "", speaking = fals
     const attach = () => {
       loadRuntime().then(runtime => {
         if (!alive) return;
-        handle.current = runtime.attach(node, latest.current, (next, state) => {
-          if (alive) { setRenderer(next); setActivity(state); }
+        handle.current = runtime.attach(node, latest.current, (next, state, reason) => {
+          if (alive) { setRenderer(next); setActivity(state); setFallbackReason(reason); }
         });
-      }, () => { if (alive) { setRenderer("fallback"); setActivity("fallback"); } });
+      }, () => { if (alive) { setRenderer("fallback"); setActivity("fallback"); setFallbackReason("runtime-load"); } });
     };
     // Hidden lists do not download WebGL or acquire a context until an avatar becomes visible.
     const observer = new IntersectionObserver(entries => {
@@ -98,7 +99,9 @@ export function PlushAvatar({ config, size = 32, className = "", speaking = fals
   }, []);
   React.useEffect(() => { handle.current?.update(latest.current); }, [configKey, size, speaking, interactive, reducedMotion]);
   return <span className={`wand-plush-avatar ${className}`.trim()} data-plush-avatar="" data-avatar-config={configKey}
-    data-renderer={renderer} data-render-state={activity} title={renderer === "fallback" ? "静态头像 · 3D 暂不可用" : undefined}
+    data-renderer={renderer} data-render-state={activity} data-fallback-reason={fallbackReason}
+    title={renderer === "fallback" ? fallbackReason === "webgl-unavailable" ? "静态头像 · 当前浏览器不支持 3D"
+      : fallbackReason === "runtime-load" ? "静态头像 · 3D 组件未能加载" : "静态头像 · 3D 暂不可用" : undefined}
     aria-hidden="true" style={{ width: size, height: size }}>
     <PlushFallback config={config}/><canvas ref={canvas} width={size} height={size}/>
   </span>;

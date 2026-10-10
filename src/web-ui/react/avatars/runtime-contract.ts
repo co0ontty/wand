@@ -13,9 +13,11 @@ export interface PlushRenderHandle {
   dispose(): void;
 }
 
+export type PlushFallbackReason = "runtime-load" | "canvas-unavailable" | "webgl-unavailable" | "context-lost" | "render-failed" | "shader-compile-failed";
+
 export interface PlushAvatarRuntime {
   attach(canvas: HTMLCanvasElement, options: PlushRenderOptions,
-    state: (renderer: "webgl" | "fallback", activity: "active" | "static" | "paused" | "fallback") => void): PlushRenderHandle;
+    state: (renderer: "webgl" | "fallback", activity: "active" | "static" | "paused" | "fallback", reason?: PlushFallbackReason) => void): PlushRenderHandle;
 }
 
 export type PlushGlobals = typeof globalThis & {

@@ -109,7 +109,7 @@ export function EmployeeAvatarPicker({ avatar, name, employeeId = "", disabled, 
     }).catch((cause: unknown) => { if (generation === epoch.current) setError(cause instanceof Error ? cause.message : "图片处理失败，请重试。"); })
       .finally(() => { if (generation === epoch.current) setProcessing(false); });
   };
-  const mode = avatar.startsWith("data:image/") ? "已上传图片" : avatar.startsWith("plush:v1:") ? "自定义毛绒头像" : /^cat:/.test(avatar) ? "已选像素头像" : "自动毛绒头像";
+  const mode = avatar.startsWith("data:image/") ? "已上传图片" : avatar.startsWith("plush:v1:") ? "自定义毛绒头像" : /^cat:/.test(avatar) ? "像素猫头像" : "自动毛绒头像";
   return <section className="wand-avatar-editor" aria-label="员工头像">
     <Flex align="center" gap={10} className="wand-avatar-editor-summary">
       <WandPopover open={menuOpen && !busy} onOpenChange={setMenuOpen} align="start" ariaLabel="头像操作" trigger={
