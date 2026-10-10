@@ -129,21 +129,24 @@ jobs:
           echo "Reused $PREVIOUS_ASSET from $PREVIOUS_TAG."
 
       # 先编译新增的协议测试 target，避免 IPA 构建绕过 WandTests。
-      # target + simulator SDK 路径即使镜像没有 runtime 也能完成编译/链接；
-      # 资源目录与协议测试无关，排除它以避免 actool 强制要求 runtime。
+      # scheme 为主应用、测试和 SwiftPM 资源统一产品目录；直接 -target
+      # 会令 SwiftTerm 的资源 bundle 落到包 checkout 的 build/，应用找不到。
+      # 通用模拟器目的地不启动设备；排除资源目录以免 actool 依赖 runtime。
       - name: Build iOS tests
         if: steps.reuse_ipa.outputs.reused != 'true'
         working-directory: ios
         run: |
           xcodebuild \
             -project Wand.xcodeproj \
-            -target WandTests \
+            -scheme Wand \
             -configuration Debug \
             -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/test-dd \
             EXCLUDED_SOURCE_FILE_NAMES=Assets.xcassets \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            build
+            build-for-testing
 
       - name: Run iOS tests when a simulator is available
         if: steps.reuse_ipa.outputs.reused != 'true'
