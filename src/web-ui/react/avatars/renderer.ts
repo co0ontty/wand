@@ -590,4 +590,5 @@ class PlushEngine implements PlushAvatarRuntime {
   }
 }
 
-(globalThis as PlushGlobals).__wandPlushRuntime = new PlushEngine();
+// Timed-out script requests can still execute late. Preserve the engine and its live handles.
+(globalThis as PlushGlobals).__wandPlushRuntime ??= new PlushEngine();

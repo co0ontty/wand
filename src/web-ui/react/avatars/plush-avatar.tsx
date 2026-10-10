@@ -2,31 +2,87 @@ import * as React from "react";
 import { PLUSH_COLORS, isPlushCatAvatar, type PlushAvatarConfig, type PlushRenderConfig } from "../../../plush-avatar.js";
 import { installStyleSheet } from "../styles.js";
 import { useReducedMotion } from "../ui/motion-tokens.js";
-import type { PlushAvatarRuntime, PlushGlobals, PlushRenderHandle, PlushFallbackReason } from "./runtime-contract.js";
+import type { PlushAvatarRuntime, PlushGlobals, PlushRenderHandle, PlushFallbackReason, PlushLoaderDiagnostics, PlushLoaderFailure } from "./runtime-contract.js";
 
 const CHUNK_SRC = "${plushAvatarChunkSrc}";
+const MAX_LOAD_ATTEMPTS = 3;
+const MAX_ONLINE_RECOVERIES = 1;
+const RETRY_DELAYS_MS = [750, 2_000];
 let pending: Promise<PlushAvatarRuntime> | null = null;
+let exhausted = false;
+let onlineRecoveries = 0;
+const recoveryListeners = new Set<() => void>();
+const loaderState: PlushLoaderDiagnostics = {
+  status: "idle", assetPath: CHUNK_SRC.split("?")[0], attempts: 0, cycleAttempts: 0,
+  maxCycleAttempts: MAX_LOAD_ATTEMPTS, onlineRecoveries: 0, maxOnlineRecoveries: MAX_ONLINE_RECOVERIES, startedAt: 0, finishedAt: 0,
+};
+(globalThis as PlushGlobals).__wandPlushLoaderDiagnostics = () => ({ ...loaderState });
+
+function downloadRuntime(): Promise<PlushAvatarRuntime> {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    let settled = false;
+    const finish = (failure?: PlushLoaderFailure) => {
+      if (settled) return;
+      settled = true; window.clearTimeout(timeout); script.onload = script.onerror = null;
+      if (failure) { script.remove(); reject(failure); }
+      else resolve((globalThis as PlushGlobals).__wandPlushRuntime!);
+    };
+    const timeout = window.setTimeout(() => finish("timeout"), 15_000);
+    script.async = true;
+    script.onload = () => finish((globalThis as PlushGlobals).__wandPlushRuntime ? undefined : "loaded-missing-runtime");
+    script.onerror = () => finish("download");
+    // Chrome can coalesce identical URLs with a timed-out script that is still downloading.
+    // Keep the asset version, but give a retry its own request identity.
+    const src = loaderState.attempts <= 1 ? CHUNK_SRC
+      : `${CHUNK_SRC}${CHUNK_SRC.includes("?") ? "&" : "?"}wandPlushRetry=${loaderState.attempts}`;
+    try { script.src = src; document.head.append(script); }
+    catch { finish("download"); }
+  });
+}
 
 function loadRuntime(): Promise<PlushAvatarRuntime> {
   const globals = globalThis as PlushGlobals;
-  if (globals.__wandPlushRuntime) return Promise.resolve(globals.__wandPlushRuntime);
+  if (globals.__wandPlushRuntime) {
+    loaderState.status = "ready"; loaderState.failure = undefined;
+    return Promise.resolve(globals.__wandPlushRuntime);
+  }
   if (pending) return pending;
-  pending = new Promise<PlushAvatarRuntime>((resolve, reject) => {
-    const script = document.createElement("script");
-    script.async = true;
-    script.src = CHUNK_SRC;
-    const timeout = window.setTimeout(() => { script.remove(); reject(new Error("头像加载超时")); }, 15_000);
-    script.onload = () => {
-      window.clearTimeout(timeout);
-      const runtime = globals.__wandPlushRuntime;
-      if (runtime) resolve(runtime);
-      else { script.remove(); reject(new Error("头像组件未能加载")); }
-    };
-    script.onerror = () => { window.clearTimeout(timeout); script.remove(); reject(new Error("头像组件下载失败")); };
-    document.head.append(script);
-  }).catch((error: unknown) => { pending = null; throw error; });
+  if (exhausted) return Promise.reject(loaderState.failure);
+  loaderState.status = "loading"; loaderState.startedAt = Date.now(); loaderState.finishedAt = 0;
+  loaderState.cycleAttempts = 0;
+  pending = (async () => {
+    for (let attempt = 0; attempt < MAX_LOAD_ATTEMPTS; attempt++) {
+      if (attempt) await new Promise<void>(resolve => window.setTimeout(resolve, RETRY_DELAYS_MS[attempt - 1]));
+      // A previously timed-out response may finish before the next bounded attempt.
+      if (globals.__wandPlushRuntime) { loaderState.status = "ready"; loaderState.failure = undefined; loaderState.finishedAt = Date.now(); return globals.__wandPlushRuntime; }
+      loaderState.attempts++; loaderState.cycleAttempts++;
+      try {
+        const runtime = await downloadRuntime();
+        loaderState.status = "ready"; loaderState.failure = undefined; loaderState.finishedAt = Date.now();
+        return runtime;
+      } catch (failure: unknown) {
+        loaderState.failure = failure === "timeout" || failure === "loaded-missing-runtime" ? failure : "download";
+      }
+    }
+    exhausted = true; loaderState.status = "failed"; loaderState.finishedAt = Date.now();
+    throw loaderState.failure;
+  })().finally(() => { pending = null; });
   return pending;
 }
+
+function recoverRuntime(online: boolean): boolean {
+  if (pending || loaderState.status !== "failed" || !recoveryListeners.size) return false;
+  if (online && onlineRecoveries >= MAX_ONLINE_RECOVERIES) return false;
+  if (online) loaderState.onlineRecoveries = ++onlineRecoveries;
+  exhausted = false;
+  for (const retry of recoveryListeners) retry();
+  return true;
+}
+const onOnline = () => { recoverRuntime(true); };
+
+/** Explicit resource retry only; this never resets WebGL or changes avatar data. */
+export function retryPlushAvatarRuntime(): boolean { return recoverRuntime(false); }
 
 const styles = String.raw`
 .wand-plush-avatar{position:relative;display:inline-grid;flex:none;place-items:center;overflow:visible;isolation:isolate;vertical-align:middle;line-height:0}
@@ -99,6 +155,8 @@ export function PlushAvatar({ config, size = 32, className = "", speaking = fals
     const node = canvas.current;
     if (!node) return;
     let alive = true;
+    let attaching = false;
+    let resourceFailed = false;
     let reported = "";
     const notifyRenderer = (next: "loading" | "webgl" | "fallback", reason?: PlushFallbackReason) => {
       const key = `${next}:${reason ?? ""}`;
@@ -106,19 +164,30 @@ export function PlushAvatar({ config, size = 32, className = "", speaking = fals
     };
     notifyRenderer("loading");
     const attach = () => {
+      if (!alive || attaching || handle.current) return;
+      attaching = true; resourceFailed = false;
+      setRenderer("loading"); setActivity("static"); setFallbackReason(undefined); notifyRenderer("loading");
       loadRuntime().then(runtime => {
+        attaching = false;
         if (!alive) return;
         handle.current = runtime.attach(node, latest.current, (next, state, reason) => {
           if (alive) { setRenderer(next); setActivity(state); setFallbackReason(reason); notifyRenderer(next, reason); }
         });
-      }, () => { if (alive) { setRenderer("fallback"); setActivity("fallback"); setFallbackReason("runtime-load"); notifyRenderer("fallback", "runtime-load"); } });
+      }, () => { attaching = false; resourceFailed = true; if (alive) { setRenderer("fallback"); setActivity("fallback"); setFallbackReason("runtime-load"); notifyRenderer("fallback", "runtime-load"); } });
     };
     // Hidden lists do not download WebGL or acquire a context until an avatar becomes visible.
     const observer = new IntersectionObserver(entries => {
       if (entries.some(entry => entry.isIntersecting)) { observer.disconnect(); attach(); }
     }, { rootMargin: "48px" });
     observer.observe(node);
-    return () => { alive = false; observer.disconnect(); handle.current?.dispose(); handle.current = null; };
+    const retry = () => { if (resourceFailed) attach(); };
+    if (!recoveryListeners.size) window.addEventListener("online", onOnline);
+    recoveryListeners.add(retry);
+    return () => {
+      recoveryListeners.delete(retry);
+      if (!recoveryListeners.size) window.removeEventListener("online", onOnline);
+      alive = false; observer.disconnect(); handle.current?.dispose(); handle.current = null;
+    };
   }, []);
   React.useEffect(() => { handle.current?.update(latest.current); }, [configKey, size, speaking, interactive, reducedMotion]);
   return <span className={`wand-plush-avatar ${className}`.trim()} data-plush-avatar="" data-avatar-config={configKey}

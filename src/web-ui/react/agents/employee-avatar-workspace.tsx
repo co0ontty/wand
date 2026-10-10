@@ -1,5 +1,5 @@
 import * as React from "react";
-import { PlushAvatar } from "../avatars/plush-avatar.js";
+import { PlushAvatar, retryPlushAvatarRuntime } from "../avatars/plush-avatar.js";
 import type { PlushFallbackReason } from "../avatars/runtime-contract.js";
 import { PixelCat, shrinkAvatarImage } from "../ai-teams/avatar.js";
 import { WandButton, WandIconButton } from "../ui/button.js";
@@ -124,6 +124,7 @@ export function EmployeeAvatarWorkspace({ employee, disabled, onChange, onBusyCh
       <WorkspaceFace key={rendererKey} employee={identity} size={136} interactive speaking={speech && renderer === "webgl" && !reducedMotion}
         onRendererChange={(state, reason) => setRenderStatus({ key: rendererKey, renderer: state, reason })}/>
       <div className="preview-state" role="status"><i data-live={plushPreview && renderer === "webgl" && !reducedMotion}/>{previewLabel}</div>
+      {plushPreview && renderer === "fallback" && renderStatus.reason === "runtime-load" && <WandButton type="button" size="small" kind="ghost" disabled={busy} onClick={() => { setSpeech(false); retryPlushAvatarRuntime(); }}>重新加载 3D</WandButton>}
       {plushPreview && <WandButton type="button" size="small" kind="ghost" aria-pressed={speech} disabled={busy || reducedMotion || renderer !== "webgl"} onClick={() => setSpeech(value => !value)}>
         <WandIcon name="audio" size={14}/>{speech ? "停止动作预览" : "预览说话动作"}
       </WandButton>}
