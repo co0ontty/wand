@@ -191,7 +191,7 @@ try {
       const shot = await send("Page.captureScreenshot",{format:"png"}); writeFileSync(join(output,`timeline-${mode}.png`),Buffer.from(shot.data,"base64"));
     }
     await click("button.chat-process-summary"); await e("h.settle()");
-    assert.equal(await e('document.querySelector(".chat-activity > div > .chat-disclosure-body").getBoundingClientRect().height'), 0);
+    assert.equal(await e('document.querySelector(".chat-activity [data-chat-activity-renderer=canonical] > .chat-disclosure-body").getBoundingClientRect().height'), 0);
     assert.equal(await e('document.querySelector(".chat-activity-menu").inert'), true);
     await click("button.chat-process-summary"); await e("h.settle()");
     await send("Input.dispatchKeyEvent", { type:"keyDown", key:"Escape", code:"Escape", windowsVirtualKeyCode:27 });
@@ -290,7 +290,7 @@ try {
   ]}])})()`);
   const previewRequests = report.requests.length;
   assert.doesNotMatch(await e('document.querySelector("button.chat-process-summary").textContent'), /npm run check|退出码 1/);
-  assert.equal(await e('document.querySelector(".chat-activity > div > .chat-disclosure-body").getBoundingClientRect().height'), 0);
+  assert.equal(await e('document.querySelector(".chat-activity [data-chat-activity-renderer=canonical] > .chat-disclosure-body").getBoundingClientRect().height'), 0);
   await click('button.chat-process-summary'); await e('h.settle()');
   // 输入与结果各占一行（对齐安卓的摘录行）：输入看 .chat-call-preview，结果看 .chat-call-result。
   assert.match(await e('document.querySelector(".chat-call-preview").textContent'), /npm run check/);
