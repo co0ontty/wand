@@ -30,7 +30,7 @@ import {
   writePreferenceToStorage,
 } from "./config.js";
 import { ModelCatalogService, type ModelRefreshOptions } from "./models.js";
-import { defaultModelGroupSelector } from "./model-groups.js";
+import { fallbackProviderModel, sessionEmployeeFields } from "./session-model.js";
 
 import { ProcessManager, ProcessEvent } from "./process-manager.js";
 import { SessionLogger } from "./session-logger.js";
@@ -1152,9 +1152,7 @@ export async function startServer(
       const command = provider === "qoder" && rawCommand === "qoder"
         ? "qodercli"
         : rawCommand;
-      const effectiveModel = provider
-        ? rawModel || defaultModelGroupSelector(config.modelGroups, provider, getDefaultModelForProvider(config, provider)) || getDefaultModelForProvider(config, provider) || undefined
-        : undefined;
+      const effectiveModel = provider ? rawModel || fallbackProviderModel(config, provider) : undefined;
       const reqCols = typeof body.cols === "number" && Number.isFinite(body.cols) ? body.cols : undefined;
       const reqRows = typeof body.rows === "number" && Number.isFinite(body.rows) ? body.rows : undefined;
       const sessionCwd = resolveSessionCwd(body.cwd, config.defaultCwd);
@@ -1184,9 +1182,7 @@ export async function startServer(
               rows: reqRows,
               thinkingEffort: body.thinkingEffort ?? config.defaultThinkingEffort,
               systemPrompt: body.systemPrompt?.trim() || role?.prompt,
-              employeeId: role?.id,
-              employeeName: role?.name,
-              employeeAvatar: role?.avatar,
+              ...sessionEmployeeFields(role),
               workspaceId,
               workspaceTaskId: body.workspaceTaskId,
               ...origin,

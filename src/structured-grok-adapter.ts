@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { startStructuredCli } from "./structured-exec-pump.js";
 import type { StructuredExecHost } from "./structured-exec-host.js";
 import { asRecord } from "./structured-content.js";
+import { cliUnacceptedFacts } from "./structured-failure.js";
 import { systemPromptArgs, thinkingEffortToGrokEffort } from "./structured-provider-common.js";
 import type {
   StructuredRunnerAdapter,
@@ -213,6 +214,8 @@ export class GrokRunner implements StructuredRunnerAdapter {
       model: context.session.selectedModel ?? context.session.structuredState?.model,
     };
     let primaryError: string | null = null;
+    let protocolError = false;
+    let unparsedStdout = false;
     return startStructuredCli({
       sessionId: context.session.id,
       file: "grok",
@@ -230,12 +233,14 @@ export class GrokRunner implements StructuredRunnerAdapter {
         try {
           const event = JSON.parse(trimmed) as Record<string, unknown>;
           observer.onEvent?.(event);
-          primaryError = applyGrokEvent(state, event) ?? primaryError;
+          const error = applyGrokEvent(state, event);
+          if (error) { primaryError = primaryError ?? error; protocolError = true; }
           observer.onUpdate(state);
-        } catch { /* Grok diagnostics belong on stderr; ignore non-JSON stdout defensively. */ }
+        } catch { unparsedStdout = true; /* Non-protocol stdout is not evidence of a safe refusal. */ }
       },
       finalize: (ctx, exitCode, signal, spawnError) => ({
         state, exitCode, signal, stderr: ctx.stderr, primaryError, ...(spawnError ? { spawnError } : {}),
+        ...cliUnacceptedFacts({ state, primaryError, protocolError, unparsedStdout, signal, ...(spawnError ? { spawnError } : {}) }),
       }),
     });
   }

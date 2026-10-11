@@ -1,20 +1,25 @@
+import type { Express,Request } from "express";
 import { createHash } from "node:crypto";
-import { parseExecutionMode, parseSessionCreationOrigin } from "./session-request.js";
-import type { Express, Request } from "express";
+import { parseExecutionMode,parseSessionCreationOrigin } from "./session-request.js";
 
-import { ProcessManager, PtyInputDeliveryError, SessionInputError } from "./process-manager.js";
-import { StructuredSessionManager } from "./structured-session-manager.js";
-import { WandStorage } from "./storage.js";
-import { ExecutionMode, InputRequest, ProcessEvent, ResizeRequest, SessionProvider, SessionRunner, SessionSnapshot, SessionSource, ToolResultBlock, ToolUseBlock, WandConfig } from "./types.js";
-import { getDefaultModelForProvider, isExecutionMode } from "./config.js";
-import { defaultRoleForCli } from "./default-employee.js";
+import { isExecutionMode } from "./config.js";
 import { DECISION_EXPERT_NAME } from "./decision-expert-identity.js";
-import { defaultModelGroupSelector } from "./model-groups.js";
+import { defaultRoleForCli } from "./default-employee.js";
+import { fallbackProviderModel, resolveExplicitOrFallbackModel, sessionEmployeeFields } from "./session-model.js";
 import type { OpenRouterFreeModelsService } from "./openrouter-free-models.js";
+import { ProcessManager,PtyInputDeliveryError,SessionInputError } from "./process-manager.js";
+import { WandStorage } from "./storage.js";
+import { StructuredSessionManager } from "./structured-session-manager.js";
+import { ExecutionMode,InputRequest,ProcessEvent,ResizeRequest,SessionProvider,SessionRunner,SessionSnapshot,ToolResultBlock,ToolUseBlock,WandConfig } from "./types.js";
 
-import { inspectPiExecution } from "./pi-execution.js";
-import { alignedBlockStart, blockWindowMessagesForTransport, compactToolMessagesForTransport, messageWindowByteBudget, sliceTurnBlocksForTransport, truncateMessagesForTransport, visibleBlockCount, windowMessagesForTransport } from "./message-truncator.js";
-import { toSessionDetailDTO, toSessionListItemDTO } from "./session-transport.js";
+import {
+  generateCommitMessageOnly,
+  getGitStatusAsync,
+  QuickCommitError,
+  runPush,
+  runQuickCommitWithFallback,
+  runTagHead,
+} from "./git-quick-commit.js";
 import {
   checkSessionWorktreeMergeabilityAsync,
   cleanupSessionWorktreeAsync,
@@ -22,18 +27,14 @@ import {
   mergeSessionWorktreeAsync,
   WorktreeMergeError,
 } from "./git-worktree.js";
-import { resolveSessionCwd } from "./session-cwd.js";
+import { alignedBlockStart,blockWindowMessagesForTransport,compactToolMessagesForTransport,messageWindowByteBudget,sliceTurnBlocksForTransport,truncateMessagesForTransport,visibleBlockCount,windowMessagesForTransport } from "./message-truncator.js";
+import { inspectPiExecution } from "./pi-execution.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
-import {
-  getGitStatusAsync,
-  QuickCommitError,
-  runQuickCommitWithFallback,
-  runTagHead,
-  runPush,
-  generateCommitMessageOnly,
-} from "./git-quick-commit.js";
+import { resolveSessionCwd } from "./session-cwd.js";
+import { toSessionDetailDTO,toSessionListItemDTO } from "./session-transport.js";
 
 import { getErrorMessage } from "./error-utils.js";
+import { asyncRoute } from "./express-async.js";
 import {
   buildIterationCommitContext,
   COMMIT_CONTEXT_MODE_PREF_KEY,
@@ -42,32 +43,31 @@ import {
   resolveCommitContextInput,
   type IterationCommitContext,
 } from "./iteration-log.js";
-import { inferProviderFromCommand, isSessionProvider, providerCliCommand, SESSION_PROVIDERS } from "./session-provider.js";
-import { selectEmployeeCandidate } from "./silicon-employee-dispatch.js";
-import { buildProviderResumeCommand, isProviderSessionId } from "./resume-policy.js";
+import { installedPiExtensions } from "./pi-extension-resources.js";
+import { discoverPiResources,resolvePiResourceSelection } from "./pi-resource-catalog.js";
+import { effectivePiSessionSettings,patchPiSessionSettings,type PiSettingsControls,type PiSettingsResponse } from "./pi-session-settings.js";
 import { parseBoundedInteger } from "./request-limits.js";
-import { asyncRoute } from "./express-async.js";
+import { buildProviderResumeCommand,isProviderSessionId } from "./resume-policy.js";
+import { registerPiRecommendationRoute,type PiRecommendationRuntime } from "./server-pi-recommendation-routes.js";
 import { sendRouteError } from "./server-request.js";
 import { registerStructuredResumeRoutes } from "./server-resume-routes.js";
-import { addHiddenSessionIds, deleteOwnedSessionWithHistory, deleteProviderNativeHistory, type ProviderHistoryDeleter, removeHiddenSessionIds, SessionRegistry } from "./session-registry.js";
-import { enrichStructuredMessages, WAND_PROTOCOL_VERSION } from "./structured-client-protocol.js";
-import { asRecord, isStructuredImagePart } from "./structured-content.js";
-import { installedPiExtensions } from "./pi-extension-resources.js";
-import { registerPiRecommendationRoute, type PiRecommendationRuntime } from "./server-pi-recommendation-routes.js";
-import { discoverPiResources, resolvePiResourceSelection } from "./pi-resource-catalog.js";
-import { effectivePiSessionSettings, patchPiSessionSettings, type PiSettingsControls, type PiSettingsResponse } from "./pi-session-settings.js";
 import {
   buildDirectoryTree,
   normalizeSessionDirectory,
   type SessionDirectoryNode,
 } from "./session-directory-tree.js";
+import { inferProviderFromCommand,isSessionProvider,providerCliCommand,SESSION_PROVIDERS } from "./session-provider.js";
+import { addHiddenSessionIds,deleteOwnedSessionWithHistory,removeHiddenSessionIds,SessionRegistry,type ProviderHistoryDeleter } from "./session-registry.js";
+import { selectEmployeeCandidate } from "./silicon-employee-dispatch.js";
+import { enrichStructuredMessages,WAND_PROTOCOL_VERSION } from "./structured-client-protocol.js";
+import { asRecord,isStructuredImagePart } from "./structured-content.js";
 import {
   projectCwdForSession,
   renameWorkspaceDirectory,
   resolveWorkspaceIdForNewSession,
 } from "./workspace-binding.js";
 
-export { parseExecutionMode, parseSessionCreationOrigin } from "./session-request.js";
+export { parseExecutionMode,parseSessionCreationOrigin } from "./session-request.js";
 
 /** 提交输入模式：query 覆盖 > 记住的偏好 > 默认（有提示词就优先用提示词）。 */
 function commitModeForRead(storage: WandStorage, override: unknown): string {
@@ -212,7 +212,7 @@ function buildSessionListEntries(
     type: "managed",
     key: `session-${session.id}`,
     sortTimestamp: sessionSortTimestamp(session),
-    session: toSessionListItemDTO(session),
+    session: toSessionListItemDTO(session, { avatar: "compact" }),
   })).sort((left, right) => {
     const timestampOrder = right.sortTimestamp - left.sortTimestamp;
     return timestampOrder || left.key.localeCompare(right.key);
@@ -589,7 +589,7 @@ export function registerSessionRoutes(
   });
 
   app.get("/api/sessions", (_req, res) => {
-    res.json(sessions.listSlim().map(toSessionListItemDTO));
+    res.json(sessions.listSlim().map((session) => toSessionListItemDTO(session)));
   });
 
   app.get("/api/sessions/provider-usage", (_req, res) => {
@@ -659,8 +659,8 @@ export function registerSessionRoutes(
         model: rawModel && rawModel !== "default"
           ? rawModel
           : (employeeAgent && !requestedProvider
-              ? employeeAgent.model === "default" ? defaultModelGroupSelector(config.modelGroups, provider, getDefaultModelForProvider(config, provider)) || getDefaultModelForProvider(config, provider) || undefined : employeeAgent.model
-              : rawModel || defaultModelGroupSelector(config.modelGroups, provider, getDefaultModelForProvider(config, provider)) || getDefaultModelForProvider(config, provider) || undefined),
+              ? resolveExplicitOrFallbackModel(config, provider, employeeAgent.model)
+              : rawModel || fallbackProviderModel(config, provider)),
         thinkingEffort: employeeAgent?.thinkingEffort ?? (typeof body.thinkingEffort === "string"
           ? (body.thinkingEffort as SessionSnapshot["thinkingEffort"])
           : config.defaultThinkingEffort),
@@ -668,9 +668,7 @@ export function registerSessionRoutes(
         workspaceTaskId: body.workspaceTaskId,
         // 角色与规则走系统提示通道，不拼进 prompt（见 AGENTS.md「Session 输入契约」）。
         systemPrompt: role?.prompt ?? body.systemPrompt,
-        employeeId: role?.id,
-        employeeName: role?.name,
-        employeeAvatar: role?.avatar,
+        ...sessionEmployeeFields(role),
         employeeCandidates: employee?.agents,
         employeeCandidateIndex: requestedProvider ? undefined : selectedEmployeeCandidate?.index,
         ...(engineDecision ? { engine: engineDecision.engine } : {}),

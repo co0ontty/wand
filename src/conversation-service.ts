@@ -9,8 +9,8 @@ import { CONVERSATION_OWNER, CONVERSATION_RELAY_PREFIX, employeeConversationId,
   type ConversationDetail, type ConversationInstance, type ConversationReceipt, type ConversationSummary,
   type ConversationTarget, type ConversationSessionUpdate } from "./conversation-types.js";
 import { conversationLeaderMention, conversationMessageBody } from "./conversation-mentions.js";
-import { getDefaultModelForProvider } from "./config.js";
-import { defaultModelGroupSelector } from "./model-groups.js";
+import { compactTransportAvatar } from "./fixed-employee-avatar.js";
+import { fallbackProviderModel } from "./session-model.js";
 import { getErrorMessage } from "./error-utils.js";
 import { resolveSessionCwd } from "./session-cwd.js";
 import { isGlobalWorkspace, normalizeProjectCwd, resolveWorkspaceIdForNewSession } from "./workspace-binding.js";
@@ -187,7 +187,7 @@ export class ConversationService {
         ...(turn.role === "assistant" && !turn.author ? { author: {
           id: channel?.employeeId ?? instance.team?.members.find((m) => m.isLeader)?.id ?? "leader",
           name: channel?.employeeName ?? instance.team?.members.find((m) => m.isLeader)?.name ?? instance.name,
-          avatar: channel?.employeeAvatar, sessionId: id,
+          avatar: compactTransportAvatar(channel?.employeeAvatar), sessionId: id,
           leader: instance.kind === "group" || undefined,
         } } : {}),
       }));
@@ -201,7 +201,59 @@ export class ConversationService {
       .sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? "") || (instance.kind === "dm" ? 0 : (a.role === "user" ? -1 : 0) - (b.role === "user" ? -1 : 0)));
   }
 
-  summary(instance: ConversationInstance): ConversationSummary {
+  /** Same ordering as turns(), so a source tail is enough when timestamps are append-only. */
+  private laterTurn(instance: ConversationInstance, left: ConversationTurn, right: ConversationTurn): ConversationTurn {
+    const time = (left.createdAt ?? "").localeCompare(right.createdAt ?? "");
+    if (time) return time > 0 ? left : right;
+    if (instance.kind === "dm" || left.role === right.role) return right;
+    return left.role === "user" ? right : left;
+  }
+
+  private tailTurn(id: string, role?: "assistant"): ConversationTurn | undefined {
+    const live = this.deps.structured.get(id);
+    if (live) {
+      const messages = live.messages ?? [];
+      for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const turn = messages[index];
+        if (turn && (!role || turn.role === role)) return turn;
+      }
+      return undefined;
+    }
+    return this.storage.lastSessionTurn(id, role) ?? undefined;
+  }
+
+  private previewTurn(instance: ConversationInstance): ConversationTurn | undefined {
+    const candidates: ConversationTurn[] = [];
+    if (instance.kind !== "dm" && instance.sessionId) {
+      const relay = this.tailTurn(instance.sessionId);
+      if (relay) candidates.push({ ...relay, messageId: relay.messageId ?? `${instance.sessionId}:0`, conversationId: instance.id });
+    }
+    const event = this.storage.lastConversationEvent(instance.id);
+    if (event) candidates.push(event);
+    const channelIds = [...(instance.historySessionIds ?? []), instance.communicationSessionId]
+      .filter((id): id is string => !!id && (instance.kind === "dm" || id !== instance.sessionId));
+    for (const id of new Set(channelIds)) {
+      const turn = this.tailTurn(id, "assistant");
+      if (!turn) continue;
+      const channel = this.deps.structured.get(id) ?? this.storage.getSessionSlim(id);
+      candidates.push({
+        ...turn,
+        messageId: turn.messageId ?? `${id}:preview`,
+        conversationId: instance.id,
+        conversationTarget: null,
+        ...(turn.author ? {} : { author: {
+          id: channel?.employeeId ?? instance.team?.members.find((member) => member.isLeader)?.id ?? "leader",
+          name: channel?.employeeName ?? instance.team?.members.find((member) => member.isLeader)?.name ?? instance.name,
+          avatar: compactTransportAvatar(channel?.employeeAvatar),
+          sessionId: id,
+          leader: instance.kind === "group" || undefined,
+        } }),
+      });
+    }
+    return candidates.reduce<ConversationTurn | undefined>((latest, turn) => latest ? this.laterTurn(instance, latest, turn) : turn, undefined);
+  }
+
+  summary(instance: ConversationInstance, knownTurns?: ConversationTurn[]): ConversationSummary {
     const tasks = this.storage.conversationTasks(instance.id).flatMap((link) => {
       const task = this.storage.getWandTask(link.taskId);
       const receipt = task ? this.storage.conversationTaskStartup(task.id) : null;
@@ -216,8 +268,7 @@ export class ConversationService {
       try { requireTeamEmployee(this.storage, instance.peerEmployeeId ?? ""); }
       catch (error) { unavailableReason = getErrorMessage(error); }
     }
-    const messages = this.turns(instance);
-    const last = messages.at(-1);
+    const last = knownTurns ? knownTurns.at(-1) : this.previewTurn(instance);
     const lastText = last?.sessionLink ? conversationSessionPreview(this.snapshot(last.sessionLink.sessionId), last.requestId ? this.receipt(last.requestId) ?? undefined : undefined).text
       : last?.content.map((b) => b.type === "text" ? b.text : "").join(" ") ?? "";
     const messageAt = [instance.updatedAt, last?.createdAt ?? "", ...tasks.flatMap((t) => t.runs.map((r) => r.updatedAt))].sort().at(-1) ?? "";
@@ -226,7 +277,10 @@ export class ConversationService {
     // 私聊标题已说明对方身份；只保留自己的署名，群聊仍需区分发言人。
     const previewAuthor = last?.role === "user" ? `${this.selfName()}：`
       : instance.kind === "group" && last ? `${last.author?.name ?? "系统"}：` : "";
-    return { ...instance, ...this.storage.conversationListState(instance.id), team: instance.team ? projectTeamEmployees(instance.team, this.storage) : null,
+    const team = instance.team ? projectTeamEmployees(instance.team, this.storage) : null;
+    return { ...instance, ...lifecycle, team: team ? { ...team, members: team.members.map((member) => ({
+      ...member, avatar: compactTransportAvatar(member.avatar) ?? "",
+    })) } : null,
       title, unavailableReason, memberUnavailableReasons: this.memberReasons(instance), tasks,
       preview: last ? `${previewAuthor}${lastText.slice(0, 160)}`
         : instance.kind === "group" ? "群已建立，尚未派任务" : "还没有消息", messageAt };
@@ -308,8 +362,9 @@ export class ConversationService {
 
   detail(id: string): ConversationDetail {
     const instance = this.requireInstance(id);
-    const summary = this.summary(instance);
-    return { ...summary, messages: this.turns(instance).map(turn => turn.sessionLink
+    const turns = this.turns(instance);
+    const summary = this.summary(instance, turns);
+    return { ...summary, messages: turns.map(turn => turn.sessionLink
       ? { ...turn, sessionPreview: conversationSessionPreview(this.snapshot(turn.sessionLink.sessionId), turn.requestId ? this.receipt(turn.requestId) ?? undefined : undefined),
         // Older clients can still open the exact source session without understanding sessionLink.
         author: turn.author ? { ...turn.author, sessionId: turn.sessionLink.sessionId } : turn.author,
@@ -507,9 +562,7 @@ export class ConversationService {
     let session = instance.communicationSessionId ? this.deps.structured.get(instance.communicationSessionId) : null;
     if (!session) {
       if (instance.communicationSessionId) instance.historySessionIds = [...(instance.historySessionIds ?? []), instance.communicationSessionId];
-      const model = agent.model === "default"
-        ? defaultModelGroupSelector(this.deps.config.modelGroups, agent.provider, getDefaultModelForProvider(this.deps.config, agent.provider))
-          || getDefaultModelForProvider(this.deps.config, agent.provider) || undefined : agent.model;
+      const model = agent.model === "default" ? fallbackProviderModel(this.deps.config, agent.provider) : agent.model;
       session = this.deps.structured.createSession({ cwd, provider: agent.provider, mode: agent.mode, model,
         thinkingEffort: agent.thinkingEffort, worktreeEnabled: false, sessionSource: "interactive",
         automationId: `conversation-talk:${instance.id}`, employeeId: employee?.id,
@@ -609,9 +662,7 @@ export class ConversationService {
     const employee = this.storage.getSiliconEmployee(instance.peerEmployeeId!)!;
     const selected = selectEmployeeCandidate(employee), agent = selected.agent;
     const cwd = this.cwd(explicitCwd);
-    const model = agent.model === "default"
-      ? defaultModelGroupSelector(this.deps.config.modelGroups, agent.provider, getDefaultModelForProvider(this.deps.config, agent.provider))
-        || getDefaultModelForProvider(this.deps.config, agent.provider) || undefined : agent.model;
+    const model = agent.model === "default" ? fallbackProviderModel(this.deps.config, agent.provider) : agent.model;
     const title = shortText(executionTarget?.title, "会话标题", 200)
       || provisionalTaskTitleFromDescription(conversationMessageBody(input)) || "新会话";
     let session: SessionSnapshot | undefined;

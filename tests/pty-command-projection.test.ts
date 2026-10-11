@@ -36,6 +36,7 @@ test("foreground activity survives both HTTP projections and invalidates revisio
   storage.saveSession(live);
   // Only the running process is a fixture: real registry, storage, DTOs, HTTP routes and client filter.
   processes.getOwned = (id) => id === live.id ? live : null;
+  processes.getOwnedSlim = (id) => id === live.id ? { ...live, output: "", messages: undefined } : null;
   processes.listSlim = () => [live];
   const completions = new SessionCompletionTracker(storage, (id) => registry.getLatest(id));
   const app = express();

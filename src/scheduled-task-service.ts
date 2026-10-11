@@ -1,20 +1,22 @@
 import { createHash } from "node:crypto";
-import { sessionActive, scheduledExecutionStatus } from "./scheduled-task-state.js";
 import { isAbsolute } from "node:path";
+import { reconcileScheduledRun,scheduledExecutionStatus } from "./scheduled-task-state.js";
 
 import { requireTeamEmployee } from "./ai-team-employee-binding.js";
 import type { ConversationService } from "./conversation-service.js";
 import { employeeConversationId } from "./conversation-types.js";
 import { getErrorMessage } from "./error-utils.js";
+import { nextScheduledTime,parseTaskSchedule } from "./scheduled-task-time.js";
+import type {
+  ScheduledTask,ScheduledTaskDetail,ScheduledTaskRun,ScheduledTaskRunView,
+  ScheduledTaskSummary
+} from "./scheduled-task-types.js";
 import { bodyObject } from "./server-request.js";
 import { resolveSessionCwd } from "./session-cwd.js";
-import { parseTaskSchedule, nextScheduledTime } from "./scheduled-task-time.js";
-import type { ScheduledTask, ScheduledTaskDetail, ScheduledTaskRun, ScheduledTaskRunView,
-  ScheduledTaskSummary } from "./scheduled-task-types.js";
 import { selectEmployeeCandidate } from "./silicon-employee-dispatch.js";
 import type { WandStorage } from "./storage.js";
 import { provisionalTaskTitleFromDescription } from "./task-title.js";
-import type { ProcessEvent, SessionSnapshot } from "./types.js";
+import type { ProcessEvent,SessionSnapshot } from "./types.js";
 import { isGlobalWorkspace } from "./workspace-binding.js";
 
 export class ScheduledTaskConflictError extends Error {}
@@ -183,39 +185,15 @@ export class ScheduledTaskService {
   private reconcile(run: ScheduledTaskRun, now: string, recoverInactive = true): ScheduledTaskRun {
     if (run.executionFinishedAt) { this.liveAcceptedRuns.delete(run.id); return run; }
     const receipt = this.deps.conversations.receipt(run.requestId) ?? run.receipt;
-    let updated: ScheduledTaskRun = { ...run, receipt };
-    if (run.state === "claimed") {
-      updated = { ...updated, state: receipt?.state === "accepted" ? "accepted" : receipt?.state === "rejected" ? "rejected" : "unknown",
-        error: receipt?.error ?? (receipt?.state === "accepted" ? null : "本次执行的接收状态无法确认，请核对执行记录；不会自动重发。") };
-    }
     const session = receipt?.sessionId ? this.deps.getSession(receipt.sessionId) : null;
-    if (session && session.endedAt && session.status !== "running" && !session.structuredState?.inFlight) {
-      // A user may already have queued a follow-up. This ended turn still settles the scheduled occurrence.
-      const failed = session.status === "failed" || session.status === "stopped" || Boolean(session.structuredState?.lastError)
-        || receipt?.startup === "failed" || (session.exitCode !== null && session.exitCode !== 0);
-      updated.executionOutcome = failed ? "failed" : "completed";
-      updated.executionFinishedAt = session.endedAt;
-      if (failed) updated.error = receipt?.error ?? session.structuredState?.lastError ?? updated.error;
-    }
-    else if (session && !sessionActive(session) && (session.status === "failed" || session.status === "stopped"
-      || session.structuredState?.lastError)) {
-      updated.error = receipt?.error ?? session.structuredState?.lastError ?? updated.error;
-      updated.executionOutcome = "failed";
-      updated.executionFinishedAt = now;
-    }
-    else if (updated.state === "rejected" || (!session && (updated.state === "unknown" || receipt?.state === "accepted"))
-      || (receipt?.startup === "failed" && (!session || !sessionActive(session)))) {
-      updated.executionOutcome = updated.state === "rejected" || receipt?.startup === "failed" ? "failed" : "unknown";
-      updated.executionFinishedAt = now;
-    }
-    else if (recoverInactive && session && !sessionActive(session) && !session.endedAt && !this.liveAcceptedRuns.has(run.id)
-      && (updated.state === "accepted" || updated.state === "unknown")) {
-      // After restart an initial idle snapshot proves neither dispatch nor completion. Preserve its receipt without replay.
-      updated = { ...updated, state: "unknown", executionFinishedAt: now, executionOutcome: "unknown",
-        error: updated.error ?? "本次执行尚未确认启动或结束，请核对会话；不会自动重发。" };
-    }
+    const updated = reconcileScheduledRun(run, receipt, session, now, {
+      recoverInactive, liveAccepted: this.liveAcceptedRuns.has(run.id),
+    });
     if (updated.executionFinishedAt) this.liveAcceptedRuns.delete(run.id);
-    if (JSON.stringify(updated) !== JSON.stringify(run)) this.deps.storage.saveScheduledTaskRun(updated);
+    if (updated.state !== run.state || updated.error !== run.error || updated.executionOutcome !== run.executionOutcome
+      || updated.executionFinishedAt !== run.executionFinishedAt || JSON.stringify(updated.receipt) !== JSON.stringify(run.receipt)) {
+      this.deps.storage.saveScheduledTaskRun(updated);
+    }
     return updated;
   }
 

@@ -70,19 +70,20 @@ export function serializeExecutionTeam(team: AiTeam): string {
   })) });
 }
 
+function projectBoundMember(member: AiTeamMember, source: AiTeamEmployeeSource, includeAgents: boolean): AiTeamMember {
+  const employee = member.employeeId ? source.getSiliconEmployee(member.employeeId) : null;
+  if (!employee) return member;
+  return includeAgents
+    ? { ...member, name: employee.name, avatar: employee.avatar, agents: employee.agents, agent: employee.agents[0]! }
+    : { ...member, name: employee.name, avatar: employee.avatar };
+}
+
 /** Team definitions expose current employee-owned fields without storing another copy of the role. */
 export function projectTeamDefinition(team: AiTeam, source: AiTeamEmployeeSource): AiTeam {
-  return { ...team, members: team.members.map((member) => {
-    const employee = member.employeeId ? source.getSiliconEmployee(member.employeeId) : null;
-    return employee ? { ...member, name: employee.name, avatar: employee.avatar,
-      agents: employee.agents, agent: employee.agents[0]! } : member;
-  }) };
+  return { ...team, members: team.members.map((member) => projectBoundMember(member, source, true)) };
 }
 
 /** Read-only names/avatars follow the same employee, never a replacement at the same member id. */
 export function projectTeamEmployees(team: AiTeam, source: AiTeamEmployeeSource): AiTeam {
-  return { ...team, members: team.members.map((member) => {
-    const employee = member.employeeId ? source.getSiliconEmployee(member.employeeId) : null;
-    return employee ? { ...member, name: employee.name, avatar: employee.avatar } : member;
-  }) };
+  return { ...team, members: team.members.map((member) => projectBoundMember(member, source, false)) };
 }

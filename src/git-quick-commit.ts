@@ -1,30 +1,14 @@
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { randomUUID } from "node:crypto";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { spawn } from "node:child_process";
-import { StringDecoder } from "node:string_decoder";
-import { appendDiagnosticTail, MAX_AI_TEXT_BYTES } from "./bounded-process-output.js";
+import { existsSync } from "node:fs";
 
-import { abortableEmployeeText, prepareEmployeeTextCandidate, type EmployeeTextDeps } from "./employee-text.js";
-import { buildChildEnv } from "./env-utils.js";
-import { buildLanguageDirective } from "./language-prompt.js";
-import { isSessionProvider, providerCliInstalled } from "./session-provider.js";
-import { asRecord } from "./structured-content.js";
 import {
+  getGitErrorMessage,
   runGitAsync as runGitAsyncBase,
   runGitRawAsync as runGitRawAsyncBase,
-  getGitErrorMessage,
 } from "./git-utils.js";
 import {
-  composeSystemFallback,
-  systemPromptFlag,
   thinkingEffortToClaudeCliEffort,
   thinkingEffortToCodexReasoningEffort,
-  thinkingEffortToGrokEffort,
-  thinkingEffortToOpenCodeVariant,
-  thinkingEffortToQoderEffort,
-  thinkingEffortToPiLevel,
+  thinkingEffortToOpenCodeVariant
 } from "./structured-provider-common.js";
 import type { AiTextRequest } from "./types.js";
 import {
@@ -38,11 +22,11 @@ import {
 } from "./types.js";
 
 /** provider 缺省值：无法识别时回落到 Claude。 */
-import { defaultProvider, normalizeAiText, buildPiTextArgs, buildGrokTextArgs, buildGeminiTextArgs, buildQoderTextArgs, systemPromptArgsFrom, contentWithSystemPrompt, runCliText, callConfiguredAiText, withOpsPersona, type QuickCommitAiOptions } from "./ai-text-runner.js";
-import { QuickCommitError, type QuickCommitErrorCode } from "./command-error.js";
-export { callCliAiText, callConfiguredAiText, assertGeminiTextCapability, withOpsPersona } from "./ai-text-runner.js";
+import { buildGeminiTextArgs,buildGrokTextArgs,buildPiTextArgs,buildQoderTextArgs,callConfiguredAiText,contentWithSystemPrompt,defaultProvider,normalizeAiText,runCliText,systemPromptArgsFrom,withOpsPersona,type QuickCommitAiOptions } from "./ai-text-runner.js";
+import { QuickCommitError } from "./command-error.js";
+export { assertGeminiTextCapability,callCliAiText,callConfiguredAiText,withOpsPersona } from "./ai-text-runner.js";
 export type { QuickCommitAiOptions } from "./ai-text-runner.js";
-export { QuickCommitError, type QuickCommitErrorCode } from "./command-error.js";
+export { QuickCommitError,type QuickCommitErrorCode } from "./command-error.js";
 
 const GIT_TIMEOUT_MS = 1500;
 const GIT_PUSH_TIMEOUT_MS = 30_000;

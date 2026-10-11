@@ -1,10 +1,10 @@
 import { isArchiveBlocked } from "./archive-policy.js";
 import { cleanupWorktreeSync } from "./git-worktree.js";
-import { inferProviderFromCommand } from "./session-provider.js";
 import type { ProcessManager } from "./process-manager.js";
-import type { StructuredSessionManager } from "./structured-session-manager.js";
+import { inferProviderFromCommand } from "./session-provider.js";
 import type { WandStorage } from "./storage.js";
-import type { ExecutionMode, SessionSnapshot } from "./types.js";
+import type { StructuredSessionManager } from "./structured-session-manager.js";
+import type { ExecutionMode,SessionSnapshot } from "./types.js";
 
 export type SessionOwner = "structured" | "pty" | "storage";
 

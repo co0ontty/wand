@@ -120,7 +120,7 @@ printf '%s\\n' \\
   const storage = new WandStorage(path.join(root, "wand.db"));
   const config = { ...defaultConfig(), defaultCwd: path.join(root, "fallback"), inheritEnv: true };
   const manager = new StructuredSessionManager(storage, config);
-  const registry = new SessionRegistry({ getOwned: () => null } as never, manager, storage);
+  const registry = new SessionRegistry({ getOwned: () => null, getOwnedSlim: () => null, listSlim: () => [] } as never, manager, storage);
   const app = express();
   app.use(express.json());
   registerTaskRoutes(app, { storage, sessions: registry, structured: manager, config });
@@ -206,7 +206,7 @@ test("dispatch rejects an invalid explicitly selected CLI instead of silently de
   const storage = new WandStorage(path.join(root, "wand.db"));
   const config = { ...defaultConfig(), defaultCwd: root };
   const manager = new StructuredSessionManager(storage, config);
-  const registry = new SessionRegistry({ getOwned: () => null } as never, manager, storage);
+  const registry = new SessionRegistry({ getOwned: () => null, getOwnedSlim: () => null, listSlim: () => [] } as never, manager, storage);
   const app = express();
   app.use(express.json());
   registerTaskRoutes(app, { storage, sessions: registry, structured: manager, config });

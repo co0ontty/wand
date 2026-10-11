@@ -19,6 +19,7 @@ import type { SessionRegistry } from "./session-registry.js";
 import type { WandStorage } from "./storage.js";
 import type { AiTeamRunChatMarker, AiTeamStepSessionMarker } from "./ai-team-types.js";
 import { collectSessionTopicBlocklist } from "./session-topic.js";
+import { compactTransportAvatar } from "./fixed-employee-avatar.js";
 import { resolveSessionDisplayTitle } from "./session-transport.js";
 import { type LayoutNode, type PaneTab, type SessionSnapshot, type TaskWindowLayout, type Workspace, type WorkspaceDefaultProvider, type WorkspaceTask, type WorkspaceTaskWorktree } from "./types.js";
 import { attachUnboundSessionsToWorkspace, normalizeProjectCwd, projectCwdForSession, isGlobalWorkspace, syncDirectoryNameForWorkspace } from "./workspace-binding.js";
@@ -77,7 +78,7 @@ function workspaceSessionSummary(
     startedAt: live.startedAt,
     employeeId: live.employeeId,
     employeeName: live.employeeName,
-    employeeAvatar: live.employeeAvatar,
+    employeeAvatar: compactTransportAvatar(live.employeeAvatar),
     ...(team.chat ? { teamChat: team.chat } : {}),
     ...(team.step ? { teamStep: team.step } : {}),
   };

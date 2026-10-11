@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { startStructuredCli } from "./structured-exec-pump.js";
 import type { StructuredExecHost } from "./structured-exec-host.js";
 import { asRecord } from "./structured-content.js";
+import { cliUnacceptedFacts } from "./structured-failure.js";
 import { promptWithSystemFallback } from "./structured-provider-common.js";
 import type {
   StructuredRunnerAdapter,
@@ -172,6 +173,8 @@ export class GeminiRunner implements StructuredRunnerAdapter {
       phase: "responding",
     };
     let primaryError: string | null = null;
+    let protocolError = false;
+    let unparsedStdout = false;
     return startStructuredCli({
       sessionId: context.session.id,
       file: "gemini",
@@ -188,9 +191,10 @@ export class GeminiRunner implements StructuredRunnerAdapter {
         try {
           const event = JSON.parse(line) as Record<string, unknown>;
           observer.onEvent?.(event);
-          primaryError = applyGeminiEvent(state, event) ?? primaryError;
+          const error = applyGeminiEvent(state, event);
+          if (error) { primaryError = primaryError ?? error; protocolError = true; }
           observer.onUpdate(state);
-        } catch { /* Gemini stdout is NDJSON; ignore non-protocol noise. */ }
+        } catch { unparsedStdout = true; /* Non-protocol stdout is not evidence of a safe refusal. */ }
       },
       finalize: (ctx, exitCode, signal, spawnError) => ({
         state,
@@ -199,6 +203,7 @@ export class GeminiRunner implements StructuredRunnerAdapter {
         stderr: ctx.stderr,
         primaryError,
         ...(spawnError ? { spawnError } : {}),
+        ...cliUnacceptedFacts({ state, primaryError, protocolError, unparsedStdout, signal, ...(spawnError ? { spawnError } : {}) }),
       }),
     });
   }

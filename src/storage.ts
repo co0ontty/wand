@@ -1,50 +1,24 @@
 import crypto from "node:crypto";
-import { FIXED_EMPLOYEE_AVATARS, employeeAvatarValue, fixedEmployeeAvatar, isFixedAvatarEmployee } from "./fixed-employee-avatar.js";
-import { CONVERSATION_OWNER, type ConversationInstance, type ConversationRequest } from "./conversation-types.js";
-import type { ScheduledTask, ScheduledTaskRun } from "./scheduled-task-types.js";
-import { chmodSync, existsSync, mkdirSync } from "node:fs";
+import { chmodSync,mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { initializeStorageSchema } from "./storage-schema.js";
-import { ScheduledTaskRepository } from "./storage-schedules.js";
-import { SessionSnapshot, ConversationTurn, HarnessSessionContext, SessionKind, SessionProvider, SessionRunner, SessionSource, StructuredSessionState, WorktreeMergeInfo, Workspace, LayoutNode, TaskWindowLayout, WorkspaceDefaultProvider, WorkspaceKind, WorkspaceTask, WorkspaceTaskWorktree, WorkspaceTaskStatus, GLOBAL_WORKSPACE_ID } from "./types.js";
-import { normalizeSessionDirectory } from "./session-directory-tree.js";
-import { ensureWorkspaceForCwd } from "./workspace-binding.js";
-import { defaultPiCliSessionSettings, defaultPiSessionSettings, patchPiSessionSettings, type PiSessionSettings } from "./pi-session-settings.js";
-import { parseHarnessExtensionState } from "./core-extension-host.js";
-import { inferProviderFromCommand, inferProviderFromRunner, isSessionProvider, SESSION_PROVIDERS } from "./session-provider.js";
-import { DEFAULT_ITERATION_NAME, DEFAULT_WAND_TASK_AGENT_KIND, DEFAULT_WAND_TASK_PRIORITY, isWandTaskAgentEngine, isWandTaskAgentKind, normalizeWandTaskAgentMode } from "./task-types.js";
-import { firstLayoutTabId } from "./layout-tree.js";
-import { isUnnamedWorkspaceTaskName } from "./wand-task-sync.js";
-import { AI_TEAM_DEFAULT_MAX_STEPS, AI_TEAM_TERMINAL_RUN_STATUSES, aiTeamChatTitle, isBuiltinSiliconEmployee, isTeamMemberRole, memberAgents, parseSiliconEmployeeTags, siliconEmployeeTags } from "./ai-team-types.js";
+import { freezeTeamEmployees,projectTeamDefinition,restoreTeamMemberEmployee,serializeExecutionTeam } from "./ai-team-employee-binding.js";
 import type {
-  AiTeam, AiTeamMember, AiTeamRun, AiTeamRunChatMarker, AiTeamRunStatus, AiTeamStep, AiTeamStepKind, AiTeamStepSessionMarker, AiTeamStepStatus,
-  CandidateFailureKind, SiliconEmployee, StepDispatchInfo,
+  AiTeam,AiTeamMember,AiTeamRun,AiTeamRunChatMarker,AiTeamRunStatus,AiTeamStep,AiTeamStepKind,AiTeamStepSessionMarker,AiTeamStepStatus,
+  CandidateFailureKind,SiliconEmployee,StepDispatchInfo,
 } from "./ai-team-types.js";
-import { freezeTeamEmployees, projectTeamDefinition, restoreTeamMemberEmployee, serializeExecutionTeam } from "./ai-team-employee-binding.js";
-import { isTaskExecutionSubject } from "./task-types.js";
-import type { WandTask, WandTaskAgent, WandTaskAgentKind, WandTaskTitleSource } from "./task-types.js";
-import {
-  SYSTEM_EMPLOYEE_KEY,
-  systemEmployeeDefinition,
-  systemEmployeeSeedAgents,
-  type SystemEmployeeSeed,
-} from "./system-employee.js";
-import { isThinkingEffort } from "./structured-provider-common.js";
-import { DEFAULT_EMPLOYEE_KEY } from "./ai-team-types.js";
-import { defaultEmployeeDefinition, legacyPtyRoleIdentity } from "./default-employee.js";
+import { AI_TEAM_DEFAULT_MAX_STEPS,AI_TEAM_TERMINAL_RUN_STATUSES,DEFAULT_EMPLOYEE_KEY,aiTeamChatTitle,isBuiltinSiliconEmployee,isTeamMemberRole,memberAgents,parseSiliconEmployeeTags,siliconEmployeeTags } from "./ai-team-types.js";
+import { CONVERSATION_OWNER,type ConversationInstance,type ConversationRequest } from "./conversation-types.js";
+import { parseHarnessExtensionState } from "./core-extension-host.js";
+import { decisionExpertDefinition } from "./decision-expert-employee.js";
 import { DECISION_EXPERT_KEY } from "./decision-expert-identity.js";
-import { SPEECH_POLISHER_KEY } from "./speech-polisher-identity.js";
-import { speechPolisherDefinition } from "./speech-polisher-employee.js";
+import { defaultEmployeeDefinition,legacyPtyRoleIdentity } from "./default-employee.js";
+import { normalizeEmployeeKnowledge } from "./employee-knowledge-content.js";
+import { EMPLOYEE_KNOWLEDGE_MAX_ENTRIES,type EmployeeKnowledgeEntry } from "./employee-knowledge-types.js";
+import { FIXED_EMPLOYEE_AVATARS,employeeAvatarValue,fixedEmployeeAvatar,isFixedAvatarEmployee } from "./fixed-employee-avatar.js";
 import { HR_EMPLOYEE_KEY } from "./hr-employee-identity.js";
 import { hrEmployeeDefinition } from "./hr-employee.js";
-import { decisionExpertDefinition } from "./decision-expert-employee.js";
-import { normalizeEmployeeKnowledge } from "./employee-knowledge-content.js";
-import { EMPLOYEE_KNOWLEDGE_MAX_ENTRIES, type EmployeeKnowledgeEntry } from "./employee-knowledge-types.js";
-import {
-  USER_MEMORY_MAX_EVENTS, USER_MEMORY_RETENTION_MS,
-  type UserMemoryEvent, type UserMemoryProfile, type UserMemoryState,
-} from "./user-memory-types.js";
+import { firstLayoutTabId } from "./layout-tree.js";
 import type {
   AgentActivityItem,
   AgentActivityState,
@@ -70,6 +44,29 @@ import {
   type PasswordVaultItemInput,
   type PasswordVaultItemType,
 } from "./password-manager.js";
+import { defaultPiCliSessionSettings,defaultPiSessionSettings,patchPiSessionSettings,type PiSessionSettings } from "./pi-session-settings.js";
+import { normalizeSessionDirectory } from "./session-directory-tree.js";
+import { SESSION_PROVIDERS,inferProviderFromCommand,inferProviderFromRunner,isSessionProvider } from "./session-provider.js";
+import { speechPolisherDefinition } from "./speech-polisher-employee.js";
+import { SPEECH_POLISHER_KEY } from "./speech-polisher-identity.js";
+import { ScheduledTaskRepository } from "./storage-schedules.js";
+import { initializeStorageSchema } from "./storage-schema.js";
+import { isThinkingEffort } from "./structured-provider-common.js";
+import {
+  SYSTEM_EMPLOYEE_KEY,
+  systemEmployeeDefinition,
+  systemEmployeeSeedAgents,
+  type SystemEmployeeSeed,
+} from "./system-employee.js";
+import type { WandTask,WandTaskAgent,WandTaskAgentKind,WandTaskTitleSource } from "./task-types.js";
+import { DEFAULT_ITERATION_NAME,DEFAULT_WAND_TASK_AGENT_KIND,DEFAULT_WAND_TASK_PRIORITY,isTaskExecutionSubject,isWandTaskAgentEngine,isWandTaskAgentKind,normalizeWandTaskAgentMode } from "./task-types.js";
+import { ConversationTurn,GLOBAL_WORKSPACE_ID,HarnessSessionContext,LayoutNode,SessionKind,SessionProvider,SessionRunner,SessionSnapshot,SessionSource,StructuredSessionState,TaskWindowLayout,Workspace,WorkspaceDefaultProvider,WorkspaceKind,WorkspaceTask,WorkspaceTaskStatus,WorkspaceTaskWorktree,WorktreeMergeInfo } from "./types.js";
+import {
+  USER_MEMORY_MAX_EVENTS,USER_MEMORY_RETENTION_MS,
+  type UserMemoryEvent,type UserMemoryProfile,type UserMemoryState,
+} from "./user-memory-types.js";
+import { isUnnamedWorkspaceTaskName } from "./wand-task-sync.js";
+import { ensureWorkspaceForCwd } from "./workspace-binding.js";
 
 // These system profiles are code-owned; candidates and timestamps are not part of the lock.
 const LOCKED_SYSTEM_EMPLOYEE_DEFINITIONS = [decisionExpertDefinition(""), speechPolisherDefinition(""), hrEmployeeDefinition("")];
@@ -1158,6 +1155,32 @@ export class WandStorage {
   conversationEvents(id: string): ConversationTurn[] {
     return (this.db.prepare("SELECT turn_json FROM conversation_messages WHERE conversation_id = ? ORDER BY created_at, rowid")
       .all(id) as Array<{ turn_json: string }>).map((row) => JSON.parse(row.turn_json) as ConversationTurn);
+  }
+
+  /** List preview only needs the newest event, not the whole transcript. */
+  lastConversationEvent(id: string): ConversationTurn | null {
+    const row = this.db.prepare(`SELECT turn_json FROM conversation_messages
+      WHERE conversation_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1`).get(id) as { turn_json: string } | undefined;
+    return row ? JSON.parse(row.turn_json) as ConversationTurn : null;
+  }
+
+  /**
+   * One turn from the persisted JSON array. Avoids materializing the transcript in the list path.
+   * Append-only sessions keep the comparator-max at the tail; role walks backward from that tail.
+   */
+  lastSessionTurn(id: string, role?: "user" | "assistant"): ConversationTurn | null {
+    const row = this.db.prepare("SELECT json_array_length(messages) AS length FROM command_sessions WHERE id = ?")
+      .get(id) as { length: number | null } | undefined;
+    const length = row?.length ?? 0;
+    if (!length) return null;
+    const read = this.db.prepare("SELECT json_extract(messages, ?) AS turn FROM command_sessions WHERE id = ?");
+    for (let index = length - 1; index >= 0; index -= 1) {
+      const item = read.get(`$[${index}]`, id) as { turn: string | null } | undefined;
+      if (!item?.turn) continue;
+      const turn = JSON.parse(item.turn) as ConversationTurn;
+      if (!role || turn.role === role) return turn;
+    }
+    return null;
   }
 
   getConversationRequest(id: string): ConversationRequest | null {

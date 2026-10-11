@@ -16,7 +16,8 @@ import {
 import type { OpenRouterFreeModelsService } from "./openrouter-free-models.js";
 import { getErrorMessage } from "./error-utils.js";
 import { asyncRoute } from "./express-async.js";
-import { bodyObject, sendRouteError, text } from "./server-request.js";
+import { parseStoredAvatar } from "./avatar-input.js";
+import { bodyObject, boundedText, sendRouteError, text } from "./server-request.js";
 import { parseTaskAgent } from "./server-task-routes.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
 import { employeeCliAvailable } from "./silicon-employee-dispatch.js";
@@ -31,7 +32,6 @@ import {
   validateStructuredEmployeeDraft,
 } from "./silicon-employee-draft.js";
 import { SESSION_PROVIDERS } from "./session-provider.js";
-import { parsePlushAvatar, parsePlushCatAvatar, parsePlushDogAvatar } from "./plush-avatar.js";
 import { DEFAULT_WAND_TASK_AGENT_KIND } from "./task-types.js";
 import type { QuickCommitAiOptions } from "./ai-text-runner.js";
 import { EMPLOYEE_KNOWLEDGE_MAX_ENTRIES } from "./employee-knowledge-types.js";
@@ -89,27 +89,8 @@ function rejectSystemEmployeeMutation(existing: SiliconEmployee, action: string)
   throw new Error(`「${existing.name}」是 Wand 内置员工，不能${action}。`);
 }
 
-function boundedText(value: unknown, label: string, min: number, max: number): string {
-  const result = text(value);
-  if (result.length < min) throw new Error(`${label}不能为空。`);
-  if (result.length > max) throw new Error(`${label}不能超过 ${max} 个字符。`);
-  return result;
-}
-
 function parseAvatar(value: unknown, name: string): string {
-  if (value !== undefined && value !== null && typeof value !== "string") {
-    throw new Error(`员工「${name}」的头像格式无效。`);
-  }
-  const avatar = text(value);
-  if (!avatar || /^cat:\d{1,2}$/.test(avatar)) return avatar;
-  if (parsePlushAvatar(avatar) || parsePlushCatAvatar(avatar) || parsePlushDogAvatar(avatar)) return avatar;
-  if (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(avatar)) {
-    throw new Error(`员工「${name}」的头像格式无效。`);
-  }
-  if (avatar.length > SILICON_EMPLOYEE_AVATAR_MAX_CHARS) {
-    throw new Error(`员工「${name}」的头像太大。`);
-  }
-  return avatar;
+  return parseStoredAvatar(value, `员工「${name}」`, SILICON_EMPLOYEE_AVATAR_MAX_CHARS);
 }
 
 /** Other built-ins keep profile locks; the two stable cat identities lock only avatar. */

@@ -13,6 +13,14 @@ export function text(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value.trim() : fallback;
 }
 
+/** Shared length check for employee and team name fields. */
+export function boundedText(value: unknown, label: string, min: number, max: number): string {
+  const result = text(value);
+  if (result.length < min) throw new Error(`${label}不能为空。`);
+  if (result.length > max) throw new Error(`${label}不能超过 ${max} 个字符。`);
+  return result;
+}
+
 /** Express query 值可能是数组，取第一个字符串。 */
 export function firstQueryStringValue(value: unknown): string | undefined {
   if (typeof value === "string") return value;

@@ -1,32 +1,30 @@
-import { canArchiveTask } from "./task-archive-policy.js";
-import { TaskReadModel } from "./task-read-model.js";
-import { taskTitleService, refreshAutoBoardTaskTitles } from "./task-title-service.js";
 import type { Express } from "express";
-import { dispatchAgentForTask, resolveTaskDispatchTarget } from "./agent-dispatch.js";
-import { asyncRoute } from "./express-async.js";
-import { getErrorMessage } from "./error-utils.js";
-import { bodyObject, sendRouteError, text } from "./server-request.js";
-import { cleanupWorktreeSync } from "./git-worktree.js";
-import { isRetentionBusy } from "./retention.js";
-import { parseWandTaskAgent, type WandStorage } from "./storage.js";
-import { defaultMilestoneIdForWrite, resolvedMilestoneFields, scopedMilestoneId } from "./milestone-scope.js";
-import { generateWandTaskTitle, provisionalTaskTitleFromDescription, TASK_TITLE_MAX_LENGTH } from "./task-title.js";
-import { recordIterationPromptForTask } from "./iteration-log.js";
-import type { QuickCommitAiOptions } from "./ai-text-runner.js";
-import { resolveSystemAiContext } from "./session-ai-context.js";
-import type { OpenRouterFreeModelsService } from "./openrouter-free-models.js";
-import type { SessionRegistry } from "./session-registry.js";
-import type { StructuredSessionManager } from "./structured-session-manager.js";
-import type { ProcessManager } from "./process-manager.js";
+import { dispatchAgentForTask,resolveTaskDispatchTarget } from "./agent-dispatch.js";
 import type { AiTeamRunner } from "./ai-team-runner.js";
 import { memberAgents } from "./ai-team-types.js";
-import { selectEmployeeCandidate } from "./silicon-employee-dispatch.js";
 import { defaultRoleForCli } from "./default-employee.js";
-import type { TaskExecutionSubject, WandTaskAgent, WandTaskAgentEngine, WandTaskAgentKind, WandTaskAgentMode, WandTaskPriority, WandTaskStatus, WandTaskTitleSource } from "./task-types.js";
-import { DEFAULT_WAND_TASK_AGENT_KIND, DEFAULT_WAND_TASK_AGENT_MODE, DEFAULT_WAND_TASK_PRIORITY, isWandTaskAgentEngine, isWandTaskAgentKind, isWandTaskAgentMode, normalizeWandTaskAgentMode, WAND_MILESTONE_NAME_MAX_LENGTH } from "./task-types.js";
-import type { SessionSnapshot, WandConfig } from "./types.js";
+import { asyncRoute } from "./express-async.js";
+import { cleanupWorktreeSync } from "./git-worktree.js";
+import { recordIterationPromptForTask } from "./iteration-log.js";
+import { defaultMilestoneIdForWrite,resolvedMilestoneFields,scopedMilestoneId } from "./milestone-scope.js";
+import type { OpenRouterFreeModelsService } from "./openrouter-free-models.js";
+import type { ProcessManager } from "./process-manager.js";
+import { isRetentionBusy } from "./retention.js";
+import { bodyObject,sendRouteError,text } from "./server-request.js";
 import { isSessionProvider } from "./session-provider.js";
+import type { SessionRegistry } from "./session-registry.js";
+import { selectEmployeeCandidate } from "./silicon-employee-dispatch.js";
+import { parseWandTaskAgent,type WandStorage } from "./storage.js";
 import { isThinkingEffort } from "./structured-provider-common.js";
+import type { StructuredSessionManager } from "./structured-session-manager.js";
+import { compactTransportAvatar } from "./fixed-employee-avatar.js";
+import { canArchiveTask } from "./task-archive-policy.js";
+import { TaskReadModel } from "./task-read-model.js";
+import { refreshAutoBoardTaskTitles,taskTitleService } from "./task-title-service.js";
+import { generateWandTaskTitle,provisionalTaskTitleFromDescription } from "./task-title.js";
+import type { TaskExecutionSubject,WandTaskAgent,WandTaskAgentEngine,WandTaskAgentKind,WandTaskAgentMode,WandTaskPriority,WandTaskStatus,WandTaskTitleSource } from "./task-types.js";
+import { DEFAULT_WAND_TASK_AGENT_KIND,DEFAULT_WAND_TASK_AGENT_MODE,DEFAULT_WAND_TASK_PRIORITY,isWandTaskAgentEngine,isWandTaskAgentKind,isWandTaskAgentMode,normalizeWandTaskAgentMode,WAND_MILESTONE_NAME_MAX_LENGTH } from "./task-types.js";
+import type { SessionSnapshot,WandConfig } from "./types.js";
 
 const STATUSES = new Set<WandTaskStatus>(["todo", "doing", "done", "archived"]);
 const PRIORITIES = new Set<WandTaskPriority>(["none", "low", "medium", "high", "urgent"]);
@@ -263,11 +261,11 @@ function taskSessionSummary(session: SessionSnapshot) {
     engine: session.provider === "pi" ? (session.structuredState?.engine === "core" ? "sdk" : "cli") : undefined,
     employeeId: session.employeeId,
     employeeName: session.employeeName,
-    employeeAvatar: session.employeeAvatar,
+    employeeAvatar: compactTransportAvatar(session.employeeAvatar),
   };
 }
 
-export { refreshAutoBoardTaskTitles, whenWandTaskTitlesSettled } from "./task-title-service.js";
+export { refreshAutoBoardTaskTitles,whenWandTaskTitlesSettled } from "./task-title-service.js";
 export type { AutoTaskTitleOptions } from "./task-title-service.js";
 
 export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): void {

@@ -1,6 +1,5 @@
-import { getDefaultModelForProvider } from "./config.js";
 import { isLocalDecisionModel } from "./decision-expert-identity.js";
-import { defaultModelGroupSelector } from "./model-groups.js";
+import { fallbackProviderModel, sessionEmployeeFields } from "./session-model.js";
 import type { ProcessManager } from "./process-manager.js";
 import { defaultRoleForCli } from "./default-employee.js";
 import { providerCliCommand } from "./session-provider.js";
@@ -72,7 +71,7 @@ export async function dispatchAgentForTask(
   const cwd = group.cwd;
   const provider = agent.provider as SessionProvider;
   const model = agent.model === "default" ? "" : agent.model;
-  const resolvedModel = model || defaultModelGroupSelector(config.modelGroups, provider, getDefaultModelForProvider(config, provider)) || getDefaultModelForProvider(config, provider) || undefined;
+  const resolvedModel = model || fallbackProviderModel(config, provider);
   if (isLocalDecisionModel(resolvedModel)) {
     throw new AgentDispatchPreflightError("LAYA 仅支持有界决策，不能执行聊天或任务；该候选尚未接受输入。");
   }
@@ -84,9 +83,7 @@ export async function dispatchAgentForTask(
         sessionSource: "automation",
         automationId: input.automationId,
         systemPrompt,
-        employeeId: role?.id,
-        employeeName: role?.name,
-        employeeAvatar: role?.avatar,
+        ...sessionEmployeeFields(role),
         workspaceId: group.workspaceId,
         workspaceTaskId: group.workspaceTaskId,
       })
@@ -105,9 +102,7 @@ export async function dispatchAgentForTask(
         sessionSource: "automation",
         automationId: input.automationId,
         systemPrompt,
-        employeeId: role?.id,
-        employeeName: role?.name,
-        employeeAvatar: role?.avatar,
+        ...sessionEmployeeFields(role),
         employeeCandidates: input.employee?.agents,
         employeeCandidateIndex: input.employeeCandidateIndex,
         workspaceId: group.workspaceId,

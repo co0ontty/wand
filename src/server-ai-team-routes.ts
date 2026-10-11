@@ -20,7 +20,8 @@ import { requireTeamEmployee, type AiTeamEmployeeSource } from "./ai-team-employ
 import { asyncRoute } from "./express-async.js";
 import { getErrorMessage } from "./error-utils.js";
 import { defaultMilestoneIdForWrite, scopedMilestoneId } from "./milestone-scope.js";
-import { bodyObject, sendRouteError, text } from "./server-request.js";
+import { parseStoredAvatar } from "./avatar-input.js";
+import { bodyObject, boundedText, sendRouteError, text } from "./server-request.js";
 import { parseTaskAgent } from "./server-task-routes.js";
 import type { WandStorage } from "./storage.js";
 import { provisionalTaskTitleFromDescription } from "./task-title.js";
@@ -40,19 +41,8 @@ function sendTeamError(res: Response, error: unknown): void {
   sendRouteError(res, error, "团队操作失败。", status);
 }
 
-function boundedText(value: unknown, label: string, min: number, max: number): string {
-  const result = text(value);
-  if (result.length < min) throw new Error(`${label}不能为空。`);
-  if (result.length > max) throw new Error(`${label}不能超过 ${max} 个字符。`);
-  return result;
-}
-
 function parseAvatar(value: unknown, name: string): string {
-  const avatar = text(value);
-  if (!avatar || /^cat:\d{1,2}$/.test(avatar)) return avatar;
-  if (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(avatar)) throw new Error(`成员「${name}」的头像格式无效。`);
-  if (avatar.length > AI_TEAM_AVATAR_MAX_CHARS) throw new Error(`成员「${name}」的头像太大。`);
-  return avatar;
+  return parseStoredAvatar(value, `成员「${name}」`, AI_TEAM_AVATAR_MAX_CHARS);
 }
 
 function parseMembers(value: unknown, existing: AiTeam | null, source?: AiTeamEmployeeSource): AiTeamMember[] {

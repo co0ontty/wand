@@ -1,21 +1,24 @@
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { existsSync,mkdtempSync,readdirSync,rmSync,writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
-import { appendDiagnosticTail, MAX_AI_TEXT_BYTES } from "./bounded-process-output.js";
-import { abortableEmployeeText, prepareEmployeeTextCandidate, type EmployeeTextDeps } from "./employee-text.js";
-import { buildChildEnv } from "./env-utils.js";
-import { buildLanguageDirective } from "./language-prompt.js";
-import { isSessionProvider, providerCliInstalled } from "./session-provider.js";
-import { asRecord } from "./structured-content.js";
-import { getGitErrorMessage } from "./git-utils.js";
+import { appendDiagnosticTail,MAX_AI_TEXT_BYTES } from "./bounded-process-output.js";
 import { QuickCommitError } from "./command-error.js";
-import { composeSystemFallback, systemPromptFlag, thinkingEffortToClaudeCliEffort,
-  thinkingEffortToCodexReasoningEffort, thinkingEffortToGrokEffort, thinkingEffortToOpenCodeVariant,
-  thinkingEffortToQoderEffort, thinkingEffortToPiLevel } from "./structured-provider-common.js";
-import type { AiTextRequest, SessionProvider, SessionSnapshot } from "./types.js";
+import { abortableEmployeeText,prepareEmployeeTextCandidate,type EmployeeTextDeps } from "./employee-text.js";
+import { buildChildEnv } from "./env-utils.js";
+import { getGitErrorMessage } from "./git-utils.js";
+import { buildLanguageDirective } from "./language-prompt.js";
+import { isSessionProvider,providerCliInstalled } from "./session-provider.js";
+import { asRecord } from "./structured-content.js";
+import {
+  composeSystemFallback,systemPromptFlag,thinkingEffortToClaudeCliEffort,
+  thinkingEffortToCodexReasoningEffort,thinkingEffortToGrokEffort,thinkingEffortToOpenCodeVariant,
+  thinkingEffortToPiLevel,
+  thinkingEffortToQoderEffort
+} from "./structured-provider-common.js";
+import type { AiTextRequest,SessionProvider,SessionSnapshot } from "./types.js";
 
 export { QuickCommitError } from "./command-error.js";
 const CLAUDE_MESSAGE_TIMEOUT_MS = 60_000;

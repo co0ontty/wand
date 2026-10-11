@@ -15,6 +15,20 @@ export function employeeAvatarValue(identity: { id?: string | null; systemKey?: 
   return fixedEmployeeAvatar(identity) ?? identity.avatar ?? "";
 }
 
+/** Uploaded photos are data URLs up to 60KB. Short tokens are the only avatar bytes lists should repeat. */
+export function isUploadedAvatar(value: string | null | undefined): boolean {
+  return typeof value === "string" && value.startsWith("data:");
+}
+
+/**
+ * List cards, nested session summaries and routine events keep plush/cat tokens.
+ * Uploaded bytes stay on the employee record, session detail and the first init packet.
+ */
+export function compactTransportAvatar(value: string | null | undefined): string | undefined {
+  if (!value || isUploadedAvatar(value)) return undefined;
+  return value;
+}
+
 /** The avatar exception does not change any other built-in employee's edit policy. */
 export function isFixedAvatarEmployee(identity: { id?: string | null; systemKey?: string | null }): boolean {
   return fixedEmployeeAvatar(identity) !== null;

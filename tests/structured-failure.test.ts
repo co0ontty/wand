@@ -12,6 +12,7 @@ import { modelGroupSelector } from "../src/model-groups.js";
 import { discoverPiResources } from "../src/pi-resource-catalog.js";
 import { defaultPiCliSessionSettings } from "../src/pi-session-settings.js";
 import { classifyProviderRejection, classifyStructuredFailure } from "../src/structured-failure.js";
+import { OpenCodeRunner } from "../src/structured-opencode-adapter.js";
 import { PiRunner } from "../src/structured-pi-adapter.js";
 import { StructuredSessionManager } from "../src/structured-session-manager.js";
 import { WandStorage } from "../src/storage.js";
@@ -277,3 +278,112 @@ for (const boundary of ["history", "manual-model", "transport", "progress", "fre
     if (boundary === "manual-model") assert.equal(manager.get(session.id)?.selectedModel, "explicit-override");
   });
 }
+
+/** Replays deterministic stdout bytes for a CLI-backed adapter; no real CLI process starts. */
+function replayCli(lines: Array<object | string>, exitCode: number | null = 1): typeof spawn {
+  return ((...args: unknown[]) => {
+    void args;
+    const child = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; pid: number; kill(): boolean };
+    child.stdout = new EventEmitter(); child.stderr = new EventEmitter(); child.pid = 4321;
+    let stopped = false;
+    child.kill = () => { stopped = true; setImmediate(() => child.emit("close", null, "SIGTERM")); return true; };
+    setImmediate(() => {
+      if (stopped) return;
+      child.stdout.emit("data", Buffer.from(`${lines.map((line) => typeof line === "string" ? line : JSON.stringify(line)).join("\n")}\n`));
+      child.emit("close", exitCode, null);
+    });
+    return child;
+  }) as unknown as typeof spawn;
+}
+
+// 本机 `opencode run --format json` 的真实失败样本：provider 在协议里回一条 error 事件，
+// 事件带它自己刚建的原生 sessionID，CLI 随后退出 1、stderr 为空、没有任何内容块。
+const openCodeProtocolError = { type: "error", timestamp: 1791714409958, sessionID: "ses_protocol_error",
+  error: { name: "UnknownError", data: { message: '503 {"error":{"type":"service_unavailable_error","message":"所有供应商暂时不可用，请稍后重试"}}' } } };
+const openCodeTextEvent = { type: "text", sessionID: "ses_protocol_error", part: { text: "已经跑出来的一段回复" } };
+
+for (const [caseName, lines, retryable] of [
+  ["protocol error with no output", [openCodeProtocolError], true],
+  ["protocol error after real output", [openCodeTextEvent, openCodeProtocolError], false],
+  ["protocol error mixed with non-protocol stdout", ["opencode: some diagnostic", openCodeProtocolError], false],
+] as const) {
+  test(`OpenCode adapter records unaccepted-input facts for a ${caseName} turn`, async () => {
+    const execution = new OpenCodeRunner(replayCli(lines)).start(
+      { session: { id: "fixture", provider: "opencode", cwd: "/tmp", claudeSessionId: null, selectedModel: "opencode/a" } as SessionSnapshot,
+        prompt: "fixture", env: {} },
+      { isActive: () => true, onUpdate() {} });
+    const got = await execution.completion;
+    assert.equal(classifyStructuredFailure(got)?.retryable, retryable,
+      retryable ? "a provider rejection with nothing executed must allow the next candidate"
+        : "work already done, or stdout we cannot account for, must never be replayed");
+    if (retryable) {
+      assert.equal(got.inputAccepted, false);
+      assert.equal(got.rejection, "model-unavailable", "a 5xx service-unavailable rejection is not a quota boundary");
+    }
+  });
+}
+
+test("employee fallback: a provider rejection on a later round switches to the next same-tool candidate and keeps the conversation", async (t) => {
+  const f = fixture(t);
+  const starts: Array<{ session: SessionSnapshot; prompt: string }> = [];
+  const runner: StructuredRunnerAdapter = { start(context, observer) {
+    starts.push({ session: context.session, prompt: context.prompt });
+    if (starts.length === 1) {
+      const state = { blocks: [{ type: "text" as const, text: "first answer" }], result: "first answer", sessionId: "ses_native" };
+      observer.onUpdate(state);
+      return { args: [], pid: 1, spawnedAt: "", interrupt() {}, completion: Promise.resolve(result({ state })) };
+    }
+    if (starts.length === 2) {
+      // 被拒绝的这一轮自己新建了一个原生会话：它可能已经存下我们准备重发的输入，不能领养。
+      observer.onUpdate({ blocks: [], result: "", sessionId: "ses_rejected_round" });
+      return { args: [], pid: 2, spawnedAt: "", interrupt() {},
+        completion: Promise.resolve(result({ exitCode: 1, primaryError: "503 所有供应商暂时不可用",
+          inputAccepted: false, rejection: "model-unavailable", state: { blocks: [], result: "", sessionId: "ses_rejected_round" } })) };
+    }
+    return { args: [], pid: 3, spawnedAt: "", interrupt() {}, completion: Promise.resolve(success()) };
+  } };
+  const manager = new StructuredSessionManager(f.storage, f.config, null, { opencode: runner });
+  t.after(() => manager.dispose());
+  const session = manager.createSession({ cwd: f.root, provider: "opencode", mode: "full-access", model: "opencode/a",
+    automationId: "conversation-message:scheduled_fixture", employeeId: "fixture", employeeName: "勤劳的初二",
+    employeeCandidates: [candidate("opencode", "opencode/a"), candidate("opencode", "opencode/b")], employeeCandidateIndex: 0 });
+  const first = await manager.sendMessage(session.id, "first round");
+  assert.equal(first.claudeSessionId, "ses_native");
+  const finished = await manager.sendMessage(session.id, "synthetic scheduled input");
+  assert.equal(starts.length, 3);
+  assert.equal(starts[2]!.prompt, "synthetic scheduled input", "the same input replays once, unchanged");
+  assert.equal(starts[2]!.session.claudeSessionId, "ses_native", "a same-tool switch resumes the session as it stood before the rejected round");
+  assert.deepEqual(starts[2]!.session.messages?.map((turn) => turn.role), ["user", "assistant", "user"],
+    "the replay continues the earlier round and sends this input once");
+  assert.ok(starts[2]!.session.messages?.[1]?.content.some((block) => block.type === "text" && block.text === "first answer"),
+    "a mid-conversation switch must not drop the conversation it is continuing");
+  assert.equal(finished.provider, "opencode"); assert.equal(finished.employeeCandidateIndex, 1);
+  assert.equal(finished.selectedModel, "opencode/b"); assert.equal(finished.status, "idle");
+  assert.equal(finished.messages?.filter((turn) => turn.role === "user").length, 2, "the replayed input is not duplicated");
+});
+
+test("employee fallback: a candidate that never produces a protocol event is abandoned and the next one runs", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const f = fixture(t);
+  const starts: string[] = [];
+  let settle: ((value: StructuredRunnerResult) => void) | null = null;
+  const runner: StructuredRunnerAdapter = { start(context) {
+    starts.push(context.session.selectedModel ?? "");
+    return starts.length === 1
+      ? { args: [], pid: 1, spawnedAt: "", interrupt: () => settle?.({ state: { blocks: [], result: "", sessionId: null },
+        exitCode: null, signal: "SIGTERM", stderr: "", primaryError: null }),
+        completion: new Promise<StructuredRunnerResult>((resolve) => { settle = resolve; }) }
+      : { args: [], pid: 2, spawnedAt: "", interrupt() {}, completion: Promise.resolve(success()) };
+  } };
+  const manager = new StructuredSessionManager(f.storage, f.config, null, { opencode: runner });
+  t.after(() => manager.dispose());
+  const session = manager.createSession({ cwd: f.root, provider: "opencode", mode: "full-access", model: "opencode/a",
+    employeeId: "fixture", employeeName: "勤劳的初二",
+    employeeCandidates: [candidate("opencode", "opencode/a"), candidate("opencode", "opencode/b")], employeeCandidateIndex: 0 });
+  const sending = manager.sendMessage(session.id, "synthetic hanging input");
+  await Promise.resolve();
+  t.mock.timers.tick(180_000);
+  const finished = await sending;
+  assert.deepEqual(starts, ["opencode/a", "opencode/b"]);
+  assert.equal(finished.employeeCandidateIndex, 1); assert.equal(finished.status, "idle");
+});

@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 
 import { ClaudeCliProtocolReducer } from "./structured-claude-protocol.js";
+import { cliUnacceptedFacts } from "./structured-failure.js";
 import { startStructuredCli } from "./structured-exec-pump.js";
 import type { StructuredExecHost } from "./structured-exec-host.js";
 import type {
@@ -39,6 +40,8 @@ export class QoderRunner implements StructuredRunnerAdapter {
     const reducer = new ClaudeCliProtocolReducer(context.session);
     let stdoutTail = "";
     let primaryError: string | null = null;
+    let protocolError = false;
+    let unparsedStdout = false;
     return startStructuredCli({
       sessionId: context.session.id,
       file: "qodercli",
@@ -57,6 +60,7 @@ export class QoderRunner implements StructuredRunnerAdapter {
         try {
           event = JSON.parse(trimmed);
         } catch {
+          unparsedStdout = true;
           return;
         }
         if (event && typeof event === "object" && !Array.isArray(event)) {
@@ -67,6 +71,7 @@ export class QoderRunner implements StructuredRunnerAdapter {
               ? record.errors.filter((item): item is string => typeof item === "string")
               : [];
             primaryError = errors.join("\n") || "Qoder CLI execution failed";
+            protocolError = true;
           }
         }
         if (reducer.apply(event, context.session.mode === "managed")) observer.onUpdate(reducer.state);
@@ -83,6 +88,15 @@ export class QoderRunner implements StructuredRunnerAdapter {
         stdoutTail,
         primaryError,
         ...(spawnError ? { spawnError } : {}),
+        ...cliUnacceptedFacts({
+          state: reducer.state,
+          primaryError,
+          protocolError: protocolError || reducer.errorResultObserved,
+          unparsedStdout,
+          signal,
+          progressed: reducer.assistantWorkObserved,
+          ...(spawnError ? { spawnError } : {}),
+        }),
       }),
     });
   }
