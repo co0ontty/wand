@@ -57,6 +57,7 @@ export function ConversationSidebarTools({ enabled, onNavigate, onCreateSession 
       aria-expanded={panel !== "closed"} aria-controls="conversation-create-panel"
       onClick={() => state.mode === "tasks" ? onCreateSession?.() : setPanel(panel === "closed" ? "group" : "closed")}>
       <ConversationMorphIcon active={panel !== "closed"} from="plus" to="close"/>
+      <span className="conversation-create-label">{panel === "closed" ? "发起群聊" : "关闭"}</span>
     </WandIconButton>
     <ConversationPanel open={enabled && panel !== "closed"} owner="conversation-create-panel" focusKey={panel} anchorRef={anchor} triggerRef={plus} onClose={() => setPanel("closed")}>
       <div hidden={panel !== "group"}><GroupEditor open={enabled && panel === "group"} owner="conversation-create-panel"
@@ -160,10 +161,11 @@ export function ConversationSidebarList({ compact, enabled = true, onNavigate }:
       <WandSearchField inputRef={searchInput} className="conversation-search-input" label="搜索对话或任务"
         value={ui.filters["list-query"] ?? ""} onValueChange={value => conversationUi.filter("list-query", value)}/>
     </div>
-    <Flex justify="space-between" align="center" gap={4} className="conversation-list-section"><Typography.Text type="secondary" className="conversation-list-count" title={countLabel} aria-label={countLabel}>{loaded ? query ? `匹配 ${counts.matches} / ${counts.scope}` : `${counts.scope} 个对话` : error ? "数量未加载" : "读取中…"}</Typography.Text>
+    <Flex vertical align="stretch" gap={4} className="conversation-list-section">
       <WandStretchTabs className="conversation-list-filter" ariaLabel="对话归档筛选"
         tabs={[{ value: "all", label: "全部" }, { value: "active", label: "未归档" }, { value: "archived", label: "已归档" }]}
-        value={filter} onValueChange={conversationUi.listFilter}/></Flex></div> : null}
+        value={filter} onValueChange={conversationUi.listFilter}/>
+      <Typography.Text type="secondary" className="conversation-list-count" title={countLabel} aria-label={countLabel}>{loaded ? query ? `匹配 ${counts.matches} / ${counts.scope}` : `${counts.scope} 个对话` : error ? "数量未加载" : "读取中…"}</Typography.Text></Flex></div> : null}
     {error ? <Typography.Text type="danger" role="status">{error}<WandButton size="small" onClick={refresh}>重新读取</WandButton></Typography.Text> : null}
     {actionError ? <Typography.Paragraph type="danger" role="alert">{actionError}</Typography.Paragraph> : null}
     {rows.map(item => <ConversationListRow key={item.id} item={item} employee={employees.find(employee => employee.id === item.peerEmployeeId) ?? null} compact={compact} query={query}

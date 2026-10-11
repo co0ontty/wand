@@ -32,6 +32,7 @@ export function installSidebarStyles(): void {
 .sidebar-header-primary { min-height:32px; }
 .sidebar-header-main { min-width:0; }
 .sidebar-header-actions { flex-shrink:0; }
+.sidebar-compact-toggle-label, .conversation-create-label { display:none; }
 .sidebar-header-actions :is(.sidebar-more-trigger,.sidebar-compact-toggle,.sidebar-close,.conversation-create-button) { width:32px; min-width:32px; height:32px; padding:0; }
 .sidebar-title { font-size:14px; letter-spacing:.02em; }
 .sidebar-new-task.ant-btn { height:34px; font-size:13px; }

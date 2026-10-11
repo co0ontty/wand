@@ -37,7 +37,7 @@ export function getShellLayoutClassName(layout: Readonly<ShellLayoutState>): str
 function ShellAppFrame({ legacyRefs }: ShellAppFrameProps = {}) {
   const snapshot = useUiStoreSnapshot();
   return (
-    <Layout className="app-container" style={{ position: "fixed", top: "var(--app-viewport-top, 0px)", left: 0, right: 0, height: "var(--app-viewport-height, 100dvh)", overflow: "hidden", paddingTop: "var(--wand-safe-top, 0px)", paddingBottom: "var(--wand-safe-bottom, 0px)" }}>
+    <Layout className="app-container" style={{ position: "fixed", top: "calc(var(--app-viewport-top, 0px) + var(--conversation-frame-top, 0px))", left: "var(--conversation-frame-inline, 0px)", right: "var(--conversation-frame-inline, 0px)", height: "calc(var(--app-viewport-height, 100dvh) - var(--conversation-frame-top, 0px) - var(--conversation-frame-bottom, 0px))", overflow: "hidden", paddingTop: "var(--wand-safe-top, 0px)", paddingBottom: "var(--wand-safe-bottom, 0px)" }}>
       <Layout hasSider className={getShellLayoutClassName(snapshot.layout.sidebarDrawer
         ? { ...snapshot.layout, sidebarAnchored: false, sidebarCollapsed: false }
         : snapshot.layout)} style={{ height: "100%", minHeight: 0 }}>

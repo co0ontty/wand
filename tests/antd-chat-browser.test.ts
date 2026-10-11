@@ -638,6 +638,9 @@ async function runExtended({ evaluate: e, send, click, key, wait, mode, result, 
   for (const scenario of ["ABA", "close-reopen", "terminal", "Home", "root-unmount", "pagehide"]) {
     plans.push({defer:true,error: scenario==="close-reopen" ? "late error" : undefined,input:{file_path:"fixture.txt"},content:"LATE-OLD",pending:false});
     await e("h.fresh(focusTurns)");await click(summary);await click(entry);await wait('!!document.querySelector(".chat-activity-loading")',"deferred detail");
+    // Loading is optimistic; synchronize with the fixture server before retiring
+    // the request whose late response this scenario needs to exercise.
+    for (let attempt = 0; deferred.length === 0 && attempt < 100; attempt++) await sleep(20);
     assert.equal(deferred.length,1);
     if (scenario==="close-reopen") { await click(entry);plans.push({input:{file_path:"fixture.txt"},content:"NEW-CURRENT",pending:false});await click(entry); }
     else if (scenario==="root-unmount") await e('document.querySelector(".chat-messages").remove();');
