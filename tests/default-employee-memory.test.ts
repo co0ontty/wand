@@ -271,7 +271,7 @@ test("HTTP memory logs only allowlisted successful actions; default built-in can
   assert.equal((await call("DELETE", `/api/silicon-employees/${DEFAULT_EMPLOYEE_ID}`)).status, 400);
   assert.equal((await call("POST", `/api/silicon-employees/${DEFAULT_EMPLOYEE_ID}/archive`)).status, 400);
   assert.equal((await call("PUT", `/api/silicon-employees/${DEFAULT_EMPLOYEE_ID}`, { agents: [CODEX] })).status, 200);
-  assert.equal((await call("PUT", `/api/silicon-employees/${DEFAULT_EMPLOYEE_ID}`, { agents: [PI], prompt: "手动覆盖" })).status, 400);
+  assert.equal((await call("PUT", `/api/silicon-employees/${DEFAULT_EMPLOYEE_ID}`, { agents: [PI], prompt: "手动覆盖" })).status, 200);
   assert.equal((await call("PATCH", "/api/user-memory", { enabled: false })).status, 200);
   await call("POST", "/api/tasks", { description: "暂停后不记录" });
   await whenUserMemorySettled(storage);
@@ -409,6 +409,6 @@ test("task dispatch defaults a missing executor; selected CLI and PTY contracts 
   assert.equal(ptyOptions.model, "user-model");
   assert.equal(ptyOptions.employeeId, DEFAULT_EMPLOYEE_ID);
   assert.equal(ptyOptions.employeeName, DEFAULT_EMPLOYEE_NAME);
-  assert.equal(ptyOptions.employeeAvatar, "");
+  assert.equal(ptyOptions.employeeAvatar, "plush-cat:v1:silver");
   assert.equal(ptyOptions.employeeCandidates, undefined);
 });

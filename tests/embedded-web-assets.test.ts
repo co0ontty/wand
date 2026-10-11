@@ -22,7 +22,7 @@ function md5(content: string): string {
   return createHash("md5").update(content).digest("hex").slice(0, 8);
 }
 
-test("compressed embedded assets preserve all six published asset payloads", () => {
+test("compressed embedded assets preserve all published asset payloads including lazy 3D", () => {
   const expectedScript = transformSync(readContent("scripts.js"), {
     loader: "js", minify: true, legalComments: "none", charset: "utf8",
   }).code;
@@ -33,6 +33,7 @@ test("compressed embedded assets preserve all six published asset payloads", () 
   assert.equal(EMBEDDED_WEB_ASSETS.scriptsJs, expectedScript);
   assert.equal(EMBEDDED_WEB_ASSETS.stylesCss, expectedStyles);
   assert.equal(EMBEDDED_WEB_ASSETS.aiTeamsJs, readContent("ai-teams.js"));
+  assert.equal(EMBEDDED_WEB_ASSETS.plushAvatarJs, readContent("plush-avatar.js"));
 
   for (const [assetPath, contentType] of [
     ["/vendor/xterm/xterm.bundle.js", "application/javascript"],
@@ -53,6 +54,7 @@ test("the embedded fallback source stays smaller than half its plain base64 payl
     EMBEDDED_WEB_ASSETS.scriptsJs,
     EMBEDDED_WEB_ASSETS.stylesCss,
     EMBEDDED_WEB_ASSETS.aiTeamsJs,
+    EMBEDDED_WEB_ASSETS.plushAvatarJs,
     ...Object.values(EMBEDDED_WEB_ASSETS.vendor).map((asset) => asset.content),
   ];
   const plainBase64Bytes = contents.reduce(
@@ -84,11 +86,14 @@ test("asset readers keep serving correct strings and hashes when disk assets are
     };
     const expectedScript = EMBEDDED_WEB_ASSETS.scriptsJs
       .replace('"${wandConfigPath}"', JSON.stringify(configPath))
-      .replace("${aiTeamsChunkSrc}", `/assets/ai-teams.js?v=${expectedChunk.hash}`);
+      .replace("${aiTeamsChunkSrc}", `/assets/ai-teams.js?v=${expectedChunk.hash}`)
+      .replace("${plushAvatarChunkSrc}", `/assets/plush-avatar.js?v=${md5(EMBEDDED_WEB_ASSETS.plushAvatarJs)}`);
     const fallbackScript = scripts.getScriptAsset(configPath);
     assert.equal(fallbackScript.content, expectedScript);
     assert.equal(fallbackScript.hash, versionWebAsset(expectedScript).hash);
     assert.deepEqual(scripts.getAiTeamsChunk(), expectedChunk);
+    const expectedPlush = { content: EMBEDDED_WEB_ASSETS.plushAvatarJs, hash: md5(EMBEDDED_WEB_ASSETS.plushAvatarJs) };
+    assert.deepEqual(scripts.getPlushAvatarChunk(), expectedPlush);
     assert.deepEqual(styles.getStylesAsset(), versionWebAsset(EMBEDDED_WEB_ASSETS.stylesCss));
 
     // A running process also retains the latest disk copy across npm replacement.
@@ -96,10 +101,12 @@ test("asset readers keep serving correct strings and hashes when disk assets are
     mkdirSync(fixtureContentDir);
     writeFileSync(path.join(fixtureContentDir, "scripts.js"), "console.log('updated build');\n");
     writeFileSync(path.join(fixtureContentDir, "ai-teams.js"), "console.log('updated teams');\n");
+    writeFileSync(path.join(fixtureContentDir, "plush-avatar.js"), "console.log('updated plush');\n");
     writeFileSync(path.join(fixtureContentDir, "tailwind.css"), ":root{--fixture:1}");
     writeFileSync(path.join(fixtureContentDir, "styles.css"), "body{color:red}");
     const diskScript = scripts.getScriptAsset(configPath);
     const diskChunk = scripts.getAiTeamsChunk();
+    const diskPlush = scripts.getPlushAvatarChunk();
     const diskStyles = styles.getStylesAsset();
     assert.equal(diskScript.content, "console.log('updated build');\n");
     assert.deepEqual(diskChunk, {
@@ -109,11 +116,13 @@ test("asset readers keep serving correct strings and hashes when disk assets are
     rmSync(fixtureContentDir, { recursive: true });
     assert.deepEqual(scripts.getScriptAsset(configPath), diskScript);
     assert.deepEqual(scripts.getAiTeamsChunk(), diskChunk);
+    assert.deepEqual(scripts.getPlushAvatarChunk(), diskPlush);
     assert.deepEqual(styles.getStylesAsset(), diskStyles);
 
     // Requests from the old page must still resolve its original embedded build.
     assert.equal(scripts.getScriptAsset(configPath, fallbackScript.hash).content, expectedScript);
     assert.deepEqual(scripts.getAiTeamsChunk(expectedChunk.hash), expectedChunk);
+    assert.deepEqual(scripts.getPlushAvatarChunk(expectedPlush.hash), expectedPlush);
     assert.deepEqual(
       styles.getStylesAsset(versionWebAsset(EMBEDDED_WEB_ASSETS.stylesCss).hash),
       versionWebAsset(EMBEDDED_WEB_ASSETS.stylesCss),

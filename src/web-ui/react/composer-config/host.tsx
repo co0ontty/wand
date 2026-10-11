@@ -74,14 +74,14 @@ export function ComposerConfigControl({ mount }: { mount: ComposerConfigMount })
               <WandIcon name="refresh" size={13} strokeWidth={1.9} />
             </WandIconButton>
           )}
-          {showAdvanced && <span
+          <span
             data-mode-control-pill="thinking"
             style={{ minWidth: 68 }}
             data-thinking={mount.thinkingValue}
             title={`思考深度：${mount.thinkingLabel}`}
           >
             {selectHost(scope, "thinking")}
-          </span>}
+          </span>
         </>
       )}
     </Flex>

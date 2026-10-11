@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { FIXED_EMPLOYEE_AVATARS, fixedEmployeeAvatar, isFixedAvatarEmployee } from "./fixed-employee-avatar.js";
 import { CONVERSATION_OWNER, type ConversationInstance, type ConversationRequest } from "./conversation-types.js";
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
@@ -3219,9 +3220,15 @@ export class WandStorage {
       state.enabled ? state.profile : null);
   }
 
-  getSiliconEmployee(id: string): SiliconEmployee | null {
+  /** Saved definition without generated short-term preferences. */
+  getSiliconEmployeeDefinition(id: string): SiliconEmployee | null {
     const row = this.db.prepare("SELECT * FROM silicon_employees WHERE id = ?").get(id) as Record<string, unknown> | undefined;
-    return row ? this.projectDefaultEmployee(mapSiliconEmployeeRow(row)) : null;
+    return row ? mapSiliconEmployeeRow(row) : null;
+  }
+
+  getSiliconEmployee(id: string): SiliconEmployee | null {
+    const employee = this.getSiliconEmployeeDefinition(id);
+    return employee ? this.projectDefaultEmployee(employee) : null;
   }
 
   getDefaultSiliconEmployee(): SiliconEmployee | null {
@@ -3232,18 +3239,10 @@ export class WandStorage {
   /** Seed once, preserve execution choices, and never reset learned preferences on restart. */
   ensureDefaultSiliconEmployee(provider?: SessionProvider): SiliconEmployee {
     const existing = this.getSystemSiliconEmployee(DEFAULT_EMPLOYEE_KEY);
-    const state = this.getUserMemoryState();
-    const definition = defaultEmployeeDefinition(
-      existing?.agents ?? systemEmployeeSeedAgents({ provider }), new Date().toISOString(), existing,
-      state.enabled ? state.profile : null,
-    );
-    if (!existing || existing.name !== definition.name || existing.duty !== definition.duty
-      || existing.prompt !== definition.prompt || existing.avatar !== definition.avatar
-      || existing.archivedAt || !existing.agents.length) {
-      this.saveSiliconEmployee(definition);
-      return definition;
-    }
-    return existing;
+    if (existing) return this.projectDefaultEmployee(existing);
+    const definition = defaultEmployeeDefinition(systemEmployeeSeedAgents({ provider }), new Date().toISOString());
+    this.saveSiliconEmployee(definition);
+    return this.projectDefaultEmployee(definition);
   }
 
   /** 内置「系统运维」员工；未创建（或被删除过）时返回 null。 */
@@ -3252,30 +3251,13 @@ export class WandStorage {
     return row ? mapSiliconEmployeeRow(row) : null;
   }
 
-  /**
-   * 幂等地保证内置员工存在。已存在时只补齐锁定字段（防止旧的同名定义漂移），
-   * 候选保留用户当下的设置；不存在时按 seed 建首条候选。
-   */
+  /** Seed only when missing; restart never overwrites user profile, candidates, or legacy avatars. */
   ensureSystemSiliconEmployee(seed: SystemEmployeeSeed = {}): SiliconEmployee {
     const existing = this.getSystemSiliconEmployee();
-    if (!existing) {
-      const employee = systemEmployeeDefinition(systemEmployeeSeedAgents(seed), new Date().toISOString());
-      this.saveSiliconEmployee(employee);
-      return employee;
-    }
-    const locked = systemEmployeeDefinition(existing.agents, new Date().toISOString(), existing);
-    if (
-      existing.name !== locked.name
-      || existing.duty !== locked.duty
-      || existing.prompt !== locked.prompt
-      || existing.avatar !== locked.avatar
-      || existing.archivedAt !== undefined
-      || existing.agents.length === 0
-    ) {
-      this.saveSiliconEmployee(locked);
-      return locked;
-    }
-    return existing;
+    if (existing) return existing;
+    const employee = systemEmployeeDefinition(systemEmployeeSeedAgents(seed), new Date().toISOString());
+    this.saveSiliconEmployee(employee);
+    return employee;
   }
 
   /** Stable built-in decision employee; seed once and retain the user's ordered call chain. */
@@ -3303,6 +3285,15 @@ export class WandStorage {
   }
 
   saveSiliconEmployee(employee: SiliconEmployee): void {
+    const existing = this.getSiliconEmployeeDefinition(employee.id);
+    const target = FIXED_EMPLOYEE_AVATARS.find((entry) => entry.id === employee.id || entry.systemKey === employee.systemKey);
+    if (target) {
+      if (employee.id !== target.id || employee.systemKey !== target.systemKey) throw new Error("内置员工身份不可修改或冒用。");
+      if (existing && !isFixedAvatarEmployee(existing)) throw new Error("内置员工身份冲突，不能覆盖已有记录。");
+      if (employee.avatar !== (existing?.avatar ?? target.avatar)) throw new Error("该员工是内置的，头像不可修改。");
+      if (existing && JSON.stringify(employee.tags) !== JSON.stringify(existing.tags)) throw new Error("该员工是内置的，标签不可修改。");
+      if (employee.archivedAt !== existing?.archivedAt) throw new Error("内置员工不可归档。");
+    }
     const tags = isBuiltinSiliconEmployee(employee)
       ? siliconEmployeeTags(employee)
       : parseSiliconEmployeeTags(employee.tags ?? []);
@@ -3335,7 +3326,33 @@ export class WandStorage {
     );
   }
 
+  /** Explicit, atomic migration; not called from GET, config load, seeds, or ordinary saves.
+   * Compare all expected avatar values first; change only avatar, including preserving timestamps.
+   */
+  migrateFixedEmployeeAvatars(expected: ReadonlyArray<{ id: string; systemKey: string; avatar: string }>): number {
+    return this.transaction(() => {
+      if (expected.length !== FIXED_EMPLOYEE_AVATARS.length || new Set(expected.map((entry) => entry.id)).size !== expected.length) {
+        throw new Error("固定头像迁移需要两个精确且不同的目标。");
+      }
+      const rows = FIXED_EMPLOYEE_AVATARS.map((target) => {
+        const prior = expected.find((entry) => entry.id === target.id && entry.systemKey === target.systemKey);
+        const employee = this.getSiliconEmployeeDefinition(target.id);
+        if (!prior || !employee || fixedEmployeeAvatar(employee) !== target.avatar) throw new Error("固定头像迁移目标不存在或身份冲突。");
+        if (employee.avatar !== prior.avatar && employee.avatar !== target.avatar) throw new Error("固定头像迁移检测到头像已变化，请重新核对。");
+        return { target, employee };
+      });
+      let changed = 0;
+      for (const { target, employee } of rows) {
+        if (employee.avatar === target.avatar) continue;
+        changed += Number(this.db.prepare("UPDATE silicon_employees SET avatar = ? WHERE id = ? AND system_key = ? AND avatar = ?")
+          .run(target.avatar, target.id, target.systemKey, employee.avatar).changes);
+      }
+      return changed;
+    });
+  }
+
   archiveSiliconEmployee(id: string, archivedAt = new Date().toISOString()): void {
+    if (isFixedAvatarEmployee(this.getSiliconEmployeeDefinition(id) ?? {})) throw new Error("内置员工不可归档。");
     this.db.prepare("UPDATE silicon_employees SET archived_at = ?, updated_at = ? WHERE id = ?").run(
       archivedAt,
       new Date().toISOString(),
@@ -3344,6 +3361,7 @@ export class WandStorage {
   }
 
   unarchiveSiliconEmployee(id: string): void {
+    if (isFixedAvatarEmployee(this.getSiliconEmployeeDefinition(id) ?? {})) throw new Error("内置员工不能恢复归档。");
     this.db.prepare("UPDATE silicon_employees SET archived_at = NULL, updated_at = ? WHERE id = ?").run(
       new Date().toISOString(),
       id,
@@ -3351,6 +3369,7 @@ export class WandStorage {
   }
 
   deleteSiliconEmployee(id: string): void {
+    if (isFixedAvatarEmployee(this.getSiliconEmployeeDefinition(id) ?? {})) throw new Error("内置员工不可删除。");
     this.db.prepare("DELETE FROM silicon_employees WHERE id = ?").run(id);
   }
 

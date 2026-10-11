@@ -97,7 +97,7 @@ function captureStdin(path: string): string {
   return `let input = ""; process.stdin.on("data", (chunk) => { input += chunk; }); process.stdin.on("end", () => { require("node:fs").writeFileSync(${JSON.stringify(path)}, input); });`;
 }
 
-test("内置员工：首次按已有系统 AI 工具落候选，之后幂等且只补锁定字段", withTempStorage((storage) => {
+test("固定头像内置员工：首次落候选，之后保留用户资料与执行选择", withTempStorage((storage) => {
   const seeded = storage.ensureSystemSiliconEmployee({ cli: "grok", model: "grok-4.5", provider: "claude" });
   assert.equal(seeded.name, SYSTEM_EMPLOYEE_NAME);
   assert.equal(seeded.duty, systemEmployeeSeedAgents().length ? seeded.duty : seeded.duty);
@@ -113,11 +113,12 @@ test("内置员工：首次按已有系统 AI 工具落候选，之后幂等且�
   assert.deepEqual(again.agents.map((agent) => agent.provider), ["grok", "claude"]);
   assert.equal(storage.listSiliconEmployees().length, 1);
 
-  // 名字/人设被外部改坏、或被人为归档：下次加载时恢复锁定值并保持可见。
-  storage.saveSiliconEmployee({ ...again, name: "被改过的名字", prompt: "", archivedAt: "2026-09-30T00:00:00.000Z" });
+  // 用户资料由用户维护，启动不恢复默认；内置身份仍不能归档。
+  storage.saveSiliconEmployee({ ...again, name: "用户自定义名字", prompt: "自定义人设" });
+  assert.throws(() => storage.archiveSiliconEmployee(again.id), /不可归档/);
   const repaired = storage.ensureSystemSiliconEmployee();
-  assert.equal(repaired.name, SYSTEM_EMPLOYEE_NAME);
-  assert.equal(repaired.prompt, SYSTEM_EMPLOYEE_PROMPT);
+  assert.equal(repaired.name, "用户自定义名字");
+  assert.equal(repaired.prompt, "自定义人设");
   assert.equal(repaired.archivedAt, undefined);
   assert.deepEqual(repaired.agents.map((agent) => agent.provider), ["grok", "claude"]);
 }));
@@ -137,7 +138,7 @@ test("内置员工：候选缺省跟随默认 provider，列表永远排在最�
   assert.equal(storage.getSystemSiliconEmployee()?.name, SYSTEM_EMPLOYEE_NAME);
 }));
 
-test("系统运维员工只有执行候选可改：改名/归档/删除都被拒", async (t) => {
+test("系统运维员工资料和候选可改：头像/身份/归档/删除仍锁定", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "wand-system-employee-routes-"));
   const storage = new WandStorage(join(root, "wand.db"));
   const changed: string[] = [];
@@ -169,17 +170,16 @@ test("系统运维员工只有执行候选可改：改名/归档/删除都被拒
   assert.equal((listed.json?.employees as Array<{ name: string }>)[0]?.name, SYSTEM_EMPLOYEE_NAME);
 
   const renamed = await call("PUT", `/api/silicon-employees/${seeded.id}`, { ...seeded, name: "别改我" });
-  assert.equal(renamed.status, 400);
-  assert.match(String(renamed.json?.error), /内置/);
-  assert.equal(storage.getSiliconEmployee(seeded.id)?.name, SYSTEM_EMPLOYEE_NAME);
+  assert.equal(renamed.status, 200);
+  assert.equal(storage.getSiliconEmployee(seeded.id)?.name, "别改我");
 
   const patched = await call("PUT", `/api/silicon-employees/${seeded.id}`, { agents: [GROK, CLAUDE] });
   assert.equal(patched.status, 200, JSON.stringify(patched.json));
   assert.deepEqual((patched.json?.agents as Array<{ provider: string }>).map((agent) => agent.provider), ["grok", "claude"]);
-  // 锁定字段仍按服务端定义返回，改名请求不会漏出去。
-  assert.equal(patched.json?.name, SYSTEM_EMPLOYEE_NAME);
+  // 部分更新保留用户资料。
+  assert.equal(patched.json?.name, "别改我");
   assert.equal(patched.json?.prompt, SYSTEM_EMPLOYEE_PROMPT);
-  assert.deepEqual(changed, [seeded.id]);
+  assert.deepEqual(changed, [seeded.id, seeded.id]);
 
   const duplicated = await call("PUT", `/api/silicon-employees/${seeded.id}`, { agents: [CLAUDE, { ...CLAUDE }] });
   assert.equal(duplicated.status, 400);
@@ -207,14 +207,17 @@ test("候选链：空模型跟随 provider 默认，PTY 候选与内部 AI 调�
   assert.deepEqual(systemEmployeeCliCandidates(null), []);
 });
 
-test("系统应用候选链会跳过员工中启用的 SDK", () => {
+test("系统应用候选链保留员工中启用的 SDK 和配置顺序", () => {
   const chain = systemEmployeeCliCandidates({
     agents: [
       { ...PI, engine: "sdk" },
       { ...CLAUDE, provider: "grok", model: "grok-4.5" },
     ],
   });
-  assert.deepEqual(chain, [{ provider: "grok", model: "grok-4.5", thinkingEffort: "off" }]);
+  assert.deepEqual(chain, [
+    { provider: "pi", engine: "sdk", model: undefined, thinkingEffort: "off" },
+    { provider: "grok", model: "grok-4.5", thinkingEffort: "off" },
+  ]);
 });
 test("系统 AI：CLI 模式按候选链取首个已安装工具，并带上运维人设", async () => {
   const root = mkdtempSync(join(tmpdir(), "wand-system-employee-chain-"));
@@ -264,15 +267,18 @@ function storageEmployee() {
   };
 }
 
-test("系统员工只有 SDK 候选时不回退到默认 provider", async () => {
+test("系统员工只有 SDK 候选时走 SDK，缺少免费分组不回退到默认 provider", async () => {
+  const free = { resolveForCall: async () => { throw new Error("offline free pool unavailable"); } };
   const context = resolveSystemAiContext(session(), { ...config, systemAiCli: "claude", systemAiModel: "fallback" }, {
-    ...storageEmployee(), agents: [{ ...PI, engine: "sdk" }],
-  });
+    ...storageEmployee(), agents: [{ ...PI, engine: "sdk", model: "wand-openrouter-free/auto" }],
+  }, free);
   assert.equal(context.employeeChannelOnly, true);
-  assert.equal(context.cliCandidates, undefined);
+  assert.deepEqual(context.cliCandidates, [{ provider: "pi", engine: "sdk", model: "wand-openrouter-free/auto", thinkingEffort: "off" }]);
+  assert.equal(context.provider, "pi");
+  assert.equal(context.employeeText?.free, free);
   await assert.rejects(
     callConfiguredAiText({ system: "s", prompt: "p" }, process.cwd(), "中文", context),
-    /已跳过 Wand Agent/,
+    /offline free pool unavailable/,
   );
 });
 test("角色设定只做前缀，任务自己的输出格式仍排在后面", () => {

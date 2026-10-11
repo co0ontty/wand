@@ -3,6 +3,7 @@ import { AI_TEAM_MAX_CANDIDATES, agentKey, isDefaultSiliconEmployee, type AiTeam
 
 export interface AiTeamEmployeeSource {
   getSiliconEmployee(id: string): SiliconEmployee | null;
+  getSiliconEmployeeDefinition?(id: string): SiliconEmployee | null;
 }
 
 // Execution-only data: never enumerable on a member or exposed by public DTO serialization.
@@ -38,7 +39,7 @@ export function requireTeamEmployee(source: AiTeamEmployeeSource, id: string): S
   }
   // The default partner's read projection includes short-term habits; they are not team snapshot data.
   return isDefaultSiliconEmployee(employee)
-    ? defaultEmployeeDefinition(employee.agents, employee.updatedAt, employee, null)
+    ? defaultEmployeeDefinition(employee.agents, employee.updatedAt, source.getSiliconEmployeeDefinition?.(id) ?? employee, null)
     : employee;
 }
 

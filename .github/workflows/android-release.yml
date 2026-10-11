@@ -40,6 +40,12 @@ jobs:
         with:
           java-version: "17"
           distribution: "temurin"
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle*
+            android/**/gradle-wrapper.properties
+            android/gradle.properties
+            android/gradle/libs.versions.toml
 
       # setup-android 的 packages 默认值是 "tools platform-tools"，而旧 `tools` 包已从
       # Android SDK 仓库下线：v4.64.0 起所有 release 的 build-android 都卡在这一步。

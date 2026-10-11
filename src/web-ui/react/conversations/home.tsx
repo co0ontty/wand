@@ -1,3 +1,4 @@
+import { useComposerUsage } from "./composer-usage.js";
 import * as React from "react";
 import { Sender } from "@ant-design/x";
 import { Alert, Descriptions, Flex, Spin, Typography } from "antd";
@@ -7,6 +8,7 @@ import { conversationLeaderMention, conversationMentionToken } from "../../../co
 import type { Workspace } from "../../../types.js";
 import { useSiliconEmployees } from "../agents/employee-repository";
 import { EmployeeAvatar } from "../agents/employee-avatar";
+import { ComposerIdentity } from "../composer-sender/identity.js";
 import { ConversationGroupAvatar } from "./avatar";
 import { ConversationMessages, formatConversationAttachments } from "../ai-teams/lazy";
 import { teamChatComposer } from "../ai-teams/composer-bridge";
@@ -102,6 +104,7 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
   const current = React.useRef({ scope, visible, id, key: draftKey }); current.current = { scope, visible, id, key: draftKey };
   const employee = employees.find(e => e.id === selected?.peerEmployeeId || id === `dm_${e.id}`);
   const previousWork = latestDirectWork(selected);
+  const composerUsage = useComposerUsage(previousWork?.sessionId ?? selected?.communicationSessionId ?? undefined, visible && !ui.directory, selected?.updatedAt);
   const leader = selected?.team?.members.find(m => m.isLeader);
   const selectedRun = selected?.runDetails.find(d => d.run.id === target?.runId);
   const mention = selected?.kind === "group" ? conversationLeaderMention(draft.text,
@@ -308,7 +311,7 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
       <Flex ref={membersAnchor} align="center" justify="space-between" gap={8} className="conversation-heading" style={{ position: "relative", flexShrink: 0 }}>
         <Flex align="center" gap={8} style={{ minWidth: 0 }}>
           {onOpenSidebar ? <WandIconButton style={{ width: 44, height: 44 }} aria-label={sidebarOpen ? "关闭列表" : "打开列表"} onClick={onOpenSidebar}><SidebarToggleIcon open={sidebarOpen}/></WandIconButton> : null}
-          {employee ? <WandIconButton className="conversation-avatar-button" aria-label={`查看${employee.name}的资料`} onClick={event => employeeProfile.open(employee, event.currentTarget)}><EmployeeAvatar employee={employee} size="md"/></WandIconButton> : selected?.team ? <WandIconButton className="conversation-avatar-button" aria-label="查看群资料" aria-expanded={members} aria-controls="conversation-members-panel" onClick={event => toggleMembers(event.currentTarget)}><ConversationGroupAvatar title={selected.title} size={32}/></WandIconButton> : id && !selected ? <span className="conversation-avatar-placeholder" aria-hidden="true"/> : null}
+          {employee ? <WandIconButton className="conversation-avatar-button" aria-label={`查看${employee.name}的资料`} onClick={event => employeeProfile.open(employee, event.currentTarget)}><EmployeeAvatar employee={employee} size="md"/></WandIconButton> : selected?.team ? <WandIconButton className="conversation-avatar-button" aria-label="查看群资料" aria-expanded={members} aria-controls="conversation-members-panel" onClick={event => toggleMembers(event.currentTarget)}><ConversationGroupAvatar title={selected.title} size={48}/></WandIconButton> : id && !selected ? <span className="conversation-avatar-placeholder" aria-hidden="true"/> : null}
           <div className="conversation-heading-copy">
             <WandButton kind="ghost" className="conversation-heading-title" title={selected?.title ?? employee?.name} aria-expanded={selected?.kind === "group" ? members : undefined} aria-controls={selected?.kind === "group" ? "conversation-members-panel" : undefined} onClick={event => employee ? employeeProfile.open(employee, event.currentTarget) : toggleMembers(event.currentTarget)}>{selected?.title ?? employee?.name ?? "选择一位员工，开始聊天"}</WandButton>
             <Typography.Text type="secondary" className="conversation-heading-context">{selected?.kind === "group" ? `群聊 · 我 + ${selected.team?.members.length ?? 0} 位员工` : employee ? `私聊${employee.id === DEFAULT_EMPLOYEE_ID ? " · 默认伙伴" : ""}` : "选择接收对象后发送"}</Typography.Text>
@@ -397,6 +400,8 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
         {draft.attachments.length ? <ComposerAttachmentList items={draft.attachments.map((a, index) => ({ index, name: a.name, sizeLabel: `${a.size} B`, previewUrl: a.previewUrl ?? null }))}
           onRemove={index => teamChatComposer.edit(draftKey, { removeAttachment: index })}/> : null}
         {voiceStatus ? <Typography.Text type="secondary" role="status" aria-live="polite" ellipsis>{voiceStatus}</Typography.Text> : null}
+        <div className="conversation-input-wrap">
+        {employee ? <ComposerIdentity employee={employee} fileActivity={composerUsage.fileActivity}/> : null}
         <Sender ref={sender} value={draft.text} className="conversation-sender" placeholder={layer === "task" ? "描述任务要求…" : "输入消息…"} autoSize={{ minRows: 1, maxRows: 5 }} suffix={false}
           onPaste={e => { if (e.clipboardData.files.length) { e.preventDefault(); addFiles(e.clipboardData.files); } }}
           onChange={text => teamChatComposer.edit(draftKey, { text })} onSubmit={() => void send()} submitType="enter"
@@ -433,6 +438,7 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
             </div>
           </ConversationPanel>
         </Flex>}/>
+        </div>
         <input ref={inputFiles} hidden type="file" multiple aria-label="选择附件" onChange={e => { if (e.currentTarget.files) addFiles(e.currentTarget.files); e.currentTarget.value = ""; }}/>
       </div>
     </Flex>

@@ -50,12 +50,15 @@ test("mode 作用域只渲染模式 chip", () => {
   assert.doesNotMatch(html, /data-models-refresh/);
 });
 
-test("runtime 保留模型快捷控制，思考与刷新收于完整执行选项", () => {
+test("runtime 并排显示模型与思考深度，刷新保留在完整执行选项", () => {
   const html = render(mountFor("runtime"));
   assert.match(html, /aria-label="模型与思考设置"/);
   assert.doesNotMatch(html, /data-mode-control-pill="mode"/);
   assert.match(html, /data-mode-control-pill="model"/);
-  assert.doesNotMatch(html, /data-mode-control-pill="thinking"/);
+  assert.match(html, /data-mode-control-pill="thinking"/);
+  assert.match(html, /data-composer-select-key="runtime-thinking"/);
+  assert.match(html, /title="思考深度：中"/);
+  assert.match(html, /data-thinking="standard"/);
   assert.doesNotMatch(html, /data-models-refresh=""/);
 });
 

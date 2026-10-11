@@ -8,6 +8,7 @@ import { ExecutionMode, InputRequest, ProcessEvent, ResizeRequest, SessionProvid
 import { getDefaultModelForProvider, isExecutionMode } from "./config.js";
 import { defaultRoleForCli } from "./default-employee.js";
 import { defaultModelGroupSelector } from "./model-groups.js";
+import type { OpenRouterFreeModelsService } from "./openrouter-free-models.js";
 
 import { inspectPiExecution } from "./pi-execution.js";
 import { alignedBlockStart, blockWindowMessagesForTransport, compactToolMessagesForTransport, messageWindowByteBudget, sliceTurnBlocksForTransport, truncateMessagesForTransport, visibleBlockCount, windowMessagesForTransport } from "./message-truncator.js";
@@ -529,6 +530,7 @@ export function registerSessionRoutes(
   onSessionCreated?: (cwd: string | undefined | null) => void,
   onCompletionViewed?: (event: ProcessEvent) => void,
   decisions?: PiRecommendationRuntime,
+  free?: Pick<OpenRouterFreeModelsService, "resolveForCall">,
 ): void {
   registerPiRecommendationRoute(app, { structured, sessions, config, decisions });
   const wantsCompactTools = (req: Request): boolean =>
@@ -672,9 +674,9 @@ export function registerSessionRoutes(
         res.status(400).json({ error: "请选择有效的执行引擎。" });
         return;
       }
-      const requestedEngine: "cli" | "sdk" | undefined = (employee && !requestedProvider) || !rawEngine
-        ? undefined
-        : rawEngine as "cli" | "sdk";
+      const requestedEngine: "cli" | "sdk" | undefined = employee && !requestedProvider
+        ? employeeAgent?.engine ?? "cli"
+        : rawEngine ? rawEngine as "cli" | "sdk" : undefined;
       if (requestedEngine === "sdk" && provider !== "pi") {
         res.status(400).json({ error: "Wand Agent 只支持 Pi 结构化会话。" });
         return;
@@ -1267,7 +1269,7 @@ export function registerSessionRoutes(
       workspaceTaskId?: unknown;
     };
     try {
-      const ai = resolveSystemAiContext(snapshot, config, storage.getSystemSiliconEmployee());
+      const ai = resolveSystemAiContext(snapshot, config, storage.getSystemSiliconEmployee(), free);
       // 自动 message + 迭代模式：拿本轮提示词当输入；提交成功后标记已用掉。
       const context = await iterationCommitInput(storage, snapshot, body);
       const result = await runQuickCommitWithFallback({
@@ -1369,7 +1371,7 @@ export function registerSessionRoutes(
     }
     const body = (req.body ?? {}) as { mode?: unknown; entryIds?: unknown; includeDiff?: boolean };
     try {
-      const ai = resolveSystemAiContext(snapshot, config, storage.getSystemSiliconEmployee());
+      const ai = resolveSystemAiContext(snapshot, config, storage.getSystemSiliconEmployee(), free);
       const context = await iterationCommitInput(storage, snapshot, body);
       const result = await generateCommitMessageOnly(snapshot.cwd, config.language ?? "", {
         ...ai,
@@ -1406,7 +1408,7 @@ export function registerSessionRoutes(
     }
     const body = (req.body ?? {}) as { tag?: string; autoTag?: boolean; push?: boolean };
     try {
-      const ai = resolveSystemAiContext(snapshot, config, storage.getSystemSiliconEmployee());
+      const ai = resolveSystemAiContext(snapshot, config, storage.getSystemSiliconEmployee(), free);
       const result = await runTagHead({
         cwd: snapshot.cwd,
         language: config.language ?? "",

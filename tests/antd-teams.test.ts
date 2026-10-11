@@ -144,9 +144,11 @@ test("ordinary team and employee controls come from the library", () => {
   assert.match(text, /<Empty\b/);
   assert.match(text, /<Checkbox\b/);
   assert.match(text, /<Tooltip\b/);
-  // 员工头像毛色是业务身份，保留像素猫，但按钮是通用圆钮。
+  // 员工头像进入通用弹层，捏脸保留原生单选组的键盘语义。
   const avatar = owned("agents/employee-avatar.tsx");
-  assert.match(avatar, /<Button\s+className="wand-team-coat"/);
+  assert.match(avatar, /<WandPopover\b/);
+  assert.match(avatar, /type="radio"/);
+  assert.match(avatar, /aria-label="编辑员工头像"/);
   assert.match(owned("ai-teams/teams-page.tsx"), /<Button\s+className="wand-team-coat"/);
 });
 

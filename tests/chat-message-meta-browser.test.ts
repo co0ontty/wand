@@ -1,3 +1,4 @@
+import { themeFixtureHtml } from "./helpers/theme-fixture.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { spawn } from "node:child_process";
@@ -51,11 +52,11 @@ test("canonical messages preserve body, compact metadata and optional usage acro
     }
     if (url.pathname.startsWith("/api/")) { res.writeHead(404); res.end("{}"); return; }
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.end(`<!doctype html><html lang="zh-CN" class="${url.searchParams.has("native") ? "is-wand-app" : ""}">
+    res.end(themeFixtureHtml(`<!doctype html><html lang="zh-CN" class="${url.searchParams.has("native") ? "is-wand-app" : ""}">
       <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
       <link rel="stylesheet" href="/tailwind.css"><link rel="stylesheet" href="/styles.css">
       <style>#chat-output { height:100dvh; display:flex; }</style></head>
-      <body><div id="chat-output"></div><textarea id="input-box" hidden></textarea><script src="/app.js"></script></body></html>`);
+      <body><div id="chat-output"></div><textarea id="input-box" hidden></textarea><script src="/app.js"></script></body></html>`));
   });
   server.listen(0, "127.0.0.1"); await once(server, "listening");
   const address = server.address(); assert.ok(address && typeof address !== "string");

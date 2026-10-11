@@ -1,3 +1,4 @@
+import { themeFixtureHtml } from "./helpers/theme-fixture.js";
 import { cssEvidenceCapture } from "./helpers/antd-css-evidence.js";
 import { peopleContrastExpression } from "./helpers/people-layout-contrast.js";
 import assert from "node:assert/strict";
@@ -157,6 +158,8 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
     },
   };
 
+  await build({entryPoints:[join(root,"src/web-ui/react/avatars/renderer.ts")],bundle:true,format:"iife",platform:"browser",outfile:join(temporary,"plush-avatar.js"),logLevel:"warning"});
+  writeFileSync(join(temporary,"app.js"),readFileSync(join(temporary,"app.js"),"utf8").replaceAll("${plushAvatarChunkSrc}","/plush-avatar.js"));
   let routeLinked = true;
   const server = createServer((request, response) => {
     const url = request.url ?? "/";
@@ -165,6 +168,7 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
       response.statusCode = status;
       response.end(JSON.stringify(value));
     };
+    if (url === "/plush-avatar.js") {response.setHeader("content-type","application/javascript");response.end(readFileSync(join(temporary,"plush-avatar.js")));return;}
     if (url === "/app.js") {
       response.setHeader("content-type", "application/javascript");
       response.end(readFileSync(join(temporary, "app.js")));
@@ -193,6 +197,12 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
     ] : []);
     if (url.startsWith("/api/workspaces")) return send([]);
     if (url.startsWith("/api/models")) return send({ providers: [] });
+    if (url.startsWith("/api/silicon-employees/") && request.method === "PUT") {
+      let body = ""; request.on("data", chunk => { body += chunk; }); request.on("end", () => {
+        const id = url.split("/").at(-1), index = employees.findIndex(employee => employee.id === id);
+        employees[index] = { ...employees[index], ...JSON.parse(body) }; send(employees[index]);
+      }); return;
+    }
     if (url.startsWith("/api/silicon-employees")) return send({ employees: qaEmployeeCount === null ? employees : Array.from({ length: qaEmployeeCount }, (_, index) => ({
       ...employees[0], id: `qa-employee-${index}`, name: `研发员工 ${index + 1} · VeryLongEnglishIdentityWithChinese姓名`.repeat(3),
       duty: "负责跨端界面、无障碍、性能与交付验收 · long-role-description ".repeat(5),
@@ -213,11 +223,11 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
     }
     if (url.startsWith("/api/")) return send({});
     response.setHeader("content-type", "text/html; charset=utf-8");
-    response.end(`<!doctype html><html lang="zh-CN"><head><meta name="viewport" content="width=device-width,initial-scale=1">`
+    response.end(themeFixtureHtml(`<!doctype html><html lang="zh-CN"><head><meta name="viewport" content="width=device-width,initial-scale=1">`
       + `<link rel="stylesheet" href="/tailwind.css"><link rel="stylesheet" href="/styles.css">`
       + `<style>html,body{margin:0}</style></head><body><div id="root"></div>`
       + `<div id="overlay-root"><div class="wand-ui-portals" id="wand-react-ui-portals"></div></div>`
-      + `<script src="/app.js"></script></body></html>`);
+      + `<script src="/app.js"></script></body></html>`));
   });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -336,7 +346,7 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
       await wait("!window.__wandFixtureBeforeNavigation && document.readyState === 'complete'");
       await send("Page.bringToFront");
       await wait("!!document.querySelector('.wand-employee-list')");
-      await wait("document.querySelectorAll('.wand-employee-list .wand-employee-card').length === 1");
+      await wait("document.querySelectorAll('[data-employee-profile]').length === 1");
 
       // A selected team belongs to its own page even after a desktop-to-mobile resize.
       await click(".wand-teams-page [data-stretch-value=teams]");
@@ -344,9 +354,11 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
       await click(".wand-teams-cards .wand-teams-card");
       await wait("!!document.querySelector('.wand-teams-page[data-detail]')");
       await click(".wand-teams-page [data-stretch-value=employees]");
-      await wait("!!document.querySelector('.wand-employee-list .wand-employee-card')");
+      await wait("!!document.querySelector('.wand-employee-list [data-employee-profile]')");
       await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 1000, deviceScaleFactor: 1, mobile: false });
-      const employeeResize = await evaluate(`(()=>{const page=document.querySelector('.wand-teams-page'),card=document.querySelector('.wand-employee-card'),button=document.querySelector('.wand-teams-toolbar-actions button');const r=card.getBoundingClientRect(),b=button.getBoundingClientRect(),hit=document.elementFromPoint(b.x+b.width/2,b.y+b.height/2);return {detail:page.hasAttribute('data-detail'),cardVisible:r.width>0&&r.height>0,cardContained:r.left>=0&&r.right<=innerWidth+1,createReachable:hit===button||button.contains(hit)}})()`);
+      await wait("document.querySelector('[data-employee-profile]').getBoundingClientRect().height>0");
+      await pause(300);
+      const employeeResize = await evaluate(`(()=>{const page=document.querySelector('.wand-teams-page'),card=document.querySelector('[data-employee-profile]'),button=document.querySelector('.wand-employee-workspace[data-collapsed=true] .directory-toggle')||document.querySelector('.directory header button');const r=card.getBoundingClientRect(),b=button.getBoundingClientRect(),hit=document.elementFromPoint(b.x+b.width/2,b.y+b.height/2);return {detail:page.hasAttribute('data-detail'),cardVisible:r.width>0&&r.height>0,cardContained:r.left>=0&&r.right<=innerWidth+1,createReachable:hit===button||button.contains(hit)}})()`);
       assert.deepEqual(employeeResize, { detail: false, cardVisible: true, cardContained: true, createReachable: true }, `${mode}: employee cards and actions survive narrowing with a selected team`);
       assert.equal(await evaluate("!!document.querySelector('.wand-teams-page button[aria-label=返回工作区]')"), true, `${mode}: selected team does not hide the employee page's back action`);
       await click(".wand-teams-page [data-stretch-value=teams]");
@@ -354,55 +366,39 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
       await click('[aria-label="团队模板导航"] button');
       await wait("!document.querySelector('.wand-teams-page[data-detail]')");
       await click(".wand-teams-page [data-stretch-value=employees]");
-      await wait("!!document.querySelector('.wand-employee-list .wand-employee-card')");
+      await wait("!!document.querySelector('.wand-employee-list [data-employee-profile]')");
       await send("Emulation.setDeviceMetricsOverride", { width: mode === "mobile" ? 390 : 1280, height: 1000, deviceScaleFactor: 1, mobile: false });
       evidence.push({ mode, employeeResize, teamSelectionPreserved: true });
 
-      // ---- 员工页：库控件 + 归档筛选 + 就地编辑 ----
-      assert.equal(await evaluate("document.querySelectorAll('.wand-employee-list .wand-employee-card').length"), 1,
-        `${mode}: 只显示未归档员工`);
-      await click(".wand-employee-list input[type=checkbox]");
-      await wait("document.querySelectorAll('.wand-employee-list .wand-employee-card').length === 2");
-      assert.equal(await evaluate("document.querySelectorAll('.wand-employee-list .ant-tag').length > 0"), true,
-        `${mode}: 标签用通用标签组件`);
-      await click(".wand-employee-list input[type=checkbox]");
-      await wait("document.querySelectorAll('.wand-employee-list .wand-employee-card').length === 1");
-      const density = await evaluate(`(()=>{const page=document.querySelector('.wand-teams-page'),header=page.querySelector('.task-board-workspace-header'),body=page.querySelector('.wand-employees-layout'),avatar=page.querySelector('.wand-team-member-head .wand-employee-avatar>.ant-avatar');return {avatarWidth:avatar.getBoundingClientRect().width,headerInset:parseFloat(getComputedStyle(header).paddingLeft),bodyInset:parseFloat(getComputedStyle(body).paddingLeft),mutedCard:getComputedStyle(page.querySelector('.wand-employee-card')).boxShadow==='none'};})()`);
-      assert.equal(density.avatarWidth, 32, `${mode}: employee identity uses a compact 32px avatar`);
-      assert.equal(density.headerInset, density.bodyInset, `${mode}: employee header and content share the page inset`);
-      assert.equal(density.mutedCard, true, `${mode}: employee identity has no decorative shadow`);
-      await screenshot(`employees-collapsed-${mode}`);
-      evidence.push({ mode, density });
-      await click(".wand-employee-list .wand-team-member-head");
-      await wait("!!document.querySelector('.wand-employee-list .ant-card[data-open] input#employee-emp-active-name')");
-      assert.equal(await evaluate("document.querySelectorAll('.wand-employee-card[data-open] .wand-team-candidate.ant-card').length"), 0,
-        `${mode}: 员工候选不嵌套卡片`);
-      assert.equal(await evaluate("Array.from(document.querySelectorAll('.wand-employee-card[data-open] .wand-team-candidate')).every(row => parseFloat(getComputedStyle(row).borderBottomWidth) === 1)"), true,
-        `${mode}: 员工候选连续细分隔`);
-      await screenshot(`employees-${mode}`);
-      assert.equal(await evaluate(`(()=>{const n=document.querySelector('#employee-emp-active-name');
-        return n.tagName === 'INPUT' && n.closest('.ant-input') !== null || n.classList.contains('ant-input')})()`), true,
-        `${mode}: 员工名是通用输入框`);
-      await click(".wand-employee-list .wand-employee-save-submit");
-      await wait("document.querySelector('.wand-employee-list .wand-employee-save-submit').textContent.includes('已保存')");
-      await click("#employee-emp-active-name");
-      await key("Escape");
-      await wait("!document.querySelector('.wand-employee-list .wand-employee-card[data-open]')");
-      assert.equal(await evaluate("document.activeElement === document.querySelector('.wand-employee-list .wand-team-member-head')"), true,
-        `${mode}: employee Escape returns focus to its own disclosure trigger`);
-      evidence.push({ mode, employeeCard: "expanded, Ant input + tag + in-place save label and Escape focus verified" });
-
-      // ---- 新建员工：高级配置收进通用折叠面板 ----
-      await click(".wand-employee-list .wand-teams-toolbar-actions .wand-ui-button");
+      // ---- 员工页：单一编辑器、原生目录、归档筛选、统一草稿 ----
+      if(await evaluate("document.querySelector('.wand-employee-workspace').dataset.collapsed==='true'")) await click('.directory-toggle');
+      assert.equal(await evaluate("document.querySelectorAll('.employee-item').length"), 1, `${mode}: 只显示未归档员工`);
+      await click(".directory input[type=checkbox]");
+      await wait("document.querySelectorAll('.employee-item').length === 2");
+      assert.equal(await evaluate("document.querySelector('.employee-item[data-directory-employee-id=emp-archived]').textContent.includes('已归档')"), true, `${mode}: 目录可见归档状态`);
+      await click(".directory input[type=checkbox]");await wait("document.querySelectorAll('.employee-item').length === 1");
+      const density = await evaluate(`(()=>{const avatar=document.querySelector('.employee-item .wand-employee-avatar');return {avatarWidth:avatar.getBoundingClientRect().width,editorCount:document.querySelectorAll('[data-employee-profile]').length,mutedCard:getComputedStyle(document.querySelector('[data-employee-profile]')).boxShadow==='none'};})()`);
+      assert.equal(density.avatarWidth,32,`${mode}: directory uses compact 32px identity`);assert.equal(density.editorCount,1,`${mode}: one editor only`);assert.equal(density.mutedCard,true);
+      await screenshot(`employees-directory-${mode}`);evidence.push({mode,density});
+      if(mode==='mobile') await click('.directory header button');
+      await click('.profile-tabs button[data-step=tools]');
+      assert.equal(await evaluate("document.querySelectorAll('[data-employee-profile] .wand-team-candidate.ant-card').length"),0,`${mode}: candidates do not nest cards`);
+      assert.equal(await evaluate("Array.from(document.querySelectorAll('[data-employee-profile] .wand-team-candidate')).every(row => parseFloat(getComputedStyle(row).borderBottomWidth) === 1)"),true);
+      await click('.profile-tabs button[data-step=identity]');await click('#employee-emp-active-name');
+      await evaluate("document.querySelector('#employee-emp-active-name').select()");await send('Input.insertText',{text:`验证员工 ${mode}`});
+      await click('.wand-employee-save-submit');await wait("document.querySelector('.wand-employee-save-submit').textContent.includes('已保存')");
+      assert.equal(employees.find(employee=>employee.id==='emp-active')?.name,`验证员工 ${mode}`,`${mode}: real repository PUT persists fixture`);
+      await click('#employee-emp-active-name');await evaluate("document.querySelector('#employee-emp-active-name').select()");await send('Input.insertText',{text:'撤销此草稿'});await key('Escape');
+      await wait(`document.querySelector('#employee-emp-active-name').value==='验证员工 ${mode}'`);
+      assert.equal(await evaluate("document.querySelectorAll('[data-employee-profile]').length"),1,`${mode}: Escape restores draft and retains fullpage editor`);
+      await screenshot(`employees-${mode}`);evidence.push({mode,employeeCard:'unified draft save and Escape rollback'});
+      if(await evaluate("document.querySelector('.wand-employee-workspace').dataset.collapsed==='true'")) await click('.directory-toggle');
+      await evaluate("[...document.querySelectorAll('.directory button')].find(button=>button.textContent.includes('新建员工')).dataset.testCreate='true'");await click('[data-test-create]');
       await wait("!!document.querySelector('.wand-employee-list .ant-collapse')");
-      assert.equal(await evaluate(`(()=>{const c=document.querySelector('.wand-employee-list .ant-collapse');
-        return !!c && !c.querySelector('textarea#new-employee-name')})()`), true, `${mode}: 高级配置默认收起`);
-      await click(".wand-employee-list .ant-collapse-header");
-      await wait("!!document.querySelector('#new-employee-name')");
-      assert.equal(await evaluate(`document.getElementById('new-employee-name').className.includes('ant-input')`), true,
-        `${mode}: 展开后是通用输入框`);
-      await click(".wand-employee-list .ant-collapse-header");
-      await pause(200);
+      assert.equal(await evaluate("!document.querySelector('.ant-collapse textarea#new-employee-name')"),true,`${mode}: advanced creation initially collapsed`);
+      await click('.wand-employee-list .ant-collapse-header');await wait("!!document.querySelector('#new-employee-name')");
+      assert.equal(await evaluate("document.getElementById('new-employee-name').className.includes('ant-input')"),true);
+      await click('.wand-employee-list .ant-collapse-header');await pause(200);
 
       if (employeesOnly) {
         assert.equal(await evaluate("document.documentElement.scrollWidth <= innerWidth + 1"), true, `${mode}: 员工页无横向溢出`);
@@ -428,6 +424,18 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
       assert.equal(await evaluate(`(()=>{const s=document.querySelector('.wand-team-member[data-open] .wand-team-select .wand-ui-select-trigger');
         return !!s && Math.abs(s.getBoundingClientRect().width - s.parentElement.getBoundingClientRect().width) < 2})()`), true,
         `${mode}: 选择器铺满字段宽度`);
+      const candidateBounds = await evaluate(`Array.from(document.querySelectorAll('.wand-team-member[data-open] .wand-team-candidate [role=combobox]')).map(control=>{const r=control.getBoundingClientRect(),f=control.closest('.task-board-native-field').getBoundingClientRect(),c=control.closest('.wand-team-member').getBoundingClientRect();return {label:control.getAttribute('aria-label'),right:r.right,fieldRight:f.right,cardRight:c.right,overflow:control.scrollWidth>control.clientWidth+1};})`);
+      assert.ok(candidateBounds.every(control => control.right <= control.fieldRight + 1 && control.right <= control.cardRight + 1 && !control.overflow), `${mode}: candidate controls stay within both field and member card: ${JSON.stringify(candidateBounds)}`);
+      const candidateModel = '.wand-team-member[data-open] .wand-team-candidate [aria-label$="模型"]';
+      await click(candidateModel);
+      await wait("!!document.querySelector('.wand-ui-select-content input')");
+      const modelPopupBounds = await evaluate(`(()=>{const p=document.querySelector('.wand-ui-select-content'),r=p.getBoundingClientRect();return {left:r.left,right:r.right,width:r.width};})()`);
+      assert.ok(modelPopupBounds.left >= 0 && modelPopupBounds.right <= (mode === "mobile" ? 390 : 1280) + 1, `${mode}: model menu remains inside the viewport`);
+      await click('.wand-ui-select-content input');
+      assert.equal(await evaluate("!!document.querySelector('.wand-team-member[data-open]')"), true, `${mode}: searching the model menu preserves the editor`);
+      await key("Escape");
+      await wait("!document.querySelector('.wand-ui-select-content')");
+      assert.equal(await evaluate(`document.activeElement === document.querySelector('${candidateModel}')`), true, `${mode}: model Escape restores the model trigger`);
       const scoreBefore = await evaluate("document.querySelectorAll('.wand-team-member[data-open] .wand-team-candidate').length");
       await click(".wand-team-member[data-open] .wand-team-candidates-foot .wand-ui-button");
       await wait(`document.querySelectorAll('.wand-team-member[data-open] .wand-team-candidate').length === ${scoreBefore + 1}`);
@@ -480,7 +488,7 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
     if (!employeesOnly) {
       routeLinked = false;
       await send("Page.navigate", { url: `${origin}/?route=unlinked#route` });
-      await wait("document.body.innerText.includes('此运行尚未关联群对话')");
+      await wait("document.body?.innerText.includes('此运行尚未关联群对话')");
       assert.equal(await evaluate("!!document.querySelector('[role=alert]')"), true, "无关联旧运行展示可恢复错误");
       assert.equal(await evaluate("Array.from(document.querySelectorAll('button')).some(button => button.textContent.replace(/\\s/g, '').includes('重试'))"), true);
       assert.equal(await evaluate("!!document.querySelector('.task-board-team-chat-input')"), false, "无关联运行不提供可发送输入");
@@ -615,18 +623,19 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
         await send("Emulation.setDeviceMetricsOverride", { width:scenario.width,height:scenario.height,deviceScaleFactor:scenario.scale,mobile:false });
         await send("Page.navigate", { url:`${origin}/?people-layout=${scenario.name}` });
         await wait("!!document.querySelector('.wand-employee-card')");
-        const geometry = await evaluate(`(()=>{const page=document.querySelector('.wand-teams-page'),header=page.querySelector('.task-board-workspace-header'),body=page.querySelector('.wand-employees-layout'),avatar=page.querySelector('.wand-team-member-head .wand-employee-avatar>.ant-avatar');return {horizontalOverflow:document.documentElement.scrollWidth>innerWidth+1,avatarWidth:avatar.getBoundingClientRect().width,headerInset:parseFloat(getComputedStyle(header).paddingLeft),bodyInset:parseFloat(getComputedStyle(body).paddingLeft),scrollOwner:getComputedStyle(body).overflowY};})()`);
+        if(await evaluate("document.querySelector('.wand-employee-workspace').dataset.collapsed==='true'"))await click('.directory-toggle');
+        const geometry = await evaluate(`(()=>{const page=document.querySelector('.wand-teams-page'),header=page.querySelector('.task-board-workspace-header'),body=page.querySelector('.wand-employees-layout'),avatar=page.querySelector('.employee-item .wand-employee-avatar');return {horizontalOverflow:document.documentElement.scrollWidth>innerWidth+1,avatarWidth:avatar.getBoundingClientRect().width,headerInset:parseFloat(getComputedStyle(header).paddingLeft),bodyInset:parseFloat(getComputedStyle(body).paddingLeft),scrollOwner:getComputedStyle(body).overflowY};})()`);
         assert.equal(geometry.horizontalOverflow,false,`${scenario.name}: long employee data remains contained`);
         assert.equal(geometry.avatarWidth,32,`${scenario.name}: avatar reserves a stable 32px square`);
-        assert.equal(geometry.headerInset,geometry.bodyInset,`${scenario.name}: cross-page inset remains aligned`);
-        const contrast = await evaluate(peopleContrastExpression([".task-board-heading-copy h3", ".wand-employee-name-line>.ant-typography", ".wand-team-member-copy>.ant-typography", ".wand-team-member-agent", ".wand-employee-tags"]));
+        assert.equal(await evaluate("document.querySelectorAll('[data-employee-profile]').length"),1,`${scenario.name}: a single profile owns the form`);
+        const contrast = await evaluate(peopleContrastExpression([".task-board-heading-copy h3", ".employee-item strong", ".employee-item small", ".directory-label", ".profile-header h2"]));
         assert.ok(contrast.length>=4,`${scenario.name}: computed title, identity and secondary colors were captured`);
-        assert.ok(contrast.every((sample:any)=>sample.ratio>=4.5),`${scenario.name}: title and small auxiliary text meet AA against their actual solid backgrounds`);
+        assert.ok(contrast.every((sample:any)=>sample.ratio>=4.5),`${scenario.name}: title and small auxiliary text meet AA against their actual solid backgrounds: ${JSON.stringify(contrast)}`);
         await screenshot(`qa-employees-${scenario.name}`);
         if(scenario.width===320) {
           await click('.wand-employee-list input[type="search"]');
           await send("Input.insertText",{text:"不会匹配的员工 fixture"});
-          await wait("document.querySelector('.wand-employee-list .ant-empty')?.textContent.includes('没有匹配的员工')");
+          await wait("document.querySelector('.directory .no-results')?.textContent.includes('没有匹配的员工')");
           await screenshot("qa-employees-no-results");
           await key("Escape");
           await wait("document.querySelectorAll('.wand-employee-card').length===1");
@@ -652,10 +661,11 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
         qaEmployeeCount=count;
         await send("Emulation.setDeviceMetricsOverride",{width:390,height:900,deviceScaleFactor:1,mobile:false});
         await send("Page.navigate",{url:`${origin}/?people-count=${count}`});
-        await wait(count?"document.querySelectorAll('.wand-employee-card').length===120":"!!document.querySelector('.wand-employee-list .ant-empty')");
+        await wait(count?"document.querySelectorAll('.employee-item').length===120":"!!document.querySelector('.directory .no-results')");
+        if(await evaluate("document.querySelector('.wand-employee-workspace').dataset.collapsed==='true'"))await click('.directory-toggle');
         assert.equal(await evaluate("document.documentElement.scrollWidth<=innerWidth+1"),true,`${count} employees: no horizontal overflow`);
         if(count) {
-          const collection=await evaluate("(()=>{const body=document.querySelector('.wand-employees-layout'),page=document.querySelector('.wand-teams-page');return {scrollHeight:body.scrollHeight,clientHeight:body.clientHeight,overflowY:getComputedStyle(body).overflowY,pageHeight:page.getBoundingClientRect().height,pageDisplay:getComputedStyle(page).display,pageDirection:getComputedStyle(page).flexDirection,bodyFlex:getComputedStyle(body).flex,minHeight:getComputedStyle(body).minHeight};})()");
+          const collection=await evaluate("(()=>{const body=document.querySelector('.employee-items'),page=document.querySelector('.wand-teams-page');return {scrollHeight:body.scrollHeight,clientHeight:body.clientHeight,overflowY:getComputedStyle(body).overflowY,pageHeight:page.getBoundingClientRect().height,pageDisplay:getComputedStyle(page).display,pageDirection:getComputedStyle(page).flexDirection,bodyFlex:getComputedStyle(body).flex,minHeight:getComputedStyle(body).minHeight};})()");
           evidence.push({mode:"large-collection",collection});
           assert.ok(collection.scrollHeight>collection.clientHeight&&collection.overflowY==='auto',`large employee collections retain one native content scroller: ${JSON.stringify(collection)}`);
         }

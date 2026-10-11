@@ -4,6 +4,7 @@ import { gzipSync } from "node:zlib";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { minifyJs, minifyCss } from "./minify-web-assets.js";
+import { buildThemePreload } from "./theme-preload.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
@@ -18,8 +19,10 @@ const assets = [
   ["qrcodeJs", path.join("vendor", "qrcode", "qrcode.bundle.js"), "application/javascript"],
   // 按需加载的 AI 团队脚本，bundle-browser.js 已按生产模式 minify，这里原样内嵌。
   ["aiTeamsJs", "ai-teams.js", "application/javascript"],
+  ["plushAvatarJs", "plush-avatar.js", "application/javascript"],
 ];
 
+const themePreload = minifyJs(await buildThemePreload(root));
 const entries = {};
 for (const [key, relPath, contentType] of assets) {
   let content = readFileSync(path.join(contentDir, relPath));
@@ -48,8 +51,10 @@ function decode(value: string): string {
 }
 
 export const EMBEDDED_WEB_ASSETS = {
+  themePreloadJs: decode(${JSON.stringify(gzipSync(themePreload).toString("base64"))}),
   scriptsJs: decode(${JSON.stringify(entries.scriptsJs.base64)}),
   aiTeamsJs: decode(${JSON.stringify(entries.aiTeamsJs.base64)}),
+  plushAvatarJs: decode(${JSON.stringify(entries.plushAvatarJs.base64)}),
   stylesCss: decode(${JSON.stringify(entries.stylesCss.base64)}),
   vendor: {
     "/vendor/xterm/xterm.bundle.js": {

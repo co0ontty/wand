@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { defaultPlushAvatar, encodePlushAvatar } from "../src/plush-avatar.js";
+import { TeamAvatar } from "../src/web-ui/react/ai-teams/avatar.js";
 import { EmployeeAvatarPicker } from "../src/web-ui/react/agents/employee-avatar.js";
 import { installSharedLibraryBridge } from "../src/web-ui/react/library-bridge.js";
 
@@ -329,7 +331,9 @@ test("ai-teams chunk borrows every shared import from the main-bundle host regis
       if (Object.hasOwn(chunkFiles, key)) continue;
       const names = clause.replace(/[{}]/g, "").split(",").map((name) => name.trim())
         .filter((name) => name && !name.startsWith("type "));
-      if (key === "theme") {
+      const chunkPlugin = readFileSync(new URL("../scripts/ai-teams-chunk.js", import.meta.url), "utf8");
+      const sharedKeys = chunkPlugin.match(/SHARED_LIBRARY_KEYS = new Set\(\[([\s\S]*?)\]\)/)?.[1] ?? "";
+      if (sharedKeys.includes(`"${key}"`)) {
         const plugin = readFileSync(new URL("../scripts/ai-teams-chunk.js", import.meta.url), "utf8");
         assert.match(plugin, /SHARED_LIBRARY_KEYS\.has\(key\)[\s\S]*?namespace: "wand-shared-library"/);
         const library = globalThis.__wandSharedLibrary!(key) as Record<string, unknown>;
@@ -344,16 +348,16 @@ test("ai-teams chunk borrows every shared import from the main-bundle host regis
 
 // ---------- [T6] Web 动效 token + 成员多候选编辑 ----------
 
-test("员工头像选择器使用库圆钮与有界头像，选中状态仍可读", () => {
-  const markup = renderToStaticMarkup(createElement(EmployeeAvatarPicker, { avatar: "cat:2", name: "测试", disabled: false, onChange() {} }));
-  assert.match(markup, /role="group" aria-label="员工头像"/);
-  assert.equal((markup.match(/ant-btn-circle/g) ?? []).length, CAT_COATS.length + 1);
-  const coatButtons = markup.match(/<button[^>]*class="[^"]*wand-team-coat[^>]*>/g) ?? [];
-  assert.equal(coatButtons.length, CAT_COATS.length + 1);
-  assert.ok(coatButtons.every((button) => button.includes("ant-btn-sm")));
-  assert.equal((markup.match(/aria-pressed="true"/g) ?? []).length, 1);
+test("员工头像选择器保留已选旧头像并提供有界上传与显式捏脸入口", () => {
+  const markup = renderToStaticMarkup(createElement(EmployeeAvatarPicker, { avatar: "cat:2", name: "测试", employeeId: "e_preview", disabled: false, onChange() {} }));
+  assert.match(markup, /aria-label="员工头像"/);
+  assert.match(markup, /aria-label="编辑员工头像"/);
+  assert.match(markup, /像素猫头像/);
+  assert.match(markup, /上传/);
+  assert.match(markup, /捏脸/);
+  assert.match(markup, /accept="image\/png,image\/jpeg,image\/webp"/);
   assert.match(markup, /width="74%" height="74%"/);
-  assert.doesNotMatch(read("react/ai-teams/styles.ts"), /\.wand-team-coat\s*\{/);
+  assert.doesNotMatch(markup, /aria-label="捏脸"/, "preview panel mounts only after explicit opening");
 });
 
 test("新建员工默认填写期望与可选标签，角色字段收进可原位展开的高级配置", () => {
@@ -1105,7 +1109,7 @@ test("[T8] 每条发言都有头像 + 名字，自己的发言用设置里的资
   assert.match(body, /src=\{spec\.kind === "upload" \? spec\.src : undefined\}/, "上传身份仍投影为 Ant Avatar src");
   // 消息行在 hover 时不位移（普通会话的 .chat-message:hover 会上浮 1px）。
   assert.match(chatStylesSource, /\.task-board-team-chat \.team-chat-msg:hover \{ transform: none; \}/);
-  assert.match(body, /<Avatar className="team-chat-avatar" shape="square" size=\{size === "sm" \? 24 : 32\}/, "两档身份头像由 Ant Avatar 渲染");
+  assert.match(body, /<Avatar className="team-chat-avatar" shape="square" size=\{size === "sm" \? 36 : 48\}/, "两档身份头像由 Ant Avatar 渲染");
   assert.doesNotMatch(chatStylesSource, /\.team-chat-avatar\s*\{/, "不重画库头像外观");
 });
 
@@ -1718,4 +1722,29 @@ test("[v2] 旧数据降级：旧 roster / 旧开工 notice 与「（等第…）
   assert.equal(chatAvatarSpec(null).kind, "brand");
   assert.equal(reportTypeLabel(parseStepReport("普通发言")), "成员发言");
   assert.deepEqual(mentionSegments("依据 @查不到的名字 继续", ["实现者"]), [{ text: "依据 @查不到的名字 继续" }]);
+});
+
+
+test("bound team members share employee-default faces across task and chat views without changing stored turns", () => {
+  const member = { id: "m_bound", employeeId: "e_identity", name: "员工", avatar: "", duty: "开发", agent: { provider: "codex" }, isLeader: false } as AiTeamMember;
+  const raw: ConversationTurn = { role: "assistant", author: { id: member.id, name: member.name }, content: [{ type: "text", text: "原始正文" }] };
+  const fingerprint = chatTurnFingerprint(raw);
+  const team = { id: "t_bound", members: [member] } as AiTeam;
+  const expected = encodePlushAvatar(defaultPlushAvatar({ id: member.employeeId!, name: member.name }));
+  const visible = displayChatTurn(raw, team);
+  assert.equal(visible.author?.avatar, expected);
+  assert.equal(visible.author?.id, member.id);
+  assert.equal(chatTurnFingerprint(raw), fingerprint);
+  assert.equal(raw.author?.avatar, undefined, "projection never persists or mutates historical identity");
+  const html = renderToStaticMarkup(createElement(TeamAvatar, { member }));
+  const renderedConfig = (markup: string) => JSON.parse(markup.match(/data-avatar-config="([^\"]+)"/)![1]!.replace(/&quot;/g, '"'));
+  assert.deepEqual(renderedConfig(html), defaultPlushAvatar({ id: member.employeeId!, name: member.name }));
+  const otherTeamRole = renderToStaticMarkup(createElement(TeamAvatar, { member: { ...member, id: "m_other", name: "改名" } }));
+  assert.deepEqual(renderedConfig(otherTeamRole), renderedConfig(html), "real employee ID wins over team-role ID and mutable name");
+  const unbound = { ...member, employeeId: undefined };
+  assert.doesNotMatch(renderToStaticMarkup(createElement(TeamAvatar, { member: unbound })), /data-plush-avatar/);
+  for (const avatar of ["cat:2", "data:image/png;base64,AAA"]) {
+    const explicit = displayChatTurn(raw, { ...team, members: [{ ...member, avatar }] });
+    assert.equal(explicit.author?.avatar, avatar, "explicit legacy cat or uploaded photo remains intact");
+  }
 });

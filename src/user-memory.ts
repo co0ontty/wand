@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { DEFAULT_EMPLOYEE_ID } from "./ai-team-types.js";
 import { explicitEmployeeMemoryContent } from "./employee-knowledge-content.js";
+import type { EmployeeTextDeps } from "./employee-text.js";
 import { callConfiguredAiText } from "./git-quick-commit.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
 import type { WandStorage } from "./storage.js";
@@ -103,6 +104,7 @@ export class UserMemoryService {
   constructor(private readonly deps: {
     storage: WandStorage;
     config: WandConfig;
+    free?: EmployeeTextDeps["free"];
     notifyChanged?: (id: string) => void;
     now?: () => number;
     generate?: (events: UserMemoryEvent[]) => Promise<UserMemoryPreference[]>;
@@ -169,7 +171,7 @@ export class UserMemoryService {
         }, config.defaultCwd, config.language ?? "", resolveSystemAiContext({
           provider: config.defaultProvider ?? "claude", command: config.defaultProvider ?? "claude",
           selectedModel: null, thinkingEffort: config.defaultThinkingEffort,
-        }, config, storage.getSystemSiliconEmployee()), (raw) => parseUserMemoryPreferences(raw, events));
+        }, config, storage.getSystemSiliconEmployee(), this.deps.free), (raw) => parseUserMemoryPreferences(raw, events));
     // Test seam and production share the exact same validator.
     const validated = parseUserMemoryPreferences(JSON.stringify({ preferences }), events);
     const referenced = new Set(validated.flatMap((entry) => entry.evidenceIds));

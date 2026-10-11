@@ -29,7 +29,6 @@ let snapshot: SettingsControllerSnapshot = {
 };
 
 const listeners = new Set<Listener>();
-let compact = false;
 
 function publish(next: Omit<SettingsControllerSnapshot, "revision">): void {
   snapshot = { ...next, revision: snapshot.revision + 1 };
@@ -51,7 +50,7 @@ export const settingsController: WandSettingsController = {
       publish({ ...snapshot, nested: null });
       return true;
     }
-    if (snapshot.open && snapshot.detail && compact) {
+    if (snapshot.open && snapshot.detail) {
       settingsStore.showDirectory();
       return true;
     }
@@ -88,8 +87,6 @@ export const settingsStore = {
     if (!snapshot.detail) return;
     publish({ ...snapshot, detail: false, nested: null });
   },
-
-  setCompact(value: boolean): void { compact = value; },
 
   setNested(nested: SettingsNestedView): void {
     if (snapshot.nested === nested) return;

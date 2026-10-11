@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { wandTheme } from "../src/web-ui/react/theme.js";
 import { foundationStyles } from "../src/web-ui/react/styles/base.js";
 import {
   MOTION_DWELL_FAILED_MS,
@@ -21,7 +22,8 @@ test("login and shared controls use the approved warm library theme", () => {
   const theme = readFileSync(new URL("../src/web-ui/react/theme.tsx", import.meta.url), "utf8");
   const button = readFileSync(new URL("../src/web-ui/react/ui/button.tsx", import.meta.url), "utf8");
   const login = readFileSync(new URL("../src/web-ui/react/login/host.tsx", import.meta.url), "utf8");
-  assert.match(theme, /colorPrimary: "#b8562f"/);
+  assert.equal(wandTheme.token?.colorPrimary, "#b8562f");
+  assert.match(theme, /paletteThemeConfig/);
   assert.match(button, /<Button/);
   assert.match(login, /<Input.Password/);
   assert.match(login, /<Button id="login-button" type="primary"/);
@@ -35,7 +37,8 @@ test("sidebar and login share the approved Ant theme owner", () => {
   assert.match(shell, /<WandUiProvider>/);
   assert.match(sidebar, /<Layout.Sider/);
   assert.match(sidebar, /theme="light"/);
-  assert.match(theme, /Layout: \{ siderBg: "#f4f0e9"/);
+  assert.equal(wandTheme.components?.Layout?.siderBg, "#f4f0e9");
+  assert.match(theme, /paletteThemeConfig/);
   assert.doesNotMatch(styles, /--web-sidebar-/);
 });
 

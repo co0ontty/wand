@@ -6,8 +6,12 @@ import { WandUiProvider } from "../react/theme";
 import { installStyleSheet } from "../react/styles";
 import { composer, state } from "./state.js";
 import { mountComposerSurfaces } from "./composer-surface-adapter";
+import { ComposerIdentity } from "../react/composer-sender/identity.js";
+import { computeRunningSignal } from "../session-activity.js";
+import { composerAvatarActivity } from "../composer-avatar-activity.js";
 interface Mount { root: Root; input: HTMLTextAreaElement; chrome: HTMLElement; }
 const roots = new Map<HTMLElement, Mount>();
+const avatarRoots = new Map<HTMLElement, Root>();
 const projection: SenderProjection = {
   subscribe: composer.subscribe.bind(composer),
   revision: () => composer.read(state.selectedId).revision,
@@ -15,13 +19,30 @@ const projection: SenderProjection = {
   isComposing: () => state.composerComposing,
 };
 
+export function syncComposerCompanion(): void {
+  for (const [host, root] of avatarRoots) if (!host.isConnected) { root.unmount(); avatarRoots.delete(host); }
+  const avatarHost = document.querySelector<HTMLElement>("[data-composer-avatar-host]");
+  const session = state.sessions.find(session => session.id === state.selectedId);
+  const activity = session ? { ...session, ptyRunning: computeRunningSignal(session).ptyRunning } : undefined;
+  if (avatarHost) {
+    const root = avatarRoots.get(avatarHost) ?? createRoot(avatarHost);
+    avatarRoots.set(avatarHost, root);
+    // Set the text lane before Sender measures the restored draft's height.
+    flushSync(() => root.render(session?.employeeId ? <ComposerIdentity fileActivity={composerAvatarActivity(activity, session.messages)} employee={{
+      id: session.employeeId, name: session.employeeName || "员工", avatar: session.employeeAvatar,
+    }}/> : null));
+  }
+}
+
 export function mountComposerSender(resize: ResizeInput): void {
   mountComposerSurfaces();
+  syncComposerCompanion();
+  const session = state.sessions.find(session => session.id === state.selectedId);
   installStyleSheet("wand-sender-owned-input", `[data-composer-sender] .ant-sender-input { width:100%; }`);
   for (const [target, mount] of roots) if (!target.isConnected) { mount.root.unmount(); roots.delete(target); }
   const target = document.querySelector<HTMLElement>("[data-composer-sender]");
   if (!target) return;
-  const structured = state.sessions.find(session => session.id === state.selectedId)?.sessionKind === "structured";
+  const structured = session?.sessionKind === "structured";
   const previous = roots.get(target);
   if (!structured) {
     if (previous) {

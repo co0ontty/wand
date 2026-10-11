@@ -1,3 +1,4 @@
+import { themeFixtureHtml } from "./helpers/theme-fixture.js";
 import { cssEvidenceCapture } from "./helpers/antd-css-evidence.js";
 import { runChatExperience } from "./helpers/chat-experience-cases.js";
 // Source-only real Chrome + real renderer, synthetic HTTP/turns. Never installed-service acceptance.
@@ -74,12 +75,12 @@ export async function runFocusBrowser({ root = resolve(import.meta.dirname, ".."
       }
       if (path.startsWith("/api/")) { result.otherRequests.push(req.method + " " + path); res.writeHead(404); res.end(); return; }
       res.setHeader("Content-Type", "text/html; charset=utf-8");
-      res.end(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"/>
+      res.end(themeFixtureHtml(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"/>
         <meta name="viewport" content="width=device-width,initial-scale=1"/>
         <link rel="stylesheet" href="/tailwind.css"/><link rel="stylesheet" href="/styles.css"/>
         <style>#chat-output { height:480px; display:flex; } .chat-messages { overflow-y:auto; }
         #input-box { width:240px; height:44px; }</style></head><body>
-        <div id="chat-output"></div><div data-composer-sender><textarea id="input-box"></textarea></div><script src="/app.js"></script></body></html>`);
+        <div id="chat-output"></div><div data-composer-sender><textarea id="input-box"></textarea></div><script src="/app.js"></script></body></html>`));
     });
     server.listen(0, "127.0.0.1"); await once(server, "listening");
     const origin = `http://127.0.0.1:${server.address().port}`;

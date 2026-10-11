@@ -4,7 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { dispatchAgentForTask, sendToAgentSession, stopAgentSession } from "../src/agent-dispatch.js";
+import { AgentDispatchPreflightError, dispatchAgentForTask, sendToAgentSession, stopAgentSession } from "../src/agent-dispatch.js";
+import { WAND_LOCAL_DECISION_MODEL } from "../src/decision-expert-identity.js";
 import { WandStorage } from "../src/storage.js";
 import type { ProcessManager } from "../src/process-manager.js";
 import type { SessionRegistry } from "../src/session-registry.js";
@@ -82,4 +83,28 @@ test("dispatchAgentForTask hands the session system prompt to the runner instead
   assert.equal(created[0]!.sessionSource, "automation");
   assert.deepEqual(sent, [["s1", "本轮要求：写计划。"]]);
   assert.deepEqual(storage.listWandTaskSessionIds(task.id), ["s1"]);
+});
+
+test("LAYA dispatch is explicitly rejected before creating or binding a session or starting inference", async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-agent-preflight-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  t.after(() => storage.close());
+  const task = storage.createWandTask({ title: "不把 LAYA 当聊天模型" });
+  let started = 0;
+  const structured = {
+    createSession() { started += 1; throw new Error("must not create"); },
+    resolveNewSessionPiEngine() { started += 1; throw new Error("must not resolve harness"); },
+    sendMessage() { started += 1; throw new Error("must not send"); },
+  } as unknown as StructuredSessionManager;
+  const agent = { provider: "pi" as const, engine: "sdk" as const, model: WAND_LOCAL_DECISION_MODEL,
+    thinkingEffort: "off" as const, mode: "default" as const, kind: "structured" as const };
+  await assert.rejects(dispatchAgentForTask({ storage, config: { defaultCwd: root } as never, structured, processes: null },
+    { task, agent, prompt: "mock-only", automationId: "ai-team:preflight" }), (error: unknown) => {
+      assert.ok(error instanceof AgentDispatchPreflightError);
+      assert.deepEqual(error.failure, { kind: "preflight", delivery: "rejected", retryable: true });
+      return true;
+    });
+  assert.equal(started, 0);
+  assert.deepEqual(storage.listWandTaskSessionIds(task.id), []);
 });

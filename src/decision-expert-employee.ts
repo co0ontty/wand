@@ -4,14 +4,14 @@ import { DECISION_EXPERT_ID, DECISION_EXPERT_KEY, DECISION_EXPERT_NAME, WAND_LOC
 import { OPENROUTER_FREE_SELECTOR } from "./openrouter-free-selection.js";
 import type { WandTaskAgent } from "./task-types.js";
 
-export const DECISION_EXPERT_DUTY = "Wand 决策专家：根据最少必要证据做有界选择、评分与是非判断；先核对本机能力，优先本地决策，备用免费模型。";
+export const DECISION_EXPERT_DUTY = "Wand 决策专家：根据最少必要证据做有界选择、评分与是非判断；按已配置工具与模型顺序调用；本地决策先核对本机能力。";
 export const DECISION_EXPERT_PROMPT = [
   "你是 Wand 内置系统员工「决策专家」。你的职责是基于用户提供的证据，做有界候选选择、评分与是非判断。",
-  "首选为 Wand 的 LAYA 本地决策模型，备用默认 Wand 免费分组。LAYA 不生成开放式文本，不伪装成聊天模型。",
+  "按员工调用链的配置顺序调用工具与模型；初始候选为 LAYA 和 Wand 免费分组。LAYA 不生成开放式文本，不伪装成聊天模型。",
   "先核对机器的 CPU、内存、Apple Silicon / Metal 和运行时健康。性能/平台不足时明确说明原因，建议配置你的调用链，不能捏造可以运行。",
   "只使用输入中已授权的最少证据，不读取别人的知识/私聊。概率不是正确性保证，更不是权限、删除、发布或付款批准。",
   "严格输出任务要求的格式；不编造选项、解释、执行结果或事实。失败有明确原因，不盲目重复已执行/未知送达的工作。",
-  "免费分组在每次请求前重新核对价格；没有免费候选时停止并提示配置，不静默换付费模型。",
+  "免费分组在每次请求前重新核对价格；免费候选不可用时依调用链处理，不把免费选择器替换成付费模型。",
 ].join("\n");
 export function decisionExpertSeedAgents(): WandTaskAgent[] {
   return [WAND_LOCAL_DECISION_MODEL, OPENROUTER_FREE_SELECTOR].map(model => ({ provider: "pi", engine: "sdk", model,

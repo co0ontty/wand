@@ -1,11 +1,29 @@
 import * as React from "react";
-import type { SiliconEmployee, SiliconEmployeeDraft } from "../../../ai-team-types.js";
+import { isBuiltinSiliconEmployee, type SiliconEmployee, type SiliconEmployeeDraft } from "../../../ai-team-types.js";
 import { jsonBody, requestJson } from "../http-adapter.js";
 
 export type SiliconEmployeeInput = Pick<
   SiliconEmployee,
   "name" | "duty" | "prompt" | "avatar" | "agents" | "tags"
 >;
+
+import { isFixedAvatarEmployee } from "../../../fixed-employee-avatar.js";
+
+export type EmployeeUpdateInput = Partial<SiliconEmployeeInput>;
+
+/** Both the directory and conversation profile use the same built-in edit policy. */
+export function employeeUpdateInput(employee: SiliconEmployee, patch: Partial<SiliconEmployee>): EmployeeUpdateInput {
+  if (isFixedAvatarEmployee(employee)) {
+    const input: EmployeeUpdateInput = {};
+    for (const field of ["name", "duty", "prompt", "agents"] as const) {
+      if (patch[field] !== undefined) Object.assign(input, { [field]: patch[field] });
+    }
+    return input;
+  }
+  if (isBuiltinSiliconEmployee(employee)) return { agents: patch.agents ?? employee.agents };
+  return { name: patch.name ?? employee.name, duty: patch.duty ?? employee.duty, prompt: patch.prompt ?? employee.prompt,
+    avatar: patch.avatar ?? employee.avatar, tags: patch.tags ?? employee.tags ?? [], agents: patch.agents ?? employee.agents };
+}
 
 type EmployeeListener = (employeeId: string) => void;
 const employeeListeners = new Set<EmployeeListener>();
@@ -90,7 +108,7 @@ export const siliconEmployeesRepository = {
     return employee;
   },
 
-  async update(id: string, input: SiliconEmployeeInput | Pick<SiliconEmployee, "agents">): Promise<SiliconEmployee> {
+  async update(id: string, input: EmployeeUpdateInput): Promise<SiliconEmployee> {
     const employee = await requestJson<SiliconEmployee>(
       `/api/silicon-employees/${encodeURIComponent(id)}`,
       jsonBody(input, "PUT"),

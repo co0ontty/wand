@@ -14,7 +14,7 @@ function chunkText(rows: number): string {
     createHash("sha256").update(String(index)).digest("hex")).join("\n");
 }
 
-function budgetFixture(): { run: (lazy: string) => ReturnType<typeof spawnSync>; cleanup: () => void } {
+function budgetFixture(): { run: (lazy: string, plush?: string) => ReturnType<typeof spawnSync>; cleanup: () => void } {
   const root = mkdtempSync(join(tmpdir(), "wand-budget-test-"));
   const scripts = join(root, "scripts");
   const assets = join(root, "dist", "web-ui");
@@ -33,10 +33,12 @@ function budgetFixture(): { run: (lazy: string) => ReturnType<typeof spawnSync>;
   writeFileSync(join(assets, "embedded-assets.js"),
     'export const EMBEDDED_WEB_ASSETS = { vendor: {} };');
   return {
-    run(lazy) {
+    run(lazy, plush = "console.log(3)") {
       writeFileSync(join(assets, "scripts.js"),
+        'export const getThemePreloadAsset = () => ({ content: "console.log(2)" });\n' +
         'export const getScriptAsset = () => ({ content: "console.log(1)" });\n' +
-        `export const getAiTeamsChunk = () => ({ content: ${JSON.stringify(lazy)} });`);
+        `export const getAiTeamsChunk = () => ({ content: ${JSON.stringify(lazy)} });\n` +
+        `export const getPlushAvatarChunk = () => ({ content: ${JSON.stringify(plush)} });`);
       return spawnSync(process.execPath, [join(scripts, "check-bundle-budget.js")],
         { encoding: "utf8" });
     },
@@ -62,6 +64,28 @@ test("employee management fits the lazy allowance without increasing shell trans
     String(stdout).match(/HTML \(repeat\).*\((\d+) B\)/)?.[1];
   assert.ok(repeatHtml(small.stdout));
   assert.equal(repeatHtml(result.stdout), repeatHtml(small.stdout));
+});
+
+test("the 3D runtime is metered separately and cannot hide bytes in the cold shell", (t) => {
+  const fixture = budgetFixture(); t.after(fixture.cleanup);
+  const small = fixture.run("", "");
+  const plush = chunkText(4_000);
+  const bytes = gzipSync(plush).length;
+  assert.ok(bytes > 140_000 && bytes <= 156_672, `fixture gzip size: ${bytes}`);
+  const result = fixture.run("", plush);
+  assert.equal(small.status, 0, String(small.stderr));
+  assert.equal(result.status, 0, String(result.stderr));
+  const firstLoad = (stdout: unknown) => String(stdout).match(/first load \(HTML \+ app \+ vendor\).*\((\d+) B\)/)?.[1];
+  assert.ok(firstLoad(small.stdout));
+  assert.equal(firstLoad(result.stdout), firstLoad(small.stdout));
+  assert.match(String(result.stdout), /plush-avatar\.js \(lazy\)/);
+});
+
+test("an oversized 3D runtime fails its explicit transfer budget", (t) => {
+  const fixture = budgetFixture(); t.after(fixture.cleanup);
+  const result = fixture.run("", chunkText(4_500));
+  assert.equal(result.status, 1);
+  assert.match(String(result.stderr), /plush-avatar\.js \(lazy\): \d+ B > 153600 B/);
 });
 
 test("employee invitations fit the new lazy boundary without becoming shell bytes", (t) => {
@@ -101,13 +125,29 @@ test("delivery overview fits only its on-demand allowance", (t) => {
 test("the raised lazy allowance still rejects oversized team chunks", (t) => {
   const fixture = budgetFixture();
   t.after(fixture.cleanup);
-  const lazy = chunkText(1_500);
+  const lazy = chunkText(1_560);
   const size = gzipSync(lazy).length;
-  assert.ok(size > 52_000, `fixture gzip size: ${size}`);
+  assert.ok(size > 54_000, `fixture gzip size: ${size}`);
   const result = fixture.run(lazy);
   assert.equal(result.status, 1);
   assert.match(String(result.stderr), /\[bundle-budget\] FAILED:/);
-  assert.match(String(result.stderr), /ai-teams\.js \(lazy\): \d+ B > 52000 B/);
+  assert.match(String(result.stderr), /ai-teams\.js \(lazy\): \d+ B > 54000 B/);
+});
+
+test("employee profile fits its lazy allowance without increasing first-load transfer", (t) => {
+  const fixture = budgetFixture();
+  t.after(fixture.cleanup);
+  const lazy = chunkText(1_520);
+  const size = gzipSync(lazy).length;
+  assert.ok(size > 52_000 && size <= 54_000, `fixture gzip size: ${size}`);
+  const small = fixture.run("");
+  const result = fixture.run(lazy);
+  assert.equal(small.status, 0, String(small.stderr));
+  assert.equal(result.status, 0, String(result.stderr));
+  const firstLoad = (stdout: unknown): string | undefined =>
+    String(stdout).match(/first load \(HTML \+ app \+ vendor\).*\((\d+) B\)/)?.[1];
+  assert.ok(firstLoad(small.stdout));
+  assert.equal(firstLoad(result.stdout), firstLoad(small.stdout));
 });
 
 test("无指派派工的名单面板只吃新的按需额度，不进主包", (t) => {

@@ -1,3 +1,4 @@
+import { syncComposerCompanion } from "./composer-sender-adapter.js";
 import { presentAssistantReply, presentChat, refreshChatPresentation } from "../react/chat/presentation.js";
 import { mountBrowserButtons, updateBrowserButtonLabel } from "./library-buttons.js";
 import { state } from "./state";
@@ -143,6 +144,7 @@ export function clearActivityDetailState(): void {
 
 
       export function renderChat(forceFullRender?) {
+        syncComposerCompanion();
         var sessionId = state.selectedId;
         var epoch = state.chatRenderEpoch || 0;
         var pending = state.chatRenderPendingToken;

@@ -507,6 +507,7 @@ export function renderAppShell() {
             '<span class="composer-attachments-host" data-composer-attachments-host="main"></span>' +
             '<div class="composer-main-row">' +
               '<div class="composer-input-wrap">' +
+                '<span data-composer-avatar-host></span>' +
                 '<button data-antd-control class="prompt-optimize-btn" id="prompt-optimize-btn" type="button" title="优化提示词" aria-label="优化提示词">' +
                   iconSvg("sparkle", { size: 15, strokeWidth: 1.9, cls: "prompt-optimize-icon" }) +
                   '<span class="prompt-optimize-label">优化</span>' +
