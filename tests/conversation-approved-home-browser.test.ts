@@ -20,6 +20,7 @@ test("approved home keeps the reading axis, real roster and attached companion",
     import {installSidebarStyles} from './src/web-ui/react/shell/sidebar-styles';
     import {notifyConversationSessionPreview} from './src/web-ui/react/conversations/session-preview';
     import {ConversationHome} from './src/web-ui/react/conversations/home';
+    import {EmployeeProfileHost} from './src/web-ui/react/agents/employee-profile';
     import {ConversationNavigation,ConversationSidebarList,ConversationSidebarTools} from './src/web-ui/react/conversations/sidebar';
     import {conversationUi,conversationDraftKey} from './src/web-ui/react/conversations/state';
     import {ComposerStore} from './src/web-ui/browser/composer';
@@ -37,7 +38,7 @@ test("approved home keeps the reading axis, real roster and attached companion",
         <div className="sidebar-list-panel"><div className="sidebar-header" style={{display:'flex',flexDirection:collapsed?'column':'row',alignItems:'center',gap:8,padding:collapsed?4:12}}><strong hidden={collapsed} className="sidebar-title">对话</strong><ConversationSidebarTools enabled onNavigate={()=>setMobileOpen(false)}/><WandButton kind="ghost" aria-label="收起或展开目录" onClick={()=>setCollapsed(!collapsed)}>{collapsed?'展开':'收起'}</WandButton></div>
           <div style={{overflow:'auto',height:'calc(100% - 70px)',padding:'0 8px'}}><ConversationSidebarList compact={collapsed} onNavigate={()=>setMobileOpen(false)}/></div></div>
       </aside><main className="main-content-conversation" style={{position:'relative',flex:1,minWidth:0}}><ConversationHome visible sidebarOpen={mobileOpen} onOpenSidebar={()=>setMobileOpen(!mobileOpen)} onOpenSession={id=>fixture.opened.push(id)}/></main>
-    </div></div>}
+    <EmployeeProfileHost mobile={false}/></div></div>}
     createRoot(document.getElementById('root')).render(<WandUiProvider><PortalContainerProvider container={document.getElementById('portals')}><Stage/></PortalContainerProvider></WandUiProvider>);
   `;
   await build({ stdin: { contents: source, resolveDir: root, loader: "tsx" }, outfile: join(out, "app.js"), bundle: true, format: "iife", platform: "browser", jsx: "automatic", define: { "process.env.NODE_ENV": '"production"' } });
@@ -64,6 +65,7 @@ test("approved home keeps the reading axis, real roster and attached companion",
       if (path === "/api/config") body = { defaultCwd: "/tmp/fixture-only", userProfile: { name: "我" } };
       else if (path === "/api/ai-teams") body = [];
       else if (path === "/api/silicon-employees") body = { employees };
+      else if (path === "/api/silicon-employees/design") body = employees[0];
       else if (path === "/api/conversations") body = { conversations: [dm, { ...dm, id: "dm_other", title: "另一位伙伴", peerEmployeeId: "other", messages: [] }, group] };
       else if (path === "/api/conversations/dm_design") body = dm;
       else if (path === "/api/conversations/group-design") body = group;
@@ -75,6 +77,15 @@ test("approved home keeps the reading axis, real roster and attached companion",
   server.listen(0, "127.0.0.1"); await once(server, "listening");
   const address = server.address(); assert.ok(address && typeof address !== "string");
   const browser = await openBrowser(`http://127.0.0.1:${address.port}`, 1536, 1024);
+  const checkInputHitTargets = async (width: number) => {
+    const points = await browser.evaluate("(()=>{const r=document.querySelector('.conversation-sender textarea').getBoundingClientRect();return [[r.x+8,r.y+1],[r.right-8,r.y+1],[r.x+8,r.bottom-1],[r.right-8,r.bottom-1],[r.x+r.width/2,r.y+1]]})()");
+    for (const [x, y] of points) {
+      assert.equal(await browser.evaluate(`document.elementFromPoint(${x},${y})===document.querySelector('.conversation-sender textarea')`), true, `${width}px textarea edge must not be covered by the companion profile button at ${x},${y}`);
+      await browser.evaluate("document.querySelector('.conversation-sender textarea').blur();true");
+      for (const type of ["mousePressed", "mouseReleased"]) await browser.send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
+      assert.equal(await browser.evaluate("document.activeElement===document.querySelector('.conversation-sender textarea')"), true, `${width}px native edge click focuses the original input`);
+    }
+  };
   try {
     await browser.wait("!!document.querySelector('.conversation-sender textarea')");
     await browser.wait("document.querySelectorAll('.conversation-group-mosaic .conversation-group-cell').length===13"); await browser.settle();
@@ -89,6 +100,12 @@ test("approved home keeps the reading axis, real roster and attached companion",
     await browser.evaluate("document.querySelector('main').classList.remove('main-content-conversation');true");
     assert.equal(await browser.evaluate("document.querySelector('.app-container').getBoundingClientRect().x"), 0, "a mounted hidden home cannot frame another active page");
     await browser.evaluate("document.querySelector('main').classList.add('main-content-conversation');true");
+    await checkInputHitTargets(1536);
+    await browser.click('.conversation-companion');
+    await browser.wait("!!document.querySelector('[aria-label=\"关闭资料面板\"]')");
+    await browser.click('[aria-label="关闭资料面板"]');
+    await browser.settle();
+    assert.equal(await browser.evaluate("document.activeElement===document.querySelector('.conversation-companion')"), true, "the companion still opens its profile and restores keyboard focus");
     await browser.screenshot(join(out, "desktop-long.png"));
     await browser.evaluate("document.querySelector('.conversation-message-scroll').scrollTop=0;true");
     await browser.wait("document.querySelector('.conversation-new-messages button')?.textContent.includes('回到最新')");
@@ -96,6 +113,7 @@ test("approved home keeps the reading axis, real roster and attached companion",
     let height = await browser.evaluate("document.querySelector('.conversation-message-scroll').scrollHeight");
     for (let index = 0; index < 3; index++) {
       streamed += `\n\n### 新进展 ${index + 1}\n\n这是一段真实换行的流式追加，用户仍在阅读较早的内容。`;
+      messages[0].sessionPreview = { status: "running", text: streamed };
       await browser.evaluate(`fixture.preview({sessionId:'design-session',conversationId:'dm_design',preview:{status:'running',text:${JSON.stringify(streamed)}}});true`);
       await browser.settle();
       const nextHeight = await browser.evaluate("document.querySelector('.conversation-message-scroll').scrollHeight");
@@ -110,6 +128,7 @@ test("approved home keeps the reading axis, real roster and attached companion",
     await browser.settle();
     assert.ok(await browser.evaluate("(()=>{const el=document.querySelector('.conversation-message-scroll');return el.scrollHeight-el.scrollTop-el.clientHeight})()") < 3, "native keyboard activation reaches the tail");
     streamed += "\n\n### 最后一次追加\n\n返回最新以后，这段回复继续增长，视口应该继续贴尾。";
+    messages[0].sessionPreview = { status: "done", text: streamed };
     await browser.evaluate(`fixture.preview({sessionId:'design-session',conversationId:'dm_design',preview:{status:'done',text:${JSON.stringify(streamed)}}});true`);
     await browser.settle();
     const tail = await browser.evaluate("(()=>{const el=document.querySelector('.conversation-message-scroll');return {height:el.scrollHeight,gap:el.scrollHeight-el.scrollTop-el.clientHeight}})()");
@@ -147,13 +166,16 @@ test("approved home keeps the reading axis, real roster and attached companion",
     await browser.wait("!!document.querySelector('.conversation-companion')");
     for (const theme of ["warm", "blue", "forest", "mauve", "graphite"]) { await browser.evaluate(`fixture.theme('${theme}');true`); await browser.screenshot(join(out, `theme-${theme}.png`)); }
     await browser.evaluate("fixture.theme('blue');true");
-    await browser.evaluate(`fixture.preview({sessionId:'design-session',conversationId:'dm_design',preview:{status:'done',text:${JSON.stringify("## 建议保留历史，默认只看当前\n\n当前计划、历史计划与执行记录需要分别表达。\n\n重复计划执行过一次，仍属于当前计划。计划结束不代表执行成功。\n\n取消记录放在历史中，避免混入正在执行的列表。")}}});true`);
+    const approvedReply = "## 建议保留历史，默认只看当前\n\n当前计划、历史计划与执行记录需要分别表达。\n\n重复计划执行过一次，仍属于当前计划。计划结束不代表执行成功。\n\n取消记录放在历史中，避免混入正在执行的列表。";
+    messages[0].sessionPreview = { status: "done", text: approvedReply };
+    await browser.evaluate(`fixture.preview({sessionId:'design-session',conversationId:'dm_design',preview:{status:'done',text:${JSON.stringify(approvedReply)}}});true`);
     await browser.settle();
     await browser.screenshot(join(out, "desktop-approved.png"));
     for (const width of [1180, 768, 640, 390, 320]) {
       await browser.send("Emulation.setDeviceMetricsOverride", { width, height: width === 768 ? 512 : 900, deviceScaleFactor: 1, mobile: false }); await browser.settle();
       assert.equal(await browser.evaluate("document.documentElement.scrollWidth<=innerWidth+1"), true);
       assert.equal(await browser.evaluate("(()=>{const r=document.querySelector('.conversation-submit').getBoundingClientRect();return r.right<=innerWidth&&r.bottom<=innerHeight})()"), true);
+      await checkInputHitTargets(width);
       await browser.screenshot(join(out, `narrow-${width}.png`));
     }
     await browser.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });

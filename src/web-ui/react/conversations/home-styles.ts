@@ -24,8 +24,8 @@ export function installConversationHomeStyles(): void {
 .conversation-root .conversation-sender.ant-sender { border:0; border-radius:16px; background:var(--bg-surface); padding:16px 16px 10px; box-shadow:0 4px 20px color-mix(in srgb,var(--text-primary) 8%,transparent); }
 .conversation-root .conversation-sender.ant-sender:focus-within { box-shadow:0 4px 20px color-mix(in srgb,var(--text-primary) 8%,transparent),0 0 0 2px var(--border-focus); }
 .conversation-root .conversation-sender.ant-sender:has(textarea:focus)::before { content:none; }
-.conversation-root .conversation-companion.ant-btn { position:absolute; inset-inline-start:-12px; inset-block-start:-62px; width:80px; height:80px; padding:0; border:0; background:transparent; z-index:1; }
-.conversation-root .conversation-companion .composer-floating-avatar { inset:0; width:80px; height:80px; }
+.conversation-root .conversation-companion.ant-btn { position:absolute; inset-inline-start:-12px; inset-block-start:-62px; width:80px; height:62px; padding:0; border:0; background:transparent; z-index:1; }
+.conversation-root .conversation-companion .composer-floating-avatar { inset:0; width:80px; height:80px; pointer-events:none; }
 .conversation-root .conversation-input-wrap > .composer-usage-line { inset-inline:76px 0; inset-block-start:-30px; overflow:visible; }
 .conversation-root .conversation-input-hint { display:block; padding:6px 8px 0; font-size:11px; }
 .conversation-root .conversation-action-row { gap:8px; }
@@ -115,7 +115,7 @@ export function installConversationHomeStyles(): void {
   .main-content-conversation .conversation-action-row .conversation-composer-control svg { width:26px !important; height:26px !important; }
   .main-content-conversation .conversation-submit-labelled.ant-btn { min-height:48px; padding-inline:16px; }
   .main-content-conversation .conversation-submit-label { font-size:clamp(15px,1.3vw,20px); }
-  .main-content-conversation .conversation-companion.ant-btn { inset-inline-start:-20px; inset-block-start:-106px; width:132px; height:132px; }
+  .main-content-conversation .conversation-companion.ant-btn { inset-inline-start:-20px; inset-block-start:-106px; width:132px; height:106px; }
   .main-content-conversation .conversation-companion .composer-floating-avatar { width:132px; height:132px; display:flex; align-items:flex-start; justify-content:flex-start; text-align:start; }
   .main-content-conversation .conversation-companion .wand-employee-avatar[data-size="composer"] { transform:scale(1.8); transform-origin:0 0; }
   .main-content-conversation .conversation-root .conversation-input-wrap > .composer-usage-line { inset-inline:108px 0; inset-block-start:-42px; font-size:var(--conversation-label-size); }
