@@ -610,6 +610,7 @@ export function ShellSidebar() {
     !snapshot.layout.sidebarDrawer && snapshot.layout.sidebarAnchored && "pinned",
     narrow && !contextRail && "collapsed",
     contextRail && "context-rail",
+    conversationState.mode === "chats" && !contextRail && "sidebar-home",
   );
   const primaryAction = getShellSidebarPrimaryAction();
   const visible = snapshot.layout.sessionsDrawerOpen
@@ -723,7 +724,7 @@ export function ShellSidebar() {
         onClick={() => void dispatch({ type: "layout.drawer.close" })}
       />
       <Layout.Sider id="sessions-drawer" ref={drawerRef as React.RefObject<HTMLDivElement | null>} className={sidebarClass}
-        width={contextRail ? 56 : "min(344px, calc(100vw - 24px))"} collapsedWidth={112} collapsed={narrow && !contextRail} theme="light"
+        width={contextRail ? 56 : conversationState.mode === "chats" ? "min(376px, calc(100vw - 24px))" : "min(344px, calc(100vw - 24px))"} collapsedWidth={112} collapsed={narrow && !contextRail} theme="light"
         style={{ position: overlay ? "fixed" : "relative", top: overlay ? "var(--wand-safe-top, 0px)" : undefined, bottom: overlay ? "var(--wand-safe-bottom, 0px)" : undefined, left: 0, display: visible ? undefined : "none", zIndex: overlay ? 20000 : 2, height: "100%", overflow: "visible" }}
         styles={{ body: { display: "flex", flexDirection: "row", height: "100%", minHeight: 0 } }}
         aria-label="主导航与会话列表" role={overlay ? "dialog" : undefined}
@@ -733,7 +734,7 @@ export function ShellSidebar() {
           <div className="sidebar-rail-scroll">
             <WandBrandMark className="sidebar-brand-mark" style={{ width: 24, height: 24 }} />
             <ConversationNavigation activePage={settings.open ? null : taskBoard.open ? taskBoard.page === "board" ? "board" : taskBoard.page === "schedules" ? "schedules" : "teams"
-              : conversationState.directory ? "contacts" : conversationState.mode} teamAttention={teamAttention}
+              : conversationState.directory ? "teams" : conversationState.mode} teamAttention={teamAttention}
               onNavigate={(page) => {
                 setAttentionOpen(false);
                 settingsController.close();
@@ -767,6 +768,7 @@ export function ShellSidebar() {
             )}/>
             <WandDropdownMenuContent id="sidebar-account-menu" className="sidebar-tools-menu" aria-label="账户与设置"
               side="right" align="end" sideOffset={6}>
+              <WandDropdownMenuItem icon="user" onClick={() => { setMoreOpen(false); settingsController.close(); taskBoardController.close(); conversationUi.directory(true); dismissSidebarSurfaces(); }}>员工与通讯录</WandDropdownMenuItem>
               <WandDropdownMenuItem id="sidebar-settings-entry" icon="gear"
                 onClick={() => { setMoreOpen(false); setAttentionOpen(false); navigate({ type: "settings.open" }); }}>
                 设置

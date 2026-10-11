@@ -6,7 +6,7 @@ import { wandOverlay } from "../overlay-controller";
 import { SidebarLabelTooltip } from "../workspaces/sidebar-label-tooltip";
 import { SidebarRowMenu } from "../workspaces/sidebar-row-menu";
 import { EmployeeAvatar } from "../agents/employee-avatar";
-import { cachedSiliconEmployee } from "../agents/employee-repository";
+import { cachedSiliconEmployee, useSiliconEmployees } from "../agents/employee-repository";
 import { ConversationGroupAvatar } from "./avatar";
 import { WandButton, WandIcon, WandIconButton, WandSearchField, WandStretchTabs } from "../ui";
 import { conversationUi, useConversationUi, type ConversationListFilter } from "./state";
@@ -30,7 +30,6 @@ export function ConversationNavigation({ activePage, teamAttention, onNavigate }
     { value: "board", label: "任务看板", icon: "board", id: "task-board-button" },
     { value: "teams", label: "团队", icon: "users", id: "ai-teams-button" },
     { value: "schedules", label: "定时任务", icon: "history", id: "scheduled-tasks-button" },
-    { value: "contacts", label: "通讯录", icon: "user" },
   ] as const;
   return <Flex component="nav" vertical gap={4} className="conversation-navigation" aria-label="功能导航">
     {entries.map(entry => <WandIconButton key={entry.value} id={"id" in entry ? entry.id : undefined}
@@ -54,13 +53,12 @@ export function ConversationSidebarTools({ enabled, onNavigate, onCreateSession 
   React.useEffect(() => { setPanel("closed"); }, [enabled, state.mode]);
   return <Flex ref={anchor} align="center" className="conversation-sidebar-tools" style={{ position: "relative" }}>
     <WandIconButton ref={plus} className="conversation-create-button"
-      aria-label={state.mode === "tasks" ? "新建会话" : panel === "closed" ? "对话操作" : "关闭对话操作"}
+      aria-label={state.mode === "tasks" ? "新建会话" : panel === "closed" ? "发起群聊" : "关闭群聊表单"}
       aria-expanded={panel !== "closed"} aria-controls="conversation-create-panel"
-      onClick={() => state.mode === "tasks" ? onCreateSession?.() : setPanel(panel === "closed" ? "menu" : "closed")}>
+      onClick={() => state.mode === "tasks" ? onCreateSession?.() : setPanel(panel === "closed" ? "group" : "closed")}>
       <ConversationMorphIcon active={panel !== "closed"} from="plus" to="close"/>
     </WandIconButton>
     <ConversationPanel open={enabled && panel !== "closed"} owner="conversation-create-panel" focusKey={panel} anchorRef={anchor} triggerRef={plus} onClose={() => setPanel("closed")}>
-      <div hidden={panel !== "menu"}><WandButton onClick={() => setPanel("group")}>发起群聊</WandButton></div>
       <div hidden={panel !== "group"}><GroupEditor open={enabled && panel === "group"} owner="conversation-create-panel"
         onCancel={() => setPanel("closed")} onCreated={id => { setPanel("closed"); conversationUi.select(id, true); onNavigate(); }}/></div>
     </ConversationPanel>
@@ -121,6 +119,7 @@ export function conversationListCounts<
 
 export function ConversationSidebarList({ compact, enabled = true, onNavigate }: { compact: boolean; enabled?: boolean; onNavigate(): void }): React.ReactElement {
   const { items, error, loaded, refresh } = useConversations();
+  const { employees } = useSiliconEmployees({ enabled });
   const ui = useConversationUi();
   const query = (ui.filters["list-query"] ?? "").trim().toLowerCase();
   const filter = ui.listFilter;
@@ -167,7 +166,7 @@ export function ConversationSidebarList({ compact, enabled = true, onNavigate }:
         value={filter} onValueChange={conversationUi.listFilter}/></Flex></div> : null}
     {error ? <Typography.Text type="danger" role="status">{error}<WandButton size="small" onClick={refresh}>重新读取</WandButton></Typography.Text> : null}
     {actionError ? <Typography.Paragraph type="danger" role="alert">{actionError}</Typography.Paragraph> : null}
-    {rows.map(item => <ConversationListRow key={item.id} item={item} compact={compact} query={query}
+    {rows.map(item => <ConversationListRow key={item.id} item={item} employee={employees.find(employee => employee.id === item.peerEmployeeId) ?? null} compact={compact} query={query}
       enabled={enabled} filter={filter} selected={ui.selectedId === item.id && ui.active !== false} onSelect={() => select(item.id)}
       onUpdate={patch => update(item, patch)} onRemove={() => remove(item)}/>) }
     {loaded && !rows.length ? <div className="conversation-list-empty" role="status"><WandIcon name={query ? "search" : "chat"} size={20}/><Typography.Paragraph type="secondary">{query ? "没有匹配的对话或任务"
@@ -177,11 +176,11 @@ export function ConversationSidebarList({ compact, enabled = true, onNavigate }:
   </div>;
 }
 
-function ConversationListRow({ item, compact, query, enabled, filter, selected, onSelect, onUpdate, onRemove }: {
-  item: ConversationSummary; compact: boolean; query: string; enabled: boolean; filter: ConversationListFilter; selected: boolean; onSelect(): void;
+function ConversationListRow({ item, employee: projectedEmployee, compact, query, enabled, filter, selected, onSelect, onUpdate, onRemove }: {
+  item: ConversationSummary; employee: React.ComponentProps<typeof EmployeeAvatar>["employee"] | null; compact: boolean; query: string; enabled: boolean; filter: ConversationListFilter; selected: boolean; onSelect(): void;
   onUpdate(patch: { pinned?: boolean; dissolved?: boolean }): Promise<void>; onRemove(): Promise<void>;
 }): React.ReactElement {
-  const employee = item.peerEmployeeId ? cachedSiliconEmployee(item.peerEmployeeId) : null;
+  const employee = projectedEmployee ?? (item.peerEmployeeId ? cachedSiliconEmployee(item.peerEmployeeId) : null);
   const identity = employee ?? (item.peerEmployeeId ? { id: item.peerEmployeeId, name: item.title } : null);
   const selfName = useUserProfile().name || "我";
   const [menu, setMenu] = React.useState(false);
@@ -202,7 +201,7 @@ function ConversationListRow({ item, compact, query, enabled, filter, selected, 
     data-pinned={!!item.pinnedAt} data-archived={archived || undefined} data-conversation-id={item.id} aria-busy={busy || undefined}>
     <WandIconButton className="conversation-row-avatar conversation-avatar-button" aria-label={identity ? `查看${item.title}的资料` : `打开${item.title}`}
       onClick={event => identity ? employeeProfile.open(identity, event.currentTarget) : onSelect()}>
-      {employee ? <EmployeeAvatar employee={employee} size="md"/> : item.kind === "group" ? <ConversationGroupAvatar title={item.title} size={48}/> : <Avatar size={48} icon={<WandIcon name="chat" size={16}/>}/>}</WandIconButton>
+      {identity ? <EmployeeAvatar employee={identity} size="md"/> : item.kind === "group" ? <ConversationGroupAvatar title={item.title} members={item.team?.members ?? []} size={48}/> : <Avatar size={48} icon={<WandIcon name="chat" size={16}/>}/>}</WandIconButton>
     {!compact ? <SidebarLabelTooltip title={item.title} selector=".conversation-row-title"><WandButton kind="ghost" className="conversation-row-open" title={item.title} onClick={onSelect}>
       <span className="conversation-row-copy"><span className="conversation-row-topline"><span className="conversation-row-title">{item.title}</span>
         {formatConversationListTime(item.messageAt) ? <time className="conversation-row-time" dateTime={item.messageAt}>{formatConversationListTime(item.messageAt)}</time> : null}</span>

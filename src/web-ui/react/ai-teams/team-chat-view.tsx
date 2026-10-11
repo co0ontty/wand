@@ -1546,6 +1546,23 @@ export function ConversationMessages({ turns, taskLabels, group = true, ready = 
       } else setUnseen(count => count + added.length);
     }
   }, [turns, ready, active, reduced]);
+  React.useLayoutEffect(() => {
+    const content = list.current;
+    const scroll = content?.closest<HTMLElement>(".conversation-message-scroll");
+    if (!content || !scroll || !active || typeof ResizeObserver === "undefined") return;
+    let previousHeight = scroll.scrollHeight;
+    const observer = new ResizeObserver(() => {
+      // Streamed replies resize without adding a turn. The reading owner follows
+      // only if the reader was at the previous tail, including pending scroll events.
+      if (!document.hidden && isFollowingTail({ scrollTop: scroll.scrollTop, scrollHeight: previousHeight, clientHeight: scroll.clientHeight })) {
+        scroll.scrollTop = scroll.scrollHeight;
+        following.current = true;
+      }
+      previousHeight = scroll.scrollHeight;
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [active, ready]);
   return <div ref={list} className="task-board-team-chat team-chat-stream conversation-stream" role="log" aria-label="对话消息" aria-relevant="additions">
     {turns.map((turn, index) => {
       const key = keys[index]!;

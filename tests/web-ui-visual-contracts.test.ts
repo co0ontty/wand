@@ -75,7 +75,9 @@ test("web sidebar uses a persistent icon rail, profile settings and a separate s
   assert.ok(sidebar.indexOf("<ConversationNavigation") < sidebar.indexOf("sidebar-list-panel"));
   assert.ok(sidebar.indexOf('id="drawer-new-session-button"') < sidebar.indexOf('className="sidebar-body"'));
   assert.match(navigation, /component="nav" vertical/);
-  for (const label of ["对话", "工作区", "任务看板", "团队", "通讯录"]) assert.ok(navigation.includes(`label: "${label}"`));
+  for (const label of ["对话", "工作区", "任务看板", "团队"]) assert.ok(navigation.includes(`label: "${label}"`));
+  assert.ok(!navigation.includes('label: "通讯录"'));
+  assert.match(sidebar, /员工与通讯录/);
   assert.match(navigation, /<Badge count=\{teamAttention\}/);
   assert.match(tree, /paddingInlineStart: 8.*className="workspace-tasks"/);
   assert.match(tree, /<Badge dot=\{glow !== "none"\}/);
