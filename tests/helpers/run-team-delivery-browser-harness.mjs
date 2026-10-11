@@ -141,6 +141,7 @@ try {
     await wait(`location.search === '?mode=${mode}' && !!document.querySelector('#chat .team-chat-context')`);
     const beforeReads = filesRead;
     assert.ok((await evaluate('document.querySelector(".team-chat-context").textContent')).includes("23 文件 · 8 接力"));
+    const closedCardHeight = (await rect("#card"))[3];
     const before = await rect("#card .team-delivery-trigger");
     await click("#card .team-delivery-trigger");
     assert.deepEqual(await rect("#card .team-delivery-trigger"), before, "task disclosure anchored");
@@ -156,6 +157,9 @@ try {
     await click("#card .team-delivery-trigger"); await escape();
     assert.equal(await evaluate('document.querySelector("#card .team-delivery-trigger").getAttribute("aria-expanded")'), "false");
     assert.deepEqual(await rect("#card .team-delivery-trigger"), before);
+    // The trigger stays fixed while its card is still collapsing. Wait for that
+    // preceding layout change before measuring the next disclosure's anchor.
+    await wait(`document.querySelector('#card').getBoundingClientRect().height === ${closedCardHeight}`);
     const chatBefore = await rect(".team-chat-context");
     await click(".team-chat-context");
     assert.deepEqual(await rect(".team-chat-context"), chatBefore, "announcement anchored");
