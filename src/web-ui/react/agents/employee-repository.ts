@@ -25,7 +25,8 @@ export function employeeUpdateInput(employee: SiliconEmployee, patch: Partial<Si
     avatar: patch.avatar ?? employee.avatar, tags: patch.tags ?? employee.tags ?? [], agents: patch.agents ?? employee.agents };
 }
 
-type EmployeeListener = (employeeId: string) => void;
+/** No ID means reconnect/resync: every active identity needs a fresh read. */
+type EmployeeListener = (employeeId?: string) => void;
 const employeeListeners = new Set<EmployeeListener>();
 const employeeCacheListeners = new Set<() => void>();
 
@@ -49,7 +50,7 @@ export function subscribeSiliconEmployeeCache(listener: () => void): () => void 
   return () => { employeeCacheListeners.delete(listener); };
 }
 
-export function notifySiliconEmployeeDefinitionChanged(employeeId: string): void {
+export function notifySiliconEmployeeDefinitionChanged(employeeId?: string): void {
   invalidateEmployeeList();
   for (const listener of employeeListeners) listener(employeeId);
 }
@@ -68,7 +69,7 @@ export const siliconEmployeesRepository = {
 
     const query = options?.includeArchived ? "?includeArchived=1" : "";
     const version = employeeListVersion;
-    const pending = requestJson<{ employees: SiliconEmployee[] }>(`/api/silicon-employees${query}`)
+    const pending = requestJson<{ employees: SiliconEmployee[] }>(`/api/silicon-employees${query}`, { cache: "no-store" })
       .then((res) => {
         const list = res.employees ?? [];
         if (!options?.includeArchived && version === employeeListVersion) {
@@ -90,7 +91,7 @@ export const siliconEmployeesRepository = {
   },
 
   get(id: string): Promise<SiliconEmployee> {
-    return requestJson<SiliconEmployee>(`/api/silicon-employees/${encodeURIComponent(id)}`);
+    return requestJson<SiliconEmployee>(`/api/silicon-employees/${encodeURIComponent(id)}`, { cache: "no-store" });
   },
 
   /** 按自然语言期望起草一份配置；仅在用户点「创建员工」或「按期望生成」时调用。 */

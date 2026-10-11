@@ -1,5 +1,5 @@
 import "./library-layout";
-import { TaskTextArea } from "./form-controls";
+import { TaskTextArea } from "./task-form";
 import { WandInput } from "../ui";
 import { Card } from "antd";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";

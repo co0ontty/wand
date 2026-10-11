@@ -13,7 +13,9 @@ import { getErrorMessage } from "../../error-utils.js";
 import { CHAT_HISTORY_BLOCK_BUDGET, CHAT_HISTORY_BYTE_BUDGET } from "../chat-history-window.js";
 
 import { mergeBlockWindowedMessages, mergeWindowedMessages, type MessageMergeSource } from "./message-reconciliation";
-import { clearActivityDetailState, ensureChatMessagesContainer, extractToolResultText, parseMessages, renderChat, scheduleChatRender } from "./chat-render";
+import { clearActivityDetailState, ensureChatMessagesContainer, renderChat, scheduleChatRender } from "./chat-render-loader";
+import { extractToolResultText } from "./tool-result-display.js";
+import { parseMessages } from "./pty-chat-parser.js";
 import { bindChatScrollListener, normalizeStructuredSnapshot, persistSelectedId, restoreStructuredQueue, saveStructuredQueue, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession, updateChatUnreadBubble, setChatHistoryLoadState } from "./chat-scroll";
 import "./events";
 import { isSidebarDrawerLayout, terminalZoomFromKeyboard, updateFilePanelCwd, updateLayoutState } from "./file-browser";

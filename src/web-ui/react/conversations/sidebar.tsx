@@ -9,14 +9,14 @@ import { EmployeeAvatar } from "../agents/employee-avatar";
 import { cachedSiliconEmployee } from "../agents/employee-repository";
 import { ConversationGroupAvatar } from "./avatar";
 import { WandButton, WandIcon, WandIconButton, WandSearchField, WandStretchTabs } from "../ui";
-import { conversationUi, useConversationUi } from "./state";
+import { conversationUi, useConversationUi, type ConversationListFilter } from "./state";
 import { conversationTaskStateLabel } from "./presentation";
 import { conversationsRepository, useConversations } from "./repository";
 import { ConversationMorphIcon, ConversationPanel } from "./controls";
 import { GroupEditor } from "./group-editor";
 import { useUserProfile } from "../user-profile-repository";
 
-export type ConversationNavigationPage = "chats" | "tasks" | "board" | "teams" | "contacts";
+export type ConversationNavigationPage = "chats" | "tasks" | "board" | "teams" | "contacts" | "schedules";
 
 /** Global destinations stay in the left rail, independent of the current list. */
 export function ConversationNavigation({ activePage, teamAttention, onNavigate }: {
@@ -29,6 +29,7 @@ export function ConversationNavigation({ activePage, teamAttention, onNavigate }
     { value: "tasks", label: "工作区", icon: "folder" },
     { value: "board", label: "任务看板", icon: "board", id: "task-board-button" },
     { value: "teams", label: "团队", icon: "users", id: "ai-teams-button" },
+    { value: "schedules", label: "定时任务", icon: "history", id: "scheduled-tasks-button" },
     { value: "contacts", label: "通讯录", icon: "user" },
   ] as const;
   return <Flex component="nav" vertical gap={4} className="conversation-navigation" aria-label="功能导航">
@@ -38,7 +39,7 @@ export function ConversationNavigation({ activePage, teamAttention, onNavigate }
       aria-pressed={activePage === entry.value} onClick={() => onNavigate(entry.value)}>
       <span className="sidebar-nav-icon" aria-hidden="true">{entry.value === "teams" ? <Badge count={teamAttention} size="small"><WandIcon name={entry.icon} size={18}/></Badge>
         : <WandIcon name={entry.icon} size={18}/>}</span>
-      <span className="sidebar-nav-label" aria-hidden="true">{entry.value === "board" ? "任务" : entry.label}</span>
+      <span className="sidebar-nav-label" aria-hidden="true">{entry.value === "board" ? "任务" : entry.value === "schedules" ? "定时" : entry.label}</span>
     </WandIconButton>)}
   </Flex>;
 }
@@ -76,7 +77,7 @@ export function formatConversationListTime(messageAt: string, now = new Date()):
 }
 
 /** 归档档位：全部 / 未归档 / 已归档，和侧栏「在跑」是同一套顶部筛选形态。 */
-export type ConversationListFilter = "all" | "active" | "archived";
+export type { ConversationListFilter } from "./state";
 
 /**
  * 归档的对话：群聊解散后归档，或它的任务已经被归档。
@@ -122,7 +123,7 @@ export function ConversationSidebarList({ compact, enabled = true, onNavigate }:
   const { items, error, loaded, refresh } = useConversations();
   const ui = useConversationUi();
   const query = (ui.filters["list-query"] ?? "").trim().toLowerCase();
-  const [filter, setFilter] = React.useState<ConversationListFilter>("all");
+  const filter = ui.listFilter;
   const [actionError, setActionError] = React.useState("");
   const searchInput = React.useRef<HTMLInputElement>(null);
   const [engaged, setEngaged] = React.useState(false);
@@ -163,7 +164,7 @@ export function ConversationSidebarList({ compact, enabled = true, onNavigate }:
     <Flex justify="space-between" align="center" gap={4} className="conversation-list-section"><Typography.Text type="secondary" className="conversation-list-count" title={countLabel} aria-label={countLabel}>{loaded ? query ? `匹配 ${counts.matches} / ${counts.scope}` : `${counts.scope} 个对话` : error ? "数量未加载" : "读取中…"}</Typography.Text>
       <WandStretchTabs className="conversation-list-filter" ariaLabel="对话归档筛选"
         tabs={[{ value: "all", label: "全部" }, { value: "active", label: "未归档" }, { value: "archived", label: "已归档" }]}
-        value={filter} onValueChange={(value) => setFilter(value as ConversationListFilter)}/></Flex></div> : null}
+        value={filter} onValueChange={conversationUi.listFilter}/></Flex></div> : null}
     {error ? <Typography.Text type="danger" role="status">{error}<WandButton size="small" onClick={refresh}>重新读取</WandButton></Typography.Text> : null}
     {actionError ? <Typography.Paragraph type="danger" role="alert">{actionError}</Typography.Paragraph> : null}
     {rows.map(item => <ConversationListRow key={item.id} item={item} compact={compact} query={query}

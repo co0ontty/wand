@@ -10,7 +10,7 @@ import { planTeamDispatch, startTeamDispatch } from "../src/team-dispatch.js";
 import { jsonErrorHandler } from "../src/express-async.js";
 import { registerTeamDispatchRoutes } from "../src/server-team-dispatch-routes.js";
 import { WandStorage } from "../src/storage.js";
-import type { DecisionResult } from "../src/decision-types.js";
+import { DecisionError, type DecisionResult } from "../src/decision-types.js";
 import { SYSTEM_EMPLOYEE_ID, SYSTEM_EMPLOYEE_KEY } from "../src/ai-team-types.js";
 
 // 员工候选必须是存储层认得的形状（parseWandTaskAgent 要求 thinkingEffort 合法）。
@@ -229,6 +229,29 @@ test("开工失败时回收刚建的卡与临时团队", async (t) => {
   );
   assert.deepEqual(storage.listWandTasks(), [], "不留空卡");
   assert.deepEqual(storage.listAiTeams(), [], "不留残留团队");
+});
+
+test("派工建议断开连接时取消决策调用，不启动后续工作", { timeout: 5000 }, async (t) => {
+  const { storage } = harness(t);
+  seed(storage, [{ name: "甲", duty: "UI" }, { name: "乙", duty: "测试" }]);
+  let entered!: () => void, cancelled!: () => void;
+  const ready = new Promise<void>(resolve => { entered = resolve; });
+  const stopped = new Promise<void>(resolve => { cancelled = resolve; });
+  const app = express(); app.use(express.json());
+  registerTeamDispatchRoutes(app, { storage, runner: { start: async () => { throw Error("must not start"); } },
+    decisions: { status: () => ({ enabled: true, supported: true, configured: true }) as any,
+      evaluate: async (_value, _caller, signal) => new Promise((_resolve, reject) => {
+        assert.ok(signal); entered();
+        signal.addEventListener("abort", () => { cancelled(); reject(new DecisionError("CANCELLED", "cancelled")); }, { once: true });
+      }) } });
+  const server = createServer(app);
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const abort = new AbortController();
+  const request = fetch(`http://127.0.0.1:${(server.address() as { port: number }).port}/api/team-dispatch/plan`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note: "设计界面" }), signal: abort.signal,
+  }).catch(error => error);
+  await ready; abort.abort(); await request; await stopped;
 });
 
 test("路由：决策未启用时明确拒绝；规划与开工串起来可用", async (t) => {

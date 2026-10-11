@@ -55,6 +55,7 @@ test("the embedded fallback source stays smaller than half its plain base64 payl
     EMBEDDED_WEB_ASSETS.stylesCss,
     EMBEDDED_WEB_ASSETS.aiTeamsJs,
     EMBEDDED_WEB_ASSETS.plushAvatarJs,
+    ...Object.values(EMBEDDED_WEB_ASSETS.browserModules),
     ...Object.values(EMBEDDED_WEB_ASSETS.vendor).map((asset) => asset.content),
   ];
   const plainBase64Bytes = contents.reduce(
@@ -87,7 +88,8 @@ test("asset readers keep serving correct strings and hashes when disk assets are
     const expectedScript = EMBEDDED_WEB_ASSETS.scriptsJs
       .replace('"${wandConfigPath}"', JSON.stringify(configPath))
       .replace("${aiTeamsChunkSrc}", `/assets/ai-teams.js?v=${expectedChunk.hash}`)
-      .replace("${plushAvatarChunkSrc}", `/assets/plush-avatar.js?v=${md5(EMBEDDED_WEB_ASSETS.plushAvatarJs)}`);
+      .replace("${plushAvatarChunkSrc}", `/assets/plush-avatar.js?v=${md5(EMBEDDED_WEB_ASSETS.plushAvatarJs)}`)
+      .replace("${browserModuleSrc}", `/assets/${EMBEDDED_WEB_ASSETS.browserModuleManifest.entry}`);
     const fallbackScript = scripts.getScriptAsset(configPath);
     assert.equal(fallbackScript.content, expectedScript);
     assert.equal(fallbackScript.hash, versionWebAsset(expectedScript).hash);
@@ -104,7 +106,14 @@ test("asset readers keep serving correct strings and hashes when disk assets are
     writeFileSync(path.join(fixtureContentDir, "plush-avatar.js"), "console.log('updated plush');\n");
     writeFileSync(path.join(fixtureContentDir, "tailwind.css"), ":root{--fixture:1}");
     writeFileSync(path.join(fixtureContentDir, "styles.css"), "body{color:red}");
+    const modulePath = "modules/0123456789abcdef/runtime.js";
+    mkdirSync(path.join(fixtureContentDir, "modules/0123456789abcdef"), { recursive: true });
+    writeFileSync(path.join(fixtureContentDir, modulePath), "export const updated = true;");
+    writeFileSync(path.join(fixtureContentDir, "module-manifest.json"), JSON.stringify({
+      entry: modulePath, eager: [modulePath], files: [modulePath],
+    }));
     const diskScript = scripts.getScriptAsset(configPath);
+    assert.equal(scripts.getBrowserModule(modulePath), "export const updated = true;");
     const diskChunk = scripts.getAiTeamsChunk();
     const diskPlush = scripts.getPlushAvatarChunk();
     const diskStyles = styles.getStylesAsset();
@@ -115,6 +124,10 @@ test("asset readers keep serving correct strings and hashes when disk assets are
     assert.deepEqual(diskStyles, versionWebAsset(":root{--fixture:1}\nbody{color:red}"));
     rmSync(fixtureContentDir, { recursive: true });
     assert.deepEqual(scripts.getScriptAsset(configPath), diskScript);
+    assert.equal(scripts.getBrowserModule(modulePath), "export const updated = true;", "retain disk modules after deletion");
+    for (const [file, content] of Object.entries(EMBEDDED_WEB_ASSETS.browserModules)) {
+      assert.equal(scripts.getBrowserModule(file), content, "old module URLs keep their original embedded graph");
+    }
     assert.deepEqual(scripts.getAiTeamsChunk(), diskChunk);
     assert.deepEqual(scripts.getPlushAvatarChunk(), diskPlush);
     assert.deepEqual(styles.getStylesAsset(), diskStyles);

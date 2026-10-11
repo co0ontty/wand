@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { DEFAULT_EMPLOYEE_ID } from "./ai-team-types.js";
 import { explicitEmployeeMemoryContent } from "./employee-knowledge-content.js";
 import type { EmployeeTextDeps } from "./employee-text.js";
-import { callConfiguredAiText } from "./git-quick-commit.js";
+import { callConfiguredAiText } from "./ai-text-runner.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
 import type { WandStorage } from "./storage.js";
 import type { WandConfig } from "./types.js";

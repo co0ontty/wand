@@ -3,13 +3,15 @@ import * as React from "react";
 import { isLocalDecisionModel, WAND_LOCAL_DECISION_MODEL, WAND_LOCAL_DECISION_LABEL } from "../../../decision-expert-identity.js";
 import { OPENROUTER_FREE_SELECTOR, OPENROUTER_FREE_GROUP } from "../../../openrouter-free-selection.js";
 import type { AiTeam, SiliconEmployee } from "../../../ai-team-types";
-import type { WandTaskAgent, WandTaskAgentEngine } from "../../../task-types";
+import type { TaskExecutionSubject, WandTaskAgent } from "../../../task-types";
 import { TeamAvatarStack } from "../ai-teams/avatar";
 import { WandSelect } from "../ui";
+import { AGENT_TOOL_OPTIONS, WAND_AGENT_TOOL_ID } from "../../provider-identity.js";
 import {
   issueAgentEffortOptions,
   issueAgentModeOptions,
   issueAgentModelOptions,
+  issueAgentTargetValue,
   withIssueAgentTarget,
   type IssueModelCatalog,
 } from "./task-board-agent";
@@ -50,11 +52,6 @@ export function agentTargetTeamId(value: string): string {
 export function agentTargetEmployeeId(value: string): string {
   return value.startsWith(EMPLOYEE_VALUE_PREFIX) ? value.slice(EMPLOYEE_VALUE_PREFIX.length) : "";
 }
-
-const AGENT_ENGINE_OPTIONS: ReadonlyArray<{ value: WandTaskAgentEngine; label: string }> = [
-  { value: "cli", label: "Pi CLI" },
-  { value: "sdk", label: "Wand Agent" },
-];
 
 const AGENT_KIND_OPTIONS = [
   { value: "structured", label: "结构化对话" },
@@ -100,26 +97,37 @@ export function AgentFields({
   employees?: ReadonlyArray<SiliconEmployee> | null;
   employeeId?: string;
   onEmployeeChange?(employeeId: string): void;
-  onChange(agent: WandTaskAgent): void;
+  /** A target change carries the complete subject, so callers never remember intermediate resets. */
+  onChange(agent: WandTaskAgent, subject?: TaskExecutionSubject): void;
 }): React.ReactElement {
   const team = teamId ? teams?.find((item) => item.id === teamId) ?? null : null;
   const employee = employeeId ? employees?.find((item) => item.id === employeeId) ?? null : null;
+  // Provider-only catalogs omit the SDK option, while the saved value includes
+  // its engine. Keep both dimensions in this selector, including saved choices.
+  const toolOptions = providerOptions && allowSdkEngine ? [
+    ...providerOptions,
+    ...AGENT_TOOL_OPTIONS.filter(option => option.id === WAND_AGENT_TOOL_ID && !providerOptions.some(item => item.value === option.id))
+      .map(option => ({ value: option.id, label: option.label })),
+  ] : providerOptions;
   const selectTarget = (value: string): void => {
     const nextTeam = agentTargetTeamId(value);
     const nextEmployee = agentTargetEmployeeId(value);
     onTeamChange?.(nextTeam);
     onEmployeeChange?.(nextEmployee);
     if (nextTeam || nextEmployee) {
-      if (agent.kind !== "structured") onChange({ ...agent, kind: "structured" });
+      onChange({ ...agent, kind: "structured" }, {
+        type: nextEmployee ? "employee" : "team", id: nextEmployee || nextTeam,
+      });
       return;
     }
-    onChange(withIssueAgentTarget(agent, value, catalog));
+    const next = withIssueAgentTarget(agent, value, catalog);
+    onChange(next, { type: "cli", id: next.provider });
   };
   return <>
-    <AgentField label={onTeamChange || onEmployeeChange ? "指派给" : "CLI 工具"}>
-      {providerOptions ? <WandSelect
-        value={employee ? `${EMPLOYEE_VALUE_PREFIX}${employee.id}` : team ? `${TEAM_VALUE_PREFIX}${team.id}` : agent.provider}
-        options={onTeamChange || onEmployeeChange ? agentTargetOptions(providerOptions, teams, employees) : providerOptions}
+    <AgentField label={onTeamChange || onEmployeeChange ? "指派给" : allowSdkEngine ? "执行工具" : "CLI 工具"}>
+      {toolOptions ? <WandSelect
+        value={employee ? `${EMPLOYEE_VALUE_PREFIX}${employee.id}` : team ? `${TEAM_VALUE_PREFIX}${team.id}` : issueAgentTargetValue(agent)}
+        options={onTeamChange || onEmployeeChange ? agentTargetOptions(toolOptions, teams, employees) : toolOptions}
         ariaLabel={`${ariaPrefix}指派给`}
         className="task-board-native-select"
         disabled={disabled}
@@ -172,6 +180,9 @@ function AgentModelFields({
   if (agent.model === OPENROUTER_FREE_SELECTOR && !models.some(option => option.value === OPENROUTER_FREE_SELECTOR)) {
     models.unshift({ value: OPENROUTER_FREE_SELECTOR, label: `Wand ${OPENROUTER_FREE_GROUP}` });
   }
+  if (agent.model && !models.some(option => option.value === agent.model)) {
+    models.push({ value: agent.model, label: `${agent.model}（已保存）` });
+  }
   return <>
     <AgentField label="模型">
       <WandSelect
@@ -211,15 +222,8 @@ function AgentModelFields({
         })}
       />
     </AgentField>
-    {allowSdkEngine && agent.provider === "pi" && agent.kind === "structured" && <AgentField label="执行引擎">
-      <WandSelect
-        value={agent.engine ?? "cli"}
-        options={AGENT_ENGINE_OPTIONS}
-        ariaLabel={`${ariaPrefix}执行引擎`}
-        className="task-board-native-select"
-        disabled={disabled}
-        onValueChange={(engine) => onChange({ ...agent, engine: engine as WandTaskAgentEngine })}
-      />
+    {allowSdkEngine && agent.provider === "pi" && agent.kind === "structured" && agent.engine !== "cli" && agent.engine && <AgentField label="执行方式">
+      <Typography.Text type="secondary">Wand 进程内执行，无需 CLI 工具</Typography.Text>
     </AgentField>}
     {showKind && <AgentField label="会话形态">
       <WandSelect

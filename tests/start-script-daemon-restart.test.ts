@@ -31,10 +31,16 @@ SCOPE=${scope}
 SCOPE_FLAG=--${scope}
 CONFIG_PATH="$1/config.json"
 REPO_ROOT="$1"
-NODE_BIN=/fixture/node
+NODE_BIN=fixture_lock_cli
 NODE_FOR_WAND=/fixture/node
 WAND_BIN="$1/wand"
 WAND_CORE_WAIT_TIMEOUT=30
+DEPLOYMENT_LOCK_RECEIPT="fixture-lock-receipt"
+fixture_lock_cli() {
+  [[ "$*" = *"src/deployment-lock.ts --release --owner-pid $$"* ]] || return 2
+  [[ "$(</dev/stdin)" = fixture-lock-receipt ]] || return 2
+  event unlock
+}
 msg() { :; }
 ok() { :; }
 warn() { :; }
@@ -63,6 +69,7 @@ run_privileged() {
 ${extract("stop_service_for_install")}
 ${extract("restart_requested_daemons")}
 ${extract("restore_stopped_service")}
+${extract("release_deployment_locks")}
 ${extract("ensure_service_installed_and_running")}
 ${route === "restart" ? restartBranch : "ensure_service_installed_and_running"}
 `, "daemon-restart-test", dir], { encoding: "utf8", timeout: 5000,
@@ -116,7 +123,7 @@ test("real restart-only dispatch honors the daemon flag without a package build/
   for (const restart of [false, true]) {
     const result = runLifecycle({ restart, route: "restart" });
     assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(result.events, ["core-guard", "cleanup", ...(restart ? ["daemons"] : []), "start"]);
+    assert.deepEqual(result.events, ["core-guard", "cleanup", ...(restart ? ["daemons"] : []), "start", "unlock"]);
   }
 });
 
@@ -124,21 +131,23 @@ test("restart-only failure attempts service recovery but never repeats daemon sh
   for (const scenario of [{ failStart: true }, { failReady: true }]) {
     const result = runLifecycle({ restart: true, route: "restart", ...scenario });
     assert.equal(result.status, 1);
-    assert.deepEqual(result.events, ["core-guard", "cleanup", "daemons", "start", "start"]);
+    assert.deepEqual(result.events, ["core-guard", "cleanup", "daemons", "start", "start", "unlock"]);
   }
 });
 
 test("guard failure in restart-only never activates the recovery or daemon action", () => {
   const result = runLifecycle({ restart: true, route: "restart", guard: 2 });
   assert.equal(result.status, 1);
-  assert.deepEqual(result.events, ["core-guard"]);
+  assert.deepEqual(result.events, ["core-guard", "unlock"]);
 });
 
 test("all restart modes use the same guarded daemon preparation, diagnostics stay readonly", () => {
   const ensure = extract("ensure_service_installed_and_running");
   assert.match(ensure, /restart_requested_daemons/);
   const dispatch = source.slice(source.indexOf('case "$ACTION" in'));
-  assert.match(dispatch, /restart-only\)\s+trap restore_stopped_service EXIT\s+ensure_service_installed_and_running/);
+  assert.match(dispatch, /restart-only\)\s+trap 'restore_stopped_service; release_deployment_locks' EXIT\s+ensure_service_installed_and_running/);
+  assert.match(dispatch, /SERVICE_STOPPED_FOR_INSTALL=0\s+trap release_deployment_locks EXIT/,
+    "successful restart releases its lease without starting a second recovery");
   for (const action of ["status", "logs", "attach"]) {
     const body = dispatch.match(new RegExp(`  ${action}\\)[\\s\\S]*?    ;;`))?.[0];
     assert.ok(body);

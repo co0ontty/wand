@@ -1,5 +1,5 @@
 import "../issues/library-layout";
-import { TaskForm, TaskTextArea } from "../issues/form-controls";
+import { TaskForm, TaskTextArea } from "../issues/task-form";
 import { WandInput } from "../ui";
 import { Alert, Card, Empty, Flex, Form, List, Radio, Space, Spin, Tag, Typography } from "antd";
 import {
@@ -36,7 +36,6 @@ import type {
 } from "./types";
 import { describeError } from "../errors";
 import { MOTION_DWELL_FAILED_MS, MOTION_DWELL_SENT_MS } from "../ui/motion-tokens";
-import { notifyTasksChanged } from "../task-changes";
 
 export interface QuickCommitHostProps {
   repository?: QuickCommitRepository;
@@ -126,7 +125,6 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
   const [form, setForm] = useState<QuickCommitForm>(EMPTY_FORM);
   const [action, setAction] = useState<QuickCommitAction>("commit");
   const [includeSubmodule, setIncludeSubmodule] = useState(false);
-  const [archiveRelatedTasks, setArchiveRelatedTasks] = useState(false);
   const [iterationContext, setIterationContext] = useState<QuickCommitIterationContext | null>(null);
   const [contextMode, setContextMode] = useState<QuickCommitContextMode>("iteration");
   // null = 用服务端给的默认勾选（上次提交以来的条目）；用户一动手就换成显式集合。
@@ -173,7 +171,6 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
     setForm(EMPTY_FORM);
     setAction("commit");
     setIncludeSubmodule(false);
-    setArchiveRelatedTasks(false);
     setIterationContext(null);
     setSelectedOverride(null);
     setIncludeDiff(false);
@@ -329,7 +326,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
     try {
       const response = await repository.commit(
         operationSessionId,
-        buildQuickCommitInput(form, action, includeSubmodule, contextSelection(), includeDiff, archiveRelatedTasks),
+        buildQuickCommitInput(form, action, includeSubmodule, contextSelection(), includeDiff),
       );
       if (!response.ok) throw new Error("快捷提交失败。");
       const nextOutcome = buildQuickCommitOutcome(
@@ -341,31 +338,18 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
       );
       const summary = commitSummary(nextOutcome);
       const hash = nextOutcome.commitHash ? nextOutcome.commitHash.slice(0, 7) : "";
-      if (response.archivedTaskIds?.length || response.archivedSessionIds?.length) {
-        notifyTasksChanged();
-        quickCommitStore.getRuntime()?.onArchived?.();
-      }
-      const archivedParts = [
-        response.archivedTaskIds?.length ? `${response.archivedTaskIds.length} 个关联任务` : "",
-        response.archivedSessionIds?.length ? `${response.archivedSessionIds.length} 个无任务会话` : "",
-      ].filter(Boolean);
-      const archiveNote = archiveRelatedTasks
-        ? `；${archivedParts.length ? `已归档 ${archivedParts.join("、")}` : "没有可归档的任务或会话"}`
-        : "";
       if (!response.pushError) {
         void reloadStatus(operationSessionId);
         void reloadContext(operationSessionId);
         if (ownsCurrentSurface()) {
           setSubmitResult(hash ? `已提交 ${hash}` : "已提交");
-          // 原来只有 toast 承载的细节（submodule 数、tag、是否推送、归档结果）改在页脚原位显示。
-          setResultNote(`${summary}${selectedMeta.push ? "，已推送" : ""}${archiveNote}。`);
+          // 原来只有 toast 承载的细节（submodule 数、tag、是否推送）改在页脚原位显示。
+          setResultNote(`${summary}${selectedMeta.push ? "，已推送" : ""}。`);
           setSubmitPhase("success");
           setSubmitting(false);
-          // 归档失败是这次操作唯一的坏消息，弹层要关掉它，只能靠原位 alert 读完。
-          if (response.archiveError) setError(`提交已完成，但归档任务与会话未全部完成：${response.archiveError}`);
         }
         await new Promise((resolve) => {
-          window.setTimeout(resolve, response.archiveError ? MOTION_DWELL_FAILED_MS : MOTION_DWELL_SENT_MS);
+          window.setTimeout(resolve, MOTION_DWELL_SENT_MS);
         });
         if (ownsCurrentSurface()) quickCommitController.close();
         return;
@@ -375,8 +359,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
         setPushError(response.pushError);
         setSubmitResult("已提交，推送失败");
         setSubmitPhase("error");
-        setResultNote(`${summary}${archiveNote}。`);
-        if (response.archiveError) setError(`归档任务与会话未全部完成：${response.archiveError}`);
+        setResultNote(`${summary}。`);
       }
       await Promise.all([
         reloadStatus(operationSessionId),
@@ -503,10 +486,7 @@ export function QuickCommitHost({ repository = httpQuickCommitRepository }: Quic
                   <Flex vertical><Typography.Text strong>包含 Submodule</Typography.Text><Typography.Text type="secondary">递归执行 commit、tag 和 push。</Typography.Text></Flex>
                   <WandSwitch id="wand-quick-submodule" checked={includeSubmodule} disabled={busy} ariaLabel="包含 Submodule" onCheckedChange={setIncludeSubmodule}/>
                 </Flex> : null}
-                <Flex justify="space-between" align="center" gap={12}>
-                  <Flex vertical><Typography.Text strong>归档任务与会话</Typography.Text><Typography.Text type="secondary">提交成功后，归档当前任务及选中的已完成任务，并整理本项目全部无任务会话。保留历史与正在运行的会话。</Typography.Text></Flex>
-                  <WandSwitch id="wand-quick-archive-tasks" checked={archiveRelatedTasks} disabled={busy || !hasQuickCommitChanges(status)} ariaLabel="提交后归档任务与会话" onCheckedChange={setArchiveRelatedTasks}/>
-                </Flex>
+
               </Flex>
             </Card>
             {error ? <Alert type="error" showIcon role="alert" title={error}/> : null}

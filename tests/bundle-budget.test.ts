@@ -14,7 +14,7 @@ function chunkText(rows: number): string {
     createHash("sha256").update(String(index)).digest("hex")).join("\n");
 }
 
-function budgetFixture(): { run: (lazy: string, plush?: string) => ReturnType<typeof spawnSync>; cleanup: () => void } {
+function budgetFixture(): { run: (lazy: string, plush?: string, modules?: { eager: string; lazy: string[] }) => ReturnType<typeof spawnSync>; cleanup: () => void } {
   const root = mkdtempSync(join(tmpdir(), "wand-budget-test-"));
   const scripts = join(root, "scripts");
   const assets = join(root, "dist", "web-ui");
@@ -33,8 +33,12 @@ function budgetFixture(): { run: (lazy: string, plush?: string) => ReturnType<ty
   writeFileSync(join(assets, "embedded-assets.js"),
     'export const EMBEDDED_WEB_ASSETS = { vendor: {} };');
   return {
-    run(lazy, plush = "console.log(3)") {
+    run(lazy, plush = "console.log(3)", modules = { eager: "", lazy: [] }) {
+      const files = Object.fromEntries([["modules/runtime.js", modules.eager], ...modules.lazy.map((content, index) => [`modules/feature${index}.js`, content])]);
       writeFileSync(join(assets, "scripts.js"),
+        `const files = ${JSON.stringify(files)};\n` +
+        'export const getBrowserModuleManifest = () => ({ entry: "modules/runtime.js", files: Object.keys(files), eager: ["modules/runtime.js"] });\n' +
+        'export const getBrowserModule = file => files[file];\n' +
         'export const getThemePreloadAsset = () => ({ content: "console.log(2)" });\n' +
         'export const getScriptAsset = () => ({ content: "console.log(1)" });\n' +
         `export const getAiTeamsChunk = () => ({ content: ${JSON.stringify(lazy)} });\n` +
@@ -71,7 +75,7 @@ test("the 3D runtime is metered separately and cannot hide bytes in the cold she
   const small = fixture.run("", "");
   const plush = chunkText(4_000);
   const bytes = gzipSync(plush).length;
-  assert.ok(bytes > 140_000 && bytes <= 156_672, `fixture gzip size: ${bytes}`);
+  assert.ok(bytes > 140_000 && bytes <= 153_600, `fixture gzip size: ${bytes}`);
   const result = fixture.run("", plush);
   assert.equal(small.status, 0, String(small.stderr));
   assert.equal(result.status, 0, String(result.stderr));
@@ -85,7 +89,7 @@ test("an oversized 3D runtime fails its explicit transfer budget", (t) => {
   const fixture = budgetFixture(); t.after(fixture.cleanup);
   const result = fixture.run("", chunkText(4_500));
   assert.equal(result.status, 1);
-  assert.match(String(result.stderr), /plush-avatar\.js \(lazy\): \d+ B > 153600 B/);
+  assert.match(String(result.stderr), /plush-avatar\.js \(lazy\): \d+ B > 156672 B/);
 });
 
 test("employee invitations fit the new lazy boundary without becoming shell bytes", (t) => {
@@ -165,4 +169,22 @@ test("无指派派工的名单面板只吃新的按需额度，不进主包", (t
   const shellBytes = firstLoad(small.stdout);
   assert.ok(shellBytes, "必须报出真实首载字节数");
   assert.equal(firstLoad(result.stdout), shellBytes, "按需包的字节不进首载");
+});
+
+test("eager modules remain in the first-load budget even with a tiny app.js", (t) => {
+  const fixture = budgetFixture(); t.after(fixture.cleanup);
+  const result = fixture.run("", "", { eager: chunkText(25_000), lazy: [] });
+  assert.equal(result.status, 1);
+  assert.match(String(result.stderr), /runtime\.js \(eager\): \d+ B > 730000 B/);
+});
+
+test("optional ESM modules have individual and aggregate limits", (t) => {
+  const fixture = budgetFixture(); t.after(fixture.cleanup);
+  const oversized = fixture.run("", "", { eager: "", lazy: [chunkText(3_500)] });
+  assert.equal(oversized.status, 1);
+  assert.match(String(oversized.stderr), /feature0\.js \(lazy\): \d+ B > 110000 B/);
+  const aggregate = fixture.run("", "", { eager: chunkText(20_000), lazy: Array(4).fill(chunkText(2_600)) });
+  assert.equal(aggregate.status, 1);
+  assert.match(String(aggregate.stderr), /all ESM modules: \d+ B > 1040000 B/);
+  assert.doesNotMatch(String(aggregate.stderr), /(?:runtime|feature\d+)\.js \((?:eager|lazy)\):/);
 });

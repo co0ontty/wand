@@ -66,7 +66,7 @@ async function withHarness(
   const config = { ...defaultConfig(), defaultCwd: root };
   const manager = new StructuredSessionManager(storage, config);
   // Task routes only ever read the registry, so the PTY manager can stay absent.
-  const registry = new SessionRegistry({ getOwned: () => null, listSlim: () => [] } as never, manager, storage);
+  const registry = new SessionRegistry({ getOwned: () => null, getOwnedSlim: () => null, listSlim: () => [] } as never, manager, storage);
   const harness = await start(storage, manager, registry, config, {
     ...(options.generateTitle
       ? { generateTitle: options.generateTitle }

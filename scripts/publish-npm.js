@@ -36,6 +36,9 @@ export async function publish(version, tag, overrides = {}) {
   if (!/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?(?:\+[A-Za-z0-9.-]+)?$/.test(version) || !["latest", "beta"].includes(tag)) {
     throw new Error("Expected a release version and latest/beta tag");
   }
+  if (tag === "latest" && !/^\d+\.\d+\.\d+$/.test(version)) {
+    throw new Error("The latest channel only accepts stable X.Y.Z releases");
+  }
   const deps = { read: readPublication, npm, sleep, now: Date.now, log: console.log, ...overrides };
   const read = async () => {
     try { return await deps.read(version, tag); }

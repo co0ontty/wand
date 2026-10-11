@@ -17,7 +17,7 @@ import type {
 import {
   WORKSPACE_KIND_OPTIONS,
   TEAM_NEEDS_PROJECT_HINT,
-} from "./workspace-agent-picker.js";
+} from "./workspace-agent-model.js";
 import { useSiliconEmployees } from "../agents/employee-repository.js";
 import { useWandModelCatalog } from "../use-model-catalog.js";
 import { MODEL_CATALOG_DEFAULT_VALUE, wandModelOptions } from "../model-catalog.js";
@@ -193,7 +193,7 @@ export function UnifiedExecutionSubjectPicker({
             ))}</div>
             {!employeesLoading && employees.every((emp) => Boolean(emp.archivedAt)) ? (
               <div><span>还没有硅基员工</span><WandButton kind="ghost"
-                onClick={() => taskBoardController.open("", "", "teams")}>创建员工</WandButton></div>
+                onClick={() => taskBoardController.open("", "", "teams")}>招聘员工</WandButton></div>
             ) : null}
           </Flex> : null}
           {!isPty && matchingTeams.length > 0 ? <Flex vertical gap={8} role="group" aria-label="AI 团队">

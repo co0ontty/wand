@@ -31,7 +31,7 @@ export function latestChatUsage(messages: readonly Pick<ConversationTurn, "role"
   return latest;
 }
 
-/** Display only reported counts. Round aggregation remains owned by the chat renderer. */
+/** Display only reported counts. */
 export function chatUsageMetrics(usage: ConversationTurn["usage"]): ChatUsageMetric[] {
   if (!usage) return [];
   const metrics: ChatUsageMetric[] = [];

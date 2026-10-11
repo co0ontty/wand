@@ -562,9 +562,14 @@ export function registerAdminUpdateRoutes(app: Express, deps: AdminUpdateRoutesD
     }
     state.updateInFlight = true;
     try {
-      const info = await deps.checkLatestPackageVersion(deps.getUpdateChannel(), true);
+      const channel = deps.getUpdateChannel();
+      const info = await deps.checkLatestPackageVersion(channel, true);
+      if (channel !== deps.getUpdateChannel()) {
+        res.status(409).json({ error: "更新通道已切换，请重新检查更新。" });
+        return;
+      }
       if (!info.latest) {
-        res.status(502).json({ error: "无法连接到 npm registry。" });
+        res.status(502).json({ error: "npm 所选通道暂无有效版本，或 registry 暂时不可用。" });
         return;
       }
       if (!canUseDetachedUpdateHelper()) {
@@ -642,7 +647,11 @@ export function registerAdminUpdateRoutes(app: Express, deps: AdminUpdateRoutesD
 
   app.post("/api/update-channel", requireAdmin, (req, res) => {
     const body = (req.body ?? {}) as { channel?: unknown };
-    const channel = body.channel === "beta" ? "beta" : "stable";
+    if (body.channel !== "beta" && body.channel !== "stable") {
+      res.status(400).json({ error: "更新通道必须为 stable 或 beta。" });
+      return;
+    }
+    const channel = body.channel;
     storage.setConfigValue("updateChannel", channel);
     res.json({ channel });
   });

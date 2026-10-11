@@ -3,7 +3,7 @@ import { wandThemeStore } from "../react/theme-preference";
 import { state } from "./state";
 import { browserEnvironment } from "./ui-store-bridge";
 import "./utils";
-import "./chat-render";
+import "./chat-render-loader";
 import { adjustTerminalScale } from "./file-browser";
 import { parseJsonResponse } from "../react/http-adapter";
 import { getErrorMessage } from "../../error-utils.js";

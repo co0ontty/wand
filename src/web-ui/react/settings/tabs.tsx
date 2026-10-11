@@ -1,4 +1,5 @@
 import { ThemePicker } from "./theme-picker";
+import { ChatWidthSettings } from "../shell/chat-width-toggle";
 import { OpenRouterSettingsPanel } from "./openrouter-panel";
 import { DaemonUpdateNotice } from "../shell/daemon-update-notice";
 import { ensureQrCodeLibrary } from "../../vendor-loader.js";
@@ -14,7 +15,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import * as React from "react";
-import { Card, Collapse, Empty, Form, Slider, Table, Tag, Upload } from "antd";
+import { Card, Collapse, Empty, Flex, Form, Slider, Table, Tag, Upload } from "antd";
 import { WandBadge, WandButton, WandDialogSurface, WandIcon, WandSearchField } from "../ui";
 import { MOTION_DWELL_RESULT_SENTENCE_MS } from "../ui/motion-tokens";
 import { settingsStore } from "./controller";
@@ -273,20 +274,20 @@ export function AboutSettingsTab({ snapshot, repository, refresh, toast, showRes
         <h2>关于 Wand</h2><p>查看版本信息、更新状态和客户端连接方式。</p>
       </header>
       <DaemonUpdateNotice />
-      <SettingsSection title="版本信息">
-        <Table size="small" showHeader={false} pagination={false} rowKey="label"
-          columns={[{ dataIndex: "label" }, { dataIndex: "value" }]}
-          dataSource={[
-            { label: "包名", value: about.packageName },
-            { label: "当前版本", value: about.version },
-            { label: "Node.js 要求", value: about.nodeVersion },
-            ...(about.build.shortCommit ? [{ label: "构建", value: `${about.build.shortCommit}${about.build.channel ? ` · ${about.build.channel}` : ""}` }] : []),
-            ...(about.repoUrl ? [{ label: "仓库地址", value: <a href={about.repoUrl} target="_blank" rel="noopener noreferrer">{about.repoUrl}</a> }] : []),
-          ]} />
-      </SettingsSection>
+      <Flex className="wand-settings-library-about-overview" wrap gap="large" align="stretch">
+        <SettingsSection title="版本信息">
+          <Table className="wand-settings-library-version-table" size="small" tableLayout="fixed" showHeader={false} pagination={false} rowKey="label"
+            columns={[{ dataIndex: "label", width: 120 }, { dataIndex: "value" }]}
+            dataSource={[
+              { label: "包名", value: about.packageName },
+              { label: "当前版本", value: about.version },
+              { label: "Node.js 要求", value: about.nodeVersion },
+              ...(about.build.shortCommit ? [{ label: "构建", value: `${about.build.shortCommit}${about.build.channel ? ` · ${about.build.channel}` : ""}` }] : []),
+              ...(about.repoUrl ? [{ label: "仓库地址", value: <a href={about.repoUrl} target="_blank" rel="noopener noreferrer">{about.repoUrl}</a> }] : []),
+            ]} />
+        </SettingsSection>
 
-      {snapshot.access === "admin" ? (
-        <>
+        {snapshot.access === "admin" ? (
           <SettingsSection title="保持在最新版本" description={`当前 ${about.version} · ${about.updateChannel === "beta" ? "Beta 通道" : "Stable 通道"}`}>
             <div className="wand-settings-library-update-deck">
               <span className="wand-settings-library-update-deck-icon" aria-hidden="true"><WandIcon name="refresh" size={18} strokeWidth={1.8}/></span>
@@ -334,48 +335,52 @@ export function AboutSettingsTab({ snapshot, repository, refresh, toast, showRes
               }, "服务正在重启…")}>重启服务</SettingsActionButton> : null}
             </div>
           </SettingsSection>
+        ) : null}
+      </Flex>
 
-          <SettingsSection title="开发 CLI" description="服务端检测到的各开发 CLI 版本；显示「当前 → 最新」表示有新版本。">
-            <div className="wand-settings-library-cli-list">
-              {cliItems.map((item) => (
-                <div key={item.id} title={cliStatusDetail(item)}><strong>{item.label}</strong><span>{cliStatusText(item)}</span></div>
-              ))}
-              {!cliItems.length ? <div className="wand-settings-library-empty">尚未检查 CLI 版本</div> : null}
-            </div>
-            <SettingsToggle
-              label="自动更新开发 CLI"
-              description="服务端定期检查并调用各 CLI 的官方更新器。"
-              checked={snapshot.autoUpdate.cli}
-              disabled={!!pending}
-              onCheckedChange={(enabled) => void action("auto-cli", async () => {
-                await repository.execute({ type: "autoUpdate.set", target: "cli", enabled });
-                await refresh();
-              }, "CLI 自动更新偏好已保存。")}
-            />
-            <div className="wand-settings-library-button-row">
-              <SettingsActionButton pending={pending === "cli-check"} kind="secondary" onClick={() => action("cli-check", async () => { await repository.execute({ type: "cliUpdates.load", force: true }); await refresh(); }, "CLI 版本检查完成。")}>检查 CLI 更新</SettingsActionButton>
-              {cliUpdates.length ? <SettingsActionButton pending={pending === "cli-install"} kind="primary" onClick={() => action("cli-install", async () => {
-                const result = await repository.execute({ type: "cliUpdates.install", ids: cliUpdates.map((item) => item.id) });
-                const summary = cliUpdateSummary(result);
-                setStatus(summary.text);
-                setTone(summary.ok ? "success" : "error");
-                await refresh();
-                if (!summary.ok) throw new Error(summary.text);
-              }, undefined)}>快速更新 ({cliUpdates.length})</SettingsActionButton> : null}
-            </div>
-          </SettingsSection>
-        </>
+      {snapshot.access === "admin" ? (
+        <SettingsSection title="开发 CLI" description="服务端检测到的各开发 CLI 版本；显示「当前 → 最新」表示有新版本。">
+          <div className="wand-settings-library-cli-list">
+            {cliItems.map((item) => (
+              <Flex key={item.id} className="wand-settings-library-cli-item" gap="small" justify="space-between" align="baseline" title={cliStatusDetail(item)}><strong>{item.label}</strong><span>{cliStatusText(item)}</span></Flex>
+            ))}
+            {!cliItems.length ? <div className="wand-settings-library-empty">尚未检查 CLI 版本</div> : null}
+          </div>
+          <SettingsToggle
+            label="自动更新开发 CLI"
+            description="服务端定期检查并调用各 CLI 的官方更新器。"
+            checked={snapshot.autoUpdate.cli}
+            disabled={!!pending}
+            onCheckedChange={(enabled) => void action("auto-cli", async () => {
+              await repository.execute({ type: "autoUpdate.set", target: "cli", enabled });
+              await refresh();
+            }, "CLI 自动更新偏好已保存。")}
+          />
+          <div className="wand-settings-library-button-row">
+            <SettingsActionButton pending={pending === "cli-check"} kind="secondary" onClick={() => action("cli-check", async () => { await repository.execute({ type: "cliUpdates.load", force: true }); await refresh(); }, "CLI 版本检查完成。")}>检查 CLI 更新</SettingsActionButton>
+            {cliUpdates.length ? <SettingsActionButton pending={pending === "cli-install"} kind="primary" onClick={() => action("cli-install", async () => {
+              const result = await repository.execute({ type: "cliUpdates.install", ids: cliUpdates.map((item) => item.id) });
+              const summary = cliUpdateSummary(result);
+              setStatus(summary.text);
+              setTone(summary.ok ? "success" : "error");
+              await refresh();
+              if (!summary.ok) throw new Error(summary.text);
+            }, undefined)}>快速更新 ({cliUpdates.length})</SettingsActionButton> : null}
+          </div>
+        </SettingsSection>
       ) : null}
 
-      {snapshot.platform.kind === "browser" || snapshot.platform.kind === "android" ? (
-        <DistributionSection kind="apk" title="Android App" distribution={about.androidApk} currentVersion={snapshot.platform.kind === "android" ? snapshot.platform.appVersion : null} repository={repository} toast={toast} />
-      ) : null}
-      {snapshot.platform.kind === "browser" || snapshot.platform.kind === "macos" ? (
-        <DistributionSection kind="dmg" title="macOS App" distribution={about.macosDmg} currentVersion={snapshot.platform.kind === "macos" ? snapshot.platform.appVersion : null} repository={repository} toast={toast} />
-      ) : null}
-      {snapshot.platform.kind === "browser" || snapshot.platform.kind === "ios" ? (
-        <DistributionSection kind="ipa" title="iOS App" distribution={about.iosIpa} currentVersion={snapshot.platform.kind === "ios" ? snapshot.platform.appVersion : null} repository={repository} toast={toast} />
-      ) : null}
+      <Flex className="wand-settings-library-about-downloads" wrap gap="large" align="stretch">
+        {snapshot.platform.kind === "browser" || snapshot.platform.kind === "android" ? (
+          <DistributionSection kind="apk" title="Android App" distribution={about.androidApk} currentVersion={snapshot.platform.kind === "android" ? snapshot.platform.appVersion : null} repository={repository} toast={toast} />
+        ) : null}
+        {snapshot.platform.kind === "browser" || snapshot.platform.kind === "macos" ? (
+          <DistributionSection kind="dmg" title="macOS App" distribution={about.macosDmg} currentVersion={snapshot.platform.kind === "macos" ? snapshot.platform.appVersion : null} repository={repository} toast={toast} />
+        ) : null}
+        {snapshot.platform.kind === "browser" || snapshot.platform.kind === "ios" ? (
+          <DistributionSection kind="ipa" title="iOS App" distribution={about.iosIpa} currentVersion={snapshot.platform.kind === "ios" ? snapshot.platform.appVersion : null} repository={repository} toast={toast} />
+        ) : null}
+      </Flex>
 
       {snapshot.access === "admin" ? (
         <ConnectCodePanel code={snapshot.connectCode?.code || ""} repository={repository} toast={toast} />
@@ -1487,7 +1492,20 @@ const CARD_OPTIONS: Array<{ key: keyof SettingsCardDefaults; title: string; desc
   { key: "thinking", title: "思考过程", description: "模型的 Thinking 内容" },
 ];
 
-export function DisplaySettingsTab({ snapshot, repository, refresh }: SettingsTabProps) {
+function DisplayAppearance() {
+  return <><ThemePicker /><ChatWidthSettings /></>;
+}
+
+/** Device-local appearance never requires server configuration privileges. */
+export function DisplaySettingsTab(props: SettingsTabProps) {
+  if (props.snapshot.access === "admin") return <AdminDisplaySettingsTab {...props} />;
+  return <section className="wand-settings-library-panel" aria-label="显示">
+    <header className="wand-settings-library-panel-heading"><h2>显示</h2><p>调整当前浏览器的配色与会话内容宽度；不修改服务配置。</p></header>
+    <DisplayAppearance />
+  </section>;
+}
+
+function AdminDisplaySettingsTab({ snapshot, repository, refresh }: SettingsTabProps) {
   const [value, setValue, acceptSaved] = useSettingsDraft<SettingsCardDefaults>({ ...snapshot.config!.cardDefaults });
   const [pending, setPending] = useState(false);
   const [status, setStatus] = useState("");
@@ -1514,10 +1532,10 @@ export function DisplaySettingsTab({ snapshot, repository, refresh }: SettingsTa
   return (
     <section className="wand-settings-library-panel" aria-label="显示">
       <header className="wand-settings-library-panel-heading">
-        <h2>显示</h2><p>调整本机配色与结果卡片的默认展开状态。</p>
+        <h2>显示</h2><p>调整本机配色、会话内容宽度与结果卡片的默认展开状态。</p>
       </header>
-      <ThemePicker />
-      <SettingsSection title="默认展开的卡片">
+      <DisplayAppearance />
+      <SettingsSection title="默认展开的卡片" description="服务共享配置，修改后点击下方保存；配色与内容宽度只保存在当前浏览器，选择后立即生效。">
         {CARD_OPTIONS.map((option) => (
           <SettingsToggle
             key={option.key}
@@ -1528,7 +1546,7 @@ export function DisplaySettingsTab({ snapshot, repository, refresh }: SettingsTa
           />
         ))}
       </SettingsSection>
-      <SettingsSaveBar label="保存显示设置" pending={pending} onSave={() => void save()} status={status} tone={tone} />
+      <SettingsSaveBar label="保存显示设置" pending={pending} disabled={JSON.stringify(value) === JSON.stringify(snapshot.config!.cardDefaults)} onSave={() => void save()} status={status} tone={tone} />
     </section>
   );
 }

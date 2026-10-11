@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -18,6 +18,21 @@ async function stop(child: ChildProcess): Promise<void> {
   const force = setTimeout(() => child.kill("SIGKILL"), 1_000);
   await exited;
   clearTimeout(force);
+}
+
+async function waitForPrivateSocket(socketPath: string): Promise<void> {
+  // bind publishes the path before the daemon's chmod. Existence alone is not
+  // readiness; preserve the client's strict type, owner and 0600 checks.
+  for (let attempt = 0; attempt < 150; attempt++) {
+    try {
+      const stat = lstatSync(socketPath);
+      if (stat.isSocket() && stat.uid === process.getuid?.() && (stat.mode & 0o777) === 0o600) return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    await delay(20);
+  }
+  assert.fail("daemon did not publish a private socket owned by this user");
 }
 
 for (const structured of [false, true]) {
@@ -45,6 +60,7 @@ for (const structured of [false, true]) {
     const pid = readFileSync(paths.pidPath, "utf8");
     const makeClient = () => structured ? new RenderStructuredClient(config)
       : new RenderDaemonClient(paths.socketPath, token, paths.tokenPath);
+    await waitForPrivateSocket(paths.socketPath);
     const client = makeClient();
     disposeClient = async () => {
       await client.request("forget", structured ? { runId: "socket-upgrade-run" }
@@ -65,7 +81,7 @@ for (const structured of [false, true]) {
       const competitor = spawn(binary, args, { stdio: "ignore" });
       const code = await new Promise<number | null>((resolve) => competitor.once("exit", resolve));
       assert.notEqual(code, 0);
-      for (let i = 0; i < 150 && !existsSync(paths.socketPath); i++) await delay(20);
+      await waitForPrivateSocket(paths.socketPath);
       const fresh = makeClient();
       try {
         await fresh.connect();

@@ -4,7 +4,7 @@ import { WandUiBoundary } from "../theme";
 import { PopupOwnerProvider, usePortalContainer } from "../ui/portal-context";
 import { WandIcon, WandButton } from "../ui/index.js";
 import { EmployeeAvatar } from "../agents/employee-avatar.js";
-import { EmployeeCard } from "../agents/employee-card.js";
+import { deferredComponent } from "../deferred-feature";
 import { siliconEmployeesRepository, employeeUpdateInput } from "../agents/employee-repository.js";
 import { siliconEmployeeTags } from "../../../ai-team-types.js";
 import { isWandPopupOwnedBy } from "../ui/popup-lifecycle.js";
@@ -14,6 +14,10 @@ import { issueAgentProviderModelLine, type IssueModelCatalog } from "../issues/t
 import { taskBoardRepository } from "../issues/task-board-repository.js";
 import { ISSUE_AGENT_PROVIDERS, normalizeIssueModelCatalog } from "../issues/task-board-agent.js";
 import { subscribeWandModelCatalog } from "../model-catalog.js";
+
+const EmployeeCard = deferredComponent(
+  () => import("../agents/employee-card.js").then(module => module.EmployeeCard), { title: "员工编辑器" },
+);
 
 export function ObjectProfilePanel({
   open,
@@ -42,7 +46,8 @@ export function ObjectProfilePanel({
   const [dirty, setDirty] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [discard, setDiscard] = React.useState<"close" | "view" | null>(null);
-  React.useEffect(() => { setSavedEmployee(null); setEditing(false); setDirty(false); setDiscard(null); }, [employee?.id, open]);
+  React.useEffect(() => { setSavedEmployee(null); }, [employee]);
+  React.useEffect(() => { setEditing(false); setDirty(false); setDiscard(null); }, [employee?.id, open]);
   employee = savedEmployee ?? employee;
   const panelRef = React.useRef<HTMLDivElement>(null);
   const returnFocus = React.useRef(false);

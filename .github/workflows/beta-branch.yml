@@ -1,10 +1,10 @@
 name: Beta NPM Publish
 
 # 每次 push 到 master，基于最新正式 tag 发布一个 npm beta 版本。
-# 版本形态：<tag-version>-beta.g<short-sha>，例如 1.43.2-beta.ga1b2c3d。
+# 版本形态：<next-patch>-beta.<run>.<attempt>.g<sha>，按序递增且高于上个正式版。
 # 正式版与 Beta 版都走同一条 npm 全局安装链路；区别仅是 dist-tag：
 #   stable → npm @latest（纯 tag）
-#   beta   → npm @beta（tag + commit 尾标）
+#   beta   → npm @beta（下一补丁版本的预发布）
 
 on:
   push:
@@ -46,16 +46,7 @@ jobs:
         id: version
         run: |
           set -euo pipefail
-          TAG="$(git tag --sort=-v:refname --list 'v*' | head -1)"
-          if [ -z "$TAG" ]; then
-            echo "No v* tag found" >&2
-            exit 1
-          fi
-          BASE_VERSION="${TAG#v}"
-          SHORT_SHA="$(git rev-parse --short=7 HEAD)"
-          VERSION="${BASE_VERSION}-beta.g${SHORT_SHA}"
-          echo "base_tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+          VERSION="$(node scripts/beta-version.js)"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Sync package versions

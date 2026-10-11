@@ -40,7 +40,9 @@ test("chat surfaces keep meaningful conditions, not permanent empty-state teachi
   assert.match(home, /if \(next === "sent"\) setFeedback\(""\)/, "only successful feedback expires; errors remain available");
   assert.doesNotMatch(home, /hidden=\{!target && !feedback/);
   assert.equal((home.match(/>取消派发<\/WandButton>/g) || []).length, 1);
-  assert.equal((home.match(/每次发送创建独立工作；补充旧工作请进入对应会话。/g) || []).length, 1, "explain the context boundary and the actual continuation path once");
+  assert.equal((home.match(/每次发送创建独立工作；补充已有工作请使用回复中的「继续此工作」。/g) || []).length, 1, "explain the context boundary on the new-work label without a permanent teaching row");
+  assert.match(home, /placeholder=\{inputPlaceholder\}/);
+  assert.match(home, /描述一项新工作…/);
   assert.match(home, /onOpenSession\(previousWork\.sessionId\)/, "continuation opens the actual prior work without a fresh dispatch");
   assert.match(home, /selected\.kind === "dm" \? "把要完成的事发给我/, "first-use guidance is limited to a genuinely empty private conversation");
   assert.match(home, /\|\| !id \|\| !selected \|\| !!selected\.unavailableReason/, "unloaded target cannot accept a silently ignored submit");

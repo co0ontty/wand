@@ -132,13 +132,12 @@ export async function runChatExperience({ evaluate: e, send, click, key, wait, m
     h.publish(experienceTurns,{status:'idle',structuredState:{inFlight:false}});h.doRenderChat(false);await h.frames();
   })()`);
   assert.equal(await e("document.querySelectorAll('.chat-process-summary-dot').length"),0,"completed receipts settle the overview");
-  // Android 消息形态：时间行 + 署名行在正文之上，用量独立成行；自己的发言是品牌色气泡。
+  // Android 消息形态：时间行 + 署名行在正文之上；自己的发言是品牌色气泡。
   const messageShape = await e(`(()=>{
     const asst=[...document.querySelectorAll('.chat-message.assistant')].find(n=>n.querySelector('.assistant-reply-head'));
     const head=asst?.querySelector('.assistant-reply-head');
     const user=[...document.querySelectorAll('.chat-message.user')].find(n=>n.querySelector('.ant-bubble-content'));
     const cs=user?getComputedStyle(user.querySelector('.ant-bubble-content')):null;
-    const usage=document.querySelector('.turn-usage-summary');
     return {
       headTime: !!head?.querySelector('.chat-message-time'),
       headTimeBeforeControl: (()=>{const t=head?.querySelector('.chat-message-time');const b=head?.querySelector('.assistant-reply-disclosure');return !t||!b?true:(t.compareDocumentPosition(b)&Node.DOCUMENT_POSITION_FOLLOWING)>0;})(),
@@ -147,8 +146,7 @@ export async function runChatExperience({ evaluate: e, send, click, key, wait, m
       authorAvatarKind: head?.querySelector('.assistant-author-avatar .wand-employee-avatar') ? 'employee' : head?.querySelector('.assistant-author-spark') ? 'brand' : 'none',
       replyAction: head?.querySelector('.assistant-reply-action')?.innerText||'',
       contentBorderless: (()=>{const c=asst?.querySelector('.ant-bubble-content'); if(!c) return null; const s=getComputedStyle(c); return s.backgroundColor==='rgba(0, 0, 0, 0)'&&s.padding==='0px';})(),
-      usageOutsideContent: !!usage && !usage.closest('.chat-message-content'),
-      usageMono: usage?getComputedStyle(usage).fontFamily.includes('mono'):null,
+      usageRows: document.querySelectorAll('.turn-usage-summary').length,
       userRadius: cs?.borderRadius||'', userBorder: cs?.borderTopWidth||'', userPadding: cs?.padding||'',
       userFont: cs?cs.fontSize+'/'+cs.lineHeight:'',
       timeOutsideBubble: !!user?.querySelector('.ant-bubble-header .chat-message-time'),
@@ -162,8 +160,7 @@ export async function runChatExperience({ evaluate: e, send, click, key, wait, m
   assert.equal(messageShape.authorAvatarKind,"employee","the session employee avatar replaces the generic brand mark");
   assert.equal(messageShape.replyAction.length>0,true,"the header owns the expand/collapse control");
   assert.equal(messageShape.contentBorderless,true,"the assistant body has no bubble chrome");
-  assert.equal(messageShape.usageOutsideContent,true,"usage is its own row after the reply");
-  assert.equal(messageShape.usageMono,true,"usage reads in the monospace scale");
+  assert.equal(messageShape.usageRows,0,"the transcript keeps no per-turn usage row");
   assert.equal(messageShape.timeOutsideBubble,true,"the message clock sits above the user bubble");
   // 右下 6px 是气泡「尾巴」，其余 20px；浏览器会把第 4 个值与第 2 个相同的写法收成三值。
   assert.match(messageShape.userRadius,/^20px 20px 6px( 20px)?$/);

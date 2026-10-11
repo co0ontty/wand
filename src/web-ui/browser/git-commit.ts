@@ -1,5 +1,5 @@
 import { state } from "./state";
-import "./chat-render";
+import "./chat-render-loader";
 import "./chat-scroll";
 import { showToast } from "./notifications";
 import "./render";

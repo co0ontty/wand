@@ -10,6 +10,8 @@ import * as React from "react";
 import { WandBadge, WandButton, WandDialogSurface, WandIcon } from "../ui";
 import { filePreviewController, filePreviewStore } from "./controller";
 import { CodeTokens, MarkdownPreview } from "./markdown";
+import { messageFileTarget } from "../../message-file-target";
+import { InlineHtmlPreview } from "../local-preview/inline";
 import { markdownPreviewStyles } from "./markdown-styles";
 import {
   fileNameFromPath,
@@ -43,8 +45,10 @@ function DownloadLink({ file, label = "下载" }: { file: Pick<FilePreviewFile, 
 
 function TextPreview({ snapshot, file }: { snapshot: FilePreviewSnapshot; file: FilePreviewFile }) {
   const content = file.content ?? "";
+  const target = messageFileTarget(file.path);
+  if (target?.previewUrl) return <InlineHtmlPreview previewUrl={target.previewUrl} downloadUrl={target.downloadUrl} label={file.name}/>;
   if (isMarkdownPreview(file)) {
-    return <MarkdownPreview content={content} fontSize={snapshot.fontSize} wrap={snapshot.wrap} />;
+    return <MarkdownPreview content={content} fontSize={snapshot.fontSize} wrap={snapshot.wrap} fileContext={{ cwd: file.path.slice(0, file.path.lastIndexOf("/")) }} />;
   }
   const lineCount = Math.max(1, content.split("\n").length);
   return (
@@ -99,6 +103,8 @@ function PreviewBody({ snapshot, editorRef }: {
     );
   }
   if (snapshot.status === "error") {
+    const html = snapshot.failure?.status === 413 && snapshot.request ? messageFileTarget(snapshot.request.path) : null;
+    if (html?.previewUrl) return <InlineHtmlPreview previewUrl={html.previewUrl} downloadUrl={html.downloadUrl} label={fileNameFromPath(html.path)}/>;
     return (
       <Flex vertical align="center" justify="center" gap="small" className="wand-file-preview-state wand-file-preview-error" role="alert" style={{ flex: 1, padding: 24 }}>
         <WandIcon name="warning" size={22}/>

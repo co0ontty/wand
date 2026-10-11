@@ -602,7 +602,7 @@ export function ShellSidebar() {
   const [attentionOpen, setAttentionOpen] = React.useState(false);
   // Secondary management surfaces borrow the list space without changing the user's pinned/collapsed preference.
   const contextRail = !snapshot.layout.sidebarDrawer && (settings.open || conversationState.directory
-    || (taskBoard.open && taskBoard.page === "teams") || snapshot.layout.filePanelOpen);
+    || taskBoard.open || snapshot.layout.filePanelOpen);
   const narrow = !snapshot.layout.sidebarDrawer && snapshot.layout.sidebarPinned && snapshot.layout.sidebarCollapsed;
   const sidebarClass = classNames(
     "sidebar sidebar-refined",
@@ -732,14 +732,14 @@ export function ShellSidebar() {
         <Flex vertical align="center" className="sidebar-navigation-rail">
           <div className="sidebar-rail-scroll">
             <WandBrandMark className="sidebar-brand-mark" style={{ width: 24, height: 24 }} />
-            <ConversationNavigation activePage={settings.open ? null : taskBoard.open ? taskBoard.page === "board" ? "board" : "teams"
+            <ConversationNavigation activePage={settings.open ? null : taskBoard.open ? taskBoard.page === "board" ? "board" : taskBoard.page === "schedules" ? "schedules" : "teams"
               : conversationState.directory ? "contacts" : conversationState.mode} teamAttention={teamAttention}
               onNavigate={(page) => {
                 setAttentionOpen(false);
                 settingsController.close();
                 peek.close();
-                if (page === "board" || page === "teams") {
-                  taskBoardController.open(snapshot.selected?.workspaceId ?? "", snapshot.selected?.id ?? "", page === "teams" ? "teams" : "board");
+                if (page === "board" || page === "teams" || page === "schedules") {
+                  taskBoardController.open(snapshot.selected?.workspaceId ?? "", snapshot.selected?.id ?? "", page);
                 } else {
                   taskBoardController.close();
                   if (page === "contacts") conversationUi.directory(true);

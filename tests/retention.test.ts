@@ -334,11 +334,13 @@ test("team runs idle for several days are removed with their sessions, running r
   storage.saveAiTeamRun(teamRun("old-waiting", "waiting_user", oldAt, "waiting-chat"));
   storage.saveAiTeamRun(teamRun("recent", "done", recentAt, "recent-chat"));
   storage.saveAiTeamRun(teamRun("live", "running", oldAt, "live-chat"));
+  storage.saveAiTeamRun(teamRun("silent-foreground", "done", oldAt, "silent-chat"));
   const { registry, current, deleted } = fakeRegistry([
     snapshot("old-chat", { endedAt: oldAt, startedAt: oldAt }),
     snapshot("waiting-chat", { endedAt: oldAt, startedAt: oldAt }),
     snapshot("recent-chat", { endedAt: recentAt, startedAt: recentAt }),
     snapshot("live-chat", { status: "running", endedAt: null, startedAt: oldAt, ptyBusy: true }),
+    snapshot("silent-chat", { status: "running", endedAt: null, startedAt: oldAt, ptyCommandRunning: true }),
   ]);
 
   const result = runRetentionSweep({
@@ -352,9 +354,22 @@ test("team runs idle for several days are removed with their sessions, running r
   assert.equal(storage.getAiTeamRun("old-waiting"), null);
   assert.equal(storage.getAiTeamRun("recent")?.status, "done");
   assert.equal(storage.getAiTeamRun("live")?.status, "running");
+  assert.equal(storage.getAiTeamRun("silent-foreground")?.status, "done", "silent foreground work protects a completed team run from retention");
   assert.equal(deleted.includes("old-chat"), true);
   assert.equal(deleted.includes("waiting-chat"), true);
   assert.equal(deleted.includes("live-chat"), false);
+  assert.equal(deleted.includes("silent-chat"), false);
   assert.equal(current.get("recent-chat")?.archived, true, "a one-day-old team chat is archived, not deleted");
   assert.equal(current.get("live-chat")?.archived, false);
+});
+
+
+test("auto-archive leaves an overdue doing task visible even without a loaded session", (t) => {
+  const { storage, dbPath } = database(t);
+  const task = storage.createWandTask({ title: "In progress", status: "doing" });
+  backdate(dbPath, "UPDATE wand_tasks SET updated_at = ? WHERE id = ?", iso(NOW - RETENTION_IDLE_MS - DAY), task.id);
+  const { registry } = fakeRegistry([]);
+  const result = runRetentionSweep({ storage, sessions: registry }, NOW);
+  assert.equal(result.archivedTasks, 0);
+  assert.equal(storage.getWandTask(task.id)?.status, "doing");
 });

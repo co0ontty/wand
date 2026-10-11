@@ -43,7 +43,6 @@ import type { EmployeeTextDeps } from "./employee-text.js";
 import { resolveSessionProvider, resolveSystemAiContext } from "./session-ai-context.js";
 import { resolveSessionCwd } from "./session-cwd.js";
 import { inferProviderFromCommand, isSessionProvider, providerCliCommand } from "./session-provider.js";
-import { RETENTION_IDLE_MS } from "./retention.js";
 import { PtyTerminalState, type PtyTerminalSnapshot, type PtyHistoryPage } from "./pty-terminal-state.js";
 import { isPtySubmitInput } from "./pty-turn-activity.js";
 import { samplePtyForegrounds } from "./pty-foreground.js";
@@ -677,9 +676,6 @@ function restoreTerminalState(state: TerminalSessionState): PtyTerminalState {
   return terminal;
 }
 
-const MAX_SESSIONS = 200;
-// 会话空闲 7 天后在这里自动归档，再由保留期扫描于 7 天后清理。任务窗口在设置里单独配置。
-const ARCHIVE_AFTER_MS = RETENTION_IDLE_MS;
 const CONFIRM_WINDOW_SIZE = 800;
 /**
  * Quiet window for the non-Claude PTY turn tracker: a submitted turn stays busy
@@ -765,8 +761,28 @@ export interface ProcessManagerOptions {
   resolveDecisionEvaluate?: () => ((value: unknown, caller: string, signal?: AbortSignal) => Promise<DecisionResult>) | undefined;
 }
 
+export interface ProcessStartOptions extends Pick<SessionSnapshot, "employeeId" | "employeeName" | "employeeAvatar"> {
+  resumedFromSessionId?: string;
+  autoRecovered?: boolean;
+  worktreeEnabled?: boolean;
+  provider?: SessionProvider;
+  model?: string;
+  reuseId?: string;
+  cols?: number;
+  rows?: number;
+  thinkingEffort?: SessionSnapshot["thinkingEffort"];
+  sessionSource?: SessionSource;
+  automationId?: string;
+  workspaceId?: string;
+  workspaceTaskId?: string;
+  interactiveShell?: boolean;
+  systemPrompt?: string;
+}
+
 export class ProcessManager extends EventEmitter {
   private readonly sessions = new Map<string, SessionRecord>();
+  /** Own the full start handshake, including model resolution and late host replies. */
+  private readonly startingSessions = new Map<string, { cancelled: boolean }>();
   private readonly logger: SessionLogger;
   private readonly providerHistory = new ProviderHistoryScanner();
   /** Quiet window for the non-Claude PTY turn tracker. */
@@ -777,8 +793,6 @@ export class ProcessManager extends EventEmitter {
   private readonly probePtyForegrounds: typeof samplePtyForegrounds;
   private readonly free: EmployeeTextDeps["free"];
   private readonly resolveDecisionEvaluate: NonNullable<ProcessManagerOptions["resolveDecisionEvaluate"]>;
-  /** 24h archive scan timer */
-  private archiveTimer: NodeJS.Timeout | null = null;
   /** 前台进程组采样定时器（见 samplePtyForegrounds） */
   private ptyForegroundTimer: NodeJS.Timeout | null = null;
   /** 采样是 async 的，避免慢 ps 重叠成多个进程 */
@@ -915,13 +929,6 @@ export class ProcessManager extends EventEmitter {
         this.orphanRecoveredCount += 1;
       }
     }
-    this.archiveExpiredSessions();
-    this.archiveTimer = setInterval(() => {
-      try { this.archiveExpiredSessions(); } catch (err) {
-        console.error(`[ProcessManager] archive scan failed: ${String(err)}`);
-      }
-    }, 60 * 1000);
-    this.archiveTimer.unref?.();
     this.ptyForegroundTimer = setInterval(() => { void this.samplePtyForegrounds(); }, this.ptyForegroundSampleMs);
     this.ptyForegroundTimer.unref?.();
   }
@@ -1348,10 +1355,6 @@ export class ProcessManager extends EventEmitter {
     // 静默心跳不跨服务关闭存活；每个会话的 timer 也在 cleanupRecord 里单独撤销。
     this.ptyHeartbeat.dispose();
 
-    if (this.archiveTimer) {
-      clearInterval(this.archiveTimer);
-      this.archiveTimer = null;
-    }
     if (this.ptyForegroundTimer) {
       clearInterval(this.ptyForegroundTimer);
       this.ptyForegroundTimer = null;
@@ -1391,55 +1394,30 @@ export class ProcessManager extends EventEmitter {
     this.emit("process", event);
   }
 
-  private cleanupOldSessions(): void {
-    // Only clean up when well over the limit
-    if (this.sessions.size < MAX_SESSIONS) return;
-
-    const now = Date.now();
-    const STALE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-    const removable: string[] = [];
-
-    for (const [id, record] of this.sessions) {
-      // Only remove archived, non-running sessions older than 7 days
-      if (record.status === "running") continue;
-      if (!record.archived) continue;
-      const ref = record.endedAt ?? record.startedAt;
-      const refMs = Date.parse(ref);
-      if (Number.isFinite(refMs) && now - refMs > STALE_MS) {
-        removable.push(id);
-      }
-    }
-
-    // Sort oldest first and remove enough to get back under the limit
-    const toRemove = removable
-      .sort((a, b) => {
-        const ra = this.sessions.get(a);
-        const rb = this.sessions.get(b);
-        return (ra?.endedAt || "").localeCompare(rb?.endedAt || "");
-      })
-      .slice(0, this.sessions.size - MAX_SESSIONS + 1);
-
-    for (const id of toRemove) {
-      const record = this.sessions.get(id);
-      if (record) {
-        this.logger.deleteSession(id);
-        if (record.provider === "claude") {
-          this.deleteClaudeCache(record);
-        }
-      }
-      this.sessions.delete(id);
-      this.terminalHost.forget(id);
-      this.lastPersistedMessageState.delete(id);
-      this.dirtySessions.delete(id);
-      this.storage.deleteSession(id);
-    }
-    if (toRemove.length > 0) {
-      this.providerHistory.invalidate();
+  async start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: ProcessStartOptions): Promise<SessionSnapshot> {
+    if (this.disposed) throw new Error("ProcessManager has been disposed.");
+    const id = opts?.reuseId || randomUUID();
+    // Host operations are keyed by session id, not by the manager record. A
+    // second handshake must not adopt/forget a cancelled first incarnation.
+    if (this.startingSessions.has(id)) throw new Error("终端启动仍在进行，请等待本次启动结束后再恢复。");
+    const start = { cancelled: false };
+    this.startingSessions.set(id, start);
+    try {
+      return await this.startSession(id, start, command, cwd, mode, initialInput, opts);
+    } finally {
+      this.startingSessions.delete(id);
     }
   }
 
-  async start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean; worktreeEnabled?: boolean; provider?: SessionProvider; model?: string; reuseId?: string; cols?: number; rows?: number; thinkingEffort?: SessionSnapshot["thinkingEffort"]; sessionSource?: SessionSource; automationId?: string; workspaceId?: string; workspaceTaskId?: string; interactiveShell?: boolean; systemPrompt?: string } & Pick<SessionSnapshot, "employeeId" | "employeeName" | "employeeAvatar">): Promise<SessionSnapshot> {
-    if (this.disposed) throw new Error("ProcessManager has been disposed.");
+  private async startSession(
+    id: string,
+    start: { cancelled: boolean },
+    command: string,
+    cwd: string | undefined,
+    mode: ExecutionMode,
+    initialInput?: string,
+    opts?: ProcessStartOptions,
+  ): Promise<SessionSnapshot> {
     if (isOpenRouterFreeSelector(opts?.model)) throw new Error("免费分组仅支持 Pi 结构化对话。");
     if (!opts?.interactiveShell) this.assertCommandAllowed(command);
 
@@ -1484,7 +1462,7 @@ export class ProcessManager extends EventEmitter {
     if (preferredModels.some(isOpenRouterFreeSelector)) throw new Error("免费模型分组仅支持 Pi 结构化对话。");
     const baseCwd = resolveSessionCwd(cwd, this.config.defaultCwd);
 
-    const id = opts?.reuseId || randomUUID();
+    if (this.disposed || start.cancelled) throw new Error("终端启动已取消。");
     // When a session is being resumed under the same id, capture its prior
     // structured messages so the new bridge can present them as the chat
     // history. We deliberately do NOT carry over rawOutput — `claude --resume`
@@ -1643,7 +1621,6 @@ export class ProcessManager extends EventEmitter {
     if (initialClaudeSessionId && (provider === "claude" || provider === "codex")) {
       this.providerHistory.invalidate(provider);
     }
-    this.cleanupOldSessions();
 
     let child: TerminalProcess;
     try {
@@ -1671,6 +1648,16 @@ export class ProcessManager extends EventEmitter {
         throw new Error("Terminal host did not return a running process");
       }
       child = attached.process;
+      if (this.disposed || start.cancelled || this.sessions.get(id) !== record) {
+        // Explicit stop/delete still owns cancellation. Ordinary server shutdown
+        // only detaches persistent hosts: the next server must be able to adopt
+        // this in-progress spawn from the durable provisional record.
+        if (start.cancelled || !this.terminalHost.persistent) {
+          try { child.kill(); } catch { /* best-effort cancellation */ }
+        }
+        if (!this.disposed) this.terminalHost.forget(id);
+        throw new Error("终端启动已取消。");
+      }
       record.output = attached.state.output;
       record.storedOutput = attached.state.output;
       record.ptyOutputSeq = attached.state.seq;
@@ -1681,6 +1668,11 @@ export class ProcessManager extends EventEmitter {
       record.terminalState = restoreTerminalState(attached.state);
       this.initializeClaudeBridge(record, attached.state.output);
     } catch (err) {
+      // stop/delete/dispose already committed the authoritative state. Neither
+      // a late success nor failure may remove or resurrect that state.
+      if (this.disposed || start.cancelled || this.sessions.get(id) !== record) {
+        throw new Error("终端启动已取消。");
+      }
       console.error("[ProcessManager] terminal spawn failed", { sessionId: id, error: String(err) });
       this.cleanupRecord(record, false);
       this.sessions.delete(id);
@@ -2005,6 +1997,12 @@ export class ProcessManager extends EventEmitter {
     return result;
   }
 
+  getOwnedSlim(id: string): SessionSnapshot | null {
+    this.terminalHost.flush?.();
+    const record = this.sessions.get(id);
+    return record ? this.snapshotSlim(record) : null;
+  }
+
   getPtyTranscript(id: string): string | null {
     return this.logger.readPtyOutputTail(id);
   }
@@ -2295,6 +2293,8 @@ export class ProcessManager extends EventEmitter {
 
   stop(id: string): SessionSnapshot {
     const record = this.mustGet(id);
+    const start = this.startingSessions.get(id);
+    if (start) start.cancelled = true;
     if (record.status !== "running") {
       return this.snapshot(record);
     }
@@ -2405,6 +2405,8 @@ export class ProcessManager extends EventEmitter {
 
   delete(id: string): void {
     const record = this.mustGet(id);
+    const start = this.startingSessions.get(id);
+    if (start) start.cancelled = true;
 
     // Always clear pending timers
     // 会话删除后迟到的回合回调要失效，静默心跳也不能再给不存在的会话发事件。
@@ -2895,22 +2897,6 @@ export class ProcessManager extends EventEmitter {
     });
   }
 
-  private archiveExpiredSessions(): void {
-    const now = Date.now();
-    for (const record of this.sessions.values()) {
-      if (record.archived || record.status === "running") {
-        continue;
-      }
-      const referenceTime = record.endedAt ?? record.startedAt;
-      const endedAtMs = Date.parse(referenceTime);
-      if (!Number.isFinite(endedAtMs) || now - endedAtMs < ARCHIVE_AFTER_MS) {
-        continue;
-      }
-      record.archived = true;
-      record.archivedAt = new Date(now).toISOString();
-      this.persist(record);
-    }
-  }
   private assertCommandAllowed(command: string): void {
     if (!isCommandAllowedByPrefixes(command, this.config.allowedCommandPrefixes)) {
       throw new Error("Command is not allowed by current configuration.");

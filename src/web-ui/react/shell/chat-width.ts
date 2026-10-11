@@ -1,5 +1,6 @@
 // 「聊天内容宽度」偏好（外部 store）。
 //
+// 对话与工作区会话共用，入口归设置 → 显示。
 // 默认 full = 铺满（历史行为，也是窄屏唯一合理值）；切成 column 时把
 // <html data-chat-width="column"> 打开，styles.css 才把正文收成
 // --chat-column-width 的居中阅读列。属性由本模块在加载时立刻写入，
@@ -15,7 +16,7 @@ export type ChatWidthMode = "full" | "column";
 export const CHAT_WIDTH_STORAGE_KEY = "wand-chat-width";
 /** styles.css 用同名属性选择器，窄屏下该属性不产生任何效果。 */
 export const CHAT_WIDTH_ATTRIBUTE = "data-chat-width";
-/** 与 styles.css 里媒体查询断点同值：比这更窄时 940px 列已经接近满宽，开关无意义。 */
+/** 与 styles.css 的断点同值：窄屏保留偏好，但正文自动铺满。 */
 export const CHAT_WIDTH_MIN_VIEWPORT = 1280;
 
 export function normalizeChatWidthMode(value: unknown): ChatWidthMode {
@@ -58,13 +59,24 @@ export const chatWidthStore = {
   },
 };
 
-export function setChatWidthMode(next: ChatWidthMode): void {
-  const value = normalizeChatWidthMode(next);
+function publishChatWidthMode(value: ChatWidthMode): void {
   if (value === chatWidthMode) return;
   chatWidthMode = value;
-  try {
-    window.localStorage.setItem(CHAT_WIDTH_STORAGE_KEY, value);
-  } catch (e) {}
   applyChatWidthMode(value);
   for (const listener of listeners) listener();
 }
+
+/** Storage rejection must not prevent the current page from applying the preference. */
+export function setChatWidthMode(next: ChatWidthMode): boolean {
+  const value = normalizeChatWidthMode(next);
+  let persisted = true;
+  try {
+    window.localStorage.setItem(CHAT_WIDTH_STORAGE_KEY, value);
+  } catch { persisted = false; }
+  publishChatWidthMode(value);
+  return persisted;
+}
+
+if (typeof window !== "undefined") window.addEventListener("storage", event => {
+  if (event.key === CHAT_WIDTH_STORAGE_KEY || event.key === null) publishChatWidthMode(readStoredChatWidthMode());
+});

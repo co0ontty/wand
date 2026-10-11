@@ -1,5 +1,5 @@
 import * as React from "react";
-import { parsePlushAvatar, parsePlushCatAvatar, resolveEmployeeAvatar } from "../../../plush-avatar.js";
+import { parsePlushAvatar, parsePlushCatAvatar, parsePlushDogAvatar, resolveEmployeeAvatar } from "../../../plush-avatar.js";
 import { PlushAvatar } from "../avatars/plush-avatar.js";
 import { Avatar, Badge } from "antd";
 import { WandUiBoundary } from "../theme";
@@ -62,7 +62,7 @@ export interface AvatarFaceParts {
 }
 
 export function avatarFaceParts(identity: AvatarIdentity, size: number): AvatarFaceParts {
-  const plush = parsePlushCatAvatar(identity.avatar ?? "") ?? parsePlushAvatar(identity.avatar ?? "");
+  const plush = parsePlushDogAvatar(identity.avatar ?? "") ?? parsePlushCatAvatar(identity.avatar ?? "") ?? parsePlushAvatar(identity.avatar ?? "");
   if (plush) return { style: { background: "transparent" }, icon: <PlushAvatar config={plush} size={size}/> };
   const face: AvatarFace = avatarFace(identity) ?? { kind: "generated", face: generatedAvatarFace(identity) };
   if (face.kind === "upload") return { src: face.src };

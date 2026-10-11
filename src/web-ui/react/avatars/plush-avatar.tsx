@@ -1,14 +1,15 @@
+import { browserAssetRuntime } from "../../asset-runtime.js";
 import * as React from "react";
 import { chuerWhiskerPath } from "../../../plush-cat-whiskers.js";
 import { plushCatAppearance, catHeadWidthAt, CAT_MARKINGS } from "../../../plush-cat-appearance.js";
-import { PLUSH_COLORS, isPlushCatAvatar, type PlushAvatarConfig, type PlushRenderConfig } from "../../../plush-avatar.js";
+import { PLUSH_COLORS, isPlushCatAvatar, isPlushDogAvatar, type PlushAvatarConfig, type PlushRenderConfig } from "../../../plush-avatar.js";
 import { installStyleSheet } from "../styles.js";
 import { useReducedMotion } from "../ui/motion-tokens.js";
 import type { PlushAvatarRuntime, PlushGlobals, PlushRenderHandle, PlushFallbackReason, PlushLoaderDiagnostics, PlushLoaderFailure } from "./runtime-contract.js";
 import { AvatarFilePropsFallback } from "./file-props-fallback.js";
 import { AvatarThinking } from "./thinking.js";
 
-const CHUNK_SRC = "${plushAvatarChunkSrc}";
+const CHUNK_SRC = browserAssetRuntime.plushAvatarChunkSrc;
 const MAX_LOAD_ATTEMPTS = 3;
 const MAX_ONLINE_RECOVERIES = 1;
 const RETRY_DELAYS_MS = [750, 2_000];
@@ -111,6 +112,18 @@ const SHAPE_PATHS: Record<PlushAvatarConfig["shape"], string> = {
 /** Honest static fallback: the same configured silhouette, not an imitation animation. */
 function PlushFallback({ config }: { config: PlushRenderConfig }): React.ReactElement {
   const headClip = React.useId();
+  if (isPlushDogAvatar(config)) {
+    return <svg className="wand-plush-avatar-fallback" viewBox="0 0 100 100" aria-hidden="true">
+      <path d="M17 42L21 9Q23 4 28 10L43 28H57L72 10Q77 4 79 9L83 42V65Q83 84 50 85Q17 84 17 65Z" fill="#cb803f"/>
+      <path d="M24 17L27 35L36 30ZM76 17L73 35L64 30Z" fill="#eebf90"/>
+      <path d="M18 58Q30 58 37 47Q50 43 63 47Q70 58 82 58V65Q82 81 50 82Q18 81 18 65" fill="#fff0da"/>
+      <ellipse cx="35" cy="45" rx="4" ry="5" fill="#29201b"/><ellipse cx="65" cy="45" rx="4" ry="5" fill="#29201b"/>
+      <path d="M44 58Q50 55 56 58Q57 63 50 65Q43 63 44 58Z" fill="#29201b"/>
+      <path d="M50 65v4m-10 0q10 9 20 0" fill="none" stroke="#66402b" strokeWidth="2" strokeLinecap="round"/>
+      <path d="M24 77Q50 87 76 77L78 86Q50 97 22 86Z" fill="#c43f3b"/>
+      <path d="M62 83L77 86L73 98L60 93Z" fill="#ae302d"/>
+    </svg>;
+  }
   if (isPlushCatAvatar(config)) {
     const silver = config.coat === "silver", profile = plushCatAppearance(config);
     const { coat, dark, pale, iris, innerEar, nose } = profile;
@@ -243,6 +256,6 @@ export function PlushAvatar({ config, size = 32, className = "", speaking = fals
       : fallbackReason === "runtime-load" ? "静态头像 · 3D 组件未能加载" : "静态头像 · 3D 暂不可用" : undefined}
     aria-hidden="true" style={{ width: size, height: size }}>
     <PlushFallback config={config}/><canvas ref={canvas} width={size} height={size}/>
-    {fileActivity !== "idle" ? <AvatarFilePropsFallback activity={fileActivity} pawColor={isPlushCatAvatar(config) ? plushCatAppearance(config).coat : PLUSH_COLORS.find(option => option.id === config.color)?.color ?? "#ecb6a3"}/> : thinking ? <AvatarThinking/> : null}
+    {fileActivity !== "idle" ? <AvatarFilePropsFallback activity={fileActivity} pawColor={isPlushCatAvatar(config) ? plushCatAppearance(config).coat : isPlushDogAvatar(config) ? "#cb803f" : PLUSH_COLORS.find(option => option.id === config.color)?.color ?? "#ecb6a3"}/> : thinking ? <AvatarThinking/> : null}
   </span>;
 }

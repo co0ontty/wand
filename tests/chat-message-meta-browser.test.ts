@@ -22,7 +22,7 @@ function textContrast(text: string, background: string): number {
 }
 
 // Real production renderer and Ant components. Synthetic messages only; no provider requests.
-test("canonical messages preserve body, compact metadata and optional usage across live patches", {
+test("canonical messages preserve body and compact metadata across live patches", {
   skip: process.env.WAND_CHAT_BROWSER !== "1", timeout: 180_000,
 }, async () => {
   const root = resolve(import.meta.dirname, "..");
@@ -37,10 +37,16 @@ test("canonical messages preserve body, compact metadata and optional usage acro
     window.projectLegacy = presentChat;
   ` }, bundle: true, platform: "browser", format: "iife", outfile: join(temp, "app.js"),
     define: { "process.env.NODE_ENV": '"production"' }, logLevel: "warning" });
+  const avatarRuntime = join(temp, "plush-avatar.js");
+  await build({ entryPoints: [join(root, "src/web-ui/react/avatars/renderer.ts")], bundle: true,
+    platform: "browser", format: "iife", minify: true, outfile: avatarRuntime });
+  const appBundle = join(temp, "app.js");
+  writeFileSync(appBundle, readFileSync(appBundle, "utf8").replaceAll("${plushAvatarChunkSrc}", "/assets/plush-avatar.js"));
   const server = createServer((req, res) => {
     const url = new URL(req.url || "/", "http://fixture.test");
     const files: Record<string, [string, string]> = {
       "/app.js": [join(temp, "app.js"), "text/javascript"],
+      "/assets/plush-avatar.js": [avatarRuntime, "text/javascript"],
       "/styles.css": [join(root, "src/web-ui/content/styles.css"), "text/css"],
       "/tailwind.css": [join(root, "src/web-ui/content/tailwind.css"), "text/css"],
     };
@@ -118,37 +124,56 @@ test("canonical messages preserve body, compact metadata and optional usage acro
       await wait("!!window.focusRefreshHarness");
       await evaluate(`(async()=>{ window.h=window.focusRefreshHarness; window.metaTurns=${JSON.stringify(fixtures)};
         window.openedAuthor=null;window.__openAuthorSession=id=>{window.openedAuthor=id;};await h.fresh(metaTurns); })()`);
-      await evaluate("document.querySelector('.chat-message[data-msg-index=\"1\"] .turn-usage-disclosure .ant-collapse-header').click()");
-      await wait("!!document.querySelector('.chat-message[data-msg-index=\"1\"] .turn-usage-number')");
-      await evaluate("document.querySelector('.chat-message[data-msg-index=\"3\"] .turn-usage-disclosure .ant-collapse-header').click()");
-      await wait("!!document.querySelector('.chat-message[data-msg-index=\"3\"] .turn-usage-number')");
+      await evaluate("h.publish(metaTurns,{employeeId:'e_meta',employeeName:'布局伙伴',employeeAvatar:'',provider:'codex'});h.doRenderChat(false)");
+      await wait("!!document.querySelector('.chat-message[data-msg-index=\"1\"] .chat-message-time time')");
+      await wait("document.querySelector('.chat-message[data-msg-index=\"3\"] .chat-message-content')?.innerText.includes('短回复')");
       const shape = await evaluate(`(()=>{
         const row=document.querySelector('.chat-message[data-msg-index="1"]');
         const surface=row.querySelector('.ant-bubble-content'); const body=row.querySelector('.chat-message-content');
-        const stats=row.querySelector('.turn-usage-disclosure'); const texts=[...stats.querySelectorAll('.turn-usage-number')];
         const time=row.querySelector('.chat-message-time time'); const r=surface.getBoundingClientRect(),b=body.getBoundingClientRect();
-        return { variant:surface.className, footerInside:row.querySelector('.ant-bubble-body').contains(stats), bodyInside:surface.contains(body),
+        return { variant:surface.className, bodyInside:surface.contains(body),
           bodyFits:b.left>=r.left&&b.right<=r.right+1&&b.top>=r.top&&b.bottom<=r.bottom+1,
-          fontSizes:texts.map(n=>getComputedStyle(n).fontSize), colors:texts.map(n=>getComputedStyle(n).color),
-          usage:row.querySelector('.turn-usage-summary').textContent, time:time.textContent,
+          fontSize:getComputedStyle(time).fontSize, color:getComputedStyle(time).color,
+          usage:row.querySelectorAll('.turn-usage-summary').length, time:time.textContent,
           duration:row.querySelector('.chat-message-time').textContent, clockIso:time.dateTime,
-          usageLines:row.querySelectorAll('.turn-usage-summary').length,
-          oversizedIcons:row.querySelectorAll('.turn-usage-icon').length,
+          badgeLabel:row.querySelector('.wand-employee-avatar-provider')?.getAttribute('aria-label'),
+          badgeRadius:getComputedStyle(row.querySelector('.wand-employee-avatar-provider .ant-avatar')).borderRadius,
+          badgeColor:getComputedStyle(row.querySelector('.wand-employee-avatar-provider .ant-avatar')).color,
+          badgeBackground:getComputedStyle(row.querySelector('.wand-employee-avatar-provider .ant-avatar')).backgroundColor,
+          badgeSize:row.querySelector('.wand-employee-avatar-provider').getBoundingClientRect().width,
+          badgeLogo:row.querySelector('[data-provider-logo]')?.getAttribute('data-provider-logo'),
           avatarWidth:row.querySelector('.assistant-author-avatar')?.getBoundingClientRect().width,
           overflow:document.documentElement.scrollWidth>innerWidth+1,
-          secondary:getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim(),
-          background:(()=>{let n=stats;while(n){const c=getComputedStyle(n).backgroundColor;if(!c.endsWith(', 0)')&&c!=='transparent')return c;n=n.parentElement;}return 'rgb(255, 255, 255)';})() };
+          background:(()=>{let n=time;while(n){const c=getComputedStyle(n).backgroundColor;if(!c.endsWith(', 0)')&&c!=='transparent')return c;n=n.parentElement;}return 'rgb(255, 255, 255)';})() };
       })()`);
       assert.match(shape.variant, /ant-bubble-content-borderless/);
-      assert.equal(shape.footerInside && shape.bodyInside && shape.bodyFits, true, `${mode}: text and optional statistics belong to the shared message`);
-      assert.equal(new Set(shape.fontSizes).size, 1, `${mode}: statistics have one type scale`);
-      assert.equal(shape.fontSizes[0], "12px");
-      assert.equal(new Set(shape.colors).size, 1, `${mode}: statistics have one semantic color`);
-      assert.ok(textContrast(shape.colors[0], shape.background) >= 4.5, `${mode}: small statistics remain readable`);
-      assert.match(shape.usage, /输入 12\.3k/); assert.match(shape.usage, /输出 678/);
+      assert.equal(shape.bodyInside && shape.bodyFits, true, `${mode}: text belongs to the shared message`);
+      assert.equal(shape.fontSize, "12px");
+      assert.ok(textContrast(shape.color, shape.background) >= 4.5, `${mode}: small metadata remains readable`);
+      assert.equal(shape.usage, 0, `${mode}: the transcript no longer carries a per-turn usage row`);
       assert.match(shape.duration, /耗时 39 秒/); assert.equal(shape.clockIso, "2026-10-07T09:00:41Z");
-      assert.equal(shape.usageLines, 1); assert.equal(shape.oversizedIcons, 1, "one bounded usage icon");
-      assert.equal(shape.avatarWidth, 26); assert.equal(shape.overflow, false);
+      assert.ok(textContrast(shape.badgeColor, shape.badgeBackground) >= 4.5, `${mode}: tool mark contrasts with its own surface`);
+      assert.equal(shape.avatarWidth, 56);assert.equal(shape.badgeLabel,"Codex CLI");assert.equal(shape.badgeLogo,"codex");assert.equal(shape.badgeRadius,"4px");assert.equal(shape.badgeSize,20); assert.equal(shape.overflow, false);
+      // Quiet identity changes update the corner mark without replacing the transcript.
+      const changedIdentity = await evaluate(`(async()=>{
+        const row=document.querySelector('.chat-message[data-msg-index="1"]');
+        const body=row.querySelector('.chat-message-content');
+        const button=row.querySelector('.assistant-reply-disclosure');button.focus();
+        h.publish(metaTurns,{provider:'pi',structuredState:{inFlight:false,engine:'core'}});
+        h.doRenderChat(false);await h.frames();
+        const sdkLabel=row.querySelector('.wand-employee-avatar-provider')?.getAttribute('aria-label');
+        const wandMark=!!row.querySelector('[data-wand-brand="pixel-cat"]');
+        const stableBody=body===row.querySelector('.chat-message-content');
+        const stableFocus=document.activeElement===button;
+        h.publish(metaTurns,{provider:'codex',structuredState:{engine:'cli'}});h.doRenderChat(false);await h.frames();
+        return {sdkLabel,wandMark,stableBody,stableFocus,
+          finalLogo:row.querySelector('[data-provider-logo]')?.getAttribute('data-provider-logo')};
+      })()`);
+      assert.equal(changedIdentity.sdkLabel, "Wand Agent");
+      assert.equal(changedIdentity.wandMark, true, `${mode}: SDK uses the Wand mark`);
+      assert.equal(changedIdentity.stableBody, true, `${mode}: identity refresh preserves the body`);
+      assert.equal(changedIdentity.stableFocus, true, `${mode}: identity refresh preserves the focused disclosure`);
+      assert.equal(changedIdentity.finalLogo, "codex");
       if (process.env.WAND_CHAT_META_SCREENSHOTS !== "0") await screenshot(mode);
       assert.equal(await evaluate("document.querySelector('.chat-message[data-msg-index=\"1\"] [data-chat-renderer]').dataset.chatRenderer"), "canonical");
       assert.ok(await evaluate("!!document.querySelector('.chat-message[data-msg-index=\"1\"] .assistant-author-name').textContent"));
@@ -156,16 +181,16 @@ test("canonical messages preserve body, compact metadata and optional usage acro
       // Estimated -> final, added/removed usage, and completion all patch the same native Bubble.
       const settled = await evaluate(`(async()=>{
         const row=document.querySelector('.chat-message[data-msg-index="3"]'); const bubble=row.querySelector('.ant-bubble');
-        const body=row.querySelector('.chat-message-content'); const input=row.querySelector('.turn-usage-summary .turn-usage-number');
+        const body=row.querySelector('.chat-message-content');
         metaTurns[3]={...metaTurns[3],completedAt:'2026-10-07T09:01:14Z',usage:{inputTokens:900,outputTokens:240,estimated:false},
           content:[{type:'text',text:'实时统计已核对，服务端最终用量已返回。'}]};
         h.publish(metaTurns); h.doRenderChat(false); await h.frames();
         return {sameRow:row===document.querySelector('.chat-message[data-msg-index="3"]'),sameBubble:bubble===row.querySelector('.ant-bubble'),
-          sameBody:body===row.querySelector('.chat-message-content'),sameInput:input===row.querySelector('.turn-usage-summary .turn-usage-number'),
+          sameBody:body===row.querySelector('.chat-message-content'),
           text:row.textContent,usageLines:row.querySelectorAll('.turn-usage-summary').length};
       })()`);
-      assert.equal(settled.sameRow && settled.sameBubble && settled.sameBody && settled.sameInput, true, `${mode}: stable owned nodes`);
-      assert.equal(settled.usageLines, 1); assert.match(settled.text, /输出 240/); assert.match(settled.text, /耗时 12 秒/); assert.doesNotMatch(settled.text, /≈/);
+      assert.equal(settled.sameRow && settled.sameBubble && settled.sameBody, true, `${mode}: stable owned nodes`);
+      assert.equal(settled.usageLines, 0); assert.match(settled.text, /耗时 12 秒/); assert.doesNotMatch(settled.text, /输入 900/);
       const missing = await evaluate(`(async()=>{
         delete metaTurns[3].usage; delete metaTurns[3].completedAt;
         h.publish(metaTurns);h.doRenderChat(false);await h.frames();
@@ -173,16 +198,16 @@ test("canonical messages preserve body, compact metadata and optional usage acro
         return {usage:row.querySelectorAll('.turn-usage-summary').length,duration:row.querySelector('.chat-message-time').textContent};
       })()`);
       assert.equal(missing.usage, 0); assert.doesNotMatch(missing.duration, /耗时/);
-      await evaluate(`(async()=>{metaTurns[3].usage={inputTokens:10,outputTokens:20};h.publish(metaTurns);h.doRenderChat(false);await h.frames();document.querySelector('.chat-message[data-msg-index="3"] .turn-usage-disclosure .ant-collapse-header').click();await h.frames();})()`);
-      assert.equal(await evaluate("document.querySelectorAll('.chat-message[data-msg-index=\"3\"] .turn-usage-summary').length"), 1, "late usage creates only one footer, not a duplicate inside the body");
-      // The existing disclosure still hides/reveals body and statistics together.
+      await evaluate(`(async()=>{metaTurns[3].usage={inputTokens:10,outputTokens:20};h.publish(metaTurns);h.doRenderChat(false);await h.frames();})()`);
+      assert.equal(await evaluate("document.querySelectorAll('.chat-message[data-msg-index=\"3\"] .turn-usage-summary').length"), 0, "late usage does not bring back a per-turn row");
+      // The existing disclosure still hides/reveals the reply body.
       const disclosure = '.chat-message[data-msg-index="3"] .assistant-reply-disclosure';
       await evaluate(`document.querySelector(${JSON.stringify(disclosure)}).click()`);
-      assert.equal(await evaluate("document.querySelector('.chat-message[data-msg-index=\"3\"] .turn-usage-disclosure').checkVisibility({checkVisibilityCSS:true})"), false);
+      assert.equal(await evaluate("document.querySelector('.chat-message[data-msg-index=\"3\"] .chat-message-content').checkVisibility({checkVisibilityCSS:true})"), false);
       await evaluate(`document.querySelector(${JSON.stringify(disclosure)}).click()`);
-      assert.equal(await evaluate("document.querySelector('.chat-message[data-msg-index=\"3\"] .turn-usage-disclosure').checkVisibility({checkVisibilityCSS:true})"), true);
+      assert.equal(await evaluate("document.querySelector('.chat-message[data-msg-index=\"3\"] .chat-message-content').checkVisibility({checkVisibilityCSS:true})"), true);
       const plain = await evaluate(`(async()=>{await h.fresh([{role:'assistant',uuid:'plain-metadata',content:[{type:'text',text:'没有统计信息的回复。'}]}]);
-        const row=document.querySelector('.chat-message[data-msg-index="0"]');return {footer:row.querySelectorAll('.turn-usage-disclosure').length,text:row.textContent};})()`);
+        const row=document.querySelector('.chat-message[data-msg-index="0"]');return {footer:row.querySelectorAll('.turn-usage-summary').length,text:row.textContent};})()`);
       assert.equal(plain.footer, 0, "absent metadata never reserves an empty footer");
       assert.match(plain.text, /没有统计信息/);
       // The provider corner mark must never replace the employee's actual face.

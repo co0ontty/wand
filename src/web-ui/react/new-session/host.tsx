@@ -2,7 +2,7 @@ import "../issues/library-layout";
 import "./layout.js";
 import { hasAutomaticPermissions, modeHint } from "./permission-summary.js";
 import { Alert, AutoComplete, Collapse, Flex, Form, Radio, Space, Spin, Typography } from "antd";
-import { TaskForm, TaskTextArea } from "../issues/form-controls";
+import { TaskForm, TaskTextArea } from "../issues/task-form";
 import { WandInput } from "../ui";
 import {
   type FormEvent,
@@ -33,7 +33,7 @@ import { AGENT_TOOL_OPTIONS, agentToolIdFor, agentToolOption, agentToolDisplayNa
 import { aiTeamPickerOption, aiTeamsRepository, useAiTeamList } from "../ai-teams/repository";
 import { taskBoardController } from "../issues/task-board-controller";
 import { notifyTasksChanged } from "../task-changes";
-import { TEAM_NEEDS_PROJECT_HINT, usableTeamWorkspaceId } from "../workspaces/workspace-agent-picker";
+import { TEAM_NEEDS_PROJECT_HINT, usableTeamWorkspaceId } from "../workspaces/workspace-agent-model";
 import { httpWorkspacesRepository } from "../workspaces/repository";
 import type { Workspace } from "../workspaces/types";
 import { newSessionController, newSessionStore } from "./controller";

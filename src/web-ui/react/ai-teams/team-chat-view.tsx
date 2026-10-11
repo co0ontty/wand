@@ -8,7 +8,7 @@ import { AI_TEAM_DETAIL_CHAT_TURNS, type AiTeamLiveStep, type AiTeamRun,
 import type { ConversationAuthor, ConversationTurn, TeamReportFile } from "../../../types";
 import { failureMessage } from "../errors";
 import { filePreviewController } from "../file-preview/controller";
-import { MarkdownPreview } from "../file-preview/markdown";
+import { MarkdownPreview, MessageFileContext } from "../file-preview/markdown";
 import { formatFilePreviewSize } from "../file-preview/model";
 import { HttpResponseError, jsonBody, requestJson } from "../http-adapter";
 import { issueAgentEffortLabel, issueAgentLabel } from "../issues/task-board-agent";
@@ -26,7 +26,7 @@ import {
 } from "../ui";
 import { ComposerAttachmentList } from "../composer-attachments/host";
 import { GeneratedAvatarGlyph, PixelCat, TeamAvatar, avatarFace, generatedAvatarBackground, type GeneratedAvatarFace } from "./avatar";
-import { encodePlushAvatar, encodePlushCatAvatar, isPlushCatAvatar, parsePlushAvatar, parsePlushCatAvatar, resolveEmployeeAvatar, type PlushRenderConfig } from "../../../plush-avatar.js";
+import { encodePlushAvatar, encodePlushCatAvatar, encodePlushDogAvatar, isPlushCatAvatar, isPlushDogAvatar, parsePlushAvatar, parsePlushCatAvatar, parsePlushDogAvatar, resolveEmployeeAvatar, type PlushRenderConfig } from "../../../plush-avatar.js";
 import { PlushAvatar } from "../avatars/plush-avatar.js";
 import { EmployeeAvatar } from "../agents/employee-avatar.js";
 import { appendedConversationKeys, CONVERSATION_TAIL_PX, conversationClock, conversationDay, conversationMessageKey, joinsConversationBubble } from "../conversations/presentation";
@@ -197,7 +197,7 @@ export function displayChatTurn(turn: ConversationTurn, team: AiTeam): Conversat
   const member = team.members.find((item) => item.id === author.id);
   if (!member) return turn;
   const plush = member.employeeId ? resolveEmployeeAvatar({ ...member, id: member.employeeId }) : null;
-  const avatar = plush ? isPlushCatAvatar(plush) ? encodePlushCatAvatar(plush) : encodePlushAvatar(plush) : member.avatar;
+  const avatar = plush ? isPlushDogAvatar(plush) ? encodePlushDogAvatar(plush) : isPlushCatAvatar(plush) ? encodePlushCatAvatar(plush) : encodePlushAvatar(plush) : member.avatar;
   if (member.name === author.name && avatar === author.avatar) return turn;
   return { ...turn, author: { ...author, name: member.name, avatar } };
 }
@@ -521,7 +521,7 @@ export function chatAvatarSpec(
 ): ChatAvatarSpec {
   // 能定位到成员身份才给脸（显式 `cat:<n>` 走像素猫，其余按身份生成，与团队页/工位同一张脸）；
   // 「我」和没有署名的发言才回落成默认 APP logo。
-  const plush = parsePlushCatAvatar(author?.avatar ?? "") ?? parsePlushAvatar(author?.avatar ?? "");
+  const plush = parsePlushDogAvatar(author?.avatar ?? "") ?? parsePlushCatAvatar(author?.avatar ?? "") ?? parsePlushAvatar(author?.avatar ?? "");
   if (plush) return { kind: "plush", config: plush };
   return avatarFace({ id: author?.id ?? "", name: author?.name ?? "", avatar: author?.avatar ?? "" })
     ?? { kind: "brand" };
@@ -697,6 +697,7 @@ function MessageAvatar({ spec, size = "md" }: {
  * `side` / `half` 只决定它从触发点的哪个方向长出来。
  */
 export interface ChatDocPayload {
+  sessionId?: string;
   text: string;
   name: string;
   clock: string;
@@ -836,7 +837,7 @@ function TeamMessageRow({
         {badge ? <Tag className="chat-author-badge">{badge}</Tag> : null}
         {clock ? <Typography.Text type="secondary" className="chat-message-time">{clock}</Typography.Text> : null}
       </div>
-      {children}
+      <MessageFileContext.Provider value={{ sessionId: sessionId || undefined }}>{children}</MessageFileContext.Provider>
       {footer}
     </div>
   </Flex>;
@@ -949,6 +950,7 @@ function StepTurn({
         text,
         name,
         clock,
+        sessionId: author?.sessionId,
         typeLabel: reportTypeLabel(report),
         chip,
         avatar,
@@ -1009,6 +1011,7 @@ function LeaderTurn({
         text,
         name,
         clock,
+        sessionId: author?.sessionId,
         typeLabel: "负责人派工",
         avatar,
         side: "start",
@@ -1467,7 +1470,7 @@ function ChatDocContents({ layer, onExited }: {
     <ChatAttachments paths={parsed.paths}/>
     <div className="team-chat-doc-layer-text" tabIndex={0} data-wand-autofocus>
       {parsed.body.trim()
-        ? <ChatMessageBody text={parsed.body} names={layer.mentionNames}/>
+        ? <MessageFileContext.Provider value={{ sessionId: layer.sessionId }}><ChatMessageBody text={parsed.body} names={layer.mentionNames}/></MessageFileContext.Provider>
         : CHAT_EMPTY_BODY}
     </div>
   </div>;
@@ -1558,7 +1561,7 @@ export function ConversationMessages({ turns, taskLabels, group = true, ready = 
       const parsed = parseChatAttachments(text);
       const signature = turn.author ? agentSignatureLabel(turn.author) : "";
       const name = turn.author?.name ?? "员工";
-      return <React.Fragment key={key}>
+      return <MessageFileContext.Provider key={key} value={{ sessionId: turn.author?.sessionId }}>
         {day && day !== conversationDay(turns[index - 1]?.createdAt) ? <div className="conversation-day"><span>{day}</span></div> : null}
         {turn.sessionLink && renderSessionPreview ? renderSessionPreview(turn, index) : turn.conversationLink && renderTaskPreview ? renderTaskPreview(turn) : turn.notice ? <Flex vertical align="center" className="team-chat-notice">
           <Typography.Text type="secondary">{text}</Typography.Text>
@@ -1590,7 +1593,7 @@ export function ConversationMessages({ turns, taskLabels, group = true, ready = 
             </>}/>
           </div>
         </div>}
-      </React.Fragment>;
+      </MessageFileContext.Provider>;
     })}
     {unseen > 0 ? <div className="conversation-new-messages"><WandButton onClick={() => {
       const scroll = list.current?.closest<HTMLElement>(".conversation-message-scroll");

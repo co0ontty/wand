@@ -34,6 +34,9 @@ export function registerTeamDispatchRoutes(app: Express, deps: {
   decisions: Pick<DecisionService, "evaluate" | "status">;
 }): void {
   app.post("/api/team-dispatch/plan", asyncRoute(async (req, res) => {
+    const abort = new AbortController();
+    const disconnected = (): void => { if (!res.writableEnded) abort.abort(); };
+    res.once("close", disconnected);
     try {
       const body = bodyObject(req.body ?? {});
       const note = text(body.note);
@@ -46,11 +49,12 @@ export function registerTeamDispatchRoutes(app: Express, deps: {
         ...(maxMembers === undefined ? {} : { maxMembers }),
         ...(threshold === undefined ? {} : { threshold }),
         evaluate: (value, caller, signal) => deps.decisions.evaluate(value, caller, signal),
+        signal: abort.signal,
       });
-      res.json(plan);
+      if (!res.destroyed) res.json(plan);
     } catch (error) {
-      sendDispatchError(res, error);
-    }
+      if (!res.destroyed) sendDispatchError(res, error);
+    } finally { res.off("close", disconnected); }
   }));
 
   app.post("/api/team-dispatch/start", asyncRoute(async (req, res) => {

@@ -1,9 +1,12 @@
 import crypto from "node:crypto";
-import { FIXED_EMPLOYEE_AVATARS, fixedEmployeeAvatar, isFixedAvatarEmployee } from "./fixed-employee-avatar.js";
+import { FIXED_EMPLOYEE_AVATARS, employeeAvatarValue, fixedEmployeeAvatar, isFixedAvatarEmployee } from "./fixed-employee-avatar.js";
 import { CONVERSATION_OWNER, type ConversationInstance, type ConversationRequest } from "./conversation-types.js";
+import type { ScheduledTask, ScheduledTaskRun } from "./scheduled-task-types.js";
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { initializeStorageSchema } from "./storage-schema.js";
+import { ScheduledTaskRepository } from "./storage-schedules.js";
 import { SessionSnapshot, ConversationTurn, HarnessSessionContext, SessionKind, SessionProvider, SessionRunner, SessionSource, StructuredSessionState, WorktreeMergeInfo, Workspace, LayoutNode, TaskWindowLayout, WorkspaceDefaultProvider, WorkspaceKind, WorkspaceTask, WorkspaceTaskWorktree, WorkspaceTaskStatus, GLOBAL_WORKSPACE_ID } from "./types.js";
 import { normalizeSessionDirectory } from "./session-directory-tree.js";
 import { ensureWorkspaceForCwd } from "./workspace-binding.js";
@@ -33,6 +36,8 @@ import { defaultEmployeeDefinition, legacyPtyRoleIdentity } from "./default-empl
 import { DECISION_EXPERT_KEY } from "./decision-expert-identity.js";
 import { SPEECH_POLISHER_KEY } from "./speech-polisher-identity.js";
 import { speechPolisherDefinition } from "./speech-polisher-employee.js";
+import { HR_EMPLOYEE_KEY } from "./hr-employee-identity.js";
+import { hrEmployeeDefinition } from "./hr-employee.js";
 import { decisionExpertDefinition } from "./decision-expert-employee.js";
 import { normalizeEmployeeKnowledge } from "./employee-knowledge-content.js";
 import { EMPLOYEE_KNOWLEDGE_MAX_ENTRIES, type EmployeeKnowledgeEntry } from "./employee-knowledge-types.js";
@@ -65,6 +70,9 @@ import {
   type PasswordVaultItemInput,
   type PasswordVaultItemType,
 } from "./password-manager.js";
+
+// These system profiles are code-owned; candidates and timestamps are not part of the lock.
+const LOCKED_SYSTEM_EMPLOYEE_DEFINITIONS = [decisionExpertDefinition(""), speechPolisherDefinition(""), hrEmployeeDefinition("")];
 
 /** `ai_team_runs.run_state_json`：本次运行的候选黑名单（§3.4 修正 B12 两层键值 + host-disabled）。 */
 export interface AiTeamRunState {
@@ -802,579 +810,7 @@ export function resolveDatabasePath(configPath: string): string {
   return path.resolve(path.dirname(configPath), DEFAULT_DB_FILE);
 }
 
-const INIT_SQL = `
-  CREATE TABLE IF NOT EXISTS auth_sessions (
-    token TEXT PRIMARY KEY,
-    expires_at INTEGER NOT NULL,
-    kind TEXT NOT NULL DEFAULT 'browser-admin',
-    scopes TEXT NOT NULL DEFAULT '["admin"]'
-  );
-
-  CREATE TABLE IF NOT EXISTS command_sessions (
-    id TEXT PRIMARY KEY,
-    session_source TEXT NOT NULL DEFAULT 'interactive',
-    automation_id TEXT,
-    command TEXT NOT NULL,
-    cwd TEXT NOT NULL,
-    mode TEXT NOT NULL,
-    status TEXT NOT NULL,
-    exit_code INTEGER,
-    started_at TEXT NOT NULL,
-    ended_at TEXT,
-    output TEXT NOT NULL,
-    pty_output_seq INTEGER NOT NULL DEFAULT 0,
-    archived INTEGER NOT NULL DEFAULT 0,
-    archived_at TEXT,
-    claude_session_id TEXT,
-    provider TEXT,
-    session_kind TEXT NOT NULL DEFAULT 'pty',
-    runner TEXT,
-    messages TEXT,
-    queued_messages TEXT,
-    queued_message_skills TEXT,
-    structured_state TEXT,
-    resumed_from_session_id TEXT,
-    resumed_to_session_id TEXT,
-    auto_recovered INTEGER NOT NULL DEFAULT 0,
-    worktree_enabled INTEGER NOT NULL DEFAULT 0,
-    worktree_info TEXT,
-    worktree_merge_status TEXT,
-    worktree_merge_info TEXT,
-    title TEXT,
-    description TEXT,
-    session_options TEXT NOT NULL DEFAULT '{"schemaVersion":1}'
-  );
-
-  CREATE TABLE IF NOT EXISTS app_config (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS session_directory_names (
-    path TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS password_vaults (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS connectors (
-    provider TEXT PRIMARY KEY,
-    token TEXT NOT NULL DEFAULT '',
-    api_url TEXT NOT NULL DEFAULT '',
-    username TEXT,
-    connected_at TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS password_items (
-    id TEXT PRIMARY KEY,
-    vault_id TEXT NOT NULL,
-    type TEXT NOT NULL,
-    title TEXT NOT NULL,
-    username TEXT,
-    password TEXT,
-    urls TEXT NOT NULL DEFAULT '[]',
-    notes TEXT,
-    fields TEXT NOT NULL DEFAULT '{}',
-    tags TEXT NOT NULL DEFAULT '[]',
-    favorite INTEGER NOT NULL DEFAULT 0,
-    archived INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    last_used_at TEXT,
-    password_updated_at TEXT,
-    FOREIGN KEY(vault_id) REFERENCES password_vaults(id)
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_password_items_vault ON password_items(vault_id);
-  CREATE INDEX IF NOT EXISTS idx_password_items_type ON password_items(type);
-  CREATE INDEX IF NOT EXISTS idx_password_items_updated ON password_items(updated_at);
-
-  CREATE TABLE IF NOT EXISTS missions (
-    id TEXT PRIMARY KEY,
-    title TEXT NOT NULL,
-    prompt TEXT NOT NULL,
-    cwd TEXT NOT NULL,
-    status TEXT NOT NULL,
-    task_id TEXT,
-    milestone_id TEXT,
-    base_ref TEXT,
-    shared_directories TEXT NOT NULL DEFAULT '[]',
-    copy_paths TEXT NOT NULL DEFAULT '[]',
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS mission_attempts (
-    id TEXT PRIMARY KEY,
-    mission_id TEXT NOT NULL,
-    session_id TEXT,
-    provider TEXT NOT NULL,
-    state TEXT NOT NULL,
-    branch TEXT,
-    worktree_path TEXT,
-    base_ref TEXT,
-    summary TEXT,
-    error TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    FOREIGN KEY(mission_id) REFERENCES missions(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS mission_review_comments (
-    id TEXT PRIMARY KEY,
-    mission_id TEXT NOT NULL,
-    attempt_id TEXT NOT NULL,
-    file_path TEXT NOT NULL,
-    line INTEGER,
-    side TEXT NOT NULL DEFAULT 'new',
-    body TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending',
-    created_at TEXT NOT NULL,
-    sent_at TEXT,
-    resolved_at TEXT,
-    FOREIGN KEY(mission_id) REFERENCES missions(id),
-    FOREIGN KEY(attempt_id) REFERENCES mission_attempts(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS agent_activity (
-    session_id TEXT PRIMARY KEY,
-    mission_id TEXT,
-    attempt_id TEXT,
-    state TEXT NOT NULL,
-    title TEXT NOT NULL,
-    summary TEXT,
-    provider TEXT,
-    cwd TEXT,
-    updated_at TEXT NOT NULL,
-    read_at TEXT
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_missions_updated ON missions(updated_at);
-  CREATE INDEX IF NOT EXISTS idx_mission_attempts_mission ON mission_attempts(mission_id);
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_mission_attempts_session ON mission_attempts(session_id) WHERE session_id IS NOT NULL;
-  CREATE INDEX IF NOT EXISTS idx_mission_comments_attempt ON mission_review_comments(attempt_id, status);
-  CREATE INDEX IF NOT EXISTS idx_agent_activity_state ON agent_activity(state, updated_at);
-
-  CREATE TABLE IF NOT EXISTS workspaces (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    cwd TEXT NOT NULL,
-    kind TEXT NOT NULL DEFAULT 'project',
-    default_provider TEXT,
-    layout_json TEXT,
-    created_at TEXT NOT NULL,
-    last_opened_at TEXT
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_workspaces_cwd ON workspaces(cwd);
-  CREATE INDEX IF NOT EXISTS idx_workspaces_last_opened ON workspaces(last_opened_at);
-
-  CREATE TABLE IF NOT EXISTS workspace_tasks (
-    id TEXT PRIMARY KEY,
-    workspace_id TEXT NOT NULL,
-    name TEXT NOT NULL,
-    worktree_json TEXT,
-    layout_json TEXT,
-    status TEXT NOT NULL DEFAULT 'active',
-    cwd TEXT,
-    milestone_id TEXT,
-    created_at TEXT NOT NULL,
-    last_opened_at TEXT,
-    layout_revision INTEGER NOT NULL DEFAULT 0,
-    FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_workspace_tasks_workspace ON workspace_tasks(workspace_id);
-  CREATE INDEX IF NOT EXISTS idx_workspace_tasks_last_opened ON workspace_tasks(last_opened_at);
-
-  CREATE TABLE IF NOT EXISTS github_issue_bindings (
-    owner TEXT NOT NULL,
-    repo TEXT NOT NULL,
-    issue_number INTEGER NOT NULL,
-    session_id TEXT NOT NULL,
-    bound_at TEXT NOT NULL,
-    PRIMARY KEY (owner, repo, issue_number, session_id),
-    FOREIGN KEY (session_id) REFERENCES command_sessions(id) ON DELETE CASCADE
-  );
-  CREATE INDEX IF NOT EXISTS idx_github_issue_bindings_session ON github_issue_bindings(session_id);
-
-  CREATE TABLE IF NOT EXISTS wand_milestones (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    due_date TEXT,
-    workspace_id TEXT,
-    is_default INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_wand_milestones_created ON wand_milestones(created_at DESC);
-
-  -- 迭代提示词记录：用户在本轮迭代里发过的提示词标题，供 commit message / 汇报类生成复用。
-  -- 不建外键：删除迭代只把记录改挂到默认迭代，绝不删记录。
-  CREATE TABLE IF NOT EXISTS wand_iteration_prompts (
-    id TEXT PRIMARY KEY,
-    milestone_id TEXT NOT NULL,
-    workspace_id TEXT,
-    session_id TEXT,
-    task_id TEXT,
-    repo_key TEXT,
-    cwd TEXT NOT NULL,
-    title TEXT NOT NULL,
-    detail TEXT NOT NULL DEFAULT '',
-    source TEXT NOT NULL DEFAULT 'session',
-    consumed_at TEXT,
-    consumed_commit TEXT,
-    created_at TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_wand_iteration_prompts_iteration ON wand_iteration_prompts(milestone_id, created_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_wand_iteration_prompts_repo ON wand_iteration_prompts(repo_key, created_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_wand_iteration_prompts_session ON wand_iteration_prompts(session_id, created_at DESC);
-
-  CREATE TABLE IF NOT EXISTS wand_tasks (
-    id TEXT PRIMARY KEY,
-    identifier TEXT,
-    workspace_id TEXT,
-    title TEXT NOT NULL,
-    description TEXT NOT NULL DEFAULT '',
-    status TEXT NOT NULL DEFAULT 'todo',
-    priority TEXT NOT NULL DEFAULT 'none',
-    labels_json TEXT NOT NULL DEFAULT '[]',
-    due_date TEXT,
-    milestone_id TEXT,
-    sort_order INTEGER NOT NULL DEFAULT 0,
-    agent_json TEXT,
-    execution_subject_json TEXT,
-    workspace_task_id TEXT,
-    parent_task_id TEXT,
-    title_source TEXT,
-    auto_title_signature TEXT,
-    archived_at TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE SET NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_wand_tasks_board ON wand_tasks(workspace_id, status, sort_order, updated_at);
-  CREATE TABLE IF NOT EXISTS wand_task_sessions (
-    task_id TEXT NOT NULL,
-    session_id TEXT NOT NULL,
-    bound_at TEXT NOT NULL,
-    PRIMARY KEY (task_id, session_id),
-    FOREIGN KEY (task_id) REFERENCES wand_tasks(id) ON DELETE CASCADE,
-    FOREIGN KEY (session_id) REFERENCES command_sessions(id) ON DELETE CASCADE
-  );
-  CREATE INDEX IF NOT EXISTS idx_wand_task_sessions_session ON wand_task_sessions(session_id);
-
-  CREATE TABLE IF NOT EXISTS ai_teams (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    description TEXT NOT NULL DEFAULT '',
-    instructions TEXT NOT NULL DEFAULT '',
-    members_json TEXT NOT NULL,
-    require_plan_approval INTEGER NOT NULL DEFAULT 1,
-    max_steps INTEGER NOT NULL DEFAULT 30,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS silicon_employees (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    duty TEXT NOT NULL DEFAULT '',
-    prompt TEXT NOT NULL DEFAULT '',
-    avatar TEXT NOT NULL DEFAULT '',
-    agents_json TEXT NOT NULL,
-    system_key TEXT,
-    archived_at TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_silicon_employees_archived ON silicon_employees(archived_at);
-
-  CREATE TABLE IF NOT EXISTS employee_knowledge (
-    id TEXT PRIMARY KEY,
-    employee_id TEXT NOT NULL REFERENCES silicon_employees(id) ON DELETE CASCADE,
-    content TEXT NOT NULL,
-    content_hash TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    UNIQUE (employee_id, content_hash)
-  );
-  CREATE INDEX IF NOT EXISTS idx_employee_knowledge_owner ON employee_knowledge(employee_id, created_at);
-  CREATE TABLE IF NOT EXISTS employee_knowledge_access (
-    token_hash TEXT PRIMARY KEY,
-    employee_id TEXT NOT NULL REFERENCES silicon_employees(id) ON DELETE CASCADE,
-    session_id TEXT NOT NULL REFERENCES command_sessions(id) ON DELETE CASCADE,
-    expires_at INTEGER NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_employee_knowledge_access_expiry ON employee_knowledge_access(expires_at);
-
-  CREATE TABLE IF NOT EXISTS decision_access (
-    token_hash TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL REFERENCES command_sessions(id) ON DELETE CASCADE,
-    expires_at INTEGER NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_decision_access_expiry ON decision_access(expires_at);
-
-  CREATE TABLE IF NOT EXISTS openrouter_free_access (
-    token_hash TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL REFERENCES command_sessions(id) ON DELETE CASCADE,
-    selector TEXT NOT NULL,
-    requirements_json TEXT NOT NULL,
-    credential_hash TEXT NOT NULL,
-    expires_at INTEGER NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_openrouter_free_access_expiry ON openrouter_free_access(expires_at);
-
-  CREATE TABLE IF NOT EXISTS user_memory_events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    feature TEXT NOT NULL,
-    text TEXT NOT NULL DEFAULT '',
-    dedup_key TEXT NOT NULL,
-    created_at INTEGER NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_user_memory_events_created ON user_memory_events(created_at);
-  CREATE INDEX IF NOT EXISTS idx_user_memory_events_dedup ON user_memory_events(dedup_key, created_at);
-  CREATE TABLE IF NOT EXISTS user_memory_state (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    enabled INTEGER NOT NULL DEFAULT 1,
-    revision INTEGER NOT NULL DEFAULT 0,
-    last_attempt_at INTEGER NOT NULL DEFAULT 0,
-    source_id INTEGER NOT NULL DEFAULT 0,
-    profile_json TEXT
-  );
-  INSERT OR IGNORE INTO user_memory_state (id) VALUES (1);
-
-  CREATE TABLE IF NOT EXISTS ai_team_runs (
-    id TEXT PRIMARY KEY,
-    team_id TEXT NOT NULL,
-    task_id TEXT NOT NULL,
-    team_json TEXT NOT NULL,
-    objective TEXT NOT NULL,
-    cwd TEXT NOT NULL,
-    status TEXT NOT NULL,
-    status_detail TEXT NOT NULL DEFAULT '',
-    steps_used INTEGER NOT NULL DEFAULT 0,
-    step_limit INTEGER NOT NULL,
-    format_retries INTEGER NOT NULL DEFAULT 0,
-    plan_approved INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_ai_team_runs_task ON ai_team_runs(task_id, created_at);
-  CREATE INDEX IF NOT EXISTS idx_ai_team_runs_status ON ai_team_runs(status);
-
-  CREATE TABLE IF NOT EXISTS ai_team_steps (
-    id TEXT PRIMARY KEY,
-    run_id TEXT NOT NULL,
-    seq INTEGER NOT NULL,
-    kind TEXT NOT NULL,
-    member_id TEXT NOT NULL,
-    title TEXT NOT NULL,
-    instructions TEXT NOT NULL,
-    session_id TEXT,
-    status TEXT NOT NULL,
-    report TEXT NOT NULL DEFAULT '',
-    report_path TEXT NOT NULL,
-    depends_on_json TEXT NOT NULL DEFAULT '[]',
-    started_at TEXT,
-    ended_at TEXT,
-    UNIQUE (run_id, seq)
-  );
-  CREATE INDEX IF NOT EXISTS idx_ai_team_steps_session ON ai_team_steps(session_id, status);
-`;
-
-/** AI 团队表的后加列；只加不删，历史行取默认值。 */
-function ensureAiTeamSchema(db: DatabaseSync): void {
-  const teamColumns = new Set((db.prepare("PRAGMA table_info(ai_teams)").all() as Array<{ name: string }>).map((column) => column.name));
-  if (!teamColumns.has("instructions")) db.exec("ALTER TABLE ai_teams ADD COLUMN instructions TEXT NOT NULL DEFAULT ''");
-  const stepColumns = new Set((db.prepare("PRAGMA table_info(ai_team_steps)").all() as Array<{ name: string }>).map((column) => column.name));
-  if (!stepColumns.has("depends_on_json")) db.exec("ALTER TABLE ai_team_steps ADD COLUMN depends_on_json TEXT NOT NULL DEFAULT '[]'");
-  const runColumns = new Set((db.prepare("PRAGMA table_info(ai_team_runs)").all() as Array<{ name: string }>).map((column) => column.name));
-  if (!runColumns.has("chat_session_id")) db.exec("ALTER TABLE ai_team_runs ADD COLUMN chat_session_id TEXT");
-  if (!runColumns.has("pending_notes_json")) db.exec("ALTER TABLE ai_team_runs ADD COLUMN pending_notes_json TEXT NOT NULL DEFAULT '[]'");
-  // v2 多候选降级：步骤实际候选与跳过记录（StepDispatchInfo）、run 级状态（黑名单等）。只加列，旧行取默认 '{}'。
-  if (!stepColumns.has("dispatch_info_json")) db.exec("ALTER TABLE ai_team_steps ADD COLUMN dispatch_info_json TEXT NOT NULL DEFAULT '{}'");
-  if (!runColumns.has("run_state_json")) db.exec("ALTER TABLE ai_team_runs ADD COLUMN run_state_json TEXT NOT NULL DEFAULT '{}'");
-
-  // 硅基员工表结构保护（遵循只加不删）
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS silicon_employees (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      duty TEXT NOT NULL DEFAULT '',
-      prompt TEXT NOT NULL DEFAULT '',
-      avatar TEXT NOT NULL DEFAULT '',
-      agents_json TEXT NOT NULL,
-      system_key TEXT,
-      archived_at TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_silicon_employees_archived ON silicon_employees(archived_at);
-  `);
-  // 内置员工标记（如 "wand-ops"）：只加列，用户员工保持 NULL。
-  const employeeColumns = new Set((db.prepare("PRAGMA table_info(silicon_employees)").all() as Array<{ name: string }>).map((column) => column.name));
-  if (employeeColumns.size > 0 && !employeeColumns.has("system_key")) {
-    db.exec("ALTER TABLE silicon_employees ADD COLUMN system_key TEXT");
-  }
-  if (employeeColumns.size > 0 && !employeeColumns.has("tags_json")) {
-    db.exec("ALTER TABLE silicon_employees ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]'");
-  }
-}
-
-function ensureWandTaskSchema(db: DatabaseSync): void {
-  const columns = db.prepare("PRAGMA table_info(wand_tasks)").all() as Array<{ name: string }>;
-  const names = new Set(columns.map((column) => column.name));
-  if (columns.length > 0 && !names.has("identifier")) db.exec("ALTER TABLE wand_tasks ADD COLUMN identifier TEXT");
-  if (columns.length > 0 && !names.has("due_date")) db.exec("ALTER TABLE wand_tasks ADD COLUMN due_date TEXT");
-  // 任务的默认派发配置（CLI 工具 / 模型 / 思考深度）。只加列，历史行保持 NULL。
-  if (columns.length > 0 && !names.has("agent_json")) db.exec("ALTER TABLE wand_tasks ADD COLUMN agent_json TEXT");
-  if (columns.length > 0 && !names.has("execution_subject_json")) db.exec("ALTER TABLE wand_tasks ADD COLUMN execution_subject_json TEXT");
-  if (columns.length > 0 && !names.has("workspace_task_id")) db.exec("ALTER TABLE wand_tasks ADD COLUMN workspace_task_id TEXT");
-  // 父任务归属只加列；历史任务仍然是顶层任务。
-  if (columns.length > 0 && !names.has("parent_task_id")) db.exec("ALTER TABLE wand_tasks ADD COLUMN parent_task_id TEXT");
-  // 标题来源：'user' = 用户手写，'auto' = 由描述/会话内容自动生成。只加列，历史行保持 NULL（读取时视为 user）。
-  if (columns.length > 0 && !names.has("title_source")) db.exec("ALTER TABLE wand_tasks ADD COLUMN title_source TEXT");
-  // 自动标题最近一次的输入指纹：内容没变就不再重复总结（也避免自动标题来回震荡）。只加列。
-  if (columns.length > 0 && !names.has("auto_title_signature")) db.exec("ALTER TABLE wand_tasks ADD COLUMN auto_title_signature TEXT");
-  // 里程碑：只加列，历史行保持 NULL；里程碑本体在 wand_milestones（INIT_SQL 建表）。
-  if (columns.length > 0 && !names.has("milestone_id")) db.exec("ALTER TABLE wand_tasks ADD COLUMN milestone_id TEXT");
-  // 归档时间（自动/手动归档都写它）：任务自动删除按它起算；历史归档行保持 NULL。
-  if (columns.length > 0 && !names.has("archived_at")) db.exec("ALTER TABLE wand_tasks ADD COLUMN archived_at TEXT");
-  if (columns.length > 0) {
-    // Index creation must wait until the column exists on legacy databases.
-    // INIT_SQL cannot create it: CREATE TABLE IF NOT EXISTS is a no-op on old
-    // wand_tasks, and CREATE INDEX would then fail with "no such column".
-    db.exec("CREATE INDEX IF NOT EXISTS idx_wand_tasks_workspace_task ON wand_tasks(workspace_task_id)");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_wand_tasks_parent ON wand_tasks(parent_task_id)");
-    const rows = db.prepare("SELECT id FROM wand_tasks WHERE identifier IS NULL OR identifier = '' ORDER BY created_at, id").all() as Array<{ id: string }>;
-    const update = db.prepare("UPDATE wand_tasks SET identifier = ? WHERE id = ?");
-    rows.forEach((row, index) => update.run(`TASK-${index + 1}`, row.id));
-  }
-}
-
-function ensureWorkspaceSchema(db: DatabaseSync): void {
-  const workspaceColumns = db.prepare("PRAGMA table_info(workspaces)").all() as Array<{ name: string }>;
-  const workspaceNames = new Set(workspaceColumns.map((column) => column.name));
-  if (workspaceColumns.length > 0 && !workspaceNames.has("kind")) {
-    db.exec("ALTER TABLE workspaces ADD COLUMN kind TEXT NOT NULL DEFAULT 'project'");
-  }
-  const taskColumns = db.prepare("PRAGMA table_info(workspace_tasks)").all() as Array<{ name: string }>;
-  const taskNames = new Set(taskColumns.map((column) => column.name));
-  if (taskColumns.length > 0 && !taskNames.has("cwd")) {
-    db.exec("ALTER TABLE workspace_tasks ADD COLUMN cwd TEXT");
-  }
-  if (taskColumns.length > 0 && !taskNames.has("layout_revision")) {
-    db.exec("ALTER TABLE workspace_tasks ADD COLUMN layout_revision INTEGER NOT NULL DEFAULT 0");
-  }
-  // 侧栏任务也记里程碑：建任务时把它带到看板卡片上，命名任务与未命名任务保持一致。
-  if (taskColumns.length > 0 && !taskNames.has("milestone_id")) {
-    db.exec("ALTER TABLE workspace_tasks ADD COLUMN milestone_id TEXT");
-  }
-}
-
-function ensureWandMilestoneSchema(db: DatabaseSync): void {
-  const columns = db.prepare("PRAGMA table_info(wand_milestones)").all() as Array<{ name: string }>;
-  const names = new Set(columns.map((column) => column.name));
-  // 里程碑归属工作区：只加列，历史行保持 NULL（读作全局里程碑，所有工作区可见）。
-  if (columns.length > 0 && !names.has("workspace_id")) {
-    db.exec("ALTER TABLE wand_milestones ADD COLUMN workspace_id TEXT");
-  }
-  // 默认迭代标记：只加列，历史行保持 0（读作普通迭代）。
-  if (columns.length > 0 && !names.has("is_default")) {
-    db.exec("ALTER TABLE wand_milestones ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0");
-  }
-  if (columns.length > 0) {
-    // 索引必须等列存在后再建：老库的 CREATE TABLE IF NOT EXISTS 是空操作，
-    // 直接在 INIT_SQL 里建索引会因缺列报错。
-    db.exec("CREATE INDEX IF NOT EXISTS idx_wand_milestones_workspace ON wand_milestones(workspace_id, created_at DESC)");
-  }
-}
-
-/**
- * 迭代提示词记录表：新库由 INIT_SQL 建好，老库在这里补建（只加表，不改表）。
- * 空库（没建过任何表）时 PRAGMA 拿不到列，直接返回。
- */
-function ensureIterationPromptSchema(db: DatabaseSync): void {
-  const columns = db.prepare("PRAGMA table_info(wand_iteration_prompts)").all() as Array<{ name: string }>;
-  if (columns.length > 0) return;
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS wand_iteration_prompts (
-      id TEXT PRIMARY KEY,
-      milestone_id TEXT NOT NULL,
-      workspace_id TEXT,
-      session_id TEXT,
-      task_id TEXT,
-      repo_key TEXT,
-      cwd TEXT NOT NULL,
-      title TEXT NOT NULL,
-      detail TEXT NOT NULL DEFAULT '',
-      source TEXT NOT NULL DEFAULT 'session',
-      consumed_at TEXT,
-      consumed_commit TEXT,
-      created_at TEXT NOT NULL
-    )
-  `);
-  db.exec("CREATE INDEX IF NOT EXISTS idx_wand_iteration_prompts_iteration ON wand_iteration_prompts(milestone_id, created_at DESC)");
-  db.exec("CREATE INDEX IF NOT EXISTS idx_wand_iteration_prompts_repo ON wand_iteration_prompts(repo_key, created_at DESC)");
-  db.exec("CREATE INDEX IF NOT EXISTS idx_wand_iteration_prompts_session ON wand_iteration_prompts(session_id, created_at DESC)");
-}
-
-function ensureConnectorSchema(db: DatabaseSync): void {
-  // The table is created by INIT_SQL for new databases; this repairs an
-  // existing wand.db that predates the connector feature (additive-only).
-  const columns = db.prepare("PRAGMA table_info(connectors)").all() as Array<{ name: string }>;
-  const names = new Set(columns.map((column) => column.name));
-  if (names.size === 0) return;
-  const migrations: ReadonlyArray<[column: string, sql: string]> = [
-    ["api_url", "ALTER TABLE connectors ADD COLUMN api_url TEXT NOT NULL DEFAULT ''"],
-    ["username", "ALTER TABLE connectors ADD COLUMN username TEXT"],
-    ["connected_at", "ALTER TABLE connectors ADD COLUMN connected_at TEXT"],
-  ];
-  for (const [column, sql] of migrations) {
-    if (!names.has(column)) db.exec(sql);
-  }
-}
-
-export function ensureDatabaseFile(dbPath: string): boolean {
-  const dir = path.dirname(dbPath);
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  chmodSync(dir, 0o700);
-  const created = !existsSync(dbPath);
-  const db = new DatabaseSync(dbPath);
-  // DDL below takes the write lock; without this a concurrent CLI/Server writer
-  // aborts startup with SQLITE_BUSY instead of waiting its turn.
-  db.exec("PRAGMA busy_timeout = 5000");
-  db.exec(INIT_SQL);
-  ensureAuthSessionSchema(db);
-  ensureCommandSessionSchema(db);
-  ensureWorkspaceSchema(db);
-  ensureWandTaskSchema(db);
-  ensureWandMilestoneSchema(db);
-  ensureIterationPromptSchema(db);
-  ensureAiTeamSchema(db);
-  ensureConnectorSchema(db);
-  {
-    const missionColumns = db.prepare("PRAGMA table_info(missions)").all() as Array<{ name: string }>;
-    if (missionColumns.length > 0 && !missionColumns.some((column) => column.name === "task_id")) {
-      db.exec("ALTER TABLE missions ADD COLUMN task_id TEXT");
-    }
-    // 并行任务的里程碑与看板共用同一份列表；只加列，历史行保持 NULL。
-    if (missionColumns.length > 0 && !missionColumns.some((column) => column.name === "milestone_id")) {
-      db.exec("ALTER TABLE missions ADD COLUMN milestone_id TEXT");
-    }
-  }
-  db.close();
-  chmodSync(dbPath, 0o600);
-  return created;
-}
+export { ensureDatabaseFile } from "./storage-schema.js";
 
 interface CreateWandTaskInput {
   workspaceId?: string | null;
@@ -1429,7 +865,44 @@ function withoutSessionTab(node: LayoutNode, sessionId: string): LayoutNode {
 }
 
 export class WandStorage {
+  private readonly closeListeners = new Set<() => void>();
+  private readonly taskTitleListeners = new Set<() => void>();
+  private titleNoticePending = false;
+  private closed = false;
+  private readonly projectionEpoch = crypto.randomUUID();
+
+  /** Exact conservative invalidation: own writes + writes from other SQLite connections. */
+  projectionRevision(): string {
+    const own = this.db.prepare("SELECT total_changes() AS revision").get() as { revision: number };
+    const external = this.db.prepare("PRAGMA data_version").get() as { data_version: number };
+    return `${this.projectionEpoch}:${own.revision}:${external.data_version}`;
+  }
+
+  onClose(listener: () => void): () => void {
+    this.closeListeners.add(listener);
+    return () => { this.closeListeners.delete(listener); };
+  }
+
+  onTaskTitleChange(listener: () => void): () => void {
+    this.taskTitleListeners.add(listener);
+    return () => { this.taskTitleListeners.delete(listener); };
+  }
+
+  /** Coalesce synchronous writes; observers read only after the transaction settles. */
+  notifyTaskTitleChange(): void {
+    if (this.closed || this.titleNoticePending || !this.taskTitleListeners.size) return;
+    this.titleNoticePending = true;
+    queueMicrotask(() => {
+      this.titleNoticePending = false;
+      if (this.closed) return;
+      for (const listener of this.taskTitleListeners) {
+        try { listener(); } catch { console.error("[WandTask] title change observer failed"); }
+      }
+    });
+  }
+
   private readonly db: DatabaseSync;
+  private readonly schedules: ScheduledTaskRepository;
   private readonly dbPath: string;
   private memoryCapture = { enabled: true, revision: 0 };
 
@@ -1439,55 +912,15 @@ export class WandStorage {
     chmodSync(dir, 0o700);
     this.dbPath = dbPath;
     this.db = new DatabaseSync(dbPath);
+    this.schedules = new ScheduledTaskRepository(this.db, action => this.transaction(action));
     this.db.exec("PRAGMA busy_timeout = 5000");
     chmodSync(dbPath, 0o600);
-    this.db.exec(INIT_SQL);
-    ensureAuthSessionSchema(this.db);
-    ensureCommandSessionSchema(this.db);
-    ensureWorkspaceSchema(this.db);
-    ensureWandTaskSchema(this.db);
-    ensureWandMilestoneSchema(this.db);
-    ensureIterationPromptSchema(this.db);
-    ensureAiTeamSchema(this.db);
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS conversation_list_state (
-        conversation_id TEXT PRIMARY KEY,
-        pinned_at TEXT,
-        hidden_at TEXT, dissolved_at TEXT, dissolved_by TEXT, deleting INTEGER NOT NULL DEFAULT 0
-      );
-      CREATE TABLE IF NOT EXISTS conversations (
-        id TEXT PRIMARY KEY, owner TEXT NOT NULL, kind TEXT NOT NULL,
-        peer_employee_id TEXT, session_id TEXT, instance_json TEXT NOT NULL
-      );
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_conversation_peer ON conversations(owner, peer_employee_id)
-        WHERE kind = 'dm';
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_conversation_session ON conversations(session_id)
-        WHERE session_id IS NOT NULL;
-      CREATE TABLE IF NOT EXISTS conversation_tasks (
-        conversation_id TEXT NOT NULL, task_id TEXT NOT NULL UNIQUE, linked_at TEXT NOT NULL,
-        PRIMARY KEY(conversation_id, task_id)
-      );
-      CREATE TABLE IF NOT EXISTS conversation_messages (
-        id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, turn_json TEXT NOT NULL, created_at TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_conversation_messages ON conversation_messages(conversation_id, created_at);
-      CREATE TABLE IF NOT EXISTS conversation_requests (
-        id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, receipt_json TEXT NOT NULL, updated_at TEXT NOT NULL
-      );
-    `);
-    const conversationListColumns = new Set((this.db.prepare("PRAGMA table_info(conversation_list_state)").all() as Array<{ name: string }>).map(column => column.name));
-    for (const [name, type] of [["dissolved_at", "TEXT"], ["dissolved_by", "TEXT"], ["deleting", "INTEGER NOT NULL DEFAULT 0"]]) {
-      if (!conversationListColumns.has(name!)) this.db.exec(`ALTER TABLE conversation_list_state ADD COLUMN ${name} ${type}`);
-    }
-    const conversationRunColumns = new Set((this.db.prepare("PRAGMA table_info(ai_team_runs)").all() as Array<{ name: string }>).map((column) => column.name));
-    if (!conversationRunColumns.has("conversation_id")) this.db.exec("ALTER TABLE ai_team_runs ADD COLUMN conversation_id TEXT");
-    if (!conversationRunColumns.has("member_version")) this.db.exec("ALTER TABLE ai_team_runs ADD COLUMN member_version INTEGER");
-    if (!conversationRunColumns.has("round_number")) this.db.exec("ALTER TABLE ai_team_runs ADD COLUMN round_number INTEGER");
-    ensureConnectorSchema(this.db);
+    initializeStorageSchema(this.db);
     this.ensureDefaultPasswordVault();
     this.migrateTaskRecords();
     const memory = this.getUserMemoryState();
     this.memoryCapture = { enabled: memory.enabled, revision: memory.revision };
+    this.ensureDefaultWandMilestone();
   }
 
   directory(): string {
@@ -1499,6 +932,13 @@ export class WandStorage {
   }
 
   close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    for (const listener of this.closeListeners) {
+      try { listener(); } catch { /* finish closing other storage-owned consumers */ }
+    }
+    this.closeListeners.clear();
+    this.taskTitleListeners.clear();
     this.db.close();
   }
 
@@ -1516,6 +956,52 @@ export class WandStorage {
       try { this.db.exec("ROLLBACK"); } catch { /* preserve the original error */ }
       throw error;
     }
+  }
+
+  // ============ Persistent employee schedules ============
+
+  listScheduledTasks(...args: Parameters<ScheduledTaskRepository["listScheduledTasks"]>): ReturnType<ScheduledTaskRepository["listScheduledTasks"]> {
+    return this.schedules.listScheduledTasks(...args);
+  }
+
+  listDueScheduledTasks(...args: Parameters<ScheduledTaskRepository["listDueScheduledTasks"]>): ReturnType<ScheduledTaskRepository["listDueScheduledTasks"]> {
+    return this.schedules.listDueScheduledTasks(...args);
+  }
+
+  getScheduledTask(...args: Parameters<ScheduledTaskRepository["getScheduledTask"]>): ReturnType<ScheduledTaskRepository["getScheduledTask"]> {
+    return this.schedules.getScheduledTask(...args);
+  }
+
+  createScheduledTask(...args: Parameters<ScheduledTaskRepository["createScheduledTask"]>): ReturnType<ScheduledTaskRepository["createScheduledTask"]> {
+    return this.schedules.createScheduledTask(...args);
+  }
+
+  updateScheduledTask(...args: Parameters<ScheduledTaskRepository["updateScheduledTask"]>): ReturnType<ScheduledTaskRepository["updateScheduledTask"]> {
+    return this.schedules.updateScheduledTask(...args);
+  }
+
+  claimScheduledTaskRun(...args: Parameters<ScheduledTaskRepository["claimScheduledTaskRun"]>): ReturnType<ScheduledTaskRepository["claimScheduledTaskRun"]> {
+    return this.schedules.claimScheduledTaskRun(...args);
+  }
+
+  saveScheduledTaskRun(...args: Parameters<ScheduledTaskRepository["saveScheduledTaskRun"]>): ReturnType<ScheduledTaskRepository["saveScheduledTaskRun"]> {
+    return this.schedules.saveScheduledTaskRun(...args);
+  }
+
+  getScheduledTaskRun(...args: Parameters<ScheduledTaskRepository["getScheduledTaskRun"]>): ReturnType<ScheduledTaskRepository["getScheduledTaskRun"]> {
+    return this.schedules.getScheduledTaskRun(...args);
+  }
+
+  listOpenScheduledTaskRuns(...args: Parameters<ScheduledTaskRepository["listOpenScheduledTaskRuns"]>): ReturnType<ScheduledTaskRepository["listOpenScheduledTaskRuns"]> {
+    return this.schedules.listOpenScheduledTaskRuns(...args);
+  }
+
+  getOpenScheduledTaskRunsForSession(...args: Parameters<ScheduledTaskRepository["getOpenScheduledTaskRunsForSession"]>): ReturnType<ScheduledTaskRepository["getOpenScheduledTaskRunsForSession"]> {
+    return this.schedules.getOpenScheduledTaskRunsForSession(...args);
+  }
+
+  listScheduledTaskRuns(...args: Parameters<ScheduledTaskRepository["listScheduledTaskRuns"]>): ReturnType<ScheduledTaskRepository["listScheduledTaskRuns"]> {
+    return this.schedules.listScheduledTaskRuns(...args);
   }
 
   // ============ Stable conversations (no read-side repair) ============
@@ -1977,6 +1463,12 @@ export class WandStorage {
     return rows.map((row) => this.mapSessionRow(row));
   }
 
+  listSessionsByWorkspaceSlim(workspaceId: string): SessionSnapshot[] {
+    const rows = this.db.prepare(`SELECT ${sessionSelectFields(true)} FROM command_sessions
+      WHERE workspace_id = ? ORDER BY started_at DESC`).all(workspaceId) as unknown as SessionRow[];
+    return rows.map(mapSessionCore);
+  }
+
   /** 显式更新某会话的工作空间归属（用于创建时绑定）。 */
   getSessionWorkspace(sessionId: string): Pick<SessionSnapshot, "workspaceId" | "workspaceTaskId"> | null {
     const row = this.db.prepare("SELECT workspace_id, workspace_task_id FROM command_sessions WHERE id = ?")
@@ -2075,6 +1567,12 @@ export class WandStorage {
       `SELECT * FROM (${WORKSPACE_TASK_PROJECTION}) WHERE workspace_id = ?
        ORDER BY created_at DESC, _created_order DESC`,
     ).all(workspaceId) as unknown as WorkspaceTaskRow[];
+    return rows.map(mapWorkspaceTaskRow);
+  }
+
+  listAllWorkspaceTasks(): WorkspaceTask[] {
+    const rows = this.db.prepare(`SELECT * FROM (${WORKSPACE_TASK_PROJECTION})
+      ORDER BY created_at DESC, _created_order DESC`).all() as unknown as WorkspaceTaskRow[];
     return rows.map(mapWorkspaceTaskRow);
   }
 
@@ -2324,6 +1822,7 @@ export class WandStorage {
         JSON.stringify(input.labels ?? []), input.dueDate ?? null, input.milestoneId ?? null,
         max.value + 1, input.agent ? JSON.stringify(input.agent) : null,
         input.executionSubject ? JSON.stringify(input.executionSubject) : null, archivedAt, createdAtValue, createdAtValue);
+    this.notifyTaskTitleChange();
     return this.getWandTask(id)!;
   }
 
@@ -2391,6 +1890,7 @@ export class WandStorage {
       this.db.prepare("UPDATE command_sessions SET workspace_id = ? WHERE workspace_task_id = ?")
         .run(workspaceId, next.workspaceTaskId);
     }
+    this.notifyTaskTitleChange();
     return next;
   }
 
@@ -2780,6 +2280,7 @@ export class WandStorage {
 
   /** Atomic exclusive ownership change; cwd, output and execution are untouched. */
   moveSessionToWorkspaceTask(sessionId: string, taskId: string | null): void {
+    this.notifyTaskTitleChange();
     this.transaction(() => {
       const session = this.getSessionWorkspace(sessionId);
       if (!session) throw new Error("未找到该会话。");
@@ -2811,6 +2312,7 @@ export class WandStorage {
   /** Metadata promotion happens on session creation/move, never on reads or checkpoints. */
   private recordTaskSession(session: SessionSnapshot, newlyAssigned = true): void {
     if (!session.workspaceTaskId) return;
+    this.notifyTaskTitleChange();
     const card = this.getWandTaskByWorkspaceTaskId(session.workspaceTaskId);
     if (!card) return;
     this.db.prepare("INSERT OR IGNORE INTO wand_task_sessions (task_id, session_id, bound_at) VALUES (?, ?, ?)")
@@ -3214,6 +2716,8 @@ export class WandStorage {
   }
 
   private projectDefaultEmployee(employee: SiliconEmployee): SiliconEmployee {
+    // Presentation only: legacy columns stay untouched until an explicit migration.
+    employee = { ...employee, avatar: employeeAvatarValue(employee) };
     if (employee.systemKey !== DEFAULT_EMPLOYEE_KEY) return employee;
     const state = this.getUserMemoryState();
     return defaultEmployeeDefinition(employee.agents, employee.updatedAt, employee,
@@ -3248,7 +2752,9 @@ export class WandStorage {
   /** 内置「系统运维」员工；未创建（或被删除过）时返回 null。 */
   getSystemSiliconEmployee(key: string = SYSTEM_EMPLOYEE_KEY): SiliconEmployee | null {
     const row = this.db.prepare("SELECT * FROM silicon_employees WHERE system_key = ?").get(key) as Record<string, unknown> | undefined;
-    return row ? mapSiliconEmployeeRow(row) : null;
+    if (!row) return null;
+    const employee = mapSiliconEmployeeRow(row);
+    return { ...employee, avatar: employeeAvatarValue(employee) };
   }
 
   /** Seed only when missing; restart never overwrites user profile, candidates, or legacy avatars. */
@@ -3284,13 +2790,36 @@ export class WandStorage {
     return existing;
   }
 
+  /** HR owns recruitment independently; seed from configured system candidates once. */
+  ensureHrEmployee(seedAgents?: WandTaskAgent[]): SiliconEmployee {
+    const existing = this.getSystemSiliconEmployee(HR_EMPLOYEE_KEY);
+    const definition = hrEmployeeDefinition(new Date().toISOString(), existing, seedAgents);
+    if (!existing || existing.name !== definition.name || existing.duty !== definition.duty || existing.prompt !== definition.prompt
+      || existing.avatar !== definition.avatar || existing.archivedAt || !existing.agents.length) {
+      this.saveSiliconEmployee(definition);
+      return definition;
+    }
+    return existing;
+  }
+
   saveSiliconEmployee(employee: SiliconEmployee): void {
     const existing = this.getSiliconEmployeeDefinition(employee.id);
+    const locked = LOCKED_SYSTEM_EMPLOYEE_DEFINITIONS.find((definition) => definition.id === employee.id || definition.systemKey === employee.systemKey);
+    if (locked) {
+      if (employee.id !== locked.id || employee.systemKey !== locked.systemKey) throw new Error("内置员工身份不可修改或冒用。");
+      if (existing && existing.systemKey !== locked.systemKey) throw new Error("内置员工身份冲突，不能覆盖已有记录。");
+      for (const field of ["name", "duty", "prompt", "avatar", "tags"] as const) {
+        if (JSON.stringify(employee[field]) !== JSON.stringify(locked[field])) throw new Error("该员工是内置的，基础资料不可修改。");
+      }
+      if (employee.archivedAt !== undefined) throw new Error("内置员工不可归档。");
+    }
     const target = FIXED_EMPLOYEE_AVATARS.find((entry) => entry.id === employee.id || entry.systemKey === employee.systemKey);
     if (target) {
       if (employee.id !== target.id || employee.systemKey !== target.systemKey) throw new Error("内置员工身份不可修改或冒用。");
       if (existing && !isFixedAvatarEmployee(existing)) throw new Error("内置员工身份冲突，不能覆盖已有记录。");
-      if (employee.avatar !== (existing?.avatar ?? target.avatar)) throw new Error("该员工是内置的，头像不可修改。");
+      if (employee.avatar !== (existing?.avatar ?? target.avatar) && employee.avatar !== employeeAvatarValue(employee)) {
+        throw new Error("该员工是内置的，头像不可修改。");
+      }
       if (existing && JSON.stringify(employee.tags) !== JSON.stringify(existing.tags)) throw new Error("该员工是内置的，标签不可修改。");
       if (employee.archivedAt !== existing?.archivedAt) throw new Error("内置员工不可归档。");
     }
@@ -3316,7 +2845,8 @@ export class WandStorage {
       employee.name,
       employee.duty,
       employee.prompt,
-      employee.avatar,
+      // Accept a canonical read echo without persisting a display projection over a legacy value.
+      target && existing ? existing.avatar : employee.avatar,
       JSON.stringify(employee.agents),
       employee.systemKey ?? null,
       employee.archivedAt ?? null,
@@ -3352,7 +2882,7 @@ export class WandStorage {
   }
 
   archiveSiliconEmployee(id: string, archivedAt = new Date().toISOString()): void {
-    if (isFixedAvatarEmployee(this.getSiliconEmployeeDefinition(id) ?? {})) throw new Error("内置员工不可归档。");
+    if (isBuiltinSiliconEmployee(this.getSiliconEmployeeDefinition(id))) throw new Error("内置员工不可归档。");
     this.db.prepare("UPDATE silicon_employees SET archived_at = ?, updated_at = ? WHERE id = ?").run(
       archivedAt,
       new Date().toISOString(),
@@ -3361,7 +2891,7 @@ export class WandStorage {
   }
 
   unarchiveSiliconEmployee(id: string): void {
-    if (isFixedAvatarEmployee(this.getSiliconEmployeeDefinition(id) ?? {})) throw new Error("内置员工不能恢复归档。");
+    if (isBuiltinSiliconEmployee(this.getSiliconEmployeeDefinition(id))) throw new Error("内置员工不能恢复归档。");
     this.db.prepare("UPDATE silicon_employees SET archived_at = NULL, updated_at = ? WHERE id = ?").run(
       new Date().toISOString(),
       id,
@@ -3369,7 +2899,7 @@ export class WandStorage {
   }
 
   deleteSiliconEmployee(id: string): void {
-    if (isFixedAvatarEmployee(this.getSiliconEmployeeDefinition(id) ?? {})) throw new Error("内置员工不可删除。");
+    if (isBuiltinSiliconEmployee(this.getSiliconEmployeeDefinition(id))) throw new Error("内置员工不可删除。");
     this.db.prepare("DELETE FROM silicon_employees WHERE id = ?").run(id);
   }
 
@@ -4555,73 +4085,11 @@ function mapPasswordItemRow(row: PasswordVaultItemRow): PasswordItemRowFields {
   };
 }
 
-const SCHEMA_MIGRATIONS: ReadonlyArray<[column: string, sql: string]> = [
-  ["session_source", "ALTER TABLE command_sessions ADD COLUMN session_source TEXT NOT NULL DEFAULT 'interactive'"],
-  ["automation_id", "ALTER TABLE command_sessions ADD COLUMN automation_id TEXT"],
-  ["archived", "ALTER TABLE command_sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0"],
-  ["archived_at", "ALTER TABLE command_sessions ADD COLUMN archived_at TEXT"],
-  ["claude_session_id", "ALTER TABLE command_sessions ADD COLUMN claude_session_id TEXT"],
-  ["provider", "ALTER TABLE command_sessions ADD COLUMN provider TEXT"],
-  ["session_kind", "ALTER TABLE command_sessions ADD COLUMN session_kind TEXT NOT NULL DEFAULT 'pty'"],
-  ["runner", "ALTER TABLE command_sessions ADD COLUMN runner TEXT"],
-  ["messages", "ALTER TABLE command_sessions ADD COLUMN messages TEXT"],
-  ["queued_messages", "ALTER TABLE command_sessions ADD COLUMN queued_messages TEXT"],
-  ["queued_message_skills", "ALTER TABLE command_sessions ADD COLUMN queued_message_skills TEXT"],
-  ["structured_state", "ALTER TABLE command_sessions ADD COLUMN structured_state TEXT"],
-  ["resumed_from_session_id", "ALTER TABLE command_sessions ADD COLUMN resumed_from_session_id TEXT"],
-  // Legacy column: never written by current persist helpers. Kept because
-  // schema migrations are additive-only and must not DROP columns.
-  ["resumed_to_session_id", "ALTER TABLE command_sessions ADD COLUMN resumed_to_session_id TEXT"],
-  ["auto_recovered", "ALTER TABLE command_sessions ADD COLUMN auto_recovered INTEGER NOT NULL DEFAULT 0"],
-  ["worktree_enabled", "ALTER TABLE command_sessions ADD COLUMN worktree_enabled INTEGER NOT NULL DEFAULT 0"],
-  ["worktree_info", "ALTER TABLE command_sessions ADD COLUMN worktree_info TEXT"],
-  ["worktree_merge_status", "ALTER TABLE command_sessions ADD COLUMN worktree_merge_status TEXT"],
-  ["worktree_merge_info", "ALTER TABLE command_sessions ADD COLUMN worktree_merge_info TEXT"],
-  ["title", "ALTER TABLE command_sessions ADD COLUMN title TEXT"],
-  ["description", "ALTER TABLE command_sessions ADD COLUMN description TEXT"],
-  ["pty_output_seq", "ALTER TABLE command_sessions ADD COLUMN pty_output_seq INTEGER NOT NULL DEFAULT 0"],
-  ["session_options", `ALTER TABLE command_sessions ADD COLUMN session_options TEXT NOT NULL DEFAULT '{"schemaVersion":1}'`],
-  ["workspace_id", "ALTER TABLE command_sessions ADD COLUMN workspace_id TEXT"],
-  ["workspace_task_id", "ALTER TABLE command_sessions ADD COLUMN workspace_task_id TEXT"],
-  ["completion_revision", "ALTER TABLE command_sessions ADD COLUMN completion_revision INTEGER NOT NULL DEFAULT 0"],
-  ["viewed_completion_revision", "ALTER TABLE command_sessions ADD COLUMN viewed_completion_revision INTEGER NOT NULL DEFAULT 0"],
-];
-
 /** 首页目录组顺序的偏好键（app_config 表，与其它 UI 偏好同一套读写）。 */
 const WORKSPACE_GROUP_ORDER_KEY = "workspaceGroupOrder";
 
 /** Pi 会话默认设置的偏好键，与其它 UI 偏好同一套读写，不出现在 config.json。 */
 const PI_SESSION_DEFAULTS_KEY = "pref:piSessionDefaults";
-
-const AUTH_SESSION_MIGRATIONS: ReadonlyArray<[column: string, sql: string]> = [
-  ["kind", "ALTER TABLE auth_sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'browser-admin'"],
-  ["scopes", `ALTER TABLE auth_sessions ADD COLUMN scopes TEXT NOT NULL DEFAULT '["admin"]'`],
-];
-
-function ensureAuthSessionSchema(db: DatabaseSync): void {
-  const columns = db.prepare("PRAGMA table_info(auth_sessions)").all() as Array<{ name: string }>;
-  const names = new Set(columns.map((column) => column.name));
-  for (const [column, sql] of AUTH_SESSION_MIGRATIONS) {
-    if (!names.has(column)) db.exec(sql);
-  }
-}
-
-function ensureCommandSessionSchema(db: DatabaseSync): void {
-  const columns = db.prepare("PRAGMA table_info(command_sessions)").all() as Array<{ name: string }>;
-  const names = new Set(columns.map((column) => column.name));
-  for (const [column, sql] of SCHEMA_MIGRATIONS) {
-    if (!names.has(column)) {
-      db.exec(sql);
-    }
-  }
-  if (columns.length > 0) {
-    // 侧栏 / 任务面板按 workspace_task_id 反复拉会话：没有索引时每次都是
-    // 46MB 表全扫（单次 ~500ms），而 command_sessions 里有 10MB+ 的 output/
-    // messages 溢出行。索引只加不删，老库首次启动时建一次。
-    db.exec("CREATE INDEX IF NOT EXISTS idx_command_sessions_workspace_task ON command_sessions(workspace_task_id)");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_command_sessions_workspace ON command_sessions(workspace_id)");
-  }
-}
 
 const AUTH_SCOPES = new Set<AuthScope>([
   "admin",

@@ -62,35 +62,27 @@ try {
       return colors;
     })()`);
     assert.ok(contrast.every(pair => pair.ratio >= 4.5), JSON.stringify(contrast));
-    const chrome = await browser.evaluate(`(()=>{const title=document.querySelector('.topbar-session-title'),cwd=document.querySelector('#topbar-cwd');return {title:title.textContent,tool:document.querySelector('.topbar-provider').textContent,cwd:cwd.textContent,full:cwd.getAttribute('aria-label'),overflow:document.documentElement.scrollWidth>innerWidth+1,file:!!document.querySelector('#topbar-file-button'),preview:!!document.querySelector('#topbar-local-preview-button')}})()`);
-    assert.equal(chrome.tool, "Wand Agent"); assert.equal(chrome.cwd, "wand"); assert.match(chrome.full, /\/workspace\/projects\/wand/);
+    const chrome = await browser.evaluate(`(()=>{const title=document.querySelector('.topbar-session-title');return {title:title.textContent,metadata:document.querySelectorAll('.topbar-metadata,.topbar-provider,.topbar-cwd,.session-status-pill,.session-status-elapsed').length,overflow:document.documentElement.scrollWidth>innerWidth+1,file:!!document.querySelector('#topbar-file-button'),preview:!!document.querySelector('#topbar-local-preview-button')}})()`);
+    assert.equal(chrome.title, "阅读完整工具结果并继续这项工作");
+    assert.equal(chrome.metadata, 0, "execution metadata stays below the header");
     assert.ok(chrome.file && chrome.preview); assert.equal(chrome.overflow, false);
+    for (const shell of ["web", "native", "rollback"]) {
+      await browser.evaluate(`document.documentElement.classList.toggle('is-wand-app',${shell === "native"});history.replaceState(null,'',${JSON.stringify(shell === "rollback" ? "?reactUi=0" : "/")})`);
+      const counts = await browser.evaluate(`(()=>{const selectors=['.topbar-metadata','.topbar-provider','.topbar-cwd','.session-status-pill','.session-status-elapsed','.session-status-text','.session-status-silent'];return Object.fromEntries(selectors.map(selector=>[selector,document.querySelectorAll(selector).length]))})()`);
+      assert.ok(Object.values(counts).every(count => count === 0), JSON.stringify({ width, shell, counts }));
+    }
+    await browser.evaluate("document.documentElement.classList.remove('is-wand-app');history.replaceState(null,'','/')");
     await browser.click("#topbar-more-button");
     await browser.wait("!!document.querySelector('#topbar-more-menu')");
-    assert.equal(await browser.evaluate("!!document.querySelector('[data-chat-width-mode=column]')"), width >= 1280);
-    if (width >= 1280) {
-      await browser.click("[data-chat-width-mode=column]");
-      assert.equal(await browser.evaluate("document.documentElement.dataset.chatWidth"), "column");
-      await browser.click("#topbar-more-button"); await browser.wait("!!document.querySelector('[data-chat-width-mode=full]')");
-      await browser.click("[data-chat-width-mode=full]");
-      assert.equal(await browser.evaluate("document.documentElement.dataset.chatWidth"), "full");
-    } else await browser.key("Escape");
+    assert.equal(await browser.evaluate("document.querySelectorAll('[data-chat-width-mode],.chat-width-toggle').length"), 0, "width preference moved to Display settings");
+    await browser.key("Escape");
     await browser.evaluate(`h.fresh([{role:'assistant',uuid:'usage-${width}',createdAt:'2026-10-09T02:00:00Z',completedAt:'2026-10-09T02:00:04Z',content:[{type:'text',text:'这是一条已完成的回复，正文与执行证据仍然可读。'}],usage:{inputTokens:2400,outputTokens:600,cacheReadInputTokens:1200,totalCostUsd:0.01}}])`);
-    await browser.wait("!!document.querySelector('.turn-usage-disclosure')");
-    assert.equal(await browser.evaluate("document.querySelector('.turn-usage-disclosure .ant-collapse-header').getAttribute('aria-expanded')"), "false");
-    await browser.click(".turn-usage-disclosure .ant-collapse-header");
-    await browser.wait("document.querySelector('.turn-usage-summary')?.textContent.includes('2.4k')");
-    await browser.evaluate("h.publish(h.turns());h.settle()");
-    assert.equal(await browser.evaluate("document.querySelector('.turn-usage-disclosure .ant-collapse-header').getAttribute('aria-expanded')"), "true", "stream patches preserve the user's usage choice");
-    await browser.evaluate("h.fresh(h.turns())");
-    assert.equal(await browser.evaluate("document.querySelector('.turn-usage-disclosure .ant-collapse-header').getAttribute('aria-expanded')"), "true", "reopening the same transcript restores the usage preference");
+    await browser.wait("document.querySelector('.chat-message[data-msg-index=\"0\"] .chat-message-content')?.innerText.includes('已完成的回复')");
+    assert.equal(await browser.evaluate("document.querySelectorAll('.turn-usage-summary').length"), 0, "the transcript carries no per-turn usage row");
     if (process.env.WAND_READING_OUTPUT) {
       mkdirSync(process.env.WAND_READING_OUTPUT, { recursive: true });
       await browser.screenshot(`${process.env.WAND_READING_OUTPUT}/reading-usage-${width}.png`);
     }
-    await browser.click(".turn-usage-disclosure .ant-collapse-header");
-    await browser.evaluate("h.publish(h.turns());h.settle()");
-    assert.equal(await browser.evaluate("document.querySelector('.turn-usage-disclosure .ant-collapse-header').getAttribute('aria-expanded')"), "false");
     const before = detailRequests;
     await browser.evaluate(`h.fresh([{role:'assistant',uuid:'image-${width}',content:[{type:'tool_use',id:'shot',name:'screenshot',input:{},activity:{kind:'other',label:'页面截图'}},{type:'tool_result',tool_use_id:'shot',preview:'{"type":"image","data":"iVBORw0KGgoAAAAAAAA...',content:[{type:'image',data:${JSON.stringify(pixel)},mimeType:'image/png'}]}]}])`);
     await browser.click("button.chat-process-summary");

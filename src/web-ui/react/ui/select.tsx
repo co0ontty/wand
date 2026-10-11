@@ -15,7 +15,7 @@ export interface WandSelectOption {
   group?: string;
 }
 
-export interface WandSelectProps {
+export interface WandSelectProps extends Pick<React.ButtonHTMLAttributes<HTMLButtonElement>, "id" | "aria-describedby" | "aria-invalid"> {
   value?: string;
   defaultValue?: string;
   options: ReadonlyArray<WandSelectOption>;
@@ -43,7 +43,7 @@ export interface WandSelectProps {
 
 /** A real button ref and popup-owned search are required by the composer focus lease. */
 export function WandSelect({ value, defaultValue, options, placeholder = "请选择", displayValue, displayTitle,
-  ariaLabel, triggerRef, disabled, searchable, searchPlaceholder = "搜索", className, contentClassName,
+  ariaLabel, id, "aria-describedby": describedBy, "aria-invalid": invalid, triggerRef, disabled, searchable, searchPlaceholder = "搜索", className, contentClassName,
   itemClassName, side = "bottom", align = "start", sideOffset = 6, collisionPadding = 12, popupOwner = ariaLabel, onValueChange, onOpenChange }: WandSelectProps) {
   const portal = usePortalContainer();
   const parentOwner = useParentPopupOwner();
@@ -107,7 +107,7 @@ export function WandSelect({ value, defaultValue, options, placeholder = "请选
       buttonRef.current = node;
       if (typeof triggerRef === "function") return triggerRef(node);
       if (triggerRef) triggerRef.current = node;
-    }} disabled={disabled} className={classNames("wand-ui-select-trigger", className)}
+    }} id={id} aria-describedby={describedBy} aria-invalid={invalid} disabled={disabled} className={classNames("wand-ui-select-trigger", className)}
       data-popup-open={open ? "" : undefined} data-placeholder={selectedValue === undefined && !displayValue ? "" : undefined}
       aria-controls={open ? listId : undefined} role="combobox" aria-haspopup="listbox" aria-expanded={open} aria-label={ariaLabel}
       title={displayTitle ?? shown}>

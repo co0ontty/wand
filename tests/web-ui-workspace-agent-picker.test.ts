@@ -71,7 +71,7 @@ function harness(overrides: Partial<UnifiedExecutionSubjectPickerProps> = {}) {
     "../../provider-identity.js": { AGENT_TOOL_OPTIONS, agentToolDisplayName, agentToolIdFor, agentToolOption },
     "../provider-usage.js": { sortProviderOptions, useProviderUsage: () => ({}) },
     "../new-session/choice-navigation.js": { nextChoice },
-    "./workspace-agent-picker.js": {
+    "./workspace-agent-model.js": {
       WORKSPACE_AGENT_OPTIONS: cliOptions,
       WORKSPACE_KIND_OPTIONS: [
         { value: "structured", label: "结构化", description: "聊天" },

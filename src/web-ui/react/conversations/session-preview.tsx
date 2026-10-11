@@ -7,15 +7,16 @@ import { conversationSessionPreviewLabels } from "../../../conversation-session-
 import { MarkdownPreview } from "../file-preview/markdown.js";
 import { WandButton } from "../ui/index.js";
 import { CONVERSATION_TAIL_PX } from "./presentation.js";
+import { executionFailure } from "./execution-failure.js";
 
 const listeners = new Set<(update: ConversationSessionUpdate) => void>();
 export function notifyConversationSessionPreview(update: ConversationSessionUpdate): void {
   for (const listener of listeners) listener(update);
 }
 
-/** A fixed message viewport, not an embedded session page or a task/group container. */
-export function ConversationSessionReply({ turn, active, onOpen, children }: {
-  turn: ConversationTurn; active: boolean; onOpen(): void; children?: React.ReactNode;
+/** A bounded transcript with its own live controls, not an embedded session page or task container. */
+export function ConversationSessionReply({ turn, active, onOpen, onModelSettings, children }: {
+  turn: ConversationTurn; active: boolean; onOpen(): void; onModelSettings?(event: React.MouseEvent<HTMLButtonElement>): void; children?: React.ReactNode;
 }): React.ReactElement {
   const { token } = theme.useToken();
   const [live, setLive] = React.useState<ConversationSessionUpdate | null>(null);
@@ -39,6 +40,7 @@ export function ConversationSessionReply({ turn, active, onOpen, children }: {
   const preview = live?.sessionId === sessionId ? live.preview : turn.sessionPreview;
   const unavailable = preview?.status === "unavailable";
   const text = preview?.text || "消息已接收，正在启动独立会话。";
+  const failure = preview?.status === "failed" ? executionFailure(text) : null;
   React.useLayoutEffect(() => {
     const element = body.current;
     if (!element) return;
@@ -57,13 +59,18 @@ export function ConversationSessionReply({ turn, active, onOpen, children }: {
       <Typography.Text strong ellipsis title={turn.sessionLink?.title}>{turn.sessionLink?.title}</Typography.Text>
       <div ref={body} role="region" tabIndex={0} aria-label="会话实时回复" style={{ minHeight: 0, maxHeight: "min(60dvh, 520px)", overflow: "auto", overflowWrap: "anywhere" }}
         onScroll={event => { const el = event.currentTarget; geometry.current = { scrollHeight: el.scrollHeight, clientHeight: el.clientHeight, scrollTop: el.scrollTop }; }}>
-        <MarkdownPreview content={text} variant="inline" wrap/>{children}
+        {failure ? <div className="conversation-execution-failure">
+          <Typography.Paragraph type="danger">{failure.summary}</Typography.Paragraph>
+          <WandButton size="small" onClick={failure.action === "model" && onModelSettings ? onModelSettings : onOpen}>{failure.action === "model" && !onModelSettings ? "查看执行记录" : failure.actionLabel}</WandButton>
+          <details><summary>错误详情</summary><pre>{text}</pre></details>
+        </div> : <MarkdownPreview content={text} variant="inline" wrap fileContext={{ sessionId }}/ >}
       </div>
+      {children ? <div className="conversation-session-actions">{children}</div> : null}
       <Flex justify="space-between" align="center" gap={token.marginXS} style={{ flexShrink: 0 }}>
         <Typography.Text role="status" type={preview?.status === "failed" ? "danger" : "secondary"}>
           {conversationSessionPreviewLabels[preview?.status ?? "starting"]}
         </Typography.Text>
-        <WandButton size="small" disabled={unavailable} title="进入此工作的执行会话，补充指令会继续同一项工作" onClick={onOpen}>打开会话继续</WandButton>
+        <WandButton size="small" disabled={unavailable} title="进入此工作的执行会话，补充指令会继续同一项工作" onClick={onOpen}>继续此工作</WandButton>
       </Flex>
     </>}/>;
 }

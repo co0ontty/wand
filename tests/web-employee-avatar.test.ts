@@ -53,6 +53,14 @@ test("an SDK employee badge identifies Wand Agent rather than Pi CLI", () => {
   const html = renderToStaticMarkup(createElement(EmployeeAvatar, { employee: sdkEmployee }));
   assert.match(html, /aria-label="Wand Agent"/);
   assert.doesNotMatch(html, /aria-label="Pi CLI"/);
+  assert.match(html, /data-wand-brand="pixel-cat"/);
+  assert.doesNotMatch(html, /data-provider-logo="pi"/);
+  const actual = renderToStaticMarkup(createElement(EmployeeAvatar, { employee, provider: "pi", engine: "core", size: "lg" }));
+  assert.match(actual, /aria-label="Wand Agent"/);
+  assert.match(actual, /data-wand-brand="pixel-cat"/);
+  const cli = renderToStaticMarkup(createElement(EmployeeAvatar, { employee: sdkEmployee, provider: "pi", engine: "cli" }));
+  assert.match(cli, /aria-label="Pi CLI"/);
+  assert.match(cli, /data-provider-logo="pi"/);
 });
 
 test("recent sidebar employee avatars show identity without a preferred CLI badge", () => {

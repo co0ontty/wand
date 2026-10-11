@@ -61,7 +61,7 @@ export function ComposerConfigControl({ mount }: { mount: ComposerConfigMount })
             {selectHost(scope, "model")}
           </span>
           {showAdvanced && (
-            <WandIconButton
+            <WandIconButton size="medium"
               type="button"
               data-models-refresh=""
               data-models-refresh-scope={scope}

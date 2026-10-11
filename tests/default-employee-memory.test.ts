@@ -9,6 +9,7 @@ import { DEFAULT_EMPLOYEE_ID, DEFAULT_EMPLOYEE_KEY, DEFAULT_EMPLOYEE_NAME, SYSTE
 import { defaultConfig, loadConfigWithStorage } from "../src/config.js";
 import { DEFAULT_EMPLOYEE_PROMPT } from "../src/default-employee.js";
 import { SPEECH_POLISHER_ID } from "../src/speech-polisher-identity.js";
+import { HR_EMPLOYEE_ID } from "../src/hr-employee-identity.js";
 import { DECISION_EXPERT_ID, DECISION_EXPERT_KEY } from "../src/decision-expert-identity.js";
 import { dispatchAgentForTask } from "../src/agent-dispatch.js";
 import { recordIterationPrompt, whenIterationPromptsSettled } from "../src/iteration-log.js";
@@ -62,7 +63,7 @@ test("default partner is seeded alongside ops, idempotent and preserves candidat
   storage.saveSiliconEmployee({ ...decisionExpert, agents: decisionCandidates });
   storage.saveSiliconEmployee({ ...role, agents: [CODEX, PI] });
   await loadConfigWithStorage(join(root, "config.json"), storage);
-  assert.deepEqual(storage.listSiliconEmployees().map((employee) => employee.id), [SYSTEM_EMPLOYEE_ID, DEFAULT_EMPLOYEE_ID, DECISION_EXPERT_ID, SPEECH_POLISHER_ID]);
+  assert.deepEqual(storage.listSiliconEmployees().map((employee) => employee.id), [SYSTEM_EMPLOYEE_ID, DEFAULT_EMPLOYEE_ID, DECISION_EXPERT_ID, SPEECH_POLISHER_ID, HR_EMPLOYEE_ID]);
   assert.deepEqual(storage.getDefaultSiliconEmployee()?.agents, [CODEX, PI]);
   assert.equal(storage.getSystemSiliconEmployee(DECISION_EXPERT_KEY)?.id, decisionExpert.id);
   assert.deepEqual(storage.getSystemSiliconEmployee(DECISION_EXPERT_KEY)?.agents, decisionCandidates);

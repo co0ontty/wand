@@ -41,7 +41,7 @@ if (!existsSync(path.join(root, "dist", "web-ui", "index.js"))) {
 }
 
 const { renderApp } = await import("../dist/web-ui/index.js");
-const { getScriptAsset, getAiTeamsChunk, getPlushAvatarChunk, getThemePreloadAsset } = await import("../dist/web-ui/scripts.js");
+const { getScriptAsset, getAiTeamsChunk, getPlushAvatarChunk, getThemePreloadAsset, getBrowserModuleManifest, getBrowserModule } = await import("../dist/web-ui/scripts.js");
 const { getStylesAsset } = await import("../dist/web-ui/styles.js");
 const { EMBEDDED_WEB_ASSETS } = await import("../dist/web-ui/embedded-assets.js");
 
@@ -50,10 +50,11 @@ const html = renderApp(configPath);
 const js = getScriptAsset(configPath);
 const css = getStylesAsset();
 const lazy = getAiTeamsChunk();
+const modules = getBrowserModuleManifest();
 
-// The first-load limit includes the terminal and QR assets, which the shell
-// requests unconditionally. Do not silently move bytes out of the inline
-// budget into these files. The optional team chunk has its own limit.
+// Keep the existing conservative terminal/QR allowance even though these
+// vendors load on use. Every eager ESM byte counts toward first load; every
+// optional ESM byte counts toward both per-module and aggregate limits.
 const BUDGET = {
   html: 4_096,
   // 工作区新建会话增加任务选择、名称和失败重试绑定：约增加 1 KB gzip（0.1%）。
@@ -74,9 +75,19 @@ const BUDGET = {
   // (actual 1,092,331 B), with all shell/vendor bytes and cache rules unchanged.
   // Shared composer identity projection: measured 965,695 B gzip (+63 B over
   // the prior limit). Reserve 1 KiB for this feature; firstLoad stays unchanged.
-  js: 966_656,
+  // Activity roots and compact identity headers: measured 966,809 B gzip,
+  // 153 B above the prior allowance. Reserve 512 B (0.05%) for this refinement;
+  // firstLoad stays 1,140,000 B (actual 1,094,703 B), with all assets still metered.
+  // app.js is now only the config/bootstrap script. Meter the whole ESM graph.
+  js: 4_096,
+  // Second pass removes explorer/welcome/configuration/editor implementations
+  // from cold JS. Keep the reduced boundary from growing back unnoticed.
+  // Third pass moves the session renderer and split-terminal view out of cold JS.
+  runtime: 730_000,
+  module: 110_000,
+  allModules: 1_040_000,
   css: 110_000,
-  firstLoad: 1_140_000,
+  firstLoad: 860_000,
   // The team chunk now also contains employee management and candidate editors.
   // Measured gzip: 38,007 B (was capped at 35,000 B); 40,000 B leaves ~5% headroom.
   // This changes only the on-demand allowance (+5,000 B), not the shell's cold
@@ -105,12 +116,16 @@ const BUDGET = {
   // True 3D identity runtime (Three.js + model) is requested only for visible
   // plush avatars. Measure it explicitly rather than hiding it in vendor bytes.
   // Measured 145,152 B gzip with Three.js 0.186.1; ~6% headroom.
+  // Composer page-turn sheets, bound 3D stationery and matching plush mittens:
+  // measured 155,172 B gzip, 1,572 B above the old lazy allowance. Reserve
+  // 3 KiB for this feature; firstLoad and ESM aggregate budgets stay unchanged.
   plush: 156_672,
 };
 const gzipBytes = (content) => gzipSync(Buffer.from(content, "utf8")).length;
 const rows = [
   ["HTML (repeat)", html, BUDGET.html],
   ["app.js (cached)", js.content, BUDGET.js],
+  ...modules.files.map(file => [`${file} (${modules.eager.includes(file) ? "eager" : "lazy"})`, getBrowserModule(file), modules.eager.includes(file) ? BUDGET.runtime : BUDGET.module]),
   ["app.css (cached)", css.content, BUDGET.css],
   ["theme.js (cached)", getThemePreloadAsset().content, 8_192],
   ...Object.entries(EMBEDDED_WEB_ASSETS.vendor).map(([name, asset]) => [name, asset.content, null]),
@@ -134,7 +149,11 @@ for (const [name, content, limit] of rows) {
 }
 const vendorBytes = [...sizes.entries()].filter(([name]) => name.startsWith("/vendor/"))
   .reduce((total, [, size]) => total + size, 0);
-const firstLoad = sizes.get("HTML (repeat)") + sizes.get("app.js (cached)")
+const eagerModuleBytes = modules.eager.reduce((total, file) => total + sizes.get(`${file} (eager)`), 0);
+const allModuleBytes = modules.files.reduce((total, file) => total + sizes.get(`${file} (${modules.eager.includes(file) ? "eager" : "lazy"})`), 0);
+if (allModuleBytes > BUDGET.allModules) failures.push(`all ESM modules: ${allModuleBytes} B > ${BUDGET.allModules} B`);
+console.log(`  all ESM modules gzip ${kib(allModuleBytes)} (${allModuleBytes} B)`);
+const firstLoad = eagerModuleBytes + sizes.get("HTML (repeat)") + sizes.get("app.js (cached)")
   + sizes.get("app.css (cached)") + sizes.get("theme.js (cached)") + vendorBytes;
 console.log(`  first load (HTML + app + vendor) gzip ${kib(firstLoad)} (${firstLoad} B)`);
 if (firstLoad > BUDGET.firstLoad) {
@@ -147,7 +166,7 @@ const reportDirectory = path.join(root, "output", "web-ui-library-migration");
 mkdirSync(reportDirectory, { recursive: true });
 writeFileSync(path.join(reportDirectory, "bundle-budget.json"), JSON.stringify({
   node: process.version, zlib: process.versions.zlib, measurements,
-  vendorBytes, firstLoad, firstLoadLimit: BUDGET.firstLoad, failures,
+  eagerModuleBytes, allModuleBytes, vendorBytes, firstLoad, firstLoadLimit: BUDGET.firstLoad, failures,
 }, null, 2));
 if (failures.length > 0) {
   console.error("\n[bundle-budget] FAILED:");

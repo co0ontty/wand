@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { statSync, rmSync, existsSync, realpathSync } from "node:fs";
-import { resolve, sep } from "node:path";
+import { isAbsolute, resolve, sep } from "node:path";
 import { AI_TEAM_ACTIVE_RUN_STATUSES, AI_TEAM_DEFAULT_MAX_STEPS, AI_TEAM_MAX_MEMBERS,
   memberAgents, type AiTeam, type AiTeamMember, type AiTeamRun } from "./ai-team-types.js";
 import { freezeTeamEmployees, projectTeamEmployees, requireTeamEmployee } from "./ai-team-employee-binding.js";
@@ -13,7 +13,7 @@ import { getDefaultModelForProvider } from "./config.js";
 import { defaultModelGroupSelector } from "./model-groups.js";
 import { getErrorMessage } from "./error-utils.js";
 import { resolveSessionCwd } from "./session-cwd.js";
-import { resolveWorkspaceIdForNewSession } from "./workspace-binding.js";
+import { isGlobalWorkspace, normalizeProjectCwd, resolveWorkspaceIdForNewSession } from "./workspace-binding.js";
 import { CONVERSATION_SESSION_PREFIX, conversationSessionPreview } from "./conversation-session-preview.js";
 import { conversationTaskLiveText } from "./conversation-task-preview.js";
 import { selectEmployeeCandidate } from "./silicon-employee-dispatch.js";
@@ -40,6 +40,13 @@ interface ConversationDispatchInput {
   cwd?: string;
   memberVersion?: number;
   continueTaskId?: string;
+}
+
+/** Internal execution context; HTTP conversation input does not expose this override. */
+interface ConversationExecutionTarget {
+  workspaceId?: string;
+  title?: string;
+  scheduled?: true;
 }
 
 const now = (): string => new Date().toISOString();
@@ -216,9 +223,12 @@ export class ConversationService {
     const messageAt = [instance.updatedAt, last?.createdAt ?? "", ...tasks.flatMap((t) => t.runs.map((r) => r.updatedAt))].sort().at(-1) ?? "";
     const title = instance.kind === "dm" ? employee?.name ?? instance.name
       : instance.nameSource === "custom" ? instance.name : tasks.at(-1)?.task.title ?? instance.name;
+    // 私聊标题已说明对方身份；只保留自己的署名，群聊仍需区分发言人。
+    const previewAuthor = last?.role === "user" ? `${this.selfName()}：`
+      : instance.kind === "group" && last ? `${last.author?.name ?? "系统"}：` : "";
     return { ...instance, ...this.storage.conversationListState(instance.id), team: instance.team ? projectTeamEmployees(instance.team, this.storage) : null,
       title, unavailableReason, memberUnavailableReasons: this.memberReasons(instance), tasks,
-      preview: last ? `${last.role === "user" ? this.selfName() : last.author?.name ?? "系统"}：${lastText.slice(0, 160)}`
+      preview: last ? `${previewAuthor}${lastText.slice(0, 160)}`
         : instance.kind === "group" ? "群已建立，尚未派任务" : "还没有消息", messageAt };
   }
 
@@ -515,10 +525,29 @@ export class ConversationService {
     return session;
   }
 
-  send(id: string, requestId: string, input: string, target: ConversationTarget, explicitCwd?: string, echo = true): Promise<ConversationReceipt> {
-    return this.request(requestId, "send", { input, target, explicitCwd, echo }, id, async (receipt, commit) => {
+  send(id: string, requestId: string, input: string, target: ConversationTarget, explicitCwd?: string, echo = true,
+    executionTarget?: ConversationExecutionTarget): Promise<ConversationReceipt> {
+    return this.request(requestId, "send", { input, target, explicitCwd, echo,
+      ...(executionTarget?.workspaceId ? { workspaceId: executionTarget.workspaceId } : {}),
+      ...(executionTarget?.title !== undefined ? { title: executionTarget.title } : {}),
+      ...(executionTarget?.scheduled ? { scheduled: true } : {}) }, id, async (receipt, commit) => {
       const text = shortText(input, "消息", 256_000, true);
       const instance = this.requireInstance(id);
+      let workspaceId: string | undefined;
+      if (executionTarget) {
+        if (instance.kind !== "dm" || target) throw new Error("指定工作项目仅用于员工执行。");
+      }
+      if (executionTarget?.workspaceId !== undefined) {
+        workspaceId = shortText(executionTarget.workspaceId, "执行项目", 160, true);
+        const workspace = this.storage.getWorkspace(workspaceId);
+        if (!workspace || isGlobalWorkspace(workspace)) throw new Error("执行项目不存在或不可用，请重新选择项目。");
+        if (!explicitCwd?.trim() || !workspace.cwd.trim() || !isAbsolute(workspace.cwd.trim())) {
+          throw new Error("指定工作项目需要有效的绝对执行目录。");
+        }
+        const cwd = this.cwd(explicitCwd);
+        const workspaceCwd = resolveSessionCwd(workspace.cwd, undefined);
+        if (normalizeProjectCwd(cwd) !== normalizeProjectCwd(workspaceCwd)) throw new Error("执行项目目录已变更，请核对执行位置。");
+      }
       if (target) {
         const run = this.requireTarget(instance, target);
         if (!AI_TEAM_ACTIVE_RUN_STATUSES.includes(run.status)) throw new Error("本轮已结束，请显式选择群内沟通或继续此任务。");
@@ -532,7 +561,8 @@ export class ConversationService {
         return;
       }
       if (instance.kind === "dm") {
-        this.startMessageSession(instance, requestId, text, explicitCwd, receipt, commit);
+        this.startMessageSession(instance, requestId, text, explicitCwd, receipt, commit,
+          executionTarget ? { ...executionTarget, workspaceId } : undefined);
         return;
       }
       if (instance.kind === "group" && instance.team) {
@@ -574,7 +604,7 @@ export class ConversationService {
 
   /** One IM message is one fresh model context. No task, team, relay or previous DM history. */
   private startMessageSession(instance: ConversationInstance, requestId: string, input: string, explicitCwd: string | undefined,
-    receipt: ConversationReceipt, commit: () => void): void {
+    receipt: ConversationReceipt, commit: () => void, executionTarget?: ConversationExecutionTarget): void {
     requireTeamEmployee(this.storage, instance.peerEmployeeId ?? "");
     const employee = this.storage.getSiliconEmployee(instance.peerEmployeeId!)!;
     const selected = selectEmployeeCandidate(employee), agent = selected.agent;
@@ -582,13 +612,14 @@ export class ConversationService {
     const model = agent.model === "default"
       ? defaultModelGroupSelector(this.deps.config.modelGroups, agent.provider, getDefaultModelForProvider(this.deps.config, agent.provider))
         || getDefaultModelForProvider(this.deps.config, agent.provider) || undefined : agent.model;
-    const title = provisionalTaskTitleFromDescription(conversationMessageBody(input)) || "新会话";
+    const title = shortText(executionTarget?.title, "会话标题", 200)
+      || provisionalTaskTitleFromDescription(conversationMessageBody(input)) || "新会话";
     let session: SessionSnapshot | undefined;
     try {
       this.storage.acceptConversationSession(instance, () => {
         session = this.deps.structured.createSession({ title, cwd, provider: agent.provider, mode: agent.mode, model,
-          thinkingEffort: agent.thinkingEffort, worktreeEnabled: false, sessionSource: "interactive",
-          workspaceId: resolveWorkspaceIdForNewSession(this.storage, cwd),
+          thinkingEffort: agent.thinkingEffort, worktreeEnabled: false, sessionSource: executionTarget?.scheduled ? "automation" : "interactive",
+          workspaceId: resolveWorkspaceIdForNewSession(this.storage, cwd, executionTarget?.workspaceId),
           automationId: `${CONVERSATION_SESSION_PREFIX}${requestId}`, employeeId: employee.id,
           employeeName: employee.name, employeeAvatar: employee.avatar, employeeCandidates: employee.agents,
           employeeCandidateIndex: selected.index, systemPrompt: employee.prompt });

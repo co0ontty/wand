@@ -13,15 +13,65 @@ import {
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { runInNewContext } from "node:vm";
+import { transformSync } from "esbuild";
 
 import {
   buildPackageUpdateInfo,
+  checkPackageUpdateAsync,
+  checkPackageUpdateSync,
   installPackageGloballySync,
   requiredUpdateFreeBytes,
   resolveGlobalWandBin,
 } from "../src/npm-update-utils.js";
 
 const MIB = 1024 * 1024;
+
+test("stable never accepts prereleases and installs the exact checked version", () => {
+  for (const invalid of ["4.90.0-beta.1", "4.90.0-debug.1", "garbage", "4.90.0\n4.91.0", "04.90.0"]) {
+    const info = buildPackageUpdateInfo("4.89.4", "stable", invalid);
+    assert.equal(info.latest, null);
+    assert.equal(info.updateAvailable, false);
+  }
+  const stable = buildPackageUpdateInfo("4.89.4", "stable", "4.89.5");
+  assert.equal(stable.installSpec, "@co0ontty/wand@4.89.5");
+  const beta = buildPackageUpdateInfo("4.89.4", "beta", "4.89.5-beta.12.1.gabcdef0");
+  assert.equal(beta.updateAvailable, true);
+  assert.equal(beta.installSpec, "@co0ontty/wand@4.89.5-beta.12.1.gabcdef0");
+  assert.equal(buildPackageUpdateInfo(beta.latest!, "beta", "4.89.5-beta.13.1.g0000000").updateAvailable, true);
+  assert.equal(buildPackageUpdateInfo(beta.latest!, "stable", "4.89.5").updateAvailable, true);
+  // Disabling Beta stops prerelease updates; returning to an older stable is explicit reinstall.
+  assert.equal(buildPackageUpdateInfo(beta.latest!, "stable", "4.89.4").updateAvailable, false);
+  assert.equal(buildPackageUpdateInfo("4.89.4", "beta", null).latest, null);
+});
+
+test("sync and async checks select only the requested npm dist-tag", async (t) => {
+  if (process.platform === "win32") return t.skip("POSIX npm fixture");
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-channel-"));
+  const bin = path.join(root, "npm");
+  const previous = process.env.WAND_NPM_BIN;
+  t.after(() => {
+    if (previous === undefined) delete process.env.WAND_NPM_BIN;
+    else process.env.WAND_NPM_BIN = previous;
+    rmSync(root, { recursive: true, force: true });
+  });
+  writeFileSync(bin, `#!/bin/sh
+case "$2" in
+  @co0ontty/wand@latest) echo 4.89.4 ;;
+  @co0ontty/wand@beta) echo 4.89.5-beta.12.1.gabcdef0 ;;
+  *) exit 1 ;;
+esac
+`);
+  chmodSync(bin, 0o755);
+  process.env.WAND_NPM_BIN = bin;
+  for (const channel of ["stable", "beta"] as const) {
+    const sync = checkPackageUpdateSync("4.89.3", channel);
+    const async = await checkPackageUpdateAsync("4.89.3", channel);
+    assert.deepEqual(async, sync);
+    assert.equal(sync.distTag, channel === "beta" ? "beta" : "latest");
+    assert.equal(sync.latest, channel === "beta" ? "4.89.5-beta.12.1.gabcdef0" : "4.89.4");
+  }
+});
 
 test("npm updates move forward without downgrading local or debug builds", () => {
   assert.equal(buildPackageUpdateInfo("2.0.0", "stable", "3.0.0").updateAvailable, true);
@@ -34,6 +84,21 @@ test("npm updates move forward without downgrading local or debug builds", () =>
 
   assert.equal(buildPackageUpdateInfo("4.0.0-beta.local", "beta", "3.0.0-beta.remote").updateAvailable, false);
   assert.equal(buildPackageUpdateInfo("3.0.0-beta.remote", "beta", "3.0.0-beta.remote").updateAvailable, false);
+});
+
+test("server update checking follows the immutable running build, not stale package metadata", async () => {
+  const source = readFileSync(new URL("../src/server.ts", import.meta.url), "utf8");
+  const check = source.match(/async function checkLatestPackageVersion\([\s\S]*?\n\}/)?.[0];
+  assert.ok(check);
+  const compiled = transformSync(check, { loader: "ts" }).code;
+  const running = "4.89.5-debug.t10101630";
+  const info = await runInNewContext(compiled + "\ncheckLatestPackageVersion('stable', true)", {
+    PKG_VERSION: "4.89.2", DISPLAY_VERSION: running, CACHE_TTL_MS: 600_000,
+    packageUpdateCache: new Map(),
+    checkPackageUpdateAsync: async (current: string) => buildPackageUpdateInfo(current, "stable", "4.89.5"),
+  });
+  assert.equal(info.current, running);
+  assert.equal(info.updateAvailable, false, "equal stable release must not replace this newer running Beta");
 });
 
 test("requiredUpdateFreeBytes keeps rollback and reserve headroom", () => {

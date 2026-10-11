@@ -1,3 +1,6 @@
+import { canArchiveTask } from "./task-archive-policy.js";
+import { TaskReadModel } from "./task-read-model.js";
+import { taskTitleService, refreshAutoBoardTaskTitles } from "./task-title-service.js";
 import type { Express } from "express";
 import { dispatchAgentForTask, resolveTaskDispatchTarget } from "./agent-dispatch.js";
 import { asyncRoute } from "./express-async.js";
@@ -9,7 +12,7 @@ import { parseWandTaskAgent, type WandStorage } from "./storage.js";
 import { defaultMilestoneIdForWrite, resolvedMilestoneFields, scopedMilestoneId } from "./milestone-scope.js";
 import { generateWandTaskTitle, provisionalTaskTitleFromDescription, TASK_TITLE_MAX_LENGTH } from "./task-title.js";
 import { recordIterationPromptForTask } from "./iteration-log.js";
-import type { QuickCommitAiOptions } from "./git-quick-commit.js";
+import type { QuickCommitAiOptions } from "./ai-text-runner.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
 import type { OpenRouterFreeModelsService } from "./openrouter-free-models.js";
 import type { SessionRegistry } from "./session-registry.js";
@@ -21,7 +24,6 @@ import { selectEmployeeCandidate } from "./silicon-employee-dispatch.js";
 import { defaultRoleForCli } from "./default-employee.js";
 import type { TaskExecutionSubject, WandTaskAgent, WandTaskAgentEngine, WandTaskAgentKind, WandTaskAgentMode, WandTaskPriority, WandTaskStatus, WandTaskTitleSource } from "./task-types.js";
 import { DEFAULT_WAND_TASK_AGENT_KIND, DEFAULT_WAND_TASK_AGENT_MODE, DEFAULT_WAND_TASK_PRIORITY, isWandTaskAgentEngine, isWandTaskAgentKind, isWandTaskAgentMode, normalizeWandTaskAgentMode, WAND_MILESTONE_NAME_MAX_LENGTH } from "./task-types.js";
-import { isAutoNameableBoardTask, taskAutoNameSignature, taskAutoNameSourceText } from "./wand-task-sync.js";
 import type { SessionSnapshot, WandConfig } from "./types.js";
 import { isSessionProvider } from "./session-provider.js";
 import { isThinkingEffort } from "./structured-provider-common.js";
@@ -222,16 +224,17 @@ interface TaskDtoDeps {
   sessions?: SessionRegistry;
 }
 
-function taskDto({ storage, sessions }: TaskDtoDeps, task: ReturnType<WandStorage["getWandTask"]>) {
+function taskDto({ storage, sessions }: TaskDtoDeps, task: ReturnType<WandStorage["getWandTask"]>, model?: TaskReadModel) {
   if (!task) return null;
-  const workspace = task.workspaceId ? storage.getWorkspace(task.workspaceId) : null;
-  const sessionIds = storage.listWandTaskSessionIds(task.id);
-  const milestone = resolvedMilestoneFields(storage, task.milestoneId);
+  const workspace = task.workspaceId ? (model ? model.workspaces.get(task.workspaceId) : storage.getWorkspace(task.workspaceId)) : null;
+  const sessionIds = model ? model.taskSessions(task).map(session => session.id) : storage.listWandTaskSessionIds(task.id);
+  const milestone = model ? model.milestone(task.milestoneId) : resolvedMilestoneFields(storage, task.milestoneId);
   return {
     ...task,
+    canArchive: model ? model.canArchive(task) : canArchiveTask(storage, sessions, task.id),
     sessionIds,
     sessions: sessionIds.flatMap((id) => {
-      const session = sessions?.getLatest(id) ?? storage.getSession(id);
+      const session = model ? model.sessionsById.get(id) : sessions?.getSlim(id) ?? storage.getSessionSlim(id);
       return session ? [taskSessionSummary(session)] : [];
     }),
     workspace: workspace
@@ -264,119 +267,20 @@ function taskSessionSummary(session: SessionSnapshot) {
   };
 }
 
-/**
- * 用户没写标题时，先用描述/会话内容当占位标题，再由后台模型总结一个更好的。
- * 全程不阻塞创建请求：失败只是保留占位标题，不返回错误、也不覆盖用户后来改的标题。
- * 多次总结会排队而不是丢弃，保证每张卡片最终都会拿到标题。
- */
-let titleGenerationChain: Promise<void> = Promise.resolve();
-
-function scheduleWandTaskTitleGeneration(
-  storage: WandStorage,
-  taskId: string,
-  source: string,
-  signature: string,
-  options: AutoTaskTitleOptions,
-): void {
-  const generateTitle = options.generateTitle ?? generateWandTaskTitle;
-  const cwd = options.cwd || options.config?.defaultCwd || process.cwd();
-  const run = async (): Promise<void> => {
-    try {
-      const pending = storage.getWandTask(taskId);
-      // 排队期间可能移走 Agent，只剩空白终端；此时也不应再启动总结。
-      if (!pending || !taskAutoNameSourceText(storage, pending)) return;
-      const title = await generateTitle(source, cwd, options.config?.language ?? "", taskTitleAiOptions(options.config, storage, options.free));
-      const current = storage.getWandTask(taskId);
-      // 用户已经自己写了标题（原生端 / 面板编辑）就不要覆盖。
-      if (!current || current.titleSource !== "auto") return;
-      // 命名输入已经变了（新增会话 / 会话内容更新）：这次是过期结果，交给下一轮。
-      if (current.autoTitleSignature !== signature) return;
-      if (!taskAutoNameSourceText(storage, current)) return;
-      const clipped = title.slice(0, TASK_TITLE_MAX_LENGTH);
-      if (!clipped || clipped === current.title) return;
-      storage.updateWandTask(taskId, { title: clipped });
-    } catch (error) {
-      console.error(`[WandTask] Failed to auto-generate title for ${taskId}:`, getErrorMessage(error));
-    }
-  };
-  titleGenerationChain = titleGenerationChain.then(run, run);
-}
-
-/** 等待排队中的标题生成全部结束；只有测试用，避免用例轮询。 */
-export function whenWandTaskTitlesSettled(): Promise<void> {
-  return titleGenerationChain;
-}
-
-export interface AutoTaskTitleOptions {
-  config?: WandConfig;
-  free?: Pick<OpenRouterFreeModelsService, "resolveForCall">;
-  /** 可注入的标题生成器；测试里换成同步桩，避免真的起 CLI。 */
-  generateTitle?: typeof generateWandTaskTitle;
-  /** 未从任务所属工作区解析到目录时的兜底 cwd。 */
-  cwd?: string;
-}
-
-/**
- * 扫描标题仍可自动命名的看板任务（titleSource=auto，或仍是占位名的历史卡片）：
- * 先用任务描述 + 所有绑定会话的内容立即改掉占位名，再交给后台模型总结更贴切的标题。
- * 同一个输入指纹只处理一次：内容没变就跳过，也避免自动标题与模型结果来回震荡。
- * 用户建任务时写了名字、或事后改过名（titleSource=user 且不是占位名）的任务永不进入这里。
- */
-export function refreshAutoBoardTaskTitles(storage: WandStorage, options: AutoTaskTitleOptions = {}): void {
-  for (const card of storage.listWandTasks()) {
-    if (!isAutoNameableBoardTask(card)) continue;
-    const source = taskAutoNameSourceText(storage, card);
-    if (!source) continue;
-    const signature = taskAutoNameSignature(source);
-    if (card.autoTitleSignature === signature) continue;
-    const provisional = provisionalTaskTitleFromDescription(source);
-    storage.updateWandTask(card.id, {
-      titleSource: "auto",
-      autoTitleSignature: signature,
-      ...(provisional && provisional !== card.title ? { title: provisional } : {}),
-    });
-    // 未启用模型（如部分只验证占位改名的单测）时只保留立即生效的占位标题。
-    if (!options.generateTitle && !options.config) continue;
-    const cwd = options.cwd
-      || (card.workspaceId ? storage.getWorkspace(card.workspaceId)?.cwd : undefined);
-    scheduleWandTaskTitleGeneration(storage, card.id, source, signature, {
-      cwd,
-      config: options.config,
-      generateTitle: options.generateTitle,
-      free: options.free,
-    });
-  }
-}
-
-/** 自动生成标题没有会话上下文，按「默认 provider + 默认模型」解析，与提示词优化一致。 */
-function taskTitleAiOptions(config?: WandConfig, storage?: WandStorage, free?: AutoTaskTitleOptions["free"]): QuickCommitAiOptions {
-  if (!config) return {};
-  const provider = config.defaultProvider ?? "claude";
-  const defaultSession = {
-    provider,
-    structuredState: undefined,
-    runner: undefined,
-    command: provider === "qoder" ? "qodercli" : provider,
-    selectedModel: null,
-    thinkingEffort: config.defaultThinkingEffort,
-  };
-  return resolveSystemAiContext(defaultSession, config, storage?.getSystemSiliconEmployee() ?? null, free);
-}
+export { refreshAutoBoardTaskTitles, whenWandTaskTitlesSettled } from "./task-title-service.js";
+export type { AutoTaskTitleOptions } from "./task-title-service.js";
 
 export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): void {
   const { storage, sessions, structured, processes, config, aiTeams } = deps;
+  taskTitleService(storage, { config, generateTitle: deps.generateTitle, free: deps.free });
   const dto = (task: ReturnType<WandStorage["getWandTask"]>) => taskDto(deps, task);
 
   app.get("/api/wand-tasks", (req, res) => {
-    try {
-      // 侧栏建的任务 / 后续新增的会话都会在这里补上自动标题。
-      refreshAutoBoardTaskTitles(storage, { config, generateTitle: deps.generateTitle, free: deps.free });
-    } catch (error) {
-      console.error("[WandTask] Failed to refresh auto task titles:", getErrorMessage(error));
-    }
     const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : undefined;
     // 数组顺序即展示顺序：created_at 倒序，新创建的在上面。
-    res.json(storage.listWandTasks(workspaceId).map((task) => dto(task)));
+    const model = new TaskReadModel(storage, sessions);
+    res.json(model.tasks.filter(task => workspaceId === undefined || task.workspaceId === workspaceId)
+      .map(task => taskDto(deps, task, model)));
   });
   app.get("/api/wand-task-agent-defaults", (_req, res) => {
     res.json(readTaskBoardLastAgent(storage));
@@ -385,8 +289,6 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
   app.get("/api/wand-milestones", (req, res) => {
     // 不传 workspaceId 返回全部；传了就只给「该工作区 + 全局」的迭代。
     const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : null;
-    // 默认迭代是惰性创建的：列表是它的第一个真实读取点，在这里保证它一定存在。
-    storage.ensureDefaultWandMilestone();
     const counts = storage.countWandTasksByMilestone();
     res.json({
       milestones: storage.listWandMilestones(workspaceId).map((milestone) => ({
@@ -602,6 +504,10 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       if (body.sortOrder !== undefined && Number.isFinite(Number(body.sortOrder))) {
         patch.sortOrder = Math.floor(Number(body.sortOrder));
       }
+      if (patch.status === "archived" && !canArchiveTask(storage, sessions, currentTask.id)) {
+        res.status(409).json({ error: "任务尚未完成或仍有执行，完成后才能归档。" });
+        return;
+      }
       const task = storage.updateWandTask(req.params.id, patch);
       if (!task) {
         res.status(404).json({ error: "未找到该任务。" });
@@ -646,6 +552,10 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
     }
   });
   app.delete("/api/wand-tasks/:id", (req, res) => {
+    if (storage.getWandTask(req.params.id) && !canArchiveTask(storage, sessions, req.params.id)) {
+      res.status(409).json({ error: "任务尚未完成或仍有执行，完成后才能归档。" });
+      return;
+    }
     const archived = storage.updateWandTask(req.params.id, { status: "archived" });
     if (!archived) {
       res.status(404).json({ error: "未找到该任务。" });

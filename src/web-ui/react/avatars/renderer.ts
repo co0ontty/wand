@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { createFileProps } from "./file-props.js";
 import { chuerWhiskerPoints } from "../../../plush-cat-whiskers.js";
 import { plushCatAppearance, catHeadWidthAt, catFaceDepth, catCoatWeights } from "../../../plush-cat-appearance.js";
-import { PLUSH_COLORS, isPlushCatAvatar, type PlushAvatarConfig, type PlushRenderConfig, type PlushCatAvatarConfig, type PlushShape } from "../../../plush-avatar.js";
+import { PLUSH_COLORS, isPlushCatAvatar, isPlushDogAvatar, type PlushAvatarConfig, type PlushRenderConfig, type PlushCatAvatarConfig, type PlushDogAvatarConfig, type PlushShape } from "../../../plush-avatar.js";
 import type { PlushAvatarRuntime, PlushGlobals, PlushRenderOptions } from "./runtime-contract.js";
 
 // One GPU context for the entire application. Individual identity canvases only
@@ -374,6 +374,49 @@ function createCatModel(config: PlushCatAvatarConfig, texture: THREE.Texture, pr
 }
 
 /** Shiba identity: upright ears, cream muzzle, black nose and a knitted red scarf. */
+function createDogModel(config: PlushDogAvatarConfig, texture: THREE.Texture, preview: boolean): Model {
+  const root = new THREE.Group(), eyes: THREE.Mesh[] = [];
+  const coat = new THREE.Color("#cb803f"), cream = new THREE.Color("#fff0da");
+  const wool = (geometry: THREE.BufferGeometry, color: THREE.Color, count: number) => {
+    const group = new THREE.Group();
+    group.add(new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color, roughness: 1, bumpMap: texture, bumpScale: 0.025 })));
+    group.add(new THREE.Mesh(fiberGeometry(geometry, color, configSeed(config) + count, count),
+      new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, side: THREE.DoubleSide })));
+    return group;
+  };
+  const head = wool(pillowGeometry("square"), coat, preview ? 28_000 : 4_500);
+  head.scale.set(1.03, 0.81, 1); head.position.y = 0.02; root.add(head);
+  for (const side of [-1, 1]) {
+    const ear = wool(pillowGeometry("triangle"), coat, preview ? 3_000 : 500);
+    ear.scale.set(0.27, 0.36, 0.35); ear.position.set(side * 0.61, 0.74, 0); ear.rotation.z = side * -0.12; root.add(ear);
+    const inner = wool(pillowGeometry("triangle"), cream.clone().lerp(coat, 0.35), preview ? 900 : 180);
+    inner.scale.set(0.15, 0.23, 0.08); inner.position.set(side * 0.61, 0.76, 0.23); inner.rotation.z = side * -0.12; root.add(inner);
+    const cheek = wool(new THREE.SphereGeometry(1, 32, 20), cream, preview ? 2_500 : 450);
+    cheek.scale.set(0.47, 0.34, 0.18); cheek.position.set(side * 0.36, -0.32, 0.51); root.add(cheek);
+    const brow = wool(new THREE.SphereGeometry(1, 20, 12), cream, preview ? 600 : 120);
+    brow.scale.set(0.095, 0.045, 0.025); brow.position.set(side * 0.31, 0.34, 0.60); root.add(brow);
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), new THREE.MeshPhysicalMaterial({ color: "#29201b", roughness: 0.25, clearcoat: 0.4 }));
+    eye.scale.set(0.065, 0.085, 0.035); eye.position.set(side * 0.32, 0.18, 0.63); eye.userData.restY = 0.085; root.add(eye); eyes.push(eye);
+    const shine = new THREE.Mesh(new THREE.SphereGeometry(0.017, 12, 8), new THREE.MeshBasicMaterial({ color: "#fffdfa" }));
+    shine.position.set(side * 0.32 - 0.018, 0.21, 0.659); root.add(shine);
+  }
+  const muzzle = wool(new THREE.SphereGeometry(1, 32, 20), cream, preview ? 3_000 : 500);
+  muzzle.scale.set(0.35, 0.27, 0.22); muzzle.position.set(0, -0.23, 0.61); root.add(muzzle);
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), new THREE.MeshPhysicalMaterial({ color: "#29201b", roughness: 0.45 }));
+  nose.scale.set(0.11, 0.074, 0.06); nose.position.set(0, -0.12, 0.82); root.add(nose);
+  const thread = new THREE.MeshStandardMaterial({ color: "#66402b", roughness: 1 });
+  root.add(tube([new THREE.Vector3(0, -0.18, 0.84), new THREE.Vector3(0, -0.29, 0.85)], 0.012, thread));
+  const smile = tube([new THREE.Vector3(-0.16, -0.30, 0.81), new THREE.Vector3(0, -0.36, 0.85), new THREE.Vector3(0.16, -0.30, 0.81)], 0.013, thread); root.add(smile);
+  const mouth = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 12), new THREE.MeshStandardMaterial({ color: "#492c2b" }));
+  mouth.position.set(0, -0.33, 0.84); mouth.scale.set(0.09, 0.034, 0.02); mouth.visible = false; root.add(mouth);
+  const scarfMaterial = new THREE.MeshStandardMaterial({ color: "#c43f3b", roughness: 1, bumpMap: texture, bumpScale: 0.035 });
+  const scarf = new THREE.Mesh(new THREE.TorusGeometry(0.63, 0.105, 16, 64), scarfMaterial);
+  scarf.rotation.x = Math.PI / 2; scarf.scale.set(1, 0.68, 1); scarf.position.y = -0.66; root.add(scarf);
+  const end = new THREE.Mesh(new THREE.CapsuleGeometry(0.11, 0.25, 8, 16), scarfMaterial);
+  end.position.set(0.46, -0.84, 0.38); end.rotation.z = -0.25; end.scale.z = 0.30; root.add(end);
+  return { root, eyes, smile, mouth, ready: false, preparing: false };
+}
+
 function createModel(config: PlushAvatarConfig, texture: THREE.Texture, preview: boolean): Model {
   const root = new THREE.Group();
   const color = new THREE.Color(PLUSH_COLORS.find(option => option.id === config.color)!.color);
@@ -642,7 +685,8 @@ class PlushEngine implements PlushAvatarRuntime {
     else {
       let model = this.models.get(key);
       if (!model) {
-        model = isPlushCatAvatar(config) ? createCatModel(config, this.texture!, item.options.interactive || size >= 96)
+        model = isPlushDogAvatar(config) ? createDogModel(config, this.texture!, item.options.interactive || size >= 96)
+          : isPlushCatAvatar(config) ? createCatModel(config, this.texture!, item.options.interactive || size >= 96)
           : createModel(config, this.texture!, item.options.interactive || size >= 96); model.fileProps = createFileProps(config, this.texture!, (surface, color) =>
             fiberGeometry(surface, color, configSeed(config) + 47, size >= 96 ? 1400 : 360, undefined, 0.18)); model.root.add(model.fileProps.root); this.models.set(key, model);
         while (this.models.size > MODEL_LIMIT || (this.models.size > 1
@@ -673,7 +717,7 @@ class PlushEngine implements PlushAvatarRuntime {
       const phase = time ? time + item.phase : 0;
       model.root.rotation.set(time ? Math.sin(phase * 0.57) * 0.035 + item.tiltY : 0,
         -0.085 + (time ? Math.sin(phase * 0.65) * 0.10 + item.tiltX : 0), time ? Math.sin(phase * 0.47) * 0.025 : 0);
-      model.root.position.y = isPlushCatAvatar(config) ? -0.03 : config.hat === "none" ? 0 : -0.13;
+      model.root.position.y = isPlushDogAvatar(config) ? 0.03 : isPlushCatAvatar(config) ? -0.03 : config.hat === "none" ? 0 : -0.13;
       model.fileProps?.pose(fileActivity, time ? Math.max(0, time - item.fileActivityStartedAt) : 0);
       if (fileActivity !== "idle") {
         model.root.rotation.x = 0.14 + (time ? Math.sin(phase * 1.9) * 0.012 : 0);

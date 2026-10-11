@@ -50,7 +50,28 @@ export interface PlushCatAvatarConfig {
   kind: "cat";
   coat: "silver" | "orange";
 }
-export type PlushRenderConfig = PlushAvatarConfig | PlushCatAvatarConfig;
+export interface PlushDogAvatarConfig {
+  version: 1;
+  kind: "dog";
+  breed: "shiba";
+  scarf: "red";
+}
+export type PlushRenderConfig = PlushAvatarConfig | PlushCatAvatarConfig | PlushDogAvatarConfig;
+
+export function isPlushDogAvatar(config: PlushRenderConfig): config is PlushDogAvatarConfig {
+  return "kind" in config && config.kind === "dog";
+}
+
+export function parsePlushDogAvatar(value: string): PlushDogAvatarConfig | null {
+  return value === "plush-dog:v1:shiba:red-scarf" ? { version: 1, kind: "dog", breed: "shiba", scarf: "red" } : null;
+}
+
+
+export function encodePlushDogAvatar(config: PlushDogAvatarConfig): string {
+  const value = `plush-dog:v${config.version}:${config.breed}:${config.scarf}-scarf`;
+  if (config.kind !== "dog" || !parsePlushDogAvatar(value)) throw new Error("毛绒柴犬头像配置无效。");
+  return value;
+}
 
 export function isPlushCatAvatar(config: PlushRenderConfig): config is PlushCatAvatarConfig {
   return "kind" in config && config.kind === "cat";
@@ -68,10 +89,10 @@ export function encodePlushCatAvatar(config: PlushCatAvatarConfig): string {
   return value;
 }
 
-/** Common identity projection; only an explicit cat value opts into this exception. */
+/** All employee surfaces share the API's avatar policy, including stale fixed-identity drafts. */
 export function resolveEmployeeAvatar(identity: PlushAvatarIdentity): PlushRenderConfig | null {
   const avatar = employeeAvatarValue(identity);
-  return parsePlushCatAvatar(avatar) ?? resolvePlushAvatar({ ...identity, avatar });
+  return parsePlushDogAvatar(avatar) ?? parsePlushCatAvatar(avatar) ?? resolvePlushAvatar({ ...identity, avatar });
 }
 
 export interface PlushAvatarIdentity {

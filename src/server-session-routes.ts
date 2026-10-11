@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { parseExecutionMode, parseSessionCreationOrigin } from "./session-request.js";
 import type { Express, Request } from "express";
 
 import { ProcessManager, PtyInputDeliveryError, SessionInputError } from "./process-manager.js";
@@ -7,6 +8,7 @@ import { WandStorage } from "./storage.js";
 import { ExecutionMode, InputRequest, ProcessEvent, ResizeRequest, SessionProvider, SessionRunner, SessionSnapshot, SessionSource, ToolResultBlock, ToolUseBlock, WandConfig } from "./types.js";
 import { getDefaultModelForProvider, isExecutionMode } from "./config.js";
 import { defaultRoleForCli } from "./default-employee.js";
+import { DECISION_EXPERT_NAME } from "./decision-expert-identity.js";
 import { defaultModelGroupSelector } from "./model-groups.js";
 import type { OpenRouterFreeModelsService } from "./openrouter-free-models.js";
 
@@ -32,7 +34,6 @@ import {
 } from "./git-quick-commit.js";
 
 import { getErrorMessage } from "./error-utils.js";
-import { archiveCommitTasks, archiveCommitStandaloneSessions } from "./commit-task-archive.js";
 import {
   buildIterationCommitContext,
   COMMIT_CONTEXT_MODE_PREF_KEY,
@@ -48,7 +49,7 @@ import { parseBoundedInteger } from "./request-limits.js";
 import { asyncRoute } from "./express-async.js";
 import { sendRouteError } from "./server-request.js";
 import { registerStructuredResumeRoutes } from "./server-resume-routes.js";
-import { addHiddenSessionIds, deleteProviderNativeHistory, type ProviderHistoryDeleter, removeHiddenSessionIds, SessionRegistry } from "./session-registry.js";
+import { addHiddenSessionIds, deleteOwnedSessionWithHistory, deleteProviderNativeHistory, type ProviderHistoryDeleter, removeHiddenSessionIds, SessionRegistry } from "./session-registry.js";
 import { enrichStructuredMessages, WAND_PROTOCOL_VERSION } from "./structured-client-protocol.js";
 import { asRecord, isStructuredImagePart } from "./structured-content.js";
 import { installedPiExtensions } from "./pi-extension-resources.js";
@@ -66,13 +67,7 @@ import {
   resolveWorkspaceIdForNewSession,
 } from "./workspace-binding.js";
 
-export function parseExecutionMode(value: unknown, fallback: ExecutionMode): ExecutionMode {
-  if (value === undefined) return fallback;
-  if (!isExecutionMode(value)) {
-    throw new Error(`无效执行模式: ${String(value)}`);
-  }
-  return value;
-}
+export { parseExecutionMode, parseSessionCreationOrigin } from "./session-request.js";
 
 /** 提交输入模式：query 覆盖 > 记住的偏好 > 默认（有提示词就优先用提示词）。 */
 function commitModeForRead(storage: WandStorage, override: unknown): string {
@@ -96,29 +91,6 @@ async function iterationCommitInput(
 /** 只有「让模型自己写 message」时才把迭代提示词交给它；用户手写的 message 不需要读任何输入。 */
 function commitMessageFromIteration(body: { autoMessage?: boolean; customMessage?: string }): boolean {
   return body.autoMessage !== false && !body.customMessage?.trim();
-}
-
-export function parseSessionCreationOrigin(
-  body: { sessionSource?: unknown; automationId?: unknown } | null | undefined,
-): { sessionSource: SessionSource; automationId?: string } {
-  const rawSource = body?.sessionSource;
-  if (rawSource !== undefined && rawSource !== "interactive" && rawSource !== "automation" && rawSource !== "startup") {
-    throw new Error("sessionSource 必须是 interactive、automation 或 startup。");
-  }
-
-  const rawAutomationId = body?.automationId;
-  if (rawAutomationId !== undefined && typeof rawAutomationId !== "string") {
-    throw new Error("automationId 必须是非空字符串。");
-  }
-  const automationId = rawAutomationId?.trim();
-  if (rawAutomationId !== undefined && !automationId) {
-    throw new Error("automationId 必须是非空字符串。");
-  }
-
-  return {
-    sessionSource: rawSource ?? "interactive",
-    ...(automationId ? { automationId } : {}),
-  };
 }
 
 function getInputErrorResponse(error: unknown, sessionId: string) {
@@ -196,27 +168,12 @@ export function deleteSessionWithProviderHistory(
   storage: Pick<WandStorage, "getConfigValue" | "setConfigValue">,
   id: string,
 ): void {
-  const snapshot = structured.get(id) ?? processes.get(id);
-
-  if (snapshot && (snapshot.sessionKind ?? "pty") === "structured") {
-    structured.delete(id);
-  } else {
-    processes.delete(id);
-  }
-
-  const providerSessionId = snapshot?.claudeSessionId?.trim();
-  if (!snapshot || !providerSessionId) return;
-
-  const provider = snapshot.provider
-    ?? snapshot.structuredState?.provider
-    ?? inferProviderFromCommand(snapshot.command)
-    ?? "claude";
-
-  deleteProviderNativeHistory(processes, provider, providerSessionId, snapshot.cwd);
-
-  // History deletion is intentionally best-effort at the filesystem layer.
-  // Keep a tombstone as a fallback for permission errors or process tail writes.
-  addHiddenSessionIds(storage, [providerSessionId]);
+  deleteOwnedSessionWithHistory(() => {
+    const snapshot = structured.get(id) ?? processes.get(id);
+    if (snapshot?.sessionKind === "structured") structured.delete(id);
+    else processes.delete(id);
+    return snapshot;
+  }, processes, storage);
 }
 
 type SessionListPageEntry = {
@@ -773,6 +730,29 @@ export function registerSessionRoutes(
     }
   });
 
+  app.post("/api/sessions/:id/employee", (req, res) => {
+    const employeeId = req.body?.employeeId;
+    if (typeof employeeId !== "string" || !employeeId.trim()) {
+      res.status(400).json({ error: "请选择有效的员工身份。" });
+      return;
+    }
+    const id = req.params.id;
+    const owner = sessions.ownerOf(id);
+    if (!owner) {
+      res.status(404).json({ error: "未找到该会话。" });
+      return;
+    }
+    if (owner !== "structured") {
+      res.status(400).json({ error: "只有新建空白结构化对话可以更换员工。" });
+      return;
+    }
+    try {
+      res.json(sessionResponseDTO(structured.setSessionEmployee(id, employeeId.trim()), req));
+    } catch (error) {
+      sendRouteError(res, error, "切换员工失败。");
+    }
+  });
+
   app.post("/api/sessions/:id/provider", (req, res) => {
     const provider = req.body?.provider;
     const engine = req.body?.engine;
@@ -833,7 +813,7 @@ export function registerSessionRoutes(
       && status?.enabled === true && status.supported && status.configured;
     const recommendationReason = !resourceCatalog.supported ? resourceCatalog.reason
       : settings.localDecision === false ? "本会话已关闭本地决策。"
-      : !recommendationAvailable ? status && "notice" in status && typeof status.notice === "string" ? status.notice : "本地决策未启用或运行环境不可用；请配置「决策专家」调用链。" : "";
+      : !recommendationAvailable ? status && "notice" in status && typeof status.notice === "string" ? status.notice : `本地决策未启用或运行环境不可用；请配置「${DECISION_EXPERT_NAME}」调用链。` : "";
     return { recommendationAvailable, recommendationReason,
       autoResourcesAvailable: recommendationAvailable, autoResourcesReason: recommendationReason,
       autoCodemodeAvailable: recommendationAvailable, skillLocksAvailable: resourceCatalog.supported,
@@ -1288,28 +1268,11 @@ export function registerSessionRoutes(
       const consumed = result.ok && result.commit?.hash && context.entryIds.length > 0
         ? storage.markIterationPromptsConsumed(context.entryIds, result.commit.hash)
         : 0;
-      let archivedTaskIds: string[] = [];
-      const archivedSessionIds: string[] = [];
-      let archiveError: string | undefined;
-      if (body.archiveRelatedTasks === true && result.ok && result.commit?.hash) {
-        try {
-          // A commit is already durable, even when push failed. Archiving must not turn that
-          // successful commit into a retryable HTTP error (which would duplicate the commit).
-          const openedTaskId = typeof body.workspaceTaskId === "string" ? body.workspaceTaskId.trim() : "";
-          archivedTaskIds = archiveCommitTasks(storage, snapshot, context.entryIds, {
-            workspaceTaskId: openedTaskId || null,
-          });
-          archiveCommitStandaloneSessions(storage, sessions, snapshot, archivedSessionIds);
-        } catch (error) {
-          archiveError = getErrorMessage(error, "归档任务与会话失败。");
-          console.error("[QuickCommit] Failed to archive related tasks:", archiveError);
-        }
-      }
       res.json({
         ...result,
-        archivedTaskIds,
-        archivedSessionIds,
-        ...(archiveError ? { archiveError } : {}),
+        // Compatibility for older clients: Git never changes task/session lifecycle.
+        archivedTaskIds: [],
+        archivedSessionIds: [],
         commitContext: {
           source: commitMessageFromIteration(body) && context.digest ? "iteration" : "diff",
           entryIds: context.entryIds,
@@ -1936,7 +1899,7 @@ export function registerSessionRoutes(
       }
       res.json(sessionResponseDTO(updated, req));
     } catch (error) {
-      sendRouteError(res, error, "无法归档会话。");
+      sendRouteError(res, error, "无法归档会话。", 409);
     }
   });
 

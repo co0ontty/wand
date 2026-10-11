@@ -123,10 +123,12 @@ test("HTTP supports profile/tool partial edits, blocks fixed fields and keeps GE
     await call("GET", path);
     assert.equal(storage.getSiliconEmployeeDefinition(target.id)?.avatar, expected.find((entry) => entry.id === target.id)?.avatar);
     const edited = await call("PUT", path, { name: "edited", duty: "updated duty", prompt: "updated prompt", agents: [AGENT] });
-    assert.equal(edited.status, 200); assert.equal(edited.body.avatar, expected.find((entry) => entry.id === target.id)?.avatar);
+    assert.equal(edited.status, 200); assert.equal(edited.body.avatar, target.avatar);
     assert.equal((await call("PUT", path, { name: "only name" })).status, 200);
     assert.equal(storage.getSiliconEmployeeDefinition(target.id)?.prompt, "updated prompt");
-    for (const patch of [{ avatar: null }, { avatar: "" }, { avatar: target.avatar }, { systemKey: null }, { id: "other" }, { tags: [] }]) assert.equal((await call("PUT", path, patch)).status, 400, JSON.stringify(patch));
+    assert.equal((await call("PUT", path, { avatar: target.avatar })).status, 200, "canonical display echoes preserve legacy storage");
+    assert.equal(storage.getSiliconEmployeeDefinition(target.id)?.avatar, expected.find((entry) => entry.id === target.id)?.avatar);
+    for (const patch of [{ avatar: null }, { avatar: "" }, { systemKey: null }, { id: "other" }, { tags: [] }]) assert.equal((await call("PUT", path, patch)).status, 400, JSON.stringify(patch));
     assert.equal((await call("POST", path + "/archive")).status, 400); assert.equal((await call("DELETE", path)).status, 400);
   }
   for (const employee of before.filter((entry) => !fixedEmployeeAvatar(entry))) assert.deepEqual(storage.getSiliconEmployeeDefinition(employee.id), employee);

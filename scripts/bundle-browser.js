@@ -1,5 +1,8 @@
 import { build } from "esbuild";
-import { mkdir, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { coalesceBrowserRuntime } from "./coalesce-browser-runtime.js";
+import { createBrowserModuleImportsPlugin } from "./browser-module-imports.js";
+import { mkdir, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -75,6 +78,59 @@ async function bundle(options, plugins = []) {
   );
 }
 
+// esbuild owns the ESM dependency graph, so shared React/controllers are singletons.
+// Each output is pooled separately and remains independently executable.
+async function bundleModules() {
+  const outdir = path.join(root, "src/web-ui/content/modules");
+  const { outfile: ignored, ...options } = commonOptions;
+  const result = await build({ ...options,
+    entryPoints: { main: path.join(root, "src/web-ui/browser/main.ts") },
+    format: "esm", splitting: true, outdir, entryNames: "[name]-[hash]",
+    chunkNames: "[name]-[hash]", minify: isProduction, legalComments: "none", write: false,
+    plugins: [await createBrowserModuleImportsPlugin(root, isProduction)],
+  });
+  // IIFE CSS pooling adds a lexical wrapper; ESM imports/exports must stay top-level.
+  let outputs = result.outputFiles.map(file => ({ path: file.path, code: file.text }));
+  const meta = result.metafile;
+  const entry = Object.keys(meta.outputs).find(file => meta.outputs[file].entryPoint === "src/web-ui/browser/main.ts");
+  if (!entry) throw new Error("Missing browser module entry");
+  const eager = new Set();
+  const visit = file => {
+    if (eager.has(file)) return;
+    eager.add(file);
+    for (const dependency of meta.outputs[file].imports) {
+      if (!dependency.external && dependency.kind !== "dynamic-import") visit(dependency.path);
+    }
+  };
+  visit(entry);
+  // esbuild can emit orphan dynamic entries from unused third-party barrel exports.
+  // Publish only the graph reachable from our actual entry, including lazy edges.
+  const reachable = new Set();
+  const visitAll = file => {
+    if (reachable.has(file)) return;
+    reachable.add(file);
+    for (const dependency of meta.outputs[file].imports) if (!dependency.external) visitAll(dependency.path);
+  };
+  visitAll(entry);
+  outputs = outputs.filter(file => reachable.has(path.relative(root, file.path).split(path.sep).join("/")));
+  for (const file of Object.keys(meta.outputs)) if (!reachable.has(file)) delete meta.outputs[file];
+  outputs = await coalesceBrowserRuntime(outputs, eager, entry, root, isProduction);
+  const buildHash = createHash("sha256").update(outputs.map(file => `${path.basename(file.path)}\n${file.code}`).join("\n")).digest("hex").slice(0, 16);
+  outputs = outputs.map(file => ({ ...file, path: path.join(outdir, buildHash, path.basename(file.path)) }));
+  const relative = file => path.relative(path.dirname(outfile), file).split(path.sep).join("/");
+  const runtime = relative(outputs[0].path);
+  const manifest = { entry: runtime, eager: [runtime], files: outputs.map(file => relative(file.path)),
+    features: Object.fromEntries(Object.entries(meta.outputs).filter(([, value]) => value.entryPoint && value.entryPoint !== "src/web-ui/browser/main.ts")
+      .map(([file, value]) => [value.entryPoint, `modules/${buildHash}/${path.basename(file)}`])) };
+  // Only generated build outputs are replaced; no source or user data is removed.
+  await rm(outdir, { recursive: true, force: true });
+  await mkdir(path.join(outdir, buildHash), { recursive: true });
+  for (const file of outputs) await writeFile(file.path, file.code);
+  await writeFile(path.join(path.dirname(outfile), "module-manifest.json"), JSON.stringify(manifest));
+  await recordGraph(path.join(outdir, "main.js"), meta);
+  console.log(`[bundle-browser] ESM: ${outputs.length} modules, 1 eager runtime`);
+}
+
 async function recordGraph(target, metafile) {
   const output = path.join(root, "output", "web-ui-library-migration", "bundle-graphs");
   await mkdir(output, { recursive: true });
@@ -82,7 +138,8 @@ async function recordGraph(target, metafile) {
 }
 
 try {
-  await bundle(commonOptions);
+  await bundleModules();
+  await bundle({ ...commonOptions, entryPoints: [path.join(root, "src/web-ui/browser/boot.ts")] });
   await bundle(
     { ...commonOptions, entryPoints: [AI_TEAMS_CHUNK_ENTRY], outfile: AI_TEAMS_CHUNK_OUTFILE },
     [createAiTeamsHostPlugin()],

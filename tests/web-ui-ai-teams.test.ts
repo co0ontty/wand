@@ -174,7 +174,8 @@ test("AI teams live on their own sidebar page, not in settings", () => {
   const sidebar = read("react/shell/shell-sidebar.tsx");
   const main = read("react/shell/shell-main-content.tsx");
   const settings = read("react/settings/host.tsx");
-  assert.match(sidebar, /taskBoardController\.open\([^;]*page === "teams" \? "teams" : "board"\)/);
+  assert.match(sidebar, /page === "board" \|\| page === "teams" \|\| page === "schedules"/);
+  assert.match(sidebar, /taskBoardController\.open\([^;]*, page\)/);
   assert.match(main, /taskBoard\.page === "teams" \? <AiTeamsPage/);
   assert.doesNotMatch(settings, /ai-teams/);
   assert.equal(isTaskBoardView("?view=teams"), true);
@@ -269,7 +270,7 @@ test("team page and run panel stay out of the inline bundle and load on demand",
   assert.match(lazy, /import type \{ AiTeamsPageProps \} from "\.\/teams-page";/);
   assert.match(lazy, /import type \{ TaskTeamRunPanelProps \} from "\.\.\/issues\/team-run-panel";/);
   assert.match(read("react/ai-teams/chunk-entry.ts"), /installStyleSheet\("wand-ai-teams-styles", aiTeamsChunkStyles\)/);
-  assert.match(read("react/ai-teams/lazy.tsx"), /const AI_TEAMS_CHUNK_SRC = "\$\{aiTeamsChunkSrc\}";/);
+  assert.match(read("react/ai-teams/lazy.tsx"), /const AI_TEAMS_CHUNK_SRC = browserAssetRuntime.aiTeamsChunkSrc;/);
   assert.match(read("scripts.ts"), /\.replace\("\$\{aiTeamsChunkSrc\}", `\/assets\/ai-teams\.js\?v=\$\{chunkHash\}`\)/);
 });
 
@@ -298,8 +299,8 @@ test("ai-teams chunk borrows every shared import from the main-bundle host regis
     "agents/employee-create-form": "react/agents/employee-create-form.tsx",
     "agents/employee-list-page": "react/agents/employee-list-page.tsx",
   };
-  const lazy = read("react/ai-teams/lazy.tsx");
-  const registry = lazy.slice(lazy.indexOf("const AI_TEAMS_HOST"), lazy.indexOf("};\n", lazy.indexOf("const AI_TEAMS_HOST")));
+  const bridge = read("react/ai-teams/host-bridge.tsx");
+  const registry = bridge.slice(bridge.indexOf("const AI_TEAMS_HOST"), bridge.indexOf("};\n", bridge.indexOf("const AI_TEAMS_HOST")));
   const hostNames = (key: string): string[] => {
     const match = registry.match(new RegExp(`"${key}": \\{([^}]*)\\}`));
     assert.ok(match, `lazy.tsx 注册表缺少模块 ${key}`);
@@ -360,7 +361,7 @@ test("员工头像选择器保留已选旧头像并提供有界上传与显式�
   assert.doesNotMatch(markup, /aria-label="捏脸"/, "preview panel mounts only after explicit opening");
 });
 
-test("新建员工默认填写期望与可选标签，角色字段收进可原位展开的高级配置", () => {
+test("新建员工默认填写期望与可选标签，手动资料可原位展开", () => {
   const form = read("react/agents/employee-create-form.tsx");
   // 默认期望 + 可选标签：名字/职责/Prompt/候选仍在高级配置里。
   assert.match(form, /id="new-employee-expectation"/);
@@ -380,10 +381,13 @@ test("新建员工默认填写期望与可选标签，角色字段收进可原�
   assert.match(form, /onChange=\{\(keys\) => setAdvanced/);
   assert.match(styles, /\.wand-employee-create-submit,\s*\.wand-employee-save-submit \{ min-inline-size:/);
   // 箭头同实例旋转变形，标签不换字，按钮尺寸不变。
-  assert.match(form, /label: "高级配置"/);
+  assert.match(form, /label: "人选资料（可手动填写）"/);
   assert.doesNotMatch(form, /收起高级配置/);
-  assert.match(styles, /\.wand-employees-layout \{[^}]*overflow-y: auto;[^}]*overscroll-behavior: contain;/,
-    "员工长表单必须由面板自己滚动，不能让保存按钮溢出到外壳之外");
+  assert.match(styles, /\.wand-employees-layout \{[^}]*min-height: 0;[^}]*overflow: hidden;[^}]*overscroll-behavior: contain;/,
+    "员工外壳保留有界高度，长表单由当前页面自己滚动");
+  const profileStyles = read("react/styles/employee-profile.ts");
+  assert.match(profileStyles, /\.employee-profile-content>\.is-new\{[^}]*min-height:0;[^}]*overflow:auto;/,
+    "新建员工的独立滚动保留保存与取消入口");
 });
 
 const DWELL_TOKENS: Array<[string, number]> = [["--motion-dwell-sent", 720], ["--motion-dwell-failed", 1500]];
@@ -703,8 +707,8 @@ test("[T8] team-chat-view 进 chunk、主包不含它，借的模块靠注册表
   ]);
   assert.match(chunkScriptSource, /"ai-teams", "teams-page\.tsx"/, "新增运行历史合并消费者仍必须属于按需包，不能进主包");
   assert.match(read("react/ai-teams/lazy.tsx"), /import type \{ ConversationMessagesProps, TeamChatViewProps \} from "\.\/team-chat-view";/);
-  const lazy = read("react/ai-teams/lazy.tsx");
-  const registry = lazy.slice(lazy.indexOf("const AI_TEAMS_HOST"), lazy.indexOf("};\n", lazy.indexOf("const AI_TEAMS_HOST")));
+  const bridge = read("react/ai-teams/host-bridge.tsx");
+  const registry = bridge.slice(bridge.indexOf("const AI_TEAMS_HOST"), bridge.indexOf("};\n", bridge.indexOf("const AI_TEAMS_HOST")));
   assert.match(registry, /"http-adapter": \{ HttpResponseError, jsonBody, requestJson \}/, "群聊发送要的 http-adapter 没注册");
 });
 
@@ -1513,7 +1517,7 @@ test("团队详情：草稿未保存时，每个离开入口都先确认，取�
   assert.match(teams, /aria-label="换一个模板" onClick=\{\(\) => \{ void backToTemplates\(\); \}\}/);
   assert.doesNotMatch(teams, /onClick=\{\(\) => setTemplate\(null\)\}/);
   assert.doesNotMatch(teams, /creating \? setSelectedId\(""\)/);
-  // 左侧列表换人也是「离开当前详情」：详情面板按 selectedId 挂 key，直接切会静默卸载未保存的编辑器。
+  // 列表选择也保留守卫：详情面板按 selectedId 挂 key，不能静默卸载未保存的编辑器。
   assert.match(teams, /const selectTeam = async \(teamId: string\): Promise<void> => \{\s*if \(teamId === selectedId\) return;\s*if \(!await confirmDiscardTeamDraft\(\)\) return;/);
   assert.match(teams, /onClick=\{\(\) => \{ void selectTeam\(team\.id\); \}\}/);
   assert.doesNotMatch(teams, /onClick=\{\(\) => setSelectedId\(team\.id\)\}/, "列表项不再有绕过确认的直连入口");
@@ -1526,16 +1530,18 @@ test("团队详情：草稿未保存时，每个离开入口都先确认，取�
   assert.match(teams, /\{ label: "继续编辑", value: false, autoFocus: true \}/);
   assert.match(teams, /\{ label: "放弃改动", value: true, kind: "danger" \}/);
   assert.match(teams, /return answer\.dismissed === false && answer\.action === true;/);
-  // 切标签的叠放面板常驻，TeamEditor 不再因换团队留旧草稿。
-  assert.match(teams, /> : <TeamEditor\n\s*key=\{selected\.id\}/);
+  // 运行记录往返保留编辑器；换团队时仍按团队 ID 隔离草稿。
+  assert.match(teams, /<TeamEditor\n\s*key=\{selected\.id\}/);
 });
 
-test("团队详情切标签：Ant Tabs 常驻两块面板，保留编辑状态与隐藏焦点约束", () => {
+test("团队详情通过运行记录入口切换，保留编辑状态与隐藏焦点约束", () => {
   const teams = read("react/ai-teams/teams-page.tsx");
-  assert.match(teams, /<Tabs activeKey=\{detailTab\} onChange=\{setDetailTab\} destroyOnHidden=\{false\}/);
-  assert.match(teams, /items=\{DETAIL_TABS\.map\(\(tab\) => \(\{ key: tab\.value, label: tab\.label, forceRender: true/);
+  assert.match(teams, /className="wand-team-history-toggle"/);
+  assert.match(teams, /"返回成员设置" : "查看运行记录"/);
+  assert.doesNotMatch(teams, /<Tabs|DETAIL_TABS/);
   assert.doesNotMatch(teams, /key=\{detailTab\}/);
-  assert.match(teams, /inert=\{detailTab !== tab\.value\}/);
+  assert.match(teams, /hidden=\{detailTab !== "members"\} inert=\{detailTab !== "members"\}/);
+  assert.match(teams, /hidden=\{detailTab !== "runs"\} inert=\{detailTab !== "runs"\}/);
   assert.match(teams, /active=\{detailTab === "members"\}/);
   assert.doesNotMatch(read("react/ai-teams/styles.ts"), /\.wand-teams-detail-(?:stack|pane)\s*\{/);
 });

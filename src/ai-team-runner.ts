@@ -568,6 +568,7 @@ export class AiTeamRunner {
   private readonly noDegrade = new Set<string>();
   private readonly teamRequestIds = new Map<string, string>();
   private sweepTimer: NodeJS.Timeout | null = null;
+  private disposed = false;
   /** 脱敏参照目录只算一次：os.homedir() 读 env，configDir 随 storage 定，运行期不变。 */
   private redactionDirsValue: RedactionDirs | null = null;
 
@@ -618,6 +619,7 @@ export class AiTeamRunner {
 
   async start(input: { teamId?: string; team?: AiTeam; taskId: string; note?: string; chatSessionId?: string;
     conversationId?: string; memberVersion?: number; runId?: string; onAccepted?: (run: AiTeamRun) => void }): Promise<AiTeamRunDetail> {
+    if (this.disposed) throw new AiTeamConflictError("AiTeamRunner has been disposed.");
     const definition = input.team ?? this.storage.getAiTeam(input.teamId ?? "");
     if (!definition) throw new Error("团队不存在。");
     const team = freezeTeamEmployees(definition, this.storage);
@@ -978,6 +980,7 @@ export class AiTeamRunner {
 
   /** 挂一次 run 级 live 去抖：同一 run 每 500ms 至多算一遍、推一次，与 evaluate 的计时器互不干扰。 */
   private scheduleLivePush(runId: string): void {
+    if (this.disposed) return;
     if (!this.notifyLiveListener || this.liveTimers.has(runId)) return;
     const timer = setTimeout(() => {
       this.liveTimers.delete(runId);
@@ -994,6 +997,7 @@ export class AiTeamRunner {
    * 放行不松开去抖：推完照样记指纹并重排心跳，所以静默期最多每 heartbeatMs 一次，不是无界重推。
    */
   private pushLive(runId: string, heartbeat = false): void {
+    if (this.disposed) return;
     if (!this.notifyLiveListener) return;
     const run = this.storage.getAiTeamRun(runId);
     if (!run) return;
@@ -1039,6 +1043,7 @@ export class AiTeamRunner {
    * 同一 run 至多一个计时器；run 不在 running、被删除或 dispose 时 cancel，不泄漏。
    */
   private scheduleHeartbeat(runId: string): void {
+    if (this.disposed) return;
     if (this.heartbeatTimers.has(runId)) return;
     if (!this.notifyLiveListener && !this.notifyListener) return;
     const last = Math.max(this.lastLivePushAt.get(runId) ?? 0, this.lastRunNotifyAt.get(runId) ?? 0);
@@ -1100,6 +1105,7 @@ export class AiTeamRunner {
 
   /** 与 missions.ingest 并列调用。绝大多数事件与团队无关，必须廉价返回。 */
   ingest(event: ProcessEvent): void {
+    if (this.disposed) return;
     if (!event.sessionId || event.sessionId === "__system__") return;
     if (event.type !== "status" && event.type !== "ended" && event.type !== "task" && event.type !== "output") return;
     const step = this.storage.getRunningAiTeamStepBySession(event.sessionId);
@@ -1146,6 +1152,7 @@ export class AiTeamRunner {
    * 没变就什么都不发。巡检间隔与 evaluate 行为都不动。
    */
   startSweep(): void {
+    if (this.disposed) return;
     if (this.sweepTimer) return;
     this.sweepTimer = setInterval(() => {
       for (const run of this.storage.listAiTeamRuns({ statuses: ["running"] })) {
@@ -1158,7 +1165,8 @@ export class AiTeamRunner {
     this.sweepTimer.unref?.();
   }
 
-  dispose(): void {
+  async dispose(): Promise<void> {
+    this.disposed = true;
     if (this.sweepTimer) clearInterval(this.sweepTimer);
     this.sweepTimer = null;
     for (const timer of this.outputTimers.values()) clearTimeout(timer);
@@ -1175,6 +1183,8 @@ export class AiTeamRunner {
     this.lastLiveKey.clear();
     this.noDegrade.clear();
     this.teamRequestIds.clear();
+    // Settle accepted host handshakes before the server closes storage.
+    await this.idle();
   }
 
   /** 等当前排队的所有操作跑完（测试用）。 */
@@ -1188,7 +1198,10 @@ export class AiTeamRunner {
 
   private enqueue<T>(runId: string, task: () => Promise<T>): Promise<T> {
     const previous = this.chains.get(runId) ?? Promise.resolve();
-    const next = previous.catch(() => undefined).then(task);
+    const next = previous.catch(() => undefined).then(() => {
+      if (this.disposed) throw new AiTeamConflictError("AiTeamRunner has been disposed.");
+      return task();
+    });
     const tracked = next.catch((error) => {
       if (!(error instanceof AiTeamConflictError)) {
         console.error(`[AiTeam] run ${runId}:`, getErrorMessage(error));
@@ -1217,6 +1230,7 @@ export class AiTeamRunner {
   // ── 内部：推进 ──
 
   private async evaluate(runId: string): Promise<void> {
+    if (this.disposed) return;
     const run = this.storage.getAiTeamRun(runId);
     if (!run || run.status !== "running") return;
     const running = this.storage.listAiTeamSteps(run.id).filter((item) => item.status === "running");
@@ -1236,6 +1250,7 @@ export class AiTeamRunner {
   }
 
   private scheduleRecheck(runId: string, delayMs: number): void {
+    if (this.disposed) return;
     if (this.recheckTimers.has(runId)) return;
     const timer = setTimeout(() => {
       this.recheckTimers.delete(runId);
@@ -1436,6 +1451,7 @@ export class AiTeamRunner {
    * 有成员失败、队列清空或依赖再也满足不了时，等在跑的都结束后交回 Leader。
    */
   private async advance(run: AiTeamRun): Promise<void> {
+    if (this.disposed) return;
     if (run.status !== "running") return;
     const steps = this.storage.listAiTeamSteps(run.id);
     const running = steps.filter((step) => step.status === "running");
@@ -1476,6 +1492,7 @@ export class AiTeamRunner {
 
   /** 开一轮 Leader：把上一轮 Leader 之后结束的成员报告交给他。 */
   private async startLeaderRound(run: AiTeamRun, userNote?: string): Promise<void> {
+    if (this.disposed) return;
     if (!this.hasBudget(run)) return;
     // 成员干活时用户在群里说的话，这一轮一起交给负责人。
     if (run.pendingNotes.length > 0) {
@@ -1682,6 +1699,7 @@ export class AiTeamRunner {
     buildPrompt: (reportPath: string, fresh: boolean) => AiTeamPrompt,
     proceed = true,
   ): Promise<void> {
+    if (this.disposed) return;
     const member = this.member(run.team, step.memberId);
     const candidates = member ? memberAgents(member) : [];
     const info = this.infoOf(step);
@@ -1742,6 +1760,7 @@ export class AiTeamRunner {
         if (this.ops.snapshot(sessionId)?.status === "failed") this.ingest({ type: "status", sessionId });
       }
     } catch (error) {
+      if (this.disposed) return;
       const message = getErrorMessage(error);
       const rejected = error instanceof AgentDispatchPreflightError && error.failure.retryable;
       const kind = rejected ? "input-rejected" : classifyCandidateFailure(message);
@@ -2137,6 +2156,7 @@ export class AiTeamRunner {
   }
 
   private postTurn(run: AiTeamRun, turn: ConversationTurn): void {
+    if (this.disposed) return;
     if (!this.chat || !run.chatSessionId) return;
     try {
       this.chat.post(run.chatSessionId, [{ ...turn,
@@ -2258,6 +2278,7 @@ export class AiTeamRunner {
   }
 
   private notify(run: AiTeamRun): void {
+    if (this.disposed) return;
     // 记下 run 通道的活动基线并排上静默心跳：长任务只等一次状态写入是不够的，
     // 用户在十几分钟没有新消息时需要「仍在运行」的证据，见 beat()。
     this.lastRunNotifyAt.set(run.id, this.now());

@@ -39,7 +39,8 @@ export function requireTeamEmployee(source: AiTeamEmployeeSource, id: string): S
   }
   // The default partner's read projection includes short-term habits; they are not team snapshot data.
   return isDefaultSiliconEmployee(employee)
-    ? defaultEmployeeDefinition(employee.agents, employee.updatedAt, source.getSiliconEmployeeDefinition?.(id) ?? employee, null)
+    ? { ...defaultEmployeeDefinition(employee.agents, employee.updatedAt, source.getSiliconEmployeeDefinition?.(id) ?? employee, null),
+      avatar: employee.avatar }
     : employee;
 }
 

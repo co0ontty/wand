@@ -22,6 +22,10 @@ const assets = [
   ["plushAvatarJs", "plush-avatar.js", "application/javascript"],
 ];
 
+const moduleManifest = JSON.parse(readFileSync(path.join(contentDir, "module-manifest.json"), "utf8"));
+const browserModules = Object.fromEntries(moduleManifest.files.map(file => [file,
+  gzipSync(readFileSync(path.join(contentDir, file)), { level: 9 }).toString("base64"),
+]));
 const themePreload = minifyJs(await buildThemePreload(root));
 const entries = {};
 for (const [key, relPath, contentType] of assets) {
@@ -51,6 +55,8 @@ function decode(value: string): string {
 }
 
 export const EMBEDDED_WEB_ASSETS = {
+  browserModuleManifest: ${JSON.stringify(moduleManifest)},
+  browserModules: Object.fromEntries(Object.entries(${JSON.stringify(browserModules)}).map(([name, value]) => [name, decode(value)])) as Record<string, string>,
   themePreloadJs: decode(${JSON.stringify(gzipSync(themePreload).toString("base64"))}),
   scriptsJs: decode(${JSON.stringify(entries.scriptsJs.base64)}),
   aiTeamsJs: decode(${JSON.stringify(entries.aiTeamsJs.base64)}),

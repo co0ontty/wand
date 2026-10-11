@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import net from "node:net";
+import { probeUnixSocket as probeSocket } from "./socket-probe.js";
 import { spawn } from "node:child_process";
 import process from "node:process";
 import { StringDecoder } from "node:string_decoder";
@@ -816,23 +817,7 @@ export async function connectExistingTerminalHost(configPath: string): Promise<T
   return tryConnect(paths.socketPath, paths.tokenPath);
 }
 
-function probeSocket(socketPath: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = net.createConnection(socketPath);
-    let settled = false;
-    const finish = (alive: boolean) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      socket.destroy();
-      resolve(alive);
-    };
-    socket.once("connect", () => finish(true));
-    socket.once("error", () => finish(false));
-    const timer = setTimeout(() => finish(false), 300);
-    timer.unref?.();
-  });
-}
+
 
 function startDetachedDaemon(configPath: string): void {
   const entry = process.argv[1];

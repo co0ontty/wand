@@ -12,7 +12,9 @@ export function ChatMessage({ own = false, surface = "message", styles, ...props
     placement={own ? "end" : "start"} shape="corner"
     variant={surface === "document" ? "outlined" : own || surface === "preview" ? "filled" : "borderless"}
     styles={{ ...styles,
-      body: { minWidth: 0, width: own ? undefined : "100%", maxWidth: own ? "calc(100% - 44px)" : "100%",
+      // Bubble already allocates avatar space. Subtracting it again from an intrinsic
+      // short bubble collapses the text and even the clock to a few pixels.
+      body: { minWidth: 0, width: own ? undefined : "100%", maxWidth: "100%",
         marginInlineStart: own ? "auto" : undefined, ...styles?.body },
       content: { overflowWrap: "anywhere", ...(own || surface !== "message" ? {} : { padding: 0 }), ...styles?.content },
     }}/>

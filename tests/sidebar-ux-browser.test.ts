@@ -78,7 +78,7 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
         mutations.push(`${req.method} ${url.pathname}`);
         const reject = (): void => { res.statusCode = 503; res.end(JSON.stringify({ error: "明确测试失败，请重试" })); };
         if (delayArchive && url.pathname === "/api/sessions/batch-archive") { releaseArchive = reject; return; }
-        if (url.pathname === "/api/workspace-tasks/t1/archive") { releaseTaskArchive = () => res.end(JSON.stringify({ id: "t1" })); return; }
+        if (url.pathname === "/api/workspace-tasks/t2/archive") { releaseTaskArchive = () => res.end(JSON.stringify({ id: "t2" })); return; }
         reject(); return;
       }
       if (url.pathname === "/api/tasks" && failList) { res.statusCode = 503; res.end(JSON.stringify({ error: "列表同步失败" })); return; }
@@ -197,8 +197,10 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
         // The chat list uses the very same native menu and keyboard/confirmation protocol.
         await browser.wait('!!document.querySelector(".conversation-row")');
         const density = await browser.evaluate(`(()=>{const row=document.querySelector('.conversation-row'),avatar=row.querySelector('.ant-avatar'),body=document.querySelector('.sidebar-body'),title=document.querySelector('[data-conversation-id="dense-0"] .conversation-row-title');return {row:row.getBoundingClientRect().height,avatar:avatar.getBoundingClientRect().width,scrolls:body.scrollHeight>body.clientHeight,truncated:title.scrollWidth>title.clientWidth,overflow:body.scrollWidth>body.clientWidth+1,labels:[...document.querySelectorAll('.conversation-navigation .sidebar-nav-label')].map(n=>n.textContent)}})()`);
-        assert.equal(density.row, 56, `${mode}: compact conversation row`);
-        assert.equal(density.avatar, 32, `${mode}: small identity image`);
+        // The current shared list identity is 48px (EmployeeAvatar md / group avatar),
+        // with the existing 8px row inset; the old 32px fixture predates that change.
+        assert.equal(density.row, 64, `${mode}: compact conversation row around the shared identity`);
+        assert.equal(density.avatar, 48, `${mode}: shared list identity image`);
         assert.equal(density.scrolls, true, `${mode}: large list scrolls inside the sidebar`);
         assert.equal(density.truncated, true, `${mode}: long name does not expand the list`);
         assert.equal(density.overflow, false, `${mode}: no horizontal overflow`);
@@ -422,15 +424,19 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
         await browser.key("Escape"); await browser.key("Escape");
         assert.equal(await browser.evaluate('fixture.memory.getSnapshot().layout.sessionsDrawerOpen'), true, "closing a failed move never dismisses the drawer");
         if (mode === "desktop") {
-          await browser.evaluate("fixture.setContext({workspaceId:'w1',taskId:'t1'});true");
+          // Busy task t1 cannot be archived; the delayed acknowledgement case uses idle t2.
           await browser.click('[data-workspace-task-id=t1] .workspace-task', "right");
+          assert.equal(await browser.evaluate("Array.from(document.querySelectorAll('.workspace-task-menu [role=menuitem]')).some(n=>n.textContent.includes('归档任务'))"), false);
+          await browser.key("Escape");
+          await browser.evaluate("fixture.setContext({workspaceId:'w1',taskId:'t2'});true");
+          await browser.click('[data-workspace-task-id=t2] .workspace-task', "right");
           await clickMenuText('.workspace-task-menu', '归档任务');
           await browser.wait(`!!(${VISIBLE_DIALOG})`);
           await clickDialogAction("确认归档任务");
           assert.ok(releaseTaskArchive, "the fixture owns the pending task mutation");
-          await browser.evaluate("fixture.setContext({workspaceId:'w1',taskId:'t2'});true");
+          await browser.evaluate("fixture.setContext({workspaceId:'w1',taskId:'t1'});true");
           (releaseTaskArchive as () => void)();
-          await browser.wait("document.querySelector('[data-workspace-task-id=t1]').getAttribute('aria-busy')!=='true'", "task archive settled");
+          await browser.wait("document.querySelector('[data-workspace-task-id=t2]').getAttribute('aria-busy')!=='true'", "task archive settled");
           assert.equal(await browser.evaluate("fixture.closed"), 0, "a late archive must not close the newly opened task");
         }
         // Reduced height and the narrow right edge cannot make the last action unreachable.

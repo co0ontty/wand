@@ -27,7 +27,8 @@ async function runConversationBrowser(t: TestContext, mentions: boolean): Promis
   const evidenceDir = mentions ? join(evidenceRoot, "mentions") : evidenceRoot; mkdirSync(evidenceDir, { recursive: true });
   const h = conversationHarness(t);
   const defaultPeer = h.storage.getSiliconEmployee("e_test_1")!;
-  h.storage.saveSiliconEmployee({ ...defaultPeer, id: "e_wand_default", name: "默认伙伴（测试替身）" });
+  const builtin = h.storage.ensureDefaultSiliconEmployee();
+  h.storage.saveSiliconEmployee({ ...builtin, name: "默认伙伴（测试替身）", agents: defaultPeer.agents });
   // Presentation fixtures are isolated stored history, not messages sent to any model.
   await h.service.prepare("dm_e_wand_default", "visual-prepare-default");
   const visualGroup = await h.service.createGroup("visual-create-group", { employeeIds: ["e_test_1", "e_test_2"], name: "设计协作群（测试）" });
@@ -110,6 +111,8 @@ async function runConversationBrowser(t: TestContext, mentions: boolean): Promis
   `;
   await build({ stdin: { contents: source, resolveDir: root, loader: "tsx" }, bundle: true, format: "iife", platform: "browser", jsx: "automatic",
     outfile: join(temp, "app.js"), logLevel: "warning", define: { "process.env.NODE_ENV": '"production"' } });
+  await build({ entryPoints: [join(root, "src/web-ui/react/avatars/renderer.ts")], bundle: true, format: "iife", platform: "browser", minify: true, outfile: join(temp, "plush-avatar.js") });
+  writeFileSync(join(temp, "app.js"), readFileSync(join(temp, "app.js"), "utf8").replaceAll("${plushAvatarChunkSrc}", "/plush-avatar.js"));
   const app = express(); app.use(express.json()); registerConversationRoutes(app, h.service);
   app.get("/api/silicon-employees", (_req, res) => res.json({ employees: h.storage.listSiliconEmployees({ includeArchived: true }) }));
   let rejectProfileSave = false;
@@ -130,6 +133,7 @@ async function runConversationBrowser(t: TestContext, mentions: boolean): Promis
   app.get("/api/attention", (_req, res) => res.json({ items: [] }));
   app.get("/api/*", (_req, res) => res.json({}));
   app.get("/app.js", (_req, res) => res.type("js").send(readFileSync(join(temp, "app.js"))));
+  app.get("/plush-avatar.js", (_req, res) => res.type("js").send(readFileSync(join(temp, "plush-avatar.js"))));
   app.get("/styles.css", (_req, res) => res.type("css").send(readFileSync(join(root, "src/web-ui/content/styles.css"))));
   app.get("/tailwind.css", (_req, res) => res.type("css").send(readFileSync(join(root, "src/web-ui/content/tailwind.css"))));
   app.get("*", (req, res) => {
@@ -161,18 +165,24 @@ async function runConversationBrowser(t: TestContext, mentions: boolean): Promis
       for (let attempt = 0; attempt < 120 && !point?.hit; attempt++) {
         await pause(40);
         const candidate: typeof point = await evaluate(`(()=>{const n=${visibleSelector(selector)};if(!n)return null;n.scrollIntoView({block:'nearest'});const r=n.getBoundingClientRect();const x=r.x+r.width/2,y=r.y+r.height/2;const h=document.elementFromPoint(x,y);return {x,y,hit:h===n||n.contains(h)}})()`);
+        // Hover may change Ant geometry; establish it before comparing pointer coordinates.
+        if (candidate) await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: candidate.x, y: candidate.y });
         // A scaled panel can be hittable while its option is still moving between pointerdown/up.
         point = candidate ? { ...candidate, hit: candidate.hit && !!previous && Math.abs(candidate.x - previous.x) < .5 && Math.abs(candidate.y - previous.y) < .5 } : null;
         previous = candidate;
       }
       if (!point?.hit) { const shot = await send("Page.captureScreenshot", { format: "png" }); writeFileSync(join(evidenceDir, "blocked-click.png"), Buffer.from(shot.data, "base64"));
-        writeFileSync(join(evidenceDir, "blocked-geometry.json"), JSON.stringify(await evaluate("({active:document.activeElement?.outerHTML.slice(0,500),scrollY,nodes:Array.from(document.querySelectorAll('.ant-drawer-body,.wand-ui-select-trigger,.wand-ui-select-content')).map(n=>({class:n.className,rect:n.getBoundingClientRect().toJSON(),scroll:n.scrollTop}))})"), null, 2)); }
+        writeFileSync(join(evidenceDir, "blocked-geometry.json"), JSON.stringify(await evaluate("({conversation:conversationFixture.conversationUi.getSnapshot(),hidden:document.querySelector('.conversation-root')?.hidden,active:document.activeElement?.outerHTML.slice(0,500),scrollY,nodes:Array.from(document.querySelectorAll('.ant-drawer-body,.wand-ui-select-trigger,.wand-ui-select-content')).map(n=>({class:n.className,rect:n.getBoundingClientRect().toJSON(),scroll:n.scrollTop}))})"), null, 2)); }
       assert.ok(point?.hit, `actual click target visible: ${selector}; point=${JSON.stringify(point)}`);
       await send("Input.dispatchMouseEvent", { type: "mousePressed", x: point.x, y: point.y, button: "left", clickCount: 1 });
       await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x, y: point.y, button: "left", clickCount: 1 });
     };
     const key = async (name: string): Promise<void> => { for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: name, code: name, windowsVirtualKeyCode: name === "Escape" ? 27 : name === "Enter" ? 13 : 0 }); };
-    const rect = (selector: string) => evaluate(`(()=>{const n=${visibleSelector(selector)};if(!n)return null;const r=n.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height}})()`);
+    const rect = async (selector: string) => {
+      // Measure settled component geometry, not an intermediate Ant enable/size transition.
+      await wait("!document.getAnimations().some(a=>a.playState==='running' && Number.isFinite(a.effect?.getComputedTiming().endTime))");
+      return evaluate(`(()=>{const n=${visibleSelector(selector)};if(!n)return null;const r=n.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height}})()`);
+    };
     /** 归档的任务在列表里必须与未归档的不同：顶部三档筛选 + 归档行自带标记，且两档真的互斥。 */
     const checkArchivedTier = async (): Promise<void> => {
       const archivedRow = `.conversation-row[data-conversation-id=${JSON.stringify(archivedGroup.conversationId)}]`;
@@ -390,7 +400,7 @@ async function runConversationBrowser(t: TestContext, mentions: boolean): Promis
     await click(cardSelector + " button");
     await wait(`conversationFixture.openedSession===${JSON.stringify(sessionId)}`);
     await evaluate("conversationFixture.conversationUi.select('dm_e_wand_default')");
-    await wait("document.querySelector('.conversation-heading-context')?.textContent.includes('私聊')");
+    await wait("document.querySelector('.conversation-root')?.hidden===false && document.querySelector('.conversation-heading-context')?.textContent.includes('私聊')");
     const callsBeforeContinuation = h.sent.length + h.executions.length;
     await click('.conversation-sender textarea'); await send("Input.insertText", { text: "新工作草稿保留" });
     await evaluate("conversationFixture.openedSession=null");
@@ -398,6 +408,8 @@ async function runConversationBrowser(t: TestContext, mentions: boolean): Promis
     await wait(`conversationFixture.openedSession===${JSON.stringify(sessionId)}`);
     assert.equal(h.sent.length + h.executions.length, callsBeforeContinuation, "continuation only opens the existing execution");
     assert.equal(await evaluate("document.querySelector('.conversation-sender textarea').value"), "新工作草稿保留", "continuation does not consume a new-work draft");
+    await evaluate("conversationFixture.conversationUi.select('dm_e_wand_default')");
+    await wait("document.querySelector('.conversation-root')?.hidden===false");
     await evaluate("conversationFixture.composer.edit('conversation-draft:' + location.origin + ':local-owner:dm_e_wand_default:talk',{text:''})");
     await click('.conversation-sender textarea'); await send("Input.insertText", { text: "浏览器消息乙" });
     await click('[aria-label="发送并开始新工作"]');
@@ -476,7 +488,7 @@ async function runConversationBrowser(t: TestContext, mentions: boolean): Promis
         await evaluate(`conversationFixture.conversationUi.select(${JSON.stringify(id)})`);
         await wait(`document.querySelector('.conversation-heading-context')?.textContent.includes(${JSON.stringify(kind === "dm" ? "私聊" : "群聊 · 我 + 2 位员工")})`);
         await wait("document.querySelector('.team-chat-file-card')?.textContent.includes('界面核对报告')");
-        assert.equal(await evaluate("Array.from(document.querySelectorAll('.conversation-root .team-chat-avatar')).every(n=>Math.abs(n.getBoundingClientRect().width-32)<1)"), true, "all sender avatars retain their 32px identity on narrow screens");
+        assert.equal(await evaluate("Array.from(document.querySelectorAll('.conversation-root .team-chat-avatar')).every(n=>Math.abs(n.getBoundingClientRect().width-48)<1)"), true, "sender avatars retain the shared 48px message identity on narrow screens");
         await evaluate("document.querySelector('.conversation-message-scroll').scrollTop = 0");
         await pause(250);
         const compactScreenshot = await send("Page.captureScreenshot", { format: "png" });
@@ -560,7 +572,7 @@ async function runConversationBrowser(t: TestContext, mentions: boolean): Promis
           authorOutsideBubble:!!author&&!!bubble&&!bubble.contains(author)&&author.getBoundingClientRect().bottom<=bubble.getBoundingClientRect().top,
           leadAvatarOnAuthor:!!author&&Math.abs(lead.querySelector('.conversation-peer-avatar').getBoundingClientRect().top-author.getBoundingClientRect().top)<=1,
           leadAvatarVisible:!!lead&&getComputedStyle(lead.querySelector('.conversation-peer-avatar')).visibility==='visible',
-          joinedKeepsAvatarSlot:!!joined&&Math.round(joined.querySelector('.conversation-peer-avatar').getBoundingClientRect().width)===32,
+          joinedKeepsAvatarSlot:!!joined&&Math.round(joined.querySelector('.conversation-peer-avatar').getBoundingClientRect().width)===48,
           selfAvatarSlots:document.querySelectorAll('.conversation-message[data-side=end] .conversation-peer-avatar').length,
           actionRowInsideSurface:!!document.querySelector('.conversation-sender .ant-sender-footer .conversation-action-row')};})()`);
       await evaluate(`conversationFixture.conversationUi.select(${JSON.stringify(visualGroup.conversationId)})`);
@@ -587,7 +599,7 @@ async function runConversationBrowser(t: TestContext, mentions: boolean): Promis
       await pause(400);
       assert.equal(await evaluate("document.querySelector('.conversation-stream').innerText.trim()"), "", "empty conversations do not invent transcript messages");
       assert.equal(await evaluate("document.querySelector('.conversation-empty')?.getAttribute('role')"), "status", "empty guidance is a separate status, never a chat message renderer");
-      assert.equal(await evaluate("document.querySelector('.conversation-sender textarea').placeholder"), "输入消息…");
+      assert.equal(await evaluate("document.querySelector('.conversation-sender textarea').placeholder"), "描述一项新工作…");
       const emptyShape = await streamShape();
       assert.equal(emptyShape.scrollable, false, "空会话用来核对短内容贴底");
       assert.ok(Math.abs(emptyShape.contentBottomGap) <= 1, `短内容贴着输入区上沿：${JSON.stringify(emptyShape)}`);

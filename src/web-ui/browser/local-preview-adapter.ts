@@ -1,4 +1,4 @@
-import { localPreviewController } from "../react/local-preview/controller";
+import { isArtifactPreviewUrl, localPreviewController } from "../react/local-preview/controller";
 import { closeReactOverlays } from "./react-overlay-coordinator";
 
 /**
@@ -9,6 +9,7 @@ export function openLocalPreviewFromLegacy(value: string): boolean {
   const normalized = typeof value === "string" ? value.trim() : "";
   if (!normalized) return false;
   if (!closeReactOverlays(["localPreview"])) return false;
+  if (isArtifactPreviewUrl(normalized)) return localPreviewController.openPreview(normalized);
   return normalized.startsWith("/")
     ? localPreviewController.openFile(normalized)
     : localPreviewController.openUrl(normalized);

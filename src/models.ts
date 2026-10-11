@@ -90,6 +90,7 @@ interface ModelCacheStorage {
 }
 
 interface ModelCommandOptions {
+  signal?: AbortSignal;
   env: NodeJS.ProcessEnv;
   timeout: number;
   /** Written to stdin, then closed. Pi RPC needs this. */
@@ -117,6 +118,7 @@ interface ClaudeModelsApi {
 }
 
 export interface ModelRefreshOptions {
+  signal?: AbortSignal;
   storage?: ModelCacheStorage;
   configuredClaudeModels?: readonly (string | null | undefined)[];
   inheritEnv?: boolean;
@@ -329,6 +331,7 @@ function defaultCommandRunner(
   return execFileAsync(file, args, {
     env: options.env,
     timeout: options.timeout,
+    signal: options.signal,
     maxBuffer: 4 * 1024 * 1024,
     ...(options.input !== undefined ? { input: options.input } : {}),
   }).then(({ stdout, stderr }) => ({ stdout: String(stdout), stderr: String(stderr) }));
@@ -1301,7 +1304,11 @@ async function discoverModelCache(
 ): Promise<ModelCache> {
   const now = options.now?.() ?? new Date();
   const env = resolveChildEnv(options);
-  const runner = options.commandRunner ?? defaultCommandRunner;
+  const execute = options.commandRunner ?? defaultCommandRunner;
+  const runner: ModelCommandRunner = (file, args, commandOptions) => {
+    options.signal?.throwIfAborted();
+    return execute(file, args, { ...commandOptions, signal: options.signal });
+  };
   const [
     claudeVersionProbe,
     codexProbe,
@@ -1327,6 +1334,7 @@ async function discoverModelCache(
     probeEffortList(runner, env, "qodercli", ["-p", "x", "--reasoning-effort", "__wand_probe__"]),
     probeEffortList(runner, env, "pi", ["--help"]),
   ]);
+  options.signal?.throwIfAborted();
   const claudeVersion = claudeVersionProbe.ok ? claudeVersionProbe.value : previous.claudeVersion;
   const priorVerifications = loadClaudeVerifications(options.storage);
   // A failed Models API request is not evidence that its prior models vanished.
@@ -1342,6 +1350,7 @@ async function discoverModelCache(
   const verifiedIds = options.verifyClaudeCandidates
     ? await verifyClaudeCandidates(initialModels, runner, env)
     : new Set<string>();
+  options.signal?.throwIfAborted();
   const verifications = mergeVerifications(priorVerifications, initialModels, verifiedIds, claudeVersion, now);
   if (verifiedIds.size > 0) saveClaudeVerifications(options.storage, verifications);
   return {
@@ -1387,6 +1396,13 @@ async function discoverModelCache(
  * the same Node process cannot leak a catalog into one another.
  */
 export class ModelCatalogService {
+  private readonly lifecycle = new AbortController();
+
+  dispose(): void {
+    this.lifecycle.abort(new Error("ModelCatalogService has been disposed."));
+    this.changeListeners.clear();
+  }
+
   private cache: ModelCache;
   private revision: string;
   private publishedRevision: string;
@@ -1414,6 +1430,7 @@ export class ModelCatalogService {
   }
 
   publishManagedPiModels(): void {
+    if (this.lifecycle.signal.aborted) return;
     const next = { ...this.cache, piModels: this.withManagedPiModels(this.cache.piModels) };
     const revision = catalogRevision(next);
     const projectionChanged = this.snapshot().revision !== this.publishedRevision;
@@ -1473,6 +1490,7 @@ export class ModelCatalogService {
 
   /** Preference changes publish immediately without re-running CLI discovery or altering stored history. */
   publishModelGroups(): void {
+    if (this.lifecycle.signal.aborted) return;
     const result = { ...this.snapshot(), changed: true, checkedAt: new Date().toISOString() };
     this.publishedRevision = result.revision;
     for (const listener of this.changeListeners) {
@@ -1487,6 +1505,7 @@ export class ModelCatalogService {
   }
 
   refresh(request: ModelCatalogRefreshRequest = {}): Promise<ModelCatalogRefreshResult> {
+    if (this.lifecycle.signal.aborted) return Promise.reject(this.lifecycle.signal.reason);
     const verifyClaudeCandidates = request.verifyClaudeCandidates === true;
     if (this.refreshPromise) {
       const sharedRefresh = this.refreshPromise;
@@ -1513,10 +1532,12 @@ export class ModelCatalogService {
     const baseOptions = this.getOptions();
     const options: ModelRefreshOptions = {
       ...baseOptions,
+      signal: baseOptions.signal ? AbortSignal.any([baseOptions.signal, this.lifecycle.signal]) : this.lifecycle.signal,
       verifyClaudeCandidates: request.verifyClaudeCandidates === true,
     };
     const checkedAt = (options.now?.() ?? new Date()).toISOString();
     const discovered = await discoverModelCache(options, this.cache);
+    options.signal?.throwIfAborted();
     discovered.piModels = this.withManagedPiModels(discovered.piModels);
     const discoveredRevision = catalogRevision(discovered);
     const changed = !this.hasPersistedSnapshot || discoveredRevision !== this.revision;

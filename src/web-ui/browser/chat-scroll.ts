@@ -1,5 +1,5 @@
 import { state, CHAT_EXPAND_STATE_STORAGE_KEY } from "./state";
-import { renderChat } from "./chat-render";
+import { renderChat } from "./chat-render-loader";
 import { fetchEarlierMessages } from "./session-engine";
 import { ChatHistoryPrefetchGate, chatHistoryRootMargin, needsChatHistoryBuffer } from "../chat-history-window.js";
 import { updateBrowserButtonLabel } from "./library-buttons.js";

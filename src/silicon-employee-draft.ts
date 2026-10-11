@@ -1,4 +1,4 @@
-import { callConfiguredAiText, type QuickCommitAiOptions } from "./git-quick-commit.js";
+import { callConfiguredAiText, type QuickCommitAiOptions } from "./ai-text-runner.js";
 import { employeeCliAvailable } from "./silicon-employee-dispatch.js";
 import { SESSION_PROVIDERS, isSessionProvider } from "./session-provider.js";
 import { isThinkingEffort } from "./structured-provider-common.js";
@@ -234,7 +234,7 @@ export function validateStructuredEmployeeDraft(
   return normalizeSiliconEmployeeDraft(input as Record<string, unknown>, { ...options, strict: true });
 }
 
-/** 规则走系统提示，用户的期望走用户消息；一次性调用沿用系统 AI 通道。 */
+/** 招聘格式规则走系统提示，岗位需求走用户消息；执行通道由 HR 配置提供。 */
 export function buildEmployeeDraftPrompt(
   expectation: string,
   providers: SessionProvider[],
@@ -242,7 +242,7 @@ export function buildEmployeeDraftPrompt(
 ): AiTextRequest {
   const list = providers.length ? providers : [...SESSION_PROVIDERS];
   const lines = [
-    "你正在帮用户创建一位「硅基员工」：一个长期负责某类工作的 AI 角色，之后会以结构化会话执行任务。",
+    "你正在为用户招聘一位「硅基员工」：一个长期负责某类工作的 AI 角色，之后会以结构化会话执行任务。这里只拟定人选资料，不办理入职。",
     "根据用户对这位员工的期望，设计一份配置，只输出一个 JSON 对象（不要 Markdown 代码块，不要任何解释）：",
     '{"name":"员工名字","duty":"一句话职责","prompt":"角色设定","provider":"执行工具"}',
     "",

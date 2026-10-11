@@ -2,12 +2,17 @@ import * as React from "react";
 import { XProvider } from "@ant-design/x";
 import zhCN from "antd/locale/zh_CN";
 import xZhCN from "@ant-design/x/locale/zh_CN";
+import dayjs from "dayjs";
+import "dayjs/locale/zh-cn.js";
 import type { ThemeConfig } from "antd";
 import { theme as antTheme } from "antd";
 import { useReducedMotion } from "./ui/motion-tokens";
 import { usePortalContainer } from "./ui/portal-context";
 import { paletteThemeConfig, themeAliases, themeCss, wandPalette, type WandThemeId } from "./theme-palettes";
 import { wandThemeStore } from "./theme-preference";
+
+// Ant's translated labels and Dayjs' calendar month/week names share this owner.
+dayjs.locale("zh-cn");
 
 const ThemeInstalled = React.createContext(false);
 

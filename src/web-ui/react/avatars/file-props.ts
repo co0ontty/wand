@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { plushCatAppearance } from "../../../plush-cat-appearance.js";
-import { PLUSH_COLORS, isPlushCatAvatar, type PlushRenderConfig } from "../../../plush-avatar.js";
+import { PLUSH_COLORS, isPlushCatAvatar, isPlushDogAvatar, type PlushRenderConfig } from "../../../plush-avatar.js";
 import type { AvatarFileActivity } from "../../composer-avatar-activity.js";
 
 const PAGE_WIDTH = 0.55;
@@ -49,7 +49,7 @@ export function createFileProps(config: PlushRenderConfig, texture: THREE.Textur
   const ink = new THREE.MeshStandardMaterial({ color: "#626c78", roughness: 0.9 });
   const gold = new THREE.MeshStandardMaterial({ color: "#dba758", roughness: 0.55 });
   const pawColor = new THREE.Color(isPlushCatAvatar(config) ? plushCatAppearance(config).coat
-    : PLUSH_COLORS.find(option => option.id === config.color)?.color ?? "#ecb6a3");
+    : isPlushDogAvatar(config) ? "#cb803f" : PLUSH_COLORS.find(option => option.id === config.color)?.color ?? "#ecb6a3");
   const box = (parent: THREE.Object3D, w: number, h: number, d: number, x: number, y: number, z: number, material: THREE.Material) => {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
     mesh.position.set(x, y, z); parent.add(mesh); return mesh;

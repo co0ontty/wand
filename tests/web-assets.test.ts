@@ -9,7 +9,7 @@ import test from "node:test";
 import { defaultConfig } from "../src/config.js";
 import { startServer } from "../src/server.js";
 import { versionWebAsset } from "../src/web-ui/asset-version.js";
-import { getScriptAsset } from "../src/web-ui/scripts.js";
+import { getBrowserModuleManifest, getScriptAsset } from "../src/web-ui/scripts.js";
 import { EMBEDDED_WEB_ASSETS } from "../src/web-ui/embedded-assets.js";
 
 const hashOf = (content: string): string => versionWebAsset(content).hash;
@@ -81,6 +81,19 @@ test("the shell transfers only HTML repeatedly and serves versioned, cacheable a
       assert.equal(response.headers.get("cache-control"), "no-store");
     }
 
+    const manifest = getBrowserModuleManifest();
+    assert.ok(manifest.files.length > manifest.eager.length);
+    for (const file of manifest.files) {
+      const module = await fetch(`${base}/assets/${file}`);
+      assert.equal(module.status, 200);
+      assert.match(module.headers.get("content-type") ?? "", /javascript/);
+      assert.match(module.headers.get("cache-control") ?? "", /public.*immutable/);
+      assert.ok((await module.text()).length > 0);
+    }
+    const missing = await fetch(`${base}/assets/modules/0000000000000000/runtime.js`);
+    assert.equal(missing.status, 404, "missing versions must never receive another build's code");
+    assert.equal(missing.headers.get("cache-control"), "no-store");
+
     // An old process knows its embedded build even if the disk has been replaced.
     const embeddedCssHash = hashOf(EMBEDDED_WEB_ASSETS.stylesCss);
     const oldCss = await fetch(`${base}/assets/app.css?v=${embeddedCssHash}`);
@@ -91,7 +104,8 @@ test("the shell transfers only HTML repeatedly and serves versioned, cacheable a
     const embeddedJs = EMBEDDED_WEB_ASSETS.scriptsJs
       .replace('"${wandConfigPath}"', JSON.stringify(configPath))
       .replace("${aiTeamsChunkSrc}", `/assets/ai-teams.js?v=${chunkHash}`)
-      .replace("${plushAvatarChunkSrc}", `/assets/plush-avatar.js?v=${plushHash}`);
+      .replace("${plushAvatarChunkSrc}", `/assets/plush-avatar.js?v=${plushHash}`)
+      .replace("${browserModuleSrc}", `/assets/${EMBEDDED_WEB_ASSETS.browserModuleManifest.entry}`);
     const oldJs = await fetch(`${base}/assets/app.js?v=${hashOf(embeddedJs)}`);
     assert.equal(await oldJs.text(), embeddedJs);
     assert.match(oldJs.headers.get("cache-control") ?? "", /private.*immutable/);

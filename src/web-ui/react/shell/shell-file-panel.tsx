@@ -4,7 +4,10 @@ import { Drawer, Flex } from "antd";
 import { WandInput, WandIcon, WandIconButton } from "../ui";
 import { classNames } from "../ui/class-names";
 import { fileExplorerController } from "../file-explorer/controller";
-import { FileExplorerHost } from "../file-explorer/host";
+import { deferredComponent } from "../deferred-feature";
+const FileExplorerHost = deferredComponent(
+  () => import("../file-explorer/host").then(module => module.FileExplorerHost), { title: "文件列表" },
+);
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
 
 export function normalizeFilePanelCwd(raw: string): string {
@@ -181,7 +184,7 @@ export function ShellFilePanel({ explorerRef, suspended = false }: ShellFilePane
               }}
             />
           </Flex>
-          <FileExplorerHost root={committedCwd}/>
+          <FileExplorerHost root={committedCwd} enabled={snapshot.layout.filePanelOpen && !suspended}/>
         </Flex>
       </Drawer>
     </>

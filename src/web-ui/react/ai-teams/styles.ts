@@ -2,12 +2,12 @@
 // 公用头像由 Ant Avatar/Badge 渲染；这里只保留按需页的业务布局。
 export const aiTeamsChunkStyles = String.raw`
 
-/* ---------- 团队页：左列表、右详情 ---------- */
+/* ---------- 团队页：列表进入单页详情 ---------- */
 .task-board-native-page.wand-teams-page { padding:0; }
 .task-board-native-page.wand-teams-page>.wand-teams-layout { flex:1 1 auto; min-height:0; }
 .wand-teams-layout {
   display: grid;
-  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   flex: 1 1 auto;
   min-height: 0;
   border-top: 1px solid var(--border-subtle);
@@ -19,8 +19,12 @@ export const aiTeamsChunkStyles = String.raw`
   min-height: 0;
   padding: 16px var(--wand-page-inset,20px) 24px;
   overflow-y: auto;
-  border-right: 1px solid var(--border-subtle);
+  max-width: 960px;
 }
+.wand-teams-page[data-detail] .wand-teams-list { display:none; }
+.wand-teams-page:not([data-detail]) .wand-teams-detail { display:none; }
+.wand-teams-page [hidden] { display:none; }
+.wand-team-history-toggle.ant-btn { width:auto; align-self:flex-start; }
 .wand-teams-card[aria-pressed="true"] { border-color: var(--accent); }
 .wand-teams-empty.is-detail { align-content: center; height: 100%; }
 
@@ -35,8 +39,8 @@ export const aiTeamsChunkStyles = String.raw`
   animation: wand-settings-fade-in var(--transition-normal);
 }
 .wand-teams-detail > * { flex: 0 0 auto; width: 100%; max-width: 920px; }
-.wand-teams-page>.task-board-workspace-header { min-height:var(--wand-page-header-height,56px); padding:10px var(--wand-page-inset,20px) !important; }
-.wand-teams-page .task-board-heading-copy h3 { font-size:var(--wand-page-title-size,18px); }
+.wand-teams-page>.task-board-workspace-header { min-height:var(--wand-page-header-height,56px); padding:8px var(--wand-page-inset,20px) !important; }
+.wand-teams-page .task-board-heading-copy h3 { font-size:var(--wand-page-title-size,18px); line-height:1.4; }
 .wand-teams-page .task-board-heading-copy>.ant-typography:last-child:not(h3) { font-size:12px; }
 .wand-teams-page .task-board-header-actions { min-width:0; max-width:100%; flex:0 1 auto; }
 .wand-teams-card>.ant-card-body { padding:10px 12px; }
@@ -97,6 +101,7 @@ export const aiTeamsChunkStyles = String.raw`
 /* 创建 / 生成中标签长度不同，固定最小宽度保证提交按钮原地不位移。 */
 .wand-employee-create-submit,
 .wand-employee-save-submit { min-inline-size: 92px; }
+.wand-employee-create-submit { inline-size: 144px; max-inline-size: 100%; }
 
 
 
@@ -417,11 +422,13 @@ export const aiTeamsChunkStyles = String.raw`
 
 /* ---------- 硅基员工列表与卡片样式 ---------- */
 .wand-employees-layout {
-  display: block !important;
+  display: flex;
+  flex: 1;
+  min-height: 0;
   margin: 0;
-  padding: 16px var(--wand-page-inset,20px) 40px;
-  overflow-y: auto;
+  padding: 0;
+  overflow: hidden;
   overscroll-behavior: contain;
 }
-.wand-employees-layout>.wand-employee-list { max-width:1080px; }
+.wand-employees-layout>.wand-employee-list { width:100%; max-width:none; min-height:0; }
 `;

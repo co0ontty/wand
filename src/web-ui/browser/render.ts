@@ -5,7 +5,7 @@ import { composer, state, writeStoredBoolean } from "./state";
 import { invalidateChatInteraction } from "./chat-render-focus.js";
 import { restoreActiveTask } from "./active-task";
 import { iconSvg } from "./i18n";
-import { escapeHtml, refreshTailMarqueePaths, scrollPathElementToEnd } from "./utils";
+import { escapeHtml, refreshTailMarqueePaths } from "./utils";
 import { getConfigCwd } from "./chat-scroll";
 import { attachEventListeners } from "./events";
 import { isSidebarDrawerLayout } from "./file-browser";
@@ -437,11 +437,6 @@ export function render(options?: any) {
     loadGitStatus(state.selectedId);
   }
 
-  // 长路径元素（topbar 的 cwd）滚到末尾展示末尾目录。
-  // 渲染刚完成，元素可能尚未完成布局，scrollPathElementToEnd 内部用 rAF 兜底。
-  // blank-chat 的 cwd 路径元素只存在于已删除的 legacy Shell markup 里，
-  // React Shell 的空白页不再渲染 #blank-chat-cwd-path。
-  scrollPathElementToEnd(document.getElementById("topbar-cwd"));
   refreshTailMarqueePaths();
 }
 

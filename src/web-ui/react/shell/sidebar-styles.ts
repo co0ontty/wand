@@ -48,10 +48,19 @@ export function installSidebarStyles(): void {
 .sidebar-search-input input::-webkit-search-cancel-button { display:none; }
 .sidebar-disclosure-chevron { display:inline-flex; flex-shrink:0; transform:rotate(-90deg); transition:transform var(--motion-fast) var(--ease-in-out-smooth); }
 .sidebar-disclosure-chevron[data-open="true"] { transform:rotate(0deg); }
-.sidebar .workspace-row-main { min-height:44px; }
-.sidebar .workspace-row-title { font-weight:600; }
+.sidebar .workspace-row-main { min-height:48px; }
+.sidebar .workspace-row-title { font-size:13px; font-weight:600; }
 .sidebar .workspace-row-path { display:block; max-width:100%; line-height:1.5; }
-.sidebar .workspace-row-count, .sidebar .workspace-task-count { color:var(--text-secondary); font-size:12px; font-variant-numeric:tabular-nums; }
+.sidebar .workspace-row-count, .sidebar .workspace-task-count, .sidebar .im-sidebar-group-count { color:var(--text-secondary); font-size:12px; font-variant-numeric:tabular-nums; white-space:nowrap; flex-shrink:0; }
+.sidebar .workspace-row-count { min-width:2ch; text-align:end; }
+.sidebar .sidebar-head-activity, .sidebar .im-sidebar-group-attention-slot { width:12px; flex:none; display:inline-flex; justify-content:center; }
+.sidebar .wand-sidebar-group-toggle { min-height:48px; padding:6px; }
+.sidebar .im-sidebar-group-title { min-width:0; font-size:13px; font-weight:600; }
+.sidebar .im-sidebar-group-meta { display:inline-flex; align-items:center; gap:4px; flex:none; }
+.sidebar .im-sidebar-group-action { display:inline-flex; flex:none; }
+.sidebar .sidebar-recent-add { width:28px; min-width:28px; height:32px; padding:0; }
+.sidebar .im-sidebar-group-inner { margin-inline-start:14px; border-inline-start:1px solid var(--border-subtle); }
+.sidebar .sidebar-group-empty, .sidebar .sidebar-filter-empty { margin:0; padding:6px; font-size:12px; line-height:1.5; }
 .sidebar .workspace-tasks, .sidebar .workspace-task-sessions { margin-inline-start:14px; border-inline-start:1px solid var(--border-subtle); }
 .sidebar .workspace-task-main, .sidebar .workspace-session-main { min-height:36px; }
 .sidebar .workspace-session-name { font-size:13px; }
@@ -79,6 +88,7 @@ export function installSidebarStyles(): void {
   .sidebar-new-task.ant-btn { min-height:44px; }
   .sidebar :is(.workspace-task-action,.workspace-task-chevron-btn) { width:32px; min-width:32px; height:44px; }
   .sidebar .workspace-task-main, .sidebar .workspace-session-main { min-height:44px; }
+  .sidebar .sidebar-recent-add { width:44px; min-width:44px; height:44px; }
   :is(.sidebar-row-menu,.sidebar-menu-submenus) :is(.ant-dropdown-menu-item,.ant-dropdown-menu-submenu-title) { min-height:44px; }
 }
 @media (max-width:640px) {

@@ -42,7 +42,7 @@ function WorkspaceFace({ employee, size, speaking = false, interactive = false, 
 export function EmployeeAvatarWorkspace({ employee, disabled, onChange, onBusyChange, onClose }: EmployeeAvatarWorkspaceProps): React.ReactElement {
   const reducedMotion = useReducedMotion();
   const fixedAvatar = fixedEmployeeAvatar(employee);
-  const identity = { ...employee, avatar: fixedAvatar ?? employee.avatar ?? "" };
+  const identity = { ...employee, avatar: employee.avatar ?? "" };
   const plush = parsePlushAvatar(identity.avatar) ?? defaultPlushAvatar(employee);
   const plushPreview = resolveEmployeeAvatar(identity) !== null;
   const rendererKey = `${employee.id}:${employee.systemKey ?? ""}:${plushPreview ? "plush" : "legacy"}`;
@@ -120,36 +120,39 @@ export function EmployeeAvatarWorkspace({ employee, disabled, onChange, onBusyCh
     }
   }}>
     <div className="aside-title"><span><WandIcon name="image" size={15}/>头像</span>{onClose && <WandIconButton type="button" aria-label="收起头像工作区" onClick={close}><WandIcon name="close" size={15}/></WandIconButton>}</div>
-    <div className="avatar-stage">
-      <WorkspaceFace key={rendererKey} employee={identity} size={136} interactive speaking={speech && renderer === "webgl" && !reducedMotion}
-        onRendererChange={(state, reason) => setRenderStatus({ key: rendererKey, renderer: state, reason })}/>
-      <div className="preview-state" role="status"><i data-live={plushPreview && renderer === "webgl" && !reducedMotion}/>{previewLabel}</div>
-      {plushPreview && renderer === "fallback" && renderStatus.reason === "runtime-load" && <WandButton type="button" size="small" kind="ghost" disabled={busy} onClick={() => { setSpeech(false); retryPlushAvatarRuntime(); }}>重新加载 3D</WandButton>}
-      {plushPreview && <WandButton type="button" size="small" kind="ghost" aria-pressed={speech} disabled={busy || reducedMotion || renderer !== "webgl"} onClick={() => setSpeech(value => !value)}>
-        <WandIcon name="audio" size={14}/>{speech ? "停止动作预览" : "预览说话动作"}
-      </WandButton>}
-    </div>
-    {fixedAvatar ? <div className="fixed-avatar"><WandIcon name="lock" size={16}/><strong>系统固定头像</strong><p>{fixedAvatar.endsWith(":silver") ? "沿用华杰的银渐层猫形象" : "沿用石一的橘猫形象"}<br/>头像由系统固定，其他资料可编辑。</p></div> : <>
-      <div className="avatar-modes">
-        <WandButton type="button" size="small" kind="ghost" onClick={() => fileInput.current?.click()} disabled={busy}><WandIcon name="image" size={14}/>上传图片</WandButton>
-        <WandButton type="button" size="small" kind="ghost" onClick={() => change("")} disabled={busy || !employee.avatar}>恢复默认</WandButton>
+    <div className="appearance-layout">
+      <div className="avatar-stage">
+        <WorkspaceFace key={rendererKey} employee={identity} size={136} interactive speaking={speech && renderer === "webgl" && !reducedMotion}
+          onRendererChange={(state, reason) => setRenderStatus({ key: rendererKey, renderer: state, reason })}/>
+        <div className="preview-state" role="status"><i data-live={plushPreview && renderer === "webgl" && !reducedMotion}/>{previewLabel}</div>
+        {plushPreview && renderer === "fallback" && renderStatus.reason === "runtime-load" && <WandButton type="button" size="small" kind="ghost" disabled={busy} onClick={() => { setSpeech(false); retryPlushAvatarRuntime(); }}>重新加载 3D</WandButton>}
+        {plushPreview && <WandButton type="button" size="small" kind="ghost" aria-pressed={speech} disabled={busy || reducedMotion || renderer !== "webgl"} onClick={() => setSpeech(value => !value)}>
+          <WandIcon name="audio" size={14}/>{speech ? "停止动作预览" : "预览说话动作"}
+        </WandButton>}
       </div>
-      <small className="upload-note">PNG、JPEG、WebP · 最大 10 MB</small>
-      <input hidden type="file" ref={fileInput} accept="image/png,image/jpeg,image/webp" aria-label="上传头像图片" disabled={busy} onChange={upload}/>
-      {processing && <div className="preview-state" role="status">正在处理图片…<WandButton type="button" size="small" kind="ghost" onClick={cancelUpload}>取消处理</WandButton></div>}
-      {error && <div className="feedback error" role="alert">{error}</div>}
-      {preserved ? <div className="preserved"><p>现有头像保持原样。</p><WandButton type="button" size="small" disabled={busy} onClick={() => change(encodePlushAvatar(defaultPlushAvatar(employee)))}>改用毛绒头像</WandButton></div> : <>
-        {optionGroup("shape", "造型", PLUSH_SHAPES)}
-        <fieldset className="option-group colors" disabled={busy}><legend>颜色<span>{PLUSH_COLORS.find(color => color.id === plush.color)?.label}</span></legend>
-          <div className="options">{PLUSH_COLORS.map(option => <label className="color-option" key={option.id} data-selected={plush.color === option.id} title={option.label}>
-            <input type="radio" name={`${radioId}-color`} value={option.id} aria-label={option.label} checked={plush.color === option.id} onChange={() => change(encodePlushAvatar({ ...plush, color: option.id }))}/>
-            <span style={{ background: option.color }}/>
-          </label>)}</div>
-        </fieldset>
-        {optionGroup("glasses", "眼镜", PLUSH_GLASSES)}{optionGroup("hat", "帽子", PLUSH_HATS)}
-      </>}
-    </>}
-    <div className="context-preview"><span>在工作台中的显示</span><div><WorkspaceFace employee={identity} size={28}/><span>{employee.name || "员工名字"}<small>导航与对话共用同一身份</small></span></div></div>
+      <div className="appearance-controls">
+        {fixedAvatar ? <div className="fixed-avatar"><WandIcon name="lock" size={16}/><strong>系统固定头像</strong><p>{fixedAvatar.endsWith(":silver") ? "虎妞三维捏脸：银灰短毛、额纹与较长鼻梁" : "初二三维捏脸：棕黑虎斑、白色口鼻与长绒"}<br/>头像由系统固定，其他资料可编辑。</p></div> : <>
+          <div className="avatar-modes">
+            <WandButton type="button" size="small" kind="ghost" onClick={() => fileInput.current?.click()} disabled={busy}><WandIcon name="image" size={14}/>上传图片</WandButton>
+            <WandButton type="button" size="small" kind="ghost" onClick={() => change("")} disabled={busy || !employee.avatar}>恢复默认</WandButton>
+          </div>
+          <small className="upload-note">PNG、JPEG、WebP · 最大 10 MB</small>
+          <input hidden type="file" ref={fileInput} accept="image/png,image/jpeg,image/webp" aria-label="上传头像图片" disabled={busy} onChange={upload}/>
+          {processing && <div className="preview-state" role="status">正在处理图片…<WandButton type="button" size="small" kind="ghost" onClick={cancelUpload}>取消处理</WandButton></div>}
+          {error && <div className="feedback error" role="alert">{error}</div>}
+          {preserved ? <div className="preserved"><p>现有头像保持原样。</p><WandButton type="button" size="small" disabled={busy} onClick={() => change(encodePlushAvatar(defaultPlushAvatar(employee)))}>改用毛绒头像</WandButton></div> : <>
+            {optionGroup("shape", "造型", PLUSH_SHAPES)}
+            <fieldset className="option-group colors" disabled={busy}><legend>颜色<span>{PLUSH_COLORS.find(color => color.id === plush.color)?.label}</span></legend>
+              <div className="options">{PLUSH_COLORS.map(option => <label className="color-option" key={option.id} data-selected={plush.color === option.id} title={option.label}>
+                <input type="radio" name={`${radioId}-color`} value={option.id} aria-label={option.label} checked={plush.color === option.id} onChange={() => change(encodePlushAvatar({ ...plush, color: option.id }))}/>
+                <span style={{ background: option.color }}/>
+              </label>)}</div>
+            </fieldset>
+            {optionGroup("glasses", "眼镜", PLUSH_GLASSES)}{optionGroup("hat", "帽子", PLUSH_HATS)}
+          </>}
+        </>}
+      </div>
+    </div>
     <small className="aside-foot">头像与资料统一保存，取消可撤销修改。</small>
   </aside>;
 }

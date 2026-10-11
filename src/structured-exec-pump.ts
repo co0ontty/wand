@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { appendDiagnosticTail, MAX_PROTOCOL_LINE_BYTES } from "./bounded-process-output.js";
 
 import {
   createUtf8TextDecoder,
@@ -69,44 +70,83 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
     state: options.createState(),
     stderr: "",
     observer,
-    requestStop: () => source?.interrupt(),
+    requestStop: () => requestStop(),
   };
 
   let source: PumpSource | null = null;
-  let sourceReady: Promise<void>;
   let lineBuffer = "";
+  let lineBytes = 0;
   let settled = false;
+  let stopRequested = false;
+  let stopDelivered = false;
+  // A pending spawn has no cancellable handle yet. Remember one request and
+  // deliver it once when ready; never install a self-referential placeholder.
+  function interruptSource(): void {
+    if (!source || stopDelivered) return;
+    stopDelivered = true;
+    try { source.interrupt(); } catch { /* best-effort interruption */ }
+  }
+  function requestStop(): void {
+    if (settled || stopRequested) return;
+    stopRequested = true;
+    interruptSource();
+  }
   let resolveCompletion!: (result: StructuredRunnerResult) => void;
-  const completion = new Promise<StructuredRunnerResult>((resolve) => {
+  let rejectCompletion!: (error: unknown) => void;
+  const completion = new Promise<StructuredRunnerResult>((resolve, reject) => {
     resolveCompletion = resolve;
+    rejectCompletion = reject;
   });
 
   const finish = (
     exitCode: number | null,
     signal: NodeJS.Signals | null,
     spawnError?: NodeJS.ErrnoException,
+    protocolError?: Error,
   ): void => {
     if (settled) return;
     settled = true;
-    if (lineBuffer.trim()) options.processLine(lineBuffer, ctx);
-    lineBuffer = "";
-    resolveCompletion(options.finalize(ctx, exitCode, signal, spawnError));
+    try {
+      if (!protocolError && lineBuffer.trim()) options.processLine(lineBuffer, ctx);
+      const result = options.finalize(ctx, exitCode, signal, spawnError);
+      resolveCompletion(protocolError ? { ...result, exitCode: 1, primaryError: protocolError.message,
+        retryForbidden: true, failure: { kind: "runtime", delivery: "unknown", retryable: false } } : result);
+    } catch (error) {
+      rejectCompletion(error);
+    } finally {
+      lineBuffer = "";
+      lineBytes = 0;
+    }
   };
 
   const handleStdoutText = (text: string): void => {
-    if (!text || !observer.isActive()) return;
+    if (settled || !text || !observer.isActive()) return;
     observer.onStdout?.(text);
     options.onStdoutText?.(text);
-    lineBuffer += text;
-    const lines = lineBuffer.split("\n");
-    lineBuffer = lines.pop() ?? "";
-    for (const line of lines) options.processLine(line, ctx);
+    try {
+      const parts = text.split("\n");
+      for (let index = 0; index < parts.length; index++) {
+        const part = parts[index];
+        lineBytes += Buffer.byteLength(part, "utf8");
+        if (lineBytes > MAX_PROTOCOL_LINE_BYTES) throw new Error("CLI 协议单行超过 8 MiB 上限；本轮已停止，送达结果不能据此推定为未接受。");
+        lineBuffer += part;
+        if (index < parts.length - 1) {
+          options.processLine(lineBuffer, ctx);
+          lineBuffer = "";
+          lineBytes = 0;
+        }
+      }
+    } catch (error) {
+      // Settle the failure before kill can synchronously deliver a close event.
+      finish(1, null, undefined, error instanceof Error ? error : new Error(String(error)));
+      interruptSource();
+    }
   };
 
   const handleStderrText = (text: string): void => {
-    if (!text || !observer.isActive()) return;
+    if (settled || !text || !observer.isActive()) return;
     observer.onStderr?.(text);
-    ctx.stderr += text;
+    ctx.stderr = appendDiagnosticTail(ctx.stderr, text);
   };
 
   const host = options.execHost;
@@ -119,25 +159,21 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
       env: options.env,
       ...(options.stdinData !== undefined ? { stdinData: options.stdinData } : {}),
     };
-    let pendingInterrupt: string | null = null;
-    sourceReady = host.spawnStructured(request).then(
-      (handle) => {
-        source = { pid: handle.pid, interrupt: () => handle.interrupt() };
-        if (pendingInterrupt !== null) handle.interrupt(pendingInterrupt);
-        wireRemoteHandle(handle, handleStdoutText, handleStderrText, finish);
-      },
-      () => {
-        // Daemon vanished between health check and spawn; surface as spawn error.
-        finish(null, null, Object.assign(new Error(`terminal daemon unavailable for ${options.file}`), { code: "EDAEMON" }));
-      },
-    );
-    source = {
-      pid: null,
-      interrupt: (signal?: string) => {
-        pendingInterrupt = signal ?? "SIGTERM";
-        void sourceReady.then(() => source?.interrupt());
-      },
+    const unavailable = (): void => {
+      source = null;
+      // Daemon vanished between health check and spawn; surface as spawn error.
+      finish(null, null, Object.assign(new Error(`terminal daemon unavailable for ${options.file}`), { code: "EDAEMON" }));
     };
+    try {
+      void host.spawnStructured(request).then((handle) => {
+        source = { pid: handle.pid, interrupt: () => handle.interrupt() };
+        // Replay and subscribe before applying a pending external cancellation.
+        wireRemoteHandle(handle, handleStdoutText, handleStderrText, finish);
+        if (stopRequested && !settled) interruptSource();
+      }, unavailable);
+    } catch {
+      unavailable();
+    }
   } else {
     const spawnProcess = options.spawnProcess ?? spawn;
     const wantsStdin = typeof options.stdinData === "string";
@@ -153,8 +189,8 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
     child.stderr?.on("data", (chunk: Buffer) => handleStderrText(stderrDecoder.write(chunk)));
     child.on("error", (error) => finish(null, null, error as NodeJS.ErrnoException));
     child.stdin?.on("error", (error) => {
+      requestStop();
       finish(null, null, error as NodeJS.ErrnoException);
-      child.kill("SIGTERM");
     });
     child.on("close", (exitCode, signalName) => {
       handleStdoutText(stdoutDecoder.end());
@@ -162,7 +198,6 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
       finish(exitCode, signalName === null || signalName === undefined ? null : signalName);
     });
     if (wantsStdin) child.stdin?.end(options.stdinData);
-    sourceReady = Promise.resolve();
   }
 
   return {
@@ -172,9 +207,7 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
       return source?.pid ?? null;
     },
     completion,
-    interrupt: () => {
-      try { source?.interrupt(); } catch { /* best-effort external interruption */ }
-    },
+    interrupt: requestStop,
   };
 }
 

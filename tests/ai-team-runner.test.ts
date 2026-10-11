@@ -2601,3 +2601,24 @@ test("the designated report wins over links to other files in a completion reply
   assert.equal(card.reportFile!.name, path.basename(dev.reportPath));
   assert.equal(card.reportFile!.preview!.title, "指定报告");
 });
+
+test("disposing a team waits for an accepted host handshake without dispatching follow-up work", async (t) => {
+  const h = harness(t);
+  const open = h.ops.open.bind(h.ops);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  h.ops.open = async input => { await gate; return open(input); };
+  const start = h.runner.start({ teamId: h.team.id, taskId: h.taskId });
+  await new Promise(resolve => setImmediate(resolve));
+  let closed = false;
+  const shutdown = h.runner.dispose().then(() => { closed = true; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(closed, false);
+  release();
+  const detail = await start;
+  await shutdown;
+  assert.equal(h.ops.opened.length, 1);
+  assert.equal(h.storage.listAiTeamSteps(detail.run.id)[0].sessionId, h.ops.opened[0].sessionId);
+  await assert.rejects(h.runner.start({ teamId: h.team.id, taskId: h.taskId }), /disposed/);
+  assert.equal(h.ops.opened.length, 1);
+});

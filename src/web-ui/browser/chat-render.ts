@@ -1,7 +1,7 @@
-import { syncComposerCompanion } from "./composer-sender-adapter.js";
 import { presentAssistantReply, presentChat, refreshChatPresentation } from "../react/chat/presentation.js";
 import { mountBrowserButtons, updateBrowserButtonLabel } from "./library-buttons.js";
 import { state } from "./state";
+import { registerChatRuntime } from "./chat-render-runtime.js";
 import { ChatRenderCache } from "./chat-render-cache.js";
 import { beginChatInteraction, chatViewLease, isChatLeaseCurrent, patchChatContents, patchChatRow, prepareChatOwners, reconcileChatRows, retireChatTurnOwners, scopeChatMarkup } from "./chat-render-focus.js";
 import type { ChatOwnerPlan, ChatViewLease } from "./chat-render-focus.js";
@@ -19,10 +19,11 @@ import { renderStructuredStatusBar } from "./utils";
 import { getCardDefault } from "./events";
 import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
 import { shouldExtractPtySystemInfo } from "./pty-system-info";
-import { codexActivityRe, codexFooterRe, isPtyCodexNoiseLine, isPtySystemInfoNoiseLine, isPtyTranscriptNoiseLine } from "./pty-noise";
+import { isPtySystemInfoNoiseLine } from "./pty-noise";
 import { getToolDisplayName, getToolIcon } from "./tool-identity";
-import { renderChatMarkdown as renderMarkdown } from "../markdown.js";
-import { chatReplyDuration, chatUsageMetrics } from "../chat-message-meta.js";
+import { renderChatMarkdown } from "../markdown.js";
+import { chatReplyDuration } from "../chat-message-meta.js";
+import { syncComposerCompanion } from "./composer-sender-adapter.js";
 import { parseJsonResponse } from "../react/http-adapter";
 import { activityLiveRow, commandOccurredAt, currentToolActivity, formatActivityElapsed, formatThinkingElapsed, groupToolActivities, isPlanTool, isToolActivityOnly, latestCommandOccurredAt, presentActivityBlock, thinkingRoundLabel, thinkingRounds, toolActivityTimeline, TOOL_ACTIVITY_KINDS } from "./tool-activity";
 import { isDecisionToolCall } from "../../decision-tool.js";
@@ -30,6 +31,11 @@ import { activityDetailText, activityFilePath, activityOpensFile } from "./tool-
 import { clearActivityTimelines, holdActivityTimeline, syncActivityTimelines } from "./tool-activity-timeline.js";
 import { extractToolResultImages, extractToolResultText, toolResultPreview } from "./tool-result-display.js";
 export { extractToolResultImages, extractToolResultText } from "./tool-result-display.js";
+export { parseMessages } from "./pty-chat-parser.js";
+import { ensureChatMessagesContainer } from "./chat-host.js";
+export { ensureChatMessagesContainer } from "./chat-host.js";
+export { formatInlineResult, shortCommand, setInlineToolImageState } from "./chat-render-model.js";
+import { formatInlineResult, setInlineToolImageState } from "./chat-render-model.js";
 import {
   agentRunAccentSeed,
   agentRunAgentTitle,
@@ -45,6 +51,12 @@ import {
   truncateInlineText,
 } from "./agent-runs";
 import "./local-preview-adapter";
+
+const replyIdentities = new WeakMap<Element, readonly unknown[]>();
+function replyIdentity(session): readonly unknown[] {
+  return [session.id, session.employeeId, session.employeeName, session.employeeAvatar,
+    session.provider, session.structuredState?.engine];
+}
 
 // Activity details survive streaming DOM refreshes, but are fetched only after
 // the user opens a specific entry. Completed responses share the existing cache.
@@ -63,6 +75,11 @@ const questionSchemas = new Map<string, string>();
 const copyBound = new WeakSet<Element>();
 let unprovenRowSequence = 0;
 let focusedAnchorPaint = 0;
+
+function renderMarkdown(text: string): string {
+  const session = state.sessions.find(session => session.id === state.selectedId);
+  return renderChatMarkdown(text, { cwd: session?.cwd, sessionId: state.selectedId || undefined });
+}
 
 function renderMessageKey(message: any, index: number): string {
   return chatOwnerPlan?.messages[index]?.displayKey || getMessageKey(message, index);
@@ -144,7 +161,6 @@ export function clearActivityDetailState(): void {
 
 
       export function renderChat(forceFullRender?) {
-        syncComposerCompanion();
         var sessionId = state.selectedId;
         var epoch = state.chatRenderEpoch || 0;
         var pending = state.chatRenderPendingToken;
@@ -288,16 +304,6 @@ export function clearActivityDetailState(): void {
         return systemInfo;
       }
 
-      export function ensureChatMessagesContainer(chatOutput) {
-        if (!chatOutput) return null;
-        var chatMessages = chatOutput.querySelector(".chat-messages");
-        if (chatMessages) return chatMessages;
-        chatMessages = document.createElement("div");
-        chatMessages.className = "chat-messages";
-        chatOutput.appendChild(chatMessages);
-        return chatMessages;
-      }
-
       export function renderChatEmptyState(chatOutput, html) {
         var chatMessages = ensureChatMessagesContainer(chatOutput);
         if (!chatMessages) return null;
@@ -319,41 +325,10 @@ function isGroupedChatMessage(messages: any[], index: number): boolean {
     && currentTime - previousTime < 60 * 60_000;
 }
 
-function buildRoundUsage(messages: any[], agentRuns: ReturnType<typeof collectAgentRuns>): Record<number, any> {
-  var result: Record<number, any> = {};
-  var empty = function() { return { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0,
-    cacheCreationInputTokens: 0, reasoningOutputTokens: 0, totalCostUsd: 0, estimated: false }; };
-  var acc = empty();
-  var hasUsage = false;
-  var lastAssistant = -1;
-  messages.forEach(function(message, index) {
-    if (message.role === "user") {
-      if (lastAssistant >= 0 && hasUsage) result[lastAssistant] = acc;
-      acc = empty(); hasUsage = false; lastAssistant = -1;
-    } else if (message.role === "assistant") {
-      // Child-only transcript rows and result-only rows are hidden after being
-      // folded into their owner. Keep the footer on the last visible reply/run.
-      var content = Array.isArray(message.content) ? message.content : [];
-      if (agentRuns.runsByMessageIndex.has(index) || content.length === 0 || content.some(function(block, blockIndex) {
-        return block?.type !== "tool_result" && !agentRuns.ownerByBlockKey.has(agentRunBlockKey(index, blockIndex));
-      })) lastAssistant = index;
-      if (message.usage) {
-        hasUsage = true;
-        Object.keys(acc).forEach(function(key) {
-          if (key === "estimated") acc.estimated = acc.estimated || message.usage.estimated === true;
-          else acc[key] += message.usage[key] || 0;
-        });
-      }
-    }
-  });
-  if (lastAssistant >= 0 && hasUsage) result[lastAssistant] = acc;
-  return result;
-}
-
 function buildChatRowDependencies(messages: any[], revisions: number[], runs: any,
-  roundUsage: Record<number, any>, visibleOffset: number, session: any): any[] {
+  visibleOffset: number, session: any): any[] {
   // Cross-turn consumers depend on exact source revisions, not the length-based
-  // Agent Run signature. A nested result/usage change can repaint an older anchor.
+  // Agent Run signature. A nested result change can repaint an older anchor.
   var results = new Map<string, any[]>();
   messages.forEach(function(message, index) {
     if (!Array.isArray(message.content)) return;
@@ -396,7 +371,6 @@ function buildChatRowDependencies(messages: any[], revisions: number[], runs: an
           block.id === _currentLatestPendingCommandId;
       });
     return { toolResults: toolResults, runs: runRows.get(index) || [], owned: ownedRows.get(index) || [],
-      usage: roundUsage[index] || null,
       grouped: index >= visibleOffset && isGroupedChatMessage(visible, index - visibleOffset),
       live: isTurnActivityLive(index), commandRunning: commandRunning,
       lang: getActiveLang(),
@@ -497,6 +471,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
           return state.selectedId === renderSessionId && (state.chatRenderEpoch || 0) === renderEpoch;
         };
         var selectedSession = state.sessions.find(function(s) { return s.id === renderSessionId; });
+        syncComposerCompanion();
         if (!selectedSession) {
           if (state.lastRenderedEmpty !== "none") {
             renderChatEmptyState(chatOutput, "");
@@ -596,12 +571,11 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         var hasOlderMessages = visibleOffset > 0 || hasServerOlder;
 
         var msgCount = messages.length;
-        var roundUsageByIndex = buildRoundUsage(allMessages, agentRunIndex);
         var systemInfo = shouldExtractPtySystemInfo(selectedSession)
           ? extractPtySystemInfo(selectedSession.output, messages) : [];
         var cache = state.chatRenderCache || (state.chatRenderCache = new ChatRenderCache());
         var plan = cache.prepare(selectedSession.id, allMessages, function(revisions) {
-          return buildChatRowDependencies(allMessages, revisions, agentRunIndex, roundUsageByIndex,
+          return buildChatRowDependencies(allMessages, revisions, agentRunIndex,
             visibleOffset, selectedSession);
         }, { visibleOffset: visibleOffset, count: msgCount, hasOlder: hasOlderMessages,
           systemInfo: systemInfo, placeholder: !!selectedSession.inFlight });
@@ -609,7 +583,13 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         var forceRender = forceFullRender || plan.structureChanged;
         if (!forceRender && changedVisibleIndices.length === 0) {
           var unchangedMessages = chatOutput.querySelector(".chat-messages");
-          if (unchangedMessages) renderStructuredStatusBar(unchangedMessages, selectedSession);
+          if (unchangedMessages) {
+            const previousIdentity = replyIdentities.get(unchangedMessages);
+            if (replyIdentity(selectedSession).some((value, index) => value !== previousIdentity?.[index])) {
+              applyHistoryCollapse(unchangedMessages, selectedSession);
+            }
+            renderStructuredStatusBar(unchangedMessages, selectedSession);
+          }
           updateTodoProgress(allMessages);
           cache.commit(plan);
           chatOwnerPlan?.commit();
@@ -684,7 +664,6 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
             // Render message
             var messageHtml = renderChatMessage(
               msg,
-              roundUsageByIndex[originalIndex] || null,
               originalIndex,
               agentRunIndex,
               conversationToolResults,
@@ -786,7 +765,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
           changedVisibleIndices.forEach(function(index) {
             var currentEl = chatMessages.querySelector('.chat-message[data-msg-index="' + index + '"]');
             var wrapper = document.createElement("div");
-            wrapper.innerHTML = chatRowMarkup(renderChatMessage(allMessages[index], roundUsageByIndex[index] || null,
+            wrapper.innerHTML = chatRowMarkup(renderChatMessage(allMessages[index],
               index, agentRunIndex, conversationToolResults,
               isGroupedChatMessage(messages, index - visibleOffset)), index);
             var replacementEl = wrapper.firstElementChild;
@@ -1272,466 +1251,6 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
           visibleCopyButton = null;
         });
       })();
-
-      // ===== Terminal copy button for mobile =====
-
-      function stripAnsi(text) {
-        return String(text || "")
-          .replace(/\x1b\][^\x07]*(\x07|\x1b\\)/g, "")
-          .replace(/\x1b\[(\d+)C/g, function(_match, count) { return " ".repeat(Number(count) || 1); })
-          .replace(/\x1b\[[0-9;?]*[AB]/g, "\n")
-          .replace(/\x1b\[[0-9;?]*[su]/g, "")
-          .replace(/\x1b\[[0-9;?]*[HfJKr]/g, "\n")
-          .replace(/\x1bM/g, "\n")
-          .replace(/\x1b\[[0-9;?]*[ST]/g, "\n")
-          .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "")
-          .replace(/\x1b[><=ePX^_]/g, "")
-          .replace(/[\u00a0\u200b-\u200d\ufeff]/g, " ")
-          .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "")
-          .replace(/\r\n?/g, "\n")
-          .replace(/[ \t]+\n/g, "\n")
-          .replace(/\n{3,}/g, "\n\n");
-      }
-
-      export function parseMessages(output, command) {
-        var messages = [];
-        if (!output) return messages;
-
-        var text = String(output || "");
-        var newline = String.fromCharCode(10);
-        var carriageReturn = String.fromCharCode(13);
-        var esc = String.fromCharCode(27);
-
-        if (/^codex\b/.test(String(command || "").trim())) {
-          function stripCodexSegment(raw) {
-            return String(raw || "")
-              .replace(/\x1b\][^\x07]*(\x07|\x1b\\)/g, "")
-              .replace(/\x1b\[(\d+)C/g, function(_match, count) { return " ".repeat(Number(count) || 1); })
-              .replace(/\x1b\[[0-9;?]*[AB]/g, newline)
-              .replace(/\x1b\[[0-9;?]*[su]/g, "")
-              .replace(/\x1b\[[0-9;?]*[HfJKr]/g, newline)
-              .replace(/\x1bM/g, newline)
-              .replace(/\x1b\[[0-9;?]*[ST]/g, newline)
-              .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "")
-              .replace(/\x1b[><=ePX^_]/g, "")
-              .replace(/[\u00a0\u200b-\u200d\ufeff]/g, " ")
-              .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "")
-              .replace(/[ \t]+\n/g, newline);
-          }
-
-          function normalizeCodexText(value) {
-            return String(value || "")
-              .replace(/\s+/g, " ")
-              .replace(/[M]+$/g, "")
-              .trim();
-          }
-
-          function normalizeCodexPromptLine(line) {
-            return String(line || "")
-              .replace(/^›\s*/, "")
-              .replace(/^>\s*/, "")
-              .trim();
-          }
-
-          function extractCodexPromptCandidate(line) {
-            var trimmed = String(line || "").trim();
-            if (!/^›(?:\s|$)/.test(trimmed)) return null;
-            if (codexFooterRe.test(trimmed)) return null;
-            var prompt = normalizeCodexText(normalizeCodexPromptLine(trimmed));
-            if (!prompt || isPtyCodexNoiseLine(prompt)) return null;
-            return prompt;
-          }
-
-          function extractCodexAssistantCandidate(line) {
-            var trimmed = String(line || "").trim();
-            if (!/^[•◦·⏺]/.test(trimmed)) return null;
-
-            var assistant = trimmed
-              .replace(/^[•◦·]\s*/, "")
-              .replace(/^⏺\s+/, "")
-              .replace(/^│\s*/, "")
-              .trim();
-            if (!assistant || /^[•◦·⏺]$/.test(assistant)) return null;
-
-            assistant = assistant
-              .replace(/\s*\(\d+[smh]?\s*•\s*esc to interrupt\)[\s\S]*$/i, "")
-              .replace(/(?:[a-z]{1,6})?›[\s\S]*$/, "")
-              .replace(/\s{2,}gpt-\d[\s\S]*$/i, "")
-              .replace(/\b(?:OpenAI Codex|model:|directory:|Tip:)\b[\s\S]*$/i, "");
-            assistant = normalizeCodexText(assistant);
-
-            if (!assistant || assistant.length < 2 || codexActivityRe.test(assistant) || isPtyCodexNoiseLine(assistant)) {
-              return null;
-            }
-            return assistant;
-          }
-
-          function extractCodexEchoCandidate(line) {
-            var trimmed = normalizeCodexText(line);
-            if (!trimmed || isPtyCodexNoiseLine(trimmed)) return null;
-            if (/^[•◦·⏺›]/.test(trimmed)) return null;
-            if (/^[\[\]<>0-9;?]+u?$/i.test(trimmed)) return null;
-            if (/^[╭╰│┌└┐┘├┤┬┴┼─═]/.test(trimmed)) return null;
-            if (trimmed.length > 500) return null;
-            return trimmed;
-          }
-
-          function isLikelyAssistantTailArtifact(longer, shorter) {
-            if (longer.indexOf(shorter) !== 0) return false;
-            var suffix = longer.slice(shorter.length);
-            return /^[a-z]{1,4}$/i.test(suffix);
-          }
-
-          function coalesceAssistantLines(lines) {
-            var collected = [];
-            for (var i = 0; i < lines.length; i++) {
-              var normalized = normalizeCodexText(lines[i]);
-              if (!normalized || normalized.length < 2 || isPtyCodexNoiseLine(normalized)) continue;
-
-              var previous = collected[collected.length - 1];
-              if (!previous) {
-                collected.push(normalized);
-                continue;
-              }
-              if (normalized === previous) continue;
-              if (normalized.indexOf(previous) === 0) {
-                collected[collected.length - 1] = normalized;
-                continue;
-              }
-              if (previous.indexOf(normalized) === 0) {
-                if (isLikelyAssistantTailArtifact(previous, normalized)) {
-                  collected[collected.length - 1] = normalized;
-                }
-                continue;
-              }
-              collected.push(normalized);
-            }
-            return collected.join(newline).trim();
-          }
-
-          function extractVisiblePrompt(lines) {
-            for (var i = 0; i < lines.length; i++) {
-              var line = String(lines[i] || "").trim();
-              if (!line) continue;
-
-              var inlinePrompt = extractCodexPromptCandidate(line);
-              if (inlinePrompt) return inlinePrompt;
-
-              if (line === "›") {
-                for (var j = i + 1; j < lines.length; j++) {
-                  var nextLine = normalizeCodexText(lines[j]);
-                  if (!nextLine || codexFooterRe.test(nextLine) || isPtyCodexNoiseLine(nextLine)) continue;
-                  return nextLine;
-                }
-              }
-            }
-            return null;
-          }
-
-          function extractVisibleAssistantLines(lines) {
-            var assistantLines = [];
-            var collecting = false;
-
-            for (var i = 0; i < lines.length; i++) {
-              var line = String(lines[i] || "").trim();
-              if (!line) {
-                if (collecting) break;
-                continue;
-              }
-
-              var assistant = extractCodexAssistantCandidate(line);
-              if (assistant) {
-                assistantLines.push(assistant);
-                collecting = true;
-                continue;
-              }
-
-              if (collecting) {
-                if (line === "›" || /^›(?:\s|$)/.test(line) || codexFooterRe.test(line) || isPtyCodexNoiseLine(line)) {
-                  break;
-                }
-                assistantLines.push(normalizeCodexText(line));
-              }
-            }
-
-            return assistantLines;
-          }
-
-          var rawCandidates = [];
-          var candidateOrder = 0;
-          var rawSegments = text.replace(/\r\n?/g, newline).split(newline);
-          for (var rs = 0; rs < rawSegments.length; rs++) {
-            var cleanedSegment = stripCodexSegment(rawSegments[rs]);
-            var pieces = cleanedSegment.split(newline);
-            for (var pi = 0; pi < pieces.length; pi++) {
-              var piece = String(pieces[pi] || "").trim();
-              if (!piece) continue;
-
-              var promptCandidate = extractCodexPromptCandidate(piece);
-              if (promptCandidate) {
-                rawCandidates.push({ kind: "user", order: candidateOrder++, text: promptCandidate });
-                continue;
-              }
-
-              var assistantCandidate = extractCodexAssistantCandidate(piece);
-              if (assistantCandidate) {
-                rawCandidates.push({ kind: "assistant", order: candidateOrder++, text: assistantCandidate });
-                continue;
-              }
-
-              var echoCandidate = extractCodexEchoCandidate(piece);
-              if (echoCandidate) {
-                rawCandidates.push({ kind: "echo", order: candidateOrder++, text: echoCandidate });
-              }
-            }
-          }
-
-          var candidates = rawCandidates.filter(function(candidate, index, list) {
-            var previous = list[index - 1];
-            return !previous || previous.kind !== candidate.kind || previous.text !== candidate.text;
-          });
-
-          var explicitUsers = candidates.filter(function(candidate) { return candidate.kind === "user"; });
-          var assistantCandidates = candidates.filter(function(candidate) { return candidate.kind === "assistant"; });
-          var echoCandidates = candidates.filter(function(candidate) { return candidate.kind === "echo"; });
-          var strippedOutput = stripAnsi(text);
-          var strippedLines = strippedOutput.split(newline).map(function(line) { return String(line || "").trimEnd(); });
-          var visiblePrompt = extractVisiblePrompt(strippedLines);
-          var latestExplicitUser = explicitUsers.length ? explicitUsers[explicitUsers.length - 1] : null;
-          var echoedUserCandidates = echoCandidates
-            .map(function(candidate) { return candidate.text; })
-            .filter(function(value) { return value.length >= 3; });
-          var latestEchoUser = null;
-          for (var eu = echoedUserCandidates.length - 1; eu >= 0; eu--) {
-            if (echoedUserCandidates[eu] !== visiblePrompt) {
-              latestEchoUser = echoedUserCandidates[eu];
-              break;
-            }
-          }
-          if (!latestEchoUser && echoedUserCandidates.length) {
-            latestEchoUser = echoedUserCandidates[echoedUserCandidates.length - 1];
-          }
-
-          var currentUser = latestExplicitUser ? latestExplicitUser.text : latestEchoUser;
-          var rawAssistantLines = assistantCandidates
-            .filter(function(candidate) { return !latestExplicitUser || candidate.order > latestExplicitUser.order; })
-            .map(function(candidate) { return candidate.text; });
-          var visibleAssistantFallback = [];
-          var bulletMatches = strippedOutput.match(/^[ \t]*[•◦·⏺][ \t]*(.+)$/gm) || [];
-          for (var bm = 0; bm < bulletMatches.length; bm++) {
-            var bulletContent = normalizeCodexText(bulletMatches[bm].replace(/^[ \t]*[•◦·⏺][ \t]*/, ""));
-            if (!bulletContent) continue;
-            if (codexActivityRe.test(bulletContent)) continue;
-            if (codexFooterRe.test(bulletContent)) continue;
-            if (/\b(?:OpenAI Codex|model:|directory:|Tip:|esc to interrupt)\b/i.test(bulletContent)) continue;
-            visibleAssistantFallback.push(bulletContent);
-          }
-
-          var assistantText = coalesceAssistantLines(rawAssistantLines)
-            || coalesceAssistantLines(extractVisibleAssistantLines(strippedLines))
-            || (visibleAssistantFallback.length ? visibleAssistantFallback[visibleAssistantFallback.length - 1] : null);
-
-          if (currentUser) {
-            messages.push({ role: "user", content: currentUser });
-          }
-          if (assistantText) {
-            messages.push({ role: "assistant", content: assistantText });
-          }
-          if (!messages.length && latestExplicitUser) {
-            messages.push({ role: "user", content: latestExplicitUser.text });
-          } else if (!messages.length && latestEchoUser) {
-            messages.push({ role: "user", content: latestEchoUser });
-          }
-
-          return messages;
-        }
-
-        // Optimized ANSI escape sequence stripping
-        // Handles: CSI sequences, OSC sequences, single-character escapes, control chars
-        var nul = String.fromCharCode(0);
-        var bs = String.fromCharCode(8);
-        var vt = String.fromCharCode(11);
-        var ff = String.fromCharCode(12);
-        var so = String.fromCharCode(14);
-        var us = String.fromCharCode(31);
-        var nbsp = String.fromCharCode(160);
-        var bel = String.fromCharCode(7);
-        var ansiRegex = new RegExp(
-          esc + '\\[[0-9;?]*[a-zA-Z]|' +  // CSI sequences
-          esc + '\\][^' + bel + ']*(' + bel + '|' + esc + '\\\\\\\\)|' +  // OSC sequences - matches ESC ] ... (BEL or ESC \)
-          esc + '[><=eP_X^]|' +  // Single-character escapes
-          '[' + nul + '-' + bs + vt + ff + so + '-' + us + ']|' +  // Control chars: 0-8, 11, 12, 14-31
-          nbsp + '|' + carriageReturn,
-          'g'
-        );
-        var ansiStripped = text.replace(
-          ansiRegex,
-          function(m) { return m === nbsp ? ' ' : m === carriageReturn ? newline : ''; }
-        ).split(carriageReturn).join(newline);
-
-        var lines = ansiStripped.split(newline).map(function(line) { return line.trim(); }).filter(Boolean);
-
-        // Extract thinking/deep thought content
-        var thinkingPatterns = [
-          /thinking with high effort/i,
-          /thinking with medium effort/i,
-          /thinking with low effort/i,
-          new RegExp("thought for [0-9]+s", "i"),
-          new RegExp("Sauteed for [0-9]+m", "i"),
-          /Germinating/i,
-          /Doodling/i,
-          /Brewing/i
-        ];
-
-        // Find the most recent thinking line (usually appears after user input)
-
-        // Separate different types of content
-        var promptLines = [];  // Try "..." suggestions
-        var contentLines = []; // Actual conversation content
-        var thinkingLines = [];
-
-        for (var i = 0; i < lines.length; i++) {
-          var line = lines[i];
-
-          // Check for prompt suggestions (Try "..." pattern, including after ❯)
-          var lineForPromptCheck = line.replace(/^❯\s*/, "");
-          if (lineForPromptCheck.indexOf('Try"') === 0 || lineForPromptCheck.indexOf('Try "') === 0) {
-            promptLines.push(lineForPromptCheck);
-            continue;
-          }
-
-          // Check for thinking content
-          var isThinking = false;
-          for (var p = 0; p < thinkingPatterns.length; p++) {
-            if (thinkingPatterns[p].test(line)) {
-              isThinking = true;
-              thinkingLines.push(line);
-              break;
-            }
-          }
-          if (isThinking) continue;
-
-          // 界面文案与 CLI 噪声集中在 pty-noise.ts：本函数只管切分，不再维护文案。
-          if (isPtyTranscriptNoiseLine(line)) continue;
-          // Strip bullet prefix from Claude TUI output lines (keep the content)
-          if (line.indexOf("●") === 0) {
-            line = line.slice(1).trim();
-            if (!line) continue;
-            contentLines.push(line);
-            continue;
-          }
-          // Filter partial/fragmented lines (likely from streaming)
-          if (line.length < 3 && !/^[a-zA-Z]{3}$/.test(line)) continue;
-
-          contentLines.push(line);
-        }
-
-        // Add thinking message (most recent one, deduplicated)
-        if (thinkingLines.length > 0) {
-          var lastThinking = thinkingLines[thinkingLines.length - 1];
-          var durationMatch = lastThinking.match(new RegExp("for ([0-9]+[ms]+| [0-9]+m [0-9]+s)", "i"));
-          var thinkingText = durationMatch ? "深度思考 " + durationMatch[0].replace(/for /i, "") : "深度思考中...";
-          messages.push({ role: "thinking", content: thinkingText, type: "deep-thought" });
-        }
-
-        // Add prompt suggestion as a special message (pulsing display)
-        if (promptLines.length > 0) {
-          var promptText = promptLines[promptLines.length - 1].replace(/^Try\s*/, "").trim();
-          messages.push({ role: "prompt", content: promptText, type: "suggestion" });
-        }
-
-        if (!contentLines.length) return messages;
-
-        // ── Multi-turn conversation parsing ──
-        // Find ALL ❯ markers to build multiple user/assistant turn pairs
-        var turns = [];
-        var currentUserText = null;
-        var currentAssistantLines = [];
-
-        for (var i = 0; i < contentLines.length; i++) {
-          line = contentLines[i];
-
-          if (line.indexOf("❯") === 0) {
-            var afterPrompt = line.replace(/^❯\s*/, "").trim();
-
-            // Skip prompt suggestions
-            if (afterPrompt.indexOf('Try"') === 0 || afterPrompt.indexOf('Try "') === 0) continue;
-
-            // Finalize previous turn if we had a user message
-            if (currentUserText !== null && currentAssistantLines.length > 0) {
-              turns.push({ user: currentUserText, assistantLines: currentAssistantLines });
-              currentAssistantLines = [];
-            }
-
-            if (afterPrompt) {
-              currentUserText = afterPrompt;
-            } else {
-              // Standalone ❯ — just a prompt, no user text
-              if (currentUserText !== null && currentAssistantLines.length > 0) {
-                turns.push({ user: currentUserText, assistantLines: currentAssistantLines });
-                currentAssistantLines = [];
-              }
-              currentUserText = null;
-            }
-          } else if (currentUserText !== null) {
-            // Filter assistant content lines
-            if (line.indexOf("⏺") !== -1 && (line.indexOf("Hi!") !== -1 || line.indexOf("Hello") !== -1 || line.indexOf("What") !== -1 || line.indexOf("working") !== -1)) {
-              currentAssistantLines.push(line);
-            } else if (line.indexOf("⏺") === 0) {
-              currentAssistantLines.push(line.slice(1).trim() || line);
-            } else if (line.length >= 8) {
-              if (line.indexOf("✢") === -1 && line.indexOf("✳") === -1 && line.indexOf("✶") === -1 && line.indexOf("✻") === -1 && line.indexOf("✽") === -1 &&
-                  line.indexOf("▐") !== 0 && line.indexOf("▝") !== 0 && line.indexOf("▘") !== 0 &&
-                  line.indexOf("esctointerrupt") === -1 && line.indexOf("?for") !== 0 && line.indexOf("? for") !== 0) {
-                currentAssistantLines.push(line);
-              }
-            }
-          }
-        }
-
-        // Finalize the last turn
-        if (currentUserText !== null && currentAssistantLines.length > 0) {
-          turns.push({ user: currentUserText, assistantLines: currentAssistantLines });
-        }
-
-        // If no ❯-based turns found, try fallback heuristic (first message without ❯)
-        if (turns.length === 0) {
-          var fallbackUserText = "";
-          var fallbackUserIdx = -1;
-          for (var i = 0; i < contentLines.length; i++) {
-            line = contentLines[i];
-            if (line.indexOf('Try"') === 0 || line.indexOf('Try "') === 0) continue;
-            if (line.indexOf('Failed to install') !== -1) continue;
-            if (line.indexOf('ctrl+g') !== -1) continue;
-            if (line.indexOf('● ') === 0) continue;
-            if (line.length < 2 || line.length > 100) continue;
-            if (/^[a-zA-Z]/.test(line)) {
-              fallbackUserText = line.trim();
-              fallbackUserIdx = i;
-              break;
-            }
-          }
-          if (fallbackUserText && fallbackUserIdx >= 0) {
-            var fallbackAssistant = contentLines.slice(fallbackUserIdx + 1).filter(function(l) {
-              return l.length >= 8;
-            });
-            if (fallbackAssistant.length > 0) {
-              turns.push({ user: fallbackUserText, assistantLines: fallbackAssistant });
-            }
-          }
-        }
-
-        // Convert turns to messages
-        for (var t = 0; t < turns.length; t++) {
-          messages.push({ role: "user", content: turns[t].user });
-          if (turns[t].assistantLines.length > 0) {
-            var formattedContent = formatAssistantResponse(turns[t].assistantLines.join(newline));
-            messages.push({ role: "assistant", content: formattedContent });
-          }
-        }
-
-        return messages;
-      }
 
       // ── 像素风猫咪头像 ──
       // 统一的 10×10 猫咪 grid 模板：父 assistant = 加菲（橙），user = 美短（灰），
@@ -2237,7 +1756,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
           .join("\n");
       }
 
-      function renderChatMessage(msg, roundUsage, messageIndex, agentRunIndex, conversationToolResults, isGrouped?) {
+      function renderChatMessage(msg, messageIndex, agentRunIndex, conversationToolResults, isGrouped?) {
         if (msg.notice) return renderChatNotice(msg, messageIndex);
         // Thinking card (deep thought) — from PTY parsing
         if (msg.role === "thinking") {
@@ -2265,7 +1784,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
 
         // Structured content blocks (from JSON chat mode)
         if (Array.isArray(msg.content)) {
-          return renderStructuredMessage(msg, roundUsage, messageIndex, agentRunIndex, conversationToolResults, isGrouped);
+          return renderStructuredMessage(msg, messageIndex, agentRunIndex, conversationToolResults, isGrouped);
         }
 
         // Legacy string content (from PTY parsing)
@@ -2386,6 +1905,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
 
       function applyHistoryCollapse(chatMessages, selectedSession) {
         if (!chatMessages) return;
+        replyIdentities.set(chatMessages, replyIdentity(selectedSession));
         var allMessages = state.currentMessages || [];
         var lastUserIdx = -1;
         for (var i = allMessages.length - 1; i >= 0; i--) {
@@ -2436,6 +1956,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
             name: replySession.employeeName || "",
             avatar: replySession.employeeAvatar || "",
             provider: replySession.provider || "",
+            engine: replySession.structuredState?.engine,
           } : null;
           var replyMeta = {
             time: formatChatClock(replyIso),
@@ -2725,7 +2246,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
               (resultText || !resultImages.length ? '<pre>' + escapeHtml(resultText || (detail.is_error ? '工具执行失败，未返回错误详情' : '工具已完成，没有文本输出')) + '</pre>' : '') +
               resultImages.map(function(image) {
                 return inlineToolImage(image.src, "工具返回图片",
-                  'onclick="event.stopPropagation(); if(window.__openImageViewer)window.__openImageViewer(this.src, this.alt);" ');
+                  'onclick="event.stopPropagation(); if(window.__openImageViewer)window.__openImageViewer(this);" ');
               }).join('') + '</section>';
           }
         }
@@ -3065,17 +2586,11 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         return html;
       }
 
-      function renderStructuredMessage(msg, roundUsage, messageIndex, agentRunIndex, conversationToolResults, isGrouped?) {
+      function renderStructuredMessage(msg, messageIndex, agentRunIndex, conversationToolResults, isGrouped?) {
         _currentMessageGlobalIndex = typeof messageIndex === "number" ? messageIndex : -1;
         var role = msg.role;
         var messageKey = renderMessageKey(msg, messageIndex);
         var timeHtml = renderChatMessageTime(msg);
-        // Only a confirmed message ID can restore this reading preference after remount.
-        // Imperative row ownership keys deliberately change with the view lease.
-        var usageMessageKey = [msg.uuid, msg.id, msg.messageId, msg.turnId].some(function(id) {
-          return typeof id === "string" && id.length > 0;
-        }) ? getMessageKey(msg, messageIndex) : messageKey;
-        var usageHtml = role === "assistant" ? renderUsageSummaryHtml(roundUsage, usageMessageKey) : "";
         var resourceLabel = role === "assistant" && typeof msg.resourceSelection?.label === "string"
           ? msg.resourceSelection.label.slice(0, 1024) : "";
         var resourceHtml = resourceLabel ? '<div class="chat-resource-selection" role="status">' + escapeHtml(resourceLabel) + '</div>' : "";
@@ -3089,7 +2604,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
           if (role === "assistant") {
             return '<div class="chat-message ' + role + '"' + groupedAttr + ' data-role="' + escapeHtml(role) + '">' +
               timeHtml +
-              '<div class="chat-message-content">' + resourceHtml + (resourceFinished ? "" : '<div class="typing-indicator"><span></span><span></span><span></span></div>') + usageHtml + '</div>' +
+              '<div class="chat-message-content">' + resourceHtml + (resourceFinished ? "" : '<div class="typing-indicator"><span></span><span></span><span></span></div>') + '</div>' +
             '</div>';
           }
           return '<div class="chat-message ' + role + ' empty-message"' + groupedAttr + ' data-role="' + escapeHtml(role) + '" data-message-key="' + escapeHtml(messageKey) + '">' +
@@ -3149,27 +2664,10 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         var queuedBadge = isQueued ? '<span class="queued-badge">排队中</span>' : "";
         return '<div class="chat-message ' + role + queuedClass + '"' + groupedAttr + ' data-role="' + escapeHtml(role) + '" data-message-key="' + escapeHtml(messageKey) + '">' +
           timeHtml +
-          '<div class="chat-message-content">' + resourceHtml + bodyHtml + queuedBadge + usageHtml + '</div>' +
+          '<div class="chat-message-content">' + resourceHtml + bodyHtml + queuedBadge + '</div>' +
         '</div>';
       }
 
-      (window as any).__turnUsageSetExpanded = function(key: string, expanded: boolean) {
-        setPersistedExpandState(key, expanded);
-      };
-
-      function renderUsageSummaryHtml(usage, messageKey) {
-        var metrics = chatUsageMetrics(usage);
-        if (!metrics.length) return "";
-        var parts = metrics.map(function(metric) { return metric.label + " " + metric.value; });
-        var expandKey = buildExpandKey("turn-usage", [state.selectedId, messageKey]);
-        return '<div class="turn-usage-summary' + (usage.estimated === true ? ' is-estimated' : '') + '" data-expand-key="' + escapeHtml(expandKey) + '" data-expanded="' + (getPersistedExpandState(expandKey) === true ? 'true' : 'false') + '" aria-label="本轮用量（Token） ' + escapeHtml(parts.join("，")) + '">' +
-          '<svg class="turn-usage-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" aria-hidden="true"><path d="M2.5 13.5h11M4 11V7.5M8 11V3M12 11V5.5"/></svg>' +
-          '<span class="turn-usage-values">' + metrics.map(function(metric) {
-            return '<span class="turn-usage-value" data-chat-key="usage:' + metric.key + '" title="' + escapeHtml(metric.title) + '">' +
-              '<span class="turn-usage-label">' + escapeHtml(metric.label) + '</span> ' +
-              '<span class="turn-usage-number">' + escapeHtml(metric.value) + '</span></span>';
-          }).join("") + '</span></div>';
-      }
       // 用户上传附件时，客户端用 buildAttachmentPrefix 在 prompt 前注入一段
       //   [附件已上传，请查看以下文件:\n<path1>\n<path2>]\n\n<正文>
       // 文字前缀。聊天里把这段路径文字念出来既冗长又没用——解析它，图片附件
@@ -3185,10 +2683,11 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
           var src = "/api/file-raw?path=" + encodeURIComponent(p);
           return '<div class="user-attachment-image">' +
             '<img class="user-attachment-thumb" loading="lazy" ' +
+              'role="button" tabindex="0" aria-label="查看' + escapeHtml(name) + '" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click();}" ' +
               'src="' + src + '" ' +
               'alt="' + escapeHtml(name) + '" ' +
               'data-path="' + escapeHtml(p) + '" ' +
-              'onclick="event.stopPropagation(); if(window.__openFilePreview)window.__openFilePreview(this.getAttribute(\'data-path\'));" ' +
+              'onclick="event.stopPropagation(); if(window.__openImageViewer)window.__openImageViewer(this);" ' +
               'onerror="var w=this.closest(\'.user-attachment-image\'); if(w)w.style.display=\'none\';" />' +
           '</div>';
         }
@@ -3328,11 +2827,6 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         }
       }
 
-      /** 内联 tool 图片的加载终态：状态落在容器上，占位行与图片的去留由样式决定。 */
-      export function setInlineToolImageState(image: Element, state: "ready" | "error"): void {
-        image.closest(".inline-tool-image")?.setAttribute("data-image-state", state);
-      }
-
       function renderInlineTool(block, toolResult, toolName, fileInfo, extraInfo, messageKey, index, options?: any) {
         var opts = options || {};
         var toolId = block.id || "tool-" + toolName;
@@ -3440,13 +2934,13 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
           var imgSrc = "/api/file-raw?path=" + encodeURIComponent(imgPath);
           imageHtml += inlineToolImage(imgSrc, imgPath,
             'data-path="' + escapeHtml(imgPath) + '" ' +
-            'onclick="event.stopPropagation(); if(window.__openFilePreview)window.__openFilePreview(this.getAttribute(\'data-path\'));" ');
+            'onclick="event.stopPropagation(); if(window.__openImageViewer)window.__openImageViewer(this);" ');
         }
         var inlineResultImages = toolResult ? extractToolResultImages(toolResult.content) : [];
         if (inlineResultImages.length > 0) imageHtml = "";
         for (var ri = 0; ri < inlineResultImages.length; ri++) {
           imageHtml += inlineToolImage(inlineResultImages[ri].src, "工具返回图片",
-            'onclick="event.stopPropagation(); if(window.__openImageViewer)window.__openImageViewer(this.src, this.alt);" ');
+            'onclick="event.stopPropagation(); if(window.__openImageViewer)window.__openImageViewer(this);" ');
         }
 
         var extraInfoHtml = meta ? '<span class="inline-tool-meta">' + escapeHtml(meta) + '</span>' : '';
@@ -3664,11 +3158,6 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
       function renderEmptyDiff(path) {
         var suffix = path ? "，可打开文件查看当前内容" : "";
         return '<div class="diff-empty">Codex 未提供内联 diff' + suffix + '。</div>';
-      }
-
-      export function formatInlineResult(content, toolName) {
-        if (!content) return '<span class="inline-tool-empty">无输出</span>';
-        return '<pre class="inline-tool-result-text" style="max-height: 300px; overflow-y: auto;">' + escapeHtml(content) + '</pre>';
       }
 
       /** 决策卡摘要行：服务端投影的 label（结论 → 题数 → 被判定内容）优先，
@@ -3922,7 +3411,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
           if (cardImages.length > 0) {
             resultHtml = cardImages.map(function(img) {
               return inlineToolImage(img.src, "工具返回图片",
-                'onclick="event.stopPropagation(); if(window.__openImageViewer)window.__openImageViewer(this.src, this.alt);" ');
+                'onclick="event.stopPropagation(); if(window.__openImageViewer)window.__openImageViewer(this);" ');
             }).join("") + resultHtml;
           }
         }
@@ -4061,60 +3550,4 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         return null;
       }
 
-      // Format assistant response with Markdown rendering and cleanup
-      function formatAssistantResponse(text) {
-        if (!text) return "";
-
-        // Clean up the text
-        var newline = String.fromCharCode(10);
-        var lines = text.split(newline);
-        var cleanLines = [];
-
-        // Remove leading/trailing empty lines and common noise
-        var started = false;
-        for (var i = 0; i < lines.length; i++) {
-          var line = lines[i];
-          var trimmed = line.trim();
-
-          // Skip leading empty lines
-          if (!started && !trimmed) continue;
-          started = true;
-
-          // Filter out noise patterns
-          if (trimmed.indexOf("⏺") === 0 && trimmed.length > 2) {
-            cleanLines.push(trimmed.slice(1).trim());
-            continue;
-          }
-          // Strip leading ● bullet from Claude TUI output
-          if (trimmed.indexOf("●") === 0) {
-            trimmed = trimmed.slice(1).trim();
-            if (!trimmed) continue;
-            line = trimmed;
-          }
-
-          cleanLines.push(line);
-        }
-
-        // Remove trailing empty lines
-        while (cleanLines.length > 0 && !cleanLines[cleanLines.length - 1].trim()) {
-          cleanLines.pop();
-        }
-
-        // Deduplicate lines (PTY can echo same content multiple times with/without spaces)
-        var deduped = [];
-        var seenNorm = {};
-        for (var j = 0; j < cleanLines.length; j++) {
-          var normalized = cleanLines[j].replace(/\s+/g, "");
-          if (normalized.length > 5 && seenNorm[normalized]) continue;
-          if (normalized.length > 5) seenNorm[normalized] = true;
-          deduped.push(cleanLines[j]);
-        }
-
-        // Return plain text — renderChatMessage will handle markdown rendering
-        return deduped.join(newline);
-      }
-
-      export function shortCommand(cmd) {
-        var s = String(cmd || "").trim();
-        return s.length <= 24 ? s || "未选择会话" : s.slice(0, 21) + "...";
-      }
+registerChatRuntime({ renderChat, scheduleChatRender, clearActivityDetailState });

@@ -1,4 +1,5 @@
-import { isFixedAvatarEmployee } from "./fixed-employee-avatar.js";
+import { employeeAvatarValue, isFixedAvatarEmployee } from "./fixed-employee-avatar.js";
+import { HR_EMPLOYEE_KEY } from "./hr-employee-identity.js";
 import { randomUUID } from "node:crypto";
 import type { Express, Response } from "express";
 
@@ -30,19 +31,21 @@ import {
   validateStructuredEmployeeDraft,
 } from "./silicon-employee-draft.js";
 import { SESSION_PROVIDERS } from "./session-provider.js";
-import { parsePlushAvatar, parsePlushCatAvatar } from "./plush-avatar.js";
+import { parsePlushAvatar, parsePlushCatAvatar, parsePlushDogAvatar } from "./plush-avatar.js";
 import { DEFAULT_WAND_TASK_AGENT_KIND } from "./task-types.js";
-import type { QuickCommitAiOptions } from "./git-quick-commit.js";
+import type { QuickCommitAiOptions } from "./ai-text-runner.js";
 import { EMPLOYEE_KNOWLEDGE_MAX_ENTRIES } from "./employee-knowledge-types.js";
 import type { WandStorage } from "./storage.js";
 import type { WandTaskAgent } from "./task-types.js";
 import type { SessionProvider, WandConfig } from "./types.js";
 
-/** 员工起草没有会话上下文，按「默认 provider」解析，与任务标题 / 提示词优化一致。 */
-function employeeDraftAiOptions(storage: WandStorage, config?: WandConfig, free?: Pick<OpenRouterFreeModelsService, "resolveForCall">): QuickCommitAiOptions {
-  if (!config) return {};
+/** Recruitment uses HR’s own ordered candidates and persona, never the ops chain. */
+export function employeeDraftAiOptions(storage: WandStorage, config?: WandConfig, free?: Pick<OpenRouterFreeModelsService, "resolveForCall">): QuickCommitAiOptions {
+  if (!config) throw new Error("招聘需要服务端 AI 配置。");
+  const hr = storage.getSystemSiliconEmployee(HR_EMPLOYEE_KEY);
+  if (!hr) throw new Error("系统 HR 嘟嘟尚未初始化，请重启服务后重试。");
   const provider: SessionProvider = config.defaultProvider ?? "claude";
-  return resolveSystemAiContext(
+  return { ...resolveSystemAiContext(
     {
       provider,
       structuredState: undefined,
@@ -52,9 +55,9 @@ function employeeDraftAiOptions(storage: WandStorage, config?: WandConfig, free?
       thinkingEffort: config.defaultThinkingEffort,
     },
     config,
-    storage.getSystemSiliconEmployee(),
+    hr,
     free,
-  );
+  ), opsPersona: hr.prompt };
 }
 
 export interface EmployeeDraftRequest {
@@ -99,7 +102,7 @@ function parseAvatar(value: unknown, name: string): string {
   }
   const avatar = text(value);
   if (!avatar || /^cat:\d{1,2}$/.test(avatar)) return avatar;
-  if (parsePlushAvatar(avatar) || parsePlushCatAvatar(avatar)) return avatar;
+  if (parsePlushAvatar(avatar) || parsePlushCatAvatar(avatar) || parsePlushDogAvatar(avatar)) return avatar;
   if (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(avatar)) {
     throw new Error(`员工「${name}」的头像格式无效。`);
   }
@@ -125,9 +128,10 @@ export function parseSystemEmployeeAgents(value: unknown, existing: SiliconEmplo
   const body = bodyObject(value);
   for (const field of SYSTEM_EMPLOYEE_LOCKED_FIELDS.filter((field) => !isFixedAvatarEmployee(existing) || field.key === "avatar")) {
     const incoming = body[field.key];
-    if (incoming === undefined || (incoming === null && !isFixedAvatarEmployee(existing))) continue;
+    if (incoming === undefined) continue;
     const current = existing[field.key];
-    const isSame = typeof incoming === "string" && incoming === current;
+    const isSame = typeof incoming === "string" && (incoming === current
+      || (field.key === "avatar" && isFixedAvatarEmployee(existing) && incoming === employeeAvatarValue(existing)));
     if (!isSame) {
       throw new Error(`该员工是内置的，${field.label}不可修改。`);
     }
@@ -136,7 +140,7 @@ export function parseSystemEmployeeAgents(value: unknown, existing: SiliconEmplo
   if (body.tags !== undefined && JSON.stringify(body.tags) !== JSON.stringify(siliconEmployeeTags(existing))) {
     throw new Error("该员工是内置的，标签不可修改。");
   }
-  if (isFixedAvatarEmployee(existing) && body.id !== undefined && body.id !== existing.id) throw new Error("该员工是内置的，身份不可修改。");
+  if (body.id !== undefined && body.id !== existing.id) throw new Error("该员工是内置的，身份不可修改。");
   if (body.systemKey !== undefined && body.systemKey !== existing.systemKey) {
     throw new Error("该员工是内置的，身份不可修改。");
   }
@@ -260,6 +264,12 @@ export function registerSiliconEmployeeRoutes(
       console.error("[SiliconEmployee] definition notification failed:", getErrorMessage(error));
     }
   };
+
+  // Identity is live data, not a versioned asset; old HTTP caches must not retain another face.
+  app.use("/api/silicon-employees", (_req, res, next) => {
+    res.setHeader("Cache-Control", "no-store");
+    next();
+  });
 
   app.get("/api/silicon-employees", (req, res) => {
     try {
@@ -393,7 +403,7 @@ export function registerSiliconEmployeeRoutes(
           : parseSiliconEmployeeInput(input, existing, now);
       storage.saveSiliconEmployee(employee);
       notifyEmployee(employee.id);
-      res.json(employee);
+      res.json(storage.getSiliconEmployee(employee.id));
     } catch (error) {
       sendEmployeeError(res, error);
     }
