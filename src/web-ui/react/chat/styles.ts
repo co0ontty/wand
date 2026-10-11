@@ -9,12 +9,32 @@ export function installChatSurfaceStyles(): void {
 }
 
 const CHAT_SURFACE_STYLES = String.raw`
+    .wand-chat-message { display:flex; gap:8px; min-width:0; max-width:100%; color:var(--text-primary); font-size:var(--font-size-sm); line-height:1.5; }
+    .wand-chat-message[data-chat-role="user"] { flex-direction:row-reverse; }
+    .wand-chat-message-avatar { flex:none; }
+    .wand-chat-message-body { display:flex; flex-direction:column; gap:4px; min-width:0; max-width:100%; width:100%; }
+    .wand-chat-message[data-chat-role="user"] > .wand-chat-message-body { width:auto; margin-inline-start:auto; }
+    .wand-chat-message-header, .wand-chat-message-footer { font-size:var(--font-size-xs); color:var(--text-secondary); }
+    .wand-chat-message-content { min-width:0; overflow-wrap:anywhere; }
+    :where(.wand-chat-message[data-chat-role="user"]) > :where(.wand-chat-message-body) > .wand-chat-message-content,
+    :where(.wand-chat-message[data-chat-surface="preview"]) > :where(.wand-chat-message-body) > .wand-chat-message-content { padding:8px 12px; background:var(--bg-secondary); border-radius:16px; }
+    :where(.wand-chat-message[data-chat-surface="document"]) > :where(.wand-chat-message-body) > .wand-chat-message-content { padding:12px 16px; border:1px solid var(--border-subtle); border-radius:var(--radius-lg); background:var(--bg-surface); }
+    .chat-disclosure-trigger { display:flex; align-items:center; gap:8px; width:100%; min-width:0; box-sizing:border-box; border:0; border-radius:var(--radius-md); background:transparent; color:inherit; font:inherit; cursor:pointer; }
+    .chat-disclosure-trigger:hover { background:var(--bg-hover); }
+    .chat-disclosure-trigger:active { background:var(--bg-active); }
+    .chat-disclosure-trigger:focus-visible { outline:2px solid var(--border-focus); outline-offset:2px; }
+    .chat-thinking-content { padding:8px 4px 12px; white-space:pre-wrap; overflow-wrap:anywhere; color:var(--text-secondary); }
+    .team-chat-live-output .chat-process-summary { min-height:44px; }
+    .team-chat-live-summary-text { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:start; }
+    .chat-thinking-label { flex:1; text-align:start; }
+    .chat-thinking-status { font-size:var(--font-size-xs); color:var(--text-secondary); }
+
     .chat-message[data-x-presentation="bubble"], .chat-activity[data-x-presentation] { display:block; width:100%; min-width:0; padding:0; }
     .chat-message.assistant-reply-collapsed > :not(.assistant-reply-host) { display:none; }
     .chat-message-text, .chat-activity-thinking-content { white-space:pre-wrap; overflow-wrap:anywhere; }
-    .chat-process-summary.ant-btn { height:auto; min-height:52px; padding:11px 4px; text-align:left; justify-content:flex-start; white-space:normal; color:var(--text-secondary); font-size:var(--font-size-xs); }
-    .chat-process-summary.ant-btn > div { flex:1; min-width:0; }
-    .chat-process-summary:not(.ant-btn) { display:inline-flex; align-items:center; gap:6px; min-width:0; }
+    .chat-process-summary.chat-disclosure-trigger { height:auto; min-height:52px; padding:11px 4px; text-align:left; justify-content:flex-start; white-space:normal; color:var(--text-secondary); font-size:var(--font-size-xs); }
+    .chat-process-summary.chat-disclosure-trigger > div { flex:1; min-width:0; }
+    .chat-process-summary:not(button) { display:inline-flex; align-items:center; gap:6px; min-width:0; }
     /* 运行标记：静态是一枚实心点，运行态在同一个实例里展开成 3×3 并相位流动。
        几何对齐 Android ToolActivityMark（12dp 标记盒 / 6dp 点 / 步进 4dp）：折叠时九点
        在中心重合放大成一点，展开时只平移不缩放。动画只由运行态驱动，不做演示用定时。 */
@@ -41,7 +61,9 @@ const CHAT_SURFACE_STYLES = String.raw`
     .chat-activity-menu-inner { overflow:visible; }
     /* Android：摘要下方按内容长高，最多占聊天视口的 1/3（120–240px），内部滚动。 */
     .chat-activity-timeline { max-height:var(--chat-activity-panel-height,240px); box-sizing:border-box; overflow:auto; overscroll-behavior:contain; overflow-anchor:none; scrollbar-gutter:stable; padding:4px; --chat-call-dot-center:17px; }
-    .chat-call .ant-thought-chain-node-box { flex:1; min-width:0; }
+    .wand-chat-entry { display:flex; align-items:flex-start; gap:8px; min-width:0; }
+    .wand-chat-entry > .chat-call-mark { flex:0 0 6px; margin-block-start:14px; margin-inline-end:3px; }
+    .wand-chat-entry-body { flex:1; min-width:0; }
     .chat-call-detail { min-width:0; overflow-wrap:anywhere; }
     /* 时间线竖线只连接首末状态点：单条活动不画贯穿整卡的长线（对齐 Android activityTimelineRailBounds）。 */
     .chat-call { position:relative; }
@@ -56,8 +78,8 @@ const CHAT_SURFACE_STYLES = String.raw`
     .chat-call[data-status="complete"] .chat-call-mark { background:var(--success); }
     /* 行高按内容档位固定：调用行留出「标签 + 输入 + 结果」三行，思考轮次单行紧凑
        （对齐 Android 的 ACTIVITY_CALL_ROW_MIN_HEIGHT / ACTIVITY_THINKING_ROW_MIN_HEIGHT）。 */
-    .chat-call-button.ant-btn { height:auto; min-height:44px; padding:8px 0; text-align:left; justify-content:flex-start; align-items:flex-start; white-space:normal; gap:8px; transition:background-color var(--motion-fast) var(--ease-in-out-smooth); }
-    .chat-call[data-tool-ids] .chat-call-button.ant-btn { min-height:78px; }
+    .chat-call-button.chat-disclosure-trigger { height:auto; min-height:44px; padding:8px 0; text-align:left; justify-content:flex-start; align-items:flex-start; white-space:normal; gap:8px; transition:background-color var(--motion-fast) var(--ease-in-out-smooth); }
+    .chat-call[data-tool-ids] .chat-call-button.chat-disclosure-trigger { min-height:78px; }
     /* 行高亮：运行中与已展开用品牌色 5%，失败行用危险色 5%（对齐 Android activityEntryHighlight）。 */
     .chat-call[data-status="running"] .chat-call-button, .chat-call[data-expanded="true"] .chat-call-button { background:color-mix(in srgb,var(--accent) 5%,transparent); }
     .chat-call[data-status="error"] .chat-call-button { background:color-mix(in srgb,var(--danger) 5%,transparent); }
@@ -125,7 +147,7 @@ const CHAT_SURFACE_STYLES = String.raw`
     /* Metadata shares one compact row; full time/duration stays available on the clock. */
     .assistant-reply-head { display:flex; flex-direction:column; gap:6px; width:100%; min-width:0; }
     .chat-message-time { display:inline-flex; align-items:center; gap:8px; padding:2px 8px; font-family:var(--font-mono); font-size:var(--font-size-2xs); font-weight:var(--font-weight-medium); color:var(--text-secondary); font-variant-numeric:tabular-nums; }
-    .chat-message.user .ant-bubble-header { display:flex; justify-content:flex-end; }
+    .chat-message.user .wand-chat-message-header { display:flex; justify-content:flex-end; }
     .assistant-reply-disclosure.ant-btn { height:auto; min-height:44px; padding:5px 8px; border-radius:var(--radius-md); justify-content:flex-start; gap:8px; text-align:left; color:var(--text-primary); }
     /* 收起态用弱底色交代「这里折起来了」，展开态回到透明标题行（对齐 Android AssistantReplyHeader）。 */
     .chat-message.assistant-reply-collapsed .assistant-reply-disclosure.ant-btn { background:color-mix(in srgb,var(--bg-secondary) 58%,transparent); }
@@ -162,12 +184,12 @@ const CHAT_SURFACE_STYLES = String.raw`
     .agent-run-receipt-row { display:flex; flex-wrap:wrap; gap:4px 8px; font-size:var(--font-size-xs); }
     .agent-run-receipt-row code { overflow-wrap:anywhere; }
     /* 自己的发言：品牌色 13% 拼接底 + 品牌色 24% 描边 + 右下小圆角尾巴（对齐 Android UserBubble）。 */
-    .chat-message.user .ant-bubble-content { padding:8px 13px; /* 15px/21px：与 Android UserBubble 同一档正文 */ border-radius:20px 20px 6px 20px; border:1px solid color-mix(in srgb,var(--accent) 24%,transparent); background:color-mix(in srgb,var(--accent) 13%,var(--bg-surface)); font-size:15px; line-height:21px; }
+    .chat-message.user .wand-chat-message-content { padding:8px 13px; /* 15px/21px：与 Android UserBubble 同一档正文 */ border-radius:20px 20px 6px 20px; border:1px solid color-mix(in srgb,var(--accent) 24%,transparent); background:color-mix(in srgb,var(--accent) 13%,var(--bg-surface)); font-size:15px; line-height:21px; }
     .chat-resource-selection { font-size:var(--font-size-xs); overflow-wrap:anywhere; }
-    .chat-process-summary.ant-btn, .chat-activity-command-time, .chat-call-time, .chat-tool-subtitle.ant-typography, .chat-resource-selection { color:color-mix(in srgb,var(--text-secondary) 88%,var(--text-primary)); }
+    .chat-process-summary.chat-disclosure-trigger, .chat-activity-command-time, .chat-call-time, .chat-tool-subtitle.ant-typography, .chat-resource-selection { color:color-mix(in srgb,var(--text-secondary) 88%,var(--text-primary)); }
     @media (max-width:640px) { .chat-tool-trigger.ant-btn { min-height:44px; } }
     /* reduce-motion：不流动、不旋转，只保留状态色，和 Android WandStatusIconSlot / ToolActivityMark 一致。 */
-    @media (prefers-reduced-motion:reduce) { .chat-disclosure-body, .chat-disclosure-chevron { transition:none; } .inline-tool-image-spinner { animation:none; } .chat-process-summary-dot i, .chat-tool-icon-progress, .chat-tool-icon-glyph, .chat-call-button.ant-btn { transition:none; }
+    @media (prefers-reduced-motion:reduce) { .chat-disclosure-body, .chat-disclosure-chevron { transition:none; } .inline-tool-image-spinner { animation:none; } .chat-process-summary-dot i, .chat-tool-icon-progress, .chat-tool-icon-glyph, .chat-call-button.chat-disclosure-trigger { transition:none; }
       .chat-activity[data-live="true"] .chat-process-summary-dot i,
       .chat-activity.is-command-running .chat-process-summary-dot i,
       .chat-activity.is-thinking-running .chat-process-summary-dot i { animation:none; transform:translate(var(--mark-x),var(--mark-y)) scale(2); }

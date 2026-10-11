@@ -4,7 +4,7 @@ import { ChatActivity, ChatActivityEntry, ChatDisclosureBody as DisclosureBody, 
 import { createRoot, type Root } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { Alert, Badge, Button, Card, Collapse, Flex, Tag, Timeline, Typography, theme } from "antd";
-import { FileCard, Think, ThoughtChain } from "@ant-design/x";
+import { FileCard } from "@ant-design/x";
 import { EmployeeAvatar } from "../agents/employee-avatar";
 import { WandIcon } from "../ui";
 import { WandUiProvider } from "../theme";
@@ -36,7 +36,7 @@ const slotNames: Partial<Record<Kind, string[]>> = {
   unknown: ["unknown-block-header", "unknown-block-body"],
 };
 
-/** Only the business-owned body crosses the DOM seam; library chrome is owned by React. */
+/** Only the business-owned body crosses the DOM seam; message chrome is owned by Wand. */
 function OwnedNode({ node }: { node?: HTMLElement }): React.ReactElement {
   const ref = React.useRef<HTMLDivElement>(null);
   React.useLayoutEffect(() => { if (node && ref.current && node.parentElement !== ref.current) ref.current.replaceChildren(node); }, [node]);
@@ -63,7 +63,7 @@ function statusColor(status?: string): "error" | "processing" | "warning" | "suc
 }
 const disclosureAnchors = new WeakMap<HTMLElement, () => void>();
 const disclosurePadding = new WeakMap<HTMLElement, string>();
-/** Keep the trigger stationary through the library disclosure's height transition.
+/** Keep the trigger stationary through the disclosure's height transition.
  * Explicit scrolling cancels the anchor immediately; it never follows new output. */
 function preserveDisclosurePosition(control: HTMLElement, change: () => void): void {
   const scroller = control.closest<HTMLElement>(".chat-messages");
@@ -158,7 +158,7 @@ function captureSlots(element: Element, kind: Kind): Map<string, HTMLElement> {
   return slots;
 }
 
-/** Ant owns message chrome; detached, non-interactive metadata stays a patchable source. */
+/** Wand owns message chrome; detached, non-interactive metadata stays a patchable source. */
 function ChatBubble({ element, slots }: { element: HTMLElement; slots: Map<string, HTMLElement> }): React.ReactElement {
   const user = element.dataset.role === "user";
   const timing = slots.get("chat-message-time");
@@ -193,11 +193,11 @@ function renderProjection(element: HTMLElement, projection: Projection): void {
       onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } }}/>
   } else if (projection.kind === "thinking") {
     const expanded = element.classList.contains("expanded");
-    content = <Think loading={element.dataset.loading === "true"} expanded={expanded}
-      title={<Button type="text" aria-expanded={expanded}>深度思考</Button>}
-      onExpand={() => { (window as any).__thinkingToggle(element); renderProjection(element, projection); }}>
-      {element.dataset.thinking}
-    </Think>;
+    content = <ChatActivity expanded={expanded}
+      summary={<><span className="chat-thinking-label">深度思考</span><span className="chat-thinking-status">{element.dataset.loading === "true" ? "思考中" : "已结束"}</span></>}
+      onToggle={event => preserveDisclosurePosition(event.currentTarget, () => { (window as any).__thinkingToggle(element); renderProjection(element, projection); })}>
+      <div className="chat-thinking-content">{element.dataset.thinking}</div>
+    </ChatActivity>;
   } else if (projection.kind === "tool" || projection.kind === "terminal" || projection.kind === "diff") {
     const kind = projection.kind;
     const headerClass = kind === "tool" ? "chat-tool-header" : kind === "terminal" ? "term-header" : "diff-header";

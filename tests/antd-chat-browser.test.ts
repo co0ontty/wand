@@ -67,6 +67,10 @@ export async function runFocusBrowser({ root = resolve(import.meta.dirname, ".."
         "/styles.css": [join(root, "src/web-ui/content/styles.css"), "text/css"],
         "/tailwind.css": [join(root, "src/web-ui/content/tailwind.css"), "text/css"] };
       if (files[path]) { res.setHeader("Content-Type", files[path][1]); res.end(readFileSync(files[path][0])); return; }
+      if (path.includes("plushAvatarChunkSrc") || path.includes("plush-avatar")) {
+        res.setHeader("Content-Type", "text/javascript");
+        res.end(readFileSync(join(root, "src/web-ui/content/plush-avatar.js"))); return;
+      }
       if (/^\/api\/sessions\/focus-[AB]\/tool-content\//.test(path)) {
         result.requests.push(path);
         const plan = responsePlans.shift() || { input: { file_path: "fixture.txt" }, content: "AAAA", pending: false, resultAvailable: true };
@@ -229,7 +233,7 @@ export async function runFocusBrowser({ root = resolve(import.meta.dirname, ".."
         await evaluate("h.state.sessions[0].sessionKind='pty';chatLane.mountComposerSender();void 0");
         assert.equal(await evaluate("!document.querySelector('.ant-sender') && ownedInput===document.getElementById('input-box') && ownedInput===document.activeElement"), true, "PTY restores exact focused native input");
         await evaluate("h.state.sessions[0].sessionKind='structured';chatLane.mountComposerSender();chatLane.attachments();void 0");
-        await wait("!!document.querySelector('.ant-attachment,.ant-attachments')", "X attachment list mounted");
+        await wait("!!document.querySelector('.composer-attachment-list')", "owned attachment list mounted");
         const removeSelector = await evaluate("(()=>{const n=document.querySelector('#test-attachments [aria-label*=Remove],#test-attachments [aria-label*=移除],#test-attachments .ant-file-card-list-remove');if(!n)throw Error(document.getElementById('test-attachments').outerHTML);n.id='remove-fixture';return '#remove-fixture';})()");
         await click(removeSelector); await wait("h.composer.read(h.state.selectedId).attachments.length===0", "real attachment removal callback");
         await evaluate("document.getElementById('test-attachments').remove();document.querySelector('[data-composer-sender]').remove();document.getElementById('chat-output').remove();const login=document.createElement('div');login.dataset.loginControls='';login.dataset.checking='false';document.body.appendChild(login);chatLane.mountLoginControls();void 0");
@@ -411,7 +415,7 @@ async function runExtended({ evaluate: e, send, click, key, wait, mode, result, 
     await e(`h.fresh(focusTurns,${JSON.stringify(patch)})`); await openRead();
   };
   // The thinking row inside the timeline stays one real control that opens only its own body:
-  // X's Think owns the visual, so no second disclosure tier is added around it.
+  // Wand owns the disclosure; there must be no second nested toggle.
   await e('window.thinkingRow=document.querySelector(".chat-call[data-thinking-entry=\\"true\\"]");void 0');
   const thinkingSelector = '.chat-call[data-thinking-entry="true"] button.chat-call-button';
   assert.equal(await e('thinkingRow?.querySelectorAll("button").length'), 1, "thinking row keeps exactly one control");
@@ -717,13 +721,13 @@ async function runExtended({ evaluate: e, send, click, key, wait, mode, result, 
 
 import { test } from "node:test";
 import { mkdirSync } from "node:fs";
-test("Ant X production chat retains tool identity, lazy details, focus and reading leases", { timeout: 180_000, skip: process.env.WAND_CHAT_BROWSER !== "1" }, async () => {
+test("Wand production chat retains tool identity, lazy details, focus and reading leases", { timeout: 180_000, skip: process.env.WAND_CHAT_BROWSER !== "1" }, async () => {
   const artifact = resolve(import.meta.dirname, "../output/web-ui-library-migration/chat");
   mkdirSync(artifact, { recursive: true });
   const result = await runFocusBrowser({ matrix: ["desktop", "390px", "native-shell", "reactUi=0", "reduce-motion"], coreOnly: true, output: join(artifact, "chat-browser.json") });
   assert.equal(result.ok, true);
 });
-test("Ant X production chat preserves pagination, source scopes, retries and late-result invalidation", { timeout: 180_000, skip: process.env.WAND_CHAT_BROWSER !== "1" }, async () => {
+test("Wand production chat preserves pagination, source scopes, retries and late-result invalidation", { timeout: 180_000, skip: process.env.WAND_CHAT_BROWSER !== "1" }, async () => {
   const artifact = resolve(import.meta.dirname, "../output/web-ui-library-migration/chat");
   mkdirSync(artifact, { recursive: true });
   const result = await runFocusBrowser({ matrix: ["desktop"], coreOnly: false, output: join(artifact, "chat-extended-browser.json") });

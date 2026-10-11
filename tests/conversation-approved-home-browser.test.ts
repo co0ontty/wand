@@ -10,7 +10,7 @@ import { openBrowser } from "./helpers/sidebar-ux-browser.mjs";
 test("approved home keeps the reading axis, real roster and attached companion", {
   skip: process.env.WAND_APPROVED_HOME_BROWSER !== "1", timeout: 120_000,
 }, async () => {
-  const root = resolve(import.meta.dirname, ".."), out = join(root, "output/home-approved-20261011/browser");
+  const root = resolve(import.meta.dirname, ".."), out = process.env.WAND_CHAT_SURFACE_OUTPUT || join(root, "output/home-approved-20261011/browser");
   mkdirSync(out, { recursive: true });
   const source = `
     import React from 'react';import {createRoot} from 'react-dom/client';
@@ -82,12 +82,42 @@ test("approved home keeps the reading axis, real roster and attached companion",
     assert.equal(await browser.evaluate("getComputedStyle(document.querySelector('.conversation-reply-body')).overflowY"), "visible");
     assert.equal(await browser.evaluate("!!document.querySelector('.conversation-companion .composer-floating-avatar')"), true);
     await browser.screenshot(join(out, "desktop-long.png"));
-    await browser.evaluate(`(()=>{window.savedReply=${JSON.stringify(reply)};const el=document.querySelector('.conversation-message-scroll');el.scrollTop=0;fixture.preview({sessionId:'design-session',conversationId:'dm_design',preview:{status:'running',text:savedReply+'\\n\\n流式增量A'}});return true})()`);
+    await browser.evaluate("document.querySelector('.conversation-message-scroll').scrollTop=0;true");
+    await browser.wait("document.querySelector('.conversation-new-messages button')?.textContent.includes('回到最新')");
+    let streamed = reply;
+    let height = await browser.evaluate("document.querySelector('.conversation-message-scroll').scrollHeight");
+    for (let index = 0; index < 3; index++) {
+      streamed += `\n\n### 新进展 ${index + 1}\n\n这是一段真实换行的流式追加，用户仍在阅读较早的内容。`;
+      await browser.evaluate(`fixture.preview({sessionId:'design-session',conversationId:'dm_design',preview:{status:'running',text:${JSON.stringify(streamed)}}});true`);
+      await browser.settle();
+      const nextHeight = await browser.evaluate("document.querySelector('.conversation-message-scroll').scrollHeight");
+      assert.ok(nextHeight > height, "streamed paragraphs really increase the scroll height");
+      height = nextHeight;
+      assert.equal(await browser.evaluate("document.querySelector('.conversation-message-scroll').scrollTop"), 0, "same-turn growth preserves history position");
+    }
+    await browser.screenshot(join(out, "reading-history.png"));
+    await browser.evaluate("document.querySelector('.conversation-new-messages button').focus();true");
+    await browser.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
+    await browser.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
     await browser.settle();
-    assert.equal(await browser.evaluate("document.querySelector('.conversation-message-scroll').scrollTop"), 0, "streaming does not pull a reader away from older content");
-    await browser.evaluate("(()=>{const el=document.querySelector('.conversation-message-scroll');el.scrollTop=el.scrollHeight;fixture.preview({sessionId:'design-session',conversationId:'dm_design',preview:{status:'done',text:savedReply+'\\n\\n流式增量B'}});return true})()");
+    assert.ok(await browser.evaluate("(()=>{const el=document.querySelector('.conversation-message-scroll');return el.scrollHeight-el.scrollTop-el.clientHeight})()") < 3, "native keyboard activation reaches the tail");
+    streamed += "\n\n### 最后一次追加\n\n返回最新以后，这段回复继续增长，视口应该继续贴尾。";
+    await browser.evaluate(`fixture.preview({sessionId:'design-session',conversationId:'dm_design',preview:{status:'done',text:${JSON.stringify(streamed)}}});true`);
     await browser.settle();
-    assert.ok(await browser.evaluate("(()=>{const el=document.querySelector('.conversation-message-scroll');return el.scrollHeight-el.scrollTop-el.clientHeight})()") < 3, "streaming follows the actual reading tail");
+    const tail = await browser.evaluate("(()=>{const el=document.querySelector('.conversation-message-scroll');return {height:el.scrollHeight,gap:el.scrollHeight-el.scrollTop-el.clientHeight}})()");
+    assert.ok(tail.height > height, "output grows again after the keyboard action");
+    assert.ok(tail.gap < 3, `keyboard return to latest resumes following same-turn growth: ${JSON.stringify(tail)}`);
+    assert.equal(await browser.evaluate("!!document.querySelector('.conversation-new-messages button')"), false);
+    await browser.click('.conversation-sender textarea');
+    await browser.send("Input.imeSetComposition", { text: "中文候选", selectionStart: 4, selectionEnd: 4 });
+    await browser.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 229 });
+    await browser.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 229 });
+    assert.equal(writes, 0, "IME Enter never submits the candidate text");
+    await browser.send("Input.insertText", { text: "中文确认" });
+    await browser.send("Input.insertText", { text: "，继续输入" });
+    assert.equal(await browser.evaluate("document.querySelector('.conversation-sender textarea').value"), "中文确认，继续输入");
+    await browser.evaluate("fixture.store.edit(fixture.key('dm_design'),{text:''});true");
+
 
     await browser.click('[aria-label="收起或展开目录"]'); await browser.screenshot(join(out, "desktop-collapsed.png"));
     await browser.click('[aria-label="收起或展开目录"]');

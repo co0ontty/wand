@@ -2,6 +2,7 @@ import { useConversationActivity } from "../conversations/activity";
 import { conversationForRun } from "../conversations/run-route";
 import { conversationsRepository } from "../conversations/repository";
 import { ChatMessage } from "../chat/message";
+import { ChatActivity } from "../chat/activity";
 import * as React from "react";
 import * as jsxRuntime from "react/jsx-runtime";
 import { failureMessage } from "../errors";
@@ -95,6 +96,7 @@ const AI_TEAMS_HOST: Record<string, object> = {
   "composer-popover/action": { ComposerPopoverAction },
   "chat/running-status-bar": { RunningStatusBar },
   "chat/message": { ChatMessage },
+  "chat/activity": { ChatActivity },
   "file-preview/controller": { filePreviewController },
   "file-preview/markdown": { MarkdownPreview, MessageFileContext },
   "file-preview/model": { formatFilePreviewSize },

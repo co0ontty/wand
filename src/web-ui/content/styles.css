@@ -241,8 +241,8 @@ textarea[data-idle-speech] { touch-action: none; user-select: none; -webkit-user
 .conversation-root .team-chat-msg-head { gap:8px; }
 .conversation-root .team-chat-msg-head .chat-message-time { color:var(--text-tertiary); font-size:var(--font-size-xs); }
 .conversation-root .team-chat-msg-content > .ant-typography { font-size:var(--font-size-xs); color:var(--text-tertiary); }
-.conversation-root .ant-bubble-content { padding:8px 12px 5px; border-radius:16px; background:var(--bg-secondary); color:var(--text-primary); font-size:15px; line-height:1.5; }
-.conversation-root .team-chat-msg[data-side="end"] .ant-bubble-content { background:var(--accent-muted); }
+.conversation-root .wand-chat-message-content { padding:8px 12px 5px; border-radius:16px; background:var(--bg-secondary); color:var(--text-primary); font-size:15px; line-height:1.5; }
+.conversation-root .team-chat-msg[data-side="end"] .wand-chat-message-content { background:var(--accent-muted); }
 .conversation-root .team-chat-notice { padding-block:8px; font-size:12px; }
 .conversation-empty { padding-block:24px; }
 .conversation-composer { flex-shrink:0; position:relative; padding:8px var(--wand-page-inset,20px) max(8px,var(--wand-safe-bottom,0px)); background:var(--bg-primary); }
@@ -357,10 +357,10 @@ textarea[data-idle-speech] { touch-action: none; user-select: none; -webkit-user
 .conversation-root .conversation-message[data-side="end"] { flex-direction:row-reverse; }
 .conversation-peer-avatar[data-visible="false"] { visibility:hidden; }
 .conversation-peer-avatar .team-chat-avatar { border-radius:50%; }
-.conversation-root .conversation-message[data-lead="true"][data-side="start"] .ant-bubble-content { border-top-left-radius:4px; }
-.conversation-root .conversation-message[data-tail="true"][data-side="start"] .ant-bubble-content { border-bottom-left-radius:4px; }
-.conversation-root .conversation-message[data-lead="true"][data-side="end"] .ant-bubble-content { border-top-right-radius:4px; }
-.conversation-root .conversation-message[data-tail="true"][data-side="end"] .ant-bubble-content { border-bottom-right-radius:4px; }
+.conversation-root .conversation-message[data-lead="true"][data-side="start"] .wand-chat-message-content { border-top-left-radius:4px; }
+.conversation-root .conversation-message[data-tail="true"][data-side="start"] .wand-chat-message-content { border-bottom-left-radius:4px; }
+.conversation-root .conversation-message[data-lead="true"][data-side="end"] .wand-chat-message-content { border-top-right-radius:4px; }
+.conversation-root .conversation-message[data-tail="true"][data-side="end"] .wand-chat-message-content { border-bottom-right-radius:4px; }
 .conversation-root .conversation-message .team-chat-body-text-text, .conversation-root .conversation-message .team-chat-preview { font-size:15px; line-height:1.5; color:inherit; }
 /* 发言人身份在气泡外、气泡正上方：名字与头像同一行顶部对齐，气泡内部只剩正文与时间。 */
 .conversation-message-author { font-size:13px; font-weight:600; line-height:20px; color:var(--text-primary); margin-bottom:2px; }

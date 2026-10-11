@@ -74,7 +74,7 @@ IM 参考 Telegram 的连续气泡：16px/dp 圆角，最后一条在发送侧�
 
 ## Components
 
-公共入口与验证见根 `AGENTS.md` 的 Canonical UI Map。管理页面共用 `--wand-page-*` 标题与边距；员工资料的分区导航与字段分别复用 WandTabs/Ant Tabs 和 SettingsField/Ant Form.Item，按钮、输入与候选选择不另设局部字号、圆角或描边。功能弹窗统一由 WandDialogSurface 安装标题、说明、可滚动正文与可见底部操作的宿主几何，外观与动效继续归 Ant 和主题。控件状态、加载与反馈来自库；feature Controller/composer 继续持有业务、请求代次和草稿。表单由应用校验，异步失败保留输入；输入框与原生/终端 refs 不因换视觉重建。
+公共入口与验证见根 `AGENTS.md` 的 Canonical UI Map。聊天消息、过程与思考展开由 Wand 的 `chat/message.tsx`、`chat/activity.tsx` 持有语义结构和轻动效，不依赖 X 的 Bubble/ThoughtChain/Think 或其内部类名。消息表面使用现有主题别名；工具展开复用 motion token，减动效时即时切换。内容节点与折叠内滚动节点保持挂载，流式追加不逐字重播入场动画；阅读历史时显示“回到最新”，由用户主动恢复贴尾。基础表单、浮层、Sender、FileCard 与主题适配继续使用 Ant/X。管理页面共用 `--wand-page-*` 标题与边距；员工资料的分区导航与字段分别复用 WandTabs/Ant Tabs 和 SettingsField/Ant Form.Item，按钮、输入与候选选择不另设局部字号、圆角或描边。功能弹窗统一由 WandDialogSurface 安装标题、说明、可滚动正文与可见底部操作的宿主几何，外观与动效继续归 Ant 和主题。控件状态、加载与反馈来自库；feature Controller/composer 继续持有业务、请求代次和草稿。表单由应用校验，异步失败保留输入；输入框与原生/终端 refs 不因换视觉重建。
 PTY 快捷键在输入框上方保持单行，窄屏横向滚动，不提供悬浮球；点击按键保留输入焦点，Web 终端与输入框继续键盘直通。结构化会话不显示此行，原生输入壳使用自身快捷栏，不重复叠加。
 滚动条使用同一组 `--scrollbar-*` token，并提供标准属性、引擎回退与 forced-colors；xterm 自有控制器是明确例外。动效复用现有 motion token，支持 reduced-motion。IM 仅对当前会话可证明的新尾消息做轻量淡入/上移；历史加载、轮询重复、编辑、切换会话不重播。上翻阅读时不抢滚动，显示新消息入口。气泡单勾只代表服务端已有发送记录，不代表对方已读。技能三档开关、PTY 文本/回车两包、date-only、未知送达与会话所有权均以项目契约为准。
 

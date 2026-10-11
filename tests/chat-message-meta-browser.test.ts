@@ -129,7 +129,7 @@ test("canonical messages preserve body and compact metadata across live patches"
       await wait("document.querySelector('.chat-message[data-msg-index=\"3\"] .chat-message-content')?.innerText.includes('短回复')");
       const shape = await evaluate(`(()=>{
         const row=document.querySelector('.chat-message[data-msg-index="1"]');
-        const surface=row.querySelector('.ant-bubble-content'); const body=row.querySelector('.chat-message-content');
+        const surface=row.querySelector('.wand-chat-message-content'); const body=row.querySelector('.chat-message-content');
         const time=row.querySelector('.chat-message-time time'); const r=surface.getBoundingClientRect(),b=body.getBoundingClientRect();
         return { variant:surface.className, bodyInside:surface.contains(body),
           bodyFits:b.left>=r.left&&b.right<=r.right+1&&b.top>=r.top&&b.bottom<=r.bottom+1,
@@ -146,7 +146,7 @@ test("canonical messages preserve body and compact metadata across live patches"
           overflow:document.documentElement.scrollWidth>innerWidth+1,
           background:(()=>{let n=time;while(n){const c=getComputedStyle(n).backgroundColor;if(!c.endsWith(', 0)')&&c!=='transparent')return c;n=n.parentElement;}return 'rgb(255, 255, 255)';})() };
       })()`);
-      assert.match(shape.variant, /ant-bubble-content-borderless/);
+      assert.match(shape.variant, /wand-chat-message-content/);
       assert.equal(shape.bodyInside && shape.bodyFits, true, `${mode}: text belongs to the shared message`);
       assert.equal(shape.fontSize, "12px");
       assert.ok(textContrast(shape.color, shape.background) >= 4.5, `${mode}: small metadata remains readable`);
@@ -178,14 +178,14 @@ test("canonical messages preserve body and compact metadata across live patches"
       assert.equal(await evaluate("document.querySelector('.chat-message[data-msg-index=\"1\"] [data-chat-renderer]').dataset.chatRenderer"), "canonical");
       assert.ok(await evaluate("!!document.querySelector('.chat-message[data-msg-index=\"1\"] .assistant-author-name').textContent"));
 
-      // Estimated -> final, added/removed usage, and completion all patch the same native Bubble.
+      // Estimated -> final, added/removed usage, and completion all patch the same Wand message.
       const settled = await evaluate(`(async()=>{
-        const row=document.querySelector('.chat-message[data-msg-index="3"]'); const bubble=row.querySelector('.ant-bubble');
+        const row=document.querySelector('.chat-message[data-msg-index="3"]'); const bubble=row.querySelector('.wand-chat-message');
         const body=row.querySelector('.chat-message-content');
         metaTurns[3]={...metaTurns[3],completedAt:'2026-10-07T09:01:14Z',usage:{inputTokens:900,outputTokens:240,estimated:false},
           content:[{type:'text',text:'实时统计已核对，服务端最终用量已返回。'}]};
         h.publish(metaTurns); h.doRenderChat(false); await h.frames();
-        return {sameRow:row===document.querySelector('.chat-message[data-msg-index="3"]'),sameBubble:bubble===row.querySelector('.ant-bubble'),
+        return {sameRow:row===document.querySelector('.chat-message[data-msg-index="3"]'),sameBubble:bubble===row.querySelector('.wand-chat-message'),
           sameBody:body===row.querySelector('.chat-message-content'),
           text:row.textContent,usageLines:row.querySelectorAll('.turn-usage-summary').length};
       })()`);

@@ -1484,9 +1484,9 @@ test("[live] 实时输出先收成一行，展开后保留定高内滚", () => {
   assert.match(chatSource, /className="team-chat-live-card"[\s\S]{0,120}height: 200/, "业务有界窗口保留200px");
   assert.match(block, /\.team-chat-live-text \{[\s\S]*?overflow-y: auto;[\s\S]*?overscroll-behavior-y: contain;/, "内部滚动且不抢外层");
   assert.match(block, /font-family: var\(--font-mono\)/, "等宽");
-  assert.match(chatSource, /className="team-chat-live-summary"[\s\S]*?<Typography.Text ellipsis/, "首屏摘要由库排版");
-  assert.match(chatSource, /<Think[\s\S]*?expanded=\{expanded\}/, "输出原位展开");
-  assert.match(chatSource, /aria-expanded=\{expanded\}/);
+  assert.match(chatSource, /className="team-chat-live-summary-text"/, "首屏摘要保留一行，全文由共享展开入口呈现");
+  assert.match(chatSource, /<ChatActivity expanded=\{expanded\}/, "输出由Wand共享组件原位展开");
+  assert.match(readFileSync(new URL("../src/web-ui/react/chat/activity.tsx", import.meta.url), "utf8"), /aria-expanded=\{expanded\}/);
   assert.match(block, /@keyframes wand-team-live-grow \{\s*from \{ opacity: 0; transform: translateX\(-10px\); \}/, "从头像方向长出");
   assert.match(block, /\.team-chat-live-row\[data-leaving\] \{\s*animation: wand-team-live-grow var\(--motion-quick-exit\) var\(--ease-in-out-smooth\) reverse forwards;/, "收起是同一段动画倒放，且快于进场");
   // 头名仍从头像方向进场；完整输出由用户主动展开。
@@ -1500,7 +1500,7 @@ test("[live] 实时输出先收成一行，展开后保留定高内滚", () => {
   );
   assert.doesNotMatch(narrow, /team-chat-live/, "窄屏不改卡片高度");
   const reduced = chatStylesSource.slice(chatStylesSource.indexOf("@media (prefers-reduced-motion"));
-  assert.match(chatSource, /destroyOnHidden=\{false\}/);
+  assert.match(readFileSync(new URL("../src/web-ui/react/chat/activity.tsx", import.meta.url), "utf8"), /inert=\{!expanded\}/);
 });
 
 test("团队详情：草稿未保存时，每个离开入口都先确认，取消不丢", () => {

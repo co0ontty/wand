@@ -1,7 +1,8 @@
 import { ChatMessage } from "../chat/message";
+import { ChatActivity } from "../chat/activity";
 import * as React from "react";
 import { Alert, Avatar, Button, Card, Collapse, Flex, List, Tag, Tooltip, Typography } from "antd";
-import { FileCard, Sender, Think } from "@ant-design/x";
+import { FileCard, Sender } from "@ant-design/x";
 import type { AgentActivityState } from "../../../mission-types";
 import { AI_TEAM_DETAIL_CHAT_TURNS, type AiTeamLiveStep, type AiTeamRun,
   type AiTeamRunDetail, type AiTeamStep, type AiTeam } from "../../../ai-team-types";
@@ -1200,40 +1201,17 @@ function LiveStepRow({
       if (row.leaving && event.target === event.currentTarget) onRetire(step.stepId);
     }}
   >
-    {/*
-      展开 / 收起交给通用过程块：收起是展开的倒放，减动效由 provider 统一关掉。
-      `destroyOnHidden={false}` 是必须的——内部滚动窗口是这一行的 owner，
-      每次收起重挂载都会把「贴尾」状态和已滚到的位置丢掉。
-    */}
-    <Think
-      className="team-chat-live-think"
-      expanded={expanded}
-      onExpand={setExpanded}
-      destroyOnHidden={false}
-      title={<>
-        <span className="team-chat-live-head">
-          {/* 署名行不再放头像：紧贴其上的开工发言已经给过同一张脸（设计 v2.2.4）；
-              也不单独挂链接——整卡已可点进该成员会话，不再嵌套点击。 */}
-          <span className="team-chat-live-name" title={memberName}>{memberName}</span>
-          <span className="team-chat-live-chip">#{step.seq}{title ? ` ${title}` : ""}</span>
-          {label ? <Tag className="team-chat-live-state" data-state={step.state} color={LIVE_STATE_TAG[step.state]}>{label}</Tag> : null}
-          {clock ? <span className="chat-message-time">{clock}</span> : null}
-        </span>
-        {/* 过程块的表头整体可点，但键盘与读屏要有一个真正的按钮：它是唯一会改展开态的控件。 */}
-        <WandButton kind="ghost"
-          type="button"
-          className="team-chat-live-summary" style={{ width: "100%", height: "auto", minHeight: 32, textAlign: "start" }}
-          aria-expanded={expanded}
-          onClick={(event) => {
-            event.stopPropagation();
-            setExpanded((current) => !current);
-          }}
-        >
-          <Typography.Text ellipsis className="team-chat-live-summary-text" style={{ flex: 1, minWidth: 0 }}>{lastLine}</Typography.Text>
-          <Typography.Text type="secondary">{expanded ? "收起输出" : "展开输出"}</Typography.Text>
-        </WandButton>
-      </>}
-    >
+    <div className="team-chat-live-think">
+      <span className="team-chat-live-head">
+        <span className="team-chat-live-name" title={memberName}>{memberName}</span>
+        <span className="team-chat-live-chip">#{step.seq}{title ? ` ${title}` : ""}</span>
+        {label ? <Tag className="team-chat-live-state" data-state={step.state} color={LIVE_STATE_TAG[step.state]}>{label}</Tag> : null}
+        {clock ? <span className="chat-message-time">{clock}</span> : null}
+      </span>
+      {/* The shared disclosure keeps the output mounted, including its reader's scroll position. */}
+      <ChatActivity expanded={expanded} className="team-chat-live-output"
+        onToggle={() => setExpanded(current => !current)}
+        summary={<><span className="team-chat-live-summary-text">{lastLine}</span><span className="chat-thinking-status">{expanded ? "收起输出" : "展开输出"}</span></>}>
       <div className="team-chat-live-body-inner">
         <Tooltip title="查看这个成员的会话"><Card size="small" hoverable
           className="team-chat-live-card"
@@ -1264,7 +1242,8 @@ function LiveStepRow({
           >{step.text || LIVE_EMPTY_TEXT}</pre>
         </Card></Tooltip>
       </div>
-    </Think>
+      </ChatActivity>
+    </div>
   </div>;
 }
 
@@ -1516,12 +1495,13 @@ export function ConversationMessages({ turns, taskLabels, group = true, ready = 
   const following = React.useRef(true);
   const [arrivals, setArrivals] = React.useState<ReadonlySet<string>>(new Set());
   const [unseen, setUnseen] = React.useState(0);
+  const [awayFromTail, setAwayFromTail] = React.useState(false);
   const reduced = useReducedMotion();
   const keys = turns.map(conversationMessageKey);
   React.useLayoutEffect(() => {
     const scroll = list.current?.closest<HTMLElement>(".conversation-message-scroll");
     if (!scroll || !active || list.current?.closest(".sidebar-projection-old")) return;
-    const track = (): void => { following.current = isFollowingTail(scroll); if (following.current) setUnseen(0); };
+    const track = (): void => { following.current = isFollowingTail(scroll); setAwayFromTail(!following.current); if (following.current) setUnseen(0); };
     scroll.addEventListener("scroll", track, { passive: true });
     return () => scroll.removeEventListener("scroll", track);
   }, [active]);
@@ -1537,10 +1517,12 @@ export function ConversationMessages({ turns, taskLabels, group = true, ready = 
     if (initial) {
       scroll.scrollTop = restoreScroll ?? scroll.scrollHeight;
       following.current = isFollowingTail(scroll);
+      setAwayFromTail(!following.current);
     } else if (added.length) {
       if (following.current || own) {
         scroll.scrollTop = scroll.scrollHeight;
         following.current = true;
+        setAwayFromTail(false);
         setUnseen(0);
         if (!reduced) setArrivals(new Set(added));
       } else setUnseen(count => count + added.length);
@@ -1558,6 +1540,7 @@ export function ConversationMessages({ turns, taskLabels, group = true, ready = 
         scroll.scrollTop = scroll.scrollHeight;
         following.current = true;
       }
+      setAwayFromTail(!isFollowingTail(scroll));
       previousHeight = scroll.scrollHeight;
     });
     observer.observe(content);
@@ -1612,11 +1595,11 @@ export function ConversationMessages({ turns, taskLabels, group = true, ready = 
         </div>}
       </MessageFileContext.Provider>;
     })}
-    {unseen > 0 ? <div className="conversation-new-messages"><WandButton onClick={() => {
+    {awayFromTail || unseen > 0 ? <div className="conversation-new-messages"><WandButton onClick={() => {
       const scroll = list.current?.closest<HTMLElement>(".conversation-message-scroll");
       if (scroll) scroll.scrollTop = scroll.scrollHeight;
-      following.current = true; setUnseen(0);
-    }}>↓ {unseen} 条新消息</WandButton></div> : null}
+      following.current = true; setAwayFromTail(false); setUnseen(0);
+    }}><WandIcon name="chevronDown" size={14}/>{unseen > 0 ? `${unseen} 条新消息` : "回到最新"}</WandButton></div> : null}
   </div>;
 }
 

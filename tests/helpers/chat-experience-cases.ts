@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 /** Real renderer/controls with nonsecret synthetic turns, not installed acceptance. */
@@ -64,6 +64,27 @@ export async function runChatExperience({ evaluate: e, send, click, key, wait, m
   if (output) {
     const shot=await send("Page.captureScreenshot",{format:"png"});
     writeFileSync(join(dirname(output),`experience-${mode}-collapsed.png`),Buffer.from(shot.data,"base64"));
+  }
+  // Optional evidence capture uses real CDP clicks and unmodified production timing.
+  if (output && process.env.WAND_CHAT_CAPTURE_MOTION === "1" && mode === "desktop") {
+    const directory = join(dirname(output), "motion");
+    mkdirSync(directory, { recursive: true });
+    const frames: { file: string; at: number }[] = [];
+    const started = Date.now();
+    for (let index = 0; index < 32; index++) {
+      if (index === 4 || index === 20) {
+        const point = await e(`(()=>{const r=document.querySelector(${JSON.stringify(summary)}).getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+        for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, ...point, button: "left", clickCount: 1 });
+      }
+      const shot = await send("Page.captureScreenshot", { format: "png" });
+      const file = `frame-${String(index).padStart(3, "0")}.png`;
+      writeFileSync(join(directory, file), Buffer.from(shot.data, "base64"));
+      frames.push({ file, at: Date.now() - started });
+      await new Promise(resolve => setTimeout(resolve, 35));
+    }
+    writeFileSync(join(directory, "frames.json"), JSON.stringify({ frames, evidence: "Chrome captures with original motion tokens; native clicks at frames 4 and 20" }, null, 2));
+    await e("h.frames()");
+    assert.equal(await e("document.querySelector('.chat-activity').dataset.expanded"), "false");
   }
   await click(summary); await e("h.frames()");
   assert.equal(await e("document.querySelector('.chat-activity').dataset.expanded"),"true");
@@ -136,24 +157,24 @@ export async function runChatExperience({ evaluate: e, send, click, key, wait, m
   const messageShape = await e(`(()=>{
     const asst=[...document.querySelectorAll('.chat-message.assistant')].find(n=>n.querySelector('.assistant-reply-head'));
     const head=asst?.querySelector('.assistant-reply-head');
-    const user=[...document.querySelectorAll('.chat-message.user')].find(n=>n.querySelector('.ant-bubble-content'));
-    const cs=user?getComputedStyle(user.querySelector('.ant-bubble-content')):null;
+    const user=[...document.querySelectorAll('.chat-message.user')].find(n=>n.querySelector('.wand-chat-message-content'));
+    const cs=user?getComputedStyle(user.querySelector('.wand-chat-message-content')):null;
     return {
       headTime: !!head?.querySelector('.chat-message-time'),
-      headTimeBeforeControl: (()=>{const t=head?.querySelector('.chat-message-time');const b=head?.querySelector('.assistant-reply-disclosure');return !t||!b?true:(t.compareDocumentPosition(b)&Node.DOCUMENT_POSITION_FOLLOWING)>0;})(),
+      headTimeInControl: !!head?.querySelector('.assistant-reply-disclosure .chat-message-time'),
       authorName: head?.querySelector('.assistant-author-name')?.innerText||'',
       authorAvatar: !!head?.querySelector('.assistant-author-avatar'),
       authorAvatarKind: head?.querySelector('.assistant-author-avatar .wand-employee-avatar') ? 'employee' : head?.querySelector('.assistant-author-spark') ? 'brand' : 'none',
       replyAction: head?.querySelector('.assistant-reply-action')?.innerText||'',
-      contentBorderless: (()=>{const c=asst?.querySelector('.ant-bubble-content'); if(!c) return null; const s=getComputedStyle(c); return s.backgroundColor==='rgba(0, 0, 0, 0)'&&s.padding==='0px';})(),
+      contentBorderless: (()=>{const c=asst?.querySelector('.wand-chat-message-content'); if(!c) return null; const s=getComputedStyle(c); return s.backgroundColor==='rgba(0, 0, 0, 0)'&&s.padding==='0px';})(),
       usageRows: document.querySelectorAll('.turn-usage-summary').length,
       userRadius: cs?.borderRadius||'', userBorder: cs?.borderTopWidth||'', userPadding: cs?.padding||'',
       userFont: cs?cs.fontSize+'/'+cs.lineHeight:'',
-      timeOutsideBubble: !!user?.querySelector('.ant-bubble-header .chat-message-time'),
+      timeOutsideBubble: !!user?.querySelector('.wand-chat-message-header .chat-message-time'),
     };
   })()`);
   assert.equal(messageShape.headTime,true,"the assistant header carries the message clock");
-  assert.equal(messageShape.headTimeBeforeControl,true,"the clock sits above the author row");
+  assert.equal(messageShape.headTimeInControl,true,"the clock shares the author disclosure row");
   assert.equal(messageShape.authorAvatar,true,"the assistant header carries an author mark");
   // 身份来自会话快照：署名就该是这条会话的员工，而不是通用的 Wand。
   assert.equal(messageShape.authorName,"Wand 助手","the assistant header names the session employee");

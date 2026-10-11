@@ -76,7 +76,7 @@ export function installChatComposerStyles(): void {
 .composer-config-controls [data-mode-control-pill="model"] { min-width:120px; }
 .composer-config-controls [data-mode-control-pill="thinking"] { min-width:68px; }
 .composer-settings-scope { margin:0 0 8px; font-size:11px; line-height:1.5; color:var(--text-secondary); }
-.conversation-root .ant-bubble-content { font-size:14px; border-radius:var(--control-radius); }
+.conversation-root .wand-chat-message-content { font-size:14px; border-radius:var(--control-radius); }
 .conversation-root .conversation-composer-control:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 @media (pointer:coarse) {
   .composer-surface, .conversation-input-wrap { --composer-control-height:44px; }

@@ -566,7 +566,7 @@ async function runConversationBrowser(t: TestContext, mentions: boolean): Promis
         const r=s.getBoundingClientRect(); const last=s.lastElementChild.getBoundingClientRect();
         const lead=document.querySelector('.conversation-message[data-side=start][data-lead=true]');
         const joined=document.querySelector('.conversation-message[data-side=start][data-joined=true][data-lead=false]');
-        const author=lead?.querySelector('.conversation-message-author'); const bubble=lead?.querySelector('.ant-bubble-content');
+        const author=lead?.querySelector('.conversation-message-author'); const bubble=lead?.querySelector('.wand-chat-message-content');
         return { tailGap:Math.round(s.scrollHeight-s.scrollTop-s.clientHeight), scrollable:s.scrollHeight>s.clientHeight+1,
           contentBottomGap:Math.round(r.bottom-parseFloat(getComputedStyle(s).paddingBottom)-last.bottom),
           authorOutsideBubble:!!author&&!!bubble&&!bubble.contains(author)&&author.getBoundingClientRect().bottom<=bubble.getBoundingClientRect().top,

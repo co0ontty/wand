@@ -29,7 +29,7 @@ function render(mount: ComposerVoiceMount): string {
 test("语音气泡投影状态与转写，保留取消反馈和 live region", () => {
   const idle = render(mountFor());
   assert.match(idle, /id="voice-transcript-bubble" aria-live="polite"/);
-  assert.match(idle, /ant-bubble/);
+  assert.match(idle, /wand-chat-message/);
   assert.match(idle, /正在聆听…上滑取消/);
   assert.doesNotMatch(idle, /tabindex|autofocus/i);
   const withText = render(mountFor({ transcript: "转写文字" }));
@@ -37,7 +37,7 @@ test("语音气泡投影状态与转写，保留取消反馈和 live region", ()
   assert.match(withText, /正在聆听…上滑取消/);
   const canceling = render(mountFor({ canceling: true, transcript: "x", status: "松开手指 取消" }));
   assert.match(canceling, /松开手指 取消/);
-  assert.match(canceling, /ant-bubble/);
+  assert.match(canceling, /wand-chat-message/);
 });
 
 test("legacy 侧不再读写气泡三个节点", () => {

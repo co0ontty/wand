@@ -638,7 +638,7 @@ export function applyExpandedState(el: any, kind: string, expanded: boolean) {
       break;
     }
     case "thinking": {
-      // 预览文案与展开/收起文案由 Ant Design X 的 Think 接手（见 react/chat/presentation.tsx），
+      // 预览文案与展开/收起文案由 Wand ChatActivity 接手（见 react/chat/presentation.tsx），
       // 宿主只保留展开状态；这里不再读写已经不存在的手写 preview / action 节点。
       el.classList.toggle("collapsed", !expanded);
       el.classList.toggle("expanded", !!expanded);

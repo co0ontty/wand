@@ -23,6 +23,7 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
   const artifact = join(root, "output/web-ui-library-migration/lanes/teams");
   const browserErrors: string[] = [];
   const evidence: Array<Record<string, unknown>> = [];
+  const chatOnly = process.env.WAND_TEAMS_BROWSER_SCOPE === "chat";
   const employeesOnly = process.env.WAND_TEAMS_BROWSER_SCOPE === "employees";
   const posts: Array<Record<string, unknown>> = [];
   const source = `
@@ -338,7 +339,7 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
     await send("Page.enable");
     await send("Runtime.enable");
 
-    for (const mode of (process.env.WAND_TEAMS_TEST_MODES?.split(",") ?? ["desktop", "mobile", "reduced-motion"])) {
+    for (const mode of (chatOnly ? [] : process.env.WAND_TEAMS_TEST_MODES?.split(",") ?? ["desktop", "mobile", "reduced-motion"])) {
       await send("Emulation.setDeviceMetricsOverride", { width: mode === "mobile" ? 390 : 1280, height: 1000, deviceScaleFactor: 1, mobile: false });
       await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: mode === "reduced-motion" ? "reduce" : "no-preference" }] });
       await evaluate("window.__wandFixtureBeforeNavigation = true");
@@ -503,9 +504,9 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
       await wait("!window.__wandFixtureBeforeNavigation && document.readyState === 'complete'");
     await send("Page.bringToFront");
     await wait("!!document.querySelector('.task-board-team-chat')");
-    await wait("document.querySelectorAll('.ant-bubble').length >= 2");
-    assert.equal(await evaluate("!!document.querySelector('.ant-bubble-end')"), true, "自己的发言靠气泡 placement 镜像");
-    assert.equal(await evaluate("!!document.querySelector('.ant-bubble-start')"), true, "成员/负责人发言在另一侧");
+    await wait("document.querySelectorAll('.wand-chat-message').length >= 2");
+    assert.equal(await evaluate("!!document.querySelector('[data-chat-role=\"user\"]')"), true, "自己的发言靠气泡 placement 镜像");
+    assert.equal(await evaluate("!!document.querySelector('[data-chat-role=\"assistant\"]')"), true, "成员/负责人发言在另一侧");
     assert.equal(await evaluate("!!document.querySelector('.team-chat-plan-list')"), true, "派工清单仍按任务条目渲染");
     assert.equal(await evaluate("!!document.querySelector('.chat-notice')"), true, "系统提示行仍是居中 notice");
     assert.equal(await evaluate(`(()=>{const row=document.querySelector('.chat-notice').getBoundingClientRect();
@@ -535,14 +536,14 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
       memberName: "实现者", sessionId: "session-dev", state: "working", text: "第一行\\n第二行", omittedChars: 12, updatedAt: "${now}" }]);
       return true})()`);
     await wait("!!document.querySelector('.team-chat-live-think')");
-    await wait("!!document.querySelector('.team-chat-live-summary')");
-    assert.equal(await evaluate("!!document.querySelector('.team-chat-live-summary')"), true, "展开态有键盘可达的按钮");
-    assert.equal(await evaluate("document.querySelector('.team-chat-live-think .ant-think-status-down-icon') !== null"), true,
+    await wait("!!document.querySelector('.team-chat-live-output > button.chat-process-summary')");
+    assert.equal(await evaluate("!!document.querySelector('.team-chat-live-output > button.chat-process-summary')"), true, "展开态有键盘可达的按钮");
+    assert.equal(await evaluate("document.querySelector('.team-chat-live-think .chat-disclosure-chevron') !== null"), true,
       "过程块自带展开图标");
-    await click(".team-chat-live-summary");
-    await wait("document.querySelector('.team-chat-live-summary').getAttribute('aria-expanded') === 'true'");
+    await click(".team-chat-live-output > button.chat-process-summary");
+    await wait("document.querySelector('.team-chat-live-output > button.chat-process-summary').getAttribute('aria-expanded') === 'true'");
     await wait("!!document.querySelector('.team-chat-live-card')");
-    assert.equal(await evaluate("document.querySelector('.team-chat-live-summary').getAttribute('aria-expanded')"), "true");
+    assert.equal(await evaluate("document.querySelector('.team-chat-live-output > button.chat-process-summary').getAttribute('aria-expanded')"), "true");
     assert.equal(await evaluate("!!document.querySelector('.team-chat-live-text')"), true, "输出窗口保留");
     const liveHeight = await evaluate("Math.round(document.querySelector('.team-chat-live-card').getBoundingClientRect().height)");
     assert.ok(liveHeight > 100 && liveHeight < 260, `live 窗口有界，实测 ${liveHeight}px`);
@@ -573,7 +574,7 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
     await key("Enter");
     await wait("globalThis.teamsFixture.fixture.submits.length === 1");
     assert.equal(await evaluate("globalThis.teamsFixture.fixture.submits[0].sessionId"), "relay-a", "提交仍走群聊 relay 会话");
-    await wait("!!document.querySelector('.ant-bubble-end')");
+    await wait("!!document.querySelector('[data-chat-role=\"user\"]')");
     assert.ok(posts.some((post) => String(post.url).includes("/api/structured-sessions/relay-a/messages")
       && JSON.parse(String(post.body)).input.includes("hello from the lane gate")),
       "请求体字段仍是 input");
@@ -605,7 +606,7 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
     await key("Escape");
     await wait("!document.querySelector('[data-testid=team-chat-doc-dialog]')");
     assert.equal(browserErrors.length, 0, `浏览器运行期异常：${browserErrors.slice(0, 2).join(" | ")}`);
-    evidence.push({ mode: `chat-${mode}`, library: ["ant-bubble", "ant-file-card", "ant-sender", "ant-think", "wand-ui-dropdown-content"],
+    evidence.push({ mode: `chat-${mode}`, library: ["wand-chat-message", "ant-file-card", "ant-sender", "chat-disclosure-body", "wand-ui-dropdown-content"],
       geometry: composerWidths,
       contracts: ["avatar beside content", "Sender fills input column", "bridge owns draft/submit", "IME Enter blocked", "relay body input", "Escape refocus", "doc dialog full text"] });
 
