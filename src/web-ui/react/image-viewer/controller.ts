@@ -1,8 +1,14 @@
+export interface ImageViewerItem {
+  src: string;
+  label?: string;
+}
+
 export interface ImageViewerSnapshot {
   open: boolean;
   src: string;
   label: string;
-  zoomed: boolean;
+  items: ReadonlyArray<ImageViewerItem>;
+  current: number;
 }
 
 type Listener = () => void;
@@ -11,9 +17,11 @@ let snapshot: ImageViewerSnapshot = {
   open: false,
   src: "",
   label: "",
-  zoomed: false,
+  items: [],
+  current: 0,
 };
 const listeners = new Set<Listener>();
+let returnFocus: (() => void) | undefined;
 
 function publish(patch: Partial<ImageViewerSnapshot>): void {
   snapshot = { ...snapshot, ...patch };
@@ -30,6 +38,13 @@ function isRenderableImageSrc(src: string): boolean {
 }
 
 export const imageViewerController = {
+  afterClosed(): void {
+    if (snapshot.open) return;
+    const restore = returnFocus;
+    returnFocus = undefined;
+    restore?.();
+  },
+
   subscribe(listener: Listener): () => void {
     listeners.add(listener);
     return () => listeners.delete(listener);
@@ -44,7 +59,7 @@ export const imageViewerController = {
   },
 
   close(): void {
-    publish({ open: false, src: "", label: "", zoomed: false });
+    publish({ open: false, src: "", label: "", items: [], current: 0 });
   },
 
   closeIfOpen(): boolean {
@@ -54,19 +69,30 @@ export const imageViewerController = {
   },
 
   open(src: string, label = ""): boolean {
-    const normalizedSrc = src.trim();
-    if (!isRenderableImageSrc(normalizedSrc)) return false;
+    return this.openGroup([{ src, label }]);
+  },
+
+  openGroup(items: ReadonlyArray<ImageViewerItem>, current = 0, onClosed?: () => void): boolean {
+    const selected = items[current];
+    if (!Number.isInteger(current) || !selected || !isRenderableImageSrc(selected.src.trim())) return false;
+    const normalized = items.map(item => ({ src: item.src.trim(), label: item.label?.trim() || "图片" }))
+      .filter(item => isRenderableImageSrc(item.src));
+    // Index by position so repeated URLs remain separate gallery entries.
+    const selectedIndex = items.slice(0, current).filter(item => isRenderableImageSrc(item.src.trim())).length;
+    returnFocus = onClosed;
     publish({
       open: true,
-      src: normalizedSrc,
-      label: label.trim() || "图片",
-      zoomed: false,
+      items: normalized,
+      current: selectedIndex,
+      src: normalized[selectedIndex].src,
+      label: normalized[selectedIndex].label,
     });
     return true;
   },
 
-  toggleZoom(): void {
-    if (!snapshot.open) return;
-    publish({ zoomed: !snapshot.zoomed });
+  select(current: number): void {
+    const item = snapshot.items[current];
+    if (!snapshot.open || !Number.isInteger(current) || !item) return;
+    publish({ current, src: item.src, label: item.label || "图片" });
   },
 };

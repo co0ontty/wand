@@ -30,7 +30,6 @@ import {
   statfsSync,
   statSync,
   symlinkSync,
-  writeFileSync,
 } from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -39,6 +38,7 @@ import { buildChildEnv } from "./env-utils.js";
 import { whichSync } from "./path-repair.js";
 import { getErrorMessage } from "./error-utils.js";
 import { compareWandInstallOrder, extractSemver } from "./version-utils.js";
+import { acquireDeploymentLock, releaseDeploymentLock, type DeploymentLock as GlobalUpdateLock } from "./deployment-lock.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -82,17 +82,20 @@ function cleanVersion(value: string): string {
   return value.trim().replace(/^v/, "");
 }
 
-function getStableTagVersion(version: string): string {
-  return cleanVersion(version).split("+")[0]?.split("-")[0] ?? cleanVersion(version);
+function acceptedVersion(version: string | null, channel: UpdateChannel): string | null {
+  const value = version ? cleanVersion(version) : "";
+  // Never turn a prerelease into a nonexistent stable version or install a tag
+  // that changed between checking and installing.
+  const stable = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+  const beta = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+  return (channel === "stable" ? stable : beta).test(value) ? value : null;
 }
 
-function computeUpdateAvailable(currentVersion: string, latestVersion: string | null, channel: UpdateChannel): boolean {
+function computeUpdateAvailable(currentVersion: string, latestVersion: string | null): boolean {
   if (!latestVersion) return false;
 
   const current = cleanVersion(currentVersion);
-  const target = channel === "stable"
-    ? getStableTagVersion(latestVersion)
-    : cleanVersion(latestVersion);
+  const target = latestVersion;
 
   // Invalid/manual labels cannot be ordered safely, so offer the selected
   // dist-tag. Valid versions only update forward. In particular, Wand's local
@@ -107,15 +110,14 @@ export function buildPackageUpdateInfo(
   channel: UpdateChannel,
   latestVersion: string | null,
 ): PackageUpdateInfo {
-  const latest = latestVersion?.trim() || null;
-  const stableLatest = channel === "stable" && latest ? getStableTagVersion(latest) : latest;
+  const latest = acceptedVersion(latestVersion, channel);
   return {
     channel,
     current: cleanVersion(currentVersion),
-    latest: stableLatest,
-    updateAvailable: computeUpdateAvailable(currentVersion, stableLatest, channel),
+    latest,
+    updateAvailable: computeUpdateAvailable(currentVersion, latest),
     distTag: getUpdateDistTag(channel),
-    installSpec: getInstallSpecForChannel(channel),
+    installSpec: latest ? `${PACKAGE_NAME}@${latest}` : getInstallSpecForChannel(channel),
   };
 }
 
@@ -651,67 +653,15 @@ function isRecoverableInstallError(message: string): boolean {
   return /ENOTEMPTY|EEXIST|全局 wand 安装不完整|无法解析 npm 全局安装目录|全局 wand CLI 无法设置执行权限|全局 wand 命令入口缺失/.test(message);
 }
 
-interface GlobalUpdateLock {
-  lockPath: string;
-  token: string;
-}
-
 function acquireGlobalUpdateLock(): GlobalUpdateLock {
   const root = getNpmGlobalRoot();
   if (!root) throw new Error("无法解析 npm 全局安装目录，不能建立更新锁。");
-  const scopeDir = path.join(root, PACKAGE_SCOPE);
-  // 放在 npm root，而不是 @scope 内；npm uninstall 可能清理空 scope 目录。
-  const lockPath = path.join(root, ".wand-update-lock");
-  const token = randomUUID();
-  mkdirSync(scopeDir, { recursive: true });
-
-  try {
-    mkdirSync(lockPath);
-    writeFileSync(
-      path.join(lockPath, "owner.json"),
-      `${JSON.stringify({ pid: process.pid, token, createdAt: Date.now() })}\n`,
-      "utf8",
-    );
-    return { lockPath, token };
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
-      // 只有本次成功 mkdir 后写 owner 失败时才清；owner token 防止误删别人的锁。
-      try {
-        const owner = JSON.parse(readFileSync(path.join(lockPath, "owner.json"), "utf8")) as {
-          token?: unknown;
-        };
-        if (owner.token === token) rmSync(lockPath, { recursive: true, force: true });
-      } catch {
-        /* 无法证明归属，不删除 */
-      }
-      throw err;
-    }
-  }
-
-  let ownerPid = 0;
-  try {
-    const owner = JSON.parse(readFileSync(path.join(lockPath, "owner.json"), "utf8")) as { pid?: unknown };
-    ownerPid = typeof owner.pid === "number" ? owner.pid : 0;
-  } catch {
-    /* owner may still be writing; the directory itself is the atomic lock */
-  }
-  throw new Error(
-    `另一个 wand 更新正在进行中（锁: ${lockPath}${ownerPid ? `, PID ${ownerPid}` : ""}）。` +
-    "若确认没有更新进程，请手动删除该锁目录。",
-  );
+  mkdirSync(path.join(root, PACKAGE_SCOPE), { recursive: true });
+  return acquireDeploymentLock(path.join(root, ".wand-update-lock"));
 }
 
 function releaseGlobalUpdateLock(lock: GlobalUpdateLock): void {
-  try {
-    const owner = JSON.parse(readFileSync(path.join(lock.lockPath, "owner.json"), "utf8")) as {
-      token?: unknown;
-    };
-    if (owner.token === lock.token) {
-      rmSync(lock.lockPath, { recursive: true, force: true });
-    }
-  } catch {
-    // 无法确认 owner 时宁可留下陈旧锁，也不能删掉另一个更新者的锁。
-  }
+  releaseDeploymentLock(lock);
 }
 
 /**

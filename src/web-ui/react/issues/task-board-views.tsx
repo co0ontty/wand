@@ -1,3 +1,4 @@
+import { canArchiveBoardTask } from "./task-board-repository";
 import { WandButton } from "../ui";
 import { Alert, Badge, Checkbox, Card, Collapse, Descriptions, Empty, Flex, List, Tag, Progress, Dropdown, Typography } from "antd";
 import * as React from "react";
@@ -807,7 +808,7 @@ export function TaskBoardContextMenu({
       ? [{ key: "restore", label: "恢复到等待认领", icon: <WandIcon name="resume"/>, onClick: onRestore }]
       : [
           { key: "dispatch", label: "派发 Agent", icon: <WandIcon name="zap"/>, onClick: onDispatch },
-          { key: "archive", label: "归档", icon: <WandIcon name="archive"/>, danger: true, onClick: onArchive },
+          ...(canArchiveBoardTask(task) ? [{ key: "archive", label: "归档", icon: <WandIcon name="archive"/>, onClick: onArchive }] : []),
         ]),
   ];
   return <Dropdown open autoFocus placement="bottomLeft" trigger={[]}

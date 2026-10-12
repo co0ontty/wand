@@ -14,7 +14,24 @@ function compactNumber(value: number): string {
   return String(Math.round(value));
 }
 
-/** Display only reported counts. Round aggregation remains owned by the chat renderer. */
+/** Latest reported round, retaining it while the next reply has no usage yet. */
+export function latestChatUsage(messages: readonly Pick<ConversationTurn, "role" | "usage">[]): ConversationTurn["usage"] {
+  let latest: ConversationTurn["usage"];
+  let round: NonNullable<ConversationTurn["usage"]> = {};
+  for (const message of messages) {
+    if (message.role === "user") round = {};
+    if (message.role !== "assistant" || !message.usage) continue;
+    for (const key of ["inputTokens", "outputTokens", "cacheReadInputTokens", "cacheCreationInputTokens", "reasoningOutputTokens", "totalCostUsd"] as const) {
+      const value = message.usage[key];
+      if (typeof value === "number" && Number.isFinite(value) && value >= 0) round[key] = (round[key] ?? 0) + value;
+    }
+    if (message.usage.estimated) round.estimated = true;
+    latest = { ...round };
+  }
+  return latest;
+}
+
+/** Display only reported counts. */
 export function chatUsageMetrics(usage: ConversationTurn["usage"]): ChatUsageMetric[] {
   if (!usage) return [];
   const metrics: ChatUsageMetric[] = [];

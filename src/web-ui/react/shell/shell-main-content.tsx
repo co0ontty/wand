@@ -2,32 +2,49 @@ import * as React from "react";
 import { Flex, Typography } from "antd";
 
 import { WandBrandMark, WandButton, WandIcon, WandIconButton } from "../ui";
-import { CodeEditorHost } from "../code-editor/host";
+import { CodeEditorHost, TaskBoardHost, SettingsHost } from "../deferred-hosts";
 import { codeEditorStore } from "../code-editor/controller";
 import { workspaceContextStore } from "../workspaces/workspace-context";
 import { openSessionWithOwningTask } from "../workspaces/session-open";
 import { workspacesStore } from "../workspaces/controller";
-import { WorkspaceWelcomeChooser, usableTeamWorkspaceId } from "../workspaces/workspace-agent-picker";
+import { usableTeamWorkspaceId } from "../workspaces/workspace-agent-model";
+import { deferredComponent, deferredFeature } from "../deferred-feature";
 import { aiTeamPickerOption, aiTeamsRepository, useAiTeamList } from "../ai-teams/repository";
 import { WorkspaceTabBar } from "../workspaces/workspace-tab-bar";
-import { WorkspaceWindow } from "../workspaces/workspace-window";
+
 import { activeWorkWindow } from "../workspaces/window-layout";
 import type { WorkspaceSessionKind, WorkspaceSessionTarget } from "../workspaces/types";
 import { HomeAttention } from "../attention/home-attention";
 import { ShellFilePanel } from "./shell-file-panel";
-import { TaskBoardHost } from "../issues/task-board-host";
+
 import { taskBoardController, taskBoardStore } from "../issues/task-board-controller";
 import { notifyTasksChanged } from "../task-changes";
 import { AiTeamsPage, TeamChatPage } from "../ai-teams/lazy";
 import { SidebarToggleIcon } from "./sidebar-toggle-icon";
 import { ShellTopbar } from "./shell-topbar";
-import { SettingsHost } from "../settings/host";
+
 import { settingsStore } from "../settings/controller";
 import { restartOverlayController } from "../restart-overlay/controller";
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
 import type { UiSnapshotData } from "./ui-store";
 import { ConversationHome } from "../conversations/home";
 import { conversationUi, useConversationUi } from "../conversations/state";
+
+const WorkspaceWindow = deferredComponent(
+  () => import("../workspaces/workspace-window").then(module => module.WorkspaceWindow),
+  { title: "分屏终端", renderPending: status => <div className="workspace-window" style={{ flex: 1, minHeight: 0, minWidth: 0 }}>{status}</div> },
+);
+
+const WorkspaceWelcomeChooser = deferredComponent(
+  () => import("../workspaces/workspace-agent-picker").then(module => module.WorkspaceWelcomeChooser), { title: "工作区执行配置" },
+);
+
+const ScheduledTasksPage = deferredFeature(
+  () => import("../scheduled-tasks/page").then(module => module.ScheduledTasksPage),
+  taskBoardStore,
+  (snapshot, props) => snapshot.open && snapshot.page === "schedules" && props.visible,
+  { title: "定时任务", page: true, close: () => taskBoardController.close() },
+);
 
 export interface ShellMainContentRefs {
   /** Stable roots populated by the corresponding imperative legacy hosts. */
@@ -313,7 +330,7 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
             void dispatch({ type: "session.select", id });
           });
         }}
-      /> : taskBoard.open ? <TaskBoardHost
+      /> : taskBoard.open && taskBoard.page === "board" ? <TaskBoardHost
         sidebarOpen={snapshot.layout.sessionsDrawerOpen}
         onBack={() => taskBoardController.close()}
         onOpenSidebar={snapshot.layout.sidebarDrawer
@@ -328,6 +345,15 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
           });
         }}
       /> : null}
+      <ScheduledTasksPage visible={taskBoard.open && taskBoard.page === "schedules" && !settings.open}
+        sidebarOpen={snapshot.layout.sessionsDrawerOpen}
+        onBack={() => taskBoardController.close()}
+        onOpenSidebar={snapshot.layout.sidebarDrawer ? () => void dispatch({ type: "layout.drawer.toggle" }) : undefined}
+        onOpenSession={(sessionId) => {
+          taskBoardController.close();
+          conversationUi.suspend();
+          void openSessionWithOwningTask(sessionId, (id) => { void dispatch({ type: "session.select", id }); });
+        }}/>
       </div>
       <SettingsHost showRestart={() => restartOverlayController.showRestart()}/>
     </Flex>

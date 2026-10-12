@@ -361,10 +361,11 @@ test("React sources have an independent strict TypeScript gate", () => {
     (reactConfig.include ?? []).some((glob) => globMatches(glob, "src/web-ui/react/nested/probe.tsx")),
     "tsconfig.react.json must include every React TSX module",
   );
+  assert.match(packageJson.scripts?.check ?? "", /deployment-lock\.ts --run-project -- npm run check:body/);
   assert.match(
-    packageJson.scripts?.check ?? "",
+    packageJson.scripts?.["check:body"] ?? "",
     /tsconfig\.react\.json/,
-    "npm run check must execute the strict React TypeScript project",
+    "the locked npm run check must execute the strict React TypeScript project",
   );
 });
 
@@ -466,7 +467,10 @@ test("migrated Worktree, File Preview, and Restart overlays keep only browser ad
     assert.ok(notifications.includes(fragment), `notifications.ts must retain the ${fragment} bridge`);
   }
   for (const host of ["WorktreeMergeHost", "FilePreviewHost", "RestartOverlayHost"]) {
-    assert.ok(overlayHost.includes(`import { ${host} }`), `OverlayHost must import ${host}`);
+    assert.match(overlayHost, new RegExp(`import \\{[^}]*\\b${host}\\b[^}]*\\}`), `OverlayHost must import ${host}`);
+    if (host !== "RestartOverlayHost") {
+      assert.ok(source("src/web-ui/react/deferred-hosts.tsx").includes(`module.${host}`), `${host} must keep its real lazy view`);
+    }
     assert.ok(overlayHost.includes(`<${host} />`), `OverlayHost must mount ${host}`);
   }
   for (const controller of [
@@ -480,7 +484,9 @@ test("migrated Worktree, File Preview, and Restart overlays keep only browser ad
 
 test("config-path injection and embedded web-asset fallbacks remain intact", () => {
   const contracts: Array<[string, string[]]> = [
-    ["src/web-ui/browser/state.ts", ['export var configPath = "${wandConfigPath}";']],
+    ["src/web-ui/browser/state.ts", ['export var configPath = browserAssetRuntime.configPath;']],
+    ["src/web-ui/browser/boot.ts", ['configPath: "${wandConfigPath}"', '__wandBrowserRuntime = runtime']],
+    ["src/web-ui/asset-runtime.ts", ['globalThis.__wandBrowserRuntime']],
     [
       "src/web-ui/scripts.ts",
       [

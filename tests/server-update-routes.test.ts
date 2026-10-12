@@ -10,7 +10,56 @@ import test from "node:test";
 import express from "express";
 
 import { jsonErrorHandler } from "../src/express-async.js";
-import { registerPublicUpdateRoutes } from "../src/server-update-routes.js";
+import { registerPublicUpdateRoutes, registerAdminUpdateRoutes, ServerUpdateState, type AdminUpdateRoutesDependencies } from "../src/server-update-routes.js";
+import { buildPackageUpdateInfo, normalizeUpdateChannel } from "../src/npm-update-utils.js";
+
+test("Web channel persists, selects npm tags and cancels a stale install check", async (t) => {
+  const values = new Map<string, string>();
+  let resume: (() => void) | undefined;
+  let checking: (() => void) | undefined;
+  let delay = false;
+  const app = express();
+  app.use(express.json());
+  registerAdminUpdateRoutes(app, {
+    storage: {
+      getConfigValue: (key: string) => values.get(key),
+      setConfigValue: (key: string, value: string) => values.set(key, value),
+    },
+    config: {}, state: new ServerUpdateState(),
+    requireAdmin: (_req, _res, next) => next(),
+    getUpdateChannel: () => normalizeUpdateChannel(values.get("updateChannel")),
+    async checkLatestPackageVersion(channel) {
+      if (delay) await new Promise<void>(resolve => { resume = resolve; checking?.(); });
+      return buildPackageUpdateInfo("4.89.3", channel, channel === "beta" ? "4.89.5-beta.1" : "4.89.4");
+    },
+    buildInfo: { version: "4.89.3", commit: null, builtAt: null, channel: null },
+  } as AdminUpdateRoutesDependencies);
+  app.use(jsonErrorHandler);
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise<void>(resolve => server.once("listening", resolve));
+  t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const set = (channel: string) => fetch(base + "/api/update-channel", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ channel }),
+  });
+  for (const channel of ["beta", "stable"] as const) {
+    assert.equal((await set(channel)).status, 200);
+    assert.equal((await (await fetch(base + "/api/update-channel")).json()).channel, channel);
+    const info = await (await fetch(base + "/api/check-update")).json();
+    assert.equal(info.distTag, channel === "beta" ? "beta" : "latest");
+    assert.equal(info.installSpec, `@co0ontty/wand@${info.latest}`);
+  }
+  assert.equal((await set("other")).status, 400);
+  assert.equal(values.get("updateChannel"), "stable");
+  await set("beta");
+  delay = true;
+  const started = new Promise<void>(resolve => { checking = resolve; });
+  const install = fetch(base + "/api/update", { method: "POST" });
+  await started;
+  await set("stable");
+  resume!();
+  assert.equal((await install).status, 409);
+});
 
 test("extracted public update routes preserve metadata, channel, range, and missing-asset behavior", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-update-routes-"));

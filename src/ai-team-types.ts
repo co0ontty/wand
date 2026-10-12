@@ -1,6 +1,7 @@
 import type { AgentActivityState } from "./mission-types.js";
 import { DECISION_EXPERT_KEY } from "./decision-expert-identity.js";
 import { SPEECH_POLISHER_KEY } from "./speech-polisher-identity.js";
+import { HR_EMPLOYEE_KEY } from "./hr-employee-identity.js";
 import type { AiTeamDeliverySummary } from "./ai-team-delivery-types.js";
 import type { WandTaskAgent } from "./task-types.js";
 import type { ConversationTurn } from "./types.js";
@@ -93,13 +94,13 @@ export interface SiliconEmployee {
   name: string;
   duty: string; // 一句话职责：侧栏/选择器/署名都用它
   prompt: string; // 角色设定；建会话时走 SessionSnapshot.systemPrompt（不拼进首条用户消息）
-  avatar: string; // 与 ai-teams 同口径："" | "cat:<n>" | "data:image/…"
+  avatar: string; // "" | legacy cat | plush:v1:… | plush-cat:v1:silver|orange | plush-dog:v1:shiba:red-scarf | uploaded image
   agents: WandTaskAgent[]; // 1..4 项，顺序 = 降级顺序（首选在前）
   /** 内置标签按 systemKey 固定；普通员工的标签由用户维护。旧客户端可不传。 */
   tags?: string[];
   /**
-   * 非空 = Wand 内置员工（如 "wand-ops" 系统运维）：名字/职责/人设/头像锁定，
-   * 不可归档、不可删除，只有执行候选由用户维护。
+   * 非空 = Wand 内置身份、标签，不可归档、不可删除。
+   * 两个固定猫头像员工可编辑资料/人设/候选；其他内置员工保留既有资料锁定策略。
    */
   systemKey?: string;
   archivedAt?: string; // 归档后不出现在选择器；其历史会话仍可打开
@@ -161,7 +162,7 @@ export function isDecisionExpertSiliconEmployee(employee: Pick<SiliconEmployee, 
 export function isBuiltinSiliconEmployee(
   employee: Pick<SiliconEmployee, "systemKey"> | null | undefined,
 ): boolean {
-  return isSystemSiliconEmployee(employee) || isDefaultSiliconEmployee(employee) || isDecisionExpertSiliconEmployee(employee) || employee?.systemKey === SPEECH_POLISHER_KEY;
+  return isSystemSiliconEmployee(employee) || isDefaultSiliconEmployee(employee) || isDecisionExpertSiliconEmployee(employee) || employee?.systemKey === SPEECH_POLISHER_KEY || employee?.systemKey === HR_EMPLOYEE_KEY;
 }
 
 export const SILICON_EMPLOYEE_MAX_TAGS = 8;
@@ -171,7 +172,7 @@ export const SILICON_EMPLOYEE_TAG_MAX_CHARS = 20;
 export function siliconEmployeeTags(
   employee: Pick<SiliconEmployee, "systemKey" | "tags">,
 ): string[] {
-  if (isSystemSiliconEmployee(employee) || isDecisionExpertSiliconEmployee(employee) || employee.systemKey === SPEECH_POLISHER_KEY) return [SYSTEM_EMPLOYEE_TAG];
+  if (isSystemSiliconEmployee(employee) || isDecisionExpertSiliconEmployee(employee) || employee.systemKey === SPEECH_POLISHER_KEY || employee.systemKey === HR_EMPLOYEE_KEY) return [SYSTEM_EMPLOYEE_TAG];
   if (isDefaultSiliconEmployee(employee)) return [DEFAULT_EMPLOYEE_TAG];
   return employee.tags ?? [];
 }

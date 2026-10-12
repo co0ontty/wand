@@ -9,7 +9,7 @@ import {
 import * as React from "react";
 import { WandButton, WandDialogSurface, WandInput } from "../ui";
 import "../issues/library-layout";
-import { TaskForm } from "../issues/form-controls";
+import { TaskForm } from "../issues/task-form";
 import { httpFolderPickerRepository } from "../folder-picker/repository";
 import { nextFolderPickerIndex, type FolderPickerNavigationKey } from "../folder-picker/model";
 import type {

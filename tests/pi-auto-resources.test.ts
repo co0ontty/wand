@@ -129,6 +129,17 @@ test("unavailable or disabled local decision continues with manual pins and fact
   }
 });
 
+test("each automatic decision gets a fresh watchdog instead of sharing the first decision deadline", async () => {
+  let evaluations = 0, starts = 0;
+  const runner = withAutomaticPiResources(immediate(() => { starts++; }), {}, {
+    inventory: async () => inventory, timeoutMs: 100,
+    evaluate: () => async () => { evaluations++; await new Promise(resolve => setTimeout(resolve, 40)); return decision(); },
+  });
+  const result = await runner.start(context(), observe()).completion;
+  assert.ok(evaluations >= 3); assert.equal(starts, 1);
+  assert.equal(result.state.resourceSelection?.status, "selected");
+});
+
 test("timeout settles even an evaluator ignoring cancellation; late judgments do not change the selected round", async () => {
   let release!: (result: DecisionResult) => void;
   let starts = 0;

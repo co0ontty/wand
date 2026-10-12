@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Alert, Avatar, Button, Card, Collapse, Empty, Flex, Input, InputNumber, List, Tabs, Tag, Tooltip, Typography } from "antd";
+import { Alert, Avatar, Button, Card, Collapse, Empty, Flex, Input, InputNumber, List, Tag, Tooltip, Typography } from "antd";
 import {
   AI_TEAM_AVATAR_MAX_CHARS,
   AI_TEAM_DEFAULT_MAX_STEPS,
@@ -916,12 +916,7 @@ export function TeamRuns({
 
 import { EmployeeListPage } from "../agents/employee-list-page.js";
 
-const DETAIL_TABS = [
-  { value: "members", label: "成员与设置" },
-  { value: "runs", label: "运行记录" },
-];
-
-const FILTER_TABS = [
+const FILTER_OPTIONS = [
   { value: "all", label: "全部" },
   { value: "running", label: "运行中" },
   { value: "attention", label: "待你处理" },
@@ -951,6 +946,7 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
   ).map((entry) => ({ value: entry.value, label: entry.label }));
   const [teams, setTeams] = React.useState<AiTeam[] | null>(null);
   const [pageMode, setPageMode] = React.useState<"employees" | "teams">("employees");
+  const [employeeEditing, setEmployeeEditing] = React.useState(false);
   const [runs, setRuns] = React.useState<AiTeamRunSummary[]>([]);
   const [loadError, setLoadError] = React.useState("");
   const [teamsLoading, setTeamsLoading] = React.useState(true);
@@ -970,7 +966,7 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
   React.useEffect(() => {
     if (teamRoute.page !== "teams" || !teamRoute.teamId) return;
     setPageMode("teams");
-    setSelectedId(window.matchMedia("(max-width: 760px)").matches ? "" : teamRoute.teamId);
+    setSelectedId(teamRoute.teamId);
   }, [teamRoute.page, teamRoute.teamId, teamRoute.revision]);
 
   const loadTeams = React.useCallback(async () => {
@@ -979,7 +975,7 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
       const list = await aiTeamsRepository.list();
       setTeams(list);
       setLoadError("");
-      setSelectedId((current) => current || (window.matchMedia("(max-width: 760px)").matches ? "" : list[0]?.id ?? ""));
+      setSelectedId((current) => list.some(team => team.id === current) ? current : "");
     } catch (cause) {
       setLoadError(failureMessage(cause, "团队模板加载失败。"));
     } finally {
@@ -1126,7 +1122,7 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
   };
 
   return <Flex component="section" vertical className="task-board-native-page wand-teams-page" aria-label="员工与团队模板" style={{ position: "absolute", inset: 0, zIndex: 8, overflow: "hidden", minWidth: 0, minHeight: 0, background: "var(--bg-primary)" }} data-detail={detailOpen || undefined}>
-    <Flex component="header" wrap align="center" justify="space-between" gap="small" className="task-board-workspace-header" style={{ flexShrink: 0, padding: 16 }}>
+    <Flex hidden={pageMode === "employees" && employeeEditing} component="header" wrap align="center" justify="space-between" gap="small" className="task-board-workspace-header" style={{ flexShrink: 0, padding: 16 }}>
       <Flex align="center" gap="small" className="task-board-kicker" style={{ minWidth: 0 }}>
         {onOpenSidebar ? <WandIconButton
           className="task-board-icon-button"
@@ -1158,7 +1154,7 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
         </div>
       </Flex>
       <Flex wrap align="center" gap="small" className="task-board-header-actions">
-        <WandStretchTabs
+        {!detailOpen && <WandStretchTabs
           tabs={PAGE_MODE_TABS}
           value={pageMode}
           ariaLabel="切换员工或团队模板"
@@ -1172,7 +1168,7 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
               }
             });
           }}
-        />
+        />}
         {pageMode === "teams" ? (
           <>
             <TeamDispatchTrigger
@@ -1205,14 +1201,14 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
     /> : null}
     {pageMode === "employees" ? (
       <div className="wand-teams-layout wand-employees-layout" style={{ width: "100%", minWidth: 0 }}>
-        <EmployeeListPage catalog={catalog} providerOptions={providerOptions} />
+        <EmployeeListPage catalog={catalog} providerOptions={providerOptions} onEditingChange={setEmployeeEditing} />
       </div>
     ) : (
     <div className="wand-teams-layout">
       <aside className="wand-teams-list" aria-label="团队模板列表">
         <WandSearchField value={query} onValueChange={setQuery} label="搜索团队模板或成员"/>
-        <WandStretchTabs
-          tabs={FILTER_TABS}
+        <WandSelect
+          options={FILTER_OPTIONS}
           value={filter}
           ariaLabel="按状态筛选"
           onValueChange={(value) => setFilter(value as TeamFilter)}
@@ -1337,14 +1333,11 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
             <TeamAvatarStack members={selected.members} size="md" max={6}/>
             <Typography.Text type="secondary">{selected.description || `${selected.members.length} 位成员`}</Typography.Text>
           </Flex>
-          <Tabs activeKey={detailTab} onChange={setDetailTab} destroyOnHidden={false}
-            items={DETAIL_TABS.map((tab) => ({ key: tab.value, label: tab.label, forceRender: true, children:
-              <div className="wand-teams-detail-pane" data-hidden={detailTab !== tab.value || undefined} inert={detailTab !== tab.value}>
-              {tab.value === "runs" ? <TeamRuns
-                runs={teams === null ? null : runsOf(selected.id)}
-                focusRunId={focusRunId}
-                onOpenSession={onOpenSession}
-              /> : <TeamEditor
+          <WandButton kind="ghost" className="wand-team-history-toggle" onClick={() => setDetailTab(value => value === "runs" ? "members" : "runs")}>
+            <WandIcon name={detailTab === "runs" ? "chevronLeft" : "history"} size={15}/>{detailTab === "runs" ? "返回成员设置" : "查看运行记录"}
+          </WandButton>
+          <div className="wand-teams-detail-pane" hidden={detailTab !== "members"} inert={detailTab !== "members"}>
+            <TeamEditor
                   key={selected.id}
                   active={detailTab === "members"}
                   team={selected}
@@ -1359,8 +1352,11 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
                     setSelectedId("");
                     setTeams((current) => (current ?? []).filter((item) => item.id !== id));
                   }}
-                />}
-              </div> }))}/>
+                />
+          </div>
+          <div className="wand-teams-detail-pane" hidden={detailTab !== "runs"} inert={detailTab !== "runs"}>
+            <TeamRuns runs={teams === null ? null : runsOf(selected.id)} focusRunId={focusRunId} onOpenSession={onOpenSession}/>
+          </div>
         </> : <Empty
           className="wand-teams-empty is-detail"
           image={<WandIcon name="parallel" size={28}/>}

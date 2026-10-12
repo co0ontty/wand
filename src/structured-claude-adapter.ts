@@ -8,6 +8,7 @@ import type { StructuredExecHost } from "./structured-exec-host.js";
 import { buildLanguageDirective, buildManagedAutonomyDirective } from "./language-prompt.js";
 import { thinkingEffortToClaudeCliEffort } from "./structured-provider-common.js";
 import { ClaudeCliProtocolReducer } from "./structured-claude-protocol.js";
+import { cliUnacceptedFacts } from "./structured-failure.js";
 import type {
   StructuredRunnerAdapter,
   StructuredRunnerContext,
@@ -166,6 +167,7 @@ export class ClaudeCliRunner implements StructuredRunnerAdapter {
     const reducer = new ClaudeCliProtocolReducer(context.session);
     let killedForQuestion = false;
     let stdoutTail = "";
+    let unparsedStdout = false;
     return startStructuredCli({
       sessionId: context.session.id,
       file: "claude",
@@ -181,7 +183,7 @@ export class ClaudeCliRunner implements StructuredRunnerAdapter {
         const trimmed = line.trim();
         if (!trimmed) return;
         let event: unknown;
-        try { event = JSON.parse(trimmed); } catch { return; }
+        try { event = JSON.parse(trimmed); } catch { unparsedStdout = true; return; }
         if (event && typeof event === "object" && !Array.isArray(event)) {
           observer.onEvent?.(event as Record<string, unknown>);
         }
@@ -206,6 +208,15 @@ export class ClaudeCliRunner implements StructuredRunnerAdapter {
         primaryError: reducer.errorText,
         stopReason: killedForQuestion ? "ask-user-question" : undefined,
         spawnError,
+        ...cliUnacceptedFacts({
+          state: reducer.state,
+          primaryError: reducer.errorText,
+          protocolError: reducer.errorResultObserved,
+          unparsedStdout,
+          signal,
+          progressed: reducer.assistantWorkObserved,
+          ...(spawnError ? { spawnError } : {}),
+        }),
       }),
     });
   }

@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { exec } from "node:child_process";
 import { createReadStream } from "node:fs";
-import { lstat, mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Stats } from "node:fs";
 import process from "node:process";
@@ -66,6 +66,31 @@ export function recordRecentPath(storage: WandStorage, cwd: string | undefined |
 
 export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependencies): void {
   const { storage, defaultCwd } = deps;
+
+  // Resolve relative artifacts against the stored source session, never a client-supplied cwd.
+  app.get("/api/session-file/:sessionId", asyncRoute(async (req, res) => {
+    const session = storage.getSessionSlim(String(req.params.sessionId));
+    if (!session?.cwd) { res.status(404).json({ error: "文件所属会话不存在。" }); return; }
+    const relative = typeof req.query.path === "string" ? req.query.path : "";
+    if (!relative || path.isAbsolute(relative) || /[\u0000-\u001f]/.test(relative) || /^[a-z][a-z\d+.-]*:/i.test(relative)) {
+      res.status(400).json({ error: "文件相对路径无效。" }); return;
+    }
+    const resolved = path.resolve(session.cwd, relative);
+    if (!isPathWithinBase(resolved, path.resolve(session.cwd)) || isBlockedFolderPath(resolved)) {
+      res.status(403).json({ error: "文件路径超出会话目录。" }); return;
+    }
+    const canonical = await realpath(resolved).catch(() => null);
+    const base = await realpath(session.cwd).catch(() => null);
+    if (canonical && base && (!isPathWithinBase(canonical, base) || isBlockedFolderPath(canonical))) {
+      res.status(403).json({ error: "文件链接目标超出会话目录。" }); return;
+    }
+    if (req.query.mode === "preview") {
+      if (!/\.html?$/i.test(resolved)) { res.status(400).json({ error: "目标不是 HTML 文件。" }); return; }
+      res.redirect(307, "/api/local-file/" + Buffer.from(resolved).toString("base64url") + "/");
+    } else {
+      res.redirect(307, "/api/file-raw?path=" + encodeURIComponent(resolved) + (req.query.mode === "download" ? "&download=1" : ""));
+    }
+  }));
 
   app.get("/api/path-suggestions", asyncRoute(async (req, res) => {
     const query = typeof req.query.q === "string" ? req.query.q : "";
@@ -418,6 +443,7 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
         headers: {
           "Cache-Control": "private, max-age=60",
           "X-Content-Type-Options": "nosniff",
+          ...(/\.html?$/i.test(ext) ? { "Content-Security-Policy": "sandbox allow-scripts; connect-src 'none'; form-action 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'" } : {}),
         },
         readErrorMessage: "Failed to read file",
       });
@@ -482,6 +508,11 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
         res.status(400).json({ error: "目标不是普通文件。" });
         return;
       }
+      const canonicalBase = await realpath(baseRoot);
+      const canonicalFile = await realpath(filePath);
+      if (!isPathWithinBase(canonicalFile, canonicalBase) || isBlockedFolderPath(canonicalFile)) {
+        res.status(403).json({ error: "访问被拒绝：资源链接目标越界。" }); return;
+      }
       const ext = path.extname(filePath).toLowerCase();
       const baseName = path.basename(filePath);
       const encodedName = encodeURIComponent(baseName);
@@ -493,6 +524,8 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
         headers: {
           "Cache-Control": "private, no-cache",
           "X-Content-Type-Options": "nosniff",
+          // Even opening the artifact directly must not grant the Wand origin.
+          ...(/\.html?$/i.test(ext) ? { "Content-Security-Policy": "sandbox allow-scripts; connect-src 'none'; form-action 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'" } : {}),
         },
         readErrorMessage: "读取本地文件失败。",
       });

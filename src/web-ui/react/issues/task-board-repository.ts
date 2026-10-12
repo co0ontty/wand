@@ -19,6 +19,7 @@ let agentDefaultsWrite = Promise.resolve();
 
 /** GET /api/wand-tasks 返回的任务：附带头部所需的工作空间、里程碑与已绑定会话。 */
 export interface WandTaskListed extends WandTaskDetail {
+  canArchive?: boolean;
   workspace: { id: string; name: string; cwd: string } | null;
   /** 服务端已解出的里程碑（含名称），卡片可以直接显示。 */
   milestone: { id: string; name: string } | null;
@@ -138,3 +139,8 @@ export const taskBoardRepository = {
 };
 
 export type { IssueWorkspace };
+
+/** Server verdict wins; status fallback keeps older servers safe. */
+export function canArchiveBoardTask(task: WandTaskListed): boolean {
+  return task.canArchive ?? task.status !== "doing";
+}

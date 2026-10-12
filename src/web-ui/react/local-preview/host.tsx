@@ -4,6 +4,7 @@ import * as React from "react";
 
 import { WandButton, WandDialogSurface, WandInput } from "../ui";
 import { localPreviewController, type LocalPreviewMode } from "./controller";
+import { HTML_PREVIEW_SANDBOX } from "./inline";
 
 const PREVIEW_MODES: ReadonlyArray<{ value: LocalPreviewMode; label: string }> = [
   { value: "url", label: "Web 服务" },
@@ -83,7 +84,7 @@ export function LocalPreviewHost() {
           style={{ flex: 1, minHeight: 0, width: "100%", border: 0 }}
           src={snapshot.previewUrl}
           title={`本地预览：${snapshot.sourceLabel}`}
-          sandbox="allow-scripts allow-forms allow-popups allow-modals"
+          sandbox={HTML_PREVIEW_SANDBOX}
         />
       ) : (
         <Card className="wand-local-preview-empty" style={{ flex: 1, minHeight: 0 }} styles={{ body: { display: "grid", placeItems: "center", height: "100%" } }}>

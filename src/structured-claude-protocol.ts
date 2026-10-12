@@ -132,6 +132,10 @@ export class ClaudeCliProtocolReducer {
   askUserQuestionDetected = false;
   /** result 事件带 is_error 时的说明（如「API Error: 503 …」），作为这一轮的主错误。 */
   errorText: string | null = null;
+  /** 协议里出现过带 is_error 的 result 事件；没有本轮助手内容时才是可降级的执行前拒绝。 */
+  errorResultObserved = false;
+  /** 本轮真正跑出来的助手/工具内容，错误回显不算。 */
+  assistantWorkObserved = false;
   private readonly blocksByKey = new Map<string, ContentBlock[]>();
   private readonly keyOrder: string[] = [];
   private readonly taskMetaRegistry: TaskMetaMap = new Map();
@@ -159,7 +163,10 @@ export class ClaudeCliProtocolReducer {
       const stamped = parentId === null
         ? stampSelfTask(extracted.content, this.taskMetaRegistry)
         : tagSubagentBlocks(extracted.content, parentId, this.taskMetaRegistry);
-      if (stamped.length > 0) this.upsertBlocks(key, stamped);
+      if (stamped.length > 0) {
+        this.assistantWorkObserved = true;
+        this.upsertBlocks(key, stamped);
+      }
       if (!managed && extracted.content.some((block) => block.type === "tool_use" && block.name === "AskUserQuestion")) {
         this.askUserQuestionDetected = true;
       }
@@ -187,13 +194,22 @@ export class ClaudeCliProtocolReducer {
       const stamped = parentId === null
         ? stampParentTaskResults(collected, this.taskMetaRegistry)
         : tagSubagentBlocks(collected, parentId, this.taskMetaRegistry);
-      if (stamped.length > 0) this.upsertBlocks(`tool_result:${this.toolResultSequence++}`, stamped);
+      if (stamped.length > 0) {
+        this.assistantWorkObserved = true;
+        this.upsertBlocks(`tool_result:${this.toolResultSequence++}`, stamped);
+      }
       return true;
     }
 
     if (event.type === "result") {
       if (typeof event.result === "string") this.state.result = event.result.trim();
-      if (event.is_error === true && this.state.result) this.errorText = this.state.result;
+      if (event.is_error === true) {
+        this.errorResultObserved = true;
+        const detail = this.state.result
+          || (typeof event.subtype === "string" && event.subtype && event.subtype !== "success"
+            ? `Claude 以 ${event.subtype} 结束，未产生任何输出。` : "");
+        if (detail) this.errorText = detail;
+      }
       this.state.model = extractClaudeModelName(
         event.modelUsage && typeof event.modelUsage === "object"
           ? event.modelUsage as Record<string, unknown>

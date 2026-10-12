@@ -174,7 +174,7 @@ test("ProcessManager dispose clears timers, kills PTYs, flushes, and rejects new
   fakePty.emitData("pending output");
 
   const internals = manager as unknown as {
-    archiveTimer: NodeJS.Timeout | null;
+    ptyForegroundTimer: NodeJS.Timeout | null;
     persistDebounceTimers: Map<string, NodeJS.Timeout>;
     sessions: Map<string, {
       initialInputTimer?: NodeJS.Timeout | null;
@@ -197,7 +197,8 @@ test("ProcessManager dispose clears timers, kills PTYs, flushes, and rejects new
   assert.equal(fakePty.killed, true);
   assert.equal(manager.get(started.id)?.status, "stopped");
   assert.equal(storage.getSession(started.id)?.status, "stopped");
-  assert.equal(internals.archiveTimer, null);
+  assert.equal(internals.ptyForegroundTimer, null);
+  assert.equal("archiveTimer" in manager, false, "retention scheduling belongs to the server retention service");
   assert.equal(internals.persistDebounceTimers.size, 0);
   assert.equal(record.initialInputTimer, null);
   assert.equal(record.claudeTaskDiscoveryTimer, null);
@@ -233,7 +234,6 @@ test("StructuredSessionManager dispose interrupts active runner work and clears 
   await waitFor(() => runner.starts === 1, "runner did not start");
 
   const internals = manager as unknown as {
-    archiveTimer: NodeJS.Timeout | null;
     streamEmitTimers: Set<NodeJS.Timeout>;
   };
   const deferredTimer = setTimeout(() => {}, 60_000);
@@ -244,7 +244,7 @@ test("StructuredSessionManager dispose interrupts active runner work and clears 
   manager.dispose();
 
   assert.equal(runner.interruptCalls, 1);
-  assert.equal(internals.archiveTimer, null);
+  assert.equal("archiveTimer" in manager, false, "structured manager must not own another retention policy");
   assert.equal(internals.streamEmitTimers.size, 0);
   assert.equal(manager.get(session.id)?.status, "idle");
   assert.equal(manager.get(session.id)?.structuredState?.inFlight, false);

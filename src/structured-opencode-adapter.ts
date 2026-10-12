@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { startStructuredCli } from "./structured-exec-pump.js";
 import type { StructuredExecHost } from "./structured-exec-host.js";
 import { asRecord } from "./structured-content.js";
+import { cliUnacceptedFacts } from "./structured-failure.js";
 import { thinkingEffortToOpenCodeVariant, promptWithSystemFallback } from "./structured-provider-common.js";
 import type {
   StructuredRunnerAdapter,
@@ -144,6 +145,8 @@ export class OpenCodeRunner implements StructuredRunnerAdapter {
       usage: undefined,
     };
     let primaryError: string | null = null;
+    let protocolError = false;
+    let unparsedStdout = false;
     return startStructuredCli({
       sessionId: context.session.id,
       file: "opencode",
@@ -163,11 +166,12 @@ export class OpenCodeRunner implements StructuredRunnerAdapter {
         try {
           event = JSON.parse(trimmed) as Record<string, unknown>;
         } catch {
+          unparsedStdout = true;
           return;
         }
         observer.onEvent?.(event);
         const error = applyOpenCodeEvent(state, event);
-        if (error) primaryError = error;
+        if (error) { primaryError = error; protocolError = true; }
         observer.onUpdate(state);
       },
       finalize: (ctx, exitCode, signal, spawnError) => ({
@@ -177,6 +181,7 @@ export class OpenCodeRunner implements StructuredRunnerAdapter {
         stderr: ctx.stderr,
         primaryError,
         ...(spawnError ? { spawnError } : {}),
+        ...cliUnacceptedFacts({ state, primaryError, protocolError, unparsedStdout, signal, ...(spawnError ? { spawnError } : {}) }),
       }),
     });
   }

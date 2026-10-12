@@ -7,7 +7,7 @@ import type { TaskDirectoryGroup, WorkspaceSessionSummary } from "./types";
 /**
  * 侧栏三态显示模式，循环切换、设备本地持久化（和聊天宽度偏好一样不上服务端）：
  * full = 全部会话照常展开；folded = 终端一律收起，只看目录和任务；
- * active = 只留下在跑的或等你的，其余整条不显示。
+ * active = 一级目录保留，只显示在跑、待处理、刚完成或正在查看的会话。
  */
 export type SidebarDisplayMode = "full" | "folded" | "active";
 
@@ -71,12 +71,12 @@ export function isSessionActive(session: WorkspaceSessionSummary): boolean {
   return isSessionAttention(session) || isSessionRunning(session) || isSessionJustCompleted(session);
 }
 
-/** 只看活动：任务里只留在动的会话，没有活动会话的任务和目录整条不显示；正在看的那条始终保留。 */
+/** 只裁剪目录内部的会话与空任务；一级目录及其顺序保留，正在看的会话始终保留。 */
 export function filterActiveGroups(
   groups: readonly TaskDirectoryGroup[],
   selectedSessionId?: string | null,
 ): TaskDirectoryGroup[] {
-  return groups.flatMap((group) => {
+  return groups.map((group) => {
     const keep = (session: WorkspaceSessionSummary): boolean => (
       isSessionActive(session) || session.id === selectedSessionId
     );
@@ -86,8 +86,7 @@ export function filterActiveGroups(
       return sessions.length ? [{ ...task, sessions, archivedSessions: [] }] : [];
     });
     const standaloneSessions = group.standaloneSessions.filter(keep);
-    if (!tasks.length && !standaloneSessions.length) return [];
-    return [{ ...group, tasks, standaloneSessions, archivedSessions: [] }];
+    return { ...group, tasks, standaloneSessions, archivedSessions: [] };
   });
 }
 
@@ -139,10 +138,11 @@ export function sidebarExpansionOpen(
   override: boolean | undefined,
   foldedOpen: boolean,
   searching: boolean,
+  activeOpen = true,
 ): boolean {
   if (searching) return true;
   if (mode === "full") return normalOpen;
-  return override ?? (mode === "active" || foldedOpen);
+  return override ?? (mode === "active" ? activeOpen : foldedOpen);
 }
 
 export function useSidebarPresentation(): SidebarPresentation {

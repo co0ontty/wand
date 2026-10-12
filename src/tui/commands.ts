@@ -13,7 +13,6 @@ import process from "node:process";
 
 import {
   checkPackageUpdateSync,
-  getInstallSpecForChannel,
   installPackageGloballySync,
   normalizeUpdateChannel,
   resolveGlobalWandBin,
@@ -108,7 +107,7 @@ export function checkUpdate(currentVersion: string, channel: UpdateChannel = "st
 }
 
 /**
- * 执行 `npm install -g @co0ontty/wand@<dist-tag>`。
+ * 检查所选 npm dist-tag，再安装经过通道校验的固定版本。
  *
  * 此调用同步阻塞（TUI 上层应在另一线程的 setImmediate 调度，或直接 await）。
  * 通过 npm-update-utils 自动处理 `.wand-XXXXXX` 残留目录和 ENOTEMPTY 回退，
@@ -119,7 +118,9 @@ export function checkUpdate(currentVersion: string, channel: UpdateChannel = "st
 export function installUpdate(channel: UpdateChannel = "stable"): CommandResult {
   const serviceSafety = checkInstalledServiceEntrypointsForUpdate();
   if (!serviceSafety.ok) return serviceSafety;
-  const res = installPackageGloballySync(getInstallSpecForChannel(channel), 180_000);
+  const info = checkPackageUpdateSync("dev", channel);
+  if (!info.latest) return { ok: false, message: "npm 所选通道暂无有效版本，或 registry 暂时不可用。" };
+  const res = installPackageGloballySync(info.installSpec, 180_000);
   const out = (res.stdout || "") + (res.stderr ? "\n" + res.stderr : "");
   const trail = res.attempts.length > 1
     ? `\n\n尝试过的命令：\n  ${res.attempts.join("\n  ")}`

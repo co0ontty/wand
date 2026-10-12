@@ -1,7 +1,7 @@
 import { Alert, Flex, Form, Space, Typography } from "antd";
 import { FolderPickerOptions } from "../folder-picker/options";
 import "../issues/library-layout";
-import { TaskForm } from "../issues/form-controls";
+import { TaskForm } from "../issues/task-form";
 import { WandInput } from "../ui";
 import {
   type FormEvent,

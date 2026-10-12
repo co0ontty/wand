@@ -101,11 +101,10 @@ function renderWithStore(component: ReturnType<typeof createElement>, snapshot =
   }
 }
 
-test("ShellTopbar SSR preserves title, status, cwd, git, and menu contracts", () => {
+test("ShellTopbar SSR preserves title, git, and menu contracts without duplicate metadata", () => {
   const html = renderWithStore(createElement(ShellTopbar));
   const requiredIds = [
     "current-task",
-    "topbar-cwd",
     "topbar-file-button",
     "topbar-local-preview-button",
     "topbar-git-slot",
@@ -124,16 +123,10 @@ test("ShellTopbar SSR preserves title, status, cwd, git, and menu contracts", ()
   assert.doesNotMatch(html, /class="topbar-brand"/);
   assert.match(html, /(?=[^<]*class="[^"]*topbar-session-title title-generating[^"]*")[^>]*aria-busy="true"/);
   assert.match(html, /Chrome migration/);
-  assert.match(html, /class="[^"]*session-status-pill idle[^"]*"/);
   assert.match(html, /实现 Shell chrome/);
-  assert.match(html, /<span[^>]*id="topbar-cwd"/);
-  assert.doesNotMatch(html, /<button[^>]*id="topbar-cwd"/);
+  assert.doesNotMatch(html, /topbar-metadata|session-status-pill|topbar-provider|topbar-cwd/);
   assert.equal((html.match(/id="topbar-more-button"/g) ?? []).length, 1);
   assert.equal((html.match(/aria-label="当前会话操作"/g) ?? []).length, 1);
-  assert.match(html, /title="工作目录：\/workspace\/wand"/);
-  assert.match(html, /aria-label="工作目录：\/workspace\/wand"/);
-  assert.match(html, />wand<\/span>/);
-  assert.match(html, />Codex<\/span>/);
   assert.match(html, /class="topbar-git-branch">codex\/chrome</);
   assert.match(html, /class="topbar-git-count">·3</);
   // Appica's icon button reports its pressed state through `data-pressed`.
@@ -147,6 +140,34 @@ test("ShellTopbar SSR preserves title, status, cwd, git, and menu contracts", ()
   assert.doesNotMatch(html, /chat-width-toggle/);
 });
 
+test("ShellTopbar omits duplicate execution metadata in every session phase and view", () => {
+  const base = fixture();
+  for (const chat of [false, true]) {
+    for (const phase of ["idle", "running", "permission", "error"] as const) {
+      const active = phase === "running" || phase === "permission";
+      const selected: UiSessionVm = {
+        ...selectedSession(),
+        status: phase === "permission" ? "running" : phase,
+        statusLabel: phase === "permission" ? "等待确认" : phase === "running" ? "思考中" : phase === "error" ? "失败" : "空闲",
+        turnActive: active,
+        permissionBlocked: phase === "permission",
+        turnStartedAt: "2026-10-10T00:00:00Z",
+        lastActivityAt: "2026-10-10T00:00:00Z",
+      };
+      const html = renderWithStore(createElement(ShellTopbar), {
+        ...base,
+        selected,
+        topbar: { ...base.topbar, statusLabel: selected.statusLabel, statusTone: phase },
+        layout: { ...base.layout, currentView: chat ? "chat" : "terminal" },
+        legacyVisibility: { terminal: !chat, chat, blank: false, composer: true },
+      });
+      assert.match(html, /Chrome migration/);
+      assert.match(html, /aria-label="当前会话操作"/);
+      assert.doesNotMatch(html, /topbar-metadata|topbar-provider|topbar-cwd|session-status-(?:pill|text|elapsed|silent)/);
+    }
+  }
+});
+
 test("ShellTopbar keeps a session menu instead of a permanent width control", () => {
   const chat = renderWithStore(
     createElement(ShellTopbar),
@@ -154,7 +175,7 @@ test("ShellTopbar keeps a session menu instead of a permanent width control", ()
   );
   assert.match(chat, /aria-label="当前会话操作"/);
   assert.doesNotMatch(chat, /ant-segmented/);
-  assert.match(readFileSync(new URL("../src/web-ui/react/shell/shell-topbar.tsx", import.meta.url), "utf8"), /<ChatWidthMenuItems\/>/);
+  assert.doesNotMatch(readFileSync(new URL("../src/web-ui/react/shell/shell-topbar.tsx", import.meta.url), "utf8"), /ChatWidthMenuItems|chat-width-toggle/);
 
 });
 
@@ -257,5 +278,6 @@ test("Shell chrome sources use UiStore hooks and no forbidden legacy seam", () =
   // root 必须来自 state，不能是 ref：commitCwd 的 setCwd 常与当前值相同
   // （输入期间 onChange 已同步），ref 更新不会触发 FileExplorerHost 重挂。
   assert.match(panelSource, /const \[committedCwd, setCommittedCwd\] = React\.useState\(snapshotCwd\)/);
-  assert.match(panelSource, /<FileExplorerHost root=\{committedCwd\}\/>/);
+  assert.match(panelSource, /<FileExplorerHost root=\{committedCwd\} enabled=\{snapshot.layout.filePanelOpen && !suspended\}\/>/);
+  assert.match(panelSource, /import\("\.\.\/file-explorer\/host"\)/);
 });

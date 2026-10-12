@@ -1,9 +1,8 @@
 import * as React from "react";
-import { Flex, Tag, Typography } from "antd";
+import { Flex, Typography } from "antd";
 
 import {
   WandBrandMark,
-  WandButton,
   WandDropdownMenu,
   WandDropdownMenuContent,
   WandDropdownMenuItem,
@@ -23,26 +22,7 @@ import {
   SHELL_WORKTREE_MERGE_LABEL,
   type ShellSidebarEntryActions,
 } from "./shell-sidebar";
-import { ChatWidthMenuItems } from "./chat-width-toggle";
-import { agentToolIdFor, agentToolOption, normalizeProviderId } from "../../provider-identity";
 import { SidebarToggleIcon } from "./sidebar-toggle-icon";
-import { SessionElapsed } from "./session-elapsed";
-import { useServerAnchoredClock } from "./use-server-anchored-clock";
-import { SILENCE_NOTICE_MS, silenceDurationMs } from "../../running-activity";
-
-/** 顶栏徽标位的紧凑静默读数；完整语义（阶段 + 已运行 + 无新消息）在会话状态条上。 */
-function silenceBadgeText(selected: UiSessionVm | null, now: number): string {
-  if (!selected?.turnActive) return "";
-  // VM 上的 status 是会话级事实（provider CLI 活着也算 running），运行事实取 turnActive。
-  const silence = silenceDurationMs({
-    status: "idle",
-    permissionBlocked: selected.permissionBlocked,
-    structuredState: { inFlight: true, lastActivityAt: selected.lastActivityAt },
-  }, now);
-  if (silence < SILENCE_NOTICE_MS) return "";
-  const minutes = Math.floor(silence / 60_000);
-  return minutes < 60 ? `静默 ${minutes} 分` : `静默 ${Math.floor(minutes / 60)} 时`;
-}
 import { TopbarGitBadge } from "./topbar-git-badge";
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
 import type { UiAction, UiSessionVm, UiSnapshotData } from "./ui-store";
@@ -171,8 +151,6 @@ export function ShellTopbar() {
   const moreOpen = snapshot.layout.topbarMoreOpen;
   const menuOpenIntent = React.useRef(moreOpen);
   React.useEffect(() => { menuOpenIntent.current = moreOpen; }, [moreOpen]);
-  const selected = snapshot.selected;
-  const topbarNow = useServerAnchoredClock(Boolean(selected?.turnActive));
   return <ShellTopbarChrome snapshot={snapshot} onAction={dispatch}
     onMoreOpenChange={(open) => {
       if (open !== menuOpenIntent.current) {
@@ -180,27 +158,20 @@ export function ShellTopbar() {
         void dispatch({ type: "topbar.menu.toggle" });
       }
     }}
-    elapsed={selected?.turnActive ? <SessionElapsed anchor={selected.turnStartedAt}/> : null}
-    silence={selected ? silenceBadgeText(selected, topbarNow) : ""}
     gitBadge={<TopbarGitBadge/>}/>;
 }
 
 /** Static chrome shared by the live shell and invisible creation measurement. */
-export function ShellTopbarChrome({ snapshot, onAction, onMoreOpenChange, elapsed, silence = "", gitBadge, measurement = false }: {
+export function ShellTopbarChrome({ snapshot, onAction, onMoreOpenChange, gitBadge, measurement = false }: {
   snapshot: Readonly<UiSnapshotData>;
   onAction?: (action: UiAction) => void | Promise<unknown>;
   onMoreOpenChange?: (open: boolean) => void;
-  elapsed?: React.ReactNode;
-  silence?: string;
   gitBadge?: React.ReactNode;
   measurement?: boolean;
 }) {
   const selected = snapshot.selected;
   const moreOpen = snapshot.layout.topbarMoreOpen;
   const selectedActions = selected ? getShellSidebarEntryActions(selected, false) : null;
-  const providerId = normalizeProviderId(selected?.provider);
-  const toolLabel = providerId ? agentToolOption(agentToolIdFor(providerId, selected?.engine))?.label : selected?.provider;
-  const cwdName = snapshot.topbar.cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || snapshot.topbar.cwd;
   const chromeId = (value: string) => measurement ? undefined : value;
   const runMoreAction = (action: UiAction) => { void onAction?.(action); };
   return (
@@ -245,32 +216,6 @@ export function ShellTopbarChrome({ snapshot, onAction, onMoreOpenChange, elapse
             >
               {snapshot.topbar.currentTask}
             </Typography.Text>
-            </Flex>
-            <Flex align="center" gap={8} wrap className="topbar-metadata">
-            <Tag
-              className={classNames("session-status-pill", snapshot.topbar.statusTone)}
-              title={snapshot.topbar.statusLabel}
-            >
-              <span className="session-status-text">{snapshot.topbar.statusLabel}</span>
-              {selected.turnActive && elapsed}
-              {selected.turnActive && silence && (
-                <span className="session-status-silent" title={silence || undefined}>
-                  {silence}
-                </span>
-              )}
-            </Tag>
-            <Typography.Text type="secondary" className="topbar-provider" title={toolLabel}>{toolLabel}</Typography.Text>
-            {snapshot.topbar.cwd && (
-              <Typography.Text type="secondary"
-                className="topbar-cwd"
-                id={chromeId("topbar-cwd")}
-                title={`工作目录：${snapshot.topbar.cwd}`}
-                aria-label={`工作目录：${snapshot.topbar.cwd}`}
-                style={{ maxWidth: 160, minWidth: 0, overflow: "hidden" }}
-              >
-                <Typography.Text ellipsis>{cwdName}</Typography.Text>
-              </Typography.Text>
-            )}
             </Flex>
           </>
         ) : (
@@ -333,7 +278,6 @@ export function ShellTopbarChrome({ snapshot, onAction, onMoreOpenChange, elapse
                 sideOffset={6}
               >
                 <TopbarMoreMenu selected={selected} actions={selectedActions} onAction={runMoreAction}/>
-                <ChatWidthMenuItems/>
               </WandDropdownMenuContent>
             </WandDropdownMenu>}
           </div>

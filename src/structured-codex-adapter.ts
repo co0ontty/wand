@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { startStructuredCli } from "./structured-exec-pump.js";
 import type { StructuredExecHost } from "./structured-exec-host.js";
 import { CodexProtocolReducer } from "./structured-codex-protocol.js";
+import { cliUnacceptedFacts } from "./structured-failure.js";
 import { whichSync } from "./path-repair.js";
 import type { SessionSnapshot } from "./types.js";
 import { thinkingEffortToCodexReasoningEffort, promptWithSystemFallback } from "./structured-provider-common.js";
@@ -51,6 +52,7 @@ export class CodexRunner implements StructuredRunnerAdapter {
     const args = buildCodexArgs(context.session);
     const file = whichSync("codex", { env: context.env }) ?? "codex";
     const reducer = new CodexProtocolReducer(context.session);
+    let unparsedStdout = false;
     return startStructuredCli({
       sessionId: context.session.id,
       file,
@@ -67,7 +69,7 @@ export class CodexRunner implements StructuredRunnerAdapter {
         const trimmed = line.trim();
         if (!trimmed) return;
         let event: unknown;
-        try { event = JSON.parse(trimmed); } catch { return; }
+        try { event = JSON.parse(trimmed); } catch { unparsedStdout = true; return; }
         if (event && typeof event === "object" && !Array.isArray(event)) {
           observer.onEvent?.(event as Record<string, unknown>);
         }
@@ -81,6 +83,14 @@ export class CodexRunner implements StructuredRunnerAdapter {
         primaryError: reducer.primaryError,
         errors: reducer.errors,
         spawnError,
+        ...cliUnacceptedFacts({
+          state: reducer.state,
+          primaryError: reducer.primaryError,
+          protocolError: !!reducer.primaryError,
+          unparsedStdout,
+          signal,
+          ...(spawnError ? { spawnError } : {}),
+        }),
       }),
     });
   }

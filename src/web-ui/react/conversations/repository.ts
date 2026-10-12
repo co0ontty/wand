@@ -1,7 +1,8 @@
 import { teamChatComposer } from "../ai-teams/composer-bridge";
 import * as React from "react";
 import type { ConversationDetail, ConversationReceipt, ConversationSummary } from "../../../conversation-types.js";
-import { HttpResponseError, jsonBody, requestJson } from "../http-adapter";
+import { createRequestId, HttpResponseError, jsonBody, requestJson } from "../http-adapter";
+import { sha256Hex } from "../sha256";
 import { subscribeAiTeamRunChanges } from "../ai-teams/repository";
 import { subscribeSiliconEmployeeDefinitionChanges } from "../agents/employee-repository";
 import { subscribeTaskChanges } from "../task-changes";
@@ -44,12 +45,11 @@ export const conversationsRepository = {
   detail: (id: string) => requestJson<ConversationDetail>(`/api/conversations/${encodeURIComponent(id)}`),
   receipt: (requestId: string) => readReceipt(`/api/conversations/requests/${encodeURIComponent(requestId)}`),
   async post(path: string, body: Record<string, unknown>): Promise<ConversationReceipt> {
-    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(path + "\0" + JSON.stringify(body)));
-    const fingerprint = Array.from(new Uint8Array(digest), n => n.toString(16).padStart(2, "0")).join("");
+    const fingerprint = await sha256Hex(path + "\0" + JSON.stringify(body));
     const previous = unresolved.get(fingerprint);
     if (previous) throw new UnconfirmedConversationError(previous);
     if (unresolved.size >= 200) throw new HttpResponseError("请先核对未确认请求，再继续提交。", 400);
-    const requestId = crypto.randomUUID();
+    const requestId = createRequestId();
     unresolved.set(fingerprint, requestId); savePending();
     try {
       const receipt = await readReceipt(path, jsonBody({ ...body, requestId }));

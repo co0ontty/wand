@@ -31,10 +31,11 @@ export function collapseTodoProgress(): void {
 
 export function renderStructuredStatusBar(chatMessages: any, session: any) {
 
-  // Status bar now lives in .composer-top-row alongside the todo-progress collapse bar
-  var topRow = document.querySelector(".composer-top-row");
+  // Keep the existing status/timer owner in the companion statistics row.
+  var topRow = document.querySelector("[data-composer-running-host]");
   var existing = document.querySelector(".structured-status-bar");
   var composer = document.querySelector(".input-composer");
+  if (existing && topRow && existing.parentElement !== topRow) topRow.appendChild(existing);
   if (!session || !isStructuredSession(session)) {
     if (existing) existing.remove();
     if (composer) composer.classList.remove("in-flight");
@@ -64,7 +65,7 @@ export function renderStructuredStatusBar(chatMessages: any, session: any) {
         '<span class="status-bar-dot"></span>' +
         '<span class="status-bar-label">' + inFlightLabel + '</span>' +
         '<span class="status-bar-timer">0.0s</span>';
-      // Append as last child of the top row so it sits to the right of the todo bar
+      // Native status children stay in their dedicated React host.
       topRow.appendChild(bar);
       existing = bar;
     } else if (existing && existing.classList.contains("completed")) {
@@ -154,11 +155,7 @@ export function isImagePath(value: any) {
 
 // ── Path display scroll helpers ──
 //
-// 长路径展示的几个小元素（topbar-cwd / file-explorer-cwd /
-// blank-chat-cwd-path）都有一个老问题：内容比可视宽度长时被 CSS
-// `text-overflow: ellipsis` 截掉，用户看不见最后一段目录名；topbar 那条
-// 还用过 `direction: rtl` hack 来"优先显示尾段"，副作用是首字符 "/" 也被
-// 吃掉，导致显示文本跟实际 data-path / value 字符串对不上。
+// 长路径展示若直接用 CSS `text-overflow: ellipsis`，会截掉末尾目录名。
 //
 // 这里把统一行为抽成一个小工具：
 //   scrollPathElementToEnd —— 横向 overflow 容器，scrollLeft 推到末尾；

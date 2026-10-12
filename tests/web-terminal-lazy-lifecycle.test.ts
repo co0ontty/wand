@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
+import { getWandTerminalTheme } from "../src/web-ui/react/theme.js";
 
 const noop = () => {};
 const fallback = new Proxy({}, { get: () => noop });
@@ -16,7 +17,7 @@ function load(file: string, dependencies: Record<string, unknown>, globals: Reco
   const source = readFileSync(new URL(`../src/web-ui/browser/${file}.ts`, import.meta.url), "utf8");
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const api: Record<string, any> = {};
-  runInNewContext(code, { exports: api, require: (id: string) => dependencies[id] ?? fallback, ...globals });
+  runInNewContext(code, { exports: api, require: (id: string) => dependencies[id] ?? ({ "../react/theme": { getWandTerminalTheme }, "../react/theme-preference": { wandThemeStore: { subscribe: () => noop } } } as Record<string, unknown>)[id] ?? fallback, ...globals });
   return api;
 }
 

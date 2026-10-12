@@ -1,22 +1,33 @@
 import * as React from "react";
 import type { ConversationTarget } from "../../../conversation-types.js";
 
+/** Device-local archive tier, shared by every conversation list projection. */
+export type ConversationListFilter = "all" | "active" | "archived";
+
 export interface ConversationUiState {
   mode: "chats" | "tasks";
   active: boolean | null;
   selectedId: string;
   directory: boolean;
+  listFilter: ConversationListFilter;
   targets: Record<string, ConversationTarget>;
   filters: Record<string, string>;
   scrolls: Record<string, number>;
   focusRequest: { id: string; revision: number } | null;
 }
 const storageKey = "wand-conversations-local-owner-v1";
+function normalizeListFilter(value: unknown): ConversationListFilter {
+  return value === "active" || value === "archived" ? value : "all";
+}
 function initial(): ConversationUiState {
   let stored: Partial<ConversationUiState> = {};
-  try { stored = JSON.parse(localStorage.getItem(storageKey) ?? "{}"); } catch {}
+  try {
+    const value = JSON.parse(localStorage.getItem(storageKey) ?? "{}");
+    if (value && typeof value === "object" && !Array.isArray(value)) stored = value;
+  } catch {}
   return { mode: stored.mode === "tasks" ? "tasks" : "chats", active: stored.active ?? null,
     selectedId: typeof stored.selectedId === "string" ? stored.selectedId : "", directory: false,
+    listFilter: normalizeListFilter(stored.listFilter),
     targets: stored.targets ?? {}, filters: stored.filters ?? {}, scrolls: stored.scrolls ?? {}, focusRequest: null };
 }
 let state = initial();
@@ -45,6 +56,7 @@ export const conversationUi = {
   suspend: () => { ++selectionRevision; update({ active: false, directory: false, focusRequest: null }); },
   directory: (open: boolean) => { ++selectionRevision; update({ directory: open, active: open ? true : state.active, focusRequest: null }); },
   mode: (mode: "chats" | "tasks") => update({ mode }),
+  listFilter: (value: string) => update({ listFilter: normalizeListFilter(value) }),
   target: (id: string, target: ConversationTarget) => update({ targets: { ...state.targets, [id]: target } }),
   filter: (id: string, filter: string) => update({ filters: { ...state.filters, [id]: filter } }),
   scroll: (id: string, value: number) => update({ scrolls: { ...state.scrolls, [id]: value } }),

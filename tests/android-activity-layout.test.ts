@@ -67,7 +67,15 @@ test("Android thinking keeps a real start clock and five-line preview with in-pl
 
 test("Android Back navigates directly and is independent of all inline chat card expansions", () => {
   const screenSource = screen("ChatScreen");
-  assert.match(screenSource, /WandDetailBackButton\(\s*onClick = onBack/);
+  assert.match(screenSource, /FloatingChatControls\(showBack = showBack, onBack = onBack/);
+  const controls = screen("FloatingChatControls");
+  assert.match(controls, /if \(showBack\) FloatingChatIconButton\(WandIcons\.back, "返回", onBack\)/);
+  assert.match(controls, /IconButton\(onClick = onClick, modifier = Modifier\.size\(48\.dp\)\)/);
+  // 右上角三枚悬浮按钮共用同一套几何：48dp 触控 + 40dp 可见圆底，文件槽不允许自己画更大的圆。
+  assert.match(controls, /Box\(Modifier\.size\(48\.dp\), contentAlignment = Alignment\.Center\) \{/);
+  assert.match(controls, /Box\(Modifier\.size\(40\.dp\)\.clip\(CircleShape\)\.background\(WandColors\.surface\)\)/);
+  assert.doesNotMatch(controls, /size\(48\.dp\)\.clip\(CircleShape\)/);
+  assert.doesNotMatch(controls, /\b(?:BackHandler|PredictiveBackHandler|onBackPressedDispatcher)\b/);
   assert.doesNotMatch(screenSource, /rememberChatBackAction|dispatchChatBack|onBackPressedDispatcher/);
   for (const name of ["ToolActivitySummary", "ChatBlocks", "ChatActionBlocks", "ToolActivityDetail", "TaskBoardScreen"]) {
     assert.doesNotMatch(screen(name), /\b(?:BackHandler|PredictiveBackHandler|onBackPressedDispatcher)\b/);

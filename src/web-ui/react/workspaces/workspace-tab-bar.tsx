@@ -20,7 +20,6 @@ import type {
 } from "./types";
 import { newSessionController } from "../new-session/controller";
 import { useUiDispatch, useUiStoreSnapshot } from "../shell/ui-store-react";
-import { ChatWidthToggle } from "../shell/chat-width-toggle";
 import { TopbarGitBadge } from "../shell/topbar-git-badge";
 import { WorkspaceDesktopActionsChrome, WorkspaceMoreButton, WorkspaceTabBarChrome } from "./workspace-tab-chrome";
 import { StandaloneSessionTabBar } from "./standalone-session-tab-bar";
@@ -197,7 +196,6 @@ export function WorkspaceTabBar(): React.ReactElement | null {
         </WandDropdownMenuContent>
       </WandDropdownMenu> : <WorkspaceDesktopActionsChrome onFiles={() => void dispatch({ type: "layout.files.toggle" })} onClose={handleClose}>
         <TopbarGitBadge id="workspace-tab-git-badge" className="workspace-tab-git"/>
-        <ChatWidthToggle className="workspace-tab-chat-width"/>
       </WorkspaceDesktopActionsChrome>}/>
   );
 }

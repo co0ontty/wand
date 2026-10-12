@@ -250,11 +250,13 @@ export interface AiTextRequest {
 }
 
 /**
- * Wand 自有 AI 调用（commit message、标题、提示词优化…）的一条 CLI 执行候选。
+ * Wand 自有 AI 调用（commit message、标题、提示词优化…）的一条执行候选。
  * 候选顺序即降级顺序；由内置「系统运维」员工维护。
  */
 export interface AiCliCandidate {
   provider: SessionProvider;
+  /** 缺省为 CLI；显式 sdk 保持 Wand Agent 引擎身份。 */
+  engine?: "cli" | "sdk";
   /** 具体模型 ID；未设置表示跟随 provider 默认模型。 */
   model?: string;
   thinkingEffort?: ThinkingEffort;

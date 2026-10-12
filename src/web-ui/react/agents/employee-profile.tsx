@@ -3,7 +3,7 @@ import type { SiliconEmployee } from "../../../ai-team-types.js";
 import { employeeConversationId } from "../../../conversation-types.js";
 import { conversationUi } from "../conversations/state";
 import { ObjectProfilePanel } from "../shell/object-profile-panel";
-import { siliconEmployeesRepository } from "./employee-repository";
+import { siliconEmployeesRepository, subscribeSiliconEmployeeDefinitionChanges } from "./employee-repository";
 
 type Profile = { id: string; name: string; avatar?: string; trigger: HTMLButtonElement | null };
 let current: Profile | null = null;
@@ -28,8 +28,15 @@ export function EmployeeProfileHost({ mobile }: { mobile: boolean }): React.Reac
   const trigger = React.useRef<HTMLButtonElement | null>(null);
   React.useEffect(() => {
     if (!profile) return;
+    return subscribeSiliconEmployeeDefinitionChanges(employeeId => {
+      if (employeeId === undefined || employeeId === profile.id) reload();
+    });
+  }, [profile?.id]);
+  React.useEffect(() => {
+    if (!profile) return;
     let active = true; trigger.current = profile.trigger;
-    setEmployee(null); setError(""); setLoading(true);
+    // A same-identity refresh must not unmount its editor or discard unsaved input.
+    setEmployee(previous => previous?.id === profile.id ? previous : null); setError(""); setLoading(true);
     void siliconEmployeesRepository.get(profile.id).then(value => { if (active) setEmployee(value); })
       .catch(cause => { if (active) setError(cause instanceof Error ? cause.message : "员工资料读取失败。"); })
       .finally(() => { if (active) setLoading(false); });

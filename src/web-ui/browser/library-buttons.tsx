@@ -28,7 +28,7 @@ function PhaseButton({ attrs, source }: { attrs: Record<string, string>; source:
     sync();
     return () => observer.disconnect();
   }, []);
-  return <Button {...attrs} ref={ref} htmlType="button" size="small" data-phase={snapshot.phase} aria-label={snapshot.label} title={snapshot.title}
+  return <Button {...attrs} ref={ref} htmlType="button" size="middle" data-phase={snapshot.phase} aria-label={snapshot.label} title={snapshot.title}
     className={[...Array.from(source.classList).filter(name => name !== "queue-mode" && !name.startsWith("ant-btn")), snapshot.queued && "queue-mode"].filter(Boolean).join(" ")}
     type={snapshot.queued ? "default" : "primary"} danger={snapshot.phase === "running" || snapshot.phase === "failed"}
     disabled={snapshot.disabled} loading={snapshot.phase === "sending"}
@@ -65,7 +65,7 @@ function paint(host: HTMLElement, source: HTMLButtonElement, projection: ButtonP
     flushSync(() => projection.root.render(<WandUiProvider><PhaseButton attrs={attrs} source={source}/></WandUiProvider>));
     return;
   }
-  flushSync(() => projection.root.render(<WandUiProvider><Button {...attrs} htmlType="button" size="small"
+  flushSync(() => projection.root.render(<WandUiProvider><Button {...attrs} htmlType="button" size={source.hasAttribute("data-composer-control") ? "middle" : "small"}
     block={source.classList.contains("ask-user-option")}
     type={source.dataset.antdControl === "primary" || source.classList.contains("ask-user-option") && source.classList.contains("selected") ? "primary" : source.id === "todo-progress-toggle" ? "text" : "default"} disabled={source.disabled}
     className={source.className || undefined} ref={button => {
@@ -111,6 +111,7 @@ export function mountBrowserButtons(container: ParentNode): void {
   `);
   for (const [host, projection] of roots) if (!host.isConnected) { projection.root.unmount(); roots.delete(host); }
   container.querySelectorAll<HTMLButtonElement>("button[data-antd-control]").forEach(source => {
+    if (source.closest(".input-composer")) source.setAttribute("data-composer-control", "");
     const host = document.createElement("span"); host.style.display = "contents";
     const projection = { root: createRoot(host), key: browserButtonKey(source)! };
     source.replaceWith(host); roots.set(host, projection);

@@ -1,5 +1,5 @@
 import { Alert, Flex, Result, Typography } from "antd";
-import { TaskForm } from "../issues/form-controls";
+import { TaskForm } from "../issues/task-form";
 import { type FormEvent, useEffect, useState } from "react";
 import * as React from "react";
 
@@ -9,7 +9,9 @@ import {
 } from "../model-catalog";
 import { httpNewSessionRepository } from "../new-session/repository";
 import { WandButton, WandIcon } from "../ui";
-import { AGENT_TOOL_OPTIONS, WAND_AGENT_TOOL_ID } from "../../provider-identity";
+import { WAND_AGENT_TOOL_ID } from "../../provider-identity";
+import { TEAM_NEEDS_PROJECT_HINT, WORKSPACE_AGENT_OPTIONS, workspaceAgentLabel, workspaceModelDefault } from "./workspace-agent-model";
+export { TEAM_NEEDS_PROJECT_HINT, WORKSPACE_AGENT_OPTIONS, WORKSPACE_KIND_OPTIONS, usableTeamWorkspaceId, workspaceAgentLabel, workspaceModelDefault } from "./workspace-agent-model";
 import {
   UnifiedExecutionSubjectPicker,
   type UnifiedExecutionSubject,
@@ -22,57 +24,6 @@ import type {
   WorkspaceTeamOption,
 } from "./types";
 import { workspaceTargetEngine, workspaceTargetProvider } from "./types";
-
-/** 镜像服务端 src/types.ts 的 GLOBAL_WORKSPACE_ID：隐藏的「全局暂存」工作区没有真实目录。 */
-const GLOBAL_WORKSPACE_ID = "wand-global";
-
-/** 团队直发的禁用说明：原位显示在分组里，不另起浮层（§5.1 修正 B8）。 */
-export const TEAM_NEEDS_PROJECT_HINT = "AI 团队需要先选择已有项目。";
-
-/**
- * 团队开工要的 workspaceId：必须是**已经存在**的非 global 项目 id。
- * 手输目录（提交时才 create）与无项目态（合成 global）都拿不到，只能返回空串让 UI 禁用（§4.2 R2）。
- */
-export function usableTeamWorkspaceId(
-  workspaceId: string | null | undefined,
-  kind?: string,
-): string {
-  if (!workspaceId) return "";
-  if (kind === "global" || workspaceId === GLOBAL_WORKSPACE_ID) return "";
-  return workspaceId;
-}
-
-/**
- * 工作窗口可选的执行项。
- * 单一真源是浏览器层的 `AGENT_TOOL_OPTIONS`（Pi 与 Wand Agent 是两条独立选项），
- * 这里只追加“空白终端”这一项，不再自己维护一份 provider 列表。
- */
-export const WORKSPACE_AGENT_OPTIONS: ReadonlyArray<{
-  value: WorkspaceSessionTarget;
-  label: string;
-  description: string;
-}> = [
-  ...AGENT_TOOL_OPTIONS.map((option) => ({
-    value: option.id as WorkspaceSessionTarget,
-    label: option.label,
-    description: option.description,
-  })),
-  { value: "shell", label: "空白终端", description: "仅启动系统 Shell" },
-];
-
-/** 工具选项 id（如用 pi / wand-agent）对应的展示名；认不出来就回落成原值。 */
-export function workspaceAgentLabel(target: WorkspaceSessionTarget): string {
-  return WORKSPACE_AGENT_OPTIONS.find((option) => option.value === target)?.label ?? target;
-}
-
-export const WORKSPACE_KIND_OPTIONS: ReadonlyArray<{
-  value: WorkspaceSessionKind;
-  label: string;
-  description: string;
-}> = [
-  { value: "structured", label: "对话", description: "阅读回复、查看工具执行过程" },
-  { value: "pty", label: "终端", description: "使用命令行工具的交互界面" },
-];
 
 export interface WorkspaceAgentPickerProps {
   target: WorkspaceSessionTarget;
@@ -97,17 +48,6 @@ export interface WorkspaceAgentPickerProps {
   onTeamChange?(teamId: string): void;
   /** 选员工 / 退回（传空串）。 */
   onEmployeeChange?(employeeId: string): void;
-}
-
-/**
- * 某个 CLI 工具「上次用过的模型」：与输入框 composer 的记忆同源（localStorage + 会话状态）。
- * 空值表示还没选过，回落到「跟随服务端默认」。
- */
-export function workspaceModelDefault(target: WorkspaceSessionTarget): string {
-  const provider = workspaceTargetProvider(target);
-  if (!provider) return MODEL_CATALOG_DEFAULT_VALUE;
-  return workspacesStore.getRuntime()?.modelPreference(provider)
-    || MODEL_CATALOG_DEFAULT_VALUE;
 }
 
 /** 选中项 → 选择器用的主体（provider + 引擎）；Wand Agent 用 pi provider + sdk 引擎。 */

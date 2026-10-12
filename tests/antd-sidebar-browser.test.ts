@@ -449,24 +449,12 @@ createRoot(document.getElementById("root")).render(<Fixture/>);
       evidence.push({mode,sourceBundleSha256,globalCssSha256,terminalLease:"real zoom control to 125%; direction remount retains same stub terminal nodes and scale; genuine split exit disposes nodes and preferences. Real terminal-pool preservation is covered by the integration owner's pool unit tests."});
       const obsolete = await evaluate(`Object.fromEntries(['details','summary','.sidebar-disclosure','.sidebar-disclosure-inner','.workspace-manage-check','.session-manage-check','.wand-new-session-choice','.chat-width-toggle-option','.im-sidebar-item','.im-sidebar-group-toggle','.workspace-worktree-bubble','.workspace-worktree-bubble-check','.workspace-worktree-dialog'].map(selector=>[selector,document.querySelectorAll(selector).length]))`);
       assert.equal(await evaluate("!!document.querySelector('.ant-collapse')"), true, `${mode}: task disclosure uses the actual Ant control`);
-      // In baseline 4a the standalone session's width preference already lives in its menu; the
-      // inline task-window Segmented leaves the DOM when closeSplit clears its context.
+      // Width belongs to Display settings, not either workspace toolbar or its session menu.
       await click('#topbar-more-button');
       await wait("!!document.querySelector('#topbar-more-menu [role=menuitem]')");
-      if (mode !== "mobile" && mode !== "native") {
-        await wait("document.querySelectorAll('#topbar-more-menu [data-chat-width-mode]').length===2");
-        await click('#topbar-more-menu [data-chat-width-mode="column"]');
-        await wait("document.documentElement.dataset.chatWidth==='column' && !document.querySelector('#topbar-more-menu') && document.activeElement.id==='topbar-more-button'");
-        assert.equal(await evaluate("localStorage.getItem('wand-chat-width')"), 'column', `${mode}: current-session menu commits the local width preference`);
-        await click('#topbar-more-button');
-        await wait("!!document.querySelector('#topbar-more-menu [data-chat-width-mode=full]')");
-        await click('#topbar-more-menu [data-chat-width-mode="full"]');
-        await wait("document.documentElement.dataset.chatWidth==='full' && !document.querySelector('#topbar-more-menu') && document.activeElement.id==='topbar-more-button'");
-      } else {
-        assert.equal(await evaluate("document.querySelectorAll('#topbar-more-menu [data-chat-width-mode]').length"), 0, `${mode}: width preference remains scoped to supported desktop chat surfaces`);
-        await key('Escape');
-        await wait("!document.querySelector('#topbar-more-menu') && document.activeElement.id==='topbar-more-button'");
-      }
+      assert.equal(await evaluate("document.querySelectorAll('#topbar-more-menu [data-chat-width-mode],.chat-width-toggle').length"), 0, `${mode}: width has one settings entry`);
+      await key('Escape');
+      await wait("!document.querySelector('#topbar-more-menu') && document.activeElement.id==='topbar-more-button'");
       evidence.push({ mode, obsolete, clickRetries: clickRetries.slice(retriesBefore), reduced: await evaluate("matchMedia('(prefers-reduced-motion: reduce)').matches"), interactions: ["production ShellApp and repository projection", "native history resume identity", "canonical new-session Input/directory AutoComplete keyboard/Escape; retired task form no longer mounted", "profile explicit/Escape focus return", "file path Input IME/Enter", "search focus/filter/Escape", "current root navigation and employee picker below", "directory ArrowRight", "controlled task Collapse", "Ant Menu/Escape/refocus", "Ant Checkbox bulk selection", "worktree selection/disabled/start failure and Escape", "owned peek menu clicks and rename Escape focus", "Ant Tabs keyboard selection", "native back action", "stable legacy hosts", "employee identity survives late preferences", "failed start keeps choices", "PTY capability downgrade", "platform arrow navigation within the library radio group", "Ant Modal focus return", "Ant Splitter horizontal and vertical real pointer drag saves ratio and preserves terminal ownership"] });
       if (mode === "desktop" || mode === "mobile") {
         if (mode === "mobile") { await click('#sessions-toggle-button'); await wait("document.querySelector('#sessions-drawer').classList.contains('open')"); await pause(350); }

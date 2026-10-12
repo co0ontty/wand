@@ -71,10 +71,11 @@ export const PROVIDER_MODEL_PREFERENCE_FIELDS = {
 export type ProviderModelField = (typeof PROVIDER_MODEL_PREFERENCE_FIELDS)[SessionProvider];
 
 const PROVIDER_MODEL_FIELDS: readonly ProviderModelField[] = Object.values(PROVIDER_MODEL_PREFERENCE_FIELDS);
-const PROVIDER_MODEL_FIELD_SET: ReadonlySet<string> = new Set(PROVIDER_MODEL_FIELDS);
+const TRIMMED_STRING_FIELDS = [...PROVIDER_MODEL_FIELDS, "commitModel", "systemAiModel", "language"] as const;
+const TRIMMED_STRING_FIELD_SET: ReadonlySet<string> = new Set(TRIMMED_STRING_FIELDS);
 
-function isProviderModelField(key: PreferenceKey): key is ProviderModelField {
-  return PROVIDER_MODEL_FIELD_SET.has(key);
+function isTrimmedStringField(key: PreferenceKey): key is typeof TRIMMED_STRING_FIELDS[number] {
+  return TRIMMED_STRING_FIELD_SET.has(key);
 }
 
 const PREFERENCE_KEY_SET = new Set<string>(PREFERENCE_KEYS);
@@ -265,8 +266,8 @@ export async function loadConfigWithStorage(configPath: string, storage: WandSto
   // password: DB 优先映射到 runtime config，让 config:show 与 server.ts 都看到真值
   applyStoragePassword(config, storage);
 
-  // 内置「系统运维」员工：Wand 自有 AI 调用（commit message / 标题 / 提示词优化 /
-  // 员工起草）都由它执行。这里只做幂等补齐——首次按用户已有的系统 AI 工具与默认
+  // 内置「系统运维」员工负责 commit message / 标题 / 提示词优化；招聘由 HR 负责。
+  // 这里只做幂等补齐——首次按用户已有的系统 AI 工具与默认
   // provider 建首条候选，之后候选由用户在员工设置里维护，不再回写 config。
   storage.ensureSystemSiliconEmployee({
     cli: config.systemAiCli,
@@ -277,6 +278,7 @@ export async function loadConfigWithStorage(configPath: string, storage: WandSto
   storage.ensureDefaultSiliconEmployee(config.defaultProvider);
   storage.ensureDecisionExpertEmployee();
   storage.ensureSpeechPolisherEmployee();
+  storage.ensureHrEmployee(storage.getSystemSiliconEmployee()?.agents);
 
   // 如果 JSON 里有偏好字段（说明是老版本配置或刚迁移），重写一次干净版本
   const hasLegacyPrefs = PREFERENCE_KEYS.some((key) => key in rawInput);
@@ -390,7 +392,7 @@ export function applyStoragePreferences(config: WandConfig, storage: WandStorage
     const v = storage.getPreference<string>(preferenceStorageKey("defaultCwd"), defaults.defaultCwd);
     if (typeof v === "string" && v.trim()) config.defaultCwd = v;
   }
-  for (const field of PROVIDER_MODEL_FIELDS) {
+  for (const field of TRIMMED_STRING_FIELDS) {
     const dbKey = preferenceStorageKey(field);
     if (!storage.hasPreference(dbKey)) continue;
     const v = storage.getPreference<string>(dbKey, defaults[field] ?? "");
@@ -403,25 +405,13 @@ export function applyStoragePreferences(config: WandConfig, storage: WandStorage
     const v = storage.getPreference<string>(preferenceStorageKey("commitCli"), defaults.commitCli ?? "claude");
     if (v === "claude" || v === "codex" || v === "opencode") config.commitCli = v;
   }
-  if (storage.hasPreference(preferenceStorageKey("commitModel"))) {
-    const v = storage.getPreference<string>(preferenceStorageKey("commitModel"), defaults.commitModel ?? "");
-    if (typeof v === "string") config.commitModel = v.trim();
-  }
   if (storage.hasPreference(preferenceStorageKey("systemAiCli"))) {
     const v = storage.getPreference<unknown>(preferenceStorageKey("systemAiCli"), defaults.systemAiCli);
     if (isSessionProvider(v)) config.systemAiCli = v;
   }
-  if (storage.hasPreference(preferenceStorageKey("systemAiModel"))) {
-    const v = storage.getPreference<unknown>(preferenceStorageKey("systemAiModel"), defaults.systemAiModel);
-    if (typeof v === "string") config.systemAiModel = v.trim();
-  }
   if (storage.hasPreference(preferenceStorageKey("defaultThinkingEffort"))) {
     const v = storage.getPreference<string>(preferenceStorageKey("defaultThinkingEffort"), defaults.defaultThinkingEffort ?? "off");
     if (isThinkingEffort(v)) config.defaultThinkingEffort = v;
-  }
-  if (storage.hasPreference(preferenceStorageKey("language"))) {
-    const v = storage.getPreference<string>(preferenceStorageKey("language"), defaults.language ?? "");
-    if (typeof v === "string") config.language = v.trim();
   }
   if (storage.hasPreference(preferenceStorageKey("cardDefaults"))) {
     const v = storage.getPreference<unknown>(preferenceStorageKey("cardDefaults"), defaults.cardDefaults);
@@ -454,9 +444,9 @@ export function writePreferenceToStorage(
   value: unknown,
 ): void {
   const dbKey = preferenceStorageKey(key);
-  // Default model fields share one shape (trimmed string) across every provider;
-  // handling them before the switch keeps the switch free of seven copies.
-  if (isProviderModelField(key)) {
+  // Identical string policies share one typed field set for both read and write.
+  // Strict enums/booleans and legacy read tolerance deliberately remain distinct.
+  if (isTrimmedStringField(key)) {
     const v = typeof value === "string" ? value.trim() : "";
     storage.setPreference(dbKey, v);
     config[key] = v;
@@ -517,22 +507,10 @@ export function writePreferenceToStorage(
       config.commitCli = value;
       break;
     }
-    case "commitModel": {
-      const v = typeof value === "string" ? value.trim() : "";
-      storage.setPreference(dbKey, v);
-      config.commitModel = v;
-      break;
-    }
     case "systemAiCli": {
       if (!isSessionProvider(value)) throw new Error(`无效系统 AI CLI: ${String(value)}`);
       storage.setPreference(dbKey, value);
       config.systemAiCli = value;
-      break;
-    }
-    case "systemAiModel": {
-      const v = typeof value === "string" ? value.trim() : "";
-      storage.setPreference(dbKey, v);
-      config.systemAiModel = v;
       break;
     }
     case "defaultThinkingEffort": {
@@ -540,12 +518,6 @@ export function writePreferenceToStorage(
       const v = value;
       storage.setPreference(dbKey, v);
       config.defaultThinkingEffort = v;
-      break;
-    }
-    case "language": {
-      const v = typeof value === "string" ? value.trim() : "";
-      storage.setPreference(dbKey, v);
-      config.language = v;
       break;
     }
     case "cardDefaults": {

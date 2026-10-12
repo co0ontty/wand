@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { chatReplyDuration, chatUsageMetrics } from "../src/web-ui/chat-message-meta.js";
+import { chatReplyDuration, chatUsageMetrics, latestChatUsage } from "../src/web-ui/chat-message-meta.js";
 
 test("reply usage keeps labels, compact values and the exact count available", () => {
   const metrics = chatUsageMetrics({ inputTokens: 12_345, outputTokens: 678, cacheReadInputTokens: 4_096, totalCostUsd: .01231 });
@@ -43,4 +43,19 @@ test("reply duration uses finished recorded anchors, never the clock or a user m
     { ...turn, completedAt: turn.createdAt }, { ...turn, completedAt: "2026-10-07T08:00:00.000Z" }]) {
     assert.equal(chatReplyDuration(invalid), null);
   }
+});
+
+
+test("composer usage sums assistant chunks within a round, not earlier rounds or user data", () => {
+  const messages = [
+    { role: "user" as const, usage: { inputTokens: 9999 } },
+    { role: "assistant" as const, usage: { inputTokens: 20, outputTokens: 4, estimated: true } },
+    { role: "assistant" as const, usage: { outputTokens: 6, cacheReadInputTokens: 12, totalCostUsd: .01 } },
+  ];
+  assert.deepEqual(latestChatUsage(messages), { inputTokens: 20, outputTokens: 10, estimated: true, cacheReadInputTokens: 12, totalCostUsd: .01 });
+  const next = [...messages, { role: "user" as const }];
+  assert.deepEqual(latestChatUsage(next), latestChatUsage(messages));
+  assert.deepEqual(latestChatUsage([...next, { role: "assistant" as const, usage: { outputTokens: 8, inputTokens: NaN, totalCostUsd: -1 } }]), { outputTokens: 8 });
+  assert.equal(latestChatUsage([]), undefined);
+  assert.equal(messages[1].usage.outputTokens, 4, "source messages remain unchanged");
 });

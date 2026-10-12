@@ -515,9 +515,11 @@ export async function confirmSidebarLogout(onConfirm: () => void, onCancel?: () 
 
 function SidebarCompactToggle({
   active,
+  conversation = false,
   onToggle,
 }: {
   active: boolean;
+  conversation?: boolean;
   onToggle(): void;
 }) {
   const label = active ? "展开完整侧边栏" : "收起为窄栏";
@@ -532,8 +534,8 @@ function SidebarCompactToggle({
       title={label}
       onClick={onToggle}
     >
-      <SidebarToggleIcon open={!active}/>
-      <span className="sidebar-compact-toggle-label" hidden>{label}</span>
+      {conversation ? <WandIcon name={active ? "rail" : "chevronLeft"}/> : <SidebarToggleIcon open={!active}/>}
+      <span className="sidebar-compact-toggle-label">{active ? "展开" : "收起"}</span>
     </WandIconButton>
   );
 }
@@ -602,7 +604,7 @@ export function ShellSidebar() {
   const [attentionOpen, setAttentionOpen] = React.useState(false);
   // Secondary management surfaces borrow the list space without changing the user's pinned/collapsed preference.
   const contextRail = !snapshot.layout.sidebarDrawer && (settings.open || conversationState.directory
-    || (taskBoard.open && taskBoard.page === "teams") || snapshot.layout.filePanelOpen);
+    || taskBoard.open || snapshot.layout.filePanelOpen);
   const narrow = !snapshot.layout.sidebarDrawer && snapshot.layout.sidebarPinned && snapshot.layout.sidebarCollapsed;
   const sidebarClass = classNames(
     "sidebar sidebar-refined",
@@ -610,6 +612,7 @@ export function ShellSidebar() {
     !snapshot.layout.sidebarDrawer && snapshot.layout.sidebarAnchored && "pinned",
     narrow && !contextRail && "collapsed",
     contextRail && "context-rail",
+    conversationState.mode === "chats" && !contextRail && "sidebar-home",
   );
   const primaryAction = getShellSidebarPrimaryAction();
   const visible = snapshot.layout.sessionsDrawerOpen
@@ -723,7 +726,7 @@ export function ShellSidebar() {
         onClick={() => void dispatch({ type: "layout.drawer.close" })}
       />
       <Layout.Sider id="sessions-drawer" ref={drawerRef as React.RefObject<HTMLDivElement | null>} className={sidebarClass}
-        width={contextRail ? 56 : "min(344px, calc(100vw - 24px))"} collapsedWidth={112} collapsed={narrow && !contextRail} theme="light"
+        width={contextRail ? 56 : conversationState.mode === "chats" ? "var(--conversation-sidebar-width, min(376px, calc(100vw - 24px)))" : "min(344px, calc(100vw - 24px))"} collapsedWidth={112} collapsed={narrow && !contextRail} theme="light"
         style={{ position: overlay ? "fixed" : "relative", top: overlay ? "var(--wand-safe-top, 0px)" : undefined, bottom: overlay ? "var(--wand-safe-bottom, 0px)" : undefined, left: 0, display: visible ? undefined : "none", zIndex: overlay ? 20000 : 2, height: "100%", overflow: "visible" }}
         styles={{ body: { display: "flex", flexDirection: "row", height: "100%", minHeight: 0 } }}
         aria-label="主导航与会话列表" role={overlay ? "dialog" : undefined}
@@ -731,15 +734,15 @@ export function ShellSidebar() {
         inert={!visible} tabIndex={-1} {...peek.triggerBindings}>
         <Flex vertical align="center" className="sidebar-navigation-rail">
           <div className="sidebar-rail-scroll">
-            <WandBrandMark className="sidebar-brand-mark" style={{ width: 24, height: 24 }} />
-            <ConversationNavigation activePage={settings.open ? null : taskBoard.open ? taskBoard.page === "board" ? "board" : "teams"
-              : conversationState.directory ? "contacts" : conversationState.mode} teamAttention={teamAttention}
+            <WandBrandMark className="sidebar-brand-mark" style={{ width: "var(--conversation-brand-size, 24px)", height: "var(--conversation-brand-size, 24px)" }} />
+            <ConversationNavigation activePage={settings.open ? null : taskBoard.open ? taskBoard.page === "board" ? "board" : taskBoard.page === "schedules" ? "schedules" : "teams"
+              : conversationState.directory ? "teams" : conversationState.mode} teamAttention={teamAttention}
               onNavigate={(page) => {
                 setAttentionOpen(false);
                 settingsController.close();
                 peek.close();
-                if (page === "board" || page === "teams") {
-                  taskBoardController.open(snapshot.selected?.workspaceId ?? "", snapshot.selected?.id ?? "", page === "teams" ? "teams" : "board");
+                if (page === "board" || page === "teams" || page === "schedules") {
+                  taskBoardController.open(snapshot.selected?.workspaceId ?? "", snapshot.selected?.id ?? "", page);
                 } else {
                   taskBoardController.close();
                   if (page === "contacts") conversationUi.directory(true);
@@ -767,6 +770,7 @@ export function ShellSidebar() {
             )}/>
             <WandDropdownMenuContent id="sidebar-account-menu" className="sidebar-tools-menu" aria-label="账户与设置"
               side="right" align="end" sideOffset={6}>
+              <WandDropdownMenuItem icon="user" onClick={() => { setMoreOpen(false); settingsController.close(); taskBoardController.close(); conversationUi.directory(true); dismissSidebarSurfaces(); }}>员工与通讯录</WandDropdownMenuItem>
               <WandDropdownMenuItem id="sidebar-settings-entry" icon="gear"
                 onClick={() => { setMoreOpen(false); setAttentionOpen(false); navigate({ type: "settings.open" }); }}>
                 设置
@@ -793,6 +797,7 @@ export function ShellSidebar() {
                   onNavigate={() => { taskBoardController.close(); dismissSidebarSurfaces(); }}/></div>
                 {!snapshot.layout.sidebarDrawer && (
                   <SidebarCompactToggle
+                    conversation={conversationState.mode === "chats"}
                     active={narrow}
                     onToggle={() => {
                       peek.close();

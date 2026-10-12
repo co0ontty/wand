@@ -3,6 +3,7 @@ import test from "node:test";
 import type { ConversationDetail } from "../src/conversation-types.js";
 import type { WandTaskAgent } from "../src/task-types.js";
 import { directWorkPreference, latestDirectWork } from "../src/web-ui/react/conversations/composer-presentation.ts";
+import { executionFailure } from "../src/web-ui/react/conversations/execution-failure.ts";
 
 test("DM continuation follows the latest available reply, never its legacy channel or another conversation", () => {
   const detail = { kind: "dm", communicationSessionId: "legacy", messages: [
@@ -24,4 +25,12 @@ test("execution preferences distinguish Pi CLI and Wand Agent and normalize Code
   assert.match(directWorkPreference({ ...agent, engine: "sdk" }), /首选 Wand Agent · 标准权限/);
   assert.match(directWorkPreference({ ...agent, provider: "codex" }), /完全访问/);
   assert.equal(directWorkPreference(undefined), "执行配置未就绪");
+});
+
+test("failure summaries use explicit causes without leaking raw paths or claiming safe replay", () => {
+  const raw = "Model not found: fixture/model\n/Users/private/runtime.js:42\n12345678-1234-1234-1234-123456789012";
+  assert.equal(executionFailure(raw).action, "model");
+  assert.doesNotMatch(executionFailure(raw).summary, /private|12345678|未启动|重试/);
+  assert.equal(executionFailure("Authentication failed: token expired").action, "login");
+  assert.equal(executionFailure("Request timed out; delivery is unknown").action, "inspect");
 });

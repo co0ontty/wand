@@ -30,7 +30,7 @@ import {
   writePreferenceToStorage,
 } from "./config.js";
 import { ModelCatalogService, type ModelRefreshOptions } from "./models.js";
-import { defaultModelGroupSelector } from "./model-groups.js";
+import { fallbackProviderModel, sessionEmployeeFields } from "./session-model.js";
 
 import { ProcessManager, ProcessEvent } from "./process-manager.js";
 import { SessionLogger } from "./session-logger.js";
@@ -67,11 +67,14 @@ import { inferProviderFromCommand, isSessionProvider } from "./session-provider.
 import { registerVaultRoutes } from "./server-vault-routes.js";
 import { registerGithubRoutes } from "./server-github-routes.js";
 import { registerTaskRoutes } from "./server-task-routes.js";
+import { taskTitleService } from "./task-title-service.js";
 import { getGithubConnectorStatus } from "./github-connector.js";
 import { registerMissionRoutes } from "./server-mission-routes.js";
 import { Missions } from "./missions.js";
 import { AI_TEAM_CHAT_PREFIX, createAiTeamRunner } from "./ai-team-runner.js";
 import { ConversationService } from "./conversation-service.js";
+import { ScheduledTaskService } from "./scheduled-task-service.js";
+import { registerScheduledTaskRoutes } from "./server-scheduled-task-routes.js";
 import type { ConversationSessionUpdate } from "./conversation-types.js";
 import { CONVERSATION_RELAY_PREFIX } from "./conversation-types.js";
 import { forwardConversationRelay, registerConversationRoutes } from "./server-conversation-routes.js";
@@ -89,10 +92,11 @@ import {
   registerPublicUpdateRoutes,
   ServerUpdateState,
 } from "./server-update-routes.js";
-import { parseSessionCreationOrigin, registerClaudeHistoryRoutes, registerSessionRoutes } from "./server-session-routes.js";
+import { registerClaudeHistoryRoutes, registerSessionRoutes } from "./server-session-routes.js";
+import { parseSessionCreationOrigin } from "./session-request.js";
 import { registerWorkspaceRoutes } from "./server-workspace-routes.js";
 import { resolveSessionCwd } from "./session-cwd.js";
-import { resolveWorkspaceIdForNewSession } from "./workspace-binding.js";
+import { backfillSessionWorkspaces, resolveWorkspaceIdForNewSession } from "./workspace-binding.js";
 import { getErrorMessage } from "./error-utils.js";
 import { asyncRoute, jsonErrorHandler } from "./express-async.js";
 import {
@@ -122,7 +126,7 @@ import { DistributionManager } from "./distribution-manager.js";
 import { isLogBusActive, wandTuiLog } from "./tui/log-bus.js";
 import { EMBEDDED_WEB_ASSETS, type EmbeddedVendorAssetPath } from "./web-ui/embedded-assets.js";
 import { renderApp } from "./web-ui/index.js";
-import { getAiTeamsChunk, getScriptAsset } from "./web-ui/scripts.js";
+import { getAiTeamsChunk, getBrowserModule, getPlushAvatarChunk, getScriptAsset, getThemePreloadAsset } from "./web-ui/scripts.js";
 import { getStylesAsset } from "./web-ui/styles.js";
 import { WsBroadcastManager } from "./ws-broadcast.js";
 import { TerminalDaemonClient } from "./terminal-daemon-client.js";
@@ -186,7 +190,9 @@ async function checkLatestPackageVersion(channel: UpdateChannel, forceRefresh = 
   if (!forceRefresh && cached && now - cached.timestamp < CACHE_TTL_MS) {
     return cached.info;
   }
-  const info = await checkPackageUpdateAsync(PKG_VERSION, channel);
+  // The immutable running build is also what the UI reports. Shared package metadata may
+  // belong to a different installer; it must not make a local Beta look like an older stable.
+  const info = await checkPackageUpdateAsync(DISPLAY_VERSION, channel);
   if (info.latest) {
     packageUpdateCache.set(channel, { info, timestamp: now });
   }
@@ -430,6 +436,11 @@ export async function startServer(
   const testMode = process.env.WAND_TEST_MODE === "1";
   app.set("trust proxy", "loopback, 172.16.0.0/12");
   const storage = new WandStorage(resolveDatabasePath(configPath));
+  if (!storage.getConfigValue("migration:session-workspaces:v1")) {
+    backfillSessionWorkspaces(storage);
+    storage.setConfigValue("migration:session-workspaces:v1", "done");
+  }
+  const taskTitles = taskTitleService(storage, { config });
   const runtimeConfig = new RuntimeConfigState(config);
   const openRouter = new OpenRouterFreeModelsService(storage, options.openRouterFetch);
   const speechPolisher = new SpeechPolisherService({ config, free: openRouter,
@@ -509,7 +520,7 @@ export async function startServer(
   let decisionRuntime: DecisionRuntimeAccess | null = null;
   let autoAssignEvaluate: DecisionRuntimeAccess["evaluate"];
   const processes = new ProcessManager(config, storage, configDir, terminalHost,
-    { resolveDecisionEvaluate: () => autoAssignEvaluate });
+    { resolveDecisionEvaluate: () => autoAssignEvaluate, free: openRouter });
   const structuredLogger = new SessionLogger(configDir, config.shortcutLogMaxBytes);
   // Production startup provides a daemon-backed host for structured CLI runs
   // even when Render owns every PTY. In-process hosts are for test injection.
@@ -578,6 +589,8 @@ export async function startServer(
     notifySession: update => notifyConversationSession(update), deleteSession: id => { sessionRegistry.deleteWithProviderHistory(id); } });
   conversations = conversationService;
   conversationService.migrateExistingChats();
+  const scheduledTasks = new ScheduledTaskService({ storage, conversations: conversationService,
+    getSession: id => sessionRegistry.get(id), defaultCwd: () => config.defaultCwd });
   for (const prefix of [CONVERSATION_RELAY_PREFIX, AI_TEAM_CHAT_PREFIX]) {
     structuredSessions.registerRelay(prefix, (sessionId, input) => forwardConversationRelay(conversationService, sessionId, input));
   }
@@ -673,13 +686,35 @@ export async function startServer(
     setAssetCache(req, res, asset.hash, "public");
     res.type("text/css").send(asset.content);
   });
+  app.get("/assets/theme.js", (req, res) => {
+    const asset = getThemePreloadAsset();
+    setAssetCache(req, res, asset.hash, "public");
+    res.type("application/javascript").send(asset.content);
+  });
   app.get("/assets/app.js", (req, res) => {
     const asset = getScriptAsset(configPath, requestedHash(req));
     setAssetCache(req, res, asset.hash, "private");
     res.type("application/javascript").send(asset.content);
   });
+  app.get("/assets/modules/:build/:file", (req, res) => {
+    const content = getBrowserModule(`modules/${req.params.build}/${req.params.file}`);
+    if (content === undefined) {
+      res.setHeader("Cache-Control", "no-store");
+      res.status(404).type("text/plain").send("Browser module not found; reload the page after updating.");
+      return;
+    }
+    // The directory fingerprints the entire immutable module graph. Never
+    // substitute current bytes for a missing older module under its cached URL.
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    res.type("application/javascript").send(content);
+  });
   app.get("/assets/ai-teams.js", (req, res) => {
     const chunk = getAiTeamsChunk(requestedHash(req));
+    setAssetCache(req, res, chunk.hash, "public");
+    res.type("application/javascript").send(chunk.content);
+  });
+  app.get("/assets/plush-avatar.js", (req, res) => {
+    const chunk = getPlushAvatarChunk(requestedHash(req));
     setAssetCache(req, res, chunk.hash, "public");
     res.type("application/javascript").send(chunk.content);
   });
@@ -865,6 +900,7 @@ export async function startServer(
     "/api/session-directories",
     "/api/structured-sessions",
     "/api/conversations",
+    "/api/scheduled-tasks",
     "/api/commands",
     "/api/user-memory",
     "/api/claude-history",
@@ -901,12 +937,13 @@ export async function startServer(
     "/api/validate-path",
     "/api/file-search",
     "/api/local-file",
+    "/api/session-file",
   ], requireFiles);
   app.use("/api/browser-extension", requirePasswordVault);
   app.use("/api/silicon-employees/:employeeId/knowledge", requireSessions);
   app.use(userMemoryOperationLog(storage));
   const userMemory = new UserMemoryService({
-    storage, config,
+    storage, config, free: openRouter,
     notifyChanged: (employeeId) => notifyAiTeamRun({ kind: "silicon-employee-definition", employeeId }),
   });
   registerUserMemoryRoutes(app, {
@@ -951,8 +988,8 @@ export async function startServer(
       // 把语言偏好暴露给前端做 UI 文案 i18n。后端原本只用它给 Claude 拼 system prompt，
       // 前端没收到 → "SUBAGENT" / "Read" 这些 UI label 一直是英文，跟用户设的中文不匹配。
       language: config.language ?? "",
-      updateAvailable: cachedUpdateInfo?.updateAvailable ?? false,
-      latestVersion: cachedUpdateInfo?.latest ?? null,
+      updateAvailable: cachedUpdateInfo?.channel === getUpdateChannel() ? cachedUpdateInfo.updateAvailable : false,
+      latestVersion: cachedUpdateInfo?.channel === getUpdateChannel() ? cachedUpdateInfo.latest : null,
       updateChannel: getUpdateChannel(),
       currentVersion: DISPLAY_VERSION,
       packageVersion: PKG_VERSION,
@@ -979,7 +1016,7 @@ export async function startServer(
     requireAdminOrSessionPreferences,
     packageInfo: { version: DISPLAY_VERSION, name: PKG_NAME, nodeVersion: PKG_NODE_REQ, repoUrl: PKG_REPO_URL },
     buildInfo: BUILD_INFO,
-    getCachedUpdateInfo: () => cachedUpdateInfo,
+    getCachedUpdateInfo: () => cachedUpdateInfo?.channel === getUpdateChannel() ? cachedUpdateInfo : null,
     getUpdateChannel,
     getDistributionSettings,
     getGithubConnector: () => getGithubConnectorStatus(storage),
@@ -992,7 +1029,7 @@ export async function startServer(
 
   registerGithubRoutes(app, { storage, requireAdmin, sessions: sessionRegistry });
   // 任务管理与 Missions 一样只需登录：原生 connected-app 也要能列/建/派发。
-  registerTaskRoutes(app, { storage, sessions: sessionRegistry, structured: structuredSessions, processes, config, aiTeams });
+  registerTaskRoutes(app, { storage, sessions: sessionRegistry, structured: structuredSessions, processes, config, aiTeams, free: openRouter });
   registerAiTeamRoutes(app, {
     storage,
     runner: aiTeams,
@@ -1003,10 +1040,12 @@ export async function startServer(
   registerSiliconEmployeeRoutes(app, {
     storage,
     config,
+    free: openRouter,
     notifyEmployeeChanged: (employeeId) => notifyAiTeamRun({ kind: "silicon-employee-definition", employeeId }),
   });
   registerAttentionRoutes(app, { sessions: sessionRegistry, runner: aiTeams });
   registerConversationRoutes(app, conversationService);
+  registerScheduledTaskRoutes(app, scheduledTasks);
 
   registerAdminUpdateRoutes(app, {
     storage,
@@ -1037,7 +1076,7 @@ export async function startServer(
 
   registerSessionRoutes(app, processes, structuredSessions, storage, config.defaultMode, config, sessionRegistry, (cwd) => {
     recordRecentPath(storage, cwd);
-  }, (event) => wsManager.emitEvent(event), decisionExpert);
+  }, (event) => wsManager.emitEvent(event), decisionExpert, openRouter);
   registerClaudeHistoryRoutes(app, processes, storage);
   registerWorkspaceRoutes(app, storage, sessionRegistry, { config });
   registerMissionRoutes(app, missions);
@@ -1053,7 +1092,7 @@ export async function startServer(
     if (typeof body.sessionId === "string" && body.sessionId.length > 0) {
       const snapshot = sessionRegistry.getLatest(body.sessionId);
       if (snapshot?.cwd) cwd = snapshot.cwd;
-      if (snapshot) ai = resolveSystemAiContext(snapshot, config, storage.getSystemSiliconEmployee());
+      if (snapshot) ai = resolveSystemAiContext(snapshot, config, storage.getSystemSiliconEmployee(), openRouter);
     }
     if (!ai) {
       const defaultSession = {
@@ -1064,7 +1103,7 @@ export async function startServer(
         selectedModel: null,
         thinkingEffort: config.defaultThinkingEffort,
       };
-      ai = resolveSystemAiContext(defaultSession, config, storage.getSystemSiliconEmployee());
+      ai = resolveSystemAiContext(defaultSession, config, storage.getSystemSiliconEmployee(), openRouter);
     }
     try {
       const optimized = await optimizePrompt(text, config.language ?? "", cwd, ai);
@@ -1113,9 +1152,7 @@ export async function startServer(
       const command = provider === "qoder" && rawCommand === "qoder"
         ? "qodercli"
         : rawCommand;
-      const effectiveModel = provider
-        ? rawModel || defaultModelGroupSelector(config.modelGroups, provider, getDefaultModelForProvider(config, provider)) || getDefaultModelForProvider(config, provider) || undefined
-        : undefined;
+      const effectiveModel = provider ? rawModel || fallbackProviderModel(config, provider) : undefined;
       const reqCols = typeof body.cols === "number" && Number.isFinite(body.cols) ? body.cols : undefined;
       const reqRows = typeof body.rows === "number" && Number.isFinite(body.rows) ? body.rows : undefined;
       const sessionCwd = resolveSessionCwd(body.cwd, config.defaultCwd);
@@ -1145,9 +1182,7 @@ export async function startServer(
               rows: reqRows,
               thinkingEffort: body.thinkingEffort ?? config.defaultThinkingEffort,
               systemPrompt: body.systemPrompt?.trim() || role?.prompt,
-              employeeId: role?.id,
-              employeeName: role?.name,
-              employeeAvatar: role?.avatar,
+              ...sessionEmployeeFields(role),
               workspaceId,
               workspaceTaskId: body.workspaceTaskId,
               ...origin,
@@ -1244,13 +1279,16 @@ export async function startServer(
 
   // Wire process events to WebSocket broadcast
   processes.on("process", (event: ProcessEvent) => {
+    taskTitles.ingest(event);
     sessionCompletions.ingest(event);
     missions.ingest(event);
     aiTeams.ingest(event);
     wsManager.emitEvent(event);
   });
   structuredSessions.setEventEmitter((event) => {
+    taskTitles.ingest(event);
     conversationService.ingestSessionEvent(event);
+    scheduledTasks.ingestSessionEvent(event);
     sessionCompletions.ingest(event);
     missions.ingest(event);
     aiTeams.ingest(event);
@@ -1347,8 +1385,9 @@ export async function startServer(
   const collectedUrls: ServerUrl[] = [];
 
   await new Promise<void>((resolve, reject) => {
-    const cleanupFailedListen = (): void => {
+    const cleanupFailedListen = async (): Promise<void> => {
       shuttingDown = true;
+      await scheduledTasks.dispose();
       decisions.dispose();
       openRouter.dispose();
       try { processes.dispose(); } catch { /* noop */ }
@@ -1357,7 +1396,9 @@ export async function startServer(
       speech.dispose();
       speechPolisher.dispose();
       try { structuredSessions.dispose(); } catch { /* noop */ }
-      aiTeams.dispose();
+      taskTitles.dispose();
+      modelCatalog.dispose();
+      await aiTeams.dispose();
       try { structuredHosts.rustClient?.disconnect(); } catch { /* noop */ }
       try { structuredLogger.dispose(); } catch { /* noop */ }
       try { wsManager.dispose(); } catch { /* noop */ }
@@ -1368,12 +1409,9 @@ export async function startServer(
     };
     const onListenError = (err: NodeJS.ErrnoException): void => {
       server.off("error", onListenError);
-      cleanupFailedListen();
-      if (err.code === "EADDRINUSE") {
-        reject(new PortInUseError(config.port, config.host));
-        return;
-      }
-      reject(err);
+      void cleanupFailedListen().then(() => {
+        reject(err.code === "EADDRINUSE" ? new PortInUseError(config.port, config.host) : err);
+      }, reject);
     };
     server.once("error", onListenError);
     server.listen(config.port, config.host, () => {
@@ -1403,6 +1441,7 @@ export async function startServer(
 
   const updateChecksEnabled = !testMode && process.env.WAND_DISABLE_UPDATE_CHECK !== "1";
   if (!testMode) userMemory.start();
+  if (!testMode) scheduledTasks.start();
 
   // Start configured background sessions after the server is already reachable.
   if (!testMode) {
@@ -1451,6 +1490,7 @@ export async function startServer(
     } catch { /* 扫描结果已经返回给保存请求，通知失败不回滚 */ }
     return result;
   };
+  if (!testMode) taskTitles.refresh();
   let retentionTimer: NodeJS.Timeout | null = null;
   if (!testMode) {
     retentionTimer = startRetentionTimer(retentionDeps, 60 * 60 * 1000, sweepRetention);
@@ -1471,7 +1511,7 @@ export async function startServer(
     if (shuttingDown) return;
     const channel = getUpdateChannel();
     const info = await checkLatestPackageVersion(channel, true);
-    if (shuttingDown) return;
+    if (shuttingDown || channel !== getUpdateChannel()) return;
     cachedUpdateInfo = info;
     if (!info.latest || !info.updateAvailable) return;
 
@@ -1606,6 +1646,10 @@ export async function startServer(
     if (closePromise) return closePromise;
     closePromise = (async () => {
       shuttingDown = true;
+      taskTitles.dispose();
+      modelCatalog.dispose();
+      const teamShutdown = aiTeams.dispose();
+      await scheduledTasks.dispose();
       await daemonMaintenance.stop();
       decisions.dispose();
       openRouter.dispose();
@@ -1652,7 +1696,7 @@ export async function startServer(
       speech.dispose();
       speechPolisher.dispose();
       try { structuredSessions.dispose(); } catch { /* best-effort shutdown */ }
-      aiTeams.dispose();
+      await teamShutdown;
       try { structuredHosts.rustClient?.disconnect(); } catch { /* best-effort shutdown */ }
       try { structuredLogger.dispose(); } catch { /* best-effort shutdown */ }
       try { wsManager.dispose(); } catch { /* best-effort shutdown */ }

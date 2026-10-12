@@ -1,4 +1,4 @@
-import { DecisionError } from "./decision-types.js";
+import { DECISION_CHAIN_WAIT_MS, DecisionError } from "./decision-types.js";
 import { discoverPiResources, resolvePiResourceSelection, type PiResourceInventory } from "./pi-resource-catalog.js";
 import { decidePiCodemode, parsePiRecommendationRequest, recommendPiResources, type PiAutomaticCodemodeChoice, type PiResourceEvaluator } from "./pi-resource-recommendation.js";
 import { patchPiResourceSelection, type PiResourceSelection, type PiResourceSelectionNotice } from "./pi-session-settings.js";
@@ -55,13 +55,16 @@ export function withAutomaticPiResources(runner: StructuredRunnerAdapter, config
             .map((item) => item.id),
         };
         const request = parsePiRecommendationRequest({ prompt: context.prompt, candidates });
-        timer = setTimeout(() => abort.abort(), options.timeoutMs ?? 15_000);
         const boundedEvaluate: PiResourceEvaluator = (value, caller, signal) => new Promise((resolve, reject) => {
+          // Restart the watchdog for each decision, so an earlier resource cannot
+          // consume the configured backup's window on the next decision.
+          const decisionTimer = setTimeout(() => abort.abort(), options.timeoutMs ?? DECISION_CHAIN_WAIT_MS);
+          timer = decisionTimer;
           const cancelled = (): void => reject(new DecisionError("CANCELLED", "本地选择已取消"));
           if (signal?.aborted) { cancelled(); return; }
           signal?.addEventListener("abort", cancelled, { once: true });
           Promise.resolve().then(() => { checkActive(); return evaluate(value, caller, signal); }).then(resolve, reject)
-            .finally(() => signal?.removeEventListener("abort", cancelled));
+            .finally(() => { clearTimeout(decisionTimer); signal?.removeEventListener("abort", cancelled); });
         });
         if (!manualCodemode) automaticCodemode = await decidePiCodemode({
           prompt: request.prompt, evaluate: boundedEvaluate, caller: `pi-auto-resources:${context.session.id}`, signal: abort.signal,

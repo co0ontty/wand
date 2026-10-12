@@ -1,3 +1,4 @@
+import { themeFixtureHtml } from "./helpers/theme-fixture.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createServer } from "node:http";
@@ -77,7 +78,7 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
         mutations.push(`${req.method} ${url.pathname}`);
         const reject = (): void => { res.statusCode = 503; res.end(JSON.stringify({ error: "明确测试失败，请重试" })); };
         if (delayArchive && url.pathname === "/api/sessions/batch-archive") { releaseArchive = reject; return; }
-        if (url.pathname === "/api/workspace-tasks/t1/archive") { releaseTaskArchive = () => res.end(JSON.stringify({ id: "t1" })); return; }
+        if (url.pathname === "/api/workspace-tasks/t2/archive") { releaseTaskArchive = () => res.end(JSON.stringify({ id: "t2" })); return; }
         reject(); return;
       }
       if (url.pathname === "/api/tasks" && failList) { res.statusCode = 503; res.end(JSON.stringify({ error: "列表同步失败" })); return; }
@@ -93,7 +94,7 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
     if (url.pathname === "/app.js") { res.setHeader("content-type", "text/javascript"); res.end(readFileSync(join(temp, "app.js"))); return; }
     if (url.pathname.endsWith(".css")) { res.setHeader("content-type", "text/css"); res.end(readFileSync(join(root, "src/web-ui/content", url.pathname.slice(1)))); return; }
     res.setHeader("content-type", "text/html;charset=utf-8");
-    res.end('<!doctype html><html lang="zh-CN"><head><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/tailwind.css"><link rel="stylesheet" href="/styles.css"><style>html,body,#app,#root{height:100%;margin:0}#root{display:flex}</style></head><body><div id="app" data-react-shell="enabled"><div id="root"></div></div><div id="overlay-root"><div id="wand-react-ui-portals" class="wand-ui-portals"></div></div><script src="/app.js"></script></body></html>');
+    res.end(themeFixtureHtml('<!doctype html><html lang="zh-CN"><head><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/tailwind.css"><link rel="stylesheet" href="/styles.css"><style>html,body,#app,#root{height:100%;margin:0}#root{display:flex}</style></head><body><div id="app" data-react-shell="enabled"><div id="root"></div></div><div id="overlay-root"><div id="wand-react-ui-portals" class="wand-ui-portals"></div></div><script src="/app.js"></script></body></html>'));
   });
   server.listen(0, "127.0.0.1"); await once(server, "listening");
   const address = server.address(); assert.ok(address && typeof address === "object");
@@ -196,12 +197,34 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
         // The chat list uses the very same native menu and keyboard/confirmation protocol.
         await browser.wait('!!document.querySelector(".conversation-row")');
         const density = await browser.evaluate(`(()=>{const row=document.querySelector('.conversation-row'),avatar=row.querySelector('.ant-avatar'),body=document.querySelector('.sidebar-body'),title=document.querySelector('[data-conversation-id="dense-0"] .conversation-row-title');return {row:row.getBoundingClientRect().height,avatar:avatar.getBoundingClientRect().width,scrolls:body.scrollHeight>body.clientHeight,truncated:title.scrollWidth>title.clientWidth,overflow:body.scrollWidth>body.clientWidth+1,labels:[...document.querySelectorAll('.conversation-navigation .sidebar-nav-label')].map(n=>n.textContent)}})()`);
-        assert.equal(density.row, 56, `${mode}: compact conversation row`);
-        assert.equal(density.avatar, 32, `${mode}: small identity image`);
+        // The current shared list identity is 48px (EmployeeAvatar md / group avatar),
+        // with the existing 8px row inset; the old 32px fixture predates that change.
+        assert.equal(density.row, 64, `${mode}: compact conversation row around the shared identity`);
+        assert.equal(density.avatar, 48, `${mode}: shared list identity image`);
         assert.equal(density.scrolls, true, `${mode}: large list scrolls inside the sidebar`);
         assert.equal(density.truncated, true, `${mode}: long name does not expand the list`);
         assert.equal(density.overflow, false, `${mode}: no horizontal overflow`);
         assert.deepEqual(density.labels, ["对话", "工作区", "任务", "团队", "通讯录"]);
+        const longConversation = '[data-conversation-id="dense-0"] .conversation-row-open';
+        const longPoint = await browser.evaluate(`(()=>{const r=document.querySelector('${longConversation}').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+        await browser.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...longPoint });
+        await browser.wait('!!document.querySelector(".ant-tooltip:not(.ant-tooltip-hidden) [role=tooltip]")', "truncated conversation hover exposes the full name");
+        await browser.settle();
+        assert.match(await browser.evaluate('document.querySelector(".ant-tooltip [role=tooltip]").textContent'), /长名称会话 0/);
+        const titleTipBounds = await browser.evaluate(`(()=>{const r=document.querySelector('.ant-tooltip:not(.ant-tooltip-hidden)').getBoundingClientRect();return {left:r.left,right:r.right,viewport:innerWidth};})()`);
+        assert.ok(titleTipBounds.left >= 0 && titleTipBounds.right <= titleTipBounds.viewport + 1, `${mode}: the complete name stays inside the viewport: ${JSON.stringify(titleTipBounds)}`);
+        await browser.screenshot(join(artifacts, `long-title-${mode}.png`));
+        await browser.key("Escape");
+        await browser.wait('!document.querySelector(".ant-tooltip:not(.ant-tooltip-hidden)")');
+        assert.equal(await browser.evaluate('fixture.memory.getSnapshot().layout.sessionsDrawerOpen'), true, "tooltip Escape preserves the drawer");
+        await browser.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 1, y: 1 });
+        await browser.evaluate(`document.querySelector('${longConversation}').focus();true`);
+        await browser.wait('!!document.querySelector(".ant-tooltip:not(.ant-tooltip-hidden)")', "keyboard focus exposes the full name");
+        await browser.key("Escape");
+        await browser.wait('!document.querySelector(".ant-tooltip:not(.ant-tooltip-hidden)")');
+        assert.equal(await browser.evaluate(`document.activeElement === document.querySelector('${longConversation}')`), true, "tooltip Escape keeps the row's focus");
+        await browser.key("Tab");
+        assert.equal(await browser.evaluate('document.activeElement.classList.contains("conversation-row-more")'), true, "the tooltip adds no tab stop");
         await browser.click('.conversation-row', "right");
         await browser.wait('!!document.querySelector(".conversation-row-menu")');
         await browser.screenshot(join(artifacts, `chat-menu-${mode}.png`));
@@ -401,15 +424,19 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
         await browser.key("Escape"); await browser.key("Escape");
         assert.equal(await browser.evaluate('fixture.memory.getSnapshot().layout.sessionsDrawerOpen'), true, "closing a failed move never dismisses the drawer");
         if (mode === "desktop") {
-          await browser.evaluate("fixture.setContext({workspaceId:'w1',taskId:'t1'});true");
+          // Busy task t1 cannot be archived; the delayed acknowledgement case uses idle t2.
           await browser.click('[data-workspace-task-id=t1] .workspace-task', "right");
+          assert.equal(await browser.evaluate("Array.from(document.querySelectorAll('.workspace-task-menu [role=menuitem]')).some(n=>n.textContent.includes('归档任务'))"), false);
+          await browser.key("Escape");
+          await browser.evaluate("fixture.setContext({workspaceId:'w1',taskId:'t2'});true");
+          await browser.click('[data-workspace-task-id=t2] .workspace-task', "right");
           await clickMenuText('.workspace-task-menu', '归档任务');
           await browser.wait(`!!(${VISIBLE_DIALOG})`);
           await clickDialogAction("确认归档任务");
           assert.ok(releaseTaskArchive, "the fixture owns the pending task mutation");
-          await browser.evaluate("fixture.setContext({workspaceId:'w1',taskId:'t2'});true");
+          await browser.evaluate("fixture.setContext({workspaceId:'w1',taskId:'t1'});true");
           (releaseTaskArchive as () => void)();
-          await browser.wait("document.querySelector('[data-workspace-task-id=t1]').getAttribute('aria-busy')!=='true'", "task archive settled");
+          await browser.wait("document.querySelector('[data-workspace-task-id=t2]').getAttribute('aria-busy')!=='true'", "task archive settled");
           assert.equal(await browser.evaluate("fixture.closed"), 0, "a late archive must not close the newly opened task");
         }
         // Reduced height and the narrow right edge cannot make the last action unreachable.

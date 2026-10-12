@@ -218,7 +218,7 @@ test("可缩放的图片台只定义一次，文件预览复用同一份", () =>
   assert.deepEqual(definers, ["src/web-ui/react/image-viewer/styles.ts"], "棋盘格只应有一处定义");
   assert.match(sourceOf("src/web-ui/react/image-viewer/styles.ts"), /\.wand-media-stage\.ant-btn \{/);
   assert.match(sourceOf("src/web-ui/react/file-preview/host.tsx"), /wand-media-stage/);
-  assert.match(sourceOf("src/web-ui/react/image-viewer/host.tsx"), /wand-media-stage/);
+  assert.match(sourceOf("src/web-ui/react/image-viewer/host.tsx"), /<Image\.PreviewGroup/);
 });
 
 test("共享样式表没有接管任何被迁移的查看器控件", () => {

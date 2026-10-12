@@ -36,8 +36,8 @@ export const conversationActivityRepository = {
       if (owner.sessionId === session.id && submissions.get(key)?.phase === "sent" && !activityOperationCurrent(session, owner.operation)) completed.add(key);
     }
   },
-  session(id: string): Promise<ActivitySession> {
-    return requestJson(`${endpoint(id)}?format=chat&blockBudget=120`, { headers: { "X-Wand-Tool-Projection": "compact" } });
+  session(id: string, signal?: AbortSignal): Promise<ActivitySession> {
+    return requestJson(`${endpoint(id)}?format=chat&blockBudget=120`, { signal, headers: { "X-Wand-Tool-Projection": "compact" } });
   },
   tool(id: string, toolId: string): Promise<{ input: Record<string, unknown>; content: unknown; is_error: boolean; pending: boolean }> {
     return requestJson(`${endpoint(id)}/tool-content/${encodeURIComponent(toolId)}`);

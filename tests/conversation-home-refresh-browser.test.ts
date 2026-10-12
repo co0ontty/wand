@@ -18,7 +18,8 @@ test("home coalesces notifications with a trailing read and preserves task draft
   const temp = mkdtempSync(join(tmpdir(), "wand-home-refresh-"));
   const output = join(root, "output/web-ux-implementation-20261009/home-refresh-browser"); mkdirSync(output, { recursive: true });
   const h = conversationHarness(t), id = await h.group({ employeeIds: ["e_test_1", "e_test_2"] });
-  h.storage.saveSiliconEmployee({ ...h.storage.getSiliconEmployee("e_test_1")!, id: "e_wand_default", name: "默认伙伴（明确替身）" });
+  const builtin = h.storage.ensureDefaultSiliconEmployee();
+  h.storage.saveSiliconEmployee({ ...builtin, name: "默认伙伴（明确替身）", agents: h.storage.getSiliconEmployee("e_test_1")!.agents });
   await build({ stdin: { resolveDir: root, loader: "tsx", contents: `
     import * as React from "react";
     import { createRoot } from "react-dom/client";
@@ -44,10 +45,12 @@ test("home coalesces notifications with a trailing read and preserves task draft
       <ConversationHome visible={visible} sidebarOpen={false} onOpenSession={id=>{globalThis.homeFixture.openedSession=id;}}/></>}
     createRoot(document.getElementById('root')).render(<PortalContainerProvider container={document.getElementById('portals')}><WandUiProvider><App/></WandUiProvider></PortalContainerProvider>);
   ` }, bundle: true, platform: "browser", format: "iife", jsx: "automatic", outfile: join(temp, "app.js"), logLevel: "warning", define: { "process.env.NODE_ENV": '"production"' } });
+  await build({ entryPoints: [join(root, "src/web-ui/react/avatars/renderer.ts")], bundle: true, format: "iife", platform: "browser", minify: true, outfile: join(temp, "plush-avatar.js") });
+  writeFileSync(join(temp, "app.js"), readFileSync(join(temp, "app.js"), "utf8").replaceAll("${plushAvatarChunkSrc}", "/plush-avatar.js"));
   let version = 1, detailRequests = 0, active = 0, maxActive = 0;
   let releaseFirst: (() => void) | null = null, projectFailure = true, projectRequests = 0, writes = 0;
   let holdEmployees = true;
-  let showPriorWork = false;
+  let showPriorWork = false, legacyStatus = 404;
   const releaseEmployees: Array<() => void> = [];
   const app = express();
   app.use((req, _res, next) => { if (req.method !== "GET") writes++; next(); });
@@ -58,18 +61,21 @@ test("home coalesces notifications with a trailing read and preserves task draft
     active--; res.json(snapshot);
   });
   app.get("/api/workspaces", (_req, res) => { projectRequests++; projectFailure ? res.status(503).json({ error: "工作项目读取失败（503 测试替身），请重试。" }) : res.json(h.storage.listWorkspaces()); });
-  app.get("/api/conversations/dm_e_wand_default", (_req, res) => res.json({ ...h.service.detail("dm_e_wand_default"), ...(showPriorWork ? { messages: [{
+  app.get("/api/conversations/dm_e_wand_default", (_req, res) => res.json({ ...h.service.detail("dm_e_wand_default"), communicationSessionId: "deleted-legacy-session", ...(showPriorWork ? { messages: [{
     role: "assistant", content: [], conversationId: "dm_e_wand_default", messageId: "prior-work-fixture", createdAt: new Date().toISOString(),
     sessionLink: { sessionId: "prior-work-session-fixture", title: "改进输入区与键盘访问".repeat(8) },
-    sessionPreview: { status: "done", text: "仅用于验证已有工作入口的只读替身。" },
+    sessionPreview: { status: "running", text: "仅用于验证已有工作入口和运行反馈归属的只读替身。" },
   }] } : {}) }));
   app.get("/api/silicon-employees", async (_req, res) => {
     if (holdEmployees) await new Promise<void>(done => { releaseEmployees.push(done); });
     res.json({ employees: h.storage.listSiliconEmployees({ includeArchived: true }) });
   });
   app.get("/api/ai-teams", (_req, res) => res.json(h.storage.listAiTeams()));
+  app.get("/api/sessions/deleted-legacy-session", (_req, res) => res.status(legacyStatus).json({ error: legacyStatus === 404 ? "旧会话已删除" : "测试服务暂不可用" }));
+  app.get("/api/sessions/prior-work-session-fixture", (_req, res) => res.json({ id: "prior-work-session-fixture", status: "idle", sessionKind: "structured", messages: [], structuredState: { inFlight: true, activeRequestId: "readonly-request", turnStartedAt: "2026-10-10T04:00:00Z" } }));
   app.get("/api/*", (_req, res) => res.json({}));
   app.get("/app.js", (_req, res) => res.type("js").send(readFileSync(join(temp, "app.js"))));
+  app.get("/plush-avatar.js", (_req, res) => res.type("js").send(readFileSync(join(temp, "plush-avatar.js"))));
   for (const file of ["styles.css", "tailwind.css"]) app.get(`/${file}`, (_req, res) => res.type("css").send(readFileSync(join(root, "src/web-ui/content", file))));
   app.get("*", (req, res) => {
     if (req.path.includes("aiTeamsChunkSrc")) { res.type("js").send("/* Production chunk components are bundled into this source-only fixture. */"); return; }
@@ -157,13 +163,22 @@ test("home coalesces notifications with a trailing read and preserves task draft
     await browser.key("Escape");
     await browser.evaluate("homeFixture.select('dm_e_wand_default')");
     await browser.wait("!!document.querySelector('.conversation-continue-work')", "prior direct work continuation displayed");
+    await browser.wait("!!document.querySelector('.conversation-session-reply [data-activity-session=prior-work-session-fixture]')", "running controls owned by the linked reply");
+    assert.equal(await browser.evaluate("document.querySelectorAll('.conversation-session-activity').length"), 0, "deleted historical channels do not add false alerts or orphan controls");
+    legacyStatus = 503;
+    await browser.wait("!!document.querySelector('.conversation-session-activity .ant-alert')", "real legacy read failure remains visible");
+    legacyStatus = 404;
+    await browser.click('.conversation-session-activity .ant-alert button');
+    await browser.wait("!document.querySelector('.conversation-session-activity')", "readonly retry clears a definitively missing historical channel");
     await browser.click('.conversation-sender textarea'); await browser.send("Input.insertText", { text: "待发送的新工作草稿" });
     const continuationViewports = [];
     for (const width of [1280, 390, 320]) {
       await browser.send("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: false });
       await browser.settle();
-      assert.match(await browser.evaluate("document.querySelector('.conversation-receiver').textContent"), /新工作.*发给/);
-      assert.match(await browser.evaluate("document.querySelector('.conversation-continue-work').textContent"), /继续上一项.*改进输入区/);
+      assert.equal(await browser.evaluate("document.querySelector('.conversation-receiver').textContent"), "新工作");
+      assert.equal(await browser.evaluate("document.querySelector('.conversation-continue-work').textContent"), "继续上一项");
+      assert.match(await browser.evaluate("document.querySelector('.conversation-continue-work').getAttribute('aria-label')"), /改进输入区/);
+      assert.equal(await browser.evaluate("document.querySelector('.conversation-work-choice').getBoundingClientRect().height"), 32, "long work titles do not add composer rows");
       assert.equal(await browser.evaluate("document.documentElement.scrollWidth<=innerWidth+1"), true, "long continuation title does not overflow");
       await browser.evaluate("homeFixture.openedSession=null");
       await browser.click('.conversation-continue-work');

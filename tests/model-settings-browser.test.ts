@@ -21,7 +21,7 @@ test("local model settings use native controls for download/init/progress/retry 
       model: "base", modelSize: 147951465, downloaded: true, runtimeAvailable: false, initialized: false, busy: false, operation: null },
   };
   const calls: Array<{ path: string; body: unknown }> = [];
-  const expert = { id: "e_wand_decision_expert", name: "决策专家", systemKey: "wand-decision-expert", duty: "有界选择", prompt: "判断", avatar: "", createdAt: "now", updatedAt: "now",
+  const expert = { id: "e_wand_decision_expert", name: "石一", systemKey: "wand-decision-expert", duty: "有界选择", prompt: "判断", avatar: "", createdAt: "now", updatedAt: "now",
     agents: [{ provider: "pi", engine: "sdk", model: "wand-decision/laya", mode: "default", kind: "structured", thinkingEffort: "off" },
       { provider: "pi", engine: "sdk", model: "wand-openrouter-free/auto", mode: "default", kind: "structured", thinkingEffort: "off" }] };
   await build({ stdin: { resolveDir: root, loader: "tsx", contents: `
@@ -40,7 +40,11 @@ test("local model settings use native controls for download/init/progress/retry 
       if (req.method === "PUT") { let text = ""; for await (const chunk of req) text += chunk; const body = JSON.parse(text); calls.push({ path: req.url, body }); expert.agents = body.agents; }
       res.end(JSON.stringify(expert)); return;
     }
-    if (req.url === "/api/models") { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ models: [], piModels: [] })); return; }
+    if (req.url === "/api/models") {
+      res.setHeader("content-type", "application/json");
+      // A real configured catalog advertises the free selector; do not depend on a different candidate's current value.
+      res.end(JSON.stringify({ models: [], piModels: [{ id: "wand-openrouter-free/auto", label: "Wand 免费分组" }] })); return;
+    }
     if (req.url?.startsWith("/api/local-models")) {
       res.setHeader("content-type", "application/json");
       if (req.method !== "GET") {
@@ -112,13 +116,13 @@ test("local model settings use native controls for download/init/progress/retry 
     assert.equal(status.laya.enabled, false);
     await evaluate("document.querySelector('[role=switch][aria-label=\"启用 LAYA 本地决策\"]').click()");
     await wait("document.querySelector('[role=switch]').getAttribute('aria-checked')==='true'"); assert.equal(status.laya.enabled, true);
-    status.laya.hardware = { suitable: false, code: "memory", message: "当前机器性能不够，请配置「决策专家」调用链。", memoryGiB: 4, availableGiB: 1, cpuCount: 2, minimumMemoryGiB: 8 };
+    status.laya.hardware = { suitable: false, code: "memory", message: "当前机器性能不够，请配置「石一」调用链。", memoryGiB: 4, availableGiB: 1, cpuCount: 2, minimumMemoryGiB: 8 };
     status.laya.supported = false;
     await clickText("刷新状态"); await wait("document.body.textContent.includes('当前机器性能不够')");
-    await clickText("配置「决策专家」调用链");
+    await clickText("配置「石一」调用链");
     await wait("document.body.textContent.includes('Wand 本地决策模型 · LAYA')");
     assert.equal(await evaluate("document.body.textContent.includes('免费分组')"), true);
-    const primary = "document.querySelector('[aria-label=\"决策专家 首选模型\"]')";
+    const primary = "document.querySelector('[aria-label=\"石一 首选模型\"]')";
     await clickElement(primary);
     await clickElement("[...document.querySelectorAll('[role=option]')].find(n=>n.textContent==='Wand 免费分组')");
     await wait("document.querySelector('[data-candidate-index=\"0\"]').textContent.includes('Wand 免费分组')");

@@ -1,6 +1,7 @@
 import type { Express } from "express";
+import { DECISION_EXPERT_NAME } from "./decision-expert-identity.js";
 import type { DecisionService } from "./decision-service.js";
-import { DecisionError } from "./decision-types.js";
+import { DECISION_CHAIN_WAIT_MS, DecisionError } from "./decision-types.js";
 import { discoverPiResources, resolvePiResourceSelection } from "./pi-resource-catalog.js";
 import { parsePiRecommendationRequest, recommendPiResources } from "./pi-resource-recommendation.js";
 import type { StructuredSessionManager } from "./structured-session-manager.js";
@@ -39,17 +40,21 @@ export function registerPiRecommendationRoute(app: Express, deps: {
       }
       const status = deps.decisions?.status();
       if (!deps.decisions || !status?.enabled || !status.supported || !status.configured || settings.localDecision === false) {
-        const notice = status && "notice" in status && typeof status.notice === "string" ? status.notice : "本地决策未启用或不可用，原选择未改变；请配置「决策专家」调用链。";
+        const notice = status && "notice" in status && typeof status.notice === "string" ? status.notice : `本地决策未启用或不可用，原选择未改变；请配置「${DECISION_EXPERT_NAME}」调用链。`;
         throw new DecisionError("UNAVAILABLE", notice, 503);
       }
       const input = parsePiRecommendationRequest(req.body);
       if (active.has(id)) throw new DecisionError("BUSY", "本会话正在推荐，请等待当前请求完成。", 409);
       active.add(id); owns = true;
-      timer = setTimeout(() => abort.abort(), 15_000);
       const inventory = await discoverPiResources(deps.config, deps.structured.get(id)!.cwd);
       resolvePiResourceSelection(inventory, input.candidates);
       const result = await recommendPiResources({ ...input, catalog: inventory.catalog,
-        evaluate: (value, caller, signal) => deps.decisions!.evaluate(value, caller, signal),
+        evaluate: async (value, caller, signal) => {
+          const decisionTimer = setTimeout(() => abort.abort(), DECISION_CHAIN_WAIT_MS);
+          timer = decisionTimer;
+          try { return await deps.decisions!.evaluate(value, caller, signal); }
+          finally { clearTimeout(decisionTimer); }
+        },
         caller: `pi-recommend:${id}`, signal: abort.signal });
       const latest = deps.structured.get(id);
       if (!latest || latest.archived || latest.provider !== "pi" || latest.piSettings?.localDecision === false

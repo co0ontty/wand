@@ -1,5 +1,5 @@
 import { type OpenRouterFreeModelsService } from "./openrouter-free-models.js";
-import { defaultModelGroupSelector, isAutoAssignSelector, resolveModelGroupModels } from "./model-groups.js";
+import { isAutoAssignSelector, resolveModelGroupModels } from "./model-groups.js";
 import { resolveAutoAssign } from "./model-auto-assign.js";
 import { withModelGroups } from "./model-group-runner.js";
 import { classifyStructuredFailure, hasStructuredExecutionProgress, type StructuredFailure } from "./structured-failure.js";
@@ -19,8 +19,11 @@ import { truncateMessagesForTransport } from "./message-truncator.js";
 import { stampNewToolUseTimes } from "./tool-use-timestamps.js";
 import { buildChildEnv } from "./env-utils.js";
 import { getErrorMessage } from "./error-utils.js";
-import { getDefaultModelForProvider } from "./config.js";
+import { compactTransportAvatar } from "./fixed-employee-avatar.js";
+import { fallbackProviderModel } from "./session-model.js";
+import { isLocalDecisionModel } from "./decision-expert-identity.js";
 import type { WandTaskAgent } from "./task-types.js";
+import { selectEmployeeCandidate } from "./silicon-employee-dispatch.js";
 import { recordIterationPrompt } from "./iteration-log.js";
 import { startEmployeeKnowledgeRunner } from "./employee-knowledge.js";
 import { CoreRunner } from "./core-runner.js";
@@ -39,6 +42,7 @@ import {
   shouldGenerateSessionTopicFromInput,
 } from "./session-topic.js";
 import { resolveSessionCwd } from "./session-cwd.js";
+import { isScheduledConversationSession } from "./conversation-session-preview.js";
 import { isSessionProvider, providerCliCommand } from "./session-provider.js";
 import { resolveSessionProvider, resolveSystemAiContext } from "./session-ai-context.js";
 import { readNativeSessionTitle } from "./native-session-title.js";
@@ -83,7 +87,6 @@ import {
 } from "./structured-provider-common.js";
 import { TurnQuietHeartbeat } from "./turn-heartbeat.js";
 import { enrichStructuredMessages, WAND_PROTOCOL_VERSION } from "./structured-client-protocol.js";
-import { RETENTION_IDLE_MS } from "./retention.js";
 
 
 export interface StructuredSessionManagerRunners {
@@ -273,6 +276,13 @@ function recoveredCommandLabel(runner: SessionRunner | undefined): string {
 
 
 const STREAM_EMIT_DEBOUNCE_MS = 16;
+
+/**
+ * 员工候选链的启动看门狗：CLI 进程起来后这么久没有任何协议事件，就认定这一候选本轮没有开始
+ * 执行（无输出、无用量、无工具调用），按未接受输入处理并沿候选链降级，而不是让会话无限停在
+ * 「运行中」。取 3 分钟：慢模型的首个事件与真正卡死之间留出足够余量。
+ */
+const EMPLOYEE_CANDIDATE_STARTUP_TIMEOUT_MS = 180_000;
 /** Min interval between full saveSession() calls for an in-progress streaming turn.
  *  saveSession serializes the entire messages array, so doing it on every NDJSON
  *  event is N². close-path always calls saveSession unconditionally to take the
@@ -283,7 +293,6 @@ const STREAM_EMIT_DEBOUNCE_MS = 16;
 // second on the event loop.
 const STREAM_SAVE_THROTTLE_MS = 1_000;
 const DETACHED_RECOVERY_RETRY_MS = 500;
-const ARCHIVE_AFTER_MS = RETENTION_IDLE_MS;
 
 interface StreamingCheckpointDirty {
   metadata: boolean;
@@ -346,6 +355,27 @@ function shouldAutoApproveForMode(mode: ExecutionMode): boolean {
   return mode === "full-access" || mode === "managed" || mode === "auto-edit";
 }
 
+/** Quiet heartbeat is a status ping, not another copy of the transcript or uploaded avatar. */
+export function structuredQuietStatusData(session: SessionSnapshot): Record<string, unknown> {
+  return {
+    sessionKind: "structured",
+    status: session.status,
+    exitCode: session.exitCode,
+    structuredState: normalizeTurnAnchors(session.structuredState),
+    provider: session.provider,
+    runner: session.runner,
+    selectedModel: session.selectedModel,
+    thinkingEffort: session.thinkingEffort,
+    employeeId: session.employeeId,
+    employeeName: session.employeeName,
+    employeeAvatar: compactTransportAvatar(session.employeeAvatar),
+    employeeCandidateIndex: session.employeeCandidateIndex,
+    title: session.title,
+    description: session.description,
+    summary: session.description ?? session.summary,
+  };
+}
+
 function buildStructuredOutputPayload(snapshot: SessionSnapshot): ProcessEvent["data"] {
   return {
     wandProtocolVersion: WAND_PROTOCOL_VERSION,
@@ -360,7 +390,7 @@ function buildStructuredOutputPayload(snapshot: SessionSnapshot): ProcessEvent["
     thinkingEffort: snapshot.thinkingEffort,
     employeeId: snapshot.employeeId,
     employeeName: snapshot.employeeName,
-    employeeAvatar: snapshot.employeeAvatar,
+    employeeAvatar: compactTransportAvatar(snapshot.employeeAvatar),
     employeeCandidateIndex: snapshot.employeeCandidateIndex,
     title: snapshot.title,
     description: snapshot.description,
@@ -594,7 +624,6 @@ export class StructuredSessionManager {
   private readonly seenIdempotencyKeys = new Map<string, number>();
   private readonly relayHandlers = new Map<string, StructuredRelayHandler>();
   private emitEvent: ((event: ProcessEvent) => void) | null = null;
-  private archiveTimer: NodeJS.Timeout | null = null;
   /**
    * 静默期心跳：回合在飞且连续 TURN_QUIET_HEARTBEAT_MS 没有任何事件时，用现有的
    * status 事件重发一次权威快照（含最新 turn 锚点）。timer 只在 inFlight 期间存在。
@@ -603,6 +632,8 @@ export class StructuredSessionManager {
   private readonly topicCoordinator = new SessionTopicCoordinator();
   private readonly nativeTitles = new SessionNativeTitleTracker();
   private readonly streamEmitTimers = new Set<NodeJS.Timeout>();
+  /** 员工候选链的「本轮还没开始执行」看门狗，按会话一个；首个协议事件或回合收敛即撤销。 */
+  private readonly candidateStartupWatchdogs = new Map<string, NodeJS.Timeout>();
   private readonly claudeCliRunner: StructuredRunnerAdapter;
   private readonly codexRunner: StructuredRunnerAdapter;
   private readonly openCodeRunner: StructuredRunnerAdapter;
@@ -630,7 +661,7 @@ export class StructuredSessionManager {
     runners: StructuredSessionManagerRunners = {},
     private readonly execHost?: StructuredExecHost,
     private readonly decisionRuntime: () => DecisionRuntimeAccess | null = () => null,
-    openRouter?: OpenRouterFreeModelsService,
+    private readonly openRouter?: OpenRouterFreeModelsService,
     /** 「智能分配」专用的本地决策入口：只有真正能跑时才注入，没注入则用系统员工回退。 */
     private readonly autoAssignEvaluate: () => DecisionRuntimeAccess["evaluate"] = () => undefined,
   ) {
@@ -708,26 +739,6 @@ export class StructuredSessionManager {
       // must still know there is a daemon run to adopt.
       if (!recoverableDetachedRun) this.storage.saveSession(restored);
     }
-    this.archiveExpiredSessions();
-    this.archiveTimer = setInterval(() => {
-      try { this.archiveExpiredSessions(); } catch (err) {
-        console.error(`[StructuredSessionManager] archive scan failed: ${String(err)}`);
-      }
-    }, 60 * 1000);
-    this.archiveTimer.unref?.();
-  }
-
-  private archiveExpiredSessions(): void {
-    const now = Date.now();
-    for (const session of this.sessions.values()) {
-      if (session.archived || session.status === "running") continue;
-      const referenceTime = session.endedAt ?? session.startedAt;
-      const endedAtMs = Date.parse(referenceTime);
-      if (!Number.isFinite(endedAtMs) || now - endedAtMs < ARCHIVE_AFTER_MS) continue;
-      session.archived = true;
-      session.archivedAt = new Date(now).toISOString();
-      this.storage.updateSessionRuntimeMetadata(session);
-    }
   }
 
   setEventEmitter(emitEvent: (event: ProcessEvent) => void): void {
@@ -778,10 +789,6 @@ export class StructuredSessionManager {
     // 静默心跳不跨服务关闭存活（会话级 timer 不允许泄漏）。
     this.turnHeartbeat.dispose();
 
-    if (this.archiveTimer) {
-      clearInterval(this.archiveTimer);
-      this.archiveTimer = null;
-    }
     if (this.detachedRecoveryRetryTimer) {
       clearTimeout(this.detachedRecoveryRetryTimer);
       this.detachedRecoveryRetryTimer = null;
@@ -832,6 +839,8 @@ export class StructuredSessionManager {
     this.autoAssignPending.clear();
     for (const timer of this.streamCheckpointTimers.values()) clearTimeout(timer);
     this.streamCheckpointTimers.clear();
+    for (const timer of this.candidateStartupWatchdogs.values()) clearTimeout(timer);
+    this.candidateStartupWatchdogs.clear();
     this.streamCheckpointDirty.clear();
     this.lastStreamSaveAt.clear();
     this.topicCoordinator.clear();
@@ -1370,6 +1379,13 @@ export class StructuredSessionManager {
     return s ? withSummary(s) : null;
   }
 
+  getSlim(id: string): SessionSnapshot | null {
+    const session = this.get(id);
+    if (!session) return null;
+    const { messages: _messages, output: _output, ...metadata } = session;
+    return { ...metadata, output: "" };
+  }
+
   setSessionWorkspace(id: string, membership: Pick<SessionSnapshot, "workspaceId" | "workspaceTaskId">): void {
     const updated = { ...this.requireSession(id), ...membership };
     this.sessions.set(id, updated);
@@ -1443,6 +1459,9 @@ export class StructuredSessionManager {
     if (this.disposed || !session || !input.trim()) return;
     // 迭代提示词记录：和会话标题共用同一套「有没有信息量」判断，用户不用多做一步。
     recordIterationPrompt(this.storage, session, input, "session");
+    // The plan names this execution. Preserve that name and avoid a second model
+    // call merely to rename background work before it reaches its chosen employee.
+    if (isScheduledConversationSession(session)) return;
     const blockedTitles = sessionTopicBlocklistForSnapshot(session, this.storage);
     // CLI 自己起了名字就归它，模型标题与输入首行都不再覆盖；取不到原生标题才走系统硅基员工。
     const hasNativeTitle = this.nativeTitles.has(id);
@@ -1460,7 +1479,7 @@ export class StructuredSessionManager {
       input,
       cwd: session.cwd,
       language: this.config.language,
-      ai: resolveSystemAiContext(session, this.config, this.storage.getSystemSiliconEmployee()),
+      ai: resolveSystemAiContext(session, this.config, this.storage.getSystemSiliconEmployee(), this.openRouter),
       readNativeTitle: () => readNativeSessionTitle(
         resolveSessionProvider(session),
         session.claudeSessionId,
@@ -1645,12 +1664,15 @@ export class StructuredSessionManager {
   }
 
   private employeeCandidateModel(agent: WandTaskAgent): string | null {
-    return agent.model === "default"
-      ? defaultModelGroupSelector(this.config.modelGroups, agent.provider, getDefaultModelForProvider(this.config, agent.provider))
-        || getDefaultModelForProvider(this.config, agent.provider) || null : agent.model;
+    return agent.model === "default" ? fallbackProviderModel(this.config, agent.provider) ?? null : agent.model;
   }
 
-  /** Only an unstarted employee conversation may replay its explicitly rejected first input. */
+  /**
+   * A turn the provider rejected before it accepted any input may replay on the next candidate.
+   * Same-tool switches carry the conversation as it stood before this turn — history plus the native
+   * session it already had — so they also cover an already-started chat. A cross-tool switch cannot
+   * hand that context over, so it stays limited to conversations that have not produced a turn yet.
+   */
   private retryEmployeeCandidate(
     id: string,
     original: SessionSnapshot,
@@ -1659,28 +1681,32 @@ export class StructuredSessionManager {
   ): Promise<SessionSnapshot> | null {
     // Team runs own candidate scheduling; keep the snapshot without a second retry loop.
     if (original.automationId?.startsWith("ai-team:") || !(error instanceof UnacceptedStructuredInputError)) return null;
+    if (!original.employeeId || !error.failure.retryable) return null;
     const candidates = original.employeeCandidates ?? [];
     const index = original.employeeCandidateIndex ?? 0;
-    const nextIndex = index + 1;
-    if (!original.employeeId || (original.messages?.length ?? 0) !== 0 || original.claudeSessionId
-      || !error.failure.retryable || nextIndex >= candidates.length) return null;
     const selected = candidates[index];
+    let nextIndex = index + 1;
+    // LAYA has no chat adapter; keep original candidate indices while skipping bounded-only models.
+    while (nextIndex < candidates.length && isLocalDecisionModel(candidates[nextIndex]!.model)) nextIndex += 1;
+    if (nextIndex >= candidates.length) return null;
     // Explicit tool/model changes, including changes during the pending request, remain authoritative.
     if (!selected || original.provider !== selected.provider
       || (original.structuredState?.engine && (original.structuredState.engine === "core" ? "sdk" : "cli") !== (selected.engine ?? "cli"))
       || (original.selectedModel && original.selectedModel !== this.employeeCandidateModel(selected))) return null;
+    const next = candidates[nextIndex]!;
+    const sameTool = next.provider === selected.provider && (next.engine ?? "cli") === (selected.engine ?? "cli");
+    if (!sameTool && ((original.messages?.length ?? 0) !== 0 || original.claudeSessionId)) return null;
     const current = this.sessions.get(id);
     if (!current || current.status !== "running" || current.provider !== original.provider
       || current.selectedModel !== original.selectedModel || current.mode !== original.mode
       || current.piSettings !== original.piSettings) return null;
-    const next = candidates[nextIndex]!;
     const runner = resolveStructuredRunner(next.provider, undefined);
     const model = this.employeeCandidateModel(next);
-    const sameTool = next.provider === original.provider && (next.engine ?? "cli") === (selected.engine ?? "cli");
     const piSettings = next.provider !== "pi" ? undefined : sameTool ? current.piSettings
       : next.engine === "sdk" ? defaultPiSessionSettings(this.config.harness?.compaction?.enabled ?? true)
       : { ...(this.storage.getPiSessionDefaults() ?? defaultPiCliSessionSettings()),
         autoCompaction: this.config.harness?.compaction?.enabled ?? true };
+    const carried = current.structuredState as StructuredSessionState | undefined;
     const retry: SessionSnapshot = {
       ...current,
       provider: next.provider,
@@ -1692,21 +1718,25 @@ export class StructuredSessionManager {
       thinkingEffort: next.thinkingEffort,
       employeeCandidateIndex: nextIndex,
       piSettings,
-      claudeSessionId: null,
-      harnessContext: undefined,
-      harnessExtensionState: undefined,
-      messages: [],
-      output: "",
+      // Replay resumes the state this turn started from, not what the rejected attempt produced:
+      // its native session may already hold the input we are about to send again.
+      claudeSessionId: sameTool ? original.claudeSessionId : null,
+      harnessContext: sameTool ? original.harnessContext : undefined,
+      harnessExtensionState: sameTool ? original.harnessExtensionState : undefined,
+      messages: sameTool ? original.messages ?? [] : [],
+      output: sameTool ? original.output ?? "" : "",
       status: "idle",
       exitCode: null,
       endedAt: null,
       structuredState: {
         ...defaultStructuredState(next.provider, runner),
+        ...(sameTool ? { engine: carried?.engine, engineReason: carried?.engineReason,
+          contextUsage: carried?.contextUsage, compactions: carried?.compactions } : {}),
         model: model ?? undefined,
       },
     };
     this.logger?.appendStructuredSpawn(id, { kind: "candidate-fallback", failureKind: error.failure.kind,
-      fromProvider: original.provider, toProvider: next.provider, candidateIndex: nextIndex });
+      fromProvider: original.provider, toProvider: next.provider, candidateIndex: nextIndex, sameTool });
     this.sessions.set(id, retry);
     this.saveAuthoritativeSession(retry);
     // sendMessage publishes the new running snapshot synchronously; do not expose a transient idle slot.
@@ -1847,7 +1877,7 @@ export class StructuredSessionManager {
           prompt,
           groups: this.config.modelGroups,
           evaluate: this.autoAssignEvaluate(),
-          ai: resolveSystemAiContext(session, this.config, this.storage.getSystemSiliconEmployee()),
+          ai: resolveSystemAiContext(session, this.config, this.storage.getSystemSiliconEmployee(), this.openRouter),
           cwd: session.cwd,
           language: this.config.language,
         });
@@ -1955,13 +1985,21 @@ export class StructuredSessionManager {
         throw new Error(`会话 runner ${String(runner)} 与 provider ${provider} 不匹配。`);
       }
       if (provider === "codex") {
-        await this.runCodexStreaming(id, updated, prompt, requestId);
+        await this.runStructuredStreaming(id, updated, prompt, requestId, {
+          runner: this.codexRunner, provider: "codex", commandLabel: "codex exec", logKind: "codex-exec",
+        });
       } else if (provider === "opencode") {
-        await this.runOpenCodeStreaming(id, updated, prompt, requestId);
+        await this.runStructuredStreaming(id, updated, prompt, requestId, {
+          runner: this.openCodeRunner, provider: "opencode", commandLabel: "opencode run", logKind: "opencode-run",
+          installHint: "请安装 opencode-ai，或重跑 `wand service:install` 刷新服务 PATH",
+        });
       } else if (provider === "grok") {
-        await this.runGrokStreaming(id, updated, prompt, requestId);
+        await this.runStructuredStreaming(id, updated, prompt, requestId, {
+          runner: this.grokRunner, provider: "grok", commandLabel: "grok", logKind: "grok-headless",
+          installHint: "请安装 Grok Build CLI，或重跑 `wand service:install` 刷新服务 PATH",
+        });
       } else if (provider === "qoder") {
-        await this.runClaudeStreaming(id, updated, prompt, requestId, {
+        await this.runStructuredStreaming(id, updated, prompt, requestId, {
           runner: this.qoderRunner,
           provider: "qoder",
           commandLabel: "qodercli -p",
@@ -1989,14 +2027,14 @@ export class StructuredSessionManager {
         };
         this.sessions.set(id, enginePatched);
         if (resolution.engine === "core") {
-          await this.runClaudeStreaming(id, enginePatched, prompt, requestId, {
+          await this.runStructuredStreaming(id, enginePatched, prompt, requestId, {
             runner: this.coreRunner,
             provider: "pi",
             commandLabel: "Wand Agent（SDK）",
             logKind: "pi-core",
           });
         } else {
-          await this.runClaudeStreaming(id, enginePatched, prompt, requestId, {
+          await this.runStructuredStreaming(id, enginePatched, prompt, requestId, {
             runner: this.piRunner,
             provider: "pi",
             commandLabel: "pi --mode json --print",
@@ -2005,7 +2043,7 @@ export class StructuredSessionManager {
           });
         }
       } else if (provider === "gemini") {
-        await this.runClaudeStreaming(id, updated, prompt, requestId, {
+        await this.runStructuredStreaming(id, updated, prompt, requestId, {
           runner: this.geminiRunner,
           provider: "gemini",
           commandLabel: "gemini -p --output-format stream-json",
@@ -2013,7 +2051,7 @@ export class StructuredSessionManager {
           installHint: "请安装 @google/gemini-cli ≥ 0.11（`npm i -g @google/gemini-cli@latest`），或重跑 `wand service:install` 刷新服务的 PATH",
         });
       } else {
-        await this.runClaudeStreaming(id, updated, cliClaudePrompt, requestId);
+        await this.runStructuredStreaming(id, updated, cliClaudePrompt, requestId);
       }
       const finished = this.requireSession(id);
       return finished;
@@ -2233,33 +2271,69 @@ export class StructuredSessionManager {
     if (!isSessionProvider(provider)) throw new Error("请选择有效的执行工具。");
     if (engine !== undefined && engine !== "cli" && engine !== "sdk") throw new Error("执行引擎必须是 cli 或 sdk。");
     if (engine === "sdk" && provider !== "pi") throw new Error("Wand Agent 只支持 Pi 结构化会话。");
+    this.requireBlankSessionSelection(session);
+    const updated = this.blankSessionToolSelection(session, provider, engine);
+    if (updated === session) return session;
+    return this.saveBlankSessionSelection(updated);
+  }
+
+  /** 首次发送前显式选择真实员工；同一会话、目录和未发送输入的归属不变。 */
+  setSessionEmployee(sessionId: string, employeeId: string): SessionSnapshot {
+    const session = this.requireSession(sessionId);
+    this.requireBlankSessionSelection(session);
+    const employee = this.storage.getSiliconEmployee(employeeId);
+    if (!employee || employee.archivedAt) throw new Error("硅基员工不存在或已归档。");
+    const selected = selectEmployeeCandidate(employee);
+    if (session.employeeId === employee.id) return session;
+    const role: SessionSnapshot = {
+      ...session,
+      employeeId: employee.id,
+      employeeName: employee.name,
+      employeeAvatar: employee.avatar,
+      systemPrompt: employee.prompt,
+      runtimeSystemPrompt: undefined,
+      employeeCandidates: employee.agents,
+      employeeCandidateIndex: selected.index,
+    };
+    return this.saveBlankSessionSelection(this.blankSessionToolSelection(
+      role, selected.agent.provider, selected.agent.engine ?? "cli", selected.index,
+    ));
+  }
+
+  private requireBlankSessionSelection(session: SessionSnapshot): void {
     if (session.status !== "idle" || session.archived || session.structuredState?.inFlight ||
-        this.pendingRunnerExecutions.has(sessionId) || session.claudeSessionId ||
+        session.structuredState?.activeRequestId ||
+        this.pendingRunnerExecutions.has(session.id) || session.claudeSessionId ||
         session.resumedFromSessionId || session.autoRecovered ||
         (session.messages?.length ?? 0) > 0 || (session.queuedMessages?.length ?? 0) > 0 ||
         session.automationId || (session.sessionSource && session.sessionSource !== "interactive") ||
         this.relayHandlerFor(session)) {
-      throw new Error("只有尚未发送消息的新建空白对话可以更换工具。");
+      throw new Error("只有尚未发送消息的新建空白对话可以更换员工或工具。");
     }
+  }
+
+  private blankSessionToolSelection(
+    session: SessionSnapshot, provider: SessionProvider, engine?: "cli" | "sdk", selectedCandidateIndex?: number,
+  ): SessionSnapshot {
     const candidates = session.employeeCandidates ?? [];
     const currentCandidate = candidates[session.employeeCandidateIndex ?? 0];
     const currentEngine = session.provider === "pi" && (session.structuredState?.engine === "core"
       || (!session.structuredState?.engine && currentCandidate?.provider === "pi" && currentCandidate.engine === "sdk")) ? "sdk" : "cli";
     // 旧客户端只发 provider 时，同 provider 保持原引擎；显式 Pi 选项始终传 cli。
     const targetEngine = provider === "pi" ? engine ?? (session.provider === provider ? currentEngine : "cli") : "cli";
-    if (session.provider === provider && currentEngine === targetEngine) return session;
+    if (selectedCandidateIndex === undefined && session.provider === provider && currentEngine === targetEngine) return session;
     if (targetEngine === "sdk" && session.provider === "pi" && (session.piSettings?.resources?.skills.length
       || session.piSettings?.resources?.mcpServers.length || session.piSettings?.lockedSkills?.length
       || session.piSettings?.autoResources || session.piSettings?.codemodeOverride !== undefined)) {
       throw new Error("Wand Agent 不支持会话级 Skills / MCP、自动选择或 CodeMode 覆盖；请先在 Pi 设置中关闭这些选项再切换。");
     }
     const resolution = provider === "pi" ? this.resolveNewSessionPiEngine(targetEngine) : undefined;
-    const candidateIndex = candidates.findIndex((candidate) => candidate.provider === provider
+    const candidateIndex = selectedCandidateIndex ?? candidates.findIndex((candidate) => candidate.provider === provider
       && (candidate.engine ?? "cli") === targetEngine);
     const candidate = candidateIndex >= 0 ? candidates[candidateIndex] : undefined;
     const runner = defaultStructuredRunner(provider);
     const model = candidate && candidate.model !== "default" ? candidate.model
-      : defaultModelGroupSelector(this.config.modelGroups, provider, getDefaultModelForProvider(this.config, provider)) || getDefaultModelForProvider(this.config, provider) || null;
+      : fallbackProviderModel(this.config, provider) ?? null;
     const effort = normalizeThinkingEffort(candidate?.thinkingEffort ?? this.config.defaultThinkingEffort);
     const thinkingEffort = effort?.includes(":") && !effort.startsWith(`${provider}:`) ? "off" : effort;
     const requestedMode = candidate?.mode ?? session.mode;
@@ -2267,7 +2341,7 @@ export class StructuredSessionManager {
       (requestedMode === "auto-edit" && ["opencode", "grok", "pi"].includes(provider));
     const mode: ExecutionMode = provider === "codex" ? "full-access"
       : unsupportedMode ? "default" : requestedMode;
-    const updated: SessionSnapshot = {
+    return {
       ...session,
       provider,
       runner,
@@ -2285,14 +2359,17 @@ export class StructuredSessionManager {
       structuredState: { ...defaultStructuredState(provider, runner), model: model ?? undefined,
         ...(resolution ? { engine: resolution.engine, engineReason: resolution.reason } : {}) },
     };
-    // 身份、知识归属、任务/目录和候选快照不变；只更新本会话的执行参数。
+  }
+
+  private saveBlankSessionSelection(updated: SessionSnapshot): SessionSnapshot {
     this.storage.saveSession(updated);
-    this.sessions.set(sessionId, updated);
+    this.sessions.set(updated.id, updated);
     this.emit({
       type: "status",
-      sessionId,
+      sessionId: updated.id,
       data: { ...(buildStructuredOutputPayload(updated) as Record<string, unknown>), command: updated.command,
-        mode, autoApprovePermissions: updated.autoApprovePermissions },
+        mode: updated.mode, autoApprovePermissions: updated.autoApprovePermissions,
+        employeeAvatar: updated.employeeAvatar },
     });
     return updated;
   }
@@ -2683,9 +2760,7 @@ export class StructuredSessionManager {
       type: "status",
       sessionId,
       data: {
-        ...(buildStructuredOutputPayload(session) as Record<string, unknown>),
-        status: session.status,
-        exitCode: session.exitCode,
+        ...structuredQuietStatusData(session),
       },
     });
     return true;
@@ -2781,501 +2856,8 @@ export class StructuredSessionManager {
     session.approvalStats = stats;
   }
 
-  // ---------------------------------------------------------------------------
-  // Streaming codex exec --json execution
-  // ---------------------------------------------------------------------------
-
-  private async runCodexStreaming(
-    sessionId: string,
-    session: SessionSnapshot,
-    prompt: string,
-    requestId: string,
-  ): Promise<void> {
-    let emitTimer: ReturnType<typeof setTimeout> | null = null;
-    const syncSnapshot = (turnState: StructuredRunnerTurnState): void => {
-      const current = this.currentSessionForRequest(sessionId, requestId);
-      if (!current) return;
-      const turn: ConversationTurn = {
-        role: "assistant",
-        content: this.compactContentBlocks([...turnState.blocks], turnState.result),
-        usage: turnState.usage,
-      };
-      const messages = upsertAssistantMessage(current.messages, turn);
-      const patched: SessionSnapshot = {
-        ...current,
-        claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
-        messages,
-        output: turnState.result || current.output,
-        structuredState: this.noteTurnActivity(sessionId, {
-          ...(current.structuredState as StructuredSessionState),
-          model: turnState.model ?? current.structuredState?.model,
-        }),
-      };
-      this.sessions.set(sessionId, patched);
-      this.saveStreamingSnapshot(patched);
-    };
-    const flushEmit = (): void => {
-      if (emitTimer) this.clearStreamEmitTimer(emitTimer);
-      emitTimer = null;
-      const current = this.currentSessionForRequest(sessionId, requestId);
-      if (current) {
-        this.emit({
-          type: "output",
-          sessionId,
-          data: buildIncrementalStructuredPayload(current, this.config.cardDefaults ?? {}),
-        });
-      }
-    };
-    const scheduleEmit = (): void => {
-      if (!emitTimer) {
-        emitTimer = this.trackStreamEmitTimer(setTimeout(flushEmit, STREAM_EMIT_DEBOUNCE_MS));
-      }
-    };
-
-    const execution = startEmployeeKnowledgeRunner(this.storage, this.codexRunner, {
-      session,
-      prompt,
-      env: buildChildEnv(this.config.inheritEnv !== false),
-    }, {
-      isActive: () => this.isCurrentRequest(sessionId, requestId),
-      onStdout: (text) => this.logger?.appendStructuredStdout(sessionId, text),
-      onStderr: (text) => this.logger?.appendStructuredStderr(sessionId, text),
-      onEvent: (event) => this.logger?.appendStreamEvent(sessionId, event),
-      onUpdate: (turnState) => {
-        syncSnapshot(turnState);
-        scheduleEmit();
-      },
-    });
-    this.pendingRunnerExecutions.set(sessionId, execution);
-    this.logger?.appendStructuredSpawn(sessionId, {
-      kind: "codex-exec",
-      provider: "codex",
-      pid: execution.pid,
-      cwd: session.cwd,
-      args: execution.args,
-      prompt: prompt.slice(0, 2048),
-      promptLength: prompt.length,
-      threadId: session.claudeSessionId,
-      spawnedAt: execution.spawnedAt,
-    });
-
-    let result;
-    try {
-      result = await execution.completion;
-    } finally {
-      const released = this.releasePendingRunnerExecution(sessionId, execution);
-      if (released) this.cancelStreamingCheckpointTimer(sessionId);
-    }
-    if (!this.isCurrentRequest(sessionId, requestId)) {
-      if (emitTimer) this.clearStreamEmitTimer(emitTimer);
-      return;
-    }
-    flushEmit();
-
-    this.throwUnacceptedInput(sessionId, result, "codex exec",
-      "（PATH 中找不到 codex 可执行文件；请确认 codex 已安装，或重跑 `wand service:install` 刷新服务的 PATH）");
-
-    this.logger?.appendStructuredSpawn(sessionId, {
-      kind: "codex-exec-close",
-      pid: execution.pid,
-      spawnedAt: execution.spawnedAt,
-      closedAt: new Date().toISOString(),
-      exitCode: result.exitCode,
-      stderrTail: result.stderr.slice(-2048),
-      codexErrors: result.errors,
-      codexTurnFailed: result.primaryError,
-    });
-    const current = this.currentSessionForRequest(sessionId, requestId);
-    if (!current) return;
-
-    const interruptedByUser = this.interruptedWith.has(sessionId);
-    const interruptPrompt = this.interruptedWith.get(sessionId);
-    if ((result.primaryError || (result.exitCode !== 0 && result.exitCode !== null) || result.signal) && !interruptedByUser) {
-      const errorText = this.formatStructuredExitError(
-        "codex exec",
-        result.exitCode,
-        result.signal,
-        { stderr: result.stderr, primary: result.primaryError, extras: result.errors },
-      );
-      const failed = this.finishStructuredFailure(
-        current,
-        typeof result.exitCode === "number" ? result.exitCode : 1,
-        errorText,
-        result.state,
-      );
-      this.sessions.set(sessionId, failed);
-      this.saveAuthoritativeSession(failed);
-      this.emitStructuredSnapshot(failed);
-      this.emitStructuredSnapshot(failed, "ended");
-      throw new PersistedStructuredRunnerError(errorText);
-    }
-
-    const messages = this.buildCompletedAssistantMessages(current, result.state);
-    const keepRunning = !!interruptPrompt;
-    const finished: SessionSnapshot = {
-      ...current,
-      status: keepRunning ? "running" : "idle",
-      exitCode: keepRunning ? null : 0,
-      endedAt: keepRunning ? null : new Date().toISOString(),
-      output: result.state.result,
-      claudeSessionId: result.state.sessionId ?? current.claudeSessionId,
-      messages,
-      queuedMessages: this.resolveQueuedMessagesAfterInterrupt(sessionId, current, interruptPrompt),
-      pendingEscalation: null,
-      permissionBlocked: false,
-      structuredState: {
-        ...this.settleTurn(sessionId, current.structuredState as StructuredSessionState),
-        model: result.state.model ?? current.structuredState?.model,
-        inFlight: false,
-        activeRequestId: null,
-        lastError: null,
-      },
-    };
-    this.sessions.set(sessionId, finished);
-    this.saveAuthoritativeSession(finished);
-    this.emitStructuredSnapshot(finished);
-    if (!keepRunning) this.emitStructuredSnapshot(finished, "ended");
-
-    if (interruptPrompt) {
-      this.interruptedWith.delete(sessionId);
-      this.preserveQueueOnInterrupt.delete(sessionId);
-      setImmediate(() => {
-        this.sendMessage(sessionId, interruptPrompt).catch((error) => {
-          console.error("[WAND] codex interrupt-and-send failed:", error);
-        });
-      });
-      return;
-    }
-    setImmediate(() => { void this.flushNextQueuedMessage(sessionId); });
-  }
-
-  private async runGrokStreaming(
-    sessionId: string,
-    session: SessionSnapshot,
-    prompt: string,
-    requestId: string,
-  ): Promise<void> {
-    let emitTimer: ReturnType<typeof setTimeout> | null = null;
-    const syncSnapshot = (turnState: StructuredRunnerTurnState): void => {
-      const current = this.currentSessionForRequest(sessionId, requestId);
-      if (!current) return;
-      const turn: ConversationTurn = {
-        role: "assistant",
-        content: this.compactContentBlocks([...turnState.blocks], turnState.result),
-        usage: turnState.usage,
-      };
-      const messages = upsertAssistantMessage(current.messages, turn);
-      const patched: SessionSnapshot = {
-        ...current,
-        claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
-        messages,
-        output: turnState.result || current.output,
-        // 每个 provider 帧都是本轮还在活动的证据：刷新 lastActivityAt 并重挂静默窗口。
-        structuredState: this.noteTurnActivity(sessionId, current.structuredState as StructuredSessionState),
-      };
-      this.sessions.set(sessionId, patched);
-      this.saveStreamingSnapshot(patched);
-    };
-    const flushEmit = (): void => {
-      if (emitTimer) this.clearStreamEmitTimer(emitTimer);
-      emitTimer = null;
-      const current = this.currentSessionForRequest(sessionId, requestId);
-      if (current) this.emit({
-        type: "output",
-        sessionId,
-        data: buildIncrementalStructuredPayload(current, this.config.cardDefaults ?? {}),
-      });
-    };
-    const scheduleEmit = (): void => {
-      if (!emitTimer) emitTimer = this.trackStreamEmitTimer(setTimeout(flushEmit, STREAM_EMIT_DEBOUNCE_MS));
-    };
-
-    const execution = startEmployeeKnowledgeRunner(this.storage, this.grokRunner, {
-      session,
-      prompt,
-      env: buildChildEnv(this.config.inheritEnv !== false),
-    }, {
-      isActive: () => this.isCurrentRequest(sessionId, requestId),
-      onStdout: (text) => this.logger?.appendStructuredStdout(sessionId, text),
-      onStderr: (text) => this.logger?.appendStructuredStderr(sessionId, text),
-      onEvent: (event) => this.logger?.appendStreamEvent(sessionId, event),
-      onUpdate: (turnState) => { syncSnapshot(turnState); scheduleEmit(); },
-    });
-    this.pendingRunnerExecutions.set(sessionId, execution);
-    this.logger?.appendStructuredSpawn(sessionId, {
-      kind: "grok-headless",
-      provider: "grok",
-      pid: execution.pid,
-      cwd: session.cwd,
-      args: execution.args,
-      prompt: prompt.slice(0, 2048),
-      promptLength: prompt.length,
-      sessionId: session.claudeSessionId,
-      spawnedAt: execution.spawnedAt,
-    });
-
-    let result;
-    try {
-      result = await execution.completion;
-    } finally {
-      const released = this.releasePendingRunnerExecution(sessionId, execution);
-      if (released) this.cancelStreamingCheckpointTimer(sessionId);
-    }
-    if (!this.isCurrentRequest(sessionId, requestId)) {
-      if (emitTimer) this.clearStreamEmitTimer(emitTimer);
-      return;
-    }
-    flushEmit();
-    this.throwUnacceptedInput(sessionId, result, "grok",
-      "（PATH 中找不到 grok；请安装 Grok Build CLI，或重跑 `wand service:install` 刷新服务 PATH）");
-    this.logger?.appendStructuredSpawn(sessionId, {
-      kind: "grok-headless-close",
-      pid: execution.pid,
-      spawnedAt: execution.spawnedAt,
-      closedAt: new Date().toISOString(),
-      exitCode: result.exitCode,
-      stderrTail: result.stderr.slice(-2048),
-      primaryError: result.primaryError,
-    });
-    const current = this.currentSessionForRequest(sessionId, requestId);
-    if (!current) return;
-    const interruptedByUser = this.interruptedWith.has(sessionId);
-    const interruptPrompt = this.interruptedWith.get(sessionId);
-    if ((result.primaryError || (result.exitCode !== 0 && result.exitCode !== null) || result.signal) && !interruptedByUser) {
-      const errorText = this.formatStructuredExitError(
-        "grok",
-        result.exitCode,
-        result.signal,
-        { stderr: result.stderr, primary: result.primaryError },
-      );
-      const failed = this.finishStructuredFailure(
-        current,
-        typeof result.exitCode === "number" ? result.exitCode : 1,
-        errorText,
-        result.state,
-      );
-      this.sessions.set(sessionId, failed);
-      this.saveAuthoritativeSession(failed);
-      this.emitStructuredSnapshot(failed);
-      this.emitStructuredSnapshot(failed, "ended");
-      throw new PersistedStructuredRunnerError(errorText);
-    }
-    const messages = this.buildCompletedAssistantMessages(current, result.state);
-    const keepRunning = !!interruptPrompt;
-    const finished: SessionSnapshot = {
-      ...current,
-      status: keepRunning ? "running" : "idle",
-      exitCode: keepRunning ? null : 0,
-      endedAt: keepRunning ? null : new Date().toISOString(),
-      output: result.state.result,
-      claudeSessionId: result.state.sessionId ?? current.claudeSessionId,
-      messages,
-      queuedMessages: this.resolveQueuedMessagesAfterInterrupt(sessionId, current, interruptPrompt),
-      pendingEscalation: null,
-      permissionBlocked: false,
-      structuredState: {
-        ...this.settleTurn(sessionId, current.structuredState as StructuredSessionState),
-        model: result.state.model ?? current.structuredState?.model,
-        inFlight: false,
-        activeRequestId: null,
-        lastError: null,
-      },
-    };
-    this.sessions.set(sessionId, finished);
-    this.saveAuthoritativeSession(finished);
-    this.emitStructuredSnapshot(finished);
-    if (!keepRunning) this.emitStructuredSnapshot(finished, "ended");
-    if (interruptPrompt) {
-      this.interruptedWith.delete(sessionId);
-      this.preserveQueueOnInterrupt.delete(sessionId);
-      setImmediate(() => this.sendMessage(sessionId, interruptPrompt).catch((error) => {
-        console.error("[WAND] grok interrupt-and-send failed:", error);
-      }));
-      return;
-    }
-    setImmediate(() => { void this.flushNextQueuedMessage(sessionId); });
-  }
-
-  private async runOpenCodeStreaming(
-    sessionId: string,
-    session: SessionSnapshot,
-    prompt: string,
-    requestId: string,
-  ): Promise<void> {
-    let emitTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const syncSnapshot = (turnState: StructuredRunnerTurnState): void => {
-      const current = this.currentSessionForRequest(sessionId, requestId);
-      if (!current) return;
-      const turn: ConversationTurn = {
-        role: "assistant",
-        content: this.compactContentBlocks([...turnState.blocks], turnState.result),
-        usage: turnState.usage,
-      };
-      const messages = upsertAssistantMessage(current.messages, turn);
-      const patched: SessionSnapshot = {
-        ...current,
-        claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
-        messages,
-        output: turnState.result || current.output,
-        // 每个 provider 帧都是本轮还在活动的证据：刷新 lastActivityAt 并重挂静默窗口。
-        structuredState: this.noteTurnActivity(sessionId, current.structuredState as StructuredSessionState),
-      };
-      this.sessions.set(sessionId, patched);
-      this.saveStreamingSnapshot(patched);
-    };
-    const flushEmit = (): void => {
-      if (emitTimer) this.clearStreamEmitTimer(emitTimer);
-      emitTimer = null;
-      const current = this.currentSessionForRequest(sessionId, requestId);
-      if (current) {
-        this.emit({
-          type: "output",
-          sessionId,
-          data: buildIncrementalStructuredPayload(current, this.config.cardDefaults ?? {}),
-        });
-      }
-    };
-    const scheduleEmit = (): void => {
-      if (!emitTimer) {
-        emitTimer = this.trackStreamEmitTimer(setTimeout(flushEmit, STREAM_EMIT_DEBOUNCE_MS));
-      }
-    };
-
-    const execution = startEmployeeKnowledgeRunner(this.storage, this.openCodeRunner, {
-      session,
-      prompt,
-      env: buildChildEnv(this.config.inheritEnv !== false),
-    }, {
-      isActive: () => this.isCurrentRequest(sessionId, requestId),
-      onStdout: (text) => this.logger?.appendStructuredStdout(sessionId, text),
-      onStderr: (text) => this.logger?.appendStructuredStderr(sessionId, text),
-      onEvent: (event) => this.logger?.appendStreamEvent(sessionId, event),
-      onUpdate: (turnState) => {
-        syncSnapshot(turnState);
-        scheduleEmit();
-      },
-    });
-    this.pendingRunnerExecutions.set(sessionId, execution);
-    this.logger?.appendStructuredSpawn(sessionId, {
-      kind: "opencode-run",
-      provider: "opencode",
-      pid: execution.pid,
-      cwd: session.cwd,
-      args: execution.args,
-      prompt: prompt.slice(0, 2048),
-      promptLength: prompt.length,
-      sessionId: session.claudeSessionId,
-      spawnedAt: execution.spawnedAt,
-    });
-
-    let result;
-    try {
-      result = await execution.completion;
-    } finally {
-      const released = this.releasePendingRunnerExecution(sessionId, execution);
-      if (released) this.cancelStreamingCheckpointTimer(sessionId);
-    }
-    if (!this.isCurrentRequest(sessionId, requestId)) {
-      if (emitTimer) this.clearStreamEmitTimer(emitTimer);
-      return;
-    }
-    flushEmit();
-
-    this.throwUnacceptedInput(sessionId, result, "opencode run",
-      "（PATH 中找不到 opencode；请安装 opencode-ai，或重跑 `wand service:install` 刷新服务 PATH）");
-
-    this.logger?.appendStructuredSpawn(sessionId, {
-      kind: "opencode-run-close",
-      pid: execution.pid,
-      spawnedAt: execution.spawnedAt,
-      closedAt: new Date().toISOString(),
-      exitCode: result.exitCode,
-      stderrTail: result.stderr.slice(-2048),
-      primaryError: result.primaryError,
-    });
-    const current = this.currentSessionForRequest(sessionId, requestId);
-    if (!current) return;
-
-    const interruptedByUser = this.interruptedWith.has(sessionId);
-    const interruptPrompt = this.interruptedWith.get(sessionId);
-    if ((result.primaryError || (result.exitCode !== 0 && result.exitCode !== null) || result.signal) && !interruptedByUser) {
-      const legacyHint = /unknown command|unknown flag|No help topic for 'run'/i.test(result.stderr)
-        ? "\n检测到旧版 OpenCode CLI；请卸载 0.0.x 旧包并安装 `opencode-ai@latest`。"
-        : "";
-      const errorText = this.formatStructuredExitError(
-        "opencode run",
-        result.exitCode,
-        result.signal,
-        { stderr: result.stderr, primary: result.primaryError },
-      ) + legacyHint;
-      const failed = this.finishStructuredFailure(
-        current,
-        typeof result.exitCode === "number" ? result.exitCode : 1,
-        errorText,
-        result.state,
-      );
-      this.sessions.set(sessionId, failed);
-      this.saveAuthoritativeSession(failed);
-      this.emitStructuredSnapshot(failed);
-      this.emitStructuredSnapshot(failed, "ended");
-      throw new PersistedStructuredRunnerError(errorText);
-    }
-
-    const messages = this.buildCompletedAssistantMessages(current, result.state);
-    const keepRunning = !!interruptPrompt;
-    const finished: SessionSnapshot = {
-      ...current,
-      status: keepRunning ? "running" : "idle",
-      exitCode: keepRunning ? null : 0,
-      endedAt: keepRunning ? null : new Date().toISOString(),
-      output: result.state.result,
-      claudeSessionId: result.state.sessionId ?? current.claudeSessionId,
-      messages,
-      queuedMessages: this.resolveQueuedMessagesAfterInterrupt(sessionId, current, interruptPrompt),
-      pendingEscalation: null,
-      permissionBlocked: false,
-      structuredState: {
-        ...this.settleTurn(sessionId, current.structuredState as StructuredSessionState),
-        model: result.state.model ?? current.structuredState?.model,
-        inFlight: false,
-        activeRequestId: null,
-        lastError: null,
-      },
-    };
-    this.sessions.set(sessionId, finished);
-    this.saveAuthoritativeSession(finished);
-    this.emitStructuredSnapshot(finished);
-    if (!keepRunning) this.emitStructuredSnapshot(finished, "ended");
-
-    if (interruptPrompt) {
-      this.interruptedWith.delete(sessionId);
-      this.preserveQueueOnInterrupt.delete(sessionId);
-      setImmediate(() => {
-        this.sendMessage(sessionId, interruptPrompt).catch((error) => {
-          console.error("[WAND] opencode interrupt-and-send failed:", error);
-        });
-      });
-      return;
-    }
-    setImmediate(() => { void this.flushNextQueuedMessage(sessionId); });
-  }
-  // ---------------------------------------------------------------------------
-  // Streaming claude -p execution
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Spawn `claude -p --output-format stream-json` and parse NDJSON lines as
-   * they arrive, emitting incremental WebSocket events so the UI can render
-   * text / thinking / tool_use blocks in real-time.
-   *
-   * Permission handling:
-   * - Non-root + full-access/managed: --permission-mode bypassPermissions
-   * - Non-root + auto-edit: --permission-mode acceptEdits
-   * - Root: --permission-mode acceptEdits + --allowedTools (extends approval
-   *   outside CWD). stdin is always "ignore" — no ACP bidirectional control.
-   */
-  private async runClaudeStreaming(
+  /** One turn lifecycle for every structured adapter; provider protocol reducers stay separate. */
+  private async runStructuredStreaming(
     sessionId: string,
     session: SessionSnapshot,
     prompt: string,
@@ -3337,21 +2919,43 @@ export class StructuredSessionManager {
     const provider = options.provider ?? "claude";
     const commandLabel = options.commandLabel ?? "claude -p";
     const logKind = options.logKind ?? "claude-print";
+    // 只在有多条候选可退的员工会话上看门：单候选会话没有可退的下一条链路，终止它只会丢工作。
+    const candidateChain = !!session.employeeId && (session.employeeCandidates?.length ?? 0) > 1;
+    let startupTimedOut = false;
+    let turnCompleted = false;
+    const disarmStartupWatchdog = (): void => {
+      const timer = this.candidateStartupWatchdogs.get(sessionId);
+      if (!timer) return;
+      clearTimeout(timer);
+      this.candidateStartupWatchdogs.delete(sessionId);
+    };
     const execution = startEmployeeKnowledgeRunner(this.storage, runner, {
       session,
       prompt,
       env: buildChildEnv(this.config.inheritEnv !== false),
     }, {
       isActive: () => this.isCurrentRequest(sessionId, requestId),
-      onStdout: (text) => this.logger?.appendStructuredStdout(sessionId, text),
+      onStdout: (text) => {
+        if (text) disarmStartupWatchdog();
+        this.logger?.appendStructuredStdout(sessionId, text);
+      },
       onStderr: (text) => this.logger?.appendStructuredStderr(sessionId, text),
       onEvent: (event) => this.logger?.appendStreamEvent(sessionId, event),
       onUpdate: (turnState) => {
+        disarmStartupWatchdog();
         syncSnapshot(turnState);
         scheduleEmit();
       },
     });
     this.pendingRunnerExecutions.set(sessionId, execution);
+    if (candidateChain) {
+      this.candidateStartupWatchdogs.set(sessionId, setTimeout(() => {
+        this.candidateStartupWatchdogs.delete(sessionId);
+        if (turnCompleted || !this.isCurrentRequest(sessionId, requestId)) return;
+        startupTimedOut = true;
+        execution.interrupt();
+      }, EMPLOYEE_CANDIDATE_STARTUP_TIMEOUT_MS));
+    }
     this.logger?.appendStructuredSpawn(sessionId, {
       kind: logKind,
       provider,
@@ -3361,6 +2965,7 @@ export class StructuredSessionManager {
       prompt: prompt.slice(0, 2048),
       promptLength: prompt.length,
       claudeSessionId: session.claudeSessionId,
+      ...(provider === "codex" ? { threadId: session.claudeSessionId } : { sessionId: session.claudeSessionId }),
       spawnedAt: execution.spawnedAt,
     });
 
@@ -3368,6 +2973,8 @@ export class StructuredSessionManager {
     try {
       result = await execution.completion;
     } finally {
+      turnCompleted = true;
+      disarmStartupWatchdog();
       const released = this.releasePendingRunnerExecution(sessionId, execution);
       if (released) this.cancelStreamingCheckpointTimer(sessionId);
     }
@@ -3377,8 +2984,20 @@ export class StructuredSessionManager {
     }
     flushEmit();
 
+    // 看门狗只在本轮确实没有产出任何东西时才算「未开始执行」；已经出过内容的那一轮维持原判定。
+    if (startupTimedOut && !hasStructuredExecutionProgress(result.state)) {
+      const unaccepted: StructuredFailure = { kind: "preflight", delivery: "rejected", retryable: true };
+      result = {
+        ...result,
+        inputAccepted: false,
+        primaryError: result.primaryError?.trim()
+          || `${commandLabel} 在 ${EMPLOYEE_CANDIDATE_STARTUP_TIMEOUT_MS / 1000} 秒内没有任何协议输出，本轮未开始执行。`,
+        failure: unaccepted,
+      };
+    }
+
     this.throwUnacceptedInput(sessionId, result, commandLabel,
-      `（PATH 中找不到 ${provider === "qoder" ? "qodercli" : provider === "gemini" ? "gemini" : provider === "pi" ? "pi" : "claude"} 可执行文件；${options.installHint ?? "请确认 claude 已安装，或重跑 `wand service:install` 刷新服务的 PATH"}）`);
+      `（PATH 中找不到 ${providerCliCommand(provider)} 可执行文件；${options.installHint ?? `请确认 ${providerCliCommand(provider)} 已安装，或重跑 wand service:install 刷新服务的 PATH`}）`);
 
     this.logger?.appendStructuredSpawn(sessionId, {
       kind: `${logKind}-close`,
@@ -3387,24 +3006,31 @@ export class StructuredSessionManager {
       closedAt: new Date().toISOString(),
       exitCode: result.exitCode,
       stderrTail: result.stderr.slice(-2048),
+      primaryError: result.primaryError,
+      ...(provider === "codex" ? { codexErrors: result.errors, codexTurnFailed: result.primaryError } : {}),
     });
     const current = this.currentSessionForRequest(sessionId, requestId);
     if (!current) return;
 
     const interruptedByUser = this.interruptedWith.has(sessionId);
-    const interruptedForQuestion = result.stopReason === "ask-user-question";
+    const supportsToolContinuation = provider !== "codex" && provider !== "opencode" && provider !== "grok";
+    const interruptedForQuestion = supportsToolContinuation && result.stopReason === "ask-user-question";
     const failedExit = (result.exitCode !== null && result.exitCode !== 0) || result.signal !== null;
     // A protocol failure remains a failure even if the CLI exits 0 or already produced work.
     // Earlier work is preserved below and must never be replayed on another candidate.
     const failure = result.failure ?? classifyStructuredFailure(result);
     if (failure && !interruptedByUser && !interruptedForQuestion) {
-      const errorText = !failedExit && result.primaryError
+      let errorText = supportsToolContinuation && !failedExit && result.primaryError
         ? result.primaryError!.trim()
         : this.formatStructuredExitError(commandLabel, result.exitCode, result.signal, {
           stderr: result.stderr,
           stdoutTail: result.stdoutTail,
           primary: result.primaryError,
+          extras: result.errors,
         });
+      if (provider === "opencode" && /unknown command|unknown flag|No help topic for 'run'/i.test(result.stderr)) {
+        errorText += "\n检测到旧版 OpenCode CLI；请卸载 0.0.x 旧包并安装 `opencode-ai@latest`。";
+      }
       const failed = this.finishStructuredFailure(
         current,
         failedExit && typeof result.exitCode === "number" ? result.exitCode : 1,
@@ -3478,7 +3104,7 @@ export class StructuredSessionManager {
     const lastToolUse = [...result.state.blocks].reverse().find(
       (block): block is ContentBlock & { type: "tool_use" } => block.type === "tool_use",
     );
-    if (lastToolUse?.name === "ExitPlanMode" && result.state.sessionId) {
+    if (supportsToolContinuation && lastToolUse?.name === "ExitPlanMode" && result.state.sessionId) {
       setImmediate(() => {
         this.sendMessage(sessionId, "Plan approved. Proceed with the implementation.").catch((error) => {
           console.error("[WAND] Auto-continue after ExitPlanMode failed:", error);

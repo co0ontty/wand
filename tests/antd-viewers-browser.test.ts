@@ -580,13 +580,13 @@ test("viewer hosts run on Ant Design in real Chrome", { timeout: 300_000, skip: 
 
         // ---- image viewer ----
         await evaluate("window.viewers.openImage('/img.png', '示例图')");
-        await wait("!!document.querySelector('[data-testid=image-viewer-dialog] .wand-media-stage')");
-        assert.equal(await evaluate("document.querySelector('[data-testid=image-viewer-dialog]').classList.contains('ant-modal') || !!document.querySelector('[data-testid=image-viewer-dialog]')"), true);
-        await click('[data-testid=image-viewer-dialog] .wand-media-stage');
-        await wait("document.querySelector('.wand-media-stage').classList.contains('zoomed')");
+        await wait("!!document.querySelector('.wand-image-viewer[role=dialog] img')");
+        assert.equal(await evaluate("document.querySelector('.wand-image-viewer').getAttribute('aria-modal')"), "true");
+        await click('.wand-image-viewer [aria-label=zoomIn]');
+        await wait("!document.querySelector('.wand-image-viewer img').style.transform.includes('scale3d(1, 1, 1)')");
         await screenshot(`image-zoom-${mode}`);
-        await click('[data-testid=image-viewer-dialog] .wand-media-stage');
-        await wait("!document.querySelector('.wand-media-stage').classList.contains('zoomed')");
+        await click('.wand-image-viewer [aria-label=zoomOut]');
+        await wait("document.querySelector('.wand-image-viewer img').style.transform.includes('scale3d(1, 1, 1)')");
         await screenshot(`image-fit-${mode}`);
         await key("Escape");
         await wait("!document.querySelector('[data-testid=image-viewer-dialog]')");

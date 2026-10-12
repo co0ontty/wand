@@ -221,7 +221,7 @@ test("sessions bind to a workspace and are listed under it", () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-test("listing workspaces backfills unbound sessions into directory projects", async () => {
+test("listing workspaces never backfills unbound sessions or creates projects", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-workspace-backfill-route-"));
   const other = mkdtempSync(path.join(os.tmpdir(), "wand-workspace-backfill-other-"));
   const storage = new WandStorage(path.join(root, "wand.db"));
@@ -237,12 +237,11 @@ test("listing workspaces backfills unbound sessions into directory projects", as
     const list = await res.json() as Array<{ id: string; cwd: string; name: string; sessionCount: number }>;
     const existingItem = list.find((item) => item.id === existing.id);
     assert.ok(existingItem);
-    assert.equal(existingItem.sessionCount, 1);
-    const created = list.find((item) => item.cwd === other);
-    assert.ok(created);
-    assert.equal(created.sessionCount, 1);
-    assert.equal(storage.getSession(inExisting.id)?.workspaceId, existing.id);
-    assert.equal(storage.getSession(needsProject.id)?.workspaceId, created.id);
+    assert.equal(existingItem.sessionCount, 0);
+    assert.equal(list.find((item) => item.cwd === other), undefined);
+    assert.equal(storage.getSession(inExisting.id)?.workspaceId, undefined);
+    assert.equal(storage.getSession(needsProject.id)?.workspaceId, undefined);
+    assert.equal(storage.listWorkspaces().length, 1);
   } finally {
     manager.dispose();
     await close();

@@ -4,7 +4,7 @@ import os from "node:os";
 /** Check that targetPath is within basePath (or equal to it). */
 export function isPathWithinBase(targetPath: string, basePath: string): boolean {
   const relativePath = path.relative(basePath, targetPath);
-  return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
+  return relativePath === "" || (relativePath !== ".." && !relativePath.startsWith(`..${path.sep}`) && !path.isAbsolute(relativePath));
 }
 
 /** Blocked folder paths that should never be browsed. */
