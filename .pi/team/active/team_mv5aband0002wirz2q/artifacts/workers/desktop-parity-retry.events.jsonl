@@ -1,0 +1,212 @@
+{"at":1791811516651,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811516651,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811516651,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811516651,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811518358,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811522888,"phase":"worker-radio-report","message":"客户端交互差距与架构补审 reported to captain","preview":"RADIO: status=started, action=读取约束与基线，evidence=AGENTS.md+macos/README.md+git status, blocker=none, next=源码对比 Web/macOS 主要流程"}
+{"at":1791811522888,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start read","toolName":"read"}
+{"at":1791811522888,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start read","toolName":"read"}
+{"at":1791811522888,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start bash","toolName":"bash"}
+{"at":1791811522889,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start read","toolName":"read"}
+{"at":1791811522890,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791811522890,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791811522891,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791811523004,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791811523004,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811523004,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811523004,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811523004,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811523004,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811523004,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811523004,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811523004,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811523694,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811527884,"phase":"worker-radio-report","message":"客户端交互差距与架构补审 reported to captain","preview":"RADIO: status=running, action=已确认主仓有既有改动且 macos 子仓干净；开始定位 Web/macOS 入口, evidence=git status + README, blocker=none, next=抽样读取关键源码并收集行号证据"}
+{"at":1791811527884,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start bash","toolName":"bash"}
+{"at":1791811527884,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start bash","toolName":"bash"}
+{"at":1791811527885,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start read","toolName":"read"}
+{"at":1791811527885,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start read","toolName":"read"}
+{"at":1791811527889,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791811527890,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791811527907,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791811527948,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791811527948,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811527948,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811527948,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811527948,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811527948,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811527948,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811527949,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811527949,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811528794,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811533417,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811533417,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start bash","toolName":"bash"}
+{"at":1791811533417,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start bash","toolName":"bash"}
+{"at":1791811533417,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start read","toolName":"read"}
+{"at":1791811533417,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start read","toolName":"read"}
+{"at":1791811533421,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791811533422,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791811533443,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791811533449,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791811533450,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811533450,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811533450,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811533450,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811533450,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811533450,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811533451,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811533451,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811534267,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811540674,"phase":"worker-radio-report","message":"客户端交互差距与架构补审 reported to captain","preview":"RADIO: status=running, action=已找到 macOS 原生首页/侧栏/聊天/任务/设置入口与 Web 员工/团队/会话入口；继续核对 API 覆盖与缺口, evidence=macos/Wand/*.swift + src/web-ui/react/*, blocker=none, next=收集精确行号并起草审查报告"}
+{"at":1791811540674,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start bash","toolName":"bash"}
+{"at":1791811540674,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start bash","toolName":"bash"}
+{"at":1791811540674,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start read","toolName":"read"}
+{"at":1791811540674,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start read","toolName":"read"}
+{"at":1791811540677,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791811540678,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791811540710,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791811540726,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791811540726,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811540726,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811540726,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811540726,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811540726,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811540727,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811540727,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811540727,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811541691,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811545838,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811545839,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start bash","toolName":"bash"}
+{"at":1791811545839,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start bash","toolName":"bash"}
+{"at":1791811545839,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start read","toolName":"read"}
+{"at":1791811545839,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start read","toolName":"read"}
+{"at":1791811545842,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791811545843,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791811545862,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791811545881,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791811545882,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811545882,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811545882,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811545882,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811545882,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811545882,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811545882,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811545882,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811547157,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811550208,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811550208,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start bash","toolName":"bash"}
+{"at":1791811550208,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start read","toolName":"read"}
+{"at":1791811550208,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start read","toolName":"read"}
+{"at":1791811550208,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start read","toolName":"read"}
+{"at":1791811550210,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791811550211,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791811550211,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791811550243,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end bash failed","toolName":"bash","isError":true}
+{"at":1791811550244,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811550244,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811550244,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811550244,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811550245,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811550245,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811550245,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811550245,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811551049,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811557479,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811557480,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start read","toolName":"read"}
+{"at":1791811557480,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start read","toolName":"read"}
+{"at":1791811557480,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start read","toolName":"read"}
+{"at":1791811557480,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start read","toolName":"read"}
+{"at":1791811557483,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791811557483,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791811557484,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791811557484,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791811557484,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811557485,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811557486,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811557486,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811557487,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811557487,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811557487,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811557488,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811558307,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811561555,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811561556,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start bash","toolName":"bash"}
+{"at":1791811561556,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start read","toolName":"read"}
+{"at":1791811561556,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start read","toolName":"read"}
+{"at":1791811561556,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start read","toolName":"read"}
+{"at":1791811561560,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791811561560,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791811561561,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791811561599,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791811561600,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811561600,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811561600,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811561600,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811561600,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811561600,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811561600,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811561601,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811562413,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811567853,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811567853,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start bash","toolName":"bash"}
+{"at":1791811567853,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start read","toolName":"read"}
+{"at":1791811567853,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start read","toolName":"read"}
+{"at":1791811567854,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start read","toolName":"read"}
+{"at":1791811567856,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791811567857,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791811567857,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791811567880,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791811567880,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811567880,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811567881,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811567881,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811567881,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811567881,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811567881,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811567881,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811568534,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811570915,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811570916,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start bash","toolName":"bash"}
+{"at":1791811570935,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791811570935,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811570935,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811571583,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811573537,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811573537,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start read","toolName":"read"}
+{"at":1791811573542,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791811573542,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811573543,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811574238,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811575856,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811575856,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start read","toolName":"read"}
+{"at":1791811575859,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791811575860,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811575860,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811576554,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811586107,"phase":"worker-radio-report","message":"客户端交互差距与架构补审 reported to captain","preview":"RADIO: status=running, action=完成证据收集；主要缺口集中在员工/私聊/群聊/AI团队/Wand Agent 执行身份与任务派发主体，原生已有会话/工作区/看板/设置基础, evidence=rg/read 多处行号, blocker=none, next=写入允许的 parity-audit.md 并做文档检查"}
+{"at":1791811586108,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start bash","toolName":"bash"}
+{"at":1791811586142,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791811586143,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811586143,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811586817,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811659565,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811659565,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start write","toolName":"write"}
+{"at":1791811659566,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end write","toolName":"write","isError":false}
+{"at":1791811659567,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811659567,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811660977,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811663992,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811663993,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start bash","toolName":"bash"}
+{"at":1791811663993,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start read","toolName":"read"}
+{"at":1791811663993,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_start read","toolName":"read"}
+{"at":1791811663996,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791811663998,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791811664039,"phase":"worker-tool","message":"客户端交互差距与架构补审 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791811664039,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811664039,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811664039,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811664040,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811664040,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811664040,"phase":"worker-message-end","message":"客户端交互差距与架构补审 assistant message ended"}
+{"at":1791811664755,"phase":"worker-message-start","message":"客户端交互差距与架构补审 message started"}
+{"at":1791811676358,"phase":"worker-radio-report","message":"客户端交互差距与架构补审 reported to captain","preview":"RADIO: status=completed, action=已写入只读补审报告并完成文档检查, evidence=output/architecture-stage2/macos-refresh/parity-audit.md + git diff --check, blocker=none, next=等待负责人综合 ## result_summary 已完成 macOS/Web 主要交互差距补审，报告写入： - `output/architecture-stage2/"}

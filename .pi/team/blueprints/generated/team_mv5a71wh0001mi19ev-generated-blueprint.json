@@ -1,0 +1,59 @@
+{
+  "blueprintId": "team_mv5a71wh0001mi19ev-generated-blueprint",
+  "runId": "team_mv5a71wh0001mi19ev",
+  "task": "在 /Users/co0ontty/Self/vibe_coding/wand 审查 macOS 客户端优化任务。用户要基于当前 Web 交互保持大致一致，判断增量改造或重写，并彻底修复不可用的客户端更新；以后 Web/macOS 可共享改动双向同步。主仓基线已有 src/conversation-service.ts、src/storage/conversations-repository.ts 修改以及 tests/workspace-employee-conversation.test.ts 未跟踪，macos 子仓干净。只读审查，不改业务源码、不发布/安装/启动客户端、不输出凭据。允许在 output/architecture-stage2/macos-refresh/ 写证据报告。先 read 根 AGENTS.md、macos/README.md；用 bash/read/write 工具发现实际文件，不要猜路径。请提供具体源码位置、差距/根因、建议最小实施边界与验证入口；所有发现的问题在报告中记录现象、证据、影响、复现方法。负责人自己综合判断。",
+  "playbookId": "generated-blueprint",
+  "playbookTitle": "Dynamic team blueprint",
+  "source": "generated",
+  "status": "draft",
+  "createdAt": 1791811321929,
+  "roles": [
+    {
+      "roleId": "desktop-parity",
+      "title": "macOS 与 Web 交互架构审查",
+      "description": "对比首页、侧栏、员工/私聊/群聊、输入草稿、工具模型选择、任务与设置的当前实现。重点判断原生现存架构可以如何增量对齐，与共享 Web 容器相比的真实成本/技术限制；不要预设重写或容器。交付可落地的本轮最小交互清单与长期双向同步门禁。只读，报告 output/architecture-stage2/macos-refresh/parity-audit.md。",
+      "capabilityNeeds": [],
+      "tools": [
+        "bash",
+        "read",
+        "write"
+      ],
+      "modelPreferences": []
+    },
+    {
+      "roleId": "update-chain",
+      "title": "macOS 更新完整链路审查",
+      "description": "审查 macos/Wand/MacUpdateManager.swift、UpdateInstaller.swift、构建/发布脚本及 src/server-update-routes.ts、src/macos* 相关实现/测试。定位导致当前更新不可用的具体断点（必须证据而非猜测）：通道/版本/元数据/下载/校验/签名/helper/原位替换/重启/回滚/恢复。允许只读检查本机已安装 Wand.app 的版本与产物，不访问真实付费模型，不读取/打印敏感数据。交付报告 output/architecture-stage2/macos-refresh/update-audit.md 及可复现测试建议。",
+      "capabilityNeeds": [],
+      "tools": [
+        "bash",
+        "read",
+        "write"
+      ],
+      "modelPreferences": []
+    }
+  ],
+  "rounds": [
+    {
+      "id": "collect",
+      "type": "parallel",
+      "roles": [
+        "desktop-parity",
+        "update-chain"
+      ]
+    }
+  ],
+  "policy": {
+    "rationale": "A task-specific collaboration blueprint generated for the lead captain",
+    "strategy": "The lead captain generated this collaboration plan; the extension handles dispatch, communication, observation, and recording.",
+    "evidencePolicy": "Workers should separate cited evidence, inference, confidence, and missing information.",
+    "modelPolicy": "Use configured models that are objectively available; keep soft health observations visible.",
+    "synthesisPolicy": "The lead uses worker outputs as inputs and keeps final judgment outside the extension.",
+    "progressMilestones": [
+      "collect: parallel"
+    ],
+    "stopCriteria": "All planned rounds have returned a status and the run log is persisted."
+  },
+  "outputContract": "两份有源码证据的只读审查报告；负责人形成最终方案。",
+  "captainRationale": "A task-specific collaboration blueprint generated for the lead captain"
+}

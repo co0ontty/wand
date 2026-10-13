@@ -115,7 +115,7 @@ for (const mode of ["refusal", "text", "thinking", "tool", "earlier-reply", "usa
       ? { ...refusal, usage: { input: 1, output: 0 } } : refusal;
     const runner = replayPi(f.agentDir, () => [...extra, ...events(message)]);
     const execution = runner.start({ session: { id: "fixture", provider: "pi", cwd: f.root,
-      piSettings: defaultPiCliSessionSettings(), claudeSessionId: null } as SessionSnapshot, prompt: "fixture", env: {} },
+      piSettings: defaultPiCliSessionSettings(), claudeSessionId: null } as SessionSnapshot, prompt: "fixture", env: { PATH: process.env.PATH } },
     { isActive: () => true, onUpdate() {} });
     const got = await execution.completion;
     assert.equal(got.rejection, mode === "refusal" ? "quota" : mode === "forbidden" ? "authentication" : undefined);
@@ -192,7 +192,7 @@ test("model groups consume the same verified rejection despite session and resou
   const selectedModel = modelGroupSelector(group);
   const session = { id: "fixture", provider: "pi", cwd: f.root, piSettings: defaultPiCliSessionSettings(),
     selectedModel, claudeSessionId: null } as SessionSnapshot;
-  const finished = await runner.start({ session, prompt: "synthetic", env: {} }, { isActive: () => true, onUpdate() {} }).completion;
+  const finished = await runner.start({ session, prompt: "synthetic", env: { PATH: process.env.PATH } }, { isActive: () => true, onUpdate() {} }).completion;
   assert.deepEqual(models, ["first", "second"]); assert.equal(finished.state.result, "done");
   assert.equal(finished.failure, null); assert.equal(session.selectedModel, selectedModel);
 });

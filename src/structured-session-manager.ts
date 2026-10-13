@@ -26,7 +26,7 @@ import { startEmployeeKnowledgeRunner } from "./employee-knowledge.js";
 import { CoreRunner } from "./core-runner.js";
 import { CoreTurnTracker } from "./core-turn-tracker.js";
 import type { CoreStatus } from "./core-status-cli.js";
-import { coreHarnessAgentDir, resolveHarnessEngineSync, type EngineResolution } from "./harness-engine.js";
+import { coreHarnessAgentDir, resolveHarnessEngine, resolveHarnessEngineSync, type EngineResolution } from "./harness-engine.js";
 import { cliPiSettingsRejection, defaultPiCliSessionSettings, defaultPiSessionSettings, patchPiSessionSettings, type PiSessionSettings } from "./pi-session-settings.js";
 import { withDecisionAccess, type DecisionRuntimeAccess } from "./decision-runner.js";
 import { signalNameFromNumber } from "./signal-utils.js";
@@ -281,7 +281,7 @@ export class StructuredSessionManager {
       storage,
       free: openRouter,
     });
-    // 能力探测放到 server 启动处 await（warmCoreHarness），这里不再另起预热。
+    // SDK capability is probed only when Wand Agent is explicitly selected.
     for (const snapshot of this.storage.loadSessions()) {
       if ((snapshot.sessionKind ?? "pty") !== "structured") continue;
       const restoredStatus = snapshot.status === "running" ? "idle" : snapshot.status;
@@ -1645,10 +1645,11 @@ export class StructuredSessionManager {
     const decidedEngine = updated.structuredState?.engine;
     const sdkRequested = decidedEngine ? decidedEngine === "core" : employeeAgent?.engine === "sdk";
     // 没显式选择时对话框固定走 CLI；只有选定 Wand Agent 或员工候选配置 SDK 才是 core。
+    // Register the selected Core runner synchronously before its lazy SDK/model
+    // preparation. This preserves cancellation ownership and the restart drain;
+    // a restored SDK session must not require a global startup prewarm.
     const resolution = sdkRequested
-      ? resolveHarnessEngineSync({ ...this.config.harness, engine: "core" }, "pi", {
-        coreRunnerSupplied: this.coreRunnerSupplied,
-      })
+      ? { engine: "core" as const, reason: "" }
       : { engine: "cli" as const, reason: "Pi 主功能固定使用 CLI JSON" };
     const enginePatched: SessionSnapshot = {
       ...updated,
@@ -1959,7 +1960,9 @@ export class StructuredSessionManager {
       || session.piSettings?.autoResources || session.piSettings?.codemodeOverride !== undefined)) {
       throw new Error("Wand Agent 不支持会话级 Skills / MCP、自动选择或 CodeMode 覆盖；请先在 Pi 设置中关闭这些选项再切换。");
     }
-    const resolution = provider === "pi" ? this.resolveNewSessionPiEngine(targetEngine) : undefined;
+    const resolution = provider === "pi" ? targetEngine === "sdk"
+      ? resolveHarnessEngineSync({ ...this.config.harness, engine: "core" }, "pi", { coreRunnerSupplied: this.coreRunnerSupplied })
+      : { engine: "cli" as const, reason: "Pi 主功能固定使用 CLI JSON" } : undefined;
     const candidateIndex = selectedCandidateIndex ?? candidates.findIndex((candidate) => candidate.provider === provider
       && (candidate.engine ?? "cli") === targetEngine);
     const candidate = candidateIndex >= 0 ? candidates[candidateIndex] : undefined;
@@ -2012,9 +2015,9 @@ export class StructuredSessionManager {
    * 用户在新建会话里选的是两个不同的东西：Pi CLI（`cli`）与 Wand Agent（`sdk`，进程内 harness）。
    * 显式选了 Wand Agent 就必须真的可用：不可用时抛错由路由告诉用户，不静默退回 CLI 冒充。
    */
-  resolveNewSessionPiEngine(engine: "cli" | "sdk" | undefined): EngineResolution {
+  async resolveNewSessionPiEngine(engine: "cli" | "sdk" | undefined): Promise<EngineResolution> {
     if (engine !== "sdk") return { engine: "cli", reason: "Pi 主功能固定使用 CLI JSON" };
-    return resolveHarnessEngineSync({ ...this.config.harness, engine: "core" }, "pi", {
+    return await resolveHarnessEngine({ ...this.config.harness, engine: "core" }, "pi", {
       coreRunnerSupplied: this.coreRunnerSupplied,
     });
   }

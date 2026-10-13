@@ -120,7 +120,7 @@ export function registerSessionLifecycleRoutes(app: Express, ctx: SessionRouteCo
         res.status(400).json({ error: "Wand Agent 只支持 Pi 结构化会话。" });
         return;
       }
-      const engineDecision = requestedEngine ? structured.resolveNewSessionPiEngine(requestedEngine) : null;
+      const engineDecision = requestedEngine ? await structured.resolveNewSessionPiEngine(requestedEngine) : null;
       const rawModel = typeof body.model === "string" ? body.model.trim() : "";
       const origin = parseSessionCreationOrigin(body);
       // Explicit employees/custom role rules and internal automation retain their own role.
@@ -233,7 +233,7 @@ export function registerSessionLifecycleRoutes(app: Express, ctx: SessionRouteCo
     }
   });
 
-  app.post("/api/sessions/:id/provider", (req, res) => {
+  app.post("/api/sessions/:id/provider", asyncRoute(async (req, res) => {
     const provider = req.body?.provider;
     const engine = req.body?.engine;
     if (engine !== undefined && engine !== "cli" && engine !== "sdk") {
@@ -259,11 +259,12 @@ export function registerSessionLifecycleRoutes(app: Express, ctx: SessionRouteCo
       return;
     }
     try {
+      if (engine === "sdk") await structured.resolveNewSessionPiEngine(engine);
       res.json(sessionResponseDTO(structured.setSessionProvider(id, provider, engine), req));
     } catch (error) {
       sendRouteError(res, error, "切换工具失败。");
     }
-  });
+  }));
 
   app.get("/api/sessions/:id/pi-settings", asyncRoute(async (req, res) => {
     try {

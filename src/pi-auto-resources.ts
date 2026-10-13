@@ -43,7 +43,7 @@ export function withAutomaticPiResources(runner: StructuredRunnerAdapter, config
       let fallback = "";
       let timer: NodeJS.Timeout | undefined;
       try {
-        inventory = await (options.inventory?.(context.session.cwd) ?? discoverPiResources(config, context.session.cwd));
+        inventory = await (options.inventory?.(context.session.cwd) ?? discoverPiResources(config, context.session.cwd, context.env));
         checkActive();
         // A missing manual resource must fail as usual, never be silently replaced by an automatic pick.
         resolvePiResourceSelection(inventory, manual);

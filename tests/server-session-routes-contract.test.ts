@@ -665,7 +665,9 @@ test("创建会话接口把 Pi 与 Wand Agent 当两个引擎，非法组合明�
   const settings = await (await fetch(`${baseUrl}/api/sessions/${cliSession.id}/pi-settings`)).json() as { engine: string };
   assert.equal(settings.engine, "cli");
 
-  // Wand Agent：本机 harness 未预热/不可用时明确拒绝，不悄悄退回 CLI 冒充。
+  // Wand Agent now probes lazily on explicit selection. A file, not a directory,
+  // is a deterministic unavailable auth source regardless of developer env/auth.
+  config.harness = { ...config.harness!, agentDir: path.join(root, "wand.db") };
   const sdk = await post({ provider: "pi", engine: "sdk" });
   assert.equal(sdk.status, 400);
   assert.match(String((await sdk.json() as { error: string }).error), /core|harness/i);

@@ -57,7 +57,10 @@ function git(cwd, args, allowedStatuses = [0]) {
   }
 }
 
-function checkCandidate(repoRoot, relativePath) {
+export function checkCandidate(repoRoot, relativePath) {
+  if (path.isAbsolute(relativePath) || relativePath.split(/[\\/]/).includes("..")) {
+    throw new Error(`Refusing cache outside repository: ${relativePath}`);
+  }
   const target = path.join(repoRoot, relativePath);
   if (!assertNoSymlink(target)) return null;
   if (!lstatSync(target).isDirectory()) {
@@ -75,18 +78,28 @@ function checkCandidate(repoRoot, relativePath) {
   if (git(worktree, ["check-ignore", "--quiet", "--", gitPath], [1]) === null) {
     throw new Error(`Refusing cache not ignored by Git: ${relativePath}`);
   }
-  return { target, bytes: directoryBytes(target) };
+  return { target, ...directoryStats(target) };
 }
 
-function directoryBytes(directory) {
+function directoryStats(directory) {
+  const rootStat = lstatSync(directory);
   let bytes = 0;
+  let allocatedBytes = rootStat.blocks * 512;
+  let lastActivityMs = Math.max(rootStat.mtimeMs, rootStat.ctimeMs);
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const target = path.join(directory, entry.name);
     if (entry.name === ".git") throw new Error(`Refusing nested Git metadata: ${target}`);
     const stat = lstatSync(target);
-    bytes += stat.isDirectory() ? directoryBytes(target) : stat.size;
+    const child = stat.isDirectory() ? directoryStats(target) : {
+      bytes: stat.size,
+      allocatedBytes: stat.blocks * 512,
+      lastActivityMs: Math.max(stat.mtimeMs, stat.ctimeMs),
+    };
+    bytes += child.bytes;
+    allocatedBytes += child.allocatedBytes;
+    lastActivityMs = Math.max(lastActivityMs, child.lastActivityMs);
   }
-  return bytes;
+  return { bytes, allocatedBytes, lastActivityMs };
 }
 
 export function main(argv = process.argv.slice(2), options = {}) {
@@ -104,22 +117,42 @@ export function main(argv = process.argv.slice(2), options = {}) {
     throw new Error("The cache cleaner must run against the repository root.");
   }
   const candidates = [];
-  for (const relativePath of CACHE_PATHS) {
+  for (const relativePath of options.cachePaths ?? CACHE_PATHS) {
     const cache = checkCandidate(repoRoot, relativePath);
-    if (cache) candidates.push({ path: relativePath, bytes: cache.bytes });
+    if (cache && (!options.eligible || options.eligible(cache))) {
+      candidates.push({ path: relativePath, ...cache });
+    }
   }
   const applied = argv.includes("--apply");
   const totalBytes = candidates.reduce((total, candidate) => total + candidate.bytes, 0);
+  const totalAllocatedBytes = candidates.reduce((total, candidate) => total + candidate.allocatedBytes, 0);
+  const removed = [];
   for (const candidate of candidates) {
+    let displayed = candidate;
     if (applied) {
       const cache = checkCandidate(repoRoot, candidate.path);
-      if (cache) rmSync(cache.target, { recursive: true });
+      if (!cache || (options.eligible && !options.eligible(cache))
+        || (options.beforeRemove && !options.beforeRemove(cache))) {
+        write(`Skipped ${candidate.path} (missing, changed, or in use)`);
+        continue;
+      }
+      // Activity inspection can take time; revalidate age/paths after it as well.
+      const latest = options.beforeRemove ? checkCandidate(repoRoot, candidate.path) : cache;
+      if (!latest || (options.eligible && !options.eligible(latest))) {
+        write(`Skipped ${candidate.path} (changed during activity inspection)`);
+        continue;
+      }
+      rmSync(latest.target, { recursive: true });
+      displayed = { path: candidate.path, ...latest };
+      removed.push(displayed);
     }
-    write(`${applied ? "Removed" : "Would remove"} ${candidate.path} (${candidate.bytes} bytes)`);
+    write(`${applied ? "Removed" : "Would remove"} ${candidate.path} (${displayed.allocatedBytes} allocated bytes; ${displayed.bytes} logical bytes)`);
   }
-  write(`${applied ? "Removed" : "Preview"}: ${candidates.length} caches, ${totalBytes} bytes.`);
+  const allocatedBytes = applied
+    ? removed.reduce((total, candidate) => total + candidate.allocatedBytes, 0) : totalAllocatedBytes;
+  write(`${applied ? "Removed" : "Preview"}: ${applied ? removed.length : candidates.length} caches, ${allocatedBytes} allocated bytes (APFS shared blocks may differ from free-space gain).`);
   if (!applied) write("Run with --apply to remove these caches. Release binaries and distribution files are preserved.");
-  return { applied, candidates, totalBytes };
+  return { applied, candidates, removed, totalBytes, totalAllocatedBytes };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

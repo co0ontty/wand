@@ -40,6 +40,8 @@
     "check:brand-assets": "node scripts/sync-brand-assets.js --check",
     "audit:remnants": "node scripts/audit-legacy-remnants.js",
     "clean:build-cache": "node scripts/clean-build-cache.js",
+    "clean:build-cache:auto": "node scripts/auto-clean-build-cache.js",
+    "clean:build-cache:install": "node scripts/install-build-cache-cleanup.js",
     "prepublishOnly": "VER=${WAND_PUBLISH_VERSION:-$(git tag --sort=-v:refname --list 'v*' | head -1)} && VER=${VER#v} && npm version \"$VER\" --no-git-tag-version --allow-same-version && npm run build",
     "bundle:tailwind": "node scripts/bundle-tailwind.js"
   },
@@ -55,9 +57,14 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.81.0",
+    "@earendil-works/chord": "1.0.2",
     "@earendil-works/pi-agent-core": "1.0.2",
     "@earendil-works/pi-ai": "1.0.2",
+    "@earendil-works/pi-codemode": "1.0.2",
     "@earendil-works/pi-coding-agent": "1.0.2",
+    "@earendil-works/pi-mcp": "1.0.2",
+    "@earendil-works/pi-telemetry": "1.0.2",
+    "@earendil-works/pi-tui": "1.0.2",
     "@xterm/addon-serialize": "^0.14.0",
     "@xterm/addon-unicode11": "^0.9.0",
     "@xterm/headless": "^6.0.0",

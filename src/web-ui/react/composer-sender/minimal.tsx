@@ -1,7 +1,7 @@
 import * as React from "react";
 import { flushSync } from "react-dom";
 import { WandButton } from "../ui/index.js";
-import { hasOpenPopupSurface, isWandPopupOwnedBy } from "../ui/popup-lifecycle.js";
+import { hasOpenOwnedPopupSurface, hasOpenPopupSurface, isWandPopupOwnedBy } from "../ui/popup-lifecycle.js";
 
 /** Presentation only: the original editor, draft and delivery owner stay mounted. */
 export function useMinimalComposer({ owner, input, surface, phase, pending, locked, forceExpanded, onDismiss, popupOwners = [] }: {
@@ -50,9 +50,7 @@ export function useMinimalComposer({ owner, input, surface, phase, pending, lock
     const escape = (event: KeyboardEvent): void => {
       if (event.key !== "Escape" || !expandedNow.current || event.defaultPrevented || event.isComposing || hasOpenPopupSurface()
         || !host.contains(document.activeElement)) return;
-      const ownedPopup = Array.from(document.querySelectorAll<HTMLElement>("[data-wand-popup-owner]"))
-        .some(node => latest.current.popupOwners.includes(node.dataset.wandPopupOwner ?? "") && node.getClientRects().length && getComputedStyle(node).visibility !== "hidden");
-      if (ownedPopup) return;
+      if (hasOpenOwnedPopupSurface(latest.current.popupOwners)) return;
       event.preventDefault(); event.stopPropagation(); dismiss("escape");
     };
     const back = (): void => { if (!hasOpenPopupSurface()) dismiss("back"); };

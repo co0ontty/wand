@@ -62,6 +62,7 @@ function workspaceSessionSummary(
     provider: live.provider,
     sessionKind: live.sessionKind,
     runner: live.runner,
+    engine: live.structuredState?.engine,
     command: live.command,
     title: team.chat?.chatTitle ?? workspaceSessionTitle(live, names),
     status: live.status,

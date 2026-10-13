@@ -12,7 +12,7 @@ test("minimal composer preserves drafts and owned popups; PTY input and shortcut
   skip: process.env.WAND_MINIMAL_COMPOSER_BROWSER !== "1", timeout: 240_000,
 }, async () => {
   const root = resolve(import.meta.dirname, ".."), temp = mkdtempSync(join(tmpdir(), "wand-minimal-composer-"));
-  const output = join(root, "output/architecture-stage2/web-pty-input-modes"); mkdirSync(output, { recursive: true });
+  const output = process.env.WAND_MINIMAL_COMPOSER_OUTPUT ? resolve(process.env.WAND_MINIMAL_COMPOSER_OUTPUT) : join(root, "output/architecture-stage2/web-pty-input-modes"); mkdirSync(output, { recursive: true });
   await build({ stdin: { resolveDir: root, loader: "tsx", contents: `
     import './tests/helpers/composer-panels-browser-harness';
     import {updateInteractiveControls} from './src/web-ui/browser/input';

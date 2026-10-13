@@ -44,7 +44,7 @@ import { fallbackProviderModel, sessionEmployeeFields } from "./session-model.js
 
 import { ProcessManager, ProcessEvent } from "./process-manager.js";
 import { SessionLogger } from "./session-logger.js";
-import { coreHarnessAgentDir, warmCoreHarness } from "./harness-engine.js";
+import { coreHarnessAgentDir } from "./harness-engine.js";
 import { SessionRegistry } from "./session-registry.js";
 import { SessionCompletionTracker } from "./session-completion.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
@@ -438,14 +438,8 @@ export async function startServer(
     structuredHosts.host ? daemonAdmission.structured(structuredHosts.host) : undefined, () => decisionRuntime, openRouter,
     () => autoAssignEvaluate,
   );
-  // core harness 预热：只读本机 Pi 认证与模型目录，不联网。失败不影响启动，
-  // 但要在开始接输入前得到确定结论，否则首轮引擎裁决会因缓存未就绪而退回 CLI。
-  const coreHarnessStatus = await warmCoreHarness(config.harness);
-  if (coreHarnessStatus) {
-    console.log(coreHarnessStatus.available
-      ? `[wand] core harness 可用（Pi provider ${coreHarnessStatus.providerCount} 个、模型 ${coreHarnessStatus.modelCount} 个，agentDir ${coreHarnessStatus.agentDir}）；pi 结构化会话将使用进程内引擎。`
-      : `[wand] core harness 不可用，pi 结构化会话回退 CLI：${coreHarnessStatus.reason}`);
-  }
+  // No SDK prewarm: Pi defaults to CLI. Only an explicit Wand Agent selection
+  // probes the in-process harness; CLI startup/settings must not depend on it.
   const sessionRegistry = new SessionRegistry(processes, structuredSessions, storage);
   const sessionCompletions = new SessionCompletionTracker(storage, (id) => sessionRegistry.get(id));
   const missions = new Missions(storage, structuredSessions, sessionRegistry);

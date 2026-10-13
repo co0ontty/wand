@@ -1,6 +1,7 @@
-import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { coreHarnessAgentDir, loadPiCodingAgent } from "./harness-engine.js";
+import { coreHarnessAgentDir } from "./harness-engine.js";
+import type { loadPiCodingAgent } from "./harness-engine.js";
+import { cliPiResourceReader, installedPiUserResources, type PiResourceReader } from "./pi-user-resources.js";
 import type { WandConfig } from "./types.js";
 import type { PiSessionSettings } from "./pi-session-settings.js";
 import type { EventBus, ExtensionFactory, ExtensionRuntime, LoadExtensionsResult, ResourceLoader } from "@earendil-works/pi-coding-agent";
@@ -8,21 +9,10 @@ import type { EventBus, ExtensionFactory, ExtensionRuntime, LoadExtensionsResult
 type CodingAgent = Awaited<ReturnType<typeof loadPiCodingAgent>>;
 
 /** Resolve already-installed USER resources only. Never install, import code, or trust project packages. */
-export async function installedPiExtensions(config: WandConfig, cwd: string): Promise<Array<{ path: string; name: string; goal: boolean }>> {
-  const pi = await loadPiCodingAgent();
-  const agentDir = coreHarnessAgentDir(config.harness);
-  let raw: Record<string, unknown> = {};
-  try {
-    raw = JSON.parse(await readFile(path.join(agentDir, "settings.json"), "utf8"));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-  const settings = pi.SettingsManager.inMemory({
-    packages: Array.isArray(raw.packages) ? raw.packages : [],
-    extensions: Array.isArray(raw.extensions) ? raw.extensions.filter((item): item is string => typeof item === "string") : [],
-  }, { projectTrusted: false });
-  const manager = new pi.DefaultPackageManager({ cwd, agentDir, settingsManager: settings });
-  const resolved = await manager.resolve(async () => "skip");
+export async function installedPiExtensions(config: WandConfig, cwd: string,
+  reader?: PiResourceReader): Promise<Array<{ path: string; name: string; goal: boolean }>> {
+  const pi = reader ?? await cliPiResourceReader(cwd);
+  const resolved = await installedPiUserResources(pi, coreHarnessAgentDir(config.harness), cwd);
   return resolved.extensions.filter((item) => item.enabled && item.metadata.scope === "user").map((item) => {
     const name = item.metadata.source === "local" || item.metadata.source === "auto"
       ? path.basename(item.path) : item.metadata.source.replace(/^npm:/, "");
@@ -52,7 +42,7 @@ async function nativeExtensionLoader(): Promise<NativeExtensionLoader> {
 export async function createPiExtensionResources(
   pi: CodingAgent, config: WandConfig, cwd: string, settings: PiSessionSettings, systemPrompt: string,
 ): Promise<ResourceLoader> {
-  const resources = settings.globalTools || settings.goalMode ? await installedPiExtensions(config, cwd) : [];
+  const resources = settings.globalTools || settings.goalMode ? await installedPiExtensions(config, cwd, pi) : [];
   if (settings.goalMode && !resources.some((item) => item.goal)) {
     throw new Error("目标模式不可用：请先在 Pi 中安装并启用 pi-goal。");
   }

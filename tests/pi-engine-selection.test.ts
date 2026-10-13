@@ -6,7 +6,6 @@ import test from "node:test";
 
 import { dispatchAgentForTask } from "../src/agent-dispatch.js";
 import { defaultConfig } from "../src/config.js";
-import { CoreHarnessUnavailableError } from "../src/harness-engine.js";
 import { WandStorage } from "../src/storage.js";
 import { StructuredSessionManager } from "../src/structured-session-manager.js";
 import type { SessionSnapshot } from "../src/types.js";
@@ -57,12 +56,13 @@ test("引擎只属于 pi：其他 provider 不接受显式引擎", (t) => {
   assert.equal(claude.structuredState?.engine, undefined, "claude 会话不带引擎标记");
 });
 
-test("Wand Agent 不可用时明确报错，不静默退回 CLI 冒充", (t) => {
-  // 没有注入 core runner，也没有预热过 core 能力：显式要求 sdk 必须失败。
-  const { manager } = makeManager(t);
-  assert.throws(() => manager.resolveNewSessionPiEngine("sdk"), CoreHarnessUnavailableError);
-  assert.deepEqual(manager.resolveNewSessionPiEngine("cli"), { engine: "cli", reason: "Pi 主功能固定使用 CLI JSON" });
-  assert.deepEqual(manager.resolveNewSessionPiEngine(undefined), { engine: "cli", reason: "Pi 主功能固定使用 CLI JSON" });
+test("CLI 引擎裁决不探测 SDK，显式 Wand Agent 等待实际能力结论", async (t) => {
+  const { manager } = makeManager(t, { withCoreRunner: true });
+  assert.deepEqual(await manager.resolveNewSessionPiEngine("cli"), { engine: "cli", reason: "Pi 主功能固定使用 CLI JSON" });
+  assert.deepEqual(await manager.resolveNewSessionPiEngine(undefined), { engine: "cli", reason: "Pi 主功能固定使用 CLI JSON" });
+  assert.equal((await manager.resolveNewSessionPiEngine("sdk")).engine, "core");
+  // Real missing/broken SDK rejection is covered by pi-cli-isolation's import
+  // blocker, independent of the developer's provider credentials.
 });
 
 test("Pi 设置面板报告的引擎与会话落库的引擎一致", (t) => {

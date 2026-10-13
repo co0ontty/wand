@@ -942,7 +942,10 @@ wandThemeStore.subscribe(() => {
           terminalLibraryPending = true;
           const loading = document.createElement("div");
           loading.dataset.terminalLoadState = "loading"; loading.setAttribute("role", "status");
-          loading.textContent = "正在加载终端…"; container.replaceChildren(loading);
+          // #output also owns stable shell controls and their bound listeners.
+          // Lazy-load status must only replace its own node, never that chrome.
+          container.querySelector("[data-terminal-load-state]")?.remove();
+          loading.textContent = "正在加载终端…"; container.appendChild(loading);
           void ensureTerminalLibrary().then(() => { terminalLibraryPending = false; terminalLibraryFailedSession = null; initTerminal(options); }).catch(() => {
             terminalLibraryPending = false;
             if (state.terminal || terminalMount) return;
@@ -950,7 +953,7 @@ wandThemeStore.subscribe(() => {
             const failedContainer = document.getElementById("output");
             terminalLibraryFailedSession = failedSession && !isStructuredSession(failedSession) ? failedSession.id : null;
             if (failedContainer?.isConnected && terminalLibraryFailedSession) {
-              failedContainer.replaceChildren();
+              failedContainer.querySelector("[data-terminal-load-state]")?.remove();
               const message = document.createElement("div"); message.dataset.terminalLoadState = "error";
               const retry = document.createElement("button");
               retry.type = "button"; retry.dataset.antdControl = "default";

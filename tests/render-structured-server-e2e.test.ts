@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -9,6 +9,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 
 import { RenderStructuredClient } from "../src/render-structured-client.js";
+import { resolvePiCliPackage } from "../src/pi-cli-runtime.js";
 import { structuredRenderPaths } from "../src/render-structured-protocol.js";
 import { terminalDaemonPaths } from "../src/terminal-daemon-protocol.js";
 
@@ -61,6 +62,12 @@ test("S1 isolated Web restart recovers a v2-owned CLI without changing PID or DT
   const bin = path.join(root, "bin");
   mkdirSync(bin);
   const fakeCli = path.join(bin, "pi");
+  // The fake execution owner exposes the native CLI's read-only resource
+  // interface. CLI preparation must not borrow parsers from Wand's SDK.
+  writeFileSync(path.join(bin, "package.json"), JSON.stringify({
+    name: "@earendil-works/pi-coding-agent", bin: { pi: "pi" },
+  }));
+  symlinkSync(path.join(resolvePiCliPackage(), "dist"), path.join(bin, "dist"), "dir");
   writeFileSync(fakeCli, `#!${process.execPath}
 const line = (event) => process.stdout.write(JSON.stringify(event) + "\\n");
 line({type:"session",id:"fixture-session"});

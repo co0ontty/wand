@@ -89,7 +89,8 @@ export function installChatComposerStyles(): void {
 .input-composer[data-composer-expanded] .composer-input-wrap:not([data-editor-expanded="true"]):not(:has(.has-clipped-draft)) .composer-editor-controls { display:none; }
 .input-composer[data-composer-expanded] .composer-compact-entry { grid-row:2; grid-column:2; }
 .input-composer[data-composer-expanded="true"] .composer-compact-entry { visibility:hidden; pointer-events:none; }
-.input-composer[data-composer-expanded="false"] .composer-input-wrap [data-composer-sender] { height:0; overflow:hidden; opacity:0; pointer-events:none; }
+/* Collapsed editors must also release the identity layout's minimum height. */
+.input-composer[data-composer-expanded="false"] .composer-input-wrap [data-composer-sender] { height:0; min-height:0; overflow:hidden; opacity:0; pointer-events:none; }
 .input-composer[data-composer-expanded="false"] :is(.composer-editor-controls,.prompt-optimize-btn,.composer-status-row:not(:has([data-tone])),.composer-inline-config,.composer-pi-settings-toggle-host) { display:none; }
 .input-composer[data-composer-expanded] .input-textarea { min-height:36px; max-height:min(112px,24dvh); }
 .input-composer[data-composer-expanded] .composer-input-wrap[data-editor-expanded="true"] .input-textarea { max-height:min(504px,48dvh); }
@@ -134,7 +135,7 @@ export function installChatComposerStyles(): void {
 .pty-input-mode-label > span { display:flex; align-items:center; justify-content:center; gap:4px; grid-area:1 / 1; opacity:0; white-space:nowrap; transition:opacity var(--motion-morph) var(--ease-in-out-smooth); }
 .pty-input-mode-label > span[data-active="true"] { opacity:1; }
 .conversation-root .conversation-input-wrap[data-composer-expanded] .conversation-sender.ant-sender { padding:8px 10px; transition:padding var(--motion-normal) var(--ease-out-expo); }
-.conversation-input-wrap[data-composer-expanded="false"] .ant-sender-content { height:0; overflow:hidden; opacity:0; pointer-events:none; }
+.conversation-root .conversation-input-wrap[data-composer-expanded="false"] .ant-sender-content { height:0; min-height:0; overflow:hidden; opacity:0; pointer-events:none; }
 .conversation-input-wrap[data-composer-expanded="false"] :is(.ant-sender-header,.composer-edit-action,.conversation-config-trigger) { display:none; }
 .conversation-input-wrap[data-composer-expanded="false"] .ant-sender-footer { padding-top:0; }
 .conversation-input-wrap[data-composer-expanded="true"] .composer-compact-entry { display:none; }

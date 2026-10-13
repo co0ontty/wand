@@ -85,21 +85,26 @@ export class ConversationService {
   private readonly removals = new Map<string, Promise<void>>();
   private readonly pendingOperations = new Map<string, Set<Promise<unknown>>>();
   private readonly previewTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly legacyChannels = new Set<string>();
 
   /** Reuse session events; send only a bounded IM projection, never a second execution protocol. */
   ingestSessionEvent(event: ProcessEvent): void {
     const session = this.deps.structured.get(event.sessionId);
-    if (!this.deps.notifySession || !session?.automationId?.startsWith(CONVERSATION_SESSION_PREFIX)
-      || this.previewTimers.has(event.sessionId)) return;
+    if (session) this.importEmployeeSession(session);
+    if (!this.deps.notifySession || !session || this.previewTimers.has(event.sessionId)
+      || (!session.automationId?.startsWith(CONVERSATION_SESSION_PREFIX)
+        && !this.storage.employeeConversationForSession(session.id))) return;
     const timer = setTimeout(() => {
       this.previewTimers.delete(event.sessionId);
       const current = this.snapshot(event.sessionId);
       const requestId = current?.automationId?.slice(CONVERSATION_SESSION_PREFIX.length);
       const receipt = requestId ? this.receipt(requestId) : null;
-      if (!receipt || receipt.sessionId !== event.sessionId || !this.storage.getConversation(receipt.conversationId)
-        || this.storage.conversationListState(receipt.conversationId).deleting) return;
-      this.deps.notifySession?.({ conversationId: receipt.conversationId, sessionId: event.sessionId,
-        preview: conversationSessionPreview(current, receipt) });
+      const conversationId = receipt?.sessionId === event.sessionId ? receipt.conversationId
+        : this.storage.employeeConversationForSession(event.sessionId);
+      if (!conversationId || !this.storage.getConversation(conversationId)
+        || this.storage.conversationListState(conversationId).deleting) return;
+      this.deps.notifySession?.({ conversationId, sessionId: event.sessionId,
+        preview: conversationSessionPreview(current, receipt ?? undefined) });
     }, 100);
     timer.unref?.(); this.previewTimers.set(event.sessionId, timer);
   }
@@ -141,6 +146,25 @@ export class ConversationService {
 
   migrateExistingChats(): void {
     for (const run of this.storage.listAiTeamRuns().reverse()) this.importRun(run);
+    // Preserve legacy channels and already accepted IM links; only unbound interactive work is imported.
+    const instances = this.storage.listConversations();
+    for (const instance of instances) for (const id of [instance.sessionId, instance.communicationSessionId, ...(instance.historySessionIds ?? [])]) {
+      if (id) this.legacyChannels.add(id);
+    }
+    const channels = new Set([...this.legacyChannels, ...instances.flatMap(instance => this.storage.conversationSessionIds(instance.id))]);
+    for (const session of this.storage.loadSessionsSlim()) {
+      if (!channels.has(session.id)) this.importEmployeeSession(session);
+    }
+  }
+
+  /** Startup + session events, never GET repair. Stable employee identity is the only attribution source. */
+  importEmployeeSession(session: SessionSnapshot): void {
+    if (this.legacyChannels.has(session.id) || session.sessionKind !== "structured" || !session.employeeId || session.automationId
+      || (session.sessionSource && session.sessionSource !== "interactive") || session.workspaceTaskId) return;
+    const instance = this.storage.getConversation(employeeConversationId(session.employeeId))
+      ?? this.pendingEmployee(session.employeeId);
+    if (this.storage.conversationListState(instance.id).deleting) return;
+    this.storage.linkEmployeeSession(instance, session);
   }
 
   pendingEmployee(employeeId: string): ConversationInstance {

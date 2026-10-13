@@ -160,6 +160,9 @@ also reads generated iOS/macOS AppIcon PNGs, which on macOS come from
 `swift <platform>/scripts/generate-icons.swift` (run `npm run sync:brand-assets`
 first; CI does the same in `.github/workflows/ci.yml`). To preview removable
 compiler caches, run `npm run clean:build-cache`; add `-- --apply` to remove them.
+For macOS daily cleanup of inactive archived compiler intermediates (seven-day retention),
+use `npm run clean:build-cache:install -- --install`; see [automatic cleanup](docs/build-cache-cleanup.md).
+This does not install Git hooks or remove live native build trees.
 
 Runtime data is stored under `~/.wand/`: `config.json`, `wand.db`, and `sessions/`.
 
@@ -387,6 +390,8 @@ git submodule update --init -- render-bin
 全量 `npm test` 包含跨端源码契约检查，运行前另检出 `android ios macos render`。品牌一致性用例还会读 iOS/macOS 的 AppIcon PNG（生成物），在 macOS 上先跑 `npm run sync:brand-assets`，再用 `swift <平台>/scripts/generate-icons.swift` 生成（CI 的 `.github/workflows/ci.yml` 做同样的事）。
 `npm run clean:build-cache` 预览可清理的编译缓存，追加 `-- --apply` 才执行删除；
 保留分发包、Release Render 二进制、签名、依赖和会话数据。
+macOS 每日清理历史归档编译中间物（保留7天）用 `npm run clean:build-cache:install -- --install`；
+范围、并发保护、日志和停用方式见[自动清理说明](docs/build-cache-cleanup.md)。不修改Git hook，不自动删除现用原生构建树。
 
 数据存储在 `~/.wand/` 下：`config.json`（配置）、`wand.db`（SQLite）、`sessions/`（日志）。
 

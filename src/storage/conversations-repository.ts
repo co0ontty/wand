@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { CONVERSATION_OWNER, type ConversationInstance, type ConversationRequest } from "../conversation-types.js";
 import { nowIso } from "../password-manager.js";
 import type { WandTask } from "../task-types.js";
-import { ConversationTurn } from "../types.js";
+import { ConversationTurn, type SessionSnapshot } from "../types.js";
 import type { WandStorage } from "../storage.js";
 import { CreateWandTaskInput } from "./internal.js";
 
@@ -138,6 +138,45 @@ export class ConversationRepository {
       this.s.saveConversationRequest({ ...request, updatedAt: nowIso(), receipt: { ...request.receipt,
         state: "accepted", conversationId: instance.id, sessionId, messageId: request.id, startup: "pending" } });
     });
+  }
+
+  /** Attach an independent interactive session, without copying its transcript or executing it. */
+  linkEmployeeSession(instance: ConversationInstance, session: SessionSnapshot): void {
+    const messageId = `employee-session:${session.id}`;
+    const title = session.title?.trim() || "工作区会话";
+    const previous = this.db.prepare("SELECT conversation_id, turn_json FROM conversation_messages WHERE id = ?")
+      .get(messageId) as { conversation_id: string; turn_json: string } | undefined;
+    if (previous?.conversation_id === instance.id
+      && (JSON.parse(previous.turn_json) as ConversationTurn).sessionLink?.title === title) return;
+    this.s.transaction(() => {
+      // An explicit employee change is allowed only before the first input. Never move historical work.
+      if (previous && previous.conversation_id !== instance.id) {
+        if (this.s.lastSessionTurn(session.id)) return;
+        this.db.prepare("DELETE FROM conversation_messages WHERE id = ?").run(messageId);
+        const old = this.s.getConversation(previous.conversation_id);
+        if (old?.kind === "dm" && !old.sessionId && !old.communicationSessionId && !old.historySessionIds?.length
+          && !this.s.lastConversationEvent(old.id) && !this.s.conversationTasks(old.id).length
+          && !this.s.conversationListState(old.id).pinnedAt) this.s.deleteConversation(old.id);
+      }
+      instance.createdAt ||= session.startedAt;
+      instance.updatedAt = [instance.updatedAt, session.startedAt, session.endedAt ?? ""].sort().at(-1)!;
+      this.s.saveConversation(instance);
+      const employee = instance.peerEmployeeId ? this.s.getSiliconEmployee(instance.peerEmployeeId) : null;
+      const turn: ConversationTurn = { role: "assistant", messageId, conversationId: instance.id,
+        createdAt: session.startedAt,
+        author: { id: instance.peerEmployeeId!, name: session.employeeName ?? employee?.name ?? instance.name,
+          avatar: session.employeeAvatar ?? employee?.avatar },
+        sessionLink: { sessionId: session.id, title }, content: [] };
+      this.db.prepare(`INSERT INTO conversation_messages(id, conversation_id, turn_json, created_at) VALUES (?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET turn_json = excluded.turn_json`)
+        .run(messageId, instance.id, JSON.stringify(turn), session.startedAt);
+    });
+  }
+
+  employeeConversationForSession(sessionId: string): string | null {
+    const row = this.db.prepare("SELECT conversation_id FROM conversation_messages WHERE id = ?")
+      .get(`employee-session:${sessionId}`) as { conversation_id: string } | undefined;
+    return row?.conversation_id ?? null;
   }
 
   conversationSessionIds(id: string): string[] {

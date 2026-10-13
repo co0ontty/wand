@@ -43,7 +43,9 @@ html.no-transition *, html.no-transition *::before, html.no-transition *::after 
 .terminal-scrollbar-track { position: absolute; inset: 0; }
 .terminal-scrollbar-thumb { position: absolute; right: 4px; width: 12px; min-height: 28px; border-radius: 6px; background: var(--scrollbar-thumb); cursor: pointer; }
 .terminal-scrollbar-thumb:hover, .terminal-scrollbar-thumb.dragging { background: var(--scrollbar-hover); }
-.terminal-scale-overlay { position: absolute; top: 8px; right: 24px; z-index: 11; display: flex; align-items: center; gap: 6px; }
+.terminal-scale-overlay { position: absolute; top: 8px; right: 24px; z-index: 11; display: flex; align-items: center; gap: 6px; padding: 4px; border-radius: var(--control-radius); background: var(--bg-primary); color: var(--text-primary); }
+.terminal-scale-overlay-label { min-width: 4ch; text-align: center; font-size: var(--font-size-xs); font-variant-numeric: tabular-nums; }
+@media (pointer: coarse) { .terminal-scale-overlay .ant-btn { min-width: 44px; min-height: 44px; } }
 .terminal-resize-handle { position: absolute; bottom: 0; right: 0; width: 24px; height: 24px; cursor: nwse-resize; touch-action: none; z-index: 12; }
 .terminal-jump-bottom, .chat-unread-bubble { position: absolute; bottom: 16px; right: 20px; z-index: 20; visibility: hidden; }
 .terminal-jump-bottom.visible, .chat-unread-bubble.visible { visibility: visible; }

@@ -1,0 +1,48 @@
+{
+  "blueprintId": "team_mv5aband0002wirz2q-generated-blueprint",
+  "runId": "team_mv5aband0002wirz2q",
+  "task": "补齐失败的只读交互审查。在 /Users/co0ontty/Self/vibe_coding/wand ，用户要求优化长期未更新的 macOS，使主要交互与当前 Web 大致一致，决定基于旧版改或重写，未来双向同步。先读取根 AGENTS.md 和 macos/README.md。主仓已有 conversation-service.ts、storage/conversations-repository.ts 修改和未跟踪 workspace-employee-conversation.test.ts，不动这些；macos 子仓干净。禁止改业务源码、发布、安装、启动客户端及输出凭据。只允许写 output/architecture-stage2/macos-refresh/parity-audit.md。审查主要流程（首页/侧栏/聊天/员工/私聊/团队/草稿/模型/任务/设置），列出证据明确的差距，区分本轮必要与后续功能。重点比较保留原生增量对齐与共享 Web 主体验的实际代价/限制，不预设选择。请在报告给出最小可落地实施清单、验证入口以及长期双向同步机制。所有新发现问题记录现象、证据、影响、复现入口。负责人最终综合。",
+  "playbookId": "generated-blueprint",
+  "playbookTitle": "Dynamic team blueprint",
+  "source": "generated",
+  "status": "draft",
+  "createdAt": 1791811516599,
+  "roles": [
+    {
+      "roleId": "desktop-parity-retry",
+      "title": "客户端交互差距与架构补审",
+      "description": "以源码证据比较两端并给出可落地的增量方案，不改业务代码。",
+      "capabilityNeeds": [],
+      "tools": [
+        "bash",
+        "read",
+        "write"
+      ],
+      "modelPreferences": [
+        "openai-codex/gpt-5.5"
+      ]
+    }
+  ],
+  "rounds": [
+    {
+      "id": "collect",
+      "type": "parallel",
+      "roles": [
+        "desktop-parity-retry"
+      ]
+    }
+  ],
+  "policy": {
+    "rationale": "A task-specific collaboration blueprint generated for the lead captain",
+    "strategy": "The lead captain generated this collaboration plan; the extension handles dispatch, communication, observation, and recording.",
+    "evidencePolicy": "Workers should separate cited evidence, inference, confidence, and missing information.",
+    "modelPolicy": "Use configured models that are objectively available; keep soft health observations visible.",
+    "synthesisPolicy": "The lead uses worker outputs as inputs and keeps final judgment outside the extension.",
+    "progressMilestones": [
+      "collect: parallel"
+    ],
+    "stopCriteria": "All planned rounds have returned a status and the run log is persisted."
+  },
+  "outputContract": "output/architecture-stage2/macos-refresh/parity-audit.md；简短结论、代码位置、影响与验证入口。",
+  "captainRationale": "A task-specific collaboration blueprint generated for the lead captain"
+}

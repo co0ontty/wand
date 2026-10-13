@@ -96,7 +96,7 @@ export async function dispatchAgentForTask(
         // 直接派发 Wand Agent（不进员工候选链）：先裁决进程内引擎是否可用，
         // 不可用就让这次派发明确失败，不静默退回 CLI 冒充。
         ...(agent.engine === "sdk"
-          ? { engine: structured!.resolveNewSessionPiEngine("sdk").engine }
+          ? { engine: (await structured!.resolveNewSessionPiEngine("sdk")).engine }
           : {}),
         worktreeEnabled: false,
         sessionSource: "automation",

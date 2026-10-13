@@ -4,22 +4,26 @@
 /** Pi CLI provider bridge. No Agent/SDK runner and no changes to the user's Pi auth/models files. */
 import { readFileSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
-import { createAssistantMessageEventStream, lazyApi, type Api, type Model,
-  type SimpleStreamOptions, type TranscriptContext } from "@earendil-works/pi-ai";
+import type { Api, Model, SimpleStreamOptions, TranscriptContext } from "@earendil-works/pi-ai";
+import { importPiCliAiModule, runningPiCliPackage } from "./pi-cli-runtime.js";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { OPENROUTER_FREE_PROVIDER, OPENROUTER_FREE_ROUTING } from "./openrouter-free-models.js";
 import { openOpenRouterFreeCliAccess, revokeOpenRouterFreeCliAccess, type OpenRouterFreeCliPolicy } from "./openrouter-free-cli.js";
 
-export default function wandOpenRouterFree(pi: ExtensionAPI): void {
+export default async function wandOpenRouterFree(pi: ExtensionAPI): Promise<void> {
   const file = process.env.WAND_PI_FREE_POLICY;
   const token = process.env.WAND_PI_FREE_TOKEN ?? "";
   delete process.env.WAND_PI_FREE_POLICY;
   delete process.env.WAND_PI_FREE_TOKEN;
   if (!file) throw new Error("免费模型调用缺少本轮策略。");
   const policy = JSON.parse(readFileSync(file, "utf8")) as OpenRouterFreeCliPolicy;
+  const host = runningPiCliPackage();
+  const [{ createAssistantMessageEventStream }, api] = await Promise.all([
+    importPiCliAiModule<typeof import("@earendil-works/pi-ai/utils/event-stream")>(host, "utils/event-stream.js"),
+    importPiCliAiModule<typeof import("@earendil-works/pi-ai/api/openai-completions")>(host, "api/openai-completions.js"),
+  ]);
   // Pi applies its HTTP/proxy configuration after factories load; use the current fetch per request.
   const access = openOpenRouterFreeCliAccess(policy.databasePath, token, (url, init) => globalThis.fetch(url, init));
-  const api = lazyApi(() => import("@earendil-works/pi-ai/api/openai-completions"));
   let activeModel = policy.model;
   const streamSimple = (model: Model<Api>, transcript: TranscriptContext, options?: SimpleStreamOptions) => {
     const stream = createAssistantMessageEventStream();
@@ -30,7 +34,7 @@ export default function wandOpenRouterFree(pi: ExtensionAPI): void {
           options?.signal, access.requirements);
         activeModel = checked.model;
         key = checked.apiKey;
-        const inner = api.streamSimple(activeModel, transcript, {
+        const inner = api.streamSimple(activeModel as Parameters<typeof api.streamSimple>[0], transcript, {
           ...options, apiKey: key,
           maxTokens: Math.min(options?.maxTokens ?? activeModel.maxTokens, activeModel.maxTokens),
           reasoning: activeModel.reasoning ? options?.reasoning : undefined,

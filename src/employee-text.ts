@@ -1,4 +1,4 @@
-import { normalizeContext, type AssistantMessage, type ModelThinkingLevel, type ThinkingLevel } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ModelThinkingLevel, ThinkingLevel } from "@earendil-works/pi-ai";
 import { coreHarnessRuntime, loadPiAi, resolveCoreModel } from "./harness-engine.js";
 import { agentKey } from "./ai-team-types.js";
 import { getDefaultModelForProvider } from "./config.js";
@@ -88,7 +88,8 @@ export async function prepareEmployeeTextCandidate(
     };
   }
   if (agent.provider !== "pi") throw new Error("Wand Agent只支持Pi provider。");
-  const context = normalizeContext({ systemPrompt: request.system,
+  const pi = await loadPiAi();
+  const context = pi.normalizeContext({ systemPrompt: request.system,
     messages: [{ role: "user", content: request.prompt, timestamp: Date.now() }], tools: [] });
   const reasoning = thinkingEffortToPiLevel(agent.thinkingEffort ?? "off");
   if (isOpenRouterFreeSelector(agent.model)) {
@@ -110,7 +111,7 @@ export async function prepareEmployeeTextCandidate(
   }
   const resolved = await resolveCoreModel(config.harness, agent.model, { cwd: config.defaultCwd });
   if (!resolved) throw new Error("Wand Agent模型不可用。");
-  const runtime = await coreHarnessRuntime(config.harness), pi = await loadPiAi();
+  const runtime = await coreHarnessRuntime(config.harness);
   const level = pi.clampThinkingLevel(resolved.model, (reasoning ?? "off") as ModelThinkingLevel);
   return async () => {
     signal.throwIfAborted();

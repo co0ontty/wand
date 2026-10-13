@@ -118,15 +118,17 @@ export function createSessionRouteContext(deps: SessionRouteDeps): SessionRouteC
   const piSettingsResponse = async (id: string): Promise<PiSettingsResponse> => {
     const { settings, resolution } = structured.getPiSettings(id);
     const snapshot = structured.get(id)!;
-    const installed = await installedPiExtensions(config, snapshot.cwd);
     const sdk = resolution.engine === "core";
+    const sdkReader = sdk ? await (await import("./harness-engine.js")).loadPiCodingAgent() : undefined;
+    const installed = await installedPiExtensions(config, snapshot.cwd, sdkReader);
     const archived = snapshot.archived;
     const modifiable = !archived;
     const goalAvailable = installed.some((item) => item.goal);
     const localDecisionAvailable = config.localDecision?.enabled === true || decisions?.status().enabled === true;
-    const inventory = await discoverPiResources(config, snapshot.cwd);
-    const resourceCatalog = { ...inventory.catalog, supported: modifiable && !sdk && inventory.catalog.supported,
-      reason: archived ? "请先恢复已归档的会话。" : sdk ? "Wand Agent 尚不支持 Skills / MCP 会话选择。" : inventory.catalog.reason };
+    const catalog = sdk ? { supported: false, reason: "Wand Agent 尚不支持 Skills / MCP 会话选择。", skills: [], mcpServers: [] }
+      : (await discoverPiResources(config, snapshot.cwd)).catalog;
+    const resourceCatalog = { ...catalog, supported: modifiable && !sdk && catalog.supported,
+      reason: archived ? "请先恢复已归档的会话。" : sdk ? "Wand Agent 尚不支持 Skills / MCP 会话选择。" : catalog.reason };
     const controls: PiSettingsControls = {
       // 基础工具与 CodeMode 在两种引擎下都能表达（CLI 通过 --tools 白名单）。
       tools: modifiable,

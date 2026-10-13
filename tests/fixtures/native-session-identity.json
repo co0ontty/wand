@@ -1,0 +1,131 @@
+{
+  "providers": [
+    "claude",
+    "codex",
+    "opencode",
+    "grok",
+    "qoder",
+    "pi",
+    "gemini"
+  ],
+  "cases": [
+    {
+      "name": "Gemini",
+      "payload": {
+        "id": "gemini",
+        "provider": "gemini"
+      },
+      "expected": {
+        "providerLabel": "Gemini"
+      }
+    },
+    {
+      "name": "unknown",
+      "payload": {
+        "id": "unknown",
+        "provider": "future-cli"
+      },
+      "expected": {
+        "providerLabel": "future-cli"
+      }
+    },
+    {
+      "name": "Pi CLI",
+      "payload": {
+        "id": "pi-cli",
+        "provider": "pi",
+        "engine": "cli",
+        "structuredState": {
+          "runner": "pi-cli-json",
+          "engine": "cli",
+          "lastError": null,
+          "inFlight": false,
+          "activeRequestId": null
+        }
+      },
+      "expected": {
+        "providerLabel": "Pi"
+      }
+    },
+    {
+      "name": "Wand Agent",
+      "payload": {
+        "id": "wand-agent",
+        "provider": "pi",
+        "engine": "core",
+        "structuredState": {
+          "runner": "pi-cli-json",
+          "engine": "core",
+          "lastError": null,
+          "inFlight": false,
+          "activeRequestId": null
+        }
+      },
+      "expected": {
+        "providerLabel": "Wand Agent"
+      }
+    },
+    {
+      "name": "employee",
+      "payload": {
+        "id": "employee",
+        "provider": "gemini",
+        "employeeId": "employee-fixture",
+        "employeeName": "测试员工",
+        "employeeAvatar": "cat:0",
+        "workspaceTaskId": "task-fixture"
+      },
+      "expected": {
+        "providerLabel": "Gemini",
+        "badge": "员工",
+        "caption": "测试员工"
+      }
+    },
+    {
+      "name": "team chat",
+      "payload": {
+        "id": "team-chat",
+        "provider": "pi",
+        "engine": "core",
+        "teamChat": {
+          "teamId": "team-fixture",
+          "runId": "run-fixture",
+          "teamName": "测试团队",
+          "chatTitle": "团队群聊",
+          "memberCount": 3
+        }
+      },
+      "expected": {
+        "providerLabel": "Wand Agent",
+        "badge": "群聊",
+        "caption": "测试团队 · 群聊"
+      }
+    },
+    {
+      "name": "team step",
+      "payload": {
+        "id": "team-step",
+        "provider": "codex",
+        "employeeId": "employee-fixture",
+        "employeeName": "测试员工",
+        "teamStep": {
+          "runId": "run-fixture",
+          "stepId": "step-fixture",
+          "kind": "work",
+          "title": "测试工作",
+          "memberId": "member-fixture",
+          "memberName": "测试成员",
+          "teamName": "测试团队",
+          "stepStatus": "running",
+          "runStatus": "running",
+          "runFinished": false
+        }
+      },
+      "expected": {
+        "providerLabel": "Codex",
+        "badge": "团队",
+        "caption": "测试团队 · 测试成员"
+      }
+    }
+  ]
+}
