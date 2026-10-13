@@ -1,9 +1,10 @@
+import { isArchiveBlocked } from "./archive-policy.js";
 import { cleanupWorktreeSync } from "./git-worktree.js";
-import { inferProviderFromCommand } from "./session-provider.js";
 import type { ProcessManager } from "./process-manager.js";
-import type { StructuredSessionManager } from "./structured-session-manager.js";
+import { inferProviderFromCommand } from "./session-provider.js";
 import type { WandStorage } from "./storage.js";
-import type { ExecutionMode, SessionSnapshot } from "./types.js";
+import type { StructuredSessionManager } from "./structured-session-manager.js";
+import type { ExecutionMode,SessionSnapshot } from "./types.js";
 
 export type SessionOwner = "structured" | "pty" | "storage";
 
@@ -54,6 +55,27 @@ export function deleteProviderNativeHistory(
 }
 
 type HiddenSessionStore = Pick<WandStorage, "getConfigValue" | "setConfigValue">;
+
+/** The owner deletes the managed session first; native history/tombstones have one implementation. */
+export function deleteOwnedSessionWithHistory(
+  remove: () => SessionSnapshot | null,
+  deleter: ProviderHistoryDeleter,
+  storage: HiddenSessionStore,
+): SessionSnapshot | null {
+  const snapshot = remove();
+    const providerSessionId = snapshot?.claudeSessionId?.trim();
+    if (!snapshot || !providerSessionId) return snapshot;
+
+    const provider = snapshot.provider
+      ?? snapshot.structuredState?.provider
+      ?? inferProviderFromCommand(snapshot.command)
+      ?? "claude";
+    deleteProviderNativeHistory(deleter, provider, providerSessionId, snapshot.cwd);
+    addHiddenSessionIds(storage, [providerSessionId]);
+    return snapshot;
+
+}
+
 
 /** 读取 `hidden_claude_session_ids`；坏数据 / 空值按空集合处理，不抛错。 */
 export function readHiddenSessionIds(storage: Pick<HiddenSessionStore, "getConfigValue">): Set<string> {
@@ -121,6 +143,12 @@ export class SessionRegistry {
 
   getLatest(id: string): SessionSnapshot | null {
     return this.get(id);
+  }
+
+  /** Runtime facts and membership only; list/policy reads must not hydrate transcripts. */
+  getSlim(id: string): SessionSnapshot | null {
+    const snapshot = this.structured.getSlim(id) ?? this.processes.getOwnedSlim(id) ?? this.storage.getSessionSlim(id);
+    return snapshot ? { ...snapshot, ...this.storage.getSessionWorkspace(id), ...this.storage.getSessionCompletion(id) } : null;
   }
 
   listSlim(): SessionSnapshot[] {
@@ -194,6 +222,11 @@ export class SessionRegistry {
   }
 
   setArchived(id: string, archived: boolean): SessionSnapshot | null {
+    const current = this.getLatest(id);
+    if (current && !!current.archived === archived && (!archived || current.archivedAt)) return current;
+    if (archived && current && isArchiveBlocked(current)) {
+      throw Object.assign(new Error("会话仍在执行或等待处理，完成后才能归档。"), { statusCode: 409 });
+    }
     const owner = this.ownerOf(id);
     if (owner === "structured") return this.structured.setSessionArchived(id, archived);
     if (owner === "pty") return this.processes.setSessionArchived(id, archived);
@@ -245,17 +278,7 @@ export class SessionRegistry {
   }
 
   deleteWithProviderHistory(id: string): SessionSnapshot | null {
-    const snapshot = this.delete(id);
-    const providerSessionId = snapshot?.claudeSessionId?.trim();
-    if (!snapshot || !providerSessionId) return snapshot;
-
-    const provider = snapshot.provider
-      ?? snapshot.structuredState?.provider
-      ?? inferProviderFromCommand(snapshot.command)
-      ?? "claude";
-    deleteProviderNativeHistory(this.processes, provider, providerSessionId, snapshot.cwd);
-    addHiddenSessionIds(this.storage, [providerSessionId]);
-    return snapshot;
+    return deleteOwnedSessionWithHistory(() => this.delete(id), this.processes, this.storage);
   }
 
   private updateStored(

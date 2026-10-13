@@ -1,3 +1,4 @@
+import { browserAssetRuntime } from "../asset-runtime.js";
 import type { AppState } from "./types";
 import { ComposerQueueClock, ComposerStore } from "./composer.js";
 import { ChatRenderCache } from "./chat-render-cache.js";
@@ -13,7 +14,7 @@ export const composer = new ComposerStore({
 });
 export const composerQueue = new ComposerQueueClock();
 
-export var configPath = "${wandConfigPath}";
+export var configPath = browserAssetRuntime.configPath;
 export var CHAT_EXPAND_STATE_STORAGE_KEY = "wand-chat-expand-state-v1";
 
 // ===== 一次性 localStorage 迁移 =====

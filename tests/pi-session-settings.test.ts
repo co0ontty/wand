@@ -310,7 +310,7 @@ test("HTTP Pi settings validates owner/engine/body, handles missing goal, and pr
   const structured = new StructuredSessionManager(storage, config, null, { core: core.runner });
   const processes = new ProcessManager(config, storage, root);
   const registry = new SessionRegistry(processes, structured, storage);
-  const app = express(); app.use(express.json()); registerSessionRoutes(app, processes, structured, storage, config.defaultMode, config, registry);
+  const app = express(); app.use(express.json()); registerSessionRoutes(app, { processes, structured, storage, defaultMode: config.defaultMode, config, sessions: registry });
   const server = createServer(app); await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   t.after(async () => { await new Promise<void>((resolve) => server.close(() => resolve())); structured.dispose(); processes.dispose(); await whenIterationPromptsSettled(); storage.close(); });

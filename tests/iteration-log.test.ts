@@ -6,6 +6,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test, { type TestContext } from "node:test";
 
 import {
@@ -19,7 +20,7 @@ import {
   resolveCommitContextInput,
   whenIterationPromptsSettled,
 } from "../src/iteration-log.js";
-import { WandStorage } from "../src/storage.js";
+import { ensureDatabaseFile, WandStorage } from "../src/storage.js";
 import { DEFAULT_ITERATION_NAME, type WandIterationPrompt } from "../src/task-types.js";
 
 function tempRoot(t: TestContext, prefix: string): string {
@@ -155,8 +156,8 @@ test("tasks without an iteration land on the default one", async (t) => {
   const storage = new WandStorage(path.join(root, "wand.db"));
   t.after(() => storage.close());
 
-  // 还没人建过：第一条记录会把默认迭代惰性建出来。
-  assert.equal(storage.findDefaultWandMilestone(), null);
+  // 初始化阶段备好默认迭代；后续 GET 不再承担惰性写入。
+  assert.ok(storage.findDefaultWandMilestone());
   recordIterationPrompt(storage, { id: "session-bare", cwd: "" }, "把首页改成暗色主题并截图对比");
   recordIterationPromptForTask(storage, { title: "顺手把 README 的截图换成新的", source: "task" });
   await whenIterationPromptsSettled();
@@ -170,18 +171,24 @@ test("tasks without an iteration land on the default one", async (t) => {
   assert.equal(rows.length, 2);
   assert.deepEqual(rows.map((row) => row.milestoneId), [fallback.id, fallback.id]);
 
-  // 惰性创建幂等：读多少次都只有一行默认迭代。
+  // 初始化/写入口幂等，默认迭代始终只有一行。
   assert.equal(storage.ensureDefaultWandMilestone().id, fallback.id);
   assert.equal(storage.listWandMilestones().filter((item) => item.isDefault).length, 1);
 });
 
 test("an existing milestone named 默认迭代 is adopted instead of duplicated", (t) => {
   const root = tempRoot(t, "wand-iteration-adopt-");
-  const storage = new WandStorage(path.join(root, "wand.db"));
+  const dbPath = path.join(root, "wand.db");
+  ensureDatabaseFile(dbPath);
+  const legacy = new DatabaseSync(dbPath);
+  legacy.prepare("INSERT INTO wand_milestones(id, name, created_at, updated_at) VALUES (?, ?, ?, ?)")
+    .run("legacy-default", DEFAULT_ITERATION_NAME, "2026-01-01", "2026-01-01");
+  legacy.close();
+  const storage = new WandStorage(dbPath);
   t.after(() => storage.close());
 
-  const existing = storage.createWandMilestone({ name: DEFAULT_ITERATION_NAME, workspaceId: null });
-  assert.equal(existing.isDefault, false);
+  const existing = storage.getWandMilestone("legacy-default")!;
+  assert.equal(existing.isDefault, true, "existing legacy default is adopted during initialization");
   const adopted = storage.ensureDefaultWandMilestone();
   assert.equal(adopted.id, existing.id);
   assert.equal(adopted.isDefault, true);

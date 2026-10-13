@@ -68,3 +68,11 @@ test("remnants audit joins constant selector fragments and records CSS separatel
   assert.equal(report.candidates[0].sites.length, 1);
   assert.equal("live" in report.candidates[0].sites[0], false);
 });
+
+test("remnants audit does not report xterm.js runtime class names as dead-code candidates", () => {
+  const report = scan(`
+    document.querySelector('.xterm-screen'); document.querySelector('.xterm-viewport');
+    document.querySelector('.xterm-helper-textarea'); document.querySelector('.wand-only-missing');
+  `);
+  assert.deepEqual(report.candidates.map((c) => c.token), [".wand-only-missing"]);
+});

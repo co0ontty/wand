@@ -19,7 +19,7 @@ test("conversation IM density stays scoped and keeps the bounded feedback and fi
   assert.match(css, /\.conversation-action-row \{ height:44px;/);
   // IM 层两侧都是气泡：按聊天气泡收口，不铺满整页。
   assert.match(css, /\.conversation-root \.team-chat-stream \.team-chat-msg\[data-shape="bubble"\] \.team-chat-msg-content \{ max-width:min\(calc\(100% - 42px\),600px\); \}/);
-  assert.match(css, /\.conversation-root \.ant-bubble-content/);
+  assert.match(css, /\.conversation-root \.wand-chat-message-content/);
   assert.match(css, /\.conversation-row-topline \.conversation-row-title[^}]*text-overflow:ellipsis/);
   assert.match(css, /prefers-reduced-motion:reduce/);
   // 消息流贴底：内容比视口短时从底部往上长（首个 flex item 吸收空余），内容超出后 auto margin 归零。
@@ -28,8 +28,8 @@ test("conversation IM density stays scoped and keeps the bounded feedback and fi
   // 输入面板一体：正文与操作行同属一张发送器面板，不再在面板外再摆一条工具栏。
   assert.match(css, /\.conversation-sender \.ant-sender-footer \{ padding:0 12px 10px; \}/);
   // 一次连续发言的首/尾各自压平对应的角（首条在头像侧）。
-  assert.match(css, /\.conversation-root \.conversation-message\[data-lead="true"\]\[data-side="start"\] \.ant-bubble-content \{ border-top-left-radius:4px; \}/);
-  assert.match(css, /\.conversation-root \.conversation-message\[data-tail="true"\]\[data-side="end"\] \.ant-bubble-content \{ border-bottom-right-radius:4px; \}/);
+  assert.match(css, /\.conversation-root \.conversation-message\[data-lead="true"\]\[data-side="start"\] \.wand-chat-message-content \{ border-top-left-radius:4px; \}/);
+  assert.match(css, /\.conversation-root \.conversation-message\[data-tail="true"\]\[data-side="end"\] \.wand-chat-message-content \{ border-bottom-right-radius:4px; \}/);
 });
 
 import { appendedConversationKeys, conversationClock, conversationDay, conversationInitials, conversationTaskStateLabel, joinsConversationBubble } from "../src/web-ui/react/conversations/presentation.js";

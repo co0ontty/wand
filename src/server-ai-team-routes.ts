@@ -20,11 +20,13 @@ import { requireTeamEmployee, type AiTeamEmployeeSource } from "./ai-team-employ
 import { asyncRoute } from "./express-async.js";
 import { getErrorMessage } from "./error-utils.js";
 import { defaultMilestoneIdForWrite, scopedMilestoneId } from "./milestone-scope.js";
-import { bodyObject, sendRouteError, text } from "./server-request.js";
-import { parseTaskAgent } from "./server-task-routes.js";
+import { parseStoredAvatar } from "./avatar-input.js";
+import { bodyObject, boundedText, sendRouteError, text } from "./server-request.js";
+import { parseTaskAgent } from "./task-agent-parsing.js";
 import type { WandStorage } from "./storage.js";
 import { provisionalTaskTitleFromDescription } from "./task-title.js";
 import type { WandTaskAgent } from "./task-types.js";
+import { badRequest, conflict, HttpError, notFound } from "./http-error.js";
 
 const NOT_FOUND = /不存在/;
 /** 团队页「直接开工」自动建卡的标记（§4.2 / Q3）：看板靠它区分团队卡与手写卡。 */
@@ -34,31 +36,31 @@ const TEAM_DIRECT_NOTE_MAX = 4000;
 /** `GET /api/ai-teams/:id` 附带多少个运行摘要（§4.1 B14）：面板只要最近这一段。 */
 const TEAM_DIRECT_RUNS_LIMIT = 50;
 
+/**
+ * AI 团队服务的业务错误（冲突、不存在、校验）文案本身面向用户，这里显式转成 HttpError
+ * 保留原文案与状态码；其余异常仍走 sendRouteError 的通用回包。
+ */
 function sendTeamError(res: Response, error: unknown): void {
   const message = getErrorMessage(error, "团队操作失败。");
-  const status = error instanceof AiTeamConflictError ? 409 : NOT_FOUND.test(message) ? 404 : 400;
-  sendRouteError(res, error, "团队操作失败。", status);
-}
-
-function boundedText(value: unknown, label: string, min: number, max: number): string {
-  const result = text(value);
-  if (result.length < min) throw new Error(`${label}不能为空。`);
-  if (result.length > max) throw new Error(`${label}不能超过 ${max} 个字符。`);
-  return result;
+  if (error instanceof AiTeamConflictError) {
+    sendRouteError(res, conflict(message), "团队操作失败。", 409);
+    return;
+  }
+  if (NOT_FOUND.test(message)) {
+    sendRouteError(res, notFound(message), "团队操作失败。", 404);
+    return;
+  }
+  sendRouteError(res, error instanceof HttpError ? error : badRequest(message), "团队操作失败。", 400);
 }
 
 function parseAvatar(value: unknown, name: string): string {
-  const avatar = text(value);
-  if (!avatar || /^cat:\d{1,2}$/.test(avatar)) return avatar;
-  if (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(avatar)) throw new Error(`成员「${name}」的头像格式无效。`);
-  if (avatar.length > AI_TEAM_AVATAR_MAX_CHARS) throw new Error(`成员「${name}」的头像太大。`);
-  return avatar;
+  return parseStoredAvatar(value, `成员「${name}」`, AI_TEAM_AVATAR_MAX_CHARS);
 }
 
 function parseMembers(value: unknown, existing: AiTeam | null, source?: AiTeamEmployeeSource): AiTeamMember[] {
-  if (!Array.isArray(value)) throw new Error("成员列表必须是数组。");
+  if (!Array.isArray(value)) throw badRequest("成员列表必须是数组。");
   if (value.length < AI_TEAM_MIN_MEMBERS || value.length > AI_TEAM_MAX_MEMBERS) {
-    throw new Error(`团队需要 ${AI_TEAM_MIN_MEMBERS}–${AI_TEAM_MAX_MEMBERS} 名成员。`);
+    throw badRequest(`团队需要 ${AI_TEAM_MIN_MEMBERS}–${AI_TEAM_MAX_MEMBERS} 名成员。`);
   }
   const names = new Set<string>();
   const ids = new Set<string>();
@@ -68,47 +70,47 @@ function parseMembers(value: unknown, existing: AiTeam | null, source?: AiTeamEm
     const rawId = text(body.id);
     const prior = existing?.members.find((member) => member.id === rawId);
     if (body.employeeId !== undefined && body.employeeId !== null && typeof body.employeeId !== "string") {
-      throw new Error("员工 ID 必须是文字。");
+      throw badRequest("员工 ID 必须是文字。");
     }
     const employeeId = body.employeeId === undefined ? prior?.employeeId : text(body.employeeId) || undefined;
-    if (employeeId && !source) throw new Error("员工绑定需要真实员工来源。");
-    if (employeeId && employees.has(employeeId)) throw new Error("同一员工不能重复加入同一团队。");
+    if (employeeId && !source) throw badRequest("员工绑定需要真实员工来源。");
+    if (employeeId && employees.has(employeeId)) throw badRequest("同一员工不能重复加入同一团队。");
     if (employeeId) employees.add(employeeId);
     const employee = employeeId ? requireTeamEmployee(source!, employeeId) : null;
     const name = employee?.name ?? boundedText(body.name, `第 ${index + 1} 位成员的名字`, 1, 40);
     const key = name.toLowerCase();
-    if (names.has(key)) throw new Error(`成员名字「${name}」重复。`);
+    if (names.has(key)) throw badRequest(`成员名字「${name}」重复。`);
     names.add(key);
     const id = /^m_[A-Za-z0-9]{1,32}$/.test(rawId) && !ids.has(rawId)
       ? rawId
       : `m_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
     ids.add(id);
     const duty = text(body.duty);
-    if (duty.length > 2000) throw new Error(`成员「${name}」的职责不能超过 2000 个字符。`);
+    if (duty.length > 2000) throw badRequest(`成员「${name}」的职责不能超过 2000 个字符。`);
     let agents: WandTaskAgent[];
     try {
       if (employee) {
         agents = employee.agents.map((candidate) => ({ ...candidate }));
       } else if (Array.isArray(body.agents)) {
-        if (body.agents.length === 0) throw new Error("至少需要一个执行候选。");
-        if (body.agents.length > AI_TEAM_MAX_CANDIDATES) throw new Error(`最多 ${AI_TEAM_MAX_CANDIDATES} 个执行候选。`);
+        if (body.agents.length === 0) throw badRequest("至少需要一个执行候选。");
+        if (body.agents.length > AI_TEAM_MAX_CANDIDATES) throw badRequest(`最多 ${AI_TEAM_MAX_CANDIDATES} 个执行候选。`);
         agents = body.agents.map((rawAgent): WandTaskAgent => {
           const parsed = parseTaskAgent(rawAgent ?? {});
-          if (!parsed) throw new Error("请选择有效的 CLI 工具。");
+          if (!parsed) throw badRequest("请选择有效的 CLI 工具。");
           return parsed;
         });
       } else if (body.agents !== undefined && body.agents !== null) {
-        throw new Error("候选执行配置必须是数组。");
+        throw badRequest("候选执行配置必须是数组。");
       } else {
         const agent = parseTaskAgent(body.agent ?? {});
-        if (!agent) throw new Error("没有选择 CLI 工具。");
+        if (!agent) throw badRequest("没有选择 CLI 工具。");
         agents = [agent];
       }
     } catch (error) {
-      throw new Error(`成员「${name}」：${getErrorMessage(error)}`);
+      throw badRequest(`成员「${name}」：${getErrorMessage(error)}`);
     }
     const seenKeys = new Set(agents.map(agentKey));
-    if (seenKeys.size !== agents.length) throw new Error(`成员「${name}」的执行候选重复。`);
+    if (seenKeys.size !== agents.length) throw badRequest(`成员「${name}」的执行候选重复。`);
     const member: AiTeamMember = {
       id, name, duty, agents,
       ...(employeeId ? { employeeId } : {}),
@@ -120,7 +122,7 @@ function parseMembers(value: unknown, existing: AiTeam | null, source?: AiTeamEm
     if (isTeamMemberRole(body.role)) member.role = body.role;
     return member;
   });
-  if (members.filter((member) => member.isLeader).length !== 1) throw new Error("团队需要恰好一位负责人。");
+  if (members.filter((member) => member.isLeader).length !== 1) throw badRequest("团队需要恰好一位负责人。");
   return members;
 }
 
@@ -128,12 +130,12 @@ export function parseAiTeamInput(value: unknown, existing: AiTeam | null, now: s
   const body = bodyObject(value);
   const maxSteps = body.maxSteps === undefined ? existing?.maxSteps ?? AI_TEAM_DEFAULT_MAX_STEPS : Number(body.maxSteps);
   if (!Number.isInteger(maxSteps) || maxSteps < AI_TEAM_MIN_STEPS || maxSteps > AI_TEAM_MAX_STEPS) {
-    throw new Error(`步数上限需要是 ${AI_TEAM_MIN_STEPS}–${AI_TEAM_MAX_STEPS} 之间的整数。`);
+    throw badRequest(`步数上限需要是 ${AI_TEAM_MIN_STEPS}–${AI_TEAM_MAX_STEPS} 之间的整数。`);
   }
   const description = text(body.description);
-  if (description.length > 500) throw new Error("说明不能超过 500 个字符。");
+  if (description.length > 500) throw badRequest("说明不能超过 500 个字符。");
   const instructions = body.instructions === undefined ? existing?.instructions ?? "" : text(body.instructions);
-  if (instructions.length > 4000) throw new Error("协作指令不能超过 4000 个字符。");
+  if (instructions.length > 4000) throw badRequest("协作指令不能超过 4000 个字符。");
   return {
     id: existing?.id ?? `team_${randomUUID().replace(/-/g, "").slice(0, 12)}`,
     name: boundedText(body.name, "团队名", 1, 60),
@@ -180,7 +182,7 @@ export function registerAiTeamRoutes(app: Express, deps: {
   app.put("/api/ai-teams/:id", (req, res) => {
     try {
       const existing = storage.getAiTeam(req.params.id);
-      if (!existing) throw new Error("团队不存在。");
+      if (!existing) throw badRequest("团队不存在。");
       const team = parseAiTeamInput(req.body, existing, new Date().toISOString(), storage);
       storage.saveAiTeam(team);
       notifyTeam(team.id);
@@ -200,7 +202,7 @@ export function registerAiTeamRoutes(app: Express, deps: {
   app.get("/api/ai-teams/:id", (req, res) => {
     try {
       const team = storage.getAiTeam(req.params.id);
-      if (!team) throw new Error("团队不存在。");
+      if (!team) throw badRequest("团队不存在。");
       res.json({ team, runs: runner.listRuns({ teamId: team.id, limit: TEAM_DIRECT_RUNS_LIMIT }) });
     } catch (error) {
       sendTeamError(res, error);
@@ -216,16 +218,16 @@ export function registerAiTeamRoutes(app: Express, deps: {
     try {
       const body = bodyObject(req.body ?? {});
       const workspaceId = text(body.workspaceId);
-      if (!workspaceId) throw new Error("请选择工作项目。");
+      if (!workspaceId) throw badRequest("请选择工作项目。");
       const workspace = storage.getWorkspace(workspaceId);
-      if (!workspace) throw new Error("请选择工作项目。");
+      if (!workspace) throw badRequest("请选择工作项目。");
       if (workspace.kind === "global") {
-        throw new Error("AI 团队不能在全局暂存工作区运行，请先选择或创建一个项目。");
+        throw badRequest("AI 团队不能在全局暂存工作区运行，请先选择或创建一个项目。");
       }
-      if (!text(workspace.cwd)) throw new Error("这个项目还没有工作目录，请先选择一个项目。");
+      if (!text(workspace.cwd)) throw badRequest("这个项目还没有工作目录，请先选择一个项目。");
       const note = boundedText(body.note, "开工说明", 1, TEAM_DIRECT_NOTE_MAX);
       const team = storage.getAiTeam(req.params.id);
-      if (!team) throw new Error("团队不存在。");
+      if (!team) throw badRequest("团队不存在。");
       // 卡片上的执行配置取团队首选（负责人的第一个候选），看板与快捷提交都按它显示。
       const preferredMember = team.members.find((member) => member.isLeader) ?? team.members[0];
       const agent = preferredMember ? memberAgents(preferredMember)[0] ?? null : null;
@@ -272,7 +274,7 @@ export function registerAiTeamRoutes(app: Express, deps: {
     try {
       const body = bodyObject(req.body);
       const teamId = text(body.teamId);
-      if (!teamId) throw new Error("请选择团队。");
+      if (!teamId) throw badRequest("请选择团队。");
       const detail = await runner.start({ teamId, taskId: req.params.id, note: text(body.note) });
       storage.updateWandTask(req.params.id, { executionSubject: { type: "team", id: teamId } });
       res.status(202).json(detail);

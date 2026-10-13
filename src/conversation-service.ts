@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { statSync, rmSync, existsSync, realpathSync } from "node:fs";
-import { resolve, sep } from "node:path";
+import { isAbsolute, resolve, sep } from "node:path";
 import { AI_TEAM_ACTIVE_RUN_STATUSES, AI_TEAM_DEFAULT_MAX_STEPS, AI_TEAM_MAX_MEMBERS,
   memberAgents, type AiTeam, type AiTeamMember, type AiTeamRun } from "./ai-team-types.js";
 import { freezeTeamEmployees, projectTeamEmployees, requireTeamEmployee } from "./ai-team-employee-binding.js";
@@ -9,11 +9,11 @@ import { CONVERSATION_OWNER, CONVERSATION_RELAY_PREFIX, employeeConversationId,
   type ConversationDetail, type ConversationInstance, type ConversationReceipt, type ConversationSummary,
   type ConversationTarget, type ConversationSessionUpdate } from "./conversation-types.js";
 import { conversationLeaderMention, conversationMessageBody } from "./conversation-mentions.js";
-import { getDefaultModelForProvider } from "./config.js";
-import { defaultModelGroupSelector } from "./model-groups.js";
+import { compactTransportAvatar } from "./fixed-employee-avatar.js";
+import { fallbackProviderModel } from "./session-model.js";
 import { getErrorMessage } from "./error-utils.js";
 import { resolveSessionCwd } from "./session-cwd.js";
-import { resolveWorkspaceIdForNewSession } from "./workspace-binding.js";
+import { isGlobalWorkspace, normalizeProjectCwd, resolveWorkspaceIdForNewSession } from "./workspace-binding.js";
 import { CONVERSATION_SESSION_PREFIX, conversationSessionPreview } from "./conversation-session-preview.js";
 import { conversationTaskLiveText } from "./conversation-task-preview.js";
 import { selectEmployeeCandidate } from "./silicon-employee-dispatch.js";
@@ -40,6 +40,13 @@ interface ConversationDispatchInput {
   cwd?: string;
   memberVersion?: number;
   continueTaskId?: string;
+}
+
+/** Internal execution context; HTTP conversation input does not expose this override. */
+interface ConversationExecutionTarget {
+  workspaceId?: string;
+  title?: string;
+  scheduled?: true;
 }
 
 const now = (): string => new Date().toISOString();
@@ -180,7 +187,7 @@ export class ConversationService {
         ...(turn.role === "assistant" && !turn.author ? { author: {
           id: channel?.employeeId ?? instance.team?.members.find((m) => m.isLeader)?.id ?? "leader",
           name: channel?.employeeName ?? instance.team?.members.find((m) => m.isLeader)?.name ?? instance.name,
-          avatar: channel?.employeeAvatar, sessionId: id,
+          avatar: compactTransportAvatar(channel?.employeeAvatar), sessionId: id,
           leader: instance.kind === "group" || undefined,
         } } : {}),
       }));
@@ -194,7 +201,59 @@ export class ConversationService {
       .sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? "") || (instance.kind === "dm" ? 0 : (a.role === "user" ? -1 : 0) - (b.role === "user" ? -1 : 0)));
   }
 
-  summary(instance: ConversationInstance): ConversationSummary {
+  /** Same ordering as turns(), so a source tail is enough when timestamps are append-only. */
+  private laterTurn(instance: ConversationInstance, left: ConversationTurn, right: ConversationTurn): ConversationTurn {
+    const time = (left.createdAt ?? "").localeCompare(right.createdAt ?? "");
+    if (time) return time > 0 ? left : right;
+    if (instance.kind === "dm" || left.role === right.role) return right;
+    return left.role === "user" ? right : left;
+  }
+
+  private tailTurn(id: string, role?: "assistant"): ConversationTurn | undefined {
+    const live = this.deps.structured.get(id);
+    if (live) {
+      const messages = live.messages ?? [];
+      for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const turn = messages[index];
+        if (turn && (!role || turn.role === role)) return turn;
+      }
+      return undefined;
+    }
+    return this.storage.lastSessionTurn(id, role) ?? undefined;
+  }
+
+  private previewTurn(instance: ConversationInstance): ConversationTurn | undefined {
+    const candidates: ConversationTurn[] = [];
+    if (instance.kind !== "dm" && instance.sessionId) {
+      const relay = this.tailTurn(instance.sessionId);
+      if (relay) candidates.push({ ...relay, messageId: relay.messageId ?? `${instance.sessionId}:0`, conversationId: instance.id });
+    }
+    const event = this.storage.lastConversationEvent(instance.id);
+    if (event) candidates.push(event);
+    const channelIds = [...(instance.historySessionIds ?? []), instance.communicationSessionId]
+      .filter((id): id is string => !!id && (instance.kind === "dm" || id !== instance.sessionId));
+    for (const id of new Set(channelIds)) {
+      const turn = this.tailTurn(id, "assistant");
+      if (!turn) continue;
+      const channel = this.deps.structured.get(id) ?? this.storage.getSessionSlim(id);
+      candidates.push({
+        ...turn,
+        messageId: turn.messageId ?? `${id}:preview`,
+        conversationId: instance.id,
+        conversationTarget: null,
+        ...(turn.author ? {} : { author: {
+          id: channel?.employeeId ?? instance.team?.members.find((member) => member.isLeader)?.id ?? "leader",
+          name: channel?.employeeName ?? instance.team?.members.find((member) => member.isLeader)?.name ?? instance.name,
+          avatar: compactTransportAvatar(channel?.employeeAvatar),
+          sessionId: id,
+          leader: instance.kind === "group" || undefined,
+        } }),
+      });
+    }
+    return candidates.reduce<ConversationTurn | undefined>((latest, turn) => latest ? this.laterTurn(instance, latest, turn) : turn, undefined);
+  }
+
+  summary(instance: ConversationInstance, knownTurns?: ConversationTurn[]): ConversationSummary {
     const tasks = this.storage.conversationTasks(instance.id).flatMap((link) => {
       const task = this.storage.getWandTask(link.taskId);
       const receipt = task ? this.storage.conversationTaskStartup(task.id) : null;
@@ -209,16 +268,21 @@ export class ConversationService {
       try { requireTeamEmployee(this.storage, instance.peerEmployeeId ?? ""); }
       catch (error) { unavailableReason = getErrorMessage(error); }
     }
-    const messages = this.turns(instance);
-    const last = messages.at(-1);
+    const last = knownTurns ? knownTurns.at(-1) : this.previewTurn(instance);
     const lastText = last?.sessionLink ? conversationSessionPreview(this.snapshot(last.sessionLink.sessionId), last.requestId ? this.receipt(last.requestId) ?? undefined : undefined).text
       : last?.content.map((b) => b.type === "text" ? b.text : "").join(" ") ?? "";
     const messageAt = [instance.updatedAt, last?.createdAt ?? "", ...tasks.flatMap((t) => t.runs.map((r) => r.updatedAt))].sort().at(-1) ?? "";
     const title = instance.kind === "dm" ? employee?.name ?? instance.name
       : instance.nameSource === "custom" ? instance.name : tasks.at(-1)?.task.title ?? instance.name;
-    return { ...instance, ...this.storage.conversationListState(instance.id), team: instance.team ? projectTeamEmployees(instance.team, this.storage) : null,
+    // 私聊标题已说明对方身份；只保留自己的署名，群聊仍需区分发言人。
+    const previewAuthor = last?.role === "user" ? `${this.selfName()}：`
+      : instance.kind === "group" && last ? `${last.author?.name ?? "系统"}：` : "";
+    const team = instance.team ? projectTeamEmployees(instance.team, this.storage) : null;
+    return { ...instance, ...lifecycle, team: team ? { ...team, members: team.members.map((member) => ({
+      ...member, avatar: compactTransportAvatar(member.avatar) ?? "",
+    })) } : null,
       title, unavailableReason, memberUnavailableReasons: this.memberReasons(instance), tasks,
-      preview: last ? `${last.role === "user" ? this.selfName() : last.author?.name ?? "系统"}：${lastText.slice(0, 160)}`
+      preview: last ? `${previewAuthor}${lastText.slice(0, 160)}`
         : instance.kind === "group" ? "群已建立，尚未派任务" : "还没有消息", messageAt };
   }
 
@@ -298,8 +362,9 @@ export class ConversationService {
 
   detail(id: string): ConversationDetail {
     const instance = this.requireInstance(id);
-    const summary = this.summary(instance);
-    return { ...summary, messages: this.turns(instance).map(turn => turn.sessionLink
+    const turns = this.turns(instance);
+    const summary = this.summary(instance, turns);
+    return { ...summary, messages: turns.map(turn => turn.sessionLink
       ? { ...turn, sessionPreview: conversationSessionPreview(this.snapshot(turn.sessionLink.sessionId), turn.requestId ? this.receipt(turn.requestId) ?? undefined : undefined),
         // Older clients can still open the exact source session without understanding sessionLink.
         author: turn.author ? { ...turn.author, sessionId: turn.sessionLink.sessionId } : turn.author,
@@ -497,9 +562,7 @@ export class ConversationService {
     let session = instance.communicationSessionId ? this.deps.structured.get(instance.communicationSessionId) : null;
     if (!session) {
       if (instance.communicationSessionId) instance.historySessionIds = [...(instance.historySessionIds ?? []), instance.communicationSessionId];
-      const model = agent.model === "default"
-        ? defaultModelGroupSelector(this.deps.config.modelGroups, agent.provider, getDefaultModelForProvider(this.deps.config, agent.provider))
-          || getDefaultModelForProvider(this.deps.config, agent.provider) || undefined : agent.model;
+      const model = agent.model === "default" ? fallbackProviderModel(this.deps.config, agent.provider) : agent.model;
       session = this.deps.structured.createSession({ cwd, provider: agent.provider, mode: agent.mode, model,
         thinkingEffort: agent.thinkingEffort, worktreeEnabled: false, sessionSource: "interactive",
         automationId: `conversation-talk:${instance.id}`, employeeId: employee?.id,
@@ -515,10 +578,29 @@ export class ConversationService {
     return session;
   }
 
-  send(id: string, requestId: string, input: string, target: ConversationTarget, explicitCwd?: string, echo = true): Promise<ConversationReceipt> {
-    return this.request(requestId, "send", { input, target, explicitCwd, echo }, id, async (receipt, commit) => {
+  send(id: string, requestId: string, input: string, target: ConversationTarget, explicitCwd?: string, echo = true,
+    executionTarget?: ConversationExecutionTarget): Promise<ConversationReceipt> {
+    return this.request(requestId, "send", { input, target, explicitCwd, echo,
+      ...(executionTarget?.workspaceId ? { workspaceId: executionTarget.workspaceId } : {}),
+      ...(executionTarget?.title !== undefined ? { title: executionTarget.title } : {}),
+      ...(executionTarget?.scheduled ? { scheduled: true } : {}) }, id, async (receipt, commit) => {
       const text = shortText(input, "消息", 256_000, true);
       const instance = this.requireInstance(id);
+      let workspaceId: string | undefined;
+      if (executionTarget) {
+        if (instance.kind !== "dm" || target) throw new Error("指定工作项目仅用于员工执行。");
+      }
+      if (executionTarget?.workspaceId !== undefined) {
+        workspaceId = shortText(executionTarget.workspaceId, "执行项目", 160, true);
+        const workspace = this.storage.getWorkspace(workspaceId);
+        if (!workspace || isGlobalWorkspace(workspace)) throw new Error("执行项目不存在或不可用，请重新选择项目。");
+        if (!explicitCwd?.trim() || !workspace.cwd.trim() || !isAbsolute(workspace.cwd.trim())) {
+          throw new Error("指定工作项目需要有效的绝对执行目录。");
+        }
+        const cwd = this.cwd(explicitCwd);
+        const workspaceCwd = resolveSessionCwd(workspace.cwd, undefined);
+        if (normalizeProjectCwd(cwd) !== normalizeProjectCwd(workspaceCwd)) throw new Error("执行项目目录已变更，请核对执行位置。");
+      }
       if (target) {
         const run = this.requireTarget(instance, target);
         if (!AI_TEAM_ACTIVE_RUN_STATUSES.includes(run.status)) throw new Error("本轮已结束，请显式选择群内沟通或继续此任务。");
@@ -532,7 +614,8 @@ export class ConversationService {
         return;
       }
       if (instance.kind === "dm") {
-        this.startMessageSession(instance, requestId, text, explicitCwd, receipt, commit);
+        this.startMessageSession(instance, requestId, text, explicitCwd, receipt, commit,
+          executionTarget ? { ...executionTarget, workspaceId } : undefined);
         return;
       }
       if (instance.kind === "group" && instance.team) {
@@ -574,21 +657,20 @@ export class ConversationService {
 
   /** One IM message is one fresh model context. No task, team, relay or previous DM history. */
   private startMessageSession(instance: ConversationInstance, requestId: string, input: string, explicitCwd: string | undefined,
-    receipt: ConversationReceipt, commit: () => void): void {
+    receipt: ConversationReceipt, commit: () => void, executionTarget?: ConversationExecutionTarget): void {
     requireTeamEmployee(this.storage, instance.peerEmployeeId ?? "");
     const employee = this.storage.getSiliconEmployee(instance.peerEmployeeId!)!;
     const selected = selectEmployeeCandidate(employee), agent = selected.agent;
     const cwd = this.cwd(explicitCwd);
-    const model = agent.model === "default"
-      ? defaultModelGroupSelector(this.deps.config.modelGroups, agent.provider, getDefaultModelForProvider(this.deps.config, agent.provider))
-        || getDefaultModelForProvider(this.deps.config, agent.provider) || undefined : agent.model;
-    const title = provisionalTaskTitleFromDescription(conversationMessageBody(input)) || "新会话";
+    const model = agent.model === "default" ? fallbackProviderModel(this.deps.config, agent.provider) : agent.model;
+    const title = shortText(executionTarget?.title, "会话标题", 200)
+      || provisionalTaskTitleFromDescription(conversationMessageBody(input)) || "新会话";
     let session: SessionSnapshot | undefined;
     try {
       this.storage.acceptConversationSession(instance, () => {
         session = this.deps.structured.createSession({ title, cwd, provider: agent.provider, mode: agent.mode, model,
-          thinkingEffort: agent.thinkingEffort, worktreeEnabled: false, sessionSource: "interactive",
-          workspaceId: resolveWorkspaceIdForNewSession(this.storage, cwd),
+          thinkingEffort: agent.thinkingEffort, worktreeEnabled: false, sessionSource: executionTarget?.scheduled ? "automation" : "interactive",
+          workspaceId: resolveWorkspaceIdForNewSession(this.storage, cwd, executionTarget?.workspaceId),
           automationId: `${CONVERSATION_SESSION_PREFIX}${requestId}`, employeeId: employee.id,
           employeeName: employee.name, employeeAvatar: employee.avatar, employeeCandidates: employee.agents,
           employeeCandidateIndex: selected.index, systemPrompt: employee.prompt });

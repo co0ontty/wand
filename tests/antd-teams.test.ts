@@ -64,12 +64,12 @@ function chatDetail(overrides: Partial<AiTeamRunDetail> = {}): AiTeamRunDetail {
   };
 }
 
-test("team chat messages render through the shared X bubble surface", () => {
+test("team chat messages render through the shared Wand message surface", () => {
   const html = renderToStaticMarkup(React.createElement(TeamChatView, {
     detail: chatDetail(), onChange() {},
   }));
-  assert.match(html, /class="[^"]*ant-bubble/, "每条发言包在通用气泡里");
-  assert.match(html, /ant-bubble-end/, "自己的发言靠气泡 placement 镜像");
+  assert.match(html, /class="[^"]*wand-chat-message/, "每条发言包在通用气泡里");
+  assert.match(html, /data-chat-role="user"/, "自己的发言靠气泡 placement 镜像");
   assert.match(html, /team-chat-mention/, "@ 成员名仍由本页呈现，不被气泡吞掉");
   assert.match(html, /chat-notice/, "系统提示行仍是居中 notice");
   // 超过阈值的正文只渲染预览，展开入口是整条发言的弹层。
@@ -109,8 +109,8 @@ test("composer keeps the IME Enter boundary and the unknown-delivery rule", () =
 
 test("live step output uses the shared process block and keeps the bounded scroll owner", () => {
   const source = owned("ai-teams/team-chat-view.tsx");
-  assert.match(source, /<Think/);
-  assert.match(source, /destroyOnHidden=\{false\}/, "收起时内容不卸载，内部滚动窗口的贴尾状态要留着");
+  assert.match(source, /<ChatActivity expanded=\{expanded\}/);
+  assert.match(owned("chat/activity.tsx"), /inert=\{!expanded\}/, "收起时保留内容与滚动节点，仅禁用隐藏交互");
   assert.match(source, /pinnedRef\.current = isFollowingTail\(event\.currentTarget\)/);
   assert.match(source, /className="team-chat-live-text"/);
   assert.match(source, /retireMs = liveExitDurationMs\(\)/);
@@ -144,9 +144,11 @@ test("ordinary team and employee controls come from the library", () => {
   assert.match(text, /<Empty\b/);
   assert.match(text, /<Checkbox\b/);
   assert.match(text, /<Tooltip\b/);
-  // 员工头像毛色是业务身份，保留像素猫，但按钮是通用圆钮。
+  // 员工头像进入通用弹层，捏脸保留原生单选组的键盘语义。
   const avatar = owned("agents/employee-avatar.tsx");
-  assert.match(avatar, /<Button\s+className="wand-team-coat"/);
+  assert.match(avatar, /<WandPopover\b/);
+  assert.match(avatar, /type="radio"/);
+  assert.match(avatar, /aria-label="编辑员工头像"/);
   assert.match(owned("ai-teams/teams-page.tsx"), /<Button\s+className="wand-team-coat"/);
 });
 

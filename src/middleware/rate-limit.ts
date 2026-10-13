@@ -1,23 +1,17 @@
 /**
- * Login rate limiter — tracks failed admin-password attempts per IP.
- * In-memory only; resets on process restart.
+ * 认证相关的内存限流器（按 IP）。进程重启即清空。
  *
- * Only human-typed passwords count. An app token is a machine-held credential the
- * user cannot "type correctly", so a stale connect code must not lock out the whole
- * shared IP bucket (that is what kept the web console answering 429).
+ * 三个独立桶：
+ *   - 密码登录：只计人工输入的错误密码；应用令牌不计入（见 /api/login 注释）。
+ *   - Bearer 应用令牌失败：无效或过期的 Authorization 头按 IP 计数，超限后该 IP 的
+ *     Bearer 请求直接 429，但不影响已持有有效会话 Cookie 的浏览器。
+ *   - 修改密码：每次调用计一次，防止持有管理员会话的脚本高频尝试。
+ *
+ * 每个桶的 key 数量有上限；超过时先清过期项，仍然超限则淘汰最早插入的 key，
+ * 所以伪造大量来源地址不会无限撑大 Map。
  */
 
-const PASSWORD_WINDOW = 15 * 60 * 1000; // failures are counted over a sliding window
-const PASSWORD_MAX = 10; // allowed failures inside the window
-const LOCKOUT = 15 * 60 * 1000; // fixed cooldown once the window is exhausted
-
-interface PasswordRecord {
-  /** Timestamps of failures inside PASSWORD_WINDOW, oldest first. */
-  attempts: number[];
-  lockedUntil: number;
-}
-
-const passwordAttempts = new Map<string, PasswordRecord>();
+const MINUTE = 60 * 1000;
 
 export interface LoginLimitState {
   lockedUntil: number;
@@ -25,66 +19,154 @@ export interface LoginLimitState {
   retryAfter: number;
 }
 
-function prune(attempts: number[], now: number): number[] {
-  const cutoff = now - PASSWORD_WINDOW;
-  let start = 0;
-  while (start < attempts.length && attempts[start] <= cutoff) start++;
-  return start === 0 ? attempts : attempts.slice(start);
+export interface AttemptLimiterOptions {
+  /** Failures are counted over a sliding window of this length. */
+  windowMs: number;
+  /** Failures allowed inside the window before the key is locked. */
+  maxAttempts: number;
+  /** Fixed cooldown once the window is exhausted. */
+  lockoutMs: number;
+  /** Upper bound on tracked keys (IPs) for this bucket. */
+  maxKeys: number;
+}
+
+interface AttemptRecord {
+  /** Timestamps of failures inside the window, oldest first. */
+  attempts: number[];
+  lockedUntil: number;
 }
 
 function lockedState(lockedUntil: number, now: number): LoginLimitState {
   return { lockedUntil, retryAfter: Math.ceil((lockedUntil - now) / 1000) };
 }
 
-export function checkPasswordRateLimit(ip: string, now = Date.now()): LoginLimitState | null {
-  const record = passwordAttempts.get(ip);
-  if (!record) return null;
+export class AttemptLimiter {
+  private readonly records = new Map<string, AttemptRecord>();
 
-  if (now < record.lockedUntil) return lockedState(record.lockedUntil, now);
+  constructor(private readonly options: AttemptLimiterOptions) {}
 
-  record.attempts = prune(record.attempts, now);
-  if (!record.attempts.length) passwordAttempts.delete(ip);
-  return null;
+  /** Returns the active lock for `key`, or null when it may proceed. */
+  check(key: string, now = Date.now()): LoginLimitState | null {
+    const record = this.records.get(key);
+    if (!record) return null;
+    if (now < record.lockedUntil) return lockedState(record.lockedUntil, now);
+    record.attempts = this.prune(record.attempts, now);
+    if (!record.attempts.length && now >= record.lockedUntil) this.records.delete(key);
+    return null;
+  }
+
+  /** Records one failure. Returns the lock that was just imposed, if any. */
+  record(key: string, now = Date.now()): LoginLimitState | null {
+    const existing = this.records.get(key);
+    // A lock that has already expired must not leave its failures behind to tip the new
+    // window over the limit on the first typo; `lockedUntil` 0 means "never locked".
+    const expiredLock = !!existing && existing.lockedUntil > 0 && now >= existing.lockedUntil;
+    const record: AttemptRecord = !existing || expiredLock ? { attempts: [], lockedUntil: 0 } : existing;
+    record.attempts = this.prune(record.attempts, now);
+    record.attempts.push(now);
+
+    let lock: LoginLimitState | null = null;
+    if (record.attempts.length >= this.options.maxAttempts) {
+      record.lockedUntil = now + this.options.lockoutMs;
+      record.attempts = [];
+      lock = lockedState(record.lockedUntil, now);
+    }
+    this.store(key, record, now);
+    return lock;
+  }
+
+  reset(key: string): void {
+    this.records.delete(key);
+  }
+
+  /** Drops expired entries; called periodically and when the key cap is reached. */
+  sweep(now = Date.now()): void {
+    for (const [key, record] of this.records) {
+      record.attempts = this.prune(record.attempts, now);
+      if (!record.attempts.length && now >= record.lockedUntil) this.records.delete(key);
+    }
+  }
+
+  get size(): number {
+    return this.records.size;
+  }
+
+  private prune(attempts: number[], now: number): number[] {
+    const cutoff = now - this.options.windowMs;
+    let start = 0;
+    while (start < attempts.length && attempts[start] <= cutoff) start++;
+    return start === 0 ? attempts : attempts.slice(start);
+  }
+
+  private store(key: string, record: AttemptRecord, now: number): void {
+    if (!this.records.has(key) && this.records.size >= this.options.maxKeys) {
+      this.sweep(now);
+      while (this.records.size >= this.options.maxKeys) {
+        const oldest = this.records.keys().next().value;
+        if (oldest === undefined) break;
+        this.records.delete(oldest);
+      }
+    }
+    // Re-insert so Map iteration order tracks recency for eviction.
+    this.records.delete(key);
+    this.records.set(key, record);
+  }
 }
 
-/**
- * Records one wrong admin password. Returns the lock that was just imposed, if any.
- * A previous lock that has already expired starts a fresh window instead of being
- * topped up by the first typo after it.
- */
-export function recordFailedPassword(ip: string, now = Date.now()): LoginLimitState | null {
-  const existing = passwordAttempts.get(ip);
-  // A lock that has already expired must not leave its failures behind to tip the new
-  // window over the limit on the first typo; `lockedUntil` 0 means "never locked".
-  const expiredLock = !!existing && existing.lockedUntil > 0 && now >= existing.lockedUntil;
-  const record: PasswordRecord = !existing || expiredLock ? { attempts: [], lockedUntil: 0 } : existing;
-  record.attempts = prune(record.attempts, now);
-  record.attempts.push(now);
+const passwordLimiter = new AttemptLimiter({
+  windowMs: 15 * MINUTE,
+  maxAttempts: 10,
+  lockoutMs: 15 * MINUTE,
+  maxKeys: 10_000,
+});
 
-  let lock: LoginLimitState | null = null;
-  if (record.attempts.length >= PASSWORD_MAX) {
-    record.lockedUntil = now + LOCKOUT;
-    record.attempts = [];
-    lock = lockedState(record.lockedUntil, now);
-  }
-  passwordAttempts.set(ip, record);
-  return lock;
+const bearerLimiter = new AttemptLimiter({
+  windowMs: 10 * MINUTE,
+  maxAttempts: 60,
+  lockoutMs: 10 * MINUTE,
+  maxKeys: 10_000,
+});
+
+const setPasswordLimiter = new AttemptLimiter({
+  windowMs: 15 * MINUTE,
+  maxAttempts: 20,
+  lockoutMs: 15 * MINUTE,
+  maxKeys: 10_000,
+});
+
+export function checkPasswordRateLimit(ip: string, now = Date.now()): LoginLimitState | null {
+  return passwordLimiter.check(ip, now);
+}
+
+/** Records one wrong admin password. Returns the lock that was just imposed, if any. */
+export function recordFailedPassword(ip: string, now = Date.now()): LoginLimitState | null {
+  return passwordLimiter.record(ip, now);
 }
 
 export function resetPasswordRateLimit(ip: string): void {
-  passwordAttempts.delete(ip);
+  passwordLimiter.reset(ip);
 }
 
-function cleanupRateLimiter(): void {
-  const now = Date.now();
-  for (const [ip, record] of passwordAttempts.entries()) {
-    record.attempts = prune(record.attempts, now);
-    if (!record.attempts.length && now >= record.lockedUntil) {
-      passwordAttempts.delete(ip);
-    }
-  }
+export function checkBearerRateLimit(ip: string, now = Date.now()): LoginLimitState | null {
+  return bearerLimiter.check(ip, now);
 }
 
-// Cleanup expired entries every 5 minutes
-const rateLimitCleanupTimer = setInterval(cleanupRateLimiter, 5 * 60 * 1000);
+export function recordFailedBearer(ip: string, now = Date.now()): LoginLimitState | null {
+  return bearerLimiter.record(ip, now);
+}
+
+/** Every call counts, successful or not: the endpoint is an admin-only write, not a guess target. */
+export function recordSetPasswordAttempt(ip: string, now = Date.now()): LoginLimitState | null {
+  return setPasswordLimiter.record(ip, now);
+}
+
+export function checkSetPasswordRateLimit(ip: string, now = Date.now()): LoginLimitState | null {
+  return setPasswordLimiter.check(ip, now);
+}
+
+const rateLimitCleanupTimer = setInterval(() => {
+  passwordLimiter.sweep();
+  bearerLimiter.sweep();
+  setPasswordLimiter.sweep();
+}, 5 * MINUTE);
 rateLimitCleanupTimer.unref();

@@ -37,10 +37,10 @@ export function ConversationApprovalButton({ phase, disabled, onClick }: {
   </WandButton>;
 }
 
-export function ConversationSubmitButton({ phase, stops, disabled, label, onClick }: {
-  phase: ConversationSubmitPhase; stops: boolean; disabled?: boolean; label: string; onClick(): void;
+export function ConversationSubmitButton({ phase, stops, disabled, label, onClick, showLabel = false }: {
+  phase: ConversationSubmitPhase; stops: boolean; disabled?: boolean; label: string; onClick(): void; showLabel?: boolean;
 }): React.ReactElement {
-  return <WandIconButton kind="primary" className="conversation-submit conversation-composer-control" aria-label={label} title={label}
+  return <WandIconButton kind="primary" className={`conversation-submit conversation-composer-control${showLabel ? " conversation-submit-labelled" : ""}`} aria-label={label} title={label}
     disabled={disabled} onClick={onClick}>
     <span className="conversation-submit-slots" data-phase={phase}>
       <span data-slot="idle"><ConversationMorphIcon active={stops} from="up" to="stop"/></span>
@@ -49,6 +49,7 @@ export function ConversationSubmitButton({ phase, stops, disabled, label, onClic
       <span data-slot="failed"><WandIcon name="warning"/></span>
       <span data-slot="unknown"><WandIcon name="question"/></span>
     </span>
+    {showLabel ? <span className="conversation-submit-label">{label}</span> : null}
   </WandIconButton>;
 }
 

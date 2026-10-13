@@ -1,4 +1,4 @@
-/** 看板任务的自动归档 / 自动删除。会话保留期不走这里。 */
+/** 任务、会话与已结束团队运行的统一自动归档 / 自动删除策略。 */
 export const TASK_RETENTION_MIN_DAYS = 1;
 export const TASK_RETENTION_MAX_DAYS = 365;
 export const DEFAULT_TASK_AUTO_ARCHIVE_DAYS = 7;

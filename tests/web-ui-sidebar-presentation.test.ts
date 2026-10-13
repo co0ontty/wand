@@ -50,6 +50,29 @@ test("1→2→1 and filtered one-session employee keep the same identity and act
   assert.match(renderRecent(1, scope({ mode: "active" })), /im-sidebar-group-title[^"]*"[^>]*>[\s\S]*?华杰/);
 });
 
+test("activity filtering keeps an idle employee head, zero count and creation action without inventing a first conversation", () => {
+  const html = renderRecent(2, scope({ mode: "active" }));
+  assert.match(html, /aria-label="华杰 · 显示 0 个会话，共 2 个会话"/);
+  assert.match(html, /class="[^"]*im-sidebar-group-count[^"]*"[^>]*>0\/2</);
+  assert.match(html, /aria-label="与华杰新建对话"/);
+  assert.match(html, /现在没有活动会话/);
+  assert.match(html, /暂无活动会话/);
+  assert.doesNotMatch(html, /还没有对话|创建第一个会话|im-sidebar-item-avatar-wrap/);
+  assert.match(html, /width:36px;height:36px/);
+});
+
+test("recent group activity badges distinguish running, attention and completed states", () => {
+  for (const [session, badge] of [
+    [{ status: "thinking" }, "processing"],
+    [{ status: "permission-blocked" }, "warning"],
+    [{ status: "idle", completionRevision: 2, viewedCompletionRevision: 1 }, "success"],
+  ] as const) {
+    const html = renderRecent(1, scope(), { entries: [{ group, taskName: null,
+      session: { id: "state", employeeId: "employee-1", ...session } }] });
+    assert.match(html, new RegExp(`ant-badge-status-${badge}`));
+  }
+});
+
 test("recent employee groups omit CLI badges while child sessions retain actual tool logos", () => {
   const entries = ["codex", "pi"].map((provider, index) => ({
     group, taskName: "侧栏优化", session: { id: `mixed-${index}`, employeeId: "employee-1",
@@ -79,6 +102,9 @@ test("temporary folds and search do not inherit or overwrite normal collapsed ch
     /class="im-sidebar-group"/);
   assert.equal(sidebarExpansionOpen("folded", false, true, false, false), true);
   assert.equal(sidebarExpansionOpen("active", false, false, false, false), false);
+  assert.equal(sidebarExpansionOpen("active", true, undefined, false, false, false), false, "empty activity groups default closed");
+  assert.equal(sidebarExpansionOpen("active", true, true, false, false, false), true, "an empty group can still be opened");
+  assert.equal(sidebarExpansionOpen("active", true, undefined, false, true, false), true, "search temporarily opens matching roots");
   assert.equal(sidebarExpansionOpen("folded", false, false, false, true), true);
   assert.equal(sidebarExpansionOpen("folded", false, false, false, false), false);
   assert.equal(sidebarExpansionOpen("folded", false, undefined, true, false), true, "directories default open");

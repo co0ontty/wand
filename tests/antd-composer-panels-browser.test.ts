@@ -323,24 +323,25 @@ export async function runPanels(matrix = modes) {
 
       await e("p.terminal()");
       assert.equal(await e("document.querySelectorAll('.wand-joystick-root').length"), 0);
-      const row = await e(`(()=>{const h=document.getElementById('terminal-shortcuts'),r=h.getBoundingClientRect(),input=document.getElementById('input-box').getBoundingClientRect();return {count:document.querySelectorAll('#terminal-shortcuts').length,above:r.bottom<=input.top,singleLine:new Set([...h.querySelectorAll('button')].map(b=>b.getBoundingClientRect().top)).size===1,contained:r.left>=0&&r.right<=innerWidth,scrollable:h.scrollWidth>h.clientWidth};})()`);
-      assert.equal(row.count, 1); assert.equal(row.above, true); assert.equal(row.singleLine, true); assert.equal(row.contained, true);
-      if (mode === "390px") assert.equal(row.scrollable, true);
-      await click("#input-box");
+      const row = await e(`(()=>{const h=document.getElementById('terminal-shortcuts'),r=h.getBoundingClientRect();return {count:document.querySelectorAll('#terminal-shortcuts').length,inputHidden:document.getElementById('input-box').closest('.composer-input-wrap').inert,singleLine:new Set([...h.querySelectorAll('[data-terminal-key]:not([hidden])')].map(b=>b.getBoundingClientRect().top)).size===1,contained:r.left>=0&&r.right<=innerWidth,scrollable:h.scrollWidth>h.clientWidth};})()`);
+      assert.equal(row.count, 1); assert.equal(row.inputHidden, true); assert.equal(row.singleLine, true); assert.equal(row.contained, true); assert.equal(row.scrollable,false);
       const terminalStart = result.requests.length;
-      const keys = ["escape", "tab", "shift_tab", "ctrl_c", "up", "down", "left", "right", "enter"];
+      const keys = ["enter", "up", "down", "left", "right", "escape", "tab", "ctrl_c", "home", "end"];
       for (const key of keys) {
-        await click(`[data-terminal-key="${key}"]`);
+        if (await e(`document.querySelector('[data-terminal-key="${key}"]').hidden`)) {
+          await click(".pty-extra-keys-trigger"); await click(`[data-extra-terminal-key="${key}"]`);
+        } else await click(`[data-terminal-key="${key}"]`);
         await wait("p.state.messageQueue.length===0", "PTY key transport settled");
-        assert.equal(await e("document.activeElement===document.getElementById('input-box')"), true, "shortcut preserves input focus");
+        assert.equal(await e("document.querySelector('.input-composer').dataset.ptyInputMode"), "shortcuts", "a shortcut does not open the keyboard");
       }
       const inputs = result.requests.slice(terminalStart).filter((operation: any) => operation.path.endsWith("/input"));
       assert.deepEqual(inputs.map((operation: any) => operation.body.shortcutKey), keys.map(key => key === "enter" ? "enter_text" : key));
-      assert.deepEqual(inputs.map((operation: any) => operation.body.input), ["\u001b", "\t", "\u001b[Z", "\u0003", "\u001b[A", "\u001b[B", "\u001b[D", "\u001b[C", "\r"]);
+      assert.deepEqual(inputs.map((operation: any) => operation.body.input), ["\r", "\u001b[A", "\u001b[B", "\u001b[D", "\u001b[C", "\u001b", "\t", "\u0003", "\u001b[H", "\u001b[F"]);
       assert.ok(inputs.every((operation: any) => operation.body.view === "terminal"));
       record("PTY shortcuts stay in one input row and dispatch once without stealing focus", { ...row, keys });
 
       // Actual keyboard input uses the production input/IME handlers, not the shortcut callback.
+      await click(".pty-input-mode-toggle"); await click("#input-box");
       const typingStart = result.requests.length;
       await send("Input.insertText", { text: "a" });
       await wait("p.state.messageQueue.length===0 && document.getElementById('input-box').value===''", "direct typing drained");
@@ -355,7 +356,11 @@ export async function runPanels(matrix = modes) {
       const typed = result.requests.slice(typingStart).filter((op: any) => op.path.endsWith("/input")).map((op: any) => op.body.input);
       assert.deepEqual(typed, ["a", "你", "\r"]);
       // Shortcut buttons remain keyboard accessible without leaking a second key to the PTY.
-      await e("document.querySelector('[data-terminal-key=tab]').focus();document.addEventListener('keydown',p.captureTerminalInput,true)");
+      await click(".pty-input-mode-toggle");
+      if (await e("document.querySelector('[data-terminal-key=tab]').hidden")) {
+        await click(".pty-extra-keys-trigger"); await e("document.querySelector('[data-extra-terminal-key=tab]').focus()");
+      } else await e("document.querySelector('[data-terminal-key=tab]').focus()");
+      await e("document.addEventListener('keydown',p.captureTerminalInput,true)");
       const keyboardStart = result.requests.length;
       await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
       await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
@@ -364,14 +369,15 @@ export async function runPanels(matrix = modes) {
       await e("document.removeEventListener('keydown',p.captureTerminalInput,true)");
       record("PTY keyboard passthrough and IME remain single delivery", { typed, keyboardActivation: true });
 
-      // A native touch tap must keep the composer and keyboard focused.
-      await click("#input-box");
+      // A native touch tap keeps the shortcut view and does not summon the keyboard.
       await send("Emulation.setTouchEmulationEnabled", { enabled: true });
-      const touch = await point('[data-terminal-key="escape"]');
+      const extraEscape = await e("document.querySelector('[data-terminal-key=escape]').hidden");
+      if (extraEscape) await click(".pty-extra-keys-trigger");
+      const touch = await point(extraEscape ? '[data-extra-terminal-key="escape"]' : '[data-terminal-key="escape"]');
       await send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: touch.x, y: touch.y }] });
       await send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
       await e("p.frames()");
-      assert.equal(await e("document.activeElement===document.getElementById('input-box')"), true);
+      assert.equal(await e("document.querySelector('.input-composer').dataset.ptyInputMode"), "shortcuts");
       await send("Emulation.setTouchEmulationEnabled", { enabled: false });
       await wait("p.state.messageQueue.length===0", "touch shortcut settled");
 
@@ -396,7 +402,7 @@ export async function runPanels(matrix = modes) {
       await e("document.documentElement.classList.remove('is-wand-native-input');p.state.selectedId=null;p.updateTerminalShortcuts()");
       assert.equal(await e("document.getElementById('terminal-shortcuts').hidden"), true);
       await e("p.state.selectedId='panels-A';p.updateTerminalShortcuts()");
-      assert.equal(await e("document.querySelectorAll('[data-terminal-key]').length"), 9);
+      assert.equal(await e("document.querySelectorAll('[data-terminal-key]').length"), 14);
       record("structured, absent, stopped and native-input sessions stay guarded", { guarded: true });
 
       await e("p.notification(false);void 0"); await click(".notification-bubble-close");

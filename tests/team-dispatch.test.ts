@@ -10,13 +10,20 @@ import { planTeamDispatch, startTeamDispatch } from "../src/team-dispatch.js";
 import { jsonErrorHandler } from "../src/express-async.js";
 import { registerTeamDispatchRoutes } from "../src/server-team-dispatch-routes.js";
 import { WandStorage } from "../src/storage.js";
-import type { DecisionResult } from "../src/decision-types.js";
+import { DecisionError, type DecisionResult } from "../src/decision-types.js";
+import { SYSTEM_EMPLOYEE_ID, SYSTEM_EMPLOYEE_KEY } from "../src/ai-team-types.js";
 
 // 员工候选必须是存储层认得的形状（parseWandTaskAgent 要求 thinkingEffort 合法）。
 const agents = [{ provider: "pi", model: "default", thinkingEffort: "off", mode: "managed", kind: "structured" }] as never;
 
 function seed(storage: WandStorage, employees: Array<{ name: string; duty: string; tags?: string[]; systemKey?: string; archived?: boolean }>): void {
   for (const [index, employee] of employees.entries()) {
+    if (employee.systemKey === SYSTEM_EMPLOYEE_KEY) {
+      // Use the actual seeded identity and retain its fixed avatar; never forge a system key on e_<index>.
+      const system = storage.ensureSystemSiliconEmployee();
+      storage.saveSiliconEmployee({ ...system, name: employee.name, duty: employee.duty, prompt: `${employee.name} 的角色`, agents });
+      continue;
+    }
     const id = `e_${index}`;
     storage.saveSiliconEmployee({
       id,
@@ -71,7 +78,7 @@ test("候选集排除系统运维与已归档员工", async (t) => {
   const { storage } = harness(t);
   seed(storage, [
     { name: "阿甲", duty: "前端", tags: ["UI"] },
-    { name: "勤劳的初二", duty: "系统运维", systemKey: "wand-ops" },
+    { name: "勤劳的初二", duty: "系统运维", systemKey: SYSTEM_EMPLOYEE_KEY },
     { name: "老乙", duty: "后端", archived: true },
   ]);
   const note = "做一个登录页";
@@ -183,7 +190,7 @@ test("开工校验：重复/缺失/未知/已归档/系统运维/人数/负责�
   seed(storage, [
     { name: "甲", duty: "前端" },
     { name: "乙", duty: "后端" },
-    { name: "运维", duty: "系统运维", systemKey: "wand-ops" },
+    { name: "运维", duty: "系统运维", systemKey: SYSTEM_EMPLOYEE_KEY },
     { name: "旧人", duty: "历史", archived: true },
   ]);
   const base = {
@@ -196,7 +203,7 @@ test("开工校验：重复/缺失/未知/已归档/系统运维/人数/负责�
   await assert.rejects(startTeamDispatch({ ...base, members: [{ employeeId: "e_0" }, { employeeId: "e_0" }] }), /重复或缺失/);
   await assert.rejects(startTeamDispatch({ ...base, members: [{ employeeId: "e_0" }, { employeeId: "e_999" }] }), /不存在/);
   await assert.rejects(startTeamDispatch({ ...base, members: [{ employeeId: "e_0" }, { employeeId: "e_3" }] }), /已归档/);
-  await assert.rejects(startTeamDispatch({ ...base, members: [{ employeeId: "e_0" }, { employeeId: "e_2" }] }), /系统运维/);
+  await assert.rejects(startTeamDispatch({ ...base, members: [{ employeeId: "e_0" }, { employeeId: SYSTEM_EMPLOYEE_ID }] }), /系统运维/);
   await assert.rejects(
     startTeamDispatch({ ...base, members: [{ employeeId: "e_0", isLeader: true }, { employeeId: "e_1", isLeader: true }] }),
     /只能指定一名负责人/,
@@ -222,6 +229,29 @@ test("开工失败时回收刚建的卡与临时团队", async (t) => {
   );
   assert.deepEqual(storage.listWandTasks(), [], "不留空卡");
   assert.deepEqual(storage.listAiTeams(), [], "不留残留团队");
+});
+
+test("派工建议断开连接时取消决策调用，不启动后续工作", { timeout: 5000 }, async (t) => {
+  const { storage } = harness(t);
+  seed(storage, [{ name: "甲", duty: "UI" }, { name: "乙", duty: "测试" }]);
+  let entered!: () => void, cancelled!: () => void;
+  const ready = new Promise<void>(resolve => { entered = resolve; });
+  const stopped = new Promise<void>(resolve => { cancelled = resolve; });
+  const app = express(); app.use(express.json());
+  registerTeamDispatchRoutes(app, { storage, runner: { start: async () => { throw Error("must not start"); } },
+    decisions: { status: () => ({ enabled: true, supported: true, configured: true }) as any,
+      evaluate: async (_value, _caller, signal) => new Promise((_resolve, reject) => {
+        assert.ok(signal); entered();
+        signal.addEventListener("abort", () => { cancelled(); reject(new DecisionError("CANCELLED", "cancelled")); }, { once: true });
+      }) } });
+  const server = createServer(app);
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const abort = new AbortController();
+  const request = fetch(`http://127.0.0.1:${(server.address() as { port: number }).port}/api/team-dispatch/plan`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note: "设计界面" }), signal: abort.signal,
+  }).catch(error => error);
+  await ready; abort.abort(); await request; await stopped;
 });
 
 test("路由：决策未启用时明确拒绝；规划与开工串起来可用", async (t) => {
@@ -252,7 +282,8 @@ test("路由：决策未启用时明确拒绝；规划与开工串起来可用",
   };
 
   const rejected = await post("/api/team-dispatch/plan", { note: "做点事" });
-  assert.equal(rejected.status, 400);
+  assert.equal(rejected.status, 503);
+  assert.equal(rejected.json.code, "decision_unavailable");
   assert.match(String(rejected.json.error), /本地决策未启用/);
 
   enabled = true;

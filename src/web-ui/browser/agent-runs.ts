@@ -1,4 +1,4 @@
-import { deriveSubagentDispatchMeta } from "../../subagent-dispatch.js";
+import { deriveSubagentDispatchMeta } from "../../subagent-meta.js";
 
 export interface AgentRunSourceMeta {
   taskId: string;
@@ -242,7 +242,7 @@ export function agentRunAccentSeed(agent: AgentRunAgent | null | undefined): str
 }
 
 /**
- * 派发判据：与 Web 服务端共用 `src/subagent-dispatch.ts` 同一份实现。
+ * 派发判据：与 Web 服务端共用 `src/subagent-meta.ts` 同一份实现。
  * pi 的 `subagent` 以「有没有 `action`」区分管理/控制与真派发，所以
  * `subagent({ workflow: "…", async: true })` 这类工作流派发同样进「子 Agent」面板。
  * 这里只留薄包装，不再自己判参数形状。

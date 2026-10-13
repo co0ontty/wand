@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
@@ -272,7 +273,8 @@ test("auth principals persist and legacy sessions migrate as browser admins", (t
   connectedStorage.close();
 
   const corruptDb = new DatabaseSync(connectedPath);
-  corruptDb.prepare("UPDATE auth_sessions SET scopes = ? WHERE token = ?").run("{bad-json", token);
+  // Rows are keyed by SHA-256 digest of the bearer token (schema v3).
+  corruptDb.prepare("UPDATE auth_sessions SET scopes = ? WHERE token = ?").run("{bad-json", createHash("sha256").update(token).digest("hex"));
   corruptDb.close();
   const corruptStorage = new WandStorage(connectedPath);
   assert.deepEqual(corruptStorage.getAuthSession(token)?.principal, {

@@ -24,35 +24,33 @@ const DEFAULT_CONFIG_FILE = "config.json";
  * 升级路径：老 JSON 里仍存有这些字段时，首次启动会被搬到 DB（见 migrateLegacyPreferencesToDb），
  * 然后下一次 saveConfig 写回 JSON 时它们会被剥离（见 stripPreferenceFields）。
  */
-export const PREFERENCE_KEYS = [
-  "defaultProvider",
-  "defaultSessionKind",
-  "defaultEngine",
-  "defaultTaskWorktree",
-  "defaultMode",
-  "defaultCwd",
-  "defaultModel",
-  "defaultCodexModel",
-  "defaultOpenCodeModel",
-  "defaultGrokModel",
-  "defaultQoderModel",
-  "defaultPiModel",
-  "defaultGeminiModel",
-  "modelGroups",
-  "commitCli",
-  "commitModel",
-  "systemAiCli",
-  "systemAiModel",
-  "defaultThinkingEffort",
-  "language",
-  "cardDefaults",
-  "inheritEnv",
-  "taskRetention",
-  "userProfile",
-  "localDecision",
-] as const satisfies readonly (keyof WandConfig)[];
+export type PreferenceKey =
+  | "defaultProvider"
+  | "defaultSessionKind"
+  | "defaultEngine"
+  | "defaultTaskWorktree"
+  | "defaultMode"
+  | "defaultCwd"
+  | "defaultModel"
+  | "defaultCodexModel"
+  | "defaultOpenCodeModel"
+  | "defaultGrokModel"
+  | "defaultQoderModel"
+  | "defaultPiModel"
+  | "defaultGeminiModel"
+  | "modelGroups"
+  | "commitCli"
+  | "commitModel"
+  | "systemAiCli"
+  | "systemAiModel"
+  | "defaultThinkingEffort"
+  | "language"
+  | "cardDefaults"
+  | "inheritEnv"
+  | "taskRetention"
+  | "userProfile"
+  | "localDecision";
 
-export type PreferenceKey = (typeof PREFERENCE_KEYS)[number];
 
 /**
  * 每个 provider 的默认模型偏好字段。新增 provider 时只改这一处：
@@ -71,20 +69,14 @@ export const PROVIDER_MODEL_PREFERENCE_FIELDS = {
 export type ProviderModelField = (typeof PROVIDER_MODEL_PREFERENCE_FIELDS)[SessionProvider];
 
 const PROVIDER_MODEL_FIELDS: readonly ProviderModelField[] = Object.values(PROVIDER_MODEL_PREFERENCE_FIELDS);
-const PROVIDER_MODEL_FIELD_SET: ReadonlySet<string> = new Set(PROVIDER_MODEL_FIELDS);
 
-function isProviderModelField(key: PreferenceKey): key is ProviderModelField {
-  return PROVIDER_MODEL_FIELD_SET.has(key);
-}
-
-const PREFERENCE_KEY_SET = new Set<string>(PREFERENCE_KEYS);
 
 function preferenceStorageKey(key: PreferenceKey): string {
   return `pref:${key}`;
 }
 
 export function isPreferenceKey(key: string): key is PreferenceKey {
-  return PREFERENCE_KEY_SET.has(key);
+  return (PREFERENCE_KEYS as readonly string[]).includes(key);
 }
 
 /**
@@ -112,45 +104,18 @@ export const defaultConfig = (): WandConfig => ({
   port: 8443,
   https: false,
   password: "change-me",
-  defaultProvider: "claude",
-  defaultSessionKind: "structured",
-  // 新建会话默认走 CLI；只有用户在新建面板显式选过 Wand Agent 才会改成 sdk。
-  defaultEngine: "cli",
-  defaultTaskWorktree: true,
-  // 非 root 启动时才有资格用 Claude 的 permission-bypass（root 会被 Claude CLI 拒绝），
-  // 所以这种环境下把默认执行模式抬到「托管」——开箱即得自动确认权限的全自主体验。
-  // root 启动则保守回落到「default」（托管在 root 下也只能降级成 acceptEdits）。
-  // 注意：defaultMode 是偏好字段，只存 SQLite、不写 config.json（见 stripPreferenceFields），
-  // 这里仅作为「用户从未在设置里显式选过模式」时的回落值——显式选择始终优先。
-  defaultMode: isRunningAsRoot() ? "default" : "managed",
   shell: resolveDefaultShell(),
-  defaultCwd: process.cwd(),
   startupCommands: [],
   allowedCommandPrefixes: [],
   shortcutLogMaxBytes: 10 * 1024 * 1024,
-  language: "",
   android: defaultAndroidApkConfig(),
   macos: defaultMacosDmgConfig(),
   ios: defaultIosIpaConfig(),
   render: defaultRenderConfig(),
   harness: defaultHarnessConfig(),
   structured: { processHost: "legacy" },
-  localDecision: { enabled: false, pythonPath: "", modelPath: "" },
-  cardDefaults: defaultCardExpandDefaults(),
-  taskRetention: defaultTaskRetention(),
-  defaultModel: "",
-  defaultCodexModel: "",
-  defaultOpenCodeModel: "",
-  defaultGrokModel: "",
-  defaultQoderModel: "",
-  defaultPiModel: "",
-  defaultGeminiModel: "",
-  modelGroups: [],
-  commitCli: "claude",
-  commitModel: "",
-  systemAiModel: "",
-  defaultThinkingEffort: "off",
-  inheritEnv: true,
+  // User preferences (SQLite-owned): defaults come from PREFERENCE_SPECS.
+  ...preferenceDefaults(),
   commandPresets: [
     {
       label: "Claude",
@@ -265,8 +230,25 @@ export async function loadConfigWithStorage(configPath: string, storage: WandSto
   // password: DB 优先映射到 runtime config，让 config:show 与 server.ts 都看到真值
   applyStoragePassword(config, storage);
 
-  // 内置「系统运维」员工：Wand 自有 AI 调用（commit message / 标题 / 提示词优化 /
-  // 员工起草）都由它执行。这里只做幂等补齐——首次按用户已有的系统 AI 工具与默认
+  bootstrapBuiltinEmployees(config, storage);
+
+  // 如果 JSON 里有偏好字段（说明是老版本配置或刚迁移），重写一次干净版本
+  const hasLegacyPrefs = PREFERENCE_KEYS.some((key) => key in rawInput);
+  const hasLegacySecrets = "password" in rawInput || "appSecret" in rawInput;
+  if (!hadFile || hasLegacyPrefs || hasLegacySecrets) {
+    await saveConfig(configPath, config);
+  }
+  return config;
+}
+
+/**
+ * Idempotent seeding of built-in employees (system ops, default partner, decision
+ * expert, speech polisher, HR). Runs once per process start from loadConfigWithStorage;
+ * never rewrites user-maintained candidates.
+ */
+export function bootstrapBuiltinEmployees(config: WandConfig, storage: WandStorage): void {
+  // 内置「系统运维」员工负责 commit message / 标题 / 提示词优化；招聘由 HR 负责。
+  // 这里只做幂等补齐——首次按用户已有的系统 AI 工具与默认
   // provider 建首条候选，之后候选由用户在员工设置里维护，不再回写 config。
   storage.ensureSystemSiliconEmployee({
     cli: config.systemAiCli,
@@ -277,14 +259,7 @@ export async function loadConfigWithStorage(configPath: string, storage: WandSto
   storage.ensureDefaultSiliconEmployee(config.defaultProvider);
   storage.ensureDecisionExpertEmployee();
   storage.ensureSpeechPolisherEmployee();
-
-  // 如果 JSON 里有偏好字段（说明是老版本配置或刚迁移），重写一次干净版本
-  const hasLegacyPrefs = PREFERENCE_KEYS.some((key) => key in rawInput);
-  const hasLegacySecrets = "password" in rawInput || "appSecret" in rawInput;
-  if (!hadFile || hasLegacyPrefs || hasLegacySecrets) {
-    await saveConfig(configPath, config);
-  }
-  return config;
+  storage.ensureHrEmployee(storage.getSystemSiliconEmployee()?.agents);
 }
 
 /**
@@ -360,88 +335,240 @@ function migrateLegacyPreferencesToDb(rawJsonInput: Partial<WandConfig> | null |
 }
 
 /**
- * 用 DB 里的偏好覆盖 config 对象（in-place），返回同一个引用，
- * 方便各 manager 持有引用后继续工作。DB 里没有的字段不动，保留 JSON 默认值。
+ * Declarative user-preference table. One record drives: the key list, the
+ * defaults in defaultConfig(), the tolerant read on load (applyStoragePreferences),
+ * the strict write from the CLI/UI (writePreferenceToStorage) and the runtime value.
+ * The record is typed over PreferenceKey, so adding a key without a spec fails to compile.
+ *
+ * - read: tolerant. Returns null to keep the current value (legacy/invalid rows are ignored).
+ * - write: strict. Throws on invalid input; returns what to persist (`stored`, null deletes)
+ *   and what the live config should hold (`runtime`).
+ * - hot: applied to the live config without restart (every preference today).
  */
-export function applyStoragePreferences(config: WandConfig, storage: WandStorage): WandConfig {
-  const defaults = defaultConfig();
+export interface PreferenceSpec<T> {
+  readonly storageKey: string;
+  /** Value when unset or unreadable; undefined means "no value" and is not written into defaultConfig. */
+  readonly default: () => T | undefined;
+  readonly read: (raw: unknown) => { value: T } | null;
+  readonly write: (value: unknown) => { stored: unknown; runtime: T | undefined };
+  readonly hot: true;
+}
 
-  if (storage.hasPreference(preferenceStorageKey("defaultProvider"))) {
-    const v = storage.getPreference<string>(preferenceStorageKey("defaultProvider"), defaults.defaultProvider ?? "claude");
-    if (isSessionProvider(v)) config.defaultProvider = v;
+type PreferenceSpecMap = { readonly [K in PreferenceKey]: PreferenceSpec<WandConfig[K]> };
+
+function trimmedStringSpec(key: TrimmedStringPreferenceKey, fallback: () => string): PreferenceSpec<string> {
+  return {
+    storageKey: preferenceStorageKey(key),
+    default: fallback,
+    read: (raw) => (typeof raw === "string" ? { value: raw.trim() } : null),
+    write: (value) => {
+      const trimmed = typeof value === "string" ? value.trim() : "";
+      return { stored: trimmed, runtime: trimmed };
+    },
+    hot: true,
+  };
+}
+
+function enumSpec<T extends string | boolean>(
+  key: PreferenceKey,
+  options: {
+    fallback: () => NoInfer<T> | undefined;
+    accepts: (value: unknown) => value is T;
+    rejectMessage: (value: unknown) => string;
+  },
+): PreferenceSpec<T> {
+  return {
+    storageKey: preferenceStorageKey(key),
+    default: options.fallback,
+    read: (raw) => (options.accepts(raw) ? { value: raw } : null),
+    write: (value) => {
+      if (!options.accepts(value)) throw new Error(options.rejectMessage(value));
+      return { stored: value, runtime: value };
+    },
+    hot: true,
+  };
+}
+
+const TRIMMED_STRING_PREFERENCE_KEYS = [
+  "defaultModel", "defaultCodexModel", "defaultOpenCodeModel", "defaultGrokModel", "defaultQoderModel",
+  "defaultPiModel", "defaultGeminiModel", "commitModel", "systemAiModel", "language",
+] as const;
+export type TrimmedStringPreferenceKey = (typeof TRIMMED_STRING_PREFERENCE_KEYS)[number];
+
+function isOneOf<T extends string>(options: readonly T[]): (value: unknown) => value is T {
+  return (value: unknown): value is T => typeof value === "string" && (options as readonly string[]).includes(value);
+}
+const isSessionKind = isOneOf(["pty", "structured"] as const);
+const isEngine = isOneOf(["cli", "sdk"] as const);
+const isCommitCli = isOneOf(["claude", "codex", "opencode"] as const);
+
+const PREFERENCE_SPECS: PreferenceSpecMap = {
+  defaultProvider: enumSpec<NonNullable<WandConfig["defaultProvider"]>>("defaultProvider", {
+    fallback: () => "claude",
+    accepts: isSessionProvider,
+    rejectMessage: (value) => `无效 Provider: ${String(value)}`,
+  }),
+  defaultSessionKind: enumSpec<NonNullable<WandConfig["defaultSessionKind"]>>("defaultSessionKind", {
+    fallback: () => "structured",
+    accepts: isSessionKind,
+    rejectMessage: (value) => `无效会话类型: ${String(value)}`,
+  }),
+  // 新建会话默认走 CLI；只有用户在新建面板显式选过 Wand Agent 才会改成 sdk。
+  defaultEngine: enumSpec<NonNullable<WandConfig["defaultEngine"]>>("defaultEngine", {
+    fallback: () => "cli",
+    accepts: isEngine,
+    rejectMessage: (value) => `无效执行引擎: ${String(value)}`,
+  }),
+  defaultTaskWorktree: enumSpec<NonNullable<WandConfig["defaultTaskWorktree"]>>("defaultTaskWorktree", {
+    fallback: () => true,
+    accepts: (value): value is boolean => typeof value === "boolean",
+    rejectMessage: () => "defaultTaskWorktree 必须是布尔值。",
+  }),
+  // 非 root 启动时抬到「托管」，root 回落到「default」（见 defaultMode 注释，显式选择始终优先）。
+  defaultMode: {
+    storageKey: preferenceStorageKey("defaultMode"),
+    default: () => (isRunningAsRoot() ? "default" : "managed"),
+    read: (raw) => (isExecutionMode(raw) ? { value: raw } : null),
+    write: (value) => {
+      if (!isExecutionMode(value)) throw new Error(`无效执行模式: ${String(value)}`);
+      return { stored: value, runtime: value };
+    },
+    hot: true,
+  },
+  defaultCwd: {
+    storageKey: preferenceStorageKey("defaultCwd"),
+    default: () => process.cwd(),
+    read: (raw) => (typeof raw === "string" && raw.trim() ? { value: raw } : null),
+    write: (value) => {
+      const v = typeof value === "string" ? value : "";
+      return { stored: v, runtime: v || defaultConfig().defaultCwd };
+    },
+    hot: true,
+  },
+  defaultModel: trimmedStringSpec("defaultModel", () => ""),
+  defaultCodexModel: trimmedStringSpec("defaultCodexModel", () => ""),
+  defaultOpenCodeModel: trimmedStringSpec("defaultOpenCodeModel", () => ""),
+  defaultGrokModel: trimmedStringSpec("defaultGrokModel", () => ""),
+  defaultQoderModel: trimmedStringSpec("defaultQoderModel", () => ""),
+  defaultPiModel: trimmedStringSpec("defaultPiModel", () => ""),
+  defaultGeminiModel: trimmedStringSpec("defaultGeminiModel", () => ""),
+  modelGroups: {
+    storageKey: preferenceStorageKey("modelGroups"),
+    default: () => [],
+    read: (raw) => ({ value: normalizeModelGroups(raw) }),
+    write: (value) => {
+      const groups = normalizeModelGroups(value);
+      return { stored: groups, runtime: groups };
+    },
+    hot: true,
+  },
+  commitCli: enumSpec<NonNullable<WandConfig["commitCli"]>>("commitCli", {
+    fallback: () => "claude",
+    accepts: isCommitCli,
+    rejectMessage: (value) => `无效 commit CLI: ${String(value)}`,
+  }),
+  commitModel: trimmedStringSpec("commitModel", () => ""),
+  systemAiCli: enumSpec<NonNullable<WandConfig["systemAiCli"]>>("systemAiCli", {
+    // No default in defaultConfig: the system employee seeds it on first run.
+    fallback: () => undefined,
+    accepts: isSessionProvider,
+    rejectMessage: (value) => `无效系统 AI CLI: ${String(value)}`,
+  }),
+  systemAiModel: trimmedStringSpec("systemAiModel", () => ""),
+  defaultThinkingEffort: enumSpec<NonNullable<WandConfig["defaultThinkingEffort"]>>("defaultThinkingEffort", {
+    fallback: () => "off",
+    accepts: isThinkingEffort,
+    rejectMessage: (value) => `无效思考深度: ${String(value)}`,
+  }),
+  language: trimmedStringSpec("language", () => ""),
+  cardDefaults: {
+    storageKey: preferenceStorageKey("cardDefaults"),
+    default: () => defaultCardExpandDefaults(),
+    read: (raw) => ({ value: normalizeCardDefaults(raw) }),
+    write: (value) => {
+      const normalized = normalizeCardDefaults(value);
+      return { stored: normalized, runtime: normalized };
+    },
+    hot: true,
+  },
+  inheritEnv: {
+    storageKey: preferenceStorageKey("inheritEnv"),
+    default: () => true,
+    // Legacy read tolerance: anything other than an explicit false means inherit.
+    read: (raw) => ({ value: raw !== false }),
+    write: (value) => {
+      if (typeof value !== "boolean") throw new Error(`inheritEnv 必须是布尔值: ${String(value)}`);
+      return { stored: value, runtime: value };
+    },
+    hot: true,
+  },
+  taskRetention: {
+    storageKey: preferenceStorageKey("taskRetention"),
+    default: () => defaultTaskRetention(),
+    read: (raw) => ({ value: normalizeTaskRetention(raw) }),
+    write: (value) => {
+      const retention = parseTaskRetention(value);
+      return { stored: retention, runtime: retention };
+    },
+    hot: true,
+  },
+  userProfile: {
+    storageKey: preferenceStorageKey("userProfile"),
+    default: () => undefined,
+    read: (raw) => ({ value: normalizeUserProfile(raw) }),
+    write: (value) => {
+      const profile = parseUserProfile(value);
+      // null deletes the stored row, so clearing the profile leaves no value behind.
+      return { stored: profile ?? null, runtime: profile };
+    },
+    hot: true,
+  },
+  localDecision: {
+    storageKey: preferenceStorageKey("localDecision"),
+    default: () => ({ enabled: false, pythonPath: "", modelPath: "" }),
+    read: (raw) => {
+      try {
+        return { value: parseLocalDecisionConfig(raw) };
+      } catch {
+        return { value: { ...defaultConfig().localDecision! } };
+      }
+    },
+    write: (value) => {
+      const decision = parseLocalDecisionConfig(value);
+      return { stored: decision, runtime: decision };
+    },
+    hot: true,
+  },
+};
+
+/** Every preference key, in schema order. */
+export const PREFERENCE_KEYS = Object.keys(PREFERENCE_SPECS) as PreferenceKey[];
+
+/** Defaults for the preference fields, derived from the schema (used by defaultConfig). */
+export function preferenceDefaults(): Pick<WandConfig, PreferenceKey> {
+  const out: Record<string, unknown> = {};
+  for (const key of PREFERENCE_KEYS) {
+    const value = PREFERENCE_SPECS[key].default();
+    if (value !== undefined) out[key] = value;
   }
-  if (storage.hasPreference(preferenceStorageKey("defaultSessionKind"))) {
-    const v = storage.getPreference<string>(preferenceStorageKey("defaultSessionKind"), defaults.defaultSessionKind ?? "structured");
-    if (v === "pty" || v === "structured") config.defaultSessionKind = v;
-  }
-  if (storage.hasPreference(preferenceStorageKey("defaultEngine"))) {
-    const v = storage.getPreference<string>(preferenceStorageKey("defaultEngine"), defaults.defaultEngine ?? "cli");
-    if (v === "cli" || v === "sdk") config.defaultEngine = v;
-  }
-  if (storage.hasPreference(preferenceStorageKey("defaultTaskWorktree"))) {
-    const v = storage.getPreference<boolean>(preferenceStorageKey("defaultTaskWorktree"), defaults.defaultTaskWorktree ?? true);
-    if (typeof v === "boolean") config.defaultTaskWorktree = v;
-  }
-  if (storage.hasPreference(preferenceStorageKey("defaultMode"))) {
-    const v = storage.getPreference<string>(preferenceStorageKey("defaultMode"), defaults.defaultMode);
-    if (isExecutionMode(v)) config.defaultMode = v;
-  }
-  if (storage.hasPreference(preferenceStorageKey("defaultCwd"))) {
-    const v = storage.getPreference<string>(preferenceStorageKey("defaultCwd"), defaults.defaultCwd);
-    if (typeof v === "string" && v.trim()) config.defaultCwd = v;
-  }
-  for (const field of PROVIDER_MODEL_FIELDS) {
-    const dbKey = preferenceStorageKey(field);
-    if (!storage.hasPreference(dbKey)) continue;
-    const v = storage.getPreference<string>(dbKey, defaults[field] ?? "");
-    if (typeof v === "string") config[field] = v.trim();
-  }
-  if (storage.hasPreference(preferenceStorageKey("modelGroups"))) {
-    config.modelGroups = normalizeModelGroups(storage.getPreference<unknown>(preferenceStorageKey("modelGroups"), []));
-  }
-  if (storage.hasPreference(preferenceStorageKey("commitCli"))) {
-    const v = storage.getPreference<string>(preferenceStorageKey("commitCli"), defaults.commitCli ?? "claude");
-    if (v === "claude" || v === "codex" || v === "opencode") config.commitCli = v;
-  }
-  if (storage.hasPreference(preferenceStorageKey("commitModel"))) {
-    const v = storage.getPreference<string>(preferenceStorageKey("commitModel"), defaults.commitModel ?? "");
-    if (typeof v === "string") config.commitModel = v.trim();
-  }
-  if (storage.hasPreference(preferenceStorageKey("systemAiCli"))) {
-    const v = storage.getPreference<unknown>(preferenceStorageKey("systemAiCli"), defaults.systemAiCli);
-    if (isSessionProvider(v)) config.systemAiCli = v;
-  }
-  if (storage.hasPreference(preferenceStorageKey("systemAiModel"))) {
-    const v = storage.getPreference<unknown>(preferenceStorageKey("systemAiModel"), defaults.systemAiModel);
-    if (typeof v === "string") config.systemAiModel = v.trim();
-  }
-  if (storage.hasPreference(preferenceStorageKey("defaultThinkingEffort"))) {
-    const v = storage.getPreference<string>(preferenceStorageKey("defaultThinkingEffort"), defaults.defaultThinkingEffort ?? "off");
-    if (isThinkingEffort(v)) config.defaultThinkingEffort = v;
-  }
-  if (storage.hasPreference(preferenceStorageKey("language"))) {
-    const v = storage.getPreference<string>(preferenceStorageKey("language"), defaults.language ?? "");
-    if (typeof v === "string") config.language = v.trim();
-  }
-  if (storage.hasPreference(preferenceStorageKey("cardDefaults"))) {
-    const v = storage.getPreference<unknown>(preferenceStorageKey("cardDefaults"), defaults.cardDefaults);
-    config.cardDefaults = normalizeCardDefaults(v);
-  }
-  if (storage.hasPreference(preferenceStorageKey("inheritEnv"))) {
-    const v = storage.getPreference<unknown>(preferenceStorageKey("inheritEnv"), defaults.inheritEnv ?? true);
-    config.inheritEnv = v === false ? false : true;
-  }
-  if (storage.hasPreference(preferenceStorageKey("taskRetention"))) {
-    config.taskRetention = normalizeTaskRetention(
-      storage.getPreference<unknown>(preferenceStorageKey("taskRetention"), defaults.taskRetention),
-    );
-  }
-  if (storage.hasPreference(preferenceStorageKey("userProfile"))) {
-    config.userProfile = normalizeUserProfile(storage.getPreference<unknown>(preferenceStorageKey("userProfile"), null));
-  }
-  if (storage.hasPreference(preferenceStorageKey("localDecision"))) {
-    try { config.localDecision = parseLocalDecisionConfig(storage.getPreference<unknown>(preferenceStorageKey("localDecision"), defaults.localDecision)); }
-    catch { config.localDecision = { ...defaults.localDecision! }; }
+  return out as Pick<WandConfig, PreferenceKey>;
+}
+
+export function preferenceSpec<K extends PreferenceKey>(key: K): PreferenceSpec<WandConfig[K]> {
+  return PREFERENCE_SPECS[key];
+}
+
+/** Keys applied to the live process config without restart (all of them today). */
+export const HOT_PREFERENCE_KEYS: readonly PreferenceKey[] = PREFERENCE_KEYS.filter((key) => PREFERENCE_SPECS[key].hot);
+
+/** 用 DB 里的偏好覆盖 config 对象（in-place），返回同一个引用。DB 里没有的字段不动，保留默认值。 */
+export function applyStoragePreferences(config: WandConfig, storage: WandStorage): WandConfig {
+  const target = config as unknown as Record<string, unknown>;
+  for (const key of PREFERENCE_KEYS) {
+    const spec = PREFERENCE_SPECS[key];
+    if (!storage.hasPreference(spec.storageKey)) continue;
+    const result = spec.read(storage.getPreference<unknown>(spec.storageKey, spec.default()));
+    if (result) target[key] = result.value;
   }
   return config;
 }
@@ -453,127 +580,10 @@ export function writePreferenceToStorage(
   key: PreferenceKey,
   value: unknown,
 ): void {
-  const dbKey = preferenceStorageKey(key);
-  // Default model fields share one shape (trimmed string) across every provider;
-  // handling them before the switch keeps the switch free of seven copies.
-  if (isProviderModelField(key)) {
-    const v = typeof value === "string" ? value.trim() : "";
-    storage.setPreference(dbKey, v);
-    config[key] = v;
-    return;
-  }
-  switch (key) {
-    case "localDecision": {
-      const decision = parseLocalDecisionConfig(value);
-      storage.setPreference(dbKey, decision);
-      config.localDecision = decision;
-      break;
-    }
-    case "modelGroups": {
-      const groups = normalizeModelGroups(value);
-      storage.setPreference(dbKey, groups);
-      config.modelGroups = groups;
-      break;
-    }
-    case "defaultProvider": {
-      if (!isSessionProvider(value)) throw new Error(`无效 Provider: ${String(value)}`);
-      storage.setPreference(dbKey, value);
-      config.defaultProvider = value;
-      break;
-    }
-    case "defaultSessionKind": {
-      if (value !== "pty" && value !== "structured") throw new Error(`无效会话类型: ${value}`);
-      storage.setPreference(dbKey, value);
-      config.defaultSessionKind = value;
-      break;
-    }
-    case "defaultEngine": {
-      if (value !== "cli" && value !== "sdk") throw new Error(`无效执行引擎: ${String(value)}`);
-      storage.setPreference(dbKey, value);
-      config.defaultEngine = value;
-      break;
-    }
-    case "defaultTaskWorktree": {
-      if (typeof value !== "boolean") throw new Error("defaultTaskWorktree 必须是布尔值。");
-      storage.setPreference(dbKey, value);
-      config.defaultTaskWorktree = value;
-      break;
-    }
-    case "defaultMode": {
-      if (!isExecutionMode(value)) throw new Error(`无效执行模式: ${value}`);
-      storage.setPreference(dbKey, value);
-      config.defaultMode = value;
-      break;
-    }
-    case "defaultCwd": {
-      const v = typeof value === "string" ? value : "";
-      storage.setPreference(dbKey, v);
-      config.defaultCwd = v || defaultConfig().defaultCwd;
-      break;
-    }
-    case "commitCli": {
-      if (value !== "claude" && value !== "codex" && value !== "opencode") throw new Error(`无效 commit CLI: ${value}`);
-      storage.setPreference(dbKey, value);
-      config.commitCli = value;
-      break;
-    }
-    case "commitModel": {
-      const v = typeof value === "string" ? value.trim() : "";
-      storage.setPreference(dbKey, v);
-      config.commitModel = v;
-      break;
-    }
-    case "systemAiCli": {
-      if (!isSessionProvider(value)) throw new Error(`无效系统 AI CLI: ${String(value)}`);
-      storage.setPreference(dbKey, value);
-      config.systemAiCli = value;
-      break;
-    }
-    case "systemAiModel": {
-      const v = typeof value === "string" ? value.trim() : "";
-      storage.setPreference(dbKey, v);
-      config.systemAiModel = v;
-      break;
-    }
-    case "defaultThinkingEffort": {
-      if (!isThinkingEffort(value)) throw new Error(`无效思考深度: ${String(value)}`);
-      const v = value;
-      storage.setPreference(dbKey, v);
-      config.defaultThinkingEffort = v;
-      break;
-    }
-    case "language": {
-      const v = typeof value === "string" ? value.trim() : "";
-      storage.setPreference(dbKey, v);
-      config.language = v;
-      break;
-    }
-    case "cardDefaults": {
-      const normalized = normalizeCardDefaults(value);
-      storage.setPreference(dbKey, normalized);
-      config.cardDefaults = normalized;
-      break;
-    }
-    case "inheritEnv": {
-      if (typeof value !== "boolean") throw new Error(`inheritEnv 必须是布尔值: ${String(value)}`);
-      const v = value;
-      storage.setPreference(dbKey, v);
-      config.inheritEnv = v;
-      break;
-    }
-    case "taskRetention": {
-      const retention = parseTaskRetention(value);
-      storage.setPreference(dbKey, retention);
-      config.taskRetention = retention;
-      break;
-    }
-    case "userProfile": {
-      const profile = parseUserProfile(value);
-      storage.setPreference(dbKey, profile ?? null);
-      config.userProfile = profile;
-      break;
-    }
-  }
+  const spec = PREFERENCE_SPECS[key];
+  const { stored, runtime } = spec.write(value);
+  storage.setPreference(spec.storageKey, stored);
+  (config as unknown as Record<string, unknown>)[key] = runtime;
 }
 
 function defaultCardExpandDefaults(): CardExpandDefaults {
@@ -746,6 +756,10 @@ function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
     ...input,
     // Ensure https is boolean
     https: typeof input.https === "boolean" ? input.https : defaults.https,
+    browserExtensionIds: Array.isArray(input.browserExtensionIds)
+      ? input.browserExtensionIds.filter((id): id is string => typeof id === "string").map((id) => id.trim()).filter(Boolean)
+      : undefined,
+    trustProxy: typeof input.trustProxy === "string" ? input.trustProxy.trim() || undefined : undefined,
     // 只接受不带路径/查询/凭据的 http(s) origin；写了非法值就当作没配。
     publicOrigin: (() => {
       const raw = typeof input.publicOrigin === "string" ? input.publicOrigin.trim() : "";

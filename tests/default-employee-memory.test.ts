@@ -9,6 +9,7 @@ import { DEFAULT_EMPLOYEE_ID, DEFAULT_EMPLOYEE_KEY, DEFAULT_EMPLOYEE_NAME, SYSTE
 import { defaultConfig, loadConfigWithStorage } from "../src/config.js";
 import { DEFAULT_EMPLOYEE_PROMPT } from "../src/default-employee.js";
 import { SPEECH_POLISHER_ID } from "../src/speech-polisher-identity.js";
+import { HR_EMPLOYEE_ID } from "../src/hr-employee-identity.js";
 import { DECISION_EXPERT_ID, DECISION_EXPERT_KEY } from "../src/decision-expert-identity.js";
 import { dispatchAgentForTask } from "../src/agent-dispatch.js";
 import { recordIterationPrompt, whenIterationPromptsSettled } from "../src/iteration-log.js";
@@ -62,7 +63,7 @@ test("default partner is seeded alongside ops, idempotent and preserves candidat
   storage.saveSiliconEmployee({ ...decisionExpert, agents: decisionCandidates });
   storage.saveSiliconEmployee({ ...role, agents: [CODEX, PI] });
   await loadConfigWithStorage(join(root, "config.json"), storage);
-  assert.deepEqual(storage.listSiliconEmployees().map((employee) => employee.id), [SYSTEM_EMPLOYEE_ID, DEFAULT_EMPLOYEE_ID, DECISION_EXPERT_ID, SPEECH_POLISHER_ID]);
+  assert.deepEqual(storage.listSiliconEmployees().map((employee) => employee.id), [SYSTEM_EMPLOYEE_ID, DEFAULT_EMPLOYEE_ID, DECISION_EXPERT_ID, SPEECH_POLISHER_ID, HR_EMPLOYEE_ID]);
   assert.deepEqual(storage.getDefaultSiliconEmployee()?.agents, [CODEX, PI]);
   assert.equal(storage.getSystemSiliconEmployee(DECISION_EXPERT_KEY)?.id, decisionExpert.id);
   assert.deepEqual(storage.getSystemSiliconEmployee(DECISION_EXPERT_KEY)?.agents, decisionCandidates);
@@ -271,7 +272,7 @@ test("HTTP memory logs only allowlisted successful actions; default built-in can
   assert.equal((await call("DELETE", `/api/silicon-employees/${DEFAULT_EMPLOYEE_ID}`)).status, 400);
   assert.equal((await call("POST", `/api/silicon-employees/${DEFAULT_EMPLOYEE_ID}/archive`)).status, 400);
   assert.equal((await call("PUT", `/api/silicon-employees/${DEFAULT_EMPLOYEE_ID}`, { agents: [CODEX] })).status, 200);
-  assert.equal((await call("PUT", `/api/silicon-employees/${DEFAULT_EMPLOYEE_ID}`, { agents: [PI], prompt: "手动覆盖" })).status, 400);
+  assert.equal((await call("PUT", `/api/silicon-employees/${DEFAULT_EMPLOYEE_ID}`, { agents: [PI], prompt: "手动覆盖" })).status, 200);
   assert.equal((await call("PATCH", "/api/user-memory", { enabled: false })).status, 200);
   await call("POST", "/api/tasks", { description: "暂停后不记录" });
   await whenUserMemorySettled(storage);
@@ -291,7 +292,7 @@ test("CLI sessions use default role without replacing provider/model/mode or add
   t.after(() => { structured.dispose(); processes.dispose(); });
   const app = express();
   app.use(express.json());
-  registerSessionRoutes(app, processes, structured, storage, config.defaultMode, config, sessions);
+  registerSessionRoutes(app, { processes, structured, storage, defaultMode: config.defaultMode, config, sessions });
   const server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
@@ -409,6 +410,6 @@ test("task dispatch defaults a missing executor; selected CLI and PTY contracts 
   assert.equal(ptyOptions.model, "user-model");
   assert.equal(ptyOptions.employeeId, DEFAULT_EMPLOYEE_ID);
   assert.equal(ptyOptions.employeeName, DEFAULT_EMPLOYEE_NAME);
-  assert.equal(ptyOptions.employeeAvatar, "");
+  assert.equal(ptyOptions.employeeAvatar, "plush-cat:v1:silver");
   assert.equal(ptyOptions.employeeCandidates, undefined);
 });

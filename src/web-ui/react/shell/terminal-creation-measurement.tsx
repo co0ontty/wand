@@ -9,6 +9,8 @@ import { FirstStandaloneSessionChrome, FirstWorkspaceWindowChrome } from "../wor
 import type { WorkspaceSessionSummary } from "../workspaces/types";
 import { TerminalShortcutsChrome } from "../composer-rail/terminal-shortcuts";
 import { ComposerRailSubmitChrome } from "../composer-rail/host";
+import { PtyInputModeToggle } from "../composer-rail/input-mode-toggle";
+import { PtyModifierButtons } from "../composer-rail/modifiers";
 
 let probeSequence = 0;
 
@@ -75,6 +77,11 @@ export function prepareTerminalCreationComposer(panel: HTMLElement): () => void 
       const className = composer.className;
       undo.push(() => { composer.className = className; });
       composer.classList.add("is-terminal-interactive");
+      const mode = composer.dataset.ptyInputMode;
+      undo.push(() => { if (mode === undefined) delete composer.dataset.ptyInputMode; else composer.dataset.ptyInputMode = mode; });
+      composer.dataset.ptyInputMode = "shortcuts";
+      // The future resting geometry is measured synchronously, not mid-transition.
+      for (const token of ["--motion-normal", "--motion-fast", "--motion-quick-exit", "--motion-morph"]) style(composer, token, "0s");
     }
     const input = panel.querySelector<HTMLElement>(".input-textarea");
     if (input) {
@@ -85,6 +92,12 @@ export function prepareTerminalCreationComposer(panel: HTMLElement): () => void 
       style(input, "height", `${Number.isFinite(minimum) ? minimum : 40}px`);
     }
     const portals: React.ReactPortal[] = [];
+    const footer = composer?.querySelector<HTMLElement>(".composer-main-row");
+    if (footer && !footer.querySelector(".pty-input-mode-toggle")) {
+      const slot = document.createElement("span"); slot.style.display = "contents"; slots.push(slot); footer.appendChild(slot);
+      portals.push(createPortal(<><PtyInputModeToggle mode="shortcuts" onToggle={() => {}}/>
+        <PtyModifierButtons ctrl={false} shift={false} onToggle={() => {}}/></>, slot));
+    }
     const shortcuts = panel.querySelector<HTMLElement>(".terminal-shortcuts");
     if (shortcuts?.hidden && !document.documentElement.classList.contains("is-wand-native-input")) {
       const slot = document.createElement("div"); slot.className = "terminal-shortcuts";

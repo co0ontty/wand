@@ -7,6 +7,33 @@ export interface StructuredFailure {
   retryable: boolean;
 }
 
+/** Extra facts a CLI-backed adapter adds to its finalize() result. */
+export type StructuredCliUnacceptedFacts = Pick<StructuredRunnerResult, "inputAccepted" | "rejection">;
+
+/**
+ * An in-band provider protocol error is the only evidence that lets a CLI adapter claim the input
+ * was never taken: the reply arrived from the provider itself, this turn produced no block, usage
+ * or cost, and stdout held nothing we could not account for as protocol traffic. Anything else —
+ * unparsed stdout, a signal, a spawn failure or work already done — stays unknown/accepted so no
+ * executed turn can be replayed on another candidate.
+ */
+export function cliUnacceptedFacts(input: {
+  state: StructuredRunnerTurnState;
+  primaryError: string | null;
+  /** The provider reported this error inside its own protocol stream. */
+  protocolError: boolean;
+  /** Stdout carried bytes the adapter could not parse as protocol events. */
+  unparsedStdout: boolean;
+  signal: NodeJS.Signals | null;
+  spawnError?: NodeJS.ErrnoException;
+  /** Adapters whose protocol echoes the failure text into `result` state what really ran. */
+  progressed?: boolean;
+}): StructuredCliUnacceptedFacts {
+  if (!input.protocolError || input.unparsedStdout || input.signal || input.spawnError || !input.primaryError?.trim()) return {};
+  if (input.progressed ?? hasStructuredExecutionProgress(input.state)) return {};
+  return { inputAccepted: false, rejection: classifyProviderRejection(input.primaryError) ?? "model-unavailable" };
+}
+
 /** Only call for a provider protocol error, never assistant text, stderr or a caught transport error. */
 export function classifyProviderRejection(message: string | null | undefined): ProviderRejectionKind | null {
   const text = message?.trim() ?? "";

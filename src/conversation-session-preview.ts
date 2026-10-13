@@ -1,6 +1,10 @@
 import type { ConversationSessionPreview, SessionSnapshot } from "./types.js";
 
 export const CONVERSATION_SESSION_PREFIX = "conversation-message:";
+/** Scheduled occurrences already have a plan title. Identify them from durable metadata, never prompt text. */
+export function isScheduledConversationSession(session: Pick<SessionSnapshot, "sessionSource" | "automationId">): boolean {
+  return session.sessionSource === "automation" && session.automationId?.startsWith(`${CONVERSATION_SESSION_PREFIX}scheduled:`) === true;
+}
 export const CONVERSATION_PREVIEW_LIMIT = 4000;
 export const conversationSessionPreviewLabels: Record<ConversationSessionPreview["status"], string> = {
   starting: "正在启动", running: "正在回复", waiting_user: "等待你确认", done: "已完成",

@@ -1,3 +1,6 @@
+// RUNTIME-LOADED BY PATH: pi-resource-run.ts starts this file as a Pi extension via
+// fileURLToPath(new URL("./pi-resource-bridge.js", import.meta.url)). It is not imported by
+// any static module, so static reachability tools report it as unused. Do not rename or move it.
 /** Explicit CLI extension: replaces built-in MCP discovery without changing the user's agent directory. */
 import { readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";

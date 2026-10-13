@@ -222,7 +222,7 @@ test("Android acknowledgement on a recovered session returns its queue without s
   assert.equal(sessions.ownerOf(sessionId), "structured");
   const app = express();
   app.use(express.json());
-  registerSessionRoutes(app, processes, manager, storage, config.defaultMode, config, sessions);
+  registerSessionRoutes(app, { processes, structured: manager, storage, defaultMode: config.defaultMode, config, sessions });
   const server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {

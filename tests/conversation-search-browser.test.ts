@@ -27,6 +27,9 @@ async function runSearchBrowser(t: TestContext): Promise<void> {
     const receipt = await h.service.createGroup(randomUUID(), { name, employeeIds: [employeeId] });
     assert.equal(receipt.state, "accepted", receipt.error);
   }
+  const archived = await h.service.createGroup(randomUUID(), { name: "已归档搜索核对群", employeeIds: ["e_test_1"] });
+  assert.equal(archived.state, "accepted", archived.error);
+  h.service.updateListState(archived.conversationId, { dissolved: true });
   const source = `
     import * as React from "react";
     import { createRoot } from "react-dom/client";
@@ -68,6 +71,8 @@ async function runSearchBrowser(t: TestContext): Promise<void> {
   `;
   await build({ stdin: { contents: source, resolveDir: root, loader: "tsx" }, bundle: true, format: "iife", platform: "browser", jsx: "automatic",
     outfile: join(temp, "app.js"), logLevel: "warning", define: { "process.env.NODE_ENV": '"production"' } });
+  await build({ entryPoints: [join(root, "src/web-ui/react/avatars/renderer.ts")], bundle: true, format: "iife", platform: "browser", minify: true, outfile: join(temp, "plush-avatar.js") });
+  writeFileSync(join(temp, "app.js"), readFileSync(join(temp, "app.js"), "utf8").replaceAll("${plushAvatarChunkSrc}", "/plush-avatar.js"));
   const app = express(); app.use(express.json());
   let holdListRead = true, failListRead = false;
   const pendingListReads: Array<() => void> = [];
@@ -84,6 +89,7 @@ async function runSearchBrowser(t: TestContext): Promise<void> {
   app.get("/api/attention", (_req, res) => res.json({ items: [] }));
   app.get("/api/*", (_req, res) => res.json({}));
   app.get("/app.js", (_req, res) => res.type("js").send(readFileSync(join(temp, "app.js"))));
+  app.get("/plush-avatar.js", (_req, res) => res.type("js").send(readFileSync(join(temp, "plush-avatar.js"))));
   app.get("/styles.css", (_req, res) => res.type("css").send(readFileSync(join(root, "src/web-ui/content/styles.css"))));
   app.get("/tailwind.css", (_req, res) => res.type("css").send(readFileSync(join(root, "src/web-ui/content/tailwind.css"))));
   app.get("*", (req, res) => {
@@ -180,8 +186,9 @@ async function runSearchBrowser(t: TestContext): Promise<void> {
       await send("Emulation.setEmulatedMedia", { features: [
         { name: "prefers-color-scheme", value: "light" },
         { name: "prefers-reduced-motion", value: scenario.reduced ? "reduce" : "no-preference" }] });
+      await evaluate("globalThis.filterNavigationPending=true");
       await send("Page.navigate", { url: `${origin}/?mode=${scenario.name}${scenario.native ? "&native=1&reactUi=0" : ""}` });
-      await wait("!!document.querySelector('.conversation-search-host')");
+      await wait("globalThis.filterNavigationPending!==true && typeof conversationFixture!=='undefined' && !!document.querySelector('.conversation-search-host')");
       if (scenario.drawer) await click('[aria-label="打开列表"]');
       await evaluate("conversationFixture.conversationUi.filter('list-query','')");
       if (holdListRead) {
@@ -196,6 +203,7 @@ async function runSearchBrowser(t: TestContext): Promise<void> {
       await wait("document.querySelectorAll('.conversation-sidebar-list .conversation-row').length>1");
       const allRows = (await searchState()).rows;
       assert.equal(await evaluate("document.querySelector('.conversation-list-count').textContent"), `${allRows} 个对话`);
+      await evaluate("Promise.all(document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity).map(a=>a.finished.catch(()=>{})))");
       const opened = await geometry();
       assert.ok(opened.input.width >= 160, `${scenario.name}: always-visible search has usable width`);
       assert.ok(opened.input.left >= opened.sidebar.left && opened.input.right <= opened.sidebar.right);
@@ -251,7 +259,33 @@ async function runSearchBrowser(t: TestContext): Promise<void> {
       assert.equal(await evaluate("getComputedStyle(document.querySelector('.conversation-search-input')).transform"), "none");
       assert.equal(await evaluate("document.documentElement.scrollWidth<=innerWidth+1"), true);
       await shot(`${scenario.name}-02-preserved`);
-      rows.push({ scenario: scenario.name, opened, persistentSearch: true, preservedQuery: true });
+      await click('[aria-label="清空搜索"]');
+      for (const filter of ["active", "archived", "all"] as const) {
+        const expectedRows = filter === "active" ? allRows - 1 : filter === "archived" ? 1 : allRows;
+        // Native radio state is stable even while Ant's decorative thumb is transitioning.
+        const selectedTier = `document.querySelector('.conversation-list-filter .ant-segmented-item:has(input:checked) [data-stretch-value]')?.dataset.stretchValue===${JSON.stringify(filter)}`;
+        await click(`.conversation-list-filter .ant-segmented-item:has([data-stretch-value="${filter}"])`);
+        await wait(`${selectedTier} && document.querySelectorAll('.conversation-row').length===${expectedRows}`);
+        await click('[data-stretch-value="tasks"]');
+        await wait("conversationFixture.conversationUi.getSnapshot().mode==='tasks'");
+        await click('[data-stretch-value="chats"]');
+        await wait(`${selectedTier} && conversationFixture.conversationUi.getSnapshot().mode==='chats'`);
+        if (scenario.drawer) {
+          await click('#close-drawer-button');
+          await click('[aria-label="打开列表"]');
+          await wait(selectedTier);
+        }
+        await evaluate("globalThis.filterReloadPending=true");
+        await send("Page.reload");
+        await wait("globalThis.filterReloadPending!==true && typeof conversationFixture!=='undefined' && !!document.querySelector('.conversation-search-input')");
+        if (scenario.drawer) await click('[aria-label="打开列表"]');
+        await wait(`${selectedTier} && document.querySelectorAll('.conversation-row').length===${expectedRows}`);
+        assert.equal(await evaluate("conversationFixture.conversationUi.getSnapshot().listFilter"), filter, "the restored state and selected tier agree");
+        assert.equal(await evaluate(`JSON.parse(localStorage.getItem('wand-conversations-local-owner-v1')).listFilter`), filter);
+        if (filter !== "all") assert.equal(await evaluate(`Array.from(document.querySelectorAll('.conversation-row')).every(n=>${filter === "archived" ? "n.dataset.archived==='true'" : "n.dataset.archived!=='true'"})`), true, "reloaded rows still obey the selected archive tier");
+        if (filter === "active") await shot(`${scenario.name}-03-restored-active`);
+      }
+      rows.push({ scenario: scenario.name, opened, persistentSearch: true, preservedQuery: true, persistedArchiveTiers: ["active", "archived", "all"] });
     }
 
     // 01-A6: the run never sends a message, creates a task, or starts a model.

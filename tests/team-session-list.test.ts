@@ -357,12 +357,15 @@ test("display mode cycles full → folded → active and survives dirty storage 
   assert.equal(sidebarDisplayModeLabel("active"), "在跑");
 });
 
-test("active mode drops idle sessions, then idle tasks and directories", () => {
+test("active mode drops idle sessions and tasks, but retains top-level directories", () => {
   const groups = filterActiveGroups([
     group([humanSession, memberSession, finishedMemberSession, chatSession]),
     { ...group([finishedMemberSession]), workspaceId: "ws-idle", workspaceName: "Idle" },
   ]);
-  assert.equal(groups.length, 1);
+  assert.equal(groups.length, 2);
+  assert.deepEqual(groups.map((group) => group.workspaceId), ["ws", "ws-idle"]);
+  assert.deepEqual(groups[1].tasks, []);
+  assert.deepEqual(groups[1].standaloneSessions, []);
   assert.deepEqual(groups[0]?.tasks[0]?.sessions.map((session) => session.id), ["human-1", "step-session-1"]);
   assert.equal(isSessionActive(humanSession), true);
   assert.equal(isSessionActive(finishedMemberSession), false);

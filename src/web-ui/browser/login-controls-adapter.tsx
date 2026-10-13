@@ -14,5 +14,5 @@ export function mountLoginControls(): void {
   const root = createRoot(target); roots.set(target, root);
   const visual = <div dangerouslySetInnerHTML={{ __html: renderLoginVisual(renderWandBrandMarkup("brand-logo")) }}/>;
   const httpHref = "http://" + location.host + location.pathname;
-  flushSync(() => root.render(<WandUiProvider><LoginForm checking={target.dataset.checking === "true"} switchServer={target.dataset.switchServer === "true"} visual={visual} httpHref={httpHref}/></WandUiProvider>));
+  flushSync(() => root.render(<WandUiProvider><LoginForm checking={target.dataset.checking === "true"} switchServer={target.dataset.switchServer === "true"} visual={visual} httpHref={httpHref} serverLabel={location.host}/></WandUiProvider>));
 }

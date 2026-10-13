@@ -18,7 +18,7 @@ import {
   serviceLogs,
   serviceRestart,
   serviceStart,
-  serviceStatus,
+  serviceStatusAsync,
   serviceStop,
   uninstallService,
 } from "./commands.js";
@@ -29,12 +29,18 @@ export interface ServicePanelDeps {
   configPath: string;
 }
 
+const panelOpenings = new WeakMap<LayoutHandle, object>();
+
 export function openServicePanel(deps: ServicePanelDeps): void {
   const { layout, configPath } = deps;
+  const opening = {};
+  panelOpenings.set(layout, opening);
   let lastAction: string | undefined;
 
-  function computeView(): ServicePanelView {
-    const s = serviceStatus();
+  // Status probes are async; a sequence guard keeps a slow older probe from overwriting a newer view.
+  let viewSeq = 0;
+  async function computeView(): Promise<ServicePanelView> {
+    const s = await serviceStatusAsync();
     return {
       statusLine: s.description,
       state: s.state,
@@ -44,10 +50,16 @@ export function openServicePanel(deps: ServicePanelDeps): void {
     };
   }
 
+  async function refreshView(): Promise<void> {
+    const seq = ++viewSeq;
+    const view = await computeView();
+    if (seq === viewSeq && panelOpenings.get(layout) === opening) layout.updateServicePanel(view);
+  }
+
   function setLastAction(msg: string): void {
     const ts = new Date().toLocaleTimeString();
     lastAction = `${ts} ${msg}`;
-    layout.updateServicePanel(computeView());
+    void refreshView();
   }
 
   function handleResult(label: string, result: { ok: boolean; message: string; detail?: string }): void {
@@ -115,13 +127,22 @@ export function openServicePanel(deps: ServicePanelDeps): void {
         }
       },
       onRefresh: () => {
-        layout.updateServicePanel(computeView());
+        void refreshView();
         layout.showToast("已刷新状态", "info", 1000);
       },
       onClose: () => {
+        if (panelOpenings.get(layout) !== opening) return;
+        panelOpenings.delete(layout);
+        ++viewSeq;
         layout.closeServicePanel();
       },
     },
-    computeView(),
+    {
+      statusLine: "检测中…",
+      state: "unknown",
+      installed: false,
+      platform: process.platform,
+    },
   );
+  void refreshView();
 }

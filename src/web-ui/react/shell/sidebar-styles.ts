@@ -1,11 +1,11 @@
 import { installStyleSheet } from "../styles";
 
-// Business layout only; Ant Design owns the control chrome and state visuals.
+// Shared sidebar geometry and semantic surface roles; Ant retains control behavior.
 export function installSidebarStyles(): void {
   installStyleSheet("wand-sidebar-layout", String.raw`
 .sidebar-visually-hidden { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; border:0; }
 .workspaces-panel { position:relative; }
-.sidebar-navigation-rail { width:56px; flex:none; min-height:0; padding:8px 4px; border-inline-end:1px solid var(--border-subtle); background:var(--bg-secondary); }
+.sidebar-navigation-rail { width:56px; flex:none; min-height:0; padding:8px 4px; border-inline-end:1px solid var(--border-subtle); background:var(--sidebar-rail); }
 .sidebar-rail-scroll { width:100%; flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; }
 .sidebar-rail-scroll > .sidebar-brand-mark { display:block; margin:8px auto 16px; }
 .sidebar-list-panel { flex:1; min-width:0; min-height:0; }
@@ -13,11 +13,12 @@ export function installSidebarStyles(): void {
 .sidebar.context-rail .sidebar-navigation-rail { border-inline-end:1px solid var(--border-subtle); }
 .sidebar-navigation-rail :is(.wand-ui-icon-button,.sidebar-list-error,[data-daemon-update-status]) { width:44px; min-width:44px; height:44px; padding:0; flex:none; }
 .sidebar .conversation-navigation .wand-ui-icon-button { height:48px; display:flex; flex-direction:column; gap:3px; border-radius:var(--control-radius); color:var(--text-secondary); }
-.sidebar .conversation-navigation .wand-ui-icon-button[aria-current="page"] { color:var(--accent-active); background:var(--accent-muted); }
+.sidebar .conversation-navigation .wand-ui-icon-button[aria-current="page"] { color:var(--sidebar-accent); background:var(--sidebar-selected); }
 .sidebar-nav-icon { display:flex; height:20px; align-items:center; justify-content:center; }
 .sidebar-nav-label { font-size:10px; line-height:14px; font-weight:500; }
-.sidebar .wand-ui-button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
-.sidebar-list-panel { background:var(--bg-surface); border-inline-end:1px solid var(--border-subtle); }
+.sidebar:focus-visible { outline:2px solid var(--sidebar-accent); outline-offset:-2px; }
+.sidebar .wand-ui-button:focus-visible { outline:2px solid var(--sidebar-accent); outline-offset:2px; }
+.sidebar-list-panel { background:var(--sidebar-surface); border-inline-end:1px solid var(--border-subtle); }
 .sidebar-rail-notices { margin-block:12px 4px; padding-block-start:12px; border-block-start:1px solid var(--border-subtle); }
 .sidebar .sidebar-profile-button { margin-block-start:8px; display:flex; flex-direction:column; gap:3px; color:var(--text-secondary); }
 .sidebar-notification-content { width:min(280px, calc(100vw - 64px)); max-height: min(480px, 65dvh); overflow:auto; }
@@ -32,14 +33,16 @@ export function installSidebarStyles(): void {
 .sidebar-header-primary { min-height:32px; }
 .sidebar-header-main { min-width:0; }
 .sidebar-header-actions { flex-shrink:0; }
+.sidebar-compact-toggle-label, .conversation-create-label { display:none; }
 .sidebar-header-actions :is(.sidebar-more-trigger,.sidebar-compact-toggle,.sidebar-close,.conversation-create-button) { width:32px; min-width:32px; height:32px; padding:0; }
-.sidebar-title { font-size:14px; letter-spacing:.02em; }
+.sidebar-title { font-size:15px; letter-spacing:0; }
+.sidebar-compact-toggle[aria-pressed="true"] .sidebar-collapse-direction { transform:rotate(180deg); }
 .sidebar-new-task.ant-btn { height:34px; font-size:13px; }
 .sidebar-status:empty { display:none; }
 .sidebar-footer-actions { min-width:0; }
 .sidebar-footer:has(#back-to-native-button,#switch-server-button) { flex-wrap:wrap; }
-.sidebar .conversation-list-tools { position:sticky; top:0; z-index:2; background:var(--bg-surface); }
-.sidebar-presentation-tools { position:sticky; top:0; z-index:2; background:var(--bg-surface); }
+.sidebar .conversation-list-tools { position:sticky; top:0; z-index:2; background:var(--sidebar-surface); }
+.sidebar-presentation-tools { position:sticky; top:0; z-index:2; background:var(--sidebar-surface); }
 .sidebar-search-slot { display:grid; flex:1; min-width:0; align-items:center; min-height:32px; }
 .sidebar-list-title, .sidebar-search-expand { grid-area:1 / 1; min-width:0; transition:opacity var(--motion-fast) var(--ease-in-out-smooth), visibility var(--motion-fast) var(--ease-in-out-smooth); }
 .sidebar-search-expand { opacity:0; pointer-events:none; }
@@ -48,10 +51,19 @@ export function installSidebarStyles(): void {
 .sidebar-search-input input::-webkit-search-cancel-button { display:none; }
 .sidebar-disclosure-chevron { display:inline-flex; flex-shrink:0; transform:rotate(-90deg); transition:transform var(--motion-fast) var(--ease-in-out-smooth); }
 .sidebar-disclosure-chevron[data-open="true"] { transform:rotate(0deg); }
-.sidebar .workspace-row-main { min-height:44px; }
-.sidebar .workspace-row-title { font-weight:600; }
+.sidebar .workspace-row-main { min-height:48px; }
+.sidebar .workspace-row-title { font-size:13px; font-weight:600; }
 .sidebar .workspace-row-path { display:block; max-width:100%; line-height:1.5; }
-.sidebar .workspace-row-count, .sidebar .workspace-task-count { color:var(--text-secondary); font-size:12px; font-variant-numeric:tabular-nums; }
+.sidebar .workspace-row-count, .sidebar .workspace-task-count, .sidebar .im-sidebar-group-count { color:var(--text-secondary); font-size:12px; font-variant-numeric:tabular-nums; white-space:nowrap; flex-shrink:0; }
+.sidebar .workspace-row-count { min-width:2ch; text-align:end; }
+.sidebar .sidebar-head-activity, .sidebar .im-sidebar-group-attention-slot { width:12px; flex:none; display:inline-flex; justify-content:center; }
+.sidebar .wand-sidebar-group-toggle { min-height:48px; padding:6px; }
+.sidebar .im-sidebar-group-title { min-width:0; font-size:13px; font-weight:600; }
+.sidebar .im-sidebar-group-meta { display:inline-flex; align-items:center; gap:4px; flex:none; }
+.sidebar .im-sidebar-group-action { display:inline-flex; flex:none; }
+.sidebar .sidebar-recent-add { width:28px; min-width:28px; height:32px; padding:0; }
+.sidebar .im-sidebar-group-inner { margin-inline-start:14px; border-inline-start:1px solid var(--border-subtle); }
+.sidebar .sidebar-group-empty, .sidebar .sidebar-filter-empty { margin:0; padding:6px; font-size:12px; line-height:1.5; }
 .sidebar .workspace-tasks, .sidebar .workspace-task-sessions { margin-inline-start:14px; border-inline-start:1px solid var(--border-subtle); }
 .sidebar .workspace-task-main, .sidebar .workspace-session-main { min-height:36px; }
 .sidebar .workspace-session-name { font-size:13px; }
@@ -72,13 +84,33 @@ export function installSidebarStyles(): void {
 .sidebar-menu-submenus .ant-dropdown-menu-submenu-popup { min-width:min(224px, calc(100vw - 24px)); max-width:min(288px, calc(100vw - 24px)); }
 .sidebar-menu-submenus .ant-dropdown-menu { max-height:min(360px, calc(100dvh - 24px)); overflow-y:auto; overscroll-behavior:contain; }
 :is(.sidebar-row-menu,.sidebar-menu-submenus) :is(.ant-dropdown-menu-item,.ant-dropdown-menu-submenu-title) { height:auto; min-height:32px; }
-.sidebar [data-sidebar-menu-open="true"] { border-radius:var(--control-radius); background:var(--bg-active); }
+.sidebar [data-sidebar-menu-open="true"] { border-radius:var(--control-radius); background:var(--sidebar-selected); }
 .sidebar .sidebar-footer-actions { align-items:center; }
-@media (pointer:coarse) {
+/* One sidebar scale across conversation and workspace pages, including the framed home. */
+.sidebar .conversation-search-host { padding:0 4px 10px; }
+.sidebar .conversation-search-input { min-height:34px; font-size:12px; background:var(--bg-surface); }
+.sidebar .conversation-list-section { padding:0 4px 10px; gap:6px; }
+.sidebar .conversation-list-count { padding-inline:2px; color:var(--text-secondary); }
+.sidebar .conversation-row:hover, .sidebar .conversation-row:focus-within { background:var(--sidebar-hover); }
+.sidebar .conversation-row[aria-current="page"] { background:var(--sidebar-selected); }
+.sidebar .conversation-row[aria-current="page"] .conversation-row-title { color:var(--sidebar-accent); }
+.sidebar .conversation-row-open.ant-btn:hover { color:inherit; background:transparent; }
+.sidebar .conversation-row-time { color:var(--text-secondary); }
+.sidebar :is(.workspace-session-main,.workspace-task-main,.wand-sidebar-session-row)[aria-current="page"], .sidebar .wand-sidebar-session-row.active { color:var(--sidebar-accent); background:var(--sidebar-selected); }
+.sidebar .conversation-navigation .wand-ui-icon-button:hover { background:var(--sidebar-hover); }
+.sidebar .conversation-navigation .wand-ui-icon-button[aria-current="page"] { background:var(--sidebar-selected); }
+.sidebar .conversation-navigation .wand-ui-icon-button[aria-current="page"]::before { content:""; position:absolute; inset-inline-start:0; inset-block:14px; width:2px; border-radius:2px; background:var(--sidebar-accent); }
+.sidebar .conversation-list-filter .ant-segmented-item-selected { color:var(--sidebar-accent); }
+.sidebar .conversation-search-input:focus-within { border-color:var(--sidebar-accent); box-shadow:0 0 0 2px color-mix(in srgb,var(--sidebar-accent) 14%,transparent); }
+.sidebar.collapsed .conversation-row { justify-content:center; padding:6px 0; min-height:48px; }
+.sidebar.collapsed .sidebar-body { scrollbar-gutter:auto; }
+
+@media (pointer:coarse), (max-width:640px) {
   .sidebar-header-actions :is(.sidebar-compact-toggle,.sidebar-close,.conversation-create-button) { width:44px; min-width:44px; height:44px; }
   .sidebar-new-task.ant-btn { min-height:44px; }
   .sidebar :is(.workspace-task-action,.workspace-task-chevron-btn) { width:32px; min-width:32px; height:44px; }
   .sidebar .workspace-task-main, .sidebar .workspace-session-main { min-height:44px; }
+  .sidebar .sidebar-recent-add { width:44px; min-width:44px; height:44px; }
   :is(.sidebar-row-menu,.sidebar-menu-submenus) :is(.ant-dropdown-menu-item,.ant-dropdown-menu-submenu-title) { min-height:44px; }
 }
 @media (max-width:640px) {

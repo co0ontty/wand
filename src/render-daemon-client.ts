@@ -29,6 +29,7 @@ import {
   type TerminalSessionState,
   type TerminalSpawnRequest,
 } from "./terminal-host.js";
+import { logInfo, logRateLimited } from "./runtime-log.js";
 
 const RECONNECT_INITIAL_MS = 500;
 const RECONNECT_MAX_MS = 10_000;
@@ -345,7 +346,7 @@ export class RenderDaemonClient implements TerminalHost {
       for (const state of sessions) this.inventory.set(state.sessionId, state);
       if (previous.size > 0) {
         this.reconcileAfterReconnect(previous);
-        process.stderr.write("[wand] Reconnected to Render; reconciled PTY inventory.\n");
+        logInfo("Reconnected to Render; reconciled PTY inventory.");
       }
       this.reconciling = false;
       const queued = this.eventsDuringReconcile;
@@ -419,8 +420,8 @@ export class RenderDaemonClient implements TerminalHost {
   private warnTokenFileUnusable(reason: string): void {
     if (this.tokenReadFailureLogged) return;
     this.tokenReadFailureLogged = true;
-    process.stderr.write(
-      `[wand] Render token file ${this.tokenPath} ${reason}; reusing the last known credential and retrying the file on the next attempt.\n`,
+    logInfo(
+      `Render token file ${this.tokenPath} ${reason}; reusing the last known credential and retrying the file on the next attempt.`,
     );
   }
 
@@ -520,12 +521,12 @@ export class RenderDaemonClient implements TerminalHost {
       // socket 断开时每个输入包都会失败，只提示一次，避免刷满日志。
       if (this.offlineOperationLogged) return;
       this.offlineOperationLogged = true;
-      process.stderr.write(
-        `[wand] Render 未连接，${method} ${sessionId} 失败（后续同类失败不再重复提示；PTY 仍在 Render 侧运行）\n`,
+      logInfo(
+        `Render 未连接，${method} ${sessionId} 失败（后续同类失败不再重复提示；PTY 仍在 Render 侧运行）`,
       );
       return;
     }
-    process.stderr.write(`[wand] Render ${method} failed for ${sessionId}: ${getErrorMessage(error)}\n`);
+    logRateLimited("render-rpc-failed", `Render ${method} failed for ${sessionId}: ${getErrorMessage(error)}`);
   }
 
   private async listSessions(): Promise<TerminalSessionState[]> {
@@ -555,7 +556,7 @@ export class RenderDaemonClient implements TerminalHost {
         throw error;
       }
       sessionIds = [...new Set([...this.knownSessionIds, ...this.inventory.keys(), ...this.handles.keys()])];
-      process.stderr.write(`[wand] Render list exceeded its frame limit; attaching ${sessionIds.length} known PTY sessions individually.\n`);
+      logInfo(`Render list exceeded its frame limit; attaching ${sessionIds.length} known PTY sessions individually.`);
     }
     const states: TerminalSessionState[] = [];
     // Keep in-flight full terminal snapshots bounded on a busy Render.
@@ -643,8 +644,8 @@ export class RenderDaemonClient implements TerminalHost {
         this.headerBytes = 0;
         const length = header.readUInt32BE(0);
         if (length > MAX_FRAME_BYTES) {
-          process.stderr.write(
-            `[wand] Render frame length ${length} exceeds the ${MAX_FRAME_BYTES} byte limit; closing the connection.\n`,
+          logInfo(
+            `Render frame length ${length} exceeds the ${MAX_FRAME_BYTES} byte limit; closing the connection.`,
           );
           this.socket?.destroy();
           return;
@@ -684,7 +685,7 @@ export class RenderDaemonClient implements TerminalHost {
     try {
       message = JSON.parse(body.toString("utf8"));
     } catch (error) {
-      process.stderr.write(`[wand] Render sent an undecodable frame: ${getErrorMessage(error)}\n`);
+      logRateLimited("render-undecodable-frame", `Render sent an undecodable frame: ${getErrorMessage(error)}`);
       return;
     }
     if (!message || typeof message !== "object") return;
@@ -733,7 +734,7 @@ export class RenderDaemonClient implements TerminalHost {
     const sessionId = typeof event.sessionId === "string" ? event.sessionId : "";
     const incarnationId = typeof event.incarnationId === "string" ? event.incarnationId : "";
     if (!sessionId || !incarnationId) {
-      process.stderr.write("[wand] Render sent an event without sessionId/incarnationId; ignoring it.\n");
+      logRateLimited("render-event-missing-ids", "Render sent an event without sessionId/incarnationId; ignoring it.");
       return;
     }
     const state = this.inventory.get(sessionId);
@@ -867,7 +868,7 @@ export class RenderDaemonClient implements TerminalHost {
    */
   private handleReconcileEvent(sessionIds: unknown): void {
     if (!Array.isArray(sessionIds)) {
-      process.stderr.write("[wand] Render sent a reconcile event without a sessionIds array; ignoring it.\n");
+      logRateLimited("render-reconcile-invalid", "Render sent a reconcile event without a sessionIds array; ignoring it.");
       return;
     }
     const live = new Set(sessionIds.filter((id): id is string => typeof id === "string"));
@@ -960,7 +961,7 @@ export class RenderDaemonClient implements TerminalHost {
     try {
       return await this.reviveDaemon();
     } catch (error) {
-      process.stderr.write(`[wand] Render daemon revival failed: ${getErrorMessage(error)}\n`);
+      logInfo(`Render daemon revival failed: ${getErrorMessage(error)}`);
       return false;
     }
   }
@@ -990,7 +991,7 @@ export class RenderDaemonClient implements TerminalHost {
       this.authBackoff = false;
       if (!this.reconnectFailureLogged) {
         this.reconnectFailureLogged = true;
-        process.stderr.write(`[wand] Render reconnect failed: ${getErrorMessage(error)}\n`);
+        logInfo(`Render reconnect failed: ${getErrorMessage(error)}`);
       }
       return false;
     }
@@ -999,10 +1000,10 @@ export class RenderDaemonClient implements TerminalHost {
     this.authBackoff = stalled;
     if (!this.reconnectFailureLogged) {
       this.reconnectFailureLogged = true;
-      process.stderr.write(
-        `[wand] Render rejected the credential (${error.message})` +
+      logInfo(
+        `Render rejected the credential (${error.message})` +
         `${stalled ? ` — retrying every ${AUTH_FAILURE_RETRY_MS / 1000}s instead of ${RECONNECT_MAX_MS / 1000}s until the daemon restarts` : ""}; ` +
-        "the token file is re-read on every attempt.\n",
+        "the token file is re-read on every attempt.",
       );
     }
     return stalled;
@@ -1039,7 +1040,7 @@ export class RenderDaemonClient implements TerminalHost {
           for (const chunk of missing) handle!.acceptData(chunk);
         } else {
           handle!.acceptResync(current!);
-          process.stderr.write(`[wand] Render replay gap for ${sessionId}: ${oldState.seq} → ${current!.seq}; rebuilt from attach snapshot.\n`);
+          logRateLimited("render-replay-gap", `Render replay gap for ${sessionId}: ${oldState.seq} → ${current!.seq}; rebuilt from attach snapshot.`);
         }
         if (current!.status === "running") continue;
       }
@@ -1100,7 +1101,7 @@ function toRenderEnv(env: NodeJS.ProcessEnv): Record<string, string> {
 }
 
 function warnStateIssue(message: string): void {
-  process.stderr.write(`[wand] Render session state rejected: ${message}\n`);
+  logRateLimited("render-state-rejected", `Render session state rejected: ${message}`);
 }
 
 /**
@@ -1136,7 +1137,7 @@ export function normalizeRenderSessionState(value: unknown): TerminalSessionStat
   const launchMarkerToken = typeof record.launchMarkerToken === "string" ? record.launchMarkerToken : null;
   if (problems.length > 0) {
     // 补齐后继续用，比整条会话变成空终端好；但一定要留痕。
-    process.stderr.write(`[wand] Render session state for ${sessionId} has unexpected fields: ${problems.join(", ")}\n`);
+    logRateLimited("render-state-unexpected-fields", `Render session state for ${sessionId} has unexpected fields: ${problems.join(", ")}`);
   }
   return {
     sessionId,
@@ -1276,7 +1277,7 @@ export async function connectExistingRenderClient(
     return client;
   } catch (error) {
     if (process.env.WAND_RENDER_DEBUG === "1") {
-      process.stderr.write(`[wand] Render adoption failed: ${getErrorMessage(error)}\n`);
+      logInfo(`Render adoption failed: ${getErrorMessage(error)}`);
     }
     client.disconnect();
     return null;

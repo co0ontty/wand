@@ -73,6 +73,26 @@ test("restoring and anonymous logins share one illustration and preserve the for
   }
 });
 
+test("login redesign keeps library credentials and identifies the current server as escaped text", () => {
+  const html = renderToStaticMarkup(React.createElement(LoginForm, { checking: false, switchServer: true, serverLabel: "<host>:8181" }));
+  assert.match(html, /<main class="login-page"/);
+  assert.match(html, /id="login-title"/);
+  assert.match(html, /你的 AI 工作台/);
+  assert.match(html, /当前服务/);
+  assert.match(html, /&lt;host&gt;:8181/);
+  assert.doesNotMatch(html, /<host>|ant-card/);
+  assert.match(html, /autoComplete="current-password"/);
+  assert.match(html, /aria-describedby="password-hint login-error"/);
+  assert.match(html, /class="login-feedback" aria-live="polite"/);
+  assert.ok(html.indexOf('id="login-cert-hint"') > html.indexOf('id="login-button"'), "certificate guidance cannot push the submit action down");
+  assert.match(styles, /\.login-feedback \{ min-height: 44px;/);
+  assert.match(styles, /#login-switch-server-button \{ height: 44px;/);
+  const restoring = renderToStaticMarkup(React.createElement(LoginForm, { checking: true, switchServer: false, serverLabel: "local:8181" }));
+  assert.match(restoring, /aria-busy="true"/);
+  assert.match(restoring, /local:8181/);
+  assert.doesNotMatch(restoring, /id="password"/);
+});
+
 test("motion has a keyboard-accessible pause, a static reduced-motion view, and no mobile footprint", () => {
   const html = renderLoginVisual("");
   assert.match(html, /id="login-visual-paused"[^>]+type="checkbox"\s+aria-label="暂停插画动效"/);
@@ -81,4 +101,6 @@ test("motion has a keyboard-accessible pause, a static reduced-motion view, and 
   assert.match(styles, /\.login-visual-toggle:checked ~ \.login-visual-scene \*\s*\{ animation-play-state: paused;/);
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.login-visual-scene \*\s*\{ animation: none !important;/);
   assert.match(styles, /@media \(max-width: 640px\)\s*\{[^@]+\.login-page \.left-spacer \{ display: none; \}/);
+  assert.match(styles, /\.login-visual-control > svg \{[^}]+transition: opacity var\(--motion-morph\)/);
+  assert.match(styles, /\.login-visual-control > svg \{ transition: none; \}/);
 });

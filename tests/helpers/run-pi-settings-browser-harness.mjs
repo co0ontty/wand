@@ -56,7 +56,7 @@ const server = createServer(async (req, res) => {
     res.setHeader('Content-Type', 'text/css'); res.end(readFileSync(join(root, 'src/web-ui/content/styles.css')));
   } else {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.end(`<!doctype html><html lang="zh-CN"><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/tailwind.css"><link rel="stylesheet" href="/styles.css"><style>body{margin:0}#root{max-width:820px;margin:auto;padding:16px}#switcher{display:flex;gap:12px}.input-panel{position:fixed;bottom:20px;left:16px;right:16px;max-width:800px;margin:auto}#input-box{min-width:0;min-height:50px;width:100%;box-sizing:border-box}.input-composer-row{overflow:visible}</style></head><body><div id="root"></div><div id="overlay-root" data-wand-ui-root><div id="wand-react-ui-portals" class="wand-ui-portals"></div></div><script src="/app.js"></script></body></html>`);
+    res.end(`<!doctype html><html lang="zh-CN"><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/tailwind.css"><link rel="stylesheet" href="/styles.css"><style>body{margin:0}#root{max-width:820px;margin:auto;padding:16px}#switcher{display:flex;gap:12px}.input-panel{position:fixed;bottom:20px;left:16px;right:16px;width:auto;max-width:800px;margin:auto}#input-box{min-width:0;min-height:50px;width:100%;box-sizing:border-box}.input-composer-row{overflow:visible}</style></head><body><div id="root"></div><div id="overlay-root" data-wand-ui-root><div id="wand-react-ui-portals" class="wand-ui-portals"></div></div><script src="/app.js"></script></body></html>`);
   }
 });
 server.listen(0, '127.0.0.1'); await once(server, 'listening');
@@ -130,7 +130,7 @@ try {
   const draft = text => evaluate(`(()=>{const n=document.getElementById('input-box');n.value=${JSON.stringify(text)};n.dispatchEvent(new Event('input',{bubbles:true}));n.focus()})()`);
   const check = async (name, expression) => {
     const actual = await evaluate(expression);
-    if (actual !== true) console.error(await evaluate('JSON.stringify({active:document.activeElement?.outerHTML,search:document.querySelector("input[type=search]")?.outerHTML,pending:piHarness.piSettingsController.hasPendingFocus()})'));
+    if (actual !== true) console.error(await evaluate('JSON.stringify({active:document.activeElement?.outerHTML,search:document.querySelector("input[type=search]")?.outerHTML,pending:piHarness.piSettingsController.hasPendingFocus(),viewport:{width:innerWidth,height:innerHeight},panel:document.querySelector(".wand-pi-settings-inner")?.getBoundingClientRect().toJSON(),composer:document.querySelector(".input-panel")?.getBoundingClientRect().toJSON()})'));
     assert.equal(actual, true, name); ++count; console.log(`✔ ${name}`);
   };
   const rect = selector => evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return{x:r.x,y:r.y,w:r.width,h:r.height}})()`);

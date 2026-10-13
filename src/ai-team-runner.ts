@@ -1,20 +1,19 @@
-import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { freezeTeamEmployees, projectTeamEmployees, teamMemberEmployee } from "./ai-team-employee-binding.js";
 import { buildAiTeamDeliverySummary } from "./ai-team-delivery.js";
-import type { SiliconEmployee } from "./ai-team-types.js";
+import type { SiliconEmployee } from "./employee-types.js";
 import {
   dispatchAgentForTask,
+  AgentDispatchPreflightError,
   resolveTaskDispatchTarget,
   sendToAgentSession,
   stopAgentSession,
   type AgentDispatchDeps,
 } from "./agent-dispatch.js";
 import {
-  AI_TEAM_REPORT_DIR,
   aiTeamChatHistoryPath,
   aiTeamHandoffPath,
   aiTeamReportPath,
@@ -62,8 +61,12 @@ import {
   type StepDispatchInfo,
 } from "./ai-team-types.js";
 import { renderLiveStepText } from "./ai-team-live.js";
+import { CHAT_INVITE_PER_LINE, chatAuthor, chatText, displayAiTeam, chatIntroLines, assignmentBasisNote, stepStartText, type AiTeamStepBasis } from "./ai-team-chat-helpers.js";
+export { CHAT_INVITE_PER_LINE, assignmentBasisNote, chatAuthor, chatIntroLines, chatText, displayAiTeam, stepStartText } from "./ai-team-chat-helpers.js";
+export type { AiTeamStepBasis } from "./ai-team-chat-helpers.js";
 import { teamReportPreview } from "./team-report-preview.js";
 import { linkedTeamReportFile } from "./team-report-file-link.js";
+import { excludeAiTeamReportDir } from "./ai-team-worktree.js";
 import { getErrorMessage } from "./error-utils.js";
 import { activityState } from "./missions.js";
 import type { AgentActivityState } from "./mission-types.js";
@@ -241,42 +244,6 @@ export function createAiTeamRunner(
  * `agent` 传该步**实际使用候选**（§3.6/B15，降级换候选后跟着变），model / thinkingEffort 与
  * provider 同源；Leader 或没有步骤的场景回退首选候选。只填真值，展示文案归客户端。
  */
-export function displayAiTeam(snapshot: AiTeam, current: AiTeam | null): AiTeam {
-  if (!current) return snapshot;
-  const byId = new Map(current.members.map((member) => [member.id, member]));
-  return {
-    ...snapshot,
-    name: current.name,
-    updatedAt: current.updatedAt,
-    members: snapshot.members.map((member) => {
-      const live = byId.get(member.id);
-      return live && !member.employeeId && !live.employeeId
-        ? { ...member, name: live.name, avatar: live.avatar } : member;
-    }),
-  };
-}
-
-function chatAuthor(
-  member: AiTeamMember,
-  sessionId?: string | null,
-  agent?: WandTaskAgent | null,
-): ConversationAuthor {
-  const used = agent ?? memberAgents(member)[0] ?? member.agent;
-  return {
-    id: member.id,
-    name: member.name,
-    avatar: member.avatar && !member.avatar.startsWith("data:") ? member.avatar : undefined,
-    leader: member.isLeader || undefined,
-    provider: used?.provider ?? member.agent.provider,
-    engine: used?.engine,
-    model: used?.model?.trim() || undefined,
-    thinkingEffort: used?.thinkingEffort || undefined,
-    sessionId: sessionId ?? undefined,
-  };
-}
-
-const chatText = (text: string): ConversationTurn["content"] => [{ type: "text", text }];
-
 /** CLI 的错误常是「一行摘要 + 一大段 JSON」，有用的信息在头尾；中间截掉以免撑爆报告。 */
 function summarizeError(error: string | null | undefined): string {
   const text = (error ?? "").trim();
@@ -348,89 +315,6 @@ function turnText(turn: { content: Array<{ type: string; text?: string }> }): st
     .join("\n\n");
 }
 
-// ── 群聊开场与协作流转的文案（设计 v2.1 S1–S5）──
-// 全部由服务端纯函数拼好：客户端只做 @ 高亮，不拼句子、不猜字段；也**不引任何 LLM 文本**。
-
-/** 每行邀请名单上限（S2/S3）：`邀请 @a、@b、@c、@d 加入群聊`。 */
-export const CHAT_INVITE_PER_LINE = 4;
-
-/** 开工发言与派工行共用的步骤说法：`第 2 步「实现 Web 端」`；标题空白时只剩步数。 */
-function chatStepLabel(seq: number, title: string): string {
-  const label = title.trim();
-  return label ? `第 ${seq} 步「${label}」` : `第 ${seq} 步`;
-}
-
-/**
- * 首次建群的入群序列（S1–S3）：负责人先入群，再按 `team.members` 原顺序邀请其余成员。
- * 每行最多 [CHAT_INVITE_PER_LINE] 人，第二行起用 `继续邀请 …`；除负责人外没人时给
- * `还没有邀请其他成员入群`（仍两条，不伪造成员）。
- */
-export function chatIntroLines(team: Pick<AiTeam, "members">, chatTitle: string): string[] {
-  const title = chatTitle.trim();
-  const lines = [title ? `创建了团队群聊「${title}」` : "创建了团队群聊"];
-  const invitees = team.members.filter((member) => !member.isLeader)
-    .map((member) => member.name.trim())
-    .filter(Boolean);
-  if (invitees.length === 0) {
-    lines.push("还没有邀请其他成员入群");
-    return lines;
-  }
-  for (let index = 0; index < invitees.length; index += CHAT_INVITE_PER_LINE) {
-    const names = invitees.slice(index, index + CHAT_INVITE_PER_LINE).map((name) => `@${name}`).join("、");
-    lines.push(`${index === 0 ? "邀请" : "继续邀请"} ${names} 加入群聊`);
-  }
-  return lines;
-}
-
-/** 开工发言里的一条依据（来自 `step.dependsOn` 解析出的上游步骤）。 */
-export interface AiTeamStepBasis {
-  seq: number;
-  title: string;
-  memberName: string;
-  reportPath: string;
-}
-
-/**
- * 开工发言正文（S4）：
- * - 第 1 行 `我正在开始工作：第 N 步「标题」`；
- * - 有依赖时第 2 行 `依据 @上游成员 第 M 步「上游标题」的产物 <reportPath>`，超过两条
- *   只列前两条并在尾上 `等 N 步`（N = 依赖总数）；
- * - 依赖解析不到（旧数据/步骤被删）→ `依据上游步骤的产物继续`。
- */
-export function stepStartText(
-  step: Pick<AiTeamStep, "seq" | "title">,
-  upstream: ReadonlyArray<AiTeamStepBasis> = [],
-  dependencyCount: number = upstream.length,
-): string {
-  const lines = [`我正在开始工作：${chatStepLabel(step.seq, step.title)}`];
-  if (dependencyCount > 0) lines.push(stepBasisLine(upstream, dependencyCount));
-  return lines.join("\n");
-}
-
-function stepBasisLine(upstream: ReadonlyArray<AiTeamStepBasis>, dependencyCount: number): string {
-  const shown = upstream.slice(0, 2);
-  if (shown.length === 0) return "依据上游步骤的产物继续";
-  const parts = shown.map((item) => {
-    const reportPath = item.reportPath.trim();
-    return `@${item.memberName} ${chatStepLabel(item.seq, item.title)}的产物${reportPath ? ` ${reportPath}` : ""}`;
-  });
-  return `依据 ${parts.join("、")}${dependencyCount > shown.length ? ` 等 ${dependencyCount} 步` : ""}`;
-}
-
-/**
- * 派工行的依据括注（S5）：`（依据：第 1 步「设计规格」的产物）`，多个依赖用 `、` 连接。
- * 位置 `at` 是**本批 steps 内**的 0-based 下标（展示成第 at+1 步）；没有依赖就是空串（首步无依据）。
- * 它**取代**旧的 `（等第 N 项完成后）`：同一个依赖关系不写两遍。
- */
-export function assignmentBasisNote(after: readonly number[], titles: readonly string[]): string {
-  if (after.length === 0) return "";
-  const parts = after.map((at) => {
-    const label = (titles[at] ?? "").trim();
-    return `第 ${at + 1} 步${label ? `「${label}」` : ""}的产物`;
-  });
-  return `（依据：${parts.join("、")}）`;
-}
-
 /** 找到提示词（含 reportPath）那一轮之后的 assistant 文本；没有回复返回 null。 */
 function assistantReplyAfterPrompt(snapshot: SessionSnapshot, reportPath: string): string | null {
   const messages = snapshot.messages ?? [];
@@ -487,22 +371,6 @@ function readReport(file: string): string {
   return bytes > REPORT_MAX_BYTES ? `${text}\n\n（已截断）` : text;
 }
 
-/** 把 .wand-team/ 加进仓库的 info/exclude，避免报告文件出现在未跟踪列表里。 */
-function excludeReportDir(cwd: string): void {
-  try {
-    const gitDir = execFileSync("git", ["rev-parse", "--git-common-dir"], {
-      cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-    if (!gitDir) return;
-    const excludeFile = path.join(path.resolve(cwd, gitDir), "info", "exclude");
-    const line = `/${AI_TEAM_REPORT_DIR}/`;
-    const current = existsSync(excludeFile) ? readFileSync(excludeFile, "utf8") : "";
-    if (current.split(/\r?\n/).some((entry) => entry.trim() === line)) return;
-    appendFileSync(excludeFile, `${current && !current.endsWith("\n") ? "\n" : ""}${line}\n`);
-  } catch {
-    // 不在 git 仓库里或没有写权限：跳过，不影响运行。
-  }
-}
 
 type StepOutcome =
   | { kind: "pending"; recheckInMs?: number }
@@ -567,6 +435,7 @@ export class AiTeamRunner {
   private readonly noDegrade = new Set<string>();
   private readonly teamRequestIds = new Map<string, string>();
   private sweepTimer: NodeJS.Timeout | null = null;
+  private disposed = false;
   /** 脱敏参照目录只算一次：os.homedir() 读 env，configDir 随 storage 定，运行期不变。 */
   private redactionDirsValue: RedactionDirs | null = null;
 
@@ -617,6 +486,7 @@ export class AiTeamRunner {
 
   async start(input: { teamId?: string; team?: AiTeam; taskId: string; note?: string; chatSessionId?: string;
     conversationId?: string; memberVersion?: number; runId?: string; onAccepted?: (run: AiTeamRun) => void }): Promise<AiTeamRunDetail> {
+    if (this.disposed) throw new AiTeamConflictError("AiTeamRunner has been disposed.");
     const definition = input.team ?? this.storage.getAiTeam(input.teamId ?? "");
     if (!definition) throw new Error("团队不存在。");
     const team = freezeTeamEmployees(definition, this.storage);
@@ -658,7 +528,7 @@ export class AiTeamRunner {
     this.storage.saveAiTeamRun(run);
     input.onAccepted?.(run);
     if (task.status === "todo") this.storage.updateWandTask(task.id, { status: "doing" });
-    excludeReportDir(cwd);
+    excludeAiTeamReportDir(cwd);
     await this.enqueue(run.id, async () => {
       const step = this.createLeaderStep(run, "制定计划");
       await this.dispatchStep(run, step, (reportPath, fresh) => (
@@ -977,6 +847,7 @@ export class AiTeamRunner {
 
   /** 挂一次 run 级 live 去抖：同一 run 每 500ms 至多算一遍、推一次，与 evaluate 的计时器互不干扰。 */
   private scheduleLivePush(runId: string): void {
+    if (this.disposed) return;
     if (!this.notifyLiveListener || this.liveTimers.has(runId)) return;
     const timer = setTimeout(() => {
       this.liveTimers.delete(runId);
@@ -993,6 +864,7 @@ export class AiTeamRunner {
    * 放行不松开去抖：推完照样记指纹并重排心跳，所以静默期最多每 heartbeatMs 一次，不是无界重推。
    */
   private pushLive(runId: string, heartbeat = false): void {
+    if (this.disposed) return;
     if (!this.notifyLiveListener) return;
     const run = this.storage.getAiTeamRun(runId);
     if (!run) return;
@@ -1038,6 +910,7 @@ export class AiTeamRunner {
    * 同一 run 至多一个计时器；run 不在 running、被删除或 dispose 时 cancel，不泄漏。
    */
   private scheduleHeartbeat(runId: string): void {
+    if (this.disposed) return;
     if (this.heartbeatTimers.has(runId)) return;
     if (!this.notifyLiveListener && !this.notifyListener) return;
     const last = Math.max(this.lastLivePushAt.get(runId) ?? 0, this.lastRunNotifyAt.get(runId) ?? 0);
@@ -1099,6 +972,7 @@ export class AiTeamRunner {
 
   /** 与 missions.ingest 并列调用。绝大多数事件与团队无关，必须廉价返回。 */
   ingest(event: ProcessEvent): void {
+    if (this.disposed) return;
     if (!event.sessionId || event.sessionId === "__system__") return;
     if (event.type !== "status" && event.type !== "ended" && event.type !== "task" && event.type !== "output") return;
     const step = this.storage.getRunningAiTeamStepBySession(event.sessionId);
@@ -1145,6 +1019,7 @@ export class AiTeamRunner {
    * 没变就什么都不发。巡检间隔与 evaluate 行为都不动。
    */
   startSweep(): void {
+    if (this.disposed) return;
     if (this.sweepTimer) return;
     this.sweepTimer = setInterval(() => {
       for (const run of this.storage.listAiTeamRuns({ statuses: ["running"] })) {
@@ -1157,7 +1032,8 @@ export class AiTeamRunner {
     this.sweepTimer.unref?.();
   }
 
-  dispose(): void {
+  async dispose(): Promise<void> {
+    this.disposed = true;
     if (this.sweepTimer) clearInterval(this.sweepTimer);
     this.sweepTimer = null;
     for (const timer of this.outputTimers.values()) clearTimeout(timer);
@@ -1174,6 +1050,8 @@ export class AiTeamRunner {
     this.lastLiveKey.clear();
     this.noDegrade.clear();
     this.teamRequestIds.clear();
+    // Settle accepted host handshakes before the server closes storage.
+    await this.idle();
   }
 
   /** 等当前排队的所有操作跑完（测试用）。 */
@@ -1187,7 +1065,10 @@ export class AiTeamRunner {
 
   private enqueue<T>(runId: string, task: () => Promise<T>): Promise<T> {
     const previous = this.chains.get(runId) ?? Promise.resolve();
-    const next = previous.catch(() => undefined).then(task);
+    const next = previous.catch(() => undefined).then(() => {
+      if (this.disposed) throw new AiTeamConflictError("AiTeamRunner has been disposed.");
+      return task();
+    });
     const tracked = next.catch((error) => {
       if (!(error instanceof AiTeamConflictError)) {
         console.error(`[AiTeam] run ${runId}:`, getErrorMessage(error));
@@ -1216,6 +1097,7 @@ export class AiTeamRunner {
   // ── 内部：推进 ──
 
   private async evaluate(runId: string): Promise<void> {
+    if (this.disposed) return;
     const run = this.storage.getAiTeamRun(runId);
     if (!run || run.status !== "running") return;
     const running = this.storage.listAiTeamSteps(run.id).filter((item) => item.status === "running");
@@ -1235,6 +1117,7 @@ export class AiTeamRunner {
   }
 
   private scheduleRecheck(runId: string, delayMs: number): void {
+    if (this.disposed) return;
     if (this.recheckTimers.has(runId)) return;
     const timer = setTimeout(() => {
       this.recheckTimers.delete(runId);
@@ -1435,6 +1318,7 @@ export class AiTeamRunner {
    * 有成员失败、队列清空或依赖再也满足不了时，等在跑的都结束后交回 Leader。
    */
   private async advance(run: AiTeamRun): Promise<void> {
+    if (this.disposed) return;
     if (run.status !== "running") return;
     const steps = this.storage.listAiTeamSteps(run.id);
     const running = steps.filter((step) => step.status === "running");
@@ -1475,6 +1359,7 @@ export class AiTeamRunner {
 
   /** 开一轮 Leader：把上一轮 Leader 之后结束的成员报告交给他。 */
   private async startLeaderRound(run: AiTeamRun, userNote?: string): Promise<void> {
+    if (this.disposed) return;
     if (!this.hasBudget(run)) return;
     // 成员干活时用户在群里说的话，这一轮一起交给负责人。
     if (run.pendingNotes.length > 0) {
@@ -1681,6 +1566,7 @@ export class AiTeamRunner {
     buildPrompt: (reportPath: string, fresh: boolean) => AiTeamPrompt,
     proceed = true,
   ): Promise<void> {
+    if (this.disposed) return;
     const member = this.member(run.team, step.memberId);
     const candidates = member ? memberAgents(member) : [];
     const info = this.infoOf(step);
@@ -1741,8 +1627,10 @@ export class AiTeamRunner {
         if (this.ops.snapshot(sessionId)?.status === "failed") this.ingest({ type: "status", sessionId });
       }
     } catch (error) {
+      if (this.disposed) return;
       const message = getErrorMessage(error);
-      const kind = classifyCandidateFailure(message);
+      const rejected = error instanceof AgentDispatchPreflightError && error.failure.retryable;
+      const kind = rejected ? "input-rejected" : classifyCandidateFailure(message);
       if (agent && kind === "host-disabled") {
         // 进程级信号（agent-dispatch 的「当前服务未启用 … 会话」）：本次运行该 kind 的候选全部不再
         // 尝试，也不能当成「不可降级」直接吞掉——记进黑名单后交给既有失败出口。
@@ -1757,7 +1645,7 @@ export class AiTeamRunner {
         await this.degradeStep(run, running, { kind, reason: message }, proceed, buildPrompt);
         return;
       }
-      if (agent && step.kind === "work" && kind === "spawn-missing"
+      if (agent && step.kind === "work" && (kind === "spawn-missing" || (rejected && reusable === null))
         && (!member?.employeeId || reusable === null)
         && !existsSync(path.join(run.cwd, step.reportPath)) && !this.noDegrade.has(step.id)) {
         // §3.4 触发点 1：会话根本没起来，ENOENT 对 structured / pty 同样可靠（修正 B4 排除的是
@@ -1966,7 +1854,8 @@ export class AiTeamRunner {
         reason: `本服务未启用${agent.kind === "pty" ? "终端" : "结构化"}会话，候选 ${agent.provider} 不再尝试`,
       };
     }
-    if (state.providers.includes(agent.provider)) {
+    // Legacy provider entries mean a missing CLI executable, not every engine sharing its provider.
+    if (agent.engine !== "sdk" && state.providers.includes(agent.provider)) {
       return { kind: "spawn-missing", reason: `${agent.provider} CLI 不可用` };
     }
     const blocked = state.agents.find((item) => item.key === agentKey(agent));
@@ -1992,7 +1881,7 @@ export class AiTeamRunner {
   }
 
   /**
-   * 失败候选的黑名单记账（§3.4）：spawn-missing 封 provider、model-unknown 直接封五元组、
+   * 失败候选的黑名单记账（§3.4）：CLI spawn-missing 封 provider，SDK 只封具体候选；model-unknown 直接封五元组、
    * startup-timeout 累计到 STARTUP_TIMEOUT_STRIKES 才封。runtime-failure 这类不计入，
    * 一次写完一次落库。
    */
@@ -2000,6 +1889,11 @@ export class AiTeamRunner {
     const state = this.stateOf(runId);
     const key = agentKey(agent);
     if (kind === "spawn-missing") {
+      if (agent.engine === "sdk") {
+        if (state.agents.some((item) => item.key === key)) return;
+        this.saveState(runId, { ...state, agents: [...state.agents, { key, kind }] });
+        return;
+      }
       if (state.providers.includes(agent.provider)) return;
       this.saveState(runId, { ...state, providers: [...state.providers, agent.provider] });
       return;
@@ -2129,6 +2023,7 @@ export class AiTeamRunner {
   }
 
   private postTurn(run: AiTeamRun, turn: ConversationTurn): void {
+    if (this.disposed) return;
     if (!this.chat || !run.chatSessionId) return;
     try {
       this.chat.post(run.chatSessionId, [{ ...turn,
@@ -2250,6 +2145,7 @@ export class AiTeamRunner {
   }
 
   private notify(run: AiTeamRun): void {
+    if (this.disposed) return;
     // 记下 run 通道的活动基线并排上静默心跳：长任务只等一次状态写入是不够的，
     // 用户在十几分钟没有新消息时需要「仍在运行」的证据，见 beat()。
     this.lastRunNotifyAt.set(run.id, this.now());

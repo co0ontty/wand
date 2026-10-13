@@ -52,7 +52,7 @@ async function startHarness(t: TestContext, root: string): Promise<Harness> {
   const sessions = new SessionRegistry(processes, structured, storage);
   const app = express();
   app.use(express.json());
-  registerSessionRoutes(app, processes, structured, storage, config.defaultMode, config, sessions);
+  registerSessionRoutes(app, { processes, structured, storage, defaultMode: config.defaultMode, config, sessions });
   app.use(jsonErrorHandler);
   const server = createServer(app);
   await new Promise<void>((resolve, reject) => {
@@ -166,7 +166,7 @@ test("iteration context route exposes the window between commits and remembers t
   }
 });
 
-test("quick commit archives the open task even while in progress, and only completed other cards", async (t) => {
+test("quick commit ignores legacy archive flags for current, completed and foreign tasks", async (t) => {
   resetRepoKeyCache();
   t.after(() => resetRepoKeyCache());
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-commit-archive-"));
@@ -230,14 +230,14 @@ test("quick commit archives the open task even while in progress, and only compl
     };
     assert.ok(result.commit.hash);
     assert.ok(result.pushError, "push without remote fails, but the commit is durable");
-    assert.deepEqual(result.archivedTaskIds, [current.id, selected.id]);
-    assert.equal(storage.getWandTask(current.id)?.status, "archived");
-    assert.equal(storage.getWandTask(selected.id)?.status, "archived");
+    assert.deepEqual(result.archivedTaskIds, []);
+    assert.equal(storage.getWandTask(current.id)?.status, "doing");
+    assert.equal(storage.getWandTask(selected.id)?.status, "done");
     assert.equal(storage.getWorkspaceTask(sidebarTask.id)?.status, "done", "side task stays recoverable");
     assert.equal(storage.getWandTask(skipped.id)?.status, "done");
     assert.equal(storage.getWandTask(active.id)?.status, "doing", "selected in-progress cards stay in the list");
     assert.equal(storage.getWandTask(foreign.id)?.status, "done");
-    assert.equal(storage.getWorkspaceTask(current.workspaceTaskId!)?.status, "done", "archived card leaves the sidebar");
+    assert.equal(storage.getWorkspaceTask(current.workspaceTaskId!)?.status, "active", "archived card leaves the sidebar");
     assert.equal(storage.listIterationPromptsByIds([entries[0]!.id])[0]?.consumedCommit, result.commit.hash);
     assert.equal(storage.listIterationPromptsByIds([entries[1]!.id])[0]?.consumedCommit, null);
 
@@ -272,8 +272,8 @@ test("quick commit archives the open task even while in progress, and only compl
     });
     assert.equal(openedRoute.status, 200);
     const openedResult = await openedRoute.json() as { archivedTaskIds: string[] };
-    assert.deepEqual(openedResult.archivedTaskIds, [active.id]);
-    assert.equal(storage.getWandTask(active.id)?.status, "archived");
+    assert.deepEqual(openedResult.archivedTaskIds, []);
+    assert.equal(storage.getWandTask(active.id)?.status, "doing");
   } finally {
     await harness.close();
     rmSync(root, { recursive: true, force: true });
@@ -363,7 +363,8 @@ test("quick commit sweeps all standalone sessions in its project, preserving tas
     const result = await response.json() as { archivedTaskIds: string[]; archivedSessionIds: string[]; archiveError?: string };
     assert.equal(result.archiveError, undefined);
     assert.deepEqual(result.archivedTaskIds, []);
-    assert.deepEqual(new Set(result.archivedSessionIds), new Set([current.id, unselected.id, "stored-pty", "stored-worktree"]));
+    assert.deepEqual(result.archivedSessionIds, []);
+    for (const id of [current.id, unselected.id, "stored-pty", "stored-worktree"]) assert.equal(sessions.get(id)?.archived, false);
     assert.equal(sessions.get(unselected.id)?.status, "running");
     assert.equal(storage.getSession("stored-pty")?.output, "preserved transcript");
     assert.equal(sessions.get(foreign.id)?.archived, false);

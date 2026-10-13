@@ -6,7 +6,7 @@ import type { SettingsTab } from "./types";
 export const SETTINGS_SECTIONS: Record<SettingsTab, { label: string; description: string; keywords?: string }> = {
   profile: { label: "我的资料", description: "消息署名与头像" },
   notifications: { label: "通知", description: "提示音、系统通知与触感", keywords: "声音 铃声 音量" },
-  display: { label: "显示", description: "结果卡片的默认展开方式", keywords: "界面 折叠" },
+  display: { label: "显示", description: "主题配色、会话宽度与卡片展开", keywords: "界面 折叠 铺满 居中 聊天 对话" },
   ai: { label: "AI 与模型", description: "默认工具、模型与候选分组", keywords: "Claude Codex Pi OpenRouter" },
   "local-models": { label: "本地模型", description: "离线决策与模型资源", keywords: "LAYA 下载 初始化" },
   speech: { label: "语音输入", description: "一键启用与本机支持情况", keywords: "麦克风 语言 sherpa" },
@@ -44,7 +44,7 @@ export function SettingsDirectory({ available, selected, query, onQuery, onSelec
   return <>
     <div className="wand-settings-library-search"><WandSearchField label="查找设置分组" value={query}
       onValueChange={onQuery} placeholder="查找设置分组"/></div>
-    {items.length ? <Menu mode="inline" inlineIndent={16} selectedKeys={[selected]} items={items}
+    {items.length ? <Menu mode="inline" inlineIndent={16} selectedKeys={[selected]} items={items} style={{ borderInlineEnd: 0, background: "transparent" }}
       aria-label="设置分组" onClick={({ key }) => onSelect(key as SettingsTab)}/>
       : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有匹配的设置分组"/>}
   </>;

@@ -1,6 +1,8 @@
 import { composer, state, writeStoredBoolean } from "./state";
 import { ensureTerminalLibrary } from "../vendor-loader.js";
 import { handlePiSettingsKeydown } from "./pi-settings-adapter";
+import { hasOpenPopupSurface } from "../react/ui/popup-lifecycle.js";
+import { ptyInputState, mergePtyModifiers, modifiedPtySequence, modifiedTypedPtyText } from "../pty-input-state.js";
 import { createSessionReads } from "./session-reads";
 import { createSessionCompletionViewIntent, isSessionJustCompleted, mergeSessionCompletionState } from "../../session-completion-state.js";
 import { notifyTasksChanged } from "../react/task-changes";
@@ -13,12 +15,14 @@ import { getErrorMessage } from "../../error-utils.js";
 import { CHAT_HISTORY_BLOCK_BUDGET, CHAT_HISTORY_BYTE_BUDGET } from "../chat-history-window.js";
 
 import { mergeBlockWindowedMessages, mergeWindowedMessages, type MessageMergeSource } from "./message-reconciliation";
-import { clearActivityDetailState, ensureChatMessagesContainer, extractToolResultText, parseMessages, renderChat, scheduleChatRender } from "./chat-render";
+import { clearActivityDetailState, ensureChatMessagesContainer, renderChat, scheduleChatRender } from "./chat-render-loader";
+import { extractToolResultText } from "./tool-result-display.js";
+import { parseMessages } from "./pty-chat-parser.js";
 import { bindChatScrollListener, normalizeStructuredSnapshot, persistSelectedId, restoreStructuredQueue, saveStructuredQueue, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession, updateChatUnreadBubble, setChatHistoryLoadState } from "./chat-scroll";
 import "./events";
 import { isSidebarDrawerLayout, terminalZoomFromKeyboard, updateFilePanelCwd, updateLayoutState } from "./file-browser";
 import { loadGitStatus, restoreGitStatusForSession } from "./git-commit";
-import { autoResizeInput, buildMessagesForRender, canAutoResumeSession, captureSessionViewFocus, captureTerminalInput, flushCrossSessionQueue, focusInputBox, getControlInput, hasActiveTerminalSelection, isImeKeyboardEvent, queueDirectInput, reconcileInteractiveState, renderCrossSessionQueue, sendInputFromBox, setTerminalInteractive, shouldCaptureTerminalEvent, stopCrossSessionQueueTicker, stopSession, switchToSessionView, updateInteractiveControls, updateStructuredQueueCounter } from "./input";
+import { keyFromKeyboardEvent, buildPtySequence, autoResizeInput, buildMessagesForRender, canAutoResumeSession, captureSessionViewFocus, captureTerminalInput, flushCrossSessionQueue, focusInputBox, getControlInput, hasActiveTerminalSelection, isImeKeyboardEvent, queueDirectInput, reconcileInteractiveState, renderCrossSessionQueue, sendInputFromBox, setTerminalInteractive, shouldCaptureTerminalEvent, stopCrossSessionQueueTicker, stopSession, switchToSessionView, updateInteractiveControls, updateStructuredQueueCounter } from "./input";
 import { _apkVersion, _hasNativeBridge, _macAppVersion, _syncWakeLock, hideError, showError, showToast } from "./notifications";
 import { getEffectiveCwd, render, resetChatRenderCache } from "./render";
 import { initTerminal, measureTerminalCreationDimensions, maybeScrollTerminalToBottom, syncTerminalBuffer, waitForTerminalSettled, type TerminalCreationContext } from "./terminal";
@@ -2272,6 +2276,30 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
 
         if (terminalZoomFromKeyboard(event)) return;
 
+        const selectedForKeys = getSelectedSession();
+        const held = ptyInputState.read(state.selectedId);
+        if (!isStructuredSession(selectedForKeys) && (held.ctrl || held.shift)
+          && !event.ctrlKey && !event.metaKey && !event.altKey && event.key.length === 1
+          && !(event.target as HTMLTextAreaElement | null)?.readOnly) {
+          const sequence = modifiedPtySequence(event.key, mergePtyModifiers(state.selectedId, {ctrl:false, shift:event.shiftKey}));
+          if (sequence !== null) {
+            event.preventDefault();
+            if (held.ctrl || state.terminalInteractive) queueDirectInput(sequence, held.ctrl ? "ctrl_" + event.key.toLowerCase() : "interactive_text").catch(function() {});
+            else replaceComposerSelection(event.target as HTMLTextAreaElement, sequence);
+            return;
+          }
+        }
+
+        if (!isStructuredSession(selectedForKeys) && state.terminalInteractive && (held.ctrl || held.shift)
+          && !event.metaKey && !(event.target as HTMLTextAreaElement | null)?.readOnly) {
+          const key = keyFromKeyboardEvent(event);
+          if (["up", "down", "left", "right", "home", "end", "pageup", "pagedown", "delete", "tab"].includes(key)) {
+            event.preventDefault();
+            queueDirectInput(buildPtySequence(key, mergePtyModifiers(state.selectedId, {ctrl:event.ctrlKey,shift:event.shiftKey,alt:event.altKey})), key).catch(function() {});
+            return;
+          }
+        }
+
         if (shouldCaptureTerminalEvent(event)) {
           captureTerminalInput(event);
           return;
@@ -2320,6 +2348,9 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
 
         if (event.key === "Escape") {
           event.preventDefault();
+          // A popup may still be leaving after its dismiss lease is released.
+          // Keep that Escape in the UI instead of interrupting the session.
+          if (state.plusPopoverOpen || hasOpenPopupSurface()) return;
           var escSess = getSelectedSession();
           if (isStructuredSession(escSess)) {
             // INPUT-2: 结构化会话没有 PTY，Esc 不能把 \x1b 当消息发给 Claude。
@@ -2660,12 +2691,25 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         return "[附件已上传，请查看以下文件:\n" + paths.join("\n") + "]\n\n";
       }
 
-      export function handleInteractiveTextInput(inputBox) {
-        if (!state.terminalInteractive || !inputBox) return false;
+      export function handleInteractiveTextInput(inputBox, event?: Pick<InputEvent, "inputType" | "data">) {
+        if (!inputBox || isStructuredSession(getSelectedSession())) return false;
         if (document.documentElement.classList.contains("is-wand-embed-terminal")) return false;
         var value = inputBox.value || "";
         if (!value) return false;
-        queueDirectInput(value, "interactive_text").catch(function() {});
+        const held = ptyInputState.read(state.selectedId);
+        const typed = event?.data ?? value;
+        const modified = modifiedTypedPtyText(typed, event, held);
+        if (!state.terminalInteractive) {
+          if (!held.ctrl || modified === null || !state.selectedId) return false;
+          const cursor = Math.max(0, inputBox.selectionStart - typed.length);
+          inputBox.value = composer.read(state.selectedId).text;
+          inputBox.setSelectionRange(cursor, cursor);
+          autoResizeInput(inputBox);
+          queueDirectInput(modified, "ctrl_" + typed.toLowerCase()).catch(function() {});
+          return true;
+        }
+        const outgoing = value === typed && modified !== null ? modified : value;
+        queueDirectInput(outgoing, held.ctrl && modified !== null && value === typed ? "ctrl_" + typed.toLowerCase() : "interactive_text").catch(function() {});
         inputBox.value = "";
         autoResizeInput(inputBox);
         setDraftValue("", true);

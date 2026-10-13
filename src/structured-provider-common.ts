@@ -163,15 +163,48 @@ export function normalizeThinkingEffort(value: unknown): SessionSnapshot["thinki
   return null;
 }
 
-export function thinkingEffortToClaudeCliEffort(
-  effort: SessionSnapshot["thinkingEffort"],
-): string | null {
-  const native = prefixedThinkingEffort("claude", effort);
-  if (native) return native;
-  if (effort === "standard") return "low";
-  if (effort === "deep") return "medium";
-  if (effort === "max") return "max";
+type ThinkingEffortProvider = "claude" | "codex" | "opencode" | "qoder" | "grok" | "pi";
+
+interface ThinkingEffortMapping {
+  /** Legacy tiers (standard/deep/max) expressed in this CLI's own level names. */
+  legacy: { standard: string; deep: string; max: string };
+  /** Result for an unset or "off" effort: null means "send no flag". */
+  offValue: string | null;
+  /** Normalizes a provider-native level the CLI cannot accept verbatim. */
+  native?: (level: string) => string;
+}
+
+/**
+ * Per-CLI thinking-effort tables. `provider:level` values pass through (after
+ * `native`); legacy four-tier values map through `legacy`.
+ */
+const THINKING_EFFORT_MAPPINGS: Record<ThinkingEffortProvider, ThinkingEffortMapping> = {
+  claude: { legacy: { standard: "low", deep: "medium", max: "max" }, offValue: null },
+  codex: { legacy: { standard: "low", deep: "medium", max: "xhigh" }, offValue: null },
+  opencode: { legacy: { standard: "low", deep: "high", max: "max" }, offValue: null },
+  qoder: { legacy: { standard: "low", deep: "high", max: "max" }, offValue: null },
+  // Grok's CLI accepts xhigh/high/medium/low only, so "max" (legacy or native) becomes xhigh.
+  grok: {
+    legacy: { standard: "low", deep: "high", max: "xhigh" },
+    offValue: null,
+    native: (level) => (level === "max" ? "xhigh" : level),
+  },
+  pi: { legacy: { standard: "low", deep: "high", max: "max" }, offValue: "off" },
+};
+
+function mapThinkingEffort(provider: ThinkingEffortProvider, effort: SessionSnapshot["thinkingEffort"]): string | null {
+  const mapping = THINKING_EFFORT_MAPPINGS[provider];
+  const native = prefixedThinkingEffort(provider, effort);
+  if (native) return mapping.native ? mapping.native(native) : native;
+  if (!effort || effort === "off") return mapping.offValue;
+  if (effort === "standard") return mapping.legacy.standard;
+  if (effort === "deep") return mapping.legacy.deep;
+  if (effort === "max") return mapping.legacy.max;
   return null;
+}
+
+export function thinkingEffortToClaudeCliEffort(effort: SessionSnapshot["thinkingEffort"]): string | null {
+  return mapThinkingEffort("claude", effort);
 }
 
 export function thinkingEffortToClaudeSlashEffort(effort: SessionSnapshot["thinkingEffort"]): string {
@@ -179,58 +212,25 @@ export function thinkingEffortToClaudeSlashEffort(effort: SessionSnapshot["think
 }
 
 export function thinkingEffortToCodexReasoningEffort(effort: SessionSnapshot["thinkingEffort"]): string | null {
-  const native = prefixedThinkingEffort("codex", effort);
-  if (native) return native;
-  if (effort === "standard") return "low";
-  if (effort === "deep") return "medium";
-  if (effort === "max") return "xhigh";
-  return null;
-}
-
-function thinkingEffortToNamedLevels(
-  provider: SessionProvider,
-  effort: SessionSnapshot["thinkingEffort"],
-  legacy: { standard: string; deep: string; max: string },
-): string | null {
-  const native = prefixedThinkingEffort(provider, effort);
-  if (native) return native;
-  if (!effort || effort === "off") return null;
-  if (effort === "standard") return legacy.standard;
-  if (effort === "deep") return legacy.deep;
-  if (effort === "max") return legacy.max;
-  return null;
+  return mapThinkingEffort("codex", effort);
 }
 
 /** OpenCode `--variant`。旧四档仍是 low/high/max；`opencode:<level>` 原样传递。 */
 export function thinkingEffortToOpenCodeVariant(effort: SessionSnapshot["thinkingEffort"]): string | null {
-  return thinkingEffortToNamedLevels("opencode", effort, { standard: "low", deep: "high", max: "max" });
+  return mapThinkingEffort("opencode", effort);
 }
 
 /** Qoder `--reasoning-effort`。旧四档仍是 low/high/max；`qoder:<level>` 原样传递。 */
 export function thinkingEffortToQoderEffort(effort: SessionSnapshot["thinkingEffort"]): string | null {
-  return thinkingEffortToNamedLevels("qoder", effort, { standard: "low", deep: "high", max: "max" });
+  return mapThinkingEffort("qoder", effort);
 }
 
-/**
- * Grok `--effort`。当前 CLI 接受 xhigh/high/medium/low，不接受 `max`，
- * 所以旧的「最大」和误存的 `grok:max` 都落到 xhigh。
- */
+/** Grok `--effort`。当前 CLI 不接受 `max`，旧的「最大」和误存的 `grok:max` 都落到 xhigh。 */
 export function thinkingEffortToGrokEffort(effort: SessionSnapshot["thinkingEffort"]): string | null {
-  const native = prefixedThinkingEffort("grok", effort);
-  if (native) return native === "max" ? "xhigh" : native;
-  if (!effort || effort === "off") return null;
-  if (effort === "standard") return "low";
-  if (effort === "deep") return "high";
-  if (effort === "max") return "xhigh";
-  return null;
+  return mapThinkingEffort("grok", effort);
 }
 
+/** Pi `--thinking`。未设置或 off 时显式传 off。 */
 export function thinkingEffortToPiLevel(effort: SessionSnapshot["thinkingEffort"]): string | null {
-  const native = prefixedThinkingEffort("pi", effort);
-  if (native) return native;
-  if (!effort || effort === "off") return "off";
-  if (effort === "standard") return "low";
-  if (effort === "deep") return "high";
-  if (effort === "max") return "max";
-  return null;
+  return mapThinkingEffort("pi", effort);
 }

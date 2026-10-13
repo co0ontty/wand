@@ -6,9 +6,11 @@ import {
   getGithubConnectorStatus,
   githubRequest,
 } from "./github-connector.js";
-import { bodyObject, integerQuery, requiredString, sendRouteError, text } from "./server-request.js";
+import { parseBoundedInteger } from "./request-limits.js";
+import { bodyObject, requiredString, sendRouteError, text } from "./server-request.js";
 import type { WandStorage } from "./storage.js";
 import type { SessionRegistry } from "./session-registry.js";
+import { badRequest } from "./http-error.js";
 
 interface GithubRouteDependencies {
   storage: WandStorage;
@@ -28,8 +30,8 @@ function githubListQuery(
   const direction = text(reqQuery.direction, defaults.direction ?? "");
   if (sort) query.set("sort", sort);
   if (direction) query.set("direction", direction);
-  query.set("per_page", String(integerQuery(reqQuery.per_page, 30, 1, 100)));
-  query.set("page", String(integerQuery(reqQuery.page, 1, 1, 10_000)));
+  query.set("per_page", String(parseBoundedInteger(reqQuery.per_page, 30, 1, 100, "fallback")));
+  query.set("page", String(parseBoundedInteger(reqQuery.page, 1, 1, 10_000, "fallback")));
   return query;
 }
 
@@ -37,14 +39,14 @@ function repoPath(req: { params: Record<string, string> }): string {
   const owner = req.params.owner?.trim();
   const repo = req.params.repo?.trim();
   if (!owner || !repo || !/^[A-Za-z0-9_.-]+$/.test(owner) || !/^[A-Za-z0-9_.-]+$/.test(repo)) {
-    throw new Error("仓库名称无效。");
+    throw badRequest("仓库名称无效。");
   }
   return `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
 }
 
 function issueNumber(req: { params: Record<string, string> }): number {
   const number = Number(req.params.number);
-  if (!Number.isInteger(number) || number < 1) throw new Error("Issue 或 PR 编号无效。");
+  if (!Number.isInteger(number) || number < 1) throw badRequest("Issue 或 PR 编号无效。");
   return number;
 }
 
@@ -110,7 +112,7 @@ export function registerGithubRoutes(app: Express, deps: GithubRouteDependencies
       const number = issueNumber(req);
       const body = bodyObject(req.body);
       const sessionId = requiredString(body, "sessionId");
-      if (sessions && !sessions.get(sessionId)) throw new Error("未找到该会话。");
+      if (sessions && !sessions.get(sessionId)) throw badRequest("未找到该会话。");
       storage.bindGithubIssueSession(req.params.owner, req.params.repo, number, sessionId);
       res.status(201).json({ ok: true, sessionId });
     } catch (error) {
@@ -143,8 +145,8 @@ export function registerGithubRoutes(app: Express, deps: GithubRouteDependencies
       if (type) query.set("type", type);
       query.set("sort", text(req.query.sort, "updated"));
       query.set("direction", text(req.query.direction, "desc"));
-      query.set("per_page", String(integerQuery(req.query.per_page, 30, 1, 100)));
-      query.set("page", String(integerQuery(req.query.page, 1, 1, 10_000)));
+      query.set("per_page", String(parseBoundedInteger(req.query.per_page, 30, 1, 100, "fallback")));
+      query.set("page", String(parseBoundedInteger(req.query.page, 1, 1, 10_000, "fallback")));
       const suffix = query.toString();
       res.json(await githubJson(storage, `/user/repos?${suffix}`));
     } catch (error) { sendGithubError(res, error); }
@@ -180,7 +182,7 @@ export function registerGithubRoutes(app: Express, deps: GithubRouteDependencies
       for (const key of ["title", "body", "state", "state_reason", "labels", "assignees", "milestone"] as const) {
         if (body[key] !== undefined) payload[key] = body[key];
       }
-      if (!Object.keys(payload).length) throw new Error("没有可更新的 Issue 字段。");
+      if (!Object.keys(payload).length) throw badRequest("没有可更新的 Issue 字段。");
       res.json(await githubJson(storage, `${repoPath(req)}/issues/${issueNumber(req)}`, { method: "PATCH", body: JSON.stringify(payload) }));
     } catch (error) { sendGithubError(res, error); }
   }));

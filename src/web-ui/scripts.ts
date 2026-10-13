@@ -27,21 +27,26 @@ function readScriptCache(): void {
   }
 }
 
-function injectRuntimeValues(source: string, configPath: string, chunkHash: string): string {
+function injectRuntimeValues(source: string, configPath: string, chunkHash: string, plushHash: string, entry: string): string {
   return source
     // This is a JS string literal, not HTML text. JSON escaping also handles
     // quotes, backslashes and newlines in nonstandard configuration paths.
     .replace('"${wandConfigPath}"', JSON.stringify(configPath))
-    .replace("${aiTeamsChunkSrc}", `/assets/ai-teams.js?v=${chunkHash}`);
+    .replace("${aiTeamsChunkSrc}", `/assets/ai-teams.js?v=${chunkHash}`)
+    .replace("${plushAvatarChunkSrc}", `/assets/plush-avatar.js?v=${plushHash}`)
+    .replace("${browserModuleSrc}", `/assets/${entry}`);
 }
 
 export function getScriptAsset(configPath: string, requestedHash?: string): VersionedWebAsset {
   readScriptCache();
-  const chunkHash = getAiTeamsChunk().hash;
+  const teamHash = getAiTeamsChunk().hash;
+  const plushHash = getPlushAvatarChunk().hash;
+  const entry = getBrowserModuleManifest().entry;
+  const chunkHash = `${teamHash}:${plushHash}:${entry}`;
   if (!_scriptAsset || _scriptAsset.source !== _scriptCache
     || _scriptAsset.configPath !== configPath || _scriptAsset.chunkHash !== chunkHash) {
     _scriptAsset = {
-      ...versionWebAsset(injectRuntimeValues(_scriptCache, configPath, chunkHash)),
+      ...versionWebAsset(injectRuntimeValues(_scriptCache, configPath, teamHash, plushHash, entry)),
       source: _scriptCache, configPath, chunkHash,
     };
   }
@@ -49,7 +54,8 @@ export function getScriptAsset(configPath: string, requestedHash?: string): Vers
     if (!_embeddedScriptAsset || _embeddedScriptAsset.configPath !== configPath) {
       _embeddedScriptAsset = {
         ...versionWebAsset(injectRuntimeValues(
-          EMBEDDED_WEB_ASSETS.scriptsJs, configPath, embeddedAiTeamsChunk.hash,
+          EMBEDDED_WEB_ASSETS.scriptsJs, configPath, embeddedAiTeamsChunk.hash, embeddedPlushAvatarChunk.hash,
+          EMBEDDED_WEB_ASSETS.browserModuleManifest.entry,
         )),
         configPath,
       };
@@ -89,4 +95,69 @@ export function getAiTeamsChunk(requestedHash?: string): { content: string; hash
   }
   if (requestedHash === embeddedAiTeamsChunk.hash) return embeddedAiTeamsChunk;
   return _aiTeamsChunk;
+}
+
+const embeddedPlushAvatarChunk = withHash(EMBEDDED_WEB_ASSETS.plushAvatarJs);
+let plushAvatarChunk = embeddedPlushAvatarChunk;
+let plushAvatarChunkKey = "";
+
+/** Content-versioned WebGL runtime, retaining embedded bytes during an in-flight package replacement. */
+export function getPlushAvatarChunk(requestedHash?: string): { content: string; hash: string } {
+  const chunkPath = path.join(__dirname, "content", "plush-avatar.js");
+  try {
+    const stat = fs.statSync(chunkPath);
+    const key = `${stat.mtimeMs}:${stat.size}`;
+    if (key !== plushAvatarChunkKey) {
+      plushAvatarChunk = withHash(fs.readFileSync(chunkPath, "utf-8")); plushAvatarChunkKey = key;
+    }
+  } catch { /* Keep the process's last/embedded version during self-update. */ }
+  return requestedHash === embeddedPlushAvatarChunk.hash ? embeddedPlushAvatarChunk : plushAvatarChunk;
+}
+
+/** Blocking, content-versioned device preference bootstrap. */
+export function getThemePreloadAsset(): VersionedWebAsset {
+  return themePreloadAsset;
+}
+const themePreloadAsset = versionWebAsset(EMBEDDED_WEB_ASSETS.themePreloadJs);
+
+export interface BrowserModuleManifest {
+  entry: string;
+  eager: readonly string[];
+  files: readonly string[];
+  features?: Record<string, string>;
+}
+let browserManifest: BrowserModuleManifest = EMBEDDED_WEB_ASSETS.browserModuleManifest;
+let browserManifestKey = "";
+const browserBuilds: Map<string, string>[] = [];
+
+/** Snapshot a complete build before serving its bootstrap. Old processes keep
+ * its lazy bytes even if npm removes/replaces content during self-update. */
+export function getBrowserModuleManifest(): BrowserModuleManifest {
+  try {
+    const manifestPath = path.join(__dirname, "content/module-manifest.json");
+    const stat = fs.statSync(manifestPath);
+    const key = `${stat.mtimeMs}:${stat.size}`;
+    if (key !== browserManifestKey) {
+      const next = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as BrowserModuleManifest;
+      if (!next.files.every(file => /^modules\/[a-f0-9]{16}\/[A-Za-z0-9_-]+\.js$/.test(file))
+        || !next.files.includes(next.entry) || !next.eager.every(file => next.files.includes(file))) {
+        throw new Error("Invalid browser module manifest");
+      }
+      const files = new Map(next.files.map(file => [file, fs.readFileSync(path.join(__dirname, "content", file), "utf8")]));
+      browserBuilds.unshift(files);
+      browserBuilds.splice(2);
+      browserManifest = next;
+      browserManifestKey = key;
+    }
+  } catch { /* Retain the last complete graph (or embedded build), never mix versions. */ }
+  return browserManifest;
+}
+
+export function getBrowserModule(file: string): string | undefined {
+  getBrowserModuleManifest();
+  for (const build of browserBuilds) {
+    const content = build.get(file);
+    if (content !== undefined) return content;
+  }
+  return Object.hasOwn(EMBEDDED_WEB_ASSETS.browserModules, file) ? EMBEDDED_WEB_ASSETS.browserModules[file] : undefined;
 }

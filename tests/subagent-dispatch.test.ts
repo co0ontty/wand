@@ -5,7 +5,7 @@ import {
   deriveSubagentDispatchMeta,
   subagentWorkflowLabel,
   WORKFLOW_SUBAGENT_AGENT_TYPE,
-} from "../src/subagent-dispatch.js";
+} from "../src/subagent-meta.js";
 
 function toolUse(name: string, input: Record<string, unknown>, id = "call-1") {
   return { type: "tool_use", id, name, input };

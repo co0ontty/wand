@@ -1,5 +1,5 @@
 import "../issues/library-layout";
-import { TaskTextArea, TaskForm } from "../issues/form-controls";
+import { TaskTextArea, TaskForm } from "../issues/task-form";
 import { WandInput } from "../ui";
 import { Alert, Button, Card, Checkbox, Collapse, Empty, Flex, Form, List, Space, Tag, Typography } from "antd";
 import { type FormEvent, useEffect, useMemo, useState, useSyncExternalStore } from "react";

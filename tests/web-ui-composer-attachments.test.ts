@@ -28,28 +28,28 @@ function render(mount: ComposerAttachmentsMount): string {
   return renderToStaticMarkup(React.createElement(ComposerAttachments, { mount }));
 }
 
-test("附件只使用 X 的展示入口，SSR 保留 live region 与受控上传", () => {
+test("附件只使用 X FileCard 展示入口，SSR 保留 live region 且不接管上传", () => {
   const html = render(mountFor());
-  assert.match(html, /ant-attachment/);
+  assert.match(html, /ant-file-card-list/);
   assert.match(html, /aria-label="待发送附件" aria-live="polite"/);
-  assert.match(html, /ant-upload-select" style="display:none"/);
+  assert.doesNotMatch(html, /ant-upload/);
   assert.doesNotMatch(html, /attachment-pill|att-remove/);
 });
 
 test("附件身份、大小与移除动作映射到唯一 composer 快照", () => {
   const host = readFileSync(new URL("../src/web-ui/react/composer-attachments/host.tsx", import.meta.url), "utf8");
-  assert.match(host, /uid: String\(item\.index\)/);
-  assert.match(host, /size: item\.size/);
-  assert.match(host, /thumbUrl: item\.previewUrl/);
-  assert.match(host, /onRemove\(Number\(item\.uid\)\)/);
+  assert.match(host, /key: String\(item\.index\)/);
+  assert.match(host, /byte: item\.size/);
+  assert.match(host, /src: item\.previewUrl/);
+  assert.match(host, /onRemove\(Number\(item\.key\)\)/);
   assert.match(host, /node\.setAttribute\("aria-label", `移除附件/);
   assert.match(host, /event\.key === "Enter" \|\| event\.key === " "/);
-  assert.match(host, /getDropContainer=\{\(\) => null\}/);
+  assert.match(host, /imageViewerController\.openGroup/);
   // Actual image/file rendering and keyboard removal are covered by the opt-in production Chrome gate.
 });
 
 test("预览条播报新附件，空列表的挂载由适配器负责", () => {
-  assert.match(render(mountFor()), /<div aria-label="待发送附件" aria-live="polite">/);
+  assert.match(render(mountFor()), /aria-label="待发送附件" aria-live="polite"/);
   assert.doesNotMatch(render(mountFor()), /attachment-preview hidden/);
 });
 

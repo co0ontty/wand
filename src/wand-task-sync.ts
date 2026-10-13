@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import type { WandStorage } from "./storage.js";
+import { isSessionProvider } from "./session-provider.js";
 import { provisionalTaskTitleFromDescription } from "./task-title.js";
 import type { WandTask } from "./task-types.js";
 import type { SessionSnapshot } from "./types.js";
@@ -18,6 +19,7 @@ export function isUnnamedWorkspaceTaskName(name: string): boolean {
 
 /** Legacy title helper; prompts name sessions, not their containing task. */
 export function boardTitleFromSession(session: SessionSnapshot): string {
+  if (isBlankTerminal(session)) return "";
   const title = session.title?.trim();
   if (title && !isUnnamedWorkspaceTaskName(title)) return provisionalTaskTitleFromDescription(title);
   const description = session.description?.trim();
@@ -29,6 +31,10 @@ export function boardTitleFromSession(session: SessionSnapshot): string {
     if (text) return provisionalTaskTitleFromDescription(text);
   }
   return "";
+}
+
+function isBlankTerminal(session: SessionSnapshot): boolean {
+  return session.sessionKind !== "structured" && !isSessionProvider(session.provider);
 }
 
 /**
@@ -50,16 +56,17 @@ function taskNamingSessions(storage: WandStorage, card: WandTask): SessionSnapsh
     if (!session) return;
     add(session);
     // boardTitleFromSession 只在 title/description 都缺时才翻 messages 找首条用户输入。
-    if (!session.title?.trim() && !session.description?.trim()) needsMessageFallback.push(session.id);
+    if (!isBlankTerminal(session) && !session.title?.trim() && !session.description?.trim()) {
+      needsMessageFallback.push(session.id);
+    }
   };
   if (card.workspaceTaskId) {
     for (const session of storage.listSessionsByWorkspaceTaskSlim(card.workspaceTaskId)) addSlim(session);
   }
-  for (const sessionId of storage.listWandTaskSessionIds(card.id)) addSlim(storage.getSessionSlim(sessionId));
+  for (const session of storage.listWandTaskSessionsSlim(card.id)) addSlim(session);
   // 只有真的需要 messages 的那几个会话才去解析大字段。
-  for (const sessionId of needsMessageFallback) {
-    const full = storage.getSession(sessionId);
-    if (full && (full.messages?.length ?? 0) > 0) sessions.set(sessionId, full);
+  for (const full of storage.getSessionsByIds(needsMessageFallback)) {
+    if ((full.messages?.length ?? 0) > 0) sessions.set(full.id, full);
   }
   return [...sessions.values()].sort((left, right) => (right.startedAt ?? "").localeCompare(left.startedAt ?? ""));
 }
@@ -69,13 +76,16 @@ function taskNamingSessions(storage: WandStorage, card: WandTask): SessionSnapsh
  * 为空表示这个任务还没有可命名的内容，调用方应保留占位标题。
  */
 export function taskAutoNameSourceText(storage: WandStorage, card: WandTask): string {
+  const sessions = taskNamingSessions(storage, card);
+  // 只有空白终端的任务不总结；后来加入 Agent 时再按真实任务内容命名。
+  if (sessions.length > 0 && sessions.every(isBlankTerminal)) return "";
   const parts: string[] = [];
   for (const line of card.description.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed || /^(?:项目|目录|分支)[：:]/.test(trimmed)) continue;
     parts.push(trimmed);
   }
-  for (const session of taskNamingSessions(storage, card)) {
+  for (const session of sessions) {
     const candidate = boardTitleFromSession(session);
     if (candidate) parts.push(candidate);
   }

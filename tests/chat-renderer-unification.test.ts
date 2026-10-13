@@ -14,17 +14,20 @@ function sourceFiles(dir: string): string[] {
     ? sourceFiles(join(dir, entry.name)) : /\.tsx?$/.test(entry.name) ? [join(dir, entry.name)] : []);
 }
 
-test("all Web chat adapters use one library message renderer", () => {
+test("all Web chat adapters use the Wand message surface", () => {
   const files = sourceFiles("src/web-ui/react");
-  assert.deepEqual(files.filter(file => /<Bubble(?:\s|>|\.)/.test(readFileSync(file, "utf8"))), ["src/web-ui/react/chat/message.tsx"]);
+  assert.deepEqual(files.filter(file => /<Bubble(?:\s|>|\.)/.test(readFileSync(file, "utf8"))), []);
   for (const file of ["chat/presentation.tsx", "ai-teams/team-chat-view.tsx", "conversations/session-preview.tsx", "composer-voice/host.tsx"]) {
     assert.match(readFileSync(`src/web-ui/react/${file}`, "utf8"), /<ChatMessage\b/, file);
   }
+  for (const file of ["chat/message.tsx", "chat/activity.tsx"]) {
+    assert.doesNotMatch(readFileSync(`src/web-ui/react/${file}`, "utf8"), /@ant-design\/x|ant-bubble|ant-thought/);
+  }
   for (const own of [false, true]) for (const surface of ["message", "document", "preview"] as const) {
-    const html = renderToStaticMarkup(React.createElement(ChatMessage, { own, surface, content: "共有正文", header: "署名", footer: "状态" }));
+    const html = renderToStaticMarkup(React.createElement(ChatMessage, { own, surface, content: "共有正文", header: "署名", footer: "状态", avatar: "头像", styles: { content: { padding: 7 } }, "aria-label": "测试消息" }));
     assert.equal((html.match(/data-chat-renderer="canonical"/g) ?? []).length, 1);
     assert.match(html, new RegExp(`data-chat-role="${own ? "user" : "assistant"}"`));
-    for (const text of ["共有正文", "署名", "状态"]) assert.ok(html.includes(text));
+    for (const text of ["共有正文", "署名", "状态", "头像", 'aria-label="测试消息"', 'style="padding:7px"']) assert.ok(html.includes(text));
   }
 });
 

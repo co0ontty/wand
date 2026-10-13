@@ -25,7 +25,7 @@ test("session HTTP interface preserves create, list, update, detail, and delete 
   const sessions = new SessionRegistry(processes, structured, storage);
   const app = express();
   app.use(express.json());
-  registerSessionRoutes(app, processes, structured, storage, config.defaultMode, config, sessions);
+  registerSessionRoutes(app, { processes, structured, storage, defaultMode: config.defaultMode, config, sessions });
   registerClaudeHistoryRoutes(app, processes, storage);
   app.use(jsonErrorHandler);
   const server = createServer(app);
@@ -368,7 +368,7 @@ test("session list and detail DTOs keep workspace binding and queue skills", asy
   const sessions = new SessionRegistry(processes, structured, storage);
   const app = express();
   app.use(express.json());
-  registerSessionRoutes(app, processes, structured, storage, config.defaultMode, config, sessions);
+  registerSessionRoutes(app, { processes, structured, storage, defaultMode: config.defaultMode, config, sessions });
   app.use(jsonErrorHandler);
   const server = createServer(app);
 
@@ -445,7 +445,7 @@ test("a session created inside a sidebar task reaches the board card immediately
   const sessions = new SessionRegistry(processes, structured, storage);
   const app = express();
   app.use(express.json());
-  registerSessionRoutes(app, processes, structured, storage, config.defaultMode, config, sessions);
+  registerSessionRoutes(app, { processes, structured, storage, defaultMode: config.defaultMode, config, sessions });
   app.use(jsonErrorHandler);
   const server = createServer(app);
 
@@ -523,7 +523,7 @@ test("首轮提示词不再把创建请求挂在 HTTP 上", async () => {
   const sessions = new SessionRegistry(processes, structured, storage);
   const app = express();
   app.use(express.json());
-  registerSessionRoutes(app, processes, structured, storage, config.defaultMode, config, sessions);
+  registerSessionRoutes(app, { processes, structured, storage, defaultMode: config.defaultMode, config, sessions });
   app.use(jsonErrorHandler);
   const server = createServer(app);
   await new Promise<void>((resolve, reject) => {
@@ -593,7 +593,7 @@ test("创建会话时 systemPrompt 落到会话上，不并进首条消息", asy
   const sessions = new SessionRegistry(processes, structured, storage);
   const app = express();
   app.use(express.json());
-  registerSessionRoutes(app, processes, structured, storage, config.defaultMode, config, sessions);
+  registerSessionRoutes(app, { processes, structured, storage, defaultMode: config.defaultMode, config, sessions });
   app.use(jsonErrorHandler);
   const server = createServer(app);
   await new Promise<void>((resolve, reject) => {
@@ -635,7 +635,7 @@ test("创建会话接口把 Pi 与 Wand Agent 当两个引擎，非法组合明�
   const sessions = new SessionRegistry(processes, structured, storage);
   const app = express();
   app.use(express.json());
-  registerSessionRoutes(app, processes, structured, storage, config.defaultMode, config, sessions);
+  registerSessionRoutes(app, { processes, structured, storage, defaultMode: config.defaultMode, config, sessions });
   app.use(jsonErrorHandler);
   const server = createServer(app);
   await new Promise<void>((resolve, reject) => {

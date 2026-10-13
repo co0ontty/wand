@@ -1,16 +1,21 @@
+import { AI_TEAM_ACTIVE_RUN_STATUSES } from "./ai-team-types.js";
+import { isArchiveBlocked } from "./archive-policy.js";
 import { cleanupWorktreeSync } from "./git-worktree.js";
 import type { SessionRegistry } from "./session-registry.js";
 import type { WandStorage } from "./storage.js";
-import { taskRetentionWindows, type TaskRetentionSettings } from "./task-retention.js";
+import { defaultTaskRetention, taskRetentionWindows, type TaskRetentionSettings } from "./task-retention.js";
 import type { SessionSnapshot } from "./types.js";
+
+/** Backward-compatible exports for consumers of the historical default windows. */
+const DEFAULT_RETENTION_WINDOWS = taskRetentionWindows(defaultTaskRetention());
+export const RETENTION_IDLE_MS = DEFAULT_RETENTION_WINDOWS.idleMs!;
+export const RETENTION_ARCHIVED_MS = DEFAULT_RETENTION_WINDOWS.archivedMs!;
 
 /**
  * 看板任务、会话和已结束的团队运行共用 `taskRetention`。
  * 没配过时默认空闲 7 天归档，再过 7 天清理。
  * 结构化会话看运行状态；PTY 只有正在回复或等待确认才跳过，空闲壳不算在处理。
  */
-export const RETENTION_IDLE_MS = 7 * 24 * 60 * 60 * 1000;
-export const RETENTION_ARCHIVED_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface RetentionDeps {
   storage: WandStorage;
@@ -32,10 +37,7 @@ export interface RetentionResult {
  * 空闲 zsh 不算。真正挡住清理的是正在回复、或停在权限/确认上。
  */
 export function isRetentionBusy(session: SessionSnapshot): boolean {
-  if (session.ptyBusy === true || session.structuredState?.inFlight === true) return true;
-  if (session.permissionBlocked || session.pendingEscalation) return true;
-  if ((session.sessionKind ?? "pty") === "pty" || session.runner === "pty") return false;
-  return session.status === "running";
+  return isArchiveBlocked(session);
 }
 
 function isIdleLivePty(session: SessionSnapshot): boolean {
@@ -86,7 +88,7 @@ export function runRetentionSweep(deps: RetentionDeps, now = Date.now()): Retent
 
   for (const session of snapshots) {
     // 真正还在处理的会话不能归档或杀掉。空闲 PTY 壳不算。
-    if (isRetentionBusy(session)) continue;
+    if (isArchiveBlocked(session)) continue;
     if (session.archived) {
       if (taskWindows.archivedMs === null) continue;
       const archivedAt = timestamp(session.archivedAt);
@@ -123,9 +125,11 @@ export function runRetentionSweep(deps: RetentionDeps, now = Date.now()): Retent
     else sessionsByTask.set(taskId, [session]);
   }
 
+  const activeTeamTaskIds = new Set(deps.storage.listAiTeamRuns({ statuses: AI_TEAM_ACTIVE_RUN_STATUSES }).map(run => run.taskId));
   for (const task of deps.storage.listWandTasks()) {
     const bound = task.workspaceTaskId ? sessionsByTask.get(task.workspaceTaskId) ?? [] : [];
-    const running = bound.some((session) => isRetentionBusy(session));
+    const running = bound.some((session) => isArchiveBlocked(session))
+      || activeTeamTaskIds.has(task.id) || (!!task.workspaceTaskId && activeTeamTaskIds.has(task.workspaceTaskId));
     if (task.status === "archived") {
       if (running || taskWindows.archivedMs === null) continue;
       const archivedAt = timestamp(task.archivedAt);
@@ -143,7 +147,7 @@ export function runRetentionSweep(deps: RetentionDeps, now = Date.now()): Retent
       result.purgedTasks += 1;
       continue;
     }
-    if (running || taskWindows.idleMs === null) continue;
+    if (running || task.status === "doing" || taskWindows.idleMs === null) continue;
     const lastActivity = taskLastActivity(deps.storage, task, bound);
     if (lastActivity === null || now - lastActivity < taskWindows.idleMs) continue;
     deps.storage.updateWandTask(task.id, { status: "archived" });

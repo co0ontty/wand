@@ -9,7 +9,7 @@ import test from "node:test";
 import { defaultConfig } from "../src/config.js";
 import { startServer } from "../src/server.js";
 import { versionWebAsset } from "../src/web-ui/asset-version.js";
-import { getScriptAsset } from "../src/web-ui/scripts.js";
+import { getBrowserModuleManifest, getScriptAsset } from "../src/web-ui/scripts.js";
 import { EMBEDDED_WEB_ASSETS } from "../src/web-ui/embedded-assets.js";
 
 const hashOf = (content: string): string => versionWebAsset(content).hash;
@@ -34,7 +34,9 @@ test("the shell transfers only HTML repeatedly and serves versioned, cacheable a
     assert.doesNotMatch(html, /<style\b|<script(?!\s+src=)/i);
     const cssHref = html.match(/href="(\/assets\/app\.css\?v=[a-f0-9]{16})"/)?.[1];
     const jsSrc = html.match(/src="(\/assets\/app\.js\?v=[a-f0-9]{16})"/)?.[1];
-    assert.ok(cssHref && jsSrc);
+    const themeSrc = html.match(/src="(\/assets\/theme\.js\?v=[a-f0-9]{16})"/)?.[1];
+    assert.ok(cssHref && jsSrc && themeSrc);
+    assert.ok(html.indexOf(themeSrc) < html.indexOf(cssHref));
     assert.ok(html.indexOf("/vendor/xterm/xterm.css") < html.indexOf(cssHref));
     assert.match(html, /name="wand-qrcode-script" content="\/vendor\/qrcode\/qrcode\.bundle\.js\?v=[a-f0-9]{8}"/);
     assert.match(html, /name="wand-xterm-script" content="\/vendor\/xterm\/xterm\.bundle\.js\?v=[a-f0-9]{8}"/);
@@ -44,6 +46,7 @@ test("the shell transfers only HTML repeatedly and serves versioned, cacheable a
     for (const [url, type, cache] of [
       [jsSrc, "javascript", "private"],
       [cssHref, "css", "public"],
+      [themeSrc, "javascript", "public"],
     ] as const) {
       const response = await fetch(`${base}${url}`);
       const content = await response.text();
@@ -69,13 +72,27 @@ test("the shell transfers only HTML repeatedly and serves versioned, cacheable a
     assert.ok(getScriptAsset(unusualPath).content.includes(JSON.stringify(unusualPath)),
       "paths with quotes and backslashes must remain valid JS string literals");
     assert.match(script, /\/assets\/ai-teams\.js\?v=[a-f0-9]{8}/);
+    assert.match(script, /\/assets\/plush-avatar\.js\?v=[a-f0-9]{8}/);
 
     for (const url of ["/assets/app.js?v=outdated", "/assets/app.css?v=outdated",
-      "/vendor/xterm/xterm.css?v=outdated", "/assets/ai-teams.js?v=outdated"]) {
+      "/vendor/xterm/xterm.css?v=outdated", "/assets/ai-teams.js?v=outdated", "/assets/plush-avatar.js?v=outdated"]) {
       const response = await fetch(`${base}${url}`);
       assert.equal(response.status, 200, `an old open page must stay usable: ${url}`);
       assert.equal(response.headers.get("cache-control"), "no-store");
     }
+
+    const manifest = getBrowserModuleManifest();
+    assert.ok(manifest.files.length > manifest.eager.length);
+    for (const file of manifest.files) {
+      const module = await fetch(`${base}/assets/${file}`);
+      assert.equal(module.status, 200);
+      assert.match(module.headers.get("content-type") ?? "", /javascript/);
+      assert.match(module.headers.get("cache-control") ?? "", /public.*immutable/);
+      assert.ok((await module.text()).length > 0);
+    }
+    const missing = await fetch(`${base}/assets/modules/0000000000000000/runtime.js`);
+    assert.equal(missing.status, 404, "missing versions must never receive another build's code");
+    assert.equal(missing.headers.get("cache-control"), "no-store");
 
     // An old process knows its embedded build even if the disk has been replaced.
     const embeddedCssHash = hashOf(EMBEDDED_WEB_ASSETS.stylesCss);
@@ -83,12 +100,18 @@ test("the shell transfers only HTML repeatedly and serves versioned, cacheable a
     assert.equal(await oldCss.text(), EMBEDDED_WEB_ASSETS.stylesCss);
     assert.match(oldCss.headers.get("cache-control") ?? "", /immutable/);
     const chunkHash = createHash("md5").update(EMBEDDED_WEB_ASSETS.aiTeamsJs).digest("hex").slice(0, 8);
+    const plushHash = createHash("md5").update(EMBEDDED_WEB_ASSETS.plushAvatarJs).digest("hex").slice(0, 8);
     const embeddedJs = EMBEDDED_WEB_ASSETS.scriptsJs
       .replace('"${wandConfigPath}"', JSON.stringify(configPath))
-      .replace("${aiTeamsChunkSrc}", `/assets/ai-teams.js?v=${chunkHash}`);
+      .replace("${aiTeamsChunkSrc}", `/assets/ai-teams.js?v=${chunkHash}`)
+      .replace("${plushAvatarChunkSrc}", `/assets/plush-avatar.js?v=${plushHash}`)
+      .replace("${browserModuleSrc}", `/assets/${EMBEDDED_WEB_ASSETS.browserModuleManifest.entry}`);
     const oldJs = await fetch(`${base}/assets/app.js?v=${hashOf(embeddedJs)}`);
     assert.equal(await oldJs.text(), embeddedJs);
     assert.match(oldJs.headers.get("cache-control") ?? "", /private.*immutable/);
+    const oldPlush = await fetch(`${base}/assets/plush-avatar.js?v=${plushHash}`);
+    assert.equal(await oldPlush.text(), EMBEDDED_WEB_ASSETS.plushAvatarJs);
+    assert.match(oldPlush.headers.get("cache-control") ?? "", /immutable/);
   } finally {
     await handle.close();
     rmSync(dir, { recursive: true, force: true });

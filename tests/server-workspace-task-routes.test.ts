@@ -134,9 +134,10 @@ test("task aggregation reuses queries without leaking truncated or filtered task
         workspaceId: workspace.id, workspaceTaskId: task.id,
       });
     }
-    const taskQueries = t.mock.method(storage, "listWorkspaceTasks");
-    // 侧栏只渲染会话摘要，路由走 slim 读（不解析 output/messages 大字段）。
-    const sessionQueries = t.mock.method(storage, "listSessionsByWorkspaceTaskSlim");
+    const taskQueries = t.mock.method(storage, "listAllWorkspaceTasks");
+    const sessionQueries = t.mock.method(storage, "loadSessionsSlim");
+    const perTaskQueries = t.mock.method(storage, "listSessionsByWorkspaceTaskSlim");
+    const fullReads = t.mock.method(storage, "getSession");
     for (const query of ["", `?workspaceId=${workspace.id}&limit=1&maxSessions=1`]) {
       taskQueries.mock.resetCalls();
       sessionQueries.mock.resetCalls();
@@ -148,10 +149,10 @@ test("task aggregation reuses queries without leaking truncated or filtered task
         standaloneSessions: unknown[];
       }>;
       assert.ok(groups.every((group) => group.standaloneSessions.length === 0));
-      assert.equal(taskQueries.mock.callCount(), 2);
-      assert.equal(sessionQueries.mock.callCount(), 3);
-      assert.equal(new Set(taskQueries.mock.calls.map((call) => call.arguments[0])).size, 2);
-      assert.equal(new Set(sessionQueries.mock.calls.map((call) => call.arguments[0])).size, 3);
+      assert.equal(taskQueries.mock.callCount(), 1, "one task batch, independent of directory count");
+      assert.equal(sessionQueries.mock.callCount(), 1, "one metadata batch, independent of task count");
+      assert.equal(perTaskQueries.mock.callCount(), 0);
+      assert.equal(fullReads.mock.callCount(), 0, "list never hydrates conversation payloads");
       if (query) {
         assert.equal(groups.length, 1);
         assert.equal(groups[0].workspaceId, workspace.id);
@@ -849,7 +850,11 @@ test("archiving a sidebar task keeps its terminals and worktree, and restoring b
     assert.ok(card);
 
     const archived = await fetch(`${baseUrl}/api/workspace-tasks/${task.id}/archive`, json({}, "POST"));
-    assert.equal(archived.status, 200);
+    assert.equal(archived.status, 409, "in-progress task remains visible");
+    assert.equal(storage.getWandTask(card.id)?.status, "doing");
+    storage.updateWandTask(card.id, { status: "done" });
+    const completedArchive = await fetch(`${baseUrl}/api/workspace-tasks/${task.id}/archive`, json({}, "POST"));
+    assert.equal(completedArchive.status, 200);
     // 软删除：卡片进归档、侧栏任务隐藏，终端 / worktree / 卡片绑定全部保留。
     assert.equal(storage.getWandTask(card!.id)?.status, "archived");
     assert.equal(storage.getWorkspaceTask(task.id)?.status, "done");

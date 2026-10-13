@@ -107,6 +107,7 @@ export interface WorkspaceSessionSummary {
   providerCliActive?: boolean;
   providerCliExitCode?: number | null;
   inFlight?: boolean;
+  canArchive?: boolean;
   employeeId?: string;
   employeeName?: string;
   employeeAvatar?: string;
@@ -159,6 +160,7 @@ interface WorkspaceTaskWorktree {
 }
 
 export interface WorkspaceTask {
+  canArchive?: boolean;
   id: string;
   workspaceId: string;
   name: string;

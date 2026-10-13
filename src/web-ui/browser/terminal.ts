@@ -1,11 +1,13 @@
+import { getWandTerminalTheme } from "../react/theme";
+import { wandThemeStore } from "../react/theme-preference";
 import { state } from "./state";
 import { browserEnvironment } from "./ui-store-bridge";
 import "./utils";
-import "./chat-render";
+import "./chat-render-loader";
 import { adjustTerminalScale } from "./file-browser";
 import { parseJsonResponse } from "../react/http-adapter";
 import { getErrorMessage } from "../../error-utils.js";
-import { focusInputBox, hasActiveTerminalSelection, installNativeInputImeGuard, lockNativeInputTerminalIme, shouldLockNativeInputTerminalIme } from "./input";
+import { keyFromKeyboardEvent, focusInputBox, hasActiveTerminalSelection, installNativeInputImeGuard, lockNativeInputTerminalIme, shouldLockNativeInputTerminalIme } from "./input";
 import { showToast } from "./notifications";
 import "./render";
 import { copyToClipboard, isStructuredSession } from "./session-engine";
@@ -23,6 +25,11 @@ import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
 import { cachedTerminalHistory, loadTerminalHistory, resetTerminalHistory } from "./terminal-history";
 import { ensureTerminalLibrary } from "../vendor-loader.js";
 import { mountBrowserButtons } from "./library-buttons";
+import { ptyInputState, mergePtyModifiers, modifiedPtySequence } from "../pty-input-state.js";
+
+wandThemeStore.subscribe(() => {
+  if (state.terminal) state.terminal.options.theme = getWandTerminalTheme();
+});
 
       export function saveWorkingDir(path: string) {
         state.workingDir = path;
@@ -550,12 +557,13 @@ import { mountBrowserButtons } from "./library-buttons";
         return true;
       }
 
-      function sendPtyInput(data: string) {
+      function sendPtyInput(data: string, shortcutKey?: string) {
         if (!state.selectedId || !data) return false;
         return sendPtySocketMessage({
           type: "pty_input",
           sessionId: state.selectedId,
           data: data,
+          shortcutKey,
           userInput: state.terminalInteractive === true
         });
       }
@@ -1040,12 +1048,7 @@ import { mountBrowserButtons } from "./library-buttons";
           fontSize: fontSize,
           lineHeight: 1.25,
           scrollback: 5000,
-          theme: {
-            background: "#17120f",
-            foreground: "#f4eee6",
-            cursor: "#d88d60",
-            selectionBackground: "rgba(216, 141, 96, 0.3)"
-          }
+          theme: getWandTerminalTheme()
         });
         fitAddon = new XTermLib.FitAddon();
         var unicodeAddon = new XTermLib.Unicode11Addon();
@@ -1065,6 +1068,7 @@ import { mountBrowserButtons } from "./library-buttons";
           }
           const restoreMeasurement = options?.prepare ? prepareTerminalMeasurement(container) : function() {};
           try {
+          term.options.theme = getWandTerminalTheme();
           term.open(termWrap);
           term.registerLinkProvider({
             provideLinks: function(lineNumber: number, callback: (links: any[] | undefined) => void) {
@@ -1100,8 +1104,16 @@ import { mountBrowserButtons } from "./library-buttons";
               callback(links.length ? links : undefined);
             },
           });
-          term.attachCustomKeyEventHandler(function() {
-            return state.terminalInteractive === true;
+          term.attachCustomKeyEventHandler(function(event: KeyboardEvent) {
+            if (!state.terminalInteractive || event.defaultPrevented) return false;
+            const held = ptyInputState.read(state.selectedId);
+            if (event.type !== "keydown" || event.isComposing || event.keyCode === 229 || event.metaKey
+              || (!held.ctrl && !held.shift) || (event.ctrlKey && event.key.toLowerCase() === "c" && hasActiveTerminalSelection())) return true;
+            const sequence = modifiedPtySequence(keyFromKeyboardEvent(event), mergePtyModifiers(state.selectedId, { ctrl:event.ctrlKey, shift:event.shiftKey, alt:event.altKey }));
+            if (sequence === null) return true;
+            event.preventDefault();
+            sendPtyInput(sequence, held.ctrl && event.key.length === 1 ? "ctrl_" + event.key.toLowerCase() : keyFromKeyboardEvent(event));
+            return false;
           });
           var wheelPagingState: TerminalWheelPagingState = {
             direction: 0,

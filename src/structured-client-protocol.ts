@@ -1,6 +1,6 @@
 import { withToolPreview } from "./tool-preview.js";
 import { asRecord, isStructuredImagePart } from "./structured-content.js";
-import { deriveSubagentDispatchMeta, PI_TODO_TOOL_NAME } from "./subagent-dispatch.js";
+import { deriveSubagentDispatchMeta, PI_TODO_TOOL_NAME } from "./subagent-meta.js";
 import { isDecisionToolCall, decisionCardSummary } from "./decision-tool.js";
 import type {
   ContentBlock,
@@ -59,7 +59,7 @@ function questionsFromInput(input: Record<string, unknown>): StructuredQuestion[
  * 历史 turn / 非 Claude provider 的子 Agent 工具调用没有 `__subagent` 盖章，
  * 按调用参数现场补一份，让「子 Agent」面板在所有端都拿得到同一份分组。
  *
- * 判据本体在 `src/subagent-dispatch.ts`：与 Web 前端共用同一份实现，
+ * 判据本体在 `src/subagent-meta.ts`：与 Web 前端共用同一份实现，
  * pi 的 `subagent` 以「有没有 `action`」区分管理/控制与真派发，不靠枚举参数形状。
  * 服务端盖的这份章就是 Android / iOS / macOS 的唯一判据来源，各端只消费不重判。
  */

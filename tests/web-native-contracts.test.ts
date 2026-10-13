@@ -356,6 +356,8 @@ test("subagent execution surfaces stay compact, avatar-free, and follow the newe
     'destroyOnHidden={false}',
     'classNames={{ header: "agent-run-process-summary" }}',
     'seed.style.getPropertyValue("--agent-color")',
+  ]);
+  includesAll("src/web-ui/react/chat/styles.ts", [
     '.agent-run-body[aria-hidden="true"]',
   ]);
   assert.doesNotMatch(
@@ -369,7 +371,7 @@ test("subagent execution surfaces stay compact, avatar-free, and follow the newe
     "Web subagent styling must not keep legacy subagent chrome",
   );
   assert.doesNotMatch(
-    source("src/web-ui/react/chat/presentation.tsx"),
+    source("src/web-ui/react/chat/styles.ts"),
     /\.agent-run-body\s*\{[^}]*height:\s*\d+px/s,
     "Web Agent Run body stays in the conversation flow instead of a fixed-height nested scroller",
   );
@@ -379,7 +381,7 @@ test("subagent execution surfaces stay compact, avatar-free, and follow the newe
     "Tool timeline rows must not spin: the compact summary owns the only running mark",
   );
   assert.match(
-    source("src/web-ui/react/chat/presentation.tsx"),
+    source("src/web-ui/react/chat/styles.ts"),
     /\.chat-activity\.is-command-running \.chat-process-summary-dot[\s\S]{0,320}?color:var\(--accent\)/,
     "The compact summary keeps its running mark whether or not the timeline is expanded",
   );

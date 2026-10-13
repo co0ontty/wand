@@ -1,7 +1,7 @@
 import type { PreferenceKey } from "./config.js";
 import type { WandConfig } from "./types.js";
 
-export const DEPLOYMENT_CONFIG_KEYS = ["host", "port", "https", "shell"] as const satisfies readonly (keyof WandConfig)[];
+export const DEPLOYMENT_CONFIG_KEYS = ["host", "port", "https", "shell", "browserExtensionIds", "trustProxy"] as const satisfies readonly (keyof WandConfig)[];
 export type DeploymentConfigKey = (typeof DEPLOYMENT_CONFIG_KEYS)[number];
 
 function cloneConfig(config: WandConfig): WandConfig {
@@ -32,7 +32,12 @@ export class RuntimeConfigState {
   }
 
   hasPendingRestart(candidate: WandConfig = this.desiredConfig): boolean {
-    return DEPLOYMENT_CONFIG_KEYS.some((key) => candidate[key] !== this.activeConfig[key]);
+    return DEPLOYMENT_CONFIG_KEYS.some((key) => {
+      if (key === "browserExtensionIds") {
+        return JSON.stringify(candidate.browserExtensionIds ?? []) !== JSON.stringify(this.activeConfig.browserExtensionIds ?? []);
+      }
+      return candidate[key] !== this.activeConfig[key];
+    });
   }
 
   activeDeployment(): Pick<WandConfig, DeploymentConfigKey> {
@@ -41,6 +46,8 @@ export class RuntimeConfigState {
       port: this.activeConfig.port,
       https: this.activeConfig.https,
       shell: this.activeConfig.shell,
+      browserExtensionIds: this.activeConfig.browserExtensionIds,
+      trustProxy: this.activeConfig.trustProxy,
     };
   }
 
@@ -50,6 +57,8 @@ export class RuntimeConfigState {
       port: candidate.port,
       https: candidate.https,
       shell: candidate.shell,
+      browserExtensionIds: candidate.browserExtensionIds,
+      trustProxy: candidate.trustProxy,
     };
   }
 }

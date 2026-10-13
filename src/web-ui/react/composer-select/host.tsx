@@ -16,6 +16,7 @@ export function ComposerSelectHost() {
       value={mount.value}
       options={mount.options}
       ariaLabel={mount.ariaLabel}
+      popupOwner={mount.scope === "dropdown" ? "composer-plus-popover" : "composer-main"}
       placeholder={mount.placeholder}
       displayValue={mount.displayValue}
       displayTitle={mount.displayTitle}

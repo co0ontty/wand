@@ -30,7 +30,9 @@ test("activity filter keeps a manual CLI in a blank terminal, not the idle shell
   assert.equal(group.tasks[0].sessions.length, 2, "filter is a read-only projection");
   const entries = [terminal, idle].map((session) => ({ session, group, taskName: null }));
   assert.deepEqual(filterRecentEntries(entries, { activeOnly: true }).map((e) => e.session.id), [terminal.id]);
-  assert.deepEqual(filterActiveGroups([{ ...group, tasks: [], standaloneSessions: [idle] }]), []);
+  const idleGroups = filterActiveGroups([{ ...group, tasks: [], standaloneSessions: [idle] }]);
+  assert.equal(idleGroups.length, 1, "the workspace root survives an empty activity result");
+  assert.deepEqual(idleGroups[0].standaloneSessions, []);
   assert.equal(filterActiveGroups([{ ...group, tasks: [], standaloneSessions: [idle] }], idle.id).length, 1);
 });
 

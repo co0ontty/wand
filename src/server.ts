@@ -3,7 +3,6 @@ import crypto from "node:crypto";
 import compression from "compression";
 import express, { NextFunction, Request, Response } from "express";
 import { existsSync, readFileSync } from "node:fs";
-import { stat } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { spawn } from "node:child_process";
@@ -13,13 +12,24 @@ import { WebSocketServer } from "ws";
 import {
   AuthService,
   BROWSER_ADMIN_PRINCIPAL,
-  CONNECTED_APP_PRINCIPAL,
   principalHasScope,
   readSessionCookie,
-  SESSION_COOKIE_HTTP,
-  SESSION_COOKIE_HTTPS,
-  SESSION_COOKIE_LEGACY,
 } from "./auth.js";
+import {
+  authenticateBearerAppToken,
+  createRequireAuth,
+  getEffectivePassword,
+  requireAdmin as requireAdminScope,
+  requireAdminOrSessionPreferences,
+  requireScope,
+  FORBIDDEN_SCOPE_ERROR,
+  clearSessionCookies,
+  issueSessionCookies,
+  browserAdminPrincipal,
+  connectedAppPrincipal,
+} from "./middleware/auth.js";
+import { createApiScopeMiddleware } from "./middleware/api-scope.js";
+import { createExtensionCors } from "./middleware/cors.js";
 import { type WandBuildInfo } from "./build-info.js";
 import { ensureCertificates } from "./cert.js";
 import {
@@ -30,7 +40,7 @@ import {
   writePreferenceToStorage,
 } from "./config.js";
 import { ModelCatalogService, type ModelRefreshOptions } from "./models.js";
-import { defaultModelGroupSelector } from "./model-groups.js";
+import { fallbackProviderModel, sessionEmployeeFields } from "./session-model.js";
 
 import { ProcessManager, ProcessEvent } from "./process-manager.js";
 import { SessionLogger } from "./session-logger.js";
@@ -43,7 +53,8 @@ import { SettingsWebAccess, registerSettingsWebAccessRoute } from "./settings-we
 import { DecisionService } from "./decision-service.js";
 import type { DecisionRuntimeAccess } from "./decision-runner.js";
 import { registerDecisionRoutes } from "./server-decision-routes.js";
-import { recordRecentPath, registerFileRoutes } from "./server-file-routes.js";
+import { registerFileRoutes } from "./server-file-routes.js";
+import { recordRecentPath } from "./recent-paths.js";
 import { registerLocalPreviewRoutes } from "./server-local-preview-routes.js";
 import { registerSettingsRoutes } from "./server-settings-routes.js";
 import { registerSpeechRoutes } from "./server-speech-routes.js";
@@ -57,21 +68,24 @@ import { SpeechService } from "./speech-service.js";
 import {
   appTokenLoginPayload,
   buildStructuredChatPersonaPayload,
-  isBrowserExtensionOrigin,
   resolveAppConnectCode,
-  resolveStructuredChatAvatarPath,
   verifyAppToken,
 } from "./server-app-connect.js";
-import { firstHeaderValue, sendRouteError } from "./server-request.js";
-import { inferProviderFromCommand, isSessionProvider } from "./session-provider.js";
+import { firstHeaderValue, resolveTrustProxy, sendRouteError } from "./server-request.js";
+import { registerAuthRoutes } from "./server-auth-routes.js";
+import { inferProviderFromCommand, isSessionProvider, providerCliCommand } from "./session-provider.js";
 import { registerVaultRoutes } from "./server-vault-routes.js";
 import { registerGithubRoutes } from "./server-github-routes.js";
 import { registerTaskRoutes } from "./server-task-routes.js";
+import { taskTitleService } from "./task-title-service.js";
 import { getGithubConnectorStatus } from "./github-connector.js";
 import { registerMissionRoutes } from "./server-mission-routes.js";
 import { Missions } from "./missions.js";
 import { AI_TEAM_CHAT_PREFIX, createAiTeamRunner } from "./ai-team-runner.js";
+import { ServerNotifier } from "./server-notifier.js";
 import { ConversationService } from "./conversation-service.js";
+import { ScheduledTaskService } from "./scheduled-task-service.js";
+import { registerScheduledTaskRoutes } from "./server-scheduled-task-routes.js";
 import type { ConversationSessionUpdate } from "./conversation-types.js";
 import { CONVERSATION_RELAY_PREFIX } from "./conversation-types.js";
 import { forwardConversationRelay, registerConversationRoutes } from "./server-conversation-routes.js";
@@ -89,10 +103,11 @@ import {
   registerPublicUpdateRoutes,
   ServerUpdateState,
 } from "./server-update-routes.js";
-import { parseSessionCreationOrigin, registerClaudeHistoryRoutes, registerSessionRoutes } from "./server-session-routes.js";
+import { registerClaudeHistoryRoutes, registerSessionRoutes } from "./server-session-routes.js";
+import { parseSessionCreationOrigin } from "./session-request.js";
 import { registerWorkspaceRoutes } from "./server-workspace-routes.js";
 import { resolveSessionCwd } from "./session-cwd.js";
-import { resolveWorkspaceIdForNewSession } from "./workspace-binding.js";
+import { backfillSessionWorkspaces, resolveWorkspaceIdForNewSession } from "./workspace-binding.js";
 import { getErrorMessage } from "./error-utils.js";
 import { asyncRoute, jsonErrorHandler } from "./express-async.js";
 import {
@@ -120,10 +135,7 @@ import { resolveDatabasePath, WandStorage, type AuthPrincipal, type AuthScope } 
 import { deepRepairRuntimePath, formatPathRepairSummary, repairRuntimePath, type PathRepairResult } from "./path-repair.js";
 import { DistributionManager } from "./distribution-manager.js";
 import { isLogBusActive, wandTuiLog } from "./tui/log-bus.js";
-import { EMBEDDED_WEB_ASSETS, type EmbeddedVendorAssetPath } from "./web-ui/embedded-assets.js";
-import { renderApp } from "./web-ui/index.js";
-import { getAiTeamsChunk, getScriptAsset } from "./web-ui/scripts.js";
-import { getStylesAsset } from "./web-ui/styles.js";
+import { registerAssetRoutes } from "./server-asset-routes.js";
 import { WsBroadcastManager } from "./ws-broadcast.js";
 import { TerminalDaemonClient } from "./terminal-daemon-client.js";
 import { createUpgradeAwareTerminalHost } from "./render-host.js";
@@ -158,17 +170,6 @@ const PKG_VERSION = PKG_JSON.version;
 const PKG_NODE_REQ = PKG_JSON.engines?.node ?? ">=24.21.0";
 const PKG_REPO_URL = "https://github.com/co0ontty/wand";
 
-/** 结构化聊天头像允许的图片类型；未知扩展名回 415。 */
-const AVATAR_CONTENT_TYPES: Record<string, string> = {
-  ".svg": "image/svg+xml",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".webp": "image/webp",
-  ".gif": "image/gif",
-  ".avif": "image/avif",
-};
-
 // ── Update check cache ──
 
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -186,7 +187,9 @@ async function checkLatestPackageVersion(channel: UpdateChannel, forceRefresh = 
   if (!forceRefresh && cached && now - cached.timestamp < CACHE_TTL_MS) {
     return cached.info;
   }
-  const info = await checkPackageUpdateAsync(PKG_VERSION, channel);
+  // The immutable running build is also what the UI reports. Shared package metadata may
+  // belong to a different installer; it must not make a local Beta look like an older stable.
+  const info = await checkPackageUpdateAsync(DISPLAY_VERSION, channel);
   if (info.latest) {
     packageUpdateCache.set(channel, { info, timestamp: now });
   }
@@ -215,101 +218,6 @@ function readBuildInfo(): WandBuildInfo {
 const BUILD_INFO = readBuildInfo();
 const DISPLAY_VERSION = BUILD_INFO.version || PKG_VERSION;
 const SERVER_INSTANCE_ID = crypto.randomUUID();
-
-// ── Auth helpers ──
-
-const requestPrincipals = new WeakMap<Request, AuthPrincipal>();
-
-function buildRequireAuth(useHttps: boolean, storage: WandStorage, config: WandConfig, authService: AuthService, settingsAccess: SettingsWebAccess) {
-  return function requireAuth(req: Request, res: Response, next: NextFunction): void {
-    const sessionToken = readSessionCookie(req, useHttps);
-    const sessionPrincipal = authService.authenticateSession(sessionToken);
-    const principal = (sessionPrincipal && principalHasScope(sessionPrincipal, "session-preferences") &&
-      settingsAccess.accepts(sessionToken, req.headers.cookie) ? BROWSER_ADMIN_PRINCIPAL : sessionPrincipal)
-      ?? authenticateBearerAppToken(req, storage, config);
-    if (!principal) {
-      res.status(401).json({ error: "未授权，请先登录。" });
-      return;
-    }
-    requestPrincipals.set(req, principal);
-    next();
-  };
-}
-
-function buildRequireScope(scope: AuthScope) {
-  return function requireScope(req: Request, res: Response, next: NextFunction): void {
-    const principal = requestPrincipals.get(req);
-    if (!principal) {
-      res.status(401).json({ error: "未授权，请先登录。" });
-      return;
-    }
-    if (!principalHasScope(principal, scope)) {
-      res.status(403).json({ error: "当前连接没有执行此操作的权限。" });
-      return;
-    }
-    next();
-  };
-}
-
-const CONNECTED_APP_PREFERENCE_KEYS = new Set([
-  "defaultMode",
-  "defaultModel",
-  "defaultCodexModel",
-  "defaultOpenCodeModel",
-  "defaultGrokModel",
-  "defaultQoderModel",
-  "defaultModels",
-  "defaultThinkingEffort",
-  "defaultProvider",
-  "defaultSessionKind",
-  "defaultEngine",
-  "defaultTaskWorktree",
-]);
-
-function requireAdminOrSessionPreferences(req: Request, res: Response, next: NextFunction): void {
-  const principal = requestPrincipals.get(req);
-  if (!principal) {
-    res.status(401).json({ error: "未授权，请先登录。" });
-    return;
-  }
-  if (principalHasScope(principal, "admin")) {
-    next();
-    return;
-  }
-  const body = req.body && typeof req.body === "object" && !Array.isArray(req.body)
-    ? req.body as Record<string, unknown>
-    : {};
-  const keys = Object.keys(body);
-  if (!principalHasScope(principal, "session-preferences")
-    || keys.length === 0
-    || keys.some((key) => !CONNECTED_APP_PREFERENCE_KEYS.has(key))) {
-    res.status(403).json({ error: "当前连接只能修改新会话默认偏好。" });
-    return;
-  }
-  next();
-}
-
-function getEffectivePassword(storage: WandStorage, config: WandConfig): string {
-  return storage.getPassword() ?? config.password;
-}
-
-function authenticateBearerAppToken(
-  req: { headers: { authorization?: string | string[] } },
-  storage: WandStorage,
-  config: WandConfig,
-): AuthPrincipal | null {
-  const header = firstHeaderValue(req.headers.authorization);
-  if (!header?.startsWith("Bearer ")) return null;
-  const token = header.slice("Bearer ".length).trim();
-  if (!token) return null;
-  try {
-    return verifyAppToken(token, getEffectivePassword(storage, config), config.appSecret ?? "")
-      ? { ...CONNECTED_APP_PRINCIPAL, scopes: [...CONNECTED_APP_PRINCIPAL.scopes] }
-      : null;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * 解析 PTY 会话的 provider：显式 `provider` 字段优先，其次按命令前缀识别；
@@ -428,8 +336,15 @@ export async function startServer(
   const app = express();
   let shuttingDown = false;
   const testMode = process.env.WAND_TEST_MODE === "1";
-  app.set("trust proxy", "loopback, 172.16.0.0/12");
+  // Explicit and bounded: login/bearer limits key on req.ip, so forwarded headers are only
+  // honoured for the configured proxy hops (see resolveTrustProxy).
+  app.set("trust proxy", resolveTrustProxy(config.trustProxy));
   const storage = new WandStorage(resolveDatabasePath(configPath));
+  if (!storage.getConfigValue("migration:session-workspaces:v1")) {
+    backfillSessionWorkspaces(storage);
+    storage.setConfigValue("migration:session-workspaces:v1", "done");
+  }
+  const taskTitles = taskTitleService(storage, { config });
   const runtimeConfig = new RuntimeConfigState(config);
   const openRouter = new OpenRouterFreeModelsService(storage, options.openRouterFetch);
   const speechPolisher = new SpeechPolisherService({ config, free: openRouter,
@@ -509,7 +424,7 @@ export async function startServer(
   let decisionRuntime: DecisionRuntimeAccess | null = null;
   let autoAssignEvaluate: DecisionRuntimeAccess["evaluate"];
   const processes = new ProcessManager(config, storage, configDir, terminalHost,
-    { resolveDecisionEvaluate: () => autoAssignEvaluate });
+    { resolveDecisionEvaluate: () => autoAssignEvaluate, free: openRouter });
   const structuredLogger = new SessionLogger(configDir, config.shortcutLogMaxBytes);
   // Production startup provides a daemon-backed host for structured CLI runs
   // even when Render owns every PTY. In-process hosts are for test injection.
@@ -538,14 +453,9 @@ export async function startServer(
   let runTaskRetentionSweep = (): RetentionResult => ({
     archivedSessions: 0, purgedSessions: 0, archivedTasks: 0, purgedTasks: 0, purgedTeamRuns: 0,
   });
-  // wsManager 在后面才建：团队运行的变更通知经由这个转发口，接好之前静默丢弃。
-  let notifyAiTeamRun = (_data:
-    | { kind: "ai-team-run"; runId: string; taskId: string }
-    | { kind: "ai-team-definition"; teamId: string }
-    | { kind: "silicon-employee-definition"; employeeId: string }): void => {};
-  // 运行中步骤的 live 文本推送（§4.9），同样走系统通知，接好之前静默丢弃。
-  let notifyAiTeamRunLive = (_update: AiTeamLiveUpdate): void => {};
-  let notifyConversationSession = (_update: ConversationSessionUpdate): void => {};
+  // WebSocket 在后面才建：所有系统通知经同一个 Notifier，接好之前静默丢弃。
+  const notifier = new ServerNotifier();
+  const notifyAiTeamRun = notifier.aiTeamChanged;
   // 团队降级的 model-unknown 事前比对只看这份已发现的清单；没刷新过就是空，判定方向是放行。
   const aiTeamModelIds = (provider: SessionProvider): string[] => {
     const cache = modelCatalog.snapshot();
@@ -568,16 +478,18 @@ export async function startServer(
       conversations?.importRun(run);
       notifyAiTeamRun({ kind: "ai-team-run", runId: run.id, taskId: run.taskId });
     },
-    notifyLive: (update) => notifyAiTeamRunLive(update),
+    notifyLive: notifier.aiTeamLive,
     models: aiTeamModelIds,
     chatHistoryTurns: id => conversations?.history(id) ?? [],
     // 成员名单里的模型名：`default` 哨兵换成服务端为该 CLI 配置的默认模型。
     defaultModelOf: (provider) => getDefaultModelForProvider(config, provider),
   });
   const conversationService = new ConversationService({ storage, config, structured: structuredSessions, runner: aiTeams,
-    notifySession: update => notifyConversationSession(update), deleteSession: id => { sessionRegistry.deleteWithProviderHistory(id); } });
+    notifySession: notifier.conversationSession, deleteSession: id => { sessionRegistry.deleteWithProviderHistory(id); } });
   conversations = conversationService;
   conversationService.migrateExistingChats();
+  const scheduledTasks = new ScheduledTaskService({ storage, conversations: conversationService,
+    getSession: id => sessionRegistry.get(id), defaultCwd: () => config.defaultCwd });
   for (const prefix of [CONVERSATION_RELAY_PREFIX, AI_TEAM_CHAT_PREFIX]) {
     structuredSessions.registerRelay(prefix, (sessionId, input) => forwardConversationRelay(conversationService, sessionId, input));
   }
@@ -610,11 +522,10 @@ export async function startServer(
   };
   const useHttps = config.https === true;
   const protocol = useHttps ? "https" : "http";
-  const requireAuth = buildRequireAuth(useHttps, storage, config, authService, settingsAccess);
-  const requireAdmin = buildRequireScope("admin");
-  const requireSessions = buildRequireScope("sessions");
-  const requireFiles = buildRequireScope("files");
-  const requirePasswordVault = buildRequireScope("password-vault");
+  const requireAuth = createRequireAuth({ useHttps, storage, config, authService, settingsAccess });
+  const requireAdmin = requireAdminScope;
+  const requireSessions = requireScope("sessions");
+  const requireFiles = requireScope("files");
   // Local preview traffic may contain arbitrary POST bodies. Mounting it before
   // Express body parsers keeps uploads, SSE and non-JSON requests streamable.
   registerLocalPreviewRoutes(app, { requireAuth, requireFiles });
@@ -634,205 +545,19 @@ export async function startServer(
     res.setHeader("Connection", "close");
     res.status(503).json({ error: "Server is shutting down." });
   });
-  app.use((req, res, next) => {
-    const origin = firstHeaderValue(req.headers.origin);
-    if (origin && isBrowserExtensionOrigin(origin)) {
-      res.setHeader("Access-Control-Allow-Origin", origin);
-      res.setHeader("Access-Control-Allow-Credentials", "true");
-      res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
-      res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-      res.setHeader("Vary", "Origin");
-    }
-    if (req.method === "OPTIONS" && origin && isBrowserExtensionOrigin(origin)) {
-      res.status(204).end();
-      return;
-    }
-    next();
-  });
+  app.use(createExtensionCors(config.browserExtensionIds));
 
-  const requestedHash = (req: Request): string | undefined =>
-    typeof req.query.v === "string" ? req.query.v : undefined;
-  const setAssetCache = (req: Request, res: Response, hash: string, visibility: "public" | "private"): void => {
-    // Never cache new bytes under an old URL after a package replacement. An old
-    // process can still serve its embedded version; a new process serves current
-    // bytes without caching the mismatch so an in-flight page remains usable.
-    res.setHeader("Cache-Control", requestedHash(req) === hash
-      ? `${visibility}, max-age=31536000, immutable`
-      : "no-store");
-  };
-  const sendEmbeddedVendorAsset = (assetPath: EmbeddedVendorAssetPath, req: Request, res: Response): void => {
-    const asset = EMBEDDED_WEB_ASSETS.vendor[assetPath];
-    setAssetCache(req, res, asset.hash, "public");
-    res.type(asset.contentType).send(asset.content);
-  };
-  app.get("/vendor/xterm/xterm.bundle.js", (req, res) => sendEmbeddedVendorAsset("/vendor/xterm/xterm.bundle.js", req, res));
-  app.get("/vendor/xterm/xterm.css", (req, res) => sendEmbeddedVendorAsset("/vendor/xterm/xterm.css", req, res));
-  app.get("/vendor/qrcode/qrcode.bundle.js", (req, res) => sendEmbeddedVendorAsset("/vendor/qrcode/qrcode.bundle.js", req, res));
-  app.get("/assets/app.css", (req, res) => {
-    const asset = getStylesAsset(requestedHash(req));
-    setAssetCache(req, res, asset.hash, "public");
-    res.type("text/css").send(asset.content);
-  });
-  app.get("/assets/app.js", (req, res) => {
-    const asset = getScriptAsset(configPath, requestedHash(req));
-    setAssetCache(req, res, asset.hash, "private");
-    res.type("application/javascript").send(asset.content);
-  });
-  app.get("/assets/ai-teams.js", (req, res) => {
-    const chunk = getAiTeamsChunk(requestedHash(req));
-    setAssetCache(req, res, chunk.hash, "public");
-    res.type("application/javascript").send(chunk.content);
-  });
+  registerAssetRoutes(app, { configPath, config, requireAuth, requireSessions });
 
-  // ── Web UI endpoints ──
 
-  app.get(["/", "/settings"], (req, res) => {
-    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-    res.type("html").send(renderApp(configPath, /^\/settings\/?$/.test(req.path) ? "settings" : "console",
-      req.query.client === "app" ? "client" : "browser"));
-  });
-
-  app.get("/api/structured-chat-avatar/:role", requireAuth, asyncRoute(async (req, res) => {
-    const role = req.params.role === "user" || req.params.role === "assistant"
-      ? req.params.role
-      : null;
-    if (!role) {
-      res.status(404).end();
-      return;
-    }
-
-    const resolvedPath = resolveStructuredChatAvatarPath(configPath, config, role);
-    if (!resolvedPath) {
-      res.status(404).end();
-      return;
-    }
-
-    try {
-      const fileStat = await stat(resolvedPath);
-      if (!fileStat.isFile()) {
-        res.status(404).end();
-        return;
-      }
-
-      const contentType = AVATAR_CONTENT_TYPES[path.extname(resolvedPath).toLowerCase()];
-      if (!contentType) {
-        res.status(415).json({ error: "不支持的头像格式。" });
-        return;
-      }
-
-      res.setHeader("X-Content-Type-Options", "nosniff");
-      res.type(contentType).sendFile(resolvedPath);
-    } catch {
-      res.status(404).end();
-    }
-  }));
-
-  // ── Auth routes ──
-
-  app.post("/api/login", (req, res) => {
-    const clientIp = req.ip || req.socket.remoteAddress || "unknown";
-    const { password, appToken, client } = req.body as { password?: string; appToken?: string; client?: string };
-    const effectivePassword = getEffectivePassword(storage, config);
-
-    // App token login is intentionally restricted even though the token remains
-    // password-derived for compatibility with existing connect codes.
-    // A stale token gets 401 without feeding the counter: the client cannot fix it by
-    // retrying, and one device holding one used to lock out every user behind the same
-    // reverse proxy IP. An active lock still gates unverified attempts.
-    let principal: AuthPrincipal | null = null;
-    if (appToken) {
-      try {
-        if (verifyAppToken(appToken, effectivePassword, config.appSecret ?? "")) {
-          principal = { ...CONNECTED_APP_PRINCIPAL, scopes: [...CONNECTED_APP_PRINCIPAL.scopes] };
-        }
-      } catch {
-        principal = null;
-      }
-    }
-
-    if (!principal) {
-      const lock = checkPasswordRateLimit(clientIp);
-      if (lock) {
-        const minutes = Math.max(1, Math.ceil(lock.retryAfter / 60));
-        res.setHeader("Retry-After", String(lock.retryAfter));
-        res
-          .status(429)
-          .json({ error: `登录尝试次数过多，请在约 ${minutes} 分钟后再试。`, retryAfter: lock.retryAfter });
-        return;
-      }
-    }
-
-    if (!principal) {
-      if (password !== effectivePassword) {
-        if (!appToken) recordFailedPassword(clientIp);
-        res.status(401).json({ error: "密码错误，请重试。" });
-        return;
-      }
-      principal = { ...BROWSER_ADMIN_PRINCIPAL, scopes: [...BROWSER_ADMIN_PRINCIPAL.scopes] };
-    }
-
-    resetPasswordRateLimit(clientIp);
-    const token = authService.createSession(principal);
-    const cookieOpts = {
-      httpOnly: true,
-      sameSite: "strict" as const,
-      path: "/",
-      maxAge: 1000 * 60 * 60 * 12,
-    };
-    // 主 cookie：按 scheme 分名字，避免被旧的同名 Secure cookie 阻挡覆盖。
-    // 兼容 cookie `wand_session`：老 macOS APP（WandAuth.swift 写死了找 `wand_session`）需要这份才能登录。
-    //   - HTTPS 模式：legacy 也带 Secure，浏览器与 APP 都能用
-    //   - HTTP 模式：legacy 不带 Secure。浏览器场景下若之前留有同名 Secure cookie 会被 Strict Secure
-    //     Cookies 拦截（无害噪音，主 cookie `wand_session_local` 兜得住）；APP 走 native cookie API
-    //     不受这条策略约束，能正确拿到
-    if (useHttps) {
-      res.cookie(SESSION_COOKIE_HTTPS, token, { ...cookieOpts, secure: true });
-      res.cookie(SESSION_COOKIE_LEGACY, token, { ...cookieOpts, secure: true });
-    } else {
-      res.cookie(SESSION_COOKIE_HTTP, token, { ...cookieOpts, secure: false });
-      res.cookie(SESSION_COOKIE_LEGACY, token, { ...cookieOpts, secure: false });
-    }
-    res.json({
-      ok: true,
-      principal,
-      ...(client === "browser-extension"
-        ? appTokenLoginPayload(req, config, useHttps, getEffectivePassword(storage, config))
-        : {}),
-    });
-  });
-
-  app.post("/api/logout", (req, res) => {
-    authService.revokeSession(readSessionCookie(req, useHttps));
-    // 全部名字都清一遍，避免遗留 cookie 在下次同源访问时被回放。
-    for (const name of [SESSION_COOKIE_HTTPS, SESSION_COOKIE_HTTP, SESSION_COOKIE_LEGACY]) {
-      res.clearCookie(name, { path: "/" });
-    }
-    res.json({ ok: true });
-  });
-
-  app.post("/api/set-password", requireAuth, requireAdmin, (req, res) => {
-    const { password } = req.body as { password?: string };
-    if (!password || password.length < 6) {
-      res.status(400).json({ error: "密码长度至少为 6 个字符。" });
-      return;
-    }
-    storage.setPassword(password);
-    authService.revokeAllSessions();
-    disconnectAuthenticatedSockets();
-    for (const name of [SESSION_COOKIE_HTTPS, SESSION_COOKIE_HTTP, SESSION_COOKIE_LEGACY]) {
-      res.clearCookie(name, { path: "/" });
-    }
-    res.json({ ok: true, reauthenticationRequired: true });
+  registerAuthRoutes(app, {
+    storage, config, authService, useHttps, requireAuth,
+    disconnectAuthenticatedSockets: () => disconnectAuthenticatedSockets(),
   });
 
   // ── Android APK update & download (no auth required) ──
 
   registerPublicUpdateRoutes(app, distributionManager, config.publicOrigin);
-
-  // Public probe so the unauthenticated browser does not log a 401 on /api/config
-  app.get("/api/session-check", (req, res) => {
-    res.json({ authed: authService.validateSession(readSessionCookie(req, useHttps)) });
-  });
 
   registerSettingsWebAccessRoute(app, {
     requireAuth, useHttps, access: settingsAccess,
@@ -850,63 +575,16 @@ export async function startServer(
   app.use("/api", requireAuth);
   registerDaemonMaintenanceRoutes(app, { requireAdmin, maintenance: daemonMaintenance,
     canForceUpdate: req => {
-      const principal = requestPrincipals.get(req);
-      return !!principal && principalHasScope(principal, "admin");
+      return !!req.principal && principalHasScope(req.principal, "admin");
     },
     log: error => wandError("底层组件强制更新未完成", getErrorMessage(error)) });
 
-  // Connected apps receive only the route families used by native clients and
-  // the browser extension. Browser-admin sessions implicitly satisfy all scopes.
-  app.use([
-    "/api/config",
-    "/api/models",
-    "/api/sessions",
-    "/api/session-list",
-    "/api/session-directories",
-    "/api/structured-sessions",
-    "/api/conversations",
-    "/api/commands",
-    "/api/user-memory",
-    "/api/claude-history",
-    "/api/codex-history",
-    "/api/opencode-history",
-    "/api/qoder-history",
-    "/api/grok-history",
-    "/api/pi-history",
-    "/api/claude-sessions",
-    "/api/codex-sessions",
-    "/api/opencode-sessions",
-    "/api/qoder-sessions",
-    "/api/grok-sessions",
-    "/api/pi-sessions",
-    "/api/optimize-prompt",
-    "/api/inbox",
-    "/api/missions",
-    "/api/workspaces",
-    "/api/workspace-tasks",
-  ], requireSessions);
-  app.use([
-    "/api/directory",
-    "/api/folders",
-    "/api/path-suggestions",
-    "/api/recent-paths",
-    "/api/file-preview",
-    "/api/file-raw",
-    "/api/file-write",
-    "/api/file-create",
-    "/api/dir-create",
-    "/api/file-rename",
-    "/api/file-delete",
-    "/api/quick-paths",
-    "/api/validate-path",
-    "/api/file-search",
-    "/api/local-file",
-  ], requireFiles);
-  app.use("/api/browser-extension", requirePasswordVault);
-  app.use("/api/silicon-employees/:employeeId/knowledge", requireSessions);
+  // Every /api family declares its scope in src/middleware/api-scope.ts; unlisted
+  // paths are admin-only for connected apps (default-deny).
+  app.use("/api", createApiScopeMiddleware());
   app.use(userMemoryOperationLog(storage));
   const userMemory = new UserMemoryService({
-    storage, config,
+    storage, config, free: openRouter,
     notifyChanged: (employeeId) => notifyAiTeamRun({ kind: "silicon-employee-definition", employeeId }),
   });
   registerUserMemoryRoutes(app, {
@@ -919,7 +597,6 @@ export async function startServer(
   app.get("/api/config", asyncRoute(async (req, res) => {
     const structuredChatPersona = await buildStructuredChatPersonaPayload(configPath, config);
     const defaultModels = getProviderDefaultModels(config);
-    const principal = requestPrincipals.get(req);
     res.json({
       host: config.host,
       port: config.port,
@@ -951,12 +628,12 @@ export async function startServer(
       // 把语言偏好暴露给前端做 UI 文案 i18n。后端原本只用它给 Claude 拼 system prompt，
       // 前端没收到 → "SUBAGENT" / "Read" 这些 UI label 一直是英文，跟用户设的中文不匹配。
       language: config.language ?? "",
-      updateAvailable: cachedUpdateInfo?.updateAvailable ?? false,
-      latestVersion: cachedUpdateInfo?.latest ?? null,
+      updateAvailable: cachedUpdateInfo?.channel === getUpdateChannel() ? cachedUpdateInfo.updateAvailable : false,
+      latestVersion: cachedUpdateInfo?.channel === getUpdateChannel() ? cachedUpdateInfo.latest : null,
       updateChannel: getUpdateChannel(),
       currentVersion: DISPLAY_VERSION,
       packageVersion: PKG_VERSION,
-      canManageSettings: !!principal && principalHasScope(principal, "admin"),
+      canManageSettings: !!req.principal && principalHasScope(req.principal, "admin"),
       serverInstanceId: SERVER_INSTANCE_ID,
     });
   }));
@@ -979,7 +656,7 @@ export async function startServer(
     requireAdminOrSessionPreferences,
     packageInfo: { version: DISPLAY_VERSION, name: PKG_NAME, nodeVersion: PKG_NODE_REQ, repoUrl: PKG_REPO_URL },
     buildInfo: BUILD_INFO,
-    getCachedUpdateInfo: () => cachedUpdateInfo,
+    getCachedUpdateInfo: () => cachedUpdateInfo?.channel === getUpdateChannel() ? cachedUpdateInfo : null,
     getUpdateChannel,
     getDistributionSettings,
     getGithubConnector: () => getGithubConnectorStatus(storage),
@@ -992,7 +669,7 @@ export async function startServer(
 
   registerGithubRoutes(app, { storage, requireAdmin, sessions: sessionRegistry });
   // 任务管理与 Missions 一样只需登录：原生 connected-app 也要能列/建/派发。
-  registerTaskRoutes(app, { storage, sessions: sessionRegistry, structured: structuredSessions, processes, config, aiTeams });
+  registerTaskRoutes(app, { storage, sessions: sessionRegistry, structured: structuredSessions, processes, config, aiTeams, free: openRouter });
   registerAiTeamRoutes(app, {
     storage,
     runner: aiTeams,
@@ -1003,10 +680,12 @@ export async function startServer(
   registerSiliconEmployeeRoutes(app, {
     storage,
     config,
+    free: openRouter,
     notifyEmployeeChanged: (employeeId) => notifyAiTeamRun({ kind: "silicon-employee-definition", employeeId }),
   });
   registerAttentionRoutes(app, { sessions: sessionRegistry, runner: aiTeams });
   registerConversationRoutes(app, conversationService);
+  registerScheduledTaskRoutes(app, scheduledTasks);
 
   registerAdminUpdateRoutes(app, {
     storage,
@@ -1023,6 +702,9 @@ export async function startServer(
     emitSystemNotification: (data) => {
       wsManager.emitEvent({ type: "notification", sessionId: "__system__", data });
     },
+    requestUpdateCheck: () => {
+      if (updateChecksEnabled) void performAutoUpdate({ manual: true }).catch(() => {});
+    },
   });
 
   // ── Global npm install (with leftover cleanup + ENOTEMPTY fallback) ──
@@ -1035,10 +717,19 @@ export async function startServer(
     });
   }
 
-  registerSessionRoutes(app, processes, structuredSessions, storage, config.defaultMode, config, sessionRegistry, (cwd) => {
-    recordRecentPath(storage, cwd);
-  }, (event) => wsManager.emitEvent(event), decisionExpert);
-  registerClaudeHistoryRoutes(app, processes, storage);
+  registerSessionRoutes(app, {
+    processes,
+    structured: structuredSessions,
+    storage,
+    defaultMode: config.defaultMode,
+    config,
+    sessions: sessionRegistry,
+    onSessionCreated: (cwd) => recordRecentPath(storage, cwd),
+    onCompletionViewed: (event) => wsManager.emitEvent(event),
+    decisions: decisionExpert,
+    free: openRouter,
+  });
+  registerClaudeHistoryRoutes(app, { processes, storage });
   registerWorkspaceRoutes(app, storage, sessionRegistry, { config });
   registerMissionRoutes(app, missions);
   registerUploadRoutes(app, sessionRegistry);
@@ -1053,7 +744,7 @@ export async function startServer(
     if (typeof body.sessionId === "string" && body.sessionId.length > 0) {
       const snapshot = sessionRegistry.getLatest(body.sessionId);
       if (snapshot?.cwd) cwd = snapshot.cwd;
-      if (snapshot) ai = resolveSystemAiContext(snapshot, config, storage.getSystemSiliconEmployee());
+      if (snapshot) ai = resolveSystemAiContext(snapshot, config, storage.getSystemSiliconEmployee(), openRouter);
     }
     if (!ai) {
       const defaultSession = {
@@ -1064,7 +755,7 @@ export async function startServer(
         selectedModel: null,
         thinkingEffort: config.defaultThinkingEffort,
       };
-      ai = resolveSystemAiContext(defaultSession, config, storage.getSystemSiliconEmployee());
+      ai = resolveSystemAiContext(defaultSession, config, storage.getSystemSiliconEmployee(), openRouter);
     }
     try {
       const optimized = await optimizePrompt(text, config.language ?? "", cwd, ai);
@@ -1092,6 +783,20 @@ export async function startServer(
       return;
     }
     const interactiveShell = body.shell === true;
+    // 连接应用只能启动 Provider CLI 会话（provider 字段 + 该 CLI 的标准可执行名）。
+    // 任意自定义命令字符串需要 admin。shell:true 是原生客户端“空白终端”（服务端配置的
+    // 登录 shell，不接受外部命令）：为保持现有客户端可用而保留，见 AGENTS 与报告。
+    if (!principalHasScope(req.principal!, "admin") && !interactiveShell) {
+      // Provider CLI only: the executable must be the provider's own CLI name (old clients send
+      // the provider id as the command, so an absent provider is inferred from it).
+      const rawCommand = typeof body.command === "string" ? body.command.trim() : "";
+      const provider = isSessionProvider(body.provider) ? body.provider : inferProviderFromCommand(rawCommand);
+      const isProviderCli = !!provider && (!rawCommand || rawCommand === provider || rawCommand === providerCliCommand(provider));
+      if (!isProviderCli) {
+        res.status(403).json({ error: "当前连接只能启动已配置的 CLI 工具，不能执行自定义命令。", code: "forbidden" });
+        return;
+      }
+    }
     if (!interactiveShell && !body.command?.trim()) {
       res.status(400).json({ error: "请输入要执行的命令。" });
       return;
@@ -1113,9 +818,7 @@ export async function startServer(
       const command = provider === "qoder" && rawCommand === "qoder"
         ? "qodercli"
         : rawCommand;
-      const effectiveModel = provider
-        ? rawModel || defaultModelGroupSelector(config.modelGroups, provider, getDefaultModelForProvider(config, provider)) || getDefaultModelForProvider(config, provider) || undefined
-        : undefined;
+      const effectiveModel = provider ? rawModel || fallbackProviderModel(config, provider) : undefined;
       const reqCols = typeof body.cols === "number" && Number.isFinite(body.cols) ? body.cols : undefined;
       const reqRows = typeof body.rows === "number" && Number.isFinite(body.rows) ? body.rows : undefined;
       const sessionCwd = resolveSessionCwd(body.cwd, config.defaultCwd);
@@ -1145,9 +848,7 @@ export async function startServer(
               rows: reqRows,
               thinkingEffort: body.thinkingEffort ?? config.defaultThinkingEffort,
               systemPrompt: body.systemPrompt?.trim() || role?.prompt,
-              employeeId: role?.id,
-              employeeName: role?.name,
-              employeeAvatar: role?.avatar,
+              ...sessionEmployeeFields(role),
               workspaceId,
               workspaceTaskId: body.workspaceTaskId,
               ...origin,
@@ -1244,29 +945,22 @@ export async function startServer(
 
   // Wire process events to WebSocket broadcast
   processes.on("process", (event: ProcessEvent) => {
+    taskTitles.ingest(event);
     sessionCompletions.ingest(event);
     missions.ingest(event);
     aiTeams.ingest(event);
     wsManager.emitEvent(event);
   });
   structuredSessions.setEventEmitter((event) => {
+    taskTitles.ingest(event);
     conversationService.ingestSessionEvent(event);
+    scheduledTasks.ingestSessionEvent(event);
     sessionCompletions.ingest(event);
     missions.ingest(event);
     aiTeams.ingest(event);
     wsManager.emitEvent(event);
   });
-  notifyAiTeamRun = (data) => {
-    wsManager.emitEvent({ type: "notification", sessionId: "__system__", data });
-  };
-  notifyAiTeamRunLive = (update) => {
-    wsManager.emitEvent({
-      type: "notification", sessionId: "__system__", data: { kind: "ai-team-step-live", ...update },
-    });
-  };
-  notifyConversationSession = update => {
-    wsManager.emitEvent({ type: "notification", sessionId: "__system__", data: { kind: "conversation-session-preview", ...update } });
-  };
+  notifier.attach((event) => wsManager.emitEvent(event));
   // Re-attach structured CLI runs that kept going inside terminald while the
   // previous web process was down; fire-and-forget, failures are logged inside.
   void structuredSessions.recoverDetachedRuns();
@@ -1347,8 +1041,9 @@ export async function startServer(
   const collectedUrls: ServerUrl[] = [];
 
   await new Promise<void>((resolve, reject) => {
-    const cleanupFailedListen = (): void => {
+    const cleanupFailedListen = async (): Promise<void> => {
       shuttingDown = true;
+      await scheduledTasks.dispose();
       decisions.dispose();
       openRouter.dispose();
       try { processes.dispose(); } catch { /* noop */ }
@@ -1357,7 +1052,9 @@ export async function startServer(
       speech.dispose();
       speechPolisher.dispose();
       try { structuredSessions.dispose(); } catch { /* noop */ }
-      aiTeams.dispose();
+      taskTitles.dispose();
+      modelCatalog.dispose();
+      await aiTeams.dispose();
       try { structuredHosts.rustClient?.disconnect(); } catch { /* noop */ }
       try { structuredLogger.dispose(); } catch { /* noop */ }
       try { wsManager.dispose(); } catch { /* noop */ }
@@ -1368,12 +1065,9 @@ export async function startServer(
     };
     const onListenError = (err: NodeJS.ErrnoException): void => {
       server.off("error", onListenError);
-      cleanupFailedListen();
-      if (err.code === "EADDRINUSE") {
-        reject(new PortInUseError(config.port, config.host));
-        return;
-      }
-      reject(err);
+      void cleanupFailedListen().then(() => {
+        reject(err.code === "EADDRINUSE" ? new PortInUseError(config.port, config.host) : err);
+      }, reject);
     };
     server.once("error", onListenError);
     server.listen(config.port, config.host, () => {
@@ -1403,6 +1097,7 @@ export async function startServer(
 
   const updateChecksEnabled = !testMode && process.env.WAND_DISABLE_UPDATE_CHECK !== "1";
   if (!testMode) userMemory.start();
+  if (!testMode) scheduledTasks.start();
 
   // Start configured background sessions after the server is already reachable.
   if (!testMode) {
@@ -1451,6 +1146,7 @@ export async function startServer(
     } catch { /* 扫描结果已经返回给保存请求，通知失败不回滚 */ }
     return result;
   };
+  if (!testMode) taskTitles.refresh();
   let retentionTimer: NodeJS.Timeout | null = null;
   if (!testMode) {
     retentionTimer = startRetentionTimer(retentionDeps, 60 * 60 * 1000, sweepRetention);
@@ -1467,17 +1163,26 @@ export async function startServer(
 
   // ── Auto-update logic ──
 
-  async function performAutoUpdate(): Promise<void> {
+  // 同一目标版本自动安装失败后指数退避（30 分钟起，最长 6 小时），避免每轮轮询都重试
+  // 同一个必失败的安装并刷屏；用户主动触发（切通道/打开开关）时清零重试。
+  const autoUpdateFailures = new Map<string, { count: number; retryAt: number }>();
+  let notifiedUpdateVersion: string | null = null;
+
+  async function performAutoUpdate(options: { manual?: boolean } = {}): Promise<void> {
     if (shuttingDown) return;
+    // 与 /api/update、provider CLI 更新共用一把互斥，避免两路同时改全局 npm 目录。
+    if (updateState.updateInFlight || updateState.providerCliUpdateInFlight) return;
     const channel = getUpdateChannel();
     const info = await checkLatestPackageVersion(channel, true);
-    if (shuttingDown) return;
+    if (shuttingDown || channel !== getUpdateChannel()) return;
     cachedUpdateInfo = info;
     if (!info.latest || !info.updateAvailable) return;
 
     const autoEnabled = storage.getConfigValue("autoUpdateWeb") === "true";
     if (!autoEnabled) {
-      // Not auto-updating, just notify
+      // 同一版本只提示一次；新连接的客户端由 cachedUpdateInfo 补发。
+      if (notifiedUpdateVersion === info.latest && !options.manual) return;
+      notifiedUpdateVersion = info.latest;
       process.stdout.write(
         `[wand] 发现新版本 ${info.latest}（当前 ${info.current}）。可在设置中更新${channel === "beta" ? "（Beta 通道）" : ""}。\n`
       );
@@ -1488,6 +1193,10 @@ export async function startServer(
       });
       return;
     }
+
+    if (options.manual) autoUpdateFailures.delete(info.latest);
+    const failure = autoUpdateFailures.get(info.latest);
+    if (failure && Date.now() < failure.retryAt) return;
 
     const servicePreflight = checkManagedServiceUpdatePreflight();
     if (!servicePreflight.ok) {
@@ -1520,9 +1229,11 @@ export async function startServer(
       },
     });
 
+    updateState.updateInFlight = true;
     try {
       await npmInstallGlobal(info.installSpec, 120000);
       if (shuttingDown) return;
+      autoUpdateFailures.delete(info.latest);
       // 镜像 install.sh：装完用全局安装刷新服务 unit（ExecStart/PATH），重启才会跑到新版。
       const repair = repairServiceUnitAfterUpdate(configPath);
       if (repair.scope) process.stdout.write(`[wand] ${repair.message}\n`);
@@ -1542,6 +1253,11 @@ export async function startServer(
       restartTimer.unref?.();
     } catch (error) {
       const msg = getErrorMessage(error, "未知错误");
+      const count = (autoUpdateFailures.get(info.latest)?.count ?? 0) + 1;
+      autoUpdateFailures.set(info.latest, {
+        count,
+        retryAt: Date.now() + Math.min(30 * 60_000 * 2 ** (count - 1), 6 * 60 * 60_000),
+      });
       process.stdout.write(`[wand] 自动更新失败: ${msg}\n`);
       // 失败不重启、保留旧版；通知前端，避免静默。
       wsManager.emitEvent({
@@ -1549,6 +1265,8 @@ export async function startServer(
         sessionId: "__system__",
         data: { kind: "auto-update-failed", current: info.current, latest: info.latest, error: msg },
       });
+    } finally {
+      updateState.updateInFlight = false;
     }
   }
 
@@ -1606,6 +1324,10 @@ export async function startServer(
     if (closePromise) return closePromise;
     closePromise = (async () => {
       shuttingDown = true;
+      taskTitles.dispose();
+      modelCatalog.dispose();
+      const teamShutdown = aiTeams.dispose();
+      await scheduledTasks.dispose();
       await daemonMaintenance.stop();
       decisions.dispose();
       openRouter.dispose();
@@ -1652,7 +1374,7 @@ export async function startServer(
       speech.dispose();
       speechPolisher.dispose();
       try { structuredSessions.dispose(); } catch { /* best-effort shutdown */ }
-      aiTeams.dispose();
+      await teamShutdown;
       try { structuredHosts.rustClient?.disconnect(); } catch { /* best-effort shutdown */ }
       try { structuredLogger.dispose(); } catch { /* best-effort shutdown */ }
       try { wsManager.dispose(); } catch { /* best-effort shutdown */ }

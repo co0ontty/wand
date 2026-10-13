@@ -1,3 +1,5 @@
+import { registerTaskRoutes } from "../src/server-task-routes.js";
+import { isArchiveBlocked } from "../src/archive-policy.js";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -28,8 +30,9 @@ test("sessions archive and restore through the HTTP routes and report their stat
   const sessions = new SessionRegistry(processes, structured, storage);
   const app = express();
   app.use(express.json());
-  registerSessionRoutes(app, processes, structured, storage, config.defaultMode, config, sessions);
+  registerSessionRoutes(app, { processes, structured, storage, defaultMode: config.defaultMode, config, sessions });
   registerWorkspaceRoutes(app, storage, sessions, { config });
+  registerTaskRoutes(app, { storage, sessions });
   app.use(jsonErrorHandler);
   const server = createServer(app);
 
@@ -51,12 +54,43 @@ test("sessions archive and restore through the HTTP routes and report their stat
     })).json() as { id: string };
     const id = created.id;
 
+    // Simulate actual execution without invoking a provider or sending user input.
+    const rows = (structured as unknown as { sessions: Map<string, ReturnType<SessionRegistry["get"]>> }).sessions;
+    const idle = rows.get(id)!;
+    rows.set(id, { ...idle, status: "running" });
+    const refused = await fetch(`${base}/api/sessions/${id}/archive`, { method: "POST" });
+    assert.equal(refused.status, 409);
+    assert.equal(sessions.get(id)?.archived, false);
+    const batchBusy = await fetch(`${base}/api/sessions/batch-archive`, { method: "POST",
+      headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionIds: [id], archived: true }) });
+    assert.deepEqual(await batchBusy.json(), { ok: true, archived: 0, failed: [id] });
+    const task = storage.createWandTask({ title: "Archive eligibility", status: "done" });
+    storage.bindWandTaskSession(task.id, id);
+    const patchArchive = () => fetch(`${base}/api/wand-tasks/${task.id}`, { method: "PATCH",
+      headers: { "content-type": "application/json" }, body: JSON.stringify({ status: "archived" }) });
+    for (const request of [patchArchive(), fetch(`${base}/api/wand-tasks/${task.id}`, { method: "DELETE" }),
+      fetch(`${base}/api/workspace-tasks/${task.workspaceTaskId}/archive`, { method: "POST" })]) {
+      assert.equal((await request).status, 409);
+    }
+    assert.equal(storage.getWandTask(task.id)?.status, "done");
+    rows.set(id, idle);
+    storage.updateWandTask(task.id, { status: "doing" });
+    assert.equal((await patchArchive()).status, 409, "incomplete doing card cannot archive even with idle session");
+    storage.updateWandTask(task.id, { status: "done" });
+    assert.equal((await patchArchive()).status, 200);
+    storage.moveSessionToWorkspaceTask(id, null);
+
     const archived = await fetch(`${base}/api/sessions/${id}/archive`, { method: "POST" });
     assert.equal(archived.status, 200);
     const archivedBody = await archived.json() as { archived: boolean; archivedAt: string | null };
     assert.equal(archivedBody.archived, true);
     assert.ok(archivedBody.archivedAt, "归档会写下时间戳，保留期清理以它起算");
     assert.equal(structured.get(id)?.archived, true);
+    rows.set(id, { ...rows.get(id)!, archivedAt: null });
+    const backfilled = await fetch(`${base}/api/sessions/${id}/archive`, { method: "POST" });
+    assert.equal(backfilled.status, 200);
+    assert.ok((await backfilled.json() as { archivedAt: string | null }).archivedAt,
+      "重复归档仍会补齐历史记录缺失的时间戳");
 
     // 默认工作区列表不能混入归档会话；显式归档查询仍保留原 ID。
     const groups = await (await fetch(`${base}/api/tasks`)).json() as Array<{
@@ -160,7 +194,7 @@ test("archiving and restoring a live PTY preserves the process; a stopped archiv
   const sessions = new SessionRegistry(processes, structured, storage);
   const app = express();
   app.use(express.json());
-  registerSessionRoutes(app, processes, structured, storage, config.defaultMode, config, sessions);
+  registerSessionRoutes(app, { processes, structured, storage, defaultMode: config.defaultMode, config, sessions });
   app.use(jsonErrorHandler);
   const server = createServer(app);
   await new Promise<void>((resolve, reject) => {
@@ -206,4 +240,13 @@ test("archiving and restoring a live PTY preserves the process; a stopped archiv
     try { structured.dispose(); } catch { /* ignore */ }
     storage.close();
   }
+});
+
+test("archive eligibility distinguishes execution from an idle shell and covers pending input", () => {
+  assert.equal(isArchiveBlocked({ sessionKind: "pty", status: "running" }), false);
+  for (const facts of [
+    { sessionKind: "structured", status: "running" }, { status: "idle", inFlight: true },
+    { ptyBusy: true }, { ptyCommandRunning: true }, { permissionBlocked: true },
+    { pendingEscalation: { id: "request" } }, { queuedMessages: ["pending"] }, { status: "initializing" },
+  ]) assert.equal(isArchiveBlocked(facts), true);
 });

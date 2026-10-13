@@ -101,8 +101,9 @@ export function withIssueAgentTarget(
 ): WandTaskAgent {
   const option = agentToolOption(target);
   if (!option) return withIssueAgentProvider(agent, target as IssueAgentProvider, catalog);
-  const next = withIssueAgentProvider(agent, option.provider, catalog);
-  const engine = option.engine === "sdk" && next.kind === "structured" ? "sdk" as const : undefined;
+  // Explicit SDK selection must not silently turn into Pi CLI when the old task used PTY.
+  const next = withIssueAgentProvider(option.engine === "sdk" ? { ...agent, kind: "structured" } : agent, option.provider, catalog);
+  const engine = option.engine === "sdk" ? "sdk" as const : undefined;
   return { ...next, engine };
 }
 
@@ -356,7 +357,7 @@ export function withIssueAgentProvider(
 export function isDispatchableIssueAgent(agent: WandTaskAgent | null | undefined): agent is WandTaskAgent {
   if (!agent) return false;
   if (!ISSUE_AGENT_PROVIDERS.some((entry) => entry.value === agent.provider)) return false;
-  if (!agent.model.trim()) return false;
+  if (typeof agent.model !== "string" || !agent.model.trim()) return false;
   if (!isThinkingEffort(agent.thinkingEffort)) return false;
   if (agent.engine !== undefined && !isWandTaskAgentEngine(agent.engine)) return false;
   if (agent.engine === "sdk" && (agent.provider !== "pi" || agent.kind !== "structured")) return false;
@@ -506,6 +507,7 @@ export function resolveIssueAgent(
       thinkingEffort: lastAgent.thinkingEffort,
       mode: normalizeWandTaskAgentMode(lastAgent.provider, lastAgent.mode),
       kind: normalizeIssueAgentKind(lastAgent.kind),
+      ...(lastAgent.engine ? { engine: lastAgent.engine } : {}),
     };
   }
   return createDefaultIssueAgent();

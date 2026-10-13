@@ -3,7 +3,7 @@
 :root { --wand-safe-top: max(var(--app-inset-top), env(safe-area-inset-top, 0px)); --wand-safe-bottom: max(var(--app-inset-bottom), env(safe-area-inset-bottom, 0px)); }
 :root { --wand-safe-left: max(var(--app-inset-left), env(safe-area-inset-left, 0px)); --wand-safe-right: max(var(--app-inset-right), env(safe-area-inset-right, 0px)); --safe-bottom: var(--wand-safe-bottom); --input-safe-bottom: var(--safe-bottom); }
 :root { --motion-press: 110ms; --motion-fast: 150ms; --motion-normal: 240ms; --motion-morph: 200ms; --motion-indicator: 260ms; --motion-quick-exit: 90ms; --motion-dwell-sent: 720ms; --motion-dwell-failed: 1500ms; --motion-spin: 2.4s; }
-:root { --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1); --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1); --ease-in-out-smooth: cubic-bezier(0.4, 0, 0.2, 1); --transition-fast: 0.14s ease-out; --transition-normal: 0.22s ease-out; --chat-column-width: 940px; }
+:root { --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1); --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1); --ease-in-out-smooth: cubic-bezier(0.4, 0, 0.2, 1); --transition-fast: 0.14s ease-out; --transition-normal: 0.22s ease-out; --chat-column-width: 940px; --chat-content-max-width: none; }
 html { height: 100%; font-size: 16px; -webkit-font-smoothing: antialiased; background: var(--bg-primary, #faf8f5); }
 body { margin: 0; height: 100dvh; overflow: hidden; font-family: var(--font-sans, sans-serif); color: var(--text-primary, #29241f); background: var(--bg-primary, #faf8f5); }
 #app { height: 100%; }
@@ -21,6 +21,7 @@ body { margin: 0; height: 100dvh; overflow: hidden; font-family: var(--font-sans
    给全局可读下限，并让角标内的标用满内圈（14 < 18，不溢出）。 */
 .wand-provider-logo { min-width: 12px; min-height: 12px; }
 .wand-employee-avatar-provider .wand-provider-logo { width: 14px; height: 14px; }
+.wand-employee-avatar-provider .ant-avatar.ant-avatar-square { border-radius:4px; background:var(--bg-primary); color:var(--text-primary); border:1px solid var(--border-subtle); }
 /* Real AI title generation; the text stays readable and the sweep never changes layout. */
 .title-generating { position: relative; }
 .title-generating::after { content: ""; position: absolute; inset: auto auto 0 0; width: 30%; height: 2px; border-radius: var(--radius-full); background: var(--accent); pointer-events: none; animation: session-title-generate var(--motion-spin) var(--ease-in-out-smooth) infinite; }
@@ -48,12 +49,12 @@ html.no-transition *, html.no-transition *::before, html.no-transition *::after 
 .terminal-jump-bottom.visible, .chat-unread-bubble.visible { visibility: visible; }
 .is-wand-embed-terminal :is(.sidebar, .main-header-row, .blank-chat, .drawer-backdrop, .file-side-panel, .file-panel-backdrop, .terminal-scale-overlay, .terminal-resize-handle) { display: none !important; }
 .is-wand-embed-terminal .app-container { padding: 0 !important; }
-.is-wand-embed-terminal .main-content, html.is-wand-embed-terminal, .is-wand-embed-terminal body { background: var(--bg-terminal, #17120f); color-scheme: light dark; }
+.is-wand-embed-terminal .main-content, html.is-wand-embed-terminal, .is-wand-embed-terminal body { background: var(--bg-terminal, #17120f); color-scheme: inherit; }
 .is-wand-embed-terminal .terminal-scroll-wrap { --term-row-height: 17px !important; }
 .is-wand-embed-terminal.is-wand-terminal-passthrough .terminal-scroll-wrap { width: 100%; min-width: 0; }
 .is-wand-embed-terminal.is-wand-native-input .input-panel { display: none !important; }
 /* Reverse message order and stable imperative roots preserve scroll/focus leases. */
-.chat-messages { flex: 1; min-width: 0; width: 100%; box-sizing: border-box; height: 100%; overflow: auto; display: flex; flex-direction: column-reverse; gap: 16px; padding: 16px; overflow-anchor: none; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.chat-messages { flex: 1; min-width: 0; width: 100%; box-sizing: border-box; height: 100%; overflow: auto; display: flex; flex-direction: column-reverse; gap: 16px; padding: 16px var(--wand-page-inset,20px); overflow-anchor: none; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .chat-message, .chat-activity, .chat-call, .agent-run { flex-shrink: 0; min-width: 0; }
 .chat-unread-divider { text-align: center; color: var(--text-secondary); font-size: var(--font-size-xs); }
 .main-header-row { min-height:var(--wand-page-header-height,56px); }
@@ -61,13 +62,6 @@ html.no-transition *, html.no-transition *::before, html.no-transition *::after 
 .topbar-title-row { min-width:0; }
 .topbar-title-row .current-task { min-width:0; max-width:45%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--font-size-sm); font-weight:500; }
 .topbar-session-title { font-size:15px; }
-.topbar-metadata { min-width:0; font-size:var(--font-size-xs); line-height:18px; color:var(--text-secondary); }
-.topbar-metadata .session-status-pill { display:inline-flex; align-items:center; gap:4px; margin:0; padding:0; border:0; background:transparent; color:var(--text-secondary); font-size:inherit; line-height:inherit; }
-.topbar-metadata .session-status-pill.running::before, .is-permission-blocked .topbar-metadata .session-status-pill::before, .topbar-metadata .session-status-pill.error::before { content:""; width:5px; height:5px; flex-shrink:0; border-radius:50%; }
-.topbar-metadata .session-status-pill.running::before { background:var(--success); }
-.is-permission-blocked .topbar-metadata .session-status-pill::before { background:var(--warning); }
-.topbar-metadata .session-status-pill.error::before { background:var(--danger); }
-.topbar-provider, .topbar-cwd { font-size:var(--font-size-xs); }
 .main-header-row .topbar-right { margin-inline-start:auto; }
 @media (pointer:coarse) {
   .main-header-row .topbar-right .ant-btn { min-width:44px; min-height:44px; }
@@ -108,7 +102,30 @@ html.no-transition *, html.no-transition *::before, html.no-transition *::after 
 .input-composer { position: relative; flex: 1; min-width: 0; }
 .composer-main-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; gap: 8px; }
 .composer-input-wrap { position: relative; grid-column: 1 / -1; min-width: 0; }
-.composer-input-wrap .prompt-optimize-btn { position: absolute; inset-block-start: -24px; inset-inline-end: 0; z-index: 1; }
+/* Identity floats above the editing surface; every text line uses its full width. */
+.composer-floating-avatar { position:absolute; inset-inline-start:0; inset-block-start:-76px; width:72px; height:72px; z-index:1; pointer-events:none; }
+.composer-surface:has(.composer-floating-avatar) { margin-block-start:50px; }
+.composer-surface:has(.composer-usage-line):not(:has(.composer-floating-avatar)) { margin-block-start:28px; }
+.composer-usage-line { position:absolute; inset-block-start:-32px; inset-inline:0 96px; display:flex; align-items:center; gap:12px; min-width:0; max-width:100%; height:24px; overflow-x:auto; white-space:nowrap; overscroll-behavior-x:contain; color:var(--text-secondary); font-size:var(--font-size-xs); line-height:20px; font-variant-numeric:tabular-nums; }
+:is(.composer-input-wrap, .conversation-input-wrap):has(.composer-floating-avatar) .composer-usage-line { inset-inline-start:84px; }
+.composer-usage-line:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.composer-usage-caption, .composer-usage-metric { flex:none; }
+.composer-identity-name { flex:none; color:var(--text-primary); font-weight:500; }
+@media (max-width:640px) { .composer-identity-name { display:none; } }
+.composer-usage-number { color:var(--text-primary); }
+.composer-usage-line [data-composer-running-host] { display:contents; }
+.composer-usage-line :is(.structured-status-bar, .chat-running-bar) { width:auto; min-height:0; margin:0; padding:0; flex:none; gap:6px; font:inherit; line-height:inherit; animation:none; }
+.composer-input-wrap:has(.composer-floating-avatar) [data-composer-sender] { box-sizing:border-box; min-height:36px; }
+.conversation-input-wrap { position:relative; }
+.conversation-input-wrap:has(.composer-floating-avatar) { margin-block-start:58px; }
+.conversation-input-wrap:has(.composer-usage-line):not(:has(.composer-floating-avatar)) { margin-block-start:28px; }
+.conversation-input-wrap > .composer-floating-avatar { inset-block-start:-76px; }
+.conversation-input-wrap > .composer-usage-line { inset-inline-end:0; inset-block-start:-28px; }
+.conversation-root .conversation-input-wrap:has(.composer-floating-avatar) .ant-sender-content { min-height:36px; }
+.input-composer.is-terminal-interactive :is(.composer-floating-avatar, .composer-usage-line) { display:none; }
+.input-composer.is-terminal-interactive .composer-surface { margin-block-start:0; }
+.input-composer.is-terminal-interactive [data-composer-sender] { padding-inline-start:0; }
+.composer-input-wrap .prompt-optimize-btn { position: absolute; inset-block-start: -36px; inset-inline-end: 0; z-index: 1; }
 .composer-input-wrap .prompt-optimize-btn.is-loading .prompt-optimize-icon { animation: composer-optimize-spin var(--motion-spin) linear infinite; }
 @keyframes composer-optimize-spin { to { transform: rotate(360deg); } }
 .composer-actions-left, .composer-actions-right, .composer-status-row, .composer-inline-config, .composer-config-controls { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -117,6 +134,10 @@ html.no-transition *, html.no-transition *::before, html.no-transition *::after 
 .composer-badge-host, .composer-config-host, .composer-rail-host, .composer-voice-host, .composer-attachments-host, .composer-action-error-host, .plus-popover-items-host { display: contents; }
 .input-textarea { width: 100%; min-height: 36px; max-height: var(--input-max-height, 160px); resize: none; touch-action: pan-y; overscroll-behavior: contain; box-sizing: border-box; display: block; border: 0; padding: 0; outline: none; background: transparent; color: var(--text-primary); caret-color: var(--accent); font: inherit; }
 .input-textarea::placeholder { color: var(--text-secondary); }
+.input-composer:not(.is-terminal-interactive) .input-textarea { min-height:63px; max-height:min(168px,28dvh); line-height:21px; }
+.input-composer:not(.is-terminal-interactive) .composer-input-wrap[data-editor-expanded="true"] .input-textarea { max-height:min(504px,48dvh); }
+.composer-editor-controls { display:flex; justify-content:flex-end; padding-block:4px; }
+.input-composer.is-terminal-interactive .composer-editor-controls { display:none; }
 /* Only idle mobile input owns hold-to-talk; focused/nonempty input keeps native selection/scroll. */
 textarea[data-idle-speech] { touch-action: none; user-select: none; -webkit-user-select: none; }
 .input-textarea:disabled { color: var(--text-tertiary); cursor: not-allowed; }
@@ -137,7 +158,7 @@ textarea[data-idle-speech] { touch-action: none; user-select: none; -webkit-user
 .input-composer.is-terminal-interactive :is(.composer-status-row, .composer-inline-config, .prompt-optimize-btn, #voice-record-btn, .composer-attachments-host) { display: none; }
 .input-composer.is-terminal-interactive #send-input-button:not([data-phase="running"]) { display: none; }
 /* One PTY key row stays with the composer; Ant owns the key visuals. */
-.terminal-shortcuts:not([hidden]) { min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; padding: 2px 0 8px; }
+.terminal-shortcuts:not([hidden]) { min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; padding: 0; }
 .terminal-shortcuts-row { width: max-content; }
 .terminal-shortcuts-row > button { flex: none; min-width: 36px; }
 @media (pointer: coarse), (max-width: 640px) {
@@ -148,9 +169,46 @@ textarea[data-idle-speech] { touch-action: none; user-select: none; -webkit-user
 .update-card-progress:not(.active) { display: none; }
 #update-card-status.error { color: var(--danger); }
 /* The local SVG illustration is a drawing, not a second control theme. */
-.login-page { height: 100%; overflow: auto; padding: max(24px, var(--wand-safe-top)) 24px max(24px, var(--wand-safe-bottom)); }
+.login-page { height: 100%; overflow: auto; display: flex; padding: max(40px, var(--wand-safe-top)) 48px max(40px, var(--wand-safe-bottom)); background: var(--bg-primary); }
+.login-layout { width: min(1080px, 100%); min-width: 0; margin: clamp(0px, calc((100dvh - 750px) / 2), 240px) auto 0; align-self: flex-start; display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 380px); column-gap: clamp(48px, 7vw, 112px); row-gap: 44px; }
+.login-brand { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; font-size: 24px; font-weight: 650; letter-spacing: -.02em; }
+.login-left { min-width: 0; }
+.login-page .login-title.ant-typography { margin: 0 0 20px; font-size: clamp(34px, 3.5vw, 48px); line-height: 1.25; font-weight: 650; letter-spacing: -.025em; }
+.login-title > span { color: var(--accent); }
+.login-page .login-intro { margin: 0; font-size: 16px; line-height: 1.8; color: var(--text-secondary); }
+.login-page .left-spacer { max-width: 440px; margin-top: 12px; }
+.login-capabilities { display: block; margin-top: 12px; font-size: 13px; }
+.login-right { min-width: 0; align-self: start; margin-top: 46px; border-top: 2px solid var(--accent); padding-top: 28px; }
+.login-page .login-form-heading h2 { margin: 0 0 10px; font-size: 28px; }
+.login-page .login-form-heading p { margin: 0; }
+.login-server { margin: 28px 0; padding: 12px 0; border-block: 1px solid var(--border-subtle); color: var(--text-secondary); }
+.login-server > div { min-width: 0; }
+.login-server .ant-typography { font-size: 12px; }
+.login-server-address { color: var(--text-primary); overflow-wrap: anywhere; font-size: 14px; }
+.login-page .login-password-hint { margin: 10px 0 0; font-size: 12px; line-height: 1.6; }
+.login-feedback { min-height: 44px; padding-top: 4px; }
+.login-page #login-error { margin: 0; font-size: 13px; line-height: 20px; }
+.login-page #login-button, .login-page #login-switch-server-button { height: 44px; }
+.login-page .ant-input-password { min-height: 44px; }
+.login-page .ant-input-password:has(input[aria-invalid="true"]) { border-color: var(--danger); }
+.login-privacy { margin-top: 24px; }
+.login-privacy .ant-typography { font-size: 12px; }
+.login-checking { min-height: 170px; display: grid; place-items: center; }
 .login-visual { position: relative; }
-.login-visual-scene { display: block; width: 100%; max-height: 52dvh; }
+.login-visual-scene { display: block; width: 100%; max-height: 330px; }
+@media (max-width: 800px) {
+  .login-page { padding: max(28px, var(--wand-safe-top)) 28px max(28px, var(--wand-safe-bottom)); }
+  .login-layout { max-width: 440px; grid-template-columns: minmax(0, 1fr); row-gap: 32px; }
+  .login-page .login-title.ant-typography { font-size: 32px; margin-bottom: 12px; }
+  .login-page .left-spacer, .login-capabilities, .login-desktop-break { display: none; }
+  .login-page .login-intro { font-size: 14px; }
+  .login-right { margin-top: 0; padding-top: 24px; }
+  .login-page .login-form-heading h2 { font-size: 24px; }
+  .login-server { margin: 20px 0; }
+}
+@media (max-width: 400px) {
+  .login-page { padding-inline: 20px; }
+}
 .login-visual :is(.login-visual-orbit, .login-visual-wire, .login-visual-registration, .login-visual-rule) { stroke: var(--border-subtle); }
 .login-visual :is(.login-visual-node, .login-visual-window, .login-visual-phone-screen, .login-visual-git-tile) { fill: var(--bg-elevated); stroke: var(--border-default); }
 .login-visual :is(.login-visual-backplate, .login-visual-chat-card, .login-visual-phone-shadow) { fill: var(--bg-secondary); }
@@ -161,19 +219,19 @@ textarea[data-idle-speech] { touch-action: none; user-select: none; -webkit-user
 .login-visual .login-visual-git { stroke: var(--success); }
 .login-visual :is(.login-visual-terminal, .login-visual-device) { fill: var(--bg-terminal); }
 .login-visual-signal { stroke: var(--accent); stroke-dasharray: .08 .92; animation: login-signal 8s linear infinite; animation-delay: var(--lv-delay); }
-.login-visual-toggle, .login-visual-control { position: absolute; right: 0; bottom: 0; width: 32px; height: 32px; }
+.login-visual-toggle, .login-visual-control { position: absolute; right: 0; bottom: 0; width: 44px; height: 44px; }
 .login-visual-toggle { opacity: 0; z-index: 1; cursor: pointer; }
-.login-visual-control { padding: 6px; color: var(--text-secondary); }
-.login-visual-play-icon, .login-visual-toggle:checked + .login-visual-control .login-visual-pause-icon { display: none; }
-.login-visual-toggle:checked + .login-visual-control .login-visual-play-icon { display: block; }
+.login-visual-control { padding: 10px; color: var(--text-secondary); }
+.login-visual-control > svg { position: absolute; inset: 10px; width: 24px; height: 24px; transition: opacity var(--motion-morph) var(--ease-out-expo), transform var(--motion-morph) var(--ease-out-expo); }
+.login-visual-play-icon, .login-visual-toggle:checked + .login-visual-control .login-visual-pause-icon { opacity: 0; transform: rotate(-45deg) scale(.8); }
+.login-visual-toggle:checked + .login-visual-control .login-visual-play-icon { opacity: 1; transform: none; }
 .login-visual-toggle:focus-visible + .login-visual-control { outline: 2px solid var(--border-focus); }
 .login-visual-toggle:checked ~ .login-visual-scene * { animation-play-state: paused; }
 @keyframes login-signal { to { stroke-dashoffset: -1; } }
-.chat-width-toggle { display: none; }
-/* 原生壳保留自己的正文 / 输入栏几何（下面的居中列规则排除 is-wand-app），那里切成「居中」
-   不会有任何变化 —— 所以除了窄屏隐藏，整个原生壳也隐藏这个开关，不给用户空动作。 */
-html.is-wand-app .chat-width-toggle { display: none; }
-@media (min-width: 1280px) { .chat-width-toggle { display: inline-flex; } html[data-chat-width="column"]:not(.is-wand-app) :is(.chat-messages, .chat-running-bar, .input-panel) { max-width: var(--chat-column-width); width: 100%; margin-inline: auto; } }
+/* One column owner for IM and workspace chat. Narrow screens naturally fill their host;
+   terminal grids and native input roots are not resized by this preference. */
+@media (min-width: 1280px) { html[data-chat-width="column"] { --chat-content-max-width: var(--chat-column-width); } }
+:is(.chat-messages, .chat-running-bar, .input-panel, .conversation-message-scroll > *, .conversation-composer, .conversation-task-context, .conversation-session-activity) { box-sizing:border-box; min-width:0; width:100%; max-width:var(--chat-content-max-width); margin-inline:auto; }
 @media (max-width: 640px) {
   .composer-status-line:not([data-tone]), .composer-status-row [data-config-scope="mode"], [data-models-refresh-scope="runtime"], .login-page .left-spacer { display: none; }
   .input-textarea { --input-max-height: min(160px, 35dvh); }
@@ -181,11 +239,11 @@ html.is-wand-app .chat-width-toggle { display: none; }
   .composer-actions-right { grid-column: 1; }
   .composer-inline-config { flex-wrap: wrap; justify-content: flex-end; }
   .composer-actions-right .ant-btn { flex-shrink: 0; }
-  .composer-input-wrap .prompt-optimize-btn { min-height: 32px; inset-block-start: -28px; }
+  .composer-input-wrap .prompt-optimize-btn { inset-block-start: -48px; }
   #send-input-button { min-width: 32px; }
 }
-@media (prefers-color-scheme: dark) { .is-wand-embed-terminal { --bg-terminal: #17120f; } }
-@media (prefers-reduced-motion: reduce) { .login-visual-scene * { animation: none !important; } html:not(.is-wand-app) *, html:not(.is-wand-app) *::before, html:not(.is-wand-app) *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; } }
+
+@media (prefers-reduced-motion: reduce) { .login-visual-scene * { animation: none !important; } .login-visual-control > svg { transition: none; } html:not(.is-wand-app) *, html:not(.is-wand-app) *::before, html:not(.is-wand-app) *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; } }
 
 /* Chat instances project the existing composer/runner owners. Geometry is state-invariant. */
 .conversation-root { position:absolute; inset:0; z-index:8; overflow:hidden; background:var(--bg-primary); min-width:0; min-height:0; }
@@ -208,7 +266,8 @@ html.is-wand-app .chat-width-toggle { display: none; }
 .conversation-heading-context { display:block; font-size:12px; line-height:20px; }
 .conversation-heading > .ant-flex:first-child { flex:1; }
 .conversation-heading > .ant-btn { flex-shrink:0; min-height:var(--wand-page-toolbar-height,36px); }
-.conversation-message-scroll { display:flex; flex-direction:column; flex:1; min-height:0; overflow:auto; padding:16px var(--wand-page-inset,20px); }
+.conversation-message-scroll { display:flex; flex-direction:column; flex:1; min-height:0; overflow:auto; padding-block:16px; }
+.conversation-message-scroll > * { padding-inline:var(--wand-page-inset,20px); }
 /* 内容比视口短时贴底：聊天记录从底部往上长，不在顶部留一片空场。内容超出后
    auto margin 自动归零，滚动行为与普通块级容器一致。 */
 .conversation-message-scroll > :first-child { margin-block-start:auto; }
@@ -220,14 +279,13 @@ html.is-wand-app .chat-width-toggle { display: none; }
 .conversation-root .team-chat-msg-head { gap:8px; }
 .conversation-root .team-chat-msg-head .chat-message-time { color:var(--text-tertiary); font-size:var(--font-size-xs); }
 .conversation-root .team-chat-msg-content > .ant-typography { font-size:var(--font-size-xs); color:var(--text-tertiary); }
-.conversation-root .ant-bubble-content { padding:8px 12px 5px; border-radius:16px; background:var(--bg-secondary); color:var(--text-primary); font-size:15px; line-height:1.5; }
-.conversation-root .team-chat-msg[data-side="end"] .ant-bubble-content { background:var(--accent-muted); }
+.conversation-root .wand-chat-message-content { padding:8px 12px 5px; border-radius:16px; background:var(--bg-secondary); color:var(--text-primary); font-size:15px; line-height:1.5; }
+.conversation-root .team-chat-msg[data-side="end"] .wand-chat-message-content { background:var(--accent-muted); }
 .conversation-root .team-chat-notice { padding-block:8px; font-size:12px; }
-.conversation-message-scroll > *, .conversation-composer { width:100%; max-width:var(--chat-column-width); margin-inline:auto; }
 .conversation-empty { padding-block:24px; }
 .conversation-composer { flex-shrink:0; position:relative; padding:8px var(--wand-page-inset,20px) max(8px,var(--wand-safe-bottom,0px)); background:var(--bg-primary); }
-.conversation-avatar-placeholder { width:44px; height:44px; flex:none; }
-.conversation-work-choice-pending { box-sizing:border-box; height:70px; margin-block:2px 4px; padding-block:2px; font-size:12px; line-height:20px; color:var(--text-secondary); }
+.conversation-avatar-placeholder { width:48px; height:48px; flex:none; }
+.conversation-work-choice-pending { font-size:12px; line-height:20px; color:var(--text-secondary); }
 .conversation-execution-summary { display:block; font-size:12px; line-height:20px; color:var(--text-secondary); }
 .conversation-receiver { display:block; flex:1; min-width:0; min-height:20px; white-space:normal; overflow-wrap:anywhere; font-size:12px; color:var(--text-secondary); }
 .conversation-cwd-summary { display:block; font-size:12px; overflow-wrap:anywhere; }
@@ -238,8 +296,15 @@ html.is-wand-app .chat-width-toggle { display: none; }
 .conversation-sender .ant-sender-footer { padding:0 12px 10px; }
 .conversation-submit.ant-btn { border-radius:50%; }
 .conversation-sender textarea { resize:none; overflow-y:auto !important; }
-.conversation-task-context { width:100%; max-width:var(--chat-column-width); margin-inline:auto; padding:12px 16px; background:var(--accent-muted); border-top:1px solid var(--border-subtle); flex-shrink:0; max-height:28dvh; overflow:auto; }
+.conversation-task-context { padding:12px var(--wand-page-inset,20px); background:var(--accent-muted); border-top:1px solid var(--border-subtle); flex-shrink:0; max-height:28dvh; overflow:auto; }
 .conversation-task-context .ant-typography { min-width:0; overflow-wrap:anywhere; }
+.conversation-session-activity { flex-shrink:0; max-height:min(35dvh,280px); overflow:auto; padding:8px var(--wand-page-inset,20px); }
+.conversation-activity-title { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.conversation-session-actions { min-width:0; max-height:min(35dvh,280px); overflow:auto; }
+.conversation-session-actions:empty { display:none; }
+.conversation-session-state { min-width:0; }
+.conversation-session-state > .chat-running-bar { flex:1; min-width:0; padding:0; margin:0; }
+.conversation-session-state > .ant-btn { flex:none; }
 .conversation-approval { align-self:flex-start; min-width:96px; height:44px; }
 .conversation-input-hint { font-size:var(--font-size-xs); }
 @media (pointer:coarse) {
@@ -325,21 +390,23 @@ html.is-wand-app .chat-width-toggle { display: none; }
 .conversation-root .team-chat-stream .conversation-message[data-joined="true"] { margin-top:-5px; }
 .conversation-root .conversation-message .team-chat-msg-content { flex:0 1 auto; }
 .conversation-root .conversation-message[data-side="end"] { align-self:flex-end; }
-.conversation-peer-avatar { display:flex; flex:0 0 32px; width:32px; }
+.conversation-peer-avatar { display:flex; flex:0 0 48px; width:48px; }
 /* 自己的气泡靠右整行镜像（自己的发言不挂头像，右对齐气泡已经表达了身份）。 */
 .conversation-root .conversation-message[data-side="end"] { flex-direction:row-reverse; }
 .conversation-peer-avatar[data-visible="false"] { visibility:hidden; }
 .conversation-peer-avatar .team-chat-avatar { border-radius:50%; }
-.conversation-root .conversation-message[data-lead="true"][data-side="start"] .ant-bubble-content { border-top-left-radius:4px; }
-.conversation-root .conversation-message[data-tail="true"][data-side="start"] .ant-bubble-content { border-bottom-left-radius:4px; }
-.conversation-root .conversation-message[data-lead="true"][data-side="end"] .ant-bubble-content { border-top-right-radius:4px; }
-.conversation-root .conversation-message[data-tail="true"][data-side="end"] .ant-bubble-content { border-bottom-right-radius:4px; }
+.conversation-root .conversation-message[data-lead="true"][data-side="start"] .wand-chat-message-content { border-top-left-radius:4px; }
+.conversation-root .conversation-message[data-tail="true"][data-side="start"] .wand-chat-message-content { border-bottom-left-radius:4px; }
+.conversation-root .conversation-message[data-lead="true"][data-side="end"] .wand-chat-message-content { border-top-right-radius:4px; }
+.conversation-root .conversation-message[data-tail="true"][data-side="end"] .wand-chat-message-content { border-bottom-right-radius:4px; }
 .conversation-root .conversation-message .team-chat-body-text-text, .conversation-root .conversation-message .team-chat-preview { font-size:15px; line-height:1.5; color:inherit; }
 /* 发言人身份在气泡外、气泡正上方：名字与头像同一行顶部对齐，气泡内部只剩正文与时间。 */
 .conversation-message-author { font-size:13px; font-weight:600; line-height:20px; color:var(--text-primary); margin-bottom:2px; }
 .conversation-root .conversation-message-author .ant-btn { height:auto; min-height:24px; padding:0; font-size:13px; font-weight:600; color:inherit; }
 .conversation-root .conversation-execution { height:24px; padding:0; font-size:var(--font-size-xs); color:var(--text-secondary); }
 .conversation-message-meta { display:flex; align-items:center; justify-content:flex-end; gap:5px; padding-top:2px; color:var(--text-secondary); font-size:var(--font-size-xs); line-height:16px; font-variant-numeric:tabular-nums; }
+.conversation-message-meta time { white-space:nowrap; flex:none; }
+.conversation-message-meta { flex-shrink:0; }
 .conversation-message-accepted { font-size:14px; color:var(--text-secondary); }
 .conversation-day { display:flex; justify-content:center; margin:12px 0 6px; color:var(--text-secondary); font-size:12px; }
 .conversation-day > span { padding:2px 0; }
@@ -359,21 +426,21 @@ html.is-wand-app .chat-width-toggle { display: none; }
 .conversation-row-copy { width:100%; }
 .conversation-row-bottomline { display:flex; align-items:center; gap:6px; min-width:0; }
 .conversation-row-preview { display:block; min-width:0; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text-secondary); }
-.conversation-avatar-button.ant-btn { padding:0; width:44px; min-width:44px; height:44px; border-radius:50%; flex-shrink:0; }
-.conversation-row-avatar.ant-btn { width:32px; min-width:32px; height:32px; }
+.conversation-avatar-button.ant-btn { padding:0; width:48px; min-width:48px; height:48px; border-radius:50%; flex-shrink:0; }
+.conversation-row-avatar.ant-btn { width:36px; min-width:36px; height:36px; }
 .conversation-avatar-button .ant-avatar { border-radius:50%; flex-shrink:0; }
-.conversation-peer-avatar .conversation-avatar-button.ant-btn { width:32px; min-width:32px; height:32px; }
+.conversation-peer-avatar .conversation-avatar-button.ant-btn { width:48px; min-width:48px; height:48px; }
 .conversation-row-more.ant-btn { position:absolute; right:2px; bottom:4px; width:24px; min-width:24px; height:24px; padding:0; opacity:.45; }
 .conversation-row:hover .conversation-row-more, .conversation-row:focus-within .conversation-row-more, .conversation-row-more[aria-expanded="true"] { opacity:1; }
 .conversation-list-section { padding:0 4px 8px; font-size:12px; }
 .conversation-list-count { font-size:11px; white-space:nowrap; font-variant-numeric:tabular-nums; }
 .conversation-list-empty { display:flex; align-items:center; flex-direction:column; gap:8px; padding:28px 16px; text-align:center; color:var(--text-secondary); }
 .conversation-list-empty .ant-typography { margin:0; font-size:13px; }
-.conversation-row-time { font-size:10px; font-variant-numeric:tabular-nums; }
+.conversation-row-time { font-size:11px; font-variant-numeric:tabular-nums; }
 .conversation-pin { font-size:14px; color:var(--text-tertiary); flex-shrink:0; }
-.conversation-task-toggle.ant-btn { margin-left:46px; height:24px; font-size:var(--font-size-xs); padding:0 4px; color:var(--text-secondary); }
-.conversation-task-row { padding-inline-start:46px; font-size:13px; min-height:32px; }
-@media (pointer:coarse) {
+.conversation-task-toggle.ant-btn { margin-left:50px; height:24px; font-size:var(--font-size-xs); padding:0 4px; color:var(--text-secondary); }
+.conversation-task-row { padding-inline-start:50px; font-size:13px; min-height:32px; }
+@media (pointer:coarse), (max-width:640px) {
   .conversation-row-avatar.ant-btn { width:44px; min-width:44px; height:44px; }
   .conversation-row-more.ant-btn { width:32px; min-width:32px; height:44px; opacity:1; }
   .conversation-row-open.ant-btn { padding-inline-end:30px; }
@@ -535,4 +602,12 @@ html.is-wand-app .chat-width-toggle { display: none; }
 @media (max-height:600px) {
   .task-board-native-page[data-view="board"][data-detail="false"] { overflow:auto; }
   .task-board-layout { flex:1 0 320px; }
+}
+
+/* One elevation treatment for employee identities, including static fallbacks. */
+.wand-team-avatar, .conversation-group-avatar, .team-chat-avatar { flex-shrink:0; }
+.wand-employee-avatar > .wand-plush-avatar, .wand-team-avatar > .ant-avatar,
+.wand-team-avatar > .ant-badge > .ant-avatar, .team-chat-avatar,
+.conversation-group-avatar > .ant-avatar {
+  filter:drop-shadow(0 4px 5px color-mix(in srgb, var(--text-primary) 20%, transparent));
 }

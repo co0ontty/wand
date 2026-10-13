@@ -6,7 +6,7 @@ import { DecisionError, type LocalDecisionConfig } from "./decision-types.js";
 import type { DecisionService } from "./decision-service.js";
 import { LAYA_FILES, LAYA_REPOSITORY, layaFileUrl, type ModelFile } from "./laya-model-manifest.js";
 import { ModelFileStore } from "./model-file-store.js";
-import { runModelSetup } from "./model-setup-process.js";
+import { runModelSetup } from "./local-model-process.js";
 import { speechModel } from "./speech-models.js";
 import type { SpeechService } from "./speech-service.js";
 import { speechSupport, type SpeechSupport } from "./speech-support.js";
@@ -122,6 +122,10 @@ export class LocalModelSetupService {
     return body as ModelSetupInput;
   }
   start(kind: LocalModelKind, action: "download" | "initialize" | "activate", raw: unknown): void {
+    // Route params are cast, not validated: reject anything outside the fixed enums before
+    // any branch that treats "not laya" as speech.
+    if (kind !== "laya" && kind !== "speech") throw new DecisionError("INVALID_REQUEST", "未知本地模型类型。", 404);
+    if (action !== "download" && action !== "initialize" && action !== "activate") throw new DecisionError("INVALID_REQUEST", "未知模型操作。");
     if (this.disposed) throw new DecisionError("UNAVAILABLE", "模型管理已关闭。", 503);
     if (kind === "laya" && !this.supported()) throw new DecisionError("UNSUPPORTED", `LAYA-MLX 需要 Apple Silicon macOS 与 Metal；${decisionHardware().message}`, 409);
     if (kind === "laya" && action === "activate") throw new DecisionError("INVALID_REQUEST", "一键启用仅用于语音识别。");

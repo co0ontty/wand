@@ -15,7 +15,7 @@ export function ComposerRailSubmitChrome({ disabled, hint, onSubmit }: {
   return <WandButton
     className="wand-composer-rail-submit"
     kind="soft"
-    size="small"
+    size="medium"
     disabled={disabled}
     title={hint ?? DEFAULT_HINT}
     aria-label={hint ?? DEFAULT_HINT}

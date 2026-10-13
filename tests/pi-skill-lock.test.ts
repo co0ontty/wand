@@ -65,7 +65,7 @@ test("HTTP skill detents persist selection and locks, reject nonexistent IDs and
   const processes = new ProcessManager(config, storage, root);
   const registry = new SessionRegistry(processes, structured, storage);
   const app = express(); app.use(express.json());
-  registerSessionRoutes(app, processes, structured, storage, config.defaultMode, config, registry);
+  registerSessionRoutes(app, { processes, structured, storage, defaultMode: config.defaultMode, config, sessions: registry });
   const server = createServer(app); await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => {
     server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve()));

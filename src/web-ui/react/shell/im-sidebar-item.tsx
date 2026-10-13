@@ -1,4 +1,5 @@
 import { Badge, Flex, Typography } from "antd";
+import { SidebarLabelTooltip } from "../workspaces/sidebar-label-tooltip";
 import { WandButton } from "../ui";
 import * as React from "react";
 import { classNames } from "../ui/class-names";
@@ -30,7 +31,7 @@ export function ImSidebarItem({
   );
   const descriptionId = React.useId();
   return (
-    <WandButton kind={active ? "soft" : "ghost"} type="button" className={`session-item wand-sidebar-session-row${active ? " active" : ""}`}
+    <SidebarLabelTooltip title={`${title} · ${summary}`} selector=".im-sidebar-item-name"><WandButton kind={active ? "soft" : "ghost"} type="button" className={`session-item wand-sidebar-session-row${active ? " active" : ""}`}
       style={{ width: "100%", height: "auto", whiteSpace: "normal", justifyContent: "flex-start", padding: 8 }}
       data-session-id={id} aria-current={active ? "page" : undefined}
       aria-describedby={descriptionId} title={`${title} · ${summary}`} onClick={onClick}>
@@ -51,6 +52,6 @@ export function ImSidebarItem({
           title={titleGenerating ? "AI 正在生成标题" : undefined}>{title}</Typography.Text>
         <Typography.Text ellipsis type="secondary" id={descriptionId} className="im-sidebar-item-summary" style={{ fontSize: 12 }}>{summary}</Typography.Text>
       </Flex>
-    </WandButton>
+    </WandButton></SidebarLabelTooltip>
   );
 }

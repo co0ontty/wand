@@ -7,7 +7,7 @@ import { notifyConversationSessionPreview } from "../react/conversations/session
 import { notifySiliconEmployeeDefinitionChanged } from "../react/agents/employee-repository.js";
 import { resolveComposerPermission } from "../react/composer-badges/model";
 import type { ComposerPermissionAction } from "../react/composer-badges/controller";
-import { renderChat, scheduleChatRender } from "./chat-render";
+import { renderChat, scheduleChatRender } from "./chat-render-loader";
 import { clearStructuredQueuePersistence } from "./chat-scroll";
 import { mergeIncrementalWindowedTurn } from "./message-reconciliation";
 import { flushPendingMessages, buildMessagesForRender, isCurrentTerminalSession, flashComposerFailed, flushStructuredInputQueue, updateStructuredQueueCounter, setTerminalInteractive, flushCrossSessionQueue, reconcileInteractiveState, getSelectedSession } from "./input";
@@ -219,6 +219,8 @@ function projectSelectedChat(sessionId: string): any {
             // new socket; clear ours so the first init isn't treated as a gap.
             state.lastSeqBySession = {};
             state.chatResyncPendingBySession = {};
+            // Definition notifications can be missed while offline or during an upgrade.
+            notifySiliconEmployeeDefinitionChanged();
             // 启动客户端心跳检测：每 10s 检查一次 lastWsMessageAt，超过 40s
             // 没收到任何消息（包括服务端 20s 一次的 ping）就视为半开连接。
             startWsHeartbeatCheck();
@@ -501,6 +503,9 @@ function projectSelectedChat(sessionId: string): any {
               updateSessionSnapshot({ id: msg.sessionId, status: "running" });
             }
             scheduleSessionListUpdate();
+            // A timer can create a session without an interactive form mutation.
+            // Reload the shared workspace projection when that session appears.
+            notifyTasksChanged();
             break;
           case 'ended': {
             // 进程退出前最后一轮改动也要落到徽章上。

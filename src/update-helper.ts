@@ -1,12 +1,14 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { readServiceEntrypoint, type ServiceScope } from "./tui/commands.js";
-import { resolveGlobalWandBin } from "./npm-update-utils.js";
+import { detectInstalledServiceScopes, readServiceEntrypoint, type ServiceScope } from "./service-manager/index.js";
+import { launchdMainPid } from "./service-manager/launchd.js";
+import { PACKAGE_NAME, resolveGlobalWandBin } from "./npm-update-utils.js";
+import { runCommandSync } from "./run-command.js";
 import { shellQuote, shellQuoteAll } from "./shell-quote.js";
 
 export interface DetachedUpdateOptions {
@@ -32,38 +34,10 @@ function resolveBashPath(): string {
   return existsSync("/bin/bash") ? "/bin/bash" : "bash";
 }
 
-function detectInstalledServiceScopes(): ServiceScope[] {
-  if (process.platform === "darwin") {
-    return [
-      existsSync("/Library/LaunchDaemons/com.wand.web.plist") ? "system" : null,
-      existsSync(path.join(os.homedir(), "Library/LaunchAgents/com.wand.web.plist")) ? "user" : null,
-    ].filter((scope): scope is ServiceScope => scope !== null);
-  }
-  if (process.platform === "linux") {
-    return [
-      existsSync("/etc/systemd/system/wand.service") ? "system" : null,
-      existsSync(path.join(os.homedir(), ".config/systemd/user/wand.service")) ? "user" : null,
-    ].filter((scope): scope is ServiceScope => scope !== null);
-  }
-  return [];
-}
-
-function readLaunchdJobPid(domain: string): number | null {
-  const result = spawnSync("launchctl", ["print", `${domain}/com.wand.web`], {
-    encoding: "utf8",
-    timeout: 5_000,
-  });
-  if (result.status !== 0) return null;
-  const match = (result.stdout || "").match(/(?:^|\n)\s*pid = (\d+)\s*(?:\n|$)/);
-  if (!match) return null;
-  const pid = Number(match[1]);
-  return Number.isSafeInteger(pid) && pid > 1 ? pid : null;
-}
-
 function detectActiveDarwinServiceScope(pid: number): ServiceScope | null {
-  if (readLaunchdJobPid("system") === pid) return "system";
+  if (launchdMainPid("system") === pid) return "system";
   const uid = typeof process.getuid === "function" ? process.getuid() : null;
-  if (uid !== null && readLaunchdJobPid(`gui/${uid}`) === pid) return "user";
+  if (uid !== null && launchdMainPid(`gui/${uid}`) === pid) return "user";
   return null;
 }
 
@@ -166,6 +140,21 @@ function resolveTypeScriptLoaderArgs(): string[] {
 
 const DEFAULT_UPDATE_UTILS_PATH = resolveDefaultUpdateUtilsPath();
 
+const INSTALL_SPEC_PATTERN = new RegExp(
+  `^${PACKAGE_NAME.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}@(latest|beta|\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?)$`,
+);
+
+/**
+ * The install spec is executed by npm, so only the Wand package with a dist-tag or a
+ * concrete semver is accepted. Anything else (paths, URLs, git specs, shell syntax) is rejected.
+ */
+export function assertSafeInstallSpec(spec: string): string {
+  if (typeof spec !== "string" || !INSTALL_SPEC_PATTERN.test(spec)) {
+    throw new Error(`Unsafe detached update install spec: ${JSON.stringify(String(spec))}`);
+  }
+  return spec;
+}
+
 /** Exported so the safety-critical update flow can be exercised without starting a detached process. */
 export function buildDetachedUpdateHelperScript(
   opts: DetachedUpdateOptions,
@@ -175,6 +164,10 @@ export function buildDetachedUpdateHelperScript(
 ): string {
   if (!Number.isSafeInteger(opts.parentPid) || opts.parentPid <= 1) {
     throw new Error(`Invalid detached update parent pid: ${opts.parentPid}`);
+  }
+  assertSafeInstallSpec(opts.installSpec);
+  if (serviceScope !== null && serviceScope !== "system" && serviceScope !== "user") {
+    throw new Error(`Invalid service scope: ${String(serviceScope)}`);
   }
   const home = opts.env.HOME || os.homedir();
   const npmCache = opts.env.npm_config_cache || path.join(home, ".npm");
@@ -354,10 +347,9 @@ function spawnDetached(
     const unitName = `wand-update-${process.pid}-${Date.now()}`;
     const bashPath = resolveBashPath();
     const runTransient = (args: string[], method: string): { method: string } | null => {
-      const res = spawnSync("systemd-run", args, {
-        encoding: "utf8",
-        timeout: 5000,
+      const res = runCommandSync("systemd-run", args, {
         env: baseEnv,
+        timeout: 5000,
         stdio: "ignore",
       });
       return res.status === 0 ? { method } : null;
@@ -387,7 +379,7 @@ function spawnDetached(
       return null;
     }
 
-    const setsid = spawnSync("setsid", ["--version"], { encoding: "utf8", timeout: 2000 });
+    const setsid = runCommandSync("setsid", ["--version"], { timeout: 2000 });
     if (setsid.status === 0) {
       const result = trySpawn("setsid", [bashPath, scriptPath], "setsid");
       if (result) return result;
@@ -410,6 +402,11 @@ export function startDetachedUpdateHelper(opts: DetachedUpdateOptions): Detached
   const dir = mkdtempSync(path.join(os.tmpdir(), "wand-update-"));
   const scriptPath = path.join(dir, "update.sh");
   const logPath = path.join(dir, "update.log");
+  try {
+    assertSafeInstallSpec(opts.installSpec);
+  } catch (err) {
+    return { started: false, scriptPath, logPath, message: err instanceof Error ? err.message : String(err) };
+  }
   let serviceScope: ServiceScope | null;
   try {
     serviceScope = detectManagedServiceScope();
@@ -461,6 +458,6 @@ export function startDetachedUpdateHelper(opts: DetachedUpdateOptions): Detached
 export function canUseDetachedUpdateHelper(): boolean {
   if (process.platform === "win32") return false;
   if (existsSync("/bin/bash")) return true;
-  const res = spawnSync("bash", ["--version"], { encoding: "utf8", timeout: 2000 });
+  const res = runCommandSync("bash", ["--version"], { timeout: 2000 });
   return res.status === 0;
 }

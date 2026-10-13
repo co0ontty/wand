@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import net from "node:net";
+import { probeUnixSocket as probeSocket } from "./socket-probe.js";
 import { spawn } from "node:child_process";
 import process from "node:process";
 import { StringDecoder } from "node:string_decoder";
@@ -34,6 +35,7 @@ import {
 } from "./structured-exec-host.js";
 import { startDaemonHeartbeat, waitForDaemonSocket } from "./daemon-connection.js";
 import { appendWindow, PTY_OUTPUT_MAX_SIZE } from "./pty-text-utils.js";
+import { logInfo, logRateLimited } from "./runtime-log.js";
 
 const TERMINAL_DAEMON_RECONNECT_INITIAL_MS = 500;
 const TERMINAL_DAEMON_RECONNECT_MAX_MS = 10_000;
@@ -190,13 +192,13 @@ class RemoteStructuredProcess implements StructuredExecProcess {
   replayFromLogs(state: StructuredRunState): void {
     const stdoutDelta = alignedDelta(state.stdoutLog, state.stdoutTruncated, this.deliveredChars.stdout);
     if (stdoutDelta === null) {
-      process.stderr.write(`[wand] structured run ${this.runId} stdout log no longer aligns with delivered output; skipping catch-up\n`);
+      logInfo(`structured run ${this.runId} stdout log no longer aligns with delivered output; skipping catch-up`);
     } else if (stdoutDelta) {
       this.acceptStream({ stream: "stdout", data: stdoutDelta, seq: state.stdoutSeq });
     }
     const stderrDelta = alignedDelta(state.stderrLog, state.stderrTruncated, this.deliveredChars.stderr);
     if (stderrDelta === null) {
-      process.stderr.write(`[wand] structured run ${this.runId} stderr log no longer aligns with delivered output; skipping catch-up\n`);
+      logInfo(`structured run ${this.runId} stderr log no longer aligns with delivered output; skipping catch-up`);
     } else if (stderrDelta) {
       this.acceptStream({ stream: "stderr", data: stderrDelta, seq: state.stderrSeq });
     }
@@ -290,7 +292,7 @@ export class TerminalDaemonClient implements TerminalHost, StructuredExecHost {
       for (const session of sessions) this.inventory.set(session.sessionId, session);
       if (previous.size > 0) {
         this.reconcileAfterReconnect(previous);
-        process.stderr.write("[wand] Reconnected to terminal daemon; reconciled PTY inventory.\n");
+        logInfo("Reconnected to terminal daemon; reconciled PTY inventory.");
       }
       await this.refreshStructuredAfterReconnect();
       if (this.disposed || this.socket !== socket) throw new Error("Terminal daemon disconnected during adoption");
@@ -527,7 +529,7 @@ export class TerminalDaemonClient implements TerminalHost, StructuredExecHost {
       if (this.disposed) return;
       if (!this.reconnectFailureLogged) {
         this.reconnectFailureLogged = true;
-        process.stderr.write(`[wand] Terminal daemon reconnect failed: ${error instanceof Error ? error.message : String(error)}\n`);
+        logInfo(`Terminal daemon reconnect failed: ${error instanceof Error ? error.message : String(error)}`);
       }
       this.scheduleReconnect();
     }
@@ -588,7 +590,7 @@ export class TerminalDaemonClient implements TerminalHost, StructuredExecHost {
 
   reportOperationError(sessionId: string, error: unknown): void {
     if (!this.socket || this.socket.destroyed) return;
-    process.stderr.write(`[wand] terminal daemon operation failed for ${sessionId}: ${error instanceof Error ? error.message : String(error)}\n`);
+    logRateLimited("terminal-daemon-op-failed", `terminal daemon operation failed for ${sessionId}: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   private resultFromState(state: TerminalSessionState, isNew: boolean, afterSeq: number): TerminalAttachResult {
@@ -761,7 +763,7 @@ export async function createTerminalHost(configPath: string): Promise<TerminalHo
     const client = await waitForTerminalDaemon(paths.socketPath, paths.tokenPath, 5_000);
     if (client) return client;
   } catch (error) {
-    process.stderr.write(`[wand] Failed to start terminal daemon: ${error instanceof Error ? error.message : String(error)}\n`);
+    logInfo(`Failed to start terminal daemon: ${error instanceof Error ? error.message : String(error)}`);
   }
   throw new Error(
     "Terminal daemon unavailable; refusing non-persistent fallback because web restarts must not stop running tasks.",
@@ -816,23 +818,7 @@ export async function connectExistingTerminalHost(configPath: string): Promise<T
   return tryConnect(paths.socketPath, paths.tokenPath);
 }
 
-function probeSocket(socketPath: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = net.createConnection(socketPath);
-    let settled = false;
-    const finish = (alive: boolean) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      socket.destroy();
-      resolve(alive);
-    };
-    socket.once("connect", () => finish(true));
-    socket.once("error", () => finish(false));
-    const timer = setTimeout(() => finish(false), 300);
-    timer.unref?.();
-  });
-}
+
 
 function startDetachedDaemon(configPath: string): void {
   const entry = process.argv[1];

@@ -3,19 +3,20 @@ import { Avatar, Badge, Flex, Typography } from "antd";
 import type { ConversationSummary } from "../../../conversation-types.js";
 import { employeeProfile } from "../agents/employee-profile";
 import { wandOverlay } from "../overlay-controller";
+import { SidebarLabelTooltip } from "../workspaces/sidebar-label-tooltip";
 import { SidebarRowMenu } from "../workspaces/sidebar-row-menu";
 import { EmployeeAvatar } from "../agents/employee-avatar";
-import { cachedSiliconEmployee } from "../agents/employee-repository";
+import { cachedSiliconEmployee, useSiliconEmployees } from "../agents/employee-repository";
 import { ConversationGroupAvatar } from "./avatar";
 import { WandButton, WandIcon, WandIconButton, WandSearchField, WandStretchTabs } from "../ui";
-import { conversationUi, useConversationUi } from "./state";
+import { conversationUi, useConversationUi, type ConversationListFilter } from "./state";
 import { conversationTaskStateLabel } from "./presentation";
 import { conversationsRepository, useConversations } from "./repository";
 import { ConversationMorphIcon, ConversationPanel } from "./controls";
 import { GroupEditor } from "./group-editor";
 import { useUserProfile } from "../user-profile-repository";
 
-export type ConversationNavigationPage = "chats" | "tasks" | "board" | "teams" | "contacts";
+export type ConversationNavigationPage = "chats" | "tasks" | "board" | "teams" | "contacts" | "schedules";
 
 /** Global destinations stay in the left rail, independent of the current list. */
 export function ConversationNavigation({ activePage, teamAttention, onNavigate }: {
@@ -28,7 +29,7 @@ export function ConversationNavigation({ activePage, teamAttention, onNavigate }
     { value: "tasks", label: "工作区", icon: "folder" },
     { value: "board", label: "任务看板", icon: "board", id: "task-board-button" },
     { value: "teams", label: "团队", icon: "users", id: "ai-teams-button" },
-    { value: "contacts", label: "通讯录", icon: "user" },
+    { value: "schedules", label: "定时任务", icon: "history", id: "scheduled-tasks-button" },
   ] as const;
   return <Flex component="nav" vertical gap={4} className="conversation-navigation" aria-label="功能导航">
     {entries.map(entry => <WandIconButton key={entry.value} id={"id" in entry ? entry.id : undefined}
@@ -37,7 +38,7 @@ export function ConversationNavigation({ activePage, teamAttention, onNavigate }
       aria-pressed={activePage === entry.value} onClick={() => onNavigate(entry.value)}>
       <span className="sidebar-nav-icon" aria-hidden="true">{entry.value === "teams" ? <Badge count={teamAttention} size="small"><WandIcon name={entry.icon} size={18}/></Badge>
         : <WandIcon name={entry.icon} size={18}/>}</span>
-      <span className="sidebar-nav-label" aria-hidden="true">{entry.value === "board" ? "任务" : entry.label}</span>
+      <span className="sidebar-nav-label" aria-hidden="true">{entry.value === "board" ? "任务" : entry.value === "schedules" ? "定时" : entry.label}</span>
     </WandIconButton>)}
   </Flex>;
 }
@@ -52,13 +53,13 @@ export function ConversationSidebarTools({ enabled, onNavigate, onCreateSession 
   React.useEffect(() => { setPanel("closed"); }, [enabled, state.mode]);
   return <Flex ref={anchor} align="center" className="conversation-sidebar-tools" style={{ position: "relative" }}>
     <WandIconButton ref={plus} className="conversation-create-button"
-      aria-label={state.mode === "tasks" ? "新建会话" : panel === "closed" ? "对话操作" : "关闭对话操作"}
+      aria-label={state.mode === "tasks" ? "新建会话" : panel === "closed" ? "发起群聊" : "关闭群聊表单"}
       aria-expanded={panel !== "closed"} aria-controls="conversation-create-panel"
-      onClick={() => state.mode === "tasks" ? onCreateSession?.() : setPanel(panel === "closed" ? "menu" : "closed")}>
+      onClick={() => state.mode === "tasks" ? onCreateSession?.() : setPanel(panel === "closed" ? "group" : "closed")}>
       <ConversationMorphIcon active={panel !== "closed"} from="plus" to="close"/>
+      <span className="conversation-create-label">{panel === "closed" ? "发起群聊" : "关闭"}</span>
     </WandIconButton>
     <ConversationPanel open={enabled && panel !== "closed"} owner="conversation-create-panel" focusKey={panel} anchorRef={anchor} triggerRef={plus} onClose={() => setPanel("closed")}>
-      <div hidden={panel !== "menu"}><WandButton onClick={() => setPanel("group")}>发起群聊</WandButton></div>
       <div hidden={panel !== "group"}><GroupEditor open={enabled && panel === "group"} owner="conversation-create-panel"
         onCancel={() => setPanel("closed")} onCreated={id => { setPanel("closed"); conversationUi.select(id, true); onNavigate(); }}/></div>
     </ConversationPanel>
@@ -75,7 +76,7 @@ export function formatConversationListTime(messageAt: string, now = new Date()):
 }
 
 /** 归档档位：全部 / 未归档 / 已归档，和侧栏「在跑」是同一套顶部筛选形态。 */
-export type ConversationListFilter = "all" | "active" | "archived";
+export type { ConversationListFilter } from "./state";
 
 /**
  * 归档的对话：群聊解散后归档，或它的任务已经被归档。
@@ -119,9 +120,10 @@ export function conversationListCounts<
 
 export function ConversationSidebarList({ compact, enabled = true, onNavigate }: { compact: boolean; enabled?: boolean; onNavigate(): void }): React.ReactElement {
   const { items, error, loaded, refresh } = useConversations();
+  const { employees } = useSiliconEmployees({ enabled });
   const ui = useConversationUi();
   const query = (ui.filters["list-query"] ?? "").trim().toLowerCase();
-  const [filter, setFilter] = React.useState<ConversationListFilter>("all");
+  const filter = ui.listFilter;
   const [actionError, setActionError] = React.useState("");
   const searchInput = React.useRef<HTMLInputElement>(null);
   const [engaged, setEngaged] = React.useState(false);
@@ -159,13 +161,14 @@ export function ConversationSidebarList({ compact, enabled = true, onNavigate }:
       <WandSearchField inputRef={searchInput} className="conversation-search-input" label="搜索对话或任务"
         value={ui.filters["list-query"] ?? ""} onValueChange={value => conversationUi.filter("list-query", value)}/>
     </div>
-    <Flex justify="space-between" align="center" gap={4} className="conversation-list-section"><Typography.Text type="secondary" className="conversation-list-count" title={countLabel} aria-label={countLabel}>{loaded ? query ? `匹配 ${counts.matches} / ${counts.scope}` : `${counts.scope} 个对话` : error ? "数量未加载" : "读取中…"}</Typography.Text>
+    <Flex vertical align="stretch" gap={4} className="conversation-list-section">
       <WandStretchTabs className="conversation-list-filter" ariaLabel="对话归档筛选"
         tabs={[{ value: "all", label: "全部" }, { value: "active", label: "未归档" }, { value: "archived", label: "已归档" }]}
-        value={filter} onValueChange={(value) => setFilter(value as ConversationListFilter)}/></Flex></div> : null}
+        value={filter} onValueChange={conversationUi.listFilter}/>
+      <Typography.Text type="secondary" className="conversation-list-count" title={countLabel} aria-label={countLabel}>{loaded ? query ? `匹配 ${counts.matches} / ${counts.scope}` : `${counts.scope} 个对话` : error ? "数量未加载" : "读取中…"}</Typography.Text></Flex></div> : null}
     {error ? <Typography.Text type="danger" role="status">{error}<WandButton size="small" onClick={refresh}>重新读取</WandButton></Typography.Text> : null}
     {actionError ? <Typography.Paragraph type="danger" role="alert">{actionError}</Typography.Paragraph> : null}
-    {rows.map(item => <ConversationListRow key={item.id} item={item} compact={compact} query={query}
+    {rows.map(item => <ConversationListRow key={item.id} item={item} employee={employees.find(employee => employee.id === item.peerEmployeeId) ?? null} compact={compact} query={query}
       enabled={enabled} filter={filter} selected={ui.selectedId === item.id && ui.active !== false} onSelect={() => select(item.id)}
       onUpdate={patch => update(item, patch)} onRemove={() => remove(item)}/>) }
     {loaded && !rows.length ? <div className="conversation-list-empty" role="status"><WandIcon name={query ? "search" : "chat"} size={20}/><Typography.Paragraph type="secondary">{query ? "没有匹配的对话或任务"
@@ -175,11 +178,11 @@ export function ConversationSidebarList({ compact, enabled = true, onNavigate }:
   </div>;
 }
 
-function ConversationListRow({ item, compact, query, enabled, filter, selected, onSelect, onUpdate, onRemove }: {
-  item: ConversationSummary; compact: boolean; query: string; enabled: boolean; filter: ConversationListFilter; selected: boolean; onSelect(): void;
+function ConversationListRow({ item, employee: projectedEmployee, compact, query, enabled, filter, selected, onSelect, onUpdate, onRemove }: {
+  item: ConversationSummary; employee: React.ComponentProps<typeof EmployeeAvatar>["employee"] | null; compact: boolean; query: string; enabled: boolean; filter: ConversationListFilter; selected: boolean; onSelect(): void;
   onUpdate(patch: { pinned?: boolean; dissolved?: boolean }): Promise<void>; onRemove(): Promise<void>;
 }): React.ReactElement {
-  const employee = item.peerEmployeeId ? cachedSiliconEmployee(item.peerEmployeeId) : null;
+  const employee = projectedEmployee ?? (item.peerEmployeeId ? cachedSiliconEmployee(item.peerEmployeeId) : null);
   const identity = employee ?? (item.peerEmployeeId ? { id: item.peerEmployeeId, name: item.title } : null);
   const selfName = useUserProfile().name || "我";
   const [menu, setMenu] = React.useState(false);
@@ -198,15 +201,15 @@ function ConversationListRow({ item, compact, query, enabled, filter, selected, 
   const archived = isConversationArchived(item);
   const contents = <div ref={row} className={`conversation-row conversation-row-${item.kind}`} aria-current={selected ? "page" : undefined}
     data-pinned={!!item.pinnedAt} data-archived={archived || undefined} data-conversation-id={item.id} aria-busy={busy || undefined}>
-    <WandIconButton className="conversation-row-avatar conversation-avatar-button" aria-label={identity ? `查看${item.title}的资料` : `打开${item.title}`}
-      onClick={event => identity ? employeeProfile.open(identity, event.currentTarget) : onSelect()}>
-      {employee ? <EmployeeAvatar employee={employee} size="md"/> : item.kind === "group" ? <ConversationGroupAvatar title={item.title} size={32}/> : <Avatar size={32} icon={<WandIcon name="chat" size={16}/>}/>}</WandIconButton>
-    {!compact ? <WandButton kind="ghost" className="conversation-row-open" title={item.title} onClick={onSelect}>
+    <WandIconButton className="conversation-row-avatar conversation-avatar-button" aria-label={identity && !compact ? `查看${item.title}的资料` : `打开${item.title}`}
+      onClick={event => identity && !compact ? employeeProfile.open(identity, event.currentTarget) : onSelect()}>
+      {identity ? <EmployeeAvatar employee={identity} size="sm"/> : item.kind === "group" ? <ConversationGroupAvatar title={item.title} members={item.team?.members ?? []} size={36}/> : <Avatar size={36} icon={<WandIcon name="chat" size={16}/>}/>}</WandIconButton>
+    {!compact ? <SidebarLabelTooltip title={item.title} selector=".conversation-row-title"><WandButton kind="ghost" className="conversation-row-open" title={item.title} onClick={onSelect}>
       <span className="conversation-row-copy"><span className="conversation-row-topline"><span className="conversation-row-title">{item.title}</span>
         {formatConversationListTime(item.messageAt) ? <time className="conversation-row-time" dateTime={item.messageAt}>{formatConversationListTime(item.messageAt)}</time> : null}</span>
         <span className="conversation-row-bottomline">{archived ? <span className="conversation-archived-tag">已归档</span> : null}<span className="conversation-row-preview">{item.dissolvedAt ? "群聊已解散 · 点击查看或恢复" : item.preview || (item.kind === "group" ? `${selfName} + ${item.team?.members.length ?? 0} 位员工` : "私聊")}</span>
           {item.pinnedAt ? <span className="conversation-pin" title="已置顶" aria-label="已置顶"><WandIcon name="pin" size={13}/></span> : null}</span>
-      </span></WandButton> : null}
+      </span></WandButton></SidebarLabelTooltip> : null}
     {!compact ? <WandIconButton className="conversation-row-more" aria-label={`${item.title}的菜单`} aria-haspopup="menu" aria-expanded={menu}
       onClick={event => {
         event.stopPropagation();

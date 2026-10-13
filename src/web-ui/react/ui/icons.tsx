@@ -39,6 +39,7 @@ export type WandIconName =
   | "image"
   | "info"
   | "keyboard"
+  | "keycaps"
   | "lock"
   | "logout"
   | "markdown"
@@ -195,6 +196,8 @@ export function WandIcon({
       return <svg {...common}><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>;
     case "keyboard":
       return <svg {...common}><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6"/></svg>;
+    case "keycaps":
+      return <svg {...common}><rect x="3" y="4" width="8" height="6" rx="1.5"/><rect x="14" y="4" width="7" height="6" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M9 16.5h6"/></svg>;
     case "lock":
       return <svg {...common}><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4M12 15v2"/></svg>;
     case "unlock":

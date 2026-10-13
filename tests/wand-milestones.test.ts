@@ -362,7 +362,7 @@ test("legacy databases gain the milestone columns and table on open", (t) => {
   assert.equal(bound.workspaceId, workspace.id);
   assert.deepEqual(
     storage.listWandMilestones(workspace.id).map((item) => item.id).sort(),
-    ["legacy-milestone", milestone.id, bound.id].sort(),
+    ["legacy-milestone", milestone.id, bound.id, storage.findDefaultWandMilestone()!.id].sort(),
   );
 
   // 新建任务没指定优先级时默认「低」。

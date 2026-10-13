@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
-import net from "node:net";
+import { probeUnixSocket as isSocketListening } from "./socket-probe.js";
 import process from "node:process";
 
 import { getErrorMessage } from "./error-utils.js";
@@ -16,6 +16,7 @@ import {
   type TerminalSpawnRequest,
 } from "./terminal-host.js";
 import type { RenderEngine } from "./types.js";
+import { logInfo } from "./runtime-log.js";
 
 /** Render 的 socket/token 就绪等待窗口，与 legacy daemon 保持一致。 */
 const RENDER_READY_TIMEOUT_MS = 5_000;
@@ -75,7 +76,7 @@ export function createRenderDaemonReviver(
       while (Date.now() < deadline) {
         // 新 daemon 先 bind 再写 pid：pid 文件里出现活 pid 才算它真正接管了这个端点。
         if (readLiveRenderPid(paths.pidPath) !== null && await isSocketListening(paths.socketPath)) {
-          process.stderr.write(`[wand] Restarted Render daemon (pid ${pid ?? "?"}); reconnecting.\n`);
+          logInfo(`Restarted Render daemon (pid ${pid ?? "?"}); reconnecting.`);
           return true;
         }
         await new Promise<void>((resolve) => setTimeout(resolve, 50));
@@ -180,7 +181,7 @@ export function resolveRenderEngine(envValue: string | undefined, configEngine: 
   const raw = (envValue ?? "").trim().toLowerCase();
   if (raw) {
     if (raw === "rust" || raw === "legacy" || raw === "auto") return raw;
-    process.stderr.write(`[wand] WAND_RENDER_ENGINE=${envValue} is invalid (expected rust|legacy|auto); ignoring it.\n`);
+    logInfo(`WAND_RENDER_ENGINE=${envValue} is invalid (expected rust|legacy|auto); ignoring it.`);
   }
   return configEngine === "rust" || configEngine === "legacy" ? configEngine : "auto";
 }
@@ -216,9 +217,9 @@ export async function createUpgradeAwareTerminalHost(
         "or set render.engine=auto/legacy to fall back.",
       );
     }
-    process.stderr.write(
-      "[wand] WARNING: render.engine=auto but no wand-render binary was found; PTYs stay on the legacy terminald. " +
-      "Build it with `npm run build:render-native`, stage a published build with `npm run build:render-bin`, or set WAND_RENDER_BIN.\n",
+    logInfo(
+      "WARNING: render.engine=auto but no wand-render binary was found; PTYs stay on the legacy terminald. " +
+      "Build it with `npm run build:render-native`, stage a published build with `npm run build:render-bin`, or set WAND_RENDER_BIN.",
     );
     const fallback = legacy ?? await createTerminalHost(configPath);
     return { host: fallback, renderHost: null, legacyHost: asTerminalDaemonClient(fallback) };
@@ -237,8 +238,8 @@ export async function createUpgradeAwareTerminalHost(
   } catch (error) {
     if (engine === "rust") throw error;
     // auto 模式下把失败讲清楚再回退：这种情况用户最需要知道 Rust 引擎没生效。
-    process.stderr.write(
-      `[wand] WARNING: render.engine=auto could not bring up Render (${getErrorMessage(error)}); falling back to the legacy terminald.\n`,
+    logInfo(
+      `WARNING: render.engine=auto could not bring up Render (${getErrorMessage(error)}); falling back to the legacy terminald.`,
     );
     const fallback = legacy ?? await createTerminalHost(configPath);
     return { host: fallback, renderHost: null, legacyHost: asTerminalDaemonClient(fallback) };
@@ -261,9 +262,9 @@ export async function createUpgradeAwareTerminalHost(
     throw error;
   }
   const version = await readRenderBinaryVersion(binaryPath);
-  process.stderr.write(
-    `[wand] Render engine active (${version ? `wand-render ${version}` : "version unknown"}, ${binaryPath}); ` +
-    "terminald available for structured CLI runs and pre-upgrade PTYs.\n",
+  logInfo(
+    `Render engine active (${version ? `wand-render ${version}` : "version unknown"}, ${binaryPath}); ` +
+    "terminald available for structured CLI runs and pre-upgrade PTYs.",
   );
   return {
     host: new CompositeTerminalHost({ legacy: structuredHost, render }),
@@ -353,7 +354,7 @@ export function spawnDetachedRenderProcess(configPath: string, binaryPath: strin
     env: process.env,
   });
   child.on("error", (error) => {
-    process.stderr.write(`[wand] Failed to spawn wand-render: ${getErrorMessage(error)}\n`);
+    logInfo(`Failed to spawn wand-render: ${getErrorMessage(error)}`);
   });
   child.unref();
   return typeof child.pid === "number" ? child.pid : null;
@@ -413,23 +414,7 @@ function reapUnreadyRender(pid: number | undefined): void {
   timer.unref?.();
 }
 
-/** 对端是否真的在监听：区分「活着但拒绝 adopt」与「上一轮崩溃留下的孤儿 socket 文件」。 */function isSocketListening(socketPath: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = net.createConnection(socketPath);
-    let settled = false;
-    const finish = (alive: boolean) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      socket.destroy();
-      resolve(alive);
-    };
-    socket.once("connect", () => finish(true));
-    socket.once("error", () => finish(false));
-    const timer = setTimeout(() => finish(false), 300);
-    timer.unref?.();
-  });
-}
+
 
 function readLiveRenderPid(pidPath: string): number | null {
   let pid: number;

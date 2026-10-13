@@ -1,5 +1,5 @@
 import * as React from "react";
-import type { SiliconEmployee, SiliconEmployeeDraft } from "../../../ai-team-types.js";
+import { isBuiltinSiliconEmployee, type SiliconEmployee, type SiliconEmployeeDraft } from "../../../ai-team-types.js";
 import { jsonBody, requestJson } from "../http-adapter.js";
 
 export type SiliconEmployeeInput = Pick<
@@ -7,7 +7,26 @@ export type SiliconEmployeeInput = Pick<
   "name" | "duty" | "prompt" | "avatar" | "agents" | "tags"
 >;
 
-type EmployeeListener = (employeeId: string) => void;
+import { isFixedAvatarEmployee } from "../../../fixed-employee-avatar.js";
+
+export type EmployeeUpdateInput = Partial<SiliconEmployeeInput>;
+
+/** Both the directory and conversation profile use the same built-in edit policy. */
+export function employeeUpdateInput(employee: SiliconEmployee, patch: Partial<SiliconEmployee>): EmployeeUpdateInput {
+  if (isFixedAvatarEmployee(employee)) {
+    const input: EmployeeUpdateInput = {};
+    for (const field of ["name", "duty", "prompt", "agents"] as const) {
+      if (patch[field] !== undefined) Object.assign(input, { [field]: patch[field] });
+    }
+    return input;
+  }
+  if (isBuiltinSiliconEmployee(employee)) return { agents: patch.agents ?? employee.agents };
+  return { name: patch.name ?? employee.name, duty: patch.duty ?? employee.duty, prompt: patch.prompt ?? employee.prompt,
+    avatar: patch.avatar ?? employee.avatar, tags: patch.tags ?? employee.tags ?? [], agents: patch.agents ?? employee.agents };
+}
+
+/** No ID means reconnect/resync: every active identity needs a fresh read. */
+type EmployeeListener = (employeeId?: string) => void;
 const employeeListeners = new Set<EmployeeListener>();
 const employeeCacheListeners = new Set<() => void>();
 
@@ -31,7 +50,7 @@ export function subscribeSiliconEmployeeCache(listener: () => void): () => void 
   return () => { employeeCacheListeners.delete(listener); };
 }
 
-export function notifySiliconEmployeeDefinitionChanged(employeeId: string): void {
+export function notifySiliconEmployeeDefinitionChanged(employeeId?: string): void {
   invalidateEmployeeList();
   for (const listener of employeeListeners) listener(employeeId);
 }
@@ -50,7 +69,7 @@ export const siliconEmployeesRepository = {
 
     const query = options?.includeArchived ? "?includeArchived=1" : "";
     const version = employeeListVersion;
-    const pending = requestJson<{ employees: SiliconEmployee[] }>(`/api/silicon-employees${query}`)
+    const pending = requestJson<{ employees: SiliconEmployee[] }>(`/api/silicon-employees${query}`, { cache: "no-store" })
       .then((res) => {
         const list = res.employees ?? [];
         if (!options?.includeArchived && version === employeeListVersion) {
@@ -72,7 +91,7 @@ export const siliconEmployeesRepository = {
   },
 
   get(id: string): Promise<SiliconEmployee> {
-    return requestJson<SiliconEmployee>(`/api/silicon-employees/${encodeURIComponent(id)}`);
+    return requestJson<SiliconEmployee>(`/api/silicon-employees/${encodeURIComponent(id)}`, { cache: "no-store" });
   },
 
   /** 按自然语言期望起草一份配置；仅在用户点「创建员工」或「按期望生成」时调用。 */
@@ -90,7 +109,7 @@ export const siliconEmployeesRepository = {
     return employee;
   },
 
-  async update(id: string, input: SiliconEmployeeInput | Pick<SiliconEmployee, "agents">): Promise<SiliconEmployee> {
+  async update(id: string, input: EmployeeUpdateInput): Promise<SiliconEmployee> {
     const employee = await requestJson<SiliconEmployee>(
       `/api/silicon-employees/${encodeURIComponent(id)}`,
       jsonBody(input, "PUT"),

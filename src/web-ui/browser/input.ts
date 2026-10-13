@@ -1,4 +1,6 @@
 import { mountComposerSender } from "./composer-sender-adapter.js";
+import { mountMinimalComposer } from "./composer-minimal-adapter.js";
+import { mergePtyModifiers, modifiedPtySequence } from "../pty-input-state.js";
 import { mountBrowserButtons } from "./library-buttons.js";
 import type { SendError } from "./types";
 import { composer as composerStore, composerQueue, state } from "./state";
@@ -7,7 +9,8 @@ import { parseJsonResponse } from "../react/http-adapter";
 import { getErrorMessage } from "../../error-utils.js";
 import { MOTION_DWELL_FAILED_MS, MOTION_DWELL_SENT_MS } from "../react/ui/motion-tokens";
 import { collapseTodoProgress, computeRunningSignal, escapeHtml } from "./utils";
-import { clearActivityDetailState, renderChat, shortCommand } from "./chat-render";
+import { clearActivityDetailState, renderChat } from "./chat-render-loader";
+import { shortCommand } from "./chat-render-model.js";
 import { getStructuredQueuedInputs, persistCrossSessionQueue, persistSelectedId, prepareChatBottomFollow, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession } from "./chat-scroll";
 import "./file-browser";
 import "./git-commit";
@@ -194,7 +197,8 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         // PTY passthrough is a compact control surface, not a drafting area.
         // Keep it at the CSS minimum even if a previous composer draft still
         // exists for this session; the draft is restored when passthrough ends.
-        var terminalPassthrough = el.classList.contains("is-terminal-passthrough");
+        var terminalPassthrough = el.classList.contains("is-terminal-passthrough")
+          && el.closest(".input-composer")?.dataset.composerExpanded !== "true";
         // For empty content, reset to minimum height immediately.
         if (terminalPassthrough || !el.value || el.value.trim() === "") {
           el.style.height = minHeight + "px";
@@ -2223,7 +2227,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         // mode the document capture listener otherwise consumes Escape before the
         // dialog can dismiss itself (and can forward radio arrow keys to the PTY).
         return !!(target.closest && target.closest(
-          '[role="dialog"], [role="alertdialog"], .wand-ui-select-trigger, .wand-ui-select-content, [role="listbox"], [role="option"], .terminal-shortcuts'
+          '[role="dialog"], [role="alertdialog"], .wand-ui-select-trigger, .wand-ui-select-content, [role="listbox"], [role="option"], [data-wand-popup-owner], .terminal-shortcuts, .pty-input-mode-toggle, .pty-modifier-toggle, .composer-actions-left button, .composer-actions-right button'
         ));
       }
 
@@ -2248,7 +2252,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         return "";
       }
 
-      function keyFromKeyboardEvent(event) {
+      export function keyFromKeyboardEvent(event) {
         return keyboardEventKeyMap[event.key] || event.key;
       }
 
@@ -2510,6 +2514,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         var container = document.getElementById("output");
         if (container) container.classList.toggle("interactive", !structured && state.terminalInteractive);
         updateTerminalShortcuts();
+        mountMinimalComposer(autoResizeInput);
         paintSelectedRunningStatus();
       }
 
@@ -2550,11 +2555,12 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         if (event.metaKey) return;
         var key = keyFromKeyboardEvent(event);
         if (!key) return;
-        var mods = getModifierStateFromEvent(event, key);
+        var physical = getModifierStateFromEvent(event, key);
+        var mods = { ...physical, ...mergePtyModifiers(state.selectedId, physical) };
         if (isModifierKey(key)) return;
         // COPY-2: 有选区时 Ctrl+C 放行浏览器原生复制，而不是发 SIGINT(0x03) 把进程
         // 杀了还复制不到。无选区的 Ctrl+C 仍透传给 PTY。
-        if (mods.ctrl && key.length === 1 && key.toLowerCase() === "c" && hasActiveTerminalSelection()) {
+        if (physical.ctrl && key.length === 1 && key.toLowerCase() === "c" && hasActiveTerminalSelection()) {
           return;
         }
         var sequence = buildPtySequence(key, mods);
@@ -2586,7 +2592,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           }
           return;
         }
-        sendTerminalSequence(buildPtySequence(key, undefined), key);
+        sendTerminalSequence(buildPtySequence(key, mergePtyModifiers(session.id, { ctrl:false, shift:false })), key);
         scheduleShortcutResync();
       }
 
@@ -2597,7 +2603,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         // Native input shells already own a shortcut row; never duplicate it.
         host.hidden = !session || isStructuredSession(session) || isNativeInputEmbed();
         if (host.hidden) return;
-        paintTerminalPanel(host, session.status !== "running", sendTerminalShortcut);
+        paintTerminalPanel(host, session.status !== "running", sendTerminalShortcut, session.id);
       }
 
       function enableTerminalCapture() {
@@ -2618,6 +2624,8 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
       export function buildPtySequence(key, modifiers) {
         var mods = modifiers || { ctrl: false, alt: false, shift: false };
         if (isModifierKey(key)) return "";
+        var modified = modifiedPtySequence(key, mods);
+        if (modified !== null) return modified;
         // Shift+Tab → CSI Z (back-tab)。Claude Code 用它在 plan / 自动接受 模式间切换。
         if (key === "tab" && mods.shift) return String.fromCharCode(27) + "[Z";
         var specialSequence = getPtySpecialSequence(key);

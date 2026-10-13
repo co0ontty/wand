@@ -195,12 +195,12 @@ test("Pi settings repository uses encoded session endpoints, partial patches and
 });
 
 test("Pi settings React modules stay behind refs/runtime and repository seams", () => {
-  for (const file of ["host.tsx", "controller.ts"]) {
+  for (const file of ["deferred-host.tsx", "host.tsx", "panel.tsx", "controller.ts"]) {
     const source = readFileSync(new URL(`../src/web-ui/react/pi-settings/${file}`, import.meta.url), "utf8");
     assert.doesNotMatch(source, /\bfetch\s*\(|\.\s*(?:getElementById|querySelector(?:All)?)\s*(?:<[^>]*>)?\s*\(/);
   }
   // 图标与面板共用同一个 mount：宿主必须同时接两个落点，不能再各存一份开关状态。
-  const host = readFileSync(new URL("../src/web-ui/react/pi-settings/host.tsx", import.meta.url), "utf8");
+  const host = readFileSync(new URL("../src/web-ui/react/pi-settings/deferred-host.tsx", import.meta.url), "utf8");
   assert.match(host, /mount\.toggleTarget/);
   assert.match(host, /aria-expanded=\{open\}/);
 });

@@ -50,6 +50,7 @@ export function useSidebarExpansion(
   defaultCollapsed = false,
   foldedOpen = false,
   fullOpen?: boolean,
+  activeOpen = true,
 ): [boolean, (open: boolean) => void] {
   const scope = React.useContext(SidebarPresentationContext);
   const [collapsed, , setCollapsed] = useSidebarCollapsed(key, defaultCollapsed);
@@ -64,6 +65,7 @@ export function useSidebarExpansion(
     scope?.overrides[key],
     foldedOpen,
     Boolean(scope?.query.trim()),
+    activeOpen,
   );
   const update = (next: boolean): void => {
     if (scope?.query.trim()) return;

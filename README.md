@@ -59,6 +59,7 @@ wand config:password
 - **Message queueing** — keep typing while the AI is working; messages are queued automatically
 - **File browser** — built-in path browsing and search
 - **Quick commits** — review Git changes and generate a commit message from the web UI
+- **Scheduled tasks** — choose an employee, workspace directory and prompt, run once or repeat daily/weekly, and review execution history. See [scheduling behavior](docs/scheduled-tasks.md).
 
 #### Deployment
 
@@ -135,7 +136,7 @@ npm run check              # TypeScript type check
 npm run build              # Compile and copy static assets to dist/
 ```
 
-On this configured development machine, use `~/start.sh` to build/install the working tree and restart, `~/start.sh --restart` to restart without rebuilding, or `~/start.sh --status` to check status. This user-home helper enters the project and handles sudo locally; do not prefix it with `sudo`. It is not included in a fresh clone, and credentials stay outside the repository. Restart safety rules remain in [AGENTS.md](AGENTS.md).
+On this configured development machine, use `~/start.sh` to build/install the working tree and restart, `~/start.sh --restart` to restart without rebuilding, or `~/start.sh --status` to check status. This user-home helper enters the project and handles sudo locally; do not prefix it with `sudo`. It is not included in a fresh clone, and credentials stay outside the repository. Restart safety rules remain in [AGENTS.md](AGENTS.md). Build/check commands share a project lock; local deployment and npm updates share the global installation lock. A busy lock fails before package or service changes. Local Beta versions are written only to build metadata and a private package snapshot, never to the working tree's package manifests. The `build:body` / `check:body` scripts are internal steps for the locked entry points.
 
 Use an isolated config for testing:
 
@@ -233,18 +234,30 @@ npm install -g @google/gemini-cli@latest
 
 #### 交互体验
 
-- **结构化对话** — 代码块语法高亮、工具调用折叠/展开、多问题分组渲染、Token 用量按轮累计
+- **结构化对话** — 代码块语法高亮、工具调用折叠/展开、多问题分组渲染、输入区展示最近一轮 Token 用量与费用
 - **个性化角色** — 像素风猫咪头像（赛博虎妞 / 勤劳初二），支持自定义对话角色名称
 - **消息排队** — 在 AI 思考时可继续输入，消息自动排队发送
 - **文件浏览器** — 内置路径浏览和搜索功能
 - **本地预览** — 消息和终端里的本机链接可点击预览；顶栏也可手动打开本机 HTTP 端口或 HTML 目录
 - **快捷提交** — Git 变动快速提交入口，一键生成 commit message
+- **定时任务** — 选择员工、工作区目录和提示词，单次或每天／每周自动执行，并查看执行记录；详见 [使用说明](docs/scheduled-tasks.md)。
 
 #### 部署与访问
 
 - **多平台客户端** — Android / iOS / macOS 原生客户端，支持加密连接码分发、自动更新检查
 - **HTTPS** — 可选自签证书，适合远程或移动端访问
 - **版本管理** — 内置更新检查与升级提示，支持 stable/beta 双通道
+
+Web 设置中的「Beta 通道」决定服务端 npm 更新来源：关闭时仅检查
+`@co0ontty/wand@latest`，开启时检查 `@co0ontty/wand@beta`；「自动更新 Web 服务」
+独立决定是否自动安装。检查后安装锁定具体版本，避免 dist-tag 在安装期间移动。
+关闭 Beta 不会自动降级；需要立即返回较旧正式版时，点击「更新或重新安装」。
+
+正式 npm 发布由 `vX.Y.Z` Git tag 触发，只写入 `latest`，拒绝预发布版本。
+master 的 Beta 发布只写入 `beta`，版本为下一补丁号加
+`-beta.<构建序号>.<重试序号>.g<提交>`，例如 `4.89.5-beta.100.1.gabcdef0`。
+版本基数同时检查正式 Git tags 和 npm latest，兼容未推送 Git 的本地正式发布。
+Beta 尚未发布、通道版本无效或 npm 暂不可达时，不自动安装其他通道。
 - **CLI 更新** — 在服务端设置中检查并快速更新 Claude Code、Codex、OpenCode、Qoder CLI、Pi 和 Gemini CLI，也可开启自动更新
 
 ### 配置
@@ -269,9 +282,17 @@ wand config:set port 9443
 | `language` | `""` | Claude 回复语言偏好（偏好项，存 SQLite） |
 | `publicOrigin` | 未设置 | 客户端应使用的公开访问地址，如 `https://home.example.com:8443`。TLS 在 L4 反代终止时必填 |
 
+### 本地访问与数据备份边界
+
+- 配对的原生端可创建 CLI 会话和空白终端；空白终端可执行本机命令。应用连接码应当按本机执行凭据保管，而不是只读访问凭据。当前连接码仍采用既有共享令牌，不支持按设备单独撤销。
+- 文件 API 允许浏览普通本地项目，但拒绝系统配置目录及家目录下的 `.wand`、SSH/云凭据、密钥环等敏感位置；检查覆盖符号链接目标和新建路径的已有上级目录。工作目录不是权限沙盒，CLI 工具的访问能力不由文件浏览 API 的过滤规则决定。
+- 可在启动配置中设置 `browserExtensionIds`（扩展 ID 数组）收窄扩展跨域访问；未设置时兼容携带 Bearer 令牌的扩展，但不授予跨域 Cookie 凭据许可。`trustProxy` 指定可信代理地址/CIDR，影响登录限流使用的客户端 IP；不要将不受信任的请求来源加入可信代理。
+- SQLite 升级前会生成一致性备份，迁移保留既有数据；遇到高于当前版本所支持的 schema 会拒绝启动，不会猜测兼容性并继续写入。降级需使用匹配的数据备份，不能让旧版本直接打开已经迁移的库。保险库和连接器的新密文使用数据库目录内独立的 `wand-vault.key`（权限 `0600`），不再只依赖同一数据库里的 `appSecret`。备份/迁移实例时须同时妥善保存数据库和密钥文件；只有数据库备份不能恢复新密文。缺失或损坏密钥会明确失败，不会生成新密钥覆盖现有密文。
+- 独立密钥防止仅泄露数据库时直接解密，但不防御获得整个数据目录或当前用户权限的攻击者。管理员密码的现有 CLI 查看/连接码兼容契约仍保留；不能据此宣称已全面完成密码哈希迁移或按设备令牌改造。
+
 ### 语音识别
 
-Web、Android、iOS 可在语音输入设置中选择「服务端识别」或「客户端本地识别」。服务端使用按需安装的 whisper.cpp 多语言模型，支持无 GPU CPU 服务器、Mac mini Metal 与可选 CUDA；模型不随普通构建下载。部署、模型大小、鉴权和隐私边界见 [服务端语音识别](docs/server-speech.md)。设置内下载/初始化 LAYA 与语音模型，以及「决策专家」的本机性能检查和默认本地/免费调用链，见 [本地模型管理](docs/local-model-setup.md)。
+Web、Android、iOS 可在语音输入设置中选择「服务端识别」或「客户端本地识别」。服务端使用按需安装的 whisper.cpp 多语言模型，支持无 GPU CPU 服务器、Mac mini Metal 与可选 CUDA；模型不随普通构建下载。部署、模型大小、鉴权和隐私边界见 [服务端语音识别](docs/server-speech.md)。设置内下载/初始化 LAYA 与语音模型，以及「石一」（决策专家）的本机性能检查和默认本地/免费调用链，见 [本地模型管理](docs/local-model-setup.md)。
 
 ### 可选本地决策（实验性）
 
@@ -322,7 +343,7 @@ npm run check              # TypeScript 类型检查
 npm run build              # 编译 + 复制静态资源到 dist/
 ```
 
-本机开发环境统一调用用户主目录入口：`~/start.sh` 构建/安装当前代码并重启，`~/start.sh --restart` 仅重启、不重新构建，`~/start.sh --status` 查状态。入口自动进入项目并在本地处理 sudo，外层不要再加 sudo；它是本机配置，不随新克隆提供，凭据不入仓库。重启安全约束仍以 [AGENTS.md](AGENTS.md) 为准。
+本机开发环境统一调用用户主目录入口：`~/start.sh` 构建/安装当前代码并重启，`~/start.sh --restart` 仅重启、不重新构建，`~/start.sh --status` 查状态。入口自动进入项目并在本地处理 sudo，外层不要再加 sudo；它是本机配置，不随新克隆提供，凭据不入仓库。重启安全约束仍以 [AGENTS.md](AGENTS.md) 为准。构建/检查共用项目锁，本地部署与 npm 更新共用全局安装锁；锁忙时在包或服务修改前拒绝执行。本地 Beta 版本仅写入构建信息和私有打包快照，不改共享工作树的包版本文件。`build:body` / `check:body` 是加锁入口的内部步骤，不直接调用。
 
 隔离测试环境（不影响生产实例）：
 

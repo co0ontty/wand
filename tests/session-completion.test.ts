@@ -158,8 +158,7 @@ test("only explicit generation-checked viewing consumes completion and invalidat
   const app = express();
   app.use(express.json());
   const events: ProcessEvent[] = [];
-  registerSessionRoutes(app, processes, structured, storage, config.defaultMode, config, sessions,
-    undefined, (event) => events.push(event));
+  registerSessionRoutes(app, { processes, structured, storage, defaultMode: config.defaultMode, config, sessions, onCompletionViewed: (event) => events.push(event) });
   registerWorkspaceRoutes(app, storage, sessions);
   const server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

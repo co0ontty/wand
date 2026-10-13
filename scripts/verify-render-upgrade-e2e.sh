@@ -23,7 +23,7 @@
 
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "${ROOT}" || exit 2
 
 DIR="${WAND_E2E_DIR:-/tmp/wand-render-upgrade-e2e}"

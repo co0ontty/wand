@@ -10,7 +10,21 @@ import { discoverPiEndpointModels, type PiModelEndpointDiscoveryOptions } from "
 import { ClaudeModelAvailability, ClaudeModelInfo, ClaudeModelSource } from "./types.js";
 import { extractSemver } from "./version-utils.js";
 import { AUTO_ASSIGN_LABEL, AUTO_ASSIGN_SELECTOR, FREE_MODEL_GROUP_ID, isAutoAssignSelector, isModelGroupSelector, modelGroupSelector, orderModelIds, type ModelGroup } from "./model-groups.js";
-import { OPENROUTER_FREE_GROUP } from "./openrouter-free-selection.js";
+import { MODEL_ID_PATTERN, QODER_MODEL_ID_PATTERN, CLAUDE_BUILTIN_MODELS, CODEX_FALLBACK_MODELS, OPENCODE_FALLBACK_MODELS, GROK_FALLBACK_MODELS, QODER_FALLBACK_MODELS, PI_FALLBACK_MODELS, GEMINI_FALLBACK_MODELS, cloneModels, isRecord } from "./models/shared.js";
+import { EFFORT_ID_PATTERN, ThinkingEffortLevel, ProviderThinkingEfforts, FALLBACK_PROVIDER_THINKING, cloneThinkingEfforts, effortLevelsFromIds, unionModelEfforts, parseCliEffortList } from "./models/thinking.js";
+import { parseOpenCodeModelCatalog } from "./models/parsers/opencode.js";
+import { parseGrokModels } from "./models/parsers/grok.js";
+import { parseQoderModels } from "./models/parsers/qoder.js";
+import { parsePiRpcModels, parsePiModels } from "./models/parsers/pi.js";
+import { parseCodexModels } from "./models/parsers/codex.js";
+export type { ThinkingEffortLevel, ProviderThinkingEfforts } from "./models/thinking.js";
+export { FALLBACK_PROVIDER_THINKING, piThinkingLevelsForModel, parseCliEffortList } from "./models/thinking.js";
+export { parseOpenCodeModelCatalog, parseOpenCodeModels } from "./models/parsers/opencode.js";
+export { parseGrokModels } from "./models/parsers/grok.js";
+export { parseQoderModels } from "./models/parsers/qoder.js";
+export { parsePiRpcModels, parsePiModels } from "./models/parsers/pi.js";
+export { parseCodexModels } from "./models/parsers/codex.js";
+import { OPENROUTER_FREE_GROUP, OPENROUTER_FREE_SELECTOR } from "./openrouter-free-selection.js";
 
 const execFileAsync = promisify(execFile);
 const CLAUDE_VERIFICATION_CACHE_KEY = "claude-model-verifications-v1";
@@ -25,64 +39,6 @@ const CLAUDE_VERIFICATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const CLAUDE_PROBE_TIMEOUT_MS = 15_000;
 const MAX_CLAUDE_MODEL_PROBES = 12;
 const CLAUDE_PROBE_CONCURRENCY = 3;
-const MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
-// Shared catalog IDs are later forwarded to `--model`. Qoder and Pi both use
-// provider-qualified values (`zhipu/glm5.2-cp`, `xai/grok-4.6`); Pi also emits
-// `@` in some Cloudflare-style ids.
-const QODER_MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$/;
-const PI_MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}\/[A-Za-z0-9@][A-Za-z0-9._:@/-]{0,127}$/;
-
-const CLAUDE_BUILTIN_MODELS: ClaudeModelInfo[] = [
-  {
-    id: "default",
-    label: "跟随 Claude Code 默认",
-    alias: true,
-    source: "builtin",
-    availability: "default",
-    note: "不传 --model 参数",
-  },
-  { id: "opus", label: "opus（最新 Opus）", alias: true, source: "builtin", availability: "candidate" },
-  { id: "sonnet", label: "sonnet（最新 Sonnet）", alias: true, source: "builtin", availability: "candidate" },
-  { id: "haiku", label: "haiku（最新 Haiku）", alias: true, source: "builtin", availability: "candidate" },
-];
-
-const CODEX_FALLBACK_MODELS: ClaudeModelInfo[] = [
-  { id: "default", label: "GPT-5.5 · gpt-5.5（Codex 默认）", alias: true },
-];
-
-const OPENCODE_FALLBACK_MODELS: ClaudeModelInfo[] = [
-  { id: "default", label: "跟随 OpenCode 默认", alias: true },
-];
-
-const GROK_FALLBACK_MODELS: ClaudeModelInfo[] = [
-  { id: "default", label: "跟随 Grok 默认", alias: true },
-  { id: "grok-4.5", label: "grok-4.5" },
-];
-
-const QODER_FALLBACK_MODELS: ClaudeModelInfo[] = [
-  { id: "default", label: "跟随 Qoder 默认", alias: true },
-  { id: "lite", label: "Lite" },
-  { id: "efficient", label: "Efficient" },
-  { id: "auto", label: "Auto" },
-  { id: "performance", label: "Performance" },
-  { id: "ultimate", label: "Ultimate" },
-];
-const PI_FALLBACK_MODELS: ClaudeModelInfo[] = [
-  { id: "default", label: "跟随 Pi 默认", alias: true },
-];
-
-/**
- * Gemini CLI 没有列模型的子命令，只能给出稳定别名（`packages/core/src/config/models.ts`
- * 里的 GEMINI_MODEL_ALIAS_*）。具体版本名随发布滚动，不适合写死在这里；
- * 设置页的模型输入框是自由文本，用户可以自己填完整模型名。
- */
-const GEMINI_FALLBACK_MODELS: ClaudeModelInfo[] = [
-  { id: "default", label: "跟随 Gemini 默认", alias: true },
-  { id: "auto", label: "Auto（按任务自动选模型）" },
-  { id: "pro", label: "Pro" },
-  { id: "flash", label: "Flash" },
-  { id: "flash-lite", label: "Flash Lite" },
-];
 
 interface ModelCacheStorage {
   getConfigValue(key: string): string | null;
@@ -90,6 +46,7 @@ interface ModelCacheStorage {
 }
 
 interface ModelCommandOptions {
+  signal?: AbortSignal;
   env: NodeJS.ProcessEnv;
   timeout: number;
   /** Written to stdin, then closed. Pi RPC needs this. */
@@ -117,6 +74,7 @@ interface ClaudeModelsApi {
 }
 
 export interface ModelRefreshOptions {
+  signal?: AbortSignal;
   storage?: ModelCacheStorage;
   configuredClaudeModels?: readonly (string | null | undefined)[];
   inheritEnv?: boolean;
@@ -133,22 +91,6 @@ export interface ModelRefreshOptions {
   now?: () => Date;
 }
 
-export interface ThinkingEffortLevel {
-  effort: string;
-  description?: string;
-}
-
-/** 各 CLI 自己报出来的思考档位。Codex / 部分 OpenCode 模型另有 per-model 列表。 */
-export interface ProviderThinkingEfforts {
-  claude: ThinkingEffortLevel[];
-  opencode: ThinkingEffortLevel[];
-  grok: ThinkingEffortLevel[];
-  qoder: ThinkingEffortLevel[];
-  pi: ThinkingEffortLevel[];
-  /** Gemini CLI 没有思考档位开关，只保留「不覆盖」一项，不假装能调。 */
-  gemini: ThinkingEffortLevel[];
-}
-
 export interface ModelCache {
   models: ClaudeModelInfo[];
   codexModels: ClaudeModelInfo[];
@@ -161,34 +103,6 @@ export interface ModelCache {
   claudeVersion: string | null;
   opencodeVersion: string | null;
   refreshedAt: string;
-}
-
-const EFFORT_ID_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/;
-
-function effortLevels(ids: readonly string[]): ThinkingEffortLevel[] {
-  return ids.map((effort) => ({ effort }));
-}
-
-/** 探针失败时的已知档位。下一次 CLI 成功应答会把它换掉。 */
-export const FALLBACK_PROVIDER_THINKING: ProviderThinkingEfforts = {
-  claude: effortLevels(["low", "medium", "high", "xhigh", "max"]),
-  opencode: effortLevels(["low", "medium", "high", "max"]),
-  grok: effortLevels(["low", "medium", "high", "xhigh"]),
-  qoder: effortLevels(["auto", "none", "low", "medium", "high", "xhigh", "max", "ultracode"]),
-  pi: effortLevels(["minimal", "low", "medium", "high", "xhigh", "max"]),
-  gemini: effortLevels(["off"]),
-};
-
-function cloneThinkingEfforts(efforts: ProviderThinkingEfforts): ProviderThinkingEfforts {
-  const copy = (levels: readonly ThinkingEffortLevel[]) => levels.map((level) => ({ ...level }));
-  return {
-    claude: copy(efforts.claude),
-    opencode: copy(efforts.opencode),
-    grok: copy(efforts.grok),
-    qoder: copy(efforts.qoder),
-    pi: copy(efforts.pi),
-    gemini: copy(efforts.gemini),
-  };
 }
 
 /** Immutable-looking snapshot returned to API clients. */
@@ -223,7 +137,7 @@ export function withConfiguredDefaultModelLabels<T extends object>(
     if (at < 0) continue;
     const entry = list[at] as { label?: unknown };
     const selected = list.find((item) => item?.id === configured);
-    const name = configured.startsWith("wand-model-group/") || configured === "wand-openrouter-free/auto"
+    const name = isModelGroupSelector(configured) || configured === OPENROUTER_FREE_SELECTOR
       ? selected?.label || "模型分组"
       : isAutoAssignSelector(configured) ? selected?.label || AUTO_ASSIGN_LABEL : configured;
     if (String(entry.label ?? "").includes(name)) continue;
@@ -255,18 +169,6 @@ export interface ModelCatalogRefreshRequest {
   verifyClaudeCandidates?: boolean;
 }
 
-interface CodexModelEntry {
-  slug: string;
-  display_name?: string;
-  visibility?: string;
-  priority?: number;
-  default_reasoning_level?: string;
-  supported_reasoning_levels?: Array<{
-    effort?: string;
-    description?: string;
-  }>;
-}
-
 interface PersistedClaudeVerification {
   id: string;
   label?: string;
@@ -296,15 +198,6 @@ type ProbeResult<T> =
   | { ok: true; value: T }
   | { ok: false };
 
-function cloneModels(models: readonly ClaudeModelInfo[]): ClaudeModelInfo[] {
-  return models.map((model) => ({
-    ...model,
-    ...(model.reasoningEfforts
-      ? { reasoningEfforts: model.reasoningEfforts.map((level) => ({ ...level })) }
-      : {}),
-  }));
-}
-
 function cloneCache(cache: ModelCache): ModelCache {
   return {
     models: cloneModels(cache.models),
@@ -329,6 +222,7 @@ function defaultCommandRunner(
   return execFileAsync(file, args, {
     env: options.env,
     timeout: options.timeout,
+    signal: options.signal,
     maxBuffer: 4 * 1024 * 1024,
     ...(options.input !== undefined ? { input: options.input } : {}),
   }).then(({ stdout, stderr }) => ({ stdout: String(stdout), stderr: String(stderr) }));
@@ -640,29 +534,6 @@ function mergePiModelCatalog(
   return [defaultModel, ...models.values()];
 }
 
-/** 从 CLI 的 help / 非法档位报错里抽出 `low, medium, high` 这种列表。 */
-export function parseCliEffortList(text: string): string[] {
-  const patterns = [
-    /valid values(?:\s+are)?\s*:\s*([^.`\n]+)/i,
-    /use one of:\s*([^.`\n]+)/i,
-    /set thinking level:\s*([^.`\n]+)/i,
-  ];
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (!match?.[1]) continue;
-    const ids = match[1]
-      .split(/[,/]/)
-      .map((part) => part.trim().toLowerCase())
-      .filter((part) => EFFORT_ID_PATTERN.test(part));
-    if (ids.length) return Array.from(new Set(ids));
-  }
-  return [];
-}
-
-function effortLevelsFromIds(ids: readonly string[]): ThinkingEffortLevel[] {
-  return ids.map((effort) => ({ effort }));
-}
-
 async function commandText(
   runner: ModelCommandRunner,
   file: string,
@@ -689,84 +560,6 @@ async function probeEffortList(
   const text = await commandText(runner, file, args, env, 8000);
   const ids = parseCliEffortList(text);
   return ids.length ? { ok: true, value: effortLevelsFromIds(ids) } : { ok: false };
-}
-
-function variantsToEfforts(value: unknown): ThinkingEffortLevel[] {
-  const ids: string[] = [];
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      if (typeof item === "string") ids.push(item);
-      else if (isRecord(item) && typeof item.effort === "string") ids.push(item.effort);
-    }
-  } else if (isRecord(value)) {
-    ids.push(...Object.keys(value));
-  }
-  const unique = Array.from(new Set(
-    ids.map((id) => id.trim().toLowerCase()).filter((id) => EFFORT_ID_PATTERN.test(id)),
-  ));
-  return effortLevelsFromIds(unique);
-}
-
-/**
- * `opencode models --verbose` 是「一行 id + 一段 JSON」。
- * variants 是这个模型自己的推理档位；没有 JSON 时退回一行一个 id。
- */
-export function parseOpenCodeModelCatalog(stdout: string): ClaudeModelInfo[] {
-  const verbose = parseOpenCodeVerboseModels(stdout);
-  if (verbose.length) return verbose;
-  return parseOpenCodeModels(stdout);
-}
-
-function parseOpenCodeVerboseModels(stdout: string): ClaudeModelInfo[] {
-  const lines = stdout.split(/\r?\n/);
-  const found: ClaudeModelInfo[] = [];
-  for (let index = 0; index < lines.length; index += 1) {
-    const header = lines[index]?.trim() ?? "";
-    if (!/^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._:/-]*$/i.test(header)) continue;
-    if ((lines[index + 1] ?? "").trim() !== "{") continue;
-    let depth = 0;
-    let end = index + 1;
-    for (; end < lines.length; end += 1) {
-      for (const character of lines[end] ?? "") {
-        if (character === "{") depth += 1;
-        else if (character === "}") depth -= 1;
-      }
-      if (depth === 0) break;
-    }
-    if (depth !== 0) continue;
-    let record: Record<string, unknown> | null = null;
-    try {
-      record = JSON.parse(lines.slice(index + 1, end + 1).join("\n")) as Record<string, unknown>;
-    } catch {
-      record = null;
-    }
-    const reasoningEfforts = record ? variantsToEfforts(record.variants) : [];
-    found.push({
-      id: header,
-      label: header,
-      ...(reasoningEfforts.length ? { reasoningEfforts } : {}),
-    });
-    index = end;
-  }
-  if (!found.length) return [];
-  return [
-    { id: "default", label: "跟随 OpenCode 默认", alias: true },
-    ...found,
-  ];
-}
-
-function unionModelEfforts(models: readonly ClaudeModelInfo[]): ThinkingEffortLevel[] {
-  const seen = new Set<string>();
-  const levels: ThinkingEffortLevel[] = [];
-  for (const model of models) {
-    for (const level of model.reasoningEfforts ?? []) {
-      const effort = level.effort.trim().toLowerCase();
-      if (!EFFORT_ID_PATTERN.test(effort) || seen.has(effort)) continue;
-      seen.add(effort);
-      levels.push({ effort, ...(level.description ? { description: level.description } : {}) });
-    }
-  }
-  return levels;
 }
 
 function createOfficialModelsApi(apiKey: string, baseURL?: string): ClaudeModelsApi {
@@ -873,250 +666,6 @@ function mergeVerifications(
   return [...byId.values()];
 }
 
-/**
- * Parse `grok models` human-readable output:
- *
- *   Default model: grok-4.5
- *   Available models:
- *     * grok-4.5 (default)
- */
-export function parseGrokModels(stdout: string): ClaudeModelInfo[] {
-  const stripAnsi = (line: string) => line.replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "");
-  const lines = stdout.split(/\r?\n/).map((line) => stripAnsi(line).trim()).filter(Boolean);
-  let defaultModel = "";
-  const ids: string[] = [];
-  for (const line of lines) {
-    const defaultMatch = line.match(/^Default model:\s*([A-Za-z0-9][A-Za-z0-9._:-]{0,127})\s*$/i);
-    if (defaultMatch) {
-      defaultModel = defaultMatch[1];
-      continue;
-    }
-    const bulletMatch = line.match(/^[-*•]+\s+([A-Za-z0-9][A-Za-z0-9._:-]{0,127})(?:\s*\(.*\))?\s*$/);
-    if (bulletMatch) {
-      ids.push(bulletMatch[1]);
-      continue;
-    }
-    // Some builds may print plain model ids after the "Available models" header.
-    if (/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(line) && !/^(available|default)\b/i.test(line)) {
-      ids.push(line);
-    }
-  }
-  const unique = Array.from(new Set(ids.filter((id) => id && id !== "default")));
-  if (defaultModel && !unique.includes(defaultModel)) unique.unshift(defaultModel);
-  if (!unique.length && !defaultModel) return cloneModels(GROK_FALLBACK_MODELS);
-  const defaultLabel = defaultModel
-    ? `${defaultModel}（Grok 默认）`
-    : "跟随 Grok 默认";
-  return [
-    { id: "default", label: defaultLabel, alias: true },
-    ...unique.map((id) => ({ id, label: id })),
-  ];
-}
-
-/**
- * Parse `qodercli --list-models`.
- *
- * Qoder has used both provider-qualified custom IDs (`zhipu/glm5.2-cp`) and
- * plain tier/frontier IDs (`glm51`). The CLI's human-readable rows put the
- * selectable value in the final parentheses; some versions also emit a bare
- * safe ID below the `MODEL` header.
- */
-export function parseQoderModels(stdout: string): ClaudeModelInfo[] {
-  const discovered: ClaudeModelInfo[] = [];
-  const seen = new Set(QODER_FALLBACK_MODELS.map((model) => model.id));
-  let inModelList = false;
-  const add = (id: string, label: string): void => {
-    if (!QODER_MODEL_ID_PATTERN.test(id) || seen.has(id)) return;
-    seen.add(id);
-    discovered.push({ id, label: label || id });
-  };
-  for (const rawLine of stdout.split(/\r?\n/)) {
-    const line = rawLine.replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "").trim();
-    if (/^models?\s*:?$/i.test(line)) {
-      inModelList = true;
-      continue;
-    }
-    const match = line.match(/^(.+?)\s+\(([^()]+)\)\s*$/);
-    if (match) {
-      const displayName = match[1].trim();
-      const id = match[2].trim();
-      if (displayName) add(id, displayName);
-      continue;
-    }
-    if (inModelList && QODER_MODEL_ID_PATTERN.test(line)) add(line, line);
-  }
-  return [...cloneModels(QODER_FALLBACK_MODELS), ...discovered];
-}
-
-const PI_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
-
-/**
- * Same rule as Pi's `getSupportedThinkingLevels`: no reasoning means only off;
- * `xhigh` / `max` exist only when `thinkingLevelMap` defines them; `null` drops a level.
- */
-export function piThinkingLevelsForModel(model: {
-  reasoning?: boolean;
-  thinkingLevelMap?: Record<string, unknown> | null;
-}): string[] {
-  if (!model.reasoning) return ["off"];
-  const map = model.thinkingLevelMap ?? {};
-  return PI_THINKING_LEVELS.filter((level) => {
-    if (!Object.prototype.hasOwnProperty.call(map, level)) {
-      return level !== "xhigh" && level !== "max";
-    }
-    return map[level] !== null;
-  });
-}
-
-/** `pi --mode rpc` + `get_available_models`. One JSON response holds every model's thinking map. */
-export function parsePiRpcModels(stdout: string): ClaudeModelInfo[] {
-  let models: unknown[] | null = null;
-  for (const rawLine of stdout.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line.startsWith("{")) continue;
-    let record: Record<string, unknown> | null = null;
-    try {
-      record = JSON.parse(line) as Record<string, unknown>;
-    } catch {
-      record = null;
-    }
-    if (!record || record.type !== "response" || record.command !== "get_available_models" || record.success !== true) {
-      continue;
-    }
-    const data = isRecord(record.data) ? record.data : null;
-    if (data && Array.isArray(data.models)) models = data.models;
-  }
-  if (!models) return [];
-  const discovered: ClaudeModelInfo[] = [];
-  const seen = new Set<string>();
-  for (const entry of models) {
-    if (!isRecord(entry)) continue;
-    const provider = typeof entry.provider === "string" ? entry.provider.trim() : "";
-    const modelId = typeof entry.id === "string" ? entry.id.trim() : "";
-    const id = provider && modelId ? `${provider}/${modelId}` : "";
-    if (!id || !PI_MODEL_ID_PATTERN.test(id) || id.length > 128 || seen.has(id)) continue;
-    seen.add(id);
-    const name = typeof entry.name === "string" && entry.name.trim() ? entry.name.trim() : id;
-    const reasoningEfforts = effortLevelsFromIds(piThinkingLevelsForModel({
-      reasoning: entry.reasoning === true,
-      thinkingLevelMap: isRecord(entry.thinkingLevelMap) || entry.thinkingLevelMap === null
-        ? entry.thinkingLevelMap as Record<string, unknown> | null
-        : undefined,
-    }));
-    discovered.push({
-      id,
-      label: name === id ? id : `${name} · ${id}`,
-      ...(reasoningEfforts.length ? { reasoningEfforts } : {}),
-    });
-  }
-  if (!discovered.length) return [];
-  const union = unionModelEfforts(discovered);
-  return [
-    {
-      id: "default",
-      label: "跟随 Pi 默认",
-      alias: true,
-      ...(union.length ? { reasoningEfforts: union } : {}),
-    },
-    ...discovered,
-  ];
-}
-
-/**
- * Parse `pi --list-models`.
- *
- * Pi prints a padEnd-aligned table whose selectable `--model` value is
- * `provider/id` (for example `xai/grok-4.6`). The table only says thinking
- * yes/no, so per-model levels come from `parsePiRpcModels` instead.
- */
-export function parsePiModels(stdout: string): ClaudeModelInfo[] {
-  const discovered: ClaudeModelInfo[] = [];
-  const seen = new Set(["default"]);
-  for (const rawLine of stdout.split(/\r?\n/)) {
-    const line = rawLine.replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "").trim();
-    if (!line || /^provider\s+model\b/i.test(line)) continue;
-    const match = line.match(/^(\S+)\s+(\S+)\s+(\S+)/);
-    if (!match || !/^\d/.test(match[3])) continue;
-    const id = `${match[1]}/${match[2]}`;
-    if (!PI_MODEL_ID_PATTERN.test(id) || id.length > 128 || seen.has(id)) continue;
-    seen.add(id);
-    discovered.push({ id, label: id });
-  }
-  if (!discovered.length) return cloneModels(PI_FALLBACK_MODELS);
-  return [
-    { id: "default", label: "跟随 Pi 默认", alias: true },
-    ...discovered,
-  ];
-}
-
-/** Parse `opencode models`, whose stable machine-friendly output is one provider/model id per line. */
-export function parseOpenCodeModels(stdout: string): ClaudeModelInfo[] {
-  const ids = Array.from(new Set(
-    stdout
-      .split(/\r?\n/)
-      .map((line) => line.replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "").trim())
-      .filter((line) => /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._:/-]*$/i.test(line)),
-  ));
-  if (!ids.length) return cloneModels(OPENCODE_FALLBACK_MODELS);
-  return [
-    { id: "default", label: "跟随 OpenCode 默认", alias: true },
-    ...ids.map((id) => ({ id, label: id })),
-  ];
-}
-
-/** Parse the machine-readable model registry emitted by the installed Codex CLI. */
-export function parseCodexModels(stdout: string): ClaudeModelInfo[] {
-  try {
-    const data = JSON.parse(stdout) as { models?: CodexModelEntry[] };
-    const visible = (Array.isArray(data.models) ? data.models : [])
-      .filter((model) => typeof model.slug === "string" && model.slug.length > 0)
-      .filter((model) => model.visibility === "list")
-      .sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99));
-    if (!visible.length) return cloneModels(CODEX_FALLBACK_MODELS);
-    const defaultModel = visible[0];
-    const defaultLabel = formatCodexModelLabel(defaultModel);
-    const result: ClaudeModelInfo[] = [
-      {
-        id: "default",
-        label: `${defaultLabel}（Codex 默认）`,
-        alias: true,
-        ...codexReasoningMetadata(defaultModel),
-      },
-    ];
-    for (const model of visible) {
-      result.push({
-        id: model.slug,
-        label: formatCodexModelLabel(model),
-        ...codexReasoningMetadata(model),
-      });
-    }
-    return result;
-  } catch {
-    return cloneModels(CODEX_FALLBACK_MODELS);
-  }
-}
-
-function codexReasoningMetadata(model: CodexModelEntry): Pick<ClaudeModelInfo, "reasoningEfforts" | "defaultReasoningEffort"> {
-  const reasoningEfforts = (Array.isArray(model.supported_reasoning_levels) ? model.supported_reasoning_levels : [])
-    .filter((level) => typeof level?.effort === "string" && level.effort.length > 0)
-    .map((level) => ({
-      effort: level.effort as string,
-      ...(typeof level.description === "string" && level.description ? { description: level.description } : {}),
-    }));
-  return {
-    ...(reasoningEfforts.length ? { reasoningEfforts } : {}),
-    ...(typeof model.default_reasoning_level === "string" && model.default_reasoning_level
-      ? { defaultReasoningEffort: model.default_reasoning_level }
-      : {}),
-  };
-}
-
-function formatCodexModelLabel(model: CodexModelEntry): string {
-  return model.display_name && model.display_name !== model.slug
-    ? `${model.display_name} · ${model.slug}`
-    : model.slug;
-}
-
 function catalogRevision(cache: ModelCache): string {
   // `refreshedAt` answers "when did content last change", so it must not
   // create a false change by itself. JSON keeps the provider/model order that
@@ -1134,10 +683,6 @@ function catalogRevision(cache: ModelCache): string {
     opencodeVersion: cache.opencodeVersion,
   });
   return createHash("sha256").update(content).digest("hex");
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
 function safePersistedString(value: unknown, maxLength = 512): string | null {
@@ -1301,7 +846,11 @@ async function discoverModelCache(
 ): Promise<ModelCache> {
   const now = options.now?.() ?? new Date();
   const env = resolveChildEnv(options);
-  const runner = options.commandRunner ?? defaultCommandRunner;
+  const execute = options.commandRunner ?? defaultCommandRunner;
+  const runner: ModelCommandRunner = (file, args, commandOptions) => {
+    options.signal?.throwIfAborted();
+    return execute(file, args, { ...commandOptions, signal: options.signal });
+  };
   const [
     claudeVersionProbe,
     codexProbe,
@@ -1327,6 +876,7 @@ async function discoverModelCache(
     probeEffortList(runner, env, "qodercli", ["-p", "x", "--reasoning-effort", "__wand_probe__"]),
     probeEffortList(runner, env, "pi", ["--help"]),
   ]);
+  options.signal?.throwIfAborted();
   const claudeVersion = claudeVersionProbe.ok ? claudeVersionProbe.value : previous.claudeVersion;
   const priorVerifications = loadClaudeVerifications(options.storage);
   // A failed Models API request is not evidence that its prior models vanished.
@@ -1342,6 +892,7 @@ async function discoverModelCache(
   const verifiedIds = options.verifyClaudeCandidates
     ? await verifyClaudeCandidates(initialModels, runner, env)
     : new Set<string>();
+  options.signal?.throwIfAborted();
   const verifications = mergeVerifications(priorVerifications, initialModels, verifiedIds, claudeVersion, now);
   if (verifiedIds.size > 0) saveClaudeVerifications(options.storage, verifications);
   return {
@@ -1387,6 +938,13 @@ async function discoverModelCache(
  * the same Node process cannot leak a catalog into one another.
  */
 export class ModelCatalogService {
+  private readonly lifecycle = new AbortController();
+
+  dispose(): void {
+    this.lifecycle.abort(new Error("ModelCatalogService has been disposed."));
+    this.changeListeners.clear();
+  }
+
   private cache: ModelCache;
   private revision: string;
   private publishedRevision: string;
@@ -1414,6 +972,7 @@ export class ModelCatalogService {
   }
 
   publishManagedPiModels(): void {
+    if (this.lifecycle.signal.aborted) return;
     const next = { ...this.cache, piModels: this.withManagedPiModels(this.cache.piModels) };
     const revision = catalogRevision(next);
     const projectionChanged = this.snapshot().revision !== this.publishedRevision;
@@ -1473,6 +1032,7 @@ export class ModelCatalogService {
 
   /** Preference changes publish immediately without re-running CLI discovery or altering stored history. */
   publishModelGroups(): void {
+    if (this.lifecycle.signal.aborted) return;
     const result = { ...this.snapshot(), changed: true, checkedAt: new Date().toISOString() };
     this.publishedRevision = result.revision;
     for (const listener of this.changeListeners) {
@@ -1487,6 +1047,7 @@ export class ModelCatalogService {
   }
 
   refresh(request: ModelCatalogRefreshRequest = {}): Promise<ModelCatalogRefreshResult> {
+    if (this.lifecycle.signal.aborted) return Promise.reject(this.lifecycle.signal.reason);
     const verifyClaudeCandidates = request.verifyClaudeCandidates === true;
     if (this.refreshPromise) {
       const sharedRefresh = this.refreshPromise;
@@ -1513,10 +1074,12 @@ export class ModelCatalogService {
     const baseOptions = this.getOptions();
     const options: ModelRefreshOptions = {
       ...baseOptions,
+      signal: baseOptions.signal ? AbortSignal.any([baseOptions.signal, this.lifecycle.signal]) : this.lifecycle.signal,
       verifyClaudeCandidates: request.verifyClaudeCandidates === true,
     };
     const checkedAt = (options.now?.() ?? new Date()).toISOString();
     const discovered = await discoverModelCache(options, this.cache);
+    options.signal?.throwIfAborted();
     discovered.piModels = this.withManagedPiModels(discovered.piModels);
     const discoveredRevision = catalogRevision(discovered);
     const changed = !this.hasPersistedSnapshot || discoveredRevision !== this.revision;

@@ -30,6 +30,10 @@ const css = String.raw`
 .wand-team-candidate-inner { align-items:flex-start; }
 .wand-team-candidate-tools { margin-top:2px; }
 .wand-team-candidate .wand-ai-team-member-agent>div { min-width:0; }
+.wand-team-candidate .task-board-native-field { max-width:100%; }
+.wand-team-candidate .ant-form-item-control { min-width:0; }
+.wand-team-candidate .wand-ui-select-trigger { min-width:0; max-width:100%; }
+.wand-team-candidate .wand-ui-select-value { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .wand-team-candidates-foot { padding-top:4px; }
 `;
 

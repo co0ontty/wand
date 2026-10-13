@@ -59,7 +59,7 @@ test("batch selection archives tasks and sessions, and delete is its own danger 
   assert.equal(describeManagedAction({ taskIds: [], sessionIds: ["s1", "s2"] }), "归档终端");
   assert.equal(describeManagedDelete({ taskIds: [], sessionIds: ["s1", "s2"] }), "删除 2 个终端");
   // 归档主操作恒为 secondary，危险按钮只在选中了终端时出现，且动的是删除而不是归档。
-  assert.match(panel, /kind="secondary"[\s\S]{0,240}setConfirmingManage\("archive"\)/);
+  assert.match(panel, /kind="secondary"[\s\S]{0,420}setConfirmingManage\("archive"\)/);
   assert.match(panel, /hasManageSessions && \(/);
   assert.match(panel, /kind="danger"[\s\S]{0,200}setConfirmingManage\("delete"\)/);
 });

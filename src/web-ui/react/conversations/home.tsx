@@ -7,6 +7,9 @@ import { conversationLeaderMention, conversationMentionToken } from "../../../co
 import type { Workspace } from "../../../types.js";
 import { useSiliconEmployees } from "../agents/employee-repository";
 import { EmployeeAvatar } from "../agents/employee-avatar";
+import { ComposerIdentity, ComposerUsage } from "../composer-sender/identity.js";
+import { computeRunningPhase } from "../../running-activity.js";
+import { useComposerUsage } from "./composer-usage.js";
 import { ConversationGroupAvatar } from "./avatar";
 import { ConversationMessages, formatConversationAttachments } from "../ai-teams/lazy";
 import { teamChatComposer } from "../ai-teams/composer-bridge";
@@ -16,7 +19,7 @@ import { ComposerSpeechButton } from "../composer-voice/button";
 import { requestJson } from "../http-adapter";
 import { SidebarToggleIcon } from "../shell/sidebar-toggle-icon";
 import { SidebarProjectionSwap } from "../workspaces/sidebar-projection-swap";
-import { WandButton, WandIcon, WandIconButton, WandInput, WandSelect } from "../ui";
+import { WandButton, WandIcon, WandIconButton, WandInput, WandSelect, WandPopover } from "../ui";
 import { MOTION_DWELL_FAILED_MS, MOTION_DWELL_RESULT_SENTENCE_MS, MOTION_DWELL_SENT_MS } from "../ui/motion-tokens";
 import { ConversationApprovalButton, ConversationMorphIcon, ConversationPanel, ConversationSubmitButton, type ConversationSubmitPhase } from "./controls";
 import { employeeProfile } from "../agents/employee-profile";
@@ -30,8 +33,11 @@ import { GroupEditor } from "./group-editor";
 import { conversationsRepository, notifyConversationChanges, UnconfirmedConversationError } from "./repository";
 import { conversationDraftKey, conversationUi, useConversationUi } from "./state";
 import { useUserProfile } from "../user-profile-repository";
+import { installConversationHomeStyles } from "./home-styles";
 import { installChatComposerStyles } from "../chat-composer-styles";
 import { directWorkPreference, latestDirectWork } from "./composer-presentation";
+import { useEditorExpansion } from "../composer-sender/editor-expansion.js";
+import { MinimalComposerEntry, useMinimalComposer } from "../composer-sender/minimal.js";
 
 const runLabel = { running: "进行中", awaiting_approval: "等你批准计划", waiting_user: "等你回复", done: "已完成", failed: "失败", stopped: "已停止" };
 
@@ -49,7 +55,7 @@ export function ConversationHome(props: ConversationHomeProps): React.ReactEleme
 }
 
 function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSession }: ConversationHomeProps): React.ReactElement {
-  React.useLayoutEffect(installChatComposerStyles, []);
+  React.useLayoutEffect(() => { installChatComposerStyles(); installConversationHomeStyles(); }, []);
   const ui = useConversationUi();
   // 老数据没有 dissolvedBy 时按当前资料署名，不让群解散提示永远写死「我」。
   const selfName = useUserProfile().name || "我";
@@ -76,6 +82,16 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
   const [continueTaskId, setContinueTaskId] = React.useState("");
   const [capturedVersion, setCapturedVersion] = React.useState(1);
   const [chatCwd, setChatCwd] = React.useState("");
+  const [draftRecipient, setDraftRecipient] = React.useState("");
+  const [defaultCwd, setDefaultCwd] = React.useState("");
+  React.useEffect(() => {
+    if (!visible) return;
+    const request = new AbortController();
+    void requestJson<{ defaultCwd?: string }>("/api/config", { signal: request.signal }).then(config => {
+      if (!request.signal.aborted) setDefaultCwd(config.defaultCwd ?? "");
+    }).catch(() => {});
+    return () => request.abort();
+  }, [visible]);
   const sender = React.useRef<React.ComponentRef<typeof Sender>>(null);
   const inputFiles = React.useRef<HTMLInputElement>(null);
   const toolsAnchor = React.useRef<HTMLDivElement>(null);
@@ -98,10 +114,16 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
   const revision = React.useCallback(() => teamChatComposer.revision(draftKey), [draftKey]);
   React.useSyncExternalStore(teamChatComposer.subscribe, revision, revision);
   const draft = teamChatComposer.read(draftKey);
+  const editor = useEditorExpansion(draftKey, () => {
+    const input = sender.current?.inputElement;
+    return input instanceof HTMLTextAreaElement ? input : input?.querySelector("textarea");
+  });
+  React.useEffect(() => { setDraftRecipient(""); }, [id]);
   const scope = `${id}:${target?.runId ?? "talk"}:${layer === "task" ? "dispatch" : "message"}`;
   const current = React.useRef({ scope, visible, id, key: draftKey }); current.current = { scope, visible, id, key: draftKey };
   const employee = employees.find(e => e.id === selected?.peerEmployeeId || id === `dm_${e.id}`);
   const previousWork = latestDirectWork(selected);
+  const composerUsage = useComposerUsage(previousWork?.sessionId ?? selected?.communicationSessionId ?? undefined, visible && !ui.directory, selected?.updatedAt);
   const leader = selected?.team?.members.find(m => m.isLeader);
   const selectedRun = selected?.runDetails.find(d => d.run.id === target?.runId);
   const mention = selected?.kind === "group" ? conversationLeaderMention(draft.text,
@@ -211,6 +233,7 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
     setTaskOptionsOpen(true); setLayer("task");
   };
   const addFiles = (files: FileList): void => {
+    if (!selected || selected.unavailableReason || selected.dissolvedAt) return;
     if (draft.attachments.length + files.length > 5) { setFeedback("最多添加 5 个附件。"); return; }
     for (const file of Array.from(files)) teamChatComposer.edit(draftKey, { addAttachment: {
       file, name: file.name, size: file.size, previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
@@ -302,13 +325,21 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
     membersTrigger.current = trigger; setMembers(!members); setInvite(false);
   };
   const toolsOpen = layer === "menu" || layer === "task" && taskOptionsOpen;
+  const composerSurface = React.useRef<HTMLDivElement>(null);
+  const minimal = useMinimalComposer({ owner: draftKey,
+    input: () => composerSurface.current?.querySelector("textarea"), surface: () => composerSurface.current,
+    phase: feedbackAction ? "idle" : phase, pending: !!draft.text || !!draft.attachments.length,
+    locked: !!draft.recovery || layer === "task",
+    popupOwners: ["conversation-task-panel", "本次新工作的执行配置"],
+  });
+  const inputPlaceholder = layer === "task" ? "描述任务要求…" : selected?.kind === "dm" ? "描述一项新工作…" : "输入消息…";
   const primaryLabel = phase === "sending" ? "发送中" : phase === "sent" ? "已接受" : phase === "failed" ? "操作失败" : phase === "unknown" ? "送达未确认" : stops ? "停止本轮" : layer === "task" ? continueTaskId ? "确认继续此任务" : "派发任务" : selected?.kind === "dm" ? "发送并开始新工作" : "发送消息";
   return <section className="conversation-root" aria-label="聊天首页" hidden={!visible} inert={!visible}>
     <Flex vertical className="conversation-chat-surface" data-active={!ui.directory} inert={ui.directory} style={{ height: "100%", minHeight: 0 }}>
       <Flex ref={membersAnchor} align="center" justify="space-between" gap={8} className="conversation-heading" style={{ position: "relative", flexShrink: 0 }}>
         <Flex align="center" gap={8} style={{ minWidth: 0 }}>
           {onOpenSidebar ? <WandIconButton style={{ width: 44, height: 44 }} aria-label={sidebarOpen ? "关闭列表" : "打开列表"} onClick={onOpenSidebar}><SidebarToggleIcon open={sidebarOpen}/></WandIconButton> : null}
-          {employee ? <WandIconButton className="conversation-avatar-button" aria-label={`查看${employee.name}的资料`} onClick={event => employeeProfile.open(employee, event.currentTarget)}><EmployeeAvatar employee={employee} size="md"/></WandIconButton> : selected?.team ? <WandIconButton className="conversation-avatar-button" aria-label="查看群资料" aria-expanded={members} aria-controls="conversation-members-panel" onClick={event => toggleMembers(event.currentTarget)}><ConversationGroupAvatar title={selected.title} size={32}/></WandIconButton> : id && !selected ? <span className="conversation-avatar-placeholder" aria-hidden="true"/> : null}
+          {selected?.team ? <WandIconButton className="conversation-avatar-button" aria-label="查看群资料" aria-expanded={members} aria-controls="conversation-members-panel" onClick={event => toggleMembers(event.currentTarget)}><ConversationGroupAvatar title={selected.title} members={selected.team.members} size={48}/></WandIconButton> : id && !selected ? <span className="conversation-avatar-placeholder" aria-hidden="true"/> : null}
           <div className="conversation-heading-copy">
             <WandButton kind="ghost" className="conversation-heading-title" title={selected?.title ?? employee?.name} aria-expanded={selected?.kind === "group" ? members : undefined} aria-controls={selected?.kind === "group" ? "conversation-members-panel" : undefined} onClick={event => employee ? employeeProfile.open(employee, event.currentTarget) : toggleMembers(event.currentTarget)}>{selected?.title ?? employee?.name ?? "选择一位员工，开始聊天"}</WandButton>
             <Typography.Text type="secondary" className="conversation-heading-context">{selected?.kind === "group" ? `群聊 · 我 + ${selected.team?.members.length ?? 0} 位员工` : employee ? `私聊${employee.id === DEFAULT_EMPLOYEE_ID ? " · 默认伙伴" : ""}` : "选择接收对象后发送"}</Typography.Text>
@@ -357,7 +388,7 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
           mentionNames={[...new Set(roster.map(member => member.name).filter(Boolean))]}
           employeeIds={Object.fromEntries(roster.filter(member => member.employeeId).flatMap(member => [[member.id, member.employeeId!], [member.employeeId!, member.employeeId!]]))}
           renderSessionPreview={(turn, index) => <ConversationSessionReply turn={turn} active={visible && !ui.directory}
-            onOpen={() => onOpenSession(turn.sessionLink!.sessionId)}>{activity.renderActivity(turn, index)}</ConversationSessionReply>}
+            onOpen={() => onOpenSession(turn.sessionLink!.sessionId)} onModelSettings={employee && !selected?.unavailableReason ? event => employeeProfile.open(employee, event.currentTarget) : undefined}>{activity.renderActivity(turn, index)}</ConversationSessionReply>}
           renderTaskPreview={turn => <ConversationTaskPreview turn={turn} active={visible && !ui.directory} onOpen={() => {
             if (turn.conversationLink) conversationUi.openTask(turn.conversationLink.conversationId, turn.conversationLink.taskId,
               turn.taskPreview?.runId && ["running", "awaiting_approval", "waiting_user"].includes(turn.taskPreview.status) ? turn.taskPreview.runId : null);
@@ -379,25 +410,34 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
           phase={feedbackAction === "approve" ? phase : "idle"} disabled={busy || !!unknown || (feedbackAction === "approve" && phase !== "idle")} onClick={() => void act("approve")}/> : null}
         {activeRun?.run.status === "waiting_user" && activeRun.run.statusDetail.includes("步数上限") ? <WandButton className="conversation-approval" disabled={busy || !!unknown} onClick={() => void act("continue")}>明确增加本轮步数</WandButton> : null}
       </Flex> : null}
-      <div className="conversation-composer" hidden={!!selected?.dissolvedAt}>
-        <Flex align="center" justify="space-between" gap={8}><Typography.Text className="conversation-receiver" title={receiver}>{receiver}</Typography.Text>{layer === "task" ? <WandButton size="small" onClick={() => setLayer("closed")}>取消派发</WandButton> : null}</Flex>
-        {directContextPending && layer !== "task" ? <div className="conversation-work-choice-pending" role="status">正在读取执行配置…</div> : selected?.kind === "dm" && layer !== "task" ? <div className="conversation-work-choice">
-          <Typography.Text type="secondary" className="conversation-input-hint">每次发送创建独立工作；补充旧工作请进入对应会话。</Typography.Text>
-          {previousWork ? <WandButton size="small" kind="ghost" className="conversation-continue-work" aria-label={`继续工作：${previousWork.title}`} title={`打开会话：${previousWork.title}；当前新工作草稿会保留`} onClick={() => onOpenSession(previousWork.sessionId)}>继续上一项 · {previousWork.title}</WandButton> : null}
-          <Typography.Text type="secondary" className="conversation-execution-summary" title="这是员工的首选执行配置；实际执行工具可按其候选顺序降级。目录沿用全局默认或本页临时目录。">{directWorkPreference(employee?.agents[0])} · {chatCwd ? "使用临时目录" : "沿用默认目录"}</Typography.Text>
-        </div> : null}
-        {chatCwd && layer !== "task" && !target ? <Typography.Text type="secondary" className="conversation-cwd-summary">临时目录：{chatCwd} · 本页聊天共用</Typography.Text> : null}
+      <div className="conversation-composer" data-composer-focus-owner={draftKey} hidden={!!selected?.dissolvedAt}>
+        {selected?.kind === "group" || layer === "task" ? <Flex align="center" justify="space-between" gap={8}><Typography.Text className="conversation-receiver" title={receiver}>{receiver}</Typography.Text>{layer === "task" ? <WandButton size="small" onClick={() => setLayer("closed")}>取消派发</WandButton> : null}</Flex> : null}
         <div className="conversation-feedback" hidden={!feedback && !selected?.unavailableReason && !unknown && !draft.recovery && activeRun?.run.status !== "awaiting_approval" && !(feedbackAction === "approve" && phase !== "idle") && !(id && !draft.text && !draft.attachments.length && teamChatComposer.read(conversationDraftKey("", null)).text)} role="status" aria-live="polite"><Typography.Text type={phase === "failed" || phase === "unknown" || selected?.unavailableReason ? "danger" : "secondary"}>
-          {feedback || selected?.unavailableReason || ""}</Typography.Text>{unknown ? <WandButton size="small" onClick={() => void reconcile()}>核对请求</WandButton> : null}
+          {selected?.unavailableReason || feedback || ""}</Typography.Text>{unknown ? <WandButton size="small" onClick={() => void reconcile()}>核对请求</WandButton> : null}
           {draft.recovery ? <WandButton size="small" onClick={() => teamChatComposer.edit(draftKey, { recoverCapture: true })}>恢复本次未发送草稿</WandButton> : null}
           {id && !draft.text && !draft.attachments.length && teamChatComposer.read(conversationDraftKey("", null)).text ? <WandButton size="small" onClick={() => {
             const unaddressed = conversationDraftKey("", null); teamChatComposer.transfer(unaddressed, draftKey, teamChatComposer.read(unaddressed).revision);
           }}>采用尚未选择的草稿</WandButton> : null}
         </div>
-        {draft.attachments.length ? <ComposerAttachmentList items={draft.attachments.map((a, index) => ({ index, name: a.name, sizeLabel: `${a.size} B`, previewUrl: a.previewUrl ?? null }))}
-          onRemove={index => teamChatComposer.edit(draftKey, { removeAttachment: index })}/> : null}
+        {selected?.unavailableReason ? <div className="conversation-unavailable-actions">
+          <Typography.Text type="secondary">草稿已保留，可选中复制；转移不会发送工作。</Typography.Text>
+          {previousWork ? <WandButton size="small" onClick={() => onOpenSession(previousWork.sessionId)}>查看上一项工作</WandButton> : null}
+          <WandSelect ariaLabel="草稿转移目标员工" placeholder="选择可用员工" value={draftRecipient} onValueChange={setDraftRecipient}
+            options={employees.filter(e => !e.archivedAt && e.id !== employee?.id).map(e => ({ value: e.id, label: e.name }))}/>
+          <WandButton size="small" disabled={busy || !!unknown || !draftRecipient || (!draft.text && !draft.attachments.length)} onClick={() => {
+            const destination = conversationDraftKey(`dm_${draftRecipient}`, null);
+            if (!teamChatComposer.transfer(draftKey, destination, draft.revision)) { setFeedback("未转移：目标已有草稿，或当前草稿仍在提交 / 发生变化。两个草稿都已保留。"); return; }
+            select(`dm_${draftRecipient}`, true);
+          }}>转移草稿</WandButton>
+          {feedback && feedback !== selected.unavailableReason ? <Typography.Text type="secondary" role="status">{feedback}</Typography.Text> : null}
+        </div> : null}
         {voiceStatus ? <Typography.Text type="secondary" role="status" aria-live="polite" ellipsis>{voiceStatus}</Typography.Text> : null}
-        <Sender ref={sender} value={draft.text} className="conversation-sender" placeholder={layer === "task" ? "描述任务要求…" : "输入消息…"} autoSize={{ minRows: 1, maxRows: 5 }} suffix={false}
+        <div ref={composerSurface} className="conversation-input-wrap" data-editor-expanded={editor.expanded} data-composer-expanded={minimal.expanded}>
+        {employee ? <WandIconButton className="conversation-companion" aria-label={`查看${employee.name}的资料`} onClick={event => employeeProfile.open(employee, event.currentTarget)}><ComposerIdentity employee={employee} fileActivity={composerUsage.fileActivity} thinking={computeRunningPhase(composerUsage.activity) === "executing"}/></WandIconButton> : null}
+        <ComposerUsage showName={false} employeeName={employee?.name} usage={composerUsage.usage} activity={composerUsage.activity}/>
+        <Sender ref={sender} value={draft.text} className="conversation-sender" readOnly={!!selected?.unavailableReason || !selected} placeholder={inputPlaceholder} autoSize={{ minRows: 1, maxRows: editor.expanded ? 24 : 4 }} suffix={false}
+          header={draft.attachments.length ? <ComposerAttachmentList items={draft.attachments.map((a, index) => ({ index, name: a.name, sizeLabel: `${a.size} B`, previewUrl: a.previewUrl ?? null }))}
+            onRemove={index => teamChatComposer.edit(draftKey, { removeAttachment: index })}/> : null}
           onPaste={e => { if (e.clipboardData.files.length) { e.preventDefault(); addFiles(e.clipboardData.files); } }}
           onChange={text => teamChatComposer.edit(draftKey, { text })} onSubmit={() => void send()} submitType="enter"
           onKeyDown={e => { if (e.nativeEvent.isComposing || e.keyCode === 229) return false;
@@ -407,13 +447,27 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
           footer={<Flex ref={toolsAnchor} align="center" justify="space-between" className="conversation-action-row" style={{ position: "relative" }}>
           <Flex align="center" gap={4}><WandIconButton ref={toolsTrigger} className="conversation-composer-control" aria-label={toolsOpen ? "关闭聊天操作" : layer === "task" ? "任务选项" : "更多聊天操作"}
             aria-expanded={toolsOpen} onClick={() => layer === "task" ? setTaskOptionsOpen(!taskOptionsOpen) : setLayer(layer === "closed" ? "menu" : "closed")}><ConversationMorphIcon from="plus" to="close" active={toolsOpen}/></WandIconButton>
-            <WandIconButton className="conversation-composer-control" aria-label="添加附件" onClick={() => { if (layer === "task") setTaskOptionsOpen(false); else setLayer("closed"); inputFiles.current?.click(); }}><WandIcon name="paperclip" size={18}/></WandIconButton>
-            <ComposerSpeechButton ownerKey={`${draftKey}:${scope}`} revision={draft.revision} inputPlaceholder={layer === "task" ? "描述任务要求…" : "输入消息…"} disabled={!visible || busy || !!selected?.dissolvedAt || !!selected?.unavailableReason}
+            <WandIconButton className="conversation-composer-control composer-edit-action" aria-label="添加附件" disabled={!selected || !!selected.unavailableReason} onClick={() => { if (layer === "task") setTaskOptionsOpen(false); else setLayer("closed"); inputFiles.current?.click(); }}><WandIcon name="paperclip" size={18}/></WandIconButton>
+            <ComposerSpeechButton ownerKey={`${draftKey}:${scope}`} revision={draft.revision} inputPlaceholder={inputPlaceholder} disabled={!visible || busy || !!selected?.dissolvedAt || !!selected?.unavailableReason}
               onStatus={setVoiceStatus} onCommit={(text, expectedRevision) => teamChatComposer.edit(draftKey, {
                 text: draft.text ? draft.text.replace(/\s+$/, "") + " " + text : text, expectedRevision, persist: true,
               })}/>
-            <Typography.Text type="secondary" className="conversation-input-hint">Enter 发送 · Shift+Enter 换行</Typography.Text></Flex>
-          <ConversationSubmitButton phase={feedbackAction === "approve" ? "idle" : phase} stops={stops} label={feedbackAction === "approve" ? "发送消息" : primaryLabel} disabled={busy || !!unknown || (feedbackAction === "approve" && phase !== "idle") || !id || !selected || !!selected.unavailableReason || (!stops && !draft.text.trim() && !draft.attachments.length)} onClick={() => void (stops ? act("stop") : send())}/>
+            <span className="composer-edit-action">{editor.control}</span>
+            {selected?.kind === "dm" && employee && layer !== "task" ? <WandPopover side="top" ariaLabel="本次新工作的执行配置" trigger={<WandButton kind="ghost" size="small" className="conversation-config-trigger" title="每次发送创建独立工作；补充已有工作请使用回复中的「继续此工作」。">执行配置{chatCwd ? " · 临时目录" : ""}<WandIcon name="chevronDown" size={14}/></WandButton>}>
+              <div className="conversation-preference-details">
+                {previousWork ? <WandButton size="small" kind="ghost" className="conversation-continue-work" aria-label={`继续工作：${previousWork.title}`} title={previousWork.title} onClick={() => onOpenSession(previousWork.sessionId)}><span className="conversation-continue-prefix">继续：</span><span className="conversation-continue-title">{previousWork.title}</span></WandButton> : null}
+                <Typography.Text strong>新工作 · {employee?.name ?? "正在读取员工"}</Typography.Text>
+                <Typography.Paragraph type="secondary">{directContextPending ? "正在读取执行配置…" : directWorkPreference(employee?.agents[0])}</Typography.Paragraph>
+          <Descriptions size="small" column={1} items={[
+            { key: "employee", label: "员工", children: employee.name },
+            { key: "model", label: "首选模型", children: employee.agents[0]?.model || "沿用工具默认模型" },
+            { key: "cwd", label: "新工作目录", children: chatCwd || defaultCwd || "默认目录尚未读取，发送前由服务端解析" },
+          ]}/><Typography.Text type="secondary">{chatCwd ? "临时目录在本页联系人之间共用。" : "目录沿用服务默认配置。"}执行按已配置候选顺序降级；继续已有工作沿用其执行配置。</Typography.Text>
+          <WandButton size="small" onClick={event => employeeProfile.open(employee, event.currentTarget)}>查看员工执行候选</WandButton>
+              </div>
+            </WandPopover> : null}</Flex>
+          <MinimalComposerEntry text={draft.text} attachments={draft.attachments.length} placeholder={inputPlaceholder} disabled={!selected || !!selected.unavailableReason} onOpen={minimal.open}/>
+          <ConversationSubmitButton showLabel phase={feedbackAction === "approve" ? "idle" : phase} stops={stops} label={feedbackAction === "approve" ? "发送消息" : primaryLabel} disabled={busy || !!unknown || (feedbackAction === "approve" && phase !== "idle") || !id || !selected || !!selected.unavailableReason || (!stops && !draft.text.trim() && !draft.attachments.length)} onClick={() => void (stops ? act("stop") : send())}/>
           <ConversationPanel open={toolsOpen} owner="conversation-task-panel" focusKey={layer} anchorRef={toolsAnchor} triggerRef={toolsTrigger} direction="up" onClose={() => layer === "task" ? setTaskOptionsOpen(false) : setLayer("closed")}>
             <div className="conversation-action-menu" hidden={layer !== "menu"}>{selected?.kind === "group" ? <WandButton disabled={!id || !!selected.unavailableReason} onClick={() => taskMode()}>派新任务</WandButton> : null}
               {selected?.kind === "dm" && previousWork ? <WandButton onClick={() => { setLayer("closed"); onOpenSession(previousWork.sessionId); }} title={previousWork.title}>继续上一项工作</WandButton> : null}
@@ -433,6 +487,8 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
             </div>
           </ConversationPanel>
         </Flex>}/>
+        </div>
+        <Typography.Text type="secondary" className="conversation-input-hint">Enter 发送 · Shift+Enter 换行</Typography.Text>
         <input ref={inputFiles} hidden type="file" multiple aria-label="选择附件" onChange={e => { if (e.currentTarget.files) addFiles(e.currentTarget.files); e.currentTarget.value = ""; }}/>
       </div>
     </Flex>

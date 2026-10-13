@@ -1,9 +1,31 @@
 import type { AgentActivityState } from "./mission-types.js";
-import { DECISION_EXPERT_KEY } from "./decision-expert-identity.js";
-import { SPEECH_POLISHER_KEY } from "./speech-polisher-identity.js";
 import type { AiTeamDeliverySummary } from "./ai-team-delivery-types.js";
 import type { WandTaskAgent } from "./task-types.js";
 import type { ConversationTurn } from "./types.js";
+
+export type { SiliconEmployee, SiliconEmployeeDraft } from "./employee-types.js";
+export {
+  DEFAULT_EMPLOYEE_ID,
+  DEFAULT_EMPLOYEE_KEY,
+  DEFAULT_EMPLOYEE_NAME,
+  DEFAULT_EMPLOYEE_TAG,
+  DECISION_EXPERT_KEY,
+  HR_EMPLOYEE_KEY,
+  isBuiltinSiliconEmployee,
+  isDecisionExpertSiliconEmployee,
+  isDefaultSiliconEmployee,
+  isSystemSiliconEmployee,
+  parseSiliconEmployeeTagInput,
+  parseSiliconEmployeeTags,
+  SILICON_EMPLOYEE_MAX_TAGS,
+  SILICON_EMPLOYEE_TAG_MAX_CHARS,
+  siliconEmployeeTags,
+  SPEECH_POLISHER_KEY,
+  SYSTEM_EMPLOYEE_ID,
+  SYSTEM_EMPLOYEE_KEY,
+  SYSTEM_EMPLOYEE_NAME,
+  SYSTEM_EMPLOYEE_TAG,
+} from "./employee-types.js";
 
 export const AI_TEAM_MIN_MEMBERS = 2;
 export const AI_TEAM_MAX_MEMBERS = 8;
@@ -87,121 +109,8 @@ export interface StepDispatchInfo {
   }>;
 }
 
-/** 上传头像在前端缩成小图后的上限（data URL 字符数）。 */
-export interface SiliconEmployee {
-  id: string; // "e_<uuid>"
-  name: string;
-  duty: string; // 一句话职责：侧栏/选择器/署名都用它
-  prompt: string; // 角色设定；建会话时走 SessionSnapshot.systemPrompt（不拼进首条用户消息）
-  avatar: string; // 与 ai-teams 同口径："" | "cat:<n>" | "data:image/…"
-  agents: WandTaskAgent[]; // 1..4 项，顺序 = 降级顺序（首选在前）
-  /** 内置标签按 systemKey 固定；普通员工的标签由用户维护。旧客户端可不传。 */
-  tags?: string[];
-  /**
-   * 非空 = Wand 内置员工（如 "wand-ops" 系统运维）：名字/职责/人设/头像锁定，
-   * 不可归档、不可删除，只有执行候选由用户维护。
-   */
-  systemKey?: string;
-  archivedAt?: string; // 归档后不出现在选择器；其历史会话仍可打开
-  createdAt: string;
-  updatedAt: string;
-}
-
-/**
- * AI 按自然语言期望起草（或结构化校验后）的员工配置：agent 是首选执行候选，
- * candidates 是已校验的完整候选清单。其余手动字段（头像等）仍由表单和「高级配置」负责。
- */
-export interface SiliconEmployeeDraft {
-  name: string;
-  duty: string;
-  prompt: string;
-  agent: WandTaskAgent;
-  /**
-   * IM-11 新增：已校验的执行候选，首项即 agent；旧客户端继续只读 agent 不受影响。
-   */
-  candidates?: WandTaskAgent[];
-}
-
 export const AI_TEAM_AVATAR_MAX_CHARS = 60_000;
 export const SILICON_EMPLOYEE_AVATAR_MAX_CHARS = 60_000;
-
-// ============ 内置「系统运维」员工 ============
-// 纯常量与判定放在这里：浏览器端要拿 Tag 和判定，不能把 server-only 的
-// system-employee.ts（依赖 node:fs）拉进前端 bundle。
-
-export const SYSTEM_EMPLOYEE_KEY = "wand-ops";
-export const SYSTEM_EMPLOYEE_ID = "e_wand_ops";
-export const SYSTEM_EMPLOYEE_NAME = "勤劳的初二";
-/** 员工列表 / 设置页上的标识。 */
-export const SYSTEM_EMPLOYEE_TAG = "系统用户";
-
-export function isSystemSiliconEmployee(
-  employee: Pick<SiliconEmployee, "systemKey"> | null | undefined,
-): boolean {
-  return employee?.systemKey === SYSTEM_EMPLOYEE_KEY;
-}
-
-
-// 默认任务角色与系统运维分开；CLI 是执行器，角色不替换用户选定的工具/权限。
-export const DEFAULT_EMPLOYEE_KEY = "wand-default";
-export const DEFAULT_EMPLOYEE_ID = "e_wand_default";
-export const DEFAULT_EMPLOYEE_NAME = "赛博虎妞";
-export const DEFAULT_EMPLOYEE_TAG = "默认用户";
-
-export function isDefaultSiliconEmployee(
-  employee: Pick<SiliconEmployee, "systemKey"> | null | undefined,
-): boolean {
-  return employee?.systemKey === DEFAULT_EMPLOYEE_KEY;
-}
-
-export function isDecisionExpertSiliconEmployee(employee: Pick<SiliconEmployee, "systemKey"> | null | undefined): boolean {
-  return employee?.systemKey === DECISION_EXPERT_KEY;
-}
-
-export function isBuiltinSiliconEmployee(
-  employee: Pick<SiliconEmployee, "systemKey"> | null | undefined,
-): boolean {
-  return isSystemSiliconEmployee(employee) || isDefaultSiliconEmployee(employee) || isDecisionExpertSiliconEmployee(employee) || employee?.systemKey === SPEECH_POLISHER_KEY;
-}
-
-export const SILICON_EMPLOYEE_MAX_TAGS = 8;
-export const SILICON_EMPLOYEE_TAG_MAX_CHARS = 20;
-
-/** 内置标识只由真实员工身份投影，不能用自定义标签冒充。 */
-export function siliconEmployeeTags(
-  employee: Pick<SiliconEmployee, "systemKey" | "tags">,
-): string[] {
-  if (isSystemSiliconEmployee(employee) || isDecisionExpertSiliconEmployee(employee) || employee.systemKey === SPEECH_POLISHER_KEY) return [SYSTEM_EMPLOYEE_TAG];
-  if (isDefaultSiliconEmployee(employee)) return [DEFAULT_EMPLOYEE_TAG];
-  return employee.tags ?? [];
-}
-
-/** API / storage / Web 共用：去空白、去重，保留用户顺序，不静默截断。 */
-export function parseSiliconEmployeeTags(value: unknown): string[] {
-  if (!Array.isArray(value)) throw new Error("员工标签必须是数组。");
-  const tags: string[] = [];
-  for (const raw of value) {
-    if (typeof raw !== "string") throw new Error("员工标签必须是文字。");
-    const tag = raw.trim();
-    if (!tag) continue;
-    if (tag.length > SILICON_EMPLOYEE_TAG_MAX_CHARS) {
-      throw new Error(`每个员工标签不能超过 ${SILICON_EMPLOYEE_TAG_MAX_CHARS} 个字符。`);
-    }
-    if (/[,，、\x00-\x1f\x7f]/.test(tag)) throw new Error("员工标签不能包含分隔符或控制字符。");
-    if (tag === SYSTEM_EMPLOYEE_TAG || tag === DEFAULT_EMPLOYEE_TAG) {
-      throw new Error(`「${tag}」是内置标签，不可自定义。`);
-    }
-    if (!tags.includes(tag)) tags.push(tag);
-  }
-  if (tags.length > SILICON_EMPLOYEE_MAX_TAGS) {
-    throw new Error(`最多 ${SILICON_EMPLOYEE_MAX_TAGS} 个员工标签。`);
-  }
-  return tags;
-}
-
-export function parseSiliconEmployeeTagInput(value: string): string[] {
-  return parseSiliconEmployeeTags(value.split(/[,，、\n]+/));
-}
 
 export interface AiTeam {
   id: string;

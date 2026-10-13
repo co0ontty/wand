@@ -27,6 +27,7 @@ import {
   issueAgentModeLabel,
   issueAgentModeOptions,
   issueAgentModelOptions,
+  issueAgentTargetValue,
   issueCreateDispatches,
   issueDropDispatches,
   issueDropDispatchPrompt,
@@ -42,6 +43,7 @@ import {
   issueWorkspaceSelectValue,
   normalizeIssueModelCatalog,
   withIssueAgentProvider,
+  withIssueAgentTarget,
   groupIssueSessionsByAgent,
   issueAgentLabel,
   issueAgentProviderModelLine,
@@ -176,6 +178,23 @@ test("unassigned issues reuse the last selected agent defaults", () => {
   assert.deepEqual(resolveIssueAgent(null), createDefaultIssueAgent());
   assert.deepEqual(normalizeIssueAgentDefaults(last), last);
   assert.deepEqual(normalizeIssueAgentDefaults({ provider: "cursor", model: "x", thinkingEffort: "off", mode: "default" }), createDefaultIssueAgent());
+});
+
+test("remembered Wand Agent defaults retain their SDK execution identity", () => {
+  const sdk = { provider: "pi" as const, model: "gpt-5", thinkingEffort: "deep" as const, mode: "managed" as const, kind: "structured" as const, engine: "sdk" as const };
+  assert.deepEqual(resolveIssueAgent(null, sdk), sdk);
+  assert.deepEqual(normalizeIssueAgentDefaults(sdk), sdk);
+  assert.equal(issueAgentTargetValue(normalizeIssueAgentDefaults(sdk)), "wand-agent");
+  const fromPty = withIssueAgentTarget({ ...createDefaultIssueAgent(), kind: "pty" }, "wand-agent", null);
+  assert.equal(fromPty.provider, "pi");
+  assert.equal(fromPty.engine, "sdk", "selecting Wand Agent never silently starts Pi CLI");
+  assert.equal(fromPty.kind, "structured");
+});
+
+test("malformed agent defaults fall back without throwing", () => {
+  for (const model of [undefined, null, 123, {}, []]) {
+    assert.deepEqual(normalizeIssueAgentDefaults({ provider: "pi", model, thinkingEffort: "off", mode: "default" }), createDefaultIssueAgent());
+  }
 });
 
 test("issue helpers expose columns, grouping, sorting, and workspace options", () => {
@@ -475,7 +494,7 @@ test("task board is a first-class view=taskboard route that does not unmount the
 
   // 主区把看板叠在会话槽位上，禁止 early-return 整块替换 <main>（那会拆掉 LegacyHost）。
   assert.match(main, /id="output"/);
-  assert.match(main, /taskBoard\.open \? <TaskBoardHost/);
+  assert.match(main, /taskBoard\.open && taskBoard\.page === "board" \? <TaskBoardHost/);
   assert.doesNotMatch(main, /if \(taskBoard\.open\) \{\s*return <main/s);
   assert.match(main, /onBack=\{\(\) => taskBoardController\.close\(\)\}/);
 
@@ -494,7 +513,7 @@ test("task board is a first-class view=taskboard route that does not unmount the
   assert.match(sidebar, /const navigateFromTree = \(\): void => \{\s*settingsController\.close\(\);\s*taskBoardController\.close\(\)/);
   assert.match(sidebar, /onNavigate=\{navigateFromTree\}/);
   // 功能导航既有库按钮高亮，也保留当前页语义。
-  assert.match(sidebar, /activePage=\{settings\.open \? null : taskBoard\.open \? taskBoard\.page === "board" \? "board" : "teams"/);
+  assert.match(sidebar, /activePage=\{settings\.open \? null : taskBoard\.open \? taskBoard\.page === "board" \? "board" : taskBoard\.page === "schedules" \? "schedules" : "teams"/);
   const navigation = readFileSync(new URL("../src/web-ui/react/conversations/sidebar.tsx", import.meta.url), "utf8");
   assert.match(navigation, /aria-current=\{activePage === entry\.value \? "page" : undefined\}/);
   // 同一功能只留一个可见入口：箭头只在未选中任务时出现（返回工作区），选中任务后返回交给面包屑首段。

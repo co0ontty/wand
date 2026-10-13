@@ -1,3 +1,6 @@
+// RUNTIME-LOADED BY PATH: openrouter-free-cli.ts starts this file as a Pi extension via
+// fileURLToPath(new URL("./pi-openrouter-free-bridge.js", import.meta.url)). It is not imported by
+// any static module, so static reachability tools report it as unused. Do not rename or move it.
 /** Pi CLI provider bridge. No Agent/SDK runner and no changes to the user's Pi auth/models files. */
 import { readFileSync, rmSync } from "node:fs";
 import { dirname } from "node:path";

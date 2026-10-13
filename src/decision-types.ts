@@ -4,6 +4,10 @@ export const DECISION_MAX_BYTES = 32 * 1024;
 export const DECISION_MAX_QUESTIONS = 8;
 export const DECISION_MAX_OPTIONS = 8;
 export const DECISION_CHECKPOINT = "aac6fef/laya-multilingual-mlx";
+/** Each saved employee slot gets its own budget; group leaves share that slot. */
+export const DECISION_CANDIDATE_TIMEOUT_MS = 45_000;
+/** At most four saved slots, plus transport/cleanup overhead. */
+export const DECISION_CHAIN_WAIT_MS = DECISION_CANDIDATE_TIMEOUT_MS * 4 + 5_000;
 
 export interface LocalDecisionConfig {
   enabled: boolean;
@@ -34,10 +38,10 @@ export interface DecisionRequest {
 export interface DecisionResult {
   model: string;
   answers: Record<string, Record<string, unknown>>;
-  usage: { input_tokens: number; output_tokens: number; truncated?: boolean };
+  usage: { input_tokens: number; output_tokens: number; truncated?: boolean; available?: boolean };
   experimental: true;
   runtime: "laya-mlx" | "decision-expert";
-  executor?: { employeeId: string; candidate: number; source: "local" | "free-group" };
+  executor?: { employeeId: string; candidate: number; source: "local" | "free-group" | "cli" | "sdk" };
 }
 
 export class DecisionError extends Error {
