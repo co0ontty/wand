@@ -150,10 +150,17 @@ test("new task conversations offer every supported Agent provider", () => {
   );
   assert.equal(WORKSPACE_AGENT_OPTIONS.at(-1)?.label, "空白终端");
   const source = readFileSync(new URL("../src/web-ui/react/workspaces/workspace-agent-picker.tsx", import.meta.url), "utf8");
-  assert.match(source, /value: "structured", label: "对话"/);
-  assert.match(source, /value: "pty", label: "终端"/);
+  const model = readFileSync(new URL("../src/web-ui/react/workspaces/workspace-agent-model.ts", import.meta.url), "utf8");
+  assert.match(model, /value: "structured", label: "对话"/);
+  assert.match(model, /value: "pty", label: "终端"/);
   assert.match(source, /UnifiedExecutionSubjectPicker/);
   assert.match(readFileSync(new URL("../src/web-ui/react/workspaces/unified-execution-subject-picker.tsx", import.meta.url), "utf8"), /会话类型/);
+});
+
+test("pending split-terminal code preserves the canonical measurement host", () => {
+  const source = readFileSync(new URL("../src/web-ui/react/shell/shell-main-content.tsx", import.meta.url), "utf8");
+  assert.match(source, /import\("\.\.\/workspaces\/workspace-window"\)/);
+  assert.match(source, /renderPending: status => <div className="workspace-window" style=\{\{ flex: 1, minHeight: 0, minWidth: 0 \}\}/);
 });
 
 test("opening an empty workspace task keeps creation user-driven", () => {
@@ -350,7 +357,7 @@ test("task list treats directories as group headers and exposes per-terminal del
 test("task sessions prioritize the active or only task and standalone sessions have no fake task fold", () => {
   const panel = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
   assert.match(panel, /useSidebarExpansion\(\s*`task\.\$\{task.id\}`, true, false, isActive \|\| isOnlyTask/);
-  assert.match(panel, /useSidebarExpansion\(`project\.\$\{group.workspaceId\}`, false, true\)/);
+  assert.match(panel, /useSidebarExpansion\(`project\.\$\{group.workspaceId\}`, false, true, undefined, visibleSessionCount > 0\)/);
   assert.doesNotMatch(panel, /useSidebarExpansion\(`loose\./);
   assert.match(panel, /aria-label="独立会话"/);
   assert.doesNotMatch(panel, /orderSidebarTasks\(group.tasks\)/);
@@ -378,13 +385,11 @@ test("task session rows and work-window tabs render each CLI logo", () => {
   assert.match(tabs, /listSessionLabel\(meta\.session, meta\.index\)/);
   assert.match(input, /index === 0 \|\| index === sequence\.length - 1/);
   assert.match(processManager, /consumePtyInputForTopic\(record\.ptyTopicDraft, input, view, shortcutKey\)/);
-  assert.match(processManager, /provisionalSessionTopic\(prompt, blockedTitles\)/);
+  // Topic generation is covered by the manager's behavioral tests, not its file layout.
   assert.match(processManager, /type: "status", sessionId: id, data: \{ title, description, summary: description \}/);
   const websocket = readFileSync(new URL("../src/web-ui/browser/websocket.ts", import.meta.url), "utf8");
   assert.match(websocket, /!topicMetadataChanged/);
   assert.match(websocket, /statusUpdate\.title = msg\.data\.title/);
-  const structured = readFileSync(new URL("../src/structured-session-manager.ts", import.meta.url), "utf8");
-  assert.match(structured, /provisionalSessionTopic\(input, blockedTitles\)/);
 });
 
 test("new task dialog delegates project suggestions and controls to the library", () => {
@@ -980,7 +985,9 @@ test("工作区与最近会话互斥展示，不重复堆叠同一批会话", ()
   // 归属分组只有一个真源（sidebar-recent.ts），面板只做过滤与转发。
   assert.match(panel, /collectRecentEntries\(groups\)/);
   assert.match(panel, /<SidebarRecentSection\b[\s\S]*?entries=\{visibleRecentEntries\}/);
-  assert.match(panel, /filterRecentEntries\(recentEntries, \{[\s\S]*?activeOnly: displayMode === "active",/);
+  assert.match(panel, /filterRecentEntries\(recentEntries, \{\s*query: searchQuery,\s*employees,\s*\}\)/);
+  const recent = readFileSync(new URL("../src/web-ui/react/workspaces/sidebar-recent-section.tsx", import.meta.url), "utf8");
+  assert.match(recent, /recentConversationGroups\(entries, \{\s*employees, activeOnly: displayMode === "active", selectedSessionId,/);
   // 同一列表位置切换组织方式；按目录为默认，不把折叠行为冒充数据筛选。
   assert.match(panel, /ariaLabel="会话组织方式"/);
   assert.match(panel, /hidden=\{manageMode \|\| view !== "recent"\}/);

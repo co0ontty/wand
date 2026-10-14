@@ -1,4 +1,4 @@
-import { callConfiguredAiText, type QuickCommitAiOptions } from "./git-quick-commit.js";
+import { callConfiguredAiText, type QuickCommitAiOptions } from "./ai-text-runner.js";
 import type { AiTextRequest } from "./types.js";
 import { clipAtWordBoundary } from "./text-utils.js";
 

@@ -291,7 +291,7 @@ verify_render_binary_installed() {
     version_output="$("$binary" --version 2>&1 | head -1)"
     case "$version_output" in
       *stub*|*TODO*)
-        die "安装的 Render 二进制是 stub（$version_output）：$binary" ;;
+        die "安装的 Render 二进制是 stub（${version_output}）：$binary" ;;
     esac
     ok "Rust Render 已随包安装：$triple · $version_output"
     return 0
@@ -313,7 +313,7 @@ cleanup_stale_wand() {
       for pid in $port_pids; do
         process_command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
         if [[ "$process_command" != *"/wand web"* && "$process_command" != *"/cli.js web"* && "$process_command" != *"src/cli.ts web"* ]]; then
-          die "端口 $target_port 被非 Wand 进程占用（PID $pid）：$process_command"
+          die "端口 $target_port 被非 Wand 进程占用（PID ${pid}）：$process_command"
         fi
         warn "端口 $target_port 仍有 Wand 进程，kill: $pid"
         run_privileged kill "$pid" 2>/dev/null || true
@@ -480,26 +480,31 @@ installed_version() {
 }
 
 verify_installed_beta() {
-  local actual_version installed_assets
+  local actual_version installed_build_version installed_assets
   actual_version="$(installed_version)"
-  [[ "$actual_version" == "$DEV_VERSION" ]] || die "Beta 安装版本不一致：期望 $DEV_VERSION，实际 $actual_version"
+  [[ "$actual_version" == "$DEV_VERSION" ]] || die "Beta 安装版本不一致：期望 ${DEV_VERSION}，实际 $actual_version"
+  installed_build_version="$("$NODE_FOR_WAND" -e 'try { process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).version || ""); } catch {}' "$WAND_PREFIX/lib/node_modules/@co0ontty/wand/dist/build-info.json")"
+  [[ "$installed_build_version" == "$DEV_VERSION" ]] || die "Beta 构建版本不一致：期望 ${DEV_VERSION}，实际 ${installed_build_version}"
 
   installed_assets="$WAND_PREFIX/lib/node_modules/@co0ontty/wand/dist/web-ui/embedded-assets.js"
-  if [[ -f "$REPO_ROOT/dist/web-ui/embedded-assets.js" && -f "$installed_assets" ]]; then
-    cmp -s "$REPO_ROOT/dist/web-ui/embedded-assets.js" "$installed_assets" || die "已安装的 Web 资源不是本次构建产物"
+  if [[ -f "$PACKAGE_STAGE/dist/web-ui/embedded-assets.js" && -f "$installed_assets" ]]; then
+    cmp -s "$PACKAGE_STAGE/dist/web-ui/embedded-assets.js" "$installed_assets" || die "已安装的 Web 资源不是本次打包产物"
   fi
   ok "Beta 已安装：$actual_version ($WAND_PREFIX)"
 }
 
 wait_for_service_ready() {
-  local port https proto url pid command listener_pids listener_matches attempt
+  local port https proto url pid command listener_pids listener_matches deadline announced=0
   command -v curl >/dev/null 2>&1 || die "缺少 curl，无法验证 Web 服务是否就绪"
   port="$(config_value port 8443)"
   https="$(config_value https false)"
   proto="http"; [[ "$https" == "true" ]] && proto="https"
   url="$proto://127.0.0.1:$port/"
 
-  for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  # Cold startup can include login-shell discovery and SQLite recovery. Keep
+  # checking the actual service owner and HTTP response within a bounded window.
+  deadline=$((SECONDS + 90))
+  while (( SECONDS < deadline )); do
     pid="$(service_pid)"
     command=""
     [[ -n "$pid" && "$pid" != "0" ]] && command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
@@ -514,10 +519,14 @@ wait_for_service_ready() {
         return 0
       fi
     fi
+    if (( announced == 0 && SECONDS >= deadline - 75 )); then
+      msg "服务仍在初始化，继续等待实际监听和 HTTP 就绪（最多 90 秒）"
+      announced=1
+    fi
     sleep 1
   done
 
-  die "服务未使用预期的 Beta 入口启动：$NODE_FOR_WAND $WAND_BIN web -c $CONFIG_PATH"
+  die "等待 90 秒后服务仍未就绪（PID ${pid:-无}）：请检查服务状态及 ~/.wand/web-error.log；预期入口 $NODE_FOR_WAND $WAND_BIN web -c $CONFIG_PATH"
 }
 
 lan_ip() {
@@ -650,7 +659,7 @@ restart_daemons_now() {
   if [[ -z "${pids// /}" ]]; then
     return 0
   fi
-  warn "重启 daemon：$pids（它们持有的 shell 会结束，可按原生 session id 恢复）"
+  warn "重启 daemon：${pids}（它们持有的 shell 会结束，可按原生 session id 恢复）"
   # Render 对 SIGTERM 是 drain（会等到会话退完），所以先礼后兵；terminald 则直接收摊。
   for pid in $pids; do run_privileged kill "$pid" 2>/dev/null || true; done
   sleep 2
@@ -678,11 +687,28 @@ print_daemon_lines() {
   daemon_state_lines | while IFS=$'\t' read -r label pid state endpoint version; do
     [[ -n "$label" ]] || continue
     if [[ "$state" == "alive" && "$endpoint" != "ok" ]]; then
-      echo "  ${C_YELLOW}${label}: pid ${pid} 活着但端点丢失（$endpoint）—— 旧构建没有端点自愈${C_RESET}"
+      echo "  ${C_YELLOW}${label}: pid ${pid} 活着但端点丢失（${endpoint}）—— 旧构建没有端点自愈${C_RESET}"
     else
       echo "  ${label}: pid ${pid:-0} (${state}), endpoint ${endpoint}${version:+ · v$version}"
     fi
   done
+}
+
+DEPLOYMENT_LOCK_RECEIPT=""
+
+acquire_deployment_locks() {
+  local locks=(--lock "$WAND_PREFIX/lib/node_modules/.wand-update-lock")
+  if [[ "$ACTION" == "install-and-restart" ]]; then
+    locks=(--lock "$REPO_ROOT/.wand-build-lock" "${locks[@]}")
+  fi
+  DEPLOYMENT_LOCK_RECEIPT="$("$NODE_BIN" "$REPO_ROOT/src/deployment-lock.ts" --acquire --owner-pid "$$" "${locks[@]}")" || die "部署锁被占用或不可写，未构建、停止或修改服务"
+  trap release_deployment_locks EXIT
+}
+
+release_deployment_locks() {
+  [[ -n "$DEPLOYMENT_LOCK_RECEIPT" ]] || return 0
+  printf '%s' "$DEPLOYMENT_LOCK_RECEIPT" | "$NODE_BIN" "$REPO_ROOT/src/deployment-lock.ts" --release --owner-pid "$$" || warn "部署锁释放失败，保留锁等待检查"
+  DEPLOYMENT_LOCK_RECEIPT=""
 }
 
 refresh_wand_runtime
@@ -691,8 +717,16 @@ refresh_wand_runtime
 # service. This is especially important when migrating an older nvm install.
 if [[ "$ACTION" == "install-and-restart" ]]; then
   "$NODE_BIN" "$REPO_ROOT/scripts/check-node-version.js" || die "请先运行 nvm use，再重新构建/安装。"
-  # 先确认全局目录可读写，再构建或停止服务。
-  [[ "$DO_INSTALL" != "1" ]] || repair_global_package_permissions
+fi
+
+case "$ACTION" in
+  status|logs|attach) ;; # read-only actions never acquire a deployment lock
+  *) acquire_deployment_locks ;;
+esac
+
+# Permission repair and cleanup also belong to the global installation transaction.
+if [[ "$ACTION" == "install-and-restart" && "$DO_INSTALL" == "1" ]]; then
+  repair_global_package_permissions
 fi
 
 case "$ACTION" in
@@ -718,11 +752,11 @@ case "$ACTION" in
     exit 0
     ;;
   restart-only)
-    trap restore_stopped_service EXIT
+    trap 'restore_stopped_service; release_deployment_locks' EXIT
     ensure_service_installed_and_running
     wait_for_service_ready
     SERVICE_STOPPED_FOR_INSTALL=0
-    trap - EXIT
+    trap release_deployment_locks EXIT
     print_panel
     exit 0
     ;;
@@ -738,31 +772,21 @@ case "$ACTION" in
 esac
 
 PACKAGE_VERSION="$("$NODE_BIN" -e 'process.stdout.write(require("./package.json").version)' 2>/dev/null)"
-# 兼容曾经使用的 -dev.YYYYMMDDHHMM，以及现在与 Android 对齐的
-# -debug.tMMDDHHMM（npm semver 不允许纯数字段带前导零）。package.json 与
-# package-lock.json 先同步到最新 tag；只有打包产物保留临时 debug 后缀。
-FALLBACK_VERSION="${PACKAGE_VERSION%%-dev.*}"
-FALLBACK_VERSION="${FALLBACK_VERSION%%-debug.*}"
-BASE_VERSION="$(latest_tag_version)"
-[[ -n "$BASE_VERSION" ]] || BASE_VERSION="$FALLBACK_VERSION"
-RESTORE_VERSION="$BASE_VERSION"
+# Build identity and staged package metadata are immutable; never rewrite package.json
+# or package-lock.json in the shared workspace. Keep the installed/tag base monotonic.
+BASE_VERSION="$("$NODE_BIN" scripts/beta-version.js --local "$PACKAGE_VERSION" "$(latest_tag_version)" "$WAND_PREFIX/lib/node_modules/@co0ontty/wand/package.json")"
 DEV_VERSION="${BASE_VERSION}-debug.t$(date +%m%d%H%M)"
 PACK_DIR=""
+PACKAGE_STAGE=""
 
-restore_version() {
+finish_deployment() {
   restore_stopped_service
-  "$NPM_FOR_WAND" version "$RESTORE_VERSION" --no-git-tag-version --allow-same-version --ignore-scripts >/dev/null 2>&1 || true
   [[ -n "$PACK_DIR" && -d "$PACK_DIR" ]] && rm -rf "$PACK_DIR"
+  release_deployment_locks
   return 0
 }
-trap restore_version EXIT
+trap finish_deployment EXIT
 trap 'echo; warn "已中断。service 可能仍在跑旧版本。"; exit 130' INT
-
-if [[ "$PACKAGE_VERSION" != "$BASE_VERSION" ]]; then
-  msg "先同步 package.json/package-lock.json: $PACKAGE_VERSION -> $BASE_VERSION (latest tag)"
-  "$NPM_FOR_WAND" version "$BASE_VERSION" --no-git-tag-version --allow-same-version --ignore-scripts >/dev/null
-  ok "仓库包版本已同步到 $BASE_VERSION"
-fi
 
 if [[ "$DO_BUILD" == "1" ]]; then
   ensure_render_submodules
@@ -771,11 +795,10 @@ if [[ "$DO_BUILD" == "1" ]]; then
     warn "dist/ 当前不可写，先归还给当前用户"
     sudo chown -R "$(id -u):$(id -g)" "$REPO_ROOT/dist"
   fi
-  msg "版本号: package $PACKAGE_VERSION, latest tag $BASE_VERSION -> $DEV_VERSION"
-  "$NPM_FOR_WAND" version "$DEV_VERSION" --no-git-tag-version --allow-same-version --ignore-scripts >/dev/null 2>&1
+  msg "版本号: package $PACKAGE_VERSION, base $BASE_VERSION -> $DEV_VERSION"
   msg "WAND_BUILD_CHANNEL=beta npm run build"
   BUILD_LOG="$(mktemp -t wand-build.XXXXXX)"
-  if ! WAND_BUILD_CHANNEL=beta "$NPM_FOR_WAND" run build >"$BUILD_LOG" 2>&1; then
+  if ! WAND_DEPLOYMENT_LOCKS="$DEPLOYMENT_LOCK_RECEIPT" WAND_BUILD_VERSION="$DEV_VERSION" WAND_BUILD_CHANNEL=beta "$NPM_FOR_WAND" run build >"$BUILD_LOG" 2>&1; then
     tail -30 "$BUILD_LOG" | sed 's/^/  /'
     # npm run build 的命令回显本身就含 check-bundle-budget.js；只有预算检查明确
     # 打出 FAILED 标记，才能把构建失败归因于预算（而非 tsc / bundler 等）。
@@ -803,7 +826,6 @@ else
   ')"
   [[ -n "$DEV_VERSION" ]] || die "--no-build 需要 dist/build-info.json 中包含有效版本"
   [[ "$DEV_VERSION" == *-debug.* ]] || die "--no-build 只能安装已有的 Beta 构建，当前版本为 $DEV_VERSION"
-  "$NPM_FOR_WAND" version "$DEV_VERSION" --no-git-tag-version --allow-same-version --ignore-scripts >/dev/null 2>&1
 fi
 
 if [[ "$DO_INSTALL" == "1" ]]; then
@@ -811,11 +833,9 @@ if [[ "$DO_INSTALL" == "1" ]]; then
   msg "npm pack -> install -g --prefix $WAND_PREFIX"
   repair_global_package_permissions
   cleanup_npm_package_temps
-  # dist was built explicitly above with the local debug version. Do not run
-  # publish lifecycle hooks here: prepublishOnly rewrites package.json back to
-  # the latest stable tag and silently turns this local package into a stable
-  # build before installation.
-  PACK_FILE="$("$NPM_FOR_WAND" pack --ignore-scripts --pack-destination "$PACK_DIR" | tail -1)"
+  # Pack a private immutable snapshot, not a shared workspace whose manifest can change.
+  PACKAGE_STAGE="$("$NODE_BIN" "$REPO_ROOT/scripts/stage-local-package.js" "$REPO_ROOT" "$PACK_DIR/package-stage" "$DEV_VERSION")"
+  PACK_FILE="$(cd "$PACKAGE_STAGE" && "$NPM_FOR_WAND" pack --ignore-scripts --pack-destination "$PACK_DIR" | tail -1)"
   [[ -n "$PACK_FILE" && -f "$PACK_DIR/$PACK_FILE" ]] || die "npm pack 未产出 tarball"
 
   if service_installed && [[ -f "$WAND_BIN" || -x "$WAND_BIN" ]]; then

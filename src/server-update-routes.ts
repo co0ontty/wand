@@ -29,7 +29,7 @@ import {
   normalizePublicOrigin,
   publicOriginFromRequest,
 } from "./ios-ota.js";
-import { streamFileWithRange } from "./server-file-routes.js";
+import { streamFileWithRange } from "./http-file-stream.js";
 import type { WandStorage } from "./storage.js";
 import type { WandConfig } from "./types.js";
 import { compareApkInstallOrder, compareSemver, compareWandInstallOrder } from "./version-utils.js";
@@ -488,6 +488,8 @@ export interface AdminUpdateRoutesDependencies {
   buildInfo: BuildInfo;
   serverInstanceId: string;
   emitSystemNotification(data: Record<string, unknown>): void;
+  /** 更新通道/自动更新开关变更后立即触发一次后台检查，而不是等 30 分钟轮询。 */
+  requestUpdateCheck?(): void;
 }
 
 export function registerAdminUpdateRoutes(app: Express, deps: AdminUpdateRoutesDependencies): void {
@@ -562,9 +564,14 @@ export function registerAdminUpdateRoutes(app: Express, deps: AdminUpdateRoutesD
     }
     state.updateInFlight = true;
     try {
-      const info = await deps.checkLatestPackageVersion(deps.getUpdateChannel(), true);
+      const channel = deps.getUpdateChannel();
+      const info = await deps.checkLatestPackageVersion(channel, true);
+      if (channel !== deps.getUpdateChannel()) {
+        res.status(409).json({ error: "更新通道已切换，请重新检查更新。" });
+        return;
+      }
       if (!info.latest) {
-        res.status(502).json({ error: "无法连接到 npm registry。" });
+        res.status(502).json({ error: "npm 所选通道暂无有效版本，或 registry 暂时不可用。" });
         return;
       }
       if (!canUseDetachedUpdateHelper()) {
@@ -629,6 +636,7 @@ export function registerAdminUpdateRoutes(app: Express, deps: AdminUpdateRoutesD
     if (typeof body.cli === "boolean") writes.push(["autoUpdateProviderClis", String(body.cli)]);
     for (const [key, value] of writes) storage.setConfigValue(key, value);
     res.json(readAutoUpdatePrefs());
+    if (body.web === true) deps.requestUpdateCheck?.();
   });
 
   // ── 更新通道（stable / beta） ──
@@ -642,8 +650,13 @@ export function registerAdminUpdateRoutes(app: Express, deps: AdminUpdateRoutesD
 
   app.post("/api/update-channel", requireAdmin, (req, res) => {
     const body = (req.body ?? {}) as { channel?: unknown };
-    const channel = body.channel === "beta" ? "beta" : "stable";
+    if (body.channel !== "beta" && body.channel !== "stable") {
+      res.status(400).json({ error: "更新通道必须为 stable 或 beta。" });
+      return;
+    }
+    const channel = body.channel;
     storage.setConfigValue("updateChannel", channel);
     res.json({ channel });
+    deps.requestUpdateCheck?.();
   });
 }

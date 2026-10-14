@@ -34,6 +34,38 @@ function legacyMutation(dbPath: string, action: (db: DatabaseSync) => void): voi
   try { action(db); } finally { db.close(); }
 }
 
+test("task write paths preserve uniqueness when v4 cannot create its index for legacy duplicates", (t) => {
+  const { storage: initialStorage, dbPath } = database(t);
+  const project = initialStorage.createWorkspace({ name: "Project", cwd: "/tmp/project" });
+  const first = initialStorage.createWorkspaceTask({ workspaceId: project.id, name: "First" });
+  const second = initialStorage.createWorkspaceTask({ workspaceId: project.id, name: "Second" });
+  const firstCard = initialStorage.getWandTaskByWorkspaceTaskId(first.id)!;
+  const secondCard = initialStorage.getWandTaskByWorkspaceTaskId(second.id)!;
+  initialStorage.close();
+
+  legacyMutation(dbPath, (db) => {
+    db.exec("DROP INDEX IF EXISTS uniq_wand_tasks_one_card_per_container");
+    db.exec("PRAGMA user_version = 3");
+    db.prepare("UPDATE wand_tasks SET workspace_task_id = ? WHERE id = ?").run(first.id, secondCard.id);
+  });
+  const storage = new WandStorage(dbPath);
+  t.after(() => storage.close());
+  const verify = new DatabaseSync(dbPath);
+  assert.equal(verify.prepare("PRAGMA user_version").get()?.user_version, 4);
+  assert.equal(verify.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'uniq_wand_tasks_one_card_per_container'").get(), undefined);
+  verify.close();
+
+  const replay = storage.createWandTask({ workspaceId: project.id, workspaceTaskId: first.id, title: "Replay" });
+  assert.ok([firstCard.id, secondCard.id].includes(replay.id), "compatibility create reuses an existing card");
+  assert.equal(storage.listWandTasks().filter((task) => task.workspaceTaskId === first.id).length, 2);
+  assert.throws(() => storage.insertWandTask({ workspaceId: project.id, workspaceTaskId: first.id, title: "Duplicate" }), /已有任务卡片/);
+  const third = storage.createWorkspaceTask({ workspaceId: project.id, name: "Third" });
+  const thirdCard = storage.getWandTaskByWorkspaceTaskId(third.id)!;
+  assert.throws(() => storage.updateWandTask(thirdCard.id, { workspaceTaskId: first.id }), /已有任务卡片/);
+  assert.equal(storage.getWandTask(firstCard.id)?.workspaceTaskId, first.id);
+  assert.equal(storage.getWandTask(secondCard.id)?.workspaceTaskId, first.id, "rejected writes leave legacy duplicate rows untouched");
+});
+
 test("either task creation entry point immediately returns both compatible projections", (t) => {
   const { storage } = database(t);
   const project = storage.createWorkspace({ name: "Project", cwd: "/tmp/project" });
@@ -170,7 +202,9 @@ test("legacy reconciliation is idempotent, preserves NULL iterations and ignores
   storage.saveSession(session);
   storage.close();
   legacyMutation(dbPath, (db) => {
+    // A legacy database: the backfill (schema v2) never ran, so the version gate is back at v1.
     db.exec("DELETE FROM app_config WHERE key = 'pref:taskRecordsVersion'");
+    db.exec("PRAGMA user_version = 1");
     db.prepare("DELETE FROM wand_tasks WHERE id = ?").run(oldCard.id);
     db.prepare("UPDATE workspace_tasks SET milestone_id = NULL WHERE id = ?").run(container.id);
     db.prepare(`INSERT INTO wand_tasks (id, title, status, created_at, updated_at)
@@ -195,6 +229,8 @@ test("legacy duplicate card links choose updated time then row order without dup
   const project = storage.createWorkspace({ name: "Project", cwd: "/tmp/project" });
   const container = storage.createWorkspaceTask({ workspaceId: project.id, name: "Old" });
   legacyMutation(dbPath, (db) => {
+    // Pre-v4 databases could hold several cards per container; v4 forbids it, so simulate that state.
+    db.exec("DROP INDEX IF EXISTS uniq_wand_tasks_one_card_per_container");
     for (const [id, title] of [["newer", "Newer"], ["tie", "Tie wins"]]) {
       db.prepare(`INSERT INTO wand_tasks (id, workspace_id, workspace_task_id, title, status, created_at, updated_at)
         VALUES (?, ?, ?, ?, 'todo', '2099', '2099')`).run(id, project.id, container.id, title);

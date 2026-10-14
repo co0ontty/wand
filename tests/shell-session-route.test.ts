@@ -248,7 +248,6 @@ test("commands endpoint puts a new session on its task card without a board relo
   for (const request of [
     { command: "pi", systemPrompt: "自定义角色" },
     { command: "pi", sessionSource: "automation", automationId: "test:internal" },
-    { command: "echo hello" },
   ]) {
     const result = await fetch(`${baseUrl}/api/commands`, {
       method: "POST", headers: authHeaders, body: JSON.stringify({ cwd: root, ...request }),
@@ -258,4 +257,9 @@ test("commands endpoint puts a new session on its task card without a board relo
     assert.equal(roleCalls.at(-1)?.employeeId, undefined);
     assert.equal(roleCalls.at(-1)?.systemPrompt, request.systemPrompt);
   }
+  // Raw command strings are admin-only: a connected app (bearer) cannot run arbitrary commands.
+  const rawForApp = await fetch(`${baseUrl}/api/commands`, {
+    method: "POST", headers: authHeaders, body: JSON.stringify({ cwd: root, command: "echo hello" }),
+  });
+  assert.equal(rawForApp.status, 403);
 });

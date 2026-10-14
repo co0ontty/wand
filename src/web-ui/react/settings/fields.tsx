@@ -1,8 +1,21 @@
 import * as React from "react";
 import { useEffect, useRef, useState, type ComponentProps, type MouseEvent, type ReactNode } from "react";
-import { Alert, Card, Form, Input, InputNumber } from "antd";
+import { Alert, Form, Input, InputNumber } from "antd";
 import { WandButton, WandSelect, WandSwitch } from "../ui";
 import { MOTION_DWELL_FAILED_MS, MOTION_DWELL_SENT_MS } from "../ui/motion-tokens";
+import { installStyleSheet } from "../styles";
+
+// Shared fields/actions are used outside Settings, including cold-loaded recruitment.
+// Their base layout must travel with the component, not the Settings page chunk.
+if (typeof document !== "undefined") installStyleSheet("wand-settings-field-styles", String.raw`
+.wand-settings-library-grid,.wand-settings-library-default-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr)); gap:16px; }
+.wand-settings-library-field { margin-bottom:0; min-width:0; }
+.wand-settings-library-number,.wand-settings-library-select,.wand-settings-library-select>button { width:100%; }
+.wand-settings-library-save-bar { display:flex; flex-direction:column; align-items:flex-start; gap:12px; }
+.wand-settings-library-action-label { display:grid; }
+.wand-settings-library-action-label>span { grid-area:1/1; }
+.wand-settings-library-action-measure { visibility:hidden; }
+`);
 
 export function SettingsSection({
   title,
@@ -16,12 +29,13 @@ export function SettingsSection({
   children: ReactNode;
 }) {
   return (
-    <Card title={title} extra={action} className="wand-settings-library-section">
+    <section className="wand-settings-library-section" aria-label={title}>
+      <div className="wand-settings-library-section-heading"><h3>{title}</h3>{action}</div>
       {description ? <p>{description}</p> : null}
       <Form component={false} layout="vertical">
         <div className="wand-settings-library-section-body">{children}</div>
       </Form>
-    </Card>
+    </section>
   );
 }
 

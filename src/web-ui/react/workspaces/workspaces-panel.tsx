@@ -1,6 +1,8 @@
+import { isArchiveBlocked } from "../../../archive-policy.js";
 import { SidebarPopupOwnerContext, SidebarSurfacesContext, useSidebarPopupOwner, useSidebarPopupState } from "./sidebar-popup-owner";
 import { ConversationMorphIcon } from "../conversations/controls";
 import { SidebarRowMenu } from "./sidebar-row-menu";
+import { SidebarLabelTooltip } from "./sidebar-label-tooltip";
 import { SidebarSessionMenu } from "./sidebar-session-menu";
 import { confirmSidebarAction, confirmClearSessions } from "./sidebar-menu-confirm";
 import { Badge, Checkbox, Flex, Menu, Skeleton, Typography } from "antd";
@@ -164,7 +166,7 @@ function TaskSessionItem({
   onToggleSelect?(): void;
   onOpen(): void;
   onDelete(): Promise<void>;
-  /** 归档会停止会话；恢复用原来的会话 ID 续上。归档行传 false 表示恢复。 */
+  /** 归档保留空闲会话与历史；恢复用原来的会话 ID 续上。归档行传 false 表示恢复。 */
   onArchive?(archived: boolean): Promise<void>;
   /** 未分组会话所在的目录组：给出「归纳为新任务」入口；任务内的会话不传。 */
   intoNewTask?: TaskDirectoryGroup;
@@ -191,7 +193,7 @@ function TaskSessionItem({
         event.stopPropagation();
         startSessionDrag(event.dataTransfer, session.id);
       }}>
-      <WandNavigationLink style={{ flex: 1, minWidth: 0, width: "100%", height: "auto", whiteSpace: "normal", justifyContent: "flex-start", textAlign: "start", padding: 6 }}
+      <SidebarLabelTooltip title={`${label} · ${state.label} · ${rowTitle}`} selector=".workspace-session-name"><WandNavigationLink style={{ flex: 1, minWidth: 0, width: "100%", height: "auto", whiteSpace: "normal", justifyContent: "flex-start", textAlign: "start", padding: 6 }}
         className="workspace-session-main"
         orientation="vertical"
         size="sm"
@@ -227,7 +229,7 @@ function TaskSessionItem({
         ) : session.sessionKind === "pty" && (
           <span className="workspace-session-kind">终端</span>
         )}
-      </WandNavigationLink>
+      </WandNavigationLink></SidebarLabelTooltip>
     </Flex>
   );
   return <SidebarSessionMenu row={row} session={session} label={label} disabled={manageMode}
@@ -397,6 +399,7 @@ function TaskItem({
   const toggleSessionsOpen = (): void => setSessionsOpen(!open);
   const teamActivity = sidebarAggregateState(teamSplit.live);
   const taskAggregate = sidebarAggregateState(task.sessions);
+  const canArchive = task.canArchive !== false && !task.sessions.some(isArchiveBlocked);
   const countId = React.useId();
 
   const submitRename = async () => {
@@ -423,6 +426,7 @@ function TaskItem({
   };
 
   const runTaskAction = async (key: "archive" | "delete" | "clear" | "clear-history"): Promise<void> => {
+    if (key === "archive" && !canArchive) return;
     if (busy) return;
     setBusy(true); setTaskActionError(""); setTaskMenuOpen(false);
     try {
@@ -553,7 +557,7 @@ function TaskItem({
         { key: "open", disabled: busy, icon: <WandIcon name="task"/>, label: "打开任务" },
         { key: "new", disabled: busy, icon: <WandIcon name="plus"/>, label: "新建会话" },
         { key: "rename", disabled: busy, icon: <WandIcon name="edit"/>, label: "重命名任务" },
-        { key: "archive", disabled: busy, icon: <WandIcon name="archive"/>, label: isolated ? "归档任务（保留 Worktree）" : "归档任务" },
+        ...(canArchive ? [{ key: "archive", disabled: busy, icon: <WandIcon name="archive"/>, label: isolated ? "归档任务（保留 Worktree）" : "归档任务" }] : []),
         ...(totalSessionCount || isolated ? [{ key: "danger-divider", type: "divider" as const }] : []),
         ...(totalSessionCount ? [{ key: "clear", disabled: busy, danger: true, icon: <WandIcon name="terminal"/>, label: `清空所列会话（${totalSessionCount}）` }] : []),
         ...(teamSplit.history.length ? [{ key: "clear-history", disabled: busy, danger: true, icon: <WandIcon name="archive"/>, label: `清理团队历史（${teamSplit.history.length}）` }] : []),
@@ -681,6 +685,7 @@ function TaskItem({
 
 function TaskGroupSection({
   group,
+  totalSessionCount,
   now,
   preview = false,
   directoryCount,
@@ -701,6 +706,7 @@ function TaskGroupSection({
   onOpenDialog,
 }: {
   group: TaskDirectoryGroup;
+  totalSessionCount: number;
   now: number;
   preview?: boolean;
   directoryCount: number;
@@ -721,7 +727,8 @@ function TaskGroupSection({
   onTasksChanged(): Promise<void>;
   onOpenDialog?: () => void;
 }) {
-  const [directoryOpen, setDirectoryOpen] = useSidebarExpansion(`project.${group.workspaceId}`, false, true);
+  const visibleSessionCount = group.tasks.reduce((count, task) => count + task.sessions.length, group.standaloneSessions.length);
+  const [directoryOpen, setDirectoryOpen] = useSidebarExpansion(`project.${group.workspaceId}`, false, true, undefined, visibleSessionCount > 0);
   const [worktreeDialogOpen, setWorktreeDialogOpen] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
   const [directoryActionError, setDirectoryActionError] = React.useState("");
@@ -827,7 +834,7 @@ function TaskGroupSection({
     await onTasksChanged();
   };
 
-  // 会话归档会停止终端，历史和 session id 保留，恢复时用它续上。
+  // 会话归档保留终端、历史和 session id，恢复时用它续上。
   const handleArchiveSession = async (sessionIds: readonly string[], archived: boolean) => {
     const ids = [...new Set(sessionIds)].filter((id) => id.trim().length > 0);
     if (ids.length === 0) return;
@@ -907,6 +914,7 @@ function TaskGroupSection({
         label={`目录 ${group.workspaceName} 的更多操作`} title={group.workspaceName} description={shortenWorkspacePath(group.workspaceCwd)}
         error={directoryActionError} className="workspace-directory-menu"
         row={<Flex align="center" gap={4} style={{ minWidth: 0 }} className={classNames("workspace-row", renamingDirectory && "is-renaming")} hidden={renamingDirectory}>
+        <SidebarLabelTooltip title={`${group.workspaceName} · ${group.workspaceCwd}`} selector=".workspace-row-title">
         <WandNavigationLink style={{ flex: 1, minWidth: 0, height: "auto", whiteSpace: "normal", justifyContent: "flex-start", textAlign: "start", padding: 6 }}
           className="workspace-row-main"
           orientation="vertical"
@@ -929,12 +937,15 @@ function TaskGroupSection({
             {!group.global && <Typography.Text type="secondary" ellipsis className="workspace-row-path" title={group.workspaceCwd}
               style={{ fontSize: 12 }}>{shortenWorkspacePath(group.workspaceCwd)}</Typography.Text>}
           </Flex>
-          <span className="workspace-row-count" title={`当前列表：${taskCount} 个任务，${group.standaloneSessions.length} 个独立会话；已归档会话在下方单列`} aria-label={`当前显示 ${taskCount} 个任务，${group.standaloneSessions.length} 个独立会话`}>
-              {taskCount ? `${taskCount} 任务` : null}{taskCount && group.standaloneSessions.length ? " · " : null}{group.standaloneSessions.length || !taskCount ? `${group.standaloneSessions.length} 会话` : null}
-          </span>
+          <Typography.Text type="secondary" className="workspace-row-count"
+            title={`当前显示 ${visibleSessionCount} / 共 ${totalSessionCount} 个会话；${taskCount} 个任务，${group.standaloneSessions.length} 个独立会话；不含归档`}
+            aria-label={`当前显示 ${visibleSessionCount} 个会话，共 ${totalSessionCount} 个会话`}>
+            {visibleSessionCount === totalSessionCount ? visibleSessionCount : `${visibleSessionCount}/${totalSessionCount}`}
+          </Typography.Text>
           <span className={`sidebar-head-activity tone-${groupActivity.tone}`} title={groupActivity.description}
             aria-label={groupActivity.description}>{groupActivity.label ? <Badge status={groupActivity.tone === "warning" ? "warning" : groupActivity.tone === "success" ? "success" : "processing"}/> : null}</span>
         </WandNavigationLink>
+        </SidebarLabelTooltip>
       </Flex>} menu={{ items: [
         { key: "new", disabled: deleting, icon: <WandIcon name="plus"/>, label: "在此新建会话" },
         ...(canRenameDirectory ? [{ key: "rename", disabled: deleting, icon: <WandIcon name="edit"/>, label: "重命名目录" }] : []),
@@ -957,7 +968,10 @@ function TaskGroupSection({
       } }}/>}
       <SidebarDisclosure id={tasksId} open={open}>
         <Flex vertical gap={4} style={{ paddingInlineStart: 8 }} className="workspace-tasks">
-          {taskCount === 0 && group.standaloneSessions.length === 0 && !group.synthetic && (
+          {displayMode === "active" && visibleSessionCount === 0 ? (
+            <Typography.Paragraph type="secondary" className="sidebar-group-empty">暂无活动会话</Typography.Paragraph>
+          ) : null}
+          {displayMode !== "active" && taskCount === 0 && group.standaloneSessions.length === 0 && !group.synthetic && (
             <WandButton kind="ghost" size="small" className="workspaces-empty-action"
               onClick={() => { onOpenDialog?.(); newSessionController.open({
                 initialCwd: group.global ? undefined : group.workspaceCwd,
@@ -1236,6 +1250,9 @@ function SidebarWorkspacesPanel({
   );
   const visibleGroups = displayMode === "active"
     ? filterActiveGroups(searchedGroups, selectedSessionId) : searchedGroups;
+  const groupSessionCounts = React.useMemo(() => new Map(groups.map((group) => [group.workspaceId,
+    group.tasks.reduce((count, task) => count + task.sessions.length, group.standaloneSessions.length),
+  ])), [groups]);
 
   // 活动高亮统一读 workspaceContextStore（主区标签栏与这里共用同一来源，
   // 关闭工作区窗口时这里也会同步取消高亮）。
@@ -1295,6 +1312,10 @@ function SidebarWorkspacesPanel({
   const prunedSelection = pruneManagedSelection(selection, visibleGroups);
   const selectedCount = sidebarManageCount(prunedSelection);
   const hasManageSessions = prunedSelection.sessionIds.length > 0;
+  const selectedArchiveBlocked = sourceGroups.some(group =>
+    group.tasks.some(task => (prunedSelection.taskIds.includes(task.id) && (task.canArchive === false || task.sessions.some(isArchiveBlocked)))
+      || task.sessions.some(session => prunedSelection.sessionIds.includes(session.id) && (session.canArchive === false || isArchiveBlocked(session))))
+    || group.standaloneSessions.some(session => prunedSelection.sessionIds.includes(session.id) && (session.canArchive === false || isArchiveBlocked(session))));
   const visibleManaged = collectManagedIds(visibleGroups);
   const allVisibleSelected = selectedCount > 0
     && prunedSelection.taskIds.length === visibleManaged.taskIds.length
@@ -1390,14 +1411,12 @@ function SidebarWorkspacesPanel({
   const contacts = useSiliconEmployees();
   const { employees } = contacts;
   // 最近对话：目录树里的全部会话拍平后按归属分组（口径见 sidebar-recent.ts），
-  // 搜索与「在跑」档在同一个入口过滤，再用同一份结果渲染。
+  // 搜索先缩小数据范围，活动筛选由分组投影裁剪子项，不能提前删掉员工身份头。
   const recentEntries = React.useMemo(() => collectRecentEntries(groups), [groups]);
   const visibleRecentEntries = React.useMemo(() => filterRecentEntries(recentEntries, {
     query: searchQuery,
     employees,
-    activeOnly: displayMode === "active",
-    selectedSessionId,
-  }), [recentEntries, searchQuery, employees, displayMode, directoryId, selectedSessionId]);
+  }), [recentEntries, searchQuery, employees]);
   React.useEffect(() => {
     if (sessionRefresh.current) {
       sessionRefresh.current = false;
@@ -1409,6 +1428,7 @@ function SidebarWorkspacesPanel({
   // 批量操作里任务和会话是同一套逻辑：收默认归档（软处理）、删除只作用于显式选中的终端。
   const applyManagedSelection = async (mode: "archive" | "delete"): Promise<void> => {
     if (manageBusy) return;
+    if (mode === "archive" && selectedArchiveBlocked) return;
     const resolved = prunedSelection;
     if (sidebarManageCount(resolved) === 0) return;
     // 危险按钮只删选中的会话；若期间数据刷新把它们都挤掉了，直接在加锁前退出。
@@ -1516,7 +1536,8 @@ function SidebarWorkspacesPanel({
                     className="sidebar-manage-action"
                     kind="secondary"
                     size="small"
-                    disabled={manageBusy || selectedCount === 0}
+                    disabled={manageBusy || selectedCount === 0 || selectedArchiveBlocked}
+                    title={selectedArchiveBlocked ? "所选任务仍在执行，完成后才能归档" : undefined}
                     onClick={() => setConfirmingManage("archive")}
                   >
                     {describeManagedAction(prunedSelection)}
@@ -1577,7 +1598,7 @@ function SidebarWorkspacesPanel({
                     if (searchVisible) onSearchChange?.("");
                     setSearchOpen(!searchVisible);
                   }}
-                ><ConversationMorphIcon active={searchVisible} from="search" to="close" size={16}/></WandIconButton>
+                ><ConversationMorphIcon active={searchVisible} from="search" to="back" size={16}/></WandIconButton>
                 <WandPopover popupOwner={popupOwner} open={listMenuOpen} onOpenChange={setListMenuOpen} align="end"
                   ariaLabel="会话列表选项" contentRole="menu"
                   trigger={<WandIconButton title="列表选项" aria-label="会话列表选项"><WandIcon name="more" size={16}/></WandIconButton>}>
@@ -1632,8 +1653,8 @@ function SidebarWorkspacesPanel({
               onArchiveSession={(sessionId, archived) => archiveListedSession(sessionId, archived)}
               onDeleteSession={(session) => deleteListedSession(session)}
             />
-            {!loading && !error && visibleRecentEntries.length === 0 && (searchQuery || displayMode === "active")
-              ? <Typography.Paragraph type="secondary">{searchQuery ? "没有匹配的会话。" : "现在没有活动会话。"}</Typography.Paragraph> : null}
+            {!loading && !error && visibleRecentEntries.length === 0 && searchQuery
+              ? <Typography.Paragraph type="secondary" className="sidebar-filter-empty">没有匹配的会话。</Typography.Paragraph> : null}
             {error && groups.length === 0 ? <WandButton kind="ghost" onClick={() => void reload()}>重新加载会话</WandButton> : null}
           </div> : null}
           <SidebarSurfacesContext.Provider value={surfacesEnabled && !compact && !manageMode && (directoryId !== undefined || view === "directory")}>
@@ -1651,12 +1672,19 @@ function SidebarWorkspacesPanel({
             </div>
           ) : !searchQuery || visibleGroups.length > 0 ? (
             <div className="sidebar-results" aria-label="目录">
+            {displayMode === "active" && visibleGroups.length > 0
+              && visibleGroups.every((group) => group.tasks.length === 0 && group.standaloneSessions.length === 0) ? (
+              <Typography.Paragraph type="secondary" className="sidebar-filter-empty" role="status">
+                {searchQuery ? "没有匹配的活动会话。" : "现在没有活动会话。"}
+              </Typography.Paragraph>
+            ) : null}
             {visibleGroups.length > 0 ? (
             <Flex vertical gap={8} className="workspaces-list" aria-label="目录">
                 {visibleGroups.map((group) => (
                   <TaskGroupSection
                     key={group.workspaceId}
                     group={group}
+                    totalSessionCount={groupSessionCounts.get(group.workspaceId) ?? 0}
                     preview={directoryId !== undefined}
                     now={now}
                     directoryCount={visibleGroups.length}

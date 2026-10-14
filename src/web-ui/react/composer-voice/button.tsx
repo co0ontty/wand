@@ -3,6 +3,7 @@ import { BrowserSpeechInput, readSpeechMode, speechInputDescription } from "../s
 import { WandIconButton } from "../ui";
 import { ConversationMorphIcon } from "../conversations/controls";
 import { bindIdleSpeechInput } from "../speech/hold-input";
+import { borrowComposerFocus } from "../composer-sender/focus-borrow.js";
 
 /** Only records/transcribes. The caller's composer performs the revision-checked edit. */
 export function ComposerSpeechButton({ ownerKey, revision, disabled, inputPlaceholder, onCommit, onStatus }: {
@@ -13,6 +14,9 @@ export function ComposerSpeechButton({ ownerKey, revision, disabled, inputPlaceh
   const [phase, setPhase] = React.useState<"idle" | "recording" | "processing">("idle");
   const button = React.useRef<HTMLButtonElement>(null);
   const idleInput = React.useRef<ReturnType<typeof bindIdleSpeechInput> | null>(null);
+  React.useEffect(() => phase !== "idle"
+    ? borrowComposerFocus(button.current?.closest<HTMLElement>(".conversation-input-wrap"), "voice")
+    : undefined, [phase, ownerKey]);
   const active = React.useRef<{ input: BrowserSpeechInput; key: string; revision: number } | null>(null);
   const gesture = React.useRef<{ y: number; cancelled: boolean; pointerId: number | null }>({ y: 0, cancelled: false, pointerId: null });
   const liveStatus = React.useRef("正在聆听…");

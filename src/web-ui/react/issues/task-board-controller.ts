@@ -1,5 +1,5 @@
 /** 看板、AI 团队页与群聊页共用这一条独立路由：同一时刻只开其中一页，返回键行为一致。 */
-export type TaskBoardPage = "board" | "teams" | "teamchat";
+export type TaskBoardPage = "board" | "teams" | "teamchat" | "schedules";
 
 export interface TaskBoardControllerSnapshot {
   open: boolean;
@@ -20,8 +20,9 @@ export const TASK_BOARD_VIEW_PARAM = "view";
 export const TASK_BOARD_VIEW = "taskboard";
 export const AI_TEAMS_VIEW = "teams";
 export const TEAM_CHAT_VIEW = "teamchat";
+export const SCHEDULED_TASKS_VIEW = "schedules";
 export const TEAM_CHAT_RUN_PARAM = "run";
-const TASK_BOARD_VIEW_ALIASES = new Set(["taskboard", "issues", AI_TEAMS_VIEW, TEAM_CHAT_VIEW]);
+const TASK_BOARD_VIEW_ALIASES = new Set(["taskboard", "issues", AI_TEAMS_VIEW, TEAM_CHAT_VIEW, SCHEDULED_TASKS_VIEW]);
 
 const HISTORY_STATE_KEY = "wandShellView";
 
@@ -60,6 +61,7 @@ export function taskBoardPageOf(search: string): TaskBoardPage {
   const value = new URLSearchParams(searchFrom(search)).get(TASK_BOARD_VIEW_PARAM);
   if (value === AI_TEAMS_VIEW) return "teams";
   if (value === TEAM_CHAT_VIEW) return "teamchat";
+  if (value === SCHEDULED_TASKS_VIEW) return "schedules";
   return "board";
 }
 
@@ -79,7 +81,7 @@ export function taskBoardSearch(
   if (open) {
     params.set(
       TASK_BOARD_VIEW_PARAM,
-      page === "teams" ? AI_TEAMS_VIEW : page === "teamchat" ? TEAM_CHAT_VIEW : TASK_BOARD_VIEW,
+      page === "teams" ? AI_TEAMS_VIEW : page === "teamchat" ? TEAM_CHAT_VIEW : page === "schedules" ? SCHEDULED_TASKS_VIEW : TASK_BOARD_VIEW,
     );
   } else {
     params.delete(TASK_BOARD_VIEW_PARAM);

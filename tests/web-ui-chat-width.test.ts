@@ -16,13 +16,14 @@ import {
   normalizeChatWidthMode,
   setChatWidthMode,
   type ChatWidthMode,
-} from "../src/web-ui/react/shell/index.js";
+} from "../src/web-ui/react/shell/chat-width.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 interface FakeEnv {
   attributes: Record<string, string>;
   stored: Map<string, string>;
+  dispatchStorage(key: string | null): void;
   restore(): void;
 }
 
@@ -33,7 +34,11 @@ function installFakeDom(initialStorage: Record<string, string> = {}): FakeEnv {
   const globals = globalThis as Record<string, unknown>;
   const previousWindow = globals.window;
   const previousDocument = globals.document;
+  const storageListeners: Array<(event: { key: string | null }) => void> = [];
   globals.window = {
+    addEventListener: (name: string, listener: (event: { key: string | null }) => void) => {
+      if (name === "storage") storageListeners.push(listener);
+    },
     localStorage: {
       getItem: (key: string) => stored.get(key) ?? null,
       setItem: (key: string, value: string) => {
@@ -51,6 +56,7 @@ function installFakeDom(initialStorage: Record<string, string> = {}): FakeEnv {
   return {
     attributes,
     stored,
+    dispatchStorage(key) { storageListeners.forEach(listener => listener({ key })); },
     restore() {
       globals.window = previousWindow;
       globals.document = previousDocument;
@@ -96,7 +102,7 @@ test("setChatWidthMode persists, writes the html attribute, and notifies once", 
     assert.equal(env.attributes[CHAT_WIDTH_ATTRIBUTE], "column");
     assert.equal(notified, 1);
 
-    // 同值重复设置是 no-op：不写存储、不通知（避免无谓的 React 重渲染）。
+    // 同值重复设置不通知（避免无谓的 React 重渲染）；存储可重新尝试。
     setChatWidthMode("column");
     assert.equal(notified, 1);
 
@@ -130,6 +136,7 @@ test("storage failures fall back to full instead of throwing", async () => {
   const globals = globalThis as Record<string, unknown>;
   const previousWindow = globals.window;
   globals.window = {
+    addEventListener: () => {},
     get localStorage(): never {
       throw new Error("denied");
     },
@@ -137,34 +144,56 @@ test("storage failures fall back to full instead of throwing", async () => {
   try {
     const fresh = await freshModule();
     assert.equal(fresh.chatWidthStore.getSnapshot(), "full");
-    assert.doesNotThrow(() => fresh.setChatWidthMode("column"));
+    assert.equal(fresh.setChatWidthMode("column"), false, "reports denied persistence while applying in memory");
+    assert.equal(fresh.chatWidthStore.getSnapshot(), "column");
   } finally {
     globals.window = previousWindow;
   }
 });
 
-test("session menu and task width control share the same preference owner", () => {
+test("only Display settings expose the shared width preference", () => {
   const topbar = readFileSync(path.join(root, "src/web-ui/react/shell/shell-topbar.tsx"), "utf8");
   const tabbar = readFileSync(
     path.join(root, "src/web-ui/react/workspaces/workspace-tab-bar.tsx"),
     "utf8",
   );
-  assert.match(topbar, /<ChatWidthMenuItems\/>/);
-  assert.match(tabbar, /<ChatWidthToggle className="workspace-tab-chat-width"\/>/);
+  assert.doesNotMatch(topbar, /ChatWidthMenuItems|chat-width-toggle/);
+  assert.doesNotMatch(tabbar, /ChatWidthToggle|workspace-tab-chat-width/);
   const controls = readFileSync(path.join(root, "src/web-ui/react/shell/chat-width-toggle.tsx"), "utf8");
-  assert.match(controls, /export function ChatWidthMenuItems/);
-  assert.match(controls, /onSelect=\{\(\) => setChatWidthMode\(option\.mode\)\}/);
+  const tabs = readFileSync(path.join(root, "src/web-ui/react/settings/tabs.tsx"), "utf8");
+  assert.match(tabs, /<ChatWidthSettings\s*\/>/);
+  assert.match(tabs, /if \(props\.snapshot\.access === "admin"\) return <AdminDisplaySettingsTab/, "server card defaults remain administrator-only");
+  assert.match(tabs, /function DisplayAppearance\(\)/, "read-only clients reuse the same local preference controls");
+  assert.match(controls, /<Radio\.Group name="wand-chat-width"/);
+  assert.match(controls, /chatWidthStore\.subscribe/);
+  assert.match(controls, /setChatWidthMode\(event\.target\.value\)/);
 });
 
-test("width toggle breakpoint matches the stylesheet media query", () => {
+test("IM and workspace messages, composers and detached controls share one responsive column", () => {
   const css = readFileSync(path.join(root, "src/web-ui/content/styles.css"), "utf8");
-  const min = `@media (min-width: ${CHAT_WIDTH_MIN_VIEWPORT}px)`;
-  assert.ok(css.includes(`${min} { .chat-width-toggle { display: inline-flex; }`),
-    "width controls use the same wide-screen threshold");
-  assert.match(css, /\.chat-width-toggle \{ display: none; \}/);
-  assert.match(css, /html\[data-chat-width="column"\]:not\(\.is-wand-app\) :is\(\.chat-messages, \.chat-running-bar, \.input-panel\)/,
-    "message and composer widths share one column rule while native shells keep their layout");
-  // 原生壳（html.is-wand-app）里那条居中列规则本来就不生效，开关不能再显示成空动作。
-  assert.match(css, /html\.is-wand-app \.chat-width-toggle \{ display: none; \}/,
-    "the native shell never shows a control that cannot change its layout");
+  assert.ok(css.includes(`@media (min-width: ${CHAT_WIDTH_MIN_VIEWPORT}px) { html[data-chat-width="column"] { --chat-content-max-width: var(--chat-column-width); } }`));
+  assert.match(css, /--chat-content-max-width: none;/, "full is the default and narrow screens fill their host");
+  assert.match(css, /:is\(\.chat-messages, \.chat-running-bar, \.input-panel, \.conversation-message-scroll > \*, \.conversation-composer, \.conversation-task-context, \.conversation-session-activity\) \{[^}]*max-width:var\(--chat-content-max-width\)/);
+  assert.doesNotMatch(css, /\.conversation-composer[^}]*max-width:var\(--chat-column-width\)/, "IM no longer unconditionally caps at 940px");
+  assert.doesNotMatch(css, /\.chat-width-toggle/, "moved controls leave no unused stylesheet");
+});
+
+test("a storage event updates both the shared snapshot and html without notifying on unrelated keys", async () => {
+  const env = installFakeDom();
+  try {
+    const fresh = await freshModule();
+    let notified = 0;
+    fresh.chatWidthStore.subscribe(() => notified++);
+    env.stored.set(CHAT_WIDTH_STORAGE_KEY, "column");
+    env.dispatchStorage("unrelated");
+    assert.equal(notified, 0);
+    env.dispatchStorage(CHAT_WIDTH_STORAGE_KEY);
+    assert.equal(fresh.chatWidthStore.getSnapshot(), "column");
+    assert.equal(env.attributes[CHAT_WIDTH_ATTRIBUTE], "column");
+    assert.equal(notified, 1);
+    env.stored.clear(); env.dispatchStorage(null);
+    assert.equal(fresh.chatWidthStore.getSnapshot(), "full");
+    assert.equal(env.attributes[CHAT_WIDTH_ATTRIBUTE], "full");
+    assert.equal(notified, 2);
+  } finally { env.restore(); }
 });

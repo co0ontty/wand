@@ -22,6 +22,7 @@ import type { StructuredSessionManager } from "./structured-session-manager.js";
 import type { WandStorage } from "./storage.js";
 import type { ConversationTurn, ProcessEvent, SessionProvider, SessionSnapshot } from "./types.js";
 import { isSessionProvider } from "./session-provider.js";
+import { badRequest } from "./http-error.js";
 
 const MAX_ATTEMPTS = 6;
 
@@ -148,13 +149,13 @@ export class Missions {
 
   create(input: CreateMissionInput): MissionDetails {
     const prompt = input.prompt?.trim();
-    if (!prompt) throw new Error("任务提示词不能为空。");
-    if (prompt.length > 200_000) throw new Error("任务提示词不能超过 200000 个字符。");
+    if (!prompt) throw badRequest("任务提示词不能为空。");
+    if (prompt.length > 200_000) throw badRequest("任务提示词不能超过 200000 个字符。");
     const cwd = path.resolve(input.cwd || "");
-    if (!existsSync(cwd) || !statSync(cwd).isDirectory()) throw new Error("任务工作目录不存在。");
+    if (!existsSync(cwd) || !statSync(cwd).isDirectory()) throw badRequest("任务工作目录不存在。");
     const providers = [...new Set(input.providers ?? [])];
     if (providers.length === 0 || providers.length > MAX_ATTEMPTS || providers.some((provider) => !isSessionProvider(provider))) {
-      throw new Error(`请选择 1-${MAX_ATTEMPTS} 个有效 provider。`);
+      throw badRequest(`请选择 1-${MAX_ATTEMPTS} 个有效 provider。`);
     }
 
     const createdAt = nowIso();

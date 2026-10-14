@@ -22,6 +22,9 @@ export interface SidebarRecentGroup {
   /** 员工分组才有：一级行头像与「新建对话」都按它取当前定义。 */
   readonly employeeId: string | null;
   readonly entries: readonly SidebarRecentEntry[];
+  /** 未经活动过滤的身份快照，空组仍使用同一头像、名字与排序。 */
+  readonly latestSession: WorkspaceSessionSummary;
+  readonly totalCount: number;
   readonly latestStartedAt: string;
   readonly activeCount: number;
   /** 所有非空归属都保留一级身份头，数量/筛选不改变结构。 */
@@ -130,7 +133,7 @@ function groupTitle(
 /** 一级分组：员工 / 团队 / PTY 终端 / 空白终端 / 其它 CLI；终端排在最后且顺序固定。 */
 export function recentConversationGroups(
   entries: readonly SidebarRecentEntry[],
-  options: { employees?: readonly SidebarRecentEmployee[]; limit?: number } = {},
+  options: Pick<RecentEntryFilter, "employees" | "activeOnly" | "selectedSessionId"> & { limit?: number } = {},
 ): SidebarRecentGroup[] {
   const employees = options.employees ?? [];
   const limit = Math.max(0, options.limit ?? RECENT_CONVERSATION_LIMIT);
@@ -142,25 +145,46 @@ export function recentConversationGroups(
     if (bucket) bucket.entries.push(entry);
     else buckets.set(key, { kind, entries: [entry] });
   };
-  // 员工 / 团队 / CLI 只看最近窗口，终端不受窗口截断，避免旧终端被「最近 N 条」提前丢掉。
+  // 先从未过滤数据建立身份。活动过滤不能改变一级名字、头像和排序。
+  for (const entry of ordered) push(entry);
   const recent = ordered.filter((entry) => !isTerminalEntry(entry));
   const terminals = ordered.filter(isTerminalEntry);
-  for (const entry of recent.slice(0, limit)) push(entry);
-  for (const entry of terminals) push(entry);
-
-  const groups: SidebarRecentGroup[] = [...buckets.entries()].map(([key, bucket]) => {
-    const sorted = [...bucket.entries].sort(compareRecentEntries);
-    return {
-      key,
-      kind: bucket.kind,
-      title: groupTitle(bucket.kind, sorted, employees),
-      employeeId: bucket.kind === "employee" ? sorted[0].session.employeeId ?? null : null,
-      entries: sorted,
-      latestStartedAt: startedAtOf(sorted[0].session),
-      activeCount: sorted.filter((entry) => isSessionActive(entry.session)).length,
-      showsHeader: true,
-    };
-  });
+  const windowEntries = recent.slice(0, limit);
+  const matching = filterRecentEntries(ordered, options);
+  const visibleEntries = [
+    ...matching.filter((entry) => !isTerminalEntry(entry)).slice(0, limit),
+    ...matching.filter(isTerminalEntry),
+  ];
+  const selected = matching.find((entry) => entry.session.id === options.selectedSessionId);
+  if (selected && !visibleEntries.includes(selected)) visibleEntries.push(selected);
+  // 保留普通最近窗口里的全部组头；旧的活动/当前会话也不能因窗口限制而消失。
+  const retainedKeys = new Set([...windowEntries, ...terminals, ...visibleEntries]
+    .map((entry) => recentSessionIdentity(entry.session).key));
+  const visibleByKey = new Map<string, SidebarRecentEntry[]>();
+  for (const entry of visibleEntries) {
+    const { key } = recentSessionIdentity(entry.session);
+    const bucket = visibleByKey.get(key);
+    if (bucket) bucket.push(entry);
+    else visibleByKey.set(key, [entry]);
+  }
+  const groups: SidebarRecentGroup[] = [...buckets.entries()]
+    .filter(([key]) => retainedKeys.has(key))
+    .map(([key, bucket]) => {
+      const sorted = bucket.entries;
+      const visible = (visibleByKey.get(key) ?? []).sort(compareRecentEntries);
+      return {
+        key,
+        kind: bucket.kind,
+        title: groupTitle(bucket.kind, sorted, employees),
+        employeeId: bucket.kind === "employee" ? sorted[0].session.employeeId ?? null : null,
+        entries: visible,
+        latestSession: sorted[0].session,
+        totalCount: sorted.length,
+        latestStartedAt: startedAtOf(sorted[0].session),
+        activeCount: visible.filter((entry) => isSessionActive(entry.session)).length,
+        showsHeader: true,
+      };
+    });
 
   const byRecency = groups
     .filter((group) => !TERMINAL_GROUP_ORDER.includes(group.kind))

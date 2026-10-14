@@ -2,10 +2,9 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import type { Model, Api } from "@earendil-works/pi-ai";
-import { decryptVaultSecret } from "./password-manager.js";
+import { openStorageReadonly, revokeOpenRouterFreeAccessAt } from "./storage/readonly.js";
 import { OpenRouterFreeModelsService, OPENROUTER_FREE_SELECTOR,
   type FreeModelRequirements, type OpenRouterFreeStorage } from "./openrouter-free-models.js";
 import type { WandStorage } from "./storage.js";
@@ -50,42 +49,35 @@ export function prepareOpenRouterFreeCli(deps: OpenRouterFreeCliDependencies,
   } catch (error) { close(); throw error; }
 }
 
-/** Read-only projection: no migrations or shared catalog writes from a running Pi child. */
+/** Read-only projection: no migrations, no key creation, no shared catalog writes from a running Pi child. */
 export function openOpenRouterFreeCliAccess(databasePath: string, token: string,
   fetchImpl: typeof fetch = globalThis.fetch) {
   if (!path.isAbsolute(databasePath) || !/^wf_[A-Za-z0-9_-]{43}$/.test(token)) {
     throw new Error("免费模型调用授权无效。");
   }
-  const db = new DatabaseSync(databasePath, { readOnly: true });
+  const handle = openStorageReadonly(databasePath);
   const hash = createHash("sha256").update(token).digest("hex");
-  const scope = (): Record<string, unknown> => {
-    const row = db.prepare(`SELECT a.* FROM openrouter_free_access a JOIN command_sessions s ON s.id = a.session_id
-      WHERE a.token_hash = ? AND a.expires_at > ? AND s.provider = 'pi' AND s.session_kind = 'structured'
-        AND s.status = 'running'`).get(hash, Date.now());
+  const scope = () => {
+    const row = handle.openRouterFreeScope(hash, Date.now());
     if (!row) throw new Error("免费模型调用授权已失效，请重新发送。");
     return row;
   };
   try {
     const access = scope();
-    const readConfig = (key: string): string | null => {
-      const value = db.prepare("SELECT value FROM app_config WHERE key = ?").get(key)?.value;
-      return typeof value === "string" ? value : null;
-    };
     const localCache = new Map<string, string>();
     const storage: OpenRouterFreeStorage = {
       getConnectorToken: () => {
         const current = scope();
-        const encrypted = db.prepare("SELECT token FROM connectors WHERE provider = 'openrouter'").get()?.token;
-        const key = typeof encrypted === "string" ? decryptVaultSecret(encrypted, readConfig("appSecret")) : null;
+        const key = handle.getConnectorToken("openrouter");
         if (!key || createHash("sha256").update(key).digest("hex") !== current.credential_hash) {
           throw new Error("OpenRouter Key 已变化，本次免费调用已停止，请重新发送。");
         }
         return key;
       },
-      getConfigValue: (key) => localCache.get(key) ?? readConfig(key),
+      getConfigValue: (key) => localCache.get(key) ?? handle.getConfigValue(key),
       setConfigValue: (key, value) => { scope(); localCache.set(key, value); },
       getPreference: <T>(key: string, fallback: T): T => {
-        try { return JSON.parse(readConfig(key) ?? "null") as T ?? fallback; } catch { return fallback; }
+        try { return JSON.parse(handle.getConfigValue(key) ?? "null") as T ?? fallback; } catch { return fallback; }
       },
       saveConnector: () => { throw new Error("CLI 不可修改 OpenRouter Key。"); },
       deleteConnector: () => { throw new Error("CLI 不可删除 OpenRouter Key。"); },
@@ -93,16 +85,11 @@ export function openOpenRouterFreeCliAccess(databasePath: string, token: string,
     const service = new OpenRouterFreeModelsService(storage, fetchImpl);
     return { selector: String(access.selector), requirements: JSON.parse(String(access.requirements_json)) as FreeModelRequirements,
       service, assertCurrent: () => { storage.getConnectorToken("openrouter"); },
-      close: () => { service.dispose(); db.close(); } };
-  } catch (error) { db.close(); throw error; }
+      close: () => { service.dispose(); handle.close(); } };
+  } catch (error) { handle.close(); throw error; }
 }
 
 /** The CLI, not its original Server owner, revokes scope on shutdown. */
 export function revokeOpenRouterFreeCliAccess(databasePath: string, token: string): void {
-  const db = new DatabaseSync(databasePath);
-  try {
-    db.exec("PRAGMA busy_timeout = 5000");
-    db.prepare("DELETE FROM openrouter_free_access WHERE token_hash = ?")
-      .run(createHash("sha256").update(token).digest("hex"));
-  } finally { db.close(); }
+  revokeOpenRouterFreeAccessAt(databasePath, createHash("sha256").update(token).digest("hex"));
 }

@@ -5,11 +5,12 @@ import type { ConversationReceipt, ConversationTarget } from "./conversation-typ
 import { AiTeamConflictError } from "./ai-team-runner.js";
 import { asyncRoute } from "./express-async.js";
 import { bodyObject, sendRouteError, text } from "./server-request.js";
+import { badRequest, notFound } from "./http-error.js";
 
 function targetOf(value: unknown): ConversationTarget {
   if (value === null || value === undefined) return null;
   const body = bodyObject(value);
-  if (!text(body.taskId) || !text(body.runId)) throw new Error("发送目标需要明确 taskId 和 runId。");
+  if (!text(body.taskId) || !text(body.runId)) throw badRequest("发送目标需要明确 taskId 和 runId。");
   return { taskId: text(body.taskId), runId: text(body.runId) };
 }
 function result(res: Response, receipt: ConversationReceipt): void {
@@ -23,7 +24,7 @@ export function registerConversationRoutes(app: Express, service: ConversationSe
     try {
       const body = bodyObject(req.body);
       if ((body.pinned !== undefined && typeof body.pinned !== "boolean") || (body.dissolved !== undefined && typeof body.dissolved !== "boolean")
-        || (body.pinned === undefined && body.dissolved === undefined)) throw new Error("请提供有效的置顶或列表显示状态。");
+        || (body.pinned === undefined && body.dissolved === undefined)) throw badRequest("请提供有效的置顶或列表显示状态。");
       res.json(service.updateListState(req.params.id, { pinned: body.pinned as boolean | undefined, dissolved: body.dissolved as boolean | undefined }));
     } catch (error) { sendRouteError(res, error, "对话列表更新失败。", 400); }
   });
@@ -57,7 +58,7 @@ export function registerConversationRoutes(app: Express, service: ConversationSe
   }));
   post("/api/conversations/:id/actions", (id, body) => {
     const target = targetOf(body.target);
-    if (!target) throw new Error("运行操作需要明确任务与轮次。");
+    if (!target) throw badRequest("运行操作需要明确任务与轮次。");
     return service.act(id, text(body.requestId), target, text(body.action), body.extraSteps === undefined ? undefined : Number(body.extraSteps));
   });
 }
@@ -65,7 +66,7 @@ export function registerConversationRoutes(app: Express, service: ConversationSe
 /** Compatibility relay inputs are ordinary talk; never infer the newest task or approve a short phrase. */
 export async function forwardConversationRelay(service: ConversationService, sessionId: string, input: string): Promise<void> {
   const group = service.list().find((item) => item.sessionId === sessionId);
-  if (!group) throw new Error("群实例不存在，请从对话列表核对。");
+  if (!group) throw notFound("群实例不存在，请从对话列表核对。");
   const receipt = await service.send(group.id, randomUUID(), input, null, undefined, false);
-  if (receipt.error) throw new Error(receipt.error);
+  if (receipt.error) throw badRequest(receipt.error);
 }

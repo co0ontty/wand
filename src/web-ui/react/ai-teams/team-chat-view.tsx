@@ -1,14 +1,15 @@
 import { ChatMessage } from "../chat/message";
+import { ChatActivity } from "../chat/activity";
 import * as React from "react";
 import { Alert, Avatar, Button, Card, Collapse, Flex, List, Tag, Tooltip, Typography } from "antd";
-import { FileCard, Sender, Think } from "@ant-design/x";
+import { FileCard, Sender } from "@ant-design/x";
 import type { AgentActivityState } from "../../../mission-types";
 import { AI_TEAM_DETAIL_CHAT_TURNS, type AiTeamLiveStep, type AiTeamRun,
   type AiTeamRunDetail, type AiTeamStep, type AiTeam } from "../../../ai-team-types";
 import type { ConversationAuthor, ConversationTurn, TeamReportFile } from "../../../types";
 import { failureMessage } from "../errors";
 import { filePreviewController } from "../file-preview/controller";
-import { MarkdownPreview } from "../file-preview/markdown";
+import { MarkdownPreview, MessageFileContext } from "../file-preview/markdown";
 import { formatFilePreviewSize } from "../file-preview/model";
 import { HttpResponseError, jsonBody, requestJson } from "../http-adapter";
 import { issueAgentEffortLabel, issueAgentLabel } from "../issues/task-board-agent";
@@ -26,6 +27,9 @@ import {
 } from "../ui";
 import { ComposerAttachmentList } from "../composer-attachments/host";
 import { GeneratedAvatarGlyph, PixelCat, TeamAvatar, avatarFace, generatedAvatarBackground, type GeneratedAvatarFace } from "./avatar";
+import { encodePlushAvatar, encodePlushCatAvatar, encodePlushDogAvatar, isPlushCatAvatar, isPlushDogAvatar, parsePlushAvatar, parsePlushCatAvatar, parsePlushDogAvatar, resolveEmployeeAvatar, type PlushRenderConfig } from "../../../plush-avatar.js";
+import { PlushAvatar } from "../avatars/plush-avatar.js";
+import { EmployeeAvatar } from "../agents/employee-avatar.js";
 import { appendedConversationKeys, CONVERSATION_TAIL_PX, conversationClock, conversationDay, conversationMessageKey, joinsConversationBubble } from "../conversations/presentation";
 import { useReducedMotion } from "../ui/motion-tokens";
 import { teamChatComposer } from "./composer-bridge";
@@ -192,8 +196,11 @@ export function displayChatTurn(turn: ConversationTurn, team: AiTeam): Conversat
   const author = turn.author;
   if (!author?.id) return turn;
   const member = team.members.find((item) => item.id === author.id);
-  if (!member || (member.name === author.name && member.avatar === author.avatar)) return turn;
-  return { ...turn, author: { ...author, name: member.name, avatar: member.avatar } };
+  if (!member) return turn;
+  const plush = member.employeeId ? resolveEmployeeAvatar({ ...member, id: member.employeeId }) : null;
+  const avatar = plush ? isPlushDogAvatar(plush) ? encodePlushDogAvatar(plush) : isPlushCatAvatar(plush) ? encodePlushCatAvatar(plush) : encodePlushAvatar(plush) : member.avatar;
+  if (member.name === author.name && avatar === author.avatar) return turn;
+  return { ...turn, author: { ...author, name: member.name, avatar } };
 }
 
 export function teamOfficeMembers(detail: AiTeamRunDetail): TeamOfficeMember[] {
@@ -504,6 +511,7 @@ export function collapsedPreview(text: string): string {
 
 /** 一条发言的头像来源（设计 §5.2）：上传图 > 显式毛色 > 按身份生成 > 默认 APP logo。 */
 export type ChatAvatarSpec =
+  | { kind: "plush"; config: PlushRenderConfig }
   | { kind: "upload"; src: string }
   | { kind: "cat"; coat: number }
   | { kind: "generated"; face: GeneratedAvatarFace }
@@ -514,6 +522,8 @@ export function chatAvatarSpec(
 ): ChatAvatarSpec {
   // 能定位到成员身份才给脸（显式 `cat:<n>` 走像素猫，其余按身份生成，与团队页/工位同一张脸）；
   // 「我」和没有署名的发言才回落成默认 APP logo。
+  const plush = parsePlushDogAvatar(author?.avatar ?? "") ?? parsePlushCatAvatar(author?.avatar ?? "") ?? parsePlushAvatar(author?.avatar ?? "");
+  if (plush) return { kind: "plush", config: plush };
   return avatarFace({ id: author?.id ?? "", name: author?.name ?? "", avatar: author?.avatar ?? "" })
     ?? { kind: "brand" };
 }
@@ -671,13 +681,14 @@ function MessageAvatar({ spec, size = "md" }: {
   spec: ChatAvatarSpec;
   size?: "md" | "sm";
 }): React.ReactElement {
-  return <Avatar className="team-chat-avatar" shape="square" size={size === "sm" ? 24 : 32}
+  if (spec.kind === "plush") return <PlushAvatar config={spec.config} size={size === "sm" ? 36 : 48} className="team-chat-avatar"/>;
+  return <Avatar className="team-chat-avatar" shape="square" size={size === "sm" ? 36 : 48}
     data-kind={spec.kind} data-size={size} aria-hidden="true"
     src={spec.kind === "upload" ? spec.src : undefined}
     style={spec.kind === "brand" ? { background: "transparent" }
       : spec.kind === "generated" ? generatedAvatarBackground(spec.face) : undefined}
     icon={spec.kind === "cat" ? <PixelCat coat={spec.coat}/>
-      : spec.kind === "generated" ? <GeneratedAvatarGlyph face={spec.face} size={size === "sm" ? 24 : 32}/>
+      : spec.kind === "generated" ? <GeneratedAvatarGlyph face={spec.face} size={size === "sm" ? 36 : 48}/>
       : spec.kind === "brand" ? <WandBrandMark/> : undefined}
   />;
 }
@@ -687,6 +698,7 @@ function MessageAvatar({ spec, size = "md" }: {
  * `side` / `half` 只决定它从触发点的哪个方向长出来。
  */
 export interface ChatDocPayload {
+  sessionId?: string;
   text: string;
   name: string;
   clock: string;
@@ -826,7 +838,7 @@ function TeamMessageRow({
         {badge ? <Tag className="chat-author-badge">{badge}</Tag> : null}
         {clock ? <Typography.Text type="secondary" className="chat-message-time">{clock}</Typography.Text> : null}
       </div>
-      {children}
+      <MessageFileContext.Provider value={{ sessionId: sessionId || undefined }}>{children}</MessageFileContext.Provider>
       {footer}
     </div>
   </Flex>;
@@ -939,6 +951,7 @@ function StepTurn({
         text,
         name,
         clock,
+        sessionId: author?.sessionId,
         typeLabel: reportTypeLabel(report),
         chip,
         avatar,
@@ -999,6 +1012,7 @@ function LeaderTurn({
         text,
         name,
         clock,
+        sessionId: author?.sessionId,
         typeLabel: "负责人派工",
         avatar,
         side: "start",
@@ -1187,40 +1201,17 @@ function LiveStepRow({
       if (row.leaving && event.target === event.currentTarget) onRetire(step.stepId);
     }}
   >
-    {/*
-      展开 / 收起交给通用过程块：收起是展开的倒放，减动效由 provider 统一关掉。
-      `destroyOnHidden={false}` 是必须的——内部滚动窗口是这一行的 owner，
-      每次收起重挂载都会把「贴尾」状态和已滚到的位置丢掉。
-    */}
-    <Think
-      className="team-chat-live-think"
-      expanded={expanded}
-      onExpand={setExpanded}
-      destroyOnHidden={false}
-      title={<>
-        <span className="team-chat-live-head">
-          {/* 署名行不再放头像：紧贴其上的开工发言已经给过同一张脸（设计 v2.2.4）；
-              也不单独挂链接——整卡已可点进该成员会话，不再嵌套点击。 */}
-          <span className="team-chat-live-name" title={memberName}>{memberName}</span>
-          <span className="team-chat-live-chip">#{step.seq}{title ? ` ${title}` : ""}</span>
-          {label ? <Tag className="team-chat-live-state" data-state={step.state} color={LIVE_STATE_TAG[step.state]}>{label}</Tag> : null}
-          {clock ? <span className="chat-message-time">{clock}</span> : null}
-        </span>
-        {/* 过程块的表头整体可点，但键盘与读屏要有一个真正的按钮：它是唯一会改展开态的控件。 */}
-        <WandButton kind="ghost"
-          type="button"
-          className="team-chat-live-summary" style={{ width: "100%", height: "auto", minHeight: 32, textAlign: "start" }}
-          aria-expanded={expanded}
-          onClick={(event) => {
-            event.stopPropagation();
-            setExpanded((current) => !current);
-          }}
-        >
-          <Typography.Text ellipsis className="team-chat-live-summary-text" style={{ flex: 1, minWidth: 0 }}>{lastLine}</Typography.Text>
-          <Typography.Text type="secondary">{expanded ? "收起输出" : "展开输出"}</Typography.Text>
-        </WandButton>
-      </>}
-    >
+    <div className="team-chat-live-think">
+      <span className="team-chat-live-head">
+        <span className="team-chat-live-name" title={memberName}>{memberName}</span>
+        <span className="team-chat-live-chip">#{step.seq}{title ? ` ${title}` : ""}</span>
+        {label ? <Tag className="team-chat-live-state" data-state={step.state} color={LIVE_STATE_TAG[step.state]}>{label}</Tag> : null}
+        {clock ? <span className="chat-message-time">{clock}</span> : null}
+      </span>
+      {/* The shared disclosure keeps the output mounted, including its reader's scroll position. */}
+      <ChatActivity expanded={expanded} className="team-chat-live-output"
+        onToggle={() => setExpanded(current => !current)}
+        summary={<><span className="team-chat-live-summary-text">{lastLine}</span><span className="chat-thinking-status">{expanded ? "收起输出" : "展开输出"}</span></>}>
       <div className="team-chat-live-body-inner">
         <Tooltip title="查看这个成员的会话"><Card size="small" hoverable
           className="team-chat-live-card"
@@ -1251,7 +1242,8 @@ function LiveStepRow({
           >{step.text || LIVE_EMPTY_TEXT}</pre>
         </Card></Tooltip>
       </div>
-    </Think>
+      </ChatActivity>
+    </div>
   </div>;
 }
 
@@ -1457,7 +1449,7 @@ function ChatDocContents({ layer, onExited }: {
     <ChatAttachments paths={parsed.paths}/>
     <div className="team-chat-doc-layer-text" tabIndex={0} data-wand-autofocus>
       {parsed.body.trim()
-        ? <ChatMessageBody text={parsed.body} names={layer.mentionNames}/>
+        ? <MessageFileContext.Provider value={{ sessionId: layer.sessionId }}><ChatMessageBody text={parsed.body} names={layer.mentionNames}/></MessageFileContext.Provider>
         : CHAT_EMPTY_BODY}
     </div>
   </div>;
@@ -1503,12 +1495,13 @@ export function ConversationMessages({ turns, taskLabels, group = true, ready = 
   const following = React.useRef(true);
   const [arrivals, setArrivals] = React.useState<ReadonlySet<string>>(new Set());
   const [unseen, setUnseen] = React.useState(0);
+  const [awayFromTail, setAwayFromTail] = React.useState(false);
   const reduced = useReducedMotion();
   const keys = turns.map(conversationMessageKey);
   React.useLayoutEffect(() => {
     const scroll = list.current?.closest<HTMLElement>(".conversation-message-scroll");
     if (!scroll || !active || list.current?.closest(".sidebar-projection-old")) return;
-    const track = (): void => { following.current = isFollowingTail(scroll); if (following.current) setUnseen(0); };
+    const track = (): void => { following.current = isFollowingTail(scroll); setAwayFromTail(!following.current); if (following.current) setUnseen(0); };
     scroll.addEventListener("scroll", track, { passive: true });
     return () => scroll.removeEventListener("scroll", track);
   }, [active]);
@@ -1524,15 +1517,35 @@ export function ConversationMessages({ turns, taskLabels, group = true, ready = 
     if (initial) {
       scroll.scrollTop = restoreScroll ?? scroll.scrollHeight;
       following.current = isFollowingTail(scroll);
+      setAwayFromTail(!following.current);
     } else if (added.length) {
       if (following.current || own) {
         scroll.scrollTop = scroll.scrollHeight;
         following.current = true;
+        setAwayFromTail(false);
         setUnseen(0);
         if (!reduced) setArrivals(new Set(added));
       } else setUnseen(count => count + added.length);
     }
   }, [turns, ready, active, reduced]);
+  React.useLayoutEffect(() => {
+    const content = list.current;
+    const scroll = content?.closest<HTMLElement>(".conversation-message-scroll");
+    if (!content || !scroll || !active || typeof ResizeObserver === "undefined") return;
+    let previousHeight = scroll.scrollHeight;
+    const observer = new ResizeObserver(() => {
+      // Streamed replies resize without adding a turn. The reading owner follows
+      // only if the reader was at the previous tail, including pending scroll events.
+      if (!document.hidden && isFollowingTail({ scrollTop: scroll.scrollTop, scrollHeight: previousHeight, clientHeight: scroll.clientHeight })) {
+        scroll.scrollTop = scroll.scrollHeight;
+        following.current = true;
+      }
+      setAwayFromTail(!isFollowingTail(scroll));
+      previousHeight = scroll.scrollHeight;
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [active, ready]);
   return <div ref={list} className="task-board-team-chat team-chat-stream conversation-stream" role="log" aria-label="对话消息" aria-relevant="additions">
     {turns.map((turn, index) => {
       const key = keys[index]!;
@@ -1548,7 +1561,7 @@ export function ConversationMessages({ turns, taskLabels, group = true, ready = 
       const parsed = parseChatAttachments(text);
       const signature = turn.author ? agentSignatureLabel(turn.author) : "";
       const name = turn.author?.name ?? "员工";
-      return <React.Fragment key={key}>
+      return <MessageFileContext.Provider key={key} value={{ sessionId: turn.author?.sessionId }}>
         {day && day !== conversationDay(turns[index - 1]?.createdAt) ? <div className="conversation-day"><span>{day}</span></div> : null}
         {turn.sessionLink && renderSessionPreview ? renderSessionPreview(turn, index) : turn.conversationLink && renderTaskPreview ? renderTaskPreview(turn) : turn.notice ? <Flex vertical align="center" className="team-chat-notice">
           <Typography.Text type="secondary">{text}</Typography.Text>
@@ -1558,7 +1571,7 @@ export function ConversationMessages({ turns, taskLabels, group = true, ready = 
           data-presentation-id={key} data-im-arriving={arrivals.has(key) || undefined}
           onAnimationEnd={event => { if (event.target === event.currentTarget) setArrivals(current => { const next = new Set(current); next.delete(key); return next; }); }}>
           {group && !self ? <span className="conversation-peer-avatar" data-visible={lead}>{lead && turn.author && employeeIds[turn.author.id] && onOpenEmployee
-            ? <WandButton kind="ghost" className="conversation-avatar-button" aria-label={`查看${name}的资料`} onClick={event => onOpenEmployee({ id: employeeIds[turn.author!.id], name, avatar: turn.author?.avatar }, event.currentTarget)}><MessageAvatar spec={chatAvatarSpec(turn.author)}/></WandButton>
+            ? <WandButton kind="ghost" className="conversation-avatar-button" aria-label={`查看${name}的资料`} onClick={event => onOpenEmployee({ id: employeeIds[turn.author!.id], name, avatar: turn.author?.avatar }, event.currentTarget)}><EmployeeAvatar employee={{ id: employeeIds[turn.author.id], name, avatar: turn.author.avatar }} provider="" size="md"/></WandButton>
             : <MessageAvatar spec={chatAvatarSpec(turn.author)}/>}</span> : null}
           <div className="team-chat-msg-content">
             {group && !self && lead ? <div className="conversation-message-author" title={signature || undefined}>
@@ -1580,13 +1593,13 @@ export function ConversationMessages({ turns, taskLabels, group = true, ready = 
             </>}/>
           </div>
         </div>}
-      </React.Fragment>;
+      </MessageFileContext.Provider>;
     })}
-    {unseen > 0 ? <div className="conversation-new-messages"><WandButton onClick={() => {
+    {awayFromTail || unseen > 0 ? <div className="conversation-new-messages"><WandButton onClick={() => {
       const scroll = list.current?.closest<HTMLElement>(".conversation-message-scroll");
       if (scroll) scroll.scrollTop = scroll.scrollHeight;
-      following.current = true; setUnseen(0);
-    }}>↓ {unseen} 条新消息</WandButton></div> : null}
+      following.current = true; setAwayFromTail(false); setUnseen(0);
+    }}><WandIcon name="chevronDown" size={14}/>{unseen > 0 ? `${unseen} 条新消息` : "回到最新"}</WandButton></div> : null}
   </div>;
 }
 

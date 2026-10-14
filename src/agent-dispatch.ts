@@ -1,5 +1,5 @@
-import { getDefaultModelForProvider } from "./config.js";
-import { defaultModelGroupSelector } from "./model-groups.js";
+import { isLocalDecisionModel } from "./decision-expert-identity.js";
+import { fallbackProviderModel, sessionEmployeeFields } from "./session-model.js";
 import type { ProcessManager } from "./process-manager.js";
 import { defaultRoleForCli } from "./default-employee.js";
 import { providerCliCommand } from "./session-provider.js";
@@ -9,6 +9,12 @@ import type { StructuredSessionManager } from "./structured-session-manager.js";
 import type { WandTask, WandTaskAgent } from "./task-types.js";
 import { agentKey, type SiliconEmployee } from "./ai-team-types.js";
 import type { SessionProvider, SessionSnapshot, WandConfig } from "./types.js";
+import type { StructuredFailure } from "./structured-failure.js";
+
+/** A local capability check rejected the input before a session or provider request existed. */
+export class AgentDispatchPreflightError extends Error {
+  readonly failure: StructuredFailure = { kind: "preflight", delivery: "rejected", retryable: true };
+}
 
 export interface AgentDispatchDeps {
   storage: WandStorage;
@@ -65,7 +71,10 @@ export async function dispatchAgentForTask(
   const cwd = group.cwd;
   const provider = agent.provider as SessionProvider;
   const model = agent.model === "default" ? "" : agent.model;
-  const resolvedModel = model || defaultModelGroupSelector(config.modelGroups, provider, getDefaultModelForProvider(config, provider)) || getDefaultModelForProvider(config, provider) || undefined;
+  const resolvedModel = model || fallbackProviderModel(config, provider);
+  if (isLocalDecisionModel(resolvedModel)) {
+    throw new AgentDispatchPreflightError("LAYA 仅支持有界决策，不能执行聊天或任务；该候选尚未接受输入。");
+  }
   const session = agent.kind === "pty"
     ? await processes!.start(providerCliCommand(provider), cwd, agent.mode, input.prompt, {
         provider,
@@ -74,9 +83,7 @@ export async function dispatchAgentForTask(
         sessionSource: "automation",
         automationId: input.automationId,
         systemPrompt,
-        employeeId: role?.id,
-        employeeName: role?.name,
-        employeeAvatar: role?.avatar,
+        ...sessionEmployeeFields(role),
         workspaceId: group.workspaceId,
         workspaceTaskId: group.workspaceTaskId,
       })
@@ -89,15 +96,13 @@ export async function dispatchAgentForTask(
         // 直接派发 Wand Agent（不进员工候选链）：先裁决进程内引擎是否可用，
         // 不可用就让这次派发明确失败，不静默退回 CLI 冒充。
         ...(agent.engine === "sdk"
-          ? { engine: structured!.resolveNewSessionPiEngine("sdk").engine }
+          ? { engine: (await structured!.resolveNewSessionPiEngine("sdk")).engine }
           : {}),
         worktreeEnabled: false,
         sessionSource: "automation",
         automationId: input.automationId,
         systemPrompt,
-        employeeId: role?.id,
-        employeeName: role?.name,
-        employeeAvatar: role?.avatar,
+        ...sessionEmployeeFields(role),
         employeeCandidates: input.employee?.agents,
         employeeCandidateIndex: input.employeeCandidateIndex,
         workspaceId: group.workspaceId,

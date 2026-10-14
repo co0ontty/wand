@@ -6,16 +6,17 @@ import { getDefaultModelForProvider } from "./config.js";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { ChildProcess } from "node:child_process";
-import { existsSync, unlinkSync, rmSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, unlinkSync, rmSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import os from "node:os";
-import { DatabaseSync } from "node:sqlite";
+
 
 import { WandStorage } from "./storage.js";
 import { SessionLogger, ShortcutLogContext } from "./session-logger.js";
 import { ApprovalPolicy, AutonomyPolicy, ChatOutputData, ConversationTurn, EscalationRequest, EscalationScope, ExecutionMode, ProcessEvent, ProcessEventHandler, SessionEvent, SessionProvider, SessionSnapshot, SessionSource, WandConfig } from "./types.js";
 import { ClaudePtyBridge, type PermissionResolution } from "./claude-pty-bridge.js";
+import { SessionTimers, type ProviderDiscoveryKind } from "./process-manager-timers.js";
 import { truncateMessagesForTransport } from "./message-truncator.js";
 import { appendWindow, hasExplicitConfirmSyntax, hasPermissionActionContext, normalizePromptText, PTY_OUTPUT_MAX_SIZE } from "./pty-text-utils.js";
 import { buildChildEnv, isRunningAsRoot, systemEnvValue } from "./env-utils.js";
@@ -23,46 +24,29 @@ import { buildLanguageDirective, buildManagedAutonomyDirective } from "./languag
 import { prepareSessionWorktree } from "./git-worktree.js";
 import { getProviderCommandSessionId, getProviderResumeCommandSessionId } from "./resume-policy.js";
 import { commandWithSystemPrompt, composeSystemFallback, normalizeThinkingEffort, systemPromptFlag, thinkingEffortToClaudeCliEffort, thinkingEffortToClaudeSlashEffort, thinkingEffortToCodexReasoningEffort, thinkingEffortToGrokEffort, thinkingEffortToPiLevel, thinkingEffortToQoderEffort } from "./structured-provider-common.js";
-import {
-  consumePtyInputForTopic,
-  createPtyTopicLineBuffer,
-  provisionalSessionTopic,
-  SessionNativeTitleTracker,
-  SessionTopicCoordinator,
-  sessionTopicBlocklistForSnapshot,
-  shouldAcceptGeneratedSessionTitle,
-  shouldGenerateSessionTopicFromInput,
-  type PtyTopicLineBuffer,
-} from "./session-topic.js";
-import { readNativeSessionTitle } from "./native-session-title.js";
-import { getErrorMessage } from "./error-utils.js";
+import { consumePtyInputForTopic, createPtyTopicLineBuffer, SessionNativeTitleTracker, SessionTopicCoordinator, type PtyTopicLineBuffer } from "./session-topic.js";
+import { SessionMetadataService } from "./session-metadata-service.js";
+
+
 import { TurnQuietHeartbeat } from "./turn-heartbeat.js";
 import { recordIterationPrompt } from "./iteration-log.js";
 import { describePtySpawnFailure } from "./ensure-node-pty-helper.js";
-import { resolveSessionProvider, resolveSystemAiContext } from "./session-ai-context.js";
+import type { EmployeeTextDeps } from "./employee-text.js";
+import { resolveSystemAiContext } from "./session-ai-context.js";
 import { resolveSessionCwd } from "./session-cwd.js";
-import { inferProviderFromCommand, providerCliCommand } from "./session-provider.js";
-import { RETENTION_IDLE_MS } from "./retention.js";
+import { inferProviderFromCommand, isSessionProvider, providerCliCommand } from "./session-provider.js";
 import { PtyTerminalState, type PtyTerminalSnapshot, type PtyHistoryPage } from "./pty-terminal-state.js";
 import { isPtySubmitInput } from "./pty-turn-activity.js";
 import { samplePtyForegrounds } from "./pty-foreground.js";
 import { buildPtyShellLaunchPlan, PtyCliExitMarker } from "./pty-shell-launch.js";
-import {
-  InProcessTerminalHost,
-  type TerminalAttachResult,
-  type TerminalDataEvent,
-  type TerminalHost,
-  type TerminalProcess,
-  type TerminalSessionState,
-} from "./terminal-host.js";
-import {
-  ProviderHistoryScanner,
-  type ClaudeHistorySession,
-  type CodexHistorySession,
-  type OpenCodeHistorySession,
-  type QoderHistorySession,
-} from "./provider-history-scanner.js";
+import { InProcessTerminalHost, type TerminalAttachResult, type TerminalDataEvent, type TerminalHost, type TerminalProcess, type TerminalSessionState } from "./terminal-host.js";
+import { ProviderHistoryScanner, type ClaudeHistorySession, type CodexHistorySession, type OpenCodeHistorySession, type QoderHistorySession } from "./provider-history-scanner.js";
+import { logInfo } from "./runtime-log.js";
 
+import { isCommandAllowedByPrefixes } from "./process-manager-command-policy.js";
+import { getClaudeProjectDir, getLatestClaudeProjectSessionId, getLatestCodexSessionId, isClaudeSessionFileAvailable, listClaudeProjectSessionMtimes, listCodexSessionMtimes, listOpenCodeSessionMtimes, listRecentClaudeProjectSessionIds, recoverClaudeSessionIdFromHistory, recoverCodexSessionIdFromHistory, selectClaudeProjectSessionForTimeWindow, selectCodexSessionForTimeWindow, selectOpenCodeSessionForRecord, selectOpenCodeSessionForTimeWindow } from "./process-manager-native-history.js";
+import { PersistedMessageState, deriveSessionSummary, getPersistedMessageState, recoverMessagesFromSnapshot, shouldPersistMessages } from "./process-manager-message-state.js";
+export { isCommandAllowedByPrefixes };
 export type {
   ClaudeHistorySession,
   CodexHistorySession,
@@ -70,121 +54,6 @@ export type {
   QoderHistorySession,
 } from "./provider-history-scanner.js";
 
-/**
- * Tokenize the restricted shell-command subset accepted by the command
- * allowlist. Commands still run through a login shell, so accepting raw string
- * prefixes here would let an allowed executable be followed by another command
- * (`claude; evil`) or be replaced with a similarly-named binary
- * (`claude-malicious`).
- *
- * Quoted and escaped operator characters are retained as ordinary argument
- * data. Unquoted shell control operators and command substitutions are rejected
- * because they can introduce additional executable commands.
- */
-function tokenizeAllowedCommand(value: string): string[] | null {
-  const tokens: string[] = [];
-  let token = "";
-  let tokenStarted = false;
-  let quote: "single" | "double" | null = null;
-
-  const pushToken = () => {
-    if (!tokenStarted) return;
-    tokens.push(token);
-    token = "";
-    tokenStarted = false;
-  };
-
-  for (let index = 0; index < value.length; index += 1) {
-    const char = value[index];
-
-    if (char === "\n" || char === "\r") {
-      return null;
-    }
-
-    if (quote === "single") {
-      if (char === "'") {
-        quote = null;
-      } else {
-        token += char;
-      }
-      continue;
-    }
-
-    if (quote === "double") {
-      if (char === '"') {
-        quote = null;
-        continue;
-      }
-      if (char === "\\") {
-        const escaped = value[index + 1];
-        if (escaped === undefined || escaped === "\n" || escaped === "\r") return null;
-        token += escaped === "$" || escaped === "`" || escaped === '"' || escaped === "\\"
-          ? escaped
-          : `\\${escaped}`;
-        tokenStarted = true;
-        index += 1;
-        continue;
-      }
-      if (char === "`" || (char === "$" && value[index + 1] === "(")) {
-        return null;
-      }
-      token += char;
-      tokenStarted = true;
-      continue;
-    }
-
-    if (/\s/.test(char)) {
-      pushToken();
-      continue;
-    }
-    if (char === "'") {
-      quote = "single";
-      tokenStarted = true;
-      continue;
-    }
-    if (char === '"') {
-      quote = "double";
-      tokenStarted = true;
-      continue;
-    }
-    if (char === "\\") {
-      const escaped = value[index + 1];
-      if (escaped === undefined || escaped === "\n" || escaped === "\r") return null;
-      token += escaped;
-      tokenStarted = true;
-      index += 1;
-      continue;
-    }
-    if (char === ";" || char === "|" || char === "&" || char === "<" || char === ">" || char === "`") {
-      return null;
-    }
-    if (char === "$" && value[index + 1] === "(") {
-      return null;
-    }
-
-    token += char;
-    tokenStarted = true;
-  }
-
-  if (quote !== null) return null;
-  pushToken();
-  return tokens;
-}
-
-/** Exported for focused policy tests. */
-export function isCommandAllowedByPrefixes(command: string, allowedPrefixes: readonly string[]): boolean {
-  if (allowedPrefixes.length === 0) return true;
-
-  const commandTokens = tokenizeAllowedCommand(command);
-  if (!commandTokens || commandTokens.length === 0) return false;
-
-  return allowedPrefixes.some((prefix) => {
-    const prefixTokens = tokenizeAllowedCommand(prefix);
-    if (!prefixTokens) return false;
-    if (prefixTokens.length === 0 || prefixTokens.length > commandTokens.length) return false;
-    return prefixTokens.every((token, index) => token === commandTokens[index]);
-  });
-}
 
 export type { ProcessEvent, ProcessEventHandler } from "./types.js";
 
@@ -209,7 +78,7 @@ export class PtyInputDeliveryError extends Error {
 }
 
 
-interface SessionRecord extends SessionSnapshot {
+export interface SessionRecord extends SessionSnapshot {
   provider?: SessionProvider;
   processId: number | null;
   ptyProcess: TerminalProcess | null;
@@ -248,7 +117,6 @@ interface SessionRecord extends SessionSnapshot {
   ptyTurnStartedAt?: string | null;
   ptyLastActivityAt?: string | null;
   /** Quiet-window timer for the non-Claude PTY turn tracker (no bridge). */
-  ptyTurnTimer?: NodeJS.Timeout | null;
   /**
    * 实时前台状态：终端的前台进程组不是 shell 自己（即有 CLI 在前台运行）。
    * `undefined` = 还没采到（平台不支持或采样失败），回退一次性的 providerCliActive。
@@ -261,48 +129,21 @@ interface SessionRecord extends SessionSnapshot {
   ptyRows: number;
   /** Claude task ids visible before this session started */
   knownClaudeTaskIds?: Set<string>;
-  /** Retry timer for discovering the real Claude resumable task id */
-  claudeTaskDiscoveryTimer?: NodeJS.Timeout | null;
-  /** Timer for delayed initial input delivery */
-  initialInputTimer?: NodeJS.Timeout | null;
+  /** Timers for PTY turn tracking, delayed initial input and provider id discovery (see SessionTimers). */
+  timers: SessionTimers;
   /** Assembles terminal-view keystrokes into a prompt for session titles. */
   ptyTopicDraft?: PtyTopicLineBuffer;
   /** Claude project jsonl mtimes visible before this session started */
   knownClaudeProjectMtimes?: Map<string, number>;
   /** Codex rollout mtimes visible before this session started */
   knownCodexSessionMtimes?: Map<string, number>;
-  /** Retry timer for discovering the real Codex resumable thread id */
-  codexSessionDiscoveryTimer?: NodeJS.Timeout | null;
   /** OpenCode sessions visible before this PTY started, keyed by provider session id. */
   knownOpenCodeSessionMtimes?: Map<string, number>;
-  /** Retry timer for discovering the real OpenCode resumable session id. */
-  openCodeSessionDiscoveryTimer?: NodeJS.Timeout | null;
   /** Auto-approval stats per session */
   approvalStats: { tool: number; command: number; file: number; total: number };
 }
 
-interface ClaudeProjectSessionCandidate {
-  id: string;
-  filePath: string;
-  mtimeMs: number;
-}
 
-interface ClaudeProjectSessionDetails extends ClaudeProjectSessionCandidate {
-  hasConversation: boolean;
-  firstUserAtMs: number | null;
-}
-
-interface OpenCodeSessionCandidate {
-  id: string;
-  cwd: string;
-  createdAtMs: number;
-  updatedAtMs: number;
-}
-
-interface PersistedMessageState {
-  count: number;
-  signature: string;
-}
 
 interface SessionDirtyState {
   metadata: boolean;
@@ -310,353 +151,6 @@ interface SessionDirtyState {
   messages: boolean;
 }
 
-const REAL_CONVERSATION_MIN_LINES = 2;
-const DISCOVERY_RECENT_WINDOW_MS = 10 * 60 * 1000;
-const START_TIME_SKEW_MS = 30 * 1000;
-
-function readClaudeProjectSessionDetails(filePath: string, id: string): ClaudeProjectSessionDetails | null {
-  try {
-    const stats = statSync(filePath);
-    const raw = readFileSync(filePath, "utf8");
-    const lines = raw.split("\n").filter((line) => line.trim().length > 0);
-    const fileSessionIds = new Set<string>();
-    let hasAssistant = false;
-    let hasUser = false;
-    let firstUserAtMs: number | null = null;
-
-    for (const line of lines) {
-      try {
-        const parsed = JSON.parse(line) as {
-          sessionId?: string;
-          type?: string;
-          timestamp?: string;
-          message?: {
-            role?: string;
-          };
-        };
-        if (parsed.sessionId) {
-          fileSessionIds.add(parsed.sessionId);
-        }
-        if (parsed.type === "user" || parsed.message?.role === "user") {
-          hasUser = true;
-          if (firstUserAtMs === null && parsed.timestamp) {
-            const parsedTime = Date.parse(parsed.timestamp);
-            if (Number.isFinite(parsedTime)) firstUserAtMs = parsedTime;
-          }
-        }
-        if (parsed.type === "assistant" || parsed.message?.role === "assistant") {
-          hasAssistant = true;
-        }
-      } catch {
-        continue;
-      }
-    }
-
-    // Only reject if the file explicitly claims a DIFFERENT primary session ID.
-    // A resumed session's JSONL may contain multiple session IDs across turns.
-    // If no sessionId appears at all (early startup file), don't reject.
-    if (fileSessionIds.size > 0 && !fileSessionIds.has(id)) {
-      // Check if at least one line references this ID (partial match is ok)
-      const hasAnyReference = lines.some((line) => line.includes(`"${id}"`));
-      if (!hasAnyReference) {
-        return null;
-      }
-    }
-
-    return {
-      id,
-      filePath,
-      mtimeMs: stats.mtimeMs,
-      hasConversation: hasUser && hasAssistant && lines.length >= REAL_CONVERSATION_MIN_LINES,
-      firstUserAtMs,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function listClaudeProjectSessionCandidates(cwd: string): ClaudeProjectSessionCandidate[] {
-  const projectDir = getClaudeProjectDir(cwd);
-  try {
-    return readdirSync(projectDir, { withFileTypes: true })
-      .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
-      .map((entry) => entry.name.replace(/\.jsonl$/, ""))
-      .filter((name) => UUID_V4_PATTERN.test(name))
-      .map((id) => {
-        const filePath = path.join(projectDir, `${id}.jsonl`);
-        const stats = statSync(filePath);
-        return { id, filePath, mtimeMs: stats.mtimeMs };
-      });
-  } catch {
-    return [];
-  }
-}
-
-function listClaudeProjectSessionMtimes(cwd: string): Map<string, number> {
-  return new Map(listClaudeProjectSessionCandidates(cwd).map((candidate) => [candidate.id, candidate.mtimeMs]));
-}
-
-function hasRecentProjectActivity(candidate: { mtimeMs: number }, startedAt: string): boolean {
-  const startedAtMs = Date.parse(startedAt);
-  if (!Number.isFinite(startedAtMs)) {
-    return true;
-  }
-  return candidate.mtimeMs >= startedAtMs - START_TIME_SKEW_MS
-    && candidate.mtimeMs <= Date.now() + DISCOVERY_RECENT_WINDOW_MS;
-}
-
-function selectClaudeProjectSessionForRecord(record: Pick<SessionRecord, "cwd" | "startedAt" | "knownClaudeProjectMtimes" | "messages">): ClaudeProjectSessionDetails | null {
-  const knownMtimes = record.knownClaudeProjectMtimes ?? new Map<string, number>();
-  // Only consider files created/touched AFTER this wand session started — those
-  // are the ones a fresh `claude` invocation could have produced. Files that
-  // existed before (knownMtimes entry present) are tolerated only if they
-  // grew since we observed them, but we de-prioritize them below.
-  const candidates = listClaudeProjectSessionCandidates(record.cwd)
-    .filter((candidate) => {
-      const previousMtime = knownMtimes.get(candidate.id);
-      return previousMtime === undefined || candidate.mtimeMs > previousMtime;
-    })
-    .filter((candidate) => hasRecentProjectActivity(candidate, record.startedAt))
-    .map((candidate) => readClaudeProjectSessionDetails(candidate.filePath, candidate.id))
-    .filter((candidate): candidate is ClaudeProjectSessionDetails => Boolean(candidate?.hasConversation))
-    .sort((a, b) => b.mtimeMs - a.mtimeMs);
-
-  if (candidates.length === 0) {
-    return null;
-  }
-
-  const hasUserTurn = record.messages.some((turn) => turn.role === "user"
-    && turn.content.some((block) => block.type === "text" && block.text.trim().length > 0));
-  if (!hasUserTurn) {
-    return null;
-  }
-
-  // Prefer brand-new files (id not in knownMtimes at session start). When more
-  // than one fresh candidate exists in parallel sessions, refuse to bind —
-  // mis-binding another session's history is worse than waiting for the bridge
-  // to capture the canonical session id from PTY output.
-  const fresh = candidates.filter((candidate) => !knownMtimes.has(candidate.id));
-  if (fresh.length === 1) {
-    return fresh[0];
-  }
-  if (fresh.length > 1) {
-    return null;
-  }
-
-  // Fallback: existing file that grew. Only bind if a single grown candidate.
-  return candidates.length === 1 ? candidates[0] : null;
-}
-
-function getLatestClaudeProjectSessionId(record: Pick<SessionRecord, "cwd" | "startedAt" | "knownClaudeProjectMtimes" | "messages">): string | null {
-  return selectClaudeProjectSessionForRecord(record)?.id ?? null;
-}
-
-function selectClaudeProjectSessionForTimeWindow(record: Pick<SessionSnapshot, "cwd" | "startedAt" | "endedAt" | "messages">): ClaudeProjectSessionDetails | null {
-  const startedAtMs = parseTimeMs(record.startedAt);
-  if (startedAtMs === null) return null;
-
-  const endedAtMs = parseTimeMs(record.endedAt) ?? Date.now();
-  const windowStart = startedAtMs - START_TIME_SKEW_MS;
-  const windowEnd = endedAtMs + START_TIME_SKEW_MS;
-  const fallbackWindowEnd = endedAtMs + DISCOVERY_RECENT_WINDOW_MS;
-
-  const candidates = listClaudeProjectSessionCandidates(record.cwd)
-    .map((candidate) => readClaudeProjectSessionDetails(candidate.filePath, candidate.id))
-    .filter((candidate): candidate is ClaudeProjectSessionDetails => Boolean(candidate?.hasConversation))
-    .filter((candidate) => {
-      if (candidate.firstUserAtMs !== null) {
-        return candidate.firstUserAtMs >= windowStart && candidate.firstUserAtMs <= windowEnd;
-      }
-      return candidate.mtimeMs >= windowStart && candidate.mtimeMs <= fallbackWindowEnd;
-    })
-    .sort((a, b) => {
-      const aTime = a.firstUserAtMs ?? a.mtimeMs;
-      const bTime = b.firstUserAtMs ?? b.mtimeMs;
-      return Math.abs(aTime - startedAtMs) - Math.abs(bTime - startedAtMs);
-    });
-
-  return candidates.length === 1 ? candidates[0] : null;
-}
-
-function listRecentClaudeProjectSessionIds(cwd: string, startedAt: string): string[] {
-  return listClaudeProjectSessionCandidates(cwd)
-    .filter((candidate) => hasRecentProjectActivity(candidate, startedAt))
-    .sort((a, b) => b.mtimeMs - a.mtimeMs)
-    .map((candidate) => candidate.id);
-}
-
-function isClaudeSessionFileAvailable(cwd: string, claudeSessionId: string): boolean {
-  const filePath = path.join(getClaudeProjectDir(cwd), `${claudeSessionId}.jsonl`);
-  return Boolean(readClaudeProjectSessionDetails(filePath, claudeSessionId));
-}
-
-function listCodexSessionMtimes(sessions: readonly CodexHistorySession[]): Map<string, number> {
-  return new Map(sessions.map((session) => [session.claudeSessionId, session.mtimeMs]));
-}
-
-function isSameResolvedPath(left: string | undefined, right: string | undefined): boolean {
-  if (!left || !right) return false;
-  return path.resolve(left) === path.resolve(right);
-}
-
-function isUsableCodexHistorySession(session: CodexHistorySession): boolean {
-  return session.hasUser || session.hasConversation;
-}
-
-function parseTimeMs(value: string | null | undefined): number | null {
-  if (!value) return null;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function selectCodexSessionForRecord(
-  record: Pick<SessionRecord, "cwd" | "startedAt" | "knownCodexSessionMtimes">,
-  sessions: readonly CodexHistorySession[],
-): CodexHistorySession | null {
-  const knownMtimes = record.knownCodexSessionMtimes ?? new Map<string, number>();
-  const candidates = sessions
-    .filter(isUsableCodexHistorySession)
-    .filter((session) => isSameResolvedPath(session.cwd, record.cwd))
-    .filter((session) => {
-      const previousMtime = knownMtimes.get(session.claudeSessionId);
-      return previousMtime === undefined || session.mtimeMs > previousMtime;
-    })
-    .filter((session) => hasRecentProjectActivity(session, record.startedAt))
-    .sort((a, b) => b.mtimeMs - a.mtimeMs);
-
-  if (candidates.length === 0) {
-    return null;
-  }
-
-  const fresh = candidates.filter((session) => !knownMtimes.has(session.claudeSessionId));
-  if (fresh.length === 1) {
-    return fresh[0];
-  }
-  if (fresh.length > 1) {
-    return null;
-  }
-
-  return candidates.length === 1 ? candidates[0] : null;
-}
-
-function getLatestCodexSessionId(
-  record: Pick<SessionRecord, "cwd" | "startedAt" | "knownCodexSessionMtimes">,
-  sessions: readonly CodexHistorySession[],
-): string | null {
-  return selectCodexSessionForRecord(record, sessions)?.claudeSessionId ?? null;
-}
-
-function listOpenCodeSessionCandidates(): OpenCodeSessionCandidate[] {
-  const dataHome = process.env.XDG_DATA_HOME?.trim() || path.join(os.homedir(), ".local", "share");
-  const dbPath = path.join(dataHome, "opencode", "opencode.db");
-  if (!existsSync(dbPath)) return [];
-  let db: DatabaseSync | null = null;
-  try {
-    db = new DatabaseSync(dbPath, { readOnly: true });
-    const sessionColumns = db.prepare("PRAGMA table_info(session)").all() as Array<{ name?: unknown }>;
-    const rootSessionFilter = sessionColumns.some((column) => column.name === "parent_id")
-      ? "WHERE parent_id IS NULL"
-      : "";
-    const rows = db.prepare(
-      `SELECT id, directory, time_created, time_updated FROM session ${rootSessionFilter} ORDER BY time_updated DESC LIMIT 500`,
-    ).all() as Array<{ id: unknown; directory: unknown; time_created: unknown; time_updated: unknown }>;
-    return rows.flatMap((row) => {
-      if (typeof row.id !== "string" || typeof row.directory !== "string") return [];
-      const createdAtMs = Number(row.time_created);
-      const updatedAtMs = Number(row.time_updated);
-      if (!Number.isFinite(createdAtMs) || !Number.isFinite(updatedAtMs)) return [];
-      return [{ id: row.id, cwd: row.directory, createdAtMs, updatedAtMs }];
-    });
-  } catch {
-    return [];
-  } finally {
-    try { db?.close(); } catch { /* best-effort read-only probe */ }
-  }
-}
-
-function listOpenCodeSessionMtimes(): Map<string, number> {
-  return new Map(listOpenCodeSessionCandidates().map((session) => [session.id, session.updatedAtMs]));
-}
-
-function selectOpenCodeSessionForRecord(
-  record: Pick<SessionRecord, "cwd" | "startedAt" | "knownOpenCodeSessionMtimes">,
-): OpenCodeSessionCandidate | null {
-  const known = record.knownOpenCodeSessionMtimes ?? new Map<string, number>();
-  const startedAtMs = Date.parse(record.startedAt);
-  const candidates = listOpenCodeSessionCandidates()
-    .filter((session) => isSameResolvedPath(session.cwd, record.cwd))
-    .filter((session) => {
-      const previous = known.get(session.id);
-      return previous === undefined || session.updatedAtMs > previous;
-    })
-    .filter((session) => !Number.isFinite(startedAtMs) || session.updatedAtMs >= startedAtMs - START_TIME_SKEW_MS)
-    .sort((left, right) => right.updatedAtMs - left.updatedAtMs);
-  if (candidates.length === 0) return null;
-  const fresh = candidates.filter((session) => !known.has(session.id));
-  if (fresh.length === 1) return fresh[0];
-  return null;
-}
-
-function selectOpenCodeSessionForTimeWindow(
-  record: Pick<SessionRecord, "cwd" | "startedAt" | "endedAt">,
-): OpenCodeSessionCandidate | null {
-  const startedAtMs = Date.parse(record.startedAt);
-  if (!Number.isFinite(startedAtMs)) return null;
-  const endedAtMs = Date.parse(record.endedAt ?? "");
-  const windowEnd = (Number.isFinite(endedAtMs) ? endedAtMs : Date.now()) + START_TIME_SKEW_MS;
-  const candidates = listOpenCodeSessionCandidates()
-    .filter((session) => isSameResolvedPath(session.cwd, record.cwd))
-    .filter((session) => session.updatedAtMs >= startedAtMs - START_TIME_SKEW_MS && session.updatedAtMs <= windowEnd)
-    .filter((session) => session.createdAtMs <= windowEnd)
-    .sort((left, right) => right.updatedAtMs - left.updatedAtMs);
-  return candidates.length === 1 ? candidates[0] : null;
-}
-
-function selectCodexSessionForTimeWindow(
-  record: Pick<SessionRecord, "cwd" | "startedAt" | "endedAt">,
-  sessions: readonly CodexHistorySession[],
-): CodexHistorySession | null {
-  const startedAtMs = parseTimeMs(record.startedAt);
-  if (startedAtMs === null) return null;
-
-  const endedAtMs = parseTimeMs(record.endedAt) ?? Date.now();
-  const windowStart = startedAtMs - START_TIME_SKEW_MS;
-  const windowEnd = endedAtMs + START_TIME_SKEW_MS;
-  const candidates = sessions
-    .filter(isUsableCodexHistorySession)
-    .filter((session) => isSameResolvedPath(session.cwd, record.cwd))
-    .filter((session) => {
-      const firstUserAtMs = parseTimeMs(session.firstUserAt);
-      if (firstUserAtMs !== null) {
-        return firstUserAtMs >= windowStart && firstUserAtMs <= windowEnd;
-      }
-      return session.mtimeMs >= windowStart && session.mtimeMs <= endedAtMs + DISCOVERY_RECENT_WINDOW_MS;
-    })
-    .sort((a, b) => {
-      const aTime = parseTimeMs(a.firstUserAt) ?? a.mtimeMs;
-      const bTime = parseTimeMs(b.firstUserAt) ?? b.mtimeMs;
-      return Math.abs(aTime - startedAtMs) - Math.abs(bTime - startedAtMs);
-    });
-
-  return candidates.length === 1 ? candidates[0] : null;
-}
-
-function recoverCodexSessionIdFromHistory(
-  snapshot: Pick<SessionSnapshot, "provider" | "command" | "cwd" | "startedAt" | "endedAt" | "claudeSessionId">,
-  sessions: readonly CodexHistorySession[],
-): string | null {
-  if (snapshot.provider !== "codex" || snapshot.claudeSessionId) {
-    return null;
-  }
-  return getProviderResumeCommandSessionId("codex", snapshot.command) ?? selectCodexSessionForTimeWindow(snapshot, sessions)?.claudeSessionId ?? null;
-}
-
-function recoverClaudeSessionIdFromHistory(snapshot: Pick<SessionSnapshot, "provider" | "command" | "cwd" | "startedAt" | "endedAt" | "claudeSessionId" | "messages">): string | null {
-  if (snapshot.provider !== "claude" || snapshot.claudeSessionId) {
-    return null;
-  }
-  return getProviderResumeCommandSessionId("claude", snapshot.command) ?? selectClaudeProjectSessionForTimeWindow(snapshot)?.id ?? null;
-}
 
 function snapshotMessages(record: Pick<SessionRecord, "ptyBridge" | "messages">): ConversationTurn[] {
   return record.ptyBridge?.getMessages() ?? record.messages;
@@ -676,9 +170,6 @@ function restoreTerminalState(state: TerminalSessionState): PtyTerminalState {
   return terminal;
 }
 
-const MAX_SESSIONS = 200;
-// 会话空闲 7 天后在这里自动归档，再由保留期扫描于 7 天后清理。任务窗口在设置里单独配置。
-const ARCHIVE_AFTER_MS = RETENTION_IDLE_MS;
 const CONFIRM_WINDOW_SIZE = 800;
 /**
  * Quiet window for the non-Claude PTY turn tracker: a submitted turn stays busy
@@ -692,67 +183,9 @@ export const PTY_TURN_IDLE_MS = 3000;
  */
 export const PTY_FOREGROUND_SAMPLE_MS = 1000;
 
-const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function getClaudeProjectDir(cwd: string): string {
-  // Claude Code encodes the project dir by replacing every non-alphanumeric
-  // character (slash, dot, underscore, etc.) with "-", not just "/". Mirroring
-  // only "/" misses paths like ".../vibe_coding/wand" → the scan looks in a
-  // directory Claude never wrote to, so the session ID is never discovered.
-  const normalized = path.resolve(cwd).replace(/[^a-zA-Z0-9]/g, "-");
-  return path.join(os.homedir(), ".claude", "projects", normalized);
-}
-
-/** Derive a short summary for a session from user messages or current task. */
-function getLastMessageSignature(messages: ConversationTurn[]): string {
-  const last = messages[messages.length - 1];
-  if (!last) {
-    return "";
-  }
-  const lastContent = JSON.stringify(last.content ?? []);
-  return `${last.role}:${lastContent}`;
-}
-
-function getPersistedMessageState(messages: ConversationTurn[]): PersistedMessageState {
-  return {
-    count: messages.length,
-    signature: getLastMessageSignature(messages),
-  };
-}
-
-function shouldPersistMessages(
-  lastState: PersistedMessageState | undefined,
-  nextMessages: ConversationTurn[]
-): boolean {
-  if (nextMessages.length === 0) {
-    return false;
-  }
-  const nextState = getPersistedMessageState(nextMessages);
-  return !lastState
-    || lastState.count !== nextState.count
-    || lastState.signature !== nextState.signature;
-}
-
-function recoverMessagesFromSnapshot(snapshot: SessionSnapshot): ConversationTurn[] {
-  return snapshot.messages ?? [];
-}
-
-function deriveSessionSummary(messages: ConversationTurn[]): string | undefined {
-  // Prefer first user message as summary
-  for (const msg of messages) {
-    if (msg.role !== "user") continue;
-    for (const block of msg.content) {
-      if (block.type === "text" && block.text.trim()) {
-        return block.text.trim().slice(0, 120);
-      }
-    }
-    break;
-  }
-  return undefined;
-}
-
 
 export interface ProcessManagerOptions {
+  free?: EmployeeTextDeps["free"];
   /** Overrides the non-Claude PTY turn quiet window (tests use a short one). */
   ptyTurnIdleMs?: number;
   /** Overrides the foreground-process-group sampling interval (tests use a short one). */
@@ -763,8 +196,28 @@ export interface ProcessManagerOptions {
   resolveDecisionEvaluate?: () => ((value: unknown, caller: string, signal?: AbortSignal) => Promise<DecisionResult>) | undefined;
 }
 
+export interface ProcessStartOptions extends Pick<SessionSnapshot, "employeeId" | "employeeName" | "employeeAvatar"> {
+  resumedFromSessionId?: string;
+  autoRecovered?: boolean;
+  worktreeEnabled?: boolean;
+  provider?: SessionProvider;
+  model?: string;
+  reuseId?: string;
+  cols?: number;
+  rows?: number;
+  thinkingEffort?: SessionSnapshot["thinkingEffort"];
+  sessionSource?: SessionSource;
+  automationId?: string;
+  workspaceId?: string;
+  workspaceTaskId?: string;
+  interactiveShell?: boolean;
+  systemPrompt?: string;
+}
+
 export class ProcessManager extends EventEmitter {
   private readonly sessions = new Map<string, SessionRecord>();
+  /** Own the full start handshake, including model resolution and late host replies. */
+  private readonly startingSessions = new Map<string, { cancelled: boolean }>();
   private readonly logger: SessionLogger;
   private readonly providerHistory = new ProviderHistoryScanner();
   /** Quiet window for the non-Claude PTY turn tracker. */
@@ -773,9 +226,8 @@ export class ProcessManager extends EventEmitter {
   private readonly ptyForegroundSampleMs: number;
   /** Foreground probe; injectable so tests can drive it without a real process table. */
   private readonly probePtyForegrounds: typeof samplePtyForegrounds;
+  private readonly free: EmployeeTextDeps["free"];
   private readonly resolveDecisionEvaluate: NonNullable<ProcessManagerOptions["resolveDecisionEvaluate"]>;
-  /** 24h archive scan timer */
-  private archiveTimer: NodeJS.Timeout | null = null;
   /** 前台进程组采样定时器（见 samplePtyForegrounds） */
   private ptyForegroundTimer: NodeJS.Timeout | null = null;
   /** 采样是 async 的，避免慢 ps 重叠成多个进程 */
@@ -789,6 +241,8 @@ export class ProcessManager extends EventEmitter {
   /** 启动时被识别为孤儿 PTY 并标记为 exited 的旧会话数（旧服务器进程已死） */
   private orphanRecoveredCount = 0;
   private readonly topicCoordinator = new SessionTopicCoordinator();
+  /** Topic/native-title policy shared with the structured manager; see SessionMetadataService. */
+  private readonly metadata: SessionMetadataService<SessionRecord>;
   private readonly nativeTitles = new SessionNativeTitleTracker();
   /**
    * 静默期心跳：ptyBusy 且连续 TURN_QUIET_HEARTBEAT_MS 没有任何输出时，用现有的 status
@@ -810,9 +264,24 @@ export class ProcessManager extends EventEmitter {
     this.ptyTurnIdleMs = options.ptyTurnIdleMs ?? PTY_TURN_IDLE_MS;
     this.ptyForegroundSampleMs = options.ptyForegroundSampleMs ?? PTY_FOREGROUND_SAMPLE_MS;
     this.probePtyForegrounds = options.samplePtyForegrounds ?? samplePtyForegrounds;
+    this.free = options.free;
     this.resolveDecisionEvaluate = options.resolveDecisionEvaluate ?? (() => undefined);
     this.terminalHost = terminalHost ?? new InProcessTerminalHost();
     this.logger = new SessionLogger(configDir || path.join(process.env.HOME || process.cwd(), ".wand"), config.shortcutLogMaxBytes);
+    this.metadata = new SessionMetadataService<SessionRecord>({
+      isDisposed: () => this.disposed,
+      current: (id) => this.sessions.get(id),
+      messagesOf: (record) => snapshotMessages(record),
+      commitTopic: (id, title, description) => { this.setSessionTopic(id, title, description); },
+      commitTopicGenerating: (id, generating) => this.setSessionTopicGenerating(id, generating),
+      topicCoordinator: () => this.topicCoordinator,
+      nativeTitles: () => this.nativeTitles,
+    }, {
+      logPrefix: "[ProcessManager]",
+      config,
+      storage,
+      free: this.free,
+    });
     let startupCodexHistory: CodexHistorySession[] | null = null;
     const getStartupCodexHistory = (): CodexHistorySession[] => {
       startupCodexHistory ??= this.providerHistory.listCodexHistorySessions();
@@ -894,7 +363,7 @@ export class ProcessManager extends EventEmitter {
       }
       if (restoredSessionId && restoredSessionId !== snapshot.claudeSessionId) {
         const label = isCodexCmd ? "Codex thread" : isOpenCodeCmd ? "OpenCode session" : "Claude session";
-        process.stderr.write(`[wand] Recovered ${label} ID for ${live ? "reattached" : "saved"} PTY ${snapshot.id}: ${restoredSessionId}\n`);
+        logInfo(`Recovered ${label} ID for ${live ? "reattached" : "saved"} PTY ${snapshot.id}: ${restoredSessionId}`);
       }
 
       const record = this.makeRestoredRecord(updated, provider, live?.process ?? null, live?.state ?? null, {
@@ -906,18 +375,11 @@ export class ProcessManager extends EventEmitter {
       this.sessions.set(snapshot.id, record);
       if (live?.process) {
         this.bindRestoredTerminal(record, live);
-        process.stderr.write(`[wand] Reattached live terminal ${snapshot.id} (pid ${live.process.pid}).\n`);
+        logInfo(`Reattached live terminal ${snapshot.id} (pid ${live.process.pid}).`);
       } else if (snapshot.status === "running") {
         this.orphanRecoveredCount += 1;
       }
     }
-    this.archiveExpiredSessions();
-    this.archiveTimer = setInterval(() => {
-      try { this.archiveExpiredSessions(); } catch (err) {
-        console.error(`[ProcessManager] archive scan failed: ${String(err)}`);
-      }
-    }, 60 * 1000);
-    this.archiveTimer.unref?.();
     this.ptyForegroundTimer = setInterval(() => { void this.samplePtyForegrounds(); }, this.ptyForegroundSampleMs);
     this.ptyForegroundTimer.unref?.();
   }
@@ -1008,12 +470,10 @@ export class ProcessManager extends EventEmitter {
       childProcess: null,
       ptyBridge: null,
       knownClaudeTaskIds: undefined,
-      claudeTaskDiscoveryTimer: null,
+      timers: new SessionTimers(),
       knownClaudeProjectMtimes: history.isClaudeCmd ? listClaudeProjectSessionMtimes(snapshot.cwd) : undefined,
       knownCodexSessionMtimes: history.isCodexCmd ? listCodexSessionMtimes(history.startupCodexHistory()) : undefined,
-      codexSessionDiscoveryTimer: null,
       knownOpenCodeSessionMtimes: history.isOpenCodeCmd ? listOpenCodeSessionMtimes() : undefined,
-      openCodeSessionDiscoveryTimer: null,
       claudeSessionId: snapshot.claudeSessionId ?? null,
       approvalStats: snapshot.approvalStats ?? { tool: 0, command: 0, file: 0, total: 0 },
       titleGenerating: false,
@@ -1105,14 +565,14 @@ export class ProcessManager extends EventEmitter {
     // 会被每次 chunk 重置。静默窗口跟着往后推。
     record.ptyLastActivityAt = new Date().toISOString();
     this.ptyHeartbeat.observe(record.id);
-    if (record.ptyTurnTimer) clearTimeout(record.ptyTurnTimer);
+    record.timers.clearPtyTurn();
     const timer = setTimeout(() => {
-      record.ptyTurnTimer = null;
+      record.timers.ptyTurn = null;
       if (this.sessions.get(record.id) !== record) return;
       this.closePtyTurn(record);
     }, this.ptyTurnIdleMs);
     timer.unref?.();
-    record.ptyTurnTimer = timer;
+    record.timers.ptyTurn = timer;
   }
 
   /** The quiet window elapsed: the CLI is back at its prompt, so the turn is done. */
@@ -1129,10 +589,7 @@ export class ProcessManager extends EventEmitter {
   }
 
   private clearPtyTurn(record: SessionRecord): void {
-    if (record.ptyTurnTimer) {
-      clearTimeout(record.ptyTurnTimer);
-      record.ptyTurnTimer = null;
-    }
+    record.timers.clearPtyTurn();
     // ptyBusy 清 false 的一切路径（退回提示符、CLI 退出、finishProviderCli、stop、
     // cleanupRecord）都经过这里：撤掉静默心跳，锚点一并回 null。
     this.ptyHeartbeat.cancel(record.id);
@@ -1210,22 +667,7 @@ export class ProcessManager extends EventEmitter {
     // A stopped session can be resumed under the same public id before the old
     // PTY emits its asynchronous exit event. Ignore that stale incarnation.
     if (current !== record || current.ptyProcess !== child) return;
-    if (current.claudeTaskDiscoveryTimer) {
-      clearTimeout(current.claudeTaskDiscoveryTimer);
-      current.claudeTaskDiscoveryTimer = null;
-    }
-    if (current.codexSessionDiscoveryTimer) {
-      clearTimeout(current.codexSessionDiscoveryTimer);
-      current.codexSessionDiscoveryTimer = null;
-    }
-    if (current.openCodeSessionDiscoveryTimer) {
-      clearTimeout(current.openCodeSessionDiscoveryTimer);
-      current.openCodeSessionDiscoveryTimer = null;
-    }
-    if (current.initialInputTimer) {
-      clearTimeout(current.initialInputTimer);
-      current.initialInputTimer = null;
-    }
+    current.timers.clearAll();
     if (current.ptyBridge) {
       current.ptyBridge.onExit(exitCode);
       current.messages = current.ptyBridge.getMessages();
@@ -1292,7 +734,7 @@ export class ProcessManager extends EventEmitter {
       current.claudeSessionId = bridgeSessionId;
       this.markDirty(current.id, { metadata: true });
       this.providerHistory.invalidate("claude");
-      process.stderr.write(`[wand] Captured Claude session ID: ${bridgeSessionId}\n`);
+      logInfo(`Captured Claude session ID: ${bridgeSessionId}`);
     }
 
     if (current.providerCliActive && boundary.exitCode === null && !current.claudeSessionId && current.knownClaudeTaskIds) {
@@ -1307,7 +749,7 @@ export class ProcessManager extends EventEmitter {
         current.claudeSessionId = discoveredTaskId;
         this.markDirty(current.id, { metadata: true });
         current.knownClaudeTaskIds.add(discoveredTaskId);
-        process.stderr.write(`[wand] Captured Claude project session ID: ${discoveredTaskId}\n`);
+        logInfo(`Captured Claude project session ID: ${discoveredTaskId}`);
       }
     }
 
@@ -1344,10 +786,6 @@ export class ProcessManager extends EventEmitter {
     // 静默心跳不跨服务关闭存活；每个会话的 timer 也在 cleanupRecord 里单独撤销。
     this.ptyHeartbeat.dispose();
 
-    if (this.archiveTimer) {
-      clearInterval(this.archiveTimer);
-      this.archiveTimer = null;
-    }
     if (this.ptyForegroundTimer) {
       clearInterval(this.ptyForegroundTimer);
       this.ptyForegroundTimer = null;
@@ -1387,55 +825,30 @@ export class ProcessManager extends EventEmitter {
     this.emit("process", event);
   }
 
-  private cleanupOldSessions(): void {
-    // Only clean up when well over the limit
-    if (this.sessions.size < MAX_SESSIONS) return;
-
-    const now = Date.now();
-    const STALE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-    const removable: string[] = [];
-
-    for (const [id, record] of this.sessions) {
-      // Only remove archived, non-running sessions older than 7 days
-      if (record.status === "running") continue;
-      if (!record.archived) continue;
-      const ref = record.endedAt ?? record.startedAt;
-      const refMs = Date.parse(ref);
-      if (Number.isFinite(refMs) && now - refMs > STALE_MS) {
-        removable.push(id);
-      }
-    }
-
-    // Sort oldest first and remove enough to get back under the limit
-    const toRemove = removable
-      .sort((a, b) => {
-        const ra = this.sessions.get(a);
-        const rb = this.sessions.get(b);
-        return (ra?.endedAt || "").localeCompare(rb?.endedAt || "");
-      })
-      .slice(0, this.sessions.size - MAX_SESSIONS + 1);
-
-    for (const id of toRemove) {
-      const record = this.sessions.get(id);
-      if (record) {
-        this.logger.deleteSession(id);
-        if (record.provider === "claude") {
-          this.deleteClaudeCache(record);
-        }
-      }
-      this.sessions.delete(id);
-      this.terminalHost.forget(id);
-      this.lastPersistedMessageState.delete(id);
-      this.dirtySessions.delete(id);
-      this.storage.deleteSession(id);
-    }
-    if (toRemove.length > 0) {
-      this.providerHistory.invalidate();
+  async start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: ProcessStartOptions): Promise<SessionSnapshot> {
+    if (this.disposed) throw new Error("ProcessManager has been disposed.");
+    const id = opts?.reuseId || randomUUID();
+    // Host operations are keyed by session id, not by the manager record. A
+    // second handshake must not adopt/forget a cancelled first incarnation.
+    if (this.startingSessions.has(id)) throw new Error("终端启动仍在进行，请等待本次启动结束后再恢复。");
+    const start = { cancelled: false };
+    this.startingSessions.set(id, start);
+    try {
+      return await this.startSession(id, start, command, cwd, mode, initialInput, opts);
+    } finally {
+      this.startingSessions.delete(id);
     }
   }
 
-  async start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: { resumedFromSessionId?: string; autoRecovered?: boolean; worktreeEnabled?: boolean; provider?: SessionProvider; model?: string; reuseId?: string; cols?: number; rows?: number; thinkingEffort?: SessionSnapshot["thinkingEffort"]; sessionSource?: SessionSource; automationId?: string; workspaceId?: string; workspaceTaskId?: string; interactiveShell?: boolean; systemPrompt?: string } & Pick<SessionSnapshot, "employeeId" | "employeeName" | "employeeAvatar">): Promise<SessionSnapshot> {
-    if (this.disposed) throw new Error("ProcessManager has been disposed.");
+  private async startSession(
+    id: string,
+    start: { cancelled: boolean },
+    command: string,
+    cwd: string | undefined,
+    mode: ExecutionMode,
+    initialInput?: string,
+    opts?: ProcessStartOptions,
+  ): Promise<SessionSnapshot> {
     if (isOpenRouterFreeSelector(opts?.model)) throw new Error("免费分组仅支持 Pi 结构化对话。");
     if (!opts?.interactiveShell) this.assertCommandAllowed(command);
 
@@ -1461,7 +874,7 @@ export class ProcessManager extends EventEmitter {
           ai: resolveSystemAiContext({
             provider: groupProvider, runner: undefined, command: providerCliCommand(groupProvider),
             structuredState: undefined, selectedModel: null, thinkingEffort: opts?.thinkingEffort,
-          }, this.config, this.storage.getSystemSiliconEmployee()),
+          }, this.config, this.storage.getSystemSiliconEmployee(), this.free),
           cwd: resolveSessionCwd(cwd, this.config.defaultCwd),
           language: this.config.language,
         });
@@ -1480,7 +893,7 @@ export class ProcessManager extends EventEmitter {
     if (preferredModels.some(isOpenRouterFreeSelector)) throw new Error("免费模型分组仅支持 Pi 结构化对话。");
     const baseCwd = resolveSessionCwd(cwd, this.config.defaultCwd);
 
-    const id = opts?.reuseId || randomUUID();
+    if (this.disposed || start.cancelled) throw new Error("终端启动已取消。");
     // When a session is being resumed under the same id, capture its prior
     // structured messages so the new bridge can present them as the chat
     // history. We deliberately do NOT carry over rawOutput — `claude --resume`
@@ -1619,12 +1032,10 @@ export class ProcessManager extends EventEmitter {
       childProcess: null,
       ptyBridge: null,
       knownClaudeTaskIds: knownClaudeTaskIds ?? undefined,
-      claudeTaskDiscoveryTimer: null,
+      timers: new SessionTimers(),
       knownClaudeProjectMtimes: knownClaudeProjectMtimes ?? undefined,
       knownCodexSessionMtimes: knownCodexSessionMtimes ?? undefined,
-      codexSessionDiscoveryTimer: null,
       knownOpenCodeSessionMtimes: knownOpenCodeSessionMtimes ?? undefined,
-      openCodeSessionDiscoveryTimer: null,
       approvalStats: { tool: 0, command: 0, file: 0, total: 0 },
       selectedModel: selectedModel ?? null,
       thinkingEffort: initialThinkingEffort,
@@ -1639,7 +1050,6 @@ export class ProcessManager extends EventEmitter {
     if (initialClaudeSessionId && (provider === "claude" || provider === "codex")) {
       this.providerHistory.invalidate(provider);
     }
-    this.cleanupOldSessions();
 
     let child: TerminalProcess;
     try {
@@ -1667,6 +1077,16 @@ export class ProcessManager extends EventEmitter {
         throw new Error("Terminal host did not return a running process");
       }
       child = attached.process;
+      if (this.disposed || start.cancelled || this.sessions.get(id) !== record) {
+        // Explicit stop/delete still owns cancellation. Ordinary server shutdown
+        // only detaches persistent hosts: the next server must be able to adopt
+        // this in-progress spawn from the durable provisional record.
+        if (start.cancelled || !this.terminalHost.persistent) {
+          try { child.kill(); } catch { /* best-effort cancellation */ }
+        }
+        if (!this.disposed) this.terminalHost.forget(id);
+        throw new Error("终端启动已取消。");
+      }
       record.output = attached.state.output;
       record.storedOutput = attached.state.output;
       record.ptyOutputSeq = attached.state.seq;
@@ -1677,6 +1097,11 @@ export class ProcessManager extends EventEmitter {
       record.terminalState = restoreTerminalState(attached.state);
       this.initializeClaudeBridge(record, attached.state.output);
     } catch (err) {
+      // stop/delete/dispose already committed the authoritative state. Neither
+      // a late success nor failure may remove or resurrect that state.
+      if (this.disposed || start.cancelled || this.sessions.get(id) !== record) {
+        throw new Error("终端启动已取消。");
+      }
       console.error("[ProcessManager] terminal spawn failed", { sessionId: id, error: String(err) });
       this.cleanupRecord(record, false);
       this.sessions.delete(id);
@@ -1698,10 +1123,10 @@ export class ProcessManager extends EventEmitter {
       initialInputSent = true;
       const current = this.sessions.get(id);
       if (current !== record || current.ptyProcess !== child || current.status !== "running") {
-        process.stderr.write(`[wand] Cannot send initial input: session not ready\n`);
+        logInfo(`Cannot send initial input: session not ready`);
         return;
       }
-      process.stderr.write(`[wand] Sending initial input (${initialInputText.length} chars)\n`);
+      logInfo(`Sending initial input (${initialInputText.length} chars)`);
 
       if (current.ptyBridge) {
         current.ptyBridge.onUserInput(initialInputText);
@@ -1724,23 +1149,31 @@ export class ProcessManager extends EventEmitter {
     }
 
     if (initialInput) {
-      record.initialInputTimer = setTimeout(() => {
-        record.initialInputTimer = null;
+      record.timers.initialInput = setTimeout(() => {
+        record.timers.initialInput = null;
         if (!initialInputSent) sendInitialInput();
       }, 3000);
+      record.timers.initialInput.unref?.();
     }
 
+    // Provider-id discovery polls the provider's on-disk history after launch.
+    // Each loop is bounded (attempt cap, backoff, deadline) and is cancelled by
+    // exit, stop, cleanup and delete through record.timers.clearAll().
+    const isCurrentLiveRecord = (): SessionRecord | null => {
+      if (this.disposed) return null;
+      const current = this.sessions.get(id);
+      if (current !== record || current.ptyProcess !== child || current.status !== "running") return null;
+      return current;
+    };
+    const onDiscoveryExhausted = (kind: ProviderDiscoveryKind) => (attempts: number) => {
+      logInfo(`Stopped ${kind} session discovery for ${id} after ${attempts} attempts without a provider session id.`);
+    };
+
     if (record.knownClaudeTaskIds) {
-      const tryDiscoverClaudeTaskId = () => {
-        if (this.disposed) return;
-        const current = this.sessions.get(id);
-        if (current !== record || current.ptyProcess !== child || current.status !== "running" || current.claudeSessionId || !current.knownClaudeTaskIds) {
-          return;
-        }
-        if (getProviderResumeCommandSessionId("claude", current.command)) {
-          current.claudeTaskDiscoveryTimer = null;
-          return;
-        }
+      record.timers.startDiscovery("claude", () => {
+        const current = isCurrentLiveRecord();
+        if (!current || current.claudeSessionId || !current.knownClaudeTaskIds) return true;
+        if (getProviderResumeCommandSessionId("claude", current.command)) return true;
         current.messages = snapshotMessages(current);
         const discoveredTaskId = getLatestClaudeProjectSessionId({
           cwd: current.cwd,
@@ -1748,61 +1181,35 @@ export class ProcessManager extends EventEmitter {
           knownClaudeProjectMtimes: current.knownClaudeProjectMtimes,
           messages: current.messages
         });
-        if (discoveredTaskId) {
-          current.claudeSessionId = discoveredTaskId;
-          current.knownClaudeTaskIds.add(discoveredTaskId);
-          current.claudeTaskDiscoveryTimer = null;
-          process.stderr.write(`[wand] Discovered Claude resumable project session ID: ${discoveredTaskId}\n`);
-          this.persist(current);
-          return;
-        }
-        current.claudeTaskDiscoveryTimer = setTimeout(tryDiscoverClaudeTaskId, 1000);
-      };
-      record.claudeTaskDiscoveryTimer = setTimeout(tryDiscoverClaudeTaskId, 500);
+        if (!discoveredTaskId) return false;
+        current.claudeSessionId = discoveredTaskId;
+        current.knownClaudeTaskIds.add(discoveredTaskId);
+        logInfo(`Discovered Claude resumable project session ID: ${discoveredTaskId}`);
+        this.persist(current);
+        return true;
+      }, onDiscoveryExhausted("claude"));
     }
 
     if (record.knownCodexSessionMtimes) {
-      const tryDiscoverCodexSessionId = () => {
-        if (this.disposed) return;
-        const current = this.sessions.get(id);
-        if (current !== record || current.ptyProcess !== child || current.status !== "running" || current.claudeSessionId || !current.knownCodexSessionMtimes) {
-          return;
-        }
-        if (getProviderResumeCommandSessionId("codex", current.command)) {
-          current.codexSessionDiscoveryTimer = null;
-          return;
-        }
-        if (this.captureCodexSessionId(current)) {
-          current.codexSessionDiscoveryTimer = null;
-          this.persist(current);
-          return;
-        }
-        current.codexSessionDiscoveryTimer = setTimeout(tryDiscoverCodexSessionId, 1000);
-      };
-      record.codexSessionDiscoveryTimer = setTimeout(tryDiscoverCodexSessionId, 500);
+      record.timers.startDiscovery("codex", () => {
+        const current = isCurrentLiveRecord();
+        if (!current || current.claudeSessionId || !current.knownCodexSessionMtimes) return true;
+        if (getProviderResumeCommandSessionId("codex", current.command)) return true;
+        if (!this.captureCodexSessionId(current)) return false;
+        this.persist(current);
+        return true;
+      }, onDiscoveryExhausted("codex"));
     }
 
     if (record.knownOpenCodeSessionMtimes) {
-      const tryDiscoverOpenCodeSessionId = () => {
-        if (this.disposed) return;
-        const current = this.sessions.get(id);
-        if (current !== record || current.ptyProcess !== child || current.status !== "running" || current.claudeSessionId || !current.knownOpenCodeSessionMtimes) {
-          return;
-        }
-        if (getProviderResumeCommandSessionId("opencode", current.command)) {
-          current.openCodeSessionDiscoveryTimer = null;
-          return;
-        }
-        if (this.captureOpenCodeSessionId(current)) {
-          current.openCodeSessionDiscoveryTimer = null;
-          this.persist(current);
-          return;
-        }
-        current.openCodeSessionDiscoveryTimer = setTimeout(tryDiscoverOpenCodeSessionId, 1000);
-        current.openCodeSessionDiscoveryTimer.unref?.();
-      };
-      record.openCodeSessionDiscoveryTimer = setTimeout(tryDiscoverOpenCodeSessionId, 500);
-      record.openCodeSessionDiscoveryTimer.unref?.();
+      record.timers.startDiscovery("opencode", () => {
+        const current = isCurrentLiveRecord();
+        if (!current || current.claudeSessionId || !current.knownOpenCodeSessionMtimes) return true;
+        if (getProviderResumeCommandSessionId("opencode", current.command)) return true;
+        if (!this.captureOpenCodeSessionId(current)) return false;
+        this.persist(current);
+        return true;
+      }, onDiscoveryExhausted("opencode"));
     }
 
     return this.snapshot(record);
@@ -1827,23 +1234,7 @@ export class ProcessManager extends EventEmitter {
   }
 
   listClaudeHistorySessions(): ClaudeHistorySession[] {
-    const allSessions = this.providerHistory.listClaudeHistorySessions();
-
-    // Cross-reference with wand-managed sessions
-    const managedClaudeIds = new Set<string>();
-    for (const record of this.sessions.values()) {
-      if (record.provider === "claude" && record.claudeSessionId) {
-        managedClaudeIds.add(record.claudeSessionId);
-      }
-    }
-
-    for (const session of allSessions) {
-      if (managedClaudeIds.has(session.claudeSessionId)) {
-        session.managedByWand = true;
-      }
-    }
-
-    return allSessions;
+    return this.markManagedHistory(this.providerHistory.listClaudeHistorySessions(), "claude");
   }
 
   deleteClaudeHistoryFiles(sessions: { claudeSessionId: string; cwd: string }[]): number {
@@ -1851,22 +1242,23 @@ export class ProcessManager extends EventEmitter {
   }
 
   listCodexHistorySessions(): CodexHistorySession[] {
-    const allSessions = this.providerHistory.listCodexHistorySessions();
+    // codex 的 thread id 也存在 claudeSessionId 字段，见 markManagedHistory。
+    return this.markManagedHistory(this.providerHistory.listCodexHistorySessions(), "codex");
+  }
 
-    // Cross-reference with wand-managed sessions（codex 的 thread id 存在 claudeSessionId 字段）
+  /** Flags history rows that wand already manages, keyed by the provider id stored on the record. */
+  private markManagedHistory<T extends { claudeSessionId: string; managedByWand?: boolean }>(
+    sessions: T[],
+    provider: "claude" | "codex",
+  ): T[] {
     const managedIds = new Set<string>();
     for (const record of this.sessions.values()) {
-      if (record.provider === "codex" && record.claudeSessionId) {
-        managedIds.add(record.claudeSessionId);
-      }
+      if (record.provider === provider && record.claudeSessionId) managedIds.add(record.claudeSessionId);
     }
-    for (const session of allSessions) {
-      if (managedIds.has(session.claudeSessionId)) {
-        session.managedByWand = true;
-      }
+    for (const session of sessions) {
+      if (managedIds.has(session.claudeSessionId)) session.managedByWand = true;
     }
-
-    return allSessions;
+    return sessions;
   }
 
   hasCodexSessionFile(threadId: string): boolean {
@@ -1928,7 +1320,7 @@ export class ProcessManager extends EventEmitter {
     record.claudeSessionId = threadId;
     record.knownCodexSessionMtimes?.set(threadId, Date.now());
     this.providerHistory.invalidate("codex");
-    process.stderr.write(`[wand] Captured Codex thread ID: ${threadId}\n`);
+    logInfo(`Captured Codex thread ID: ${threadId}`);
     return true;
   }
 
@@ -1946,7 +1338,7 @@ export class ProcessManager extends EventEmitter {
     if (!providerSessionId) return false;
     record.claudeSessionId = providerSessionId;
     record.knownOpenCodeSessionMtimes?.set(providerSessionId, discovered?.updatedAtMs ?? fallback?.updatedAtMs ?? Date.now());
-    process.stderr.write(`[wand] Captured OpenCode session ID: ${providerSessionId}\n`);
+    logInfo(`Captured OpenCode session ID: ${providerSessionId}`);
     return true;
   }
 
@@ -1975,7 +1367,7 @@ export class ProcessManager extends EventEmitter {
     record.claudeSessionId = sessionId;
     record.knownClaudeProjectMtimes?.set(sessionId, Date.now());
     this.providerHistory.invalidate("claude");
-    process.stderr.write(`[wand] Captured Claude session ID: ${sessionId}\n`);
+    logInfo(`Captured Claude session ID: ${sessionId}`);
     return true;
   }
 
@@ -1999,6 +1391,12 @@ export class ProcessManager extends EventEmitter {
     const result = this.snapshot(record);
     if (!record.output && record.storedOutput) result.output = record.storedOutput;
     return result;
+  }
+
+  getOwnedSlim(id: string): SessionSnapshot | null {
+    this.terminalHost.flush?.();
+    const record = this.sessions.get(id);
+    return record ? this.snapshotSlim(record) : null;
   }
 
   getPtyTranscript(id: string): string | null {
@@ -2245,22 +1643,7 @@ export class ProcessManager extends EventEmitter {
     this.clearPtyTurn(record);
     record.ptyBusy = false;
 
-    if (record.claudeTaskDiscoveryTimer) {
-      clearTimeout(record.claudeTaskDiscoveryTimer);
-      record.claudeTaskDiscoveryTimer = null;
-    }
-    if (record.codexSessionDiscoveryTimer) {
-      clearTimeout(record.codexSessionDiscoveryTimer);
-      record.codexSessionDiscoveryTimer = null;
-    }
-    if (record.openCodeSessionDiscoveryTimer) {
-      clearTimeout(record.openCodeSessionDiscoveryTimer);
-      record.openCodeSessionDiscoveryTimer = null;
-    }
-    if (record.initialInputTimer) {
-      clearTimeout(record.initialInputTimer);
-      record.initialInputTimer = null;
-    }
+    record.timers.clearAll();
 
     if (record.ptyBridge) {
       record.ptyBridge.onExit(exitCode);
@@ -2291,26 +1674,13 @@ export class ProcessManager extends EventEmitter {
 
   stop(id: string): SessionSnapshot {
     const record = this.mustGet(id);
+    const start = this.startingSessions.get(id);
+    if (start) start.cancelled = true;
     if (record.status !== "running") {
       return this.snapshot(record);
     }
 
-    if (record.claudeTaskDiscoveryTimer) {
-      clearTimeout(record.claudeTaskDiscoveryTimer);
-      record.claudeTaskDiscoveryTimer = null;
-    }
-    if (record.codexSessionDiscoveryTimer) {
-      clearTimeout(record.codexSessionDiscoveryTimer);
-      record.codexSessionDiscoveryTimer = null;
-    }
-    if (record.openCodeSessionDiscoveryTimer) {
-      clearTimeout(record.openCodeSessionDiscoveryTimer);
-      record.openCodeSessionDiscoveryTimer = null;
-    }
-    if (record.initialInputTimer) {
-      clearTimeout(record.initialInputTimer);
-      record.initialInputTimer = null;
-    }
+    record.timers.clearAll();
 
     record.stopRequested = true;
     record.providerCliActive = false;
@@ -2357,22 +1727,7 @@ export class ProcessManager extends EventEmitter {
 
   private cleanupRecord(record: SessionRecord, terminateTerminal = true): void {
     this.clearPtyTurn(record);
-    if (record.claudeTaskDiscoveryTimer) {
-      clearTimeout(record.claudeTaskDiscoveryTimer);
-      record.claudeTaskDiscoveryTimer = null;
-    }
-    if (record.codexSessionDiscoveryTimer) {
-      clearTimeout(record.codexSessionDiscoveryTimer);
-      record.codexSessionDiscoveryTimer = null;
-    }
-    if (record.openCodeSessionDiscoveryTimer) {
-      clearTimeout(record.openCodeSessionDiscoveryTimer);
-      record.openCodeSessionDiscoveryTimer = null;
-    }
-    if (record.initialInputTimer) {
-      clearTimeout(record.initialInputTimer);
-      record.initialInputTimer = null;
-    }
+    record.timers.clearAll();
     const pendingPersist = this.persistDebounceTimers.get(record.id);
     if (pendingPersist) {
       clearTimeout(pendingPersist);
@@ -2401,26 +1756,13 @@ export class ProcessManager extends EventEmitter {
 
   delete(id: string): void {
     const record = this.mustGet(id);
+    const start = this.startingSessions.get(id);
+    if (start) start.cancelled = true;
 
     // Always clear pending timers
     // 会话删除后迟到的回合回调要失效，静默心跳也不能再给不存在的会话发事件。
     this.ptyHeartbeat.cancel(id);
-    if (record.claudeTaskDiscoveryTimer) {
-      clearTimeout(record.claudeTaskDiscoveryTimer);
-      record.claudeTaskDiscoveryTimer = null;
-    }
-    if (record.codexSessionDiscoveryTimer) {
-      clearTimeout(record.codexSessionDiscoveryTimer);
-      record.codexSessionDiscoveryTimer = null;
-    }
-    if (record.openCodeSessionDiscoveryTimer) {
-      clearTimeout(record.openCodeSessionDiscoveryTimer);
-      record.openCodeSessionDiscoveryTimer = null;
-    }
-    if (record.initialInputTimer) {
-      clearTimeout(record.initialInputTimer);
-      record.initialInputTimer = null;
-    }
+    record.timers.clearAll();
     const pendingPersist = this.persistDebounceTimers.get(id);
     if (pendingPersist) {
       clearTimeout(pendingPersist);
@@ -2643,57 +1985,9 @@ export class ProcessManager extends EventEmitter {
     if (this.disposed || !prompt || !record) return;
     // 迭代提示词记录：和会话标题共用同一套「有没有信息量」判断，用户不用多做一步。
     recordIterationPrompt(this.storage, record, prompt, "session");
-    const blockedTitles = sessionTopicBlocklistForSnapshot(record, this.storage);
-    // CLI 自己起了名字就归它，模型标题与输入首行都不再覆盖；取不到原生标题才走系统硅基员工。
-    const hasNativeTitle = this.nativeTitles.has(id);
-    const provisional = provisionalSessionTopic(prompt, blockedTitles);
-    if (
-      provisional
-      && !hasNativeTitle
-      && shouldGenerateSessionTopicFromInput(prompt)
-      && (record.title !== provisional.title || record.description !== provisional.description)
-    ) {
-      this.setSessionTopic(id, provisional.title, provisional.description);
-    }
-    this.topicCoordinator.request(id, {
-      messages: snapshotMessages(record),
-      input: prompt,
-      cwd: record.cwd,
-      language: this.config.language,
-      ai: resolveSystemAiContext(record, this.config, this.storage.getSystemSiliconEmployee()),
-      readNativeTitle: () => readNativeSessionTitle(
-        resolveSessionProvider(record),
-        record.claudeSessionId,
-        record.cwd,
-      ),
-      hasNativeTitle,
-      onGenerating: (generating) => {
-        if (!this.disposed) this.setSessionTopicGenerating(id, generating);
-      },
-      onTopic: ({ title, description, source }) => {
-        if (this.disposed || !this.sessions.has(id)) return;
-        if (source === "native") {
-          this.applyNativeSessionTitle(id, title, blockedTitles);
-          return;
-        }
-        if (this.nativeTitles.has(id)) return;
-        if (shouldAcceptGeneratedSessionTitle(title, blockedTitles)) {
-          this.setSessionTopic(id, title, description);
-        }
-      },
-      onError: (error) => {
-        console.error(`[ProcessManager] Failed to generate session topic ${id}:`, getErrorMessage(error));
-      },
-    });
-  }
-
-  /** 原生标题优先于模型标题：只受「不能是任务名/目录名」约束，命中且变化时才落库。 */
-  private applyNativeSessionTitle(id: string, title: string, blockedTitles: readonly string[]): void {
-    this.nativeTitles.record(id, title);
-    const current = this.sessions.get(id);
-    if (!current || !shouldAcceptGeneratedSessionTitle(title, blockedTitles)) return;
-    if (current.title === title && current.description === title) return;
-    this.setSessionTopic(id, title, title);
+    // 空白终端只执行 Shell 命令，不生成会话标题或调用系统员工总结。
+    if (!isSessionProvider(record.provider)) return;
+    this.metadata.generateTopicForPrompt(id, prompt);
   }
 
   private defaultAutonomyPolicy(mode: ExecutionMode): AutonomyPolicy {
@@ -2889,22 +2183,6 @@ export class ProcessManager extends EventEmitter {
     });
   }
 
-  private archiveExpiredSessions(): void {
-    const now = Date.now();
-    for (const record of this.sessions.values()) {
-      if (record.archived || record.status === "running") {
-        continue;
-      }
-      const referenceTime = record.endedAt ?? record.startedAt;
-      const endedAtMs = Date.parse(referenceTime);
-      if (!Number.isFinite(endedAtMs) || now - endedAtMs < ARCHIVE_AFTER_MS) {
-        continue;
-      }
-      record.archived = true;
-      record.archivedAt = new Date(now).toISOString();
-      this.persist(record);
-    }
-  }
   private assertCommandAllowed(command: string): void {
     if (!isCommandAllowedByPrefixes(command, this.config.allowedCommandPrefixes)) {
       throw new Error("Command is not allowed by current configuration.");

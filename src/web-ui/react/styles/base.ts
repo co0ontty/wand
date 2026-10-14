@@ -9,7 +9,13 @@ export const foundationStyles = String.raw`
 /* Notification lists cover the viewport; only the actual notice owns clicks. */
 .wand-ui-portals :is(.ant-modal-wrap, .ant-dropdown, .ant-dropdown-menu-submenu-popup, .ant-select-dropdown, .ant-popover, .ant-notification-notice) { pointer-events: auto; }
 .wand-ui-dialog-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.wand-ui-dialog-description { white-space: pre-wrap; font-weight: normal; }
+/* One modal geometry for every feature; Ant retains surface, focus and motion. */
+.wand-ui-dialog-content .ant-modal-body { max-height:calc(100dvh - 180px - var(--wand-safe-top,0px) - var(--wand-safe-bottom,0px)); overflow:auto; overscroll-behavior:contain; }
+.wand-ui-dialog-title { font-size:var(--wand-page-title-size); font-weight:600; line-height:1.4; }
+.wand-ui-dialog-description { white-space:pre-wrap; font-weight:normal; font-size:13px; line-height:1.55; color:var(--text-secondary); padding-top:4px; }
+.wand-ui-dialog-content .wand-dialog-sticky-actions { position:sticky; bottom:0; z-index:2; padding-block:12px; background:var(--bg-elevated); border-top:1px solid var(--border-subtle); }
+@media(max-width:639px) { .wand-ui-dialog-content .ant-modal-body { max-height:calc(100dvh - 160px - var(--wand-safe-top,0px) - var(--wand-safe-bottom,0px)); } }
+
 .wand-ui-dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 .wand-ui-switch-row { display: inline-flex; align-items: center; gap: 9px; }
 .wand-ui-menu { display: flex; flex-direction: column; }
@@ -76,7 +82,7 @@ export const reducedMotionStyles = String.raw`
 @media (prefers-reduced-motion: reduce) {
   /* The global duration blanket otherwise creates a transition of left/top on
      library popups. rc-trigger measures those coordinates synchronously. */
-  :is(.ant-dropdown, .ant-dropdown-menu-submenu-popup, .ant-popover, .ant-picker-dropdown, .ant-select-dropdown) {
+  :is(.ant-dropdown, .ant-dropdown-menu-submenu-popup, .ant-popover, .ant-tooltip, .ant-picker-dropdown, .ant-select-dropdown) {
     transition-property: none !important;
     animation-duration: 0.01ms !important;
     transform: none !important;

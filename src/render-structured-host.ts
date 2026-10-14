@@ -11,6 +11,7 @@ import { structuredRenderPaths } from "./render-structured-protocol.js";
 import type {
   StructuredExecHost, StructuredExecProcess, StructuredRunState, StructuredSpawnRequest,
 } from "./structured-exec-host.js";
+import { logInfo } from "./runtime-log.js";
 
 const READY_TIMEOUT_MS = 5_000;
 
@@ -105,7 +106,7 @@ export async function startStructuredRenderHost(configPath: string): Promise<Ren
   const child = spawn(binary, ["--config", configPath], {
     detached: true, stdio: "ignore", cwd: process.cwd(), env: process.env,
   });
-  child.on("error", (error) => process.stderr.write(`[wand] Structured Render launch failed: ${getErrorMessage(error)}\n`));
+  child.on("error", (error) => logInfo(`Structured Render launch failed: ${getErrorMessage(error)}`));
   child.unref();
   const deadline = Date.now() + READY_TIMEOUT_MS;
   while (Date.now() < deadline) {

@@ -36,11 +36,12 @@ test("foreground activity survives both HTTP projections and invalidates revisio
   storage.saveSession(live);
   // Only the running process is a fixture: real registry, storage, DTOs, HTTP routes and client filter.
   processes.getOwned = (id) => id === live.id ? live : null;
+  processes.getOwnedSlim = (id) => id === live.id ? { ...live, output: "", messages: undefined } : null;
   processes.listSlim = () => [live];
   const completions = new SessionCompletionTracker(storage, (id) => registry.getLatest(id));
   const app = express();
   app.use(express.json());
-  registerSessionRoutes(app, processes, structured, storage, config.defaultMode, config, registry);
+  registerSessionRoutes(app, { processes, structured, storage, defaultMode: config.defaultMode, config, sessions: registry });
   registerWorkspaceRoutes(app, storage, registry);
   const server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -54,7 +55,9 @@ test("foreground activity survives both HTTP projections and invalidates revisio
     type TaskPage = { unchanged?: boolean; revision: string; groups: TaskDirectoryGroup[] };
     const before = await get("/api/tasks?revision=initial") as TaskPage;
     const sessionsBefore = await get("/api/session-list");
-    assert.deepEqual(filterActiveGroups(before.groups), []);
+    // Active-only trims idle sessions, not the workspace roots used to start new work.
+    assert.deepEqual(filterActiveGroups(before.groups).map(({ workspaceId, tasks, standaloneSessions }) => ({ workspaceId, tasks, standaloneSessions })),
+      [{ workspaceId: workspace.id, tasks: [], standaloneSessions: [] }]);
     assert.equal((await get(`/api/tasks?revision=${before.revision}`)).unchanged, true);
     assert.equal((await get(`/api/session-list?revision=${sessionsBefore.revision}`)).unchanged, true);
 
@@ -80,7 +83,8 @@ test("foreground activity survives both HTTP projections and invalidates revisio
     completions.ingest({ type: "status", sessionId: live.id, data: { ptyCommandRunning: false } });
     const finished = await get(`/api/tasks?revision=${running.revision}`) as TaskPage;
     assert.equal(finished.unchanged, false);
-    assert.deepEqual(filterActiveGroups(finished.groups), []);
+    assert.deepEqual(filterActiveGroups(finished.groups).map(({ workspaceId, tasks, standaloneSessions }) => ({ workspaceId, tasks, standaloneSessions })),
+      [{ workspaceId: workspace.id, tasks: [], standaloneSessions: [] }]);
     assert.notEqual((await get(`/api/session-list?revision=${sessionsRunning.revision}`)).revision, sessionsRunning.revision);
     assert.equal(storage.getSessionCompletion(live.id)?.completionRevision ?? 0, 0, "foreground transitions are not a successful AI turn");
   } finally {

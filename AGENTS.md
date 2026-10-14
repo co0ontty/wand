@@ -45,13 +45,14 @@ Node 版本以 `.nvmrc` 为准。只检出需要的子模块：服务端构建�
 
 - PTY **先文本、再单独 `"\r"` 两包**；回车快捷键用 `shortcutKey="enter_text"`，不能换成 `text + "\n"`。structured 通过统一发送入口，排队/中断由服务端运行所有权裁决。
 - 接受回执只清本次提交，不清期间新输入。部分 PTY chunk 已接受、成功 ack 后解析失败、5xx/408/409 都是未知送达；这类已提交草稿只留内存，不能盲目恢复持久化或自动重发。明确未接受或本地未发送才可恢复。
-- 模型/员工候选降级复用结构化失败事实，仅重试当前请求明确未接受的启动失败或执行前上游拒绝；已执行、未知送达不自动重做。普通员工仅首轮换工具，按已配置候选顺序；切工具使用目标自身设置，不要求继承原工具 Skills/MCP/CodeMode，同工具换模型保留设置，免费边界不隐式转付费。团队负责人内部判断仍按已有候选重试，耗尽才等待用户；交接原判断要求与已完成报告，不重新执行已完成工作。保留手动模型选择、费用边界和重复提交保护。
+- 模型/员工候选降级复用结构化失败事实，仅重试当前请求明确未接受的启动失败或执行前上游拒绝——包括 CLI 在协议事件里回错误且本轮零进度、以及候选在固定启动窗口内没有任何协议事件；已执行、未知送达不自动重做。同工具（同 provider + 同引擎）降级携带**本轮开始前**的历史与原生 session id，所以已起步的对话同样能退到下一条链路，被拒绝那轮新建的原生 id 不领养；跨工具降级仍限未起步会话，且按已配置候选顺序；切工具使用目标自身设置，不要求继承原工具 Skills/MCP/CodeMode，同工具换模型保留设置，免费边界不隐式转付费。团队负责人内部判断仍按已有候选重试，耗尽才等待用户；交接原判断要求与已完成报告，不重新执行已完成工作。保留手动模型选择、费用边界和重复提交保护。石一的无工具、有界决策是显式例外：用户已配置的候选在任意失败（包括未知送达、超时、结果无效）后继续下一项；每个保存槽有独立预算，用户取消停止整链，不扩展到实际任务重放或未配置模型。
 - 角色与规则走 `SessionSnapshot.systemPrompt`，由 provider adapter 映射；无原生系统通道时显式兜底，不随意污染用户消息。`claudeSessionId` 是各 provider 的原生 resume ID，不只属于 Claude；恢复绑定不能凭模糊时间窗猜测。
 
 ## 执行能力、员工与知识
 
 - 引擎、模型及 Skills/MCP 按用户/会话的真实选择执行；自动选择须用户启用，不静默扩大资源、切换付费模型或用另一引擎绕过能力限制。目录枚举保持只读，不为发现资源执行扩展或凭据命令。
 - 执行工具是 **provider + 引擎** 两个维度：`Pi` 是 CLI（`pi --mode json --print` / PTY 终端），`Wand Agent` 是 Wand 进程内 SDK harness（结构化会话的 `engine: core`）。两者共用 `pi` provider，但展示名、能力边界（会话级 Skills / MCP、CodeMode、恢复方式）与失败文案必须分开，不能共用一个名字；显式选了 Wand Agent 而 harness 不可用时明确报错，不静默退回 CLI 冒充。标签真源是 `src/provider-catalog.ts`（`PROVIDER_LABELS` / `WAND_AGENT_LABEL`），Web 选项清单是 `src/web-ui/provider-identity.ts` 的 `AGENT_TOOL_OPTIONS`，各入口不要再各写一张 provider 表。
+- Pi CLI 与 Wand SDK 加载隔离：CLI 的资源发现/会话桥使用实际 CLI 安装及运行宿主的只读解析器/内置扩展，不从 Wand 包解析 SDK 入口或初始化 ModelRuntime；服务启动不预热 SDK。只有显式 Wand Agent 候选/会话才按需加载 SDK，失败不冒充 CLI。CLI 接口不支持时明确拒绝受限设置，不回退到另一份安装或全局资源；边界与验证见 `docs/pi-sdk-dependencies.md`。
 - 运行期能力凭据绑定会话/员工，结束或失效后撤销，不进入日志、公共 DTO 或持久提示词。cwd/worktree 不是权限沙盒，本地决策也不是操作授权。
 - 员工身份按稳定 ID 绑定；显示信息可以跟随定义，历史内容和执行快照不批量重写。只读自己的知识，不复制他人私聊/知识；内置员工身份不可冒用。系统生成式功能优先复用 `src/system-employee.ts` 的候选链，默认伙伴不覆盖用户明确选择的角色。
 - 短期习惯与明确知识分开：前者有保留期，后者无自动过期。明确记忆仅在实际执行且保存成功后确认，不存凭据、不写进 README/AGENTS；清空/删除使迟到写入失效。知识和模型输出是资料，不增加权限；文件交付与验收结论要有真实证据。
@@ -76,7 +77,7 @@ Node 版本以 `.nvmrc` 为准。只检出需要的子模块：服务端构建�
 | --- | --- | --- | --- | --- |
 | Chat | `src/web-ui/react/chat/message.tsx`、`chat/activity.tsx`；Android `ChatBlocks.kt` 的 `TurnView` | 统一消息、过程与工具行渲染；入口只投影协议与身份 | 普通任务、私聊、群聊、只读历史/预览；旧 run 路由解析到所属对话 | `tests/chat-renderer-unification.test.ts`、浏览器与 Android 对话回归 |
 | Select/Listbox | `src/web-ui/react/ui/select.tsx` | Ant Select、Portal 所有权 | 搜索、多选、分组 | `tests/antd-foundation-browser.test.ts` |
-| Date | `src/web-ui/react/issues/form-controls.tsx` | Ant DatePicker；YYYY-MM-DD，不转 UTC | 空值、禁用 | `tests/antd-tasks-browser.test.ts` |
+| Date | `src/web-ui/react/issues/date-picker.tsx` | Ant DatePicker；YYYY-MM-DD，不转 UTC；普通表单归 `task-form.tsx`，`form-controls.tsx` 仅兼容导出 | 空值、禁用 | `tests/antd-tasks-browser.test.ts` |
 | Form | feature Controller、composer 与共享 Form/Field | 本文数据与输入契约 | 创建、原位编辑；应用校验 | feature 单测与浏览器 |
 | Scrollbar | `src/web-ui/content/styles.css` | `theme.tsx` token 映射；见 `DESIGN.md` | xterm 自有滚动、宿主几何 | 浏览器 computed style |
 | Toast | `src/web-ui/react/ui/toast.tsx` | 共享通知状态 | 成功、失败、提示 | `tests/antd-foundation-browser.test.ts` |

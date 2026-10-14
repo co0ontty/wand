@@ -13,6 +13,7 @@ import {
 import { DECISION_MAX_OPTIONS, type DecisionResult } from "./decision-types.js";
 import { defaultMilestoneIdForWrite, scopedMilestoneId } from "./milestone-scope.js";
 import type { WandStorage } from "./storage.js";
+import { badRequest, HttpError } from "./http-error.js";
 import { provisionalTaskTitleFromDescription } from "./task-title.js";
 
 /** 团队页「直接开工」自动建卡的标记，与手写卡区分。 */
@@ -119,7 +120,7 @@ function chunksOf<T>(items: readonly T[], size: number): T[][] {
  */
 export async function planTeamDispatch(request: TeamDispatchRequest): Promise<TeamDispatchPlan> {
   const note = collapse(request.note ?? "", DISPATCH_NOTE_MAX);
-  if (!note) throw new Error("请先写清这次要做什么（开工说明不能为空）。");
+  if (!note) throw badRequest("请先写清这次要做什么（开工说明不能为空）。");
   const maxMembers = clampInteger(request.maxMembers, DISPATCH_MAX_MEMBERS_DEFAULT, AI_TEAM_MIN_MEMBERS, AI_TEAM_MAX_MEMBERS);  const threshold = clampProbability(request.threshold, DISPATCH_MIN_PROBABILITY_DEFAULT);
   const candidates = listTeamDispatchCandidates(request.storage);
   const considered = candidates.length;
@@ -237,7 +238,7 @@ export async function startTeamDispatch(request: TeamDispatchStartRequest): Prom
   run: unknown;
 }> {
   const note = collapse(request.note ?? "", DISPATCH_NOTE_MAX);
-  if (!note) throw new Error("请先写清这次要做什么（开工说明不能为空）。");
+  if (!note) throw badRequest("请先写清这次要做什么（开工说明不能为空）。");
   if (request.members.length < AI_TEAM_MIN_MEMBERS) throw new Error(`团队开工至少需要 ${AI_TEAM_MIN_MEMBERS} 名员工（含负责人）。`);
   if (request.members.length > AI_TEAM_MAX_MEMBERS) throw new Error(`临时派工最多 ${AI_TEAM_MAX_MEMBERS} 名员工。`);
   const workspace = request.storage.getWorkspace(request.workspaceId);
@@ -330,8 +331,10 @@ export function assertDispatchDecisionReady(decisions: {
   status(): { enabled: boolean; supported: boolean; configured: boolean; notice?: string | null };
 }): void {
   const status = decisions.status();
-  if ((!status.enabled || !status.supported || !status.configured) && status.notice) throw new Error(status.notice);
-  if (!status.enabled) throw new Error("本地决策未启用（localDecision.enabled=false），无法用决策模型选人。");
-  if (!status.supported) throw new Error("本地决策在当前平台不可用（首期只支持 macOS arm64），无法用决策模型选人。");
-  if (!status.configured) throw new Error("本地决策运行环境未配置（pythonPath / modelPath），无法用决策模型选人。");
+  if ((!status.enabled || !status.supported || !status.configured) && status.notice) {
+    throw new HttpError(503, "decision_unavailable", status.notice);
+  }
+  if (!status.enabled) throw new HttpError(503, "decision_unavailable", "本地决策未启用（localDecision.enabled=false），无法用决策模型选人。");
+  if (!status.supported) throw new HttpError(503, "decision_unavailable", "本地决策在当前平台不可用（首期只支持 macOS arm64），无法用决策模型选人。");
+  if (!status.configured) throw new HttpError(503, "decision_unavailable", "本地决策运行环境未配置（pythonPath / modelPath），无法用决策模型选人。");
 }

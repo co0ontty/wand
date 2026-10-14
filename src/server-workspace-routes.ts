@@ -1,3 +1,6 @@
+import { canArchiveTask } from "./task-archive-policy.js";
+import { TaskReadModel } from "./task-read-model.js";
+import { isArchiveBlocked } from "./archive-policy.js";
 import path from "node:path";
 import crypto from "node:crypto";
 import { existsSync, statSync } from "node:fs";
@@ -16,15 +19,18 @@ import type { SessionRegistry } from "./session-registry.js";
 import type { WandStorage } from "./storage.js";
 import type { AiTeamRunChatMarker, AiTeamStepSessionMarker } from "./ai-team-types.js";
 import { collectSessionTopicBlocklist } from "./session-topic.js";
+import { compactTransportAvatar } from "./fixed-employee-avatar.js";
 import { resolveSessionDisplayTitle } from "./session-transport.js";
 import { type LayoutNode, type PaneTab, type SessionSnapshot, type TaskWindowLayout, type Workspace, type WorkspaceDefaultProvider, type WorkspaceTask, type WorkspaceTaskWorktree } from "./types.js";
-import { attachUnboundSessionsToWorkspace, backfillSessionWorkspaces, normalizeProjectCwd, projectCwdForSession, isGlobalWorkspace, syncDirectoryNameForWorkspace } from "./workspace-binding.js";
+import { attachUnboundSessionsToWorkspace, normalizeProjectCwd, projectCwdForSession, isGlobalWorkspace, syncDirectoryNameForWorkspace } from "./workspace-binding.js";
 import { defaultMilestoneIdForWrite, resolvedMilestoneFields, scopedMilestoneId } from "./milestone-scope.js";
 import { isUnnamedWorkspaceTaskName, UNNAMED_WORKSPACE_TASK_NAME } from "./wand-task-sync.js";
 import { isSessionProvider } from "./session-provider.js";
 import { firstLayoutTabId } from "./layout-tree.js";
-import { parentTaskIdFrom, refreshAutoBoardTaskTitles, type AutoTaskTitleOptions } from "./server-task-routes.js";
+import { parentTaskIdFrom } from "./task-agent-parsing.js";
+import { taskTitleService, refreshAutoBoardTaskTitles, type AutoTaskTitleOptions } from "./task-title-service.js";
 import { provisionalTaskTitleFromDescription } from "./task-title.js";
+import { badRequest, surfaceDomainError } from "./http-error.js";
 
 function workspaceSessionTitle(
   session: SessionSnapshot,
@@ -41,7 +47,7 @@ function liveSession(
   session: SessionSnapshot,
   registry?: SessionRegistry,
 ): SessionSnapshot {
-  return registry?.getLatest(session.id) ?? session;
+  return registry?.getSlim(session.id) ?? session;
 }
 
 function workspaceSessionSummary(
@@ -56,6 +62,7 @@ function workspaceSessionSummary(
     provider: live.provider,
     sessionKind: live.sessionKind,
     runner: live.runner,
+    engine: live.structuredState?.engine,
     command: live.command,
     title: team.chat?.chatTitle ?? workspaceSessionTitle(live, names),
     status: live.status,
@@ -68,11 +75,12 @@ function workspaceSessionSummary(
     providerCliActive: live.providerCliActive,
     providerCliExitCode: live.providerCliExitCode,
     inFlight: live.structuredState?.inFlight === true,
+    canArchive: !isArchiveBlocked(live),
     cwd: live.cwd,
     startedAt: live.startedAt,
     employeeId: live.employeeId,
     employeeName: live.employeeName,
-    employeeAvatar: live.employeeAvatar,
+    employeeAvatar: compactTransportAvatar(live.employeeAvatar),
     ...(team.chat ? { teamChat: team.chat } : {}),
     ...(team.step ? { teamStep: team.step } : {}),
   };
@@ -98,34 +106,6 @@ function teamMarkersFor(
   if (chat) return { chat };
   const step = markers.step.get(sessionId);
   return step ? { step } : {};
-}
-
-function cheapTasksRevision(storage: WandStorage, registry?: SessionRegistry, includeArchived = false): string {
-  const fingerprint = [
-    // Invalidate pre-filter client caches even if no stored row has changed.
-    "visible-sessions-v2",
-    includeArchived,
-    storage.tasksAggregateFingerprint(),
-    // 团队标记（群聊入口、成员步骤与运行状态）也在列表里。
-    storage.teamSessionFingerprint(),
-    // 排序只更新偏好，不改变任务和会话；轮询 revision 也必须跟着变化。
-    storage.getWorkspaceGroupOrder(),
-    ...(registry?.listSlim() ?? []).map((session) => [
-      session.id,
-      session.status,
-      session.completionRevision ?? 0,
-      session.viewedCompletionRevision ?? 0,
-      session.archived === true ? 1 : 0,
-      session.ptyBusy === true ? 1 : 0,
-      session.ptyCommandRunning === true ? 1 : 0,
-      session.providerCliActive ? 1 : 0,
-      session.structuredState?.inFlight === true ? 1 : 0,
-      session.title ?? "",
-      session.workspaceId ?? "",
-      session.workspaceTaskId ?? "",
-    ]),
-  ];
-  return crypto.createHash("sha256").update(JSON.stringify(fingerprint)).digest("base64url");
 }
 
 /**
@@ -179,10 +159,10 @@ function parseDefaultProvider(value: unknown): WorkspaceDefaultProvider | undefi
 /** Resolve + validate a workspace cwd: expand home, require an existing directory. */
 function resolveWorkspaceCwd(raw: unknown): string {
   const expanded = expandHomePath(typeof raw === "string" ? raw : "");
-  if (!expanded.trim()) throw new Error("请选择项目目录。");
+  if (!expanded.trim()) throw badRequest("请选择项目目录。");
   const resolved = path.resolve(expanded);
-  if (!existsSync(resolved)) throw new Error(`目录不存在：${resolved}`);
-  if (!statSync(resolved).isDirectory()) throw new Error(`不是目录：${resolved}`);
+  if (!existsSync(resolved)) throw badRequest(`目录不存在：${resolved}`);
+  if (!statSync(resolved).isDirectory()) throw badRequest(`不是目录：${resolved}`);
   return resolved;
 }
 
@@ -237,7 +217,7 @@ function createTaskForWorkspace(
   // 迭代按工作区归属：项目里的任务只能挂本项目或全局的迭代（详见 milestone-scope.ts）。
   const requestedMilestoneId = typeof body.milestoneId === "string" ? body.milestoneId.trim() : "";
   if (requestedMilestoneId && !storage.getWandMilestone(requestedMilestoneId)) {
-    throw new Error("未找到该里程碑。");
+    throw badRequest("未找到该里程碑。");
   }
   const milestoneId = scopedMilestoneId(
     storage,
@@ -250,7 +230,7 @@ function createTaskForWorkspace(
   }
   if (mountedCwd && !isGlobalWorkspace(workspace)
     && normalizeProjectCwd(mountedCwd) !== normalizeProjectCwd(workspace.cwd)) {
-    throw new Error("任务目录与所属项目不一致，请先选择对应项目，或创建独立任务。");
+    throw badRequest("任务目录与所属项目不一致，请先选择对应项目，或创建独立任务。");
   }
   const baseRef = typeof body.baseRef === "string" && body.baseRef.trim() ? body.baseRef.trim() : undefined;
   const runCwd = mountedCwd ?? workspace.cwd;
@@ -400,9 +380,9 @@ export function registerWorkspaceRoutes(
   sessions?: SessionRegistry,
   titleOptions: AutoTaskTitleOptions = {},
 ): void {
+  taskTitleService(storage, titleOptions);
   // 列出所有项目（按创建时间降序：新建在前，打开不会改位置）
   app.get("/api/workspaces", (req, res) => {
-    backfillSessionWorkspaces(storage);
     const includeArchived = req.query.includeArchived === "1";
     const sessionCounts = storage.countSessionsByWorkspace({ includeArchived });
     res.json(storage.listWorkspaces()
@@ -433,19 +413,18 @@ export function registerWorkspaceRoutes(
     res.status(201).json(workspaceWithCounts(storage, workspace));
   }));
 
-  // 项目详情：meta + 会话 + 布局；访问即更新 lastOpenedAt
+  // 项目详情：meta + 会话 + 布局；纯投影，不把读取当成用户已打开。
   app.get("/api/workspaces/:id", (req, res) => {
     const workspace = storage.getWorkspace(req.params.id);
     if (!workspace) {
       res.status(404).json({ error: "未找到该项目。" });
       return;
     }
-    storage.touchWorkspace(workspace.id);
     const includeArchived = req.query.includeArchived === "1";
     const archivedTaskIds = new Set(storage.listWorkspaceTasks(workspace.id)
       .filter((task) => task.archived).map((task) => task.id));
     const teamMarkers = teamSessionMarkers(storage);
-    const visibleSessions = storage.listSessionsByWorkspace(workspace.id).map((session) => ({
+    const visibleSessions = storage.listSessionsByWorkspaceSlim(workspace.id).map((session) => ({
       ...workspaceSessionSummary(
         session, { workspaceName: workspace.name }, sessions, teamMarkersFor(teamMarkers, session.id),
       ),
@@ -566,30 +545,17 @@ export function registerWorkspaceRoutes(
         worktreeError: created.worktreeError,
       });
     } catch (error) {
-      sendRouteError(res, error, "创建任务失败。");
+      sendRouteError(res, surfaceDomainError(error, /Git 仓库/) ?? error, "创建任务失败。");
     }
   }));
 
   // 目录组为一级容器的任务聚合列表，供侧栏「任务」视图一次拉全。
   app.get("/api/tasks", (req, res) => {
-    // 侧栏轮询也在补自动标题：不打开看板的任务（以及新增会话后的改名）也要吃到。
-    try {
-      refreshAutoBoardTaskTitles(storage, titleOptions);
-    } catch (error) {
-      console.error("[WandTask] Failed to refresh auto task titles:", getErrorMessage(error));
-    }
     // 查询参数：workspaceId 过滤单目录；limit 截断每目录任务数；
     // maxSessions 截断每任务内嵌会话数（大数据量时控制响应体积）。
     const includeArchived = req.query.includeArchived === "1";
     const hasRevisionQuery = typeof req.query.revision === "string";
     const requestedRevision = hasRevisionQuery ? req.query.revision : "";
-    if (hasRevisionQuery && requestedRevision) {
-      const cheap = cheapTasksRevision(storage, sessions, includeArchived);
-      if (requestedRevision === cheap) {
-        res.json({ unchanged: true, revision: cheap, groups: [] });
-        return;
-      }
-    }
     const workspaceFilter = typeof req.query.workspaceId === "string" ? req.query.workspaceId : "";
     const parseBoundedCount = (raw: unknown): number | null => {
       const value = Number(raw);
@@ -597,14 +563,20 @@ export function registerWorkspaceRoutes(
     };
     const taskLimit = parseBoundedCount(req.query.limit);
     const sessionLimit = parseBoundedCount(req.query.maxSessions);
-    backfillSessionWorkspaces(storage);
-    // 目录组只需要会话元数据：用 slim 读，否则每次轮询都要把每个会话的
-    // messages 大字段 JSON 解析一遍（单会话可达十几 MB，整表 ~30MB）。
-    const allSessions = storage.loadSessionsSlim();
-    const liveArchiveFlags = new Map((sessions?.listSlim() ?? []).map((session) => [session.id, session.archived]));
-    const sessionVisible = (session: SessionSnapshot): boolean => includeArchived
-      || !(liveArchiveFlags.get(session.id) ?? session.archived);
-    const workspaces = storage.listWorkspaces();
+    const snapshots = sessions?.listSlim();
+    const revision = crypto.createHash("sha256").update(JSON.stringify({
+      storage: storage.projectionRevision(),
+      query: { includeArchived, workspaceFilter, taskLimit, sessionLimit },
+      runtime: snapshots,
+    })).digest("base64url");
+    if (hasRevisionQuery && requestedRevision === revision) {
+      res.json({ unchanged: true, revision, groups: [] });
+      return;
+    }
+    const model = new TaskReadModel(storage, sessions, snapshots);
+    const allSessions = model.sessions;
+    const sessionVisible = (session: SessionSnapshot): boolean => includeArchived || !session.archived;
+    const workspaces = [...model.workspaces.values()];
     // 目录组为一级容器：任务归属目录；未绑定任务的会话以 standaloneSessions
     // 归入所在目录的组（含无项目的合成组），保证没有会话在任务视图里失联。
     interface TaskDirectoryGroup {
@@ -622,7 +594,7 @@ export function registerWorkspaceRoutes(
     const summarize = (
       session: SessionSnapshot,
       names: { taskName?: string; workspaceName?: string } = {},
-    ) => workspaceSessionSummary(session, names, sessions, teamMarkersFor(teamMarkers, session.id));
+    ) => workspaceSessionSummary(session, names, undefined, teamMarkersFor(teamMarkers, session.id));
     // 目录自定义名（工作区名称）：没有项目实体的合成目录也按这个名字显示。
     const directoryNames = storage.listSessionDirectoryNames();
     const customNameForCwd = (cwd: string): string | undefined => {
@@ -666,18 +638,9 @@ export function registerWorkspaceRoutes(
       groups.set(id, created);
       return created;
     };
-    const tasksByWorkspace = new Map(workspaces.map((workspace) => [
-      workspace.id, storage.listWorkspaceTasks(workspace.id),
-    ]));
-    const sessionsByTask = new Map<string, SessionSnapshot[]>();
-    const taskSessions = (taskId: string): SessionSnapshot[] => {
-      let snapshots = sessionsByTask.get(taskId);
-      if (!snapshots) {
-        snapshots = storage.listSessionsByWorkspaceTaskSlim(taskId);
-        sessionsByTask.set(taskId, snapshots);
-      }
-      return snapshots;
-    };
+    const tasksByWorkspace = new Map<string, WorkspaceTask[]>(workspaces.map(workspace => [workspace.id, []]));
+    for (const task of storage.listAllWorkspaceTasks()) tasksByWorkspace.get(task.workspaceId)?.push(task);
+    const taskSessions = (taskId: string): SessionSnapshot[] => model.sessionsByTask.get(taskId) ?? [];
     const appendTask = (
       target: TaskDirectoryGroup,
       workspace: Workspace,
@@ -692,8 +655,8 @@ export function registerWorkspaceRoutes(
         }));
       target.tasks.push({
         ...task,
-        // 没单独指定迭代的任务读作默认迭代（id 与名字成对）。
-        ...resolvedMilestoneFields(storage, task.milestoneId),
+        canArchive: (() => { const card = model.cardsByContainer.get(task.id); return card ? model.canArchive(card) : true; })(),
+        ...model.milestone(task.milestoneId),
         cwd: taskRuntimeCwd(task, workspace),
         isolated: task.worktree !== null,
         sessions,
@@ -772,7 +735,7 @@ export function registerWorkspaceRoutes(
       .filter((group) => !group.global || group.tasks.length > 0 || group.standaloneSessions.length > 0);
     const payload = sortTaskDirectoryGroups(orderedGroups, storage.getWorkspaceGroupOrder());
     if (hasRevisionQuery) {
-      res.json({ unchanged: false, revision: cheapTasksRevision(storage, sessions, includeArchived), groups: payload });
+      res.json({ unchanged: false, revision, groups: payload });
       return;
     }
     res.json(payload);
@@ -813,6 +776,7 @@ export function registerWorkspaceRoutes(
       .filter((task) => req.query.includeArchived === "1" || !task.archived)
       .map((task) => ({
         ...task,
+        canArchive: (() => { const card = storage.getWandTaskByWorkspaceTaskId(task.id); return card ? canArchiveTask(storage, sessions, card.id) : true; })(),
         ...resolvedMilestoneFields(storage, task.milestoneId),
       })));
   });
@@ -917,18 +881,17 @@ export function registerWorkspaceRoutes(
         worktreeError: created.worktreeError,
       });
     } catch (error) {
-      sendRouteError(res, error, "创建任务失败。");
+      sendRouteError(res, surfaceDomainError(error, /Git 仓库/) ?? error, "创建任务失败。");
     }
   }));
 
-  // 任务详情：meta + 该任务下的会话；访问即更新 lastOpenedAt
+  // 任务详情：meta + 该任务下的会话；后台预取/轮询不改活动时间。
   app.get("/api/workspace-tasks/:taskId", (req, res) => {
     const task = storage.getWorkspaceTask(req.params.taskId);
     if (!task) {
       res.status(404).json({ error: "未找到该任务。" });
       return;
     }
-    storage.touchWorkspaceTask(task.id);
     const workspace = storage.getWorkspace(task.workspaceId);
     const teamMarkers = teamSessionMarkers(storage);
     res.json({
@@ -994,6 +957,11 @@ export function registerWorkspaceRoutes(
     const existing = storage.getWorkspaceTask(req.params.taskId);
     if (!existing) {
       res.status(404).json({ error: "未找到该任务。" });
+      return;
+    }
+    const card = storage.getWandTaskByWorkspaceTaskId(existing.id);
+    if (card && !canArchiveTask(storage, sessions, card.id)) {
+      res.status(409).json({ error: "任务尚未完成或仍有执行，完成后才能归档。" });
       return;
     }
     storage.archiveWorkspaceTask(existing.id);

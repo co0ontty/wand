@@ -66,7 +66,7 @@ async function startApp(root: string): Promise<{
   const sessions = new SessionRegistry(processes, structured, storage);
   const app = express();
   app.use(express.json());
-  registerSessionRoutes(app, processes, structured, storage, config.defaultMode, config, sessions);
+  registerSessionRoutes(app, { processes, structured, storage, defaultMode: config.defaultMode, config, sessions });
   registerWorkspaceRoutes(app, storage, sessions);
   app.use(jsonErrorHandler);
   const server = createServer(app);

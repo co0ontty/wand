@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { wandTheme } from "../src/web-ui/react/theme.js";
 import { foundationStyles } from "../src/web-ui/react/styles/base.js";
 import {
   MOTION_DWELL_FAILED_MS,
@@ -21,7 +22,8 @@ test("login and shared controls use the approved warm library theme", () => {
   const theme = readFileSync(new URL("../src/web-ui/react/theme.tsx", import.meta.url), "utf8");
   const button = readFileSync(new URL("../src/web-ui/react/ui/button.tsx", import.meta.url), "utf8");
   const login = readFileSync(new URL("../src/web-ui/react/login/host.tsx", import.meta.url), "utf8");
-  assert.match(theme, /colorPrimary: "#b8562f"/);
+  assert.equal(wandTheme.token?.colorPrimary, "#b8562f");
+  assert.match(theme, /paletteThemeConfig/);
   assert.match(button, /<Button/);
   assert.match(login, /<Input.Password/);
   assert.match(login, /<Button id="login-button" type="primary"/);
@@ -35,7 +37,8 @@ test("sidebar and login share the approved Ant theme owner", () => {
   assert.match(shell, /<WandUiProvider>/);
   assert.match(sidebar, /<Layout.Sider/);
   assert.match(sidebar, /theme="light"/);
-  assert.match(theme, /Layout: \{ siderBg: "#f4f0e9"/);
+  assert.equal(wandTheme.components?.Layout?.siderBg, "#f4f0e9");
+  assert.match(theme, /paletteThemeConfig/);
   assert.doesNotMatch(styles, /--web-sidebar-/);
 });
 
@@ -72,7 +75,9 @@ test("web sidebar uses a persistent icon rail, profile settings and a separate s
   assert.ok(sidebar.indexOf("<ConversationNavigation") < sidebar.indexOf("sidebar-list-panel"));
   assert.ok(sidebar.indexOf('id="drawer-new-session-button"') < sidebar.indexOf('className="sidebar-body"'));
   assert.match(navigation, /component="nav" vertical/);
-  for (const label of ["对话", "工作区", "任务看板", "团队", "通讯录"]) assert.ok(navigation.includes(`label: "${label}"`));
+  for (const label of ["对话", "工作区", "任务看板", "团队"]) assert.ok(navigation.includes(`label: "${label}"`));
+  assert.ok(!navigation.includes('label: "通讯录"'));
+  assert.match(sidebar, /员工与通讯录/);
   assert.match(navigation, /<Badge count=\{teamAttention\}/);
   assert.match(tree, /paddingInlineStart: 8.*className="workspace-tasks"/);
   assert.match(tree, /<Badge dot=\{glow !== "none"\}/);

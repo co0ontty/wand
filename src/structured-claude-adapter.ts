@@ -7,7 +7,9 @@ import { startStructuredCli } from "./structured-exec-pump.js";
 import type { StructuredExecHost } from "./structured-exec-host.js";
 import { buildLanguageDirective, buildManagedAutonomyDirective } from "./language-prompt.js";
 import { thinkingEffortToClaudeCliEffort } from "./structured-provider-common.js";
+import { createNdjsonLineHandler } from "./structured-ndjson.js";
 import { ClaudeCliProtocolReducer } from "./structured-claude-protocol.js";
+import { cliUnacceptedFacts } from "./structured-failure.js";
 import type {
   StructuredRunnerAdapter,
   StructuredRunnerContext,
@@ -166,6 +168,7 @@ export class ClaudeCliRunner implements StructuredRunnerAdapter {
     const reducer = new ClaudeCliProtocolReducer(context.session);
     let killedForQuestion = false;
     let stdoutTail = "";
+    let unparsedStdout = false;
     return startStructuredCli({
       sessionId: context.session.id,
       file: "claude",
@@ -176,23 +179,19 @@ export class ClaudeCliRunner implements StructuredRunnerAdapter {
       observer,
       execHost: this.execHost,
       createState: () => reducer.state,
-      processLine: (line, ctx) => {
-        if (!observer.isActive()) return;
-        const trimmed = line.trim();
-        if (!trimmed) return;
-        let event: unknown;
-        try { event = JSON.parse(trimmed); } catch { return; }
-        if (event && typeof event === "object" && !Array.isArray(event)) {
-          observer.onEvent?.(event as Record<string, unknown>);
-        }
-        if (reducer.apply(event, context.session.mode === "managed")) {
-          observer.onUpdate(reducer.state);
-        }
-        if (reducer.askUserQuestionDetected && !killedForQuestion) {
-          killedForQuestion = true;
-          ctx.requestStop();
-        }
-      },
+      processLine: createNdjsonLineHandler({
+        observer,
+        onUnparsed: () => { unparsedStdout = true; },
+        handleEvent: (event, ctx) => {
+          if (reducer.apply(event, context.session.mode === "managed")) {
+            observer.onUpdate(reducer.state);
+          }
+          if (reducer.askUserQuestionDetected && !killedForQuestion) {
+            killedForQuestion = true;
+            ctx.requestStop();
+          }
+        },
+      }),
       onStdoutText: (text) => {
         const trimmed = text.trim();
         if (trimmed) stdoutTail = trimmed.slice(-1024);
@@ -206,6 +205,15 @@ export class ClaudeCliRunner implements StructuredRunnerAdapter {
         primaryError: reducer.errorText,
         stopReason: killedForQuestion ? "ask-user-question" : undefined,
         spawnError,
+        ...cliUnacceptedFacts({
+          state: reducer.state,
+          primaryError: reducer.errorText,
+          protocolError: reducer.errorResultObserved,
+          unparsedStdout,
+          signal,
+          progressed: reducer.assistantWorkObserved,
+          ...(spawnError ? { spawnError } : {}),
+        }),
       }),
     });
   }

@@ -2,6 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createRealtimeRenderHarness, createRealtimeSessionHarness, jsonValue, textTurn } from "./helpers/realtime-refresh-harness.js";
 
+test("background session creation immediately refreshes the shared workspace list", () => {
+  const h = createRealtimeSessionHarness();
+  h.state.sessions = [{ id: "A", sessionKind: "structured", messages: [] }];
+  const initial = h.taskChanges();
+  h.send({ type: "started", sessionId: "scheduled-session", data: { sessionKind: "structured" } });
+  assert.equal(h.taskChanges(), initial + 1, "the timer's minimal started event invalidates the authoritative workspace projection");
+  assert.equal(h.state.sessions.some((session: any) => session.id === "scheduled-session"), true);
+  assert.equal(h.state.selectedId, "A", "background work does not take over the selected chat");
+});
+
 for (const [name, initial, revised] of [
   ["text", { type: "text", text: "AAAA" }, { type: "text", text: "BBBB" }],
   ["thinking", { type: "thinking", thinking: "AAAA" }, { type: "thinking", thinking: "BBBB" }],
@@ -37,16 +47,18 @@ test("R01/R02: equal additions and removals cannot cancel semantic changes", () 
   assert.match(h.bodyAt(0), /"text":"a"/); assert.match(h.bodyAt(1), /bbbbb/);
 });
 
-test("completion, errors and equal-sum usage values invalidate the affected row", () => {
+test("completion and errors invalidate the affected row", () => {
   const h = createRealtimeRenderHarness(); h.setMessages([textTurn("done", "assistant", { usage: { inputTokens: 2, outputTokens: 3 } })]); h.chat.doRenderChat(false);
   h.setMessages([textTurn("done", "assistant", { completedAt: "2026-09-30T00:01:00Z", error: "failed", usage: { inputTokens: 3, outputTokens: 2 } })]);
   h.chat.doRenderChat(false); assert.match(h.bodyAt(0), /00:01:00Z/); assert.match(h.bodyAt(0), /failed/); assert.match(h.bodyAt(0), /"inputTokens":3/);
 });
 
-test("a changed earlier usage updates the last assistant cumulative usage in the round", () => {
+test("a usage change repaints only its own row", () => {
   const h = createRealtimeRenderHarness(); const old = [textTurn("q", "user"), textTurn("a", "assistant", { usage: { outputTokens: 2 } }), ...Array.from({ length: 8 }, () => textTurn("tail"))];
-  h.setMessages(old); h.chat.doRenderChat(false); const next = old.slice(); next[1] = textTurn("a", "assistant", { usage: { outputTokens: 7 } });
-  h.setMessages(next); h.chat.doRenderChat(false); assert.match(h.bodyAt(9), /"outputTokens":7/);
+  h.setMessages(old); h.chat.doRenderChat(false); h.rendered.length = 0;
+  const next = old.slice(); next[1] = textTurn("a", "assistant", { usage: { outputTokens: 7 } });
+  h.setMessages(next); h.chat.doRenderChat(false);
+  assert.deepEqual(h.rendered, [1], "usage no longer accumulates onto the last reply of the round");
 });
 
 test("a cross-turn tool result revision updates its older tool-use row", () => {

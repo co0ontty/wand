@@ -1,5 +1,5 @@
 import { browserButtonKey, isBrowserButtonPair, patchBrowserButton } from "./library-buttons.js";
-import { patchChatPresentation, presentChat } from "../react/chat/presentation.js";
+import { patchChatPresentation, presentChat } from "../react/chat/presentation-runtime.js";
 import { state } from "./state.js";
 
 /** DOM-only interaction ownership. No draft, selection, submit or scroll state store. */

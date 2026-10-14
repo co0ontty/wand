@@ -1,12 +1,10 @@
-import { execFile } from "node:child_process";
-import { buildChildEnv, systemEnvValue } from "./env-utils.js";
+import { systemEnvValue } from "./env-utils.js";
+import { runCommand } from "./run-command.js";
 
 export interface SpeechSupport { supported: boolean; reason: string | null; }
 
 function available(command: string, args = ["--version"]): Promise<boolean> {
-  return new Promise((resolve) => {
-    execFile(command, args, { env: buildChildEnv(true), timeout: 5000, maxBuffer: 16_384, windowsHide: true }, (error) => resolve(!error));
-  });
+  return runCommand(command, args, { timeout: 5000, maxBuffer: 16_384 }).then((result) => result.ok);
 }
 
 /** Fixed, read-only tool probes; never install anything during status polling. */

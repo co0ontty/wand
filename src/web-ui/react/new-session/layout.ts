@@ -2,17 +2,19 @@ import { installStyleSheet } from "../styles.js";
 
 /** Form geometry only; the shared Ant controls and theme own interactive states. */
 if (typeof document !== "undefined") installStyleSheet("wand-new-session-layout", String.raw`
-.wand-new-session-library-dialog .ant-modal-body { scroll-padding-top: 180px; scroll-padding-bottom: 64px; }
+.wand-new-session-library-dialog .ant-modal-body { scroll-padding-bottom: 64px; }
 .wand-new-session-summary {
-  position: sticky; top: 0; z-index: 2; padding: 10px 0;
-  background: var(--bg-elevated); border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 16px; border-bottom: 1px solid var(--border-subtle);
 }
 .wand-new-session-summary dl { display: grid; gap: 4px; margin: 0; font-size: 12px; }
 .wand-new-session-summary dl > div { display: grid; grid-template-columns: 60px minmax(0, 1fr); gap: 8px; }
 .wand-new-session-summary dt { color: var(--text-secondary); }
 .wand-new-session-summary dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .wand-new-session-summary .wand-new-session-permission-warning { color: var(--danger); }
-.wand-new-session-summary .wand-new-session-permission-detail { margin: 6px 0 0; font-size: 12px; line-height: 1.5; }
+.wand-new-session-summary .wand-new-session-permission-detail { margin: 4px 0 0; font-size: 12px; line-height: 1.5; }
+.wand-new-session-permission-context dl { margin-bottom: 8px; }
+.wand-new-session-subject-collapse .ant-collapse-header-text { min-width: 0; }
+.wand-new-session-summary .ant-segmented { min-height: 36px; }
 .wand-new-session-library-dialog .ant-input-affix-wrapper,
 .wand-new-session-library-dialog .ant-input:not(.ant-input-affix-wrapper .ant-input),
 .wand-new-session-library-dialog .wand-ui-select-trigger { min-height: 36px; }

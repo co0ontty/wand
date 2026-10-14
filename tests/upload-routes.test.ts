@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -71,9 +71,41 @@ test("upload rejects missing sessions and invalid working directories", async (t
   const { url } = await harness(t);
   const missing = await upload(url, "missing", "note.txt");
   assert.equal(missing.status, 404);
-  assert.deepEqual(await missing.json(), { error: "会话不存在。" });
+  assert.deepEqual(await missing.json(), { error: "会话不存在。", code: "not_found" });
 
   const invalid = await upload(url, "bad-cwd", "note.txt");
   assert.equal(invalid.status, 400);
-  assert.deepEqual(await invalid.json(), { error: "会话工作目录无效。" });
+  assert.deepEqual(await invalid.json(), { error: "会话工作目录无效。", code: "bad_request" });
+});
+
+test("upload directory quota rejects overflow and removes the rejected files", async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-upload-quota-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const cwd = path.join(root, "project");
+  mkdirSync(cwd, { recursive: true });
+  const app = express();
+  registerUploadRoutes(app, {
+    getLatest(id) {
+      return id === "quota" ? { id, cwd } as never : null;
+    },
+  }, { maxDirBytes: 64 });
+  app.use(jsonErrorHandler);
+  const server = app.listen(0, "127.0.0.1");
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  await new Promise<void>((resolve) => server.once("listening", () => resolve()));
+  const { port } = server.address() as { port: number };
+  const url = `http://127.0.0.1:${port}`;
+  const send = (size: number) => {
+    const form = new FormData();
+    form.append("files", new Blob([Buffer.alloc(size, 97)]), "blob.txt");
+    return fetch(`${url}/api/sessions/quota/upload`, { method: "POST", body: form });
+  };
+
+  const first = await send(40);
+  assert.equal(first.status, 200);
+  const second = await send(40);
+  assert.equal(second.status, 413);
+  assert.equal((await second.json() as { code: string }).code, "payload_too_large");
+  const stored = readdirSync(path.join(cwd, ".wand-uploads"));
+  assert.equal(stored.length, 1, "rejected upload is not left on disk");
 });

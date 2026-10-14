@@ -70,8 +70,10 @@ sudo() { return 1; }
   assert.equal(result.status, 1);
   assert.match(result.stderr, /权限异常.*当前环境不能输入 sudo 密码/);
   assert.equal(result.mode, 0o700);
-  const preflight = startScript.indexOf('[[ "$DO_INSTALL" != "1" ]] || repair_global_package_permissions');
-  assert.ok(preflight > 0 && preflight < startScript.indexOf('PACKAGE_VERSION="'));
+  const preflight = startScript.indexOf('if [[ "$ACTION" == "install-and-restart" && "$DO_INSTALL" == "1" ]]');
+  const acquire = startScript.indexOf('*) acquire_deployment_locks ;;');
+  assert.ok(preflight > acquire && preflight < startScript.indexOf('PACKAGE_VERSION="'));
+  assert.ok(acquire > 0, "the global lock must also guard permission repair");
 });
 
 test("sudo start hands packages back to the original user even with a private umask", () => {
@@ -88,4 +90,21 @@ umask 077
   assert.match(result.stdout, /chown -R 501:20 /);
   assert.equal(result.mode, 0o755);
   assert.match(startScript, /\(umask 022; "\$NPM_FOR_WAND" install -g/);
+});
+
+test("start reports a mismatched Beta version without absorbing Chinese punctuation into a Bash variable", () => {
+  const verify = startScript.match(/verify_installed_beta\(\) \{[\s\S]*?\n\}/)?.[0];
+  assert.ok(verify);
+  const result = spawnSync("/bin/bash", ["-c", `set -euo pipefail
+DEV_VERSION=expected-beta
+installed_version() { echo observed-beta; }
+die() { printf '%s\\n' "$*" >&2; exit 1; }
+${verify}
+verify_installed_beta
+`], { encoding: "utf8" });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /期望 expected-beta，实际 observed-beta/);
+  assert.doesNotMatch(result.stderr, /unbound variable/);
+  assert.doesNotMatch(startScript, /\$[A-Za-z_][A-Za-z0-9_]*[，。；：、（）\p{Script=Han}]/u,
+    "brace interpolation before non-ASCII punctuation in every diagnostic path");
 });

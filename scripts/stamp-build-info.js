@@ -34,6 +34,12 @@ function gitCommit() {
 }
 
 function pkgVersion() {
+  // Local deployment passes an immutable build identity instead of rewriting shared metadata.
+  const override = process.env.WAND_BUILD_VERSION;
+  if (override !== undefined) {
+    if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(override)) throw new Error("Invalid WAND_BUILD_VERSION");
+    return override;
+  }
   try {
     return JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")).version ?? null;
   } catch {

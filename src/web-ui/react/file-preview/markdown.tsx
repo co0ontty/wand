@@ -1,7 +1,12 @@
 import * as React from "react";
 import type { ReactNode } from "react";
+import { messageFileTarget, type MessageFileContext as FileContext } from "../../message-file-target.js";
+import { InlineHtmlPreview } from "../local-preview/inline";
+
+export const MessageFileContext = React.createContext<FileContext>({});
 import { localFilePreviewHref, localHttpPreviewHref, localPreviewController } from "../local-preview/controller";
 import { classNames } from "../ui/class-names";
+import { openMessageImage } from "../image-viewer/gallery";
 import { parseFilePreviewMarkdown, tokenizeFilePreviewCode } from "./model";
 import type {
   FilePreviewCodeToken,
@@ -26,6 +31,7 @@ function MarkdownInline({ tokens, renderText }: {
 }) {
   // 纯文本片段的自定义渲染（群聊用它保留 @成员名 token）；不传就是原样文本。
   const text = (value: string): ReactNode => renderText ? renderText(value) : value;
+  const fileContext = React.useContext(MessageFileContext);
   return (
     <>
       {tokens.map((token, index): ReactNode => {
@@ -35,6 +41,10 @@ function MarkdownInline({ tokens, renderText }: {
           case "emphasis": return <em key={index}>{text(token.value)}</em>;
           case "delete": return <del key={index}>{text(token.value)}</del>;
           case "link": {
+            const file = messageFileTarget(token.url, fileContext);
+            if (file?.previewUrl) return <InlineHtmlPreview key={index} previewUrl={file.previewUrl} downloadUrl={file.downloadUrl} label={token.value}/>;
+            if (file) return <a key={index} href={file.downloadUrl}>{text(token.value)}</a>;
+            if (!/^(?:https?:|mailto:|#|\/)/i.test(token.url)) return <React.Fragment key={index}>{text(token.value)}</React.Fragment>;
             const isServerHtmlPath = token.url.startsWith("/") && /\.(?:html?|)$/i.test(token.url);
             const localHref = isServerHtmlPath
               ? localFilePreviewHref(token.url)
@@ -55,7 +65,13 @@ function MarkdownInline({ tokens, renderText }: {
               <a key={index} href={token.url} target="_blank" rel="noopener noreferrer">{text(token.value)}</a>
             );
           }
-          case "image": return <img key={index} src={token.url} alt={token.value} />;
+          case "image": {
+            const file = messageFileTarget(token.url, fileContext);
+            if (!file && !/^(?:https?:|data:image\/|\/)/i.test(token.url)) return <React.Fragment key={index}>{token.value}</React.Fragment>;
+            return <img key={index} src={file?.rawUrl || token.url} alt={token.value} role="button" tabIndex={0}
+            aria-label={`查看${token.value || "图片"}`} onClick={event => { event.stopPropagation(); openMessageImage(event.currentTarget); }}
+            onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.currentTarget.click(); } }}/>;
+          }
           default: return <React.Fragment key={index}>{text(token.value)}</React.Fragment>;
         }
       })}
@@ -127,6 +143,8 @@ function MarkdownBlock({ block, renderText }: {
 
 export interface MarkdownPreviewProps {
   content: string;
+  /** Trusted source session/directory, not a model-provided base URL. */
+  fileContext?: FileContext;
   /** Font size in px; omitted keeps the surrounding stylesheet's size. */
   fontSize?: number;
   /** Soft-wrap long lines instead of forcing the container to scroll. */
@@ -145,14 +163,15 @@ export interface MarkdownPreviewProps {
  * dialog, the code editor's rendered mode and the chat message bodies use this
  * entry point, so parsing and sanitising stay in one place; React owns every DOM node.
  */
-export function MarkdownPreview({ content, fontSize, wrap, variant = "page", renderText }: MarkdownPreviewProps) {
+export function MarkdownPreview({ content, fontSize, wrap, variant = "page", renderText, fileContext }: MarkdownPreviewProps) {
+  const inherited = React.useContext(MessageFileContext);
   const blocks = React.useMemo(() => parseFilePreviewMarkdown(content), [content]);
   return (
-    <div
+    <MessageFileContext.Provider value={fileContext || inherited}><div
       className={classNames("wand-markdown-preview", variant === "inline" && "wand-markdown-preview-inline", wrap && "wrap")}
       style={fontSize == null ? undefined : { fontSize: `${fontSize}px` }}
     >
       {blocks.map((block, index) => <MarkdownBlock block={block} renderText={renderText} key={index} />)}
-    </div>
+    </div></MessageFileContext.Provider>
   );
 }

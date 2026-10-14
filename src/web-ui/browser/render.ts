@@ -5,7 +5,7 @@ import { composer, state, writeStoredBoolean } from "./state";
 import { invalidateChatInteraction } from "./chat-render-focus.js";
 import { restoreActiveTask } from "./active-task";
 import { iconSvg } from "./i18n";
-import { escapeHtml, refreshTailMarqueePaths, scrollPathElementToEnd } from "./utils";
+import { escapeHtml, refreshTailMarqueePaths } from "./utils";
 import { getConfigCwd } from "./chat-scroll";
 import { attachEventListeners } from "./events";
 import { isSidebarDrawerLayout } from "./file-browser";
@@ -437,11 +437,6 @@ export function render(options?: any) {
     loadGitStatus(state.selectedId);
   }
 
-  // 长路径元素（topbar 的 cwd）滚到末尾展示末尾目录。
-  // 渲染刚完成，元素可能尚未完成布局，scrollPathElementToEnd 内部用 rAF 兜底。
-  // blank-chat 的 cwd 路径元素只存在于已删除的 legacy Shell markup 里，
-  // React Shell 的空白页不再渲染 #blank-chat-cwd-path。
-  scrollPathElementToEnd(document.getElementById("topbar-cwd"));
   refreshTailMarqueePaths();
 }
 
@@ -497,7 +492,6 @@ export function renderAppShell() {
           // 垂直排列，一行一个液态玻璃气泡（编号 + 文本 + 立即/删除）。
           // updateQueueBar() 在 queuedMessages 非空时去掉 hidden。
           '<div id="queue-bar-host" class="queue-bar-host" hidden></div>' +
-          '<div id="terminal-shortcuts" class="terminal-shortcuts" hidden></div>' +
           // 输入主行：正文独占上层书写区域；下层按参考布局分为
           // 「添加 / 权限」与「模型 / 思考 / 发送」两组，键盘顺序与视觉顺序一致。
           '<div class="input-composer-row" data-pi-composer="">' +
@@ -506,7 +500,9 @@ export function renderAppShell() {
             // 附件预览条由 React portal 渲染（见 composer-attachments 组件）。
             '<span class="composer-attachments-host" data-composer-attachments-host="main"></span>' +
             '<div class="composer-main-row">' +
+              '<div id="terminal-shortcuts" class="terminal-shortcuts" hidden></div>' +
               '<div class="composer-input-wrap">' +
+                '<span data-composer-avatar-host></span>' +
                 '<button data-antd-control class="prompt-optimize-btn" id="prompt-optimize-btn" type="button" title="优化提示词" aria-label="优化提示词">' +
                   iconSvg("sparkle", { size: 15, strokeWidth: 1.9, cls: "prompt-optimize-icon" }) +
                   '<span class="prompt-optimize-label">优化</span>' +
@@ -544,6 +540,7 @@ export function renderAppShell() {
               '</div>' +
               '<div class="composer-actions-right" role="group" aria-label="模型与发送">' +
                 // 直通模式的 Appica 发送按钮挂在这里（其余 legacy 按钮在直通下收起）。
+                '<span class="composer-rail-host" data-pty-extra-keys-host></span>' +
                 '<span class="composer-rail-host" data-composer-rail-host="pty"></span>' +
                 '<div class="composer-inline-config">' +
                   // 注意：`.composer-inline-config` 的闭合由紧邻它的这个 `</div>` 承担，
@@ -562,7 +559,7 @@ export function renderAppShell() {
           // 加号气泡 —— 浮在 + 按钮上方（.input-composer 之外，绕开它的 overflow:hidden）。
           // 内容：附件 / 终端交互 / 三件套（模式·模型·思考）。默认 hidden，点 + 切换；
           // 点 popover 外部 / Esc / 选完任一项后自动关闭。
-          '<div class="composer-plus-popover hidden" id="composer-plus-popover" role="dialog" aria-modal="false" aria-label="更多操作" aria-hidden="true">' +
+          '<div class="composer-plus-popover hidden" id="composer-plus-popover" data-wand-popup-owner="composer-plus-popover" role="dialog" aria-modal="false" aria-label="更多操作" aria-hidden="true">' +
             // 两个条目（上传附件 / 终端交互）由 React portal 渲染（见 composer-popover
             // 组件），宿主常驻；容器本身的开关与键盘导航仍然归 legacy。
             '<span class="plus-popover-items-host" data-composer-popover-host="items"></span>' +

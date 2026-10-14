@@ -188,6 +188,16 @@ export interface WandConfig {
   language?: string;
   /** Per-instance secret for app connection code encryption. Auto-generated on first run. */
   appSecret?: string;
+  /**
+   * 允许携带 Bearer 应用令牌访问 API 的浏览器扩展 ID 列表（chrome-extension / moz-extension / safari-web-extension）。
+   * 配置后只有列表内的扩展获得 CORS 回包；未配置时扩展仍可用 Bearer 调用，但响应不带凭据许可。
+   */
+  browserExtensionIds?: string[];
+  /**
+   * Express `trust proxy` 规格（逗号分隔的地址或 CIDR / loopback 等关键字）。决定登录限流用的客户端 IP 是否采信 X-Forwarded-For。
+   * 缺省 "loopback, 172.16.0.0/12"，即只信任本机与 Docker 桥接网段的反向代理。
+   */
+  trustProxy?: string;
   android?: AndroidApkConfig;
   macos?: MacosDmgConfig;
   ios?: IosIpaConfig;
@@ -250,11 +260,13 @@ export interface AiTextRequest {
 }
 
 /**
- * Wand 自有 AI 调用（commit message、标题、提示词优化…）的一条 CLI 执行候选。
+ * Wand 自有 AI 调用（commit message、标题、提示词优化…）的一条执行候选。
  * 候选顺序即降级顺序；由内置「系统运维」员工维护。
  */
 export interface AiCliCandidate {
   provider: SessionProvider;
+  /** 缺省为 CLI；显式 sdk 保持 Wand Agent 引擎身份。 */
+  engine?: "cli" | "sdk";
   /** 具体模型 ID；未设置表示跟随 provider 默认模型。 */
   model?: string;
   thinkingEffort?: ThinkingEffort;

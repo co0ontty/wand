@@ -70,8 +70,10 @@ export function SidebarRecentSection({
   onDeleteSession,
 }: SidebarRecentSectionProps): React.ReactElement {
   const groups = React.useMemo(
-    () => recentConversationGroups(entries, { employees }),
-    [entries, employees],
+    () => recentConversationGroups(entries, {
+      employees, activeOnly: displayMode === "active", selectedSessionId,
+    }),
+    [entries, employees, displayMode, selectedSessionId],
   );
   const [pickerOpen, setPickerOpen] = React.useState(false);
   const pickerButton = React.useRef<HTMLButtonElement>(null);
@@ -88,7 +90,7 @@ export function SidebarRecentSection({
   }, [onStartConversation]);
 
   return (
-    <section className="sidebar-recent" aria-label="最近对话" onKeyDown={(event) => {
+    <section className="sidebar-recent" aria-label="最近会话" onKeyDown={(event) => {
       if (event.key !== "Escape" || !pickerOpen || event.defaultPrevented
         || event.nativeEvent.isComposing) return;
       event.preventDefault();
@@ -96,7 +98,7 @@ export function SidebarRecentSection({
       cancelPicker();
     }}>
       <Flex align="center" justify="space-between" gap="small" className="sidebar-section-head" style={{ paddingBlock: 8 }}>
-        <Typography.Text strong className="sidebar-section-title">最近对话</Typography.Text>
+        <Typography.Text strong className="sidebar-section-title">最近会话</Typography.Text>
         <WandIconButton
           ref={pickerButton}
           className={classNames("sidebar-section-add", pickerOpen && "is-open")}
@@ -148,12 +150,17 @@ export function SidebarRecentSection({
         <div role="status" aria-label="正在加载最近对话" aria-busy="true">
           <WandUiBoundary><Skeleton active title={false} paragraph={{ rows: 2 }}/></WandUiBoundary>
         </div>
-      ) : groups.length === 0 && (listError || query.trim() || displayMode === "active") ? null : groups.length === 0 ? (
+      ) : groups.length === 0 && (listError || query.trim()) ? null : groups.length === 0 ? (
         <p className="sidebar-section-empty">
-          {displayMode === "active" ? "现在没有在跑、待处理或刚完成的会话。" : "还没有对话，点＋选择员工开始。"}
+          {displayMode === "active" ? "现在没有活动会话。" : "还没有对话，点＋选择员工开始。"}
         </p>
       ) : (
         <Flex vertical gap={4} className="sidebar-recent-groups">
+          {displayMode === "active" && groups.every((group) => group.entries.length === 0) ? (
+            <Typography.Paragraph type="secondary" className="sidebar-filter-empty" role="status">
+              {query.trim() ? "没有匹配的活动会话。" : "现在没有活动会话。"}
+            </Typography.Paragraph>
+          ) : null}
           {groups.map((group) => (
             <RecentConversationGroup
               key={group.key}
@@ -201,7 +208,7 @@ function RecentConversationGroup({
   onDeleteSession?(session: WorkspaceSessionSummary, label: string): Promise<void>;
   disabled?: boolean;
 }): React.ReactElement {
-  const [open, setOpen] = useSidebarExpansion(`recent.${group.key}`);
+  const [open, setOpen] = useSidebarExpansion(`recent.${group.key}`, false, false, undefined, group.entries.length > 0);
   const activity = sidebarAggregateState(group.entries.map((entry) => entry.session));
   const hasMenu = Boolean(onArchiveSession || onDeleteSession);
 
@@ -237,7 +244,8 @@ function RecentConversationGroup({
     <ImSidebarGroup
       label={group.title}
       count={group.entries.length}
-      description={activity.description}
+      totalCount={group.totalCount}
+      description={`${activity.description}，共 ${group.totalCount} 个会话`}
       activity={activity}
       containsCurrent={group.entries.some((entry) => entry.session.id === selectedSessionId)}
       avatarNode={<GroupMark group={group} employees={employees}/>}
@@ -246,7 +254,9 @@ function RecentConversationGroup({
       onToggle={() => setOpen(!open)}
       onSetOpen={setOpen}
     >
-      {rows}
+      {rows.length ? rows : <Typography.Paragraph type="secondary" className="sidebar-group-empty">
+        暂无活动会话
+      </Typography.Paragraph>}
     </ImSidebarGroup>
   );
 }
@@ -304,7 +314,7 @@ function GroupMark({
   group: SidebarRecentGroup;
   employees: readonly SidebarRecentEmployee[];
 }): React.ReactElement {
-  const session = group.entries[0]?.session;
+  const session = group.latestSession;
   if (group.kind === "employee") {
     // 员工改名 / 换头像后按当前定义显示，定义被删才退回会话快照。
     const employee = employees.find((candidate) => candidate.id === group.employeeId)

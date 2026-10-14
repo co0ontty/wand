@@ -86,6 +86,8 @@ export interface Workspace {
 /** GET /api/workspaces/:id 额外带回该项目下的会话列表。 */
 export interface WorkspaceSessionSummary {
   id: string;
+  /** 实际运行引擎的只读投影，不把 Wand Agent 冒充 Pi CLI。 */
+  engine?: "core" | "cli";
   provider?: WorkspaceProvider;
   sessionKind?: string;
   runner?: string;
@@ -107,6 +109,7 @@ export interface WorkspaceSessionSummary {
   providerCliActive?: boolean;
   providerCliExitCode?: number | null;
   inFlight?: boolean;
+  canArchive?: boolean;
   employeeId?: string;
   employeeName?: string;
   employeeAvatar?: string;
@@ -159,6 +162,7 @@ interface WorkspaceTaskWorktree {
 }
 
 export interface WorkspaceTask {
+  canArchive?: boolean;
   id: string;
   workspaceId: string;
   name: string;

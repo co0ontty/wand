@@ -30,7 +30,7 @@ export async function openBrowser(url, width = 1440, height = 1000) {
       const request = pending.get(response.id);
       if (!request) return;
       pending.delete(response.id); clearTimeout(request.timer);
-      if (response.error) request.reject(new Error("Browser command rejected: " + request.method));
+      if (response.error) request.reject(new Error(`Browser command rejected: ${request.method}: ${response.error.message}`));
       else request.resolve(response.result);
     });
     const send = (method, params = {}) => new Promise((resolve, reject) => {

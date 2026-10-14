@@ -53,6 +53,14 @@ test("an SDK employee badge identifies Wand Agent rather than Pi CLI", () => {
   const html = renderToStaticMarkup(createElement(EmployeeAvatar, { employee: sdkEmployee }));
   assert.match(html, /aria-label="Wand Agent"/);
   assert.doesNotMatch(html, /aria-label="Pi CLI"/);
+  assert.match(html, /data-wand-brand="pixel-cat"/);
+  assert.doesNotMatch(html, /data-provider-logo="pi"/);
+  const actual = renderToStaticMarkup(createElement(EmployeeAvatar, { employee, provider: "pi", engine: "core", size: "lg" }));
+  assert.match(actual, /aria-label="Wand Agent"/);
+  assert.match(actual, /data-wand-brand="pixel-cat"/);
+  const cli = renderToStaticMarkup(createElement(EmployeeAvatar, { employee: sdkEmployee, provider: "pi", engine: "cli" }));
+  assert.match(cli, /aria-label="Pi CLI"/);
+  assert.match(cli, /data-provider-logo="pi"/);
 });
 
 test("recent sidebar employee avatars show identity without a preferred CLI badge", () => {
@@ -65,7 +73,7 @@ test("recent sidebar employee avatars show identity without a preferred CLI badg
       assert.doesNotMatch(html, /wand-employee-avatar-provider|data-provider-logo/);
       if (avatar.startsWith("data:")) assert.ok(html.includes(avatar));
       else if (avatar.startsWith("cat:")) assert.match(html, /<svg/);
-      else assert.match(html, /wand-generated-avatar-glyph/);
+      else { assert.match(html, /data-plush-avatar/); assert.match(html, /data-avatar-config=/); assert.doesNotMatch(html, /wand-generated-avatar-glyph/); }
     }
   }
 });
@@ -117,6 +125,7 @@ test("session transcript stays generic with or without employee identity and act
 test("contact avatars still support generated faces, explicit cats and uploaded images outside sessions", () => {
   const generated = renderToStaticMarkup(createElement(EmployeeAvatar, { employee: { ...employee, avatar: "" } }));
   assert.match(generated, /wand-employee-avatar/);
+  assert.match(generated, /data-plush-avatar/);
   const chosen = renderToStaticMarkup(createElement(EmployeeAvatar, { employee }));
   assert.match(chosen, /<svg/);
   const uploaded = renderToStaticMarkup(createElement(EmployeeAvatar, { employee: { ...employee, avatar: "data:image/png;base64,BBB" } }));

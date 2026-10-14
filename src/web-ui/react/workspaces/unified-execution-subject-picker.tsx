@@ -17,7 +17,7 @@ import type {
 import {
   WORKSPACE_KIND_OPTIONS,
   TEAM_NEEDS_PROJECT_HINT,
-} from "./workspace-agent-picker.js";
+} from "./workspace-agent-model.js";
 import { useSiliconEmployees } from "../agents/employee-repository.js";
 import { useWandModelCatalog } from "../use-model-catalog.js";
 import { MODEL_CATALOG_DEFAULT_VALUE, wandModelOptions } from "../model-catalog.js";
@@ -63,6 +63,8 @@ export interface UnifiedExecutionSubjectPickerProps {
   teams?: ReadonlyArray<WorkspaceTeamOption> | null;
   teamWorkspaceId?: string;
   showModel?: boolean;
+  /** 新对话表单在主层级持有会话类型，展开对象列表时不重复显示。 */
+  showKind?: boolean;
   onSubjectChange(subject: UnifiedExecutionSubject): void;
   onKindChange(kind: WorkspaceSessionKind): void;
   onModelChange(model: string): void;
@@ -82,6 +84,7 @@ export function UnifiedExecutionSubjectPicker({
   teams = null,
   teamWorkspaceId = "",
   showModel = true,
+  showKind = true,
   onSubjectChange,
   onKindChange,
   onModelChange,
@@ -148,12 +151,12 @@ export function UnifiedExecutionSubjectPicker({
   );
   return <WandUiBoundary>
     <Flex vertical gap={12} className="wand-execution-subject-picker">
-      <Form.Item label="会话类型">
+      {showKind ? <Form.Item label="会话类型">
         <Segmented block aria-label="会话类型" value={kind} disabled={disabled}
           options={WORKSPACE_KIND_OPTIONS.map((option) => ({ value: option.value,
             label: <span title={option.description}>{option.label}</span> }))}
           onChange={(value) => handleKindSelect(value as WorkspaceSessionKind)}/>
-      </Form.Item>
+      </Form.Item> : null}
       <Form.Item label="执行对象">
         <WandSearchField value={query} onValueChange={setQuery} disabled={disabled}
           inputRef={searchRef} label="搜索执行对象" placeholder="搜索员工、团队或工具"/>
@@ -193,7 +196,7 @@ export function UnifiedExecutionSubjectPicker({
             ))}</div>
             {!employeesLoading && employees.every((emp) => Boolean(emp.archivedAt)) ? (
               <div><span>还没有硅基员工</span><WandButton kind="ghost"
-                onClick={() => taskBoardController.open("", "", "teams")}>创建员工</WandButton></div>
+                onClick={() => taskBoardController.open("", "", "teams")}>招聘员工</WandButton></div>
             ) : null}
           </Flex> : null}
           {!isPty && matchingTeams.length > 0 ? <Flex vertical gap={8} role="group" aria-label="AI 团队">

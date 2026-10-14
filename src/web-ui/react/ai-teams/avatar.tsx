@@ -1,4 +1,6 @@
 import * as React from "react";
+import { parsePlushAvatar, parsePlushCatAvatar, parsePlushDogAvatar, resolveEmployeeAvatar } from "../../../plush-avatar.js";
+import { PlushAvatar } from "../avatars/plush-avatar.js";
 import { Avatar, Badge } from "antd";
 import { WandUiBoundary } from "../theme";
 import type { AiTeamMember } from "../../../ai-team-types";
@@ -60,6 +62,8 @@ export interface AvatarFaceParts {
 }
 
 export function avatarFaceParts(identity: AvatarIdentity, size: number): AvatarFaceParts {
+  const plush = parsePlushDogAvatar(identity.avatar ?? "") ?? parsePlushCatAvatar(identity.avatar ?? "") ?? parsePlushAvatar(identity.avatar ?? "");
+  if (plush) return { style: { background: "transparent" }, icon: <PlushAvatar config={plush} size={size}/> };
   const face: AvatarFace = avatarFace(identity) ?? { kind: "generated", face: generatedAvatarFace(identity) };
   if (face.kind === "upload") return { src: face.src };
   if (face.kind === "cat") return { icon: <PixelCat coat={face.coat}/> };
@@ -80,16 +84,18 @@ export function TeamAvatar({
   showProvider = false,
   className,
 }: {
-  member: Pick<AiTeamMember, "id" | "name" | "avatar" | "isLeader" | "agent">;
+  member: Pick<AiTeamMember, "id" | "name" | "avatar" | "isLeader" | "agent"> & { employeeId?: string | null };
   size?: "sm" | "md" | "lg";
   state?: TeamAvatarState;
   showProvider?: boolean;
   className?: string;
 }): React.ReactElement {
-  const pixelSize = { sm: 26, md: 32, lg: 44 }[size];
+  const pixelSize = { sm: 36, md: 48, lg: 56 }[size];
   const stateColor = state === "done" ? "var(--success)" : state === "failed" ? "var(--danger)"
     : state === "waiting" ? "var(--warning)" : state === "working" ? "var(--info)" : undefined;
-  const face = avatarFaceParts(member, pixelSize);
+  const plush = member.employeeId ? resolveEmployeeAvatar({ ...member, id: member.employeeId }) : null;
+  const face: AvatarFaceParts = plush ? { style: { background: "transparent" }, icon: <PlushAvatar config={plush} size={pixelSize}/> }
+    : avatarFaceParts(member, pixelSize);
   return <WandUiBoundary><Badge
     className={classNames("wand-team-avatar", className)} data-size={size}
     data-state={state === "idle" ? undefined : state} data-leader={member.isLeader || undefined} title={member.name}
@@ -109,7 +115,7 @@ export function TeamAvatarStack({
   max = 5,
   size = "sm",
 }: {
-  members: ReadonlyArray<Pick<AiTeamMember, "id" | "name" | "avatar" | "isLeader" | "agent">>;
+  members: ReadonlyArray<Pick<AiTeamMember, "id" | "name" | "avatar" | "isLeader" | "agent"> & { employeeId?: string | null }>;
   max?: number;
   size?: "sm" | "md";
 }): React.ReactElement {

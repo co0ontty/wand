@@ -39,12 +39,11 @@ export function SystemAiOwnerSummary({
               </span>
               {agentToolDisplayName(agent.provider, agent.engine)}
               {agent.model && agent.model !== "default" ? ` · ${agent.model}` : " · 默认模型"}
-              {agent.engine === "sdk" ? <Tag>系统 AI 跳过</Tag> : null}
             </li>
           )) : <li className="wand-settings-library-system-ai-chain-empty">{employee ? "尚未配置执行候选，请到「团队 → 员工」添加。" : "正在读取执行候选…"}</li>}
         </ol>
         <span className="wand-settings-library-system-ai-hint">
-          系统 AI 内部调用会跳过 SDK 候选；候选与顺序在「团队 → 员工」列表的「{name}」中调整。
+          按此顺序调用已配置的工具与模型；候选与顺序在「团队 → 员工」列表的「{name}」中调整。
         </span>
       </div>
     </div>

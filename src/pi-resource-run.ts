@@ -15,7 +15,7 @@ export interface PreparedPiResources {
 export async function preparePiResources(agentDir: string, cwd: string, selection: PiResourceSelection | undefined,
   baseEnv: NodeJS.ProcessEnv, codemodeOverride?: "off" | "on" | "only"): Promise<PreparedPiResources> {
   const selected = selection ? resolvePiResourceSelection(
-    await discoverPiResources({ harness: { engine: "cli", agentDir } }, cwd), selection) : undefined;
+    await discoverPiResources({ harness: { engine: "cli", agentDir } }, cwd, baseEnv), selection) : undefined;
   const privateDir = mkdtempSync(path.join(os.tmpdir(), "wand-pi-resources-"));
   chmodSync(privateDir, 0o700);
   try {

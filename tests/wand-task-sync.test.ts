@@ -11,7 +11,7 @@ import {
   taskAutoNameSourceText,
   taskAutoNameSignature,
 } from "../src/wand-task-sync.js";
-import { refreshAutoBoardTaskTitles } from "../src/server-task-routes.js";
+import { refreshAutoBoardTaskTitles, whenWandTaskTitlesSettled } from "../src/server-task-routes.js";
 
 function tempDatabase(t: TestContext): WandStorage {
   const directory = mkdtempSync(path.join(os.tmpdir(), "wand-task-sync-"));
@@ -210,6 +210,65 @@ test("auto naming source only includes task content, not synced directory metada
   const source = taskAutoNameSourceText(storage, storage.getWandTask(card.id)!);
   assert.equal(source, "把登录页错误提示修好");
   assert.equal(taskAutoNameSignature(source), taskAutoNameSignature("把登录页错误提示修好"));
+});
+
+test("blank-terminal-only tasks skip title generation; adding an Agent enables it", async (t) => {
+  const storage = tempDatabase(t);
+  const workspace = storage.createWorkspace({ name: "wand", cwd: "/tmp/wand" });
+  const task = storage.createWorkspaceTask({ workspaceId: workspace.id, name: "未命名任务" });
+  const card = storage.getWandTaskByWorkspaceTaskId(task.id)!;
+  storage.updateWandTask(card.id, { titleSource: "auto", description: "检查项目构建结果" });
+  const shell = snapshot({
+    id: "shell", sessionKind: "pty", provider: undefined, command: "/bin/zsh",
+    workspaceId: workspace.id, workspaceTaskId: task.id,
+    title: "旧版自动生成的 Shell 标题", description: "npm run check && npm run build",
+    messages: [{ role: "user", content: [{ type: "text", text: "git log --oneline --all" }] }],
+  });
+  storage.saveSession(shell);
+  assert.equal(boardTitleFromSession(shell), "");
+  assert.equal(boardTitleFromSession({ ...shell, provider: "shell" as SessionSnapshot["provider"] }), "");
+  assert.equal(taskAutoNameSourceText(storage, storage.getWandTask(card.id)!), "");
+  const calls: string[] = [];
+  const generateTitle = async (source: string) => { calls.push(source); return "构建结果检查"; };
+  refreshAutoBoardTaskTitles(storage, { generateTitle });
+  await whenWandTaskTitlesSettled();
+  assert.deepEqual(calls, []);
+  assert.equal(storage.getWandTask(card.id)?.title, "未命名任务");
+  assert.equal(storage.getWandTask(card.id)?.autoTitleSignature, null);
+
+  storage.saveSession(snapshot({ id: "agent", workspaceId: workspace.id, workspaceTaskId: task.id,
+    title: "分析构建失败原因" }));
+  refreshAutoBoardTaskTitles(storage, { generateTitle });
+  await whenWandTaskTitlesSettled();
+  assert.deepEqual(calls, ["检查项目构建结果\n分析构建失败原因"]);
+  assert.equal(storage.getWandTask(card.id)?.title, "构建结果检查");
+});
+
+test("queued or in-flight task titles cannot rename a task that now only has blank terminals", async (t) => {
+  const storage = tempDatabase(t);
+  const workspace = storage.createWorkspace({ name: "wand", cwd: "/tmp/wand" });
+  const tasks = ["first", "queued"].map((id) => {
+    const task = storage.createWorkspaceTask({ workspaceId: workspace.id, name: "未命名任务" });
+    storage.saveSession(snapshot({ id, workspaceId: workspace.id, workspaceTaskId: task.id,
+      title: `分析 ${id} 构建错误` }));
+    storage.saveSession(snapshot({ id: `${id}-shell`, sessionKind: "pty", provider: undefined,
+      command: "/bin/zsh", workspaceId: workspace.id, workspaceTaskId: task.id }));
+    return { task, card: storage.getWandTaskByWorkspaceTaskId(task.id)! };
+  });
+  let resolveTitle!: (title: string) => void;
+  const calls: string[] = [];
+  refreshAutoBoardTaskTitles(storage, { generateTitle: (source) => {
+    calls.push(source);
+    return new Promise<string>((resolve) => { resolveTitle = resolve; });
+  } });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls.length, 1);
+  const before = tasks.map(({ card }) => storage.getWandTask(card.id)!.title);
+  for (const id of ["first", "queued"]) storage.moveSessionToWorkspaceTask(id, null);
+  resolveTitle("迟到的模型标题");
+  await whenWandTaskTitlesSettled();
+  assert.equal(calls.length, 1, "the queued title must not start a model call");
+  assert.deepEqual(tasks.map(({ card }) => storage.getWandTask(card.id)!.title), before);
 });
 
 test("session creation leaves standalone sessions unassigned", (t) => {

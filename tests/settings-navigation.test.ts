@@ -5,7 +5,6 @@ import { installSettingsHistory, settingsRoute, settingsSearch } from "../src/we
 
 test("settings navigation preserves the selected section and unwinds nested content before leaving", () => {
   settingsController.close();
-  settingsStore.setCompact(true);
   settingsController.open();
   assert.equal(settingsStore.getSnapshot().detail, false);
   settingsStore.setTab("general");
@@ -19,7 +18,8 @@ test("settings navigation preserves the selected section and unwinds nested cont
   assert.equal(settingsController.isOpen(), true);
   settingsStore.setTab("general");
   assert.equal(settingsStore.getSnapshot().detail, true, "reselecting the same section enters it again");
-  settingsStore.setCompact(false);
+  assert.equal(settingsController.closeTopmost(), true);
+  assert.equal(settingsController.isOpen(), true, "desktop and mobile both return to the directory first");
   assert.equal(settingsController.closeTopmost(), true);
   assert.equal(settingsController.isOpen(), false);
 });

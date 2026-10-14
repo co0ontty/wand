@@ -24,6 +24,7 @@ import type { WandStorage } from "./storage.js";
 import type { RetentionResult } from "./retention.js";
 import type { WandConfig } from "./types.js";
 import type { GithubConnectorStatus } from "./github-connector.js";
+import { badRequest } from "./http-error.js";
 
 interface SettingsDistributionPayload {
   androidApk: Record<string, unknown>;
@@ -188,7 +189,7 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
     };
     let touchedDeployField = false;
     try {
-      if (Object.hasOwn(body, "localDecision")) throw new Error("请使用本地模型设置管理 LAYA；通用配置不接受运行时路径或命令。");
+      if (Object.hasOwn(body, "localDecision")) throw badRequest("请使用本地模型设置管理 LAYA；通用配置不接受运行时路径或命令。");
       if (body.modelGroups !== undefined && body.expectedModelGroups !== undefined
         && JSON.stringify(normalizeModelGroups(body.expectedModelGroups)) !== JSON.stringify(config.modelGroups ?? [])) {
         res.status(409).json({ error: "模型分组已在其他设备修改，请先刷新；当前草稿已保留。" });
@@ -198,23 +199,32 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
         if (!(field in body) || body[field] === undefined) continue;
         if (field === "port") {
           const port = Number(body.port);
-          if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`无效端口号: ${body.port}`);
+          if (!Number.isInteger(port) || port < 1 || port > 65535) throw badRequest(`无效端口号: ${body.port}`);
           candidateConfig.port = port;
         } else if (field === "https") {
-          if (typeof body.https !== "boolean") throw new Error("https 必须是布尔值。");
+          if (typeof body.https !== "boolean") throw badRequest("https 必须是布尔值。");
           candidateConfig.https = body.https;
         } else if (field === "host") {
-          if (typeof body.host !== "string" || !body.host.trim()) throw new Error("host 不能为空。");
+          if (typeof body.host !== "string" || !body.host.trim()) throw badRequest("host 不能为空。");
           candidateConfig.host = body.host.trim();
         } else if (field === "shell") {
-          if (typeof body.shell !== "string" || !body.shell.trim()) throw new Error("shell 不能为空。");
+          if (typeof body.shell !== "string" || !body.shell.trim()) throw badRequest("shell 不能为空。");
           candidateConfig.shell = body.shell.trim();
+        } else if (field === "browserExtensionIds") {
+          if (!Array.isArray(body.browserExtensionIds)
+            || body.browserExtensionIds.some((id: unknown) => typeof id !== "string" || !id.trim())) {
+            throw badRequest("browserExtensionIds 必须是非空字符串数组。");
+          }
+          candidateConfig.browserExtensionIds = body.browserExtensionIds.map((id: string) => id.trim());
+        } else if (field === "trustProxy") {
+          if (typeof body.trustProxy !== "string" || !body.trustProxy.trim()) throw badRequest("trustProxy 不能为空。");
+          candidateConfig.trustProxy = body.trustProxy.trim();
         }
         touchedDeployField = true;
       }
       if (body.defaultModels !== undefined) {
         if (!body.defaultModels || typeof body.defaultModels !== "object" || Array.isArray(body.defaultModels)) {
-          throw new Error("defaultModels 必须是对象。");
+          throw badRequest("defaultModels 必须是对象。");
         }
         for (const provider of SESSION_PROVIDERS) {
           if (Object.hasOwn(body.defaultModels, provider)) {

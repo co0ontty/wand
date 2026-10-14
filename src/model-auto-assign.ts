@@ -14,7 +14,7 @@
  */
 import type { DecisionResult } from "./decision-types.js";
 import { getErrorMessage } from "./error-utils.js";
-import { callConfiguredAiText, type QuickCommitAiOptions } from "./git-quick-commit.js";
+import { callConfiguredAiText, type QuickCommitAiOptions } from "./ai-text-runner.js";
 import { findModelGroup, modelGroupSelector, type ModelGroup } from "./model-groups.js";
 import type { SessionProvider } from "./provider-catalog.js";
 import type { AiTextRequest } from "./types.js";

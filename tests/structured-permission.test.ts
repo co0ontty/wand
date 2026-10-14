@@ -83,7 +83,7 @@ test("approve-permission resolves a pending escalation and validates the request
   const sessions = new SessionRegistry(processes, manager, storage);
   const app = express();
   app.use(express.json());
-  registerSessionRoutes(app, processes, manager, storage, config.defaultMode, config, sessions);
+  registerSessionRoutes(app, { processes, structured: manager, storage, defaultMode: config.defaultMode, config, sessions });
   app.use(jsonErrorHandler);
   const server = createServer(app);
   await new Promise<void>((resolve, reject) => {

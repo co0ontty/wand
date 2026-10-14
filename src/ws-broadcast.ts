@@ -17,6 +17,8 @@ export type { ProcessEvent } from "./types.js";
 // ── Constants ──
 
 const MAX_QUEUE_SIZE = 500;
+/** Byte ceiling for one client's pending frames. A consumer that cannot drain this is closed. */
+const MAX_QUEUE_BYTES = 8 * 1024 * 1024;
 const QUEUE_RESUME_SIZE = Math.floor(MAX_QUEUE_SIZE * 0.8);
 const SEND_BATCH_SIZE = 8;
 const MAX_BLOCK_BUDGET = 2_000;
@@ -82,6 +84,8 @@ function outputEventShapeMismatch(
 interface WsClient {
   ws: WebSocket;
   sendQueue: string[];
+  /** Bytes currently held in sendQueue; bounded by MAX_QUEUE_BYTES. */
+  queuedBytes: number;
   sendInProgress: boolean;
   backpressurePaused: boolean;
   /** Per-session monotonically increasing sequence number for output events. */
@@ -210,6 +214,7 @@ export class WsBroadcastManager {
       const client: WsClient = {
         ws,
         sendQueue: [],
+        queuedBytes: 0,
         sendInProgress: false,
         backpressurePaused: false,
         outputSeqBySession: new Map(),
@@ -469,6 +474,7 @@ export class WsBroadcastManager {
       client.sendQueue = client.sendQueue.filter((frame) => {
         try { return JSON.parse(frame).sessionId !== sessionId; } catch { return true; }
       });
+      client.queuedBytes = client.sendQueue.reduce((total, frame) => total + Buffer.byteLength(frame), 0);
       if (subscription.resyncTimer) clearTimeout(subscription.resyncTimer);
       subscription.resyncTimer = undefined;
       subscription.unackedBytes = 0;
@@ -642,7 +648,7 @@ export class WsBroadcastManager {
         ...(usesPtyAckFlowControl ? { ptyBytes } : {}),
       };
       if (usesPtyAckFlowControl) subscription.unackedBytes += ptyBytes;
-      client.sendQueue.push(JSON.stringify(outgoing));
+      if (!this.enqueueFrame(client, JSON.stringify(outgoing))) continue;
       if (client.sendQueue.length >= MAX_QUEUE_SIZE) {
         client.backpressurePaused = true;
       }
@@ -668,16 +674,33 @@ export class WsBroadcastManager {
         break;
       }
       client.pendingResyncSessions.delete(sessionId);
-      client.sendQueue.push(JSON.stringify({
+      if (!this.enqueueFrame(client, JSON.stringify({
         type: "resync_required",
         sessionId,
         reason: "backpressure_drop",
-      }));
+      }))) return;
     }
+  }
+
+  /**
+   * 唯一的入队口：同时维护字节计数。超过 MAX_QUEUE_BYTES 说明客户端已经追不上，
+   * 关闭它（它重连后会拿到完整 init），不在内存里无限积压。返回 false 表示已丢弃该客户端。
+   */
+  private enqueueFrame(client: WsClient, frame: string): boolean {
+    const bytes = Buffer.byteLength(frame);
+    if (client.queuedBytes + bytes > MAX_QUEUE_BYTES) {
+      this.discardClient(client, false);
+      try { client.ws.close(1013, "Slow consumer"); } catch { /* ignore */ }
+      return false;
+    }
+    client.sendQueue.push(frame);
+    client.queuedBytes += bytes;
+    return true;
   }
 
   private discardClient(client: WsClient, terminate: boolean): void {
     client.sendQueue.length = 0;
+    client.queuedBytes = 0;
     client.pendingResyncSessions.clear();
     client.sendInProgress = false;
     client.backpressurePaused = false;
@@ -730,7 +753,7 @@ export class WsBroadcastManager {
   /** 把一条 resync 通知塞进该客户端的发送队列（不绕过队列，也不绕过背压）。 */
   private queueResyncNotice(client: WsClient, sessionId: string, reason: string): void {
     if (client.ws.readyState !== WebSocket.OPEN) return;
-    client.sendQueue.push(JSON.stringify({ type: "resync_required", sessionId, reason }));
+    if (!this.enqueueFrame(client, JSON.stringify({ type: "resync_required", sessionId, reason }))) return;
     if (client.sendQueue.length >= MAX_QUEUE_SIZE) {
       client.backpressurePaused = true;
     }
@@ -756,6 +779,7 @@ export class WsBroadcastManager {
     }
     client.sendInProgress = true;
     const batch = client.sendQueue.splice(0, Math.min(SEND_BATCH_SIZE, client.sendQueue.length));
+    for (const frame of batch) client.queuedBytes -= Buffer.byteLength(frame);
     let pending = batch.length;
     let sendError: Error | undefined;
     const settleSend = (err?: Error): void => {

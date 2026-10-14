@@ -1,3 +1,4 @@
+import { isArchiveBlocked } from "../../../archive-policy.js";
 import * as React from "react";
 import { WandIcon } from "../ui";
 import { describeError } from "../errors";
@@ -25,12 +26,13 @@ export function SidebarSessionMenu({ row, session, label, disabled, intoNewTask,
   const lock = React.useRef(false);
   const rowRef = React.useRef<HTMLElement>(null);
   const archived = session.archived === true;
+  const canArchive = archived || (session.canArchive !== false && !isArchiveBlocked(session));
   const move = useSessionMove({ sessionId: session.id, taskId: session.workspaceTaskId, intoNewTask,
     open: open && moveOpen, onMoved: () => setOpen(false) });
   const busy = action !== null || move.busy;
   React.useEffect(() => { if (!open) setMoveOpen(false); }, [open]);
   const run = async (kind: "archive" | "delete"): Promise<void> => {
-    if (lock.current || busy) return;
+    if (lock.current || busy || (kind === "archive" && !canArchive)) return;
     lock.current = true; setError("");
     try {
       if (kind === "delete") {
@@ -73,7 +75,7 @@ export function SidebarSessionMenu({ row, session, label, disabled, intoNewTask,
             ...(move.error ? [{ key: "move-error", disabled: true, label: <span role="alert" className="sidebar-menu-error">{move.error}</span> },
               { key: "retry", disabled: busy || move.loading, icon: <WandIcon name="refresh"/>, label: "重新加载任务" }] : []),
           ] }] : []),
-        ...(onArchive ? [{ key: "archive", disabled: busy, icon: <WandIcon name={archived ? "resume" : "archive"}/>,
+        ...(onArchive && canArchive ? [{ key: "archive", disabled: busy, icon: <WandIcon name={archived ? "resume" : "archive"}/>,
           label: action === "archive" ? archived ? "正在恢复…" : "正在归档…" : archived ? "恢复会话" : "归档会话" }] : []),
         ...(onDelete ? [{ key: "danger-divider", type: "divider" as const },
           { key: "delete", disabled: busy, danger: true, icon: <WandIcon name="trash"/>, label: "删除会话…" }] : []),

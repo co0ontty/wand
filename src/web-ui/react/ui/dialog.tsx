@@ -100,7 +100,7 @@ export function WandDialogSurface({ open, title, description, children, width = 
     getContainer={portal ?? undefined} aria-describedby={description ? descriptionId : undefined} keyboard={false} closable={false}
     mask={{ closable: dismissable }} width={width} styles={styles} zIndex={zIndex} focusable={{ focusTriggerAfterClose: focusTriggerAfterClose ?? !onAfterClose }}
     afterClose={onAfterClose}
-    classNames={{ container: className, mask: overlayClassName }}
+    classNames={{ container: `wand-ui-dialog-content ${className}`, mask: overlayClassName }}
     onCancel={event => {
       const reason = event.type === "keydown" ? "escape-key" : "outside-press";
       handleDialogOpenChange(false, { reason, cancel() {} }, dismissable, openedAt.current,

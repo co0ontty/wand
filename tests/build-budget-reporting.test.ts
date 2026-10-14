@@ -32,7 +32,21 @@ test("development and both publish workflows use the same pinned Node version", 
   assert.equal(lock.packages[""].engines.node, pkg.engines.node);
   assert.ok(readFileSync(new URL("../install.sh", import.meta.url), "utf8")
     .includes(`REQUIRED_NODE_VERSION="${required}"`));
-  for (const command of ["build", "check", "test", "dev", "check:bundle-budget"]) {
+  for (const command of ["build", "check"]) {
+    assert.equal(pkg.scripts[command], `node src/deployment-lock.ts --run-project -- npm run ${command}:body`,
+      `${command} must acquire the shared build lock before mutating generated assets`);
+    if (command === "build") {
+      assert.equal(pkg.scripts["build:body"], "node scripts/build-body.js", "build must run the build body script");
+    } else {
+      assert.match(pkg.scripts[`${command}:body`] ?? "", /^node scripts\/check-node-version\.js && /,
+        `${command} still checks Node before executing its body`);
+    }
+  }
+  // build-body.js owns the step order; Node version is checked first, before any mutation.
+  const buildBody = readFileSync(new URL("../scripts/build-body.js", import.meta.url), "utf8");
+  assert.match(buildBody, /const STEPS = \[\n  \(\) => node\("scripts\/check-node-version\.js"\),\n  \(\) => rmSync\(/,
+    "build body must check Node before removing dist");
+  for (const command of ["test", "dev", "check:bundle-budget"]) {
     assert.match(pkg.scripts[command] ?? "", /^node scripts\/check-node-version\.js && /);
   }
   for (const workflow of ["npm-release.yml", "beta-branch.yml"]) {

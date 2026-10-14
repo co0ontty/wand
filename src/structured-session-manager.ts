@@ -1,5 +1,5 @@
 import { type OpenRouterFreeModelsService } from "./openrouter-free-models.js";
-import { defaultModelGroupSelector, isAutoAssignSelector, resolveModelGroupModels } from "./model-groups.js";
+import { isAutoAssignSelector, resolveModelGroupModels } from "./model-groups.js";
 import { resolveAutoAssign } from "./model-auto-assign.js";
 import { withModelGroups } from "./model-group-runner.js";
 import { classifyStructuredFailure, hasStructuredExecutionProgress, type StructuredFailure } from "./structured-failure.js";
@@ -9,83 +9,57 @@ import { randomUUID } from "node:crypto";
 import { prepareSessionWorktree, type WorktreeSetupSpec } from "./git-worktree.js";
 
 import { SessionLogger } from "./session-logger.js";
+import { BoundedKeySet } from "./structured-bounded-keys.js";
 import { WandStorage } from "./storage.js";
-import {
-  CardExpandDefaults, ContentBlock, ConversationTurn, EscalationRequest, EscalationScope,
-  ExecutionMode, HarnessSessionContext, ProcessEvent, SessionProvider, SessionRunner, SessionSnapshot, SessionSource, StructuredSessionState,
-  WandConfig,
-} from "./types.js";
-import { truncateMessagesForTransport } from "./message-truncator.js";
-import { stampNewToolUseTimes } from "./tool-use-timestamps.js";
+import { ContentBlock, ConversationTurn, EscalationScope, ExecutionMode, ProcessEvent, SessionProvider, SessionRunner, SessionSnapshot, SessionSource, StructuredSessionState, WandConfig } from "./types.js";
+
+
 import { buildChildEnv } from "./env-utils.js";
 import { getErrorMessage } from "./error-utils.js";
-import { getDefaultModelForProvider } from "./config.js";
+
+import { fallbackProviderModel } from "./session-model.js";
+import { isLocalDecisionModel } from "./decision-expert-identity.js";
 import type { WandTaskAgent } from "./task-types.js";
+import { selectEmployeeCandidate } from "./silicon-employee-dispatch.js";
 import { recordIterationPrompt } from "./iteration-log.js";
 import { startEmployeeKnowledgeRunner } from "./employee-knowledge.js";
 import { CoreRunner } from "./core-runner.js";
 import { CoreTurnTracker } from "./core-turn-tracker.js";
 import type { CoreStatus } from "./core-status-cli.js";
-import { coreHarnessAgentDir, resolveHarnessEngineSync, type EngineResolution } from "./harness-engine.js";
+import { coreHarnessAgentDir, resolveHarnessEngine, resolveHarnessEngineSync, type EngineResolution } from "./harness-engine.js";
 import { cliPiSettingsRejection, defaultPiCliSessionSettings, defaultPiSessionSettings, patchPiSessionSettings, type PiSessionSettings } from "./pi-session-settings.js";
 import { withDecisionAccess, type DecisionRuntimeAccess } from "./decision-runner.js";
 import { signalNameFromNumber } from "./signal-utils.js";
-import {
-  provisionalSessionTopic,
-  SessionNativeTitleTracker,
-  SessionTopicCoordinator,
-  sessionTopicBlocklistForSnapshot,
-  shouldAcceptGeneratedSessionTitle,
-  shouldGenerateSessionTopicFromInput,
-} from "./session-topic.js";
+import { SessionNativeTitleTracker, SessionTopicCoordinator } from "./session-topic.js";
+import { SessionMetadataService } from "./session-metadata-service.js";
 import { resolveSessionCwd } from "./session-cwd.js";
+import { isScheduledConversationSession } from "./conversation-session-preview.js";
 import { isSessionProvider, providerCliCommand } from "./session-provider.js";
-import { resolveSessionProvider, resolveSystemAiContext } from "./session-ai-context.js";
-import { readNativeSessionTitle } from "./native-session-title.js";
+import { resolveSystemAiContext } from "./session-ai-context.js";
+
 import { CodexRunner } from "./structured-codex-adapter.js";
-import { CodexProtocolReducer } from "./structured-codex-protocol.js";
+
 import { normalizeStructuredToolResultContent } from "./structured-content.js";
-import {
-  buildSessionSystemPromptParts,
-  ClaudeCliRunner,
-  derivePermissionPolicy,
-} from "./structured-claude-adapter.js";
-import { inferStructuredEscalation, structuredPermissionDenied } from "./structured-permission.js";
-import {
-  captureTaskMeta,
-  extractClaudeAssistantMessage,
-  extractClaudeModelName,
-  normalizeClaudeToolInput,
-  stampParentTaskResults,
-  stampSelfTask,
-  tagSubagentBlocks,
-  ClaudeCliProtocolReducer,
-  type TaskMetaMap,
-} from "./structured-claude-protocol.js";
-import { OpenCodeRunner, applyOpenCodeEvent } from "./structured-opencode-adapter.js";
-import { GrokRunner, applyGrokEvent } from "./structured-grok-adapter.js";
+import { ClaudeCliRunner } from "./structured-claude-adapter.js";
+
+
+import { OpenCodeRunner } from "./structured-opencode-adapter.js";
+import { GrokRunner } from "./structured-grok-adapter.js";
 import { QoderRunner } from "./structured-qoder-adapter.js";
-import { PiRunner, applyPiEvent, isMissingPiSession } from "./structured-pi-adapter.js";
-import { GeminiRunner, applyGeminiEvent, isMissingGeminiSession } from "./structured-gemini-adapter.js";
-import {
-  structuredRunId,
-  type StructuredExecHost,
-  type StructuredRunState,
-} from "./structured-exec-host.js";
-import type { StructuredCompactionNotice, StructuredRunnerAdapter, StructuredRunnerExecution, StructuredRunnerResult, StructuredRunnerTurnState } from "./structured-runner.js";
-import {
-  defaultStructuredRunner,
-  defaultStructuredState,
-  isStructuredRunnerForProvider,
-  normalizeThinkingEffort,
-  normalizeTurnAnchors,
-  resolveStructuredRunner,
-} from "./structured-provider-common.js";
+import { PiRunner, isMissingPiSession } from "./structured-pi-adapter.js";
+import { GeminiRunner, isMissingGeminiSession } from "./structured-gemini-adapter.js";
+import { structuredRunId, type StructuredExecHost, type StructuredRunState } from "./structured-exec-host.js";
+import type { StructuredRunnerAdapter, StructuredRunnerExecution, StructuredRunnerResult, StructuredRunnerTurnState } from "./structured-runner.js";
+import { defaultStructuredRunner, defaultStructuredState, isStructuredRunnerForProvider, normalizeThinkingEffort, resolveStructuredRunner } from "./structured-provider-common.js";
 import { TurnQuietHeartbeat } from "./turn-heartbeat.js";
-import { enrichStructuredMessages, WAND_PROTOCOL_VERSION } from "./structured-client-protocol.js";
-import { RETENTION_IDLE_MS } from "./retention.js";
+
+import { logInfo } from "./runtime-log.js";
 
 
+import { ReplayProcessor, StreamingCheckpointDirty, TruncatedReplayView, appendNoticeTurn, buildIncrementalStructuredPayload, buildReplayProcessor, buildStructuredOutputPayload, cancelPendingResourceSelection, compactionToSessionContext, findUnpairedAskUserQuestion, isDuplicateStructuredQueueInput, isoNow, recoveredCommandLabel, shouldAutoApproveForMode, structuredQuietStatusData, upsertAssistantMessage, withSummary } from "./structured-session-manager-replay.js";
+
+// Public helpers moved to the replay module; re-exported so existing importers keep working.
+export { structuredQuietStatusData, getLastSubmittedStructuredInput, isDuplicateStructuredQueueInput } from "./structured-session-manager-replay.js";
 export interface StructuredSessionManagerRunners {
   /**
    * 宿主注入的执行器。注入 `pi` 视作钉死 CLI 引擎（`auto` 不覆盖）；
@@ -168,111 +142,14 @@ class UnacceptedStructuredInputError extends Error {
 interface StreamingTurnState extends StructuredRunnerTurnState {}
 
 /** Line-at-a-time protocol replayer used to rebuild turn state from daemon logs. */
-interface ReplayProcessor {
-  state: StructuredRunnerTurnState;
-  stderr: string;
-  primaryError: string | null;
-  errors?: string[];
-  stdoutTail?: string;
-  stopReason?: "ask-user-question";
-  askUserQuestionDetected?: boolean;
-  /** Feed one complete stdout line; returns true when turn state changed. */
-  feed(line: string, observedAt?: string): boolean;
-}
-
-function buildReplayProcessor(session: SessionSnapshot): ReplayProcessor {
-  const runner = session.runner;
-  if (runner === "codex-cli-exec") {
-    const reducer = new CodexProtocolReducer(session);
-    return {
-      state: reducer.state,
-      stderr: "",
-      get primaryError() { return reducer.primaryError; },
-      get errors() { return reducer.errors; },
-      feed: (line) => {
-        const trimmed = line.trim();
-        if (!trimmed) return false;
-        let event: unknown;
-        try { event = JSON.parse(trimmed); } catch { return false; }
-        return reducer.apply(event);
-      },
-    };
-  }
-  if (runner === "claude-cli-print" || runner === "qoder-cli-print") {
-    const reducer = new ClaudeCliProtocolReducer(session);
-    const managed = session.mode === "managed";
-    const processor: ReplayProcessor = {
-      state: reducer.state,
-      stderr: "",
-      primaryError: null,
-      stdoutTail: "",
-      get askUserQuestionDetected() { return reducer.askUserQuestionDetected; },
-      get stopReason() { return reducer.askUserQuestionDetected ? "ask-user-question" as const : undefined; },
-      feed: (line) => {
-        const trimmed = line.trim();
-        if (!trimmed) return false;
-        processor.stdoutTail = trimmed.slice(-1024);
-        let event: unknown;
-        try { event = JSON.parse(trimmed); } catch { return false; }
-        if (runner === "qoder-cli-print" && event && typeof event === "object" && !Array.isArray(event)) {
-          const record = event as Record<string, unknown>;
-          if (record.type === "result" && record.subtype !== "success") {
-            const errors = Array.isArray(record.errors)
-              ? record.errors.filter((item): item is string => typeof item === "string")
-              : [];
-            processor.primaryError = errors.join("\n") || "Qoder CLI execution failed";
-          }
-        }
-        return reducer.apply(event, managed);
-      },
-    };
-    return processor;
-  }
-  // grok-cli-headless / opencode-cli-run / pi-cli-json / gemini-cli-json share the same shape.
-  const state: StructuredRunnerTurnState = {
-    blocks: [],
-    result: "",
-    sessionId: session.claudeSessionId,
-    model: session.selectedModel ?? session.structuredState?.model,
-    ...(runner === "opencode-cli-run" ? { usage: undefined } : {}),
-  };
-  const processor: ReplayProcessor = {
-    state,
-    stderr: "",
-    primaryError: null,
-    feed: (line, observedAt) => {
-      const trimmed = line.trim();
-      if (!trimmed) return false;
-      let event: Record<string, unknown>;
-      try { event = JSON.parse(trimmed) as Record<string, unknown>; } catch { return false; }
-      const error = runner === "grok-cli-headless"
-        ? applyGrokEvent(state as Parameters<typeof applyGrokEvent>[0], event)
-        : runner === "opencode-cli-run"
-          ? applyOpenCodeEvent(state, event)
-          : runner === "gemini-cli-json"
-            ? applyGeminiEvent(state, event)
-            : applyPiEvent(state, event, observedAt);
-      if (error) processor.primaryError = error;
-      return true;
-    },
-  };
-  return processor;
-}
-
-function recoveredCommandLabel(runner: SessionRunner | undefined): string {
-  switch (runner) {
-    case "codex-cli-exec": return "codex exec";
-    case "opencode-cli-run": return "opencode run";
-    case "grok-cli-headless": return "grok -p --output-format streaming-json";
-    case "qoder-cli-print": return "qodercli -p --output-format stream-json";
-    case "pi-cli-json": return "pi --mode json";
-    case "gemini-cli-json": return "gemini -p --output-format stream-json";
-    default: return "claude -p";
-  }
-}
-
-
 const STREAM_EMIT_DEBOUNCE_MS = 16;
+
+/**
+ * 员工候选链的启动看门狗：CLI 进程起来后这么久没有任何协议事件，就认定这一候选本轮没有开始
+ * 执行（无输出、无用量、无工具调用），按未接受输入处理并沿候选链降级，而不是让会话无限停在
+ * 「运行中」。取 3 分钟：慢模型的首个事件与真正卡死之间留出足够余量。
+ */
+const EMPLOYEE_CANDIDATE_STARTUP_TIMEOUT_MS = 180_000;
 /** Min interval between full saveSession() calls for an in-progress streaming turn.
  *  saveSession serializes the entire messages array, so doing it on every NDJSON
  *  event is N². close-path always calls saveSession unconditionally to take the
@@ -283,287 +160,24 @@ const STREAM_EMIT_DEBOUNCE_MS = 16;
 // second on the event loop.
 const STREAM_SAVE_THROTTLE_MS = 1_000;
 const DETACHED_RECOVERY_RETRY_MS = 500;
-const ARCHIVE_AFTER_MS = RETENTION_IDLE_MS;
+/** Upper bound on remembered (session, idempotency key) pairs; oldest half is dropped past it. */
+const IDEMPOTENCY_KEY_LIMIT = 1024;
 
-interface StreamingCheckpointDirty {
-  metadata: boolean;
-  output: boolean;
-  messages: boolean;
-}
 
-/**
- * 找出最后一条 assistant turn 中尚未配对 tool_result 的 AskUserQuestion tool_use。
- * 用来识别"刚被 SIGTERM 中断、正在等用户提交答案"的状态。
- */
-function findUnpairedAskUserQuestion(
-  messages: ConversationTurn[],
-): { id: string } | null {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const turn = messages[i];
-    if (turn.role !== "assistant") continue;
-    for (const block of turn.content) {
-      if (block.type === "tool_use" && block.name === "AskUserQuestion") {
-        const toolUseId = block.id;
-        // 检查后续 turn 中是否已有对应 tool_result
-        let answered = false;
-        for (let j = i + 1; j < messages.length; j++) {
-          const nextTurn = messages[j];
-          for (const nb of nextTurn.content) {
-            if (nb.type === "tool_result" && nb.tool_use_id === toolUseId) {
-              answered = true;
-              break;
-            }
-          }
-          if (answered) break;
-        }
-        if (!answered) return { id: toolUseId };
-      }
-    }
-    // 只检查最后一条 assistant turn
-    return null;
+/** The turn recorded for one user prompt; an open AskUserQuestion is answered by it as a tool_result. */
+function buildUserTurn(
+  prompt: string,
+  pendingAsk: { id: string } | null | undefined,
+  createdAt: string,
+): ConversationTurn {
+  if (pendingAsk) {
+    return {
+      role: "user",
+      createdAt,
+      content: [{ type: "tool_result", tool_use_id: pendingAsk.id, content: prompt, is_error: false }],
+    };
   }
-  return null;
-}
-
-/** Enrich a snapshot with a derived summary from the first user message. */
-function withSummary(snapshot: SessionSnapshot): SessionSnapshot {
-  if (snapshot.summary) return snapshot;
-  const messages = snapshot.messages ?? [];
-  for (const msg of messages) {
-    if (msg.role !== "user") continue;
-    for (const block of msg.content) {
-      if (block.type === "text" && block.text.trim()) {
-        return { ...snapshot, summary: block.text.trim().slice(0, 120) };
-      }
-    }
-    break;
-  }
-  return snapshot;
-}
-
-/** Should we auto-approve permissions for this mode? */
-function shouldAutoApproveForMode(mode: ExecutionMode): boolean {
-  return mode === "full-access" || mode === "managed" || mode === "auto-edit";
-}
-
-function buildStructuredOutputPayload(snapshot: SessionSnapshot): ProcessEvent["data"] {
-  return {
-    wandProtocolVersion: WAND_PROTOCOL_VERSION,
-    output: snapshot.output,
-    messages: snapshot.messages ? enrichStructuredMessages(snapshot.messages, snapshot.id) : undefined,
-    queuedMessages: snapshot.queuedMessages,
-    sessionKind: "structured",
-    structuredState: snapshot.structuredState,
-    provider: snapshot.provider,
-    runner: snapshot.runner,
-    selectedModel: snapshot.selectedModel,
-    thinkingEffort: snapshot.thinkingEffort,
-    employeeId: snapshot.employeeId,
-    employeeName: snapshot.employeeName,
-    employeeAvatar: snapshot.employeeAvatar,
-    employeeCandidateIndex: snapshot.employeeCandidateIndex,
-    title: snapshot.title,
-    description: snapshot.description,
-    summary: snapshot.description ?? snapshot.summary,
-  };
-}
-
-/**
- * 返回最近一次真正提交给结构化会话的用户输入。
- *
- * 排队非空时，队尾才是“上一条提交”；否则回看当前正在处理的最后一个 user turn。
- * 这里只接受可无损还原成字符串的 text / tool_result，避免把图片等结构化内容误判
- * 成更早的纯文本输入。
- */
-export function getLastSubmittedStructuredInput(snapshot: Pick<SessionSnapshot, "messages" | "queuedMessages">): string | null {
-  const queue = snapshot.queuedMessages ?? [];
-  for (let i = queue.length - 1; i >= 0; i--) {
-    const queued = queue[i]?.trim();
-    if (queued) return queued;
-  }
-
-  const messages = snapshot.messages ?? [];
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const turn = messages[i];
-    if (turn.role !== "user") continue;
-
-    const textParts = turn.content
-      .filter((block): block is Extract<ContentBlock, { type: "text" }> => block.type === "text")
-      .map((block) => block.text);
-    if (textParts.length > 0) {
-      const text = textParts.join("\n").trim();
-      return text || null;
-    }
-
-    const toolResult = turn.content.find(
-      (block): block is Extract<ContentBlock, { type: "tool_result" }> => block.type === "tool_result" && typeof block.content === "string",
-    );
-    return toolResult && typeof toolResult.content === "string" ? toolResult.content.trim() || null : null;
-  }
-  return null;
-}
-
-/** 仅用于 in-flight 排队分支：连续两次内容相同则把后一次视为输入重放。 */
-export function isDuplicateStructuredQueueInput(
-  snapshot: Pick<SessionSnapshot, "messages" | "queuedMessages">,
-  input: string,
-): boolean {
-  const prompt = input.trim();
-  if (!prompt) return false;
-  return getLastSubmittedStructuredInput(snapshot) === prompt;
-}
-
-function buildIncrementalStructuredPayload(
-  snapshot: SessionSnapshot,
-  cardDefaults: CardExpandDefaults,
-): ProcessEvent["data"] {
-  const messages = snapshot.messages ?? [];
-  // Derive semantics from the complete current turn before taking the
-  // incremental tail; TaskCreate results can live in an earlier provider frame.
-  const clientMessages = enrichStructuredMessages(messages, snapshot.id);
-  const lastTurn = clientMessages.length > 0 ? clientMessages[clientMessages.length - 1] : undefined;
-  // Streaming turn (index 0 here) is preserved verbatim; truncation only kicks
-  // in if the live response is already bigger than the transport threshold,
-  // matching the PTY runner's behaviour in process-manager.ts.
-  const lastMessage = lastTurn ? truncateMessagesForTransport([lastTurn], cardDefaults, 0)[0] : undefined;
-  return {
-    wandProtocolVersion: WAND_PROTOCOL_VERSION,
-    incremental: true,
-    queuedMessages: snapshot.queuedMessages,
-    sessionKind: "structured",
-    structuredState: snapshot.structuredState,
-    lastMessage,
-    messageCount: messages.length,
-  };
-}
-
-function isoNow(): string {
-  return new Date().toISOString();
-}
-
-/**
- * Identity of one content block inside an assistant turn. Tool ids are copied
- * verbatim from the CLI stream and never mutate, so they are the anchors used to
- * align a replayed turn with the transcript we already stored.
- */
-function replayBlockAnchor(block: ContentBlock): string | null {
-  switch (block.type) {
-    case "tool_use": return `tool_use:${block.id}`;
-    case "tool_result": return `tool_result:${block.tool_use_id}`;
-    case "thinking": return `thinking:${block.thinking}`;
-    case "text": return `text:${block.text}`;
-    default: return null;
-  }
-}
-
-/**
- * Index of the last replayed block the stored turn already contains, or -1 when
- * no overlap can be proven.
- *
- * Needed because a daemon replay log can start mid-stream
- * (STRUCTURED_RUN_LOG_MAX_CHARS), so the first replayed blocks usually repeat the
- * tail of the turn we accumulated live before the restart.
- */
-function lastStoredAnchorIndex(stored: ContentBlock[] | null, replayed: ContentBlock[]): number {
-  if (!stored || stored.length === 0) return -1;
-  const known = new Set<string>();
-  for (const block of stored) {
-    const anchor = replayBlockAnchor(block);
-    if (anchor !== null) known.add(anchor);
-  }
-  let cut = -1;
-  for (let index = 0; index < replayed.length; index += 1) {
-    const anchor = replayBlockAnchor(replayed[index]);
-    if (anchor !== null && known.has(anchor)) cut = index;
-  }
-  return cut;
-}
-
-/**
- * 截断重放期间「本地已存 turn + replay 新增段」的合并视图。
- *
- * 重启后在 terminald 里继续跑的 CLI 只保留最后 STRUCTURED_RUN_LOG_MAX_CHARS 字符的
- * stdout，replay 出来的是「半截尾巴」：直接用它覆盖会删掉重启前用户已经看到的输出，
- * 完全不用它又会让前端冻结到本轮结束。所以把 checkpoint 里的 turn 当固定底，只把
- * replay 里能证明是新增的那段拼在后面。cut 只算一次，视图随 replay 增长而增长
- * （保持流式），且重复调用幂等（不会重复追加、也不会丢底）。
- */
-class TruncatedReplayView {
-  private readonly base: ContentBlock[] | null;
-  private cut = -1;
-  private primed = false;
-
-  constructor(messages: ConversationTurn[] | undefined) {
-    const last = messages && messages.length > 0 ? messages[messages.length - 1] : undefined;
-    this.base = last && last.role === "assistant" ? last.content : null;
-  }
-
-  get ready(): boolean {
-    return this.primed;
-  }
-
-  /** 必须在 replay 首轮 feed 完成后再定锚点：feed 途中的半截 blocks 会把重叠判错。 */
-  prime(replayed: ContentBlock[]): void {
-    this.cut = lastStoredAnchorIndex(this.base, replayed);
-    this.primed = true;
-  }
-
-  content(replayed: ContentBlock[]): ContentBlock[] {
-    if (!this.base || this.base.length === 0) return replayed;
-    // 证明不了重叠就只信本地已存内容（宁可暂不追加，也不要重复整段）。
-    if (!this.primed || this.cut === -1) return this.base;
-    const extra = replayed.slice(this.cut + 1);
-    return extra.length === 0 ? this.base : [...this.base, ...extra];
-  }
-}
-
-/** Append a standalone notice turn without touching the previous assistant turn. */
-function appendNoticeTurn(messages: ConversationTurn[] | undefined, turn: ConversationTurn): ConversationTurn[] {
-  return [...(messages ?? []), { ...turn, createdAt: isoNow(), completedAt: isoNow() }];
-}
-
-/** core 引擎的压缩通知 → 可持久化的会话上下文（历史不删，只记切点与摘要）。 */
-function compactionToSessionContext(notice: StructuredCompactionNotice): HarnessSessionContext {
-  return {
-    summary: notice.summary,
-    fromTurnIndex: notice.fromTurnIndex,
-    tokensBefore: notice.tokensBefore,
-    compactions: notice.compactions,
-  };
-}
-
-function cancelPendingResourceSelection(messages: ConversationTurn[] | undefined): ConversationTurn[] | undefined {
-  const last = messages?.at(-1);
-  if (!messages || last?.role !== "assistant" || last.resourceSelection?.status !== "selecting") return messages;
-  return [...messages.slice(0, -1), { ...last, completedAt: isoNow(), resourceSelection: {
-    ...last.resourceSelection, status: "cancelled", label: "本轮自动选择已取消",
-  } }];
-}
-
-function upsertAssistantMessage(
-  messages: ConversationTurn[] | undefined,
-  turn: ConversationTurn,
-  complete = false,
-  stampNewTools = true,
-): ConversationTurn[] {
-  const msgs = [...(messages ?? [])];
-  const last = msgs[msgs.length - 1];
-  const observedAt = isoNow();
-  const createdAt = (last?.role === "assistant" ? last.createdAt : undefined) ?? turn.createdAt ?? observedAt;
-  const next: ConversationTurn = {
-    ...turn,
-    ...(turn.resourceSelection ? { resourceSelection: turn.resourceSelection }
-      : last?.role === "assistant" && last.resourceSelection ? { resourceSelection: last.resourceSelection } : {}),
-    createdAt,
-    content: stampNewToolUseTimes(
-      turn.content, last?.role === "assistant" ? last.content : undefined, observedAt, stampNewTools,
-    ),
-  };
-  if (complete) next.completedAt = isoNow();
-  else if (last?.role === "assistant" && last.completedAt) next.completedAt = last.completedAt;
-  if (last?.role === "assistant") msgs[msgs.length - 1] = next;
-  else msgs.push(next);
-  return msgs;
+  return { role: "user", createdAt, content: [{ type: "text", text: prompt }] };
 }
 
 export class StructuredSessionManager {
@@ -591,10 +205,9 @@ export class StructuredSessionManager {
    * 久去重，重复就抛错让前端弹 toast 提示，**不**做任何处理。timestamp 仅用于
    * map 大小溢出时按时间裁剪。
    */
-  private readonly seenIdempotencyKeys = new Map<string, number>();
+  private readonly seenIdempotencyKeys = new BoundedKeySet(IDEMPOTENCY_KEY_LIMIT);
   private readonly relayHandlers = new Map<string, StructuredRelayHandler>();
   private emitEvent: ((event: ProcessEvent) => void) | null = null;
-  private archiveTimer: NodeJS.Timeout | null = null;
   /**
    * 静默期心跳：回合在飞且连续 TURN_QUIET_HEARTBEAT_MS 没有任何事件时，用现有的
    * status 事件重发一次权威快照（含最新 turn 锚点）。timer 只在 inFlight 期间存在。
@@ -602,7 +215,11 @@ export class StructuredSessionManager {
   private readonly turnHeartbeat = new TurnQuietHeartbeat((sessionId) => this.publishQuietHeartbeat(sessionId));
   private readonly topicCoordinator = new SessionTopicCoordinator();
   private readonly nativeTitles = new SessionNativeTitleTracker();
+  /** Topic/native-title policy shared with the PTY manager; see SessionMetadataService. */
+  private readonly metadata: SessionMetadataService;
   private readonly streamEmitTimers = new Set<NodeJS.Timeout>();
+  /** 员工候选链的「本轮还没开始执行」看门狗，按会话一个；首个协议事件或回合收敛即撤销。 */
+  private readonly candidateStartupWatchdogs = new Map<string, NodeJS.Timeout>();
   private readonly claudeCliRunner: StructuredRunnerAdapter;
   private readonly codexRunner: StructuredRunnerAdapter;
   private readonly openCodeRunner: StructuredRunnerAdapter;
@@ -630,7 +247,7 @@ export class StructuredSessionManager {
     runners: StructuredSessionManagerRunners = {},
     private readonly execHost?: StructuredExecHost,
     private readonly decisionRuntime: () => DecisionRuntimeAccess | null = () => null,
-    openRouter?: OpenRouterFreeModelsService,
+    private readonly openRouter?: OpenRouterFreeModelsService,
     /** 「智能分配」专用的本地决策入口：只有真正能跑时才注入，没注入则用系统员工回退。 */
     private readonly autoAssignEvaluate: () => DecisionRuntimeAccess["evaluate"] = () => undefined,
   ) {
@@ -650,7 +267,21 @@ export class StructuredSessionManager {
     this.piRunnerSupplied = runners.pi !== undefined;
     this.coreRunnerSupplied = runners.core !== undefined;
     this.geminiRunner = wrap(runners.gemini ?? new GeminiRunner(undefined, this.execHost));
-    // 能力探测放到 server 启动处 await（warmCoreHarness），这里不再另起预热。
+    this.metadata = new SessionMetadataService({
+      isDisposed: () => this.disposed,
+      current: (id) => this.sessions.get(id),
+      messagesOf: (snapshot) => snapshot.messages,
+      commitTopic: (id, title, description) => { this.setSessionTopic(id, title, description); },
+      commitTopicGenerating: (id, generating) => this.setSessionTopicGenerating(id, generating),
+      topicCoordinator: () => this.topicCoordinator,
+      nativeTitles: () => this.nativeTitles,
+    }, {
+      logPrefix: "[StructuredSessionManager]",
+      config,
+      storage,
+      free: openRouter,
+    });
+    // SDK capability is probed only when Wand Agent is explicitly selected.
     for (const snapshot of this.storage.loadSessions()) {
       if ((snapshot.sessionKind ?? "pty") !== "structured") continue;
       const restoredStatus = snapshot.status === "running" ? "idle" : snapshot.status;
@@ -708,26 +339,6 @@ export class StructuredSessionManager {
       // must still know there is a daemon run to adopt.
       if (!recoverableDetachedRun) this.storage.saveSession(restored);
     }
-    this.archiveExpiredSessions();
-    this.archiveTimer = setInterval(() => {
-      try { this.archiveExpiredSessions(); } catch (err) {
-        console.error(`[StructuredSessionManager] archive scan failed: ${String(err)}`);
-      }
-    }, 60 * 1000);
-    this.archiveTimer.unref?.();
-  }
-
-  private archiveExpiredSessions(): void {
-    const now = Date.now();
-    for (const session of this.sessions.values()) {
-      if (session.archived || session.status === "running") continue;
-      const referenceTime = session.endedAt ?? session.startedAt;
-      const endedAtMs = Date.parse(referenceTime);
-      if (!Number.isFinite(endedAtMs) || now - endedAtMs < ARCHIVE_AFTER_MS) continue;
-      session.archived = true;
-      session.archivedAt = new Date(now).toISOString();
-      this.storage.updateSessionRuntimeMetadata(session);
-    }
   }
 
   setEventEmitter(emitEvent: (event: ProcessEvent) => void): void {
@@ -778,10 +389,6 @@ export class StructuredSessionManager {
     // 静默心跳不跨服务关闭存活（会话级 timer 不允许泄漏）。
     this.turnHeartbeat.dispose();
 
-    if (this.archiveTimer) {
-      clearInterval(this.archiveTimer);
-      this.archiveTimer = null;
-    }
     if (this.detachedRecoveryRetryTimer) {
       clearTimeout(this.detachedRecoveryRetryTimer);
       this.detachedRecoveryRetryTimer = null;
@@ -832,6 +439,9 @@ export class StructuredSessionManager {
     this.autoAssignPending.clear();
     for (const timer of this.streamCheckpointTimers.values()) clearTimeout(timer);
     this.streamCheckpointTimers.clear();
+    for (const timer of this.candidateStartupWatchdogs.values()) clearTimeout(timer);
+    this.candidateStartupWatchdogs.clear();
+    for (const id of this.sessions.keys()) this.disposeSession(id, "session");
     this.streamCheckpointDirty.clear();
     this.lastStreamSaveAt.clear();
     this.topicCoordinator.clear();
@@ -872,7 +482,7 @@ export class StructuredSessionManager {
     } catch (error) {
       if (!this.detachedRecoveryFailureLogged) {
         this.detachedRecoveryFailureLogged = true;
-        process.stderr.write(`[wand] structured run recovery waiting for terminal daemon: ${getErrorMessage(error)}\n`);
+        logInfo(`structured run recovery waiting for terminal daemon: ${getErrorMessage(error)}`);
       }
       this.scheduleDetachedRecovery();
       return;
@@ -971,7 +581,7 @@ export class StructuredSessionManager {
     this.sessions.set(sessionId, resumed);
     this.saveAuthoritativeSession(resumed);
     this.emitStructuredSnapshot(resumed);
-    process.stderr.write(`[wand] resuming structured run for session ${sessionId} (daemon pid ${initialState.pid})\n`);
+    logInfo(`resuming structured run for session ${sessionId} (daemon pid ${initialState.pid})`);
     this.logger?.appendStructuredSpawn(sessionId, {
       kind: `${resumed.runner ?? "structured"}-recovered`,
       provider: resumed.provider,
@@ -1321,6 +931,51 @@ export class StructuredSessionManager {
     this.lastStreamSaveAt.set(sessionId, Date.now());
   }
 
+  /**
+   * Per-session teardown of timers and transient bookkeeping.
+   * "run" (stop): the session stays resumable, so duplicate-submit keys, the
+   * unaccepted-start record and the message-persistence state survive.
+   * "session" (delete, and dispose for each live session): forgets everything kept for the id.
+   */
+  private disposeSession(sessionId: string, scope: "run" | "session"): void {
+    const pendingAssign = this.autoAssignPending.get(sessionId);
+    if (pendingAssign) {
+      pendingAssign.cancelled = true;
+      this.autoAssignPending.delete(sessionId);
+    }
+    this.interruptedWith.delete(sessionId);
+    this.preserveQueueOnInterrupt.delete(sessionId);
+    this.clearStreamingCheckpoint(sessionId);
+    this.disarmCandidateStartupWatchdog(sessionId);
+    this.turnHeartbeat.cancel(sessionId);
+    if (scope === "run") return;
+    this.unacceptedTeamStarts.delete(sessionId);
+    const keyPrefix = `${sessionId}:`;
+    this.seenIdempotencyKeys.deleteMatching((key) => key.startsWith(keyPrefix));
+  }
+
+  /**
+   * Arms the per-session "no protocol output yet" watchdog. It is unref'd so it can
+   * never keep the process alive, and it is registered so stop/delete/dispose and
+   * settlement can cancel it through disarmCandidateStartupWatchdog.
+   */
+  private armCandidateStartupWatchdog(sessionId: string, onTimeout: () => void): void {
+    this.disarmCandidateStartupWatchdog(sessionId);
+    const timer = setTimeout(() => {
+      this.candidateStartupWatchdogs.delete(sessionId);
+      onTimeout();
+    }, EMPLOYEE_CANDIDATE_STARTUP_TIMEOUT_MS);
+    timer.unref?.();
+    this.candidateStartupWatchdogs.set(sessionId, timer);
+  }
+
+  private disarmCandidateStartupWatchdog(sessionId: string): void {
+    const timer = this.candidateStartupWatchdogs.get(sessionId);
+    if (!timer) return;
+    clearTimeout(timer);
+    this.candidateStartupWatchdogs.delete(sessionId);
+  }
+
   private clearStreamingCheckpoint(sessionId: string): void {
     this.cancelStreamingCheckpointTimer(sessionId);
     this.streamCheckpointDirty.delete(sessionId);
@@ -1368,6 +1023,13 @@ export class StructuredSessionManager {
   get(id: string): SessionSnapshot | null {
     const s = this.sessions.get(id);
     return s ? withSummary(s) : null;
+  }
+
+  getSlim(id: string): SessionSnapshot | null {
+    const session = this.get(id);
+    if (!session) return null;
+    const { messages: _messages, output: _output, ...metadata } = session;
+    return { ...metadata, output: "" };
   }
 
   setSessionWorkspace(id: string, membership: Pick<SessionSnapshot, "workspaceId" | "workspaceTaskId">): void {
@@ -1443,57 +1105,10 @@ export class StructuredSessionManager {
     if (this.disposed || !session || !input.trim()) return;
     // 迭代提示词记录：和会话标题共用同一套「有没有信息量」判断，用户不用多做一步。
     recordIterationPrompt(this.storage, session, input, "session");
-    const blockedTitles = sessionTopicBlocklistForSnapshot(session, this.storage);
-    // CLI 自己起了名字就归它，模型标题与输入首行都不再覆盖；取不到原生标题才走系统硅基员工。
-    const hasNativeTitle = this.nativeTitles.has(id);
-    const provisional = provisionalSessionTopic(input, blockedTitles);
-    if (
-      provisional
-      && !hasNativeTitle
-      && shouldGenerateSessionTopicFromInput(input)
-      && (session.title !== provisional.title || session.description !== provisional.description)
-    ) {
-      this.setSessionTopic(id, provisional.title, provisional.description);
-    }
-    this.topicCoordinator.request(id, {
-      messages: session.messages,
-      input,
-      cwd: session.cwd,
-      language: this.config.language,
-      ai: resolveSystemAiContext(session, this.config, this.storage.getSystemSiliconEmployee()),
-      readNativeTitle: () => readNativeSessionTitle(
-        resolveSessionProvider(session),
-        session.claudeSessionId,
-        session.cwd,
-      ),
-      hasNativeTitle,
-      onGenerating: (generating) => {
-        if (!this.disposed) this.setSessionTopicGenerating(id, generating);
-      },
-      onTopic: ({ title, description, source }) => {
-        if (this.disposed || !this.sessions.has(id)) return;
-        if (source === "native") {
-          this.applyNativeSessionTitle(id, title, blockedTitles);
-          return;
-        }
-        if (this.nativeTitles.has(id)) return;
-        if (shouldAcceptGeneratedSessionTitle(title, blockedTitles)) {
-          this.setSessionTopic(id, title, description);
-        }
-      },
-      onError: (error) => {
-        console.error(`[StructuredSessionManager] Failed to generate session topic ${id}:`, getErrorMessage(error));
-      },
-    });
-  }
-
-  /** 原生标题优先于模型标题：只受「不能是任务名/目录名」约束，命中且变化时才落库。 */
-  private applyNativeSessionTitle(id: string, title: string, blockedTitles: readonly string[]): void {
-    this.nativeTitles.record(id, title);
-    const current = this.sessions.get(id);
-    if (!current || !shouldAcceptGeneratedSessionTitle(title, blockedTitles)) return;
-    if (current.title === title && current.description === title) return;
-    this.setSessionTopic(id, title, title);
+    // The plan names this execution. Preserve that name and avoid a second model
+    // call merely to rename background work before it reaches its chosen employee.
+    if (isScheduledConversationSession(session)) return;
+    this.metadata.generateTopicForPrompt(id, input);
   }
 
   createSession(options: CreateStructuredSessionOptions): SessionSnapshot {
@@ -1645,12 +1260,15 @@ export class StructuredSessionManager {
   }
 
   private employeeCandidateModel(agent: WandTaskAgent): string | null {
-    return agent.model === "default"
-      ? defaultModelGroupSelector(this.config.modelGroups, agent.provider, getDefaultModelForProvider(this.config, agent.provider))
-        || getDefaultModelForProvider(this.config, agent.provider) || null : agent.model;
+    return agent.model === "default" ? fallbackProviderModel(this.config, agent.provider) ?? null : agent.model;
   }
 
-  /** Only an unstarted employee conversation may replay its explicitly rejected first input. */
+  /**
+   * A turn the provider rejected before it accepted any input may replay on the next candidate.
+   * Same-tool switches carry the conversation as it stood before this turn — history plus the native
+   * session it already had — so they also cover an already-started chat. A cross-tool switch cannot
+   * hand that context over, so it stays limited to conversations that have not produced a turn yet.
+   */
   private retryEmployeeCandidate(
     id: string,
     original: SessionSnapshot,
@@ -1659,28 +1277,32 @@ export class StructuredSessionManager {
   ): Promise<SessionSnapshot> | null {
     // Team runs own candidate scheduling; keep the snapshot without a second retry loop.
     if (original.automationId?.startsWith("ai-team:") || !(error instanceof UnacceptedStructuredInputError)) return null;
+    if (!original.employeeId || !error.failure.retryable) return null;
     const candidates = original.employeeCandidates ?? [];
     const index = original.employeeCandidateIndex ?? 0;
-    const nextIndex = index + 1;
-    if (!original.employeeId || (original.messages?.length ?? 0) !== 0 || original.claudeSessionId
-      || !error.failure.retryable || nextIndex >= candidates.length) return null;
     const selected = candidates[index];
+    let nextIndex = index + 1;
+    // LAYA has no chat adapter; keep original candidate indices while skipping bounded-only models.
+    while (nextIndex < candidates.length && isLocalDecisionModel(candidates[nextIndex]!.model)) nextIndex += 1;
+    if (nextIndex >= candidates.length) return null;
     // Explicit tool/model changes, including changes during the pending request, remain authoritative.
     if (!selected || original.provider !== selected.provider
       || (original.structuredState?.engine && (original.structuredState.engine === "core" ? "sdk" : "cli") !== (selected.engine ?? "cli"))
       || (original.selectedModel && original.selectedModel !== this.employeeCandidateModel(selected))) return null;
+    const next = candidates[nextIndex]!;
+    const sameTool = next.provider === selected.provider && (next.engine ?? "cli") === (selected.engine ?? "cli");
+    if (!sameTool && ((original.messages?.length ?? 0) !== 0 || original.claudeSessionId)) return null;
     const current = this.sessions.get(id);
     if (!current || current.status !== "running" || current.provider !== original.provider
       || current.selectedModel !== original.selectedModel || current.mode !== original.mode
       || current.piSettings !== original.piSettings) return null;
-    const next = candidates[nextIndex]!;
     const runner = resolveStructuredRunner(next.provider, undefined);
     const model = this.employeeCandidateModel(next);
-    const sameTool = next.provider === original.provider && (next.engine ?? "cli") === (selected.engine ?? "cli");
     const piSettings = next.provider !== "pi" ? undefined : sameTool ? current.piSettings
       : next.engine === "sdk" ? defaultPiSessionSettings(this.config.harness?.compaction?.enabled ?? true)
       : { ...(this.storage.getPiSessionDefaults() ?? defaultPiCliSessionSettings()),
         autoCompaction: this.config.harness?.compaction?.enabled ?? true };
+    const carried = current.structuredState as StructuredSessionState | undefined;
     const retry: SessionSnapshot = {
       ...current,
       provider: next.provider,
@@ -1692,21 +1314,25 @@ export class StructuredSessionManager {
       thinkingEffort: next.thinkingEffort,
       employeeCandidateIndex: nextIndex,
       piSettings,
-      claudeSessionId: null,
-      harnessContext: undefined,
-      harnessExtensionState: undefined,
-      messages: [],
-      output: "",
+      // Replay resumes the state this turn started from, not what the rejected attempt produced:
+      // its native session may already hold the input we are about to send again.
+      claudeSessionId: sameTool ? original.claudeSessionId : null,
+      harnessContext: sameTool ? original.harnessContext : undefined,
+      harnessExtensionState: sameTool ? original.harnessExtensionState : undefined,
+      messages: sameTool ? original.messages ?? [] : [],
+      output: sameTool ? original.output ?? "" : "",
       status: "idle",
       exitCode: null,
       endedAt: null,
       structuredState: {
         ...defaultStructuredState(next.provider, runner),
+        ...(sameTool ? { engine: carried?.engine, engineReason: carried?.engineReason,
+          contextUsage: carried?.contextUsage, compactions: carried?.compactions } : {}),
         model: model ?? undefined,
       },
     };
     this.logger?.appendStructuredSpawn(id, { kind: "candidate-fallback", failureKind: error.failure.kind,
-      fromProvider: original.provider, toProvider: next.provider, candidateIndex: nextIndex });
+      fromProvider: original.provider, toProvider: next.provider, candidateIndex: nextIndex, sameTool });
     this.sessions.set(id, retry);
     this.saveAuthoritativeSession(retry);
     // sendMessage publishes the new running snapshot synchronously; do not expose a transient idle slot.
@@ -1752,137 +1378,23 @@ export class StructuredSessionManager {
     let session = this.requireSession(id);
     const prompt = input.trim();
     if (!prompt) return session;
+    // Only await on branches that really need it: an unconditional await would
+    // defer every send past its synchronous state transition (requestId/turn start).
     const relay = this.relayHandlerFor(session);
-    if (relay) {
-      // 群聊不起 CLI：先落下用户这句话，再交给转发方；转发失败以提示行告诉用户。
-      const posted = this.appendRelayTurns(id, [{ role: "user", content: [{ type: "text", text: prompt }] }])!;
-      try {
-        await relay(id, prompt);
-      } catch (error) {
-        this.appendRelayTurns(id, [{
-          role: "assistant", notice: true, content: [{ type: "text", text: `没能转达：${getErrorMessage(error)}` }],
-        }]);
-      }
-      return this.sessions.get(id) ?? posted;
-    }
-    if (opts?.idempotencyKey) {
-      const mapKey = `${id}:${opts.idempotencyKey}`;
-      if (this.seenIdempotencyKeys.has(mapKey)) {
-        const err = new Error("检测到重复发送，已拦截。") as Error & { code?: string };
-        err.code = "duplicate_idempotency_key";
-        throw err;
-      }
-      this.seenIdempotencyKeys.set(mapKey, Date.now());
-      // 防止 map 无限增长：超过 1024 条时按时间裁掉一半最早的
-      if (this.seenIdempotencyKeys.size > 1024) {
-        const sorted = Array.from(this.seenIdempotencyKeys.entries()).sort((a, b) => a[1] - b[1]);
-        for (let i = 0; i < sorted.length / 2; i++) {
-          this.seenIdempotencyKeys.delete(sorted[i][0]);
-        }
-      }
-    }
+    if (relay) return await this.relayUserMessage(id, prompt, relay);
+    if (opts?.idempotencyKey) this.claimIdempotencyKey(id, opts.idempotencyKey);
     // Pi 主功能现在固定走 CLI；core SDK 重启 drain 不影响 CLI 会话入场。
     this.maybeGenerateSessionTopic(id, prompt);
     // 「智能分配」结算窗口：还没有 runner 归属，新输入先排队，不能另起一轮。
     if (this.autoAssignPending.has(id)) return this.enqueueInput(session, prompt);
-    if (session.structuredState?.inFlight) {
-      const runnerExecution = this.pendingRunnerExecutions.get(id);
-      // interrupt() only requests cancellation; completion can settle later.
-      // Treat runner-map ownership as the authoritative in-flight state.
-      const childActive = Boolean(runnerExecution) || this.pendingRecoveryIds.includes(id);
-      if (!childActive) {
-        const recovered: SessionSnapshot = {
-          ...session,
-          status: "idle",
-          endedAt: session.endedAt ?? new Date().toISOString(),
-          structuredState: {
-            ...this.settleTurn(id, session.structuredState as StructuredSessionState),
-            inFlight: false,
-            activeRequestId: null,
-          },
-        };
-        this.sessions.set(id, recovered);
-        this.storage.updateSessionRuntimeMetadata(recovered);
-        session = recovered;
-      } else if (opts?.interrupt) {
-        this.requireRecoveryControl(id);
-        this.interruptedWith.set(id, prompt);
-        if (opts.preserveQueue) {
-          this.preserveQueueOnInterrupt.add(id);
-          // 「立即发送」排队条某一条：interrupt 把它作为新输入重发，但该条仍留在
-          // queuedMessages 里。必须在这里把它从队列摘掉一次，否则 preserveQueue 会
-          // 原样保留整条队列，待 interruptPrompt 跑完 flushNextQueuedMessage 会把它
-          // 当成普通排队再发一遍（重复发送）。旧客户端没有走 promote endpoint，
-          // 服务端只能按文本删第一处匹配；新客户端会带 queueAlreadyRemoved 跳过这里。
-          if (!opts.queueAlreadyRemoved) {
-            const queue = session.queuedMessages ?? [];
-            const removeAt = queue.indexOf(prompt);
-            if (removeAt !== -1) {
-              const trimmedQueue = queue.slice(0, removeAt).concat(queue.slice(removeAt + 1));
-              session = { ...session, queuedMessages: trimmedQueue };
-              this.sessions.set(id, session);
-              this.storage.updateSessionRuntimeMetadata(session);
-              this.emitStructuredSnapshot(session);
-            }
-          }
-        } else {
-          this.preserveQueueOnInterrupt.delete(id);
-        }
-        runnerExecution?.interrupt();
-        return session;
-      } else {
-        return this.enqueueInput(session, prompt);
-      }
-    }
+    const inFlight = this.resolveInFlightSend(id, session, prompt, opts);
+    if ("result" in inFlight) return inFlight.result;
+    session = inFlight.session;
 
-    // 「智能分配」：只有真拿到这一轮提示词才能结算成本次使用的分组。结算后钉在会话上，
-    // 后续轮次用同一个分组（不在会话中途换模型）；客户端选择器同步显示实际分组。
     if (isAutoAssignSelector(session.selectedModel)) {
-      const token = { cancelled: false };
-      this.autoAssignPending.set(id, token);
-      let assigned: Awaited<ReturnType<typeof resolveAutoAssign>>;
-      try {
-        assigned = await resolveAutoAssign({
-          provider: session.provider ?? "claude",
-          prompt,
-          groups: this.config.modelGroups,
-          evaluate: this.autoAssignEvaluate(),
-          ai: resolveSystemAiContext(session, this.config, this.storage.getSystemSiliconEmployee()),
-          cwd: session.cwd,
-          language: this.config.language,
-        });
-      } catch (error) {
-        // 结算本身绝不阻断发送：拿不到结论就按默认分组继续。
-        console.warn("[AutoAssign] 分配分组失败，改用默认分组:", getErrorMessage(error));
-        assigned = { selector: "", group: null, strategy: "default", calls: 0 };
-      } finally {
-        if (this.autoAssignPending.get(id) === token) this.autoAssignPending.delete(id);
-      }
-      const latest = this.sessions.get(id);
-      if (!latest || token.cancelled || this.disposed) return latest ?? session;
-      session = latest;
-      // 结算期间用户可能自己换了模型；那是更强的意愿，不覆盖。
-      if (isAutoAssignSelector(session.selectedModel)) {
-        const resolved: SessionSnapshot = {
-          ...session,
-          selectedModel: assigned.selector || null,
-          structuredState: {
-            ...(session.structuredState ?? defaultStructuredState(session.provider ?? "claude", session.runner)),
-            ...(assigned.selector ? { model: assigned.selector } : {}),
-          },
-        };
-        this.sessions.set(id, resolved);
-        this.storage.updateSessionRuntimeMetadata(resolved);
-        this.emit({
-          type: "status",
-          sessionId: id,
-          data: { sessionKind: "structured", selectedModel: resolved.selectedModel, structuredState: resolved.structuredState },
-        });
-        session = resolved;
-        if (assigned.group) {
-          console.info(`[AutoAssign] ${id} → 分组「${assigned.group.name}」（${assigned.strategy}${assigned.probability === undefined ? "" : `, p=${assigned.probability.toFixed(2)}`}）`);
-        }
-      }
+      const assigned = await this.settleAutoAssignForSend(id, session, prompt);
+      if ("result" in assigned) return assigned.result;
+      session = assigned.session;
     }
 
     // 检测上一轮 assistant 是否有未配对的 AskUserQuestion tool_use（说明前一次
@@ -1890,24 +1402,7 @@ export class StructuredSessionManager {
     // 成 tool_result 注入到 messages，让 UI 把卡片渲染为 answered。
     const pendingAsk = findUnpairedAskUserQuestion(session.messages ?? []);
     const userTurnAt = isoNow();
-    const userTurn: ConversationTurn = pendingAsk
-      ? {
-          role: "user",
-          createdAt: userTurnAt,
-          content: [
-            {
-              type: "tool_result",
-              tool_use_id: pendingAsk.id,
-              content: prompt,
-              is_error: false,
-            },
-          ],
-        }
-      : {
-          role: "user",
-          createdAt: userTurnAt,
-          content: [{ type: "text", text: prompt }],
-        };
+    const userTurn = buildUserTurn(prompt, pendingAsk, userTurnAt);
     const requestId = randomUUID();
     this.unacceptedTeamStarts.delete(id);
     if ((session.provider === "pi" && isMissingPiSession(session.structuredState?.lastError, session.claudeSessionId))
@@ -1937,13 +1432,8 @@ export class StructuredSessionManager {
       data: { status: "running", sessionKind: "structured", queuedMessages: updated.queuedMessages, structuredState: updated.structuredState },
     });
 
-    // 续接 AskUserQuestion 的两条不同路线：
-    //   - CLI runner (`claude -p`)：stdin 是 ignore，没有 tool_result 回传通道，
-    //     只能把答案当作普通文本塞回去，靠提示词让 Claude 自己脑补"这是工具回答"。
-    //   - SDK runner：streaming input mode 下 prompt 是 AsyncIterable，可以把
-    //     用户答案直接 yield 成真正的 tool_result block，对 Claude 来说就是标准
-    //     的工具结果，不需要任何 hack。runner 自己从 session.messages 末尾读取
-    //     新加的 userTurn，所以传原始 prompt 即可。
+    // 续接 AskUserQuestion：CLI runner（`claude -p`）没有 tool_result 回传通道，只能把
+    // 答案当作普通文本塞回去，靠提示词让 Claude 理解这是工具回答。
     const cliClaudePrompt = pendingAsk
       ? `[对刚才 AskUserQuestion 工具的回答 — 结构化模式不支持工具结果回传，下面是用户从选项中的选择]\n${prompt}`
       : prompt;
@@ -1954,118 +1444,299 @@ export class StructuredSessionManager {
       if (!isStructuredRunnerForProvider(provider, runner)) {
         throw new Error(`会话 runner ${String(runner)} 与 provider ${provider} 不匹配。`);
       }
-      if (provider === "codex") {
-        await this.runCodexStreaming(id, updated, prompt, requestId);
-      } else if (provider === "opencode") {
-        await this.runOpenCodeStreaming(id, updated, prompt, requestId);
-      } else if (provider === "grok") {
-        await this.runGrokStreaming(id, updated, prompt, requestId);
-      } else if (provider === "qoder") {
-        await this.runClaudeStreaming(id, updated, prompt, requestId, {
-          runner: this.qoderRunner,
-          provider: "qoder",
-          commandLabel: "qodercli -p",
-          logKind: "qoder-print",
-          installHint: "请安装 @qoder-ai/qodercli，或重跑 `wand service:install` 刷新服务的 PATH",
-        });
-      } else if (provider === "pi") {
-        const employeeAgent = updated.employeeCandidates?.[updated.employeeCandidateIndex ?? 0];
-        // 会话已裁决过引擎就沿用（新建会话选了 Wand Agent 或 Pi CLI）；未裁决的旧会话/员工会话回落到候选配置。
-        const decidedEngine = updated.structuredState?.engine;
-        const sdkRequested = decidedEngine ? decidedEngine === "core" : employeeAgent?.engine === "sdk";
-        // 没显式选择时对话框固定走 CLI；只有选定 Wand Agent 或员工候选配置 SDK 才是 core。
-        const resolution = sdkRequested
-          ? resolveHarnessEngineSync({ ...this.config.harness, engine: "core" }, "pi", {
-            coreRunnerSupplied: this.coreRunnerSupplied,
-          })
-          : { engine: "cli" as const, reason: "Pi 主功能固定使用 CLI JSON" };
-        const enginePatched: SessionSnapshot = {
-          ...updated,
-          structuredState: {
-            ...(updated.structuredState as StructuredSessionState),
-            engine: resolution.engine,
-            engineReason: resolution.reason,
-          },
-        };
-        this.sessions.set(id, enginePatched);
-        if (resolution.engine === "core") {
-          await this.runClaudeStreaming(id, enginePatched, prompt, requestId, {
-            runner: this.coreRunner,
-            provider: "pi",
-            commandLabel: "Wand Agent（SDK）",
-            logKind: "pi-core",
-          });
-        } else {
-          await this.runClaudeStreaming(id, enginePatched, prompt, requestId, {
-            runner: this.piRunner,
-            provider: "pi",
-            commandLabel: "pi --mode json --print",
-            logKind: "pi-json",
-            installHint: "请安装 @earendil-works/pi-coding-agent（或兼容的 Pi CLI），或重跑 `wand service:install` 刷新服务的 PATH",
-          });
-        }
-      } else if (provider === "gemini") {
-        await this.runClaudeStreaming(id, updated, prompt, requestId, {
-          runner: this.geminiRunner,
-          provider: "gemini",
-          commandLabel: "gemini -p --output-format stream-json",
-          logKind: "gemini-json",
-          installHint: "请安装 @google/gemini-cli ≥ 0.11（`npm i -g @google/gemini-cli@latest`），或重跑 `wand service:install` 刷新服务的 PATH",
-        });
-      } else {
-        await this.runClaudeStreaming(id, updated, cliClaudePrompt, requestId);
-      }
+      await this.runProviderTurn(id, updated, prompt, cliClaudePrompt, requestId);
       const finished = this.requireSession(id);
       return finished;
     } catch (error) {
-      const message = getErrorMessage(error);
-      // Close handlers use this tagged error after they have already persisted
-      // the detailed failure. Re-throw even if an ended-event listener removed
-      // the session synchronously; there is no request-id marker to leak.
-      if (error instanceof PersistedStructuredRunnerError) throw error;
-      const current = this.sessions.get(id);
-      if (!current) throw error;
-      // stop() or a newer turn may have invalidated this execution while its
-      // runner was unwinding. A stale rejection must never fail the new turn.
-      if (!this.isCurrentRequest(id, requestId)) {
-        return current;
-      }
-      const retry = this.retryEmployeeCandidate(id, session, prompt, error);
-      if (retry) return await retry;
-      const failed: SessionSnapshot = error instanceof UnacceptedStructuredInputError
-        ? this.finishStructuredFailure(current, 1, message, error.state)
-        : {
-          ...current,
-          status: "failed",
-          exitCode: 1,
-          endedAt: new Date().toISOString(),
-          pendingEscalation: null,
-          permissionBlocked: false,
-          structuredState: {
-            ...this.settleTurn(id, current.structuredState as StructuredSessionState),
-            inFlight: false,
-            activeRequestId: null,
-            lastError: message,
-          },
-        };
-      this.sessions.set(id, failed);
-      this.saveAuthoritativeSession(failed);
-      if (!this.disposed && error instanceof UnacceptedStructuredInputError
-        && current.automationId?.startsWith("ai-team:")) {
-        // Available before status/ended listeners run. A later turn/stop/delete invalidates this fact.
-        if (this.unacceptedTeamStarts.size >= 1024) {
-          this.unacceptedTeamStarts.delete(this.unacceptedTeamStarts.keys().next().value!);
-        }
-        this.unacceptedTeamStarts.set(id, { requestId, failure: error.failure });
-      }
-      this.emit({
-        type: "status",
-        sessionId: id,
-        data: { status: failed.status, error: message, sessionKind: "structured", queuedMessages: failed.queuedMessages, structuredState: failed.structuredState },
-      });
-      this.emitStructuredSnapshot(failed, "ended");
-      throw error;
+      return await this.recoverFromSendFailure(id, session, prompt, requestId, error);
     }
+  }
+
+  /** 群聊不起 CLI：先落下用户这句话，再交给转发方；转发失败以提示行告诉用户。 */
+  private async relayUserMessage(id: string, prompt: string, relay: StructuredRelayHandler): Promise<SessionSnapshot> {
+    const posted = this.appendRelayTurns(id, [{ role: "user", content: [{ type: "text", text: prompt }] }])!;
+    try {
+      await relay(id, prompt);
+    } catch (error) {
+      this.appendRelayTurns(id, [{
+        role: "assistant", notice: true, content: [{ type: "text", text: `没能转达：${getErrorMessage(error)}` }],
+      }]);
+    }
+    return this.sessions.get(id) ?? posted;
+  }
+
+  /** Rejects a repeated (session, key) pair; otherwise remembers it (bounded). */
+  private claimIdempotencyKey(id: string, idempotencyKey: string): void {
+    const mapKey = `${id}:${idempotencyKey}`;
+    if (this.seenIdempotencyKeys.has(mapKey)) {
+      const err = new Error("检测到重复发送，已拦截。") as Error & { code?: string };
+      err.code = "duplicate_idempotency_key";
+      throw err;
+    }
+    // Bounded: BoundedKeySet drops the oldest half past IDEMPOTENCY_KEY_LIMIT.
+    this.seenIdempotencyKeys.add(mapKey);
+  }
+
+  /**
+   * While a turn is in flight, decide what this send does: recover a turn whose
+   * runner is gone, interrupt the current turn, or queue the input. Returns the
+   * session to continue with, or the value sendMessage should return now.
+   */
+  private resolveInFlightSend(
+    id: string,
+    session: SessionSnapshot,
+    prompt: string,
+    opts: { interrupt?: boolean; preserveQueue?: boolean; queueAlreadyRemoved?: boolean } | undefined,
+  ): { session: SessionSnapshot } | { result: SessionSnapshot } {
+    if (!session.structuredState?.inFlight) return { session };
+    const runnerExecution = this.pendingRunnerExecutions.get(id);
+    // interrupt() only requests cancellation; completion can settle later.
+    // Treat runner-map ownership as the authoritative in-flight state.
+    const childActive = Boolean(runnerExecution) || this.pendingRecoveryIds.includes(id);
+    if (!childActive) {
+      const recovered: SessionSnapshot = {
+        ...session,
+        status: "idle",
+        endedAt: session.endedAt ?? new Date().toISOString(),
+        structuredState: {
+          ...this.settleTurn(id, session.structuredState as StructuredSessionState),
+          inFlight: false,
+          activeRequestId: null,
+        },
+      };
+      this.sessions.set(id, recovered);
+      this.storage.updateSessionRuntimeMetadata(recovered);
+      return { session: recovered };
+    }
+    if (!opts?.interrupt) return { result: this.enqueueInput(session, prompt) };
+
+    this.requireRecoveryControl(id);
+    this.interruptedWith.set(id, prompt);
+    let current = session;
+    if (opts.preserveQueue) {
+      this.preserveQueueOnInterrupt.add(id);
+      // 「立即发送」排队条某一条：interrupt 把它作为新输入重发，但该条仍留在
+      // queuedMessages 里。必须在这里把它从队列摘掉一次，否则 preserveQueue 会
+      // 原样保留整条队列，待 interruptPrompt 跑完 flushNextQueuedMessage 会把它
+      // 当成普通排队再发一遍（重复发送）。旧客户端没有走 promote endpoint，
+      // 服务端只能按文本删第一处匹配；新客户端会带 queueAlreadyRemoved 跳过这里。
+      if (!opts.queueAlreadyRemoved) {
+        const queue = current.queuedMessages ?? [];
+        const removeAt = queue.indexOf(prompt);
+        if (removeAt !== -1) {
+          const trimmedQueue = queue.slice(0, removeAt).concat(queue.slice(removeAt + 1));
+          current = { ...current, queuedMessages: trimmedQueue };
+          this.sessions.set(id, current);
+          this.storage.updateSessionRuntimeMetadata(current);
+          this.emitStructuredSnapshot(current);
+        }
+      }
+    } else {
+      this.preserveQueueOnInterrupt.delete(id);
+    }
+    runnerExecution?.interrupt();
+    return { result: current };
+  }
+
+  /**
+   * 「智能分配」：只有真拿到这一轮提示词才能结算成本次使用的分组。结算后钉在会话上，
+   * 后续轮次用同一个分组（不在会话中途换模型）；客户端选择器同步显示实际分组。
+   */
+  private async settleAutoAssignForSend(
+    id: string,
+    session: SessionSnapshot,
+    prompt: string,
+  ): Promise<{ session: SessionSnapshot } | { result: SessionSnapshot }> {
+    if (!isAutoAssignSelector(session.selectedModel)) return { session };
+    const token = { cancelled: false };
+    this.autoAssignPending.set(id, token);
+    let assigned: Awaited<ReturnType<typeof resolveAutoAssign>>;
+    try {
+      assigned = await resolveAutoAssign({
+        provider: session.provider ?? "claude",
+        prompt,
+        groups: this.config.modelGroups,
+        evaluate: this.autoAssignEvaluate(),
+        ai: resolveSystemAiContext(session, this.config, this.storage.getSystemSiliconEmployee(), this.openRouter),
+        cwd: session.cwd,
+        language: this.config.language,
+      });
+    } catch (error) {
+      // 结算本身绝不阻断发送：拿不到结论就按默认分组继续。
+      console.warn("[AutoAssign] 分配分组失败，改用默认分组:", getErrorMessage(error));
+      assigned = { selector: "", group: null, strategy: "default", calls: 0 };
+    } finally {
+      if (this.autoAssignPending.get(id) === token) this.autoAssignPending.delete(id);
+    }
+    const latest = this.sessions.get(id);
+    if (!latest || token.cancelled || this.disposed) return { result: latest ?? session };
+    // 结算期间用户可能自己换了模型；那是更强的意愿，不覆盖。
+    if (!isAutoAssignSelector(latest.selectedModel)) return { session: latest };
+    const resolved: SessionSnapshot = {
+      ...latest,
+      selectedModel: assigned.selector || null,
+      structuredState: {
+        ...(latest.structuredState ?? defaultStructuredState(latest.provider ?? "claude", latest.runner)),
+        ...(assigned.selector ? { model: assigned.selector } : {}),
+      },
+    };
+    this.sessions.set(id, resolved);
+    this.storage.updateSessionRuntimeMetadata(resolved);
+    this.emit({
+      type: "status",
+      sessionId: id,
+      data: { sessionKind: "structured", selectedModel: resolved.selectedModel, structuredState: resolved.structuredState },
+    });
+    if (assigned.group) {
+      console.info(`[AutoAssign] ${id} → 分组「${assigned.group.name}」（${assigned.strategy}${assigned.probability === undefined ? "" : `, p=${assigned.probability.toFixed(2)}`}）`);
+    }
+    return { session: resolved };
+  }
+
+  /** Runs one turn through the runner that owns the session's provider (and, for Pi, its engine). */
+  private async runProviderTurn(
+    id: string,
+    updated: SessionSnapshot,
+    prompt: string,
+    cliClaudePrompt: string,
+    requestId: string,
+  ): Promise<void> {
+    const provider = updated.provider ?? updated.structuredState?.provider ?? "claude";
+    if (provider === "codex") {
+      await this.runStructuredStreaming(id, updated, prompt, requestId, {
+        runner: this.codexRunner, provider: "codex", commandLabel: "codex exec", logKind: "codex-exec",
+      });
+    } else if (provider === "opencode") {
+      await this.runStructuredStreaming(id, updated, prompt, requestId, {
+        runner: this.openCodeRunner, provider: "opencode", commandLabel: "opencode run", logKind: "opencode-run",
+        installHint: "请安装 opencode-ai，或重跑 `wand service:install` 刷新服务 PATH",
+      });
+    } else if (provider === "grok") {
+      await this.runStructuredStreaming(id, updated, prompt, requestId, {
+        runner: this.grokRunner, provider: "grok", commandLabel: "grok", logKind: "grok-headless",
+        installHint: "请安装 Grok Build CLI，或重跑 `wand service:install` 刷新服务 PATH",
+      });
+    } else if (provider === "qoder") {
+      await this.runStructuredStreaming(id, updated, prompt, requestId, {
+        runner: this.qoderRunner,
+        provider: "qoder",
+        commandLabel: "qodercli -p",
+        logKind: "qoder-print",
+        installHint: "请安装 @qoder-ai/qodercli，或重跑 `wand service:install` 刷新服务的 PATH",
+      });
+    } else if (provider === "pi") {
+      await this.runPiTurn(id, updated, prompt, requestId);
+    } else if (provider === "gemini") {
+      await this.runStructuredStreaming(id, updated, prompt, requestId, {
+        runner: this.geminiRunner,
+        provider: "gemini",
+        commandLabel: "gemini -p --output-format stream-json",
+        logKind: "gemini-json",
+        installHint: "请安装 @google/gemini-cli ≥ 0.11（`npm i -g @google/gemini-cli@latest`），或重跑 `wand service:install` 刷新服务的 PATH",
+      });
+    } else {
+      await this.runStructuredStreaming(id, updated, cliClaudePrompt, requestId);
+    }
+  }
+
+  private async runPiTurn(id: string, updated: SessionSnapshot, prompt: string, requestId: string): Promise<void> {
+    const employeeAgent = updated.employeeCandidates?.[updated.employeeCandidateIndex ?? 0];
+    // 会话已裁决过引擎就沿用（新建会话选了 Wand Agent 或 Pi CLI）；未裁决的旧会话/员工会话回落到候选配置。
+    const decidedEngine = updated.structuredState?.engine;
+    const sdkRequested = decidedEngine ? decidedEngine === "core" : employeeAgent?.engine === "sdk";
+    // 没显式选择时对话框固定走 CLI；只有选定 Wand Agent 或员工候选配置 SDK 才是 core。
+    // Register the selected Core runner synchronously before its lazy SDK/model
+    // preparation. This preserves cancellation ownership and the restart drain;
+    // a restored SDK session must not require a global startup prewarm.
+    const resolution = sdkRequested
+      ? { engine: "core" as const, reason: "" }
+      : { engine: "cli" as const, reason: "Pi 主功能固定使用 CLI JSON" };
+    const enginePatched: SessionSnapshot = {
+      ...updated,
+      structuredState: {
+        ...(updated.structuredState as StructuredSessionState),
+        engine: resolution.engine,
+        engineReason: resolution.reason,
+      },
+    };
+    this.sessions.set(id, enginePatched);
+    if (resolution.engine === "core") {
+      await this.runStructuredStreaming(id, enginePatched, prompt, requestId, {
+        runner: this.coreRunner,
+        provider: "pi",
+        commandLabel: "Wand Agent（SDK）",
+        logKind: "pi-core",
+      });
+    } else {
+      await this.runStructuredStreaming(id, enginePatched, prompt, requestId, {
+        runner: this.piRunner,
+        provider: "pi",
+        commandLabel: "pi --mode json --print",
+        logKind: "pi-json",
+        installHint: "请安装 @earendil-works/pi-coding-agent（或兼容的 Pi CLI），或重跑 `wand service:install` 刷新服务的 PATH",
+      });
+    }
+  }
+
+  /**
+   * A turn threw before the runner reported its own outcome. Re-throws errors that
+   * were already persisted, ignores stale turns, offers the employee-candidate
+   * fallback, and otherwise records the failure on the session.
+   */
+  private async recoverFromSendFailure(
+    id: string,
+    session: SessionSnapshot,
+    prompt: string,
+    requestId: string,
+    error: unknown,
+  ): Promise<SessionSnapshot> {
+    const message = getErrorMessage(error);
+    // Close handlers use this tagged error after they have already persisted
+    // the detailed failure. Re-throw even if an ended-event listener removed
+    // the session synchronously; there is no request-id marker to leak.
+    if (error instanceof PersistedStructuredRunnerError) throw error;
+    const current = this.sessions.get(id);
+    if (!current) throw error;
+    // stop() or a newer turn may have invalidated this execution while its
+    // runner was unwinding. A stale rejection must never fail the new turn.
+    if (!this.isCurrentRequest(id, requestId)) {
+      return current;
+    }
+    const retry = this.retryEmployeeCandidate(id, session, prompt, error);
+    if (retry) return await retry;
+    const failed: SessionSnapshot = error instanceof UnacceptedStructuredInputError
+      ? this.finishStructuredFailure(current, 1, message, error.state)
+      : {
+        ...current,
+        status: "failed",
+        exitCode: 1,
+        endedAt: new Date().toISOString(),
+        pendingEscalation: null,
+        permissionBlocked: false,
+        structuredState: {
+          ...this.settleTurn(id, current.structuredState as StructuredSessionState),
+          inFlight: false,
+          activeRequestId: null,
+          lastError: message,
+        },
+      };
+    this.sessions.set(id, failed);
+    this.saveAuthoritativeSession(failed);
+    if (!this.disposed && error instanceof UnacceptedStructuredInputError
+      && current.automationId?.startsWith("ai-team:")) {
+      // Available before status/ended listeners run. A later turn/stop/delete invalidates this fact.
+      if (this.unacceptedTeamStarts.size >= 1024) {
+        this.unacceptedTeamStarts.delete(this.unacceptedTeamStarts.keys().next().value!);
+      }
+      this.unacceptedTeamStarts.set(id, { requestId, failure: error.failure });
+    }
+    this.emit({
+      type: "status",
+      sessionId: id,
+      data: { status: failed.status, error: message, sessionKind: "structured", queuedMessages: failed.queuedMessages, structuredState: failed.structuredState },
+    });
+    this.emitStructuredSnapshot(failed, "ended");
+    throw error;
   }
 
   /**
@@ -2233,33 +1904,71 @@ export class StructuredSessionManager {
     if (!isSessionProvider(provider)) throw new Error("请选择有效的执行工具。");
     if (engine !== undefined && engine !== "cli" && engine !== "sdk") throw new Error("执行引擎必须是 cli 或 sdk。");
     if (engine === "sdk" && provider !== "pi") throw new Error("Wand Agent 只支持 Pi 结构化会话。");
+    this.requireBlankSessionSelection(session);
+    const updated = this.blankSessionToolSelection(session, provider, engine);
+    if (updated === session) return session;
+    return this.saveBlankSessionSelection(updated);
+  }
+
+  /** 首次发送前显式选择真实员工；同一会话、目录和未发送输入的归属不变。 */
+  setSessionEmployee(sessionId: string, employeeId: string): SessionSnapshot {
+    const session = this.requireSession(sessionId);
+    this.requireBlankSessionSelection(session);
+    const employee = this.storage.getSiliconEmployee(employeeId);
+    if (!employee || employee.archivedAt) throw new Error("硅基员工不存在或已归档。");
+    const selected = selectEmployeeCandidate(employee);
+    if (session.employeeId === employee.id) return session;
+    const role: SessionSnapshot = {
+      ...session,
+      employeeId: employee.id,
+      employeeName: employee.name,
+      employeeAvatar: employee.avatar,
+      systemPrompt: employee.prompt,
+      runtimeSystemPrompt: undefined,
+      employeeCandidates: employee.agents,
+      employeeCandidateIndex: selected.index,
+    };
+    return this.saveBlankSessionSelection(this.blankSessionToolSelection(
+      role, selected.agent.provider, selected.agent.engine ?? "cli", selected.index,
+    ));
+  }
+
+  private requireBlankSessionSelection(session: SessionSnapshot): void {
     if (session.status !== "idle" || session.archived || session.structuredState?.inFlight ||
-        this.pendingRunnerExecutions.has(sessionId) || session.claudeSessionId ||
+        session.structuredState?.activeRequestId ||
+        this.pendingRunnerExecutions.has(session.id) || session.claudeSessionId ||
         session.resumedFromSessionId || session.autoRecovered ||
         (session.messages?.length ?? 0) > 0 || (session.queuedMessages?.length ?? 0) > 0 ||
         session.automationId || (session.sessionSource && session.sessionSource !== "interactive") ||
         this.relayHandlerFor(session)) {
-      throw new Error("只有尚未发送消息的新建空白对话可以更换工具。");
+      throw new Error("只有尚未发送消息的新建空白对话可以更换员工或工具。");
     }
+  }
+
+  private blankSessionToolSelection(
+    session: SessionSnapshot, provider: SessionProvider, engine?: "cli" | "sdk", selectedCandidateIndex?: number,
+  ): SessionSnapshot {
     const candidates = session.employeeCandidates ?? [];
     const currentCandidate = candidates[session.employeeCandidateIndex ?? 0];
     const currentEngine = session.provider === "pi" && (session.structuredState?.engine === "core"
       || (!session.structuredState?.engine && currentCandidate?.provider === "pi" && currentCandidate.engine === "sdk")) ? "sdk" : "cli";
     // 旧客户端只发 provider 时，同 provider 保持原引擎；显式 Pi 选项始终传 cli。
     const targetEngine = provider === "pi" ? engine ?? (session.provider === provider ? currentEngine : "cli") : "cli";
-    if (session.provider === provider && currentEngine === targetEngine) return session;
+    if (selectedCandidateIndex === undefined && session.provider === provider && currentEngine === targetEngine) return session;
     if (targetEngine === "sdk" && session.provider === "pi" && (session.piSettings?.resources?.skills.length
       || session.piSettings?.resources?.mcpServers.length || session.piSettings?.lockedSkills?.length
       || session.piSettings?.autoResources || session.piSettings?.codemodeOverride !== undefined)) {
       throw new Error("Wand Agent 不支持会话级 Skills / MCP、自动选择或 CodeMode 覆盖；请先在 Pi 设置中关闭这些选项再切换。");
     }
-    const resolution = provider === "pi" ? this.resolveNewSessionPiEngine(targetEngine) : undefined;
-    const candidateIndex = candidates.findIndex((candidate) => candidate.provider === provider
+    const resolution = provider === "pi" ? targetEngine === "sdk"
+      ? resolveHarnessEngineSync({ ...this.config.harness, engine: "core" }, "pi", { coreRunnerSupplied: this.coreRunnerSupplied })
+      : { engine: "cli" as const, reason: "Pi 主功能固定使用 CLI JSON" } : undefined;
+    const candidateIndex = selectedCandidateIndex ?? candidates.findIndex((candidate) => candidate.provider === provider
       && (candidate.engine ?? "cli") === targetEngine);
     const candidate = candidateIndex >= 0 ? candidates[candidateIndex] : undefined;
     const runner = defaultStructuredRunner(provider);
     const model = candidate && candidate.model !== "default" ? candidate.model
-      : defaultModelGroupSelector(this.config.modelGroups, provider, getDefaultModelForProvider(this.config, provider)) || getDefaultModelForProvider(this.config, provider) || null;
+      : fallbackProviderModel(this.config, provider) ?? null;
     const effort = normalizeThinkingEffort(candidate?.thinkingEffort ?? this.config.defaultThinkingEffort);
     const thinkingEffort = effort?.includes(":") && !effort.startsWith(`${provider}:`) ? "off" : effort;
     const requestedMode = candidate?.mode ?? session.mode;
@@ -2267,7 +1976,7 @@ export class StructuredSessionManager {
       (requestedMode === "auto-edit" && ["opencode", "grok", "pi"].includes(provider));
     const mode: ExecutionMode = provider === "codex" ? "full-access"
       : unsupportedMode ? "default" : requestedMode;
-    const updated: SessionSnapshot = {
+    return {
       ...session,
       provider,
       runner,
@@ -2285,14 +1994,17 @@ export class StructuredSessionManager {
       structuredState: { ...defaultStructuredState(provider, runner), model: model ?? undefined,
         ...(resolution ? { engine: resolution.engine, engineReason: resolution.reason } : {}) },
     };
-    // 身份、知识归属、任务/目录和候选快照不变；只更新本会话的执行参数。
+  }
+
+  private saveBlankSessionSelection(updated: SessionSnapshot): SessionSnapshot {
     this.storage.saveSession(updated);
-    this.sessions.set(sessionId, updated);
+    this.sessions.set(updated.id, updated);
     this.emit({
       type: "status",
-      sessionId,
+      sessionId: updated.id,
       data: { ...(buildStructuredOutputPayload(updated) as Record<string, unknown>), command: updated.command,
-        mode, autoApprovePermissions: updated.autoApprovePermissions },
+        mode: updated.mode, autoApprovePermissions: updated.autoApprovePermissions,
+        employeeAvatar: updated.employeeAvatar },
     });
     return updated;
   }
@@ -2303,9 +2015,9 @@ export class StructuredSessionManager {
    * 用户在新建会话里选的是两个不同的东西：Pi CLI（`cli`）与 Wand Agent（`sdk`，进程内 harness）。
    * 显式选了 Wand Agent 就必须真的可用：不可用时抛错由路由告诉用户，不静默退回 CLI 冒充。
    */
-  resolveNewSessionPiEngine(engine: "cli" | "sdk" | undefined): EngineResolution {
+  async resolveNewSessionPiEngine(engine: "cli" | "sdk" | undefined): Promise<EngineResolution> {
     if (engine !== "sdk") return { engine: "cli", reason: "Pi 主功能固定使用 CLI JSON" };
-    return resolveHarnessEngineSync({ ...this.config.harness, engine: "core" }, "pi", {
+    return await resolveHarnessEngine({ ...this.config.harness, engine: "core" }, "pi", {
       coreRunnerSupplied: this.coreRunnerSupplied,
     });
   }
@@ -2529,13 +2241,7 @@ export class StructuredSessionManager {
     const session = this.requireSession(id);
     this.requireRecoveryControl(id);
     // 结算中的智能分配还没有 runner：置位取消，结算回来后不得再启动。
-    const pendingAssign = this.autoAssignPending.get(id);
-    if (pendingAssign) {
-      pendingAssign.cancelled = true;
-      this.autoAssignPending.delete(id);
-    }
-    this.interruptedWith.delete(id);
-    this.preserveQueueOnInterrupt.delete(id);
+    this.disposeSession(id, "run");
     // Clearing activeRequestId is the generation barrier: late data/close callbacks
     // from the cancelled runner can no longer mutate this session or a replacement turn.
     // 主动停止只是取消「当前回合」，结构化会话本身并没有结束——置为 idle 而非 stopped。
@@ -2571,11 +2277,6 @@ export class StructuredSessionManager {
   delete(id: string): void {
     this.unacceptedTeamStarts.delete(id);
     this.requireRecoveryControl(id);
-    const pendingAssign = this.autoAssignPending.get(id);
-    if (pendingAssign) {
-      pendingAssign.cancelled = true;
-      this.autoAssignPending.delete(id);
-    }
     const runnerExecution = this.pendingRunnerExecutions.get(id);
     // Invalidate callback ownership before signalling the runner. Cancellation
     // can synchronously wake listeners in some adapter implementations.
@@ -2584,11 +2285,8 @@ export class StructuredSessionManager {
       runnerExecution.interrupt();
       this.releasePendingRunnerExecution(id, runnerExecution);
     }
-    this.clearStreamingCheckpoint(id);
     // 会话被删除后迟到的回合回调必须失效，静默心跳也不能再给一个不存在的会话发事件。
-    this.turnHeartbeat.cancel(id);
-    this.interruptedWith.delete(id);
-    this.preserveQueueOnInterrupt.delete(id);
+    this.disposeSession(id, "session");
     this.storage.deleteSession(id);
     this.logger?.deleteSession(id);
   }
@@ -2683,9 +2381,7 @@ export class StructuredSessionManager {
       type: "status",
       sessionId,
       data: {
-        ...(buildStructuredOutputPayload(session) as Record<string, unknown>),
-        status: session.status,
-        exitCode: session.exitCode,
+        ...structuredQuietStatusData(session),
       },
     });
     return true;
@@ -2781,501 +2477,8 @@ export class StructuredSessionManager {
     session.approvalStats = stats;
   }
 
-  // ---------------------------------------------------------------------------
-  // Streaming codex exec --json execution
-  // ---------------------------------------------------------------------------
-
-  private async runCodexStreaming(
-    sessionId: string,
-    session: SessionSnapshot,
-    prompt: string,
-    requestId: string,
-  ): Promise<void> {
-    let emitTimer: ReturnType<typeof setTimeout> | null = null;
-    const syncSnapshot = (turnState: StructuredRunnerTurnState): void => {
-      const current = this.currentSessionForRequest(sessionId, requestId);
-      if (!current) return;
-      const turn: ConversationTurn = {
-        role: "assistant",
-        content: this.compactContentBlocks([...turnState.blocks], turnState.result),
-        usage: turnState.usage,
-      };
-      const messages = upsertAssistantMessage(current.messages, turn);
-      const patched: SessionSnapshot = {
-        ...current,
-        claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
-        messages,
-        output: turnState.result || current.output,
-        structuredState: this.noteTurnActivity(sessionId, {
-          ...(current.structuredState as StructuredSessionState),
-          model: turnState.model ?? current.structuredState?.model,
-        }),
-      };
-      this.sessions.set(sessionId, patched);
-      this.saveStreamingSnapshot(patched);
-    };
-    const flushEmit = (): void => {
-      if (emitTimer) this.clearStreamEmitTimer(emitTimer);
-      emitTimer = null;
-      const current = this.currentSessionForRequest(sessionId, requestId);
-      if (current) {
-        this.emit({
-          type: "output",
-          sessionId,
-          data: buildIncrementalStructuredPayload(current, this.config.cardDefaults ?? {}),
-        });
-      }
-    };
-    const scheduleEmit = (): void => {
-      if (!emitTimer) {
-        emitTimer = this.trackStreamEmitTimer(setTimeout(flushEmit, STREAM_EMIT_DEBOUNCE_MS));
-      }
-    };
-
-    const execution = startEmployeeKnowledgeRunner(this.storage, this.codexRunner, {
-      session,
-      prompt,
-      env: buildChildEnv(this.config.inheritEnv !== false),
-    }, {
-      isActive: () => this.isCurrentRequest(sessionId, requestId),
-      onStdout: (text) => this.logger?.appendStructuredStdout(sessionId, text),
-      onStderr: (text) => this.logger?.appendStructuredStderr(sessionId, text),
-      onEvent: (event) => this.logger?.appendStreamEvent(sessionId, event),
-      onUpdate: (turnState) => {
-        syncSnapshot(turnState);
-        scheduleEmit();
-      },
-    });
-    this.pendingRunnerExecutions.set(sessionId, execution);
-    this.logger?.appendStructuredSpawn(sessionId, {
-      kind: "codex-exec",
-      provider: "codex",
-      pid: execution.pid,
-      cwd: session.cwd,
-      args: execution.args,
-      prompt: prompt.slice(0, 2048),
-      promptLength: prompt.length,
-      threadId: session.claudeSessionId,
-      spawnedAt: execution.spawnedAt,
-    });
-
-    let result;
-    try {
-      result = await execution.completion;
-    } finally {
-      const released = this.releasePendingRunnerExecution(sessionId, execution);
-      if (released) this.cancelStreamingCheckpointTimer(sessionId);
-    }
-    if (!this.isCurrentRequest(sessionId, requestId)) {
-      if (emitTimer) this.clearStreamEmitTimer(emitTimer);
-      return;
-    }
-    flushEmit();
-
-    this.throwUnacceptedInput(sessionId, result, "codex exec",
-      "（PATH 中找不到 codex 可执行文件；请确认 codex 已安装，或重跑 `wand service:install` 刷新服务的 PATH）");
-
-    this.logger?.appendStructuredSpawn(sessionId, {
-      kind: "codex-exec-close",
-      pid: execution.pid,
-      spawnedAt: execution.spawnedAt,
-      closedAt: new Date().toISOString(),
-      exitCode: result.exitCode,
-      stderrTail: result.stderr.slice(-2048),
-      codexErrors: result.errors,
-      codexTurnFailed: result.primaryError,
-    });
-    const current = this.currentSessionForRequest(sessionId, requestId);
-    if (!current) return;
-
-    const interruptedByUser = this.interruptedWith.has(sessionId);
-    const interruptPrompt = this.interruptedWith.get(sessionId);
-    if ((result.primaryError || (result.exitCode !== 0 && result.exitCode !== null) || result.signal) && !interruptedByUser) {
-      const errorText = this.formatStructuredExitError(
-        "codex exec",
-        result.exitCode,
-        result.signal,
-        { stderr: result.stderr, primary: result.primaryError, extras: result.errors },
-      );
-      const failed = this.finishStructuredFailure(
-        current,
-        typeof result.exitCode === "number" ? result.exitCode : 1,
-        errorText,
-        result.state,
-      );
-      this.sessions.set(sessionId, failed);
-      this.saveAuthoritativeSession(failed);
-      this.emitStructuredSnapshot(failed);
-      this.emitStructuredSnapshot(failed, "ended");
-      throw new PersistedStructuredRunnerError(errorText);
-    }
-
-    const messages = this.buildCompletedAssistantMessages(current, result.state);
-    const keepRunning = !!interruptPrompt;
-    const finished: SessionSnapshot = {
-      ...current,
-      status: keepRunning ? "running" : "idle",
-      exitCode: keepRunning ? null : 0,
-      endedAt: keepRunning ? null : new Date().toISOString(),
-      output: result.state.result,
-      claudeSessionId: result.state.sessionId ?? current.claudeSessionId,
-      messages,
-      queuedMessages: this.resolveQueuedMessagesAfterInterrupt(sessionId, current, interruptPrompt),
-      pendingEscalation: null,
-      permissionBlocked: false,
-      structuredState: {
-        ...this.settleTurn(sessionId, current.structuredState as StructuredSessionState),
-        model: result.state.model ?? current.structuredState?.model,
-        inFlight: false,
-        activeRequestId: null,
-        lastError: null,
-      },
-    };
-    this.sessions.set(sessionId, finished);
-    this.saveAuthoritativeSession(finished);
-    this.emitStructuredSnapshot(finished);
-    if (!keepRunning) this.emitStructuredSnapshot(finished, "ended");
-
-    if (interruptPrompt) {
-      this.interruptedWith.delete(sessionId);
-      this.preserveQueueOnInterrupt.delete(sessionId);
-      setImmediate(() => {
-        this.sendMessage(sessionId, interruptPrompt).catch((error) => {
-          console.error("[WAND] codex interrupt-and-send failed:", error);
-        });
-      });
-      return;
-    }
-    setImmediate(() => { void this.flushNextQueuedMessage(sessionId); });
-  }
-
-  private async runGrokStreaming(
-    sessionId: string,
-    session: SessionSnapshot,
-    prompt: string,
-    requestId: string,
-  ): Promise<void> {
-    let emitTimer: ReturnType<typeof setTimeout> | null = null;
-    const syncSnapshot = (turnState: StructuredRunnerTurnState): void => {
-      const current = this.currentSessionForRequest(sessionId, requestId);
-      if (!current) return;
-      const turn: ConversationTurn = {
-        role: "assistant",
-        content: this.compactContentBlocks([...turnState.blocks], turnState.result),
-        usage: turnState.usage,
-      };
-      const messages = upsertAssistantMessage(current.messages, turn);
-      const patched: SessionSnapshot = {
-        ...current,
-        claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
-        messages,
-        output: turnState.result || current.output,
-        // 每个 provider 帧都是本轮还在活动的证据：刷新 lastActivityAt 并重挂静默窗口。
-        structuredState: this.noteTurnActivity(sessionId, current.structuredState as StructuredSessionState),
-      };
-      this.sessions.set(sessionId, patched);
-      this.saveStreamingSnapshot(patched);
-    };
-    const flushEmit = (): void => {
-      if (emitTimer) this.clearStreamEmitTimer(emitTimer);
-      emitTimer = null;
-      const current = this.currentSessionForRequest(sessionId, requestId);
-      if (current) this.emit({
-        type: "output",
-        sessionId,
-        data: buildIncrementalStructuredPayload(current, this.config.cardDefaults ?? {}),
-      });
-    };
-    const scheduleEmit = (): void => {
-      if (!emitTimer) emitTimer = this.trackStreamEmitTimer(setTimeout(flushEmit, STREAM_EMIT_DEBOUNCE_MS));
-    };
-
-    const execution = startEmployeeKnowledgeRunner(this.storage, this.grokRunner, {
-      session,
-      prompt,
-      env: buildChildEnv(this.config.inheritEnv !== false),
-    }, {
-      isActive: () => this.isCurrentRequest(sessionId, requestId),
-      onStdout: (text) => this.logger?.appendStructuredStdout(sessionId, text),
-      onStderr: (text) => this.logger?.appendStructuredStderr(sessionId, text),
-      onEvent: (event) => this.logger?.appendStreamEvent(sessionId, event),
-      onUpdate: (turnState) => { syncSnapshot(turnState); scheduleEmit(); },
-    });
-    this.pendingRunnerExecutions.set(sessionId, execution);
-    this.logger?.appendStructuredSpawn(sessionId, {
-      kind: "grok-headless",
-      provider: "grok",
-      pid: execution.pid,
-      cwd: session.cwd,
-      args: execution.args,
-      prompt: prompt.slice(0, 2048),
-      promptLength: prompt.length,
-      sessionId: session.claudeSessionId,
-      spawnedAt: execution.spawnedAt,
-    });
-
-    let result;
-    try {
-      result = await execution.completion;
-    } finally {
-      const released = this.releasePendingRunnerExecution(sessionId, execution);
-      if (released) this.cancelStreamingCheckpointTimer(sessionId);
-    }
-    if (!this.isCurrentRequest(sessionId, requestId)) {
-      if (emitTimer) this.clearStreamEmitTimer(emitTimer);
-      return;
-    }
-    flushEmit();
-    this.throwUnacceptedInput(sessionId, result, "grok",
-      "（PATH 中找不到 grok；请安装 Grok Build CLI，或重跑 `wand service:install` 刷新服务 PATH）");
-    this.logger?.appendStructuredSpawn(sessionId, {
-      kind: "grok-headless-close",
-      pid: execution.pid,
-      spawnedAt: execution.spawnedAt,
-      closedAt: new Date().toISOString(),
-      exitCode: result.exitCode,
-      stderrTail: result.stderr.slice(-2048),
-      primaryError: result.primaryError,
-    });
-    const current = this.currentSessionForRequest(sessionId, requestId);
-    if (!current) return;
-    const interruptedByUser = this.interruptedWith.has(sessionId);
-    const interruptPrompt = this.interruptedWith.get(sessionId);
-    if ((result.primaryError || (result.exitCode !== 0 && result.exitCode !== null) || result.signal) && !interruptedByUser) {
-      const errorText = this.formatStructuredExitError(
-        "grok",
-        result.exitCode,
-        result.signal,
-        { stderr: result.stderr, primary: result.primaryError },
-      );
-      const failed = this.finishStructuredFailure(
-        current,
-        typeof result.exitCode === "number" ? result.exitCode : 1,
-        errorText,
-        result.state,
-      );
-      this.sessions.set(sessionId, failed);
-      this.saveAuthoritativeSession(failed);
-      this.emitStructuredSnapshot(failed);
-      this.emitStructuredSnapshot(failed, "ended");
-      throw new PersistedStructuredRunnerError(errorText);
-    }
-    const messages = this.buildCompletedAssistantMessages(current, result.state);
-    const keepRunning = !!interruptPrompt;
-    const finished: SessionSnapshot = {
-      ...current,
-      status: keepRunning ? "running" : "idle",
-      exitCode: keepRunning ? null : 0,
-      endedAt: keepRunning ? null : new Date().toISOString(),
-      output: result.state.result,
-      claudeSessionId: result.state.sessionId ?? current.claudeSessionId,
-      messages,
-      queuedMessages: this.resolveQueuedMessagesAfterInterrupt(sessionId, current, interruptPrompt),
-      pendingEscalation: null,
-      permissionBlocked: false,
-      structuredState: {
-        ...this.settleTurn(sessionId, current.structuredState as StructuredSessionState),
-        model: result.state.model ?? current.structuredState?.model,
-        inFlight: false,
-        activeRequestId: null,
-        lastError: null,
-      },
-    };
-    this.sessions.set(sessionId, finished);
-    this.saveAuthoritativeSession(finished);
-    this.emitStructuredSnapshot(finished);
-    if (!keepRunning) this.emitStructuredSnapshot(finished, "ended");
-    if (interruptPrompt) {
-      this.interruptedWith.delete(sessionId);
-      this.preserveQueueOnInterrupt.delete(sessionId);
-      setImmediate(() => this.sendMessage(sessionId, interruptPrompt).catch((error) => {
-        console.error("[WAND] grok interrupt-and-send failed:", error);
-      }));
-      return;
-    }
-    setImmediate(() => { void this.flushNextQueuedMessage(sessionId); });
-  }
-
-  private async runOpenCodeStreaming(
-    sessionId: string,
-    session: SessionSnapshot,
-    prompt: string,
-    requestId: string,
-  ): Promise<void> {
-    let emitTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const syncSnapshot = (turnState: StructuredRunnerTurnState): void => {
-      const current = this.currentSessionForRequest(sessionId, requestId);
-      if (!current) return;
-      const turn: ConversationTurn = {
-        role: "assistant",
-        content: this.compactContentBlocks([...turnState.blocks], turnState.result),
-        usage: turnState.usage,
-      };
-      const messages = upsertAssistantMessage(current.messages, turn);
-      const patched: SessionSnapshot = {
-        ...current,
-        claudeSessionId: turnState.sessionId ?? current.claudeSessionId,
-        messages,
-        output: turnState.result || current.output,
-        // 每个 provider 帧都是本轮还在活动的证据：刷新 lastActivityAt 并重挂静默窗口。
-        structuredState: this.noteTurnActivity(sessionId, current.structuredState as StructuredSessionState),
-      };
-      this.sessions.set(sessionId, patched);
-      this.saveStreamingSnapshot(patched);
-    };
-    const flushEmit = (): void => {
-      if (emitTimer) this.clearStreamEmitTimer(emitTimer);
-      emitTimer = null;
-      const current = this.currentSessionForRequest(sessionId, requestId);
-      if (current) {
-        this.emit({
-          type: "output",
-          sessionId,
-          data: buildIncrementalStructuredPayload(current, this.config.cardDefaults ?? {}),
-        });
-      }
-    };
-    const scheduleEmit = (): void => {
-      if (!emitTimer) {
-        emitTimer = this.trackStreamEmitTimer(setTimeout(flushEmit, STREAM_EMIT_DEBOUNCE_MS));
-      }
-    };
-
-    const execution = startEmployeeKnowledgeRunner(this.storage, this.openCodeRunner, {
-      session,
-      prompt,
-      env: buildChildEnv(this.config.inheritEnv !== false),
-    }, {
-      isActive: () => this.isCurrentRequest(sessionId, requestId),
-      onStdout: (text) => this.logger?.appendStructuredStdout(sessionId, text),
-      onStderr: (text) => this.logger?.appendStructuredStderr(sessionId, text),
-      onEvent: (event) => this.logger?.appendStreamEvent(sessionId, event),
-      onUpdate: (turnState) => {
-        syncSnapshot(turnState);
-        scheduleEmit();
-      },
-    });
-    this.pendingRunnerExecutions.set(sessionId, execution);
-    this.logger?.appendStructuredSpawn(sessionId, {
-      kind: "opencode-run",
-      provider: "opencode",
-      pid: execution.pid,
-      cwd: session.cwd,
-      args: execution.args,
-      prompt: prompt.slice(0, 2048),
-      promptLength: prompt.length,
-      sessionId: session.claudeSessionId,
-      spawnedAt: execution.spawnedAt,
-    });
-
-    let result;
-    try {
-      result = await execution.completion;
-    } finally {
-      const released = this.releasePendingRunnerExecution(sessionId, execution);
-      if (released) this.cancelStreamingCheckpointTimer(sessionId);
-    }
-    if (!this.isCurrentRequest(sessionId, requestId)) {
-      if (emitTimer) this.clearStreamEmitTimer(emitTimer);
-      return;
-    }
-    flushEmit();
-
-    this.throwUnacceptedInput(sessionId, result, "opencode run",
-      "（PATH 中找不到 opencode；请安装 opencode-ai，或重跑 `wand service:install` 刷新服务 PATH）");
-
-    this.logger?.appendStructuredSpawn(sessionId, {
-      kind: "opencode-run-close",
-      pid: execution.pid,
-      spawnedAt: execution.spawnedAt,
-      closedAt: new Date().toISOString(),
-      exitCode: result.exitCode,
-      stderrTail: result.stderr.slice(-2048),
-      primaryError: result.primaryError,
-    });
-    const current = this.currentSessionForRequest(sessionId, requestId);
-    if (!current) return;
-
-    const interruptedByUser = this.interruptedWith.has(sessionId);
-    const interruptPrompt = this.interruptedWith.get(sessionId);
-    if ((result.primaryError || (result.exitCode !== 0 && result.exitCode !== null) || result.signal) && !interruptedByUser) {
-      const legacyHint = /unknown command|unknown flag|No help topic for 'run'/i.test(result.stderr)
-        ? "\n检测到旧版 OpenCode CLI；请卸载 0.0.x 旧包并安装 `opencode-ai@latest`。"
-        : "";
-      const errorText = this.formatStructuredExitError(
-        "opencode run",
-        result.exitCode,
-        result.signal,
-        { stderr: result.stderr, primary: result.primaryError },
-      ) + legacyHint;
-      const failed = this.finishStructuredFailure(
-        current,
-        typeof result.exitCode === "number" ? result.exitCode : 1,
-        errorText,
-        result.state,
-      );
-      this.sessions.set(sessionId, failed);
-      this.saveAuthoritativeSession(failed);
-      this.emitStructuredSnapshot(failed);
-      this.emitStructuredSnapshot(failed, "ended");
-      throw new PersistedStructuredRunnerError(errorText);
-    }
-
-    const messages = this.buildCompletedAssistantMessages(current, result.state);
-    const keepRunning = !!interruptPrompt;
-    const finished: SessionSnapshot = {
-      ...current,
-      status: keepRunning ? "running" : "idle",
-      exitCode: keepRunning ? null : 0,
-      endedAt: keepRunning ? null : new Date().toISOString(),
-      output: result.state.result,
-      claudeSessionId: result.state.sessionId ?? current.claudeSessionId,
-      messages,
-      queuedMessages: this.resolveQueuedMessagesAfterInterrupt(sessionId, current, interruptPrompt),
-      pendingEscalation: null,
-      permissionBlocked: false,
-      structuredState: {
-        ...this.settleTurn(sessionId, current.structuredState as StructuredSessionState),
-        model: result.state.model ?? current.structuredState?.model,
-        inFlight: false,
-        activeRequestId: null,
-        lastError: null,
-      },
-    };
-    this.sessions.set(sessionId, finished);
-    this.saveAuthoritativeSession(finished);
-    this.emitStructuredSnapshot(finished);
-    if (!keepRunning) this.emitStructuredSnapshot(finished, "ended");
-
-    if (interruptPrompt) {
-      this.interruptedWith.delete(sessionId);
-      this.preserveQueueOnInterrupt.delete(sessionId);
-      setImmediate(() => {
-        this.sendMessage(sessionId, interruptPrompt).catch((error) => {
-          console.error("[WAND] opencode interrupt-and-send failed:", error);
-        });
-      });
-      return;
-    }
-    setImmediate(() => { void this.flushNextQueuedMessage(sessionId); });
-  }
-  // ---------------------------------------------------------------------------
-  // Streaming claude -p execution
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Spawn `claude -p --output-format stream-json` and parse NDJSON lines as
-   * they arrive, emitting incremental WebSocket events so the UI can render
-   * text / thinking / tool_use blocks in real-time.
-   *
-   * Permission handling:
-   * - Non-root + full-access/managed: --permission-mode bypassPermissions
-   * - Non-root + auto-edit: --permission-mode acceptEdits
-   * - Root: --permission-mode acceptEdits + --allowedTools (extends approval
-   *   outside CWD). stdin is always "ignore" — no ACP bidirectional control.
-   */
-  private async runClaudeStreaming(
+  /** One turn lifecycle for every structured adapter; provider protocol reducers stay separate. */
+  private async runStructuredStreaming(
     sessionId: string,
     session: SessionSnapshot,
     prompt: string,
@@ -3337,21 +2540,37 @@ export class StructuredSessionManager {
     const provider = options.provider ?? "claude";
     const commandLabel = options.commandLabel ?? "claude -p";
     const logKind = options.logKind ?? "claude-print";
+    // 只在有多条候选可退的员工会话上看门：单候选会话没有可退的下一条链路，终止它只会丢工作。
+    const candidateChain = !!session.employeeId && (session.employeeCandidates?.length ?? 0) > 1;
+    let startupTimedOut = false;
+    let turnCompleted = false;
+    const disarmStartupWatchdog = (): void => this.disarmCandidateStartupWatchdog(sessionId);
     const execution = startEmployeeKnowledgeRunner(this.storage, runner, {
       session,
       prompt,
       env: buildChildEnv(this.config.inheritEnv !== false),
     }, {
       isActive: () => this.isCurrentRequest(sessionId, requestId),
-      onStdout: (text) => this.logger?.appendStructuredStdout(sessionId, text),
+      onStdout: (text) => {
+        if (text) disarmStartupWatchdog();
+        this.logger?.appendStructuredStdout(sessionId, text);
+      },
       onStderr: (text) => this.logger?.appendStructuredStderr(sessionId, text),
       onEvent: (event) => this.logger?.appendStreamEvent(sessionId, event),
       onUpdate: (turnState) => {
+        disarmStartupWatchdog();
         syncSnapshot(turnState);
         scheduleEmit();
       },
     });
     this.pendingRunnerExecutions.set(sessionId, execution);
+    if (candidateChain) {
+      this.armCandidateStartupWatchdog(sessionId, () => {
+        if (turnCompleted || !this.isCurrentRequest(sessionId, requestId)) return;
+        startupTimedOut = true;
+        execution.interrupt();
+      });
+    }
     this.logger?.appendStructuredSpawn(sessionId, {
       kind: logKind,
       provider,
@@ -3361,6 +2580,7 @@ export class StructuredSessionManager {
       prompt: prompt.slice(0, 2048),
       promptLength: prompt.length,
       claudeSessionId: session.claudeSessionId,
+      ...(provider === "codex" ? { threadId: session.claudeSessionId } : { sessionId: session.claudeSessionId }),
       spawnedAt: execution.spawnedAt,
     });
 
@@ -3368,6 +2588,8 @@ export class StructuredSessionManager {
     try {
       result = await execution.completion;
     } finally {
+      turnCompleted = true;
+      disarmStartupWatchdog();
       const released = this.releasePendingRunnerExecution(sessionId, execution);
       if (released) this.cancelStreamingCheckpointTimer(sessionId);
     }
@@ -3377,8 +2599,20 @@ export class StructuredSessionManager {
     }
     flushEmit();
 
+    // 看门狗只在本轮确实没有产出任何东西时才算「未开始执行」；已经出过内容的那一轮维持原判定。
+    if (startupTimedOut && !hasStructuredExecutionProgress(result.state)) {
+      const unaccepted: StructuredFailure = { kind: "preflight", delivery: "rejected", retryable: true };
+      result = {
+        ...result,
+        inputAccepted: false,
+        primaryError: result.primaryError?.trim()
+          || `${commandLabel} 在 ${EMPLOYEE_CANDIDATE_STARTUP_TIMEOUT_MS / 1000} 秒内没有任何协议输出，本轮未开始执行。`,
+        failure: unaccepted,
+      };
+    }
+
     this.throwUnacceptedInput(sessionId, result, commandLabel,
-      `（PATH 中找不到 ${provider === "qoder" ? "qodercli" : provider === "gemini" ? "gemini" : provider === "pi" ? "pi" : "claude"} 可执行文件；${options.installHint ?? "请确认 claude 已安装，或重跑 `wand service:install` 刷新服务的 PATH"}）`);
+      `（PATH 中找不到 ${providerCliCommand(provider)} 可执行文件；${options.installHint ?? `请确认 ${providerCliCommand(provider)} 已安装，或重跑 wand service:install 刷新服务的 PATH`}）`);
 
     this.logger?.appendStructuredSpawn(sessionId, {
       kind: `${logKind}-close`,
@@ -3387,24 +2621,31 @@ export class StructuredSessionManager {
       closedAt: new Date().toISOString(),
       exitCode: result.exitCode,
       stderrTail: result.stderr.slice(-2048),
+      primaryError: result.primaryError,
+      ...(provider === "codex" ? { codexErrors: result.errors, codexTurnFailed: result.primaryError } : {}),
     });
     const current = this.currentSessionForRequest(sessionId, requestId);
     if (!current) return;
 
     const interruptedByUser = this.interruptedWith.has(sessionId);
-    const interruptedForQuestion = result.stopReason === "ask-user-question";
+    const supportsToolContinuation = provider !== "codex" && provider !== "opencode" && provider !== "grok";
+    const interruptedForQuestion = supportsToolContinuation && result.stopReason === "ask-user-question";
     const failedExit = (result.exitCode !== null && result.exitCode !== 0) || result.signal !== null;
     // A protocol failure remains a failure even if the CLI exits 0 or already produced work.
     // Earlier work is preserved below and must never be replayed on another candidate.
     const failure = result.failure ?? classifyStructuredFailure(result);
     if (failure && !interruptedByUser && !interruptedForQuestion) {
-      const errorText = !failedExit && result.primaryError
+      let errorText = supportsToolContinuation && !failedExit && result.primaryError
         ? result.primaryError!.trim()
         : this.formatStructuredExitError(commandLabel, result.exitCode, result.signal, {
           stderr: result.stderr,
           stdoutTail: result.stdoutTail,
           primary: result.primaryError,
+          extras: result.errors,
         });
+      if (provider === "opencode" && /unknown command|unknown flag|No help topic for 'run'/i.test(result.stderr)) {
+        errorText += "\n检测到旧版 OpenCode CLI；请卸载 0.0.x 旧包并安装 `opencode-ai@latest`。";
+      }
       const failed = this.finishStructuredFailure(
         current,
         failedExit && typeof result.exitCode === "number" ? result.exitCode : 1,
@@ -3478,7 +2719,7 @@ export class StructuredSessionManager {
     const lastToolUse = [...result.state.blocks].reverse().find(
       (block): block is ContentBlock & { type: "tool_use" } => block.type === "tool_use",
     );
-    if (lastToolUse?.name === "ExitPlanMode" && result.state.sessionId) {
+    if (supportsToolContinuation && lastToolUse?.name === "ExitPlanMode" && result.state.sessionId) {
       setImmediate(() => {
         this.sendMessage(sessionId, "Plan approved. Proceed with the implementation.").catch((error) => {
           console.error("[WAND] Auto-continue after ExitPlanMode failed:", error);

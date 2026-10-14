@@ -80,6 +80,15 @@ export function isWandPopupOwnedBy(target: EventTarget | null, owner: string): b
   return false;
 }
 
+/** Visible Portals retain their owner's focus lease, including registered child ownership. */
+export function hasOpenOwnedPopupSurface(owners: readonly string[]): boolean {
+  if (!owners.length || typeof document === "undefined") return false;
+  return Array.from(document.querySelectorAll<HTMLElement>("[data-wand-popup-owner]"))
+    .some((element) => element.getClientRects().length > 0
+      && getComputedStyle(element).visibility !== "hidden"
+      && owners.some((owner) => isWandPopupOwnedBy(element, owner)));
+}
+
 /** Updating a callback must not reorder an already open popup's dismissal lease. */
 export function usePopupDismiss(open: boolean, dismiss: () => void, priority: PopupDismissPriority = "normal"): void {
   const latest = useRef(dismiss);

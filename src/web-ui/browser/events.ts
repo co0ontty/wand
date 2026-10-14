@@ -1,4 +1,4 @@
-import { refreshChatPresentation } from "../react/chat/presentation.js";
+import { refreshChatPresentation } from "../react/chat/presentation-runtime.js";
 import { mountLoginControls } from "./login-controls-adapter.js";
 import { mountComposerSender } from "./composer-sender-adapter.js";
 import { mountBrowserButtons } from "./library-buttons.js";
@@ -9,9 +9,11 @@ import { syncPiSettingsComposer } from "./pi-settings-adapter";
 import "./i18n";
 import { HttpResponseError, parseJsonResponse } from "../react/http-adapter";
 import { imageViewerController } from "../react/image-viewer/controller";
+import { openMessageImage } from "../react/image-viewer/gallery";
 import { getErrorMessage } from "../../error-utils.js";
 import { escapeHtml } from "./utils";
-import { formatInlineResult, scheduleChatRender, setInlineToolImageState } from "./chat-render";
+import { scheduleChatRender } from "./chat-render-loader";
+import { formatInlineResult, setInlineToolImageState } from "./chat-render-model";
 import { applyExpandedState, persistElementExpandState, persistSelectedId, scrollChatToBottom, setPersistedAgentSelection } from "./chat-scroll";
 import { adjustTerminalScale, openFilePreview } from "./file-browser";
 import { attachQueueBarDelegates, bindInputTouchScroll, cancelVoiceRecording, getComposerSendPhase, handleInputBoxBlur, handleInputBoxFocus, handleVoiceMove, refreshInputBoxState, sendOrStart, setupMobileKeyboardHandlers, startVoiceRecording, stopSession, stopVoiceRecording, updateQueueBar } from "./input";
@@ -184,7 +186,8 @@ import { setupVisualViewportHandlers } from "./viewport";
       };
       // 没有服务端路径的内联图（工具返回的截图 / base64 图）只能按 src 放大。
       (window as any).__openImageViewer = function(img: any, label?: any) {
-        if (img) imageViewerController.open(String(img), typeof label === "string" ? label : "");
+        if (img instanceof HTMLImageElement) openMessageImage(img);
+        else if (img) imageViewerController.open(String(img), typeof label === "string" ? label : "");
       };
       // 工具结果内联图片的加载终态：ready 收掉占位行，error 整块隐藏（对齐安卓不渲染失败图）。
       (window as any).__inlineToolImageState = function(img: any, state: any) {
@@ -463,10 +466,10 @@ import { setupVisualViewportHandlers } from "./viewport";
           bindInputTouchScroll(inputBox);
           inputBox.addEventListener("keydown", handleInputBoxKeydown);
           inputBox.addEventListener("paste", handleInputPaste);
-          inputBox.addEventListener("input", function() {
+          inputBox.addEventListener("input", function(event) {
             // INPUT-3: IME 组字期间不把半成品发给 PTY，等 compositionend 再统一发。
             if (state.terminalComposing) return;
-            if (handleInteractiveTextInput(inputBox!)) {
+            if (handleInteractiveTextInput(inputBox!, event as InputEvent)) {
               return;
             }
             refreshInputBoxState(inputBox!);

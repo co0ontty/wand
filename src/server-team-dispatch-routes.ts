@@ -11,6 +11,7 @@ import {
   planTeamDispatch,
   startTeamDispatch,
 } from "./team-dispatch.js";
+import { badRequest, surfaceDomainError } from "./http-error.js";
 
 function sendDispatchError(res: Response, error: unknown): void {
   const message = getErrorMessage(error, "派工失败。");
@@ -20,7 +21,8 @@ function sendDispatchError(res: Response, error: unknown): void {
     res.status(error.status).json({ error: message, code: error.code });
     return;
   }
-  sendRouteError(res, error, "派工失败。", 400);
+  const safeDomainError = surfaceDomainError(error, /^(请先写清这次要做什么（开工说明不能为空）。|团队开工至少需要 \d+ 名员工（含负责人）。|临时派工最多 \d+ 名员工。|请选择工作项目。|临时派工不能在全局暂存工作区运行，请先选择或创建一个项目。|这个项目还没有工作目录，请先选择一个项目。|只能指定一名负责人。|名单里有重复或缺失的员工。|名单里的员工不存在，请重新生成建议。|员工「.+」已归档，不能参与派工。|系统运维员工不参与任务派工。|员工「.+」没有可用的执行候选，请先在员工设置里补上。)$/) ?? error;
+  sendRouteError(res, safeDomainError, "派工失败。", 400);
 }
 
 /**
@@ -34,6 +36,9 @@ export function registerTeamDispatchRoutes(app: Express, deps: {
   decisions: Pick<DecisionService, "evaluate" | "status">;
 }): void {
   app.post("/api/team-dispatch/plan", asyncRoute(async (req, res) => {
+    const abort = new AbortController();
+    const disconnected = (): void => { if (!res.writableEnded) abort.abort(); };
+    res.once("close", disconnected);
     try {
       const body = bodyObject(req.body ?? {});
       const note = text(body.note);
@@ -46,18 +51,19 @@ export function registerTeamDispatchRoutes(app: Express, deps: {
         ...(maxMembers === undefined ? {} : { maxMembers }),
         ...(threshold === undefined ? {} : { threshold }),
         evaluate: (value, caller, signal) => deps.decisions.evaluate(value, caller, signal),
+        signal: abort.signal,
       });
-      res.json(plan);
+      if (!res.destroyed) res.json(plan);
     } catch (error) {
-      sendDispatchError(res, error);
-    }
+      if (!res.destroyed) sendDispatchError(res, error);
+    } finally { res.off("close", disconnected); }
   }));
 
   app.post("/api/team-dispatch/start", asyncRoute(async (req, res) => {
     try {
       const body = bodyObject(req.body ?? {});
       const workspaceId = text(body.workspaceId);
-      if (!workspaceId) throw new Error("请选择工作项目。");
+      if (!workspaceId) throw badRequest("请选择工作项目。");
       const rawMembers = Array.isArray(body.members) ? body.members : [];
       const members = rawMembers.map((raw) => {
         const record = bodyObject(raw);

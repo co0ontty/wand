@@ -4,14 +4,17 @@ import { ChatActivity, ChatActivityEntry, ChatDisclosureBody as DisclosureBody, 
 import { createRoot, type Root } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { Alert, Badge, Button, Card, Collapse, Flex, Tag, Timeline, Typography, theme } from "antd";
-import { FileCard, Think, ThoughtChain } from "@ant-design/x";
+import { FileCard } from "@ant-design/x";
 import { EmployeeAvatar } from "../agents/employee-avatar";
 import { WandIcon } from "../ui";
 import { WandUiProvider } from "../theme";
-import { installStyleSheet } from "../styles";
+import { installChatSurfaceStyles } from "./styles";
+export { installChatSurfaceStyles } from "./styles";
+import { registerChatPresentation } from "./presentation-runtime";
 import { readMotionTokenMs } from "../ui/motion-tokens";
+import { InlineHtmlPreview } from "../local-preview/inline";
 
-type Kind = "bubble" | "call" | "activity" | "tool" | "thinking" | "file" | "agent" | "agent-detail" | "agent-rail" | "agent-process" | "agent-timeline" | "agent-result" | "agent-receipt" | "question" | "section" | "terminal" | "diff" | "inline" | "preview" | "typography" | "notice" | "answer" | "unknown";
+type Kind = "html" | "bubble" | "call" | "activity" | "tool" | "thinking" | "file" | "agent" | "agent-detail" | "agent-rail" | "agent-process" | "agent-timeline" | "agent-result" | "agent-receipt" | "question" | "section" | "terminal" | "diff" | "inline" | "preview" | "typography" | "notice" | "answer" | "unknown";
 interface Projection { root: Root; slots: Map<string, HTMLElement>; kind: Kind; expanded?: boolean; }
 const projections = new Map<HTMLElement, Projection>();
 const replies = new Map<HTMLElement, Root>();
@@ -33,7 +36,7 @@ const slotNames: Partial<Record<Kind, string[]>> = {
   unknown: ["unknown-block-header", "unknown-block-body"],
 };
 
-/** Only the business-owned body crosses the DOM seam; library chrome is owned by React. */
+/** Only the business-owned body crosses the DOM seam; message chrome is owned by Wand. */
 function OwnedNode({ node }: { node?: HTMLElement }): React.ReactElement {
   const ref = React.useRef<HTMLDivElement>(null);
   React.useLayoutEffect(() => { if (node && ref.current && node.parentElement !== ref.current) ref.current.replaceChildren(node); }, [node]);
@@ -60,7 +63,7 @@ function statusColor(status?: string): "error" | "processing" | "warning" | "suc
 }
 const disclosureAnchors = new WeakMap<HTMLElement, () => void>();
 const disclosurePadding = new WeakMap<HTMLElement, string>();
-/** Keep the trigger stationary through the library disclosure's height transition.
+/** Keep the trigger stationary through the disclosure's height transition.
  * Explicit scrolling cancels the anchor immediately; it never follows new output. */
 function preserveDisclosurePosition(control: HTMLElement, change: () => void): void {
   const scroller = control.closest<HTMLElement>(".chat-messages");
@@ -152,68 +155,36 @@ function captureSlots(element: Element, kind: Kind): Map<string, HTMLElement> {
     while (element.firstChild) body.append(element.firstChild);
     slots.set("body", body);
   }
-  if (kind === "bubble") {
-    const body = slots.get("chat-message-content") || slots.get("chat-message-text");
-    const usage = body?.querySelector<HTMLElement>(":scope > .turn-usage-summary");
-    // Capture on BOTH initial mount and every patch. The body being morphed must
-    // not contain a second usage node once its statistics belong to the footer.
-    if (usage) { usage.remove(); slots.set("turn-usage-summary", usage); }
-  }
   return slots;
 }
 
-/** Ant owns message chrome; detached, non-interactive metadata stays a patchable source. */
+/** Wand owns message chrome; detached, non-interactive metadata stays a patchable source. */
 function ChatBubble({ element, slots }: { element: HTMLElement; slots: Map<string, HTMLElement> }): React.ReactElement {
   const user = element.dataset.role === "user";
-  const usage = slots.get("turn-usage-summary");
   const timing = slots.get("chat-message-time");
   const clock = timing?.querySelector("time");
   const duration = textOf(timing, ".chat-message-duration");
-  const values = Array.from(usage?.querySelectorAll<HTMLElement>(".turn-usage-value") || []);
-  const usageKey = usage?.dataset.expandKey || "";
-  const [usageExpanded, setUsageExpanded] = React.useState(usage?.dataset.expanded === "true");
-  React.useEffect(() => setUsageExpanded(usage?.dataset.expanded === "true"), [usageKey, usage?.dataset.expanded]);
   // Android ChatMessageTime：时间行在正文之上，自己的发言靠右；等宽字体、次要色。
   const timeRow = timing ? <span className="chat-message-time">
     {duration ? <span className="chat-message-duration">{duration}</span> : null}
     <time dateTime={clock?.getAttribute("datetime") || undefined} title={timing.title}
       aria-label={clock?.getAttribute("aria-label") || undefined}>{textOf(clock || timing)}</time>
   </span> : null;
-  // Token details remain available without taking a full statistics row on every reply.
-  const usageValues = usage ? <span className="turn-usage-summary" role="status" aria-live="polite"
-    aria-label={usage.getAttribute("aria-label") || undefined}>
-    <span className="turn-usage-icon" aria-hidden="true"><WandIcon name="sigma" size={13}/></span>
-    {values.length ? values.map(value => <span key={value.dataset.chatKey} className="turn-usage-value" title={value.title}>
-      <span className="turn-usage-label">{textOf(value, ".turn-usage-label")}</span>{" "}
-      <span className="turn-usage-number">{textOf(value, ".turn-usage-number") || textOf(value)}</span>
-    </span>)
-      : <span className="turn-usage-value">{textOf(usage)}</span>}
-  </span> : null;
-  const usageRow = usage ? <Collapse ghost size="small" className="turn-usage-disclosure"
-    activeKey={usageExpanded ? ["usage"] : []}
-    onChange={keys => {
-      const expanded = keys.includes("usage");
-      setUsageExpanded(expanded);
-      usage.dataset.expanded = String(expanded);
-      (window as any).__turnUsageSetExpanded?.(usageKey, expanded);
-    }}
-    items={[{ key: "usage", label: "本轮用量", children: usageValues }]}/> : null;
   return <ChatMessage own={user}
     // 助手的回复头部（时间 + 署名 + 收起）由 presentAssistantReply 持有，这里不再重复一份时间行。
     header={user ? timeRow : undefined}
     // 助手回复不设阅读栏宽：横向用满可用宽度（对齐 Android 回复正文），只有自己的发言按气泡收口。
     styles={{ body: { minWidth: 0, width: user ? undefined : "100%", maxWidth: user ? "calc(100% - 44px)" : "100%", marginInlineStart: user ? "auto" : undefined },
-      content: { overflowWrap: "anywhere", ...(user ? {} : { padding: 0 }) },
-      footer: { marginBlockStart: 8, fontVariantNumeric: "tabular-nums", textAlign: "start" } }}
-    content={businessBody(slots.get("chat-message-content") || slots.get("chat-message-text"))}
-    footerPlacement="outer-start"
-    footer={usageRow || undefined}/>;
+      content: { overflowWrap: "anywhere", ...(user ? {} : { padding: 0 }) } }}
+    content={businessBody(slots.get("chat-message-content") || slots.get("chat-message-text"))}/>;
 }
 
 function renderProjection(element: HTMLElement, projection: Projection): void {
   const slots = projection.slots;
   let content: React.ReactNode;
-  if (projection.kind === "bubble") {
+  if (projection.kind === "html") {
+    content = <InlineHtmlPreview previewUrl={element.dataset.htmlPreviewUrl!} downloadUrl={element.dataset.htmlDownloadUrl!} label={element.dataset.htmlLabel}/>;
+  } else if (projection.kind === "bubble") {
     content = <ChatBubble element={element} slots={slots}/>;
   } else if (projection.kind === "file") {
     const open = () => (window as any).__openFilePreview?.(element.dataset.path);
@@ -222,11 +193,11 @@ function renderProjection(element: HTMLElement, projection: Projection): void {
       onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } }}/>
   } else if (projection.kind === "thinking") {
     const expanded = element.classList.contains("expanded");
-    content = <Think loading={element.dataset.loading === "true"} expanded={expanded}
-      title={<Button type="text" aria-expanded={expanded}>深度思考</Button>}
-      onExpand={() => { (window as any).__thinkingToggle(element); renderProjection(element, projection); }}>
-      {element.dataset.thinking}
-    </Think>;
+    content = <ChatActivity expanded={expanded}
+      summary={<><span className="chat-thinking-label">深度思考</span><span className="chat-thinking-status">{element.dataset.loading === "true" ? "思考中" : "已结束"}</span></>}
+      onToggle={event => preserveDisclosurePosition(event.currentTarget, () => { (window as any).__thinkingToggle(element); renderProjection(element, projection); })}>
+      <div className="chat-thinking-content">{element.dataset.thinking}</div>
+    </ChatActivity>;
   } else if (projection.kind === "tool" || projection.kind === "terminal" || projection.kind === "diff") {
     const kind = projection.kind;
     const headerClass = kind === "tool" ? "chat-tool-header" : kind === "terminal" ? "term-header" : "diff-header";
@@ -412,7 +383,7 @@ function renderProjection(element: HTMLElement, projection: Projection): void {
 
 
 /** The message owner keeps the fold choice; Ant owns its single keyboard control. */
-export function presentAssistantReply(element: HTMLElement, key: string, preview: string, expanded: boolean, toggle: (expanded: boolean) => void, meta?: { time?: string; dateTime?: string; duration?: string; author?: string; employee?: { id: string; name?: string; avatar?: string; provider?: string } }): void {
+export function presentAssistantReply(element: HTMLElement, key: string, preview: string, expanded: boolean, toggle: (expanded: boolean) => void, meta?: { time?: string; dateTime?: string; duration?: string; author?: string; employee?: { id: string; name?: string; avatar?: string; provider?: string; engine?: "cli" | "sdk" | "core" } }): void {
   // 署名只是「谁在做这件事」的说明：会话自带员工快照就署员工，团队 relay 的 msg.author 次之，
   // 都取不到才回落品牌标记 + Wand（与 Android AssistantReplyHeader 同一套优先级）。
   const employee = meta?.employee?.id ? meta.employee : null;
@@ -434,7 +405,7 @@ export function presentAssistantReply(element: HTMLElement, key: string, preview
       <span className="assistant-author">
         <span className="assistant-author-avatar" aria-hidden="true">
           {employee
-            ? <EmployeeAvatar employee={{ id: employee.id, name: employee.name || employee.id, avatar: employee.avatar }} provider={employee.provider} size="sm"/>
+            ? <EmployeeAvatar employee={{ id: employee.id, name: employee.name || employee.id, avatar: employee.avatar }} provider={employee.provider} engine={employee.engine} size="lg"/>
             : <span className="assistant-author-spark"><WandIcon name="sparkle" size={14}/></span>}
         </span>
         <span className="assistant-author-name">{authorName}</span>
@@ -473,6 +444,11 @@ export function patchChatPresentation(current: Element, next: Element, morph: (c
   if (!projection) return false;
   if (projection.kind === "unknown") current.removeAttribute("onclick");
   if (projection.kind === "inline") for (const name of ["onclick", "onkeydown", "role", "tabindex", "aria-expanded"]) current.removeAttribute(name);
+  if (projection.kind === "html") {
+    for (const key of ["htmlPreviewUrl", "htmlDownloadUrl", "htmlLabel"]) (current as HTMLElement).dataset[key] = (next as HTMLElement).dataset[key];
+    renderProjection(current as HTMLElement, projection);
+    return true;
+  }
   const fresh = captureSlots(next, projection.kind);
   for (const [name, node] of fresh) {
     const old = projection.slots.get(name);
@@ -490,6 +466,7 @@ export function patchChatPresentation(current: Element, next: Element, morph: (c
 }
 
 function kindOf(element: HTMLElement): Kind {
+  if (element.classList.contains("chat-html-preview")) return "html";
   if (element.classList.contains("chat-file-attachment")) return "file";
   if (element.classList.contains("chat-thinking")) return "thinking";
   if (element.classList.contains("chat-tool-card")) return "tool";
@@ -515,218 +492,19 @@ function kindOf(element: HTMLElement): Kind {
   return "typography";
 }
 
-let chatSurfaceInstalled = false;
+
 
 /** 会话表面样式只装一份：详情层（presentChat）与 IM 层的转录渲染共用同一批 class，
  *  样式表在模块里保持单一来源，IM 层不再另写一套工具行/卡片。 */
-export function installChatSurfaceStyles(): void {
-  if (chatSurfaceInstalled) return;
-  chatSurfaceInstalled = true;
-  installStyleSheet("wand-chat-library-layout", CHAT_SURFACE_STYLES);
-}
 
-const CHAT_SURFACE_STYLES = String.raw`
-    .chat-message[data-x-presentation="bubble"], .chat-activity[data-x-presentation] { display:block; width:100%; min-width:0; padding:0; }
-    .chat-message.assistant-reply-collapsed > :not(.assistant-reply-host) { display:none; }
-    .chat-message-text, .chat-activity-thinking-content { white-space:pre-wrap; overflow-wrap:anywhere; }
-    .chat-process-summary.ant-btn { height:auto; min-height:52px; padding:11px 4px; text-align:left; justify-content:flex-start; white-space:normal; color:var(--text-secondary); font-size:var(--font-size-xs); }
-    .chat-process-summary.ant-btn > div { flex:1; min-width:0; }
-    .chat-process-summary:not(.ant-btn) { display:inline-flex; align-items:center; gap:6px; min-width:0; }
-    /* 运行标记：静态是一枚实心点，运行态在同一个实例里展开成 3×3 并相位流动。
-       几何对齐 Android ToolActivityMark（12dp 标记盒 / 6dp 点 / 步进 4dp）：折叠时九点
-       在中心重合放大成一点，展开时只平移不缩放。动画只由运行态驱动，不做演示用定时。 */
-    .chat-process-summary-dot { flex:0 0 12px; width:12px; height:12px; display:grid; grid-template-columns:repeat(3,2px); grid-template-rows:repeat(3,2px); place-content:center; gap:2px; --mark-x:0px; --mark-y:0px; }
-    .chat-process-summary-dot i { width:2px; height:2px; border-radius:50%; background:currentColor; transform:translate(var(--mark-x),var(--mark-y)) scale(2); transition:transform var(--motion-morph) var(--ease-out-expo); }
-    .chat-process-summary-dot i:nth-child(3n + 1) { --mark-x:4px; }
-    .chat-process-summary-dot i:nth-child(3n) { --mark-x:-4px; }
-    .chat-process-summary-dot i:nth-child(-n + 3) { --mark-y:4px; }
-    .chat-process-summary-dot i:nth-child(n + 7) { --mark-y:-4px; }
-    .chat-activity[data-live="true"] .chat-process-summary-dot,
-    .chat-activity.is-command-running .chat-process-summary-dot,
-    .chat-activity.is-thinking-running .chat-process-summary-dot { color:var(--accent); }
-    .chat-activity[data-live="true"] .chat-process-summary-dot i,
-    .chat-activity.is-command-running .chat-process-summary-dot i,
-    .chat-activity.is-thinking-running .chat-process-summary-dot i { transform:none; animation:wand-activity-mark-flow var(--motion-spin) var(--ease-in-out-smooth) infinite; }
-    .chat-process-summary-dot i:nth-child(3n + 2) { animation-delay:calc(var(--motion-spin) / -3); }
-    .chat-process-summary-dot i:nth-child(3n) { animation-delay:calc(var(--motion-spin) * -2 / 3); }
-    /* Android: 呼吸是 1600ms 单程 + Reverse（3.2s 一周）；这里沿用 Web 既有的持续周期 token。 */
-    @keyframes wand-activity-mark-flow { 0%, 100% { opacity:.3; } 50% { opacity:1; } }
-    .chat-activity-meta { display:inline-flex; flex-wrap:wrap; align-items:baseline; gap:6px; }
-    .chat-activity-command-time { color:var(--text-secondary); font-variant-numeric:tabular-nums; }
-    .chat-activity-error { color:color-mix(in srgb,var(--ant-color-error-text-active,var(--danger)) 80%,var(--text-primary)); }
-    .chat-activity-menu { display:block; opacity:1; pointer-events:auto; }
-    .chat-activity-menu-inner { overflow:visible; }
-    /* Android：摘要下方按内容长高，最多占聊天视口的 1/3（120–240px），内部滚动。 */
-    .chat-activity-timeline { max-height:var(--chat-activity-panel-height,240px); box-sizing:border-box; overflow:auto; overscroll-behavior:contain; overflow-anchor:none; scrollbar-gutter:stable; padding:4px; --chat-call-dot-center:17px; }
-    .chat-call .ant-thought-chain-node-box { flex:1; min-width:0; }
-    .chat-call-detail { min-width:0; overflow-wrap:anywhere; }
-    /* 时间线竖线只连接首末状态点：单条活动不画贯穿整卡的长线（对齐 Android activityTimelineRailBounds）。 */
-    .chat-call { position:relative; }
-    .chat-call::before { content:""; position:absolute; inset-block:0; inset-inline-start:6px; width:1px; background:var(--border-subtle); }
-    /* 17px = 首行上边距（8px）+ 行高的一半（9px），首末行按点心收口。 */
-    .chat-call:first-child::before { top:var(--chat-call-dot-center,15px); }
-    .chat-call:last-child::before { bottom:calc(100% - var(--chat-call-dot-center,15px)); }
-    /* 左侧状态点：颜色承担状态（失败/运行/完成/未返回），右侧不再写状态字样。 */
-    .chat-call-mark { display:block; width:6px; height:6px; margin-inline-start:3px; border-radius:50%; background:var(--text-muted); }
-    .chat-call[data-status="error"] .chat-call-mark { background:var(--danger); }
-    .chat-call[data-status="running"] .chat-call-mark { background:var(--accent); }
-    .chat-call[data-status="complete"] .chat-call-mark { background:var(--success); }
-    /* 行高按内容档位固定：调用行留出「标签 + 输入 + 结果」三行，思考轮次单行紧凑
-       （对齐 Android 的 ACTIVITY_CALL_ROW_MIN_HEIGHT / ACTIVITY_THINKING_ROW_MIN_HEIGHT）。 */
-    .chat-call-button.ant-btn { height:auto; min-height:44px; padding:8px 0; text-align:left; justify-content:flex-start; align-items:flex-start; white-space:normal; gap:8px; transition:background-color var(--motion-fast) var(--ease-in-out-smooth); }
-    .chat-call[data-tool-ids] .chat-call-button.ant-btn { min-height:78px; }
-    /* 行高亮：运行中与已展开用品牌色 5%，失败行用危险色 5%（对齐 Android activityEntryHighlight）。 */
-    .chat-call[data-status="running"] .chat-call-button, .chat-call[data-expanded="true"] .chat-call-button { background:color-mix(in srgb,var(--accent) 5%,transparent); }
-    .chat-call[data-status="error"] .chat-call-button { background:color-mix(in srgb,var(--danger) 5%,transparent); }
-    .chat-call-copy { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
-    .chat-call-line { display:flex; align-items:baseline; gap:6px; min-width:0; line-height:18px; }
-    .chat-call-time, .chat-call-preview, .chat-call-result { font-family:var(--font-mono); font-size:var(--font-size-2xs); line-height:16px; color:var(--text-muted); }
-    .chat-call-label, .chat-call-preview, .chat-call-result { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    /* 摘录行常驻：没有内容时也占一行，迟到结果不会把行撑高。 */
-    .chat-call-preview, .chat-call-result { min-height:16px; }
-    .chat-call-line .chat-call-label { flex:1; min-width:0; }
-    .chat-call-label { font-size:var(--font-size-xs); font-weight:var(--font-weight-medium); color:var(--text-secondary); }
-    .chat-call[data-status="running"] .chat-call-label, .chat-call[data-expanded="true"] .chat-call-label { color:var(--text-primary); }
-    .chat-call-result[data-error] { color:var(--danger); }
-    .chat-call[data-thinking-entry] .chat-call-preview, .chat-call[data-thinking-entry] .chat-call-result { white-space:normal; -webkit-line-clamp:2; -webkit-box-orient:vertical; display:-webkit-box; }
-    .chat-disclosure-chevron { display:inline-flex; flex-shrink:0; margin-inline-start:auto; transition:transform var(--motion-normal) var(--ease-out-expo); }
-    .chat-disclosure-chevron[data-expanded="true"] { transform:rotate(180deg); }
-    .chat-disclosure-body { display:grid; grid-template-rows:0fr; opacity:0; transition:grid-template-rows var(--motion-normal) var(--ease-out-expo),opacity var(--motion-fast) var(--ease-in-out-smooth); }
-    .chat-disclosure-body[data-expanded="true"] { grid-template-rows:1fr; opacity:1; }
-    .chat-disclosure-body > div { min-height:0; overflow:hidden; }
-    .chat-disclosure-body .chat-tool-body, .chat-disclosure-body .diff-body { padding:12px; }
-    .chat-activity-detail-content { padding:8px 4px 12px; }
-    .chat-activity-detail-section h4 { margin:0 0 6px; font-size:var(--font-size-xs); color:var(--text-secondary); font-weight:500; }
-    .chat-activity-detail-section pre, .tool-use-content, .tool-use-result-content { white-space:pre-wrap; overflow-wrap:anywhere; font-family:var(--font-mono); max-height:320px; overflow:auto; font-size:var(--font-size-xs); }
-    .chat-activity-thinking-content { font-size:var(--font-size-sm); line-height:1.65; }
-    .agent-run-body[aria-hidden="true"] { display:none; }
-    /* 内联工具图片（Read 读图 / 工具结果截图）：图片拿到真实尺寸前是 0×0，所以加载期间由占位行
-       给出反馈，加载完收掉、失败整块隐藏（对齐 Android WandAsyncToolImage 的 onError 不渲染）。
-       图片是本地文件或内联 base64，没有可信的字节进度，转圈只表示「正在取图」。 */
-    .inline-tool-image { display:block; min-width:0; margin:8px 0; }
-    .inline-tool-image[data-image-state="error"] { display:none; }
-    .inline-tool-image-loading { display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border:1px dashed var(--border-subtle); border-radius:var(--radius-md); color:var(--text-secondary); font-size:var(--font-size-2xs); }
-    .inline-tool-image-spinner { width:12px; height:12px; border-radius:50%; border:2px solid color-mix(in srgb,currentColor 22%,transparent); border-top-color:currentColor; animation:wand-tool-icon-spin var(--motion-spin) linear infinite; }
-    .inline-tool-image[data-image-state="ready"] .inline-tool-image-loading { display:none; }
-    .inline-tool-image-thumb { max-width:100%; max-height:320px; object-fit:contain; object-position:left center; cursor:pointer; }
-    .inline-tool-image-thumb:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
-    .chat-tool-card, .inline-terminal, .inline-diff, .agent-run { width:100%; min-width:0; }
-    .chat-tool-trigger.ant-btn { height:40px; min-width:0; justify-content:flex-start; text-align:left; gap:8px; padding:6px 8px; }
-    /* Android ToolCard 头部：34dp 状态图标槽 + 标题/摘要两行 + 箭头，去掉右侧状态字样。 */
-    .chat-tool-trigger-card.ant-btn { height:auto; min-height:54px; padding:10px 12px; gap:10px; align-items:center; }
-    .chat-tool-icon-slot { position:relative; flex:none; width:34px; height:34px; border-radius:9px; display:grid; place-items:center; background:color-mix(in srgb,var(--text-muted) 11%,transparent); color:var(--text-secondary); transition:background-color var(--motion-fast) var(--ease-in-out-smooth), color var(--motion-fast) var(--ease-in-out-smooth); }
-    .chat-tool-icon-slot[data-status="running"] { background:color-mix(in srgb,var(--accent) 11%,transparent); color:var(--accent); }
-    .chat-tool-icon-slot[data-status="success"] { background:color-mix(in srgb,var(--success) 11%,transparent); color:var(--success); }
-    .chat-tool-icon-slot[data-status="error"] { background:color-mix(in srgb,var(--danger) 11%,transparent); color:var(--danger); }
-    .chat-tool-icon-progress, .chat-tool-icon-glyph { position:absolute; inset:0; display:grid; place-items:center; transition:opacity var(--motion-morph) var(--ease-out-expo), transform var(--motion-morph) var(--ease-out-expo); }
-    .chat-tool-icon-progress { opacity:0; transform:rotate(90deg) scale(.78); }
-    .chat-tool-icon-progress::before { content:""; box-sizing:border-box; width:16px; height:16px; border-radius:50%; border:2px solid color-mix(in srgb,currentColor 22%,transparent); border-top-color:currentColor; }
-    /* 运行态：进度环淡入并转响，工具图标旋转缩小淡出；结果到达后沿同一曲线倒放（同一个实例）。 */
-    .chat-tool-icon-slot[data-status="running"] .chat-tool-icon-progress { opacity:1; transform:none; }
-    .chat-tool-icon-slot[data-status="running"] .chat-tool-icon-progress::before { animation:wand-tool-icon-spin var(--motion-spin) linear infinite; }
-    .chat-tool-icon-slot[data-status="running"] .chat-tool-icon-glyph { opacity:0; transform:rotate(90deg) scale(.78); }
-    @keyframes wand-tool-icon-spin { to { transform:rotate(360deg); } }
-    .chat-tool-head { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; text-align:start; }
-    .chat-tool-title { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .chat-tool-summary { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; font-family:var(--font-mono); font-size:var(--font-size-2xs); line-height:1.4; color:var(--text-secondary); }
-    .chat-tool-subtitle { flex:1; min-width:0; text-align:left; font-size:var(--font-size-xs); }
-    .chat-tool-error-preview { padding-inline:8px; font-size:var(--font-size-xs); }
-    .decision-result-load { width:12em; max-width:100%; }
-    .decision-tool-card[data-decision-result-window="true"] .tool-use-result-content { height:160px; overflow:auto; }
-    .chat-tool-surface { border-bottom:1px solid var(--border-subtle); }
-    /* Android 工具卡是一张 14dp 圆角的描边卡，不是只有一条分隔线的裸行。 */
-    .chat-tool-surface.chat-tool-card-surface { border:1px solid var(--border-subtle); border-radius:var(--radius-lg); background:var(--bg-surface); overflow:hidden; }
-    .ant-btn.agent-run-summary, .ant-btn.agent-run-agent { height:auto; text-align:left; white-space:normal; }
-    /* 头部（时间 + 署名）与正文都占满整行；正文不再压成窄阅读栏。 */
-    .assistant-reply-host { font-size:var(--font-size-sm); width:100%; min-width:0; }
-    /* Metadata shares one compact row; full time/duration stays available on the clock. */
-    .assistant-reply-head { display:flex; flex-direction:column; gap:6px; width:100%; min-width:0; }
-    .chat-message-time { display:inline-flex; align-items:center; gap:8px; padding:2px 8px; font-family:var(--font-mono); font-size:var(--font-size-2xs); font-weight:var(--font-weight-medium); color:var(--text-secondary); font-variant-numeric:tabular-nums; }
-    .chat-message.user .ant-bubble-header { display:flex; justify-content:flex-end; }
-    .assistant-reply-disclosure.ant-btn { height:auto; min-height:44px; padding:5px 8px; border-radius:var(--radius-md); justify-content:flex-start; gap:8px; text-align:left; color:var(--text-primary); }
-    /* 收起态用弱底色交代「这里折起来了」，展开态回到透明标题行（对齐 Android AssistantReplyHeader）。 */
-    .chat-message.assistant-reply-collapsed .assistant-reply-disclosure.ant-btn { background:color-mix(in srgb,var(--bg-secondary) 58%,transparent); }
-    .assistant-author { display:inline-flex; align-items:center; gap:8px; flex:0 1 auto; min-width:0; }
-    .assistant-author-avatar { display:grid; place-items:center; width:26px; height:26px; flex:none; }
-    .assistant-author-avatar .ant-avatar { border-radius:50%; }
-    .assistant-author-spark { display:grid; place-items:center; width:26px; height:26px; border-radius:50%; background:color-mix(in srgb,var(--accent) 14%,transparent); color:var(--accent); }
-    .assistant-author-name { font-size:var(--font-size-xs); font-weight:var(--font-weight-semibold); color:var(--text-primary); max-width:16em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .assistant-author-preview { flex:1; min-width:0; font-size:var(--font-size-2xs); font-weight:400; color:var(--text-secondary); text-align:start; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .assistant-author-space { flex:1; min-width:0; }
-    .assistant-reply-action { flex:none; font-size:var(--font-size-2xs); font-weight:var(--font-weight-semibold); color:var(--text-primary); }
-    /* Android UsageSummaryRow：回复尾部独立一行的小字用量（等宽、次要色、左对齐）。 */
-    .turn-usage-summary { display:inline-flex; align-items:center; flex-wrap:wrap; gap:4px 14px; padding:4px 0; font-size:var(--font-size-xs); color:var(--text-secondary); font-variant-numeric:tabular-nums; }
-    .turn-usage-icon { display:inline-flex; flex:none; width:13px; height:13px; color:var(--text-secondary); }
-    .turn-usage-value { display:inline-flex; align-items:baseline; gap:5px; white-space:nowrap; }
-    .turn-usage-number { font-family:var(--font-mono); color:var(--text-primary); }
-    .turn-usage-disclosure.ant-collapse { width:100%; }
-    .turn-usage-disclosure.ant-collapse > .ant-collapse-item > .ant-collapse-header { padding:4px 0; color:var(--text-secondary); font-size:var(--font-size-xs); }
-    .turn-usage-disclosure.ant-collapse > .ant-collapse-item > .ant-collapse-content > .ant-collapse-content-box { padding:0; }
-    @media (pointer:coarse) {
-      .turn-usage-disclosure.ant-collapse > .ant-collapse-item > .ant-collapse-header { min-height:44px; box-sizing:border-box; align-items:center; }
-      .chat-message-time { padding-inline:0; }
-    }
-    .agent-run-surface .ant-card-head { min-height:0; padding:0; }
-    .agent-run-surface .ant-card-head-title { padding:0; }
-    .agent-run-summary.ant-btn { padding:10px 12px; gap:8px; align-items:flex-start; border-radius:var(--radius-md); }
-    .agent-run-summary > .ant-badge { padding-block-start:3px; }
-    .agent-run-summary-copy { display:flex; flex-direction:column; gap:4px; flex:1; min-width:0; }
-    .agent-run-summary-line { display:flex; align-items:baseline; gap:8px; min-width:0; }
-    .agent-run-title { flex:1; min-width:0; overflow-wrap:anywhere; font-size:var(--font-size-xs); font-weight:500; }
-    .agent-run-status-label, .agent-run-agent-status { flex:none; font-size:var(--font-size-xs); }
-    .agent-run-context { display:flex; gap:8px; flex-wrap:wrap; font-size:var(--font-size-2xs); font-weight:400; color:var(--text-secondary); }
-    .agent-run-latest { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--font-size-xs); font-weight:400; }
-    .agent-run-summary .chat-disclosure-chevron { padding-block-start:3px; }
-    .agent-run-agent.ant-btn { padding:6px 8px; gap:8px; align-items:center; }
-    .agent-run-agent.is-selected { background:var(--bg-secondary); }
-    .agent-run-agent-copy { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; text-align:start; }
-    .agent-run-agent-name { font-size:var(--font-size-xs); overflow-wrap:anywhere; }
-    .agent-run-agent-type, .agent-run-output-label { font-size:var(--font-size-2xs); color:var(--text-secondary); }
-    .agent-run-detail-task { min-width:0; overflow-wrap:anywhere; font-size:var(--font-size-xs); }
-    .agent-run-output { min-width:0; overflow-wrap:anywhere; }
-    .agent-run-process .ant-collapse-header { padding:6px 0 !important; color:var(--text-secondary); font-size:var(--font-size-xs); }
-    .agent-run-process .ant-collapse-content-box { padding-inline:0 !important; }
-    .agent-run-receipt-row { display:flex; flex-wrap:wrap; gap:4px 8px; font-size:var(--font-size-xs); }
-    .agent-run-receipt-row code { overflow-wrap:anywhere; }
-    /* 自己的发言：品牌色 13% 拼接底 + 品牌色 24% 描边 + 右下小圆角尾巴（对齐 Android UserBubble）。 */
-    .chat-message.user .ant-bubble-content { padding:8px 13px; /* 15px/21px：与 Android UserBubble 同一档正文 */ border-radius:20px 20px 6px 20px; border:1px solid color-mix(in srgb,var(--accent) 24%,transparent); background:color-mix(in srgb,var(--accent) 13%,var(--bg-surface)); font-size:15px; line-height:21px; }
-    .chat-resource-selection { font-size:var(--font-size-xs); overflow-wrap:anywhere; }
-    .chat-process-summary.ant-btn, .chat-activity-command-time, .chat-call-time, .chat-tool-subtitle.ant-typography, .chat-resource-selection { color:color-mix(in srgb,var(--text-secondary) 88%,var(--text-primary)); }
-    @media (max-width:640px) { .chat-tool-trigger.ant-btn { min-height:44px; } }
-    /* reduce-motion：不流动、不旋转，只保留状态色，和 Android WandStatusIconSlot / ToolActivityMark 一致。 */
-    @media (prefers-reduced-motion:reduce) { .chat-disclosure-body, .chat-disclosure-chevron { transition:none; } .inline-tool-image-spinner { animation:none; } .chat-process-summary-dot i, .chat-tool-icon-progress, .chat-tool-icon-glyph, .chat-call-button.ant-btn { transition:none; }
-      .chat-activity[data-live="true"] .chat-process-summary-dot i,
-      .chat-activity.is-command-running .chat-process-summary-dot i,
-      .chat-activity.is-thinking-running .chat-process-summary-dot i { animation:none; transform:translate(var(--mark-x),var(--mark-y)) scale(2); }
-      .chat-tool-icon-slot[data-status="running"] .chat-tool-icon-progress { opacity:0; }
-      .chat-tool-icon-slot[data-status="running"] .chat-tool-icon-progress::before { animation:none; }
-      .chat-tool-icon-slot[data-status="running"] .chat-tool-icon-glyph { opacity:1; transform:none; } }
-    .agent-run-detail, .agent-run-agent-body { display:grid; gap:12px; }
-    .agent-run-body-inner { display:grid; gap:12px; }
-    .ask-user-options { display:grid; gap:8px; }
-    .diff-columns { display:flex; overflow:auto; }
-    .diff-col { flex:1; min-width:0; white-space:pre-wrap; font-family:monospace; }
-    .diff-remove { color:var(--danger); } .diff-add { color:var(--success); }
-    .term-output { white-space:pre-wrap; overflow-wrap:anywhere; font-family:monospace; }
-    .chat-messages img { max-width:100%; height:auto; }
-    [data-composer-sender] { width:100%; min-width:0; }
-    /* IM 层的转录（conversations/activity.tsx）直接铺在消息气泡里：与详情层共用同一批
-       .chat-call / .chat-process-summary / .chat-tool-* 规则，只少一层有界内滚动与缩进。 */
-    .chat-activity-inline { display:flex; flex-direction:column; gap:2px; }
-    .chat-activity-rows { display:flex; flex-direction:column; gap:2px; padding-inline-start:20px; }
-    .chat-call-inline { display:flex; align-items:flex-start; gap:8px; }
-    .chat-process-summary-plain { display:flex; align-items:center; gap:6px; width:100%; min-width:0; padding:6px 0; border:0; background:transparent; text-align:left; font:inherit; color:color-mix(in srgb,var(--text-secondary) 88%,var(--text-primary)); font-size:var(--font-size-xs); cursor:pointer; }
-    .chat-call-button-plain { display:flex; align-items:flex-start; gap:8px; width:100%; min-width:0; padding:6px 4px; border:0; border-radius:var(--radius-md); background:transparent; text-align:left; font:inherit; color:inherit; cursor:pointer; }
-    .chat-call-inline .chat-call-copy { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
-    .chat-call-inline .chat-disclosure-chevron { margin-inline-start:auto; }
-    .chat-call-inline .chat-disclosure-body { flex-basis:100%; }
-  `;
+
+
 
 export function presentChat(root: HTMLElement): void {
   installChatSurfaceStyles();
   for (const [host, root] of replies) if (!host.isConnected) { root.unmount(); replies.delete(host); }
   for (const [element, projection] of projections) if (!element.isConnected) { projection.root.unmount(); projections.delete(element); }
-  const targets = root.querySelectorAll<HTMLElement>(".chat-message[data-role], .chat-activity, .chat-call, .chat-tool-card, .chat-thinking, .chat-file-attachment, .agent-run, .agent-run-rail, .agent-run-detail-panel, .agent-run-process, .agent-run-timeline, .agent-run-result, .agent-run-receipt, .agent-run-waiting, .ask-user-question-group, .inline-terminal, .inline-diff, .inline-tool, .tool-preview, .chat-activity-detail-section, .chat-activity-thinking-content, .chat-activity-loading, .chat-activity-pending-detail, .tool-content-error, .tool-use-downgrade-chip, .ask-user-option-readonly, .unknown-block");
+  const targets = root.querySelectorAll<HTMLElement>(".chat-html-preview, .chat-message[data-role], .chat-activity, .chat-call, .chat-tool-card, .chat-thinking, .chat-file-attachment, .agent-run, .agent-run-rail, .agent-run-detail-panel, .agent-run-process, .agent-run-timeline, .agent-run-result, .agent-run-receipt, .agent-run-waiting, .ask-user-question-group, .inline-terminal, .inline-diff, .inline-tool, .tool-preview, .chat-activity-detail-section, .chat-activity-thinking-content, .chat-activity-loading, .chat-activity-pending-detail, .tool-content-error, .tool-use-downgrade-chip, .ask-user-option-readonly, .unknown-block");
   for (const element of targets) {
     if (projections.has(element) || element.hidden || !element.isConnected || isDeferredChatContent(element)) continue;
     const kind = kindOf(element);
@@ -734,7 +512,8 @@ export function presentChat(root: HTMLElement): void {
     if (kind === "inline") for (const name of ["onclick", "onkeydown", "role", "tabindex", "aria-expanded"]) element.removeAttribute(name);
     const slots = captureSlots(element, kind);
     if (kind === "bubble" && !slots.has("chat-message-text") && !slots.has("chat-message-content")) continue;
-    const host = document.createElement("div");
+    const host = document.createElement(kind === "html" ? "span" : "div");
+    if (kind === "html") element.replaceChildren();
     // The first projection happens before interaction. Subsequent morphs keep these exact nodes attached.
     for (const node of slots.values()) node.remove();
     element.prepend(host);
@@ -743,3 +522,5 @@ export function presentChat(root: HTMLElement): void {
     renderProjection(element, projection);
   }
 }
+
+registerChatPresentation({ presentChat, refreshChatPresentation, patchChatPresentation });

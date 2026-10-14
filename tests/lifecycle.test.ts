@@ -174,21 +174,23 @@ test("ProcessManager dispose clears timers, kills PTYs, flushes, and rejects new
   fakePty.emitData("pending output");
 
   const internals = manager as unknown as {
-    archiveTimer: NodeJS.Timeout | null;
+    ptyForegroundTimer: NodeJS.Timeout | null;
     persistDebounceTimers: Map<string, NodeJS.Timeout>;
     sessions: Map<string, {
-      initialInputTimer?: NodeJS.Timeout | null;
-      claudeTaskDiscoveryTimer?: NodeJS.Timeout | null;
-      codexSessionDiscoveryTimer?: NodeJS.Timeout | null;
+      timers: {
+        initialInput: NodeJS.Timeout | null;
+        hasDiscovery(kind: "claude" | "codex" | "opencode"): boolean;
+        startDiscovery(kind: "claude" | "codex" | "opencode", attempt: () => boolean): void;
+      };
     }>;
   };
   const record = internals.sessions.get(started.id)!;
-  record.initialInputTimer = setTimeout(() => {}, 60_000);
-  record.claudeTaskDiscoveryTimer = setTimeout(() => {}, 60_000);
-  record.codexSessionDiscoveryTimer = setTimeout(() => {}, 60_000);
-  record.initialInputTimer.unref?.();
-  record.claudeTaskDiscoveryTimer.unref?.();
-  record.codexSessionDiscoveryTimer.unref?.();
+  record.timers.initialInput = setTimeout(() => {}, 60_000);
+  record.timers.initialInput.unref?.();
+  record.timers.startDiscovery("claude", () => false);
+  record.timers.startDiscovery("codex", () => false);
+  assert.equal(record.timers.hasDiscovery("claude"), true);
+  assert.equal(record.timers.hasDiscovery("codex"), true);
   assert.equal(internals.persistDebounceTimers.size, 1);
 
   manager.dispose();
@@ -197,11 +199,12 @@ test("ProcessManager dispose clears timers, kills PTYs, flushes, and rejects new
   assert.equal(fakePty.killed, true);
   assert.equal(manager.get(started.id)?.status, "stopped");
   assert.equal(storage.getSession(started.id)?.status, "stopped");
-  assert.equal(internals.archiveTimer, null);
+  assert.equal(internals.ptyForegroundTimer, null);
+  assert.equal("archiveTimer" in manager, false, "retention scheduling belongs to the server retention service");
   assert.equal(internals.persistDebounceTimers.size, 0);
-  assert.equal(record.initialInputTimer, null);
-  assert.equal(record.claudeTaskDiscoveryTimer, null);
-  assert.equal(record.codexSessionDiscoveryTimer, null);
+  assert.equal(record.timers.initialInput, null);
+  assert.equal(record.timers.hasDiscovery("claude"), false);
+  assert.equal(record.timers.hasDiscovery("codex"), false);
   await assert.rejects(manager.start("opencode", root, "default"), /disposed/);
   assert.throws(() => manager.sendInput(started.id, "late input"), /disposed/);
 });
@@ -233,7 +236,6 @@ test("StructuredSessionManager dispose interrupts active runner work and clears 
   await waitFor(() => runner.starts === 1, "runner did not start");
 
   const internals = manager as unknown as {
-    archiveTimer: NodeJS.Timeout | null;
     streamEmitTimers: Set<NodeJS.Timeout>;
   };
   const deferredTimer = setTimeout(() => {}, 60_000);
@@ -244,7 +246,7 @@ test("StructuredSessionManager dispose interrupts active runner work and clears 
   manager.dispose();
 
   assert.equal(runner.interruptCalls, 1);
-  assert.equal(internals.archiveTimer, null);
+  assert.equal("archiveTimer" in manager, false, "structured manager must not own another retention policy");
   assert.equal(internals.streamEmitTimers.size, 0);
   assert.equal(manager.get(session.id)?.status, "idle");
   assert.equal(manager.get(session.id)?.structuredState?.inFlight, false);

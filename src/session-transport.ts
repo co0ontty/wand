@@ -1,4 +1,5 @@
 import type { ConversationTurn, SessionSnapshot } from "./types.js";
+import { compactTransportAvatar } from "./fixed-employee-avatar.js";
 import { enrichStructuredMessages, WAND_PROTOCOL_VERSION } from "./structured-client-protocol.js";
 import { normalizeTurnAnchors } from "./structured-provider-common.js";
 import {
@@ -57,15 +58,20 @@ export function resolveSessionDisplayTitle(
   return "会话";
 }
 
-/** Explicit allow-list separating the server's session object from its wire DTO. */
-function sessionBase(snapshot: SessionSnapshot): SessionBaseDTO {
+/**
+ * Explicit allow-list separating the server's session object from its wire DTO.
+ * queuedMessages, piSettings and worktreeMergeInfo stay on this DTO: Web loads
+ * GET /api/sessions as the live session, and iOS decodes /api/session-list into
+ * the same snapshot. Nested task and workspace cards already use a slimmer summary.
+ */
+function sessionBase(snapshot: SessionSnapshot, avatarMode: "full" | "compact" = "full"): SessionBaseDTO {
   return {
     id: snapshot.id,
     sessionSource: snapshot.sessionSource,
     automationId: snapshot.automationId,
     employeeId: snapshot.employeeId,
     employeeName: snapshot.employeeName,
-    employeeAvatar: snapshot.employeeAvatar,
+    employeeAvatar: avatarMode === "compact" ? compactTransportAvatar(snapshot.employeeAvatar) : snapshot.employeeAvatar,
     employeeCandidateIndex: snapshot.employeeCandidateIndex,
     sessionKind: snapshot.sessionKind,
     provider: snapshot.provider,
@@ -126,8 +132,11 @@ function sessionBase(snapshot: SessionSnapshot): SessionBaseDTO {
   };
 }
 
-export function toSessionListItemDTO(snapshot: SessionSnapshot): SessionListItemDTO {
-  return { ...sessionBase(snapshot), output: "" };
+export function toSessionListItemDTO(
+  snapshot: SessionSnapshot,
+  options: { avatar?: "full" | "compact" } = {},
+): SessionListItemDTO {
+  return { ...sessionBase(snapshot, options.avatar ?? "full"), output: "" };
 }
 
 export interface SessionDetailDTOOptions {

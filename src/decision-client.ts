@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
-import { DECISION_MAX_BYTES, DecisionError, parseDecisionRequest, parseDecisionResult, type DecisionRequest } from "./decision-types.js";
+import { DECISION_CHAIN_WAIT_MS, DECISION_MAX_BYTES, DecisionError, parseDecisionRequest, parseDecisionResult, type DecisionRequest } from "./decision-types.js";
 
 /** No admin/password lookup, redirects, or implicit remote fallback. Credentials stay in headers. */
 export async function callDecisionService(request: DecisionRequest | null, env = process.env): Promise<unknown> {
@@ -42,11 +42,27 @@ export async function callDecisionService(request: DecisionRequest | null, env =
             // Only bounded machine codes, never echo a remote response containing secrets.
             const code = typeof value?.code === "string" && /^[A-Z_]{1,40}$/.test(value.code) ? value.code : "HTTP_ERROR";
             reject(new DecisionError(code, `决策调用失败 (${code}, HTTP ${res.statusCode})。`, res.statusCode));
-          } else resolve(request ? parseDecisionResult(value, request) : value);
-        } catch { reject(new DecisionError("INVALID_RESULT", "决策服务返回了无效结果。", 502)); }
+          } else if (!request) resolve(value);
+          else {
+            // A configured backup is a text evaluator, not LAYA (and can have output tokens).
+            if (typeof value?.model !== "string" || !value.model || value.model.length > 512
+              || !["laya-mlx", "decision-expert"].includes(value.runtime)) throw new Error("identity");
+            const result = parseDecisionResult(value, request, { model: value.model, runtime: value.runtime });
+            if (value.executor !== undefined) {
+              const executor = value.executor;
+              if (!executor || typeof executor.employeeId !== "string" || executor.employeeId.length > 128
+                || !Number.isSafeInteger(executor.candidate) || executor.candidate < 0 || executor.candidate > 3
+                || !["local", "free-group", "cli", "sdk"].includes(executor.source)) throw new Error("executor");
+              result.executor = { employeeId: executor.employeeId, candidate: executor.candidate, source: executor.source };
+            }
+            resolve(result);
+          }
+        } catch (error) {
+          reject(error instanceof DecisionError ? error : new DecisionError("INVALID_RESULT", "决策服务返回了无效结果。", 502));
+        }
       });
     });
-    const deadline = setTimeout(() => req.destroy(new Error("deadline")), 50_000);
+    const deadline = setTimeout(() => req.destroy(new Error("deadline")), request ? DECISION_CHAIN_WAIT_MS : 50_000);
     req.once("close", () => clearTimeout(deadline));
     req.once("error", () => reject(new DecisionError("CONNECTION_FAILED", "连接决策服务失败或超时。", 502)));
     req.end(data);

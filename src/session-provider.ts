@@ -20,6 +20,11 @@ export {
  * 不启动 shell 也能判断某个 provider 的 CLI 是否在 PATH 上（与子进程 PATH 一致）。
  * 用于多候选降级时跳过没安装的工具，避免白等一次 spawn 失败。
  */
+/** One availability rule for every candidate chain: in-process SDK engines are decided by the harness; CLI engines need their executable on PATH. */
+export function candidateInstalled(candidate: { provider: SessionProvider; engine?: string }, pathValue = process.env.PATH ?? ""): boolean {
+  return candidate.engine === "sdk" || providerCliInstalled(candidate.provider, pathValue);
+}
+
 export function providerCliInstalled(provider: SessionProvider, pathValue = process.env.PATH ?? ""): boolean {
   const command = providerCliCommand(provider);
   for (const directory of pathValue.split(path.delimiter)) {

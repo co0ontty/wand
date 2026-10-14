@@ -107,7 +107,7 @@ test("HTTP directory route validates input, ownership and empty-state restrictio
   const registry = new SessionRegistry(processes, manager, storage);
   const app = express();
   app.use(express.json());
-  registerSessionRoutes(app, processes, manager, storage, config.defaultMode, config, registry);
+  registerSessionRoutes(app, { processes, structured: manager, storage, defaultMode: config.defaultMode, config, sessions: registry });
   const server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));

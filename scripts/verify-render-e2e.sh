@@ -31,7 +31,7 @@
 
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 # 固定工作目录：Server 与 E2E 助手都按仓库根解析相对路径。
 cd "${ROOT}" || exit 2
 DIR="${WAND_E2E_DIR:-/tmp/wand-render-e2e}"
@@ -459,6 +459,12 @@ render_process_count() {
 isolated_render_count() {
   ps -ax -o command= 2>/dev/null | grep -cE "[w]and-render -c ${DIR}[^ ]*config\.json$" || true
 }
+# Rust mode also starts terminald for structured runs. Include the main and
+# development probes, not only probe-legacy; match the actual trailing argv.
+isolated_terminald_pids() {
+  ps -ax -o pid=,command= 2>/dev/null | awk -v dir="$DIR/" '
+    NF >= 5 && $(NF-2) == "terminald" && $(NF-1) == "-c" && index($NF, dir) == 1 && $NF ~ /\/config\.json$/ { print $1 }'
+}
 
 # ── 预检 ────────────────────────────────────────────────────────────────────
 step "步骤 0：预检（端口 / 隔离目录 / 二进制）"
@@ -802,6 +808,18 @@ else
   pass "drain 之后新会话被拒绝：/api/commands → $(json_field "$DRAIN_CREATE" status)（$(json_field "$DRAIN_CREATE" bodyPreview)）"
 fi
 if [ -n "$NEW_SESSION_PID" ] && process_alive "$NEW_SESSION_PID"; then pass "被拒绝的建会话没有影响运行中的 PTY"; else fail "建会话被拒后 PTY 也没了"; fi
+# Server 的自愈器会在 daemon 退出后主动拉起替代者；它不是 shutdown(now) 的失败。
+# 先断开 Server 并验证持久 PTY 未受影响，再单独验证 Render 的 now / 清理语义。
+if stop_server "$SERVER_PID_FILE"; then
+  pass "now 验证前 Server 已退出，自愈器不再参与"
+else
+  fail "now 验证前 Server 未在 30s 内退出"
+fi
+if process_alive "$RENDER_PID_2" && [ -n "$NEW_SESSION_PID" ] && process_alive "$NEW_SESSION_PID"; then
+  pass "断开 Server 后 Render 与 PTY 仍存活（随后独立验证 now，避免自愈器干扰）"
+else
+  fail "断开 Server 不应提前停止 Render 或 PTY"
+fi
 NOW_ACK="$(run_helper render-shutdown now)"
 sleep 1
 if process_alive "$RENDER_PID_2"; then fail "shutdown {mode:now} 之后 daemon 仍在（pid ${RENDER_PID_2}）"; else pass "shutdown {mode:now} 之后 daemon 已退出"; fi
@@ -968,11 +986,16 @@ for pidfile in "$DIR"/probe-*/server.pid; do
   [ -f "$pidfile" ] || continue
   stop_server "$pidfile" >/dev/null 2>&1 || true
 done
-# legacy terminald 由 Server detached 启动，不属于任何 server.pid；按 config 精确定位后收尾。
-LEGACY_DAEMON_PIDS="$(pgrep -f "terminald -c $LEGACY_DIR/config.json" || true)"
-if [ -n "$LEGACY_DAEMON_PIDS" ]; then
-  printf '%s\n' "$LEGACY_DAEMON_PIDS" | xargs kill -TERM 2>/dev/null || true
-  sleep 1
+# terminald 由 Server detached 启动，不属于任何 server.pid；按本轮 config 精确定位。
+LEGACY_DAEMON_PIDS="$(isolated_terminald_pids)"
+for pid in $LEGACY_DAEMON_PIDS; do
+  kill -TERM "$pid" 2>/dev/null || true
+  wait_for_exit "$pid" 10 >/dev/null 2>&1 || true
+done
+if [ -z "$(isolated_terminald_pids)" ]; then
+  pass "没有残留本次主实例或 probe 的 terminald 进程"
+else
+  fail "本次验证的 terminald 未在 10s 内退出"
 fi
 run_helper render-shutdown now >/dev/null 2>&1 || true
 for _ in $(seq 1 20); do

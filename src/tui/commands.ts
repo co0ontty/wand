@@ -5,7 +5,8 @@
  * 命令本身不直接写 stdout / stderr —— TUI 模式下 stderr 已经被 log-bus 劫持。
  */
 
-import { spawn, spawnSync } from "node:child_process";
+import { spawn, type SpawnSyncReturns } from "node:child_process";
+import { runCommand, runCommandSync, type RunCommandResult } from "../run-command.js";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, unlinkSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -13,7 +14,6 @@ import process from "node:process";
 
 import {
   checkPackageUpdateSync,
-  getInstallSpecForChannel,
   installPackageGloballySync,
   normalizeUpdateChannel,
   resolveGlobalWandBin,
@@ -108,7 +108,7 @@ export function checkUpdate(currentVersion: string, channel: UpdateChannel = "st
 }
 
 /**
- * 执行 `npm install -g @co0ontty/wand@<dist-tag>`。
+ * 检查所选 npm dist-tag，再安装经过通道校验的固定版本。
  *
  * 此调用同步阻塞（TUI 上层应在另一线程的 setImmediate 调度，或直接 await）。
  * 通过 npm-update-utils 自动处理 `.wand-XXXXXX` 残留目录和 ENOTEMPTY 回退，
@@ -119,7 +119,9 @@ export function checkUpdate(currentVersion: string, channel: UpdateChannel = "st
 export function installUpdate(channel: UpdateChannel = "stable"): CommandResult {
   const serviceSafety = checkInstalledServiceEntrypointsForUpdate();
   if (!serviceSafety.ok) return serviceSafety;
-  const res = installPackageGloballySync(getInstallSpecForChannel(channel), 180_000);
+  const info = checkPackageUpdateSync("dev", channel);
+  if (!info.latest) return { ok: false, message: "npm 所选通道暂无有效版本，或 registry 暂时不可用。" };
+  const res = installPackageGloballySync(info.installSpec, 180_000);
   const out = (res.stdout || "") + (res.stderr ? "\n" + res.stderr : "");
   const trail = res.attempts.length > 1
     ? `\n\n尝试过的命令：\n  ${res.attempts.join("\n  ")}`
@@ -162,7 +164,7 @@ export function openInBrowser(url: string): CommandResult {
 export function copyToClipboard(text: string): CommandResult {
   const candidates = clipboardCandidates();
   for (const c of candidates) {
-    const res = spawnSync(c.cmd, c.args, { input: text, timeout: 5_000 });
+    const res = runCommandSync(c.cmd, c.args, { input: text, timeout: 5_000 });
     if (res.status === 0) {
       return { ok: true, message: `已复制到剪贴板 (${c.cmd})` };
     }
@@ -198,8 +200,8 @@ const LAUNCHD_TERMINAL_LABEL = "com.wand.terminald";
  *
  * 默认 system。
  */
-export type ServiceScope = "system" | "user";
-const DEFAULT_SERVICE_SCOPE: ServiceScope = "system";
+import { DEFAULT_SERVICE_SCOPE, detectInstalledScope, readServiceEntrypoint, servicePathFor, type ServiceScope } from "../service-manager/index.js";
+export { detectInstalledScope, readServiceEntrypoint, type ServiceScope };
 
 export interface ServiceContext {
   configPath: string;
@@ -231,12 +233,6 @@ function isRoot(): boolean {
   }
 }
 
-/** 自动检测哪个 scope 已经装了 unit；优先 system，找不到就 user。两个都没装返回 null。 */
-export function detectInstalledScope(): ServiceScope | null {
-  if (existsSync(servicePathFor("system"))) return "system";
-  if (existsSync(servicePathFor("user"))) return "user";
-  return null;
-}
 
 /** 给定一个 opts.scope，如果没传就按 detect → default 顺序回退。 */
 function resolveScope(opts?: ServiceOpts): ServiceScope {
@@ -266,8 +262,18 @@ export interface ServiceStatus {
 
 export function serviceStatus(opts?: ServiceOpts): ServiceStatus {
   const scope = resolveScope(opts);
-  if (process.platform === "linux") return systemdStatus(scope);
-  if (process.platform === "darwin") return launchdStatus(scope);
+  if (process.platform === "linux" || process.platform === "darwin") return serviceStatusSync(scope);
+  return unsupportedStatus();
+}
+
+/** Non-blocking status for the interactive TUI: probes run as child processes without stalling the event loop. */
+export async function serviceStatusAsync(opts?: ServiceOpts): Promise<ServiceStatus> {
+  const scope = resolveScope(opts);
+  if (process.platform === "linux" || process.platform === "darwin") return serviceStatusAsyncFor(scope);
+  return unsupportedStatus();
+}
+
+function unsupportedStatus(): ServiceStatus {
   return {
     installed: false,
     state: "unsupported",
@@ -305,7 +311,7 @@ export function serviceLogs(lines: number = 80, opts?: ServiceOpts): CommandResu
     const args = scope === "user"
       ? ["--user", "-u", "wand.service", "-n", String(lines), "--no-pager"]
       : ["-u", "wand.service", "-n", String(lines), "--no-pager"];
-    const r = spawnSync("journalctl", args, { encoding: "utf8", timeout: 10_000 });
+    const r = runCommandSync("journalctl", args, { encoding: "utf8", timeout: 10_000 });
     if (r.status === 0) return { ok: true, message: `journalctl 输出 ${lines} 行`, detail: r.stdout.trim() };
     return { ok: false, message: "journalctl 调用失败", detail: r.stderr.trim() || `exit ${r.status}` };
   }
@@ -339,7 +345,7 @@ export function serviceLogs(lines: number = 80, opts?: ServiceOpts): CommandResu
 function readLaunchdConfigDir(scope: ServiceScope): string | null {
   const plistPath = servicePathFor(scope);
   if (!existsSync(plistPath)) return null;
-  const result = spawnSync(
+  const result = runCommandSync(
     "plutil",
     ["-extract", "ProgramArguments.4", "raw", "-o", "-", plistPath],
     { encoding: "utf8", timeout: 5_000 },
@@ -363,42 +369,26 @@ function systemctlBaseArgs(scope: ServiceScope): string[] {
   return scope === "user" ? ["--user"] : [];
 }
 
-function systemdStatus(scope: ServiceScope): ServiceStatus {
-  const installed = isServiceInstalled(scope);
-  if (!installed) {
-    return {
-      installed: false,
-      state: "unknown",
-      description: `未安装 (${scope} scope)`,
-      raw: "",
-      platform: "linux",
-    };
-  }
+interface ProbeOutput { status: number | null; stdout: string; stderr: string }
+const NO_PROBE: ProbeOutput = { status: null, stdout: "", stderr: "" };
+
+function systemdProbeArgs(scope: ServiceScope): { active: string[]; show: string[]; status: string[] } {
   const base = systemctlBaseArgs(scope);
-  // 用 `is-active` + `show -p ...` 拿结构化数据
-  const active = spawnSync("systemctl", [...base, "is-active", "wand.service"], { encoding: "utf8" });
-  const stateRaw = (active.stdout || "").trim();
-  const show = spawnSync(
-    "systemctl",
-    [
-      ...base,
-      "show",
-      "wand.service",
-      "-p",
-      "ActiveState",
-      "-p",
-      "SubState",
-      "-p",
-      "ActiveEnterTimestamp",
-      "-p",
-      "MainPID",
-    ],
-    { encoding: "utf8" },
-  );
-  const props = parseSystemctlShow(show.stdout || "");
-  const status = spawnSync("systemctl", [...base, "status", "wand.service", "--no-pager", "-n", "5"], {
-    encoding: "utf8",
-  });
+  return {
+    active: [...base, "is-active", "wand.service"],
+    show: [...base, "show", "wand.service", "-p", "ActiveState", "-p", "SubState", "-p", "ActiveEnterTimestamp", "-p", "MainPID"],
+    status: [...base, "status", "wand.service", "--no-pager", "-n", "5"],
+  };
+}
+
+function notInstalledStatus(scope: ServiceScope, platform: "linux" | "darwin"): ServiceStatus {
+  return { installed: false, state: "unknown", description: `未安装 (${scope} scope)`, raw: "", platform };
+}
+
+/** Pure parser: systemd probe output to status. Probes are supplied by the sync or async caller. */
+function systemdStatusFromProbes(scope: ServiceScope, probes: { active: ProbeOutput; show: ProbeOutput; status: ProbeOutput }): ServiceStatus {
+  const stateRaw = (probes.active.stdout || "").trim();
+  const props = parseSystemctlShow(probes.show.stdout || "");
   const sub = props.SubState || stateRaw;
   const since = props.ActiveEnterTimestamp ? ` since ${props.ActiveEnterTimestamp}` : "";
   const pid = props.MainPID && props.MainPID !== "0" ? ` · PID ${props.MainPID}` : "";
@@ -414,24 +404,13 @@ function systemdStatus(scope: ServiceScope): ServiceStatus {
     installed: true,
     state: normalized,
     description: desc,
-    raw: status.stdout || status.stderr || "",
+    raw: probes.status.stdout || probes.status.stderr || "",
     platform: "linux",
   };
 }
 
-function launchdStatus(scope: ServiceScope): ServiceStatus {
-  const installed = isServiceInstalled(scope);
-  if (!installed) {
-    return {
-      installed: false,
-      state: "unknown",
-      description: `未安装 (${scope} scope)`,
-      raw: "",
-      platform: "darwin",
-    };
-  }
-  const target = launchdTarget(scope);
-  const printed = spawnSync("launchctl", ["print", target], { encoding: "utf8", timeout: 10_000 });
+/** Pure parser: `launchctl print` output to status. */
+function launchdStatusFromPrint(scope: ServiceScope, target: string, printed: ProbeOutput): ServiceStatus {
   if (printed.status !== 0) {
     return {
       installed: true,
@@ -455,19 +434,59 @@ function launchdStatus(scope: ServiceScope): ServiceStatus {
     : lastExit
       ? ` · last exit ${lastExit}`
       : "";
-  const desc = `[${scope}] ${state}${tail} · ${target}`;
   return {
     installed: true,
     state: normalized,
-    description: desc,
+    description: `[${scope}] ${state}${tail} · ${target}`,
     raw: text,
     platform: "darwin",
   };
 }
 
+function fromSpawn(result: SpawnSyncReturns<string>): ProbeOutput {
+  return { status: result.status, stdout: result.stdout || "", stderr: result.stderr || "" };
+}
+
+async function fromRun(promise: Promise<RunCommandResult>): Promise<ProbeOutput> {
+  const result = await promise;
+  return { status: result.code, stdout: result.stdout, stderr: result.stderr };
+}
+
+/** Synchronous probes: only for the CLI, which is not interactive. TUI must use serviceStatusAsync. */
+function serviceStatusSync(scope: ServiceScope): ServiceStatus {
+  if (process.platform === "linux") {
+    if (!isServiceInstalled(scope)) return notInstalledStatus(scope, "linux");
+    const args = systemdProbeArgs(scope);
+    return systemdStatusFromProbes(scope, {
+      active: fromSpawn(runCommandSync("systemctl", args.active, { encoding: "utf8" })),
+      show: fromSpawn(runCommandSync("systemctl", args.show, { encoding: "utf8" })),
+      status: fromSpawn(runCommandSync("systemctl", args.status, { encoding: "utf8" })),
+    });
+  }
+  if (!isServiceInstalled(scope)) return notInstalledStatus(scope, "darwin");
+  const target = launchdTarget(scope);
+  return launchdStatusFromPrint(scope, target, fromSpawn(runCommandSync("launchctl", ["print", target], { encoding: "utf8", timeout: 10_000 })));
+}
+
+async function serviceStatusAsyncFor(scope: ServiceScope): Promise<ServiceStatus> {
+  if (process.platform === "linux") {
+    if (!isServiceInstalled(scope)) return notInstalledStatus(scope, "linux");
+    const args = systemdProbeArgs(scope);
+    const [active, show, status] = await Promise.all([
+      fromRun(runCommand("systemctl", args.active)),
+      fromRun(runCommand("systemctl", args.show)),
+      fromRun(runCommand("systemctl", args.status)),
+    ]);
+    return systemdStatusFromProbes(scope, { active, show, status });
+  }
+  if (!isServiceInstalled(scope)) return notInstalledStatus(scope, "darwin");
+  const target = launchdTarget(scope);
+  return launchdStatusFromPrint(scope, target, await fromRun(runCommand("launchctl", ["print", target], { timeout: 10_000 })));
+}
+
 function runSystemctl(scope: ServiceScope, args: string[], successWord: string): CommandResult {
   const base = systemctlBaseArgs(scope);
-  const r = spawnSync("systemctl", [...base, ...args], { encoding: "utf8", timeout: 15_000 });
+  const r = runCommandSync("systemctl", [...base, ...args], { encoding: "utf8", timeout: 15_000 });
   const scopeLabel = scope === "user" ? "--user " : "";
   if (r.status === 0) {
     return { ok: true, message: `systemctl ${scopeLabel}${args.join(" ")} ${successWord}` };
@@ -498,7 +517,7 @@ function launchctlUnload(scope: ServiceScope): CommandResult {
 
 function launchdRestart(scope: ServiceScope): CommandResult {
   const target = launchdTarget(scope);
-  const kicked = spawnSync("launchctl", ["kickstart", "-k", target], { encoding: "utf8", timeout: 10_000 });
+  const kicked = runCommandSync("launchctl", ["kickstart", "-k", target], { encoding: "utf8", timeout: 10_000 });
   if (kicked.status === 0) return { ok: true, message: `已重启 launchd ${scope}: ${target}` };
 
   const started = launchctlLoad(scope);
@@ -527,7 +546,7 @@ function currentUid(): number {
   if (typeof fn === "function") {
     try { return fn.call(process); } catch { /* fall through */ }
   }
-  const id = spawnSync("id", ["-u"], { encoding: "utf8", timeout: 3000 });
+  const id = runCommandSync("id", ["-u"], { encoding: "utf8", timeout: 3000 });
   const uid = Number((id.stdout || "").trim());
   return Number.isInteger(uid) && uid >= 0 ? uid : 0;
 }
@@ -555,7 +574,7 @@ function waitForLaunchdCondition(check: () => boolean, timeoutMs: number): boole
 }
 
 function launchdTargetIsLoaded(scope: ServiceScope, label = LAUNCHD_LABEL): boolean {
-  const printed = spawnSync("launchctl", ["print", launchdTarget(scope, label)], {
+  const printed = runCommandSync("launchctl", ["print", launchdTarget(scope, label)], {
     encoding: "utf8",
     timeout: 10_000,
   });
@@ -568,7 +587,7 @@ function waitForLaunchdTarget(scope: ServiceScope, loaded: boolean, timeoutMs: n
 
 function waitForLaunchdActive(scope: ServiceScope, timeoutMs: number, label = LAUNCHD_LABEL): boolean {
   return waitForLaunchdCondition(() => {
-    const printed = spawnSync("launchctl", ["print", launchdTarget(scope, label)], {
+    const printed = runCommandSync("launchctl", ["print", launchdTarget(scope, label)], {
       encoding: "utf8",
       timeout: 10_000,
     });
@@ -582,7 +601,7 @@ function waitForLaunchdActive(scope: ServiceScope, timeoutMs: number, label = LA
 function launchdBootstrap(scope: ServiceScope, plist: string, successMessage: string, label = LAUNCHD_LABEL): CommandResult {
   const domain = launchdDomain(scope);
   const target = launchdTarget(scope, label);
-  const bootout = spawnSync("launchctl", ["bootout", domain, plist], { encoding: "utf8", timeout: 10_000 });
+  const bootout = runCommandSync("launchctl", ["bootout", domain, plist], { encoding: "utf8", timeout: 10_000 });
   const detail: string[] = [
     `target: ${target}`,
     `bootout: ${formatSpawnResult(bootout)}`,
@@ -599,10 +618,10 @@ function launchdBootstrap(scope: ServiceScope, plist: string, successMessage: st
     };
   }
 
-  const bootstrapAttempts: Array<ReturnType<typeof spawnSync>> = [];
+  const bootstrapAttempts: Array<SpawnSyncReturns<string>> = [];
   let loaded = false;
   for (let attempt = 0; attempt < 3; attempt++) {
-    const bootstrap = spawnSync("launchctl", ["bootstrap", domain, plist], {
+    const bootstrap = runCommandSync("launchctl", ["bootstrap", domain, plist], {
       encoding: "utf8",
       timeout: 10_000,
     });
@@ -620,7 +639,7 @@ function launchdBootstrap(scope: ServiceScope, plist: string, successMessage: st
     return { ok: false, message: `launchctl bootstrap 失败 (${target})`, detail: detail.join("\n") };
   }
 
-  const enable = spawnSync("launchctl", ["enable", target], { encoding: "utf8", timeout: 10_000 });
+  const enable = runCommandSync("launchctl", ["enable", target], { encoding: "utf8", timeout: 10_000 });
   detail.push(`enable: ${formatSpawnResult(enable)}`);
   if (enable.status !== 0) {
     return { ok: false, message: `launchctl enable 失败 (${target})`, detail: detail.join("\n") };
@@ -634,7 +653,7 @@ function launchdBootstrap(scope: ServiceScope, plist: string, successMessage: st
     return { ok: true, message: successMessage, detail: detail.join("\n") };
   }
 
-  const kickstart = spawnSync("launchctl", ["kickstart", target], { encoding: "utf8", timeout: 10_000 });
+  const kickstart = runCommandSync("launchctl", ["kickstart", target], { encoding: "utf8", timeout: 10_000 });
   detail.push(`kickstart: ${formatSpawnResult(kickstart)}`);
   if (!waitForLaunchdActive(scope, 2_000, label)) {
     return { ok: false, message: `launchctl kickstart 失败 (${target})`, detail: detail.join("\n") };
@@ -645,7 +664,7 @@ function launchdBootstrap(scope: ServiceScope, plist: string, successMessage: st
 function launchdBootout(scope: ServiceScope, plist: string, successMessage: string, label = LAUNCHD_LABEL): CommandResult {
   const domain = launchdDomain(scope);
   const target = launchdTarget(scope, label);
-  const bootout = spawnSync("launchctl", ["bootout", domain, plist], { encoding: "utf8", timeout: 10_000 });
+  const bootout = runCommandSync("launchctl", ["bootout", domain, plist], { encoding: "utf8", timeout: 10_000 });
   if (waitForLaunchdTarget(scope, false, 2_000, label)) {
     return {
       ok: true,
@@ -660,12 +679,12 @@ function launchdBootout(scope: ServiceScope, plist: string, successMessage: stri
   };
 }
 
-function launchdIsTransientBootstrapFailure(result: ReturnType<typeof spawnSync>): boolean {
+function launchdIsTransientBootstrapFailure(result: SpawnSyncReturns<string>): boolean {
   const text = `${result.stdout || ""}\n${result.stderr || ""}`;
   return /Bootstrap failed:\s*(?:5|37)|Input\/output error|resource busy|operation (?:now |in )?progress/i.test(text);
 }
 
-function formatSpawnResult(result: ReturnType<typeof spawnSync>): string {
+function formatSpawnResult(result: SpawnSyncReturns<string>): string {
   const text = ((result.stdout || "") + "\n" + (result.stderr || "")).trim();
   return result.status === 0
     ? "ok"
@@ -715,19 +734,6 @@ export function uninstallService(opts?: ServiceOpts): CommandResult {
   return { ok: false, message: `当前平台 ${process.platform} 暂不支持服务注册` };
 }
 
-function servicePathFor(scope: ServiceScope): string {
-  if (process.platform === "linux") {
-    return scope === "user"
-      ? path.join(os.homedir(), ".config/systemd/user/wand.service")
-      : "/etc/systemd/system/wand.service";
-  }
-  if (process.platform === "darwin") {
-    return scope === "user"
-      ? path.join(os.homedir(), "Library/LaunchAgents/com.wand.web.plist")
-      : "/Library/LaunchDaemons/com.wand.web.plist";
-  }
-  return "";
-}
 
 function terminalServicePathFor(scope: ServiceScope): string {
   if (process.platform === "linux") {
@@ -848,7 +854,7 @@ export function isDaemonProcessForConfig(
   configPath: string,
   kind: "render" | "terminald",
 ): boolean {
-  const result = spawnSync("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8", timeout: 5_000 });
+  const result = runCommandSync("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8", timeout: 5_000 });
   const command = (result.stdout ?? "").trim();
   if (!command || !command.includes(configPath)) return false;
   return kind === "render" ? command.includes("wand-render") : command.includes("terminald");
@@ -879,7 +885,7 @@ function staleDaemonNote(configPath: string): string | null {
       const sidecar = readFileSync(`${binaryPath}.version`, "utf8").trim();
       if (/^\d+\.\d+\.\d+/.test(sidecar)) return sidecar;
     } catch { /* 没有 sidecar 就跑一次 --version */ }
-    const result = spawnSync(binaryPath, ["--version"], { encoding: "utf8", timeout: 5_000 });
+    const result = runCommandSync(binaryPath, ["--version"], { encoding: "utf8", timeout: 5_000 });
     const match = /(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.]+)?)/.exec(result.stdout ?? "");
     return match?.[1] ?? null;
   })();
@@ -899,29 +905,6 @@ function describeDaemonEndpoints(configPath: string): string {
       return `  ${state.label}: pid ${pid} (${alive}), ${socket} ${state.socketPath}`;
     })
     .join("\n");
-}
-
-/** 读取已安装服务 unit / plist 的入口命令；未安装或平台不支持时返回 null。 */
-export function readServiceEntrypoint(scope: ServiceScope): string | null {
-  const servicePath = servicePathFor(scope);
-  if (process.platform === "darwin") {
-    const result = spawnSync(
-      "plutil",
-      ["-extract", "ProgramArguments.1", "raw", "-o", "-", servicePath],
-      { encoding: "utf8", timeout: 5_000 },
-    );
-    return result.status === 0 ? (result.stdout || "").trim() || null : null;
-  }
-  if (process.platform === "linux") {
-    try {
-      const execStart = readFileSync(servicePath, "utf8").split("\n").find((line) => line.startsWith("ExecStart="));
-      if (!execStart) return null;
-      return execStart.slice("ExecStart=".length).trim().split(/\s+/)[1] || null;
-    } catch {
-      return null;
-    }
-  }
-  return null;
 }
 
 function checkInstalledServiceEntrypointsForUpdate(): CommandResult {
@@ -1015,7 +998,7 @@ function ownerUserNameForPath(targetPath: string): string {
       if (process.env.SUDO_UID === String(uid) && process.env.SUDO_USER) {
         return process.env.SUDO_USER;
       }
-      const resolved = spawnSync("id", ["-un", String(uid)], { encoding: "utf8", timeout: 3000 });
+      const resolved = runCommandSync("id", ["-un", String(uid)], { encoding: "utf8", timeout: 3000 });
       const name = (resolved.stdout || "").trim();
       if (resolved.status === 0 && name) return name;
     } catch {
@@ -1028,7 +1011,7 @@ function ownerUserNameForPath(targetPath: string): string {
 function homeForUser(userName: string, fallback: string): string {
   if (!userName || userName === "root") return fallback;
   if (process.platform === "darwin") {
-    const resolved = spawnSync("dscl", [".", "-read", `/Users/${userName}`, "NFSHomeDirectory"], {
+    const resolved = runCommandSync("dscl", [".", "-read", `/Users/${userName}`, "NFSHomeDirectory"], {
       encoding: "utf8",
       timeout: 3000,
     });
@@ -1036,7 +1019,7 @@ function homeForUser(userName: string, fallback: string): string {
     if (resolved.status === 0 && match?.[1]) return match[1].trim();
   }
   if (process.platform === "linux") {
-    const resolved = spawnSync("getent", ["passwd", userName], { encoding: "utf8", timeout: 3000 });
+    const resolved = runCommandSync("getent", ["passwd", userName], { encoding: "utf8", timeout: 3000 });
     const home = (resolved.stdout || "").split(":")[5];
     if (resolved.status === 0 && home) return home.trim();
   }
@@ -1056,7 +1039,7 @@ function shellFromConfig(configPath: string): string | null {
 function shellForUser(userName: string, fallback: string): string {
   if (userName && userName !== "root") {
     if (process.platform === "darwin") {
-      const resolved = spawnSync("dscl", [".", "-read", `/Users/${userName}`, "UserShell"], {
+      const resolved = runCommandSync("dscl", [".", "-read", `/Users/${userName}`, "UserShell"], {
         encoding: "utf8",
         timeout: 3000,
       });
@@ -1064,7 +1047,7 @@ function shellForUser(userName: string, fallback: string): string {
       if (resolved.status === 0 && match?.[1]) return match[1].trim();
     }
     if (process.platform === "linux") {
-      const resolved = spawnSync("getent", ["passwd", userName], { encoding: "utf8", timeout: 3000 });
+      const resolved = runCommandSync("getent", ["passwd", userName], { encoding: "utf8", timeout: 3000 });
       const shell = (resolved.stdout || "").split(":")[6];
       if (resolved.status === 0 && shell) return shell.trim();
     }
@@ -1197,14 +1180,14 @@ function installSystemdService(ctx: ServiceContext, scope: ServiceScope): Comman
   }
 
   const base = systemctlBaseArgs(scope);
-  const reload = spawnSync("systemctl", [...base, "daemon-reload"], { encoding: "utf8" });
+  const reload = runCommandSync("systemctl", [...base, "daemon-reload"], { encoding: "utf8" });
   const terminalAlreadyLive = hasLiveTerminalDaemon(ctx.configPath);
-  const enableTerminal = spawnSync(
+  const enableTerminal = runCommandSync(
     "systemctl",
     [...base, "enable", ...(terminalAlreadyLive ? [] : ["--now"]), "wand-terminald.service"],
     { encoding: "utf8" },
   );
-  const enable = spawnSync("systemctl", [...base, "enable", "--now", "wand.service"], { encoding: "utf8" });
+  const enable = runCommandSync("systemctl", [...base, "enable", "--now", "wand.service"], { encoding: "utf8" });
   const hints = scope === "user"
     ? "提示: 若需登出后保持运行，请运行 `loginctl enable-linger $USER`"
     : "提示: 已写入系统级 unit；开机自启已 enable。";
@@ -1245,15 +1228,15 @@ function uninstallSystemdService(scope: ServiceScope): CommandResult {
     return { ok: false, message: `未检测到已安装的 systemd ${scope} 服务` };
   }
   const base = systemctlBaseArgs(scope);
-  const stop = spawnSync("systemctl", [...base, "disable", "--now", "wand.service"], { encoding: "utf8" });
-  const stopTerminal = spawnSync("systemctl", [...base, "disable", "--now", "wand-terminald.service"], { encoding: "utf8" });
+  const stop = runCommandSync("systemctl", [...base, "disable", "--now", "wand.service"], { encoding: "utf8" });
+  const stopTerminal = runCommandSync("systemctl", [...base, "disable", "--now", "wand-terminald.service"], { encoding: "utf8" });
   try {
     unlinkSync(unitPath);
     if (existsSync(terminalUnitPath)) unlinkSync(terminalUnitPath);
   } catch (err) {
     return { ok: false, message: `删除 unit 失败: ${getErrorMessage(err)}` };
   }
-  spawnSync("systemctl", [...base, "daemon-reload"], { encoding: "utf8" });
+  runCommandSync("systemctl", [...base, "daemon-reload"], { encoding: "utf8" });
   return {
     ok: true,
     message: `已卸载 systemd ${scope === "user" ? "用户" : "系统"}服务`,
@@ -1347,7 +1330,7 @@ ${logFields("terminald.log", "terminald-error.log")}  <key>KeepAlive</key><true/
   } catch (err) {
     return { ok: false, message: `写入 plist 失败: ${getErrorMessage(err)}` };
   }
-  const terminalEnable = spawnSync(
+  const terminalEnable = runCommandSync(
     "launchctl",
     ["enable", launchdTarget(scope, LAUNCHD_TERMINAL_LABEL)],
     { encoding: "utf8", timeout: 10_000 },
@@ -1419,8 +1402,8 @@ function uninstallLaunchdService(scope: ServiceScope): CommandResult {
     `已停止持久终端宿主 ${scope}`,
     LAUNCHD_TERMINAL_LABEL,
   );
-  const disabled = spawnSync("launchctl", ["disable", launchdTarget(scope)], { encoding: "utf8", timeout: 10_000 });
-  const disabledTerminal = spawnSync(
+  const disabled = runCommandSync("launchctl", ["disable", launchdTarget(scope)], { encoding: "utf8", timeout: 10_000 });
+  const disabledTerminal = runCommandSync(
     "launchctl",
     ["disable", launchdTarget(scope, LAUNCHD_TERMINAL_LABEL)],
     { encoding: "utf8", timeout: 10_000 },

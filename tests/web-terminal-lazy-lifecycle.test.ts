@@ -3,20 +3,22 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
+import { getWandTerminalTheme } from "../src/web-ui/react/theme.js";
 
 const noop = () => {};
 const fallback = new Proxy({}, { get: () => noop });
 const tick = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
 function deferred() {
   let resolve!: () => void;
-  const promise = new Promise<void>(yes => { resolve = yes; });
-  return { promise, resolve };
+  let reject!: (error: Error) => void;
+  const promise = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
 }
 function load(file: string, dependencies: Record<string, unknown>, globals: Record<string, unknown>) {
   const source = readFileSync(new URL(`../src/web-ui/browser/${file}.ts`, import.meta.url), "utf8");
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const api: Record<string, any> = {};
-  runInNewContext(code, { exports: api, require: (id: string) => dependencies[id] ?? fallback, ...globals });
+  runInNewContext(code, { exports: api, require: (id: string) => dependencies[id] ?? ({ "../react/theme": { getWandTerminalTheme }, "../react/theme-preference": { wandThemeStore: { subscribe: () => noop } } } as Record<string, unknown>)[id] ?? fallback, ...globals });
   return api;
 }
 
@@ -99,7 +101,7 @@ class Element {
   click() { for (const handler of this.listeners.get("click") ?? []) handler({}); }
 }
 
-function terminalHarness() {
+function terminalHarness(library?: ReturnType<typeof deferred>) {
   const output = new Element(); output.root = true;
   const html = new Element(); html.root = true;
   const document = {
@@ -134,13 +136,16 @@ function terminalHarness() {
   const globals = {
     document, HTMLElement: Element, window: { addEventListener: noop, removeEventListener: noop, setTimeout: () => 1 },
     console: { error: (...values: unknown[]) => errors.push(values) },
-    XTermLib: { Terminal, FitAddon, Unicode11Addon: class {} },
+    XTermLib: (library ? {} : { Terminal, FitAddon, Unicode11Addon: class {} }) as Record<string, any>,
     getComputedStyle: () => ({ getPropertyValue: () => "" }),
     requestAnimationFrame: () => 1, cancelAnimationFrame: noop,
     setTimeout: () => 1, clearTimeout: noop, setInterval: () => 1, clearInterval: noop,
   };
   const dependencies = {
     "./state": { state },
+    "../vendor-loader.js": { ensureTerminalLibrary: () => library!.promise.then(() => {
+      Object.assign(globals.XTermLib, { Terminal, FitAddon, Unicode11Addon: class {} });
+    }) },
     "./ui-store-bridge": { browserEnvironment: () => ({ width:390,height:900,coarsePointer:false,online:true,embedTerminal:false,nativeInput:false,backToNative:false,switchServer:false }) },
     "../react/shell/legacy-snapshot": { deriveLegacyUiSnapshot: () => ({ viewport: { mobile: true } }) },
     "../react/shell/terminal-creation-measurement": { prepareTerminalCreationComposer: () => noop, measureTerminalCreationTopbar: () => 0, measureTerminalCreationStandaloneTabbar: () => 0 },
@@ -160,8 +165,46 @@ function terminalHarness() {
   // Layout-specific resize setup is outside the fixture; teardown stays real.
   for (const key of ["ensureTerminalFit", "initTerminalResizeHandle", "observeTerminalResize", "startTerminalHealthCheck"]) viewport[key] = noop;
   return { api, state, output, document, terms, fits, errors, viewport, globals, dependencies, conversation,
+    readyLibrary: () => { Object.assign(globals.XTermLib, { Terminal, FitAddon, Unicode11Addon: class {} }); },
     fail: (where: string) => { failAt = where; }, failDispose: () => { disposeThrows = true; } };
 }
+
+test("lazy terminal loading preserves shell controls and listeners through success or explicit retry", async () => {
+  for (const initiallyFails of [false, true]) {
+    const library = deferred(); const h = terminalHarness(library);
+    const scale = new Element(); scale.className = "terminal-scale-overlay";
+    const down = h.document.createElement("button"), up = h.document.createElement("button");
+    const refresh = h.document.createElement("button"), jump = h.document.createElement("button");
+    jump.className = "terminal-jump-bottom";
+    let clicks = 0;
+    for (const button of [down, up, refresh, jump]) button.addEventListener("click", () => clicks++);
+    scale.appendChild(down); scale.appendChild(up); scale.appendChild(refresh);
+    h.output.appendChild(scale); h.output.appendChild(jump);
+    h.api.initTerminal();
+    assert.equal(h.output.querySelector(".terminal-scale-overlay"), scale, "loading must not clear the shell chrome");
+    assert.equal(h.output.querySelector(".terminal-jump-bottom"), jump);
+    assert.equal(h.output.querySelectorAll("[data-terminal-load-state]").length, 1);
+    if (initiallyFails) {
+      library.reject(new Error("library unavailable")); await tick();
+      assert.equal(h.output.querySelector(".terminal-scale-overlay"), scale, "failure retains the same control nodes");
+      assert.equal(h.output.querySelector(".terminal-jump-bottom"), jump);
+      const error = h.output.querySelector("[data-terminal-load-state]")!;
+      assert.equal(error.dataset.terminalLoadState, "error");
+      h.readyLibrary(); error.querySelector("button")!.click();
+    } else library.resolve();
+    await tick();
+    assert.equal(h.state.terminal, h.terms[0]); assert.equal(h.terms[0].openCount, 1);
+    assert.equal(h.output.querySelectorAll("[data-terminal-load-state]").length, 0);
+    assert.equal(h.output.querySelectorAll(".terminal-scale-overlay").length, 1);
+    assert.equal(h.output.querySelector(".terminal-scale-overlay"), scale);
+    assert.equal(h.output.querySelector(".terminal-jump-bottom"), jump);
+    for (const button of [down, up, refresh, jump]) button.click();
+    assert.equal(clicks, 4, "the original event listeners survive loading and retry");
+    h.viewport.teardownTerminal();
+    assert.equal(h.output.querySelector(".terminal-scale-overlay"), scale, "terminal teardown only releases terminal-owned nodes");
+    assert.equal(h.output.querySelector(".terminal-jump-bottom"), jump);
+  }
+});
 
 test("terminal partial synchronous construction releases its wrapper and permits explicit retry", async () => {
   for (const failure of ["terminal", "fit-constructor", "addon"]) {

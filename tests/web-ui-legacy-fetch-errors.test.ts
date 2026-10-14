@@ -1,3 +1,4 @@
+import { getWandTerminalTheme } from "../src/web-ui/react/theme.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
@@ -316,6 +317,8 @@ function loadTerminal(
     console: { log: noop, warn: (...args: unknown[]) => { warnings.push(args.join(" ")); }, error: noop },
     require: (id: string) => {
       if (id === "./state") return { state };
+      if (id === "../react/theme") return { getWandTerminalTheme };
+      if (id === "../react/theme-preference") return { wandThemeStore: { subscribe: () => () => {} } };
       if (id === "../react/http-adapter") return { HttpResponseError, parseJsonResponse };
       if (id === "../../error-utils.js") return { getErrorMessage };
       return fallback;

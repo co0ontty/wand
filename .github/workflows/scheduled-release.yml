@@ -1,0 +1,120 @@
+name: Scheduled Stable Release
+
+# 定时检查 master 分支是否有新提交（相比最新的正式版 tag），
+# 若有则自动打一个新的 patch 版本 tag 并推送，触发完整发布流程（npm + 原生端 + Release Notes）。
+#
+# 版本规则：
+# - 只递增 patch 版本号（vX.Y.Z → vX.Y.Z+1）
+# - 基准是 git tag 中最新的 v* 正式版（不含 beta/alpha 等预发布标签）
+# - 不创建预发布版本，只发正式版
+# - 与 beta-branch.yml 共用 npm-publish 并发组，避免同一时间写 packument
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 每天 UTC 02:00（北京时间 10:00）运行
+  workflow_dispatch:       # 也支持手动触发
+
+permissions:
+  contents: write  # 需要推 tag
+
+concurrency:
+  group: scheduled-release
+  cancel-in-progress: true
+
+jobs:
+  maybe-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout (full history & tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Get latest stable tag from git
+        id: latest-tag
+        run: |
+          set -euo pipefail
+          # 只取 vX.Y.Z 形式的正式版 tag，按版本号排序取最新
+          LATEST=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)
+          if [ -z "$LATEST" ]; then
+            echo "No stable tag found" >&2
+            exit 1
+          fi
+          echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
+          echo "Latest stable tag: $LATEST"
+
+      - name: Check if master has new commits since latest tag
+        id: check-commits
+        run: |
+          set -euo pipefail
+          LATEST="${{ steps.latest-tag.outputs.latest }}"
+          # 获取 latest tag 对应的 commit
+          TAG_COMMIT=$(git rev-list -n 1 "$LATEST")
+          # 获取 master 当前 commit
+          MASTER_COMMIT=$(git rev-parse origin/master)
+          echo "Tag commit: $TAG_COMMIT"
+          echo "Master commit: $MASTER_COMMIT"
+          if [ "$TAG_COMMIT" = "$MASTER_COMMIT" ]; then
+            echo "No new commits since $LATEST, skipping release"
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          else
+            # 检查 master 是否包含 tag commit（即 tag 是否是 master 的祖先）
+            if git merge-base --is-ancestor "$TAG_COMMIT" origin/master; then
+              echo "New commits found on master since $LATEST"
+              echo "should_release=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "Tag $LATEST is not ancestor of master (tag on different branch?), skipping"
+              echo "should_release=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Compute next patch version
+        id: version
+        if: steps.check-commits.outputs.should_release == 'true'
+        run: |
+          set -euo pipefail
+          LATEST="${{ steps.latest-tag.outputs.latest }}"
+          VERSION="${LATEST#v}"
+          if ! [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Invalid version format: $VERSION" >&2
+            exit 1
+          fi
+          MAJOR="${VERSION%%.*}"
+          REST="${VERSION#*.}"
+          MINOR="${REST%%.*}"
+          PATCH="${REST#*.}"
+          NEXT_PATCH=$((PATCH + 1))
+          NEXT_VERSION="${MAJOR}.${MINOR}.${NEXT_PATCH}"
+          NEXT_TAG="v${NEXT_VERSION}"
+          echo "version=$NEXT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$NEXT_TAG" >> "$GITHUB_OUTPUT"
+          echo "Next version: $NEXT_TAG"
+
+      - name: Create and push tag
+        if: steps.check-commits.outputs.should_release == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.version.outputs.tag }}"
+          echo "Creating tag $TAG at origin/master..."
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$TAG" origin/master
+          git push origin "$TAG"
+          echo "Pushed tag $TAG"
+
+      - name: Notify release triggered
+        if: steps.check-commits.outputs.should_release == 'true'
+        run: |
+          echo "✅ Release ${{ steps.version.outputs.tag }} triggered"
+          echo "npm-release.yml, release-notes.yml, android-release.yml, macos-release.yml, ios-build.yml will run automatically"

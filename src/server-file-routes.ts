@@ -1,13 +1,11 @@
 import crypto from "node:crypto";
 import { exec } from "node:child_process";
-import { createReadStream } from "node:fs";
-import { lstat, mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Stats } from "node:fs";
 import process from "node:process";
 import { promisify } from "node:util";
-import type { Express, Request, Response } from "express";
-
+import type { Express } from "express";
 import { getErrorMessage } from "./error-utils.js";
 import { asyncRoute } from "./express-async.js";
 import { sendRouteError } from "./server-request.js";
@@ -15,61 +13,55 @@ import { isBlockedFolderPath, isPathWithinBase, normalizeFolderPath } from "./mi
 import { parseBoundedInteger } from "./request-limits.js";
 import { runGitRawAsync } from "./git-utils.js";
 import type { WandStorage } from "./storage.js";
-import type {
-  DirectoryListing,
-  FileEntry,
-  FilePreviewKind,
-  FilePreviewResponse,
-  GitFileStatus,
-  PathSuggestion,
-} from "./types.js";
+import type { DirectoryListing, FileEntry, FilePreviewKind, FilePreviewResponse, GitFileStatus, PathSuggestion } from "./types.js";
+import { RecentPath, parseStoredPathList, recordRecentPath } from "./recent-paths.js";
+import { streamFileWithRange } from "./http-file-stream.js";
 
 const execAsync = promisify(exec);
 const DIRECTORY_MAX_ITEMS = 200;
 const MAX_TEXT_PREVIEW_SIZE = 512 * 1024;
 const MAX_TEXT_WRITE_SIZE = 1024 * 1024;
-const MAX_RECENT_PATHS = 10;
-
-interface RecentPath {
-  path: string;
-  name: string;
-  lastUsedAt: string;
-}
 
 export interface ServerFileRoutesDependencies {
   storage: WandStorage;
   defaultCwd: string;
 }
 
-/** Persist a cwd to recent paths. Used by REST and session creation hooks. */
-export function recordRecentPath(storage: WandStorage, cwd: string | undefined | null): void {
-  if (!cwd) return;
-  const trimmed = cwd.trim();
-  if (!trimmed) return;
-  let resolved: string;
-  try {
-    resolved = normalizeFolderPath(trimmed);
-  } catch {
-    return;
-  }
-  if (isBlockedFolderPath(resolved)) return;
-  const stored = storage.getConfigValue("recent_paths");
-  let recent = parseStoredPathList<RecentPath>(stored);
-  recent = recent.filter((item) => normalizeFolderPath(item.path) !== resolved);
-  recent.unshift({
-    path: resolved,
-    name: path.basename(resolved),
-    lastUsedAt: new Date().toISOString(),
-  });
-  storage.setConfigValue("recent_paths", JSON.stringify(recent.slice(0, MAX_RECENT_PATHS)));
-}
-
 export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependencies): void {
   const { storage, defaultCwd } = deps;
+
+  // Resolve relative artifacts against the stored source session, never a client-supplied cwd.
+  app.get("/api/session-file/:sessionId", asyncRoute(async (req, res) => {
+    const session = storage.getSessionSlim(String(req.params.sessionId));
+    if (!session?.cwd) { res.status(404).json({ error: "文件所属会话不存在。" }); return; }
+    const relative = typeof req.query.path === "string" ? req.query.path : "";
+    if (!relative || path.isAbsolute(relative) || /[\u0000-\u001f]/.test(relative) || /^[a-z][a-z\d+.-]*:/i.test(relative)) {
+      res.status(400).json({ error: "文件相对路径无效。" }); return;
+    }
+    const resolved = path.resolve(session.cwd, relative);
+    if (!isPathWithinBase(resolved, path.resolve(session.cwd)) || isBlockedFolderPath(resolved)) {
+      res.status(403).json({ error: "文件路径超出会话目录。" }); return;
+    }
+    const canonical = await realpath(resolved).catch(() => null);
+    const base = await realpath(session.cwd).catch(() => null);
+    if (canonical && base && (!isPathWithinBase(canonical, base) || isBlockedFolderPath(canonical))) {
+      res.status(403).json({ error: "文件链接目标超出会话目录。" }); return;
+    }
+    if (req.query.mode === "preview") {
+      if (!/\.html?$/i.test(resolved)) { res.status(400).json({ error: "目标不是 HTML 文件。" }); return; }
+      res.redirect(307, "/api/local-file/" + Buffer.from(resolved).toString("base64url") + "/");
+    } else {
+      res.redirect(307, "/api/file-raw?path=" + encodeURIComponent(resolved) + (req.query.mode === "download" ? "&download=1" : ""));
+    }
+  }));
 
   app.get("/api/path-suggestions", asyncRoute(async (req, res) => {
     const query = typeof req.query.q === "string" ? req.query.q : "";
     try {
+      if (isBlockedFolderPath(normalizeFolderPath(query || defaultCwd))) {
+        res.status(403).json({ error: "访问被拒绝：无法访问系统敏感目录。" });
+        return;
+      }
       res.json(await listPathSuggestions(query, defaultCwd));
     } catch (error) {
       sendRouteError(res, error, "无法加载路径建议。");
@@ -80,6 +72,10 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
     const q = typeof req.query.q === "string" ? req.query.q : "";
     const includeGitStatus = req.query.gitStatus === "true";
     const targetPath = path.resolve(q || defaultCwd);
+    if (isBlockedFolderPath(targetPath)) {
+      res.status(403).json({ error: "Access denied" });
+      return;
+    }
 
     try {
       const entries = await readdir(targetPath, { withFileTypes: true });
@@ -418,6 +414,7 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
         headers: {
           "Cache-Control": "private, max-age=60",
           "X-Content-Type-Options": "nosniff",
+          ...(/\.html?$/i.test(ext) ? { "Content-Security-Policy": "sandbox allow-scripts; connect-src 'none'; form-action 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'" } : {}),
         },
         readErrorMessage: "Failed to read file",
       });
@@ -482,6 +479,11 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
         res.status(400).json({ error: "目标不是普通文件。" });
         return;
       }
+      const canonicalBase = await realpath(baseRoot);
+      const canonicalFile = await realpath(filePath);
+      if (!isPathWithinBase(canonicalFile, canonicalBase) || isBlockedFolderPath(canonicalFile)) {
+        res.status(403).json({ error: "访问被拒绝：资源链接目标越界。" }); return;
+      }
       const ext = path.extname(filePath).toLowerCase();
       const baseName = path.basename(filePath);
       const encodedName = encodeURIComponent(baseName);
@@ -493,6 +495,8 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
         headers: {
           "Cache-Control": "private, no-cache",
           "X-Content-Type-Options": "nosniff",
+          // Even opening the artifact directly must not grant the Wand origin.
+          ...(/\.html?$/i.test(ext) ? { "Content-Security-Policy": "sandbox allow-scripts; connect-src 'none'; form-action 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'" } : {}),
         },
         readErrorMessage: "读取本地文件失败。",
       });
@@ -694,54 +698,6 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
   }));
 }
 
-export function streamFileWithRange(
-  req: Request,
-  res: Response,
-  options: {
-    filePath: string;
-    size: number;
-    contentType: string;
-    disposition?: string;
-    headers?: Record<string, string>;
-    readErrorMessage?: string;
-  },
-): void {
-  res.setHeader("Content-Type", options.contentType);
-  if (options.disposition) res.setHeader("Content-Disposition", options.disposition);
-  for (const [name, value] of Object.entries(options.headers ?? {})) res.setHeader(name, value);
-  res.setHeader("Accept-Ranges", "bytes");
-  if (options.size === 0) {
-    if (req.headers.range?.trim().startsWith("bytes=")) {
-      res.status(416).setHeader("Content-Range", "bytes */0").end();
-      return;
-    }
-    res.setHeader("Content-Length", "0");
-    res.end();
-    return;
-  }
-  const parsedRange = parseByteRange(req.headers.range, options.size);
-  if (parsedRange === "invalid") {
-    res.status(416).setHeader("Content-Range", `bytes */${options.size}`).end();
-    return;
-  }
-  const start = parsedRange?.start ?? 0;
-  const end = parsedRange?.end ?? options.size - 1;
-  if (parsedRange) {
-    res.status(206);
-    res.setHeader("Content-Range", `bytes ${start}-${end}/${options.size}`);
-  }
-  res.setHeader("Content-Length", String(end - start + 1));
-  const stream = createReadStream(options.filePath, { start, end });
-  stream.on("error", (error) => {
-    if (!res.headersSent) {
-      res.status(500).json({ error: getErrorMessage(error, options.readErrorMessage ?? "读取文件失败。") });
-    } else {
-      res.destroy();
-    }
-  });
-  stream.pipe(res);
-}
-
 async function listPathSuggestions(input: string, fallbackCwd: string): Promise<PathSuggestion[]> {
   const normalizedInput = input.trim();
   const resolvedInput = normalizeFolderPath(normalizedInput || fallbackCwd);
@@ -755,16 +711,6 @@ async function listPathSuggestions(input: string, fallbackCwd: string): Promise<
     .sort((a, b) => a.name.localeCompare(b.name))
     .slice(0, 8)
     .map((entry) => ({ path: path.join(searchDir, entry.name), name: entry.name, isDirectory: true }));
-}
-
-function parseStoredPathList<T>(raw: string | null): T[] {
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed) ? parsed as T[] : [];
-  } catch {
-    return [];
-  }
 }
 
 async function getGitRepoRoot(dirPath: string): Promise<string | null> {
@@ -920,32 +866,4 @@ function classifyFile(ext: string, baseName: string): FilePreviewKind {
 
 function mimeForExt(ext: string): string {
   return MIME_BY_EXT[ext.toLowerCase()] || "application/octet-stream";
-}
-
-interface ParsedByteRange {
-  start: number;
-  end: number;
-}
-
-function parseByteRange(rangeHeader: string | undefined, total: number): ParsedByteRange | "invalid" | null {
-  if (!rangeHeader) return null;
-  const trimmed = rangeHeader.trim();
-  if (!trimmed.startsWith("bytes=")) return null;
-  const match = /^bytes=(\d*)-(\d*)$/.exec(trimmed);
-  if (!match || (match[1] === "" && match[2] === "")) return "invalid";
-  let start: number;
-  let end: number;
-  if (match[1] === "") {
-    const suffixLength = Number(match[2]);
-    if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) return "invalid";
-    start = Math.max(0, total - suffixLength);
-    end = total - 1;
-  } else {
-    start = Number(match[1]);
-    end = match[2] === "" ? total - 1 : Math.min(Number(match[2]), total - 1);
-  }
-  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start > end || start >= total) {
-    return "invalid";
-  }
-  return { start, end };
 }

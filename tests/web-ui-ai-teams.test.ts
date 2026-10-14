@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { defaultPlushAvatar, encodePlushAvatar } from "../src/plush-avatar.js";
+import { TeamAvatar } from "../src/web-ui/react/ai-teams/avatar.js";
 import { EmployeeAvatarPicker } from "../src/web-ui/react/agents/employee-avatar.js";
 import { installSharedLibraryBridge } from "../src/web-ui/react/library-bridge.js";
 
@@ -172,7 +174,8 @@ test("AI teams live on their own sidebar page, not in settings", () => {
   const sidebar = read("react/shell/shell-sidebar.tsx");
   const main = read("react/shell/shell-main-content.tsx");
   const settings = read("react/settings/host.tsx");
-  assert.match(sidebar, /taskBoardController\.open\([^;]*page === "teams" \? "teams" : "board"\)/);
+  assert.match(sidebar, /page === "board" \|\| page === "teams" \|\| page === "schedules"/);
+  assert.match(sidebar, /taskBoardController\.open\([^;]*, page\)/);
   assert.match(main, /taskBoard\.page === "teams" \? <AiTeamsPage/);
   assert.doesNotMatch(settings, /ai-teams/);
   assert.equal(isTaskBoardView("?view=teams"), true);
@@ -267,7 +270,7 @@ test("team page and run panel stay out of the inline bundle and load on demand",
   assert.match(lazy, /import type \{ AiTeamsPageProps \} from "\.\/teams-page";/);
   assert.match(lazy, /import type \{ TaskTeamRunPanelProps \} from "\.\.\/issues\/team-run-panel";/);
   assert.match(read("react/ai-teams/chunk-entry.ts"), /installStyleSheet\("wand-ai-teams-styles", aiTeamsChunkStyles\)/);
-  assert.match(read("react/ai-teams/lazy.tsx"), /const AI_TEAMS_CHUNK_SRC = "\$\{aiTeamsChunkSrc\}";/);
+  assert.match(read("react/ai-teams/lazy.tsx"), /const AI_TEAMS_CHUNK_SRC = browserAssetRuntime.aiTeamsChunkSrc;/);
   assert.match(read("scripts.ts"), /\.replace\("\$\{aiTeamsChunkSrc\}", `\/assets\/ai-teams\.js\?v=\$\{chunkHash\}`\)/);
 });
 
@@ -296,8 +299,8 @@ test("ai-teams chunk borrows every shared import from the main-bundle host regis
     "agents/employee-create-form": "react/agents/employee-create-form.tsx",
     "agents/employee-list-page": "react/agents/employee-list-page.tsx",
   };
-  const lazy = read("react/ai-teams/lazy.tsx");
-  const registry = lazy.slice(lazy.indexOf("const AI_TEAMS_HOST"), lazy.indexOf("};\n", lazy.indexOf("const AI_TEAMS_HOST")));
+  const bridge = read("react/ai-teams/host-bridge.tsx");
+  const registry = bridge.slice(bridge.indexOf("const AI_TEAMS_HOST"), bridge.indexOf("};\n", bridge.indexOf("const AI_TEAMS_HOST")));
   const hostNames = (key: string): string[] => {
     const match = registry.match(new RegExp(`"${key}": \\{([^}]*)\\}`));
     assert.ok(match, `lazy.tsx 注册表缺少模块 ${key}`);
@@ -329,7 +332,9 @@ test("ai-teams chunk borrows every shared import from the main-bundle host regis
       if (Object.hasOwn(chunkFiles, key)) continue;
       const names = clause.replace(/[{}]/g, "").split(",").map((name) => name.trim())
         .filter((name) => name && !name.startsWith("type "));
-      if (key === "theme") {
+      const chunkPlugin = readFileSync(new URL("../scripts/ai-teams-chunk.js", import.meta.url), "utf8");
+      const sharedKeys = chunkPlugin.match(/SHARED_LIBRARY_KEYS = new Set\(\[([\s\S]*?)\]\)/)?.[1] ?? "";
+      if (sharedKeys.includes(`"${key}"`)) {
         const plugin = readFileSync(new URL("../scripts/ai-teams-chunk.js", import.meta.url), "utf8");
         assert.match(plugin, /SHARED_LIBRARY_KEYS\.has\(key\)[\s\S]*?namespace: "wand-shared-library"/);
         const library = globalThis.__wandSharedLibrary!(key) as Record<string, unknown>;
@@ -344,19 +349,19 @@ test("ai-teams chunk borrows every shared import from the main-bundle host regis
 
 // ---------- [T6] Web 动效 token + 成员多候选编辑 ----------
 
-test("员工头像选择器使用库圆钮与有界头像，选中状态仍可读", () => {
-  const markup = renderToStaticMarkup(createElement(EmployeeAvatarPicker, { avatar: "cat:2", name: "测试", disabled: false, onChange() {} }));
-  assert.match(markup, /role="group" aria-label="员工头像"/);
-  assert.equal((markup.match(/ant-btn-circle/g) ?? []).length, CAT_COATS.length + 1);
-  const coatButtons = markup.match(/<button[^>]*class="[^"]*wand-team-coat[^>]*>/g) ?? [];
-  assert.equal(coatButtons.length, CAT_COATS.length + 1);
-  assert.ok(coatButtons.every((button) => button.includes("ant-btn-sm")));
-  assert.equal((markup.match(/aria-pressed="true"/g) ?? []).length, 1);
+test("员工头像选择器保留已选旧头像并提供有界上传与显式捏脸入口", () => {
+  const markup = renderToStaticMarkup(createElement(EmployeeAvatarPicker, { avatar: "cat:2", name: "测试", employeeId: "e_preview", disabled: false, onChange() {} }));
+  assert.match(markup, /aria-label="员工头像"/);
+  assert.match(markup, /aria-label="编辑员工头像"/);
+  assert.match(markup, /像素猫头像/);
+  assert.match(markup, /上传/);
+  assert.match(markup, /捏脸/);
+  assert.match(markup, /accept="image\/png,image\/jpeg,image\/webp"/);
   assert.match(markup, /width="74%" height="74%"/);
-  assert.doesNotMatch(read("react/ai-teams/styles.ts"), /\.wand-team-coat\s*\{/);
+  assert.doesNotMatch(markup, /aria-label="捏脸"/, "preview panel mounts only after explicit opening");
 });
 
-test("新建员工默认填写期望与可选标签，角色字段收进可原位展开的高级配置", () => {
+test("新建员工默认填写期望与可选标签，手动资料可原位展开", () => {
   const form = read("react/agents/employee-create-form.tsx");
   // 默认期望 + 可选标签：名字/职责/Prompt/候选仍在高级配置里。
   assert.match(form, /id="new-employee-expectation"/);
@@ -376,10 +381,13 @@ test("新建员工默认填写期望与可选标签，角色字段收进可原�
   assert.match(form, /onChange=\{\(keys\) => setAdvanced/);
   assert.match(styles, /\.wand-employee-create-submit,\s*\.wand-employee-save-submit \{ min-inline-size:/);
   // 箭头同实例旋转变形，标签不换字，按钮尺寸不变。
-  assert.match(form, /label: "高级配置"/);
+  assert.match(form, /label: "人选资料（可手动填写）"/);
   assert.doesNotMatch(form, /收起高级配置/);
-  assert.match(styles, /\.wand-employees-layout \{[^}]*overflow-y: auto;[^}]*overscroll-behavior: contain;/,
-    "员工长表单必须由面板自己滚动，不能让保存按钮溢出到外壳之外");
+  assert.match(styles, /\.wand-employees-layout \{[^}]*min-height: 0;[^}]*overflow: hidden;[^}]*overscroll-behavior: contain;/,
+    "员工外壳保留有界高度，长表单由当前页面自己滚动");
+  const profileStyles = read("react/styles/employee-profile.ts");
+  assert.match(profileStyles, /\.employee-profile-content>\.is-new\{[^}]*min-height:0;[^}]*overflow:auto;/,
+    "新建员工的独立滚动保留保存与取消入口");
 });
 
 const DWELL_TOKENS: Array<[string, number]> = [["--motion-dwell-sent", 720], ["--motion-dwell-failed", 1500]];
@@ -699,8 +707,8 @@ test("[T8] team-chat-view 进 chunk、主包不含它，借的模块靠注册表
   ]);
   assert.match(chunkScriptSource, /"ai-teams", "teams-page\.tsx"/, "新增运行历史合并消费者仍必须属于按需包，不能进主包");
   assert.match(read("react/ai-teams/lazy.tsx"), /import type \{ ConversationMessagesProps, TeamChatViewProps \} from "\.\/team-chat-view";/);
-  const lazy = read("react/ai-teams/lazy.tsx");
-  const registry = lazy.slice(lazy.indexOf("const AI_TEAMS_HOST"), lazy.indexOf("};\n", lazy.indexOf("const AI_TEAMS_HOST")));
+  const bridge = read("react/ai-teams/host-bridge.tsx");
+  const registry = bridge.slice(bridge.indexOf("const AI_TEAMS_HOST"), bridge.indexOf("};\n", bridge.indexOf("const AI_TEAMS_HOST")));
   assert.match(registry, /"http-adapter": \{ HttpResponseError, jsonBody, requestJson \}/, "群聊发送要的 http-adapter 没注册");
 });
 
@@ -1105,7 +1113,7 @@ test("[T8] 每条发言都有头像 + 名字，自己的发言用设置里的资
   assert.match(body, /src=\{spec\.kind === "upload" \? spec\.src : undefined\}/, "上传身份仍投影为 Ant Avatar src");
   // 消息行在 hover 时不位移（普通会话的 .chat-message:hover 会上浮 1px）。
   assert.match(chatStylesSource, /\.task-board-team-chat \.team-chat-msg:hover \{ transform: none; \}/);
-  assert.match(body, /<Avatar className="team-chat-avatar" shape="square" size=\{size === "sm" \? 24 : 32\}/, "两档身份头像由 Ant Avatar 渲染");
+  assert.match(body, /<Avatar className="team-chat-avatar" shape="square" size=\{size === "sm" \? 36 : 48\}/, "两档身份头像由 Ant Avatar 渲染");
   assert.doesNotMatch(chatStylesSource, /\.team-chat-avatar\s*\{/, "不重画库头像外观");
 });
 
@@ -1476,9 +1484,9 @@ test("[live] 实时输出先收成一行，展开后保留定高内滚", () => {
   assert.match(chatSource, /className="team-chat-live-card"[\s\S]{0,120}height: 200/, "业务有界窗口保留200px");
   assert.match(block, /\.team-chat-live-text \{[\s\S]*?overflow-y: auto;[\s\S]*?overscroll-behavior-y: contain;/, "内部滚动且不抢外层");
   assert.match(block, /font-family: var\(--font-mono\)/, "等宽");
-  assert.match(chatSource, /className="team-chat-live-summary"[\s\S]*?<Typography.Text ellipsis/, "首屏摘要由库排版");
-  assert.match(chatSource, /<Think[\s\S]*?expanded=\{expanded\}/, "输出原位展开");
-  assert.match(chatSource, /aria-expanded=\{expanded\}/);
+  assert.match(chatSource, /className="team-chat-live-summary-text"/, "首屏摘要保留一行，全文由共享展开入口呈现");
+  assert.match(chatSource, /<ChatActivity expanded=\{expanded\}/, "输出由Wand共享组件原位展开");
+  assert.match(readFileSync(new URL("../src/web-ui/react/chat/activity.tsx", import.meta.url), "utf8"), /aria-expanded=\{expanded\}/);
   assert.match(block, /@keyframes wand-team-live-grow \{\s*from \{ opacity: 0; transform: translateX\(-10px\); \}/, "从头像方向长出");
   assert.match(block, /\.team-chat-live-row\[data-leaving\] \{\s*animation: wand-team-live-grow var\(--motion-quick-exit\) var\(--ease-in-out-smooth\) reverse forwards;/, "收起是同一段动画倒放，且快于进场");
   // 头名仍从头像方向进场；完整输出由用户主动展开。
@@ -1492,7 +1500,7 @@ test("[live] 实时输出先收成一行，展开后保留定高内滚", () => {
   );
   assert.doesNotMatch(narrow, /team-chat-live/, "窄屏不改卡片高度");
   const reduced = chatStylesSource.slice(chatStylesSource.indexOf("@media (prefers-reduced-motion"));
-  assert.match(chatSource, /destroyOnHidden=\{false\}/);
+  assert.match(readFileSync(new URL("../src/web-ui/react/chat/activity.tsx", import.meta.url), "utf8"), /inert=\{!expanded\}/);
 });
 
 test("团队详情：草稿未保存时，每个离开入口都先确认，取消不丢", () => {
@@ -1509,7 +1517,7 @@ test("团队详情：草稿未保存时，每个离开入口都先确认，取�
   assert.match(teams, /aria-label="换一个模板" onClick=\{\(\) => \{ void backToTemplates\(\); \}\}/);
   assert.doesNotMatch(teams, /onClick=\{\(\) => setTemplate\(null\)\}/);
   assert.doesNotMatch(teams, /creating \? setSelectedId\(""\)/);
-  // 左侧列表换人也是「离开当前详情」：详情面板按 selectedId 挂 key，直接切会静默卸载未保存的编辑器。
+  // 列表选择也保留守卫：详情面板按 selectedId 挂 key，不能静默卸载未保存的编辑器。
   assert.match(teams, /const selectTeam = async \(teamId: string\): Promise<void> => \{\s*if \(teamId === selectedId\) return;\s*if \(!await confirmDiscardTeamDraft\(\)\) return;/);
   assert.match(teams, /onClick=\{\(\) => \{ void selectTeam\(team\.id\); \}\}/);
   assert.doesNotMatch(teams, /onClick=\{\(\) => setSelectedId\(team\.id\)\}/, "列表项不再有绕过确认的直连入口");
@@ -1522,16 +1530,18 @@ test("团队详情：草稿未保存时，每个离开入口都先确认，取�
   assert.match(teams, /\{ label: "继续编辑", value: false, autoFocus: true \}/);
   assert.match(teams, /\{ label: "放弃改动", value: true, kind: "danger" \}/);
   assert.match(teams, /return answer\.dismissed === false && answer\.action === true;/);
-  // 切标签的叠放面板常驻，TeamEditor 不再因换团队留旧草稿。
-  assert.match(teams, /> : <TeamEditor\n\s*key=\{selected\.id\}/);
+  // 运行记录往返保留编辑器；换团队时仍按团队 ID 隔离草稿。
+  assert.match(teams, /<TeamEditor\n\s*key=\{selected\.id\}/);
 });
 
-test("团队详情切标签：Ant Tabs 常驻两块面板，保留编辑状态与隐藏焦点约束", () => {
+test("团队详情通过运行记录入口切换，保留编辑状态与隐藏焦点约束", () => {
   const teams = read("react/ai-teams/teams-page.tsx");
-  assert.match(teams, /<Tabs activeKey=\{detailTab\} onChange=\{setDetailTab\} destroyOnHidden=\{false\}/);
-  assert.match(teams, /items=\{DETAIL_TABS\.map\(\(tab\) => \(\{ key: tab\.value, label: tab\.label, forceRender: true/);
+  assert.match(teams, /className="wand-team-history-toggle"/);
+  assert.match(teams, /"返回成员设置" : "查看运行记录"/);
+  assert.doesNotMatch(teams, /<Tabs|DETAIL_TABS/);
   assert.doesNotMatch(teams, /key=\{detailTab\}/);
-  assert.match(teams, /inert=\{detailTab !== tab\.value\}/);
+  assert.match(teams, /hidden=\{detailTab !== "members"\} inert=\{detailTab !== "members"\}/);
+  assert.match(teams, /hidden=\{detailTab !== "runs"\} inert=\{detailTab !== "runs"\}/);
   assert.match(teams, /active=\{detailTab === "members"\}/);
   assert.doesNotMatch(read("react/ai-teams/styles.ts"), /\.wand-teams-detail-(?:stack|pane)\s*\{/);
 });
@@ -1718,4 +1728,29 @@ test("[v2] 旧数据降级：旧 roster / 旧开工 notice 与「（等第…）
   assert.equal(chatAvatarSpec(null).kind, "brand");
   assert.equal(reportTypeLabel(parseStepReport("普通发言")), "成员发言");
   assert.deepEqual(mentionSegments("依据 @查不到的名字 继续", ["实现者"]), [{ text: "依据 @查不到的名字 继续" }]);
+});
+
+
+test("bound team members share employee-default faces across task and chat views without changing stored turns", () => {
+  const member = { id: "m_bound", employeeId: "e_identity", name: "员工", avatar: "", duty: "开发", agent: { provider: "codex" }, isLeader: false } as AiTeamMember;
+  const raw: ConversationTurn = { role: "assistant", author: { id: member.id, name: member.name }, content: [{ type: "text", text: "原始正文" }] };
+  const fingerprint = chatTurnFingerprint(raw);
+  const team = { id: "t_bound", members: [member] } as AiTeam;
+  const expected = encodePlushAvatar(defaultPlushAvatar({ id: member.employeeId!, name: member.name }));
+  const visible = displayChatTurn(raw, team);
+  assert.equal(visible.author?.avatar, expected);
+  assert.equal(visible.author?.id, member.id);
+  assert.equal(chatTurnFingerprint(raw), fingerprint);
+  assert.equal(raw.author?.avatar, undefined, "projection never persists or mutates historical identity");
+  const html = renderToStaticMarkup(createElement(TeamAvatar, { member }));
+  const renderedConfig = (markup: string) => JSON.parse(markup.match(/data-avatar-config="([^\"]+)"/)![1]!.replace(/&quot;/g, '"'));
+  assert.deepEqual(renderedConfig(html), defaultPlushAvatar({ id: member.employeeId!, name: member.name }));
+  const otherTeamRole = renderToStaticMarkup(createElement(TeamAvatar, { member: { ...member, id: "m_other", name: "改名" } }));
+  assert.deepEqual(renderedConfig(otherTeamRole), renderedConfig(html), "real employee ID wins over team-role ID and mutable name");
+  const unbound = { ...member, employeeId: undefined };
+  assert.doesNotMatch(renderToStaticMarkup(createElement(TeamAvatar, { member: unbound })), /data-plush-avatar/);
+  for (const avatar of ["cat:2", "data:image/png;base64,AAA"]) {
+    const explicit = displayChatTurn(raw, { ...team, members: [{ ...member, avatar }] });
+    assert.equal(explicit.author?.avatar, avatar, "explicit legacy cat or uploaded photo remains intact");
+  }
 });

@@ -3,6 +3,7 @@ import { AI_TEAM_MAX_CANDIDATES, agentKey, isDefaultSiliconEmployee, type AiTeam
 
 export interface AiTeamEmployeeSource {
   getSiliconEmployee(id: string): SiliconEmployee | null;
+  getSiliconEmployeeDefinition?(id: string): SiliconEmployee | null;
 }
 
 // Execution-only data: never enumerable on a member or exposed by public DTO serialization.
@@ -38,7 +39,8 @@ export function requireTeamEmployee(source: AiTeamEmployeeSource, id: string): S
   }
   // The default partner's read projection includes short-term habits; they are not team snapshot data.
   return isDefaultSiliconEmployee(employee)
-    ? defaultEmployeeDefinition(employee.agents, employee.updatedAt, employee, null)
+    ? { ...defaultEmployeeDefinition(employee.agents, employee.updatedAt, source.getSiliconEmployeeDefinition?.(id) ?? employee, null),
+      avatar: employee.avatar }
     : employee;
 }
 
@@ -68,19 +70,20 @@ export function serializeExecutionTeam(team: AiTeam): string {
   })) });
 }
 
+function projectBoundMember(member: AiTeamMember, source: AiTeamEmployeeSource, includeAgents: boolean): AiTeamMember {
+  const employee = member.employeeId ? source.getSiliconEmployee(member.employeeId) : null;
+  if (!employee) return member;
+  return includeAgents
+    ? { ...member, name: employee.name, avatar: employee.avatar, agents: employee.agents, agent: employee.agents[0]! }
+    : { ...member, name: employee.name, avatar: employee.avatar };
+}
+
 /** Team definitions expose current employee-owned fields without storing another copy of the role. */
 export function projectTeamDefinition(team: AiTeam, source: AiTeamEmployeeSource): AiTeam {
-  return { ...team, members: team.members.map((member) => {
-    const employee = member.employeeId ? source.getSiliconEmployee(member.employeeId) : null;
-    return employee ? { ...member, name: employee.name, avatar: employee.avatar,
-      agents: employee.agents, agent: employee.agents[0]! } : member;
-  }) };
+  return { ...team, members: team.members.map((member) => projectBoundMember(member, source, true)) };
 }
 
 /** Read-only names/avatars follow the same employee, never a replacement at the same member id. */
 export function projectTeamEmployees(team: AiTeam, source: AiTeamEmployeeSource): AiTeam {
-  return { ...team, members: team.members.map((member) => {
-    const employee = member.employeeId ? source.getSiliconEmployee(member.employeeId) : null;
-    return employee ? { ...member, name: employee.name, avatar: employee.avatar } : member;
-  }) };
+  return { ...team, members: team.members.map((member) => projectBoundMember(member, source, false)) };
 }

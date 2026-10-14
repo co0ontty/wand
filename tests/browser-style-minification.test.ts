@@ -27,7 +27,7 @@ const REAL_STYLE_FILES = [
   "src/web-ui/react/styles/features.ts",
   "src/web-ui/react/shell/sidebar-styles.ts",
   "src/web-ui/react/issues/library-layout.ts",
-  "src/web-ui/react/chat/presentation.tsx",
+  "src/web-ui/react/chat/styles.ts",
 ];
 
 test("static String.raw CSS templates are replaced with a minified string literal", () => {
@@ -216,7 +216,7 @@ test("real source style files are transformed in memory but untouched on disk", 
 });
 
 test("the real chat raw template has identical cooked value and unchanged CSS minification semantics", () => {
-  const full = path.join(root, "src/web-ui/react/chat/presentation.tsx");
+  const full = path.join(root, "src/web-ui/react/chat/styles.ts");
   const before = readFileSync(full, "utf8");
   const source = ts.createSourceFile(full, before, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const templates: ts.TaggedTemplateExpression[] = [];

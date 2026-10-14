@@ -1,8 +1,8 @@
 import "../issues/library-layout";
 import "./layout.js";
 import { hasAutomaticPermissions, modeHint } from "./permission-summary.js";
-import { Alert, AutoComplete, Collapse, Flex, Form, Radio, Space, Spin, Typography } from "antd";
-import { TaskForm, TaskTextArea } from "../issues/form-controls";
+import { Alert, AutoComplete, Collapse, Flex, Form, Radio, Segmented, Space, Spin, Typography } from "antd";
+import { TaskForm, TaskTextArea } from "../issues/task-form";
 import { WandInput } from "../ui";
 import {
   type FormEvent,
@@ -33,7 +33,7 @@ import { AGENT_TOOL_OPTIONS, agentToolIdFor, agentToolOption, agentToolDisplayNa
 import { aiTeamPickerOption, aiTeamsRepository, useAiTeamList } from "../ai-teams/repository";
 import { taskBoardController } from "../issues/task-board-controller";
 import { notifyTasksChanged } from "../task-changes";
-import { TEAM_NEEDS_PROJECT_HINT, usableTeamWorkspaceId } from "../workspaces/workspace-agent-picker";
+import { WORKSPACE_KIND_OPTIONS, TEAM_NEEDS_PROJECT_HINT, usableTeamWorkspaceId } from "../workspaces/workspace-agent-model";
 import { httpWorkspacesRepository } from "../workspaces/repository";
 import type { Workspace } from "../workspaces/types";
 import { newSessionController, newSessionStore } from "./controller";
@@ -148,6 +148,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
   const [suggestionsActive, setSuggestionsActive] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [subjectPickerOpen, setSubjectPickerOpen] = useState(false);
+  const subjectPickerRef = useRef<HTMLDivElement | null>(null);
   const [recentPathsOpen, setRecentPathsOpen] = useState(false);
   // 目录和使用次数都在打开后请求（登录前会 401）；加载完才展示选项，避免排序跳动。
   const modelCatalog = useWandModelCatalog(controller.open);
@@ -275,7 +276,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
   const selectKind = useCallback((kind: NewSessionKind) => {
     setForm((current) => current ? { ...current, kind,
       model: kind !== "structured" && current.model.startsWith("wand-openrouter-free/") ? "default" : current.model } : current);
-    if (kind !== "structured") setAdvancedOpen(true);
+    // 协议说明按需展开；切换主要执行方式不自动打开次要说明。
     if (kind !== "shell") {
       void repository.savePreferences({ defaultSessionKind: kind })
         .catch((saveError) => console.warn("[wand] Failed to persist new-session defaults", saveError));
@@ -465,7 +466,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
       open={controller.open}
       onOpenChange={(open) => { if (!open) newSessionController.close(); }}
       title={controller.taskName ? `新对话 · ${controller.taskName}` : "新对话"}
-      description="确认执行对象、工作目录与权限后启动。工具、会话类型与模式会记为下次新建偏好。"
+      description="先选择执行方式，再确认模型与工作目录。选择会记为下次新建偏好。"
       className="wand-task-library-dialog wand-new-session-library-dialog"
       closeLabel="关闭新建会话"
       testId="new-session-dialog"
@@ -474,17 +475,286 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
       {loading || (controller.open && providerUsage === null) ? <Spin tip="正在加载新建会话配置…"><div style={{ minHeight: 100 }} role="status">正在加载新建会话配置…</div></Spin> : form && defaults ? (
         <TaskForm noValidate aria-busy={submitting} onSubmit={(event) => void submit(event)}>
           <Flex vertical gap={12}>
-            <section className="wand-new-session-summary" aria-label="本次启动配置" aria-live="polite">
-              <dl>
-                <div><dt>执行对象</dt><dd title={subjectSummary}>{subjectSummary}{form.kind === "shell" ? " · Shell" : form.kind === "structured" ? " · 对话" : " · 终端"}</dd></div>
-                <div><dt>模型</dt><dd title={modelSummary}>{modelSummary}</dd></div>
-                <div><dt>工作目录</dt><dd title={effectiveCwd}>{effectiveCwd}</dd></div>
-                <div><dt>权限</dt><dd className={permissionWarning ? "wand-new-session-permission-warning" : undefined}>{permissionSummary}</dd></div>
-              </dl>
-              <Typography.Paragraph className="wand-new-session-permission-detail" type={permissionWarning ? "danger" : "secondary"}>{permissionDetail}</Typography.Paragraph>
+            <section className="wand-new-session-summary" aria-label="执行设置">
+              <Flex vertical gap={12}>
+                <Form.Item label="执行对象" style={{ marginBottom: 0 }}>
+                  {form.employeeId ? (
+                    <div className="wand-new-session-employee-section">
+                      <Flex
+                        align="center"
+                        justify="space-between"
+                        gap={12}
+                        className="wand-new-session-logo-bar"
+                        style={{
+                          padding: "8px 0",
+                          borderBottom: "1px solid var(--border-subtle)",
+                        }}
+                      >
+                        <Flex align="center" gap={12} style={{ minWidth: 0, flex: 1 }}>
+                          <button
+                            type="button"
+                            className="wand-new-session-logo-toggle"
+                            ref={employeeToolButtonRef}
+                            title={customizingCli ? "收起工具切换" : "切换执行工具和模型"}
+                            aria-label={customizingCli ? "收起工具切换" : "切换执行工具和模型"}
+                            aria-expanded={customizingCli}
+                            style={{
+                              background: "transparent",
+                              border: "none",
+                              padding: 0,
+                              cursor: "pointer",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                            }}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setCustomizingCli(!customizingCli);
+                            }}
+                          >
+                            <EmployeeAvatar
+                              employee={selectedEmployee || { id: form.employeeId, name: "员工" }}
+                              provider={form.specifiedCli ? form.provider : undefined}
+                              size="md"
+                            />
+                          </button>
+                          <Flex vertical style={{ minWidth: 0, flex: 1 }}>
+                            <Flex align="center" gap={8}>
+                              <Typography.Text strong ellipsis style={{ fontSize: 13 }}>
+                                {selectedEmployee?.name || "硅基员工"}
+                              </Typography.Text>
+                              <Typography.Text
+                                type="secondary"
+                                style={{
+                                  fontSize: 12,
+                                  padding: "1px 6px",
+                                  borderRadius: 4,
+                                  background: form.specifiedCli ? "var(--accent-muted)" : "var(--bg-secondary)",
+                                  color: form.specifiedCli ? "var(--accent)" : "var(--text-secondary)",
+                                }}
+                              >
+                                {form.specifiedCli ? "已指定工具" : "按员工配置启动"}
+                              </Typography.Text>
+                            </Flex>
+                            <Typography.Text type="secondary" ellipsis style={{ fontSize: 12 }}>
+                              {form.specifiedCli
+                                ? `工具：${selectedTool(form)?.label || form.provider} · 模型：${preferredModel(form.model)}`
+                                : "按员工配置的工具与模型候选顺序启动"}
+                            </Typography.Text>
+                          </Flex>
+                        </Flex>
+                        <WandButton
+                          kind="ghost"
+                          size="small"
+                          type="button"
+                          aria-expanded={customizingCli}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setCustomizingCli(!customizingCli);
+                          }}
+                        >
+                          {customizingCli ? "收起" : "指定工具 / 模型"}
+                        </WandButton>
+                      </Flex>
+
+                      {customizingCli ? (
+                        <Flex
+                          vertical
+                          gap={12}
+                          className="wand-new-session-custom-cli-panel"
+                          style={{
+                            marginTop: 8,
+                            padding: "8px 0",
+                          }}
+                        >
+                          <Form.Item label="选择执行工具" style={{ marginBottom: 0 }}>
+                            <Radio.Group
+                              value={form.specifiedCli ? agentToolIdFor(form.provider, form.engine) : "default_dispatch"}
+                              disabled={submitting}
+                              style={{ width: "100%" }}
+                              onChange={(event) => {
+                                const val = event.target.value;
+                                if (val === "default_dispatch") {
+                                  setForm((current) => current ? { ...current, specifiedCli: false } : current);
+                                } else {
+                                  setForm((current) => current ? { ...current, specifiedCli: true } : current);
+                                  selectTool(val);
+                                }
+                              }}
+                            >
+                              <div className="wand-execution-subject-grid">
+                                <Radio value="default_dispatch">
+                                  <Flex align="center" gap={8}>
+                                    <EmployeeAvatar
+                                      employee={selectedEmployee || { id: form.employeeId, name: "员工" }}
+                                      size="sm"
+                                    />
+                                    <Flex vertical>
+                                      <Typography.Text strong>员工默认派发</Typography.Text>
+                                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                        按员工配置的候选顺序尝试工具与模型
+                                      </Typography.Text>
+                                    </Flex>
+                                  </Flex>
+                                </Radio>
+                                {AGENT_TOOL_OPTIONS.map((tool) => (
+                                  <Radio key={tool.id} value={tool.id}>
+                                    <Flex align="center" gap={8}>
+                                      {tool.engine === "sdk"
+                                        ? <WandIcon name="spark" size={18}/>
+                                        : <ProviderLogo provider={tool.provider} className="wand-subject-provider" />}
+                                      <Flex vertical>
+                                        <Typography.Text strong>{tool.label}</Typography.Text>
+                                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                          {tool.description}
+                                        </Typography.Text>
+                                      </Flex>
+                                    </Flex>
+                                  </Radio>
+                                ))}
+                              </div>
+                            </Radio.Group>
+                          </Form.Item>
+
+                          {form.specifiedCli ? (
+                            <Form.Item
+                              label="指定模型"
+                              style={{ marginBottom: 0 }}
+                              extra="所选模型随会话启动一起提交；「跟随服务端默认」沿用服务端配置的默认模型。"
+                            >
+                              <WandSelect
+                                value={preferredModel(form.model)}
+                                options={wandModelOptions(modelCatalog, form.provider).filter(
+                                  (option) => form.kind === "structured" || !option.value.startsWith("wand-openrouter-free/"),
+                                )}
+                                ariaLabel="模型"
+                                searchable
+                                searchPlaceholder="搜索模型"
+                                disabled={submitting}
+                                className="wand-new-session-model-select"
+                                onValueChange={selectModel}
+                              />
+                            </Form.Item>
+                          ) : null}
+
+                          <Flex justify="space-between" align="center" style={{ paddingTop: 4 }}>
+                            <WandButton
+                              kind="ghost"
+                              size="small"
+                              type="button"
+                              onClick={() => {
+                                setForm((current) => current ? { ...current, employeeId: undefined, specifiedCli: undefined } : current);
+                                setCustomizingCli(false);
+                                setSubjectPickerOpen(true);
+                              }}
+                            >
+                              选择其他执行者
+                            </WandButton>
+                            {form.specifiedCli ? (
+                              <WandButton
+                                kind="ghost"
+                                size="small"
+                                type="button"
+                                onClick={() => {
+                                  setForm((current) => current ? { ...current, specifiedCli: false } : current);
+                                }}
+                              >
+                                恢复员工默认派发
+                              </WandButton>
+                            ) : null}
+                          </Flex>
+                        </Flex>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <Collapse ref={subjectPickerRef} className="wand-new-session-subject-collapse" destroyOnHidden activeKey={subjectPickerOpen ? ["subject"] : []}
+                      onChange={(keys) => setSubjectPickerOpen(keys.includes("subject"))}
+                      items={[{ key: "subject", label: <Flex justify="space-between" align="center" gap={12}><Typography.Text strong ellipsis title={subjectSummary}>{subjectSummary}</Typography.Text><Typography.Text type="secondary">更换执行对象</Typography.Text></Flex>, children: <UnifiedExecutionSubjectPicker
+                      selectedSubject={form.teamId
+                        ? { type: "team", id: form.teamId }
+                        : form.employeeId
+                          ? { type: "employee", id: form.employeeId }
+                          : { type: "cli", id: form.kind === "shell" ? "shell" : form.provider,
+                              ...(form.engine ? { engine: form.engine } : {}) }}
+                      kind={form.kind === "shell" ? "pty" : form.kind}
+                      model={form.model}
+                      showModel={false}
+                      showKind={false}
+                      teams={teamContext ? teamOptions : null}
+                      teamWorkspaceId={teamWorkspaceId}
+                      disabled={submitting}
+                      onSubjectChange={(subj) => {
+                        // 员工有自己的身份入口焦点；其余选择回到原展开按钮。
+                        if (subj.type !== "employee") subjectPickerRef.current?.querySelector<HTMLElement>(".ant-collapse-header")?.focus({ preventScroll: true });
+                        setSubjectPickerOpen(false);
+                        if (subj.type === "team") {
+                          setForm((current) => current
+                            ? { ...current, teamId: subj.id, employeeId: undefined, specifiedCli: undefined }
+                            : current);
+                          return;
+                        }
+                        if (subj.type === "cli") {
+                          if (subj.id === "shell") {
+                            setForm((current) => current
+                              ? { ...current, teamId: undefined, employeeId: undefined, kind: "shell", specifiedCli: undefined }
+                              : current);
+                          } else {
+                            setForm((current) => current
+                              ? { ...current, teamId: undefined, employeeId: undefined, kind: current.kind === "shell" ? "pty" : current.kind, specifiedCli: undefined }
+                              : current);
+                            selectTool(agentToolIdFor(subj.id as NewSessionProvider, subj.engine));
+                          }
+                        } else if (subj.type === "employee") {
+                          setForm((current) => current
+                            ? { ...current, teamId: undefined, employeeId: subj.id, kind: "structured", specifiedCli: false }
+                            : current);
+                        }
+                      }}
+                      onKindChange={(nextKind) => {
+                        if (nextKind === "pty") {
+                          setForm((current) => current ? { ...current, teamId: undefined, employeeId: undefined, specifiedCli: undefined } : current);
+                        }
+                        selectKind(nextKind);
+                      }}
+                      onModelChange={(nextModel) => selectModel(nextModel)}
+                    /> }]}/>
+                  )}
+                </Form.Item>
+                <Form.Item label="会话类型" style={{ marginBottom: 0 }}>
+                  <Segmented block aria-label="会话类型" value={form.kind === "shell" ? "pty" : form.kind} disabled={submitting}
+                    options={WORKSPACE_KIND_OPTIONS.map((option) => ({ value: option.value,
+                      label: <span title={option.description}>{option.label}</span> }))}
+                    onChange={(value) => {
+                      if (value === "pty") {
+                        setForm((current) => current ? { ...current, teamId: undefined, employeeId: undefined, specifiedCli: undefined,
+                          engine: current.engine === "sdk" ? "cli" : current.engine } : current);
+                        if (form.engine === "sdk") selectTool(agentToolIdFor(form.provider, "cli"));
+                      }
+                      selectKind(value as NewSessionKind);
+                    }}/>
+                  {form.employeeId || form.teamId || form.engine === "sdk" ? <Typography.Text type="secondary">终端直接使用命令行工具；切换后不使用员工、团队或 Wand Agent。</Typography.Text> : null}
+                </Form.Item>
+                {!form.teamId && !(form.employeeId && !form.specifiedCli) && form.kind !== "shell" ? <Form.Item label="权限与执行模式" style={{ marginBottom: 0 }}>
+                  <Radio.Group aria-label="执行模式" value={form.mode} disabled={submitting} onChange={(event) => selectMode(event.target.value)}>
+                    <Space wrap>{MODES.filter((mode) => supported.has(mode.value)).map((mode) => <Radio.Button key={mode.value} value={mode.value} disabled={!supported.has(mode.value)} title={mode.description}
+                      ref={(element) => { modeRefs.current[mode.value] = element?.input ?? null; }}
+                      onKeyDown={(event) => navigateChoice(event, form.mode, supportedModesForProvider, selectMode, modeRefs)}>{mode.label}</Radio.Button>)}</Space>
+                  </Radio.Group>
+                </Form.Item> : null}
+                <div className="wand-new-session-permission-context" aria-live="polite">
+                  {form.teamId || (form.employeeId && !form.specifiedCli) ? <dl><div><dt>模型</dt><dd title={modelSummary}>{modelSummary}</dd></div></dl> : null}
+                  {permissionWarning || form.teamId || form.employeeId || form.kind === "shell" ? <Typography.Text strong className={permissionWarning ? "wand-new-session-permission-warning" : undefined}>{permissionSummary}</Typography.Text> : null}
+                  <Typography.Paragraph className="wand-new-session-permission-detail" type={permissionWarning ? "danger" : "secondary"}>{permissionDetail}</Typography.Paragraph>
+                </div>
+              </Flex>
             </section>
-            {!form.teamId ? <NewSessionTaskField form={form} initialName={controller.taskName}
-              disabled={submitting} cwd={projectCwd} onChange={setForm}/> : null}
+            {form.teamId ? <Form.Item label="本轮说明" htmlFor="wand-new-session-team-note"
+              extra={<Typography.Text id="wand-new-session-team-note-hint" type="secondary">团队按这句话拆解与验收；开工后首屏直接进群聊页看进展。</Typography.Text>}>
+              <TaskTextArea className="resize-none" id="wand-new-session-team-note" ref={teamNoteRef}
+                rows={3} maxLength={4000} required value={teamNote} disabled={submitting}
+                aria-describedby="wand-new-session-team-note-hint" placeholder="一句话说清要他们做什么"
+                onChange={(event) => setTeamNote(event.currentTarget.value)}/>
+            </Form.Item> : null}
             <div className={`wand-new-session-primary-fields${form.kind === "shell" || form.employeeId || form.teamId ? " is-single" : ""}`}>
             <Form.Item htmlFor="wand-new-session-cwd" label="工作目录" extra={<Typography.Text id="wand-new-session-cwd-hint" type="secondary">{form.workspaceTaskId ? "使用所选任务的运行目录；切换任务可更换目录。" : "留空则使用当前目录，支持路径自动补全。"}</Typography.Text>}>
               <AutoComplete style={{ width: "100%" }} value={form.cwd} disabled={submitting || Boolean(form.workspaceTaskId)}
@@ -494,7 +764,7 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                 onSelect={(cwd) => { setForm({ ...form, cwd, workspaceId: undefined }); setSuggestionsActive(false); }}
                 onFocus={() => setSuggestionsActive(true)} onBlur={() => setSuggestionsActive(false)}>
                 <WandInput id="wand-new-session-cwd" type="text"
-                  placeholder={newSessionStore.getRuntime()?.getContext().effectiveCwd || defaults.config.defaultCwd}
+                  placeholder={effectiveCwd}
                   autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
                   aria-invalid={error.includes("目录") || undefined} aria-describedby="wand-new-session-cwd-hint"/>
               </AutoComplete>
@@ -509,264 +779,15 @@ export function NewSessionHost({ repository = httpNewSessionRepository }: NewSes
                 </WandButton>)}
               </Space> }]}/> : null}
             </Form.Item>
-            {form.kind !== "shell" && !form.employeeId && !form.teamId ? <Form.Item label="模型" extra="所选模型随会话启动一起提交；「跟随服务端默认」沿用服务端配置的默认模型。">
+            {form.kind !== "shell" && !form.employeeId && !form.teamId ? <Form.Item label="模型" extra="选择默认时，沿用服务端默认模型。">
               <WandSelect value={preferredModel(form.model)}
                 options={wandModelOptions(modelCatalog, form.provider).filter((option) => form.kind === "structured" || !option.value.startsWith("wand-openrouter-free/"))}
                 ariaLabel="模型" searchable searchPlaceholder="搜索模型" disabled={submitting}
                 className="wand-new-session-model-select" onValueChange={selectModel}/>
             </Form.Item> : null}
             </div>
-            {form.employeeId ? (
-              <div className="wand-new-session-employee-section">
-                <Flex
-                  align="center"
-                  justify="space-between"
-                  gap={12}
-                  className="wand-new-session-logo-bar"
-                  style={{
-                    padding: "8px 0",
-                    borderBottom: "1px solid var(--border-subtle)",
-                  }}
-                >
-                  <Flex align="center" gap={12} style={{ minWidth: 0, flex: 1 }}>
-                    <button
-                      type="button"
-                      className="wand-new-session-logo-toggle"
-                      ref={employeeToolButtonRef}
-                      title={customizingCli ? "收起工具切换" : "切换执行工具和模型"}
-                      aria-label={customizingCli ? "收起工具切换" : "切换执行工具和模型"}
-                      aria-expanded={customizingCli}
-                      style={{
-                        background: "transparent",
-                        border: "none",
-                        padding: 0,
-                        cursor: "pointer",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setCustomizingCli(!customizingCli);
-                      }}
-                    >
-                      <EmployeeAvatar
-                        employee={selectedEmployee || { id: form.employeeId, name: "员工" }}
-                        provider={form.specifiedCli ? form.provider : undefined}
-                        size="md"
-                      />
-                    </button>
-                    <Flex vertical style={{ minWidth: 0, flex: 1 }}>
-                      <Flex align="center" gap={8}>
-                        <Typography.Text strong ellipsis style={{ fontSize: 13 }}>
-                          {selectedEmployee?.name || "硅基员工"}
-                        </Typography.Text>
-                        <Typography.Text
-                          type="secondary"
-                          style={{
-                            fontSize: 12,
-                            padding: "1px 6px",
-                            borderRadius: 4,
-                            background: form.specifiedCli ? "var(--accent-muted)" : "var(--bg-secondary)",
-                            color: form.specifiedCli ? "var(--accent)" : "var(--text-secondary)",
-                          }}
-                        >
-                          {form.specifiedCli ? "已指定工具" : "按员工配置启动"}
-                        </Typography.Text>
-                      </Flex>
-                      <Typography.Text type="secondary" ellipsis style={{ fontSize: 12 }}>
-                        {form.specifiedCli
-                          ? `工具：${selectedTool(form)?.label || form.provider} · 模型：${preferredModel(form.model)}`
-                          : "按员工配置的工具与模型候选顺序启动"}
-                      </Typography.Text>
-                    </Flex>
-                  </Flex>
-                  <WandButton
-                    kind="ghost"
-                    size="small"
-                    type="button"
-                    aria-expanded={customizingCli}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setCustomizingCli(!customizingCli);
-                    }}
-                  >
-                    {customizingCli ? "收起" : "指定工具 / 模型"}
-                  </WandButton>
-                </Flex>
-
-                {customizingCli ? (
-                  <Flex
-                    vertical
-                    gap={12}
-                    className="wand-new-session-custom-cli-panel"
-                    style={{
-                      marginTop: 8,
-                      padding: "8px 0",
-                    }}
-                  >
-                    <Form.Item label="选择执行工具" style={{ marginBottom: 0 }}>
-                      <Radio.Group
-                        value={form.specifiedCli ? agentToolIdFor(form.provider, form.engine) : "default_dispatch"}
-                        disabled={submitting}
-                        style={{ width: "100%" }}
-                        onChange={(event) => {
-                          const val = event.target.value;
-                          if (val === "default_dispatch") {
-                            setForm((current) => current ? { ...current, specifiedCli: false } : current);
-                          } else {
-                            setForm((current) => current ? { ...current, specifiedCli: true } : current);
-                            selectTool(val);
-                          }
-                        }}
-                      >
-                        <div className="wand-execution-subject-grid">
-                          <Radio value="default_dispatch">
-                            <Flex align="center" gap={8}>
-                              <EmployeeAvatar
-                                employee={selectedEmployee || { id: form.employeeId, name: "员工" }}
-                                size="sm"
-                              />
-                              <Flex vertical>
-                                <Typography.Text strong>员工默认派发</Typography.Text>
-                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                  按员工配置的候选顺序尝试工具与模型
-                                </Typography.Text>
-                              </Flex>
-                            </Flex>
-                          </Radio>
-                          {AGENT_TOOL_OPTIONS.map((tool) => (
-                            <Radio key={tool.id} value={tool.id}>
-                              <Flex align="center" gap={8}>
-                                {tool.engine === "sdk"
-                                  ? <WandIcon name="spark" size={18}/>
-                                  : <ProviderLogo provider={tool.provider} className="wand-subject-provider" />}
-                                <Flex vertical>
-                                  <Typography.Text strong>{tool.label}</Typography.Text>
-                                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                    {tool.description}
-                                  </Typography.Text>
-                                </Flex>
-                              </Flex>
-                            </Radio>
-                          ))}
-                        </div>
-                      </Radio.Group>
-                    </Form.Item>
-
-                    {form.specifiedCli ? (
-                      <Form.Item
-                        label="指定模型"
-                        style={{ marginBottom: 0 }}
-                        extra="所选模型随会话启动一起提交；「跟随服务端默认」沿用服务端配置的默认模型。"
-                      >
-                        <WandSelect
-                          value={preferredModel(form.model)}
-                          options={wandModelOptions(modelCatalog, form.provider).filter(
-                            (option) => form.kind === "structured" || !option.value.startsWith("wand-openrouter-free/"),
-                          )}
-                          ariaLabel="模型"
-                          searchable
-                          searchPlaceholder="搜索模型"
-                          disabled={submitting}
-                          className="wand-new-session-model-select"
-                          onValueChange={selectModel}
-                        />
-                      </Form.Item>
-                    ) : null}
-
-                    <Flex justify="space-between" align="center" style={{ paddingTop: 4 }}>
-                      <WandButton
-                        kind="ghost"
-                        size="small"
-                        type="button"
-                        onClick={() => {
-                          setForm((current) => current ? { ...current, employeeId: undefined, specifiedCli: undefined } : current);
-                          setCustomizingCli(false);
-                          setSubjectPickerOpen(true);
-                        }}
-                      >
-                        选择其他执行者
-                      </WandButton>
-                      {form.specifiedCli ? (
-                        <WandButton
-                          kind="ghost"
-                          size="small"
-                          type="button"
-                          onClick={() => {
-                            setForm((current) => current ? { ...current, specifiedCli: false } : current);
-                          }}
-                        >
-                          恢复员工默认派发
-                        </WandButton>
-                      ) : null}
-                    </Flex>
-                  </Flex>
-                ) : null}
-              </div>
-            ) : (
-              <Collapse className="wand-new-session-subject-collapse" destroyOnHidden activeKey={subjectPickerOpen ? ["subject"] : []}
-                onChange={(keys) => setSubjectPickerOpen(keys.includes("subject"))}
-                items={[{ key: "subject", label: "更换执行对象与会话类型", children: <UnifiedExecutionSubjectPicker
-                selectedSubject={form.teamId
-                  ? { type: "team", id: form.teamId }
-                  : form.employeeId
-                    ? { type: "employee", id: form.employeeId }
-                    : { type: "cli", id: form.kind === "shell" ? "shell" : form.provider,
-                        ...(form.engine ? { engine: form.engine } : {}) }}
-                kind={form.kind === "shell" ? "pty" : form.kind}
-                model={form.model}
-                showModel={false}
-                teams={teamContext ? teamOptions : null}
-                teamWorkspaceId={teamWorkspaceId}
-                disabled={submitting}
-                onSubjectChange={(subj) => {
-                  if (subj.type === "team") {
-                    setForm((current) => current
-                      ? { ...current, teamId: subj.id, employeeId: undefined, specifiedCli: undefined }
-                      : current);
-                    return;
-                  }
-                  if (subj.type === "cli") {
-                    if (subj.id === "shell") {
-                      setForm((current) => current
-                        ? { ...current, teamId: undefined, employeeId: undefined, kind: "shell", specifiedCli: undefined }
-                        : current);
-                    } else {
-                      setForm((current) => current
-                        ? { ...current, teamId: undefined, employeeId: undefined, kind: current.kind === "shell" ? "pty" : current.kind, specifiedCli: undefined }
-                        : current);
-                      selectTool(agentToolIdFor(subj.id as NewSessionProvider, subj.engine));
-                    }
-                  } else if (subj.type === "employee") {
-                    setForm((current) => current
-                      ? { ...current, teamId: undefined, employeeId: subj.id, kind: "structured", specifiedCli: false }
-                      : current);
-                  }
-                }}
-                onKindChange={(nextKind) => {
-                  if (nextKind === "pty") {
-                    setForm((current) => current ? { ...current, teamId: undefined, employeeId: undefined, specifiedCli: undefined } : current);
-                  }
-                  selectKind(nextKind);
-                }}
-                onModelChange={(nextModel) => selectModel(nextModel)}
-              /> }]}/>
-            )}
-            {form.teamId ? <Form.Item label="本轮说明" htmlFor="wand-new-session-team-note"
-              extra={<Typography.Text id="wand-new-session-team-note-hint" type="secondary">团队按这句话拆解与验收；开工后首屏直接进群聊页看进展。</Typography.Text>}>
-              <TaskTextArea className="resize-none" id="wand-new-session-team-note" ref={teamNoteRef}
-                rows={3} maxLength={4000} required value={teamNote} disabled={submitting}
-                aria-describedby="wand-new-session-team-note-hint" placeholder="一句话说清要他们做什么"
-                onChange={(event) => setTeamNote(event.currentTarget.value)}/>
-            </Form.Item> : null}
-            {!form.teamId && !(form.employeeId && !form.specifiedCli) && form.kind !== "shell" ? <Form.Item label="权限与执行模式" style={{ marginBottom: 0 }} extra="选择会记为下次新建会话的偏好，不改变已有会话。">
-              <Radio.Group aria-label="执行模式" value={form.mode} disabled={submitting} onChange={(event) => selectMode(event.target.value)}>
-                <Space wrap>{MODES.map((mode) => <Radio.Button key={mode.value} value={mode.value} disabled={!supported.has(mode.value)} title={mode.description}
-                  ref={(element) => { modeRefs.current[mode.value] = element?.input ?? null; }}
-                  onKeyDown={(event) => navigateChoice(event, form.mode, supportedModesForProvider, selectMode, modeRefs)}>{mode.label}</Radio.Button>)}</Space>
-              </Radio.Group>
-            </Form.Item> : null}
+            {!form.teamId ? <NewSessionTaskField form={form} initialName={controller.taskName}
+              disabled={submitting} cwd={projectCwd} onChange={setForm}/> : null}
             <Collapse activeKey={advancedOpen ? ["advanced"] : []}
               onChange={(keys) => setAdvancedOpen(keys.includes("advanced"))}
               items={[{ key: "advanced", label: "执行说明", children:

@@ -1,6 +1,8 @@
 import { isSessionProvider, SESSION_PROVIDERS, type SessionProvider } from "./provider-catalog.js";
 import { OPENROUTER_FREE_GROUP, OPENROUTER_FREE_PROVIDER, OPENROUTER_FREE_SELECTOR,
   isOpenRouterFreeSelector } from "./openrouter-free-selection.js";
+import { AUTO_ASSIGN_SELECTOR, MODEL_GROUP_PREFIX, isAutoAssignSelector, isModelGroupSelector } from "./model-selectors.js";
+export { AUTO_ASSIGN_SELECTOR, MODEL_GROUP_PREFIX, isAutoAssignSelector, isModelGroupSelector };
 
 /** Stable identities, not names, are saved in sessions/employees/default model preferences. */
 export interface ModelGroup {
@@ -11,13 +13,11 @@ export interface ModelGroup {
   models: string[];
 }
 
-export const MODEL_GROUP_PREFIX = "wand-model-group/";
 /**
  * 「智能分配」：不是一个分组，而是一条只能在真实提示词到手后结算的选择。
  * 结构化会话的第一轮、终端会话带首条输入创建时才解析成本次真正使用的分组；
  * 没有提示词的同步场景（构建命令行、一次性文本调用）退化成默认分组。
  */
-export const AUTO_ASSIGN_SELECTOR = "wand-auto-assign/auto";
 export const AUTO_ASSIGN_LABEL = "智能分配";
 export const FREE_MODEL_GROUP_ID = "openrouter-free";
 export const MODEL_GROUP_MAX_PER_PROVIDER = 32;
@@ -25,13 +25,6 @@ export const MODEL_GROUP_MAX_MEMBERS = 32;
 export const DEFAULT_MODEL_GROUP_NAMES = ["默认分组", "默认", "default"] as const;
 const GROUP_ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
 
-export function isModelGroupSelector(value: string | null | undefined): boolean {
-  return value?.startsWith(MODEL_GROUP_PREFIX) === true;
-}
-
-export function isAutoAssignSelector(value: string | null | undefined): boolean {
-  return value?.trim() === AUTO_ASSIGN_SELECTOR;
-}
 
 /** 「智能分配」在只拿到选择器、拿不到提示词时的等价写法：按默认分组解析。 */
 function modelSelectorWithoutAutoAssign(selector: string | null | undefined): string {

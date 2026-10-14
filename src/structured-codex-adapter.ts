@@ -3,9 +3,11 @@ import { spawn } from "node:child_process";
 import { startStructuredCli } from "./structured-exec-pump.js";
 import type { StructuredExecHost } from "./structured-exec-host.js";
 import { CodexProtocolReducer } from "./structured-codex-protocol.js";
+import { cliUnacceptedFacts } from "./structured-failure.js";
 import { whichSync } from "./path-repair.js";
 import type { SessionSnapshot } from "./types.js";
 import { thinkingEffortToCodexReasoningEffort, promptWithSystemFallback } from "./structured-provider-common.js";
+import { createNdjsonLineHandler } from "./structured-ndjson.js";
 import type {
   StructuredRunnerAdapter,
   StructuredRunnerContext,
@@ -51,6 +53,7 @@ export class CodexRunner implements StructuredRunnerAdapter {
     const args = buildCodexArgs(context.session);
     const file = whichSync("codex", { env: context.env }) ?? "codex";
     const reducer = new CodexProtocolReducer(context.session);
+    let unparsedStdout = false;
     return startStructuredCli({
       sessionId: context.session.id,
       file,
@@ -62,17 +65,13 @@ export class CodexRunner implements StructuredRunnerAdapter {
       execHost: this.execHost,
       spawnProcess: this.spawnProcess,
       createState: () => reducer.state,
-      processLine: (line) => {
-        if (!observer.isActive()) return;
-        const trimmed = line.trim();
-        if (!trimmed) return;
-        let event: unknown;
-        try { event = JSON.parse(trimmed); } catch { return; }
-        if (event && typeof event === "object" && !Array.isArray(event)) {
-          observer.onEvent?.(event as Record<string, unknown>);
-        }
-        if (reducer.apply(event)) observer.onUpdate(reducer.state);
-      },
+      processLine: createNdjsonLineHandler({
+        observer,
+        onUnparsed: () => { unparsedStdout = true; },
+        handleEvent: (event) => {
+          if (reducer.apply(event)) observer.onUpdate(reducer.state);
+        },
+      }),
       finalize: (ctx, exitCode, signal, spawnError) => ({
         state: reducer.state,
         exitCode,
@@ -81,6 +80,14 @@ export class CodexRunner implements StructuredRunnerAdapter {
         primaryError: reducer.primaryError,
         errors: reducer.errors,
         spawnError,
+        ...cliUnacceptedFacts({
+          state: reducer.state,
+          primaryError: reducer.primaryError,
+          protocolError: !!reducer.primaryError,
+          unparsedStdout,
+          signal,
+          ...(spawnError ? { spawnError } : {}),
+        }),
       }),
     });
   }

@@ -1,4 +1,4 @@
-import { SYSTEM_EMPLOYEE_TAG, type SiliconEmployee } from "./ai-team-types.js";
+import { SYSTEM_EMPLOYEE_TAG, type SiliconEmployee } from "./employee-types.js";
 import { SPEECH_POLISHER_ID, SPEECH_POLISHER_KEY, SPEECH_POLISHER_NAME } from "./speech-polisher-identity.js";
 import { OPENROUTER_FREE_SELECTOR } from "./openrouter-free-selection.js";
 import type { WandTaskAgent } from "./task-types.js";

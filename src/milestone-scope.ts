@@ -47,7 +47,7 @@ export function resolvedMilestoneFields(
 ): ResolvedTaskMilestone {
   const milestone = milestoneId
     ? storage.getWandMilestone(milestoneId)
-    : storage.ensureDefaultWandMilestone();
+    : storage.findDefaultWandMilestone();
   if (!milestone) return { milestoneId: null, milestone: null };
   return {
     milestoneId: milestone.id,

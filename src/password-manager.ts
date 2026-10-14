@@ -326,8 +326,10 @@ export function encryptVaultSecret(plaintext: string, secret: string): string {
   return `${VAULT_CIPHER_PREFIX}${iv.toString("base64url")}.${cipher.getAuthTag().toString("base64url")}.${encrypted.toString("base64url")}`;
 }
 
+/** Legacy v1 decrypt (appSecret-derived key). Refuses v2 ciphertext so it can never be mistaken for a plaintext token. Use decryptVaultSecretTyped. */
 export function decryptVaultSecret(value: string | undefined, secret: string | null): string | undefined {
   if (!value) return undefined;
+  if (value.startsWith("enc:v2:")) throw new VaultDecryptError("malformed", "v2 ciphertext requires decryptVaultSecretTyped");
   if (!value.startsWith(VAULT_CIPHER_PREFIX)) return value;
   if (!secret) return undefined;
   try {
@@ -341,8 +343,119 @@ export function decryptVaultSecret(value: string | undefined, secret: string | n
   }
 }
 
+/** Any ciphertext version (v1 legacy or v2 key-file). */
 export function isEncryptedVaultSecret(value: string | undefined): boolean {
+  return typeof value === "string" && (value.startsWith(VAULT_CIPHER_PREFIX) || value.startsWith("enc:v2:"));
+}
+
+// ── v2: random key file (see storage/vault-keys.ts). v1 above stays for legacy rows only. ──
+
+const VAULT_CIPHER_PREFIX_V2 = "enc:v2:";
+
+export type VaultDecryptReason = "missing-key" | "malformed" | "auth-failed";
+
+/** Decrypt failure. Distinct from "no value" (which returns undefined) so callers never mistake loss for emptiness. */
+export class VaultDecryptError extends Error {
+  readonly reason: VaultDecryptReason;
+  constructor(reason: VaultDecryptReason, message: string) {
+    super(message);
+    this.name = "VaultDecryptError";
+    this.reason = reason;
+  }
+}
+
+export interface VaultKeys {
+  /** AES key derived from the key file (v2). Null when the key file is absent. */
+  readonly cipherKey: Buffer | null;
+  /** Legacy appSecret used only for v1 rows. */
+  readonly legacySecret: string | null;
+}
+
+export function encryptVaultSecretV2(plaintext: string, cipherKey: Buffer): string {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", cipherKey, iv);
+  const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  return `${VAULT_CIPHER_PREFIX_V2}${iv.toString("base64url")}.${cipher.getAuthTag().toString("base64url")}.${encrypted.toString("base64url")}`;
+}
+
+export function isLegacyVaultSecret(value: string | null | undefined): boolean {
   return typeof value === "string" && value.startsWith(VAULT_CIPHER_PREFIX);
+}
+
+export function isVaultSecretV2(value: string | null | undefined): boolean {
+  return typeof value === "string" && value.startsWith(VAULT_CIPHER_PREFIX_V2);
+}
+
+/**
+ * Typed decrypt: empty input -> undefined; plaintext (pre-encryption rows) -> as is;
+ * v1/v2 ciphertext -> plaintext, or throws VaultDecryptError. Never returns undefined for ciphertext.
+ */
+export function decryptVaultSecretTyped(value: string | null | undefined, keys: VaultKeys): string | undefined {
+  if (!value) return undefined;
+  if (isVaultSecretV2(value)) {
+    if (!keys.cipherKey) throw new VaultDecryptError("missing-key", "vault key file is missing; encrypted values cannot be read");
+    return openCiphertext(value.slice(VAULT_CIPHER_PREFIX_V2.length), keys.cipherKey);
+  }
+  if (isLegacyVaultSecret(value)) {
+    if (!keys.legacySecret) throw new VaultDecryptError("missing-key", "legacy vault secret is unavailable");
+    return openCiphertext(value.slice(VAULT_CIPHER_PREFIX.length), deriveVaultKey(keys.legacySecret));
+  }
+  return value;
+}
+
+function openCiphertext(body: string, key: Buffer): string {
+  const [ivB64, tagB64, dataB64] = body.split(".");
+  if (!ivB64 || !tagB64 || !dataB64) throw new VaultDecryptError("malformed", "encrypted value is malformed");
+  try {
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(ivB64, "base64url"));
+    decipher.setAuthTag(Buffer.from(tagB64, "base64url"));
+    return Buffer.concat([decipher.update(Buffer.from(dataB64, "base64url")), decipher.final()]).toString("utf8");
+  } catch {
+    throw new VaultDecryptError("auth-failed", "encrypted value failed authentication");
+  }
+}
+
+// ── Admin password: scrypt at rest, constant-time verify. Legacy plaintext is still accepted. ──
+
+const SCRYPT_PREFIX = "scrypt$";
+const SCRYPT_PARAMS = { N: 16384, r: 8, p: 1, keyLength: 32 } as const;
+
+export function isHashedAdminPassword(stored: string | null | undefined): boolean {
+  return typeof stored === "string" && stored.startsWith(SCRYPT_PREFIX);
+}
+
+export function hashAdminPassword(password: string): string {
+  const salt = crypto.randomBytes(16);
+  const hash = crypto.scryptSync(password, salt, SCRYPT_PARAMS.keyLength, { N: SCRYPT_PARAMS.N, r: SCRYPT_PARAMS.r, p: SCRYPT_PARAMS.p });
+  return `${SCRYPT_PREFIX}${SCRYPT_PARAMS.N}$${SCRYPT_PARAMS.r}$${SCRYPT_PARAMS.p}$${salt.toString("base64")}$${hash.toString("base64")}`;
+}
+
+/** Verify a candidate against a stored scrypt hash or a legacy plaintext value, in constant time. */
+export function verifyAdminPassword(candidate: string, stored: string | null | undefined): boolean {
+  if (typeof stored !== "string" || stored.length === 0) return false;
+  if (isHashedAdminPassword(stored)) {
+    const parts = stored.split("$");
+    if (parts.length !== 6) return false;
+    const [, nRaw, rRaw, pRaw, saltB64, hashB64] = parts;
+    const N = Number(nRaw), r = Number(rRaw), p = Number(pRaw);
+    const salt = Buffer.from(saltB64 ?? "", "base64");
+    const expected = Buffer.from(hashB64 ?? "", "base64");
+    // Stored hashes come from a local DB and may be tampered with. Accept only
+    // the parameters emitted by hashAdminPassword; otherwise an attacker could
+    // turn a login attempt into an unbounded scrypt allocation/CPU workload.
+    if (N !== SCRYPT_PARAMS.N || r !== SCRYPT_PARAMS.r || p !== SCRYPT_PARAMS.p
+      || salt.length !== 16 || expected.length !== SCRYPT_PARAMS.keyLength) return false;
+    try {
+      const actual = crypto.scryptSync(candidate, salt, expected.length, { N, r, p });
+      return crypto.timingSafeEqual(actual, expected);
+    } catch {
+      return false;
+    }
+  }
+  // Legacy plaintext: compare digests so the comparison length does not leak.
+  const a = crypto.createHash("sha256").update(candidate, "utf8").digest();
+  const b = crypto.createHash("sha256").update(stored, "utf8").digest();
+  return crypto.timingSafeEqual(a, b) && candidate === stored;
 }
 
 export function generatePassword(options: PasswordGeneratorOptions = {}): string {

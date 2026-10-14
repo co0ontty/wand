@@ -25,7 +25,7 @@ export function loadRealtimeBrowserModule(file: string, dependencies: Record<str
   const pureModules = new Map<string, Record<string, any>>();
   runInNewContext(code, { exports: api, require: (id: string) => {
     if (dependencies[id]) return dependencies[id];
-    const pure = /^\.\/(chat-render-cache|chat-render-signature)(?:\.js)?$/.exec(id)?.[1];
+    const pure = /^\.\/(chat-render-cache|chat-render-signature|chat-host|pty-chat-parser|pty-noise)(?:\.js)?$/.exec(id)?.[1];
     if (pure) {
       if (!pureModules.has(pure)) pureModules.set(pure, loadRealtimeBrowserModule(pure, dependencies, globals));
       return pureModules.get(pure);
@@ -109,9 +109,9 @@ export function createRealtimeRenderHarness() {
     fixtureAfterWrite: () => {
       if (failPostWrite) { failPostWrite = false; throw new Error("injected post-write failure"); }
     },
-    fixtureRenderer: (msg: any, usage: any, index: number, _runs: any, results: any, grouped: boolean) => {
+    fixtureRenderer: (msg: any, index: number, _runs: any, results: any, grouped: boolean) => {
       rendered.push(index);
-      const body = JSON.stringify({ msg, usage, results, grouped: !!grouped }).replace(/</g, "&lt;");
+      const body = JSON.stringify({ msg, results, grouped: !!grouped }).replace(/</g, "&lt;");
       return `<div class="chat-message ${msg.role}" data-msg-index="${index}">${body}</div>`;
     },
   };
@@ -132,7 +132,7 @@ export function createRealtimeRenderHarness() {
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const chat: any = {};
   runInNewContext(code, { exports: chat, ...globals, require: (id: string) => {
-    const pure = /^\.\/(chat-render-cache|chat-render-signature)(?:\.js)?$/.exec(id)?.[1];
+    const pure = /^\.\/(chat-render-cache|chat-render-signature|chat-host|pty-chat-parser|pty-noise)(?:\.js)?$/.exec(id)?.[1];
     return pure ? loadRealtimeBrowserModule(pure, {}, globals) : (dependencies as any)[id] ?? fallback;
   } });
   const render = loadRealtimeBrowserModule("render", dependencies, globals);
@@ -159,6 +159,7 @@ export function createRealtimeSessionHarness() {
     close() { this.readyState = 3; this.onclose?.(); }
   }
   const sockets: Socket[] = [], errors: unknown[] = [];
+  let taskChanges = 0;
   const state: Record<string, any> = { selectedId: "A", sessions: [], currentMessages: [], config: {},
     ws: null, lastSeqBySession: {}, crossSessionQueue: [], pendingMessages: [], messageQueue: [],
     structuredInputQueue: [], terminalStatesBySession: {}, currentView: "chat", turnActiveBySession: {} };
@@ -174,6 +175,7 @@ export function createRealtimeSessionHarness() {
     "./session-reads": { createSessionReads }, "./message-reconciliation": reconciliation,
     "../../session-completion-state.js": completionState,
     "../react/http-adapter": { parseJsonResponse },
+    "../react/task-changes": { notifyTasksChanged: () => { taskChanges++; } },
     "./composer-select-values": new Proxy({ compactModelDisplayLabel }, { get: (o: Record<string, unknown>, k: string) => o[k] ?? noop }),
     "./input": new Proxy({ buildMessagesForRender: (_s: any, turns: any) => turns }, { get: (o: any, k: string) => o[k] ?? noop }),
     "./chat-scroll": new Proxy({ normalizeStructuredSnapshot: (s: any) => s, stripRenderOnlyStructuredMessages: (m: any) => m }, { get: (o: any, k: string) => o[k] ?? noop }) };
@@ -183,5 +185,6 @@ export function createRealtimeSessionHarness() {
   const send = (frame: any, owner = socket) => owner.onmessage!({ data: JSON.stringify(frame) });
   const respond = (i: number, body: unknown) => requests[i].resolve(new Response(JSON.stringify(body), { status: 200 }));
   return { state, engine, ws, socket, sockets, send, requests, respond, errors, composer,
+    taskChanges: () => taskChanges,
     resyncs: () => socket.sent.filter(value => JSON.parse(value).type === "resync") };
 }

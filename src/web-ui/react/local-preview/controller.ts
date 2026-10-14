@@ -72,6 +72,7 @@ export function localFilePreviewHref(input: string): string | null {
 
 function normalizeLocalFile(input: string): string {
   const trimmed = input.trim();
+  if (isArtifactPreviewUrl(trimmed)) return trimmed;
   if (!trimmed) throw new Error("请输入文件或目录路径。");
   return localFilePreviewHref(trimmed) ?? (() => { throw new Error("请输入服务端文件路径。"); })();
 }
@@ -120,7 +121,17 @@ function openUrl(value: string): boolean {
   }
 }
 
+export function isArtifactPreviewUrl(value: string): boolean {
+  return /^\/api\/local-file\/[A-Za-z0-9_-]+\/$/.test(value) ||
+    /^\/api\/session-file\/[^/?#]+\?path=[^&#]+&mode=preview$/.test(value);
+}
+
 export const localPreviewController = {
+  openPreview(previewUrl: string, label = "HTML 预览"): boolean {
+    if (!isArtifactPreviewUrl(previewUrl)) return false;
+    publish({ open: true, mode: "file", value: previewUrl, previewUrl, sourceLabel: label, error: null });
+    return true;
+  },
   subscribe(listener: Listener): () => void {
     listeners.add(listener);
     return () => listeners.delete(listener);

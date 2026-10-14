@@ -3,9 +3,10 @@ import { Alert, Checkbox, Flex, Input, Radio, Typography } from "antd";
 import type { ConversationTarget } from "../../../conversation-types.js";
 import type { ConversationTurn, ToolResultBlock, ToolUseBlock } from "../../../types.js";
 import { ChatActivity, ChatActivityEntry } from "../chat/activity.js";
-import { installChatSurfaceStyles } from "../chat/presentation.js";
+import { installChatSurfaceStyles } from "../chat/styles.js";
 import { RunningStatusBar } from "../chat/running-status-bar.js";
 import { WandButton } from "../ui/index.js";
+import { HttpResponseError } from "../http-adapter.js";
 import { computeRunningSignal } from "../../session-activity.js";
 import { conversationActivityRepository as repository } from "./activity-repository.js";
 import { activityAnswerText, activityQuestions, activityResultText, activityResults, activityRunning, activitySessionOwners,
@@ -176,7 +177,10 @@ export function useConversationActivity({ detail, active, target = null, onRefre
     let failures = 0;
     reads.forEach((result, index) => {
       if (result.status === "fulfilled" && result.value.id === ids[index]) { next[ids[index]!] = result.value; repository.observe(result.value); }
-      else failures++;
+      // A deleted legacy channel is historical context, not a failed current execution.
+      // Keep genuine network/permission/server failures and missing linked work visible.
+      else if (!(result.status === "rejected" && result.reason instanceof HttpResponseError
+        && result.reason.status === 404 && ids[index] === detail?.communicationSessionId)) failures++;
     });
     setSessions(next); setLoadError(failures ? "部分执行状态暂时无法读取，重新读取后可操作。" : "");
   }, [ownerKey, active, scope]);
@@ -198,13 +202,11 @@ export function useConversationActivity({ detail, active, target = null, onRefre
     const status = repository.submission(session.id, { kind: "stop", anchor: activityStopAnchor(session) });
     return status?.phase === "unknown" || status?.phase === "failed";
   })());
-  const showControls = active && (ongoing.length > 0 || !!loadError || available.some(session => {
-    const status = repository.submission(session.id, { kind: "stop", anchor: activityStopAnchor(session) });
-    return status?.phase === "unknown" || status?.phase === "failed";
-  }));
-  const controls = showControls ? <Flex vertical gap={8} className="conversation-session-activity" style={{ flexShrink: 0, maxHeight: "min(35dvh, 280px)", overflow: "auto", padding: "8px 16px" }}>
-    {loadError ? <Alert type="warning" title={loadError} action={<WandButton onClick={() => void load()}>重新读取</WandButton>}/> : null}
-    {ongoing.map(session => {
+  // Linked work owns its controls inside the corresponding reply, never in an orphan full-page strip.
+  // Legacy communication and group member sessions without a reply keep the shared controls region.
+  const linkedSessions = new Set(detail?.messages.flatMap(turn => turn.sessionLink ? [turn.sessionLink.sessionId] : []) ?? []);
+  const detached = ongoing.filter(session => !linkedSessions.has(session.id));
+  const renderControls = (session: ActivitySession, inline = false): React.ReactNode => {
       const escalation = session.pendingEscalation;
       const signal = computeRunningSignal(session);
       const stop: ActivityOperation = { kind: "stop", anchor: activityStopAnchor(session) };
@@ -212,22 +214,29 @@ export function useConversationActivity({ detail, active, target = null, onRefre
       const status = repository.submission(session.id, operation);
       const locked = !!status && status.phase !== "failed";
       return <Flex vertical gap={6} key={session.id} data-activity-session={session.id}>
-        <Flex align="center" justify="space-between" gap={8}><Typography.Text strong>{owners.get(session.id)}</Typography.Text>
-          {!escalation && activityRunning(session) ? <WandButton size="small" disabled={locked} onClick={() => submit(session.id, stop)}>停止本轮</WandButton> : null}</Flex>
+        {!inline ? <Typography.Text strong className="conversation-activity-title" title={owners.get(session.id)}>{owners.get(session.id)}</Typography.Text> : null}
         {escalation ? <Alert type="warning" title="等待你确认操作" description={<Flex vertical gap={8}>
           <Typography.Text>{escalation.reason}</Typography.Text>{escalation.target ? <pre style={detailStyle}>{escalation.target}</pre> : null}
           <Flex gap={8}><WandButton disabled={locked} onClick={() => submit(session.id, { ...operation as Extract<ActivityOperation, { kind: "permission" }>, resolution: "deny" })}>拒绝</WandButton>
             <WandButton kind="primary" disabled={locked} onClick={() => submit(session.id, operation)}>批准本次</WandButton></Flex>
-        </Flex>}/> : <RunningStatusBar activity={{ ...session, ptyRunning: signal.ptyRunning, turnStartedAt: session.ptyTurnStartedAt, lastActivityAt: session.ptyLastActivityAt }}/>}
+        </Flex>}/> : <Flex align="center" justify="space-between" gap={8} className="conversation-session-state">
+          <RunningStatusBar activity={{ ...session, ptyRunning: signal.ptyRunning, turnStartedAt: session.ptyTurnStartedAt, lastActivityAt: session.ptyLastActivityAt }}/>
+          {activityRunning(session) ? <WandButton size="small" disabled={locked} onClick={() => submit(session.id, stop)}>停止本轮</WandButton> : null}
+        </Flex>}
         {status ? <Typography.Text role="status" type={status.phase === "unknown" || status.phase === "failed" ? "danger" : "secondary"}>{status.message}</Typography.Text> : null}
         {status?.phase === "unknown" ? <WandButton size="small" onClick={() => { void load(); current.current.onRefresh?.(); }}>刷新状态核对</WandButton> : null}
       </Flex>;
-    })}
+  };
+  const controls = active && (detached.length > 0 || loadError) ? <Flex vertical gap={8} className="conversation-session-activity">
+    {loadError ? <Alert type="warning" title={loadError} action={<WandButton onClick={() => void load()}>重新读取</WandButton>}/> : null}
+    {detached.map(session => renderControls(session))}
   </Flex> : null;
   return { controls, renderActivity: (turn, index) => {
     const source = activitySource(turn, detail?.communicationSessionId ?? null);
     const session = source && active && owners.has(source) ? sessions[source] : undefined;
-    if (turn.sessionLink) return session ? <React.Fragment key={session.id}>{pendingActivityQuestions(session).map(block =>
+    if (turn.sessionLink) return session ? <React.Fragment key={session.id}>
+      {ongoing.some(item => item.id === session.id) ? renderControls(session, true) : null}
+      {pendingActivityQuestions(session).map(block =>
       <QuestionCard key={block.id} block={block} session={session} canAnswer submit={operation => submit(session.id, operation)}/>)}</React.Fragment> : null;
     const last = source ? detail?.messages.slice().reverse().find(item => item.role === "assistant" && activitySource(item, detail?.communicationSessionId ?? null) === source) : undefined;
     return <TurnActivity key={`${source}:${turn.messageId ?? index}`} turn={turn} source={source} results={results} session={session}

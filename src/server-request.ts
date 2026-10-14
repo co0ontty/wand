@@ -7,10 +7,24 @@
  */
 
 import { getErrorMessage } from "./error-utils.js";
+import { badRequest, isHttpError } from "./http-error.js";
+
+/** 客户端 IP：经 trust proxy 解析后的 req.ip，缺省回落到 socket 地址。 */
+export function resolveClientIp(req: { ip?: string; socket: { remoteAddress?: string } }): string {
+  return req.ip || req.socket.remoteAddress || "unknown";
+}
 
 /** 取字符串并 trim；非字符串一律当缺省处理。 */
 export function text(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value.trim() : fallback;
+}
+
+/** Shared length check for employee and team name fields. */
+export function boundedText(value: unknown, label: string, min: number, max: number): string {
+  const result = text(value);
+  if (result.length < min) throw badRequest(`${label}不能为空。`);
+  if (result.length > max) throw badRequest(`${label}不能超过 ${max} 个字符。`);
+  return result;
 }
 
 /** Express query 值可能是数组，取第一个字符串。 */
@@ -54,30 +68,26 @@ export function normalizeProtocol(value: string | undefined): "http" | "https" |
   return undefined;
 }
 
-/** 解析范围内整数，越界或非整数回落到 fallback。 */
-export function integerQuery(value: unknown, fallback: number, min: number, max: number): number {
-  const parsed = Number(text(value));
-  return Number.isInteger(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
-}
 
 /** 要求请求体是普通对象；数组和 null 都拒绝。 */
 export function bodyObject(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("请求体必须是对象。");
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw badRequest("请求体必须是对象。");
   return value as Record<string, unknown>;
 }
 
 /** 从对象里取必填的非空字符串字段。 */
 export function requiredString(body: Record<string, unknown>, key: string): string {
   const value = text(body[key]);
-  if (!value) throw new Error(`${key} 不能为空。`);
+  if (!value) throw badRequest(`${key} 不能为空。`);
   return value;
 }
 
 /**
- * 路由 catch 块的标准回包：业务异常用 fallback 文案，默认 400。
+ * 路由 catch 块的标准回包。
  *
- * `getErrorMessage` 会把 Error.message 原样透出，因此抛出的错误必须是面向用户的；
- * 内部错误请用 getErrorMessage(error, fallback) 已包好的 fallback。
+ * - HttpError：使用它自己的状态码、code 与面向用户的 message；
+ * - 其他异常：记日志，响应 fallback 文案（不透出 Error.message，避免内部细节泄露），
+ *   状态码取调用方给定的 status（默认 400，内部故障请显式传 500）。
  */
 export function sendRouteError(
   res: { status(code: number): { json(body: unknown): unknown } },
@@ -85,5 +95,23 @@ export function sendRouteError(
   fallback: string,
   status = 400,
 ): void {
-  res.status(status).json({ error: getErrorMessage(error, fallback) });
+  if (isHttpError(error)) {
+    res.status(error.status).json({ error: error.message, code: error.code });
+    return;
+  }
+  console.error(`[wand] route error (${status}): ${getErrorMessage(error, fallback)}`);
+  res.status(status).json({ error: fallback, code: status >= 500 ? "internal_error" : "bad_request" });
+}
+
+/** 缺省只信任本机与 Docker 桥接网段的反向代理，避免任意来源伪造 X-Forwarded-For 绕过登录限流。 */
+export const DEFAULT_TRUST_PROXY = "loopback, 172.16.0.0/12";
+
+/**
+ * 解析 `trustProxy` 配置。拒绝 "true"/"*"（信任任意跳，等于允许伪造客户端 IP）并回落到缺省值。
+ */
+export function resolveTrustProxy(value: string | undefined): string {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) return DEFAULT_TRUST_PROXY;
+  if (trimmed === "true" || trimmed === "*") return DEFAULT_TRUST_PROXY;
+  return trimmed;
 }

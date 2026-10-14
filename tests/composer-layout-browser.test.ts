@@ -20,10 +20,20 @@ test("integrated composer preserves native nodes, bounded drafts, attachment act
     import { mountComposerSurfaces } from "./src/web-ui/browser/composer-surface-adapter";
     import { mountComposerSender } from "./src/web-ui/browser/composer-sender-adapter";
     import { syncBrowserComposerAttachments } from "./src/web-ui/browser/composer-attachments-adapter";
+    import * as React from "react";
+    import {createRoot} from "react-dom/client";
+    import {useComposerUsage} from "./src/web-ui/react/conversations/composer-usage";
+    import {conversationActivityRepository as usageRepository} from "./src/web-ui/react/conversations/activity-repository";
+    let usageRoot;
+    function UsageProbe({id,revision}){const usage=useComposerUsage(id,true,revision);return React.createElement('output',{'data-usage-probe':''},JSON.stringify(usage.usage??null));}
     const resize=input=>{input.style.height='auto';input.style.height=Math.min(input.scrollHeight,160)+'px';};
     window.fixture={mount:()=>{mountComposerSurfaces();mountComposerSender(resize);},
       attachments:()=>syncBrowserComposerAttachments({resolve:()=>[{index:0,name:'很长的设计交付文件名称-'+('商业产品'.repeat(15))+'.pdf',sizeLabel:'12 KB',previewUrl:null}],onRemove:()=>{window.removed=(window.removed||0)+1;syncBrowserComposerAttachments({resolve:()=>[],onRemove:()=>{}});}}),
-      resize};
+      resize,
+      usageSource(id,revision){if(!usageRoot){const host=document.createElement('div');document.body.append(host);usageRoot=createRoot(host);window.usageRequests={};usageRepository.session=(id,signal)=>new Promise(resolve=>{window.usageRequests[id]={resolve,signal};});}usageRoot.render(React.createElement(UsageProbe,{id,revision}));},
+      resolveUsage(id,usage){window.usageRequests[id].resolve({id,status:'completed',messages:[{role:'assistant',usage}]});},
+      disposeUsage(){usageRoot.unmount();}
+    };
   ` }, bundle: true, platform: "browser", format: "iife", jsx: "automatic", outfile: join(temp, "app.js"), logLevel: "warning", define: { "process.env.NODE_ENV": '"production"' } });
   let requests = 0;
   const server = createServer((request, response) => {
@@ -44,7 +54,7 @@ test("integrated composer preserves native nodes, bounded drafts, attachment act
   try {
     await browser.wait("!!window.composerPanels");
     await browser.evaluate("window.p=window.composerPanels;p.setup()");
-    await browser.evaluate("fixture.mount();window.originalInput=document.getElementById('input-box');window.nativeEdits=0;originalInput.addEventListener('input',()=>nativeEdits++);window.originalActions=document.getElementById('send-input-button');void 0");
+    await browser.evaluate(`p.state.sessions[0].employeeId='composer-peer';p.state.sessions[0].employeeName='测试伙伴';p.state.sessions[0].employeeAvatar='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="72" height="72"><circle cx="36" cy="36" r="30" fill="gray"/></svg>');p.state.sessions[0].messages=[{role:'user'},{role:'assistant',usage:{inputTokens:12345,cacheReadInputTokens:4096,cacheCreationInputTokens:800,outputTokens:678,reasoningOutputTokens:90,totalCostUsd:.01231}}];fixture.mount();window.originalInput=document.getElementById('input-box');window.nativeEdits=0;originalInput.addEventListener('input',()=>nativeEdits++);window.originalActions=document.getElementById('send-input-button');void 0`);
     for (const [name, width, height, reduce] of [["desktop", 1280, 900, false], ["tablet", 768, 900, false], ["phone", 390, 844, false], ["narrow", 320, 640, true], ["zoom-equivalent", 640, 450, true]] as const) {
       await browser.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: name === "zoom-equivalent" ? 2 : 1, mobile: false });
       await browser.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: reduce ? "reduce" : "no-preference" }] });
@@ -58,7 +68,23 @@ test("integrated composer preserves native nodes, bounded drafts, attachment act
       const focus = await browser.evaluate(`(()=>{const s=document.querySelector('.composer-surface'),i=originalInput,t=document.querySelector('.ant-sender'),r=s.getBoundingClientRect(),b=getComputedStyle(s);return{nodeIdentity:i===document.getElementById('input-box'),actionIdentity:originalActions===document.getElementById('send-input-button'),focus:document.activeElement===i,nativeEdits,inside:r.left>=0&&r.right<=innerWidth,inputLeft:i.getBoundingClientRect().left-s.getBoundingClientRect().left,surfaceShadow:b.boxShadow,surfaceBackground:b.backgroundColor,surfaceBorder:b.borderTopWidth,senderBorder:getComputedStyle(t).borderTopWidth,senderShadow:getComputedStyle(t).boxShadow,text:i.value,focusLine:b.borderTopColor,caret:getComputedStyle(i).caretColor}})()`);
       assert.equal(focus.nodeIdentity, true); assert.equal(focus.actionIdentity, true); assert.equal(focus.focus, true); assert.ok(focus.nativeEdits > 0); assert.equal(focus.inside, true);
       assert.equal(focus.senderBorder, "0px"); assert.equal(focus.senderShadow, "none");
-      if (process.env.WAND_COMPOSER_LAYOUT_BASELINE !== "1") { assert.equal(focus.surfaceShadow, "none"); assert.equal(focus.surfaceBackground, "rgba(0, 0, 0, 0)"); assert.ok(focus.inputLeft < 1); assert.equal(focus.focusLine, focus.caret); }
+      if (process.env.WAND_COMPOSER_LAYOUT_BASELINE !== "1") { assert.equal(focus.surfaceShadow, "none"); assert.equal(focus.surfaceBackground, "rgba(0, 0, 0, 0)"); assert.ok(focus.inputLeft <= 8, "text uses the whole composer width"); assert.equal(focus.focusLine, focus.caret); }
+      const companion = await browser.evaluate(`(()=>{const a=document.querySelector('.composer-floating-avatar').getBoundingClientRect(),u=document.querySelector('.composer-usage-line'),r=u.getBoundingClientRect(),o=document.querySelector('.prompt-optimize-btn').getBoundingClientRect(),i=originalInput.getBoundingClientRect();return{avatarAboveInput:a.top<i.top,usageBesideAvatar:r.left>=a.right+10,usageAboveInput:r.bottom<=i.top,usageAvoidsOptimize:r.right<=o.left-4,metrics:u.querySelectorAll('.composer-usage-metric').length,scrollable:u.scrollWidth>u.clientWidth,thinking:document.querySelectorAll('.composer-floating-avatar .wand-avatar-thinking').length,spokes:document.querySelectorAll('.wand-avatar-thinking svg rect').length,statusInCompanion:!!u.querySelector('.structured-status-bar'),controlHeights:[...document.querySelectorAll('.composer-actions-left .ant-btn,.composer-actions-right .ant-btn,.prompt-optimize-btn')].filter(b=>b.checkVisibility()).map(b=>({id:b.id,height:b.getBoundingClientRect().height})),text:u.textContent}})()`);
+      writeFileSync(join(output, `${name}-geometry.json`), JSON.stringify(companion,null,2));
+      await browser.screenshot(join(output, `${name}-focus.png`));
+      assert.equal(companion.avatarAboveInput, true);assert.equal(companion.usageBesideAvatar, true);assert.equal(companion.usageAboveInput, true);assert.equal(companion.usageAvoidsOptimize, true);assert.equal(companion.metrics, 0);assert.ok(companion.text.startsWith("测试伙伴："));assert.equal(companion.thinking,1);assert.equal(companion.spokes,8);assert.equal(companion.statusInCompanion,true);
+      const spinTransform = () => browser.evaluate("getComputedStyle(document.querySelector('.wand-avatar-thinking svg')).transform");
+      const firstSpin = await spinTransform();
+      await new Promise(resolve => setTimeout(resolve, 180));
+      const nextSpin = await spinTransform();
+      if (reduce) assert.equal(nextSpin, firstSpin, "reduced motion keeps the thought wheel still");
+      else assert.notEqual(nextSpin, firstSpin, "eight-spoke thought wheel visibly rotates");
+      assert.ok(companion.controlHeights.every(control=>Math.abs(control.height-32)<1), JSON.stringify(companion.controlHeights));
+      assert.match(companion.text,/用量/);
+      await browser.click('.composer-usage-caption');
+      assert.equal(await browser.evaluate("document.querySelectorAll('.composer-usage-metric').length"),6);
+      assert.match(await browser.evaluate("document.querySelector('.composer-usage-details').textContent"),/缓存写入/);
+      await browser.key('Escape');
       await browser.screenshot(join(output, `${name}-focus.png`));
       await browser.evaluate(`p.composer.edit(p.state.selectedId,{text:${JSON.stringify(("长文本没有空格LongUnbrokenContent".repeat(18) + "\n").repeat(12))}});fixture.mount();void 0`);
       const long = await browser.evaluate("({text:originalInput.value.length,height:originalInput.offsetHeight,scroll:originalInput.scrollHeight>originalInput.clientHeight,inside:originalInput.getBoundingClientRect().right<=innerWidth})");
@@ -80,8 +106,35 @@ test("integrated composer preserves native nodes, bounded drafts, attachment act
       assert.equal(await browser.evaluate("removed"), cases.length + 1);
       await browser.evaluate("p.state.sessions[0].sessionKind='pty';fixture.mount();p.state.sessions[0].sessionKind='structured';fixture.mount();fixture.mount();void 0");
       assert.equal(await browser.evaluate("originalInput===document.getElementById('input-box')&&originalActions===document.getElementById('send-input-button')"), true, "Sender mount/unmount preserves native textarea and action hosts");
-      cases.push({ name, width, height, reducedMotion: reduce, focus, long, disabled, attachment, mountedWithoutIdentityLoss: true });
+      cases.push({ name, width, height, reducedMotion: reduce, companion, focus, long, disabled, attachment, mountedWithoutIdentityLoss: true });
     }
+    await browser.evaluate("p.state.sessions[0].structuredState.inFlight=false;fixture.mount();void 0");
+    assert.equal(await browser.evaluate("document.querySelectorAll('.composer-floating-avatar .wand-avatar-thinking').length"),0,"idle execution has no thought orbit");
+    await browser.evaluate("window.savedMessages=p.state.sessions[0].messages;p.state.sessions[0].messages=[];fixture.mount();void 0");
+    assert.equal(await browser.evaluate("document.querySelector('.composer-identity-name').textContent"), "测试伙伴：", "identity remains visible without usage or running state");
+    await browser.evaluate("p.state.sessions[0].employeeName='很长的员工名称'.repeat(12);fixture.mount();void 0");
+    assert.equal(await browser.evaluate("document.documentElement.scrollWidth<=innerWidth"), true, "long identity is contained in the companion lane");
+    await browser.evaluate("p.state.sessions[0].employeeName='测试伙伴';p.state.sessions[0].messages=savedMessages;fixture.mount();void 0");
+    await browser.evaluate("p.state.sessions[0].structuredState.inFlight=true;p.state.sessions[0].pendingEscalation={reason:'fixture'};fixture.mount();void 0");
+    assert.equal(await browser.evaluate("document.querySelectorAll('.composer-floating-avatar .wand-avatar-thinking').length"),0,"waiting for approval must not imply thinking");
+    await browser.evaluate("fixture.usageSource('usage-A');void 0");
+    await browser.wait("!!window.usageRequests?.['usage-A']");
+    await browser.evaluate("fixture.usageSource('usage-B');void 0");
+    await browser.wait("!!window.usageRequests?.['usage-B']");
+    assert.equal(await browser.evaluate("usageRequests['usage-A'].signal.aborted"), true);
+    await browser.evaluate("fixture.resolveUsage('usage-B',{outputTokens:222});void 0");
+    await browser.wait("document.querySelector('[data-usage-probe]').textContent.includes('222')");
+    await browser.evaluate("fixture.resolveUsage('usage-A',{outputTokens:111});void 0");await browser.settle();
+    assert.equal(await browser.evaluate("document.querySelector('[data-usage-probe]').textContent"), '{"outputTokens":222}');
+    await browser.evaluate("window.previousUsageRequest=usageRequests['usage-B'];fixture.usageSource('usage-B','resumed');void 0");
+    await browser.wait("usageRequests['usage-B']!==previousUsageRequest");
+    await browser.evaluate("fixture.resolveUsage('usage-B',{outputTokens:333});void 0");
+    await browser.wait("document.querySelector('[data-usage-probe]').textContent.includes('333')");
+    await browser.evaluate("fixture.usageSource('usage-C');void 0");
+    await browser.wait("!!window.usageRequests?.['usage-C']");
+    assert.equal(await browser.evaluate("document.querySelector('[data-usage-probe]').textContent"), 'null', "new selection never shows the previous source's usage");
+    await browser.evaluate("fixture.disposeUsage();void 0");
+    assert.equal(await browser.evaluate("usageRequests['usage-C'].signal.aborted"), true);
     assert.deepEqual(browser.errors, []);
     writeFileSync(join(output, "browser.json"), JSON.stringify({ evidence: "Isolated Chrome with production owners, equivalent zoom only; no installed acceptance or physical keyboard", cases, requests, errors: browser.errors }, null, 2));
   } finally { await browser.close(); server.closeAllConnections(); await new Promise<void>(done => server.close(() => done())); rmSync(temp, { recursive: true, force: true }); }

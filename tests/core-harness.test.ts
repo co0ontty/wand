@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test, { afterEach, beforeEach } from "node:test";
 
 import { createFauxCore, fauxAssistantMessage, fauxToolCall, fauxText } from "@earendil-works/pi-ai";
 
@@ -10,12 +10,54 @@ import { defaultConfig } from "../src/config.js";
 import { OPENROUTER_FREE_SELECTOR } from "../src/openrouter-free-selection.js";
 import { CoreRunner, applyCoreAgentEvent, buildCoreSystemPrompt, coreMessagesFromTurns, thinkingLevelFor } from "../src/core-runner.js";
 import { buildDecisionTool } from "../src/core-runner.js";
-import { resolveHarnessEngine, resolveHarnessEngineSync, decideHarnessEngine, coreHarnessStatus, coreHarnessCachedStatus } from "../src/harness-engine.js";
+import { resolveHarnessEngine, resolveHarnessEngineSync, decideHarnessEngine, coreHarnessStatus, coreHarnessCachedStatus, resetCoreHarnessRuntime } from "../src/harness-engine.js";
 import { WandStorage } from "../src/storage.js";
 import { StructuredSessionManager } from "../src/structured-session-manager.js";
 import type { ResolvedCoreModel } from "../src/harness-engine.js";
 import type { StructuredRunnerAdapter, StructuredRunnerTurnState } from "../src/structured-runner.js";
 import type { SessionSnapshot } from "../src/types.js";
+
+const testAgentDir = path.join(os.tmpdir(), `wand-core-harness-test-${process.pid}`);
+const piProviderAuthEnvVars = [
+  "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_API_KEY",
+  "OPENAI_API_KEY", "AZURE_OPENAI_API_KEY", "NVIDIA_API_KEY", "DEEPSEEK_API_KEY",
+  "GEMINI_API_KEY", "GOOGLE_CLOUD_API_KEY", "GOOGLE_CLOUD_PROJECT", "GCLOUD_PROJECT",
+  "GOOGLE_CLOUD_LOCATION", "GOOGLE_APPLICATION_CREDENTIALS", "GROQ_API_KEY", "CEREBRAS_API_KEY",
+  "XAI_API_KEY", "TYPESAFE_API_KEY", "RADIUS_API_KEY", "OPENROUTER_API_KEY", "AI_GATEWAY_API_KEY",
+  "ZAI_API_KEY", "ZAI_CODING_CN_API_KEY", "MISTRAL_API_KEY", "MINIMAX_API_KEY", "MINIMAX_CN_API_KEY",
+  "MOONSHOT_API_KEY", "ANT_LING_API_KEY", "QWEN_TOKEN_PLAN_API_KEY", "QWEN_TOKEN_PLAN_CN_API_KEY",
+  "FIREWORKS_API_KEY", "TOGETHER_API_KEY", "BASETEN_API_KEY", "OPENCODE_API_KEY", "KIMI_API_KEY",
+  "META_API_KEY", "CLOUDFLARE_API_KEY", "XIAOMI_API_KEY", "XIAOMI_TOKEN_PLAN_CN_API_KEY",
+  "XIAOMI_TOKEN_PLAN_AMS_API_KEY", "XIAOMI_TOKEN_PLAN_SGP_API_KEY", "COPILOT_GITHUB_TOKEN", "HF_TOKEN",
+  "AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_BEARER_TOKEN_BEDROCK",
+  "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "AWS_CONTAINER_CREDENTIALS_FULL_URI", "AWS_WEB_IDENTITY_TOKEN_FILE",
+];
+let savedProviderAuthEnv = new Map<string, string | undefined>();
+let previousPiAgentDir: string | undefined;
+
+beforeEach(() => {
+  mkdirSync(testAgentDir, { recursive: true, mode: 0o700 });
+  // These assertions exercise the missing-auth path. A models catalog is fine to
+  // share with the runtime, but auth must be explicitly empty and independent of
+  // both the developer's ~/.pi configuration and provider credentials in env.
+  writeFileSync(path.join(testAgentDir, "auth.json"), "{}\n", { mode: 0o600 });
+  savedProviderAuthEnv = new Map(piProviderAuthEnvVars.map((key) => [key, process.env[key]]));
+  for (const key of piProviderAuthEnvVars) delete process.env[key];
+  previousPiAgentDir = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = testAgentDir;
+  resetCoreHarnessRuntime();
+});
+
+afterEach(() => {
+  resetCoreHarnessRuntime();
+  for (const [key, value] of savedProviderAuthEnv) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  if (previousPiAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+  else process.env.PI_CODING_AGENT_DIR = previousPiAgentDir;
+  rmSync(testAgentDir, { recursive: true, force: true });
+});
 
 function session(overrides: Partial<SessionSnapshot> = {}): SessionSnapshot {
   return {
@@ -529,7 +571,7 @@ test("服务重启：进程内 core 回合不会被当成可领养的 daemon 运
 
 test("选择免费分组后进程内 agent 自动分配并发出零价路由请求，无需 Pi 本地认证", async () => {
   const { OpenRouterFreeModelsService, OPENROUTER_FREE_SELECTOR } = await import("../src/openrouter-free-models.js");
-  const root = mkdtempSync(path.resolve("output/openrouter/core-test-"));
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-openrouter-core-test-"));
   const storage = new WandStorage(path.join(root, "wand.db"));
   const service = new OpenRouterFreeModelsService(storage, async (url) => String(url).endsWith("/chat/completions")
     ? Response.json({ choices: [{ finish_reason: "stop", message: { content: "免费模型验证" } }] })
@@ -576,7 +618,7 @@ test("选择免费分组后进程内 agent 自动分配并发出零价路由请�
 });
 
 test("Pi 主功能的免费分组不切换到 core SDK", async (t) => {
-  const root = mkdtempSync(path.resolve("output/openrouter/cli-free-group-"));
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-openrouter-cli-free-group-"));
   const storage = new WandStorage(path.join(root, "wand.db"));
   const pi: StructuredRunnerAdapter = {
     start() {
@@ -603,7 +645,7 @@ test("Pi 主功能的免费分组不切换到 core SDK", async (t) => {
 
 test("core 工具循环每次调用查价格，收费后切换免费替补且状态记录实际模型", async () => {
   const { OpenRouterFreeModelsService, OPENROUTER_FREE_PROVIDER } = await import("../src/openrouter-free-models.js");
-  const root = mkdtempSync(path.resolve("output/openrouter/core-price-loop-"));
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-openrouter-core-price-loop-"));
   const storage = new WandStorage(path.join(root, "wand.db"));
   let priceChecks = 0;
   let probes = 0;
@@ -647,7 +689,7 @@ test("core 工具循环每次调用查价格，收费后切换免费替补且状
 
 test("core 价格接口失败或没有免费替补时不发送推理请求", async () => {
   const { OpenRouterFreeModelsService, OPENROUTER_FREE_PROVIDER } = await import("../src/openrouter-free-models.js");
-  const root = mkdtempSync(path.resolve("output/openrouter/core-price-fail-"));
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-openrouter-core-price-fail-"));
   const storage = new WandStorage(path.join(root, "wand.db"));
   let phase = "initial";
   const service = new OpenRouterFreeModelsService(storage, async (url) => {
@@ -674,7 +716,7 @@ test("core 价格接口失败或没有免费替补时不发送推理请求", asy
 
 test("core 上下文压缩与正式回复分别检查价格，复用历史探测不重发测试消息", async () => {
   const { OpenRouterFreeModelsService, OPENROUTER_FREE_PROVIDER } = await import("../src/openrouter-free-models.js");
-  const root = mkdtempSync(path.resolve("output/openrouter/core-price-compact-"));
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-openrouter-core-price-compact-"));
   const storage = new WandStorage(path.join(root, "wand.db"));
   let checks = 0;
   let probes = 0;

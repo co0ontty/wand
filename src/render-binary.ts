@@ -3,6 +3,7 @@ import { execFile, spawnSync } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { logInfo } from "./runtime-log.js";
 
 /** 仓库根：src/ 与 dist/ 都在根下一层，所以两种运行方式解析结果一致。 */
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -148,8 +149,8 @@ export function resolveRenderBinaryPath(configPath: string): string | null {
   if (fromEnv) {
     if (isExecutableFile(fromEnv)) return fromEnv;
     // 显式配置但不存在属于配置错误，必须可见，不能静默滑到仓库构建产物。
-    process.stderr.write(
-      `[wand] WAND_RENDER_BIN points at ${fromEnv}, which is not an executable file; falling back to discovery.\n`,
+    logInfo(
+      `WAND_RENDER_BIN points at ${fromEnv}, which is not an executable file; falling back to discovery.`,
     );
   }
   const configDir = path.dirname(path.resolve(configPath));

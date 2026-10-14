@@ -1,3 +1,5 @@
+import { employeeAvatarValue, isFixedAvatarEmployee } from "./fixed-employee-avatar.js";
+import { HR_EMPLOYEE_KEY } from "./hr-employee-identity.js";
 import { randomUUID } from "node:crypto";
 import type { Express, Response } from "express";
 
@@ -11,12 +13,12 @@ import {
   type SiliconEmployee,
   type SiliconEmployeeDraft,
 } from "./ai-team-types.js";
+import type { OpenRouterFreeModelsService } from "./openrouter-free-models.js";
 import { getErrorMessage } from "./error-utils.js";
-import { DECISION_EXPERT_KEY, isLocalDecisionModel } from "./decision-expert-identity.js";
-import { OPENROUTER_FREE_SELECTOR, isOpenRouterFreeSelector } from "./openrouter-free-selection.js";
 import { asyncRoute } from "./express-async.js";
-import { bodyObject, sendRouteError, text } from "./server-request.js";
-import { parseTaskAgent } from "./server-task-routes.js";
+import { parseStoredAvatar } from "./avatar-input.js";
+import { bodyObject, boundedText, sendRouteError, text } from "./server-request.js";
+import { parseTaskAgent } from "./task-agent-parsing.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
 import { employeeCliAvailable } from "./silicon-employee-dispatch.js";
 import {
@@ -31,17 +33,20 @@ import {
 } from "./silicon-employee-draft.js";
 import { SESSION_PROVIDERS } from "./session-provider.js";
 import { DEFAULT_WAND_TASK_AGENT_KIND } from "./task-types.js";
-import type { QuickCommitAiOptions } from "./git-quick-commit.js";
+import type { QuickCommitAiOptions } from "./ai-text-runner.js";
 import { EMPLOYEE_KNOWLEDGE_MAX_ENTRIES } from "./employee-knowledge-types.js";
 import type { WandStorage } from "./storage.js";
 import type { WandTaskAgent } from "./task-types.js";
 import type { SessionProvider, WandConfig } from "./types.js";
+import { badRequest } from "./http-error.js";
 
-/** 员工起草没有会话上下文，按「默认 provider」解析，与任务标题 / 提示词优化一致。 */
-function employeeDraftAiOptions(storage: WandStorage, config?: WandConfig): QuickCommitAiOptions {
-  if (!config) return {};
+/** Recruitment uses HR’s own ordered candidates and persona, never the ops chain. */
+export function employeeDraftAiOptions(storage: WandStorage, config?: WandConfig, free?: Pick<OpenRouterFreeModelsService, "resolveForCall">): QuickCommitAiOptions {
+  if (!config) throw badRequest("招聘需要服务端 AI 配置。");
+  const hr = storage.getSystemSiliconEmployee(HR_EMPLOYEE_KEY);
+  if (!hr) throw badRequest("系统 HR 嘟嘟尚未初始化，请重启服务后重试。");
   const provider: SessionProvider = config.defaultProvider ?? "claude";
-  return resolveSystemAiContext(
+  return { ...resolveSystemAiContext(
     {
       provider,
       structuredState: undefined,
@@ -51,8 +56,9 @@ function employeeDraftAiOptions(storage: WandStorage, config?: WandConfig): Quic
       thinkingEffort: config.defaultThinkingEffort,
     },
     config,
-    storage.getSystemSiliconEmployee(),
-  );
+    hr,
+    free,
+  ), opsPersona: hr.prompt };
 }
 
 export interface EmployeeDraftRequest {
@@ -81,29 +87,14 @@ function sendEmployeeError(res: Response, error: unknown, context?: { expectatio
 /** 内置员工是 Wand 自己的执行者，不能被归档或删除。 */
 function rejectSystemEmployeeMutation(existing: SiliconEmployee, action: string): void {
   if (!isBuiltinSiliconEmployee(existing)) return;
-  throw new Error(`「${existing.name}」是 Wand 内置员工，不能${action}。`);
-}
-
-function boundedText(value: unknown, label: string, min: number, max: number): string {
-  const result = text(value);
-  if (result.length < min) throw new Error(`${label}不能为空。`);
-  if (result.length > max) throw new Error(`${label}不能超过 ${max} 个字符。`);
-  return result;
+  throw badRequest(`「${existing.name}」是 Wand 内置员工，不能${action}。`);
 }
 
 function parseAvatar(value: unknown, name: string): string {
-  const avatar = text(value);
-  if (!avatar || /^cat:\d{1,2}$/.test(avatar)) return avatar;
-  if (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(avatar)) {
-    throw new Error(`员工「${name}」的头像格式无效。`);
-  }
-  if (avatar.length > SILICON_EMPLOYEE_AVATAR_MAX_CHARS) {
-    throw new Error(`员工「${name}」的头像太大。`);
-  }
-  return avatar;
+  return parseStoredAvatar(value, `员工「${name}」`, SILICON_EMPLOYEE_AVATAR_MAX_CHARS);
 }
 
-/** 内置员工的锁定字段：名字 / 职责 / 人设 / 头像写死在服务端，只有候选可改。 */
+/** Other built-ins keep profile locks; the two stable cat identities lock only avatar. */
 const SYSTEM_EMPLOYEE_LOCKED_FIELDS: ReadonlyArray<{ key: "name" | "duty" | "prompt" | "avatar"; label: string }> = [
   { key: "name", label: "名字" },
   { key: "duty", label: "职责" },
@@ -112,45 +103,60 @@ const SYSTEM_EMPLOYEE_LOCKED_FIELDS: ReadonlyArray<{ key: "name" | "duty" | "pro
 ];
 
 /**
- * 内置员工只接受 agents；其余字段即使前端遗漏地发上来也必须与服务端一致，
- * 不一致直接拒绝（静默忽略会让客户端以为改成功了）。
+ * 其他内置员工只接受 agents；固定猫头员工另外接受资料的部分更新。
+ * 锁定字段即使由旧客户端或直接 API 发来，也必须一致；不一致明确拒绝。
  */
 export function parseSystemEmployeeAgents(value: unknown, existing: SiliconEmployee): WandTaskAgent[] {
   const body = bodyObject(value);
-  for (const field of SYSTEM_EMPLOYEE_LOCKED_FIELDS) {
+  for (const field of SYSTEM_EMPLOYEE_LOCKED_FIELDS.filter((field) => !isFixedAvatarEmployee(existing) || field.key === "avatar")) {
     const incoming = body[field.key];
-    if (incoming === undefined || incoming === null) continue;
+    if (incoming === undefined) continue;
     const current = existing[field.key];
-    const isSame = typeof incoming === "string" && incoming === current;
+    const isSame = typeof incoming === "string" && (incoming === current
+      || (field.key === "avatar" && isFixedAvatarEmployee(existing) && incoming === employeeAvatarValue(existing)));
     if (!isSame) {
-      throw new Error(`该员工是内置的，${field.label}不可修改。`);
+      throw badRequest(`该员工是内置的，${field.label}不可修改。`);
     }
   }
 
   if (body.tags !== undefined && JSON.stringify(body.tags) !== JSON.stringify(siliconEmployeeTags(existing))) {
-    throw new Error("该员工是内置的，标签不可修改。");
+    throw badRequest("该员工是内置的，标签不可修改。");
   }
+  if (body.id !== undefined && body.id !== existing.id) throw badRequest("该员工是内置的，身份不可修改。");
   if (body.systemKey !== undefined && body.systemKey !== existing.systemKey) {
-    throw new Error("该员工是内置的，身份不可修改。");
+    throw badRequest("该员工是内置的，身份不可修改。");
   }
 
-  if (!Array.isArray(body.agents)) throw new Error("请提供执行候选数组（CLI / SDK）。");
-  if (body.agents.length === 0) throw new Error("至少需要一个执行候选。");
-  if (body.agents.length > AI_TEAM_MAX_CANDIDATES) {
-    throw new Error(`最多 ${AI_TEAM_MAX_CANDIDATES} 个执行候选。`);
+  return isFixedAvatarEmployee(existing) && body.agents === undefined ? existing.agents : parseEmployeeAgents(body.agents);
+}
+
+/** Partial edits preserve omitted fields and the raw saved prompt, not a generated read projection. */
+export function parseFixedAvatarEmployeeInput(value: unknown, existing: SiliconEmployee, now: string): SiliconEmployee {
+  const body = bodyObject(value);
+  const agents = parseSystemEmployeeAgents(body, existing);
+  const name = body.name === undefined ? existing.name : boundedText(body.name, "员工名字", 1, 40);
+  const duty = body.duty === undefined ? existing.duty : text(body.duty);
+  const prompt = body.prompt === undefined ? existing.prompt : text(body.prompt);
+  if (duty.length > 2000) throw badRequest("员工职责不能超过 2000 个字符。");
+  if (prompt.length > 20_000) throw badRequest("员工设定 Prompt 不能超过 20000 个字符。");
+  return { ...existing, name, duty, prompt, agents, updatedAt: now };
+}
+
+/** One validation owner for every employee candidate list, including legacy single agents. */
+function parseEmployeeAgents(value: unknown): WandTaskAgent[] {
+  if (!Array.isArray(value)) throw badRequest("请提供执行候选数组（CLI / SDK）。");
+  if (value.length === 0) throw badRequest("至少需要一个执行候选。");
+  if (value.length > AI_TEAM_MAX_CANDIDATES) {
+    throw badRequest(`最多 ${AI_TEAM_MAX_CANDIDATES} 个执行候选。`);
   }
-  const agents = body.agents.map((rawAgent): WandTaskAgent => {
+  const agents = value.map((rawAgent): WandTaskAgent => {
     const parsed = parseTaskAgent(rawAgent ?? {});
-    if (!parsed) throw new Error("请选择有效的 CLI 工具或 Wand Agent。");
-    if (parsed.kind !== "structured") throw new Error("硅基员工只支持结构化会话。");
-    if (existing.systemKey === DECISION_EXPERT_KEY && (parsed.provider !== "pi" || parsed.engine !== "sdk"
-      || !(isLocalDecisionModel(parsed.model) || parsed.model === OPENROUTER_FREE_SELECTOR || isOpenRouterFreeSelector(parsed.model)))) {
-      throw new Error("决策专家仅支持 LAYA 或 Wand 免费分组的决策候选；请使用 Wand 内部执行入口。");
-    }
+    if (!parsed) throw badRequest("请选择有效的 CLI 工具或 Wand Agent。");
+    if (parsed.kind !== "structured") throw badRequest("硅基员工只支持结构化会话。");
     return parsed;
   });
   if (new Set(agents.map(agentKey)).size !== agents.length) {
-    throw new Error("执行候选存在重复。");
+    throw badRequest("执行候选存在重复。");
   }
   return agents;
 }
@@ -163,37 +169,16 @@ export function parseSiliconEmployeeInput(
   const body = bodyObject(value);
   const name = boundedText(body.name, "员工名字", 1, 40);
   const duty = text(body.duty);
-  if (duty.length > 2000) throw new Error("员工职责不能超过 2000 个字符。");
+  if (duty.length > 2000) throw badRequest("员工职责不能超过 2000 个字符。");
   const prompt = text(body.prompt);
-  if (prompt.length > 20_000) throw new Error("员工设定 Prompt 不能超过 20000 个字符。");
+  if (prompt.length > 20_000) throw badRequest("员工设定 Prompt 不能超过 20000 个字符。");
 
-  let agents: WandTaskAgent[];
-  if (Array.isArray(body.agents)) {
-    if (body.agents.length === 0) throw new Error("至少需要一个执行候选。");
-    if (body.agents.length > AI_TEAM_MAX_CANDIDATES) {
-      throw new Error(`最多 ${AI_TEAM_MAX_CANDIDATES} 个执行候选。`);
-    }
-    agents = body.agents.map((rawAgent): WandTaskAgent => {
-      const parsed = parseTaskAgent(rawAgent ?? {});
-      if (!parsed) throw new Error("请选择有效的 CLI 工具或 Wand Agent。");
-      if (parsed.kind !== "structured") throw new Error("硅基员工只支持结构化会话。");
-      return parsed;
-    });
-  } else if (body.agents !== undefined && body.agents !== null) {
-    throw new Error("候选执行配置必须是数组。");
-  } else if (body.agent !== undefined && body.agent !== null) {
-    const singleAgent = parseTaskAgent(body.agent);
-    if (!singleAgent) throw new Error("请选择有效的 CLI 工具或 Wand Agent。");
-    if (singleAgent.kind !== "structured") throw new Error("硅基员工只支持结构化会话。");
-    agents = [singleAgent];
-  } else {
-    throw new Error("至少需要一个执行候选。");
-  }
-
-  const seenKeys = new Set(agents.map(agentKey));
-  if (seenKeys.size !== agents.length) {
-    throw new Error("执行候选存在重复。");
-  }
+  let candidates: unknown;
+  if (Array.isArray(body.agents)) candidates = body.agents;
+  else if (body.agents !== undefined && body.agents !== null) throw badRequest("候选执行配置必须是数组。");
+  else if (body.agent !== undefined && body.agent !== null) candidates = [body.agent];
+  else throw badRequest("至少需要一个执行候选。");
+  const agents = parseEmployeeAgents(candidates);
 
   const avatar = parseAvatar(body.avatar, name);
   const tags = parseSiliconEmployeeTags(body.tags === undefined ? existing?.tags ?? [] : body.tags);
@@ -220,6 +205,7 @@ export function registerSiliconEmployeeRoutes(
     storage: WandStorage;
     notifyEmployeeChanged?: (employeeId: string) => void;
     config?: WandConfig;
+    free?: Pick<OpenRouterFreeModelsService, "resolveForCall">;
     /** 测试注入点：默认按系统 AI 配置真实调用模型。 */
     generateDraft?: (request: EmployeeDraftRequest) => Promise<SiliconEmployeeDraft>;
     /** 测试注入点：CLI 可用性探测。 */
@@ -246,7 +232,7 @@ export function registerSiliconEmployeeRoutes(
     return available.length ? available : [...SESSION_PROVIDERS];
   };
   const generateDraft = deps.generateDraft ?? ((request: EmployeeDraftRequest) =>
-    generateSiliconEmployeeDraft(request.expectation, employeeDraftAiOptions(storage, config), {
+    generateSiliconEmployeeDraft(request.expectation, employeeDraftAiOptions(storage, config, deps.free), {
       cwd: config?.defaultCwd || process.cwd(),
       language: config?.language ?? "",
       existingNames: request.existingNames,
@@ -260,6 +246,12 @@ export function registerSiliconEmployeeRoutes(
       console.error("[SiliconEmployee] definition notification failed:", getErrorMessage(error));
     }
   };
+
+  // Identity is live data, not a versioned asset; old HTTP caches must not retain another face.
+  app.use("/api/silicon-employees", (_req, res, next) => {
+    res.setHeader("Cache-Control", "no-store");
+    next();
+  });
 
   app.get("/api/silicon-employees", (req, res) => {
     try {
@@ -280,8 +272,8 @@ export function registerSiliconEmployeeRoutes(
   app.put("/api/silicon-employees/draft/defaults", (req, res) => {
     try {
       const agent = parseTaskAgent(req.body ?? {}, undefined, DEFAULT_WAND_TASK_AGENT_KIND);
-      if (!agent) throw new Error("请选择有效的执行候选。");
-      if (agent.kind !== "structured") throw new Error("硅基员工只支持结构化会话。");
+      if (!agent) throw badRequest("请选择有效的执行候选。");
+      if (agent.kind !== "structured") throw badRequest("硅基员工只支持结构化会话。");
       storage.setPreference(EMPLOYEE_CREATION_DEFAULTS_PREF, {
         provider: agent.provider,
         model: agent.model,
@@ -336,7 +328,7 @@ export function registerSiliconEmployeeRoutes(
   app.get("/api/silicon-employees/:id", (req, res) => {
     try {
       const employee = storage.getSiliconEmployee(req.params.id);
-      if (!employee) throw new Error(`硅基员工「${req.params.id}」不存在。`);
+      if (!employee) throw badRequest(`硅基员工「${req.params.id}」不存在。`);
       res.json(employee);
     } catch (error) {
       sendEmployeeError(res, error);
@@ -356,7 +348,7 @@ export function registerSiliconEmployeeRoutes(
   app.post("/api/silicon-employees/:id/knowledge", (req, res) => {
     try {
       const body = bodyObject(req.body);
-      if (typeof body.content !== "string") throw new Error("content 必须是知识文字。");
+      if (typeof body.content !== "string") throw badRequest("content 必须是知识文字。");
       const entry = storage.rememberEmployeeKnowledge(req.params.id, body.content);
       res.status(201).json(entry);
     } catch (error) { sendEmployeeError(res, error); }
@@ -380,14 +372,20 @@ export function registerSiliconEmployeeRoutes(
   app.put("/api/silicon-employees/:id", (req, res) => {
     try {
       const existing = storage.getSiliconEmployee(req.params.id);
-      if (!existing) throw new Error(`硅基员工「${req.params.id}」不存在。`);
+      if (!existing) throw badRequest(`硅基员工「${req.params.id}」不存在。`);
       const now = new Date().toISOString();
-      const employee = isBuiltinSiliconEmployee(existing)
-        ? { ...existing, agents: parseSystemEmployeeAgents(req.body, existing), updatedAt: now }
-        : parseSiliconEmployeeInput(req.body, existing, now);
+      const definition = storage.getSiliconEmployeeDefinition(existing.id)!;
+      const body = bodyObject(req.body);
+      // An unchanged projected prompt is an echo, not a request to persist generated preferences.
+      const input = body.prompt === existing.prompt ? { ...body, prompt: definition.prompt } : body;
+      const employee = isFixedAvatarEmployee(definition)
+        ? parseFixedAvatarEmployeeInput(input, definition, now)
+        : isBuiltinSiliconEmployee(existing)
+          ? { ...existing, agents: parseSystemEmployeeAgents(input, existing), updatedAt: now }
+          : parseSiliconEmployeeInput(input, existing, now);
       storage.saveSiliconEmployee(employee);
       notifyEmployee(employee.id);
-      res.json(employee);
+      res.json(storage.getSiliconEmployee(employee.id));
     } catch (error) {
       sendEmployeeError(res, error);
     }
@@ -396,7 +394,7 @@ export function registerSiliconEmployeeRoutes(
   app.post("/api/silicon-employees/:id/archive", (req, res) => {
     try {
       const existing = storage.getSiliconEmployee(req.params.id);
-      if (!existing) throw new Error(`硅基员工「${req.params.id}」不存在。`);
+      if (!existing) throw badRequest(`硅基员工「${req.params.id}」不存在。`);
       rejectSystemEmployeeMutation(existing, "归档");
       const now = new Date().toISOString();
       storage.archiveSiliconEmployee(req.params.id, now);
@@ -410,7 +408,7 @@ export function registerSiliconEmployeeRoutes(
   app.post("/api/silicon-employees/:id/unarchive", (req, res) => {
     try {
       const existing = storage.getSiliconEmployee(req.params.id);
-      if (!existing) throw new Error(`硅基员工「${req.params.id}」不存在。`);
+      if (!existing) throw badRequest(`硅基员工「${req.params.id}」不存在。`);
       rejectSystemEmployeeMutation(existing, "恢复");
       storage.unarchiveSiliconEmployee(req.params.id);
       notifyEmployee(req.params.id);
@@ -423,7 +421,7 @@ export function registerSiliconEmployeeRoutes(
   app.delete("/api/silicon-employees/:id", (req, res) => {
     try {
       const existing = storage.getSiliconEmployee(req.params.id);
-      if (!existing) throw new Error(`硅基员工「${req.params.id}」不存在。`);
+      if (!existing) throw badRequest(`硅基员工「${req.params.id}」不存在。`);
       rejectSystemEmployeeMutation(existing, "删除");
       storage.deleteSiliconEmployee(req.params.id);
       notifyEmployee(req.params.id);

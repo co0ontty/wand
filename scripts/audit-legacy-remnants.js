@@ -7,6 +7,15 @@ import ts from "typescript";
 
 const TOKEN = /^[A-Za-z_][\w-]*$/;
 
+/**
+ * Class/id names created at runtime by third-party components (xterm.js writes `.xterm*`
+ * into its DOM). They are never literal producers in src/, so they are not dead-code evidence.
+ */
+const THIRD_PARTY_TOKEN = /^\.xterm(?:-|$)/;
+export function isThirdPartyToken(token) {
+  return THIRD_PARTY_TOKEN.test(token);
+}
+
 function staticText(node) {
   if (!node) return null;
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
@@ -132,7 +141,7 @@ export function auditSources(files) {
     };
     visit(source);
   }
-  const candidates = [...consumers].filter(([token]) => !producers.has(token))
+  const candidates = [...consumers].filter(([token]) => !producers.has(token) && !isThirdPartyToken(token))
     .map(([token, sites]) => ({ token, hasCss: cssRules.has(token), sites }))
     .sort((a, b) => a.token.localeCompare(b.token));
   return { candidates, consumerTargets: consumers.size, dynamicQueries };

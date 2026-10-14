@@ -83,11 +83,11 @@ test("cancelled resource preparation never spawns; missing selection does not fa
   const session = { id: "test", provider: "pi", sessionKind: "structured", cwd: root, selectedModel: null,
     claudeSessionId: null, piSettings: defaultPiCliSessionSettings() } as SessionSnapshot;
   const observer = { isActive: () => true, onUpdate() {} };
-  const active = runner.start({ session, prompt: "x", env: {} }, observer);
+  const active = runner.start({ session, prompt: "x", env: { ...process.env } }, observer);
   active.interrupt();
   assert.match((await active.completion).primaryError ?? "", /取消/);
   const missing = runner.start({ session: { ...session, piSettings: { ...session.piSettings!,
-    resources: { skills: ["skill-" + "0".repeat(24)], mcpServers: [] } } }, prompt: "x", env: {} }, observer);
+    resources: { skills: ["skill-" + "0".repeat(24)], mcpServers: [] } } }, prompt: "x", env: { ...process.env } }, observer);
   assert.match((await missing.completion).primaryError ?? "", /不存在/);
   assert.equal(spawns, 0);
 });
@@ -200,6 +200,9 @@ test("real Pi CLI: selected Skills in model context; only selected MCP connects;
   for (const key of Object.keys(env)) {
     if (/^WAND_(KNOWLEDGE|DECISION|PI_RESOURCE)/.test(key) || key === "NODE_TEST_CONTEXT" || key === "NODE_OPTIONS") delete env[key];
   }
+  // Block the public SDK even inside the real CLI child. The resource bridge
+  // must use CLI-owned built-ins; an ESM import of Wand's SDK fails this test.
+  env.NODE_OPTIONS = `--import=${new URL("./fixtures/block-pi-sdk.mjs", import.meta.url).href}`;
   const prepared = await preparePiResources(agentDir, root, { skills: [skill.id], mcpServers: [mcp.id] }, env);
   let stdout: string;
   try {

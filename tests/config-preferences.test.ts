@@ -1,16 +1,20 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import {
   applyStoragePreferences,
   defaultConfig,
+  loadConfigWithStorage,
   getDefaultModelForProvider,
   getProviderDefaultModels,
   resolveDefaultShell,
   writePreferenceToStorage,
 } from "../src/config.js";
-import type { WandStorage } from "../src/storage.js";
+import { WandStorage } from "../src/storage.js";
+import type { WandStorage as WandStorageType } from "../src/storage.js";
 
 class FakePreferenceStorage {
   private readonly values = new Map<string, unknown>();
@@ -28,6 +32,33 @@ class FakePreferenceStorage {
   }
 }
 
+test("deployment trust fields are normalized and survive config storage round-trip", async (t) => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wand-deployment-config-"));
+  const configPath = path.join(dir, "config.json");
+  const storage = new WandStorage(path.join(dir, "wand.db"));
+  t.after(() => { storage.close(); rmSync(dir, { recursive: true, force: true }); });
+  writeFileSync(configPath, JSON.stringify({
+    browserExtensionIds: [" chrome-extension://abc ", null, "", 42, "moz-extension://def"],
+    trustProxy: "  loopback, 10.0.0.0/8  ",
+  }));
+
+  const loaded = await loadConfigWithStorage(configPath, storage);
+  assert.deepEqual(loaded.browserExtensionIds, ["chrome-extension://abc", "moz-extension://def"]);
+  assert.equal(loaded.trustProxy, "loopback, 10.0.0.0/8");
+  assert.deepEqual((await loadConfigWithStorage(configPath, storage)).browserExtensionIds, loaded.browserExtensionIds);
+  assert.equal((await loadConfigWithStorage(configPath, storage)).trustProxy, loaded.trustProxy);
+
+  writeFileSync(configPath, JSON.stringify({ browserExtensionIds: "not-an-array", trustProxy: ["bad"] }));
+  const malformed = await loadConfigWithStorage(configPath, storage);
+  assert.equal(malformed.browserExtensionIds, undefined);
+  assert.equal(malformed.trustProxy, undefined);
+
+  writeFileSync(configPath, JSON.stringify({ browserExtensionIds: ["  ", " chrome-extension://ok ", null], trustProxy: "   " }));
+  const partial = await loadConfigWithStorage(configPath, storage);
+  assert.deepEqual(partial.browserExtensionIds, ["chrome-extension://ok"]);
+  assert.equal(partial.trustProxy, undefined);
+});
+
 test("default shell follows the account login shell instead of a hardcoded bash", () => {
   if (process.platform === "win32") {
     assert.equal(resolveDefaultShell(), process.env.COMSPEC || "cmd.exe");
@@ -43,7 +74,7 @@ test("default shell follows the account login shell instead of a hardcoded bash"
 });
 
 test("commit CLI and model preferences update live config and restore from storage", () => {
-  const storage = new FakePreferenceStorage() as unknown as WandStorage;
+  const storage = new FakePreferenceStorage() as unknown as WandStorageType;
   const config = defaultConfig();
 
   writePreferenceToStorage(config, storage, "commitCli", "codex");
@@ -58,7 +89,7 @@ test("commit CLI and model preferences update live config and restore from stora
 });
 
 test("system AI CLI and model round-trip independently from API route preferences", () => {
-  const storage = new FakePreferenceStorage() as unknown as WandStorage;
+  const storage = new FakePreferenceStorage() as unknown as WandStorageType;
   const config = defaultConfig();
   assert.equal(config.systemAiCli, undefined, "old installs continue to use the session CLI");
   writePreferenceToStorage(config, storage, "systemAiCli", "pi");
@@ -74,7 +105,7 @@ test("system AI CLI and model round-trip independently from API route preference
 });
 
 test("commit CLI preference rejects unsupported commands", () => {
-  const storage = new FakePreferenceStorage() as unknown as WandStorage;
+  const storage = new FakePreferenceStorage() as unknown as WandStorageType;
   assert.throws(
     () => writePreferenceToStorage(defaultConfig(), storage, "commitCli", "cursor"),
     /无效 commit CLI/,
@@ -82,7 +113,7 @@ test("commit CLI preference rejects unsupported commands", () => {
 });
 
 test("removed direct-API preferences are gone and legacy DB rows are ignored", () => {
-  const storage = new FakePreferenceStorage() as unknown as WandStorage;
+  const storage = new FakePreferenceStorage() as unknown as WandStorageType;
   // 老实例的库里还留着这两条偏好；升级后必须既不读回 config，也不影响其它偏好。
   storage.setPreference("pref:systemAi", { enabled: true, apiKey: "legacy-secret", baseUrl: "https://old.test", model: "old" });
   storage.setPreference("pref:commitAiSource", "api");
@@ -95,7 +126,7 @@ test("removed direct-API preferences are gone and legacy DB rows are ignored", (
 });
 
 test("Codex dynamic reasoning effort preference round-trips through storage", () => {
-  const storage = new FakePreferenceStorage() as unknown as WandStorage;
+  const storage = new FakePreferenceStorage() as unknown as WandStorageType;
   const config = defaultConfig();
 
   writePreferenceToStorage(config, storage, "defaultThinkingEffort", "codex:ultra");
@@ -105,7 +136,7 @@ test("Codex dynamic reasoning effort preference round-trips through storage", ()
 });
 
 test("new-session provider and kind preferences round-trip through storage", () => {
-  const storage = new FakePreferenceStorage() as unknown as WandStorage;
+  const storage = new FakePreferenceStorage() as unknown as WandStorageType;
   const config = defaultConfig();
 
   writePreferenceToStorage(config, storage, "defaultProvider", "codex");
@@ -126,7 +157,7 @@ test("new-session provider and kind preferences round-trip through storage", () 
 });
 
 test("OpenCode provider and model preferences round-trip through storage", () => {
-  const storage = new FakePreferenceStorage() as unknown as WandStorage;
+  const storage = new FakePreferenceStorage() as unknown as WandStorageType;
   const config = defaultConfig();
 
   writePreferenceToStorage(config, storage, "defaultProvider", "opencode");
@@ -140,7 +171,7 @@ test("OpenCode provider and model preferences round-trip through storage", () =>
 });
 
 test("Grok provider and model preferences round-trip through storage", () => {
-  const storage = new FakePreferenceStorage() as unknown as WandStorage;
+  const storage = new FakePreferenceStorage() as unknown as WandStorageType;
   const config = defaultConfig();
 
   writePreferenceToStorage(config, storage, "defaultProvider", "grok");
@@ -152,7 +183,7 @@ test("Grok provider and model preferences round-trip through storage", () => {
 });
 
 test("Qoder provider and model preferences round-trip through storage", () => {
-  const storage = new FakePreferenceStorage() as unknown as WandStorage;
+  const storage = new FakePreferenceStorage() as unknown as WandStorageType;
   const config = defaultConfig();
 
   writePreferenceToStorage(config, storage, "defaultProvider", "qoder");
@@ -164,7 +195,7 @@ test("Qoder provider and model preferences round-trip through storage", () => {
 });
 
 test("Pi provider and model preferences round-trip through storage", () => {
-  const storage = new FakePreferenceStorage() as unknown as WandStorage;
+  const storage = new FakePreferenceStorage() as unknown as WandStorageType;
   const config = defaultConfig();
   writePreferenceToStorage(config, storage, "defaultProvider", "pi");
   writePreferenceToStorage(config, storage, "defaultPiModel", " openai/gpt-5.4 ");
@@ -174,7 +205,7 @@ test("Pi provider and model preferences round-trip through storage", () => {
 });
 
 test("Gemini provider and model preferences round-trip through storage", () => {
-  const storage = new FakePreferenceStorage() as unknown as WandStorage;
+  const storage = new FakePreferenceStorage() as unknown as WandStorageType;
   const config = defaultConfig();
   writePreferenceToStorage(config, storage, "defaultProvider", "gemini");
   writePreferenceToStorage(config, storage, "defaultGeminiModel", " gemini-2.5-pro ");
@@ -184,7 +215,7 @@ test("Gemini provider and model preferences round-trip through storage", () => {
 });
 
 test("new-session preferences reject unsupported values", () => {
-  const storage = new FakePreferenceStorage() as unknown as WandStorage;
+  const storage = new FakePreferenceStorage() as unknown as WandStorageType;
 
   assert.throws(
     () => writePreferenceToStorage(defaultConfig(), storage, "defaultProvider", "cursor"),
@@ -209,7 +240,7 @@ test("new-session preferences reject unsupported values", () => {
 });
 
 test("task retention preference updates live config and rejects partial or out-of-range values", () => {
-  const storage = new FakePreferenceStorage() as unknown as WandStorage;
+  const storage = new FakePreferenceStorage() as unknown as WandStorageType;
   const config = defaultConfig();
   const value = {
     autoArchiveEnabled: false,

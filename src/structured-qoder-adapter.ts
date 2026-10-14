@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 
 import { ClaudeCliProtocolReducer } from "./structured-claude-protocol.js";
+import { cliUnacceptedFacts } from "./structured-failure.js";
 import { startStructuredCli } from "./structured-exec-pump.js";
 import type { StructuredExecHost } from "./structured-exec-host.js";
 import type {
@@ -10,6 +11,7 @@ import type {
   StructuredRunnerObserver,
 } from "./structured-runner.js";
 import { systemPromptArgs, thinkingEffortToQoderEffort } from "./structured-provider-common.js";
+import { createNdjsonLineHandler } from "./structured-ndjson.js";
 import type { SessionSnapshot } from "./types.js";
 
 export function buildQoderArgs(session: SessionSnapshot, prompt: string): string[] {
@@ -39,6 +41,8 @@ export class QoderRunner implements StructuredRunnerAdapter {
     const reducer = new ClaudeCliProtocolReducer(context.session);
     let stdoutTail = "";
     let primaryError: string | null = null;
+    let protocolError = false;
+    let unparsedStdout = false;
     return startStructuredCli({
       sessionId: context.session.id,
       file: "qodercli",
@@ -49,28 +53,23 @@ export class QoderRunner implements StructuredRunnerAdapter {
       execHost: this.execHost,
       spawnProcess: this.spawnProcess,
       createState: () => reducer.state,
-      processLine: (line) => {
-        if (!observer.isActive()) return;
-        const trimmed = line.trim();
-        if (!trimmed) return;
-        let event: unknown;
-        try {
-          event = JSON.parse(trimmed);
-        } catch {
-          return;
-        }
-        if (event && typeof event === "object" && !Array.isArray(event)) {
-          const record = event as Record<string, unknown>;
-          observer.onEvent?.(record);
-          if (record.type === "result" && record.subtype !== "success") {
-            const errors = Array.isArray(record.errors)
-              ? record.errors.filter((item): item is string => typeof item === "string")
-              : [];
-            primaryError = errors.join("\n") || "Qoder CLI execution failed";
+      processLine: createNdjsonLineHandler({
+        observer,
+        onUnparsed: () => { unparsedStdout = true; },
+        handleEvent: (event) => {
+          if (event && typeof event === "object" && !Array.isArray(event)) {
+            const record = event as Record<string, unknown>;
+            if (record.type === "result" && record.subtype !== "success") {
+              const errors = Array.isArray(record.errors)
+                ? record.errors.filter((item): item is string => typeof item === "string")
+                : [];
+              primaryError = errors.join("\n") || "Qoder CLI execution failed";
+              protocolError = true;
+            }
           }
-        }
-        if (reducer.apply(event, context.session.mode === "managed")) observer.onUpdate(reducer.state);
-      },
+          if (reducer.apply(event, context.session.mode === "managed")) observer.onUpdate(reducer.state);
+        },
+      }),
       onStdoutText: (text) => {
         const trimmed = text.trim();
         if (trimmed) stdoutTail = trimmed.slice(-1024);
@@ -83,6 +82,15 @@ export class QoderRunner implements StructuredRunnerAdapter {
         stdoutTail,
         primaryError,
         ...(spawnError ? { spawnError } : {}),
+        ...cliUnacceptedFacts({
+          state: reducer.state,
+          primaryError,
+          protocolError: protocolError || reducer.errorResultObserved,
+          unparsedStdout,
+          signal,
+          progressed: reducer.assistantWorkObserved,
+          ...(spawnError ? { spawnError } : {}),
+        }),
       }),
     });
   }

@@ -15,7 +15,7 @@ import { asyncRoute } from "./express-async.js";
 import { getErrorMessage } from "./error-utils.js";
 import type { ProcessManager } from "./process-manager.js";
 import { isProviderSessionId, isSafeProviderSessionId } from "./resume-policy.js";
-import { parseExecutionMode, parseSessionCreationOrigin } from "./server-session-routes.js";
+import { parseExecutionMode, parseSessionCreationOrigin } from "./session-request.js";
 import type { StructuredSessionManager } from "./structured-session-manager.js";
 import type { WandStorage } from "./storage.js";
 import type { ExecutionMode, SessionProvider, SessionRunner, SessionSnapshot } from "./types.js";

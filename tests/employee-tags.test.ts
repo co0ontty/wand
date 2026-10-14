@@ -66,8 +66,8 @@ test("员工标签随存储、归档和重启保留；内置标签由身份固�
     const partner = storage.ensureDefaultSiliconEmployee();
     assert.deepEqual(system.tags, ["系统用户"]);
     assert.deepEqual(partner.tags, ["默认用户"]);
-    storage.saveSiliconEmployee({ ...system, tags: ["假标签"] });
-    storage.saveSiliconEmployee({ ...partner, tags: [] });
+    assert.throws(() => storage.saveSiliconEmployee({ ...system, tags: ["假标签"] }), /标签不可修改/);
+    assert.throws(() => storage.saveSiliconEmployee({ ...partner, tags: [] }), /标签不可修改/);
     assert.deepEqual(storage.getSystemSiliconEmployee()?.tags, ["系统用户"]);
     assert.deepEqual(storage.getDefaultSiliconEmployee()?.tags, ["默认用户"]);
     assert.throws(() => storage.saveSiliconEmployee({ ...employee, tags: [SYSTEM_EMPLOYEE_TAG] }), /内置标签/);

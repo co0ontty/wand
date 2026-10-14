@@ -199,7 +199,7 @@ test("quick-commit action model produces the four legacy API combinations", () =
   assert.equal(buildQuickCommitInput(
     { message: "ship", tag: "", tagEdited: false }, "commit-push", false,
     undefined, false, true,
-  ).archiveRelatedTasks, true);
+  ).archiveRelatedTasks, undefined);
   // 勾选集合是快照：之后改数组不会反过来改输入对象。
   const ids = ["x"];
   const snapshot = buildQuickCommitInput(
@@ -513,7 +513,7 @@ test("快捷提交的结果全在弹层体内原位呈现，驻留取自 token",
   assert.ok(!host.includes("toast("), "原位已有三态反馈，不再同时弹 Toast");
   assert.match(host, /setResultNote\(`\$\{summary\}/, "submodule / tag / 推送 / 归档细节改到页脚原位");
   assert.match(host, /resultNote \|\| \(hasQuickCommitChanges\(status\)/);
-  assert.match(host, /window\.setTimeout\(resolve, response\.archiveError \? MOTION_DWELL_FAILED_MS : MOTION_DWELL_SENT_MS\)/);
+  assert.match(host, /window\.setTimeout\(resolve, MOTION_DWELL_SENT_MS\)/);
   assert.match(host, /setPushError\(describeError\(pushFailure, "推送失败。"\)\)/, "推送失败只走原位 alert");
 });
 

@@ -5,13 +5,18 @@ import { getErrorMessage } from "./error-utils.js";
 import { sendRouteError } from "./server-request.js";
 import type { CreateMissionInput, CreateReviewCommentInput } from "./mission-types.js";
 import type { Missions } from "./missions.js";
+import { badRequest, surfaceDomainError } from "./http-error.js";
 
 // Missions 的错误文案在 service 层就已确定，这里只把“不存在”类错误提升为 404。
 const MISSION_NOT_FOUND = /^(任务不存在|任务 attempt 不存在)|没有关联会话|当前不可用/;
 
 function sendMissionError(res: Response, error: unknown): void {
   const message = getErrorMessage(error, "任务操作失败。");
-  sendRouteError(res, error, "任务操作失败。", MISSION_NOT_FOUND.test(message) ? 404 : 400);
+  const domainMessage = surfaceDomainError(error, /^(?:.+最多允许 20 个路径。|.+中的路径过长。|任务提示词不能为空。|任务提示词不能超过 200000 个字符。|请选择 1-\d+ 个有效 provider。|未找到该里程碑。|请选择共享或复制路径|共享路径不能与复制路径重叠|任务不存在。|任务 attempt 不存在。|这个 attempt 没有可审查的 worktree。|文件和 review 内容不能为空。|这个 attempt 没有关联会话。|没有待发送的 review 意见。|任务会话当前不可用。)$/);
+  const exposedError = domainMessage ?? (error instanceof Error && error.message === "任务工作目录不存在。"
+    ? badRequest(error.message)
+    : error);
+  sendRouteError(res, exposedError, "任务操作失败。", MISSION_NOT_FOUND.test(message) ? 404 : 400);
 }
 
 function commentIdsFrom(body: unknown): string[] {

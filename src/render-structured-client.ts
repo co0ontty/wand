@@ -27,6 +27,7 @@ import type {
   StructuredSpawnRequest,
   StructuredStreamEvent,
 } from "./structured-exec-host.js";
+import { logInfo } from "./runtime-log.js";
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_QUEUED_EVENTS = 2048;
@@ -72,7 +73,7 @@ class RemoteRun implements StructuredExecProcess {
 
   interrupt(signal?: string): void {
     void this.client.request("interrupt", { runId: this.runId, signal }).catch((error) =>
-      process.stderr.write(`[wand] structured Render interrupt failed: ${getErrorMessage(error)}\n`));
+      logInfo(`structured Render interrupt failed: ${getErrorMessage(error)}`));
   }
 
   onStream(listener: (event: StructuredStreamEvent) => void): { dispose(): void } {
@@ -325,7 +326,7 @@ export class RenderStructuredClient implements StructuredExecHost {
         handle.acceptExit({ exitCode: latest.exitCode, signal: latest.signal });
       }
     } catch (error) {
-      process.stderr.write(`[wand] structured Render replay failed for ${handle.runId}: ${getErrorMessage(error)}\n`);
+      logInfo(`structured Render replay failed for ${handle.runId}: ${getErrorMessage(error)}`);
       handle.fail();
       throw error;
     } finally {
