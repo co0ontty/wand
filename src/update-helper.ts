@@ -284,7 +284,7 @@ WAND_STATUS_NODE
 
 on_exit() {
   local status="$?"
-  if [ "$HELPER_MODE" != "--apply" ]; then rm -f "$GLOBAL_CLI_PATH_FILE" "$TARGET_VERSION_FILE" 2>/dev/null || true; fi
+  if [ -z "$HELPER_MODE" ]; then rm -f "$GLOBAL_CLI_PATH_FILE" "$TARGET_VERSION_FILE" 2>/dev/null || true; fi
   if [ "$status" -ne 0 ]; then
     if [ "$("$NODE_BIN" --input-type=module -e 'import {readFileSync} from "node:fs"; try { console.log(JSON.parse(readFileSync(process.argv[1], "utf8")).phase); } catch {}' "$STATUS_PATH")" != "failed" ]; then
       set_status failed "更新未完成，服务未确认切换到新版。请查看更新日志并重试。" || true

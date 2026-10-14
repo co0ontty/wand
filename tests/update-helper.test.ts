@@ -61,17 +61,24 @@ exit 64
   writeFileSync(globalCliPath, `
 const fs = require("node:fs");
 fs.appendFileSync(process.env.WAND_TEST_EVENTS, "cli:" + process.argv.slice(2).join(" ") + "\\n");
+if (process.argv[2] === "init" && process.env.WAND_TEST_INIT_FAIL === "1") process.exit(1);
 `, "utf8");
 
   writeFileSync(updateUtilsPath, `
 import fs from "node:fs";
 export async function withGlobalUpdateLock(action) { return action(); }
-export async function installPackageGloballyAsync(spec, timeoutMs, log) {
+export function finalizeDeferredGlobalUpdate(receipt, rollback) {
+  fs.appendFileSync(process.env.WAND_TEST_EVENTS, "finalize:" + String(rollback) + "\\n");
+  fs.rmSync(receipt, { force: true });
+  return true;
+}
+export async function installPackageGloballyAsync(spec, timeoutMs, log, options) {
   fs.appendFileSync(process.env.WAND_TEST_EVENTS, "install:" + spec + ":" + timeoutMs + "\\n");
   log("[stub] install invoked");
   if (process.env.WAND_TEST_INSTALL_FAIL === "1") {
     throw new Error("stub install failure");
   }
+  if (process.env.WAND_TEST_DEFER_BACKUP === "1") fs.writeFileSync(options.backupReceiptPath, "{}");
   return process.env.WAND_TEST_INSTALLED_CLI;
 }
 `, "utf8");
@@ -142,7 +149,7 @@ setInterval(() => {}, 1000);
   return parent;
 }
 
-async function runScript(fixture: Fixture, serviceScope: "system" | "user" | null): Promise<number | null> {
+async function runScript(fixture: Fixture, serviceScope: "system" | "user" | null, args: string[] = []): Promise<number | null> {
   const script = buildDetachedUpdateHelperScript(
     fixture.opts,
     fixture.logPath,
@@ -151,7 +158,7 @@ async function runScript(fixture: Fixture, serviceScope: "system" | "user" | nul
   );
   writeFileSync(fixture.scriptPath, script, { encoding: "utf8", mode: 0o700 });
   return await new Promise<number | null>((resolve, reject) => {
-    const child = spawn("/bin/bash", [fixture.scriptPath], {
+    const child = spawn("/bin/bash", [fixture.scriptPath, ...args], {
       env: fixture.opts.env,
       stdio: "ignore",
     });
@@ -400,4 +407,35 @@ test("unknown Core state cancels before installation and leaves the parent alive
   assert.equal(readDetachedUpdateStatus(fixture.logPath)?.phase, "failed");
   assert.match(readFileSync(fixture.logPath, "utf8"), /Core 状态未知/);
   assert.equal(existsSync(fixture.eventsPath), false);
+});
+
+
+test("initialization failure rolls back the deferred install before terminating the parent", async t => {
+  if (process.platform === "win32") return t.skip("bash helper");
+  const fixture = createFixture(process.pid);
+  const parent = await spawnParent(fixture.root, fixture.eventsPath);
+  fixture.opts.parentPid = parent.pid!;
+  fixture.opts.env.WAND_TEST_INIT_FAIL = "1";
+  fixture.opts.env.WAND_TEST_DEFER_BACKUP = "1";
+  t.after(() => { if (isAlive(parent)) parent.kill("SIGKILL"); rmSync(fixture.root, { recursive: true, force: true }); });
+  assert.notEqual(await runScript(fixture, null), 0);
+  assert.equal(isAlive(parent), true);
+  assert.match(readFileSync(fixture.eventsPath, "utf8"), /finalize:true/);
+  assert.match(readDetachedUpdateStatus(fixture.logPath)?.message ?? "", /已恢复原安装/);
+});
+
+test("rollback stop action retains the CLI path needed for standalone relaunch", async t => {
+  if (process.platform === "win32") return t.skip("bash helper");
+  const fixture = createFixture(process.pid);
+  const parent = await spawnParent(fixture.root, fixture.eventsPath);
+  fixture.opts.parentPid = parent.pid!;
+  writeFileSync(fixture.opts.configPath, "{}");
+  writeFileSync(path.join(path.dirname(fixture.opts.configPath), "wand.pid"), JSON.stringify({
+    pid: parent.pid, configPath: fixture.opts.configPath,
+  }));
+  writeFileSync(fixture.logPath + ".cli-path", fixture.globalCliPath);
+  t.after(() => { if (isAlive(parent)) parent.kill("SIGKILL"); rmSync(fixture.root, { recursive: true, force: true }); });
+  assert.equal(await runScript(fixture, null, ["--stop-replacement", String(parent.pid)]), 0);
+  assert.equal(isAlive(parent), false);
+  assert.equal(readFileSync(fixture.logPath + ".cli-path", "utf8"), fixture.globalCliPath);
 });
