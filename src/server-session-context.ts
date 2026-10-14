@@ -1,74 +1,23 @@
-import type { Express,Request } from "express";
-import { createHash } from "node:crypto";
-import { parseExecutionMode,parseSessionCreationOrigin } from "./session-request.js";
-
-import { isExecutionMode } from "./config.js";
+import type { Request } from "express";
 import { DECISION_EXPERT_NAME } from "./decision-expert-identity.js";
-import { defaultRoleForCli } from "./default-employee.js";
-import { fallbackProviderModel, resolveExplicitOrFallbackModel, sessionEmployeeFields } from "./session-model.js";
 import type { OpenRouterFreeModelsService } from "./openrouter-free-models.js";
-import { ProcessManager,PtyInputDeliveryError,SessionInputError } from "./process-manager.js";
+import { ProcessManager } from "./process-manager.js";
 import { WandStorage } from "./storage.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
-import { ExecutionMode,InputRequest,ProcessEvent,ResizeRequest,SessionProvider,SessionRunner,SessionSnapshot,ToolResultBlock,ToolUseBlock,WandConfig } from "./types.js";
+import { ExecutionMode, ProcessEvent, SessionSnapshot, WandConfig } from "./types.js";
 
-import {
-  generateCommitMessageOnly,
-  getGitStatusAsync,
-  QuickCommitError,
-  runPush,
-  runQuickCommitWithFallback,
-  runTagHead,
-} from "./git-quick-commit.js";
-import {
-  checkSessionWorktreeMergeabilityAsync,
-  cleanupSessionWorktreeAsync,
-  getWorktreeMergeErrorCode,
-  mergeSessionWorktreeAsync,
-  WorktreeMergeError,
-} from "./git-worktree.js";
-import { alignedBlockStart,blockWindowMessagesForTransport,compactToolMessagesForTransport,messageWindowByteBudget,sliceTurnBlocksForTransport,truncateMessagesForTransport,visibleBlockCount,windowMessagesForTransport } from "./message-truncator.js";
-import { inspectPiExecution } from "./pi-execution.js";
-import { resolveSystemAiContext } from "./session-ai-context.js";
-import { resolveSessionCwd } from "./session-cwd.js";
-import { toSessionDetailDTO,toSessionListItemDTO } from "./session-transport.js";
+import { compactToolMessagesForTransport, windowMessagesForTransport } from "./message-truncator.js";
+import { toSessionDetailDTO } from "./session-transport.js";
 
-import { getErrorMessage } from "./error-utils.js";
-import { asyncRoute } from "./express-async.js";
-import {
-  buildIterationCommitContext,
-  COMMIT_CONTEXT_MODE_PREF_KEY,
-  isCommitContextMode,
-  readCommitContextMode,
-  resolveCommitContextInput,
-  type IterationCommitContext,
-} from "./iteration-log.js";
 import { installedPiExtensions } from "./pi-extension-resources.js";
-import { discoverPiResources,resolvePiResourceSelection } from "./pi-resource-catalog.js";
-import { effectivePiSessionSettings,patchPiSessionSettings,type PiSettingsControls,type PiSettingsResponse } from "./pi-session-settings.js";
-import { parseBoundedInteger } from "./request-limits.js";
-import { buildProviderResumeCommand,isProviderSessionId } from "./resume-policy.js";
-import { registerPiRecommendationRoute,type PiRecommendationRuntime } from "./server-pi-recommendation-routes.js";
-import { sendRouteError } from "./server-request.js";
-import { registerStructuredResumeRoutes } from "./server-resume-routes.js";
-import {
-  buildDirectoryTree,
-  normalizeSessionDirectory,
-  type SessionDirectoryNode,
-} from "./session-directory-tree.js";
-import { inferProviderFromCommand,isSessionProvider,providerCliCommand,SESSION_PROVIDERS } from "./session-provider.js";
-import { addHiddenSessionIds,deleteOwnedSessionWithHistory,removeHiddenSessionIds,SessionRegistry,type ProviderHistoryDeleter } from "./session-registry.js";
-import { selectEmployeeCandidate } from "./silicon-employee-dispatch.js";
-import { enrichStructuredMessages,WAND_PROTOCOL_VERSION } from "./structured-client-protocol.js";
-import { asRecord,isStructuredImagePart } from "./structured-content.js";
-import {
-  projectCwdForSession,
-  renameWorkspaceDirectory,
-  resolveWorkspaceIdForNewSession,
-} from "./workspace-binding.js";
-import { badRequest, surfaceDomainError } from "./http-error.js";
+import { discoverPiResources } from "./pi-resource-catalog.js";
+import { effectivePiSessionSettings, type PiSettingsControls, type PiSettingsResponse } from "./pi-session-settings.js";
+import { type PiRecommendationRuntime } from "./server-pi-recommendation-routes.js";
+import { SessionRegistry } from "./session-registry.js";
+import { enrichStructuredMessages } from "./structured-client-protocol.js";
+import { badRequest } from "./http-error.js";
 
-import { commitModeForRead, iterationCommitInput, commitMessageFromIteration, getInputErrorResponse, getInputDebugMeta, SessionDeletionProcesses, SessionDeletionStructured, deleteSessionWithProviderHistory, SessionListPageEntry, SessionListPage, SessionDirectoryTreeResponse, sessionSortTimestamp, buildSessionListEntries, sessionListRevision, buildSessionListPage, buildSessionDirectoryTree, directoryTreeContainsPath, requireWorktreeSession, buildWorktreeMergeInfo, saveWorktreeMergeState, getWorktreeMergeResponseStatus, getWorktreeMergePayload, resolvePtyResumeProvider, isPtyProviderCommand, startResumedPtySession, restoreArchivedSession, getAutoResumeInitialInput, canAutoResumePtyForInput, canMergeSession, isMergeActionAllowed } from "./session-service.js";
+import { SessionDirectoryTreeResponse, buildSessionDirectoryTree } from "./session-service.js";
 
 /** Dependencies shared by every session route module (one typed object, no positional args). */
 export interface SessionRouteDeps {
@@ -93,7 +42,7 @@ export interface SessionRouteContext extends SessionRouteDeps {
 }
 
 export function createSessionRouteContext(deps: SessionRouteDeps): SessionRouteContext {
-  const { processes, structured, storage, sessions, config, decisions, free } = deps;
+  const { structured, storage, sessions, config, decisions } = deps;
   const wantsCompactTools = (req: Request): boolean =>
     req.get("X-Wand-Tool-Projection") === "compact" || req.query.compactTools === "1";
 

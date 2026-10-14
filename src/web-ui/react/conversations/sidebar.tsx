@@ -15,6 +15,15 @@ import { conversationsRepository, useConversations } from "./repository";
 import { ConversationMorphIcon, ConversationPanel } from "./controls";
 import { GroupEditor } from "./group-editor";
 import { useUserProfile } from "../user-profile-repository";
+import { useTaskGroups } from "../workspaces/task-groups-store";
+import { SidebarSessionPreview } from "../workspaces/sidebar-session-preview";
+import { SidebarChevron, SidebarDisclosure, anchorSidebarDisclosure, sidebarDisclosureKeys } from "../workspaces/sidebar-disclosure";
+import { SessionProviderMark } from "../workspaces/session-mark";
+import { sidebarSessionLabel, workspaceSessionProvider } from "../workspaces/session-order";
+import { sidebarSessionState, sessionGlowStatus } from "../workspaces/sidebar-session-state";
+import { agentToolDisplayName } from "../../provider-identity";
+import { ImSidebarItem } from "../shell/im-sidebar-item";
+import { indexPersonSessions, filterPersonSessions, personSessionSearchValues, type PersonSessionEntry } from "./sidebar-sessions";
 
 export type ConversationNavigationPage = "chats" | "tasks" | "board" | "teams" | "contacts" | "schedules";
 
@@ -97,13 +106,13 @@ export function conversationListFilterLabel(filter: ConversationListFilter): str
 /** 筛选与搜索共用一个入口：先按归档档筛，再按标题、预览与任务名匹配。 */
 export function filterConversationList<
   T extends { title: string; preview: string; dissolvedAt?: string | null; tasks: ReadonlyArray<{ task: { title: string; status: string } }> },
->(items: readonly T[], filter: ConversationListFilter, query: string): T[] {
+>(items: readonly T[], filter: ConversationListFilter, query: string, extraSearch?: (item: T) => readonly string[]): T[] {
   const needle = query.trim().toLowerCase();
   return items.filter((item) => {
     const archived = isConversationArchived(item);
     if (filter === "archived" ? !archived : filter === "active" ? archived : false) return false;
     if (!needle) return true;
-    return [item.title, item.preview, ...item.tasks.map((entry) => entry.task.title)]
+    return [item.title, item.preview, ...item.tasks.map((entry) => entry.task.title), ...(extraSearch?.(item) ?? [])]
       .join(" ").toLowerCase().includes(needle);
   });
 }
@@ -111,15 +120,22 @@ export function filterConversationList<
 /** Totals always describe the archive tier, while matches describe the current query. */
 export function conversationListCounts<
   T extends { title: string; preview: string; dissolvedAt?: string | null; tasks: ReadonlyArray<{ task: { title: string; status: string } }> },
->(items: readonly T[], filter: ConversationListFilter, query: string): { total: number; active: number; archived: number; scope: number; matches: number } {
+>(items: readonly T[], filter: ConversationListFilter, query: string, extraSearch?: (item: T) => readonly string[]): { total: number; active: number; archived: number; scope: number; matches: number } {
   const archived = items.filter(isConversationArchived).length;
   const active = items.length - archived;
   return { total: items.length, active, archived, scope: filter === "archived" ? archived : filter === "active" ? active : items.length,
-    matches: filterConversationList(items, filter, query).length };
+    matches: filterConversationList(items, filter, query, extraSearch).length };
 }
 
-export function ConversationSidebarList({ compact, enabled = true, onNavigate }: { compact: boolean; enabled?: boolean; onNavigate(): void }): React.ReactElement {
+export function ConversationSidebarList({ compact, enabled = true, onNavigate, onOpenSession, selectedSessionId = null, sessionTitles = {} }: {
+  compact: boolean; enabled?: boolean; onNavigate(): void;
+  onOpenSession?(sessionId: string): void;
+  selectedSessionId?: string | null;
+  sessionTitles?: Readonly<Record<string, string>>;
+}): React.ReactElement {
   const { items, error, loaded, refresh } = useConversations();
+  const { groups: sessionGroups } = useTaskGroups();
+  const sessionIndex = React.useMemo(() => indexPersonSessions(sessionGroups), [sessionGroups]);
   const { employees } = useSiliconEmployees({ enabled });
   const ui = useConversationUi();
   const query = (ui.filters["list-query"] ?? "").trim().toLowerCase();
@@ -134,8 +150,9 @@ export function ConversationSidebarList({ compact, enabled = true, onNavigate }:
     const left = positions.get(a.id) ?? -1, right = positions.get(b.id) ?? -1;
     return Number(!!b.pinnedAt) - Number(!!a.pinnedAt) || (b.pinnedAt ?? "").localeCompare(a.pinnedAt ?? "") || (left < 0 ? items.length : left) - (right < 0 ? items.length : right);
   });
-  const rows = filterConversationList(sorted, filter, query);
-  const counts = conversationListCounts(items, filter, query);
+  const extraSearch = (item: ConversationSummary): string[] => personSessionSearchValues(item, sessionIndex, filter, sessionTitles);
+  const rows = filterConversationList(sorted, filter, query, extraSearch);
+  const counts = conversationListCounts(items, filter, query, extraSearch);
   const countLabel = loaded ? `${conversationListFilterLabel(filter)}共 ${counts.scope} 个对话${query ? `，搜索匹配 ${counts.matches} 个` : ""}；全部 ${counts.total}，未归档 ${counts.active}，已归档 ${counts.archived}`
     : error ? "对话数量尚未加载" : "正在读取对话数量";
   const select = (id: string): void => { conversationUi.select(id); onNavigate(); };
@@ -170,6 +187,8 @@ export function ConversationSidebarList({ compact, enabled = true, onNavigate }:
     {actionError ? <Typography.Paragraph type="danger" role="alert">{actionError}</Typography.Paragraph> : null}
     {rows.map(item => <ConversationListRow key={item.id} item={item} employee={employees.find(employee => employee.id === item.peerEmployeeId) ?? null} compact={compact} query={query}
       enabled={enabled} filter={filter} selected={ui.selectedId === item.id && ui.active !== false} onSelect={() => select(item.id)}
+      sessionEntries={filterPersonSessions(item, sessionIndex, filter, query, sessionTitles)}
+      sessionTitles={sessionTitles} selectedSessionId={selectedSessionId} onOpenSession={onOpenSession}
       onUpdate={patch => update(item, patch)} onRemove={() => remove(item)}/>) }
     {loaded && !rows.length ? <div className="conversation-list-empty" role="status"><WandIcon name={query ? "search" : "chat"} size={20}/><Typography.Paragraph type="secondary">{query ? "没有匹配的对话或任务"
       : filter === "archived" ? "还没有已归档的对话，解散群聊或归档任务后会出现在这里。"
@@ -178,9 +197,14 @@ export function ConversationSidebarList({ compact, enabled = true, onNavigate }:
   </div>;
 }
 
-function ConversationListRow({ item, employee: projectedEmployee, compact, query, enabled, filter, selected, onSelect, onUpdate, onRemove }: {
+function ConversationListRow({ item, employee: projectedEmployee, compact, query, enabled, filter, selected, onSelect, onUpdate, onRemove,
+  sessionEntries, sessionTitles, selectedSessionId, onOpenSession }: {
   item: ConversationSummary; employee: React.ComponentProps<typeof EmployeeAvatar>["employee"] | null; compact: boolean; query: string; enabled: boolean; filter: ConversationListFilter; selected: boolean; onSelect(): void;
   onUpdate(patch: { pinned?: boolean; dissolved?: boolean }): Promise<void>; onRemove(): Promise<void>;
+  sessionEntries: readonly PersonSessionEntry[];
+  sessionTitles: Readonly<Record<string, string>>;
+  selectedSessionId: string | null;
+  onOpenSession?(sessionId: string): void;
 }): React.ReactElement {
   const employee = projectedEmployee ?? (item.peerEmployeeId ? cachedSiliconEmployee(item.peerEmployeeId) : null);
   const identity = employee ?? (item.peerEmployeeId ? { id: item.peerEmployeeId, name: item.title } : null);
@@ -189,7 +213,10 @@ function ConversationListRow({ item, employee: projectedEmployee, compact, query
   const [expanded, setExpanded] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const row = React.useRef<HTMLDivElement>(null);
-  React.useEffect(() => { setMenu(false); }, [enabled, compact, query, filter]);
+  const sessionToggleRef = React.useRef<HTMLButtonElement>(null);
+  const sessionListId = React.useId();
+  const [sessionsExpanded, setSessionsExpanded] = React.useState(false);
+  React.useEffect(() => { setMenu(false); setSessionsExpanded(false); }, [enabled, compact, query, filter]);
   const action = async (run: () => Promise<void>): Promise<void> => {
     if (busy) return; setBusy(true); setMenu(false);
     (row.current?.querySelector<HTMLElement>(".conversation-row-open")
@@ -197,7 +224,10 @@ function ConversationListRow({ item, employee: projectedEmployee, compact, query
     try { await run(); } finally { setBusy(false); }
   };
   const tasks = query ? item.tasks.filter(task => task.task.title.toLowerCase().includes(query)) : item.tasks;
-  const showTasks = !compact && !item.dissolvedAt && (expanded || !!query && tasks.length > 0);
+  const showTasks = !compact && !item.dissolvedAt && (item.kind !== "dm" || expanded) && (expanded || !!query && tasks.length > 0);
+  const showSessions = !compact && item.kind === "dm" && sessionsExpanded;
+  const sessions = sessionEntries.map(entry => entry.session);
+  const toggleSessions = (): void => { setExpanded(false); setSessionsExpanded(!sessionsExpanded); };
   const archived = isConversationArchived(item);
   const contents = <div ref={row} className={`conversation-row conversation-row-${item.kind}`} aria-current={selected ? "page" : undefined}
     data-pinned={!!item.pinnedAt} data-archived={archived || undefined} data-conversation-id={item.id} aria-busy={busy || undefined}>
@@ -210,6 +240,13 @@ function ConversationListRow({ item, employee: projectedEmployee, compact, query
         <span className="conversation-row-bottomline">{archived ? <span className="conversation-archived-tag">已归档</span> : null}<span className="conversation-row-preview">{item.dissolvedAt ? "群聊已解散 · 点击查看或恢复" : item.preview || (item.kind === "group" ? `${selfName} + ${item.team?.members.length ?? 0} 位员工` : "私聊")}</span>
           {item.pinnedAt ? <span className="conversation-pin" title="已置顶" aria-label="已置顶"><WandIcon name="pin" size={13}/></span> : null}</span>
       </span></WandButton></SidebarLabelTooltip> : null}
+    {!compact && item.kind === "dm" ? <WandIconButton ref={sessionToggleRef} className="conversation-session-toggle"
+      aria-label={`${showSessions ? "收起" : "展开"}${item.title}的 ${sessions.length} 个会话`}
+      aria-expanded={showSessions} aria-controls={sessionListId}
+      onClick={event => anchorSidebarDisclosure(event.currentTarget, toggleSessions)}
+      onKeyDown={event => sidebarDisclosureKeys(event, showSessions, open => { setExpanded(false); setSessionsExpanded(open); })}>
+      <SidebarChevron open={showSessions} size={12}/>
+    </WandIconButton> : null}
     {!compact ? <WandIconButton className="conversation-row-more" aria-label={`${item.title}的菜单`} aria-haspopup="menu" aria-expanded={menu}
       onClick={event => {
         event.stopPropagation();
@@ -218,12 +255,17 @@ function ConversationListRow({ item, employee: projectedEmployee, compact, query
         event.currentTarget.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: bounds.right, clientY: bounds.bottom, button: 2 }));
       }}><WandIcon name="more" size={16}/></WandIconButton> : null}
   </div>;
-  return <div className="conversation-list-item"><SidebarRowMenu row={contents} rowRef={row} open={menu} disabled={!enabled}
+  return <div className="conversation-list-item" onKeyDown={event => {
+    if (event.key !== "Escape" || event.defaultPrevented || !showSessions || menu) return;
+    event.preventDefault(); event.stopPropagation();
+    sessionToggleRef.current?.focus({ preventScroll: true }); setSessionsExpanded(false);
+  }}><SidebarRowMenu row={contents} rowRef={row} open={menu} disabled={!enabled}
     onOpenChange={next => { if (!next || !busy) setMenu(next); }} label="对话菜单" title={item.title} className="conversation-row-menu"
     menu={{ items: [
       { key: "open", disabled: busy, icon: <WandIcon name="chat"/>, label: "打开对话" },
       ...(identity ? [{ key: "profile", disabled: busy, icon: <WandIcon name="info"/>, label: "查看员工资料" }] : []),
       { key: "pin", disabled: busy, icon: <WandIcon name="pin"/>, label: item.pinnedAt ? "取消置顶" : "置顶" },
+      ...(item.kind === "dm" ? [{ key: "sessions", disabled: busy, icon: <WandIcon name="chat"/>, label: showSessions ? "收起会话" : `查看 ${sessions.length} 个会话` }] : []),
       ...(!item.dissolvedAt && item.tasks.length > 0 ? [{ key: "tasks", disabled: busy, icon: <WandIcon name="task"/>, label: expanded ? "收起任务" : `查看 ${item.tasks.length} 个任务` }] : []),
       { key: "danger-divider", type: "divider" },
       ...(item.kind === "group" ? [{ key: "dissolve", disabled: busy, icon: <WandIcon name={item.dissolvedAt ? "resume" : "archive"}/>, label: item.dissolvedAt ? "恢复群聊" : "解散群聊…" }] : []),
@@ -233,7 +275,8 @@ function ConversationListRow({ item, employee: projectedEmployee, compact, query
       setMenu(false);
       if (key === "open") onSelect();
       else if (key === "profile" && identity) employeeProfile.open(identity, row.current?.querySelector("button") ?? null);
-      else if (key === "tasks") setExpanded(!expanded);
+      else if (key === "tasks") { setSessionsExpanded(false); setExpanded(!expanded); }
+      else if (key === "sessions") toggleSessions();
       else if (key === "pin") void action(() => onUpdate({ pinned: !item.pinnedAt }));
       else if (key === "delete") void action(onRemove);
       else if (key === "dissolve") void action(async () => {
@@ -245,7 +288,25 @@ function ConversationListRow({ item, employee: projectedEmployee, compact, query
       });
     } }}/>
 
-    {!compact && !item.dissolvedAt && item.tasks.length > 0 ? <WandButton kind="ghost" className="conversation-task-toggle" aria-expanded={showTasks} onClick={() => setExpanded(!expanded)}>
+    {!compact && item.kind === "dm" ? <>
+      <SidebarSessionPreview sessions={sessions} expanded={showSessions || showTasks} label={`${item.title}的会话预览`}
+        className="sidebar-session-preview-person" disabled={!enabled || busy} liveTitles={sessionTitles}
+        selectedSessionId={selectedSessionId} expansionRef={sessionToggleRef}
+        onExpand={() => { setExpanded(false); setSessionsExpanded(true); }} onActivate={session => {
+          setExpanded(false); setSessionsExpanded(true); onOpenSession?.(session.id);
+        }}/>
+      <SidebarDisclosure id={sessionListId} open={showSessions}>
+        <div className="conversation-person-sessions" role="group" aria-label={`${item.title}的会话列表`}>
+          {sessions.map((session, index) => <ImSidebarItem key={session.id} id={session.id}
+            title={sidebarSessionLabel(session, index, sessionTitles[session.id])} titleGenerating={session.titleGenerating}
+            avatarNode={<SessionProviderMark session={session} size={14}/>} state={sidebarSessionState(session)} glow={sessionGlowStatus(session)}
+            summary={`${agentToolDisplayName(workspaceSessionProvider(session), session.engine)} · ${sidebarSessionState(session).label}`}
+            active={session.id === selectedSessionId} onClick={() => onOpenSession?.(session.id)}/>)}
+          {!sessions.length ? <Typography.Paragraph type="secondary" className="sidebar-group-empty">暂无符合条件的会话</Typography.Paragraph> : null}
+        </div>
+      </SidebarDisclosure>
+    </> : null}
+    {!compact && item.kind !== "dm" && !item.dissolvedAt && item.tasks.length > 0 ? <WandButton kind="ghost" className="conversation-task-toggle" aria-expanded={showTasks} onClick={() => setExpanded(!expanded)}>
       <WandIcon name="chevronDown" size={12}/>{item.tasks.length} 个任务{showTasks ? " · 收起" : ""}</WandButton> : null}
     {showTasks ? tasks.map(t => <WandButton key={t.task.id} kind="ghost" className="conversation-task-row" onClick={() => {
       onSelect(); conversationUi.filter(item.id, t.task.id);

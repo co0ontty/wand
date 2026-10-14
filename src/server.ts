@@ -1,7 +1,7 @@
 import { OpenRouterFreeModelsService } from "./openrouter-free-models.js";
 import crypto from "node:crypto";
 import compression from "compression";
-import express, { NextFunction, Request, Response } from "express";
+import express from "express";
 import { existsSync, readFileSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
@@ -11,9 +11,7 @@ import process from "node:process";
 import { WebSocketServer } from "ws";
 import {
   AuthService,
-  BROWSER_ADMIN_PRINCIPAL,
   principalHasScope,
-  readSessionCookie,
 } from "./auth.js";
 import {
   authenticateBearerAppToken,
@@ -22,11 +20,6 @@ import {
   requireAdmin as requireAdminScope,
   requireAdminOrSessionPreferences,
   requireScope,
-  FORBIDDEN_SCOPE_ERROR,
-  clearSessionCookies,
-  issueSessionCookies,
-  browserAdminPrincipal,
-  connectedAppPrincipal,
 } from "./middleware/auth.js";
 import { createApiScopeMiddleware } from "./middleware/api-scope.js";
 import { createExtensionCors } from "./middleware/cors.js";
@@ -66,12 +59,10 @@ import { DecisionExpertService } from "./decision-expert-service.js";
 import { DECISION_EXPERT_KEY } from "./decision-expert-identity.js";
 import { SpeechService } from "./speech-service.js";
 import {
-  appTokenLoginPayload,
   buildStructuredChatPersonaPayload,
   resolveAppConnectCode,
-  verifyAppToken,
 } from "./server-app-connect.js";
-import { firstHeaderValue, resolveTrustProxy, sendRouteError } from "./server-request.js";
+import { resolveTrustProxy, sendRouteError } from "./server-request.js";
 import { registerAuthRoutes } from "./server-auth-routes.js";
 import { inferProviderFromCommand, isSessionProvider, providerCliCommand } from "./session-provider.js";
 import { registerVaultRoutes } from "./server-vault-routes.js";
@@ -86,10 +77,8 @@ import { ServerNotifier } from "./server-notifier.js";
 import { ConversationService } from "./conversation-service.js";
 import { ScheduledTaskService } from "./scheduled-task-service.js";
 import { registerScheduledTaskRoutes } from "./server-scheduled-task-routes.js";
-import type { ConversationSessionUpdate } from "./conversation-types.js";
 import { CONVERSATION_RELAY_PREFIX } from "./conversation-types.js";
 import { forwardConversationRelay, registerConversationRoutes } from "./server-conversation-routes.js";
-import type { AiTeamLiveUpdate } from "./ai-team-types.js";
 import { registerAiTeamRoutes } from "./server-ai-team-routes.js";
 import { registerTeamDispatchRoutes } from "./server-team-dispatch-routes.js";
 import { registerSiliconEmployeeRoutes } from "./server-employee-routes.js";
@@ -100,6 +89,8 @@ import { registerAttentionRoutes } from "./server-attention-routes.js";
 import {
   refreshProviderCliUpdateState,
   registerAdminUpdateRoutes,
+  launchServerUpdate,
+  type AdminUpdateRoutesDependencies,
   registerPublicUpdateRoutes,
   ServerUpdateState,
 } from "./server-update-routes.js";
@@ -112,26 +103,21 @@ import { getErrorMessage } from "./error-utils.js";
 import { asyncRoute, jsonErrorHandler } from "./express-async.js";
 import {
   checkPackageUpdateAsync,
-  installPackageGloballyAsync,
   normalizeUpdateChannel,
   resolveGlobalWandCli,
   type PackageUpdateInfo,
   type UpdateChannel,
 } from "./npm-update-utils.js";
-import { repairServiceUnitAfterUpdate } from "./service-self-repair.js";
 import { computeRelaunch } from "./relaunch.js";
 import { createRetentionSweep, startRetentionTimer, type RetentionResult } from "./retention.js";
 import { RuntimeConfigState } from "./runtime-config.js";
 import { safeServiceInstalled } from "./tui/runtime-utils.js";
-import {
-  checkManagedServiceUpdatePreflight,
-} from "./update-helper.js";
 import { toSessionDetailDTO } from "./session-transport.js";
 import { compactToolMessagesForTransport, windowMessagesForTransport } from "./message-truncator.js";
 import { enrichStructuredMessages } from "./structured-client-protocol.js";
 import { registerUploadRoutes } from "./upload-routes.js";
 import { optimizePrompt, PromptOptimizeError } from "./prompt-optimizer.js";
-import { resolveDatabasePath, WandStorage, type AuthPrincipal, type AuthScope } from "./storage.js";
+import { resolveDatabasePath, WandStorage } from "./storage.js";
 import { deepRepairRuntimePath, formatPathRepairSummary, repairRuntimePath, type PathRepairResult } from "./path-repair.js";
 import { DistributionManager } from "./distribution-manager.js";
 import { isLogBusActive, wandTuiLog } from "./tui/log-bus.js";
@@ -145,7 +131,6 @@ import { registerDaemonMaintenanceRoutes } from "./server-daemon-maintenance-rou
 import { terminalDaemonBuildIsCurrent } from "./terminal-daemon-build.js";
 import { createUpgradeAwareStructuredHost } from "./render-structured-host.js";
 import type { TerminalHost } from "./terminal-host.js";
-import { checkPasswordRateLimit, recordFailedPassword, resetPasswordRateLimit } from "./middleware/rate-limit.js";
 import {
   updateProviderClis,
   verifyProviderCliUpdateResults,
@@ -681,7 +666,7 @@ export async function startServer(
   registerConversationRoutes(app, conversationService);
   registerScheduledTaskRoutes(app, scheduledTasks);
 
-  registerAdminUpdateRoutes(app, {
+  const adminUpdateDeps: AdminUpdateRoutesDependencies = {
     storage,
     config,
     configPath,
@@ -699,17 +684,8 @@ export async function startServer(
     requestUpdateCheck: () => {
       if (updateChecksEnabled) void performAutoUpdate({ manual: true }).catch(() => {});
     },
-  });
-
-  // ── Global npm install (with leftover cleanup + ENOTEMPTY fallback) ──
-  // 把所有恢复逻辑下沉到 ./npm-update-utils，TUI 和 server 共用，确保自动更新、
-  // /api/update、tui installUpdate 三处行为一致。
-
-  async function npmInstallGlobal(pkg: string, timeoutMs: number): Promise<void> {
-    await installPackageGloballyAsync(pkg, timeoutMs, (line) => {
-      process.stdout.write(`${line}\n`);
-    });
-  }
+  };
+  registerAdminUpdateRoutes(app, adminUpdateDeps);
 
   registerSessionRoutes(app, {
     processes,
@@ -1192,75 +1168,28 @@ export async function startServer(
     const failure = autoUpdateFailures.get(info.latest);
     if (failure && Date.now() < failure.retryAt) return;
 
-    const servicePreflight = checkManagedServiceUpdatePreflight();
-    if (!servicePreflight.ok) {
-      process.stdout.write(`[wand] 自动更新已取消: ${servicePreflight.message}\n`);
-      wsManager.emitEvent({
-        type: "notification",
-        sessionId: "__system__",
-        data: {
-          kind: "auto-update-failed",
-          current: info.current,
-          latest: info.latest,
-          error: servicePreflight.message,
-        },
-      });
-      return;
-    }
-
-    // Auto-update: install and restart
-    process.stdout.write(
-      `[wand] 自动更新：正在从 ${info.current} 更新到 ${info.latest}...\n`
-    );
-    wsManager.emitEvent({
-      type: "notification",
-      sessionId: "__system__",
-      data: {
-        kind: "auto-update-start",
-        current: info.current,
-        latest: info.latest,
-        previousInstanceId: SERVER_INSTANCE_ID,
-      },
-    });
-
+    // Checking npm is asynchronous; a manual update may have started meanwhile.
+    if (updateState.updateInFlight || updateState.providerCliUpdateInFlight) return;
     updateState.updateInFlight = true;
     try {
-      await npmInstallGlobal(info.installSpec, 120000);
-      if (shuttingDown) return;
-      autoUpdateFailures.delete(info.latest);
-      // 镜像 install.sh：装完用全局安装刷新服务 unit（ExecStart/PATH），重启才会跑到新版。
-      const repair = repairServiceUnitAfterUpdate(configPath);
-      if (repair.scope) process.stdout.write(`[wand] ${repair.message}\n`);
-      process.stdout.write(`[wand] 自动更新完成，正在重启...\n`);
-      wsManager.emitEvent({
-        type: "notification",
-        sessionId: "__system__",
-        data: {
-          kind: "auto-update-restart",
-          current: info.current,
-          latest: info.latest,
-          previousInstanceId: SERVER_INSTANCE_ID,
-        },
-      });
-      // Manual and automatic restarts share the same live admission barrier.
-      const restartTimer = setTimeout(() => relaunchAfterShutdown(), 1000);
-      restartTimer.unref?.();
+      launchServerUpdate(adminUpdateDeps, info, (message) => recordUpdateFailure(message));
     } catch (error) {
-      const msg = getErrorMessage(error, "未知错误");
-      const count = (autoUpdateFailures.get(info.latest)?.count ?? 0) + 1;
-      autoUpdateFailures.set(info.latest, {
+      recordUpdateFailure(getErrorMessage(error, "未知错误"));
+      updateState.updateInFlight = false;
+    }
+
+    function recordUpdateFailure(msg: string): void {
+      const count = (autoUpdateFailures.get(info.latest!)?.count ?? 0) + 1;
+      autoUpdateFailures.set(info.latest!, {
         count,
         retryAt: Date.now() + Math.min(30 * 60_000 * 2 ** (count - 1), 6 * 60 * 60_000),
       });
       process.stdout.write(`[wand] 自动更新失败: ${msg}\n`);
-      // 失败不重启、保留旧版；通知前端，避免静默。
       wsManager.emitEvent({
         type: "notification",
         sessionId: "__system__",
         data: { kind: "auto-update-failed", current: info.current, latest: info.latest, error: msg },
       });
-    } finally {
-      updateState.updateInFlight = false;
     }
   }
 

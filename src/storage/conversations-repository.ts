@@ -1,5 +1,4 @@
 import crypto from "node:crypto";
-import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { CONVERSATION_OWNER, type ConversationInstance, type ConversationRequest } from "../conversation-types.js";
 import { nowIso } from "../password-manager.js";

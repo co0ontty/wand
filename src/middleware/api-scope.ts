@@ -43,6 +43,7 @@ export const API_ROUTE_RULES: readonly ApiRouteRule[] = [
   { prefix: "/api/connectors", scope: "admin" },
   { prefix: "/api/github", scope: "admin" },
   { prefix: "/api/update", scope: "admin" },
+  { prefix: "/api/update-status", scope: "admin" },
   { prefix: "/api/update-channel", scope: "admin" },
   { prefix: "/api/check-update", scope: "admin" },
   { prefix: "/api/auto-update", scope: "admin" },

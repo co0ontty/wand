@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 
 import type { ClaudeModelInfo } from "./types.js";
+import { isRecord } from "./object-utils.js";
 
 const MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$/;
 const SUPPORTED_APIS = new Set([
@@ -37,10 +38,6 @@ interface PiEndpoint {
 interface EndpointPage {
   models: ClaudeModelInfo[];
   nextCursor: string;
-}
-
-function isRecord(value: unknown): value is JsonRecord {
-  return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
 function resolveConfigValue(value: unknown, env: NodeJS.ProcessEnv): string | null {

@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { appendDiagnosticTail, MAX_PROTOCOL_LINE_BYTES } from "./bounded-process-output.js";
+import { PiOutputFile, type PiOutputFileOptions } from "./pi-output-file.js";
 
 import {
   createUtf8TextDecoder,
@@ -42,6 +43,12 @@ export interface StructuredCliPumpOptions<S extends StructuredRunnerTurnState> {
   execHost?: StructuredExecHost;
   /** Local/test spawn injection; ignored when the execHost takes over. */
   spawnProcess?: typeof spawn;
+  /** Pi opts in: stdout is captured to a private file; only file reads feed processLine. */
+  stdoutFile?: PiOutputFileOptions;
+  nativePi?: boolean;
+  requestId?: string;
+  /** Provider-owned streaming projection; defaults to the strict shared line framer. */
+  createProtocolReader?(onLine: (line: string) => void): { push(text: string): void; finish(): void };
   /** Fresh per-run state (or reducer-owned state) for the pump context. */
   createState(): S;
   processLine(line: string, ctx: StructuredCliPumpContext<S>): void;
@@ -74,8 +81,11 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
   };
 
   let source: PumpSource | null = null;
+  let stdoutFile: PiOutputFile | null = null;
+  const nativeLaunch = options.nativePi ? new AbortController() : null;
   let lineBuffer = "";
   let lineBytes = 0;
+  const protocolReader = options.createProtocolReader?.((line) => options.processLine(line, ctx));
   let settled = false;
   let stopRequested = false;
   let stopDelivered = false;
@@ -89,6 +99,7 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
   function requestStop(): void {
     if (settled || stopRequested) return;
     stopRequested = true;
+    nativeLaunch?.abort();
     interruptSource();
   }
   let resolveCompletion!: (result: StructuredRunnerResult) => void;
@@ -103,20 +114,35 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
     signal: NodeJS.Signals | null,
     spawnError?: NodeJS.ErrnoException,
     protocolError?: Error,
+    beforeSpawn = false,
   ): void => {
     if (settled) return;
+    if (!protocolError) {
+      try {
+        stdoutFile?.drain();
+        // File consumption can itself settle a protocol failure.
+        if (settled) return;
+        protocolReader?.finish();
+      } catch (error) { protocolError = error instanceof Error ? error : new Error(String(error)); }
+      if (settled) return;
+    }
     settled = true;
     try {
       if (!protocolError && lineBuffer.trim()) options.processLine(lineBuffer, ctx);
       const result = options.finalize(ctx, exitCode, signal, spawnError);
-      resolveCompletion(protocolError ? { ...result, exitCode: 1, primaryError: protocolError.message,
-        retryForbidden: true, failure: { kind: "runtime", delivery: "unknown", retryable: false } } : result);
+      resolveCompletion(beforeSpawn ? { ...result, primaryError: spawnError?.message ?? "Pi 实时事件文件初始化失败。",
+        inputAccepted: false, retryForbidden: true, failure: { kind: "preflight", delivery: "rejected", retryable: false } }
+        : protocolError ? { ...result, exitCode: 1, primaryError: protocolError.message,
+            rejection: undefined, inputAccepted: result.inputAccepted === true ? true : undefined,
+            retryForbidden: true, failure: { kind: "runtime", delivery: "unknown", retryable: false } } : result);
     } catch (error) {
       rejectCompletion(error);
     } finally {
+      stdoutFile?.dispose();
       lineBuffer = "";
       lineBytes = 0;
     }
+    if (protocolError) interruptSource();
   };
 
   const handleStdoutText = (text: string): void => {
@@ -124,6 +150,7 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
     observer.onStdout?.(text);
     options.onStdoutText?.(text);
     try {
+      if (protocolReader) { protocolReader.push(text); return; }
       const parts = text.split("\n");
       for (let index = 0; index < parts.length; index++) {
         const part = parts[index];
@@ -149,6 +176,33 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
     ctx.stderr = appendDiagnosticTail(ctx.stderr, text);
   };
 
+  const execution: StructuredRunnerExecution = {
+    args: options.args,
+    spawnedAt,
+    get pid() { return source?.pid ?? null; },
+    completion,
+    interrupt: requestStop,
+  };
+  const fileFailure = (error: Error): void => {
+    finish(1, null, undefined, new Error(`Pi 实时事件文件读写失败：${error.message}`));
+    interruptSource();
+  };
+  const captureStdout = (text: string): void => {
+    if (settled || !text) return;
+    if (!observer.isActive()) { stdoutFile?.dispose(); return; }
+    if (!stdoutFile) { handleStdoutText(text); return; }
+    try { stdoutFile.append(text); }
+    catch (error) { fileFailure(error instanceof Error ? error : new Error(String(error))); }
+  };
+  if (options.stdoutFile) {
+    try { stdoutFile = new PiOutputFile(options.stdoutFile, () => observer.isActive(), handleStdoutText, fileFailure); }
+    catch (error) {
+      const cause = error instanceof Error ? error.message : String(error);
+      finish(null, null, Object.assign(new Error(`Pi 实时事件文件初始化失败：${cause}`), { code: "EFILESOURCE" }), undefined, true);
+      return execution;
+    }
+  }
+
   const host = options.execHost;
   if (host?.persistent) {
     const request: Parameters<StructuredExecHost["spawnStructured"]>[0] = {
@@ -158,17 +212,27 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
       cwd: options.cwd,
       env: options.env,
       ...(options.stdinData !== undefined ? { stdinData: options.stdinData } : {}),
+      ...(options.nativePi ? { nativePi: true, requestId: options.requestId, launchSignal: nativeLaunch!.signal } : {}),
     };
-    const unavailable = (): void => {
+    const unavailable = (error?: unknown): void => {
       source = null;
-      // Daemon vanished between health check and spawn; surface as spawn error.
-      finish(null, null, Object.assign(new Error(`terminal daemon unavailable for ${options.file}`), { code: "EDAEMON" }));
+      if (error && typeof error === "object" && "preflightBlocked" in error && error.preflightBlocked) {
+        finish(null, null, Object.assign(new Error(error instanceof Error ? error.message : "Pi 原生启动被拒绝。"), { code: "ENATIVE_PREFLIGHT" }), undefined, true);
+        return;
+      }
+      if (error && typeof error === "object" && "deliveryUnknown" in error && error.deliveryUnknown) {
+        finish(1, null, undefined, new Error("Pi 原生启动送达结果未知，不自动重试。"));
+        return;
+      }
+      // Explicit pre-execution failure; existing providers retain their daemon contract.
+      finish(null, null, Object.assign(new Error(options.nativePi && error instanceof Error
+        ? error.message : `terminal daemon unavailable for ${options.file}`), { code: "EDAEMON" }));
     };
     try {
       void host.spawnStructured(request).then((handle) => {
         source = { pid: handle.pid, interrupt: () => handle.interrupt() };
         // Replay and subscribe before applying a pending external cancellation.
-        wireRemoteHandle(handle, handleStdoutText, handleStderrText, finish);
+        wireRemoteHandle(handle, captureStdout, handleStderrText, finish);
         if (stopRequested && !settled) interruptSource();
       }, unavailable);
     } catch {
@@ -185,7 +249,7 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
     source = { pid: child.pid ?? null, interrupt: () => child.kill("SIGTERM") };
     const stdoutDecoder = createUtf8TextDecoder();
     const stderrDecoder = createUtf8TextDecoder();
-    child.stdout?.on("data", (chunk: Buffer) => handleStdoutText(stdoutDecoder.write(chunk)));
+    child.stdout?.on("data", (chunk: Buffer) => captureStdout(stdoutDecoder.write(chunk)));
     child.stderr?.on("data", (chunk: Buffer) => handleStderrText(stderrDecoder.write(chunk)));
     child.on("error", (error) => finish(null, null, error as NodeJS.ErrnoException));
     child.stdin?.on("error", (error) => {
@@ -193,22 +257,14 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
       finish(null, null, error as NodeJS.ErrnoException);
     });
     child.on("close", (exitCode, signalName) => {
-      handleStdoutText(stdoutDecoder.end());
+      captureStdout(stdoutDecoder.end());
       handleStderrText(stderrDecoder.end());
       finish(exitCode, signalName === null || signalName === undefined ? null : signalName);
     });
     if (wantsStdin) child.stdin?.end(options.stdinData);
   }
 
-  return {
-    args: options.args,
-    spawnedAt,
-    get pid() {
-      return source?.pid ?? null;
-    },
-    completion,
-    interrupt: requestStop,
-  };
+  return execution;
 }
 
 function wireRemoteHandle(

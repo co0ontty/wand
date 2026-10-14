@@ -134,16 +134,18 @@ async function readLegacyStatus(configPath: string, timeoutMs = 5000): Promise<C
   return parseStatus(result);
 }
 
+/** A single request spends only the original overall deadline, never a fresh timeout. */
+export function remainingCoreRequestBudget(deadline: number): number {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) throw new Error("等待 Core 回合超时，服务未停止，已取消重启。");
+  return Math.min(5000, remaining);
+}
+
 async function openControl(configPath: string, deadline = Infinity): Promise<CoreControl | null> {
   const control = new CoreControl(configPath);
-  const budget = (): number => {
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) throw new Error("等待 Core 回合超时，服务未停止，已取消重启。");
-    return Math.min(5000, remaining);
-  };
   try {
-    await control.connect(budget());
-    await control.request("core-status", budget());
+    await control.connect(remainingCoreRequestBudget(deadline));
+    await control.request("core-status", remainingCoreRequestBudget(deadline));
     return control;
   } catch (error) {
     control.close();
@@ -174,11 +176,6 @@ export async function waitForCoreTurnsComplete(
   if (!Number.isFinite(timeoutSeconds) || timeoutSeconds < 0) throw new Error("--timeout 必须是非负秒数（0 表示一直等待）。");
   if (stopCommand && !stopCommand.length) throw new Error("缺少等待完成后要执行的停止命令。");
   const deadline = timeoutSeconds > 0 ? Date.now() + timeoutSeconds * 1000 : Infinity;
-  const budget = (): number => {
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) throw new Error("等待 Core 回合超时，服务未停止，已取消重启。");
-    return Math.min(5000, remaining);
-  };
   const control = await openControl(configPath, deadline);
   try {
     const readStatus = async (budget = 5000): Promise<CoreStatus> => {
@@ -196,7 +193,9 @@ export async function waitForCoreTurnsComplete(
         return { hasActiveTurns: false, activeTurnCount: 0 };
       }
     };
-    let status = control && stopCommand ? await control.request("core-drain", budget()) : await readStatus(budget());
+    let status = control && stopCommand
+      ? await control.request("core-drain", remainingCoreRequestBudget(deadline))
+      : await readStatus(remainingCoreRequestBudget(deadline));
     if (!control && stopCommand) console.error("[wand] 旧服务尚不支持重启排空；正在读取真实服务状态。首次升级等待期间请勿启动新任务。");
     let lastCount = -1;
     while (status.hasActiveTurns) {
@@ -207,7 +206,7 @@ export async function waitForCoreTurnsComplete(
       const remaining = deadline - Date.now();
       if (remaining <= 0) throw new Error("等待 Core 回合超时，服务未停止，已取消重启。");
       await new Promise<void>((resolve) => setTimeout(resolve, Math.min(1000, remaining)));
-      status = await readStatus(budget());
+      status = await readStatus(remainingCoreRequestBudget(deadline));
     }
     // The draining connection stays open until the stop command finishes.
     // New Pi inputs are persisted in the queue, not started in the check/stop gap.

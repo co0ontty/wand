@@ -15,6 +15,7 @@ import { defaultMilestoneIdForWrite, scopedMilestoneId } from "./milestone-scope
 import type { WandStorage } from "./storage.js";
 import { badRequest, HttpError } from "./http-error.js";
 import { provisionalTaskTitleFromDescription } from "./task-title.js";
+import { collapseWhitespaceAndClip as collapse } from "./text-utils.js";
 
 /** 团队页「直接开工」自动建卡的标记，与手写卡区分。 */
 export const TEAM_DISPATCH_LABEL = "team_direct";
@@ -80,11 +81,6 @@ export interface TeamDispatchStartRequest {
   note: string;
   members: Array<{ employeeId: string; isLeader?: boolean }>;
   name?: string;
-}
-
-function collapse(value: string, max: number): string {
-  const flat = value.replace(/\s+/g, " ").trim();
-  return flat.length > max ? `${flat.slice(0, Math.max(1, max - 1))}…` : flat;
 }
 
 /**

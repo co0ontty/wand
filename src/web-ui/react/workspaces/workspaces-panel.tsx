@@ -41,7 +41,8 @@ import {
 import { sidebarSessionState, sidebarAggregateState, sessionGlowStatus, sidebarGlowColor } from "./sidebar-session-state";
 import { SidebarProjectionSwap } from "./sidebar-projection-swap";
 import { sidebarSelection } from "./sidebar-task-meta";
-import { filterSidebarGroups } from "./sidebar-search";
+import { filterSidebarGroups, filterSidebarTaskSessions } from "./sidebar-search";
+import { SidebarSessionPreview } from "./sidebar-session-preview";
 import {
   useSidebarPresentation,
   SidebarPresentationContext,
@@ -304,6 +305,7 @@ function ArchivedSessionsFold({
 
 function TaskItem({
   task,
+  visibleSessions = task.sessions,
   now,
   liveTitles,
   activeTaskId,
@@ -328,6 +330,8 @@ function TaskItem({
   onMoveSession,
 }: {
   task: TaskSummary;
+  /** Display-only filtering; task.sessions remains the full mutation scope. */
+  visibleSessions?: readonly WorkspaceSessionSummary[];
   now: number;
   liveTitles?: Readonly<Record<string, string>>;
   activeTaskId: string | null;
@@ -385,11 +389,12 @@ function TaskItem({
 
   // 人工会话和群聊入口照常显示，团队派发的会话收进一个可点的折叠头。
   const teamSplit = splitTeamSessions(task.sessions);
-  const shownSessions = nonTeamSessions(task.sessions);
-  const teamCount = teamSplit.live.length + teamSplit.history.length;
+  const shownTeamSplit = splitTeamSessions(visibleSessions);
+  const shownSessions = nonTeamSessions(visibleSessions);
+  const teamCount = shownTeamSplit.live.length + shownTeamSplit.history.length;
   const archivedSessions = task.archivedSessions ?? [];
-  const sessionCount = shownSessions.length;
-  const totalSessionCount = sessionCount + teamCount;
+  const totalSessionCount = task.sessions.length;
+  const sessionToggleRef = React.useRef<HTMLButtonElement>(null);
   const [open, setSessionsOpen] = useSidebarExpansion(
     `task.${task.id}`, true, false, isActive || isOnlyTask,
   );
@@ -397,8 +402,8 @@ function TaskItem({
     if (activeSessionId && task.sessions.some(session => session.id === activeSessionId)) setSessionsOpen(true);
   }, [activeSessionId]);
   const toggleSessionsOpen = (): void => setSessionsOpen(!open);
-  const teamActivity = sidebarAggregateState(teamSplit.live);
-  const taskAggregate = sidebarAggregateState(task.sessions);
+  const teamActivity = sidebarAggregateState(shownTeamSplit.live);
+  const taskAggregate = sidebarAggregateState(visibleSessions);
   const canArchive = task.canArchive !== false && !task.sessions.some(isArchiveBlocked);
   const countId = React.useId();
 
@@ -430,14 +435,14 @@ function TaskItem({
     if (busy) return;
     setBusy(true); setTaskActionError(""); setTaskMenuOpen(false);
     try {
-      const confirmed = key === "clear" || key === "clear-history"
+      // 归档可恢复且不清理会话或 Worktree，直接执行；破坏性操作仍需确认。
+      const confirmed = key === "archive" ? true : key === "clear" || key === "clear-history"
         ? await confirmClearSessions(key === "clear" ? totalSessionCount : teamSplit.history.length,
           `任务「${task.name}」${key === "clear-history" ? "已结束的团队会话" : ""}`, taskMenuTrigger.current,
           key === "clear-history" ? `将删除这一轮协作留下的 ${teamSplit.history.length} 个成员会话，无法撤销。你自己的会话和任务都会保留。` : undefined)
-        : await confirmSidebarAction({ title: `${key === "archive" ? "归档" : "删除"}「${task.name}」？`,
-          description: key === "archive" ? "任务从侧栏移到看板归档，保留会话和 Worktree，不停止正在执行的工作。"
-            : "将删除任务、所属会话并清理 Worktree，无法撤销。", action: key === "archive" ? "确认归档任务" : "确认删除任务",
-          danger: key === "delete", trigger: taskMenuTrigger.current });
+        : await confirmSidebarAction({ title: `删除「${task.name}」？`,
+          description: "将删除任务、所属会话并清理 Worktree，无法撤销。", action: "确认删除任务",
+          danger: true, trigger: taskMenuTrigger.current });
       if (!confirmed) return;
       if (key === "archive") await onArchive();
       else if (key === "delete") await onDelete();
@@ -495,6 +500,12 @@ function TaskItem({
     )}
       data-workspace-task-id={task.id}
       aria-busy={busy || undefined}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || event.defaultPrevented || !open || taskMenuOpen) return;
+        event.preventDefault(); event.stopPropagation();
+        sessionToggleRef.current?.focus({ preventScroll: true });
+        setSessionsOpen(false);
+      }}
       onDragOver={(event) => {
         if (manageMode || busy || !isSessionDrag(event.dataTransfer)) return;
         event.preventDefault();
@@ -529,7 +540,7 @@ function TaskItem({
         manageMode && "managing",
         manageMode && selected && "selected",
       )}>
-        <WandIconButton className="workspace-task-chevron-btn" title={open ? "收起会话" : "展开会话"}
+        <WandIconButton ref={sessionToggleRef} className="workspace-task-chevron-btn" title={open ? "收起会话" : "展开会话"}
           aria-label={`${open ? "收起" : "展开"}任务 ${task.name} 的会话`}
           aria-expanded={open} aria-controls={sessionsId} aria-describedby={countId}
           onClick={(event) => anchorSidebarDisclosure(event.currentTarget, toggleSessionsOpen)}
@@ -548,8 +559,8 @@ function TaskItem({
           {manageMode && <ManageCheck checked={selected} label={`选择任务 ${task.name}`}/>}
           <span style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} className="workspace-task-name">{task.name}</span>
         </WandNavigationLink>
-        <span id={countId} className="workspace-task-count" title={taskAggregate.description}>
-          {totalSessionCount}
+        <span id={countId} className="workspace-task-count" title={`${taskAggregate.description}，共 ${totalSessionCount} 个会话`}>
+          {visibleSessions.length === totalSessionCount ? totalSessionCount : `${visibleSessions.length}/${totalSessionCount}`}
         </span>
         <span className={`sidebar-head-activity tone-${taskAggregate.tone}`} title={taskAggregate.description}
           aria-label={taskAggregate.description}>{taskAggregate.label ? <Badge status={taskAggregate.tone === "warning" ? "warning" : taskAggregate.tone === "success" ? "success" : "processing"}/> : null}</span>
@@ -557,7 +568,8 @@ function TaskItem({
         { key: "open", disabled: busy, icon: <WandIcon name="task"/>, label: "打开任务" },
         { key: "new", disabled: busy, icon: <WandIcon name="plus"/>, label: "新建会话" },
         { key: "rename", disabled: busy, icon: <WandIcon name="edit"/>, label: "重命名任务" },
-        ...(canArchive ? [{ key: "archive", disabled: busy, icon: <WandIcon name="archive"/>, label: isolated ? "归档任务（保留 Worktree）" : "归档任务" }] : []),
+        { key: "archive", disabled: busy || !canArchive, icon: <WandIcon name="archive"/>,
+          label: !canArchive ? "归档任务（执行结束后可用）" : isolated ? "归档任务（保留 Worktree）" : "归档任务" },
         ...(totalSessionCount || isolated ? [{ key: "danger-divider", type: "divider" as const }] : []),
         ...(totalSessionCount ? [{ key: "clear", disabled: busy, danger: true, icon: <WandIcon name="terminal"/>, label: `清空所列会话（${totalSessionCount}）` }] : []),
         ...(teamSplit.history.length ? [{ key: "clear-history", disabled: busy, danger: true, icon: <WandIcon name="archive"/>, label: `清理团队历史（${teamSplit.history.length}）` }] : []),
@@ -570,6 +582,21 @@ function TaskItem({
         else if (key === "archive" || key === "delete" || key === "clear" || key === "clear-history") void runTaskAction(key);
       } }}/>
 
+      <SidebarSessionPreview sessions={visibleSessions} expanded={open || manageMode}
+        label={`任务 ${task.name} 的会话预览`} className="sidebar-session-preview-task"
+        selectedSessionId={activeSessionId} liveTitles={liveTitles} disabled={manageMode || busy}
+        expansionRef={sessionToggleRef} onExpand={() => {
+          setSessionsOpen(true);
+          if (visibleSessions.some(session => session.teamStep)) setTeamOpen(true);
+          if (visibleSessions.some(session => session.teamStep?.runFinished)) setTeamHistoryOpen(true);
+        }} onActivate={(session) => {
+          setSessionsOpen(true);
+          if (session.teamStep) {
+            setTeamOpen(true);
+            if (session.teamStep.runFinished) setTeamHistoryOpen(true);
+          }
+          onOpenSession(session);
+        }}/>
       <SidebarDisclosure id={sessionsId} open={open}>
         {totalSessionCount === 0 && !manageMode && <WandButton kind="ghost" type="button" className="workspace-task-empty"
           onClick={onRequestNewSession}><WandIcon name="plus" size={12}/>添加会话，或拖入已有会话</WandButton>}
@@ -610,7 +637,7 @@ function TaskItem({
               </WandButton>
               <SidebarDisclosure id={teamId} open={teamOpen}>
                 <Flex vertical gap={4} style={{ paddingInlineStart: 12 }} className="workspace-team-fold-list">
-                  {teamSplit.live.map((session, index) => (
+                  {shownTeamSplit.live.map((session, index) => (
                     <TaskSessionItem
                       key={session.id}
                       session={session}
@@ -622,7 +649,7 @@ function TaskItem({
                       onArchive={(archived) => onArchiveSession([session.id], archived)}
                     />
                   ))}
-                  {teamSplit.history.length > 0 && (
+                  {shownTeamSplit.history.length > 0 && (
                     <div className="workspace-team-history">
                       <Flex align="center" gap={4} className="workspace-team-history-head">
                         <WandButton style={{ width: "100%", justifyContent: "flex-start", height: "auto" }} kind="ghost"
@@ -630,18 +657,18 @@ function TaskItem({
                           className="workspace-team-fold-head is-nested"
                           aria-expanded={teamHistoryOpen}
                           aria-controls={teamHistoryId}
-                          title={teamHistoryOpen ? "收起已结束的团队会话" : `展开 ${teamSplit.history.length} 个已结束的团队会话`}
+                          title={teamHistoryOpen ? "收起已结束的团队会话" : `展开 ${shownTeamSplit.history.length} 个已结束的团队会话`}
                           onClick={(event) => anchorSidebarDisclosure(event.currentTarget, () => setTeamHistoryOpen(!teamHistoryOpen))}
                           onKeyDown={(event) => sidebarDisclosureKeys(event, teamHistoryOpen, setTeamHistoryOpen)}
                         >
                           <SidebarChevron open={teamHistoryOpen} size={10} className={classNames("workspace-task-chevron", teamHistoryOpen && "open")}/>
                           <span className="workspace-team-fold-label">已结束</span>
-                          <span className="workspace-team-fold-count">{teamSplit.history.length}</span>
+                          <span className="workspace-team-fold-count">{shownTeamSplit.history.length}</span>
                         </WandButton>
                       </Flex>
                       <SidebarDisclosure id={teamHistoryId} open={teamHistoryOpen}>
                         <Flex vertical gap={4} className="workspace-team-fold-list">
-                          {teamSplit.history.map((session, index) => (
+                          {shownTeamSplit.history.map((session, index) => (
                             <TaskSessionItem
                               key={session.id}
                               session={session}
@@ -685,6 +712,7 @@ function TaskItem({
 
 function TaskGroupSection({
   group,
+  searchQuery = "",
   totalSessionCount,
   now,
   preview = false,
@@ -706,6 +734,7 @@ function TaskGroupSection({
   onOpenDialog,
 }: {
   group: TaskDirectoryGroup;
+  searchQuery?: string;
   totalSessionCount: number;
   now: number;
   preview?: boolean;
@@ -984,6 +1013,7 @@ function TaskGroupSection({
             <TaskItem
               key={task.id}
               task={task}
+              visibleSessions={filterSidebarTaskSessions(group, task, searchQuery, liveTitles)}
               now={now}
               liveTitles={liveTitles}
               activeTaskId={activeTaskId}
@@ -1684,6 +1714,7 @@ function SidebarWorkspacesPanel({
                   <TaskGroupSection
                     key={group.workspaceId}
                     group={group}
+                    searchQuery={searchQuery}
                     totalSessionCount={groupSessionCounts.get(group.workspaceId) ?? 0}
                     preview={directoryId !== undefined}
                     now={now}

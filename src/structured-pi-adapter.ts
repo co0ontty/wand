@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { capturePiExecutionEvent } from "./pi-execution.js";
 import { defaultCoreHarnessAgentDir } from "./harness-engine.js";
 import { preparePiResources, type PreparedPiResources } from "./pi-resource-run.js";
@@ -9,6 +11,8 @@ import { classifyProviderRejection, hasStructuredExecutionProgress } from "./str
 
 import { settleThinkingRound, updateThinkingActivity } from "./structured-thinking.js";
 import { startStructuredCli } from "./structured-exec-pump.js";
+import type { PiOutputFileOptions } from "./pi-output-file.js";
+import { PiProtocolReader } from "./pi-protocol-reader.js";
 import type { StructuredExecHost } from "./structured-exec-host.js";
 import { asRecord, canonicalizeToolResultContent } from "./structured-content.js";
 import { systemPromptArgs, thinkingEffortToPiLevel } from "./structured-provider-common.js";
@@ -61,6 +65,15 @@ export function buildPiArgs(session: SessionSnapshot, prompt: string, resourceAr
   args.push(...systemPromptArgs(session));
   if (session.claudeSessionId) args.push("--session", session.claudeSessionId);
   args.push(prompt);
+  return args;
+}
+
+/** Same CLI selection/resources, but actual interactive TUI instead of JSON/print mode. */
+export function buildPiNativeArgs(session: SessionSnapshot, prompt: string, resourceArgs: string[] = []): string[] {
+  const js = fileURLToPath(new URL("./pi-native-event-bridge.js", import.meta.url));
+  const bridge = existsSync(js) ? js : js.replace(/\.js$/, ".ts");
+  const args = buildPiArgs(session, prompt, resourceArgs).slice(3);
+  args.splice(args.length - 1, 0, "--extension", bridge);
   return args;
 }
 
@@ -205,6 +218,7 @@ export class PiRunner implements StructuredRunnerAdapter {
     private readonly execHost?: StructuredExecHost,
     private readonly agentDir?: string,
     private readonly freeModels?: OpenRouterFreeCliDependencies,
+    private readonly outputFiles?: (sessionId: string) => PiOutputFileOptions,
   ) {}
 
   start(context: StructuredRunnerContext, observer: StructuredRunnerObserver): StructuredRunnerExecution {
@@ -255,7 +269,9 @@ export class PiRunner implements StructuredRunnerAdapter {
 
   private startCli(context: StructuredRunnerContext, observer: StructuredRunnerObserver,
     resourceArgs: string[] = []): StructuredRunnerExecution {
-    const args = buildPiArgs(context.session, context.prompt, resourceArgs);
+    const nativePi = this.execHost?.piNativeTui === true;
+    const args = nativePi ? buildPiNativeArgs(context.session, context.prompt, resourceArgs)
+      : buildPiArgs(context.session, context.prompt, resourceArgs);
     const state: PiTurnState = {
       blocks: [],
       result: "",
@@ -275,7 +291,10 @@ export class PiRunner implements StructuredRunnerAdapter {
       observer,
       execHost: this.execHost,
       spawnProcess: this.spawnProcess,
+      ...(nativePi ? { nativePi: true, requestId: context.session.structuredState?.activeRequestId ?? undefined }
+        : { stdoutFile: this.outputFiles?.(context.session.id) ?? {} }),
       createState: () => state,
+      createProtocolReader: (onLine) => new PiProtocolReader(onLine),
       processLine: (line) => {
         if (!observer.isActive() || !line.trim()) return;
         try {

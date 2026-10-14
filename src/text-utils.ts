@@ -11,3 +11,17 @@ export function clipAtWordBoundary(value: string, maxLength: number): string {
   if (lastSpace >= Math.floor(maxLength * 0.55)) return sliced.slice(0, lastSpace);
   return sliced;
 }
+
+/** Single-line summaries retain the existing UTF-16 budget and ellipsis rules. */
+export function collapseWhitespaceAndClip(value: string, maxLength: number): string {
+  const flat = value.replace(/\s+/g, " ").trim();
+  if (flat.length > maxLength) {
+    let end = Math.max(1, maxLength - 1);
+    const previous = flat.charCodeAt(end - 1);
+    const next = flat.charCodeAt(end);
+    // Shorten the prefix rather than emitting half of an otherwise valid surrogate pair.
+    if (previous >= 0xd800 && previous <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) end--;
+    return `${flat.slice(0, end)}…`;
+  }
+  return flat;
+}

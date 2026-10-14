@@ -85,10 +85,17 @@ test("recent employee groups omit CLI badges while child sessions retain actual 
         selectedSessionId: null, now: 0, onOpen() {} })));
     assert.match(html, /wand-employee-avatar/);
     assert.doesNotMatch(html, /wand-employee-avatar-provider/);
+    const header = html.split('class="sidebar-session-preview ')[0];
+    assert.doesNotMatch(header, /data-provider-logo=/, "the person identity head still has no CLI badge");
+    const children = html.split('class="im-sidebar-group-inner"')[1];
     for (const provider of ["codex", "pi"]) {
-      assert.equal(html.split(`data-provider-logo="${provider}"`).length - 1, 1,
-        "only the actual child session shows its tool");
+      assert.equal(children.split(`data-provider-logo="${provider}"`).length - 1, 1,
+        "each actual child retains its tool");
+      const preview = html.split('class="sidebar-session-preview-row"')[1].split('class="sidebar-session-preview-measure-clip"')[0];
+      assert.equal(preview.split(`data-provider-logo="${provider}"`).length - 1, 1,
+        "one preview slot per real tool; inaccessible measurements are not semantic entries");
     }
+    assert.match(html, /sidebar-session-preview[^>]*data-expanded="true"[^>]*inert[^>]*aria-hidden="true"/);
   }
 });
 

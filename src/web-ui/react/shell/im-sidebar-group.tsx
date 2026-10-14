@@ -22,6 +22,8 @@ export function ImSidebarGroup({
   expanded = true,
   onToggle,
   onSetOpen,
+  toggleRef,
+  collapsedPreview,
   children,
 }: {
   label: string;
@@ -35,15 +37,23 @@ export function ImSidebarGroup({
   expanded?: boolean;
   onToggle?(): void;
   onSetOpen?(open: boolean): void;
+  toggleRef?: React.Ref<HTMLButtonElement>;
+  collapsedPreview?: React.ReactNode;
   children: React.ReactNode;
 }): React.ReactElement {
   const id = React.useId();
   const descriptionId = React.useId();
   return (
-    <div className={`im-sidebar-group${expanded ? " is-expanded" : ""}`}>
+    <div className={`im-sidebar-group${expanded ? " is-expanded" : ""}`} onKeyDown={(event) => {
+      if (event.key !== "Escape" || event.defaultPrevented || !expanded || (!onSetOpen && !onToggle)) return;
+      event.preventDefault(); event.stopPropagation();
+      const head = event.currentTarget.querySelector<HTMLElement>(".wand-sidebar-group-toggle");
+      head?.focus({ preventScroll: true });
+      if (head) anchorSidebarDisclosure(head, () => onSetOpen ? onSetOpen(false) : onToggle?.());
+    }}>
       <Flex align="center" gap={4} className="im-sidebar-group-header">
         <SidebarLabelTooltip title={`${label} · ${description ?? `${totalCount} 个会话`}`} selector=".im-sidebar-group-title">
-        <WandButton kind="ghost" type="button" className="wand-sidebar-group-toggle"
+        <WandButton ref={toggleRef} kind="ghost" type="button" className="wand-sidebar-group-toggle"
           style={{ flex: 1, minWidth: 0, height: "auto", justifyContent: "flex-start", whiteSpace: "normal" }}
           aria-expanded={expanded} aria-controls={id} aria-describedby={descriptionId}
           aria-label={`${label} · 显示 ${count} 个会话，共 ${totalCount} 个会话${containsCurrent ? " · 包含当前会话" : ""}`}
@@ -70,6 +80,7 @@ export function ImSidebarGroup({
       <span id={descriptionId} className="sidebar-visually-hidden" hidden>
         {description}{containsCurrent ? "，包含当前会话" : ""}
       </span>
+      {collapsedPreview}
       <SidebarDisclosure id={id} open={expanded}>
         <div className="im-sidebar-group-inner" style={{ paddingInlineStart: 8 }}>{children}</div>
       </SidebarDisclosure>

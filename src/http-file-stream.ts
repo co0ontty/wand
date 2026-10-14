@@ -1,4 +1,3 @@
-import { exec } from "node:child_process";
 import { createReadStream } from "node:fs";
 import type { Request, Response } from "express";
 import { getErrorMessage } from "./error-utils.js";

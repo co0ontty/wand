@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -8,6 +8,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import {
   buildDetachedUpdateHelperScript,
+  readDetachedUpdateStatus,
   isStableServiceEntrypoint,
   resolveManagedServiceScope,
   resolveManagedServiceScopeCandidates,
@@ -54,6 +55,9 @@ exit 64
 `);
 
   const globalCliPath = path.join(globalCliDir, "cli.js");
+  writeFileSync(path.join(globalCliDir, "..", "package.json"), JSON.stringify({ name: "@co0ontty/wand", version: "1.0.0" }));
+  const healthCheckPath = path.join(root, "update-health.mjs");
+  writeFileSync(healthCheckPath, `export async function waitForUpdatedService() { return { pid: 123, version: "1.0.0" }; }`, "utf8");
   writeFileSync(globalCliPath, `
 const fs = require("node:fs");
 fs.appendFileSync(process.env.WAND_TEST_EVENTS, "cli:" + process.argv.slice(2).join(" ") + "\\n");
@@ -61,6 +65,7 @@ fs.appendFileSync(process.env.WAND_TEST_EVENTS, "cli:" + process.argv.slice(2).j
 
   writeFileSync(updateUtilsPath, `
 import fs from "node:fs";
+export async function withGlobalUpdateLock(action) { return action(); }
 export async function installPackageGloballyAsync(spec, timeoutMs, log) {
   fs.appendFileSync(process.env.WAND_TEST_EVENTS, "install:" + spec + ":" + timeoutMs + "\\n");
   log("[stub] install invoked");
@@ -78,7 +83,22 @@ export async function installPackageGloballyAsync(spec, timeoutMs, log) {
     WAND_TEST_INSTALL_FAIL: installFails ? "1" : "0",
     WAND_TEST_INSTALLED_CLI: globalCliPath,
   };
+  const coreGuardPath = path.join(root, "core-guard.mjs");
+  writeFileSync(coreGuardPath, `
+import { spawn } from "node:child_process";
+export async function waitForCoreTurnsComplete(config, timeout, command) {
+  if (process.env.WAND_TEST_GUARD_FAIL === "1") throw new Error("Core 状态未知，禁止安装");
+  return new Promise((resolve, reject) => {
+    const child = spawn(command[0], command.slice(1), { stdio: "inherit" });
+    child.once("error", reject);
+    child.once("exit", code => resolve(code));
+  });
+}
+`, "utf8");
   const opts: DetachedUpdateOptions = {
+    healthCheckPath,
+    expectedVersion: "1.0.0",
+    coreGuardPath,
     installSpec: "@co0ontty/wand@latest",
     configPath,
     parentPid,
@@ -227,6 +247,7 @@ test("helper uses the shared installer and keeps the parent alive when install f
   const code = await runScript(fixture, null);
   assert.notEqual(code, 0);
   assert.equal(isAlive(parent), true);
+  assert.equal(readDetachedUpdateStatus(fixture.logPath)?.phase, "failed");
 
   const script = readFileSync(fixture.scriptPath, "utf8");
   assert.match(script, /^set -euo pipefail$/m);
@@ -252,6 +273,7 @@ test("helper can import the TypeScript installer used by npm run dev", async (t)
   writeFileSync(sourceInstaller, `
 import fs from "node:fs";
 const eventName: string = "typescript-install";
+export async function withGlobalUpdateLock<T>(action: () => Promise<T>): Promise<T> { return action(); }
 export async function installPackageGloballyAsync(spec: string, timeoutMs: number): Promise<void> {
   fs.appendFileSync(process.env.WAND_TEST_EVENTS!, eventName + ":" + spec + ":" + timeoutMs + "\\n");
   throw new Error("expected TypeScript installer failure");
@@ -354,6 +376,7 @@ test("service-scoped helper relies on Restart/KeepAlive without launching anothe
 
   const code = await runScript(fixture, "user");
   assert.equal(code, 0);
+  assert.equal(readDetachedUpdateStatus(fixture.logPath)?.phase, "completed");
   await delay(200);
 
   const events = readFileSync(fixture.eventsPath, "utf8").trim().split("\n");
@@ -362,4 +385,19 @@ test("service-scoped helper relies on Restart/KeepAlive without launching anothe
   assert.equal(events[2], "parent:term");
   assert.equal(events.some((line) => line.startsWith("cli:web")), false);
   assert.match(readFileSync(fixture.logPath, "utf8"), /user service detected; waiting for Restart\/KeepAlive relaunch/);
+});
+
+
+test("unknown Core state cancels before installation and leaves the parent alive", async (t) => {
+  if (process.platform === "win32") return t.skip("bash helper");
+  const fixture = createFixture(process.pid);
+  const parent = await spawnParent(fixture.root, fixture.eventsPath);
+  fixture.opts.parentPid = parent.pid!;
+  fixture.opts.env.WAND_TEST_GUARD_FAIL = "1";
+  t.after(() => { if (isAlive(parent)) parent.kill("SIGKILL"); rmSync(fixture.root, { recursive: true, force: true }); });
+  assert.notEqual(await runScript(fixture, null), 0);
+  assert.equal(isAlive(parent), true);
+  assert.equal(readDetachedUpdateStatus(fixture.logPath)?.phase, "failed");
+  assert.match(readFileSync(fixture.logPath, "utf8"), /Core 状态未知/);
+  assert.equal(existsSync(fixture.eventsPath), false);
 });

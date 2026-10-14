@@ -78,7 +78,7 @@ export interface SettingsTabProps {
   refresh(): Promise<void>;
   setSnapshot: Dispatch<SetStateAction<SettingsSnapshot | null>>;
   toast(message: string, tone?: "info" | "success" | "warning" | "error"): void;
-  showRestart(): void;
+  showRestart(previousInstanceId?: string | null, expectedVersion?: string | null): void;
 }
 
 type StatusTone = "info" | "success" | "warning" | "error";
@@ -325,13 +325,14 @@ export function AboutSettingsTab({ snapshot, repository, refresh, toast, showRes
             />
             <div className="wand-settings-library-button-row">
               <SettingsActionButton className="wand-settings-library-update-primary" pending={pending === "check"} kind="primary" onClick={() => action("check", async () => setUpdate(await repository.execute({ type: "webUpdate.check" })), "版本检查完成。")}>检查更新</SettingsActionButton>
-              <SettingsActionButton pending={pending === "install"} kind="secondary" onClick={() => action("install", async () => { const result = await repository.execute({ type: "webUpdate.install" }); setStatus(result.message); }, undefined)}>更新或重新安装</SettingsActionButton>
+              <SettingsActionButton pending={pending === "install"} kind="secondary" onClick={() => action("install", async () => {
+                const result = await repository.execute({ type: "webUpdate.install" });
+                setStatus(result.message);
+                if (result.detachedUpdate) showRestart(result.previousInstanceId, result.version);
+              }, undefined)}>更新或重新安装</SettingsActionButton>
               {snapshot.restartRequired ? <SettingsActionButton pending={pending === "restart"} kind="secondary" onClick={() => action("restart", async () => {
-                try {
-                  await repository.execute({ type: "server.restart" });
-                } finally {
-                  showRestart();
-                }
+                await repository.execute({ type: "server.restart" });
+                showRestart();
               }, "服务正在重启…")}>重启服务</SettingsActionButton> : null}
             </div>
           </SettingsSection>

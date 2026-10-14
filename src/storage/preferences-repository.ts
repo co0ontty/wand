@@ -1,4 +1,3 @@
-import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { nowIso } from "../password-manager.js";
 import { defaultPiCliSessionSettings, patchPiSessionSettings, type PiSessionSettings } from "../pi-session-settings.js";
@@ -8,7 +7,7 @@ import { WORKSPACE_GROUP_ORDER_KEY, PI_SESSION_DEFAULTS_KEY } from "./internal.j
 
 /** Preferences storage: one domain of the WandStorage facade. Shares the connection and the facade's transaction. */
 export class PreferencesRepository {
-  constructor(private readonly db: DatabaseSync, private readonly s: WandStorage) {}
+  constructor(private readonly db: DatabaseSync, _s: WandStorage) {}
 
   /** Get a config value from database */
   getConfigValue(key: string): string | null {

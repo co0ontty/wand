@@ -1,16 +1,6 @@
-import type { Express,Request } from "express";
-import { createHash } from "node:crypto";
-import { parseExecutionMode,parseSessionCreationOrigin } from "./session-request.js";
+import type { Express } from "express";
 
-import { isExecutionMode } from "./config.js";
-import { DECISION_EXPERT_NAME } from "./decision-expert-identity.js";
-import { defaultRoleForCli } from "./default-employee.js";
-import { fallbackProviderModel, resolveExplicitOrFallbackModel, sessionEmployeeFields } from "./session-model.js";
-import type { OpenRouterFreeModelsService } from "./openrouter-free-models.js";
-import { ProcessManager,PtyInputDeliveryError,SessionInputError } from "./process-manager.js";
-import { WandStorage } from "./storage.js";
-import { StructuredSessionManager } from "./structured-session-manager.js";
-import { ExecutionMode,InputRequest,ProcessEvent,ResizeRequest,SessionProvider,SessionRunner,SessionSnapshot,ToolResultBlock,ToolUseBlock,WandConfig } from "./types.js";
+import { SessionSnapshot } from "./types.js";
 
 import {
   generateCommitMessageOnly,
@@ -20,62 +10,22 @@ import {
   runQuickCommitWithFallback,
   runTagHead,
 } from "./git-quick-commit.js";
-import {
-  checkSessionWorktreeMergeabilityAsync,
-  cleanupSessionWorktreeAsync,
-  getWorktreeMergeErrorCode,
-  mergeSessionWorktreeAsync,
-  WorktreeMergeError,
-} from "./git-worktree.js";
-import { alignedBlockStart,blockWindowMessagesForTransport,compactToolMessagesForTransport,messageWindowByteBudget,sliceTurnBlocksForTransport,truncateMessagesForTransport,visibleBlockCount,windowMessagesForTransport } from "./message-truncator.js";
-import { inspectPiExecution } from "./pi-execution.js";
+import { checkSessionWorktreeMergeabilityAsync, cleanupSessionWorktreeAsync, mergeSessionWorktreeAsync } from "./git-worktree.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
-import { resolveSessionCwd } from "./session-cwd.js";
-import { toSessionDetailDTO,toSessionListItemDTO } from "./session-transport.js";
 
 import { getErrorMessage } from "./error-utils.js";
 import { asyncRoute } from "./express-async.js";
-import {
-  buildIterationCommitContext,
-  COMMIT_CONTEXT_MODE_PREF_KEY,
-  isCommitContextMode,
-  readCommitContextMode,
-  resolveCommitContextInput,
-  type IterationCommitContext,
-} from "./iteration-log.js";
-import { installedPiExtensions } from "./pi-extension-resources.js";
-import { discoverPiResources,resolvePiResourceSelection } from "./pi-resource-catalog.js";
-import { effectivePiSessionSettings,patchPiSessionSettings,type PiSettingsControls,type PiSettingsResponse } from "./pi-session-settings.js";
-import { parseBoundedInteger } from "./request-limits.js";
-import { buildProviderResumeCommand,isProviderSessionId } from "./resume-policy.js";
-import { registerPiRecommendationRoute,type PiRecommendationRuntime } from "./server-pi-recommendation-routes.js";
+import { buildIterationCommitContext, COMMIT_CONTEXT_MODE_PREF_KEY, isCommitContextMode } from "./iteration-log.js";
 import { sendRouteError } from "./server-request.js";
-import { registerStructuredResumeRoutes } from "./server-resume-routes.js";
-import {
-  buildDirectoryTree,
-  normalizeSessionDirectory,
-  type SessionDirectoryNode,
-} from "./session-directory-tree.js";
-import { inferProviderFromCommand,isSessionProvider,providerCliCommand,SESSION_PROVIDERS } from "./session-provider.js";
-import { addHiddenSessionIds,deleteOwnedSessionWithHistory,removeHiddenSessionIds,SessionRegistry,type ProviderHistoryDeleter } from "./session-registry.js";
-import { selectEmployeeCandidate } from "./silicon-employee-dispatch.js";
-import { enrichStructuredMessages,WAND_PROTOCOL_VERSION } from "./structured-client-protocol.js";
-import { asRecord,isStructuredImagePart } from "./structured-content.js";
-import {
-  projectCwdForSession,
-  renameWorkspaceDirectory,
-  resolveWorkspaceIdForNewSession,
-} from "./workspace-binding.js";
-import { badRequest, surfaceDomainError } from "./http-error.js";
 
 import type { SessionRouteContext } from "./server-session-context.js";
-import { commitModeForRead, iterationCommitInput, commitMessageFromIteration, getInputErrorResponse, getInputDebugMeta, SessionDeletionProcesses, SessionDeletionStructured, deleteSessionWithProviderHistory, SessionListPageEntry, SessionListPage, SessionDirectoryTreeResponse, sessionSortTimestamp, buildSessionListEntries, sessionListRevision, buildSessionListPage, buildSessionDirectoryTree, directoryTreeContainsPath, requireWorktreeSession, buildWorktreeMergeInfo, saveWorktreeMergeState, getWorktreeMergeResponseStatus, getWorktreeMergePayload, resolvePtyResumeProvider, isPtyProviderCommand, startResumedPtySession, restoreArchivedSession, getAutoResumeInitialInput, canAutoResumePtyForInput, canMergeSession, isMergeActionAllowed } from "./session-service.js";
+import { commitModeForRead, iterationCommitInput, commitMessageFromIteration, requireWorktreeSession, saveWorktreeMergeState, getWorktreeMergeResponseStatus, getWorktreeMergePayload, canMergeSession, isMergeActionAllowed } from "./session-service.js";
 
 /** Worktree merge/cleanup, git status/commit/push and iteration context routes. */
 export function registerSessionWorktreeRoutes(app: Express, ctx: SessionRouteContext): void {
   const {
-    processes, structured, storage, defaultMode, config, sessions, onSessionCreated, onCompletionViewed, decisions, free,
-    wantsCompactTools, sessionResponseDTO, currentDirectoryTree, piSettingsResponse, requirePiSession,
+    storage, config, sessions, free,
+    wantsCompactTools, sessionResponseDTO,
   } = ctx;
 
   app.post("/api/sessions/:id/worktree/merge/check", asyncRoute(async (req, res) => {

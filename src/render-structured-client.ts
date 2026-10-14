@@ -1,7 +1,7 @@
 import { lstatSync, readFileSync } from "node:fs";
 import net from "node:net";
 
-import { startDaemonHeartbeat, waitForDaemonSocket } from "./daemon-connection.js";
+import { rejectPendingRequests, startDaemonHeartbeat, waitForDaemonSocket } from "./daemon-connection.js";
 import { getErrorMessage } from "./error-utils.js";
 import {
   STRUCTURED_RENDER_PROTOCOL_VERSION,
@@ -493,7 +493,6 @@ export class RenderStructuredClient implements StructuredExecHost {
   }
 
   private rejectPending(error: Error): void {
-    for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(error); }
-    this.pending.clear();
+    rejectPendingRequests(this.pending, error);
   }
 }

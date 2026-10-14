@@ -68,6 +68,13 @@ wand config:password
 - **Update channels** — built-in stable/beta update checks and upgrade prompts
 - **CLI updates** — check and quickly update Claude Code, Codex, OpenCode, Qoder CLI, Pi, and Gemini CLI from server settings, with optional automatic updates
 
+Stable subscribers receive npm `latest`; Beta subscribers receive the newer of `latest`
+and `beta`, including a stable release that supersedes its prerelease. Installing stable
+keeps the Beta subscription enabled. Updates pin the checked version, wait for Core turns,
+and restart only the Web service. If an old updater cannot run, rerun `install.sh` for a
+staged recovery that preserves the previous installation and service scope. Node.js must
+meet the new package's requirement. See [Web update and recovery](docs/web-updates.md).
+
 ### Configuration
 
 The default config file is `~/.wand/config.json`; it is created by `wand init`.
@@ -251,16 +258,30 @@ npm install -g @google/gemini-cli@latest
 - **HTTPS** — 可选自签证书，适合远程或移动端访问
 - **版本管理** — 内置更新检查与升级提示，支持 stable/beta 双通道
 
-Web 设置中的「Beta 通道」决定服务端 npm 更新来源：关闭时仅检查
-`@co0ontty/wand@latest`，开启时检查 `@co0ontty/wand@beta`；「自动更新 Web 服务」
-独立决定是否自动安装。检查后安装锁定具体版本，避免 dist-tag 在安装期间移动。
-关闭 Beta 不会自动降级；需要立即返回较旧正式版时，点击「更新或重新安装」。
+Web 设置中的「Beta 通道」决定服务端 npm 更新候选：关闭时仅检查
+`@co0ontty/wand@latest`，开启时同时检查 `latest` 与 `beta`，选择版本较新的一个；
+同号正式版高于其 beta。「自动更新 Web 服务」独立决定是否自动安装。
+检查后安装锁定具体版本，避免 dist-tag 在安装期间移动。Beta 用户安装正式版后
+仍保留 Beta 订阅，下一次有更新的 beta 时继续收到更新。关闭 Beta 不会自动降级；
+需要立即返回较旧正式版时，点击「更新或重新安装」。
+
+手动与自动更新共用独立 helper：等待 Core 回合完成后安装，失败保留旧服务；
+成功后只重启 Web 服务，Render/terminald 的会话继续运行。Web 更新不能升级 Node.js；
+Node 版本不足会在改动安装前拒绝。页面同时核对新服务实例和目标版本后才刷新。
+旧版本无法自更新时，重新执行本文的 `install.sh`：恢复流程先下载验证完整包，
+保留旧安装，等待 Core 排空，再修复全局入口与原 service scope，支持残缺安装。
+默认保留已保存的 Beta 订阅；切换 Node 后已有配置/数据库仍进入升级流程。
+入口会复用兼容的已有 Node，必要时使用已配置 nvm 安装；npm 目录不可写时迁入用户可写的运行时目录，
+后续更新始终绑定这份实际安装。新版也附带 `wand update:repair` 恢复命令，避免依赖 GitHub 可达。
+可用 `WAND_UPDATE_CHANNEL=stable` 或 `beta` 指定本次恢复目标，
+`WAND_CONFIG_PATH` 指定自定义配置路径。详细流程、失败原因与补救见 [Web 更新说明](docs/web-updates.md)。
 
 正式 npm 发布由 `vX.Y.Z` Git tag 触发，只写入 `latest`，拒绝预发布版本。
 master 的 Beta 发布只写入 `beta`，版本为下一补丁号加
 `-beta.<构建序号>.<重试序号>.g<提交>`，例如 `4.89.5-beta.100.1.gabcdef0`。
 版本基数同时检查正式 Git tags 和 npm latest，兼容未推送 Git 的本地正式发布。
-Beta 尚未发布、通道版本无效或 npm 暂不可达时，不自动安装其他通道。
+Beta 标签缺失或无效时，Beta 订阅仍可接收有效正式版；正式通道始终不选择 beta。
+两个候选都无效或 npm 不可达时不安装。
 - **CLI 更新** — 在服务端设置中检查并快速更新 Claude Code、Codex、OpenCode、Qoder CLI、Pi 和 Gemini CLI，也可开启自动更新
 
 ### 配置

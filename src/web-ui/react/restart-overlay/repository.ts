@@ -50,7 +50,21 @@ export class HttpRestartOverlayRepository implements RestartOverlayRepository {
         response.status,
       );
     }
-    return normalizeRestartOverlayConfig(record);
+    const config = normalizeRestartOverlayConfig(record);
+    if (options.expectedVersion) {
+      // Older servers have no status endpoint; their readiness probe still works.
+      const statusResponse = await this.fetchImpl("/api/update-status", {
+        credentials: "same-origin", signal: options.signal, cache: "no-store",
+      });
+      if (statusResponse.ok) {
+        const statusValue: unknown = await statusResponse.json();
+        if (isRecord(statusValue) && statusValue.version === options.expectedVersion
+          && isRecord(statusValue.status) && statusValue.status.phase === "failed") {
+          config.updateFailure = stringValue(statusValue.status.message) || "更新失败，请刷新后重试。";
+        }
+      }
+    }
+    return config;
   }
 }
 

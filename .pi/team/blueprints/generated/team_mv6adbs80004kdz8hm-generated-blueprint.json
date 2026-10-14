@@ -1,0 +1,105 @@
+{
+  "blueprintId": "team_mv6adbs80004kdz8hm-generated-blueprint",
+  "runId": "team_mv6adbs80004kdz8hm",
+  "task": "完成剩余13文件清理与1行无效裸import修正，四个writer各独立cwd、无依赖图，不重复已有10文件候选。范围/Users/co0ontty/Self/vibe_coding/wand/output/architecture-stage2/server-cleanup-team/REMAINING-PLAN.md与remaining-ownership.json。只改owner源码，保留公开/compat/迁移/daemon/bridge与运行输入/生命周期；定点+tsc+真实patch/handoff。不得为机械拓扑数组相等新增死import。owner返回后负责人核候选/集成全量验证，再针对实际整体diff独立review，不自动发布部署或调整工具预算。",
+  "playbookId": "generated-blueprint",
+  "playbookTitle": "Dynamic team blueprint",
+  "source": "generated",
+  "status": "draft",
+  "createdAt": 1791872080086,
+  "roles": [
+    {
+      "roleId": "route-b-finish",
+      "title": "route-b-finish 剩余清理",
+      "description": "单一独占cwd=/Users/co0ontty/Self/vibe_coding/wand/output/architecture-stage2/server-cleanup-team/route-worktree，仅4文件",
+      "capability": "code",
+      "capabilityNeeds": [],
+      "tools": [
+        "bash",
+        "read",
+        "write",
+        "edit"
+      ],
+      "modelPreferences": [
+        "OpenAI/gpt-6.1-sol"
+      ],
+      "modelFit": "Small concrete TypeScript cleanup patch with compiler evidence; implement and verify, no repeated scouting."
+    },
+    {
+      "roleId": "storage-b-finish",
+      "title": "storage-b-finish 剩余清理",
+      "description": "单一独占cwd=/Users/co0ontty/Self/vibe_coding/wand/output/architecture-stage2/server-cleanup-team/storage-worktree，仅4文件",
+      "capability": "code",
+      "capabilityNeeds": [],
+      "tools": [
+        "bash",
+        "read",
+        "write",
+        "edit"
+      ],
+      "modelPreferences": [
+        "xai/grok-4.3"
+      ],
+      "modelFit": "Small concrete TypeScript cleanup patch with compiler evidence; implement and verify, no repeated scouting."
+    },
+    {
+      "roleId": "storage-c-finish",
+      "title": "storage-c-finish 剩余清理",
+      "description": "单一独占cwd=/Users/co0ontty/Self/vibe_coding/wand/output/architecture-stage2/server-cleanup-team/storage-tail-worktree，仅5文件",
+      "capability": "code",
+      "capabilityNeeds": [],
+      "tools": [
+        "bash",
+        "read",
+        "write",
+        "edit"
+      ],
+      "modelPreferences": [
+        "xai/grok-4.3"
+      ],
+      "modelFit": "Small concrete TypeScript cleanup patch with compiler evidence; implement and verify, no repeated scouting."
+    },
+    {
+      "roleId": "execution-finalize",
+      "title": "execution-finalize 剩余清理",
+      "description": "单一独占cwd=/Users/co0ontty/Self/vibe_coding/wand/output/architecture-stage2/server-cleanup-team/execution-worktree，仅1文件",
+      "capability": "code",
+      "capabilityNeeds": [],
+      "tools": [
+        "bash",
+        "read",
+        "write",
+        "edit"
+      ],
+      "modelPreferences": [
+        "xai/grok-4.3"
+      ],
+      "modelFit": "Small concrete TypeScript cleanup patch with compiler evidence; implement and verify, no repeated scouting."
+    }
+  ],
+  "rounds": [
+    {
+      "id": "collect",
+      "type": "parallel",
+      "roles": [
+        "route-b-finish",
+        "storage-b-finish",
+        "storage-c-finish",
+        "execution-finalize"
+      ]
+    }
+  ],
+  "policy": {
+    "rationale": "A task-specific collaboration blueprint generated for the lead captain",
+    "strategy": "The lead captain generated this collaboration plan; the extension handles dispatch, communication, observation, and recording.",
+    "evidencePolicy": "Workers should separate cited evidence, inference, confidence, and missing information.",
+    "modelPolicy": "Use configured models that are objectively available; keep soft health observations visible.",
+    "synthesisPolicy": "The lead uses worker outputs as inputs and keeps final judgment outside the extension.",
+    "progressMilestones": [
+      "collect: parallel"
+    ],
+    "stopCriteria": "All planned rounds have returned a status and the run log is persisted."
+  },
+  "outputContract": "真实ownFiles patch+短report/handoff/tests logs，final必须实质正文而非仅RADIO；不存在空成果冒称完成。",
+  "captainRationale": "A task-specific collaboration blueprint generated for the lead captain"
+}

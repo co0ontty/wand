@@ -15,6 +15,7 @@ test("repository opts into revision on bootstrap and encodes the returned opaque
     const url = new URL(String(input), "http://fixture");
     requests.push(`${url.pathname}${url.search}`);
     assert.equal(init?.credentials, "same-origin");
+    assert.equal(url.searchParams.get("includeArchived"), "1", "the shared directory includes the archive tier for local display filtering");
     // The production endpoint only sends an envelope when revision is present.
     if (!url.searchParams.has("revision")) return response(groups);
     return response(url.searchParams.get("revision") === revision
@@ -26,7 +27,7 @@ test("repository opts into revision on bootstrap and encodes the returned opaque
   assert.equal(initial.unchanged, false);
   assert.deepEqual(initial.groups, groups);
   assert.deepEqual(await repository.listTaskGroups(initial.revision), { groups: [], revision, unchanged: true });
-  assert.deepEqual(requests, ["/api/tasks?revision=", `/api/tasks?revision=${encodeURIComponent(revision)}`]);
+  assert.deepEqual(requests, ["/api/tasks?revision=&includeArchived=1", `/api/tasks?revision=${encodeURIComponent(revision)}&includeArchived=1`]);
 });
 
 test("repository retains legacy bare-array compatibility after opting into revision", async () => {
@@ -34,7 +35,7 @@ test("repository retains legacy bare-array compatibility after opting into revis
   const repository = new HttpWorkspacesRepository(async input => { requests.push(String(input)); return response(groups); });
   assert.deepEqual(await repository.listTaskGroups(), { groups, unchanged: false });
   assert.deepEqual(await repository.listTaskGroups("old-revision"), { groups, unchanged: false });
-  assert.deepEqual(requests, ["/api/tasks?revision=", "/api/tasks?revision=old-revision"]);
+  assert.deepEqual(requests, ["/api/tasks?revision=&includeArchived=1", "/api/tasks?revision=old-revision&includeArchived=1"]);
 });
 
 test("shared store bootstraps through the HTTP repository and preserves its cached directory on unchanged poll", async () => {
@@ -63,7 +64,7 @@ test("shared store bootstraps through the HTTP repository and preserves its cach
     poll(); await tick();
     assert.equal(store.getSnapshot().groups, cached);
     assert.equal(store.getSnapshot().loading, false);
-    assert.deepEqual(requests, ["/api/tasks?revision=", "/api/tasks?revision=server-revision"]);
+    assert.deepEqual(requests, ["/api/tasks?revision=&includeArchived=1", "/api/tasks?revision=server-revision&includeArchived=1"]);
   } finally { unsubscribe(); }
   assert.equal(cleared, true);
 });

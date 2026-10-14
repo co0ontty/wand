@@ -319,7 +319,10 @@ test("HTTP and auto restart wait before closing tools or arming a forced-exit ti
   assert.ok(wait < relaunch.indexOf("const forceExitTimer"));
   assert.ok(wait < relaunch.indexOf("await close()"));
   assert.doesNotMatch(relaunch.slice(0, wait), /dispose\(\)|process\.exit|await close\(\)/);
-  assert.match(server.slice(server.indexOf("// Manual and automatic restarts share")), /setTimeout\(\(\) => relaunchAfterShutdown\(\), 1000\)/);
+  assert.match(server.slice(server.indexOf("async function performAutoUpdate")), /launchServerUpdate/);
+  const helper = readFileSync(new URL("../src/update-helper.ts", import.meta.url), "utf8");
+  assert.ok(helper.indexOf("guard.waitForCoreTurnsComplete") < helper.indexOf("installedCli = await installPackageGloballyAsync"));
+  assert.doesNotMatch(server.slice(server.indexOf("async function performAutoUpdate")), /repairServiceUnitAfterUpdate/);
 });
 
 test("the running-service guard works in macOS Bash 3.2 under nounset without an optional flag", () => {

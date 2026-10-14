@@ -96,6 +96,11 @@ export function installSidebarStyles(): void {
 .sidebar .conversation-row[aria-current="page"] .conversation-row-title { color:var(--sidebar-accent); }
 .sidebar .conversation-row-open.ant-btn:hover { color:inherit; background:transparent; }
 .sidebar .conversation-row-time { color:var(--text-secondary); }
+.sidebar .conversation-session-toggle.ant-btn { width:24px; min-width:24px; height:28px; padding:0; margin-inline-end:24px; flex:none; color:var(--text-secondary); }
+.conversation-person-sessions { margin-inline-start:50px; border-inline-start:1px solid var(--border-subtle); padding-inline-start:6px; min-width:0; max-height:min(45dvh,360px); overflow-y:auto; overscroll-behavior:contain; }
+.sidebar .im-sidebar-group:has(.sidebar-session-preview) .im-sidebar-group-inner { max-height:min(45dvh,360px); overflow-y:auto; overscroll-behavior:contain; }
+.conversation-person-sessions .wand-sidebar-session-row { min-height:44px; }
+@media (pointer:coarse), (max-width:640px) { .sidebar .conversation-session-toggle.ant-btn { width:32px; min-width:32px; height:44px; margin-inline-end:32px; } }
 .sidebar :is(.workspace-session-main,.workspace-task-main,.wand-sidebar-session-row)[aria-current="page"], .sidebar .wand-sidebar-session-row.active { color:var(--sidebar-accent); background:var(--sidebar-selected); }
 .sidebar .conversation-navigation .wand-ui-icon-button:hover { background:var(--sidebar-hover); }
 .sidebar .conversation-navigation .wand-ui-icon-button[aria-current="page"] { background:var(--sidebar-selected); }

@@ -1,5 +1,5 @@
 import { legacyPtyRoleIdentity } from "../default-employee.js";
-import path from "node:path";
+import { isRecord } from "../object-utils.js";
 import { parseHarnessExtensionState } from "../core-extension-host.js";
 import { firstLayoutTabId } from "../layout-tree.js";
 import { type PasswordVaultItemType } from "../password-manager.js";
@@ -202,9 +202,7 @@ export type PersistedSessionOptions = DurableSessionOptions & {
   schemaVersion: typeof SESSION_OPTIONS_SCHEMA_VERSION;
 };
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+export { isRecord };
 
 export function isAutonomyPolicy(value: unknown): value is NonNullable<SessionSnapshot["autonomyPolicy"]> {
   return value === "assist" || value === "agent" || value === "agent-max";

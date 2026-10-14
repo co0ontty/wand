@@ -163,7 +163,7 @@ export function createRestartOverlayController(
     let becameReady = false;
     try {
       const config = await Promise.race([
-        dependencies.repository.loadConfig({ signal: abort.signal }),
+        dependencies.repository.loadConfig({ signal: abort.signal, expectedVersion: snapshot.target.expectedVersion }),
         aborted,
       ]);
       if (
@@ -172,6 +172,11 @@ export function createRestartOverlayController(
         || request !== abort
         || !snapshot.open
       ) return;
+      if (config.updateFailure) {
+        stopSchedule();
+        publish({ phase: "timed-out", lastError: config.updateFailure });
+        return;
+      }
       const readiness = evaluateRestartReadiness(snapshot.target, config);
       becameReady = readiness.ready;
       publish({

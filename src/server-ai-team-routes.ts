@@ -5,12 +5,10 @@ import { AiTeamConflictError, type AiTeamRunner } from "./ai-team-runner.js";
 import {
   AI_TEAM_AVATAR_MAX_CHARS,
   AI_TEAM_DEFAULT_MAX_STEPS,
-  AI_TEAM_MAX_CANDIDATES,
   AI_TEAM_MAX_MEMBERS,
   AI_TEAM_MAX_STEPS,
   AI_TEAM_MIN_MEMBERS,
   AI_TEAM_MIN_STEPS,
-  agentKey,
   isTeamMemberRole,
   memberAgents,
   type AiTeam,
@@ -22,7 +20,7 @@ import { getErrorMessage } from "./error-utils.js";
 import { defaultMilestoneIdForWrite, scopedMilestoneId } from "./milestone-scope.js";
 import { parseStoredAvatar } from "./avatar-input.js";
 import { bodyObject, boundedText, sendRouteError, text } from "./server-request.js";
-import { parseTaskAgent } from "./task-agent-parsing.js";
+import { hasDuplicateTaskAgentCandidates, parseTaskAgent, parseTaskAgentCandidates } from "./task-agent-parsing.js";
 import type { WandStorage } from "./storage.js";
 import { provisionalTaskTitleFromDescription } from "./task-title.js";
 import type { WandTaskAgent } from "./task-types.js";
@@ -92,13 +90,7 @@ function parseMembers(value: unknown, existing: AiTeam | null, source?: AiTeamEm
       if (employee) {
         agents = employee.agents.map((candidate) => ({ ...candidate }));
       } else if (Array.isArray(body.agents)) {
-        if (body.agents.length === 0) throw badRequest("至少需要一个执行候选。");
-        if (body.agents.length > AI_TEAM_MAX_CANDIDATES) throw badRequest(`最多 ${AI_TEAM_MAX_CANDIDATES} 个执行候选。`);
-        agents = body.agents.map((rawAgent): WandTaskAgent => {
-          const parsed = parseTaskAgent(rawAgent ?? {});
-          if (!parsed) throw badRequest("请选择有效的 CLI 工具。");
-          return parsed;
-        });
+        agents = parseTaskAgentCandidates(body.agents);
       } else if (body.agents !== undefined && body.agents !== null) {
         throw badRequest("候选执行配置必须是数组。");
       } else {
@@ -109,8 +101,7 @@ function parseMembers(value: unknown, existing: AiTeam | null, source?: AiTeamEm
     } catch (error) {
       throw badRequest(`成员「${name}」：${getErrorMessage(error)}`);
     }
-    const seenKeys = new Set(agents.map(agentKey));
-    if (seenKeys.size !== agents.length) throw badRequest(`成员「${name}」的执行候选重复。`);
+    if (hasDuplicateTaskAgentCandidates(agents)) throw badRequest(`成员「${name}」的执行候选重复。`);
     const member: AiTeamMember = {
       id, name, duty, agents,
       ...(employeeId ? { employeeId } : {}),

@@ -90,7 +90,10 @@ setTimeout(() => process.exit(2), 15000).unref();
   // PATH repair is independent of shell-env recovery, so disable both before
   // startup; otherwise the real pi can move ahead of the fixture executable.
   const env = { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`,
-    WAND_SHELL_ENV_DISABLE: "1", WAND_PATH_REPAIR_DEEP_DISABLE: "1", WAND_STRUCTURED_RENDER_BIN: RUST_BIN };
+    WAND_SHELL_ENV_DISABLE: "1", WAND_PATH_REPAIR_DEEP_DISABLE: "1", WAND_STRUCTURED_RENDER_BIN: RUST_BIN,
+    // This test deliberately verifies the existing JSON CLI's Rust v2 owner,
+    // not the new native TUI owner; keep its execution lane explicit.
+    WAND_PI_NATIVE_TMUX: "0" };
   delete env.NODE_TEST_CONTEXT;
   delete env.WAND_TEST_MODE;
   let web: ChildProcess | null = null;

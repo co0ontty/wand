@@ -1,5 +1,4 @@
 import crypto from "node:crypto";
-import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { firstLayoutTabId } from "../layout-tree.js";
 import { nowIso } from "../password-manager.js";

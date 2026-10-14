@@ -22,6 +22,11 @@ export interface StructuredSpawnRequest {
   env: NodeJS.ProcessEnv;
   /** Written to stdin once, then stdin is closed. Omit for stdio-ignore CLIs. */
   stdinData?: string;
+  /** Internal opt-in: a real Pi native TUI in an owned tmux pane. Never supplied by HTTP command text. */
+  nativePi?: boolean;
+  requestId?: string;
+  /** Native launch cancellation before a CLI has accepted any input; not sent to daemon RPCs. */
+  launchSignal?: AbortSignal;
 }
 
 export interface StructuredRunState {
@@ -37,6 +42,8 @@ export interface StructuredRunState {
   stderrLog: string;
   stdoutTruncated: boolean;
   stderrTruncated: boolean;
+  /** Already-file-backed native output; no Server-side stdout capture copy is required. */
+  nativeFile?: string;
 }
 
 export interface StructuredStreamEvent {
@@ -61,6 +68,7 @@ export interface StructuredExecProcess {
 
 export interface StructuredExecHost {
   readonly persistent: boolean;
+  readonly piNativeTui?: boolean;
   spawnStructured(request: StructuredSpawnRequest): Promise<StructuredExecProcess>;
   /** Full state incl. replay logs; null when the host does not know the run. */
   attachRun(runId: string): Promise<StructuredRunState | null>;

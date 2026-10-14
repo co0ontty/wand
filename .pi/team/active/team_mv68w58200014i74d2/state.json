@@ -1,0 +1,155 @@
+{
+  "runId": "team_mv68w58200014i74d2",
+  "task": "清理Wand服务端已核实的重构遗留：3个互不重叠隔离writer产出patch与定点证据，随后第4角色只读独立复核。范围与证据见/Users/co0ontty/Self/vibe_coding/wand/output/architecture-stage2/server-cleanup-team/PLAN.md和/Users/co0ontty/Self/vibe_coding/wand/output/architecture-stage2/server-cleanup-candidates.md。保留公开API/兼容重导出/legacy daemon/动态bridge/迁移/协议，禁止提交发布与线上数据操作。负责人在team结束后核验并集成，统一全量验证；workers不要替负责人声称任务完成。",
+  "playbookId": "generated-blueprint",
+  "fallbackPolicy": "task_first",
+  "status": "failed",
+  "modelHealth": [
+    {
+      "model": "anthropic/claude-fable-5",
+      "provider": "anthropic",
+      "status": "provider_error",
+      "reason": "probe produced no output",
+      "latencyMs": 1307,
+      "checkedAt": 1791869597584,
+      "evidenceSource": "probe"
+    },
+    {
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "provider": "openai-codex",
+      "status": "provider_error",
+      "reason": "probe produced no output",
+      "latencyMs": 1807,
+      "checkedAt": 1791869598084,
+      "evidenceSource": "probe"
+    },
+    {
+      "model": "xai/grok-4.3",
+      "provider": "xai",
+      "status": "probe_passed",
+      "latencyMs": 3365,
+      "checkedAt": 1791869599642,
+      "evidenceSource": "probe"
+    },
+    {
+      "model": "OpenAI/gpt-6.1-sol",
+      "provider": "OpenAI",
+      "status": "probe_passed",
+      "latencyMs": 3615,
+      "checkedAt": 1791869599892,
+      "evidenceSource": "probe"
+    }
+  ],
+  "workers": [],
+  "lastEvent": {
+    "at": 1791869599935,
+    "phase": "plan-graph-invalid",
+    "message": "role 'cleanup-review' references unknown dependency 'execution_dead'",
+    "isError": true
+  },
+  "events": [
+    {
+      "at": 1791869596274,
+      "phase": "planning",
+      "message": "selected playbook generated-blueprint with 1 round(s)",
+      "status": "planning"
+    },
+    {
+      "at": 1791869596274,
+      "phase": "blueprint-strategy",
+      "message": "The lead captain generated this collaboration plan; the extension handles dispatch, communication, observation, and recording.",
+      "status": "planning"
+    },
+    {
+      "at": 1791869596274,
+      "phase": "blueprint-policy",
+      "message": "evidence=Workers should separate cited evidence, inference, confidence, and missing information. model=Use configured models that are objectively available; keep soft health observations visible. synthesis=The lead uses worker outputs as inputs and keeps final judgment outside the extension.",
+      "status": "planning"
+    },
+    {
+      "at": 1791869596274,
+      "phase": "tool-inheritance",
+      "message": "inherited 32 active tool(s): read,bash,edit,write,codemode,bg_wait,subagents_enable,todo,workflow,find_roots,observe_ui,search_ui,expand_ui,inspect_ui,act_ui,read_text,wait_for,launch_browser,navigate_browser,evaluate_browser,advisor,team_status,team_message,team_promote_blueprint,team_cancel_worker,team_spawn_worker,team_cancel,team_handoff,web_enable,subagent_supervisor,create_goal,get_goal",
+      "status": "planning"
+    },
+    {
+      "at": 1791869599893,
+      "phase": "model-observe-start",
+      "message": "selected 4/49 relevant model(s) to probe across 4 role(s); fallbackPolicy=task_first",
+      "status": "probing"
+    },
+    {
+      "at": 1791869599893,
+      "phase": "model-observe-end",
+      "message": "anthropic/claude-fable-5:provider_error, openai-codex/gpt-5.3-codex-spark:provider_error, xai/grok-4.3:probe_passed, OpenAI/gpt-6.1-sol:probe_passed",
+      "status": "probing"
+    },
+    {
+      "at": 1791869599894,
+      "phase": "dispatch-ready",
+      "message": "route-remnants->anthropic/claude-fable-5 (policy=task_first; selected via metadata; thinking=high; captain remains final judge; metadata: anthropic/claude-fable-5 (warning: probe error: probe produced no output) | fallback: xiaomai/claude-fable-5 (warning: not probed (lazy fallback)) | fallback: anthropic/claude-fable-5-1 (warning: not probed (lazy fallback))), storage-assembly->openai-codex/gpt-5.3-codex-spark (policy=task_first; selected via metadata; thinking=high; captain remains final judge; metadata: openai-codex/gpt-5.3-codex-spark (warning: probe error: probe produced no output) | fallback: openai-codex/gpt-5.5 (warning: not probed (lazy fallback)) | fallback: openai-codex/gpt-5.6-luna (warning: not probed (lazy fallback))), execution-dead->xai/grok-4.3 (policy=task_first; selected via metadata; thinking=high; captain remains final judge; metadata: xai/grok-4.3 | fallback: xai/grok-4.5 (warning: not probed (lazy fallback)) | fallback: xai/grok-4.6 (warning: not probed (lazy fallback))), cleanup-review->OpenAI/gpt-6.1-sol (policy=task_first; selected via metadata; thinking=high; captain remains final judge; metadata: OpenAI/gpt-6.1-sol | fallback: openai-codex/gpt-6.1-sol (warning: not probed (lazy fallback)) | fallback: OpenAI/gpt-6-astra (warning: not probed (lazy fallback)))"
+    },
+    {
+      "at": 1791869599934,
+      "phase": "run-start",
+      "message": "running playbook generated-blueprint: A task-specific collaboration blueprint generated for the lead captain",
+      "status": "running"
+    },
+    {
+      "at": 1791869599934,
+      "phase": "run-policy",
+      "message": "strategy=The lead captain generated this collaboration plan; the extension handles dispatch, communication, observation, and recording. evidence=Workers should separate cited evidence, inference, confidence, and missing information.",
+      "status": "running"
+    },
+    {
+      "at": 1791869599935,
+      "phase": "watchdog-advisory",
+      "message": "watchdog advisory active (1 file(s): default:/Users/co0ontty/.pi/agent/npm/node_modules/pi-team/src/defaults/WATCHDOG.md); injected as advisory into worker prompts",
+      "status": "running"
+    },
+    {
+      "at": 1791869599935,
+      "phase": "plan-graph-invalid",
+      "message": "role 'cleanup-review' references unknown dependency 'route_remnants'",
+      "isError": true
+    },
+    {
+      "at": 1791869599935,
+      "phase": "plan-graph-invalid",
+      "message": "role 'cleanup-review' references unknown dependency 'storage_assembly'",
+      "isError": true
+    },
+    {
+      "at": 1791869599935,
+      "phase": "plan-graph-invalid",
+      "message": "role 'cleanup-review' references unknown dependency 'execution_dead'",
+      "isError": true
+    }
+  ],
+  "activeDir": "/Users/co0ontty/Self/vibe_coding/wand/.pi/team/active/team_mv68w58200014i74d2",
+  "mailboxFile": "/Users/co0ontty/Self/vibe_coding/wand/.pi/team/active/team_mv68w58200014i74d2/mailbox.jsonl",
+  "mailboxTextFile": "/Users/co0ontty/Self/vibe_coding/wand/.pi/team/active/team_mv68w58200014i74d2/mailbox.txt",
+  "cancelFile": "/Users/co0ontty/Self/vibe_coding/wand/.pi/team/active/team_mv68w58200014i74d2/cancel.json",
+  "blueprintId": "team_mv68w58200014i74d2-generated-blueprint",
+  "blueprintFile": "/Users/co0ontty/Self/vibe_coding/wand/.pi/team/blueprints/generated/team_mv68w58200014i74d2-generated-blueprint.json",
+  "planGraph": {
+    "errors": [
+      "role 'cleanup-review' references unknown dependency 'route_remnants'",
+      "role 'cleanup-review' references unknown dependency 'storage_assembly'",
+      "role 'cleanup-review' references unknown dependency 'execution_dead'"
+    ],
+    "warnings": []
+  },
+  "finalSummary": "Team plan graph invalid:\n- role 'cleanup-review' references unknown dependency 'route_remnants'\n- role 'cleanup-review' references unknown dependency 'storage_assembly'\n- role 'cleanup-review' references unknown dependency 'execution_dead'",
+  "resultAvailability": "empty",
+  "evidenceCompleteness": {
+    "hasEvidenceRefs": false,
+    "hasLimitations": false,
+    "hasConfidence": false,
+    "hasOpenQuestions": false
+  },
+  "captainAbsorptionPrompt": "Captain: the extension has classified this run's output landscape.\nresultAvailability=empty\nevidenceCompleteness={\"hasEvidenceRefs\":false,\"hasLimitations\":false,\"hasConfidence\":false,\"hasOpenQuestions\":false}\nThese are factual signals, not quality judgments. The semantic verdict is yours.",
+  "logFile": "/Users/co0ontty/Self/vibe_coding/wand/.pi/team/runs/team_mv68w58200014i74d2.json",
+  "lastObservedAt": 1791869616389,
+  "terminalObservedAt": 1791869616389
+}

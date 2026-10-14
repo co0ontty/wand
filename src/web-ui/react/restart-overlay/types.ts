@@ -11,10 +11,12 @@ export interface RestartOverlayConfig {
   serverInstanceId: string;
   packageVersion: string;
   currentVersion: string;
+  updateFailure?: string;
 }
 
 export interface RestartOverlayRepositoryOptions {
   signal?: AbortSignal;
+  expectedVersion?: string;
 }
 
 /** Remote-owned seam for the readiness probe. */

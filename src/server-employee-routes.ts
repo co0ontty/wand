@@ -4,9 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { Express, Response } from "express";
 
 import {
-  AI_TEAM_MAX_CANDIDATES,
   SILICON_EMPLOYEE_AVATAR_MAX_CHARS,
-  agentKey,
   isBuiltinSiliconEmployee,
   parseSiliconEmployeeTags,
   siliconEmployeeTags,
@@ -18,7 +16,7 @@ import { getErrorMessage } from "./error-utils.js";
 import { asyncRoute } from "./express-async.js";
 import { parseStoredAvatar } from "./avatar-input.js";
 import { bodyObject, boundedText, sendRouteError, text } from "./server-request.js";
-import { parseTaskAgent } from "./task-agent-parsing.js";
+import { hasDuplicateTaskAgentCandidates, parseTaskAgent, parseTaskAgentCandidates } from "./task-agent-parsing.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
 import { employeeCliAvailable } from "./silicon-employee-dispatch.js";
 import {
@@ -145,17 +143,10 @@ export function parseFixedAvatarEmployeeInput(value: unknown, existing: SiliconE
 /** One validation owner for every employee candidate list, including legacy single agents. */
 function parseEmployeeAgents(value: unknown): WandTaskAgent[] {
   if (!Array.isArray(value)) throw badRequest("请提供执行候选数组（CLI / SDK）。");
-  if (value.length === 0) throw badRequest("至少需要一个执行候选。");
-  if (value.length > AI_TEAM_MAX_CANDIDATES) {
-    throw badRequest(`最多 ${AI_TEAM_MAX_CANDIDATES} 个执行候选。`);
-  }
-  const agents = value.map((rawAgent): WandTaskAgent => {
-    const parsed = parseTaskAgent(rawAgent ?? {});
-    if (!parsed) throw badRequest("请选择有效的 CLI 工具或 Wand Agent。");
-    if (parsed.kind !== "structured") throw badRequest("硅基员工只支持结构化会话。");
-    return parsed;
+  const agents = parseTaskAgentCandidates(value, (candidate) => {
+    if (candidate.kind !== "structured") throw badRequest("硅基员工只支持结构化会话。");
   });
-  if (new Set(agents.map(agentKey)).size !== agents.length) {
+  if (hasDuplicateTaskAgentCandidates(agents)) {
     throw badRequest("执行候选存在重复。");
   }
   return agents;

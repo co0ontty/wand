@@ -15,7 +15,6 @@ import { renderApp } from "./web-ui/index.js";
 import { getAiTeamsChunk, getBrowserModule, getPlushAvatarChunk, getScriptAsset, getThemePreloadAsset } from "./web-ui/scripts.js";
 import { getStylesAsset } from "./web-ui/styles.js";
 import type { WandConfig } from "./types.js";
-import { getErrorMessage } from "./error-utils.js";
 
 /** 结构化聊天头像允许的图片类型；未知扩展名回 415。 */
 const AVATAR_CONTENT_TYPES: Record<string, string> = {

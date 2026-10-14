@@ -2,82 +2,11 @@ import crypto from "node:crypto";
 import { chmodSync,mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { freezeTeamEmployees,projectTeamDefinition,restoreTeamMemberEmployee,serializeExecutionTeam } from "./ai-team-employee-binding.js";
-import type {
-  AiTeam,AiTeamMember,AiTeamRun,AiTeamRunChatMarker,AiTeamRunStatus,AiTeamStep,AiTeamStepKind,AiTeamStepSessionMarker,AiTeamStepStatus,
-  CandidateFailureKind,SiliconEmployee,StepDispatchInfo,
-} from "./ai-team-types.js";
-import { AI_TEAM_DEFAULT_MAX_STEPS,AI_TEAM_TERMINAL_RUN_STATUSES,DEFAULT_EMPLOYEE_KEY,aiTeamChatTitle,isBuiltinSiliconEmployee,isTeamMemberRole,memberAgents,parseSiliconEmployeeTags,siliconEmployeeTags } from "./ai-team-types.js";
-import { CONVERSATION_OWNER,type ConversationInstance,type ConversationRequest } from "./conversation-types.js";
-import { parseHarnessExtensionState } from "./core-extension-host.js";
-import { decisionExpertDefinition } from "./decision-expert-employee.js";
-import { DECISION_EXPERT_KEY } from "./decision-expert-identity.js";
-import { defaultEmployeeDefinition,legacyPtyRoleIdentity } from "./default-employee.js";
-import { normalizeEmployeeKnowledge } from "./employee-knowledge-content.js";
-import { EMPLOYEE_KNOWLEDGE_MAX_ENTRIES,type EmployeeKnowledgeEntry } from "./employee-knowledge-types.js";
-import { FIXED_EMPLOYEE_AVATARS,employeeAvatarValue,fixedEmployeeAvatar,isFixedAvatarEmployee } from "./fixed-employee-avatar.js";
-import { HR_EMPLOYEE_KEY } from "./hr-employee-identity.js";
-import { hrEmployeeDefinition } from "./hr-employee.js";
-import { firstLayoutTabId } from "./layout-tree.js";
-import type {
-  AgentActivityItem,
-  AgentActivityState,
-  Mission,
-  MissionAttempt,
-  MissionAttemptState,
-  MissionReviewComment,
-  MissionReviewStatus,
-  MissionStatus,
-} from "./mission-types.js";
-import {
-  DEFAULT_PASSWORD_VAULT_ID,
-  VaultDecryptError,
-  decryptVaultSecretTyped,
-  encryptVaultSecretV2,
-  isVaultSecretV2,
-  verifyAdminPassword,
-  type VaultKeys,
-  DEFAULT_PASSWORD_VAULT_NAME,
-  itemMatchesFilter,
-  normalizePasswordItemInput,
-  normalizeVaultName,
-  nowIso,
-  type PasswordVault,
-  type PasswordVaultItem,
-  type PasswordVaultItemFilter,
-  type PasswordVaultItemInput,
-  type PasswordVaultItemType,
-} from "./password-manager.js";
-import { defaultPiCliSessionSettings,defaultPiSessionSettings,patchPiSessionSettings,type PiSessionSettings } from "./pi-session-settings.js";
-import { normalizeSessionDirectory } from "./session-directory-tree.js";
-import { SESSION_PROVIDERS,inferProviderFromCommand,inferProviderFromRunner,isSessionProvider } from "./session-provider.js";
-import { speechPolisherDefinition } from "./speech-polisher-employee.js";
-import { SPEECH_POLISHER_KEY } from "./speech-polisher-identity.js";
 import { ScheduledTaskRepository } from "./storage-schedules.js";
 import { openStorageDatabase } from "./storage-schema.js";
-import { hashAuthToken } from "./storage/auth-token.js";
-import { loadVaultKey } from "./storage/vault-keys.js";
-import { isThinkingEffort } from "./structured-provider-common.js";
-import {
-  SYSTEM_EMPLOYEE_KEY,
-  systemEmployeeDefinition,
-  systemEmployeeSeedAgents,
-  type SystemEmployeeSeed,
-} from "./system-employee.js";
-import type { WandTask,WandTaskAgent,WandTaskAgentKind,WandTaskTitleSource } from "./task-types.js";
-import { DEFAULT_ITERATION_NAME,DEFAULT_WAND_TASK_AGENT_KIND,DEFAULT_WAND_TASK_PRIORITY,isTaskExecutionSubject,isWandTaskAgentEngine,isWandTaskAgentKind,normalizeWandTaskAgentMode } from "./task-types.js";
-import { ConversationTurn,GLOBAL_WORKSPACE_ID,HarnessSessionContext,LayoutNode,SessionKind,SessionProvider,SessionRunner,SessionSnapshot,SessionSource,StructuredSessionState,TaskWindowLayout,Workspace,WorkspaceDefaultProvider,WorkspaceKind,WorkspaceTask,WorkspaceTaskStatus,WorkspaceTaskWorktree,WorktreeMergeInfo } from "./types.js";
-import {
-  USER_MEMORY_MAX_EVENTS,USER_MEMORY_RETENTION_MS,
-  type UserMemoryEvent,type UserMemoryProfile,type UserMemoryState,
-} from "./user-memory-types.js";
-import { isUnnamedWorkspaceTaskName } from "./wand-task-sync.js";
-import { ensureWorkspaceForCwd } from "./workspace-binding.js";
-import { SessionRow, PasswordVaultRow, PasswordVaultItemRow, ConnectorRow, safeJsonParse, mapWandMilestoneRow, mapIterationPromptRow, SESSION_OPTIONS_SCHEMA_VERSION, DurableSessionOptions, PersistedSessionOptions, isRecord, isAutonomyPolicy, isApprovalPolicy, isEscalationScope, isEscalationResolution, parsePendingEscalation, parseLastEscalationResult, parseApprovalStats, serializeSessionOptions, parseSessionOptions, HARNESS_SUMMARY_MAX_CHARS, parseHarnessContext, parseQueuedMessages, parseWorktreeInfo, parseWorktreeMergeInfo, serializeJsonOrNull, normalizeWorktreeMergeStatus, normalizeSessionSource, mapWorktreeMergeFields, sessionSelectFields, WorkspaceRow, mapWorkspaceKind, mapWorkspaceRow, WorkspaceTaskRow, mapWorkspaceTaskWorktree, mapWorkspaceTaskLayout, mapWorkspaceTaskRow, sessionPersistFields, sessionPersistAssignments, sessionRuntimeMetadataAssignments, sessionPersistValues, sessionRuntimeMetadataValues, mapSessionCore, sessionRowQuery } from "./storage/mappers.js";
 import type { ConnectorMeta } from "./storage/mappers.js";
 import { parseWandTaskAgent } from "./storage/mappers.js";
 export * from "./storage/internal.js";
-import { LOCKED_SYSTEM_EMPLOYEE_DEFINITIONS, AiTeamRunState, DEFAULT_DB_FILE, AuthPrincipalKind, AuthScope, AuthPrincipal, PersistedAuthSession, resolveDatabasePath, CreateWandTaskInput, WandTaskPatch, WAND_TASK_FIELDS, WORKSPACE_TASK_PROJECTION, withoutSessionTab, mapSiliconEmployeeRow, mapAiTeamRow, normalizeAiTeamMember, normalizeAiTeamMembers, teamMemberName, mapAiTeamRunRow, CANDIDATE_FAILURE_KINDS, isCandidateFailureKind, nonEmptyString, parseStepDispatchInfo, parseAiTeamRunState, mapAiTeamStepRow, mapMissionRow, mapMissionAttemptRow, mapMissionReviewCommentRow, mapAgentActivityRow, mapPasswordVaultRow, PasswordItemRowFields, decodePasswordFields, mapPasswordItemRow, WORKSPACE_GROUP_ORDER_KEY, PI_SESSION_DEFAULTS_KEY, AUTH_SCOPES, parseAuthPrincipal } from "./storage/internal.js";
 import { ConversationRepository } from "./storage/conversations-repository.js";
 import { PreferencesRepository } from "./storage/preferences-repository.js";
 import { WorkspaceRepository } from "./storage/workspaces-repository.js";

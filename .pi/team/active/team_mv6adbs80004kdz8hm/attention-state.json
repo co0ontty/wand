@@ -1,0 +1,10 @@
+{
+  "roles": {
+    "route-b-finish": {
+      "communicationAt": 1791872415988,
+      "silenceAlerted": false,
+      "pendingAckAlerted": false,
+      "cancelAlerted": false
+    }
+  }
+}

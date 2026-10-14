@@ -8,6 +8,7 @@
 
 import { getErrorMessage } from "./error-utils.js";
 import { badRequest, isHttpError } from "./http-error.js";
+import { isRecord } from "./object-utils.js";
 
 /** 客户端 IP：经 trust proxy 解析后的 req.ip，缺省回落到 socket 地址。 */
 export function resolveClientIp(req: { ip?: string; socket: { remoteAddress?: string } }): string {
@@ -71,8 +72,8 @@ export function normalizeProtocol(value: string | undefined): "http" | "https" |
 
 /** 要求请求体是普通对象；数组和 null 都拒绝。 */
 export function bodyObject(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw badRequest("请求体必须是对象。");
-  return value as Record<string, unknown>;
+  if (!isRecord(value)) throw badRequest("请求体必须是对象。");
+  return value;
 }
 
 /** 从对象里取必填的非空字符串字段。 */

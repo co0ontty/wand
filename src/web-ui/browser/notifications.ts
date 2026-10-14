@@ -816,7 +816,7 @@ function showUpdateBubble(currentVer: string, latestVer: string) {
       setStatus("");
       if (actionLabel) actionLabel.textContent = "正在重启…";
       if (data.detachedUpdate) {
-        showRestartOverlay();
+        showRestartOverlay(data.previousInstanceId || null, data.version || null);
         return;
       }
       if (data.restartRequired === false) {

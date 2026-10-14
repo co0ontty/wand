@@ -68,6 +68,7 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
   let failList = false;
   let delayArchive = false;
   let releaseArchive: (() => void) | null = null;
+  let delayTaskArchive = false;
   let releaseTaskArchive: (() => void) | null = null;
   const mutations: string[] = [];
   const server = createServer((req, res) => {
@@ -78,7 +79,7 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
         mutations.push(`${req.method} ${url.pathname}`);
         const reject = (): void => { res.statusCode = 503; res.end(JSON.stringify({ error: "明确测试失败，请重试" })); };
         if (delayArchive && url.pathname === "/api/sessions/batch-archive") { releaseArchive = reject; return; }
-        if (url.pathname === "/api/workspace-tasks/t2/archive") { releaseTaskArchive = () => res.end(JSON.stringify({ id: "t2" })); return; }
+        if (delayTaskArchive && url.pathname === "/api/workspace-tasks/t2/archive") { releaseTaskArchive = () => res.end(JSON.stringify({ id: "t2" })); return; }
         reject(); return;
       }
       if (url.pathname === "/api/tasks" && failList) { res.statusCode = 503; res.end(JSON.stringify({ error: "列表同步失败" })); return; }
@@ -196,7 +197,7 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
         await browser.wait('!document.querySelector("#sidebar-notifications")', "outside click closes notifications");
         // The chat list uses the very same native menu and keyboard/confirmation protocol.
         await browser.wait('!!document.querySelector(".conversation-row")');
-        const density = await browser.evaluate(`(()=>{const row=document.querySelector('.conversation-row'),avatar=row.querySelector('.ant-avatar'),body=document.querySelector('.sidebar-body'),title=document.querySelector('[data-conversation-id="dense-0"] .conversation-row-title');return {row:row.getBoundingClientRect().height,avatar:avatar.getBoundingClientRect().width,scrolls:body.scrollHeight>body.clientHeight,truncated:title.scrollWidth>title.clientWidth,overflow:body.scrollWidth>body.clientWidth+1,labels:[...document.querySelectorAll('.conversation-navigation .sidebar-nav-label')].map(n=>n.textContent)}})()`);
+        const density = await browser.evaluate(`(()=>{const row=document.querySelector('.conversation-row'),avatar=row.querySelector('.conversation-group-avatar,.wand-employee-avatar,.ant-avatar'),body=document.querySelector('.sidebar-body'),title=document.querySelector('[data-conversation-id="dense-0"] .conversation-row-title');return {row:row.getBoundingClientRect().height,avatar:avatar.getBoundingClientRect().width,scrolls:body.scrollHeight>body.clientHeight,truncated:title.scrollWidth>title.clientWidth,overflow:body.scrollWidth>body.clientWidth+1,labels:[...document.querySelectorAll('.conversation-navigation .sidebar-nav-label')].map(n=>n.textContent)}})()`);
         // List identities use the shared 36px small avatar; touch targets grow independently.
         assert.equal(density.row, 56, `${mode}: compact conversation row around the shared identity`);
         assert.equal(density.avatar, 36, `${mode}: shared list identity image`);
@@ -422,19 +423,34 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
         assert.equal(await browser.evaluate(`(${visible})(document.querySelector('.workspace-session-move-menu'))`), true, "failure feedback is visible, not merely retained in a hidden submenu");
         await browser.key("Escape"); await browser.key("Escape");
         assert.equal(await browser.evaluate('fixture.memory.getSnapshot().layout.sessionsDrawerOpen'), true, "closing a failed move never dismisses the drawer");
+        // Archive stays discoverable while busy, but cannot submit or interrupt work.
+        await browser.click('[data-workspace-task-id=t1] .workspace-task', "right");
+        await browser.wait('!!document.querySelector(".workspace-task-menu .ant-dropdown-menu")');
+        assert.equal(await browser.evaluate("Array.from(document.querySelectorAll('.workspace-task-menu [role=menuitem]')).find(n=>n.textContent.includes('归档任务'))?.getAttribute('aria-disabled')"), "true");
+        assert.match(await browser.evaluate("document.querySelector('.workspace-task-menu').textContent"), /执行结束后可用/);
+        const beforeBlockedArchive = mutations.length;
+        await clickMenuText('.workspace-task-menu', '归档任务');
+        assert.equal(mutations.length, beforeBlockedArchive);
+        await browser.key("Escape");
+        // A failed direct archive keeps the row and retryable feedback in every shell.
+        await browser.click('[data-workspace-task-id=t2] .workspace-task', "right");
+        await clickMenuText('.workspace-task-menu', '归档任务');
+        await browser.wait("document.querySelector('[data-workspace-task-id=t2]').getAttribute('aria-busy')!=='true'", "failed archive released the lock");
+        assert.equal(await browser.evaluate(`!!(${VISIBLE_DIALOG})`), false);
+        await browser.click('[data-workspace-task-id=t2] .workspace-task', "right");
+        await browser.wait(`document.querySelector('.workspace-task-menu [role=alert]')?.textContent.includes('明确测试失败')`, "task archive failure remains retryable");
+        await browser.key("Escape");
         if (mode === "desktop") {
-          // Busy task t1 cannot be archived; the delayed acknowledgement case uses idle t2.
-          await browser.click('[data-workspace-task-id=t1] .workspace-task', "right");
-          assert.equal(await browser.evaluate("Array.from(document.querySelectorAll('.workspace-task-menu [role=menuitem]')).some(n=>n.textContent.includes('归档任务'))"), false);
-          await browser.key("Escape");
+          // Idle t2 archives directly; a late receipt cannot close a different task.
+          delayTaskArchive = true; releaseTaskArchive = null;
           await browser.evaluate("fixture.setContext({workspaceId:'w1',taskId:'t2'});true");
           await browser.click('[data-workspace-task-id=t2] .workspace-task', "right");
           await clickMenuText('.workspace-task-menu', '归档任务');
-          await browser.wait(`!!(${VISIBLE_DIALOG})`);
-          await clickDialogAction("确认归档任务");
+          await browser.wait("document.querySelector('[data-workspace-task-id=t2]').getAttribute('aria-busy')==='true'", "direct archive started");
+          assert.equal(await browser.evaluate(`!!(${VISIBLE_DIALOG})`), false, "recoverable task archive needs no confirmation");
           assert.ok(releaseTaskArchive, "the fixture owns the pending task mutation");
           await browser.evaluate("fixture.setContext({workspaceId:'w1',taskId:'t1'});true");
-          (releaseTaskArchive as () => void)();
+          (releaseTaskArchive as () => void)(); delayTaskArchive = false;
           await browser.wait("document.querySelector('[data-workspace-task-id=t2]').getAttribute('aria-busy')!=='true'", "task archive settled");
           assert.equal(await browser.evaluate("fixture.closed"), 0, "a late archive must not close the newly opened task");
         }

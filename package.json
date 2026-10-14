@@ -16,6 +16,10 @@
     "skills/wand-decision",
     "browser-extension",
     "scripts/install-render-binary.js",
+    "scripts/recover-web-update.sh",
+    "scripts/recover-web-update.mjs",
+    "scripts/update-node.sh",
+    "scripts/update-target.js",
     "scripts/stage-render-binaries.js",
     "scripts/install-speech-runtime.js",
     "scripts/install-laya-runtime.js"
@@ -74,6 +78,8 @@
     "multer": "^2.1.1",
     "neo-blessed": "^0.2.0",
     "node-pty": "^1.1.0",
+    "stream-chain": "4.2.5",
+    "stream-json": "3.7.0",
     "ws": "^8.19.0"
   },
   "devDependencies": {

@@ -52,7 +52,7 @@ export function OverlayHost({ portalContainer, settingsPresentation = "workspace
       <WorkspacesHost />
       <GithubIssuesHost />
       </> : null}
-      {settingsPresentation === "page" ? <SettingsHost presentation="page" showRestart={() => restartOverlayController.showRestart()} /> : null}
+      {settingsPresentation === "page" ? <SettingsHost presentation="page" showRestart={restartOverlayController.showRestart} /> : null}
       {settingsPresentation === "workspace" ? <>
       <NewSessionHost />
       <FolderPickerHost />

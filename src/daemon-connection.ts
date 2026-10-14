@@ -5,6 +5,18 @@ const CONNECT_TIMEOUT_MS = 10_000;
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const HEARTBEAT_TIMEOUT_MS = 5_000;
 
+/** Reject this client's pending generation without changing its connection lifecycle. */
+export function rejectPendingRequests<T extends { timer: NodeJS.Timeout; reject(error: Error): void }>(
+  pending: Map<number, T>,
+  error: Error,
+): void {
+  for (const request of pending.values()) {
+    clearTimeout(request.timer);
+    request.reject(error);
+  }
+  pending.clear();
+}
+
 /** Bound connect attempts, including sockets that close before the handshake. */
 export function waitForDaemonSocket(socket: net.Socket): Promise<void> {
   return new Promise((resolve, reject) => {

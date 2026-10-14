@@ -370,7 +370,6 @@ function systemctlBaseArgs(scope: ServiceScope): string[] {
 }
 
 interface ProbeOutput { status: number | null; stdout: string; stderr: string }
-const NO_PROBE: ProbeOutput = { status: null, stdout: "", stderr: "" };
 
 function systemdProbeArgs(scope: ServiceScope): { active: string[]; show: string[]; status: string[] } {
   const base = systemctlBaseArgs(scope);

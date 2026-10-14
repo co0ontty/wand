@@ -1,0 +1,6 @@
+Lane mailbox for execution-finalize 剩余清理 (role execution-finalize)
+Run: team_mv6adbs80004kdz8hm
+Lane: execution-finalize-1791872080112
+Token: 8dbceb3d-2876-4d4a-946e-f8c702d8c60d
+
+Captain messages appear below, newest last.

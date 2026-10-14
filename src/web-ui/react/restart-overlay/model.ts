@@ -58,12 +58,12 @@ export function restartOverlayPresentation(
   snapshot: RestartOverlaySnapshot,
 ): RestartOverlayPresentation {
   const isAutoUpdate = snapshot.mode === "auto-update";
-  const title = isAutoUpdate
+  let title = isAutoUpdate
     ? "自动更新中"
     : snapshot.target.expectedVersion
       ? "正在完成更新"
       : "服务正在重启";
-  const description = isAutoUpdate
+  let description = isAutoUpdate
     ? `${snapshot.currentVersion || "-"} → ${snapshot.latestVersion || "-"}\n正在下载并安装新版本，完成后将自动重启。`
     : snapshot.target.expectedVersion
       ? "安装完成并启动新版本后将自动刷新页面。"
@@ -75,10 +75,14 @@ export function restartOverlayPresentation(
   } else if (snapshot.phase === "ready") {
     liveStatus = "新服务和目标版本均已就绪，正在刷新页面…";
   } else if (snapshot.phase === "timed-out") {
-    liveStatus = "等待服务重启超时，请手动刷新页面。";
+    liveStatus = snapshot.lastError || "等待服务重启超时，请手动刷新页面。";
   } else if (snapshot.phase === "waiting") {
     liveStatus = waitingStatus(snapshot);
   }
 
+  if (snapshot.phase === "timed-out") {
+    title = isAutoUpdate || snapshot.target.expectedVersion ? "更新未完成" : "服务尚未就绪";
+    description = "请查看失败原因，手动刷新后核对服务状态。";
+  }
   return { title, description, liveStatus };
 }

@@ -39,7 +39,6 @@ import { resolveSystemAiContext } from "./session-ai-context.js";
 
 import { CodexRunner } from "./structured-codex-adapter.js";
 
-import { normalizeStructuredToolResultContent } from "./structured-content.js";
 import { ClaudeCliRunner } from "./structured-claude-adapter.js";
 
 
@@ -47,6 +46,9 @@ import { OpenCodeRunner } from "./structured-opencode-adapter.js";
 import { GrokRunner } from "./structured-grok-adapter.js";
 import { QoderRunner } from "./structured-qoder-adapter.js";
 import { PiRunner, isMissingPiSession } from "./structured-pi-adapter.js";
+import { PiOutputFile, type PiOutputFileOptions } from "./pi-output-file.js";
+import { PiProtocolReader } from "./pi-protocol-reader.js";
+import { PiTmuxHost } from "./pi-tmux-host.js";
 import { GeminiRunner, isMissingGeminiSession } from "./structured-gemini-adapter.js";
 import { structuredRunId, type StructuredExecHost, type StructuredRunState } from "./structured-exec-host.js";
 import type { StructuredRunnerAdapter, StructuredRunnerExecution, StructuredRunnerResult, StructuredRunnerTurnState } from "./structured-runner.js";
@@ -228,8 +230,6 @@ export class StructuredSessionManager {
   private readonly piRunner: StructuredRunnerAdapter;
   /** 进程内 core 引擎供员工候选显式启用；普通 Pi 主功能不使用它。 */
   private readonly coreRunner: StructuredRunnerAdapter;
-  /** 宿主是否显式注入了 pi 的 CLI runner / core runner，供系统级引擎状态使用。 */
-  private readonly piRunnerSupplied: boolean;
   private readonly coreRunnerSupplied: boolean;
   private coreRestartDrains = 0;
   private readonly geminiRunner: StructuredRunnerAdapter;
@@ -251,6 +251,10 @@ export class StructuredSessionManager {
     /** 「智能分配」专用的本地决策入口：只有真正能跑时才注入，没注入则用系统员工回退。 */
     private readonly autoAssignEvaluate: () => DecisionRuntimeAccess["evaluate"] = () => undefined,
   ) {
+    if (logger && execHost?.persistent && !runners.pi && process.env.WAND_PI_NATIVE_TMUX !== "0"
+      && process.env.WAND_TEST_MODE !== "1" && !process.env.NODE_TEST_CONTEXT) {
+      this.execHost = new PiTmuxHost(logger.getConfigDirectory(), execHost);
+    }
     const wrap = (runner: StructuredRunnerAdapter): StructuredRunnerAdapter =>
       withModelGroups(withDecisionAccess(runner, storage, decisionRuntime), config);
     this.claudeCliRunner = wrap(runners.claudeCli ?? new ClaudeCliRunner({ language: () => this.config.language }, this.execHost));
@@ -260,11 +264,11 @@ export class StructuredSessionManager {
     this.qoderRunner = wrap(runners.qoder ?? new QoderRunner(undefined, this.execHost));
     this.piRunner = wrap(withAutomaticPiResources(
       runners.pi ?? new PiRunner(undefined, this.execHost, coreHarnessAgentDir(config.harness),
-        openRouter ? { storage, service: openRouter } : undefined), config,
+        openRouter ? { storage, service: openRouter } : undefined,
+        (id) => this.piOutputFileOptions(id)), config,
       { evaluate: () => this.decisionRuntime()?.evaluate }));
     this.coreRunner = withModelGroups(runners.core ?? new CoreRunner({ config: this.config,
       decisionAccess: decisionRuntime, openRouter }), config);
-    this.piRunnerSupplied = runners.pi !== undefined;
     this.coreRunnerSupplied = runners.core !== undefined;
     this.geminiRunner = wrap(runners.gemini ?? new GeminiRunner(undefined, this.execHost));
     this.metadata = new SessionMetadataService({
@@ -428,7 +432,7 @@ export class StructuredSessionManager {
       try { this.saveAuthoritativeSession(cancelled); } catch { /* best-effort shutdown flush */ }
     }
 
-    for (const [executionId, execution] of this.pendingRunnerExecutions) {
+    for (const [, execution] of this.pendingRunnerExecutions) {
       if (detachSafe) continue;
       execution.interrupt();
     }
@@ -546,6 +550,13 @@ export class StructuredSessionManager {
       void this.recoverDetachedRuns();
     }, DETACHED_RECOVERY_RETRY_MS);
     this.detachedRecoveryRetryTimer.unref?.();
+  }
+
+  private piOutputFileOptions(sessionId: string): PiOutputFileOptions {
+    return {
+      ...(this.logger ? { directory: this.logger.protocolDirectory(sessionId) } : {}),
+      onCreated: (file) => this.logger?.appendStructuredSpawn(sessionId, { kind: "pi-file-source", file }),
+    };
   }
 
   private async resumeDetachedRun(snapshot: SessionSnapshot, initialState: StructuredRunState): Promise<void> {
@@ -673,7 +684,10 @@ export class StructuredSessionManager {
     const feedLine = (line: string): void => {
       onApplied(processor.feed(line, replayingHistory ? undefined : new Date().toISOString()));
     };
+    const piReader = resumed.provider === "pi" && resumed.structuredState?.engine !== "core"
+      ? new PiProtocolReader(feedLine, { truncatedHead: initialState.stdoutTruncated }) : null;
     const feedDelta = (text: string): void => {
+      if (piReader) { piReader.push(text); return; }
       carry += text;
       const lines = carry.split("\n");
       carry = lines.pop() ?? "";
@@ -681,7 +695,49 @@ export class StructuredSessionManager {
     };
     let carry = "";
 
+    let stdoutFile: PiOutputFile | null = null;
+    let fileFailed = false;
+    const fileFailure = (error: Error): void => {
+      if (fileFailed) return;
+      fileFailed = true;
+      stdoutFile?.dispose();
+      processor.primaryError = `Pi 实时事件文件读写失败：${error.message}；送达结果未知，不自动重试。`;
+      this.finalizeRecoveredRun(sessionId, requestId, processor, replayView, {
+        exitCode: 1, signal: null, stderr: processor.stderr, stdoutTruncated: true,
+      });
+      flushEmit();
+    };
+    const captureStdout = (text: string): void => {
+      if (fileFailed) return;
+      try {
+        if (!stdoutFile) { feedDelta(text); return; }
+        stdoutFile.append(text); stdoutFile.drain();
+      }
+      catch (error) { fileFailure(error instanceof Error ? error : new Error(String(error))); }
+    };
+    if (resumed.provider === "pi" && resumed.structuredState?.engine !== "core" && !initialState.nativeFile) {
+      try {
+        stdoutFile = new PiOutputFile(this.piOutputFileOptions(sessionId),
+          () => this.isCurrentRequest(sessionId, requestId), feedDelta, fileFailure);
+      } catch (error) {
+        fileFailure(error instanceof Error ? error : new Error(String(error)));
+        return;
+      }
+    }
+
+    const finishProtocol = (): void => {
+      if (piReader) piReader.finish();
+      else if (carry.trim()) feedLine(carry);
+      carry = "";
+    };
     const feedFullLog = (): void => {
+      if (stdoutFile || piReader) {
+        try {
+          captureStdout(initialState.stdoutLog);
+          if (!fileFailed) finishProtocol();
+        } catch (error) { fileFailure(error instanceof Error ? error : new Error(String(error))); }
+        return;
+      }
       const log = initialState.stdoutLog;
       const lines = log.split("\n");
       const tail = lines.pop() ?? "";
@@ -691,6 +747,8 @@ export class StructuredSessionManager {
 
     if (initialState.status === "exited") {
       feedFullLog();
+      stdoutFile?.dispose();
+      if (fileFailed) return;
       replayView.prime([...processor.state.blocks]);
       this.finalizeRecoveredRun(sessionId, requestId, processor, replayView, {
         exitCode: initialState.exitCode,
@@ -704,7 +762,10 @@ export class StructuredSessionManager {
 
     // Still running: replay what we have, then subscribe live. Events that
     // arrive between snapshot and subscription are deduped via fedChars.
-    {
+    if (stdoutFile || piReader) {
+      captureStdout(initialState.stdoutLog);
+      if (fileFailed) return;
+    } else {
       const lines = initialState.stdoutLog.split("\n");
       carry = lines.pop() ?? "";
       for (const line of lines) feedLine(line);
@@ -712,18 +773,21 @@ export class StructuredSessionManager {
     try {
       runningHandle = await this.execHost.adoptRun(structuredRunId(sessionId));
     } catch (error) {
+      stdoutFile?.dispose();
       this.releasePendingRunnerExecution(sessionId, execution, false);
       throw error;
     }
     // Server shutdown detaches persistent runs; only an explicit stop/delete
     // should cancel a handle that arrived after its request was invalidated.
-    if (this.disposed) return;
+    if (this.disposed) { stdoutFile?.dispose(); return; }
     if (!this.isCurrentRequest(sessionId, requestId)) {
+      stdoutFile?.dispose();
       runningHandle?.interrupt();
       this.releasePendingRunnerExecution(sessionId, execution);
       return;
     }
     if (!runningHandle) {
+      stdoutFile?.dispose();
       // Run vanished between listing and adoption; fall back to failure notes.
       this.finalizeRecoveredRun(sessionId, requestId, processor, replayView, {
         exitCode: null,
@@ -748,7 +812,7 @@ export class StructuredSessionManager {
         // 重启后 daemon 继续吐出的输出也要落回会话制品，否则会话日志在重启点断掉，
         // 事后无从核对这一轮到底产出了什么。
         this.logger?.appendStructuredStdout(sessionId, event.data);
-        feedDelta(event.data);
+        captureStdout(event.data);
         return;
       }
       if (event.seq <= lastStderrSeq) return;
@@ -757,8 +821,10 @@ export class StructuredSessionManager {
       processor.stderr += event.data;
     });
     runningHandle.onExit((event) => {
-      if (carry.trim()) feedLine(carry);
-      carry = "";
+      if (fileFailed) return;
+      try { stdoutFile?.drain(); finishProtocol(); }
+      catch (error) { fileFailure(error instanceof Error ? error : new Error(String(error))); return; }
+      stdoutFile?.dispose();
       this.finalizeRecoveredRun(sessionId, requestId, processor, replayView, {
         exitCode: event.exitCode,
         signal: event.signal === null ? null : signalNameFromNumber(event.signal),
@@ -2816,11 +2882,6 @@ export class StructuredSessionManager {
   }
 
 
-  private normalizeToolResultContent(content: unknown): string | Array<{ type: string; [key: string]: unknown }> {
-    return normalizeStructuredToolResultContent(content);
-  }
-
-
   /**
    * 组装结构化 runner 退出失败时的可读错误字符串。
    *
@@ -2909,19 +2970,5 @@ export class StructuredSessionManager {
     };
   }
 
-
-  /** Extract usage from an SDKResultSuccess message (sdk runner). */
-  private extractSdkUsage(result: Record<string, unknown>): ConversationTurn["usage"] {
-    const usage = result?.usage as Record<string, unknown> | undefined;
-    const value = {
-      inputTokens: typeof usage?.input_tokens === "number" ? usage.input_tokens : undefined,
-      outputTokens: typeof usage?.output_tokens === "number" ? usage.output_tokens : undefined,
-      cacheReadInputTokens: typeof usage?.cache_read_input_tokens === "number" ? usage.cache_read_input_tokens : undefined,
-      cacheCreationInputTokens: typeof usage?.cache_creation_input_tokens === "number" ? usage.cache_creation_input_tokens : undefined,
-      totalCostUsd: typeof result?.total_cost_usd === "number" ? result.total_cost_usd : undefined,
-    };
-    if (Object.values(value).every(v => v === undefined)) return undefined;
-    return value;
-  }
 
 }

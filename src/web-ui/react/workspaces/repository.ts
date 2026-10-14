@@ -124,7 +124,9 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
 
   async listTaskGroups(revision?: string): Promise<{ groups: TaskDirectoryGroup[]; revision?: string; unchanged: boolean }> {
     // An empty revision opts into the envelope on the first read; an omitted query returns legacy arrays.
-    const query = `?revision=${encodeURIComponent(revision ?? "")}`;
+    // Fetch both tiers once; groupSessionsByArchive keeps archived sessions out of active views.
+    // The person submenu and the archive folds otherwise cannot represent the server\'s archived tier.
+    const query = `?revision=${encodeURIComponent(revision ?? "")}&includeArchived=1`;
     const body = await parseJsonResponse<unknown>(await this.fetchImpl(`/api/tasks${query}`, { credentials: "same-origin" }));
     if (Array.isArray(body)) return { groups: body as TaskDirectoryGroup[], unchanged: false };
     const record = body && typeof body === "object" ? body as { groups?: TaskDirectoryGroup[]; revision?: string; unchanged?: boolean } : {};

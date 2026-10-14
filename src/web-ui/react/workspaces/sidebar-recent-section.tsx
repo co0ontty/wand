@@ -9,6 +9,7 @@ import { classNames } from "../ui/class-names";
 import { ImSidebarGroup } from "../shell/im-sidebar-group";
 import { ImSidebarItem } from "../shell/im-sidebar-item";
 import { SessionProviderMark, TeamChatSessionMark } from "./session-mark";
+import { SidebarSessionPreview } from "./sidebar-session-preview";
 import { SidebarSessionMenu } from "./sidebar-session-menu";
 import { sidebarSessionLabel } from "./session-order";
 import { SidebarDisclosure, useSidebarExpansion, anchorSidebarDisclosure } from "./sidebar-disclosure";
@@ -72,6 +73,8 @@ export function SidebarRecentSection({
   const groups = React.useMemo(
     () => recentConversationGroups(entries, {
       employees, activeOnly: displayMode === "active", selectedSessionId,
+      // A person expands to their complete matching session list, not a global eight-row window.
+      limit: Number.POSITIVE_INFINITY,
     }),
     [entries, employees, displayMode, selectedSessionId],
   );
@@ -209,7 +212,9 @@ function RecentConversationGroup({
   disabled?: boolean;
 }): React.ReactElement {
   const [open, setOpen] = useSidebarExpansion(`recent.${group.key}`, false, false, undefined, group.entries.length > 0);
-  const activity = sidebarAggregateState(group.entries.map((entry) => entry.session));
+  const toggleRef = React.useRef<HTMLButtonElement>(null);
+  const sessions = group.entries.map(entry => entry.session);
+  const activity = sidebarAggregateState(sessions);
   const hasMenu = Boolean(onArchiveSession || onDeleteSession);
 
   const rows = group.entries.map((entry, index) => {
@@ -253,6 +258,15 @@ function RecentConversationGroup({
       expanded={open}
       onToggle={() => setOpen(!open)}
       onSetOpen={setOpen}
+      toggleRef={toggleRef}
+      collapsedPreview={<SidebarSessionPreview sessions={sessions} expanded={open}
+        label={`${group.title}的会话预览`} className="sidebar-session-preview-person"
+        liveTitles={liveTitles} selectedSessionId={selectedSessionId} disabled={disabled}
+        expansionRef={toggleRef} onExpand={() => setOpen(true)} onActivate={(session) => {
+          const entry = group.entries.find(candidate => candidate.session.id === session.id);
+          if (!entry) return;
+          setOpen(true); onOpen(entry);
+        }}/>}
     >
       {rows.length ? rows : <Typography.Paragraph type="secondary" className="sidebar-group-empty">
         暂无活动会话

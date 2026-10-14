@@ -90,12 +90,13 @@ export function collectRecentEntries(
   const entries: SidebarRecentEntry[] = [];
   const seen = new Set<string>();
   const push = (group: TaskDirectoryGroup, session: WorkspaceSessionSummary, taskName: string | null): void => {
-    if (seen.has(session.id)) return;
+    if (session.archived || seen.has(session.id)) return;
     seen.add(session.id);
     entries.push({ group, taskName, session });
   };
   for (const group of groups) {
     for (const task of group.tasks) {
+      if (task.archived || task.status === "done") continue;
       for (const session of task.sessions) push(group, session, task.name);
     }
     for (const session of group.standaloneSessions) push(group, session, null);

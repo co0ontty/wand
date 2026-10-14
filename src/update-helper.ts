@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import { detectInstalledServiceScopes, readServiceEntrypoint, type ServiceScope } from "./service-manager/index.js";
 import { launchdMainPid } from "./service-manager/launchd.js";
-import { PACKAGE_NAME, resolveGlobalWandBin } from "./npm-update-utils.js";
+import { PACKAGE_NAME, resolveGlobalWandBin, checkGlobalUpdateAccess } from "./npm-update-utils.js";
 import { runCommandSync } from "./run-command.js";
 import { shellQuote, shellQuoteAll } from "./shell-quote.js";
 
@@ -20,6 +20,10 @@ export interface DetachedUpdateOptions {
   cwd: string;
   env: NodeJS.ProcessEnv;
   timeoutMs?: number;
+  /** Test/development seam; production resolves the guard next to this module. */
+  coreGuardPath?: string;
+  healthCheckPath?: string;
+  expectedVersion?: string;
 }
 
 export interface DetachedUpdateResult {
@@ -30,15 +34,32 @@ export interface DetachedUpdateResult {
   message: string;
 }
 
-function resolveBashPath(): string {
-  return existsSync("/bin/bash") ? "/bin/bash" : "bash";
+export interface DetachedUpdateStatus {
+  phase: "queued" | "waiting-core" | "installing" | "restarting" | "verifying" | "completed" | "failed";
+  message: string;
 }
 
-function detectActiveDarwinServiceScope(pid: number): ServiceScope | null {
-  if (launchdMainPid("system") === pid) return "system";
-  const uid = typeof process.getuid === "function" ? process.getuid() : null;
-  if (uid !== null && launchdMainPid(`gui/${uid}`) === pid) return "user";
-  return null;
+export function readDetachedUpdateStatus(logPath: string): DetachedUpdateStatus | null {
+  try {
+    const value = JSON.parse(readFileSync(`${logPath}.status.json`, "utf8"));
+    if (!["queued", "waiting-core", "installing", "restarting", "verifying", "completed", "failed"].includes(value.phase)
+      || typeof value.message !== "string") return null;
+    return { phase: value.phase, message: value.message.slice(0, 1000) };
+  } catch { return null; }
+}
+
+export function readLatestDetachedUpdate(configPath: string): { logPath: string; version: string; status: DetachedUpdateStatus | null } | null {
+  try {
+    const value = JSON.parse(readFileSync(path.join(path.dirname(path.resolve(configPath)), "web-update-operation.json"), "utf8"));
+    if (value.configPath !== path.resolve(configPath) || typeof value.logPath !== "string"
+      || path.basename(value.logPath) !== "update.log" || !/^wand-update-[A-Za-z0-9]+$/.test(path.basename(path.dirname(value.logPath)))
+      || typeof value.version !== "string" || !/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(value.version)) return null;
+    return { logPath: value.logPath, version: value.version, status: readDetachedUpdateStatus(value.logPath) };
+  } catch { return null; }
+}
+
+function resolveBashPath(): string {
+  return existsSync("/bin/bash") ? "/bin/bash" : "bash";
 }
 
 /** A manifest alone is not enough: only a process actually launched by its manager may rely on auto-restart. */
@@ -76,11 +97,34 @@ export function resolveManagedServiceScopeCandidates(
   return managedScope;
 }
 
+export function resolveVerifiedManagedScope(
+  installedScopes: ServiceScope[],
+  active: Partial<Record<ServiceScope, number | null>>,
+  pid: number,
+): ServiceScope | null {
+  const owned = installedScopes.filter(scope => active[scope] === pid);
+  if (owned.length === 1) return owned[0];
+  if (owned.length > 1) throw new Error("同一进程被两份服务注册领用，无法安全更新。");
+  if (Object.values(active).some(value => Number.isSafeInteger(value) && Number(value) > 1)) return null;
+  throw new Error("无法核实运行中的服务进程身份，已取消更新；请使用安装恢复入口。");
+}
+
 function detectManagedServiceScope(): ServiceScope | null {
   const installedScopes = detectInstalledServiceScopes();
   if (process.platform === "darwin" && process.env.XPC_SERVICE_NAME === "com.wand.web") {
-    const activeScope = detectActiveDarwinServiceScope(process.pid);
-    if (activeScope && installedScopes.includes(activeScope)) return activeScope;
+    const uid = process.getuid?.();
+    return resolveVerifiedManagedScope(installedScopes, {
+      system: launchdMainPid("system"), user: uid === undefined ? null : launchdMainPid(`gui/${uid}`),
+    }, process.pid);
+  }
+  if (process.platform === "linux" && (process.env.SYSTEMD_EXEC_PID || process.env.INVOCATION_ID)) {
+    const active: Partial<Record<ServiceScope, number | null>> = {};
+    for (const scope of installedScopes) {
+      const value = runCommandSync("systemctl", [...(scope === "user" ? ["--user"] : []), "show", "wand.service", "--property=MainPID", "--value"], { timeout: 5000 });
+      const pid = Number(value.stdout.trim());
+      active[scope] = value.status === 0 && Number.isSafeInteger(pid) && pid > 1 ? pid : null;
+    }
+    return resolveVerifiedManagedScope(installedScopes, active, process.pid);
   }
   return resolveManagedServiceScopeCandidates(installedScopes);
 }
@@ -94,18 +138,20 @@ export function isStableServiceEntrypoint(entrypoint: string | null, stableBin: 
   }
 }
 
-function managedServiceUpdatePreflight(scope: ServiceScope): { ok: true } | { ok: false; message: string } {
+export function buildUpdateRecoveryCommand(configPath: string): string {
+  return `WAND_CONFIG_PATH=${shellQuote(configPath)} bash <(curl -fLsS https://raw.githubusercontent.com/co0ontty/wand/master/install.sh)`;
+}
+
+function managedServiceUpdatePreflight(scope: ServiceScope, configPath = path.join(os.homedir(), ".wand/config.json")): { ok: true } | { ok: false; message: string } {
   const stableBin = resolveGlobalWandBin();
   const entrypoint = readServiceEntrypoint(scope);
   if (isStableServiceEntrypoint(entrypoint, stableBin)) return { ok: true };
-  const command = scope === "system"
-    ? `sudo ${stableBin || "wand"} service:install -c <config-path>`
-    : `${stableBin || "wand"} service:install --user -c <config-path>`;
+  const command = buildUpdateRecoveryCommand(configPath);
   return {
     ok: false,
     message:
       `检测到 ${scope} 服务仍指向不稳定入口 (${entrypoint || "无法读取"})，已取消 Web 更新以保持服务在线。` +
-      `请先在终端重注册到全局 shim：${command}`,
+      `请在终端执行一次保留数据的恢复更新：${command}`,
   };
 }
 
@@ -183,6 +229,13 @@ export function buildDetachedUpdateHelperScript(
   }
   const nodeLoaderCommand = nodeLoaderArgs.length > 0 ? `${shellQuoteAll(nodeLoaderArgs)} ` : "";
 
+  const coreGuardPath = opts.coreGuardPath ?? path.join(path.dirname(updateUtilsPath),
+    updateUtilsPath.endsWith(".ts") ? "core-status-cli.ts" : "core-status-cli.js");
+  const healthPath = opts.healthCheckPath ?? path.join(path.dirname(updateUtilsPath),
+    updateUtilsPath.endsWith(".ts") ? "update-health.ts" : "update-health.js");
+  const guardLoaderArgs = coreGuardPath.endsWith(".ts") ? resolveTypeScriptLoaderArgs() : [];
+  const guardLoaderCommand = guardLoaderArgs.length > 0 ? `${shellQuoteAll(guardLoaderArgs)} ` : "";
+
   return `#!/usr/bin/env bash
 set -euo pipefail
 LOG=${shellQuote(logPath)}
@@ -201,21 +254,41 @@ SERVICE_SCOPE=${shellQuote(serviceScope ?? "")}
 TIMEOUT_MS=${timeoutMs}
 NODE_BIN=${shellQuote(process.execPath)}
 UPDATE_UTILS=${shellQuote(updateUtilsPath)}
+CORE_GUARD=${shellQuote(coreGuardPath)}
+HEALTH_CHECK=${shellQuote(healthPath)}
+EXPECTED_VERSION=${shellQuote(opts.expectedVersion ?? "")}
+BACKUP_RECEIPT=${shellQuote(`${logPath}.backup.json`)}
+TARGET_VERSION_FILE=${shellQuote(`${logPath}.version`)}
+SCRIPT_PATH=${shellQuote(`${path.dirname(logPath)}/update.sh`)}
+STATUS_PATH=${shellQuote(`${logPath}.status.json`)}
 GLOBAL_CLI_PATH_FILE=${shellQuote(`${logPath}.cli-path`)}
 WORKING_DIRECTORY=${shellQuote(opts.cwd)}
 CLI_ARGS=(${shellQuoteAll(opts.cliArgs)})
 GLOBAL_CLI=""
 PARENT_EXITED=0
+HELPER_MODE="\${1:-}"
 
 run() {
   echo "+ $*"
   "$@"
 }
 
+set_status() {
+  "$NODE_BIN" --input-type=module - "$STATUS_PATH" "$1" "$2" <<'WAND_STATUS_NODE'
+import { writeFileSync, renameSync } from "node:fs";
+const [file, phase, message] = process.argv.slice(2);
+writeFileSync(file + ".tmp", JSON.stringify({ phase, message }), { mode: 0o600 });
+renameSync(file + ".tmp", file);
+WAND_STATUS_NODE
+}
+
 on_exit() {
   local status="$?"
-  rm -f "$GLOBAL_CLI_PATH_FILE" 2>/dev/null || true
+  if [ "$HELPER_MODE" != "--apply" ]; then rm -f "$GLOBAL_CLI_PATH_FILE" "$TARGET_VERSION_FILE" 2>/dev/null || true; fi
   if [ "$status" -ne 0 ]; then
+    if [ "$("$NODE_BIN" --input-type=module -e 'import {readFileSync} from "node:fs"; try { console.log(JSON.parse(readFileSync(process.argv[1], "utf8")).phase); } catch {}' "$STATUS_PATH")" != "failed" ]; then
+      set_status failed "更新未完成，服务未确认切换到新版。请查看更新日志并重试。" || true
+    fi
     if [ "$PARENT_EXITED" = "0" ]; then
       echo "[wand-update] failed with exit code $status; parent service was left running"
     else
@@ -239,12 +312,99 @@ wait_for_parent_exit() {
 }
 
 main() {
+  if [ "\${1:-}" = "--stop-replacement" ]; then
+    run "$NODE_BIN" --input-type=module - "$CONFIG_PATH" "$2" <<'WAND_STOP_NODE'
+import { readFileSync } from "node:fs";
+import path from "node:path";
+const [configPath, pidValue] = process.argv.slice(2);
+const pid = Number(pidValue);
+const info = JSON.parse(readFileSync(path.join(path.dirname(configPath), "wand.pid"), "utf8"));
+if (!Number.isSafeInteger(pid) || pid <= 1 || info.pid !== pid || path.resolve(info.configPath) !== path.resolve(configPath)) {
+  throw new Error("替换进程身份已变化，取消回滚停止。");
+}
+process.kill(pid, "SIGTERM");
+WAND_STOP_NODE
+    wait_for_parent_exit "$2"
+    return
+  fi
+  if [ "\${1:-}" = "--relaunch-old" ]; then
+    if [ -z "$SERVICE_SCOPE" ] && [ -f "$GLOBAL_CLI_PATH_FILE" ]; then
+      GLOBAL_CLI="$(<"$GLOBAL_CLI_PATH_FILE")"
+      cd "$WORKING_DIRECTORY"
+      "$NODE_BIN" "$GLOBAL_CLI" "$\{CLI_ARGS[@]}" >>"$LOG" 2>&1 </dev/null &
+    fi
+    return
+  fi
+  if [ "\${1:-}" != "--apply" ]; then
+    set_status waiting-core "正在等待执行中的 Core 回合结束；新输入将排队。"
+    # Keep the admission barrier open across installation and parent shutdown.
+    # Import the dependency-free guard before npm can replace the running package.
+    run "$NODE_BIN" ${guardLoaderCommand}--input-type=module - "$CORE_GUARD" "$CONFIG_PATH" "$TIMEOUT_MS" "$SCRIPT_PATH" "$UPDATE_UTILS" "$HEALTH_CHECK" "$BACKUP_RECEIPT" "$STATUS_PATH" "$EXPECTED_VERSION" "$TARGET_VERSION_FILE" "$PARENT_PID" <<'WAND_DRAIN_NODE'
+import { existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
+const [guardPath, configPath, timeoutMs, scriptPath, modulePath, healthPath, receipt, statusPath, expectedVersion, targetFile, parentValue] = process.argv.slice(2);
+const parentPid = Number(parentValue);
+const guard = await import(pathToFileURL(guardPath).href);
+const updateUtils = await import(pathToFileURL(modulePath).href);
+const health = await import(pathToFileURL(healthPath).href);
+const alive = pid => {
+  try { process.kill(pid, 0); return true; } catch (error) { return error.code === "EPERM"; }
+};
+const mark = (phase, message) => {
+  writeFileSync(statusPath + ".tmp", JSON.stringify({ phase, message }), { mode: 0o600 });
+  renameSync(statusPath + ".tmp", statusPath);
+};
+await updateUtils.withGlobalUpdateLock(async () => {
+  try {
+    const code = await guard.waitForCoreTurnsComplete(configPath, Number(timeoutMs) / 1000, ["/bin/bash", scriptPath, "--apply"]);
+    if (code !== 0) throw new Error("安装或初始化未完成。");
+    const version = expectedVersion || readFileSync(targetFile, "utf8").trim();
+    mark("verifying", "正在核对目标版本的新服务实例。");
+    await health.waitForUpdatedService(configPath, version, parentPid);
+    if (existsSync(receipt)) updateUtils.finalizeDeferredGlobalUpdate(receipt);
+    mark("completed", "目标版本的新服务已启动并响应。");
+  } catch (error) {
+    let restored = false;
+    if (existsSync(receipt)) {
+      try {
+        if (!alive(parentPid)) {
+          let replacement;
+          try { replacement = JSON.parse(readFileSync(path.join(path.dirname(configPath), "wand.pid"), "utf8")); } catch {}
+          if (!replacement || !Number.isSafeInteger(replacement.pid) || replacement.pid <= 1) {
+            throw new Error("替换服务进程状态未知，保留备份以便恢复。");
+          }
+          if (alive(replacement.pid)) {
+            const stopped = await guard.waitForCoreTurnsComplete(configPath, Number(timeoutMs) / 1000,
+              ["/bin/bash", scriptPath, "--stop-replacement", String(replacement.pid)]);
+            if (stopped !== 0) throw new Error("新版执行尚未安全停止，保留备份。");
+          }
+        }
+        restored = updateUtils.finalizeDeferredGlobalUpdate(receipt, true, line => process.stdout.write(String(line) + "\\n"));
+        if (restored && !alive(parentPid)) spawnSync("/bin/bash", [scriptPath, "--relaunch-old"], { stdio: "inherit" });
+      } catch (rollbackError) {
+        process.stderr.write("[wand-update] rollback deferred: " + rollbackError.message + "\\n");
+      }
+    }
+    const prior = JSON.parse(readFileSync(statusPath, "utf8"));
+    mark("failed", restored ? "更新未完成，已恢复原安装。请刷新后重试。"
+      : prior.phase === "failed" ? prior.message : "更新未完成，备份保留；请通过安装恢复入口重试。");
+    process.stderr.write("[wand-update] " + error.message + "\\n");
+    process.exitCode = 1;
+  }
+});
+WAND_DRAIN_NODE
+    return
+  fi
+  set_status installing "正在下载、校验并安装新版本。"
   echo "[wand-update] installing while parent service stays online"
-  if run "$NODE_BIN" ${nodeLoaderCommand}--input-type=module - "$UPDATE_UTILS" "$INSTALL_SPEC" "$TIMEOUT_MS" "$GLOBAL_CLI_PATH_FILE" <<'WAND_INSTALL_NODE'
-import { realpathSync, statSync, writeFileSync } from "node:fs";
+  if run "$NODE_BIN" ${nodeLoaderCommand}--input-type=module - "$UPDATE_UTILS" "$INSTALL_SPEC" "$TIMEOUT_MS" "$GLOBAL_CLI_PATH_FILE" "$STATUS_PATH" "$BACKUP_RECEIPT" "$TARGET_VERSION_FILE" <<'WAND_INSTALL_NODE'
+import { realpathSync, statSync, readFileSync, writeFileSync, renameSync } from "node:fs";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-const [modulePath, installSpec, timeoutValue, cliPathFile] = process.argv.slice(2);
+const [modulePath, installSpec, timeoutValue, cliPathFile, statusPath, receiptPath, targetFile] = process.argv.slice(2);
 const timeoutMs = Number(timeoutValue);
 const updateUtils = await import(pathToFileURL(modulePath).href);
 const installPackageGloballyAsync = updateUtils.installPackageGloballyAsync
@@ -252,9 +412,18 @@ const installPackageGloballyAsync = updateUtils.installPackageGloballyAsync
 if (typeof installPackageGloballyAsync !== "function") {
   throw new Error("installPackageGloballyAsync is unavailable in " + modulePath);
 }
-const installedCli = await installPackageGloballyAsync(installSpec, timeoutMs, (line) => {
-  process.stdout.write(String(line) + "\\n");
-});
+let installedCli;
+try {
+  installedCli = await installPackageGloballyAsync(installSpec, timeoutMs, (line) => {
+    process.stdout.write(String(line) + "\\n");
+  }, { backupReceiptPath: receiptPath });
+} catch (error) {
+  const message = error instanceof Error && error.message.startsWith("新版本要求 Node.js")
+    ? error.message : "安装失败，旧服务保持运行；请查看更新日志并重试。";
+  writeFileSync(statusPath + ".tmp", JSON.stringify({ phase: "failed", message }), { mode: 0o600 });
+  renameSync(statusPath + ".tmp", statusPath);
+  throw error;
+}
 if (typeof installedCli !== "string" || installedCli.trim().length === 0) {
   throw new Error("installer did not return the installed Wand CLI path");
 }
@@ -262,6 +431,8 @@ const resolvedCli = realpathSync(installedCli.trim());
 if (!statSync(resolvedCli).isFile()) {
   throw new Error("installed Wand CLI is not a file: " + resolvedCli);
 }
+const manifest = JSON.parse(readFileSync(path.join(path.dirname(resolvedCli), "..", "package.json"), "utf8"));
+writeFileSync(targetFile, String(manifest.version), { encoding: "utf8", mode: 0o600 });
 writeFileSync(cliPathFile, resolvedCli, { encoding: "utf8", mode: 0o600 });
 WAND_INSTALL_NODE
   then
@@ -277,7 +448,6 @@ WAND_INSTALL_NODE
     return 1
   fi
   GLOBAL_CLI="$(<"$GLOBAL_CLI_PATH_FILE")"
-  rm -f "$GLOBAL_CLI_PATH_FILE"
   if [ ! -f "$GLOBAL_CLI" ]; then
     echo "[wand-update] global CLI not found after install: $GLOBAL_CLI"
     return 1
@@ -286,6 +456,7 @@ WAND_INSTALL_NODE
   echo "[wand-update] initializing updated installation"
   run "$NODE_BIN" "$GLOBAL_CLI" init -c "$CONFIG_PATH"
 
+  set_status restarting "安装完成，正在切换服务到新版。"
   if kill -0 "$PARENT_PID" 2>/dev/null; then
     echo "[wand-update] sending SIGTERM to parent pid $PARENT_PID"
     run kill -TERM "$PARENT_PID"
@@ -307,11 +478,23 @@ WAND_INSTALL_NODE
     "$NODE_BIN" "$GLOBAL_CLI" "$\{CLI_ARGS[@]}" >>"$LOG" 2>&1 </dev/null &
     echo "[wand-update] standalone pid: $!"
   fi
+  set_status verifying "新版已交接，正在确认新进程与目标版本响应。"
   echo "[wand-update] completed at $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 }
 
-main
+main "$@"
 `;
+}
+
+export function buildSystemdUpdateEnvironmentArgs(env: NodeJS.ProcessEnv, systemScope: boolean, uid: number, gid: number): string[] {
+  if (!Number.isSafeInteger(uid) || uid < 0 || !Number.isSafeInteger(gid) || gid < 0) throw new Error("无效的更新进程身份。");
+  const names = Object.keys(env).filter(name => /^(?:npm_config_|NPM_CONFIG_)/.test(name)
+    || ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy",
+      "NODE_EXTRA_CA_CERTS", "NODE_AUTH_TOKEN", "NPM_TOKEN", "WAND_NPM_BIN"].includes(name));
+  // NAME-only setenv inherits from the invoking environment without exposing
+  // credential values in argv or copying them into generated scripts.
+  return [...names.filter(name => env[name] !== undefined).sort().map(name => `--setenv=${name}`),
+    ...(systemScope ? [`--property=User=${uid}`, `--property=Group=${gid}`] : [])];
 }
 
 function spawnDetached(
@@ -354,25 +537,29 @@ function spawnDetached(
       });
       return res.status === 0 ? { method } : null;
     };
+    const uid = process.getuid?.() ?? 0;
+    const gid = process.getgid?.() ?? 0;
+    const userEnvArgs = buildSystemdUpdateEnvironmentArgs(baseEnv, false, uid, gid);
+    const systemEnvArgs = buildSystemdUpdateEnvironmentArgs(baseEnv, true, uid, gid);
     if (shouldUseSystemdRunForDetachedUpdate(serviceScope)) {
       const userService =
         runTransient(
-          ["--user", `--unit=${unitName}`, "--quiet", "--collect", bashPath, scriptPath],
+          ["--user", ...userEnvArgs, `--unit=${unitName}`, "--quiet", "--collect", bashPath, scriptPath],
           "systemd-run --user",
         ) ??
         runTransient(
-          ["--user", `--unit=${unitName}`, "--quiet", bashPath, scriptPath],
+          ["--user", ...userEnvArgs, `--unit=${unitName}`, "--quiet", bashPath, scriptPath],
           "systemd-run --user",
         );
       if (userService) return userService;
 
       const systemService =
         runTransient(
-          [`--unit=${unitName}`, "--quiet", "--collect", bashPath, scriptPath],
+          [...systemEnvArgs, `--unit=${unitName}`, "--quiet", "--collect", bashPath, scriptPath],
           "systemd-run",
         ) ??
         runTransient(
-          [`--unit=${unitName}`, "--quiet", bashPath, scriptPath],
+          [...systemEnvArgs, `--unit=${unitName}`, "--quiet", bashPath, scriptPath],
           "systemd-run",
         );
       if (systemService) return systemService;
@@ -418,14 +605,18 @@ export function startDetachedUpdateHelper(opts: DetachedUpdateOptions): Detached
       message: err instanceof Error ? err.message : String(err),
     };
   }
+  if (!checkGlobalUpdateAccess()) {
+    return { started: false, scriptPath, logPath,
+      message: `当前安装目录不允许服务写入，请执行一次恢复更新，迁移到可持续自更新的安装：${buildUpdateRecoveryCommand(opts.configPath)}` };
+  }
   if (serviceScope) {
-    const preflight = managedServiceUpdatePreflight(serviceScope);
+    const preflight = managedServiceUpdatePreflight(serviceScope, opts.configPath);
     if (!preflight.ok) {
       return {
         started: false,
         scriptPath,
         logPath,
-        message: preflight.message.replace("<config-path>", opts.configPath),
+        message: preflight.message,
       };
     }
   }
@@ -434,10 +625,18 @@ export function startDetachedUpdateHelper(opts: DetachedUpdateOptions): Detached
     mode: 0o700,
   });
   chmodSync(scriptPath, 0o700);
-  writeFileSync(logPath, `[wand-update] helper queued at ${new Date().toISOString()}\n`, "utf8");
+  writeFileSync(logPath, `[wand-update] helper queued at ${new Date().toISOString()}\n`, { mode: 0o600 });
+  writeFileSync(`${logPath}.status.json`, JSON.stringify({ phase: "queued", message: "更新已排队。" }), { mode: 0o600 });
 
+  const operationFile = path.join(path.dirname(path.resolve(opts.configPath)), "web-update-operation.json");
+  writeFileSync(`${operationFile}.tmp`, JSON.stringify({
+    configPath: path.resolve(opts.configPath), logPath,
+    version: opts.expectedVersion ?? opts.installSpec.slice(opts.installSpec.lastIndexOf("@") + 1),
+  }), { mode: 0o600 });
+  renameSync(`${operationFile}.tmp`, operationFile);
   const spawned = spawnDetached(scriptPath, logPath, opts.env, serviceScope);
   if (!spawned) {
+    writeFileSync(`${logPath}.status.json`, JSON.stringify({ phase: "failed", message: "独立更新程序没有启动，当前服务未停止。" }), { mode: 0o600 });
     return {
       started: false,
       scriptPath,

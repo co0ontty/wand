@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { capturePiExecutionEvent } from "./pi-execution.js";
 import { buildChildEnv } from "./env-utils.js";
 import { getErrorMessage } from "./error-utils.js";
-import { coreHarnessAgentDir, coreModelSelector, coreHarnessRuntime, loadPiAi, loadPiAgentCore, loadPiCodingAgent, resolveCoreModel } from "./harness-engine.js";
+import { coreModelSelector, coreHarnessRuntime, loadPiAi, loadPiAgentCore, loadPiCodingAgent, resolveCoreModel } from "./harness-engine.js";
 import { OPENROUTER_FREE_ROUTING, isOpenRouterFreeSelector, type OpenRouterFreeModelsService } from "./openrouter-free-models.js";
 import type { ResolvedCoreModel } from "./harness-engine.js";
 import type { DecisionRuntimeAccess } from "./decision-runner.js";
@@ -23,7 +23,6 @@ import type {
 } from "./structured-runner.js";
 import type { Agent, AgentMessage, AgentTool, StreamFn } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, JsonObject, Model, Api, ModelThinkingLevel, ThinkingLevel, Usage } from "@earendil-works/pi-ai";
-import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 
 /** 上游工具名 → Wand 展示名，与 CLI 适配器保持同一口径（卡片/语义投影都按这个名字判定）。 */
 const CORE_TOOL_DISPLAY_NAMES: Record<string, string> = {
@@ -663,14 +662,6 @@ interface PlanContextOptions {
   estimateTokens: (message: AgentMessage) => number;
   shouldCompact: typeof import("@earendil-works/pi-coding-agent").shouldCompact;
   state: StructuredRunnerTurnState;
-}
-
-/** 一条只含文本的用户消息才算“真正的用户输入”：只在该边界切，保证 tool_use / tool_result 不被切开。 */
-function currentUserTurnIndex(session: SessionSnapshot, prompt: string): number {
-  const turns = session.messages ?? [];
-  const last = turns.at(-1);
-  const text = last?.content?.filter((block) => block.type === "text").map((block) => block.text).join("\n");
-  return last?.role === "user" && text === prompt ? turns.length - 1 : turns.length;
 }
 
 function isUserTextTurn(turn: ConversationTurn): boolean {

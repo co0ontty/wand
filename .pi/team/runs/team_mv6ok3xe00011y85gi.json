@@ -1,0 +1,3349 @@
+{
+  "runId": "team_mv6ok3xe00011y85gi",
+  "task": "独立审查本轮 Pi CLI 8 MiB 单行问题修复，只读不得改源码、重启、访问凭据、调用真实模型或安装依赖。cwd /Users/co0ontty/Self/vibe_coding/wand。必须先 bash ls/rg 找文件并读 AGENTS.md。工作区有大量同期未提交改动，不把整个 diff 当本轮。具体本轮新文件 src/pi-protocol-reader.ts、src/pi-event-projection.ts、tests/pi-protocol-reader.test.ts；增量接入 src/structured-exec-pump.ts 的 createProtocolReader/finish，src/structured-pi-adapter.ts 的 PiProtocolReader，src/pi-native-event-bridge.ts 的 projectPiProtocolEvent；src/structured-session-manager.ts 的 piReader/finishProtocol 恢复接入；package.json/lock 新增 stream-json3.7.0 stream-chain4.2.5。真实日志已确定 turn_end 的 8.42MB 大事件中 context占8.397MB、新message仅24.9KB；此前 agent_end含工具截图汇总也触发8MB。方案：SAX逐token验证原始JSON，丢掉未消费context/entries/toolResults，agent_end只保留最新assistant，单个有效载荷仍限8MiB、封套256MiB、键1024、深度128；源桥先投影再写文件；协议错误unknown且禁止重试。定点38测试通过（含真实Pi本地零费用模型/TUI）。请指出证据明确的阻断性bug/语义回归和缺失回归，勿泛化愿望。可运行相关本地测试，但不要运行全量或付费链路。报告文件路径+行号+复现+严重性。由主助手自行综合判断。",
+  "playbookId": "generated-blueprint",
+  "fallbackPolicy": "task_first",
+  "status": "degraded",
+  "modelHealth": [
+    {
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "provider": "openai-codex",
+      "status": "provider_error",
+      "evidenceSource": "worker",
+      "latencyMs": 2634,
+      "reason": "recent worker failure: worker produced no assistant text",
+      "checkedAt": 1791895914916
+    },
+    {
+      "model": "anthropic/claude-fable-5",
+      "provider": "anthropic",
+      "status": "provider_error",
+      "evidenceSource": "worker",
+      "latencyMs": 18271,
+      "reason": "recent worker failure: worker produced no assistant text",
+      "checkedAt": 1791895930557
+    },
+    {
+      "model": "xiaomai/claude-fable-5",
+      "provider": "xiaomai",
+      "status": "provider_error",
+      "evidenceSource": "worker",
+      "latencyMs": 1107,
+      "reason": "recent worker failure: worker produced no assistant text",
+      "checkedAt": 1791895931667
+    },
+    {
+      "model": "anthropic/claude-fable-5-1",
+      "provider": "anthropic",
+      "status": "provider_error",
+      "evidenceSource": "worker",
+      "latencyMs": 21059,
+      "reason": "recent worker failure: worker produced no assistant text",
+      "checkedAt": 1791895952728
+    },
+    {
+      "model": "openai-codex/gpt-5.5",
+      "provider": "openai-codex",
+      "status": "probe_passed",
+      "evidenceSource": "worker",
+      "latencyMs": 120825,
+      "reason": "recent worker produced substantive output",
+      "checkedAt": 1791896035743
+    }
+  ],
+  "workers": [
+    {
+      "roleId": "protocol-review",
+      "title": "流式协议边界审查",
+      "task": "Objective: 独立审查本轮 Pi CLI 8 MiB 单行问题修复，只读不得改源码、重启、访问凭据、调用真实模型或安装依赖。cwd /Users/co0ontty/Self/vibe_coding/wand。必须先 bash ls/rg 找文件并读 AGENTS.md。工作区有大量同期未提交改动，不把整个 diff 当本轮。具体本轮新文件 src/pi-protocol-reader.ts、src/pi-event-projection.ts、tests/pi-protocol-reader.test.ts；增量接入 src/structured-exec-pump.ts 的 createProtocolReader/finish，src/structured-pi-adapter.ts 的 PiProtocolReader，src/pi-native-event-bridge.ts 的 projectPiProtocolEvent；src/structured-session-manager.ts 的 piReader/finishProtocol 恢复接入；package.json/lock 新增 stream-json3.7.0 stream-chain4.2.5。真实日志已确定 turn_end 的 8.42MB 大事件中 context占8.397MB、新message仅24.9KB；此前 agent_end含工具截图汇总也触发8MB。方案：SAX逐token验证原始JSON，丢掉未消费context/entries/toolResults，agent_end只保留最新assistant，单个有效载荷仍限8MiB、封套256MiB、键1024、深度128；源桥先投影再写文件；协议错误unknown且禁止重试。定点38测试通过（含真实Pi本地零费用模型/TUI）。请指出证据明确的阻断性bug/语义回归和缺失回归，勿泛化愿望。可运行相关本地测试，但不要运行全量或付费链路。报告文件路径+行号+复现+严重性。由主助手自行综合判断。\nPlaybook: Dynamic team blueprint (generated-blueprint)\nRole: 流式协议边界审查 (protocol-review)\nRole boundary: 检查解析器边界、内存、恶意输入、chunk/UTF8和投影语义；只读。\n\nUse your role prompt and return a concise structured finding.\nRequired fields: result_summary, evidence_refs, confidence, disagreements, next_questions.\n\nStructured output (for machine consumption by the captain):\n- After your normal findings, end your final message with a single fenced JSON block:\n  ```json\n  { ... }\n  ```\n- The JSON object must include these fields:\n  - result_summary (string)\n  - evidence_refs (array of strings)\n  - confidence (string)\n  - disagreements (array of strings)\n  - next_questions (array of strings)\n- Keep your prose findings too; the JSON is an additional structured summary, not a replacement.",
+      "model": "anthropic/claude-fable-5-1",
+      "thinkingLevel": "high",
+      "routingReason": "policy=task_first; selected via metadata; thinking=high; captain remains final judge; metadata: anthropic/claude-fable-5 (warning: probe error: probe produced no output) | fallback: xiaomai/claude-fable-5 (warning: not probed (lazy fallback)) | fallback: anthropic/claude-fable-5-1 (warning: not probed (lazy fallback))",
+      "modelFallbackKeys": [
+        "xiaomai/claude-fable-5",
+        "anthropic/claude-fable-5-1"
+      ],
+      "status": "failed",
+      "output": "",
+      "tools": [
+        "bash",
+        "read",
+        "write"
+      ],
+      "activeTools": [
+        "bash",
+        "read",
+        "write"
+      ],
+      "startedAt": 1791895931669,
+      "endedAt": 1791895952728,
+      "lastEvent": "agent_end",
+      "lastSignalAt": 1791895952727,
+      "outputKind": "empty",
+      "timedOut": false,
+      "requests": 4,
+      "tokens": 0,
+      "costUsd": 0,
+      "sessionId": "team-team_mv6ok3xe00011y85gi-protocol-review",
+      "exitCode": 0,
+      "events": [
+        {
+          "at": 1791895912329,
+          "phase": "worker-message-start",
+          "message": "流式协议边界审查 message started"
+        },
+        {
+          "at": 1791895912329,
+          "phase": "worker-message-end",
+          "message": "流式协议边界审查 assistant message ended"
+        },
+        {
+          "at": 1791895912329,
+          "phase": "worker-message-start",
+          "message": "流式协议边界审查 message started"
+        },
+        {
+          "at": 1791895912330,
+          "phase": "worker-message-end",
+          "message": "流式协议边界审查 assistant message ended"
+        },
+        {
+          "at": 1791895913076,
+          "phase": "worker-message-start",
+          "message": "流式协议边界审查 message started"
+        },
+        {
+          "at": 1791895913079,
+          "phase": "worker-message-end",
+          "message": "流式协议边界审查 assistant message ended"
+        },
+        {
+          "at": 1791895915704,
+          "phase": "worker-message-start",
+          "message": "流式协议边界审查 message started"
+        },
+        {
+          "at": 1791895915707,
+          "phase": "worker-message-end",
+          "message": "流式协议边界审查 assistant message ended"
+        },
+        {
+          "at": 1791895921225,
+          "phase": "worker-message-start",
+          "message": "流式协议边界审查 message started"
+        },
+        {
+          "at": 1791895921225,
+          "phase": "worker-message-end",
+          "message": "流式协议边界审查 assistant message ended"
+        },
+        {
+          "at": 1791895930550,
+          "phase": "worker-message-start",
+          "message": "流式协议边界审查 message started"
+        },
+        {
+          "at": 1791895930553,
+          "phase": "worker-message-end",
+          "message": "流式协议边界审查 assistant message ended"
+        },
+        {
+          "at": 1791895930605,
+          "phase": "worker-message-start",
+          "message": "流式协议边界审查 message started"
+        },
+        {
+          "at": 1791895930605,
+          "phase": "worker-message-end",
+          "message": "流式协议边界审查 assistant message ended"
+        },
+        {
+          "at": 1791895930605,
+          "phase": "worker-message-start",
+          "message": "流式协议边界审查 message started"
+        },
+        {
+          "at": 1791895930606,
+          "phase": "worker-message-end",
+          "message": "流式协议边界审查 assistant message ended"
+        },
+        {
+          "at": 1791895931656,
+          "phase": "worker-message-start",
+          "message": "流式协议边界审查 message started"
+        },
+        {
+          "at": 1791895931660,
+          "phase": "worker-message-end",
+          "message": "流式协议边界审查 assistant message ended"
+        },
+        {
+          "at": 1791895931706,
+          "phase": "worker-message-start",
+          "message": "流式协议边界审查 message started"
+        },
+        {
+          "at": 1791895931707,
+          "phase": "worker-message-end",
+          "message": "流式协议边界审查 assistant message ended"
+        },
+        {
+          "at": 1791895931708,
+          "phase": "worker-message-start",
+          "message": "流式协议边界审查 message started"
+        },
+        {
+          "at": 1791895931708,
+          "phase": "worker-message-end",
+          "message": "流式协议边界审查 assistant message ended"
+        },
+        {
+          "at": 1791895933961,
+          "phase": "worker-message-start",
+          "message": "流式协议边界审查 message started"
+        },
+        {
+          "at": 1791895933962,
+          "phase": "worker-message-end",
+          "message": "流式协议边界审查 assistant message ended"
+        },
+        {
+          "at": 1791895937932,
+          "phase": "worker-message-start",
+          "message": "流式协议边界审查 message started"
+        },
+        {
+          "at": 1791895937935,
+          "phase": "worker-message-end",
+          "message": "流式协议边界审查 assistant message ended"
+        },
+        {
+          "at": 1791895943256,
+          "phase": "worker-message-start",
+          "message": "流式协议边界审查 message started"
+        },
+        {
+          "at": 1791895943260,
+          "phase": "worker-message-end",
+          "message": "流式协议边界审查 assistant message ended"
+        },
+        {
+          "at": 1791895952717,
+          "phase": "worker-message-start",
+          "message": "流式协议边界审查 message started"
+        },
+        {
+          "at": 1791895952721,
+          "phase": "worker-message-end",
+          "message": "流式协议边界审查 assistant message ended"
+        }
+      ],
+      "errorReason": "worker produced no assistant text",
+      "modelAttempts": [
+        {
+          "model": "anthropic/claude-fable-5",
+          "status": "failed",
+          "errorReason": "worker produced no assistant text"
+        },
+        {
+          "model": "xiaomai/claude-fable-5",
+          "status": "failed",
+          "errorReason": "worker produced no assistant text"
+        },
+        {
+          "model": "anthropic/claude-fable-5-1",
+          "status": "failed",
+          "errorReason": "worker produced no assistant text"
+        }
+      ],
+      "outputFile": "/Users/co0ontty/Self/vibe_coding/wand/.pi/team/active/team_mv6ok3xe00011y85gi/artifacts/workers/protocol-review.md",
+      "eventFile": "/Users/co0ontty/Self/vibe_coding/wand/.pi/team/active/team_mv6ok3xe00011y85gi/artifacts/workers/protocol-review.events.jsonl"
+    },
+    {
+      "roleId": "lifecycle-review",
+      "title": "错误与恢复语义审查",
+      "task": "Objective: 独立审查本轮 Pi CLI 8 MiB 单行问题修复，只读不得改源码、重启、访问凭据、调用真实模型或安装依赖。cwd /Users/co0ontty/Self/vibe_coding/wand。必须先 bash ls/rg 找文件并读 AGENTS.md。工作区有大量同期未提交改动，不把整个 diff 当本轮。具体本轮新文件 src/pi-protocol-reader.ts、src/pi-event-projection.ts、tests/pi-protocol-reader.test.ts；增量接入 src/structured-exec-pump.ts 的 createProtocolReader/finish，src/structured-pi-adapter.ts 的 PiProtocolReader，src/pi-native-event-bridge.ts 的 projectPiProtocolEvent；src/structured-session-manager.ts 的 piReader/finishProtocol 恢复接入；package.json/lock 新增 stream-json3.7.0 stream-chain4.2.5。真实日志已确定 turn_end 的 8.42MB 大事件中 context占8.397MB、新message仅24.9KB；此前 agent_end含工具截图汇总也触发8MB。方案：SAX逐token验证原始JSON，丢掉未消费context/entries/toolResults，agent_end只保留最新assistant，单个有效载荷仍限8MiB、封套256MiB、键1024、深度128；源桥先投影再写文件；协议错误unknown且禁止重试。定点38测试通过（含真实Pi本地零费用模型/TUI）。请指出证据明确的阻断性bug/语义回归和缺失回归，勿泛化愿望。可运行相关本地测试，但不要运行全量或付费链路。报告文件路径+行号+复现+严重性。由主助手自行综合判断。\nPlaybook: Dynamic team blueprint (generated-blueprint)\nRole: 错误与恢复语义审查 (lifecycle-review)\nRole boundary: 检查pump完成竞态、sourcewriter与恢复接入、终止错误/unknown/no retry和现有兼容；只读。\n\nUse your role prompt and return a concise structured finding.\nRequired fields: result_summary, evidence_refs, confidence, disagreements, next_questions.\n\nStructured output (for machine consumption by the captain):\n- After your normal findings, end your final message with a single fenced JSON block:\n  ```json\n  { ... }\n  ```\n- The JSON object must include these fields:\n  - result_summary (string)\n  - evidence_refs (array of strings)\n  - confidence (string)\n  - disagreements (array of strings)\n  - next_questions (array of strings)\n- Keep your prose findings too; the JSON is an additional structured summary, not a replacement.",
+      "model": "openai-codex/gpt-5.5",
+      "thinkingLevel": "high",
+      "routingReason": "policy=task_first; selected via metadata; thinking=high; captain remains final judge; metadata: openai-codex/gpt-5.3-codex-spark (warning: probe error: probe produced no output) | fallback: openai-codex/gpt-5.5 (warning: not probed (lazy fallback)) | fallback: openai-codex/gpt-5.6-luna (warning: not probed (lazy fallback))",
+      "modelFallbackKeys": [
+        "openai-codex/gpt-5.5",
+        "openai-codex/gpt-5.6-luna"
+      ],
+      "status": "succeeded",
+      "output": "## result_summary\n\n未发现证据明确的阻断性 bug 或已可复现的错误/恢复语义回归。  \n本轮实现对 pump 完成竞态、source writer/恢复接入、协议错误 unknown/no retry 的主路径语义基本闭合；我只指出一个非阻断的缺失回归覆盖。\n\n## evidence_refs\n\n- `src/structured-exec-pump.ts:120-137`：完成路径先 `stdoutFile.drain()` 再 `protocolReader.finish()`；协议错误被标记为 `delivery: \"unknown\"`、`retryable: false`、`retryForbidden: true`，且不把 `inputAccepted` 写成 false。\n- `src/structured-exec-pump.ts:166-169`：stdout 解析异常先 `finish(...)` 再 interrupt，覆盖同步 close 竞态。\n- `src/structured-pi-adapter.ts:297-323`：PiRunner 接入 `PiProtocolReader`，解析失败不当作安全拒绝；有进度时保留 `inputAccepted: true`。\n- `src/pi-native-event-bridge.ts:32-40`：native bridge 对 `message_update`/其他事件先投影再写入文件。\n- `src/structured-session-manager.ts:687-738,823-833`：恢复路径也接入 `PiProtocolReader`，退出时调用 `finishProtocol()`。\n- `tests/pi-protocol-reader.test.ts:106-145`：覆盖实际 pump/file 路径的大冗余 summary、最终错误保留、畸形/超大真实 payload unknown/no retry。\n- 已运行：`node --test --import tsx tests/pi-protocol-reader.test.ts`，11/11 通过。\n\n## 缺失回归\n\n- 严重性：P2 / 非阻断。\n- 现象：恢复路径虽然代码接入了 `PiProtocolReader`（`src/structured-session-manager.ts:687-738,823-833`），但现有新增测试主要覆盖新启动的 PiRunner/file pump 路径；`tests/pi-output-file.test.ts` 有恢复文件流测试，但未覆盖“恢复 replay 中含 >8MiB context/agent_end 汇总”以及“恢复中协议错误应 unknown/no retry 且不重试”的语义。\n- 复现建议：构造 `StructuredRunState.stdoutLog` 含大 `turn_end.context` 或 malformed retained payload，调用 `recoverDetachedRuns()` 验证最终状态/错误语义。\n\n## confidence\n\n中高。已读目标文件和恢复/pump 关键路径，并跑定点测试；未运行全量、未调用真实模型、未重启服务。\n\n## disagreements\n\n无。\n\n## next_questions\n\n- 是否需要补一个专门的 detached recovery 大事件/协议错误单测，锁住恢复路径语义？\n\n```json\n{\n  \"result_summary\": \"未发现证据明确的阻断性 bug 或错误/恢复语义回归；仅发现恢复路径缺少专门覆盖大事件与协议错误 unknown/no-retry 的非阻断回归测试。\",\n  \"evidence_refs\": [\n    \"src/structured-exec-pump.ts:120-137\",\n    \"src/structured-exec-pump.ts:166-169\",\n    \"src/structured-pi-adapter.ts:297-323\",\n    \"src/pi-native-event-bridge.ts:32-40\",\n    \"src/structured-session-manager.ts:687-738\",\n    \"src/structured-session-manager.ts:823-833\",\n    \"tests/pi-protocol-reader.test.ts:106-145\",\n    \"command: node --test --import tsx tests/pi-protocol-reader.test.ts -> 11/11 passed\"\n  ],\n  \"confidence\": \"中高\",\n  \"disagreements\": [],\n  \"next_questions\": [\n    \"是否补一个 detached recovery 路径的大 Pi 事件和协议错误回归测试？\"\n  ]\n}\n```",
+      "tools": [
+        "bash",
+        "read",
+        "write"
+      ],
+      "activeTools": [
+        "bash",
+        "read",
+        "write"
+      ],
+      "startedAt": 1791895914918,
+      "endedAt": 1791896035743,
+      "lastEvent": "agent_end",
+      "lastTool": "read",
+      "lastSignalAt": 1791896035741,
+      "lastReportAt": 1791895970791,
+      "lastReportPreview": "RADIO: status=testing, action=run targeted local protocol-reader test only, evidence=mailbox empty; line refs collected, blocker=none, next=confirm regression coverage.",
+      "lastOutputPreview": "## result_summary 未发现证据明确的阻断性 bug 或已可复现的错误/恢复语义回归。 本轮实现对 pump 完成竞态、source writer/恢复接入、协议错误 unknown/no retry 的主路径语义基本闭合；我只指出一个非阻断的缺失回归覆盖。 ## evidence_refs - `src/structured-exec-pump.ts:120-137`：完成路径先 `stdoutFile.drain()` 再 `protocolReader.f",
+      "outputKind": "substantive",
+      "structuredOutput": {
+        "result_summary": "未发现证据明确的阻断性 bug 或错误/恢复语义回归；仅发现恢复路径缺少专门覆盖大事件与协议错误 unknown/no-retry 的非阻断回归测试。",
+        "evidence_refs": [
+          "src/structured-exec-pump.ts:120-137",
+          "src/structured-exec-pump.ts:166-169",
+          "src/structured-pi-adapter.ts:297-323",
+          "src/pi-native-event-bridge.ts:32-40",
+          "src/structured-session-manager.ts:687-738",
+          "src/structured-session-manager.ts:823-833",
+          "tests/pi-protocol-reader.test.ts:106-145",
+          "command: node --test --import tsx tests/pi-protocol-reader.test.ts -> 11/11 passed"
+        ],
+        "confidence": "中高",
+        "disagreements": [],
+        "next_questions": [
+          "是否补一个 detached recovery 路径的大 Pi 事件和协议错误回归测试？"
+        ]
+      },
+      "timedOut": false,
+      "requests": 19,
+      "tokens": 913324,
+      "costUsd": 1.20263,
+      "budgetNoticeSent": true,
+      "sessionId": "team-team_mv6ok3xe00011y85gi-lifecycle-review",
+      "exitCode": 0,
+      "events": [
+        {
+          "at": 1791895912315,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895912316,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895912316,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895912316,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895914909,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895914911,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895914963,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895914963,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895914964,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895914964,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895916939,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895923852,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895923854,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_start bash",
+          "toolName": "bash"
+        },
+        {
+          "at": 1791895923927,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_end bash",
+          "toolName": "bash",
+          "isError": false
+        },
+        {
+          "at": 1791895923928,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895923928,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895924623,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895928108,
+          "phase": "worker-radio-report",
+          "message": "错误与恢复语义审查 reported to captain",
+          "preview": "RADIO: status=started, action=scope confirmed via ls/rg and now reading AGENTS/mailbox, evidence=repo root + target files listed, blocker=none, next=inspect lifecycle/error paths."
+        },
+        {
+          "at": 1791895928110,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1791895928112,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1791895928136,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1791895928140,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1791895928141,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895928141,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895928141,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895928142,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895928922,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895933860,
+          "phase": "worker-radio-report",
+          "message": "错误与恢复语义审查 reported to captain",
+          "preview": "RADIO: status=reading, action=inspect protocol reader/projection and integration points, evidence=AGENTS.md read; mailbox empty, blocker=none, next=collect line-numbered evidence."
+        },
+        {
+          "at": 1791895933862,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1791895933865,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1791895933866,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1791895933879,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1791895933881,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1791895933882,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1791895933883,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895933884,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895933885,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895933886,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895933887,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895933888,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895934659,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895937473,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895937476,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1791895937477,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1791895937479,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1791895937492,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1791895937495,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1791895937497,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1791895937497,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895937498,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895937498,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895937499,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895937499,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895937500,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895938238,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895940818,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895940821,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_start bash",
+          "toolName": "bash"
+        },
+        {
+          "at": 1791895940857,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_end bash",
+          "toolName": "bash",
+          "isError": false
+        },
+        {
+          "at": 1791895940859,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895940860,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895941554,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895944552,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895944554,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1791895944557,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1791895944559,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1791895944573,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1791895944576,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1791895944579,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1791895944580,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895944580,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895944581,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895944582,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895944582,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895944583,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895945329,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895947403,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895947405,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1791895947421,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1791895947423,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895947425,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895948203,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895951888,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895951891,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1791895951894,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1791895951896,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1791895951908,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1791895951911,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1791895951913,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1791895951914,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895951915,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895951916,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895951917,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895951918,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895951919,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895952616,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895955652,
+          "phase": "worker-radio-report",
+          "message": "错误与恢复语义审查 reported to captain",
+          "preview": "RADIO: status=evidence_found, action=inspecting recovery reducer/error handling details, evidence=PiProtocolReader/PiRunner/recovery sections read; no captain request, blocker=none, next=verify exact line refs and tests."
+        },
+        {
+          "at": 1791895955655,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1791895955667,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1791895955669,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895955670,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895956408,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895961738,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895961741,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_start bash",
+          "toolName": "bash"
+        },
+        {
+          "at": 1791895961787,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_end bash",
+          "toolName": "bash",
+          "isError": false
+        },
+        {
+          "at": 1791895961788,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895961788,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895962478,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895964922,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895964925,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_start bash",
+          "toolName": "bash"
+        },
+        {
+          "at": 1791895964970,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_end bash",
+          "toolName": "bash",
+          "isError": false
+        },
+        {
+          "at": 1791895964972,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895964972,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895965655,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895967705,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895967708,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1791895967724,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1791895967727,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895967728,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895968446,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895970791,
+          "phase": "worker-radio-report",
+          "message": "错误与恢复语义审查 reported to captain",
+          "preview": "RADIO: status=testing, action=run targeted local protocol-reader test only, evidence=mailbox empty; line refs collected, blocker=none, next=confirm regression coverage."
+        },
+        {
+          "at": 1791895970797,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_start bash",
+          "toolName": "bash"
+        },
+        {
+          "at": 1791895971340,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_end bash",
+          "toolName": "bash",
+          "isError": false
+        },
+        {
+          "at": 1791895971341,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895971341,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895972037,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895989604,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895989607,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_start bash",
+          "toolName": "bash"
+        },
+        {
+          "at": 1791895989642,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_end bash",
+          "toolName": "bash",
+          "isError": false
+        },
+        {
+          "at": 1791895989645,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895989646,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895990462,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895991756,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895991760,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1791895991771,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1791895991773,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895991774,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895992613,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895995255,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895995258,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1791895995260,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1791895995271,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1791895995273,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1791895995274,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895995275,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895995276,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791895995277,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791895995993,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791896005365,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791896005369,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_start bash",
+          "toolName": "bash"
+        },
+        {
+          "at": 1791896005424,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_end bash",
+          "toolName": "bash",
+          "isError": false
+        },
+        {
+          "at": 1791896005425,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791896005425,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791896006238,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791896008305,
+          "phase": "worker-budget-notice",
+          "message": "错误与恢复语义审查 reached soft request budget (18/18)"
+        },
+        {
+          "at": 1791896008308,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791896008311,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1791896008325,
+          "phase": "worker-tool",
+          "message": "错误与恢复语义审查 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1791896008327,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791896008329,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791896008333,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791896008334,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended"
+        },
+        {
+          "at": 1791896009027,
+          "phase": "worker-message-start",
+          "message": "错误与恢复语义审查 message started"
+        },
+        {
+          "at": 1791896035733,
+          "phase": "worker-message-end",
+          "message": "错误与恢复语义审查 assistant message ended",
+          "preview": "## result_summary 未发现证据明确的阻断性 bug 或已可复现的错误/恢复语义回归。 本轮实现对 pump 完成竞态、source writer/恢复接入、协议错误 unknown/no retry 的主路径语义基本闭合；我只指出一个非阻断的缺失回归覆盖。 ## evidence_refs - `src/structured-exec-pump.ts:120-137`：完成路径先 `stdoutFile.drain()` 再 `protocolReader.f"
+        }
+      ],
+      "modelAttempts": [
+        {
+          "model": "openai-codex/gpt-5.3-codex-spark",
+          "status": "failed",
+          "errorReason": "worker produced no assistant text"
+        },
+        {
+          "model": "openai-codex/gpt-5.5",
+          "status": "succeeded"
+        }
+      ],
+      "outputFile": "/Users/co0ontty/Self/vibe_coding/wand/.pi/team/active/team_mv6ok3xe00011y85gi/artifacts/workers/lifecycle-review.md",
+      "eventFile": "/Users/co0ontty/Self/vibe_coding/wand/.pi/team/active/team_mv6ok3xe00011y85gi/artifacts/workers/lifecycle-review.events.jsonl"
+    }
+  ],
+  "lastEvent": {
+    "at": 1791896035768,
+    "phase": "run-evidence-warning",
+    "message": "1 worker(s) failed",
+    "isError": true
+  },
+  "events": [
+    {
+      "at": 1791895908578,
+      "phase": "planning",
+      "message": "selected playbook generated-blueprint with 1 round(s)",
+      "status": "planning"
+    },
+    {
+      "at": 1791895908579,
+      "phase": "blueprint-strategy",
+      "message": "The lead captain generated this collaboration plan; the extension handles dispatch, communication, observation, and recording.",
+      "status": "planning"
+    },
+    {
+      "at": 1791895908579,
+      "phase": "blueprint-policy",
+      "message": "evidence=Workers should separate cited evidence, inference, confidence, and missing information. model=Use configured models that are objectively available; keep soft health observations visible. synthesis=The lead uses worker outputs as inputs and keeps final judgment outside the extension.",
+      "status": "planning"
+    },
+    {
+      "at": 1791895908579,
+      "phase": "tool-inheritance",
+      "message": "inherited 32 active tool(s): read,bash,edit,write,codemode,bg_wait,subagents_enable,todo,workflow,find_roots,observe_ui,search_ui,expand_ui,inspect_ui,act_ui,read_text,wait_for,launch_browser,navigate_browser,evaluate_browser,advisor,team_status,team_message,team_promote_blueprint,team_cancel_worker,team_spawn_worker,team_cancel,team_handoff,web_enable,subagent_supervisor,create_goal,get_goal",
+      "status": "planning"
+    },
+    {
+      "at": 1791895912261,
+      "phase": "model-observe-start",
+      "message": "selected 2/49 relevant model(s) to probe across 2 role(s); fallbackPolicy=task_first",
+      "status": "probing"
+    },
+    {
+      "at": 1791895912261,
+      "phase": "model-observe-end",
+      "message": "anthropic/claude-fable-5:provider_error, openai-codex/gpt-5.3-codex-spark:provider_error",
+      "status": "probing"
+    },
+    {
+      "at": 1791895912263,
+      "phase": "dispatch-ready",
+      "message": "protocol-review->anthropic/claude-fable-5 (policy=task_first; selected via metadata; thinking=high; captain remains final judge; metadata: anthropic/claude-fable-5 (warning: probe error: probe produced no output) | fallback: xiaomai/claude-fable-5 (warning: not probed (lazy fallback)) | fallback: anthropic/claude-fable-5-1 (warning: not probed (lazy fallback))), lifecycle-review->openai-codex/gpt-5.3-codex-spark (policy=task_first; selected via metadata; thinking=high; captain remains final judge; metadata: openai-codex/gpt-5.3-codex-spark (warning: probe error: probe produced no output) | fallback: openai-codex/gpt-5.5 (warning: not probed (lazy fallback)) | fallback: openai-codex/gpt-5.6-luna (warning: not probed (lazy fallback)))"
+    },
+    {
+      "at": 1791895912272,
+      "phase": "run-start",
+      "message": "running playbook generated-blueprint: A task-specific collaboration blueprint generated for the lead captain",
+      "status": "running"
+    },
+    {
+      "at": 1791895912273,
+      "phase": "run-policy",
+      "message": "strategy=The lead captain generated this collaboration plan; the extension handles dispatch, communication, observation, and recording. evidence=Workers should separate cited evidence, inference, confidence, and missing information.",
+      "status": "running"
+    },
+    {
+      "at": 1791895912274,
+      "phase": "watchdog-advisory",
+      "message": "watchdog advisory active (1 file(s): default:/Users/co0ontty/.pi/agent/npm/node_modules/pi-team/src/defaults/WATCHDOG.md); injected as advisory into worker prompts",
+      "status": "running"
+    },
+    {
+      "at": 1791895912276,
+      "phase": "round-start",
+      "message": "collect (parallel) with 2 role(s): no round goal",
+      "isError": false
+    },
+    {
+      "at": 1791895912278,
+      "phase": "worker-start",
+      "message": "错误与恢复语义审查 started; capability=检查pump完成竞态、sourcewriter与恢复接入、终止错误/unknown/no retry和现有兼容；只读。; needs=none; modelFit=not specified; thinking-requested=high; routing=policy=task_first; selected via metadata; thinking=high; captain remains final judge; metadata: openai-codex/gpt-5.3-codex-spark (warning: probe error: probe produced no output) | fallback: openai-codex/gpt-5.5 (warning: not probed (lazy fallback)) | fallback: openai-codex/gpt-5.6-luna (warning: not probed (lazy fallback)); tools=bash,read,write",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791895912280,
+      "phase": "worker-heartbeat",
+      "message": "错误与恢复语义审查 running 0s, last event worker-start",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791895912285,
+      "phase": "worker-start",
+      "message": "流式协议边界审查 started; capability=检查解析器边界、内存、恶意输入、chunk/UTF8和投影语义；只读。; needs=none; modelFit=not specified; thinking-requested=high; routing=policy=task_first; selected via metadata; thinking=high; captain remains final judge; metadata: anthropic/claude-fable-5 (warning: probe error: probe produced no output) | fallback: xiaomai/claude-fable-5 (warning: not probed (lazy fallback)) | fallback: anthropic/claude-fable-5-1 (warning: not probed (lazy fallback)); tools=bash,read,write",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5",
+      "status": "running"
+    },
+    {
+      "at": 1791895912286,
+      "phase": "worker-heartbeat",
+      "message": "流式协议边界审查 running 0s, last event worker-start",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5",
+      "status": "running"
+    },
+    {
+      "at": 1791895912315,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791895912316,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791895912316,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791895912316,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791895912329,
+      "phase": "worker-message-start",
+      "message": "流式协议边界审查 message started",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5",
+      "status": "running"
+    },
+    {
+      "at": 1791895912329,
+      "phase": "worker-message-end",
+      "message": "流式协议边界审查 assistant message ended",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5",
+      "status": "running"
+    },
+    {
+      "at": 1791895912329,
+      "phase": "worker-message-start",
+      "message": "流式协议边界审查 message started",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5",
+      "status": "running"
+    },
+    {
+      "at": 1791895912330,
+      "phase": "worker-message-end",
+      "message": "流式协议边界审查 assistant message ended",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5",
+      "status": "running"
+    },
+    {
+      "at": 1791895913076,
+      "phase": "worker-message-start",
+      "message": "流式协议边界审查 message started",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5",
+      "status": "running"
+    },
+    {
+      "at": 1791895913079,
+      "phase": "worker-message-end",
+      "message": "流式协议边界审查 assistant message ended",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5",
+      "status": "running"
+    },
+    {
+      "at": 1791895914909,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791895914911,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791895914917,
+      "phase": "worker-model-retry",
+      "message": "错误与恢复语义审查 retrying with fallback model openai-codex/gpt-5.5 after worker produced no assistant text",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895914963,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895914963,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895914964,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895914964,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895915704,
+      "phase": "worker-message-start",
+      "message": "流式协议边界审查 message started",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5",
+      "status": "running"
+    },
+    {
+      "at": 1791895915707,
+      "phase": "worker-message-end",
+      "message": "流式协议边界审查 assistant message ended",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5",
+      "status": "running"
+    },
+    {
+      "at": 1791895916939,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895917282,
+      "phase": "worker-heartbeat",
+      "message": "错误与恢复语义审查 running 2s, last event message_end",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791895917289,
+      "phase": "worker-heartbeat",
+      "message": "流式协议边界审查 running 5s, last event message_end",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5",
+      "status": "running"
+    },
+    {
+      "at": 1791895921225,
+      "phase": "worker-message-start",
+      "message": "流式协议边界审查 message started",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5",
+      "status": "running"
+    },
+    {
+      "at": 1791895921225,
+      "phase": "worker-message-end",
+      "message": "流式协议边界审查 assistant message ended",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5",
+      "status": "running"
+    },
+    {
+      "at": 1791895922283,
+      "phase": "worker-heartbeat",
+      "message": "错误与恢复语义审查 running 7s, last event message_end",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791895922290,
+      "phase": "worker-heartbeat",
+      "message": "流式协议边界审查 running 10s, last event message_end",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5",
+      "status": "running"
+    },
+    {
+      "at": 1791895923852,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895923854,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_start bash",
+      "toolName": "bash",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895923927,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_end bash",
+      "toolName": "bash",
+      "isError": false,
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895923928,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895923928,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895924623,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895927287,
+      "phase": "worker-heartbeat",
+      "message": "错误与恢复语义审查 running 12s, last tool bash",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791895927290,
+      "phase": "worker-heartbeat",
+      "message": "流式协议边界审查 running 15s, last event message_end",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5",
+      "status": "running"
+    },
+    {
+      "at": 1791895928108,
+      "phase": "worker-radio-report",
+      "message": "错误与恢复语义审查 reported to captain",
+      "preview": "RADIO: status=started, action=scope confirmed via ls/rg and now reading AGENTS/mailbox, evidence=repo root + target files listed, blocker=none, next=inspect lifecycle/error paths.",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895928110,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895928112,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895928136,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895928140,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895928141,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895928141,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895928141,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895928142,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895928922,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895930550,
+      "phase": "worker-message-start",
+      "message": "流式协议边界审查 message started",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5",
+      "status": "running"
+    },
+    {
+      "at": 1791895930553,
+      "phase": "worker-message-end",
+      "message": "流式协议边界审查 assistant message ended",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5",
+      "status": "running"
+    },
+    {
+      "at": 1791895930558,
+      "phase": "worker-model-retry",
+      "message": "流式协议边界审查 retrying with fallback model xiaomai/claude-fable-5 after worker produced no assistant text",
+      "roleId": "protocol-review",
+      "model": "xiaomai/claude-fable-5",
+      "status": "running"
+    },
+    {
+      "at": 1791895930605,
+      "phase": "worker-message-start",
+      "message": "流式协议边界审查 message started",
+      "roleId": "protocol-review",
+      "model": "xiaomai/claude-fable-5",
+      "status": "running"
+    },
+    {
+      "at": 1791895930605,
+      "phase": "worker-message-end",
+      "message": "流式协议边界审查 assistant message ended",
+      "roleId": "protocol-review",
+      "model": "xiaomai/claude-fable-5",
+      "status": "running"
+    },
+    {
+      "at": 1791895930605,
+      "phase": "worker-message-start",
+      "message": "流式协议边界审查 message started",
+      "roleId": "protocol-review",
+      "model": "xiaomai/claude-fable-5",
+      "status": "running"
+    },
+    {
+      "at": 1791895930606,
+      "phase": "worker-message-end",
+      "message": "流式协议边界审查 assistant message ended",
+      "roleId": "protocol-review",
+      "model": "xiaomai/claude-fable-5",
+      "status": "running"
+    },
+    {
+      "at": 1791895931656,
+      "phase": "worker-message-start",
+      "message": "流式协议边界审查 message started",
+      "roleId": "protocol-review",
+      "model": "xiaomai/claude-fable-5",
+      "status": "running"
+    },
+    {
+      "at": 1791895931660,
+      "phase": "worker-message-end",
+      "message": "流式协议边界审查 assistant message ended",
+      "roleId": "protocol-review",
+      "model": "xiaomai/claude-fable-5",
+      "status": "running"
+    },
+    {
+      "at": 1791895931667,
+      "phase": "worker-model-retry",
+      "message": "流式协议边界审查 retrying with fallback model anthropic/claude-fable-5-1 after worker produced no assistant text",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5-1",
+      "status": "running"
+    },
+    {
+      "at": 1791895931706,
+      "phase": "worker-message-start",
+      "message": "流式协议边界审查 message started",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5-1",
+      "status": "running"
+    },
+    {
+      "at": 1791895931707,
+      "phase": "worker-message-end",
+      "message": "流式协议边界审查 assistant message ended",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5-1",
+      "status": "running"
+    },
+    {
+      "at": 1791895931708,
+      "phase": "worker-message-start",
+      "message": "流式协议边界审查 message started",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5-1",
+      "status": "running"
+    },
+    {
+      "at": 1791895931708,
+      "phase": "worker-message-end",
+      "message": "流式协议边界审查 assistant message ended",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5-1",
+      "status": "running"
+    },
+    {
+      "at": 1791895932289,
+      "phase": "worker-heartbeat",
+      "message": "错误与恢复语义审查 running 17s, last tool read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791895932292,
+      "phase": "worker-heartbeat",
+      "message": "流式协议边界审查 running 1s, last event message_end",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5",
+      "status": "running"
+    },
+    {
+      "at": 1791895933860,
+      "phase": "worker-radio-report",
+      "message": "错误与恢复语义审查 reported to captain",
+      "preview": "RADIO: status=reading, action=inspect protocol reader/projection and integration points, evidence=AGENTS.md read; mailbox empty, blocker=none, next=collect line-numbered evidence.",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895933862,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895933865,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895933866,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895933879,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895933881,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895933882,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895933883,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895933884,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895933885,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895933886,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895933887,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895933888,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895933961,
+      "phase": "worker-message-start",
+      "message": "流式协议边界审查 message started",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5-1",
+      "status": "running"
+    },
+    {
+      "at": 1791895933962,
+      "phase": "worker-message-end",
+      "message": "流式协议边界审查 assistant message ended",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5-1",
+      "status": "running"
+    },
+    {
+      "at": 1791895934659,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895937290,
+      "phase": "worker-heartbeat",
+      "message": "错误与恢复语义审查 running 22s, last tool read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791895937293,
+      "phase": "worker-heartbeat",
+      "message": "流式协议边界审查 running 6s, last event message_end",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5",
+      "status": "running"
+    },
+    {
+      "at": 1791895937473,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895937476,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895937478,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895937479,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895937492,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895937495,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895937497,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895937497,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895937498,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895937498,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895937499,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895937499,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895937500,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895937932,
+      "phase": "worker-message-start",
+      "message": "流式协议边界审查 message started",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5-1",
+      "status": "running"
+    },
+    {
+      "at": 1791895937935,
+      "phase": "worker-message-end",
+      "message": "流式协议边界审查 assistant message ended",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5-1",
+      "status": "running"
+    },
+    {
+      "at": 1791895938238,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895940818,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895940821,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_start bash",
+      "toolName": "bash",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895940858,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_end bash",
+      "toolName": "bash",
+      "isError": false,
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895940859,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895940860,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895941554,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895942297,
+      "phase": "worker-heartbeat",
+      "message": "错误与恢复语义审查 running 27s, last tool bash",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791895942300,
+      "phase": "worker-heartbeat",
+      "message": "流式协议边界审查 running 11s, last event message_end",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5",
+      "status": "running"
+    },
+    {
+      "at": 1791895943257,
+      "phase": "worker-message-start",
+      "message": "流式协议边界审查 message started",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5-1",
+      "status": "running"
+    },
+    {
+      "at": 1791895943260,
+      "phase": "worker-message-end",
+      "message": "流式协议边界审查 assistant message ended",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5-1",
+      "status": "running"
+    },
+    {
+      "at": 1791895944552,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895944555,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895944557,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895944559,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895944573,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895944576,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895944579,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895944580,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895944580,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895944581,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895944582,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895944582,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895944583,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895945329,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895947298,
+      "phase": "worker-heartbeat",
+      "message": "错误与恢复语义审查 running 32s, last tool read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791895947301,
+      "phase": "worker-heartbeat",
+      "message": "流式协议边界审查 running 16s, last event message_end",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5",
+      "status": "running"
+    },
+    {
+      "at": 1791895947403,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895947405,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895947421,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895947423,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895947425,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895948203,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895951888,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895951891,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895951894,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895951896,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895951908,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895951911,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895951913,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895951914,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895951915,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895951916,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895951917,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895951918,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895951919,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895952297,
+      "phase": "worker-heartbeat",
+      "message": "错误与恢复语义审查 running 37s, last tool read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791895952301,
+      "phase": "worker-heartbeat",
+      "message": "流式协议边界审查 running 21s, last event message_end",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5",
+      "status": "running"
+    },
+    {
+      "at": 1791895952616,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895952717,
+      "phase": "worker-message-start",
+      "message": "流式协议边界审查 message started",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5-1",
+      "status": "running"
+    },
+    {
+      "at": 1791895952721,
+      "phase": "worker-message-end",
+      "message": "流式协议边界审查 assistant message ended",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5-1",
+      "status": "running"
+    },
+    {
+      "at": 1791895952747,
+      "phase": "worker-end",
+      "message": "流式协议边界审查 failed",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5-1",
+      "status": "failed"
+    },
+    {
+      "at": 1791895952748,
+      "phase": "round-progress",
+      "message": "1 worker(s) completed",
+      "roleId": "protocol-review",
+      "model": "anthropic/claude-fable-5",
+      "status": "failed"
+    },
+    {
+      "at": 1791895955652,
+      "phase": "worker-radio-report",
+      "message": "错误与恢复语义审查 reported to captain",
+      "preview": "RADIO: status=evidence_found, action=inspecting recovery reducer/error handling details, evidence=PiProtocolReader/PiRunner/recovery sections read; no captain request, blocker=none, next=verify exact line refs and tests.",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895955655,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895955667,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895955669,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895955670,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895956408,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895957300,
+      "phase": "worker-heartbeat",
+      "message": "错误与恢复语义审查 running 42s, last tool read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791895961738,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895961741,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_start bash",
+      "toolName": "bash",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895961787,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_end bash",
+      "toolName": "bash",
+      "isError": false,
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895961788,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895961788,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895962305,
+      "phase": "worker-heartbeat",
+      "message": "错误与恢复语义审查 running 47s, last tool bash",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791895962478,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895964922,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895964925,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_start bash",
+      "toolName": "bash",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895964970,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_end bash",
+      "toolName": "bash",
+      "isError": false,
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895964972,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895964972,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895965655,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895967305,
+      "phase": "worker-heartbeat",
+      "message": "错误与恢复语义审查 running 52s, last tool bash",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791895967705,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895967708,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895967724,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895967727,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895967728,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895968446,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895970792,
+      "phase": "worker-radio-report",
+      "message": "错误与恢复语义审查 reported to captain",
+      "preview": "RADIO: status=testing, action=run targeted local protocol-reader test only, evidence=mailbox empty; line refs collected, blocker=none, next=confirm regression coverage.",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895970797,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_start bash",
+      "toolName": "bash",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895971340,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_end bash",
+      "toolName": "bash",
+      "isError": false,
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895971341,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895971341,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895972037,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895972307,
+      "phase": "worker-heartbeat",
+      "message": "错误与恢复语义审查 running 57s, last tool bash",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791895977308,
+      "phase": "worker-heartbeat",
+      "message": "错误与恢复语义审查 running 62s, last tool bash",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791895982310,
+      "phase": "worker-heartbeat",
+      "message": "错误与恢复语义审查 running 67s, last tool bash",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791895987312,
+      "phase": "worker-heartbeat",
+      "message": "错误与恢复语义审查 running 72s, last tool bash",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791895989604,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895989607,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_start bash",
+      "toolName": "bash",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895989642,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_end bash",
+      "toolName": "bash",
+      "isError": false,
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895989645,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895989646,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895990462,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895991756,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895991760,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895991771,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895991773,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895991774,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895992314,
+      "phase": "worker-heartbeat",
+      "message": "错误与恢复语义审查 running 77s, last tool read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791895992613,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895995255,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895995258,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895995260,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895995271,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895995273,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895995274,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895995275,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895995276,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895995277,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895995993,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791895997316,
+      "phase": "worker-heartbeat",
+      "message": "错误与恢复语义审查 running 82s, last tool read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791896002317,
+      "phase": "worker-heartbeat",
+      "message": "错误与恢复语义审查 running 87s, last tool read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791896005366,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791896005369,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_start bash",
+      "toolName": "bash",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791896005424,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_end bash",
+      "toolName": "bash",
+      "isError": false,
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791896005425,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791896005425,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791896006238,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791896007319,
+      "phase": "worker-heartbeat",
+      "message": "错误与恢复语义审查 running 92s, last tool bash",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791896008305,
+      "phase": "worker-budget-notice",
+      "message": "错误与恢复语义审查 reached soft request budget (18/18)",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791896008308,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791896008311,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791896008325,
+      "phase": "worker-tool",
+      "message": "错误与恢复语义审查 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791896008327,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791896008329,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791896008333,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791896008334,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791896009027,
+      "phase": "worker-message-start",
+      "message": "错误与恢复语义审查 message started",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791896012321,
+      "phase": "worker-heartbeat",
+      "message": "错误与恢复语义审查 running 97s, last tool read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791896017322,
+      "phase": "worker-heartbeat",
+      "message": "错误与恢复语义审查 running 102s, last tool read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791896022323,
+      "phase": "worker-heartbeat",
+      "message": "错误与恢复语义审查 running 107s, last tool read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791896027324,
+      "phase": "worker-heartbeat",
+      "message": "错误与恢复语义审查 running 112s, last tool read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791896032325,
+      "phase": "worker-heartbeat",
+      "message": "错误与恢复语义审查 running 117s, last tool read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "running"
+    },
+    {
+      "at": 1791896035733,
+      "phase": "worker-message-end",
+      "message": "错误与恢复语义审查 assistant message ended",
+      "preview": "## result_summary 未发现证据明确的阻断性 bug 或已可复现的错误/恢复语义回归。 本轮实现对 pump 完成竞态、source writer/恢复接入、协议错误 unknown/no retry 的主路径语义基本闭合；我只指出一个非阻断的缺失回归覆盖。 ## evidence_refs - `src/structured-exec-pump.ts:120-137`：完成路径先 `stdoutFile.drain()` 再 `protocolReader.f",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "running"
+    },
+    {
+      "at": 1791896035764,
+      "phase": "worker-end",
+      "message": "错误与恢复语义审查 succeeded, last tool read",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.5",
+      "status": "succeeded"
+    },
+    {
+      "at": 1791896035766,
+      "phase": "round-progress",
+      "message": "2 worker(s) completed",
+      "roleId": "lifecycle-review",
+      "model": "openai-codex/gpt-5.3-codex-spark",
+      "status": "succeeded"
+    },
+    {
+      "at": 1791896035767,
+      "phase": "round-end",
+      "message": "collect completed"
+    },
+    {
+      "at": 1791896035768,
+      "phase": "run-evidence-warning",
+      "message": "1 worker(s) failed",
+      "isError": true
+    }
+  ],
+  "activeDir": "/Users/co0ontty/Self/vibe_coding/wand/.pi/team/active/team_mv6ok3xe00011y85gi",
+  "mailboxFile": "/Users/co0ontty/Self/vibe_coding/wand/.pi/team/active/team_mv6ok3xe00011y85gi/mailbox.jsonl",
+  "mailboxTextFile": "/Users/co0ontty/Self/vibe_coding/wand/.pi/team/active/team_mv6ok3xe00011y85gi/mailbox.txt",
+  "cancelFile": "/Users/co0ontty/Self/vibe_coding/wand/.pi/team/active/team_mv6ok3xe00011y85gi/cancel.json",
+  "blueprintId": "team_mv6ok3xe00011y85gi-generated-blueprint",
+  "blueprintFile": "/Users/co0ontty/Self/vibe_coding/wand/.pi/team/blueprints/generated/team_mv6ok3xe00011y85gi-generated-blueprint.json",
+  "planGraph": {
+    "errors": [],
+    "warnings": []
+  },
+  "delegationLanes": [
+    {
+      "runId": "team_mv6ok3xe00011y85gi",
+      "laneId": "lifecycle-review-1791895912278",
+      "delegationToken": "8baad80e-b969-44d5-b594-5e0db6331405",
+      "roleId": "lifecycle-review",
+      "workerKey": "错误与恢复语义审查",
+      "status": "succeeded",
+      "visibleMessageRefs": [],
+      "ackedMessageRefs": [],
+      "invalidAckRefs": [],
+      "ackState": "none",
+      "createdAt": 1791895912278
+    },
+    {
+      "runId": "team_mv6ok3xe00011y85gi",
+      "laneId": "protocol-review-1791895912277",
+      "delegationToken": "99e6e5eb-6a29-48ef-8360-1358977964c6",
+      "roleId": "protocol-review",
+      "workerKey": "流式协议边界审查",
+      "status": "failed",
+      "visibleMessageRefs": [],
+      "ackedMessageRefs": [],
+      "invalidAckRefs": [],
+      "ackState": "none",
+      "createdAt": 1791895912285
+    }
+  ],
+  "finalSummary": "## ⚠️  Captain Pre-Delivery: This team run is DEGRADED — read the checklist below before you proceed.\n\n### 流式协议边界审查 (protocol-review): failed\n- Model: anthropic/claude-fable-5-1\n- Reason: worker produced no assistant text\n- Evidence missing from \"流式协议边界审查\" — this worker did not contribute usable findings.\n- **Action required**: explicitly accept this gap, OR cancel/retry this worker, OR ask the user.\n\nSucceeded: \"错误与恢复语义审查\"\n\nNote (factual): this plan ran 1 parallel round(s) and 1 worker(s) returned usable findings. Parallel roles often cover deliberately different angles, so the extension cannot judge whether the surviving workers already cover the missing one — that coverage call is yours. Weigh whether the absent angle is essential before accepting or rejecting. This is a factual signal, not a quality verdict.\n\n---\n\nWorker evidence digest (full outputs remain in artifacts):\n\n## 流式协议边界审查 (protocol-review)\nModel: anthropic/claude-fable-5-1\nStatus: failed: worker produced no assistant text\nRoute: policy=task_first; selected via metadata; thinking=high; captain remains final judge; metadata: anthropic/claude-fable-5 (warning: probe error: probe produced no output) | fallback: xiaomai/claude-fable-5 (warning: not probed (lazy fallback)) | fallback: anthropic/claude-fable-5-1 (warning: not probed (lazy fallback))\nFallbacks: xiaomai/claude-fable-5, anthropic/claude-fable-5-1\nArtifact: /Users/co0ontty/Self/vibe_coding/wand/.pi/team/active/team_mv6ok3xe00011y85gi/artifacts/workers/protocol-review.md\nSummary: (no summary)\n\n---\n\n## 错误与恢复语义审查 (lifecycle-review)\nModel: openai-codex/gpt-5.5\nStatus: succeeded\nRoute: policy=task_first; selected via metadata; thinking=high; captain remains final judge; metadata: openai-codex/gpt-5.3-codex-spark (warning: probe error: probe produced no output) | fallback: openai-codex/gpt-5.5 (warning: not probed (lazy fallback)) | fallback: openai-codex/gpt-5.6-luna (warning: not probed (lazy fallback))\nFallbacks: openai-codex/gpt-5.5, openai-codex/gpt-5.6-luna\nArtifact: /Users/co0ontty/Self/vibe_coding/wand/.pi/team/active/team_mv6ok3xe00011y85gi/artifacts/workers/lifecycle-review.md\nSummary: 未发现证据明确的阻断性 bug 或错误/恢复语义回归；仅发现恢复路径缺少专门覆盖大事件与协议错误 unknown/no-retry 的非阻断回归测试。",
+  "resultAvailability": "partial",
+  "evidenceCompleteness": {
+    "hasEvidenceRefs": true,
+    "hasLimitations": false,
+    "hasConfidence": true,
+    "hasOpenQuestions": true
+  },
+  "captainAbsorptionPrompt": "Captain: the extension has classified this run's output landscape.\nresultAvailability=partial\nevidenceCompleteness={\"hasEvidenceRefs\":true,\"hasLimitations\":false,\"hasConfidence\":true,\"hasOpenQuestions\":true}\nThese are factual signals, not quality judgments. The semantic verdict is yours.",
+  "logFile": "/Users/co0ontty/Self/vibe_coding/wand/.pi/team/runs/team_mv6ok3xe00011y85gi.json"
+}

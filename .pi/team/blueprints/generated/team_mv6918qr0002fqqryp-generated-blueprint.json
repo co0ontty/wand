@@ -1,0 +1,111 @@
+{
+  "blueprintId": "team_mv6918qr0002fqqryp-generated-blueprint",
+  "runId": "team_mv6918qr0002fqqryp",
+  "task": "同协议重派Wand服务端清理。上次图错误导致0worker，3个隔离worktree仍干净；这次所有显式role ID及依赖均为kebab-case且lead已核验图。3个互不重叠writer仅清理已核实unused/dead私有实现，随后cleanup-review只读复核；负责人最终集成并统一check/test/build。边界见/Users/co0ontty/Self/vibe_coding/wand/output/architecture-stage2/server-cleanup-team/PLAN.md。保留公开API/兼容、迁移、daemon、动态bridge与输入/生命周期契约，禁止提交发布与线上业务操作。",
+  "playbookId": "generated-blueprint",
+  "playbookTitle": "Dynamic team blueprint",
+  "source": "generated",
+  "status": "draft",
+  "createdAt": 1791869839457,
+  "roles": [
+    {
+      "roleId": "route-remnants",
+      "title": "会话路由遗留清理",
+      "description": "唯一writer，cwd=/Users/co0ontty/Self/vibe_coding/wand/output/architecture-stage2/server-cleanup-team/route-worktree，只改src/server-session-routes.ts, src/server-session-context.ts, src/server-session-input-routes.ts, src/server-session-list-routes.ts, src/server-session-lifecycle-routes.ts, src/server-session-worktree-routes.ts, src/server-history-routes.ts, src/session-service.ts",
+      "capability": "code",
+      "capabilityNeeds": [],
+      "tools": [
+        "bash",
+        "read",
+        "write",
+        "edit"
+      ],
+      "modelPreferences": [
+        "xai/grok-4.3"
+      ],
+      "modelFit": "High-thinking TypeScript implementation; precise, evidence-based deletion cleanup."
+    },
+    {
+      "roleId": "storage-assembly",
+      "title": "存储与装配遗留清理",
+      "description": "唯一writer，cwd=/Users/co0ontty/Self/vibe_coding/wand/output/architecture-stage2/server-cleanup-team/storage-worktree，只改src/storage.ts, src/server.ts, src/http-file-stream.ts, src/server-asset-routes.ts, src/server-settings-routes.ts, src/storage/conversations-repository.ts, src/storage/mappers.ts, src/storage/preferences-repository.ts, src/storage/missions-repository.ts, src/storage/tasks-repository.ts, src/storage/vault-keys.ts",
+      "capability": "code",
+      "capabilityNeeds": [],
+      "tools": [
+        "bash",
+        "read",
+        "write",
+        "edit"
+      ],
+      "modelPreferences": [
+        "OpenAI/gpt-6.1-sol"
+      ],
+      "modelFit": "High-thinking TypeScript implementation; precise, evidence-based deletion cleanup."
+    },
+    {
+      "roleId": "execution-dead",
+      "title": "执行层死实现清理",
+      "description": "唯一writer，cwd=/Users/co0ontty/Self/vibe_coding/wand/output/architecture-stage2/server-cleanup-team/execution-worktree，只改src/structured-session-manager.ts, src/core-runner.ts, src/ai-team-runner.ts, src/tui/commands.ts",
+      "capability": "code",
+      "capabilityNeeds": [],
+      "tools": [
+        "bash",
+        "read",
+        "write",
+        "edit"
+      ],
+      "modelPreferences": [
+        "xai/grok-4.3"
+      ],
+      "modelFit": "High-thinking TypeScript implementation; precise, evidence-based deletion cleanup."
+    },
+    {
+      "roleId": "cleanup-review",
+      "title": "独立兼容与副作用复核",
+      "description": "只读复核三个worktree/patch与验证证据，提供证据而不是captain综合裁决。",
+      "capability": "review",
+      "capabilityNeeds": [],
+      "tools": [
+        "bash",
+        "read",
+        "write"
+      ],
+      "modelPreferences": [
+        "OpenAI/gpt-6.1-sol"
+      ],
+      "modelFit": "Independent high-thinking TypeScript review; semantic regressions, public ABI and dynamic-load safety."
+    }
+  ],
+  "rounds": [
+    {
+      "id": "wave-1",
+      "type": "parallel",
+      "roles": [
+        "route-remnants",
+        "storage-assembly",
+        "execution-dead"
+      ]
+    },
+    {
+      "id": "wave-2",
+      "type": "single",
+      "roles": [
+        "cleanup-review"
+      ]
+    }
+  ],
+  "policy": {
+    "rationale": "A task-specific collaboration blueprint generated for the lead captain",
+    "strategy": "The lead captain generated this collaboration plan; the extension handles dispatch, communication, observation, and recording.",
+    "evidencePolicy": "Workers should separate cited evidence, inference, confidence, and missing information.",
+    "modelPolicy": "Use configured models that are objectively available; keep soft health observations visible.",
+    "synthesisPolicy": "The lead uses worker outputs as inputs and keeps final judgment outside the extension.",
+    "progressMilestones": [
+      "wave-1: parallel",
+      "wave-2: single"
+    ],
+    "stopCriteria": "All planned rounds have returned a status and the run log is persisted."
+  },
+  "outputContract": "writer: exclusive-worktree changes.patch+report.md+真实定点日志; reviewer: 独立证据与缺口/merge verdict。报告路径明确，不替captain宣称整任务完成。",
+  "captainRationale": "A task-specific collaboration blueprint generated for the lead captain"
+}

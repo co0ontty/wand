@@ -1,0 +1,48 @@
+{
+  "blueprintId": "team_mv6opun500025rhya8-generated-blueprint",
+  "runId": "team_mv6opun500025rhya8",
+  "task": "重试上轮失败的流式协议审查，限只读，不改代码/重启/访问凭据/调用真实云模型。cwd /Users/co0ontty/Self/vibe_coding/wand。先bash ls/rg再读AGENTS.md。仅看新 src/pi-protocol-reader.ts、src/pi-event-projection.ts、tests/pi-protocol-reader.test.ts 与 tests/pi-protocol-recovery.test.ts（均存在），必要时看 src/structured-exec-pump.ts 接入。工作区大量同期改动不是本轮。方案用stream-json rawjsonParser同步SAX，单片16K输入，packValues=false，逐token验证全部JSON，root只留PI_PROTOCOL_FIELDS，messages数组逐条有界收集但只保留latestassistant，所有context/entries/toolResults丢弃；字段顺序任意，单有效payload8MiB/封套256MiB/深度128/键1024；malformed或超大真正payload failunknown/noretry，nativebridge先投影再写源文件。既有11解析测试+27链路测试通过，首位lifecycle审查无阻断，指出恢复缺专测现已补。请只找能复现的阻断bug、协议语义或有界内存漏洞。尽量<=12工具调用，报告紧凑路径行号+证据+建议。只读不跑全量。前次anthropic无输出失败，本轮用已验证健康gpt5.5。主助手自行作最终综合。",
+  "playbookId": "generated-blueprint",
+  "playbookTitle": "Dynamic team blueprint",
+  "source": "generated",
+  "status": "draft",
+  "createdAt": 1791896176488,
+  "roles": [
+    {
+      "roleId": "protocol-retry",
+      "title": "流式边界独立复审",
+      "description": "只读检查SAX/投影/有界内存与语义，独立提供可复现证据。",
+      "capabilityNeeds": [],
+      "tools": [
+        "bash",
+        "read",
+        "write"
+      ],
+      "modelPreferences": [
+        "openai-codex/gpt-5.5"
+      ]
+    }
+  ],
+  "rounds": [
+    {
+      "id": "collect",
+      "type": "parallel",
+      "roles": [
+        "protocol-retry"
+      ]
+    }
+  ],
+  "policy": {
+    "rationale": "A task-specific collaboration blueprint generated for the lead captain",
+    "strategy": "The lead captain generated this collaboration plan; the extension handles dispatch, communication, observation, and recording.",
+    "evidencePolicy": "Workers should separate cited evidence, inference, confidence, and missing information.",
+    "modelPolicy": "Use configured models that are objectively available; keep soft health observations visible.",
+    "synthesisPolicy": "The lead uses worker outputs as inputs and keeps final judgment outside the extension.",
+    "progressMilestones": [
+      "collect: parallel"
+    ],
+    "stopCriteria": "All planned rounds have returned a status and the run log is persisted."
+  },
+  "outputContract": "紧凑 evidence refs + blockers +缺失覆盖。不能修改项目文件。",
+  "captainRationale": "A task-specific collaboration blueprint generated for the lead captain"
+}

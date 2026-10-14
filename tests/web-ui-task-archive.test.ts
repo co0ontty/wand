@@ -68,6 +68,10 @@ test("sidebar task menus archive by default and only isolated tasks keep a workt
   const panel = source("src/web-ui/react/workspaces/workspaces-panel.tsx");
   assert.match(panel, /await httpWorkspacesRepository\.archiveTask\(task\.id\)/);
   assert.match(panel, /归档任务（保留 Worktree）/);
+  assert.match(panel, /key: "archive", disabled: busy \|\| !canArchive/);
+  assert.match(panel, /归档任务（执行结束后可用）/);
+  assert.match(panel, /const confirmed = key === "archive" \? true/);
+  assert.doesNotMatch(panel, /确认归档任务/);
   assert.match(panel, /可在任务看板的归档任务中恢复/);
   // 硬删除只剩隔离任务的 Worktree 清理入口；普通任务不再有级联删除按钮。
   assert.match(panel, /\.\.\.\(isolated \? \[\{ key: "delete"/);

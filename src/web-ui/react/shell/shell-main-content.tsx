@@ -355,7 +355,7 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
           void openSessionWithOwningTask(sessionId, (id) => { void dispatch({ type: "session.select", id }); });
         }}/>
       </div>
-      <SettingsHost showRestart={() => restartOverlayController.showRestart()}/>
+      <SettingsHost showRestart={restartOverlayController.showRestart}/>
     </Flex>
   );
 }

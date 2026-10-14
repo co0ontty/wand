@@ -91,7 +91,7 @@ export class SessionLogger {
   private flushTimer: NodeJS.Timeout | null = null;
   private disposed = false;
 
-  constructor(configDir: string, shortcutLogMaxBytes?: number, options: SessionLoggerOptions = {}) {
+  constructor(private readonly configDir: string, shortcutLogMaxBytes?: number, options: SessionLoggerOptions = {}) {
     this.baseDir = path.join(configDir, "sessions");
     this.shortcutLogMaxBytes = shortcutLogMaxBytes ?? DEFAULT_SHORTCUT_LOG_MAX_BYTES;
     this.flushIntervalMs = positiveInteger(options.flushIntervalMs, DEFAULT_FLUSH_INTERVAL_MS);
@@ -233,6 +233,15 @@ export class SessionLogger {
     } catch {
       return null;
     }
+  }
+
+  getConfigDirectory(): string {
+    return this.configDir;
+  }
+
+  /** Trusted artifact location; file-backed protocol consumers own their private per-run subdirectories. */
+  protocolDirectory(sessionId: string): string {
+    return this.ensureDir(sessionId);
   }
 
   /** Append a native mode NDJSON event */

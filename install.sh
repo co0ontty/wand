@@ -11,15 +11,15 @@ warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
 
 read_wand_password() {
+  local config_path="$1"
   if command -v wand &>/dev/null; then
-    wand config:password 2>/dev/null && return 0
+    wand config:password -c "$config_path" 2>/dev/null && return 0
   fi
-  node <<'NODE' 2>/dev/null
+  node - "$config_path" <<'NODE' 2>/dev/null
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 
-const configPath = path.join(os.homedir(), ".wand", "config.json");
+const configPath = process.argv[2];
 let configPassword = "";
 try {
   const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
@@ -58,31 +58,26 @@ if [[ -f "$NODE_VERSION_FILE" ]]; then
   REQUIRED_NODE_VERSION="$(<"$NODE_VERSION_FILE")"
 fi
 
-# --- Check Node.js ---
-if command -v node &>/dev/null; then
-  NODE_VERSION=$(node -v | sed 's/^v//')
-  if ! node -e '
-    const have = process.versions.node.split(".").map(Number);
-    const need = process.argv[1].split(".").map(Number);
-    for (let i = 0; i < 3; i++) {
-      if (have[i] > need[i]) process.exit(0);
-      if (have[i] < need[i]) process.exit(1);
-    }
-  ' "$REQUIRED_NODE_VERSION"; then
-    warn "Node.js v${NODE_VERSION} detected, but v${REQUIRED_NODE_VERSION}+ is required."
-    NEED_NODE=1
-  else
-    info "Node.js v${NODE_VERSION} found."
-    NEED_NODE=0
-  fi
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALL_TEMP_DIR=""
+cleanup_install_temp() {
+  if [ -n "$INSTALL_TEMP_DIR" ]; then rm -rf "$INSTALL_TEMP_DIR"; fi
+}
+trap cleanup_install_temp EXIT
+ensure_install_temp() {
+  if [ -z "$INSTALL_TEMP_DIR" ]; then INSTALL_TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/wand-install.XXXXXX")"; fi
+}
+if [ -f "$SCRIPT_DIR/scripts/update-node.sh" ]; then
+  . "$SCRIPT_DIR/scripts/update-node.sh"
 else
-  warn "Node.js not found."
-  NEED_NODE=1
+  ensure_install_temp
+  curl -fLsS https://raw.githubusercontent.com/co0ontty/wand/master/scripts/update-node.sh -o "$INSTALL_TEMP_DIR/update-node.sh"
+  . "$INSTALL_TEMP_DIR/update-node.sh"
 fi
 
-if (( NEED_NODE )); then
+if ! wand_ensure_update_node "$REQUIRED_NODE_VERSION"; then
   if [ "$(uname -s)" = "Darwin" ]; then
-    error "需要 Node.js >= ${REQUIRED_NODE_VERSION}：先 nvm install ${REQUIRED_NODE_VERSION} && nvm use，再重跑本脚本。"
+    error "未找到兼容 Node.js；请先安装 Node.js >= ${REQUIRED_NODE_VERSION} 或配置 nvm，再重跑本入口。旧服务未修改。"
   fi
   info "Installing Node.js v${REQUIRED_NODE_VERSION} via NodeSource..."
   if command -v curl &>/dev/null; then
@@ -93,132 +88,84 @@ if (( NEED_NODE )); then
     error "curl or wget is required to install Node.js."
   fi
   sudo apt-get install -y nodejs || error "Failed to install Node.js. Please install Node.js >= ${REQUIRED_NODE_VERSION} manually."
-  info "Node.js $(node -v) installed."
+  wand_use_existing_node "$REQUIRED_NODE_VERSION" || error "安装后的 Node.js 仍低于要求，旧服务未修改。"
 fi
+info "Node.js $(node -v) ready."
 
-# --- Pre-install cleanup ---
-# 如果 wand 设为开机自启或正在运行，npm 全局更新时 rename 旧包目录会失败，
-# 留下 `.wand-XXXXXX` 残留目录；之后每次 `npm install -g` 都会因 dest 已存在
-# 报 ENOTEMPTY。这里先停掉正在跑的进程，再清理残留，让安装幂等可重试。
+# Existing installations use an independent recovery runtime. Their installed
+# updater may be broken or pinned to an old source/Node path.
 SUDO=""
-if [ "$(id -u)" -ne 0 ] && command -v sudo &>/dev/null; then
-  SUDO="sudo"
+if [ "$(id -u)" -ne 0 ] && command -v sudo &>/dev/null; then SUDO="sudo"; fi
+NPM_ROOT_CHECK="$(npm root -g 2>/dev/null || true)"
+CONFIG_PATH="${WAND_CONFIG_PATH:-$HOME/.wand/config.json}"
+SERVICE_EXISTS=0
+if [ "$(uname -s)" = "Darwin" ]; then
+  if [ -f /Library/LaunchDaemons/com.wand.web.plist ] || [ -f "$HOME/Library/LaunchAgents/com.wand.web.plist" ]; then SERVICE_EXISTS=1; fi
+else
+  if [ -f /etc/systemd/system/wand.service ] || [ -f "$HOME/.config/systemd/user/wand.service" ]; then SERVICE_EXISTS=1; fi
 fi
-
-info "Stopping running wand processes (if any)..."
-# 同时检测系统级和用户级 systemd unit，升级后要按对应 scope 重新生成
-# unit 文件（详见下面 WAND_SYSTEMD_SCOPE 的用途）。
-WAND_SYSTEMD_SCOPE=""
-if command -v systemctl &>/dev/null; then
-  for unit in wand wand.service; do
-    if systemctl list-unit-files 2>/dev/null | grep -q "^${unit}"; then
-      $SUDO systemctl stop "$unit" 2>/dev/null || true
-      WAND_SYSTEMD_UNIT="$unit"
-      WAND_SYSTEMD_SCOPE="system"
-    fi
-  done
-  # 用户级 unit（XDG_RUNTIME_DIR 有时不会一直在；用 --user list-unit-files
-  # 安全地探测，失败就当没有）。
-  if [ -z "$WAND_SYSTEMD_SCOPE" ] && systemctl --user list-unit-files 2>/dev/null | grep -q "^wand"; then
-    systemctl --user stop wand.service 2>/dev/null || true
-    WAND_SYSTEMD_UNIT="wand.service"
-    WAND_SYSTEMD_SCOPE="user"
+if [ -d "$NPM_ROOT_CHECK/@co0ontty/wand" ] || [ -f "$CONFIG_PATH" ] || [ -f "$(dirname "$CONFIG_PATH")/wand.db" ] || [ -f "$(dirname "$CONFIG_PATH")/wand.pid" ] || [ "$SERVICE_EXISTS" = 1 ]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [ -f "$SCRIPT_DIR/scripts/recover-web-update.sh" ]; then
+    bash "$SCRIPT_DIR/scripts/recover-web-update.sh"
+  else
+    ensure_install_temp
+    RECOVERY_SCRIPT="$INSTALL_TEMP_DIR/recover-web-update.sh"
+    curl -fLsS https://raw.githubusercontent.com/co0ontty/wand/master/scripts/recover-web-update.sh -o "$RECOVERY_SCRIPT"
+    bash "$RECOVERY_SCRIPT"
   fi
-fi
-
-# macOS 同理：launchd 的 KeepAlive 会在 npm 覆盖包目录时立刻把 web 重新拉起来，
-# 和 npm 的目录 rename 撞上就留下 .wand-XXXXXX 残留、下次装 ENOTEMPTY。
-# 所以先 bootout 掉 web 服务，装完再用 `wand service:install` 重新注册
-# （顺带把 unit 里的 PATH 与新加的日志路径刷新一遍）。
-# terminald 故意不动：它持有用户的 shell，换包不需要重启它。
-WAND_LAUNCHD_SCOPE=""
-if command -v launchctl >/dev/null 2>&1; then
-  if [ -f "/Library/LaunchDaemons/${WAND_LAUNCHD_LABEL:-com.wand.web}.plist" ]; then
-    WAND_LAUNCHD_SCOPE="system"
-  elif [ -f "${HOME}/Library/LaunchAgents/${WAND_LAUNCHD_LABEL:-com.wand.web}.plist" ]; then
-    WAND_LAUNCHD_SCOPE="user"
-  fi
-  if [ "$WAND_LAUNCHD_SCOPE" = "system" ]; then
-    $SUDO launchctl bootout "system/${WAND_LAUNCHD_LABEL:-com.wand.web}" 2>/dev/null || true
-    info "已停止 launchd 服务 com.wand.web（system scope），装完会重新注册"
-  elif [ "$WAND_LAUNCHD_SCOPE" = "user" ]; then
-    launchctl bootout "gui/$(id -u)/${WAND_LAUNCHD_LABEL:-com.wand.web}" 2>/dev/null || true
-    info "已停止 launchd 用户代理 com.wand.web，装完会重新注册"
-  fi
-fi
-pkill -f "wand web" 2>/dev/null || true
-pkill -f "wand/dist/cli\\.js" 2>/dev/null || true
-# 给 OS 一点时间释放文件句柄
-sleep 1
-
-NPM_ROOT="$(npm root -g 2>/dev/null || true)"
-if [ -n "$NPM_ROOT" ] && [ -d "$NPM_ROOT/@co0ontty" ]; then
-  LEFTOVER=$(find "$NPM_ROOT/@co0ontty" -maxdepth 1 -name ".wand-*" -type d 2>/dev/null || true)
-  if [ -n "$LEFTOVER" ]; then
-    warn "Cleaning leftover npm rename dirs:"
-    echo "$LEFTOVER" | while read -r d; do echo "  - $d"; done
-    echo "$LEFTOVER" | xargs $SUDO rm -rf
-  fi
+  exit $?
 fi
 
 # --- Install wand ---
-info "Installing @co0ontty/wand..."
-npm install -g @co0ontty/wand || error "npm install failed."
+INSTALL_CHANNEL="${WAND_UPDATE_CHANNEL:-stable}"
+case "$INSTALL_CHANNEL" in stable|beta) ;; *) error "WAND_UPDATE_CHANNEL must be stable or beta" ;; esac
+if [ -f "$SCRIPT_DIR/scripts/update-target.js" ]; then
+  TARGET_SELECTOR="$SCRIPT_DIR/scripts/update-target.js"
+else
+  ensure_install_temp
+  TARGET_SELECTOR="$INSTALL_TEMP_DIR/update-target.js"
+  curl -fLsS https://raw.githubusercontent.com/co0ontty/wand/master/scripts/update-target.js -o "$TARGET_SELECTOR"
+fi
+INSTALL_TAGS="$(npm view @co0ontty/wand dist-tags --json)"
+INSTALL_VERSION="$(node "$TARGET_SELECTOR" "$INSTALL_CHANNEL" "$INSTALL_TAGS")"
+ENGINE_RANGE="$(npm view "@co0ontty/wand@$INSTALL_VERSION" engines.node)"
+if [[ "$ENGINE_RANGE" =~ ^\>=([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+  wand_ensure_update_node "${BASH_REMATCH[1]}" || error "目标版本要求 Node.js $ENGINE_RANGE；当前安装未修改。"
+fi
+if [ -f "$SCRIPT_DIR/scripts/recover-web-update.mjs" ]; then PREFIX_SELECTOR="$SCRIPT_DIR/scripts/recover-web-update.mjs";
+else
+  ensure_install_temp
+  PREFIX_SELECTOR="$INSTALL_TEMP_DIR/recover-web-update.mjs"
+  curl -fLsS https://raw.githubusercontent.com/co0ontty/wand/master/scripts/recover-web-update.mjs -o "$PREFIX_SELECTOR"
+fi
+INSTALL_PREFIX="$(node "$PREFIX_SELECTOR" prefix "${WAND_INSTALL_PREFIX:-$(npm prefix -g)}" "$HOME")"
+info "Installing @co0ontty/wand@$INSTALL_VERSION..."
+npm install -g --engine-strict --prefix "$INSTALL_PREFIX" "@co0ontty/wand@$INSTALL_VERSION" || error "npm install failed."
+NODE_BIN="$(command -v node)"
+GLOBAL_WAND_BIN="$INSTALL_PREFIX/bin/wand"
+export PATH="$INSTALL_PREFIX/bin:$PATH"
+[ -f "$GLOBAL_WAND_BIN" ] || error "安装后全局 wand 入口缺失。"
+printf -v CONFIG_ARGUMENT '%q' "$CONFIG_PATH"
 
 # --- Init (needed before service:install reads config) ---
 info "Initializing wand..."
-wand init
-if WAND_INITIAL_PASSWORD="$(read_wand_password)"; then
+"$NODE_BIN" "$GLOBAL_WAND_BIN" init -c "$CONFIG_PATH"
+"$NODE_BIN" --input-type=module - "$GLOBAL_WAND_BIN" "$CONFIG_PATH" "$INSTALL_CHANNEL" <<'NODE'
+import { realpathSync } from "node:fs";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+const [bin, configPath, channel] = process.argv.slice(2);
+const packageDir = path.dirname(path.dirname(realpathSync(bin)));
+const { WandStorage, resolveDatabasePath } = await import(pathToFileURL(path.join(packageDir, "dist/storage.js")).href);
+const storage = new WandStorage(resolveDatabasePath(configPath));
+try { storage.setConfigValue("updateChannel", channel); } finally { storage.close(); }
+NODE
+if WAND_INITIAL_PASSWORD="$(read_wand_password "$CONFIG_PATH")"; then
   info "Wand login password: ${GREEN}${WAND_INITIAL_PASSWORD}${NC}"
-  info "You can view it again with: ${GREEN}wand config:password${NC}"
+  info "You can view it again with: ${GREEN}wand config:password -c ${CONFIG_ARGUMENT}${NC}"
 else
   warn "Unable to read Wand login password. Try: wand config:password"
-fi
-
-# --- Re-register systemd unit if we stopped one (升级场景) ---
-# 关键修复：以前这里只 `systemctl start`，但 unit 文件里的 `Environment=PATH=...`
-# 是上次 `wand service:install` 那一刻烧的快照。用户切 node 版本 / 把 claude 装
-# 到新位置后，老 unit 的 PATH 找不到 claude → "command not found"。
-# 现在改成重新跑 `wand service:install`：它会按当前 shell 的 PATH 重新生成 unit
-# 文件，然后 daemon-reload + enable --now，等价于 stop+regen+start。
-# 升级成功后置 SKIP_INSTALL_MENU=1，跳过下面的"选启动方式"交互（用户本来就在用服务）。
-SKIP_INSTALL_MENU=0
-if [ -n "${WAND_SYSTEMD_UNIT:-}" ]; then
-  if [ "$WAND_SYSTEMD_SCOPE" = "user" ]; then
-    info "Re-registering ${WAND_SYSTEMD_UNIT} (user scope) to refresh baked-in PATH..."
-    if wand service:install --user; then
-      SKIP_INSTALL_MENU=1
-    else
-      warn "wand service:install --user 失败，回退到 systemctl --user start"
-      systemctl --user start "$WAND_SYSTEMD_UNIT" 2>/dev/null \
-        || warn "也起不来，请手动跑 'wand service:install --user'"
-    fi
-  else
-    info "Re-registering ${WAND_SYSTEMD_UNIT} to refresh baked-in PATH..."
-    if $SUDO wand service:install; then
-      SKIP_INSTALL_MENU=1
-    else
-      warn "wand service:install 失败，回退到 systemctl start"
-      $SUDO systemctl start "$WAND_SYSTEMD_UNIT" 2>/dev/null \
-        || warn "也起不来，请手动跑 '${SUDO:+sudo }wand service:install'"
-    fi
-  fi
-elif [ -n "$WAND_LAUNCHD_SCOPE" ]; then
-  if [ "$WAND_LAUNCHD_SCOPE" = "user" ]; then
-    info "Re-registering launchd user agent to refresh baked-in PATH / log paths..."
-    if wand service:install --user; then
-      SKIP_INSTALL_MENU=1
-    else
-      warn "wand service:install --user 失败，手动跑 'wand service:install --user' 恢复。"
-    fi
-  else
-    info "Re-registering launchd daemon to refresh baked-in PATH / log paths..."
-    if $SUDO wand service:install; then
-      SKIP_INSTALL_MENU=1
-    else
-      warn "wand service:install 失败，手动跑 '${SUDO:+sudo }wand service:install' 恢复。"
-    fi
-  fi
 fi
 
 # --- Choose run mode ---
@@ -273,31 +220,6 @@ choose_install_mode() {
   fi
 }
 
-if [ "$SKIP_INSTALL_MENU" = "1" ]; then
-  # 升级场景：老服务已被 wand service:install 重新生成 + enable --now，没必要
-  # 再问用户怎么启动。直接打印升级完成 + 状态查询提示。
-  echo ""
-  if [ "$WAND_LAUNCHD_SCOPE" = "user" ]; then
-    info "升级完成，用户级 launchd 代理已重新注册并启动。"
-    info "查看状态：${GREEN}wand service:status --user${NC}"
-    info "看 日 志：${GREEN}wand service:logs --user${NC}"
-  elif [ "$WAND_LAUNCHD_SCOPE" = "system" ]; then
-    info "升级完成，系统级 launchd 守护已重新注册并启动。"
-    info "查看状态：${GREEN}wand service:status${NC}"
-    info "看 日 志：${GREEN}wand service:logs${NC}"
-  elif [ "$WAND_SYSTEMD_SCOPE" = "user" ]; then
-    info "升级完成，用户级服务已用最新 PATH 重新注册并启动。"
-    info "查看状态：${GREEN}wand service:status --user${NC}"
-    info "看 日 志：${GREEN}wand service:logs --user${NC}"
-  else
-    info "升级完成，系统级服务已用最新 PATH 重新注册并启动。"
-    info "查看状态：${GREEN}wand service:status${NC}"
-    info "看 日 志：${GREEN}wand service:logs${NC}"
-  fi
-  info "接入 TUI：${GREEN}wand web${NC}"
-  exit 0
-fi
-
 MODE=$(choose_install_mode)
 
 case "$MODE" in
@@ -307,7 +229,7 @@ case "$MODE" in
     if [ -n "$SUDO" ]; then
       info "需要 sudo 密码以写入 /etc/systemd/system/:"
     fi
-    if $SUDO wand service:install; then
+    if $SUDO "$NODE_BIN" "$GLOBAL_WAND_BIN" service:install -c "$CONFIG_PATH"; then
       info "服务已注册并在后台运行（开机自启）。"
       echo ""
       info "查看状态：${GREEN}wand service:status${NC}    ${SUDO:+(读取不要 sudo)}"
@@ -325,7 +247,7 @@ case "$MODE" in
   user)
     # 用户级 systemd / launchd,不要 sudo
     info "Installing wand as a user-level service (no sudo)..."
-    if wand service:install --user; then
+    if "$NODE_BIN" "$GLOBAL_WAND_BIN" service:install --user -c "$CONFIG_PATH"; then
       info "用户级服务已注册并在后台运行。"
       if [ "$(uname)" = "Linux" ]; then
         warn "⚠ 用户登出后服务会被回收。想保持登出后也运行:"

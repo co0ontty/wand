@@ -1,0 +1,163 @@
+{"at":1791895912315,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895912316,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895912316,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895912316,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895914909,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895914911,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895914963,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895914963,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895914964,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895914964,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895916939,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895923852,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895923854,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_start bash","toolName":"bash"}
+{"at":1791895923927,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791895923928,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895923928,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895924623,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895928108,"phase":"worker-radio-report","message":"错误与恢复语义审查 reported to captain","preview":"RADIO: status=started, action=scope confirmed via ls/rg and now reading AGENTS/mailbox, evidence=repo root + target files listed, blocker=none, next=inspect lifecycle/error paths."}
+{"at":1791895928110,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_start read","toolName":"read"}
+{"at":1791895928112,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_start read","toolName":"read"}
+{"at":1791895928136,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791895928140,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791895928141,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895928141,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895928141,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895928142,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895928922,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895933860,"phase":"worker-radio-report","message":"错误与恢复语义审查 reported to captain","preview":"RADIO: status=reading, action=inspect protocol reader/projection and integration points, evidence=AGENTS.md read; mailbox empty, blocker=none, next=collect line-numbered evidence."}
+{"at":1791895933862,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_start read","toolName":"read"}
+{"at":1791895933865,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_start read","toolName":"read"}
+{"at":1791895933866,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_start read","toolName":"read"}
+{"at":1791895933879,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791895933881,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791895933882,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791895933883,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895933884,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895933885,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895933886,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895933887,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895933888,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895934659,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895937473,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895937476,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_start read","toolName":"read"}
+{"at":1791895937477,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_start read","toolName":"read"}
+{"at":1791895937479,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_start read","toolName":"read"}
+{"at":1791895937492,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791895937495,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791895937497,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791895937497,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895937498,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895937498,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895937499,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895937499,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895937500,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895938238,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895940818,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895940821,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_start bash","toolName":"bash"}
+{"at":1791895940857,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791895940859,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895940860,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895941554,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895944552,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895944554,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_start read","toolName":"read"}
+{"at":1791895944557,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_start read","toolName":"read"}
+{"at":1791895944559,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_start read","toolName":"read"}
+{"at":1791895944573,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791895944576,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791895944579,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791895944580,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895944580,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895944581,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895944582,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895944582,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895944583,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895945329,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895947403,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895947405,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_start read","toolName":"read"}
+{"at":1791895947421,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791895947423,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895947425,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895948203,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895951888,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895951891,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_start read","toolName":"read"}
+{"at":1791895951894,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_start read","toolName":"read"}
+{"at":1791895951896,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_start read","toolName":"read"}
+{"at":1791895951908,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791895951911,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791895951913,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791895951914,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895951915,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895951916,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895951917,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895951918,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895951919,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895952616,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895955652,"phase":"worker-radio-report","message":"错误与恢复语义审查 reported to captain","preview":"RADIO: status=evidence_found, action=inspecting recovery reducer/error handling details, evidence=PiProtocolReader/PiRunner/recovery sections read; no captain request, blocker=none, next=verify exact line refs and tests."}
+{"at":1791895955655,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_start read","toolName":"read"}
+{"at":1791895955667,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791895955669,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895955670,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895956408,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895961738,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895961741,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_start bash","toolName":"bash"}
+{"at":1791895961787,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791895961788,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895961788,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895962478,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895964922,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895964925,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_start bash","toolName":"bash"}
+{"at":1791895964970,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791895964972,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895964972,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895965655,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895967705,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895967708,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_start read","toolName":"read"}
+{"at":1791895967724,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791895967727,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895967728,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895968446,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895970791,"phase":"worker-radio-report","message":"错误与恢复语义审查 reported to captain","preview":"RADIO: status=testing, action=run targeted local protocol-reader test only, evidence=mailbox empty; line refs collected, blocker=none, next=confirm regression coverage."}
+{"at":1791895970797,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_start bash","toolName":"bash"}
+{"at":1791895971340,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791895971341,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895971341,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895972037,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895989604,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895989607,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_start bash","toolName":"bash"}
+{"at":1791895989642,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791895989645,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895989646,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895990462,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895991756,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895991760,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_start read","toolName":"read"}
+{"at":1791895991771,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791895991773,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895991774,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895992613,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895995255,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895995258,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_start read","toolName":"read"}
+{"at":1791895995260,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_start read","toolName":"read"}
+{"at":1791895995271,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791895995273,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791895995274,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895995275,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895995276,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791895995277,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791895995993,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791896005365,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791896005369,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_start bash","toolName":"bash"}
+{"at":1791896005424,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791896005425,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791896005425,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791896006238,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791896008305,"phase":"worker-budget-notice","message":"错误与恢复语义审查 reached soft request budget (18/18)"}
+{"at":1791896008308,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791896008311,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_start read","toolName":"read"}
+{"at":1791896008325,"phase":"worker-tool","message":"错误与恢复语义审查 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791896008327,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791896008329,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791896008333,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791896008334,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended"}
+{"at":1791896009027,"phase":"worker-message-start","message":"错误与恢复语义审查 message started"}
+{"at":1791896035733,"phase":"worker-message-end","message":"错误与恢复语义审查 assistant message ended","preview":"## result_summary 未发现证据明确的阻断性 bug 或已可复现的错误/恢复语义回归。 本轮实现对 pump 完成竞态、source writer/恢复接入、协议错误 unknown/no retry 的主路径语义基本闭合；我只指出一个非阻断的缺失回归覆盖。 ## evidence_refs - `src/structured-exec-pump.ts:120-137`：完成路径先 `stdoutFile.drain()` 再 `protocolReader.f"}

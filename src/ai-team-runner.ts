@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { freezeTeamEmployees, projectTeamEmployees, teamMemberEmployee } from "./ai-team-employee-binding.js";
@@ -61,7 +61,7 @@ import {
   type StepDispatchInfo,
 } from "./ai-team-types.js";
 import { renderLiveStepText } from "./ai-team-live.js";
-import { CHAT_INVITE_PER_LINE, chatAuthor, chatText, displayAiTeam, chatIntroLines, assignmentBasisNote, stepStartText, type AiTeamStepBasis } from "./ai-team-chat-helpers.js";
+import { chatAuthor, chatText, displayAiTeam, chatIntroLines, assignmentBasisNote, stepStartText, type AiTeamStepBasis } from "./ai-team-chat-helpers.js";
 export { CHAT_INVITE_PER_LINE, assignmentBasisNote, chatAuthor, chatIntroLines, chatText, displayAiTeam, stepStartText } from "./ai-team-chat-helpers.js";
 export type { AiTeamStepBasis } from "./ai-team-chat-helpers.js";
 import { teamReportPreview } from "./team-report-preview.js";

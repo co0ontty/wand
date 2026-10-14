@@ -7,6 +7,7 @@ import { ClaudeCliProtocolReducer } from "./structured-claude-protocol.js";
 import { applyOpenCodeEvent } from "./structured-opencode-adapter.js";
 import { applyGrokEvent } from "./structured-grok-adapter.js";
 import { applyPiEvent } from "./structured-pi-adapter.js";
+import { lastPiAssistantMessage } from "./pi-event-projection.js";
 import { applyGeminiEvent } from "./structured-gemini-adapter.js";
 import type { StructuredCompactionNotice, StructuredRunnerTurnState } from "./structured-runner.js";
 import { normalizeTurnAnchors } from "./structured-provider-common.js";
@@ -97,6 +98,12 @@ export function buildReplayProcessor(session: SessionSnapshot): ReplayProcessor 
             ? applyGeminiEvent(state, event)
             : applyPiEvent(state, event, observedAt);
       if (error) processor.primaryError = error;
+      else if (runner === "pi-cli-json") {
+        const lastAssistant = lastPiAssistantMessage(event);
+        // Match live PiRunner: a later successful answer supersedes an error
+        // that Pi recovered internally, while a terminal error stays a failure.
+        if (lastAssistant && lastAssistant.stopReason !== "error") processor.primaryError = null;
+      }
       return true;
     },
   };

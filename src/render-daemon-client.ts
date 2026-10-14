@@ -2,7 +2,7 @@ import { lstatSync, readFileSync } from "node:fs";
 import net from "node:net";
 import process from "node:process";
 
-import { startDaemonHeartbeat, waitForDaemonSocket } from "./daemon-connection.js";
+import { rejectPendingRequests, startDaemonHeartbeat, waitForDaemonSocket } from "./daemon-connection.js";
 import { getErrorMessage } from "./error-utils.js";
 import { appendWindow, PTY_OUTPUT_MAX_SIZE } from "./pty-text-utils.js";
 import type { PtyTerminalSnapshot } from "./pty-terminal-state.js";
@@ -1083,11 +1083,7 @@ export class RenderDaemonClient implements TerminalHost {
   }
 
   private rejectPending(error: Error): void {
-    for (const pending of this.pending.values()) {
-      clearTimeout(pending.timer);
-      pending.reject(error);
-    }
-    this.pending.clear();
+    rejectPendingRequests(this.pending, error);
   }
 }
 

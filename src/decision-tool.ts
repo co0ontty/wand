@@ -1,4 +1,6 @@
 import type { DecisionCardSummary } from "./types.js";
+import { isRecord } from "./object-utils.js";
+import { collapseWhitespaceAndClip as collapse } from "./text-utils.js";
 
 /** Presentation-only recognition of actual local-decision invocations, never an execution policy. */
 interface DecisionToolLike {
@@ -106,16 +108,6 @@ const MODE_HINTS: Record<DecisionMode, string> = {
 const GENERIC_HINT = "选择 / 评分 / 是非判断";
 
 type DecisionMode = NonNullable<DecisionCardSummary["mode"]>;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-/** 折叠空白并截断：摘要永远单行、有界。 */
-function collapse(text: string, max: number): string {
-  const flat = text.replace(/\s+/g, " ").trim();
-  return flat.length > max ? `${flat.slice(0, Math.max(1, max - 1))}…` : flat;
-}
 
 function modeOf(types: Iterable<string>): DecisionMode | undefined {
   const unique = new Set(types);

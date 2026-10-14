@@ -5,6 +5,7 @@ import { isThinkingEffort } from "./structured-provider-common.js";
 import type { WandTaskAgent, WandTaskAgentEngine, WandTaskAgentKind, WandTaskAgentMode } from "./task-types.js";
 import { DEFAULT_WAND_TASK_AGENT_KIND, DEFAULT_WAND_TASK_AGENT_MODE, isWandTaskAgentEngine, isWandTaskAgentKind, isWandTaskAgentMode, normalizeWandTaskAgentMode } from "./task-types.js";
 import { badRequest } from "./http-error.js";
+import { AI_TEAM_MAX_CANDIDATES, agentKey } from "./ai-team-types.js";
 
 /** Request parsing for task agents and parent-task links, shared by task, team and employee routes. */
 /** 新认领只能挂到同项目且正在处理的任务；历史归属在父任务完成后仍保留。 */
@@ -68,4 +69,26 @@ export function parseTaskAgent(
   }
   const engine: WandTaskAgentEngine | undefined = rawEngine === "sdk" ? rawEngine : undefined;
   return { provider, model, thinkingEffort, mode, kind: rawKind, ...(engine ? { engine } : {}) };
+}
+
+/** Callers retain their array/legacy-input errors and per-candidate policy order. */
+export function parseTaskAgentCandidates(
+  values: readonly unknown[],
+  validateCandidate?: (candidate: WandTaskAgent) => void,
+): WandTaskAgent[] {
+  if (values.length === 0) throw badRequest("至少需要一个执行候选。");
+  if (values.length > AI_TEAM_MAX_CANDIDATES) {
+    throw badRequest(`最多 ${AI_TEAM_MAX_CANDIDATES} 个执行候选。`);
+  }
+  return values.map((raw): WandTaskAgent => {
+    const candidate = parseTaskAgent(raw ?? {});
+    if (!candidate) throw badRequest("请选择有效的 CLI 工具。");
+    validateCandidate?.(candidate);
+    return candidate;
+  });
+}
+
+/** Preserve literal model/default and CLI/SDK identity; callers own duplicate errors. */
+export function hasDuplicateTaskAgentCandidates(agents: readonly WandTaskAgent[]): boolean {
+  return new Set(agents.map(agentKey)).size !== agents.length;
 }

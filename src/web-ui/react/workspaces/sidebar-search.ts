@@ -1,10 +1,24 @@
-import type { TaskDirectoryGroup, WorkspaceSessionSummary } from "./types";
+import type { TaskDirectoryGroup, TaskSummary, WorkspaceSessionSummary } from "./types";
 
 export function sidebarSearchMatches(query: string, ...values: (string | undefined)[]): boolean {
   const words = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
   if (words.length === 0) return true;
   const text = values.filter(Boolean).join(" ").toLocaleLowerCase();
   return words.every((word) => text.includes(word));
+}
+
+/** Child display projection only: do not feed this array back into task mutation scope. */
+export function filterSidebarTaskSessions(
+  group: TaskDirectoryGroup,
+  task: TaskSummary,
+  query: string,
+  liveTitles: Readonly<Record<string, string>> = {},
+): readonly WorkspaceSessionSummary[] {
+  if (sidebarSearchMatches(query, group.workspaceName, group.workspaceCwd, task.name, task.cwd)) return task.sessions;
+  return task.sessions.filter(session => sidebarSearchMatches(query,
+    session.title, liveTitles[session.id], session.cwd, session.provider, session.employeeName,
+    session.teamStep?.title, session.teamStep?.memberName, session.teamChat?.chatTitle,
+  ));
 }
 
 /** Keep complete tasks: filtering must never change the scope of rename/delete/clear actions. */

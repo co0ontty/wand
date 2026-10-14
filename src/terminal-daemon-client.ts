@@ -33,7 +33,7 @@ import {
   type StructuredStreamEvent,
   type StructuredRunState,
 } from "./structured-exec-host.js";
-import { startDaemonHeartbeat, waitForDaemonSocket } from "./daemon-connection.js";
+import { rejectPendingRequests, startDaemonHeartbeat, waitForDaemonSocket } from "./daemon-connection.js";
 import { appendWindow, PTY_OUTPUT_MAX_SIZE } from "./pty-text-utils.js";
 import { logInfo, logRateLimited } from "./runtime-log.js";
 
@@ -722,11 +722,7 @@ export class TerminalDaemonClient implements TerminalHost, StructuredExecHost {
   }
 
   private rejectPending(error: Error): void {
-    for (const pending of this.pending.values()) {
-      clearTimeout(pending.timer);
-      pending.reject(error);
-    }
-    this.pending.clear();
+    rejectPendingRequests(this.pending, error);
   }
 }
 

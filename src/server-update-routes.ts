@@ -9,7 +9,7 @@ import { getErrorMessage } from "./error-utils.js";
 import { asyncRoute } from "./express-async.js";
 import { sendRouteError, text } from "./server-request.js";
 import type { ModelCatalogService } from "./models.js";
-import type { PackageUpdateInfo, UpdateChannel } from "./npm-update-utils.js";
+import { isGlobalUpdateLocked, type PackageUpdateInfo, type UpdateChannel } from "./npm-update-utils.js";
 import { isSessionProvider } from "./session-provider.js";
 import {
   checkProviderCliUpdates,
@@ -33,7 +33,8 @@ import { streamFileWithRange } from "./http-file-stream.js";
 import type { WandStorage } from "./storage.js";
 import type { WandConfig } from "./types.js";
 import { compareApkInstallOrder, compareSemver, compareWandInstallOrder } from "./version-utils.js";
-import { canUseDetachedUpdateHelper, startDetachedUpdateHelper } from "./update-helper.js";
+import { HttpError } from "./http-error.js";
+import { canUseDetachedUpdateHelper, readDetachedUpdateStatus, readLatestDetachedUpdate, startDetachedUpdateHelper, type DetachedUpdateResult } from "./update-helper.js";
 
 interface DownloadAsset {
   fileName: string;
@@ -463,6 +464,42 @@ export class ServerUpdateState {
   providerCliUpdateCache: { items: ProviderCliUpdateStatus[]; checkedAt: string } | null = null;
   providerCliUpdateInFlight = false;
   updateInFlight = false;
+  helper: DetachedUpdateResult | null = null;
+  updateTargetVersion: string | null = null;
+}
+
+/** Both scheduled and manual Web updates use the same installer and lifecycle. */
+export function launchServerUpdate(
+  deps: AdminUpdateRoutesDependencies,
+  info: PackageUpdateInfo,
+  onFailure?: (message: string) => void,
+): DetachedUpdateResult {
+  if (isGlobalUpdateLocked()) throw new HttpError(409, "update_in_progress", "另一个更新尚未完成安装与启动验证，请稍后重试。");
+  if (!canUseDetachedUpdateHelper()) throw new HttpError(409, "update_unavailable", "当前平台暂不支持 Web 异步更新，请在终端运行 install.sh 更新。");
+  const helper = startDetachedUpdateHelper({
+    installSpec: info.installSpec, configPath: deps.configPath, parentPid: process.pid,
+    cliArgs: process.argv.slice(2), cwd: process.cwd(), env: process.env, timeoutMs: 300_000, expectedVersion: info.latest ?? undefined,
+  });
+  if (!helper.started) throw new HttpError(409, "update_preflight", helper.message);
+  deps.state.helper = helper;
+  deps.state.updateTargetVersion = info.latest;
+  deps.state.updateInFlight = true;
+  process.stdout.write(`[wand] ${helper.message}\n`);
+  const monitor = setInterval(() => {
+    const status = readDetachedUpdateStatus(helper.logPath);
+    if (!status || !["completed", "failed"].includes(status.phase)) return;
+    clearInterval(monitor);
+    deps.state.updateInFlight = false;
+    if (status.phase === "failed") {
+      onFailure?.(status.message);
+      if (!onFailure) deps.emitSystemNotification({ kind: "auto-update-failed", current: info.current, latest: info.latest, error: status.message });
+    }
+  }, 1000);
+  monitor.unref();
+  deps.emitSystemNotification({
+    kind: "auto-update-restart", current: info.current, latest: info.latest, previousInstanceId: deps.serverInstanceId,
+  });
+  return helper;
 }
 
 export async function refreshProviderCliUpdateState(
@@ -548,6 +585,14 @@ export function registerAdminUpdateRoutes(app: Express, deps: AdminUpdateRoutesD
     }
   }));
 
+  app.get("/api/update-status", requireAdmin, (_req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const latest = readLatestDetachedUpdate(deps.configPath);
+    const status = latest?.status ?? (state.helper ? readDetachedUpdateStatus(state.helper.logPath) : null);
+    res.json({ updating: state.updateInFlight || isGlobalUpdateLocked(), version: latest?.version ?? state.updateTargetVersion,
+      status });
+  });
+
   app.get("/api/check-update", requireAdmin, asyncRoute(async (_req, res) => {
     try {
       const info = await deps.checkLatestPackageVersion(deps.getUpdateChannel(), true);
@@ -563,6 +608,7 @@ export function registerAdminUpdateRoutes(app: Express, deps: AdminUpdateRoutesD
       return;
     }
     state.updateInFlight = true;
+    let launched = false;
     try {
       const channel = deps.getUpdateChannel();
       const info = await deps.checkLatestPackageVersion(channel, true);
@@ -574,30 +620,8 @@ export function registerAdminUpdateRoutes(app: Express, deps: AdminUpdateRoutesD
         res.status(502).json({ error: "npm 所选通道暂无有效版本，或 registry 暂时不可用。" });
         return;
       }
-      if (!canUseDetachedUpdateHelper()) {
-        res.status(500).json({ error: "当前平台暂不支持 Web 异步更新，请在终端运行 install.sh 更新。" });
-        return;
-      }
-      const helper = startDetachedUpdateHelper({
-        installSpec: info.installSpec,
-        configPath: deps.configPath,
-        parentPid: process.pid,
-        cliArgs: process.argv.slice(2),
-        cwd: process.cwd(),
-        env: process.env,
-        timeoutMs: 300000,
-      });
-      if (!helper.started) {
-        res.status(500).json({ error: helper.message, detail: `script=${helper.scriptPath}\nlog=${helper.logPath}` });
-        return;
-      }
-      process.stdout.write(`[wand] ${helper.message}\n`);
-      deps.emitSystemNotification({
-        kind: "auto-update-restart",
-        current: info.current,
-        latest: info.latest,
-        previousInstanceId: deps.serverInstanceId,
-      });
+      const helper = launchServerUpdate(deps, info);
+      launched = true;
       res.json({
         ok: true,
         message: info.updateAvailable ? `已开始更新到 ${info.latest}` : `已开始重新安装 ${info.latest}`,
@@ -610,7 +634,7 @@ export function registerAdminUpdateRoutes(app: Express, deps: AdminUpdateRoutesD
     } catch (error) {
       sendRouteError(res, error, "更新失败。", 500);
     } finally {
-      state.updateInFlight = false;
+      if (!launched) state.updateInFlight = false;
     }
   }));
 

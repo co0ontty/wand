@@ -6,7 +6,6 @@ import type { Express, Request, RequestHandler } from "express";
 
 import { buildInfoPayload, type BuildInfo } from "./build-info.js";
 import { buildChildEnv } from "./env-utils.js";
-import { getErrorMessage } from "./error-utils.js";
 import { asyncRoute } from "./express-async.js";
 import { sendRouteError } from "./server-request.js";
 import {

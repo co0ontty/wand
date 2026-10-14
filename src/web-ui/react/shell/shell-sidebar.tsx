@@ -9,6 +9,7 @@ import { isSessionJustCompleted } from "../../../session-completion-state.js";
 import { WAND_AGENT_LABEL, normalizeProviderId, providerDisplayName } from "../../provider-identity";
 import { ProviderLogo } from "../provider-logo";
 import { WorkspacesPanel } from "../workspaces/workspaces-panel";
+import { openSessionWithOwningTask } from "../workspaces/session-open";
 import { SidebarProjectionSwap } from "../workspaces/sidebar-projection-swap";
 import { conversationUi, useConversationUi } from "../conversations/state";
 import { ConversationNavigation, ConversationSidebarList, ConversationSidebarTools } from "../conversations/sidebar";
@@ -827,7 +828,14 @@ export function ShellSidebar() {
             <div id="sessions-panel">
               <div className="sessions-list" id="sessions-list">
                 <SidebarProjectionSwap value={conversationState.mode}>
-                  <div hidden={conversationState.mode !== "chats"} inert={conversationState.mode !== "chats"}><ConversationSidebarList compact={narrow} enabled={visible && !contextRail && conversationState.mode === "chats"} onNavigate={() => { taskBoardController.close(); dismissSidebarSurfaces(); }}/></div>
+                  <div hidden={conversationState.mode !== "chats"} inert={conversationState.mode !== "chats"}><ConversationSidebarList compact={narrow} enabled={visible && !contextRail && conversationState.mode === "chats"}
+                    selectedSessionId={snapshot.selected?.id ?? null}
+                    sessionTitles={Object.fromEntries(snapshot.sidebar.groups.flatMap(group => group.entries.map(entry => [entry.id, entry.title] as const)))}
+                    onNavigate={() => { taskBoardController.close(); dismissSidebarSurfaces(); }}
+                    onOpenSession={id => {
+                      taskBoardController.close(); conversationUi.suspend(); dismissSidebarSurfaces();
+                      void openSessionWithOwningTask(id, selectedId => { void dispatch({ type: "session.select", id: selectedId }); });
+                    }}/></div>
                   <div hidden={conversationState.mode !== "tasks"} inert={conversationState.mode !== "tasks"}>{taskTree(narrow)}</div>
                 </SidebarProjectionSwap>
               </div>

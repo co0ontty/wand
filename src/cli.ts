@@ -194,6 +194,11 @@ async function main(): Promise<void> {
       await runAgentCliCommand(command, args, configPath);
       break;
     }
+    case "update:repair": {
+      const { repairInstalledUpdate } = await import("./update-repair-cli.js");
+      process.exitCode = await repairInstalledUpdate(configPath);
+      break;
+    }
     case "core:status": {
       const { checkCoreStatus } = await import("./core-status-cli.js");
       await checkCoreStatus(configPath);
@@ -309,6 +314,7 @@ Agent runtime:
 
 System service (default = system-wide; pass --user for user-level):
   wand service:install      Register and start the background service (needs sudo for system)
+  wand update:repair        Recover an old/broken installation while retaining data and update channel
   wand service:uninstall    Stop and remove the service
   wand service:start        Start the service
   wand service:stop         Stop the service

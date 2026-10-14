@@ -1,0 +1,6 @@
+Lane mailbox for storage-b-finish 剩余清理 (role storage-b-finish)
+Run: team_mv6adbs80004kdz8hm
+Lane: storage-b-finish-1791872080112
+Token: 23b79dc3-4046-46e9-a30a-766b3a897bcd
+
+Captain messages appear below, newest last.

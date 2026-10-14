@@ -32,7 +32,7 @@ if (typeof document !== "undefined") installSettingsLibraryStyles();
 
 export interface SettingsHostProps {
   repository?: SettingsRepository;
-  showRestart?: () => void;
+  showRestart?: (previousInstanceId?: string | null, expectedVersion?: string | null) => void;
   presentation?: "workspace" | "page";
 }
 

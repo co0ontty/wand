@@ -6,7 +6,7 @@ import { mapMissionRow, mapMissionAttemptRow, mapMissionReviewCommentRow, mapAge
 
 /** Mission storage: one domain of the WandStorage facade. Shares the connection and the facade's transaction. */
 export class MissionRepository {
-  constructor(private readonly db: DatabaseSync, private readonly s: WandStorage) {}
+  constructor(private readonly db: DatabaseSync, _s: WandStorage) {}
 
   saveMission(mission: Mission): void {
     this.db.prepare(

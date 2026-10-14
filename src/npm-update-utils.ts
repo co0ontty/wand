@@ -15,6 +15,8 @@
 import { execFile, type ExecFileOptions, spawnSync, type SpawnSyncOptionsWithStringEncoding } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
+  accessSync,
+  constants as fsConstants,
   chmodSync,
   cpSync,
   existsSync,
@@ -30,14 +32,16 @@ import {
   statfsSync,
   statSync,
   symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { buildChildEnv } from "./env-utils.js";
 import { whichSync } from "./path-repair.js";
 import { getErrorMessage } from "./error-utils.js";
-import { compareWandInstallOrder, extractSemver } from "./version-utils.js";
+import { compareSemver, compareWandInstallOrder, extractSemver } from "./version-utils.js";
 import { acquireDeploymentLock, releaseDeploymentLock, type DeploymentLock as GlobalUpdateLock } from "./deployment-lock.js";
 
 const execFileAsync = promisify(execFile);
@@ -60,6 +64,9 @@ export interface PackageUpdateInfo {
   updateAvailable: boolean;
   distTag: "latest" | "beta";
   installSpec: string;
+  /** Candidate metadata is distinct from the user's persistent subscription. */
+  stableVersion?: string | null;
+  betaVersion?: string | null;
 }
 
 function npmBin(): string {
@@ -142,13 +149,29 @@ function viewPackageVersionSync(channel: UpdateChannel, timeoutMs = NPM_VIEW_TIM
   return version || null;
 }
 
+export function selectPackageUpdateInfo(
+  currentVersion: string,
+  channel: UpdateChannel,
+  stableVersion: string | null,
+  betaVersion: string | null = null,
+): PackageUpdateInfo {
+  const stable = acceptedVersion(stableVersion, "stable");
+  const beta = channel === "beta" ? acceptedVersion(betaVersion, "beta") : null;
+  const useBeta = beta !== null && (stable === null || compareWandInstallOrder(beta, stable) > 0);
+  const info = buildPackageUpdateInfo(currentVersion, useBeta ? "beta" : "stable", useBeta ? beta : stable);
+  return { ...info, channel, stableVersion: stable, betaVersion: beta };
+}
+
 export async function checkPackageUpdateAsync(
   currentVersion: string,
   channel: UpdateChannel,
   timeoutMs = NPM_VIEW_TIMEOUT_MS,
 ): Promise<PackageUpdateInfo> {
-  const latest = await viewPackageVersionAsync(channel, timeoutMs);
-  return buildPackageUpdateInfo(currentVersion, channel, latest);
+  const [stable, beta] = await Promise.all([
+    viewPackageVersionAsync("stable", timeoutMs),
+    channel === "beta" ? viewPackageVersionAsync("beta", timeoutMs) : null,
+  ]);
+  return selectPackageUpdateInfo(currentVersion, channel, stable, beta);
 }
 
 export function checkPackageUpdateSync(
@@ -156,9 +179,32 @@ export function checkPackageUpdateSync(
   channel: UpdateChannel,
   timeoutMs = NPM_VIEW_TIMEOUT_MS,
 ): PackageUpdateInfo {
-  const latest = viewPackageVersionSync(channel, timeoutMs);
-  return buildPackageUpdateInfo(currentVersion, channel, latest);
+  const stable = viewPackageVersionSync("stable", timeoutMs);
+  const beta = channel === "beta" ? viewPackageVersionSync("beta", timeoutMs) : null;
+  return selectPackageUpdateInfo(currentVersion, channel, stable, beta);
 }
+
+export function resolveInstalledNpmPrefix(
+  moduleUrl: string = import.meta.url,
+  platform: NodeJS.Platform = process.platform,
+): { root: string; prefix: string } | null {
+  try {
+    const packageDir = path.dirname(path.dirname(fileURLToPath(moduleUrl)));
+    let scope = path.dirname(packageDir);
+    // Rollback may briefly boot through the recovery shim. Its retained backup
+    // still belongs to the original npm prefix, not the shell's default prefix.
+    if (/^\.wand-safe-backup-[A-Za-z0-9]+$/.test(path.basename(scope))) scope = path.dirname(scope);
+    const root = path.dirname(scope);
+    if (path.basename(packageDir) !== PACKAGE_BASENAME || path.basename(scope) !== PACKAGE_SCOPE
+      || path.basename(root) !== "node_modules"
+      || JSON.parse(readFileSync(path.join(packageDir, "package.json"), "utf8")).name !== PACKAGE_NAME) return null;
+    const parent = path.dirname(root);
+    if (platform !== "win32" && path.basename(parent) !== "lib") return null;
+    return { root, prefix: platform === "win32" ? parent : path.dirname(parent) };
+  } catch { return null; }
+}
+
+const INSTALLED_NPM_BINDING = resolveInstalledNpmPrefix();
 
 function getChildEnv(): NodeJS.ProcessEnv {
   const entries = [
@@ -176,6 +222,7 @@ function getChildEnv(): NodeJS.ProcessEnv {
   return {
     ...buildChildEnv(true),
     PATH: pathEntries.join(path.delimiter),
+    ...(INSTALLED_NPM_BINDING ? { npm_config_prefix: INSTALLED_NPM_BINDING.prefix } : {}),
   };
 }
 
@@ -202,6 +249,7 @@ async function runNpmAsync(args: string[], timeoutMs: number): Promise<void> {
  * 解析当前 `npm root -g` 的目录。失败返回 null。
  */
 function getNpmGlobalRoot(): string | null {
+  if (INSTALLED_NPM_BINDING) return INSTALLED_NPM_BINDING.root;
   try {
     const res = runNpmSync(["root", "-g"], 10_000);
     if (res.status !== 0) return null;
@@ -213,6 +261,7 @@ function getNpmGlobalRoot(): string | null {
 }
 
 function getNpmGlobalPrefix(): string | null {
+  if (INSTALLED_NPM_BINDING) return INSTALLED_NPM_BINDING.prefix;
   try {
     const res = runNpmSync(["prefix", "-g"], 10_000);
     if (res.status !== 0) return null;
@@ -645,19 +694,69 @@ function restoreGlobalInstallBackup(backup: GlobalInstallBackup, note?: (line: s
   }
 }
 
+export function assertNodeVersionForUpdate(range: string, current = process.versions.node): void {
+  const minimum = range.trim().match(/^>=(\d+\.\d+\.\d+)$/)?.[1];
+  if (minimum && compareSemver(current, minimum) < 0) {
+    throw new Error(`新版本要求 Node.js >= ${minimum}（当前 ${current}）。请先升级 Node.js，再执行 README 的 install.sh 恢复更新；旧安装未修改。`);
+  }
+}
+
+async function checkUpdateNodeVersion(pkg: string, timeoutMs: number): Promise<void> {
+  // Registry metadata is checked before creating a backup or replacing any files.
+  // npm --engine-strict remains the authority for other engine range formats.
+  const { stdout } = await execFileAsync(npmBin(), ["view", pkg, "engines.node"], {
+    timeout: Math.min(timeoutMs, NPM_VIEW_TIMEOUT_MS), env: getChildEnv(), maxBuffer: INSTALL_MAX_BUFFER,
+  });
+  assertNodeVersionForUpdate(String(stdout));
+}
+
 async function npmInstallGlobalAsync(pkg: string, timeoutMs: number, extra: string[] = []): Promise<void> {
-  await runNpmAsync(["install", "-g", ...extra, pkg], timeoutMs);
+  await runNpmAsync(["install", "-g", "--engine-strict", ...extra, pkg], timeoutMs);
 }
 
 function isRecoverableInstallError(message: string): boolean {
   return /ENOTEMPTY|EEXIST|全局 wand 安装不完整|无法解析 npm 全局安装目录|全局 wand CLI 无法设置执行权限|全局 wand 命令入口缺失/.test(message);
 }
 
+export function checkGlobalUpdateAccess(): boolean {
+  const root = getNpmGlobalRoot();
+  const prefix = getNpmGlobalPrefix();
+  if (!root || !prefix) return false;
+  try {
+    for (const dir of [root, path.join(root, PACKAGE_SCOPE), path.join(prefix, "bin")]) {
+      accessSync(nearestExistingAncestor(dir), fsConstants.W_OK);
+    }
+    return true;
+  } catch { return false; }
+}
+
+export function isGlobalUpdateLocked(): boolean {
+  const root = getNpmGlobalRoot();
+  return !!root && existsSync(path.join(root, ".wand-update-lock"));
+}
+
 function acquireGlobalUpdateLock(): GlobalUpdateLock {
   const root = getNpmGlobalRoot();
   if (!root) throw new Error("无法解析 npm 全局安装目录，不能建立更新锁。");
   mkdirSync(path.join(root, PACKAGE_SCOPE), { recursive: true });
-  return acquireDeploymentLock(path.join(root, ".wand-update-lock"));
+  const inherited: GlobalUpdateLock[] = process.env.WAND_DEPLOYMENT_LOCKS
+    ? JSON.parse(process.env.WAND_DEPLOYMENT_LOCKS) : [];
+  if (!Array.isArray(inherited)) throw new Error("无效的部署锁回执。");
+  return acquireDeploymentLock(path.join(root, ".wand-update-lock"), { inherited });
+}
+
+/** Only used in the independent helper process; holds the install lock through handoff. */
+export async function withGlobalUpdateLock<T>(action: () => Promise<T>): Promise<T> {
+  const lock = acquireGlobalUpdateLock();
+  const previous = process.env.WAND_DEPLOYMENT_LOCKS;
+  try {
+    process.env.WAND_DEPLOYMENT_LOCKS = JSON.stringify([lock]);
+    return await action();
+  } finally {
+    if (previous === undefined) delete process.env.WAND_DEPLOYMENT_LOCKS;
+    else process.env.WAND_DEPLOYMENT_LOCKS = previous;
+    releaseGlobalUpdateLock(lock);
+  }
 }
 
 function releaseGlobalUpdateLock(lock: GlobalUpdateLock): void {
@@ -680,11 +779,13 @@ export async function installPackageGloballyAsync(
   pkg: string,
   timeoutMs: number,
   log?: (line: string) => void,
+  options: { backupReceiptPath?: string } = {},
 ): Promise<string> {
   const note = (line: string) => {
     if (log) log(line);
   };
 
+  await checkUpdateNodeVersion(pkg, timeoutMs);
   const updateLock = acquireGlobalUpdateLock();
   let backup: GlobalInstallBackup | null = null;
   let success = false;
@@ -748,11 +849,50 @@ export async function installPackageGloballyAsync(
         }
       }
       // 恢复失败时绝不能再删唯一完整备份，留给人工恢复。
-      if (backup && (success || restored)) cleanupGlobalInstallBackup(backup);
+      if (backup && success && options.backupReceiptPath) {
+        writeFileSync(options.backupReceiptPath, JSON.stringify(backup), { mode: 0o600 });
+        note(`[wand] 旧安装备份保留到启动验证完成: ${backup.backupDir ?? "首次安装"}`);
+      } else if (backup && (success || restored)) cleanupGlobalInstallBackup(backup);
     } finally {
       releaseGlobalUpdateLock(updateLock);
     }
   }
+}
+
+function readDeferredGlobalInstallBackup(receiptPath: string): GlobalInstallBackup {
+  const value = JSON.parse(readFileSync(receiptPath, "utf8")) as GlobalInstallBackup;
+  const packageDir = getGlobalPackageDir();
+  if (!packageDir || value.packageDir !== packageDir || !Array.isArray(value.binEntries)) {
+    throw new Error("更新备份回执与当前安装不一致。");
+  }
+  if (value.backupRoot === null && value.backupDir === null && value.binEntries.length === 0) return value;
+  if (typeof value.backupRoot !== "string" || path.dirname(value.backupRoot) !== path.dirname(packageDir)
+    || !/^\.wand-safe-backup-[A-Za-z0-9]+$/.test(path.basename(value.backupRoot))
+    || value.backupDir !== path.join(value.backupRoot, PACKAGE_BASENAME)
+    || !lstatSync(value.backupRoot).isDirectory() || lstatSync(value.backupRoot).isSymbolicLink()) {
+    throw new Error("更新备份回执无效。");
+  }
+  const expectedBins = new Set(getGlobalWandBinPaths());
+  for (const entry of value.binEntries) {
+    if (!expectedBins.has(entry.originalPath) || path.dirname(entry.backupPath) !== path.join(value.backupRoot, "bin")) {
+      throw new Error("更新入口备份回执无效。");
+    }
+  }
+  return value;
+}
+
+/** Keep the old runtime until the new instance actually responds. */
+export function finalizeDeferredGlobalUpdate(receiptPath: string, rollback = false, log?: (line: string) => void): boolean {
+  const lock = acquireGlobalUpdateLock();
+  try {
+    const backup = readDeferredGlobalInstallBackup(receiptPath);
+    if (rollback && !restoreGlobalInstallBackup(backup, log)) return false;
+    // A manager may already be starting the old runtime through the recovery
+    // shim. Retain that backup so its late imports remain available.
+    if (!rollback) cleanupGlobalInstallBackup(backup);
+    rmSync(receiptPath, { force: true });
+    return true;
+  } finally { releaseGlobalUpdateLock(lock); }
 }
 
 /**
@@ -768,6 +908,9 @@ export function installPackageGloballySync(
   const backupNotes: string[] = [];
   let updateLock: GlobalUpdateLock;
   try {
+    const metadata = runNpmSync(["view", pkg, "engines.node"], Math.min(timeoutMs, NPM_VIEW_TIMEOUT_MS));
+    if (metadata.status === 0) assertNodeVersionForUpdate(metadata.stdout);
+    // Fixtures/old registries may not expose engines; --engine-strict still checks installation.
     updateLock = acquireGlobalUpdateLock();
   } catch (err) {
     return { status: 1, stdout: "", stderr: getErrorMessage(err), attempts };
@@ -797,7 +940,7 @@ export function installPackageGloballySync(
     };
   };
   const tryInstall = (extra: string[]): { status: number | null; stdout: string; stderr: string } => {
-    const args = ["install", "-g", ...extra, pkg];
+    const args = ["install", "-g", "--engine-strict", ...extra, pkg];
     attempts.push(`npm ${args.join(" ")}`);
     const r = runNpmSync(args, timeoutMs);
     return withValidation({
