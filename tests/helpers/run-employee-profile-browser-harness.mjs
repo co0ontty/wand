@@ -120,7 +120,9 @@ const clickTarget=async(target)=>{
           &&animation.effect.getKeyframes().some(frame=>['transform','translate','scale','rotate','width','height','top','left','right','bottom','inset','margin','padding'].some(property=>property in frame)));
         if(moving)continue candidates;
       }
-      n.scrollIntoView({block:'nearest',behavior:'instant'});
+      // Native focus on mouse-down can scroll a partially clipped edge target.
+      // Center it before both stable samples so mouse-up still reaches the same node.
+      n.scrollIntoView({block:'center',inline:'center',behavior:'instant'});
       const r=n.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,hit=document.elementFromPoint(x,y);
       if(r.width<=0||r.height<=0||!(n===hit||n.contains(hit)||hit?.closest('label')?.contains(n)))continue;
       if(!identities.has(n))identities.set(n,window.__employeePointerSequence=(window.__employeePointerSequence??0)+1);
@@ -135,7 +137,8 @@ const clickTarget=async(target)=>{
     }
   }
   const targets=await e(`([...document.querySelectorAll(${JSON.stringify(target.selector)})].filter(n=>${JSON.stringify(target.text)}===undefined||n.innerText.replace(/\\s+/g,'')===${JSON.stringify(target.text)}).slice(0,10).map(n=>{const r=n.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {text:n.textContent,connected:n.isConnected,disabled:n.disabled,visible:n.checkVisibility?.({visibilityProperty:true}),scope:n.closest('[role=dialog]')?'dialog':'page',rect:{x:r.x,y:r.y,width:r.width,height:r.height},hit:hit?{tag:hit.tagName,text:hit.textContent.slice(0,80)}:null}}))`);
-  throw Error(`Real pointer target never became visible, enabled and stable: ${JSON.stringify(target)}; evidence=${JSON.stringify(targets)}`);
+  const page=await e(`({profiles:[...document.querySelectorAll('[data-employee-profile]')].map(n=>({id:n.dataset.employeeId,text:n.innerText.slice(-600)})),creating:!!document.querySelector('.is-new'),directory:!!document.querySelector('.employee-directory'),dialog:employeeProfileFixture.dialogState(),plans:window.__employeeClickPlans?.slice(-5)})`);
+  throw Error(`Real pointer target never became visible, enabled and stable: ${JSON.stringify(target)}; evidence=${JSON.stringify(targets)}; page=${JSON.stringify(page)}; requests=${JSON.stringify(requests.slice(-10))}`);
 };
 browser.click=selector=>clickTarget({selector});
 const writes=()=>requests.filter(r=>!["GET","HEAD"].includes(r.method)).length;
@@ -146,7 +149,10 @@ const section=async(step,scope="[data-employee-profile]")=>{
     if(!await e(`!!document.querySelector('${scope} .appearance')`))await browser.click(`${scope} .identity-summary button`);
     return;
   }
-  if(step==='advanced'&&!await e(`document.querySelector('${scope} .advanced-details').open`))await browser.click(`${scope} .advanced-details>summary`);
+  if(step==='advanced'&&!await e(`document.querySelector('${scope} .advanced-details').open`)){
+    await browser.click(`${scope} .advanced-details>summary`);
+    await browser.wait(`document.querySelector('${scope} .advanced-details').open`,'the real summary click opens employee management');
+  }
   await e(`document.querySelector('${scope} #${step}').scrollIntoView({block:'start',behavior:'instant'})`);
 };
 const editor=async(id)=>{await e(`employeeProfileFixture.editor(${JSON.stringify(id)})`);await browser.wait(`!!document.querySelector('[data-employee-profile][data-employee-id="${id}"]')`)};
@@ -170,6 +176,7 @@ try{
     await browser.click('.wand-employee-create-submit');await browser.wait("document.querySelector('[role=alert]')?.textContent.includes('拟定失败')");
     assert.equal(await e("document.querySelector('#new-employee-expectation').value"),'模拟拟定失败');
     await fill('#new-employee-expectation','招聘一位测试工程师');
+    await e("document.querySelector('.wand-employee-create-submit').scrollIntoView({block:'center',inline:'center',behavior:'instant'});true");
     const actionGeometry = await e("document.querySelector('.wand-employee-create-submit').getBoundingClientRect().toJSON()");
     await browser.click('.wand-employee-create-submit');await browser.wait("document.querySelector('#new-employee-name')?.value==='招聘验证人选'");
     const reviewedGeometry = await e("document.querySelector('.wand-employee-create-submit').getBoundingClientRect().toJSON()");
@@ -342,7 +349,7 @@ try{
   await browser.wait("![...document.querySelectorAll('[role=dialog]')].some(n=>n.getClientRects().length)");await browser.click('.ant-collapse-header');await fill('#new-employee-name',"手动创建验证员工");await fill('#new-employee-duty',"真实手动配置");
   await clickText("编辑头像",".is-new");await browser.click('.is-new .appearance input[value="diamond"]');
   assert.equal(await e("document.querySelectorAll('.ant-popover,.ant-modal-wrap').length"),0,"new employee avatar edits inline without another overlay");
-  await e("document.querySelector('.wand-employee-create-submit').scrollIntoView({block:'nearest',behavior:'instant'});true");await browser.settle();
+  await e("document.querySelector('.wand-employee-create-submit').scrollIntoView({block:'center',inline:'center',behavior:'instant'});true");await browser.settle();
   const createBefore=await e("document.querySelector('.wand-employee-create-submit').getBoundingClientRect().toJSON()");
   deferCreate=true;await browser.click('.wand-employee-create-submit');await browser.wait("document.querySelector('.wand-employee-create-submit').getAttribute('aria-busy')==='true'");
   const createPending=await e("document.querySelector('.wand-employee-create-submit').getBoundingClientRect().toJSON()");

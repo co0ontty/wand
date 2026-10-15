@@ -54,15 +54,41 @@ export async function openPlushBrowser(width = 1280, height = 960, fallback = fa
     "--headless=new", "--no-first-run", "--remote-allow-origins=*",
     "--remote-debugging-port=0", `--user-data-dir=${temp}/profile`,
     ...(fallback ? ["--disable-webgl"] : []), "about:blank",
-  ], { stdio: "ignore" });
+  ], { stdio: ["ignore", "ignore", "pipe"] });
+  let startupError, startupLog = "";
+  chrome.once("error", error => { startupError = error; });
+  chrome.stderr.on("data", chunk => { startupLog = (startupLog + chunk.toString()).slice(-8192); });
   let socket;
   try {
     const portFile = join(temp, "profile/DevToolsActivePort");
-    for (let n = 0; n < 150 && !existsSync(portFile); n++) await pause(50);
-    assert.ok(existsSync(portFile), "Chrome must start");
+    // The port file, not elapsed sleeps, is the startup readiness signal. Hosted
+    // CPU contention may exceed the old 7.5s window; process failures still fail early.
+    const deadline = Date.now() + 30_000;
+    while (!existsSync(portFile)) {
+      if (startupError) throw startupError;
+      if (chrome.exitCode !== null || chrome.signalCode !== null) throw Error(`Chrome exited before debugging was ready: ${chrome.exitCode ?? chrome.signalCode}; ${startupLog}`);
+      if (Date.now() >= deadline) throw Error(`Chrome debugging did not become ready within 30s; ${startupLog}`);
+      await pause(50);
+    }
     const port = readFileSync(portFile, "utf8").split("\n")[0];
-    const pages = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
-    socket = new WebSocket(pages.find(page => page.type === "page").webSocketDebuggerUrl);
+    assert.match(port, /^\d{1,5}$/, "Chrome publishes a numeric debugging port");
+    let page, discoveryError = "no page target";
+    while (Date.now() < deadline) {
+      if (startupError) throw startupError;
+      if (chrome.exitCode !== null || chrome.signalCode !== null) throw Error(`Chrome exited during debugging discovery; ${startupLog}`);
+      try {
+        const response = await fetch(`http://127.0.0.1:${port}/json`, { signal: AbortSignal.timeout(Math.min(1000, Math.max(1, deadline - Date.now()))) });
+        const body = await response.text();
+        if (!response.ok) throw Error(`HTTP ${response.status}: ${body.slice(0, 256)}`);
+        const pages = JSON.parse(body);
+        page = Array.isArray(pages) && pages.find(target => target.type === "page" && typeof target.webSocketDebuggerUrl === "string");
+        if (page) break;
+        discoveryError = "no page target";
+      } catch (error) { discoveryError = error.message; }
+      await pause(50);
+    }
+    if (!page) throw Error(`Chrome page discovery did not become ready within 30s: ${discoveryError}; ${startupLog}`);
+    socket = new WebSocket(page.webSocketDebuggerUrl);
     await once(socket, "open");
     const pending = new Map(), errors = [], events = []; let sequence = 0;
     socket.addEventListener("message", event => {
@@ -91,7 +117,7 @@ export async function openPlushBrowser(width = 1280, height = 960, fallback = fa
     };
     const settle = () => evaluate("document.fonts.ready.then(()=>new Promise(resolve=>{let n=0;function frame(){if(++n===6)resolve();else requestAnimationFrame(frame)}requestAnimationFrame(frame)}))");
     const click = async selector => {
-      const point = await evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n||n.disabled)throw Error('missing/enabled target');n.scrollIntoView({block:'nearest',behavior:'instant'});const r=n.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+      const point = await evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n||n.disabled)throw Error('missing/enabled target');n.scrollIntoView({block:'center',inline:'center',behavior:'instant'});const r=n.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
       for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, ...point, button: "left", clickCount: 1 });
       await settle();
     };
@@ -122,7 +148,12 @@ export async function openPlushBrowser(width = 1280, height = 960, fallback = fa
         try { rmSync(temp, { recursive: true, force: true }); } catch { /* only owned Chrome profile */ }
       },
     };
-  } catch (error) { socket?.close(); chrome.kill("SIGTERM"); throw error; }
+  } catch (error) {
+    socket?.close(); chrome.kill("SIGTERM");
+    await Promise.race([once(chrome, "exit").catch(() => {}), pause(1500)]);
+    rmSync(temp, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 export async function runPlushBrowser() {

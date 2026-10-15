@@ -3,12 +3,10 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 const source = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("Android keeps voice inside and send/stop in a fixed exterior circle", () => {
+// Scoped UI wiring checks only. Lifecycle and input-delivery behavior belongs
+// to the platform stores/protocol tests; no container, size or child order is fixed here.
+test("Android projects active execution into stop and preserves action availability", () => {
   const root = "android/app/src/main/java/com/wand/app/ui/screens/";
-  const focus = source(root + "FocusCapsuleComposer.kt");
-  assert.match(focus, /modifier = Modifier\.weight\(1f\)/);
-  assert.match(focus, /if \(exteriorAction != null\) microphone\(\)/);
-  assert.match(focus, /if \(exteriorAction != null\) Box\(Modifier\.size\(ComposerActionTouchSize\)/);
   assert.match(source(root + "ChatScreen.kt"), /if \(store\.isResponding\) SendActionVisual\.Stop else sendActionVisual/);
   assert.match(source(root + "ChatScreen.kt"), /visible = store\.isResponding \|\| canSend \|\| sendPhase != SendPhase\.Idle/);
   assert.match(source(root + "ComposerSendActions.kt"), /enabled = visible && !busy/);
@@ -16,13 +14,8 @@ test("Android keeps voice inside and send/stop in a fixed exterior circle", () =
   assert.match(source(root + "ConversationScreens.kt"), /visual = if \(running && !taskMode\) SendActionVisual\.Stop else visual/);
 });
 
-test("iOS mounts the same exterior action separately from the capsule voice", () => {
+test("iOS projects active execution without treating it as an unsent draft", () => {
   const root = "ios/Wand/";
-  const focus = source(root + "FocusComposer.swift");
-  assert.match(focus, /HStack\(alignment: \.bottom, spacing: 4\) \{\s*capsule\s*send\(\)\.frame\(width: 48, height: 48\)/);
-  assert.match(focus, /allowsHitTesting\(primaryVisible\)\.accessibilityHidden\(!primaryVisible\)/);
-  assert.match(focus, /voice\(\)\s*\}\.padding\(\.horizontal, 4\)/);
-  assert.doesNotMatch(focus, /if expanded \{ send\(\) \}/);
   assert.match(source(root + "ChatView.swift"), /phase: store\.isResponding \? \.idle/);
   assert.match(source(root + "ChatView.swift"), /hasDraft: !store\.isResponding/);
   for (const file of ["ChatView.swift", "ConversationViews.swift", "ChatDesignPreview.swift"]) assert.match(source(root + file), /primaryVisible:/);

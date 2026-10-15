@@ -3,7 +3,7 @@ import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { partitionTests } from "../scripts/run-ci-tests.js";
+import { partitionTests, runGroups } from "../scripts/run-ci-tests.js";
 import { publish, readPublication } from "../scripts/publish-npm.js";
 
 function harness(states: Array<{ exists: boolean; tagged: boolean }>, commandResults = [true]) {
@@ -37,6 +37,9 @@ test("CI partition covers every test file once, including mixed browser/unit fil
   }
   assert.ok(groups.unit.some(file => file.endsWith("browser-module-splitting.test.ts")), "module graph assertions run in unit while gated Chrome integration stays dormant");
   assert.ok(groups.unit.some(file => file.endsWith("local-model-runtime.test.ts")), "real local-model runtime stays out of the shared browser lane");
+  for (const file of ["mobile-composer-stop.test.ts", "web-ui-composer-seed-structure.test.ts"]) {
+    assert.ok(groups.browserOptIn.some(candidate => candidate.endsWith(file)), `${file} is a scoped UI implementation check, not a global business gate`);
+  }
   const fixture = mkdtempSync(join(tmpdir(), "wand-ci-partition-"));
   try {
     writeFileSync(join(fixture, "unit.test.ts"), "test('unit', () => {});");
@@ -51,6 +54,18 @@ test("CI partition covers every test file once, including mixed browser/unit fil
     assert.deepEqual(partition.browser.map(file => file.split("/").at(-1)), ["mixed.test.ts", "shared-browser.test.ts"]);
     assert.deepEqual(partition.browserOptIn.map(file => file.split("/").at(-1)), ["legacy-gate.test.ts", "standalone-browser.test.ts"]);
   } finally { rmSync(fixture, { recursive: true }); }
+});
+
+test("core and UI suites have explicit scope and neither hides failures in its scope", async () => {
+  const groups = { unit: ["business"], browser: ["ui-flow"], browserOptIn: ["ui-specific"] };
+  for (const [suite, expected] of [["unit", ["unit"]], ["ui", ["browser", "browser-opt-in"]], ["all", ["unit", "browser", "browser-opt-in"]]] as const) {
+    const calls: string[] = [];
+    const run = async (name: string) => { calls.push(name); return 0; };
+    assert.equal(await runGroups(groups, { suite, run }), 0);
+    assert.deepEqual(calls, expected);
+    for (const failed of expected) assert.equal(await runGroups(groups, { suite, run: async (name: string) => name === failed ? 1 : 0 }), 1);
+  }
+  await assert.rejects(runGroups(groups, { suite: "unknown" }), /Unknown CI suite/);
 });
 
 test("successful npm write is not repeated while metadata propagates", async () => {
