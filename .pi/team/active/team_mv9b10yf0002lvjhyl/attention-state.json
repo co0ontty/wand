@@ -1,0 +1,10 @@
+{
+  "roles": {
+    "macos-navigation-finish": {
+      "communicationAt": 1792054932093,
+      "silenceAlerted": false,
+      "pendingAckAlerted": false,
+      "cancelAlerted": false
+    }
+  }
+}

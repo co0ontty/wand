@@ -13,6 +13,14 @@ test("calendar expands future recurrences, not just each plan's saved next trigg
   assert.equal(new Set(result.entries.map(entry => entry.key)).size, result.entries.length);
   assert.deepEqual(result.issues, []); assert.equal(result.truncated, false);
 });
+test("global projection mixes all supplied employees without an employee detail context", () => {
+  const result = calendarData(initialTasks(), histories, "2026-09-28", "2026-11-08", PREVIEW_NOW, DISPLAY_ZONE);
+  const actual = result.entries.filter(entry => entry.kind === "execution");
+  const future = result.entries.filter(entry => entry.kind === "planned");
+  assert.equal(new Set(actual.map(entry => entry.kind === "execution" ? entry.run.employeeId : "")).size, 3);
+  assert.equal(new Set(future.map(entry => entry.task.employeeId)).size, 3);
+  assert.equal(result.entries.length, 53);
+});
 test("current rules never manufacture past execution or past daily appointments", () => {
   assert.equal(calendarEntries([changelog], "2026-10-01", "2026-10-13", PREVIEW_NOW, DISPLAY_ZONE).entries.length, 0);
   const actual = calendarData([changelog], histories, "2026-10-01", "2026-10-13", PREVIEW_NOW, DISPLAY_ZONE);

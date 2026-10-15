@@ -23,6 +23,8 @@ export const foundationStyles = String.raw`
 .wand-ui-menu-item-label { flex: 1; min-width: 0; text-align: start; }
 .wand-ui-menu-item-hint, .wand-ui-dropdown-item-hint { margin-inline-start: auto; }
 .wand-ui-badge { font-variant-numeric: tabular-nums; margin-inline-end: 0; }
+/* 名字后的「我」标签：贴着名字尾部，短名换行时不错位。 */
+.wand-self-tag { margin-inline-start: 6px; vertical-align: middle; }
 .wand-ui-select-content { max-width: calc(100vw - var(--wand-safe-left, 0px) - var(--wand-safe-right, 0px) - 24px); }
 .wand-ui-select-content .ant-dropdown-menu { max-height: min(360px, 60dvh); overflow-y: auto; overscroll-behavior: contain; }
 .wand-ui-navigation-list { list-style: none; margin: 0; padding: 0; }

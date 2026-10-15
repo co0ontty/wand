@@ -7,6 +7,18 @@ const runtime = {
 };
 (globalThis as typeof globalThis & { __wandBrowserRuntime?: typeof runtime }).__wandBrowserRuntime = runtime;
 const moduleSrc = "${browserModuleSrc}";
+// The lookup belongs to this document/build, not the server's latest graph.
+// Optional module URLs never leak into the cold runtime's content fingerprint.
+const optionalModules = "${browserModuleImports}" as unknown as Record<string, string>;
+const attempts = new Map<string, number>();
+(globalThis as typeof globalThis & { __wandImportBrowserModule?: (id: string) => Promise<unknown> }).__wandImportBrowserModule = id => {
+  const file = Object.prototype.hasOwnProperty.call(optionalModules, id) ? optionalModules[id] : undefined;
+  if (!file) return Promise.reject(new Error("Unknown optional browser module"));
+  const url = new URL(`/assets/${file}`, window.location.href);
+  const attempt = attempts.get(id) ?? 0;
+  if (attempt) url.searchParams.set("wandModuleRetry", String(attempt));
+  return import(url.href).catch(error => { attempts.set(id, attempt + 1); throw error; });
+};
 void import(moduleSrc).catch(() => {
   const root = document.getElementById("app");
   if (!root) return;

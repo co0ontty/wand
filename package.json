@@ -14,6 +14,7 @@
   "files": [
     "dist",
     "skills/wand-decision",
+    "skills/wand-system",
     "browser-extension",
     "scripts/install-render-binary.js",
     "scripts/recover-web-update.sh",
@@ -40,6 +41,7 @@
     "check:body": "node scripts/check-node-version.js && node scripts/bundle-tailwind.js && node scripts/bundle-xterm.js && node scripts/bundle-qrcode.js && node scripts/bundle-browser.js && npm run generate:web-assets && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.browser.json && tsc --noEmit -p tsconfig.react.json",
     "test": "node scripts/check-node-version.js && node scripts/run-tests.js",
     "check:bundle-budget": "node scripts/check-node-version.js && node scripts/check-bundle-budget.js",
+    "budget:accept": "node scripts/check-node-version.js && node scripts/check-bundle-budget.js --accept-baseline",
     "sync:brand-assets": "node scripts/sync-brand-assets.js",
     "check:brand-assets": "node scripts/sync-brand-assets.js --check",
     "audit:remnants": "node scripts/audit-legacy-remnants.js",
@@ -57,7 +59,7 @@
   ],
   "license": "MIT",
   "engines": {
-    "node": ">=24.21.0"
+    "node": ">=22.19.0"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.81.0",

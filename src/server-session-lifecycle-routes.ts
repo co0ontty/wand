@@ -16,6 +16,7 @@ import { isProviderSessionId } from "./resume-policy.js";
 import { sendRouteError } from "./server-request.js";
 import { isSessionProvider } from "./session-provider.js";
 import { selectEmployeeCandidate } from "./silicon-employee-dispatch.js";
+import { parseConversationExecutionPreference, withConversationExecutionPreference } from "./conversation-execution-preference.js";
 import { projectCwdForSession, resolveWorkspaceIdForNewSession } from "./workspace-binding.js";
 import { badRequest, surfaceDomainError } from "./http-error.js";
 
@@ -46,7 +47,11 @@ export function registerSessionLifecycleRoutes(app: Express, ctx: SessionRouteCo
       const employee = employeeId ? storage.getSiliconEmployee(employeeId) : null;
       if (employeeId && (!employee || employee.archivedAt)) throw badRequest("硅基员工不存在或已归档。");
       const selectedEmployeeCandidate = employee ? selectEmployeeCandidate(employee) : null;
-      const employeeAgent = selectedEmployeeCandidate?.agent;
+      const manualPreference = body.overrideCli === true ? parseConversationExecutionPreference({
+        provider: body.provider, engine: body.engine, model: body.model || "default", thinkingEffort: body.thinkingEffort || "off",
+      }) : undefined;
+      const executionEmployee = employee && manualPreference ? withConversationExecutionPreference(employee, manualPreference) : employee;
+      const employeeAgent = manualPreference && executionEmployee ? executionEmployee.agents[0] : selectedEmployeeCandidate?.agent;
       if (body.provider && !isSessionProvider(body.provider)) {
         res.status(400).json({ error: "结构化会话当前仅支持 Claude、Codex、OpenCode、Grok、Qoder 或 Pi provider。" });
         return;
@@ -102,8 +107,8 @@ export function registerSessionLifecycleRoutes(app: Express, ctx: SessionRouteCo
         // 角色与规则走系统提示通道，不拼进 prompt（见 AGENTS.md「Session 输入契约」）。
         systemPrompt: role?.prompt ?? body.systemPrompt,
         ...sessionEmployeeFields(role),
-        employeeCandidates: employee?.agents,
-        employeeCandidateIndex: requestedProvider ? undefined : selectedEmployeeCandidate?.index,
+        employeeCandidates: executionEmployee?.agents,
+        employeeCandidateIndex: manualPreference ? 0 : selectedEmployeeCandidate?.index,
         ...(engineDecision ? { engine: engineDecision.engine } : {}),
         ...origin,
       });

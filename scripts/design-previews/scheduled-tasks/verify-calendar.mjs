@@ -25,11 +25,23 @@ const finishMotion = selector => e(`Promise.allSettled([...document.querySelecto
 const shot = async name => { await e("document.activeElement?.blur()"); await browser.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 36, y: 16 }); await browser.wait("![...document.querySelectorAll('.ant-tooltip')].some(n=>n.getClientRects().length&&getComputedStyle(n).visibility==='visible'&&getComputedStyle(n).opacity!=='0')"); await browser.screenshot(join(output, name)); screenshots.push(name); };
 const choose = async (label, text) => { await browser.click(`[role="combobox"][aria-label="${label}"]`); await browser.wait("!!document.querySelector('[role=option]')"); await e(`(()=>{let n=[...document.querySelectorAll('[role=option]')].find(n=>n.textContent.trim()===${JSON.stringify(text)});if(!n)throw Error('Missing option');n.dataset.calendarOption='target'})()`); await browser.click('[data-calendar-option=target]'); await browser.wait("![...document.querySelectorAll('.ant-dropdown')].some(n=>n.getClientRects().length&&getComputedStyle(n).visibility==='visible')"); };
 const ensureFits = async label => assert.equal(await e("document.documentElement.scrollWidth<=innerWidth+1"), true, label + ': only the calendar canvas may scroll horizontally');
+const switchMain = async view => {
+  const selector = `nav button[aria-label="${view === 'calendar' ? '全局日历' : '定时任务'}"]`;
+  if (await e(`!!document.querySelector(${JSON.stringify(selector)})?.getClientRects().length`)) await browser.click(selector);
+  else await browser.click(`.global-view-switch [data-stretch-value="${view}"]`);
+};
 
 try {
-  await loadReady(() => browser.send('Page.navigate', { url: preview.origin + '/?layout=calendar' }));
+  await loadReady(() => browser.send('Page.navigate', { url: preview.origin + '/?view=calendar' }));
   await browser.wait("document.querySelector('.calendar-view')?.dataset.calendarMode==='month' && document.querySelectorAll('.calendar-layer[data-active=true] .calendar-event').length>0");
-  await browser.wait("!!document.querySelector('.next-section [data-renderer=webgl]')");
+  await browser.wait("!!document.querySelector('.calendar-face [data-renderer=webgl]')");
+  assert.equal(await e("document.querySelector('.page-header h1').textContent"), '全局日历');
+  assert.equal(await e("document.querySelector('.global-scope-label').textContent"), '全部员工');
+  assert.equal(await e("document.querySelector('#scheduled-main').dataset.scope"), 'all-employees');
+  assert.equal(await e("document.querySelectorAll('.next-section').length"), 0);
+  assert.equal(await e("document.querySelector('nav button[aria-label=全局日历]').getAttribute('aria-current')"), 'page');
+  assert.equal(await e("new Set([...document.querySelectorAll('.calendar-layer[data-active=true] .calendar-event[data-entry-kind=execution] .calendar-face')].map(n=>n.dataset.employeeId)).size"), 3);
+  cases.push('Independent global calendar opens directly from workbench navigation, shows all three sample employees, and requires no employee detail or hero');
   assert.equal(await e("document.querySelector('.page-content').dataset.layout"), 'calendar');
   assert.equal(await e("document.querySelectorAll('.calendar-layer[data-active=true] .month-cell').length"), 42);
   assert.equal(await e("document.querySelectorAll('.calendar-layer[data-active=true] .calendar-event').length"), 53);
@@ -53,6 +65,15 @@ try {
   await browser.key('Escape'); await waitPopupClosed();
   assert.equal(await e("document.activeElement.dataset.dateKey"), '2026-10-09');
   cases.push('Click a historical bar to view that exact immutable record, not the latest one; heatmap closes before the anchored popup and focus returns');
+  await browser.click(failed); await browser.wait("!!document.querySelector('.calendar-detail-popover .latest-record')");
+  await browser.click('.calendar-toolbar h2'); await waitPopupClosed();
+  await browser.click(failed); await browser.wait("!!document.querySelector('.calendar-detail-popover .latest-record')");
+  await browser.click('.calendar-detail-popover .detail-prompt > button');
+  await browser.wait("document.querySelector('.editor-shell').dataset.open==='true'"); await waitPopupClosed();
+  assert.ok(await e("document.querySelector('#task-prompt').value.startsWith('阅读过去 24 小时')"), 'editing an old execution opens the current plan, not the immutable old prompt');
+  await browser.key('Escape'); await finishMotion('.editor-shell');
+  assert.equal(await e("document.querySelector('.editor-shell').dataset.open"), 'false');
+  cases.push('Owned popup keeps internal actions, closes on a genuine outside click, and edit opens the current plan without mutating the old execution');
 
   await browser.click(`${month} .month-date-button[data-date-key="2026-10-09"]`); await browser.key('ArrowRight');
   await browser.wait("document.querySelector('.calendar-view').dataset.selectedDate==='2026-10-10'");
@@ -84,15 +105,21 @@ try {
   await browser.click('[aria-label="上一周"]');
   cases.push('Week bars are anchored to Wednesday 15:00 exactly, with fixed 44px reading height and collision lanes; week navigation and forecast details work');
 
-  await browser.click('[data-stretch-value="list"]'); await finishMotion('.schedule-view-pane');
+  await switchMain('list'); await finishMotion('.schedule-view-pane');
   assert.equal(await e("document.querySelector('.page-content').dataset.layout"), 'list');
   assert.ok(await e("document.querySelector('.schedule-view-pane[data-active=false]').hidden"));
-  await browser.click('[data-stretch-value="calendar"]'); await finishMotion('.schedule-view-pane');
+  await browser.click('input[aria-label="搜索定时任务"]');
+  await browser.send('Input.insertText', { text: '赛博虎妞' }); await browser.settle();
+  assert.equal(await e("document.querySelectorAll('[data-task-id]').length"), 2);
+  await switchMain('calendar'); await finishMotion('.schedule-view-pane');
+  assert.equal(await e("document.querySelector('input[aria-label=搜索定时任务]').value"), '');
+  assert.equal(await e("document.querySelector('[data-stretch-value=all] .filter-count').textContent"), '6');
+  assert.equal(await e("document.querySelector('#scheduled-main').dataset.scope"), 'all-employees');
   assert.equal(await e("document.querySelector('.calendar-view').dataset.calendarMode"), 'week');
   await browser.click('[data-stretch-value="paused"]');
   assert.equal(await e("document.querySelectorAll('.calendar-layer[data-active=true] .calendar-event[data-entry-kind=planned]').length"), 0);
   await browser.click('[data-stretch-value="all"]');
-  cases.push('List/calendar crossfade at one host, inactive layers become hidden/inert, date/range is retained, and paused plans create no fake future bars');
+  cases.push('Global navigation clears an employee-specific list query, retains date/range, hides/inerts the old view, and paused plans create no fake future bars');
 
   for (const width of [768, 390, 320]) {
     await browser.send('Emulation.setDeviceMetricsOverride', { width, height: 960, deviceScaleFactor: 1, mobile: false }); await browser.settle();

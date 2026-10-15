@@ -8,8 +8,9 @@ import { createServer } from "node:http";
 
 import { defaultConfig } from "../src/config.js";
 import { startServer } from "../src/server.js";
+import { WandStorage } from "../src/storage.js";
 
-test("system AI CLI preference runs the chosen model for prompt optimization", async () => {
+test("configured system employee runs its chosen CLI model for prompt optimization", async () => {
   process.env.WAND_TEST_MODE = "1";
   const dir = mkdtempSync(path.join(os.tmpdir(), "wand-system-ai-cli-"));
   const previousPath = process.env.PATH;
@@ -37,6 +38,11 @@ test("system AI CLI preference runs the chosen model for prompt optimization", a
   let handle: Awaited<ReturnType<typeof startServer>> | undefined;
   try {
     handle = await startServer(config, path.join(dir, "config.json"));
+    // Test mode skips production employee bootstrap. Seed the actual candidate
+    // owner explicitly instead of expecting legacy config fields to create it.
+    const storage = new WandStorage(handle.dbPath);
+    try { storage.ensureSystemSiliconEmployee({ cli: "pi", model: "openai/test" }); }
+    finally { storage.close(); }
     const baseUrl = handle.urls[0]!.url;
     const login = await fetch(`${baseUrl}/api/login`, {
       method: "POST", headers: { "Content-Type": "application/json" },

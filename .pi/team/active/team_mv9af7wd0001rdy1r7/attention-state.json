@@ -1,0 +1,11 @@
+{
+  "roles": {
+    "web-navigation": {
+      "communicationAt": 1792053997992,
+      "silenceAlerted": false,
+      "pendingAckAlerted": false,
+      "cancelAlerted": false,
+      "rearmAt": 1792053973856
+    }
+  }
+}

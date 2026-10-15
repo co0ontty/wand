@@ -38,9 +38,12 @@ test("IM execution cards keep answers, approvals and stop bound to their source 
     installReactUiStyles();
     function App() {
       const [id,setId]=React.useState("A");
-      const detail=React.useMemo(()=>({id:"dm_"+id,title:"员工 "+id,kind:"dm",communicationSessionId:id,runDetails:[],messages:[{
-        role:"assistant",messageId:id+":turn",author:{id,name:"员工 "+id,sessionId:id},createdAt:"2026-10-07T10:00:00Z",
-        content:[{type:"thinking",thinking:id+"：检查环境与范围"},question]}]}),[id]);
+      const [dense,setDense]=React.useState(false);
+      React.useEffect(()=>{window.setDenseFixture=setDense;},[]);
+      const detail=React.useMemo(()=>({id:"dm_"+id,title:"员工 "+id,kind:"dm",communicationSessionId:id,runDetails:[],messages:[
+        ...(dense ? Array.from({length:12},(_,index)=>({role:"user",messageId:"history:"+index,content:[{type:"text",text:"历史消息"+index+"："+"只读测试内容。".repeat(24)}]})) : []),
+        {role:"assistant",messageId:id+":turn",author:{id,name:"员工 "+id,sessionId:id},createdAt:"2026-10-07T10:00:00Z",
+        content:[{type:"thinking",thinking:id+"：检查环境与范围"},question]}]}),[id,dense]);
       const activity=useConversationActivity({detail,active:true});
       return <div style={{height:"100dvh",display:"flex",flexDirection:"column",minWidth:0}}>
         <nav>{["A","B","C","D"].map(value=><button id={"open-"+value} onClick={()=>setId(value)} key={value}>员工 {value}</button>)}</nav>
@@ -95,7 +98,7 @@ test("IM execution cards keep answers, approvals and stop bound to their source 
     for (let n = 0; n < 160; n++) { if (await evaluate(expression)) return; await pause(50); }
     throw new Error(`Timed out: ${expression}; ${await evaluate("document.body.innerText")}; ${errors.join("\n")}`);
   };
-  const click = async (selector: string): Promise<void> => {
+  const click = async (selector: string, beforePress?: () => Promise<void>): Promise<void> => {
     await wait(`!!document.querySelector(${JSON.stringify(selector)})`);
     await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest'})`);
     let point: { x: number; y: number; hit: boolean } | null = null;
@@ -106,6 +109,7 @@ test("IM execution cards keep answers, approvals and stop bound to their source 
       point = next;
     }
     assert.ok(point?.hit, `visible click target ${selector}`);
+    await beforePress?.();
     for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, ...point, button: "left", clickCount: 1 });
     await pause(120);
   };
@@ -127,7 +131,7 @@ test("IM execution cards keep answers, approvals and stop bound to their source 
   assert.equal(await evaluate("document.querySelector('.conversation-question input[value=\"测试环境\"]').checked"), true);
   await clickText("提交并继续"); await wait("!document.querySelector('.conversation-question')");
   assert.deepEqual(requests[0], { id: "A", path: "/api/sessions/A/input", body: { input: "测试环境；只读检查", view: "chat", respondImmediately: true } });
-  await click(".conversation-turn-activity .chat-process-summary");
+  if (await evaluate("document.querySelector('.conversation-turn-activity .chat-process-summary').getAttribute('aria-expanded')") !== "true") await click(".conversation-turn-activity .chat-process-summary");
   await wait("!!document.querySelector('.conversation-tool-activity .chat-call-button')");
   await click(".conversation-tool-activity .chat-call-button");
   await wait("document.body.innerText.includes('来自 A 的结果')");
@@ -147,6 +151,27 @@ test("IM execution cards keep answers, approvals and stop bound to their source 
   await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true }); await pause(300);
   assert.ok(await evaluate("document.documentElement.scrollWidth<=innerWidth"), "mobile card does not overflow horizontally");
   await screenshot("mobile-unknown-answer");
+  await send("Emulation.setDeviceMetricsOverride", { width: 1100, height: 900, deviceScaleFactor: 1, mobile: false });
+  await evaluate("window.setDenseFixture(true);true");
+  await click("#open-A");
+  await wait("document.querySelectorAll('.conversation-message').length > 10");
+  if (await evaluate("document.querySelector('.conversation-turn-activity .chat-process-summary').getAttribute('aria-expanded')") !== "true") await click(".conversation-turn-activity .chat-process-summary");
+  await wait("!!document.querySelector('.conversation-tool-activity .chat-call-button')");
+  await evaluate("(()=>{const s=document.querySelector('.conversation-message-scroll');s.scrollTop=s.scrollHeight;return true})()");
+  await pause(250);
+  let triggerTop = 0;
+  await click(".conversation-tool-activity .chat-call-button", async () => {
+    // Measure after the native click helper reveals and settles the target, not
+    // before scrollIntoView moves an off-screen header into reach.
+    triggerTop = await evaluate("document.querySelector('.conversation-tool-activity .chat-call-button').getBoundingClientRect().top");
+    assert.ok(triggerTop >= 0 && triggerTop < 900, "the measured header is visible before the click");
+  });
+  await wait("document.body.innerText.includes('来自 A 的结果')");
+  await pause(600);
+  const expandedTop = await evaluate("document.querySelector('.conversation-tool-activity .chat-call-button').getBoundingClientRect().top");
+  assert.ok(Math.abs(expandedTop - triggerTop) <= 2, `IM tool header must stay anchored: ${triggerTop} → ${expandedTop}`);
+  assert.equal(await evaluate("(()=>{const b=document.querySelector('.conversation-tool-activity .chat-call-button');return document.getElementById(b.getAttribute('aria-controls'))?.getAttribute('aria-hidden')})()"), "false");
+  await screenshot("im-tool-disclosure-anchor");
   assert.deepEqual(errors, []);
-  writeFileSync(join(evidence, "verification.json"), JSON.stringify({ requests, exceptions: errors, answerPreserved: true, unknownNotResent: true, mobileWidth: 390 }, null, 2));
+  writeFileSync(join(evidence, "verification.json"), JSON.stringify({ requests, exceptions: errors, answerPreserved: true, unknownNotResent: true, mobileWidth: 390, imDisclosureAnchor: { triggerTop, expandedTop } }, null, 2));
 });

@@ -1,4 +1,5 @@
 import { composer, state, writeStoredBoolean } from "./state";
+import { isSystemAiCall, SYSTEM_AI_READ_ONLY } from "../../system-ai-call.js";
 import { ensureTerminalLibrary } from "../vendor-loader.js";
 import { handlePiSettingsKeydown } from "./pi-settings-adapter";
 import { hasOpenPopupSurface } from "../react/ui/popup-lifecycle.js";
@@ -322,6 +323,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
 
       export function getComposerPlaceholder(session, terminalInteractive) {        // Keep placeholders short so they don't wrap on portrait mobile screens.
         // Only show informative state hints; drop the redundant "send to X" labels.
+        if (isSystemAiCall(session)) return SYSTEM_AI_READ_ONLY;
         if (terminalInteractive) return "键盘输入直通终端 · Enter 提交";
         // 只有真正进入终止态（exited / failed / stopped）才提示"会话已结束"。
         // 结构化会话刚创建或一次回复结束后会回到 "idle"——那是等待下一条输入的
@@ -543,7 +545,8 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           if (!operation.pending && !state.sessions.some(function(item) { return item.id === id; })) sessionToolSwitches.delete(id);
         }
         const toolSwitch = sessionToolSwitches.get(session?.id);
-        const toolVisible = canSwitchSessionTool(session, state.currentMessages?.length);
+        const canSwitchTool = canSwitchSessionTool(session, state.currentMessages?.length);
+        const toolVisible = !!session || canSwitchTool;
         const toolDisabled = !!toolSwitch?.pending;
         var modelOptions = getChatModelSelectOptions(model, session);
         var normalizedModel = normalizeComposerModelValue(model);
@@ -577,7 +580,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
               return { value: id, options: AGENT_TOOL_OPTIONS.map(function(tool) { return { value: tool.id, label: tool.label }; }),
                 ariaLabel: "更换执行工具", displayValue: toolDisabled ? "切换中…" : toolSwitch?.failed ? "切换失败" : agentToolOption(id)?.label,
                 displayTitle: toolSwitch?.status || agentToolOption(id)?.description,
-                disabled: toolDisabled || !!getPendingSessionConfig(session?.id) };
+                disabled: !canSwitchTool || toolDisabled || !!getPendingSessionConfig(session?.id) };
             }
             if (control === "mode") {
               return {
@@ -2857,6 +2860,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
 
       export function canSendComposer(value, sessionId?) {
         var id = sessionId === undefined ? state.selectedId : sessionId;
+        if (isSystemAiCall(state.sessions.find(session => session.id === id))) return false;
         if (sessionToolSwitches.get(id)?.pending) return false;
         return !!String(value || "").trim() || getPendingAttachments(id).length > 0;
       }

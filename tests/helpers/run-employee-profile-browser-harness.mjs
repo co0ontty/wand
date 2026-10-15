@@ -84,6 +84,7 @@ const server=createServer(async(request,response)=>{
       if(request.method==="POST"){if(hrQa&&failRecruitCreate){failRecruitCreate=false;return send({error:"入职失败，请重试"},503)}if(deferCreate)await new Promise(resolveCreate=>{createRelease=resolveCreate});const created=person("emp-created","", "",body);employees.push(created);return send(created,201)}
       return send({employees:url.searchParams.has("includeArchived")?employees:employees.filter(e=>!e.archivedAt)});
     }
+    if (/^\/api\/silicon-employees\/[^/]+\/im$/.test(path) && request.method === "GET") return send({ events: [], telegram: { enabled: false, chatId: "" }, dingtalk: { enabled: false } });
     const knowledge=path.match(/^\/api\/silicon-employees\/([^/]+)\/knowledge$/);
     if(knowledge&&request.method==="GET")return send({employeeId:knowledge[1],entries:[],total:0,maxEntries:200});
     const matched=path.match(/^\/api\/silicon-employees\/([^/]+)(?:\/(archive|unarchive))?$/);

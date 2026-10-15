@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Alert, Checkbox, Spin } from "antd";
 import { isBuiltinSiliconEmployee, siliconEmployeeTags, type SiliconEmployee } from "../../../ai-team-types.js";
-import { WandButton, WandIcon, WandIconButton, WandSearchField } from "../ui";
+import { WandBadge, WandButton, WandIcon, WandIconButton, WandSearchField } from "../ui";
 import { EmployeeAvatar } from "./employee-avatar.js";
 import { EmployeeCard } from "./employee-card.js";
 import { EmployeeCreateForm } from "./employee-create-form.js";
@@ -100,7 +100,7 @@ export function EmployeeListPage({ catalog, providerOptions, onEditingChange, re
           setSelectedSelf(true); setDirty(false);
         }}>
           <EmployeeAvatar employee={{ id: "user", name: self.name || "我", avatar: self.avatar }} provider="" size="md"/>
-          <span><strong>{self.name || "我"} · 我</strong><small>我的资料 · 消息署名与头像</small></span><WandIcon name="chevron" size={16}/>
+          <span><strong>{self.name || "我"}<WandBadge className="wand-self-tag" tone="accent">我</WandBadge></strong><small>我的资料 · 消息署名与头像</small></span><WandIcon name="chevron" size={16}/>
         </button>}
         {filtered.map(employee => <button type="button" className="employee-item" key={employee.id} data-directory-employee-id={employee.id} onClick={() => void select(employee)} title={employee.name}>
           <EmployeeAvatar employee={employee} provider="" size="md"/>

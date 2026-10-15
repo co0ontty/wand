@@ -19,8 +19,8 @@ test("real Chrome loads production modules on demand and preserves close/retry p
   const { startServer } = await import("../src/server.js");
   const { verifyBrowserModuleLoading } = await import("./helpers/browser-module-loading.mjs");
   const dir = mkdtempSync(path.join(tmpdir(), "wand-module-browser-"));
-  const fixturePath = path.join(dir, "read-only-example.txt");
-  writeFileSync(fixturePath, "Read-only module loading acceptance.\n");
+  const fixturePath = path.join(dir, "read-only-example.md");
+  writeFileSync(fixturePath, "**Read-only module preview**\n");
   const handle = await startServer({ ...defaultConfig(), host: "127.0.0.1", port: 0, https: false,
     password: "module-test-password", appSecret: "0123456789abcdef0123456789abcdef0123456789abcdef", startupCommands: [],
   }, path.join(dir, "config.json"));
@@ -42,7 +42,7 @@ test("published graph has one eager runtime and real optional feature boundaries
     "src/web-ui/react/file-preview/host.tsx", "src/web-ui/react/code-editor/host.tsx",
     "src/web-ui/react/new-session/host.tsx", "src/web-ui/react/quick-commit/host.tsx",
     "src/web-ui/react/file-explorer/host.tsx", "src/web-ui/react/pi-settings/panel.tsx",
-    "src/web-ui/react/pi-execution/host.tsx", "src/web-ui/react/workspaces/workspace-agent-picker.tsx",
+    "src/web-ui/react/pi-execution/host.tsx",
     "src/web-ui/react/agents/employee-card.tsx", "src/web-ui/react/workspaces/workspace-window.tsx",
     "src/web-ui/browser/chat-render.ts"]) {
     const file = manifest.features?.[source];
@@ -84,6 +84,8 @@ test("optional view implementations and heavy controls are absent from the eager
     "src/web-ui/react/agents/employee-card.tsx", "src/web-ui/react/agents/employee-avatar-workspace.tsx",
     "src/web-ui/react/workspaces/workspace-agent-picker.tsx", "src/web-ui/react/issues/date-picker.tsx",
     "src/web-ui/browser/chat-render.ts", "src/web-ui/react/chat/presentation.tsx",
+    "src/web-ui/react/file-preview/markdown.tsx", "src/web-ui/react/file-preview/markdown-model.ts",
+    "node_modules/marked/lib/marked.esm.js",
     "src/web-ui/react/workspaces/workspace-window.tsx",
     "node_modules/antd/es/date-picker/index.js", "node_modules/antd/es/result/serverError.js",
     "node_modules/antd/es/result/noFound.js", "node_modules/antd/es/result/unauthorized.js"]) {

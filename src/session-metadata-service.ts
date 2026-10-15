@@ -71,7 +71,7 @@ export class SessionMetadataService<S extends SessionSnapshot = SessionSnapshot>
       input: prompt,
       cwd: snapshot.cwd,
       language: config.language,
-      ai: resolveSystemAiContext(snapshot, config, storage.getSystemSiliconEmployee(), free),
+      ai: resolveSystemAiContext(snapshot, config, storage.getSystemSiliconEmployee(), free, { storage }),
       readNativeTitle: () => readNativeSessionTitle(
         resolveSessionProvider(snapshot),
         snapshot.claudeSessionId,

@@ -10,6 +10,9 @@ const css = String.raw`
 .conversation-directory .conversation-contact-row { min-height:64px; padding:6px 0; gap:10px; }
 .conversation-directory .conversation-contact-copy.ant-btn { min-height:48px; padding-inline:4px; }
 .conversation-contact-name { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; }
+/* 「我」这一行名字后跟标签：名字截断，标签常驻不被挤掉。 */
+.conversation-directory .conversation-self-row .conversation-contact-name { display:flex; align-items:center; overflow:visible; white-space:normal; }
+.conversation-directory .conversation-self-row .conversation-contact-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .conversation-directory .conversation-contact-duty { margin-top:2px; font-size:12px; }
 .conversation-contact-engine { display:block; color:var(--text-secondary); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .conversation-directory .conversation-avatar-button { width:36px; height:36px; flex:0 0 auto; }

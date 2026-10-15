@@ -4,7 +4,8 @@ import {
   type NewSessionCreated,
   type NewSessionRuntimeAdapter,
 } from "../react";
-import { focusInputBox } from "./input";
+import { focusInputBox, sendInputFromBox } from "./input";
+import { teamChatComposer } from "../react/ai-teams/composer-bridge";
 import { getEffectiveCwd } from "./render";
 import {
   clearDraftValueForSession,
@@ -13,6 +14,7 @@ import {
   getChatModelForProvider,
   loadSessions,
   selectSession,
+  restoreComposerStateForSession,
   setChatModelForProvider,
   updateDrawerState,
   withTerminalDimensions,
@@ -69,7 +71,8 @@ const legacyRuntime: NewSessionRuntimeAdapter = {
     return withTerminalDimensions({}, { kind, provider: request?.kind === "pty" ? request.provider : undefined, command: request?.kind === "pty" ? request.command : undefined, cwd: request?.cwd || getEffectiveCwd(), workspaceTaskId: request?.workspaceTaskId });
   },
 
-  async completeCreate(request: NewSessionCreateRequest, created: NewSessionCreated): Promise<void> {
+  async completeCreate(request: NewSessionCreateRequest, created: NewSessionCreated,
+    initialDraft?: { key: string; revision: number }): Promise<void> {
     state.chatMode = request.mode;
     if (request.kind !== "shell") {
       state.sessionTool = request.provider;
@@ -95,8 +98,15 @@ const legacyRuntime: NewSessionRuntimeAdapter = {
     }
     // The form is a temporary overlay; only accepted creation leaves the chat.
     conversationUi.suspend();
+    if (initialDraft && !teamChatComposer.transfer(initialDraft.key, created.id, initialDraft.revision)) {
+      throw new Error("新工作已创建，但输入已变化，草稿保留。请从会话列表打开后继续。");
+    }
     selectSession(created.id);
     dismissDrawerIfOverlay();
+    if (initialDraft) {
+      restoreComposerStateForSession(created.id);
+      await sendInputFromBox(undefined);
+    }
     window.setTimeout(() => focusInputBox(true), 0);
   },
 };

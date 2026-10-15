@@ -8,6 +8,7 @@ import type { ConnectorMeta } from "./storage/mappers.js";
 import { parseWandTaskAgent } from "./storage/mappers.js";
 export * from "./storage/internal.js";
 import { ConversationRepository } from "./storage/conversations-repository.js";
+import { ConversationOrganizationRepository } from "./storage/conversation-organization-repository.js";
 import { PreferencesRepository } from "./storage/preferences-repository.js";
 import { WorkspaceRepository } from "./storage/workspaces-repository.js";
 import { TaskRepository } from "./storage/tasks-repository.js";
@@ -27,6 +28,7 @@ type RepositoryMethods<T> = Pick<T, { [K in keyof T]: T[K] extends (...args: nev
 
 export interface WandStorage extends
   RepositoryMethods<ConversationRepository>,
+  RepositoryMethods<ConversationOrganizationRepository>,
   RepositoryMethods<PreferencesRepository>,
   RepositoryMethods<WorkspaceRepository>,
   RepositoryMethods<TaskRepository>,
@@ -40,6 +42,7 @@ export interface WandStorage extends
 
 export class WandStorage {
   readonly conversations: ConversationRepository;
+  readonly conversationOrganizations: ConversationOrganizationRepository;
   readonly preferences: PreferencesRepository;
   readonly workspaces: WorkspaceRepository;
   readonly tasks: TaskRepository;
@@ -100,6 +103,7 @@ export class WandStorage {
     this.dbPath = dbPath;
     this.db = openStorageDatabase(dbPath);
     this.conversations = new ConversationRepository(this.db, this);
+    this.conversationOrganizations = new ConversationOrganizationRepository(this.db);
     this.preferences = new PreferencesRepository(this.db, this);
     this.workspaces = new WorkspaceRepository(this.db, this);
     this.tasks = new TaskRepository(this.db, this);
@@ -240,6 +244,18 @@ export class WandStorage {
 
   listScheduledTaskRuns(...args: Parameters<ScheduledTaskRepository["listScheduledTaskRuns"]>): ReturnType<ScheduledTaskRepository["listScheduledTaskRuns"]> {
     return this.schedules.listScheduledTaskRuns(...args);
+  }
+
+  listScheduledTaskRunFacts(...args: Parameters<ScheduledTaskRepository["listScheduledTaskRunFacts"]>): ReturnType<ScheduledTaskRepository["listScheduledTaskRunFacts"]> {
+    return this.schedules.listScheduledTaskRunFacts(...args);
+  }
+
+  countInvalidScheduledTaskRunDates(...args: Parameters<ScheduledTaskRepository["countInvalidScheduledTaskRunDates"]>): ReturnType<ScheduledTaskRepository["countInvalidScheduledTaskRunDates"]> {
+    return this.schedules.countInvalidScheduledTaskRunDates(...args);
+  }
+
+  latestScheduledTaskRun(...args: Parameters<ScheduledTaskRepository["latestScheduledTaskRun"]>): ReturnType<ScheduledTaskRepository["latestScheduledTaskRun"]> {
+    return this.schedules.latestScheduledTaskRun(...args);
   }
 
   // ============ Stable conversations (no read-side repair) ============
@@ -515,6 +531,7 @@ export class WandStorage {
 
 const REPOSITORY_FORWARDS: ReadonlyArray<readonly [field: string, repository: { readonly prototype: object }]> = [
   ["conversations", ConversationRepository],
+  ["conversationOrganizations", ConversationOrganizationRepository],
   ["preferences", PreferencesRepository],
   ["workspaces", WorkspaceRepository],
   ["tasks", TaskRepository],

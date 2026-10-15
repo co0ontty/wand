@@ -31,14 +31,14 @@ function entryEmployee(entry: CalendarEntry) {
 function CalendarFace({ entry }: { entry: CalendarEntry }) {
   const employee = entryEmployee(entry), plush = resolveEmployeeAvatar(employee);
   const face = plush ? null : avatarFaceParts(employee, 22);
-  return <span className="calendar-face" role="img" aria-label={`${employee.name}的头像`}>{plush ? <PlushAvatar config={plush} size={22}/> : <Avatar size={22} shape="square" src={face?.src} icon={face?.icon} style={face?.style}/>}</span>;
+  return <span className="calendar-face" role="img" aria-label={`${employee.name}的头像`} data-employee-id={employee.id}>{plush ? <PlushAvatar config={plush} size={22}/> : <Avatar size={22} shape="square" src={face?.src} icon={face?.icon} style={face?.style}/>}</span>;
 }
 
 function CalendarBar({ entry, selected, onSelect, onClose, content, style, position }: {
   entry: CalendarEntry; selected: boolean; onSelect(): void; onClose(): void; content: React.ReactNode; style?: React.CSSProperties; position?: { day: number; minute: number; lane: number; lanes: number };
 }) {
   const time = appointment(entry.at, PREVIEW_NOW, DISPLAY_ZONE);
-  return <WandPopover className="calendar-detail-popover" ariaLabel={`${entry.task.title}的日历详情`} popupOwner={`calendar-entry-${entry.key}`} align="start" open={selected} onOpenChange={next => { if (!next) onClose(); }} trigger={<WandButton kind="ghost" className="calendar-event" style={style} data-entry-key={entry.key} data-entry-kind={entry.kind} data-task={entry.task.id} data-date-key={entry.date} data-state={entryState(entry)} data-minute={position?.minute} data-day={position?.day} data-lane={position?.lane} data-lanes={position?.lanes} aria-pressed={selected}
+  return <WandPopover className="calendar-detail-popover" sideOffset={0} ariaLabel={`${entry.task.title}的日历详情`} popupOwner={`calendar-entry-${entry.key}`} align="start" open={selected} onOpenChange={next => { if (!next) onClose(); }} trigger={<WandButton kind="ghost" className="calendar-event" style={style} data-entry-key={entry.key} data-entry-kind={entry.kind} data-task={entry.task.id} data-date-key={entry.date} data-state={entryState(entry)} data-minute={position?.minute} data-day={position?.day} data-lane={position?.lane} data-lanes={position?.lanes} aria-pressed={selected}
     aria-label={`${entry.date} ${time.time} ${entry.task.title} · ${entry.kind === "execution" ? "实际执行" : "预计计划"} · ${entryLabel(entry)}`}
     title={`${time.exact} · ${DISPLAY_ZONE}\n${entry.task.title}\n${entry.kind === "execution" ? "实际执行记录" : "按当前计划预计，不代表已执行"} · ${entryLabel(entry)}`}
     onClick={event => { event.stopPropagation(); onSelect(); }}>
@@ -130,7 +130,7 @@ export function ScheduleCalendar({ tasks, allTasks, records, active, selectedTas
   }, [active, mode, valueKey]);
   const popoverContent = selected && currentTask ? <div className="calendar-selected-content" onPointerDown={event => event.stopPropagation()} onMouseDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}><header className="calendar-selection-heading"><div><strong>{selected.kind === "execution" ? "本次执行记录" : currentTask.cancelledAt ? "计划已取消" : "预计计划"}</strong><span>{appointment(selected.at, PREVIEW_NOW, DISPLAY_ZONE).exact}</span></div><WandIconButton aria-label="收起日历任务详情" onClick={() => { clearDetails(); restoreFocus(); }}><WandIcon name="close" size={16}/></WandIconButton></header>{renderDetails(currentTask, selectedRun)}</div> : null;
   const heading = mode === "month" ? value.format("YYYY年M月") : `${dayjs(start).format("M月D日")}—${dayjs(end).format("M月D日")}`;
-  return <section className="calendar-view" aria-label="定时任务日历" data-calendar-mode={mode} data-selected-date={valueKey}>
+  return <section className="calendar-view" aria-label="全局日历，全部员工" data-scope="all-employees" data-calendar-mode={mode} data-selected-date={valueKey}>
     <header className="calendar-toolbar"><div className="calendar-navigation"><WandIconButton aria-label={mode === "month" ? "上个月" : "上一周"} onClick={() => navigate(-1)}><WandIcon name="chevronLeft" size={17}/></WandIconButton><h2>{heading}</h2><WandIconButton aria-label={mode === "month" ? "下个月" : "下一周"} onClick={() => navigate(1)}><WandIcon className="calendar-forward" name="chevron" size={17}/></WandIconButton><WandButton size="small" kind="ghost" aria-label="回到示例今天" onClick={() => chooseDate(dayjs(today))}>今天</WandButton></div><WandStretchTabs className="calendar-range" ariaLabel="日历范围" value={mode} onValueChange={chooseMode} tabs={[{ value: "month", label: "月" }, { value: "week", label: "周" }]}/></header>
     <div className="calendar-explanation"><span><i data-kind="execution"/>实色：执行记录</span><span><i data-kind="planned"/>虚线：预计计划</span>{canvasScrollable && <span className="calendar-scroll-hint">左右滑动</span>}<span>{DISPLAY_ZONE}</span></div>
     {projection.issues.length ? <Alert type="warning" showIcon title={projection.issues.join("；")}/> : null}

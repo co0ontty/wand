@@ -27,26 +27,27 @@ function readScriptCache(): void {
   }
 }
 
-function injectRuntimeValues(source: string, configPath: string, chunkHash: string, plushHash: string, entry: string): string {
+function injectRuntimeValues(source: string, configPath: string, chunkHash: string, plushHash: string, manifest: BrowserModuleManifest): string {
   return source
     // This is a JS string literal, not HTML text. JSON escaping also handles
     // quotes, backslashes and newlines in nonstandard configuration paths.
     .replace('"${wandConfigPath}"', JSON.stringify(configPath))
     .replace("${aiTeamsChunkSrc}", `/assets/ai-teams.js?v=${chunkHash}`)
     .replace("${plushAvatarChunkSrc}", `/assets/plush-avatar.js?v=${plushHash}`)
-    .replace("${browserModuleSrc}", `/assets/${entry}`);
+    .replace("${browserModuleSrc}", `/assets/${manifest.entry}`)
+    .replace('"${browserModuleImports}"', JSON.stringify(manifest.imports ?? {}));
 }
 
 export function getScriptAsset(configPath: string, requestedHash?: string): VersionedWebAsset {
   readScriptCache();
   const teamHash = getAiTeamsChunk().hash;
   const plushHash = getPlushAvatarChunk().hash;
-  const entry = getBrowserModuleManifest().entry;
-  const chunkHash = `${teamHash}:${plushHash}:${entry}`;
+  const manifest = getBrowserModuleManifest();
+  const chunkHash = `${teamHash}:${plushHash}:${manifest.buildId ?? manifest.entry}`;
   if (!_scriptAsset || _scriptAsset.source !== _scriptCache
     || _scriptAsset.configPath !== configPath || _scriptAsset.chunkHash !== chunkHash) {
     _scriptAsset = {
-      ...versionWebAsset(injectRuntimeValues(_scriptCache, configPath, teamHash, plushHash, entry)),
+      ...versionWebAsset(injectRuntimeValues(_scriptCache, configPath, teamHash, plushHash, manifest)),
       source: _scriptCache, configPath, chunkHash,
     };
   }
@@ -55,7 +56,7 @@ export function getScriptAsset(configPath: string, requestedHash?: string): Vers
       _embeddedScriptAsset = {
         ...versionWebAsset(injectRuntimeValues(
           EMBEDDED_WEB_ASSETS.scriptsJs, configPath, embeddedAiTeamsChunk.hash, embeddedPlushAvatarChunk.hash,
-          EMBEDDED_WEB_ASSETS.browserModuleManifest.entry,
+          EMBEDDED_WEB_ASSETS.browserModuleManifest,
         )),
         configPath,
       };
@@ -121,6 +122,10 @@ export function getThemePreloadAsset(): VersionedWebAsset {
 const themePreloadAsset = versionWebAsset(EMBEDDED_WEB_ASSETS.themePreloadJs);
 
 export interface BrowserModuleManifest {
+  buildId?: string;
+  imports?: Record<string, string>;
+  dependencies?: Record<string, readonly string[]>;
+  integrity?: Record<string, string>;
   entry: string;
   eager: readonly string[];
   files: readonly string[];
@@ -140,10 +145,18 @@ export function getBrowserModuleManifest(): BrowserModuleManifest {
     if (key !== browserManifestKey) {
       const next = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as BrowserModuleManifest;
       if (!next.files.every(file => /^modules\/[a-f0-9]{16}\/[A-Za-z0-9_-]+\.js$/.test(file))
-        || !next.files.includes(next.entry) || !next.eager.every(file => next.files.includes(file))) {
+        || !next.files.includes(next.entry) || !next.eager.every(file => next.files.includes(file))
+        || !Object.values(next.imports ?? {}).every(file => next.files.includes(file))
+        || !Object.entries(next.dependencies ?? {}).every(([file, deps]) => next.files.includes(file) && deps.every(dep => next.files.includes(dep)))) {
         throw new Error("Invalid browser module manifest");
       }
-      const files = new Map(next.files.map(file => [file, fs.readFileSync(path.join(__dirname, "content", file), "utf8")]));
+      const files = new Map(next.files.map(file => {
+        const content = fs.readFileSync(path.join(__dirname, "content", file), "utf8");
+        if (next.integrity && createHash("sha256").update(content).digest("hex") !== next.integrity[file]) {
+          throw new Error("Browser module integrity mismatch");
+        }
+        return [file, content] as const;
+      }));
       browserBuilds.unshift(files);
       browserBuilds.splice(2);
       browserManifest = next;

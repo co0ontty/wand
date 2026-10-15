@@ -4,6 +4,9 @@ import { conversationForRun } from "../conversations/run-route";
 import { conversationsRepository } from "../conversations/repository";
 import { ChatMessage } from "../chat/message";
 import { ChatActivity } from "../chat/activity";
+import { TurnNavPanel } from "../chat/navigation/TurnNavPanel.js";
+import { buildTurnNavIndex, turnNavRange } from "../chat/navigation/turn-nav-model.js";
+import { jumpToChatTurn } from "../chat/navigation/turn-jump.js";
 import * as React from "react";
 import * as jsxRuntime from "react/jsx-runtime";
 import { failureMessage } from "../errors";
@@ -79,6 +82,7 @@ import { employeeAvatarProvider, employeeCliLabel } from "../agents/employee-ide
 import { installAvatarEditorStyles } from "../agents/employee-avatar-styles.js";
 import { EmployeeAvatarWorkspace } from "../agents/employee-avatar-workspace.js";
 import { installEmployeeProfileStyles } from "../styles/employee-profile.js";
+import { EmployeeImEditor } from "../agents/employee-im-editor.js";
 import { installEmployeeStyles } from "../agents/styles.js";
 import { PlushAvatar } from "../avatars/plush-avatar.js";
 import { AvatarThinking } from "../avatars/thinking.js";
@@ -100,6 +104,9 @@ const AI_TEAMS_HOST: Record<string, object> = {
   "chat/running-status-bar": { RunningStatusBar },
   "chat/message": { ChatMessage },
   "chat/activity": { ChatActivity },
+  "chat/navigation/TurnNavPanel": { TurnNavPanel },
+  "chat/navigation/turn-nav-model": { buildTurnNavIndex, turnNavRange },
+  "chat/navigation/turn-jump": { jumpToChatTurn },
   "file-preview/controller": { filePreviewController },
   "file-preview/markdown": { MarkdownPreview, MessageFileContext },
   "file-preview/model": { formatFilePreviewSize },
@@ -121,6 +128,7 @@ const AI_TEAMS_HOST: Record<string, object> = {
   "agents/employee-identity": { employeeAvatarProvider, employeeCliLabel },
   "agents/styles": { installEmployeeStyles },
   "agents/employee-avatar-workspace": { EmployeeAvatarWorkspace },
+  "agents/employee-im-editor": { EmployeeImEditor },
   "styles/employee-profile": { installEmployeeProfileStyles },
   "provider-logo": { ProviderLogo },
   "model-catalog": { subscribeWandModelCatalog, wandModelDisplayName },

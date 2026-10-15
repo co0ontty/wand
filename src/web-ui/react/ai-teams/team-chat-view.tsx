@@ -1,4 +1,7 @@
 import { ChatMessage } from "../chat/message";
+import { TurnNavPanel } from "../chat/navigation/TurnNavPanel.js";
+import { buildTurnNavIndex, turnNavRange } from "../chat/navigation/turn-nav-model.js";
+import { jumpToChatTurn } from "../chat/navigation/turn-jump.js";
 import { ChatActivity } from "../chat/activity";
 import * as React from "react";
 import { Alert, Avatar, Button, Card, Collapse, Flex, List, Tag, Tooltip, Typography } from "antd";
@@ -1470,6 +1473,7 @@ export function chatDocOwnerPresent(
 }
 
 export interface ConversationMessagesProps {
+  navigationScope?: string;
   turns: ConversationTurn[];
   taskLabels: Record<string, string>;
   group?: boolean;
@@ -1489,7 +1493,7 @@ export interface ConversationMessagesProps {
 }
 
 /** IM presentation shares file cards and text expansion; composer/receipt ownership stays unchanged. */
-export function ConversationMessages({ turns, taskLabels, group = true, ready = true, active = true, restoreScroll,
+export function ConversationMessages({ turns, navigationScope = "conversation", taskLabels, group = true, ready = true, active = true, restoreScroll,
   employeeIds = {}, mentionNames = EMPTY_MENTION_NAMES, onOpenEmployee, onOpenConversation, onOpenSession, renderActivity, renderTaskPreview, renderSessionPreview }: ConversationMessagesProps): React.ReactElement {
   const profile = useUserProfile();
   const list = React.useRef<HTMLDivElement>(null);
@@ -1500,6 +1504,23 @@ export function ConversationMessages({ turns, taskLabels, group = true, ready = 
   const [awayFromTail, setAwayFromTail] = React.useState(false);
   const reduced = useReducedMotion();
   const keys = turns.map(conversationMessageKey);
+  const questionBodies = turns.map(turn => turn.role === "user" ? parseChatAttachments(chatTurnText(turn)).body : "");
+  const fallbackScope = React.useId();
+  const fallbackWindow = React.useRef({ signature: "", revision: 0 });
+  // HTTP snapshots clone every turn. Keep the established render keys; rotate
+  // only navigation's legacy window token when identity/order/questions change,
+  // not for a cloned snapshot or an assistant's streamed text.
+  const signature = JSON.stringify([navigationScope, turns.map((turn, index) => [keys[index], !!turn.notice, questionBodies[index]])]);
+  if (signature !== fallbackWindow.current.signature) {
+    fallbackWindow.current = { signature, revision: fallbackWindow.current.revision + 1 };
+  }
+  const navigationOwners = turns.map((turn, index) => turn.messageId ? keys[index]!
+    : `${fallbackScope}:window:${fallbackWindow.current.revision}:${index}`);
+  const navigationEntries = buildTurnNavIndex(turns.map((turn, index) => ({
+    ownerKey: navigationOwners[index]!, visibleIndex: index, role: turn.role,
+    notice: !!turn.notice || !!turn.sessionLink || !!turn.conversationLink,
+    visibleText: questionBodies[index]!,
+  })));
   React.useLayoutEffect(() => {
     const scroll = list.current?.closest<HTMLElement>(".conversation-message-scroll");
     if (!scroll || !active || list.current?.closest(".sidebar-projection-old")) return;
@@ -1549,6 +1570,18 @@ export function ConversationMessages({ turns, taskLabels, group = true, ready = 
     return () => observer.disconnect();
   }, [active, ready]);
   return <div ref={list} className="task-board-team-chat team-chat-stream conversation-stream" role="log" aria-label="对话消息" aria-relevant="additions">
+    <TurnNavPanel scope={navigationScope} active={active && ready} entries={navigationEntries}
+      readingRoot={() => list.current?.closest<HTMLElement>(".conversation-message-scroll") ?? null} ownerAttribute="data-conversation-nav-owner"
+      range={turnNavRange(navigationEntries.length, "unknown")} onJump={ownerKey => {
+        const content = list.current;
+        const scroll = content?.closest<HTMLElement>(".conversation-message-scroll");
+        if (!content || !scroll || !active || content.closest(".sidebar-projection-old")) return false;
+        const found = content.querySelector<HTMLElement>(`[data-conversation-nav-owner="${CSS.escape(ownerKey)}"]`);
+        if (!found || !jumpToChatTurn(scroll, ownerKey, "data-conversation-nav-owner")) return false;
+        following.current = false;
+        setAwayFromTail(true);
+        return true;
+      }}/>
     {turns.map((turn, index) => {
       const key = keys[index]!;
       const text = chatTurnText(turn);
@@ -1570,7 +1603,7 @@ export function ConversationMessages({ turns, taskLabels, group = true, ready = 
           {turn.conversationLink ? <WandButton onClick={() => onOpenConversation(turn.conversationLink!.conversationId)}>打开任务群 · {turn.conversationLink.title}</WandButton> : null}
         </Flex> : <div className="chat-message assistant team-chat-msg conversation-message"
           data-side={self ? "end" : "start"} data-shape="bubble" data-group={group} data-joined={joined} data-lead={lead} data-tail={tail}
-          data-presentation-id={key} data-im-arriving={arrivals.has(key) || undefined}
+          data-presentation-id={key} data-conversation-nav-owner={navigationOwners[index]} data-im-arriving={arrivals.has(key) || undefined}
           onAnimationEnd={event => { if (event.target === event.currentTarget) setArrivals(current => { const next = new Set(current); next.delete(key); return next; }); }}>
           {group && self ? <span className="conversation-peer-avatar" data-visible={lead}><EmployeeAvatar employee={{ id: "user", name: profile.name || "我", avatar: profile.avatar }} provider="" size="md"/></span> : null}
           {group && !self ? <span className="conversation-peer-avatar" data-visible={lead}>{lead && turn.author && employeeIds[turn.author.id] && onOpenEmployee

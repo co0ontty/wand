@@ -85,7 +85,9 @@ const css = String.raw`
 .wand-settings-library-about-list>div { display:flex; align-items:baseline; justify-content:space-between; gap:16px; }
 .wand-settings-library-about-overview>.wand-settings-library-section { flex:1 1 480px; min-width:0; }
 .wand-settings-library-about-downloads>.wand-settings-library-section { flex:1 1 280px; min-width:0; }
-.wand-settings-library-version-table .ant-table-cell { overflow-wrap:anywhere; }
+.wand-settings-library-version-table .ant-descriptions-item-content { overflow-wrap:anywhere; }
+.wand-settings-library-nested-dialog .ant-descriptions-item-label { overflow-wrap:anywhere; }
+.wand-settings-library-nested-dialog .ant-descriptions-item-content { min-width:0; }
 .wand-settings-library-cli-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(280px,100%),1fr)); gap:0 24px; }
 .wand-settings-library-cli-item { min-width:0; padding-block:8px; border-bottom:1px solid var(--border-subtle); }
 .wand-settings-library-cli-item>span { min-width:0; overflow-wrap:anywhere; text-align:end; font-variant-numeric:tabular-nums; }

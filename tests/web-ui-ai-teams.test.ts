@@ -565,24 +565,14 @@ test("[T7] 团队是 picker 自己的选择态，没有撑宽 WorkspaceSessionTa
   assert.match(pickerSource, /if \(!onStartTeam \|\| !teamWorkspaceId\) throw new Error\(TEAM_NEEDS_PROJECT_HINT\)/);
 });
 
-test("[T7] 侧栏新建任务与项目欢迎页都接了团队旁路，任务上下文那条没有", () => {
-  // 侧栏「新建任务」= 统一新建会话页：同一页提供 CLI / 员工 / 团队三类执行主体，
-  // 团队要一个已存在的项目 id，所以按所选目录对项目；任务上下文不给团队（那张卡已经在了）。
-  assert.match(newSessionSource, /const teamWorkspaceId = form\?\.workspaceTaskId\s*\n?\s*\? ""\s*\n?\s*: usableTeamWorkspaceId\(form\?\.workspaceId \?\? matchedProject\?\.id, matchedProject\?\.kind\)/);
-  assert.match(newSessionSource, /teams=\{teamContext \? teamOptions : null\}[\s\S]*?teamWorkspaceId=\{teamWorkspaceId\}/);
-  assert.match(newSessionSource, /const teamContext = Boolean\(controller\.open && form && !form\.workspaceTaskId && form\.taskName === undefined\)/);
-  assert.match(newSessionSource, /try \{\n      \/\/[^\n]*\n      if \(form\.teamId\) \{[\s\S]*?await startDirectTeamRun\(form\);\n        return;/);
-  // 桥接本身不再自己建任务卡，也不再重复一份团队逻辑。
-  assert.match(hostSource, /newSessionController\.open\(\{ initialCwd: controller\.initialCwd, newTask: controller\.initialKind === "task" \}\)/);
-  assert.doesNotMatch(hostSource, /startDirect|teamWorkspaceId|usableTeamWorkspaceId/);
-  // 项目欢迎页：workspaceId 是当前项目；global 项目不下发团队候选。
+test("[T7] all welcome entry points delegate team creation to the single new-work page", () => {
+  assert.match(newSessionSource, /useAiTeamList\(!controller.workspaceTaskId && !controller.newTask\)/);
+  assert.match(newSessionSource, /usableTeamWorkspaceId/);
+  assert.match(newSessionSource, /teamWorkspaceId=\{teamWorkspaceId\}/);
+  assert.match(newSessionSource, /aiTeamsRepository\.startDirect/);
   const main = read("react/shell/shell-main-content.tsx");
-  assert.match(main, /teams=\{teamWorkspaceId \? teamOptions : null\}/);
-  assert.match(main, /onStartTeam=\{startTeamInProject\}/);
-  // 任务上下文分支：这张卡已经存在，再加团队只会冗余建卡，所以不接团队。
-  const taskBranch = main.slice(main.indexOf("eyebrow={workspaceTask.workspaceName"), main.indexOf(") : workspaceProject ? ("));
-  assert.ok(taskBranch.length > 0 && taskBranch.length < 800, "任务分支片段异常");
-  assert.doesNotMatch(taskBranch, /teams=|onStartTeam|teamWorkspaceId/);
+  assert.match(main, /newSessionController\.open/);
+  assert.doesNotMatch(main, /aiTeamsRepository\.startDirect|onStartTeam/);
 });
 
 test("[T7] startDirect 只发 note + workspaceId，不发 cwd", () => {
@@ -658,17 +648,10 @@ test("[T7] 开工成功后落到 IM 群聊页，拿不到 chatSessionId 才退�
   assert.match(after, /setDetailTab\("runs"\)/);
   assert.match(after, /setFocusRunId\(started\.run\.id\)/, "兜底也要停在「团队页-该运行」，不静默");
   assert.match(teamPageSource, /if \(focusRunId\) setOpenId\(focusRunId\)/);
-  // 另两个入口（统一新建会话页、项目欢迎页）开团首屏统一进 IM 群聊页（teamchat，按 runId），兜底才是团队页。
-  assert.match(newSessionSource, /taskBoardController\.open\("", "", "teamchat", started\.run\.id\)/);
+  // All entry points now share this one creation owner and its team result route.
+  assert.match(newSessionSource, /taskBoardController\.open\("", "", "teamchat", result\.run\.id\)/);
   assert.match(newSessionSource, /else taskBoardController\.open\("", "", "teams"\)/);
-  const main = read("react/shell/shell-main-content.tsx");
-  assert.match(main, /taskBoardController\.open\("", "", "teamchat", started\.run\.id\)/);
-  assert.match(main, /taskBoardController\.open\("", "", "teams"\)/);
-  // S2：开团后各补一次 task-changes 通知，侧栏群聊徽标不必等 ~6s 轮询。
   assert.match(newSessionSource, /notifyTasksChanged\(\);/);
-  assert.match(main, /notifyTasksChanged\(\);/);
-  // S4：结果不再靠整行提示语（旧弹窗那句 notice），而是原位停够 dwell 再前进，失败态停留更久；
-  // 两档都只从 motion-tokens 取，入口里不写死毫秒（见上一条测试）。
   assert.match(newSessionSource, /await aiTeamsRepository\.settle\("success"\);/);
   assert.match(newSessionSource, /await aiTeamsRepository\.settle\("error"\);/);
 });

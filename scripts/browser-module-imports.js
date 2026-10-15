@@ -6,7 +6,7 @@ import { isBrowserStyleFile, minifyStringRawCssTemplates } from "./browser-style
 /** Native component entrypoints avoid an all-controls barrel becoming one eager
  * shared chunk. Derive mappings from the installed library, never hand-maintain
  * a second component list. Source imports and team-IIFE sharing remain unchanged. */
-export async function createBrowserModuleImportsPlugin(root, production) {
+export async function createBrowserModuleImportsPlugin(root, production, cssCandidates) {
   const libraries = new Map();
   for (const name of ["antd", "@ant-design/x"]) {
     const directory = path.join(root, "node_modules", name, "es");
@@ -29,7 +29,11 @@ export async function createBrowserModuleImportsPlugin(root, production) {
         if (!args.path.startsWith(path.join(root, "src") + path.sep)
           && !args.path.startsWith(path.join(root, "node_modules/@ant-design/x/es") + path.sep)) return;
         let source = await readFile(args.path, "utf8");
-        if (production && isBrowserStyleFile(args.path)) source = minifyStringRawCssTemplates(source, args.path).code;
+        if (production && isBrowserStyleFile(args.path)) {
+          const result = minifyStringRawCssTemplates(source, args.path);
+          source = result.code;
+          for (const value of result.values) if (value.length) cssCandidates?.add(value);
+        }
         const ast = ts.createSourceFile(args.path, source, ts.ScriptTarget.Latest, true);
         const edits = [];
         for (const statement of ast.statements) {

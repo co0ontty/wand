@@ -17,6 +17,7 @@ import { isGlobalWorkspace, normalizeProjectCwd, resolveWorkspaceIdForNewSession
 import { CONVERSATION_SESSION_PREFIX, conversationSessionPreview } from "./conversation-session-preview.js";
 import { conversationTaskLiveText } from "./conversation-task-preview.js";
 import { selectEmployeeCandidate } from "./silicon-employee-dispatch.js";
+import { parseConversationExecutionPreference, withConversationExecutionPreference, type ConversationExecutionPreference } from "./conversation-execution-preference.js";
 import { userAuthor, userDisplayName } from "./user-profile.js";
 import type { WandStorage } from "./storage.js";
 import type { StructuredSessionManager } from "./structured-session-manager.js";
@@ -603,13 +604,16 @@ export class ConversationService {
   }
 
   send(id: string, requestId: string, input: string, target: ConversationTarget, explicitCwd?: string, echo = true,
-    executionTarget?: ConversationExecutionTarget): Promise<ConversationReceipt> {
+    executionTarget?: ConversationExecutionTarget, executionPreference?: ConversationExecutionPreference): Promise<ConversationReceipt> {
+    const preference = parseConversationExecutionPreference(executionPreference);
     return this.request(requestId, "send", { input, target, explicitCwd, echo,
+      ...(preference ? { executionPreference: preference } : {}),
       ...(executionTarget?.workspaceId ? { workspaceId: executionTarget.workspaceId } : {}),
       ...(executionTarget?.title !== undefined ? { title: executionTarget.title } : {}),
       ...(executionTarget?.scheduled ? { scheduled: true } : {}) }, id, async (receipt, commit) => {
       const text = shortText(input, "消息", 256_000, true);
       const instance = this.requireInstance(id);
+      if (preference && (instance.kind !== "dm" || target)) throw new Error("临时执行配置仅用于私聊的新工作，不修改已有任务。");
       let workspaceId: string | undefined;
       if (executionTarget) {
         if (instance.kind !== "dm" || target) throw new Error("指定工作项目仅用于员工执行。");
@@ -639,7 +643,7 @@ export class ConversationService {
       }
       if (instance.kind === "dm") {
         this.startMessageSession(instance, requestId, text, explicitCwd, receipt, commit,
-          executionTarget ? { ...executionTarget, workspaceId } : undefined);
+          executionTarget ? { ...executionTarget, workspaceId } : undefined, preference);
         return;
       }
       if (instance.kind === "group" && instance.team) {
@@ -681,9 +685,11 @@ export class ConversationService {
 
   /** One IM message is one fresh model context. No task, team, relay or previous DM history. */
   private startMessageSession(instance: ConversationInstance, requestId: string, input: string, explicitCwd: string | undefined,
-    receipt: ConversationReceipt, commit: () => void, executionTarget?: ConversationExecutionTarget): void {
+    receipt: ConversationReceipt, commit: () => void, executionTarget?: ConversationExecutionTarget,
+    preference?: ConversationExecutionPreference): void {
     requireTeamEmployee(this.storage, instance.peerEmployeeId ?? "");
-    const employee = this.storage.getSiliconEmployee(instance.peerEmployeeId!)!;
+    const savedEmployee = this.storage.getSiliconEmployee(instance.peerEmployeeId!)!;
+    const employee = preference ? withConversationExecutionPreference(savedEmployee, preference) : savedEmployee;
     const selected = selectEmployeeCandidate(employee), agent = selected.agent;
     const cwd = this.cwd(explicitCwd);
     const model = agent.model === "default" ? fallbackProviderModel(this.deps.config, agent.provider) : agent.model;

@@ -13,7 +13,7 @@ copy_or_fetch_script update-node.sh
 copy_or_fetch_script update-target.js
 copy_or_fetch_script recover-web-update.mjs
 . "$RECOVERY_DIR/update-node.sh"
-wand_ensure_update_node 24.21.0 || { echo "需要 Node.js >=24.21.0；旧服务与安装未修改。" >&2; exit 1; }
+wand_ensure_update_node "$WAND_MINIMUM_NODE_VERSION" || { echo "需要 Node.js >=$WAND_MINIMUM_NODE_VERSION；旧服务与安装未修改。" >&2; exit 1; }
 
 PLATFORM="$(uname -s)"
 SYSTEM=0
@@ -83,8 +83,9 @@ GLOBAL_BIN="$INSTALL_PREFIX/bin/wand"
 echo "[wand-recovery] preparing $VERSION ($CHANNEL subscription); current service stays online"
 npm install -g --engine-strict --prefix "$RECOVERY_DIR/prepared" "@co0ontty/wand@$VERSION"
 PREPARED="$RECOVERY_DIR/prepared/lib/node_modules/@co0ontty/wand"
-for name in core-status-cli update-health update-legacy; do
-  if [ -f "$SCRIPT_DIR/../dist/$name.js" ]; then
+for name in core-status-cli update-health update-legacy deployment-lock; do
+  # A checkout may contain an older dist; use the matching source protocol there.
+  if [ ! -f "$SCRIPT_DIR/../src/$name.ts" ] && [ -f "$SCRIPT_DIR/../dist/$name.js" ]; then
     cp "$SCRIPT_DIR/../dist/$name.js" "$RECOVERY_DIR/$name.js"
     case "$name" in core-status-cli) GUARD_PATH="$RECOVERY_DIR/$name.js" ;; update-health) HEALTH_PATH="$RECOVERY_DIR/$name.js" ;; update-legacy) LEGACY_PATH="$RECOVERY_DIR/$name.js" ;; esac
   else
@@ -114,10 +115,12 @@ else
 fi
 # No sudo around the transaction: package, DB and WAL stay owned by the caller.
 # Only system-service registration prompts for its existing required privilege.
-"$NODE_BIN" --input-type=module - "$GUARD_PATH" "$LEGACY_PATH" "$CONFIG_PATH" "$ALLOW_STOPPED" "$NODE_BIN" "$RECOVERY_DIR/recover-web-update.mjs" apply "$PREPARED" "$GLOBAL_ROOT" "$GLOBAL_BIN" "$CONFIG_PATH" "$SCOPE" "$PLATFORM" "$HEALTH_PATH" "$GUARD_PATH" <<'NODE'
+"$NODE_BIN" --input-type=module - "$GUARD_PATH" "$LEGACY_PATH" "$CONFIG_PATH" "$ALLOW_STOPPED" "$GLOBAL_ROOT" "$NODE_BIN" "$RECOVERY_DIR/recover-web-update.mjs" apply "$PREPARED" "$GLOBAL_ROOT" "$GLOBAL_BIN" "$CONFIG_PATH" "$SCOPE" "$PLATFORM" "$HEALTH_PATH" "$GUARD_PATH" <<'NODE'
 import { pathToFileURL } from "node:url";
-const [guardPath, legacyPath, configPath, stopped, ...command] = process.argv.slice(2);
+const [guardPath, legacyPath, configPath, stopped, root, ...command] = process.argv.slice(2);
 const guard = await import(pathToFileURL(guardPath).href);
 const { waitForCompatibleUpdate } = await import(pathToFileURL(legacyPath).href);
-process.exitCode = await waitForCompatibleUpdate(configPath, 300, command, stopped === "1", guard);
+const { withRecoveryLock } = await import(pathToFileURL(command[1]).href);
+process.exitCode = await withRecoveryLock(root, guardPath,
+  () => waitForCompatibleUpdate(configPath, 300, command, stopped === "1", guard));
 NODE

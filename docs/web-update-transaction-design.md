@@ -1,6 +1,6 @@
 # Web 更新改为可恢复事务：设计提案
 
-> 本文是排查后提出的架构与实施合同，**尚未实现、部署或发布**。现有行为见 [web-updates.md](web-updates.md)。范围只含 Server/Web；不合并 Render/terminald 生命周期，不改原生客户端更新协议。
+> 本文是排查后提出的架构与实施合同，**完整事务方案尚未实现、部署或发布**。后续局部兼容修复已统一 recovery/Web/start.sh 的锁模块、支持合法父锁继承，并在排空前检查锁；这不等于已实现遗留锁自动回收或崩溃恢复。现有行为见 [web-updates.md](web-updates.md)。范围只含 Server/Web；不合并 Render/terminald 生命周期，不改原生客户端更新协议。
 
 ## 1. 结论
 
@@ -22,7 +22,7 @@
 | 现象 / 缺口 | 当前源码证据 | 影响与复现入口 |
 | --- | --- | --- |
 | 死锁主人退出后仍拒绝更新 | `src/deployment-lock.ts` 的 `acquireDeploymentLock` 对已存在目录直接拒绝；`src/npm-update-utils.ts` 的 `isGlobalUpdateLocked` 只检查目录存在 | 进程异常退出留下锁会持续阻断安装；隔离创建已确认退出 PID 的 owner 后仍拒绝 |
-| 相同路径却有两套锁语义 | `scripts/recover-web-update.mjs` 的 `acquireRecoveryLock` 不使用共享锁及继承回执 | 有合法父锁也会报用户提供的原文；正常独立调用被其他更新持锁时也会报同一句，不能仅凭文案断言锁已死 |
+| 相同路径却有两套锁语义（已局部修复） | 原 `acquireRecoveryLock` 不使用共享锁及继承回执；现 `withRecoveryLock` 复用部署锁且先于排空 | 合法父锁不再自冲突；真实竞争仍拒绝；未知/遗留锁不自动删除，完整事务恢复仍待实现 |
 | 没有写前事务，硬中断绕过回滚 | `src/npm-update-utils.ts` 的 `installPackageGloballyAsync` 在全局目录执行 npm；备份回执仅在安装成功后的 `finally` 中写入 | 已隔离实测：创建备份后 npm 改写当前包，再对本次进程组 SIGKILL，留下修改过的包、备份及锁，但没有回执，不能自动定位恢复事务 |
 | 运行版本和包版本不一致时判断分裂 | `src/server.ts` 使用 `DISPLAY_VERSION` 检查更新；`restart-overlay/model.ts` 优先取 `packageVersion` | 隔离输入中实际运行版本匹配目标、manifest 版本不同，页面仍不就绪；当前本机两值一致，不能说这就是本机此次提示的原因 |
 | 页面早于事务提交就宣告就绪 | `restart-overlay/repository.ts` 仅识别 `failed`，不等待 `completed`；`model.ts` 只比较实例/版本 | 隔离响应仍处于 `verifying` 时已经 `ready=true`，后续验证或提交失败无法阻止已经发生的刷新 |

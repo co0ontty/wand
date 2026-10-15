@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
+import { DatabaseSync } from "node:sqlite";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -101,6 +102,29 @@ test("all-user selections are successful no-ops rather than missing tasks", asyn
   });
 });
 
+test("missing legacy title provenance is protected by default and only included by explicit all", async () => {
+  await fixture(async (storage, root, post) => {
+    const workspace = storage.createWorkspace({ name: "Legacy", cwd: root });
+    const task = storage.createWorkspaceTask({ workspaceId: workspace.id, name: "旧用户标题" });
+    const card = storage.getWandTaskByWorkspaceTaskId(task.id)!;
+    const legacy = new DatabaseSync(path.join(root, "wand.db"));
+    try { legacy.prepare("UPDATE wand_tasks SET title_source = NULL WHERE id = ?").run(card.id); }
+    finally { legacy.close(); }
+    save(storage, root, "legacy-loose", "旧用户标题");
+    const body = { taskIds: [task.id], sessionIds: ["legacy-loose"] };
+    const automatic = await post(body);
+    assert.equal(automatic.status, 200);
+    const protectedResult = await automatic.json();
+    assert.equal(protectedResult.eligibleTasks, 0);
+    assert.equal(protectedResult.skippedTasks, 1);
+    assert.equal(storage.getSession("legacy-loose")?.workspaceTaskId, undefined);
+    const all = await post({ ...body, mode: "all" });
+    assert.equal(all.status, 200);
+    assert.equal((await all.json()).movedSessions.length, 1);
+    assert.equal(storage.getSession("legacy-loose")?.workspaceTaskId, task.id);
+  });
+});
+
 test("manual rename during semantic judgment invalidates pending moves", async () => {
   await fixture(async (storage, root) => {
     const workspace = storage.createWorkspace({ name: "Project", cwd: root });
@@ -136,6 +160,46 @@ test("large passes bound model calls without truncating late candidates, conflic
     sessions: input.sessions.map(item => ({ id: item.id, taskId: input.tasks[0]!.id })), tasks: [],
   }));
   assert.deepEqual(conflict.sessions, [{ id: "s", taskId: null }]);
+});
+
+test("default auto protects user-titled parents while explicit all can persist a safe parent relationship", async () => {
+  await fixture(async (storage, root) => {
+    const workspace = storage.createWorkspace({ name: "Project", cwd: root });
+    const parent = storage.createWorkspaceTask({ workspaceId: workspace.id, name: "修复客户端" });
+    const child = storage.createWorkspaceTask({ workspaceId: workspace.id, name: "修复登录弹窗", board: { titleSource: "auto" } });
+    const parentCard = storage.getWandTaskByWorkspaceTaskId(parent.id)!;
+    storage.updateWandTask(parentCard.id, { status: "doing" });
+    let calls = 0;
+    const judge = async () => { calls++; return { sessions: [], tasks: [{ id: child.id, parentId: parent.id }] }; };
+    const automatic = await organizeSelectedByTitle(storage, { taskIds: [parent.id, child.id] }, { judge });
+    assert.equal(automatic.skippedTasks, 1);
+    assert.equal(calls, 0);
+    assert.deepEqual(automatic.categorizedTasks, []);
+    assert.equal(storage.getWandTaskByWorkspaceTaskId(child.id)?.parentTaskId, null);
+    const all = await organizeSelectedByTitle(storage, { taskIds: [parent.id, child.id], mode: "all" }, { judge });
+    assert.equal(calls, 1);
+    assert.equal(all.categorizedTasks[0]?.taskId, child.id);
+    assert.equal(all.categorizedTasks[0]?.parentTaskId, parentCard.id, "归类回执和看板模型使用父卡片ID");
+    assert.equal(storage.getWandTaskByWorkspaceTaskId(child.id)?.parentTaskId, parentCard.id);
+    assert.ok(storage.getWorkspaceTask(child.id), "归类不删除原任务及历史容器");
+  });
+});
+
+test("global tasks in different project directories cannot persist a semantic parent link", async () => {
+  await fixture(async (storage, root) => {
+    const global = storage.ensureGlobalWorkspace();
+    const create = (name: string, cwd: string) => storage.createWorkspaceTask({ workspaceId: global.id, name, cwd, board: { titleSource: "auto" } });
+    const parent = create("修复客户端", path.join(root, "a"));
+    const child = create("修复登录弹窗", path.join(root, "a"));
+    const unrelated = create("改进交互", path.join(root, "b"));
+    for (const task of [parent, child, unrelated]) storage.updateWandTask(storage.getWandTaskByWorkspaceTaskId(task.id)!.id, { status: "doing" });
+    const result = await organizeSelectedByTitle(storage, { taskIds: [parent.id, child.id, unrelated.id] }, {
+      judge: async () => ({ sessions: [], tasks: [{ id: child.id, parentId: unrelated.id }] }),
+    });
+    assert.deepEqual(result.categorizedTasks, []);
+    assert.equal(storage.getWandTaskByWorkspaceTaskId(child.id)?.parentTaskId, null);
+    assert.ok(result.refused.some(item => item.id === child.id && item.reason === "不能归入该任务"));
+  });
 });
 
 test("repository defaults auto for existing entry and sends explicit scope for new entries", async () => {

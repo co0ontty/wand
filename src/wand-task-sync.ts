@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import type { WandStorage } from "./storage.js";
+import { isSystemAiCall } from "./system-ai-call.js";
 import { isSessionProvider } from "./session-provider.js";
 import { provisionalTaskTitleFromDescription } from "./task-title.js";
 import type { WandTask } from "./task-types.js";
@@ -49,7 +50,7 @@ export function isAutoNameableBoardTask(card: Pick<WandTask, "title" | "titleSou
 function taskNamingSessions(storage: WandStorage, card: WandTask): SessionSnapshot[] {
   const sessions = new Map<string, SessionSnapshot>();
   const add = (session: SessionSnapshot | null | undefined): void => {
-    if (session && !sessions.has(session.id)) sessions.set(session.id, session);
+    if (session && !isSystemAiCall(session) && !sessions.has(session.id)) sessions.set(session.id, session);
   };
   const needsMessageFallback: string[] = [];
   const addSlim = (session: SessionSnapshot | null | undefined): void => {

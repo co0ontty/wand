@@ -44,7 +44,10 @@ export function acquireDeploymentLock(
     mkdirSync(lockPath, { mode: 0o700 });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    throw new Error(`另一个 wand 更新正在进行中（锁: ${lockPath}${typeof owner?.pid === "number" ? `, PID ${owner.pid}` : ""}）。若确认没有更新进程，请手动处理该锁目录。`);
+    const ownerState = Number.isSafeInteger(owner?.pid) && (owner!.pid as number) > 0
+      ? pidAlive(owner!.pid as number) ? "进程仍存活" : "进程已退出，可能存在遗留写者或未完成事务"
+      : "归属未知";
+    throw new Error(`另一个 wand 更新正在进行中或遗留安装锁尚未核实（锁: ${lockPath}${typeof owner?.pid === "number" ? `, PID ${owner.pid}` : ""}；${ownerState}）。旧安装未修改；未自动删除锁，请先核查安装子进程、备份与事务状态。`);
   }
   try {
     writeFileSync(path.join(lockPath, "owner.json"), `${JSON.stringify({ pid: ownerPid, token, createdAt: Date.now() })}\n`, { mode: 0o600 });

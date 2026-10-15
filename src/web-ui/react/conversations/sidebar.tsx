@@ -33,7 +33,7 @@ import { SidebarProjectionSwap } from "../workspaces/sidebar-projection-swap";
 import { conversationActivitySessions, isConversationActive } from "./activity-filter";
 import { indexPersonSessions, filterPersonSessions, personSessionSearchValues, type PersonSessionEntry } from "./sidebar-sessions";
 
-export type ConversationNavigationPage = "chats" | "tasks" | "board" | "teams" | "contacts" | "schedules";
+export type ConversationNavigationPage = "chats" | "tasks" | "board" | "teams" | "contacts" | "schedules" | "calendar";
 
 /** Global destinations stay in the left rail, independent of the current list. */
 export function ConversationNavigation({ activePage, teamAttention, onNavigate }: {
@@ -47,6 +47,7 @@ export function ConversationNavigation({ activePage, teamAttention, onNavigate }
     { value: "board", label: "任务看板", icon: "board", id: "task-board-button" },
     { value: "teams", label: "团队", icon: "users", id: "ai-teams-button" },
     { value: "schedules", label: "定时任务", icon: "history", id: "scheduled-tasks-button" },
+    { value: "calendar", label: "全局日历", icon: "calendar", id: "global-calendar-button" },
   ] as const;
   return <Flex component="nav" vertical gap={4} className="conversation-navigation" aria-label="功能导航">
     {entries.map(entry => <WandIconButton key={entry.value} id={"id" in entry ? entry.id : undefined}
@@ -55,7 +56,7 @@ export function ConversationNavigation({ activePage, teamAttention, onNavigate }
       aria-pressed={activePage === entry.value} onClick={() => onNavigate(entry.value)}>
       <span className="sidebar-nav-icon" aria-hidden="true">{entry.value === "teams" ? <Badge count={teamAttention} size="small"><WandIcon name={entry.icon} size={18}/></Badge>
         : <WandIcon name={entry.icon} size={18}/>}</span>
-      <span className="sidebar-nav-label" aria-hidden="true">{entry.value === "board" ? "任务" : entry.value === "schedules" ? "定时" : entry.label}</span>
+      <span className="sidebar-nav-label" aria-hidden="true">{entry.value === "board" ? "任务" : entry.value === "schedules" ? "定时" : entry.value === "calendar" ? "日历" : entry.label}</span>
     </WandIconButton>)}
   </Flex>;
 }

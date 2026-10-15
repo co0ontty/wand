@@ -166,3 +166,28 @@ test("employee HTTP endpoint validates IDs and owner, returns safe same-session 
   assert.equal((await request(original.id, "employee-test")).status, 400);
   assert.equal(manager.get(original.id)?.employeeId, employee().id);
 });
+
+
+test("new work manual tool/model/thinking apply together without overwriting employee defaults", async t => {
+  const { root, storage, config, manager } = harness(t);
+  const definition = employee(); storage.saveSiliconEmployee(definition);
+  const saved = storage.getSiliconEmployee(definition.id)!;
+  const app = express(); app.use(express.json());
+  const processes = new ProcessManager(config, storage, root);
+  registerSessionRoutes(app, { processes, structured: manager, storage, defaultMode: config.defaultMode, config,
+    sessions: new SessionRegistry(processes, manager, storage) });
+  const server = createServer(app); await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
+  const base = "http://127.0.0.1:" + (server.address() as { port: number }).port;
+  const response = await fetch(base + "/api/structured-sessions", { method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ employeeId: saved.id, overrideCli: true, cwd: root, provider: "pi", engine: "cli",
+      model: "page-model", thinkingEffort: "pi:high", mode: "default" }) });
+  assert.equal(response.status, 201); const created = await response.json();
+  const snapshot = manager.get(created.id)!;
+  assert.equal(snapshot.selectedModel, "page-model"); assert.equal(snapshot.thinkingEffort, "pi:high");
+  assert.equal(snapshot.structuredState?.engine, "cli");
+  assert.equal(snapshot.employeeCandidates?.length, 1);
+  assert.equal(snapshot.employeeCandidates?.[0]?.model, "page-model");
+  assert.equal(snapshot.systemPrompt, saved.prompt);
+  assert.deepEqual(storage.getSiliconEmployee(saved.id), saved);
+});

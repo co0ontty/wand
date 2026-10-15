@@ -73,7 +73,10 @@ and `beta`, including a stable release that supersedes its prerelease. Installin
 keeps the Beta subscription enabled. Updates pin the checked version, wait for Core turns,
 and restart only the Web service. If an old updater cannot run, rerun `install.sh` for a
 staged recovery that preserves the previous installation and service scope. Node.js must
-meet the new package's requirement. See [Web update and recovery](docs/web-updates.md).
+meet the new package's requirement. The runtime minimum is **Node.js 22.19.0**;
+maintained even-numbered LTS releases are recommended (22.x / 24.x, with 26.x
+also checked for compatibility). `.nvmrc` pins reproducible builds, not the
+installation minimum. See [Web update and recovery](docs/web-updates.md).
 
 ### Configuration
 

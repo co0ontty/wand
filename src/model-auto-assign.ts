@@ -170,7 +170,7 @@ async function decideWithAi(
   const text = call
     ? await call({ system, prompt: message }, ai)
     : await callConfiguredAiText({ system, prompt: message }, request.cwd ?? process.cwd(), request.language ?? "",
-      { ...ai, budgetMs: AUTO_ASSIGN_AI_BUDGET_MS }, (raw) => String(raw).trim());
+      { ...ai, purpose: "model-auto-assign", budgetMs: AUTO_ASSIGN_AI_BUDGET_MS }, (raw) => String(raw).trim());
   const flat = collapseWhitespace(text);
   if (!flat || flat === "-" || flat === "无") return { group: null, calls: 1 };
   return { group: parseGroupChoice(flat, candidates, names), calls: 1 };

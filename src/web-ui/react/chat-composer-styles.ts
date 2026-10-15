@@ -154,6 +154,11 @@ export function installChatComposerStyles(): void {
 .conversation-runtime-summary > .ant-typography { min-width:0; }
 .conversation-runtime-summary > .ant-typography:first-child { flex:1; }
 .conversation-runtime-summary > .conversation-thinking-summary { flex:none; }
+.conversation-runtime-summary .conversation-runtime-select { height:24px; min-height:24px; padding:0 3px; min-width:0; max-width:100%; font-size:inherit; color:inherit; }
+.conversation-runtime-summary .conversation-tool-select { flex:0 1 124px; }
+.conversation-runtime-summary .conversation-model-select { flex:1 1 140px; }
+.conversation-runtime-summary .conversation-thinking-select { flex:0 1 150px; }
+.conversation-runtime-summary .wand-ui-select-value { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 @media (pointer:coarse) { .conversation-composer > .conversation-input-hint { display:none; } }
 @media (pointer:coarse) { .conversation-root .conversation-input-wrap[data-composer-expanded] .composer-expand-editor.ant-btn { min-height:44px; } }
 @media (max-width:640px) {

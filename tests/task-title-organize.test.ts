@@ -34,12 +34,18 @@ function session(patch: Partial<OrganizeSession> & Pick<OrganizeSession, "id" | 
   };
 }
 
-test("title identity ignores case and punctuation but not different work", () => {
+test("title identity ignores presentation differences but preserves meaningful punctuation", () => {
   assert.equal(titleIdentity("修复 Web 批量删除目录"), titleIdentity("修复 web 批量删除目录"));
   assert.equal(titleIdentity("macOS 优化"), titleIdentity("macos优化"));
   assert.notEqual(titleIdentity("修复 Web 批量删除目录"), titleIdentity("修复 Web 批量删除目录功能"));
+  assert.equal(titleIdentity("修复登录。"), titleIdentity("修复登录"));
+  assert.notEqual(titleIdentity("实现 C++ 接口"), titleIdentity("实现 C# 接口"));
+  assert.notEqual(titleIdentity("升级版本 1.0"), titleIdentity("升级版本 10"));
   assert.equal(isClassifiableTitle("未命名任务"), false);
   assert.equal(isClassifiableTitle("Claude 1"), false);
+  assert.equal(isClassifiableTitle("Claude #1"), false);
+  assert.equal(isClassifiableTitle("Pi-1"), false);
+  assert.equal(isClassifiableTitle("💻✨"), false);
   assert.equal(isClassifiableTitle("修复登录"), true);
 });
 
@@ -77,6 +83,15 @@ test("keyword overlap does not assign a session to the only selected task", asyn
   assert.deepEqual(plan.sessionMoves, [{ sessionId: "actions", taskId: "macos" }]);
   assert.deepEqual(refused.sessionMoves, []);
   assert.equal(refused.refused.length, 0);
+});
+
+test("meaningful language and version punctuation is not an exact same-work match", async () => {
+  const plan = await planTitleOrganization([
+    task({ id: "cpp", titles: ["实现 C++ 接口"] }),
+    task({ id: "csharp", titles: ["实现 C# 接口"] }),
+  ], [session({ id: "cpp-session", title: "实现 C++ 接口", workspaceTaskId: "cpp" })], async () => ({ sessions: [], tasks: [] }));
+  assert.deepEqual(plan.taskParents, []);
+  assert.deepEqual(plan.sessionMoves, []);
 });
 
 test("cross-directory title equality does not move a session", async () => {
@@ -156,6 +171,27 @@ test("judge cannot invent a parent or cross a workspace boundary", async () => {
   assert.match(split.refused[0]?.reason ?? "", /不在同一项目/);
 });
 
+test("global tasks never acquire a parent from another directory, even when the judge claims a match", async () => {
+  const left = task({ id: "left", titles: ["修复客户端"], workspaceId: null, directoryKey: "/left" });
+  const child = task({ id: "child", titles: ["修复登录弹窗"], workspaceId: null, directoryKey: "/left" });
+  const right = task({ id: "right", titles: ["改进客户端交互"], workspaceId: null, directoryKey: "/right" });
+  const plan = await planTitleOrganization([left, child, right], [], async () => ({
+    sessions: [], tasks: [{ id: "child", parentId: "right" }],
+  }));
+  assert.deepEqual(plan.taskParents, []);
+  assert.ok(plan.refused.some(item => item.id === "child" && item.reason === "不能归入该任务"));
+});
+
+test("separate global directories are not peer candidates for task parent judgment", async () => {
+  let judged = false;
+  const plan = await planTitleOrganization([
+    task({ id: "left", titles: ["修复客户端"], workspaceId: null, directoryKey: "/left" }),
+    task({ id: "right", titles: ["修复登录弹窗"], workspaceId: null, directoryKey: "/right" }),
+  ], [], async () => { judged = true; return { sessions: [], tasks: [] }; });
+  assert.equal(judged, false, "不同目录不能仅因workspaceId同为null就发起父子关系比较");
+  assert.deepEqual(plan.taskParents, []);
+});
+
 test("parseTitleJudgment accepts a fenced object and rejects prose", () => {
   assert.deepEqual(parseTitleJudgment('```json\n{"sessions":[{"id":"s","taskId":null}],"tasks":[]}\n```'), {
     sessions: [{ id: "s", taskId: null }],
@@ -170,5 +206,11 @@ test("outcome copy stays on the action and surfaces a refusal", () => {
     categorizedTasks: [{}],
     refused: [{ reason: "不在同一项目目录，未改归属" }],
   }), { label: "已归类 1 个任务、归属 1 个会话", reason: "另有 1 项未处理：不在同一项目目录，未改归属" });
-  assert.equal(describeOrganizeOutcome({ movedSessions: [], categorizedTasks: [], refused: [] }).label, "所选标题已归类");
+  assert.equal(describeOrganizeOutcome({ movedSessions: [], categorizedTasks: [], refused: [] }).label, "未发现可安全归类的项");
+  assert.deepEqual(describeOrganizeOutcome({ movedSessions: [], categorizedTasks: [], refused: [], eligibleTasks: 3, skippedTasks: 2 }), {
+    label: "未发现可安全归类的项", reason: "已检查 3 个任务；已跳过 2 个用户自定标题的任务",
+  });
+  assert.deepEqual(describeOrganizeOutcome({ movedSessions: [], categorizedTasks: [], refused: [{ reason: "自动判断不可用" }], eligibleTasks: 3 }), {
+    label: "未调整任何任务或会话", reason: "已检查 3 个任务；自动判断不可用",
+  });
 });

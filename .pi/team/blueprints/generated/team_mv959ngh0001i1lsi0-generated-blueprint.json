@@ -1,0 +1,75 @@
+{
+  "blueprintId": "team_mv959ngh0001i1lsi0-generated-blueprint",
+  "runId": "team_mv959ngh0001i1lsi0",
+  "task": "实现每员工 Telegram/钉钉 IM 通知配置及自动关键节点通知。根目录 /Users/co0ontty/Self/vibe_coding/wand。先读根 AGENTS，检查 git 基线，不覆盖已有工作，不提交/push/restart。共享契约已由 captain 写 src/employee-im-types.ts，所有角色先读取它，严格用此形状；需要调整先 RADIO 协调。API 约定：GET/PUT /api/silicon-employees/:id/im 返回 EmployeeImConfig（直接对象）；POST /api/silicon-employees/:id/im/test body {provider:'telegram'|'dingtalk'} 使用已保存配置发测试消息，返回 {ok:true}；测试发送不受 enabled/events 约束但凭据须齐全。凭据写入字段 botToken/webhook/secret 空或省略保留，null清除；GET仅configured布尔不回秘密。独立配置保存，不把秘密放 SiliconEmployee/模型prompt/日志。内置员工也可配置。你们使用 bash/read/write/edit，thinking high。不要动 captain 将负责的 Web UI。发现问题当场修或写交付说明含证据影响与复现。每角色报告修改、验证、剩余。协同角色如下。",
+  "playbookId": "generated-blueprint",
+  "playbookTitle": "Dynamic team blueprint",
+  "source": "generated",
+  "status": "draft",
+  "createdAt": 1792044910123,
+  "roles": [
+    {
+      "roleId": "im-backend",
+      "title": "IM配置与发送后端",
+      "description": "独占新src/employee-im.ts(建议提供 EmployeeImService 类)、src/server-employee-im-routes.ts、src/storage/secrets-repository.ts、src/storage-schema.ts及相关新tests/employee-im.test.ts。读取src/employee-im-types.ts。实现加密持久化（复用vault key加密能力，考虑丢失key不可生成新key）、独立表FK cascade，API路由函数registerEmployeeImRoutes(app,{storage,im,requireAdmin})，不改server.ts（生命周期角色集成）。Service约定 new EmployeeImService(storage, 可选测试依赖)，notify(employeeId,event:EmployeeImEvent, context:{sessionId?:string;title?:string}):void 非阻塞失败隔离且有界并发队列；test(employeeId,provider):Promise<void>；dispose():void；配置storage建议 getEmployeeImConfig(id), saveEmployeeImConfig(id,input)，Service可自行读取内部解密配置。与生命周期角色RADIO确认接口。严格官方域名telegram api和oapi.dingtalk.com/robot/send避免SSRF/redirect，钉钉HMAC签名，超时/响应限制，不打印远端响应或泄露秘密，失败只泛化描述。路由需admin、no-store、存在性校验；复用现有auth/helpers。写全面mock单测含凭据保留清除、validation、加密missing key、off/unselected、cross employee、provider/signature、失败超时、不跟随跳转、路由权限。如需事件列表变化协调。",
+      "capabilityNeeds": [],
+      "tools": [
+        "bash",
+        "read",
+        "write",
+        "edit"
+      ],
+      "modelPreferences": []
+    },
+    {
+      "roleId": "im-lifecycle",
+      "title": "通知节点集成",
+      "description": "独占新src/employee-im-lifecycle.ts与tests/employee-im-lifecycle.test.ts及src/server.ts。读取共享src/employee-im-types.ts事件列表，检查SessionCompletionTracker等真实状态入口，使用统一生命周期投影将employee绑定会话各种重要事件通知，调用im.notify(employeeId,event,{sessionId,title})，不含原始prompt、路径/工具参数/错误正文。Service由后端角色实现new EmployeeImService(storage); registerEmployeeImRoutes(app,{storage,im,requireAdmin}); im.dispose()。server.ts负责import/实例化/路由/事件接线及关闭清理，避免读未初始化的sessionRegistry。真实开始而非仅started(session)；完成按权威completionRevision，失败与停止不冒充完成；重复输出不重复提醒，重启/recovery不补历史；后续新轮照常；任务/私聊/团队员工执行覆盖，同工具fallback保持清晰；等待审批/输入、队列入队、语义计划步骤完成、候选切换逐项支持。如果发现事件实际无法权威判断，先与captain RADIO沟通，不猜测文本关键词。写状态流、dedupe、isolation、startup/recovery tests，并说明每事件真实来源。不要改后端拥有文件。",
+      "capabilityNeeds": [],
+      "tools": [
+        "bash",
+        "read",
+        "write",
+        "edit"
+      ],
+      "modelPreferences": []
+    },
+    {
+      "roleId": "im-macos",
+      "title": "Mac员工IM配置",
+      "description": "仅修改macos子仓新增EmployeeIm相关Swift/测试、必要时最小增量macos/Wand/SettingsView.swift、CommunicationsRepository.swift，保留macos现有TaskBoard/WandAPI等工作，不覆盖。先读macos README/build约定，员工设置入口现位SettingsView.swift Employee identities。按共享src/employee-im-types.ts和API约定实现与Web同语义的每员工Telegram/钉钉启用/凭据/chatID/事件多选配置、独立保存和测试发送、凭据write-only/已配置占位、明确清除选项、异步身份隔离、失败保留输入、原位按钮反馈与reduced-motion用现有token，admin不足复用原生管理员登录路径。不需要实现员工其他CRUD。GET/PUT直接EmployeeImConfig；test已保存配置，不隐式发送。补Swift测试并运行相关验证；构建Beta并部署~/.wand/macos/（保留签名，版本取最高tag之后按脚本约定，不安装启动客户端，不push/tag），版本/产物/sha向captain报告。如构建成本太大先完成代码和测试并报告如何执行。不要修改Web或server。",
+      "capabilityNeeds": [],
+      "tools": [
+        "bash",
+        "read",
+        "write",
+        "edit"
+      ],
+      "modelPreferences": []
+    }
+  ],
+  "rounds": [
+    {
+      "id": "collect",
+      "type": "parallel",
+      "roles": [
+        "im-backend",
+        "im-lifecycle",
+        "im-macos"
+      ]
+    }
+  ],
+  "policy": {
+    "rationale": "A task-specific collaboration blueprint generated for the lead captain",
+    "strategy": "The lead captain generated this collaboration plan; the extension handles dispatch, communication, observation, and recording.",
+    "evidencePolicy": "Workers should separate cited evidence, inference, confidence, and missing information.",
+    "modelPolicy": "Use configured models that are objectively available; keep soft health observations visible.",
+    "synthesisPolicy": "The lead uses worker outputs as inputs and keeps final judgment outside the extension.",
+    "progressMilestones": [
+      "collect: parallel"
+    ],
+    "stopCriteria": "All planned rounds have returned a status and the run log is persisted."
+  },
+  "outputContract": "每角色交付精简证据：文件列表、实现行为、实际命令结果、限制/剩余问题。不要宣称未做验证通过；不能带任何凭据。",
+  "captainRationale": "A task-specific collaboration blueprint generated for the lead captain"
+}

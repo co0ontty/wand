@@ -396,8 +396,8 @@ test("task session rows and work-window tabs render each CLI logo", () => {
 test("new task dialog delegates project suggestions and controls to the library", () => {
   const newSessionHost = readFileSync(new URL("../src/web-ui/react/new-session/host.tsx", import.meta.url), "utf8");
   assert.match(newSessionHost, /<AutoComplete/);
-  assert.match(newSessionHost, /<Collapse/);
-  assert.match(newSessionHost, /<TaskForm/);
+  assert.match(newSessionHost, /<Sender/);
+  assert.match(newSessionHost, /<NewSessionTaskField/);
   assert.doesNotMatch(sessionPickerAndWorktreeStyles, /wand-new-project-providers/);
 });
 
@@ -1077,7 +1077,11 @@ test("工作区与最近会话互斥展示，不重复堆叠同一批会话", ()
   assert.match(panel, /ariaLabel="会话组织方式"/);
   assert.match(panel, /hidden=\{manageMode \|\| view !== "recent"\}/);
   assert.match(panel, /hidden=\{directoryId === undefined && !manageMode && view !== "directory"\}/);
-  assert.match(panel, /aria-label="只看活动会话"/);
+  assert.match(panel, /<SidebarActivityFilter\s+active=\{displayMode === "active"\}/);
+  const activityFilter = readFileSync(new URL("../src/web-ui/react/workspaces/sidebar-activity-filter.tsx", import.meta.url), "utf8");
+  assert.match(activityFilter, /label = "只看活动会话"/);
+  assert.match(activityFilter, /aria-label=\{label\} aria-pressed=\{active\}/);
+  assert.match(activityFilter, /onChange\(!active\)/);
   // 重复的入口不再各自渲染一份。
   assert.doesNotMatch(panel, /sidebar-activity-rail/);
   assert.doesNotMatch(panel, /label="硅基员工"/);
@@ -1100,7 +1104,8 @@ test("最近对话：头像与「+」都在一级行，二级行只说工具", (
   assert.match(section, /newSessionController\.open\(\{ initialKind: "shell" \}\)/);
   assert.match(section, /newSessionController\.open\(employeeId \? \{ initialEmployeeId: employeeId \} : \{\}\)/);
   assert.match(section, /onClick=\{\(\) => onStartConversation\(group\.employeeId \?\? undefined\)\}/);
-  // 侧栏一键新建员工对话：段头「+」原位展开联系人列表。
-  assert.match(section, /className=\{classNames\("sidebar-section-add"/);
-  assert.match(section, /<SidebarDisclosure id=\{pickerId\} open=\{pickerOpen\}>/);
+  // The section Add opens the same page; employee Add supplies only its preselection.
+  assert.match(section, /className="sidebar-section-add"/);
+  assert.match(section, /aria-label="新建工作"/);
+  assert.doesNotMatch(section, /sidebar-contact-picker/);
 });

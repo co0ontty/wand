@@ -1,0 +1,84 @@
+import assert from "node:assert/strict";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { writeFileSync } from "node:fs";
+import { startStudy, output } from "./serve-overlap.mjs";
+import { openPlushBrowser } from "../../../tests/helpers/run-plush-avatar-browser-harness.mjs";
+const study = await startStudy(0), browser = await openPlushBrowser(1440, 1100, true, "no-preference");
+const cases = [], e = browser.evaluate;
+const finishPopupMotion = () => e("Promise.allSettled([...document.querySelectorAll('.overlap-more-popover')].flatMap(node=>node.getAnimations({subtree:true})).filter(animation=>animation.effect.getComputedTiming().iterations!==Infinity).map(animation=>animation.finished))");
+try {
+  await browser.send("Page.navigate", { url: study.origin });
+  await browser.wait("document.querySelectorAll('[data-study-day]').length===7 && document.querySelectorAll('[data-study-item]').length>0");
+  const boxes = await e("[...document.querySelectorAll('.overlap-day-hours .overlap-event,.overlap-day-hours .overlap-more')].map(n=>{const r=n.getBoundingClientRect();return{key:n.dataset.studyItem??n.dataset.studyOverflow,day:n.closest('[data-study-day]').dataset.studyDay,x:r.x,y:r.y,w:r.width,h:r.height}})");
+  writeFileSync(join(output, "geometry.json"), JSON.stringify(boxes, null, 2));
+  for (const a of boxes) { assert.ok(a.w >= 84, `${a.key}: readable width`); assert.ok(a.h >= 44, `${a.key}: usable height`); for (const b of boxes) if (a.key !== b.key && a.day === b.day) assert.ok(a.x+a.w<=b.x+0.5 || b.x+b.w<=a.x+0.5 || a.y+a.h<=b.y+0.5 || b.y+b.h<=a.y+0.5, `${a.key}/${b.key}: no occlusion`); }
+  const a = boxes.find(n => n.key === "same-a"), b = boxes.find(n => n.key === "same-b");
+  assert.equal(a.y, b.y); assert.ok(a.x !== b.x);
+  const first = boxes.find(n => n.key === "span-a"), partial = boxes.find(n => n.key === "span-b"), reused = boxes.find(n => n.key === "span-c"), solo = boxes.find(n => n.key === "span-d");
+  assert.equal(partial.y-first.y, 32); assert.equal(first.x, reused.x); assert.equal(first.y+first.h, reused.y);
+  assert.ok(solo.w > first.w * 1.8);
+  cases.push("same-time side-by-side", "half-open intervals reuse lanes", "partial overlap is exact", "later independent events regain full width", "all hitboxes readable and unobscured");
+  await browser.screenshot(join(output, "overlap-week-and-month.png"));
+  await browser.click('[data-study-overflow="day-4"]');
+  await browser.wait("document.querySelectorAll('.overlap-more-popover .overlap-expanded-item').length===8");
+  await browser.screenshot(join(output, "overlap-more-open.png"));
+  await browser.click(".overlap-more-popover .overlap-expanded-item");
+  await browser.wait("!!document.querySelector('.overlap-more-popover .overlap-item-expansion[data-open=true]')");
+  await browser.key("Escape");
+  assert.equal(await e("document.querySelectorAll('.overlap-more-popover .overlap-item-expansion[data-open=true]').length"), 0);
+  assert.equal(await e("document.querySelector('[data-study-overflow=day-4]').getAttribute('aria-expanded')"), "true");
+  await browser.key("Escape");
+  await browser.wait("document.querySelector('[data-study-overflow=day-4]').getAttribute('aria-expanded')==='false'");
+  cases.push("8 dense events are all accessible", "detail expands in place", "layered Escape and anchored popup");
+  await browser.click('[data-study-overflow="month"]');
+  await browser.wait("[...document.querySelectorAll('.overlap-more-popover')].some(n=>getComputedStyle(n).visibility==='visible'&&n.querySelectorAll('.overlap-expanded-item').length===9)");
+  await browser.screenshot(join(output, "overlap-month-more.png"));
+  await browser.click(".overlap-page-header h1");
+  await browser.wait("![...document.querySelectorAll('.overlap-more-popover')].some(n=>getComputedStyle(n).visibility==='visible')");
+  cases.push("month overflow uses the same in-place disclosure", "real outside click dismisses");
+  for (const width of [390, 320]) {
+    await browser.send("Emulation.setDeviceMetricsOverride", { width, height: 960, deviceScaleFactor: 1, mobile: false });
+    await browser.send("Emulation.setTouchEmulationEnabled", { enabled: true });
+    await browser.settle();
+    assert.equal(await e("document.documentElement.scrollWidth<=innerWidth+1"), true);
+    assert.ok(await e("document.querySelector('.overlap-scroll').scrollWidth>document.querySelector('.overlap-scroll').clientWidth"));
+    await e(`document.querySelector('.overlap-scroll').scrollLeft=document.querySelector('[data-study-day="4"]').offsetLeft-56`);
+    await browser.screenshot(join(output, `overlap-${width}.png`));
+    await browser.click('[data-study-overflow="day-4"]');
+    await browser.wait("document.querySelectorAll('.overlap-more-popover .overlap-expanded-item').length===8");
+    await finishPopupMotion();
+    const popupBounds = await e("(()=>{const n=document.querySelector('.overlap-more-popover'),r=n.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,height:r.height,width:innerWidth,heightLimit:innerHeight,content:getComputedStyle(n.querySelector('.overlap-more-content')).maxHeight}})()");
+    writeFileSync(join(output, `popup-geometry-${width}.json`), JSON.stringify(popupBounds, null, 2));
+    assert.ok(popupBounds.left>=0&&popupBounds.right<=popupBounds.width+1&&popupBounds.top>=0&&popupBounds.bottom<=popupBounds.heightLimit+1, `mobile ${width}: anchored popup fits`);
+    const backgroundY = await e("scrollY");
+    await e("(()=>{const pane=document.querySelector('.overlap-more-content');pane.scrollTop=pane.scrollHeight})()");
+    await browser.settle();
+    const point = await e("(()=>{const button=document.querySelector('.overlap-more-popover li:last-child .overlap-expanded-item'),r=button.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;if(!button.contains(document.elementFromPoint(x,y)))throw Error('Last event is occluded');return{x,y}})()");
+    for (const type of ["mousePressed", "mouseReleased"]) await browser.send("Input.dispatchMouseEvent", { type, ...point, button: "left", clickCount: 1 });
+    await browser.wait("!!document.querySelector('.overlap-more-popover li:last-child .overlap-item-expansion[data-open=true]')");
+    await browser.settle();
+    await finishPopupMotion();
+    assert.equal(await e("scrollY"), backgroundY, "in-place expansion does not scroll the background");
+    assert.ok(await e("(()=>{const r=document.querySelector('.overlap-more-popover').getBoundingClientRect();return r.left>=0&&r.right<=innerWidth+1&&r.top>=0&&r.bottom<=innerHeight+1})()"), "expanded popup still fits");
+    await e("(()=>{const pane=document.querySelector('.overlap-more-content');pane.scrollTop=pane.scrollHeight})()");
+    await browser.screenshot(join(output, `overlap-more-${width}.png`));
+    await browser.key("Escape"); await browser.key("Escape");
+    await browser.wait("document.querySelector('[data-study-overflow=day-4]').getAttribute('aria-expanded')==='false'");
+  }
+  cases.push("320/390 keep day width and scroll only the calendar", "mobile overflow exposes all eight and the last item expands within the viewport");
+  await browser.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+  await browser.click('[data-study-overflow="day-4"]');
+  await browser.wait("!!document.querySelector('.overlap-more-popover .overlap-item-expansion')");
+  // Wand keeps a 0.01ms native lifecycle so popup alignment callbacks complete.
+  assert.ok(await e("Math.max(...getComputedStyle(document.querySelector('.overlap-item-expansion')).transitionDuration.split(',').map(parseFloat))<=0.00001"), "reduced-motion is instantaneous under the shared native token");
+  assert.deepEqual(browser.errors, []); assert.ok(study.requests.every(request => request.method === "GET" && !request.path.startsWith("/api/")));
+  cases.push("reduced motion", "no API/model/mutation access");
+  await browser.send("Page.navigate", { url: pathToFileURL(join(output, "Wand-calendar-overlap.html")).href });
+  await browser.wait("location.protocol==='file:'&&document.querySelectorAll('[data-study-day]').length===7");
+  assert.ok(await e("document.querySelector('meta[http-equiv=Content-Security-Policy]').content.includes(\"connect-src 'none'\")"));
+  assert.deepEqual(browser.errors, []); cases.push("standalone offline document without network APIs");
+  writeFileSync(join(output, "verification.json"), JSON.stringify({ cases, boxes, errors: browser.errors, renderer: "supported SVG fallback, not GPU performance certification", requests: study.requests }, null, 2));
+  console.log(`${cases.length} overlap scenarios passed; ${output}`);
+} catch (error) { await browser.screenshot(join(output, "failure.png")); writeFileSync(join(output, "failure.json"), JSON.stringify({ error: String(error), errors: browser.errors }, null, 2)); throw error; }
+finally { await browser.close(); study.server.closeAllConnections(); await new Promise(resolve => study.server.close(resolve)); }

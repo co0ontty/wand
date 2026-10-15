@@ -1,0 +1,6 @@
+Lane mailbox for 完成原生过程与状态呈现 (role macos-presentation-finish)
+Run: team_mv9d9dex0003uqhj0z
+Lane: macos-presentation-finish-1792058334794
+Token: f261e24a-a1c2-42c6-a8a3-5c388297fad1
+
+Captain messages appear below, newest last.

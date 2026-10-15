@@ -17,8 +17,11 @@ export const workspaces = [
 
 function run(taskId: string, at: string, executionStatus: ScheduledTaskRunView["executionStatus"], error: string | null = null): ScheduledTaskRunView {
   const noSession = executionStatus === "skipped";
+  const employeeId = taskId === "review" ? "preview-reviewer" : taskId === "digest" ? "preview-partner" : "preview-ops";
+  const workspaceId = taskId === "review" ? "preview-diplay" : taskId === "digest" ? "preview-notes" : "preview-wand";
+  const cwd = taskId === "review" ? "/projects/diplay" : taskId === "digest" ? "/projects/notes" : "/projects/wand";
   return { id: `${taskId}-${at}`, taskId, requestId: `preview-${taskId}-${at}`, scheduledAt: at, claimedAt: at,
-    executionFinishedAt: executionStatus === "running" ? null : at, employeeId: "preview-ops", workspaceId: "preview-wand", cwd: "/projects/wand",
+    executionFinishedAt: executionStatus === "running" ? null : at, employeeId, workspaceId, cwd,
     prompt: "设计预览中的示例执行，未触发真实会话。", state: noSession ? "skipped" : "accepted", receipt: null,
     executionStatus, sessionId: noSession ? null : `preview-session-${taskId}-${Date.parse(at)}`, error };
 }

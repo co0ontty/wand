@@ -125,6 +125,7 @@ export function buildCreateRequest(
       kind: "pty",
       command: providerCliCommand(form.provider),
       model: model || undefined,
+      ...(context.thinkingEffort?.trim() ? { thinkingEffort: context.thinkingEffort.trim() } : {}),
     };
   }
 
@@ -214,6 +215,7 @@ export class HttpNewSessionRepository implements NewSessionRepository {
           mode: request.mode,
           provider: request.provider,
           runner: request.runner,
+          engine: request.engine,
           worktreeEnabled: request.worktreeEnabled,
           model: request.model,
           thinkingEffort: request.thinkingEffort,
@@ -232,6 +234,7 @@ export class HttpNewSessionRepository implements NewSessionRepository {
           worktreeEnabled: request.worktreeEnabled,
           // PTY 也按模型启动 CLI（服务端 processCommandForMode 注入 --model）。
           model: request.kind === "pty" ? request.model : undefined,
+          thinkingEffort: request.kind === "pty" ? request.thinkingEffort : undefined,
           cols: request.cols,
           rows: request.rows,
           ...(request.workspaceId ? { workspaceId: request.workspaceId } : {}),

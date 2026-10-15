@@ -15,7 +15,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import * as React from "react";
-import { Card, Collapse, Empty, Flex, Form, Slider, Table, Tag, Upload } from "antd";
+import { Card, Collapse, Descriptions, Empty, Flex, Form, Slider, Spin, Tag, Upload } from "antd";
 import { WandBadge, WandButton, WandDialogSurface, WandIcon, WandSearchField } from "../ui";
 import { MOTION_DWELL_RESULT_SENTENCE_MS } from "../ui/motion-tokens";
 import { settingsStore } from "./controller";
@@ -276,14 +276,13 @@ export function AboutSettingsTab({ snapshot, repository, refresh, toast, showRes
       <DaemonUpdateNotice />
       <Flex className="wand-settings-library-about-overview" wrap gap="large" align="stretch">
         <SettingsSection title="版本信息">
-          <Table className="wand-settings-library-version-table" size="small" tableLayout="fixed" showHeader={false} pagination={false} rowKey="label"
-            columns={[{ dataIndex: "label", width: 120 }, { dataIndex: "value" }]}
-            dataSource={[
-              { label: "包名", value: about.packageName },
-              { label: "当前版本", value: about.version },
-              { label: "Node.js 要求", value: about.nodeVersion },
-              ...(about.build.shortCommit ? [{ label: "构建", value: `${about.build.shortCommit}${about.build.channel ? ` · ${about.build.channel}` : ""}` }] : []),
-              ...(about.repoUrl ? [{ label: "仓库地址", value: <a href={about.repoUrl} target="_blank" rel="noopener noreferrer">{about.repoUrl}</a> }] : []),
+          <Descriptions className="wand-settings-library-version-table" size="small" column={1}
+            items={[
+              { key: "package", label: "包名", children: about.packageName },
+              { key: "version", label: "当前版本", children: about.version },
+              { key: "node", label: "Node.js 要求", children: about.nodeVersion },
+              ...(about.build.shortCommit ? [{ key: "build", label: "构建", children: `${about.build.shortCommit}${about.build.channel ? ` · ${about.build.channel}` : ""}` }] : []),
+              ...(about.repoUrl ? [{ key: "repository", label: "仓库地址", children: <a href={about.repoUrl} target="_blank" rel="noopener noreferrer">{about.repoUrl}</a> }] : []),
             ]} />
         </SettingsSection>
 
@@ -607,13 +606,15 @@ function EnvironmentDialog({ repository }: { repository: SettingsRepository }) {
       {error ? <SettingsStatus tone="error">
         {error}<WandButton size="small" disabled={loading} onClick={() => void load(requestedReveal.current)}>重新加载</WandButton>
       </SettingsStatus> : null}
-      <Table size="small" pagination={false} loading={loading} rowKey="name"
-        aria-label="子进程环境变量" dataSource={entries}
-        locale={{ emptyText: search.trim() ? "没有匹配的变量" : "暂无环境变量" }}
-        columns={[
-          { title: "变量名", dataIndex: "name", render: (name: string) => <code>{name}</code> },
-          { title: "值", dataIndex: "value", render: (value: string) => <span className="wand-settings-library-env-value">{value}</span> },
-        ]} />
+      <div role="region" aria-label="子进程环境变量" aria-busy={loading}>
+        <Spin spinning={loading}>
+          {entries.length ? <Descriptions size="small" column={1} items={entries.map(entry => ({
+            key: entry.name,
+            label: <code>{entry.name}</code>,
+            children: <span className="wand-settings-library-env-value">{entry.value}</span>,
+          }))}/> : <Empty description={search.trim() ? "没有匹配的变量" : "暂无环境变量"}/>}
+        </Spin>
+      </div>
     </WandDialogSurface>
   );
 }

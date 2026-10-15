@@ -1,5 +1,6 @@
 import { callConfiguredAiText, type QuickCommitAiOptions } from "./ai-text-runner.js";
 import { getErrorMessage } from "./error-utils.js";
+import { isSystemAiCall } from "./system-ai-call.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
 import { parentTaskIdFrom } from "./task-agent-parsing.js";
 import type { AutoTaskTitleOptions } from "./task-title-service.js";
@@ -19,7 +20,7 @@ import { isGlobalWorkspace, normalizeProjectCwd, projectCwdForSession } from "./
 import type { OrganizeByTitleResult } from "./task-organize-contract.js";
 export type { OrganizeByTitleResult } from "./task-organize-contract.js";
 
-export function titleJudgeForStorage(storage: WandStorage, options: AutoTaskTitleOptions): TitleJudge | undefined {
+export function titleJudgeForStorage(storage: WandStorage, options: AutoTaskTitleOptions, onCallSessionCreated?: (id: string) => void): TitleJudge | undefined {
   const config = options.config;
   if (!config) return undefined;
   const provider = config.defaultProvider;
@@ -30,9 +31,8 @@ export function titleJudgeForStorage(storage: WandStorage, options: AutoTaskTitl
     command: provider === "qoder" ? "qodercli" : (provider || "pi"),
     selectedModel: null,
     thinkingEffort: "off",
-  }, config, storage.getSystemSiliconEmployee(), options.free);
-  if (ai.employeeChannelOnly && !ai.cliCandidates?.length) return undefined;
-  return systemTitleJudge(ai, options.cwd || config.defaultCwd || process.cwd());
+  }, config, storage.getSystemSiliconEmployee(), options.free, { storage });
+  return systemTitleJudge({ ...ai, onCallSessionCreated }, options.cwd || config.defaultCwd || process.cwd());
 }
 
 export function systemTitleJudge(ai: QuickCommitAiOptions, cwd: string): TitleJudge {
@@ -40,6 +40,7 @@ export function systemTitleJudge(ai: QuickCommitAiOptions, cwd: string): TitleJu
     const request = titleJudgmentPrompt(input);
     return callConfiguredAiText(request, cwd || process.cwd(), "", {
       ...ai,
+      purpose: "task-organize",
       thinkingEffort: "off",
     }, parseTitleJudgment);
   };
@@ -114,6 +115,7 @@ export async function organizeSelectedByTitle(
   const sessions = new Map<string, OrganizeSession>();
   for (const task of tasks) {
     for (const session of storage.listSessionsByWorkspaceTaskSlim(task.id)) {
+      if (isSystemAiCall(session)) continue;
       sessions.set(session.id, sessionRecord(session, teamIds.has(session.id)));
     }
   }
@@ -124,6 +126,7 @@ export async function organizeSelectedByTitle(
       refused.push({ id, kind: "session", reason: "未找到该会话" });
       continue;
     }
+    if (isSystemAiCall(session)) continue;
     // Explicit session selection must not pull user-named tasks into auto mode.
     if ((input.mode ?? "auto") === "auto" && session.workspaceTaskId
       && storage.getWandTaskByWorkspaceTaskId(session.workspaceTaskId)?.titleSource !== "auto") continue;

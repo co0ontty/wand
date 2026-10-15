@@ -1,0 +1,96 @@
+{
+  "blueprintId": "team_mv9b10yf0002lvjhyl-generated-blueprint",
+  "runId": "team_mv9b10yf0002lvjhyl",
+  "task": "同协议续接第一批实现，上一轮已经全部终止，不重跑已完成的源码核查。先读 /Users/co0ontty/Self/vibe_coding/wand/output/architecture-stage2/chat-ux-batch1/ROUND1-REVIEW.md（Captain已判定部分候选不可交付）及LANE-BOARD.md相应自己那行；scout-map仅按需定位，不再整仓扫或反复读全部文档。原授权范围只有1–3，主仓只读，writer继续各自已有隔离目录，没有并发写者。用明确的小范围动作完成这次任务，不把请求预算花在重复准备。Web Node PATH用$HOME/.nvm/versions/node/v24.21.0/bin，禁止依赖安装、真实模型调用、服务/设备启动重启、commit/reset/clean/push/tag；不打印凭据。必须复用项目theme/motion/消息/滚动/草稿owner。源码写入只用指定目录绝对路径，bash先cd。所有worker都有bash/read/write/edit；reviewer仅允许写报告/测试日志，不改源码。原生只走scripts/run-tests.sh等正常入口，migration.lock存在不可直接xcodebuild绕过。每个节点用RADIO简报和ACK；最终给精确相对基线增量、实际验证与剩余，Captain拥有合并/验收权。",
+  "playbookId": "generated-blueprint",
+  "playbookTitle": "Dynamic team blueprint",
+  "source": "generated",
+  "status": "draft",
+  "createdAt": 1792054588501,
+  "roles": [
+    {
+      "roleId": "web-navigation-finish",
+      "title": "修复并接入Web轮次导航",
+      "description": "唯一写入 /tmp/wand-chat-ux-batch1-poxnz8cu/web-navigation。只完成计划1。前任已终止且其候选在主仓output/.../round1归档，可重写/清掉本轮错误新候选，不动其他baseline。已明确错误：TurnNavPanel相对导入错；key不匹配真实data-chat-owner，nav:id剥前缀丢id:；home.tsx实际IM入口不是exec；constant200px目录和硬编码动画不符计划；原浏览器test含document不存在时空断言/仅import占位，必须改为真实浏览器验证。用真实render owner而非复制ID算法，不用首尾{}过滤用户JSON正文，预览走已有可见正文规则。只索引用户提问轮次，载入范围真实说明，点击可展开旧历史折叠并定位，异步不串会话，不新建分页通道。桌面轻量按钮/轨道+预览，窄屏按需目录，不加常驻列、不重做主题。独占新navigation模块、browser/chat-render.ts/chat-scroll.ts/chat-render-focus.ts必要改动、conversations/home.tsx/presentation.ts、ai-teams/team-chat-view.tsx及对应测试；不能改公共chat/activity/styles/presentation或running模块。本轮必须把ordinary chat和IM ConversationMessages两个实际入口接上，不把独占文件推回Captain。先跑React/browser tsc抓编译问题，再至少一个真实Chromium harness验证点击定位/流式上翻/窄屏关闭，不运行业务模型。不需要安装服务，Captain后验。提供精确改动与测试日志，不将静态26pass当端到端通过。",
+      "capability": "coding",
+      "capabilityNeeds": [
+        "coding",
+        "tool_use",
+        "long_context"
+      ],
+      "tools": [
+        "bash",
+        "read",
+        "write",
+        "edit"
+      ],
+      "modelPreferences": [
+        "OpenAI/gpt-6.1-sol:high"
+      ]
+    },
+    {
+      "roleId": "macos-navigation-finish",
+      "title": "落实原生轮次导航接入",
+      "description": "唯一写入 /tmp/wand-chat-ux-batch1-poxnz8cu/macos。本轮只完成计划1原生导航，以缩小前任未接入三功能的失败范围；计划2/3由后续同一单writer窗口继续。先看现有ChatView.swift实际查找/ScrollViewProxy入口和CommunicationsViews的另一滚动owner。可以重做TurnNavigator.swift并将按钮/目录/预览/跳转实际接入两个入口，复用原theme/motion。只索引用户提问，messageId优先，fallback明确绑定当前加载窗口/原绝对位置，异步切会话不误跳，不为UI重写历史，窄窗口/键盘/Escape按原生模式。前任新增RunningStateProjection.swift和ChatUXBatch1Tests.swift完全未接入且有错误API/语义，已归档；允许清除这两份本轮失败候选并改建本轮真实导航测试，不删除任何既有生产代码。工程新文件必须增量登记，pbxproj含他人baseline不可覆盖；现有ChatStore/WandModels只做必要展示适配。不要碰Workspace/Settings/IM/WandAPI，不修他人Settings编译错。禁止直接xcodebuild、swiftc或更改WAND_NATIVE_BUILD_ENV绕过迁移锁；正常scripts/run-tests.sh尝试一次写日志，锁阻挡明确未编译/未UI/未Beta。必须完整接入源码，不只给Captain伪代码。报告还未实现的2/3，并给后续最佳最小修改点。",
+      "capability": "coding",
+      "capabilityNeeds": [
+        "coding",
+        "tool_use",
+        "long_context"
+      ],
+      "tools": [
+        "bash",
+        "read",
+        "write",
+        "edit"
+      ],
+      "modelPreferences": [
+        "openai-codex/gpt-6-astra:high"
+      ]
+    },
+    {
+      "roleId": "web-presentation-review",
+      "title": "独立复核工具与状态候选",
+      "description": "只读源码审查两个已终止writer候选：/tmp/wand-chat-ux-batch1-poxnz8cu/web-activity 和 /tmp/wand-chat-ux-batch1-poxnz8cu/web-status。不改任何源文件，报告写 /Users/co0ontty/Self/vibe_coding/wand/output/architecture-stage2/chat-ux-batch1/round2-presentation-review.md。仅检查handoff列出的增量：公共activity/presentation/styles + IM工具状态；running-activity/current-action/bar/adapter。核对语义：pending不冒充running、error不被完成态压没、manual展开/锚点保留、full详情reset不竞态；新request开始与旧failed/status冲突、裸PTY常驻、队列/等待优先级、工具退场/外源隔离、无凭据/正文关键词、idle/终态时钟/aria。独立执行两组定点测试/必要tsc（Node24），给本轮引入的具体P0/P1/P2或明确OK，指出静态断言无法证明的浏览器缺口。最多列5个最高价值可操作问题，给路径行号/复现测试；不要泛泛审全仓/不作最终产品验收。不读取私密连接/不调用模型。",
+      "capability": "review",
+      "capabilityNeeds": [
+        "coding",
+        "tool_use",
+        "critical_review"
+      ],
+      "tools": [
+        "bash",
+        "read",
+        "write",
+        "edit"
+      ],
+      "modelPreferences": [
+        "openai-codex/gpt-5.6-luna:high"
+      ]
+    }
+  ],
+  "rounds": [
+    {
+      "id": "collect",
+      "type": "parallel",
+      "roles": [
+        "web-navigation-finish",
+        "macos-navigation-finish",
+        "web-presentation-review"
+      ]
+    }
+  ],
+  "policy": {
+    "rationale": "A task-specific collaboration blueprint generated for the lead captain",
+    "strategy": "The lead captain generated this collaboration plan; the extension handles dispatch, communication, observation, and recording.",
+    "evidencePolicy": "Workers should separate cited evidence, inference, confidence, and missing information.",
+    "modelPolicy": "Use configured models that are objectively available; keep soft health observations visible.",
+    "synthesisPolicy": "The lead uses worker outputs as inputs and keeps final judgment outside the extension.",
+    "progressMilestones": [
+      "collect: parallel"
+    ],
+    "stopCriteria": "All planned rounds have returned a status and the run log is persisted."
+  },
+  "outputContract": "本轮有界可用增量或明确BLOCK报告，写到自身output/chat-ux-batch1/ROUND2.md；不得仅新增未挂载组件或空断言测试后宣布完成。",
+  "captainRationale": "A task-specific collaboration blueprint generated for the lead captain"
+}

@@ -109,12 +109,13 @@ export async function verifyBrowserModuleLoading(origin, { installed = false, fi
         assert.ok(release); release();
         await page.unroute("**" + newSessionPath);
         await page.evaluate(() => window.__wandReactNewSession.open());
-        await page.locator("[data-testid=new-session-dialog]").waitFor({ state: "visible" });
+        await page.getByRole("region", { name: "新建工作", exact: true }).waitFor({ state: "visible" });
         await page.evaluate(() => window.__wandReactNewSession.close());
         if (fixturePath) {
           await page.evaluate(file => window.__wandReactFilePreview.open({ path: file }), fixturePath);
           await page.locator(".wand-file-preview-dialog").waitFor({ state: "visible" });
           assert.ok(requested.includes(previewPath));
+          if (fixturePath.endsWith(".md")) await page.locator(".wand-file-preview-dialog .wand-markdown-preview strong").filter({ hasText: "Read-only module preview" }).waitFor();
           await page.evaluate(() => window.__wandReactFilePreview.execute({ type: "close" }));
         }
         assert.ok(await page.evaluate(() => window.__wandDesktopTools.openFiles()));
@@ -133,6 +134,8 @@ export async function verifyBrowserModuleLoading(origin, { installed = false, fi
         await page.locator("#file-side-panel-close").click();
         if (!installed) {
           const input = page.locator("#input-box");
+          const compactEntry = page.locator(".input-composer .composer-compact-entry");
+          if (await compactEntry.isVisible()) await compactEntry.click();
           await input.fill("按需加载期间保留的草稿");
           await input.evaluate(node => { window.__moduleTestInput = node; });
           let releasePi;

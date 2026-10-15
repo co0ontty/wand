@@ -21,19 +21,25 @@ const STYLES_DIR_BASENAMES = new Set(["base.ts", "features.ts"]);
 // sibling clones whose paths merely happen to contain "src/web-ui/react/".
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REACT_ROOT = path.join(PROJECT_ROOT, "src", "web-ui", "react");
-const CHAT_SURFACE_STYLE_FILE = path.join(REACT_ROOT, "chat", "presentation.tsx");
 const EXACT_REACT_STYLE_PATHS = new Set([
   path.join("shell", "sidebar-styles.ts"),
   path.join("issues", "library-layout.ts"),
   path.join("chat", "presentation.tsx"),
+  path.join("new-session", "layout.ts"),
+  path.join("settings", "fields.tsx"),
+  path.join("avatars", "plush-avatar.tsx"),
+  path.join("workspaces", "sidebar-session-preview.tsx"),
+  path.join("workspaces", "sidebar-session-area.tsx"),
+  path.join("styles", "employee-profile.ts"),
+  "chat-composer-styles.ts",
+  path.join("conversations", "home-styles.ts"),
+  path.join("conversations", "directory-styles.ts"),
+  path.join("agents", "employee-im-styles.ts"),
+  path.join("agents", "employee-avatar-styles.ts"),
 ]);
 
 function projectFilePath(filePath) {
   return path.isAbsolute(filePath) ? path.normalize(filePath) : path.join(PROJECT_ROOT, filePath);
-}
-
-function isChatSurfaceStyleFile(filePath) {
-  return projectFilePath(filePath) === CHAT_SURFACE_STYLE_FILE;
 }
 
 /** Strict filename guard: only the known React style modules may be rewritten. */
@@ -120,9 +126,8 @@ export function minifyStringRawCssTemplates(sourceText, filePath = "module.ts") 
     sourceText,
     ts.ScriptTarget.Latest,
     true,
-    // Only the explicitly owned chat surface module mixes JSX with static CSS.
-    // Other TSX files never enter the plugin's filename guard.
-    isChatSurfaceStyleFile(filePath) ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    // Explicitly allowlisted TSX style owners retain their JSX syntax.
+    filePath.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
   );
   const { edits, skipped } = collectCssTemplateEdits(sourceFile, filePath);
   let code = sourceText;
@@ -154,7 +159,7 @@ export function createBrowserStyleMinificationPlugin(cssCandidates) {
             if (value.length > 0) cssCandidates.add(value);
           }
         }
-        return { contents: code, loader: isChatSurfaceStyleFile(args.path) ? "tsx" : "ts" };
+        return { contents: code, loader: args.path.endsWith(".tsx") ? "tsx" : "ts" };
       });
     },
   };
@@ -217,7 +222,7 @@ function isPoolableLiteral(node, candidates) {
  * order and stylesheet insertion timing are untouched because only literal
  * *values* change.
  */
-export function poolEmittedCssStringLiterals(code, cssCandidates) {
+export function poolEmittedCssStringLiterals(code, cssCandidates, { format = "iife" } = {}) {
   const candidates = new Set();
   for (const value of cssCandidates ?? []) {
     if (typeof value === "string" && value.length > 0) candidates.add(value);
@@ -272,6 +277,14 @@ export function poolEmittedCssStringLiterals(code, cssCandidates) {
   let rewritten = code;
   for (const edit of [...edits].sort((a, b) => b.start - a.start)) {
     rewritten = rewritten.slice(0, edit.start) + edit.text + rewritten.slice(edit.end);
+  }
+  if (format === "esm") {
+    // A module already owns its lexical scope. Wrapping it in an IIFE would
+    // make imports/exports invalid; preserve them and the directive prologue.
+    return {
+      code: `${directives.join("\n")}\nconst ${poolIdentifier} = Object.freeze(${JSON.stringify(poolValues)});\n${rewritten.slice(prefixEnd)}`,
+      poolSize: poolValues.length, pooled: edits.length,
+    };
   }
   const wrapper =
     `(() => {\nconst ${poolIdentifier} = Object.freeze(${JSON.stringify(poolValues)});\n` +

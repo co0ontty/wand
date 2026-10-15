@@ -10,6 +10,7 @@ import { getGitErrorMessage } from "./git-utils.js";
 import { buildLanguageDirective } from "./language-prompt.js";
 import { candidateInstalled, isSessionProvider } from "./session-provider.js";
 import { asRecord } from "./structured-content.js";
+import { AiCallTraceError, type AiCallTrace, type AiCallTraceFactory, type SystemAiPurpose } from "./system-ai-call.js";
 import {
   composeSystemFallback,systemPromptFlag,thinkingEffortToClaudeCliEffort,
   thinkingEffortToCodexReasoningEffort,thinkingEffortToGrokEffort,thinkingEffortToOpenCodeVariant,
@@ -44,6 +45,9 @@ export interface QuickCommitAiOptions {
   /** 整条候选链的时间上限；默认 CLI_CHAIN_BUDGET_MS。第一条消息里的调用要短得多。 */
   budgetMs?: number;
   signal?: AbortSignal;
+  purpose?: SystemAiPurpose;
+  traceFactory?: AiCallTraceFactory;
+  onCallSessionCreated?(sessionId: string): void;
 }
 
 type CliAiTextOptions = QuickCommitAiOptions & { deadline?: number };
@@ -529,6 +533,7 @@ async function callTextCandidates<T>(
   language: string,
   opts: QuickCommitAiOptions,
   parseOutput: (raw: string) => T,
+  trace?: AiCallTrace,
 ): Promise<T> {
   opts.signal?.throwIfAborted();
   const { resolveModelGroupModels } = await import("./model-groups.js");
@@ -555,15 +560,31 @@ async function callTextCandidates<T>(
     try {
       const generate = await abortableEmployeeText(prepareEmployeeTextCandidate({
         ...opts.employeeText,
+        callSessionId: trace?.sessionId,
+        onUsage: usage => { opts.employeeText?.onUsage?.(usage); trace?.usageReported(usage); },
         config: { ...opts.employeeText?.config, defaultCwd: cwd, inheritEnv: opts.inheritEnv ?? opts.employeeText?.config.inheritEnv, modelGroups },
       }, { ...candidate, model: candidate.model ?? "default", thinkingEffort: candidate.thinkingEffort ?? opts.thinkingEffort ?? "off", mode: "default", kind: "structured" }, request, signal), signal);
       signal.throwIfAborted();
       return await abortableEmployeeText(generate(), signal);
     } finally { clearTimeout(timer); }
   };
-  if (chain.length === 1) return parseOutput(await call(chain[0]!));
+  if (chain.length === 1) {
+    const candidate = chain[0]!;
+    trace?.candidateStarted({ ...candidate, thinkingEffort: candidate.thinkingEffort ?? opts.thinkingEffort ?? undefined });
+    let phase: "execution" | "result" = "execution";
+    try {
+      const raw = await call(candidate);
+      phase = "result";
+      const parsed = await parseOutput(raw);
+      trace?.candidateSucceeded(raw, parsed);
+      return parsed;
+    } catch (error) { trace?.candidateFailed(candidate, error, phase); throw error; }
+  }
 
   const installed = chain.filter((candidate) => candidateInstalled(candidate));
+  if (installed.length) for (const candidate of chain) {
+    if (!installed.includes(candidate)) trace?.candidateSkipped(candidate, "CLI 未安装，未提交输入。");
+  }
   const attempts = installed.length ? installed : chain;
   const errors: string[] = [];
   for (const candidate of attempts) {
@@ -572,14 +593,20 @@ async function callTextCandidates<T>(
       errors.push("已超过等待上限");
       break;
     }
+    trace?.candidateStarted({ ...candidate, thinkingEffort: candidate.thinkingEffort ?? opts.thinkingEffort ?? undefined });
+    let phase: "execution" | "result" = "execution";
     try {
       const text = await call(candidate);
+      phase = "result";
       const result = await parseOutput(text);
+      trace?.candidateSucceeded(text, result);
       if (candidate !== attempts[0]) {
         console.info(`[SystemAi] 候选 ${chain.indexOf(candidate) + 1}/${chain.length} (${candidate.provider}) 成功`);
       }
       return result;
     } catch (error) {
+      if (error instanceof AiCallTraceError) throw error;
+      trace?.candidateFailed(candidate, error, phase);
       opts.signal?.throwIfAborted();
       errors.push(`${candidate.provider}: ${getGitErrorMessage(error)}`);
       // 不记录提示词、路径、CLI 原始响应或可能带鉴权信息的错误正文。
@@ -615,6 +642,15 @@ export async function callConfiguredAiText(
   opts: QuickCommitAiOptions,
   parseOutput: (raw: string) => unknown = (raw) => raw,
 ): Promise<unknown> {
-  return callTextCandidates(withOpsPersona(request, opts.opsPersona), cwd, language, opts, parseOutput);
+  const trace = opts.traceFactory?.start(opts.purpose ?? "system-text", request, cwd);
+  try {
+    if (trace) opts.onCallSessionCreated?.(trace.sessionId);
+    const result = await callTextCandidates(withOpsPersona(request, opts.opsPersona), cwd, language, opts, parseOutput, trace);
+    trace?.complete();
+    return result;
+  } catch (error) {
+    trace?.fail(error, opts.signal?.aborted === true);
+    throw error;
+  }
 }
 

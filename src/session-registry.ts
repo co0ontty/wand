@@ -1,4 +1,6 @@
 import { isArchiveBlocked } from "./archive-policy.js";
+import { isSystemAiCall } from "./system-ai-call.js";
+import { systemAiSessions } from "./system-ai-session-recorder.js";
 import { cleanupWorktreeSync } from "./git-worktree.js";
 import type { ProcessManager } from "./process-manager.js";
 import { inferProviderFromCommand } from "./session-provider.js";
@@ -251,6 +253,10 @@ export class SessionRegistry {
   delete(id: string): SessionSnapshot | null {
     const snapshot = this.get(id);
     if (!snapshot) return null;
+    if (isSystemAiCall(snapshot)) {
+      systemAiSessions(this.storage).remove(id);
+      return snapshot;
+    }
     // Best-effort: tear down the session's isolated worktree (directory +
     // branch) before removing the session record. Without this, deleting a
     // session that was never merged leaves an orphan under `.wand-worktrees/`

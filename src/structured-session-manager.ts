@@ -36,6 +36,7 @@ import { resolveSessionCwd } from "./session-cwd.js";
 import { isScheduledConversationSession } from "./conversation-session-preview.js";
 import { isSessionProvider, providerCliCommand } from "./session-provider.js";
 import { resolveSessionProvider, resolveSystemAiContext } from "./session-ai-context.js";
+import { isSystemAiCall, SYSTEM_AI_READ_ONLY } from "./system-ai-call.js";
 
 import { CodexRunner } from "./structured-codex-adapter.js";
 
@@ -207,6 +208,7 @@ export class StructuredSessionManager {
    */
   private readonly seenIdempotencyKeys = new BoundedKeySet(IDEMPOTENCY_KEY_LIMIT);
   private readonly relayHandlers = new Map<string, StructuredRelayHandler>();
+  private readonly systemCallDrainReleases = new Set<() => void>();
   private emitEvent: ((event: ProcessEvent) => void) | null = null;
   /**
    * 静默期心跳：回合在飞且连续 TURN_QUIET_HEARTBEAT_MS 没有任何事件时，用现有的
@@ -284,7 +286,7 @@ export class StructuredSessionManager {
     });
     // SDK capability is probed only when Wand Agent is explicitly selected.
     for (const snapshot of this.storage.loadSessions()) {
-      if ((snapshot.sessionKind ?? "pty") !== "structured") continue;
+      if (isSystemAiCall(snapshot) || (snapshot.sessionKind ?? "pty") !== "structured") continue;
       const restoredStatus = snapshot.status === "running" ? "idle" : snapshot.status;
       let provider: SessionProvider;
       try {
@@ -381,11 +383,15 @@ export class StructuredSessionManager {
   beginCoreRestartDrain(): () => void {
     if (this.disposed) throw new Error("StructuredSessionManager has been disposed.");
     this.coreRestartDrains += 1;
+    const releaseSystemCalls = CoreTurnTracker.beginSystemCallDrain();
+    this.systemCallDrainReleases.add(releaseSystemCalls);
     let released = false;
     return () => {
       if (released) return;
       released = true;
       this.coreRestartDrains -= 1;
+      releaseSystemCalls();
+      this.systemCallDrainReleases.delete(releaseSystemCalls);
       if (this.coreRestartDrains === 0) this.resumeQueuedPiMessages();
     };
   }
@@ -406,6 +412,8 @@ export class StructuredSessionManager {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    for (const release of this.systemCallDrainReleases) release();
+    this.systemCallDrainReleases.clear();
     this.unacceptedTeamStarts.clear();
     // 静默心跳不跨服务关闭存活（会话级 timer 不允许泄漏）。
     this.turnHeartbeat.dispose();
@@ -1195,6 +1203,7 @@ export class StructuredSessionManager {
   }
 
   createSession(options: CreateStructuredSessionOptions): SessionSnapshot {
+    if (isSystemAiCall(options)) throw new Error(SYSTEM_AI_READ_ONLY);
     if (this.disposed) throw new Error("StructuredSessionManager has been disposed.");
     const id = randomUUID();
     const startedAt = new Date().toISOString();
@@ -1640,7 +1649,7 @@ export class StructuredSessionManager {
         prompt,
         groups: this.config.modelGroups,
         evaluate: this.autoAssignEvaluate(),
-        ai: resolveSystemAiContext(session, this.config, this.storage.getSystemSiliconEmployee(), this.openRouter),
+        ai: resolveSystemAiContext(session, this.config, this.storage.getSystemSiliconEmployee(), this.openRouter, { storage: this.storage }),
         cwd: session.cwd,
         language: this.config.language,
       });
@@ -2345,7 +2354,9 @@ export class StructuredSessionManager {
     }
     this.saveAuthoritativeSession(cancelled);
     // 仍发 "ended" 事件让各端停掉"回复中"指示 / 灵动岛，但携带的 status 是 idle。
-    this.emitStructuredSnapshot(cancelled, "ended");
+    this.emitStructuredSnapshot(cancelled, "ended", {
+      ...(session.structuredState?.inFlight || session.status === "running" ? { turnOutcome: "stopped" as const } : {}),
+    });
     return cancelled;
   }
 
@@ -2462,7 +2473,7 @@ export class StructuredSessionManager {
     return true;
   }
 
-  private emitStructuredSnapshot(session: SessionSnapshot, eventType: "output" | "ended" = "output"): void {
+  private emitStructuredSnapshot(session: SessionSnapshot, eventType: "output" | "ended" = "output", outcome: { turnOutcome?: "stopped" } = {}): void {
     // 排队消息只通过 payload.queuedMessages 单独下发，由各端在消息卡片外的「排队条」
     // 里纵向渲染——绝不再把它们当成 __queued 占位 turn 混进 messages 消息流里，否则会
     // 和排队条重复显示（旧的「显示异常」根因）。
@@ -2471,6 +2482,7 @@ export class StructuredSessionManager {
       ...payload,
       status: session.status,
       exitCode: session.exitCode,
+      ...outcome,
     };
     this.emit({
       type: eventType,

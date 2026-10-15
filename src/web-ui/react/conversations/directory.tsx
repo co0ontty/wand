@@ -5,9 +5,11 @@ import { employeeProfile } from "../agents/employee-profile";
 import { EmployeeAvatar } from "../agents/employee-avatar";
 import { employeeCliLabel } from "../agents/employee-identity.js";
 import { useSiliconEmployees } from "../agents/employee-repository";
+import { useUserProfile } from "../user-profile-repository";
+import { settingsController } from "../settings/controller.js";
 import { useAiTeamListState } from "../ai-teams/repository";
 import { taskBoardController } from "../issues/task-board-controller";
-import { WandButton, WandIconButton, WandSearchField, WandStretchTabs } from "../ui";
+import { WandBadge, WandButton, WandIconButton, WandSearchField, WandStretchTabs } from "../ui";
 import { ConversationMorphIcon, ConversationPanel } from "./controls";
 import { GroupEditor, PresetDetails } from "./group-editor";
 import { conversationUi } from "./state";
@@ -16,6 +18,7 @@ import { installDirectoryStyles } from "./directory-styles.js";
 export function ConversationDirectory({ onSelect }: { onSelect(id: string, focusComposer?: boolean): void }): React.ReactElement {
   React.useEffect(() => { installDirectoryStyles(); }, []);
   const { employees, error, loading, reload } = useSiliconEmployees({ includeArchived: true });
+  const self = useUserProfile();
   const teamSource = useAiTeamListState(true);
   const { teams } = teamSource;
   const [tab, setTab] = React.useState("employees");
@@ -28,6 +31,7 @@ export function ConversationDirectory({ onSelect }: { onSelect(id: string, focus
   const toggle = (id: string): void => setExpanded(values => values.includes(id) ? values.filter(v => v !== id) : [...values, id]);
   const match = (text: string): boolean => text.toLowerCase().includes(query.trim().toLowerCase());
   const visibleEmployees = employees.filter(e => match(`${e.name} ${e.duty} ${e.id}`));
+  const selfVisible = match(`${self.name || "我"} 我 我的资料`);
   const visibleTeams = teams.filter(t => match(`${t.name} ${t.description}`));
   return <Flex vertical className="conversation-directory" style={{ height: "100%", minHeight: 0 }}>
     <Flex ref={anchor} align="center" justify="space-between" gap={8} className="conversation-directory-header" style={{ position: "relative", flexShrink: 0 }}>
@@ -50,6 +54,12 @@ export function ConversationDirectory({ onSelect }: { onSelect(id: string, focus
         {error ? <Alert type="error" showIcon role="alert" title="员工加载失败" description={error}
           action={<WandButton size="small" disabled={loading} onClick={reload}>重新加载员工</WandButton>}/> : null}
         {loading ? <Typography.Paragraph type="secondary" role="status">正在读取员工…</Typography.Paragraph> : null}
+        {selfVisible ? <Flex key="user" align="center" gap={12} className="conversation-contact-row conversation-self-row">
+          <WandIconButton className="conversation-avatar-button" aria-label="查看我的资料" onClick={() => settingsController.open("profile")}><EmployeeAvatar employee={{ id: "user", name: self.name || "我", avatar: self.avatar }} provider="" size="md"/></WandIconButton>
+          <WandButton kind="ghost" className="conversation-contact-copy" onClick={() => settingsController.open("profile")}>
+            <span><strong className="conversation-contact-name"><span className="conversation-contact-label" title={self.name || "我"}>{self.name || "我"}</span><WandBadge className="wand-self-tag" tone="accent">我</WandBadge></strong><span className="conversation-contact-duty">我的资料 · 消息署名与头像</span></span>
+          </WandButton><WandButton kind="ghost" size="small" onClick={() => settingsController.open("profile")}>资料</WandButton>
+        </Flex> : null}
         {visibleEmployees.map(e => <Flex key={e.id} align="center" gap={12} className="conversation-contact-row">
           <WandIconButton className="conversation-avatar-button" aria-label={`查看${e.name}的资料`} onClick={event => employeeProfile.open(e, event.currentTarget)}><EmployeeAvatar employee={e} size="md"/></WandIconButton>
           <WandButton kind="ghost" className="conversation-contact-copy" onClick={() => onSelect(employeeConversationId(e.id))}>

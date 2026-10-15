@@ -1,5 +1,7 @@
 import type { AssistantMessage, ModelThinkingLevel, ThinkingLevel } from "@earendil-works/pi-ai";
 import { coreHarnessRuntime, loadPiAi, resolveCoreModel } from "./harness-engine.js";
+import { randomUUID } from "node:crypto";
+import { CoreTurnTracker } from "./core-turn-tracker.js";
 import { agentKey } from "./ai-team-types.js";
 import { getDefaultModelForProvider } from "./config.js";
 import { freeModelOrder, resolveModelGroupModels } from "./model-groups.js";
@@ -14,6 +16,7 @@ export interface EmployeeTextDeps {
   config: Pick<WandConfig, "harness" | "inheritEnv" | "modelGroups"> & { defaultCwd?: string };
   free?: Pick<OpenRouterFreeModelsService, "resolveForCall">;
   onUsage?: (usage: { inputTokens: number; outputTokens: number; model: string }) => void;
+  callSessionId?: string;
 }
 
 /** Expand each configured slot once; equivalent leaves execute once in first occurrence order. */
@@ -87,6 +90,7 @@ export async function prepareEmployeeTextCandidate(
     };
   }
   if (agent.provider !== "pi") throw new Error("Wand Agent只支持Pi provider。");
+  CoreTurnTracker.assertSystemCallAdmission();
   const pi = await loadPiAi();
   const context = pi.normalizeContext({ systemPrompt: request.system,
     messages: [{ role: "user", content: request.prompt, timestamp: Date.now() }], tools: [] });
@@ -98,14 +102,17 @@ export async function prepareEmployeeTextCandidate(
     const { streamSimple } = await import("@earendil-works/pi-ai/api/openai-completions");
     return async () => {
       signal.throwIfAborted();
-      let status: number | undefined;
-      const message = await streamSimple(checked.model as Parameters<typeof streamSimple>[0], context, { apiKey: checked.apiKey, signal,
-        maxRetries: 0, fetch: async (input, init) => { const response = await fetch(input, init); status = response.status; return response; },
-        maxTokens: Math.min(4096, checked.model.maxTokens), reasoning: reasoning === "off" ? undefined : reasoning as ThinkingLevel,
-        toolChoice: "none", onPayload: payload => ({ ...(payload as Record<string, unknown>), provider: OPENROUTER_FREE_ROUTING }) }).result();
-      const text = sdkText(message, status);
-      deps.onUsage?.({ inputTokens: message.usage.input, outputTokens: message.usage.output, model: `${checked.model.provider}/${checked.model.id}` });
-      return text;
+      const token = CoreTurnTracker.startTurn(deps.callSessionId ?? `system-ai:${randomUUID()}`, true);
+      try {
+        let status: number | undefined;
+        const message = await streamSimple(checked.model as Parameters<typeof streamSimple>[0], context, { apiKey: checked.apiKey, signal,
+          maxRetries: 0, fetch: async (input, init) => { const response = await fetch(input, init); status = response.status; return response; },
+          maxTokens: Math.min(4096, checked.model.maxTokens), reasoning: reasoning === "off" ? undefined : reasoning as ThinkingLevel,
+          toolChoice: "none", onPayload: payload => ({ ...(payload as Record<string, unknown>), provider: OPENROUTER_FREE_ROUTING }) }).result();
+        const text = sdkText(message, status);
+        deps.onUsage?.({ inputTokens: message.usage.input, outputTokens: message.usage.output, model: `${checked.model.provider}/${checked.model.id}` });
+        return text;
+      } finally { CoreTurnTracker.endTurn(token); }
     };
   }
   const resolved = await resolveCoreModel(config.harness, agent.model, { cwd: config.defaultCwd });
@@ -114,10 +121,13 @@ export async function prepareEmployeeTextCandidate(
   const level = pi.clampThinkingLevel(resolved.model, (reasoning ?? "off") as ModelThinkingLevel);
   return async () => {
     signal.throwIfAborted();
-    const message = await runtime.streamSimple(resolved.model, context, { signal, maxRetries: 0, maxTokens: Math.min(4096, resolved.model.maxTokens),
-      reasoning: level === "off" ? undefined : level as ThinkingLevel, toolChoice: "none" }).result();
-    const text = sdkText(message);
-    deps.onUsage?.({ inputTokens: message.usage.input, outputTokens: message.usage.output, model: `${resolved.model.provider}/${resolved.model.id}` });
-    return text;
+    const token = CoreTurnTracker.startTurn(deps.callSessionId ?? `system-ai:${randomUUID()}`, true);
+    try {
+      const message = await runtime.streamSimple(resolved.model, context, { signal, maxRetries: 0, maxTokens: Math.min(4096, resolved.model.maxTokens),
+        reasoning: level === "off" ? undefined : level as ThinkingLevel, toolChoice: "none" }).result();
+      const text = sdkText(message);
+      deps.onUsage?.({ inputTokens: message.usage.input, outputTokens: message.usage.output, model: `${resolved.model.provider}/${resolved.model.id}` });
+      return text;
+    } finally { CoreTurnTracker.endTurn(token); }
   };
 }

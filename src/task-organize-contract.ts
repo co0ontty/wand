@@ -17,6 +17,6 @@ export type TaskOrganizeTarget =
   | { kind: "directory"; cwd: string };
 
 export const TASK_ORGANIZE_OPTIONS = [
-  { value: "auto" as const, label: "自动任务归类", hint: "仅系统自动标题，跳过用户自定标题" },
-  { value: "all" as const, label: "所有任务归类", hint: "包含用户自定标题的任务" },
+  { value: "auto" as const, label: "默认范围会话", hint: "未分组及系统自动任务中的工作会话；不挪动人工命名任务中的会话" },
+  { value: "all" as const, label: "所有工作会话", hint: "包含人工任务中的会话；仍跳过归档、私聊、自动化执行和系统日志" },
 ];

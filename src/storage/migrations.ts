@@ -261,4 +261,14 @@ export const STORAGE_MIGRATIONS: readonly StorageMigration[] = [
       PRIMARY KEY(file_path, session_id)
     );
   `) },
+  { version: 6, name: "conversation-organization-jobs", up: db => db.exec(`
+    CREATE TABLE IF NOT EXISTS conversation_organization_jobs (
+      id TEXT PRIMARY KEY, request_token TEXT NOT NULL UNIQUE, scope_key TEXT NOT NULL,
+      status TEXT NOT NULL, state_json TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_conversation_organization_running ON conversation_organization_jobs(status);
+    CREATE TABLE IF NOT EXISTS conversation_organization_cache (
+      scope_key TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+  `) },
 ];

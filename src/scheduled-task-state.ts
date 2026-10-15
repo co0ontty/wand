@@ -9,7 +9,7 @@ export function sessionActive(session: SessionSnapshot): boolean {
 
 
 /** Pure read projection; it never settles or replays a scheduled occurrence. */
-export function scheduledExecutionStatus(run: ScheduledTaskRun, receipt: ConversationReceipt | null, session: SessionSnapshot | null): ScheduledTaskRunView["executionStatus"] {
+export function scheduledExecutionStatus(run: Pick<ScheduledTaskRun, "state" | "executionOutcome" | "executionFinishedAt">, receipt: ConversationReceipt | null, session: SessionSnapshot | null): ScheduledTaskRunView["executionStatus"] {
     let executionStatus: ScheduledTaskRunView["executionStatus"];
     if (run.state === "skipped") executionStatus = "skipped";
     else if (run.executionOutcome) executionStatus = run.executionOutcome;

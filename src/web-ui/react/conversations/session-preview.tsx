@@ -4,7 +4,7 @@ import { Flex, Typography, theme } from "antd";
 import type { ConversationTurn } from "../../../types.js";
 import type { ConversationSessionUpdate } from "../../../conversation-types.js";
 import { conversationSessionPreviewLabels } from "../../../conversation-session-preview.js";
-import { MarkdownPreview } from "../file-preview/markdown.js";
+import { DeferredMarkdownPreview as MarkdownPreview } from "../file-preview/deferred-markdown.js";
 import { WandButton, WandIcon } from "../ui/index.js";
 import { executionFailure } from "./execution-failure.js";
 
@@ -14,8 +14,10 @@ export function notifyConversationSessionPreview(update: ConversationSessionUpda
 }
 
 /** The transcript shares the conversation's reading scroller and keeps its live controls. */
-export function ConversationSessionReply({ turn, active, onOpen, onModelSettings, children }: {
-  turn: ConversationTurn; active: boolean; onOpen(): void; onModelSettings?(event: React.MouseEvent<HTMLButtonElement>): void; children?: React.ReactNode;
+export function ConversationSessionReply({ turn, active, onOpen, onModelSettings, statusProvided = false, children }: {
+  turn: ConversationTurn; active: boolean; onOpen(): void; onModelSettings?(event: React.MouseEvent<HTMLButtonElement>): void;
+  /** The exact source session already projects its current state in children. */
+  statusProvided?: boolean; children?: React.ReactNode;
 }): React.ReactElement {
   const { token } = theme.useToken();
   const [live, setLive] = React.useState<ConversationSessionUpdate | null>(null);
@@ -50,9 +52,9 @@ export function ConversationSessionReply({ turn, active, onOpen, onModelSettings
       </div>
       {children ? <div className="conversation-session-actions">{children}</div> : null}
       <Flex align="center" gap={token.marginSM} className="conversation-reply-footer" style={{ flexShrink: 0 }}>
-        <Typography.Text role="status" type={preview?.status === "failed" ? "danger" : "secondary"}>
+        {!statusProvided ? <Typography.Text role="status" type={preview?.status === "failed" ? "danger" : "secondary"}>
           {conversationSessionPreviewLabels[preview?.status ?? "starting"]}
-        </Typography.Text>
+        </Typography.Text> : null}
         <WandButton kind="ghost" size="small" disabled={unavailable} title="进入此工作的执行会话，补充指令会继续同一项工作" onClick={onOpen}>继续此工作 <WandIcon name="up" size={14} className="conversation-continue-arrow"/></WandButton>
       </Flex>
     </>}/>;

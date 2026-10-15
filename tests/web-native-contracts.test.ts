@@ -204,7 +204,7 @@ test("Apple clients preserve native terminal, IME, replay and transport contract
   includesAll("macos/Wand/MainShellView.swift", [
     "if session?.isStructured == false",
     "SessionHeaderView(",
-    "PtySessionView(sessionId: sessionId, api: api)",
+    "PtySessionView(sessionId: sessionId, api: api, onViewed:",
   ]);
   includesAll("macos/Wand/ChatView.swift", [
     "NativeTerminalSurface(terminal: store.terminal)",
@@ -540,7 +540,8 @@ test("tool activity summaries stay consecutive and split when prose arrives", ()
 
   includesAll("macos/Wand/ChatView.swift", [
     "struct ActivityFoldCard",
-    "_expanded = State(initialValue: activityGroup.newest)",
+    "_expanded = State(initialValue: ChatDisclosurePresentation.expanded(userChoice: nil,",
+    "running: activityGroup.newest && running, attention: attention)",
     "summarizeActivityItems",
   ]);
 });

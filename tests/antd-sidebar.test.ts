@@ -40,15 +40,15 @@ test("execution choices use real library radio identities and disable teams with
   assert.doesNotMatch(html, /<button[^>]*role="radio"/);
 });
 
-test("recent loading projects Ant Skeleton and preserves the contact retry", () => {
+test("recent loading uses Ant Skeleton and its new-work entry defers contact choice to the shared page", () => {
   const html = renderToStaticMarkup(createElement(SidebarRecentSection, {
     entries: [], employees: [], displayMode: "full", selectedSessionId: null, now: 0,
     listLoading: true, contactsError: "加载失败", onOpen() {},
   }));
   assert.match(html, /aria-label="正在加载最近对话"/);
   assert.match(html, /ant-skeleton/);
-  assert.match(html, /联系人加载失败/);
-  assert.match(html, /重试/);
+  assert.match(html, /aria-label="新建工作"/);
+  assert.doesNotMatch(html, /sidebar-contact-picker/);
 });
 
 test("history actions preserve actual provider resume identities and manage selection", () => {

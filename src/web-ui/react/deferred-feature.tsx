@@ -14,7 +14,7 @@ export function deferredFeature<P extends object, S>(
   store: FeatureStore<S>,
   active: (snapshot: S, props: P) => boolean,
   options: { title: string; close(): void; page?: boolean; inline?: boolean; dismissable?: (props: P) => boolean;
-    renderPending?: (status: React.ReactElement, props: P) => React.ReactElement },
+    renderPending?: (status: React.ReactElement, props: P, state: { failed: boolean }) => React.ReactElement },
 ): React.ComponentType<P> {
   let loaded: React.ComponentType<P> | null = null;
   let pending: Promise<React.ComponentType<P>> | null = null;
@@ -64,7 +64,7 @@ export function deferredFeature<P extends object, S>(
         </Flex>
       </> : <Flex align="center" gap="small" role="status"><Spin/>正在加载{options.title}…</Flex>}
     </Flex>;
-    if (options.renderPending) return options.renderPending(status, props);
+    if (options.renderPending) return options.renderPending(status, props, { failed: !!error });
     if (options.inline) return status;
     if (!options.page) return <WandDialogSurface open title={options.title}
       onOpenChange={open => { if (!open) options.close(); }}>{status}</WandDialogSurface>;
@@ -81,7 +81,7 @@ const componentStore = { subscribe: () => () => {}, getSnapshot: () => null };
 /** Embedded views keep their existing parent surface/Portal and close protocol. */
 export function deferredComponent<P extends object>(
   load: () => Promise<React.ComponentType<P>>,
-  options: { title: string; renderPending?: (status: React.ReactElement, props: P) => React.ReactElement },
+  options: { title: string; renderPending?: (status: React.ReactElement, props: P, state: { failed: boolean }) => React.ReactElement },
 ): React.ComponentType<P & { enabled?: boolean }> {
   return deferredFeature<P & { enabled?: boolean }, null>(
     () => load().then(Component => function LoadedComponent({ enabled: _enabled, ...props }) {

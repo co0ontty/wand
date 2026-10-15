@@ -87,7 +87,7 @@ export async function generateWandTaskTitle(
     ].join("\n"),
     prompt: `任务描述：\n${input}`,
   };
-  return callConfiguredAiText(request, cwd || process.cwd(), language, ai, (raw) => {
+  return callConfiguredAiText(request, cwd || process.cwd(), language, { ...ai, purpose: "task-title" }, (raw) => {
     const stripped = stripGeneratedTitle(raw);
     // 校验在候选链内：格式不可用也要继续备用候选，不能先把非空文本当成功。
     // 先判可信度再裁剪：截断过的长句看起来就像标题，会绕过长度检查。

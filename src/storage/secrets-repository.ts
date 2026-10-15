@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import { emptyEmployeeImConfig, type EmployeeImConfig } from "../employee-im-types.js";
+import { normalizeStoredEmployeeImConfig, parseEmployeeImConfig, type EmployeeImCredentials, type EmployeeImSettings } from "../employee-im-config.js";
 import { DatabaseSync } from "node:sqlite";
 import { DEFAULT_PASSWORD_VAULT_ID, VaultDecryptError, decryptVaultSecretTyped, encryptVaultSecretV2, isVaultSecretV2, verifyAdminPassword, type VaultKeys, DEFAULT_PASSWORD_VAULT_NAME, itemMatchesFilter, normalizePasswordItemInput, normalizeVaultName, nowIso, type PasswordVault, type PasswordVaultItem, type PasswordVaultItemFilter, type PasswordVaultItemInput } from "../password-manager.js";
 import { hashAuthToken } from "./auth-token.js";
@@ -75,7 +77,8 @@ export class SecretsRepository {
     const item = this.db.prepare("SELECT 1 FROM password_items WHERE password LIKE ? OR notes LIKE ? OR fields LIKE ? LIMIT 1")
       .get(pattern, pattern, pattern);
     if (item) return true;
-    return !!this.db.prepare("SELECT 1 FROM connectors WHERE token LIKE ? LIMIT 1").get(pattern);
+    if (this.db.prepare("SELECT 1 FROM connectors WHERE token LIKE ? LIMIT 1").get(pattern)) return true;
+    return !!this.db.prepare("SELECT 1 FROM employee_im_settings WHERE credentials LIKE ? LIMIT 1").get(pattern);
   }
 
   private requireVaultCipherKey(): Buffer {
@@ -136,6 +139,31 @@ export class SecretsRepository {
     });
     if (failed > 0) console.warn(`[wand] ${failed} vault value(s) could not be re-encrypted and were left as stored`);
     return converted;
+  }
+
+  /** Public configuration is a separate projection: no credential is returned to clients or models. */
+  getEmployeeImConfig(employeeId: string): EmployeeImConfig {
+    const row = this.db.prepare("SELECT config_json FROM employee_im_settings WHERE employee_id = ?").get(employeeId) as { config_json: string } | undefined;
+    return row ? normalizeStoredEmployeeImConfig(JSON.parse(row.config_json)) : emptyEmployeeImConfig();
+  }
+
+  /** Server delivery path only; callers must never expose this object over HTTP/WS. */
+  getEmployeeImSettings(employeeId: string): EmployeeImSettings {
+    const row = this.db.prepare("SELECT credentials FROM employee_im_settings WHERE employee_id = ?").get(employeeId) as { credentials: string | null } | undefined;
+    const raw = row?.credentials ? decryptVaultSecretTyped(row.credentials, this.vaultKeys()) : undefined;
+    return { config: this.getEmployeeImConfig(employeeId), credentials: raw ? JSON.parse(raw) as EmployeeImCredentials : {} };
+  }
+
+  saveEmployeeImConfig(employeeId: string, input: unknown): EmployeeImConfig {
+    return this.s.transaction(() => {
+      if (!this.s.getSiliconEmployeeDefinition(employeeId)) throw new Error("员工不存在。");
+      const settings = parseEmployeeImConfig(input, this.getEmployeeImSettings(employeeId));
+      const encrypted = this.encryptStoredSecret(JSON.stringify(settings.credentials));
+      this.db.prepare(`INSERT INTO employee_im_settings (employee_id, config_json, credentials) VALUES (?, ?, ?)
+        ON CONFLICT(employee_id) DO UPDATE SET config_json = excluded.config_json, credentials = excluded.credentials`)
+        .run(employeeId, JSON.stringify(settings.config), encrypted);
+      return settings.config;
+    });
   }
 
   /** Encrypt an at-rest secret with the v2 key; empty values stay NULL. */

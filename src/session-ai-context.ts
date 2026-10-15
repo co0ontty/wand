@@ -6,6 +6,9 @@ import type { SiliconEmployee } from "./ai-team-types.js";
 import { isSystemSiliconEmployee, systemEmployeeCandidates } from "./system-employee.js";
 import type { AiCliCandidate, SessionProvider, SessionSnapshot, WandConfig } from "./types.js";
 import { inferProviderFromCommand, inferProviderFromRunner } from "./session-provider.js";
+import type { WandStorage } from "./storage.js";
+import type { AiCallTraceFactory, SystemAiPurpose } from "./system-ai-call.js";
+import { systemAiSessions } from "./system-ai-session-recorder.js";
 
 export interface SessionAiContext {
   provider: SessionProvider;
@@ -20,6 +23,9 @@ export interface SessionAiContext {
   /** 系统应用必须经员工渠道；候选为空时禁止退回当前会话/默认 provider。 */
   employeeChannelOnly?: boolean;
   modelGroups?: ModelGroup[];
+  purpose?: SystemAiPurpose;
+  traceFactory?: AiCallTraceFactory;
+  onCallSessionCreated?(sessionId: string): void;
 }
 
 /**
@@ -75,14 +81,14 @@ export function resolveSessionAiContext(
 
 /** Build the source order for Wand-owned AI features such as titles. */
 export function resolveSystemAiContext(
-  snapshot: Parameters<typeof resolveSessionAiContext>[0],
+  snapshot: Parameters<typeof resolveSessionAiContext>[0] & { id?: string },
   config: Parameters<typeof resolveSessionAiContext>[1]
     & Pick<WandConfig, "systemAiCli" | "systemAiModel">
-    & Partial<Pick<WandConfig, "defaultCwd" | "harness">>,
+    & Partial<Pick<WandConfig, "defaultCwd" | "defaultProvider" | "harness">>,
   systemEmployee?: SiliconEmployee | null,
   free?: EmployeeTextDeps["free"],
+  recording?: { storage: WandStorage; purpose?: SystemAiPurpose },
 ): SessionAiContext {
-  const sessionContext = resolveSessionAiContext(snapshot, config);
   // 候选里的「跟随默认模型」在这里就换成具体的 Wand 默认模型：降级到下一个 provider
   // 时不能拿上一个 provider 的模型，也不能把决定权交给 CLI 自己的默认值。
   // Keep the configured chain here; model groups are expanded once at execution.
@@ -90,12 +96,30 @@ export function resolveSystemAiContext(
     ...candidate,
     model: candidate.model ?? normalizeModel(getDefaultModelForProvider(config, candidate.provider)),
   }));
+  // System work belongs to its configured role, not the source session's possibly removed provider/model.
+  const fallbackProvider = isSessionProvider(config.defaultProvider) ? config.defaultProvider
+    : isSessionProvider(snapshot.provider) ? snapshot.provider : "pi";
+  const sessionContext: SessionAiContext = systemEmployee ? {
+    provider: chain[0]?.provider ?? fallbackProvider,
+    model: chain[0]?.model,
+    thinkingEffort: config.defaultThinkingEffort,
+    inheritEnv: config.inheritEnv,
+    ...(config.modelGroups?.length ? { modelGroups: config.modelGroups } : {}),
+  } : resolveSessionAiContext(snapshot, config);
   const owned: SessionAiContext = {
     ...sessionContext,
     ...(chain.length ? { cliCandidates: chain } : {}),
     ...(chain.some(candidate => candidate.engine === "sdk") ? { employeeText: { config, ...(free ? { free } : {}) } } : {}),
     ...(systemEmployee ? { employeeChannelOnly: true } : {}),
     ...(isSystemSiliconEmployee(systemEmployee) ? { opsPersona: systemEmployee!.prompt } : {}),
+    ...(recording ? {
+      employeeChannelOnly: true,
+      purpose: recording.purpose,
+      traceFactory: { start: (purpose, request, cwd) => {
+        if (!systemEmployee) throw new Error("系统默认 AI 员工尚未初始化，未执行模型；请检查服务初始化。");
+        return systemAiSessions(recording.storage).forEmployee(systemEmployee, snapshot.id).start(purpose, request, cwd);
+      } } satisfies AiCallTraceFactory,
+    } : {}),
   };
   // 内置员工可用时，Wand 自有调用一律按它的候选链：provider/model 取首个已安装的
   // 候选（两条路都一致），整条链留给运行期降级。

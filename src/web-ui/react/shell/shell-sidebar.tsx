@@ -734,14 +734,14 @@ export function ShellSidebar() {
         <Flex vertical align="center" className="sidebar-navigation-rail">
           <div className="sidebar-rail-scroll">
             <WandBrandMark className="sidebar-brand-mark" style={{ width: "var(--conversation-brand-size, 24px)", height: "var(--conversation-brand-size, 24px)" }} />
-            <ConversationNavigation activePage={settings.open ? null : taskBoard.open ? taskBoard.page === "board" ? "board" : taskBoard.page === "schedules" ? "schedules" : "teams"
+            <ConversationNavigation activePage={settings.open ? null : taskBoard.open ? taskBoard.page === "board" ? "board" : taskBoard.page === "schedules" ? "schedules" : taskBoard.page === "calendar" ? "calendar" : "teams"
               : conversationState.directory ? "teams" : conversationState.mode} teamAttention={teamAttention}
               onNavigate={(page) => {
                 setAttentionOpen(false);
                 settingsController.close();
                 peek.close();
-                if (page === "board" || page === "teams" || page === "schedules") {
-                  taskBoardController.open(snapshot.selected?.workspaceId ?? "", snapshot.selected?.id ?? "", page);
+                if (page === "board" || page === "teams" || page === "schedules" || page === "calendar") {
+                  taskBoardController.open(page === "calendar" ? "" : snapshot.selected?.workspaceId ?? "", page === "calendar" ? "" : snapshot.selected?.id ?? "", page);
                 } else {
                   taskBoardController.close();
                   if (page === "contacts") conversationUi.directory(true);

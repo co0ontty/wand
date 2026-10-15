@@ -60,7 +60,7 @@ Node 版本以 `.nvmrc` 为准。只检出需要的子模块：服务端构建�
 
 ## Web UI 与多端
 
-- 手改 browser/react、`src/web-ui/content/styles.css` 和构建脚本，不手改打包 JS、tailwind/vendor、`src/web-ui/embedded-assets.ts` 或 `dist/`；通过构建再生成。保留自更新期间的资产回退和正确缓存，预算可以随需求调整，但说明实际加载影响，不绕过门禁。
+- 手改 browser/react、`src/web-ui/content/styles.css` 和构建脚本，不手改打包 JS、tailwind/vendor、`src/web-ui/embedded-assets.ts` 或 `dist/`；通过构建再生成。保留自更新期间的资产回退和正确缓存；bundle 预算分硬上限与基线棘轮，功能级增长用 `npm run budget:accept` 刷新 `scripts/bundle-budget-baseline.json` 并在提交里说明加载影响，改动硬上限才需要产品取舍，都不绕过门禁。
 - 优先复用公共组件、主题与语义 token；布局、尺寸、分包和内部实现可按需求演进，不把历史像素值、展开方向或某一端布局当永久限制。多端对齐与修改一致性：以后所有功能、界面与交互修改，桌面端 Mac 与 Web 保持一致，移动端 Android（安卓）与 iOS 保持一致；涉及任一端修改时同步检查并修改同组另一端，保持行为与界面语义一致，不只更新单端。允许平台原生实现差异；构建、验证与交付分别按各端规则执行，不能把一端通过当作双端通过。
 - Web React Shell 与 vanilla 会话/终端层仍并存；`?reactUi=0` 只回滚通用对话框/通知，不回滚 Shell。修改相关链路时核对两层适配与受影响的回滚路径。
 

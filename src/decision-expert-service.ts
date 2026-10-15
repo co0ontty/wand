@@ -7,8 +7,10 @@ import { isOpenRouterFreeSelector, type OpenRouterFreeModelsService } from "./op
 import { abortableEmployeeText, employeeTextCandidates, prepareEmployeeTextCandidate } from "./employee-text.js";
 import type { AiTextRequest, WandConfig } from "./types.js";
 import type { WandTaskAgent } from "./task-types.js";
+import { AiCallTraceError, type AiCallTraceFactory, type AiCallTrace } from "./system-ai-call.js";
 
 interface DecisionExpertDeps {
+  trace?(employee: SiliconEmployee): AiCallTraceFactory;
   employee(): SiliconEmployee | null;
   local: Pick<DecisionService, "status" | "evaluate">;
   free: Pick<OpenRouterFreeModelsService, "status" | "resolveForCall">;
@@ -57,7 +59,9 @@ export class DecisionExpertService {
       system: `${employee.prompt}\n只输出JSON对象 {"answers":{...}}。对每题保留type；choice给choice和所有criteria的probabilities(总和1)，score给score和以0开始索引的probabilities(总和1)，noul给0到1的noul。不得执行操作或增加候选。概率是实验性辅助而非授权。`,
       prompt: JSON.stringify(request),
     };
+    let trace: AiCallTrace | undefined;
     try {
+      trace = this.deps.trace?.(employee).start("decision", prompt, this.deps.config.defaultCwd);
       for (const { agent, index: candidate } of candidates) {
         cancelled();
         const deadline = new AbortController();
@@ -73,13 +77,17 @@ export class DecisionExpertService {
               || !hardware.suitable || !local.enabled || !local.configured || !local.supported) {
               throw new DecisionError("UNAVAILABLE", "LAYA 不可用。", 503);
             }
+            trace?.localStarted(agent.model);
             stage = "execution"; executed = true;
             const localResult = await abortableEmployeeText(this.deps.local.evaluate(request, caller, attempt), attempt);
             stage = "result";
             const result = parseDecisionResult(localResult, request, { model: localResult.model, runtime: "laya-mlx" });
             cancelled(); attempt.throwIfAborted();
+            trace?.candidateSucceeded(JSON.stringify(localResult), result);
+            trace?.complete();
             return { ...result, executor: { employeeId: employee.id, candidate, source: "local" } };
           }
+          trace?.candidateStarted(agent);
           let run: () => Promise<{ answers: unknown; inputTokens: number; outputTokens: number; model: string; available?: boolean }>;
           if (this.deps.generate) {
             run = () => this.deps.generate!(agent, request, employee, attempt);
@@ -91,7 +99,7 @@ export class DecisionExpertService {
             let usage: { inputTokens: number; outputTokens: number; model: string } | undefined;
             try {
               generate = await abortableEmployeeText((this.deps.prepare ?? ((next, text, checkedSignal) => prepareEmployeeTextCandidate({
-                config: this.deps.config, free: this.deps.free, onUsage: value => { usage = value; },
+                config: this.deps.config, free: this.deps.free, callSessionId: trace?.sessionId, onUsage: value => { usage = value; trace?.usageReported(value); },
               }, next, text, checkedSignal)))(agent, prompt, check), check);
             } finally { clearTimeout(checkTimer); }
             run = async () => {
@@ -110,9 +118,13 @@ export class DecisionExpertService {
             request, { model: generated.model, runtime: "decision-expert" });
           cancelled(); attempt.throwIfAborted();
           if (generated.available === false) result.usage.available = false;
+          trace?.candidateSucceeded(JSON.stringify(generated.answers), result);
+          trace?.complete();
           return { ...result, executor: { employeeId: employee.id, candidate,
             source: isOpenRouterFreeSelector(agent.model) ? "free-group" : agent.engine === "sdk" ? "sdk" : "cli" } };
         } catch (error) {
+          if (error instanceof AiCallTraceError) throw error;
+          trace?.candidateFailed(agent, error, stage);
           cancelled();
           const timedOut = deadline.signal.aborted || error instanceof DecisionError && error.code === "TIMEOUT";
           sawTimeout ||= timedOut;
@@ -126,6 +138,9 @@ export class DecisionExpertService {
       const timedOut = sawTimeout && !otherExecutionFailure;
       const code = timedOut ? "TIMEOUT" : executed ? "EXECUTION_FAILED" : "CONFIGURATION_REQUIRED";
       throw new DecisionError(code, `${employee.name}已尝试全部配置的决策候选，均未成功${failures.length ? `（${failures.join("；").slice(0, 2048)}）` : ""}；请检查该员工调用链。`, timedOut ? 504 : 503);
+    } catch (error) {
+      trace?.fail(error, signal?.aborted === true);
+      throw error;
     } finally { this.active -= 1; }
   }
 }

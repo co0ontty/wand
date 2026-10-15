@@ -30,6 +30,9 @@ import { firstLayoutTabId, wrapLegacyTaskLayout } from "./layout-tree.js";
 import { parentTaskIdFrom } from "./task-agent-parsing.js";
 import { taskTitleService, refreshAutoBoardTaskTitles, type AutoTaskTitleOptions } from "./task-title-service.js";
 import { organizeSelectedByTitle, titleJudgeForStorage } from "./task-title-organize-service.js";
+import { systemAiSessions } from "./system-ai-session-recorder.js";
+import { registerConversationOrganizeRoutes } from "./server-conversation-organize-routes.js";
+import type { ConversationGroupingJudge } from "./conversation-organize.js";
 import { TITLE_ORGANIZE_MAX_SESSIONS, TITLE_ORGANIZE_MAX_TASKS, type TitleJudge } from "./task-title-organize.js";
 import { provisionalTaskTitleFromDescription } from "./task-title.js";
 import { badRequest, surfaceDomainError } from "./http-error.js";
@@ -375,9 +378,15 @@ export function registerWorkspaceRoutes(
   storage: WandStorage,
   sessions?: SessionRegistry,
   titleOptions: AutoTaskTitleOptions = {},
-  organize: { judge?: TitleJudge } = {},
+  organize: { judge?: TitleJudge; conversationJudge?: ConversationGroupingJudge; summarize?: (text: string, index: number, total: number, signal: AbortSignal) => Promise<string> } = {},
 ): void {
   taskTitleService(storage, titleOptions);
+  registerConversationOrganizeRoutes(app, storage, {
+    titleOptions, judge: organize.conversationJudge, summarize: organize.summarize,
+    listSessions: () => sessions?.listSlim() ?? storage.loadSessionsSlim(),
+    getSession: id => sessions?.get(id) ?? storage.getSession(id),
+    refreshSession: id => sessions?.refreshSessionWorkspace(id),
+  });
   // 列出所有项目（按创建时间降序：新建在前，打开不会改位置）
   app.get("/api/workspaces", (req, res) => {
     const includeArchived = req.query.includeArchived === "1";
@@ -577,10 +586,14 @@ export function registerWorkspaceRoutes(
       res.status(400).json({ error: `一次最多归类 ${TITLE_ORGANIZE_MAX_TASKS} 个任务、${TITLE_ORGANIZE_MAX_SESSIONS} 个会话。` });
       return;
     }
+    const callSessionIds: string[] = [];
     const result = await organizeSelectedByTitle(storage, { taskIds, sessionIds, mode: body?.mode === "all" ? "all" : "auto" }, {
-      judge: organize.judge ?? titleJudgeForStorage(storage, titleOptions),
+      judge: organize.judge ?? titleJudgeForStorage(storage, titleOptions, id => callSessionIds.push(id)),
       refreshSession: (sessionId) => sessions?.refreshSessionWorkspace(sessionId),
     });
+    for (const id of callSessionIds) systemAiSessions(storage).appendOutcome(id, "实际任务归类结果", result);
+    res.setHeader("X-Wand-System-Call-Ids", callSessionIds.slice(0, 64).join(","));
+    res.setHeader("X-Wand-System-Call-Count", String(callSessionIds.length));
     if (!result.foundTasks && body?.target === undefined) {
       res.status(404).json({ error: "未找到所选任务。" });
       return;

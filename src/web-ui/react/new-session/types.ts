@@ -105,6 +105,7 @@ interface PtyNewSessionCreateRequest extends NewSessionCreateRequestBase {
   command: string;
   /** PTY 会话同样按模型启动 CLI（服务端 processCommandForMode 注入 --model）。 */
   model?: string;
+  thinkingEffort?: string;
   cols?: number;
   rows?: number;
 }
@@ -152,5 +153,6 @@ export interface NewSessionRuntimeAdapter {
   /** 用户在对话框里选了模型：写回按 provider 的记忆，下次打开默认沿用。 */
   rememberModel(provider: NewSessionProvider, model: string): void;
   prepareCreate(kind: NewSessionKind, request?: NewSessionCreateRequest): Promise<NewSessionTerminalDimensions>;
-  completeCreate(request: NewSessionCreateRequest, created: NewSessionCreated): Promise<void>;
+  completeCreate(request: NewSessionCreateRequest, created: NewSessionCreated,
+    initialDraft?: { key: string; revision: number }): Promise<void>;
 }

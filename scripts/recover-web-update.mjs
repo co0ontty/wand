@@ -1,5 +1,4 @@
 import { accessSync, constants, chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -57,23 +56,28 @@ export function chooseInstallPrefix(defaultPrefix, home, configPath) {
   return writable ? defaultPrefix : path.join(home, ".wand/runtime/npm");
 }
 
-function acquireRecoveryLock(root) {
-  const lockPath = path.join(root, ".wand-update-lock");
-  mkdirSync(root, { recursive: true });
-  const token = randomUUID();
-  try { mkdirSync(lockPath, { mode: 0o700 }); }
-  catch (error) {
-    if (error.code === "EEXIST") throw new Error("另一个更新仍持有安装锁，旧安装未修改。");
-    throw error;
+/** Same protocol as Web updates/start.sh, including a live parent's lease.
+ * Acquire before draining: a competing install must not close task admission.
+ * The module is copied into the independent recovery runtime, never loaded
+ * from the installation that this transaction is about to replace.
+ */
+export async function withRecoveryLock(root, guardPath, action) {
+  const directory = path.dirname(guardPath);
+  const lockModule = path.join(directory, existsSync(path.join(directory, "deployment-lock.js"))
+    ? "deployment-lock.js" : "deployment-lock.ts");
+  const { acquireDeploymentLock, releaseDeploymentLock } = await import(pathToFileURL(lockModule).href);
+  const previous = process.env.WAND_DEPLOYMENT_LOCKS;
+  const inherited = previous ? JSON.parse(previous) : [];
+  if (!Array.isArray(inherited)) throw new Error("无效的部署锁回执。");
+  const lock = acquireDeploymentLock(path.join(root, ".wand-update-lock"), { inherited });
+  try {
+    process.env.WAND_DEPLOYMENT_LOCKS = JSON.stringify([...inherited, lock]);
+    return await action();
+  } finally {
+    if (previous === undefined) delete process.env.WAND_DEPLOYMENT_LOCKS;
+    else process.env.WAND_DEPLOYMENT_LOCKS = previous;
+    releaseDeploymentLock(lock);
   }
-  try { writeFileSync(path.join(lockPath, "owner.json"), JSON.stringify({ pid: process.pid, token, createdAt: Date.now() }), { mode: 0o600 }); }
-  catch (error) { rmSync(lockPath, { recursive: true, force: true }); throw error; }
-  return () => {
-    try {
-      const owner = JSON.parse(readFileSync(path.join(lockPath, "owner.json"), "utf8"));
-      if (owner.pid === process.pid && owner.token === token) rmSync(lockPath, { recursive: true, force: true });
-    } catch { /* Never remove a changed or unknown lock. */ }
-  };
 }
 
 function copyEntry(source, destination) {
@@ -109,6 +113,10 @@ function stopManagedService(platform, scope, serviceFile) {
 }
 
 export async function recoverPreparedInstallation(options) {
+  return withRecoveryLock(options.root, options.guardPath, () => applyPreparedInstallation(options));
+}
+
+async function applyPreparedInstallation(options) {
   const { prepared, root, bin, configPath, scope, platform, healthPath, guardPath } = options;
   const health = await import(pathToFileURL(healthPath).href);
   const guard = await import(pathToFileURL(guardPath).href);
@@ -118,7 +126,6 @@ export async function recoverPreparedInstallation(options) {
   try { originalPid = JSON.parse(readFileSync(path.join(configDir, "wand.pid"), "utf8")).pid; }
   catch (error) { if (error.code !== "ENOENT") throw error; }
   const wasRunning = alive(originalPid);
-  const unlock = acquireRecoveryLock(root);
   let stageRoot, backupRoot, backup, oldBin, previousService;
   let movedOld = false, promoted = false, registered = false;
   const serviceFile = scope === "standalone" ? null : platform === "Darwin"
@@ -244,7 +251,7 @@ export async function recoverPreparedInstallation(options) {
         [...(privileged ? ["systemctl"] : []), ...(scope === "user" ? ["--user"] : []), "start", "wand.service"], { stdio: "inherit" });
     } else if (wasRunning && !alive(originalPid) && savedBin) await startStandalone();
     throw error;
-  } finally { unlock(); }
+  }
 }
 
 let main = false;

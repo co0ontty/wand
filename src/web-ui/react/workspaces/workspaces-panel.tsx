@@ -2,7 +2,7 @@ import { isArchiveBlocked } from "../../../archive-policy.js";
 import { SidebarPopupOwnerContext, SidebarSurfacesContext, useSidebarPopupOwner, useSidebarPopupState } from "./sidebar-popup-owner";
 import { ConversationMorphIcon } from "../conversations/controls";
 import { SidebarRowMenu } from "./sidebar-row-menu";
-import { useTaskOrganization } from "./task-organization";
+import { TaskOrganizeButton, useTaskOrganization } from "./task-organization";
 import { SidebarLabelTooltip } from "./sidebar-label-tooltip";
 import { SidebarSessionMenu } from "./sidebar-session-menu";
 import { confirmSidebarAction, confirmClearSessions } from "./sidebar-menu-confirm";
@@ -70,7 +70,6 @@ import {
   describeManagedAction,
   describeManagedDelete,
   describeManagedResult,
-  describeOrganizeOutcome,
   isManagedGroupSelected,
   pruneManagedSelection,
   sidebarManageCount,
@@ -983,7 +982,8 @@ function TaskGroupSection({
             aria-label={groupActivity.description}>{groupActivity.label ? <Badge status={groupActivity.tone === "warning" ? "warning" : groupActivity.tone === "success" ? "success" : "processing"}/> : null}</span>
         </WandNavigationLink>
         </SidebarLabelTooltip>
-      </Flex>} menu={{ items: [
+      </Flex>} menu={{ multiple: true, items: [
+        // Ant keeps this non-selectable submenu open across preview/confirm/progress.
         { key: "new", disabled: deleting || group.global, icon: <WandIcon name="plus"/>, label: "在此新建会话" },
         { key: "organize", disabled: deleting, icon: <WandIcon name="folder"/>, label: organization.label, children: organization.items },
         ...(canRenameDirectory ? [{ key: "rename", disabled: deleting, icon: <WandIcon name="edit"/>, label: "重命名目录" }] : []),
@@ -994,9 +994,8 @@ function TaskGroupSection({
       ], onClick: ({ key, domEvent }) => {
         domEvent.stopPropagation();
         if (deleting) return;
-        if (key === "organize-auto" || key === "organize-all") {
-          void organization.run(key === "organize-all" ? "all" : "auto");
-        } else if (key === "new") {
+        if (organization.handleMenuKey(key)) return;
+        if (key === "new") {
           setMenuOpen(false); onOpenDialog?.();
           newSessionController.open({ initialCwd: group.workspaceCwd,
             ...(group.synthetic || group.global ? {} : { workspaceId: group.workspaceId }) });
@@ -1320,7 +1319,7 @@ function SidebarWorkspacesPanel({
     searchButtonRef.current?.focus({ preventScroll: true });
   }, [searchVisible]);
   const [selection, setSelection] = React.useState<SidebarManageSelection>(EMPTY_SIDEBAR_MANAGE_SELECTION);
-  const [confirmingManage, setConfirmingManage] = React.useState<"archive" | "delete" | "organize" | false>(false);
+  const [confirmingManage, setConfirmingManage] = React.useState<"archive" | "delete" | false>(false);
   const [manageBusy, setManageBusy] = React.useState(false);
   const prunedSelection = pruneManagedSelection(selection, visibleGroups);
   const selectedCount = sidebarManageCount(prunedSelection);
@@ -1328,7 +1327,7 @@ function SidebarWorkspacesPanel({
   const hasManageSessions = prunedSelection.sessionIds.length > 0;
   const hasManageDestructive = hasManageDirectories || hasManageSessions;
   const hasManageArchive = prunedSelection.taskIds.length > 0 || prunedSelection.sessionIds.length > 0;
-  const hasManageOrganize = prunedSelection.taskIds.length > 0;
+  const hasManageOrganize = prunedSelection.taskIds.length > 0 || prunedSelection.sessionIds.length > 0;
   const selectedArchiveBlocked = sourceGroups.some(group =>
     group.tasks.some(task => (prunedSelection.taskIds.includes(task.id) && (task.canArchive === false || task.sessions.some(isArchiveBlocked)))
       || task.sessions.some(session => prunedSelection.sessionIds.includes(session.id) && (session.canArchive === false || isArchiveBlocked(session))))
@@ -1444,12 +1443,11 @@ function SidebarWorkspacesPanel({
   }, [selectedSessionId, activeTaskId]);
 
   // 批量操作里任务和会话是同一套逻辑：收默认归档（软处理）、删除只作用于显式选中的终端或目录。
-  const applyManagedSelection = async (mode: "archive" | "delete" | "organize"): Promise<void> => {
+  const applyManagedSelection = async (mode: "archive" | "delete"): Promise<void> => {
     if (manageBusy) return;
     if (mode === "archive" && selectedArchiveBlocked) return;
     const resolved = prunedSelection;
     if (sidebarManageCount(resolved) === 0) return;
-    if (mode === "organize" && resolved.taskIds.length === 0) return;
     // 危险按钮只删选中的会话与目录；若期间数据刷新把它们都挤掉了，直接在加锁前退出。
     if (mode === "delete" && (resolved.directoryIds?.length ?? 0) === 0 && resolved.sessionIds.length === 0) return;
     setManageBusy(true);
@@ -1457,21 +1455,6 @@ function SidebarWorkspacesPanel({
     setManageFeedbackLabel("");
     setManageFeedbackReason("");
     try {
-      if (mode === "organize") {
-        const organized = await httpWorkspacesRepository.organizeByTitle(resolved.taskIds, resolved.sessionIds);
-        const outcome = describeOrganizeOutcome(organized);
-        setManageFeedback("done");
-        setManageFeedbackLabel(outcome.label);
-        setManageFeedbackReason(outcome.reason);
-        await runtime()?.refreshSessions();
-        await reload();
-        clearManageFeedbackTimer();
-        manageFeedbackTimer.current = window.setTimeout(() => {
-          manageFeedbackTimer.current = null;
-          exitManageMode();
-        }, MOTION_DWELL_RESULT_SENTENCE_MS);
-        return;
-      }
       if (mode === "delete") {
         const directoryIds = resolved.directoryIds ?? [];
         for (const workspaceId of directoryIds) {
@@ -1572,25 +1555,14 @@ function SidebarWorkspacesPanel({
                         ? manageFeedbackLabel
                         : confirmingManage === "delete"
                           ? `确认${describeManagedDelete(prunedSelection, sourceGroups)}`
-                          : confirmingManage === "organize"
-                            ? "确认自动任务归类"
-                            : `确认${describeManagedAction(prunedSelection)}`}
+                          : `确认${describeManagedAction(prunedSelection)}`}
                   </WandButton>
                 </>
               ) : (
                 <>
-                  {hasManageOrganize && (
-                    <WandButton
-                      className="sidebar-manage-action"
-                      kind="secondary"
-                      size="small"
-                      disabled={manageBusy || selectedCount === 0}
-                      title="仅归类系统自动标题的任务，跳过用户自定标题；按会话标题内容判断，只共享关键词的不移动。"
-                      onClick={() => setConfirmingManage("organize")}
-                    >
-                      自动任务归类
-                    </WandButton>
-                  )}
+                  {hasManageOrganize && !manageBusy && <TaskOrganizeButton
+                    target={{ kind: "selection", taskIds: prunedSelection.taskIds, sessionIds: prunedSelection.sessionIds }}
+                    onChanged={async () => { await runtime()?.refreshSessions(); await reload(); }}/>}
                   {hasManageArchive && (
                     <WandButton
                       className="sidebar-manage-action"

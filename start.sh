@@ -803,9 +803,10 @@ if [[ "$DO_BUILD" == "1" ]]; then
     # npm run build 的命令回显本身就含 check-bundle-budget.js；只有预算检查明确
     # 打出 FAILED 标记，才能把构建失败归因于预算（而非 tsc / bundler 等）。
     if grep -q '^\[bundle-budget\] FAILED:' "$BUILD_LOG"; then
-      die "构建失败：Web 资产超出首载/复访 bundle 预算。
-   检查上方具体超限项：瘦身、按需加载或在同一个提交里调整 scripts/check-bundle-budget.js
-   的 BUDGET 并说明首载与缓存影响。完整日志：$BUILD_LOG"
+      die "构建失败：Web 资产超出 bundle 预算（硬上限或相对基线的异常增长）。
+   硬上限：瘦身或改按需加载，确属产品取舍才改 scripts/check-bundle-budget.js 的 BUDGET；
+   棘轮超限：确认增长符合预期后运行 npm run budget:accept 刷新基线，并在提交里说明首载影响。
+   完整日志：$BUILD_LOG"
     fi
     die "构建失败。完整日志：$BUILD_LOG"
   fi

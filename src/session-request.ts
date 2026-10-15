@@ -1,4 +1,5 @@
 import { isExecutionMode } from "./config.js";
+import { isSystemAiCall } from "./system-ai-call.js";
 import type { ExecutionMode, SessionSource } from "./types.js";
 
 export function parseExecutionMode(value: unknown, fallback: ExecutionMode): ExecutionMode {
@@ -22,6 +23,7 @@ export function parseSessionCreationOrigin(
     throw new Error("automationId 必须是非空字符串。");
   }
   const automationId = rawAutomationId?.trim();
+  if (isSystemAiCall({ automationId })) throw new Error("automationId 使用了系统调用的保留命名空间。");
   if (rawAutomationId !== undefined && !automationId) {
     throw new Error("automationId 必须是非空字符串。");
   }

@@ -56,6 +56,7 @@ export function employeeDraftAiOptions(storage: WandStorage, config?: WandConfig
     config,
     hr,
     free,
+    { storage },
   ), opsPersona: hr.prompt };
 }
 

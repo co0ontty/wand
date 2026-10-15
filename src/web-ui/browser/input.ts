@@ -2531,7 +2531,8 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           return;
         }
         paintRunningStatusBar(host, selected
-          ? { ...selected, ptyRunning: computeRunningSignal(selected).ptyRunning }
+          ? { ...selected, ptyRunning: computeRunningSignal(selected).ptyRunning,
+              turnStartedAt: selected.ptyTurnStartedAt, lastActivityAt: selected.ptyLastActivityAt }
           : null);
       }
 

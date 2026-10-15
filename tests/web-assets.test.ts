@@ -105,7 +105,8 @@ test("the shell transfers only HTML repeatedly and serves versioned, cacheable a
       .replace('"${wandConfigPath}"', JSON.stringify(configPath))
       .replace("${aiTeamsChunkSrc}", `/assets/ai-teams.js?v=${chunkHash}`)
       .replace("${plushAvatarChunkSrc}", `/assets/plush-avatar.js?v=${plushHash}`)
-      .replace("${browserModuleSrc}", `/assets/${EMBEDDED_WEB_ASSETS.browserModuleManifest.entry}`);
+      .replace("${browserModuleSrc}", `/assets/${EMBEDDED_WEB_ASSETS.browserModuleManifest.entry}`)
+      .replace('"${browserModuleImports}"', JSON.stringify(EMBEDDED_WEB_ASSETS.browserModuleManifest.imports ?? {}));
     const oldJs = await fetch(`${base}/assets/app.js?v=${hashOf(embeddedJs)}`);
     assert.equal(await oldJs.text(), embeddedJs);
     assert.match(oldJs.headers.get("cache-control") ?? "", /private.*immutable/);

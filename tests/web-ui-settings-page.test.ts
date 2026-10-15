@@ -83,7 +83,7 @@ test("an expired page session offers admin login in place and never navigates ba
 
 test("employees stay first, default to my profile and share the identity avatar editor", () => {
   const host = source("src/web-ui/react/settings/host.tsx");
-  assert.match(source("src/web-ui/react/settings/navigation.tsx"), /profile: \{ label: "员工"/, "分组标签有名字");
+  assert.match(source("src/web-ui/react/settings/navigation.tsx"), /profile: \{ label: "我的信息"/, "分组标签有名字");
   assert.match(host, /const ADMIN_TAB_ORDER: SettingsTab\[\] = \[\s*"profile",/, "管理员进设置先看到自己的资料");
   assert.match(host, /profile: <EmployeesSettingsTab \{\.\.\.props\} \/>/);
   const tabs = source("src/web-ui/react/settings/tabs.tsx");

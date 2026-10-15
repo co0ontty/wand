@@ -2,7 +2,7 @@ import * as React from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { WandUiProvider } from "../react/theme";
 import { RunningStatusBar } from "../react/chat/running-status-bar";
-import type { RunningActivityShape } from "../running-activity";
+import { projectRunningStatus, type RunningActivityShape } from "../running-activity";
 
 interface Island {
   root: Root;
@@ -14,7 +14,15 @@ const islands = new Map<HTMLElement, Island>();
 function keyOf(activity: RunningActivityShape | null | undefined): string {
   if (!activity) return "";
   const structured = activity.structuredState;
-  return [
+  const projection = projectRunningStatus(activity);
+  return JSON.stringify([
+    activity.id ?? "",
+    activity.archived === true,
+    projection.stage,
+    projection.label,
+    projection.action,
+    projection.toolId,
+    structured?.activeRequestId ?? "",
     activity.status ?? "",
     activity.ptyRunning ? "1" : "0",
     activity.permissionBlocked ? "1" : "0",
@@ -26,7 +34,7 @@ function keyOf(activity: RunningActivityShape | null | undefined): string {
     activity.turnStartedAt ?? "",
     activity.lastActivityAt ?? "",
     activity.queuedMessages?.length ?? 0,
-  ].join("|");
+  ]);
 }
 
 function disposeDisconnected(): void {

@@ -283,7 +283,7 @@ export async function generateSiliconEmployeeDraft(
   const providers = available.length ? available : [options.preferredProvider ?? "claude", ...SESSION_PROVIDERS];
   const request = buildEmployeeDraftPrompt(trimmed, providers, options.existingNames);
   try {
-    return await callConfiguredAiText(request, options.cwd || process.cwd(), options.language ?? "", ai,
+    return await callConfiguredAiText(request, options.cwd || process.cwd(), options.language ?? "", { ...ai, purpose: "employee-draft" },
       (raw) => parseSiliconEmployeeDraft(raw, {
         allowedProviders: providers, fallbackProvider: providers[0], existingNames: options.existingNames,
       }));

@@ -205,6 +205,42 @@ async function main(): Promise<void> {
       }
       break;
     }
+    case "employee:list":
+    case "workspace:list":
+    case "session:create":
+    case "session:resume":
+    case "schedule:list":
+    case "schedule:read":
+    case "schedule:create":
+    case "schedule:update": {
+      const { parseSystemCliCommand } = await import("./system-cli.js");
+      const operationArgs = args.slice(1);
+      for (const flag of ["-c", "--config"]) {
+        const index = operationArgs.indexOf(flag);
+        if (index !== -1) {
+          if (!operationArgs[index + 1] || operationArgs[index + 1]!.startsWith("-")) throw new Error("配置路径缺失。");
+          operationArgs.splice(index, 2);
+        }
+      }
+      const operation = await parseSystemCliCommand(command, operationArgs);
+      const { config } = await loadConfigForCli(configPath);
+      process.stdout.write(`${JSON.stringify(await operation(new WandCliApi(config)), null, 2)}\n`);
+      break;
+    }
+    case "system:skills": {
+      for (let index = 1; index < args.length; index += 2) {
+        if (!["--providers", "--config", "-c"].includes(args[index]!)
+          || !args[index + 1] || args[index + 1]!.startsWith("-")) {
+          throw new Error("用法：wand system:skills [--providers pi,claude,...] [-c <config-path>]");
+        }
+      }
+      const { installSystemSkill } = await import("./system-skill.js");
+      const { SESSION_PROVIDERS } = await import("./provider-catalog.js");
+      const selected = readFlagValue(args, "--providers")?.split(",") ?? [...SESSION_PROVIDERS];
+      if (selected.some(provider => !SESSION_PROVIDERS.includes(provider as typeof SESSION_PROVIDERS[number]))) throw new Error("未知CLI技能目标。");
+      process.stdout.write(`${JSON.stringify(await installSystemSkill(configPath, selected as typeof SESSION_PROVIDERS[number][]))}\n`);
+      break;
+    }
     case "session:list":
     case "session:read":
     case "session:send":
@@ -319,6 +355,15 @@ Commands:
   wand storage:cleanup [--apply]  Inspect/reclaim abandoned Wand runtime storage
 
 Agent runtime:
+  wand system:skills [--providers pi,claude,...]  Install the managed wand-system skill
+  wand employee:list [--include-archived]  List employee definitions (not private knowledge)
+  wand workspace:list       List project directories
+  wand session:create --stdin  Create an employee session from JSON
+  wand session:resume <id> --stdin  Continue the exact structured session with JSON input
+  wand schedule:list [--include-cancelled]
+  wand schedule:read <id>    Read schedule and execution history
+  wand schedule:create --stdin  Create a schedule from JSON (requestId required)
+  wand schedule:update <id> --stdin  Edit/pause/cancel (revision required)
   wand session:list         List sessions as JSON
   wand inbox:list           List mission inbox items as JSON
   wand session:read <id>    Read a complete session snapshot

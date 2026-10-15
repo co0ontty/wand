@@ -63,8 +63,11 @@ export interface OrganizePlan {
 }
 
 export function titleIdentity(title: string): string {
+  // Symbols and inner punctuation can carry identity (C++ / C#, 1.0 / 10).
+  // Only ignore spacing, case and terminal sentence marks; other differences need judgment.
   return title.normalize("NFKC")
-    .replace(/[\p{P}\p{S}]+/gu, " ")
+    .trim()
+    .replace(/[。.!！?？]+$/u, "")
     .replace(/\s+/g, "")
     .toLowerCase();
 }
@@ -73,8 +76,10 @@ export function isClassifiableTitle(title: string): boolean {
   const trimmed = title.replace(/\s+/g, " ").trim();
   if (trimmed.length < 2 || trimmed === "未命名任务" || trimmed === "新任务") return false;
   const identity = titleIdentity(trimmed);
-  if (!identity || PLACEHOLDER_TITLES.has(identity)) return false;
-  if (/^(?:claude|codex|opencode|grok|qoder|pi|终端)\d+$/i.test(identity)) return false;
+  // Placeholder recognition retains old formatting tolerance without using this lossy key for grouping.
+  const placeholderIdentity = identity.replace(/[\p{P}\p{S}]+/gu, "");
+  if (!placeholderIdentity || PLACEHOLDER_TITLES.has(placeholderIdentity)) return false;
+  if (/^(?:claude|codex|opencode|grok|qoder|pi|终端)\d+$/i.test(placeholderIdentity)) return false;
   return true;
 }
 
@@ -304,7 +309,8 @@ export async function planTitleOrganization(
   const judgeTasks = [...unresolvedTasks].flatMap((id) => {
     const task = byId.get(id);
     if (!task) return [];
-    const hasPeer = targets.some((peer) => peer.id !== task.id && peer.workspaceId === task.workspaceId && peer.status === "doing");
+    const hasPeer = targets.some((peer) => peer.id !== task.id && peer.workspaceId === task.workspaceId
+      && sameDirectory(peer.directoryKey, task.directoryKey) && peer.status === "doing");
     return hasPeer ? [task] : [];
   });
   const judgeNeeded = judgeSessions.length > 0 || judgeTasks.length > 0;
@@ -314,7 +320,8 @@ export async function planTitleOrganization(
     let judgment: TitleJudgment;
     try {
       judgment = await judgeTitleOrganization({
-        tasks: targets.filter((task) => judgeTasks.some((item) => item.workspaceId === task.workspaceId) || judgeSessions.some((session) => sameDirectory(session.directoryKey, task.directoryKey)))
+        tasks: targets.filter((task) => judgeTasks.some((item) => item.workspaceId === task.workspaceId && sameDirectory(item.directoryKey, task.directoryKey))
+          || judgeSessions.some((session) => sameDirectory(session.directoryKey, task.directoryKey)))
           .map((task) => ({ id: task.id, titles: classifiableTitles(task.titles) })),
         sessions: judgeSessions.map((session) => ({ id: session.id, title: session.title.trim() })),
       }, judge);
@@ -343,7 +350,7 @@ export async function planTitleOrganization(
       const parentWorkspaceTaskId = taskJudgment.get(task.id) ?? null;
       if (!parentWorkspaceTaskId || parentWorkspaceTaskId === task.id) continue;
       const parent = byId.get(parentWorkspaceTaskId);
-      if (!parent || parent.workspaceId !== task.workspaceId || parent.status !== "doing") {
+      if (!parent || parent.workspaceId !== task.workspaceId || !sameDirectory(parent.directoryKey, task.directoryKey) || parent.status !== "doing") {
         if (parentWorkspaceTaskId) refused.push({ id: task.id, kind: "task", reason: "不能归入该任务" });
         continue;
       }

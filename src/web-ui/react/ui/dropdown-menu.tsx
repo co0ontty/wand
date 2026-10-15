@@ -15,6 +15,8 @@ export interface WandDropdownMenuProps {
   defaultOpen?: boolean;
   modal?: boolean;
   onOpenChange?(open: boolean): void;
+  /** Keep native popup open for actions with in-place progress/results. */
+  closeOnSelect?: boolean;
 }
 export interface WandDropdownMenuTriggerProps extends React.ComponentPropsWithRef<"button"> {
   render?: React.ReactElement<React.ComponentPropsWithRef<"button">>;
@@ -42,7 +44,7 @@ type RegisteredItem = { item: Item; marker: HTMLSpanElement | null };
 type RegisterItem = (key: string, item: Item, marker: HTMLSpanElement | null) => () => void;
 const MenuRegistration = React.createContext<RegisterItem | null>(null);
 
-export function WandDropdownMenu({ children, contextTrigger, triggers = ["click"], open, defaultOpen = false, onOpenChange }: WandDropdownMenuProps) {
+export function WandDropdownMenu({ children, contextTrigger, triggers = ["click"], open, defaultOpen = false, onOpenChange, closeOnSelect = true }: WandDropdownMenuProps) {
   const portal = usePortalContainer();
   const triggerRef = React.useRef<HTMLElement>(null);
   const popupRef = React.useRef<HTMLDivElement | null>(null);
@@ -80,7 +82,10 @@ export function WandDropdownMenu({ children, contextTrigger, triggers = ["click"
     className, children: declarations, ...attributes } = content.props;
   return <WandUiBoundary>
     <MenuRegistration.Provider value={register}>{declarations}</MenuRegistration.Provider>
-    <Dropdown ref={triggerRef} open={shown} onOpenChange={change} trigger={triggers}
+    <Dropdown ref={triggerRef} open={shown} onOpenChange={(next, info) => {
+      if (info.source === "menu" && !closeOnSelect) return;
+      change(next);
+    }} trigger={triggers}
       getPopupContainer={() => container ?? portal ?? document.body}
       placement={popupPlacement(side, align)} destroyOnHidden autoFocus
       align={{ offset: popupOffset(side, sideOffset), overflow: { adjustX: true, adjustY: true, shiftX: collisionPadding, shiftY: collisionPadding } }}
@@ -90,8 +95,10 @@ export function WandDropdownMenu({ children, contextTrigger, triggers = ["click"
         const position = a.marker.compareDocumentPosition(b.marker);
         return position & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : position & Node.DOCUMENT_POSITION_PRECEDING ? 1 : 0;
       }).map(entry => entry.item), selectable: false, onClick: () => {
-        selectionFocusTarget.current = triggerRef.current;
-        change(false);
+        if (closeOnSelect) {
+          selectionFocusTarget.current = triggerRef.current;
+          change(false);
+        }
       } }}
       popupRender={menu => <div {...attributes} ref={bindPopup} data-wand-popup-owner={popupOwner ?? attributes.id}>{menu}</div>}>
       {contextTrigger ?? React.cloneElement(trigger!, { "aria-haspopup": "menu", "aria-expanded": shown, "aria-controls": attributes.id })}

@@ -134,7 +134,7 @@ export function registerSessionWorktreeRoutes(app: Express, ctx: SessionRouteCon
       workspaceTaskId?: unknown;
     };
     try {
-      const ai = resolveSystemAiContext(snapshot, config, storage.getSystemSiliconEmployee(), free);
+      const ai = resolveSystemAiContext(snapshot, config, storage.getSystemSiliconEmployee(), free, { storage });
       // 自动 message + 迭代模式：拿本轮提示词当输入；提交成功后标记已用掉。
       const context = await iterationCommitInput(storage, snapshot, body);
       const result = await runQuickCommitWithFallback({
@@ -221,7 +221,7 @@ export function registerSessionWorktreeRoutes(app: Express, ctx: SessionRouteCon
     }
     const body = (req.body ?? {}) as { mode?: unknown; entryIds?: unknown; includeDiff?: boolean };
     try {
-      const ai = resolveSystemAiContext(snapshot, config, storage.getSystemSiliconEmployee(), free);
+      const ai = resolveSystemAiContext(snapshot, config, storage.getSystemSiliconEmployee(), free, { storage });
       const context = await iterationCommitInput(storage, snapshot, body);
       const result = await generateCommitMessageOnly(snapshot.cwd, config.language ?? "", {
         ...ai,
@@ -258,7 +258,7 @@ export function registerSessionWorktreeRoutes(app: Express, ctx: SessionRouteCon
     }
     const body = (req.body ?? {}) as { tag?: string; autoTag?: boolean; push?: boolean };
     try {
-      const ai = resolveSystemAiContext(snapshot, config, storage.getSystemSiliconEmployee(), free);
+      const ai = resolveSystemAiContext(snapshot, config, storage.getSystemSiliconEmployee(), free, { storage });
       const result = await runTagHead({
         cwd: snapshot.cwd,
         language: config.language ?? "",

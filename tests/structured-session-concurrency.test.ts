@@ -117,6 +117,23 @@ test("Claude CLI in-flight turns queue a second message instead of starting conc
   await firstRun;
 });
 
+test("explicit turn stop emits a stopped outcome while the session remains reusable idle", async (t) => {
+  const { manager, claudeRunner, session } = createHarness(t);
+  const outcomes: unknown[] = [];
+  manager.setEventEmitter(event => {
+    if (event.type === "ended") outcomes.push((event.data as { turnOutcome?: string }).turnOutcome);
+  });
+  const run = manager.sendMessage(session.id, "first");
+  await waitFor(() => claudeRunner.starts.length === 1, "first turn did not start");
+  const stopped = manager.stop(session.id);
+  assert.equal(stopped.status, "idle");
+  assert.equal(stopped.structuredState?.inFlight, false);
+  assert.deepEqual(outcomes, ["stopped"]);
+  manager.stop(session.id);
+  assert.deepEqual(outcomes, ["stopped", undefined]);
+  claudeRunner.finish(); await run;
+});
+
 test("a stopped turn cannot overwrite or release a newer turn", async (t) => {
   const { manager, claudeRunner, session } = createHarness(t);
 

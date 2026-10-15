@@ -16,6 +16,10 @@ export class WandCliApi {
     return this.request<T>("POST", pathname, body);
   }
 
+  async patch<T>(pathname: string, body: unknown): Promise<T> {
+    return this.request<T>("PATCH", pathname, body);
+  }
+
   async del<T>(pathname: string): Promise<T> {
     return this.request<T>("DELETE", pathname);
   }
@@ -27,22 +31,24 @@ export class WandCliApi {
     if (!this.cookie) throw new Error("Wand 服务未返回登录会话。");
   }
 
-  private async request<T>(method: "GET" | "POST" | "DELETE", pathname: string, body?: unknown): Promise<T> {
+  private async request<T>(method: "GET" | "POST" | "PATCH" | "DELETE", pathname: string, body?: unknown): Promise<T> {
     if (!this.cookie) await this.login();
     const result = await this.rawRequest(method, pathname, body, this.cookie);
     let parsed: unknown = {};
-    try { parsed = result.body ? JSON.parse(result.body) : {}; } catch { /* handled below */ }
+    try { parsed = result.body ? JSON.parse(result.body) : {}; } catch {
+      throw new Error(`Wand 响应不是有效 JSON (HTTP ${result.status})；${method === "GET" ? "无法确认结果。" : "请求可能已接受，请回读核对，不要重复提交。"}`);
+    }
     const error = parsed && typeof parsed === "object" && "error" in parsed && typeof (parsed as { error?: unknown }).error === "string"
       ? (parsed as { error: string }).error
       : null;
     if (result.status < 200 || result.status >= 300 || error) {
-      throw new Error(error || `Wand 请求失败 (HTTP ${result.status})`);
+      throw new Error(`Wand 请求失败 (HTTP ${result.status})${error ? `：${error}` : ""}`);
     }
     return parsed as T;
   }
 
   private rawRequest(
-    method: "GET" | "POST" | "DELETE",
+    method: "GET" | "POST" | "PATCH" | "DELETE",
     pathname: string,
     body?: unknown,
     cookie?: string,

@@ -877,7 +877,7 @@ export class ProcessManager extends EventEmitter {
           ai: resolveSystemAiContext({
             provider: groupProvider, runner: undefined, command: providerCliCommand(groupProvider),
             structuredState: undefined, selectedModel: null, thinkingEffort: opts?.thinkingEffort,
-          }, this.config, this.storage.getSystemSiliconEmployee(), this.free),
+          }, this.config, this.storage.getSystemSiliconEmployee(), this.free, { storage: this.storage }),
           cwd: resolveSessionCwd(cwd, this.config.defaultCwd),
           language: this.config.language,
         });

@@ -10,6 +10,7 @@ import { CandidatesListEditor, type ProviderOptions } from "./candidate-editor.j
 import { candidateListError } from "./candidate-list.js";
 import { EmployeeKnowledge } from "./employee-knowledge.js";
 import { EmployeeMemory } from "./employee-memory.js";
+import { EmployeeImEditor } from "./employee-im-editor.js";
 import { EmployeeTagsField } from "./employee-tags-field.js";
 import type { IssueModelCatalog } from "../issues/task-board-agent.js";
 import { installEmployeeProfileStyles } from "../styles/employee-profile.js";
@@ -26,6 +27,9 @@ export function EmployeeCard({ employee, catalog, providerOptions, onSave, onArc
   const [advanced, setAdvanced] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
   const [uploading, setUploading] = React.useState(false);
+  const [imDirty, setImDirty] = React.useState(false);
+  const [imBusy, setImBusy] = React.useState(false);
+  const [imRevision, resetIm] = React.useReducer(value => value + 1, 0);
   const [avatarRevision, resetAvatarWorkspace] = React.useReducer(value => value + 1, 0);
   const [error, setError] = React.useState("");
   const [notice, setNotice] = React.useState("");
@@ -38,9 +42,9 @@ export function EmployeeCard({ employee, catalog, providerOptions, onSave, onArc
   const lockedProfile = builtin && !fixed;
   const dirty = JSON.stringify(draft) !== JSON.stringify(baseline) || tagInput !== siliconEmployeeTags(baseline).join("，");
   const dirtyRef = React.useRef(dirty); dirtyRef.current = dirty;
-  const saving = submitting || uploading;
+  const saving = submitting || uploading || imBusy;
   React.useEffect(() => { installEmployeeProfileStyles(); }, []);
-  React.useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
+  React.useEffect(() => { onDirtyChange?.(dirty || imDirty); }, [dirty, imDirty, onDirtyChange]);
   React.useEffect(() => { onSavingChange?.(saving); }, [saving, onSavingChange]);
   React.useEffect(() => {
     // Background knowledge updates must not overwrite an active form draft.
@@ -49,7 +53,8 @@ export function EmployeeCard({ employee, catalog, providerOptions, onSave, onArc
   }, [employee]);
   const patch = (value: Partial<SiliconEmployee>) => { setDraft(current => ({ ...current, ...value })); setError(""); setNotice(""); setSaveStatus("idle"); };
   const cancel = () => {
-    if (submitting) return;
+    if (submitting || imBusy) return;
+    resetIm(); setImDirty(false);
     resetAvatarWorkspace(); setUploading(false);
     setDraft(baseline); setTagInput(siliconEmployeeTags(baseline).join("，")); setError(""); setNotice("已撤销本次修改"); setSaveStatus("idle");
     onCancel?.();
@@ -77,7 +82,7 @@ export function EmployeeCard({ employee, catalog, providerOptions, onSave, onArc
   return <main className="profile wand-employee-card wand-team-member" data-employee-profile data-open="true" data-employee-id={employee.id}
     onKeyDown={event => { if (event.key === "Escape" && !event.defaultPrevented && !event.nativeEvent.isComposing && !saving) { event.preventDefault(); event.stopPropagation(); cancel(); } }}>
     <header className="profile-header"><div className="profile-heading">{onBack && <WandIconButton aria-label="返回员工列表" disabled={saving} onClick={onBack}><WandIcon name="chevronLeft" size={18}/></WandIconButton>}<h2>编辑员工</h2></div>
-      <div className="save-actions">{uploading && <span className="dirty" role="status">正在处理图片…</span>}<WandButton kind="ghost" onClick={cancel} disabled={submitting}>取消</WandButton><SettingsActionButton className="wand-employee-save-submit" kind="primary" onClick={() => void save()} disabled={!dirty || saving} pending={submitting} settled={saveStatus === "saved" ? "success" : saveStatus === "failed" ? "error" : null} pendingLabel="保存中…" successLabel="已保存" errorLabel="保存失败">{saveStatus === "saved" ? "已保存" : saveStatus === "failed" ? "保存失败" : "保存修改"}</SettingsActionButton></div></header>
+      <div className="save-actions">{uploading && <span className="dirty" role="status">正在处理图片…</span>}<WandButton kind="ghost" onClick={cancel} disabled={submitting || imBusy}>取消</WandButton><SettingsActionButton className="wand-employee-save-submit" kind="primary" onClick={() => void save()} disabled={!dirty || saving} pending={submitting} settled={saveStatus === "saved" ? "success" : saveStatus === "failed" ? "error" : null} pendingLabel="保存中…" successLabel="已保存" errorLabel="保存失败">{saveStatus === "saved" ? "已保存" : saveStatus === "failed" ? "保存失败" : "保存修改"}</SettingsActionButton></div></header>
     {(error || notice) && <div className={`feedback ${error ? "error" : ""}`} role={error ? "alert" : "status"}>{error || notice}</div>}
     <div className="profile-body"><div className="editor">
       <div className="identity-summary"><EmployeeAvatar employee={draft} provider="" size="lg"/><div><strong>{draft.name || "未命名员工"}</strong><small>{siliconEmployeeTags(employee).join(" · ") || "硅基员工"}</small></div><WandButton ref={avatarTrigger} size="small" kind="ghost" aria-expanded={avatarOpen} onClick={() => setAvatarOpen(value => !value)}><WandIcon name={fixed || lockedProfile ? "lock" : "edit"} size={13}/>{avatarOpen ? "收起头像" : fixed || lockedProfile ? "查看头像" : "编辑头像"}</WandButton></div>
@@ -90,6 +95,7 @@ export function EmployeeCard({ employee, catalog, providerOptions, onSave, onArc
         {field("一句话职责", `employee-${employee.id}-duty`, <Input.TextArea id={`employee-${employee.id}-duty`} value={draft.duty} autoSize={{ minRows: 2, maxRows: 8 }} style={{ resize: "none" }} maxLength={2000} disabled={saving || lockedProfile} onChange={event => patch({ duty: event.target.value })}/>)}
         {field("角色设定", `employee-${employee.id}-prompt`, <Input.TextArea id={`employee-${employee.id}-prompt`} value={draft.prompt} autoSize={{ minRows: 5, maxRows: 14 }} style={{ resize: "none" }} maxLength={20000} disabled={saving || lockedProfile} onChange={event => patch({ prompt: event.target.value })}/>, "用于此员工之后的新工作；已有执行快照保持不变。")}</section>
       <section id="tools" ref={toolsSection} className="form-section"><CandidatesListEditor agents={draft.agents} label={draft.name || "员工"} catalog={catalog} providerOptions={providerOptions} disabled={saving} structuredOnly onChange={agents => patch({ agents })}/></section>
+      <EmployeeImEditor key={`${employee.id}:${imRevision}`} employeeId={employee.id} disabled={submitting || uploading} onDirtyChange={setImDirty} onBusyChange={setImBusy}/>
       <section id="advanced" className="form-section"><details className="advanced-details" open={advanced} onToggle={event => setAdvanced(event.currentTarget.open)}><summary>知识与员工管理</summary><div className="advanced-content">
         {field("员工 ID", `employee-${employee.id}-id`, <WandInput id={`employee-${employee.id}-id`} value={employee.id} readOnly/>)}
         {isDefaultSiliconEmployee(employee) && <EmployeeMemory active={advanced}/>}

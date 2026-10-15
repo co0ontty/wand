@@ -1,4 +1,5 @@
 import type { TaskDirectoryGroup } from "./types.js";
+import type { ConversationOrganizationResult } from "../../../conversation-organize-contract.js";
 
 export interface SidebarManageSelection {
   readonly directoryIds?: readonly string[];
@@ -135,6 +136,23 @@ export function describeManagedResult(selection: SidebarManageSelection): string
   return parts.join("、") || "处理所选项目";
 }
 
+export function describeConversationOrganizationOutcome(result: ConversationOrganizationResult): { label: string; reason: string } {
+  const changes: string[] = [];
+  if (result.createdTasks.length) changes.push(`新建 ${result.createdTasks.length} 个任务`);
+  if (result.updatedTasks.length) changes.push(`更新 ${result.updatedTasks.length} 个系统任务标题`);
+  if (result.reusedTasks.length) changes.push(`复用 ${new Set(result.reusedTasks.map(task => task.taskId)).size} 个任务`);
+  if (result.movedSessions.length) changes.push(`归入 ${result.movedSessions.length} 个会话`);
+  const label = result.unchanged ? "会话内容和归属未变化，没有重复建任务或调用模型"
+    : changes.length ? `${result.cancelled || result.error ? "部分完成：" : "已"}${changes.join("、")}`
+      : result.cancelled ? "已取消后续会话归类" : result.error ? "会话归类未完成" : result.eligibleSessions ? "会话尚未得到明确工作分组，本次未作调整" : "没有符合范围且有正文的工作会话";
+  const details = [`已检查 ${result.analyzedSessions}/${result.eligibleSessions} 个工作会话`,
+    result.skippedManualSessions ? `跳过 ${result.skippedManualSessions} 个人工任务中的会话` : "",
+    result.skippedSessions ? `排除 ${result.skippedSessions} 个归档/私聊/自动化/系统日志或无正文会话` : "",
+    result.unassignedSessions.length ? `${result.unassignedSessions.length} 个会话尚未确定主题` : "",
+    result.refused.length ? `${result.refused.length} 项未处理：${result.refused[0]?.reason}` : "", result.error ?? ""].filter(Boolean);
+  return { label, reason: details.join("；") };
+}
+
 export function describeOrganizeOutcome(result: {
   movedSessions: readonly unknown[];
   categorizedTasks: readonly unknown[];
@@ -145,16 +163,20 @@ export function describeOrganizeOutcome(result: {
   const moved = result.movedSessions.length;
   const categorized = result.categorizedTasks.length;
   const reason = result.refused[0]?.reason ?? "";
+  const details = [
+    result.eligibleTasks === undefined ? "" : `已检查 ${result.eligibleTasks} 个任务`,
+    result.skippedTasks ? `已跳过 ${result.skippedTasks} 个用户自定标题的任务` : "",
+  ].filter(Boolean);
   if (!moved && !categorized) {
-    return { label: reason || (result.eligibleTasks === 0 ? "没有符合归类范围的任务" : "所选标题已归类"),
-      reason: reason || (result.skippedTasks ? `已跳过 ${result.skippedTasks} 个用户自定标题的任务` : "") };
+    return { label: reason ? "未调整任何任务或会话" : (result.eligibleTasks === 0 ? "没有符合归类范围的任务" : "未发现可安全归类的项"),
+      reason: [...details, reason].filter(Boolean).join("；") };
   }
   const parts: string[] = [];
   if (categorized) parts.push(`归类 ${categorized} 个任务`);
   if (moved) parts.push(`归属 ${moved} 个会话`);
   return {
     label: `已${parts.join("、")}`,
-    reason: result.refused.length ? `另有 ${result.refused.length} 项未处理：${reason}` : "",
+    reason: [...details, result.refused.length ? `另有 ${result.refused.length} 项未处理：${reason}` : ""].filter(Boolean).join("；"),
   };
 }
 

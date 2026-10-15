@@ -10,6 +10,10 @@ test("target engine minimum rejects old Node before installation", () => {
   assert.throws(() => assertNodeVersionForUpdate(">=24.21.0", "22.5.0"), /新版本要求 Node.js/);
   assert.doesNotThrow(() => assertNodeVersionForUpdate(">=24.21.0", "24.21.0"));
   assert.doesNotThrow(() => assertNodeVersionForUpdate(">=24.21.0", "26.10.0"));
+  for (const version of ["22.19.0", "24.0.0", "24.19.0", "26.10.0"]) {
+    assert.doesNotThrow(() => assertNodeVersionForUpdate(">=22.19.0", version));
+  }
+  assert.throws(() => assertNodeVersionForUpdate(">=22.19.0", "22.18.0"), /新版本要求 Node.js/);
 });
 
 test("independent helper retains the global lock after nested npm install until restart handoff finishes", async (t) => {

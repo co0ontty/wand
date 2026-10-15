@@ -134,14 +134,14 @@ test("ShellMainContent SSR renders the complete React welcome state contract", (
   }));
 
   for (const id of [
-    "welcome-new-task",
+    "welcome-new-work",
     "cross-session-queue-host",
   ]) {
     assert.match(html, new RegExp(`id="${id}"`), `missing #${id}`);
   }
   // 统一任务入口：欢迎页不再有按 provider 的快捷建会话按钮与目录选择器。
   assert.doesNotMatch(html, /welcome-tool-|blank-chat-cwd/);
-  assert.match(html, /新建任务/);
+  assert.match(html, /新建工作/);
   assert.match(html, /<div id="output" inert="" class="terminal-container hidden"[^>]*><\/div>/);
   assert.match(html, /<div id="chat-output" inert="" class="chat-container hidden"[^>]*><\/div>/);
   assert.match(html, /<section class="conversation-root" aria-label="正在读取聊天输入服务"/);
@@ -185,38 +185,23 @@ test("ShellMainContent uses UiStore actions and no forbidden legacy seam", () =>
   assert.match(source, /<div id="chat-output" inert=\{pageLayerOpen\} className=\{classes\.chat\} ref=\{legacyRefs\?\.chat\}[^>]*\/>/);
   assert.match(source, /<div inert=\{pageLayerOpen\} className=\{classes\.composer\} ref=\{legacyRefs\?\.composer\}[^>]*\/>/);
   assert.match(source, /id="cross-session-queue-host" ref=\{queueRef\}/);
-  assert.match(source, /context\.taskId \? null : <div[^>]*inert=\{conversationVisible \|\| settings\.open\}[^>]*><ShellTopbar\/>/);
+  assert.match(source, /context\.taskId \? null : <div[^>]*inert=\{newWork\.open \|\| conversationVisible \|\| settings\.open\}[^>]*><ShellTopbar\/>/);
   assert.match(source, /<WorkspaceTabBar\/>/);
   assert.doesNotMatch(source, /inSplit \? null : <WorkspaceTabBar\/>/);
-  assert.match(source, /const pageLayerOpen = settings\.open \|\| conversationVisible \|\| taskBoard\.open \|\| editor\.open/);
+  assert.match(source, /const pageLayerOpen = newWork\.open \|\| settings\.open \|\| conversationVisible \|\| taskBoard\.open \|\| editor\.open/);
   // 任务管理是叠层路由，不能替换 <main>，否则 #output 被卸载后会话回不去。
   assert.match(source, /taskBoard\.open && taskBoard\.page === "board" \? <TaskBoardHost/);
   assert.doesNotMatch(source, /if \(taskBoard\.open\) \{\s*return <main/s);
   assert.doesNotMatch(source, /innerHTML|querySelector|getElementById|browser\/state|@radix-ui\/|\bfetch\s*\(/);
 });
 
-test("no-task welcome steers to task creation instead of loose sessions", () => {
-  const source = readFileSync(
-    path.join(root, "src", "web-ui", "react", "shell", "shell-main-content.tsx"),
-    "utf8",
-  );
-  // 欢迎页不再提供绕过任务的快捷建会话按钮，统一引导到「新建任务」。
-  assert.match(source, /id="welcome-new-task"/);
-  assert.match(source, /type: "workspace\.new"/);
-  assert.doesNotMatch(source, /welcome-tool-claude|新建终端会话|新建结构化会话/);
-});
-
-test("workspace task blank state offers an explicit Agent or shell choice", () => {
-  const source = readFileSync(
-    path.join(root, "src", "web-ui", "react", "shell", "shell-main-content.tsx"),
-    "utf8",
-  );
-  assert.match(source, /选择 CLI 工具，以及结构化或 PTY，开始这个任务。/);
-  assert.match(source, /WorkspaceWelcomeChooser/);
-  assert.match(source, /选择 CLI 工具和结构化 \/ PTY，在项目里直接开始会话；需要时再归纳成任务。/);
-  // 项目欢迎页开工不再替会话建任务：会话只带项目归属，落在侧栏「未分组任务」里。
-  assert.doesNotMatch(source, /createTask\(|httpWorkspacesRepository/);
-  assert.match(source, /runtime\.newTaskSession\(\{\s*workspaceId: workspaceProject\.workspaceId,\s*cwd: workspaceProject\.cwd,/);
+test("all blank welcomes open the same new-work page with project and task context", () => {
+  const source = readFileSync(path.join(root, "src/web-ui/react/shell/shell-main-content.tsx"), "utf8");
+  assert.match(source, /id="welcome-new-work"/);
+  assert.match(source, /newSessionController\.open\(\{/);
+  assert.match(source, /workspaceTaskId: workspaceTask\?\.taskId/);
+  assert.match(source, /<NewSessionHost\//);
+  assert.doesNotMatch(source, /runtime\.newTaskSession|WorkspaceWelcomeChooser|aiTeamsRepository\.startDirect/);
 });
 
 test("mobile tasks keep a sidebar navigation entry even without terminal windows", () => {
