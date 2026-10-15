@@ -23,6 +23,16 @@ test("model labels omit repeated names while retaining genuinely different IDs",
   assert.equal(compactModelDisplayLabel("provider/variant"), "provider/variant");
 });
 
+test("floating runtime selectors reuse the text-button variant without losing combobox semantics", () => {
+  const html = renderToStaticMarkup(React.createElement(WandSelect, {
+    ariaLabel: "模型", triggerKind: "ghost", value: "gpt-5.4-mini",
+    options: [{ value: "gpt-5.4-mini", label: "gpt-5.4-mini" }],
+  }));
+  assert.match(html, /ant-btn-text/);
+  assert.match(html, /role="combobox"/);
+  assert.match(html, /gpt-5\.4-mini/);
+});
+
 test("composer select controller publishes immutable portal mount snapshots", () => {
   const controller = new ComposerSelectController();
   const target = {} as HTMLElement;

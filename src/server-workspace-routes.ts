@@ -26,9 +26,11 @@ import { attachUnboundSessionsToWorkspace, normalizeProjectCwd, projectCwdForSes
 import { defaultMilestoneIdForWrite, resolvedMilestoneFields, scopedMilestoneId } from "./milestone-scope.js";
 import { isUnnamedWorkspaceTaskName, UNNAMED_WORKSPACE_TASK_NAME } from "./wand-task-sync.js";
 import { isSessionProvider } from "./session-provider.js";
-import { firstLayoutTabId } from "./layout-tree.js";
+import { firstLayoutTabId, wrapLegacyTaskLayout } from "./layout-tree.js";
 import { parentTaskIdFrom } from "./task-agent-parsing.js";
 import { taskTitleService, refreshAutoBoardTaskTitles, type AutoTaskTitleOptions } from "./task-title-service.js";
+import { organizeSelectedByTitle, titleJudgeForStorage } from "./task-title-organize-service.js";
+import { TITLE_ORGANIZE_MAX_SESSIONS, TITLE_ORGANIZE_MAX_TASKS, type TitleJudge } from "./task-title-organize.js";
 import { provisionalTaskTitleFromDescription } from "./task-title.js";
 import { badRequest, surfaceDomainError } from "./http-error.js";
 
@@ -336,13 +338,7 @@ function layoutHasTab(node: LayoutNode, tabId: string): boolean {
 /** 校验任务级工作窗口集合；旧版单棵布局会兼容升级成一个 window。 */
 export function sanitizeTaskLayout(value: unknown): TaskWindowLayout | null {
   const legacy = sanitizeLayoutNode(value);
-  if (legacy) {
-    return {
-      type: "windows",
-      windows: [{ id: "window-legacy", layout: legacy, activeTabId: firstLayoutTabId(legacy) }],
-      activeWindowId: "window-legacy",
-    };
-  }
+  if (legacy) return wrapLegacyTaskLayout(legacy);
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
   if (record.type !== "windows" || !Array.isArray(record.windows)) return null;
@@ -379,6 +375,7 @@ export function registerWorkspaceRoutes(
   storage: WandStorage,
   sessions?: SessionRegistry,
   titleOptions: AutoTaskTitleOptions = {},
+  organize: { judge?: TitleJudge } = {},
 ): void {
   taskTitleService(storage, titleOptions);
   // 列出所有项目（按创建时间降序：新建在前，打开不会改位置）
@@ -526,6 +523,70 @@ export function registerWorkspaceRoutes(
   });
 
   // ── 任务（Task = 命名 + 独立 worktree + 一组标签）──
+
+  // 侧边栏多选后的按标题归类：任务归入同类父任务，会话归入标题对应的任务。
+  // 不确定的不移动。选中任务时，其下会话即使没有被逐条勾选也在范围内。
+  app.post("/api/tasks/organize-by-title", asyncRoute(async (req, res) => {
+    const body = req.body as { taskIds?: unknown; sessionIds?: unknown; mode?: unknown; target?: unknown };
+    if (body?.mode !== undefined && body.mode !== "auto" && body.mode !== "all") {
+      res.status(400).json({ error: "归类范围必须是 auto 或 all。" });
+      return;
+    }
+    const ids = (value: unknown, limit: number): string[] | null => {
+      if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) return null;
+      return [...new Set(value.map((item) => item.trim()).filter(Boolean))].slice(0, limit + 1);
+    };
+    let taskIds = ids(body?.taskIds, TITLE_ORGANIZE_MAX_TASKS);
+    let sessionIds = body?.sessionIds === undefined ? [] : ids(body.sessionIds, TITLE_ORGANIZE_MAX_SESSIONS);
+    if (body?.target !== undefined) {
+      const target = body.target as { kind?: unknown; workspaceId?: unknown; cwd?: unknown } | null;
+      if (!target || typeof target !== "object" || Array.isArray(target)
+        || typeof target.kind !== "string" || !["all", "workspace", "directory"].includes(target.kind)
+        || (target.kind === "workspace" && (typeof target.workspaceId !== "string" || !storage.getWorkspace(target.workspaceId)))
+        || (target.kind === "directory" && (typeof target.cwd !== "string" || !target.cwd.trim()))
+        || body.taskIds !== undefined || body.sessionIds !== undefined) {
+        res.status(400).json({ error: "归类目标无效。" });
+        return;
+      }
+      const cwd = typeof target.cwd === "string" ? normalizeProjectCwd(target.cwd) : "";
+      taskIds = storage.listAllWorkspaceTasks().filter(task => {
+        if (task.archived) return false;
+        if (target.kind === "all") return true;
+        if (target.kind === "workspace") return task.workspaceId === target.workspaceId;
+        const workspace = storage.getWorkspace(task.workspaceId);
+        // Match the same grouping as GET /api/tasks, including synthetic global directories.
+        return normalizeProjectCwd(workspace && !isGlobalWorkspace(workspace)
+          ? workspace.cwd : taskRuntimeCwd(task, workspace)) === cwd;
+      }).map(task => task.id);
+      sessionIds = storage.loadSessionsSlim().filter(session => {
+        if (session.archived || session.workspaceTaskId) return false;
+        if (target.kind === "all") return true;
+        const directory = target.kind === "workspace" ? storage.getWorkspace(String(target.workspaceId))?.cwd : cwd;
+        return projectCwdForSession(session) === normalizeProjectCwd(directory || "");
+      }).map(session => session.id);
+    }
+    if (!taskIds || !sessionIds) {
+      res.status(400).json({ error: "需要任务 id 列表，会话 id 列表可选。" });
+      return;
+    }
+    if (!taskIds.length && body?.target === undefined) {
+      res.status(400).json({ error: "请选择要归类的任务。" });
+      return;
+    }
+    if (body?.target === undefined && (taskIds.length > TITLE_ORGANIZE_MAX_TASKS || sessionIds.length > TITLE_ORGANIZE_MAX_SESSIONS)) {
+      res.status(400).json({ error: `一次最多归类 ${TITLE_ORGANIZE_MAX_TASKS} 个任务、${TITLE_ORGANIZE_MAX_SESSIONS} 个会话。` });
+      return;
+    }
+    const result = await organizeSelectedByTitle(storage, { taskIds, sessionIds, mode: body?.mode === "all" ? "all" : "auto" }, {
+      judge: organize.judge ?? titleJudgeForStorage(storage, titleOptions),
+      refreshSession: (sessionId) => sessions?.refreshSessionWorkspace(sessionId),
+    });
+    if (!result.foundTasks && body?.target === undefined) {
+      res.status(404).json({ error: "未找到所选任务。" });
+      return;
+    }
+    res.json(result);
+  }));
 
   // 不依赖项目的独立任务：挂到隐藏的全局空间，目录可省略（使用全局临时目录）。
   app.post("/api/tasks", asyncRoute(async (req, res) => {

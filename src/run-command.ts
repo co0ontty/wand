@@ -1,5 +1,6 @@
 import {
   execFile,
+  spawn,
   spawnSync,
   type ExecFileOptions,
   type SpawnSyncOptionsWithStringEncoding,
@@ -53,6 +54,20 @@ export function runCommandSync(
     stdio: options.stdio,
     windowsHide: true,
     shell: false,
+  });
+}
+
+/** Foreground operations such as sudo: the terminal owns input (including passwords).
+ * No capture, shell, or timeout: cancellation belongs to the user, and Core drain
+ * may legitimately wait longer than the bounded probe timeout.
+ */
+export function runCommandInteractive(file: string, args: readonly string[]): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(file, [...args], {
+      env: commandEnv({}), stdio: "inherit", shell: false,
+    });
+    child.once("error", reject);
+    child.once("exit", (code, signal) => resolve(code ?? (signal === "SIGINT" ? 130 : 1)));
   });
 }
 

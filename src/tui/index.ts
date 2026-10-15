@@ -142,11 +142,11 @@ export function startTui(deps: TuiDeps): TuiHandle {
       `通道 ${channelLabel}：当前 ${current} → 最新 ${latest}，是否立即升级？`,
     installServiceBody: (isRoot) => process.platform === "linux"
       ? `将写入 /etc/systemd/system/wand.service，systemctl enable --now，开机自启。\n${
-          isRoot ? "当前是 root，可以直接装。" : "⚠ 需要 root,请退出 TUI 后直接跑 sudo wand service:install。"
+          isRoot ? "当前是 root，可以直接装。" : "需要管理员权限，将自动申请 sudo，请在终端输入密码。"
         }\n不想要 root？退出 TUI 跑 wand service:install --user (登出会被回收)。`
       : process.platform === "darwin"
         ? `将写入 /Library/LaunchDaemons/com.wand.web.plist，launchctl load，开机自启。\n${
-            isRoot ? "当前是 root,可以直接装。" : "⚠ 需要 root,请退出 TUI 后直接跑 sudo wand service:install。"
+            isRoot ? "当前是 root,可以直接装。" : "需要管理员权限，将自动申请 sudo，请在终端输入密码。"
           }`
         : "当前平台暂不支持。",
     onServiceChanged: refreshAll,

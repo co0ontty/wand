@@ -46,6 +46,8 @@ export interface SidebarRecentSectionProps {
   onOpen(entry: SidebarRecentEntry): void;
   /** 新建员工对话前先让调用方收起侧栏浮层（原生外壳下会关抽屉）。 */
   onStartConversation?(): void;
+  /** The identity header opens its existing employee conversation; the gutter controls the child list. */
+  onOpenConversation?(employeeId: string): void;
   /** 与目录树同一批会话动作，右键 / 长按 / Shift+F10 打开；缺失时不提供菜单。 */
   onArchiveSession?(sessionId: string, archived: boolean): Promise<void>;
   onDeleteSession?(session: WorkspaceSessionSummary, label: string): Promise<void>;
@@ -69,6 +71,7 @@ export function SidebarRecentSection({
   onStartConversation,
   onArchiveSession,
   onDeleteSession,
+  onOpenConversation,
 }: SidebarRecentSectionProps): React.ReactElement {
   const groups = React.useMemo(
     () => recentConversationGroups(entries, {
@@ -175,6 +178,7 @@ export function SidebarRecentSection({
               now={now}
               onOpen={onOpen}
               onStartConversation={startConversation}
+              onOpenConversation={onOpenConversation}
               onArchiveSession={onArchiveSession}
               onDeleteSession={onDeleteSession}
               disabled={disabled}
@@ -197,6 +201,7 @@ function RecentConversationGroup({
   onStartConversation,
   onArchiveSession,
   onDeleteSession,
+  onOpenConversation,
   disabled = false,
 }: {
   group: SidebarRecentGroup;
@@ -207,6 +212,7 @@ function RecentConversationGroup({
   now: number;
   onOpen(entry: SidebarRecentEntry): void;
   onStartConversation(employeeId?: string): void;
+  onOpenConversation?(employeeId: string): void;
   onArchiveSession?(sessionId: string, archived: boolean): Promise<void>;
   onDeleteSession?(session: WorkspaceSessionSummary, label: string): Promise<void>;
   disabled?: boolean;
@@ -258,6 +264,7 @@ function RecentConversationGroup({
       expanded={open}
       onToggle={() => setOpen(!open)}
       onSetOpen={setOpen}
+      onActivate={group.employeeId && onOpenConversation ? () => onOpenConversation(group.employeeId!) : undefined}
       toggleRef={toggleRef}
       collapsedPreview={<SidebarSessionPreview sessions={sessions} expanded={open}
         label={`${group.title}的会话预览`} className="sidebar-session-preview-person"
@@ -265,7 +272,7 @@ function RecentConversationGroup({
         expansionRef={toggleRef} onExpand={() => setOpen(true)} onActivate={(session) => {
           const entry = group.entries.find(candidate => candidate.session.id === session.id);
           if (!entry) return;
-          setOpen(true); onOpen(entry);
+          setOpen(false); onOpen(entry);
         }}/>}
     >
       {rows.length ? rows : <Typography.Paragraph type="secondary" className="sidebar-group-empty">

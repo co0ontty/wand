@@ -1,13 +1,14 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { constants, createReadStream } from "node:fs";
-import { access, mkdir, mkdtemp, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { buildChildEnv, systemEnvValue } from "./env-utils.js";
 import { SPEECH_MODELS, speechModel, speechModelUrl, type SpeechModel } from "./speech-models.js";
 import { SPEECH_MAX_SECONDS, SPEECH_MAX_WAV_BYTES, SPEECH_SAMPLE_RATE, type SpeechBackend, type SpeechResult, type SpeechSettings, type SpeechStatus } from "./speech-types.js";
 import type { WandStorage } from "./storage.js";
+import { configTemporaryRoot, createManagedTemporary, registerTemporaryChild } from "./managed-temp.js";
 
 export const SPEECH_SETTINGS_KEY = "pref:speechRecognition";
 export class SpeechError extends Error {
@@ -108,8 +109,8 @@ export class SpeechService {
     const runtime = await this.runtime();
     if (!runtime.executable || !await this.modelReady(model)) throw new SpeechError("NOT_READY", "请先下载模型并安装语音运行时。", 503);
     signal.throwIfAborted();
-    await mkdir(path.join(this.root, "tmp"), { recursive: true, mode: 0o700 });
-    const directory = await mkdtemp(path.join(this.root, "tmp", "check-"));
+    const temporary = createManagedTemporary("speech-check", configTemporaryRoot(path.dirname(this.root)));
+    const directory = temporary.directory;
     try {
       const wav = Buffer.alloc(8044); wav.write("RIFF"); wav.writeUInt32LE(wav.length - 8, 4); wav.write("WAVEfmt ", 8);
       wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
@@ -128,7 +129,7 @@ export class SpeechService {
       signal.throwIfAborted();
       if (this.disposed) throw new SpeechError("UNAVAILABLE", "语音服务已关闭。", 503);
       this.initialized.add(id);
-    } finally { await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); }
+    } finally { await temporary.closeAsync(); }
   }
   private modelPath(model: SpeechModel): string { return path.join(this.root, "models", `ggml-${model.id}.bin`); }
 
@@ -249,6 +250,7 @@ export class SpeechService {
     const cancel = (): void => abort.abort();
     signal?.addEventListener("abort", cancel, { once: true });
     let directory: string | null = null;
+    let temporary: ReturnType<typeof createManagedTemporary> | null = null;
     try {
       const settings = this.settings();
       const model = this.models.find((item) => item.id === settings.model)!;
@@ -260,8 +262,8 @@ export class SpeechService {
       if (abort.signal.aborted) throw new SpeechError("CANCELLED", "识别已取消。", 499);
       let backend = settings.acceleration === "cpu" ? "cpu" as const : runtime.backend;
       if (silent) return { text: "", model: model.id, backend };
-      await mkdir(path.join(this.root, "tmp"), { recursive: true, mode: 0o700 });
-      directory = await mkdtemp(path.join(this.root, "tmp", "voice-"));
+      temporary = createManagedTemporary("speech-voice", configTemporaryRoot(path.dirname(this.root)));
+      directory = temporary.directory;
       const wav = path.join(directory, "audio.wav");
       await writeFile(wav, audio, { mode: 0o600 });
       const output = path.join(directory, "transcript");
@@ -293,7 +295,7 @@ export class SpeechService {
       if (error instanceof SpeechError) throw error;
       throw new SpeechError("ENGINE_FAILED", "服务端语音识别失败，请检查运行时、模型与可用磁盘。", 503);
     } finally {
-      if (directory) await rm(directory, { recursive: true, force: true }).catch(() => {});
+      await temporary?.closeAsync();
       signal?.removeEventListener("abort", cancel);
       if (this.active === abort) this.active = null;
     }
@@ -306,6 +308,12 @@ export class SpeechService {
         LD_LIBRARY_PATH: systemEnvValue("LD_LIBRARY_PATH"), DYLD_LIBRARY_PATH: systemEnvValue("DYLD_LIBRARY_PATH"),
         CUDA_VISIBLE_DEVICES: systemEnvValue("CUDA_VISIBLE_DEVICES"),
       }), stdio: "ignore", windowsHide: true });
+      try { registerTemporaryChild(cwd, child.pid); }
+      catch {
+        child.on("error", () => {});
+        child.once("close", () => { reject(new SpeechError("ENGINE_FAILED", "临时文件保护失败。", 503)); });
+        child.kill("SIGKILL"); return;
+      }
       let failure: SpeechError | null = null;
       let killTimer: NodeJS.Timeout | undefined;
       const stop = (error: SpeechError): void => {

@@ -200,7 +200,7 @@ const LAUNCHD_TERMINAL_LABEL = "com.wand.terminald";
  *
  * 默认 system。
  */
-import { DEFAULT_SERVICE_SCOPE, detectInstalledScope, readServiceEntrypoint, servicePathFor, type ServiceScope } from "../service-manager/index.js";
+import { DEFAULT_SERVICE_SCOPE, detectInstalledScope, readServiceEntrypoint, readServiceConfigPath, servicePathFor, type ServiceScope } from "../service-manager/index.js";
 export { detectInstalledScope, readServiceEntrypoint, type ServiceScope };
 
 export interface ServiceContext {
@@ -297,11 +297,37 @@ export function serviceStop(opts?: ServiceOpts): CommandResult {
   return unsupported();
 }
 
-export function serviceRestart(opts?: ServiceOpts): CommandResult {
+export async function serviceRestart(
+  opts?: ServiceOpts & { configPath?: string; timeoutSeconds?: number },
+): Promise<CommandResult> {
   const scope = resolveScope(opts);
-  if (process.platform === "linux") return runSystemctl(scope, ["restart", "wand.service"], "已重启");
-  if (process.platform === "darwin") return launchdRestart(scope);
-  return unsupported();
+  if (process.platform !== "linux" && process.platform !== "darwin") return unsupported();
+  if (scope === "system" && !isRoot()) {
+    return { ok: false, message: "系统服务重启需要管理员授权，请运行 wand service:restart 自动申请 sudo。" };
+  }
+  if (!isServiceInstalled(scope)) return { ok: false, message: `未安装 (${scope} scope)` };
+  const { resolveConfigPath } = await import("../config.js");
+  const { waitForCoreTurnsComplete } = await import("../core-status-cli.js");
+  const installedConfig = readServiceConfigPath(scope);
+  if (!installedConfig || (opts?.configPath && path.resolve(opts.configPath) !== installedConfig)) {
+    return { ok: false, message: "安全重启已取消：无法确认所检查的配置与已安装服务一致。" };
+  }
+  const status = await serviceStatusAsync({ scope });
+  let result: CommandResult | undefined;
+  try {
+    await waitForCoreTurnsComplete(resolveConfigPath(installedConfig), opts?.timeoutSeconds ?? 0, async () => {
+      // Graceful stop/start, not kickstart -k. Only Server is restarted; the
+      // Core admission barrier remains held through stop and daemon owners stay alive.
+      const stopped = serviceStop({ scope });
+      if (!stopped.ok) { result = stopped; return 3; }
+      result = serviceStart({ scope });
+      if (result.ok) result.message = `已安全重启 ${scope} 服务`;
+      return result.ok ? 0 : 3;
+    }, status.state === "inactive" || status.state === "failed");
+    return result ?? { ok: false, message: "重启未执行" };
+  } catch (error) {
+    return { ok: false, message: "安全重启已取消", detail: getErrorMessage(error) };
+  }
 }
 
 /** 取最近 N 行服务日志。 */
@@ -512,24 +538,6 @@ function launchctlUnload(scope: ServiceScope): CommandResult {
   const plist = servicePathFor(scope);
   if (!existsSync(plist)) return { ok: false, message: `未安装 (${plist} 不存在)` };
   return launchdBootout(scope, plist, `已停止 launchd ${scope}`);
-}
-
-function launchdRestart(scope: ServiceScope): CommandResult {
-  const target = launchdTarget(scope);
-  const kicked = runCommandSync("launchctl", ["kickstart", "-k", target], { encoding: "utf8", timeout: 10_000 });
-  if (kicked.status === 0) return { ok: true, message: `已重启 launchd ${scope}: ${target}` };
-
-  const started = launchctlLoad(scope);
-  if (started.ok) return { ok: true, message: `已 bootstrap 并启动 launchd ${scope}: ${target}` };
-  return {
-    ok: false,
-    message: `launchd 重启失败 (${target})`,
-    detail: [
-      `kickstart: ${formatSpawnResult(kicked)}`,
-      `bootstrap: ${started.message}`,
-      started.detail ?? "",
-    ].filter(Boolean).join("\n"),
-  };
 }
 
 function launchdDomain(scope: ServiceScope): string {

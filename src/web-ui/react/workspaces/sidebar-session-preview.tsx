@@ -21,6 +21,7 @@ const previewStyles = String.raw`
 .sidebar-session-preview .sidebar-session-tag[aria-pressed="true"], .sidebar-session-preview .sidebar-session-more.ant-btn[data-contains-current="true"] { background:var(--sidebar-selected,var(--bg-active)); color:var(--sidebar-accent,var(--text-link)); border-color:var(--sidebar-selected,var(--border-subtle)); }
 .sidebar-session-preview :is(.sidebar-session-tag,.sidebar-session-more):focus-visible { outline:2px solid var(--sidebar-accent,var(--border-focus)); outline-offset:-2px; }
 .sidebar-session-preview .sidebar-session-more.ant-btn { flex:none; width:auto; min-width:0; max-width:100%; height:28px; padding:0 6px; font-size:11px; font-variant-numeric:tabular-nums; border-radius:var(--radius-xs); color:var(--text-secondary); background:var(--sidebar-surface,var(--bg-surface)); border:1px solid var(--border-subtle); }
+.sidebar-session-tag-content { display:inline-flex; align-items:center; gap:4px; }
 .sidebar-session-tag-title { font-size:11px; line-height:16px; white-space:nowrap; }
 .sidebar-session-preview .sidebar-provider-mark { flex:none; }
 .sidebar-session-preview .sidebar-provider-mark > svg { width:100%; height:100%; }
@@ -30,8 +31,8 @@ const previewStyles = String.raw`
 .sidebar-session-preview-measure-clip { position:absolute; width:0; height:0; overflow:hidden; visibility:hidden; pointer-events:none; }
 .sidebar-session-preview-measure { display:flex; width:max-content; gap:4px; }
 .sidebar-session-preview-measure-clip .sidebar-session-more.ant-btn { max-width:none; }
-.sidebar-session-preview-task { margin-inline-start:28px; }
-.sidebar-session-preview-person { margin-inline-start:50px; }
+.sidebar-session-preview-task { margin-inline-start:20px; }
+.sidebar-session-preview-person { margin-inline-start:28px; }
 @media (pointer:coarse) { .sidebar-session-preview :is(.sidebar-session-tag,.sidebar-session-more).ant-btn { height:36px; } }
 @media (prefers-reduced-motion:reduce) { .sidebar-session-preview { transition:none; } }
 `;
@@ -67,6 +68,7 @@ export function SidebarSessionPreview({ sessions, expanded, selectedSessionId, l
   const moreProbe = React.useRef<HTMLButtonElement>(null);
   const moreText = React.useRef<HTMLSpanElement>(null);
   const [layout, setLayout] = React.useState<SidebarPreviewLayout>({ titles: false, count: sessions.length });
+  const [dismissedTooltipId, setDismissedTooltipId] = React.useState<string | null>(null);
   const labels = sessions.map((session, index) => sidebarSessionLabel(session, index, liveTitles?.[session.id]));
   const signature = JSON.stringify(sessions.map((session, index) => [session.id, labels[index]]));
   React.useLayoutEffect(() => { installStyleSheet("wand-sidebar-session-preview", previewStyles); }, []);
@@ -104,10 +106,11 @@ export function SidebarSessionPreview({ sessions, expanded, selectedSessionId, l
   const shown = sessions.slice(0, layout.count);
   const hidden = sessions.length - shown.length;
   const containsCurrent = sessions.slice(shown.length).some(session => session.id === selectedSessionId);
-  const contents = (session: WorkspaceSessionSummary, index: number, full: boolean): React.ReactNode => <>
+  // Ant wraps fragments in a plain span; own the content row so block SVGs cannot stack below the status.
+  const contents = (session: WorkspaceSessionSummary, index: number, full: boolean): React.ReactNode => <span className="sidebar-session-tag-content">
     <PreviewStatus session={session}/><SessionProviderMark session={session} size={14}/>
     {full ? <span className="sidebar-session-tag-title">{labels[index]}</span> : null}
-  </>;
+  </span>;
   const focusOwner = (): void => { expansionRef?.current?.focus({ preventScroll: true }); };
   const moreDescription = `还有 ${hidden} 个匹配会话${containsCurrent ? "，包含当前会话" : ""}，展开完整列表`;
   return <WandUiBoundary><div className={`sidebar-session-preview ${className}`} data-expanded={expanded}
@@ -120,11 +123,16 @@ export function SidebarSessionPreview({ sessions, expanded, selectedSessionId, l
         const provider = workspaceSessionProvider(session);
         const tool = provider ? agentToolDisplayName(provider, session.engine) : "终端";
         const description = `${labels[index]} · ${tool} · ${state.label}`;
-        return <Tooltip key={session.id} title={description} open={expanded ? false : undefined}>
+        return <Tooltip key={session.id} title={description} open={expanded || dismissedTooltipId === session.id ? false : undefined}>
           <WandChip size="sm" kind="ghost" className="sidebar-session-tag" data-preview-session-id={session.id}
             data-titles={layout.titles} aria-label={description} aria-pressed={session.id === selectedSessionId}
-            disabled={disabled} onClick={event => {
-              event.stopPropagation(); focusOwner(); onActivate(session);
+            disabled={disabled} onMouseEnter={() => setDismissedTooltipId(current => current === session.id ? null : current)}
+            onFocus={() => setDismissedTooltipId(current => current === session.id ? null : current)}
+            onClick={event => {
+              // The tag stays visible after navigation; dismiss its tooltip so it cannot cover the parent row.
+              setDismissedTooltipId(session.id);
+              // Session navigation and parent disclosure are separate actions.
+              event.stopPropagation(); onActivate(session);
             }}>{contents(session, index, layout.titles)}</WandChip>
         </Tooltip>;
       })}

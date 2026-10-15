@@ -1,5 +1,6 @@
 import { parseJsonResponse } from "../http-adapter";
 import { taskMutationCompleted } from "../task-changes";
+import type { TaskOrganizeMode, TaskOrganizeTarget, OrganizeByTitleResult } from "../../../task-organize-contract";
 
 function parseTaskMutation<T>(response: Response): Promise<T> {
   return parseJsonResponse<T>(response).then(taskMutationCompleted);
@@ -250,6 +251,23 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
       `/api/workspace-tasks/${encodeURIComponent(taskId)}/archive`,
       { method: "POST", credentials: "same-origin" },
     ));
+  }
+
+  async organizeByTitle(taskIds: readonly string[], sessionIds: readonly string[] = [], mode: TaskOrganizeMode = "auto"): Promise<OrganizeByTitleResult> {
+    return this.organizeTasks({ taskIds, sessionIds, mode });
+  }
+
+  async organizeTarget(target: TaskOrganizeTarget, mode: TaskOrganizeMode = "auto"): Promise<OrganizeByTitleResult> {
+    return this.organizeTasks({ target, mode });
+  }
+
+  private async organizeTasks(body: object): Promise<OrganizeByTitleResult> {
+    return parseTaskMutation(await this.fetchImpl("/api/tasks/organize-by-title", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }));
   }
 
   async moveSession(taskId: string, sessionId: string): Promise<void> {

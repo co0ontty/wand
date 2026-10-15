@@ -18,8 +18,7 @@ export function installChatComposerStyles(): void {
 }
 .composer-surface { position:relative; }
 .composer-surface, .conversation-input-wrap { --composer-control-height:32px; }
-.composer-surface :is(.composer-actions-left, .composer-actions-right, .composer-status-row) .ant-btn,
-.composer-surface .prompt-optimize-btn.ant-btn {
+.composer-surface :is(.composer-actions-left, .composer-actions-right, .composer-status-row) .ant-btn {
   height:var(--composer-control-height); min-height:var(--composer-control-height); display:inline-flex; align-items:center;
 }
 .composer-surface :is(#attach-btn, #voice-record-btn, #send-input-button, .composer-pi-settings-toggle),
@@ -79,29 +78,37 @@ export function installChatComposerStyles(): void {
 }
 .composer-compact-entry.ant-btn { flex:1; min-width:0; height:var(--composer-control-height); padding-inline:8px; justify-content:flex-start; text-align:start; color:var(--text-secondary); overflow:hidden; }
 .composer-compact-entry.ant-btn > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.input-composer[data-composer-expanded] .composer-main-row { grid-template-columns:auto minmax(0,1fr) auto; grid-template-rows:auto auto; gap:4px 8px; align-items:center; }
+.input-composer[data-composer-expanded] .composer-main-row { grid-template-columns:minmax(0,1fr) auto; grid-template-rows:auto auto; gap:4px 8px; align-items:center; }
+.input-composer[data-composer-expanded]:not([data-pty-input-mode]) .composer-inline-config { position:absolute; inset-block-start:calc(-1 * var(--composer-runtime-height,32px) + 6px); inset-inline-end:0; width:max-content; max-width:calc(100% - 84px); }
+.input-composer[data-composer-expanded]:not([data-pty-input-mode]) .composer-usage-line { inset-inline-end:calc(var(--composer-runtime-width, 280px) + 8px); }
+.input-composer[data-composer-expanded] .composer-actions-left > .ant-btn { flex:none; }
+.input-composer[data-composer-expanded] .composer-actions-left > .composer-compact-entry { flex:1; min-width:44px; }
+.composer-config-controls-runtime > [data-mode-control-pill="model"] { flex:0 1 auto; max-width:100%; }
+.composer-config-controls-runtime > [data-mode-control-pill="thinking"] { flex:none; }
+.composer-config-controls-runtime .wand-composer-select-trigger.ant-btn { background:transparent !important; border:0; box-shadow:none; padding-inline:4px; font-size:var(--font-size-xs); color:var(--text-secondary); }
+.composer-config-controls-runtime .wand-composer-select-trigger.ant-btn:is(:hover,[data-popup-open]) { color:var(--accent); }
+.composer-config-controls-runtime .wand-composer-select-trigger svg { width:10px; height:10px; opacity:.5; }
+.composer-runtime-separator { flex:none; color:var(--text-tertiary); }
 .input-composer[data-composer-expanded] .composer-input-wrap { grid-row:1; grid-column:1 / -1; }
 .input-composer[data-composer-expanded] .composer-actions-left { grid-row:2; grid-column:1; }
-.input-composer[data-composer-expanded] .composer-actions-right { grid-row:2; grid-column:3; flex-wrap:nowrap; }
-.input-composer[data-composer-expanded] .composer-inline-config,
+.input-composer[data-composer-expanded] .composer-actions-right { grid-row:2; grid-column:2; flex-wrap:nowrap; }
 .input-composer[data-composer-expanded] .composer-status-row > :not(#composer-status-line),
 .input-composer[data-composer-expanded] .composer-status-line:not([data-tone]),
 .input-composer[data-composer-expanded] .composer-input-wrap:not([data-editor-expanded="true"]):not(:has(.has-clipped-draft)) .composer-editor-controls { display:none; }
-.input-composer[data-composer-expanded] .composer-compact-entry { grid-row:2; grid-column:2; }
 .input-composer[data-composer-expanded="true"] .composer-compact-entry { visibility:hidden; pointer-events:none; }
 /* Collapsed editors must also release the identity layout's minimum height. */
 .input-composer[data-composer-expanded="false"] .composer-input-wrap [data-composer-sender] { height:0; min-height:0; overflow:hidden; opacity:0; pointer-events:none; }
-.input-composer[data-composer-expanded="false"] :is(.composer-editor-controls,.prompt-optimize-btn,.composer-status-row:not(:has([data-tone])),.composer-inline-config,.composer-pi-settings-toggle-host) { display:none; }
+.input-composer[data-composer-expanded="false"] :is(.composer-editor-controls,.composer-status-row:not(:has([data-tone])),.composer-pi-settings-toggle-host) { display:none; }
 .input-composer[data-composer-expanded] .input-textarea { min-height:36px; max-height:min(112px,24dvh); }
 .input-composer[data-composer-expanded] .composer-input-wrap[data-editor-expanded="true"] .input-textarea { max-height:min(504px,48dvh); }
 .input-composer[data-composer-expanded="false"] .composer-attachments-host { display:none; }
 .input-composer[data-composer-expanded="true"] .composer-actions-left .composer-status-row { flex-wrap:wrap; }
-.input-composer[data-composer-expanded="true"] .composer-actions-left { flex-wrap:wrap; }
+.input-composer[data-composer-expanded] .composer-actions-left { flex-wrap:nowrap; }
 /* PTY has two complete views. The footer anchors never move during the swap. */
 .input-composer[data-pty-input-mode] .composer-surface { margin-block-start:0; padding:8px; border:1px solid var(--border-default); border-radius:var(--control-radius); background:var(--bg-surface); }
 .input-composer[data-pty-input-mode] .composer-surface:has(textarea:focus) { border-color:var(--border-focus); }
 .input-composer[data-pty-input-mode] .composer-surface::before { content:none; }
-.input-composer[data-pty-input-mode] :is(.composer-floating-avatar,.composer-usage-line,.prompt-optimize-btn,.composer-compact-entry) { display:none; }
+.input-composer[data-pty-input-mode] :is(.composer-floating-avatar,.composer-usage-line,.composer-compact-entry) { display:none; }
 .input-composer[data-pty-input-mode] .composer-main-row { grid-template-columns:auto minmax(0,1fr) auto; grid-template-rows:auto auto; gap:4px; align-items:end; }
 .input-composer[data-pty-input-mode] .pty-input-mode-toggle { grid-row:2; grid-column:1; }
 .input-composer[data-pty-input-mode] .composer-input-wrap { grid-row:1; grid-column:1 / -1; }
@@ -141,8 +148,18 @@ export function installChatComposerStyles(): void {
 .conversation-input-wrap[data-composer-expanded="true"] .composer-compact-entry { display:none; }
 .conversation-composer:has([data-composer-expanded="false"]) > .conversation-input-hint { display:none; }
 .conversation-root .conversation-action-row > .ant-flex { flex-wrap:nowrap; }
+.conversation-runtime-summary { position:absolute; inset-block-start:-56px; inset-inline-end:0; width:max-content; max-width:calc(100% - 84px); height:24px; display:flex; align-items:center; gap:8px; min-width:0; font-size:var(--font-size-xs); color:var(--text-secondary); }
+.conversation-input-wrap:has(.conversation-runtime-summary):not(:has(.composer-floating-avatar)) { margin-block-start:56px; }
+.conversation-input-wrap:not(:has(.composer-floating-avatar)) > .conversation-runtime-summary { max-width:100%; }
+.conversation-runtime-summary > .ant-typography { min-width:0; }
+.conversation-runtime-summary > .ant-typography:first-child { flex:1; }
+.conversation-runtime-summary > .conversation-thinking-summary { flex:none; }
+@media (pointer:coarse) { .conversation-composer > .conversation-input-hint { display:none; } }
 @media (pointer:coarse) { .conversation-root .conversation-input-wrap[data-composer-expanded] .composer-expand-editor.ant-btn { min-height:44px; } }
 @media (max-width:640px) {
+  .input-composer[data-composer-expanded]:not([data-pty-input-mode]) .composer-surface { margin-block-start:50px; }
+  .composer-config-controls-runtime > [data-mode-control-pill="tool"] { display:none; }
+  .input-composer[data-composer-expanded]:not([data-pty-input-mode]) .composer-usage-line { inset-block-start:-64px; inset-inline-end:0; }
   .input-composer[data-pty-input-mode] .composer-surface { --composer-control-height:44px; }
   .input-composer[data-pty-input-mode] .wand-composer-rail-submit { width:var(--composer-control-height); min-width:var(--composer-control-height); padding-inline:0; }
   .input-composer[data-pty-input-mode] .wand-composer-rail-submit > span { display:none; }
@@ -165,7 +182,6 @@ export function installChatComposerStyles(): void {
 .conversation-root .conversation-composer-control:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 @media (pointer:coarse) {
   .composer-surface, .conversation-input-wrap { --composer-control-height:44px; }
-  .composer-surface .prompt-optimize-btn { inset-block-start:-48px; }
   .conversation-work-choice .ant-btn, .conversation-heading > .ant-btn, .conversation-session-actions .ant-btn, .conversation-session-state > .ant-btn { min-height:44px; height:auto; }
 }
 @media (max-width:640px) {

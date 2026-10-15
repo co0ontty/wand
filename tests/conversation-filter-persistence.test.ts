@@ -105,6 +105,23 @@ test("blocked or unavailable localStorage does not prevent in-page filtering", a
   }
 });
 
+test("activity filter persists independently of archive tiers and search", async () => {
+  const storage = memoryStorage();
+  await withStorage(storage, async () => {
+    const { conversationUi } = await freshState();
+    assert.equal(conversationUi.getSnapshot().activityOnly, false);
+    conversationUi.activityOnly(true);
+    conversationUi.listFilter("archived");
+    conversationUi.filter("list-query", "保留搜索");
+    const restored = (await freshState()).conversationUi;
+    assert.equal(restored.getSnapshot().activityOnly, true);
+    assert.equal(restored.getSnapshot().listFilter, "archived");
+    assert.equal(restored.getSnapshot().filters["list-query"], "保留搜索");
+    restored.activityOnly(false);
+    assert.equal(restored.getSnapshot().listFilter, "archived");
+  });
+});
+
 test("archive filter updates accept only the three known tiers", async () => {
   await withStorage(memoryStorage(), async () => {
     const { conversationUi } = await freshState();

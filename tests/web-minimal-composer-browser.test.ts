@@ -18,8 +18,9 @@ test("minimal composer preserves drafts and owned popups; PTY input and shortcut
     import {updateInteractiveControls} from './src/web-ui/browser/input';
     import {attachEventListeners} from './src/web-ui/browser/events';
         import {ptyInputState} from './src/web-ui/pty-input-state';
+    import {refreshAllChatModeTrios} from './src/web-ui/browser/session-engine';
     import {PTY_SHORTCUTS} from './src/web-ui/react/composer-rail/terminal-shortcuts';
-    window.minimalFixture={update:updateInteractiveControls,bind:attachEventListeners,ptyInputState,priority:PTY_SHORTCUTS.map(k=>k.key)};
+    window.minimalFixture={update:updateInteractiveControls,bind:attachEventListeners,refreshRuntime:refreshAllChatModeTrios,ptyInputState,priority:PTY_SHORTCUTS.map(k=>k.key)};
   ` }, bundle: true, platform: "browser", format: "iife", jsx: "automatic", outfile: join(temp, "app.js"), logLevel: "warning", define: { "process.env.NODE_ENV": '"production"' } });
   const server = createServer((request, response) => {
     const path = new URL(request.url!, "http://fixture.invalid").pathname;
@@ -39,9 +40,19 @@ test("minimal composer preserves drafts and owned popups; PTY input and shortcut
       await browser.evaluate("p.state.sessions[0].sessionKind='structured';p.state.terminalInteractive=false;p.composer.edit(p.state.selectedId,{text:''});minimalFixture.update();void 0");
       await browser.click("#chat-output"); await browser.wait("document.querySelector('.input-composer').dataset.composerExpanded==='false'");
       assert.equal(await browser.evaluate("original===document.getElementById('input-box')"), true);
+      await browser.evaluate("p.state.sessions[0].selectedModel='claude-opus-4-6';p.state.sessions[0].thinkingEffort='deep';minimalFixture.refreshRuntime();void 0");
+      await browser.settle();
+      const runtime = await browser.evaluate(`(()=>{const r=document.querySelector('.composer-inline-config'),m=r.querySelector('[data-mode-control-pill=model]'),t=r.querySelector('[data-mode-control-pill=thinking]');const box=r.getBoundingClientRect(),attach=document.getElementById('attach-btn').getBoundingClientRect();return {height:box.height,model:m.textContent,thinking:t.textContent,sameActionRow:Math.abs((box.top+box.bottom)/2-(attach.top+attach.bottom)/2)<1,floating:getComputedStyle(r).position==='absolute',modelWidth:m.getBoundingClientRect().width,overflow:document.documentElement.scrollWidth>innerWidth}})()`);
+      assert.ok(runtime.height >= 24, "model/thinking remain visible while the editor is collapsed");
+      assert.equal(runtime.floating, true, "runtime labels float at the upper right without occupying the attachment/action row");
+      assert.ok(runtime.modelWidth >= 60, "narrow layouts must not squeeze the model name to zero width");
+      assert.match(runtime.model, /4[.-]6/);
+      assert.match(runtime.thinking, /中/);
+      assert.equal(runtime.overflow, false);
       await browser.screenshot(join(output, `${name}-chat-compact.png`));
       await browser.click(".composer-compact-entry");
       await browser.wait("document.activeElement===original");
+      assert.ok(await browser.evaluate("document.querySelector('.composer-inline-config').getBoundingClientRect().height >= 24"));
       await browser.click("#attach-btn");
       await browser.evaluate("original.focus();void 0");
       await browser.key("Escape");

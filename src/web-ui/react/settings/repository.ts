@@ -140,7 +140,6 @@ function normalizeConfig(value: unknown): SettingsConfig {
     const raw = stringValue(input.defaultThinkingEffort);
     if (raw === "off" || raw === "standard" || raw === "deep" || raw === "max") return raw;
     // Codex 动态推理档位由旧客户端写入，原样保留而不是悄悄重置成 off。
-    // gemini 不在原生档位名单里，不接受 `gemini:<level>`。
     if (isNativeThinkingEffort(raw)) {
       return raw as SettingsThinkingEffort;
     }
@@ -152,7 +151,6 @@ function normalizeConfig(value: unknown): SettingsConfig {
   const grok = stringValue(defaults.grok, stringValue(input.defaultGrokModel));
   const qoder = stringValue(defaults.qoder, stringValue(input.defaultQoderModel));
   const pi = stringValue(defaults.pi, stringValue(input.defaultPiModel));
-  const gemini = stringValue(defaults.gemini, stringValue(input.defaultGeminiModel));
   return {
     host: stringValue(input.host, "127.0.0.1"),
     port: finiteNumber(input.port, 3000),
@@ -168,8 +166,7 @@ function normalizeConfig(value: unknown): SettingsConfig {
     defaultGrokModel: grok,
     defaultQoderModel: qoder,
     defaultPiModel: pi,
-    defaultGeminiModel: gemini,
-    defaultModels: { claude, codex, opencode, grok, qoder, pi, gemini },
+    defaultModels: { claude, codex, opencode, grok, qoder, pi },
     modelGroups: normalizeModelGroups(input.modelGroups ?? []),
     defaultProvider,
     defaultThinkingEffort,
@@ -230,7 +227,6 @@ export function normalizeModels(value: unknown): SettingsModelCatalog {
     grokModels: models("grokModels"),
     qoderModels: models("qoderModels"),
     piModels: models("piModels"),
-    geminiModels: models("geminiModels"),
     thinkingEfforts: record(input.thinkingEfforts) as SettingsModelCatalog["thinkingEfforts"],
     claudeVersion: nullableString(input.claudeVersion),
     opencodeVersion: nullableString(input.opencodeVersion),
@@ -241,7 +237,6 @@ export function normalizeModels(value: unknown): SettingsModelCatalog {
     defaultGrokModel: stringValue(input.defaultGrokModel),
     defaultQoderModel: stringValue(input.defaultQoderModel),
     defaultPiModel: stringValue(input.defaultPiModel),
-    defaultGeminiModel: stringValue(input.defaultGeminiModel),
     defaultModels: {
       claude: stringValue(defaults.claude, stringValue(input.defaultModel)),
       codex: stringValue(defaults.codex, stringValue(input.defaultCodexModel)),
@@ -249,7 +244,6 @@ export function normalizeModels(value: unknown): SettingsModelCatalog {
       grok: stringValue(defaults.grok, stringValue(input.defaultGrokModel)),
       qoder: stringValue(defaults.qoder, stringValue(input.defaultQoderModel)),
       pi: stringValue(defaults.pi, stringValue(input.defaultPiModel)),
-      gemini: stringValue(defaults.gemini, stringValue(input.defaultGeminiModel)),
     },
   };
 }
@@ -532,7 +526,6 @@ export class HttpSettingsRepository implements SettingsRepository {
             grok: command.value.defaultGrokModel,
             qoder: command.value.defaultQoderModel,
             pi: command.value.defaultPiModel,
-            gemini: command.value.defaultGeminiModel,
           },
         }, options.signal);
         this.runtime.configSaved(normalizeConfig(record(result).config));

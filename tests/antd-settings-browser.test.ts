@@ -45,6 +45,8 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
     import { createRoot } from "react-dom/client";
     import { SettingsHost } from "./src/web-ui/react/settings/host";
     import { settingsController } from "./src/web-ui/react/settings/controller";
+    import { EmployeeListPage } from "./src/web-ui/react/agents/employee-list-page";
+    window.__wandAiTeamsChunk = { EmployeeListPage };
     import { installReactUiStyles } from "./src/web-ui/react/styles";
     installReactUiStyles();
     Object.defineProperty(navigator, "clipboard", {value:{writeText:async()=>{window.fixtureCopies=(window.fixtureCopies||0)+1;}}});
@@ -83,7 +85,7 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
       }
       const payload = path === "/api/settings" || path === "/api/settings/about" ? about()
         : path === "/api/models" ? models
-        : path === "/api/provider-cli-updates" ? {items:process.env.WAND_SETTINGS_LAYOUT_QA === "1" ? ["Claude Code", "Codex", "OpenCode", "Grok CLI", "Qoder CLI", "Pi CLI", "Gemini CLI"].map((label,index)=>({id:String(index),label,installed:true,currentVersion:"1.0.0",latestVersion:"1.0.0",updateAvailable:false,updateSupported:true})) : [],autoUpdate:false}
+        : path === "/api/provider-cli-updates" ? {items:process.env.WAND_SETTINGS_LAYOUT_QA === "1" ? ["Claude Code", "Codex", "OpenCode", "Grok CLI", "Qoder CLI", "Pi CLI"].map((label,index)=>({id:String(index),label,installed:true,currentVersion:"1.0.0",latestVersion:"1.0.0",updateAvailable:false,updateSupported:true})) : [],autoUpdate:false}
         : path === "/api/local-models/status" ? {laya:null,speech:{operation:null,supported:false}}
         : path === "/api/app-connect-code" ? {code:"local-browser-fixture",url:""}
         : path === "/api/silicon-employees" ? {employees:[]}
@@ -141,6 +143,10 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
       throw new Error(`Timed out: ${expression}`);
     };
     const click = async (selector: string): Promise<void> => {
+      if (selector === '[aria-label="返回设置目录"]' && await evaluate("document.querySelector('[data-testid=settings-page]')?.dataset.wide === 'true'")) {
+        assert.equal(await evaluate("!!document.querySelector('[aria-label=设置目录]')?.getClientRects().length"), true, "desktop navigation is always present");
+        return;
+      }
       await wait(`!!document.querySelector(${JSON.stringify(selector)})`);
       await evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n.closest('.ant-dropdown,.ant-popover'))n.scrollIntoView({block:"nearest",behavior:"instant"})})()`);
       await pause(280);
@@ -252,9 +258,9 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
         if(hostWidth<720) assert.ok(about.sections[1].y>about.sections[0].y,`${width}/${condition}: About stacks on a narrow host`);
         await click('[aria-label="返回设置目录"]');
         const directory=await evaluate(`(()=>{const n=document.querySelector('[aria-label=设置目录]');return {width:n.clientWidth,groups:[...n.querySelectorAll('.ant-menu-item-group')].map(n=>n.getBoundingClientRect().toJSON()),overflow:n.scrollWidth>n.clientWidth+1}})()`);
-        assert.equal(directory.width,Math.min(hostWidth,1160));
+        assert.equal(directory.width,hostWidth >= 720 ? 224 : Math.min(hostWidth,1160));
         assert.equal(directory.overflow,false);
-        if(directory.width-40>=800) assert.ok(directory.groups.every(r=>Math.abs(r.y-directory.groups[0].y)<1),`${width}: desktop directory groups share a row`);
+        assert.ok(directory.groups[1].y>directory.groups[0].y,`${width}: navigation groups always stack vertically`);
         if(hostWidth<720) assert.ok(directory.groups[1].y>directory.groups[0].y,`${width}/${condition}: directory groups stack`);
         await clickText('基本配置','tab');
         assert.equal(await evaluate("document.querySelector('#settings-host').value"),'layout-draft.example',`${width}/${condition}: layout/navigation preserve the draft`);
@@ -305,7 +311,7 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
       console.log(`Settings layout QA: ${records.length} cases; ${records.filter(r=>r.issues.length).length} with findings`);
       return;
     }
-    const tabs = ["我的资料","连接器","基本配置","AI 与模型","通知","显示","安全","命令预设","关于"];
+    const tabs = ["员工","连接器","基本配置","AI 与模型","通知","显示","安全","命令预设","关于"];
     for (const mode of process.env.WAND_SETTINGS_TEST_MODES?.split(",") ?? ["desktop","mobile","native","rollback","reduced-motion"]) {
       access="admin"; failSave=false;
       qrFail=true; const qrRequestBaseline=qrRequests;
@@ -453,15 +459,16 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
       const volumeBefore=Number(await evaluate(`document.querySelector('.ant-slider-handle').getAttribute('aria-valuenow')`));
       await key("ArrowRight");
       await wait(`document.querySelector('.ant-slider-handle').getAttribute('aria-valuenow')==='${Math.min(100,volumeBefore+5)}'`);
-      await clickText("我的资料","tab");
+      await clickText("员工","tab");
       await enter("#settings-profile-name","赛博虎妞");
-      await click('[aria-label="上传头像图片"]').catch(() => {});
-      await click('.wand-team-coat[aria-pressed]');
+      await clickText("捏脸");
+      await click('input[aria-label="圆形"]');
+      await clickText("使用这个头像");
       await clickText("保存资料");
       try { await wait('document.body.innerText.includes("资料已保存")'); }
       catch { throw new Error(`${mode}: profile save did not settle; last=${JSON.stringify(commands.at(-1)?.value.userProfile)}; alerts=${await evaluate("Array.from(document.querySelectorAll('.ant-alert')).map(n=>n.innerText).join('|')")}`); }
       assert.equal(commands.at(-1)!.value.userProfile.name,"赛博虎妞",`${mode}: profile name submitted trimmed`);
-      assert.match(String(commands.at(-1)!.value.userProfile.avatar),/^(cat:\d+|data:image\/)/,`${mode}: profile avatar submitted as picked`);
+      assert.match(String(commands.at(-1)!.value.userProfile.avatar),/^(cat:\d+|plush:v1:|data:image\/)/,`${mode}: profile avatar submitted as picked`);
       await clickText("安全","tab");
       assert.equal(await evaluate('document.querySelectorAll(".ant-upload input[type=file]").length'),2,`${mode}: local controlled Upload`);
       await clickText("关于","tab"); await clickText("检查更新"); await wait('document.body.innerText.includes("版本检查完成")');
@@ -473,7 +480,7 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
         const shot=await send("Page.captureScreenshot",{format:"png"});mkdirSync(artifact,{recursive:true});writeFileSync(join(artifact,`settings-${mode}.png`),Buffer.from(shot.data,"base64"));
         await evaluate('document.getElementById("settings-redact").remove()');
       }
-      await key("Escape"); await wait('!!document.querySelector("[aria-label=设置目录]").getClientRects().length');
+      if (mode === "mobile") { await key("Escape"); await wait('!!document.querySelector("[aria-label=设置目录]").getClientRects().length'); }
       await key("Escape"); await wait('!document.querySelector("[data-testid=settings-page]").getClientRects().length');
       access="read-only";
       await evaluate('settingsHarness.open("general")');

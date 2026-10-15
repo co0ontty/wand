@@ -17,8 +17,6 @@ test("permission summary follows actual provider behavior instead of treating ev
   assert.equal(hasAutomaticPermissions(form({ provider: "qoder" })), true);
   assert.match(modeHint(form({ provider: "qoder" })), /所有模式.*跳过/);
   assert.equal(hasAutomaticPermissions(form({ kind: "shell", mode: "full-access" })), false);
-  assert.equal(hasAutomaticPermissions(form({ provider: "gemini", kind: "pty", mode: "auto-edit" })), true);
-  assert.equal(hasAutomaticPermissions(form({ provider: "gemini", mode: "auto-edit" })), false);
 });
 
 test("Pi CLI and Wand Agent descriptions retain different execution and permission boundaries", () => {

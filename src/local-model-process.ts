@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { buildChildEnv, systemEnvValue } from "./env-utils.js";
+import { registerTemporaryChild } from "./managed-temp.js";
 
 /** Runs one fixed deployment command. Only whitelisted server code constructs executable/args. */
 export function runModelSetup(executable: string, args: string[], cwd: string, signal: AbortSignal,
@@ -12,6 +13,17 @@ export function runModelSetup(executable: string, args: string[], cwd: string, s
         HTTPS_PROXY: systemEnvValue("HTTPS_PROXY"), HTTP_PROXY: systemEnvValue("HTTP_PROXY"), NO_PROXY: systemEnvValue("NO_PROXY"),
         WAND_LAYA_PYTHON_BIN: systemEnvValue("WAND_LAYA_PYTHON_BIN"),
       }) });
+    const workIndex = args.indexOf("--work-dir");
+    if (workIndex !== -1) {
+      try { registerTemporaryChild(args[workIndex + 1]!, child.pid, grouped); }
+      catch {
+        child.on("error", () => {});
+        child.once("close", () => { reject(new Error("Model setup temporary lease unavailable")); });
+        if (grouped && child.pid) { try { process.kill(-child.pid, "SIGKILL"); } catch {} }
+        else child.kill("SIGKILL");
+        return;
+      }
+    }
     let failed = false, buffer = "", kill: NodeJS.Timeout | undefined;
     const terminate = (): void => {
       failed = true;

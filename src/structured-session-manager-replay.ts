@@ -8,7 +8,6 @@ import { applyOpenCodeEvent } from "./structured-opencode-adapter.js";
 import { applyGrokEvent } from "./structured-grok-adapter.js";
 import { applyPiEvent } from "./structured-pi-adapter.js";
 import { lastPiAssistantMessage } from "./pi-event-projection.js";
-import { applyGeminiEvent } from "./structured-gemini-adapter.js";
 import type { StructuredCompactionNotice, StructuredRunnerTurnState } from "./structured-runner.js";
 import { normalizeTurnAnchors } from "./structured-provider-common.js";
 import { enrichStructuredMessages, WAND_PROTOCOL_VERSION } from "./structured-client-protocol.js";
@@ -73,7 +72,7 @@ export function buildReplayProcessor(session: SessionSnapshot): ReplayProcessor 
     };
     return processor;
   }
-  // grok-cli-headless / opencode-cli-run / pi-cli-json / gemini-cli-json share the same shape.
+  // grok-cli-headless / opencode-cli-run / pi-cli-json share the same shape.
   const state: StructuredRunnerTurnState = {
     blocks: [],
     result: "",
@@ -94,9 +93,7 @@ export function buildReplayProcessor(session: SessionSnapshot): ReplayProcessor 
         ? applyGrokEvent(state as Parameters<typeof applyGrokEvent>[0], event)
         : runner === "opencode-cli-run"
           ? applyOpenCodeEvent(state, event)
-          : runner === "gemini-cli-json"
-            ? applyGeminiEvent(state, event)
-            : applyPiEvent(state, event, observedAt);
+          : applyPiEvent(state, event, observedAt);
       if (error) processor.primaryError = error;
       else if (runner === "pi-cli-json") {
         const lastAssistant = lastPiAssistantMessage(event);
@@ -117,7 +114,6 @@ export function recoveredCommandLabel(runner: SessionRunner | undefined): string
     case "grok-cli-headless": return "grok -p --output-format streaming-json";
     case "qoder-cli-print": return "qodercli -p --output-format stream-json";
     case "pi-cli-json": return "pi --mode json";
-    case "gemini-cli-json": return "gemini -p --output-format stream-json";
     default: return "claude -p";
   }
 }

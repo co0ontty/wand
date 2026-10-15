@@ -85,7 +85,9 @@ const BUDGET = {
   // Third pass moves the session renderer and split-terminal view out of cold JS.
   runtime: 730_000,
   module: 110_000,
-  allModules: 1_040_000,
+  // 工作区批量操作支持目录批量选择与级联删除：实测 allModules 1041100 B gzip，
+  // 调整 allModules 上限 1040000 -> 1045000（+5 KB，0.48%）；首载与首屏总预算保持 860000 B。
+  allModules: 1_045_000,
   css: 110_000,
   firstLoad: 860_000,
   // The team chunk now also contains employee management and candidate editors.

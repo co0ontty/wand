@@ -227,7 +227,7 @@ export function recentEntrySearchText(
 export interface RecentEntryFilter {
   readonly query?: string;
   readonly employees?: readonly SidebarRecentEmployee[];
-  /** 「在跑」档只留在动会话；正在看的那条始终保留。 */
+  /** 活动档只留在跑、待处理及尚未查看的完成结果。 */
   readonly activeOnly?: boolean;
   readonly selectedSessionId?: string | null;
 }
@@ -241,6 +241,6 @@ export function filterRecentEntries(
   return entries.filter((entry) => {
     if (query && !recentEntrySearchText(entry, employees).includes(query)) return false;
     if (!filter.activeOnly) return true;
-    return isSessionActive(entry.session) || entry.session.id === filter.selectedSessionId;
+    return isSessionActive(entry.session);
   });
 }

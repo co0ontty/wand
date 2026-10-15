@@ -100,6 +100,5 @@ test("readNativeSessionTitle returns empty for providers without a native title"
   clearNativeSessionTitleCache();
   assert.equal(await readNativeSessionTitle("claude", THREAD_ID, process.cwd(), { codexHome: tempRoot("wand-none-") }), "");
   assert.equal(await readNativeSessionTitle("pi", "sess-1", process.cwd(), {}), "");
-  assert.equal(await readNativeSessionTitle("gemini", "sess-1", process.cwd(), {}), "");
   assert.equal(await readNativeSessionTitle("codex", "", process.cwd(), {}), "");
 });

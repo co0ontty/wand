@@ -19,6 +19,7 @@ import { StructuredSessionManager } from "../src/structured-session-manager.js";
 import type { ProcessEvent, SessionSnapshot } from "../src/types.js";
 import { filterActiveGroups, isSessionActive, isSessionRunning } from "../src/web-ui/react/workspaces/sidebar-display-mode.js";
 import { deriveLegacyUiSnapshot } from "../src/web-ui/react/shell/legacy-snapshot.js";
+import { collectRecentEntries, recentConversationGroups } from "../src/web-ui/react/workspaces/sidebar-recent.js";
 import { splitTeamSessions } from "../src/web-ui/react/workspaces/team-sessions.js";
 import type { TaskDirectoryGroup } from "../src/web-ui/react/workspaces/types.js";
 
@@ -38,10 +39,19 @@ test("automatic selection and background refresh cannot consume explicit complet
   assert.equal(view.isOpen("automatic-newest"), false);
   view.open("clicked-A");
   assert.equal(view.isOpen("clicked-A"), true);
+  assert.equal(view.isLoaded("clicked-A"), false, "cleared/loading chrome is not the completed result");
+  view.loaded("automatic-newest");
+  assert.equal(view.isLoaded("clicked-A"), false);
+  view.loaded("clicked-A");
+  assert.equal(view.isLoaded("clicked-A"), true);
   assert.equal(view.isOpen("automatic-newest"), false);
   view.open("clicked-B");
   assert.equal(view.isOpen("clicked-A"), false, "late A rendering cannot consume a result after switching to B");
   assert.equal(view.isOpen("clicked-B"), true);
+  view.loaded("clicked-A");
+  assert.equal(view.isLoaded("clicked-B"), false, "late A content cannot mark B ready");
+  view.open("clicked-A");
+  assert.equal(view.isLoaded("clicked-A"), false, "retrying the same session requires loaded content");
   view.clear();
   assert.equal(view.isOpen("clicked-B"), false, "going home terminates the view intent");
 });
@@ -146,6 +156,25 @@ test("just completed stays in the activity filter without inflating running coun
     { completionRevision: 3, viewedCompletionRevision: 2 },
     { completionRevision: 2, viewedCompletionRevision: 2 },
   ), { completionRevision: 3, viewedCompletionRevision: 2 });
+});
+
+test("viewed completion leaves directory and recent activity without closing the selected result", () => {
+  const unread = { ...snapshot(), completionRevision: 2, viewedCompletionRevision: 1 };
+  const seen = { ...unread, viewedCompletionRevision: 2 };
+  const page = (session: typeof unread): TaskDirectoryGroup[] => [{
+    workspaceId: "w", workspaceName: "W", workspaceCwd: "/tmp",
+    tasks: [{ id: "t", name: "T", workspaceId: "w", cwd: "/tmp", createdAt: "", sessions: [session] }],
+    standaloneSessions: [{ ...session, id: "standalone" }],
+  }];
+  assert.equal(filterActiveGroups(page(unread), unread.id)[0].tasks.length, 1);
+  assert.deepEqual(filterActiveGroups(page(seen), seen.id)[0].tasks, []);
+  assert.deepEqual(filterActiveGroups(page(seen), "standalone")[0].standaloneSessions, []);
+  const recent = (session: typeof unread, activeOnly = true) => recentConversationGroups(collectRecentEntries(page(session)),
+    { activeOnly, selectedSessionId: session.id }).flatMap(group => group.entries);
+  assert.equal(recent(unread).length, 2);
+  assert.equal(recent(seen).length, 0);
+  assert.equal(recent(seen, false).length, 2, "viewing neither archives nor deletes the result");
+  assert.equal(recent({ ...seen, inFlight: true } as typeof unread).length, 2, "new work remains active");
 });
 
 test("only explicit generation-checked viewing consumes completion and invalidates both list revisions", async () => {

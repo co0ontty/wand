@@ -84,6 +84,21 @@ test("the sender projection always resolves to a stable id with one default name
   assert.deepEqual(Object.keys(userAuthor({ name: "虎妞" })).sort(), ["id", "name"]);
 });
 
+test("user and employee avatars share versioned plush grammar without widening URL permissions", () => {
+  for (const avatar of ["plush:v1:round:cream:none:beanie", "plush-cat:v1:silver", "plush-dog:v1:shiba:red-scarf"]) {
+    assert.deepEqual(parseUserProfile({ avatar }), { avatar });
+    assert.deepEqual(normalizeUserProfile({ avatar }), { avatar });
+    withStorage((storage, config) => {
+      writePreferenceToStorage(config, storage, "userProfile", { avatar });
+      assert.equal(applyStoragePreferences(defaultConfig(), storage).userProfile?.avatar, avatar);
+    });
+  }
+  for (const avatar of ["plush:v2:round:cream:none:none", "plush:v1:bad:cream:none:none", "https://example.com/avatar.png"]) {
+    assert.throws(() => parseUserProfile({ avatar }), /格式无效/);
+    assert.equal(normalizeUserProfile({ avatar }), undefined);
+  }
+});
+
 test("parse and normalize agree on the values they accept", () => {
   assert.deepEqual(parseUserProfile({ name: " 虎妞 ", avatar: " cat:1 " }), { name: "虎妞", avatar: "cat:1" });
   assert.deepEqual(parseUserProfile({ name: "虎妞", avatar: PNG }), { name: "虎妞", avatar: PNG });

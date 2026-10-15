@@ -1,0 +1,6 @@
+Lane mailbox for Gemini 共享回归调整 (role tests)
+Run: team_mv80lpx800018d8evp
+Lane: tests-1791976609220
+Token: f893b904-34a3-4c0c-a9ce-1768181ca183
+
+Captain messages appear below, newest last.

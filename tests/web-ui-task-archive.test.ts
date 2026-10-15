@@ -55,13 +55,17 @@ test("batch selection archives tasks and sessions, and delete is its own danger 
   const tasksOnly = { taskIds: ["t1", "t2"], sessionIds: [] };
   assert.equal(managedSelectionIsDestructive(tasksOnly), false);
   assert.equal(managedSelectionIsDestructive({ taskIds: [], sessionIds: ["s1"] }), true);
+  assert.equal(managedSelectionIsDestructive({ directoryIds: ["d1"], taskIds: [], sessionIds: [] }), true);
   assert.equal(describeManagedAction(tasksOnly), "归档任务");
   assert.equal(describeManagedAction({ taskIds: [], sessionIds: ["s1", "s2"] }), "归档终端");
   assert.equal(describeManagedDelete({ taskIds: [], sessionIds: ["s1", "s2"] }), "删除 2 个终端");
-  // 归档主操作恒为 secondary，危险按钮只在选中了终端时出现，且动的是删除而不是归档。
+  assert.equal(describeManagedDelete({ directoryIds: ["d1"], taskIds: [], sessionIds: [] }), "删除 1 个目录");
+  assert.equal(describeManagedDelete({ directoryIds: ["d1", "d2"], taskIds: [], sessionIds: ["s1"] }), "删除 2 个目录与 1 个终端");
+  // 归档主操作恒为 secondary，危险按钮在选中了终端或目录时出现，且动的是真删除而不是归档。
   assert.match(panel, /kind="secondary"[\s\S]{0,420}setConfirmingManage\("archive"\)/);
-  assert.match(panel, /hasManageSessions && \(/);
+  assert.match(panel, /hasManageDestructive && \(/);
   assert.match(panel, /kind="danger"[\s\S]{0,200}setConfirmingManage\("delete"\)/);
+  assert.match(panel, /httpWorkspacesRepository\.remove\(workspaceId, true\)/);
 });
 
 test("sidebar task menus archive by default and only isolated tasks keep a worktree delete", () => {

@@ -62,9 +62,10 @@ export function installSidebarStyles(): void {
 .sidebar .im-sidebar-group-meta { display:inline-flex; align-items:center; gap:4px; flex:none; }
 .sidebar .im-sidebar-group-action { display:inline-flex; flex:none; }
 .sidebar .sidebar-recent-add { width:28px; min-width:28px; height:32px; padding:0; }
-.sidebar .im-sidebar-group-inner { margin-inline-start:14px; border-inline-start:1px solid var(--border-subtle); }
+.sidebar .im-sidebar-group-inner { margin-inline-start:8px; border-inline-start:1px solid var(--border-subtle); }
 .sidebar .sidebar-group-empty, .sidebar .sidebar-filter-empty { margin:0; padding:6px; font-size:12px; line-height:1.5; }
-.sidebar .workspace-tasks, .sidebar .workspace-task-sessions { margin-inline-start:14px; border-inline-start:1px solid var(--border-subtle); }
+.sidebar .workspace-tasks { margin-inline-start:8px; border-inline-start:1px solid var(--border-subtle); }
+.sidebar .workspace-task-sessions { margin-inline-start:6px; border-inline-start:1px solid var(--border-subtle); }
 .sidebar .workspace-task-main, .sidebar .workspace-session-main { min-height:36px; }
 .sidebar .workspace-session-name { font-size:13px; }
 .sidebar .workspace-session-kind { color:var(--text-secondary); font-size:11px; }
@@ -96,16 +97,18 @@ export function installSidebarStyles(): void {
 .sidebar .conversation-row[aria-current="page"] .conversation-row-title { color:var(--sidebar-accent); }
 .sidebar .conversation-row-open.ant-btn:hover { color:inherit; background:transparent; }
 .sidebar .conversation-row-time { color:var(--text-secondary); }
-.sidebar .conversation-session-toggle.ant-btn { width:24px; min-width:24px; height:28px; padding:0; margin-inline-end:24px; flex:none; color:var(--text-secondary); }
-.conversation-person-sessions { margin-inline-start:50px; border-inline-start:1px solid var(--border-subtle); padding-inline-start:6px; min-width:0; max-height:min(45dvh,360px); overflow-y:auto; overscroll-behavior:contain; }
+.conversation-person-sessions { margin-inline-start:28px; border-inline-start:1px solid var(--border-subtle); padding-inline-start:4px; min-width:0; max-height:min(45dvh,360px); overflow-y:auto; overscroll-behavior:contain; }
 .sidebar .im-sidebar-group:has(.sidebar-session-preview) .im-sidebar-group-inner { max-height:min(45dvh,360px); overflow-y:auto; overscroll-behavior:contain; }
 .conversation-person-sessions .wand-sidebar-session-row { min-height:44px; }
-@media (pointer:coarse), (max-width:640px) { .sidebar .conversation-session-toggle.ant-btn { width:32px; min-width:32px; height:44px; margin-inline-end:32px; } }
 .sidebar :is(.workspace-session-main,.workspace-task-main,.wand-sidebar-session-row)[aria-current="page"], .sidebar .wand-sidebar-session-row.active { color:var(--sidebar-accent); background:var(--sidebar-selected); }
 .sidebar .conversation-navigation .wand-ui-icon-button:hover { background:var(--sidebar-hover); }
 .sidebar .conversation-navigation .wand-ui-icon-button[aria-current="page"] { background:var(--sidebar-selected); }
 .sidebar .conversation-navigation .wand-ui-icon-button[aria-current="page"]::before { content:""; position:absolute; inset-inline-start:0; inset-block:14px; width:2px; border-radius:2px; background:var(--sidebar-accent); }
+.sidebar .conversation-list-filter { flex:1; min-width:0; }
+.sidebar .conversation-list-filter .ant-segmented-item-label { padding-inline:6px; }
 .sidebar .conversation-list-filter .ant-segmented-item-selected { color:var(--sidebar-accent); }
+.sidebar .sidebar-activity-filter.ant-btn { flex:none; width:48px; height:28px; padding:0; border-radius:var(--radius-full); font-size:12px; color:var(--text-secondary); background:transparent; border-color:var(--border-subtle); }
+.sidebar .sidebar-activity-filter.ant-btn[aria-pressed="true"] { color:var(--sidebar-accent); background:var(--sidebar-selected); border-color:color-mix(in srgb,var(--sidebar-accent) 45%,var(--border-subtle)); }
 .sidebar .conversation-search-input:focus-within { border-color:var(--sidebar-accent); box-shadow:0 0 0 2px color-mix(in srgb,var(--sidebar-accent) 14%,transparent); }
 .sidebar.collapsed .conversation-row { justify-content:center; padding:6px 0; min-height:48px; }
 .sidebar.collapsed .sidebar-body { scrollbar-gutter:auto; }
@@ -115,6 +118,7 @@ export function installSidebarStyles(): void {
   .sidebar-new-task.ant-btn { min-height:44px; }
   .sidebar :is(.workspace-task-action,.workspace-task-chevron-btn) { width:32px; min-width:32px; height:44px; }
   .sidebar .workspace-task-main, .sidebar .workspace-session-main { min-height:44px; }
+  .sidebar .sidebar-activity-filter.ant-btn { min-height:44px; }
   .sidebar .sidebar-recent-add { width:44px; min-width:44px; height:44px; }
   :is(.sidebar-row-menu,.sidebar-menu-submenus) :is(.ant-dropdown-menu-item,.ant-dropdown-menu-submenu-title) { min-height:44px; }
 }
@@ -144,7 +148,7 @@ export function installSidebarStyles(): void {
    旁边留 21px 邻标签提示，溢出标签仍能从“更多”下拉进。 */
 @media (max-width: 640px) {
   .wand-workspace-tab-label { max-width:96px; }
-  .wand-workspace-tabs .ant-tabs-tab-remove { display:none; }
+  [data-session-tabs="task"] .wand-workspace-tabs .ant-tabs-tab-remove { display:none; }
 }
 .wand-attention-item { width:100%; height:auto; white-space:normal; text-align:start; justify-content:flex-start; }
 /* 报错项正文是不带空格的 CJK 长串，默认 overflow-wrap:normal 时 min-content 会把

@@ -170,11 +170,11 @@ export async function checkCoreStatus(configPath: string): Promise<void> {
 export async function waitForCoreTurnsComplete(
   configPath: string,
   timeoutSeconds = 0,
-  stopCommand?: string[],
+  stopCommand?: string[] | (() => Promise<number>),
   allowStopped = false,
 ): Promise<number> {
   if (!Number.isFinite(timeoutSeconds) || timeoutSeconds < 0) throw new Error("--timeout 必须是非负秒数（0 表示一直等待）。");
-  if (stopCommand && !stopCommand.length) throw new Error("缺少等待完成后要执行的停止命令。");
+  if (Array.isArray(stopCommand) && !stopCommand.length) throw new Error("缺少等待完成后要执行的停止命令。");
   const deadline = timeoutSeconds > 0 ? Date.now() + timeoutSeconds * 1000 : Infinity;
   const control = await openControl(configPath, deadline);
   try {
@@ -213,6 +213,7 @@ export async function waitForCoreTurnsComplete(
     control?.assertConnected();
     console.log("[wand] 原生 Core 回合已全部完成，可以停止服务。");
     if (!stopCommand) return 0;
+    if (typeof stopCommand === "function") return await stopCommand();
     return await new Promise<number>((resolve, reject) => {
       const child = spawn(stopCommand[0], stopCommand.slice(1), { stdio: "inherit" });
       child.once("error", reject);

@@ -1043,8 +1043,8 @@ test("[T8] 预览 = 前 6 行且不超过 420 字，被截断一定以 … 结�
 
 test("[T8] 头像解析：上传图 > 显式毛色 > 按身份生成 > 默认 APP logo", () => {
   assert.deepEqual(chatAvatarSpec({ id: "m_impl", name: "实现者" }),
-    { kind: "generated", face: generatedAvatarFace({ id: "m_impl", name: "实现者" }) },
-    "没自定义头像的成员按身份生成（不再是像素猫）");
+    { kind: "plush", config: defaultPlushAvatar({ id: "m_impl", name: "实现者" }) },
+    "没自定义头像的成员与员工目录共用稳定身份毛绒默认");
   assert.deepEqual(chatAvatarSpec({ id: "m_impl", name: "实现者", avatar: "cat:3" }), { kind: "cat", coat: 3 });
   assert.deepEqual(chatAvatarSpec({ id: "m_impl", name: "实现者", avatar: "data:image/png;base64,AAA" }),
     { kind: "upload", src: "data:image/png;base64,AAA" });
@@ -1052,7 +1052,7 @@ test("[T8] 头像解析：上传图 > 显式毛色 > 按身份生成 > 默认 AP
   assert.deepEqual(chatAvatarSpec({ id: "", name: "", avatar: "说不清的取值" }), { kind: "brand" },
     "非法 avatar 且定位不到身份也不渲染空 <img>");
   assert.deepEqual(chatAvatarSpec({ id: "", name: "实现者", avatar: "说不清的取值" }),
-    { kind: "generated", face: generatedAvatarFace({ id: "", name: "实现者" }) }, "非法 avatar 但能定位身份 → 按身份生成");
+    { kind: "plush", config: defaultPlushAvatar({ id: "", name: "实现者" }) }, "非法 avatar 但能定位身份 → 按身份生成");
 });
 
 test("[T8] 生成头像：字形看名字，种子只认稳定身份，八组配色白字对比度 ≥4.5", () => {

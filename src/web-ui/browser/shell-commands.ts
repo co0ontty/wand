@@ -99,8 +99,6 @@ function copyTopbarField(field: "providerSessionId" | "cwd" | "sessionId"): void
         ? "Grok 会话 ID 已复制"
       : provider === "qoder"
         ? "Qoder 会话 ID 已复制"
-        : provider === "gemini"
-          ? "Gemini 会话 ID 已复制"
         : "Claude 会话 ID 已复制";
   return copySelectedSessionField("claudeSessionId", label);
 }

@@ -33,6 +33,8 @@ import { EmployeeAvatar } from "../agents/employee-avatar.js";
 import { appendedConversationKeys, CONVERSATION_TAIL_PX, conversationClock, conversationDay, conversationMessageKey, joinsConversationBubble } from "../conversations/presentation";
 import { useReducedMotion } from "../ui/motion-tokens";
 import { teamChatComposer } from "./composer-bridge";
+import { composerRuntimePreference } from "../conversations/composer-presentation";
+import { useWandModelCatalog } from "../use-model-catalog";
 import { aiTeamsRepository } from "./repository";
 import { currentUserAuthor, selfAuthorFor, useUserProfile } from "../user-profile-repository";
 import { deliveryResultText, deliverySummaryText, TeamDeliveryDetails } from "./team-delivery";
@@ -520,9 +522,8 @@ export type ChatAvatarSpec =
 export function chatAvatarSpec(
   author: Pick<ConversationAuthor, "id" | "name" | "avatar"> | null | undefined,
 ): ChatAvatarSpec {
-  // 能定位到成员身份才给脸（显式 `cat:<n>` 走像素猫，其余按身份生成，与团队页/工位同一张脸）；
-  // 「我」和没有署名的发言才回落成默认 APP logo。
-  const plush = parsePlushDogAvatar(author?.avatar ?? "") ?? parsePlushCatAvatar(author?.avatar ?? "") ?? parsePlushAvatar(author?.avatar ?? "");
+  // 与设置、员工目录和群头像共用稳定身份默认；无署名才回落品牌。
+  const plush = author && (author.id || author.name) ? resolveEmployeeAvatar(author) : null;
   if (plush) return { kind: "plush", config: plush };
   return avatarFace({ id: author?.id ?? "", name: author?.name ?? "", avatar: author?.avatar ?? "" })
     ?? { kind: "brand" };
@@ -1490,6 +1491,7 @@ export interface ConversationMessagesProps {
 /** IM presentation shares file cards and text expansion; composer/receipt ownership stays unchanged. */
 export function ConversationMessages({ turns, taskLabels, group = true, ready = true, active = true, restoreScroll,
   employeeIds = {}, mentionNames = EMPTY_MENTION_NAMES, onOpenEmployee, onOpenConversation, onOpenSession, renderActivity, renderTaskPreview, renderSessionPreview }: ConversationMessagesProps): React.ReactElement {
+  const profile = useUserProfile();
   const list = React.useRef<HTMLDivElement>(null);
   const previous = React.useRef<string[] | null>(null);
   const following = React.useRef(true);
@@ -1570,6 +1572,7 @@ export function ConversationMessages({ turns, taskLabels, group = true, ready = 
           data-side={self ? "end" : "start"} data-shape="bubble" data-group={group} data-joined={joined} data-lead={lead} data-tail={tail}
           data-presentation-id={key} data-im-arriving={arrivals.has(key) || undefined}
           onAnimationEnd={event => { if (event.target === event.currentTarget) setArrivals(current => { const next = new Set(current); next.delete(key); return next; }); }}>
+          {group && self ? <span className="conversation-peer-avatar" data-visible={lead}><EmployeeAvatar employee={{ id: "user", name: profile.name || "我", avatar: profile.avatar }} provider="" size="md"/></span> : null}
           {group && !self ? <span className="conversation-peer-avatar" data-visible={lead}>{lead && turn.author && employeeIds[turn.author.id] && onOpenEmployee
             ? <WandButton kind="ghost" className="conversation-avatar-button" aria-label={`查看${name}的资料`} onClick={event => onOpenEmployee({ id: employeeIds[turn.author!.id], name, avatar: turn.author?.avatar }, event.currentTarget)}><EmployeeAvatar employee={{ id: employeeIds[turn.author.id], name, avatar: turn.author.avatar }} provider="" size="md"/></WandButton>
             : <MessageAvatar spec={chatAvatarSpec(turn.author)}/>}</span> : null}
@@ -1614,6 +1617,8 @@ export interface TeamChatViewProps {
 
 export function TeamChatView({ detail, onChange, onOpenSession, details, staleRun = false }: TeamChatViewProps): React.ReactElement {
   const { run, chatTurns, steps } = detail;
+  const modelCatalog = useWandModelCatalog();
+  const runtimePreference = composerRuntimePreference(run.team.members.find(member => member.isLeader)?.agent, modelCatalog);
   // 拉一次当前资料，让本地临时行与已落库回合用同一个署名。
   useUserProfile();
   const [local, setLocal] = React.useState<LocalChatTurn[]>([]);
@@ -2252,7 +2257,11 @@ export function TeamChatView({ detail, onChange, onOpenSession, details, staleRu
             }))}
             onRemove={(index) => teamChatComposer.edit(chatSessionId, { removeAttachment: index })}
           /> : null}
-          <Flex vertical className="team-chat-compose-main" style={{ width: "100%", minWidth: 0 }}>
+          <Flex vertical className="team-chat-compose-main" style={{ width: "100%", minWidth: 0, position: "relative", marginBlockStart: 32 }}>
+            <Flex gap={8} align="center" aria-label="本轮负责人的首选配置" style={{ position: "absolute", insetBlockStart: -32, insetInlineEnd: 0, maxWidth: "100%", minWidth: 0, fontSize: "var(--font-size-xs)" }}>
+              <Typography.Text type="secondary" ellipsis={{ tooltip: true }} style={{ flex: 1, minWidth: 0 }}>首选模型：{runtimePreference.model}</Typography.Text>
+              <Typography.Text type="secondary" style={{ flex: "none" }}>思考：{runtimePreference.thinking}</Typography.Text>
+            </Flex>
             {/*
               输入框用通用发送器：值仍来自团队 composer bridge（它才是草稿 owner），
               自动换行由 autoSize 负责，本页不再手工量高度。

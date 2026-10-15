@@ -1,0 +1,97 @@
+{
+  "blueprintId": "team_mv80sew40002bk1wzg-generated-blueprint",
+  "runId": "team_mv80sew40002bk1wzg",
+  "task": "继续实际执行 Gemini 移除，不是仅排查。用户要求项目完全移除 Gemini 接入。仓库 /Users/co0ontty/Self/vibe_coding/wand；AGENTS.md 已有规则，基线 output/gemini-removal/baseline-*.txt，上轮worker报告 .pi/team/active/team_mv80lpx800018d8evp/artifacts/workers/。Web已移除（暂时有 Gemini 排除补丁待lead简化）；主仓tests部分完成；server完全未改，native完全未改。必须增量 edit保留大量其他在途工作，禁止 reset/clean/提交/push/安装/重启。当前目标是真正完成分配范围：少输出报告，多批量 read/edit/bash，不要把调用预算耗在反复只读。每角色先批量发现+读取需要范围，批量修改，必要时安全脚本精准变更；不手改生成物、不删用户数据/数据库列、未知provider不能默默执行其他工具。默认Google Gemini discovery移除，但 SDK传递依赖及凭据隔离安全测试不可误删。明确模型均为刚成功的健康模型，跨两provider分摊。captain自己会统跑全量check/test/build和部署。",
+  "playbookId": "generated-blueprint",
+  "playbookTitle": "Dynamic team blueprint",
+  "source": "generated",
+  "status": "draft",
+  "createdAt": 1791976917617,
+  "roles": [
+    {
+      "roleId": "server",
+      "title": "完成服务端移除",
+      "description": "所有 src/ 非 web-ui源码 + README/docs归你，tests/不改。实际删除Gemini专属structured-gemini-adapter（有已有diff先存output/gemini-removal），移除provider-catalog/types/config/models/thinking/shared/session-registry/provider-history-scanner/provider-cli-updater/server-settings-routes/server/server-session-lifecycle/structured-session-manager/replay/common/ai-text-runner/git-quick-commit/employee-text/silicon-employee-draft/native-session-title/managed-temp/task-title-organize/process-manager分支，以及 pi-model-discovery google-generative-ai专属分支。发现引用文件 output/gemini-removal/remaining-src.txt 可直接看。重点一次批量修改，18调用预算不必逐文件调用，多文件read via bash? 用read为准，可批量工具在一条codemode(若可用)。必须达到全范围实际代码修改再收尾。对unknown explicit provider新建/恢复应明确拒绝不静默Claude；可做泛化provider守卫不保留Gemini特例。保留所有其他在途改动。",
+      "capabilityNeeds": [],
+      "tools": [
+        "bash",
+        "read",
+        "write",
+        "edit"
+      ],
+      "modelPreferences": [
+        "openai-codex/gpt-5.5"
+      ]
+    },
+    {
+      "roleId": "android",
+      "title": "完成 Android 移除",
+      "description": "只负责 android/ 源码和模块内tests。上轮只读未改，直接rg定向+批量read/edit移除 Gemini ProviderRules/WandModels/WorkspaceModels/WandApi/SessionTopic/MissionsScreen/TaskListPresentation/BrandLogos 及tests中的provider mode/model/runner/icon/theme/fixture。Unknown provider不改为新可执行provider；不要影响其他providers/其他在途改动。完整实现后跑 :app:testDebugUnitTest（如时间可）;不要构建部署安装，报告 captain。",
+      "capabilityNeeds": [],
+      "tools": [
+        "bash",
+        "read",
+        "write",
+        "edit"
+      ],
+      "modelPreferences": [
+        "OpenAI/gpt-6.1-sol"
+      ]
+    },
+    {
+      "roleId": "swift",
+      "title": "完成 iOS macOS 移除",
+      "description": "只负责 ios/ macos/ 两模块源码+tests fixtures。上轮只读未改，直接rg定向+批量read/edit移除 Gemini enum/aliases/models/default模型/API body/runner/SessionCapabilities/SessionActivity/Contact/Workspace regex/NewSessionView permission/tool list/theme/logo 分支；改 Gemini fixture为支持provider，同步正向tests。两端一致，不改变未知provider到新可执行provider，不动其他在途工作。不构建部署安装。用现有模块测试脚本定向验证可选，但必须先实际完成所有源码修改。",
+      "capabilityNeeds": [],
+      "tools": [
+        "bash",
+        "read",
+        "write",
+        "edit"
+      ],
+      "modelPreferences": [
+        "openai-codex/gpt-5.5"
+      ]
+    },
+    {
+      "roleId": "tests",
+      "title": "完成主仓回归调整",
+      "description": "只负责 tests/ 主仓（非原生）。续读上轮tests报告剩余列表，Gemini专属test删除、fixtures替换、models示例替换。移除混合tests残留Gemini正向分支；禁止删其他provider覆盖；保留与增加 Gemini未知provider新建/恢复明确拒绝零spawn边界测试，避免静默Claude。各接口正在server修改，协调预计generic unsupported检查。重点 config-preferences/session-ai-context/process-manager-safety/session-provider-switch/web-ui-provider-logo/server-session-routes-contract/settings-repository/antd-settings-browser/silicon-employee；core-harness凭据隔离安全测试保留(属于SDK)。实际完成所有改动先，然后第二次rg与相关tests。",
+      "capabilityNeeds": [],
+      "tools": [
+        "bash",
+        "read",
+        "write",
+        "edit"
+      ],
+      "modelPreferences": [
+        "OpenAI/gpt-6.1-sol"
+      ]
+    }
+  ],
+  "rounds": [
+    {
+      "id": "collect",
+      "type": "parallel",
+      "roles": [
+        "server",
+        "android",
+        "swift",
+        "tests"
+      ]
+    }
+  ],
+  "policy": {
+    "rationale": "A task-specific collaboration blueprint generated for the lead captain",
+    "strategy": "The lead captain generated this collaboration plan; the extension handles dispatch, communication, observation, and recording.",
+    "evidencePolicy": "Workers should separate cited evidence, inference, confidence, and missing information.",
+    "modelPolicy": "Use configured models that are objectively available; keep soft health observations visible.",
+    "synthesisPolicy": "The lead uses worker outputs as inputs and keeps final judgment outside the extension.",
+    "progressMilestones": [
+      "collect: parallel"
+    ],
+    "stopCriteria": "All planned rounds have returned a status and the run log is persisted."
+  },
+  "outputContract": "findings",
+  "captainRationale": "A task-specific collaboration blueprint generated for the lead captain"
+}

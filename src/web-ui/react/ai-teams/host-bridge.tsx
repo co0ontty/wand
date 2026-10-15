@@ -1,3 +1,4 @@
+import { composerRuntimePreference } from "../conversations/composer-presentation";
 import { useConversationActivity } from "../conversations/activity";
 import { conversationForRun } from "../conversations/run-route";
 import { conversationsRepository } from "../conversations/repository";
@@ -50,6 +51,7 @@ import { subscribeTaskChanges } from "../task-changes";
 import { appendedConversationKeys, CONVERSATION_TAIL_PX, conversationClock, conversationDay, conversationMessageKey, joinsConversationBubble } from "../conversations/presentation";
 import { conversationUi } from "../conversations/state";
 import { currentUserAuthor, selfAuthorFor, userProfileStore, useUserProfile } from "../user-profile-repository";
+import { settingsController } from "../settings/controller";
 import {
   WandBadge,
   WandBrandMark,
@@ -85,6 +87,7 @@ import { teamChatComposer } from "./composer-bridge";
 import { aiTeamsRepository, subscribeAiTeamDefinitionChanges, subscribeAiTeamRunChanges } from "./repository";
 
 const AI_TEAMS_HOST: Record<string, object> = {
+  "conversations/composer-presentation": { composerRuntimePreference },
   "conversations/activity": { useConversationActivity },
   "react": React,
   "react/jsx-runtime": jsxRuntime,
@@ -124,6 +127,7 @@ const AI_TEAMS_HOST: Record<string, object> = {
   "use-model-catalog": { useWandModelCatalog },
   "overlay-controller": { wandOverlay },
   "provider-usage": { sortProviderOptions, useProviderUsage },
+  "settings/controller": { settingsController },
   "settings/fields": {
     SettingsActionButton,
     SettingsField,

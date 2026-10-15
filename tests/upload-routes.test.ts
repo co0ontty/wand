@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { createServer } from "node:http";
+import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { createServer, request } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
@@ -9,6 +9,8 @@ import express from "express";
 import { jsonErrorHandler } from "../src/express-async.js";
 import type { SessionSnapshot } from "../src/types.js";
 import { registerUploadRoutes } from "../src/upload-routes.js";
+import type { ManagedUpload } from "../src/storage/uploads-repository.js";
+import { TEMP_ROOT_MARKER } from "../src/managed-temp.ts";
 
 async function harness(t: TestContext): Promise<{ url: string; root: string }> {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-upload-routes-"));
@@ -108,4 +110,54 @@ test("upload directory quota rejects overflow and removes the rejected files", a
   assert.equal((await second.json() as { code: string }).code, "payload_too_large");
   const stored = readdirSync(path.join(cwd, ".wand-uploads"));
   assert.equal(stored.length, 1, "rejected upload is not left on disk");
+});
+
+test("concurrent uploads reserve quota atomically and persist ownership before returning files", async t => {
+  const cwd = mkdtempSync(path.join(os.tmpdir(), "wand-upload-receipt-"));
+  const receipts: Omit<ManagedUpload, "orphanedAt">[] = [];
+  const app = express();
+  registerUploadRoutes(app, { getLatest: () => ({ id: "owner", cwd } as SessionSnapshot) },
+    { maxDirBytes: 64, temporaryRoot: path.join(realpathSync(cwd), "temporary"), uploads: { recordManagedUploads: rows => { receipts.push(...rows); } } });
+  app.use(jsonErrorHandler);
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise<void>(resolve => server.once("listening", resolve));
+  t.after(async () => { await new Promise<void>(resolve => server.close(() => resolve())); rmSync(cwd, { recursive: true, force: true }); });
+  const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/sessions/owner/upload`;
+  const send = () => { const form = new FormData(); form.append("files", new Blob([Buffer.alloc(40)]), "notes.txt"); return fetch(url, { method: "POST", body: form }); };
+  const replies = await Promise.all([send(), send()]); assert.deepEqual(replies.map(reply => reply.status).sort(), [200, 413]);
+  assert.equal(receipts.length, 1); const row = receipts[0]!; const stat = lstatSync(row.canonicalPath);
+  assert.equal(row.sessionId, "owner"); assert.equal(row.inode, stat.ino); assert.equal(row.device, stat.dev); assert.equal(row.size, 40);
+  assert.equal(readdirSync(path.join(cwd, ".wand-uploads")).length, 1);
+  for (let i = 0; i < 100 && readdirSync(path.join(cwd, "temporary")).length > 1; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.deepEqual(readdirSync(path.join(cwd, "temporary")), [TEMP_ROOT_MARKER]);
+});
+
+test("disconnected multipart upload closes its writer and removes unfinished staging", async t => {
+  const cwd = realpathSync(mkdtempSync(path.join(os.tmpdir(), "wand-upload-disconnect-")));
+  const temporaryRoot = path.join(cwd, "temporary");
+  const receipts: unknown[] = [];
+  const app = express();
+  registerUploadRoutes(app, { getLatest: () => ({ id: "owner", cwd } as SessionSnapshot) },
+    { temporaryRoot, uploads: { recordManagedUploads: rows => { receipts.push(...rows); } } });
+  app.use(jsonErrorHandler);
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise<void>(resolve => server.once("listening", resolve));
+  t.after(async () => { await new Promise<void>(resolve => server.close(() => resolve())); rmSync(cwd, { recursive: true, force: true }); });
+  const client = request({ hostname: "127.0.0.1", port: (server.address() as { port: number }).port,
+    method: "POST", path: "/api/sessions/owner/upload", headers: { "Content-Type": "multipart/form-data; boundary=wand-cancel-test" } });
+  client.on("error", () => undefined);
+  client.write('--wand-cancel-test\r\nContent-Disposition: form-data; name="files"; filename="incomplete.txt"\r\nContent-Type: text/plain\r\n\r\n');
+  client.write(Buffer.alloc(8192, 97));
+  let staged = false;
+  for (let i = 0; i < 200; i++) {
+    try { staged = readdirSync(temporaryRoot).some(name => name !== TEMP_ROOT_MARKER); } catch { /* not created yet */ }
+    if (staged) break;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(staged, true, "request reached the disk staging path");
+  client.destroy();
+  for (let i = 0; i < 200 && readdirSync(temporaryRoot).length > 1; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.deepEqual(readdirSync(temporaryRoot), [TEMP_ROOT_MARKER]);
+  assert.deepEqual(readdirSync(path.join(cwd, ".wand-uploads")), []);
+  assert.deepEqual(receipts, []);
 });

@@ -71,7 +71,9 @@ test("ungrouped tabs reuse native chrome with add on both widths and retain task
     assert.match(html, /独立会话/);
     assert.match(html, /workspace-tab-add/);
     assert.match(html, /在当前目录新建 Agent 或空白终端/);
-    assert.doesNotMatch(html, /ant-tabs-tab-remove|workspace-tab-move|workspace-tab-close|workspace-tab-files|工作窗口操作/);
+    assert.match(html, /ant-tabs-tab-remove/);
+    assert.match(html, /关闭并删除会话 独立会话/);
+    assert.doesNotMatch(html, /workspace-tab-move|workspace-tab-close|workspace-tab-files|工作窗口操作/);
     if (mobile) assert.match(html, /width:44px;height:44px/);
   }
 });

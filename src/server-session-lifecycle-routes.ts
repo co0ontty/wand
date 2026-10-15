@@ -48,7 +48,7 @@ export function registerSessionLifecycleRoutes(app: Express, ctx: SessionRouteCo
       const selectedEmployeeCandidate = employee ? selectEmployeeCandidate(employee) : null;
       const employeeAgent = selectedEmployeeCandidate?.agent;
       if (body.provider && !isSessionProvider(body.provider)) {
-        res.status(400).json({ error: "结构化会话当前仅支持 Claude、Codex、OpenCode、Grok、Qoder、Pi 或 Gemini provider。" });
+        res.status(400).json({ error: "结构化会话当前仅支持 Claude、Codex、OpenCode、Grok、Qoder 或 Pi provider。" });
         return;
       }
       const overrideCli = body.overrideCli === true;

@@ -110,7 +110,6 @@ function creationFallback({ provider, kind, engine }: NewSessionForm): string {
   if (provider === "grok") return "无法启动 Grok 会话，请确认 Grok Build CLI 已正确安装。";
   if (provider === "qoder") return "无法启动 Qoder 会话，请确认 @qoder-ai/qodercli 已正确安装。";
   if (provider === "pi") return "无法启动 Pi 会话，请确认 Pi CLI 已正确安装。";
-  if (provider === "gemini") return "无法启动 Gemini 会话，请确认 Gemini CLI 已正确安装。";
   return "无法启动 Claude 会话，请确认 Claude 已正确安装。";
 }
 

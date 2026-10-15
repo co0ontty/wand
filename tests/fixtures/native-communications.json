@@ -25,7 +25,7 @@
       "duty": "核对布局、键盘和焦点行为。",
       "agents": [
         {
-          "provider": "gemini",
+          "provider": "pi",
           "model": "fixture-model",
           "kind": "structured"
         }

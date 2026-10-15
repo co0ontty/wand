@@ -35,7 +35,7 @@ import { SessionMetadataService } from "./session-metadata-service.js";
 import { resolveSessionCwd } from "./session-cwd.js";
 import { isScheduledConversationSession } from "./conversation-session-preview.js";
 import { isSessionProvider, providerCliCommand } from "./session-provider.js";
-import { resolveSystemAiContext } from "./session-ai-context.js";
+import { resolveSessionProvider, resolveSystemAiContext } from "./session-ai-context.js";
 
 import { CodexRunner } from "./structured-codex-adapter.js";
 
@@ -49,7 +49,6 @@ import { PiRunner, isMissingPiSession } from "./structured-pi-adapter.js";
 import { PiOutputFile, type PiOutputFileOptions } from "./pi-output-file.js";
 import { PiProtocolReader } from "./pi-protocol-reader.js";
 import { PiTmuxHost } from "./pi-tmux-host.js";
-import { GeminiRunner, isMissingGeminiSession } from "./structured-gemini-adapter.js";
 import { structuredRunId, type StructuredExecHost, type StructuredRunState } from "./structured-exec-host.js";
 import type { StructuredRunnerAdapter, StructuredRunnerExecution, StructuredRunnerResult, StructuredRunnerTurnState } from "./structured-runner.js";
 import { defaultStructuredRunner, defaultStructuredState, isStructuredRunnerForProvider, normalizeThinkingEffort, resolveStructuredRunner } from "./structured-provider-common.js";
@@ -74,7 +73,6 @@ export interface StructuredSessionManagerRunners {
   grok?: StructuredRunnerAdapter;
   qoder?: StructuredRunnerAdapter;
   pi?: StructuredRunnerAdapter;
-  gemini?: StructuredRunnerAdapter;
 }
 
 interface CreateStructuredSessionOptions {
@@ -232,7 +230,7 @@ export class StructuredSessionManager {
   private readonly coreRunner: StructuredRunnerAdapter;
   private readonly coreRunnerSupplied: boolean;
   private coreRestartDrains = 0;
-  private readonly geminiRunner: StructuredRunnerAdapter;
+  private readonly unsupportedStructuredProviders = new Set<string>();
   /** Structured CLI runs that were mid-flight when the previous web process died. */
   private pendingRecoveryIds: string[] = [];
   private detachedRecoveryPromise: Promise<void> | null = null;
@@ -270,7 +268,6 @@ export class StructuredSessionManager {
     this.coreRunner = withModelGroups(runners.core ?? new CoreRunner({ config: this.config,
       decisionAccess: decisionRuntime, openRouter }), config);
     this.coreRunnerSupplied = runners.core !== undefined;
-    this.geminiRunner = wrap(runners.gemini ?? new GeminiRunner(undefined, this.execHost));
     this.metadata = new SessionMetadataService({
       isDisposed: () => this.disposed,
       current: (id) => this.sessions.get(id),
@@ -289,8 +286,28 @@ export class StructuredSessionManager {
     for (const snapshot of this.storage.loadSessions()) {
       if ((snapshot.sessionKind ?? "pty") !== "structured") continue;
       const restoredStatus = snapshot.status === "running" ? "idle" : snapshot.status;
-      const storedProvider = snapshot.provider ?? snapshot.structuredState?.provider;
-      const provider: SessionProvider = isSessionProvider(storedProvider) ? storedProvider : "claude";
+      let provider: SessionProvider;
+      try {
+        provider = resolveSessionProvider(snapshot);
+      } catch (error) {
+        // Keep removed/unknown tools as read-only history. Never rewrite their
+        // durable identity to another provider or try to adopt their process.
+        this.unsupportedStructuredProviders.add(snapshot.id);
+        this.sessions.set(snapshot.id, {
+          ...snapshot,
+          status: "failed",
+          titleGenerating: false,
+          ...(snapshot.structuredState ? { structuredState: {
+            ...snapshot.structuredState,
+            inFlight: false,
+            activeRequestId: null,
+            turnStartedAt: null,
+            lastActivityAt: null,
+            lastError: error instanceof Error ? error.message : String(error),
+          } } : {}),
+        });
+        continue;
+      }
       const storedRunner = snapshot.runner ?? snapshot.structuredState?.runner;
       // Legacy/corrupt snapshots are normalized on restore so send dispatch can
       // rely on the provider/runner invariant without making startup fail.
@@ -1234,8 +1251,6 @@ export class StructuredSessionManager {
             ? "qodercli -p --output-format stream-json"
           : provider === "pi"
             ? "pi --mode json --print"
-          : provider === "gemini"
-            ? "gemini -p --output-format stream-json"
           : runner === "claude-cli-print"
             ? "claude -p (stream-json)"
             : "claude -p --output-format stream-json",
@@ -1471,8 +1486,10 @@ export class StructuredSessionManager {
     const userTurn = buildUserTurn(prompt, pendingAsk, userTurnAt);
     const requestId = randomUUID();
     this.unacceptedTeamStarts.delete(id);
-    if ((session.provider === "pi" && isMissingPiSession(session.structuredState?.lastError, session.claudeSessionId))
-      || (session.provider === "gemini" && isMissingGeminiSession(session.structuredState?.lastError))) {
+    if (this.unsupportedStructuredProviders.has(id)) {
+      throw new Error(`会话使用的 provider 已不受支持，不能继续发送。`);
+    }
+    if (session.provider === "pi" && isMissingPiSession(session.structuredState?.lastError, session.claudeSessionId)) {
       session = { ...session, claudeSessionId: null };
     }
     const updated: SessionSnapshot = {
@@ -1692,14 +1709,6 @@ export class StructuredSessionManager {
       });
     } else if (provider === "pi") {
       await this.runPiTurn(id, updated, prompt, requestId);
-    } else if (provider === "gemini") {
-      await this.runStructuredStreaming(id, updated, prompt, requestId, {
-        runner: this.geminiRunner,
-        provider: "gemini",
-        commandLabel: "gemini -p --output-format stream-json",
-        logKind: "gemini-json",
-        installHint: "请安装 @google/gemini-cli ≥ 0.11（`npm i -g @google/gemini-cli@latest`），或重跑 `wand service:install` 刷新服务的 PATH",
-      });
     } else {
       await this.runStructuredStreaming(id, updated, cliClaudePrompt, requestId);
     }
@@ -2719,9 +2728,6 @@ export class StructuredSessionManager {
         result.state,
       );
       if (provider === "pi" && isMissingPiSession(result.stderr, current.claudeSessionId)) {
-        failed.claudeSessionId = null;
-      }
-      if (provider === "gemini" && isMissingGeminiSession(`${result.stderr}\n${errorText}`)) {
         failed.claudeSessionId = null;
       }
       this.sessions.set(sessionId, failed);

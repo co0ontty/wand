@@ -1,5 +1,7 @@
 import { randomBytes } from "node:crypto";
-import { readdir, stat, unlink, mkdir } from "node:fs/promises";
+import { readdir, stat, lstat, realpath, unlink, mkdir, open } from "node:fs/promises";
+import { createReadStream, createWriteStream, type WriteStream } from "node:fs";
+import { pipeline } from "node:stream/promises";
 import path from "node:path";
 import type { Express, NextFunction, Request, Response } from "express";
 import multer, { MulterError } from "multer";
@@ -7,6 +9,8 @@ import multer, { MulterError } from "multer";
 import { asyncRoute } from "./express-async.js";
 import { HttpError } from "./http-error.js";
 import type { SessionRegistry } from "./session-registry.js";
+import type { UploadRepository, ManagedUpload } from "./storage/uploads-repository.js";
+import { assertPlainTempPath, createManagedTemporary } from "./managed-temp.js";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 const MAX_FILES = 5;
@@ -14,7 +18,7 @@ const MAX_FILES = 5;
 const MAX_UPLOAD_DIR_BYTES = 512 * 1024 * 1024;
 const UPLOAD_DIR_NAME = ".wand-uploads";
 
-type UploadRequest = Request & { uploadCwd?: string };
+type UploadRequest = Request & { uploadCwd?: string; uploadTemporary?: ReturnType<typeof createManagedTemporary>; uploadClosed?: boolean; uploadWriters?: Set<WriteStream> };
 
 function sanitizeFilename(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 200);
@@ -26,6 +30,19 @@ function sanitizeFilename(name: string): string {
  * needs to grow; deleting files outside the server simply makes the cap conservative.
  */
 const uploadUsage = new Map<string, Promise<number>>();
+
+export function invalidateUploadUsage(cwd: string): void { uploadUsage.delete(path.join(cwd, UPLOAD_DIR_NAME)); }
+
+async function reserveUploadUsage(dir: string, incoming: number, maximum: number): Promise<boolean> {
+  for (;;) {
+    const pending = seedUploadUsage(dir);
+    const current = await pending;
+    if (uploadUsage.get(dir) !== pending) continue;
+    if (current + incoming > maximum) return false;
+    uploadUsage.set(dir, Promise.resolve(current + incoming));
+    return true;
+  }
+}
 
 function seedUploadUsage(dir: string): Promise<number> {
   let usage = uploadUsage.get(dir);
@@ -60,6 +77,7 @@ async function removeFiles(paths: readonly string[]): Promise<void> {
 
 /** multer 的限额错误改成稳定的 413，其他错误原样交给统一错误处理。 */
 function uploadErrorHandler(error: unknown, _req: Request, res: Response, next: NextFunction): void {
+  if (_req.aborted) return;
   if (error instanceof MulterError && (error.code === "LIMIT_FILE_SIZE" || error.code === "LIMIT_FILE_COUNT" || error.code === "LIMIT_UNEXPECTED_FILE")) {
     next(new HttpError(413, "payload_too_large", error.code === "LIMIT_FILE_SIZE" ? "单个文件不能超过 10 MB。" : `一次最多上传 ${MAX_FILES} 个文件。`));
     return;
@@ -70,6 +88,8 @@ function uploadErrorHandler(error: unknown, _req: Request, res: Response, next: 
 export interface UploadRouteOptions {
   /** Test seam: per-directory byte ceiling. */
   maxDirBytes?: number;
+  uploads?: Pick<UploadRepository, "recordManagedUploads">;
+  temporaryRoot?: string;
 }
 
 export function registerUploadRoutes(
@@ -78,27 +98,39 @@ export function registerUploadRoutes(
   options: UploadRouteOptions = {},
 ): void {
   const maxDirBytes = options.maxDirBytes ?? MAX_UPLOAD_DIR_BYTES;
-  const storage = multer.diskStorage({
-    destination(req, _file, cb) {
-      const cwd = (req as UploadRequest).uploadCwd;
-      if (!cwd) {
-        cb(new Error("会话不存在。"), "");
-        return;
-      }
-      const uploadDir = path.join(cwd, UPLOAD_DIR_NAME);
-      // Async mkdir keeps the event loop free while a large upload is being accepted.
-      mkdir(uploadDir, { recursive: true }).then(
-        () => cb(null, uploadDir),
-        (error: unknown) => cb(error instanceof Error ? error : new Error(String(error)), ""),
-      );
+  const storage: multer.StorageEngine = {
+    _handleFile(req, file, cb) {
+      void (async () => {
+        const request = req as UploadRequest;
+        const cwd = request.uploadCwd;
+        if (!cwd) throw new Error("会话不存在。");
+        const uploadDir = path.join(await realpath(cwd), UPLOAD_DIR_NAME);
+        assertPlainTempPath(uploadDir);
+        await mkdir(uploadDir, { recursive: true, mode: 0o700 });
+        assertPlainTempPath(uploadDir);
+        if (request.uploadClosed || req.aborted) throw new Error("Upload closed before receiving files.");
+        if (options.temporaryRoot) request.uploadTemporary ??= createManagedTemporary("upload-stage", options.temporaryRoot);
+        const destination = request.uploadTemporary?.directory ?? path.join(cwd, UPLOAD_DIR_NAME);
+        const filename = `${Date.now()}-${randomBytes(4).toString("hex")}-${sanitizeFilename(file.originalname)}`;
+        const filePath = path.join(destination, filename);
+        const output = createWriteStream(filePath, { flags: "wx", mode: 0o600 });
+        const writers = request.uploadWriters ??= new Set();
+        writers.add(output);
+        let opened = false;
+        output.once("open", () => { opened = true; });
+        output.once("close", () => writers.delete(output));
+        try {
+          // pipeline closes the disk descriptor when the multipart source fails or disconnects.
+          await pipeline(file.stream, output);
+        } catch (error) {
+          if (opened) await unlink(filePath).catch(() => undefined);
+          throw error;
+        }
+        return { destination, filename, path: filePath, size: output.bytesWritten };
+      })().then(info => cb(null, info), error => cb(error instanceof Error ? error : new Error(String(error))));
     },
-    filename(_req, file, cb) {
-      const ts = Date.now();
-      const rand = randomBytes(4).toString("hex");
-      const safe = sanitizeFilename(file.originalname);
-      cb(null, `${ts}-${rand}-${safe}`);
-    },
-  });
+    _removeFile(_req, file, cb) { unlink(file.path).then(() => cb(null), error => cb(error.code === "ENOENT" ? null : error)); },
+  };
 
   const upload = multer({
     storage,
@@ -106,6 +138,18 @@ export function registerUploadRoutes(
   });
 
   function requireUploadSession(req: Request, res: Response, next: NextFunction): void {
+    const discardStage = () => {
+      const request = req as UploadRequest;
+      if (request.uploadClosed) return;
+      request.uploadClosed = true;
+      const closed = [...(request.uploadWriters ?? [])].map(writer => new Promise<void>(resolve => {
+        writer.once("close", resolve); writer.destroy();
+      }));
+      // Wait for descriptors to close before unlinking; deleted-but-open files still consume disk.
+      void Promise.all(closed).then(() => request.uploadTemporary?.closeAsync());
+    };
+    res.once("finish", discardStage); res.once("close", discardStage);
+    req.once("aborted", discardStage);
     const sessionId = req.params.id;
     // Group chats are structured relay sessions; ProcessManager does not own them.
     // Resolve through the same registry used by the rest of the session API so
@@ -138,12 +182,49 @@ export function registerUploadRoutes(
 
       const dir = path.join((req as UploadRequest).uploadCwd!, UPLOAD_DIR_NAME);
       const incoming = files.reduce((total, file) => total + file.size, 0);
-      const current = await seedUploadUsage(dir);
-      if (current + incoming > maxDirBytes) {
+      if (!await reserveUploadUsage(dir, incoming, maxDirBytes)) {
         await removeFiles(files.map((file) => file.path));
         throw new HttpError(413, "payload_too_large", "该会话的上传空间已满，请清理 .wand-uploads 目录后重试。");
       }
-      uploadUsage.set(dir, Promise.resolve(current + incoming));
+
+      if ((req as UploadRequest).uploadTemporary) {
+        const promoted: string[] = [];
+        try {
+          const targetDir = path.join(await realpath((req as UploadRequest).uploadCwd!), UPLOAD_DIR_NAME);
+          assertPlainTempPath(targetDir);
+          for (const file of files) {
+            const destination = path.join(targetDir, path.basename(file.path));
+            // Exclusive creation never overwrites a collision or user-created redirect.
+            const output = await open(destination, "wx", 0o600); promoted.push(destination);
+            try { for await (const chunk of createReadStream(file.path)) await output.writeFile(chunk); }
+            finally { await output.close(); }
+            await unlink(file.path);
+            file.path = path.join((req as UploadRequest).uploadCwd!, UPLOAD_DIR_NAME, path.basename(destination));
+          }
+        } catch (error) {
+          await removeFiles(promoted); invalidateUploadUsage((req as UploadRequest).uploadCwd!); throw error;
+        }
+      }
+
+      if (options.uploads) {
+        try {
+          const canonicalCwd = await realpath((req as UploadRequest).uploadCwd!);
+          const receipts: Omit<ManagedUpload, "orphanedAt">[] = [];
+          for (const file of files) {
+            const canonicalPath = path.join(canonicalCwd, UPLOAD_DIR_NAME, path.basename(file.path));
+            assertPlainTempPath(canonicalPath);
+            const info = await lstat(canonicalPath);
+            if (!info.isFile()) throw new Error("Upload is not a regular file.");
+            receipts.push({ filePath: file.path, canonicalPath, cwd: (req as UploadRequest).uploadCwd!,
+              canonicalCwd, sessionId: req.params.id, device: info.dev, inode: info.ino, size: info.size,
+              mtimeMs: info.mtimeMs, ctimeMs: info.ctimeMs, createdAt: Date.now() });
+          }
+          options.uploads.recordManagedUploads(receipts);
+        } catch (error) {
+          await removeFiles(files.map(file => file.path)); invalidateUploadUsage((req as UploadRequest).uploadCwd!);
+          throw error;
+        }
+      }
 
       const result = files.map((f) => ({
         originalName: f.originalname,

@@ -33,7 +33,7 @@ import {
   writePreferenceToStorage,
 } from "./config.js";
 import { ModelCatalogService, type ModelRefreshOptions } from "./models.js";
-import { fallbackProviderModel, sessionEmployeeFields } from "./session-model.js";
+import { fallbackProviderModel, readProviderModelPreferences, sessionEmployeeFields } from "./session-model.js";
 
 import { ProcessManager, ProcessEvent } from "./process-manager.js";
 import { SessionLogger } from "./session-logger.js";
@@ -54,6 +54,8 @@ import { registerSpeechRoutes } from "./server-speech-routes.js";
 import { SpeechPolisherService } from "./speech-polisher-service.js";
 import { SPEECH_POLISHER_KEY } from "./speech-polisher-identity.js";
 import { registerLocalModelRoutes } from "./server-local-model-routes.js";
+import { createStorageCleanup } from "./storage-cleanup.js";
+import { registerStorageCleanupRoutes } from "./server-storage-cleanup-routes.js";
 import { LocalModelSetupService } from "./local-model-setup.js";
 import { DecisionExpertService } from "./decision-expert-service.js";
 import { DECISION_EXPERT_KEY } from "./decision-expert-identity.js";
@@ -115,7 +117,9 @@ import { safeServiceInstalled } from "./tui/runtime-utils.js";
 import { toSessionDetailDTO } from "./session-transport.js";
 import { compactToolMessagesForTransport, windowMessagesForTransport } from "./message-truncator.js";
 import { enrichStructuredMessages } from "./structured-client-protocol.js";
-import { registerUploadRoutes } from "./upload-routes.js";
+import { registerUploadRoutes, invalidateUploadUsage } from "./upload-routes.js";
+import { uploadReferenceGuard } from "./upload-reference-guard.js";
+import { configTemporaryRoot } from "./managed-temp.js";
 import { optimizePrompt, PromptOptimizeError } from "./prompt-optimizer.js";
 import { resolveDatabasePath, WandStorage } from "./storage.js";
 import { deepRepairRuntimePath, formatPathRepairSummary, repairRuntimePath, type PathRepairResult } from "./path-repair.js";
@@ -339,20 +343,9 @@ export async function startServer(
   const decisions = new DecisionService(config.localDecision);
   const decisionExpert = new DecisionExpertService({ local: decisions, free: openRouter, config,
     employee: () => storage.getSystemSiliconEmployee(DECISION_EXPERT_KEY) });
-  // 默认模型优先读存储（UI 改设置后实时生效），未设置时由 getPreference 回落到 config。
-  const getCurrentDefaultModels = (): { claude: string; codex: string; opencode: string; grok: string; qoder: string; pi: string; gemini: string } => ({
-    claude: storage.getPreference("pref:defaultModel", config.defaultModel ?? ""),
-    codex: storage.getPreference("pref:defaultCodexModel", config.defaultCodexModel ?? ""),
-    opencode: storage.getPreference("pref:defaultOpenCodeModel", config.defaultOpenCodeModel ?? ""),
-    grok: storage.getPreference("pref:defaultGrokModel", config.defaultGrokModel ?? ""),
-    qoder: storage.getPreference("pref:defaultQoderModel", config.defaultQoderModel ?? ""),
-    pi: storage.getPreference("pref:defaultPiModel", config.defaultPiModel ?? ""),
-    gemini: storage.getPreference("pref:defaultGeminiModel", config.defaultGeminiModel ?? ""),
-  });
-
   const getModelRefreshOptions = (): ModelRefreshOptions => {
     const injected = options.modelRefreshOptions?.() ?? {};
-    const currentDefaults = getCurrentDefaultModels();
+    const currentDefaults = readProviderModelPreferences(config, storage);
     return {
       storage,
       managedPiModels: () => openRouter.catalog(),
@@ -374,6 +367,9 @@ export async function startServer(
   // Clients receive its persisted snapshot via GET /api/models.
   const modelCatalog = new ModelCatalogService(getModelRefreshOptions);
   const configDir = resolveConfigDir(configPath);
+  const storageCleanup = createStorageCleanup(configDir, { uploads: storage.uploads,
+    uploadsActive: () => sessionRegistry.listSlim().some(session => (session.sessionKind === "structured" && session.status === "running") || (session.queuedMessages?.length ?? 0) > 0),
+    onUploadRemoved: invalidateUploadUsage });
   const speech = new SpeechService(storage, configDir);
   const localModels = new LocalModelSetupService({ configDir, speech, decisions,
     decisionConfig: () => config.localDecision ?? { enabled: false, pythonPath: "", modelPath: "" },
@@ -445,7 +441,6 @@ export async function startServer(
       grok: "grokModels",
       qoder: "qoderModels",
       pi: "piModels",
-      gemini: "geminiModels",
     } as const)[provider];
     return cache[key].map((entry) => entry.id);
   };
@@ -561,6 +556,7 @@ export async function startServer(
   // Every /api family declares its scope in src/middleware/api-scope.ts; unlisted
   // paths are admin-only for connected apps (default-deny).
   app.use("/api", createApiScopeMiddleware());
+  app.use("/api", uploadReferenceGuard(storage.uploads));
   app.use(userMemoryOperationLog(storage));
   const userMemory = new UserMemoryService({
     storage, config, free: openRouter,
@@ -700,11 +696,12 @@ export async function startServer(
     free: openRouter,
   });
   registerClaudeHistoryRoutes(app, { processes, storage });
-  registerWorkspaceRoutes(app, storage, sessionRegistry, { config });
+  registerWorkspaceRoutes(app, storage, sessionRegistry, { config, free: openRouter });
   registerMissionRoutes(app, missions);
-  registerUploadRoutes(app, sessionRegistry);
+  registerUploadRoutes(app, sessionRegistry, { uploads: storage.uploads, temporaryRoot: configTemporaryRoot(configDir) });
   registerSpeechRoutes(app, { speech, requireSessions, requireAdmin, polisher: speechPolisher });
   registerLocalModelRoutes(app, { models: localModels, requireSessions, requireAdmin });
+  registerStorageCleanupRoutes(app, storageCleanup, requireAdmin);
 
   app.post("/api/optimize-prompt", asyncRoute(async (req, res) => {
     const body = (req.body ?? {}) as { text?: string; sessionId?: string };
@@ -750,6 +747,10 @@ export async function startServer(
     if (body.employeeId !== undefined || body.teamId !== undefined
       || (body.subject !== undefined && body.subject?.type !== "cli")) {
       res.status(400).json({ error: "PTY 只能选择 CLI 工具。" });
+      return;
+    }
+    if (body.provider !== undefined && !isSessionProvider(body.provider)) {
+      res.status(400).json({ error: "请选择有效的执行工具。" });
       return;
     }
     const interactiveShell = body.shell === true;
@@ -1130,6 +1131,7 @@ export async function startServer(
   // Daemon-only maintenance does not restart Server, depend on npm auto-update
   // preferences, or stop a live execution. Startup recovery is already attached.
   if (!testMode) daemonMaintenance.start();
+  if (!testMode && config.autoCleanupTemporaryFiles !== false) storageCleanup.start();
 
   // ── Auto-update logic ──
 
@@ -1252,6 +1254,7 @@ export async function startServer(
       const teamShutdown = aiTeams.dispose();
       await scheduledTasks.dispose();
       await daemonMaintenance.stop();
+      await storageCleanup.stop();
       decisions.dispose();
       openRouter.dispose();
       await userMemory.dispose();

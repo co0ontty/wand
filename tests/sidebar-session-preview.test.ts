@@ -3,6 +3,7 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { SidebarSessionPreview } from "../src/web-ui/react/workspaces/sidebar-session-preview.js";
+import { SidebarSessionArea } from "../src/web-ui/react/workspaces/sidebar-session-area.js";
 import { fitSidebarSessionPreview } from "../src/web-ui/react/workspaces/sidebar-session-preview-layout.js";
 import { filterSidebarTaskSessions } from "../src/web-ui/react/workspaces/sidebar-search.js";
 import { indexPersonSessions, filterPersonSessions, personSessionSearchValues } from "../src/web-ui/react/conversations/sidebar-sessions.js";
@@ -38,6 +39,14 @@ test("expanded preview is hidden and inert without discarding session identity",
   assert.match(html, /data-expanded="true"[^>]*inert[^>]*aria-hidden="true"/);
   assert.match(html, /data-preview-session-id="a"/);
   assert.equal(renderToStaticMarkup(createElement(SidebarSessionPreview, { sessions: [], expanded: false, label: "会话预览", onActivate() {} })), "");
+});
+
+test("empty matched session areas render no disclosure control or vacant preview region", () => {
+  assert.equal(renderToStaticMarkup(createElement(SidebarSessionArea, { id: "empty", label: "人物", open: false,
+    hasSessions: false, onOpenChange() {}, children: "" })), "");
+  const present = renderToStaticMarkup(createElement(SidebarSessionArea, { id: "one", label: "人物", open: false,
+    hasSessions: true, onOpenChange() {}, children: "会话" }));
+  assert.match(present, /sidebar-session-area-toggle/);
 });
 
 test("preview width layout shows full titles when they fit, then complete icons before overflowing", () => {

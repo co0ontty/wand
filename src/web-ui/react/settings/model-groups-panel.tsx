@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { FREE_MODEL_GROUP_ID, MODEL_GROUP_MAX_MEMBERS, MODEL_GROUP_MAX_PER_PROVIDER,
   isModelGroupSelector, normalizeModelGroups, orderModelIds, type ModelGroup } from "../../../model-groups.js";
 import { OPENROUTER_FREE_GROUP, OPENROUTER_FREE_SELECTOR } from "../../../openrouter-free-selection.js";
-import { PROVIDER_LABELS, SESSION_PROVIDERS } from "../../../provider-catalog.js";
+import { PROVIDER_IDS, PROVIDER_LABELS } from "../../provider-identity";
 import { WandButton, WandIcon, WandIconButton } from "../ui";
 import { SettingsField, SettingsSaveBar, SettingsSection, SettingsSelect, SettingsTextInput } from "./fields";
 import { failureMessage } from "../errors";
@@ -43,7 +43,7 @@ function GroupEditor({ group, catalog, disabled, onChange, onRemove }: {
   const [model, setModel] = useState("");
   const [remove, setRemove] = useState(false);
   const free = group.id === FREE_MODEL_GROUP_ID;
-  const suggestions = free ? catalog?.freeModels ?? [] : groupEditorModels(catalog, group.provider);
+  const suggestions = free ? catalog?.freeModels ?? [] : groupEditorModels(catalog, group.provider as SettingsSessionProvider);
   const available = suggestions.filter((entry) => !group.models.includes(entry.id));
   const key = `${group.provider}-${group.id}`;
   return <Collapse activeKey={expanded ? [key] : []}
@@ -132,7 +132,7 @@ export function ModelGroupsSettingsPanel({ snapshot, repository, setSnapshot }: 
   }
   return <SettingsSection title="模型分组" description="每个工具可配置多个分组，聊天、任务和员工的模型选择器都可直接选组。首选在前；仅明确未接受输入的启动失败才尝试下一项，运行中错误不会自动重发。终端只使用首选模型。">
     <SettingsSelect id="settings-model-group-provider" ariaLabel="配置模型分组的工具" value={provider}
-      disabled={pending} options={SESSION_PROVIDERS.map((id) => ({ value: id, label: PROVIDER_LABELS[id] }))}
+      disabled={pending} options={PROVIDER_IDS.map((id) => ({ value: id, label: PROVIDER_LABELS[id] }))}
       onChange={(id) => setProvider(id as SettingsSessionProvider)} />
     {visible.map((group) => <GroupEditor key={`${group.provider}/${group.id}`} group={group} catalog={snapshot.models} disabled={pending}
       onChange={(next) => edit(groups.map((item) => item.id === group.id && item.provider === provider ? next : item))}

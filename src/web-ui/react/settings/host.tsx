@@ -12,6 +12,7 @@ import { WandBadge, WandButton, WandIcon, WandIconButton } from "../ui";
 import { hasOpenPopupSurface } from "../ui/popup-lifecycle";
 import { settingsController, settingsStore } from "./controller";
 import { SettingsDirectory, SETTINGS_SECTIONS } from "./navigation";
+import { EmployeesSettingsTab } from "./employees-panel";
 import { httpSettingsRepository } from "./repository";
 import {
   AboutSettingsTab,
@@ -21,7 +22,6 @@ import {
   GeneralSettingsTab,
   NotificationSettingsTab,
   PresetSettingsTab,
-  ProfileSettingsTab,
   SecuritySettingsTab,
 } from "./tabs";
 import { SettingsActionButton, SettingsField, SettingsStatus, SettingsTextInput } from "./fields";
@@ -229,7 +229,7 @@ export function SettingsHost({
     if (!snapshot) return null;
     const props = { snapshot, repository, refresh, setSnapshot, toast, showRestart };
     const panels: Record<SettingsTab, ReactNode> = {
-      profile: <ProfileSettingsTab {...props} />,
+      profile: <EmployeesSettingsTab {...props} />,
       connectors: <GithubSettingsTab {...props} />,
       general: <GeneralSettingsTab {...props} />,
       ai: <AiSettingsTab {...props} />,
@@ -259,7 +259,7 @@ export function SettingsHost({
     const sync = (): void => {
       const value = page.clientWidth < 720;
       setCompact(value);
-      setWide(page.clientWidth >= 1000);
+      setWide(page.clientWidth >= 720);
     };
     sync();
     const observer = new ResizeObserver(sync);
@@ -268,9 +268,9 @@ export function SettingsHost({
   }, [isOpen]);
 
   useEffect(() => {
-    if (!snapshot || !controller.detail) return;
+    if (!snapshot || (!controller.detail && !wide)) return;
     setVisited((current) => current.includes(selectedTab) ? current : [...current, selectedTab]);
-  }, [snapshot, compact, controller.detail, selectedTab]);
+  }, [snapshot, wide, controller.detail, selectedTab]);
 
   useLayoutEffect(() => {
     if (!isOpen) return;
@@ -295,7 +295,7 @@ export function SettingsHost({
       if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
       // Inspect nested ownership before the child's Escape handler changes its state.
       if (settingsStore.getSnapshot().nested !== null || hasOpenPopupSurface()) return;
-      if (controller.detail) settingsStore.showDirectory();
+      if (controller.detail && compact) settingsStore.showDirectory();
       else if (presentation === "workspace") settingsController.close();
       else return;
       event.preventDefault();
@@ -308,15 +308,16 @@ export function SettingsHost({
     setVisited((current) => current.includes(tab) ? current : [...current, tab]);
     settingsStore.setTab(tab);
   };
+  const detailVisible = controller.detail || wide;
   const directoryVisible = !controller.detail || wide;
-  const title = controller.detail ? SETTINGS_SECTIONS[selectedTab].label : "系统设置";
+  const title = detailVisible ? SETTINGS_SECTIONS[selectedTab].label : "系统设置";
   const Tag = presentation === "page" ? "main" : "section";
   return <WandUiProvider><Tag ref={pageRef} className="wand-settings-library-page" data-testid="settings-page"
-    data-presentation={presentation} data-compact={compact} data-wide={wide} data-detail={controller.detail}
+    data-presentation={presentation} data-compact={compact} data-wide={wide} data-detail={detailVisible}
     hidden={!isOpen} inert={!isOpen} aria-labelledby="settings-page-title">
     <header className="wand-settings-library-page-heading">
       <div className="wand-settings-library-page-title">
-        {controller.detail ? <WandIconButton aria-label="返回设置目录" title="返回设置目录" onClick={() => settingsStore.showDirectory()}>
+        {controller.detail && !wide ? <WandIconButton aria-label="返回设置目录" title="返回设置目录" onClick={() => settingsStore.showDirectory()}>
           <WandIcon name="chevronLeft" size={18}/>
         </WandIconButton> : presentation === "workspace" ? <WandIconButton aria-label="返回工作台" title="返回工作台" onClick={() => settingsController.close()}>
           <WandIcon name="chevronLeft" size={18}/>
@@ -343,8 +344,8 @@ export function SettingsHost({
           ghost items={[{ key: "admin", label: "登录管理设置", children: <ConnectedAppAccess repository={repository}
             allowEmptyPassword={presentation === "page"} onAuthenticated={onAuthenticated}/> }]}/> : null}
       </nav>
-      <div className="wand-settings-library-details" hidden={!controller.detail}>
-        {available.filter((tab) => visited.includes(tab) || controller.detail && tab === selectedTab).map((tab) => <div
+      <div className="wand-settings-library-details" hidden={!detailVisible}>
+        {available.filter((tab) => visited.includes(tab) || detailVisible && tab === selectedTab).map((tab) => <div
           key={tab} className="wand-settings-library-detail-scroll" data-settings-panel={tab}
           hidden={tab !== selectedTab} inert={tab !== selectedTab} role="region" aria-label={SETTINGS_SECTIONS[tab].label}>
           <div className="wand-settings-library-detail-content">{contentByTab[tab]}</div>
@@ -354,7 +355,7 @@ export function SettingsHost({
       <nav className="wand-settings-library-directory" aria-label="设置目录" hidden={!directoryVisible}>
         <SettingsLoading/>
       </nav>
-      <div className="wand-settings-library-details" hidden={!controller.detail}>
+      <div className="wand-settings-library-details" hidden={!detailVisible}>
         <div className="wand-settings-library-detail-scroll"><div className="wand-settings-library-detail-content">
           <SettingsLoading/>
         </div></div>

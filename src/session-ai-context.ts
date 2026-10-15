@@ -31,12 +31,20 @@ export function resolveSessionProvider(snapshot: Pick<
   SessionSnapshot,
   "provider" | "structuredState" | "runner" | "command"
 >): SessionProvider {
-  if (isSessionProvider(snapshot.provider)) return snapshot.provider;
-  const structuredProvider = snapshot.structuredState?.provider;
-  if (isSessionProvider(structuredProvider)) return structuredProvider;
-
+  for (const provider of [snapshot.provider, snapshot.structuredState?.provider]) {
+    if (provider == null) continue;
+    if (!isSessionProvider(provider)) throw new Error(`不支持的会话 provider：${String(provider)}`);
+    return provider;
+  }
   const runner = snapshot.runner ?? snapshot.structuredState?.runner;
-  return inferProviderFromRunner(runner) ?? inferProviderFromCommand(snapshot.command) ?? "claude";
+  if (runner && runner !== "pty") {
+    const provider = inferProviderFromRunner(runner);
+    if (!provider) throw new Error(`不支持的会话 runner：${String(runner)}`);
+    return provider;
+  }
+  const provider = inferProviderFromCommand(snapshot.command);
+  if (!provider) throw new Error("不支持的会话命令，无法选择 AI provider。");
+  return provider;
 }
 
 function normalizeModel(value: string | null | undefined): string | undefined {

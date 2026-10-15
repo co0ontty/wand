@@ -214,8 +214,8 @@ test("provider history scanner exposes resumable OpenCode and Qoder sessions cre
   }
 });
 
-test("provider history scanner deletes Pi, Grok, and Gemini native session resources", () => {
-  const root = mkdtempSync(path.join(os.tmpdir(), "wand-pi-grok-gemini-history-"));
+test("provider history scanner deletes Pi and Grok native session resources", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-pi-grok-history-"));
   try {
     const piSessionsDir = path.join(root, ".pi", "agent", "sessions");
     const piProjectDir = path.join(piSessionsDir, "--Users-test-project--");
@@ -231,17 +231,9 @@ test("provider history scanner deletes Pi, Grok, and Gemini native session resou
     mkdirSync(grokSessionDir, { recursive: true });
     writeFileSync(path.join(grokSessionDir, "meta.json"), "{}");
 
-    const geminiHome = path.join(root, ".gemini");
-    const geminiSessionId = "8e3cb689-bdf7-42ec-96a0-c762ce08d547";
-    const geminiConvDir = path.join(geminiHome, "antigravity-cli", "conversations");
-    mkdirSync(geminiConvDir, { recursive: true });
-    const geminiDb = path.join(geminiConvDir, `${geminiSessionId}.db`);
-    writeFileSync(geminiDb, "sqlite");
-
     const scanner = new ProviderHistoryScanner({
       piSessionsDir,
       grokSessionsDir,
-      geminiHome,
     });
 
     assert.equal(scanner.deletePiHistoryFiles([piSessionId]), 1);
@@ -249,9 +241,6 @@ test("provider history scanner deletes Pi, Grok, and Gemini native session resou
 
     assert.equal(scanner.deleteGrokHistoryFiles([grokSessionId]), 1);
     assert.equal(scanner.deleteGrokHistoryFiles([grokSessionId]), 0);
-
-    assert.equal(scanner.deleteGeminiHistoryFiles([geminiSessionId]), 1);
-    assert.equal(scanner.deleteGeminiHistoryFiles([geminiSessionId]), 0);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

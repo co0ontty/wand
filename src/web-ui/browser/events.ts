@@ -626,6 +626,7 @@ import { setupVisualViewportHandlers } from "./viewport";
             e.preventDefault();
           });
           promptOptimizeBtn.addEventListener("click", function() {
+            closePlusPopover();
             optimizePromptText();
           });
         }

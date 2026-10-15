@@ -1,7 +1,7 @@
 import { legacyPtyRoleIdentity } from "../default-employee.js";
 import { isRecord } from "../object-utils.js";
 import { parseHarnessExtensionState } from "../core-extension-host.js";
-import { firstLayoutTabId } from "../layout-tree.js";
+import { wrapLegacyTaskLayout } from "../layout-tree.js";
 import { type PasswordVaultItemType } from "../password-manager.js";
 import { defaultPiSessionSettings, patchPiSessionSettings } from "../pi-session-settings.js";
 import { inferProviderFromCommand, inferProviderFromRunner, isSessionProvider } from "../session-provider.js";
@@ -514,12 +514,7 @@ export function mapWorkspaceTaskLayout(raw: string | null): TaskWindowLayout | n
     return parsed as TaskWindowLayout;
   }
   if (record.type === "pane" || record.type === "split") {
-    const legacy = parsed as LayoutNode;
-    return {
-      type: "windows",
-      windows: [{ id: "window-legacy", layout: legacy, activeTabId: firstLayoutTabId(legacy) }],
-      activeWindowId: "window-legacy",
-    };
+    return wrapLegacyTaskLayout(parsed as LayoutNode);
   }
   return null;
 }
@@ -665,9 +660,10 @@ export function sessionRuntimeMetadataValues(snapshot: SessionSnapshot): Array<s
 }
 
 export function mapSessionCore(row: SessionRow): SessionSnapshot {
-  const provider = isSessionProvider(row.provider)
-    ? row.provider
-    : (inferProviderFromRunner(row.runner) ?? inferProviderFromCommand(row.command));
+  // Durable identity is historical data, not a new executable selection.
+  // Preserve unknown/removed values so execution owners can reject them without
+  // silently inferring a different provider or rewriting the original row.
+  const provider = row.provider ?? inferProviderFromRunner(row.runner) ?? inferProviderFromCommand(row.command);
   const sessionOptions = parseSessionOptions(row.session_options);
   const queuedMessages = parseQueuedMessages(row.queued_messages);
   return {

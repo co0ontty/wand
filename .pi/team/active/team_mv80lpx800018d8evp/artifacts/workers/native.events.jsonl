@@ -1,0 +1,137 @@
+{"at":1791976609287,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976609288,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976609288,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976609289,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976612308,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976618613,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976618615,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791976618631,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791976618632,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976618634,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976619830,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976622794,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976622796,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976622797,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976622798,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976622804,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976622807,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976622808,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976622808,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976622809,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976622809,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976622810,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976622811,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976622811,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976624445,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976625071,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976625073,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976625079,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976625080,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976625081,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976628137,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976628948,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976628950,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791976628965,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791976628966,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976628968,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976630378,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976631607,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976631609,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976631610,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976631611,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976631617,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976631620,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976631622,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976631623,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976631623,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976631624,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976631624,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976631625,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976631626,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976633516,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976636984,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976636988,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791976637072,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791976637074,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976637075,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976638928,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976643203,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976643204,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976643206,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976643213,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976643215,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976643216,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976643217,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976643218,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976643219,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976645234,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976648116,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976648118,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791976648141,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791976648143,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976648144,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976649757,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976653880,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976653882,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976653891,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976653893,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976653894,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976658801,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976658873,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976658875,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976658884,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976658886,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976658888,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976660951,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976662188,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976662213,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791976662311,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791976662318,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976662324,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976663946,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976664575,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976664579,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976664590,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976664593,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976664598,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976666601,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976666756,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976666761,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791976666805,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791976666807,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976666808,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976671722,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976671777,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976671779,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976671791,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976671792,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976671793,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976673680,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976674031,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976674035,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976674047,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976674048,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976674049,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976676594,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976676663,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976676667,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791976676681,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_end bash failed","toolName":"bash","isError":true}
+{"at":1791976676682,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976676683,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976678251,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976678485,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976678490,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791976678511,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791976678512,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976678513,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976681094,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976681149,"phase":"worker-budget-notice","message":"Gemini 原生三端移除 reached soft request budget (18/18)"}
+{"at":1791976681151,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976681152,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791976681178,"phase":"worker-tool","message":"Gemini 原生三端移除 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791976681181,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976681182,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976681184,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976681185,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended"}
+{"at":1791976683255,"phase":"worker-message-start","message":"Gemini 原生三端移除 message started"}
+{"at":1791976713212,"phase":"worker-message-end","message":"Gemini 原生三端移除 assistant message ended","preview":"**RADIO: status=blocked, action=finalizing (budget limit hit after 18 responses; no more tool calls), evidence=baselines+READMEs+rg scans (20+ gemini refs in android/ios/macos only), blocker=edit quota reached before any write/edit (incompl"}

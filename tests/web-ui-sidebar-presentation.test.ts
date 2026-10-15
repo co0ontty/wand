@@ -56,7 +56,7 @@ test("activity filtering keeps an idle employee head, zero count and creation ac
   assert.match(html, /class="[^"]*im-sidebar-group-count[^"]*"[^>]*>0\/2</);
   assert.match(html, /aria-label="与华杰新建对话"/);
   assert.match(html, /现在没有活动会话/);
-  assert.match(html, /暂无活动会话/);
+  assert.doesNotMatch(html, /sidebar-session-area-toggle|sidebar-session-area-content|暂无活动会话/, "a zero-count identity has no vacant expandable child region");
   assert.doesNotMatch(html, /还没有对话|创建第一个会话|im-sidebar-item-avatar-wrap/);
   assert.match(html, /width:36px;height:36px/);
 });
@@ -145,7 +145,7 @@ test("sidebar status prioritizes attention, real turns and unseen completion, no
   assert.equal(completed.viewedCompletionRevision, 1, "projection must not mark completion viewed");
   const active = filterActiveGroups([{ ...group, standaloneSessions: [completed,
     { id: "idle", status: "idle" }, { id: "alive", status: "running", providerCliActive: true }] }], "idle");
-  assert.deepEqual(active[0].standaloneSessions.map((session) => session.id), ["completed", "idle"]);
+  assert.deepEqual(active[0].standaloneSessions.map((session) => session.id), ["completed"]);
 });
 
 test("first read placeholders and contact failures remain in place, without a false business empty", () => {
@@ -162,7 +162,7 @@ test("first read placeholders and contact failures remain in place, without a fa
 });
 
 test("sidebar only sizes explicit provider slots; default window and tab output is compatible", () => {
-  for (const provider of ["claude", "codex", "opencode", "grok", "qoder", "pi", "gemini"]) {
+  for (const provider of ["claude", "codex", "opencode", "grok", "qoder", "pi"]) {
     const sized = renderToStaticMarkup(createElement(SessionProviderMark, { session: { provider }, size: 14 }));
     assert.match(sized, /class="sidebar-provider-mark" data-mark-size="14"/);
     assert.match(sized, new RegExp(`data-provider-logo="${provider}"`));

@@ -41,7 +41,7 @@ function harness(t: TestContext, claudeCli?: StructuredRunnerAdapter, core?: Str
   return { root, storage, config, manager, create };
 }
 
-test("blank conversation switches all seven tools in place and persists identity and task binding", (t) => {
+test("blank conversation switches all supported tools in place and persists identity and task binding", (t) => {
   const { manager, storage, create } = harness(t);
   const original = create();
   for (const provider of SESSION_PROVIDERS) {
@@ -76,14 +76,53 @@ test("tool switch uses its candidate settings or its own defaults, never the pre
   assert.equal(codex.mode, "full-access");
   assert.equal(codex.employeeCandidateIndex, 1);
   assert.equal(codex.autoApprovePermissions, true);
-  const gemini = manager.setSessionProvider(original.id, "gemini");
-  assert.equal(gemini.selectedModel, null);
-  assert.equal(gemini.thinkingEffort, "off");
-  assert.equal(gemini.employeeCandidateIndex, undefined);
+  const qoder = manager.setSessionProvider(original.id, "qoder");
+  assert.equal(qoder.selectedModel, null);
+  assert.equal(qoder.thinkingEffort, "off");
+  assert.equal(qoder.employeeCandidateIndex, undefined);
   const pi = manager.setSessionProvider(original.id, "pi");
   assert.equal(pi.selectedModel, "pi-model");
   assert.equal(pi.thinkingEffort, "pi:high");
   assert.equal(pi.employeeCandidateIndex, 0);
+});
+
+test("removed provider creation and tool switch reject without creating or mutating a conversation", (t) => {
+  const { manager, root, storage, create } = harness(t);
+  const original = create();
+  const removed = "gemini" as unknown as NonNullable<SessionSnapshot["provider"]>;
+  assert.throws(
+    () => manager.createSession({ cwd: root, mode: "default", provider: removed }),
+    /unsupported|不支持|无效|有效/i,
+  );
+  assert.throws(
+    () => manager.setSessionProvider(original.id, removed),
+    /unsupported|不支持|无效|有效/i,
+  );
+  assert.equal(manager.get(original.id), original);
+  assert.equal(storage.getSession(original.id)?.provider, "pi");
+  assert.equal(manager.listSlim().length, 1);
+  assert.equal(storage.loadSessions().length, 1);
+});
+
+test("removed structured history remains read-only without rewriting identity or spawning a runner", async (t) => {
+  const { manager, root, config, storage, create } = harness(t);
+  const original = create();
+  const legacy = { ...original, provider: "gemini", runner: "gemini-cli-json", command: "gemini",
+    structuredState: { ...original.structuredState, provider: "gemini", runner: "gemini-cli-json" },
+    output: "saved history" } as unknown as SessionSnapshot;
+  storage.saveSession(legacy);
+  const durable = storage.getSession(legacy.id);
+  manager.dispose();
+  let executions = 0;
+  const runner = { async execute() { executions += 1; throw new Error("must not run"); } } as unknown as StructuredRunnerAdapter;
+  const restored = new StructuredSessionManager(storage, { ...config, defaultCwd: root }, null, { claudeCli: runner });
+  t.after(() => restored.dispose());
+  assert.equal(restored.get(legacy.id)?.provider, legacy.provider);
+  assert.equal(restored.get(legacy.id)?.runner, legacy.runner);
+  assert.equal(restored.get(legacy.id)?.status, "failed");
+  await assert.rejects(restored.sendMessage(legacy.id, "continue"), /unsupported|不支持|不受支持/i);
+  assert.equal(executions, 0);
+  assert.deepEqual(storage.getSession(legacy.id), durable);
 });
 
 test("selecting the same tool is a no-op preserving explicit model and thinking choices", (t) => {
@@ -237,7 +276,7 @@ test("HTTP provider switch routes by owner, validates input and never rewrites a
   assert.equal(dto.employeeId, original.employeeId);
   assert.equal("systemPrompt" in dto, false);
   assert.equal("runtimeSystemPrompt" in dto, false);
-  for (const invalid of ["shell", "bad-cli", "", null, 42]) {
+  for (const invalid of ["gemini", "shell", "bad-cli", "", null, 42]) {
     assert.equal((await request(original.id, invalid)).status, 400);
   }
   assert.equal((await request(original.id, "pi", "core")).status, 400);

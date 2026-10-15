@@ -44,7 +44,6 @@ export const ISSUE_AGENT_PROVIDERS: ReadonlyArray<{
   { value: "grok", label: "Grok", description: "Grok Build CLI" },
   { value: "qoder", label: "Qoder", description: "Qoder CLI" },
   { value: "pi", label: "Pi", description: "Pi CLI 多模型工具" },
-  { value: "gemini", label: "Gemini", description: "Gemini CLI" },
 ];
 
 export const ISSUE_AGENT_EFFORTS: ReadonlyArray<{ value: WandTaskAgentEffort; label: string }> = [

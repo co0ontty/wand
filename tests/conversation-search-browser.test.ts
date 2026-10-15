@@ -285,7 +285,33 @@ async function runSearchBrowser(t: TestContext): Promise<void> {
         if (filter !== "all") assert.equal(await evaluate(`Array.from(document.querySelectorAll('.conversation-row')).every(n=>${filter === "archived" ? "n.dataset.archived==='true'" : "n.dataset.archived!=='true'"})`), true, "reloaded rows still obey the selected archive tier");
         if (filter === "active") await shot(`${scenario.name}-03-restored-active`);
       }
-      rows.push({ scenario: scenario.name, opened, persistentSearch: true, preservedQuery: true, persistedArchiveTiers: ["active", "archived", "all"] });
+      // These fixture groups have no execution, attention or unseen completion.
+      const activityButton = '.conversation-list-tools .sidebar-activity-filter';
+      await evaluate("Promise.all(document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity).map(a=>a.finished.catch(()=>{})))");
+      const activityFrame = await rect(activityButton);
+      assert.ok(activityFrame && activityFrame.left >= opened.sidebar.left && activityFrame.right <= opened.sidebar.right, "activity control stays inside the sidebar");
+      assert.equal(await evaluate(`document.querySelector(${JSON.stringify(activityButton)}).querySelectorAll("svg").length`), 0, "text-only control has no lightning");
+      for (const tier of ["all", "active", "archived"]) {
+        await click(`.conversation-list-filter .ant-segmented-item:has([data-stretch-value="${tier}"])`);
+        await click(activityButton);
+        await wait("conversationFixture.conversationUi.getSnapshot().activityOnly && document.querySelectorAll('.sidebar-projection-current .conversation-row').length===0");
+        assert.equal(await evaluate("conversationFixture.conversationUi.getSnapshot().listFilter"), tier);
+        assert.deepEqual(await rect(activityButton), activityFrame, "pressed state never moves or resizes its trigger");
+        assert.equal(await evaluate("document.querySelector('.conversation-list-count').textContent"), "0 个对话");
+        await click(activityButton);
+        await wait("!conversationFixture.conversationUi.getSnapshot().activityOnly");
+      }
+      await click('.conversation-list-filter .ant-segmented-item:has([data-stretch-value="all"])');
+      await click(activityButton);
+      await shot(`${scenario.name}-04-activity-on`);
+      await evaluate("globalThis.activityReloadPending=true");
+      await send("Page.reload");
+      await wait("globalThis.activityReloadPending!==true && typeof conversationFixture!=='undefined'");
+      if (scenario.drawer) await click('[aria-label="打开列表"]');
+      await wait("document.querySelector('.conversation-list-tools .sidebar-activity-filter')?.getAttribute('aria-pressed')==='true'");
+      await click(activityButton);
+      await wait("!conversationFixture.conversationUi.getSnapshot().activityOnly");
+      rows.push({ activityIntersection: true, activityPersists: true, stableActivityFrame: activityFrame, scenario: scenario.name, opened, persistentSearch: true, preservedQuery: true, persistedArchiveTiers: ["active", "archived", "all"] });
     }
 
     // 01-A6: the run never sends a message, creates a task, or starts a model.

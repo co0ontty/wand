@@ -4,7 +4,7 @@ import { WandIcon, WandSearchField } from "../ui";
 import type { SettingsTab } from "./types";
 
 export const SETTINGS_SECTIONS: Record<SettingsTab, { label: string; description: string; keywords?: string }> = {
-  profile: { label: "我的资料", description: "消息署名与头像" },
+  profile: { label: "员工", description: "我的资料与员工配置", keywords: "我 名字 署名 头像" },
   notifications: { label: "通知", description: "提示音、系统通知与触感", keywords: "声音 铃声 音量" },
   display: { label: "显示", description: "主题配色、会话宽度与卡片展开", keywords: "界面 折叠 铺满 居中 聊天 对话" },
   ai: { label: "AI 与模型", description: "默认工具、模型与候选分组", keywords: "Claude Codex Pi OpenRouter" },

@@ -8,13 +8,18 @@ export interface SessionCompletionState {
 export function createSessionCompletionViewIntent(): {
   open(id: string): void;
   clear(): void;
+  loaded(id: string): void;
   isOpen(id: string): boolean;
+  isLoaded(id: string): boolean;
 } {
   let openedId: string | null = null;
+  let loaded = false;
   return {
-    open(id) { openedId = id; },
-    clear() { openedId = null; },
+    open(id) { openedId = id; loaded = false; },
+    clear() { openedId = null; loaded = false; },
+    loaded(id) { if (openedId === id) loaded = true; },
     isOpen(id) { return openedId === id; },
+    isLoaded(id) { return openedId === id && loaded; },
   };
 }
 

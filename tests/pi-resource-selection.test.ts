@@ -275,14 +275,23 @@ test("real Pi CLI: selected Skills in model context; only selected MCP connects;
     const actualPi = new PiRunner(((file, args, options) => spawn(file, ["--approve", "--no-session", ...(args ?? [])], options)) as typeof spawn, undefined, agentDir);
     const auto = withAutomaticPiResources(actualPi, config, { inventory: async () => inventory,
       evaluate: () => async (raw) => {
-        const request = raw as { questions: { forward?: { criteria: { match: string } } } };
-        const use = enabled && request.questions.forward?.criteria.match === "Batch tool calls";
-        return { model: "fixture", experimental: true, runtime: "laya-mlx", usage: { input_tokens: 20, output_tokens: 0, truncated: false },
-          answers: {
-            forward: { type: "choice", choice: use ? "match" : "none", probabilities: { match: use ? 1 : 0, none: use ? 0 : 1 } },
-            reverse: { type: "choice", choice: use ? "match" : "none", probabilities: { match: use ? 1 : 0, none: use ? 0 : 1 } },
-            relevant: { type: "noul", noul: use ? 1 : 0 },
-          } } as DecisionResult;
+        const request = raw as { questions: Record<string, { criteria: Record<string, string> }> };
+        const answers: DecisionResult["answers"] = {};
+        for (const [id, question] of Object.entries(request.questions)) {
+          if (Object.hasOwn(question.criteria, "match")) {
+            const use = enabled && question.criteria.match === "Batch tool calls";
+            answers[id] = { type: "choice", choice: use ? "match" : "none",
+              probabilities: { match: use ? 1 : 0, none: use ? 0 : 1 } };
+            continue;
+          }
+          const labels = Object.keys(question.criteria);
+          const selected = labels.find((label) => question.criteria[label]!.startsWith("selected-design:"));
+          const choice = selected ?? "none";
+          answers[id] = { type: "choice", choice, probabilities: Object.fromEntries(labels.map((label) =>
+            [label, label === choice ? 1 : 0])) };
+        }
+        return { model: "fixture", experimental: true, runtime: "laya-mlx",
+          usage: { input_tokens: 20, output_tokens: 0, truncated: false }, answers } as DecisionResult;
       } });
     const target = { id: `auto-codemode-${enabled}`, provider: "pi", cwd: root, mode: "managed", claudeSessionId: null,
       selectedModel: "selectionProbe/selection-probe", thinkingEffort: "off", piSettings: {

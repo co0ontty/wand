@@ -71,7 +71,7 @@ test("recent activity retains employee, team, CLI and terminal heads with their 
   assert.deepEqual(entries, before);
 });
 
-test("recent selection survives inactivity and the recent limit without hiding older real activity", () => {
+test("recent selection respects activity but survives the full-list recent limit", () => {
   const groups = [directory("wand", [
     entry("new-idle", { employeeId: "e1", startedAt: "2026-10-10T10:00:00Z" }),
     entry("older-busy", { employeeId: "e2", inFlight: true, startedAt: "2026-10-10T09:00:00Z" }),
@@ -79,8 +79,8 @@ test("recent selection survives inactivity and the recent limit without hiding o
   ])];
   const entries = collectRecentEntries(groups);
   const active = recentConversationGroups(entries, { limit: 1, activeOnly: true, selectedSessionId: "selected-idle" });
-  assert.deepEqual(active.map(group => group.key), ["employee:e1", "employee:e2", "employee:e3"]);
-  assert.deepEqual(active.map(group => group.entries.map(entry => entry.session.id)), [[], ["older-busy"], ["selected-idle"]]);
+  assert.deepEqual(active.map(group => group.key), ["employee:e1", "employee:e2"]);
+  assert.deepEqual(active.map(group => group.entries.map(entry => entry.session.id)), [[], ["older-busy"]]);
   const full = recentConversationGroups(entries, { limit: 1, selectedSessionId: "selected-idle" });
   assert.deepEqual(full.flatMap(group => group.entries.map(entry => entry.session.id)), ["new-idle", "selected-idle"]);
 });

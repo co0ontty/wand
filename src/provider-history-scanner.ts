@@ -73,7 +73,6 @@ export interface ProviderHistoryScannerOptions {
   qoderProjectsDirs?: string[];
   piSessionsDir?: string;
   grokSessionsDir?: string;
-  geminiHome?: string;
 }
 
 interface CachedSummary<T> {
@@ -341,7 +340,6 @@ export class ProviderHistoryScanner {
   private readonly qoderProjectsDirs: string[];
   private readonly piSessionsDir: string;
   private readonly grokSessionsDir: string;
-  private readonly geminiHome: string;
   private readonly claudeIndex = new Map<string, CachedSummary<ClaudeHistorySession>>();
   private readonly codexIndex = new Map<string, CachedSummary<CodexHistorySession>>();
   private readonly qoderIndex = new Map<string, CachedSummary<QoderHistorySession>>();
@@ -361,7 +359,6 @@ export class ProviderHistoryScanner {
     ];
     this.piSessionsDir = options.piSessionsDir ?? path.join(os.homedir(), ".pi", "agent", "sessions");
     this.grokSessionsDir = options.grokSessionsDir ?? path.join(os.homedir(), ".grok", "sessions");
-    this.geminiHome = options.geminiHome ?? path.join(os.homedir(), ".gemini");
   }
 
   getDiagnostics(): { parsedFiles: number; claudeEntries: number; codexEntries: number; openCodeEntries: number; qoderEntries: number } {
@@ -734,20 +731,4 @@ export class ProviderHistoryScanner {
     return deleted;
   }
 
-  deleteGeminiHistoryFiles(sessionIds: string[]): number {
-    const ids = new Set(sessionIds.filter((id) => PROVIDER_SESSION_ID_PATTERN.test(id)));
-    if (ids.size === 0 || !existsSync(this.geminiHome)) return 0;
-    let deleted = 0;
-    for (const id of ids) {
-      const dbPath = path.join(this.geminiHome, "antigravity-cli", "conversations", `${id}.db`);
-      if (existsSync(dbPath)) {
-        try { unlinkSync(dbPath); deleted += 1; } catch { /* already absent */ }
-      }
-      const lockPath = path.join(this.geminiHome, "antigravity-cli", "presence", `${id}.lock`);
-      if (existsSync(lockPath)) {
-        try { unlinkSync(lockPath); } catch { /* best effort */ }
-      }
-    }
-    return deleted;
-  }
 }

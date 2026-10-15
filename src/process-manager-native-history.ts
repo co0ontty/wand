@@ -7,6 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { SessionSnapshot } from "./types.js";
 import { getProviderResumeCommandSessionId } from "./resume-policy.js";
 import { type CodexHistorySession } from "./provider-history-scanner.js";
+import { parseTimestampMs as parseTimeMs } from "./time-utils.js";
 
 interface ClaudeProjectSessionCandidate {
   id: string;
@@ -216,12 +217,6 @@ function isSameResolvedPath(left: string | undefined, right: string | undefined)
 
 function isUsableCodexHistorySession(session: CodexHistorySession): boolean {
   return session.hasUser || session.hasConversation;
-}
-
-function parseTimeMs(value: string | null | undefined): number | null {
-  if (!value) return null;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function selectCodexSessionForRecord(

@@ -78,8 +78,7 @@ export async function prepareEmployeeTextCandidate(
   const config = deps.config;
   if (agent.engine !== "sdk") {
     if (!providerCliInstalled(agent.provider) || isOpenRouterFreeSelector(agent.model)) throw new Error("CLI候选不可用。");
-    const { callCliAiText, assertGeminiTextCapability } = await import("./ai-text-runner.js");
-    if (agent.provider === "gemini") assertGeminiTextCapability();
+    const { callCliAiText } = await import("./ai-text-runner.js");
     // One adapter call, never re-enter the candidate chain.
     return async () => {
       signal.throwIfAborted();

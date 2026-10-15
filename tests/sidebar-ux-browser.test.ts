@@ -258,10 +258,37 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
         await browser.settle();
         const initial = await browser.evaluate(`(()=>{const v=${visible}; const root=document.querySelector('#sessions-drawer');return {recent:v(root.querySelector('.sidebar-recent')),loose:v(root.querySelector('.workspace-session[data-session-id=loose]')),sandbox:v(root.querySelector('.workspace-session[data-session-id=sandbox]')),standaloneFold:root.textContent.includes('未分组任务'),singleAction:root.querySelector('.workspace-session[data-session-id=loose]').querySelectorAll('button').length,overflow:root.scrollWidth>root.clientWidth+1,childNameWidth:root.querySelector('.workspace-session[data-session-id=s2] .workspace-session-name').getBoundingClientRect().width,t2:root.querySelector('[data-workspace-task-id=t2] .workspace-task-chevron-btn').getAttribute('aria-expanded')}})()`);
         assert.equal(initial.recent, false); assert.equal(initial.loose, true); assert.equal(initial.sandbox, true);
-        assert.equal(initial.standaloneFold, false); assert.equal(initial.singleAction, 1); assert.equal(initial.overflow, false);
+        assert.equal(initial.standaloneFold, true); assert.equal(initial.singleAction, 1); assert.equal(initial.overflow, false);
         assert.equal(await browser.evaluate(`document.querySelectorAll('.workspace-row-folder,.workspace-task-marker,.workspace-row-actions,.workspace-task-actions,.workspace-session-action').length`), 0, "no decorative directory/task logos or row action buttons");
         assert.ok(initial.childNameWidth >= 110, `${mode}: usable session title width`); assert.equal(initial.t2, "false");
         await browser.screenshot(join(artifacts, `after-${mode}.png`));
+        // Fixed default tasks reuse task disclosure/preview and keep real session ownership.
+        const defaultRow = '[data-sidebar-default-task-id="w1"]';
+        const defaultTrigger = `${defaultRow} .workspace-task-main`;
+        assert.equal(await browser.evaluate(`document.querySelector(${JSON.stringify(defaultTrigger)}).textContent.trim()`), "Atlas 客户端 - 未分组任务");
+        assert.equal(await browser.evaluate(`document.querySelectorAll(${JSON.stringify(`${defaultRow} [data-session-id="loose"]`)}).length`), 1);
+        assert.equal(await browser.evaluate(`document.querySelectorAll(${JSON.stringify(`${defaultRow} [data-session-id="s1"]`)}).length`), 0);
+        await browser.click(defaultTrigger);
+        await browser.wait(`document.querySelector(${JSON.stringify(defaultTrigger)}).getAttribute('aria-expanded')==='false'`);
+        await browser.settle();
+        assert.equal(await browser.evaluate(`(${visible})(document.querySelector('.workspace-session[data-session-id=loose]'))`), false);
+        await browser.key("ArrowRight");
+        await browser.wait(`document.querySelector(${JSON.stringify(defaultTrigger)}).getAttribute('aria-expanded')==='true'`);
+        await browser.key("Escape");
+        assert.equal(await browser.evaluate(`document.querySelector(${JSON.stringify(defaultTrigger)}).getAttribute('aria-expanded')`), "false");
+        await browser.key("ArrowRight");
+        await browser.click(`${defaultRow} .workspace-task`, "right");
+        await browser.wait('!!document.querySelector(".workspace-task-menu .ant-dropdown-menu")');
+        const defaultMenu = await browser.evaluate('document.querySelector(".workspace-task-menu").textContent');
+        assert.match(defaultMenu, /新建会话/);
+        assert.doesNotMatch(defaultMenu, /重命名任务|归档任务|删除任务|打开任务/);
+        await clickMenuText('.workspace-task-menu', '新建会话');
+        const defaultCreation = await browser.evaluate('fixture.creation()');
+        assert.equal(defaultCreation.initialCwd, "/work/atlas");
+        assert.equal(defaultCreation.workspaceId, "w1");
+        assert.ok(!defaultCreation.workspaceTaskId, "display-only task id must not become a persisted session binding");
+        await browser.evaluate('fixture.closeCreation();fixture.update({sessionsDrawerOpen:true,sessionsBackdropVisible:innerWidth<600});true');
+        assert.equal(mutations.length, 0, "default task disclosure and creation dialog are read-only");
         // Search transforms in its existing slot, restores focus and reveals ancestor paths.
         const before = await browser.evaluate(`document.querySelector('[aria-label="搜索任务或会话"]').getBoundingClientRect().toJSON()`);
         await browser.click('[aria-label="搜索任务或会话"]');

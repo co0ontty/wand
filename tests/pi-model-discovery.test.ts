@@ -33,12 +33,6 @@ test("Pi model discovery imports and paginates models from its configured LLM en
       baseUrl: "https://claude.example",
       apiKey: "$CLAUDE_MODELS_KEY",
     },
-    "huniu-gemini": {
-      api: "google-generative-ai",
-      baseUrl: "https://gemini.example/v1beta",
-      apiKey: "literal-google-secret",
-      headers: { "x-tenant-token": "$GEMINI_TENANT_TOKEN" },
-    },
   });
 
   const calls: string[] = [];
@@ -62,22 +56,10 @@ test("Pi model discovery imports and paginates models from its configured LLM en
         has_more: false,
       });
     }
-    assert.equal(url.host, "gemini.example");
-    assert.equal(url.searchParams.has("key"), false, "API keys must not be placed in request URLs");
-    assert.equal(headers.get("x-goog-api-key"), "literal-google-secret");
-    assert.equal(headers.get("x-tenant-token"), "gemini-tenant-test-secret");
-    if (url.searchParams.has("pageToken")) {
-      assert.equal(url.searchParams.get("pageToken"), "next-page");
-      return response({ models: [{ name: "models/gemini-3.1-pro" }] });
-    }
-    return response({
-      models: [{ name: "models/gemini-3.8-flash", displayName: "Gemini 3.8 Flash" }],
-      nextPageToken: "next-page",
-    });
+    throw new Error(`Unexpected discovery endpoint: ${url.host}`);
   };
   const env = {
     CLAUDE_MODELS_KEY: "claude-test-secret",
-    GEMINI_TENANT_TOKEN: "gemini-tenant-test-secret",
   };
 
   const discovered = await discoverPiEndpointModels({ agentDir, env, fetchImpl });
@@ -85,12 +67,10 @@ test("Pi model discovery imports and paginates models from its configured LLM en
     "OpenAI/gpt-5-nano",
     "OpenAI/gpt-5-mini",
     "xiaomai/claude-sonnet-5-5",
-    "huniu-gemini/gemini-3.8-flash",
-    "huniu-gemini/gemini-3.1-pro",
   ]);
-  assert.equal(discovered.find((model) => model.id === "huniu-gemini/gemini-3.8-flash")?.label,
-    "Gemini 3.8 Flash · huniu-gemini/gemini-3.8-flash");
-  assert.equal(calls.length, 5, "OpenAI and Gemini cursors should be followed");
+  assert.equal(discovered.find((model) => model.id === "xiaomai/claude-sonnet-5-5")?.label,
+    "Claude Sonnet 5.5 · xiaomai/claude-sonnet-5-5");
+  assert.equal(calls.length, 3, "OpenAI cursors should be followed");
   assert.doesNotMatch(JSON.stringify(discovered), /secret|token/i);
 
   const runner: ModelCommandRunner = async (file, args) => {
@@ -119,8 +99,6 @@ test("Pi model discovery imports and paginates models from its configured LLM en
     "OpenAI/gpt-5-nano",
     "OpenAI/gpt-5-mini",
     "xiaomai/claude-sonnet-5-5",
-    "huniu-gemini/gemini-3.8-flash",
-    "huniu-gemini/gemini-3.1-pro",
   ]);
   assert.doesNotMatch(JSON.stringify(catalog.piModels), /secret|token/i);
 });

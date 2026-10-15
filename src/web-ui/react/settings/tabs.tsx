@@ -802,7 +802,6 @@ function aiFromSnapshot(snapshot: SettingsSnapshot): SettingsAiInput {
     defaultGrokModel: config.defaultGrokModel,
     defaultQoderModel: config.defaultQoderModel,
     defaultPiModel: config.defaultPiModel,
-    defaultGeminiModel: config.defaultGeminiModel,
     defaultProvider: config.defaultProvider,
     defaultThinkingEffort: config.defaultThinkingEffort,
   };
@@ -819,7 +818,7 @@ function ModelSuggestions({ id, models }: { id: string; models: SettingsModelOpt
 /** CLI 工具下拉与任务指派 / 新建会话共用使用频率排序。 */
 const SESSION_PROVIDER_OPTIONS: ReadonlyArray<{ value: SettingsSessionProvider; label: string }> =
   AGENT_TOOL_OPTIONS.filter((option) => option.engine !== "sdk")
-    .map((option) => ({ value: option.provider, label: option.label }));
+    .map((option) => ({ value: option.provider as SettingsSessionProvider, label: option.label }));
 
 /** 目录还没回来时的四档。CLI 档位到达后换成原生列表。 */
 const THINKING_EFFORT_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
@@ -874,7 +873,6 @@ const PROVIDER_MODEL_FIELDS: Record<SettingsSessionProvider, keyof SettingsAiInp
   grok: "defaultGrokModel",
   qoder: "defaultQoderModel",
   pi: "defaultPiModel",
-  gemini: "defaultGeminiModel",
 };
 
 function sessionProviderLabel(provider: SettingsSessionProvider): string {
@@ -892,7 +890,6 @@ function providerModelSuggestions(
   if (provider === "grok") return models.grokModels;
   if (provider === "qoder") return models.qoderModels;
   if (provider === "pi") return models.piModels;
-  if (provider === "gemini") return models.geminiModels;
   return models.models;
 }
 
@@ -1014,7 +1011,6 @@ export function modelCatalogSummary(models: SettingsModelCatalog): string {
     ["Grok", models.grokModels.length],
     ["Qoder", models.qoderModels.length],
     ["Pi", models.piModels.length],
-    ["Gemini", models.geminiModels.length],
   ];
   return groups
     .map(([label, count]) => count > 0 ? `${label} ${count}` : `${label} 0（未发现）`)
@@ -1558,12 +1554,17 @@ function AdminDisplaySettingsTab({ snapshot, repository, refresh }: SettingsTabP
  * 只是展示设置，不牵涉执行身份或权限；留空名字就沿用默认的「我」，
  * 这样不改资料的老用户看到的还是原来的样子。
  */
-export function ProfileSettingsTab({ snapshot, repository, refresh }: SettingsTabProps) {
+export function ProfileSettingsTab({ snapshot, repository, refresh, onDirtyChange, onSavingChange }: SettingsTabProps & {
+  onDirtyChange?(dirty: boolean): void;
+  onSavingChange?(busy: boolean): void;
+}) {
   const [value, setValue, acceptSaved] = useSettingsDraft<SettingsUserProfile>({ ...snapshot.config!.userProfile });
   const [pending, setPending] = useState(false);
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [tone, setTone] = useState<StatusTone>("info");
+  React.useEffect(() => { onDirtyChange?.(JSON.stringify(value) !== JSON.stringify(snapshot.config!.userProfile)); }, [value, snapshot.config, onDirtyChange]);
+  React.useEffect(() => { onSavingChange?.(pending || avatarBusy); }, [pending, avatarBusy, onSavingChange]);
   const name = value.name.trim();
   const nameError = value.name.length > USER_PROFILE_NAME_MAX ? `名字不能超过 ${USER_PROFILE_NAME_MAX} 个字符。` : "";
 
@@ -1605,7 +1606,7 @@ export function ProfileSettingsTab({ snapshot, repository, refresh }: SettingsTa
             onChange={(next) => setValue((current) => ({ ...current, name: next }))}
           />
         </SettingsField>
-        <SettingsField label="头像" hint="可以挑一只像素猫，或上传一张自己的图片。">
+        <SettingsField label="头像" hint="与员工使用相同的头像规则；可以捏脸或上传图片，已有像素猫会保留。">
           <UserAvatarPicker
             avatar={value.avatar}
             name={name || DEFAULT_USER_DISPLAY_NAME}

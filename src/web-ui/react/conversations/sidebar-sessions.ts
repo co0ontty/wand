@@ -5,6 +5,7 @@ import { sidebarSearchMatches } from "../workspaces/sidebar-search";
 import { workspaceSessionProvider } from "../workspaces/session-order";
 import type { TaskDirectoryGroup, WorkspaceSessionSummary } from "../workspaces/types";
 import type { ConversationListFilter } from "./state";
+import { isSessionActive } from "../workspaces/sidebar-display-mode";
 
 export interface PersonSessionEntry extends SidebarRecentEntry {
   readonly archived: boolean;
@@ -47,10 +48,13 @@ export function filterPersonSessions(
   filter: ConversationListFilter,
   query: string,
   liveTitles: Readonly<Record<string, string>> = {},
+  activityOnly = false,
+  _selectedSessionId: string | null = null,
 ): PersonSessionEntry[] {
   if (item.kind !== "dm" || !item.peerEmployeeId) return [];
   return (index.get(item.peerEmployeeId) ?? []).filter(entry => {
     if (filter === "archived" ? !entry.archived : filter === "active" ? entry.archived : false) return false;
+    if (activityOnly && !isSessionActive(entry.session)) return false;
     return sidebarSearchMatches(query, item.title, item.name, ...sessionSearchValues(entry, liveTitles));
   });
 }

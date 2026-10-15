@@ -13,16 +13,12 @@
  */
 
 import {
-  installService,
   isServiceInstalled,
   serviceLogs,
-  serviceRestart,
-  serviceStart,
   serviceStatusAsync,
-  serviceStop,
-  uninstallService,
 } from "./commands.js";
 import { LayoutHandle, ServicePanelView } from "./layout.js";
+import { runTuiServiceCommand } from "./service-command.js";
 
 export interface ServicePanelDeps {
   layout: LayoutHandle;
@@ -72,8 +68,8 @@ export function openServicePanel(deps: ServicePanelDeps): void {
 
   layout.openServicePanel(
     {
-      onStart: () => {
-        handleResult("start", serviceStart());
+      onStart: async () => {
+        handleResult("start", await runTuiServiceCommand(layout, "service:start", configPath));
       },
       onStop: async () => {
         const ok = await layout.confirm({
@@ -81,7 +77,7 @@ export function openServicePanel(deps: ServicePanelDeps): void {
           body: "将停止 wand.service / launchd 代理；如果你正 attach 到它，连接会断开。",
         });
         if (!ok) return;
-        handleResult("stop", serviceStop());
+        handleResult("stop", await runTuiServiceCommand(layout, "service:stop", configPath));
       },
       onRestart: async () => {
         const ok = await layout.confirm({
@@ -89,7 +85,7 @@ export function openServicePanel(deps: ServicePanelDeps): void {
           body: "将 restart wand.service / 重新 load 代理；attach 连接会短暂断开后自动重连。",
         });
         if (!ok) return;
-        handleResult("restart", serviceRestart());
+        handleResult("restart", await runTuiServiceCommand(layout, "service:restart", configPath));
       },
       onInstall: async () => {
         if (isServiceInstalled()) {
@@ -98,11 +94,11 @@ export function openServicePanel(deps: ServicePanelDeps): void {
         }
         const isRoot = typeof process.getuid === "function" ? process.getuid() === 0 : false;
         const body = `默认装 system-wide(/etc/systemd/system/ 或 /Library/LaunchDaemons/),开机自启、登出不停。${
-          isRoot ? "" : "\n⚠ 需要 root,如果失败请退出 TUI 跑 sudo wand service:install。"
+          isRoot ? "" : "\n需要管理员权限，将自动申请 sudo，请在终端输入密码。"
         }`;
         const ok = await layout.confirm({ title: "注册服务", body });
         if (!ok) return;
-        handleResult("install", installService({ configPath }));
+        handleResult("install", await runTuiServiceCommand(layout, "service:install", configPath));
       },
       onUninstall: async () => {
         if (!isServiceInstalled()) {
@@ -114,7 +110,7 @@ export function openServicePanel(deps: ServicePanelDeps): void {
           body: "将禁用并删除服务配置文件。",
         });
         if (!ok) return;
-        handleResult("uninstall", uninstallService());
+        handleResult("uninstall", await runTuiServiceCommand(layout, "service:uninstall", configPath));
       },
       onLogs: () => {
         const r = serviceLogs(80);

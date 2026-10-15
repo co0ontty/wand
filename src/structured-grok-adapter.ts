@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { startStructuredCli } from "./structured-exec-pump.js";
 import type { StructuredExecHost } from "./structured-exec-host.js";
 import { asRecord } from "./structured-content.js";
-import { cliUnacceptedFacts } from "./structured-failure.js";
+import { buildStructuredCliResult } from "./structured-failure.js";
 import { systemPromptArgs, thinkingEffortToGrokEffort } from "./structured-provider-common.js";
 import type {
   StructuredRunnerAdapter,
@@ -238,9 +238,9 @@ export class GrokRunner implements StructuredRunnerAdapter {
           observer.onUpdate(state);
         } catch { unparsedStdout = true; /* Non-protocol stdout is not evidence of a safe refusal. */ }
       },
-      finalize: (ctx, exitCode, signal, spawnError) => ({
-        state, exitCode, signal, stderr: ctx.stderr, primaryError, ...(spawnError ? { spawnError } : {}),
-        ...cliUnacceptedFacts({ state, primaryError, protocolError, unparsedStdout, signal, ...(spawnError ? { spawnError } : {}) }),
+      finalize: (ctx, exitCode, signal, spawnError) => buildStructuredCliResult({
+        state, exitCode, signal, stderr: ctx.stderr, primaryError,
+        protocolError, unparsedStdout, spawnError,
       }),
     });
   }

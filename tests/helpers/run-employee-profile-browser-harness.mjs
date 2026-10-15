@@ -259,10 +259,11 @@ try{
     assert.equal(employees.some(item=>item.id==='emp-custom'),false);assert.equal(writes(),mutations+1,'explicit confirmation deletes exactly once');
     cases.push({name:'rapid cancel/reopen/confirm with real pointer',width:320,cpuRate:4,cancellations:16,deletes:1});
   }else{
-  assert.equal(await e("document.querySelectorAll('.employee-item').length"),seeds.filter(employee=>!employee.archivedAt).length);assert.equal(await e("document.querySelectorAll('[data-employee-profile]').length"),0,"directory opens without an automatic split editor");
-  await browser.click('.employee-directory input[type=checkbox]');await browser.wait(`document.querySelectorAll('.employee-item').length===${seeds.length}`);await browser.click('.employee-directory input[type=checkbox]');
+  assert.equal(await e("document.querySelectorAll('.employee-item').length"),seeds.filter(employee=>!employee.archivedAt).length + 1);assert.equal(await e("document.querySelectorAll('[data-employee-profile]').length"),0,"directory opens without an automatic split editor");
+  assert.equal(await e("document.querySelector('.employee-item').dataset.directoryEmployeeId"), "user", "我固定置顶，不进入员工执行配置");
+  await browser.click('.employee-directory input[type=checkbox]');await browser.wait(`document.querySelectorAll('.employee-item').length===${seeds.length + 1}`);await browser.click('.employee-directory input[type=checkbox]');
   await fill('.employee-directory input[type=search]',"无匹配样本");await browser.wait("document.querySelector('.no-results')?.textContent.includes('没有匹配')");await browser.key("Escape");
-  await browser.wait(`document.querySelectorAll('.employee-item').length===${seeds.filter(employee=>!employee.archivedAt).length}`);assert.equal(await e("document.activeElement===document.querySelector('.employee-directory input[type=search]')"),true,"search Escape clears and preserves focus");
+  await browser.wait(`document.querySelectorAll('.employee-item').length===${seeds.filter(employee=>!employee.archivedAt).length + 1}`);assert.equal(await e("document.activeElement===document.querySelector('.employee-directory input[type=search]')"),true,"search Escape clears and preserves focus");
   cases.push({name:"directory index, archived filter and search Escape"});
   await browser.click('.employee-item[data-directory-employee-id="emp-custom"]');
   assert.equal(await e("document.querySelectorAll('[data-employee-profile] [role=tab],.employee-directory').length"),0,"editor has no tabs or side directory");

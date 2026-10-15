@@ -24,7 +24,7 @@ interface ProviderCliSpec {
   /** 有 npm 发布渠道时用它查最新版；Grok 只提供自更新，见 `cliLatestArgs`。 */
   npmPackage?: string;
   versionArgs: string[];
-  /** 没有自更新子命令时留空，改走 `npm install -g <npmPackage>@latest`（如 Gemini CLI）。 */
+  /** 没有自更新子命令时留空，改走 `npm install -g <npmPackage>@latest`。 */
   updateArgs?: string[];
   /** 没有 npm 渠道的 CLI 用自身 --check 读取最新版（如 `grok update --check --json`）。 */
   cliLatestArgs?: string[];
@@ -81,14 +81,6 @@ const PROVIDER_CLI_SPECS: readonly ProviderCliSpec[] = [
     npmPackage: "@earendil-works/pi-coding-agent",
     versionArgs: ["--version"],
     updateArgs: ["update", "self"],
-  },
-  {
-    id: "gemini",
-    label: "Gemini CLI",
-    command: "gemini",
-    npmPackage: "@google/gemini-cli",
-    versionArgs: ["--version"],
-    // 没有 `gemini update` 子命令，只能走 npm 发布渠道。
   },
 ] as const;
 
@@ -442,7 +434,7 @@ export async function updateProviderClis(
       } else if (spec.updateArgs) {
         output = await runCommand(executable, spec.updateArgs, options.updateTimeoutMs ?? UPDATE_TIMEOUT_MS, options);
       } else {
-        // 没有自更新子命令的 CLI（Gemini）走它的 npm 发布渠道。
+        // 没有自更新子命令的 CLI 走它的 npm 发布渠道。
         output = await runCommand(
           npmBin(options),
           ["install", "-g", `${spec.npmPackage}@latest`],

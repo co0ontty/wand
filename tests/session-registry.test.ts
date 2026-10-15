@@ -43,7 +43,6 @@ function harness() {
     claudeDeletes: [] as string[],
     piDeletes: [] as string[],
     grokDeletes: [] as string[],
-    geminiDeletes: [] as string[],
     opencodeDeletes: [] as string[],
     qoderDeletes: [] as string[],
     slimStorageLoads: 0,
@@ -82,7 +81,6 @@ function harness() {
     deleteCodexHistoryFiles: () => 0,
     deletePiHistoryFiles: (ids: string[]) => { calls.piDeletes.push(...ids); return ids.length; },
     deleteGrokHistoryFiles: (ids: string[]) => { calls.grokDeletes.push(...ids); return ids.length; },
-    deleteGeminiHistoryFiles: (ids: string[]) => { calls.geminiDeletes.push(...ids); return ids.length; },
     deleteOpenCodeHistorySessions: (ids: string[]) => { calls.opencodeDeletes.push(...ids); return ids.length; },
     deleteQoderHistoryFiles: (ids: string[]) => { calls.qoderDeletes.push(...ids); return ids.length; },
   } as unknown as ProcessManager;

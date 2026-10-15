@@ -37,7 +37,6 @@ const PROVIDER_LABELS: Record<SessionProvider, string> = {
   grok: "Grok Build CLI",
   qoder: "Qoder CLI",
   pi: "Pi coding agent",
-  gemini: "Gemini CLI",
 };
 
 /** 硅基员工只能跑结构化会话；候选沿用看板的「跟随服务端默认」。 */

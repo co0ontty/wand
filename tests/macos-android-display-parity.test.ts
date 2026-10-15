@@ -16,8 +16,9 @@ test("macOS avatar display consumes latest Android canonical portraits and local
   const manifest = JSON.parse(readFileSync(new URL("PlushScene/source-hashes.json", base), "utf8")) as { sources: Record<string, string> };
   for (const [file, expected] of Object.entries(manifest.sources)) assert.equal(hash(readFileSync(new URL("../" + file, import.meta.url))), expected, file);
   const source = readFileSync(new URL("FocusComposer.swift", base), "utf8");
-  assert.match(source, /expandedRadius: CGFloat = 22/);
-  assert.match(source, /collapsedRadius: CGFloat = 28/);
+  // Portraits stay shared; desktop composer geometry now follows Web, not mobile.
+  assert.match(source, /controlRadius: CGFloat = 8/);
+  assert.match(source, /overlay\(alignment: \.top\)/);
   assert.match(source, /maximumTextHeight: CGFloat = 112/);
   assert.match(source, /awaitingAck/);
   assert.match(source, /recovery/);

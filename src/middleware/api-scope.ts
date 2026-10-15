@@ -48,6 +48,7 @@ export const API_ROUTE_RULES: readonly ApiRouteRule[] = [
   { prefix: "/api/check-update", scope: "admin" },
   { prefix: "/api/auto-update", scope: "admin" },
   { prefix: "/api/provider-cli-updates", scope: "admin" },
+  { prefix: "/api/storage-cleanup", scope: "admin" },
   { prefix: "/api/android-apk", scope: "admin" },
   { prefix: "/api/macos-dmg", scope: "admin" },
   { prefix: "/api/ios-ipa", scope: "admin" },

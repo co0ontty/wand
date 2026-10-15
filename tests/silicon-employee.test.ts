@@ -516,7 +516,7 @@ test("员工起草：解析模型输出、容忍围栏并收敛非法 provider",
 
   // provider 不在已安装清单里时退回首选，员工不能带着跑不起来的 CLI 落库。
   const fallback = parseSiliconEmployeeDraft(
-    JSON.stringify({ name: "前端小匠", duty: "负责前端实现", prompt: "你是资深前端。", provider: "gemini" }),
+    JSON.stringify({ name: "前端小匠", duty: "负责前端实现", prompt: "你是资深前端。", provider: "qoder" }),
     { allowedProviders: ["claude", "pi"], fallbackProvider: "pi" },
   );
   assert.equal(fallback.agent.provider, "pi");
@@ -737,7 +737,8 @@ test("员工草稿接口：结构化草稿走同一校验，不调用模型且�
     draft: { name: "越界员工", duty: "职责", prompt: "你是……。", provider: "gemini" },
   });
   assert.equal(illegal.status, 400);
-  assert.equal(illegal.json.code, "DRAFT_PROVIDER_NOT_ALLOWED");
+  assert.equal(illegal.json.code, "DRAFT_INVALID_PROVIDER");
+  assert.equal(generateCalls, 0, "removed provider must be rejected before any model execution");
 
   // 生成路径空期望：调模型前就被拒，且不落任何实体。
   const empty = await postDraft({ expectation: "  " });

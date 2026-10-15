@@ -8,15 +8,14 @@
 
 import {
   checkUpdate,
-  installService,
   installUpdate,
   isServiceInstalled,
   readUpdateChannel,
-  uninstallService,
 } from "./commands.js";
 import { repairServiceUnitAfterUpdate } from "../service-self-repair.js";
 import type { LayoutHandle } from "./layout.js";
 import { runOffMicrotask } from "./runtime-utils.js";
+import { runTuiServiceCommand } from "./service-command.js";
 
 export interface UpdateConfirmContext {
   current: string;
@@ -93,14 +92,14 @@ export function createServiceActions(options: ServiceActionsOptions): ServiceAct
       layout.showToast("服务已安装，按 Shift+S 卸载", "warn", 2500);
       return;
     }
-    // 默认装 system-wide。非 root 时 installService 会返回明确错误,toast 自然展示。
+    // 默认装 system-wide；确认后让独立 CLI 自动申请 sudo。
     const isRoot = typeof process.getuid === "function" ? process.getuid() === 0 : false;
     const ok = await layout.confirm({
       title: "注册为系统服务",
       body: options.installServiceBody(isRoot),
     });
     if (!ok) return;
-    const r = await runOffMicrotask(() => installService({ configPath: options.configPath }));
+    const r = await runTuiServiceCommand(layout, "service:install", options.configPath);
     layout.showToast(r.message, r.ok ? "success" : "error", 5000);
     if (r.detail) layout.showDetail(r.ok ? "服务安装详情" : "服务安装失败", r.detail);
     options.onServiceChanged?.();
@@ -116,7 +115,7 @@ export function createServiceActions(options: ServiceActionsOptions): ServiceAct
       body: "将禁用并删除 wand 的 systemd / launchd 配置，确认继续？",
     });
     if (!ok) return;
-    const r = await runOffMicrotask(() => uninstallService());
+    const r = await runTuiServiceCommand(layout, "service:uninstall", options.configPath);
     layout.showToast(r.message, r.ok ? "success" : "error", 4000);
     if (r.detail) layout.showDetail(r.ok ? "服务卸载详情" : "服务卸载失败", r.detail);
     options.onServiceChanged?.();

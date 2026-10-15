@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DecisionError, type LocalDecisionConfig } from "./decision-types.js";
@@ -13,6 +13,7 @@ import { speechSupport, type SpeechSupport } from "./speech-support.js";
 import { systemEnvValue } from "./env-utils.js";
 import { decisionHardware } from "./decision-hardware.js";
 import { DECISION_EXPERT_ID } from "./decision-expert-identity.js";
+import { configTemporaryRoot, createManagedTemporary } from "./managed-temp.js";
 import type { LocalModelKind, LocalModelsStatus, ModelSetupInput, ModelSetupOperation, ModelSetupPhase } from "./local-model-types.js";
 
 export interface LocalModelSetupDeps {
@@ -224,12 +225,13 @@ export class LocalModelSetupService {
             if (systemEnvValue("WAND_WHISPER_BIN")) throw new Error("服务器使用自定义语音运行时，请由管理员核对环境配置；不会覆盖它。");
             phase("runtime", "安装固定 whisper.cpp 运行时（需 Git、CMake、C++工具链；CUDA需已安装Toolkit）");
             await mkdir(path.join(this.deps.configDir, "speech"), { recursive: true, mode: 0o700 });
-            const work = await mkdtemp(path.join(this.deps.configDir, "speech", ".setup-work-"));
+            const temporary = createManagedTemporary("speech-setup", configTemporaryRoot(this.deps.configDir));
+            const work = temporary.directory;
             try {
               await (this.deps.run ?? runModelSetup)(process.execPath,
                 [this.installer("install-speech-runtime.js"), "--dir", path.join(this.deps.configDir, "speech"), "--backend", backend, "--work-dir", work, "--events"], this.deps.configDir, signal,
                 (name, message) => phase(name === "verifying" ? "verifying" : "runtime", message));
-            } finally { await rm(work, { recursive: true, force: true }).catch(() => {}); }
+            } finally { await temporary.closeAsync(); }
           }
           phase("initializing", action === "activate" ? "正在检查语音模型，完成后自动启用。" : "加载所选语音模型并用合成静音检查，未启用识别或重启服务");
           await this.deps.speech.initializeModel(selected, signal, action === "activate" ? "auto" : undefined);

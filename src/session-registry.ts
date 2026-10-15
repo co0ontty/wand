@@ -16,7 +16,6 @@ export type ProviderHistoryDeleter = Pick<
   | "deleteQoderHistoryFiles"
   | "deletePiHistoryFiles"
   | "deleteGrokHistoryFiles"
-  | "deleteGeminiHistoryFiles"
 >;
 
 export function deleteProviderNativeHistory(
@@ -45,9 +44,6 @@ export function deleteProviderNativeHistory(
       break;
     case "grok":
       deleter.deleteGrokHistoryFiles([id]);
-      break;
-    case "gemini":
-      deleter.deleteGeminiHistoryFiles([id]);
       break;
     default:
       break;

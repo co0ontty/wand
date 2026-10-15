@@ -11,9 +11,11 @@ import type { ConversationMessagesProps, TeamChatViewProps } from "./team-chat-v
 import type { TeamChatPageProps } from "./team-chat-page";
 import type { AiTeamsPageProps } from "./teams-page";
 import type { DecisionChainEditorProps } from "../settings/decision-chain-editor";
+import type { EmployeeListPageProps } from "../agents/employee-list-page";
 
 
 interface AiTeamsChunk {
+  EmployeeListPage: React.ComponentType<EmployeeListPageProps>;
   DecisionChainEditor: React.ComponentType<DecisionChainEditorProps>;
   AiTeamsPage: React.ComponentType<AiTeamsPageProps>;
   TaskTeamRunPanel: React.ComponentType<TaskTeamRunPanelProps>;
@@ -38,6 +40,7 @@ function loadAiTeamsChunk(): Promise<AiTeamsChunk> {
   if (loaded) return Promise.resolve(loaded);
   if (pending) return pending;
   const globals = globalThis as ChunkGlobals;
+  if (globals.__wandAiTeamsChunk) { loaded = globals.__wandAiTeamsChunk; return Promise.resolve(loaded); }
   pending = Promise.all([import("../library-bridge"), import("./host-bridge")]).then(([library, host]) => {
     library.installSharedLibraryBridge();
     host.installAiTeamsHostBridge();
@@ -111,6 +114,12 @@ export function AiTeamsPage(props: AiTeamsPageProps): React.ReactElement {
       <WandButton kind="soft" size="small" onClick={retry}>重试</WandButton>
     </> : <><Spin/><span role="status">正在加载 AI 团队…</span></>}
   </Flex>;
+}
+
+export function EmployeeListPage(props: EmployeeListPageProps): React.ReactElement {
+  const { chunk, error, retry } = useAiTeamsChunk();
+  if (chunk) return <chunk.EmployeeListPage {...props}/>;
+  return <div role="status">{error || "正在读取员工资料…"}{error ? <WandButton onClick={retry}>重试</WandButton> : <Spin size="small"/>}</div>;
 }
 
 /** 任务详情里的团队运行：脚本到位前不占位（没有运行时本来也不渲染）。 */

@@ -216,7 +216,7 @@ test("issue helpers expose columns, grouping, sorting, and workspace options", (
   assert.notEqual(options[0]!.value, "");
   assert.match(options[1]!.label, /wand/);
   assert.match(options[1]!.label, /\/tmp\/wand/);
-  assert.equal(ISSUE_AGENT_PROVIDERS.length, 7);
+  assert.deepEqual(ISSUE_AGENT_PROVIDERS.map((option) => option.value), ["claude", "codex", "opencode", "grok", "qoder", "pi"]);
 
   // 哨兵值 ↔ workspaceId 的双向转换：null / 空串 / 真实 id 都要还原正确。
   assert.equal(issueWorkspaceSelectValue(null), ISSUE_NO_WORKSPACE);

@@ -1,11 +1,9 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync,mkdtempSync,readdirSync,rmSync,writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { appendDiagnosticTail,MAX_AI_TEXT_BYTES } from "./bounded-process-output.js";
 import { QuickCommitError } from "./command-error.js";
+import { registerTemporaryChild } from "./managed-temp.js";
 import { abortableEmployeeText,prepareEmployeeTextCandidate,type EmployeeTextDeps } from "./employee-text.js";
 import { buildChildEnv } from "./env-utils.js";
 import { getGitErrorMessage } from "./git-utils.js";
@@ -132,9 +130,6 @@ function assertCliProtocolSucceeded(stdout: string, provider: SessionProvider): 
         failure = message.stopReason === "error" || message.stopReason === "aborted"
           ? failed(message.errorMessage) : null;
       }
-    } else if (provider === "gemini") {
-      if (event.type === "error" && event.severity === "error") failure = failed(event);
-      if (event.type === "result") failure = event.status === "error" ? failed(event) : null;
     } else if ((provider === "grok" || provider === "opencode") && event.type === "error") {
       failure = failed(event);
     }
@@ -253,23 +248,6 @@ function extractPiText(stdout: string): string {
   return text.trim();
 }
 
-/** Gemini `--output-format stream-json`：assistant message 是增量 chunk，拼接即可。 */
-function extractGeminiText(stdout: string): string {
-  assertCliProtocolSucceeded(stdout, "gemini");
-  let text = "";
-  for (const line of stdout.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith("{")) continue;
-    try {
-      const event = JSON.parse(trimmed) as { type?: string; role?: string; content?: unknown };
-      if (event.type === "message" && event.role === "assistant" && typeof event.content === "string") {
-        text += event.content;
-      }
-    } catch { /* ignore non-protocol stdout */ }
-  }
-  return text.trim();
-}
-
 export function buildPiTextArgs(request: AiTextRequest, opts: QuickCommitAiOptions, allowTools = false): string[] {
   const args = ["--mode", "json", "--print", "--no-session"];
   if (!allowTools) args.push("--no-tools");
@@ -292,22 +270,6 @@ export function buildGrokTextArgs(request: AiTextRequest, opts: QuickCommitAiOpt
   else args.push("--tools", "", "--disallowed-tools",
     "run_terminal_cmd,read_file,search_replace,grep,list_dir,web_search,web_fetch,todo_write,task,Agent",
     "--deny", "MCPTool", "--disable-web-search", "--no-subagents");
-  return args;
-}
-
-/**
- * Gemini CLI 没有 `--append-system-prompt`，规则走 `contentWithSystemPrompt` 并进内容；
- * headless 下必须带 `--skip-trust`，否则未信任的工作目录会直接以 55 退出。
- *
- * `-p ""` 只把 CLI 钉在 headless 模式，真正的 prompt 走 stdin：commit diff 可能很大，
- * 塞进 argv 会撞 ARG_MAX。Gemini 没有 Codex `--ephemeral` 那样的临时会话开关，
- * 一次性调用会留在它自己的聊天记录里（Wand 不扫描 Gemini 历史，不会误当可恢复会话）。
- */
-export function buildGeminiTextArgs(opts: QuickCommitAiOptions, allowTools = false): string[] {
-  const args = ["-p", "", "--output-format", "stream-json", "--skip-trust"];
-  const model = opts.model?.trim();
-  if (model && model !== "default") args.push("--model", model);
-  if (allowTools) args.push("--approval-mode", "yolo");
   return args;
 }
 
@@ -340,7 +302,7 @@ export function runCliText(
   command: string,
   args: string[],
   prompt: string,
-  opts: { cwd: string; timeoutMs: number; inheritEnv?: boolean; signal?: AbortSignal; env?: (base: NodeJS.ProcessEnv) => NodeJS.ProcessEnv },
+  opts: { cwd: string; timeoutMs: number; inheritEnv?: boolean; signal?: AbortSignal; env?: (base: NodeJS.ProcessEnv) => NodeJS.ProcessEnv; temporaryDirectory?: string; onChildClose?: () => void },
 ): Promise<string> {
   opts.signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
@@ -350,6 +312,14 @@ export function runCliText(
       env: opts.env ? opts.env(baseEnv) : baseEnv,
       stdio: ["pipe", "pipe", "pipe"],
     });
+    if (opts.temporaryDirectory) {
+      try { registerTemporaryChild(opts.temporaryDirectory, child.pid); }
+      catch {
+        child.on("error", () => {});
+        child.once("close", () => { reject(new Error("AI text temporary lease unavailable")); });
+        child.kill("SIGKILL"); return;
+      }
+    }
     let stdout = "";
     let stdoutBytes = 0;
     const stdoutDecoder = new StringDecoder("utf8");
@@ -391,6 +361,7 @@ export function runCliText(
     });
     child.on("close", (code) => {
       cleanup();
+      opts.onChildClose?.();
       if (settled) return;
       settled = true;
       stdout += stdoutDecoder.end();
@@ -502,32 +473,6 @@ async function callPiText(request: AiTextRequest, cwd: string, opts: CliAiTextOp
   return text;
 }
 
-export function assertGeminiTextCapability(): void {
-  // Gemini ignores supplemental admin policy when a central policy exists.
-  // Refuse that unsupported text-only path rather than launching without deny.
-  const systemPolicies = process.platform === "darwin" ? "/Library/Application Support/GeminiCli/policies"
-    : process.platform === "win32" ? join(process.env.ProgramData ?? "C:\\ProgramData", "gemini-cli", "policies") : "/etc/gemini-cli/policies";
-  if (existsSync(systemPolicies) && readdirSync(systemPolicies).some(file => file.endsWith(".toml"))) {
-    throw new QuickCommitError("Gemini 中央策略阻止注入纯文本工具边界，请配置可用的文本候选。", "AI_FALLBACK_FAILED");
-  }
-}
-
-async function callGeminiText(request: AiTextRequest, cwd: string, opts: CliAiTextOptions): Promise<string> {
-  assertGeminiTextCapability();
-  const root = mkdtempSync(join(tmpdir(), "wand-gemini-text-"));
-  try {
-    const policy = join(root, "text-only.toml");
-    writeFileSync(policy, '[[rule]]\ntoolName = "*"\ndecision = "deny"\npriority = 999\n', { mode: 0o600 });
-    const args = [...buildGeminiTextArgs(opts), "--admin-policy", policy, "--extensions", "none", "--allowed-mcp-server-names", ""];
-    const stdout = await runCliText("gemini", args, contentWithSystemPrompt("gemini", request), {
-      cwd, timeoutMs: cliTextTimeoutMs(CODEX_MESSAGE_TIMEOUT_MS, opts), inheritEnv: opts.inheritEnv, signal: opts.signal,
-    });
-    const text = extractGeminiText(stdout);
-    if (!text) throw new QuickCommitError("Gemini 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
-    return text;
-  } finally { rmSync(root, { recursive: true, force: true }); }
-}
-
 export async function callCliAiText(request: AiTextRequest, cwd: string, language: string, opts: CliAiTextOptions): Promise<string> {
   const provider = defaultProvider(opts.provider);
   if (provider === "codex") {
@@ -537,7 +482,6 @@ export async function callCliAiText(request: AiTextRequest, cwd: string, languag
   if (provider === "grok") return callGrokText(request, cwd, opts);
   if (provider === "qoder") return callQoderText(request, cwd, opts);
   if (provider === "pi") return callPiText(request, cwd, opts);
-  if (provider === "gemini") return callGeminiText(request, cwd, opts);
   return callClaudeText(request, cwd, language, opts);
 }
 

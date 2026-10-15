@@ -173,7 +173,7 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
   app.post("/api/settings/config", requireAdminOrSessionPreferences, asyncRoute(async (req, res) => {
     const body = req.body as Partial<WandConfig> & {
       expectedModelGroups?: unknown;
-      defaultModels?: { claude?: unknown; codex?: unknown; opencode?: unknown; grok?: unknown; qoder?: unknown; pi?: unknown; gemini?: unknown };
+      defaultModels?: { claude?: unknown; codex?: unknown; opencode?: unknown; grok?: unknown; qoder?: unknown; pi?: unknown };
     };
     const previousDesiredConfig = runtimeConfig.desiredSnapshot();
     const candidateConfig = runtimeConfig.createCandidate();

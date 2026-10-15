@@ -11,7 +11,7 @@
 
 ### Overview
 
-Wand is a web console for remotely accessing and managing local CLI tools from a browser. It supports [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), [OpenCode](https://opencode.ai/), [Grok Build](https://grok.com/), [Qoder CLI](https://docs.qoder.com/en/cli/quick-start), and [Pi](https://pi.dev/), as well as [Gemini CLI](https://github.com/google-gemini/gemini-cli), with terminal and structured conversation views, persistent resumable sessions, permission controls, file browsing, and native clients for multiple platforms.
+Wand is a web console for remotely accessing and managing local CLI tools from a browser. It supports [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), [OpenCode](https://opencode.ai/), [Grok Build](https://grok.com/), [Qoder CLI](https://docs.qoder.com/en/cli/quick-start), and [Pi](https://pi.dev/), with terminal and structured conversation views, persistent resumable sessions, permission controls, file browsing, and native clients for multiple platforms.
 
 The browser password manager extension source lives in `browser-extension/`.
 
@@ -48,7 +48,7 @@ wand config:password
 #### Core
 
 - **Dual view modes** — switch between raw terminal output and a structured conversation view for the same session
-- **Multiple providers** — create PTY or structured sessions for Claude Code, Codex, OpenCode, Grok, Qoder CLI, Pi, and Gemini CLI
+- **Multiple providers** — create PTY or structured sessions for Claude Code, Codex, OpenCode, Grok, Qoder CLI, and Pi
 - **Session management** — create, archive, and resume Claude, Codex, OpenCode, Grok, and Qoder sessions with their provider-native context; restore Claude/Codex native history; show summaries in the session list
 - **Permission control** — visual permission prompts with one-time approval, per-turn memory, and related policies
 
@@ -66,7 +66,7 @@ wand config:password
 - **Native clients** — Android, iOS, and macOS clients with encrypted connection codes and update checks
 - **HTTPS** — optional self-signed certificates for remote or mobile access
 - **Update channels** — built-in stable/beta update checks and upgrade prompts
-- **CLI updates** — check and quickly update Claude Code, Codex, OpenCode, Qoder CLI, Pi, and Gemini CLI from server settings, with optional automatic updates
+- **CLI updates** — check and quickly update Claude Code, Codex, OpenCode, Qoder CLI, and Pi from server settings, with optional automatic updates
 
 Stable subscribers receive npm `latest`; Beta subscribers receive the newer of `latest`
 and `beta`, including a stable release that supersedes its prerelease. Installing stable
@@ -113,16 +113,16 @@ Web and Android show inference calls as standalone local-decision cards, outside
 
 ### System Service
 
-The default service mode is system-wide: Linux writes `/etc/systemd/system/wand.service`, and macOS writes `/Library/LaunchDaemons/com.wand.web.plist`. Installing or removing the system service requires sudo.
+The default service mode is system-wide: Linux writes `/etc/systemd/system/wand.service`, and macOS writes `/Library/LaunchDaemons/com.wand.web.plist`. System service changes require administrator permission. Wand automatically invokes sudo and lets you enter the password in the terminal; it never reads or stores the password. Without an interactive terminal, only already-authorized noninteractive sudo is allowed. Restart waits for active Core turns before gracefully restarting Server, leaving Render/terminald running (`--timeout <seconds>` cancels on timeout).
 
 ```bash
-sudo wand service:install   # Register and start the service
-wand service:status         # Show status
-sudo wand service:start     # Start
-sudo wand service:stop      # Stop
-sudo wand service:restart   # Restart
-wand service:logs           # Show recent logs
-sudo wand service:uninstall # Stop and remove the service
+wand service:install   # Register and start; automatically request sudo
+wand service:status    # Show status
+wand service:start     # Start
+wand service:stop      # Stop
+wand service:restart   # Safely restart; automatically request sudo
+wand service:logs      # Show recent logs
+wand service:uninstall # Stop and remove the service
 ```
 
 Use `--user` for a user-level service:
@@ -180,17 +180,13 @@ npm uninstall -g opencode
 npm install -g opencode-ai@latest
 ```
 
-Gemini structured sessions require `@google/gemini-cli` 0.11 or newer (the release that added headless `--output-format stream-json`):
-
-```bash
-npm install -g @google/gemini-cli@latest
 ```
 
 ## 中文
 
 ### 概览
 
-通过浏览器远程访问和管理本地 CLI 工具的 Web 控制台。支持 [Claude Code](https://docs.anthropic.com/en/docs/claude-code)、[Codex](https://github.com/openai/codex)、[OpenCode](https://opencode.ai/)、[Grok Build](https://grok.com/)、[Qoder CLI](https://docs.qoder.com/zh/cli/quick-start)、[Pi](https://pi.dev/) 和 [Gemini CLI](https://github.com/google-gemini/gemini-cli)，提供终端和结构化对话双视图、会话持久化与恢复、权限管控、文件浏览和多平台客户端。
+通过浏览器远程访问和管理本地 CLI 工具的 Web 控制台。支持 [Claude Code](https://docs.anthropic.com/en/docs/claude-code)、[Codex](https://github.com/openai/codex)、[OpenCode](https://opencode.ai/)、[Grok Build](https://grok.com/)、[Qoder CLI](https://docs.qoder.com/zh/cli/quick-start)、[Pi](https://pi.dev/)，提供终端和结构化对话双视图、会话持久化与恢复、权限管控、文件浏览和多平台客户端。
 
 ### 安装
 
@@ -227,10 +223,6 @@ npm uninstall -g opencode
 npm install -g opencode-ai@latest
 ```
 
-Gemini 结构化会话需要 `@google/gemini-cli` 0.11 或更高版本（该版本才加入 headless 的 `--output-format stream-json`）：
-
-```bash
-npm install -g @google/gemini-cli@latest
 ```
 
 ### 功能
@@ -238,7 +230,7 @@ npm install -g @google/gemini-cli@latest
 #### 核心
 
 - **双视图模式** — 终端原始输出和结构化对话视图可随时切换，同一会话两种呈现
-- **多 Provider 支持** — Claude Code、Codex、OpenCode、Grok、Qoder CLI、Pi 和 Gemini CLI 均可创建 PTY 或结构化会话
+- **多 Provider 支持** — Claude Code、Codex、OpenCode、Grok、Qoder CLI 和 Pi 均可创建 PTY 或结构化会话
 - **会话管理** — 创建、归档并携带原生上下文恢复 Claude、Codex、OpenCode、Grok、Qoder 会话；支持恢复 Claude/Codex 原生历史记录；会话列表显示摘要
 - **权限控制** — 可视化权限提示，支持逐次确认、单次批准、本轮记忆等策略
 
@@ -282,7 +274,7 @@ master 的 Beta 发布只写入 `beta`，版本为下一补丁号加
 版本基数同时检查正式 Git tags 和 npm latest，兼容未推送 Git 的本地正式发布。
 Beta 标签缺失或无效时，Beta 订阅仍可接收有效正式版；正式通道始终不选择 beta。
 两个候选都无效或 npm 不可达时不安装。
-- **CLI 更新** — 在服务端设置中检查并快速更新 Claude Code、Codex、OpenCode、Qoder CLI、Pi 和 Gemini CLI，也可开启自动更新
+- **CLI 更新** — 在服务端设置中检查并快速更新 Claude Code、Codex、OpenCode、Qoder CLI 和 Pi，也可开启自动更新
 
 ### 配置
 
@@ -334,16 +326,16 @@ Web/Android 的推理调用独立显示为「本地决策」卡，不混入普�
 
 ### 系统服务
 
-默认走 **system-wide**：Linux 写 `/etc/systemd/system/wand.service`，macOS 写 `/Library/LaunchDaemons/com.wand.web.plist`。开机自启、不依赖 login session、`service wand` / `systemctl status wand` 这些老命令都能用。装/卸需要 sudo。
+默认走 **system-wide**：Linux 写 `/etc/systemd/system/wand.service`，macOS 写 `/Library/LaunchDaemons/com.wand.web.plist`。开机自启、不依赖 login session、`service wand` / `systemctl status wand` 这些老命令都能用。系统服务变更需要管理员权限，Wand 会自动申请 sudo，让你在终端输入密码（不显示、不读取、不保存）。无交互终端时仅允许已经授权的非交互 sudo。重启会先等待 Core 回合排空，再优雅重启 Server，保留 Render/terminald；可用 `--timeout <秒数>` 限制等待时间，超时不停止服务。
 
 ```bash
-sudo wand service:install   # 注册并启动（首次安装走这里）
-wand service:status         # 查状态（active / inactive / failed） — 读取不要 sudo
-sudo wand service:start     # 启动
-sudo wand service:stop      # 停止
-sudo wand service:restart   # 重启
-wand service:logs           # 看最近日志（--lines N 调整行数）
-sudo wand service:uninstall # 卸载（停服 + 删 unit）
+wand service:install   # 注册并启动（自动申请 sudo）
+wand service:status    # 查状态（active / inactive / failed） — 读取不要 sudo
+wand service:start     # 启动
+wand service:stop      # 停止
+wand service:restart   # 安全重启（自动申请 sudo）
+wand service:logs      # 看最近日志（--lines N 调整行数）
+wand service:uninstall # 卸载（停服 + 删 unit）
 ```
 
 不想用 sudo？传 `--user` 切到 user-level（写 `~/.config/systemd/user/wand.service` 或 `~/Library/LaunchAgents/`）：
@@ -413,6 +405,9 @@ git submodule update --init -- render-bin
 保留分发包、Release Render 二进制、签名、依赖和会话数据。
 macOS 每日清理历史归档编译中间物（保留7天）用 `npm run clean:build-cache:install -- --install`；
 范围、并发保护、日志和停用方式见[自动清理说明](docs/build-cache-cleanup.md)。不修改Git hook，不自动删除现用原生构建树。
+
+通过 npm 安装后，运行存储维护默认在后台自动执行：回收过期临时残留与无引用的上传文件，限制诊断日志大小并清理过期轮转日志。无需源码仓库或日常手动操作，保留会话历史和正在使用的文件。
+归属判断、保留时间与可选管理员诊断入口见[运行存储自动维护](docs/storage-cleanup.md)。
 
 数据存储在 `~/.wand/` 下：`config.json`（配置）、`wand.db`（SQLite）、`sessions/`（日志）。
 

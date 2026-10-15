@@ -185,6 +185,6 @@ test("optional ESM modules have individual and aggregate limits", (t) => {
   assert.match(String(oversized.stderr), /feature0\.js \(lazy\): \d+ B > 110000 B/);
   const aggregate = fixture.run("", "", { eager: chunkText(20_000), lazy: Array(4).fill(chunkText(2_600)) });
   assert.equal(aggregate.status, 1);
-  assert.match(String(aggregate.stderr), /all ESM modules: \d+ B > 1040000 B/);
+  assert.match(String(aggregate.stderr), /all ESM modules: \d+ B > 1045000 B/);
   assert.doesNotMatch(String(aggregate.stderr), /(?:runtime|feature\d+)\.js \((?:eager|lazy)\):/);
 });

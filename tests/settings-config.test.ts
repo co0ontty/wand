@@ -47,11 +47,11 @@ test("system AI CLI preference runs the chosen model for prompt optimization", a
     const headers = { Cookie: cookie, "Content-Type": "application/json" };
     const saved = await fetch(`${baseUrl}/api/settings/config`, {
       method: "POST", headers,
-      body: JSON.stringify({ systemAiCli: "pi", systemAiModel: "google/test" }),
+      body: JSON.stringify({ systemAiCli: "pi", systemAiModel: "openai/test" }),
     });
     assert.equal(saved.status, 200);
     assert.equal(config.systemAiCli, "pi");
-    assert.equal(config.systemAiModel, "google/test");
+    assert.equal(config.systemAiModel, "openai/test");
     const optimized = await fetch(`${baseUrl}/api/optimize-prompt`, {
       method: "POST", headers, body: JSON.stringify({ text: "fix bug" }),
     });
@@ -59,7 +59,7 @@ test("system AI CLI preference runs the chosen model for prompt optimization", a
     assert.deepEqual(await optimized.json(), { optimized: "CLI_OK" });
     const args = readFileSync(argsPath, "utf8").split("\n");
     assert.ok(args.includes("--model"));
-    assert.ok(args.includes("google/test"));
+    assert.ok(args.includes("openai/test"));
     assert.equal(args.includes("codex"), false);
 
     const invalid = await fetch(`${baseUrl}/api/settings/config`, {
@@ -67,7 +67,7 @@ test("system AI CLI preference runs the chosen model for prompt optimization", a
     });
     assert.equal(invalid.status, 400);
     assert.equal(config.systemAiCli, "pi");
-    assert.equal(config.systemAiModel, "google/test");
+    assert.equal(config.systemAiModel, "openai/test");
   } finally {
     if (handle) await handle.close();
     if (previousPath === undefined) delete process.env.PATH;

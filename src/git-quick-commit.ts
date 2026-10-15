@@ -22,9 +22,9 @@ import {
 } from "./types.js";
 
 /** provider 缺省值：无法识别时回落到 Claude。 */
-import { buildGeminiTextArgs,buildGrokTextArgs,buildPiTextArgs,buildQoderTextArgs,callConfiguredAiText,contentWithSystemPrompt,defaultProvider,normalizeAiText,runCliText,systemPromptArgsFrom,withOpsPersona,type QuickCommitAiOptions } from "./ai-text-runner.js";
+import { buildGrokTextArgs,buildPiTextArgs,buildQoderTextArgs,callConfiguredAiText,contentWithSystemPrompt,defaultProvider,normalizeAiText,runCliText,systemPromptArgsFrom,withOpsPersona,type QuickCommitAiOptions } from "./ai-text-runner.js";
 import { QuickCommitError } from "./command-error.js";
-export { assertGeminiTextCapability,callCliAiText,callConfiguredAiText,withOpsPersona } from "./ai-text-runner.js";
+export { callCliAiText,callConfiguredAiText,withOpsPersona } from "./ai-text-runner.js";
 export type { QuickCommitAiOptions } from "./ai-text-runner.js";
 export { QuickCommitError,type QuickCommitErrorCode } from "./command-error.js";
 
@@ -1019,12 +1019,6 @@ async function runQuickCommitFallbackCli(opts: QuickCommitOptions, priorError: s
     });
   } else if (provider === "pi") {
     await runCliText("pi", buildPiTextArgs(request, opts, true), "", {
-      cwd: opts.cwd,
-      timeoutMs: QUICK_COMMIT_CLI_TIMEOUT_MS,
-      inheritEnv: opts.inheritEnv,
-    });
-  } else if (provider === "gemini") {
-    await runCliText("gemini", buildGeminiTextArgs(opts, true), contentWithSystemPrompt("gemini", request), {
       cwd: opts.cwd,
       timeoutMs: QUICK_COMMIT_CLI_TIMEOUT_MS,
       inheritEnv: opts.inheritEnv,

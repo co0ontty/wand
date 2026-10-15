@@ -293,14 +293,14 @@ test("AI save preserves the empty-key sentinel and emits only a redacted runtime
     defaultProvider: "grok" as const,
     defaultThinkingEffort: "deep" as const,
     systemAiCli: "pi" as const,
-    systemAiModel: "google/gemini-3",
+    systemAiModel: "openai/gpt-5.4",
   };
   await new HttpSettingsRepository(runtime).execute({ type: "ai.save", value });
   assert.equal(Object.hasOwn(submitted ?? {}, "systemAi"), false, "直连 API 字段已不再提交");
   assert.equal(submitted?.defaultProvider, "grok", "the CLI tool choice must reach the config endpoint");
   assert.equal(submitted?.defaultThinkingEffort, "deep");
   assert.equal(submitted?.systemAiCli, "pi");
-  assert.equal(submitted?.systemAiModel, "google/gemini-3");
+  assert.equal(submitted?.systemAiModel, "openai/gpt-5.4");
 });
 
 test("notification preference commands synchronize the injected runtime adapter", async () => {
