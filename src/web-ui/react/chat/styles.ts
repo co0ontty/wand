@@ -50,8 +50,8 @@ const CHAT_SURFACE_STYLES = String.raw`
     .chat-activity-error { color:color-mix(in srgb,var(--ant-color-error-text-active,var(--danger)) 80%,var(--text-primary)); }
     .chat-activity-menu { display:block; opacity:1; pointer-events:auto; }
     .chat-activity-menu-inner { overflow:visible; }
-    /* Thinking and action history share the main reading axis, not a nested log viewport. */
-    .chat-activity-timeline { box-sizing:border-box; overflow:visible; overflow-anchor:none; padding:8px 0; }
+    /* Android：摘要下方按内容长高，最多占聊天视口的 1/3（120–240px），内部滚动。 */
+    .chat-activity-timeline { max-height:var(--chat-activity-panel-height,240px); box-sizing:border-box; overflow:auto; overscroll-behavior:contain; overflow-anchor:none; scrollbar-gutter:stable; padding:4px; }
     .wand-chat-entry { display:flex; align-items:flex-start; gap:8px; min-width:0; }
     .wand-chat-entry-body { flex:1; min-width:0; }
     .chat-call-detail { min-width:0; overflow-wrap:anywhere; }

@@ -788,10 +788,10 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         var reason = getInputErrorMessage(error);
         if (sessionId && text) {
           restoreFailedComposerSubmission(sessionId, text, [], false);
-          flashComposerFailed("这段输入没有送到终端（" + reason + "），已放回输入框；重试前先看终端里是否留下半行。");
+          flashComposerFailed("这段输入没有送到终端（" + reason + "），已放回输入框；重试前先看终端里是否留下半行。", sessionId);
           return;
         }
-        flashComposerFailed("回车没有送到终端（" + reason + "）。");
+        flashComposerFailed("回车没有送到终端（" + reason + "）。", sessionId);
       }
 
       export function sendInputFromBox(opts) {
@@ -855,7 +855,8 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
 
         // 提交瞬间按钮进「加载」相位、状态行给句子；结果到了再原地换 完成/失败。
         // 全程不弹气泡，也不挪动任何控件（docs/motion-design.md §3）。
-        flashComposerSending("正在发送…");
+        // token 让这条链路的 then/catch 只推进自己的进行态，不覆盖更新的提交。
+        var sendingToken = flashComposerSending("正在发送…", sessionId, "已发送");
 
         var submissionPromise = composerStore.submit(sessionId, value, function(payload) {
           var capturedAttachments = payload.attachments;
@@ -957,16 +958,18 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
             });
           })
           .then(function(result) {
-            // 发送链路自己给出更具体结论时（已加入排队 / 已中断）不覆盖，
-            // 否则统一落到「已发送」，在同一位置原地显示后自动收回。
-            if (getComposerResultPhase() === "sending") flashComposerDone("已发送");
+            // 发送链路自己给出更具体结论时（已加入排队 / 已中断）不覆盖；
+            // 否则把这条链路自己的「正在发送」收口成「已送达」。结构化 POST 常常
+            // 已被 WS 接受信号提前收口，这里只是信号缺失时的兜底。
+            noteComposerSendAccepted(sessionId, sendingToken);
             return result;
           })
         }).catch(function(err) {
             restoreComposerStateForSession(sessionId);
             // 失败原因在原位读（状态行 aria-live + 驻留比成功更长），草稿同帧回填，
-            // 不再靠会自己飘走的气泡承担结果。已经原位播报过的（送达不确定）不重写。
-            if (!(err && err.__wandComposerReported)) flashComposerFailed(getInputErrorMessage(err));
+            // 不再靠会自己飘走的气泡承担结果。已经原位播报过的（送达不确定）不重写；
+            // 绑定发起时的会话，迟到的失败不画到用户已经切过去的会话上。
+            if (!(err && err.__wandComposerReported)) flashComposerFailed(getInputErrorMessage(err), sessionId);
           })
           .finally(function() {
             updateInteractiveControls();
@@ -1007,7 +1010,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
             setDraftValueForSession(session.id, "", true);
           }
           // 「没发出去」这件事在原位说清楚：排队条没有新增气泡，状态行给出原因。
-          flashComposerFailed("与上一条消息相同，未加入排队。");
+          flashComposerFailed("与上一条消息相同，未加入排队。", session.id);
           return Promise.resolve();
         }
         // 短窗口内的连击当作重复点击丢掉；正常间隔的两次提交（哪怕第一次还在流式）
@@ -1055,7 +1058,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           if (session.id === state.selectedId) {
             flashComposerDone(nextQueue.length > 1
               ? ("已加入排队（共 " + nextQueue.length + " 条等待）")
-              : "已加入排队，等当前回复完成会自动发送。");
+              : "已加入排队，等当前回复完成会自动发送。", session.id);
           } else {
             // 排进的是另一个会话：当前页没有它的排队条，原位宿主不存在，只能保留气泡。
             showToast(nextQueue.length > 1 ? ("已加入「" + (session.title || "该会话") + "」排队（共 " + nextQueue.length + " 条等待）") : "已加入「" + (session.title || "该会话") + "」排队，等它当前回复完成会自动发送。", "info");
@@ -1083,7 +1086,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
             // 「上一条已被打断」。普通发送不写句子（chat 流自己就是可见结果），
             // 由提交链路的 then 统一收口成「已发送」。
             if (isInterrupting) {
-              flashComposerDone("已中断上一条回复，正在处理新消息…");
+              flashComposerDone("已中断上一条回复，正在处理新消息…", session.id);
             }
           }
         }
@@ -1157,7 +1160,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
             // 服务端识别出重发并拦截：这一条没被处理两次。原位说明即可，
             // 乐观更新按注释保持不回滚（第一次已送达）。
             if (session.id === state.selectedId) {
-              flashComposerFailed(error.message || "检测到重复发送，已拦截。");
+              flashComposerFailed(error.message || "检测到重复发送，已拦截。", session.id);
             } else {
               showToast(error.message || "检测到重复发送，已拦截。", "warning");
             }
@@ -1207,10 +1210,10 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
             // sendInputFromBox 知道回填只能留在内存里（见 composer-draft.ts）。
             // 送达不确定也要原位说明，否则用户只会看到草稿莫名其妙回来。
             error.__wandAmbiguousDelivery = true;
-            if (session.id === state.selectedId) {
-              flashComposerFailed("网络中断，这条消息可能已送达；草稿已回填，重试前请先看会话内容。");
-              error.__wandComposerReported = true;
-            }
+            // 绑定发起会话：原位可见就画状态行，已经切走了就退回录入气泡（flash
+            // 内部按归属分发），不再把这条 A 的失败画到 B 的状态行上。
+            flashComposerFailed("网络中断，这条消息可能已送达；草稿已回填，重试前请先看会话内容。", session.id);
+            error.__wandComposerReported = true;
           }
           throw error;
         });
@@ -1223,11 +1226,27 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
       // SendActionVisual 一致：结果 > 运行中且无草稿 → 停止 > 有草稿 → 发送。
       // 「有草稿」这一档不能省：结构化会话在跑时点发送是排队，不是停止。
       //
+      // 结果相位带会话归属：宿主只有一个，但相位描述的是「某个会话的某次提交」。
+      // 没有归属时，在 A 发送后切到 B，B 的按钮/状态行会借用 A 的 加载/完成/失败，
+      // 迟到的 then/catch 也会画到新会话上。
+      //
+      // 「正在发送」只能由这一条提交自己推进：服务端接受（WS status inFlight=true，
+      // 见 websocket.ts 的 noteComposerSendAccepted 调用）立刻收口成「已送达」；
+      // 结构化 POST 要等整轮 streaming 才 resolve，不能让它独占进行态——否则按钮
+      // 在整轮里都是 loading、且被禁用，停止入口消失（Android 用 Accepted 事件
+      // 推进 Sending → Sent，同理）。
+      //
       // 同一相位文案写在 .composer-status-line 上（原位），不再靠 Toast 气泡承担。
       type ComposerSendPhase = "idle" | "sending" | "sent" | "failed" | "running";
       var composerResultPhase: ComposerSendPhase | null = null;
       var composerResultText = "";
       var composerResultTimer = 0;
+      var composerResultSessionId: string | null = null;
+      // 每次 flashComposerSending 自增并记下 token：一条提交链路的 then/catch 只许
+      // 推进它自己那一次「正在发送」，不许覆盖同一会话里更新的提交。
+      var composerSendToken = 0;
+      var composerSendingToken = 0;
+      var composerSendingAcceptText = "";
       const composerStops = new Set<string>();
 
       function composerResultDwellMs(phase: ComposerSendPhase) {
@@ -1249,6 +1268,13 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
       // 当前是否还压着一个结果相位（发送链路用它判断「有没有人写过更具体的结论」）。
       export function getComposerResultPhase(): string {
         return composerResultPhase || "";
+      }
+
+      // 结果相位此刻是否属于正在看的会话：渲染与播报都以它为准，
+      // 否则 A 会话的迟到结论会画到 B 的按钮/状态行上。
+      function composerResultOwns(selectedId?: string | null): boolean {
+        var owner = selectedId === undefined ? state.selectedId : selectedId;
+        return !!composerResultSessionId && composerResultSessionId === owner;
       }
 
       function composerIdleHint(isCodex) {
@@ -1290,19 +1316,20 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         return !!line && line.getClientRects().length > 0;
       }
 
-      function flashComposerPhase(phase: ComposerSendPhase, text: string, dwell: number) {
+      function flashComposerPhase(phase: ComposerSendPhase, text: string, dwell: number, sessionId?: string | null) {
         if (composerResultTimer) {
           clearTimeout(composerResultTimer);
           composerResultTimer = 0;
         }
         composerResultPhase = phase;
         composerResultText = text || "";
+        composerResultSessionId = sessionId === undefined ? (state.selectedId || null) : (sessionId || null);
         updateInteractiveControls();
-        // 失败原因不许静默：这一处「原位根本没有宿主」时才退回旧气泡，不是原位已有结果再叠一层。
-        // 直通模式整条 .composer-status-row 被 CSS 收掉（输入即透传，没有草稿位），原生嵌入壳
-        // 同样隐藏 drafting row —— 这两种情况下原位行读不到 rect。成功态不退回气泡：直通下
-        // 结果本来就写在终端/聊天流里，加气泡只会变成每次发送都响一下的噪音。
-        if (phase === "failed" && !composerResultHostVisible()) {
+        // 失败原因不许静默：原位宿主读不到 rect（直通模式整条 .composer-status-row 被 CSS 收掉、
+        // 原生嵌入壳同样隐藏 drafting row），或这条结果属于别的会话时才退回旧气泡，不是原位
+        // 已有结果再叠一层。成功态不退回气泡：直通下结果本来就写在终端/聊天流里，加气泡只会
+        // 变成每次发送都响一下的噪音。
+        if (phase === "failed" && (!composerResultOwns() || !composerResultHostVisible())) {
           showToast(text || "操作未完成。", "error");
         }
         if (dwell <= 0) return;
@@ -1310,22 +1337,40 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           composerResultTimer = 0;
           composerResultPhase = null;
           composerResultText = "";
+          composerResultSessionId = null;
           updateInteractiveControls();
         }, dwell);
       }
 
       // 「正在发送」是进行态不是结果：不设驻留计时，由提交链路的 then/catch 推进，
       // 否则慢上传（附件、首条流式响应）会被 720ms 后的自动回落打断。
-      export function flashComposerSending(text: string) {
-        flashComposerPhase("sending", text, 0);
+      // 返回 token：这条链路的 then/catch 凭它只推进自己的这一份进行态。
+      // acceptText 是服务端接受（或兜底收口）后原地显示的句子。
+      export function flashComposerSending(text: string, sessionId?: string, acceptText?: string): number {
+        composerSendToken += 1;
+        composerSendingToken = composerSendToken;
+        composerSendingAcceptText = acceptText || "已发送";
+        flashComposerPhase("sending", text, 0, sessionId);
+        return composerSendingToken;
       }
 
-      export function flashComposerDone(text: string) {
-        flashComposerPhase("sent", text, composerResultDwellMs("sent"));
+      export function flashComposerDone(text: string, sessionId?: string) {
+        flashComposerPhase("sent", text, composerResultDwellMs("sent"), sessionId);
       }
 
-      export function flashComposerFailed(reason: string) {
-        flashComposerPhase("failed", reason, composerResultDwellMs("failed"));
+      export function flashComposerFailed(reason: string, sessionId?: string) {
+        flashComposerPhase("failed", reason, composerResultDwellMs("failed"), sessionId);
+      }
+
+      // 服务端已接受这次提交（WS status：structured inFlight=true），或提交链路自己
+      // 走到终点：把「正在发送」推进到「已送达」，驻留后回落到结构相位（运行中且
+      // 无草稿 → 停止按钮）。只允许同一会话、同一 token 的链路推进；已经被更具体的
+      // 结论（已加入排队 / 已中断 / 失败）覆盖过的不再改写。
+      export function noteComposerSendAccepted(sessionId?: string | null, token?: number): void {
+        if (composerResultPhase !== "sending" || !composerResultSessionId) return;
+        if (sessionId && sessionId !== composerResultSessionId) return;
+        if (token !== undefined && token !== composerSendingToken) return;
+        flashComposerPhase("sent", composerSendingAcceptText || "已发送", composerResultDwellMs("sent"), composerResultSessionId);
       }
 
       export function updateStructuredQueueCounter() {
@@ -1482,7 +1527,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         })
         .catch(function(err) {
           rollbackQueueOptimistic(session, prev, mutationVersion);
-          flashComposerFailed((err && err.message) || "删除排队消息失败。");
+          flashComposerFailed((err && err.message) || "删除排队消息失败。", session.id);
         });
       }
 
@@ -1514,7 +1559,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         })
         .catch(function(err) {
           rollbackQueueOptimistic(session, prev, mutationVersion);
-          flashComposerFailed((err && err.message) || "清空排队消息失败。");
+          flashComposerFailed((err && err.message) || "清空排队消息失败。", session.id);
         });
       }
 
@@ -1547,8 +1592,13 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           : (Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10));
 
         // 插队的即时反馈在原位：这一条气泡已经从小条里剥掉（乐观），状态行同步说明
-        // 接下来发生什么；不再是右上角飘走的气泡。
-        flashComposerSending(inFlight ? "正在插队发送，准备打断当前回复…" : "正在发送这条…");
+        // 接下来发生什么；不再是右上角飘走的气泡。promote POST 同样要等整轮才
+        // resolve，所以带 token + 接受文案：接受信号（或兜底收口）才写「已送达」。
+        var promoteToken = flashComposerSending(
+          inFlight ? "正在插队发送，准备打断当前回复…" : "正在发送这条…",
+          session.id,
+          inFlight ? "已中断上一条回复，这条立即发送。" : "已立即发送这条消息。",
+        );
 
         compactSessionFetch("/api/structured-sessions/" + session.id + "/queued/" + index + "/promote", {
           method: "POST",
@@ -1575,13 +1625,15 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
               updateQueueBar();
             }
           }
-          flashComposerDone(inFlight ? "已中断上一条回复，这条立即发送。" : "已立即发送这条消息。");
+          // 服务端接受时（WS 信号）已经原位上屏；这里兜底收口，且不许覆盖同会话
+          // 更新的提交（token 不匹配时 noteComposerSendAccepted 自己跳过）。
+          noteComposerSendAccepted(session.id, promoteToken);
           state.queueBarPromoting = false;
         })
         .catch(function(err) {
           state.queueBarPromoting = false;
           rollbackQueueOptimistic(session, prev, mutationVersion);
-          flashComposerFailed((err && err.message) || "立即发送失败。");
+          flashComposerFailed((err && err.message) || "立即发送失败。", session.id);
         });
       }
 
@@ -1729,7 +1781,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         if (currentQueue.length !== queueSnapshot.length
           || currentQueue.some(function(text, index) { return text !== queueSnapshot[index]; })) {
           updateQueueBar();
-          flashComposerFailed("排队内容已更新，请重新拖动排序。");
+          flashComposerFailed("排队内容已更新，请重新拖动排序。", session.id);
           return;
         }
         var mutationVersion = composerQueue.advance(session.id, "local");
@@ -1751,7 +1803,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         })
         .catch(function(err) {
           rollbackQueueOptimistic(session, queueSnapshot, mutationVersion);
-          flashComposerFailed((err && err.message) || "调整排队顺序失败。");
+          flashComposerFailed((err && err.message) || "调整排队顺序失败。", session.id);
         });
       }
 
@@ -1888,6 +1940,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
 
       function ensureSessionReadyForInput(session) {
         // 只在发送链路被调用（唯一调用点见 sendInputFromBox），所以失败原因原位播报。
+        // 绑定发起会话：发送等待期间用户切走了，失败退回气泡而不是画到新会话状态行。
         if (!session) {
           flashComposerFailed("会话不存在，请重新选择或新建会话。");
           return Promise.resolve(null);
@@ -1897,7 +1950,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         }
         if (!canAutoResumeSession(session)) {
           var providerLabel = (session && PROVIDER_LABELS[session.provider]) || "Provider";
-          flashComposerFailed("该会话没有可恢复的 " + providerLabel + " 历史上下文，请新建会话。");
+          flashComposerFailed("该会话没有可恢复的 " + providerLabel + " 历史上下文，请新建会话。", session.id);
           return Promise.resolve(null);
         }
 
@@ -2411,7 +2464,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           // Terminal passthrough must stay editable for IME composition. Prompt
           // optimization is the sole short-lived read-only state so the request
           // cannot race a new edit or send half-replaced content.
-          composer.readOnly = promptOptimizeBusyForCurrent;
+          composer.readOnly = promptOptimizeBusyForCurrent || !!state.config?.webLoginAccess?.readOnly;
           composer.setAttribute("aria-readonly", composer.readOnly ? "true" : "false");
           composer.setAttribute("aria-busy", promptOptimizeBusyForCurrent ? "true" : "false");
           composer.classList.toggle(
@@ -2485,7 +2538,10 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
             || duplicateInFlight
             || sessionUnavailable;
           // 相位 = 结果覆盖 > 运行中且无草稿（停止）> 空闲（发送）。
-          var sendPhase: ComposerSendPhase = composerResultPhase
+          // 结果覆盖必须属于当前选中会话；别人的 加载/完成/失败 不落在本会话的宿主上。
+          var resultOwned = composerResultOwns();
+          var phaseText = resultOwned ? composerResultText : "";
+          var sendPhase: ComposerSendPhase = (resultOwned && composerResultPhase)
             || composerBaseSendPhase(selectedSession, composerCanSend);
           // 「停止」是这一相位下唯一的动作，原来那颗独立停止按钮从来没有禁用逻辑；
           // 空草稿不算「不能点」，否则在跑会话的唯一出口又被发条件锁死。
@@ -2502,12 +2558,12 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           var sendLabel = promptOptimizeBusyForCurrent
             ? "正在优化提示词"
             : (structuredInFlight ? "加入发送队列" : "发送消息");
-          var phaseLabels = composerPhaseLabels(sendPhase, sendTitle, sendLabel, composerResultText);
+          var phaseLabels = composerPhaseLabels(sendPhase, sendTitle, sendLabel, phaseText);
           sendBtn.setAttribute("title", phaseLabels.title);
           sendBtn.setAttribute("aria-label", phaseLabels.label);
           // queue-mode 只描述「点下去是排队」这一语义；露出停止 glyph 时不参与。
           sendBtn.classList.toggle("queue-mode", structuredInFlight && sendPhase !== "running");
-          renderComposerPhaseHost(sendPhase, composerResultText, isCodex);
+          renderComposerPhaseHost(sendPhase, phaseText, isCodex);
         }
         // 「是否有 reply 在跑」由 computeRunningSignal 统一给出（结构化 inFlight /
         // PTY running / 权限审批阻塞），它只决定上面那颗按钮的相位，

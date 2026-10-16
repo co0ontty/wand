@@ -6,6 +6,7 @@ import {
   isSystemSiliconEmployee,
   type SiliconEmployee,
 } from "./employee-types.js";
+import { OPENCODE_FREE_GROUP_SELECTOR } from "./opencode-free-selection.js";
 import { fixedEmployeeAvatar } from "./fixed-employee-avatar.js";
 import { isSessionProvider } from "./session-provider.js";
 import { DEFAULT_WAND_TASK_AGENT_KIND, DEFAULT_WAND_TASK_AGENT_MODE, normalizeWandTaskAgentMode, type WandTaskAgent } from "./task-types.js";
@@ -71,6 +72,13 @@ export function systemEmployeeSeedAgents(seed: SystemEmployeeSeed = {}): WandTas
   }];
 }
 
+/** New system services default to the maintained native free group; explicit legacy choices win. */
+export function systemEmployeeDefaultAgents(seed: SystemEmployeeSeed = {}): WandTaskAgent[] {
+  return isSessionProvider(seed.cli) ? systemEmployeeSeedAgents(seed) : [{
+    provider: "opencode", model: OPENCODE_FREE_GROUP_SELECTOR, thinkingEffort: "off", mode: "default", kind: "structured",
+  }];
+}
+
 export function systemEmployeeDefinition(agents: WandTaskAgent[], now: string, existing?: SiliconEmployee | null): SiliconEmployee {
   return {
     id: existing?.id ?? SYSTEM_EMPLOYEE_ID,
@@ -78,7 +86,7 @@ export function systemEmployeeDefinition(agents: WandTaskAgent[], now: string, e
     duty: existing?.duty ?? SYSTEM_EMPLOYEE_DUTY,
     prompt: existing?.prompt ?? SYSTEM_EMPLOYEE_PROMPT,
     avatar: existing?.avatar ?? fixedEmployeeAvatar({ id: SYSTEM_EMPLOYEE_ID, systemKey: SYSTEM_EMPLOYEE_KEY })!,
-    agents: agents.length ? agents : systemEmployeeSeedAgents(),
+    agents: agents.length ? agents : systemEmployeeDefaultAgents(),
     systemKey: SYSTEM_EMPLOYEE_KEY,
     tags: [SYSTEM_EMPLOYEE_TAG],
     createdAt: existing?.createdAt ?? now,

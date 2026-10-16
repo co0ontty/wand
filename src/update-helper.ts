@@ -24,6 +24,9 @@ export interface DetachedUpdateOptions {
   coreGuardPath?: string;
   healthCheckPath?: string;
   expectedVersion?: string;
+  /** Immutable version of the reporting installer, not the partially installed target. */
+  feedbackVersion?: string;
+  feedbackUsername?: string;
 }
 
 export interface DetachedUpdateResult {
@@ -236,6 +239,25 @@ export function buildDetachedUpdateHelperScript(
   const guardLoaderArgs = coreGuardPath.endsWith(".ts") ? resolveTypeScriptLoaderArgs() : [];
   const guardLoaderCommand = guardLoaderArgs.length > 0 ? `${shellQuoteAll(guardLoaderArgs)} ` : "";
 
+  const feedbackFailureCapture = String.raw`
+async function reportFailure(error) {
+  const marker = statusPath + ".feedback-attempted";
+  if (existsSync(marker)) return;
+  try {
+    const { FeedbackReporter } = await import(pathToFileURL(path.join(path.dirname(statusPath), "feedback.mjs")).href);
+    const reporter = new FeedbackReporter({ configDir: path.dirname(path.resolve(configPath)), version: feedbackVersion,
+      username: () => feedbackUsername,
+      secrets: () => Object.entries(process.env).filter(([key]) => /TOKEN|SECRET|PASSWORD|API_KEY|CREDENTIAL/i.test(key)).map(([, value]) => value || "") });
+    const timeout = setTimeout(() => reporter.stop(), 5000);
+    try {
+      reporter.capture("update_failed", error);
+      await reporter.flush();
+      writeFileSync(marker, "1", { mode: 0o600 });
+    } finally { clearTimeout(timeout); reporter.stop(); }
+  } catch { /* Feedback must never change rollback or the install result. */ }
+}
+`;
+
   return `#!/usr/bin/env bash
 set -euo pipefail
 LOG=${shellQuote(logPath)}
@@ -256,6 +278,9 @@ NODE_BIN=${shellQuote(process.execPath)}
 UPDATE_UTILS=${shellQuote(updateUtilsPath)}
 CORE_GUARD=${shellQuote(coreGuardPath)}
 HEALTH_CHECK=${shellQuote(healthPath)}
+FEEDBACK_MODULE=${shellQuote(path.join(path.dirname(logPath), "feedback.mjs"))}
+FEEDBACK_VERSION=${shellQuote(opts.feedbackVersion ?? "0.0.0")}
+FEEDBACK_USERNAME=${shellQuote(opts.feedbackUsername ?? "我")}
 EXPECTED_VERSION=${shellQuote(opts.expectedVersion ?? "")}
 BACKUP_RECEIPT=${shellQuote(`${logPath}.backup.json`)}
 TARGET_VERSION_FILE=${shellQuote(`${logPath}.version`)}
@@ -288,6 +313,27 @@ on_exit() {
   if [ "$status" -ne 0 ]; then
     if [ "$("$NODE_BIN" --input-type=module -e 'import {readFileSync} from "node:fs"; try { console.log(JSON.parse(readFileSync(process.argv[1], "utf8")).phase); } catch {}' "$STATUS_PATH")" != "failed" ]; then
       set_status failed "更新未完成，服务未确认切换到新版。请查看更新日志并重试。" || true
+    fi
+    # The parent may already be gone. Use a dependency-free snapshot outside the installation.
+    if [ -z "$HELPER_MODE" ] && [ -f "$FEEDBACK_MODULE" ] && [ ! -f "$STATUS_PATH.feedback-attempted" ]; then
+      "$NODE_BIN" --input-type=module - "$FEEDBACK_MODULE" "$CONFIG_PATH" "$FEEDBACK_VERSION" "$STATUS_PATH" "$FEEDBACK_USERNAME" <<'WAND_FEEDBACK_NODE' || true
+import { pathToFileURL } from "node:url";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+try {
+  const [modulePath, configPath, version, statusPath, username] = process.argv.slice(2);
+  const { FeedbackReporter } = await import(pathToFileURL(modulePath).href);
+  const reporter = new FeedbackReporter({ configDir: path.dirname(path.resolve(configPath)), version, username: () => username,
+    secrets: () => Object.entries(process.env).filter(([key]) => /TOKEN|SECRET|PASSWORD|API_KEY|CREDENTIAL/i.test(key)).map(([, value]) => value || "") });
+  const timeout = setTimeout(() => reporter.stop(), 5000);
+  let message = "Detached update failed";
+  try { message = JSON.parse(readFileSync(statusPath, "utf8")).message || message; } catch {}
+  reporter.capture("update_failed", new Error(message));
+  await reporter.flush();
+  clearTimeout(timeout);
+  reporter.stop();
+} catch { /* Do not replace the updater's original failure. */ }
+WAND_FEEDBACK_NODE
     fi
     if [ "$PARENT_EXITED" = "0" ]; then
       echo "[wand-update] failed with exit code $status; parent service was left running"
@@ -339,12 +385,13 @@ WAND_STOP_NODE
     set_status waiting-core "正在等待执行中的 Core 回合结束；新输入将排队。"
     # Keep the admission barrier open across installation and parent shutdown.
     # Import the dependency-free guard before npm can replace the running package.
-    run "$NODE_BIN" ${guardLoaderCommand}--input-type=module - "$CORE_GUARD" "$CONFIG_PATH" "$TIMEOUT_MS" "$SCRIPT_PATH" "$UPDATE_UTILS" "$HEALTH_CHECK" "$BACKUP_RECEIPT" "$STATUS_PATH" "$EXPECTED_VERSION" "$TARGET_VERSION_FILE" "$PARENT_PID" <<'WAND_DRAIN_NODE'
+    run "$NODE_BIN" ${guardLoaderCommand}--input-type=module - "$CORE_GUARD" "$CONFIG_PATH" "$TIMEOUT_MS" "$SCRIPT_PATH" "$UPDATE_UTILS" "$HEALTH_CHECK" "$BACKUP_RECEIPT" "$STATUS_PATH" "$EXPECTED_VERSION" "$TARGET_VERSION_FILE" "$PARENT_PID" "$FEEDBACK_VERSION" "$FEEDBACK_USERNAME" <<'WAND_DRAIN_NODE'
 import { existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
-const [guardPath, configPath, timeoutMs, scriptPath, modulePath, healthPath, receipt, statusPath, expectedVersion, targetFile, parentValue] = process.argv.slice(2);
+const [guardPath, configPath, timeoutMs, scriptPath, modulePath, healthPath, receipt, statusPath, expectedVersion, targetFile, parentValue, feedbackVersion, feedbackUsername] = process.argv.slice(2);
+${feedbackFailureCapture}
 const parentPid = Number(parentValue);
 const guard = await import(pathToFileURL(guardPath).href);
 const updateUtils = await import(pathToFileURL(modulePath).href);
@@ -391,6 +438,7 @@ await updateUtils.withGlobalUpdateLock(async () => {
     mark("failed", restored ? "更新未完成，已恢复原安装。请刷新后重试。"
       : prior.phase === "failed" ? prior.message : "更新未完成，备份保留；请通过安装恢复入口重试。");
     process.stderr.write("[wand-update] " + error.message + "\\n");
+    await reportFailure(error);
     process.exitCode = 1;
   }
 });
@@ -399,12 +447,13 @@ WAND_DRAIN_NODE
   fi
   set_status installing "正在下载、校验并安装新版本。"
   echo "[wand-update] installing while parent service stays online"
-  if run "$NODE_BIN" ${nodeLoaderCommand}--input-type=module - "$UPDATE_UTILS" "$INSTALL_SPEC" "$TIMEOUT_MS" "$GLOBAL_CLI_PATH_FILE" "$STATUS_PATH" "$BACKUP_RECEIPT" "$TARGET_VERSION_FILE" <<'WAND_INSTALL_NODE'
-import { realpathSync, statSync, readFileSync, writeFileSync, renameSync } from "node:fs";
+  if run "$NODE_BIN" ${nodeLoaderCommand}--input-type=module - "$UPDATE_UTILS" "$INSTALL_SPEC" "$TIMEOUT_MS" "$GLOBAL_CLI_PATH_FILE" "$STATUS_PATH" "$BACKUP_RECEIPT" "$TARGET_VERSION_FILE" "$CONFIG_PATH" "$FEEDBACK_VERSION" "$FEEDBACK_USERNAME" <<'WAND_INSTALL_NODE'
+import { existsSync, realpathSync, statSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-const [modulePath, installSpec, timeoutValue, cliPathFile, statusPath, receiptPath, targetFile] = process.argv.slice(2);
+const [modulePath, installSpec, timeoutValue, cliPathFile, statusPath, receiptPath, targetFile, configPath, feedbackVersion, feedbackUsername] = process.argv.slice(2);
+${feedbackFailureCapture}
 const timeoutMs = Number(timeoutValue);
 const updateUtils = await import(pathToFileURL(modulePath).href);
 const installPackageGloballyAsync = updateUtils.installPackageGloballyAsync
@@ -412,28 +461,28 @@ const installPackageGloballyAsync = updateUtils.installPackageGloballyAsync
 if (typeof installPackageGloballyAsync !== "function") {
   throw new Error("installPackageGloballyAsync is unavailable in " + modulePath);
 }
-let installedCli;
 try {
-  installedCli = await installPackageGloballyAsync(installSpec, timeoutMs, (line) => {
+  const installedCli = await installPackageGloballyAsync(installSpec, timeoutMs, (line) => {
     process.stdout.write(String(line) + "\\n");
   }, { backupReceiptPath: receiptPath });
+  if (typeof installedCli !== "string" || installedCli.trim().length === 0) {
+    throw new Error("installer did not return the installed Wand CLI path");
+  }
+  const resolvedCli = realpathSync(installedCli.trim());
+  if (!statSync(resolvedCli).isFile()) {
+    throw new Error("installed Wand CLI is not a file: " + resolvedCli);
+  }
+  const manifest = JSON.parse(readFileSync(path.join(path.dirname(resolvedCli), "..", "package.json"), "utf8"));
+  writeFileSync(targetFile, String(manifest.version), { encoding: "utf8", mode: 0o600 });
+  writeFileSync(cliPathFile, resolvedCli, { encoding: "utf8", mode: 0o600 });
 } catch (error) {
   const message = error instanceof Error && error.message.startsWith("新版本要求 Node.js")
     ? error.message : "安装失败，旧服务保持运行；请查看更新日志并重试。";
   writeFileSync(statusPath + ".tmp", JSON.stringify({ phase: "failed", message }), { mode: 0o600 });
   renameSync(statusPath + ".tmp", statusPath);
+  await reportFailure(error);
   throw error;
 }
-if (typeof installedCli !== "string" || installedCli.trim().length === 0) {
-  throw new Error("installer did not return the installed Wand CLI path");
-}
-const resolvedCli = realpathSync(installedCli.trim());
-if (!statSync(resolvedCli).isFile()) {
-  throw new Error("installed Wand CLI is not a file: " + resolvedCli);
-}
-const manifest = JSON.parse(readFileSync(path.join(path.dirname(resolvedCli), "..", "package.json"), "utf8"));
-writeFileSync(targetFile, String(manifest.version), { encoding: "utf8", mode: 0o600 });
-writeFileSync(cliPathFile, resolvedCli, { encoding: "utf8", mode: 0o600 });
 WAND_INSTALL_NODE
   then
     echo "[wand-update] install completed"
@@ -490,7 +539,8 @@ export function buildSystemdUpdateEnvironmentArgs(env: NodeJS.ProcessEnv, system
   if (!Number.isSafeInteger(uid) || uid < 0 || !Number.isSafeInteger(gid) || gid < 0) throw new Error("无效的更新进程身份。");
   const names = Object.keys(env).filter(name => /^(?:npm_config_|NPM_CONFIG_)/.test(name)
     || ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy",
-      "NODE_EXTRA_CA_CERTS", "NODE_AUTH_TOKEN", "NPM_TOKEN", "WAND_NPM_BIN"].includes(name));
+      "NODE_EXTRA_CA_CERTS", "NODE_AUTH_TOKEN", "NPM_TOKEN", "WAND_NPM_BIN",
+      "WAND_FEEDBACK_ENABLED", "WAND_FEEDBACK_URL", "WAND_TEST_MODE"].includes(name));
   // NAME-only setenv inherits from the invoking environment without exposing
   // credential values in argv or copying them into generated scripts.
   return [...names.filter(name => env[name] !== undefined).sort().map(name => `--setenv=${name}`),
@@ -619,6 +669,12 @@ export function startDetachedUpdateHelper(opts: DetachedUpdateOptions): Detached
         message: preflight.message,
       };
     }
+  }
+  // Keep reporting available even if promotion/rollback replaces or removes this package.
+  const feedbackModule = path.join(path.dirname(fileURLToPath(import.meta.url)), "feedback.js");
+  if (existsSync(feedbackModule)) {
+    try { writeFileSync(path.join(dir, "feedback.mjs"), readFileSync(feedbackModule), { mode: 0o600 }); }
+    catch { /* Feedback is best-effort and must never prevent an update. */ }
   }
   writeFileSync(scriptPath, buildDetachedUpdateHelperScript(opts, logPath, serviceScope), {
     encoding: "utf8",

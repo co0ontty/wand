@@ -293,6 +293,11 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
     }
   }
 
+  async conversationOrganizationJobByToken(token: string): Promise<ConversationOrganizationJob> {
+    const response = await parseJsonResponse<{ job: ConversationOrganizationJob }>(await this.fetchImpl(`/api/sessions/auto-organize/by-token/${encodeURIComponent(token)}`, { credentials: "same-origin" }));
+    return response.job;
+  }
+
   async conversationOrganizationJob(id: string): Promise<ConversationOrganizationJob> {
     const response = await parseJsonResponse<{ job: ConversationOrganizationJob }>(await this.fetchImpl(`/api/sessions/auto-organize/${encodeURIComponent(id)}`, { credentials: "same-origin" }));
     return response.job;

@@ -410,6 +410,7 @@ export class SecretsRepository {
     expiresAt: number,
     principal: AuthPrincipal = { kind: "browser-admin", scopes: ["admin"] },
   ): void {
+    if (principal.webSession) throw new Error("Runtime-scoped Web sessions must not be persisted without their subject boundary.");
     this.db
       .prepare(
         `INSERT INTO auth_sessions (token, expires_at, kind, scopes)

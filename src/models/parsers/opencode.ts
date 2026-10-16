@@ -11,17 +11,22 @@ export function parseOpenCodeModelCatalog(stdout: string): ClaudeModelInfo[] {
   if (verbose.length) return verbose;
   return parseOpenCodeModels(stdout);
 }
-export function parseOpenCodeVerboseModels(stdout: string): ClaudeModelInfo[] {
+/** Shared native catalog records; callers enforcing prices must never fall back to bare IDs. */
+export function parseOpenCodeModelRecords(stdout: string): Array<{ id: string; record: Record<string, unknown> }> {
   const lines = stdout.split(/\r?\n/);
-  const found: ClaudeModelInfo[] = [];
+  const found: Array<{ id: string; record: Record<string, unknown> }> = [];
   for (let index = 0; index < lines.length; index += 1) {
     const header = lines[index]?.trim() ?? "";
     if (!/^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._:/-]*$/i.test(header)) continue;
     if ((lines[index + 1] ?? "").trim() !== "{") continue;
-    let depth = 0;
+    let depth = 0, quoted = false, escaped = false;
     let end = index + 1;
     for (; end < lines.length; end += 1) {
       for (const character of lines[end] ?? "") {
+        if (escaped) { escaped = false; continue; }
+        if (quoted && character === "\\") { escaped = true; continue; }
+        if (character === '"') { quoted = !quoted; continue; }
+        if (quoted) continue;
         if (character === "{") depth += 1;
         else if (character === "}") depth -= 1;
       }
@@ -34,19 +39,19 @@ export function parseOpenCodeVerboseModels(stdout: string): ClaudeModelInfo[] {
     } catch {
       record = null;
     }
-    const reasoningEfforts = record ? variantsToEfforts(record.variants) : [];
-    found.push({
-      id: header,
-      label: header,
-      ...(reasoningEfforts.length ? { reasoningEfforts } : {}),
-    });
+    if (record && typeof record === "object" && !Array.isArray(record)) found.push({ id: header, record });
     index = end;
   }
+  return found;
+}
+
+export function parseOpenCodeVerboseModels(stdout: string): ClaudeModelInfo[] {
+  const found = parseOpenCodeModelRecords(stdout).map(({ id, record }) => {
+    const reasoningEfforts = variantsToEfforts(record.variants);
+    return { id, label: id, ...(reasoningEfforts.length ? { reasoningEfforts } : {}) };
+  });
   if (!found.length) return [];
-  return [
-    { id: "default", label: "跟随 OpenCode 默认", alias: true },
-    ...found,
-  ];
+  return [{ id: "default", label: "跟随 OpenCode 默认", alias: true }, ...found];
 }
 /** Parse `opencode models`, whose stable machine-friendly output is one provider/model id per line. */
 export function parseOpenCodeModels(stdout: string): ClaudeModelInfo[] {

@@ -78,6 +78,8 @@ import { AgentField, AgentFields, DISPATCH_VALUE, agentTargetIsDispatch, agentTa
 import { TeamDispatchActionButton, TeamDispatchRoster, dispatchStartBlockedReason, useTeamDispatchFlow } from "../team-dispatch/roster";
 import { aiTeamsRepository, type AiTeam } from "../ai-teams/repository";
 import { TaskTeamRunPanel } from "../ai-teams/lazy";
+import { TaskComments } from "./task-comments";
+import { TaskDescription } from "./task-description";
 import { taskBoardController, taskBoardStore } from "./task-board-controller";
 import { taskBoardRepository, type IssueWorkspace, type WandTaskListed } from "./task-board-repository";
 import { openTaskSessionCreation } from "./task-session-create";
@@ -451,11 +453,14 @@ export function TaskBoardHost({
     });
   }, [createMore, draft, employeeTarget, employees, loading, rememberAgent, rememberAssignment, rememberCreateDefaults, reload, runFor, teamTarget, teams]);
 
-  const patchTask = React.useCallback(async (id: string, patch: Parameters<typeof taskBoardRepository.update>[1]) => {
+  const patchTask = React.useCallback(async (id: string, patch: Parameters<typeof taskBoardRepository.update>[1]): Promise<boolean> => {
+    let saved = false;
     await runFor(id, async () => {
       await taskBoardRepository.update(id, patch);
+      saved = true;
       await reload();
     });
+    return saved;
   }, [reload, runFor]);
 
   const removeTask = React.useCallback(async (task: WandTaskListed): Promise<void> => {
@@ -1078,7 +1083,7 @@ export function TaskBoardHost({
         setDetailAgent(agent);
         rememberAssignment(agent, subject ?? { type: "cli", id: agent.provider });
       }}
-      onPatch={(patch) => void patchTask(selected.id, patch)}
+      onPatch={(patch) => patchTask(selected.id, patch)}
       composeRequest={composeRequest}
       onDispatch={(prompt) => {
         const team = teams?.find((item) => item.id === teamTarget);
@@ -1553,7 +1558,7 @@ function IssueDetail({
   onOpenTask(id: string): void;
   onCreateChild(): void;
   onAgentChange(agent: WandTaskAgent, subject?: TaskExecutionSubject): void;
-  onPatch(patch: Parameters<typeof taskBoardRepository.update>[1]): void;
+  onPatch(patch: Parameters<typeof taskBoardRepository.update>[1]): Promise<boolean>;
   onDispatch(prompt: string): void;
   onRemove(): void;
   onOpenSession?: (sessionId: string) => void;
@@ -1608,7 +1613,7 @@ function IssueDetail({
           </WandButton>}
           <TaskTextArea
             className="resize-none task-board-detail-title"
-            rows={1}
+            autoSize={{ minRows: 1 }}
             value={title}
             aria-label="任务标题"
             disabled={busy}
@@ -1621,6 +1626,8 @@ function IssueDetail({
               onPatch({ title: title.trim() });
             }}
           />
+          <TaskDescription key={task.id} description={task.description} busy={busy} onSave={value => onPatch({ description: value })}/>
+          <TaskComments key={`comments-${task.id}`} taskId={task.id} updatedAt={task.updatedAt}/>
           <TaskBoardAgentSessionList
             sessions={task.sessions}
             assigned={task.agent}
@@ -1700,7 +1707,7 @@ function IssueDetail({
               setComposeOpen(true);
             }}
           >
-            <WandIcon name="plus" size={16}/>
+            <WandIcon name="plus" size={16}/>再指派一个 Agent
           </WandButton>}
           <TaskTeamRunPanel taskId={task.id} refreshKey={teamRunRefresh} onOpenSession={onOpenSession}/>
         </Flex>

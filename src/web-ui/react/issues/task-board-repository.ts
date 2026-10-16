@@ -4,10 +4,11 @@ import type {
   WandTaskDetail,
   WandTaskPriority,
   WandTaskStatus,
+  WandTaskComment,
   TaskExecutionSubject,
 } from "../../../task-types";
 import { normalizeIssueAgentDefaults, type IssueWorkspace } from "./task-board-agent";
-import { jsonBody, requestJson } from "../http-adapter";
+import { HttpResponseError, jsonBody, requestJson } from "../http-adapter";
 import { taskMutationCompleted } from "../task-changes";
 
 function mutateTask<T>(url: string, init: RequestInit): Promise<T> {
@@ -90,6 +91,11 @@ export const taskBoardRepository = {
   /** 单条任务：新建后用来确认后台自动标题是否已经生成。 */
   get(id: string): Promise<WandTaskListed> {
     return requestJson(`/api/wand-tasks/${encodeURIComponent(id)}`);
+  },
+  comments(id: string, signal?: AbortSignal): Promise<WandTaskComment[]> {
+    return requestJson<{ comments: WandTaskComment[] }>(`/api/wand-tasks/${encodeURIComponent(id)}/comments`, { signal, cache: "no-store" })
+      .then(result => result.comments)
+      .catch(error => { if (error instanceof HttpResponseError && error.status === 404) return []; throw error; });
   },
   update(
     id: string,

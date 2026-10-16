@@ -21,6 +21,7 @@ import type { SettingsWebAccess } from "../settings-web-access.js";
 import type { AuthPrincipal, AuthScope, WandStorage } from "../storage.js";
 import type { WandConfig } from "../types.js";
 import { checkBearerRateLimit, recordFailedBearer } from "./rate-limit.js";
+import { webSessionRequestAllowed } from "../web-session-access.js";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -123,6 +124,16 @@ export function createRequireAuth(deps: AuthMiddlewareDeps): RequestHandler {
       }
       res.status(401).json(UNAUTHORIZED_ERROR);
       return;
+    }
+    if (principal.webSession) {
+      const session = deps.storage.getSessionSlim(principal.webSession.sessionId);
+      if (!session || session.employeeId !== principal.webSession.employeeId) {
+        deps.authService.revokeSession(readSessionCookie(req, deps.useHttps));
+        res.status(401).json(UNAUTHORIZED_ERROR); return;
+      }
+      if (!webSessionRequestAllowed(principal, req.method, `${req.baseUrl}${req.path}`)) {
+        res.status(403).json({ error: "此票据登录仅可查看签发时的当前员工会话。", code: "web_session_read_only" }); return;
+      }
     }
     req.principal = principal;
     next();

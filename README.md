@@ -183,7 +183,9 @@ npm uninstall -g opencode
 npm install -g opencode-ai@latest
 ```
 
-```
+New system employees default to OpenCode's **Free group**, a saved Wand-managed group (`wand-model-group/opencode/opencode-free`), not an implicit fallback. Every six hours the server refreshes the native catalog and actually tests every native zero-priced `opencode/*` candidate (including models without a `-free` suffix), adds new usable models and removes retired, paid or failed models while preserving saved priority. Membership is server-owned; clients may reorder it. A one-time default migration prepends this group while retaining existing candidates; later manual edits are not overwritten on restart. If all four slots are already occupied, no candidate is discarded: the server asks for a free slot instead. If the CLI is missing, the server installs `opencode-ai` under the configuration directory's `tools/opencode/`, without sudo or changing global npm packages. Free system text calls use a separate anonymous profile under `tools/opencode-system/` (no user credentials, project configuration or authorized tools), and check native pricing before execution. An empty/unavailable group never selects a paid default. Original provider errors are shown in the system call log with credentials redacted. Local decision roles and ordinary interactive sessions do not acquire an implicit cloud fallback.
+
+Set `WAND_DISABLE_OPENCODE_FALLBACK=1` on the server to disable automatic preparation and the free-group execution service. Free upstream models can be rate-limited, retired, or have different data-retention/training policies; system text sent to this fallback is processed by that provider. See [OpenCode model policies](https://opencode.ai/docs/zen).
 
 ## 中文
 
@@ -226,7 +228,9 @@ npm uninstall -g opencode
 npm install -g opencode-ai@latest
 ```
 
-```
+新系统员工默认使用 OpenCode 的「免费分组」（`wand-model-group/opencode/opencode-free`），这是 Wand 保存并维护的真实分组，不是隐式追加的兜底。服务端每 6 小时刷新原生目录并实际验证全部原生零价格 `opencode/*` 候选（包括不带 `-free` 后缀的模型），加入新可用模型、移除下架/收费/验证失败模型，保留已有优先顺序；客户端只能排序，不能塞入未经验证的成员。首次迁移会把该组放在首位、原候选保留为后备；之后手动调整不被重启覆盖。若原有4格已满则不丢弃任何候选，服务日志提示先腾出一格。缺少 CLI 时自动安装到配置目录下的 `tools/opencode/`，不用 sudo、不覆盖全局 npm 包；系统文本调用使用 `tools/opencode-system/` 的匿名独立环境，不加载用户凭据、项目配置或授权工具，执行前仍检查原生价格。空组或不可用时明确失败，不改用付费默认模型。系统调用日志提供凭据脱敏后的上游原始错误；普通交互会话、显式本地决策不会隐式增加云端候选。
+
+服务环境设置 `WAND_DISABLE_OPENCODE_FALLBACK=1` 可关闭自动准备和免费分组执行服务。免费上游可能限流、退役，数据保留/训练政策也各不相同；使用兜底时系统文本会发往对应提供商，详见 [OpenCode 模型政策](https://opencode.ai/docs/zen)。
 
 ### 功能
 

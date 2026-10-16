@@ -1,10 +1,12 @@
 /** React 层共享的 JSON 请求工具。 */
 import { isRecord } from "./json-utils";
+import { feedbackFeatureForPath, reportClientError, type ClientFeedbackFeature } from "../client-feedback";
 
 export class HttpResponseError extends Error {
-  constructor(message: string, public readonly status: number) {
+  constructor(message: string, public readonly status: number, feature?: ClientFeedbackFeature) {
     super(message);
     this.name = "HttpResponseError";
+    if (status >= 500) reportClientError("http_5xx", this, feature);
   }
 }
 
@@ -31,15 +33,15 @@ export async function parseJsonResponse<T>(response: Response): Promise<T> {
     if (error instanceof Error && error.name === "AbortError") throw error;
     throw new HttpResponseError(
       response.ok ? "服务端返回了无效的数据，请重试。" : `请求失败（${response.status}）`,
-      response.status,
+      response.status, feedbackFeatureForPath(response.url),
     );
   }
   const message = isRecord(body) && typeof body.error === "string" ? body.error : "";
   if (!response.ok || message) {
-    throw new HttpResponseError(message || `请求失败（${response.status}）`, response.status);
+    throw new HttpResponseError(message || `请求失败（${response.status}）`, response.status, feedbackFeatureForPath(response.url));
   }
   if (body === null || typeof body !== "object") {
-    throw new HttpResponseError("服务端返回了无效的数据，请重试。", response.status);
+    throw new HttpResponseError("服务端返回了无效的数据，请重试。", response.status, feedbackFeatureForPath(response.url));
   }
   return body as T;
 }

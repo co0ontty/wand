@@ -5,7 +5,7 @@ import { nowIso } from "../password-manager.js";
 import { isSessionProvider } from "../session-provider.js";
 import { isSystemAiCall } from "../system-ai-call.js";
 import { isThinkingEffort } from "../structured-provider-common.js";
-import type { WandTask, WandTaskAgent } from "../task-types.js";
+import type { WandTask, WandTaskAgent, WandTaskComment } from "../task-types.js";
 import { DEFAULT_ITERATION_NAME, DEFAULT_WAND_TASK_PRIORITY, isTaskExecutionSubject, normalizeWandTaskAgentMode } from "../task-types.js";
 import { GLOBAL_WORKSPACE_ID, SessionSnapshot } from "../types.js";
 import { safeJsonParse, mapWandMilestoneRow, mapIterationPromptRow } from "./mappers.js";
@@ -115,6 +115,14 @@ export class TaskRepository {
       updatedAt: String(row.updated_at),
       archivedAt: typeof row.archived_at === "string" && row.archived_at ? row.archived_at : null,
     };
+  }
+
+  listWandTaskComments(taskId: string): WandTaskComment[] {
+    const rows = this.db.prepare(`SELECT id, task_id, author_name, body, created_at
+      FROM wand_task_comments WHERE task_id = ? ORDER BY rowid DESC LIMIT 50`).all(taskId) as Array<{
+        id: string; task_id: string; author_name: string; body: string; created_at: string;
+      }>;
+    return rows.reverse().map(row => ({ id: row.id, taskId: row.task_id, authorName: row.author_name, body: row.body, createdAt: row.created_at }));
   }
 
   getWandTask(id: string): WandTask | null {

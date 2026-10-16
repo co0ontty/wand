@@ -1,3 +1,4 @@
+import { reportClientError } from "../../client-feedback";
 import type {
   RestartOverlayConfig,
   RestartOverlayRepository,
@@ -61,6 +62,7 @@ export class HttpRestartOverlayRepository implements RestartOverlayRepository {
         if (isRecord(statusValue) && statusValue.version === options.expectedVersion
           && isRecord(statusValue.status) && statusValue.status.phase === "failed") {
           config.updateFailure = stringValue(statusValue.status.message) || "更新失败，请刷新后重试。";
+          reportClientError("update_failed", new Error(config.updateFailure));
         }
       }
     }

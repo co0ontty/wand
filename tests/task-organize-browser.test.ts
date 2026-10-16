@@ -30,7 +30,7 @@ function App(){const [page,setPage]=React.useState("board");React.useEffect(()=>
 createRoot(document.getElementById("root")).render(<WandUiProvider><App/></WandUiProvider>);`;
   await build({ stdin: { contents: source, resolveDir: root, loader: "tsx" }, bundle: true, format: "iife", platform: "browser", jsx: "automatic", outfile: join(temp, "app.js"), define: { "process.env.NODE_ENV": '"production"' } });
   const requests: Array<Record<string, any>> = [];
-  let previewCount = 2, failPreview = false, complete = false, created = false, cancelled = false, jobNumber = 0;
+  let previewCount = 2, failPreview = false, complete = false, created = false, cancelled = false, jobNumber = 0, completedPolls = 0;
   let currentJob: any;
   const result = () => ({ ok: true, eligibleSessions: previewCount, analyzedSessions: complete ? previewCount : 0, skippedManualSessions: 1, skippedSessions: 0,
     createdTasks: complete && !cancelled ? [{ taskId: "new-task", cardId: "new-card", title: "修复通知保存", sessionCount: 2 }] : [], reusedTasks: [], updatedTasks: [],
@@ -55,7 +55,7 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><App/></WandU
     if (url.pathname.startsWith("/api/sessions/auto-organize/")) {
       if (url.pathname.endsWith("/cancel")) { cancelled = true;complete = true; }
       const job = { ...currentJob, status: complete ? cancelled ? "cancelled" : "completed" : "running", processedSessions: complete ? previewCount : 0, stage: complete ? "已处理完成" : "正在按真实正文生成分组", result: result() };
-      if (complete && !cancelled) created = true;
+      if (complete && !cancelled) { created = true;completedPolls++; }
       json({ kind: "job", job });return;
     }
     if (url.pathname.startsWith("/api/")) {
@@ -127,8 +127,21 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><App/></WandU
           assert.deepEqual(requests.at(-1), { action: "preview", ...expected });
         };
         previewCount = 2;await directory("w1", "所有工作会话", { target: { kind: "workspace", workspaceId: "w1" }, mode: "all" });
-        await choose("确认整理 2 个会话");await mark("取消后续归类（保留已完成部分）");complete = true;
+        await choose("确认整理 2 个会话");await mark("取消后续归类（保留已完成部分）");
+        const previousStarts = requests.filter(r => r.action === "start").length, beforePolls = completedPolls;
+        // Native context menus intentionally close when their scroll host moves.
+        // Long-running work must survive that closure, and reopening must show its result, not start again.
+        await browser.evaluate("window.dispatchEvent(new Event('scroll'));true");
+        await browser.wait(`document.querySelector('[data-sidebar-tree-directory-id="w1"] .workspace-row').getAttribute('aria-expanded')==='false'`);
+        complete = true;
+        for (let n = 0; n < 150 && completedPolls === beforePolls; n++) await new Promise(resolve => setTimeout(resolve, 20));
+        assert.ok(completedPolls > beforePolls, "the same background job continues polling after its menu closes");
+        await browser.click('[data-sidebar-tree-directory-id="w1"] .workspace-row', "right");
+        await browser.wait(`[...document.querySelectorAll('[role="menuitem"]')].some(n=>n.getClientRects().length&&['已完成','会话归类结果'].includes(n.textContent.trim()))`);
+        const resultLabel = await browser.evaluate(`[...document.querySelectorAll('[role="menuitem"]')].find(n=>n.getClientRects().length&&['已完成','会话归类结果'].includes(n.textContent.trim())).textContent.trim()`);
+        await choose(resultLabel);
         await browser.wait(`document.querySelector('.sidebar-menu-submenus [role="status"]')?.textContent.includes('新建 1 个任务')`);
+        assert.equal(requests.filter(r => r.action === "start").length, previousStarts, "reopening a completed job result cannot resubmit a model request");
         await browser.key("Escape");await browser.key("Escape");
         previewCount = 0;await directory("cwd:/tmp/synthetic", "默认范围会话", { target: { kind: "directory", cwd: "/tmp/synthetic" }, mode: "auto" });
         await browser.wait(`document.querySelector('.sidebar-menu-submenus [role="status"]')?.textContent.includes('没有符合范围且有正文')`);

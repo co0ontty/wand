@@ -4,16 +4,20 @@ export const scheduledTaskStyles = String.raw`
 :where(.scheduled-tasks-page,.scheduled-calendar-detail-popover) :where(h1,h2,h3,p) { margin:0; }
 :where(.scheduled-tasks-page,.scheduled-calendar-detail-popover) code { font:12px/1.55 var(--font-mono); overflow-wrap:anywhere; }
 .scheduled-tasks-header { min-height:var(--wand-page-header-height); padding:12px var(--wand-page-inset); border-bottom:1px solid var(--border-subtle); flex-shrink:0; }
-.scheduled-tasks-header h1 { font-size:var(--wand-page-title-size); line-height:1.4; }
+.scheduled-tasks-heading { min-width:0; }
+.scheduled-tasks-header h1 { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--wand-page-title-size); line-height:1.4; }
+.scheduled-tasks-heading > .wand-ui-icon-button { flex-shrink:0; }
 .scheduled-tasks-header .scheduled-create-trigger { width:144px; flex-shrink:0; }
 .scheduled-tasks-body { flex:1; min-height:0; overflow:auto; padding:0 var(--wand-page-inset); }
-.scheduled-tasks-content { max-width:1440px; width:100%; }
+.scheduled-tasks-content { width:100%; min-width:0; }
+.scheduled-view-toolbar { display:flex; align-items:center; padding-top:16px; }
+.scheduled-list-pane { max-width:1440px; margin-inline:auto; }
 .scheduled-editor { padding:20px 0; max-width:860px; }
 .scheduled-global-scope-label { color:var(--text-secondary); font-size:12px; white-space:nowrap; }
 .scheduled-task-save { width:156px; }
 .scheduled-inline-confirm { display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:14px 0; border-top:1px solid var(--border-subtle); }
 .scheduled-inline-confirm p { flex-basis:100%; }
-@starting-style { .scheduled-calendar-layer[data-active="true"] { opacity:0; } }
+@starting-style { .scheduled-calendar-layer[data-active="true"], .scheduled-schedule-view-pane[data-active="true"] { opacity:0; } }
 .scheduled-read-state { color:var(--text-secondary); font-size:12px; padding:6px 0; }
 .scheduled-task-form { max-width:720px; display:flex; flex-direction:column; gap:24px; }
 .scheduled-task-form .ant-form-item { margin-bottom:0; }
@@ -267,7 +271,7 @@ export const scheduledTaskStyles = String.raw`
 .scheduled-task-chevron { margin-top:4px; } .scheduled-task-target { gap:3px 8px; }
 .scheduled-task-actions { align-self:center; } .scheduled-task-actions .wand-ui-icon-button { width:32px; height:32px; }
 .scheduled-row-detail-content { margin-left:0; padding-inline:12px; }
-.scheduled-tasks-header .scheduled-create-trigger { width:36px; min-width:36px; padding-inline:0; } .scheduled-create-label { display:none; }
+.scheduled-tasks-header .scheduled-create-trigger { width:36px; min-width:36px; padding-inline:0; } .scheduled-create-label,.scheduled-global-scope-label { display:none; }
 .scheduled-next-heading h2 { gap:10px; } .scheduled-next-schedule time { font-size:16px; }
 .scheduled-next-work { grid-template-columns:40px minmax(0,1fr); gap:10px; } .scheduled-next-identity .scheduled-employee-face { margin-left:-8px; }
 .scheduled-next-description h3 { font-size:15px; } .scheduled-next-metadata { gap:3px 8px; } .scheduled-next-metadata code { font-size:11px; }

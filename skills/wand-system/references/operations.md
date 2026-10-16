@@ -98,3 +98,29 @@ JSON
 不读管理员密码、不改员工配置、不换引擎、不改系统定时器、不自动重启 Wand。
 提示 skill 未安装时由已授权的本机 CLI 执行 `wand system:skills`；安装只增加发现入口，不改变任何会话的工具开关或 Skills 白名单。
 新会话/资源刷新后可发现；被显式限定资源的会话需用户在原设置里选择该技能，不能绕过选择。
+
+
+## 一次性网页登录
+
+本能力沿用**本机所有者 CLI** 已有认证，不显示或传递长期密码；不是知识库/决策 token，也不是由员工自行授予 Web 管理权限。
+- `web-login:issue --stdin` 输入 `{requestId,origin}`；`web-login:cancel --stdin` 输入 `{requestId}`。仅本机直连、已认证管理员的所有者 CLI 可签发/取消；原生 App token、浏览器和代理转发不能签发。
+- 不能传 employeeId、sessionId、scopes、mode 或 TTL。每轮runner注入专用、可撤销的随机执行证明，经内存请求头交给服务；服务从证明回读实际员工/会话，再核对运行主体。不以非秘密WAND_SESSION_ID或调用者提供的ID当作授权。回合结束/取消/改密/重启撤销证明；升级前正在运行的回合需等新一轮员工执行取得新证明，无证明明确拒绝，不能降为local-owner或复用知识库/决策token。**不改变员工模型、执行模式或工具权限，也不授权其他业务操作。**
+- 固定 connected-app / sessions，同时在Cookie主体保留webSession（员工ID+会话ID）。服务端只允许查看这一个会话及安全配置/过滤后的列表；其他会话、员工知识、任务/文件/管理/写操作和全局WebSocket默认拒绝。输入框为只读，不能借此创建任务、切身份、修改权限或执行命令。此Cookie只在服务运行期有效，重启必须重新签发，不会持久化后丢失主体限制。
+- 票据绑定精确 origin；仅 HTTPS（回环地址允许 HTTP），配置 publicOrigin 时必须匹配。60 秒有效，服务端内存保存摘要；重启、改密、取消、主体结束/改变都会使未消费票据失效。同一 requestId 12 小时内只处理一次，重复返回409，不重发密钥；重启会清空内存记录，旧票据仍失效。
+- 票据不得放入 argv、URL（含 fragment）、剪贴板、文件、日志、知识或截图。禁用 Playwright trace/HAR/video、请求体记录和页面输入快照；登录期间不截图。不要把签发命令直接交给会回显 stdout 的命令工具。
+
+在已有 Playwright 程序中，关闭凭据录制后直接 import（占位路径换成真实技能目录）：
+
+```js
+import { loginWithWebTicket } from "/absolute/path/to/wand-system/scripts/web-login.mjs";
+// 已用用户授权的专用 Chrome 打开精确 origin；不注入 Cookie、不调用登录内部 API。
+await page.goto(origin);
+await page.locator('#login-form, #app[data-react-shell="enabled"] .main-content').first().waitFor();
+const result = await loginWithWebTicket(page, { origin });
+// 仅输出非敏感 result；不能输出中间票据、输入值或网络请求体。
+```
+
+助手先查是否存在可见登录表单；已有登录态不签发。否则匿名进程管道拿票据，在真实页面选择「一次性票据」、填写遮罩输入并点「进入控制台」；一次提交后立即清除 DOM 中的票据。不得用 Cookie 注入或 API 登录代替该入口。
+页面与 helper 不静默重新签发/重试；失败、取消或未知后 helper 尝试取消原 requestId 并清空输入。取消不能撤销已消费形成的登录态；如果需要退出，用正常登出。
+签发请求失败/超时/响应解析失败可能已经签发，消费连接断开也可能已经登录：先刷新核对真实登录状态，不重放票据、不自动换 requestId。明确确认未登录且重新获得授权后才能发起新请求。浏览器登录态过期或服务重启后，沿同一显式流程重新取得新票据，不存长期密码。
+`issueWebLoginTicket` 仅供需要自管内存与失败处理的可信程序；其结果含密钥，不能打印。`cancelWebLoginTicket(requestId)` 可取消未消费票据；取消先到也会阻止迟到签发。

@@ -1,3 +1,4 @@
+import { reportClientError } from "../client-feedback";
 import { composerQueue, state } from "./state";
 import { syncBrowserComposerBadges } from "./composer-badges-adapter";
 import { getErrorMessage } from "../../error-utils.js";
@@ -10,7 +11,7 @@ import type { ComposerPermissionAction } from "../react/composer-badges/controll
 import { renderChat, scheduleChatRender } from "./chat-render-loader";
 import { clearStructuredQueuePersistence } from "./chat-scroll";
 import { mergeIncrementalWindowedTurn } from "./message-reconciliation";
-import { flushPendingMessages, buildMessagesForRender, isCurrentTerminalSession, flashComposerFailed, flushStructuredInputQueue, updateStructuredQueueCounter, setTerminalInteractive, flushCrossSessionQueue, reconcileInteractiveState, getSelectedSession } from "./input";
+import { flushPendingMessages, buildMessagesForRender, isCurrentTerminalSession, flashComposerFailed, flushStructuredInputQueue, updateStructuredQueueCounter, setTerminalInteractive, flushCrossSessionQueue, reconcileInteractiveState, getSelectedSession, noteComposerSendAccepted } from "./input";
 import { notifyTaskEnded, clearSessionProgressNative, _syncWakeLock, showNotificationBubble, notifyTaskProgress, syncSessionProgressToNative, notifyPermissionRequest, notifyUpdateAvailable, showAutoUpdateOverlay, showRestartOverlay, showToast } from "./notifications";
 import { refreshAll, scheduleSessionListUpdate, subscribeToSession, updateSessionSnapshot, markSessionCompletionViewed, getPreferredMessages, selectSession, updateShellChrome, loadOutput, isAutoApproveImpliedByMode, applyCurrentView, fetchAvailableModels, loadSessions } from "./session-engine";
 import { getLastAssistantSummary } from "./session-ui";
@@ -187,7 +188,7 @@ function projectSelectedChat(sessionId: string): any {
       }
 
       export function initWebSocket(reason?: any) {
-        if (!window.WebSocket) return false;
+        if (!window.WebSocket || state.config?.webLoginAccess?.readOnly) return false;
 
         // Ordinary initialization reuses an owned connection, including CONNECTING.
         // Only forceReconnectWebSocket deliberately replaces a healthy socket.
@@ -311,11 +312,13 @@ function projectSelectedChat(sessionId: string): any {
 
           ws.onerror = function() {
             if (state.ws !== ws) return;
+            reportClientError("websocket_error", new Error("WebSocket transport error"));
             ws.close();
           };
 
           return true;
         } catch (e) {
+          reportClientError("websocket_error", e);
           // Constructor threw (rare — bad URL, blocked scheme). Try again
           // through the backoff path so we don't get stuck.
           scheduleWsReconnect();
@@ -650,6 +653,11 @@ function projectSelectedChat(sessionId: string): any {
                 replacePooledTerminalOutput(msg.sessionId, pooledInitOutput);
               }
             }
+            // 重连 / 重新订阅时的快照同样携带 inFlight：发送中掉线再回来，
+            // 「正在发送」不能永远等一个不会再 resolve 的 POST。
+            if (msg.data && msg.data.structuredState && msg.data.structuredState.inFlight === true) {
+              noteComposerSendAccepted(msg.sessionId);
+            }
             break;
           case 'usage':
             // Token usage events are processed server-side; per-message usage is read from msg.usage
@@ -774,6 +782,12 @@ function projectSelectedChat(sessionId: string): any {
               // PTY 的 ptyBusy 同样代表「这一轮干完了」。
               if (statusUpdate.structuredState) {
                 noteTurnActivity(msg.sessionId, statusUpdate.structuredState.inFlight === true);
+              }
+              // 服务端在接受输入时就同步发出 inFlight=true 的 status（sendMessage 里
+              // beginTurn 之后），这是「已送达」的权威信号：收到就把该会话还压着的
+              // 「正在发送」推进到「已送达」，不等 POST（结构化 POST 要等整轮结束）。
+              if (statusUpdate.structuredState && statusUpdate.structuredState.inFlight === true) {
+                noteComposerSendAccepted(msg.sessionId);
               }
               if (Object.prototype.hasOwnProperty.call(msg.data, 'ptyBusy')) {
                 noteTurnActivity(msg.sessionId, !!msg.data.ptyBusy);

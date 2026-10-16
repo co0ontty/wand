@@ -54,7 +54,7 @@ export async function abortableEmployeeText<T>(pending: Promise<T>, signal: Abor
 }
 
 export class EmployeeCandidateRejected extends Error {
-  constructor(readonly failure: StructuredFailure) { super("SDK 候选在执行前被拒绝。"); }
+  constructor(readonly failure: StructuredFailure, message = "SDK 候选在执行前被拒绝。") { super(message); }
 }
 
 function sdkText(message: AssistantMessage, status?: number): string {
@@ -66,8 +66,8 @@ function sdkText(message: AssistantMessage, status?: number): string {
     const failure = classifyStructuredFailure({ state: { blocks: [], result: "", sessionId: null }, exitCode: 1,
       signal: null, stderr: "", primaryError: "SDK 文字生成失败。", rejection,
       inputAccepted: rejection && !progressed ? false : undefined }, { progress: progressed });
-    if (failure?.retryable) throw new EmployeeCandidateRejected(failure);
-    throw new Error("SDK文字生成失败。");
+    if (failure?.retryable) throw new EmployeeCandidateRejected(failure, message.errorMessage || "SDK 候选在执行前被拒绝。");
+    throw new Error(message.errorMessage || "SDK文字生成失败。");
   }
   if (message.stopReason === "aborted" || message.content.some(part => part.type === "toolCall")) throw new Error("SDK文字生成失败。");
   return message.content.filter(part => part.type === "text").map(part => part.text).join("");

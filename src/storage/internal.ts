@@ -39,6 +39,8 @@ export type AuthScope = "admin" | "sessions" | "files" | "password-vault" | "ses
 export interface AuthPrincipal {
   kind: AuthPrincipalKind;
   scopes: AuthScope[];
+  /** Runtime-only read access to exactly one employee-owned session. Never persist without this boundary. */
+  webSession?: { sessionId: string; employeeId: string };
 }
 
 export interface PersistedAuthSession {

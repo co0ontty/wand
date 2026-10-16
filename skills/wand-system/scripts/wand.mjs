@@ -4,6 +4,7 @@ import { isAbsolute } from "node:path";
 
 const args = process.argv.slice(2);
 const allowed = new Set([
+  "web-login:issue", "web-login:cancel",
   "employee:list", "workspace:list", "session:current", "session:list", "session:read",
   "session:create", "session:resume", "session:wait", "schedule:list", "schedule:read",
   "schedule:create", "schedule:update",

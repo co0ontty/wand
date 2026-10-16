@@ -1,4 +1,6 @@
 import { OpenRouterFreeModelsService } from "./openrouter-free-models.js";
+import { OpenCodeFreeModelsService, registerOpenCodeFreePool, adoptSystemOpenCodeFreeDefault } from "./opencode-system-fallback.js";
+import { OPENCODE_FREE_GROUP_ID, OPENCODE_FREE_GROUP_NAME } from "./opencode-free-selection.js";
 import crypto from "node:crypto";
 import compression from "compression";
 import express from "express";
@@ -67,6 +69,7 @@ import {
 } from "./server-app-connect.js";
 import { resolveTrustProxy, sendRouteError } from "./server-request.js";
 import { registerAuthRoutes } from "./server-auth-routes.js";
+import { WebLoginTickets } from "./web-login-tickets.js";
 import { inferProviderFromCommand, isSessionProvider, providerCliCommand } from "./session-provider.js";
 import { registerVaultRoutes } from "./server-vault-routes.js";
 import { registerGithubRoutes } from "./server-github-routes.js";
@@ -107,6 +110,10 @@ import { resolveSessionCwd } from "./session-cwd.js";
 import { backfillSessionWorkspaces, resolveWorkspaceIdForNewSession } from "./workspace-binding.js";
 import { getErrorMessage } from "./error-utils.js";
 import { asyncRoute, jsonErrorHandler } from "./express-async.js";
+import { FeedbackReceiver, FeedbackReporter } from "./feedback.js";
+import { feedbackFeatureForApiPath } from "./feedback-feature-map.js";
+import { feedbackRequestSecrets, registerFeedbackAdminRoutes, registerFeedbackClientRoutes, registerFeedbackIngress } from "./server-feedback-routes.js";
+import type { ErrorRequestHandler } from "express";
 import {
   checkPackageUpdateAsync,
   normalizeUpdateChannel,
@@ -145,7 +152,7 @@ import {
   type ProviderCliUpdateStatus,
 } from "./provider-cli-updater.js";
 import { CommandRequest, SessionProvider, WandConfig } from "./types.js";
-import { userAuthor } from "./user-profile.js";
+import { userAuthor, userDisplayName } from "./user-profile.js";
 
 const SERVER_MODULE_DIR = path.dirname(new URL(import.meta.url).pathname);
 const RUNTIME_ROOT_DIR = path.resolve(SERVER_MODULE_DIR, "..");
@@ -223,12 +230,15 @@ function resolveProviderForCommand(provider: unknown, command: string): SessionP
 
 // ── Startup error handling ──
 
+let activeFeedback: FeedbackReporter | null = null;
 process.on("uncaughtException", (err) => {
+  activeFeedback?.capture("uncaught_exception", err);
   wandError("服务器异常", err.message, "请检查配置是否正确，或尝试重启服务。");
   process.exit(1);
 });
 
 process.on("unhandledRejection", (reason) => {
+  activeFeedback?.capture("unhandled_rejection", reason);
   const msg = getErrorMessage(reason);
   wandError("未处理的异步错误", msg);
 });
@@ -326,6 +336,16 @@ export async function startServer(
     process.stdout.write(`[wand] ${formatPathRepairSummary(pathRepair)}\n`);
   }
 
+  const feedbackReceiver = process.env.WAND_FEEDBACK_PRIVATE_KEY_FILE
+    ? new FeedbackReceiver(resolveConfigDir(configPath), process.env.WAND_FEEDBACK_PRIVATE_KEY_FILE, {
+      accept: (report, envelope) => storage.ingestFeedback(report, envelope),
+      latest: taskId => storage.latestFeedbackEnvelopes(taskId),
+    }) : null;
+  const feedback = new FeedbackReporter({ configDir: resolveConfigDir(configPath), version: DISPLAY_VERSION,
+    username: () => userDisplayName(config.userProfile),
+    secrets: () => [config.password, config.appSecret ?? "", getEffectivePassword(storage, config), ...Object.entries(process.env)
+      .filter(([key]) => /(?:TOKEN|SECRET|PASSWORD|API_KEY|APIKEY|PRIVATE_KEY|CREDENTIAL)/i.test(key))
+      .map(([, value]) => value ?? "")] });
   const app = express();
   let shuttingDown = false;
   const testMode = process.env.WAND_TEST_MODE === "1";
@@ -346,6 +366,7 @@ export async function startServer(
     employee: () => storage.getSystemSiliconEmployee(SPEECH_POLISHER_KEY),
     trace: employee => systemCalls.forEmployee(employee) });
   const authService = new AuthService(storage);
+  const webLoginTickets = new WebLoginTickets();
   const settingsAccess = new SettingsWebAccess();
   const decisions = new DecisionService(config.localDecision);
   const decisionExpert = new DecisionExpertService({ local: decisions, free: openRouter, config,
@@ -375,6 +396,32 @@ export async function startServer(
   // Clients receive its persisted snapshot via GET /api/models.
   const modelCatalog = new ModelCatalogService(getModelRefreshOptions);
   const configDir = resolveConfigDir(configPath);
+  let notifyFreeDefaultChanged = (_employeeId: string): void => {};
+  const systemFallback = testMode || process.env.WAND_DISABLE_OPENCODE_FALLBACK === "1" ? undefined : new OpenCodeFreeModelsService({ configDir,
+    storage, inheritEnv: config.inheritEnv, onLog: line => process.stdout.write(`[wand] ${line}\n`),
+    onModelsChanged(models) {
+      const candidate = runtimeConfig.createCandidate();
+      // Refresh reads the latest preference at commit time; never clobber unrelated groups/edits.
+      const groups = candidate.modelGroups ?? [];
+      const next = [...groups.filter(group => !(group.provider === "opencode"
+        && (group.id === OPENCODE_FREE_GROUP_ID || group.name === OPENCODE_FREE_GROUP_NAME))),
+        { id: OPENCODE_FREE_GROUP_ID, provider: "opencode" as const, name: OPENCODE_FREE_GROUP_NAME, models }];
+      if (JSON.stringify(groups) !== JSON.stringify(next)) {
+        writePreferenceToStorage(candidate, storage, "modelGroups", next);
+        runtimeConfig.commit(candidate, ["modelGroups"]);
+        modelCatalog.publishModelGroups();
+      }
+      if (models.length) {
+        const adopted = adoptSystemOpenCodeFreeDefault(storage);
+        if (adopted === "adopted") notifyFreeDefaultChanged(storage.getSystemSiliconEmployee()!.id);
+        if (adopted === "full") process.stdout.write("[wand] 系统员工已有4个明确候选，未覆盖；请腾出一格后采用 OpenCode 免费分组。\n");
+      }
+    } });
+  if (systemFallback) {
+    const unregister = registerOpenCodeFreePool(storage, systemFallback);
+    storage.onClose(() => { unregister(); systemFallback.dispose(); });
+    systemFallback.restoreSavedGroup();
+  }
   const storageCleanup = createStorageCleanup(configDir, { uploads: storage.uploads,
     uploadsActive: () => sessionRegistry.listSlim().some(session => (session.sessionKind === "structured" && session.status === "running") || (session.queuedMessages?.length ?? 0) > 0),
     onUploadRemoved: invalidateUploadUsage });
@@ -426,7 +473,7 @@ export async function startServer(
   const structuredSessions = new StructuredSessionManager(
     storage, config, structuredLogger, {},
     structuredHosts.host ? daemonAdmission.structured(structuredHosts.host) : undefined, () => decisionRuntime, openRouter,
-    () => autoAssignEvaluate,
+    () => autoAssignEvaluate, webLoginTickets,
   );
   // No SDK prewarm: Pi defaults to CLI. Only an explicit Wand Agent selection
   // probes the in-process harness; CLI startup/settings must not depend on it.
@@ -449,6 +496,7 @@ export async function startServer(
   // WebSocket 在后面才建：所有系统通知经同一个 Notifier，接好之前静默丢弃。
   const notifier = new ServerNotifier();
   const notifyAiTeamRun = notifier.aiTeamChanged;
+  notifyFreeDefaultChanged = employeeId => notifyAiTeamRun({ kind: "silicon-employee-definition", employeeId });
   // 团队降级的 model-unknown 事前比对只看这份已发现的清单；没刷新过就是空，判定方向是放行。
   const aiTeamModelIds = (provider: SessionProvider): string[] => {
     const cache = modelCatalog.snapshot();
@@ -505,7 +553,10 @@ export async function startServer(
     },
     available: () => !shuttingDown && !updateState.updateInFlight && !updateState.providerCliUpdateInFlight
       && terminalDaemonBuildIsCurrent(),
-    log: (error) => wandError("底层组件自动更新暂缓，将稍后重试", getErrorMessage(error)),
+    log: (error) => {
+      feedback.capture("daemon_update_failed", error);
+      wandError("底层组件自动更新暂缓，将稍后重试", getErrorMessage(error));
+    },
   });
   const getUpdateChannel = (): "stable" | "beta" =>
     normalizeUpdateChannel(storage.getConfigValue("updateChannel"));
@@ -525,6 +576,8 @@ export async function startServer(
 
   // Route-specific parsers must run before the global parser. Once body-parser
   // has consumed a request, a later express.json() cannot tighten or widen it.
+  registerFeedbackIngress(app, feedbackReceiver);
+  app.use("/api/feedback/client", express.json({ limit: "32kb", inflate: false }));
   app.use("/api/decisions", express.json({ limit: "32kb" }));
   app.use("/api/optimize-prompt", express.json({ limit: "256kb" }));
   app.use("/api/file-write", express.json({ limit: "2mb" }));
@@ -544,7 +597,8 @@ export async function startServer(
 
 
   registerAuthRoutes(app, {
-    storage, config, authService, useHttps, requireAuth,
+    storage, config, authService, useHttps, requireAuth, tickets: webLoginTickets,
+    getSession: id => sessionRegistry.get(id),
     disconnectAuthenticatedSockets: () => disconnectAuthenticatedSockets(),
   });
 
@@ -570,11 +624,16 @@ export async function startServer(
     canForceUpdate: req => {
       return !!req.principal && principalHasScope(req.principal, "admin");
     },
-    log: error => wandError("底层组件强制更新未完成", getErrorMessage(error)) });
+    log: error => {
+      feedback.capture("daemon_update_failed", error);
+      wandError("底层组件强制更新未完成", getErrorMessage(error));
+    } });
 
   // Every /api family declares its scope in src/middleware/api-scope.ts; unlisted
   // paths are admin-only for connected apps (default-deny).
   app.use("/api", createApiScopeMiddleware());
+  registerFeedbackClientRoutes(app, feedback);
+  registerFeedbackAdminRoutes(app, feedbackReceiver, requireAdmin);
   app.use("/api", uploadReferenceGuard(storage.uploads));
   app.use(userMemoryOperationLog(storage));
   const userMemory = new UserMemoryService({
@@ -628,6 +687,7 @@ export async function startServer(
       currentVersion: DISPLAY_VERSION,
       packageVersion: PKG_VERSION,
       canManageSettings: !!req.principal && principalHasScope(req.principal, "admin"),
+      ...(req.principal?.webSession ? { webLoginAccess: { ...req.principal.webSession, readOnly: true } } : {}),
       serverInstanceId: SERVER_INSTANCE_ID,
     });
   }));
@@ -694,6 +754,9 @@ export async function startServer(
     checkLatestPackageVersion,
     buildInfo: BUILD_INFO,
     serverInstanceId: SERVER_INSTANCE_ID,
+    currentVersion: DISPLAY_VERSION,
+    feedbackUsername: () => userDisplayName(config.userProfile),
+    reportFailure: (event, error) => feedback.capture(event, error),
     emitSystemNotification: (data) => {
       wsManager.emitEvent({ type: "notification", sessionId: "__system__", data });
     },
@@ -937,6 +1000,7 @@ export async function startServer(
   disconnectAuthenticatedSockets = () => wsManager.disconnectAll();
   wss.on("error", (err: NodeJS.ErrnoException) => {
     if (err.code === "EADDRINUSE") return;
+    feedback.capture("websocket_error", err);
     wandError("WebSocket 异常", err.message);
   });
 
@@ -1047,6 +1111,7 @@ export async function startServer(
       employeeIm.dispose();
       await scheduledTasks.dispose();
       decisions.dispose();
+      systemFallback?.dispose();
       openRouter.dispose();
       try { processes.dispose(); } catch { /* noop */ }
       conversationService.dispose();
@@ -1066,6 +1131,8 @@ export async function startServer(
       try { storage.close(); } catch { /* noop */ }
     };
     const onListenError = (err: NodeJS.ErrnoException): void => {
+      feedback.capture("startup_failed", err);
+      feedback.stop();
       server.off("error", onListenError);
       void cleanupFailedListen().then(() => {
         reject(err.code === "EADDRINUSE" ? new PortInUseError(config.port, config.host) : err);
@@ -1098,6 +1165,7 @@ export async function startServer(
   }
 
   const updateChecksEnabled = !testMode && process.env.WAND_DISABLE_UPDATE_CHECK !== "1";
+  systemFallback?.start();
   if (!testMode) userMemory.start();
   if (!testMode) scheduledTasks.start();
 
@@ -1157,7 +1225,15 @@ export async function startServer(
   // Express 4 does not forward rejected route promises automatically. Every
   // async route above is wrapped with asyncRoute, and this final middleware
   // keeps parser, synchronous middleware, and async failures JSON-shaped.
+  const reportRequestFailure: ErrorRequestHandler = (error, req, _res, next) => {
+    const status = typeof error?.status === "number" ? error.status : 500;
+    if (status >= 500 && !req.path.startsWith("/api/feedback")) feedback.capture("http_5xx", error, feedbackFeatureForApiPath(req.path), feedbackRequestSecrets(req));
+    next(error);
+  };
+  app.use(reportRequestFailure);
   app.use(jsonErrorHandler);
+  activeFeedback = feedback;
+  feedback.start();
 
   // Daemon-only maintenance does not restart Server, depend on npm auto-update
   // preferences, or stop a live execution. Startup recovery is already attached.
@@ -1207,6 +1283,7 @@ export async function startServer(
     try {
       launchServerUpdate(adminUpdateDeps, info, (message) => recordUpdateFailure(message));
     } catch (error) {
+      feedback.capture("update_failed", error);
       recordUpdateFailure(getErrorMessage(error, "未知错误"));
       updateState.updateInFlight = false;
     }
@@ -1242,10 +1319,12 @@ export async function startServer(
       const after = await refreshProviderCliUpdates();
       const results = verifyProviderCliUpdateResults(commandResults, after.items);
       for (const result of results) {
+        if (!result.ok) feedback.capture("provider_update_failed", new Error(result.message));
         process.stdout.write(`[wand] CLI 自动更新 ${result.ok ? "完成" : "失败"}: ${result.message}\n`);
       }
       void modelCatalog.refresh().catch(() => {});
     } catch (error) {
+      feedback.capture("provider_update_failed", error);
       process.stdout.write(`[wand] CLI 自动更新失败: ${getErrorMessage(error)}\n`);
     } finally {
       updateState.providerCliUpdateInFlight = false;
@@ -1280,6 +1359,8 @@ export async function startServer(
     if (closePromise) return closePromise;
     closePromise = (async () => {
       shuttingDown = true;
+      feedback.stop();
+      if (activeFeedback === feedback) activeFeedback = null;
       employeeImLifecycle.dispose();
       employeeIm.dispose();
       taskTitles.dispose();
@@ -1289,6 +1370,7 @@ export async function startServer(
       await daemonMaintenance.stop();
       await storageCleanup.stop();
       decisions.dispose();
+      systemFallback?.dispose();
       openRouter.dispose();
       await userMemory.dispose();
       if (updateCheckTimer) {

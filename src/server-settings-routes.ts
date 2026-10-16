@@ -1,5 +1,5 @@
 import type { OpenRouterFreeModelsService } from "./openrouter-free-models.js";
-import { normalizeModelGroups } from "./model-groups.js";
+import { normalizeModelGroups, preserveOpenCodeFreeMembership } from "./model-groups.js";
 import { existsSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { Express, Request, RequestHandler } from "express";
@@ -183,7 +183,8 @@ export function registerSettingsRoutes(app: Express, deps: ServerSettingsRoutesD
       setPreference(key: string, value: unknown): void { stagedPreferences.push({ key, value }); },
     } as unknown as WandStorage;
     const stagePreference = (field: (typeof PREFERENCE_KEYS)[number], value: unknown): void => {
-      writePreferenceToStorage(candidateConfig, stagingStorage, field, value);
+      writePreferenceToStorage(candidateConfig, stagingStorage, field, field === "modelGroups"
+        ? preserveOpenCodeFreeMembership(normalizeModelGroups(value), config.modelGroups ?? []) : value);
       stagedPreferenceFields.add(field);
     };
     let touchedDeployField = false;

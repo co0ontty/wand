@@ -1,6 +1,7 @@
 import { composer, state, writeStoredBoolean } from "./state";
 import { isSystemAiCall, SYSTEM_AI_READ_ONLY } from "../../system-ai-call.js";
 import { ensureTerminalLibrary } from "../vendor-loader.js";
+import { clearLoginCredential } from "../login-credential.js";
 import { handlePiSettingsKeydown } from "./pi-settings-adapter";
 import { hasOpenPopupSurface } from "../react/ui/popup-lifecycle.js";
 import { ptyInputState, mergePtyModifiers, modifiedPtySequence, modifiedTypedPtyText } from "../pty-input-state.js";
@@ -167,13 +168,24 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           loginButton.textContent = "进入控制台";
         };
 
-        fetch("/api/login", {
+        var ticketMode = passwordEl.dataset.loginKind === "ticket";
+        var credential = passwordEl.value;
+        // Never retain a submitted ticket in DOM, browser storage, URLs or error logs.
+        // Unknown delivery cannot be retried with the same value.
+        if (ticketMode) clearLoginCredential(passwordEl);
+        fetch(ticketMode ? "/api/login/ticket" : "/api/login", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ password: passwordEl.value }),
+          body: JSON.stringify(ticketMode ? { ticket: credential } : { password: credential }),
           credentials: "same-origin"
         })
         .then(function (res) {
+          if (ticketMode && !res.ok) {
+            return res.json().then(function (body) {
+              showError(errorEl, body && typeof body.error === "string" ? body.error : "票据登录未确认；请先刷新核对登录状态，不要自动重试。");
+              return Promise.reject("handled");
+            });
+          }
           if (res.status === 429) {
             return res.json().then(function (body) {
               var seconds = body && typeof body.retryAfter === "number" ? Math.max(1, Math.ceil(body.retryAfter)) : 0;
@@ -220,8 +232,8 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         })
         .catch(function(error) {
           if (error === "handled") return;
-          console.error("[wand] Login error:", error);
-          showError(errorEl, "登录失败，请重试。");
+          if (!ticketMode) console.error("[wand] Login error:", error);
+          showError(errorEl, ticketMode ? "票据登录结果未知；请先刷新核对登录状态，不要重复提交。" : "登录失败，请重试。");
         })
         .finally(function() {
           finishLoginAttempt();
@@ -323,6 +335,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
 
       export function getComposerPlaceholder(session, terminalInteractive) {        // Keep placeholders short so they don't wrap on portrait mobile screens.
         // Only show informative state hints; drop the redundant "send to X" labels.
+        if (state.config?.webLoginAccess?.readOnly) return "票据登录：仅可查看当前员工的当前会话";
         if (isSystemAiCall(session)) return SYSTEM_AI_READ_ONLY;
         if (terminalInteractive) return "键盘输入直通终端 · Enter 提交";
         // 只有真正进入终止态（exited / failed / stopped）才提示"会话已结束"。

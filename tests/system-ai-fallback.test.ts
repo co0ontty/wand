@@ -98,6 +98,26 @@ for (const [provider, failure] of failures) {
   });
 }
 
+for (const status of ["error", "completed"]) {
+  test(`OpenCode pure-text rejects a ${status} tool attempt even with valid text`, async () => {
+    await withCliOutputs({
+      first: [
+        { type: "tool_use", part: { tool: "bash", state: { status } } },
+        ...textEvents("opencode", "must not be used"),
+      ],
+      second: textEvents("pi", SUCCESS),
+    }, async (root, attempts) => {
+      await assert.rejects(callConfiguredAiText(REQUEST, root, "", {
+        provider: "opencode", model: "first",
+      }), (error: unknown) => error instanceof QuickCommitError && error.message.includes("尝试使用工具"));
+      assert.equal(await callConfiguredAiText(REQUEST, root, "", {
+        cliCandidates: [{ provider: "opencode", model: "first" }, { provider: "pi", model: "second" }],
+      }), SUCCESS);
+      assert.deepEqual(attempts(), ["first", "first", "second"]);
+    });
+  });
+}
+
 test("一次性文本选模型分组时按成员顺序尝试，分组 ID 不传给 CLI", async () => {
   await withCliOutputs({ first: [piText(FAILURE, "error")], second: [piText(SUCCESS)] }, async (root, attempts) => {
     const result = await callConfiguredAiText(REQUEST, root, "中文", {

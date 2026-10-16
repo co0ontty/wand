@@ -218,6 +218,10 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
     res.json(model.tasks.filter(task => workspaceId === undefined || task.workspaceId === workspaceId)
       .map(task => taskDto(deps, task, model)));
   });
+  app.get("/api/wand-tasks/:id/comments", (req, res) => {
+    if (!storage.getWandTask(req.params.id)) { res.status(404).json({ error: "未找到该任务。" }); return; }
+    res.set("Cache-Control", "no-store").json({ comments: storage.listWandTaskComments(req.params.id) });
+  });
   app.get("/api/wand-task-agent-defaults", (_req, res) => {
     res.json(readTaskBoardLastAgent(storage));
   });

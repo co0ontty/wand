@@ -999,7 +999,7 @@ export class ModelCatalogService {
       const list = catalog[PROVIDER_MODEL_LIST_FIELDS[group.provider]];
       const members = group.provider === "pi" ? [...list, ...freeModels] : list;
       const memberInfo = group.models.map((id) => members.find((model) => model.id === id));
-      const efforts = memberInfo.every((model) => model?.reasoningEfforts?.length)
+      const efforts = memberInfo.length > 0 && memberInfo.every((model) => model?.reasoningEfforts?.length)
         ? memberInfo[0]!.reasoningEfforts!.filter((level) => memberInfo.every((model) =>
           model!.reasoningEfforts!.some((item) => item.effort === level.effort))) : [];
       list.push({ id: modelGroupSelector(group), label: group.name, group: "模型分组",

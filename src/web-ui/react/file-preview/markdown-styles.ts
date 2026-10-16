@@ -25,6 +25,9 @@ export const markdownPreviewStyles = String.raw`
 .wand-markdown-preview h2:first-child,
 .wand-markdown-preview h3:first-child { margin-top: 0; }
 .wand-markdown-preview a { color: var(--accent-active); }
+/* Restore semantic list markers after the shared utility/preflight reset. */
+.wand-markdown-preview ul { list-style-type: disc; padding-left: 1.4em; }
+.wand-markdown-preview ol { list-style-type: decimal; padding-left: 1.4em; }
 .wand-markdown-preview code {
   border-radius: var(--radius-xs);
   padding: 0.12em 0.34em;

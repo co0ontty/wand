@@ -7,6 +7,19 @@ import test from "node:test";
 import { defaultConfig } from "../src/config.js";
 import { WandStorage } from "../src/storage.js";
 import { StructuredSessionManager } from "../src/structured-session-manager.js";
+import { applyOpenCodeEvent } from "../src/structured-opencode-adapter.js";
+
+test("OpenCode nested protocol errors preserve the upstream cause", () => {
+  for (const message of [
+    "OpenCode's free tier can only be used from within OpenCode.",
+    "unknown certificate verification error",
+    "Unexpected server error. Check server logs for details.",
+  ]) {
+    assert.equal(applyOpenCodeEvent({ blocks: [], result: "", sessionId: null }, {
+      type: "error", error: { name: "APIError", data: { message } },
+    }), message);
+  }
+});
 
 test("OpenCode structured runner maps JSON events and resumes the CLI session", async (t) => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-opencode-"));

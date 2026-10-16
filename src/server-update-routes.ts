@@ -479,6 +479,7 @@ export function launchServerUpdate(
   const helper = startDetachedUpdateHelper({
     installSpec: info.installSpec, configPath: deps.configPath, parentPid: process.pid,
     cliArgs: process.argv.slice(2), cwd: process.cwd(), env: process.env, timeoutMs: 300_000, expectedVersion: info.latest ?? undefined,
+    feedbackVersion: deps.currentVersion, feedbackUsername: deps.feedbackUsername?.(),
   });
   if (!helper.started) throw new HttpError(409, "update_preflight", helper.message);
   deps.state.helper = helper;
@@ -491,6 +492,7 @@ export function launchServerUpdate(
     clearInterval(monitor);
     deps.state.updateInFlight = false;
     if (status.phase === "failed") {
+      deps.reportFailure?.("update_failed", new Error(status.message));
       onFailure?.(status.message);
       if (!onFailure) deps.emitSystemNotification({ kind: "auto-update-failed", current: info.current, latest: info.latest, error: status.message });
     }
@@ -524,9 +526,12 @@ export interface AdminUpdateRoutesDependencies {
   checkLatestPackageVersion(channel: UpdateChannel, forceRefresh?: boolean): Promise<PackageUpdateInfo>;
   buildInfo: BuildInfo;
   serverInstanceId: string;
+  currentVersion?: string;
+  feedbackUsername?(): string;
   emitSystemNotification(data: Record<string, unknown>): void;
   /** 更新通道/自动更新开关变更后立即触发一次后台检查，而不是等 30 分钟轮询。 */
   requestUpdateCheck?(): void;
+  reportFailure?(event: "update_failed" | "provider_update_failed", error?: unknown): void;
 }
 
 export function registerAdminUpdateRoutes(app: Express, deps: AdminUpdateRoutesDependencies): void {
@@ -577,8 +582,10 @@ export function registerAdminUpdateRoutes(app: Express, deps: AdminUpdateRoutesD
       // Model discovery is server-owned and persisted; clients only consume
       // the latest snapshot after a CLI update.
       void deps.modelCatalog.refresh().catch(() => {});
+      if (results.some((item) => !item.ok)) deps.reportFailure?.("provider_update_failed", new Error(results.filter(item => !item.ok).map(item => item.message).join("\n")));
       res.json({ ok: results.every((item) => item.ok), results, ...after, autoUpdate: storage.getConfigValue("autoUpdateProviderClis") === "true" });
     } catch (error) {
+      deps.reportFailure?.("provider_update_failed", error);
       sendRouteError(res, error, "更新 CLI 失败。", 500);
     } finally {
       state.providerCliUpdateInFlight = false;
@@ -617,6 +624,7 @@ export function registerAdminUpdateRoutes(app: Express, deps: AdminUpdateRoutesD
         return;
       }
       if (!info.latest) {
+        deps.reportFailure?.("update_failed", new Error("npm 所选通道暂无有效版本，或 registry 暂时不可用。"));
         res.status(502).json({ error: "npm 所选通道暂无有效版本，或 registry 暂时不可用。" });
         return;
       }
@@ -632,6 +640,7 @@ export function registerAdminUpdateRoutes(app: Express, deps: AdminUpdateRoutesD
         logPath: helper.logPath,
       });
     } catch (error) {
+      if (!(error instanceof HttpError && error.code === "update_in_progress")) deps.reportFailure?.("update_failed", error);
       sendRouteError(res, error, "更新失败。", 500);
     } finally {
       if (!launched) state.updateInFlight = false;

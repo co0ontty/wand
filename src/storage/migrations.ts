@@ -271,4 +271,22 @@ export const STORAGE_MIGRATIONS: readonly StorageMigration[] = [
       scope_key TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, updated_at TEXT NOT NULL
     );
   `) },
+  { version: 7, name: "feedback-task-projection", up: db => db.exec(`
+    CREATE TABLE IF NOT EXISTS wand_task_comments (
+      id TEXT PRIMARY KEY, task_id TEXT NOT NULL, author_name TEXT NOT NULL,
+      body TEXT NOT NULL, created_at TEXT NOT NULL,
+      FOREIGN KEY(task_id) REFERENCES wand_tasks(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_wand_task_comments_task ON wand_task_comments(task_id, created_at);
+    CREATE TABLE IF NOT EXISTS feedback_task_features (
+      feature TEXT PRIMARY KEY, task_id TEXT,
+      FOREIGN KEY(task_id) REFERENCES wand_tasks(id) ON DELETE SET NULL
+    );
+    CREATE TABLE IF NOT EXISTS feedback_reports (
+      report_id TEXT PRIMARY KEY, feature TEXT NOT NULL, task_id TEXT,
+      occurred_at TEXT NOT NULL, received_at TEXT NOT NULL, envelope_json TEXT NOT NULL,
+      FOREIGN KEY(task_id) REFERENCES wand_tasks(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_feedback_reports_task ON feedback_reports(task_id, received_at);
+  `) },
 ];

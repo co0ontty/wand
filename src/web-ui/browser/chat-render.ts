@@ -2314,7 +2314,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         // Android 最新运行组默认向下展开；Web 不按网络或设备分类。
         // 默认值每轮重新派生，绝不写进手动偏好；查详情/滚动会显式保留展开。
         var activityLive = !!opts.isTrailing && isTurnActivityLive(_currentMessageGlobalIndex);
-        var expanded = persisted ?? true;
+        var expanded = persisted ?? activityLive;
         // 全段只有一个活跃条目：没回执的调用优先，其次最后一轮思考。
         // 摘要的 running 标记与时间线行的 loading 都读它，两处不会同时闪。
         var liveRow = activityLiveRow(items, _currentActivitySessionBusy && _currentLatestPendingCommandId
@@ -2335,7 +2335,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
           var callScope = renderBlockScope(messageKey, call.index + segmentFirstIndex, block);
           var entryKey = buildExpandKey(isThinking ? "activity-thinking" : "activity-detail",
             [state.selectedId, groupKey, callScope]);
-          var entryOpen = isThinking ? getPersistedExpandState(entryKey) ?? true : activityDetailOpen.has(entryKey);
+          var entryOpen = activityDetailOpen.has(entryKey);
           var entryRunning = !!liveRow && block === liveBlock;
           var result = isThinking ? null : pickToolResultForDisplay(toolResults, block.id);
           var status = entryRunning ? "运行中" : result?.is_error ? "失败" : result ? "完成" : "未返回";
@@ -2480,7 +2480,6 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         var group = row.closest(".chat-activity");
         var detail = row.querySelector(".chat-call-detail");
         var nowExpanded = row.getAttribute("data-expanded") !== "true";
-        if (row.getAttribute("data-thinking-entry") === "true") setPersistedExpandState(key, nowExpanded);
         // Only opening a detail is a reading choice; closing it must release the drawer.
         if (group && nowExpanded) holdActivityTimeline(group);
         row.setAttribute("data-expanded", nowExpanded ? "true" : "false");

@@ -12,7 +12,7 @@ import { HR_EMPLOYEE_KEY } from "../hr-employee-identity.js";
 import { hrEmployeeDefinition } from "../hr-employee.js";
 import { speechPolisherDefinition } from "../speech-polisher-employee.js";
 import { SPEECH_POLISHER_KEY } from "../speech-polisher-identity.js";
-import { SYSTEM_EMPLOYEE_KEY, systemEmployeeDefinition, systemEmployeeSeedAgents, type SystemEmployeeSeed } from "../system-employee.js";
+import { SYSTEM_EMPLOYEE_KEY, systemEmployeeDefinition, systemEmployeeDefaultAgents, systemEmployeeSeedAgents, type SystemEmployeeSeed } from "../system-employee.js";
 import type { WandTaskAgent } from "../task-types.js";
 import { SessionProvider } from "../types.js";
 import type { WandStorage } from "../storage.js";
@@ -78,7 +78,7 @@ export class EmployeeRepository {
   ensureSystemSiliconEmployee(seed: SystemEmployeeSeed = {}): SiliconEmployee {
     const existing = this.getSystemSiliconEmployee();
     if (existing) return existing;
-    const employee = systemEmployeeDefinition(systemEmployeeSeedAgents(seed), new Date().toISOString());
+    const employee = systemEmployeeDefinition(systemEmployeeDefaultAgents(seed), new Date().toISOString());
     this.saveSiliconEmployee(employee);
     return employee;
   }

@@ -23,6 +23,7 @@ import type { WandTaskAgent } from "./task-types.js";
 import { selectEmployeeCandidate } from "./silicon-employee-dispatch.js";
 import { recordIterationPrompt } from "./iteration-log.js";
 import { startEmployeeKnowledgeRunner } from "./employee-knowledge.js";
+import type { WebLoginTickets } from "./web-login-tickets.js";
 import { CoreRunner } from "./core-runner.js";
 import { CoreTurnTracker } from "./core-turn-tracker.js";
 import type { CoreStatus } from "./core-status-cli.js";
@@ -250,6 +251,7 @@ export class StructuredSessionManager {
     private readonly openRouter?: OpenRouterFreeModelsService,
     /** 「智能分配」专用的本地决策入口：只有真正能跑时才注入，没注入则用系统员工回退。 */
     private readonly autoAssignEvaluate: () => DecisionRuntimeAccess["evaluate"] = () => undefined,
+    private readonly webLoginTickets?: WebLoginTickets,
   ) {
     if (logger && execHost?.persistent && !runners.pi && process.env.WAND_PI_NATIVE_TMUX !== "0"
       && process.env.WAND_TEST_MODE !== "1" && !process.env.NODE_TEST_CONTEXT) {
@@ -2649,7 +2651,7 @@ export class StructuredSessionManager {
         syncSnapshot(turnState);
         scheduleEmit();
       },
-    });
+    }, this.webLoginTickets ? (sessionId, employeeId) => this.webLoginTickets!.grant({ sessionId, employeeId }) : undefined);
     this.pendingRunnerExecutions.set(sessionId, execution);
     if (candidateChain) {
       this.armCandidateStartupWatchdog(sessionId, () => {

@@ -40,7 +40,7 @@ export interface SidebarRecentEmployee {
   readonly agents?: ReadonlyArray<{ provider?: string }>;
 }
 
-/** 员工 / 团队看最近窗口，终端不受窗口截断（对齐安卓首页）。 */
+/** 员工 / 团队分组的默认窗口只作兜底；生产入口都传全量（Web 侧栏与安卓 / iOS 首页一致）。 */
 export const RECENT_CONVERSATION_LIMIT = 8;
 
 const TERMINAL_GROUP_ORDER: readonly SidebarRecentKind[] = ["terminal", "blank-terminal"];

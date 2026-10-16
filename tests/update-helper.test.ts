@@ -270,6 +270,33 @@ test("helper uses the shared installer and keeps the parent alive when install f
   ]);
 });
 
+test("failed helper reports raw diagnostics and originating custom name from its independent snapshot", async t => {
+  if (process.platform === "win32") { t.skip("bash helper is not supported on Windows"); return; }
+  const fixture = createFixture(process.pid, true);
+  fixture.opts.feedbackVersion = "4.99.0";
+  fixture.opts.feedbackUsername = "用户自定义名";
+  const parent = await spawnParent(fixture.root, fixture.eventsPath);
+  fixture.opts.parentPid = parent.pid!;
+  t.after(() => { if (isAlive(parent)) parent.kill("SIGKILL"); rmSync(fixture.root, { recursive: true, force: true }); });
+  const observed = path.join(fixture.root, "feedback.json");
+  writeFileSync(path.join(fixture.root, "feedback.mjs"), `
+import fs from "node:fs";
+export class FeedbackReporter {
+  constructor(options) { this.options = options; }
+  capture(event, error) { fs.writeFileSync(${JSON.stringify(observed)}, JSON.stringify({ event, message: error.message, username: this.options.username(), version: this.options.version })); }
+  async flush() {}
+  stop() {}
+}
+`, { mode: 0o600 });
+  assert.notEqual(await runScript(fixture, null), 0);
+  assert.equal(isAlive(parent), true);
+  const value = JSON.parse(readFileSync(observed, "utf8"));
+  assert.equal(value.event, "update_failed");
+  assert.match(value.message, /stub install failure/);
+  assert.equal(value.username, "用户自定义名");
+  assert.equal(value.version, "4.99.0");
+});
+
 test("helper can import the TypeScript installer used by npm run dev", async (t) => {
   if (process.platform === "win32") {
     t.skip("bash helper is not supported on Windows");

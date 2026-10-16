@@ -56,6 +56,9 @@ export class AuthService {
   private readonly sessions = new Map<string, CachedAuthSession>();
   private readonly cleanupTimer: NodeJS.Timeout;
   private disposed = false;
+  private readonly revokeAllListeners = new Set<() => void>();
+
+  onRevokeAll(listener: () => void): void { this.revokeAllListeners.add(listener); }
 
   constructor(
     private readonly storage: WandStorage,
@@ -72,7 +75,9 @@ export class AuthService {
     const expiresAt = Date.now() + this.sessionTtlMs;
     const cached = { expiresAt, principal: clonePrincipal(principal) };
     this.sessions.set(token, cached);
-    this.storage.saveAuthSession(token, expiresAt, cached.principal);
+    // Scoped automation cookies deliberately die on server restart. Persisting only
+    // kind/scopes would silently discard the actor boundary and broaden access.
+    if (!cached.principal.webSession) this.storage.saveAuthSession(token, expiresAt, cached.principal);
     return token;
   }
 
@@ -93,6 +98,11 @@ export class AuthService {
       }
       return null;
     }
+    // Retire cookies minted by the early ticket prototype. Native App sessions
+    // use the established multi-scope principal; a sessions-only cookie without
+    // its actor boundary must never regain broad workbench access after upgrade.
+    if (cached.principal.kind === "connected-app" && cached.principal.scopes.length === 1
+      && cached.principal.scopes[0] === "sessions" && !cached.principal.webSession) return null;
     return clonePrincipal(cached.principal);
   }
 
@@ -110,6 +120,7 @@ export class AuthService {
     if (this.disposed) return;
     this.sessions.clear();
     this.storage.deleteAllAuthSessions();
+    for (const listener of this.revokeAllListeners) listener();
   }
 
   dispose(): void {
@@ -117,6 +128,8 @@ export class AuthService {
     this.disposed = true;
     clearInterval(this.cleanupTimer);
     this.sessions.clear();
+    for (const listener of this.revokeAllListeners) listener();
+    this.revokeAllListeners.clear();
   }
 
   private cleanupExpiredSessions(): void {
@@ -130,11 +143,13 @@ export class AuthService {
 }
 
 export function principalHasScope(principal: AuthPrincipal, scope: AuthScope): boolean {
+  if (principal.webSession) return scope === "sessions" && principal.scopes.includes("sessions");
   return principal.kind === "browser-admin"
     || principal.scopes.includes("admin")
     || principal.scopes.includes(scope);
 }
 
 function clonePrincipal(principal: AuthPrincipal): AuthPrincipal {
-  return { kind: principal.kind, scopes: [...principal.scopes] };
+  return { kind: principal.kind, scopes: [...principal.scopes],
+    ...(principal.webSession ? { webSession: { ...principal.webSession } } : {}) };
 }

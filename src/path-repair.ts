@@ -93,6 +93,7 @@ function candidateBinDirs(): string[] {
     path.join(home, "bin"),
     path.join(home, ".bun", "bin"),
     path.join(home, ".grok", "bin"),
+    path.join(home, ".opencode", "bin"),
     path.join(home, ".volta", "bin"),
     path.join(home, ".cargo", "bin"),
     path.join(home, ".deno", "bin"),

@@ -9,6 +9,8 @@ import { inferProviderFromCommand, inferProviderFromRunner } from "./session-pro
 import type { WandStorage } from "./storage.js";
 import type { AiCallTraceFactory, SystemAiPurpose } from "./system-ai-call.js";
 import { systemAiSessions } from "./system-ai-session-recorder.js";
+import { openCodeFreePool, type OpenCodeFreePool } from "./opencode-system-fallback.js";
+import { OPENCODE_FREE_GROUP_SELECTOR } from "./opencode-free-selection.js";
 
 export interface SessionAiContext {
   provider: SessionProvider;
@@ -22,6 +24,8 @@ export interface SessionAiContext {
   employeeText?: EmployeeTextDeps;
   /** 系统应用必须经员工渠道；候选为空时禁止退回当前会话/默认 provider。 */
   employeeChannelOnly?: boolean;
+  /** Execution/price proof for the saved OpenCode free group, not an implicit extra candidate. */
+  opencodeFree?: OpenCodeFreePool;
   modelGroups?: ModelGroup[];
   purpose?: SystemAiPurpose;
   traceFactory?: AiCallTraceFactory;
@@ -111,6 +115,11 @@ export function resolveSystemAiContext(
     ...(chain.length ? { cliCandidates: chain } : {}),
     ...(chain.some(candidate => candidate.engine === "sdk") ? { employeeText: { config, ...(free ? { free } : {}) } } : {}),
     ...(systemEmployee ? { employeeChannelOnly: true } : {}),
+    // This is the executor for an explicitly selected group, not an implicit
+    // fallback. HR inherits the ops defaults on first install, and other roles
+    // may explicitly choose the same group; do not strand those selections.
+    ...(recording && chain.some(candidate => candidate.provider === "opencode" && candidate.model === OPENCODE_FREE_GROUP_SELECTOR)
+      ? { opencodeFree: openCodeFreePool(recording.storage) } : {}),
     ...(isSystemSiliconEmployee(systemEmployee) ? { opsPersona: systemEmployee!.prompt } : {}),
     ...(recording ? {
       employeeChannelOnly: true,

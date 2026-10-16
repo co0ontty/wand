@@ -1,3 +1,4 @@
+import { reportClientError } from "../../client-feedback";
 import { publishWandModelCatalog } from "../model-catalog";
 import { normalizeModelGroups } from "../../../model-groups.js";
 import { normalizeTaskRetention } from "../../../task-retention.js";
@@ -581,7 +582,9 @@ export class HttpSettingsRepository implements SettingsRepository {
         result = await request("/api/check-update", { signal: options.signal });
         break;
       case "webUpdate.install":
-        result = await post("/api/update", undefined, options.signal);
+        result = await post("/api/update", undefined, options.signal).catch(error => {
+          reportClientError("update_failed", error, "server_update"); throw error;
+        });
         break;
       case "server.restart":
         result = await post("/api/restart", undefined, options.signal);
@@ -590,7 +593,9 @@ export class HttpSettingsRepository implements SettingsRepository {
         result = await request(`/api/provider-cli-updates${command.force ? "?refresh=1" : ""}`, { signal: options.signal });
         break;
       case "cliUpdates.install":
-        result = await post("/api/provider-cli-updates", { ids: command.ids || [] }, options.signal);
+        result = await post("/api/provider-cli-updates", { ids: command.ids || [] }, options.signal).catch(error => {
+          reportClientError("update_failed", error, "provider_update"); throw error;
+        });
         break;
       case "autoUpdate.set": {
         const body: Partial<SettingsAutoUpdate> = { [command.target]: command.enabled };

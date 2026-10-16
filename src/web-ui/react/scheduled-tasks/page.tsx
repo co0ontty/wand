@@ -30,6 +30,7 @@ if (typeof document !== "undefined") installStyleSheet("wand-scheduled-task-styl
 export interface ScheduledTasksPageProps {
   visible: boolean;
   view?: "list" | "calendar";
+  onViewChange?(view: "list" | "calendar"): void;
   calendarMode?: "month" | "week";
   onCalendarModeChange?(mode: "month" | "week"): void;
   sidebarOpen?: boolean;
@@ -57,9 +58,19 @@ function sameSavedInput(task: ScheduledTaskSummary, patch: ScheduledTaskPatch): 
 }
 
 /** Keep the page and its draft mounted; only the visible page owns polling. */
-export function ScheduledTasksPage({ visible, view = "list", calendarMode, onCalendarModeChange, sidebarOpen, onBack, onOpenSidebar, onOpenSession }: ScheduledTasksPageProps): React.ReactElement {
+export function ScheduledTasksPage({ visible, view: controlledView, onViewChange, calendarMode, onCalendarModeChange, sidebarOpen, onBack, onOpenSidebar, onOpenSession }: ScheduledTasksPageProps): React.ReactElement {
+  const [localView, setLocalView] = React.useState<"list" | "calendar">("list");
+  const view = controlledView ?? localView;
   const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   const reduced = useReducedMotion();
+  const [listHidden, setListHidden] = React.useState(view !== "list");
+  const [calendarHidden, setCalendarHidden] = React.useState(view !== "calendar");
+  const [calendarVisited, setCalendarVisited] = React.useState(view === "calendar");
+  React.useLayoutEffect(() => {
+    if (view === "list") setListHidden(false);
+    else { setCalendarHidden(false); setCalendarVisited(true); }
+    if (reduced) { setListHidden(view !== "list"); setCalendarHidden(view !== "calendar"); }
+  }, [view, reduced]);
   const [localCalendarMode, setLocalCalendarMode] = React.useState<"month" | "week">("month");
   const [clock, setClock] = React.useState(() => new Date());
   const [query, setQuery] = React.useState("");
@@ -176,14 +187,16 @@ export function ScheduledTasksPage({ visible, view = "list", calendarMode, onCal
       const shell = pageRef.current?.querySelector<HTMLElement>(".scheduled-editor-shell");
       shell?.scrollIntoView({ block: "start", behavior: "instant" });
       if (input && getComputedStyle(input).visibility === "visible") focus();
-      else void Promise.allSettled(shell?.getAnimations().map(animation => animation.finished) ?? []).then(focus);
+      // Inputs can still inherit a visibility transition after the shell itself
+      // has settled (including Ant's reduced-motion lifecycle).
+      else void Promise.allSettled(shell?.getAnimations({ subtree: true }).map(animation => animation.finished) ?? []).then(focus);
     });
     document.addEventListener("pointerdown", cancel, true); document.addEventListener("keydown", cancel, true);
     return () => { cancelled = true; cancelAnimationFrame(frame); document.removeEventListener("pointerdown", cancel, true); document.removeEventListener("keydown", cancel, true); };
   }, [visible, mode, formFocus]);
   React.useEffect(() => {
-    if (visible && view === "calendar") { setFilter("all"); setQuery(""); setExpanded([]); setMenuId(""); setCancelId(""); setMode("list"); }
-  }, [visible, view]);
+    setExpanded([]); setMenuId(""); setCancelId(""); setMode("list");
+  }, [view]);
 
   const mergeTask = (task: ScheduledTaskSummary): void => {
     setTasks(previous => [task, ...previous.filter(item => item.id !== task.id)]);
@@ -313,11 +326,11 @@ export function ScheduledTasksPage({ visible, view = "list", calendarMode, onCal
       <WandButton size="small" disabled={!!busyTask} onClick={() => setCancelId("")}>保留计划</WandButton>
     </div>}
   </>;
-  const pageTitle = view === "calendar" ? "全局日历" : "定时任务";
+  const pageTitle = "定时";
   return <ScheduledPresentationProvider employees={employeeData.employees} now={clock} timeZone={localZone}>
     <section ref={pageRef} className="scheduled-tasks-page" aria-label={pageTitle} hidden={!visible} inert={!visible} style={{ display: visible ? undefined : "none" }}>
       <Flex component="header" className="scheduled-tasks-header" align="center" justify="space-between" gap="small">
-        <Flex align="center" gap="small">
+        <Flex className="scheduled-tasks-heading" align="center" gap="small">
           {onOpenSidebar ? <WandIconButton aria-label={sidebarOpen ? "关闭列表" : "打开列表"} onClick={onOpenSidebar}><SidebarToggleIcon open={!!sidebarOpen}/></WandIconButton> : null}
           <WandIconButton aria-label={mode === "form" ? `返回${pageTitle}` : "返回会话"} onClick={back} disabled={saving || !!busyTask}><WandIcon name="back"/></WandIconButton>
           <h1 ref={titleRef} tabIndex={-1}>{pageTitle}</h1>
@@ -327,6 +340,9 @@ export function ScheduledTasksPage({ visible, view = "list", calendarMode, onCal
           onClick={() => mode === "form" ? back() : void startNew()}><ConversationMorphIcon from="plus" to="close" active={mode === "form"}/><span className="scheduled-create-label">{mode === "form" ? "收起编辑" : "新建定时任务"}</span></WandButton>
       </Flex>
       <div className="scheduled-tasks-body"><div className="scheduled-tasks-content">
+        <div className="scheduled-view-toolbar"><WandStretchTabs ariaLabel="日程视图" value={view}
+          onValueChange={value => (onViewChange ?? setLocalView)(value as "list" | "calendar")}
+          tabs={[{ value: "calendar", label: "日历" }, { value: "list", label: "定时任务" }]}/></div>
         {actionError && <Alert type="error" showIcon title={actionError} role="alert" closable onClose={() => setActionError("")}/>}
         {error && <Alert type="error" showIcon title={error} action={<WandButton size="small" onClick={() => void refresh()}>重新读取</WandButton>} role="alert"/>}
         {employeeData.error && <Alert type="warning" showIcon title="员工资料暂时无法读取，日程仍保留。头像使用公共回退显示。"/>}
@@ -339,20 +355,27 @@ export function ScheduledTasksPage({ visible, view = "list", calendarMode, onCal
               workspaceFieldError={workspaceFieldError} workspaceTrigger={workspaceTrigger} onSave={() => void save()} onBack={back}/>
           </section>
         </div></div>
-        {view === "list" && <NextTaskPanel task={nextTask(tasks)} scene={!loaded && error ? "error" : !loaded && loading ? "loading" : "normal"}
-          hasTasks={!!tasks.length} reduced={reduced} onLocate={task => { setExpanded(previous => previous.includes(task.id) ? previous : [...previous, task.id]); }} onEdit={task => void edit(task)}/>}
         <div className="scheduled-list-toolbar">
           <WandStretchTabs ariaLabel="定时任务筛选" value={filter} onValueChange={value => { setFilter(value as Filter); setExpanded([]); setCancelId(""); setMenuId(""); }}
             tabs={[{ value: "all", label: `全部 ${loaded ? counts.all : "—"}` }, { value: "active", label: `待执行 ${loaded ? counts.active : "—"}` }, { value: "paused", label: `已暂停 ${loaded ? counts.paused : "—"}` }, { value: "finished", label: `已结束 ${loaded ? counts.finished : "—"}` }]}/>
           <div className="scheduled-search-tools"><WandSearchField value={query} onValueChange={value => { setQuery(value); setExpanded([]); setCancelId(""); }} placeholder="搜索任务或员工" label="搜索定时任务"/>
             <Tooltip title="刷新"><WandIconButton aria-label="刷新定时任务" disabled={loading} onClick={() => void refresh()}><WandIcon name="refresh"/></WandIconButton></Tooltip></div>
         </div>
-        {view === "calendar" ? <ScheduleCalendar tasks={shown} allTasks={tasks} feed={calendarFeed} loading={loading}
-          mode={calendarMode ?? localCalendarMode} onModeChange={onCalendarModeChange ?? setLocalCalendarMode} onRangeChange={onRangeChange}
-          active={visible && mode === "list"} selectedTaskId={expanded[0] ?? null} onSelectTask={selectCalendarTask} renderDetails={renderDetails} renderActions={renderActions}/>
-          : <>{!loaded && loading && <div role="status" className="scheduled-read-state"><Spin size="small"/>正在读取定时任务…</div>}
+        <div className="scheduled-schedule-view-host">
+          <div className="scheduled-schedule-view-pane" data-active={view === "calendar"} hidden={calendarHidden && view !== "calendar"} inert={view !== "calendar"} aria-hidden={view !== "calendar"}
+            onTransitionEnd={event => { if (event.target === event.currentTarget && event.propertyName === "opacity" && view !== "calendar") setCalendarHidden(true); }}>
+            {calendarVisited && <ScheduleCalendar tasks={shown} allTasks={tasks} feed={calendarFeed} loading={loading}
+              mode={calendarMode ?? localCalendarMode} onModeChange={onCalendarModeChange ?? setLocalCalendarMode} onRangeChange={onRangeChange}
+              active={visible && view === "calendar" && mode === "list"} selectedTaskId={expanded[0] ?? null} onSelectTask={selectCalendarTask} renderDetails={renderDetails} renderActions={renderActions}/>}
+          </div>
+          <div className="scheduled-schedule-view-pane scheduled-list-pane" data-active={view === "list"} hidden={listHidden && view !== "list"} inert={view !== "list"} aria-hidden={view !== "list"}
+            onTransitionEnd={event => { if (event.target === event.currentTarget && event.propertyName === "opacity" && view !== "list") setListHidden(true); }}>
+            <NextTaskPanel task={nextTask(tasks)} scene={!loaded && error ? "error" : !loaded && loading ? "loading" : "normal"}
+              hasTasks={!!tasks.length} reduced={reduced} onLocate={task => { setExpanded(previous => previous.includes(task.id) ? previous : [...previous, task.id]); }} onEdit={task => void edit(task)}/>
+            {!loaded && loading && <div role="status" className="scheduled-read-state"><Spin size="small"/>正在读取定时任务…</div>}
             {loaded && !shown.length ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={tasks.length ? "没有匹配的定时任务。" : "还没有定时任务。"}/> : <TaskAgenda tasks={shown} expanded={expanded} visited={visited} onToggle={toggleRow} renderActions={renderActions} renderDetails={renderDetails}/>}
-          </>}
+          </div>
+        </div>
         <footer className="scheduled-page-foot"><span className="scheduled-rule-note">每次执行独立创建会话；暂停或取消不停止当前执行。服务需保持运行。</span><span>{localZone}</span></footer>
       </div></div>
     </section>

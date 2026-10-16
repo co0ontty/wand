@@ -5,7 +5,19 @@ import path from "node:path";
 import test from "node:test";
 
 import { buildChildEnv, getLoginShellEnv, setLoginShellEnv } from "../src/env-utils.js";
-import { deepRepairRuntimePath, formatPathRepairSummary, whichSync, type PathRepairResult } from "../src/path-repair.js";
+import { deepRepairRuntimePath, formatPathRepairSummary, repairRuntimePath, whichSync, type PathRepairResult } from "../src/path-repair.js";
+
+test("runtime PATH includes the native OpenCode install even without shell initialization", t => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-native-opencode-path-"));
+  const bin = path.join(root, ".opencode", "bin"); mkdirSync(bin, { recursive: true });
+  const saved = { HOME: process.env.HOME, PATH: process.env.PATH, WAND_PATH_REPAIR_DISABLE: process.env.WAND_PATH_REPAIR_DISABLE };
+  t.after(() => {
+    for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    rmSync(root, { recursive: true, force: true });
+  });
+  process.env.HOME = root; process.env.PATH = "/usr/bin:/bin"; delete process.env.WAND_PATH_REPAIR_DISABLE;
+  assert.ok(repairRuntimePath().finalPath.split(path.delimiter).includes(bin));
+});
 
 test("deepRepairRuntimePath follows provider PTY interactive login shell PATH", async (t) => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-path-repair-"));

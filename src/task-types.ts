@@ -177,6 +177,14 @@ export interface WandIterationPrompt {
   createdAt: string;
 }
 
+export interface WandTaskComment {
+  id: string;
+  taskId: string;
+  authorName: string;
+  body: string;
+  createdAt: string;
+}
+
 export interface WandTask {
   id: string;
   workspaceId: string | null;

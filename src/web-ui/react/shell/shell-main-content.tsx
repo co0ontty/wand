@@ -36,7 +36,7 @@ const ScheduledTasksPage = deferredFeature(
   () => import("../scheduled-tasks/page").then(module => module.ScheduledTasksPage),
   taskBoardStore,
   (snapshot, props) => snapshot.open && (snapshot.page === "schedules" || snapshot.page === "calendar") && props.visible,
-  { title: "定时任务", page: true, close: () => taskBoardController.close() },
+  { title: "定时", page: true, close: () => taskBoardController.close() },
 );
 
 export interface ShellMainContentRefs {
@@ -219,6 +219,7 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
       /> : null}
       <ScheduledTasksPage visible={taskBoard.open && (taskBoard.page === "schedules" || taskBoard.page === "calendar") && !settings.open}
         view={taskBoard.page === "calendar" ? "calendar" : "list"} calendarMode={taskBoard.calendarRange}
+        onViewChange={value => taskBoardController.open("", "", value === "calendar" ? "calendar" : "schedules")}
         onCalendarModeChange={value => taskBoardController.calendarRange(value)}
         sidebarOpen={snapshot.layout.sessionsDrawerOpen}
         onBack={() => taskBoardController.close()}

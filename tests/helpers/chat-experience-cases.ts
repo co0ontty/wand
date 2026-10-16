@@ -59,12 +59,12 @@ export async function runChatExperience({ evaluate: e, send, click, key, wait, m
   assert.match(stats.summary, /1 项失败/, "failure cannot disappear into collapsed history");
   assert.doesNotMatch(stats.summary, /Created|Updated|内部任务说明/);
   assert.ok(stats.summaryHeight <= 90);
-  assert.ok(stats.hiddenDetail > 0, "the process and full thinking are readable by default");
-  assert.equal(await e("document.querySelectorAll('.chat-call[data-thinking-entry][data-expanded=\"true\"] .chat-activity-thinking-content').length"), 2);
+  assert.equal(stats.hiddenDetail, 0, "the process stays folded until the reader opens it");
+  assert.equal(await e("document.querySelectorAll('.chat-call[data-thinking-entry][data-expanded=\"true\"]').length"), 0, "full thinking bodies are not expanded by default");
   assert.equal(stats.overflow, false);
   if (output) {
     const shot=await send("Page.captureScreenshot",{format:"png"});
-    writeFileSync(join(dirname(output),`experience-${mode}-default-expanded.png`),Buffer.from(shot.data,"base64"));
+    writeFileSync(join(dirname(output),`experience-${mode}-collapsed.png`),Buffer.from(shot.data,"base64"));
   }
   // Optional evidence capture uses real CDP clicks and unmodified production timing.
   if (output && process.env.WAND_CHAT_CAPTURE_MOTION === "1" && mode === "desktop") {
@@ -85,25 +85,28 @@ export async function runChatExperience({ evaluate: e, send, click, key, wait, m
     }
     writeFileSync(join(directory, "frames.json"), JSON.stringify({ frames, evidence: "Chrome captures with original motion tokens; native clicks at frames 4 and 20" }, null, 2));
     await e("h.frames()");
-    assert.equal(await e("document.querySelector('.chat-activity').dataset.expanded"), "true");
+    assert.equal(await e("document.querySelector('.chat-activity').dataset.expanded"), "false");
   }
-  if (await e("document.querySelector('.chat-activity').dataset.expanded") !== "true") await click(summary);
+  await click(summary);
   await e("h.frames()");
   assert.equal(await e("document.querySelector('.chat-activity').dataset.expanded"),"true");
-  const rows = await e(`(()=>({thinking:[...document.querySelectorAll('.chat-call[data-thinking-entry]')].map(n=>({height:n.querySelector('button').getBoundingClientRect().height,state:n.dataset.status,text:n.querySelector('button').innerText,icon:n.querySelector('[data-wand-icon]')?.dataset.wandIcon,body:n.querySelector('.chat-activity-thinking-content')?.innerText,open:n.dataset.expanded})),tools:[...document.querySelectorAll('.chat-call[data-tool-ids]')].map(n=>({height:n.querySelector('button').getBoundingClientRect().height,status:n.dataset.status,label:n.querySelector('.chat-call-label')?.innerText||'',icon:n.querySelector('[data-wand-icon]')?.dataset.wandIcon,result:n.querySelector('.chat-call-result')?.innerText||'',state:!!n.querySelector('.chat-call-meta')})),height:document.querySelector('.chat-activity-timeline').getBoundingClientRect().height,timelineOverflow:getComputedStyle(document.querySelector('.chat-activity-timeline')).overflowY,overflow:document.documentElement.scrollWidth>innerWidth+1}))()`);
+  const rows = await e(`(()=>({thinking:[...document.querySelectorAll('.chat-call[data-thinking-entry]')].map(n=>({height:n.querySelector('button').getBoundingClientRect().height,state:n.dataset.status,text:n.querySelector('button').innerText,icon:n.querySelector('[data-wand-icon]')?.dataset.wandIcon,body:n.querySelector('.chat-activity-thinking-content')?.innerText,open:n.dataset.expanded})),tools:[...document.querySelectorAll('.chat-call[data-tool-ids]')].map(n=>({height:n.querySelector('button').getBoundingClientRect().height,status:n.dataset.status,label:n.querySelector('.chat-call-label')?.innerText||'',icon:n.querySelector('[data-wand-icon]')?.dataset.wandIcon,result:n.querySelector('.chat-call-result')?.innerText||'',state:!!n.querySelector('.chat-call-meta')})),viewport:document.querySelector('.chat-messages').clientHeight,height:document.querySelector('.chat-activity-timeline').getBoundingClientRect().height,timelineOverflow:getComputedStyle(document.querySelector('.chat-activity-timeline')).overflowY,overflow:document.documentElement.scrollWidth>innerWidth+1}))()`);
   assert.equal(rows.thinking.length, 2);
-  assert.ok(rows.thinking.every(row=>row.height<=48&&row.state==="complete"&&row.open==="true"&&row.icon==="brain"&&row.body), "full thoughts are open beneath a quiet brain header");
+  assert.ok(rows.thinking.every(row=>row.height<=48&&row.state==="complete"&&row.open==="false"&&row.icon==="brain"&&!row.body), "thinking rounds stay single-line until their row is opened");
   assert.ok(rows.tools.every(row=>row.height<=110), "tool rows remain bounded while showing meaningful action titles");
   assert.ok(rows.tools.every(row=>row.icon), "actual action icons replace anonymous dots");
   assert.ok(rows.tools.some(row=>row.label.includes("核对截图")), "task subjects carry the primary hierarchy");
   assert.ok(rows.tools.some(row=>row.label==="运行界面回归"&&row.status==="error"), "failed command retains its supplied intent");
-  assert.equal(rows.timelineOverflow,"visible", "thoughts use the outer reading axis");
+  assert.equal(rows.timelineOverflow,"auto", "the timeline scrolls inside its own bounded window");
+  assert.ok(Math.abs(rows.height - Math.round(Math.max(120, Math.min(240, rows.viewport / 3)))) <= 1, "the timeline honors the viewport-third window: "+JSON.stringify(rows.height)+" "+rows.viewport);
   assert.equal(rows.overflow,false);
-  // A manual thinking collapse is not reset by another streamed paint.
+  // 手动展开的思考条目是阅读选择：换一次绘制也不会被重置。
   await click('.chat-call[data-thinking-entry] .chat-call-button');
   await e("h.doRenderChat(false);h.frames()");
-  assert.equal(await e("document.querySelector('.chat-call[data-thinking-entry]').dataset.expanded"),"false");
+  assert.equal(await e("document.querySelector('.chat-call[data-thinking-entry]').dataset.expanded"),"true","an explicitly opened thought survives repaint");
   await click('.chat-call[data-thinking-entry] .chat-call-button');
+  await e("h.frames()");
+  assert.equal(await e("document.querySelector('.chat-call[data-thinking-entry]').dataset.expanded"),"false","the reader can fold it again");
   if (output) {
     const shot=await send("Page.captureScreenshot",{format:"png"});
     writeFileSync(join(dirname(output),`experience-${mode}-expanded.png`),Buffer.from(shot.data,"base64"));

@@ -154,14 +154,14 @@ export class WsBroadcastManager {
 
   private getCardDefaults: () => CardExpandDefaults;
   private useHttps: boolean;
-  private authService?: Pick<AuthService, "validateSession">;
+  private authService?: Pick<AuthService, "validateSession"> & Partial<Pick<AuthService, "authenticateSession">>;
   private authenticateRequest?: (req: IncomingMessage) => boolean;
 
   constructor(
     wss: WebSocketServer,
     getCardDefaults?: () => CardExpandDefaults,
     useHttps = false,
-    authService?: Pick<AuthService, "validateSession">,
+    authService?: Pick<AuthService, "validateSession"> & Partial<Pick<AuthService, "authenticateSession">>,
     authenticateRequest?: (req: IncomingMessage) => boolean,
   ) {
     this.wss = wss;
@@ -205,6 +205,11 @@ export class WsBroadcastManager {
         return;
       }
       const sessionToken = readSessionCookie(req, this.useHttps);
+      if (this.authService?.authenticateSession?.(sessionToken)?.webSession) {
+        // The existing socket broadcasts workbench-wide notifications. Scoped Web
+        // login uses bounded HTTP polling instead; never expose this channel.
+        ws.close(1008, "Scoped Web login uses HTTP polling"); return;
+      }
       const cookieOk = !!sessionToken && !!this.authService?.validateSession(sessionToken);
       if (!cookieOk && !this.authenticateRequest?.(req)) {
         ws.close(1008, "Unauthorized");

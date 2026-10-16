@@ -4,6 +4,7 @@ import { ToolResultBlock, ToolUseBlock } from "./types.js";
 import { alignedBlockStart,blockWindowMessagesForTransport,compactToolMessagesForTransport,messageWindowByteBudget,sliceTurnBlocksForTransport,truncateMessagesForTransport,visibleBlockCount,windowMessagesForTransport } from "./message-truncator.js";
 import { inspectPiExecution } from "./pi-execution.js";
 import { toSessionDetailDTO,toSessionListItemDTO } from "./session-transport.js";
+import { filterWebSessionList } from "./web-session-access.js";
 
 import { asyncRoute } from "./express-async.js";
 import { parseBoundedInteger } from "./request-limits.js";
@@ -28,7 +29,7 @@ export function registerSessionListRoutes(app: Express, ctx: SessionRouteContext
       const offset = parseBoundedInteger(req.query.offset, 0, 0, Number.MAX_SAFE_INTEGER);
       const limit = parseBoundedInteger(req.query.limit, 40, 1, 200);
       const requestedRevision = typeof req.query.revision === "string" ? req.query.revision : "";
-      const currentSessions = sessions.listSlim();
+      const currentSessions = filterWebSessionList(req.principal, sessions.listSlim());
       const page = buildSessionListPage(currentSessions, offset, limit);
       if (offset > 0 && requestedRevision !== page.revision) {
         res.status(409).json({ error: "会话列表已更新，请重新加载。", revision: page.revision });
@@ -100,8 +101,8 @@ export function registerSessionListRoutes(app: Express, ctx: SessionRouteContext
     }
   });
 
-  app.get("/api/sessions", (_req, res) => {
-    res.json(sessions.listSlim().map((session) => toSessionListItemDTO(session)));
+  app.get("/api/sessions", (req, res) => {
+    res.json(filterWebSessionList(req.principal, sessions.listSlim()).map((session) => toSessionListItemDTO(session)));
   });
 
   app.get("/api/sessions/provider-usage", (_req, res) => {

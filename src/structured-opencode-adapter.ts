@@ -22,7 +22,7 @@ function extractStructuredText(value: unknown): string {
   if (Array.isArray(value)) return value.map(extractStructuredText).filter(Boolean).join("\n");
   const record = asRecord(value);
   if (!record) return "";
-  for (const key of ["text", "output_text", "message", "content", "summary"]) {
+  for (const key of ["text", "output_text", "message", "content", "summary", "data"]) {
     const text = extractStructuredText(record[key]);
     if (text) return text;
   }
