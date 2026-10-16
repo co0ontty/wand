@@ -1,8 +1,8 @@
 // 工作空间（项目）前端类型。镜像 src/types.ts 的 Workspace/LayoutNode/PaneTab，
 // provider 联合沿用浏览器层共享的 provider-identity（不把服务端 types 拉进浏览器 bundle）。
 
-import type { ProviderId } from "../../provider-identity";
-import { WAND_AGENT_TOOL_ID } from "../../provider-identity";
+import type { ProviderId } from "../../provider-identity.js";
+import { WAND_AGENT_TOOL_ID } from "../../provider-identity.js";
 
 export type WorkspaceProvider = ProviderId;
 

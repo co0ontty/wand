@@ -1,0 +1,113 @@
+{
+  "blueprintId": "team_mv9af7wd0001rdy1r7-generated-blueprint",
+  "runId": "team_mv9af7wd0001rdy1r7",
+  "task": "执行已授权的Wand会话交互第一批（仅计划1–3）：轮次导航、工具过程精简、真实运行状态合一，并同步macOS语义。必须先读 /Users/co0ontty/Self/vibe_coding/wand/output/architecture-stage2/chat-ux-batch1/LANE-BOARD.md 和 scout-map.md；计划/动态证据在 output/product-research/qoderwake/dynamic/。主仓和macOS大量已有改动已快照，严禁写主仓源码；每个角色只能写指定隔离目录，所有bash先cd该目录，read/write/edit使用对应绝对路径。隔离目录含原有dirty基线，不能把既有变更当成果。所有角色都具备bash/read/write/edit。无commit/reset/clean/push/tag，无真实模型调用/用户设备安装/服务重启/依赖安装；凭据不读不打印。Web用PATH=$HOME/.nvm/versions/node/v24.21.0/bin:$PATH，node_modules只读复用。已读设计上下文；每位UI writer实施前读自身AGENTS/DESIGN（Mac额外读主仓AGENTS与MacREADME）及主仓 .agents/skills/impeccable/reference/craft-floor.md，项目Ant/原生token优先，不重复跑context启动器。基于源码地图有界读取，避免整仓大输出；测试日志写本lane output/chat-ux-batch1。RADIO报告已确认的接口、关键风险、验证与完成；出现跨owner需求向Captain发消息，不擅自越界。Captain负责最终共享文件插接、增量合并、独立审查和安装态验收。每人完成后写本lane output/chat-ux-batch1/IMPLEMENTATION.md，精确列本轮相对基线改动、测试命令/通过或阻塞、需Captain插接的接口、未验证事项。不要把生成物或Mac锁阻挡写成通过。",
+  "playbookId": "generated-blueprint",
+  "playbookTitle": "Dynamic team blueprint",
+  "source": "generated",
+  "status": "draft",
+  "createdAt": 1792053567701,
+  "roles": [
+    {
+      "roleId": "web-navigation",
+      "title": "Web轮次导航实现",
+      "description": "仅写 /tmp/wand-chat-ux-batch1-poxnz8cu/web-navigation。负责计划1：普通执行会话与IM/群聊的轻量轮次索引、可见正文预览、稳定身份跳转、当前轮提示；窄屏按需目录。独占新导航模型/UI/样式、browser/chat-render.ts/chat-scroll.ts/chat-render-focus.ts必要改动、react/conversations/home.tsx/presentation.ts、react/ai-teams/team-chat-view.tsx及专用导航测试。不得改公共chat/activity/presentation/styles或运行状态模块。基于现有owner/lease、反向/顺向滚动及更早加载链；不能只按index跳，不能把全部历史强行渲染，不能重写数据库。预览不得包含隐藏系统上下文/原始JSON。先完成可用端到端入口，不只交静态组件；纯helper测试覆盖ID/fallback/前插/重复文本，浏览器覆盖点击/键盘/Escape/流式上翻/更早分页/窄屏/减动效。现有长会话和原生壳/?reactUi=0适配按影响范围核对。全量check可能写生成物，留在自身lane，最终只报告本轮源码增量。",
+      "capability": "coding",
+      "capabilityNeeds": [
+        "coding",
+        "tool_use",
+        "long_context"
+      ],
+      "tools": [
+        "bash",
+        "read",
+        "write",
+        "edit"
+      ],
+      "modelPreferences": [],
+      "modelFit": "Strong TypeScript/React DOM lifecycle and history-window reasoning; prefer a healthy provider distinct from other roles when available."
+    },
+    {
+      "roleId": "web-activity",
+      "title": "Web工具过程密度优化",
+      "description": "仅写 /tmp/wand-chat-ux-batch1-poxnz8cu/web-activity。负责计划2，精简已有公共ChatActivityEntry的完成态（默认单行摘要），运行/错误/待处理层级明确；原详情和用户手动展开状态保留，折叠保持阅读锚点。独占react/chat/activity.tsx、presentation.tsx、styles.ts以及conversations/activity.tsx中的工具/折叠段，专用测试/harness。不要改chat-render.ts/home.tsx/team-chat-view.tsx/运行状态模块；如需数据属性，给Captain精确接口，不跨lane修改。不把pending当running、不用文字关键词猜成功、不隐藏QuestionCard。优先复用现有preserveDisclosurePosition和懒挂载，不大量重建DOM。补结构化工具返回成功/错误/未返回、手动展开、长参数、多工具、键盘和reduced-motion的针对验证；将既有失败和自身回归分开。",
+      "capability": "coding",
+      "capabilityNeeds": [
+        "coding",
+        "tool_use",
+        "critical_review"
+      ],
+      "tools": [
+        "bash",
+        "read",
+        "write",
+        "edit"
+      ],
+      "modelPreferences": [],
+      "modelFit": "Strong frontend state/accessibility correctness and focused regression design; prefer independent healthy model/provider."
+    },
+    {
+      "roleId": "web-status",
+      "title": "Web真实运行状态统一",
+      "description": "仅写 /tmp/wand-chat-ux-batch1-poxnz8cu/web-status。负责计划3的纯投影和状态条：真实阶段+当前动作/工具名，减少重复/矛盾文案，不造进度/本地运行事实。独占src/web-ui/running-activity.ts、react/chat/running-status-bar.tsx、browser/running-status-adapter.tsx、新纯辅助和专用测试。不得改server/structured-session-manager或browser/input.ts、home.tsx、team-chat-view.tsx、conversations/activity.tsx；接入所需新增参数/删除重复标签的最小建议写handoff，由Captain插接。必须依据当前回合明确enum/工具事件，缺少事实回落通用执行；禁止正文关键词识别。不同source session和团队run不合并，裸PTY status=running不能算在执行。排队、等待、停止、失败语义若与现有projection优先级冲突，要在行为测试与报告中明确修正，不改底层执行。服务端时间锚点与迟到结果/草稿边界不变，不暴露完整命令或敏感参数到全局状态条。验证纯投影、bar/adapter更新、当前动作退场等；不宣称未接入的入口已经完成。",
+      "capability": "coding",
+      "capabilityNeeds": [
+        "coding",
+        "tool_use",
+        "critical_review"
+      ],
+      "tools": [
+        "bash",
+        "read",
+        "write",
+        "edit"
+      ],
+      "modelPreferences": [],
+      "modelFit": "Strong typed state-machine and regression reasoning; different healthy model/provider preferred."
+    },
+    {
+      "roleId": "macos-transcript",
+      "title": "macOS会话同语义实现",
+      "description": "仅写 /tmp/wand-chat-ux-batch1-poxnz8cu/macos。这是单一原生transcript集成seam：ChatView.swift同时拥有三项呈现，避免三人交叉写。同步第一批：轻量轮次目录/预览与跳转、完成工具紧凑呈现、真实状态合一；覆盖执行会话ChatView及CommunicationsViews的私聊/群聊适配。独占这两文件、新导航/状态纯投影Swift文件、必要的ChatStore/WandModels展示适配、相关WandTests；pbxproj已有dirty基线，只增量登记新文件并列明，不碰Workspace/Settings/IM/WandAPI其他工作。保持现有阅读宽度、WandMotion/ReduceMotion、原生焦点/键盘，保留userToggled/草稿/当前request/运行所有权。旧messageId可缺失，要给诚实稳定fallback与加载范围，不宣称全历史永久ID。~/.config/wand-build/migration.lock存在，正常脚本测试尝试一次并留证据；不得绕过锁或改环境。被阻挡时明确未编译/未视觉/未Beta，不用静态测试冒充原生通过；源码仍应形成完整候选与测试，由Captain审查/后续构建。只实现第一批，不增加侧聊、/技能或改输入协议。",
+      "capability": "coding",
+      "capabilityNeeds": [
+        "coding",
+        "tool_use",
+        "long_context"
+      ],
+      "tools": [
+        "bash",
+        "read",
+        "write",
+        "edit"
+      ],
+      "modelPreferences": [],
+      "modelFit": "Strong native SwiftUI/AppKit implementation with explicit scroll ownership and state-projection discipline."
+    }
+  ],
+  "rounds": [
+    {
+      "id": "collect",
+      "type": "parallel",
+      "roles": [
+        "web-navigation",
+        "web-activity",
+        "web-status",
+        "macos-transcript"
+      ]
+    }
+  ],
+  "policy": {
+    "rationale": "A task-specific collaboration blueprint generated for the lead captain",
+    "strategy": "The lead captain generated this collaboration plan; the extension handles dispatch, communication, observation, and recording.",
+    "evidencePolicy": "Workers should separate cited evidence, inference, confidence, and missing information.",
+    "modelPolicy": "Use configured models that are objectively available; keep soft health observations visible.",
+    "synthesisPolicy": "The lead uses worker outputs as inputs and keeps final judgment outside the extension.",
+    "progressMilestones": [
+      "collect: parallel"
+    ],
+    "stopCriteria": "All planned rounds have returned a status and the run log is persisted."
+  },
+  "outputContract": "每个角色提供隔离目录内的可集成实现和精确文件清单、测试证据、未通过/阻塞与共享接入点；不直接改主仓，不自作最终验收结论。",
+  "captainRationale": "A task-specific collaboration blueprint generated for the lead captain"
+}

@@ -1,4 +1,5 @@
 import type { TaskDirectoryGroup, TaskSummary, WorkspaceSessionSummary } from "./types";
+import { defaultDirectoryTaskName } from "./sidebar-default-task";
 
 export function sidebarSearchMatches(query: string, ...values: (string | undefined)[]): boolean {
   const words = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
@@ -46,11 +47,12 @@ export function filterSidebarGroups(
     const tasks = group.tasks.filter((task) => matches(
       name, task.name, task.cwd, ...task.sessions.map(sessionText), ...(task.archivedSessions ?? []).map(sessionText),
     ));
+    const defaultName = defaultDirectoryTaskName(group);
     const standaloneSessions = group.standaloneSessions.filter((session) => (
-      matches(name, sessionText(session))
+      matches(defaultName, sessionText(session))
     ));
-    const archivedSessions = group.archivedSessions?.filter((session) => matches(name, sessionText(session)));
-    return tasks.length || standaloneSessions.length || archivedSessions?.length
+    const archivedSessions = group.archivedSessions?.filter((session) => matches(defaultName, sessionText(session)));
+    return tasks.length || standaloneSessions.length || archivedSessions?.length || matches(defaultName)
       ? [{ ...group, tasks, standaloneSessions, archivedSessions }] : [];
   });
 }

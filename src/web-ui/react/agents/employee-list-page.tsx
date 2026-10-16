@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Alert, Checkbox, Spin } from "antd";
 import { isBuiltinSiliconEmployee, siliconEmployeeTags, type SiliconEmployee } from "../../../ai-team-types.js";
-import { WandButton, WandIcon, WandIconButton, WandSearchField } from "../ui";
+import { WandBadge, WandButton, WandIcon, WandIconButton, WandSearchField } from "../ui";
 import { EmployeeAvatar } from "./employee-avatar.js";
 import { EmployeeCard } from "./employee-card.js";
 import { EmployeeCreateForm } from "./employee-create-form.js";
@@ -11,8 +11,17 @@ import type { IssueModelCatalog } from "../issues/task-board-agent.js";
 import type { ProviderOptions } from "./candidate-editor.js";
 import type { WandTaskAgent } from "../../../task-types.js";
 import { wandOverlay } from "../overlay-controller.js";
+import { useUserProfile } from "../user-profile-repository.js";
+import { settingsController } from "../settings/controller.js";
 
-export function EmployeeListPage({ catalog, providerOptions, onEditingChange }: { catalog: IssueModelCatalog | null; providerOptions: ProviderOptions; onEditingChange?(editing: boolean): void }): React.ReactElement {
+export interface EmployeeListPageProps {
+  catalog: IssueModelCatalog | null; providerOptions: ProviderOptions; onEditingChange?(editing: boolean): void;
+  renderSelf?(callbacks: { onDirtyChange(dirty: boolean): void; onSavingChange(busy: boolean): void }): React.ReactNode;
+}
+
+export function EmployeeListPage({ catalog, providerOptions, onEditingChange, renderSelf }: EmployeeListPageProps): React.ReactElement {
+  const self = useUserProfile();
+  const [selectedSelf, setSelectedSelf] = React.useState(!!renderSelf);
   const { employees, loading, error, reload } = useSiliconEmployees({ includeArchived: true });
   const [query, setQuery] = React.useState("");
   const [showArchived, setShowArchived] = React.useState(false);
@@ -28,7 +37,7 @@ export function EmployeeListPage({ catalog, providerOptions, onEditingChange }: 
     && `${employee.name} ${employee.duty} ${employee.prompt} ${siliconEmployeeTags(employee).join(" ")}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())), [employees, query, showArchived]);
   const selected = employees.find(employee => employee.id === selectedId) ?? null;
   React.useEffect(() => { installEmployeeProfileStyles(); }, []);
-  const editing = isCreating || selected !== null;
+  const editing = selectedSelf || isCreating || selected !== null;
   React.useLayoutEffect(() => { onEditingChange?.(editing); }, [editing, onEditingChange]);
   React.useLayoutEffect(() => {
     if (editing || !directoryRef.current) return;
@@ -48,16 +57,16 @@ export function EmployeeListPage({ catalog, providerOptions, onEditingChange }: 
     if (!await discard()) return;
     directoryPosition.current = directoryRef.current?.scrollTop ?? 0;
     returnEmployee.current = employee.id;
-    setSelectedId(employee.id); setIsCreating(false); setDirty(false);
+    setSelectedSelf(false); setSelectedId(employee.id); setIsCreating(false); setDirty(false);
   };
   const back = async () => {
     if (!await discard()) return;
-    setSelectedId(null); setIsCreating(false); setDirty(false);
+    setSelectedSelf(false); setSelectedId(null); setIsCreating(false); setDirty(false);
   };
   const create = async () => {
     if (!await discard()) return;
     directoryPosition.current = directoryRef.current?.scrollTop ?? 0;
-    setIsCreating(true); setDirty(false);
+    setSelectedSelf(false); setIsCreating(true); setSelectedId(null); setDirty(false);
   };
   const handleCreate = async (draft: { name: string; duty: string; prompt: string; avatar: string; tags: string[]; agents: WandTaskAgent[] }) => {
     const saved = await siliconEmployeesRepository.create(draft); setSelectedId(saved.id); setIsCreating(false); reload();
@@ -86,6 +95,13 @@ export function EmployeeListPage({ catalog, providerOptions, onEditingChange }: 
         <WandButton kind="primary" disabled={busy} onClick={() => void create()}><WandIcon name="plus" size={15}/>招聘员工</WandButton>
       </div>
       <div className="employee-items">
+        {(!query.trim() || `${self.name || "我"} 我 我的资料`.includes(query.trim())) && <button type="button" className="employee-item" data-directory-employee-id="user" onClick={() => {
+          if (!renderSelf) { settingsController.open("profile"); return; }
+          setSelectedSelf(true); setDirty(false);
+        }}>
+          <EmployeeAvatar employee={{ id: "user", name: self.name || "我", avatar: self.avatar }} provider="" size="md"/>
+          <span><strong>{self.name || "我"}<WandBadge className="wand-self-tag" tone="accent">我</WandBadge></strong><small>我的资料 · 消息署名与头像</small></span><WandIcon name="chevron" size={16}/>
+        </button>}
         {filtered.map(employee => <button type="button" className="employee-item" key={employee.id} data-directory-employee-id={employee.id} onClick={() => void select(employee)} title={employee.name}>
           <EmployeeAvatar employee={employee} provider="" size="md"/>
           <span><strong>{employee.name}{employee.archivedAt && <span className="employee-archived-label">已归档</span>}</strong><small>{employee.duty || siliconEmployeeTags(employee).join(" · ") || "尚未填写职责"}</small></span>
@@ -95,7 +111,10 @@ export function EmployeeListPage({ catalog, providerOptions, onEditingChange }: 
         {!filtered.length && !loading && <div className="no-results" role="status"><p>{query ? "没有匹配的员工" : "还没有硅基员工"}</p><WandButton kind="ghost" onClick={() => query ? setQuery("") : void create()}>{query ? "清空搜索" : "招聘员工"}</WandButton></div>}
       </div>
       {loading && <span role="status"><Spin size="small"/>正在读取员工…</span>}
-    </section> : isCreating ? <div className="employee-profile-content">
+    </section> : selectedSelf ? <div className="employee-profile-content">
+      <header className="profile-header"><div className="profile-heading"><WandIconButton aria-label="返回员工列表" disabled={busy} onClick={() => void back()}><WandIcon name="chevronLeft" size={18}/></WandIconButton><h2>{self.name || "我"} · 我的资料</h2></div></header>
+      {renderSelf?.({ onDirtyChange: setDirty, onSavingChange: setBusy })}
+    </div> : isCreating ? <div className="employee-profile-content">
       <header className="profile-header"><div className="profile-heading"><WandIconButton aria-label="返回员工列表" disabled={busy} onClick={() => void back()}><WandIcon name="chevronLeft" size={18}/></WandIconButton><h2>招聘员工</h2></div></header>
       <EmployeeCreateForm catalog={catalog} providerOptions={providerOptions} onDirtyChange={setDirty} onSavingChange={setBusy} onSave={handleCreate} onCancel={() => { setIsCreating(false); setDirty(false); setBusy(false); }}/>
     </div> : selected && <EmployeeCard key={selected.id} employee={selected} catalog={catalog} providerOptions={providerOptions} editorOnly onDirtyChange={setDirty} onSavingChange={setBusy} onSave={handleSave} onBack={() => void back()} onArchive={() => mutation("archive")} onUnarchive={() => mutation("unarchive")} onDelete={() => mutation("remove")}/>}

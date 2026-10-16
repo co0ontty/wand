@@ -24,7 +24,7 @@ export function scheduledTaskState(task: ScheduledTaskSummary): string {
   return task.employeeUnavailableReason ? "员工不可用" : task.workspaceUnavailableReason ? "工作区不可用" : "待执行";
 }
 
-export function scheduledRunState(run: ScheduledTaskRunView): string {
+export function scheduledRunState(run: Pick<ScheduledTaskRunView, "executionStatus">): string {
   return ({ pending: "等待执行", running: "执行中", completed: "已完成", failed: "执行失败", unknown: "执行结果待确认", skipped: "已跳过" })[run.executionStatus];
 }
 

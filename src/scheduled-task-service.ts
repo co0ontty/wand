@@ -7,9 +7,13 @@ import type { ConversationService } from "./conversation-service.js";
 import { employeeConversationId } from "./conversation-types.js";
 import { getErrorMessage } from "./error-utils.js";
 import { nextScheduledTime,parseTaskSchedule } from "./scheduled-task-time.js";
+import { dateKey } from "./scheduled-task-activity.js";
+import { calendarData } from "./scheduled-task-calendar.js";
+import { scheduledActivityRange, scheduledReadBounds, scheduledReadRange } from "./scheduled-task-read-range.js";
 import type {
   ScheduledTask,ScheduledTaskDetail,ScheduledTaskRun,ScheduledTaskRunView,
-  ScheduledTaskSummary
+  ScheduledTaskSummary, ScheduledTaskRunFact, ScheduledTaskRunFactView, ScheduledTaskReadRange,
+  ScheduledTaskCalendarResponse, ScheduledTaskActivityResponse
 } from "./scheduled-task-types.js";
 import { bodyObject } from "./server-request.js";
 import { resolveSessionCwd } from "./session-cwd.js";
@@ -88,7 +92,7 @@ export class ScheduledTaskService {
     return task;
   }
 
-  private runView(run: ScheduledTaskRun): ScheduledTaskRunView {
+  private runView<T extends ScheduledTaskRunFact>(run: T): T & Pick<ScheduledTaskRunView, "receipt" | "executionStatus" | "sessionId"> {
     const receipt = run.executionFinishedAt ? run.receipt : this.deps.conversations.receipt(run.requestId) ?? run.receipt;
     const sessionId = receipt?.sessionId ?? null;
     const session = sessionId ? this.deps.getSession(sessionId) : null;
@@ -103,7 +107,7 @@ export class ScheduledTaskService {
     catch (error) { employeeUnavailableReason = getErrorMessage(error); }
     const workspace = task.workspaceId ? this.deps.storage.getWorkspace(task.workspaceId) : null;
     const directory = this.executionDirectory(task);
-    const lastRun = this.deps.storage.listScheduledTaskRuns(task.id, 1)[0];
+    const lastRun = this.deps.storage.latestScheduledTaskRun(task.id);
     return { ...task, employeeName: employee?.name ?? "员工已不可用", employeeUnavailableReason,
       workspaceName: task.workspaceId ? workspace?.name ?? "项目已不可用" : "服务默认目录",
       workspaceCwd: directory.cwd, workspaceUnavailableReason: directory.error,
@@ -116,6 +120,60 @@ export class ScheduledTaskService {
 
   get(id: string): ScheduledTaskDetail {
     return { task: this.summary(this.requireTask(id)), runs: this.deps.storage.listScheduledTaskRuns(id).map(run => this.runView(run)) };
+  }
+
+  getRun(taskId: string, runId: string): ScheduledTaskRunView {
+    this.requireTask(taskId);
+    const run = this.deps.storage.getScheduledTaskRun(runId);
+    if (!run || run.taskId !== taskId) throw new ScheduledTaskNotFoundError("执行记录不存在。");
+    return this.runView(run);
+  }
+
+  private fact(run: ScheduledTaskRunFact): ScheduledTaskRunFactView {
+    const view = this.runView(run);
+    const { id, taskId, scheduledAt, claimedAt, executionFinishedAt, executionOutcome, employeeId, workspaceId, cwd, state, executionStatus, sessionId } = view;
+    return { id, taskId, scheduledAt, claimedAt, executionFinishedAt, executionOutcome, employeeId, workspaceId, cwd, state, executionStatus, sessionId,
+      error: view.error && view.error.length > 8000 ? `${view.error.slice(0, 8000)}…（完整错误请查看本次记录或会话）` : view.error };
+  }
+
+  private facts(range: ScheduledTaskReadRange, taskId?: string): ScheduledTaskRunFactView[] {
+    const [from, to] = scheduledReadBounds(range);
+    const raw = this.deps.storage.listScheduledTaskRunFacts(from, to, taskId, range.limit + 1);
+    range.truncated = raw.length > range.limit;
+    range.invalidDates = this.deps.storage.countInvalidScheduledTaskRunDates(taskId);
+    range.complete = !range.truncated && range.invalidDates === 0;
+    return raw.slice(0, range.limit).filter(run => {
+      if (!Number.isFinite(Date.parse(run.claimedAt))) { range.complete = false; return false; }
+      const day = dateKey(run.claimedAt, range.timeZone);
+      return day >= range.from && day <= range.to;
+    }).map(run => this.fact(run));
+  }
+
+  activity(id: string, timeZone: unknown): ScheduledTaskActivityResponse {
+    this.requireTask(id);
+    const now = this.now(), range = scheduledActivityRange(now, timeZone);
+    return { runs: this.facts(range, id), range, generatedAt: now.toISOString() };
+  }
+
+  calendar(from: unknown, to: unknown, timeZone: unknown): ScheduledTaskCalendarResponse {
+    const now = this.now(), range = scheduledReadRange(from, to, timeZone);
+    const tasks = this.list(true), facts = this.facts(range);
+    const records: Record<string, ScheduledTaskRunFactView[]> = {};
+    for (const run of facts) (records[run.taskId] ??= []).push(run);
+    const projection = calendarData(tasks, records, range.from, range.to, now, range.timeZone);
+    range.truncated ||= projection.truncated;
+    const taskIDs = new Set(tasks.map(task => task.id));
+    const orphaned = facts.filter(run => !taskIDs.has(run.taskId)).length;
+    range.complete &&= !range.truncated && orphaned === 0 && projection.issues.length === 0;
+    const issues = [...projection.issues];
+    if (range.truncated) issues.push("历史或预计安排已达到读取上限，当前范围可能不完整，请缩小日期范围。");
+    if (range.invalidDates) issues.push(`${range.invalidDates} 条旧记录时间待确认，未绘入日期格。`);
+    if (orphaned) issues.push(`${orphaned} 条记录的原计划已不可用。`);
+    return { tasks, entries: projection.entries.map(({ task, ...entry }) => {
+      const parts = new Intl.DateTimeFormat("en-GB", { timeZone: range.timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(entry.at));
+      const minuteOfDay = Number(parts.find(part => part.type === "hour")!.value) * 60 + Number(parts.find(part => part.type === "minute")!.value);
+      return { ...entry, taskId: task.id, minuteOfDay };
+    }), range, generatedAt: now.toISOString(), issues };
   }
 
   create(value: unknown): ScheduledTaskSummary {

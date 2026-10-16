@@ -12,7 +12,6 @@ const STRUCTURED_RUNNERS = new Set([
   "grok-cli-headless",
   "qoder-cli-print",
   "pi-cli-json",
-  "gemini-cli-json",
 ]);
 
 /**

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -159,26 +159,4 @@ test("OpenCode 纯文本适配只对本次调用禁用工具，保留既有内�
   assert.match(agent, /^wand-text-/); assert.equal(value.config.agent[agent].permission, "deny");
   assert.deepEqual(value.config.agent.user, { mode: "primary" });
   assert.equal(process.env.OPENCODE_CONFIG_CONTENT, original);
-});
-
-test("Gemini 的临时 deny policy 权限为 0600，失败和取消均清理", async t => {
-  const root = mkdtempSync(join(tmpdir(), "wand-gemini-policy-test-")), bin = join(root, "bin"); mkdirSync(bin);
-  const marker = join(root, "policy.json");
-  writeFileSync(join(bin, "gemini"), `#!${process.execPath}\nconst fs=require("node:fs"),args=process.argv.slice(2),policy=args[args.indexOf("--admin-policy")+1];fs.writeFileSync(${JSON.stringify(marker)},JSON.stringify({policy,mode:fs.statSync(policy).mode&511}));process.stdin.resume();process.stdin.on("end",()=>{if(args.includes("fail"))process.exit(1);else setInterval(()=>{},1000);});\n`, { mode: 0o755 });
-  const oldPath = process.env.PATH, oldShell = process.env.WAND_SHELL_ENV_DISABLE;
-  process.env.PATH = bin; process.env.WAND_SHELL_ENV_DISABLE = "1";
-  t.after(() => { process.env.PATH = oldPath;
-    if (oldShell === undefined) delete process.env.WAND_SHELL_ENV_DISABLE; else process.env.WAND_SHELL_ENV_DISABLE = oldShell;
-    rmSync(root, { recursive: true, force: true }); });
-  await assert.rejects(callConfiguredAiText(request, root, "", { provider: "gemini", model: "fail" }));
-  let value = JSON.parse(readFileSync(marker, "utf8"));
-  assert.equal(value.mode, 0o600); assert.equal(existsSync(value.policy), false);
-  rmSync(marker);
-  const abort = new AbortController();
-  const pending = callConfiguredAiText(request, root, "", { provider: "gemini", signal: abort.signal, budgetMs: 5000 });
-  const rejection = assert.rejects(pending, { name: "AbortError" });
-  for (let i = 0; i < 250 && !existsSync(marker); i++) await new Promise(resolve => setTimeout(resolve, 20));
-  assert.equal(existsSync(marker), true); value = JSON.parse(readFileSync(marker, "utf8"));
-  abort.abort(); await rejection;
-  assert.equal(existsSync(value.policy), false);
 });

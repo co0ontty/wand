@@ -9,7 +9,6 @@
 import {
   copyToClipboard,
   openInBrowser,
-  serviceRestart,
 } from "./commands.js";
 import { IpcClient } from "./ipc-client.js";
 import { IpcSnapshotData } from "./ipc-protocol.js";
@@ -17,7 +16,8 @@ import { PidInfo } from "../pidfile.js";
 import { buildLayout, HeaderInfo, LayoutHandle } from "./layout.js";
 import { SessionRow } from "./session-formatter.js";
 import { openServicePanel } from "./service-panel.js";
-import { runOffMicrotask, safeServiceInstalled } from "./runtime-utils.js";
+import { safeServiceInstalled } from "./runtime-utils.js";
+import { runTuiServiceCommand } from "./service-command.js";
 import { createServiceActions } from "./service-actions.js";
 
 export interface AttachTuiDeps {
@@ -158,11 +158,11 @@ export function startAttachTui(deps: AttachTuiDeps): AttachTuiHandle {
       `通道 ${channelLabel}：当前 ${current} → 最新 ${latest}，立即升级？升级后请按 R 重启服务。`,
     installServiceBody: (isRoot) => process.platform === "linux"
       ? `将写入 /etc/systemd/system/wand.service，systemctl enable --now，开机自启。\n${
-          isRoot ? "当前是 root，可以直接装。" : "⚠ 需要 root,可以 Ctrl+C 退出 TUI 后跑 sudo wand service:install。"
+          isRoot ? "当前是 root，可以直接装。" : "需要管理员权限，将自动申请 sudo，请在终端输入密码。"
         }`
       : process.platform === "darwin"
         ? `将写入 /Library/LaunchDaemons/com.wand.web.plist，launchctl load，开机自启。\n${
-            isRoot ? "当前是 root,可以直接装。" : "⚠ 需要 root,退出 TUI 跑 sudo wand service:install。"
+            isRoot ? "当前是 root,可以直接装。" : "需要管理员权限，将自动申请 sudo，请在终端输入密码。"
           }`
         : "当前平台暂不支持。",
   });
@@ -206,7 +206,7 @@ export function startAttachTui(deps: AttachTuiDeps): AttachTuiHandle {
       });
       if (!ok) return;
       layout.showToast("正在请求服务重启…", "info", 3000);
-      const r = await runOffMicrotask(() => serviceRestart());
+      const r = await runTuiServiceCommand(layout, "service:restart", deps.configPath);
       layout.showToast(r.ok ? "已请求重启，IPC 会自动重连" : r.message, r.ok ? "success" : "error", 4000);
       if (r.detail) layout.showDetail(r.ok ? "服务重启输出" : "服务重启失败", r.detail);
       return;

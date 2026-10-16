@@ -37,7 +37,6 @@ const PROVIDER_LABELS: Record<SessionProvider, string> = {
   grok: "Grok Build CLI",
   qoder: "Qoder CLI",
   pi: "Pi coding agent",
-  gemini: "Gemini CLI",
 };
 
 /** 硅基员工只能跑结构化会话；候选沿用看板的「跟随服务端默认」。 */
@@ -284,7 +283,7 @@ export async function generateSiliconEmployeeDraft(
   const providers = available.length ? available : [options.preferredProvider ?? "claude", ...SESSION_PROVIDERS];
   const request = buildEmployeeDraftPrompt(trimmed, providers, options.existingNames);
   try {
-    return await callConfiguredAiText(request, options.cwd || process.cwd(), options.language ?? "", ai,
+    return await callConfiguredAiText(request, options.cwd || process.cwd(), options.language ?? "", { ...ai, purpose: "employee-draft" },
       (raw) => parseSiliconEmployeeDraft(raw, {
         allowedProviders: providers, fallbackProvider: providers[0], existingNames: options.existingNames,
       }));

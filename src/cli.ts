@@ -51,6 +51,10 @@ async function main(): Promise<void> {
         break;
       }
 
+      const { installServiceDiagnosticRotation } = await import("./diagnostic-logs.js");
+      const { dirname } = await import("node:path");
+      installServiceDiagnosticRotation(dirname(configPath), "web");
+
       const { ensureNodePtyHelperExecutable } = await import("./ensure-node-pty-helper.js");
       ensureNodePtyHelperExecutable();
       const { isPortInUseError, startServer } = await import("./server.js");
@@ -110,6 +114,9 @@ async function main(): Promise<void> {
       break;
     }
     case "terminald": {
+      const { installServiceDiagnosticRotation } = await import("./diagnostic-logs.js");
+      const { dirname } = await import("node:path");
+      installServiceDiagnosticRotation(dirname(configPath), "terminald");
       const { ensureNodePtyHelperExecutable } = await import("./ensure-node-pty-helper.js");
       ensureNodePtyHelperExecutable();
       const { runTerminalDaemon } = await import("./terminal-daemon-server.js");
@@ -118,6 +125,24 @@ async function main(): Promise<void> {
     }
     case "config:path": {
       process.stdout.write(`${configPath}\n`);
+      break;
+    }
+    case "storage:cleanup": {
+      const options = args.slice(1);
+      for (let i = 0; i < options.length; i++) {
+        if (options[i] === "-c" || options[i] === "--config") {
+          if (!options[++i] || options[i].startsWith("-")) throw new Error("Missing config path.");
+        }
+        else if (options[i] !== "--apply") throw new Error("Usage: wand storage:cleanup [--apply] [-c <config>]");
+      }
+      const { createStorageCleanup } = await import("./storage-cleanup.js");
+      const { dirname } = await import("node:path");
+      const { openUploadCleanupStore } = await import("./storage/uploads-repository.js");
+      const { resolveDatabasePath } = await import("./storage.js");
+      const database = openUploadCleanupStore(resolveDatabasePath(configPath), options.includes("--apply"));
+      const cleanup = createStorageCleanup(dirname(configPath), { uploads: database?.uploads });
+      try { process.stdout.write(`${JSON.stringify(await cleanup.run(options.includes("--apply")), null, 2)}\n`); }
+      finally { await cleanup.stop(); database?.close(); }
       break;
     }
     case "config:show": {
@@ -178,6 +203,42 @@ async function main(): Promise<void> {
       } finally {
         storage.close();
       }
+      break;
+    }
+    case "employee:list":
+    case "workspace:list":
+    case "session:create":
+    case "session:resume":
+    case "schedule:list":
+    case "schedule:read":
+    case "schedule:create":
+    case "schedule:update": {
+      const { parseSystemCliCommand } = await import("./system-cli.js");
+      const operationArgs = args.slice(1);
+      for (const flag of ["-c", "--config"]) {
+        const index = operationArgs.indexOf(flag);
+        if (index !== -1) {
+          if (!operationArgs[index + 1] || operationArgs[index + 1]!.startsWith("-")) throw new Error("配置路径缺失。");
+          operationArgs.splice(index, 2);
+        }
+      }
+      const operation = await parseSystemCliCommand(command, operationArgs);
+      const { config } = await loadConfigForCli(configPath);
+      process.stdout.write(`${JSON.stringify(await operation(new WandCliApi(config)), null, 2)}\n`);
+      break;
+    }
+    case "system:skills": {
+      for (let index = 1; index < args.length; index += 2) {
+        if (!["--providers", "--config", "-c"].includes(args[index]!)
+          || !args[index + 1] || args[index + 1]!.startsWith("-")) {
+          throw new Error("用法：wand system:skills [--providers pi,claude,...] [-c <config-path>]");
+        }
+      }
+      const { installSystemSkill } = await import("./system-skill.js");
+      const { SESSION_PROVIDERS } = await import("./provider-catalog.js");
+      const selected = readFlagValue(args, "--providers")?.split(",") ?? [...SESSION_PROVIDERS];
+      if (selected.some(provider => !SESSION_PROVIDERS.includes(provider as typeof SESSION_PROVIDERS[number]))) throw new Error("未知CLI技能目标。");
+      process.stdout.write(`${JSON.stringify(await installSystemSkill(configPath, selected as typeof SESSION_PROVIDERS[number][]))}\n`);
       break;
     }
     case "session:list":
@@ -291,8 +352,18 @@ Commands:
   wand config:show          Print current config
   wand config:password      Print current login password
   wand config:set           Update a simple config value
+  wand storage:cleanup [--apply]  Inspect/reclaim abandoned Wand runtime storage
 
 Agent runtime:
+  wand system:skills [--providers pi,claude,...]  Install the managed wand-system skill
+  wand employee:list [--include-archived]  List employee definitions (not private knowledge)
+  wand workspace:list       List project directories
+  wand session:create --stdin  Create an employee session from JSON
+  wand session:resume <id> --stdin  Continue the exact structured session with JSON input
+  wand schedule:list [--include-cancelled]
+  wand schedule:read <id>    Read schedule and execution history
+  wand schedule:create --stdin  Create a schedule from JSON (requestId required)
+  wand schedule:update <id> --stdin  Edit/pause/cancel (revision required)
   wand session:list         List sessions as JSON
   wand inbox:list           List mission inbox items as JSON
   wand session:read <id>    Read a complete session snapshot
@@ -908,12 +979,13 @@ function setConfigValue(
         port: Number(value)
       };
     case "https":
+    case "autoCleanupTemporaryFiles":
       if (value !== "true" && value !== "false") {
-        throw new Error("https must be 'true' or 'false'");
+        throw new Error(`${key} must be 'true' or 'false'`);
       }
       return {
         ...config,
-        https: value === "true"
+        [key]: value === "true"
       };
     case "publicOrigin": {
       if (!value) throw new Error("publicOrigin must not be empty; use 'wand config:unset publicOrigin' to clear it");
@@ -951,6 +1023,15 @@ async function runServiceCommand(
   args: string[],
   configPath: string,
 ): Promise<number> {
+  const { elevateServiceCommand, resolveServiceCommandScope } = await import("./service-command-privilege.js");
+  const scope = resolveServiceCommandScope(command, args);
+  if (command === "service:restart" && !readFlagValue(args, "-c") && !readFlagValue(args, "--config")) {
+    const { readServiceConfigPath } = await import("./service-manager/index.js");
+    configPath = readServiceConfigPath(scope) ?? configPath;
+  }
+  const elevated = await elevateServiceCommand(command, args, configPath, scope);
+  if (elevated !== null) return elevated;
+
   const {
     installService,
     uninstallService,
@@ -962,11 +1043,6 @@ async function runServiceCommand(
   } = await import("./tui/commands.js");
 
   const verbose = args.includes("--verbose");
-  // --user / --system 决定 scope；不传走库里 default（= system）。
-  // 同时传 --user 和 --system 时 --user 胜（更"友好"那一个不需要 root）。
-  const wantUser = args.includes("--user");
-  const wantSystem = args.includes("--system");
-  const scope = wantUser ? "user" : (wantSystem ? "system" : undefined);
 
   switch (command) {
     case "service:install": {
@@ -999,7 +1075,8 @@ async function runServiceCommand(
       return result.ok ? 0 : 1;
     }
     case "service:restart": {
-      const result = serviceRestart(scope ? { scope } : undefined);
+      const timeoutSeconds = Number(readFlagValue(args, "--timeout") ?? 0);
+      const result = await serviceRestart({ scope, configPath, timeoutSeconds });
       printServiceResult(result, verbose);
       return result.ok ? 0 : 1;
     }
@@ -1036,7 +1113,7 @@ function printServiceResult(
 ): void {
   const prefix = result.ok ? "[wand]" : "[wand] ✗";
   process.stdout.write(`${prefix} ${result.message}\n`);
-  if (verbose && result.detail) {
+  if ((verbose || !result.ok) && result.detail) {
     process.stdout.write(result.detail + "\n");
   }
 }

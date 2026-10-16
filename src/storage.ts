@@ -8,6 +8,7 @@ import type { ConnectorMeta } from "./storage/mappers.js";
 import { parseWandTaskAgent } from "./storage/mappers.js";
 export * from "./storage/internal.js";
 import { ConversationRepository } from "./storage/conversations-repository.js";
+import { ConversationOrganizationRepository } from "./storage/conversation-organization-repository.js";
 import { PreferencesRepository } from "./storage/preferences-repository.js";
 import { WorkspaceRepository } from "./storage/workspaces-repository.js";
 import { TaskRepository } from "./storage/tasks-repository.js";
@@ -17,6 +18,7 @@ import { UserMemoryRepository } from "./storage/user-memory-repository.js";
 import { AiTeamRepository } from "./storage/ai-teams-repository.js";
 import { MissionRepository } from "./storage/missions-repository.js";
 import { SessionRepository } from "./storage/sessions-repository.js";
+import { UploadRepository } from "./storage/uploads-repository.js";
 export { parseWandTaskAgent };
 export type { ConnectorMeta };
 export { ensureDatabaseFile } from "./storage-schema.js";
@@ -26,6 +28,7 @@ type RepositoryMethods<T> = Pick<T, { [K in keyof T]: T[K] extends (...args: nev
 
 export interface WandStorage extends
   RepositoryMethods<ConversationRepository>,
+  RepositoryMethods<ConversationOrganizationRepository>,
   RepositoryMethods<PreferencesRepository>,
   RepositoryMethods<WorkspaceRepository>,
   RepositoryMethods<TaskRepository>,
@@ -34,10 +37,12 @@ export interface WandStorage extends
   RepositoryMethods<UserMemoryRepository>,
   RepositoryMethods<AiTeamRepository>,
   RepositoryMethods<MissionRepository>,
-  RepositoryMethods<SessionRepository> {}
+  RepositoryMethods<SessionRepository>,
+  RepositoryMethods<UploadRepository> {}
 
 export class WandStorage {
   readonly conversations: ConversationRepository;
+  readonly conversationOrganizations: ConversationOrganizationRepository;
   readonly preferences: PreferencesRepository;
   readonly workspaces: WorkspaceRepository;
   readonly tasks: TaskRepository;
@@ -47,6 +52,7 @@ export class WandStorage {
   readonly aiTeams: AiTeamRepository;
   readonly missions: MissionRepository;
   readonly sessions: SessionRepository;
+  readonly uploads: UploadRepository;
   private readonly closeListeners = new Set<() => void>();
   private readonly taskTitleListeners = new Set<() => void>();
   private titleNoticePending = false;
@@ -97,6 +103,7 @@ export class WandStorage {
     this.dbPath = dbPath;
     this.db = openStorageDatabase(dbPath);
     this.conversations = new ConversationRepository(this.db, this);
+    this.conversationOrganizations = new ConversationOrganizationRepository(this.db);
     this.preferences = new PreferencesRepository(this.db, this);
     this.workspaces = new WorkspaceRepository(this.db, this);
     this.tasks = new TaskRepository(this.db, this);
@@ -106,6 +113,7 @@ export class WandStorage {
     this.aiTeams = new AiTeamRepository(this.db, this);
     this.missions = new MissionRepository(this.db, this);
     this.sessions = new SessionRepository(this.db, this);
+    this.uploads = new UploadRepository(this.db, this);
     this.schedules = new ScheduledTaskRepository(this.db, action => this.transaction(action));
     this.secrets.openVault();
     const brokenLinks = this.integrityReport().filter((item) => item.count > 0);
@@ -236,6 +244,18 @@ export class WandStorage {
 
   listScheduledTaskRuns(...args: Parameters<ScheduledTaskRepository["listScheduledTaskRuns"]>): ReturnType<ScheduledTaskRepository["listScheduledTaskRuns"]> {
     return this.schedules.listScheduledTaskRuns(...args);
+  }
+
+  listScheduledTaskRunFacts(...args: Parameters<ScheduledTaskRepository["listScheduledTaskRunFacts"]>): ReturnType<ScheduledTaskRepository["listScheduledTaskRunFacts"]> {
+    return this.schedules.listScheduledTaskRunFacts(...args);
+  }
+
+  countInvalidScheduledTaskRunDates(...args: Parameters<ScheduledTaskRepository["countInvalidScheduledTaskRunDates"]>): ReturnType<ScheduledTaskRepository["countInvalidScheduledTaskRunDates"]> {
+    return this.schedules.countInvalidScheduledTaskRunDates(...args);
+  }
+
+  latestScheduledTaskRun(...args: Parameters<ScheduledTaskRepository["latestScheduledTaskRun"]>): ReturnType<ScheduledTaskRepository["latestScheduledTaskRun"]> {
+    return this.schedules.latestScheduledTaskRun(...args);
   }
 
   // ============ Stable conversations (no read-side repair) ============
@@ -511,6 +531,7 @@ export class WandStorage {
 
 const REPOSITORY_FORWARDS: ReadonlyArray<readonly [field: string, repository: { readonly prototype: object }]> = [
   ["conversations", ConversationRepository],
+  ["conversationOrganizations", ConversationOrganizationRepository],
   ["preferences", PreferencesRepository],
   ["workspaces", WorkspaceRepository],
   ["tasks", TaskRepository],
@@ -520,6 +541,7 @@ const REPOSITORY_FORWARDS: ReadonlyArray<readonly [field: string, repository: { 
   ["aiTeams", AiTeamRepository],
   ["missions", MissionRepository],
   ["sessions", SessionRepository],
+  ["uploads", UploadRepository],
 ];
 for (const [field, repository] of REPOSITORY_FORWARDS) {
   for (const name of Object.getOwnPropertyNames(repository.prototype)) {

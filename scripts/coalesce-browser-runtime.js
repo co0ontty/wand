@@ -5,7 +5,7 @@ import path from "node:path";
 /** Collapse the eagerly shared graph into one module. esbuild's default splitter
  * can otherwise create dozens of tiny requests. Lazy views import this module's
  * exact bindings, keeping one React runtime and one controller instance. */
-export async function coalesceBrowserRuntime(outputs, eager, entry, root, production) {
+export async function coalesceBrowserRuntime(outputs, eager, entry, root, production, { preserveDynamicImports = false } = {}) {
   const files = new Map(outputs.map(file => [path.resolve(file.path), file.code]));
   const eagerPaths = new Set([...eager].map(file => path.resolve(root, file)));
   const aliases = new Map();
@@ -75,7 +75,7 @@ export async function coalesceBrowserRuntime(outputs, eager, entry, root, produc
     }
     ts.forEachChild(node, visit);
   };
-  visit(ast);
+  if (!preserveDynamicImports) visit(ast);
   for (const edit of imports.reverse()) runtimeCode = runtimeCode.slice(0, edit.start) + "__wandImportOptional" + runtimeCode.slice(edit.end);
   if (imports.length) runtimeCode = `const __wandModuleAttempts=new Map();
 function __wandImportOptional(specifier){

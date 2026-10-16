@@ -8,7 +8,6 @@ import { isRecord } from "./object-utils.js";
 const MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$/;
 const SUPPORTED_APIS = new Set([
   "anthropic-messages",
-  "google-generative-ai",
   "openai-completions",
   "openai-responses",
 ]);
@@ -89,8 +88,6 @@ function endpointUrl(baseUrl: string, api: string): URL | null {
     let suffix: string;
     if (api === "anthropic-messages") {
       suffix = /\/v\d+(?:beta)?$/i.test(basePath) ? "models" : "v1/models";
-    } else if (api === "google-generative-ai") {
-      suffix = /\/v\d+(?:beta)?$/i.test(basePath) ? "models" : "v1beta/models";
     } else {
       suffix = "models";
     }
@@ -167,7 +164,6 @@ function providerEndpoints(
 function asModelId(value: unknown, api: string): string {
   if (typeof value !== "string") return "";
   const trimmed = value.trim();
-  if (api === "google-generative-ai") return trimmed.replace(/^models\//, "");
   return trimmed;
 }
 
@@ -179,21 +175,19 @@ function parseEndpointPage(api: string, body: unknown, provider: string): Endpoi
   const models: ClaudeModelInfo[] = [];
   for (const row of rows) {
     if (!isRecord(row)) continue;
-    const id = asModelId(api === "google-generative-ai" ? row.name : row.id, api);
+    const id = asModelId(row.id, api);
     const qualifiedId = `${provider}/${id}`;
     if (!id || id.length > 128 || !MODEL_ID_PATTERN.test(id) || !MODEL_ID_PATTERN.test(qualifiedId)) continue;
     const displayName = typeof row.display_name === "string" ? row.display_name.trim()
       : typeof row.displayName === "string" ? row.displayName.trim()
-        : typeof row.name === "string" && api !== "google-generative-ai" ? row.name.trim() : "";
+        : typeof row.name === "string" ? row.name.trim() : "";
     models.push({
       id: qualifiedId,
       label: displayName && displayName !== id ? `${displayName} · ${qualifiedId}` : qualifiedId,
     });
   }
   let nextCursor = "";
-  if (api === "google-generative-ai") {
-    nextCursor = typeof body.nextPageToken === "string" ? body.nextPageToken : "";
-  } else if (body.has_more === true) {
+  if (body.has_more === true) {
     const lastRow = rows.at(-1);
     const lastRowId = isRecord(lastRow) && typeof lastRow.id === "string" ? lastRow.id : "";
     nextCursor = typeof body.last_id === "string" ? body.last_id : lastRowId;
@@ -205,8 +199,7 @@ function pageUrl(endpoint: PiEndpoint, cursor: string): URL | null {
   const url = endpointUrl(endpoint.baseUrl, endpoint.api);
   if (!url) return null;
   if (cursor) {
-    const key = endpoint.api === "google-generative-ai" ? "pageToken"
-      : endpoint.api === "anthropic-messages" ? "after_id" : "after";
+    const key = endpoint.api === "anthropic-messages" ? "after_id" : "after";
     url.searchParams.set(key, cursor);
   }
   return url;
@@ -247,8 +240,7 @@ async function fetchEndpointModels(
     if (!url) break;
     const headers = { ...endpoint.headers };
     if (endpoint.apiKey) {
-      if (endpoint.api === "google-generative-ai") headers["x-goog-api-key"] = endpoint.apiKey;
-      else if (endpoint.api === "anthropic-messages") {
+      if (endpoint.api === "anthropic-messages") {
         headers["x-api-key"] = endpoint.apiKey;
         headers["anthropic-version"] = "2023-06-01";
       } else headers.authorization = `Bearer ${endpoint.apiKey}`;

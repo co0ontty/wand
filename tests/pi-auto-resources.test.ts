@@ -30,16 +30,31 @@ const inventory: PiResourceInventory = {
   ], mcpServers: [] },
   skills: new Map([[id("a"), { name: "manual-pin" } as any], [id("b"), { name: "auto-skill" } as any]]), servers: new Map(),
 };
-const decision = (pick = true): DecisionResult => ({ model: "fixture", experimental: true, runtime: "laya-mlx",
-  usage: { input_tokens: 20, output_tokens: 0, truncated: false },
-  answers: {
-    forward: { type: "choice", choice: pick ? "match" : "none", probabilities: { match: pick ? 1 : 0, none: pick ? 0 : 1 } },
-    reverse: { type: "choice", choice: pick ? "match" : "none", probabilities: { match: pick ? 1 : 0, none: pick ? 0 : 1 } },
-    relevant: { type: "noul", noul: pick ? 1 : 0 },
-  } });
-const requestedResource = (raw: any): string => typeof raw.state === "string"
-  ? raw.questions.forward.criteria.match === "Batch tool calls" ? "CodeMode" : raw.questions.forward.criteria.match
-  : raw.state.resource.name;
+const decision = (pick = true, raw?: any): DecisionResult => {
+  if (!raw) return { model: "fixture", experimental: true, runtime: "laya-mlx",
+    usage: { input_tokens: 20, output_tokens: 0, truncated: false }, answers: {
+      forward: { type: "choice", choice: pick ? "match" : "none", probabilities: { match: pick ? 1 : 0, none: pick ? 0 : 1 } },
+      reverse: { type: "choice", choice: pick ? "match" : "none", probabilities: { match: pick ? 1 : 0, none: pick ? 0 : 1 } },
+    } };
+  const answers: DecisionResult["answers"] = {};
+  for (const [questionId, question] of Object.entries(raw.questions) as [string, any][]) {
+    if (Object.hasOwn(question.criteria, "match")) {
+      answers[questionId] = { type: "choice", choice: pick ? "match" : "none",
+        probabilities: { match: pick ? 1 : 0, none: pick ? 0 : 1 } };
+      continue;
+    }
+    const labels = Object.keys(question.criteria);
+    const automatic = labels.find((label) => String(question.criteria[label]).startsWith("auto-skill:"));
+    const choice = pick ? automatic ?? labels.find((label) => label !== "none")! : "none";
+    answers[questionId] = { type: "choice", choice, probabilities: Object.fromEntries(labels.map((label) =>
+      [label, label === choice ? 1 : 0])) };
+  }
+  return { model: "fixture", experimental: true, runtime: "laya-mlx",
+    usage: { input_tokens: 20, output_tokens: 0, truncated: false }, answers };
+};
+const requestedResource = (raw: any): string => Object.values(raw.questions).some((question: any) => question.criteria?.match === "Batch tool calls")
+  ? "CodeMode" : Object.values(raw.questions).some((question: any) => Object.values(question.criteria ?? {}).some((value) => String(value).startsWith("auto-skill:")))
+    ? "auto-skill" : "Skills";
 const success = (): StructuredRunnerResult => ({ state: { blocks: [{ type: "text", text: "done" }], result: "done", sessionId: null },
   exitCode: 0, signal: null, stderr: "", primaryError: null, inputAccepted: true });
 const context = (): StructuredRunnerContext => ({ session: { id: "automatic", provider: "pi", sessionKind: "structured", cwd: tmpdir(),
@@ -71,7 +86,7 @@ test("selection happens after submission, preserves locked-on skills only for th
   const input = context(); const before = structuredClone(input);
   let captured: StructuredRunnerContext | undefined;
   const runner = withAutomaticPiResources(immediate((value) => { captured = value; }), {}, {
-    inventory: async () => inventory, evaluate: () => async (raw) => decision(requestedResource(raw) === "auto-skill"),
+    inventory: async () => inventory, evaluate: () => async (raw) => decision(requestedResource(raw) === "auto-skill", raw),
   });
   const observer = observe(); const active = runner.start(input, observer);
   assert.equal(captured, undefined, "ownership must be returned before async matching");
@@ -88,7 +103,7 @@ test("unlocked enabled skills can be omitted, while a locked enabled skill bypas
   const input = context(); input.session.piSettings!.lockedSkills = [];
   let selected: PiResourceSelection | undefined;
   const runner = withAutomaticPiResources(immediate((value) => { selected = value.session.piSettings!.resources; }), {}, {
-    inventory: async () => inventory, evaluate: () => async (raw) => decision(requestedResource(raw) === "auto-skill"),
+    inventory: async () => inventory, evaluate: () => async (raw) => decision(requestedResource(raw) === "auto-skill", raw),
   });
   await runner.start(input, observe()).completion;
   assert.deepEqual(selected?.skills, [id("b")], "an ordinary On position is not a permanent pin");
@@ -104,7 +119,7 @@ test("locked-off skills are not assessed or enabled, and unlocking restores auto
   const assessed: string[] = [];
   let selected: PiResourceSelection | undefined;
   const runner = withAutomaticPiResources(immediate((value) => { selected = value.session.piSettings!.resources; }), {}, {
-    inventory: async () => inventory, evaluate: () => async (raw) => { assessed.push(requestedResource(raw)); return decision(); },
+    inventory: async () => inventory, evaluate: () => async (raw) => { assessed.push(requestedResource(raw)); return decision(true, raw); },
   });
   await runner.start(input, observe()).completion;
   assert.deepEqual(selected?.skills, [id("a")]);
@@ -133,10 +148,10 @@ test("each automatic decision gets a fresh watchdog instead of sharing the first
   let evaluations = 0, starts = 0;
   const runner = withAutomaticPiResources(immediate(() => { starts++; }), {}, {
     inventory: async () => inventory, timeoutMs: 100,
-    evaluate: () => async () => { evaluations++; await new Promise(resolve => setTimeout(resolve, 40)); return decision(); },
+    evaluate: () => async (raw) => { evaluations++; await new Promise(resolve => setTimeout(resolve, 60)); return decision(true, raw); },
   });
   const result = await runner.start(context(), observe()).completion;
-  assert.ok(evaluations >= 3); assert.equal(starts, 1);
+  assert.ok(evaluations >= 2); assert.equal(starts, 1);
   assert.equal(result.state.resourceSelection?.status, "selected");
 });
 
@@ -196,7 +211,7 @@ test("automatic CodeMode decisions affect the real CLI allowlist for this round 
     const input = context(); input.session.piSettings!.globalTools = false;
     let captured!: StructuredRunnerContext;
     const runner = withAutomaticPiResources(immediate((value) => { captured = value; }), {}, {
-      inventory: async () => inventory, evaluate: () => async (raw) => decision(enabled && requestedResource(raw) === "CodeMode"),
+      inventory: async () => inventory, evaluate: () => async (raw) => decision(enabled && requestedResource(raw) === "CodeMode", raw),
     });
     const result = await runner.start(input, observe()).completion;
     assert.equal(captured.session.piSettings?.codemodeOverride, enabled ? "on" : "off");
@@ -214,7 +229,7 @@ test("manual CodeMode off/on/only overrides automatic decisions and is reported 
       assert.equal(value.session.piSettings!.codemodeOverride, mode);
     }), {}, { inventory: async () => inventory, evaluate: () => async (raw) => {
       assert.notEqual(requestedResource(raw), "CodeMode", "manual mode must skip the automatic CodeMode question");
-      return decision(false);
+      return decision(false, raw);
     } });
     const result = await runner.start(input, observe()).completion;
     assert.deepEqual(result.state.resourceSelection?.codemode, { mode, source: "manual" });
@@ -229,10 +244,12 @@ test("explicit CodeMode requests/exclusions precede inference; uncertain answers
   const input = context();
   let captured!: StructuredRunnerContext;
   const runner = withAutomaticPiResources(immediate((value) => { captured = value; }), {}, {
-    inventory: async () => inventory, evaluate: () => async () => ({ ...decision(), answers: {
-      ...decision().answers,
-      reverse: { type: "choice", choice: "none", probabilities: { match: 0.04, none: 0.96 } },
-    } }),
+    inventory: async () => inventory, evaluate: () => async (raw) => {
+      const result = decision(true, raw);
+      if (requestedResource(raw) === "CodeMode") result.answers.reverse = {
+        type: "choice", choice: "none", probabilities: { match: 0.04, none: 0.96 } };
+      return result;
+    },
   });
   const result = await runner.start(input, observe()).completion;
   assert.equal(captured.session.piSettings?.codemodeOverride, undefined);
@@ -246,7 +263,7 @@ test("automatic selection never enables a globally disabled MCP; an explicit man
     servers: new Map([[serverId, { name: "docs", config: { command: "test-only", enabled: false } } as any]]) };
   const selected: PiResourceSelection[] = [];
   const runner = withAutomaticPiResources(immediate((value) => { selected.push(value.session.piSettings!.resources!); }), {}, {
-    inventory: async () => withMcp, evaluate: () => async () => decision(false),
+    inventory: async () => withMcp, evaluate: () => async (raw) => decision(false, raw),
   });
   const input = context(); input.prompt = "使用 docs 服务";
   await runner.start(input, observe()).completion;
@@ -286,7 +303,7 @@ test("HTTP auto mode accepts immediately, queues during selection, recomputes ea
     if (pause) await new Promise<void>(() => {});
     const input = raw as { state: string | { task: string } };
     const prompt = typeof input.state === "string" ? input.state : input.state.task;
-    return decision(prompt.includes("第一轮") && requestedResource(raw) === "auto-skill");
+    return decision(prompt.includes("第一轮") && requestedResource(raw) === "auto-skill", raw);
   };
   const seen: StructuredRunnerContext[] = [];
   const manager = new StructuredSessionManager(storage, config, null, { pi: immediate((value) => { seen.push(value); }) },

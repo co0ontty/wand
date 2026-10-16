@@ -133,7 +133,6 @@ export interface SettingsConfig {
   defaultGrokModel: string;
   defaultQoderModel: string;
   defaultPiModel: string;
-  defaultGeminiModel: string;
   defaultModels: Record<SettingsModelProvider, string>;
   defaultProvider: SettingsSessionProvider;
   defaultThinkingEffort: SettingsThinkingEffort;
@@ -198,7 +197,6 @@ export interface SettingsModelCatalog {
   grokModels: SettingsModelOption[];
   qoderModels: SettingsModelOption[];
   piModels: SettingsModelOption[];
-  geminiModels: SettingsModelOption[];
   thinkingEfforts?: Partial<Record<SettingsModelProvider, Array<{ effort: string; description?: string }>>>;
   claudeVersion: string | null;
   opencodeVersion: string | null;
@@ -209,7 +207,6 @@ export interface SettingsModelCatalog {
   defaultGrokModel: string;
   defaultQoderModel: string;
   defaultPiModel: string;
-  defaultGeminiModel: string;
   defaultModels: Record<SettingsModelProvider, string>;
 }
 
@@ -331,7 +328,6 @@ export interface SettingsAiInput {
   defaultGrokModel: string;
   defaultQoderModel: string;
   defaultPiModel: string;
-  defaultGeminiModel: string;
   defaultProvider: SettingsSessionProvider;
   defaultThinkingEffort: SettingsThinkingEffort;
 }

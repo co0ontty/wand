@@ -85,7 +85,7 @@ function publishDismissable(dismissable: boolean): void {
 
 export const newSessionController: WandNewSessionController = {
   open(options = {}): boolean {
-    if (!runtime) return false;
+    if (!runtime || (snapshot.open && !snapshot.dismissable)) return false;
     runtime.onOpen();
     publish(
       true,

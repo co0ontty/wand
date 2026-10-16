@@ -18,6 +18,7 @@ const listeners = new Set<() => void>();
 let current: UserProfileView = { name: "", avatar: "", loaded: false };
 let inflight: Promise<unknown> | null = null;
 let loading = false;
+let revision = 0;
 
 function publish(next: UserProfileView): void {
   current = next;
@@ -32,9 +33,10 @@ function view(value: unknown): UserProfileView {
 function load(): Promise<unknown> {
   if (inflight) return inflight;
   loading = true;
+  const startedRevision = revision;
   inflight = fetch("/api/config", { credentials: "same-origin" })
     .then((response) => (response.ok ? response.json() : null))
-    .then((payload) => { publish(view(payload?.userProfile)); })
+    .then((payload) => { if (payload && startedRevision === revision) publish(view(payload.userProfile)); })
     // 读不到就继续用默认值：署名回落到「我」不该让聊天界面报错。
     .catch(() => { publish(current); })
     .finally(() => { loading = false; inflight = null; });
@@ -44,6 +46,7 @@ function load(): Promise<unknown> {
 // 设置保存后服务端会广播整份配置，署名立刻跟着变，不用等下次拉取。
 if (typeof window !== "undefined") {
   window.addEventListener("wand-settings-config-saved", (event) => {
+    ++revision;
     publish(view((event as CustomEvent<{ userProfile?: unknown }>).detail?.userProfile));
   });
 }
@@ -95,7 +98,7 @@ export function selfAuthorFor(turn: { role: string; author?: { id: string; name:
   if (turn?.role !== "user") return { id: "", name: "", avatar: fallback.avatar };
   const author = turn.author;
   if (!author || author.id !== "user") return fallback;
-  return { id: "user", name: author.name || fallback.name, ...(fallback.avatar ? { avatar: fallback.avatar } : {}) };
+  return { ...fallback, name: current.loaded ? fallback.name : author.name || fallback.name };
 }
 
 export type { UserProfileConfig };

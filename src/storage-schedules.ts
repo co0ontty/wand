@@ -1,5 +1,9 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { ScheduledTask, ScheduledTaskRun } from "./scheduled-task-types.js";
+import type { ScheduledTask, ScheduledTaskRun, ScheduledTaskRunFact } from "./scheduled-task-types.js";
+
+/** Guard legacy non-ISO values before indexing: SQLite's special `now` input
+ * must never make a read timestamp depend on the current clock. */
+export const SCHEDULED_CLAIM_DATE_SQL = "CASE WHEN json_extract(run_json, '$.claimedAt') GLOB '????-??-??T*' THEN julianday(json_extract(run_json, '$.claimedAt')) ELSE NULL END";
 
 /** Same SQLite connection and transaction owner as WandStorage; no separate lifecycle. */
 export class ScheduledTaskRepository {
@@ -74,6 +78,30 @@ export class ScheduledTaskRepository {
       AND json_extract(run_json, '$.executionFinishedAt') IS NULL`)
       .all(sessionId) as Array<{ run_json: string }>;
     return rows.map(row => JSON.parse(row.run_json) as ScheduledTaskRun);
+  }
+
+  /** Date-indexed, lightweight facts; prompts never enter calendar/activity payloads. */
+  listScheduledTaskRunFacts(from: string, to: string, taskId?: string, limit = 1001): ScheduledTaskRunFact[] {
+    const bounded = Math.max(1, Math.min(5001, Math.floor(limit)));
+    const date = SCHEDULED_CLAIM_DATE_SQL;
+    const where = `${taskId ? "task_id = ? AND " : ""}${date} >= julianday(?) AND ${date} <= julianday(?)`;
+    const args = taskId ? [taskId, from, to, bounded] : [from, to, bounded];
+    const rows = this.db.prepare(`SELECT json_remove(run_json, '$.prompt') AS fact_json FROM scheduled_task_runs
+      WHERE ${where} ORDER BY ${date} DESC, id DESC LIMIT ?`).all(...args) as Array<{ fact_json: string }>;
+    return rows.map(row => JSON.parse(row.fact_json) as ScheduledTaskRunFact);
+  }
+
+  countInvalidScheduledTaskRunDates(taskId?: string): number {
+    const where = `(${SCHEDULED_CLAIM_DATE_SQL}) IS NULL`;
+    const row = (taskId ? this.db.prepare(`SELECT COUNT(*) AS count FROM scheduled_task_runs WHERE task_id = ? AND ${where}`).get(taskId)
+      : this.db.prepare(`SELECT COUNT(*) AS count FROM scheduled_task_runs WHERE ${where}`).get()) as { count: number };
+    return row.count;
+  }
+
+  latestScheduledTaskRun(taskId: string): ScheduledTaskRun | null {
+    const row = this.db.prepare(`SELECT run_json FROM scheduled_task_runs WHERE task_id = ?
+      ORDER BY (${SCHEDULED_CLAIM_DATE_SQL}) DESC, id DESC LIMIT 1`).get(taskId) as { run_json: string } | undefined;
+    return row ? JSON.parse(row.run_json) as ScheduledTaskRun : null;
   }
 
   listScheduledTaskRuns(taskId?: string, limit = 50): ScheduledTaskRun[] {

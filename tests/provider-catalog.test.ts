@@ -13,7 +13,7 @@ import {
 } from "../src/provider-catalog.js";
 
 test("provider 真源是唯一的一份列表，且守卫只接受字面量", () => {
-  assert.deepEqual([...SESSION_PROVIDERS], ["claude", "codex", "opencode", "grok", "qoder", "pi", "gemini"]);
+  assert.deepEqual([...SESSION_PROVIDERS], ["claude", "codex", "opencode", "grok", "qoder", "pi"]);
   for (const provider of SESSION_PROVIDERS) assert.equal(isSessionProvider(provider), true);
   // 别名 / 大小写 / 空白都不算合法字面量。
   assert.equal(isSessionProvider("anthropic"), false);
@@ -37,7 +37,7 @@ test("normalizeProviderId 接受别名与历史 runner 值，拒绝未知名字"
 test("inferProviderFromRunner 只认识与 provider 相关的 runner", () => {
   assert.equal(inferProviderFromRunner("claude-cli-print"), "claude");
   assert.equal(inferProviderFromRunner("codex-cli-exec"), "codex");
-  assert.equal(inferProviderFromRunner("gemini-cli-json"), "gemini");
+  assert.equal(inferProviderFromRunner("gemini-cli-json"), undefined);
   assert.equal(inferProviderFromRunner("pty"), undefined, "pty 与 provider 无关");
   assert.equal(inferProviderFromRunner(undefined), undefined);
 });
@@ -49,7 +49,7 @@ test("inferProviderFromCommand 从可执行名推断，参数与父目录不能�
   assert.equal(inferProviderFromCommand("/tmp/opencode-tools/bin/claude --resume abc"), "claude", "父目录不能冒充");
   assert.equal(inferProviderFromCommand("open-code run"), "opencode");
   assert.equal(inferProviderFromCommand("qodercli --print"), "qoder");
-  assert.equal(inferProviderFromCommand("gemini -p '' --output-format stream-json"), "gemini");
+  assert.equal(inferProviderFromCommand("gemini -p '' --output-format stream-json"), undefined);
   assert.equal(inferProviderFromCommand("/usr/local/bin/codex.cmd"), "codex", "Windows 后缀要去掉");
   assert.equal(inferProviderFromCommand("node script.js"), undefined);
   assert.equal(inferProviderFromCommand("bash -lc claude"), undefined, "shell 包装不能冒充");
@@ -61,7 +61,7 @@ test("inferProviderFromCommand 能穿过包管理器前缀", () => {
   assert.equal(inferProviderFromCommand("npx claude"), "claude");
   assert.equal(inferProviderFromCommand("npx -y claude"), "claude");
   assert.equal(inferProviderFromCommand("pnpm dlx codex"), "codex");
-  assert.equal(inferProviderFromCommand("yarn dlx gemini"), "gemini");
+  assert.equal(inferProviderFromCommand("yarn dlx gemini"), undefined);
 });
 
 test("providerCliCommand 把 qoder 换成真实可执行文件 qodercli", () => {
@@ -77,7 +77,15 @@ test("providerDisplayName 归一别名，terminal 有独立文案，未知名字
   assert.equal(providerDisplayName(""), "AI");
 });
 
-test("原生思考档位只认有档位开关的 provider，gemini 不算", () => {
+test("移除的 Gemini provider、别名与 runner 均不归一为其他工具", () => {
+  for (const value of ["gemini", "gemini-cli", "gemini-cli-json", " GEMINI "]) {
+    assert.equal(isSessionProvider(value), false);
+    assert.equal(normalizeProviderId(value), null);
+    assert.equal(inferProviderFromRunner(value), undefined);
+  }
+});
+
+test("原生思考档位只认受支持且有档位开关的 provider", () => {
   assert.equal(isNativeThinkingEffort("codex:ultra"), true);
   assert.equal(isNativeThinkingEffort("claude:xhigh"), true);
   assert.equal(isNativeThinkingEffort("gemini:max"), false, "gemini 没有思考档位开关");

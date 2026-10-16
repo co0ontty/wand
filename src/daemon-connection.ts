@@ -17,6 +17,38 @@ export function rejectPendingRequests<T extends { timer: NodeJS.Timeout; reject(
   pending.clear();
 }
 
+/** Replay a retained terminal event asynchronously; disposal cancels queued delivery. */
+export function subscribeWithPendingEvent<Event>(
+  listeners: Set<(event: Event) => void>,
+  listener: (event: Event) => void,
+  pending: Event | null,
+): { dispose(): void } {
+  listeners.add(listener);
+  if (pending) queueMicrotask(() => { if (listeners.has(listener)) listener(pending); });
+  return { dispose: () => listeners.delete(listener) };
+}
+
+/** A queued batch belongs to this registration; the owner has already taken it from its buffer. */
+export function subscribeWithBufferedEvents<Event>(
+  listeners: Set<(event: Event) => void>,
+  listener: (event: Event) => void,
+  pending: readonly Event[],
+): { dispose(): void } {
+  const subscription = subscribeWithPendingEvent(listeners, listener, null);
+  if (pending.length > 0) queueMicrotask(() => {
+    if (!listeners.has(listener)) return;
+    for (const event of pending) listener(event);
+  });
+  return subscription;
+}
+
+/** Snapshot listeners once so re-entrant subscription changes cannot alter the current delivery. */
+export function emitToSubscribedListeners<Event>(listeners: Set<(event: Event) => void>, event: Event): boolean {
+  if (listeners.size === 0) return false;
+  for (const listener of Array.from(listeners)) listener(event);
+  return true;
+}
+
 /** Bound connect attempts, including sockets that close before the handshake. */
 export function waitForDaemonSocket(socket: net.Socket): Promise<void> {
   return new Promise((resolve, reject) => {

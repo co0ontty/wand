@@ -10,7 +10,7 @@ import { discoverPiEndpointModels, type PiModelEndpointDiscoveryOptions } from "
 import { ClaudeModelAvailability, ClaudeModelInfo, ClaudeModelSource } from "./types.js";
 import { extractSemver } from "./version-utils.js";
 import { AUTO_ASSIGN_LABEL, AUTO_ASSIGN_SELECTOR, FREE_MODEL_GROUP_ID, isAutoAssignSelector, isModelGroupSelector, modelGroupSelector, orderModelIds, type ModelGroup } from "./model-groups.js";
-import { MODEL_ID_PATTERN, QODER_MODEL_ID_PATTERN, CLAUDE_BUILTIN_MODELS, CODEX_FALLBACK_MODELS, OPENCODE_FALLBACK_MODELS, GROK_FALLBACK_MODELS, QODER_FALLBACK_MODELS, PI_FALLBACK_MODELS, GEMINI_FALLBACK_MODELS, cloneModels, isRecord } from "./models/shared.js";
+import { MODEL_ID_PATTERN, QODER_MODEL_ID_PATTERN, CLAUDE_BUILTIN_MODELS, CODEX_FALLBACK_MODELS, OPENCODE_FALLBACK_MODELS, GROK_FALLBACK_MODELS, QODER_FALLBACK_MODELS, PI_FALLBACK_MODELS, cloneModels, isRecord } from "./models/shared.js";
 import { EFFORT_ID_PATTERN, ThinkingEffortLevel, ProviderThinkingEfforts, FALLBACK_PROVIDER_THINKING, cloneThinkingEfforts, effortLevelsFromIds, unionModelEfforts, parseCliEffortList } from "./models/thinking.js";
 import { parseOpenCodeModelCatalog } from "./models/parsers/opencode.js";
 import { parseGrokModels } from "./models/parsers/grok.js";
@@ -98,7 +98,6 @@ export interface ModelCache {
   grokModels: ClaudeModelInfo[];
   qoderModels: ClaudeModelInfo[];
   piModels: ClaudeModelInfo[];
-  geminiModels: ClaudeModelInfo[];
   thinkingEfforts: ProviderThinkingEfforts;
   claudeVersion: string | null;
   opencodeVersion: string | null;
@@ -114,7 +113,6 @@ const PROVIDER_MODEL_LIST_FIELDS = {
   grok: "grokModels",
   qoder: "qoderModels",
   pi: "piModels",
-  gemini: "geminiModels",
 } as const;
 
 /**
@@ -206,7 +204,6 @@ function cloneCache(cache: ModelCache): ModelCache {
     grokModels: cloneModels(cache.grokModels),
     qoderModels: cloneModels(cache.qoderModels),
     piModels: cloneModels(cache.piModels),
-    geminiModels: cloneModels(cache.geminiModels),
     thinkingEfforts: cloneThinkingEfforts(cache.thinkingEfforts),
     claudeVersion: cache.claudeVersion,
     opencodeVersion: cache.opencodeVersion,
@@ -390,7 +387,6 @@ function createInitialCache(options: ModelRefreshOptions): ModelCache {
     grokModels: cloneModels(GROK_FALLBACK_MODELS),
     qoderModels: cloneModels(QODER_FALLBACK_MODELS),
     piModels: cloneModels(PI_FALLBACK_MODELS),
-    geminiModels: cloneModels(GEMINI_FALLBACK_MODELS),
     thinkingEfforts: cloneThinkingEfforts(FALLBACK_PROVIDER_THINKING),
     claudeVersion: null,
     opencodeVersion: null,
@@ -677,7 +673,6 @@ function catalogRevision(cache: ModelCache): string {
     grokModels: cache.grokModels,
     qoderModels: cache.qoderModels,
     piModels: cache.piModels,
-    geminiModels: cache.geminiModels,
     thinkingEfforts: cache.thinkingEfforts,
     claudeVersion: cache.claudeVersion,
     opencodeVersion: cache.opencodeVersion,
@@ -748,7 +743,7 @@ function parsePersistedModelList(value: unknown): ClaudeModelInfo[] | null {
 function parsePersistedThinkingEfforts(value: unknown): ProviderThinkingEfforts {
   const fallback = cloneThinkingEfforts(FALLBACK_PROVIDER_THINKING);
   if (!isRecord(value)) return fallback;
-  const providers = ["claude", "opencode", "grok", "qoder", "pi", "gemini"] as const;
+  const providers = ["claude", "opencode", "grok", "qoder", "pi"] as const;
   for (const provider of providers) {
     const levels = parsePersistedEffortLevels(value[provider]);
     if (levels) fallback[provider] = levels;
@@ -780,10 +775,9 @@ function parsePersistedModelCatalog(value: unknown): PersistedModelCatalog | nul
   const grokModels = parsePersistedModelList(catalog.grokModels);
   const qoderModels = parsePersistedModelList(catalog.qoderModels);
   const piModels = parsePersistedModelList(catalog.piModels);
-  const geminiModels = parsePersistedModelList(catalog.geminiModels);
   const refreshedAt = safePersistedString(catalog.refreshedAt, 64);
   if (
-    !models || !codexModels || !opencodeModels || !grokModels || !qoderModels || !piModels || !geminiModels
+    !models || !codexModels || !opencodeModels || !grokModels || !qoderModels || !piModels
     || !refreshedAt || Number.isNaN(Date.parse(refreshedAt))
   ) {
     return null;
@@ -800,7 +794,6 @@ function parsePersistedModelCatalog(value: unknown): PersistedModelCatalog | nul
     grokModels,
     qoderModels,
     piModels,
-    geminiModels,
     thinkingEfforts: parsePersistedThinkingEfforts(catalog.thinkingEfforts),
     claudeVersion,
     opencodeVersion,
@@ -908,7 +901,6 @@ async function discoverModelCache(
     grokModels: grokProbe.ok ? grokProbe.value : cloneModels(previous.grokModels),
     qoderModels: qoderProbe.ok ? qoderProbe.value : cloneModels(previous.qoderModels),
     piModels: piProbe.ok ? piProbe.value : cloneModels(previous.piModels),
-    geminiModels: cloneModels(previous.geminiModels),
     thinkingEfforts: {
       claude: claudeEffortProbe.ok ? claudeEffortProbe.value : cloneThinkingEfforts(previous.thinkingEfforts).claude,
       opencode: opencodeProbe.models.ok && unionModelEfforts(opencodeProbe.models.value).length
@@ -921,7 +913,6 @@ async function discoverModelCache(
         : piEffortProbe.ok
           ? piEffortProbe.value
           : cloneThinkingEfforts(previous.thinkingEfforts).pi,
-      gemini: cloneThinkingEfforts(previous.thinkingEfforts).gemini,
     },
     claudeVersion,
     opencodeVersion: opencodeProbe.version.ok ? opencodeProbe.version.value : previous.opencodeVersion,

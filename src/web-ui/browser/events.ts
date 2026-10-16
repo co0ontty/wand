@@ -49,7 +49,8 @@ import { setupVisualViewportHandlers } from "./viewport";
       }
 
       export function getCardDefault(key: string) {
-        return !!(state.config && state.config.cardDefaults && state.config.cardDefaults[key]);
+        var value = state.config && state.config.cardDefaults && state.config.cardDefaults[key];
+        return key === "thinking" && value == null ? true : !!value;
       }
 
       export function lazyLoadTruncatedToolContent(container: any, targetEl: any, renderContent: any, renderError?: any) {
@@ -626,6 +627,7 @@ import { setupVisualViewportHandlers } from "./viewport";
             e.preventDefault();
           });
           promptOptimizeBtn.addEventListener("click", function() {
+            closePlusPopover();
             optimizePromptText();
           });
         }

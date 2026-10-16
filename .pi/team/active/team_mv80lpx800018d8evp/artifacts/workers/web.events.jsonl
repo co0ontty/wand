@@ -1,0 +1,289 @@
+{"at":1791976609307,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976609307,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976609308,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976609308,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976611199,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976611200,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976611237,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976611237,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976611238,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976611238,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976613125,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976617248,"phase":"worker-radio-report","message":"Gemini Web 入口移除 reported to captain","preview":"RADIO: status=started, action=读取仓库规则/邮箱并检查现有 diff 基线, evidence=none, blocker=none, next=定位 src/web-ui Gemini 引用并增量编辑"}
+{"at":1791976617249,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976617250,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976617251,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791976617258,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976617260,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976617607,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791976617608,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976617609,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976617610,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976617610,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976617610,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976617610,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976618486,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976621424,"phase":"worker-radio-report","message":"Gemini Web 入口移除 reported to captain","preview":"RADIO: status=running, action=扫描 src/web-ui Gemini/Google 入口并查看现有 web diff, evidence=git status 已显示大量在途改动, blocker=none, next=按文件最小化移除 UI 选择入口与映射"}
+{"at":1791976621426,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791976621427,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791976621428,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976621436,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976621472,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791976621474,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791976621474,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976621475,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976621475,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976621475,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976621476,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976621476,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976622181,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976625211,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976625213,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791976625214,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791976625215,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791976625245,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791976625253,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791976625261,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791976625262,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976625263,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976625264,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976625265,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976625266,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976625266,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976625993,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976629631,"phase":"worker-radio-report","message":"Gemini Web 入口移除 reported to captain","preview":"RADIO: status=running, action=已定位 57 个 src/web-ui Gemini/Google 命中，准备逐文件最小编辑, evidence=/tmp/wand-web-gemini-rg.txt, blocker=none, next=读取相关源文件并删除入口/Logo/模型映射/权限摘要特例"}
+{"at":1791976629634,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976629635,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976629635,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976629636,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976629636,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976629642,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976629643,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976629645,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976629646,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976629647,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976629648,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976629648,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976629649,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976629649,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976629650,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976629650,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976629652,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976629653,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976629653,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976629654,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976630465,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976632330,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976632332,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976632333,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976632334,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976632334,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976632335,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976632341,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976632342,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976632344,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976632346,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976632347,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976632348,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976632350,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976632351,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976632352,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976632352,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976632353,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976632354,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976632354,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976632355,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976632356,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976633352,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976634975,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976634977,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976634978,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976634979,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976634979,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976634980,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976634989,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976634991,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976634992,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976634993,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976634995,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976634996,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976634997,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976634998,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976634999,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976635000,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976635001,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976635002,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976635003,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976635003,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976635004,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976635734,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976637466,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976637468,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976637470,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976637471,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976637473,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976637474,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976637482,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976637485,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976637487,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976637490,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976637493,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976637494,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976637495,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976637497,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976637498,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976637499,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976637500,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976637502,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976637503,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976637505,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976637506,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976638228,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976650408,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976650410,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791976650413,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976650414,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976650416,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976650418,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976650427,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976650429,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976650431,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976650433,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976650438,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791976650439,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976650441,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976650443,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976650446,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976650448,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976650450,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976650452,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976650453,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976650454,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976650457,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976651150,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976654135,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976654138,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976654139,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976654140,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976654142,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976654143,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791976654152,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976654154,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976654155,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976654157,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976654187,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791976654188,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976654189,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976654190,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976654191,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976654193,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976654195,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976654196,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976654197,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976654198,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976654199,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976654930,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976682294,"phase":"worker-radio-report","message":"Gemini Web 入口移除 reported to captain","preview":"RADIO: status=running, action=准备编辑 provider identity/React/browser 映射；会避免手改 generated 和 tests, evidence=provider-identity.ts/new-session/settings/session-engine 等命中, blocker=none, next=应用精确替换后复扫 Gemini 命中"}
+{"at":1791976682299,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start edit","toolName":"edit"}
+{"at":1791976682315,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1791976682318,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976682319,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976683039,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976684975,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976684977,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start edit","toolName":"edit"}
+{"at":1791976684983,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1791976684985,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976684987,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976685817,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976690554,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976690557,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start edit","toolName":"edit"}
+{"at":1791976690564,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1791976690567,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976690568,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976691272,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976692900,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976692905,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start edit","toolName":"edit"}
+{"at":1791976692923,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1791976692925,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976692927,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976693680,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976695783,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976695789,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start edit","toolName":"edit"}
+{"at":1791976695804,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1791976695807,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976695809,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976696552,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976698595,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976698599,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start edit","toolName":"edit"}
+{"at":1791976698613,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1791976698616,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976698618,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976699318,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976700909,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976700915,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start edit","toolName":"edit"}
+{"at":1791976700931,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1791976700933,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976700934,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976701692,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976705485,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976705491,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start edit","toolName":"edit"}
+{"at":1791976705504,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1791976705505,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976705506,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976706191,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976709128,"phase":"worker-budget-notice","message":"Gemini Web 入口移除 reached soft request budget (18/18)"}
+{"at":1791976709132,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976709136,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start edit","toolName":"edit"}
+{"at":1791976709148,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end edit failed","toolName":"edit","isError":true}
+{"at":1791976709150,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976709151,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976709153,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976709154,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976709899,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976726169,"phase":"worker-radio-report","message":"Gemini Web 入口移除 reported to captain","preview":"RADIO: status=running, action=收到预算提醒，收敛到当前 Web 删除步骤并完成可验证复扫, evidence=已编辑 provider-identity/new-session/部分入口, blocker=none, next=完成剩余精确替换并输出结构化结果"}
+{"at":1791976726173,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791976726233,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791976726235,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976726237,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976727023,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976731116,"phase":"worker-radio-report","message":"Gemini Web 入口移除 reported to captain","preview":"RADIO: status=running, action=已完成剩余 Web 精确移除并复扫，当前仅 provider-identity 内部过滤保留 gemini 字面量, evidence=rg 仅 4 处内部过滤, blocker=none, next=运行轻量差异/类型验证并最终报告"}
+{"at":1791976731120,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791976731123,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791976731124,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start read","toolName":"read"}
+{"at":1791976731135,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976731163,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791976747504,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end bash failed","toolName":"bash","isError":true}
+{"at":1791976747506,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976747507,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976747508,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976747509,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976747510,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976747511,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976748428,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976762658,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976762662,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791976776755,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end bash failed","toolName":"bash","isError":true}
+{"at":1791976776757,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976776758,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976777487,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976784792,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976784795,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791976791338,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end bash failed","toolName":"bash","isError":true}
+{"at":1791976791340,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976791342,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976792038,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976794664,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976794669,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791976794673,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791976794676,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791976794721,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791976794736,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791976800392,"phase":"worker-tool","message":"Gemini Web 入口移除 tool_execution_end bash failed","toolName":"bash","isError":true}
+{"at":1791976800394,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976800395,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976800396,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976800397,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976800398,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976800399,"phase":"worker-message-end","message":"Gemini Web 入口移除 assistant message ended"}
+{"at":1791976801113,"phase":"worker-message-start","message":"Gemini Web 入口移除 message started"}
+{"at":1791976816884,"phase":"worker-radio-report","message":"Gemini Web 入口移除 reported to captain","preview":"RADIO: status=completed, action=Web Gemini 入口移除已收敛并验证到可报告状态, evidence=rg/git diff check/tsc, blocker=npm run check 被非 web storage TS 基线错误阻断, next=交由 captain 统一整合与测试同步 ## result_summary 已在 `src/web-ui/` 源码内移除 Gemini 的 Web 选择入口与专属实现：工具列表、Logo"}

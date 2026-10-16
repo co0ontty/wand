@@ -11,6 +11,7 @@ import type {
 import { isIdleAtPrompt } from "./ui-store";
 import { stringValue } from "../json-utils";
 import { usesSidebarDrawer } from "../../sidebar-layout";
+import { isSystemAiCall } from "../../../system-ai-call.js";
 
 export interface LegacySnapshotState {
   selectedId?: string | null;
@@ -44,6 +45,7 @@ interface LegacySession {
   command?: string;
   sessionKind?: string;
   sessionSource?: string;
+  automationId?: string;
   title?: string;
   description?: string;
   summary?: string;
@@ -380,7 +382,7 @@ export function deriveLegacyUiSnapshot(
       terminal: Boolean(selected) && currentView === "terminal",
       chat: Boolean(selected) && currentView === "chat",
       blank: !selected,
-      composer: Boolean(selected),
+      composer: Boolean(selected) && !isSystemAiCall(selectedLegacy),
     },
   };
 }

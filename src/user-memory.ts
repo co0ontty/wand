@@ -171,7 +171,7 @@ export class UserMemoryService {
         }, config.defaultCwd, config.language ?? "", resolveSystemAiContext({
           provider: config.defaultProvider ?? "claude", command: config.defaultProvider ?? "claude",
           selectedModel: null, thinkingEffort: config.defaultThinkingEffort,
-        }, config, storage.getSystemSiliconEmployee(), this.deps.free), (raw) => parseUserMemoryPreferences(raw, events));
+        }, config, storage.getSystemSiliconEmployee(), this.deps.free, { storage, purpose: "user-memory" }), (raw) => parseUserMemoryPreferences(raw, events));
     // Test seam and production share the exact same validator.
     const validated = parseUserMemoryPreferences(JSON.stringify({ preferences }), events);
     const referenced = new Set(validated.flatMap((entry) => entry.evidenceIds));

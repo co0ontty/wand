@@ -38,4 +38,6 @@ node --test --import tsx tests/pi-cli-isolation.test.ts tests/pi-resource-select
 - `openrouter-free-cli`：源文件与编译文件的真实 CLI provider、工具续轮、resume 与价格边界回归，使用本地 fixture，不调用真实付费模型。
 - `pi-sdk-dependencies`：发布 SDK 依赖闭包/锁/嵌套版本与新进程真实导入。
 
+CI 在 `$RUNNER_TEMP/wand-ci-pi` 独立安装已验证的 Pi CLI 1.2.0，并把它的真实 npm bin 目录加入 PATH；测试不调用真实付费模型。这个安装不属于 Wand 的 SDK 依赖闭包，不能以 Wand `node_modules/.bin/pi` 冒充独立 CLI，也不修改机器上的全局 Pi。升级 CI CLI 时单独复验资源、加载隔离与拒绝/降级协议契约，不能把 CLI 版本机械跟随 SDK pin。
+
 改动后跑完整 check/test/build，核对 npm tarball 的干净生产安装。最终验收用已安装服务；更新必须走现有部署锁/Core 排空流程，不重启或强杀 daemon，不修改全局 Pi CLI。

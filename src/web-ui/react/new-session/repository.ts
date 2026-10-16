@@ -56,7 +56,7 @@ function normalizePaths(value: unknown): NewSessionPath[] {
 export function supportedModes(provider: NewSessionProvider): readonly NewSessionMode[] {
   if (provider === "codex") return ["full-access"];
   if (provider === "opencode" || provider === "grok" || provider === "pi") return ["default", "full-access", "managed"];
-  if (provider === "qoder" || provider === "gemini") return ["default", "full-access", "auto-edit", "managed"];
+  if (provider === "qoder") return ["default", "full-access", "auto-edit", "managed"];
   return ["default", "full-access", "auto-edit", "native", "managed"];
 }
 
@@ -77,7 +77,6 @@ function structuredRunner(provider: NewSessionProvider): string {
   if (provider === "grok") return "grok-cli-headless";
   if (provider === "qoder") return "qoder-cli-print";
   if (provider === "pi") return "pi-cli-json";
-  if (provider === "gemini") return "gemini-cli-json";
   return "claude-cli-print";
 }
 
@@ -126,6 +125,7 @@ export function buildCreateRequest(
       kind: "pty",
       command: providerCliCommand(form.provider),
       model: model || undefined,
+      ...(context.thinkingEffort?.trim() ? { thinkingEffort: context.thinkingEffort.trim() } : {}),
     };
   }
 
@@ -215,6 +215,7 @@ export class HttpNewSessionRepository implements NewSessionRepository {
           mode: request.mode,
           provider: request.provider,
           runner: request.runner,
+          engine: request.engine,
           worktreeEnabled: request.worktreeEnabled,
           model: request.model,
           thinkingEffort: request.thinkingEffort,
@@ -233,6 +234,7 @@ export class HttpNewSessionRepository implements NewSessionRepository {
           worktreeEnabled: request.worktreeEnabled,
           // PTY 也按模型启动 CLI（服务端 processCommandForMode 注入 --model）。
           model: request.kind === "pty" ? request.model : undefined,
+          thinkingEffort: request.kind === "pty" ? request.thinkingEffort : undefined,
           cols: request.cols,
           rows: request.rows,
           ...(request.workspaceId ? { workspaceId: request.workspaceId } : {}),

@@ -13,8 +13,6 @@ export interface ProviderThinkingEfforts {
   grok: ThinkingEffortLevel[];
   qoder: ThinkingEffortLevel[];
   pi: ThinkingEffortLevel[];
-  /** Gemini CLI 没有思考档位开关，只保留「不覆盖」一项，不假装能调。 */
-  gemini: ThinkingEffortLevel[];
 }
 /** 探针失败时的已知档位。下一次 CLI 成功应答会把它换掉。 */
 export const FALLBACK_PROVIDER_THINKING: ProviderThinkingEfforts = {
@@ -23,7 +21,6 @@ export const FALLBACK_PROVIDER_THINKING: ProviderThinkingEfforts = {
   grok: effortLevelsFromIds(["low", "medium", "high", "xhigh"]),
   qoder: effortLevelsFromIds(["auto", "none", "low", "medium", "high", "xhigh", "max", "ultracode"]),
   pi: effortLevelsFromIds(["minimal", "low", "medium", "high", "xhigh", "max"]),
-  gemini: effortLevelsFromIds(["off"]),
 };
 export function cloneThinkingEfforts(efforts: ProviderThinkingEfforts): ProviderThinkingEfforts {
   const copy = (levels: readonly ThinkingEffortLevel[]) => levels.map((level) => ({ ...level }));
@@ -33,7 +30,6 @@ export function cloneThinkingEfforts(efforts: ProviderThinkingEfforts): Provider
     grok: copy(efforts.grok),
     qoder: copy(efforts.qoder),
     pi: copy(efforts.pi),
-    gemini: copy(efforts.gemini),
   };
 }
 export function effortLevelsFromIds(ids: readonly string[]): ThinkingEffortLevel[] {

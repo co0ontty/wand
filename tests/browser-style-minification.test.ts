@@ -246,7 +246,9 @@ test("the real chat raw template has identical cooked value and unchanged CSS mi
   assert.deepEqual(result.values, [expected.code]);
   assert.match(result.values[0], /@keyframes wand-activity-mark-flow/);
   assert.match(result.values[0], /prefers-reduced-motion:\s*reduce/);
-  assert.match(result.values[0], /--chat-call-dot-center:/);
+  for (const [, variable] of raw.matchAll(/var\((--[\w-]+)/g)) {
+    assert.ok(result.values[0].includes(`var(${variable}`), `theme variable ${variable} survives compression`);
+  }
   assert.equal(readFileSync(full, "utf8"), before);
 });
 
@@ -480,4 +482,18 @@ test("all remaining real style fragments pool with identical runtime values", ()
   assert.equal(poolSize, new Set(values).size);
   assert.deepEqual(extractPool(code), [...new Set(values)]);
   assert.deepEqual(hostArray(executeBundle(code).__out), hostArray(executeBundle(source).__out));
+});
+
+test("ESM CSS pools keep module syntax and exact literal values without an IIFE", () => {
+  const css = ".a{display:flex}";
+  const source = `export const a=${JSON.stringify(css)};export const b=${JSON.stringify(css)};`;
+  const result = poolEmittedCssStringLiterals(source, new Set([css]), { format: "esm" });
+  assert.equal(result.pooled, 2);
+  assert.equal(result.poolSize, 1);
+  assert.doesNotMatch(result.code, /\(\(\) => \{/);
+  const transformed = transformSync(result.code, { loader: "js", format: "iife", globalName: "styles" }).code;
+  const context = vm.createContext({});
+  vm.runInContext(transformed, context);
+  assert.equal(context.styles.a, css);
+  assert.equal(context.styles.b, css);
 });

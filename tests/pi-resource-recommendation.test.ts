@@ -18,13 +18,20 @@ const catalog: PiResourceCatalog = { supported: true, reason: "", skills: [
   { id: skill("b"), name: "mermaid", description: "Draw documentation diagrams", source: "已安装" },
 ], mcpServers: [{ id: mcp, name: "docs", description: "已配置的本地 MCP 服务", source: "用户配置" }] };
 const candidates = { skills: catalog.skills.map((item) => item.id), mcpServers: [mcp] };
-const answer = (relevant: number, excluded: number): DecisionResult => ({ model: "fixture", experimental: true,
-  runtime: "laya-mlx", usage: { input_tokens: 30, output_tokens: 0, truncated: false },
-  answers: {
-    forward: { type: "choice", choice: relevant >= 0.5 ? "match" : "none", probabilities: { match: relevant, none: 1 - relevant } },
-    reverse: { type: "choice", choice: excluded <= 0.5 ? "match" : "none", probabilities: { match: 1 - excluded, none: excluded } },
-    relevant: { type: "noul", noul: relevant },
-  } });
+function rankedAnswer(raw: unknown, preferredName: string | null): DecisionResult {
+  const request = raw as { questions: Record<string, { criteria: Record<string, string> }> };
+  const answers: DecisionResult["answers"] = {};
+  for (const [id, question] of Object.entries(request.questions)) {
+    const labels = Object.keys(question.criteria);
+    const preferred = preferredName && labels.find((label) => question.criteria[label]!.startsWith(`${preferredName}:`));
+    const choice = preferred ?? (preferredName ? labels.find((label) => label !== "none") : "none") ?? "none";
+    const remainder = labels.length > 1 ? 0.05 / (labels.length - 1) : 0;
+    answers[id] = { type: "choice", choice, probabilities: Object.fromEntries(labels.map((label) =>
+      [label, label === choice ? 0.95 : remainder])) };
+  }
+  return { model: "fixture", experimental: true, runtime: "laya-mlx",
+    usage: { input_tokens: 30, output_tokens: 0, truncated: false }, answers };
+}
 
 test("recommendation request rejects paths, extra authority, overlength prompts and too many candidates", () => {
   assert.deepEqual(parsePiRecommendationRequest({ prompt: " 做一个页面 ", candidates }), { prompt: "做一个页面", candidates });
@@ -62,7 +69,7 @@ test("standalone resource controls stay out of semantic matching without droppin
   ]) {
     const result = await recommendPiResources({ prompt, candidates, catalog, caller: "test", evaluate: async (raw) => {
       assert.equal((raw as { state: string }).state, expected);
-      return answer(0.1, 0.9);
+      return rankedAnswer(raw, null);
     } });
     assert.deepEqual(result.selection.skills, []);
   }
@@ -71,20 +78,21 @@ test("standalone resource controls stay out of semantic matching without droppin
   assert.deepEqual(result.selection.skills, [skill("b")]);
 });
 
-test("shortlist requires stable choices before complete-description confirmation; limits remain unselected", async () => {
+test("the system decision role ranks the candidate set with descriptions in one bounded call", async () => {
   let calls = 0;
   const result = await recommendPiResources({ prompt: "设计页面", candidates, catalog, caller: "test", evaluate: async (raw) => {
     calls++;
-    const value = raw as { state: string | { task: string; resource: { name: string } };
-      questions: { forward?: { criteria: { match: string } } } };
-    assert.equal(typeof value.state === "string" ? value.state : value.state.task, "设计页面");
-    const name = typeof value.state === "string" ? value.questions.forward!.criteria.match : value.state.resource.name;
-    return name === "frontend-design" ? answer(0.9, 0.1) : answer(0.97, 0.96);
+    const request = raw as { state: string; questions: Record<string, { criteria: Record<string, string> }> };
+    assert.equal(request.state, "设计页面");
+    assert.deepEqual(Object.keys(request.questions), ["g0f", "g0r"]);
+    assert.ok(Object.values(request.questions).every((question) => Object.values(question.criteria)
+      .some((description) => description.startsWith("frontend-design:"))));
+    return rankedAnswer(raw, "frontend-design");
   } });
   assert.deepEqual(result.selection, { skills: [skill("a")], mcpServers: [] });
   assert.equal(result.resources.find((item) => item.id === skill("b"))?.status, "uncertain");
-  assert.equal(calls, 3);
-  assert.equal(result.calls, 3);
+  assert.equal(calls, 1);
+  assert.equal(result.calls, 1);
   const limited = await recommendPiResources({ prompt: "复杂任务", candidates, catalog, caller: "test",
     evaluate: async () => { throw new DecisionError("CONTEXT_LIMIT", "too long"); } });
   assert.deepEqual(limited.selection, { skills: [], mcpServers: [] });
@@ -93,65 +101,62 @@ test("shortlist requires stable choices before complete-description confirmation
     evaluate: async () => { throw new DecisionError("UNAVAILABLE", "unavailable"); } }), /unavailable/);
 });
 
-test("name matches cannot bypass the full description, cancellation or budget rejection", async () => {
+test("large catalogs use bounded group and final decisions; disagreement, limits and cancellation select nothing", async () => {
+  const largeCatalog: PiResourceCatalog = { supported: true, reason: "", mcpServers: [], skills: Array.from({ length: 9 }, (_, index) => ({
+    id: `skill-${index.toString(16).padStart(24, "0")}`, name: index === 7 ? "target-skill" : `skill-${index}`,
+    description: index === 7 ? "The best specialist for this task" : `Unrelated specialist ${index}`, source: "已安装",
+  })) };
+  const largeCandidates = { skills: largeCatalog.skills.map((item) => item.id), mcpServers: [] };
+  let calls = 0;
+  const selected = await recommendPiResources({ prompt: "完成目标任务", candidates: largeCandidates, catalog: largeCatalog,
+    caller: "test", evaluate: async (raw) => { calls++; return rankedAnswer(raw, "target-skill"); } });
+  assert.deepEqual(selected.selection.skills, [largeCatalog.skills[7]!.id]);
+  assert.equal(calls, 2); assert.equal(selected.calls, 2);
+
   const only = { skills: [skill("a")], mcpServers: [] };
-  for (const confirmation of [0.1, 0.5, 0.95]) {
-    let calls = 0;
-    const result = await recommendPiResources({ prompt: "设计页面", candidates: only, catalog, caller: "test", evaluate: async (raw) => {
-      const request = raw as { state: unknown; questions: Record<string, { instructions: string }> };
-      calls++;
-      if (calls === 1) {
-        assert.equal(request.state, "设计页面", "the short pass must contain only the unchanged task");
-        assert.deepEqual(Object.keys(request.questions), ["forward", "reverse"]);
-        assert.ok(Object.values(request.questions).every((question) => question.instructions.length < 40));
-        return answer(0.95, 0.05);
-      }
-      assert.deepEqual(request.state, { task: "设计页面", resource: {
-        name: catalog.skills[0]!.name, description: catalog.skills[0]!.description,
-      } });
-      assert.deepEqual(Object.keys(request.questions), ["relevant"]);
-      return answer(confirmation, 1 - confirmation);
+  const disagreement = await recommendPiResources({ prompt: "设计页面", candidates: only, catalog, caller: "test",
+    evaluate: async (raw) => {
+      const result = rankedAnswer(raw, "frontend-design");
+      const reverse = result.answers.g0r! as { choice: string; probabilities: Record<string, number> };
+      reverse.choice = "none"; reverse.probabilities = { s0: 0.05, none: 0.95 };
+      return result;
     } });
-    assert.equal(calls, 2);
-    assert.deepEqual(result.selection.skills, confirmation >= 0.8 ? only.skills : []);
-  }
+  assert.deepEqual(disagreement.selection.skills, []);
+  assert.equal(disagreement.resources[0]!.status, "uncertain");
   for (const code of ["QUESTION_LIMIT", "CONTEXT_LIMIT", "OPTIONS_COLLAPSED"]) {
-    let calls = 0;
-    const result = await recommendPiResources({ prompt: "设计页面", candidates: only, catalog, caller: "test", evaluate: async () => {
-      if (++calls === 1) return answer(0.95, 0.05);
-      throw new DecisionError(code, "too long");
-    } });
+    const result = await recommendPiResources({ prompt: "设计页面", candidates: only, catalog, caller: "test",
+      evaluate: async () => { throw new DecisionError(code, "too long"); } });
     assert.deepEqual(result.selection.skills, []);
     assert.equal(result.resources[0]!.status, "unassessed");
   }
-  const abort = new AbortController();
-  let calls = 0;
+  const abort = new AbortController(); let abortedCalls = 0;
   await assert.rejects(recommendPiResources({ prompt: "设计页面", candidates: only, catalog, caller: "test", signal: abort.signal,
-    evaluate: async () => { calls++; abort.abort(); return answer(0.95, 0.05); } }), /取消/);
-  assert.equal(calls, 1, "stopping after shortlist must prevent description confirmation");
+    evaluate: async (raw) => { abortedCalls++; abort.abort(); return rankedAnswer(raw, "frontend-design"); } }), /取消/);
+  assert.equal(abortedCalls, 1);
 });
 
-test("invalid choice distributions and labels are rejected before confirmation", async () => {
-  for (const forward of [
-    { type: "choice", choice: "match", probabilities: { match: 0.95, none: 0.95 } },
-    { type: "choice", choice: "none", probabilities: { match: 0.95, none: 0.05 } },
-    { type: "choice", choice: "other", probabilities: { match: 0.95, none: 0.05 } },
-    { type: "noul", noul: 0.95 },
+test("invalid choice distributions and labels are rejected before they can select a Skill", async () => {
+  for (const mutate of [
+    (result: DecisionResult) => { (result.answers.g0f!.probabilities as Record<string, number>).none = 0.95; },
+    (result: DecisionResult) => { result.answers.g0f!.choice = "other"; },
+    (result: DecisionResult) => { result.answers.g0f = { type: "noul", noul: 0.95 }; },
   ]) {
-    await assert.rejects(recommendPiResources({ prompt: "设计页面", candidates, catalog, caller: "test", evaluate: async () => ({
-      ...answer(0.95, 0.05), answers: { ...answer(0.95, 0.05).answers, forward },
-    }) }), /无效/);
+    await assert.rejects(recommendPiResources({ prompt: "设计页面", candidates, catalog, caller: "test", evaluate: async (raw) => {
+      const result = rankedAnswer(raw, "frontend-design"); mutate(result); return result;
+    } }), /无效/);
   }
 });
 
 test("removed candidates, invalid probabilities and cancellation never produce actionable recommendations", async () => {
   await assert.rejects(recommendPiResources({ prompt: "任务", candidates: { skills: [skill("0")], mcpServers: [] },
-    catalog, caller: "test", evaluate: async () => answer(1, 0) }), /移除/);
-  await assert.rejects(recommendPiResources({ prompt: "任务", candidates, catalog, caller: "test",
-    evaluate: async () => answer(NaN, 0) }), /无效/);
+    catalog, caller: "test", evaluate: async (raw) => rankedAnswer(raw, null) }), /移除/);
+  await assert.rejects(recommendPiResources({ prompt: "任务", candidates, catalog, caller: "test", evaluate: async (raw) => {
+    const result = rankedAnswer(raw, "frontend-design");
+    (result.answers.g0f!.probabilities as Record<string, number>).s0 = NaN; return result;
+  } }), /无效/);
   const controller = new AbortController(); controller.abort();
   await assert.rejects(recommendPiResources({ prompt: "任务", candidates, catalog, caller: "test",
-    signal: controller.signal, evaluate: async () => answer(1, 0) }), /取消/);
+    signal: controller.signal, evaluate: async (raw) => rankedAnswer(raw, null) }), /取消/);
 });
 
 test("HTTP recommendation stays read-only, validates owner/engine/local toggle and rejects busy or changed sessions", { timeout: 12_000 }, async (t) => {
@@ -166,6 +171,7 @@ test("HTTP recommendation stays read-only, validates owner/engine/local toggle a
   let target: any = { id: "test", provider: "pi", cwd: root, archived: false, piSettings: defaultPiCliSessionSettings() };
   let engine = "cli", owner: string | null = "structured", evaluations = 0;
   let deferred: ((result: DecisionResult) => void) | null = null;
+  let deferredRequest: unknown;
   let delay = false;
   const initial = JSON.stringify(target);
   const app = express(); app.use(express.json());
@@ -175,7 +181,8 @@ test("HTTP recommendation stays read-only, validates owner/engine/local toggle a
     sessions: { ownerOf: () => owner } as any,
     structured: { get: () => target, getPiSettings: () => ({ settings: target.piSettings, resolution: { engine } }) } as any,
     decisions: { status: () => ({ enabled: true, supported: true, configured: true }) as any,
-      evaluate: async () => { evaluations++; return delay ? new Promise<DecisionResult>((resolve) => { deferred = resolve; }) : answer(0.95, 0.05); } },
+      evaluate: async (raw: unknown) => { evaluations++; deferredRequest = raw;
+        return delay ? new Promise<DecisionResult>((resolve) => { deferred = resolve; }) : rankedAnswer(raw, "web-design"); } },
   });
   const server = createServer(app); await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => { server.closeAllConnections(); server.close(); });
@@ -200,6 +207,6 @@ test("HTTP recommendation stays read-only, validates owner/engine/local toggle a
   assert.equal((await post()).status, 409);
   target = { ...target, archived: true };
   delay = false;
-  (deferred as (value: DecisionResult) => void)(answer(1, 0));
+  (deferred as (value: DecisionResult) => void)(rankedAnswer(deferredRequest, "web-design"));
   assert.equal((await pending).status, 409, "a stale session cannot return an actionable recommendation");
 });

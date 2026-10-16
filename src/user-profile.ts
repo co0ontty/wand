@@ -1,4 +1,5 @@
 import type { ConversationAuthor, WandConfig } from "./types.js";
+import { parsePlushAvatar, parsePlushCatAvatar, parsePlushDogAvatar } from "./plush-avatar.js";
 
 /**
  * 用户自己的资料：会话里显示的名字与头像。
@@ -9,7 +10,7 @@ import type { ConversationAuthor, WandConfig } from "./types.js";
 export interface UserProfileConfig {
   /** 会话里的署名。留空回落 `DEFAULT_USER_DISPLAY_NAME`，不做多套默认。 */
   name?: string;
-  /** `""`（按名字生成）、`"cat:<n>"`（像素猫毛色）或 `data:image/*;base64,…`（上传图）。 */
+  /** 与员工共用头像格式；空值按稳定 user ID 生成，保留旧像素猫与上传图。 */
   avatar?: string;
 }
 
@@ -27,10 +28,15 @@ function clean(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-/** 只接受像素猫毛色与白名单 data URL；其他写法当没配，不猜也不静默改写。 */
+function isAvatar(avatar: string): boolean {
+  return AVATAR_CAT.test(avatar) || AVATAR_DATA_URL.test(avatar)
+    || !!(parsePlushAvatar(avatar) ?? parsePlushCatAvatar(avatar) ?? parsePlushDogAvatar(avatar));
+}
+
+/** 与员工共享版本化毛绒格式；仍拒绝外部 URL 和未知版本。 */
 function normalizeAvatar(value: unknown): string {
   const avatar = clean(value);
-  if (!avatar || AVATAR_CAT.test(avatar) || (avatar.length <= USER_AVATAR_MAX_CHARS && AVATAR_DATA_URL.test(avatar))) {
+  if (!avatar || (avatar.length <= USER_AVATAR_MAX_CHARS && isAvatar(avatar))) {
     return avatar;
   }
   return "";
@@ -58,7 +64,7 @@ export function parseUserProfile(input: unknown): UserProfileConfig | undefined 
   const avatarInput = raw.avatar;
   const avatar = clean(avatarInput);
   if (avatar) {
-    if (!AVATAR_CAT.test(avatar) && !AVATAR_DATA_URL.test(avatar)) {
+    if (!isAvatar(avatar)) {
       throw new Error("头像格式无效，请重新选择或上传图片。");
     }
     if (avatar.length > USER_AVATAR_MAX_CHARS) throw new Error("头像太大，请换一张小一点的图片。");

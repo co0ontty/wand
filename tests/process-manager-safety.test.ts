@@ -225,23 +225,42 @@ test("Pi PTY launches the TUI with model and thinking flags", async (t) => {
   assert.match(shellArgs.at(-1) ?? "", /if pi --model 'openai\/gpt-5\.4' --thinking 'high'/);
 });
 
-test("Gemini PTY launches the TUI with model, mode-derived approval, and an assigned session id", async (t) => {
-  const { manager, root, spawnCalls } = createHarness(t);
-  const session = await manager.start("gemini", root, "managed", undefined, {
-    provider: "gemini",
-    model: "gemini-2.5-pro",
-  });
-  assert.equal(session.provider, "gemini");
-  assert.equal(session.runner, "pty");
-  // gemini 接受调用方指定的 UUID，PTY 直接前置 --session-id 就能拿到可 resume 的 ID。
-  assert.match(session.claudeSessionId ?? "", /^[0-9a-f-]{36}$/);
-  const shellArgs = spawnCalls[0][1] as string[];
-  assert.equal(shellArgs[0], "-lic");
-  assert.match(shellArgs.at(-1) ?? "", /if gemini --model 'gemini-2\.5-pro' --approval-mode yolo --session-id [0-9a-f-]{36}/);
+test("removed provider is rejected before PTY spawn or persistence", async (t) => {
+  const { manager, root, spawnCalls, storage } = createHarness(t);
+  await assert.rejects(
+    manager.start("gemini", root, "managed", undefined, {
+      provider: "gemini" as unknown as SessionSnapshot["provider"],
+    }),
+    /unsupported|不支持|无效/i,
+  );
+  assert.equal(spawnCalls.length, 0);
+  assert.deepEqual(storage.loadSessions(), []);
+});
 
-  const standard = await manager.start("gemini", root, "default", undefined, { provider: "gemini" });
-  assert.equal(standard.mode, "default");
-  assert.doesNotMatch((spawnCalls.at(-1)?.[1] as string[]).at(-1) ?? "", /--approval-mode/);
+test("restoring removed provider PTY history never spawns or rewrites it as Claude", async (t) => {
+  const { manager, root, spawnCalls, storage } = createHarness(t);
+  const legacy = {
+    id: "legacy-removed-provider", command: "gemini", provider: "gemini", runner: "pty",
+    sessionKind: "pty", cwd: root, mode: "default", status: "idle", exitCode: null,
+    startedAt: new Date(0).toISOString(), endedAt: null, output: "saved history",
+    archived: false, archivedAt: null, claudeSessionId: "legacy-native-id",
+  } as unknown as SessionSnapshot;
+  storage.saveSession(legacy);
+  manager.dispose();
+  const restored = new ProcessManager(
+    { ...defaultConfig(), defaultCwd: root, startupCommands: [] },
+    storage as unknown as WandStorage, path.join(root, ".wand-restored"),
+  );
+  t.after(() => restored.dispose());
+  await assert.rejects(
+    restored.start("gemini", root, "default", undefined, {
+      provider: legacy.provider, reuseId: legacy.id, resumedFromSessionId: legacy.id,
+    }),
+    /unsupported|不支持|无效/i,
+  );
+  assert.equal(spawnCalls.length, 0);
+  assert.equal(storage.getSession(legacy.id)?.provider, legacy.provider);
+  assert.equal(storage.getSession(legacy.id)?.output, "saved history");
 });
 
 test("OpenCode PTY never injects --variant (TUI-only flags must stay on `opencode run`)", async (t) => {

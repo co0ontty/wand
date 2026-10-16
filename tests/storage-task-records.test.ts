@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import test, { type TestContext } from "node:test";
 
 import { WandStorage } from "../src/storage.js";
+import { STORAGE_SCHEMA_VERSION } from "../src/storage-schema.js";
 import type { SessionSnapshot } from "../src/types.js";
 
 function database(t: TestContext): { storage: WandStorage; dbPath: string } {
@@ -51,7 +52,7 @@ test("task write paths preserve uniqueness when v4 cannot create its index for l
   const storage = new WandStorage(dbPath);
   t.after(() => storage.close());
   const verify = new DatabaseSync(dbPath);
-  assert.equal(verify.prepare("PRAGMA user_version").get()?.user_version, 4);
+  assert.equal(verify.prepare("PRAGMA user_version").get()?.user_version, STORAGE_SCHEMA_VERSION);
   assert.equal(verify.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'uniq_wand_tasks_one_card_per_container'").get(), undefined);
   verify.close();
 

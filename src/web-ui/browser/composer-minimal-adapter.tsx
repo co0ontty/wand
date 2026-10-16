@@ -15,6 +15,18 @@ function MinimalComposer({ host, input, resize }: { host: HTMLElement; input: HT
   const [, refresh] = React.useReducer(value => value + 1, 0);
   React.useEffect(() => composer.subscribe(refresh), []);
   React.useEffect(() => ptyInputState.subscribe(refresh), []);
+  React.useLayoutEffect(() => {
+    const runtime = host.querySelector<HTMLElement>(".composer-inline-config");
+    if (!runtime) return;
+    const measure = (): void => {
+      const rect = runtime.getBoundingClientRect();
+      host.style.setProperty("--composer-runtime-width", `${Math.ceil(rect.width)}px`);
+      host.style.setProperty("--composer-runtime-height", `${Math.ceil(rect.height)}px`);
+    };
+    measure();
+    const observer = new ResizeObserver(measure); observer.observe(runtime);
+    return () => observer.disconnect();
+  }, [host]);
   React.useEffect(() => {
     const observer = new MutationObserver(refresh);
     const action = host.querySelector("#send-input-button");
@@ -86,13 +98,14 @@ function MinimalComposer({ host, input, resize }: { host: HTMLElement; input: HT
       if (saved?.owner === owner) { input.setSelectionRange(saved.start, saved.end, saved.direction); input.scrollTop = saved.scroll; }
     }
   };
-  return createPortal(<>
+  return <>{createPortal(<>
     {terminal ? <><PtyInputModeToggle ref={toggle} mode={mode} hasDraft={!!draft.text || !!draft.attachments.length} disabled={locked || phase === "sending" || failed} onToggle={changeMode}/>
       <PtyModifierButtons ctrl={choice.ctrl} shift={choice.shift} disabled={state.composerComposing}
         onToggle={key => { if (!state.composerComposing) ptyInputState.toggle(owner, key); }}/></> : null}
-    <MinimalComposerEntry text={draft.text} attachments={draft.attachments.length}
-      placeholder={input.placeholder} disabled={input.disabled} onOpen={minimal.open}/>
-  </>, host.querySelector(".composer-main-row")!);
+  </>, host.querySelector(".composer-main-row")!)}
+    {createPortal(<MinimalComposerEntry text={draft.text} attachments={draft.attachments.length}
+      placeholder={input.placeholder} disabled={input.disabled} onOpen={minimal.open}/>, host.querySelector(".composer-actions-left")!)}
+  </>;
 }
 
 export function mountMinimalComposer(resize: ResizeInput): void {

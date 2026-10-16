@@ -1,0 +1,247 @@
+{"at":1792053567818,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053567818,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053567818,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053567818,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053570508,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053573278,"phase":"worker-radio-report","message":"Web真实运行状态统一 reported to captain","preview":"RADIO: status=started, action=读取任务板、源码地图与本lane规范，确认状态投影接口, evidence=none, blocker=none, next=核对基线与现有状态优先级"}
+{"at":1792053573281,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start read","toolName":"read"}
+{"at":1792053573302,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792053573303,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053573303,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053575960,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053576841,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053576842,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start read","toolName":"read"}
+{"at":1792053576851,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792053576851,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053576852,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053584726,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053585107,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053585107,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start read","toolName":"read"}
+{"at":1792053585107,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start read","toolName":"read"}
+{"at":1792053585107,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start read","toolName":"read"}
+{"at":1792053585108,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start read","toolName":"read"}
+{"at":1792053585108,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start bash","toolName":"bash"}
+{"at":1792053585114,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792053585115,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792053585116,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792053585116,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792053585277,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end bash failed","toolName":"bash","isError":true}
+{"at":1792053585277,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053585277,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053585278,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053585278,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053585278,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053585279,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053585279,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053585279,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053585280,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053585280,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053593414,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053593494,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053593496,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start read","toolName":"read"}
+{"at":1792053593497,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start read","toolName":"read"}
+{"at":1792053593497,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start read","toolName":"read"}
+{"at":1792053593498,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start read","toolName":"read"}
+{"at":1792053593498,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start read","toolName":"read"}
+{"at":1792053593499,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start read","toolName":"read"}
+{"at":1792053593512,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792053593513,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792053593513,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792053593514,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792053593514,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792053593514,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792053593515,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053593515,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053593516,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053593516,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053593516,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053593517,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053593517,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053593518,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053593518,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053593518,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053593518,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053593519,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053598850,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053606867,"phase":"worker-radio-report","message":"Web真实运行状态统一 reported to captain","preview":"RADIO: status=working, action=采用impeccable现有Operate约束并复用Wand状态行，核对事实优先级, evidence=running-activity.ts现有queue优先于waiting且裸PTY静默判断存在混用, blocker=none, next=确认当前回合工具事件与状态enum后提交纯投影接口"}
+{"at":1792053606868,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start bash","toolName":"bash"}
+{"at":1792053606869,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start read","toolName":"read"}
+{"at":1792053606869,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start read","toolName":"read"}
+{"at":1792053606875,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792053606876,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792053606978,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792053606981,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053606981,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053606982,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053606982,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053606982,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053606983,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053616943,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053617034,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053617034,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start read","toolName":"read"}
+{"at":1792053617035,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start read","toolName":"read"}
+{"at":1792053617035,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start read","toolName":"read"}
+{"at":1792053617036,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start read","toolName":"read"}
+{"at":1792053617036,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start bash","toolName":"bash"}
+{"at":1792053617045,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792053617046,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792053617047,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792053617048,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792053617063,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end bash failed","toolName":"bash","isError":true}
+{"at":1792053617063,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053617064,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053617065,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053617065,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053617066,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053617066,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053617067,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053617067,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053617068,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053617068,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053619802,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053628903,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053628905,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start bash","toolName":"bash"}
+{"at":1792053629000,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end bash failed","toolName":"bash","isError":true}
+{"at":1792053629001,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053629001,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053632110,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053638247,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053638248,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start bash","toolName":"bash"}
+{"at":1792053638304,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792053638304,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053638305,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053640750,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053646253,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053646254,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start read","toolName":"read"}
+{"at":1792053646254,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start read","toolName":"read"}
+{"at":1792053646255,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start read","toolName":"read"}
+{"at":1792053646255,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start read","toolName":"read"}
+{"at":1792053646255,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start read","toolName":"read"}
+{"at":1792053646264,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792053646264,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792053646264,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792053646265,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792053646265,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792053646265,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053646265,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053646265,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053646266,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053646266,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053646266,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053646266,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053646266,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053646267,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053646267,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053649301,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053685871,"phase":"worker-radio-report","message":"Web真实运行状态统一 reported to captain","preview":"RADIO: status=working, action=确定接口：activity复用同源messages/id/activeRequestId，新增纯状态投影，保留computeRunningPhase的executing兼容头像, evidence=types.ts:744 phase仅responding/background；工具type/name/activity.kind为明确事件, blocker=共享入口去重需Captain插接, next=实现等待/终态"}
+{"at":1792053685873,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start write","toolName":"write"}
+{"at":1792053685889,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end write","toolName":"write","isError":false}
+{"at":1792053685890,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053685891,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053690597,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053742313,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053742316,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start edit","toolName":"edit"}
+{"at":1792053742344,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1792053742345,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053742346,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053744771,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053749409,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053749412,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start edit","toolName":"edit"}
+{"at":1792053749433,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1792053749435,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053749436,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053752104,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053762809,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053762810,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start edit","toolName":"edit"}
+{"at":1792053762823,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1792053762824,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053762825,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053767526,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053769642,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053769643,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start edit","toolName":"edit"}
+{"at":1792053769656,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1792053769657,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053769658,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053775850,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053784002,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053784005,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start edit","toolName":"edit"}
+{"at":1792053784027,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1792053784028,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053784028,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053790157,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053807177,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053807178,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start edit","toolName":"edit"}
+{"at":1792053807208,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1792053807209,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053807210,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053811338,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053815083,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053815085,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start bash","toolName":"bash"}
+{"at":1792053815125,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end bash failed","toolName":"bash","isError":true}
+{"at":1792053815126,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053815127,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053817865,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053819585,"phase":"worker-budget-notice","message":"Web真实运行状态统一 reached soft request budget (18/18)"}
+{"at":1792053819587,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053819589,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start read","toolName":"read"}
+{"at":1792053819618,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792053819619,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053819620,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053819622,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053819622,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053823814,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053828491,"phase":"worker-radio-report","message":"Web真实运行状态统一 reported to captain","preview":"RADIO: status=finishing, action=按预算收口当前实现，补adapter去重键与定点回归后交接, evidence=新增纯动作投影及bar已修改, blocker=浏览器与共享入口尚未验证, next=执行定点测试并写IMPLEMENTATION"}
+{"at":1792053828493,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start edit","toolName":"edit"}
+{"at":1792053828505,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1792053828506,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053828507,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053832334,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053835893,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053835894,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start edit","toolName":"edit"}
+{"at":1792053835901,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1792053835902,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053835902,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053843283,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053852443,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053852445,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start edit","toolName":"edit"}
+{"at":1792053852462,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1792053852463,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053852464,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053855889,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053880913,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053880915,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start write","toolName":"write"}
+{"at":1792053881047,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end write","toolName":"write","isError":false}
+{"at":1792053881048,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053881049,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053885465,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053890475,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053890477,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start bash","toolName":"bash"}
+{"at":1792053895775,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792053895776,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053895777,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053898979,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053908105,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053908106,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start read","toolName":"read"}
+{"at":1792053908107,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start read","toolName":"read"}
+{"at":1792053908107,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start read","toolName":"read"}
+{"at":1792053908108,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start bash","toolName":"bash"}
+{"at":1792053908120,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792053908124,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792053908136,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792053908179,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792053908179,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053908180,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053908180,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053908181,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053908181,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053908181,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053908181,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053908182,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053912543,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053958278,"phase":"worker-radio-report","message":"Web真实运行状态统一 reported to captain","preview":"RADIO: status=verified, action=收口状态lane交付, evidence=14/14定点测试通过；tsconfig.react类型检查与diff-check通过, blocker=预算收口未执行bar/adapter真实浏览器验证及共享入口去重, next=写入精确handoff供Captain集成与验收"}
+{"at":1792053958279,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_start write","toolName":"write"}
+{"at":1792053958289,"phase":"worker-tool","message":"Web真实运行状态统一 tool_execution_end write","toolName":"write","isError":false}
+{"at":1792053958290,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053958291,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended"}
+{"at":1792053960414,"phase":"worker-message-start","message":"Web真实运行状态统一 message started"}
+{"at":1792053984592,"phase":"worker-message-end","message":"Web真实运行状态统一 assistant message ended","preview":"## result_summary 已在独占lane完成状态纯投影、状态条与adapter更新，未修改主仓源码或其他owner文件。 - 状态优先级修正为：归档/真实终态 → 等待确认/输入 → 当前执行 → 排队。 - 当前动作仅依据同源当前请求的工具事件、正文块类型及明确phase；缺证据回落通用执行。 - 工具结果按ID退场；不显示命令、参数、描述或敏感摘要。 - failed/stopped分别显示“执行失败”/“已停止”，停止计时；裸PTY `status=runn"}

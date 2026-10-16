@@ -343,7 +343,7 @@ export async function generateSessionTopic(
     ].join("\n"),
     prompt: `按发送顺序排列的用户消息：\n${input}`,
   };
-  return callConfiguredAiText(request, cwd ?? process.cwd(), language ?? "", ai, (raw) => {
+  return callConfiguredAiText(request, cwd ?? process.cwd(), language ?? "", { ...ai, purpose: "session-title" }, (raw) => {
     const topic = parseTopic(raw);
     if (!topic) throw new Error("模型返回的会话主题格式无效。");
     return topic;

@@ -1,4 +1,5 @@
 import { composer, state, writeStoredBoolean } from "./state";
+import { isSystemAiCall, SYSTEM_AI_READ_ONLY } from "../../system-ai-call.js";
 import { ensureTerminalLibrary } from "../vendor-loader.js";
 import { handlePiSettingsKeydown } from "./pi-settings-adapter";
 import { hasOpenPopupSurface } from "../react/ui/popup-lifecycle.js";
@@ -57,7 +58,7 @@ const completionViewIntent = createSessionCompletionViewIntent();
 
 /** Only acknowledge a generation whose result is actually displayed in the active view. */
 export async function markSessionCompletionViewed(session: any): Promise<void> {
-  if (!session || !completionViewIntent.isOpen(session.id) || state.selectedId !== session.id
+  if (!session || !completionViewIntent.isLoaded(session.id) || state.selectedId !== session.id
     || document.visibilityState !== "visible"
     || !isSessionJustCompleted(session)) return;
   const view = document.getElementById(state.currentView === "chat" ? "chat-output" : "output");
@@ -322,6 +323,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
 
       export function getComposerPlaceholder(session, terminalInteractive) {        // Keep placeholders short so they don't wrap on portrait mobile screens.
         // Only show informative state hints; drop the redundant "send to X" labels.
+        if (isSystemAiCall(session)) return SYSTEM_AI_READ_ONLY;
         if (terminalInteractive) return "键盘输入直通终端 · Enter 提交";
         // 只有真正进入终止态（exited / failed / stopped）才提示"会话已结束"。
         // 结构化会话刚创建或一次回复结束后会回到 "idle"——那是等待下一条输入的
@@ -543,7 +545,8 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           if (!operation.pending && !state.sessions.some(function(item) { return item.id === id; })) sessionToolSwitches.delete(id);
         }
         const toolSwitch = sessionToolSwitches.get(session?.id);
-        const toolVisible = canSwitchSessionTool(session, state.currentMessages?.length);
+        const canSwitchTool = canSwitchSessionTool(session, state.currentMessages?.length);
+        const toolVisible = !!session || canSwitchTool;
         const toolDisabled = !!toolSwitch?.pending;
         var modelOptions = getChatModelSelectOptions(model, session);
         var normalizedModel = normalizeComposerModelValue(model);
@@ -571,13 +574,13 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           onRefreshModels: function() { void refreshAvailableModels(); },
         });
         syncBrowserComposerSelects({
-          resolve: function(control) {
+          resolve: function(control, scope) {
             if (control === "tool") {
               const id = sessionToolId(session);
               return { value: id, options: AGENT_TOOL_OPTIONS.map(function(tool) { return { value: tool.id, label: tool.label }; }),
                 ariaLabel: "更换执行工具", displayValue: toolDisabled ? "切换中…" : toolSwitch?.failed ? "切换失败" : agentToolOption(id)?.label,
                 displayTitle: toolSwitch?.status || agentToolOption(id)?.description,
-                disabled: toolDisabled || !!getPendingSessionConfig(session?.id) };
+                disabled: !canSwitchTool || toolDisabled || !!getPendingSessionConfig(session?.id) };
             }
             if (control === "mode") {
               return {
@@ -609,7 +612,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
               options: thinkingOptions,
               ariaLabel: "思考深度",
               placeholder: thinkingLabel,
-              displayValue: thinkingLabel,
+              displayValue: scope === "runtime" ? "思考：" + thinkingLabel : thinkingLabel,
             };
           },
           onValueChange: function(control, value, scope) {
@@ -625,7 +628,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
       }
 
       export function getProviderKey(provider) {
-        return provider === "codex" || provider === "opencode" || provider === "grok" || provider === "qoder" || provider === "pi" || provider === "gemini" ? provider : "claude";
+        return provider === "codex" || provider === "opencode" || provider === "grok" || provider === "qoder" || provider === "pi" ? provider : "claude";
       }
 
       export function getProviderForSession(session) {
@@ -643,7 +646,6 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           grok: typeof configured.grok === "string" ? configured.grok : ((state.config && state.config.defaultGrokModel) || ""),
           qoder: typeof configured.qoder === "string" ? configured.qoder : ((state.config && state.config.defaultQoderModel) || "")
           , pi: typeof configured.pi === "string" ? configured.pi : ((state.config && state.config.defaultPiModel) || "")
-          , gemini: typeof configured.gemini === "string" ? configured.gemini : ((state.config && state.config.defaultGeminiModel) || "")
         };
       }
 
@@ -655,7 +657,6 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         if (key === "grok") return defaults.grok || "";
         if (key === "qoder") return defaults.qoder || "";
         if (key === "pi") return defaults.pi || "";
-        if (key === "gemini") return defaults.gemini || "";
         return defaults.claude || "";
       }
 
@@ -696,7 +697,6 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         if (provider === "pi") return (state.availablePiModels || []).filter(function(model) {
           return session?.sessionKind !== "pty" || !model.id.startsWith("wand-openrouter-free/");
         });
-        if (provider === "gemini") return state.availableGeminiModels || [];
         return state.availableModels || [];
       }
 
@@ -873,7 +873,6 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         state.availableGrokModels = Array.isArray(data.grokModels) ? data.grokModels : [];
         state.availableQoderModels = Array.isArray(data.qoderModels) ? data.qoderModels : [];
         state.availablePiModels = Array.isArray(data.piModels) ? data.piModels : [];
-        state.availableGeminiModels = Array.isArray(data.geminiModels) ? data.geminiModels : [];
         state.providerThinkingEfforts = data.thinkingEfforts && typeof data.thinkingEfforts === "object"
           ? data.thinkingEfforts
           : {};
@@ -1033,9 +1032,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
               ? "qoder-cli-print"
             : provider === "pi"
               ? "pi-cli-json"
-            : provider === "gemini"
-              ? "gemini-cli-json"
-              : "claude-cli-print";
+            : "claude-cli-print";
         var payload = {
           cwd: cwdOverride || getEffectiveCwd(),
           mode: modeOverride || state.chatMode || (state.config && state.config.defaultMode) || "default",
@@ -1102,6 +1099,9 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
 
       export function updateSessionSnapshot(snapshot, messageSource: MessageMergeSource = "unknown") {
         if (!snapshot || !snapshot.id) return;
+        if (messageSource === "latest" && (Array.isArray(snapshot.messages) || typeof snapshot.output === "string")) {
+          completionViewIntent.loaded(snapshot.id);
+        }
         var currentSession = state.sessions.find(function(session) { return session.id === snapshot.id; }) || null;
         var normalizedSnapshot = Object.assign({}, normalizeStructuredSnapshot(snapshot, currentSession),
           mergeSessionCompletionState(currentSession, snapshot));
@@ -1320,7 +1320,10 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
               return mergeServerSession(localSession, snapshot);
             });
 
-            var preferredSessionId = getPreferredSessionId(state.sessions);
+            // Destructive refreshes must preserve an explicit return to Home;
+            // ordinary boot/list reads retain the existing preferred selection.
+            var preferredSessionId = opts.preserveNoSelection && !state.selectedId
+              ? null : getPreferredSessionId(state.sessions);
             if (preferredSessionId !== undefined) {
               state.selectedId = preferredSessionId;
             }
@@ -2857,6 +2860,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
 
       export function canSendComposer(value, sessionId?) {
         var id = sessionId === undefined ? state.selectedId : sessionId;
+        if (isSystemAiCall(state.sessions.find(session => session.id === id))) return false;
         if (sessionToolSwitches.get(id)?.pending) return false;
         return !!String(value || "").trim() || getPendingAttachments(id).length > 0;
       }

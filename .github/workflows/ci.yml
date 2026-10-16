@@ -1,6 +1,7 @@
 name: CI
 
-# 类型检查 + 全量单测的质量门。
+# 类型检查、构建契约与业务单测的质量门。
+# 界面操作矩阵属于专项验收，显式手动触发，不阻塞每次业务/架构改动。
 #
 # 为什么固定跑在 macOS runner：`npm test` 是全量的跨端契约套件，
 # 其中「生成品牌资源与 Android launcher 同步」用例要读 iOS/macOS 的 AppIcon PNG，
@@ -11,6 +12,12 @@ on:
     branches: [master]
   pull_request:
   workflow_dispatch:
+    inputs:
+      ui_regression:
+        description: "额外运行浏览器专项回归（不作为普通 push 的全局门禁）"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -20,6 +27,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  node-compatibility:
+    runs-on: macos-26
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22.19.0", "24", "26"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: git submodule update --init -- render-bin
+      - run: npm ci --prefer-offline
+      - run: npm run check
+      - name: Runtime, storage and installer contracts
+        run: node --test --import tsx tests/deployment-lock.test.ts tests/update-node-bootstrap.test.ts tests/web-update-recovery.test.ts tests/update-deployment-lock.test.ts tests/update-compatibility.test.ts tests/storage-security-migrations.test.ts tests/storage-session-options.test.ts tests/core-harness.test.ts tests/pi-output-file.test.ts tests/build-budget-reporting.test.ts tests/bundle-budget.test.ts
+      - run: npm run build
+
   verify:
     runs-on: macos-26
     timeout-minutes: 45
@@ -41,6 +70,17 @@ jobs:
 
       - name: Install dependencies
         run: npm ci --prefer-offline
+
+      # CLI resource/isolation tests need a real CLI install on PATH. Wand's pinned
+      # SDK dependency is deliberately not a fallback for a missing CLI.
+      # Keep this install outside the checkout and pin its independently tested version.
+      - name: Install independent Pi CLI for contract tests
+        run: |
+          set -euo pipefail
+          CLI_ROOT="$RUNNER_TEMP/wand-ci-pi"
+          npm install --prefix "$CLI_ROOT" --no-audit --no-fund --save-exact @earendil-works/pi-coding-agent@1.2.0
+          echo "$CLI_ROOT/node_modules/.bin" >> "$GITHUB_PATH"
+          "$CLI_ROOT/node_modules/.bin/pi" --version
 
       # 内嵌品牌资产（browser-extension 图标、wand-logo、生成的 swift 脚本）是
       # 构建产物，未入库；干净检出必须先同步，否则品牌一致性用例直接失败。
@@ -74,11 +114,26 @@ jobs:
           # Stage unchanged release artifacts for the distinct package compatibility tests.
           node scripts/stage-render-binaries.js --all --strict
 
-      # 真实的 Chrome CDP 用例；macOS runner 预装 Google Chrome。
-      # 浏览器回归在本地默认跳过，CI 在这里显式打开。
-      # 保留所有 test 文件，在同一 runner 分给 1 个 Chrome worker 与 2 个 unit worker。
+      # 保留业务、协议、存储和运行生命周期断言；不因点击坐标/浏览器启动抖动
+      # 阻止与界面无关的需求。完整 UI 矩阵仍保留在显式专项入口。
       - name: Unit and contract tests
-        run: node scripts/check-node-version.js && node scripts/run-ci-tests.js
+        run: node scripts/check-node-version.js && node scripts/run-ci-tests.js --suite=unit
         env:
-          WAND_BROWSER_E2E: "1"
           WAND_RENDER_BIN: ${{ github.workspace }}/render/target/release/wand-render
+
+      - name: Optional browser regression
+        if: github.event_name == 'workflow_dispatch' && inputs.ui_regression
+        run: node scripts/run-ci-tests.js --suite=ui
+        env:
+          WAND_RENDER_BIN: ${{ github.workspace }}/render/target/release/wand-render
+
+      # Loopback-only synthetic employee fixtures, not installed-service captures.
+      # Preserve the actual DOM/pointer evidence when a hosted browser gate fails.
+      - name: Upload employee browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: employee-browser-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/employee-profile-browser/
+          if-no-files-found: ignore
+          retention-days: 7

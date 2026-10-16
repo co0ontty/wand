@@ -56,7 +56,7 @@ test("activity filtering keeps an idle employee head, zero count and creation ac
   assert.match(html, /class="[^"]*im-sidebar-group-count[^"]*"[^>]*>0\/2</);
   assert.match(html, /aria-label="与华杰新建对话"/);
   assert.match(html, /现在没有活动会话/);
-  assert.match(html, /暂无活动会话/);
+  assert.doesNotMatch(html, /sidebar-session-area-toggle|sidebar-session-area-content|暂无活动会话/, "a zero-count identity has no vacant expandable child region");
   assert.doesNotMatch(html, /还没有对话|创建第一个会话|im-sidebar-item-avatar-wrap/);
   assert.match(html, /width:36px;height:36px/);
 });
@@ -145,7 +145,7 @@ test("sidebar status prioritizes attention, real turns and unseen completion, no
   assert.equal(completed.viewedCompletionRevision, 1, "projection must not mark completion viewed");
   const active = filterActiveGroups([{ ...group, standaloneSessions: [completed,
     { id: "idle", status: "idle" }, { id: "alive", status: "running", providerCliActive: true }] }], "idle");
-  assert.deepEqual(active[0].standaloneSessions.map((session) => session.id), ["completed", "idle"]);
+  assert.deepEqual(active[0].standaloneSessions.map((session) => session.id), ["completed"]);
 });
 
 test("first read placeholders and contact failures remain in place, without a false business empty", () => {
@@ -153,16 +153,16 @@ test("first read placeholders and contact failures remain in place, without a fa
   assert.match(loading, /ant-skeleton/);
   assert.doesNotMatch(loading, /还没有对话|还没有硅基员工/);
   const failed = renderRecent(0, scope(), { listError: true, contactsError: "not authorized" });
-  assert.match(failed, /联系人加载失败/);
-  assert.match(failed, />重试<\/span><\/button>/);
+  assert.match(failed, /aria-label="新建工作"/);
   assert.doesNotMatch(failed, /还没有对话|还没有硅基员工/);
   const retained = renderRecent(1, scope(), { contactsError: "offline" });
   assert.match(retained, /会话0/);
-  assert.match(retained, /联系人加载失败/);
+  const host = source("src/web-ui/react/new-session/host.tsx");
+  assert.match(host, /employeesError \? <Alert type="error" title=\{employeesError\}/);
 });
 
 test("sidebar only sizes explicit provider slots; default window and tab output is compatible", () => {
-  for (const provider of ["claude", "codex", "opencode", "grok", "qoder", "pi", "gemini"]) {
+  for (const provider of ["claude", "codex", "opencode", "grok", "qoder", "pi"]) {
     const sized = renderToStaticMarkup(createElement(SessionProviderMark, { session: { provider }, size: 14 }));
     assert.match(sized, /class="sidebar-provider-mark" data-mark-size="14"/);
     assert.match(sized, new RegExp(`data-provider-logo="${provider}"`));
@@ -239,17 +239,11 @@ test("inline reasons do not echo credential-bearing URLs or paths", () => {
   assert.equal(sidebarSafeError("认证失败 Bearer secret"), "认证失败 [凭据已隐藏]");
 });
 
-test("sidebar review regression: long contact names remain accessible with Ant typography", () => {
-  const name = "很长的联系人姓名".repeat(5);
-  const html = renderRecent(0, scope(), { employees: [{ id: "long", name, duty: "负责侧栏验证" }] });
-  assert.match(html, /class="[^"]*sidebar-contact-picker-name[^"]*"/);
-  assert.ok(html.includes(`title="${name}"`));
-  assert.ok(html.includes(name));
-  assert.ok(html.includes(`title="${name} · 负责侧栏验证"`));
-  const picker = source("src/web-ui/react/workspaces/sidebar-recent-section.tsx");
-  assert.match(picker, /<Typography.Text ellipsis className="sidebar-contact-picker-name"/);
-  assert.match(picker, /style=\{\{ flex: 1, textAlign: "start" \}\}/);
-
+test("long employee names stay accessible in the one new-work picker", () => {
+  const host = source("src/web-ui/react/new-session/host.tsx");
+  const picker = source("src/web-ui/react/workspaces/unified-execution-subject-picker.tsx");
+  assert.match(host, /className="new-work-person-name" title=\{employee\?\.name \|\| team\?\.name\}/);
+  assert.match(picker, /Typography.Text strong ellipsis title=\{title\}/);
 });
 
 // Opt-in development DOM regression, never an installed-service acceptance test.

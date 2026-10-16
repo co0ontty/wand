@@ -39,7 +39,6 @@ const config = {
   defaultGrokModel: "grok-4.5",
   defaultQoderModel: "performance",
   defaultPiModel: "anthropic/claude-sonnet-4-6",
-  defaultGeminiModel: "gemini-2.5-pro",
   defaultThinkingEffort: "deep" as const,
   inheritEnv: true,
 };

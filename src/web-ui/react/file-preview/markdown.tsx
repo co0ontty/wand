@@ -7,12 +7,12 @@ export const MessageFileContext = React.createContext<FileContext>({});
 import { localFilePreviewHref, localHttpPreviewHref, localPreviewController } from "../local-preview/controller";
 import { classNames } from "../ui/class-names";
 import { openMessageImage } from "../image-viewer/gallery";
-import { parseFilePreviewMarkdown, tokenizeFilePreviewCode } from "./model";
+import { tokenizeFilePreviewCode, type FilePreviewCodeToken } from "./model";
+import { parseFilePreviewMarkdown } from "./markdown-model";
 import type {
-  FilePreviewCodeToken,
   FilePreviewMarkdownBlock,
   FilePreviewMarkdownInline,
-} from "./model";
+} from "./markdown-model";
 
 /** Tokenized source, shared by the raw text preview and fenced Markdown blocks. */
 export function CodeTokens({ tokens }: { tokens: ReadonlyArray<FilePreviewCodeToken> }) {

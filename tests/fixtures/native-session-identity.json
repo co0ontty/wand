@@ -5,18 +5,17 @@
     "opencode",
     "grok",
     "qoder",
-    "pi",
-    "gemini"
+    "pi"
   ],
   "cases": [
     {
-      "name": "Gemini",
+      "name": "Pi",
       "payload": {
-        "id": "gemini",
-        "provider": "gemini"
+        "id": "pi",
+        "provider": "pi"
       },
       "expected": {
-        "providerLabel": "Gemini"
+        "providerLabel": "Pi"
       }
     },
     {
@@ -69,14 +68,14 @@
       "name": "employee",
       "payload": {
         "id": "employee",
-        "provider": "gemini",
+        "provider": "pi",
         "employeeId": "employee-fixture",
         "employeeName": "测试员工",
         "employeeAvatar": "cat:0",
         "workspaceTaskId": "task-fixture"
       },
       "expected": {
-        "providerLabel": "Gemini",
+        "providerLabel": "Pi",
         "badge": "员工",
         "caption": "测试员工"
       }

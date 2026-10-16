@@ -33,10 +33,14 @@ import { GroupEditor } from "./group-editor";
 import { conversationsRepository, notifyConversationChanges, UnconfirmedConversationError } from "./repository";
 import { conversationDraftKey, conversationUi, useConversationUi } from "./state";
 import { useUserProfile } from "../user-profile-repository";
+import { settingsController } from "../settings/controller";
 import { installConversationHomeStyles } from "./home-styles";
 import { installChatComposerStyles } from "../chat-composer-styles";
-import { directWorkPreference, latestDirectWork } from "./composer-presentation";
+import { composerRuntimePreference, directWorkPreference, latestDirectWork } from "./composer-presentation";
+import { ConversationExecutionSelectors, conversationPreferenceAgent, setPageExecutionPreference, usePageExecutionPreference } from "./execution-preference";
+import { agentToolDisplayName } from "../../provider-identity.js";
 import { useEditorExpansion } from "../composer-sender/editor-expansion.js";
+import { useWandModelCatalog } from "../use-model-catalog";
 import { MinimalComposerEntry, useMinimalComposer } from "../composer-sender/minimal.js";
 
 const runLabel = { running: "进行中", awaiting_approval: "等你批准计划", waiting_user: "等你回复", done: "已完成", failed: "失败", stopped: "已停止" };
@@ -58,7 +62,8 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
   React.useLayoutEffect(() => { installChatComposerStyles(); installConversationHomeStyles(); }, []);
   const ui = useConversationUi();
   // 老数据没有 dissolvedBy 时按当前资料署名，不让群解散提示永远写死「我」。
-  const selfName = useUserProfile().name || "我";
+  const selfProfile = useUserProfile();
+  const selfName = selfProfile.name || "我";
   const { employees, loading, error: directoryError } = useSiliconEmployees({ enabled: visible, includeArchived: true });
   const id = ui.selectedId;
   const [detail, setDetail] = React.useState<ConversationDetail | null>(null);
@@ -84,6 +89,7 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
   const [chatCwd, setChatCwd] = React.useState("");
   const [draftRecipient, setDraftRecipient] = React.useState("");
   const [defaultCwd, setDefaultCwd] = React.useState("");
+  const modelCatalog = useWandModelCatalog(visible);
   React.useEffect(() => {
     if (!visible) return;
     const request = new AbortController();
@@ -129,6 +135,13 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
   const mention = selected?.kind === "group" ? conversationLeaderMention(draft.text,
     layer !== "task" && selectedRun ? selectedRun.run.team.members : selected.team?.members ?? []) : null;
   const mentionedLeader = mention && !("error" in mention) ? mention : null;
+  const pagePreference = usePageExecutionPreference();
+  const editablePreference = selected?.kind === "dm" && !target && layer !== "task";
+  const defaultRuntimeAgent = target && selectedRun
+    ? selectedRun.run.team.members.find(member => member.isLeader)?.agent
+    : selected?.kind === "group" ? (selected.team?.members.find(member => member.id === mentionedLeader?.memberId) ?? leader)?.agent : employee?.agents[0];
+  const runtimeAgent = conversationPreferenceAgent(defaultRuntimeAgent, editablePreference ? pagePreference : undefined);
+  const runtimePreference = composerRuntimePreference(runtimeAgent, modelCatalog);
   const activeRun = selectedRun && AI_TEAM_ACTIVE_RUN_STATUSES.includes(selectedRun.run.status) ? selectedRun : null;
   const stops = !!activeRun && !draft.text.trim() && !draft.attachments.length && layer !== "task";
   const busy = phase === "sending";
@@ -291,7 +304,8 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
           text = await formatConversationAttachments(uploaded.files, text);
         }
         return conversationsRepository.post(`/api/conversations/${encodeURIComponent(originalId)}/${isTask ? "tasks" : "messages"}`,
-          isTask ? { ...metadata, description: text } : { input: text, target: originalTarget, cwd });
+          isTask ? { ...metadata, description: text } : { input: text, target: originalTarget, cwd,
+            ...(editablePreference && pagePreference ? { executionPreference: pagePreference } : {}) });
       });
       if (current.current.scope !== captured || !current.current.visible) { notifyConversationChanges(); return; }
       void load();
@@ -330,7 +344,7 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
     input: () => composerSurface.current?.querySelector("textarea"), surface: () => composerSurface.current,
     phase: feedbackAction ? "idle" : phase, pending: !!draft.text || !!draft.attachments.length,
     locked: !!draft.recovery || layer === "task",
-    popupOwners: ["conversation-task-panel", "本次新工作的执行配置"],
+    popupOwners: ["conversation-task-panel", "本次新工作的执行配置", "本页执行工具", "本页模型", "本页思考深度"],
   });
   const inputPlaceholder = layer === "task" ? "描述任务要求…" : selected?.kind === "dm" ? "描述一项新工作…" : "输入消息…";
   const primaryLabel = phase === "sending" ? "发送中" : phase === "sent" ? "已接受" : phase === "failed" ? "操作失败" : phase === "unknown" ? "送达未确认" : stops ? "停止本轮" : layer === "task" ? continueTaskId ? "确认继续此任务" : "派发任务" : selected?.kind === "dm" ? "发送并开始新工作" : "发送消息";
@@ -349,6 +363,7 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
         <ConversationPanel open={members} owner="conversation-members-panel" anchorRef={membersAnchor} triggerRef={membersTrigger} onClose={() => { setMembers(false); setInvite(false); }}>
           <Typography.Text strong>当前群成员：我 + {selected?.team?.members.length ?? 0} 位员工</Typography.Text>
           {selected?.sourceTemplateId ? <Typography.Paragraph type="secondary">来自团队模板 · {selected.team?.name}</Typography.Paragraph> : null}
+          <Flex gap={8} align="center" style={{ paddingBlock: 8 }}><WandIconButton className="conversation-avatar-button" aria-label="查看我的资料" onClick={() => { setMembers(false); settingsController.open("profile"); }}><EmployeeAvatar employee={{ id: "user", name: selfName, avatar: selfProfile.avatar }} provider="" size="md"/></WandIconButton><Typography.Text strong>{selfName} · 我</Typography.Text></Flex>
           {selected?.team?.members.map(m => <Flex key={m.id} vertical gap={4} style={{ paddingBlock: 8 }}>
             <Flex gap={8} align="center">{m.employeeId ? <WandIconButton className="conversation-avatar-button" aria-label={`查看${m.name}的资料`} onClick={event => { setMembers(false); employeeProfile.open({ id: m.employeeId!, name: m.name, avatar: m.avatar }, event.currentTarget); }}><EmployeeAvatar employee={{ id: m.employeeId, name: m.name, avatar: m.avatar }} size="md"/></WandIconButton> : null}<Typography.Text strong>{m.name}{m.isLeader ? " · 负责人" : ""}</Typography.Text></Flex><Typography.Text>{m.duty}</Typography.Text>
             <Typography.Text type="secondary">加入版本 {selected.joinedVersions[m.employeeId ?? `${m.legacyTemplateId}:${m.legacyMemberId}`]} · {selected.memberUnavailableReasons[m.id] || "后续新派工可用"}</Typography.Text>
@@ -384,10 +399,10 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
         {emptyNotice ? <Typography.Paragraph type={!selected && directoryError ? "danger" : "secondary"} className="conversation-empty" role="status">
           {emptyNotice}
         </Typography.Paragraph> : null}
-        <SidebarProjectionSwap value={`${id}:${filter}`}><ConversationMessages key={`${id}:${filter}`} ready={!!selected} active={visible && !ui.directory} group={selected?.kind === "group"} restoreScroll={storedConversationScroll(ui.scrolls[scrollScope])} turns={turns} taskLabels={taskLabels}
+        <SidebarProjectionSwap value={`${id}:${filter}`}><ConversationMessages key={`${id}:${filter}`} navigationScope={`${id}:${filter}`} ready={!!selected} active={visible && !ui.directory} group={selected?.kind === "group"} restoreScroll={storedConversationScroll(ui.scrolls[scrollScope])} turns={turns} taskLabels={taskLabels}
           mentionNames={[...new Set(roster.map(member => member.name).filter(Boolean))]}
           employeeIds={Object.fromEntries(roster.filter(member => member.employeeId).flatMap(member => [[member.id, member.employeeId!], [member.employeeId!, member.employeeId!]]))}
-          renderSessionPreview={(turn, index) => <ConversationSessionReply turn={turn} active={visible && !ui.directory}
+          renderSessionPreview={(turn, index) => <ConversationSessionReply turn={turn} active={visible && !ui.directory} statusProvided={activity.hasStatus(turn)}
             onOpen={() => onOpenSession(turn.sessionLink!.sessionId)} onModelSettings={employee && !selected?.unavailableReason ? event => employeeProfile.open(employee, event.currentTarget) : undefined}>{activity.renderActivity(turn, index)}</ConversationSessionReply>}
           renderTaskPreview={turn => <ConversationTaskPreview turn={turn} active={visible && !ui.directory} onOpen={() => {
             if (turn.conversationLink) conversationUi.openTask(turn.conversationLink.conversationId, turn.conversationLink.taskId,
@@ -433,6 +448,14 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
         </div> : null}
         {voiceStatus ? <Typography.Text type="secondary" role="status" aria-live="polite" ellipsis>{voiceStatus}</Typography.Text> : null}
         <div ref={composerSurface} className="conversation-input-wrap" data-editor-expanded={editor.expanded} data-composer-expanded={minimal.expanded}>
+        {selected ? <div className="conversation-runtime-summary" aria-label={target ? "本轮负责人的首选配置" : "新工作的首选执行配置"}>
+          {editablePreference && runtimeAgent ? <ConversationExecutionSelectors agent={runtimeAgent} catalog={modelCatalog}
+            disabled={busy || !!unknown || !!selected.unavailableReason}/> : <>
+            <Typography.Text type="secondary">{runtimeAgent ? agentToolDisplayName(runtimeAgent.provider, runtimeAgent.engine) : "工具未就绪"}</Typography.Text>
+            <Typography.Text type="secondary" ellipsis={{ tooltip: true }}>首选模型：{runtimePreference.model}</Typography.Text>
+            <Typography.Text type="secondary" className="conversation-thinking-summary">思考：{runtimePreference.thinking}</Typography.Text>
+          </>}
+        </div> : null}
         {employee ? <WandIconButton className="conversation-companion" aria-label={`查看${employee.name}的资料`} onClick={event => employeeProfile.open(employee, event.currentTarget)}><ComposerIdentity employee={employee} fileActivity={composerUsage.fileActivity} thinking={computeRunningPhase(composerUsage.activity) === "executing"}/></WandIconButton> : null}
         <ComposerUsage showName={false} employeeName={employee?.name} usage={composerUsage.usage} activity={composerUsage.activity}/>
         <Sender ref={sender} value={draft.text} className="conversation-sender" readOnly={!!selected?.unavailableReason || !selected} placeholder={inputPlaceholder} autoSize={{ minRows: 1, maxRows: editor.expanded ? 24 : 4 }} suffix={false}
@@ -457,12 +480,14 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
               <div className="conversation-preference-details">
                 {previousWork ? <WandButton size="small" kind="ghost" className="conversation-continue-work" aria-label={`继续工作：${previousWork.title}`} title={previousWork.title} onClick={() => onOpenSession(previousWork.sessionId)}><span className="conversation-continue-prefix">继续：</span><span className="conversation-continue-title">{previousWork.title}</span></WandButton> : null}
                 <Typography.Text strong>新工作 · {employee?.name ?? "正在读取员工"}</Typography.Text>
-                <Typography.Paragraph type="secondary">{directContextPending ? "正在读取执行配置…" : directWorkPreference(employee?.agents[0])}</Typography.Paragraph>
+                <Typography.Paragraph type="secondary">{directContextPending ? "正在读取执行配置…" : directWorkPreference(runtimeAgent)}</Typography.Paragraph>
           <Descriptions size="small" column={1} items={[
             { key: "employee", label: "员工", children: employee.name },
-            { key: "model", label: "首选模型", children: employee.agents[0]?.model || "沿用工具默认模型" },
+            { key: "model", label: "首选模型", children: runtimePreference.model },
+            { key: "thinking", label: "思考深度", children: runtimePreference.thinking },
             { key: "cwd", label: "新工作目录", children: chatCwd || defaultCwd || "默认目录尚未读取，发送前由服务端解析" },
-          ]}/><Typography.Text type="secondary">{chatCwd ? "临时目录在本页联系人之间共用。" : "目录沿用服务默认配置。"}执行按已配置候选顺序降级；继续已有工作沿用其执行配置。</Typography.Text>
+          ]}/><Typography.Text type="secondary">{chatCwd ? "临时目录在本页联系人之间共用。" : "目录沿用服务默认配置。"}{pagePreference ? "三项临时选择在本页联系人之间共用，刷新恢复员工默认；手动选择只执行当前配置，不自动改用其他候选。" : "执行按员工已配置候选顺序降级。"}继续已有工作沿用其执行配置，不修改员工默认设置。</Typography.Text>
+          {pagePreference ? <WandButton size="small" onClick={() => setPageExecutionPreference(undefined)}>恢复员工默认执行配置</WandButton> : null}
           <WandButton size="small" onClick={event => employeeProfile.open(employee, event.currentTarget)}>查看员工执行候选</WandButton>
               </div>
             </WandPopover> : null}</Flex>

@@ -1,0 +1,6 @@
+Lane mailbox for 补齐集成导航浏览器回归 (role navigation-browser-gate)
+Run: team_mv9d9dex0003uqhj0z
+Lane: navigation-browser-gate-1792058334793
+Token: a43d8d61-17e5-4bee-ad44-88e3d38e606d
+
+Captain messages appear below, newest last.

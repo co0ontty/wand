@@ -1,0 +1,4173 @@
+{
+  "runId": "team_mv9elwhc0004rxhlvl",
+  "task": "按Captain已明确授权的最小接续完成原生第一批真实状态。读 /Users/co0ontty/Self/vibe_coding/wand/output/architecture-stage2/chat-ux-batch1/NATIVE-FACTS-HANDOFF.md。此前team全部结束，你唯一写入 /tmp/wand-chat-ux-batch1-poxnz8cu/macos；不改主仓、不重做已完成导航/工具实现，不反复完整扫ChatView。此次只补客户端已有服务端字段解码与ChatStore同步、真实当前回合阶段/工具/时长投影，以及review指出停止/失败无result时的活动卡终态。源码字段先用rg真实定位，不猜接口。保持旧数据兼容与原输入/权限/队列执行逻辑，不添加后端协议或状态机，不从正文/标题/参数关键词分类。锁仍在，只走一次正常scripts/run-tests.sh验证并如实记录；禁止xcodebuild/swiftc/改环境绕过。无模型调用、安装/服务重启、commit/reset/clean/push/tag。最终写output/chat-ux-batch1/NATIVE-FACTS.md并发非RADIO总结，明确未编译/未视觉/Beta，不能仅新增未接入helper。",
+  "playbookId": "generated-blueprint",
+  "fallbackPolicy": "strict",
+  "status": "succeeded",
+  "modelHealth": [
+    {
+      "model": "openai-codex/gpt-6-astra",
+      "provider": "openai-codex",
+      "status": "probe_passed",
+      "evidenceSource": "worker",
+      "latencyMs": 505501,
+      "reason": "recent worker produced substantive output",
+      "checkedAt": 1792061103619
+    }
+  ],
+  "workers": [
+    {
+      "roleId": "native-runtime-facts",
+      "title": "补齐Mac运行事实展示链路",
+      "task": "Objective: 按Captain已明确授权的最小接续完成原生第一批真实状态。读 /Users/co0ontty/Self/vibe_coding/wand/output/architecture-stage2/chat-ux-batch1/NATIVE-FACTS-HANDOFF.md。此前team全部结束，你唯一写入 /tmp/wand-chat-ux-batch1-poxnz8cu/macos；不改主仓、不重做已完成导航/工具实现，不反复完整扫ChatView。此次只补客户端已有服务端字段解码与ChatStore同步、真实当前回合阶段/工具/时长投影，以及review指出停止/失败无result时的活动卡终态。源码字段先用rg真实定位，不猜接口。保持旧数据兼容与原输入/权限/队列执行逻辑，不添加后端协议或状态机，不从正文/标题/参数关键词分类。锁仍在，只走一次正常scripts/run-tests.sh验证并如实记录；禁止xcodebuild/swiftc/改环境绕过。无模型调用、安装/服务重启、commit/reset/clean/push/tag。最终写output/chat-ux-batch1/NATIVE-FACTS.md并发非RADIO总结，明确未编译/未视觉/Beta，不能仅新增未接入helper。\nPlaybook: Dynamic team blueprint (generated-blueprint)\nRole: 补齐Mac运行事实展示链路 (native-runtime-facts)\nRole boundary: 源码已经有TurnNavigator和ChatPresentation，缺口见NATIVE-FACTS-HANDOFF：ConversationTurn.requestId、StructuredSessionState.phase/lastActivityAt、WS新事实未写回snapshot、PTY真实锚点。允许必要修改WandModels、ChatStore、真实WsData定义处、ChatPresentation、ChatView及对应tests/pbx登记，保持别人的Settings/Workspace/IM/WandAPI基线不动。先核对所有旧构造调用，新增可选字段要兼容；区分新请求/结束/缺字段，不用陈旧snapshot推断新一轮耗时，子代理与外源不参与当前动作，工具结果按ID退场。Native Timeline显示若需要周期重绘只能差分服务端锚点，不在首次挂载开始计时。真实字段不足宁可通用执行，但不要因为角色旧边界限制而继续跳过已授权接线。停止/失败无回执只影响当前活动，历史未知仍未知。源码修改后做符号/调用检查、plutil/diff-check、正常测试入口一次；维护锁阻挡不绕过。不声称正常脚本未执行的测试已通过。\n\nUse your role prompt and return a concise structured finding.\nRequired fields: result_summary, evidence_refs, confidence, disagreements, next_questions.\n\nStructured output (for machine consumption by the captain):\n- After your normal findings, end your final message with a single fenced JSON block:\n  ```json\n  { ... }\n  ```\n- The JSON object must include these fields:\n  - result_summary (string)\n  - evidence_refs (array of strings)\n  - confidence (string)\n  - disagreements (array of strings)\n  - next_questions (array of strings)\n- Keep your prose findings too; the JSON is an additional structured summary, not a replacement.",
+      "model": "openai-codex/gpt-6-astra",
+      "thinkingLevel": "high",
+      "routingReason": "policy=strict; selected via user; thinking=high; captain remains final judge; user: openai-codex/gpt-6-astra",
+      "modelFallbackKeys": [],
+      "status": "succeeded",
+      "output": "## 结果\n已在隔离 Mac lane 接入字段解码、WS 事实同步、真实阶段/工具/时长投影，以及当前活动停止/失败终态。保留既有导航与他人基线，新增 5 项回归测试。\n\n## 验证与限制\n- `plutil`、`git diff --check` 通过。\n- 正常测试入口仅运行一次，被维护锁阻挡，退出码 1。\n- **未编译、未运行 XCTest、未视觉验收、未构建 Beta**；未绕过锁。\n- 完整证据：`output/chat-ux-batch1/NATIVE-FACTS.md`。\n\n```json\n{\n  \"result_summary\": \"已完成隔离Mac lane真实状态接线及当前活动终态修复，新增5项测试；正常测试入口被维护锁阻挡。\",\n  \"evidence_refs\": [\n    \"/tmp/wand-chat-ux-batch1-poxnz8cu/macos/output/chat-ux-batch1/NATIVE-FACTS.md\",\n    \"Wand/WandModels.swift:355\",\n    \"Wand/ChatStore.swift:320\",\n    \"Wand/ChatPresentation.swift:36\",\n    \"Wand/ChatView.swift:533\",\n    \"WandTests/ChatPresentationTests.swift:48\"\n  ],\n  \"confidence\": \"中等：静态检查通过，但未编译、未执行测试、未视觉验收或构建Beta。运行模型openai-codex/gpt-6-astra；使用bash/read/edit/write。\",\n  \"disagreements\": [],\n  \"next_questions\": [\n    \"维护锁解除后需通过正常入口完成编译、XCTest及真实Mac界面验收。\",\n    \"Beta构建、部署和更新端点验收需后续安排。\"\n  ]\n}\n```",
+      "tools": [
+        "bash",
+        "edit",
+        "read",
+        "write"
+      ],
+      "activeTools": [
+        "bash",
+        "edit",
+        "read",
+        "write"
+      ],
+      "startedAt": 1792060598117,
+      "endedAt": 1792061103618,
+      "lastEvent": "agent_end",
+      "lastTool": "write",
+      "lastSignalAt": 1792061103616,
+      "lastReportAt": 1792061038744,
+      "lastReportPreview": "RADIO: status=blocked, action=完成源码接线及回归用例，正常测试入口已尝试一次, evidence=plutil通过;git diff --check通过;scripts/run-tests.sh退出1, blocker=原生开发环境维护锁阻止构建，未编译未运行XCTest, next=写入NATIVE-FACTS.md并交付限制与证据",
+      "lastOutputPreview": "## 结果 已在隔离 Mac lane 接入字段解码、WS 事实同步、真实阶段/工具/时长投影，以及当前活动停止/失败终态。保留既有导航与他人基线，新增 5 项回归测试。 ## 验证与限制 - `plutil`、`git diff --check` 通过。 - 正常测试入口仅运行一次，被维护锁阻挡，退出码 1。 - **未编译、未运行 XCTest、未视觉验收、未构建 Beta**；未绕过锁。 - 完整证据：`output/chat-ux-batch1/NATIVE-FACT",
+      "outputKind": "substantive",
+      "structuredOutput": {
+        "result_summary": "已完成隔离Mac lane真实状态接线及当前活动终态修复，新增5项测试；正常测试入口被维护锁阻挡。",
+        "evidence_refs": [
+          "/tmp/wand-chat-ux-batch1-poxnz8cu/macos/output/chat-ux-batch1/NATIVE-FACTS.md",
+          "Wand/WandModels.swift:355",
+          "Wand/ChatStore.swift:320",
+          "Wand/ChatPresentation.swift:36",
+          "Wand/ChatView.swift:533",
+          "WandTests/ChatPresentationTests.swift:48"
+        ],
+        "confidence": "中等：静态检查通过，但未编译、未执行测试、未视觉验收或构建Beta。运行模型openai-codex/gpt-6-astra；使用bash/read/edit/write。",
+        "disagreements": [],
+        "next_questions": [
+          "维护锁解除后需通过正常入口完成编译、XCTest及真实Mac界面验收。",
+          "Beta构建、部署和更新端点验收需后续安排。"
+        ]
+      },
+      "timedOut": false,
+      "requests": 23,
+      "tokens": 1088051,
+      "costUsd": 2.52263,
+      "budgetNoticeSent": true,
+      "sessionId": "team-team_mv9elwhc0004rxhlvl-native-runtime-facts",
+      "exitCode": 0,
+      "events": [
+        {
+          "at": 1792060598145,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060598145,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060598145,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060598145,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060600121,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060604978,
+          "phase": "worker-radio-report",
+          "message": "补齐Mac运行事实展示链路 reported to captain",
+          "preview": "RADIO: status=started, action=核对交接与隔离Mac工作树基线, evidence=none, blocker=none, next=定位模型解码与ChatStore事实同步"
+        },
+        {
+          "at": 1792060604978,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1792060604985,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1792060604985,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060604986,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060605653,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060613500,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060613500,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start bash",
+          "toolName": "bash"
+        },
+        {
+          "at": 1792060613500,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1792060613500,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1792060613507,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1792060613508,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1792060613691,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end bash failed",
+          "toolName": "bash",
+          "isError": true
+        },
+        {
+          "at": 1792060613691,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060613691,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060613691,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060613692,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060613692,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060613692,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060614408,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060620838,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060620839,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1792060620839,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1792060620839,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1792060620839,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start bash",
+          "toolName": "bash"
+        },
+        {
+          "at": 1792060620846,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1792060620847,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1792060620847,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1792060620904,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end bash",
+          "toolName": "bash",
+          "isError": false
+        },
+        {
+          "at": 1792060620904,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060620904,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060620904,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060620905,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060620905,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060620905,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060620905,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060620905,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060621602,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060626928,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060626929,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start bash",
+          "toolName": "bash"
+        },
+        {
+          "at": 1792060627004,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end bash",
+          "toolName": "bash",
+          "isError": false
+        },
+        {
+          "at": 1792060627005,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060627005,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060627674,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060635619,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060635620,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1792060635620,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1792060635620,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1792060635620,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1792060635620,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1792060635620,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1792060635624,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1792060635624,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1792060635624,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1792060635625,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1792060635625,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1792060635626,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1792060635626,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060635626,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060635627,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060635627,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060635627,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060635627,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060635627,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060635627,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060635628,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060635628,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060635628,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060635628,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060636352,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060667038,
+          "phase": "worker-radio-report",
+          "message": "补齐Mac运行事实展示链路 reported to captain",
+          "preview": "RADIO: status=working, action=已定位WsData与服务端PTY锚点，采用权威structuredState替换和可辨缺失/空值的PTY同步, evidence=Wand/WandModels.swift:629;integration/src/session-transport.ts:84-85, blocker=首次rg包含不存在tests目录已纠正, next=增量接入投影与当前活动终态测试"
+        },
+        {
+          "at": 1792060667038,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1792060667038,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1792060667038,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1792060667039,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1792060667039,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start bash",
+          "toolName": "bash"
+        },
+        {
+          "at": 1792060667050,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1792060667051,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1792060667052,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1792060667053,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1792060667087,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end bash",
+          "toolName": "bash",
+          "isError": false
+        },
+        {
+          "at": 1792060667087,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060667087,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060667087,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060667088,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060667088,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060667088,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060667088,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060667088,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060667088,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060667088,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060667807,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060714645,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060714646,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start edit",
+          "toolName": "edit"
+        },
+        {
+          "at": 1792060714660,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end edit",
+          "toolName": "edit",
+          "isError": false
+        },
+        {
+          "at": 1792060714660,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060714660,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060715341,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060740304,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060740304,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start edit",
+          "toolName": "edit"
+        },
+        {
+          "at": 1792060740314,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end edit",
+          "toolName": "edit",
+          "isError": false
+        },
+        {
+          "at": 1792060740314,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060740315,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060740972,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060747721,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060747721,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start bash",
+          "toolName": "bash"
+        },
+        {
+          "at": 1792060747787,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end bash",
+          "toolName": "bash",
+          "isError": false
+        },
+        {
+          "at": 1792060747788,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060747788,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060748591,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060753281,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060753282,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start bash",
+          "toolName": "bash"
+        },
+        {
+          "at": 1792060753349,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end bash",
+          "toolName": "bash",
+          "isError": false
+        },
+        {
+          "at": 1792060753350,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060753350,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060754049,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060760810,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060760810,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1792060760811,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1792060760811,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1792060760811,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1792060760811,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1792060760826,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1792060760827,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1792060760828,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1792060760836,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1792060760836,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1792060760837,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060760837,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060760837,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060760837,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060760838,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060760838,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060760838,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060760838,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060760838,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060760838,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060761508,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060777906,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060777908,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1792060777930,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1792060777930,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060777931,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060778617,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060845168,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060845169,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start write",
+          "toolName": "write"
+        },
+        {
+          "at": 1792060845182,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end write",
+          "toolName": "write",
+          "isError": false
+        },
+        {
+          "at": 1792060845182,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060845183,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060846153,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060877036,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060877036,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start edit",
+          "toolName": "edit"
+        },
+        {
+          "at": 1792060877043,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end edit",
+          "toolName": "edit",
+          "isError": false
+        },
+        {
+          "at": 1792060877043,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060877044,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060877738,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060885209,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060885210,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start edit",
+          "toolName": "edit"
+        },
+        {
+          "at": 1792060885230,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end edit",
+          "toolName": "edit",
+          "isError": false
+        },
+        {
+          "at": 1792060885231,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060885231,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060885925,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060925042,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060925044,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start edit",
+          "toolName": "edit"
+        },
+        {
+          "at": 1792060925100,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end edit",
+          "toolName": "edit",
+          "isError": false
+        },
+        {
+          "at": 1792060925100,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060925100,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060925788,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060953060,
+          "phase": "worker-radio-report",
+          "message": "补齐Mac运行事实展示链路 reported to captain",
+          "preview": "RADIO: status=working, action=已接入真实入口的阶段/工具ID退场/服务端锚点计时及最新活动终态, evidence=Wand/ChatPresentation.swift;Wand/ChatView.swift;Wand/ChatStore.swift, blocker=尚未编译且维护锁禁止绕过, next=补充旧字段/WS换轮与源隔离回归并执行一次正常测试入口"
+        },
+        {
+          "at": 1792060953062,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1792060953078,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1792060953078,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060953078,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060953770,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060961311,
+          "phase": "worker-budget-notice",
+          "message": "补齐Mac运行事实展示链路 reached soft request budget (18/18)"
+        },
+        {
+          "at": 1792060961311,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060961312,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start edit",
+          "toolName": "edit"
+        },
+        {
+          "at": 1792060961330,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end edit",
+          "toolName": "edit",
+          "isError": false
+        },
+        {
+          "at": 1792060961330,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060961330,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060961331,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792060961331,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792060962094,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792061020981,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792061020982,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start edit",
+          "toolName": "edit"
+        },
+        {
+          "at": 1792061020999,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end edit",
+          "toolName": "edit",
+          "isError": false
+        },
+        {
+          "at": 1792061020999,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792061020999,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792061021665,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792061027744,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792061027744,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start bash",
+          "toolName": "bash"
+        },
+        {
+          "at": 1792061027847,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end bash failed",
+          "toolName": "bash",
+          "isError": true
+        },
+        {
+          "at": 1792061027847,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792061027847,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792061028517,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792061038744,
+          "phase": "worker-radio-report",
+          "message": "补齐Mac运行事实展示链路 reported to captain",
+          "preview": "RADIO: status=blocked, action=完成源码接线及回归用例，正常测试入口已尝试一次, evidence=plutil通过;git diff --check通过;scripts/run-tests.sh退出1, blocker=原生开发环境维护锁阻止构建，未编译未运行XCTest, next=写入NATIVE-FACTS.md并交付限制与证据"
+        },
+        {
+          "at": 1792061038745,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1792061038745,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+          "toolName": "read"
+        },
+        {
+          "at": 1792061038745,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start bash",
+          "toolName": "bash"
+        },
+        {
+          "at": 1792061038758,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1792061038760,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+          "toolName": "read",
+          "isError": false
+        },
+        {
+          "at": 1792061038788,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end bash",
+          "toolName": "bash",
+          "isError": false
+        },
+        {
+          "at": 1792061038788,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792061038788,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792061038789,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792061038789,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792061038789,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792061038789,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792061039485,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792061091363,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792061091363,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_start write",
+          "toolName": "write"
+        },
+        {
+          "at": 1792061091370,
+          "phase": "worker-tool",
+          "message": "补齐Mac运行事实展示链路 tool_execution_end write",
+          "toolName": "write",
+          "isError": false
+        },
+        {
+          "at": 1792061091370,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792061091371,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended"
+        },
+        {
+          "at": 1792061092083,
+          "phase": "worker-message-start",
+          "message": "补齐Mac运行事实展示链路 message started"
+        },
+        {
+          "at": 1792061103612,
+          "phase": "worker-message-end",
+          "message": "补齐Mac运行事实展示链路 assistant message ended",
+          "preview": "## 结果 已在隔离 Mac lane 接入字段解码、WS 事实同步、真实阶段/工具/时长投影，以及当前活动停止/失败终态。保留既有导航与他人基线，新增 5 项回归测试。 ## 验证与限制 - `plutil`、`git diff --check` 通过。 - 正常测试入口仅运行一次，被维护锁阻挡，退出码 1。 - **未编译、未运行 XCTest、未视觉验收、未构建 Beta**；未绕过锁。 - 完整证据：`output/chat-ux-batch1/NATIVE-FACT"
+        }
+      ],
+      "modelAttempts": [
+        {
+          "model": "openai-codex/gpt-6-astra",
+          "status": "succeeded"
+        }
+      ],
+      "outputFile": "/Users/co0ontty/Self/vibe_coding/wand/.pi/team/active/team_mv9elwhc0004rxhlvl/artifacts/workers/native-runtime-facts.md",
+      "eventFile": "/Users/co0ontty/Self/vibe_coding/wand/.pi/team/active/team_mv9elwhc0004rxhlvl/artifacts/workers/native-runtime-facts.events.jsonl"
+    }
+  ],
+  "lastEvent": {
+    "at": 1792061103633,
+    "phase": "round-end",
+    "message": "collect completed"
+  },
+  "events": [
+    {
+      "at": 1792060594608,
+      "phase": "planning",
+      "message": "selected playbook generated-blueprint with 1 round(s)",
+      "status": "planning"
+    },
+    {
+      "at": 1792060594608,
+      "phase": "blueprint-strategy",
+      "message": "The lead captain generated this collaboration plan; the extension handles dispatch, communication, observation, and recording.",
+      "status": "planning"
+    },
+    {
+      "at": 1792060594608,
+      "phase": "blueprint-policy",
+      "message": "evidence=Workers should separate cited evidence, inference, confidence, and missing information. model=Use configured models that are objectively available; keep soft health observations visible. synthesis=The lead uses worker outputs as inputs and keeps final judgment outside the extension.",
+      "status": "planning"
+    },
+    {
+      "at": 1792060594608,
+      "phase": "tool-inheritance",
+      "message": "inherited 38 active tool(s): read,bash,edit,write,codemode,bg_wait,subagents_enable,todo,workflow,find_roots,observe_ui,search_ui,expand_ui,inspect_ui,act_ui,read_text,wait_for,launch_browser,navigate_browser,evaluate_browser,advisor,team_status,team_message,team_promote_blueprint,team_cancel_worker,team_spawn_worker,team_cancel,team_handoff,web_enable,subagent_supervisor,create_goal,get_goal,web_search,source_check,fetch_content,get_search_content,subagent,contact_supervisor",
+      "status": "planning"
+    },
+    {
+      "at": 1792060598106,
+      "phase": "model-observe-start",
+      "message": "selected 1/49 relevant model(s) to probe across 1 role(s); fallbackPolicy=strict; direct-dispatch (captain fully specified — probing only chosen models as liveness check); direct-dispatch: the captain specified each role's primary model; only primaries are probed and backups remain lazy.",
+      "status": "probing"
+    },
+    {
+      "at": 1792060598106,
+      "phase": "model-observe-end",
+      "message": "openai-codex/gpt-6-astra:probe_passed | direct-dispatch: the captain specified each role's primary model; only primaries are probed and backups remain lazy. | fallbackPolicy=strict: configured models are not substituted for unavailable explicit preferences.",
+      "status": "probing"
+    },
+    {
+      "at": 1792060598106,
+      "phase": "dispatch-ready",
+      "message": "native-runtime-facts->openai-codex/gpt-6-astra (policy=strict; selected via user; thinking=high; captain remains final judge; user: openai-codex/gpt-6-astra)"
+    },
+    {
+      "at": 1792060598111,
+      "phase": "run-start",
+      "message": "running playbook generated-blueprint: A task-specific collaboration blueprint generated for the lead captain",
+      "status": "running"
+    },
+    {
+      "at": 1792060598111,
+      "phase": "run-policy",
+      "message": "strategy=The lead captain generated this collaboration plan; the extension handles dispatch, communication, observation, and recording. evidence=Workers should separate cited evidence, inference, confidence, and missing information.",
+      "status": "running"
+    },
+    {
+      "at": 1792060598112,
+      "phase": "watchdog-advisory",
+      "message": "watchdog advisory active (1 file(s): default:/Users/co0ontty/.pi/agent/npm/node_modules/pi-team/src/defaults/WATCHDOG.md); injected as advisory into worker prompts",
+      "status": "running"
+    },
+    {
+      "at": 1792060598113,
+      "phase": "round-start",
+      "message": "collect (parallel) with 1 role(s): no round goal",
+      "isError": false
+    },
+    {
+      "at": 1792060598117,
+      "phase": "worker-start",
+      "message": "补齐Mac运行事实展示链路 started; capability=coding; needs=coding,tool_use,long_context; modelFit=not specified; thinking-requested=high; routing=policy=strict; selected via user; thinking=high; captain remains final judge; user: openai-codex/gpt-6-astra; tools=bash,edit,read,write",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060598117,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 0s, last event worker-start",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060598145,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060598145,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060598145,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060598145,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060600121,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060603119,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 5s, last event message_end",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060604978,
+      "phase": "worker-radio-report",
+      "message": "补齐Mac运行事实展示链路 reported to captain",
+      "preview": "RADIO: status=started, action=核对交接与隔离Mac工作树基线, evidence=none, blocker=none, next=定位模型解码与ChatStore事实同步",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060604978,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060604985,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060604985,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060604986,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060605654,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060608121,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 10s, last tool read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060613122,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 15s, last tool read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060613500,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060613500,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start bash",
+      "toolName": "bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060613500,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060613500,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060613507,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060613508,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060613691,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end bash failed",
+      "toolName": "bash",
+      "isError": true,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060613691,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060613691,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060613691,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060613692,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060613692,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060613692,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060614408,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060618122,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 20s, last tool bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060620838,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060620839,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060620839,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060620839,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060620839,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start bash",
+      "toolName": "bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060620846,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060620847,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060620847,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060620904,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end bash",
+      "toolName": "bash",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060620904,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060620904,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060620904,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060620905,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060620905,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060620905,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060620905,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060620905,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060621602,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060623124,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 25s, last tool bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060626929,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060626929,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start bash",
+      "toolName": "bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060627004,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end bash",
+      "toolName": "bash",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060627005,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060627005,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060627674,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060628129,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 30s, last tool bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060633130,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 35s, last tool bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060635619,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060635620,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060635620,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060635620,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060635620,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060635620,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060635620,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060635624,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060635624,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060635624,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060635625,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060635625,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060635626,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060635626,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060635626,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060635627,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060635627,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060635627,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060635627,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060635627,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060635627,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060635628,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060635628,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060635628,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060635628,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060636352,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060638132,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 40s, last tool read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060643132,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 45s, last tool read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060648134,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 50s, last tool read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060653136,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 55s, last tool read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060658137,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 60s, last tool read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060663142,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 65s, last tool read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060667038,
+      "phase": "worker-radio-report",
+      "message": "补齐Mac运行事实展示链路 reported to captain",
+      "preview": "RADIO: status=working, action=已定位WsData与服务端PTY锚点，采用权威structuredState替换和可辨缺失/空值的PTY同步, evidence=Wand/WandModels.swift:629;integration/src/session-transport.ts:84-85, blocker=首次rg包含不存在tests目录已纠正, next=增量接入投影与当前活动终态测试",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060667038,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060667038,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060667038,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060667039,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060667039,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start bash",
+      "toolName": "bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060667050,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060667051,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060667052,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060667053,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060667087,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end bash",
+      "toolName": "bash",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060667087,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060667087,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060667087,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060667088,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060667088,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060667088,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060667088,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060667088,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060667088,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060667088,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060667807,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060668143,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 70s, last tool bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060673147,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 75s, last tool bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060678148,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 80s, last tool bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060683150,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 85s, last tool bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060688152,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 90s, last tool bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060693154,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 95s, last tool bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060698154,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 100s, last tool bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060703154,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 105s, last tool bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060708156,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 110s, last tool bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060713161,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 115s, last tool bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060714645,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060714646,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start edit",
+      "toolName": "edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060714660,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end edit",
+      "toolName": "edit",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060714660,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060714660,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060715341,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060718163,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 120s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060723165,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 125s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060728166,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 130s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060733166,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 135s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060738168,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 140s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060740304,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060740304,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start edit",
+      "toolName": "edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060740314,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end edit",
+      "toolName": "edit",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060740314,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060740315,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060740972,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060743169,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 145s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060747721,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060747721,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start bash",
+      "toolName": "bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060747788,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end bash",
+      "toolName": "bash",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060747788,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060747788,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060748174,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 150s, last tool bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060748591,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060753176,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 155s, last tool bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060753281,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060753282,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start bash",
+      "toolName": "bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060753349,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end bash",
+      "toolName": "bash",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060753350,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060753350,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060754049,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060758178,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 160s, last tool bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060760810,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060760810,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060760811,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060760811,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060760811,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060760811,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060760826,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060760827,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060760828,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060760836,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060760837,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060760837,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060760837,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060760837,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060760837,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060760838,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060760838,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060760838,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060760838,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060760838,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060760838,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060761508,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060763185,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 165s, last tool read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060768187,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 170s, last tool read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060773188,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 175s, last tool read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060777906,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060777908,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060777930,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060777930,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060777931,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060778188,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 180s, last tool read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060778617,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060783193,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 185s, last tool read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060788194,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 190s, last tool read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060793195,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 195s, last tool read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060798197,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 200s, last tool read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060803199,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 205s, last tool read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060808201,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 210s, last tool read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060813205,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 215s, last tool read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060818207,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 220s, last tool read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060823215,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 225s, last tool read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060828217,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 230s, last tool read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060833218,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 235s, last tool read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060838219,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 240s, last tool read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060843219,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 245s, last tool read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060845168,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060845169,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start write",
+      "toolName": "write",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060845182,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end write",
+      "toolName": "write",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060845182,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060845183,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060846153,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060848220,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 250s, last tool write",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060853225,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 255s, last tool write",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060858225,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 260s, last tool write",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060863225,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 265s, last tool write",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060868227,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 270s, last tool write",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060873231,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 275s, last tool write",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060877036,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060877036,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start edit",
+      "toolName": "edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060877043,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end edit",
+      "toolName": "edit",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060877043,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060877044,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060877738,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060878233,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 280s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060883240,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 285s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060885209,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060885210,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start edit",
+      "toolName": "edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060885230,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end edit",
+      "toolName": "edit",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060885231,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060885231,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060885925,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060888241,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 290s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060893246,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 295s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060898246,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 300s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060903248,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 305s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060908250,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 310s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060913254,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 315s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060918256,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 320s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060923263,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 325s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060925042,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060925044,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start edit",
+      "toolName": "edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060925100,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end edit",
+      "toolName": "edit",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060925100,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060925100,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060925788,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060928263,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 330s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060933264,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 335s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060938264,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 340s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060943266,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 345s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060948267,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 350s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060953061,
+      "phase": "worker-radio-report",
+      "message": "补齐Mac运行事实展示链路 reported to captain",
+      "preview": "RADIO: status=working, action=已接入真实入口的阶段/工具ID退场/服务端锚点计时及最新活动终态, evidence=Wand/ChatPresentation.swift;Wand/ChatView.swift;Wand/ChatStore.swift, blocker=尚未编译且维护锁禁止绕过, next=补充旧字段/WS换轮与源隔离回归并执行一次正常测试入口",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060953062,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060953078,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060953078,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060953078,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060953269,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 355s, last tool read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060953770,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060958271,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 360s, last tool read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060961311,
+      "phase": "worker-budget-notice",
+      "message": "补齐Mac运行事实展示链路 reached soft request budget (18/18)",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060961311,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060961312,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start edit",
+      "toolName": "edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060961330,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end edit",
+      "toolName": "edit",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060961330,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060961330,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060961331,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060961331,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060962094,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060963281,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 365s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060968283,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 370s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060973285,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 375s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060978287,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 380s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060983287,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 385s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060988288,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 390s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060993288,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 395s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792060998289,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 400s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061003290,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 405s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061008292,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 410s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061013292,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 415s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061018294,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 420s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061020981,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061020982,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start edit",
+      "toolName": "edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061020999,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end edit",
+      "toolName": "edit",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061020999,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061020999,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061021665,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061023297,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 425s, last tool edit",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061027744,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061027744,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start bash",
+      "toolName": "bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061027847,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end bash failed",
+      "toolName": "bash",
+      "isError": true,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061027847,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061027847,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061028298,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 430s, last tool bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061028517,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061033297,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 435s, last tool bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061038299,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 440s, last tool bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061038744,
+      "phase": "worker-radio-report",
+      "message": "补齐Mac运行事实展示链路 reported to captain",
+      "preview": "RADIO: status=blocked, action=完成源码接线及回归用例，正常测试入口已尝试一次, evidence=plutil通过;git diff --check通过;scripts/run-tests.sh退出1, blocker=原生开发环境维护锁阻止构建，未编译未运行XCTest, next=写入NATIVE-FACTS.md并交付限制与证据",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061038745,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061038745,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start read",
+      "toolName": "read",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061038745,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start bash",
+      "toolName": "bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061038758,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061038760,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end read",
+      "toolName": "read",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061038788,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end bash",
+      "toolName": "bash",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061038788,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061038788,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061038789,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061038789,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061038789,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061038789,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061039485,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061043300,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 445s, last tool bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061048300,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 450s, last tool bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061053301,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 455s, last tool bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061058303,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 460s, last tool bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061063303,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 465s, last tool bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061068304,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 470s, last tool bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061073313,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 475s, last tool bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061078317,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 480s, last tool bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061083325,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 485s, last tool bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061088327,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 490s, last tool bash",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061091363,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061091363,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_start write",
+      "toolName": "write",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061091370,
+      "phase": "worker-tool",
+      "message": "补齐Mac运行事实展示链路 tool_execution_end write",
+      "toolName": "write",
+      "isError": false,
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061091370,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061091371,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061092083,
+      "phase": "worker-message-start",
+      "message": "补齐Mac运行事实展示链路 message started",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061093330,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 495s, last tool write",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061098329,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 500s, last tool write",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061103329,
+      "phase": "worker-heartbeat",
+      "message": "补齐Mac运行事实展示链路 running 505s, last tool write",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061103613,
+      "phase": "worker-message-end",
+      "message": "补齐Mac运行事实展示链路 assistant message ended",
+      "preview": "## 结果 已在隔离 Mac lane 接入字段解码、WS 事实同步、真实阶段/工具/时长投影，以及当前活动停止/失败终态。保留既有导航与他人基线，新增 5 项回归测试。 ## 验证与限制 - `plutil`、`git diff --check` 通过。 - 正常测试入口仅运行一次，被维护锁阻挡，退出码 1。 - **未编译、未运行 XCTest、未视觉验收、未构建 Beta**；未绕过锁。 - 完整证据：`output/chat-ux-batch1/NATIVE-FACT",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "running"
+    },
+    {
+      "at": 1792061103632,
+      "phase": "worker-end",
+      "message": "补齐Mac运行事实展示链路 succeeded, last tool write",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "succeeded"
+    },
+    {
+      "at": 1792061103633,
+      "phase": "round-progress",
+      "message": "1 worker(s) completed",
+      "roleId": "native-runtime-facts",
+      "model": "openai-codex/gpt-6-astra",
+      "status": "succeeded"
+    },
+    {
+      "at": 1792061103633,
+      "phase": "round-end",
+      "message": "collect completed"
+    }
+  ],
+  "activeDir": "/Users/co0ontty/Self/vibe_coding/wand/.pi/team/active/team_mv9elwhc0004rxhlvl",
+  "mailboxFile": "/Users/co0ontty/Self/vibe_coding/wand/.pi/team/active/team_mv9elwhc0004rxhlvl/mailbox.jsonl",
+  "mailboxTextFile": "/Users/co0ontty/Self/vibe_coding/wand/.pi/team/active/team_mv9elwhc0004rxhlvl/mailbox.txt",
+  "cancelFile": "/Users/co0ontty/Self/vibe_coding/wand/.pi/team/active/team_mv9elwhc0004rxhlvl/cancel.json",
+  "blueprintId": "team_mv9elwhc0004rxhlvl-generated-blueprint",
+  "blueprintFile": "/Users/co0ontty/Self/vibe_coding/wand/.pi/team/blueprints/generated/team_mv9elwhc0004rxhlvl-generated-blueprint.json",
+  "planGraph": {
+    "errors": [],
+    "warnings": []
+  },
+  "delegationLanes": [
+    {
+      "runId": "team_mv9elwhc0004rxhlvl",
+      "laneId": "native-runtime-facts-1792060598114",
+      "delegationToken": "7dbd87e7-ce69-41d6-b964-34bf4a06e8c6",
+      "roleId": "native-runtime-facts",
+      "workerKey": "补齐Mac运行事实展示链路",
+      "status": "succeeded",
+      "visibleMessageRefs": [],
+      "ackedMessageRefs": [],
+      "invalidAckRefs": [],
+      "ackState": "none",
+      "createdAt": 1792060598117
+    }
+  ],
+  "finalSummary": "All workers succeeded — captain may proceed to synthesis.\n\n\n---\n\nWorker evidence digest (full outputs remain in artifacts):\n## 补齐Mac运行事实展示链路 (native-runtime-facts)\nModel: openai-codex/gpt-6-astra\nStatus: succeeded\nRoute: policy=strict; selected via user; thinking=high; captain remains final judge; user: openai-codex/gpt-6-astra\nArtifact: /Users/co0ontty/Self/vibe_coding/wand/.pi/team/active/team_mv9elwhc0004rxhlvl/artifacts/workers/native-runtime-facts.md\nSummary: 已完成隔离Mac lane真实状态接线及当前活动终态修复，新增5项测试；正常测试入口被维护锁阻挡。",
+  "resultAvailability": "substantive",
+  "evidenceCompleteness": {
+    "hasEvidenceRefs": true,
+    "hasLimitations": false,
+    "hasConfidence": true,
+    "hasOpenQuestions": true
+  },
+  "captainAbsorptionPrompt": "Captain: the extension has classified this run's output landscape.\nresultAvailability=substantive\nevidenceCompleteness={\"hasEvidenceRefs\":true,\"hasLimitations\":false,\"hasConfidence\":true,\"hasOpenQuestions\":true}\nThese are factual signals, not quality judgments. The semantic verdict is yours.",
+  "logFile": "/Users/co0ontty/Self/vibe_coding/wand/.pi/team/runs/team_mv9elwhc0004rxhlvl.json"
+}

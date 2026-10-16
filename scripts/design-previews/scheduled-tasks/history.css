@@ -1,0 +1,39 @@
+/* A heatmap is not an Ant chart primitive; cells reuse WandButton and Tooltip. */
+.detail-history { min-width:0; }
+.history-toggle.wand-ui-button { width:108px; height:24px; padding-inline:4px; justify-content:flex-end; }
+.latest-record { margin:0; padding:0; list-style:none; }
+.detail-history .latest-record .execution-record { padding:0; border-bottom:0; }
+.execution-record > code { display:block; margin-top:4px; color:var(--text-secondary); }
+.execution-heatmap { --heat-cell:18px; --heat-gap:4px; padding-top:16px; min-width:0; }
+.heat-summary { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px; font-size:12px; }
+.heat-summary > span:last-child { color:var(--text-secondary); }
+.heat-scroll { max-width:100%; overflow-x:auto; overscroll-behavior-inline:contain; }
+.heat-months { display:grid; grid-template-columns:22px repeat(12,var(--heat-cell)); column-gap:var(--heat-gap); width:max-content; font-size:10px; color:var(--text-secondary); margin-bottom:5px; }
+.heat-months span { white-space:nowrap; overflow:visible; }
+.heat-layout { display:flex; align-items:start; gap:var(--heat-gap); width:max-content; }
+.heat-weekdays { display:grid; grid-template-rows:repeat(7,var(--heat-cell)); row-gap:var(--heat-gap); width:22px; flex-shrink:0; color:var(--text-secondary); font-size:10px; }
+.heat-weekdays > span { display:flex; align-items:center; }
+.heat-board { display:grid; grid-template-columns:repeat(12,var(--heat-cell)); grid-template-rows:repeat(7,var(--heat-cell)); gap:var(--heat-gap); }
+.heat-board .heat-cell.wand-ui-button { width:var(--heat-cell); min-width:var(--heat-cell); height:var(--heat-cell); padding:0; border:1px solid var(--border-subtle); border-radius:4px; background:var(--bg-elevated); box-shadow:none; font-size:10px; line-height:1; color:var(--text-secondary); }
+.heat-board .heat-cell[disabled] { opacity:.4; }
+.heat-board .heat-cell[data-outcome="completed"], .heat-legend i[data-outcome="completed"] { background:color-mix(in srgb,var(--success) 28%,var(--bg-surface)); border-color:var(--success); }
+.heat-board .heat-cell[data-outcome="completed"][data-level="2"], .heat-board .heat-cell[data-outcome="completed"][data-level="3"] { background:var(--success); }
+.heat-board .heat-cell[data-outcome="failed"], .heat-legend i[data-outcome="failed"] { background:color-mix(in srgb,var(--danger) 24%,var(--bg-surface)); border-color:var(--danger); }
+.heat-board .heat-cell[data-outcome="running"], .heat-board .heat-cell[data-outcome="pending"], .heat-legend i[data-outcome="running"] { background:var(--accent-muted); border-color:var(--accent); }
+.heat-board .heat-cell[data-outcome="unknown"], .heat-legend i[data-outcome="unknown"] { background:var(--bg-elevated); border-color:var(--warning); color:var(--warning); }
+.heat-board .heat-cell[data-outcome="mixed"], .heat-legend i[data-outcome="mixed"] { background:var(--warning-muted); border-color:var(--warning); color:var(--warning); }
+.heat-board .heat-cell[data-outcome="skipped"], .heat-legend i[data-outcome="skipped"] { background:var(--bg-secondary); border-color:var(--text-secondary); border-style:dashed; }
+.heat-board .heat-cell[aria-pressed="true"] { outline:2px solid var(--border-focus); outline-offset:2px; }
+.heat-legend { display:flex; flex-wrap:wrap; gap:5px 10px; margin-top:12px; font-size:11px; color:var(--text-secondary); }
+.heat-legend > span { display:inline-flex; align-items:center; gap:4px; }
+.heat-legend i { display:inline-block; width:9px; height:9px; border:1px solid var(--border-default); border-radius:2px; }
+.heat-help { font-size:11px; line-height:1.6; color:var(--text-secondary); margin-top:9px; }
+.heat-day-detail { margin-top:14px; padding-top:12px; border-top:1px solid var(--border-subtle); }
+.heat-day-detail > header { display:flex; justify-content:space-between; gap:12px; margin-bottom:8px; }
+.heat-day-detail h3 { font-size:12px; font-weight:500; }
+.heat-day-detail header > span { font-size:12px; color:var(--text-secondary); }
+.heat-day-detail ol { margin:0; padding:0; list-style:none; }
+@media (pointer:coarse) {
+  .history-toggle.wand-ui-button { min-height:44px; width:120px; }
+  .execution-heatmap { --heat-cell:44px; }
+}

@@ -7,11 +7,12 @@ import { Alert, Badge, Button, Card, Collapse, Flex, Tag, Timeline, Typography, 
 import { FileCard } from "@ant-design/x";
 import { EmployeeAvatar } from "../agents/employee-avatar";
 import { WandIcon } from "../ui";
+import type { WandIconName } from "../ui/icons.js";
 import { WandUiProvider } from "../theme";
 import { installChatSurfaceStyles } from "./styles";
 export { installChatSurfaceStyles } from "./styles";
 import { registerChatPresentation } from "./presentation-runtime";
-import { readMotionTokenMs } from "../ui/motion-tokens";
+import { preserveDisclosurePosition } from "./disclosure-position.js";
 import { InlineHtmlPreview } from "../local-preview/inline";
 
 type Kind = "html" | "bubble" | "call" | "activity" | "tool" | "thinking" | "file" | "agent" | "agent-detail" | "agent-rail" | "agent-process" | "agent-timeline" | "agent-result" | "agent-receipt" | "question" | "section" | "terminal" | "diff" | "inline" | "preview" | "typography" | "notice" | "answer" | "unknown";
@@ -60,66 +61,6 @@ function textOf(node: Element | null | undefined, selector?: string): string {
 }
 function statusColor(status?: string): "error" | "processing" | "warning" | "success" | "default" {
   return status === "failed" || status === "error" ? "error" : status === "running" || status === "background" ? "processing" : status === "interrupted" ? "warning" : status === "complete" || status === "completed" || status === "success" || status === "done" ? "success" : "default";
-}
-const disclosureAnchors = new WeakMap<HTMLElement, () => void>();
-const disclosurePadding = new WeakMap<HTMLElement, string>();
-/** Keep the trigger stationary through the disclosure's height transition.
- * Explicit scrolling cancels the anchor immediately; it never follows new output. */
-function preserveDisclosurePosition(control: HTMLElement, change: () => void): void {
-  const scroller = control.closest<HTMLElement>(".chat-messages");
-  const before = control.getBoundingClientRect();
-  const bounds = scroller?.getBoundingClientRect();
-  const visible = !!bounds && before.bottom > bounds.top && before.top < bounds.bottom;
-  disclosureAnchors.get(scroller!)?.();
-  const closing = control.getAttribute("aria-expanded") === "true";
-  const owner = control.closest(".chat-message");
-  let expectedScroll = scroller?.scrollTop;
-  let expectedHeight = owner?.getBoundingClientRect().height;
-  const restore = () => {
-    if (scroller && visible && control.isConnected) {
-      scroller.scrollTop += control.getBoundingClientRect().top - before.top;
-      const remaining = control.getBoundingClientRect().top - before.top;
-      // A bottom-aligned short conversation has no scroll range yet. Reserve
-      // reading space ABOVE it so disclosure can grow below its trigger rather
-      // than lifting that trigger. The reserve is capped by viewport + detail.
-      if (remaining < -1) {
-        if (!disclosurePadding.has(scroller)) disclosurePadding.set(scroller, scroller.style.paddingTop);
-        const css = getComputedStyle(scroller);
-        const rows = Array.from(scroller.children).filter(node => node.getBoundingClientRect().height > 0);
-        const used = rows.reduce((sum, node) => sum + node.getBoundingClientRect().height, 0)
-          + Math.max(0, rows.length - 1) * (parseFloat(css.rowGap) || 0) + parseFloat(css.paddingTop) + parseFloat(css.paddingBottom);
-        scroller.style.paddingTop = (parseFloat(css.paddingTop) + Math.max(0, scroller.clientHeight - used) - remaining) + "px";
-        scroller.scrollTop += control.getBoundingClientRect().top - before.top;
-      }
-      expectedScroll = scroller.scrollTop;
-      expectedHeight = owner?.getBoundingClientRect().height;
-    }
-  };
-  change(); restore();
-  if (!scroller || !visible || !owner) return;
-  const observer = new ResizeObserver(restore);
-  observer.observe(owner);
-  let frame = requestAnimationFrame(function anchorFrame() { restore(); frame = requestAnimationFrame(anchorFrame); });
-  const cancel = () => {
-    observer.disconnect(); cancelAnimationFrame(frame); clearTimeout(timer);
-    for (const event of ["wheel", "touchstart", "pointerdown", "keydown", "focusin"]) scroller.removeEventListener(event, cancel);
-    scroller.removeEventListener("scroll", onScroll);
-    disclosureAnchors.delete(scroller);
-  };
-  const onScroll = () => {
-    if (Math.abs(scroller.scrollTop - (expectedScroll || 0)) > 1 && Math.abs(owner.getBoundingClientRect().height - (expectedHeight || 0)) < 1) cancel();
-  };
-  scroller.addEventListener("scroll", onScroll, { passive: true });
-  const timer = setTimeout(() => {
-    if (closing && disclosurePadding.has(scroller) && !scroller.querySelector('.chat-activity[data-expanded="true"], .chat-tool-card:not(.collapsed), .inline-terminal[data-expanded="true"], .inline-tool-open')) {
-      scroller.style.paddingTop = disclosurePadding.get(scroller)!;
-      disclosurePadding.delete(scroller);
-      restore();
-    }
-    cancel();
-  }, readMotionTokenMs("--motion-normal") + readMotionTokenMs("--motion-fast"));
-  for (const event of ["wheel", "touchstart", "pointerdown", "keydown", "focusin"]) scroller.addEventListener(event, cancel, { passive: true });
-  disclosureAnchors.set(scroller, cancel);
 }
 function businessBody(node?: HTMLElement): React.ReactNode {
   return <Typography><OwnedNode node={node}/></Typography>;
@@ -271,8 +212,9 @@ function renderProjection(element: HTMLElement, projection: Projection): void {
     // 输入/结果两行摘录对工具调用**常驻**（哪怕还没结果），每行还留一行高度：
     // 迟到的结果只补文字，不把行撑出来（对齐 Android ToolActivityEntryRow 的触发区几何）。
     const showsToolRows = !thinking && element.hasAttribute("data-tool-ids");
-    content = <ChatActivityEntry expanded={open} status={status} label={seed?.dataset.label || "工具调用"} stateLabel={stateLabel}
-      clock={seed?.dataset.time} occurredAt={seed?.dataset.occurredAt} preview={inputPreview} result={resultPreview} tool={showsToolRows}
+    content = <ChatActivityEntry expanded={open} status={status === "pending" ? "pending" : status} label={seed?.dataset.label || "工具调用"} stateLabel={stateLabel}
+      clock={thinking ? undefined : seed?.dataset.time} occurredAt={seed?.dataset.occurredAt} preview={inputPreview} result={resultPreview} tool={showsToolRows}
+      icon={(seed?.dataset.icon as WandIconName) || (thinking ? "brain" : "wrench")} context={seed?.dataset.context}
       onToggle={event => preserveDisclosurePosition(event.currentTarget, () => { (window as any).__activityEntryToggle(event.currentTarget); renderProjection(element, projection); })}>
       {businessBody(detail)}
     </ChatActivityEntry>;

@@ -4,12 +4,14 @@ import { once } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import test from "node:test";
 import { build } from "esbuild";
 
-test("real insecure HTTP keeps SHA-256 request identity and unknown conversation delivery protection", {
+const { coalesceBrowserRuntime } = await import("../scripts/coalesce-browser-runtime.js");
+
+for (const format of ["iife", "esm"] as const) test(`${format}: real insecure HTTP keeps SHA-256 request identity and unknown conversation delivery protection`, {
   skip: process.env.WAND_CONVERSATION_FINGERPRINT_BROWSER !== "1", timeout: 60_000,
 }, async t => {
   const root = resolve(import.meta.dirname, "..");
@@ -20,15 +22,36 @@ test("real insecure HTTP keeps SHA-256 request identity and unknown conversation
   const body = { input: "隔离 HTTP 帖子🐯\n\0第二段", target: null };
   const expected = createHash("sha256").update(path + "\0" + JSON.stringify(body)).digest("hex");
   const priorId = "old-webcrypto-request-12345678";
-  await build({ stdin: { contents: `import { conversationsRepository } from "./src/web-ui/react/conversations/repository";
+  const entry = join(temp, "fixture.js");
+  const result = await build({ stdin: { contents: `import { conversationsRepository } from "./src/web-ui/react/conversations/repository";
     import { sha256Hex } from "./src/web-ui/react/sha256";
     globalThis.fingerprintFixture = { repository: conversationsRepository, sha256Hex };`,
-    resolveDir: root, loader: "ts" }, bundle: true, platform: "browser", format: "iife",
-    outfile: join(temp, "fixture.js"), logLevel: "warning" });
+    resolveDir: root, loader: "ts" }, bundle: true, platform: "browser", format,
+    ...(format === "esm" ? { splitting: true, outdir: temp } : { outfile: entry }),
+    entryNames: "fixture", minify: true, target: "es2020", write: false, metafile: true, logLevel: "warning" });
+  let outputs = result.outputFiles.map(file => ({ path: file.path, code: file.text }));
+  let script = "fixture.js";
+  if (format === "esm") {
+    // Match production: split ESM first, then coalesce the eager runtime. An
+    // IIFE-only fixture hides CommonJS default-only exports in lazy chunks.
+    const eager = new Set<string>();
+    const visit = (file: string): void => {
+      if (eager.has(file)) return;
+      eager.add(file);
+      for (const dependency of result.metafile.outputs[file].imports) {
+        if (!dependency.external && dependency.kind !== "dynamic-import") visit(dependency.path);
+      }
+    };
+    visit(relative(root, entry));
+    outputs = await coalesceBrowserRuntime(outputs, eager, relative(root, entry), root, true);
+    script = "runtime.js";
+  }
+  const assets = new Map(outputs.map(file => ["/" + relative(temp, file.path), file.code]));
   const requests: string[] = [];
   let mode = "unknown";
   const server = createServer(async (req, res) => {
-    if (req.url === "/fixture.js") { res.setHeader("content-type", "text/javascript"); res.end(readFileSync(join(temp, "fixture.js"))); return; }
+    const asset = assets.get(new URL(req.url ?? "/", "http://fixture.test").pathname);
+    if (asset !== undefined) { res.setHeader("content-type", "text/javascript"); res.end(asset); return; }
     if (req.url?.startsWith("/api/")) {
       requests.push(`${req.method} ${req.url}`);
       let content = "";
@@ -39,7 +62,7 @@ test("real insecure HTTP keeps SHA-256 request identity and unknown conversation
       res.end(JSON.stringify({ requestId, state: "accepted", conversationId: "dm_e_isolated" })); return;
     }
     res.setHeader("content-type", "text/html");
-    res.end(`<!doctype html><meta charset="UTF-8"><script>localStorage.setItem("wand-conversation-requests-v1",${JSON.stringify(JSON.stringify({ [expected]: priorId }))})</script><script src="/fixture.js"></script>`);
+    res.end(`<!doctype html><meta charset="UTF-8"><script>localStorage.setItem("wand-conversation-requests-v1",${JSON.stringify(JSON.stringify({ [expected]: priorId }))})</script><script ${format === "esm" ? 'type="module"' : ""} src="/${script}"></script>`);
   });
   server.listen(0, "127.0.0.1"); await once(server, "listening");
   t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
@@ -104,7 +127,7 @@ test("real insecure HTTP keeps SHA-256 request identity and unknown conversation
   assert.deepEqual(await evaluate('JSON.parse(localStorage.getItem("wand-conversation-requests-v1"))'), {});
   if (evidence) {
     mkdirSync(evidence, { recursive: true });
-    writeFileSync(join(evidence, "http-fingerprint.json"), JSON.stringify({ secure, insecure, preservedOldRequest: rejected,
+    writeFileSync(join(evidence, `http-fingerprint-${format}.json`), JSON.stringify({ format, secure, insecure, preservedOldRequest: rejected,
       unknownDuplicateBlocked: unknown, accepted, requests, isolated: true, modelCalls: 0 }, null, 2));
   }
 });

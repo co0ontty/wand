@@ -251,7 +251,12 @@ test("Claude quick-commit fallback grants only git Bash commands without bypassi
 
 test("generateCommitMessageOnly does not stage unstaged files", async () => {
   const root = mkdtempSync(join(tmpdir(), "wand-commit-message-only-"));
+  const bin = mkdtempSync(join(tmpdir(), "wand-message-only-cli-"));
+  const previousPath = process.env.PATH, previousDisable = process.env.WAND_SHELL_ENV_DISABLE;
   try {
+    writeFileSync(join(bin, "claude"), "#!/bin/sh\nprintf '%s\\n' 'fixture commit message'\n", { mode: 0o755 });
+    process.env.PATH = `${bin}${delimiter}${previousPath ?? ""}`;
+    process.env.WAND_SHELL_ENV_DISABLE = "1";
     initRepo(root);
     writeFileSync(join(root, "tracked.txt"), "hello\n");
     git(root, "add", "tracked.txt");
@@ -259,14 +264,18 @@ test("generateCommitMessageOnly does not stage unstaged files", async () => {
     writeFileSync(join(root, "tracked.txt"), "hello world\n");
     writeFileSync(join(root, "unstaged.txt"), "new\n");
     const before = git(root, "status", "--porcelain");
-    await generateCommitMessageOnly(root, "中文").catch(() => undefined);
-    // AI may fail in tests; generating a message still must not stage files.
+    const generated = await generateCommitMessageOnly(root, "中文", { provider: "claude" });
+    assert.equal(generated.message, "fixture commit message");
+    // A successful mocked model response must not stage files; never invoke authenticated real AI.
     const after = git(root, "status", "--porcelain");
     assert.equal(after, before);
     assert.match(after, /M tracked\.txt/);
     assert.match(after, /\?\? unstaged\.txt/);
     assert.equal(git(root, "diff", "--cached", "--name-only"), "");
   } finally {
+    if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath;
+    if (previousDisable === undefined) delete process.env.WAND_SHELL_ENV_DISABLE; else process.env.WAND_SHELL_ENV_DISABLE = previousDisable;
+    rmSync(bin, { recursive: true, force: true });
     rmSync(root, { recursive: true, force: true });
   }
 });

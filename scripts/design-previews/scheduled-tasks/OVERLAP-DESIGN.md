@@ -1,0 +1,62 @@
+# 全局日历：同刻、部分重叠与密集日程
+
+## 结论
+
+- 不让事件互相覆盖，不把一列无限均分成细条，也不把同时触发标成执行冲突。
+- 周视图按可读宽度容纳 1–3 列；空间足够时直接并列，超过容量保留一列「＋N项」。点开锚点浮层，按时间列出全部任务，再原位展开单项。
+- 月视图继续上下堆叠横条，达到可见行数后显示「＋N项」，同样原位展开，不强行切周视图。
+- 不按员工分栏。头像表示归属，文字／图标／颜色表示状态。
+
+核对稿：`http://127.0.0.1:8798/`。离线：`output/design-previews/scheduled-tasks/overlap-study/Wand-calendar-overlap.html`。
+
+## 三种情况
+
+### 1. 同一时刻有多项
+
+周一示例：09:00 两项分列，顶边严格对齐。窄栏使用两行：第一行头像、时间、状态图标，第二行标题；不把全部信息强塞在同一行。完整状态有 Tooltip 与无障碍名称，详情提供完整标题。
+
+### 2. 部分时间重合
+
+周三仅为**明确起止的假设区间**：A 09:00–10:00、B 09:30–10:30、C 10:00–11:00。最大同时数是2，不是3；C复用A结束后的空列。后面的11:30独立任务恢复整列宽度。
+
+算法：起点升序，相同起点按终点降序、稳定key排序；以半开区间 `[start,end)` 扫描连通重叠组，贪心复用已空闲的最左列。组内列宽保持稳定，组结束后重新计算。不能按整天任务总数平均分栏。
+
+### 3. 同时8项／窄屏
+
+周五示例：桌面宽度下显示1个可读任务与「＋7项」；浮层列出全部8项，全部可触达。容量由实际日列宽测量得出，不是简单写死“第4条隐藏”。核对稿最小事件宽84px、间隙4px、触发目标高44px；大列最多3栏，较窄日列可以汇总全部，不能先压缩到不可读再叠字。
+
+窄屏保留日列的可读宽度，只让日历画布横向滚动，不撑宽文档、不换成默认下方列表。多项浮层限高、内部滚动、标题/关闭固定；通过公共Popover的零额外偏移配合原生边缘适配，展开末项后仍留在视口，背景不滚动。核对稿中的说明文字用于设计评审，正式界面继续保持已确认的精简布局。
+
+## 触发标记与真实时长必须分开
+
+现有 `TaskSchedule` 只有触发时间，没有预计结束时间。现版 `weekPositions()` 按44px阅读高度分栏，只是避免09:00和09:15标记互相遮挡，**不是推断两次执行同时在跑**。
+
+现有 `ScheduledTaskRun.executionFinishedAt` 也不能一律当作精确结束：`src/scheduled-task-state.ts` 在缺会话／重启恢复等路径可写入结算时刻 `now`。因此本轮不根据这个字段绘制伪精确耗时，也不默认给未来计划补30／60分钟。
+
+若后续要把实际执行时长画成长块，需要可区分的权威起止与时间来源，查询也须支持跨日区间相交，而不只按 `claimedAt` 落日。当前周三长块仅解释排布规则，不宣称现有接口已经提供该能力。
+
+## 与现版的差距及处理边界
+
+- 已证实：现版 `weekPositions()` 可生成任意多列。日列约180px时8列只有约22px，头像、时间、标题、状态不可同时阅读。新密集策略在本核对稿实现；**尚未把该产品取舍写入生产布局或宣称Mac已实现**。
+- 核对中发现 Ant Button 的默认 `transition: all` 会让重排时的几何短暂相交。已对研究稿、原日历预览及生产周条局部限定为颜色／边框／阴影过渡，不改公共组件，也不动画 top/left/width/height。修复前后几何值保存在产物中，生产浏览器回归通过。
+- 月份本体仍是 Ant Calendar；按钮、Popover、Tooltip、头像、Portal、主题及减少动态效果均复用 Wand。没有引入 FullCalendar 依赖。
+
+## 参考依据
+
+实际读取官方说明与示例图片，不将搜索摘要当实机测量：
+
+- [FullCalendar slotEventOverlap](https://fullcalendar.io/docs/slotEventOverlap)：`false` 完全取消事件视觉遮挡，官方给出并列截图。
+- [FullCalendar eventMaxStack](https://fullcalendar.io/docs/eventMaxStack)：TimeGrid限制横向并列数，超出部分以more入口及浮层展示。
+- [FullCalendar eventShortHeight](https://fullcalendar.io/docs/eventShortHeight)：短事件单独采用紧凑样式，而非让文字溢出。
+
+这里采用「不遮挡＋可读容量＋原位展开」，不照抄默认可遮挡半个事件的模式。Google／Apple帮助页只用于确认视图能力，没有据此声称本轮实测了它们的重叠算法；未访问用户私人日历。
+
+## 验证
+
+Node24.21.0：研究稿类型检查通过；重叠模型6项＋既有日历模型10项通过；浏览器15类场景通过（含移动端完整展开与离线HTML）。原列表/热力图28类及月周日历14类也重跑通过。检查了真实DOM矩形不相交、同刻对齐、部分重叠、半开边界复用、恢复整宽、8项完整访问、月格原位展开、分层Escape、外点、320/390px及减少动态效果。浏览器使用支持的SVG头像回退，不作为GPU帧率认证。无API调用、真实任务执行或正式服务重启。
+
+```sh
+node --test --import tsx scripts/design-previews/scheduled-tasks/overlap-layout.test.ts tests/scheduled-calendar-model.test.ts
+node scripts/design-previews/scheduled-tasks/verify-overlap.mjs
+node scripts/design-previews/scheduled-tasks/serve-overlap.mjs
+```

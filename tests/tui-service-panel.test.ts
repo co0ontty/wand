@@ -15,7 +15,9 @@ function harness() {
   const module = { exports: {} as { openServicePanel?: (deps: unknown) => void } };
   const require = createRequire(import.meta.url);
   new Function("require", "module", "exports", code)(
-    (name: string) => name === "./commands.js" ? commands : require(name), module, module.exports,
+    (name: string) => name === "./commands.js" ? commands
+      : name === "./service-command.js" ? { runTuiServiceCommand: async () => ({ ok: true, message: "done" }) }
+      : require(name), module, module.exports,
   );
   const openings: Array<{ onClose(): void; onRefresh(): void }> = [];
   const updates: Array<{ statusLine: string }> = [];

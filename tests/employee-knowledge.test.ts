@@ -194,7 +194,7 @@ test("runtime knowledge is refreshed per turn, raw user text/base/history stay u
 });
 
 test("all provider system channels and resumed no-flag providers receive live knowledge without repasting base rules", () => {
-  for (const provider of ["claude", "qoder", "pi", "grok", "codex", "opencode", "gemini"] as SessionProvider[]) {
+  for (const provider of ["claude", "qoder", "pi", "grok", "codex", "opencode"] as SessionProvider[]) {
     const session = { ...snapshot("s", "e_a"), provider, runtimeSystemPrompt: "LIVE_KNOWLEDGE",
       messages: [{ role: "user", content: [] }, { role: "assistant", content: [] }] } as SessionSnapshot;
     if (["claude", "qoder", "pi", "grok"].includes(provider)) {

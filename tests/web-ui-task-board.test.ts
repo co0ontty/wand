@@ -216,7 +216,7 @@ test("issue helpers expose columns, grouping, sorting, and workspace options", (
   assert.notEqual(options[0]!.value, "");
   assert.match(options[1]!.label, /wand/);
   assert.match(options[1]!.label, /\/tmp\/wand/);
-  assert.equal(ISSUE_AGENT_PROVIDERS.length, 7);
+  assert.deepEqual(ISSUE_AGENT_PROVIDERS.map((option) => option.value), ["claude", "codex", "opencode", "grok", "qoder", "pi"]);
 
   // 哨兵值 ↔ workspaceId 的双向转换：null / 空串 / 真实 id 都要还原正确。
   assert.equal(issueWorkspaceSelectValue(null), ISSUE_NO_WORKSPACE);
@@ -513,7 +513,7 @@ test("task board is a first-class view=taskboard route that does not unmount the
   assert.match(sidebar, /const navigateFromTree = \(\): void => \{\s*settingsController\.close\(\);\s*taskBoardController\.close\(\)/);
   assert.match(sidebar, /onNavigate=\{navigateFromTree\}/);
   // 功能导航既有库按钮高亮，也保留当前页语义。
-  assert.match(sidebar, /activePage=\{settings\.open \? null : taskBoard\.open \? taskBoard\.page === "board" \? "board" : taskBoard\.page === "schedules" \? "schedules" : "teams"/);
+  assert.match(sidebar, /activePage=\{settings\.open \? null : taskBoard\.open \? taskBoard\.page === "board" \? "board" : taskBoard\.page === "schedules" \? "schedules" : taskBoard\.page === "calendar" \? "calendar" : "teams"/);
   const navigation = readFileSync(new URL("../src/web-ui/react/conversations/sidebar.tsx", import.meta.url), "utf8");
   assert.match(navigation, /aria-current=\{activePage === entry\.value \? "page" : undefined\}/);
   // 同一功能只留一个可见入口：箭头只在未选中任务时出现（返回工作区），选中任务后返回交给面包屑首段。

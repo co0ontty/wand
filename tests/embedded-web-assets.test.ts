@@ -49,6 +49,22 @@ test("compressed embedded assets preserve all published asset payloads including
   }
 });
 
+test("build evidence retains the exact graph and module bytes under an immutable build identity", () => {
+  const evidence = EMBEDDED_WEB_ASSETS.buildIdentity;
+  const manifest = EMBEDDED_WEB_ASSETS.browserModuleManifest;
+  assert.equal(evidence.moduleBuildId, manifest.buildId);
+  const archive = new URL(`../output/web-ui-library-migration/builds/${evidence.id}/`, import.meta.url);
+  for (const [name, digest] of Object.entries(evidence.graphs)) {
+    const bytes = readFileSync(new URL(`bundle-graphs/${name}`, archive));
+    assert.equal(createHash("sha256").update(bytes).digest("hex"), digest);
+  }
+  for (const file of manifest.files) {
+    const digest = createHash("sha256").update(EMBEDDED_WEB_ASSETS.browserModules[file]).digest("hex");
+    assert.equal(manifest.integrity[file], digest);
+    assert.equal(evidence.artifacts[file], digest);
+  }
+});
+
 test("the embedded fallback source stays smaller than half its plain base64 payloads", () => {
   const contents = [
     EMBEDDED_WEB_ASSETS.scriptsJs,
@@ -89,7 +105,8 @@ test("asset readers keep serving correct strings and hashes when disk assets are
       .replace('"${wandConfigPath}"', JSON.stringify(configPath))
       .replace("${aiTeamsChunkSrc}", `/assets/ai-teams.js?v=${expectedChunk.hash}`)
       .replace("${plushAvatarChunkSrc}", `/assets/plush-avatar.js?v=${md5(EMBEDDED_WEB_ASSETS.plushAvatarJs)}`)
-      .replace("${browserModuleSrc}", `/assets/${EMBEDDED_WEB_ASSETS.browserModuleManifest.entry}`);
+      .replace("${browserModuleSrc}", `/assets/${EMBEDDED_WEB_ASSETS.browserModuleManifest.entry}`)
+      .replace('"${browserModuleImports}"', JSON.stringify(EMBEDDED_WEB_ASSETS.browserModuleManifest.imports ?? {}));
     const fallbackScript = scripts.getScriptAsset(configPath);
     assert.equal(fallbackScript.content, expectedScript);
     assert.equal(fallbackScript.hash, versionWebAsset(expectedScript).hash);

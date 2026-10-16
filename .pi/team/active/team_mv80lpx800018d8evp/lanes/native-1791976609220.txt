@@ -1,0 +1,6 @@
+Lane mailbox for Gemini 原生三端移除 (role native)
+Run: team_mv80lpx800018d8evp
+Lane: native-1791976609220
+Token: db99edc8-bb16-40cd-a220-d4d020d4b037
+
+Captain messages appear below, newest last.

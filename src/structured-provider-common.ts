@@ -4,8 +4,7 @@ import { shellQuote } from "./shell-quote.js";
 
 /**
  * 把会话级系统提示交给 CLI 的开关。Claude / Qoder / Pi 用 `--append-system-prompt`，
- * Grok 用 `--rules`；Codex / OpenCode / Gemini 没有这个入口，只能退回并入本轮消息
- * （Gemini 只有 `GEMINI_SYSTEM_MD`，那是整体替换而非追加）。
+ * Grok 用 `--rules`；Codex / OpenCode 没有这个入口，只能退回并入本轮消息。
  * 各 provider 的支持情况由 `--help` 实测得出，新增 provider 前先验。
  */
 export function systemPromptFlag(provider: SessionProvider | null | undefined): string | null {
@@ -39,7 +38,7 @@ export function promptWithSystemFallback(
 ): string {
   if (systemPromptFlag(session.provider)) return prompt;
   const base = (session.messages?.length ?? 0) <= 1 ? session.systemPrompt?.trim() : "";
-  // Knowledge is live per turn, including resumed Codex/OpenCode/Gemini conversations.
+  // Knowledge is live per turn, including resumed Codex/OpenCode conversations.
   const text = [base, session.runtimeSystemPrompt?.trim()].filter(Boolean).join("\n\n");
   return text ? composeSystemFallback(text, prompt) : prompt;
 }
@@ -92,7 +91,7 @@ export function isStructuredRunnerForProvider(provider: SessionProvider, runner:
   if (provider === "grok") return runner === "grok-cli-headless";
   if (provider === "qoder") return runner === "qoder-cli-print";
   if (provider === "pi") return runner === "pi-cli-json";
-  return runner === "gemini-cli-json";
+  return false;
 }
 
 export function defaultStructuredRunner(provider: SessionProvider): SessionRunner {
@@ -101,7 +100,6 @@ export function defaultStructuredRunner(provider: SessionProvider): SessionRunne
   if (provider === "grok") return "grok-cli-headless";
   if (provider === "qoder") return "qoder-cli-print";
   if (provider === "pi") return "pi-cli-json";
-  if (provider === "gemini") return "gemini-cli-json";
   return "claude-cli-print";
 }
 

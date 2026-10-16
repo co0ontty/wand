@@ -79,7 +79,8 @@ test("web sidebar uses a persistent icon rail, profile settings and a separate s
   assert.ok(!navigation.includes('label: "通讯录"'));
   assert.match(sidebar, /员工与通讯录/);
   assert.match(navigation, /<Badge count=\{teamAttention\}/);
-  assert.match(tree, /paddingInlineStart: 8.*className="workspace-tasks"/);
+  assert.match(tree, /paddingInlineStart: 4.*className="workspace-tasks"/);
+  assert.match(tree, /SidebarSessionArea/);
   assert.match(tree, /<Badge dot=\{glow !== "none"\}/);
 });
 

@@ -3,6 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import { firstLayoutTabId } from "../layout-tree.js";
 import { nowIso } from "../password-manager.js";
 import { isSessionProvider } from "../session-provider.js";
+import { isSystemAiCall } from "../system-ai-call.js";
 import { isThinkingEffort } from "../structured-provider-common.js";
 import type { WandTask, WandTaskAgent } from "../task-types.js";
 import { DEFAULT_ITERATION_NAME, DEFAULT_WAND_TASK_PRIORITY, isTaskExecutionSubject, normalizeWandTaskAgentMode } from "../task-types.js";
@@ -561,6 +562,7 @@ export class TaskRepository {
 
   /** Atomic exclusive ownership change; cwd, output and execution are untouched. */
   moveSessionToWorkspaceTask(sessionId: string, taskId: string | null): void {
+    if (taskId && isSystemAiCall(this.s.getSessionSlim(sessionId))) throw new Error("系统调用记录不能绑定到业务任务。");
     this.s.notifyTaskTitleChange();
     this.s.transaction(() => {
       const session = this.s.getSessionWorkspace(sessionId);
@@ -601,6 +603,7 @@ export class TaskRepository {
     const provider = session.provider;
     const agent: WandTaskAgent | null = isSessionProvider(provider) ? {
       provider,
+      ...(session.structuredState?.engine === "core" ? { engine: "sdk" as const } : session.sessionKind === "pty" || session.structuredState?.engine === "cli" ? { engine: "cli" as const } : {}),
       model: session.selectedModel || session.structuredState?.model || "default",
       thinkingEffort: isThinkingEffort(session.thinkingEffort) ? session.thinkingEffort : "off",
       mode: normalizeWandTaskAgentMode(provider, session.mode),

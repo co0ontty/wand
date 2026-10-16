@@ -3,11 +3,15 @@ import { Alert, Checkbox, Flex, Input, Radio, Typography } from "antd";
 import type { ConversationTarget } from "../../../conversation-types.js";
 import type { ConversationTurn, ToolResultBlock, ToolUseBlock } from "../../../types.js";
 import { ChatActivity, ChatActivityEntry } from "../chat/activity.js";
+import { activityLabel } from "../chat/activity-label.js";
+import { DeferredMarkdownPreview as MarkdownPreview } from "../file-preview/deferred-markdown.js";
+import { preserveDisclosurePosition } from "../chat/disclosure-position.js";
 import { installChatSurfaceStyles } from "../chat/styles.js";
 import { RunningStatusBar } from "../chat/running-status-bar.js";
-import { WandButton } from "../ui/index.js";
+import { WandButton, WandIcon } from "../ui/index.js";
 import { HttpResponseError } from "../http-adapter.js";
 import { computeRunningSignal } from "../../session-activity.js";
+import { projectRunningStatus } from "../../running-activity.js";
 import { conversationActivityRepository as repository } from "./activity-repository.js";
 import { activityAnswerText, activityQuestions, activityResultText, activityResults, activityRunning, activitySessionOwners,
   activitySource, activityStopAnchor, activityToolKey, pendingActivityQuestions, type ActivityOperation, type ActivitySession, type ConversationActivityDetail } from "./activity-model.js";
@@ -21,7 +25,7 @@ function readable(value: unknown): string {
 /** 会话页现在这套行语言：时间线行的状态点、箭头、时钟都在这里复用同一批 class。 */
 function ActivityMark({ running }: { running: boolean }): React.ReactElement {
   return <span className="chat-process-summary-dot" data-running={running ? "" : undefined} aria-hidden="true">
-    {Array.from({ length: 9 }, (_, index) => <i key={index}/>)}
+    <WandIcon name="brain" size={14}/>
   </span>;
 }
 
@@ -67,6 +71,15 @@ function QuestionCard({ block, session, canAnswer, submit }: {
   </Flex>;
 }
 
+export type ActivityToolState = "error" | "complete" | "pending";
+
+/** 只读取结构化回执；没有回执永远是未返回，不推断为运行中。 */
+export function activityToolState(result?: Pick<ToolResultBlock, "is_error">, full?: { pending: boolean; is_error: boolean }): ActivityToolState {
+  if (result) return result.is_error ? "error" : "complete";
+  if (full && !full.pending) return full.is_error ? "error" : "complete";
+  return "pending";
+}
+
 function ActivityTool({ block, result, source, session, canAnswer, submit }: {
   block: ToolUseBlock; result?: ToolResultBlock; source: string | null; session?: ActivitySession;
   canAnswer: boolean; submit(operation: ActivityOperation): void;
@@ -79,24 +92,25 @@ function ActivityTool({ block, result, source, session, canAnswer, submit }: {
   React.useEffect(() => {
     if (!open || !source) return;
     let valid = true;
-    setLoading(true); setError("");
+    setLoading(true); setError(""); setFull(null);
     void repository.tool(source, block.id).then(value => { if (valid) setFull(value); }, cause => {
       if (valid) setError(cause instanceof Error ? cause.message : "读取工具详情失败。");
     }).finally(() => { if (valid) setLoading(false); });
     return () => { valid = false; };
   }, [open, source, block.id, result, retry]);
   const questions = activityQuestions(block);
-  const status = result ? result.is_error ? "error" : "complete" : "pending";
+  const status = activityToolState(result, full ?? undefined);
   // 状态词表只有一套：失败 / 运行中 / 完成 / 未返回，和会话详情一致，读的是颜色不是文字。
   const statusLabel = status === "error" ? "失败" : status === "complete" ? "完成" : "未返回";
-  const label = questions.length ? "补充信息" : block.activity?.label || block.description || block.name;
-  const inputExcerpt = block.preview || "";
+  const presentation = activityLabel(block);
+  const label = questions.length ? "补充信息" : presentation.title;
+  const inputExcerpt = presentation.detail;
   const resultExcerpt = result?.preview || (result ? activityResultText(result) : "");
   return <div className="chat-call chat-call-inline conversation-tool-activity" data-status={status} data-expanded={open ? "true" : "false"}
     data-tool-source={source ?? undefined} data-tool-id={block.id}>
     <ChatActivityEntry expanded={open} status={status} label={label} stateLabel={statusLabel}
       clock={activityRowClock(block.activity?.occurredAt)} occurredAt={block.activity?.occurredAt}
-      preview={inputExcerpt} result={resultExcerpt} tool onToggle={() => setOpen(current => !current)}>
+      icon={presentation.icon} context={presentation.context} preview={inputExcerpt} result={resultExcerpt} tool onToggle={event => preserveDisclosurePosition(event.currentTarget, () => setOpen(current => !current))}>
       {open ? <div className="chat-activity-detail-content">
       {loading ? <Typography.Text type="secondary" role="status">正在读取详情…</Typography.Text> : null}
       {error ? <Typography.Text type="danger" role="alert">{error}<WandButton size="small" onClick={() => setRetry(value => value + 1)}>重新读取</WandButton></Typography.Text> : null}
@@ -117,12 +131,12 @@ function TurnActivity({ turn, source, results, session, live, submit }: {
   if (!blocks.length) return null;
   const pending = new Set(session ? pendingActivityQuestions(session).map(block => block.id) : []);
   const duration = turn.completedAt && turn.createdAt ? Date.parse(turn.completedAt) - Date.parse(turn.createdAt) : 0;
-  const open = expanded ?? live;
+  const open = expanded ?? true;
   const questionBlocks = blocks.filter((block): block is ToolUseBlock => block.type === "tool_use" && pending.has(block.id));
   const runningCall = live && blocks.some((block, index) => index === blocks.length - 1 && block.type === "tool_use" && !(source && results.get(activityToolKey(source, block.id))));
   const runningThinking = live && blocks.some((block, index) => index === blocks.length - 1 && block.type === "thinking");
   return <div className={`chat-activity chat-activity-inline conversation-turn-activity${runningCall ? " is-command-running" : ""}${runningThinking ? " is-thinking-running" : ""}`} data-expanded={open ? "true" : "false"}>
-    <ChatActivity expanded={open} onToggle={() => setExpanded(current => !(current ?? live))} summary={<>
+    <ChatActivity expanded={open} onToggle={event => preserveDisclosurePosition(event.currentTarget, () => setExpanded(current => !(current ?? true)))} summary={<>
       {live ? <ActivityMark running/> : null}
       <span className="chat-activity-meta">
         <span className="chat-activity-meta-item">{turn.completedAt ? "处理结束" : "执行过程"}</span>
@@ -133,7 +147,7 @@ function TurnActivity({ turn, source, results, session, live, submit }: {
     </>}>
     {open ? <div className="chat-activity-rows">
       {blocks.map((block, index) => block.type === "thinking"
-        ? <ActivityThinkingRow key={`thinking:${index}`} thinking={block.thinking} clock={activityRowClock(block.occurredAt)}
+        ? <ActivityThinkingRow key={`thinking:${index}`} thinking={block.thinking}
             running={!!runningThinking && index === blocks.length - 1}/>
         : block.type === "tool_use" ? <ActivityTool key={`${source}:${block.id}`} block={block} source={source} session={session}
             result={source ? results.get(activityToolKey(source, block.id)) : undefined} canAnswer={false} submit={submit}/> : null)}
@@ -142,22 +156,19 @@ function TurnActivity({ turn, source, results, session, live, submit }: {
   </div>;
 }
 
-/** 思考轮次的行：单行紧凑，展开只有一个正文（和会话详情同一套行骨架）。 */
-function ActivityThinkingRow({ thinking, clock, running }: { thinking: string; clock: string; running: boolean }): React.ReactElement {
-  const [open, setOpen] = React.useState(false);
-  const excerpt = thinking.replace(/\s+/g, " ").trim().slice(0, 180);
+/** Thinking is readable by default; explicit reader choices survive stream updates. */
+function ActivityThinkingRow({ thinking, running }: { thinking: string; running: boolean }): React.ReactElement {
+  const [open, setOpen] = React.useState(true);
   return <div className="chat-call chat-call-inline" data-status={running ? "running" : "complete"} data-thinking-entry="true" data-expanded={open ? "true" : "false"}>
     <ChatActivityEntry expanded={open} status={running ? "running" : "complete"} label="思考过程" stateLabel={running ? "运行中" : "已结束"}
-      clock={clock} preview={excerpt} onToggle={() => setOpen(current => !current)}>
-      {open ? <div className="chat-activity-detail-content">
-      <div className="chat-activity-detail-section"><h4>思考</h4><pre tabIndex={0}>{thinking || "模型未提供可显示的思考正文。"}</pre></div>
-    </div> : null}</ChatActivityEntry>
+      icon="brain" onToggle={event => preserveDisclosurePosition(event.currentTarget, () => setOpen(current => !current))}>
+      <div className="chat-thinking-content"><MarkdownPreview content={thinking || (running ? "正在思考…" : "模型未提供可显示的思考正文。")} variant="inline" wrap/></div></ChatActivityEntry>
   </div>;
 }
 
 export function useConversationActivity({ detail, active, target = null, onRefresh }: {
   detail: ConversationActivityDetail | null; active: boolean; target?: ConversationTarget; onRefresh?(): void;
-}): { renderActivity(turn: ConversationTurn, index: number): React.ReactNode; controls: React.ReactNode } {
+}): { renderActivity(turn: ConversationTurn, index: number): React.ReactNode; hasStatus(turn: ConversationTurn): boolean; controls: React.ReactNode } {
   React.useSyncExternalStore(repository.subscribe, repository.revision, repository.revision);
   const owners = activitySessionOwners(detail, target);
   const ownerKey = JSON.stringify([...owners]);
@@ -206,9 +217,18 @@ export function useConversationActivity({ detail, active, target = null, onRefre
   // Legacy communication and group member sessions without a reply keep the shared controls region.
   const linkedSessions = new Set(detail?.messages.flatMap(turn => turn.sessionLink ? [turn.sessionLink.sessionId] : []) ?? []);
   const detached = ongoing.filter(session => !linkedSessions.has(session.id));
+  const runningFacts = (session: ActivitySession) => ({ ...session, ptyRunning: computeRunningSignal(session).ptyRunning,
+    turnStartedAt: session.ptyTurnStartedAt, lastActivityAt: session.ptyLastActivityAt });
+  const sourceSession = (turn: ConversationTurn): ActivitySession | undefined => {
+    const source = activitySource(turn, detail?.communicationSessionId ?? null);
+    return source && active && owners.has(source) ? sessions[source] : undefined;
+  };
+  const hasStatus = (turn: ConversationTurn): boolean => {
+    const session = turn.sessionLink && sourceSession(turn);
+    return !!session && !!projectRunningStatus(runningFacts(session)).label;
+  };
   const renderControls = (session: ActivitySession, inline = false): React.ReactNode => {
       const escalation = session.pendingEscalation;
-      const signal = computeRunningSignal(session);
       const stop: ActivityOperation = { kind: "stop", anchor: activityStopAnchor(session) };
       const operation: ActivityOperation = escalation ? { kind: "permission", requestId: escalation.requestId, resolution: "approve_once" } : stop;
       const status = repository.submission(session.id, operation);
@@ -220,7 +240,7 @@ export function useConversationActivity({ detail, active, target = null, onRefre
           <Flex gap={8}><WandButton disabled={locked} onClick={() => submit(session.id, { ...operation as Extract<ActivityOperation, { kind: "permission" }>, resolution: "deny" })}>拒绝</WandButton>
             <WandButton kind="primary" disabled={locked} onClick={() => submit(session.id, operation)}>批准本次</WandButton></Flex>
         </Flex>}/> : <Flex align="center" justify="space-between" gap={8} className="conversation-session-state">
-          <RunningStatusBar activity={{ ...session, ptyRunning: signal.ptyRunning, turnStartedAt: session.ptyTurnStartedAt, lastActivityAt: session.ptyLastActivityAt }}/>
+          <RunningStatusBar activity={runningFacts(session)}/>
           {activityRunning(session) ? <WandButton size="small" disabled={locked} onClick={() => submit(session.id, stop)}>停止本轮</WandButton> : null}
         </Flex>}
         {status ? <Typography.Text role="status" type={status.phase === "unknown" || status.phase === "failed" ? "danger" : "secondary"}>{status.message}</Typography.Text> : null}
@@ -231,11 +251,11 @@ export function useConversationActivity({ detail, active, target = null, onRefre
     {loadError ? <Alert type="warning" title={loadError} action={<WandButton onClick={() => void load()}>重新读取</WandButton>}/> : null}
     {detached.map(session => renderControls(session))}
   </Flex> : null;
-  return { controls, renderActivity: (turn, index) => {
+  return { controls, hasStatus, renderActivity: (turn, index) => {
     const source = activitySource(turn, detail?.communicationSessionId ?? null);
-    const session = source && active && owners.has(source) ? sessions[source] : undefined;
+    const session = sourceSession(turn);
     if (turn.sessionLink) return session ? <React.Fragment key={session.id}>
-      {ongoing.some(item => item.id === session.id) ? renderControls(session, true) : null}
+      {hasStatus(turn) || ongoing.some(item => item.id === session.id) ? renderControls(session, true) : null}
       {pendingActivityQuestions(session).map(block =>
       <QuestionCard key={block.id} block={block} session={session} canAnswer submit={operation => submit(session.id, operation)}/>)}</React.Fragment> : null;
     const last = source ? detail?.messages.slice().reverse().find(item => item.role === "assistant" && activitySource(item, detail?.communicationSessionId ?? null) === source) : undefined;

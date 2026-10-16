@@ -5,6 +5,19 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { shellQuote } from "../src/shell-quote.js";
+import { compareNodeVersions, nodeBaseline, nodeMinimum } from "../scripts/node-version.js";
+
+test("runtime minimum is independent of the reproducible build pin and matches the installer", () => {
+  assert.equal(nodeMinimum, "22.19.0");
+  assert.ok(compareNodeVersions(nodeBaseline, nodeMinimum) >= 0);
+  const script = readFileSync("scripts/update-node.sh", "utf8");
+  assert.ok(script.includes(`WAND_MINIMUM_NODE_VERSION="${nodeMinimum}"`));
+  assert.equal(readFileSync("install.sh", "utf8").includes('REQUIRED_NODE_VERSION="$(<"$NODE_VERSION_FILE")"'), false);
+  for (const version of ["22.19.0", "22.23.0", "24.0.0", "24.19.0", "24.21.0", "26.10.0"]) {
+    assert.ok(compareNodeVersions(version, nodeMinimum) >= 0, version);
+  }
+  for (const version of ["20.19.0", "22.18.0"]) assert.ok(compareNodeVersions(version, nodeMinimum) < 0);
+});
 
 function versionNode(file: string, version: string) {
   mkdirSync(path.dirname(file), { recursive: true });

@@ -1,8 +1,9 @@
 import type { SiliconEmployee } from "./ai-team-types.js";
-import { abortableEmployeeText, EmployeeCandidateRejected, employeeTextCandidates, prepareEmployeeTextCandidate } from "./employee-text.js";
+import { abortableEmployeeText, EmployeeCandidateRejected, employeeTextCandidates, prepareEmployeeTextCandidate, type EmployeeTextDeps } from "./employee-text.js";
 import type { OpenRouterFreeModelsService } from "./openrouter-free-models.js";
 import { SPEECH_POLISHER_ID, SPEECH_POLISHER_KEY } from "./speech-polisher-identity.js";
 import type { WandTaskAgent } from "./task-types.js";
+import { AiCallTraceError, type AiCallTraceFactory, type AiCallTrace } from "./system-ai-call.js";
 import type { AiTextRequest, WandConfig } from "./types.js";
 
 export interface SpeechPolishResult {
@@ -14,6 +15,7 @@ export interface SpeechPolishResult {
   optimizationError?: string;
 }
 interface SpeechPolisherDeps {
+  trace?(employee: SiliconEmployee): AiCallTraceFactory;
   employee(): SiliconEmployee | null;
   config: WandConfig;
   free: Pick<OpenRouterFreeModelsService, "resolveForCall">;
@@ -49,40 +51,52 @@ export class SpeechPolisherService {
     const combined = AbortSignal.any([this.lifetime.signal, deadline, ...(signal ? [signal] : [])]);
     const request = { system: `${employee.prompt}\n输出一个 JSON 对象：{"text":"整理后的完整文字"}，不加其他字段或说明。`,
       prompt: JSON.stringify({ transcript: text }) };
+    let trace: AiCallTrace | undefined;
     try {
+      trace = this.deps.trace?.(employee).start("speech-polish", request, this.deps.config.defaultCwd);
       for (const candidate of employeeTextCandidates(employee.agents, this.deps.config)) {
         combined.throwIfAborted();
         const agent = candidate.agent;
         let generate: () => Promise<string>;
+        trace?.candidateStarted(agent);
         // An unavailable candidate has accepted no user input: continue the configured order.
-        try { generate = await this.prepareCandidate(agent, request, combined); }
-        catch { combined.throwIfAborted(); continue; }
+        try { generate = await this.prepareCandidate(agent, request, combined, trace?.sessionId, usage => trace?.usageReported(usage)); }
+        catch (error) { if (error instanceof AiCallTraceError) throw error; trace?.candidateFailed(agent, error, "availability"); combined.throwIfAborted(); continue; }
         combined.throwIfAborted();
         // Only a structured, verified pre-execution refusal permits another candidate.
         let raw: string;
         try { raw = await abortableEmployeeText(generate(), combined); }
         catch (error) {
+          if (error instanceof AiCallTraceError) throw error;
+          trace?.candidateFailed(agent, error, "execution");
           combined.throwIfAborted();
           if (error instanceof EmployeeCandidateRejected && error.failure.retryable) continue;
           throw error;
         }
         combined.throwIfAborted();
-        return { text: parseSpeechPolishOutput(raw), originalText: text, optimized: true, employeeId: employee.id,
+        let polished: string;
+        try { polished = parseSpeechPolishOutput(raw); }
+        catch (error) { trace?.candidateFailed(agent, error, "result"); throw error; }
+        trace?.candidateSucceeded(raw, polished);
+        trace?.complete();
+        return { text: polished, originalText: text, optimized: true, employeeId: employee.id,
           candidate: candidate.index };
       }
+      trace?.fail(new Error("NoAvailableCandidate"));
       return { ...original, optimizationError: "口述整理师的候选均不可用，已保留原始转写。" };
-    } catch {
+    } catch (error) {
+      trace?.fail(error, combined.aborted);
       signal?.throwIfAborted();
       this.lifetime.signal.throwIfAborted();
       return { ...original, optimizationError: "口述整理失败或超时，已保留原始转写。" };
     } finally { this.active -= 1; }
   }
-  private async prepareCandidate(agent: WandTaskAgent, request: AiTextRequest, signal: AbortSignal): Promise<() => Promise<string>> {
+  private async prepareCandidate(agent: WandTaskAgent, request: AiTextRequest, signal: AbortSignal, callSessionId?: string, onUsage?: EmployeeTextDeps["onUsage"]): Promise<() => Promise<string>> {
     const deadline = new AbortController();
     const timer = setTimeout(() => deadline.abort(new Error("候选可用性检查超时。")), 8000);
     const checkedSignal = AbortSignal.any([signal, deadline.signal]);
     try {
-      return await abortableEmployeeText((this.deps.prepare ?? ((candidate, input, checked) => prepareEmployeeTextCandidate(this.deps, candidate, input, checked)))(agent, request, checkedSignal), checkedSignal);
+      return await abortableEmployeeText((this.deps.prepare ?? ((candidate, input, checked) => prepareEmployeeTextCandidate({ ...this.deps, callSessionId, onUsage }, candidate, input, checked)))(agent, request, checkedSignal), checkedSignal);
     } finally {
       clearTimeout(timer);
     }

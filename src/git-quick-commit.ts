@@ -22,9 +22,9 @@ import {
 } from "./types.js";
 
 /** provider 缺省值：无法识别时回落到 Claude。 */
-import { buildGeminiTextArgs,buildGrokTextArgs,buildPiTextArgs,buildQoderTextArgs,callConfiguredAiText,contentWithSystemPrompt,defaultProvider,normalizeAiText,runCliText,systemPromptArgsFrom,withOpsPersona,type QuickCommitAiOptions } from "./ai-text-runner.js";
+import { buildGrokTextArgs,buildPiTextArgs,buildQoderTextArgs,callConfiguredAiText,contentWithSystemPrompt,defaultProvider,normalizeAiText,runCliText,systemPromptArgsFrom,withOpsPersona,type QuickCommitAiOptions } from "./ai-text-runner.js";
 import { QuickCommitError } from "./command-error.js";
-export { assertGeminiTextCapability,callCliAiText,callConfiguredAiText,withOpsPersona } from "./ai-text-runner.js";
+export { callCliAiText,callConfiguredAiText,withOpsPersona } from "./ai-text-runner.js";
 export type { QuickCommitAiOptions } from "./ai-text-runner.js";
 export { QuickCommitError,type QuickCommitErrorCode } from "./command-error.js";
 
@@ -386,7 +386,7 @@ async function generateCommitMessage(
 ): Promise<string> {
   const { input, usedIteration } = await buildCommitPromptInput(cwd, options);
   const lang = language.trim() || "中文";
-  return callConfiguredAiText({ system: commitTaskLine(lang, usedIteration), prompt: input }, cwd, language, ai, (raw) => {
+  return callConfiguredAiText({ system: commitTaskLine(lang, usedIteration), prompt: input }, cwd, language, { ...ai, purpose: "git-commit" }, (raw) => {
     const message = normalizeAiText(raw);
     if (!message) throw new QuickCommitError("AI 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
     return message;
@@ -446,7 +446,7 @@ async function generateCommitMessageWithTag(
 
 请严格输出**单行 JSON 对象**，不要 Markdown 代码块、不要任何解释文字、不要多余引号。格式：
 {"message":"...","tag":"v1.2.3"}`;
-  return callConfiguredAiText({ system, prompt: `${tagHint}\n\n${input}` }, cwd, language, ai, (raw) => {
+  return callConfiguredAiText({ system, prompt: `${tagHint}\n\n${input}` }, cwd, language, { ...ai, purpose: "git-tag" }, (raw) => {
     const parsed = tryParseJson(raw);
     // Preserve the plain-message fallback for older CLIs that do not return JSON.
     const message = normalizeAiText(parsed && typeof parsed.message === "string" ? parsed.message : raw);
@@ -513,7 +513,7 @@ async function generateTagAfterCommit(
 请用${lang}思考但严格输出**单行 JSON 对象**，不要 Markdown 代码块、不要任何解释文字、不要多余引号。格式：
 {"tag":"v1.2.3"}`;
   const prompt = `${tagHint}\n\ncommit message：${commitMessage}\n\ngit diff：\n${diff}`;
-  return callConfiguredAiText({ system, prompt }, cwd, language, ai, (raw) => {
+  return callConfiguredAiText({ system, prompt }, cwd, language, { ...ai, purpose: "git-tag" }, (raw) => {
     const parsed = tryParseJson(raw);
     const suggested = sanitizeSuggestedTag(parsed && typeof parsed.tag === "string" ? parsed.tag : raw);
     if (!suggested) throw new QuickCommitError("AI 没有给出合法的 tag，请手动填写。", "INVALID_AI_TAG");
@@ -978,6 +978,23 @@ async function getLatestTagAtHead(cwd: string): Promise<string | undefined> {
 }
 
 async function runQuickCommitFallbackCli(opts: QuickCommitOptions, priorError: string): Promise<QuickCommitResult> {
+  const trace = opts.traceFactory?.start("git-fallback", buildFallbackPrompt(opts, priorError), opts.cwd);
+  const candidate = { provider: defaultProvider(opts.provider), engine: "cli" as const, model: opts.model ?? undefined, thinkingEffort: opts.thinkingEffort ?? undefined };
+  try {
+    if (trace) opts.onCallSessionCreated?.(trace.sessionId);
+    trace?.candidateStarted(candidate);
+    const result = await runQuickCommitFallbackCliImpl(opts, priorError);
+    trace?.applicationResult(result);
+    trace?.complete();
+    return result;
+  } catch (error) {
+    trace?.candidateFailed(candidate, error, "execution");
+    trace?.fail(error);
+    throw error;
+  }
+}
+
+async function runQuickCommitFallbackCliImpl(opts: QuickCommitOptions, priorError: string): Promise<QuickCommitResult> {
   await assertGitWorkTreeAsync(opts.cwd);
   const beforeHead = await getHead(opts.cwd);
   const request = withOpsPersona(buildFallbackPrompt(opts, priorError), opts.opsPersona);
@@ -1019,12 +1036,6 @@ async function runQuickCommitFallbackCli(opts: QuickCommitOptions, priorError: s
     });
   } else if (provider === "pi") {
     await runCliText("pi", buildPiTextArgs(request, opts, true), "", {
-      cwd: opts.cwd,
-      timeoutMs: QUICK_COMMIT_CLI_TIMEOUT_MS,
-      inheritEnv: opts.inheritEnv,
-    });
-  } else if (provider === "gemini") {
-    await runCliText("gemini", buildGeminiTextArgs(opts, true), contentWithSystemPrompt("gemini", request), {
       cwd: opts.cwd,
       timeoutMs: QUICK_COMMIT_CLI_TIMEOUT_MS,
       inheritEnv: opts.inheritEnv,

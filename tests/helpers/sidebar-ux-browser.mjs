@@ -4,6 +4,7 @@ import { once } from "node:events";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { BrowserCommandError, createDocumentEvaluator, waitForBrowserCondition } from "./browser-document.mjs";
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -26,11 +27,12 @@ export async function openBrowser(url, width = 1440, height = 1000) {
     const pending = new Map(); const errors = []; let sequence = 0;
     socket.addEventListener("message", event => {
       const response = JSON.parse(event.data);
+      documentEvaluator.observe(response);
       if (response.method === "Runtime.exceptionThrown") errors.push(response.params.exceptionDetails.exception?.description ?? response.params.exceptionDetails.text);
       const request = pending.get(response.id);
       if (!request) return;
       pending.delete(response.id); clearTimeout(request.timer);
-      if (response.error) request.reject(new Error(`Browser command rejected: ${request.method}: ${response.error.message}`));
+      if (response.error) request.reject(new BrowserCommandError(request.method, response.error));
       else request.resolve(response.result);
     });
     const send = (method, params = {}) => new Promise((resolve, reject) => {
@@ -38,15 +40,9 @@ export async function openBrowser(url, width = 1440, height = 1000) {
       const timer = setTimeout(() => { pending.delete(id); reject(new Error("Browser deadline: " + method)); }, 15000);
       pending.set(id, { method, timer, resolve, reject }); socket.send(JSON.stringify({ id, method, params }));
     });
-    const evaluate = async expression => {
-      const result = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
-      if (result.exceptionDetails) throw new Error("Browser evaluation failed");
-      return result.result.value;
-    };
-    const wait = async (expression, label = "DOM ready") => {
-      for (let i = 0; i < 150; i++) { if (await evaluate(expression)) return; await pause(40); }
-      throw new Error("Browser condition missing: " + label);
-    };
+    const documentEvaluator = createDocumentEvaluator(send);
+    const evaluate = documentEvaluator.evaluate;
+    const wait = (expression, label = "DOM ready") => waitForBrowserCondition(evaluate, expression, label);
     const settle = async () => {
       // rc-trigger stages visibility, measurement, alignment and motion across frames.
       // Two frames can observe a submenu before its CSS/align prepare phase completes.
@@ -79,6 +75,8 @@ export async function openBrowser(url, width = 1440, height = 1000) {
       writeFileSync(path, Buffer.from(shot.data, "base64"));
     };
     await send("Runtime.enable"); await send("Page.enable");
+    const { frameTree } = await send("Page.getFrameTree");
+    documentEvaluator.setMainFrame(frameTree.frame.id);
     await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
     await send("Page.bringToFront");
     return { send, evaluate, wait, click, key, settle, screenshot, errors,

@@ -41,7 +41,7 @@ test("Ant Design task pages preserve date-only, portals, draft refs and owned fo
     import { MilestonePicker } from "./src/web-ui/react/milestones/picker";
     import { TaskDatePicker, TaskTextArea, TaskForm } from "./src/web-ui/react/issues/form-controls";
     import { NewSessionHost } from "./src/web-ui/react/new-session/host";
-    import { configureNewSessionRuntime, newSessionController } from "./src/web-ui/react/new-session/controller";
+    import { configureNewSessionRuntime, newSessionController, newSessionStore } from "./src/web-ui/react/new-session/controller";
     import { FolderPickerHost } from "./src/web-ui/react/folder-picker/host";
     import { configureFolderPickerRuntime, folderPickerController } from "./src/web-ui/react/folder-picker/controller";
     import { MemoryFolderPickerRepository } from "./src/web-ui/react/folder-picker/memory-repository";
@@ -72,6 +72,7 @@ test("Ant Design task pages preserve date-only, portals, draft refs and owned fo
     const task = { id:"t1", identifier:"TASK-1", title:"Actual task card", description:("Full inline description with details. ").repeat(60), labels:["UI","Regression","Complete"], workspaceId:"w1", workspaceTaskId:"wt1", workspace:{id:"w1",name:"Project",cwd:"/tmp"}, milestone:{id:"m1",name:"Iteration"}, milestoneId:"m1", status:"doing", priority:"high", dueDate:"2028-02-29", parentTaskId:null, createdAt:"2026-01-01", updatedAt:"2026-01-01", sortOrder:0, sessions:[{id:"s1",provider:"codex",model:"gpt-5",title:"Real session " + "long-unbroken-directory-name/".repeat(12),status:"idle",sessionKind:"structured",cwd:"/tmp/worktree",thinkingEffort:"high"}], agent:null };
     window.tasks = { selection:"", date:"", refs:false, chosen:"", saved:null, requests:[], deferred:null, employees:[], teams:[{id:"audit-team",name:"审计团队",description:"只读验收",instructions:"",requirePlanApproval:true,maxSteps:8,createdAt:"2026-01-01",updatedAt:"2026-01-01",members:[{id:"m1",name:"负责人",duty:"拆解与验收",isLeader:true,agents:[agent],agent}]}], board:null, baseTask:task, boardTasks:null, teamRun:null };
     window.tasks.board = () => taskBoardStore.getSnapshot();
+    window.tasks.creation = () => newSessionStore.getSnapshot();
     const milestones = [{id:"m1",name:"Iteration",workspaceId:"w1",isDefault:false,taskCount:1},{id:"m0",name:"Default",workspaceId:null,isDefault:true,taskCount:0}];
     globalThis.fetch = async (input, init) => {
       const url=String(input); window.tasks.requests.push({url,method:init?.method??"GET"});
@@ -83,6 +84,7 @@ test("Ant Design task pages preserve date-only, portals, draft refs and owned fo
       }
       if (url.includes("/pi-execution/")) return new Response(JSON.stringify({toolId:"execution-real",toolName:"subagent",input:{workflow:"fixture"},script:"Read-only fixture script",snapshot:{version:1,source:"tool-result",mode:"workflow",state:"completed",inventoryComplete:true,nodes:[{id:"real-parent",label:"Actual parent",kind:"step",state:"completed",task:"Parent task"},{id:"real-child",parentId:"real-parent",label:"Actual child",kind:"step",state:"failed",task:"Child task",error:"Fixture node failed"}],trace:[],omittedNodes:0,omittedTrace:0}}),{status:200,headers:{"content-type":"application/json"}});
       if (init?.method && init.method!=="GET") throw new Error("Unexpected fixture HTTP mutation: "+url);
+      if (url==='/api/workspace-tasks/wt1') return new Response(JSON.stringify({id:'wt1',workspaceId:'w1',name:'Worktree task',cwd:'/tmp/.worktrees/feature',status:'active',archived:false,sessions:[],layout:null,worktree:null}),{status:200,headers:{'content-type':'application/json'}});
       let data = url.includes("provider-usage")?{}:url.includes("silicon-employees")?{employees:window.tasks.employees}:url.includes("ai-teams")?window.tasks.teams:url.includes("workspaces")?[{id:"w-audit",name:"Audit project",cwd:"/tmp",kind:"project"}]:url.includes("wand-milestones")?{milestones}:url.includes("team-runs")?[]:url.includes("models")?{models:[{id:"default",label:"Default"},{id:"alpha",label:"Alpha"}]}:{};
       return new Response(JSON.stringify(data), {status:200,headers:{"content-type":"application/json"}});
     };
@@ -119,7 +121,7 @@ test("Ant Design task pages preserve date-only, portals, draft refs and owned fo
       React.useEffect(()=>{if(page!=="pi")return;piSettingsController.sync([{key:"pi",target:document.getElementById("pi-target"),toggleTarget:document.getElementById("pi-toggle"),sessionId:"s",draft:"",open:true,onSaved:noop,returnFocus:()=>document.getElementById("outside").focus()}]);return()=>piSettingsController.sync([])},[page]);
       return <><WandButton id="outside">Outside</WandButton>
       {page==="controls"&&<WandDialogSurface open={open} title="Task controls" testId="task-controls" onOpenChange={setOpen}><TaskForm style={{display:"flex",flexDirection:"column",gap:16}} onSubmit={event=>event.preventDefault()}><TaskTextArea ref={textarea} aria-label="Native ref" value="Draft" readOnly/><WandSelect searchable ariaLabel="Task model" popupOwner="task-controls" options={[{value:"a",label:"Alpha"},{value:"b",label:"Beta"}]} value={value} onValueChange={v=>{setValue(v);window.tasks.selection=v}}/><TaskDatePicker ariaLabel="Date only" popupOwner="task-controls" value={date} onValueChange={v=>{setDate(v);window.tasks.date=v}}/><MilestonePicker value="m1" workspaceId="w1" onChange={noop}/></TaskForm></WandDialogSurface>}
-      {page==="subject"&&<SubjectAudit/>}{page==="board"&&<TaskBoardHost/>}{page==="github"&&<GithubIssuesHost/>}{(page==="new"||page==="new-task")&&<NewSessionHost repository={newRepo}/>}{page==="folder"&&<FolderPickerHost repository={folders}/>}{page==="quick"&&<QuickCommitHost repository={quick}/>}{page==="merge"&&<WorktreeMergeHost repository={merge}/>}{page==="missions"&&<MissionsHost repository={missions}/>}{page==="dispatch"&&<Dispatch/>}{page==="team"&&<TeamRunView detail={detail} onChange={setDetail}/>}{page==="execution"&&<PiExecutionHost/>}{page==="pi"&&<><div id="pi-target"/><div id="pi-toggle"/><PiSettingsHost/></>}
+      {page==="subject"&&<SubjectAudit/>}{page==="board"&&<TaskBoardHost/>}{page==="github"&&<GithubIssuesHost/>}{(page==="new"||page==="new-task"||page==="board")&&<NewSessionHost repository={newRepo}/>}{page==="folder"&&<FolderPickerHost repository={folders}/>}{page==="quick"&&<QuickCommitHost repository={quick}/>}{page==="merge"&&<WorktreeMergeHost repository={merge}/>}{page==="missions"&&<MissionsHost repository={missions}/>}{page==="dispatch"&&<Dispatch/>}{page==="team"&&<TeamRunView detail={detail} onChange={setDetail}/>}{page==="execution"&&<PiExecutionHost/>}{page==="pi"&&<><div id="pi-target"/><div id="pi-toggle"/><PiSettingsHost/></>}
       </>;
     }
     createRoot(document.getElementById("root")).render(<PortalContainerProvider container={document.getElementById("wand-react-ui-portals")}><WandUiProvider><App/></WandUiProvider></PortalContainerProvider>);
@@ -399,6 +401,14 @@ test("Ant Design task pages preserve date-only, portals, draft refs and owned fo
       await wait("!!document.querySelector('[data-wand-popup-owner=task-board-context] [role=menuitem]')");
       await key('Escape'); await wait("!document.querySelector('[data-wand-popup-owner=task-board-context]')");
       assert.equal(await evaluate("!!document.querySelector('[data-task-id=t1]')"), true, `${mode}: menu Escape retains board`);
+      await click('[aria-label="任务菜单 TASK-1"]');
+      await wait("!!document.querySelector('[data-wand-popup-owner=task-board-context] [role=menuitem]:has([data-wand-icon=plus])')");
+      await click('[data-wand-popup-owner=task-board-context] [role=menuitem]:has([data-wand-icon=plus])');
+      await wait("!!document.querySelector('[data-testid=new-session-dialog]')");
+      assert.deepEqual(await evaluate("(()=>{const s=tasks.creation();return{workspaceId:s.workspaceId,workspaceTaskId:s.workspaceTaskId,initialCwd:s.initialCwd,taskName:s.taskName}})()"), {workspaceId:'w1',workspaceTaskId:'wt1',initialCwd:'/tmp/.worktrees/feature',taskName:'Worktree task'}, `${mode}: task context menu uses the workspace creation flow and real container cwd`);
+      assert.equal(await evaluate("!!document.querySelector('[data-testid=new-session-dialog] input[value^=\"team:\"]')"), false, `${mode}: bound task creation preserves workspace flow subject restrictions`);
+      await key('Escape'); await wait("!document.querySelector('[data-testid=new-session-dialog]')");
+      assert.equal(await evaluate("!!document.querySelector('[data-task-id=t1]')"), true, `${mode}: canceling session creation preserves the task`);
       await evaluate("document.querySelector('.task-board-card-open').focus()");
       await send('Input.dispatchKeyEvent',{type:'keyDown',key:'F10',code:'F10',modifiers:8,windowsVirtualKeyCode:121});
       await wait("!!document.querySelector('[data-wand-popup-owner=task-board-context]')");

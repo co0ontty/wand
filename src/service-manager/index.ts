@@ -22,6 +22,8 @@ export interface ServiceManager {
   unitPath(scope: ServiceScope): string;
   /** Command the installed unit runs, or null when absent/unreadable. */
   readEntrypoint(scope: ServiceScope): string | null;
+  /** Config used by the installed Server; restart must drain this exact process. */
+  readConfigPath(scope: ServiceScope): string | null;
 }
 
 /** The manager for the current platform, or null where Wand has no service integration. */
@@ -50,4 +52,8 @@ export function detectInstalledScope(): ServiceScope | null {
 
 export function readServiceEntrypoint(scope: ServiceScope): string | null {
   return currentServiceManager()?.readEntrypoint(scope) ?? null;
+}
+
+export function readServiceConfigPath(scope: ServiceScope): string | null {
+  return currentServiceManager()?.readConfigPath(scope) ?? null;
 }

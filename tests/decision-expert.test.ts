@@ -275,7 +275,7 @@ test("explicit cancellation during a backup stops later slots and ignores late r
 
 test("all employee roles share tool/model validation and retain legacy single-agent config", () => {
   const base = decisionExpertDefinition(new Date().toISOString());
-  for (const provider of ["claude", "codex", "opencode", "grok", "qoder", "pi", "gemini"] as const) {
+  for (const provider of ["claude", "codex", "opencode", "grok", "qoder", "pi"] as const) {
     const configured = { provider, model: "explicit-configured-model", kind: "structured", engine: "cli", thinkingEffort: "off", mode: "default" };
     const ordinary = parseSiliconEmployeeInput({ name: "ordinary", duty: "", prompt: "", agent: configured }, null, "now");
     for (const systemKey of [SYSTEM_EMPLOYEE_KEY, DEFAULT_EMPLOYEE_KEY, DECISION_EXPERT_KEY, "wand-speech-polisher"]) {

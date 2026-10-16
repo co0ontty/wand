@@ -1,0 +1,54 @@
+{
+  "blueprintId": "team_mv9elwhc0004rxhlvl-generated-blueprint",
+  "runId": "team_mv9elwhc0004rxhlvl",
+  "task": "按Captain已明确授权的最小接续完成原生第一批真实状态。读 /Users/co0ontty/Self/vibe_coding/wand/output/architecture-stage2/chat-ux-batch1/NATIVE-FACTS-HANDOFF.md。此前team全部结束，你唯一写入 /tmp/wand-chat-ux-batch1-poxnz8cu/macos；不改主仓、不重做已完成导航/工具实现，不反复完整扫ChatView。此次只补客户端已有服务端字段解码与ChatStore同步、真实当前回合阶段/工具/时长投影，以及review指出停止/失败无result时的活动卡终态。源码字段先用rg真实定位，不猜接口。保持旧数据兼容与原输入/权限/队列执行逻辑，不添加后端协议或状态机，不从正文/标题/参数关键词分类。锁仍在，只走一次正常scripts/run-tests.sh验证并如实记录；禁止xcodebuild/swiftc/改环境绕过。无模型调用、安装/服务重启、commit/reset/clean/push/tag。最终写output/chat-ux-batch1/NATIVE-FACTS.md并发非RADIO总结，明确未编译/未视觉/Beta，不能仅新增未接入helper。",
+  "playbookId": "generated-blueprint",
+  "playbookTitle": "Dynamic team blueprint",
+  "source": "generated",
+  "status": "draft",
+  "createdAt": 1792060598108,
+  "roles": [
+    {
+      "roleId": "native-runtime-facts",
+      "title": "补齐Mac运行事实展示链路",
+      "description": "源码已经有TurnNavigator和ChatPresentation，缺口见NATIVE-FACTS-HANDOFF：ConversationTurn.requestId、StructuredSessionState.phase/lastActivityAt、WS新事实未写回snapshot、PTY真实锚点。允许必要修改WandModels、ChatStore、真实WsData定义处、ChatPresentation、ChatView及对应tests/pbx登记，保持别人的Settings/Workspace/IM/WandAPI基线不动。先核对所有旧构造调用，新增可选字段要兼容；区分新请求/结束/缺字段，不用陈旧snapshot推断新一轮耗时，子代理与外源不参与当前动作，工具结果按ID退场。Native Timeline显示若需要周期重绘只能差分服务端锚点，不在首次挂载开始计时。真实字段不足宁可通用执行，但不要因为角色旧边界限制而继续跳过已授权接线。停止/失败无回执只影响当前活动，历史未知仍未知。源码修改后做符号/调用检查、plutil/diff-check、正常测试入口一次；维护锁阻挡不绕过。不声称正常脚本未执行的测试已通过。",
+      "capability": "coding",
+      "capabilityNeeds": [
+        "coding",
+        "tool_use",
+        "long_context"
+      ],
+      "tools": [
+        "bash",
+        "read",
+        "write",
+        "edit"
+      ],
+      "modelPreferences": [
+        "openai-codex/gpt-6-astra:high"
+      ]
+    }
+  ],
+  "rounds": [
+    {
+      "id": "collect",
+      "type": "parallel",
+      "roles": [
+        "native-runtime-facts"
+      ]
+    }
+  ],
+  "policy": {
+    "rationale": "A task-specific collaboration blueprint generated for the lead captain",
+    "strategy": "The lead captain generated this collaboration plan; the extension handles dispatch, communication, observation, and recording.",
+    "evidencePolicy": "Workers should separate cited evidence, inference, confidence, and missing information.",
+    "modelPolicy": "Use configured models that are objectively available; keep soft health observations visible.",
+    "synthesisPolicy": "The lead uses worker outputs as inputs and keeps final judgment outside the extension.",
+    "progressMilestones": [
+      "collect: parallel"
+    ],
+    "stopCriteria": "All planned rounds have returned a status and the run log is persisted."
+  },
+  "outputContract": "真实接线与精确源文件/测试增量、字段来源、实际验证/阻塞；终态卡与当前动作入口必须使用新投影；结果交Captain审查。",
+  "captainRationale": "A task-specific collaboration blueprint generated for the lead captain"
+}

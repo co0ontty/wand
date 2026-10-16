@@ -23,7 +23,7 @@ export interface NativeTitleHomes {
  * provider 自己在运行期写下的会话标题：
  * codex `session_index.jsonl` 的 thread_name、qoder 转录里的 ai-title、
  * OpenCode SQLite 的 session.title、grok `summary.json` 的 generated_title。
- * Claude / Pi / Gemini 没有这个入口，返回空串让调用方回退系统硅基员工。
+ * Claude / Pi 没有这个入口，返回空串让调用方回退系统硅基员工。
  */
 export async function readNativeSessionTitle(
   provider: SessionProvider,

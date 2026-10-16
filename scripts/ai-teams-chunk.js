@@ -1,5 +1,6 @@
 // AI 团队页 + 任务运行面板打成单独的按需脚本 content/ai-teams.js，不进内联的 scripts.js
-// （check-bundle-budget.js 第 5 条）。chunk 自己只带 CHUNK_FILES 与它们引用的纯数据模块；
+// （check-bundle-budget.js 的 lazy 硬上限与按需计量）。chunk 自己只带 CHUNK_FILES
+// 与它们引用的纯数据模块；
 // 引到 src/web-ui 其余模块和 react 的一律改成向主包要（globalThis.__wandAiTeamsHost），
 // 否则 taskBoardController、仓储、React 都会多出一份互不相通的实例。主包侧的注册表在
 // src/web-ui/react/ai-teams/host-bridge.tsx（由 lazy.tsx 按需加载），名字由 tests/web-ui-ai-teams.test.ts 核对。

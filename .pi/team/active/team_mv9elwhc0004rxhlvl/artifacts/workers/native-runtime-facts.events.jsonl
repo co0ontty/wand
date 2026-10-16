@@ -1,0 +1,221 @@
+{"at":1792060598145,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060598145,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060598145,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060598145,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060600121,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060604978,"phase":"worker-radio-report","message":"补齐Mac运行事实展示链路 reported to captain","preview":"RADIO: status=started, action=核对交接与隔离Mac工作树基线, evidence=none, blocker=none, next=定位模型解码与ChatStore事实同步"}
+{"at":1792060604978,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start read","toolName":"read"}
+{"at":1792060604985,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792060604985,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060604986,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060605653,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060613500,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060613500,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start bash","toolName":"bash"}
+{"at":1792060613500,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start read","toolName":"read"}
+{"at":1792060613500,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start read","toolName":"read"}
+{"at":1792060613507,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792060613508,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792060613691,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end bash failed","toolName":"bash","isError":true}
+{"at":1792060613691,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060613691,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060613691,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060613692,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060613692,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060613692,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060614408,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060620838,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060620839,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start read","toolName":"read"}
+{"at":1792060620839,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start read","toolName":"read"}
+{"at":1792060620839,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start read","toolName":"read"}
+{"at":1792060620839,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start bash","toolName":"bash"}
+{"at":1792060620846,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792060620847,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792060620847,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792060620904,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792060620904,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060620904,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060620904,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060620905,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060620905,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060620905,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060620905,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060620905,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060621602,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060626928,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060626929,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start bash","toolName":"bash"}
+{"at":1792060627004,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792060627005,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060627005,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060627674,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060635619,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060635620,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start read","toolName":"read"}
+{"at":1792060635620,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start read","toolName":"read"}
+{"at":1792060635620,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start read","toolName":"read"}
+{"at":1792060635620,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start read","toolName":"read"}
+{"at":1792060635620,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start read","toolName":"read"}
+{"at":1792060635620,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start read","toolName":"read"}
+{"at":1792060635624,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792060635624,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792060635624,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792060635625,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792060635625,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792060635626,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792060635626,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060635626,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060635627,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060635627,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060635627,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060635627,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060635627,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060635627,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060635628,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060635628,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060635628,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060635628,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060636352,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060667038,"phase":"worker-radio-report","message":"补齐Mac运行事实展示链路 reported to captain","preview":"RADIO: status=working, action=已定位WsData与服务端PTY锚点，采用权威structuredState替换和可辨缺失/空值的PTY同步, evidence=Wand/WandModels.swift:629;integration/src/session-transport.ts:84-85, blocker=首次rg包含不存在tests目录已纠正, next=增量接入投影与当前活动终态测试"}
+{"at":1792060667038,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start read","toolName":"read"}
+{"at":1792060667038,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start read","toolName":"read"}
+{"at":1792060667038,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start read","toolName":"read"}
+{"at":1792060667039,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start read","toolName":"read"}
+{"at":1792060667039,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start bash","toolName":"bash"}
+{"at":1792060667050,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792060667051,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792060667052,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792060667053,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792060667087,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792060667087,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060667087,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060667087,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060667088,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060667088,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060667088,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060667088,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060667088,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060667088,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060667088,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060667807,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060714645,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060714646,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start edit","toolName":"edit"}
+{"at":1792060714660,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1792060714660,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060714660,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060715341,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060740304,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060740304,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start edit","toolName":"edit"}
+{"at":1792060740314,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1792060740314,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060740315,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060740972,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060747721,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060747721,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start bash","toolName":"bash"}
+{"at":1792060747787,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792060747788,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060747788,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060748591,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060753281,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060753282,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start bash","toolName":"bash"}
+{"at":1792060753349,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792060753350,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060753350,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060754049,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060760810,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060760810,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start read","toolName":"read"}
+{"at":1792060760811,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start read","toolName":"read"}
+{"at":1792060760811,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start read","toolName":"read"}
+{"at":1792060760811,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start read","toolName":"read"}
+{"at":1792060760811,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start read","toolName":"read"}
+{"at":1792060760826,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792060760827,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792060760828,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792060760836,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792060760836,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792060760837,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060760837,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060760837,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060760837,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060760838,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060760838,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060760838,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060760838,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060760838,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060760838,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060761508,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060777906,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060777908,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start read","toolName":"read"}
+{"at":1792060777930,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792060777930,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060777931,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060778617,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060845168,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060845169,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start write","toolName":"write"}
+{"at":1792060845182,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end write","toolName":"write","isError":false}
+{"at":1792060845182,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060845183,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060846153,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060877036,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060877036,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start edit","toolName":"edit"}
+{"at":1792060877043,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1792060877043,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060877044,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060877738,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060885209,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060885210,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start edit","toolName":"edit"}
+{"at":1792060885230,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1792060885231,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060885231,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060885925,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060925042,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060925044,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start edit","toolName":"edit"}
+{"at":1792060925100,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1792060925100,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060925100,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060925788,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060953060,"phase":"worker-radio-report","message":"补齐Mac运行事实展示链路 reported to captain","preview":"RADIO: status=working, action=已接入真实入口的阶段/工具ID退场/服务端锚点计时及最新活动终态, evidence=Wand/ChatPresentation.swift;Wand/ChatView.swift;Wand/ChatStore.swift, blocker=尚未编译且维护锁禁止绕过, next=补充旧字段/WS换轮与源隔离回归并执行一次正常测试入口"}
+{"at":1792060953062,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start read","toolName":"read"}
+{"at":1792060953078,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792060953078,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060953078,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060953770,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060961311,"phase":"worker-budget-notice","message":"补齐Mac运行事实展示链路 reached soft request budget (18/18)"}
+{"at":1792060961311,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060961312,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start edit","toolName":"edit"}
+{"at":1792060961330,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1792060961330,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060961330,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060961331,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792060961331,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792060962094,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792061020981,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792061020982,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start edit","toolName":"edit"}
+{"at":1792061020999,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1792061020999,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792061020999,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792061021665,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792061027744,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792061027744,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start bash","toolName":"bash"}
+{"at":1792061027847,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end bash failed","toolName":"bash","isError":true}
+{"at":1792061027847,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792061027847,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792061028517,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792061038744,"phase":"worker-radio-report","message":"补齐Mac运行事实展示链路 reported to captain","preview":"RADIO: status=blocked, action=完成源码接线及回归用例，正常测试入口已尝试一次, evidence=plutil通过;git diff --check通过;scripts/run-tests.sh退出1, blocker=原生开发环境维护锁阻止构建，未编译未运行XCTest, next=写入NATIVE-FACTS.md并交付限制与证据"}
+{"at":1792061038745,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start read","toolName":"read"}
+{"at":1792061038745,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start read","toolName":"read"}
+{"at":1792061038745,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start bash","toolName":"bash"}
+{"at":1792061038758,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792061038760,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792061038788,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792061038788,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792061038788,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792061038789,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792061038789,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792061038789,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792061038789,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792061039485,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792061091363,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792061091363,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_start write","toolName":"write"}
+{"at":1792061091370,"phase":"worker-tool","message":"补齐Mac运行事实展示链路 tool_execution_end write","toolName":"write","isError":false}
+{"at":1792061091370,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792061091371,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended"}
+{"at":1792061092083,"phase":"worker-message-start","message":"补齐Mac运行事实展示链路 message started"}
+{"at":1792061103612,"phase":"worker-message-end","message":"补齐Mac运行事实展示链路 assistant message ended","preview":"## 结果 已在隔离 Mac lane 接入字段解码、WS 事实同步、真实阶段/工具/时长投影，以及当前活动停止/失败终态。保留既有导航与他人基线，新增 5 项回归测试。 ## 验证与限制 - `plutil`、`git diff --check` 通过。 - 正常测试入口仅运行一次，被维护锁阻挡，退出码 1。 - **未编译、未运行 XCTest、未视觉验收、未构建 Beta**；未绕过锁。 - 完整证据：`output/chat-ux-batch1/NATIVE-FACT"}

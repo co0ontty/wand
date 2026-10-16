@@ -1,4 +1,7 @@
 import { presentAssistantReply, presentChat, refreshChatPresentation } from "../react/chat/presentation.js";
+import { paintTurnNavigation } from "../react/chat/navigation/browser-host.js";
+import { buildTurnNavIndex, turnNavRange } from "../react/chat/navigation/turn-nav-model.js";
+import { jumpToChatTurn } from "../react/chat/navigation/turn-jump.js";
 import { mountBrowserButtons, updateBrowserButtonLabel } from "./library-buttons.js";
 import { state } from "./state";
 import { registerChatRuntime } from "./chat-render-runtime.js";
@@ -7,7 +10,7 @@ import { beginChatInteraction, chatViewLease, isChatLeaseCurrent, patchChatConte
 import type { ChatOwnerPlan, ChatViewLease } from "./chat-render-focus.js";
 import { t, getActiveLang, iconSvg } from "./i18n";
 import { escapeHtml, isImagePath, refreshTailMarqueePaths, renderTailMarqueePath } from "./utils";
-import { applyExpandedState, applyPersistedExpandState, bindChatScrollListener, buildExpandKey, clearChatUnread, getMessageKey, getPersistedAgentSelection, getPersistedExpandState, isChatNearBottom, observeLoadMoreSentinel, persistElementExpandState, refreshChatUnreadDivider, setPersistedExpandState, updateChatUnreadBubble } from "./chat-scroll";
+import { beginChatHistorySeek, applyExpandedState, applyPersistedExpandState, bindChatScrollListener, buildExpandKey, clearChatUnread, getMessageKey, getPersistedAgentSelection, getPersistedExpandState, isChatNearBottom, observeLoadMoreSentinel, persistElementExpandState, refreshChatUnreadDivider, setPersistedExpandState, updateChatUnreadBubble } from "./chat-scroll";
 import "./file-browser";
 import { buildMessagesForRender } from "./input";
 import { syncSessionProgressToNative } from "./notifications";
@@ -27,6 +30,7 @@ import { syncComposerCompanion } from "./composer-sender-adapter.js";
 import { parseJsonResponse } from "../react/http-adapter";
 import { activityLiveRow, commandOccurredAt, currentToolActivity, formatActivityElapsed, formatThinkingElapsed, groupToolActivities, isPlanTool, isToolActivityOnly, latestCommandOccurredAt, presentActivityBlock, thinkingRoundLabel, thinkingRounds, toolActivityTimeline, TOOL_ACTIVITY_KINDS } from "./tool-activity";
 import { isDecisionToolCall } from "../../decision-tool.js";
+import { activityLabel } from "../react/chat/activity-label.js";
 import { activityDetailText, activityFilePath, activityOpensFile } from "./tool-activity-detail.js";
 import { clearActivityTimelines, holdActivityTimeline, syncActivityTimelines } from "./tool-activity-timeline.js";
 import { extractToolResultImages, extractToolResultText, toolResultPreview } from "./tool-result-display.js";
@@ -79,6 +83,45 @@ let focusedAnchorPaint = 0;
 function renderMarkdown(text: string): string {
   const session = state.sessions.find(session => session.id === state.selectedId);
   return renderChatMarkdown(text, { cwd: session?.cwd, sessionId: state.selectedId || undefined });
+}
+
+function syncTurnNavigation(output: HTMLElement, session: any): void {
+  if (typeof HTMLElement === "undefined") return;
+  const view = session ? chatViewLease() : null;
+  if (!session || !view || !chatOwnerPlan) { paintTurnNavigation(output, null); return; }
+  const messages = state.currentMessages || [];
+  // Text uses the SAME user-body projection as the message renderer. Attachments,
+  // hidden block types and their paths are not copied into navigation previews.
+  const visibleText = (message: any): string => {
+    const content = typeof message.content === "string" ? [message.content]
+      : (message.content || []).filter((block: any) => block.type === "text").map((block: any) => block.text || "");
+    const template = document.createElement("template");
+    template.innerHTML = content.map(renderUserText).join("\n");
+    template.content.querySelectorAll(".user-attachments").forEach(node => node.remove());
+    return template.content.textContent || "";
+  };
+  const entries = buildTurnNavIndex(messages.map((message: any, index: number) => ({
+    ownerKey: chatOwnerPlan?.messages[index]?.key || null, visibleIndex: index,
+    role: message.role, notice: !!message.notice,
+    placeholder: Array.isArray(message.content) && message.content.some((block: any) => block.__processing || block.__queued),
+    visibleText: message.role === "user" && !message.notice ? visibleText(message) : "",
+  })));
+  const earlier = session.messageOffset > 0 || session.leadingBlockOffset > 0;
+  const omitted = messages.some((message: any, index: number) => message.role === "user" && !message.notice
+    && !chatOwnerPlan?.messages[index]);
+  paintTurnNavigation(output, { scope: String(view.id), entries, readingRoot: () => view.root,
+    range: turnNavRange(entries.length, earlier ? "available" : "none", omitted),
+    onJump(ownerKey) {
+      if (!isChatLeaseCurrent(view)) return false;
+      // Resolve against the latest committed render plan, never an old array index.
+      const index = chatOwnerPlan?.messages.findIndex(owner => owner?.key === ownerKey) ?? -1;
+      if (index < 0) return false;
+      beginChatHistorySeek(view.root);
+      state.chatRenderedCount = Math.max(state.chatRenderedCount, state.currentMessages.length - index);
+      renderChat(true);
+      return isChatLeaseCurrent(view) && jumpToChatTurn(view.root, ownerKey, "data-chat-owner");
+    },
+  });
 }
 
 function renderMessageKey(message: any, index: number): string {
@@ -478,6 +521,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
             state.lastRenderedEmpty = "none";
             state.lastRenderedMsgCount = 0;
           }
+          syncTurnNavigation(chatOutput, null);
           renderStructuredStatusBar(null, null);
           updateTodoProgress([]);
           state.chatRenderCache?.reset();
@@ -528,6 +572,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
           updateTodoProgress([]);
           state.chatRenderCache?.reset();
           if (typeof HTMLElement !== "undefined") retireChatTurnOwners();
+          syncTurnNavigation(chatOutput, null);
           return;
         }
 
@@ -593,6 +638,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
           updateTodoProgress(allMessages);
           cache.commit(plan);
           chatOwnerPlan?.commit();
+          syncTurnNavigation(chatOutput, selectedSession);
           refreshActivityElapsedLabels();
           return;
         }
@@ -853,6 +899,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         }
         cache.commit(plan);
         chatOwnerPlan?.commit();
+        syncTurnNavigation(chatOutput, selectedSession);
         state.lastRenderedMsgCount = msgCount;
         state.lastRenderedEmpty = null;
         refreshActivityElapsedLabels();
@@ -2254,8 +2301,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
       }
 
       function activityMarkHtml(className: string): string {
-        return '<span class="' + className + '" aria-hidden="true">' +
-          '<i></i>'.repeat(9) + '</span>';
+        return '<span class="' + className + '" aria-hidden="true">' + iconSvg("brain", { size: 14 }) + '</span>';
       }
 
       function renderActivityFold(items, role, toolResults, messageKey, segmentFirstIndex, options?: any) {
@@ -2268,7 +2314,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         // Android 最新运行组默认向下展开；Web 不按网络或设备分类。
         // 默认值每轮重新派生，绝不写进手动偏好；查详情/滚动会显式保留展开。
         var activityLive = !!opts.isTrailing && isTurnActivityLive(_currentMessageGlobalIndex);
-        var expanded = persisted ?? activityLive;
+        var expanded = persisted ?? true;
         // 全段只有一个活跃条目：没回执的调用优先，其次最后一轮思考。
         // 摘要的 running 标记与时间线行的 loading 都读它，两处不会同时闪。
         var liveRow = activityLiveRow(items, _currentActivitySessionBusy && _currentLatestPendingCommandId
@@ -2286,19 +2332,18 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
           var call = timeline[k];
           var block = call.block;
           var isThinking = block.type === "thinking";
-          var kind = block.activity?.kind || "other";
           var callScope = renderBlockScope(messageKey, call.index + segmentFirstIndex, block);
           var entryKey = buildExpandKey(isThinking ? "activity-thinking" : "activity-detail",
             [state.selectedId, groupKey, callScope]);
-          var entryOpen = activityDetailOpen.has(entryKey);
+          var entryOpen = isThinking ? getPersistedExpandState(entryKey) ?? true : activityDetailOpen.has(entryKey);
           var entryRunning = !!liveRow && block === liveBlock;
           var result = isThinking ? null : pickToolResultForDisplay(toolResults, block.id);
           var status = entryRunning ? "运行中" : result?.is_error ? "失败" : result ? "完成" : "未返回";
-          var itemLabel = isThinking ? thinkingRoundLabel(roundOf.get(call)) : block.activity?.label ||
-            (ACTIVITY_KIND_META[kind]?.item || "调用") + " · " + (block.name || "工具");
+          var presentation = isThinking ? null : activityLabel(block);
+          var itemLabel = isThinking ? thinkingRoundLabel(roundOf.get(call)) : presentation!.title;
           var occurredAt = isThinking ? block.occurredAt : block.activity?.occurredAt;
           var itemClock = occurredAt ? formatActivityEventTime(occurredAt) : "";
-          var inputPreview = isThinking ? "" : block.preview || "";
+          var inputPreview = presentation?.detail || "";
           // Task receipts repeat the title/status already shown by the progress owner.
           // Full receipts remain available on demand, including errors.
           var resultPreview = isPlanTool(block) && !result?.is_error ? "" : toolResultPreview(result);
@@ -2306,7 +2351,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
           if (entryOpen && expanded) {
             detailHtml = isThinking
               ? '<div class="chat-activity-thinking-content">' +
-                escapeHtml(block.thinking || "模型未提供可显示的思考正文。") + '</div>'
+                renderChatMarkdown(block.thinking || (entryRunning ? "正在思考…" : "模型未提供可显示的思考正文。")) + '</div>'
               : renderActivityEntryDetails({ calls: [call] }, toolResults, entryRunning, entryKey);
           }
           var entryState = result?.is_error ? "error" : entryRunning ? "running" : result || isThinking ? "complete" : "pending";
@@ -2315,6 +2360,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
               escapeHtml(JSON.stringify(block.id ? [String(block.id)] : []))) +
             '" data-file-entry="' + (activityOpensFile(block) ? "true" : "false") + '" data-expanded="' + (entryOpen ? "true" : "false") + '">' +
               '<button type="button" class="chat-call-button" data-label="' + escapeHtml(itemLabel) +
+                '" data-icon="' + escapeHtml(presentation?.icon || "brain") + '" data-context="' + escapeHtml(presentation?.context || "") +
                 '" data-preview="' + escapeHtml(inputPreview) + '" data-time="' + escapeHtml(itemClock) + '" data-occurred-at="' + escapeHtml(occurredAt || '') + '" data-result="' + escapeHtml(isThinking ? (entryRunning ? '思考中' : '已结束') : resultPreview || status) +
                 '" aria-expanded="' + (entryOpen ? "true" : "false") + '" onclick="__activityEntryToggle(this)">' + escapeHtml(itemLabel) + '</button>' +
               '<div class="chat-call-detail"' + (entryOpen ? '' : ' inert aria-hidden="true"') + '>' +
@@ -2434,6 +2480,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         var group = row.closest(".chat-activity");
         var detail = row.querySelector(".chat-call-detail");
         var nowExpanded = row.getAttribute("data-expanded") !== "true";
+        if (row.getAttribute("data-thinking-entry") === "true") setPersistedExpandState(key, nowExpanded);
         // Only opening a detail is a reading choice; closing it must release the drawer.
         if (group && nowExpanded) holdActivityTimeline(group);
         row.setAttribute("data-expanded", nowExpanded ? "true" : "false");

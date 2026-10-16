@@ -28,7 +28,6 @@ const PROVIDERS: Array<{ id: MissionProvider; label: string }> = [
   { id: "claude", label: "Claude" }, { id: "codex", label: "Codex" },
   { id: "opencode", label: "OpenCode" }, { id: "grok", label: "Grok" },
   { id: "qoder", label: "Qoder" }, { id: "pi", label: "Pi" },
-  { id: "gemini", label: "Gemini" },
 ];
 
 const STATE_LABELS: Record<string, string> = {

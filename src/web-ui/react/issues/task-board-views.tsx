@@ -777,6 +777,7 @@ export function TaskBoardContextMenu({
   onOpen,
   onCopy,
   onDispatch,
+  onNewSession,
   onArchive,
   onRestore,
   onClose,
@@ -787,6 +788,7 @@ export function TaskBoardContextMenu({
   onOpen(): void;
   onCopy(): void;
   onDispatch(): void;
+  onNewSession?(): void;
   /** 归档：卡片进归档目录，侧栏不再显示，终端与记录都保留。 */
   onArchive(): void;
   /** 恢复归档卡片：重建侧栏任务并带回它的终端。 */
@@ -804,6 +806,8 @@ export function TaskBoardContextMenu({
   const actions = [
     { key: "open", label: "打开", icon: <WandIcon name="folder"/>, onClick: onOpen },
     { key: "copy", label: "复制 ID", icon: <WandIcon name="copy"/>, onClick: onCopy },
+    ...(onNewSession ? [{ key: "new-session", label: "新建会话", icon: <WandIcon name="plus"/>,
+      disabled: task.status === "archived" || !task.workspaceTaskId, onClick: onNewSession }] : []),
     ...(task.status === "archived"
       ? [{ key: "restore", label: "恢复到等待认领", icon: <WandIcon name="resume"/>, onClick: onRestore }]
       : [

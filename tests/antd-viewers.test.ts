@@ -8,7 +8,7 @@ import { MarkdownPreview } from "../src/web-ui/react/file-preview/markdown.tsx";
 import {
   parseFilePreviewMarkdown,
   tokenizeFilePreviewMarkdownInline,
-} from "../src/web-ui/react/file-preview/model.ts";
+} from "../src/web-ui/react/file-preview/markdown-model.ts";
 
 const SHARED_SHEETS = [
   "src/web-ui/content/styles.css",
@@ -237,7 +237,7 @@ test("共享样式表没有接管任何被迁移的查看器控件", () => {
 });
 
 test("解析器与渲染器都没有第二套 HTML/正则实现", () => {
-  const model = sourceOf("src/web-ui/react/file-preview/model.ts");
+  const model = sourceOf("src/web-ui/react/file-preview/markdown-model.ts");
   assert.match(model, /from "marked"/);
   assert.ok(!/INLINE_MARKDOWN|startsMarkdownBlock|splitMarkdownRow/.test(model), "手写块/内联扫描器必须删除");
   for (const file of ["src/web-ui/react/file-preview/host.tsx", "src/web-ui/react/file-preview/markdown.tsx"]) {

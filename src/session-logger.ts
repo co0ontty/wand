@@ -1,6 +1,7 @@
 import { mkdirSync, rmSync, appendFileSync, writeFileSync, readFileSync, existsSync, statSync, renameSync, unlinkSync, openSync, readSync, closeSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { appendBoundedDiagnostic } from "./diagnostic-logs.js";
 import type { ConversationTurn, ExecutionMode } from "./types.js";
 
 /** Context passed alongside a shortcut key interaction for richer logging */
@@ -99,7 +100,10 @@ export class SessionLogger {
     this.totalBufferMaxBytes = positiveInteger(options.totalBufferMaxBytes, DEFAULT_TOTAL_BUFFER_MAX_BYTES);
     this.ptyLogMaxBytes = positiveInteger(options.ptyLogMaxBytes, PTY_LOG_MAX_SIZE);
     this.ptyLogMaxRotations = positiveInteger(options.ptyLogMaxRotations, PTY_LOG_MAX_ROTATIONS);
-    this.appendFile = options.appendFile ?? ((filePath, data) => appendFileSync(filePath, data));
+    this.appendFile = options.appendFile ?? ((filePath, data) => {
+      if (["structured-stdout.log", "structured-stderr.log", "structured-spawns.jsonl"].includes(path.basename(filePath))) appendBoundedDiagnostic(filePath, data);
+      else appendFileSync(filePath, data);
+    });
     try {
       mkdirSync(this.baseDir, { recursive: true });
     } catch {

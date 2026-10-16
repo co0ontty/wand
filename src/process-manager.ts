@@ -827,6 +827,9 @@ export class ProcessManager extends EventEmitter {
 
   async start(command: string, cwd: string | undefined, mode: ExecutionMode, initialInput?: string, opts?: ProcessStartOptions): Promise<SessionSnapshot> {
     if (this.disposed) throw new Error("ProcessManager has been disposed.");
+    if (opts?.provider != null && !isSessionProvider(opts.provider)) {
+      throw new Error(`不支持的终端 provider：${String(opts.provider)}`);
+    }
     const id = opts?.reuseId || randomUUID();
     // Host operations are keyed by session id, not by the manager record. A
     // second handshake must not adopt/forget a cancelled first incarnation.
@@ -874,7 +877,7 @@ export class ProcessManager extends EventEmitter {
           ai: resolveSystemAiContext({
             provider: groupProvider, runner: undefined, command: providerCliCommand(groupProvider),
             structuredState: undefined, selectedModel: null, thinkingEffort: opts?.thinkingEffort,
-          }, this.config, this.storage.getSystemSiliconEmployee(), this.free),
+          }, this.config, this.storage.getSystemSiliconEmployee(), this.free, { storage: this.storage }),
           cwd: resolveSessionCwd(cwd, this.config.defaultCwd),
           language: this.config.language,
         });
@@ -953,10 +956,10 @@ export class ProcessManager extends EventEmitter {
       ? getProviderCommandSessionId(provider, processedCommand)
         ?? getProviderCommandSessionId(provider, command)
       : null;
-    // Grok / Qoder / Gemini accept caller-selected IDs for new conversations. Assigning
+    // Grok / Qoder accept caller-selected IDs for new conversations. Assigning
     // one up front avoids depending on provider-specific TUI rendering to learn
     // the durable ID later.
-    const assignedProviderSessionId = !existingProviderSessionId && (provider === "grok" || provider === "qoder" || provider === "gemini")
+    const assignedProviderSessionId = !existingProviderSessionId && (provider === "grok" || provider === "qoder")
       ? randomUUID()
       : null;
     if (assignedProviderSessionId) {
@@ -1293,9 +1296,6 @@ export class ProcessManager extends EventEmitter {
     return this.providerHistory.deleteGrokHistoryFiles(sessionIds);
   }
 
-  deleteGeminiHistoryFiles(sessionIds: string[]): number {
-    return this.providerHistory.deleteGeminiHistoryFiles(sessionIds);
-  }
 
   private captureCodexSessionId(record: SessionRecord, options?: { allowTimeWindowFallback?: boolean }): boolean {
     if (record.provider !== "codex" || record.claudeSessionId) {
@@ -2542,19 +2542,6 @@ export class ProcessManager extends EventEmitter {
       return result;
     }
 
-    if (provider === "gemini") {
-      let result = command;
-      const trimmedModel = model?.trim();
-      if (trimmedModel && trimmedModel !== "default" && !/--model(?:\s|=)/.test(result) && !/(?:^|\s)-m(?:\s|$)/.test(result)) {
-        result += ` --model '${trimmedModel.replace(/'/g, "'\\''")}'`;
-      }
-      // Gemini CLI 没有 thinking 档位开关。approval mode 与其它 provider 的
-      // auto-approve 语义对齐，default 下让 TUI 自己弹确认。
-      if ((mode === "managed" || mode === "full-access" || mode === "auto-edit") && !/--approval-mode(?:\s|=)/.test(result) && !/(?:^|\s)-y(?:\s|$)/.test(result)) {
-        result += " --approval-mode yolo";
-      }
-      return result;
-    }
 
     const isClaudeCmd = /^(?:claude|npx\s+claude|[^\s]+\/claude)(?:\s|$)/.test(command);
     if (!isClaudeCmd) return command;

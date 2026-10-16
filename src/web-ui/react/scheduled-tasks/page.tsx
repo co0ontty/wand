@@ -1,7 +1,7 @@
 import * as React from "react";
-import { Alert, DatePicker, Empty, Flex, Form, Input, Spin, Tag, TimePicker, Typography } from "antd";
+import { Alert, DatePicker, Empty, Flex, Form, Input, Spin, Switch, TimePicker, Tooltip, Typography } from "antd";
 import dayjs from "dayjs";
-import type { ScheduledTaskDetail, ScheduledTaskInput, ScheduledTaskSummary, TaskSchedule } from "../../../scheduled-task-types.js";
+import type { ScheduledTaskInput, ScheduledTaskSummary, TaskSchedule, ScheduledTaskCalendarResponse, ScheduledTaskRunFactView } from "../../../scheduled-task-types.js";
 import { useSiliconEmployees } from "../agents/employee-repository.js";
 import { createRequestId, HttpResponseError } from "../http-adapter.js";
 import { installStyleSheet } from "../styles";
@@ -10,8 +10,18 @@ import { httpWorkspacesRepository } from "../workspaces/repository";
 import type { Workspace } from "../workspaces/types";
 import { SidebarToggleIcon } from "../shell/sidebar-toggle-icon";
 import { WandButton, WandIcon, WandIconButton, WandSelect, WandStretchTabs } from "../ui";
-import { usePopupDismiss } from "../ui/popup-lifecycle";
-import { scheduleDate, scheduleInputError, scheduleLabel, scheduleSaveUnknown, scheduleTimeZones, scheduledRunState, scheduledTaskState, WEEKDAYS } from "./model";
+import { hasOpenPopupSurface, usePopupDismiss } from "../ui/popup-lifecycle";
+import { WandDropdownMenu, WandDropdownMenuTrigger, WandDropdownMenuContent, WandDropdownMenuItem } from "../ui/dropdown-menu";
+import { ConversationMorphIcon } from "../conversations/controls";
+import { WandSearchField } from "../ui/search-field";
+import { useReducedMotion } from "../ui/motion-tokens";
+import { nextTask } from "../../../scheduled-task-agenda.js";
+import { addDateDays } from "../../../scheduled-task-activity.js";
+import { ScheduledPresentationProvider } from "./presentation-context";
+import { NextTaskPanel, TaskAgenda } from "./agenda-view";
+import { ScheduleCalendar } from "./calendar-view";
+import { ScheduledTaskDetails } from "./task-detail";
+import { scheduleInputError, scheduleSaveUnknown, scheduleTimeZones, WEEKDAYS } from "./model";
 import { scheduledTasksRepository, type ScheduledTaskPatch } from "./repository";
 import { scheduledTaskStyles } from "./styles";
 
@@ -19,6 +29,9 @@ if (typeof document !== "undefined") installStyleSheet("wand-scheduled-task-styl
 
 export interface ScheduledTasksPageProps {
   visible: boolean;
+  view?: "list" | "calendar";
+  calendarMode?: "month" | "week";
+  onCalendarModeChange?(mode: "month" | "week"): void;
   sidebarOpen?: boolean;
   onBack(): void;
   onOpenSidebar?(): void;
@@ -29,7 +42,7 @@ type Filter = "all" | "active" | "paused" | "finished";
 type PendingSave = { kind: "create"; input: ScheduledTaskInput } | { kind: "update"; id: string; patch: ScheduledTaskPatch };
 
 function newDraft(): ScheduledTaskInput {
-  return { requestId: createRequestId(), employeeId: "", workspaceId: "", prompt: "",
+  return { requestId: createRequestId(), title: "", employeeId: "", workspaceId: "", prompt: "",
     schedule: { kind: "once", runAt: dayjs().add(1, "hour").startOf("minute").toISOString() } };
 }
 
@@ -44,14 +57,32 @@ function sameSavedInput(task: ScheduledTaskSummary, patch: ScheduledTaskPatch): 
 }
 
 /** Keep the page and its draft mounted; only the visible page owns polling. */
-export function ScheduledTasksPage({ visible, sidebarOpen, onBack, onOpenSidebar, onOpenSession }: ScheduledTasksPageProps): React.ReactElement {
+export function ScheduledTasksPage({ visible, view = "list", calendarMode, onCalendarModeChange, sidebarOpen, onBack, onOpenSidebar, onOpenSession }: ScheduledTasksPageProps): React.ReactElement {
+  const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  const reduced = useReducedMotion();
+  const [localCalendarMode, setLocalCalendarMode] = React.useState<"month" | "week">("month");
+  const [clock, setClock] = React.useState(() => new Date());
+  const [query, setQuery] = React.useState("");
+  const [expanded, setExpanded] = React.useState<string[]>([]);
+  const [visited, setVisited] = React.useState<string[]>([]);
+  const viewRef = React.useRef(view); viewRef.current = view;
+  const expandedRef = React.useRef(expanded); expandedRef.current = expanded;
+  const [menuId, setMenuId] = React.useState("");
+  const [calendarFeed, setCalendarFeed] = React.useState<ScheduledTaskCalendarResponse | null>(null);
+  const [calendarWindow, setCalendarWindow] = React.useState(() => {
+    const from = dayjs().startOf("month").startOf("week").format("YYYY-MM-DD");
+    return { from, to: addDateDays(from, 41) };
+  });
+  const onRangeChange = React.useCallback((from: string, to: string) => setCalendarWindow(previous => previous.from === from && previous.to === to ? previous : { from, to }), []);
+  const selectCalendarTask = React.useCallback((id: string | null) => { setExpanded(id ? [id] : []); setCancelId(""); }, []);
+  React.useEffect(() => { setVisited(previous => [...new Set([...previous, ...expanded])]); }, [expanded]);
   const [tasks, setTasks] = React.useState<ScheduledTaskSummary[]>([]);
   const [loaded, setLoaded] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState("");
   const [actionError, setActionError] = React.useState("");
   const [filter, setFilter] = React.useState<Filter>("all");
-  const [mode, setMode] = React.useState<"list" | "form" | "history">("list");
+  const [mode, setMode] = React.useState<"list" | "form">("list");
   const [editing, setEditing] = React.useState<ScheduledTaskSummary | null>(null);
   const [draft, setDraft] = React.useState<ScheduledTaskInput>(newDraft);
   const draftBaseline = React.useRef(draft);
@@ -61,12 +92,15 @@ export function ScheduledTasksPage({ visible, sidebarOpen, onBack, onOpenSidebar
   const workspaceTrigger = React.useRef<HTMLButtonElement>(null);
   const [pendingSave, setPendingSave] = React.useState<PendingSave | null>(null);
   const [saving, setSaving] = React.useState(false);
+  const [saveResult, setSaveResult] = React.useState(false);
+  const [formFocus, setFormFocus] = React.useState(0);
   const [busyTask, setBusyTask] = React.useState("");
   const [cancelId, setCancelId] = React.useState("");
-  const [historyId, setHistoryId] = React.useState("");
-  const [detail, setDetail] = React.useState<ScheduledTaskDetail | null>(null);
+  const pageRef = React.useRef<HTMLElement>(null);
   const [documentVisible, setDocumentVisible] = React.useState(() => document.visibilityState !== "hidden");
   const loadRef = React.useRef<AbortController | null>(null);
+  const readAllowed = React.useRef(false); readAllowed.current = visible && documentVisible;
+  const refreshLatest = React.useRef<() => Promise<void>>(async () => {});
   const saveLock = React.useRef(false);
   const titleRef = React.useRef<HTMLHeadingElement>(null);
   const employeeData = useSiliconEmployees({ includeArchived: true, enabled: visible });
@@ -83,28 +117,29 @@ export function ScheduledTasksPage({ visible, sidebarOpen, onBack, onOpenSidebar
   }, []);
 
   const refresh = React.useCallback(async () => {
-    if (!visible || !documentVisible || loadRef.current) return;
+    if (!readAllowed.current || loadRef.current) return;
     const controller = new AbortController(); loadRef.current = controller;
     setLoading(true);
     try {
       const [taskResult, workspaceResult] = await Promise.allSettled([
-        scheduledTasksRepository.list(controller.signal), httpWorkspacesRepository.list(),
+        view === "calendar" ? scheduledTasksRepository.calendar(calendarWindow.from, calendarWindow.to, localZone, controller.signal) : scheduledTasksRepository.list(controller.signal), httpWorkspacesRepository.list(),
       ]);
       if (controller.signal.aborted) return;
-      if (taskResult.status === "fulfilled") { setTasks(taskResult.value); setLoaded(true); setError(""); }
-      else setError(errorText(taskResult.reason));
+      if (taskResult.status === "fulfilled") {
+        const result = taskResult.value;
+        if (Array.isArray(result)) { setTasks(result); setClock(new Date()); }
+        else { setCalendarFeed(result); setTasks(result.tasks); setClock(new Date(result.generatedAt)); }
+        setLoaded(true); setError("");
+      } else setError(view === "calendar" && taskResult.reason instanceof HttpResponseError && taskResult.reason.status === 404 ? "服务端尚不支持全局日历，请先更新服务端。已有计划不会受影响。" : errorText(taskResult.reason));
       if (workspaceResult.status === "fulfilled") {
         setWorkspaces(workspaceResult.value.filter(workspace => workspace.kind !== "global" && workspace.id !== "wand-global" && !!workspace.cwd?.trim()));
         setWorkspacesLoaded(true); setWorkspaceError("");
       } else setWorkspaceError(errorText(workspaceResult.reason));
-      if (mode === "history" && historyId) {
-        const next = await scheduledTasksRepository.detail(historyId, controller.signal);
-        if (!controller.signal.aborted) setDetail(next);
-      }
     } catch (cause) { if (!controller.signal.aborted) setError(errorText(cause)); }
     finally { if (loadRef.current === controller) { loadRef.current = null; setLoading(false); } }
-  }, [visible, documentVisible, mode, historyId]);
+  }, [visible, documentVisible, view, calendarWindow.from, calendarWindow.to, localZone]);
 
+  refreshLatest.current = refresh;
   React.useEffect(() => {
     if (!visible || !documentVisible) return undefined;
     void refresh();
@@ -121,23 +156,40 @@ export function ScheduledTasksPage({ visible, sidebarOpen, onBack, onOpenSidebar
   React.useEffect(() => {
     if (!visible) return undefined;
     const key = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
-      event.preventDefault(); back();
+      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing || hasOpenPopupSurface()) return;
+      if (mode === "form") { event.preventDefault(); back(); return; }
+      if (expanded.length) { event.preventDefault(); setExpanded([]); pageRef.current?.querySelector<HTMLButtonElement>(`[data-scheduled-task-id="${expanded[0]}"] .scheduled-task-title-button`)?.focus({ preventScroll: true }); }
+      else { event.preventDefault(); back(); }
     };
     document.addEventListener("keydown", key);
     return () => document.removeEventListener("keydown", key);
-  }, [visible, back]);
+  }, [visible, back, expanded, mode]);
 
+  React.useLayoutEffect(() => {
+    if (!visible) return;
+    let cancelled = false;
+    const cancel = () => { cancelled = true; };
+    const input = pageRef.current?.querySelector<HTMLInputElement>("#scheduled-task-name");
+    const focus = () => { if (!cancelled && input && getComputedStyle(input).visibility === "visible") input.focus({ preventScroll: true }); };
+    const frame = requestAnimationFrame(() => {
+      if (mode !== "form") { titleRef.current?.focus({ preventScroll: true }); return; }
+      const shell = pageRef.current?.querySelector<HTMLElement>(".scheduled-editor-shell");
+      shell?.scrollIntoView({ block: "start", behavior: "instant" });
+      if (input && getComputedStyle(input).visibility === "visible") focus();
+      else void Promise.allSettled(shell?.getAnimations().map(animation => animation.finished) ?? []).then(focus);
+    });
+    document.addEventListener("pointerdown", cancel, true); document.addEventListener("keydown", cancel, true);
+    return () => { cancelled = true; cancelAnimationFrame(frame); document.removeEventListener("pointerdown", cancel, true); document.removeEventListener("keydown", cancel, true); };
+  }, [visible, mode, formFocus]);
   React.useEffect(() => {
-    if (visible) titleRef.current?.focus({ preventScroll: true });
-  }, [visible, mode]);
+    if (visible && view === "calendar") { setFilter("all"); setQuery(""); setExpanded([]); setMenuId(""); setCancelId(""); setMode("list"); }
+  }, [visible, view]);
 
   const mergeTask = (task: ScheduledTaskSummary): void => {
     setTasks(previous => [task, ...previous.filter(item => item.id !== task.id)]);
-    setDetail(previous => previous?.task.id === task.id ? { ...previous, task } : previous);
   };
 
-  const draftDirty = (): boolean => draft.employeeId !== draftBaseline.current.employeeId || draft.workspaceId !== draftBaseline.current.workspaceId || draft.prompt !== draftBaseline.current.prompt
+  const draftDirty = (): boolean => draft.title !== draftBaseline.current.title || draft.employeeId !== draftBaseline.current.employeeId || draft.workspaceId !== draftBaseline.current.workspaceId || draft.prompt !== draftBaseline.current.prompt
     || JSON.stringify(draft.schedule) !== JSON.stringify(draftBaseline.current.schedule);
   const discardBeforeSwitch = async (): Promise<boolean> => {
     if (draftSwitchLock.current || saving || pendingSave) return false;
@@ -152,26 +204,26 @@ export function ScheduledTasksPage({ visible, sidebarOpen, onBack, onOpenSidebar
       if (!await discardBeforeSwitch()) return;
       const next = newDraft(); draftBaseline.current = next; setDraft(next); setEditing(null);
     }
-    setFormError(""); setMode("form");
+    setExpanded([]); setFormError(""); setSaveResult(false); setMode("form"); setFormFocus(value => value + 1);
     setWorkspaceFieldError("");
   };
   const edit = async (task: ScheduledTaskSummary): Promise<void> => {
     if (pendingSave) { setMode("form"); return; }
-    if (editing?.id === task.id) { setMode("form"); return; }
+    if (editing?.id === task.id) { setMode("form"); setFormFocus(value => value + 1); return; }
     if (!await discardBeforeSwitch()) return;
-    const next = { requestId: createRequestId(), employeeId: task.employeeId, workspaceId: task.workspaceId ?? "", prompt: task.prompt, schedule: task.schedule };
-    draftBaseline.current = next; setEditing(task); setDraft(next);
-    setFormError(""); setMode("form");
+    const next = { requestId: createRequestId(), title: task.title, employeeId: task.employeeId, workspaceId: task.workspaceId ?? "", prompt: task.prompt, schedule: task.schedule };
+    draftBaseline.current = next; setEditing(task); setDraft(next); setExpanded([]);
+    setFormError(""); setSaveResult(false); setMode("form"); setFormFocus(value => value + 1);
     setWorkspaceFieldError("");
   };
 
   const saved = (task: ScheduledTaskSummary): void => {
     invalidateRead();
-    const next = newDraft(); draftBaseline.current = next;
-    mergeTask(task); setPendingSave(null); setEditing(null); setDraft(next); setFormError(""); setWorkspaceFieldError(""); setMode("list");
+    const next = { ...draft, title: task.title }; draftBaseline.current = next;
+    mergeTask(task); setPendingSave(null); setEditing(task); setDraft(next); setFormError(""); setWorkspaceFieldError(""); setSaveResult(true); void refreshLatest.current();
   };
   const save = async (): Promise<void> => {
-    if (saveLock.current) return;
+    if (saveLock.current || saveResult) return;
     if (!pendingSave) {
       const problem = scheduleInputError(draft);
       if (problem) {
@@ -191,7 +243,7 @@ export function ScheduledTasksPage({ visible, sidebarOpen, onBack, onOpenSidebar
     invalidateRead();
     const request = pendingSave ?? (editing ? { kind: "update" as const, id: editing.id, patch: {
       revision: editing.revision, employeeId: draft.employeeId, workspaceId: draft.workspaceId, prompt: draft.prompt, schedule: draft.schedule,
-      title: draft.prompt.trim().split("\n")[0].slice(0, 80),
+      title: draft.title?.trim() || draft.prompt.trim().split("\n")[0].slice(0, 80),
       ...(editing.schedule.kind === "once" && !editing.nextRunAt ? { enabled: true } : {}),
     } } : { kind: "create" as const, input: { ...draft } });
     try {
@@ -218,91 +270,98 @@ export function ScheduledTasksPage({ visible, sidebarOpen, onBack, onOpenSidebar
     if (busyTask) return;
     setBusyTask(task.id); setActionError("");
     invalidateRead();
-    try { const updated = await scheduledTasksRepository.update(task.id, { revision: task.revision, ...patch }); invalidateRead(); mergeTask(updated); setCancelId(""); }
+    try { const updated = await scheduledTasksRepository.update(task.id, { revision: task.revision, ...patch }); invalidateRead(); mergeTask(updated); setCancelId(""); if (viewRef.current === "calendar" && expandedRef.current.includes(task.id)) setExpanded([]); void refreshLatest.current(); }
     catch (cause) {
       setActionError(cause instanceof HttpResponseError && cause.status === 409 ? "计划已在其他页面修改，请核对最新状态后重试。" : errorText(cause));
-      void refresh();
+      void refreshLatest.current();
     } finally { setBusyTask(""); }
   };
 
-  const history = (task: ScheduledTaskSummary): void => { setHistoryId(task.id); setDetail(null); setMode("history"); };
-  const shown = tasks.filter(task => filter === "all" || (filter === "finished" ? Boolean(task.cancelledAt || !task.nextRunAt)
-    : filter === "paused" ? !task.cancelledAt && !task.enabled && Boolean(task.nextRunAt) : !task.cancelledAt && task.enabled && Boolean(task.nextRunAt)));
-  const pageTitle = mode === "form" ? editing ? "编辑定时任务" : "新建定时任务" : mode === "history" ? "执行记录" : "定时任务";
-  const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-  return <section className="scheduled-tasks-page" aria-label="定时任务" hidden={!visible} inert={!visible} style={{ display: visible ? undefined : "none" }}>
-    <Flex component="header" className="scheduled-tasks-header" align="center" justify="space-between" gap="small">
-      <Flex align="center" gap="small">
-        {onOpenSidebar ? <WandIconButton aria-label={sidebarOpen ? "关闭列表" : "打开列表"} onClick={onOpenSidebar}><SidebarToggleIcon open={!!sidebarOpen}/></WandIconButton> : null}
-        <WandIconButton aria-label={mode === "list" ? "返回会话" : "返回定时任务"} onClick={back} disabled={saving || !!busyTask}><WandIcon name="back"/></WandIconButton>
-        <h1 ref={titleRef} tabIndex={-1}>{pageTitle}</h1>
-      </Flex>
-      {mode === "list" ? <WandButton kind="primary" onClick={startNew}><WandIcon name="plus" size={16}/>新建定时任务</WandButton> : null}
-    </Flex>
-    <div className="scheduled-tasks-body"><div className="scheduled-tasks-content">
-      {mode === "list" ? <>
-        <Typography.Paragraph type="secondary" className="scheduled-tasks-intro">选择员工和工作区、写好提示词，Wand 会在指定时间自动执行。每次执行都会创建独立会话，显示在所选工作区的会话列表中。服务需要保持运行。</Typography.Paragraph>
-        <Flex justify="space-between" align="center" gap="small" className="scheduled-tasks-tools">
-          <WandStretchTabs ariaLabel="定时任务筛选" value={filter} onValueChange={value => setFilter(value as Filter)}
-            tabs={[{ value: "all", label: "全部" }, { value: "active", label: "待执行" }, { value: "paused", label: "已暂停" }, { value: "finished", label: "已结束" }]}/>
-          <WandButton kind="ghost" size="small" disabled={loading} onClick={() => void refresh()}><WandIcon name="refresh" size={14}/>刷新</WandButton>
+  const counts = {
+    all: tasks.length, active: tasks.filter(task => !task.cancelledAt && task.enabled && task.nextRunAt).length,
+    paused: tasks.filter(task => !task.cancelledAt && !task.enabled && task.nextRunAt).length,
+    finished: tasks.filter(task => task.cancelledAt || !task.nextRunAt).length,
+  };
+  const shown = tasks.filter(task => (filter === "all" || (filter === "finished" ? Boolean(task.cancelledAt || !task.nextRunAt)
+    : filter === "paused" ? !task.cancelledAt && !task.enabled && Boolean(task.nextRunAt) : !task.cancelledAt && task.enabled && Boolean(task.nextRunAt)))
+    && (!query.trim() || [task.title, task.prompt, task.employeeName, task.workspaceName].join(" ").toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())));
+  const toggleRow = (id: string) => { setExpanded(previous => previous.includes(id) ? previous.filter(item => item !== id) : [...previous, id]); setCancelId(""); };
+  const busy = saving || !!busyTask || !!pendingSave;
+  const renderActions = (task: ScheduledTaskSummary): React.ReactNode => <div className="scheduled-task-actions">
+    {task.nextRunAt && !task.cancelledAt ? <Tooltip title={task.enabled ? "暂停计划（不停止当前执行）" : "恢复计划"}>
+      <span className="scheduled-switch-hitbox"><Switch size="small" checked={task.enabled} aria-label={`${task.enabled ? "暂停" : "恢复"}${task.title}`}
+        disabled={busy || !task.enabled && !!(task.employeeUnavailableReason || task.workspaceUnavailableReason)}
+        loading={busyTask === task.id} onChange={enabled => void changeTask(task, { enabled })}/></span>
+    </Tooltip> : <span className="scheduled-switch-placeholder" aria-hidden/>}
+    <WandDropdownMenu open={menuId === task.id} onOpenChange={open => setMenuId(open ? task.id : "")}>
+      <WandDropdownMenuTrigger render={<WandIconButton aria-label={`${task.title}的更多操作`} disabled={saving}><WandIcon name="more"/></WandIconButton>}/>
+      <WandDropdownMenuContent align="end" popupOwner={`scheduled-actions-${task.id}`}>
+        {task.lastRun?.sessionId && <WandDropdownMenuItem onSelect={() => onOpenSession(task.lastRun!.sessionId!)}>查看会话</WandDropdownMenuItem>}
+        <WandDropdownMenuItem onSelect={() => setExpanded(previous => previous.includes(task.id) ? previous : [...previous, task.id])}>执行记录</WandDropdownMenuItem>
+        {!task.cancelledAt && <><WandDropdownMenuItem disabled={busy} onSelect={() => { void edit(task); }}>编辑任务</WandDropdownMenuItem>
+          {task.nextRunAt && <WandDropdownMenuItem disabled={busy || !task.enabled && !!(task.employeeUnavailableReason || task.workspaceUnavailableReason)} onSelect={() => void changeTask(task, { enabled: !task.enabled })}>{task.enabled ? "暂停计划" : "恢复计划"}</WandDropdownMenuItem>}
+          <WandDropdownMenuItem disabled={busy} onSelect={() => { setExpanded(previous => previous.includes(task.id) ? previous : [...previous, task.id]); setCancelId(task.id); }}>取消计划</WandDropdownMenuItem></>}
+      </WandDropdownMenuContent>
+    </WandDropdownMenu>
+  </div>;
+  const renderDetails = (task: ScheduledTaskSummary, run?: ScheduledTaskRunFactView): React.ReactNode => <>
+    <ScheduledTaskDetails task={task} active={visible && mode === "list" && expanded.includes(task.id) && cancelId !== task.id} focusRun={run} onEdit={() => void edit(task)} onOpenSession={onOpenSession}/>
+    {cancelId === task.id && <div className="scheduled-inline-confirm" role="group" aria-label={`确认取消${task.title}`}>
+      <p>保留历史和当前执行，只取消后续安排？</p>
+      <WandButton kind="danger" size="small" loading={busyTask === task.id} disabled={!!busyTask} onClick={() => void changeTask(task, { cancelled: true })}>确认取消</WandButton>
+      <WandButton size="small" disabled={!!busyTask} onClick={() => setCancelId("")}>保留计划</WandButton>
+    </div>}
+  </>;
+  const pageTitle = view === "calendar" ? "全局日历" : "定时任务";
+  return <ScheduledPresentationProvider employees={employeeData.employees} now={clock} timeZone={localZone}>
+    <section ref={pageRef} className="scheduled-tasks-page" aria-label={pageTitle} hidden={!visible} inert={!visible} style={{ display: visible ? undefined : "none" }}>
+      <Flex component="header" className="scheduled-tasks-header" align="center" justify="space-between" gap="small">
+        <Flex align="center" gap="small">
+          {onOpenSidebar ? <WandIconButton aria-label={sidebarOpen ? "关闭列表" : "打开列表"} onClick={onOpenSidebar}><SidebarToggleIcon open={!!sidebarOpen}/></WandIconButton> : null}
+          <WandIconButton aria-label={mode === "form" ? `返回${pageTitle}` : "返回会话"} onClick={back} disabled={saving || !!busyTask}><WandIcon name="back"/></WandIconButton>
+          <h1 ref={titleRef} tabIndex={-1}>{pageTitle}</h1>
+          <span className="scheduled-global-scope-label">全部员工</span>
         </Flex>
-        {actionError ? <Alert type="error" showIcon title={actionError} role="alert"/> : null}
-        {error ? <Alert type="error" showIcon title={error} action={<WandButton size="small" onClick={() => void refresh()}>重新读取</WandButton>} role="alert"/> : null}
-        {!loaded && loading ? <Flex gap="small" align="center" role="status"><Spin size="small"/>正在读取定时任务…</Flex> : null}
-        {loaded && !shown.length ? <Empty className="scheduled-task-empty" image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description={tasks.length ? "这个筛选下还没有定时任务。" : "还没有定时任务。先选择一位员工，把想让它执行的内容写进去。"}/> : null}
-        <div className="scheduled-task-list">{shown.map(task => <div className="scheduled-task-row" key={task.id} data-scheduled-task-id={task.id}>
-          <div className="scheduled-task-main"><span className="scheduled-task-title">{task.title}</span>
-            <p className="scheduled-task-preview">{task.prompt}</p>
-            <Flex className="scheduled-task-meta" align="center"><Typography.Text>{task.employeeName}</Typography.Text><Tag>{scheduledTaskState(task)}</Tag></Flex>
-            <div className="scheduled-task-directory"><Typography.Text type="secondary">{task.workspaceName}</Typography.Text><Typography.Text code>{task.workspaceCwd || "目录不可用"}</Typography.Text></div>
-            {task.employeeUnavailableReason && !task.cancelledAt ? <Typography.Text type="danger">{task.employeeUnavailableReason}</Typography.Text> : null}
-            {task.workspaceUnavailableReason && !task.cancelledAt ? <Typography.Text type="danger">{task.workspaceUnavailableReason}</Typography.Text> : null}
-          </div>
-          <div className="scheduled-task-timing"><Typography.Text>{scheduleLabel(task.schedule)}</Typography.Text>
-            <Typography.Text type="secondary" className="scheduled-task-time">{task.nextRunAt && !task.cancelledAt ? `下次：${scheduleDate(task.nextRunAt)}` : task.cancelledAt ? "不再安排执行" : "暂无下次执行"}</Typography.Text>
-            {task.lastRun ? <Typography.Text type="secondary">最近：{scheduledRunState(task.lastRun)}</Typography.Text> : null}
-          </div>
-          <Flex gap={4} className="scheduled-task-actions">
-            {task.lastRun?.sessionId ? <WandButton size="small" onClick={() => onOpenSession(task.lastRun!.sessionId!)}>查看会话</WandButton> : null}
-            <WandButton size="small" onClick={() => history(task)}>执行记录</WandButton>
-            {!task.cancelledAt ? <><WandButton size="small" disabled={!!busyTask || !!pendingSave} onClick={() => edit(task)}>编辑</WandButton>
-              {task.nextRunAt ? <WandButton size="small" disabled={!!busyTask || !task.enabled && !!(task.employeeUnavailableReason || task.workspaceUnavailableReason)}
-                onClick={() => void changeTask(task, { enabled: !task.enabled })}>{busyTask === task.id ? "处理中…" : task.enabled ? "暂停" : "恢复"}</WandButton> : null}
-              {cancelId === task.id ? <><Typography.Text type="secondary">保留执行记录，停止后续计划？</Typography.Text><WandButton size="small" kind="danger" disabled={!!busyTask} onClick={() => void changeTask(task, { cancelled: true })}>确认取消</WandButton><WandButton size="small" disabled={!!busyTask} onClick={() => setCancelId("")}>保留计划</WandButton></>
-                : <WandButton size="small" kind="ghost" disabled={!!busyTask} onClick={() => setCancelId(task.id)}>取消计划</WandButton>}
-            </> : null}
-          </Flex>
-        </div>)}</div>
-      </> : mode === "form" ? <ScheduledTaskForm draft={draft} onChange={next => { setDraft(next); if (next.workspaceId !== draft.workspaceId) setWorkspaceFieldError(""); }} editing={editing} error={formError}
-        visible={visible} saving={saving} unknown={!!pendingSave} employeeData={employeeData} localZone={localZone}
-        workspaces={workspaces} workspaceLoading={!workspacesLoaded && loading} workspaceError={workspaceError} onReloadWorkspaces={() => void refresh()}
-        workspaceFieldError={workspaceFieldError} workspaceTrigger={workspaceTrigger}
-        onSave={() => void save()} onBack={back}/>
-      : <>
-        {error ? <Alert type="error" showIcon title={error} action={<WandButton size="small" onClick={() => void refresh()}>重新读取</WandButton>}/> : null}
-        {!detail ? <Flex align="center" gap="small" role="status"><Spin size="small"/>正在读取执行记录…</Flex> : <>
-          <Typography.Title level={4} className="scheduled-task-history-heading">{detail.task.title}</Typography.Title>
-          <Typography.Paragraph type="secondary">{detail.task.employeeName} · {scheduleLabel(detail.task.schedule)}</Typography.Paragraph>
-          <div className="scheduled-task-directory"><Typography.Text type="secondary">{detail.task.workspaceName}</Typography.Text><Typography.Text code>{detail.task.workspaceCwd || "目录不可用"}</Typography.Text></div>
-          <details style={{ marginBottom: 24 }}><summary>查看提示词</summary><p className="scheduled-task-prompt-detail">{detail.task.prompt}</p></details>
-          {!detail.runs.length ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有执行记录。到达计划时间后会显示在这里。"/> : detail.runs.map(run => <div key={run.id} className="scheduled-task-run">
-            <Flex justify="space-between" align="center" gap="small" wrap><Flex align="center" gap="small" wrap><Typography.Text className="scheduled-task-time">{scheduleDate(run.scheduledAt)}</Typography.Text><Tag>{scheduledRunState(run)}</Tag></Flex>
-              {run.sessionId ? <WandButton size="small" onClick={() => onOpenSession(run.sessionId!)}>查看会话</WandButton> : null}</Flex>
-            <div className="scheduled-task-directory"><Typography.Text type="secondary">执行目录</Typography.Text><Typography.Text code>{run.cwd || (run.cwd === undefined ? "旧记录未保留目录" : "未解析执行目录")}</Typography.Text></div>
-            {run.error ? <Typography.Paragraph type={run.executionStatus === "skipped" ? "secondary" : "danger"} className="scheduled-task-run-error">{run.error}</Typography.Paragraph> : null}
-          </div>)}
-        </>}
-      </>}
-    </div></div>
-  </section>;
+        <WandButton kind="primary" className="scheduled-create-trigger" aria-label={mode === "form" ? "收起编辑" : "新建定时任务"} aria-expanded={mode === "form"} disabled={saving || !!busyTask}
+          onClick={() => mode === "form" ? back() : void startNew()}><ConversationMorphIcon from="plus" to="close" active={mode === "form"}/><span className="scheduled-create-label">{mode === "form" ? "收起编辑" : "新建定时任务"}</span></WandButton>
+      </Flex>
+      <div className="scheduled-tasks-body"><div className="scheduled-tasks-content">
+        {actionError && <Alert type="error" showIcon title={actionError} role="alert" closable onClose={() => setActionError("")}/>}
+        {error && <Alert type="error" showIcon title={error} action={<WandButton size="small" onClick={() => void refresh()}>重新读取</WandButton>} role="alert"/>}
+        {employeeData.error && <Alert type="warning" showIcon title="员工资料暂时无法读取，日程仍保留。头像使用公共回退显示。"/>}
+        <div className="scheduled-editor-shell" data-open={mode === "form"} inert={mode !== "form"}><div>
+          <section className="scheduled-editor" aria-label={editing ? "编辑定时任务" : "新建定时任务"}>
+            <h2>{editing ? "编辑定时任务" : "新建定时任务"}</h2>
+            <ScheduledTaskForm draft={draft} onChange={next => { setSaveResult(false); setFormError(""); setDraft(next); if (next.workspaceId !== draft.workspaceId) setWorkspaceFieldError(""); }} editing={editing} error={formError}
+              visible={visible && mode === "form"} saving={saving} result={saveResult} unknown={!!pendingSave} backLabel={`返回${view === "calendar" ? "日历" : "列表"}`} employeeData={employeeData} localZone={localZone}
+              workspaces={workspaces} workspaceLoading={!workspacesLoaded && loading} workspaceError={workspaceError} onReloadWorkspaces={() => void refresh()}
+              workspaceFieldError={workspaceFieldError} workspaceTrigger={workspaceTrigger} onSave={() => void save()} onBack={back}/>
+          </section>
+        </div></div>
+        {view === "list" && <NextTaskPanel task={nextTask(tasks)} scene={!loaded && error ? "error" : !loaded && loading ? "loading" : "normal"}
+          hasTasks={!!tasks.length} reduced={reduced} onLocate={task => { setExpanded(previous => previous.includes(task.id) ? previous : [...previous, task.id]); }} onEdit={task => void edit(task)}/>}
+        <div className="scheduled-list-toolbar">
+          <WandStretchTabs ariaLabel="定时任务筛选" value={filter} onValueChange={value => { setFilter(value as Filter); setExpanded([]); setCancelId(""); setMenuId(""); }}
+            tabs={[{ value: "all", label: `全部 ${loaded ? counts.all : "—"}` }, { value: "active", label: `待执行 ${loaded ? counts.active : "—"}` }, { value: "paused", label: `已暂停 ${loaded ? counts.paused : "—"}` }, { value: "finished", label: `已结束 ${loaded ? counts.finished : "—"}` }]}/>
+          <div className="scheduled-search-tools"><WandSearchField value={query} onValueChange={value => { setQuery(value); setExpanded([]); setCancelId(""); }} placeholder="搜索任务或员工" label="搜索定时任务"/>
+            <Tooltip title="刷新"><WandIconButton aria-label="刷新定时任务" disabled={loading} onClick={() => void refresh()}><WandIcon name="refresh"/></WandIconButton></Tooltip></div>
+        </div>
+        {view === "calendar" ? <ScheduleCalendar tasks={shown} allTasks={tasks} feed={calendarFeed} loading={loading}
+          mode={calendarMode ?? localCalendarMode} onModeChange={onCalendarModeChange ?? setLocalCalendarMode} onRangeChange={onRangeChange}
+          active={visible && mode === "list"} selectedTaskId={expanded[0] ?? null} onSelectTask={selectCalendarTask} renderDetails={renderDetails} renderActions={renderActions}/>
+          : <>{!loaded && loading && <div role="status" className="scheduled-read-state"><Spin size="small"/>正在读取定时任务…</div>}
+            {loaded && !shown.length ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={tasks.length ? "没有匹配的定时任务。" : "还没有定时任务。"}/> : <TaskAgenda tasks={shown} expanded={expanded} visited={visited} onToggle={toggleRow} renderActions={renderActions} renderDetails={renderDetails}/>}
+          </>}
+        <footer className="scheduled-page-foot"><span className="scheduled-rule-note">每次执行独立创建会话；暂停或取消不停止当前执行。服务需保持运行。</span><span>{localZone}</span></footer>
+      </div></div>
+    </section>
+  </ScheduledPresentationProvider>;
 }
 
-function ScheduledTaskForm({ draft, onChange, editing, error, visible, saving, unknown, employeeData, workspaces, workspaceLoading, workspaceError, workspaceFieldError, workspaceTrigger, onReloadWorkspaces, localZone, onSave, onBack }: {
+function ScheduledTaskForm({ draft, onChange, editing, error, visible, saving, result, unknown, backLabel, employeeData, workspaces, workspaceLoading, workspaceError, workspaceFieldError, workspaceTrigger, onReloadWorkspaces, localZone, onSave, onBack }: {
   draft: ScheduledTaskInput; onChange(next: ScheduledTaskInput): void; editing: ScheduledTaskSummary | null; error: string;
-  visible: boolean; saving: boolean; unknown: boolean; employeeData: ReturnType<typeof useSiliconEmployees>; localZone: string;
+  visible: boolean; saving: boolean; result: boolean; unknown: boolean; backLabel: string; employeeData: ReturnType<typeof useSiliconEmployees>; localZone: string;
   workspaces: Workspace[]; workspaceLoading: boolean; workspaceError: string; onReloadWorkspaces(): void;
   workspaceFieldError: string; workspaceTrigger: React.RefObject<HTMLButtonElement | null>;
   onSave(): void; onBack(): void;
@@ -340,6 +399,7 @@ function ScheduledTaskForm({ draft, onChange, editing, error, visible, saving, u
     {employeeData.error ? <Alert type="error" showIcon title={`员工列表读取失败：${employeeData.error}`} action={<WandButton size="small" onClick={employeeData.reload}>重试</WandButton>}/> : null}
     {workspaceError ? <Alert type="error" showIcon title={`工作区读取失败：${workspaceError}`} action={<WandButton size="small" onClick={onReloadWorkspaces}>重试</WandButton>}/> : null}
     {error ? <Alert type={unknown ? "warning" : "error"} showIcon title={error} role="alert"/> : null}
+    <Form.Item label="任务名称（可选）" htmlFor="scheduled-task-name"><Input id="scheduled-task-name" value={draft.title ?? ""} maxLength={200} disabled={disabled} placeholder="留空时使用提示词首行" onChange={event => onChange({ ...draft, title: event.target.value })}/></Form.Item>
     <Form.Item label="执行员工" required help={editing?.employeeUnavailableReason || "使用这位员工当前的工具与模型配置。"}>
       <WandSelect ariaLabel="执行员工" placeholder={employeeData.loading ? "正在读取员工…" : "选择一位员工"}
         value={draft.employeeId || undefined} options={options} searchable searchPlaceholder="搜索员工"
@@ -358,7 +418,7 @@ function ScheduledTaskForm({ draft, onChange, editing, error, visible, saving, u
       {draft.workspaceId && !selectedWorkspace && !workspaceLoading ? <Typography.Text type="danger">{editing?.workspaceUnavailableReason || "原工作区当前不可用，请重新选择。"}</Typography.Text> : null}
     </Form.Item>
     <Form.Item label="执行提示词" htmlFor="scheduled-task-prompt" required help="可以直接粘贴帖子或完整任务要求，保存后会按这段提示词执行。">
-      <Input.TextArea id="scheduled-task-prompt" aria-label="执行提示词" className="scheduled-task-prompt" autoSize={{ minRows: 7, maxRows: 18 }}
+      <Input.TextArea id="scheduled-task-prompt" aria-label="执行提示词" className="scheduled-task-prompt" autoSize={{ minRows: 4, maxRows: 18 }}
         placeholder="例如：阅读下面这段帖子，整理重点并给出我的行动建议。" value={draft.prompt} disabled={disabled}
         onChange={event => onChange({ ...draft, prompt: event.target.value })}/>
     </Form.Item>
@@ -385,8 +445,8 @@ function ScheduledTaskForm({ draft, onChange, editing, error, visible, saving, u
           disabled={disabled} popupOwner="scheduled-task-form" onValueChange={timeZone => { if (draft.schedule.kind !== "once") changePlan({ ...draft.schedule, timeZone }); }}/></Form.Item>
       </>}
     </div>
-    <Flex gap="small" className="scheduled-task-form-actions"><WandButton kind="primary" type="submit" disabled={saving || !unknown && (employeeData.loading || !!employeeData.error || workspaceLoading || !!workspaceError)}>
-      {saving ? "正在保存…" : unknown ? "确认保存结果" : editing?.schedule.kind === "once" && !editing.nextRunAt ? "保存并重新安排" : editing ? "保存修改" : "创建定时任务"}</WandButton>
-      <WandButton disabled={saving} onClick={onBack}>返回列表</WandButton></Flex>
+    <Flex gap="small" className="scheduled-task-form-actions"><WandButton className="scheduled-task-save" kind="primary" type="submit" loading={saving} disabled={saving || result || !unknown && (employeeData.loading || !!employeeData.error || workspaceLoading || !!workspaceError)}>
+      {saving ? "正在保存…" : result ? "已保存" : unknown ? "确认保存结果" : editing?.schedule.kind === "once" && !editing.nextRunAt ? "保存并重新安排" : editing ? "保存修改" : "创建定时任务"}</WandButton>
+      <WandButton disabled={saving} onClick={onBack}>{backLabel}</WandButton></Flex>
   </Form>;
 }

@@ -12,6 +12,18 @@ export class LaunchdServiceManager implements ServiceManager {
       : "/Library/LaunchDaemons/com.wand.web.plist";
   }
 
+  readConfigPath(scope: ServiceScope): string | null {
+    const result = runCommandSync("plutil", ["-extract", "ProgramArguments", "json", "-o", "-", this.unitPath(scope)],
+      { timeout: 5_000 });
+    if (result.status !== 0) return null;
+    try {
+      const args: unknown = JSON.parse(result.stdout);
+      if (!Array.isArray(args) || !args.every((arg) => typeof arg === "string")) return null;
+      const at = args.findIndex((arg) => arg === "-c" || arg === "--config");
+      return at >= 0 && args[at + 1] ? path.resolve(args[at + 1]) : null;
+    } catch { return null; }
+  }
+
   readEntrypoint(scope: ServiceScope): string | null {
     const result = runCommandSync("plutil", ["-extract", "ProgramArguments.1", "raw", "-o", "-", this.unitPath(scope)],
       { timeout: 5_000 });

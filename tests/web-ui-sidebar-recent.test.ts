@@ -171,9 +171,9 @@ test("搜索按会话标题 / 任务名 / 目录名 / 员工与团队名命中�
     ["s3", "s1", "s2"], "目录名也算命中（顺序按最近）");
   assert.deepEqual(filterRecentEntries(entries, { query: "没有这个", employees }), []);
   assert.deepEqual(filterRecentEntries(entries, { activeOnly: true }).map((e) => e.session.id), ["s1"]);
-  // 正在看的那条即使不活动也留在「在跑」档里。
+  // 当前选择不能把已查看或空闲会话留在活动档里。
   assert.deepEqual(
     filterRecentEntries(entries, { activeOnly: true, selectedSessionId: "s2" }).map((e) => e.session.id),
-    ["s1", "s2"],
+    ["s1"],
   );
 });

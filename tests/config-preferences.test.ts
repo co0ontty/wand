@@ -73,6 +73,18 @@ test("default shell follows the account login shell instead of a hardcoded bash"
   }
 });
 
+test("temporary cleanup is deployment-owned, defaults on, and only accepts boolean disabling", async t => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wand-cleanup-config-"));
+  const storage = new WandStorage(path.join(dir, "wand.db"));
+  t.after(() => { storage.close(); rmSync(dir, { recursive: true, force: true }); });
+  const configPath = path.join(dir, "config.json");
+  assert.equal(defaultConfig().autoCleanupTemporaryFiles, true);
+  for (const [value, expected] of [[false, false], [true, true], ["false", true], [0, true]]) {
+    writeFileSync(configPath, JSON.stringify({ autoCleanupTemporaryFiles: value }));
+    assert.equal((await loadConfigWithStorage(configPath, storage)).autoCleanupTemporaryFiles, expected);
+  }
+});
+
 test("commit CLI and model preferences update live config and restore from storage", () => {
   const storage = new FakePreferenceStorage() as unknown as WandStorageType;
   const config = defaultConfig();
@@ -93,11 +105,11 @@ test("system AI CLI and model round-trip independently from API route preference
   const config = defaultConfig();
   assert.equal(config.systemAiCli, undefined, "old installs continue to use the session CLI");
   writePreferenceToStorage(config, storage, "systemAiCli", "pi");
-  writePreferenceToStorage(config, storage, "systemAiModel", "  google/gemini-3  ");
+  writePreferenceToStorage(config, storage, "systemAiModel", "  openai/gpt-5.4  ");
 
   const restored = applyStoragePreferences(defaultConfig(), storage);
   assert.equal(restored.systemAiCli, "pi");
-  assert.equal(restored.systemAiModel, "google/gemini-3");
+  assert.equal(restored.systemAiModel, "openai/gpt-5.4");
   assert.throws(
     () => writePreferenceToStorage(config, storage, "systemAiCli", "shell-command"),
     /无效系统 AI CLI/,
@@ -204,14 +216,35 @@ test("Pi provider and model preferences round-trip through storage", () => {
   assert.equal(restored.defaultPiModel, "openai/gpt-5.4");
 });
 
-test("Gemini provider and model preferences round-trip through storage", () => {
+test("removed provider preferences reject selection and loading without deleting legacy data", () => {
   const storage = new FakePreferenceStorage() as unknown as WandStorageType;
   const config = defaultConfig();
-  writePreferenceToStorage(config, storage, "defaultProvider", "gemini");
-  writePreferenceToStorage(config, storage, "defaultGeminiModel", " gemini-2.5-pro ");
+  assert.throws(
+    () => writePreferenceToStorage(config, storage, "defaultProvider", "gemini"),
+    /无效 Provider|unsupported|不支持/i,
+  );
+  storage.setPreference("pref:defaultProvider", "gemini");
+  storage.setPreference("pref:defaultGeminiModel", "legacy-model");
+  assert.throws(() => applyStoragePreferences(defaultConfig(), storage), /不支持的执行工具偏好/);
+  assert.equal(storage.getPreference("pref:defaultProvider", ""), "gemini");
+  writePreferenceToStorage(config, storage, "defaultProvider", "pi");
   const restored = applyStoragePreferences(defaultConfig(), storage);
-  assert.equal(restored.defaultProvider, "gemini");
-  assert.equal(restored.defaultGeminiModel, "gemini-2.5-pro");
+  assert.equal(restored.defaultProvider, "pi");
+  assert.equal("defaultGeminiModel" in restored, false);
+  assert.equal(storage.getPreference("pref:defaultGeminiModel", ""), "legacy-model");
+});
+
+test("legacy removed tool defaults fail before bootstrapping and respect corrected DB preferences", async (t) => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "wand-removed-tool-config-"));
+  const configPath = path.join(dir, "config.json");
+  const storage = new WandStorage(path.join(dir, "wand.db"));
+  t.after(() => { storage.close(); rmSync(dir, { recursive: true, force: true }); });
+  writeFileSync(configPath, JSON.stringify({ defaultProvider: "gemini" }));
+  await assert.rejects(loadConfigWithStorage(configPath, storage), /不支持的执行工具偏好/);
+  assert.equal(storage.getPreference("pref:defaultProvider", ""), "gemini");
+  assert.equal(storage.getSystemSiliconEmployee(), null);
+  writePreferenceToStorage(defaultConfig(), storage, "defaultProvider", "pi");
+  assert.equal((await loadConfigWithStorage(configPath, storage)).defaultProvider, "pi");
 });
 
 test("new-session preferences reject unsupported values", () => {
@@ -288,7 +321,6 @@ test("`default` 哨兵不是模型 id：历史配置里读到它当没配", () =
     grok: "",
     qoder: "",
     pi: "",
-    gemini: "",
   });
   assert.equal(getDefaultModelForProvider(config, "claude"), "", "哨兵不当作模型 id 下发");
 });

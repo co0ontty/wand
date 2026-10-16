@@ -21,6 +21,7 @@ export function ComposerSelectHost() {
       displayValue={mount.displayValue}
       displayTitle={mount.displayTitle}
       disabled={mount.disabled}
+      triggerKind={mount.scope === "runtime" ? "ghost" : undefined}
       searchable={mount.control === "model"}
       searchPlaceholder="搜索模型"
       className={`wand-composer-select-trigger wand-composer-select-trigger-${mount.control}`}

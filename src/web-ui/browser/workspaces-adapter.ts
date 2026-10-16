@@ -3,7 +3,7 @@ import { configureWorkspacesRuntime } from "../react/workspaces/controller";
 import { clearActiveWorkspaceContext, setActiveWorkspaceContext, workspaceContextStore } from "../react/workspaces/workspace-context";
 import { persistActiveTask } from "./active-task";
 import { closeReactOverlays } from "./react-overlay-coordinator";
-import { dismissDrawerIfOverlay, getChatModelForProvider, goHome, refreshAll, selectSession, setChatModelForProvider, startSessionInCwd } from "./session-engine";
+import { dismissDrawerIfOverlay, getChatModelForProvider, goHome, loadSessions, refreshAll, selectSession, setChatModelForProvider, startSessionInCwd } from "./session-engine";
 import { getEffectiveCwd } from "./render";
 import { showToast } from "./notifications";
 import { confirmDelete } from "./sidebar";
@@ -252,10 +252,10 @@ export function installWorkspacesLegacyAdapter(): void {
       try {
         await httpWorkspacesRepository.deleteSessions(ids);
         ids.forEach((sessionId) => disposePooledTerminal(sessionId));
-        await refreshAll();
+        await loadSessions({ preserveNoSelection: true });
         return true;
       } catch (error) {
-        await refreshAll().catch(() => { /* 保留原错误提示 */ });
+        await loadSessions({ preserveNoSelection: true }).catch(() => { /* 保留原错误提示 */ });
         showToast(error instanceof Error ? error.message : "无法关闭终端，请稍后重试。", "danger");
         return false;
       }

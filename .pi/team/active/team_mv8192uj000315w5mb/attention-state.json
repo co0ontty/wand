@@ -1,0 +1,31 @@
+{
+  "roles": {
+    "macos-build": {
+      "communicationAt": 1791977942644,
+      "silenceAlerted": false,
+      "pendingRequestRef": "c908e22b-caf4-4fd0-8ef5-a30b1c22bab0",
+      "pendingRequestStage": "queued",
+      "pendingAckAlerted": true,
+      "cancelAlerted": false,
+      "rearmAt": 1791981076239
+    },
+    "ios-build": {
+      "communicationAt": 1791977711413,
+      "silenceAlerted": false,
+      "pendingRequestRef": "c908e22b-caf4-4fd0-8ef5-a30b1c22bab0",
+      "pendingRequestStage": "queued",
+      "pendingAckAlerted": true,
+      "cancelAlerted": false,
+      "rearmAt": 1791981076239
+    },
+    "android-build": {
+      "communicationAt": 1791977885481,
+      "silenceAlerted": false,
+      "pendingRequestRef": "c908e22b-caf4-4fd0-8ef5-a30b1c22bab0",
+      "pendingRequestStage": "queued",
+      "pendingAckAlerted": true,
+      "cancelAlerted": false,
+      "rearmAt": 1791981076239
+    }
+  }
+}

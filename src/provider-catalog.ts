@@ -7,13 +7,12 @@
  */
 
 /** 全部受支持的会话 provider；顺序即 UI / 派发选择器里的展示顺序。 */
-export const SESSION_PROVIDERS = ["claude", "codex", "opencode", "grok", "qoder", "pi", "gemini"] as const;
+export const SESSION_PROVIDERS = ["claude", "codex", "opencode", "grok", "qoder", "pi"] as const;
 
 export type SessionProvider = (typeof SESSION_PROVIDERS)[number];
 
 /**
  * 拥有原生思考档位（`provider:level`）的 provider。
- * Gemini CLI 没有档位开关，所以不出现在这里：`gemini:max` 这种值不应该被当成合法档位保留。
  */
 export const NATIVE_THINKING_EFFORT_PROVIDERS = ["claude", "codex", "opencode", "grok", "qoder", "pi"] as const;
 
@@ -52,7 +51,6 @@ export const PROVIDER_LABELS: Readonly<Record<SessionProvider, string>> = {
   grok: "Grok",
   qoder: "Qoder",
   pi: "Pi",
-  gemini: "Gemini",
 };
 
 /**
@@ -92,9 +90,6 @@ export const PROVIDER_ALIASES: Readonly<Record<string, SessionProvider>> = {
   pi: "pi",
   "pi-cli": "pi",
   "pi-cli-json": "pi",
-  gemini: "gemini",
-  "gemini-cli": "gemini",
-  "gemini-cli-json": "gemini",
 };
 
 /** 归一化一个已持久化的 provider id 或 runner/别名；无法识别时返回 null。 */

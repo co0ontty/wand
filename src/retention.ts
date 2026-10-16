@@ -5,6 +5,7 @@ import type { SessionRegistry } from "./session-registry.js";
 import type { WandStorage } from "./storage.js";
 import { defaultTaskRetention, taskRetentionWindows, type TaskRetentionSettings } from "./task-retention.js";
 import type { SessionSnapshot } from "./types.js";
+import { parseTimestampMs as timestamp } from "./time-utils.js";
 
 /** Backward-compatible exports for consumers of the historical default windows. */
 const DEFAULT_RETENTION_WINDOWS = taskRetentionWindows(defaultTaskRetention());
@@ -43,12 +44,6 @@ export function isRetentionBusy(session: SessionSnapshot): boolean {
 function isIdleLivePty(session: SessionSnapshot): boolean {
   return session.status === "running" && !isRetentionBusy(session)
     && ((session.sessionKind ?? "pty") === "pty" || session.runner === "pty");
-}
-
-function timestamp(value: string | null | undefined): number | null {
-  if (!value) return null;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 /**

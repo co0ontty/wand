@@ -59,11 +59,12 @@ export async function runChatExperience({ evaluate: e, send, click, key, wait, m
   assert.match(stats.summary, /1 项失败/, "failure cannot disappear into collapsed history");
   assert.doesNotMatch(stats.summary, /Created|Updated|内部任务说明/);
   assert.ok(stats.summaryHeight <= 90);
-  assert.equal(stats.hiddenDetail, 0);
+  assert.ok(stats.hiddenDetail > 0, "the process and full thinking are readable by default");
+  assert.equal(await e("document.querySelectorAll('.chat-call[data-thinking-entry][data-expanded=\"true\"] .chat-activity-thinking-content').length"), 2);
   assert.equal(stats.overflow, false);
   if (output) {
     const shot=await send("Page.captureScreenshot",{format:"png"});
-    writeFileSync(join(dirname(output),`experience-${mode}-collapsed.png`),Buffer.from(shot.data,"base64"));
+    writeFileSync(join(dirname(output),`experience-${mode}-default-expanded.png`),Buffer.from(shot.data,"base64"));
   }
   // Optional evidence capture uses real CDP clicks and unmodified production timing.
   if (output && process.env.WAND_CHAT_CAPTURE_MOTION === "1" && mode === "desktop") {
@@ -84,29 +85,25 @@ export async function runChatExperience({ evaluate: e, send, click, key, wait, m
     }
     writeFileSync(join(directory, "frames.json"), JSON.stringify({ frames, evidence: "Chrome captures with original motion tokens; native clicks at frames 4 and 20" }, null, 2));
     await e("h.frames()");
-    assert.equal(await e("document.querySelector('.chat-activity').dataset.expanded"), "false");
+    assert.equal(await e("document.querySelector('.chat-activity').dataset.expanded"), "true");
   }
-  await click(summary); await e("h.frames()");
+  if (await e("document.querySelector('.chat-activity').dataset.expanded") !== "true") await click(summary);
+  await e("h.frames()");
   assert.equal(await e("document.querySelector('.chat-activity').dataset.expanded"),"true");
-  const rows = await e(`(()=>({thinking:[...document.querySelectorAll('.chat-call[data-thinking-entry]')].map(n=>({height:n.querySelector('button').getBoundingClientRect().height,state:n.dataset.status,text:n.querySelector('button').innerText,mark:n.querySelector('.chat-call-mark')?getComputedStyle(n.querySelector('.chat-call-mark')).backgroundColor:'',clock:n.querySelector('.chat-call-time')?.innerText||''})),tools:[...document.querySelectorAll('.chat-call[data-tool-ids]')].map(n=>({height:n.querySelector('button').getBoundingClientRect().height,status:n.dataset.status,label:n.querySelector('.chat-call-label')?.innerText||'',preview:n.querySelector('.chat-call-preview')?getComputedStyle(n.querySelector('.chat-call-preview')).fontFamily:'',result:n.querySelector('.chat-call-result')?.innerText||'',mark:n.querySelector('.chat-call-mark')?getComputedStyle(n.querySelector('.chat-call-mark')).backgroundColor:'',state:!!n.querySelector('.chat-call-meta')})),height:document.querySelector('.chat-activity-timeline').getBoundingClientRect().height,rail:(()=>{const box=document.querySelector('.chat-activity-timeline').getBoundingClientRect();const calls=[...document.querySelectorAll('.chat-call')];return calls.map((n,i)=>{const r=n.getBoundingClientRect();const mark=n.querySelector('.chat-call-mark')?.getBoundingClientRect();return {i,top:Math.round(r.top-box.top),bottom:Math.round(r.bottom-box.top),left:Math.round(r.left-box.left),dotCenter:mark?Math.round(mark.top-r.top+mark.height/2):null,dotLeft:mark?Math.round(mark.left-box.left):null,railTop:Math.round(Number.parseFloat(getComputedStyle(n,"::before").top)||0),railBottom:Math.round(Number.parseFloat(getComputedStyle(n,"::before").bottom)||0)}})})(),overflow:document.documentElement.scrollWidth>innerWidth+1}))()`);
-  // 竖线只连接首末状态点：首行从点中心开始，末行在点中心结束，中间行贯穿，行与行不断开。
-  const rail = rows.rail;
-  assert.ok(rail.length > 2, "timeline renders several rows");
-  assert.equal(rail[0].railTop, rail[0].dotCenter, "the rail starts at the first dot centre");
-  const lastRow = rail[rail.length - 1];
-  assert.equal(lastRow.railBottom, Math.round(lastRow.bottom - lastRow.top) - lastRow.dotCenter, "the rail stops at the last dot centre");
-  assert.ok(rail.slice(1, -1).every(row => row.railTop === 0 && row.railBottom === 0), "middle rows carry a full-height rail");
-  assert.ok(rail.every((row, index) => index === 0 || row.top === rail[index - 1].bottom), "rail segments meet without a gap");
-  assert.ok(rail.every(row => row.dotLeft === row.left + 3), "the status dot is centred in its 12px slot");
+  const rows = await e(`(()=>({thinking:[...document.querySelectorAll('.chat-call[data-thinking-entry]')].map(n=>({height:n.querySelector('button').getBoundingClientRect().height,state:n.dataset.status,text:n.querySelector('button').innerText,icon:n.querySelector('[data-wand-icon]')?.dataset.wandIcon,body:n.querySelector('.chat-activity-thinking-content')?.innerText,open:n.dataset.expanded})),tools:[...document.querySelectorAll('.chat-call[data-tool-ids]')].map(n=>({height:n.querySelector('button').getBoundingClientRect().height,status:n.dataset.status,label:n.querySelector('.chat-call-label')?.innerText||'',icon:n.querySelector('[data-wand-icon]')?.dataset.wandIcon,result:n.querySelector('.chat-call-result')?.innerText||'',state:!!n.querySelector('.chat-call-meta')})),height:document.querySelector('.chat-activity-timeline').getBoundingClientRect().height,timelineOverflow:getComputedStyle(document.querySelector('.chat-activity-timeline')).overflowY,overflow:document.documentElement.scrollWidth>innerWidth+1}))()`);
   assert.equal(rows.thinking.length, 2);
-  assert.ok(rows.thinking.every(row=>row.height<=48&&row.state==="complete"), "思考轮次是单行紧凑行");
-  // Android 时间线行：时钟 + 标签一行，输入/结果摘录各一行；状态只由左侧点颜色表达，不写状态字样。
-  assert.ok(rows.tools.every(row=>row.height<=88), "tool rows keep the label plus input/result excerpt, not cards");
-  assert.ok(rows.tools.every(row=>row.state===false), "rows do not repeat the status as text");
-  assert.ok(rows.tools.every(row=>row.mark!=="rgba(0, 0, 0, 0)"), "every row carries a status dot");
-  assert.ok(rows.tools.every(row=>row.preview.includes("mono")), "excerpts stay monospace");
-  assert.ok(rows.height<=360);
+  assert.ok(rows.thinking.every(row=>row.height<=48&&row.state==="complete"&&row.open==="true"&&row.icon==="brain"&&row.body), "full thoughts are open beneath a quiet brain header");
+  assert.ok(rows.tools.every(row=>row.height<=110), "tool rows remain bounded while showing meaningful action titles");
+  assert.ok(rows.tools.every(row=>row.icon), "actual action icons replace anonymous dots");
+  assert.ok(rows.tools.some(row=>row.label.includes("核对截图")), "task subjects carry the primary hierarchy");
+  assert.ok(rows.tools.some(row=>row.label==="运行界面回归"&&row.status==="error"), "failed command retains its supplied intent");
+  assert.equal(rows.timelineOverflow,"visible", "thoughts use the outer reading axis");
   assert.equal(rows.overflow,false);
+  // A manual thinking collapse is not reset by another streamed paint.
+  await click('.chat-call[data-thinking-entry] .chat-call-button');
+  await e("h.doRenderChat(false);h.frames()");
+  assert.equal(await e("document.querySelector('.chat-call[data-thinking-entry]').dataset.expanded"),"false");
+  await click('.chat-call[data-thinking-entry] .chat-call-button');
   if (output) {
     const shot=await send("Page.captureScreenshot",{format:"png"});
     writeFileSync(join(dirname(output),`experience-${mode}-expanded.png`),Buffer.from(shot.data,"base64"));
@@ -126,23 +123,13 @@ export async function runChatExperience({ evaluate: e, send, click, key, wait, m
     experienceTurns[2].content.push({type:'tool_use',id:'pending-plan',name:'Pi/todo',input:{action:'update',id:2,status:'in_progress'}});
     experienceTurns.pop();h.publish(experienceTurns,{status:'running',structuredState:{inFlight:true}});h.doRenderChat(false);await h.frames();
   })()`);
-  // 运行标记是全段唯一的动态 loading：九点在同一个实例里从中心展开，不在时间线行再来一份。
-  const runningMark = await e(`(()=>{const dots=[...document.querySelectorAll('.chat-process-summary-dot i')];const rects=dots.map(n=>n.getBoundingClientRect());const first=dots[0];return {dots:dots.length,count:document.querySelectorAll('.chat-process-summary-dot').length,rowMarks:document.querySelectorAll('.chat-call .chat-process-summary-dot').length,columns:new Set(rects.map(r=>Math.round(r.left))).size,rows:new Set(rects.map(r=>Math.round(r.top))).size,size:first?getComputedStyle(first).width:'',animation:first?getComputedStyle(first).animationName:'',running:document.querySelector('.chat-activity')?.classList.contains('is-command-running')??false}})()`);
+  // One semantic icon represents live work; it settles immediately under reduced motion.
+  const runningMark = await e(`(()=>{const mark=document.querySelector('.chat-process-summary-dot');return{count:document.querySelectorAll('.chat-process-summary-dot').length,rowMarks:document.querySelectorAll('.chat-call .chat-process-summary-dot').length,icons:mark?.querySelectorAll('svg').length||0,animation:mark?getComputedStyle(mark).animationName:'',running:document.querySelector('.chat-activity')?.classList.contains('is-command-running')??false}})()`);
   assert.equal(runningMark.count,1,"only the overview animates");
   assert.equal(runningMark.rowMarks,0);
-  assert.equal(runningMark.dots,9,"the running mark keeps one nine-dot instance");
-  assert.equal(runningMark.running,true,"the live turn marks itself as running");
-  if (mode.includes("reduce")) {
-    // Android ToolActivityMark：reduce-motion 下不流动、不展开，只保留状态色。
-    assert.equal(runningMark.columns,1,"reduced motion keeps the mark collapsed to one dot");
-    assert.equal(runningMark.rows,1);
-    assert.equal(runningMark.animation,"none");
-  } else {
-    assert.equal(runningMark.columns,3,"running spreads the nine dots into three columns");
-    assert.equal(runningMark.rows,3,"running spreads the nine dots into three rows");
-    assert.equal(runningMark.size,"2px","spread dots keep the Android 6dp mark size");
-    assert.equal(runningMark.animation,"wand-activity-mark-flow","the overview mark flows while the turn runs");
-  }
+  assert.equal(runningMark.icons,1,"one clear semantic icon replaces the nine-dot logo");
+  assert.equal(runningMark.running,true);
+  assert.equal(runningMark.animation,mode.includes("reduce")?"none":"wand-activity-mark-flow");
   if (output) {
     const mark = await e(`(()=>{const n=document.querySelector('.chat-process-summary');if(!n)return null;const r=n.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}})()`);
     const shot = await send("Page.captureScreenshot",{format:"png",clip:{...mark,scale:2}});

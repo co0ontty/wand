@@ -50,14 +50,6 @@ process.exit(1);
 NODE
 }
 
-# A standalone downloaded install.sh has no .nvmrc beside it. In a checkout,
-# use the same pin as build/CI; keep the standalone fallback in sync.
-REQUIRED_NODE_VERSION="24.21.0"
-NODE_VERSION_FILE="$(dirname "${BASH_SOURCE[0]}")/.nvmrc"
-if [[ -f "$NODE_VERSION_FILE" ]]; then
-  REQUIRED_NODE_VERSION="$(<"$NODE_VERSION_FILE")"
-fi
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_TEMP_DIR=""
 cleanup_install_temp() {
@@ -75,6 +67,8 @@ else
   . "$INSTALL_TEMP_DIR/update-node.sh"
 fi
 
+# .nvmrc pins reproducible CI builds; it is not the installation minimum.
+REQUIRED_NODE_VERSION="$WAND_MINIMUM_NODE_VERSION"
 if ! wand_ensure_update_node "$REQUIRED_NODE_VERSION"; then
   if [ "$(uname -s)" = "Darwin" ]; then
     error "未找到兼容 Node.js；请先安装 Node.js >= ${REQUIRED_NODE_VERSION} 或配置 nvm，再重跑本入口。旧服务未修改。"

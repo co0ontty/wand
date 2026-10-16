@@ -1,3 +1,4 @@
+import { configTemporaryRoot, TEMP_ROOT_MARKER } from "../src/managed-temp.ts";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync } from "node:fs";
@@ -77,7 +78,7 @@ test("speech initialization checks actual CLI/model while disabled, restores adm
   const status = await finish(h.models, "speech");
   assert.equal(status.operation?.phase, "completed"); assert.equal(status.initialized, true);
   assert.equal(status.enabled, false); assert.equal(status.busy, false);
-  assert.deepEqual(readdirSync(path.join(h.root, "speech", "tmp")), []);
+  assert.deepEqual(readdirSync(configTemporaryRoot(h.root)).filter(name => name !== TEMP_ROOT_MARKER), []);
 });
 
 test("fixed file downloads validate full size/hash, preserve completed bytes on retry, and remove bad partials", async t => {

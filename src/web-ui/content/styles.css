@@ -127,8 +127,7 @@ html.no-transition *, html.no-transition *::before, html.no-transition *::after 
 .input-composer.is-terminal-interactive :is(.composer-floating-avatar, .composer-usage-line) { display:none; }
 .input-composer.is-terminal-interactive .composer-surface { margin-block-start:0; }
 .input-composer.is-terminal-interactive [data-composer-sender] { padding-inline-start:0; }
-.composer-input-wrap .prompt-optimize-btn { position: absolute; inset-block-start: -36px; inset-inline-end: 0; z-index: 1; }
-.composer-input-wrap .prompt-optimize-btn.is-loading .prompt-optimize-icon { animation: composer-optimize-spin var(--motion-spin) linear infinite; }
+.prompt-optimize-btn.is-loading .prompt-optimize-icon { animation: composer-optimize-spin var(--motion-spin) linear infinite; }
 @keyframes composer-optimize-spin { to { transform: rotate(360deg); } }
 .composer-actions-left, .composer-actions-right, .composer-status-row, .composer-inline-config, .composer-config-controls { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .composer-actions-right { justify-content: flex-end; flex-wrap: wrap; }
@@ -143,7 +142,7 @@ html.no-transition *, html.no-transition *::before, html.no-transition *::after 
 /* Only idle mobile input owns hold-to-talk; focused/nonempty input keeps native selection/scroll. */
 textarea[data-idle-speech] { touch-action: none; user-select: none; -webkit-user-select: none; }
 .input-textarea:disabled { color: var(--text-tertiary); cursor: not-allowed; }
-@media (prefers-reduced-motion: reduce) { .composer-input-wrap .prompt-optimize-btn.is-loading .prompt-optimize-icon { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .prompt-optimize-btn.is-loading .prompt-optimize-icon { animation: none; } }
 .composer-status-line { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-secondary); font-size: var(--font-size-xs); }
 .composer-plus-popover { position: absolute; bottom: calc(100% - 8px); left: 16px; z-index: 50; width: min(360px, calc(100vw - 32px)); }
 .composer-plus-popover [data-composer-popover-host] { display: grid; gap: 4px; }
@@ -157,7 +156,7 @@ textarea[data-idle-speech] { touch-action: none; user-select: none; -webkit-user
 .status-bar-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
 .status-bar-timer { font-variant-numeric: tabular-nums; }
 .structured-status-bar.completed { color: var(--success); }
-.input-composer.is-terminal-interactive :is(.composer-status-row, .composer-inline-config, .prompt-optimize-btn, #voice-record-btn, .composer-attachments-host) { display: none; }
+.input-composer.is-terminal-interactive :is(.composer-status-row, .composer-inline-config, #voice-record-btn, .composer-attachments-host) { display: none; }
 .input-composer.is-terminal-interactive #send-input-button:not([data-phase="running"]) { display: none; }
 /* One PTY key row stays with the composer; Ant owns the key visuals. */
 .terminal-shortcuts:not([hidden]) { min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; padding: 0; }
@@ -241,7 +240,6 @@ textarea[data-idle-speech] { touch-action: none; user-select: none; -webkit-user
   .composer-actions-right { grid-column: 1; }
   .composer-inline-config { flex-wrap: wrap; justify-content: flex-end; }
   .composer-actions-right .ant-btn { flex-shrink: 0; }
-  .composer-input-wrap .prompt-optimize-btn { inset-block-start: -48px; }
   #send-input-button { min-width: 32px; }
 }
 

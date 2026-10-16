@@ -38,13 +38,17 @@ test("directory distinguishes resource failures, search misses, and unselected t
     </PortalContainerProvider>);
   ` }, bundle: true, platform: "browser", format: "iife", jsx: "automatic", outfile: join(temp, "app.js"),
   logLevel: "warning", define: { "process.env.NODE_ENV": '"production"' } });
+  await build({ entryPoints: [join(root, "src/web-ui/react/avatars/renderer.ts")], bundle: true, format: "iife", platform: "browser", outfile: join(temp, "plush-avatar.js"), logLevel: "warning" });
+  writeFileSync(join(temp, "app.js"), readFileSync(join(temp, "app.js"), "utf8").replaceAll("${plushAvatarChunkSrc}", "/plush-avatar.js"));
   const app = express();
   app.use((req, _res, next) => { if (req.method !== "GET") writes++; next(); });
   app.get("/api/silicon-employees", (_req, res) => setTimeout(() => fixture.employeeFail
     ? res.status(503).json({ error: "员工列表暂时不可用，请重试。" }) : res.json({ employees: fixture.empty ? [] : [employee] }), 150));
   app.get("/api/ai-teams", (_req, res) => setTimeout(() => fixture.teamFail
     ? res.status(503).json({ error: "团队模板列表暂时不可用，请重试。" }) : res.json(fixture.empty ? [] : [team]), 150));
+  app.get("/api/config", (_req, res) => res.json({ userProfile: { name: "我", avatar: "cat:1" } }));
   app.get("/app.js", (_req, res) => res.type("js").send(readFileSync(join(temp, "app.js"))));
+  app.get("/plush-avatar.js", (_req, res) => res.type("js").send(readFileSync(join(temp, "plush-avatar.js"))));
   app.get("/styles.css", (_req, res) => res.type("css").send(readFileSync(join(root, "src/web-ui/content/styles.css"))));
   app.get("/tailwind.css", (_req, res) => res.type("css").send(readFileSync(join(root, "src/web-ui/content/tailwind.css"))));
   app.get("*", (_req, res) => res.type("html").send(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/tailwind.css"><link rel="stylesheet" href="/styles.css"></head><body><div id="root"></div><div id="overlay-root"><div id="portals" class="wand-ui-portals"></div></div><script src="/app.js"></script></body></html>`));
@@ -178,11 +182,21 @@ test("directory distinguishes resource failures, search misses, and unselected t
       // The directory includes archived employees; the group's active-only reload
       // intentionally does not replace that separate repository snapshot.
       if (await evaluate("!!document.querySelector('.conversation-directory .ant-alert')")) await click('.conversation-directory .ant-alert button');
-      await wait("!!document.querySelector('.conversation-contact-row')");
-      const density = await evaluate(`(()=>{const root=document.querySelector('.conversation-directory'),header=root.querySelector('.conversation-directory-header'),body=root.querySelector('.conversation-directory-body'),avatar=root.querySelector('.conversation-contact-row .wand-employee-avatar>.ant-avatar');return {avatarWidth:avatar.getBoundingClientRect().width,headerInset:parseFloat(getComputedStyle(header).paddingLeft),bodyInset:parseFloat(getComputedStyle(body).paddingLeft)};})()`);
-      assert.equal(density.avatarWidth, 32, "directory retains identity in compact 32px avatars");
+      await wait("!!document.querySelector('.conversation-contact-row:not(.conversation-self-row) .wand-employee-avatar .ant-avatar')");
+      const selfRow = await evaluate(`(()=>{const rows=[...document.querySelectorAll('.conversation-directory .conversation-contact-row')];
+        return {firstIsSelf:rows[0]?.classList.contains('conversation-self-row'),selfCount:rows.filter(r=>r.classList.contains('conversation-self-row')).length,
+          selfTag:rows[0]?.querySelector('.conversation-contact-name')?.innerText.includes('我')};})()`);
+      assert.equal(selfRow.firstIsSelf, true, "the user's own profile is pinned as the first directory contact");
+      assert.equal(selfRow.selfCount, 1, "exactly one self row renders");
+      assert.equal(selfRow.selfTag, true, "the self row carries the 我 tag");
+      const density = await evaluate(`(()=>{const root=document.querySelector('.conversation-directory'),header=root.querySelector('.conversation-directory-header'),body=root.querySelector('.conversation-directory-body'),
+        empAvatar=root.querySelector('.conversation-contact-row:not(.conversation-self-row) .wand-employee-avatar .ant-avatar'),
+        selfAvatar=root.querySelector('.conversation-self-row .wand-employee-avatar :is(.ant-avatar,.wand-plush-avatar)');
+        return {empAvatarWidth:empAvatar.getBoundingClientRect().width,selfAvatarWidth:selfAvatar.getBoundingClientRect().width,headerInset:parseFloat(getComputedStyle(header).paddingLeft),bodyInset:parseFloat(getComputedStyle(body).paddingLeft)};})()`);
+      assert.ok(density.empAvatarWidth>0, "employee identity avatars render");
+      assert.equal(density.selfAvatarWidth, density.empAvatarWidth, "the self row renders the same identity footprint as employees");
       assert.equal(density.headerInset, density.bodyInset, "directory header and content share the page inset");
-      const contrast = await evaluate(peopleContrastExpression([".conversation-directory-header h2", ".conversation-contact-name", ".conversation-contact-duty"]));
+      const contrast = await evaluate(peopleContrastExpression([".conversation-directory-header h2", ".conversation-contact-row:not(.conversation-self-row) .conversation-contact-name", ".conversation-contact-row:not(.conversation-self-row) .conversation-contact-duty"]));
       assert.equal(contrast.length,3,"directory title, identity and duty computed colors captured");
       assert.ok(contrast.every((sample:any)=>sample.ratio>=4.5),"directory title and secondary text meet AA on actual solid backgrounds");
       await shot(`${width}-contacts`);

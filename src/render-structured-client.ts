@@ -1,7 +1,7 @@
 import { lstatSync, readFileSync } from "node:fs";
 import net from "node:net";
 
-import { rejectPendingRequests, startDaemonHeartbeat, waitForDaemonSocket } from "./daemon-connection.js";
+import { rejectPendingRequests, startDaemonHeartbeat, subscribeWithPendingEvent, waitForDaemonSocket } from "./daemon-connection.js";
 import { getErrorMessage } from "./error-utils.js";
 import {
   STRUCTURED_RENDER_PROTOCOL_VERSION,
@@ -86,10 +86,7 @@ class RemoteRun implements StructuredExecProcess {
   }
 
   onExit(listener: (event: StructuredExitEvent) => void): { dispose(): void } {
-    this.exitListeners.add(listener);
-    const event = this.pendingExit;
-    if (event) queueMicrotask(() => { if (this.exitListeners.has(listener)) listener(event); });
-    return { dispose: () => this.exitListeners.delete(listener) };
+    return subscribeWithPendingEvent(this.exitListeners, listener, this.pendingExit);
   }
 
   acceptStream(event: StructuredStreamEvent): void {

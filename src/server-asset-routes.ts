@@ -76,8 +76,9 @@ export function registerAssetRoutes(app: Express, deps: AssetRouteDependencies):
       res.status(404).type("text/plain").send("Browser module not found; reload the page after updating.");
       return;
     }
-    // The directory fingerprints the entire immutable module graph. Never
-    // substitute current bytes for a missing older module under its cached URL.
+    // Each directory fingerprints a module's static dependency component.
+    // Legacy whole-build directories remain readable from retained snapshots.
+    // Never substitute current bytes for a missing older immutable URL.
     res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
     res.type("application/javascript").send(content);
   });

@@ -1,4 +1,7 @@
 import { ChatMessage } from "../chat/message";
+import { TurnNavPanel } from "../chat/navigation/TurnNavPanel.js";
+import { buildTurnNavIndex, turnNavRange } from "../chat/navigation/turn-nav-model.js";
+import { jumpToChatTurn } from "../chat/navigation/turn-jump.js";
 import { ChatActivity } from "../chat/activity";
 import * as React from "react";
 import { Alert, Avatar, Button, Card, Collapse, Flex, List, Tag, Tooltip, Typography } from "antd";
@@ -33,6 +36,8 @@ import { EmployeeAvatar } from "../agents/employee-avatar.js";
 import { appendedConversationKeys, CONVERSATION_TAIL_PX, conversationClock, conversationDay, conversationMessageKey, joinsConversationBubble } from "../conversations/presentation";
 import { useReducedMotion } from "../ui/motion-tokens";
 import { teamChatComposer } from "./composer-bridge";
+import { composerRuntimePreference } from "../conversations/composer-presentation";
+import { useWandModelCatalog } from "../use-model-catalog";
 import { aiTeamsRepository } from "./repository";
 import { currentUserAuthor, selfAuthorFor, useUserProfile } from "../user-profile-repository";
 import { deliveryResultText, deliverySummaryText, TeamDeliveryDetails } from "./team-delivery";
@@ -520,9 +525,8 @@ export type ChatAvatarSpec =
 export function chatAvatarSpec(
   author: Pick<ConversationAuthor, "id" | "name" | "avatar"> | null | undefined,
 ): ChatAvatarSpec {
-  // 能定位到成员身份才给脸（显式 `cat:<n>` 走像素猫，其余按身份生成，与团队页/工位同一张脸）；
-  // 「我」和没有署名的发言才回落成默认 APP logo。
-  const plush = parsePlushDogAvatar(author?.avatar ?? "") ?? parsePlushCatAvatar(author?.avatar ?? "") ?? parsePlushAvatar(author?.avatar ?? "");
+  // 与设置、员工目录和群头像共用稳定身份默认；无署名才回落品牌。
+  const plush = author && (author.id || author.name) ? resolveEmployeeAvatar(author) : null;
   if (plush) return { kind: "plush", config: plush };
   return avatarFace({ id: author?.id ?? "", name: author?.name ?? "", avatar: author?.avatar ?? "" })
     ?? { kind: "brand" };
@@ -1469,6 +1473,7 @@ export function chatDocOwnerPresent(
 }
 
 export interface ConversationMessagesProps {
+  navigationScope?: string;
   turns: ConversationTurn[];
   taskLabels: Record<string, string>;
   group?: boolean;
@@ -1488,8 +1493,9 @@ export interface ConversationMessagesProps {
 }
 
 /** IM presentation shares file cards and text expansion; composer/receipt ownership stays unchanged. */
-export function ConversationMessages({ turns, taskLabels, group = true, ready = true, active = true, restoreScroll,
+export function ConversationMessages({ turns, navigationScope = "conversation", taskLabels, group = true, ready = true, active = true, restoreScroll,
   employeeIds = {}, mentionNames = EMPTY_MENTION_NAMES, onOpenEmployee, onOpenConversation, onOpenSession, renderActivity, renderTaskPreview, renderSessionPreview }: ConversationMessagesProps): React.ReactElement {
+  const profile = useUserProfile();
   const list = React.useRef<HTMLDivElement>(null);
   const previous = React.useRef<string[] | null>(null);
   const following = React.useRef(true);
@@ -1498,6 +1504,23 @@ export function ConversationMessages({ turns, taskLabels, group = true, ready = 
   const [awayFromTail, setAwayFromTail] = React.useState(false);
   const reduced = useReducedMotion();
   const keys = turns.map(conversationMessageKey);
+  const questionBodies = turns.map(turn => turn.role === "user" ? parseChatAttachments(chatTurnText(turn)).body : "");
+  const fallbackScope = React.useId();
+  const fallbackWindow = React.useRef({ signature: "", revision: 0 });
+  // HTTP snapshots clone every turn. Keep the established render keys; rotate
+  // only navigation's legacy window token when identity/order/questions change,
+  // not for a cloned snapshot or an assistant's streamed text.
+  const signature = JSON.stringify([navigationScope, turns.map((turn, index) => [keys[index], !!turn.notice, questionBodies[index]])]);
+  if (signature !== fallbackWindow.current.signature) {
+    fallbackWindow.current = { signature, revision: fallbackWindow.current.revision + 1 };
+  }
+  const navigationOwners = turns.map((turn, index) => turn.messageId ? keys[index]!
+    : `${fallbackScope}:window:${fallbackWindow.current.revision}:${index}`);
+  const navigationEntries = buildTurnNavIndex(turns.map((turn, index) => ({
+    ownerKey: navigationOwners[index]!, visibleIndex: index, role: turn.role,
+    notice: !!turn.notice || !!turn.sessionLink || !!turn.conversationLink,
+    visibleText: questionBodies[index]!,
+  })));
   React.useLayoutEffect(() => {
     const scroll = list.current?.closest<HTMLElement>(".conversation-message-scroll");
     if (!scroll || !active || list.current?.closest(".sidebar-projection-old")) return;
@@ -1547,6 +1570,18 @@ export function ConversationMessages({ turns, taskLabels, group = true, ready = 
     return () => observer.disconnect();
   }, [active, ready]);
   return <div ref={list} className="task-board-team-chat team-chat-stream conversation-stream" role="log" aria-label="对话消息" aria-relevant="additions">
+    <TurnNavPanel scope={navigationScope} active={active && ready} entries={navigationEntries}
+      readingRoot={() => list.current?.closest<HTMLElement>(".conversation-message-scroll") ?? null} ownerAttribute="data-conversation-nav-owner"
+      range={turnNavRange(navigationEntries.length, "unknown")} onJump={ownerKey => {
+        const content = list.current;
+        const scroll = content?.closest<HTMLElement>(".conversation-message-scroll");
+        if (!content || !scroll || !active || content.closest(".sidebar-projection-old")) return false;
+        const found = content.querySelector<HTMLElement>(`[data-conversation-nav-owner="${CSS.escape(ownerKey)}"]`);
+        if (!found || !jumpToChatTurn(scroll, ownerKey, "data-conversation-nav-owner")) return false;
+        following.current = false;
+        setAwayFromTail(true);
+        return true;
+      }}/>
     {turns.map((turn, index) => {
       const key = keys[index]!;
       const text = chatTurnText(turn);
@@ -1568,8 +1603,9 @@ export function ConversationMessages({ turns, taskLabels, group = true, ready = 
           {turn.conversationLink ? <WandButton onClick={() => onOpenConversation(turn.conversationLink!.conversationId)}>打开任务群 · {turn.conversationLink.title}</WandButton> : null}
         </Flex> : <div className="chat-message assistant team-chat-msg conversation-message"
           data-side={self ? "end" : "start"} data-shape="bubble" data-group={group} data-joined={joined} data-lead={lead} data-tail={tail}
-          data-presentation-id={key} data-im-arriving={arrivals.has(key) || undefined}
+          data-presentation-id={key} data-conversation-nav-owner={navigationOwners[index]} data-im-arriving={arrivals.has(key) || undefined}
           onAnimationEnd={event => { if (event.target === event.currentTarget) setArrivals(current => { const next = new Set(current); next.delete(key); return next; }); }}>
+          {group && self ? <span className="conversation-peer-avatar" data-visible={lead}><EmployeeAvatar employee={{ id: "user", name: profile.name || "我", avatar: profile.avatar }} provider="" size="md"/></span> : null}
           {group && !self ? <span className="conversation-peer-avatar" data-visible={lead}>{lead && turn.author && employeeIds[turn.author.id] && onOpenEmployee
             ? <WandButton kind="ghost" className="conversation-avatar-button" aria-label={`查看${name}的资料`} onClick={event => onOpenEmployee({ id: employeeIds[turn.author!.id], name, avatar: turn.author?.avatar }, event.currentTarget)}><EmployeeAvatar employee={{ id: employeeIds[turn.author.id], name, avatar: turn.author.avatar }} provider="" size="md"/></WandButton>
             : <MessageAvatar spec={chatAvatarSpec(turn.author)}/>}</span> : null}
@@ -1614,6 +1650,8 @@ export interface TeamChatViewProps {
 
 export function TeamChatView({ detail, onChange, onOpenSession, details, staleRun = false }: TeamChatViewProps): React.ReactElement {
   const { run, chatTurns, steps } = detail;
+  const modelCatalog = useWandModelCatalog();
+  const runtimePreference = composerRuntimePreference(run.team.members.find(member => member.isLeader)?.agent, modelCatalog);
   // 拉一次当前资料，让本地临时行与已落库回合用同一个署名。
   useUserProfile();
   const [local, setLocal] = React.useState<LocalChatTurn[]>([]);
@@ -2252,7 +2290,11 @@ export function TeamChatView({ detail, onChange, onOpenSession, details, staleRu
             }))}
             onRemove={(index) => teamChatComposer.edit(chatSessionId, { removeAttachment: index })}
           /> : null}
-          <Flex vertical className="team-chat-compose-main" style={{ width: "100%", minWidth: 0 }}>
+          <Flex vertical className="team-chat-compose-main" style={{ width: "100%", minWidth: 0, position: "relative", marginBlockStart: 32 }}>
+            <Flex gap={8} align="center" aria-label="本轮负责人的首选配置" style={{ position: "absolute", insetBlockStart: -32, insetInlineEnd: 0, maxWidth: "100%", minWidth: 0, fontSize: "var(--font-size-xs)" }}>
+              <Typography.Text type="secondary" ellipsis={{ tooltip: true }} style={{ flex: 1, minWidth: 0 }}>首选模型：{runtimePreference.model}</Typography.Text>
+              <Typography.Text type="secondary" style={{ flex: "none" }}>思考：{runtimePreference.thinking}</Typography.Text>
+            </Flex>
             {/*
               输入框用通用发送器：值仍来自团队 composer bridge（它才是草稿 owner），
               自动换行由 autoSize 负责，本页不再手工量高度。

@@ -2,7 +2,7 @@ import { lstatSync, readFileSync } from "node:fs";
 import net from "node:net";
 import process from "node:process";
 
-import { rejectPendingRequests, startDaemonHeartbeat, waitForDaemonSocket } from "./daemon-connection.js";
+import { emitToSubscribedListeners, rejectPendingRequests, startDaemonHeartbeat, subscribeWithBufferedEvents, subscribeWithPendingEvent, waitForDaemonSocket } from "./daemon-connection.js";
 import { getErrorMessage } from "./error-utils.js";
 import { appendWindow, PTY_OUTPUT_MAX_SIZE } from "./pty-text-utils.js";
 import type { PtyTerminalSnapshot } from "./pty-terminal-state.js";
@@ -123,28 +123,13 @@ class RemoteRenderProcess implements TerminalProcess {
   }
 
   onData(listener: (event: TerminalDataEvent) => void): { dispose(): void } {
-    this.dataListeners.add(listener);
-    if (this.undeliveredEvents.length > 0) {
-      const pending = this.undeliveredEvents;
-      this.undeliveredEvents = [];
-      queueMicrotask(() => {
-        if (!this.dataListeners.has(listener)) return;
-        for (const event of pending) listener(event);
-      });
-    }
-    return { dispose: () => this.dataListeners.delete(listener) };
+    const pending = this.undeliveredEvents;
+    if (pending.length > 0) this.undeliveredEvents = [];
+    return subscribeWithBufferedEvents(this.dataListeners, listener, pending);
   }
 
   onExit(listener: (event: TerminalExitEvent) => void): { dispose(): void } {
-    this.exitListeners.add(listener);
-    const pending = this.pendingExit;
-    if (pending) {
-      // 退出事件只发生一次，但可能早于 listener 到达；补发语义必须与 data 一致。
-      queueMicrotask(() => {
-        if (this.exitListeners.has(listener)) listener(pending);
-      });
-    }
-    return { dispose: () => this.exitListeners.delete(listener) };
+    return subscribeWithPendingEvent(this.exitListeners, listener, this.pendingExit);
   }
 
   onResync(listener: (state: TerminalSessionState) => void): { dispose(): void } {
@@ -171,11 +156,9 @@ class RemoteRenderProcess implements TerminalProcess {
   }
 
   acceptData(event: TerminalDataEvent): void {
-    if (this.dataListeners.size === 0) {
+    if (!emitToSubscribedListeners(this.dataListeners, event)) {
       this.undeliveredEvents = appendTerminalChunkWindow(this.undeliveredEvents, event);
-      return;
     }
-    this.emitData(event);
   }
 
   acceptExit(event: TerminalExitEvent): void {
@@ -183,9 +166,6 @@ class RemoteRenderProcess implements TerminalProcess {
     for (const listener of Array.from(this.exitListeners)) listener(event);
   }
 
-  private emitData(event: TerminalDataEvent): void {
-    for (const listener of Array.from(this.dataListeners)) listener(event);
-  }
 }
 
 /**

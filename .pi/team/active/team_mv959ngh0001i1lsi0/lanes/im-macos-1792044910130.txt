@@ -1,0 +1,6 @@
+Lane mailbox for Mac员工IM配置 (role im-macos)
+Run: team_mv959ngh0001i1lsi0
+Lane: im-macos-1792044910130
+Token: e2752e5d-4832-4364-82a0-2b3fd6a4058a
+
+Captain messages appear below, newest last.

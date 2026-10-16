@@ -55,7 +55,7 @@ export async function runStandaloneSessionTabsBrowser() {
   // Only HTTP data is a local fixture; no dispatcher fabricates context or input changes.
   const source = `import*as React from'react';import{createRoot}from'react-dom/client';import{Layout}from'antd';
 import{state,composer}from'./src/web-ui/browser/state';
-import{selectSession,goHome}from'./src/web-ui/browser/session-engine';
+import{selectSession,goHome,refreshAll}from'./src/web-ui/browser/session-engine';
 import{installWorkspacesLegacyAdapter}from'./src/web-ui/browser/workspaces-adapter';
 import{createBrowserUiStoreBridge}from'./src/web-ui/browser/ui-store-bridge';
 import{restoreActiveTask,readActiveTaskId}from'./src/web-ui/browser/active-task';
@@ -79,12 +79,16 @@ context:()=>workspaceContextStore.getSnapshot(),activeTask:readActiveTaskId,grou
 creation:()=>newSessionStore.getSnapshot(),closeCreation:()=>newSessionController.close(),
 openTask:()=>workspacesStore.getRuntime().openTask({workspaceId:'fixture-project',workspaceName:'Fixture 项目',taskId:'fixture-task',taskName:'Fixture 任务',cwd:'/fixture/project',preferredSessionId:'grouped1'})};
 const defaultFocusMode=new URL(location.href).searchParams.has('defaultFocus');
-const legacyRefs={composer:(node)=>{if(node&&!node.firstChild)node.innerHTML='<div class="input-composer"><textarea id="input-box" class="input-textarea" aria-label="Fixture draft"></textarea></div>';},chat:(node)=>{if(node&&!node.firstChild)node.innerHTML='<div id="chat-messages"></div>';}};
+const legacyRefs={composer:(node)=>{if(node&&!node.firstChild)node.innerHTML='<div class="input-composer"><div class="composer-main-row"><textarea id="input-box" class="input-textarea" aria-label="Fixture draft"></textarea><div class="composer-actions-left"></div></div></div>';},chat:(node)=>{if(node&&!node.firstChild)node.innerHTML='<div id="chat-messages"></div>';}};
 createRoot(document.querySelector('#fixture-tabs')).render(<WandUiProvider><UiStoreProvider store={store}><Layout style={{minWidth:0,height:'100%'}}>{defaultFocusMode?<ShellMainContent legacyRefs={legacyRefs}/>:<WorkspaceTabBar/>}</Layout></UiStoreProvider></WandUiProvider>);
-async function start(){if(!defaultFocusMode){await restoreActiveTask(loadedSelection);await selectSession(loadedSelection&&state.sessions.some(s=>s.id===loadedSelection)?loadedSelection:'loose1');}window.tabsFixture.ready=true;}void start();`;
+async function start(){if(!defaultFocusMode){await refreshAll();await restoreActiveTask(loadedSelection);await selectSession(loadedSelection&&state.sessions.some(s=>s.id===loadedSelection)?loadedSelection:'loose1');}window.tabsFixture.ready=true;}void start();`;
   const built = await build({ stdin: { contents: source, resolveDir: root, loader: "tsx" }, bundle: true,
     format: "iife", platform: "browser", write: false, jsx: "automatic", define: { "process.env.NODE_ENV": '"production"' } });
   const mutations = [];
+  const deletedIds = new Set();
+  let failNextDelete = false;
+  let delayNextDelete = false;
+  let heldDelete = null;
   let failGroups = false;
   let delayNextSessionReadId = null;
   let heldSessionRead = null;
@@ -97,8 +101,27 @@ async function start(){if(!defaultFocusMode){await restoreActiveTask(loadedSelec
         mutations.push(mutation);
         let body = ""; req.on("data", chunk => { body += chunk; });
         req.on("end", () => {
-          try { const value = JSON.parse(body); mutation.unchangedCanonicalLayout = JSON.stringify(value.layout) === JSON.stringify(taskLayout); mutation.windowCount = value.layout?.windows?.length; mutation.activeIsFirst = value.layout?.activeWindowId === "window-grouped1"; } catch {}
-          res.statusCode = 409; res.end(JSON.stringify({ error: "Fixture refuses business writes" }));
+          try {
+            const value = JSON.parse(body);
+            if (url.pathname === "/api/sessions/batch-delete") {
+              mutation.sessionIds = value.sessionIds;
+              if (failNextDelete) {
+                failNextDelete = false;
+                res.statusCode = 500; res.end(JSON.stringify({ error: "Fixture deletion failed" })); return;
+              }
+              const complete = () => {
+                value.sessionIds.forEach(id => deletedIds.add(id));
+                res.end(JSON.stringify({ failed: [] }));
+                heldDelete = null;
+              };
+              if (delayNextDelete) { delayNextDelete = false; heldDelete = complete; }
+              else complete();
+              return;
+            }
+            mutation.unchangedCanonicalLayout = JSON.stringify(value.layout) === JSON.stringify(taskLayout);
+            mutation.windowCount = value.layout?.windows?.length; mutation.activeIsFirst = value.layout?.activeWindowId === "window-grouped1";
+          } catch {}
+          res.statusCode = 409; res.end(JSON.stringify({ error: "Fixture refuses unrelated business writes" }));
         }); return;
       }
       if (url.pathname === "/api/tasks" && failGroups) {
@@ -110,7 +133,9 @@ async function start(){if(!defaultFocusMode){await restoreActiveTask(loadedSelec
         heldSessionRead = () => { res.end(JSON.stringify(sessions.find(session => session.id === sessionId))); heldSessionRead = null; };
         return;
       }
-      const payload = url.pathname === "/api/tasks" ? { groups }
+      if (sessionId && deletedIds.has(sessionId)) { res.statusCode = 404; res.end(JSON.stringify({ error: "Session not found" })); return; }
+      const payload = url.pathname === "/api/tasks" ? { groups: groups.map(group => ({ ...group, standaloneSessions: group.standaloneSessions.filter(session => !deletedIds.has(session.id)) })) }
+        : url.pathname === "/api/sessions" ? sessions.filter(session => !deletedIds.has(session.id))
         : url.pathname === "/api/workspace-tasks/fixture-task" ? task
         : sessionId ? sessions.find(session => session.id === sessionId)
         : url.pathname.endsWith("/git-status") ? { isGit: false }
@@ -127,7 +152,7 @@ async function start(){if(!defaultFocusMode){await restoreActiveTask(loadedSelec
     if (url.searchParams.has("defaultFocus")) {
       res.end('<!doctype html><html lang="zh-CN" data-wand-page="settings"><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/tailwind.css"><link rel="stylesheet" href="/styles.css"><style>html,body,#fixture-tabs{margin:0;width:100%;height:100%}</style></head><body><div id="fixture-tabs"></div><div id="overlay-root"><div id="wand-react-ui-portals" class="wand-ui-portals"></div></div><script src="/app.js"></script></body></html>'); return;
     }
-    res.end('<!doctype html><html lang="zh-CN" data-wand-page="settings"><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/tailwind.css"><link rel="stylesheet" href="/styles.css"><style>html,body{margin:0;width:100%;height:100%}.main-content{display:flex;flex-direction:column;width:100%;height:100%;min-width:0}#fixture-tabs{flex:none;min-width:0}#chat-output{flex:1;min-height:0}#input-box{max-width:100%;width:100%;box-sizing:border-box}</style></head><body><main id="app" class="main-content" data-react-shell="enabled"><div id="fixture-tabs"></div><div id="output" class="hidden"></div><div id="chat-output"><div id="chat-messages"></div></div><div id="blank-chat" class="hidden"></div><div class="input-panel"><div class="input-composer"><textarea id="input-box" class="input-textarea" aria-label="Fixture draft"></textarea></div></div></main><div id="overlay-root"><div id="wand-react-ui-portals" class="wand-ui-portals"></div></div><script src="/app.js"></script></body></html>');
+    res.end('<!doctype html><html lang="zh-CN" data-wand-page="settings"><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/tailwind.css"><link rel="stylesheet" href="/styles.css"><style>html,body{margin:0;width:100%;height:100%}.main-content{display:flex;flex-direction:column;width:100%;height:100%;min-width:0}#fixture-tabs{flex:none;min-width:0}#chat-output{flex:1;min-height:0}#input-box{max-width:100%;width:100%;box-sizing:border-box}</style></head><body><main id="app" class="main-content" data-react-shell="enabled"><div id="fixture-tabs"></div><div id="output" class="hidden"></div><div id="chat-output"><div id="chat-messages"></div></div><div id="blank-chat" class="hidden"></div><div class="input-panel"><div class="input-composer"><div class="composer-main-row"><textarea id="input-box" class="input-textarea" aria-label="Fixture draft"></textarea><div class="composer-actions-left"></div></div></div></div></main><div id="overlay-root"><div id="wand-react-ui-portals" class="wand-ui-portals"></div></div><script src="/app.js"></script></body></html>');
   });
   server.listen(0, "127.0.0.1"); await once(server, "listening");
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -136,10 +161,7 @@ async function start(){if(!defaultFocusMode){await restoreActiveTask(loadedSelec
   let failureDiagnostics = null;
   const waitForFreshDocument = async (browser, previousDocumentId) => {
     const expression = `!!window.tabsFixture?.ready&&window.tabsFixture.documentId!==${JSON.stringify(previousDocumentId)}`;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try { await browser.wait(expression, "new fixture document ready"); return; }
-      catch (error) { if (error.message !== "Browser command rejected: Runtime.evaluate" || attempt === 2) throw error; }
-    }
+    await browser.wait(expression, "new fixture document ready");
   };
   const assertLabel = async browser => {
     await browser.wait("!!document.querySelector('[data-session-tabs=standalone] [role=tab]')", "standalone bar");
@@ -148,13 +170,19 @@ async function start(){if(!defaultFocusMode){await restoreActiveTask(loadedSelec
   const keys = browser => browser.evaluate("[...document.querySelectorAll('[data-session-tabs=standalone] [role=tab]')].map(n=>n.closest('[data-node-key]').dataset.nodeKey)");
   const clickReachable = async (browser, selector) => {
     await browser.settle();
-    const point = await browser.evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n)return null;const r=n.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,hit=document.elementFromPoint(x,y);return {x,y,reachable:!!r.width&&!!r.height&&(n===hit||n.contains(hit))}})()`);
-    assert.ok(point?.reachable, `Actual pointer target is reachable: ${selector}`);
+    const point = await browser.evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n)return null;const r=n.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,hit=document.elementFromPoint(x,y);return {x,y,width:r.width,height:r.height,hit:hit?.className,reachable:!!r.width&&!!r.height&&(n===hit||n.contains(hit))}})()`);
+    assert.ok(point?.reachable, `Actual pointer target is reachable: ${selector} ${JSON.stringify(point)}`);
     await browser.send("Input.dispatchMouseEvent", { type: "mousePressed", x: point.x, y: point.y, button: "left", clickCount: 1 });
     await browser.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x, y: point.y, button: "left", clickCount: 1 });
     await browser.settle();
   };
   const tab = id => `[data-session-tabs=standalone] [data-node-key="${id}"] [role=tab]`;
+  const answerDelete = async (browser, confirmed) => {
+    await browser.wait("!!document.querySelector('[role=dialog] .wand-ui-dialog-actions')");
+    assert.match(await browser.evaluate("document.querySelector('[role=dialog]').textContent"), /结束并被删除/);
+    await browser.click(`[role=dialog] .wand-ui-dialog-actions button:${confirmed ? "last-child" : "first-child"}`);
+    await browser.wait("!document.querySelector('[role=dialog]')");
+  };
   const visibleActive = async browser => {
     await browser.settle();
     const geometry = await browser.evaluate("(()=>{const n=document.querySelector('[data-session-tabs=standalone] [role=tab][aria-selected=true]'),clip=n?.closest('.ant-tabs-nav-wrap');if(!n||!clip)return null;const r=n.getBoundingClientRect(),c=clip.getBoundingClientRect();return{left:r.left,right:r.right,clipLeft:c.left,clipRight:c.right,width:r.width,documentWidth:document.documentElement.scrollWidth,viewport:innerWidth}})()");
@@ -191,7 +219,7 @@ async function start(){if(!defaultFocusMode){await restoreActiveTask(loadedSelec
       } finally { if (heldSessionRead) heldSessionRead(); await browser.close(); }
     }
     for (const width of [1280, 390, 320]) {
-      mutations.length = 0; failGroups = false;
+      mutations.length = 0; failGroups = false; deletedIds.clear(); failNextDelete = false; delayNextDelete = false;
       const browser = await openBrowser("about:blank", width, 900);
       const stage = value => { failedAt = { width, stage: value }; };
       try {
@@ -202,7 +230,8 @@ async function start(){if(!defaultFocusMode){await restoreActiveTask(loadedSelec
         await assertLabel(browser);
         await browser.wait("document.querySelectorAll('[data-session-tabs=standalone] [role=tab]').length===3");
         assert.deepEqual(await keys(browser), ["loose1", "loose2", "loose3"]);
-        assert.equal(await browser.evaluate("document.querySelectorAll('[data-session-tabs=standalone] .ant-tabs-tab-remove,[data-session-tabs=standalone] .workspace-tab-move').length"), 0);
+        assert.equal(await browser.evaluate("document.querySelectorAll('[data-session-tabs=standalone] .ant-tabs-tab-remove').length"), 3);
+        assert.equal(await browser.evaluate("document.querySelectorAll('[data-session-tabs=standalone] .workspace-tab-move').length"), 0);
         await visibleActive(browser);
         stage("pointer-and-drafts");
         await browser.click("#input-box");
@@ -314,21 +343,100 @@ async function start(){if(!defaultFocusMode){await restoreActiveTask(loadedSelec
           "Unknown directory projection retains the selected worktree's known project identity");
         await browser.evaluate("tabsFixture.closeCreation();true");
         failGroups = false;
+        assert.deepEqual(mutations, [], "Standalone navigation never writes business data before explicit deletion");
+        stage("cancel-session-deletion");
+        await browser.evaluate("tabsFixture.select('loose1')");
+        await browser.wait("document.querySelectorAll('[data-session-tabs=standalone] [role=tab]').length===3");
+        await clickReachable(browser, "[data-session-tabs=standalone] [data-node-key=loose1] .ant-tabs-tab-remove");
+        await answerDelete(browser, false);
+        assert.deepEqual(mutations, [], "Cancelling never sends a delete request");
+        assert.deepEqual(await keys(browser), ["loose1", "loose2", "loose3"]);
+        assert.equal(await browser.evaluate("tabsFixture.state.selectedId"), "loose1");
+        assert.equal(await browser.evaluate("document.querySelector('#input-box').value"), "Fixture draft one");
+        stage("failed-session-deletion");
+        failNextDelete = true;
+        await clickReachable(browser, "[data-session-tabs=standalone] [data-node-key=loose1] .ant-tabs-tab-remove");
+        await answerDelete(browser, true);
+        await browser.wait("document.querySelector('[data-node-key=loose1] [aria-busy=false]')!==null");
+        assert.deepEqual(await keys(browser), ["loose1", "loose2", "loose3"]);
+        assert.equal(await browser.evaluate("tabsFixture.state.selectedId"), "loose1");
+        assert.equal(await browser.evaluate("document.querySelector('#input-box').value"), "Fixture draft one");
+        await browser.wait("!!document.querySelector('.notification-bubble-close')");
+        assert.match(await browser.evaluate("document.querySelector('.notification-bubble').textContent"), /Fixture deletion failed/);
+        await browser.click('.notification-bubble-close');
+        await browser.wait("!document.querySelector('.notification-bubble')");
+        stage("delete-inactive-session");
+        // Inactive overflowed tabs can use the same native removal action.
+        await browser.evaluate("document.querySelector('[data-session-tabs=standalone] [data-node-key=loose3] .ant-tabs-tab-remove').click();true");
+        await answerDelete(browser, true);
+        await browser.wait("document.querySelectorAll('[data-session-tabs=standalone] [role=tab]').length===2");
+        assert.equal(await browser.evaluate("tabsFixture.state.selectedId"), "loose1");
+        assert.equal(await browser.evaluate("tabsFixture.state.sessions.some(s=>s.id==='loose3')"), false);
+        stage("delete-active-session");
+        await clickReachable(browser, "[data-session-tabs=standalone] [data-node-key=loose1] .ant-tabs-tab-remove");
+        await answerDelete(browser, true);
+        await browser.wait("tabsFixture.state.selectedId==='loose2'");
+        assert.deepEqual(await keys(browser), ["loose2"]);
+        assert.equal(await browser.evaluate("document.querySelector('#input-box').value"), "Fixture draft two");
+        assert.equal(await browser.evaluate("fetch('/api/sessions/loose1').then(r=>r.status)"), 404);
+        stage("delete-last-session");
+        await clickReachable(browser, "[data-session-tabs=standalone] [data-node-key=loose2] .ant-tabs-tab-remove");
+        await answerDelete(browser, true);
+        await browser.wait("!tabsFixture.state.selectedId&&!document.querySelector('[data-session-tabs=standalone]')");
+        assert.equal(await browser.evaluate("tabsFixture.state.sessions.filter(s=>s.id.startsWith('loose')).length"), 0);
+        stage("delayed-delete-preserves-new-selection");
+        await browser.evaluate("tabsFixture.select('project1')");
+        await assertLabel(browser);
+        delayNextDelete = true;
+        await clickReachable(browser, "[data-session-tabs=standalone] [data-node-key=project1] .ant-tabs-tab-remove");
+        await answerDelete(browser, true);
+        await browser.wait("document.querySelector('[data-node-key=project1] [aria-busy=true]')!==null");
+        assert.ok(heldDelete, "Deletion is pending in the backend");
+        const deleteCount = mutations.length;
+        await browser.evaluate("document.querySelector('[data-session-tabs=standalone] [data-node-key=project1] .ant-tabs-tab-remove').click();true");
+        assert.equal(await browser.evaluate("!!document.querySelector('[role=dialog]')"), false, "Repeated clicks cannot duplicate deletion");
+        assert.equal(mutations.length, deleteCount);
+        await browser.evaluate("tabsFixture.select('global1')");
+        heldDelete();
+        await browser.wait("!tabsFixture.state.sessions.some(s=>s.id==='project1')");
+        assert.equal(await browser.evaluate("tabsFixture.state.selectedId"), "global1", "Late completion does not hijack the new selection");
+        stage("delayed-delete-preserves-explicit-home");
+        await browser.evaluate("tabsFixture.select('project2')");
+        await assertLabel(browser);
+        delayNextDelete = true;
+        await clickReachable(browser, "[data-session-tabs=standalone] [data-node-key=project2] .ant-tabs-tab-remove");
+        await answerDelete(browser, true);
+        assert.ok(heldDelete);
+        await browser.evaluate("tabsFixture.store.dispatch({type:'nav.home'});true");
+        await browser.wait("!tabsFixture.state.selectedId");
+        heldDelete();
+        await browser.wait("!tabsFixture.state.sessions.some(s=>s.id==='project2')");
+        await browser.settle();
+        assert.equal(await browser.evaluate("tabsFixture.state.selectedId"), null, "Late completion cannot pull the user off Home");
+        await browser.evaluate("tabsFixture.select('global1')");
+        stage("refresh-after-deletion");
+        const beforeDeletedRefresh = await browser.evaluate("tabsFixture.documentId");
+        await browser.send("Page.reload"); await waitForFreshDocument(browser, beforeDeletedRefresh);
+        await browser.wait("tabsFixture.state.selectedId==='global1'");
+        assert.equal(await browser.evaluate("tabsFixture.state.sessions.some(s=>['loose1','loose2','loose3','project1','project2'].includes(s.id))"), false);
         stage("guard-and-console");
-        assert.deepEqual(mutations, [], "Standalone navigation never writes task layout or other business data");
+        assert.deepEqual(mutations.map(m=>m.path), Array(6).fill('/api/sessions/batch-delete'), "Only explicit confirmed deletes mutate business data");
+        assert.deepEqual(mutations.map(m=>m.sessionIds), [['loose1'], ['loose3'], ['loose1'], ['loose2'], ['project1'], ['project2']]);
         assert.deepEqual(browser.errors, [], "Production owners raise no browser exception");
         reports.push({ width, directoryCount: 3, excluded: ["different-directory", "task-owned", "archived", "relay"],
+          cancelledDeletePreservesSession: true, failedDeletePreservesSession: true, inactiveDeletePreservesSelection: true,
+          confirmedDeletePersists: true, activeCloseSelectsNeighbour: true, lastCloseGoesHome: true, lateDeleteKeepsNewSelection: true, lateDeleteKeepsExplicitHome: true, duplicateDeleteGuard: true,
           nativeKeyboardSelected: true, draftsRetained: true, refreshRestored: true, activeTabGeometry: thirdGeometry,
           taskTabsPreserved: true, syntheticContextExited: true, projectContextRetainedWithoutTask: true,
           canonicalSelectionExitedTask: true, failedListSelfOnly: true, delayedDefaultSelectionABAFocusRetained: true,
           knownGlobalOmitsProjectId: true, unknownWorktreeRetainsKnownProjectId: true,
-          businessWrites: 0, layoutPuts: 0, browserExceptions: 0 });
+          businessWrites: mutations.length, successfulDeletes: deletedIds.size, layoutPuts: 0, browserExceptions: 0 });
       } catch (error) {
         failureDiagnostics = { exceptions: browser.errors.slice(), state: await browser.evaluate("({fixture:!!window.tabsFixture,ready:!!window.tabsFixture?.ready,selected:window.tabsFixture?.state.selectedId,context:window.tabsFixture?.context(),ids:[...document.querySelectorAll('[id]')].map(n=>n.id),tabs:[...document.querySelectorAll('[role=tab]')].map(n=>({text:n.textContent,selected:n.getAttribute('aria-selected')}))})").catch(() => null) };
         throw error;
-      } finally { if (heldSessionRead) heldSessionRead(); await browser.close(); }
+      } finally { if (heldSessionRead) heldSessionRead(); if (heldDelete) heldDelete(); await browser.close(); }
     }
-    const result = { capturedAt: new Date().toISOString(), scope: "production source with read-only HTTP fixtures; no installed service", passed: true, reports };
+    const result = { capturedAt: new Date().toISOString(), scope: "production source with isolated HTTP session/deletion fixtures; no installed service", passed: true, reports };
     writeFileSync(join(output, "source-browser-result.json"), JSON.stringify(result, null, 2) + "\n");
     return result;
   } catch (error) {

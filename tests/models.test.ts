@@ -212,7 +212,7 @@ test("Pi RPC catalog keeps each model's thinking levels", () => {
   const models = parsePiRpcModels([
     "{\"type\":\"response\",\"command\":\"get_available_models\",\"success\":true,\"data\":{\"models\":[",
     "{\"provider\":\"xai\",\"id\":\"grok-4.6\",\"name\":\"Grok\",\"reasoning\":true,\"thinkingLevelMap\":{\"xhigh\":\"high\",\"max\":null}},",
-    "{\"provider\":\"google\",\"id\":\"gemini\",\"name\":\"Gemini\",\"reasoning\":false}",
+    "{\"provider\":\"openai\",\"id\":\"gpt-5-mini\",\"name\":\"GPT Mini\",\"reasoning\":false}",
     "]}}",
   ].join(""));
   assert.deepEqual(
@@ -220,7 +220,7 @@ test("Pi RPC catalog keeps each model's thinking levels", () => {
     ["off", "minimal", "low", "medium", "high", "xhigh"],
   );
   assert.deepEqual(
-    models.find((model) => model.id === "google/gemini")?.reasoningEfforts?.map((level) => level.effort),
+    models.find((model) => model.id === "openai/gpt-5-mini")?.reasoningEfforts?.map((level) => level.effort),
     ["off"],
   );
   assert.ok(models.find((model) => model.id === "default")?.reasoningEfforts?.some((level) => level.effort === "xhigh"));
@@ -259,13 +259,10 @@ test("Qoder model catalog exposes the official tier aliases", async () => {
   ]);
 });
 
-test("Gemini model catalog exposes only stable aliases and never claims a thinking knob", async () => {
+test("model catalog no longer exposes the removed provider", async () => {
   const result = await refreshModels(refreshOptions());
-  assert.deepEqual(result.geminiModels.map((model) => model.id), [
-    "default", "auto", "pro", "flash", "flash-lite",
-  ]);
-  // Gemini CLI 没有思考档位开关：只留「不覆盖」，下拉不会假装能调。
-  assert.deepEqual(result.thinkingEfforts.gemini, [{ effort: "off" }]);
+  assert.equal("geminiModels" in result, false);
+  assert.equal("gemini" in result.thinkingEfforts, false);
 });
 
 test("Qoder model discovery accepts bare and provider-qualified IDs", () => {

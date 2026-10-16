@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { ConversationService, GroupInput } from "./conversation-service.js";
 import type { ConversationReceipt, ConversationTarget } from "./conversation-types.js";
 import { AiTeamConflictError } from "./ai-team-runner.js";
+import { parseConversationExecutionPreference } from "./conversation-execution-preference.js";
 import { asyncRoute } from "./express-async.js";
 import { bodyObject, sendRouteError, text } from "./server-request.js";
 import { badRequest, notFound } from "./http-error.js";
@@ -50,7 +51,8 @@ export function registerConversationRoutes(app: Express, service: ConversationSe
   post("/api/conversations", (_id, body) => service.createGroup(text(body.requestId), bodyObject(body.group) as GroupInput));
   post("/api/conversations/:id/invitations", (id, body) => service.invite(id, text(body.requestId), Number(body.memberVersion), bodyObject(body.group) as GroupInput));
   post("/api/conversations/:id/channel", (id, body) => service.prepare(id, text(body.requestId), text(body.cwd) || undefined));
-  post("/api/conversations/:id/messages", (id, body) => service.send(id, text(body.requestId), text(body.input), targetOf(body.target), text(body.cwd) || undefined));
+  post("/api/conversations/:id/messages", (id, body) => service.send(id, text(body.requestId), text(body.input), targetOf(body.target), text(body.cwd) || undefined, true, undefined,
+    parseConversationExecutionPreference(body.executionPreference)));
   post("/api/conversations/:id/tasks", (id, body) => service.dispatch(id, text(body.requestId), {
     title: text(body.title), description: text(body.description), workspaceId: text(body.workspaceId), cwd: text(body.cwd) || undefined,
     memberVersion: body.memberVersion === undefined ? undefined : Number(body.memberVersion),

@@ -7,7 +7,7 @@ import type { TaskDirectoryGroup, WorkspaceSessionSummary } from "./types";
 /**
  * 侧栏三态显示模式，循环切换、设备本地持久化（和聊天宽度偏好一样不上服务端）：
  * full = 全部会话照常展开；folded = 终端一律收起，只看目录和任务；
- * active = 一级目录保留，只显示在跑、待处理、刚完成或正在查看的会话。
+ * active = 一级目录保留，只显示在跑、待处理或尚未查看的刚完成会话。
  */
 export type SidebarDisplayMode = "full" | "folded" | "active";
 
@@ -71,14 +71,14 @@ export function isSessionActive(session: WorkspaceSessionSummary): boolean {
   return isSessionAttention(session) || isSessionRunning(session) || isSessionJustCompleted(session);
 }
 
-/** 只裁剪目录内部的会话与空任务；一级目录及其顺序保留，正在看的会话始终保留。 */
+/** 只裁剪目录内部的会话与空任务；选择仅表示导航，不赋予活动状态。 */
 export function filterActiveGroups(
   groups: readonly TaskDirectoryGroup[],
-  selectedSessionId?: string | null,
+  _selectedSessionId?: string | null,
 ): TaskDirectoryGroup[] {
   return groups.map((group) => {
     const keep = (session: WorkspaceSessionSummary): boolean => (
-      isSessionActive(session) || session.id === selectedSessionId
+      isSessionActive(session)
     );
     const tasks = group.tasks.flatMap((task) => {
       const sessions = task.sessions.filter(keep);

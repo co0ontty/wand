@@ -213,6 +213,15 @@ test("commands endpoint puts a new session on its task card without a board relo
     return snapshot;
   }) as typeof handle.processManager.start;
 
+  for (const command of ["claude", "gemini"]) {
+    const rejected = await fetch(`${baseUrl}/api/commands`, {
+      method: "POST", headers: authHeaders,
+      body: JSON.stringify({ provider: "gemini", command, cwd: root }),
+    });
+    assert.equal(rejected.status, 400, "removed explicit provider must not be discarded or inferred as another tool");
+  }
+  assert.equal(roleCalls.length, 0, "invalid provider must not reach the process owner");
+
   const response = await fetch(`${baseUrl}/api/commands`, {
     method: "POST",
     headers: authHeaders,

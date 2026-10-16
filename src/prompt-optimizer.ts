@@ -43,7 +43,7 @@ export async function optimizePrompt(
   }
   const request = buildOptimizePrompt(text, language);
   try {
-    return await callConfiguredAiText(request, cwd ?? process.cwd(), language, ai, (raw) => {
+    return await callConfiguredAiText(request, cwd ?? process.cwd(), language, { ...ai, purpose: "prompt-optimize" }, (raw) => {
       const cleaned = raw
         .replace(/^```[a-zA-Z]*\n?/, "")
         .replace(/\n?```$/, "")

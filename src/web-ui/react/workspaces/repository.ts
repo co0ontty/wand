@@ -1,5 +1,7 @@
 import { parseJsonResponse } from "../http-adapter";
 import { taskMutationCompleted } from "../task-changes";
+import type { TaskOrganizeMode, TaskOrganizeTarget, OrganizeByTitleResult } from "../../../task-organize-contract";
+import type { ConversationOrganizationScope, ConversationOrganizationPreview, ConversationOrganizationJob } from "../../../conversation-organize-contract";
 
 function parseTaskMutation<T>(response: Response): Promise<T> {
   return parseJsonResponse<T>(response).then(taskMutationCompleted);
@@ -250,6 +252,68 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
       `/api/workspace-tasks/${encodeURIComponent(taskId)}/archive`,
       { method: "POST", credentials: "same-origin" },
     ));
+  }
+
+  async organizeByTitle(taskIds: readonly string[], sessionIds: readonly string[] = [], mode: TaskOrganizeMode = "auto"): Promise<OrganizeByTitleResult> {
+    return this.organizeTasks({ taskIds, sessionIds, mode });
+  }
+
+  async organizeTarget(target: TaskOrganizeTarget, mode: TaskOrganizeMode = "auto"): Promise<OrganizeByTitleResult> {
+    return this.organizeTasks({ target, mode });
+  }
+
+  private async organizeTasks(body: object): Promise<OrganizeByTitleResult> {
+    return parseTaskMutation(await this.fetchImpl("/api/tasks/organize-by-title", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }));
+  }
+
+  async prepareConversationOrganization(scope: ConversationOrganizationScope): Promise<ConversationOrganizationPreview> {
+    const response = await parseJsonResponse<{ kind: "preview"; preview: ConversationOrganizationPreview }>(await this.fetchImpl("/api/sessions/auto-organize", {
+      method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "preview", ...scope }),
+    }));
+    return response.preview;
+  }
+
+  async startConversationOrganization(token: string, force = false): Promise<ConversationOrganizationJob> {
+    try {
+      const response = await parseJsonResponse<{ job: ConversationOrganizationJob }>(await this.fetchImpl("/api/sessions/auto-organize", {
+        method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "start", token, force }),
+      }));
+      return response.job;
+    } catch (error) {
+      // Unknown acceptance is a read, never a second start with a new token.
+      try {
+        const response = await parseJsonResponse<{ job: ConversationOrganizationJob }>(await this.fetchImpl(`/api/sessions/auto-organize/by-token/${encodeURIComponent(token)}`, { credentials: "same-origin" }));
+        return response.job;
+      } catch { throw error; }
+    }
+  }
+
+  async conversationOrganizationJob(id: string): Promise<ConversationOrganizationJob> {
+    const response = await parseJsonResponse<{ job: ConversationOrganizationJob }>(await this.fetchImpl(`/api/sessions/auto-organize/${encodeURIComponent(id)}`, { credentials: "same-origin" }));
+    return response.job;
+  }
+
+  async watchConversationOrganization(initial: ConversationOrganizationJob, onProgress?: (job: ConversationOrganizationJob) => void, signal?: AbortSignal): Promise<ConversationOrganizationJob> {
+    let job = initial, changes = "";
+    while (true) {
+      signal?.throwIfAborted();
+      onProgress?.(job);
+      const key = `${job.result.createdTasks.length}:${job.result.movedSessions.length}`;
+      if (key !== changes && key !== "0:0") { changes = key; taskMutationCompleted(job.result); }
+      if (job.status !== "running") return job;
+      await new Promise(resolve => setTimeout(resolve, 800));
+      const response = await parseJsonResponse<{ job: ConversationOrganizationJob }>(await this.fetchImpl(`/api/sessions/auto-organize/${encodeURIComponent(job.id)}`, { credentials: "same-origin", signal }));
+      job = response.job;
+    }
+  }
+
+  async cancelConversationOrganization(id: string): Promise<void> {
+    await parseJsonResponse(await this.fetchImpl(`/api/sessions/auto-organize/${encodeURIComponent(id)}/cancel`, { method: "POST", credentials: "same-origin" }));
   }
 
   async moveSession(taskId: string, sessionId: string): Promise<void> {

@@ -5,7 +5,7 @@ export type SessionKind = "pty" | "structured";
 export type { SessionProvider } from "./provider-catalog.js";
 import type { SessionProvider } from "./provider-catalog.js";
 /** "claude-sdk" 是历史值：SDK 执行路径已移除，读旧会话时归一为 claude-cli-print。 */
-export type SessionRunner = "claude-cli" | "claude-cli-print" | "claude-sdk" | "codex-cli-exec" | "opencode-cli-run" | "grok-cli-headless" | "qoder-cli-print" | "pi-cli-json" | "gemini-cli-json" | "pty";
+export type SessionRunner = "claude-cli" | "claude-cli-print" | "claude-sdk" | "codex-cli-exec" | "opencode-cli-run" | "grok-cli-headless" | "qoder-cli-print" | "pi-cli-json" | "pty";
 export type SessionSource = "interactive" | "automation" | "startup";
 
 export type ExecutionMode = "assist" | "agent" | "agent-max" | "default" | "auto-edit" | "full-access" | "native" | "managed";
@@ -137,6 +137,8 @@ export interface IosIpaConfig {
 }
 
 export interface WandConfig {
+  /** Background maintenance for owned temporary files, orphan uploads and diagnostic archives. Deployment-owned. */
+  autoCleanupTemporaryFiles?: boolean;
   host: string;
   port: number;
   /** Enable HTTPS with self-signed certificate (default: false) */
@@ -225,8 +227,6 @@ export interface WandConfig {
   defaultQoderModel?: string;
   /** 新建 Pi 会话时默认使用的 provider/model pattern。 */
   defaultPiModel?: string;
-  /** 新建 Gemini 会话时默认使用的模型。留空则不传 --model，由 gemini 自行决定。 */
-  defaultGeminiModel?: string;
   /** 每工具的命名模型优先链。SQLite 偏好，稳定分组 ID 可用于会话/员工/默认值。 */
   modelGroups?: import("./model-groups.js").ModelGroup[];
   /** 快捷提交生成 commit message / tag 时使用的 CLI。 */
@@ -315,7 +315,7 @@ export type ThinkingEffort =
   | "standard"
   | "deep"
   | "max"
-  | `${"claude" | "codex" | "opencode" | "grok" | "qoder" | "pi" | "gemini"}:${string}`;
+  | `${"claude" | "codex" | "opencode" | "grok" | "qoder" | "pi"}:${string}`;
 
 export interface WorktreeInfo {
   branch: string;

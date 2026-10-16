@@ -119,6 +119,47 @@ test("out-of-order list reads cannot remove newer sessions or their drafts", asy
   assert.deepEqual(h.errors, []);
 });
 
+test("destructive list refresh preserves an explicit empty Home selection", async () => {
+  const h = harness();
+  const pending = h.api.loadSessions({ preserveNoSelection: true, skipSelectedOutputReload: true });
+  h.respond(0, [{ id: "A", status: "running" }]);
+  await pending;
+  assert.equal(h.state.selectedId, null);
+  assert.equal(h.state.sessions[0]?.id, "A", "the live list still refreshes");
+  assert.deepEqual(h.errors, []);
+});
+
+test("ordinary startup still chooses the preferred live session", async () => {
+  const h = harness();
+  const pending = h.api.loadSessions({ skipSelectedOutputReload: true });
+  h.respond(0, [{ id: "A", status: "running" }]);
+  await pending;
+  assert.equal(h.state.selectedId, "A");
+  assert.deepEqual(h.errors, []);
+});
+
+test("returning Home during destructive refresh is not overridden by the response", async () => {
+  const h = harness();
+  h.state.selectedId = "deleted";
+  const pending = h.api.loadSessions({ preserveNoSelection: true, skipSelectedOutputReload: true });
+  h.state.selectedId = null;
+  h.respond(0, [{ id: "B", status: "running" }]);
+  await pending;
+  assert.equal(h.state.selectedId, null);
+  assert.deepEqual(h.errors, []);
+});
+
+test("a newer selection during destructive refresh stays selected", async () => {
+  const h = harness();
+  h.state.selectedId = "deleted";
+  const pending = h.api.loadSessions({ preserveNoSelection: true, skipSelectedOutputReload: true });
+  h.state.selectedId = "B";
+  h.respond(0, [{ id: "B", status: "running" }]);
+  await pending;
+  assert.equal(h.state.selectedId, "B");
+  assert.deepEqual(h.errors, []);
+});
+
 test("HTTP detail cannot roll back a newer status push or append old queued inputs", async () => {
   const h = harness();
   h.state.selectedId = "A";

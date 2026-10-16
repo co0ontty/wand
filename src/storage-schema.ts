@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { STORAGE_MIGRATIONS, type StorageMigration, type StorageMigrationContext } from "./storage/migrations.js";
+import { SCHEDULED_CLAIM_DATE_SQL } from "./storage-schedules.js";
 
 /** Additive schema only. Domain migrations and transactions remain owned by WandStorage. */
 const INIT_SQL = `
@@ -301,6 +302,12 @@ const INIT_SQL = `
   );
   CREATE INDEX IF NOT EXISTS idx_silicon_employees_archived ON silicon_employees(archived_at);
 
+  CREATE TABLE IF NOT EXISTS employee_im_settings (
+    employee_id TEXT PRIMARY KEY REFERENCES silicon_employees(id) ON DELETE CASCADE,
+    config_json TEXT NOT NULL,
+    credentials TEXT
+  );
+
   CREATE TABLE IF NOT EXISTS employee_knowledge (
     id TEXT PRIMARY KEY,
     employee_id TEXT NOT NULL REFERENCES silicon_employees(id) ON DELETE CASCADE,
@@ -581,6 +588,8 @@ function applyBaselineSchema(db: DatabaseSync): void {
       CREATE INDEX IF NOT EXISTS idx_scheduled_task_runs ON scheduled_task_runs(task_id, scheduled_at DESC);
       CREATE INDEX IF NOT EXISTS idx_scheduled_task_runs_session ON scheduled_task_runs(json_extract(run_json, '$.receipt.sessionId'));
       CREATE INDEX IF NOT EXISTS idx_scheduled_task_runs_open ON scheduled_task_runs(json_extract(run_json, '$.executionFinishedAt'), json_extract(run_json, '$.state'));
+      CREATE INDEX IF NOT EXISTS idx_scheduled_task_runs_claimed ON scheduled_task_runs((${SCHEDULED_CLAIM_DATE_SQL}), id);
+      CREATE INDEX IF NOT EXISTS idx_scheduled_task_runs_task_claimed ON scheduled_task_runs(task_id, (${SCHEDULED_CLAIM_DATE_SQL}), id);
     `);
     ensureAuthSessionSchema(db);
     ensureCommandSessionSchema(db);

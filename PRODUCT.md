@@ -39,7 +39,7 @@ Wand 连接运行在用户主机上的 CLI 工具与结构化执行能力，在�
 
 ### 当前能力
 
-- 接入 Claude Code、Codex、OpenCode、Grok Build、Qoder CLI、Pi 和 Gemini CLI 等本机工具，支持终端与结构化会话能力。
+- 接入 Claude Code、Codex、OpenCode、Grok Build、Qoder CLI 和 Pi 等本机工具，支持终端与结构化会话能力。
 - 管理持久会话、归档与恢复，展示历史、工具调用、执行状态和权限请求；具体恢复能力依工具而异。
 - 提供员工配置、知识与记忆、私聊、群聊及团队任务协作。
 - 提供工作区、任务、文件浏览、Git 变更查看与快速提交入口。

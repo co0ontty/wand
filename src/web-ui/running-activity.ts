@@ -1,3 +1,6 @@
+import type { ConversationTurn } from "../types.js";
+import { currentRunningAction } from "./running-current-action.js";
+
 /**
  * 「正在执行」的客户端推导：只允许对服务端下发的运行事实与锚点时刻做展示差分。
  * 锚点（turnStartedAt / lastActivityAt）缺失时一律不显示时长，前端不本地起表伪造运行中。
@@ -5,6 +8,9 @@
 
 /** 服务端会话快照里本模块关心的字段（structured 与 PTY 共用同一形状）。 */
 export interface RunningActivityShape {
+  readonly id?: string;
+  /** Must be the transcript for this source session, never a team's merged feed. */
+  readonly messages?: readonly ConversationTurn[];
   readonly status?: string;
   readonly archived?: boolean;
   readonly permissionBlocked?: boolean;
@@ -17,6 +23,7 @@ export interface RunningActivityShape {
   readonly ptyRunning?: boolean;
   readonly structuredState?: {
     readonly inFlight?: boolean;
+    readonly activeRequestId?: string | null;
     readonly phase?: string;
     readonly turnStartedAt?: string | null;
     readonly lastActivityAt?: string | null;
@@ -37,6 +44,9 @@ export type RunningPhase = "received" | "executing" | "waiting" | "idle";
 
 /** 静默起显阈值：超过后从「正在执行」升级为「仍在运行 · 已 N 分钟无新消息」。 */
 export const SILENCE_NOTICE_MS = 60_000;
+
+const TERMINAL_STATUSES = new Set(["failed", "stopped", "exited", "done"]);
+const WAITING_STATUSES = new Set(["waiting-input", "waiting_input", "waiting_user", "awaiting_approval"]);
 
 const RUNNING_STATUSES = new Set([
   "running", "thinking", "waiting-input", "waiting_input",
@@ -69,6 +79,7 @@ export function isRunningNow(source: RunningActivityShape | RunningRunShape | nu
   if (!source) return false;
   if ((source as RunningActivityShape).archived) return false;
   const activity = source as RunningActivityShape;
+  if (activity.archived || TERMINAL_STATUSES.has(activity.status ?? "")) return false;
   if (activity.permissionBlocked || activity.pendingEscalation) return true;
   if (activity.structuredState?.inFlight) return true;
   const status = (source as RunningRunShape).status;
@@ -77,13 +88,13 @@ export function isRunningNow(source: RunningActivityShape | RunningRunShape | nu
 
 /** 会话侧运行事实：structured 看本轮 inFlight，PTY 看 ptyRunning，两者都不看本地计时。 */
 export function sessionRunning(source: RunningActivityShape | null | undefined): boolean {
-  if (!source || source.archived) return false;
+  if (!source || source.archived || TERMINAL_STATUSES.has(source.status ?? "")) return false;
   return Boolean(source.structuredState?.inFlight) || source.ptyRunning === true;
 }
 
 /**
- * 分阶段：等待审批/输入 > 已接收排队 > 正在执行 > 结束。
- * 非运行中一律 idle，调用方必须据此立即收敛状态条，不留残留。
+ * 分阶段：终态/归档 > 等待审批/输入 > 正在执行 > 已接收排队 > 结束。
+ * 队列是下一项工作，不能掩盖本轮执行或待答。终态保留在完整投影中，
  * `runMode` 给团队 run：那里的 status 就是运行事实本身。会话侧不行——裸 shell 的
  * status 恒为 running，必须走 sessionRunning（structured inFlight / PTY ptyRunning）。
  */
@@ -91,20 +102,24 @@ export function computeRunningPhase(
   source: RunningActivityShape | null | undefined,
   runMode = false,
 ): RunningPhase {
-  if (!source) return "idle";
-  // 排队未空 = 服务端还欠这一轮回复，属于「已接收」；不能被会话级 idle 吞掉。
-  if ((source.queuedMessages?.length ?? 0) > 0) return "received";
-  if (!(runMode ? isRunningNow(source) : sessionRunning(source))) return "idle";
-  if (source.permissionBlocked || source.pendingEscalation) return "waiting";
-  return "executing";
+  if (!source || source.archived || TERMINAL_STATUSES.has(source.status ?? "")) return "idle";
+  if (source.permissionBlocked || source.pendingEscalation || WAITING_STATUSES.has(source.status ?? "")) return "waiting";
+  if (runMode ? isRunningNow(source) : sessionRunning(source)) {
+    if (!runMode && currentRunningAction(source)?.kind === "waiting") return "waiting";
+    return "executing";
+  }
+  if ((source.queuedMessages?.length ?? 0) > 0 || (runMode && source.status === "starting")) return "received";
+  return "idle";
 }
 
 /** 距最近一次活动已静默多久；锚点缺失或不在运行中时为 0。 */
 export function silenceDurationMs(
   source: RunningActivityShape | RunningRunShape | null | undefined,
   nowMs: number,
+  runMode = false,
 ): number {
-  if (!isRunningNow(source) && !sessionRunning(source)) return 0;
+  // Session status=running alone is only a live shell, not an active turn.
+  if (!(runMode ? isRunningNow(source) : sessionRunning(source))) return 0;
   const last = lastActivityAtMs(source);
   if (last === null) return 0;
   return Math.max(0, nowMs - last);
@@ -115,8 +130,9 @@ export function silenceNotice(
   source: RunningActivityShape | RunningRunShape | null | undefined,
   nowMs: number,
   thresholdMs: number = SILENCE_NOTICE_MS,
+  runMode = false,
 ): string | null {
-  const silence = silenceDurationMs(source, nowMs);
+  const silence = silenceDurationMs(source, nowMs, runMode);
   if (silence < thresholdMs) return null;
   return `仍在运行 · 已 ${formatMinutes(silence)}无新消息`;
 }
@@ -139,33 +155,57 @@ export const PHASE_LABELS: Readonly<Record<RunningPhase, string>> = {
   idle: "",
 };
 
-/**
- * 状态条的完整文案。运行中恒有文字（阶段 + 已运行时长），静默超阈值时追加无新消息提示，
- * 这样「还在跑」和「已经停了」在界面上一眼可分。
- */
+/** Distinct display stages; computeRunningPhase remains compatible with avatar consumers. */
+export type RunningStatusStage = RunningPhase | "tool" | "output" | "thinking" | "background" | "failed" | "stopped";
+
+export interface RunningStatusProjection {
+  readonly phase: RunningPhase;
+  readonly stage: RunningStatusStage;
+  readonly label: string;
+  readonly action: string | null;
+  readonly toolId?: string;
+  readonly active: boolean;
+}
+
+export function projectRunningStatus(
+  source: RunningActivityShape | null | undefined,
+  runMode = false,
+): RunningStatusProjection {
+  const phase = computeRunningPhase(source, runMode);
+  const base = { phase, stage: phase, label: PHASE_LABELS[phase], action: null, active: phase !== "idle" };
+  if (!source || source.archived) return base;
+  if (source.status === "failed" || source.status === "stopped") {
+    return { ...base, stage: source.status, label: source.status === "failed" ? "执行失败" : "已停止", active: false };
+  }
+  if (phase === "received") return { ...base, label: "已接收 · 排队中" };
+  if (phase === "waiting") return { ...base, label: source.permissionBlocked || source.pendingEscalation || source.status === "awaiting_approval" ? "等待你确认操作" : PHASE_LABELS.waiting };
+  if (phase !== "executing" || runMode) return base;
+  if (source.structuredState?.phase === "background") return { ...base, stage: "background", label: "等待后台任务" };
+  const action = currentRunningAction(source);
+  return action ? { ...base, stage: action.kind, label: action.kind === "tool" ? "正在使用工具" : action.label, action: action.kind === "tool" ? action.label : null, toolId: action.toolId } : base;
+}
+
+/** One authoritative label, with server-anchored elapsed/silence reads. */
 export function runningStatusText(
   source: RunningActivityShape | null | undefined,
   nowMs: number,
   runMode = false,
 ): string {
-  const phase = computeRunningPhase(source, runMode);
-  if (phase === "idle") return "";
-  const parts = [PHASE_LABELS[phase]];
-  const started = turnStartedAtMs(source);
+  const projection = projectRunningStatus(source, runMode);
+  if (!projection.label) return "";
+  const parts = [projection.label];
+  if (projection.action) parts.push(projection.action);
+  if (!projection.active || projection.phase === "received") return parts.join(" · ");
+  const started = runMode
+    ? parseTime(source?.turnStartedAt) ?? parseTime((source as RunningRunShape | undefined)?.startedAt)
+    : turnStartedAtMs(source);
   if (started !== null) parts.push(`已运行 ${formatMinutes(Math.max(0, nowMs - started))}`);
-  const silence = silenceNotice(source, nowMs);
-  if (silence) parts.push(silence);
+  const silence = silenceDurationMs(source, nowMs, runMode);
+  if (silence >= SILENCE_NOTICE_MS) parts.push(`已 ${formatMinutes(silence)}无新消息`);
   return parts.join(" · ");
 }
 
-/** 团队侧文案：run 级锚点，语义与会话侧一致。 */
+/** 团队只投影 run 自身，不借用任何成员会话的工具或输出。 */
 export function runStatusText(source: RunningRunShape | null | undefined, nowMs: number): string {
-  if (!isRunningNow(source)) return "";
-  const waiting = source?.status === "awaiting_approval" || source?.status === "waiting_user";
-  const parts = [waiting ? PHASE_LABELS.waiting : PHASE_LABELS.executing];
-  const started = parseTime(source?.turnStartedAt) ?? parseTime(source?.startedAt);
-  if (started !== null) parts.push(`已运行 ${formatMinutes(Math.max(0, nowMs - started))}`);
-  const silence = silenceNotice(source, nowMs);
-  if (silence) parts.push(silence);
-  return parts.join(" · ");
+  return runningStatusText(source, nowMs, true);
 }

@@ -4,6 +4,7 @@ export async function sha256Hex(value: string): Promise<string> {
   const subtle = globalThis.crypto?.subtle;
   const digest = subtle
     ? new Uint8Array(await subtle.digest("SHA-256", bytes))
-    : (await import("fast-sha256")).hash(bytes);
+    // The lazy CommonJS chunk exposes only default in split ESM builds.
+    : (await import("fast-sha256")).default(bytes);
   return Array.from(digest, byte => byte.toString(16).padStart(2, "0")).join("");
 }

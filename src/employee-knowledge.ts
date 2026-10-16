@@ -58,7 +58,8 @@ export function startEmployeeKnowledgeRunner(
 ): StructuredRunnerExecution {
   const employeeId = context.session.employeeId;
   // Strip any inherited credentials from the parent environment (including nested Wand runs).
-  const env = { ...context.env };
+  // Non-secret identity, overwritten for nested executions; never infer a current session by title/time.
+  const env: NodeJS.ProcessEnv = { ...context.env, WAND_SESSION_ID: context.session.id };
   delete env.WAND_KNOWLEDGE_DB;
   delete env.WAND_KNOWLEDGE_TOKEN;
   if (!employeeId) return runner.start({ ...context, env }, observer);
@@ -72,7 +73,7 @@ export function startEmployeeKnowledgeRunner(
   try {
     const receipt = (!context.session.automationId || context.session.automationId.startsWith("wand-task:"))
       ? rememberExplicitEmployeeRequest(storage, employeeId, context.prompt) : null;
-    const runtimeSystemPrompt = [context.session.runtimeSystemPrompt, receipt, knowledgeContext(storage, employeeId, context.prompt)]
+    const runtimeSystemPrompt = [context.session.runtimeSystemPrompt, `当前 Wand 会话 ID：${context.session.id}（非凭据；创建后续检查计划时用作精确续接目标）。`, receipt, knowledgeContext(storage, employeeId, context.prompt)]
       .filter(Boolean).join("\n\n");
     const execution = runner.start({ ...context,
       session: { ...context.session, runtimeSystemPrompt },

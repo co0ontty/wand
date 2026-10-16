@@ -2439,6 +2439,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         syncPiSettingsComposer();
         var promptOptimizeBtn = document.getElementById("prompt-optimize-btn") as HTMLButtonElement | null;
         if (promptOptimizeBtn) {
+          promptOptimizeBtn.hidden = state.terminalInteractive;
           promptOptimizeBtn.disabled = promptOptimizeBusyAnywhere;
           promptOptimizeBtn.classList.toggle("is-loading", promptOptimizeBusyForCurrent);
           promptOptimizeBtn.setAttribute("aria-busy", promptOptimizeBusyForCurrent ? "true" : "false");
@@ -2530,7 +2531,8 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           return;
         }
         paintRunningStatusBar(host, selected
-          ? { ...selected, ptyRunning: computeRunningSignal(selected).ptyRunning }
+          ? { ...selected, ptyRunning: computeRunningSignal(selected).ptyRunning,
+              turnStartedAt: selected.ptyTurnStartedAt, lastActivityAt: selected.ptyLastActivityAt }
           : null);
       }
 

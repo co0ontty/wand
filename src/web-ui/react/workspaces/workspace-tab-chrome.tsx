@@ -77,7 +77,7 @@ export function WorkspaceTabBarChrome({ mobile, taskName, variant = "task", acti
         aria-label={standalone ? "未分组会话标签" : `任务 ${taskName} 的工作窗口标签`} activeKey={activeWindowId ?? undefined}
         items={windows.map(presentation => ({
           key: presentation.id,
-          closable: !mobile && !standalone,
+          closable: standalone || !mobile,
           label: <span className={classNames("wand-workspace-tab-label",
             movingDir && !presentation.containsMoving && "move-target", presentation.containsMoving && "moving-source")}
             title={movingDir && !presentation.containsMoving ? `把当前终端移入「${presentation.label}」`
@@ -86,7 +86,8 @@ export function WorkspaceTabBarChrome({ mobile, taskName, variant = "task", acti
             {presentation.session ? <SessionProviderMark session={presentation.session} className="workspace-tab-logo"/> : null}
             <span>{presentation.label}</span>
           </span>,
-          closeIcon: <span aria-label={`关闭工作窗口 ${presentation.label}`} aria-busy={closingWindowId === presentation.id}
+          closeIcon: <span title={standalone ? "关闭并删除会话" : undefined}
+            aria-label={`${standalone ? "关闭并删除会话" : "关闭工作窗口"} ${presentation.label}`} aria-busy={closingWindowId === presentation.id}
             aria-disabled={closingWindowId === presentation.id}><WandIcon name="close" size={14}/></span>,
         }))}
         onChange={movingDir ? undefined : key => onSelectWindow?.(key)}

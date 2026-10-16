@@ -44,7 +44,10 @@ export async function verifyChatModuleLoading(origin) {
         await page.goto(origin + "/?session=chat-load-A");
         if (fail) await page.getByRole("alert").filter({ hasText: "会话组件加载失败" }).waitFor();
         else await page.getByRole("status").filter({ hasText: "正在加载会话组件" }).waitFor();
-        const input = page.locator("#input-box"); await input.fill("Owned draft");
+        const input = page.locator("#input-box");
+        const compactEntry = page.locator(".input-composer .composer-compact-entry");
+        if (await compactEntry.isVisible()) await compactEntry.click();
+        await input.fill("Owned draft");
         await input.evaluate(node => { window.__chatTestInput = node; });
         // The exported owner is unique and remains shared with the optional module.
         await page.evaluate(async entry => {

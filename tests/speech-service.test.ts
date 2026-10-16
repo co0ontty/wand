@@ -1,3 +1,4 @@
+import { configTemporaryRoot, TEMP_ROOT_MARKER } from "../src/managed-temp.ts";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -71,7 +72,7 @@ test("CPU inference passes explicit no-gpu, returns text and deletes temporary a
   assert.ok(args.includes("-ng")); assert.equal(args[args.indexOf("-l") + 1], "zh");
   assert.equal(args[args.indexOf("-t") + 1], "2");
   assert.match(args[args.indexOf("--prompt") + 1]!, /语音识别.*服务端/);
-  assert.deepEqual(readdirSync(path.join(root, "speech", "tmp")), []);
+  assert.deepEqual(readdirSync(configTemporaryRoot(root)).filter(name => name !== TEMP_ROOT_MARKER), []);
   assert.equal((await service.transcribe(wav(0.2, 0))).text, "");
   assert.equal(readFileSync(log, "utf8").trim().split("\n").length, 1);
 });
@@ -95,7 +96,7 @@ test("cancellation rejects late results, frees the single job slot and cleans au
   setTimeout(() => abort.abort(), 150);
   await assert.rejects(pending, (error: SpeechError) => error.code === "CANCELLED");
   assert.equal((await service.status()).busy, false);
-  assert.deepEqual(readdirSync(path.join(root, "speech", "tmp")), []);
+  assert.deepEqual(readdirSync(configTemporaryRoot(root)).filter(name => name !== TEMP_ROOT_MARKER), []);
 });
 
 test("timeouts and oversized results fail rather than hang or expose engine output", async (t) => {

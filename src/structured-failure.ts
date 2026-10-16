@@ -34,6 +34,18 @@ export function cliUnacceptedFacts(input: {
   return { inputAccepted: false, rejection: classifyProviderRejection(input.primaryError) ?? "model-unavailable" };
 }
 
+/** Assemble common CLI exit fields while the adapter retains protocol/error observations. */
+export function buildStructuredCliResult(
+  input: Parameters<typeof cliUnacceptedFacts>[0] & Pick<StructuredRunnerResult, "exitCode" | "stderr">,
+): StructuredRunnerResult {
+  const { state, exitCode, signal, stderr, primaryError, spawnError } = input;
+  return {
+    state, exitCode, signal, stderr, primaryError,
+    ...(spawnError ? { spawnError } : {}),
+    ...cliUnacceptedFacts(input),
+  };
+}
+
 /** Only call for a provider protocol error, never assistant text, stderr or a caught transport error. */
 export function classifyProviderRejection(message: string | null | undefined): ProviderRejectionKind | null {
   const text = message?.trim() ?? "";

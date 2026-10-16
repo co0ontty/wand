@@ -148,6 +148,21 @@ export function prepareChatBottomFollow() {
   updateChatUnreadBubble();
 }
 
+/** Navigation borrows the existing scroll owner, without a second follow state. */
+export function beginChatHistorySeek(container: HTMLElement): void {
+  if (container !== getChatScrollElement()) return;
+  const sessionId = state.selectedId;
+  state.chatStickToBottom = false;
+  state.chatIsProgrammaticScroll = true;
+  state.chatProgrammaticScrollUntil = 0;
+  requestAnimationFrame(() => {
+    if (state.selectedId === sessionId && getChatScrollElement() === container) {
+      state.chatIsProgrammaticScroll = false;
+      updateChatUnreadBubble();
+    }
+  });
+}
+
 export function bindChatScrollListener() {
   var chatMsgs = getChatScrollElement();
   if (!chatMsgs || !(chatMsgs as any).isConnected) return;

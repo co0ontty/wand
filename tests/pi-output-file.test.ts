@@ -53,6 +53,11 @@ function fixture(t: TestContext, fileOptions: { directory?: string; maxBytes?: n
   const run = runner.start({ session, prompt: "fixture only", env: {} }, {
     isActive: () => active, onUpdate: (state) => updates.push(state.result),
   });
+  // A real child/daemon transport keeps the event loop alive. EventEmitter has
+  // no handle; unref-ed watch/poll hints alone need not fire before Node exits.
+  const childHandle = setInterval(() => {}, 1000);
+  const closeHandle = () => clearInterval(childHandle);
+  void run.completion.then(closeHandle, closeHandle);
   t.after(async () => {
     active = false;
     child.emit("close", 0, null);

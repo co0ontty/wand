@@ -2,7 +2,7 @@
 
 ## Kept guarantees
 
-The `CI / verify` check still runs on macOS 26, checks all three TypeScript projects and the browser bundle, generates the cross-platform brand icons, and runs every `tests/*.test.ts` file. `scripts/run-ci-tests.js` schedules files containing `WAND_BROWSER_E2E` in one browser worker and all other files in two unit workers on the same runner. Mixed unit/browser files stay intact. Both groups finish, and either nonzero exit fails the check. Existing opt-in flags and skips stay unchanged.
+The default `CI / verify` check runs on macOS 26, checks all three TypeScript projects and the browser bundle, generates cross-platform brand icons, and runs the unit/business partition with two workers. Browser interaction matrices are a separate, explicit scope: manually dispatch CI with `ui_regression=true` to run them on the same runner. `node scripts/run-ci-tests.js --suite=unit|ui|all` selects the scope; no argument retains the full-suite diagnostic behavior. Every file remains classified exactly once, and a failure in the selected scope still fails that command. Mixed files remain intact rather than being removed by source keywords. See [testing policy](testing-policy.md): tests protect behavior, not historical implementation choices.
 
 Stable and beta npm releases keep the shared `npm-publish` lock, pinned Render binary verification, explicit build, `--ignore-scripts`, and their `latest`/`beta` channels. `scripts/publish-npm.js` confirms both the version and intended dist-tag from one anonymous registry response. Requests have distinct query keys and no-cache headers so a polling cycle does not keep reusing the same representation. This mitigates a suspected stale metadata response; the historical logs alone do not establish the cache layer responsible.
 
@@ -16,7 +16,9 @@ Android caches Gradle dependency downloads keyed by build definitions, wrapper a
 
 GitHub cache access is ref-scoped. A cache from a previous tag cannot automatically seed a different tag. Native caches therefore primarily benefit reruns of the same tag or runs with a matching default-branch cache created by an authorized manual build. They do not guarantee a warm cache on every release.
 
-No workflow trigger, runner class, permissions, release upload condition, test gate or cleanup policy changed. Outdated CI and beta runs retain existing cancellation; release runs remain uncancelled to preserve publication.
+Runner class, permissions, release upload conditions and cleanup policy are unchanged. Ordinary push/PR CI now gates the business/unit scope; manual dispatch can additionally request UI regression. This is an explicit test-policy change, not a claim that earlier browser failures passed. Outdated CI and beta runs retain existing cancellation; release runs remain uncancelled to preserve publication.
+
+The measurements and verification below describe the previous full-suite policy, not the current default CI scope.
 
 ## Baseline measured on 2026-10-09
 

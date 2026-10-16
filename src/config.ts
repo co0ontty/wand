@@ -37,7 +37,6 @@ export type PreferenceKey =
   | "defaultGrokModel"
   | "defaultQoderModel"
   | "defaultPiModel"
-  | "defaultGeminiModel"
   | "modelGroups"
   | "commitCli"
   | "commitModel"
@@ -63,7 +62,6 @@ export const PROVIDER_MODEL_PREFERENCE_FIELDS = {
   grok: "defaultGrokModel",
   qoder: "defaultQoderModel",
   pi: "defaultPiModel",
-  gemini: "defaultGeminiModel",
 } as const satisfies Record<SessionProvider, keyof WandConfig>;
 
 export type ProviderModelField = (typeof PROVIDER_MODEL_PREFERENCE_FIELDS)[SessionProvider];
@@ -103,6 +101,7 @@ export const defaultConfig = (): WandConfig => ({
   host: "127.0.0.1",
   port: 8443,
   https: false,
+  autoCleanupTemporaryFiles: true,
   password: "change-me",
   shell: resolveDefaultShell(),
   startupCommands: [],
@@ -218,7 +217,13 @@ export async function loadConfigWithStorage(configPath: string, storage: WandSto
   migrateLegacyPreferencesToDb(rawInput, storage);
   migrateLegacyPasswordToDb(rawInput, storage);
 
-  const config = mergeWithDefaults(rawInput);
+  // DB preferences are authoritative, including a user correction of an old
+  // JSON tool selection. Do not validate the shadowed legacy JSON value.
+  const mergeInput = { ...rawInput };
+  for (const key of EXECUTION_TOOL_PREFERENCES) {
+    if (storage.hasPreference(preferenceStorageKey(key))) delete mergeInput[key];
+  }
+  const config = mergeWithDefaults(mergeInput);
   applyStoragePreferences(config, storage);
 
   // appSecret: DB 是权威源。
@@ -391,7 +396,7 @@ function enumSpec<T extends string | boolean>(
 
 const TRIMMED_STRING_PREFERENCE_KEYS = [
   "defaultModel", "defaultCodexModel", "defaultOpenCodeModel", "defaultGrokModel", "defaultQoderModel",
-  "defaultPiModel", "defaultGeminiModel", "commitModel", "systemAiModel", "language",
+  "defaultPiModel", "commitModel", "systemAiModel", "language",
 ] as const;
 export type TrimmedStringPreferenceKey = (typeof TRIMMED_STRING_PREFERENCE_KEYS)[number];
 
@@ -451,7 +456,6 @@ const PREFERENCE_SPECS: PreferenceSpecMap = {
   defaultGrokModel: trimmedStringSpec("defaultGrokModel", () => ""),
   defaultQoderModel: trimmedStringSpec("defaultQoderModel", () => ""),
   defaultPiModel: trimmedStringSpec("defaultPiModel", () => ""),
-  defaultGeminiModel: trimmedStringSpec("defaultGeminiModel", () => ""),
   modelGroups: {
     storageKey: preferenceStorageKey("modelGroups"),
     default: () => [],
@@ -561,13 +565,26 @@ export function preferenceSpec<K extends PreferenceKey>(key: K): PreferenceSpec<
 /** Keys applied to the live process config without restart (all of them today). */
 export const HOT_PREFERENCE_KEYS: readonly PreferenceKey[] = PREFERENCE_KEYS.filter((key) => PREFERENCE_SPECS[key].hot);
 
+const EXECUTION_TOOL_PREFERENCES = ["defaultProvider", "systemAiCli", "commitCli"] as const;
+
+/** Removed/unknown explicit tools must never silently become another executable. */
+function assertSupportedToolPreference(key: (typeof EXECUTION_TOOL_PREFERENCES)[number], value: unknown): void {
+  if (typeof value === "string" && value.trim() && !PREFERENCE_SPECS[key].read(value)) {
+    throw new Error(`不支持的执行工具偏好 ${key}: ${value}。请重新选择受支持的工具；原配置与历史已保留。`);
+  }
+}
+
 /** 用 DB 里的偏好覆盖 config 对象（in-place），返回同一个引用。DB 里没有的字段不动，保留默认值。 */
 export function applyStoragePreferences(config: WandConfig, storage: WandStorage): WandConfig {
   const target = config as unknown as Record<string, unknown>;
   for (const key of PREFERENCE_KEYS) {
     const spec = PREFERENCE_SPECS[key];
     if (!storage.hasPreference(spec.storageKey)) continue;
-    const result = spec.read(storage.getPreference<unknown>(spec.storageKey, spec.default()));
+    const raw = storage.getPreference<unknown>(spec.storageKey, spec.default());
+    if ((EXECUTION_TOOL_PREFERENCES as readonly string[]).includes(key)) {
+      assertSupportedToolPreference(key as (typeof EXECUTION_TOOL_PREFERENCES)[number], raw);
+    }
+    const result = spec.read(raw);
     if (result) target[key] = result.value;
   }
   return config;
@@ -750,12 +767,15 @@ function normalizeStructuredChatPersona(input: unknown): StructuredChatPersonaCo
 }
 
 function mergeWithDefaults(input: Partial<WandConfig>): WandConfig {
+  for (const key of EXECUTION_TOOL_PREFERENCES) assertSupportedToolPreference(key, input[key]);
   const defaults = defaultConfig();
   return {
     ...defaults,
     ...input,
     // Ensure https is boolean
     https: typeof input.https === "boolean" ? input.https : defaults.https,
+    autoCleanupTemporaryFiles: typeof input.autoCleanupTemporaryFiles === "boolean"
+      ? input.autoCleanupTemporaryFiles : defaults.autoCleanupTemporaryFiles,
     browserExtensionIds: Array.isArray(input.browserExtensionIds)
       ? input.browserExtensionIds.filter((id): id is string => typeof id === "string").map((id) => id.trim()).filter(Boolean)
       : undefined,

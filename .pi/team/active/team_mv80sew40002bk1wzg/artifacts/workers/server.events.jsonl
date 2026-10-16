@@ -1,0 +1,297 @@
+{"at":1791976917710,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976917710,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976917710,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976917711,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976919663,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976924518,"phase":"worker-radio-report","message":"完成服务端移除 reported to captain","preview":"RADIO: status=started, action=读取邮箱并采集当前服务端 Gemini 引用/基线, evidence=none, blocker=none, next=批量读取待改文件后集中编辑"}
+{"at":1791976924519,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976924520,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791976924525,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976924651,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791976924652,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976924653,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976924653,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976924655,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976925378,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976929885,"phase":"worker-radio-report","message":"完成服务端移除 reported to captain","preview":"RADIO: status=in_progress, action=已确认 server 范围仍有 Gemini 引用，准备保存 adapter 既有 diff 并读取核心文件, evidence=output/gemini-removal/remaining-src.txt+rg, blocker=none, next=批量读取 provider/types/config/models/structured/common 关键片段并编辑"}
+{"at":1791976929886,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976929887,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976929887,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976929888,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976929889,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976929889,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791976929900,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976929901,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976929902,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976929902,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976929903,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976929913,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791976929914,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976929915,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976929915,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976929916,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976929916,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976929917,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976929917,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976929918,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976929918,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976929919,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976929919,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976929920,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976930710,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976934709,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976934713,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976934715,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976934717,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976934718,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976934720,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976934721,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976934728,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976934729,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976934730,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976934731,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976934731,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976934732,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976934733,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976934733,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976934734,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976934734,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976934735,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976934735,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976934736,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976934737,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976934738,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976934739,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976934739,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976934740,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976935592,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976939567,"phase":"worker-radio-report","message":"完成服务端移除 reported to captain","preview":"RADIO: status=in_progress, action=已保存 structured-gemini-adapter diff 并定位核心分支，继续读取 AI 文本/进程/路由/发现器后执行批量改动, evidence=output/gemini-removal/structured-gemini-adapter.pre-removal.diff+src/* reads, blocker=none, next=删除 provider/catalog/model/ru"}
+{"at":1791976939570,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976939572,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976939574,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976939575,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976939576,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976939577,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976939577,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976939578,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976939578,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976939579,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976939583,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976939585,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976939586,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976939588,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976939589,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976939590,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976939590,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976939591,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976939592,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976939593,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976939594,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976939595,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976939597,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976939600,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976939602,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976939603,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976939605,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976939606,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976939608,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976939610,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976939611,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976939613,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976939614,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976939616,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976939618,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976939619,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976939620,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976939621,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976939622,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976939623,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976940477,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976943551,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976943561,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976943564,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976943566,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976943567,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976943569,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976943570,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976943570,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976943571,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976943572,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976943572,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976943583,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976943585,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976943586,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976943587,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976943587,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976943588,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976943589,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976943589,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976943590,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976943592,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976943593,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976943593,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976943594,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976943594,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976943595,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976943596,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976943596,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976943597,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976943598,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976943598,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976943599,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976943600,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976943600,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976943601,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976943602,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976943602,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976943603,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976943604,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976943604,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976943606,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976944765,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976948590,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976948591,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976948592,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976948593,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976948594,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791976948600,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976948602,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976948603,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976948624,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791976948626,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976948628,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976948629,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976948630,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976948630,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976948631,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976948632,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976948633,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976949686,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976952668,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976952670,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791976952693,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791976952694,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976952698,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976953451,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976955430,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976955432,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791976955438,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976955440,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976955442,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976956208,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976960080,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976960085,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791976960105,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791976960108,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791976960109,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791976961040,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977017515,"phase":"worker-radio-report","message":"完成服务端移除 reported to captain","preview":"RADIO: status=in_progress, action=完成必要读取，正在用精准脚本批量移除 Gemini server 分支并删除 adapter 文件, evidence=src/{provider-catalog,types,config,models,structured-session-manager,ai-text-runner,...}, blocker=none, next=执行脚本后 rg/tsc 定位残留"}
+{"at":1791977017520,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791977017562,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791977017565,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977017566,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791977018690,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977022198,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791977022201,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791977022203,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791977022204,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791977022205,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791977022214,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791977022217,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791977022219,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791977027258,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end bash failed","toolName":"bash","isError":true}
+{"at":1791977027260,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977027263,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791977027264,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977027265,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791977027267,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977027269,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791977027270,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977027271,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791977028330,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977029790,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791977029793,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791977029799,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791977029801,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977029802,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791977030634,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977034261,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791977034268,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start edit","toolName":"edit"}
+{"at":1791977034285,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1791977034288,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977034290,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791977035070,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977036646,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791977036648,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start edit","toolName":"edit"}
+{"at":1791977036659,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1791977036661,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977036663,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791977037359,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977042792,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791977042795,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791977042796,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791977042848,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791977047866,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end bash failed","toolName":"bash","isError":true}
+{"at":1791977047869,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977047870,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791977047872,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977047874,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791977048579,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977056105,"phase":"worker-radio-report","message":"完成服务端移除 reported to captain","preview":"RADIO: status=in_progress, action=批量移除完成且非 web-ui/server 范围 Gemini rg 为空；tsc 仅剩 web-ui 排除补丁类型冲突（本角色范围外）, evidence=rg scoped empty+npx tsc filtered no non-web errors, blocker=web-ui/provider-identity.ts 仍有类型错误归其他角色, next=复查关键改动和 README/docs "}
+{"at":1791977056113,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791977056119,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791977056124,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791977056129,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791977056133,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791977056149,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791977056151,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791977056153,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791977056157,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791977056241,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791977056243,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977056244,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791977056246,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977056248,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791977056249,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977056250,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791977056253,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977056255,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791977056257,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977056258,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791977057132,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977059030,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791977059039,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start bash","toolName":"bash"}
+{"at":1791977059125,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791977059127,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977059128,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791977059865,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977062786,"phase":"worker-budget-notice","message":"完成服务端移除 reached soft request budget (18/18)"}
+{"at":1791977062789,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791977062791,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791977062793,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791977062794,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791977062796,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791977062799,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791977062801,"phase":"worker-tool","message":"完成服务端移除 tool_execution_start read","toolName":"read"}
+{"at":1791977062810,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791977062814,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791977062818,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791977062820,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791977062822,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791977062825,"phase":"worker-tool","message":"完成服务端移除 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791977062830,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977062833,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791977062834,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977062835,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791977062838,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977062841,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791977062842,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977062843,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791977062845,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977062847,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791977062850,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977062853,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791977062858,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977062861,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended"}
+{"at":1791977063733,"phase":"worker-message-start","message":"完成服务端移除 message started"}
+{"at":1791977084448,"phase":"worker-message-end","message":"完成服务端移除 assistant message ended","preview":"## result_summary 已在本角色范围内实际移除服务端 Gemini 接入： - 删除 `src/structured-gemini-adapter.ts`，并已先保存既有 diff 到 `output/gemini-removal/structured-gemini-adapter.pre-removal.diff`。 - 从 provider 真源、类型、配置偏好、模型目录、thinking effort、结构化 runner/replay、PTY proce"}

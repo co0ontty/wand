@@ -1,6 +1,7 @@
 import { build } from "esbuild";
 import { createHash } from "node:crypto";
 import { coalesceBrowserRuntime } from "./coalesce-browser-runtime.js";
+import { addressBrowserModules } from "./address-browser-modules.js";
 import { createBrowserModuleImportsPlugin } from "./browser-module-imports.js";
 import { mkdir, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
@@ -83,13 +84,14 @@ async function bundle(options, plugins = []) {
 async function bundleModules() {
   const outdir = path.join(root, "src/web-ui/content/modules");
   const { outfile: ignored, ...options } = commonOptions;
+  const cssCandidates = new Set();
   const result = await build({ ...options,
     entryPoints: { main: path.join(root, "src/web-ui/browser/main.ts") },
     format: "esm", splitting: true, outdir, entryNames: "[name]-[hash]",
     chunkNames: "[name]-[hash]", minify: isProduction, legalComments: "none", write: false,
-    plugins: [await createBrowserModuleImportsPlugin(root, isProduction)],
+    plugins: [await createBrowserModuleImportsPlugin(root, isProduction, cssCandidates)],
   });
-  // IIFE CSS pooling adds a lexical wrapper; ESM imports/exports must stay top-level.
+  // ESM pooling keeps imports/exports in module scope (no IIFE wrapper).
   let outputs = result.outputFiles.map(file => ({ path: file.path, code: file.text }));
   const meta = result.metafile;
   const entry = Object.keys(meta.outputs).find(file => meta.outputs[file].entryPoint === "src/web-ui/browser/main.ts");
@@ -114,19 +116,25 @@ async function bundleModules() {
   visitAll(entry);
   outputs = outputs.filter(file => reachable.has(path.relative(root, file.path).split(path.sep).join("/")));
   for (const file of Object.keys(meta.outputs)) if (!reachable.has(file)) delete meta.outputs[file];
-  outputs = await coalesceBrowserRuntime(outputs, eager, entry, root, isProduction);
-  const buildHash = createHash("sha256").update(outputs.map(file => `${path.basename(file.path)}\n${file.code}`).join("\n")).digest("hex").slice(0, 16);
-  outputs = outputs.map(file => ({ ...file, path: path.join(outdir, buildHash, path.basename(file.path)) }));
-  const relative = file => path.relative(path.dirname(outfile), file).split(path.sep).join("/");
-  const runtime = relative(outputs[0].path);
-  const manifest = { entry: runtime, eager: [runtime], files: outputs.map(file => relative(file.path)),
+  outputs = await coalesceBrowserRuntime(outputs, eager, entry, root, isProduction, { preserveDynamicImports: true });
+  if (isProduction) outputs = outputs.map(file => ({ ...file, code: poolEmittedCssStringLiterals(file.code, cssCandidates, { format: "esm" }).code }));
+  const addressed = addressBrowserModules(outputs, meta, root);
+  outputs = addressed.outputs;
+  const runtime = outputs[0].path;
+  const manifest = { buildId: addressed.buildId, entry: runtime, eager: [runtime], files: outputs.map(file => file.path),
+    imports: addressed.imports, dependencies: addressed.dependencies,
+    integrity: Object.fromEntries(outputs.map(file => [file.path, createHash("sha256").update(file.code).digest("hex")])),
     features: Object.fromEntries(Object.entries(meta.outputs).filter(([, value]) => value.entryPoint && value.entryPoint !== "src/web-ui/browser/main.ts")
-      .map(([file, value]) => [value.entryPoint, `modules/${buildHash}/${path.basename(file)}`])) };
+      .map(([file, value]) => [value.entryPoint, addressed.published.get(path.resolve(root, file))]).filter(([, file]) => file)) };
   // Only generated build outputs are replaced; no source or user data is removed.
   await rm(outdir, { recursive: true, force: true });
-  await mkdir(path.join(outdir, buildHash), { recursive: true });
-  for (const file of outputs) await writeFile(file.path, file.code);
+  for (const file of outputs) {
+    const target = path.join(path.dirname(outfile), file.path);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, file.code);
+  }
   await writeFile(path.join(path.dirname(outfile), "module-manifest.json"), JSON.stringify(manifest));
+  meta.wandBuild = { id: manifest.buildId, manifest };
   await recordGraph(path.join(outdir, "main.js"), meta);
   console.log(`[bundle-browser] ESM: ${outputs.length} modules, 1 eager runtime`);
 }

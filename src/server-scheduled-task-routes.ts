@@ -11,6 +11,15 @@ function failure(res: Response, error: unknown): void {
 /** Authentication and the sessions capability are enforced by the server route family. */
 export function registerScheduledTaskRoutes(app: Express, service: ScheduledTaskService): void {
   app.get("/api/scheduled-tasks", (req, res) => { res.json({ tasks: service.list(req.query.includeCancelled === "1") }); });
+  app.get("/api/scheduled-tasks/calendar", (req, res) => {
+    try { res.json(service.calendar(req.query.from, req.query.to, req.query.timeZone)); } catch (error) { failure(res, error); }
+  });
+  app.get("/api/scheduled-tasks/:id/activity", (req, res) => {
+    try { res.json(service.activity(req.params.id, req.query.timeZone)); } catch (error) { failure(res, error); }
+  });
+  app.get("/api/scheduled-tasks/:id/runs/:runId", (req, res) => {
+    try { res.json({ run: service.getRun(req.params.id, req.params.runId) }); } catch (error) { failure(res, error); }
+  });
   app.get("/api/scheduled-tasks/:id", (req, res) => {
     try { res.json(service.get(req.params.id)); } catch (error) { failure(res, error); }
   });

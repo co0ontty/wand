@@ -8,6 +8,7 @@ import test, { type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { CoreTurnTracker } from "../src/core-turn-tracker.js";
+import { waitForCoreTurnsComplete } from "../src/core-status-cli.js";
 import { startIpcServer, type IpcServerDeps } from "../src/tui/ipc-server.js";
 import type { IpcSnapshotData } from "../src/tui/ipc-protocol.js";
 
@@ -78,6 +79,31 @@ test("restart waits for both real-process turns, holding the barrier through the
   assert.equal(result.code, 0, result.output);
   assert.equal(readFileSync(marker, "utf8"), "stopped");
   await eventually(() => releases === 1);
+});
+
+test("in-process restart action runs only after idle and retains the drain connection until completion", async (t) => {
+  let busy = true;
+  let draining = false;
+  const { config } = await fixture(t, {
+    coreStatusProvider: () => ({ hasActiveTurns: busy, activeTurnCount: busy ? 1 : 0 }),
+    beginCoreDrain: () => { draining = true; return () => { draining = false; }; },
+  });
+  let actionStarted = false;
+  let finishAction!: () => void;
+  const done = waitForCoreTurnsComplete(config, 5, async () => {
+    actionStarted = true;
+    assert.equal(draining, true);
+    await new Promise<void>((resolve) => { finishAction = resolve; });
+    assert.equal(draining, true);
+    return 3;
+  });
+  await eventually(() => draining);
+  assert.equal(actionStarted, false);
+  busy = false;
+  await eventually(() => actionStarted);
+  finishAction();
+  assert.equal(await done, 3);
+  await eventually(() => !draining);
 });
 
 test("a separate CLI sees busy while its own tracker is empty", async (t) => {

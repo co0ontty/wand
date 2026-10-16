@@ -111,6 +111,7 @@ test("create-request builder preserves structured and PTY legacy contracts", () 
     sessionSource: "interactive",
     // PTY 也照该 provider 用过的模型启动 CLI（macOS 客户端同样如此）。
     model: "gpt-5",
+    thinkingEffort: "deep",
     cols: 98,
     rows: 31,
   });
@@ -251,14 +252,14 @@ test("PTY 创建请求把模型发到 /api/commands", async () => {
   assert.equal(calls[0].body.model, undefined);
 });
 
-test("新建会话对话框提供模型字段并把选择写回 provider 记忆", () => {
+test("new work uses page-only model choices and the existing composer handoff", () => {
   const host = readFileSync(new URL("../src/web-ui/react/new-session/host.tsx", import.meta.url), "utf8");
-  assert.match(host, /wand-new-session-model-select/);
-  assert.match(host, /rememberModel\(/);
-  assert.match(host, /wandModelOptions\(modelCatalog/);
-
+  assert.match(host, /ConversationExecutionSelectors/);
+  assert.match(host, /usePageExecutionPreference/);
+  assert.doesNotMatch(host, /savePreferences\(|rememberModel\(/);
   const adapter = readFileSync(new URL("../src/web-ui/browser/new-session-adapter.ts", import.meta.url), "utf8");
-  assert.match(adapter, /rememberModel\(provider, model\)[\s\S]*setChatModelForProvider\(provider, model \|\| ""\)/);
+  assert.match(adapter, /teamChatComposer\.transfer/);
+  assert.match(adapter, /await sendInputFromBox/);
 });
 
 test("HTTP repository serializes preferences and loads the latest server defaults", async () => {
@@ -466,15 +467,12 @@ test("新会话对话框支持员工默认派发与指定 CLI 及模型", () => 
     assert.equal(specifiedReq.model, "custom-pi-model");
   }
 
-  // 3. UI 源码核对
+  // The one page uses employee identity plus temporary runtime selectors.
   const host = readFileSync(new URL("../src/web-ui/react/new-session/host.tsx", import.meta.url), "utf8");
-  assert.match(host, /wand-new-session-employee-section/);
-  assert.match(host, /wand-new-session-logo-bar/);
-  assert.match(host, /EmployeeAvatar[\s\S]*selectedEmployee/);
-  assert.match(host, /按员工配置的工具与模型候选顺序启动/);
-  assert.match(host, /customizingCli/);
-  assert.match(host, /选择执行工具/);
-  assert.match(host, /指定模型/);
+  assert.match(host, /new-work-person/);
+  assert.match(host, /EmployeeAvatar employee=\{employee\}/);
+  assert.match(host, /specifiedCli: true/);
+  assert.doesNotMatch(host, /savePreferences\(/);
 });
 
 test("新会话控制器与请求生成器支持工作区任务上下文绑定", () => {
@@ -529,23 +527,13 @@ test("新会话控制器与请求生成器支持工作区任务上下文绑定",
   uninstall();
 });
 
-test("新会话页的团队直发：不建会话、本轮说明必填、按已存在项目直发", () => {
+test("team new work retains its direct-run route before ordinary session creation", () => {
   const host = readFileSync(new URL("../src/web-ui/react/new-session/host.tsx", import.meta.url), "utf8");
-  const types = readFileSync(new URL("../src/web-ui/react/new-session/types.ts", import.meta.url), "utf8");
-  // 表单契约：团队与 employeeId 并列，是同一页的第三类执行主体。
-  assert.match(types, /teamId\?: string;/);
-  // 团队分支先于建会话：直发路由自己建 team_direct 卡，不下发 cwd、不先开空会话。
-  const submit = host.slice(host.indexOf("async function submit"));
-  assert.match(submit, /if \(form\.teamId\) \{\s*await startDirectTeamRun\(form\);\s*return;\s*\}/);
-  assert.ok(submit.indexOf("if (form.teamId) {") < submit.indexOf("prepareCreate"), "团队分支在建会话之前");
-  // 说明必填：服务端 boundedText(note, 1, …) 会拒空，前端本地就拦并把光标放回说明框。
-  assert.match(host, /const note = teamNote\.trim\(\);\s*\n\s*if \(!note\) \{[\s\S]*?teamNoteRef\.current\?\.focus\(\);/);
-  // 直发只发 note + workspaceId（cwd 由服务端按项目解析）。
-  assert.match(host, /aiTeamsRepository\.startDirect\(teamId, \{ note, workspaceId \}\)/);
-  // 团队只在「非任务上下文」时提供，且要一个已存在的项目 id。
-  assert.match(host, /const teamContext = Boolean\(controller\.open && form && !form\.workspaceTaskId && form\.taskName === undefined\)/);
-  assert.match(host, /teams=\{teamContext \? teamOptions : null\}/);
-  assert.match(host, /const teamWorkspaceId = form\?\.workspaceTaskId/);
+  const submit = host.slice(host.indexOf("const submit = async"));
+  assert.ok(submit.indexOf("if (form.teamId)") < submit.indexOf("prepareCreate"));
+  assert.match(submit, /aiTeamsRepository\.startDirect/);
+  assert.match(host, /form.kind === "structured" && !draft.text.trim/);
+  assert.match(host, /useAiTeamList\(!controller.workspaceTaskId && !controller.newTask\)/);
 });
 
 test("执行引擎跟 provider 一起记住：选过 Wand Agent 下次仍预选它", async () => {

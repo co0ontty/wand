@@ -12,6 +12,15 @@ export class SystemdServiceManager implements ServiceManager {
       : "/etc/systemd/system/wand.service";
   }
 
+  readConfigPath(scope: ServiceScope): string | null {
+    try {
+      const execStart = readFileSync(this.unitPath(scope), "utf8").split("\n").find((line) => line.startsWith("ExecStart="));
+      const match = execStart?.match(/(?:^|\s)(?:-c|--config)(?:=|\s+)(?:"([^"\\]+)"|'([^'\\]+)'|([^\s"'\\]+))(?=\s|$)/);
+      const config = match?.[1] ?? match?.[2] ?? match?.[3];
+      return config ? path.resolve(config) : null;
+    } catch { return null; }
+  }
+
   readEntrypoint(scope: ServiceScope): string | null {
     try {
       const execStart = readFileSync(this.unitPath(scope), "utf8").split("\n").find((line) => line.startsWith("ExecStart="));

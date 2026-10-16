@@ -77,7 +77,7 @@ test(".input-panel 之后的浮层仍留在输入面板内", () => {
 
 test("输入面板内保留了三个 composer 配置宿主", () => {
   const scopes = [...SHELL_BODY.matchAll(/data-composer-config-host="([a-z]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(scopes, ["mode", "runtime", "all"]);
+  assert.deepEqual(scopes, ["runtime", "mode", "all"]);
   const panelEnd = findInputPanelEnd(SHELL_BODY);
   for (const match of SHELL_BODY.matchAll(/data-composer-config-host="([a-z]+)"/g)) {
     assert.ok((match.index ?? 0) < panelEnd, `composer 配置宿主 ${match[1]} 必须在输入面板内`);

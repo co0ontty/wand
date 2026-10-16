@@ -6,7 +6,7 @@ import {
   WandDialog,
   WandToastRegion,
 } from "./ui";
-import { SettingsHost, NewSessionHost, FolderPickerHost, QuickCommitHost, WorktreeMergeHost,
+import { SettingsHost, FolderPickerHost, QuickCommitHost, WorktreeMergeHost,
   FilePreviewHost, LocalPreviewHost, ImageViewerHost, MissionsHost, WorkspacesHost, GithubIssuesHost, PiExecutionHost } from "./deferred-hosts";
 import { RestartOverlayHost } from "./restart-overlay/host";
 import { restartOverlayController } from "./restart-overlay/controller";
@@ -54,7 +54,6 @@ export function OverlayHost({ portalContainer, settingsPresentation = "workspace
       </> : null}
       {settingsPresentation === "page" ? <SettingsHost presentation="page" showRestart={restartOverlayController.showRestart} /> : null}
       {settingsPresentation === "workspace" ? <>
-      <NewSessionHost />
       <FolderPickerHost />
       <QuickCommitHost />
       <WorktreeMergeHost />

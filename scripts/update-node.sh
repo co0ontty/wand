@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Sourced by install/recovery. Changes only this process's PATH; never removes an old Node runtime.
+# Keep in sync with package.json engines; .nvmrc is only the CI/build pin.
+WAND_MINIMUM_NODE_VERSION="22.19.0"
 wand_node_satisfies() {
   local executable="$1"
   local required="$2"
@@ -25,7 +27,7 @@ wand_use_existing_node() {
   # nvm installs and Homebrew's versioned prefixes are user-selected runtimes.
   # Do not run arbitrary executables discovered in the project or rewrite nvm aliases.
   for candidate in "${NVM_DIR:-$HOME/.nvm}"/versions/node/v*/bin/node \
-    /opt/homebrew/opt/node@24/bin/node /usr/local/opt/node@24/bin/node \
+    /opt/homebrew/opt/node@{22,24,26}/bin/node /usr/local/opt/node@{22,24,26}/bin/node \
     /opt/homebrew/bin/node /usr/local/bin/node; do
     [ -x "$candidate" ] || continue
     wand_node_satisfies "$candidate" "$required" || continue

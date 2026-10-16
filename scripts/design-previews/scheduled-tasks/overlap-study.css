@@ -1,0 +1,83 @@
+html,body,#root { min-height:100%; margin:0; }
+body { height:auto; min-height:100dvh; overflow:auto; background:var(--bg-primary); color:var(--text-primary); font-family:var(--font-sans); font-size:13px; }
+* { box-sizing:border-box; }
+.overlap-study { max-width:1480px; padding:28px 28px 20px; margin:auto; }
+.overlap-study :where(h1,h2,h3,p) { margin:0; }
+.overlap-page-header { display:flex; align-items:center; justify-content:space-between; gap:16px; padding-bottom:24px; }
+.overlap-kicker { color:var(--text-secondary); font-size:12px; }
+.overlap-page-header h1 { font-size:26px; font-weight:600; line-height:1.5; margin-top:4px; }
+.overlap-study-badge { color:var(--text-secondary); font-size:12px; border:1px solid var(--border-subtle); border-radius:var(--control-radius); padding:6px 10px; }
+.overlap-section-heading { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px 16px; }
+.overlap-section-heading h2 { font-size:16px; font-weight:600; }
+.overlap-section-heading>span,.overlap-help { color:var(--text-secondary); font-size:12px; line-height:1.7; }
+.overlap-help { margin:8px 0 16px; }
+.overlap-scroll,.overlap-month-scroll { width:100%; overflow-x:auto; border:1px solid var(--border-subtle); border-radius:var(--control-radius); background:var(--bg-surface); overscroll-behavior-inline:contain; }
+.overlap-week { display:grid; grid-template-columns:56px repeat(7,minmax(176px,1fr)); min-width:1288px; }
+.overlap-day { min-width:0; border-left:1px solid var(--border-subtle); }
+.overlap-day>header { height:60px; display:flex; flex-direction:column; justify-content:center; gap:4px; padding:4px 8px; text-align:center; border-bottom:1px solid var(--border-subtle); }
+.overlap-day>header strong { font-size:13px; font-weight:500; }
+.overlap-day>header span { color:var(--text-secondary); font-size:10px; white-space:nowrap; }
+.overlap-day-hours { position:relative; height:288px; background:repeating-linear-gradient(to bottom,var(--border-subtle) 0px,var(--border-subtle) 1px,transparent 1px,transparent 32px); }
+.overlap-axis { position:sticky; left:0; z-index:2; background:var(--bg-surface); }
+.overlap-axis>div { height:60px; border-bottom:1px solid var(--border-subtle); }
+.overlap-axis>section { position:relative; height:288px; }
+.overlap-axis span { position:absolute; left:8px; font-size:10px; color:var(--text-secondary); font-variant-numeric:tabular-nums; padding-top:4px; }
+.overlap-event.wand-ui-button { width:100%; height:44px; padding:4px; display:grid; grid-template-columns:16px minmax(0,1fr); grid-template-rows:16px 14px; align-content:start; gap:2px 4px; text-align:start; justify-content:initial; border:1px dashed var(--border-subtle); border-left:3px dashed var(--text-secondary); border-radius:4px; color:var(--text-primary); background:var(--bg-surface); box-shadow:none; white-space:normal; overflow:hidden; }
+.overlap-day-hours>.overlap-event,.overlap-day-hours>.overlap-more { position:absolute; transition-property:background-color,border-color,color,box-shadow; }
+.overlap-event[data-interval=true] { border-style:solid; background:var(--success-muted); border-color:var(--success); }
+.overlap-face { width:16px; height:16px; display:inline-flex; line-height:0; }
+.overlap-event-meta { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:2px; }
+.overlap-event-meta time { font-size:10px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.overlap-status { display:inline-flex; width:12px; height:12px; flex-shrink:0; color:var(--text-secondary); }
+[data-status=completed] .overlap-status { color:var(--success); }
+.overlap-event-title { grid-column:1/-1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; line-height:14px; }
+.overlap-end { grid-column:1/-1; font-size:10px; color:var(--text-secondary); line-height:12px; font-variant-numeric:tabular-nums; }
+.overlap-more.wand-ui-button { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; align-content:center; gap:2px 6px; min-height:44px; height:44px; padding:3px 4px; color:var(--text-primary); background:var(--bg-secondary); border:1px solid var(--border-subtle); border-radius:4px; font-size:11px; box-shadow:none; }
+.overlap-more>strong { font-weight:500; white-space:nowrap; }
+.overlap-more>span:last-child { font-size:10px; color:var(--text-secondary); }
+.overlap-face-stack { display:inline-flex; padding-left:4px; }
+.overlap-face-stack>.overlap-face { margin-left:-4px; border-radius:4px; background:var(--bg-secondary); }
+.overlap-legend { display:flex; align-items:center; flex-wrap:wrap; gap:8px 24px; margin:12px 0 28px; font-size:11px; color:var(--text-secondary); line-height:1.7; }
+.overlap-legend>span { display:inline-flex; align-items:center; gap:6px; }
+.overlap-legend i { width:12px; height:9px; background:var(--success-muted); border:1px solid var(--success); border-radius:2px; }
+.overlap-legend i[data-planned] { background:var(--bg-surface); border:1px dashed var(--text-secondary); }
+.overlap-month-section .overlap-section-heading { margin-bottom:12px; }
+.overlap-month-scroll>.ant-picker-calendar { min-width:1288px; }
+.overlap-month-scroll tbody>tr:not(:nth-child(3)) { display:none; }
+.overlap-month-scroll .ant-picker-cell { vertical-align:top; padding:0; }
+.overlap-month-scroll .ant-picker-content { table-layout:fixed; }
+.overlap-month-scroll th { font-size:11px; padding:8px 0; font-weight:500; color:var(--text-secondary); }
+.overlap-month-cell { height:144px; padding:6px; display:flex; flex-direction:column; gap:4px; border-top:1px solid var(--border-subtle); border-right:1px solid var(--border-subtle); }
+.overlap-month-cell>span { text-align:right; font-size:12px; margin-bottom:4px; }
+.overlap-month-cell>.overlap-more { justify-content:flex-start; background:transparent; border:0; height:28px; min-height:28px; }
+.overlap-month-cell .overlap-more .overlap-face-stack,.overlap-month-cell .overlap-more>span:last-child { display:none; }
+.overlap-month-cell>.overlap-event { flex-shrink:0; height:28px; grid-template-columns:16px 32px minmax(0,1fr) 12px; grid-template-rows:16px; align-items:center; gap:4px; }
+.overlap-month-cell .overlap-event-meta { display:contents; }
+.overlap-month-cell .overlap-event-meta>time { grid-column:2; grid-row:1; }
+.overlap-month-cell .overlap-status { grid-column:4; grid-row:1; }
+.overlap-month-cell .overlap-event-title { grid-column:3; grid-row:1; }
+.overlap-study>footer { color:var(--text-secondary); font-size:11px; line-height:1.7; padding-top:16px; max-width:1000px; }
+.overlap-more-content { width:min(360px,calc(100vw - 48px)); max-height:min(560px,calc(100dvh - 96px)); overflow:auto; overscroll-behavior:contain; }
+.overlap-more-content>header { position:sticky; top:0; z-index:1; background:var(--bg-surface); }
+.overlap-more-content>header,.overlap-record>header { display:flex; justify-content:space-between; gap:12px; align-items:center; padding-bottom:12px; border-bottom:1px solid var(--border-subtle); }
+.overlap-more-content h3,.overlap-record h3 { font-size:14px; font-weight:600; margin:0; }
+.overlap-more-content header p { font-size:11px; color:var(--text-secondary); margin:4px 0 0; }
+.overlap-more-content>ol { list-style:none; padding:0; margin:4px 0 0; }
+.overlap-more-content li { border-bottom:1px solid var(--border-subtle); }
+.overlap-more-content li:last-child { border-bottom:0; }
+.overlap-expanded-item.wand-ui-button { display:grid; grid-template-columns:16px minmax(0,1fr) 14px; gap:3px 8px; align-content:start; width:100%; height:auto; padding:10px 4px; text-align:left; white-space:normal; }
+.overlap-expanded-item>.overlap-face { grid-column:1; grid-row:1/4; margin-top:1px; }
+.overlap-expanded-item>.overlap-event-meta { grid-column:2; grid-row:1; }
+.overlap-expanded-item>.overlap-event-title { grid-column:2; grid-row:2; font-size:12px; line-height:1.6; white-space:normal; }
+.overlap-expanded-item>.overlap-member { grid-column:2; grid-row:3; font-size:11px; color:var(--text-secondary); }
+.overlap-expanded-item>svg { grid-column:3; grid-row:1/4; align-self:center; transition:transform var(--motion-normal) var(--ease-out-expo); }
+.overlap-expanded-item[data-selected=true]>svg { transform:rotate(180deg); }
+.overlap-item-expansion { display:grid; grid-template-rows:0fr; opacity:0; visibility:hidden; transition:grid-template-rows var(--motion-normal) var(--ease-out-expo),opacity var(--motion-quick-exit) var(--ease-in-out-smooth),visibility var(--motion-normal); }
+.overlap-item-expansion[data-open=true] { grid-template-rows:1fr; opacity:1; visibility:visible; }
+.overlap-item-expansion>div { min-height:0; overflow:hidden; }
+.overlap-item-expansion p { font-size:12px; line-height:1.7; color:var(--text-secondary); padding:0 8px 12px 28px; margin:0; }
+.overlap-record { width:min(320px,calc(100vw - 48px)); }
+.overlap-record p { font-size:12px; line-height:1.7; color:var(--text-secondary); margin:12px 0 0; }
+@media(max-width:640px) { .overlap-study { padding:16px; } .overlap-page-header { flex-direction:column; align-items:flex-start; gap:8px; } .overlap-page-header h1 { font-size:22px; } }
+@media(pointer:coarse) { .overlap-month-cell>.overlap-more,.overlap-month-cell>.overlap-event { min-height:44px; } .overlap-month-cell { height:196px; } }
+@media(prefers-reduced-motion:reduce) { .overlap-item-expansion,.overlap-expanded-item>svg { transition:none; } }

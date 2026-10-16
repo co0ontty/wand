@@ -3,25 +3,30 @@ import { WandIcon } from "../ui";
 import { useReducedMotion } from "../ui/motion-tokens";
 import { useServerAnchoredClock } from "../shell/use-server-anchored-clock.js";
 import {
-  computeRunningPhase,
+  projectRunningStatus,
   runningStatusText,
-  runStatusText,
-  silenceNotice,
+  silenceDurationMs,
+  SILENCE_NOTICE_MS,
   type RunningActivityShape,
-  type RunningPhase,
+  type RunningStatusStage,
 } from "../../running-activity";
 
 const PHASE_ICONS = {
   received: "enter",
   executing: "spark",
+  tool: "wrench",
+  output: "enter",
+  thinking: "spark",
+  background: "history",
   waiting: "shield",
+  failed: "warning",
+  stopped: "stop",
   idle: "spark",
-} as const;
+} as const satisfies Record<RunningStatusStage, string>;
 
 /**
- * 持续可见的「正在执行」状态条（私聊会话与团队群聊共用同一语义）。
- * 全部读数来自服务端运行事实与本轮锚点：非运行中直接不渲染（立即收敛，不留残影），
- * 静默超过阈值时升级为「仍在运行 · 已 N 分钟无新消息」，而不是一片静止历史。
+ * 阶段与当前动作合并成一条状态。终态按真实 failed/stopped 展示并停止计时；
+ * 运行读数只差分服务端锚点，不把输出正文当阶段、不借用其他会话事实。
  */
 export function RunningStatusBar(props: {
   activity: RunningActivityShape | null | undefined;
@@ -30,32 +35,29 @@ export function RunningStatusBar(props: {
 }): React.ReactElement | null {
   const activity = props.activity;
   const runMode = props.runMode === true;
-  // 相位为准：排队未空也算「这一轮还没完」，不能被会话级 idle 吞掉。
-  const phase = computeRunningPhase(activity, runMode);
-  const running = phase !== "idle";
-  const now = useServerAnchoredClock(running);
+  const projection = projectRunningStatus(activity, runMode);
+  const now = useServerAnchoredClock(projection.active && projection.phase !== "received");
   const reduced = useReducedMotion();
-  if (!running || !activity) return null;
-  const waitingRun = runMode
-    && (activity.status === "awaiting_approval" || activity.status === "waiting_user");
-  const shownPhase: RunningPhase = waitingRun ? "waiting" : phase;
-  const text = runMode ? runStatusText(activity, now) : runningStatusText(activity, now, runMode);
+  const text = runningStatusText(activity, now, runMode);
   if (!text) return null;
-  const waiting = shownPhase === "waiting";
+  const waiting = projection.phase === "waiting";
+  const silent = projection.active && projection.phase !== "received"
+    && silenceDurationMs(activity, now, runMode) >= SILENCE_NOTICE_MS;
   return (
     <div
       className={`chat-running-bar${waiting ? " is-waiting" : ""}`}
-      data-phase={shownPhase}
-      data-silent={silenceNotice(activity, now) ? "true" : undefined}
+      data-phase={projection.stage}
+      data-source-session={runMode ? undefined : activity?.id}
+      data-silent={silent ? "true" : undefined}
       role="status"
       aria-live="polite"
     >
       <span
-        className={`chat-running-pulse${reduced ? " is-instant" : ""}`}
-        data-phase={shownPhase}
+        className={`chat-running-pulse${reduced || !projection.active ? " is-instant" : ""}`}
+        data-phase={projection.stage}
         aria-hidden="true"
       >
-        <WandIcon name={PHASE_ICONS[shownPhase]} size={13} />
+        <WandIcon name={PHASE_ICONS[projection.stage]} size={13} />
       </span>
       <span className="chat-running-text">{text}</span>
     </div>

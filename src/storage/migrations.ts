@@ -247,4 +247,28 @@ export const STORAGE_MIGRATIONS: readonly StorageMigration[] = [
   { version: 2, name: "task-records-backfill", up: migrateTaskRecordsV2 },
   { version: 3, name: "auth-token-digests", up: migrateAuthTokensV3 },
   { version: 4, name: "unique-card-per-container", up: uniqueCardPerContainerV4 },
+  { version: 5, name: "managed-upload-provenance", up: db => db.exec(`
+    CREATE TABLE IF NOT EXISTS wand_uploads (
+      file_path TEXT PRIMARY KEY, canonical_path TEXT NOT NULL UNIQUE,
+      cwd TEXT NOT NULL, canonical_cwd TEXT NOT NULL, session_id TEXT NOT NULL,
+      device INTEGER NOT NULL, inode INTEGER NOT NULL, size INTEGER NOT NULL,
+      mtime_ms REAL NOT NULL, ctime_ms REAL NOT NULL, created_at INTEGER NOT NULL,
+      orphaned_at INTEGER, checked_at INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_wand_uploads_checked ON wand_uploads(checked_at, created_at);
+    CREATE TABLE IF NOT EXISTS wand_upload_references (
+      file_path TEXT NOT NULL, session_id TEXT NOT NULL, created_at INTEGER NOT NULL,
+      PRIMARY KEY(file_path, session_id)
+    );
+  `) },
+  { version: 6, name: "conversation-organization-jobs", up: db => db.exec(`
+    CREATE TABLE IF NOT EXISTS conversation_organization_jobs (
+      id TEXT PRIMARY KEY, request_token TEXT NOT NULL UNIQUE, scope_key TEXT NOT NULL,
+      status TEXT NOT NULL, state_json TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_conversation_organization_running ON conversation_organization_jobs(status);
+    CREATE TABLE IF NOT EXISTS conversation_organization_cache (
+      scope_key TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+  `) },
 ];

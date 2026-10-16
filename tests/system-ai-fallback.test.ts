@@ -35,7 +35,6 @@ function textEvents(provider: SessionProvider, text: string): object[] {
     case "opencode": return [{ type: "text", part: { text } }];
     case "grok": return [{ type: "text", data: text }];
     case "qoder": return [{ type: "result", subtype: "success", result: text }];
-    case "gemini": return [{ type: "message", role: "assistant", content: text }];
     default: return [piText(text)];
   }
 }
@@ -49,7 +48,7 @@ async function withCliOutputs(
   const bin = join(root, "bin");
   const marker = join(root, "attempts");
   mkdirSync(bin);
-  for (const command of ["codex", "opencode", "grok", "qodercli", "pi", "gemini"]) {
+  for (const command of ["codex", "opencode", "grok", "qodercli", "pi"]) {
     writeFileSync(join(bin, command), `#!${process.execPath}\n` + [
       'const fs = require("node:fs");',
       'const args = process.argv.slice(2);',
@@ -78,7 +77,6 @@ const failures: Array<[SessionProvider, object]> = [
   ["grok", { type: "error", message: FAILURE }],
   ["qoder", { type: "result", subtype: "error_during_execution", is_error: true, errors: [FAILURE] }],
   ["pi", piText(FAILURE, "error")],
-  ["gemini", { type: "result", status: "error", error: { message: FAILURE } }],
 ];
 
 for (const [provider, failure] of failures) {
@@ -146,10 +144,8 @@ test("warnings and a successful terminal result after an internal retry do not f
     pi: [piText(FAILURE, "error"), piText(SUCCESS)],
     codex: [failures[0][1], ...textEvents("codex", SUCCESS), { type: "turn.completed" }],
     qoder: [failures[3][1], ...textEvents("qoder", SUCCESS)],
-    gemini: [{ type: "error", severity: "warning", message: "warning" },
-      ...textEvents("gemini", SUCCESS), { type: "result", status: "success" }],
   }, async (root) => {
-    for (const provider of ["pi", "codex", "qoder", "gemini"] as const) {
+    for (const provider of ["pi", "codex", "qoder"] as const) {
       assert.equal(await callConfiguredAiText(REQUEST, root, "中文", { provider, model: provider }), SUCCESS);
     }
   });

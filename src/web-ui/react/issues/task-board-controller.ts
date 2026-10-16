@@ -1,5 +1,5 @@
 /** 看板、AI 团队页与群聊页共用这一条独立路由：同一时刻只开其中一页，返回键行为一致。 */
-export type TaskBoardPage = "board" | "teams" | "teamchat" | "schedules";
+export type TaskBoardPage = "board" | "teams" | "teamchat" | "schedules" | "calendar";
 
 export interface TaskBoardControllerSnapshot {
   open: boolean;
@@ -10,6 +10,7 @@ export interface TaskBoardControllerSnapshot {
   runId: string;
   /** 团队联系人入口要预选并展开开工表单的团队。 */
   teamId: string;
+  calendarRange: "month" | "week";
   revision: number;
 }
 
@@ -21,8 +22,9 @@ export const TASK_BOARD_VIEW = "taskboard";
 export const AI_TEAMS_VIEW = "teams";
 export const TEAM_CHAT_VIEW = "teamchat";
 export const SCHEDULED_TASKS_VIEW = "schedules";
+export const GLOBAL_CALENDAR_VIEW = "calendar";
 export const TEAM_CHAT_RUN_PARAM = "run";
-const TASK_BOARD_VIEW_ALIASES = new Set(["taskboard", "issues", AI_TEAMS_VIEW, TEAM_CHAT_VIEW, SCHEDULED_TASKS_VIEW]);
+const TASK_BOARD_VIEW_ALIASES = new Set(["taskboard", "issues", AI_TEAMS_VIEW, TEAM_CHAT_VIEW, SCHEDULED_TASKS_VIEW, GLOBAL_CALENDAR_VIEW]);
 
 const HISTORY_STATE_KEY = "wandShellView";
 
@@ -33,6 +35,7 @@ let snapshot: TaskBoardControllerSnapshot = {
   sessionId: "",
   runId: "",
   teamId: "",
+  calendarRange: "month",
   revision: 0,
 };
 const listeners = new Set<Listener>();
@@ -62,6 +65,7 @@ export function taskBoardPageOf(search: string): TaskBoardPage {
   if (value === AI_TEAMS_VIEW) return "teams";
   if (value === TEAM_CHAT_VIEW) return "teamchat";
   if (value === SCHEDULED_TASKS_VIEW) return "schedules";
+  if (value === GLOBAL_CALENDAR_VIEW) return "calendar";
   return "board";
 }
 
@@ -76,16 +80,20 @@ export function taskBoardSearch(
   open: boolean,
   page: TaskBoardPage = "board",
   runId = "",
+  calendarRange: "month" | "week" = "month",
 ): string {
   const params = new URLSearchParams(searchFrom(search));
+  const ownedCalendarRange = params.get(TASK_BOARD_VIEW_PARAM) === GLOBAL_CALENDAR_VIEW || page === "calendar";
   if (open) {
     params.set(
       TASK_BOARD_VIEW_PARAM,
-      page === "teams" ? AI_TEAMS_VIEW : page === "teamchat" ? TEAM_CHAT_VIEW : page === "schedules" ? SCHEDULED_TASKS_VIEW : TASK_BOARD_VIEW,
+      page === "teams" ? AI_TEAMS_VIEW : page === "teamchat" ? TEAM_CHAT_VIEW : page === "schedules" ? SCHEDULED_TASKS_VIEW : page === "calendar" ? GLOBAL_CALENDAR_VIEW : TASK_BOARD_VIEW,
     );
   } else {
     params.delete(TASK_BOARD_VIEW_PARAM);
   }
+  if (open && page === "calendar" && calendarRange === "week") params.set("range", "week");
+  else if (ownedCalendarRange) params.delete("range");
   if (open && page === "teamchat" && runId) params.set(TEAM_CHAT_RUN_PARAM, runId);
   else params.delete(TEAM_CHAT_RUN_PARAM);
   const next = params.toString();
@@ -110,7 +118,7 @@ function historyState(): Record<string, unknown> {
 function writeLocation(open: boolean, mode: HistoryMode): void {
   if (typeof window === "undefined" || !window.history) return;
   const url = new URL(window.location.href);
-  url.search = taskBoardSearch(url.search, open, snapshot.page, snapshot.runId);
+  url.search = taskBoardSearch(url.search, open, snapshot.page, snapshot.runId, snapshot.calendarRange);
   const next = `${url.pathname}${url.search}${url.hash}`;
   const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
   const state = { ...historyState(), [HISTORY_STATE_KEY]: open ? TASK_BOARD_VIEW : null };
@@ -132,10 +140,13 @@ function onPopState(): void {
     return;
   }
   const page = shouldOpen ? taskBoardPageOf(locationSearch()) : snapshot.page;
-  if (shouldOpen === snapshot.open && page === snapshot.page) return;
+  const calendarRange = new URLSearchParams(searchFrom(locationSearch())).get("range") === "week" ? "week" : "month";
+  if (shouldOpen === snapshot.open && page === snapshot.page && (page !== "calendar" || calendarRange === snapshot.calendarRange)) return;
   publish({
     open: shouldOpen,
     page,
+    calendarRange,
+    ...(page === "calendar" ? { workspaceId: "", sessionId: "" } : {}),
     runId: page === "teamchat" ? teamChatRunOf(locationSearch()) : "",
     teamId: "",
   });
@@ -148,7 +159,7 @@ export function installTaskBoardHistory(): void {
   if (!isTaskBoardView(locationSearch())) return;
   if (!snapshot.open) {
     const page = taskBoardPageOf(locationSearch());
-    publish({ open: true, page, ...(page === "teamchat" ? { runId: teamChatRunOf(locationSearch()) } : {}) });
+    publish({ open: true, page, calendarRange: new URLSearchParams(searchFrom(locationSearch())).get("range") === "week" ? "week" : "month", ...(page === "teamchat" ? { runId: teamChatRunOf(locationSearch()) } : {}) });
   }
   writeLocation(true, "replace");
 }
@@ -163,7 +174,7 @@ export const taskBoardController = {
     const wasOpen = snapshot.open;
     const pageChanged = snapshot.page !== page;
     const runChanged = page === "teamchat" && snapshot.runId !== runId;
-    publish({ open: true, workspaceId, sessionId, page, runId: page === "teamchat" ? runId : "", teamId: page === "teams" ? teamId : "" });
+    publish({ open: true, workspaceId: page === "calendar" ? "" : workspaceId, sessionId: page === "calendar" ? "" : sessionId, page, runId: page === "teamchat" ? runId : "", teamId: page === "teams" ? teamId : "" });
     if (wasOpen) {
       // 看板 ⇄ 团队页 ⇄ 群聊页之间切换只改地址，不多压一层历史：返回键仍然一步回到会话。
       if (pageChanged || runChanged) writeLocation(true, "replace");
@@ -175,6 +186,11 @@ export const taskBoardController = {
     }
     writeLocation(true, "push");
     openedViaPush = true;
+  },
+  calendarRange(value: "month" | "week"): void {
+    if (snapshot.calendarRange === value) return;
+    publish({ calendarRange: value });
+    if (snapshot.open && snapshot.page === "calendar") writeLocation(true, "replace");
   },
   close(): void {
     installTaskBoardHistory();

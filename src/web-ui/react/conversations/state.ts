@@ -10,6 +10,7 @@ export interface ConversationUiState {
   selectedId: string;
   directory: boolean;
   listFilter: ConversationListFilter;
+  activityOnly: boolean;
   targets: Record<string, ConversationTarget>;
   filters: Record<string, string>;
   scrolls: Record<string, number>;
@@ -27,7 +28,7 @@ function initial(): ConversationUiState {
   } catch {}
   return { mode: stored.mode === "tasks" ? "tasks" : "chats", active: stored.active ?? null,
     selectedId: typeof stored.selectedId === "string" ? stored.selectedId : "", directory: false,
-    listFilter: normalizeListFilter(stored.listFilter),
+    listFilter: normalizeListFilter(stored.listFilter), activityOnly: stored.activityOnly === true,
     targets: stored.targets ?? {}, filters: stored.filters ?? {}, scrolls: stored.scrolls ?? {}, focusRequest: null };
 }
 let state = initial();
@@ -57,6 +58,7 @@ export const conversationUi = {
   directory: (open: boolean) => { ++selectionRevision; update({ directory: open, active: open ? true : state.active, focusRequest: null }); },
   mode: (mode: "chats" | "tasks") => update({ mode }),
   listFilter: (value: string) => update({ listFilter: normalizeListFilter(value) }),
+  activityOnly: (value: boolean) => update({ activityOnly: value }),
   target: (id: string, target: ConversationTarget) => update({ targets: { ...state.targets, [id]: target } }),
   filter: (id: string, filter: string) => update({ filters: { ...state.filters, [id]: filter } }),
   scroll: (id: string, value: number) => update({ scrolls: { ...state.scrolls, [id]: value } }),

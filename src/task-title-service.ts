@@ -75,7 +75,7 @@ export class TaskTitleService {
         const provider = config?.defaultProvider ?? "claude";
         const ai = config ? resolveSystemAiContext({ provider, structuredState: undefined, runner: undefined,
           command: provider === "qoder" ? "qodercli" : provider, selectedModel: null,
-          thinkingEffort: config.defaultThinkingEffort }, config, this.storage.getSystemSiliconEmployee(), free) : {};
+          thinkingEffort: config.defaultThinkingEffort }, config, this.storage.getSystemSiliconEmployee(), free, { storage: this.storage }) : {};
         const cwd = (current.workspaceId ? this.storage.getWorkspace(current.workspaceId)?.cwd : undefined) || this.options.cwd
           || config?.defaultCwd || process.cwd();
         const title = await generateTitle(input.source, cwd, config?.language ?? "", { ...ai, signal: this.controller.signal });

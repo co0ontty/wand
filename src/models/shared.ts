@@ -40,18 +40,6 @@ export const QODER_FALLBACK_MODELS: ClaudeModelInfo[] = [
 export const PI_FALLBACK_MODELS: ClaudeModelInfo[] = [
   { id: "default", label: "跟随 Pi 默认", alias: true },
 ];
-/**
- * Gemini CLI 没有列模型的子命令，只能给出稳定别名（`packages/core/src/config/models.ts`
- * 里的 GEMINI_MODEL_ALIAS_*）。具体版本名随发布滚动，不适合写死在这里；
- * 设置页的模型输入框是自由文本，用户可以自己填完整模型名。
- */
-export const GEMINI_FALLBACK_MODELS: ClaudeModelInfo[] = [
-  { id: "default", label: "跟随 Gemini 默认", alias: true },
-  { id: "auto", label: "Auto（按任务自动选模型）" },
-  { id: "pro", label: "Pro" },
-  { id: "flash", label: "Flash" },
-  { id: "flash-lite", label: "Flash Lite" },
-];
 export function cloneModels(models: readonly ClaudeModelInfo[]): ClaudeModelInfo[] {
   return models.map((model) => ({
     ...model,

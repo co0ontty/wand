@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { createHash, webcrypto } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
+import { build } from "esbuild";
 import { sha256Hex } from "../src/web-ui/react/sha256.ts";
 
 function replaceGlobal(t: { after(action: () => void): void }, key: string, value: unknown): void {
@@ -23,6 +28,19 @@ test("native and LAN HTTP SHA-256 keep identical UTF-8 fingerprints, including U
       const expected = createHash("sha256").update(value).digest("hex");
       assert.equal(await sha256Hex(value), expected);
     }
+  }
+});
+
+test("production split ESM SHA-256 fallback preserves every fingerprint vector", async t => {
+  const dir = mkdtempSync(join(tmpdir(), "wand-hash-esm-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  replaceGlobal(t, "crypto", { getRandomValues: webcrypto.getRandomValues.bind(webcrypto) });
+  await build({ entryPoints: { fingerprint: fileURLToPath(new URL("../src/web-ui/react/sha256.ts", import.meta.url)) },
+    bundle: true, splitting: true, minify: true, platform: "browser", format: "esm", target: "es2020",
+    outdir: dir, outExtension: { ".js": ".mjs" }, logLevel: "warning" });
+  const { sha256Hex: bundledHash } = await import(pathToFileURL(join(dir, "fingerprint.mjs")).href);
+  for (const value of vectors) {
+    assert.equal(await bundledHash(value), createHash("sha256").update(value).digest("hex"));
   }
 });
 

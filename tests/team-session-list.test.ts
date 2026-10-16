@@ -371,8 +371,8 @@ test("active mode drops idle sessions and tasks, but retains top-level directori
   assert.equal(isSessionActive(finishedMemberSession), false);
   assert.equal(isSessionAttention({ ...memberSession, status: "permission-blocked", inFlight: false }), true);
 
-  // 正在看的会话不能因为不活动就从列表里消失。
+  // 当前选择不赋予活动状态；完成已查看后从筛选中消失。
   const kept = filterActiveGroups([group([finishedMemberSession])], "step-session-2");
-  assert.deepEqual(kept[0]?.tasks[0]?.sessions.map((session) => session.id), ["step-session-2"]);
+  assert.deepEqual(kept[0]?.tasks, []);
 });
 

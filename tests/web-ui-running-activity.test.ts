@@ -42,7 +42,7 @@ test("phases advance received → executing → waiting and collapse when not ru
     { status: "failed", structuredState: { inFlight: false } },
   ]) {
     assert.equal(computeRunningPhase(settled), "idle");
-    assert.equal(runningStatusText(settled, NOW), "");
+    assert.equal(runningStatusText(settled, NOW), settled?.status === "failed" ? "执行失败" : "");
   }
 });
 
@@ -60,11 +60,11 @@ test("silence only surfaces after the threshold and stops at once when the turn 
 test("team run text keeps the same semantics and collapses on terminal statuses", () => {
   assert.equal(isRunningNow({ status: "running" }), true);
   assert.equal(isRunningNow({ status: "awaiting_approval" }), true);
-  assert.equal(runStatusText({ status: "awaiting_approval", startedAt: started }, NOW), "等待你的输入 · 已运行 1 分钟");
+  assert.equal(runStatusText({ status: "awaiting_approval", startedAt: started }, NOW), "等待你确认操作 · 已运行 1 分钟");
   assert.equal(runStatusText({ status: "running", startedAt: started }, NOW), "正在执行 · 已运行 1 分钟");
   for (const terminal of ["done", "failed", "stopped"] as const) {
     assert.equal(isRunningNow({ status: terminal, lastActivityAt: started }), false);
-    assert.equal(runStatusText({ status: terminal, lastActivityAt: started }, NOW), "");
+    assert.equal(runStatusText({ status: terminal, lastActivityAt: started }, NOW), terminal === "failed" ? "执行失败" : terminal === "stopped" ? "已停止" : "");
   }
   assert.equal(runStatusText({ status: "running" }, NOW), "正在执行");
 });

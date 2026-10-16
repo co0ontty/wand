@@ -5,14 +5,13 @@ import * as React from "react";
 import { SidebarEmployeeAvatar } from "./sidebar-employee-avatar";
 import { newSessionController } from "../new-session/controller";
 import { WandButton, WandIcon, WandIconButton } from "../ui";
-import { classNames } from "../ui/class-names";
 import { ImSidebarGroup } from "../shell/im-sidebar-group";
 import { ImSidebarItem } from "../shell/im-sidebar-item";
 import { SessionProviderMark, TeamChatSessionMark } from "./session-mark";
 import { SidebarSessionPreview } from "./sidebar-session-preview";
 import { SidebarSessionMenu } from "./sidebar-session-menu";
 import { sidebarSessionLabel } from "./session-order";
-import { SidebarDisclosure, useSidebarExpansion, anchorSidebarDisclosure } from "./sidebar-disclosure";
+import { useSidebarExpansion } from "./sidebar-disclosure";
 import { sidebarSessionState, sidebarAggregateState, sessionGlowStatus } from "./sidebar-session-state";
 import { formatTaskRecency } from "./sidebar-task-meta";
 import type { SidebarDisplayMode } from "./sidebar-display-mode";
@@ -46,6 +45,8 @@ export interface SidebarRecentSectionProps {
   onOpen(entry: SidebarRecentEntry): void;
   /** 新建员工对话前先让调用方收起侧栏浮层（原生外壳下会关抽屉）。 */
   onStartConversation?(): void;
+  /** The identity header opens its existing employee conversation; the gutter controls the child list. */
+  onOpenConversation?(employeeId: string): void;
   /** 与目录树同一批会话动作，右键 / 长按 / Shift+F10 打开；缺失时不提供菜单。 */
   onArchiveSession?(sessionId: string, archived: boolean): Promise<void>;
   onDeleteSession?(session: WorkspaceSessionSummary, label: string): Promise<void>;
@@ -57,9 +58,6 @@ export function SidebarRecentSection({
   displayMode,
   query = "",
   disabled = false,
-  contactsLoading = false,
-  contactsError = null,
-  onReloadContacts,
   listLoading = false,
   listError = false,
   liveTitles,
@@ -69,6 +67,7 @@ export function SidebarRecentSection({
   onStartConversation,
   onArchiveSession,
   onDeleteSession,
+  onOpenConversation,
 }: SidebarRecentSectionProps): React.ReactElement {
   const groups = React.useMemo(
     () => recentConversationGroups(entries, {
@@ -78,84 +77,25 @@ export function SidebarRecentSection({
     }),
     [entries, employees, displayMode, selectedSessionId],
   );
-  const [pickerOpen, setPickerOpen] = React.useState(false);
-  const pickerButton = React.useRef<HTMLButtonElement>(null);
-  const pickerId = React.useId();
-  React.useEffect(() => { setPickerOpen(false); }, [displayMode, disabled, query]);
-  const cancelPicker = (): void => {
-    pickerButton.current?.focus({ preventScroll: true });
-    setPickerOpen(false);
-  };
   const startConversation = React.useCallback((employeeId?: string): void => {
-    setPickerOpen(false);
     onStartConversation?.();
     newSessionController.open(employeeId ? { initialEmployeeId: employeeId } : {});
   }, [onStartConversation]);
 
   return (
-    <section className="sidebar-recent" aria-label="最近会话" onKeyDown={(event) => {
-      if (event.key !== "Escape" || !pickerOpen || event.defaultPrevented
-        || event.nativeEvent.isComposing) return;
-      event.preventDefault();
-      event.stopPropagation();
-      cancelPicker();
-    }}>
+    <section className="sidebar-recent" aria-label="最近会话">
       <Flex align="center" justify="space-between" gap="small" className="sidebar-section-head" style={{ paddingBlock: 8 }}>
         <Typography.Text strong className="sidebar-section-title">最近会话</Typography.Text>
-        <WandIconButton
-          ref={pickerButton}
-          className={classNames("sidebar-section-add", pickerOpen && "is-open")}
-          title={pickerOpen ? "收起联系人" : "新建员工对话"}
-          aria-label={pickerOpen ? "收起联系人" : "新建员工对话"}
-          aria-expanded={pickerOpen}
-          aria-controls={pickerId}
-          disabled={disabled}
-          onClick={(event) => anchorSidebarDisclosure(event.currentTarget,
-            () => pickerOpen ? cancelPicker() : setPickerOpen(true))}
-        >
-          <WandIcon name="plus" size={16} className="sidebar-plus-morph"/>
-        </WandIconButton>
-
+        <WandIconButton className="sidebar-section-add" title="新建工作" aria-label="新建工作" disabled={disabled}
+          onClick={() => startConversation()}><WandIcon name="plus" size={16}/></WandIconButton>
       </Flex>
-      <SidebarDisclosure id={pickerId} open={pickerOpen}>
-      <div className="sidebar-contact-picker">
-        <div className="sidebar-contact-picker-inner">
-          <p className="sidebar-contact-picker-hint">点一位员工开始新对话</p>
-          <Flex vertical gap={4} className="sidebar-contact-picker-list">
-            {employees.map((employee) => (
-              <WandButton kind="ghost"
-                key={employee.id}
-                type="button"
-                className="sidebar-contact-picker-item"
-                style={{ height: "auto", width: "100%", minWidth: 0, justifyContent: "flex-start", whiteSpace: "normal", padding: 8 }}
-                title={[employee.name, employee.duty].filter(Boolean).join(" · ")}
-                onClick={() => startConversation(employee.id)}
-              >
-                <span className="sidebar-contact-avatar"><SidebarEmployeeAvatar employee={employee}/></span>
-                <Typography.Text ellipsis className="sidebar-contact-picker-name" title={employee.name} style={{ flex: 1, textAlign: "start" }}>{employee.name}</Typography.Text>
-                <Typography.Text ellipsis type="secondary" className="sidebar-contact-picker-duty" style={{ maxWidth: 100, fontSize: 12 }}>{employee.duty || "员工"}</Typography.Text>
-              </WandButton>
-            ))}
-            {contactsLoading || contactsError ? (
-              <div className="sidebar-contact-state" role={contactsError ? "alert" : "status"}
-                aria-busy={contactsLoading}>
-                <span>{contactsLoading ? "正在加载联系人…" : "联系人加载失败"}</span>
-                <WandButton kind="ghost" type="button" disabled={contactsLoading} onClick={onReloadContacts}>重试</WandButton>
-              </div>
-            ) : employees.length === 0 ? (
-              <p className="sidebar-contact-state">还没有硅基员工，可从AI团队管理。</p>
-            ) : null}
-          </Flex>
-        </div>
-      </div>
-      </SidebarDisclosure>
       {listLoading && groups.length === 0 ? (
         <div role="status" aria-label="正在加载最近对话" aria-busy="true">
           <WandUiBoundary><Skeleton active title={false} paragraph={{ rows: 2 }}/></WandUiBoundary>
         </div>
       ) : groups.length === 0 && (listError || query.trim()) ? null : groups.length === 0 ? (
         <p className="sidebar-section-empty">
-          {displayMode === "active" ? "现在没有活动会话。" : "还没有对话，点＋选择员工开始。"}
+          {displayMode === "active" ? "现在没有活动会话。" : "还没有对话，点＋开始新的工作。"}
         </p>
       ) : (
         <Flex vertical gap={4} className="sidebar-recent-groups">
@@ -175,6 +115,7 @@ export function SidebarRecentSection({
               now={now}
               onOpen={onOpen}
               onStartConversation={startConversation}
+              onOpenConversation={onOpenConversation}
               onArchiveSession={onArchiveSession}
               onDeleteSession={onDeleteSession}
               disabled={disabled}
@@ -197,6 +138,7 @@ function RecentConversationGroup({
   onStartConversation,
   onArchiveSession,
   onDeleteSession,
+  onOpenConversation,
   disabled = false,
 }: {
   group: SidebarRecentGroup;
@@ -207,6 +149,7 @@ function RecentConversationGroup({
   now: number;
   onOpen(entry: SidebarRecentEntry): void;
   onStartConversation(employeeId?: string): void;
+  onOpenConversation?(employeeId: string): void;
   onArchiveSession?(sessionId: string, archived: boolean): Promise<void>;
   onDeleteSession?(session: WorkspaceSessionSummary, label: string): Promise<void>;
   disabled?: boolean;
@@ -258,6 +201,7 @@ function RecentConversationGroup({
       expanded={open}
       onToggle={() => setOpen(!open)}
       onSetOpen={setOpen}
+      onActivate={group.employeeId && onOpenConversation ? () => onOpenConversation(group.employeeId!) : undefined}
       toggleRef={toggleRef}
       collapsedPreview={<SidebarSessionPreview sessions={sessions} expanded={open}
         label={`${group.title}的会话预览`} className="sidebar-session-preview-person"
@@ -265,7 +209,7 @@ function RecentConversationGroup({
         expansionRef={toggleRef} onExpand={() => setOpen(true)} onActivate={(session) => {
           const entry = group.entries.find(candidate => candidate.session.id === session.id);
           if (!entry) return;
-          setOpen(true); onOpen(entry);
+          setOpen(false); onOpen(entry);
         }}/>}
     >
       {rows.length ? rows : <Typography.Paragraph type="secondary" className="sidebar-group-empty">
@@ -304,7 +248,7 @@ function GroupCreateButton({
         aria-label={blank ? "新建空白终端" : "新建终端"}
         onClick={() => {
           if (blank) newSessionController.open({ initialKind: "shell" });
-          else newSessionController.open();
+          else newSessionController.open({ initialKind: "pty" });
         }}
       >
         <WandIcon name="plus" size={14}/>

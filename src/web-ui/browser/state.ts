@@ -185,7 +185,6 @@ export var state: AppState = {
   availableGrokModels: [],
   availableQoderModels: [],
   availablePiModels: [],
-  availableGeminiModels: [],
   providerThinkingEfforts: {},
   modelCatalogRevision: "",
   modelsRefreshing: false,

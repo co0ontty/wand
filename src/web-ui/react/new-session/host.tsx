@@ -1,811 +1,254 @@
-import "../issues/library-layout";
-import "./layout.js";
-import { hasAutomaticPermissions, modeHint } from "./permission-summary.js";
-import { Alert, AutoComplete, Collapse, Flex, Form, Radio, Segmented, Space, Spin, Typography } from "antd";
-import { TaskForm, TaskTextArea } from "../issues/task-form";
-import { WandInput } from "../ui";
-import {
-  type FormEvent,
-  type KeyboardEvent,
-  type MutableRefObject,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
-import {
-  MODEL_CATALOG_DEFAULT_VALUE,
-  pickedModelId,
-  wandModelOptions,
-} from "../model-catalog";
-import { useWandModelCatalog } from "../use-model-catalog";
-import { useProviderUsage } from "../provider-usage";
-import { WandButton, WandDialogSurface, WandIcon, WandSelect } from "../ui";
-import {
-  UnifiedExecutionSubjectPicker,
-} from "../workspaces/unified-execution-subject-picker.js";
-import { useSiliconEmployees } from "../agents/employee-repository.js";
-import { EmployeeAvatar } from "../agents/employee-avatar.js";
-import { ProviderLogo } from "../provider-logo.js";
-import { AGENT_TOOL_OPTIONS, agentToolIdFor, agentToolOption, agentToolDisplayName } from "../../provider-identity";
+import * as React from "react";
+import { Sender } from "@ant-design/x";
+import { Alert, AutoComplete, Flex, Spin, Typography } from "antd";
+import { DEFAULT_EMPLOYEE_ID } from "../../../ai-team-types.js";
+import { normalizeWandTaskAgentMode, type WandTaskAgent } from "../../../task-types.js";
+import { agentToolDisplayName } from "../../provider-identity.js";
+import { useSiliconEmployees } from "../agents/employee-repository";
+import { EmployeeAvatar } from "../agents/employee-avatar";
+import { employeeProfile } from "../agents/employee-profile";
+import { teamChatComposer } from "../ai-teams/composer-bridge";
 import { aiTeamPickerOption, aiTeamsRepository, useAiTeamList } from "../ai-teams/repository";
 import { taskBoardController } from "../issues/task-board-controller";
-import { notifyTasksChanged } from "../task-changes";
-import { WORKSPACE_KIND_OPTIONS, TEAM_NEEDS_PROJECT_HINT, usableTeamWorkspaceId } from "../workspaces/workspace-agent-model";
+import { ConversationExecutionSelectors, setPageExecutionPreference, usePageExecutionPreference } from "../conversations/execution-preference";
+import { ConversationSubmitButton } from "../conversations/controls";
+import { conversationDraftKey } from "../conversations/state";
+import { ComposerIdentity } from "../composer-sender/identity";
+import { MinimalComposerEntry, useMinimalComposer } from "../composer-sender/minimal";
+import { useEditorExpansion } from "../composer-sender/editor-expansion";
+import { ComposerAttachmentList } from "../composer-attachments/host";
+import { ComposerSpeechButton } from "../composer-voice/button";
+import { UnifiedExecutionSubjectPicker } from "../workspaces/unified-execution-subject-picker";
 import { httpWorkspacesRepository } from "../workspaces/repository";
+import { usableTeamWorkspaceId } from "../workspaces/workspace-agent-model";
 import type { Workspace } from "../workspaces/types";
-import { newSessionController, newSessionStore } from "./controller";
-import {
-  buildCreateRequest,
-  httpNewSessionRepository,
-  safeMode,
-  supportedModes,
-} from "./repository";
-import { nextChoice, type ChoiceNavigationKey } from "./choice-navigation";
-import type {
-  NewSessionDefaults,
-  NewSessionForm,
-  NewSessionKind,
-  NewSessionMode,
-  NewSessionProvider,
-  NewSessionRepository,
-} from "./types";
+import { notifyTasksChanged } from "../task-changes";
+import { WandButton, WandInput, WandIcon, WandIconButton, WandPopover, WandTabs } from "../ui";
+import { useWandModelCatalog } from "../use-model-catalog";
+import { installChatComposerStyles } from "../chat-composer-styles";
+import { installConversationHomeStyles } from "../conversations/home-styles";
 import { describeError } from "../errors";
-import { NewSessionTaskField } from "./task-field";
+import { newSessionController, newSessionStore } from "./controller";
+import { buildCreateRequest, httpNewSessionRepository, safeMode } from "./repository";
 import { resolveNewSessionTask } from "./task-creation";
+import { NewSessionTaskField } from "./task-field";
+import type { NewSessionCreated, NewSessionCreateRequest, NewSessionDefaults, NewSessionForm, NewSessionKind, NewSessionRepository } from "./types";
+import { installNewWorkStyles } from "./start-styles";
 
-export interface NewSessionHostProps {
-  repository?: NewSessionRepository;
+export interface NewSessionHostProps { repository?: NewSessionRepository; }
+
+/** All creation entry points project one pending work; resource creation starts only on submit. */
+export function NewSessionHost(props: NewSessionHostProps): React.ReactElement | null {
+  const controller = React.useSyncExternalStore(newSessionStore.subscribe, newSessionStore.getSnapshot, newSessionStore.getSnapshot);
+  const ready = React.useSyncExternalStore(teamChatComposer.subscribeReady, teamChatComposer.ready, () => false);
+  return controller.open ? ready ? <NewWorkPage key={controller.revision} {...props}/> : <Spin tip="正在准备输入服务…"/> : null;
 }
 
-/**
- * 工具清单直接用浏览器层的唯一真源：Pi（CLI）与 Wand Agent（进程内 SDK）是两条独立选项，
- * 不再在这个文件里维护第二份 provider 列表。
- */
-
-/** 当前表单选中的执行工具（provider + 引擎）；找不到时返回 null，调用方回落到 provider 名。 */
-function selectedTool(form: NewSessionForm | null) {
-  if (!form) return null;
-  return agentToolOption(agentToolIdFor(form.provider, form.engine));
-}
-
-const MODES: ReadonlyArray<{
-  value: NewSessionMode;
-  label: string;
-  description: string;
-}> = [
-  { value: "managed", label: "托管", description: "按目标连续执行" },
-  { value: "full-access", label: "完全访问", description: "自动确认权限" },
-  { value: "auto-edit", label: "自动编辑", description: "自动确认修改" },
-  { value: "default", label: "标准", description: "使用工具默认权限配置" },
-  { value: "native", label: "原生", description: "保留工具原生执行方式" },
-];
-
-/**
- * 模型的预选值：显式文字优先，空值回落到「跟随服务端默认」（与工作区选择器同一套哨兵值）。
- * 归一化 / 目录解析共用 `../model-catalog`，不在这里重写一遍。
- */
-function preferredModel(selected?: string | null): string {
-  return (selected ?? "").trim() || MODEL_CATALOG_DEFAULT_VALUE;
-}
-
-
-function protocolHint(form: NewSessionForm): string {
-  if (form.kind === "pty") return "终端使用 PTY，直接呈现命令行工具的交互界面与原始输出。";
-  if (form.engine === "sdk") return "Wand Agent 使用 Wand 进程内 SDK，不启动 Pi CLI。";
-  if (form.provider === "codex") return "对话解析 Codex 的 JSONL 事件。";
-  if (form.provider === "pi" || form.provider === "opencode") return "对话解析命令行工具的 JSON 事件。";
-  if (form.provider === "grok") return "对话解析 Grok 的 streaming-json 事件。";
-  return "对话解析命令行工具的 stream-json 事件。";
-}
-
-function creationFallback({ provider, kind, engine }: NewSessionForm): string {
-  if (kind === "shell") return "无法启动空白终端，请检查服务端 Shell 配置。";
-  if (engine === "sdk") return "无法启动 Wand Agent 对话，请检查服务端 Agent 配置与模型可用性。";
-  if (kind === "structured") return "无法启动对话，请检查所选工具是否可用及模型配置。";
-  if (provider === "codex") return "无法启动 Codex 会话，请确认 codex 已正确安装并可在终端中执行。";
-  if (provider === "opencode") return "无法启动 OpenCode 会话，请确认 opencode-ai 已正确安装。";
-  if (provider === "grok") return "无法启动 Grok 会话，请确认 Grok Build CLI 已正确安装。";
-  if (provider === "qoder") return "无法启动 Qoder 会话，请确认 @qoder-ai/qodercli 已正确安装。";
-  if (provider === "pi") return "无法启动 Pi 会话，请确认 Pi CLI 已正确安装。";
-  if (provider === "gemini") return "无法启动 Gemini 会话，请确认 Gemini CLI 已正确安装。";
-  return "无法启动 Claude 会话，请确认 Claude 已正确安装。";
-}
-
-/**
- * 与服务端 `resolveWorkspaceCwd` 的 path.resolve 结果对齐的轻量归一化：
- * 团队开工要按目录找到已存在的项目 id，这里只做尾部斜杠与空白归一。
- */
-function normalizeDir(value: string): string {
-  const trimmed = value.trim().replace(/\/+$/, "");
-  return trimmed || "/";
-}
-
-const RADIO_NAVIGATION_KEYS = new Set<ChoiceNavigationKey>([
-  "ArrowLeft",
-  "ArrowRight",
-  "ArrowUp",
-  "ArrowDown",
-  "Home",
-  "End",
-]);
-
-export function NewSessionHost({ repository = httpNewSessionRepository }: NewSessionHostProps) {
-  const controller = useSyncExternalStore(
-    newSessionStore.subscribe,
-    newSessionStore.getSnapshot,
-    newSessionStore.getSnapshot,
-  );
-  const [defaults, setDefaults] = useState<NewSessionDefaults | null>(null);
-  const [form, setForm] = useState<NewSessionForm | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const submitLock = useRef(false);
-  const [error, setError] = useState("");
-  const [suggestions, setSuggestions] = useState<NewSessionDefaults["recentPaths"]>([]);
-  const [suggestionsActive, setSuggestionsActive] = useState(false);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [subjectPickerOpen, setSubjectPickerOpen] = useState(false);
-  const subjectPickerRef = useRef<HTMLDivElement | null>(null);
-  const [recentPathsOpen, setRecentPathsOpen] = useState(false);
-  // 目录和使用次数都在打开后请求（登录前会 401）；加载完才展示选项，避免排序跳动。
-  const modelCatalog = useWandModelCatalog(controller.open);
-  const providerUsage = useProviderUsage(controller.open);
-  const { employees } = useSiliconEmployees({ includeArchived: true, enabled: controller.open });
-  const [customizingCli, setCustomizingCli] = useState(false);
-  const modeRefs = useRef<Partial<Record<NewSessionMode, HTMLInputElement | null>>>({});
-  const employeeToolButtonRef = useRef<HTMLButtonElement | null>(null);
-  useEffect(() => {
-    if (form?.employeeId) employeeToolButtonRef.current?.focus({ preventScroll: true });
-  }, [form?.employeeId]);
-  // 团队直发：
-  // - 说明是服务端必填的开工输入（`boundedText(note, 1, …)`），所以只有选团队时才长这个框；
-  // - 团队开工要一个**已存在**的 project id，而这一页只拿得到目录文本，所以按目录对一次项目列表。
-  const [teamNote, setTeamNote] = useState("");
-  const teamNoteRef = useRef<HTMLTextAreaElement | null>(null);
-  const [projects, setProjects] = useState<Workspace[]>([]);
-  // 任务上下文（`workspaceTaskId`）不给团队：那张卡已经在了，从这里开团只会多建一张卡（§5.1）。
-  const teamContext = Boolean(controller.open && form && !form.workspaceTaskId && form.taskName === undefined);
-  const teams = useAiTeamList(teamContext);
-  const teamOptions = useMemo(() => teams?.map(aiTeamPickerOption) ?? null, [teams]);
-
-  useEffect(() => {
-    if (!controller.open) return;
+function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostProps): React.ReactElement {
+  const controller = newSessionStore.getSnapshot();
+  const [defaults, setDefaults] = React.useState<NewSessionDefaults | null>(null);
+  const [form, setForm] = React.useState<NewSessionForm | null>(null);
+  const [error, setError] = React.useState("");
+  const [loading, setLoading] = React.useState(true);
+  const [submitting, setSubmitting] = React.useState(false);
+  const [unknown, setUnknown] = React.useState(false);
+  const accepted = React.useRef<{ request: NewSessionCreateRequest; created: NewSessionCreated } | null>(null);
+  const lock = React.useRef(false);
+  const mounted = React.useRef(true);
+  const [directoryOpen, setDirectoryOpen] = React.useState(false);
+  const [subjectOpen, setSubjectOpen] = React.useState(false);
+  const [voiceStatus, setVoiceStatus] = React.useState("");
+  const [suggestions, setSuggestions] = React.useState<readonly { path: string; name: string }[]>([]);
+  const sender = React.useRef<React.ComponentRef<typeof Sender>>(null);
+  const surface = React.useRef<HTMLDivElement>(null);
+  const files = React.useRef<HTMLInputElement>(null);
+  const { employees, loading: employeesLoading, error: employeesError } = useSiliconEmployees({ enabled: true });
+  const teams = useAiTeamList(!controller.workspaceTaskId && !controller.newTask);
+  const [projects, setProjects] = React.useState<Workspace[]>([]);
+  React.useEffect(() => {
+    let active = true;
+    void httpWorkspacesRepository.list().then(items => { if (active) setProjects(items); }).catch(() => {});
+    return () => { active = false; };
+  }, []);
+  const catalog = useWandModelCatalog(true);
+  const preference = usePageExecutionPreference();
+  const key = conversationDraftKey(`new-work:${controller.workspaceTaskId || controller.workspaceId || "standalone"}`, null);
+  const revision = React.useCallback(() => teamChatComposer.revision(key), [key]);
+  React.useSyncExternalStore(teamChatComposer.subscribe, revision, revision);
+  const draft = teamChatComposer.read(key);
+  const editor = useEditorExpansion(key, () => sender.current?.inputElement as HTMLTextAreaElement | null);
+  const minimal = useMinimalComposer({ owner: key, input: () => surface.current?.querySelector("textarea"), surface: () => surface.current,
+    phase: submitting ? "sending" : error ? "failed" : "idle", pending: !!draft.text || !!draft.attachments.length,
+    popupOwners: ["新工作执行对象", "新工作运行目录", "本页执行工具", "本页模型", "本页思考深度", "新工作更多选项"] });
+  React.useLayoutEffect(() => { installChatComposerStyles(); installConversationHomeStyles(); installNewWorkStyles(); }, []);
+  React.useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  React.useEffect(() => {
     const abort = new AbortController();
-    const runtime = newSessionStore.getRuntime();
-    setLoading(true);
-    setSubmitting(false);
-    setError("");
-    setDefaults(null);
-    setForm(null);
-    setSuggestions([]);
-    setSuggestionsActive(false);
-    setAdvancedOpen(false);
-    setSubjectPickerOpen(false);
-    setRecentPathsOpen(false);
-    setCustomizingCli(false);
-    setTeamNote("");
-    void repository.load({ signal: abort.signal })
-      .then((loaded) => {
-        if (abort.signal.aborted) return;
-        const context = runtime?.getContext();
-        setDefaults(loaded);
-        const initialProvider = loaded.config.defaultProvider;
-        setForm({
-          provider: initialProvider,
-          // 上次用的是 Wand Agent 就继续预选它；其他 provider 不带引擎维度。
-          engine: initialProvider === "pi" ? loaded.config.defaultEngine ?? "cli" : undefined,
-          employeeId: controller.initialKind === "shell" ? undefined : controller.initialEmployeeId || undefined,
-          kind: controller.initialKind
-            ? controller.initialKind
-            : controller.initialEmployeeId ? "structured" : loaded.config.defaultSessionKind,
-          mode: safeMode(
-            loaded.config.defaultProvider,
-            loaded.config.defaultMode,
-            loaded.config.defaultMode,
-          ),
-          cwd: controller.initialCwd,
-          worktreeEnabled: false,
-          model: preferredModel(context?.selectedModels?.[loaded.config.defaultProvider]),
-          specifiedCli: false,
-          workspaceId: controller.workspaceId || undefined,
-          workspaceTaskId: controller.workspaceTaskId || undefined,
-          taskName: controller.newTask ? "" : undefined,
-        });
-        if (!context) setError("新建会话运行环境尚未就绪，请刷新页面后重试。");
-      })
-      .catch((loadError) => {
-        if (!abort.signal.aborted) setError(describeError(loadError, "无法加载新建会话配置。"));
-      })
-      .finally(() => {
-        if (!abort.signal.aborted) setLoading(false);
-      });
+    void repository.load({ signal: abort.signal }).then(loaded => {
+      if (abort.signal.aborted) return;
+      setDefaults(loaded);
+      const context = newSessionStore.getRuntime()?.getContext();
+      setForm({ provider: loaded.config.defaultProvider, engine: loaded.config.defaultEngine, model: "default",
+        kind: controller.initialKind || "structured", employeeId: controller.initialEmployeeId || undefined,
+        mode: safeMode(loaded.config.defaultProvider, loaded.config.defaultMode),
+        cwd: controller.initialCwd || context?.effectiveCwd || loaded.config.defaultCwd, worktreeEnabled: false,
+        workspaceId: controller.workspaceId || undefined, workspaceTaskId: controller.workspaceTaskId || undefined,
+        taskName: controller.newTask ? "" : undefined });
+    }).catch(cause => { if (!abort.signal.aborted) setError(describeError(cause, "配置读取失败，请重新打开新建。")); })
+      .finally(() => { if (!abort.signal.aborted) setLoading(false); });
     return () => abort.abort();
-  }, [controller.initialCwd, controller.initialEmployeeId, controller.initialKind, controller.open, controller.revision, controller.taskName, controller.workspaceId, controller.workspaceTaskId, controller.newTask, repository]);
-
-  // 项目列表只在需要团队直发时读一次：拿不到就当成「没有可开工的项目」，CLI/员工会话不受影响。
-  useEffect(() => {
-    if (!teamContext) return;
-    let alive = true;
-    httpWorkspacesRepository.list().then(
-      (list) => { if (alive) setProjects(list); },
-      () => { if (alive) setProjects([]); },
-    );
-    return () => { alive = false; };
-  }, [teamContext]);
-
-  useEffect(() => {
-    if (!controller.open || !form || !suggestionsActive) return;
-    const abort = new AbortController();
-    const timer = window.setTimeout(() => {
-      void repository.suggestPaths(form.cwd, { signal: abort.signal })
-        .then((items) => { if (!abort.signal.aborted) setSuggestions(items); })
-        .catch(() => { if (!abort.signal.aborted) setSuggestions([]); });
-    }, 120);
-    return () => {
-      window.clearTimeout(timer);
-      abort.abort();
-    };
-  }, [controller.open, form?.cwd, repository, suggestionsActive]);
-
-  const selectTool = useCallback((toolId: string) => {
-    const option = agentToolOption(toolId);
-    if (!defaults || !option) return;
-    const provider = option.provider;
-    const engine = option.engine;
-    // 模型跟着 provider 走：切过去时预选该 provider 上次用过的模型。
-    const remembered = preferredModel(newSessionStore.getRuntime()?.getContext().selectedModels?.[provider]);
-    setForm((current) => current ? {
-      ...current,
-      provider,
-      engine,
-      // Wand Agent 只跑结构化会话：切过去时把形态一起纠正，不留一个跑不了的组合。
-      kind: engine === "sdk" ? "structured" : current.kind,
-      model: remembered,
-      mode: safeMode(provider, current.mode, defaults.config.defaultMode),
-    } : current);
-    const currentMode = form
-      ? safeMode(provider, form.mode, defaults.config.defaultMode)
-      : safeMode(provider, defaults.config.defaultMode, defaults.config.defaultMode);
-    void repository.savePreferences({ defaultProvider: provider, defaultEngine: engine ?? "cli", defaultMode: currentMode })
-      .catch((saveError) => console.warn("[wand] Failed to persist new-session defaults", saveError));
-  }, [defaults, form, repository]);
-
-  const selectKind = useCallback((kind: NewSessionKind) => {
-    setForm((current) => current ? { ...current, kind,
-      model: kind !== "structured" && current.model.startsWith("wand-openrouter-free/") ? "default" : current.model } : current);
-    // 协议说明按需展开；切换主要执行方式不自动打开次要说明。
-    if (kind !== "shell") {
-      void repository.savePreferences({ defaultSessionKind: kind })
-        .catch((saveError) => console.warn("[wand] Failed to persist new-session defaults", saveError));
-    }
   }, [repository]);
-
-  const selectMode = useCallback((mode: NewSessionMode) => {
-    if (!form || !supportedModes(form.provider).includes(mode)) return;
-    setForm((current) => current ? { ...current, mode } : current);
-    void repository.savePreferences({ defaultMode: mode })
-      .catch((saveError) => console.warn("[wand] Failed to persist new-session defaults", saveError));
-  }, [form, repository]);
-
-  const selectModel = useCallback((model: string) => {
-    setForm((current) => current ? { ...current, model } : current);
-    // 写回按 provider 的记忆，与任务选择器 / composer 同一份。
-    newSessionStore.getRuntime()?.rememberModel(form?.provider ?? "claude", pickedModelId(model));
-  }, [form?.provider]);
-
-  const supportedModesForProvider = useMemo(
-    () => form ? supportedModes(form.provider) : [],
-    [form?.provider],
-  );
-  const supported = useMemo(() => new Set(supportedModesForProvider), [supportedModesForProvider]);
-  const effectiveCwd = form?.cwd.trim()
-    || newSessionStore.getRuntime()?.getContext().effectiveCwd
-    || defaults?.config.defaultCwd
-    || "当前工作目录";
-  const selectedMode = form ? MODES.find((mode) => mode.value === form.mode) : undefined;
-  const selectedEmployee = form?.employeeId ? employees.find((emp) => emp.id === form.employeeId) : null;
-  const selectedTeam = form?.teamId ? teams?.find((team) => team.id === form.teamId) ?? null : null;
-  const employeeCandidates = selectedEmployee?.agents ?? [];
-  const permissionWarning = Boolean(form && !form.teamId && (form.employeeId && !form.specifiedCli
-    ? employeeCandidates.some((candidate) => hasAutomaticPermissions(candidate))
-    : hasAutomaticPermissions(form)));
-  const subjectSummary = form?.teamId ? selectedTeam?.name ?? "AI 团队"
-    : form?.employeeId ? selectedEmployee?.name ?? "硅基员工"
-    : form?.kind === "shell" ? "空白终端"
-    : selectedTool(form)?.label ?? form?.provider ?? "";
-  const modelSummary = !form || form.kind === "shell" ? "不使用模型" : form.teamId ? "跟随成员员工配置"
-    : form.employeeId && !form.specifiedCli ? employeeCandidates.length
-      ? employeeCandidates.map((candidate) => `${agentToolDisplayName(candidate.provider, candidate.engine)} · ${candidate.model === MODEL_CATALOG_DEFAULT_VALUE ? "服务端默认" : candidate.model}`).join("；")
-      : "跟随员工配置"
-    : preferredModel(form.model) === MODEL_CATALOG_DEFAULT_VALUE ? "跟随服务端默认" : preferredModel(form.model);
-  const permissionSummary = !form ? "" : form.teamId ? "跟随成员员工配置"
-    : form.employeeId && !form.specifiedCli ? `跟随员工候选配置${permissionWarning ? " · 含自动授权" : ""}`
-    : form.kind === "shell" ? "系统 Shell 权限"
-    : `${selectedMode?.label ?? "标准"}${form.mode === "full-access" ? " · full access" : permissionWarning ? " · 自动授权" : ""}`;
-  const permissionDetail = !form ? "" : form.teamId
-    ? "负责人拆解任务，各成员使用自己的工具与权限配置。"
-    : form.employeeId && !form.specifiedCli
-      ? employeeCandidates.length ? employeeCandidates.map((candidate) => {
-        const label = candidate.provider === "codex" ? "完全访问 · full access" : MODES.find((mode) => mode.value === candidate.mode)?.label ?? "标准";
-        return `${agentToolDisplayName(candidate.provider, candidate.engine)} · ${label}`;
-      }).join("；") + (employeeCandidates.some((candidate) => candidate.provider === "codex")
-        ? "。Codex 自动批准工具调用并关闭沙盒限制；工作目录不是权限沙盒。"
-        : permissionWarning ? "。部分候选使用自动授权，启动会沿用所用候选的权限；工作目录不是权限沙盒。"
-          : "。启动会沿用所用候选的权限，工作目录不是权限沙盒。") : "员工配置尚未加载；启动时使用该员工的工具与权限配置。"
-    : form.kind === "shell" ? "直接使用系统 Shell，不启动 AI 工具；工作目录不是权限沙盒。"
-    : `${modeHint(form)} 工作目录不是权限沙盒。`;
-  // 目录改了也要重新对项目：手输目录和对不上项目的目录都拿不到 teamWorkspaceId，整组就禁用。
-  // 留空时用真正会生效的目录（运行时当前目录或服务端默认），不让「什么都没填」把团队卡死。
-  const projectCwd = form?.cwd.trim()
-    || newSessionStore.getRuntime()?.getContext().effectiveCwd
-    || defaults?.config.defaultCwd
-    || "";
-  const matchedProject = projects.find((project) => normalizeDir(project.cwd) === normalizeDir(projectCwd));
-  const teamWorkspaceId = form?.workspaceTaskId
-    ? ""
-    : usableTeamWorkspaceId(form?.workspaceId ?? matchedProject?.id, matchedProject?.kind);
-
-  // 目录一改，原来选中的团队可能就没项目可开工了：清掉选择态，不留一个看不见的团队。
-  useEffect(() => {
-    if (!form?.teamId || teamWorkspaceId) return;
-    setForm((current) => current ? { ...current, teamId: undefined } : current);
-  }, [form?.teamId, teamWorkspaceId]);
-  // 选中团队就把光标落到说明框：开工说明是唯一必填输入。
-  useEffect(() => {
-    if (!form?.teamId) return;
-    teamNoteRef.current?.focus();
-  }, [form?.teamId]);
-
-  function navigateChoice<T extends string>(
-    event: KeyboardEvent<HTMLElement>,
-    current: T,
-    values: readonly T[],
-    choose: (value: T) => void,
-    refs: MutableRefObject<Partial<Record<T, HTMLElement | null>>>,
-  ): void {
-    if (!RADIO_NAVIGATION_KEYS.has(event.key as ChoiceNavigationKey)) return;
-    event.preventDefault();
-    const next = nextChoice(values, current, event.key as ChoiceNavigationKey);
-    choose(next);
-    window.requestAnimationFrame(() => refs.current[next]?.focus());
-  }
-
-  /**
-   * 团队直发（§5.1 修正 B8）：选团队时这一页不建任务卡也不开会话，由直发路由自己建 `team_direct` 卡。
-   * 成功后原位停够 dwell 再前进：能拿到 `chatSessionId` 就落到 IM 群聊页，否则退回团队页看这一轮。
-   */
-  async function startDirectTeamRun(current: NewSessionForm): Promise<void> {
-    const teamId = current.teamId ?? "";
-    if (!teamId) return;
-    const workspaceId = current.workspaceTaskId
-      ? ""
-      : usableTeamWorkspaceId(current.workspaceId ?? matchedProject?.id, matchedProject?.kind);
-    if (!workspaceId) {
-      // 不静默：禁用态可能被绕过（例如选完团队又把目录清空），这里原位说明。
-      setError(TEAM_NEEDS_PROJECT_HINT);
-      return;
-    }
-    const note = teamNote.trim();
-    if (!note) {
-      setError("先写一句本轮说明：团队要有明确目标才能开工。");
-      teamNoteRef.current?.focus();
-      return;
-    }
-    try {
-      const started = await aiTeamsRepository.startDirect(teamId, { note, workspaceId });
-      const sessionId = started.run.chatSessionId;
-      await aiTeamsRepository.settle("success");
-      taskBoardController.close();
-      newSessionController.close();
-      // 开团后首屏直接进 IM 群聊页（§5.1 路径 a 走 teamchat），和侧栏点群聊条目一致。
-      if (sessionId) taskBoardController.open("", "", "teamchat", started.run.id);
-      else taskBoardController.open("", "", "teams");
-      // 侧栏群聊徽标来自 /api/tasks：开团后主动通知一次，不等 ~6s 轮询。
-      notifyTasksChanged();
-    } catch (cause) {
-      setError(describeError(cause, "开工失败，请选择已有项目后重试。"));
-      await aiTeamsRepository.settle("error");
-    }
-  }
-
-  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    if ((event.nativeEvent as Event & { isComposing?: boolean }).isComposing) return;
-    if (!form || !defaults || submitLock.current) return;
+  // Wait for the real directory, then use the default companion only when no entry selected an identity.
+  React.useEffect(() => {
+    if (!form || employeesLoading || form.kind !== "structured" || form.employeeId || form.teamId) return;
+    const employee = employees.find(item => item.id === DEFAULT_EMPLOYEE_ID) ?? employees[0];
+    if (employee) setForm(current => current ? { ...current, employeeId: employee.id } : current);
+  }, [!!form, employeesLoading]);
+  React.useEffect(() => {
+    if (!directoryOpen || !form) return;
+    const abort = new AbortController();
+    const timeout = window.setTimeout(() => {
+      void repository.suggestPaths(form.cwd, { signal: abort.signal }).then(items => { if (!abort.signal.aborted) setSuggestions(items); }).catch(() => {});
+    }, 120);
+    return () => { abort.abort(); clearTimeout(timeout); };
+  }, [directoryOpen, form?.cwd, repository]);
+  const employee = employees.find(item => item.id === form?.employeeId);
+  const team = teams?.find(item => item.id === form?.teamId);
+  const matchedProject = projects.find(project => project.cwd.replace(/\/+$/, "") === form?.cwd.trim().replace(/\/+$/, ""));
+  const teamWorkspaceId = controller.workspaceTaskId || controller.newTask ? "" : usableTeamWorkspaceId(form?.workspaceId || matchedProject?.id, matchedProject?.kind);
+  const base: WandTaskAgent | undefined = employee?.agents[0] ?? (form ? { provider: form.provider, engine: form.engine,
+    model: form.model || "default", thinkingEffort: "off", mode: normalizeWandTaskAgentMode(form.provider, form.mode), kind: "structured" } : undefined);
+  const runtimeAgent = base && preference ? { ...base, ...preference } : base;
+  const disabled = submitting || unknown || !!accepted.current;
+  const chooseKind = (kind: NewSessionKind): void => {
+    setSubjectOpen(false); setDirectoryOpen(false);
+    setForm(current => current ? { ...current, kind, teamId: undefined,
+      employeeId: kind === "structured" ? employee?.id || employees.find(item => item.id === DEFAULT_EMPLOYEE_ID)?.id || employees[0]?.id : undefined,
+      engine: kind === "pty" ? "cli" : current.engine } : current);
+  };
+  const submit = async (): Promise<void> => {
+    if (!form || !defaults || lock.current || unknown) return;
+    if (form.kind === "structured" && !draft.text.trim() && !draft.attachments.length) return;
     const runtime = newSessionStore.getRuntime();
-    if (!runtime) {
-      setError("新建会话运行环境尚未就绪，请刷新页面后重试。");
-      return;
-    }
+    if (!runtime) { setError("运行环境未就绪，请刷新页面后重试；草稿保留。"); return; }
+    lock.current = true; setSubmitting(true); setError(""); setSubjectOpen(false); setDirectoryOpen(false);
     newSessionController.setDismissable(false);
-    submitLock.current = true;
-    setSubmitting(true);
-    setError("");
     try {
-      // 团队分支：既不建任务卡也不起会话，走直发路由（它自己建 team_direct 卡）。
       if (form.teamId) {
-        await startDirectTeamRun(form);
-        return;
+        if (draft.attachments.length) throw new Error("团队新工作暂不支持附件，请先移除附件后开工。");
+        if (!teamWorkspaceId) throw new Error("团队工作需要已存在的项目，请更换运行目录后重试。");
+        const result = await aiTeamsRepository.startDirect(form.teamId, { workspaceId: teamWorkspaceId, note: draft.text });
+        await aiTeamsRepository.settle("success");
+        teamChatComposer.edit(key, { acknowledgeRevision: draft.revision });
+        newSessionController.close();
+        if (result.run.chatSessionId) taskBoardController.open("", "", "teamchat", result.run.id);
+        else taskBoardController.open("", "", "teams");
+        notifyTasksChanged(); return;
       }
-      const boundForm = await resolveNewSessionTask(form, projectCwd, httpWorkspacesRepository);
-      if (boundForm !== form) {
-        // Keep the accepted task binding if session creation fails, so retry never creates another task.
-        setForm(boundForm);
-        notifyTasksChanged();
+      const bound = await resolveNewSessionTask(form, form.cwd, httpWorkspacesRepository);
+      if (bound !== form) { setForm(bound); notifyTasksChanged(); }
+      if (!accepted.current) {
+        const manual = preference && bound.kind !== "shell";
+        const selected = manual ? { ...bound, provider: preference.provider, engine: bound.kind === "pty" ? "cli" as const : preference.engine,
+          model: preference.model, mode: normalizeWandTaskAgentMode(preference.provider, base?.mode || bound.mode), specifiedCli: true } : bound;
+        const context = { ...runtime.getContext(), thinkingEffort: manual ? preference.thinkingEffort : base?.thinkingEffort || "off" };
+        const request = buildCreateRequest(selected, defaults.config, context);
+        const dimensions = await runtime.prepareCreate(request.kind, request);
+        if (request.kind !== "structured") Object.assign(request, dimensions);
+        let created: NewSessionCreated;
+        try { created = await repository.create(request); }
+        catch (cause) {
+          const status = (cause as { status?: number }).status;
+          if (!status || status >= 500 || status === 408 || status === 409) setUnknown(true);
+          throw cause;
+        }
+        accepted.current = { request, created };
       }
-      const request = buildCreateRequest(boundForm, defaults.config, runtime.getContext());
-      const dimensions = await runtime.prepareCreate(request.kind, request);
-      if (request.kind !== "structured") Object.assign(request, dimensions);
-      void repository.savePreferences({
-        ...(request.kind === "shell" ? {} : {
-          ...(!form.employeeId ? { defaultProvider: request.provider } : {}),
-          // 引擎跟 provider 一起记：下次打开还预选 Wand Agent 而不是悄悄回到 Pi CLI。
-          ...(request.kind === "structured" && request.provider === "pi"
-            ? { defaultEngine: form.engine ?? "cli" } : {}),
-          defaultSessionKind: request.kind,
-          defaultMode: request.mode,
-        }),
-      }).catch((saveError) => console.warn("[wand] Failed to persist new-session defaults", saveError));
-      const created = await repository.create(request);
-      await runtime.completeCreate(request, created);
+      const { request, created } = accepted.current;
+      await runtime.completeCreate(request, created, draft.text || draft.attachments.length ? { key, revision: draft.revision } : undefined);
       newSessionController.close();
-    } catch (createError) {
-      setError(describeError(createError, creationFallback(form)));
+    } catch (cause) {
+      if (form.teamId) await aiTeamsRepository.settle("error");
+      if (mounted.current) setError(describeError(cause, "创建未完成，输入已保留。"));
     } finally {
-      submitLock.current = false;
-      newSessionController.setDismissable(true);
-      setSubmitting(false);
+      lock.current = false; newSessionController.setDismissable(true);
+      if (mounted.current) setSubmitting(false);
     }
-  }
-
-  return (
-    <WandDialogSurface
-      open={controller.open}
-      onOpenChange={(open) => { if (!open) newSessionController.close(); }}
-      title={controller.taskName ? `新对话 · ${controller.taskName}` : "新对话"}
-      description="先选择执行方式，再确认模型与工作目录。选择会记为下次新建偏好。"
-      className="wand-task-library-dialog wand-new-session-library-dialog"
-      closeLabel="关闭新建会话"
-      testId="new-session-dialog"
-      dismissable={!submitting}
-    >
-      {loading || (controller.open && providerUsage === null) ? <Spin tip="正在加载新建会话配置…"><div style={{ minHeight: 100 }} role="status">正在加载新建会话配置…</div></Spin> : form && defaults ? (
-        <TaskForm noValidate aria-busy={submitting} onSubmit={(event) => void submit(event)}>
-          <Flex vertical gap={12}>
-            <section className="wand-new-session-summary" aria-label="执行设置">
-              <Flex vertical gap={12}>
-                <Form.Item label="执行对象" style={{ marginBottom: 0 }}>
-                  {form.employeeId ? (
-                    <div className="wand-new-session-employee-section">
-                      <Flex
-                        align="center"
-                        justify="space-between"
-                        gap={12}
-                        className="wand-new-session-logo-bar"
-                        style={{
-                          padding: "8px 0",
-                          borderBottom: "1px solid var(--border-subtle)",
-                        }}
-                      >
-                        <Flex align="center" gap={12} style={{ minWidth: 0, flex: 1 }}>
-                          <button
-                            type="button"
-                            className="wand-new-session-logo-toggle"
-                            ref={employeeToolButtonRef}
-                            title={customizingCli ? "收起工具切换" : "切换执行工具和模型"}
-                            aria-label={customizingCli ? "收起工具切换" : "切换执行工具和模型"}
-                            aria-expanded={customizingCli}
-                            style={{
-                              background: "transparent",
-                              border: "none",
-                              padding: 0,
-                              cursor: "pointer",
-                              display: "inline-flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                            }}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setCustomizingCli(!customizingCli);
-                            }}
-                          >
-                            <EmployeeAvatar
-                              employee={selectedEmployee || { id: form.employeeId, name: "员工" }}
-                              provider={form.specifiedCli ? form.provider : undefined}
-                              size="md"
-                            />
-                          </button>
-                          <Flex vertical style={{ minWidth: 0, flex: 1 }}>
-                            <Flex align="center" gap={8}>
-                              <Typography.Text strong ellipsis style={{ fontSize: 13 }}>
-                                {selectedEmployee?.name || "硅基员工"}
-                              </Typography.Text>
-                              <Typography.Text
-                                type="secondary"
-                                style={{
-                                  fontSize: 12,
-                                  padding: "1px 6px",
-                                  borderRadius: 4,
-                                  background: form.specifiedCli ? "var(--accent-muted)" : "var(--bg-secondary)",
-                                  color: form.specifiedCli ? "var(--accent)" : "var(--text-secondary)",
-                                }}
-                              >
-                                {form.specifiedCli ? "已指定工具" : "按员工配置启动"}
-                              </Typography.Text>
-                            </Flex>
-                            <Typography.Text type="secondary" ellipsis style={{ fontSize: 12 }}>
-                              {form.specifiedCli
-                                ? `工具：${selectedTool(form)?.label || form.provider} · 模型：${preferredModel(form.model)}`
-                                : "按员工配置的工具与模型候选顺序启动"}
-                            </Typography.Text>
-                          </Flex>
-                        </Flex>
-                        <WandButton
-                          kind="ghost"
-                          size="small"
-                          type="button"
-                          aria-expanded={customizingCli}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setCustomizingCli(!customizingCli);
-                          }}
-                        >
-                          {customizingCli ? "收起" : "指定工具 / 模型"}
-                        </WandButton>
-                      </Flex>
-
-                      {customizingCli ? (
-                        <Flex
-                          vertical
-                          gap={12}
-                          className="wand-new-session-custom-cli-panel"
-                          style={{
-                            marginTop: 8,
-                            padding: "8px 0",
-                          }}
-                        >
-                          <Form.Item label="选择执行工具" style={{ marginBottom: 0 }}>
-                            <Radio.Group
-                              value={form.specifiedCli ? agentToolIdFor(form.provider, form.engine) : "default_dispatch"}
-                              disabled={submitting}
-                              style={{ width: "100%" }}
-                              onChange={(event) => {
-                                const val = event.target.value;
-                                if (val === "default_dispatch") {
-                                  setForm((current) => current ? { ...current, specifiedCli: false } : current);
-                                } else {
-                                  setForm((current) => current ? { ...current, specifiedCli: true } : current);
-                                  selectTool(val);
-                                }
-                              }}
-                            >
-                              <div className="wand-execution-subject-grid">
-                                <Radio value="default_dispatch">
-                                  <Flex align="center" gap={8}>
-                                    <EmployeeAvatar
-                                      employee={selectedEmployee || { id: form.employeeId, name: "员工" }}
-                                      size="sm"
-                                    />
-                                    <Flex vertical>
-                                      <Typography.Text strong>员工默认派发</Typography.Text>
-                                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                        按员工配置的候选顺序尝试工具与模型
-                                      </Typography.Text>
-                                    </Flex>
-                                  </Flex>
-                                </Radio>
-                                {AGENT_TOOL_OPTIONS.map((tool) => (
-                                  <Radio key={tool.id} value={tool.id}>
-                                    <Flex align="center" gap={8}>
-                                      {tool.engine === "sdk"
-                                        ? <WandIcon name="spark" size={18}/>
-                                        : <ProviderLogo provider={tool.provider} className="wand-subject-provider" />}
-                                      <Flex vertical>
-                                        <Typography.Text strong>{tool.label}</Typography.Text>
-                                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                          {tool.description}
-                                        </Typography.Text>
-                                      </Flex>
-                                    </Flex>
-                                  </Radio>
-                                ))}
-                              </div>
-                            </Radio.Group>
-                          </Form.Item>
-
-                          {form.specifiedCli ? (
-                            <Form.Item
-                              label="指定模型"
-                              style={{ marginBottom: 0 }}
-                              extra="所选模型随会话启动一起提交；「跟随服务端默认」沿用服务端配置的默认模型。"
-                            >
-                              <WandSelect
-                                value={preferredModel(form.model)}
-                                options={wandModelOptions(modelCatalog, form.provider).filter(
-                                  (option) => form.kind === "structured" || !option.value.startsWith("wand-openrouter-free/"),
-                                )}
-                                ariaLabel="模型"
-                                searchable
-                                searchPlaceholder="搜索模型"
-                                disabled={submitting}
-                                className="wand-new-session-model-select"
-                                onValueChange={selectModel}
-                              />
-                            </Form.Item>
-                          ) : null}
-
-                          <Flex justify="space-between" align="center" style={{ paddingTop: 4 }}>
-                            <WandButton
-                              kind="ghost"
-                              size="small"
-                              type="button"
-                              onClick={() => {
-                                setForm((current) => current ? { ...current, employeeId: undefined, specifiedCli: undefined } : current);
-                                setCustomizingCli(false);
-                                setSubjectPickerOpen(true);
-                              }}
-                            >
-                              选择其他执行者
-                            </WandButton>
-                            {form.specifiedCli ? (
-                              <WandButton
-                                kind="ghost"
-                                size="small"
-                                type="button"
-                                onClick={() => {
-                                  setForm((current) => current ? { ...current, specifiedCli: false } : current);
-                                }}
-                              >
-                                恢复员工默认派发
-                              </WandButton>
-                            ) : null}
-                          </Flex>
-                        </Flex>
-                      ) : null}
-                    </div>
-                  ) : (
-                    <Collapse ref={subjectPickerRef} className="wand-new-session-subject-collapse" destroyOnHidden activeKey={subjectPickerOpen ? ["subject"] : []}
-                      onChange={(keys) => setSubjectPickerOpen(keys.includes("subject"))}
-                      items={[{ key: "subject", label: <Flex justify="space-between" align="center" gap={12}><Typography.Text strong ellipsis title={subjectSummary}>{subjectSummary}</Typography.Text><Typography.Text type="secondary">更换执行对象</Typography.Text></Flex>, children: <UnifiedExecutionSubjectPicker
-                      selectedSubject={form.teamId
-                        ? { type: "team", id: form.teamId }
-                        : form.employeeId
-                          ? { type: "employee", id: form.employeeId }
-                          : { type: "cli", id: form.kind === "shell" ? "shell" : form.provider,
-                              ...(form.engine ? { engine: form.engine } : {}) }}
-                      kind={form.kind === "shell" ? "pty" : form.kind}
-                      model={form.model}
-                      showModel={false}
-                      showKind={false}
-                      teams={teamContext ? teamOptions : null}
-                      teamWorkspaceId={teamWorkspaceId}
-                      disabled={submitting}
-                      onSubjectChange={(subj) => {
-                        // 员工有自己的身份入口焦点；其余选择回到原展开按钮。
-                        if (subj.type !== "employee") subjectPickerRef.current?.querySelector<HTMLElement>(".ant-collapse-header")?.focus({ preventScroll: true });
-                        setSubjectPickerOpen(false);
-                        if (subj.type === "team") {
-                          setForm((current) => current
-                            ? { ...current, teamId: subj.id, employeeId: undefined, specifiedCli: undefined }
-                            : current);
-                          return;
-                        }
-                        if (subj.type === "cli") {
-                          if (subj.id === "shell") {
-                            setForm((current) => current
-                              ? { ...current, teamId: undefined, employeeId: undefined, kind: "shell", specifiedCli: undefined }
-                              : current);
-                          } else {
-                            setForm((current) => current
-                              ? { ...current, teamId: undefined, employeeId: undefined, kind: current.kind === "shell" ? "pty" : current.kind, specifiedCli: undefined }
-                              : current);
-                            selectTool(agentToolIdFor(subj.id as NewSessionProvider, subj.engine));
-                          }
-                        } else if (subj.type === "employee") {
-                          setForm((current) => current
-                            ? { ...current, teamId: undefined, employeeId: subj.id, kind: "structured", specifiedCli: false }
-                            : current);
-                        }
-                      }}
-                      onKindChange={(nextKind) => {
-                        if (nextKind === "pty") {
-                          setForm((current) => current ? { ...current, teamId: undefined, employeeId: undefined, specifiedCli: undefined } : current);
-                        }
-                        selectKind(nextKind);
-                      }}
-                      onModelChange={(nextModel) => selectModel(nextModel)}
-                    /> }]}/>
-                  )}
-                </Form.Item>
-                <Form.Item label="会话类型" style={{ marginBottom: 0 }}>
-                  <Segmented block aria-label="会话类型" value={form.kind === "shell" ? "pty" : form.kind} disabled={submitting}
-                    options={WORKSPACE_KIND_OPTIONS.map((option) => ({ value: option.value,
-                      label: <span title={option.description}>{option.label}</span> }))}
-                    onChange={(value) => {
-                      if (value === "pty") {
-                        setForm((current) => current ? { ...current, teamId: undefined, employeeId: undefined, specifiedCli: undefined,
-                          engine: current.engine === "sdk" ? "cli" : current.engine } : current);
-                        if (form.engine === "sdk") selectTool(agentToolIdFor(form.provider, "cli"));
-                      }
-                      selectKind(value as NewSessionKind);
-                    }}/>
-                  {form.employeeId || form.teamId || form.engine === "sdk" ? <Typography.Text type="secondary">终端直接使用命令行工具；切换后不使用员工、团队或 Wand Agent。</Typography.Text> : null}
-                </Form.Item>
-                {!form.teamId && !(form.employeeId && !form.specifiedCli) && form.kind !== "shell" ? <Form.Item label="权限与执行模式" style={{ marginBottom: 0 }}>
-                  <Radio.Group aria-label="执行模式" value={form.mode} disabled={submitting} onChange={(event) => selectMode(event.target.value)}>
-                    <Space wrap>{MODES.filter((mode) => supported.has(mode.value)).map((mode) => <Radio.Button key={mode.value} value={mode.value} disabled={!supported.has(mode.value)} title={mode.description}
-                      ref={(element) => { modeRefs.current[mode.value] = element?.input ?? null; }}
-                      onKeyDown={(event) => navigateChoice(event, form.mode, supportedModesForProvider, selectMode, modeRefs)}>{mode.label}</Radio.Button>)}</Space>
-                  </Radio.Group>
-                </Form.Item> : null}
-                <div className="wand-new-session-permission-context" aria-live="polite">
-                  {form.teamId || (form.employeeId && !form.specifiedCli) ? <dl><div><dt>模型</dt><dd title={modelSummary}>{modelSummary}</dd></div></dl> : null}
-                  {permissionWarning || form.teamId || form.employeeId || form.kind === "shell" ? <Typography.Text strong className={permissionWarning ? "wand-new-session-permission-warning" : undefined}>{permissionSummary}</Typography.Text> : null}
-                  <Typography.Paragraph className="wand-new-session-permission-detail" type={permissionWarning ? "danger" : "secondary"}>{permissionDetail}</Typography.Paragraph>
-                </div>
-              </Flex>
-            </section>
-            {form.teamId ? <Form.Item label="本轮说明" htmlFor="wand-new-session-team-note"
-              extra={<Typography.Text id="wand-new-session-team-note-hint" type="secondary">团队按这句话拆解与验收；开工后首屏直接进群聊页看进展。</Typography.Text>}>
-              <TaskTextArea className="resize-none" id="wand-new-session-team-note" ref={teamNoteRef}
-                rows={3} maxLength={4000} required value={teamNote} disabled={submitting}
-                aria-describedby="wand-new-session-team-note-hint" placeholder="一句话说清要他们做什么"
-                onChange={(event) => setTeamNote(event.currentTarget.value)}/>
-            </Form.Item> : null}
-            <div className={`wand-new-session-primary-fields${form.kind === "shell" || form.employeeId || form.teamId ? " is-single" : ""}`}>
-            <Form.Item htmlFor="wand-new-session-cwd" label="工作目录" extra={<Typography.Text id="wand-new-session-cwd-hint" type="secondary">{form.workspaceTaskId ? "使用所选任务的运行目录；切换任务可更换目录。" : "留空则使用当前目录，支持路径自动补全。"}</Typography.Text>}>
-              <AutoComplete style={{ width: "100%" }} value={form.cwd} disabled={submitting || Boolean(form.workspaceTaskId)}
-                open={suggestionsActive && suggestions.length > 0}
-                options={suggestions.map((item) => ({ value: item.path, label: <Flex vertical><Typography.Text strong>{item.name}</Typography.Text><Typography.Text type="secondary">{item.path}</Typography.Text></Flex> }))}
-                onChange={(cwd) => setForm({ ...form, cwd, workspaceId: undefined })}
-                onSelect={(cwd) => { setForm({ ...form, cwd, workspaceId: undefined }); setSuggestionsActive(false); }}
-                onFocus={() => setSuggestionsActive(true)} onBlur={() => setSuggestionsActive(false)}>
-                <WandInput id="wand-new-session-cwd" type="text"
-                  placeholder={effectiveCwd}
-                  autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
-                  aria-invalid={error.includes("目录") || undefined} aria-describedby="wand-new-session-cwd-hint"/>
+  };
+  const placeholder = form?.kind === "shell" ? "输入启动后要执行的命令（可选）…" : form?.kind === "pty" ? "输入要交给 CLI 的内容（可选）…" : "描述你想完成的事…";
+  return <section className="new-work-page conversation-root" aria-label="新建工作">
+    <Flex align="center" justify="space-between" className="new-work-heading">
+      <Typography.Text strong>{controller.taskName ? `新建工作 · ${controller.taskName}` : "新建工作"}</Typography.Text>
+      <WandButton kind="ghost" disabled={submitting} onClick={() => newSessionController.close()}>返回</WandButton>
+    </Flex>
+    {loading || employeesLoading ? <Flex align="center" justify="center" flex={1}><Spin/><span>正在读取工作配置…</span></Flex> : form && defaults ? <>
+      <div className="new-work-kind"><WandTabs ariaLabel="工作类型" value={form.kind} onValueChange={value => chooseKind(value as NewSessionKind)}
+        tabs={[{ value: "structured", label: "对话", content: null, disabled }, { value: "pty", label: "CLI 终端", content: null, disabled }, { value: "shell", label: "空白终端", content: null, disabled }]}/></div>
+      <div className="new-work-context">
+        <div className="new-work-sentence">
+          {form.kind === "structured" ? <><span>与</span><WandPopover ariaLabel="新工作执行对象" side="bottom" open={subjectOpen} onOpenChange={setSubjectOpen}
+            trigger={<WandButton kind="ghost" disabled={disabled} className="new-work-person">{employee ? <EmployeeAvatar employee={employee} size="sm"/> : <WandIcon name="spark"/>}<span className="new-work-person-name" title={employee?.name || team?.name}>{employee?.name || team?.name || (form.specifiedCli ? agentToolDisplayName(form.provider, form.engine) : "选择员工")}</span><WandIcon name="chevronDown" size={14}/></WandButton>}>
+            <div className="new-work-subject"><UnifiedExecutionSubjectPicker selectedSubject={form.teamId ? { type: "team", id: form.teamId } : form.specifiedCli && !form.employeeId ? { type: "cli", id: form.provider, engine: form.engine } : { type: "employee", id: form.employeeId || "" }}
+              kind="structured" model="default" showKind={false} showModel={false} teams={teams?.map(aiTeamPickerOption)} teamWorkspaceId={teamWorkspaceId}
+              onKindChange={chooseKind} onModelChange={() => {}} onSubjectChange={subject => {
+                if (subject.type === "cli" && subject.id !== "shell") setPageExecutionPreference({
+                  provider: subject.id as WandTaskAgent["provider"], engine: subject.engine, model: "default", thinkingEffort: "off",
+                });
+                setForm(current => current ? subject.type === "employee" ? { ...current, employeeId: subject.id, teamId: undefined }
+                  : subject.type === "team" ? { ...current, teamId: subject.id, employeeId: undefined }
+                  : { ...current, employeeId: undefined, teamId: undefined, specifiedCli: true, kind: subject.id === "shell" ? "shell" : current.kind,
+                    provider: subject.id === "shell" ? current.provider : subject.id as NewSessionForm["provider"], engine: subject.engine } : current);
+                setSubjectOpen(false);
+              }}/></div>
+          </WandPopover><span>一起在</span></> : <span>在</span>}
+          <WandPopover ariaLabel="新工作运行目录" side="bottom" open={directoryOpen} onOpenChange={setDirectoryOpen}
+            trigger={<WandButton kind="ghost" disabled={disabled || !!form.workspaceTaskId} className="new-work-directory" title={form.cwd}>{form.cwd || "选择运行目录"}<WandIcon name="chevronDown" size={14}/></WandButton>}>
+            <Flex vertical gap={12} className="new-work-paths"><Typography.Text strong>运行目录</Typography.Text>
+              <AutoComplete value={form.cwd} options={suggestions.map(item => ({ value: item.path }))} onChange={cwd => setForm({ ...form, cwd, workspaceId: undefined })}>
+                <WandInput autoFocus aria-label="新工作运行目录路径" placeholder="输入目录路径" onKeyDown={event => { if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); setDirectoryOpen(false); } }}/>
               </AutoComplete>
-              {defaults.recentPaths.length > 0 ? <Collapse className="wand-new-session-recent-paths" ghost size="small" activeKey={recentPathsOpen ? ["recent"] : []}
-                onChange={(keys) => setRecentPathsOpen(keys.includes("recent"))}
-                items={[{ key: "recent", label: `最近使用的目录 · ${defaults.recentPaths.length}`, children: <Space wrap aria-label="最近使用的工作目录">
-                {defaults.recentPaths.map((item) => <WandButton kind={form.cwd === item.path ? "outline" : "ghost"} size="small"
-                  disabled={submitting || Boolean(form.workspaceTaskId)}
-                  key={item.path} type="button" title={item.path} aria-pressed={form.cwd === item.path}
-                  onClick={() => setForm({ ...form, cwd: item.path, workspaceId: undefined })}>
-                  <Typography.Text ellipsis style={{ maxWidth: 180 }}>{item.path}</Typography.Text>
-                </WandButton>)}
-              </Space> }]}/> : null}
-            </Form.Item>
-            {form.kind !== "shell" && !form.employeeId && !form.teamId ? <Form.Item label="模型" extra="选择默认时，沿用服务端默认模型。">
-              <WandSelect value={preferredModel(form.model)}
-                options={wandModelOptions(modelCatalog, form.provider).filter((option) => form.kind === "structured" || !option.value.startsWith("wand-openrouter-free/"))}
-                ariaLabel="模型" searchable searchPlaceholder="搜索模型" disabled={submitting}
-                className="wand-new-session-model-select" onValueChange={selectModel}/>
-            </Form.Item> : null}
-            </div>
-            {!form.teamId ? <NewSessionTaskField form={form} initialName={controller.taskName}
-              disabled={submitting} cwd={projectCwd} onChange={setForm}/> : null}
-            <Collapse activeKey={advancedOpen ? ["advanced"] : []}
-              onChange={(keys) => setAdvancedOpen(keys.includes("advanced"))}
-              items={[{ key: "advanced", label: "执行说明", children:
-                form.teamId ? <Typography.Text type="secondary">团队开工不另选模式与模型：负责人拆解，成员各用自己的员工配置与候选链执行。</Typography.Text>
-                : form.employeeId && !form.specifiedCli ? <Typography.Text type="secondary">模型、权限与候选顺序由员工配置决定。可在硅基员工页修改。</Typography.Text>
-                : form.kind !== "shell" ? <Typography.Text type="secondary">{protocolHint(form)}</Typography.Text>
-                : <Typography.Text type="secondary">空白终端使用服务端配置的登录 Shell，不应用 AI 权限模式。</Typography.Text>
-              }]}/>
-            {error ? <Alert type="error" showIcon role="alert" title={error}/> : null}
-            <Flex justify="flex-end" gap={8} className="wand-dialog-sticky-actions">
-              <WandButton kind="ghost" type="button" disabled={submitting} onClick={() => newSessionController.close()}>取消</WandButton>
-              <WandButton className="wand-new-session-submit" kind="primary" type="submit" disabled={submitting}>
-                {submitting ? (form.teamId ? "正在开工…" : "正在启动…") : form.teamId ? "直接开工" : form.kind === "shell" ? "启动空白终端" : form.employeeId ? "启动员工会话" : "启动会话"}
-              </WandButton>
+              {defaults.recentPaths.map(item => <WandButton key={item.path} kind="ghost" title={item.path} onClick={() => { setForm({ ...form, cwd: item.path, workspaceId: undefined }); setDirectoryOpen(false); }}>{item.path}</WandButton>)}
+              <WandButton onClick={() => setDirectoryOpen(false)}>完成</WandButton>
             </Flex>
-          </Flex>
-        </TaskForm>
-      ) : error ? <Alert type="error" showIcon role="alert" title={error} action={<WandButton kind="primary" onClick={() => newSessionController.open()}>重试</WandButton>}/> : null}
-    </WandDialogSurface>
-  );
+          </WandPopover><span>{form.kind === "structured" ? "工作" : form.kind === "pty" ? "使用 CLI 工作" : "打开空白终端"}</span>
+        </div>
+        {controller.workspaceTaskId ? <Typography.Text type="secondary">当前任务使用既有工作目录</Typography.Text> : null}
+        {form.taskName !== undefined ? <NewSessionTaskField form={form} initialName={controller.taskName} disabled={disabled} cwd={form.cwd} onChange={setForm}/> : null}
+      </div>
+      <div className="conversation-composer new-work-composer">
+        {employeesError ? <Alert type="error" title={employeesError}/> : null}
+        {error ? <Alert type="error" role="alert" title={error}/>: null}
+        {accepted.current && error ? <WandButton onClick={() => {
+          const captured = accepted.current!;
+          void newSessionStore.getRuntime()?.completeCreate(captured.request, captured.created).then(() => newSessionController.close())
+            .catch(cause => setError(describeError(cause, "打开工作失败，请从会话列表重试。")));
+        }}>打开已创建的工作（本页草稿保留）</WandButton> : null}
+        {unknown ? <Typography.Text type="warning">创建结果未确认，请先从会话列表核对，不要重复创建；本页输入保留。</Typography.Text> : null}
+        {voiceStatus ? <Typography.Text type="secondary" role="status">{voiceStatus}</Typography.Text> : null}
+        <div ref={surface} className="conversation-input-wrap" data-composer-expanded={minimal.expanded} data-editor-expanded={editor.expanded}>
+          {form.kind !== "shell" && runtimeAgent && !form.teamId ? <div className="conversation-runtime-summary"><ConversationExecutionSelectors agent={form.kind === "pty" ? { ...runtimeAgent, engine: "cli" } : runtimeAgent} catalog={catalog} disabled={disabled} cliOnly={form.kind === "pty"}/></div> : null}
+          {employee && form.kind === "structured" ? <WandIconButton className="conversation-companion" aria-label={`查看${employee.name}的资料`} onClick={event => employeeProfile.open(employee, event.currentTarget)}><ComposerIdentity employee={employee}/></WandIconButton> : null}
+          <Sender ref={sender} className="conversation-sender" value={draft.text} readOnly={disabled} placeholder={placeholder} suffix={false}
+            autoSize={{ minRows: 1, maxRows: editor.expanded ? 24 : 4 }} onChange={text => teamChatComposer.edit(key, { text })} onSubmit={() => void submit()}
+            header={draft.attachments.length ? <ComposerAttachmentList items={draft.attachments.map((item, index) => ({ index, name: item.name, sizeLabel: `${item.size} B`, previewUrl: item.previewUrl || null }))} onRemove={index => teamChatComposer.edit(key, { removeAttachment: index })}/> : null}
+            footer={<Flex justify="space-between" align="center" className="conversation-action-row"><Flex gap={4} align="center">
+              <WandPopover ariaLabel="新工作更多选项" side="top" trigger={<WandIconButton aria-label="更多新工作选项" disabled={disabled}><WandIcon name="plus"/></WandIconButton>}>
+                <Flex vertical gap={12}><Typography.Text type="secondary">{form.kind === "shell" ? "使用系统 Shell" : `权限：${employee?.agents[0]?.mode || form.mode}`}</Typography.Text>
+                  {preference ? <WandButton disabled={disabled} onClick={() => setPageExecutionPreference(undefined)}>恢复员工默认执行配置</WandButton> : null}
+                </Flex>
+              </WandPopover>
+              <WandIconButton aria-label="添加附件" disabled={disabled || form.kind === "shell"} onClick={() => files.current?.click()}><WandIcon name="paperclip"/></WandIconButton>
+              <ComposerSpeechButton ownerKey={key} revision={draft.revision} inputPlaceholder={placeholder} disabled={disabled || form.kind === "shell"} onStatus={setVoiceStatus}
+                onCommit={(text, expectedRevision) => teamChatComposer.edit(key, { text: draft.text ? `${draft.text} ${text}` : text, expectedRevision, persist: true })}/>
+              <span className="composer-edit-action">{editor.control}</span>
+            </Flex><MinimalComposerEntry text={draft.text} attachments={draft.attachments.length} placeholder={placeholder} onOpen={minimal.open} disabled={disabled}/>
+            <ConversationSubmitButton stops={false} phase={submitting ? "sending" : error ? "failed" : "idle"} label={form.kind === "structured" ? "开始工作" : "打开终端"} showLabel disabled={disabled || !form.cwd.trim() || (form.kind === "structured" && (!draft.text.trim() && !draft.attachments.length || !!employee && !employee.agents.length || !employee && !team && !form.specifiedCli))} onClick={() => void submit()}/></Flex>}/>
+        </div>
+        <input ref={files} hidden type="file" multiple onChange={event => {
+          for (const file of Array.from(event.currentTarget.files || [])) teamChatComposer.edit(key, { addAttachment: { file, name: file.name, size: file.size } });
+          event.currentTarget.value = "";
+        }}/>
+      </div>
+    </> : <Alert type="error" title={error || "配置未就绪，请重新打开新建。"}/ >}
+  </section>;
 }

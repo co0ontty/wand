@@ -11,6 +11,7 @@ import { draggedTaskId, isTaskDrag, startTaskDrag, TASK_DRAG_TYPE } from "./task
 import { draggedSessionId, isSessionDrag, startSessionDrag } from "../workspaces/session-drag";
 import { SessionMoveButton } from "../workspaces/session-move-button";
 import { workspacesStore } from "../workspaces/controller";
+import { TaskOrganizeButton } from "../workspaces/task-organization";
 import { sortProviderOptions, useProviderUsage } from "../provider-usage";
 import { DEFAULT_WAND_TASK_PRIORITY, type TaskExecutionSubject, type WandTaskAgent, type WandTaskPriority, type WandTaskStatus } from "../../../task-types";
 import { useSiliconEmployees } from "../agents/employee-repository.js";
@@ -79,6 +80,7 @@ import { aiTeamsRepository, type AiTeam } from "../ai-teams/repository";
 import { TaskTeamRunPanel } from "../ai-teams/lazy";
 import { taskBoardController, taskBoardStore } from "./task-board-controller";
 import { taskBoardRepository, type IssueWorkspace, type WandTaskListed } from "./task-board-repository";
+import { openTaskSessionCreation } from "./task-session-create";
 import {
   TaskBoardAgentChips,
   TaskBoardAgentSessionList,
@@ -212,6 +214,7 @@ export function TaskBoardHost({
   const [dropStatus, setDropStatus] = React.useState<WandTaskStatus | "">("");
   const [archiveDrop, setArchiveDrop] = React.useState(false);
   const [contextMenu, setContextMenu] = React.useState<{ taskId: string; x: number; y: number } | null>(null);
+  const sessionCreationLock = React.useRef(false);
   const [composeRequest, setComposeRequest] = React.useState<{ id: string; nonce: number } | null>(null);
   const loadGenerationRef = React.useRef(0);
   const workspaceGenerationRef = React.useRef(0);
@@ -984,6 +987,7 @@ export function TaskBoardHost({
       </Flex>
       <Flex wrap gap="small" className="task-board-header-actions">
         {!selected && <>
+          <TaskOrganizeButton target={filterWorkspaceId ? { kind: "workspace", workspaceId: filterWorkspaceId } : { kind: "all" }} onChanged={() => reload(true)}/>
           <WandIconButton disabled={loading} onClick={() => void reload()} aria-label="刷新任务" title="刷新任务">
             <WandIcon name="refresh"/>
           </WandIconButton>
@@ -1188,6 +1192,14 @@ export function TaskBoardHost({
       onCopy={() => {
         void navigator.clipboard?.writeText(contextTask.identifier);
         setContextMenu(null);
+      }}
+      onNewSession={() => {
+        setContextMenu(null);
+        if (sessionCreationLock.current) return;
+        sessionCreationLock.current = true;
+        void openTaskSessionCreation(contextTask, { canContinue: () => taskBoardStore.getSnapshot().open })
+          .catch(error => { if (taskBoardStore.getSnapshot().open) setNotice(error instanceof Error ? error.message : "无法打开新建会话。"); })
+          .finally(() => { sessionCreationLock.current = false; });
       }}
       onDispatch={() => {
         // 右键「派发」只打开空的指派框。任务卡描述不再被当成这次的提示词直接发出去。

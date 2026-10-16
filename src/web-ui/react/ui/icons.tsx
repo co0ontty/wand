@@ -13,6 +13,7 @@ export type WandIconName =
   | "board"
   | "brain"
   | "branch"
+  | "calendar"
   | "chat"
   | "check"
   | "chevron"
@@ -139,6 +140,8 @@ export function WandIcon({
       return <svg {...common}><path d="M12 5a3 3 0 0 0-5.8 1A4 4 0 0 0 4 13a4 4 0 0 0 8 5V5Zm0 0a3 3 0 0 1 5.8 1A4 4 0 0 1 20 13a4 4 0 0 1-8 5M8 10l4 2 4-2"/></svg>;
     case "branch":
       return <svg {...common}><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7M18 10.5c0 4-6 2.5-6 6.5"/></svg>;
+    case "calendar":
+      return <svg {...common}><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M8 3v4M16 3v4M4 10h16M8 14h2M14 14h2M8 18h2M14 18h2"/></svg>;
     case "chat":
       return <svg {...common}><path d="M5.5 4h13a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5.5 3V6a2 2 0 0 1 2-2Z"/><path d="M8 9h8"/></svg>;
     case "check":

@@ -9,11 +9,10 @@ import {
   formatFilePreviewSize,
   nextFilePreviewSibling,
   normalizeFilePreviewRequest,
-  parseFilePreviewMarkdown,
   shellQuoteFilePath,
   tokenizeFilePreviewCode,
-  tokenizeFilePreviewMarkdownInline,
 } from "../src/web-ui/react/file-preview/model.ts";
+import { parseFilePreviewMarkdown, tokenizeFilePreviewMarkdownInline } from "../src/web-ui/react/file-preview/markdown-model.ts";
 import { HttpFilePreviewRepository } from "../src/web-ui/react/file-preview/repository.ts";
 import type {
   FilePreviewFile,

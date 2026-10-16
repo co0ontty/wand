@@ -1,0 +1,199 @@
+{"at":1791976917686,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791976917686,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791976917686,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791976917687,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791976920143,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791976922942,"phase":"worker-radio-report","message":"完成主仓回归调整 reported to captain","preview":"RADIO: status=started, action=读取上轮测试报告与当前 tests 基线并批量清理 Gemini 正向覆盖, evidence=tests/ 与上轮报告, blocker=none, next=补未知 provider 拒绝与零 spawn 回归后运行相关测试"}
+{"at":1791976922942,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start bash","toolName":"bash"}
+{"at":1791976923092,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791976923093,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791976923094,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791976928983,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791976929669,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791976929671,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start read","toolName":"read"}
+{"at":1791976929672,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start read","toolName":"read"}
+{"at":1791976929674,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start read","toolName":"read"}
+{"at":1791976929675,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start read","toolName":"read"}
+{"at":1791976929675,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start read","toolName":"read"}
+{"at":1791976929681,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976929683,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976929684,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976929685,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976929685,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976929686,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791976929687,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791976929687,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791976929688,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791976929688,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791976929689,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791976929689,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791976929689,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791976929690,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791976929690,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791976934952,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791976935254,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791976935255,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start read","toolName":"read"}
+{"at":1791976935256,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start read","toolName":"read"}
+{"at":1791976935257,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start read","toolName":"read"}
+{"at":1791976935257,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start read","toolName":"read"}
+{"at":1791976935258,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start read","toolName":"read"}
+{"at":1791976935260,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start read","toolName":"read"}
+{"at":1791976935268,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976935271,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976935273,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976935275,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976935279,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976935280,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791976935284,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791976935289,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791976935293,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791976935294,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791976935297,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791976935300,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791976935302,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791976935304,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791976935305,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791976935308,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791976935309,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791976935311,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791976944335,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791976951904,"phase":"worker-radio-report","message":"完成主仓回归调整 reported to captain","preview":"RADIO: status=working, action=已确认残留正向分支与静默 Claude 风险，准备补统一 unsupported 拒绝断言, evidence=src/session-ai-context.ts:resolveSessionProvider 当前仍 fallback Claude；tests 13 个重点文件, blocker=server 接口仍在并行修改, next=测试按 /unsupported|不支持|无效/i 校验并断言零 spawn、"}
+{"at":1791976951910,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start bash","toolName":"bash"}
+{"at":1791976952071,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791976952074,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791976952076,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791976958920,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791976967683,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791976967684,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start edit","toolName":"edit"}
+{"at":1791976967694,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1791976967695,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791976967696,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791976977994,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791976985330,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791976985332,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start edit","toolName":"edit"}
+{"at":1791976985341,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1791976985342,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791976985343,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791976991886,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977004598,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977004599,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start edit","toolName":"edit"}
+{"at":1791977004607,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1791977004608,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977004609,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977008415,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977010447,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977010448,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start bash","toolName":"bash"}
+{"at":1791977010475,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791977010478,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977010479,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977013476,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977014666,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977014668,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start edit","toolName":"edit"}
+{"at":1791977014676,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1791977014678,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977014679,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977017099,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977025142,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977025145,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start edit","toolName":"edit"}
+{"at":1791977025156,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1791977025158,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977025159,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977028745,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977032639,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977032644,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start edit","toolName":"edit"}
+{"at":1791977032660,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1791977032664,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977032665,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977039972,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977040308,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977040311,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start read","toolName":"read"}
+{"at":1791977040313,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start read","toolName":"read"}
+{"at":1791977040315,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start read","toolName":"read"}
+{"at":1791977040316,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start read","toolName":"read"}
+{"at":1791977040317,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start read","toolName":"read"}
+{"at":1791977040319,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start read","toolName":"read"}
+{"at":1791977040330,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791977040332,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791977040334,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791977040336,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791977040338,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791977040340,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791977040342,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977040343,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977040344,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977040346,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977040349,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977040350,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977040352,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977040353,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977040355,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977040356,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977040358,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977040359,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977042842,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977045703,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977045706,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start read","toolName":"read"}
+{"at":1791977045715,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791977045718,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977045720,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977047748,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977051833,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977051839,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start edit","toolName":"edit"}
+{"at":1791977051852,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1791977051855,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977051857,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977053798,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977055309,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977055311,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start edit","toolName":"edit"}
+{"at":1791977055320,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1791977055323,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977055325,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977057318,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977060283,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977060287,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start edit","toolName":"edit"}
+{"at":1791977060300,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1791977060302,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977060304,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977063654,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977065120,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977065124,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start edit","toolName":"edit"}
+{"at":1791977065148,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1791977065152,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977065154,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977067920,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977071719,"phase":"worker-budget-notice","message":"完成主仓回归调整 reached soft request budget (18/18)"}
+{"at":1791977071728,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977071731,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start edit","toolName":"edit"}
+{"at":1791977071753,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end edit failed","toolName":"edit","isError":true}
+{"at":1791977071756,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977071759,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977071762,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977071764,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977075702,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977093038,"phase":"worker-radio-report","message":"完成主仓回归调整 reported to captain","preview":"RADIO: status=working, action=已完成会话/配置/PTY拒绝回归及模型与UI示例替换；收到预算立即收尾要求，正在完成本批剩余替换并定点验证, evidence=tests/config-preferences、session-ai-context、process-manager-safety、session-provider-switch 等9文件, blocker=原生共享fixture正被其他worker同步修改导致精确替换未命中，未覆盖, n"}
+{"at":1791977093042,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start bash","toolName":"bash"}
+{"at":1791977098538,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1791977098541,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977098544,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977103787,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977106554,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977106562,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start read","toolName":"read"}
+{"at":1791977106567,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start read","toolName":"read"}
+{"at":1791977106571,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start read","toolName":"read"}
+{"at":1791977106585,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791977106588,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791977106590,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end read","toolName":"read","isError":false}
+{"at":1791977106592,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977106593,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977106594,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977106596,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977106597,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977106599,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977112430,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977116976,"phase":"worker-radio-report","message":"完成主仓回归调整 reported to captain","preview":"RADIO: status=blocked, action=定点运行完成，104/107通过；新增3条拒绝测试准确暴露服务端尚未加的边界, evidence=/tmp/wand-gemini-tests-worker.log；PTY新建/恢复均未reject，session-ai-context仍静默Claude, blocker=等待server实现unsupported检查，未弱化断言, next=交付本批tests改动与失败入口，captain统跑；fixture已被其"}
+{"at":1791977116980,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_start edit","toolName":"edit"}
+{"at":1791977116991,"phase":"worker-tool","message":"完成主仓回归调整 tool_execution_end edit","toolName":"edit","isError":false}
+{"at":1791977116994,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977116997,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended"}
+{"at":1791977119469,"phase":"worker-message-start","message":"完成主仓回归调整 message started"}
+{"at":1791977140821,"phase":"worker-message-end","message":"完成主仓回归调整 assistant message ended","preview":"## result_summary 已完成本批主仓 `tests/` 实际修改，未修改 `src/` 或原生目录： - 删除 Gemini 专属 `tests/gemini-structured.test.ts`。 - 替换配置、会话、设置页中的 Gemini 正向覆盖与模型示例，保留其他 provider 覆盖。 - 新增 Gemini PTY 新建/恢复明确拒绝、零 spawn、历史不改写回归；新增 structured 创建/切换拒绝且不新增、不修改会话回归。 - 会话"}
