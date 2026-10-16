@@ -540,8 +540,8 @@ test("tool activity summaries stay consecutive and split when prose arrives", ()
 
   includesAll("macos/Wand/ChatView.swift", [
     "struct ActivityFoldCard",
-    "_expanded = State(initialValue: ChatDisclosurePresentation.expanded(userChoice: nil,",
-    "running: activityGroup.newest && running, attention: attention)",
+    "_expanded = State(initialValue: ChatDisclosurePresentation.activityExpanded(userChoice: nil,",
+    "isNewest: activityGroup.newest, running: running)",
     "summarizeActivityItems",
   ]);
 });
