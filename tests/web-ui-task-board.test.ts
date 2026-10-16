@@ -515,7 +515,8 @@ test("task board is a first-class view=taskboard route that does not unmount the
   // 功能导航既有库按钮高亮，也保留当前页语义。
   assert.match(sidebar, /activePage=\{settings\.open \? null : taskBoard\.open \? taskBoard\.page === "board" \? "board" : taskBoard\.page === "schedules" \? "schedules" : taskBoard\.page === "calendar" \? "calendar" : "teams"/);
   const navigation = readFileSync(new URL("../src/web-ui/react/conversations/sidebar.tsx", import.meta.url), "utf8");
-  assert.match(navigation, /aria-current=\{activePage === entry\.value \? "page" : undefined\}/);
+  assert.match(navigation, /const selectedPage = activePage === "schedules" \? "calendar" : activePage/);
+  assert.match(navigation, /aria-current=\{selectedPage === entry\.value \? "page" : undefined\}/);
   // 同一功能只留一个可见入口：箭头只在未选中任务时出现（返回工作区），选中任务后返回交给面包屑首段。
   assert.match(host, /\{!selected \? <WandIconButton/);
   assert.match(host, /aria-label="返回工作区"/);
