@@ -1,19 +1,19 @@
 {
   "schema": 1,
-  "node": "v26.10.0",
-  "zlib": "1.3.2.1-motley-285e94b",
+  "node": "v24.21.0",
+  "zlib": "1.3.2.1-motley-8002e91",
   "metrics": {
     "firstLoad": {
-      "gzip": 833367,
-      "raw": 2719124
+      "gzip": 880983,
+      "raw": 2890480
     },
     "allModules": {
-      "gzip": 1056528,
-      "raw": 3344163
+      "gzip": 1005603,
+      "raw": 3227720
     },
     "eagerModules": {
-      "gzip": 704119,
-      "raw": 2224724
+      "gzip": 750661,
+      "raw": 2393288
     },
     "vendor": {
       "gzip": 112008,
@@ -24,12 +24,12 @@
       "raw": 2621
     },
     "appJs": {
-      "gzip": 490,
-      "raw": 633
+      "gzip": 1387,
+      "raw": 2353
     },
     "css": {
-      "gzip": 13393,
-      "raw": 65681
+      "gzip": 13570,
+      "raw": 66753
     },
     "theme": {
       "gzip": 2360,
