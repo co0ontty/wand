@@ -145,8 +145,8 @@ const RECEIPT_BRACKET_ID = /\[([0-9a-fA-F-]{8,64})\]/g;
 const RECEIPT_OUTPUT_FIELD = /^Output:\s*(\S+)/m;
 const RECEIPT_QODER_OUTPUT_FIELD = /^output_file:\s*(\S+)/m;
 /**
- * 第三层：兜底。provider 文案会变，白名单必然漏新形状；漏的时候宁可判中性
- * 「后台运行中」也不能标绿「最终结论」——后者是用户认定过的 bug，前者只是不够精确。
+ * 第三层：兜底。provider 文案会变，白名单必然漏新形状；漏的时候判中性
+ * 「运行状态未知」，不能由启动回执断言仍在运行，更不能标绿「最终结论」。
  * 正文一律照常渲染，不丢。
  */
 const RECEIPT_BACKGROUND_PHRASES = [
@@ -325,8 +325,8 @@ export function getAgentRunStatusSummary(
 }
 
 /**
- * 「后台已结束」不是第七种状态，而是 background 在会话已停时的说法：
- * 回执证明不了后台到底跑完没有，所以不给绿色「已完成」，只中性说明已脱离本次会话。
+ * background 是内部兼容状态：仅有派发回执时，无论父会话是否运行，
+ * 文案都显示「运行状态未知」。父会话结束不能证明子任务已经结束。
  */
 export function agentRunStatusLabelKey(status: AgentRunStatus, live: AgentRunActivity): string {
   var activity = activityOf(live);
@@ -479,6 +479,9 @@ export function collectAgentRuns(messages: AgentRunMessage[]): AgentRunIndex {
       ownerByBlockKey.set(key2, taskId);
       if (isFinalResultBlock(block2, taskId)) {
         if (!agent2.result || compareRefs(ref2, agent2.result) > 0) {
+          // Keep the original acknowledgement as diagnostic history once a
+          // native terminal notification or a real result supersedes it.
+          if (agent2.result && agent2.receipt) agent2.blocks.push(agent2.result);
           agent2.result = ref2;
           // 失败的结果不是「已交给后台」，判据不参与，保持「失败原因」展示。
           agent2.receipt = block2.is_error === true

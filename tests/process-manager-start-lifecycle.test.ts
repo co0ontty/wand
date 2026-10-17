@@ -27,16 +27,18 @@ function harness(t: test.TestContext, persistent = false) {
     const { request } = pending[index];
     let kills = 0;
     const writes: string[] = [];
+    const exits = new Set<Parameters<TerminalProcess["onExit"]>[0]>();
     const child: TerminalProcess = {
       sessionId: request.sessionId, incarnationId: `fixture-${index}`, pid: 0,
       kill() { kills++; }, write(text) { writes.push(text); }, resize() {},
-      onData() { return { dispose() {} }; }, onExit() { return { dispose() {} }; },
+      onData() { return { dispose() {} }; },
+      onExit(listener) { exits.add(listener); return { dispose() { exits.delete(listener); } }; },
     };
     pending[index].resolve({ process: child, replay: [], isNew: true, state: {
       sessionId: request.sessionId, incarnationId: child.incarnationId, pid: 0, status: "running", exitCode: null,
       cols: 120, rows: 36, seq: 0, output: "", chunks: [], terminalSnapshot: null, launchMarkerToken: null,
     } });
-    return { kills: () => kills, writes };
+    return { kills: () => kills, writes, exit: (exitCode = 0) => { for (const listener of [...exits]) listener({ exitCode }); } };
   };
   return { root, storage, manager, pending, resolve, events, forgotten };
 }
@@ -91,6 +93,27 @@ test("same-id reuse is refused while a start owns the host handshake; settled ca
   assert.equal((await next).status, "running");
   assert.equal(oldChild.kills(), 1);
   assert.equal(newChild.kills(), 0);
+});
+
+test("native cleanup keeps persistent PTY handles until exit acknowledgement", async t => {
+  const h = harness(t, true);
+  const start = h.manager.startShell(h.root, "default");
+  const child = h.resolve();
+  const session = await start;
+  const barrier = h.manager.nativeHistoryCleanupBarrier(session.id);
+  assert.ok(barrier);
+  h.manager.delete(session.id);
+  assert.equal(child.kills(), 1);
+  assert.deepEqual(h.forgotten, []);
+  let settled = false;
+  void barrier.then(() => { settled = true; });
+  child.exit(-1);
+  await Promise.resolve();
+  assert.equal(settled, false, "missing remote inventory is not an acknowledged exit");
+  child.exit();
+  await barrier;
+  await Promise.resolve();
+  assert.deepEqual(h.forgotten, [session.id]);
 });
 
 test("uncancelled startup failure still removes its own provisional record", async t => {

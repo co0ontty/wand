@@ -71,7 +71,7 @@ async function waitFor(predicate: () => boolean, message: string): Promise<void>
   }
 }
 
-function createHarness(t: TestContext, runner: SessionRunner = "claude-cli-print") {
+function createHarness(t: TestContext, runner: SessionRunner = "claude-cli-print", exited?: Promise<void>) {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-structured-generation-"));
   const storage = new WandStorage(path.join(root, "wand.db"));
   const claudeRunner = new DeferredClaudeCliRunner();
@@ -79,7 +79,7 @@ function createHarness(t: TestContext, runner: SessionRunner = "claude-cli-print
     storage,
     { ...defaultConfig(), defaultCwd: root },
     null,
-    { claudeCli: claudeRunner },
+    { claudeCli: exited ? { start: (context) => ({ ...claudeRunner.start(context), exited }) } : claudeRunner },
   );
   const session = manager.createSession({
     cwd: root,
@@ -98,6 +98,46 @@ function createHarness(t: TestContext, runner: SessionRunner = "claude-cli-print
   });
   return { manager, claudeRunner, session };
 }
+
+test("early protocol completion retains the process exit barrier after runner ownership is released", async (t) => {
+  let exit = () => {};
+  const exited = new Promise<void>((resolve) => { exit = resolve; });
+  const { manager, claudeRunner, session } = createHarness(t, "claude-cli-print", exited);
+  const running = manager.sendMessage(session.id, "first");
+  await waitFor(() => claudeRunner.starts.length === 1, "runner did not start");
+  const failedResult = assert.rejects(running, /terminated by signal SIGTERM/);
+  claudeRunner.finish(); // Protocol result is available, but the process is still exiting.
+  await failedResult;
+  const barrier = manager.nativeHistoryCleanupBarrier(session.id);
+  assert.ok(barrier, "dropping runner ownership must not lose a live CLI's exit fact");
+  let settled = false;
+  void barrier.then(() => { settled = true; });
+  manager.delete(session.id);
+  await Promise.resolve();
+  assert.equal(settled, false);
+  exit();
+  await barrier;
+  assert.equal(settled, true);
+});
+
+test("deleted structured runners acknowledge exit before native artifact cleanup", async (t) => {
+  const { manager, claudeRunner, session } = createHarness(t);
+  const running = manager.sendMessage(session.id, "first");
+  await waitFor(() => claudeRunner.starts.length === 1, "runner did not start");
+  const barrier = manager.nativeHistoryCleanupBarrier(session.id);
+  assert.ok(barrier);
+  let settled = false;
+  void barrier.then(() => { settled = true; });
+  const deletedResult = assert.rejects(running, /未找到该结构化会话/);
+  manager.delete(session.id);
+  await Promise.resolve();
+  assert.equal(settled, false, "interrupt alone must not authorize file deletion");
+  claudeRunner.finish();
+  await barrier;
+  await deletedResult;
+  assert.equal(settled, true);
+  assert.equal(manager.get(session.id), null, "late completion must not recreate the deleted session");
+});
 
 test("Claude CLI in-flight turns queue a second message instead of starting concurrently", async (t) => {
   const { manager, claudeRunner, session } = createHarness(t);

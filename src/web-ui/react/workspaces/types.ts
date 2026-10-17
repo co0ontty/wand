@@ -192,6 +192,8 @@ export interface WorkspaceTaskDetail extends WorkspaceTask {
 
 /** GET /api/tasks 聚合行：任务 + 运行期派生字段；目录信息在 TaskDirectoryGroup 上。 */
 export type TaskSummary = WorkspaceTaskDetail & {
+  boardTaskId?: string | null;
+  parentWorkspaceTaskId?: string | null;
   /** 使用 maxSessions 截断时的真实会话总数（未截断时等于 sessions.length）。 */
   totalSessions?: number;
   /** 已归档的会话：不进正常列表，在任务下单独收起，可恢复。 */

@@ -102,6 +102,8 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
     nativeLaunch?.abort();
     interruptSource();
   }
+  let acknowledgeExit = () => {};
+  const exited = new Promise<void>((resolve) => { acknowledgeExit = resolve; });
   let resolveCompletion!: (result: StructuredRunnerResult) => void;
   let rejectCompletion!: (error: unknown) => void;
   const completion = new Promise<StructuredRunnerResult>((resolve, reject) => {
@@ -181,6 +183,7 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
     spawnedAt,
     get pid() { return source?.pid ?? null; },
     completion,
+    exited,
     interrupt: requestStop,
   };
   const fileFailure = (error: Error): void => {
@@ -198,6 +201,7 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
     try { stdoutFile = new PiOutputFile(options.stdoutFile, () => observer.isActive(), handleStdoutText, fileFailure); }
     catch (error) {
       const cause = error instanceof Error ? error.message : String(error);
+      acknowledgeExit(); // No process was started.
       finish(null, null, Object.assign(new Error(`Pi 实时事件文件初始化失败：${cause}`), { code: "EFILESOURCE" }), undefined, true);
       return execution;
     }
@@ -217,6 +221,7 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
     const unavailable = (error?: unknown): void => {
       source = null;
       if (error && typeof error === "object" && "preflightBlocked" in error && error.preflightBlocked) {
+        acknowledgeExit();
         finish(null, null, Object.assign(new Error(error instanceof Error ? error.message : "Pi 原生启动被拒绝。"), { code: "ENATIVE_PREFLIGHT" }), undefined, true);
         return;
       }
@@ -225,6 +230,7 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
         return;
       }
       // Explicit pre-execution failure; existing providers retain their daemon contract.
+      acknowledgeExit();
       finish(null, null, Object.assign(new Error(options.nativePi && error instanceof Error
         ? error.message : `terminal daemon unavailable for ${options.file}`), { code: "EDAEMON" }));
     };
@@ -232,7 +238,7 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
       void host.spawnStructured(request).then((handle) => {
         source = { pid: handle.pid, interrupt: () => handle.interrupt() };
         // Replay and subscribe before applying a pending external cancellation.
-        wireRemoteHandle(handle, captureStdout, handleStderrText, finish);
+        wireRemoteHandle(handle, captureStdout, handleStderrText, finish, acknowledgeExit);
         if (stopRequested && !settled) interruptSource();
       }, unavailable);
     } catch {
@@ -257,6 +263,7 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
       finish(null, null, error as NodeJS.ErrnoException);
     });
     child.on("close", (exitCode, signalName) => {
+      acknowledgeExit();
       captureStdout(stdoutDecoder.end());
       handleStderrText(stderrDecoder.end());
       finish(exitCode, signalName === null || signalName === undefined ? null : signalName);
@@ -272,12 +279,14 @@ function wireRemoteHandle(
   onStdout: (text: string) => void,
   onStderr: (text: string) => void,
   finish: (exitCode: number | null, signal: NodeJS.Signals | null, spawnError?: NodeJS.ErrnoException) => void,
+  acknowledgeExit: () => void,
 ): void {
   handle.onStream((event) => {
     if (event.stream === "stdout") onStdout(event.data);
     else onStderr(event.data);
   });
   handle.onExit((event) => {
+    if (event.processExited !== false) acknowledgeExit();
     finish(event.exitCode, signalNameFromNumber(event.signal));
   });
 }

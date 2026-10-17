@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
+import { createServer } from "node:http";
+import express from "express";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { registerPublicUpdateRoutes } from "../src/server-update-routes.js";
 
 import {
   absoluteUrl,
@@ -62,6 +66,7 @@ test("inspectIpa reads XML Info.plist and signing markers", async () => {
     const unsigned = await inspectIpa(unsignedPath);
     assert.equal(unsigned.bundleId, "com.wand.app");
     assert.equal(unsigned.bundleVersion, "4.52.0-debug.09061350");
+    assert.equal(unsigned.bundleBuild, "45200.09061350");
     assert.equal(unsigned.signed, false);
 
     const signedPath = path.join(root, "signed.ipa");
@@ -110,4 +115,54 @@ test("OTA helpers encode itms-services URLs and HTTPS blockers", () => {
   });
   assert.match(manifest, /software-package/);
   assert.match(manifest, /com.wand.app/);
+});
+
+test("iOS install manifest uses the IPA build while update checks retain marketing versions", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-ios-ota-route-"));
+  const filePath = path.join(root, "wand.ipa");
+  const version = "4.96.0-debug.10162050";
+  writeFileSync(filePath, createStoredZip({
+    "Payload/Wand.app/Info.plist": `<?xml version="1.0"?><plist><dict>
+<key>CFBundleIdentifier</key><string>com.example.wand</string>
+<key>CFBundleShortVersionString</key><string>${version}</string>
+<key>CFBundleVersion</key><string>49600.10162050</string>
+</dict></plist>`,
+    "Payload/Wand.app/embedded.mobileprovision": "profile-marker",
+  }));
+  const app = express();
+  registerPublicUpdateRoutes(app, {
+    resolveLatestApk: async () => null,
+    resolveAndroidDownload: async () => null,
+    computeAssetSha256: async () => null,
+    resolveLatestDmg: async () => null,
+    resolveMacosDownload: async () => null,
+    resolveLatestMacosBeta: async () => null,
+    resolveMacosBetaDownload: async () => null,
+    resolveLatestIpa: async () => ({ version, downloadUrl: "/ios/download", fileName: "wand.ipa", size: 1, source: "local" }),
+    resolveIosDownload: async () => ({ filePath, fileName: "wand.ipa", size: 1 }),
+  }, "https://updates.example.test");
+  const server = createServer(app);
+  try {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const origin = `http://127.0.0.1:${address.port}`;
+    const response = await fetch(`${origin}/ios/manifest.plist`);
+    assert.equal(response.status, 200);
+    const manifest = await response.text();
+    assert.match(manifest, /<key>bundle-version<\/key>\s*<string>49600\.10162050<\/string>/);
+    assert.doesNotMatch(manifest, /4\.96\.0-debug/);
+    const update = await (await fetch(`${origin}/api/ios-ipa-update?currentVersion=0.0.0`)).json();
+    assert.equal(update.latestVersion, version);
+    assert.equal(update.bundleId, "com.example.wand");
+    assert.equal(update.updateAvailable, true);
+    assert.equal(update.otaReady, true);
+    const same = await (await fetch(`${origin}/api/ios-ipa-update?currentVersion=${version}`)).json();
+    assert.equal(same.updateAvailable, false);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    rmSync(root, { recursive: true, force: true });
+  }
 });

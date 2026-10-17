@@ -183,7 +183,10 @@ test("看板新建任务接上共享派工流程：不建本地任务、成功�
   const host = read("react/issues/task-board-host.tsx");
   assert.match(host, /const \[dispatchSelected, setDispatchSelected\] = React\.useState\(false\)/);
   assert.match(host, /const dispatchFlow = useTeamDispatchFlow\(\)/);
-  assert.match(host, /agentTargetOptions\(providerOptions, teams, employees, \{ includeDispatch: true \}\)/);
+  assert.match(host, /onDispatchSelect=\{\(\) => \{[^}]*setDispatchSelected\(true\)/);
+  const fields = read("react/issues/agent-fields.tsx");
+  assert.match(fields, /agentTargetOptions\(\[\], teams, employees, \{ includeDispatch: !!onDispatchSelect \}\)/);
+  assert.match(fields, /agentTargetIsDispatch\(value\)\) \{ onDispatchSelect\?\.\(\)/);
   assert.match(host, /<TeamDispatchRoster\s/);
   assert.match(host, /<TeamDispatchActionButton\s/);
   // 派工分支必须在创建本地任务之前返回（服务端自己建卡）

@@ -1,0 +1,6 @@
+Lane mailbox for Android Beta 构建与测试 (role android-gate)
+Run: team_mvanf7qe0001f07rbo
+Lane: android-gate-1792135868663
+Token: 932c1d10-eb7b-455d-acc3-8f88bb7fa694
+
+Captain messages appear below, newest last.

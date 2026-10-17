@@ -1,4 +1,5 @@
 import { isArchiveBlocked } from "./archive-policy.js";
+import { logInfo } from "./runtime-log.js";
 import { isSystemAiCall } from "./system-ai-call.js";
 import { systemAiSessions } from "./system-ai-session-recorder.js";
 import { cleanupWorktreeSync } from "./git-worktree.js";
@@ -59,19 +60,32 @@ export function deleteOwnedSessionWithHistory(
   remove: () => SessionSnapshot | null,
   deleter: ProviderHistoryDeleter,
   storage: HiddenSessionStore,
+  options: { barrier?: Promise<void> | null; canCleanup?: () => boolean; isSettled?: () => boolean } = {},
 ): SessionSnapshot | null {
   const snapshot = remove();
-    const providerSessionId = snapshot?.claudeSessionId?.trim();
-    if (!snapshot || !providerSessionId) return snapshot;
-
-    const provider = snapshot.provider
-      ?? snapshot.structuredState?.provider
-      ?? inferProviderFromCommand(snapshot.command)
-      ?? "claude";
-    deleteProviderNativeHistory(deleter, provider, providerSessionId, snapshot.cwd);
-    addHiddenSessionIds(storage, [providerSessionId]);
+  const providerSessionId = snapshot?.claudeSessionId?.trim();
+  if (!snapshot || !providerSessionId) {
+    void options.barrier?.catch(() => {});
     return snapshot;
+  }
+  const provider = sessionProvider(snapshot);
+  // Hide immediately so history cannot reappear between row removal and CLI exit.
+  if (options.canCleanup?.() !== false) addHiddenSessionIds(storage, [providerSessionId]);
+  const cleanup = () => {
+    if (options.canCleanup?.() === false || options.isSettled?.() === false) return;
+    addHiddenSessionIds(storage, [providerSessionId]);
+    deleteProviderNativeHistory(deleter, provider, providerSessionId, snapshot.cwd);
+  };
+  const failed = () => { logInfo("[SessionCleanup] CLI session cleanup could not complete; artifacts were preserved."); };
+  if (options.barrier) void options.barrier.then(cleanup).catch(failed);
+  else {
+    try { cleanup(); } catch { failed(); }
+  }
+  return snapshot;
+}
 
+function sessionProvider(snapshot: SessionSnapshot): string {
+  return snapshot.provider ?? snapshot.structuredState?.provider ?? inferProviderFromCommand(snapshot.command) ?? "claude";
 }
 
 
@@ -121,6 +135,9 @@ export function removeHiddenSessionIds(storage: HiddenSessionStore, ids: readonl
  * Live structured state wins over PTY, and both win over a durable fallback.
  */
 export class SessionRegistry {
+  /** Deleted owners can still be exiting; listSlim alone no longer sees them. */
+  private readonly nativeDeletionBarriers = new Map<string, Set<Promise<void>>>();
+
   constructor(
     private readonly processes: ProcessManager,
     private readonly structured: StructuredSessionManager,
@@ -250,7 +267,7 @@ export class SessionRegistry {
     }));
   }
 
-  delete(id: string): SessionSnapshot | null {
+  private deleteManagedSession(id: string): SessionSnapshot | null {
     const snapshot = this.get(id);
     if (!snapshot) return null;
     if (isSystemAiCall(snapshot)) {
@@ -279,8 +296,34 @@ export class SessionRegistry {
     return snapshot;
   }
 
+  /** All destructive paths, including retention, remove native session artifacts. */
+  delete(id: string): SessionSnapshot | null {
+    const snapshot = this.get(id);
+    if (!snapshot) return null;
+    const manager = this.ownerOf(id) === "structured" || snapshot.sessionKind === "structured"
+      ? this.structured : this.processes;
+    const ownBarrier = manager.nativeHistoryCleanupBarrier?.(id);
+    const key = `${sessionProvider(snapshot)}\0${snapshot.claudeSessionId?.trim() ?? ""}`;
+    if (ownBarrier) {
+      const pending = this.nativeDeletionBarriers.get(key) ?? new Set<Promise<void>>();
+      pending.add(ownBarrier);
+      this.nativeDeletionBarriers.set(key, pending);
+      void ownBarrier.then(() => {
+        pending.delete(ownBarrier);
+        if (!pending.size && this.nativeDeletionBarriers.get(key) === pending) this.nativeDeletionBarriers.delete(key);
+      }, () => { /* Unknown exit continues to protect all aliases of this native ID. */ });
+    }
+    const pending = this.nativeDeletionBarriers.get(key);
+    const barrier = pending?.size ? Promise.all([...pending]).then(() => {}) : null;
+    const canCleanup = () => !this.listSlim().some((other) => other.id !== id
+      && other.claudeSessionId?.trim() === snapshot.claudeSessionId?.trim()
+      && sessionProvider(other) === sessionProvider(snapshot));
+    return deleteOwnedSessionWithHistory(() => this.deleteManagedSession(id), this.processes, this.storage,
+      { barrier, canCleanup, isSettled: () => !this.nativeDeletionBarriers.has(key) });
+  }
+
   deleteWithProviderHistory(id: string): SessionSnapshot | null {
-    return deleteOwnedSessionWithHistory(() => this.delete(id), this.processes, this.storage);
+    return this.delete(id);
   }
 
   private updateStored(

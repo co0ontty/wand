@@ -205,6 +205,8 @@ async function main(): Promise<void> {
       }
       break;
     }
+    case "web-login:issue":
+    case "web-login:cancel":
     case "employee:list":
     case "workspace:list":
     case "session:create":
@@ -213,6 +215,9 @@ async function main(): Promise<void> {
     case "schedule:read":
     case "schedule:create":
     case "schedule:update": {
+      if (command === "web-login:issue" && (process.stdout.isTTY || process.env.WAND_WEB_LOGIN_PIPE !== "1" || process.env.DEBUG || process.env.PWDEBUG || process.env.NODE_DEBUG)) {
+        throw new Error("票据只能通过 wand-system 的受控内存助手传递；禁止终端回显和调试录制。");
+      }
       const { parseSystemCliCommand } = await import("./system-cli.js");
       const operationArgs = args.slice(1);
       for (const flag of ["-c", "--config"]) {
@@ -358,6 +363,8 @@ Agent runtime:
   wand system:skills [--providers pi,claude,...]  Install the managed wand-system skill
   wand employee:list [--include-archived]  List employee definitions (not private knowledge)
   wand workspace:list       List project directories
+  wand web-login:issue --stdin  Mint a 60s, one-use Web admin ticket (employee execution proof + controlled pipe only)
+  wand web-login:cancel --stdin  Cancel an unconsumed ticket by requestId
   wand session:create --stdin  Create an employee session from JSON
   wand session:resume <id> --stdin  Continue the exact structured session with JSON input
   wand schedule:list [--include-cancelled]
@@ -1119,6 +1126,11 @@ function printServiceResult(
 }
 
 main().catch((error) => {
-  process.stderr.write(`[wand] ${getErrorMessage(error)}\n`);
+  if (["web-login:issue", "web-login:cancel"].includes(process.argv[2] ?? "") && process.env.WAND_WEB_LOGIN_PIPE === "1" && !process.stdout.isTTY) {
+    const status = typeof error?.status === "number" ? error.status : 0;
+    const rejected = status >= 400 && status < 500 && ![408, 409].includes(status);
+    // Only machine facts enter the pipe; never reflect a remote error, credential or stack.
+    process.stdout.write(JSON.stringify({ error: { code: rejected ? "ISSUANCE_REJECTED" : "DELIVERY_UNKNOWN", status } }) + "\n");
+  } else process.stderr.write(`[wand] ${getErrorMessage(error)}\n`);
   process.exitCode = 1;
 });

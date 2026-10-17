@@ -185,12 +185,14 @@ test("发送与停止是同一颗按钮的相位模型，结果原位显示不�
   assert.match(inputSrc, /return phase === "failed" \? MOTION_DWELL_FAILED_MS : MOTION_DWELL_SENT_MS;/);
 
   // ② 提交链路（sendInputFromBox 全文）：结果只落原位相位，不再落 Toast。
+  // 成功侧不再是固定「已发送」文案，而是凭本次提交的 token 收口成「已送达」
+  // （服务端接受时由 WS 信号提前推进，见 noteComposerSendAccepted）。
   const submitChain = inputSrc.slice(
     inputSrc.indexOf("export function sendInputFromBox"),
     inputSrc.indexOf("function postStructuredInput"),
   );
   assert.ok(submitChain.length > 1000, "找不到 sendInputFromBox 函数体");
-  for (const call of ["flashComposerSending(", "flashComposerDone(", "flashComposerFailed("]) {
+  for (const call of ["flashComposerSending(", "noteComposerSendAccepted(", "flashComposerFailed("]) {
     assert.ok(submitChain.includes(call), `提交链路缺 ${call}`);
   }
   assert.doesNotMatch(submitChain, /showToast\(/, "提交链路的失败原因留在原位，不叠气泡");

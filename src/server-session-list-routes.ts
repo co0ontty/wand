@@ -100,7 +100,7 @@ export function registerSessionListRoutes(app: Express, ctx: SessionRouteContext
     }
   });
 
-  app.get("/api/sessions", (_req, res) => {
+  app.get("/api/sessions", (req, res) => {
     res.json(sessions.listSlim().map((session) => toSessionListItemDTO(session)));
   });
 
@@ -319,8 +319,17 @@ export function registerSessionListRoutes(app: Express, ctx: SessionRouteContext
       const blockEnd = Math.min(Math.max(Number.isFinite(rawBlockOffset) ? rawBlockOffset : blockTotal, 0), blockTotal);
       const blockStart = Math.max(0, blockEnd - blockLimit);
       const cardDefaults = config.cardDefaults ?? {};
-      const startOffset = alignedBlockStart(turn.content, cardDefaults, blockStart, blockEnd,
-        Math.min(128 * 1024, messageWindowByteBudget(req.query.byteBudget)));
+      // Web opts into the same visible-block/byte budget as the initial and
+      // inter-turn windows. Counting raw tool blocks here produces many serial
+      // pages with almost no visible height. Keep blockLimit semantics for
+      // older/native clients; the response and cursor contract stay unchanged.
+      const visibleBudget = typeof req.query.blockBudget === "string" && /^\d+$/.test(req.query.blockBudget)
+        ? parseBoundedInteger(req.query.blockBudget, 12, 1, 200) : null;
+      const startOffset = visibleBudget !== null
+        ? blockWindowMessagesForTransport([{ ...turn, content: turn.content.slice(0, blockEnd) }],
+          cardDefaults, visibleBudget, messageWindowByteBudget(req.query.byteBudget), true).leadingBlockOffset
+        : alignedBlockStart(turn.content, cardDefaults, blockStart, blockEnd,
+          Math.min(128 * 1024, messageWindowByteBudget(req.query.byteBudget)));
       const blocks = enrichStructuredMessages([{
         ...turn,
         content: sliceTurnBlocksForTransport(turn, startOffset, blockEnd, cardDefaults),

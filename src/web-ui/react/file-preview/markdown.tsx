@@ -7,6 +7,8 @@ export const MessageFileContext = React.createContext<FileContext>({});
 import { localFilePreviewHref, localHttpPreviewHref, localPreviewController } from "../local-preview/controller";
 import { classNames } from "../ui/class-names";
 import { openMessageImage } from "../image-viewer/gallery";
+import { installStyleSheet } from "../styles";
+import { markdownPreviewStyles } from "./markdown-styles";
 import { tokenizeFilePreviewCode, type FilePreviewCodeToken } from "./model";
 import { parseFilePreviewMarkdown } from "./markdown-model";
 import type {
@@ -164,6 +166,8 @@ export interface MarkdownPreviewProps {
  * entry point, so parsing and sanitising stay in one place; React owns every DOM node.
  */
 export function MarkdownPreview({ content, fontSize, wrap, variant = "page", renderText, fileContext }: MarkdownPreviewProps) {
+  // Deferred/inline readers must not depend on opening a file dialog first.
+  React.useInsertionEffect(() => { installStyleSheet("wand-markdown-preview-styles", markdownPreviewStyles); }, []);
   const inherited = React.useContext(MessageFileContext);
   const blocks = React.useMemo(() => parseFilePreviewMarkdown(content), [content]);
   return (

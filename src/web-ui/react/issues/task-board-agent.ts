@@ -18,6 +18,7 @@ import {
   normalizeWandTaskAgentMode,
   supportedWandTaskAgentModes,
 } from "../../../task-types";
+import { assertTaskHierarchy } from "../../../task-hierarchy";
 import type { WandSelectOption } from "../ui";
 import { isThinkingEffort } from "../../../structured-provider-common";
 import { compactThinkingLabel, dynamicThinkingChoices } from "../../thinking-efforts";
@@ -151,19 +152,18 @@ export const ISSUE_ARCHIVE_COLUMN: {
 
 /**
  * 新建任务是否顺带完成第一次指派。
- * 「等待认领」列只创建任务；「处理中」列代表已经决定要跑，所以创建后立刻派给所选 Agent。
+ * 状态仅表达业务进展；保存与派发由独立动作裁决。
  */
 export function issueCreateDispatches(status: WandTaskStatus): boolean {
-  return status === "doing";
+  return false;
 }
 
 /**
  * 拖进「处理中」是否要顺带派发 Agent。
- * 只有还没派发过（没有绑定会话）的任务才自动派发：已经在跑 / 跑过的卡再拖回来只改状态，
- * 避免拖一次就多开一个 session。
+ * 换列只改状态，任何执行必须经显式派发入口。
  */
 export function issueDropDispatches(status: WandTaskStatus, sessionCount: number): boolean {
-  return status === "doing" && sessionCount === 0;
+  return false;
 }
 
 /** 拖拽派发用的提示词：优先任务描述，其次标题，最后给一句兜底指令。 */
@@ -173,33 +173,30 @@ export function issueDropDispatchPrompt(task: { title: string; description: stri
 
 export const ISSUE_NO_PARENT = "__no_parent__";
 
-/** 只允许选同项目、处理中的任务；保留已完成的当前父任务供查看和解除。 */
+/** Same candidate policy for creation and reassignment; server/storage validate again atomically. */
 export function issueParentOptions(
-  tasks: readonly Pick<WandTask, "id" | "identifier" | "title" | "status" | "workspaceId" | "parentTaskId">[],
+  tasks: readonly (Pick<WandTask, "id" | "identifier" | "title" | "status" | "workspaceId" | "parentTaskId"> & { sessions?: readonly unknown[] })[],
   workspaceId: string | null | undefined,
   childId: string | null = null,
   currentParentId: string | null = null,
 ): WandSelectOption[] {
-  const byId = new Map(tasks.map((task) => [task.id, task]));
-  const descendantsOfChild = (candidateId: string): boolean => {
-    const visited = new Set<string>();
-    let id: string | null = candidateId;
-    while (id && !visited.has(id)) {
-      if (id === childId) return true;
-      visited.add(id);
-      id = byId.get(id)?.parentTaskId ?? null;
-    }
-    return false;
-  };
+  const existing = tasks.find(task => task.id === childId);
   return [
     { value: ISSUE_NO_PARENT, label: "无父任务" },
-    ...tasks.filter((task) => (workspaceId === undefined || task.workspaceId === workspaceId)
-      && (task.status === "doing" || task.id === currentParentId)
-      && !descendantsOfChild(task.id))
-      .map((task) => ({
+    ...tasks.filter(task => workspaceId === undefined || task.workspaceId === workspaceId).map(task => {
+      let reason = "";
+      try {
+        assertTaskHierarchy(tasks, childId, task.id, workspaceId === undefined ? task.workspaceId : workspaceId,
+          task.id === currentParentId ? existing : undefined);
+      } catch (error) { reason = error instanceof Error ? error.message : "父任务无效"; }
+      const status = ISSUE_COLUMNS.find(column => column.status === task.status)?.label ?? "归档";
+      const children = tasks.filter(child => child.parentTaskId === task.id).length;
+      return {
         value: task.id,
-        label: `${task.identifier} · ${task.title}${task.status !== "doing" ? "（已结束）" : ""}`,
-      })),
+        label: `${task.identifier} · ${task.title} · ${status} · ${children} 个子任务 · ${task.sessions?.length ?? 0} 个会话${reason ? `（不可选：${reason}）` : task.parentTaskId ? "（历史层级，保留）" : ""}`,
+        disabled: !!reason,
+      };
+    }),
   ];
 }
 
@@ -381,6 +378,7 @@ export interface IssueAgentGroup {
   engine?: "cli" | "sdk";
   agent: WandTaskAgent | null;
   sessions: Array<{
+    employeeName?: string;
     id: string;
     provider: string;
     title: string;

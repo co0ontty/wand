@@ -40,7 +40,7 @@ export interface SidebarRecentEmployee {
   readonly agents?: ReadonlyArray<{ provider?: string }>;
 }
 
-/** 员工 / 团队看最近窗口，终端不受窗口截断（对齐安卓首页）。 */
+/** 员工 / 团队分组的默认窗口只作兜底；生产入口都传全量（Web 侧栏与安卓 / iOS 首页一致）。 */
 export const RECENT_CONVERSATION_LIMIT = 8;
 
 const TERMINAL_GROUP_ORDER: readonly SidebarRecentKind[] = ["terminal", "blank-terminal"];
@@ -94,10 +94,11 @@ export function collectRecentEntries(
     seen.add(session.id);
     entries.push({ group, taskName, session });
   };
+  const tasksById = new Map(groups.flatMap(group => group.tasks.map(task => [task.id, task] as const)));
   for (const group of groups) {
     for (const task of group.tasks) {
       if (task.archived || task.status === "done") continue;
-      for (const session of task.sessions) push(group, session, task.name);
+      for (const session of task.sessions) push(group, session, [tasksById.get(task.parentWorkspaceTaskId ?? "")?.name, task.name].filter(Boolean).join(" → "));
     }
     for (const session of group.standaloneSessions) push(group, session, null);
   }
@@ -188,14 +189,14 @@ export function recentConversationGroups(
     });
 
   const byRecency = groups
-    .filter((group) => !TERMINAL_GROUP_ORDER.includes(group.kind))
+    .filter((group) => group.entries.length > 0 && !TERMINAL_GROUP_ORDER.includes(group.kind))
     .sort((left, right) => {
       const delta = Date.parse(right.latestStartedAt || "") - Date.parse(left.latestStartedAt || "");
       if (delta) return delta;
       return left.key.localeCompare(right.key);
     });
   const terminalGroups = TERMINAL_GROUP_ORDER
-    .map((kind) => groups.find((group) => group.kind === kind))
+    .map((kind) => groups.find((group) => group.kind === kind && group.entries.length > 0))
     .filter((group): group is SidebarRecentGroup => Boolean(group));
   return [...byRecency, ...terminalGroups];
 }

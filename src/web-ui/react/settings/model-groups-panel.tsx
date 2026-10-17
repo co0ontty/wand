@@ -2,7 +2,7 @@ import * as React from "react";
 import { Collapse, Tag } from "antd";
 import { useEffect, useState } from "react";
 import { FREE_MODEL_GROUP_ID, MODEL_GROUP_MAX_MEMBERS, MODEL_GROUP_MAX_PER_PROVIDER,
-  isModelGroupSelector, normalizeModelGroups, orderModelIds, type ModelGroup } from "../../../model-groups.js";
+  isManagedFreeGroup, isModelGroupSelector, normalizeModelGroups, orderModelIds, type ModelGroup } from "../../../model-groups.js";
 import { OPENROUTER_FREE_GROUP, OPENROUTER_FREE_SELECTOR } from "../../../openrouter-free-selection.js";
 import { PROVIDER_IDS, PROVIDER_LABELS } from "../../provider-identity";
 import { WandButton, WandIcon, WandIconButton } from "../ui";
@@ -39,11 +39,11 @@ function GroupEditor({ group, catalog, disabled, onChange, onRemove }: {
   group: ModelGroup; catalog: SettingsModelCatalog | null; disabled: boolean;
   onChange(group: ModelGroup): void; onRemove(): void;
 }): React.ReactElement {
-  const [expanded, setExpanded] = useState(group.id !== FREE_MODEL_GROUP_ID && !group.models.length);
+  const [expanded, setExpanded] = useState(!isManagedFreeGroup(group) && !group.models.length);
   const [model, setModel] = useState("");
   const [remove, setRemove] = useState(false);
-  const free = group.id === FREE_MODEL_GROUP_ID;
-  const suggestions = free ? catalog?.freeModels ?? [] : groupEditorModels(catalog, group.provider as SettingsSessionProvider);
+  const free = isManagedFreeGroup(group);
+  const suggestions = free && group.provider === "pi" ? catalog?.freeModels ?? [] : groupEditorModels(catalog, group.provider as SettingsSessionProvider);
   const available = suggestions.filter((entry) => !group.models.includes(entry.id));
   const key = `${group.provider}-${group.id}`;
   return <Collapse activeKey={expanded ? [key] : []}
@@ -67,7 +67,7 @@ function GroupEditor({ group, catalog, disabled, onChange, onRemove }: {
             </div>
           </li>)}
         </ol>
-        {!group.models.length ? <p>{free ? "尚无已验证的免费模型，请先配置 OpenRouter Key 并同步。" : "请添加至少一个具体模型。"}</p> : null}
+        {!group.models.length ? <p>{free ? group.provider === "opencode" ? "服务端正在维护 OpenCode 免费分组；暂时没有实测可用模型。" : "尚无已验证的免费模型，请先配置 OpenRouter Key 并同步。" : "请添加至少一个具体模型。"}</p> : null}
         {!free ? <>
           <SettingsSelect id={`add-${key}`} ariaLabel="从目录添加模型" value="" searchable
             options={[{ value: "", label: "从目录添加模型…" }, ...available.map((entry) => ({ value: entry.id, label: entry.label }))]}
@@ -137,7 +137,7 @@ export function ModelGroupsSettingsPanel({ snapshot, repository, setSnapshot }: 
     {visible.map((group) => <GroupEditor key={`${group.provider}/${group.id}`} group={group} catalog={snapshot.models} disabled={pending}
       onChange={(next) => edit(groups.map((item) => item.id === group.id && item.provider === provider ? next : item))}
       onRemove={() => edit(groups.filter((item) => item.id !== group.id || item.provider !== provider))} />)}
-    <WandButton kind="secondary" size="small" disabled={pending || visible.filter((entry) => entry.id !== FREE_MODEL_GROUP_ID).length >= MODEL_GROUP_MAX_PER_PROVIDER}
+    <WandButton kind="secondary" size="small" disabled={pending || visible.filter((entry) => !isManagedFreeGroup(entry)).length >= MODEL_GROUP_MAX_PER_PROVIDER}
       onClick={() => {
         let number = 1;
         while (visible.some((entry) => entry.name === `分组 ${number}`)) number++;

@@ -135,14 +135,14 @@ test("系统 SDK 可用性检查受链截止限制，不让迟到结果进入调
   assert.equal(checked, 1);
 });
 
-test("OpenCode 纯文本适配只对本次调用禁用工具，保留既有内联模型配置", async t => {
+test("OpenCode 纯文本适配保留工具 schema 但不授权工具，保留既有模型配置", async t => {
   const root = mkdtempSync(join(tmpdir(), "wand-opencode-text-")), bin = join(root, "bin"); mkdirSync(bin);
   const captured = join(root, "capture.json");
   writeFileSync(join(bin, "opencode"), `#!${process.execPath}\nconst fs=require("node:fs"); process.stdin.resume(); process.stdin.on("end",()=>{fs.writeFileSync(${JSON.stringify(captured)},JSON.stringify({args:process.argv.slice(2),permission:process.env.OPENCODE_PERMISSION,config:JSON.parse(process.env.OPENCODE_CONFIG_CONTENT)})); console.log(JSON.stringify({type:"text",part:{text:"纯文本"}}));});\n`, { mode: 0o755 });
   const oldPath = process.env.PATH, oldShell = process.env.WAND_SHELL_ENV_DISABLE, oldInline = process.env.OPENCODE_CONFIG_CONTENT;
   process.env.PATH = bin; process.env.WAND_SHELL_ENV_DISABLE = "1";
   process.env.OPENCODE_CONFIG_CONTENT = JSON.stringify({ marker: "test-only", provider: { offline: { models: { custom: {} } } },
-    permission: { bash: "allow" }, agent: { user: { mode: "primary" } } });
+    permission: { bash: "allow" }, agent: { user: { mode: "primary" }, title: { model: "paid/title" } } });
   t.after(() => { process.env.PATH = oldPath;
     if (oldShell === undefined) delete process.env.WAND_SHELL_ENV_DISABLE; else process.env.WAND_SHELL_ENV_DISABLE = oldShell;
     if (oldInline === undefined) delete process.env.OPENCODE_CONFIG_CONTENT; else process.env.OPENCODE_CONFIG_CONTENT = oldInline;
@@ -150,13 +150,15 @@ test("OpenCode 纯文本适配只对本次调用禁用工具，保留既有内�
   const original = process.env.OPENCODE_CONFIG_CONTENT;
   assert.equal(await callConfiguredAiText(request, root, "", { provider: "opencode", model: "offline/custom" }), "纯文本");
   const value = JSON.parse(readFileSync(captured, "utf8"));
-  assert.equal(value.permission, '"deny"');
-  assert.equal(value.config.permission, "deny"); assert.equal(value.config.share, "disabled");
+  assert.equal(value.permission, '"ask"');
+  assert.equal(value.config.permission, "ask"); assert.equal(value.config.share, "disabled");
   assert.equal(value.config.marker, "test-only");
   assert.deepEqual(value.config.provider, { offline: { models: { custom: {} } } });
   assert.ok(value.args.includes("--pure"));
   const agent = value.args[value.args.indexOf("--agent") + 1];
-  assert.match(agent, /^wand-text-/); assert.equal(value.config.agent[agent].permission, "deny");
+  assert.match(agent, /^wand-text-/); assert.equal(value.config.agent[agent].permission, "ask");
+  for (const flag of ["--auto", "--yolo", "--dangerously-skip-permissions", "--interactive", "-i"]) assert.ok(!value.args.includes(flag));
+  assert.deepEqual(value.config.agent.title, { model: "paid/title", disable: true });
   assert.deepEqual(value.config.agent.user, { mode: "primary" });
   assert.equal(process.env.OPENCODE_CONFIG_CONTENT, original);
 });

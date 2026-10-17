@@ -1,3 +1,5 @@
+import { assertTaskHierarchy } from "./task-hierarchy.js";
+
 /** Explicit multi-select limits. Directory/board passes bound each semantic request separately. */
 export const TITLE_ORGANIZE_MAX_TASKS = 40;
 export const TITLE_ORGANIZE_MAX_SESSIONS = 200;
@@ -294,14 +296,12 @@ export async function planTitleOrganization(
       refused.push({ id: task.id, kind: "task", reason: "不在同一项目，未改任务归类" });
       continue;
     }
-    if (canonical.status !== "doing") {
-      refused.push({ id: task.id, kind: "task", reason: "同类任务的主任务不在处理中，未改父任务" });
-      continue;
-    }
     if (wouldCycle(task.cardId, canonical.cardId, tasks, parents)) {
       refused.push({ id: task.id, kind: "task", reason: "父任务不能形成循环" });
       continue;
     }
+    const reason = parentRejection(task, canonical, tasks, parents);
+    if (reason) { refused.push({ id: task.id, kind: "task", reason }); continue; }
     parents.set(task.id, canonical.cardId);
   }
 
@@ -310,7 +310,7 @@ export async function planTitleOrganization(
     const task = byId.get(id);
     if (!task) return [];
     const hasPeer = targets.some((peer) => peer.id !== task.id && peer.workspaceId === task.workspaceId
-      && sameDirectory(peer.directoryKey, task.directoryKey) && peer.status === "doing");
+      && sameDirectory(peer.directoryKey, task.directoryKey) && !parentRejection(task, peer, tasks, parents));
     return hasPeer ? [task] : [];
   });
   const judgeNeeded = judgeSessions.length > 0 || judgeTasks.length > 0;
@@ -350,7 +350,7 @@ export async function planTitleOrganization(
       const parentWorkspaceTaskId = taskJudgment.get(task.id) ?? null;
       if (!parentWorkspaceTaskId || parentWorkspaceTaskId === task.id) continue;
       const parent = byId.get(parentWorkspaceTaskId);
-      if (!parent || parent.workspaceId !== task.workspaceId || !sameDirectory(parent.directoryKey, task.directoryKey) || parent.status !== "doing") {
+      if (!parent || parent.workspaceId !== task.workspaceId || !sameDirectory(parent.directoryKey, task.directoryKey)) {
         if (parentWorkspaceTaskId) refused.push({ id: task.id, kind: "task", reason: "不能归入该任务" });
         continue;
       }
@@ -358,6 +358,8 @@ export async function planTitleOrganization(
         refused.push({ id: task.id, kind: "task", reason: "父任务不能形成循环" });
         continue;
       }
+      const reason = parentRejection(task, parent, tasks, parents);
+      if (reason) { refused.push({ id: task.id, kind: "task", reason }); continue; }
       parents.set(task.id, parent.cardId);
     }
   }
@@ -368,6 +370,14 @@ export async function planTitleOrganization(
     refused,
     judgeNeeded,
   };
+}
+
+/** Planning and final atomic writes use the same business hierarchy rules. */
+function parentRejection(child: OrganizeTask, parent: OrganizeTask, tasks: readonly OrganizeTask[], planned: ReadonlyMap<string, string>): string | null {
+  try {
+    assertTaskHierarchy(tasks.map(task => ({ id: task.cardId, parentTaskId: planned.get(task.id) ?? task.parentTaskId, workspaceId: task.workspaceId, status: task.archived ? "archived" : task.status })), child.cardId, parent.cardId, child.workspaceId);
+    return null;
+  } catch (error) { return error instanceof Error ? error.message : "父任务无效"; }
 }
 
 function wouldCycle(

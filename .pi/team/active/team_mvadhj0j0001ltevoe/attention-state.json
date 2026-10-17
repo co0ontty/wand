@@ -1,0 +1,34 @@
+{
+  "roles": {
+    "android-feedback": {
+      "communicationAt": 1792119180432,
+      "silenceAlerted": false,
+      "pendingRequestRef": "d9025b9d-73ea-4f1e-ab2d-1d6cdbce6f44",
+      "pendingRequestStage": "queued",
+      "pendingAckAlerted": true,
+      "pendingCancelAt": 1792121450663,
+      "cancelAlerted": true,
+      "rearmAt": 1792119656586
+    },
+    "ios-feedback": {
+      "communicationAt": 1792119183924,
+      "silenceAlerted": false,
+      "pendingRequestRef": "d9025b9d-73ea-4f1e-ab2d-1d6cdbce6f44",
+      "pendingRequestStage": "queued",
+      "pendingAckAlerted": true,
+      "pendingCancelAt": 1792121473643,
+      "cancelAlerted": true,
+      "rearmAt": 1792119656586
+    },
+    "macos-feedback": {
+      "communicationAt": 1792119180435,
+      "silenceAlerted": false,
+      "pendingRequestRef": "d9025b9d-73ea-4f1e-ab2d-1d6cdbce6f44",
+      "pendingRequestStage": "queued",
+      "pendingAckAlerted": true,
+      "pendingCancelAt": 1792121490463,
+      "cancelAlerted": true,
+      "rearmAt": 1792119656586
+    }
+  }
+}

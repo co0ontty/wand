@@ -577,3 +577,44 @@ test("changing the service default after claim cannot redirect a legacy plan's c
   assert.equal(scheduled.get(task.id).task.workspaceCwd, otherCwd);
   await scheduled.dispose();
 });
+
+test("interval plans persist, resume on the original grid, skip overlaps and claim once after downtime", async t => {
+  const h = harness(t);
+  const schedule = { kind: "interval" as const, everyHours: 3, startAt: "2030-01-01T01:00:00.000Z", timeZone: "Asia/Shanghai" };
+  const input = { ...h.input("interval-restart-1"), schedule };
+  const task = h.scheduled.create(input);
+  assert.equal(h.scheduled.create(input).id, task.id);
+  const paused = h.scheduled.update(task.id, { revision: 1, enabled: false });
+  h.setTime("2030-01-01T05:00:00.000Z");
+  await h.scheduled.tick(); assert.equal(h.sent.length, 0);
+  const resumed = h.scheduled.update(task.id, { revision: paused.revision, enabled: true });
+  assert.equal(resumed.nextRunAt, "2030-01-01T07:00:00.000Z");
+  h.setTime("2030-01-01T07:00:02.000Z");
+  await Promise.all([h.scheduled.tick(), h.scheduled.tick()]);
+  assert.equal(h.sent.length, 1);
+  const run = h.scheduled.get(task.id).runs[0]!;
+  const session = h.sessions.get(run.sessionId!)!;
+  h.sessions.set(session.id, { ...session, status: "running", structuredState: { ...session.structuredState!, inFlight: true } });
+  await h.scheduled.dispose();
+  const reopened = new WandStorage(path.join(path.dirname(h.cwd), "wand.db"));
+  const recovered = new ScheduledTaskService({ storage: reopened, conversations: h.service,
+    getSession: id => h.sessions.get(id) ?? reopened.getSession(id), now: h.now });
+  try {
+    assert.deepEqual(recovered.get(task.id).task.schedule, schedule);
+    assert.equal(recovered.get(task.id).task.nextRunAt, "2030-01-01T10:00:00.000Z");
+    h.setTime("2030-01-02T11:20:00.000Z");
+    await recovered.tick(); await recovered.tick();
+    assert.equal(h.sent.length, 1);
+    let detail = recovered.get(task.id);
+    assert.equal(detail.runs.length, 2);
+    assert.equal(detail.runs[0]!.state, "skipped");
+    assert.equal(detail.task.nextRunAt, "2030-01-02T13:00:00.000Z");
+    h.sessions.set(session.id, { ...session, endedAt: h.now().toISOString() });
+    h.setTime("2030-01-03T12:00:00.000Z");
+    await recovered.tick(); await recovered.tick();
+    detail = recovered.get(task.id);
+    assert.equal(h.sent.length, 2, "missed occurrences coalesce into one execution");
+    assert.equal(detail.runs.length, 3);
+    assert.equal(detail.task.nextRunAt, "2030-01-03T13:00:00.000Z");
+  } finally { await recovered.dispose(); reopened.close(); }
+});

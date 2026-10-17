@@ -1,11 +1,12 @@
 import crypto from "node:crypto";
+import { assertTaskHierarchy } from "../task-hierarchy.js";
 import { DatabaseSync } from "node:sqlite";
 import { firstLayoutTabId } from "../layout-tree.js";
 import { nowIso } from "../password-manager.js";
 import { isSessionProvider } from "../session-provider.js";
 import { isSystemAiCall } from "../system-ai-call.js";
 import { isThinkingEffort } from "../structured-provider-common.js";
-import type { WandTask, WandTaskAgent } from "../task-types.js";
+import type { WandTask, WandTaskAgent, WandTaskComment } from "../task-types.js";
 import { DEFAULT_ITERATION_NAME, DEFAULT_WAND_TASK_PRIORITY, isTaskExecutionSubject, normalizeWandTaskAgentMode } from "../task-types.js";
 import { GLOBAL_WORKSPACE_ID, SessionSnapshot } from "../types.js";
 import { safeJsonParse, mapWandMilestoneRow, mapIterationPromptRow } from "./mappers.js";
@@ -91,6 +92,7 @@ export class TaskRepository {
 
   mapWandTaskRow(row: Record<string, unknown>): WandTask {
     return {
+      acceptance: safeJsonParse(String(row.acceptance_json ?? "null")),
       id: String(row.id),
       identifier: typeof row.identifier === "string" && row.identifier ? row.identifier : `TASK-${String(row.id).slice(0, 6)}`,
       workspaceId: typeof row.workspace_id === "string" ? row.workspace_id : null,
@@ -117,6 +119,14 @@ export class TaskRepository {
     };
   }
 
+  listWandTaskComments(taskId: string): WandTaskComment[] {
+    const rows = this.db.prepare(`SELECT id, task_id, author_name, body, created_at
+      FROM wand_task_comments WHERE task_id = ? ORDER BY rowid DESC LIMIT 50`).all(taskId) as Array<{
+        id: string; task_id: string; author_name: string; body: string; created_at: string;
+      }>;
+    return rows.reverse().map(row => ({ id: row.id, taskId: row.task_id, authorName: row.author_name, body: row.body, createdAt: row.created_at }));
+  }
+
   getWandTask(id: string): WandTask | null {
     const row = this.db.prepare(`SELECT ${WAND_TASK_FIELDS} FROM wand_tasks WHERE id = ?`)
       .get(id) as Record<string, unknown> | undefined;
@@ -138,6 +148,7 @@ export class TaskRepository {
     if (input.workspaceTaskId && this.getWandTaskByWorkspaceTaskId(input.workspaceTaskId)) {
       throw new Error("该任务容器已有任务卡片。");
     }
+    assertTaskHierarchy(this.listWandTasks(), null, input.parentTaskId ?? null, input.workspaceId ?? null);
     const id = crypto.randomUUID();
     const status = input.status ?? "todo";
     const createdAtValue = createdAt;
@@ -148,18 +159,22 @@ export class TaskRepository {
       FROM wand_tasks WHERE identifier GLOB 'TASK-[0-9]*'`).get() as { value: number };
     try {
       this.db.prepare(`INSERT INTO wand_tasks (${WAND_TASK_FIELDS})
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(id, `TASK-${number.value + 1}`, input.workspaceId ?? null, input.workspaceTaskId ?? null,
         input.parentTaskId ?? null, input.title, input.titleSource ?? "user", null,
         input.description ?? "", status, input.priority ?? DEFAULT_WAND_TASK_PRIORITY,
         JSON.stringify(input.labels ?? []), input.dueDate ?? null, input.milestoneId ?? null,
         max.value + 1, input.agent ? JSON.stringify(input.agent) : null,
-        input.executionSubject ? JSON.stringify(input.executionSubject) : null, archivedAt, createdAtValue, createdAtValue);
+        input.executionSubject ? JSON.stringify(input.executionSubject) : null, archivedAt, createdAtValue, createdAtValue, input.acceptance ? JSON.stringify(input.acceptance) : null);
     } catch (error) {
       if (input.workspaceTaskId && this.getWandTaskByWorkspaceTaskId(input.workspaceTaskId)) {
         throw new Error("该任务容器已有任务卡片。", { cause: error });
       }
       throw error;
+    }
+    if (input.parentTaskId) {
+      const parent = this.getWandTask(input.parentTaskId);
+      if (parent?.acceptance?.acceptedAt) this.writeWandTask(parent, { acceptance: { ...parent.acceptance, acceptedAt: null } });
     }
     this.s.notifyTaskTitleChange();
     return this.getWandTask(id)!;
@@ -193,6 +208,12 @@ export class TaskRepository {
   /** Private canonical writer; callers own the transaction, never a reverse writer. */
   writeWandTask(current: WandTask, patch: WandTaskPatch): WandTask {
     const next = { ...current, ...patch, updatedAt: nowIso() };
+    assertTaskHierarchy(this.listWandTasks(), current.id, next.parentTaskId, next.workspaceId, current);
+    if (next.acceptance?.acceptedAt) {
+      if (patch.description !== undefined && patch.description !== current.description) next.acceptance = { ...next.acceptance, acceptedAt: null };
+      else if (!next.acceptance.evidence.trim() || next.acceptance.blocker.trim()) throw new Error("验收通过需要交付证据，并先解除阻塞。");
+      else if (this.listWandTasks().some(child => child.parentTaskId === current.id && !child.acceptance?.acceptedAt)) throw new Error("仍有子任务未验收通过，不能通过主目标整体验收。");
+    }
     // 归档时间只在进入归档时写一次；取消归档/重新打开时清空，恢复“未动多久”重新计时。
     if (next.status === "archived") {
       if (!next.archivedAt) next.archivedAt = next.updatedAt;
@@ -218,14 +239,14 @@ export class TaskRepository {
     this.db.prepare(`UPDATE wand_tasks SET workspace_id = ?, workspace_task_id = ?, parent_task_id = ?,
       title = ?, title_source = ?, auto_title_signature = ?, description = ?, status = ?, priority = ?,
       labels_json = ?, due_date = ?, milestone_id = ?, sort_order = ?, agent_json = ?, execution_subject_json = ?,
-      archived_at = ?, updated_at = ?
+      archived_at = ?, updated_at = ?, acceptance_json = ?
       WHERE id = ?`)
       .run(next.workspaceId, next.workspaceTaskId, next.parentTaskId, next.title, next.titleSource,
         next.autoTitleSignature ?? null, next.description, next.status, next.priority,
         JSON.stringify(next.labels), next.dueDate, next.milestoneId ?? null, next.sortOrder,
         next.agent ? JSON.stringify(next.agent) : null,
         next.executionSubject ? JSON.stringify(next.executionSubject) : null,
-        next.archivedAt, next.updatedAt, next.id);
+        next.archivedAt, next.updatedAt, next.acceptance ? JSON.stringify(next.acceptance) : null, next.id);
     if (patch.workspaceId !== undefined && next.workspaceTaskId) {
       const workspaceId = next.workspaceId ?? this.s.ensureGlobalWorkspace().id;
       // The container FK/index and standalone session workspace bucket follow the canonical project.
@@ -233,6 +254,10 @@ export class TaskRepository {
         .run(workspaceId, next.workspaceTaskId);
       this.db.prepare("UPDATE command_sessions SET workspace_id = ? WHERE workspace_task_id = ?")
         .run(workspaceId, next.workspaceTaskId);
+    }
+    if ((patch.acceptance !== undefined || patch.description !== undefined || patch.parentTaskId !== undefined) && next.parentTaskId) {
+      const parent = this.getWandTask(next.parentTaskId);
+      if (parent?.acceptance?.acceptedAt) this.writeWandTask(parent, { acceptance: { ...parent.acceptance, acceptedAt: null } });
     }
     this.s.notifyTaskTitleChange();
     return next;

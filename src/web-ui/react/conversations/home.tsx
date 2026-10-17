@@ -37,7 +37,8 @@ import { settingsController } from "../settings/controller";
 import { installConversationHomeStyles } from "./home-styles";
 import { installChatComposerStyles } from "../chat-composer-styles";
 import { composerRuntimePreference, directWorkPreference, latestDirectWork } from "./composer-presentation";
-import { ConversationExecutionSelectors, conversationPreferenceAgent, setPageExecutionPreference, usePageExecutionPreference } from "./execution-preference";
+import { ConversationExecutionSelectors, conversationPreferenceAgent } from "./execution-preference";
+import type { ConversationExecutionPreference } from "../../../conversation-execution-preference.js";
 import { agentToolDisplayName } from "../../provider-identity.js";
 import { useEditorExpansion } from "../composer-sender/editor-expansion.js";
 import { useWandModelCatalog } from "../use-model-catalog";
@@ -135,12 +136,19 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
   const mention = selected?.kind === "group" ? conversationLeaderMention(draft.text,
     layer !== "task" && selectedRun ? selectedRun.run.team.members : selected.team?.members ?? []) : null;
   const mentionedLeader = mention && !("error" in mention) ? mention : null;
-  const pagePreference = usePageExecutionPreference();
+  // 临时执行配置只属于当前打开的会话：切到别的会话或进入通讯录即丢弃，重进回到员工默认。
+  // 在渲染阶段同步重置（而非 effect），避免切换瞬间把上一会话的临时工具闪到新会话上。
+  const [conversationPreference, setConversationPreference] = React.useState<ConversationExecutionPreference | undefined>(undefined);
+  const preferenceOwner = React.useRef(id);
+  if (preferenceOwner.current !== id || ui.directory) {
+    preferenceOwner.current = id;
+    if (conversationPreference) setConversationPreference(undefined);
+  }
   const editablePreference = selected?.kind === "dm" && !target && layer !== "task";
   const defaultRuntimeAgent = target && selectedRun
     ? selectedRun.run.team.members.find(member => member.isLeader)?.agent
     : selected?.kind === "group" ? (selected.team?.members.find(member => member.id === mentionedLeader?.memberId) ?? leader)?.agent : employee?.agents[0];
-  const runtimeAgent = conversationPreferenceAgent(defaultRuntimeAgent, editablePreference ? pagePreference : undefined);
+  const runtimeAgent = conversationPreferenceAgent(defaultRuntimeAgent, editablePreference ? conversationPreference : undefined);
   const runtimePreference = composerRuntimePreference(runtimeAgent, modelCatalog);
   const activeRun = selectedRun && AI_TEAM_ACTIVE_RUN_STATUSES.includes(selectedRun.run.status) ? selectedRun : null;
   const stops = !!activeRun && !draft.text.trim() && !draft.attachments.length && layer !== "task";
@@ -305,7 +313,7 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
         }
         return conversationsRepository.post(`/api/conversations/${encodeURIComponent(originalId)}/${isTask ? "tasks" : "messages"}`,
           isTask ? { ...metadata, description: text } : { input: text, target: originalTarget, cwd,
-            ...(editablePreference && pagePreference ? { executionPreference: pagePreference } : {}) });
+            ...(editablePreference && conversationPreference ? { executionPreference: conversationPreference } : {}) });
       });
       if (current.current.scope !== captured || !current.current.visible) { notifyConversationChanges(); return; }
       void load();
@@ -450,7 +458,7 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
         <div ref={composerSurface} className="conversation-input-wrap" data-editor-expanded={editor.expanded} data-composer-expanded={minimal.expanded}>
         {selected ? <div className="conversation-runtime-summary" aria-label={target ? "本轮负责人的首选配置" : "新工作的首选执行配置"}>
           {editablePreference && runtimeAgent ? <ConversationExecutionSelectors agent={runtimeAgent} catalog={modelCatalog}
-            disabled={busy || !!unknown || !!selected.unavailableReason}/> : <>
+            disabled={busy || !!unknown || !!selected.unavailableReason} onChange={setConversationPreference}/> : <>
             <Typography.Text type="secondary">{runtimeAgent ? agentToolDisplayName(runtimeAgent.provider, runtimeAgent.engine) : "工具未就绪"}</Typography.Text>
             <Typography.Text type="secondary" ellipsis={{ tooltip: true }}>首选模型：{runtimePreference.model}</Typography.Text>
             <Typography.Text type="secondary" className="conversation-thinking-summary">思考：{runtimePreference.thinking}</Typography.Text>
@@ -486,8 +494,8 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
             { key: "model", label: "首选模型", children: runtimePreference.model },
             { key: "thinking", label: "思考深度", children: runtimePreference.thinking },
             { key: "cwd", label: "新工作目录", children: chatCwd || defaultCwd || "默认目录尚未读取，发送前由服务端解析" },
-          ]}/><Typography.Text type="secondary">{chatCwd ? "临时目录在本页联系人之间共用。" : "目录沿用服务默认配置。"}{pagePreference ? "三项临时选择在本页联系人之间共用，刷新恢复员工默认；手动选择只执行当前配置，不自动改用其他候选。" : "执行按员工已配置候选顺序降级。"}继续已有工作沿用其执行配置，不修改员工默认设置。</Typography.Text>
-          {pagePreference ? <WandButton size="small" onClick={() => setPageExecutionPreference(undefined)}>恢复员工默认执行配置</WandButton> : null}
+          ]}/><Typography.Text type="secondary">{chatCwd ? "临时目录在本页联系人之间共用。" : "目录沿用服务默认配置。"}{conversationPreference ? "临时选择只属于当前会话，切走或进入通讯录恢复员工默认；手动选择只执行当前配置，不自动改用其他候选。" : "执行按员工已配置候选顺序降级。"}继续已有工作沿用其执行配置，不修改员工默认设置。</Typography.Text>
+          {conversationPreference ? <WandButton size="small" onClick={() => setConversationPreference(undefined)}>恢复员工默认执行配置</WandButton> : null}
           <WandButton size="small" onClick={event => employeeProfile.open(employee, event.currentTarget)}>查看员工执行候选</WandButton>
               </div>
             </WandPopover> : null}</Flex>

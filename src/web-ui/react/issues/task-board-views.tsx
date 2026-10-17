@@ -1,8 +1,14 @@
+import { taskExecutors } from "./task-executors";
+import { TaskBoardAgentChips } from "./task-executor-chips";
+export { TaskBoardAgentChips } from "./task-executor-chips";
+import { useSiliconEmployees } from "../agents/employee-repository";
+import { taskHasOpenDescendant } from "../../../task-hierarchy";
+import { TaskGoalChildren } from "./task-goal-children";
 import { canArchiveBoardTask } from "./task-board-repository";
 import { WandButton } from "../ui";
 import { Alert, Badge, Checkbox, Card, Collapse, Descriptions, Empty, Flex, List, Tag, Progress, Dropdown, Typography } from "antd";
 import * as React from "react";
-import type { WandTaskAgent, WandTaskPriority, WandTaskStatus } from "../../../task-types";
+import type { TaskExecutionSubject, WandTaskAgent, WandTaskPriority, WandTaskStatus } from "../../../task-types";
 import { ProviderLogo } from "../provider-logo";
 import { WandIcon, WandIconButton, WandPopover, WandStretchTabs, WandSwitch } from "../ui";
 import { isWandPopupOwnedBy, usePopupDismiss } from "../ui/popup-lifecycle";
@@ -130,7 +136,7 @@ export function TaskBoardConversationButton({
     >
       <ProviderLogo provider={session.provider} className="task-board-agent-logo"/>
       <span>
-        <strong>{session.title || issueAgentLabel(session.provider, session.engine)}</strong>
+        <strong>{session.employeeName ? `${session.employeeName} · ` : ""}{session.title || issueAgentLabel(session.provider, session.engine)}</strong>
         <small>{issueAgentProviderModelLine(session, catalog)}</small>
       </span>
     </WandButton>)}
@@ -351,6 +357,7 @@ export function useExpansionFocusReturn(openId: string): (id: string) => (elemen
 function TaskBoardListRow({
   task,
   parentLabel,
+  allTasks,
   expanded,
   onToggle,
   onOpen,
@@ -359,6 +366,7 @@ function TaskBoardListRow({
 }: {
   task: WandTaskListed;
   parentLabel?: string;
+  allTasks: WandTaskListed[];
   expanded: boolean;
   onToggle(): void;
   onOpen(id: string): void;
@@ -396,6 +404,7 @@ function TaskBoardListRow({
       <TaskBoardConversationButton sessions={task.sessions} onOpen={onOpenSession}/>
       <time>{formatIssueStamp(task.updatedAt)}</time>
     </Flex>
+    <TaskGoalChildren task={task} tasks={allTasks} onOpen={onOpen}/>
     <Collapse bordered={false} ghost activeKey={expanded ? ["details"] : []}
       styles={{ header: { display: "none" }, body: { padding: 0 } }}
       items={[{ key: "details", label: "任务详情", forceRender: true, showArrow: false, children: <div className="task-board-list-detail" id={`task-list-detail-${task.id}`} inert={!expanded}>
@@ -460,9 +469,7 @@ export function TaskBoardCardDetail({
   const description = task.description.trim();
   const catalog = useWandModelCatalog();
   const agent = task.agent;
-  const assignee = agent
-    ? `${issueAgentLabel(agent.provider, agent.engine)} · ${issueAgentModeLabel(agent.mode)}`
-    : "未指派";
+  const assignee = <TaskBoardAgentChips sessions={task.sessions} assigned={agent} subject={task.executionSubject} assignee={task.assignedExecutor}/>;
   const fields = [
     { key: "status", label: "状态", children: issueStatusLabel(task.status) },
     { key: "assignee", label: "负责人", children: assignee },
@@ -565,6 +572,7 @@ export function TaskBoardListView({
           {items.map((task) => <TaskBoardListRow
             key={task.id}
             task={task}
+            allTasks={allTasks}
             expanded={expandedId === task.id}
             parentLabel={allTasks.find((parent) => parent.id === task.parentTaskId)?.identifier}
             onToggle={() => toggleExpanded(task.id)}
@@ -583,6 +591,7 @@ export function TaskBoardListView({
               {archived.map((task) => <TaskBoardListRow
                 key={task.id}
                 task={task}
+                allTasks={allTasks}
                 expanded={expandedId === task.id}
                 parentLabel={allTasks.find((parent) => parent.id === task.parentTaskId)?.identifier}
                 onToggle={() => toggleExpanded(task.id)}
@@ -599,11 +608,13 @@ export function TaskBoardListView({
 }
 
 export function TaskBoardDashboard({
+  allTasks = [],
   projectName,
   tasks,
   onOpen,
   onOpenSession,
 }: {
+  allTasks?: WandTaskListed[];
   projectName: string;
   tasks: WandTaskListed[];
   onOpen(id: string): void;
@@ -655,6 +666,7 @@ export function TaskBoardDashboard({
       </Typography.Paragraph>
     </Card>
     <Flex wrap gap="middle" className="task-board-dashboard-grid">
+      {panel("目标与子任务计划", <Flex vertical>{tasks.map(task => <div key={task.id}><WandButton kind="ghost" onClick={() => onOpen(task.id)}>{task.title}</WandButton><TaskGoalChildren task={task} tasks={allTasks} onOpen={onOpen}/></div>)}</Flex>)}
       {panel("即将到期", dueSoon.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有设置截止日期的任务"/> : <List size="small" dataSource={dueSoon} renderItem={(task) => <List.Item><WandButton kind="ghost" onClick={() => onOpen(task.id)} style={{ height: "auto", whiteSpace: "normal" }}><TaskBoardStatusGlyph status={task.status}/><span>{task.title}</span><Tag color={issueIsOverdue(task.dueDate, task.status) ? "error" : "default"}>{issueDueStamp(task.dueDate)}</Tag></WandButton></List.Item>}/>)}
       {panel("优先级", byPriority.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有优先级分布"/> : <List size="small" dataSource={byPriority} renderItem={(entry) => <List.Item><Flex vertical style={{ width: "100%" }}><Flex justify="space-between"><span>{entry.label}</span><span>{entry.count}</span></Flex><Progress status="normal" percent={Math.round(entry.count / Math.max(1, stats.total) * 100)} size="small" showInfo={false}/></Flex></List.Item>}/>)}
       {panel("标签", labels.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有标签"/> : <List size="small" dataSource={labels} renderItem={(entry) => <List.Item><TaskBoardLabelChip label={entry.label}/><Tag>{entry.count}</Tag></List.Item>}/>)}
@@ -664,6 +676,7 @@ export function TaskBoardDashboard({
 }
 
 export function TaskBoardGantt({
+  allTasks = [],
   grouped,
   zoom,
   hideCompleted,
@@ -672,6 +685,7 @@ export function TaskBoardGantt({
   onOpen,
 }: {
   grouped: Record<WandTaskStatus, WandTaskListed[]>;
+  allTasks?: WandTaskListed[];
   zoom: IssueGanttZoom;
   hideCompleted: boolean;
   onZoom(zoom: IssueGanttZoom): void;
@@ -679,8 +693,9 @@ export function TaskBoardGantt({
   onOpen(id: string): void;
 }): React.ReactElement {
   const closed = (status: WandTaskStatus): boolean => status === "done" || status === "archived";
+  const hidden = (task: WandTaskListed): boolean => hideCompleted && closed(task.status) && !taskHasOpenDescendant(allTasks, task.id);
   const tasks = [...ISSUE_COLUMNS.flatMap((column) => grouped[column.status]), ...grouped.archived]
-    .filter((task) => !(hideCompleted && closed(task.status)));
+    .filter((task) => !hidden(task));
   const range = issueGanttRange(tasks, zoom);
   const today = isoDate(new Date());
   const todayIndex = range.columns.indexOf(today);
@@ -732,8 +747,8 @@ export function TaskBoardGantt({
             </div>
           </div>
         </div>
-        {[...ISSUE_COLUMNS, ...(hideCompleted ? [] : [ISSUE_ARCHIVE_COLUMN])].map((column) => {
-          const items = grouped[column.status].filter((task) => !(hideCompleted && closed(task.status)));
+        {[...ISSUE_COLUMNS, ISSUE_ARCHIVE_COLUMN].map((column) => {
+          const items = grouped[column.status].filter((task) => !hidden(task));
           if (items.length === 0) return null;
           return <section key={column.status} className={`task-board-gantt-group is-${column.status}`}>
             <div style={{ display: "grid", gridTemplateColumns: "180px minmax(0, 1fr)", height: 36 }}>
@@ -745,15 +760,14 @@ export function TaskBoardGantt({
               const finish = task.dueDate || created;
               const inRange = created <= range.columns.at(-1)! && finish >= range.start;
               const span = issueGanttSpan({ ...task, dueDate: finish }, range.start, range.days);
-              return <WandButton kind="ghost"
-                key={task.id}
+              return <div key={task.id}><WandButton kind="ghost"
                 type="button"
                 className="task-board-gantt-row"
                 title={`${task.title} · ${created}${task.dueDate ? ` 至 ${task.dueDate}` : " · 未设置截止日期"}`}
                 style={{ width: "100%", height: 48, padding: 0, display: "grid", gridTemplateColumns: "180px minmax(0, 1fr)", gap: 0, textAlign: "left" }}
                 onClick={() => onOpen(task.id)}
               >
-                <Flex vertical style={{ minWidth: 0, paddingInline: 8 }}><Typography.Text type="secondary">{task.identifier}</Typography.Text><Typography.Text ellipsis>{task.title}</Typography.Text></Flex>
+                <Flex vertical style={{ minWidth: 0, paddingInline: 8 }}><Typography.Text type="secondary">{task.identifier}{task.parentTaskId ? ` · 归属 ${allTasks.find(parent => parent.id === task.parentTaskId)?.identifier ?? "历史主目标"}` : ""}</Typography.Text><Typography.Text ellipsis>{task.title}</Typography.Text></Flex>
                 <div className="task-board-gantt-track" style={{ position: "relative", display: "grid", gridTemplateColumns: timelineColumns, alignItems: "center", height: "100%", minWidth: 0,
                   backgroundImage: "linear-gradient(to right, var(--border-subtle) 1px, transparent 1px)", backgroundSize: `${100 / range.days}% 100%` }}>
                   {inRange ? <i className={`is-${task.status}`} aria-hidden="true"
@@ -761,7 +775,7 @@ export function TaskBoardGantt({
                     : <Typography.Text type="secondary" style={{ gridColumn: `1 / ${range.days + 1}`, paddingInline: 8 }}>时间不在当前范围</Typography.Text>}
                   {todayLine}
                 </div>
-              </WandButton>;
+              </WandButton><TaskGoalChildren task={task} tasks={allTasks} onOpen={onOpen}/></div>;
             })}
           </section>;
         })}
@@ -838,67 +852,22 @@ export function TaskBoardAgentChip({
   </Tag>;
 }
 
-export function TaskBoardAgentChips({
-  sessions,
-  assigned,
-}: {
-  sessions: IssueSessionSummary[];
-  assigned: WandTaskAgent | null;
-}): React.ReactElement | null {
-  const agents = listIssueAgents(sessions, assigned);
-  if (agents.length === 0) return null;
-  return <>{agents.map((agent) => <TaskBoardAgentChip
-    key={agent.provider}
-    agent={agent}
-    running={sessions.some((session) => session.provider === agent.provider && issueSessionRunning(session.status))}
-  />)}</>;
-}
 
-export function TaskBoardAgentSessionList({
-  sessions,
-  assigned,
-  onOpenSession,
-  catalog,
-}: {
-  sessions: IssueSessionSummary[];
-  assigned: WandTaskAgent | null;
-  onOpenSession?: (sessionId: string) => void;
-  catalog?: IssueModelCatalog | null;
+export function TaskBoardAgentSessionList({ sessions, assigned, subject, assignee, onOpenSession, catalog }: {
+  sessions: IssueSessionSummary[]; assigned: WandTaskAgent | null; subject?: TaskExecutionSubject | null; assignee?: WandTaskListed["assignedExecutor"];
+  onOpenSession?: (sessionId: string) => void; catalog?: IssueModelCatalog | null;
 }): React.ReactElement {
-  const groups = groupIssueSessionsByAgent(sessions, assigned);
-  if (groups.length === 0) {
-    return <div className="task-board-agent-list" aria-label="指派记录">
-      <p className="task-board-agent-empty">还没有指派 Agent。</p>
-    </div>;
-  }
-  return <div className="task-board-agent-list" aria-label="已指派的 Agent">
-    {groups.map((group) => <section key={`${group.provider}:${group.engine ?? "cli"}`} className="task-board-agent-group">
-      <header className="task-board-agent-group-head">
-        <ProviderLogo provider={group.agent?.provider ?? group.provider} className="task-board-agent-logo"/>
-        <strong>{issueAgentLabel(group.agent?.provider ?? group.provider, group.engine ?? group.agent?.engine)}</strong>
-        {group.agent ? <span>{[
-          wandModelDisplayName(catalog ?? null, group.agent.provider, group.agent.model),
-          issueAgentEffortLabel(group.agent.thinkingEffort),
-          issueAgentModeLabel(group.agent.mode),
-        ].filter(Boolean).join(" · ")}</span> : null}
-        <b>{group.sessions.length}</b>
-      </header>
-      {group.sessions.length === 0
-        ? <p className="task-board-agent-empty">已指派，等待派发</p>
-        : group.sessions.map((session) => <WandButton kind="ghost"
-            key={session.id}
-            type="button"
-            className="task-board-agent-session"
-            onClick={() => onOpenSession?.(session.id)}
-          >
-            <span className={classNames("task-board-agent-session-status", issueSessionRunning(session.status) && "is-running")}/>
-            <strong>{session.title || issueAgentLabel(session.provider, session.engine)}</strong>
-            <small>
-              {[wandModelDisplayName(catalog ?? null, session.provider, session.model), sessionStatusLabel(session.status)]
-                .filter(Boolean)
-                .join(" · ")}
-            </small>
-          </WandButton>)}
+  const { employees } = useSiliconEmployees();
+  const executors = taskExecutors(sessions, assigned, subject, employees, assignee);
+  return <div className="task-board-agent-list" aria-label="任务执行者与指派记录">
+    <TaskBoardAgentChips sessions={sessions} assigned={assigned} subject={subject} assignee={assignee}/>
+    {executors.map(person => <section key={person.key} className="task-board-agent-group">
+      <header className="task-board-agent-group-head"><strong>{person.name}</strong></header>
+      {person.sessions.map(session => <WandButton key={session.id} kind="ghost" type="button" className="task-board-agent-session" onClick={() => onOpenSession?.(session.id)}>
+        <span className={classNames("task-board-agent-session-status", issueSessionRunning(session.status) && "is-running")}/>
+        <strong>{session.title || person.name}</strong>
+        <small>{[issueAgentLabel(session.provider, session.engine), wandModelDisplayName(catalog ?? null, session.provider, session.model), issueAgentEffortLabel(session.thinkingEffort), issueAgentModeLabel(session.mode), sessionStatusLabel(session.status)].join(" · ")}</small>
+      </WandButton>)}
     </section>)}
   </div>;
 }

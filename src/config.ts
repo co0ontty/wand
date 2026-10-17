@@ -253,8 +253,8 @@ export async function loadConfigWithStorage(configPath: string, storage: WandSto
  */
 export function bootstrapBuiltinEmployees(config: WandConfig, storage: WandStorage): void {
   // 内置「系统运维」员工负责 commit message / 标题 / 提示词优化；招聘由 HR 负责。
-  // 这里只做幂等补齐——首次按用户已有的系统 AI 工具与默认
-  // provider 建首条候选，之后候选由用户在员工设置里维护，不再回写 config。
+  // 新系统员工默认用服务端维护的 OpenCode 免费分组；显式旧系统 AI 选择仍优先。
+  // 这里只幂等补齐；已有员工候选由用户维护，不在重启时改写。
   storage.ensureSystemSiliconEmployee({
     cli: config.systemAiCli,
     model: config.systemAiModel,

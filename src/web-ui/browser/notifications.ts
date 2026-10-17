@@ -1,3 +1,4 @@
+import { reportClientError } from "../client-feedback";
 import { clearNoticeView, paintNotificationNotice, paintUpdateNotice } from "./notice-view-adapter";
 import { state, writeStoredBoolean } from "./state";
 import { WAND_FAVICON_URL } from "../brand-identity.js";
@@ -829,6 +830,7 @@ function showUpdateBubble(currentVer: string, latestVer: string) {
       performRestartCard(setUpdateFailed);
     })
     .catch(function(error: unknown) {
+      reportClientError("update_failed", error);
       // 非 2xx（含非 JSON 的 5xx）不再伪装成成功；纯网络中断沿用既有文案。
       setUpdateFailed(error instanceof HttpResponseError
         ? getErrorMessage(error, "更新失败，请重试。")

@@ -11,8 +11,8 @@ import { dateKey, addDateDays } from "../src/scheduled-task-activity.js";
 
 // Isolated UI integration. Actual service/storage/ACL contracts have separate
 // tests; this fixture accepts metadata edits only and can never dispatch a model.
-test("production calendar navigation, snapshot, heatmap, editor, month/week and narrow canvas", { timeout: 180_000 }, async t => {
-  const out = resolve("output/architecture-stage2/global-calendar-production/browser"); mkdirSync(out, { recursive: true });
+for (const motion of ["no-preference", "reduce"] as const) test(`unified calendar navigation, snapshot, editor, wide/narrow canvas (${motion})`, { timeout: 180_000 }, async t => {
+  const out = resolve("output/architecture-stage2/global-calendar-production/browser", motion); mkdirSync(out, { recursive: true });
   await build({ entryPoints: [resolve("tests/helpers/scheduled-calendar-browser.tsx")], outfile: join(out, "app.js"), bundle: true, platform: "browser", format: "iife", jsx: "automatic", target: "es2022", minify: true, define: { "process.env.NODE_ENV": '"production"' } });
   await build({ entryPoints: [resolve("src/web-ui/react/avatars/renderer.ts")], outfile: join(out, "avatar.js"), bundle: true, platform: "browser", format: "iife", target: "es2022", minify: true });
   let tasks = initialTasks(); const requests: { path: string; method: string; query: string }[] = [];
@@ -58,13 +58,17 @@ test("production calendar navigation, snapshot, heatmap, editor, month/week and 
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(() => { server.closeAllConnections(); server.close(); });
   const address = server.address() as any;
-  const browser = await openPlushBrowser(1440, 1100, true, "no-preference"); t.after(() => browser.close());
+  const browser = await openPlushBrowser(1440, 1100, true, motion); t.after(() => browser.close());
   await browser.send("Emulation.setTimezoneOverride", { timezoneId: DISPLAY_ZONE });
   await browser.send("Page.navigate", { url: `http://127.0.0.1:${address.port}/?view=calendar` });
   await browser.wait("document.querySelectorAll('.scheduled-calendar-layer[data-active=true] .scheduled-calendar-event').length>0");
   const e = browser.evaluate, month = ".scheduled-calendar-layer[data-active=true]";
-  assert.equal(await e("document.querySelector('h1').textContent"), "全局日历");
-  assert.equal(await e("document.querySelectorAll('.scheduled-next-section').length"), 0);
+  assert.equal(await e("document.querySelector('h1').textContent"), "定时");
+  assert.equal(await e("document.querySelector('#global-calendar-button').getAttribute('aria-label')"), "定时");
+  assert.equal(await e("document.querySelector('#global-calendar-button .sidebar-nav-label').textContent"), "定时");
+  assert.equal(await e("!!document.querySelector('#global-calendar-button [data-wand-icon=calendar]')"), true, "calendar icon remains");
+  assert.equal(await e("[...document.querySelectorAll('.scheduled-next-section')].filter(n=>n.getClientRects().length).length"), 0);
+  assert.equal(await e("document.querySelectorAll('#scheduled-tasks-button').length"), 0, "only one sidebar destination");
   assert.equal(await e("document.querySelector('#global-calendar-button').getAttribute('aria-current')"), "page");
   assert.equal(await e(`new Set([...document.querySelectorAll('${month} .scheduled-calendar-face')].map(n=>n.dataset.employeeId)).size`), 3);
   assert.equal(requests.filter(r => r.path.includes("/activity")).length, 0, "history is lazy, not read per plan on entry");
@@ -88,7 +92,12 @@ test("production calendar navigation, snapshot, heatmap, editor, month/week and 
   await browser.wait("document.querySelectorAll('.scheduled-calendar-layer[data-active=true] .scheduled-calendar-event').length>0");
   assert.ok(await e("getComputedStyle(document.querySelector('.scheduled-calendar-layer[data-active=true] .scheduled-calendar-event')).transitionProperty.split(',').every(name=>!['all','left','top','width','height'].includes(name.trim()))"), "positioned production markers never interpolate geometry through their neighbours");
   await browser.screenshot(join(out, "week.png"));
-  await browser.click("#scheduled-tasks-button"); await browser.wait("document.querySelector('h1')?.textContent==='定时任务'");
+  const createButton = await e("document.querySelector('.scheduled-create-trigger').getBoundingClientRect().toJSON()");
+  await browser.click('.scheduled-view-toolbar [data-stretch-value="list"]');
+  await browser.wait("new URLSearchParams(location.search).get('view')==='schedules'");
+  await browser.wait("document.querySelector('.scheduled-list-pane')?.dataset.active==='true'");
+  assert.equal(await e("document.querySelector('#global-calendar-button').getAttribute('aria-current')"), "page");
+  assert.deepEqual(await e("document.querySelector('.scheduled-create-trigger').getBoundingClientRect().toJSON()"), createButton, "create trigger never moves between views");
   await browser.wait("document.querySelectorAll('.scheduled-task-row').length===6");
   await browser.screenshot(join(out, "list.png"));
   await browser.click('.scheduled-task-row[data-task-id="changelog"] .scheduled-task-title-button');
@@ -96,12 +105,45 @@ test("production calendar navigation, snapshot, heatmap, editor, month/week and 
   await browser.click('[aria-label="新建定时任务"]');
   try { await browser.wait("document.activeElement?.id==='scheduled-task-name'"); }
   catch (failure) { await browser.screenshot(join(out, "form-focus-failure.png")); writeFileSync(join(out, "form-focus-failure.json"), JSON.stringify(await e("({active:document.activeElement?.outerHTML,form:document.querySelector('.scheduled-editor-shell')?.outerHTML,errors:document.querySelectorAll('[role=alert]').length})"), null, 2)); throw failure; }
+  await browser.send("Input.insertText", { text: "切换视图后保留的草稿" });
   await browser.click('[aria-label="执行员工"]'); await browser.wait("!!document.querySelector('[role=option]')");
   await browser.click('[role=option]'); assert.equal(await e("document.querySelector('.scheduled-editor-shell').dataset.open"), "true");
   await browser.key("Escape");
-  await browser.click("#global-calendar-button");
-  await browser.wait("document.querySelector('h1')?.textContent==='全局日历'");
+  await browser.click('.scheduled-view-toolbar [data-stretch-value="calendar"]');
+  await browser.wait("new URLSearchParams(location.search).get('view')==='calendar'");
+  await browser.wait("document.querySelector('.scheduled-calendar-view')?.dataset.calendarMode==='week'");
+  for (const width of [1920, 2560, 3440]) {
+    await browser.send("Emulation.setDeviceMetricsOverride", { width, height: 1100, deviceScaleFactor: 1, mobile: false });
+    await browser.settle();
+    for (const range of ["month", "week"]) {
+      await browser.click(`.scheduled-calendar-range [data-stretch-value="${range}"]`);
+      await browser.wait(`document.querySelector('.scheduled-calendar-view')?.dataset.calendarMode==='${range}'`);
+      assert.ok(await e("(()=>{const body=document.querySelector('.scheduled-tasks-body'), canvas=document.querySelector('.scheduled-calendar-layer[data-active=true]');return Math.abs(canvas.getBoundingClientRect().width-(body.clientWidth-parseFloat(getComputedStyle(body).paddingLeft)-parseFloat(getComputedStyle(body).paddingRight)))<2})()"), `${range} fills available width at ${width}`);
+      assert.equal(await e("document.documentElement.scrollWidth<=innerWidth+1"), true);
+    }
+    await browser.screenshot(join(out, `wide-${width}.png`));
+  }
   assert.equal(await e("document.querySelector('[aria-label=搜索定时任务]').value"), "");
+  const selectedDate = await e("document.querySelector('.scheduled-calendar-view').dataset.selectedDate");
+  await browser.click('[aria-label="搜索定时任务"]');
+  await browser.send("Input.insertText", { text: "整理" });
+  await browser.click('.scheduled-view-toolbar [data-stretch-value="list"]');
+  assert.equal(await e("document.querySelector('[aria-label=搜索定时任务]').value"), "整理");
+  await browser.click('[aria-label="新建定时任务"]');
+  await browser.wait("document.activeElement?.id==='scheduled-task-name'");
+  assert.equal(await e("document.querySelector('#scheduled-task-name').value"), "切换视图后保留的草稿");
+  await browser.click('.scheduled-view-toolbar [data-stretch-value="calendar"]');
+  assert.equal(await e("document.querySelector('.scheduled-editor-shell').dataset.open"), "false");
+  assert.equal(await e("document.querySelector('.scheduled-calendar-view').dataset.selectedDate"), selectedDate);
+  assert.equal(await e("document.querySelector('[aria-label=搜索定时任务]').value"), "整理");
+  await browser.click('[aria-label="搜索定时任务"]');
+  await browser.key("Escape");
+  // Reopen the legacy link directly: it resolves to the same page and one selected rail item.
+  await browser.send("Page.navigate", { url: `http://127.0.0.1:${address.port}/?view=schedules&reactUi=0` });
+  await browser.wait("document.querySelector('.scheduled-list-pane')?.dataset.active==='true'");
+  assert.equal(await e("document.querySelector('#global-calendar-button').getAttribute('aria-current')"), "page");
+  await browser.click('.scheduled-view-toolbar [data-stretch-value="calendar"]');
+  await browser.wait("document.querySelector('.scheduled-calendar-view')?.dataset.calendarMode==='month'");
   for (const width of [390, 320]) {
     await browser.send("Emulation.setDeviceMetricsOverride", { width, height: 960, deviceScaleFactor: 1, mobile: false });
     await browser.settle();
@@ -110,5 +152,5 @@ test("production calendar navigation, snapshot, heatmap, editor, month/week and 
   }
   assert.deepEqual(browser.errors, []);
   assert.equal(requests.filter(r => r.method !== "GET").length, 0, "viewing and opening forms never mutates schedules or runs");
-  writeFileSync(join(out, "verification.json"), JSON.stringify({ cases: ["independent all-employee navigation", "no personal hero", "direct calendar bars", "lazy history", "exact immutable occurrence", "latest only by default", "12-week heatmap", "layered Escape", "week URL", "list rendering", "native select ownership", "390/320 canvas scrolling", "no mutations or models"], requests: requests.map(r => ({ ...r })), errors: browser.errors }, null, 2));
+  writeFileSync(join(out, "verification.json"), JSON.stringify({ cases: ["one sidebar destination", "calendar/list tabs with legacy URLs", "1920/2560/3440 month and week fill", "stable create trigger", "retained search, calendar date and draft", "reduced-motion form focus", "independent all-employee navigation", "no personal hero", "direct calendar bars", "lazy history", "exact immutable occurrence", "latest only by default", "12-week heatmap", "layered Escape", "week URL", "list rendering", "native select ownership", "390/320 canvas scrolling", "no mutations or models"], requests: requests.map(r => ({ ...r })), errors: browser.errors }, null, 2));
 });

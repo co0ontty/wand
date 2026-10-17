@@ -227,23 +227,24 @@ test("issue helpers expose columns, grouping, sorting, and workspace options", (
   assert.equal(issueWorkspaceIdFromSelect("w1"), "w1");
 });
 
-test("parent task picker offers only active tasks in the same project and avoids cycles", () => {
+test("parent planning offers every unarchived root and explains illegal depth", () => {
   const tasks = [
     { id: "root", identifier: "TASK-1", title: "父任务", status: "doing" as const, workspaceId: "w1", parentTaskId: null },
     { id: "child", identifier: "TASK-2", title: "子任务", status: "doing" as const, workspaceId: "w1", parentTaskId: "root" },
-    { id: "grandchild", identifier: "TASK-3", title: "孙任务", status: "doing" as const, workspaceId: "w1", parentTaskId: "child" },
-    { id: "done", identifier: "TASK-4", title: "已结束", status: "done" as const, workspaceId: "w1", parentTaskId: null },
+    { id: "done", identifier: "TASK-101", title: "iOS 体验", status: "done" as const, workspaceId: "w1", parentTaskId: null },
+    { id: "todo", identifier: "TASK-105", title: "待办规划", status: "todo" as const, workspaceId: "w1", parentTaskId: null },
+    { id: "archived", identifier: "TASK-6", title: "归档", status: "archived" as const, workspaceId: "w1", parentTaskId: null },
     { id: "other", identifier: "TASK-5", title: "其他项目", status: "doing" as const, workspaceId: "w2", parentTaskId: null },
   ];
-  const options = issueParentOptions(tasks, "w1", "root");
-  assert.deepEqual(options.map((option) => option.value), [ISSUE_NO_PARENT]);
-  assert.deepEqual(issueParentOptions(tasks, "w1", "child").map((option) => option.value), [ISSUE_NO_PARENT, "root"]);
-  const remembered = issueParentOptions(tasks, "w1", "grandchild", "done");
-  assert.deepEqual(remembered.map((option) => option.value), [ISSUE_NO_PARENT, "root", "child", "done"]);
-  assert.match(remembered.at(-1)!.label, /已结束/);
-  assert.match(issueParentOptions(tasks, "w2")[1]!.label, /TASK-5 · 其他项目/);
-  assert.deepEqual(issueParentOptions(tasks, undefined).map((option) => option.value),
-    [ISSUE_NO_PARENT, "root", "child", "grandchild", "other"]);
+  const enabled = (childId: string | null) => issueParentOptions(tasks, "w1", childId).filter(o => !o.disabled).map(o => o.value);
+  assert.deepEqual(enabled(null), [ISSUE_NO_PARENT, "root", "done", "todo"]);
+  assert.deepEqual(enabled("child"), [ISSUE_NO_PARENT, "root", "done", "todo"]);
+  assert.deepEqual(enabled("root"), [ISSUE_NO_PARENT]);
+  const options = issueParentOptions(tasks, "w1", "child");
+  assert.match(options.find(o => o.value === "done")!.label, /TASK-101 · iOS 体验 · 等你确认 · 0 个子任务 · 0 个会话/);
+  assert.match(options.find(o => o.value === "child")!.label, /不可选.*循环/);
+  assert.match(options.find(o => o.value === "archived")!.label, /不可选.*归档/);
+  assert.equal(options.some(o => o.value === "other"), false);
 });
 
 test("native board host talks to the Wand task API instead of the removed taskboard bridge", () => {
@@ -267,9 +268,9 @@ test("native board host talks to the Wand task API instead of the removed taskbo
   assert.doesNotMatch(host, /wand-taskboard-ready/);
 });
 
-test("only the doing column creates and assigns in one step", () => {
+test("business status never creates execution implicitly", () => {
   // 「处理中」列的新建代表已经决定要跑，所以创建后立刻派发。
-  assert.equal(issueCreateDispatches("doing"), true);
+  assert.equal(issueCreateDispatches("doing"), false);
   // 「等待认领」只创建；「等你确认」/归档列也不应该拉起 Agent。
   assert.equal(issueCreateDispatches("todo"), false);
   assert.equal(issueCreateDispatches("done"), false);
@@ -277,16 +278,16 @@ test("only the doing column creates and assigns in one step", () => {
 
   const host = readFileSync(new URL("../src/web-ui/react/issues/task-board-host.tsx", import.meta.url), "utf8");
   // 创建链路和新建对话框共用同一个判定，避免「按钮写创建并指派但没派发」这类不一致。
-  assert.match(host, /issueCreateDispatches\(draft\.status\) && submitDescription && \(employee \|\| isDispatchableIssueAgent\(draft\.agent\)\)/);
-  assert.match(host, /const createDispatches = issueCreateDispatches\(draft\.status\)/);
+  assert.match(host, /dispatch && submitDescription && \(employee \|\| isDispatchableIssueAgent\(draft\.agent\)\)/);
+  assert.match(host, /const createDispatches = saveAndDispatch/);
   // 运行模式属于本任务，保存以后默认必须显式选择。
-  assert.match(host, /<Card size="small" className="task-board-create-assign task-board-form-section" aria-label=\{createDispatches \? "第一次指派" : "Agent 与运行模式"\}>/);
+  assert.match(host, /<Card size="small" className="task-board-create-assign task-board-form-section" aria-label=\{createDispatches \? "第一次指派" : "执行员工"\}>/);
   // 只创建时不出现「创建并指派」的按钮文案。
-  assert.match(host, /createDispatches && draft\.description\.trim\(\) \? "创建并指派" : "创建任务"/);
-  assert.match(host, /只创建任务，不指派 Agent/);
+  assert.match(host, /saveAndDispatch && draft\.description\.trim\(\) \? "保存并派发" : "保存任务"/);
+  assert.match(host, /仅保存任务的指派计划/);
 });
 
-test("create form can assign the first agent from the description", () => {
+test("create form explicitly chooses saving or dispatching", () => {
   const host = readFileSync(new URL("../src/web-ui/react/issues/task-board-host.tsx", import.meta.url), "utf8");
   const composer = host.slice(host.indexOf("task-board-native-composer"), host.indexOf("task-board-create-footer"));
   const editor = host.slice(host.indexOf("task-board-native-assign"));
@@ -295,26 +296,24 @@ test("create form can assign the first agent from the description", () => {
   assert.match(composer, /可选/);
   assert.match(composer, /按描述自动生成/);
   assert.match(host, /指定项目目录/);
-  assert.match(composer, /任务执行对象/);
-  assert.match(composer, /任务思考深度/);
-  assert.match(composer, /ariaLabel="运行模式"/);
-  assert.match(composer, /issueAgentModeOptions\(draft\.agent\.provider\)/);
+  assert.match(composer, /<AgentFields agent=\{draft.agent\}/);
+  assert.match(composer, /onEmployeeChange=\{setEmployeeTarget\}/);
   assert.match(host, /作为第一个 Agent 的指派内容/);
   assert.match(host, /submitDescription && \(employee \|\| isDispatchableIssueAgent\(draft\.agent\)\)/);
-  assert.match(host, /taskBoardRepository\.dispatch\(created\.id, subject\.type === "cli" \? draft\.agent : null/);
+  assert.match(host, /taskBoardRepository\.dispatch\(created\.id, subject\.type === "cli" \|\| employeeOverride \? draft\.agent : null/);
   assert.match(host, /\.\.\.\(subject\.type === "cli" \? \{ agent: draft\.agent \} : \{\}\)/);
   assert.match(host, /parentTaskId: draft\.parentTaskId \|\| null/);
   assert.match(composer, /ariaLabel="归属父任务"/);
-  assert.match(host, /onCreateChild=\{\(\) => openCreate\("doing", selected\)\}/);
+  assert.match(host, /onCreateChild=\{\(\) => openCreate\("todo", selected\)\}/);
   assert.match(host, /aria-label="子任务"/);
-  assert.match(host, /创建并指派/);
+  assert.match(host, /保存并派发/);
 
   assert.match(editor, /指派 Agent/);
   assert.match(editor, /先输入提示词，再选员工、团队或 CLI/);
   // 指派面板的执行配置控件与 AI 团队成员编辑共用 AgentFields，aria 标签按前缀拼出。
   const agentFields = readFileSync(new URL("../src/web-ui/react/issues/agent-fields.tsx", import.meta.url), "utf8");
   assert.match(editor, /<AgentFields[\s\S]*?ariaPrefix="任务"/);
-  assert.match(agentFields, /\$\{ariaPrefix\}指派给/);
+  assert.match(agentFields, /direct \? "直接工具" : "指派给"/);
   assert.match(agentFields, /\$\{ariaPrefix\}模型/);
   assert.match(agentFields, /\$\{ariaPrefix\}思考深度/);
   assert.match(agentFields, /\$\{ariaPrefix\}工作模式/);
@@ -365,7 +364,7 @@ test("已完成卡片不带「完成」死按钮：写回同一个状态、触�
 
 test("dropping an unassigned task into doing asks before sending the card description", () => {
   // 没派发过的任务拖进「处理中」可以派发，但必须先把将要发出的任务说明摆出来确认。
-  assert.equal(issueDropDispatches("doing", 0), true);
+  assert.equal(issueDropDispatches("doing", 0), false);
   // 已经在跑 / 跑过的任务只改状态，避免拖一下就多开一个 session。
   assert.equal(issueDropDispatches("doing", 1), false);
   assert.equal(issueDropDispatches("todo", 0), false);
@@ -515,7 +514,8 @@ test("task board is a first-class view=taskboard route that does not unmount the
   // 功能导航既有库按钮高亮，也保留当前页语义。
   assert.match(sidebar, /activePage=\{settings\.open \? null : taskBoard\.open \? taskBoard\.page === "board" \? "board" : taskBoard\.page === "schedules" \? "schedules" : taskBoard\.page === "calendar" \? "calendar" : "teams"/);
   const navigation = readFileSync(new URL("../src/web-ui/react/conversations/sidebar.tsx", import.meta.url), "utf8");
-  assert.match(navigation, /aria-current=\{activePage === entry\.value \? "page" : undefined\}/);
+  assert.match(navigation, /const selectedPage = activePage === "schedules" \? "calendar" : activePage/);
+  assert.match(navigation, /aria-current=\{selectedPage === entry\.value \? "page" : undefined\}/);
   // 同一功能只留一个可见入口：箭头只在未选中任务时出现（返回工作区），选中任务后返回交给面包屑首段。
   assert.match(host, /\{!selected \? <WandIconButton/);
   assert.match(host, /aria-label="返回工作区"/);
@@ -620,7 +620,7 @@ test("看板卡片点击就地展开，不再把整块看板换成详情页（�
   // 关闭路径逐条：面板内收起按钮、再次点击（toggle）、Esc、切视图/搜索/筛选、进详情、重开面板、拖拽开始。
   assert.match(detail, /onCollapse\(\)/);
   assert.match(card, /onCollapse=\{\(\) => setExpandedTaskId\(""\)\}/);
-  assert.match(host, /setExpandedTaskId\(""\);\s*\}, \[view, query, filterWorkspaceId, filters, selectedId, controller\.open, controller\.revision\]\);/);
+  assert.doesNotMatch(host, /setExpandedTaskId\(""\);\s*\}, \[view, query/);
   assert.match(host, /onDragStart=\{\(event\) => \{\s*if \(event\.target !== event\.currentTarget\) return;[\s\S]{0,120}setExpandedTaskId\(""\);/);
   assert.match(host, /if \(expandedTaskId\) \{\s*setExpandedTaskId\(""\);\s*return;\s*\}/);
   // Esc 一次只退一层：新建对话框 → 完整详情 → 展开的卡片 → 离开看板。
@@ -747,7 +747,7 @@ test("task board distinguishes first-use, inactive and filtered empty states", (
   assert.match(issueBoardEmptyState(8, 0, 8, false).description, /8 个归档任务/);
   assert.equal(issueBoardEmptyState(8, 0, 0, true).kind, "filtered");
   const host = readFileSync(new URL("../src/web-ui/react/issues/task-board-host.tsx", import.meta.url), "utf8");
-  assert.match(host, /活动 \$\{activeCount\} · 归档 \$\{archiveCount\}/);
+  assert.match(host, /子任务 \$\{matchedTasks\.filter/);
   assert.match(host, /const matchedTasks = filterIssues\(tasks, query, filterWorkspaceId, filters, true\)/);
   assert.doesNotMatch(host, /共 \$\{visible\.length\} 个任务/);
   assert.match(host, /rememberCreateDefaults, setRememberCreateDefaults\] = React\.useState\(false\)/);

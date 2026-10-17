@@ -50,10 +50,9 @@ test("legacy global tasks use a named fallback group after real workspaces", () 
   assert.deepEqual(groups[1].tasks[0].sessions, source.tasks[1].sessions);
 });
 
-test("sidebar keeps empty workspaces and restores reopened tasks without deleting history", () => {
+test("sidebar prunes empty workspaces and restores reopened tasks without deleting history", () => {
   const completedOnly = { ...source, tasks: [source.tasks[0]], standaloneSessions: [] };
-  assert.equal(filterSidebarGroups([completedOnly], "").length, 1);
-  assert.deepEqual(filterSidebarGroups([completedOnly], "")[0].tasks, []);
+  assert.deepEqual(filterSidebarGroups([completedOnly], ""), []);
   const reopened = { ...source.tasks[0], status: "active" as const };
   assert.deepEqual(filterSidebarGroups([{ ...completedOnly, tasks: [reopened] }], "")[0].tasks, [reopened]);
 });

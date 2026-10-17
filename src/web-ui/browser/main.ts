@@ -43,7 +43,16 @@ import { installWorkspacesLegacyAdapter } from "./workspaces-adapter";
 import { appendToComposer, copyTextSafely, setFilePanelOpen } from "./file-browser";
 import { fileExplorerController, fileExplorerStore } from "../react/file-explorer/controller";
 import { explorerParentOf } from "../react/file-explorer/paths";
+import { configureClientFeedback, installClientFeedbackHandlers } from "../client-feedback";
 
+
+configureClientFeedback({
+  ready: () => !!state.config && !state.pageUnloading,
+  version: () => String(state.config?.currentVersion || state.config?.packageVersion || "0.0.0"),
+  secure: () => window.location.protocol === "https:" || ["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname),
+  fetch: (input, init) => globalThis.fetch(input, init),
+});
+installClientFeedbackHandlers(window);
 
 installAiTeamComposerAdapter();
 installSettingsRuntimeBridge();

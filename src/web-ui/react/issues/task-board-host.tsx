@@ -1,3 +1,7 @@
+import { buildTaskDispatchPrompt, taskDispatchConfiguration } from "./task-dispatch-preview";
+import { TaskAcceptanceEditor } from "./task-acceptance";
+import { taskGoalProjection } from "../../../task-hierarchy";
+import { TaskGoalChildren } from "./task-goal-children";
 import { canArchiveBoardTask } from "./task-board-repository";
 import "./library-layout";
 import { TaskForm, TaskTextArea } from "./task-form";
@@ -78,6 +82,8 @@ import { AgentField, AgentFields, DISPATCH_VALUE, agentTargetIsDispatch, agentTa
 import { TeamDispatchActionButton, TeamDispatchRoster, dispatchStartBlockedReason, useTeamDispatchFlow } from "../team-dispatch/roster";
 import { aiTeamsRepository, type AiTeam } from "../ai-teams/repository";
 import { TaskTeamRunPanel } from "../ai-teams/lazy";
+import { TaskComments } from "./task-comments";
+import { TaskDescription } from "./task-description";
 import { taskBoardController, taskBoardStore } from "./task-board-controller";
 import { taskBoardRepository, type IssueWorkspace, type WandTaskListed } from "./task-board-repository";
 import { openTaskSessionCreation } from "./task-session-create";
@@ -140,6 +146,7 @@ function columnOf(status: WandTaskStatus) {
 }
 
 const IssueField = AgentField;
+const taskDispatchDrafts = new Map<string, string>();
 
 export interface TaskBoardHostProps {
   readonly onOpenSession?: (sessionId: string) => void;
@@ -200,6 +207,7 @@ export function TaskBoardHost({
   const detailChoiceTaskRef = React.useRef("");
   const [teamTarget, setTeamTarget] = React.useState("");
   const [employeeTarget, setEmployeeTarget] = React.useState("");
+  const [employeeOverride, setEmployeeOverride] = React.useState(false);
   const [teamRunRefresh, setTeamRunRefresh] = React.useState(0);
   const [lastAgent, setLastAgent] = React.useState<WandTaskAgent>(() => createDefaultIssueAgent());
   const lastAgentRef = React.useRef(lastAgent);
@@ -220,6 +228,13 @@ export function TaskBoardHost({
   const workspaceGenerationRef = React.useRef(0);
   const titleRef = React.useRef<HTMLTextAreaElement>(null);
   const searchRef = React.useRef<HTMLInputElement>(null);
+  const pageRef = React.useRef<HTMLDivElement>(null);
+  const readingPositions = React.useRef(new Map<string, number>());
+  React.useLayoutEffect(() => {
+    if (selectedId) return;
+    if (pageRef.current) pageRef.current.scrollTop = readingPositions.current.get(view) ?? 0;
+    for (const [status, column] of Object.entries(columnScrollRefs.current)) if (column) column.scrollTop = readingPositions.current.get(`column:${status}`) ?? 0;
+  }, [selectedId, view]);
   const columnScrollRefs = React.useRef<Partial<Record<WandTaskStatus, HTMLElement>>>({});
   const titlePollerRef = React.useRef<GeneratedTitlePoller | null>(null);
 
@@ -358,31 +373,41 @@ export function TaskBoardHost({
   });
 
   const openCreate = React.useCallback((status: WandTaskStatus = "todo", parent?: WandTaskListed) => {
-    const assignment = resolveIssueAssignment({}, issueCreateDispatches(status) ? lastAssignmentRef.current : null, lastAgentRef.current, {
+    const assignment = resolveIssueAssignment({}, lastAssignmentRef.current?.subject.type === "cli" ? null : lastAssignmentRef.current, lastAgentRef.current, {
       employees: employeesLoading || employeesError ? null : employees, teams,
     });
     setTeamTarget(assignment.subject.type === "team" ? assignment.subject.id : "");
     setEmployeeTarget(assignment.subject.type === "employee" ? assignment.subject.id : "");
     setDraft({
-      ...emptyDraft(parent ? parent.workspaceId ?? "" : filterWorkspaceId || controller.workspaceId, status, assignment.agent, parent?.id),
+      ...emptyDraft(parent ? parent.workspaceId ?? "" : filterWorkspaceId || controller.workspaceId, status, assignment.subject.type === "employee" ? employees.find(item => item.id === assignment.subject.id)?.agents[0] ?? assignment.agent : assignment.agent, parent?.id),
       milestoneId: parent?.milestoneId ?? "",
     });
+    setEmployeeOverride(false);
+    setSaveAndDispatch(false);
+    setDispatchSelected(false);
     setCreateExpanded(false);
     setRememberCreateDefaults(false);
     setCreateOpen(true);
     requestAnimationFrame(() => titleRef.current?.focus());
   }, [controller.workspaceId, employees, employeesError, employeesLoading, filterWorkspaceId, teams]);
 
-  const createTask = React.useCallback(async (): Promise<void> => {
+  const [saveAndDispatch, setSaveAndDispatch] = React.useState(false);
+  const createTask = React.useCallback(async (dispatch = false): Promise<void> => {
     const submitTitle = draft.title.trim();
     const submitDescription = draft.description.trim();
     // 标题是可选字段：只写描述也能创建，标题由服务端按描述自动生成。
     if ((!submitTitle && !submitDescription) || loading) return;
+    if (employeeTarget && !employees.some(item => item.id === employeeTarget && !item.archivedAt)) { setError("所选员工不可用，请重新选择。"); return; }
+    if (dispatch) {
+      if (!submitDescription) { setError("保存并派发需要填写本次交付目标。"); return; }
+      const answer = await wandOverlay.dialog({ title: "确认保存并派发", description: `将保存任务并新建一次执行。\n${submitTitle}\n${submitDescription}\n${taskDispatchConfiguration(draft.agent, employeeOverride ? undefined : employees.find(employee => employee.id === employeeTarget))}\n${teams?.find(team => team.id === teamTarget)?.name ?? ""}\n主目标约束：${tasks.find(task => task.id === draft.parentTaskId)?.description ?? "无父任务"}\n确认后随本轮要求发送任务快照，沿用已有权限与费用边界。`, actions: [{ label: "取消", value: false, autoFocus: true }, { label: "保存并派发", value: true, kind: "primary" }] });
+      if (answer.dismissed === true || answer.action !== true) return;
+    }
     await runFor("__create__", async () => {
-      const subject: TaskExecutionSubject = teamTarget && issueCreateDispatches(draft.status)
+      const subject: TaskExecutionSubject = teamTarget
         ? { type: "team", id: teamTarget }
-        : employeeTarget && issueCreateDispatches(draft.status)
-          ? { type: "employee", id: employeeTarget }
+        : employeeTarget
+          ? { type: "employee", id: employeeTarget, ...(employeeOverride ? { agentOverride: draft.agent } : {}) }
           : { type: "cli", id: draft.agent.provider };
       const created = await taskBoardRepository.create({
         workspaceId: draft.workspaceId || null,
@@ -399,25 +424,26 @@ export function TaskBoardHost({
         rememberAgentDefaults: subject.type === "cli" && rememberCreateDefaults,
       });
       if (subject.type === "cli" && rememberCreateDefaults) rememberAgent(draft.agent);
-      // 只有「处理中」列的新建才顺带第一次指派；「等待认领」列只创建任务。
+      const executionPrompt = buildTaskDispatchPrompt(created, tasks.find(task => task.id === created.parentTaskId), submitDescription);
+      // 只有明确选择保存并派发才启动执行，与业务状态无关。
       // 有描述才派发，否则只落库，之后在任务详情里再指派。
       let assignError = "";
       const team = subject.type === "team" ? teams?.find((item) => item.id === subject.id) : undefined;
       const employee = subject.type === "employee" ? employees.find((item) => item.id === subject.id) : undefined;
-      if (team && submitDescription) {
+      if (dispatch && team && submitDescription) {
         try {
           await taskBoardRepository.dispatch(created.id, null, {
-            subject, prompt: submitDescription, workspaceId: draft.workspaceId || null,
+            subject, prompt: executionPrompt, workspaceId: draft.workspaceId || null,
           });
           rememberAssignment(draft.agent, subject);
           setNotice(`团队「${team.name}」已开始处理「${created.title}」`);
         } catch (cause) {
           assignError = cause instanceof Error ? cause.message : "任务已创建，但交给团队失败。";
         }
-      } else if (issueCreateDispatches(draft.status) && submitDescription && (employee || isDispatchableIssueAgent(draft.agent))) {
+      } else if (dispatch && submitDescription && (employee || isDispatchableIssueAgent(draft.agent))) {
         try {
-          const result = await taskBoardRepository.dispatch(created.id, subject.type === "cli" ? draft.agent : null, {
-            prompt: submitDescription,
+          const result = await taskBoardRepository.dispatch(created.id, subject.type === "cli" || employeeOverride ? draft.agent : null, {
+            prompt: executionPrompt,
             workspaceId: draft.workspaceId || null,
             subject,
           });
@@ -440,7 +466,7 @@ export function TaskBoardHost({
       await reload();
       // reload() 开头会清掉错误横幅，所以这些提示必须放在它之后才留得住。
       if (assignError) setError(assignError);
-      else setNotice(`已创建任务「${created.title}」${issueCreateDispatches(draft.status) && submitDescription ? "，工具已启动" : "，未启动执行"}${subject.type === "cli" && rememberCreateDefaults ? "；以后新建任务将使用这组执行默认" : ""}。`);
+      else setNotice(`已创建任务「${created.title}」${dispatch && submitDescription ? "，已启动执行" : "，未启动执行"}${subject.type === "cli" && rememberCreateDefaults ? "；以后新建任务将使用这组执行默认" : ""}。`);
       if (!submitTitle && created.titleSource === "auto") {
         titlePollerRef.current ??= createGeneratedTitlePoller({
           getTask: (taskId) => taskBoardRepository.get(taskId),
@@ -449,13 +475,22 @@ export function TaskBoardHost({
         void titlePollerRef.current.start(created.id, created.title);
       }
     });
-  }, [createMore, draft, employeeTarget, employees, loading, rememberAgent, rememberAssignment, rememberCreateDefaults, reload, runFor, teamTarget, teams]);
+  }, [createMore, draft, employeeOverride, employeeTarget, employees, loading, rememberAgent, rememberAssignment, rememberCreateDefaults, reload, runFor, tasks, teamTarget, teams]);
 
-  const patchTask = React.useCallback(async (id: string, patch: Parameters<typeof taskBoardRepository.update>[1]) => {
+  const patchTask = React.useCallback(async (id: string, patch: Parameters<typeof taskBoardRepository.update>[1]): Promise<boolean> => {
+    let saved = false;
     await runFor(id, async () => {
-      await taskBoardRepository.update(id, patch);
+      try {
+        await taskBoardRepository.update(id, patch);
+      } catch (cause) {
+        if (patch.parentTaskId !== undefined) throw new Error(`父任务归属保存未确认，请先刷新回读后再操作，避免重复提交。${cause instanceof Error ? cause.message : "请求失败。"}`);
+        throw cause;
+      }
+      saved = true;
       await reload();
+      if (patch.parentTaskId !== undefined) setNotice("父任务归属已保存，未启动执行。");
     });
+    return saved;
   }, [reload, runFor]);
 
   const removeTask = React.useCallback(async (task: WandTaskListed): Promise<void> => {
@@ -513,14 +548,15 @@ export function TaskBoardHost({
     });
   }, [onOpenSession, rememberAssignment, reload, runFor]);
 
-  const dispatchEmployee = React.useCallback(async (task: WandTaskListed, employeeId: string, prompt: string): Promise<void> => {
+  const dispatchEmployee = React.useCallback(async (task: WandTaskListed, employeeId: string, prompt: string, override?: WandTaskAgent): Promise<void> => {
     const employee = employees.find((item) => item.id === employeeId);
     if (!employee) return;
     await runFor(task.id, async () => {
-      const result = await taskBoardRepository.dispatch(task.id, null, {
+      const result = await taskBoardRepository.dispatch(task.id, override ?? null, {
         prompt: prompt.trim(),
         workspaceId: task.workspaceId,
         subject: { type: "employee", id: employeeId },
+        useEmployeeDefaults: !override,
       });
       rememberAssignment(agentOf(task, lastAssignmentRef.current?.agent ?? lastAgentRef.current), { type: "employee", id: employeeId });
       setNotice(`${employee.name} 已开始处理「${task.title}」`);
@@ -612,11 +648,14 @@ export function TaskBoardHost({
   const selected = tasks.find((task) => task.id === selectedId) ?? null;
   const selectedChildren = selected ? tasks.filter((task) => task.parentTaskId === selected.id) : [];
   const archiveOpen = issueArchiveFolderOpen(collapsedList.archived, query, filters);
-  const visible = sortTaskBoardTasks(filterIssues(tasks, query, filterWorkspaceId, filters, archiveOpen), sort);
+  const [executionQueue, setExecutionQueue] = React.useState(false);
+  const matches = filterIssues(tasks, query, filterWorkspaceId, filters, archiveOpen);
+  const visible = sortTaskBoardTasks(executionQueue ? matches : taskGoalProjection(tasks, matches), sort);
   const grouped = groupIssuesByStatus(visible);
   const matchedTasks = filterIssues(tasks, query, filterWorkspaceId, filters, true);
-  const activeCount = matchedTasks.filter((task) => task.status !== "archived").length;
-  const archiveCount = matchedTasks.length - activeCount;
+  const counted = executionQueue ? matchedTasks : taskGoalProjection(tasks, matchedTasks);
+  const activeCount = counted.filter((task) => task.status !== "archived").length;
+  const archiveCount = counted.length - activeCount;
   // 「清空归档」删的是当前项目范围内全部归档卡片，不受搜索和筛选影响，确认框按这个数量说话。
   const archivePurgeScope = tasks.filter((task) => task.status === "archived"
     && (!filterWorkspaceId || task.workspaceId === filterWorkspaceId)).length;
@@ -666,9 +705,9 @@ export function TaskBoardHost({
   // 服务端自己建卡 + 建临时团队 + 起 run，所以这条路径不创建本地任务，也不派 CLI。
   const [dispatchSelected, setDispatchSelected] = React.useState(false);
   const dispatchFlow = useTeamDispatchFlow();
-  const createDispatches = issueCreateDispatches(draft.status);
-  const createTeam = createDispatches ? teams?.find((team) => team.id === teamTarget) ?? null : null;
-  const createEmployee = createDispatches ? employees.find((employee) => employee.id === employeeTarget) ?? null : null;
+  const createDispatches = saveAndDispatch;
+  const createTeam = teams?.find((team) => team.id === teamTarget) ?? null;
+  const createEmployee = employees.find((employee) => employee.id === employeeTarget) ?? null;
 
   // Compare the saved configuration by value, not the fresh objects returned by polling.
   const selectedAgentKey = JSON.stringify(selected?.agent ?? null);
@@ -685,7 +724,8 @@ export function TaskBoardHost({
     const assignment = resolveIssueAssignment(selected, lastAssignment, lastAgent, {
       employees: employeesLoading || employeesError ? null : employees, teams,
     });
-    setDetailAgent(assignment.agent);
+    setEmployeeOverride(!!assignment.subject.agentOverride);
+    setDetailAgent(assignment.subject.agentOverride ?? (assignment.subject.type === "employee" ? employees.find(item => item.id === assignment.subject.id)?.agents[0] ?? assignment.agent : assignment.agent));
     setTeamTarget(assignment.subject.type === "team" ? assignment.subject.id : "");
     setEmployeeTarget(assignment.subject.type === "employee" ? assignment.subject.id : "");
   }, [selected?.id, selectedAgentKey, selected?.executionSubject?.type, selected?.executionSubject?.id, lastAgent, lastAssignment, employeeTarget, employees, employeesError, employeesLoading, teamTarget, teams]);
@@ -694,11 +734,7 @@ export function TaskBoardHost({
     writeTaskBoardViewState({ view, query, workspaceId: filterWorkspaceId, filters, sort });
   }, [view, query, filterWorkspaceId, filters, sort]);
 
-  // 展开态只属于「当前这一屏看板」：换视图、改筛选或搜索、进完整详情、重开面板时一律收起，
-  // 不留半开（卡片可能已经不在这一列里了）。
-  React.useEffect(() => {
-    setExpandedTaskId("");
-  }, [view, query, filterWorkspaceId, filters, selectedId, controller.open, controller.revision]);
+  // 展开选择随面板保留；过滤仅改变可见投影，不清除返回位置。
 
   React.useEffect(() => {
     const previous = document.title;
@@ -842,6 +878,7 @@ export function TaskBoardHost({
       {display.body && task.description && !expanded
         ? <p className="task-board-card-body">{task.description}</p>
         : null}
+      {task.acceptance?.acceptedAt && <Typography.Text type="success">验收通过</Typography.Text>}
       <Flex wrap gap={4} align="center" className="task-board-card-meta" aria-label="任务属性">
         <span className="task-board-card-id">{task.identifier}</span>
         {parent && <span className="task-board-chip is-parent" title={`归属 ${parent.identifier} · ${parent.title}`}>
@@ -858,11 +895,12 @@ export function TaskBoardHost({
         {task.dueDate ? <span className={classNames("task-board-due", issueIsOverdue(task.dueDate, task.status) && "is-overdue")}>
           {issueDueStamp(task.dueDate)}
         </span> : null}
-        <TaskBoardAgentChips sessions={task.sessions} assigned={assigned}/>
+        <TaskBoardAgentChips sessions={task.sessions} assigned={assigned} subject={task.executionSubject} assignee={task.assignedExecutor}/>
         {task.status !== "doing"
           ? <TaskBoardConversationButton sessions={task.sessions} onOpen={onOpenSession}/>
           : null}
       </Flex>
+      <TaskGoalChildren task={task} tasks={tasks} onOpen={setSelectedId}/>
       {sessionDropTarget === task.id && <Alert type="info" showIcon title="移入此任务 · 运行目录不变"/>}
       {task.sessions.length > 0 && <Flex vertical gap={4} className="task-board-session-list" style={{ display: expanded ? "none" : undefined }} aria-label={`${task.title} 的会话`}>
         {task.sessions.slice(0, 2).map((session) => <Flex key={session.id} align="center" justify="space-between" gap={4} className="task-board-session-row" style={{ minWidth: 0 }}
@@ -937,7 +975,7 @@ export function TaskBoardHost({
           </WandIconButton>
         </div>
       </Flex>
-      <Flex vertical gap="small" className="task-board-column-list" ref={(node) => { columnScrollRefs.current[status] = node ?? undefined; }}>
+      <Flex vertical gap="small" className="task-board-column-list" data-scroll-status={status} ref={(node) => { columnScrollRefs.current[status] = node ?? undefined; }}>
         {loading && tasks.length === 0
           ? <>
               <WandSkeleton className="task-board-skeleton"/>
@@ -952,6 +990,13 @@ export function TaskBoardHost({
   };
 
   return <Flex component="section" vertical gap="middle" className="task-board-native-page" aria-label="任务管理"
+    ref={pageRef}
+    onScrollCapture={event => {
+      if (selectedId || !(event.target instanceof HTMLElement)) return;
+      const status = event.target.dataset.scrollStatus;
+      if (status) readingPositions.current.set(`column:${status}`, event.target.scrollTop);
+      else if (event.target === pageRef.current) readingPositions.current.set(view, event.target.scrollTop);
+    }}
     data-view={view} data-detail={Boolean(selected)}>
     <Flex component="header" wrap align="center" justify="space-between" gap="small" className="task-board-workspace-header">
       <Flex align="center" gap="small" className="task-board-kicker">
@@ -987,6 +1032,8 @@ export function TaskBoardHost({
       </Flex>
       <Flex wrap gap="small" className="task-board-header-actions">
         {!selected && <>
+          <WandSwitch checked={executionQueue} onCheckedChange={setExecutionQueue} ariaLabel="子任务执行队列"/>
+          <Typography.Text>{executionQueue ? "包含子任务的执行队列" : "主目标视图"}</Typography.Text>
           <TaskOrganizeButton target={filterWorkspaceId ? { kind: "workspace", workspaceId: filterWorkspaceId } : { kind: "all" }} onChanged={() => reload(true)}/>
           <WandIconButton disabled={loading} onClick={() => void reload()} aria-label="刷新任务" title="刷新任务">
             <WandIcon name="refresh"/>
@@ -1038,7 +1085,7 @@ export function TaskBoardHost({
       </Flex>
     </Flex>}
     {!selected && <Flex wrap align="center" justify="space-between" gap="small" className="task-board-result-summary" role="status">
-      <span>{loading ? "正在同步任务…" : `活动 ${activeCount} · 归档 ${archiveCount}`}{(query || filterActive || filterWorkspaceId) ? " · 已筛选" : ""}</span>
+      <span>{loading ? "正在同步任务…" : `${executionQueue ? "任务" : "主目标"} ${activeCount} · 归档 ${archiveCount} · 子任务 ${matchedTasks.filter(task => task.parentTaskId).length} · 执行会话 ${new Set(matchedTasks.flatMap(task => task.sessions.map(session => session.id))).size}`}{(query || filterActive || filterWorkspaceId) ? " · 已筛选" : ""}</span>
       <Flex wrap gap={4} className="task-board-active-filters">
         {filters.statuses.map((status) => <WandButton kind="ghost" size="small" key={status} aria-label={`移除状态筛选 ${columnOf(status).label}`} onClick={() => setFilters({ ...filters, statuses: filters.statuses.filter((entry) => entry !== status) })}>{status === "archived" ? "归档任务" : columnOf(status).label}<WandIcon name="close" size={12}/></WandButton>)}
         {filters.priorities.map((priority) => <WandButton kind="ghost" size="small" key={priority} aria-label={`移除优先级筛选 ${priority}`} onClick={() => setFilters({ ...filters, priorities: filters.priorities.filter((entry) => entry !== priority) })}>{ISSUE_PRIORITIES.find((entry) => entry.value === priority)?.label}<WandIcon name="close" size={12}/></WandButton>)}
@@ -1064,6 +1111,7 @@ export function TaskBoardHost({
       teamId={teamTarget}
       employees={employees}
       employeeId={employeeTarget}
+      employeeOverride={employeeOverride}
       teamRunRefresh={teamRunRefresh}
       onTeamChange={setTeamTarget}
       onEmployeeChange={setEmployeeTarget}
@@ -1072,19 +1120,25 @@ export function TaskBoardHost({
       children={selectedChildren}
       parentOptions={issueParentOptions(tasks, selected.workspaceId, selected.id, selected.parentTaskId)}
       onOpenTask={setSelectedId}
-      onCreateChild={() => openCreate("doing", selected)}
-      onAgentChange={(agent, subject) => {
+      onCreateChild={() => openCreate("todo", selected)}
+      onAgentChange={(agent, subject, override) => {
+        setEmployeeOverride(override === true);
         detailChoiceTaskRef.current = selected.id;
         setDetailAgent(agent);
         rememberAssignment(agent, subject ?? { type: "cli", id: agent.provider });
       }}
-      onPatch={(patch) => void patchTask(selected.id, patch)}
+      onPatch={(patch) => patchTask(selected.id, patch)}
       composeRequest={composeRequest}
       onDispatch={(prompt) => {
         const team = teams?.find((item) => item.id === teamTarget);
-        void (team ? dispatchTeam(selected, team, prompt)
-          : employeeTarget ? dispatchEmployee(selected, employeeTarget, prompt)
-            : dispatchTask(selected, detailAgentValue, prompt));
+        const employee = employees.find(item => item.id === employeeTarget);
+        const executionPrompt = buildTaskDispatchPrompt(selected, tasks.find(item => item.id === selected.parentTaskId), prompt);
+        void wandOverlay.dialog({
+          title: "确认新建一次执行",
+          description: `${executionPrompt}\n\n执行配置：${team?.name || taskDispatchConfiguration(detailAgentValue, employeeOverride ? undefined : employee)}\n沿用现有权限与费用边界；已有会话请从执行记录精确继续，此处新建执行，不代表验收通过。`,
+          actions: [{ label: "取消", value: false, autoFocus: true }, { label: "确认派发", value: true, kind: "primary" }],
+        }).then(answer => { if (answer.dismissed !== true && answer.action === true) return team ? dispatchTeam(selected, team, executionPrompt)
+          : employeeTarget ? dispatchEmployee(selected, employeeTarget, executionPrompt, employeeOverride ? detailAgentValue : undefined) : dispatchTask(selected, detailAgentValue, executionPrompt); });
       }}
       onRemove={() => void removeTask(selected)}
       onOpenSession={onOpenSession}
@@ -1100,6 +1154,7 @@ export function TaskBoardHost({
     </div> : view === "dashboard" ? <TaskBoardDashboard
       projectName={projectName}
       tasks={visible}
+      allTasks={tasks}
       onOpen={setSelectedId}
       onOpenSession={onOpenSession}
     /> : view === "list" ? <TaskBoardListView
@@ -1115,6 +1170,7 @@ export function TaskBoardHost({
       onOpen={setSelectedId}
       onOpenSession={onOpenSession}
     /> : view === "gantt" ? <TaskBoardGantt
+      allTasks={tasks}
       grouped={grouped}
       zoom={ganttZoom}
       hideCompleted={ganttHideCompleted}
@@ -1253,7 +1309,7 @@ export function TaskBoardHost({
               : dispatchFlow.planNow(draft.description));
             return;
           }
-          void createTask();
+          void createTask(saveAndDispatch);
         }}
       >
         <Flex vertical gap="small" className="task-board-create-writing task-board-form-section">
@@ -1282,7 +1338,7 @@ export function TaskBoardHost({
             value={draft.description}
             placeholder={createDispatches
               ? "添加描述…（将作为第一个 Agent 的指派内容）"
-              : "添加描述…（只创建任务，不指派 Agent）"}
+              : "添加描述…（仅保存计划，不启动执行）"}
             aria-label={createDispatches ? "任务描述（作为第一次指派）" : "任务描述"}
             onChange={(event) => {
               const value = event.currentTarget.value;
@@ -1318,7 +1374,7 @@ export function TaskBoardHost({
               ariaLabel="归属父任务"
               placeholder="归属父任务"
               searchable
-              searchPlaceholder="搜索正在处理的任务"
+              searchPlaceholder="搜索主任务编号或标题"
               className="task-board-native-select task-board-parent-select"
               onValueChange={(value) => {
                 const parent = tasks.find((task) => task.id === value);
@@ -1372,80 +1428,20 @@ export function TaskBoardHost({
           </section>
 
           {/* 执行配置先属于本任务；只有显式勾选后才在创建成功时更新以后默认。 */}
-          <Card size="small" className="task-board-create-assign task-board-form-section" aria-label={createDispatches ? "第一次指派" : "Agent 与运行模式"}>
+          <Card size="small" className="task-board-create-assign task-board-form-section" aria-label={createDispatches ? "第一次指派" : "执行员工"}>
             <Flex vertical gap={4} className="task-board-create-assign-copy" style={{ marginBottom: 12 }}>
-              <strong>{createDispatches ? "第一次指派" : "Agent 与运行模式"}</strong>
+              <strong>{createDispatches ? "第一次指派" : "执行员工"}</strong>
               <span>{dispatchSelected
                 ? "不指派员工：本机决策模型给建议名单，确认后才开工"
                 : createTeam ? "有描述时会立刻交给团队，由负责人拆解分派"
-                : createEmployee ? "有描述时会立刻交给员工"
-                : createDispatches ? "有描述时会立即交给所选工具；配置仅用于本任务" : "只创建任务，不指派 Agent；执行配置保存在本任务中"}</span>
+                : createEmployee ? "默认交给所选员工；仅保存不会启动执行"
+                : createDispatches ? "有描述时会立即交给所选工具；配置仅用于本任务" : "仅保存任务的指派计划，确认派发后才启动执行"}</span>
             </Flex>
             <Flex wrap gap="small" className="task-board-create-assign-controls">
-              {providerOptions ? <IssueField label="执行对象"><WandSelect
-                value={dispatchSelected ? DISPATCH_VALUE
-                  : createEmployee ? `employee:${createEmployee.id}`
-                  : createTeam ? `team:${createTeam.id}` : issueAgentTargetValue(draft.agent)}
-                options={createDispatches
-                  ? agentTargetOptions(providerOptions, teams, employees, { includeDispatch: true })
-                  : providerOptions}
-                ariaLabel="任务执行对象"
-                className="task-board-native-select"
-                onValueChange={(value) => {
-                  if (agentTargetIsDispatch(value)) {
-                    setTeamTarget("");
-                    setEmployeeTarget("");
-                    dispatchFlow.resetResults();
-                    setDispatchSelected(true);
-                    setDraft((current) => ({ ...current, agent: { ...current.agent, kind: "structured" } }));
-                    return;
-                  }
-                  setDispatchSelected(false);
-                  dispatchFlow.resetResults();
-                  const nextTeam = agentTargetTeamId(value);
-                  const nextEmployee = agentTargetEmployeeId(value);
-                  setTeamTarget(nextTeam);
-                  setEmployeeTarget(nextEmployee);
-                  if (nextTeam || nextEmployee) {
-                    setDraft((current) => ({ ...current, agent: { ...current.agent, kind: "structured" } }));
-                    return;
-                  }
-                  setDraft((current) => ({
-                    ...current,
-                    agent: withIssueAgentTarget(current.agent, value, catalog),
-                  }));
-                }}
-              /></IssueField> : <span role="status">正在加载工具列表…</span>}
-              {createTeam || createEmployee || dispatchSelected ? null : <>
-              <IssueField label="模型"><WandSelect
-                value={draft.agent.model}
-                options={issueAgentModelOptions(catalog, draft.agent.provider)}
-                ariaLabel="任务执行模型"
-                searchable
-                searchPlaceholder="搜索模型"
-                className="task-board-native-select"
-                onValueChange={(model) => setDraft((current) => ({ ...current, agent: { ...current.agent, model } }))}
-              /></IssueField>
-              <IssueField label="思考深度"><WandSelect
-                value={draft.agent.thinkingEffort}
-                options={issueAgentEffortOptions(draft.agent.provider, catalog, draft.agent.model, draft.agent.thinkingEffort)}
-                ariaLabel="任务思考深度"
-                className="task-board-native-select"
-                onValueChange={(effort) => setDraft((current) => ({
-                  ...current,
-                  agent: { ...current.agent, thinkingEffort: effort as WandTaskAgent["thinkingEffort"] },
-                }))}
-              /></IssueField>
-              <IssueField label="运行模式"><WandSelect
-                value={draft.agent.mode}
-                options={issueAgentModeOptions(draft.agent.provider)}
-                ariaLabel="运行模式"
-                className="task-board-native-select"
-                onValueChange={(mode) => {
-                  setDraft((current) => ({ ...current, agent: { ...current.agent, mode: mode as WandTaskAgent["mode"] } }));
-                }}
-              /></IssueField>
-              </>}
+              <AgentFields agent={draft.agent} catalog={catalog} providerOptions={providerOptions} ariaPrefix="任务" employeeOverride={employeeOverride} teams={teams} teamId={teamTarget} employees={employees} employeeId={employeeTarget} onTeamChange={setTeamTarget} onEmployeeChange={setEmployeeTarget}
+                onDispatchSelect={() => { setEmployeeTarget(""); setTeamTarget(""); setDispatchSelected(true); dispatchFlow.resetResults(); }}
+                onChange={(agent, _subject, override) => { setEmployeeOverride(override === true); setDraft(current => ({ ...current, agent })); }}/>
+
             </Flex>
             {!createTeam && !createEmployee && !dispatchSelected && draft.agent.mode === "full-access" && <Alert type="warning" showIcon
               className="task-board-create-permission-note" title="完全访问（Full access）"
@@ -1483,6 +1479,8 @@ export function TaskBoardHost({
           >
             <WandIcon name={createExpanded ? "chevron" : "up"}/>
           </WandIconButton>
+          <WandSwitch checked={saveAndDispatch} onCheckedChange={value => { setSaveAndDispatch(value); if (!value) setDispatchSelected(false); }} ariaLabel="保存并派发"/>
+          <Typography.Text>{saveAndDispatch ? "保存并派发（新建执行）" : "仅保存计划"}</Typography.Text>
           {dispatchSelected ? <div className="task-board-create-submit-slot">
             <TeamDispatchActionButton
               flow={dispatchFlow}
@@ -1498,9 +1496,9 @@ export function TaskBoardHost({
             kind="primary"
             type="submit"
             className="task-board-create-submit"
-            disabled={(!draft.title.trim() && !draft.description.trim()) || busyId === "__create__"}
+            disabled={(!draft.title.trim() && !draft.description.trim()) || (saveAndDispatch && !draft.description.trim()) || busyId === "__create__"}
           >
-            {busyId === "__create__" ? "正在保存…" : createDispatches && draft.description.trim() ? "创建并指派" : "创建任务"}
+            {busyId === "__create__" ? "正在保存…" : saveAndDispatch && draft.description.trim() ? "保存并派发" : "保存任务"}
           </WandButton>}
         </Flex>
       </TaskForm>
@@ -1518,6 +1516,7 @@ function IssueDetail({
   teamId,
   employees,
   employeeId,
+  employeeOverride,
   teamRunRefresh,
   onTeamChange,
   onEmployeeChange,
@@ -1543,6 +1542,7 @@ function IssueDetail({
   teamId: string;
   employees: ReturnType<typeof useSiliconEmployees>["employees"];
   employeeId: string;
+  employeeOverride: boolean;
   teamRunRefresh: number;
   onTeamChange(teamId: string): void;
   onEmployeeChange(employeeId: string): void;
@@ -1552,8 +1552,8 @@ function IssueDetail({
   parentOptions: ReturnType<typeof issueParentOptions>;
   onOpenTask(id: string): void;
   onCreateChild(): void;
-  onAgentChange(agent: WandTaskAgent, subject?: TaskExecutionSubject): void;
-  onPatch(patch: Parameters<typeof taskBoardRepository.update>[1]): void;
+  onAgentChange(agent: WandTaskAgent, subject?: TaskExecutionSubject, employeeOverride?: boolean): void;
+  onPatch(patch: Parameters<typeof taskBoardRepository.update>[1]): Promise<boolean>;
   onDispatch(prompt: string): void;
   onRemove(): void;
   onOpenSession?: (sessionId: string) => void;
@@ -1563,7 +1563,7 @@ function IssueDetail({
   const [labelDraft, setLabelDraft] = React.useState(task.labels.join(", "));
   const hasAgents = task.sessions.length > 0;
   const [composeOpen, setComposeOpen] = React.useState(!hasAgents);
-  const [composePrompt, setComposePrompt] = React.useState("");
+  const [composePrompt, setComposePrompt] = React.useState(() => taskDispatchDrafts.get(task.id) ?? "");
   const knownLabels = collectIssueLabels([task]);
   const labelKey = task.labels.join("\0");
   const workspaceSelectOptions = React.useMemo(() => {
@@ -1590,13 +1590,13 @@ function IssueDetail({
   React.useEffect(() => {
     const assigned = sessionCount > 0;
     setComposeOpen(!assigned);
-    setComposePrompt("");
+    setComposePrompt(taskDispatchDrafts.get(task.id) ?? "");
   }, [task.id, sessionCount]);
 
   React.useEffect(() => {
     if (composeRequest?.id !== task.id) return;
     setComposeOpen(true);
-    setComposePrompt("");
+    setComposePrompt(taskDispatchDrafts.get(task.id) ?? "");
   }, [composeRequest, task.id]);
 
   return <Flex vertical gap="middle" className="task-board-detail" aria-label="任务详情">
@@ -1608,7 +1608,7 @@ function IssueDetail({
           </WandButton>}
           <TaskTextArea
             className="resize-none task-board-detail-title"
-            rows={1}
+            autoSize={{ minRows: 1 }}
             value={title}
             aria-label="任务标题"
             disabled={busy}
@@ -1621,24 +1621,25 @@ function IssueDetail({
               onPatch({ title: title.trim() });
             }}
           />
+          <TaskDescription key={task.id} description={task.description} busy={busy} onSave={value => onPatch({ description: value })}/>
+          <TaskAcceptanceEditor key={`acceptance-${task.id}`} task={task} children={children} busy={busy} onSave={acceptance => onPatch({ acceptance })}/>
+          <TaskComments key={`comments-${task.id}`} taskId={task.id} updatedAt={task.updatedAt}/>
           <TaskBoardAgentSessionList
             sessions={task.sessions}
             assigned={task.agent}
+            subject={task.executionSubject}
+            assignee={task.assignedExecutor}
             catalog={catalog}
             onOpenSession={onOpenSession}
           />
-          {(children.length > 0 || task.status === "doing") && <section className="task-board-children" aria-label="子任务">
+          {(children.length > 0 || !task.parentTaskId) && <section className="task-board-children" aria-label="子任务">
             <div className="task-board-children-head">
               <strong>子任务 <span>{children.length}</span></strong>
-              {task.status === "doing" && <WandButton kind="ghost" size="small" onClick={onCreateChild}>
-                <WandIcon name="plus" size={14} slot="start"/>派发子任务
+              {!task.parentTaskId && task.status !== "archived" && <WandButton kind="ghost" size="small" onClick={onCreateChild}>
+                <WandIcon name="plus" size={14} slot="start"/>添加子任务
               </WandButton>}
             </div>
-            {children.map((child) => <WandButton kind="ghost" key={child.id} type="button" className="task-board-child-row" onClick={() => onOpenTask(child.id)}>
-              <TaskBoardStatusGlyph status={child.status}/>
-              <span>{child.title}</span>
-              <small>{child.identifier}</small>
-            </WandButton>)}
+            <TaskGoalChildren task={task} tasks={children} onOpen={onOpenTask}/>
           </section>}
           {composeOpen ? <Card size="small" className="task-board-native-assign" aria-label="指派 Agent">
             <Flex vertical gap={4} className="task-board-native-assign-head" style={{ marginBottom: 12 }}>
@@ -1650,14 +1651,15 @@ function IssueDetail({
               rows={5}
               value={composePrompt}
               placeholder={teams?.some((item) => item.id === teamId)
-                ? "输入这次交给团队的提示词。任务卡里的旧描述不会自动带上。"
+                ? "输入本轮交给团队的范围，确认时预览任务快照与主目标约束。"
                 : employees.some((item) => item.id === employeeId)
-                  ? "输入这次交给员工的任务。任务卡里的旧描述不会自动带上。"
-                : "输入这次派给 Agent 的提示词…"}
+                  ? "输入本轮交给员工的范围，确认时预览任务快照与主目标约束。"
+                : "输入本轮执行范围，确认后随任务快照发送…"}
               aria-label="派发提示词"
               disabled={busy}
               onChange={(event) => {
                 const value = event.currentTarget.value;
+                taskDispatchDrafts.set(task.id, value);
                 setComposePrompt(value);
               }}
             />
@@ -1672,6 +1674,7 @@ function IssueDetail({
                 teamId={teamId}
                 employees={employees}
                 employeeId={employeeId}
+                employeeOverride={employeeOverride}
                 onTeamChange={onTeamChange}
                 onEmployeeChange={onEmployeeChange}
                 onChange={onAgentChange}
@@ -1683,7 +1686,7 @@ function IssueDetail({
                 kind="primary"
                 size="small"
                 className="task-board-native-dispatch"
-                disabled={busy || !composePrompt.trim()}
+                disabled={busy || !composePrompt.trim() || !!employeeId && !employees.some(item => item.id === employeeId && !item.archivedAt) || !!teamId && !teams?.some(item => item.id === teamId)}
                 onClick={() => onDispatch(composePrompt)}
               >
                 <WandIcon name="spark" size={14}/>
@@ -1700,7 +1703,7 @@ function IssueDetail({
               setComposeOpen(true);
             }}
           >
-            <WandIcon name="plus" size={16}/>
+            <WandIcon name="plus" size={16}/>再指派一个 Agent
           </WandButton>}
           <TaskTeamRunPanel taskId={task.id} refreshKey={teamRunRefresh} onOpenSession={onOpenSession}/>
         </Flex>
@@ -1749,7 +1752,7 @@ function IssueDetail({
               ariaLabel="归属父任务"
               placeholder="归属父任务"
               searchable
-              searchPlaceholder="搜索正在处理的任务"
+              searchPlaceholder="搜索主任务编号或标题"
               className="task-board-native-select task-board-parent-select"
               disabled={busy}
               onValueChange={(value) => onPatch({ parentTaskId: value === ISSUE_NO_PARENT ? null : value })}

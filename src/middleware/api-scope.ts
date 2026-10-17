@@ -29,6 +29,8 @@ export const PUBLIC_API_PREFIXES: readonly string[] = [
   "/api/logout",
   "/api/session-check",
   "/api/core-status",
+  // Only key discovery and encrypted POST ingress are public; reports are admin-only below.
+  "/api/feedback/key",
   "/api/android-apk-update",
   "/api/macos-app-update",
   "/api/macos-dmg-update",
@@ -37,6 +39,8 @@ export const PUBLIC_API_PREFIXES: readonly string[] = [
 
 export const API_ROUTE_RULES: readonly ApiRouteRule[] = [
   // ── 管理员 ──
+  { prefix: "/api/feedback/client", scope: "sessions" },
+  { prefix: "/api/feedback", scope: "admin" },
   { prefix: "/api/set-password", scope: "admin" },
   { prefix: "/api/restart", scope: "admin" },
   { prefix: "/api/app-connect-code", scope: "admin" },

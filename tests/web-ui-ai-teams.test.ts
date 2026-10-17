@@ -231,15 +231,16 @@ test("team page edits members with the shared agent fields; only one leader", ()
   assert.match(page, /patch\.isLeader \? \{ \.\.\.member, isLeader: false \} : member/);
 });
 
-test("task assignment offers CLI and teams as distinct targets", () => {
+test("task assignment lists teams before advanced CLI targets while preserving distinct identities", () => {
   const team = { id: "t1", name: "全栈" } as AiTeam;
   const options = agentTargetOptions([{ value: "claude", label: "Claude" }], [team]);
-  assert.deepEqual(options.map((option) => option.value), ["claude", "team:t1"]);
-  assert.equal(options[1]!.label, "团队 · 全栈");
+  assert.deepEqual(options.map((option) => option.value), ["team:t1", "claude"]);
+  assert.equal(options[0]!.label, "团队 · 全栈");
   assert.equal(agentTargetTeamId("team:t1"), "t1");
   assert.equal(agentTargetTeamId("claude"), "");
   const board = read("react/issues/task-board-host.tsx");
-  assert.match(board, /team \? dispatchTeam\(selected, team, prompt\)/);
+  assert.match(board, /buildTaskDispatchPrompt\(selected, tasks\.find/);
+  assert.match(board, /team \? dispatchTeam\(selected, team, executionPrompt\)/);
   assert.match(board, /subject: \{ type: "team", id: team\.id \}/);
 });
 

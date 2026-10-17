@@ -12,8 +12,8 @@ export class WandCliApi {
     return this.request<T>("GET", pathname);
   }
 
-  async post<T>(pathname: string, body: unknown): Promise<T> {
-    return this.request<T>("POST", pathname, body);
+  async post<T>(pathname: string, body: unknown, headers?: Record<string, string>): Promise<T> {
+    return this.request<T>("POST", pathname, body, headers);
   }
 
   async patch<T>(pathname: string, body: unknown): Promise<T> {
@@ -26,14 +26,14 @@ export class WandCliApi {
 
   private async login(): Promise<void> {
     const result = await this.rawRequest("POST", "/api/login", { password: this.config.password });
-    if (result.status < 200 || result.status >= 300) throw new Error(`Wand 登录失败 (HTTP ${result.status})`);
+    if (result.status < 200 || result.status >= 300) throw Object.assign(new Error(`Wand 登录失败 (HTTP ${result.status})`), { status: result.status });
     this.cookie = result.cookies.map((value) => value.split(";", 1)[0]).join("; ");
     if (!this.cookie) throw new Error("Wand 服务未返回登录会话。");
   }
 
-  private async request<T>(method: "GET" | "POST" | "PATCH" | "DELETE", pathname: string, body?: unknown): Promise<T> {
+  private async request<T>(method: "GET" | "POST" | "PATCH" | "DELETE", pathname: string, body?: unknown, headers?: Record<string, string>): Promise<T> {
     if (!this.cookie) await this.login();
-    const result = await this.rawRequest(method, pathname, body, this.cookie);
+    const result = await this.rawRequest(method, pathname, body, this.cookie, headers);
     let parsed: unknown = {};
     try { parsed = result.body ? JSON.parse(result.body) : {}; } catch {
       throw new Error(`Wand 响应不是有效 JSON (HTTP ${result.status})；${method === "GET" ? "无法确认结果。" : "请求可能已接受，请回读核对，不要重复提交。"}`);
@@ -42,7 +42,7 @@ export class WandCliApi {
       ? (parsed as { error: string }).error
       : null;
     if (result.status < 200 || result.status >= 300 || error) {
-      throw new Error(`Wand 请求失败 (HTTP ${result.status})${error ? `：${error}` : ""}`);
+      throw Object.assign(new Error(`Wand 请求失败 (HTTP ${result.status})${error ? `：${error}` : ""}`), { status: result.status });
     }
     return parsed as T;
   }
@@ -52,6 +52,7 @@ export class WandCliApi {
     pathname: string,
     body?: unknown,
     cookie?: string,
+    headers?: Record<string, string>,
   ): Promise<{ status: number; body: string; cookies: string[] }> {
     return new Promise((resolve, reject) => {
       const protocol = this.config.https ? "https:" : "http:";
@@ -63,6 +64,7 @@ export class WandCliApi {
         rejectUnauthorized: false,
         timeout: 30_000,
         headers: {
+          ...headers,
           Accept: "application/json",
           ...(payload ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } : {}),
           ...(cookie ? { Cookie: cookie } : {}),

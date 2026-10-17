@@ -180,7 +180,12 @@ test("managed skill installation is shared, idempotent and preserves user edits 
   const first = await installDecisionSkill(config, undefined, home);
   assert.equal(first.installed.length, 3);
   assert.equal(new Set(first.installed.map((file) => realpathSync(file))).size, 1);
-  assert.deepEqual(await installDecisionSkill(config, undefined, home), first);
+  assert.deepEqual(first.changed.sort(), ["SKILL.md", "scripts/decide.mjs"]);
+  assert.equal(first.linked.length, 3);
+  const reinstalled = await installDecisionSkill(config, undefined, home);
+  assert.deepEqual(reinstalled.installed, first.installed);
+  assert.deepEqual(reinstalled.changed, []);
+  assert.deepEqual(reinstalled.linked, []);
   const skill = join(config, "skills/wand-decision/SKILL.md");
   writeFileSync(skill, readFileSync(skill, "utf8") + "\nUSER EDIT\n");
   await assert.rejects(installDecisionSkill(config, undefined, home), /用户修改/);

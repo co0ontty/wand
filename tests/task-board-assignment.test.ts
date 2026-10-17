@@ -86,3 +86,11 @@ test("unavailable localStorage and server-side rendering remain usable", () => {
     assert.doesNotThrow(() => writeIssueAssignment(recent));
   });
 });
+
+
+test("新任务优先默认员工，失效的已指派身份不得静默改为工具", () => {
+  const available = { employees: [{ id: "e_wand_default" }], teams: [] };
+  assert.deepEqual(resolveIssueAssignment({}, null, defaults, available).subject, { type: "employee", id: "e_wand_default" });
+  const subject = { type: "employee" as const, id: "missing" };
+  assert.deepEqual(resolveIssueAssignment({ executionSubject: subject }, null, defaults, available).subject, subject);
+});

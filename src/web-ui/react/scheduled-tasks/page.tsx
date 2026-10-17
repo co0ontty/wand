@@ -1,6 +1,7 @@
 import * as React from "react";
-import { Alert, DatePicker, Empty, Flex, Form, Input, Spin, Switch, TimePicker, Tooltip, Typography } from "antd";
+import { Alert, DatePicker, Empty, Flex, Form, Input, InputNumber, Spin, Switch, TimePicker, Tooltip, Typography } from "antd";
 import dayjs from "dayjs";
+import { nextScheduledTime, parseTaskSchedule } from "../../../scheduled-task-time.js";
 import type { ScheduledTaskInput, ScheduledTaskSummary, TaskSchedule, ScheduledTaskCalendarResponse, ScheduledTaskRunFactView } from "../../../scheduled-task-types.js";
 import { useSiliconEmployees } from "../agents/employee-repository.js";
 import { createRequestId, HttpResponseError } from "../http-adapter.js";
@@ -21,7 +22,7 @@ import { ScheduledPresentationProvider } from "./presentation-context";
 import { NextTaskPanel, TaskAgenda } from "./agenda-view";
 import { ScheduleCalendar } from "./calendar-view";
 import { ScheduledTaskDetails } from "./task-detail";
-import { scheduleInputError, scheduleSaveUnknown, scheduleTimeZones, WEEKDAYS } from "./model";
+import { scheduleInputError, scheduleSaveUnknown, scheduleTimeZones, scheduleLabel, scheduleDateInZone, WEEKDAYS } from "./model";
 import { scheduledTasksRepository, type ScheduledTaskPatch } from "./repository";
 import { scheduledTaskStyles } from "./styles";
 
@@ -30,6 +31,7 @@ if (typeof document !== "undefined") installStyleSheet("wand-scheduled-task-styl
 export interface ScheduledTasksPageProps {
   visible: boolean;
   view?: "list" | "calendar";
+  onViewChange?(view: "list" | "calendar"): void;
   calendarMode?: "month" | "week";
   onCalendarModeChange?(mode: "month" | "week"): void;
   sidebarOpen?: boolean;
@@ -57,9 +59,19 @@ function sameSavedInput(task: ScheduledTaskSummary, patch: ScheduledTaskPatch): 
 }
 
 /** Keep the page and its draft mounted; only the visible page owns polling. */
-export function ScheduledTasksPage({ visible, view = "list", calendarMode, onCalendarModeChange, sidebarOpen, onBack, onOpenSidebar, onOpenSession }: ScheduledTasksPageProps): React.ReactElement {
+export function ScheduledTasksPage({ visible, view: controlledView, onViewChange, calendarMode, onCalendarModeChange, sidebarOpen, onBack, onOpenSidebar, onOpenSession }: ScheduledTasksPageProps): React.ReactElement {
+  const [localView, setLocalView] = React.useState<"list" | "calendar">("list");
+  const view = controlledView ?? localView;
   const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   const reduced = useReducedMotion();
+  const [listHidden, setListHidden] = React.useState(view !== "list");
+  const [calendarHidden, setCalendarHidden] = React.useState(view !== "calendar");
+  const [calendarVisited, setCalendarVisited] = React.useState(view === "calendar");
+  React.useLayoutEffect(() => {
+    if (view === "list") setListHidden(false);
+    else { setCalendarHidden(false); setCalendarVisited(true); }
+    if (reduced) { setListHidden(view !== "list"); setCalendarHidden(view !== "calendar"); }
+  }, [view, reduced]);
   const [localCalendarMode, setLocalCalendarMode] = React.useState<"month" | "week">("month");
   const [clock, setClock] = React.useState(() => new Date());
   const [query, setQuery] = React.useState("");
@@ -176,14 +188,16 @@ export function ScheduledTasksPage({ visible, view = "list", calendarMode, onCal
       const shell = pageRef.current?.querySelector<HTMLElement>(".scheduled-editor-shell");
       shell?.scrollIntoView({ block: "start", behavior: "instant" });
       if (input && getComputedStyle(input).visibility === "visible") focus();
-      else void Promise.allSettled(shell?.getAnimations().map(animation => animation.finished) ?? []).then(focus);
+      // Inputs can still inherit a visibility transition after the shell itself
+      // has settled (including Ant's reduced-motion lifecycle).
+      else void Promise.allSettled(shell?.getAnimations({ subtree: true }).map(animation => animation.finished) ?? []).then(focus);
     });
     document.addEventListener("pointerdown", cancel, true); document.addEventListener("keydown", cancel, true);
     return () => { cancelled = true; cancelAnimationFrame(frame); document.removeEventListener("pointerdown", cancel, true); document.removeEventListener("keydown", cancel, true); };
   }, [visible, mode, formFocus]);
   React.useEffect(() => {
-    if (visible && view === "calendar") { setFilter("all"); setQuery(""); setExpanded([]); setMenuId(""); setCancelId(""); setMode("list"); }
-  }, [visible, view]);
+    setExpanded([]); setMenuId(""); setCancelId(""); setMode("list");
+  }, [view]);
 
   const mergeTask = (task: ScheduledTaskSummary): void => {
     setTasks(previous => [task, ...previous.filter(item => item.id !== task.id)]);
@@ -270,7 +284,16 @@ export function ScheduledTasksPage({ visible, view = "list", calendarMode, onCal
     if (busyTask) return;
     setBusyTask(task.id); setActionError("");
     invalidateRead();
-    try { const updated = await scheduledTasksRepository.update(task.id, { revision: task.revision, ...patch }); invalidateRead(); mergeTask(updated); setCancelId(""); if (viewRef.current === "calendar" && expandedRef.current.includes(task.id)) setExpanded([]); void refreshLatest.current(); }
+    try {
+      const updated = await scheduledTasksRepository.update(task.id, { revision: task.revision, ...patch });
+      invalidateRead(); mergeTask(updated);
+      // This page's own pause/resume changed only lifecycle fields. Keep its editor
+      // revision current without replacing the separately held draft or bypassing remote conflicts.
+      setEditing(previous => previous?.id === updated.id ? updated : previous);
+      setCancelId("");
+      if (viewRef.current === "calendar" && expandedRef.current.includes(task.id)) setExpanded([]);
+      void refreshLatest.current();
+    }
     catch (cause) {
       setActionError(cause instanceof HttpResponseError && cause.status === 409 ? "计划已在其他页面修改，请核对最新状态后重试。" : errorText(cause));
       void refreshLatest.current();
@@ -313,11 +336,11 @@ export function ScheduledTasksPage({ visible, view = "list", calendarMode, onCal
       <WandButton size="small" disabled={!!busyTask} onClick={() => setCancelId("")}>保留计划</WandButton>
     </div>}
   </>;
-  const pageTitle = view === "calendar" ? "全局日历" : "定时任务";
+  const pageTitle = "定时";
   return <ScheduledPresentationProvider employees={employeeData.employees} now={clock} timeZone={localZone}>
     <section ref={pageRef} className="scheduled-tasks-page" aria-label={pageTitle} hidden={!visible} inert={!visible} style={{ display: visible ? undefined : "none" }}>
       <Flex component="header" className="scheduled-tasks-header" align="center" justify="space-between" gap="small">
-        <Flex align="center" gap="small">
+        <Flex className="scheduled-tasks-heading" align="center" gap="small">
           {onOpenSidebar ? <WandIconButton aria-label={sidebarOpen ? "关闭列表" : "打开列表"} onClick={onOpenSidebar}><SidebarToggleIcon open={!!sidebarOpen}/></WandIconButton> : null}
           <WandIconButton aria-label={mode === "form" ? `返回${pageTitle}` : "返回会话"} onClick={back} disabled={saving || !!busyTask}><WandIcon name="back"/></WandIconButton>
           <h1 ref={titleRef} tabIndex={-1}>{pageTitle}</h1>
@@ -327,6 +350,9 @@ export function ScheduledTasksPage({ visible, view = "list", calendarMode, onCal
           onClick={() => mode === "form" ? back() : void startNew()}><ConversationMorphIcon from="plus" to="close" active={mode === "form"}/><span className="scheduled-create-label">{mode === "form" ? "收起编辑" : "新建定时任务"}</span></WandButton>
       </Flex>
       <div className="scheduled-tasks-body"><div className="scheduled-tasks-content">
+        <div className="scheduled-view-toolbar"><WandStretchTabs ariaLabel="日程视图" value={view}
+          onValueChange={value => (onViewChange ?? setLocalView)(value as "list" | "calendar")}
+          tabs={[{ value: "calendar", label: "日历" }, { value: "list", label: "定时任务" }]}/></div>
         {actionError && <Alert type="error" showIcon title={actionError} role="alert" closable onClose={() => setActionError("")}/>}
         {error && <Alert type="error" showIcon title={error} action={<WandButton size="small" onClick={() => void refresh()}>重新读取</WandButton>} role="alert"/>}
         {employeeData.error && <Alert type="warning" showIcon title="员工资料暂时无法读取，日程仍保留。头像使用公共回退显示。"/>}
@@ -339,20 +365,27 @@ export function ScheduledTasksPage({ visible, view = "list", calendarMode, onCal
               workspaceFieldError={workspaceFieldError} workspaceTrigger={workspaceTrigger} onSave={() => void save()} onBack={back}/>
           </section>
         </div></div>
-        {view === "list" && <NextTaskPanel task={nextTask(tasks)} scene={!loaded && error ? "error" : !loaded && loading ? "loading" : "normal"}
-          hasTasks={!!tasks.length} reduced={reduced} onLocate={task => { setExpanded(previous => previous.includes(task.id) ? previous : [...previous, task.id]); }} onEdit={task => void edit(task)}/>}
         <div className="scheduled-list-toolbar">
           <WandStretchTabs ariaLabel="定时任务筛选" value={filter} onValueChange={value => { setFilter(value as Filter); setExpanded([]); setCancelId(""); setMenuId(""); }}
             tabs={[{ value: "all", label: `全部 ${loaded ? counts.all : "—"}` }, { value: "active", label: `待执行 ${loaded ? counts.active : "—"}` }, { value: "paused", label: `已暂停 ${loaded ? counts.paused : "—"}` }, { value: "finished", label: `已结束 ${loaded ? counts.finished : "—"}` }]}/>
           <div className="scheduled-search-tools"><WandSearchField value={query} onValueChange={value => { setQuery(value); setExpanded([]); setCancelId(""); }} placeholder="搜索任务或员工" label="搜索定时任务"/>
             <Tooltip title="刷新"><WandIconButton aria-label="刷新定时任务" disabled={loading} onClick={() => void refresh()}><WandIcon name="refresh"/></WandIconButton></Tooltip></div>
         </div>
-        {view === "calendar" ? <ScheduleCalendar tasks={shown} allTasks={tasks} feed={calendarFeed} loading={loading}
-          mode={calendarMode ?? localCalendarMode} onModeChange={onCalendarModeChange ?? setLocalCalendarMode} onRangeChange={onRangeChange}
-          active={visible && mode === "list"} selectedTaskId={expanded[0] ?? null} onSelectTask={selectCalendarTask} renderDetails={renderDetails} renderActions={renderActions}/>
-          : <>{!loaded && loading && <div role="status" className="scheduled-read-state"><Spin size="small"/>正在读取定时任务…</div>}
+        <div className="scheduled-schedule-view-host">
+          <div className="scheduled-schedule-view-pane" data-active={view === "calendar"} hidden={calendarHidden && view !== "calendar"} inert={view !== "calendar"} aria-hidden={view !== "calendar"}
+            onTransitionEnd={event => { if (event.target === event.currentTarget && event.propertyName === "opacity" && view !== "calendar") setCalendarHidden(true); }}>
+            {calendarVisited && <ScheduleCalendar tasks={shown} allTasks={tasks} feed={calendarFeed} loading={loading}
+              mode={calendarMode ?? localCalendarMode} onModeChange={onCalendarModeChange ?? setLocalCalendarMode} onRangeChange={onRangeChange}
+              active={visible && view === "calendar" && mode === "list"} selectedTaskId={expanded[0] ?? null} onSelectTask={selectCalendarTask} renderDetails={renderDetails} renderActions={renderActions}/>}
+          </div>
+          <div className="scheduled-schedule-view-pane scheduled-list-pane" data-active={view === "list"} hidden={listHidden && view !== "list"} inert={view !== "list"} aria-hidden={view !== "list"}
+            onTransitionEnd={event => { if (event.target === event.currentTarget && event.propertyName === "opacity" && view !== "list") setListHidden(true); }}>
+            <NextTaskPanel task={nextTask(tasks)} scene={!loaded && error ? "error" : !loaded && loading ? "loading" : "normal"}
+              hasTasks={!!tasks.length} reduced={reduced} onLocate={task => { setExpanded(previous => previous.includes(task.id) ? previous : [...previous, task.id]); }} onEdit={task => void edit(task)}/>
+            {!loaded && loading && <div role="status" className="scheduled-read-state"><Spin size="small"/>正在读取定时任务…</div>}
             {loaded && !shown.length ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={tasks.length ? "没有匹配的定时任务。" : "还没有定时任务。"}/> : <TaskAgenda tasks={shown} expanded={expanded} visited={visited} onToggle={toggleRow} renderActions={renderActions} renderDetails={renderDetails}/>}
-          </>}
+          </div>
+        </div>
         <footer className="scheduled-page-foot"><span className="scheduled-rule-note">每次执行独立创建会话；暂停或取消不停止当前执行。服务需保持运行。</span><span>{localZone}</span></footer>
       </div></div>
     </section>
@@ -388,12 +421,20 @@ function ScheduledTaskForm({ draft, onChange, editing, error, visible, saving, r
   const changePlan = (schedule: TaskSchedule): void => onChange({ ...draft, schedule });
   const changeKind = (value: string): void => {
     if (value === "once") changePlan({ kind: "once", runAt: dayjs().add(1, "hour").startOf("minute").toISOString() });
+    else if (value === "interval") changePlan({ kind: "interval", everyHours: 3,
+      startAt: dayjs().add(1, "hour").startOf("minute").toISOString(), timeZone: localZone });
     else {
-      const base = draft.schedule.kind === "once" ? { time: "09:00", timeZone: localZone } : draft.schedule;
+      const base = draft.schedule.kind === "once" || draft.schedule.kind === "interval" ? { time: "09:00", timeZone: localZone } : draft.schedule;
       changePlan(value === "weekly" ? { kind: "weekly", time: base.time, timeZone: base.timeZone, weekday: draft.schedule.kind === "weekly" ? draft.schedule.weekday : 1 }
         : { kind: "daily", time: base.time, timeZone: base.timeZone });
     }
   };
+  let preview = "请完善执行计划";
+  try {
+    const next = nextScheduledTime(parseTaskSchedule(draft.schedule), new Date());
+    const zone = draft.schedule.kind === "once" ? localZone : draft.schedule.timeZone;
+    preview = next ? `下次执行：${scheduleDateInZone(next, zone)}` : "执行时间已过去";
+  } catch { /* Incomplete fields remain editable. */ }
   return <Form layout="vertical" noValidate className="scheduled-task-form" onFinish={onSave}>
     <Typography.Paragraph type="secondary" style={{ margin: 0 }}>员工会按照自己的工具与模型配置执行提示词。每次执行都会保留对话记录。</Typography.Paragraph>
     {employeeData.error ? <Alert type="error" showIcon title={`员工列表读取失败：${employeeData.error}`} action={<WandButton size="small" onClick={employeeData.reload}>重试</WandButton>}/> : null}
@@ -424,7 +465,7 @@ function ScheduledTaskForm({ draft, onChange, editing, error, visible, saving, r
     </Form.Item>
     <div className="scheduled-task-plan-grid">
       <Form.Item label="执行计划" required><WandSelect ariaLabel="执行计划" value={draft.schedule.kind} disabled={disabled}
-        options={[{ value: "once", label: "指定时间执行一次" }, { value: "daily", label: "每天" }, { value: "weekly", label: "每周" }]}
+        options={[{ value: "once", label: "指定时间执行一次" }, { value: "interval", label: "每隔若干小时" }, { value: "daily", label: "每天" }, { value: "weekly", label: "每周" }]}
         popupOwner="scheduled-task-form" onValueChange={changeKind}/></Form.Item>
       {draft.schedule.kind === "once" ? <Form.Item label="执行日期和时间" required help={`按本机时区 ${localZone} 显示。`}>
         <DatePicker ref={dateRef} aria-label="执行日期和时间" value={draft.schedule.runAt ? dayjs(draft.schedule.runAt) : null}
@@ -433,17 +474,32 @@ function ScheduledTaskForm({ draft, onChange, editing, error, visible, saving, r
           onChange={value => changePlan({ kind: "once", runAt: value?.toISOString() || "" })}
           panelRender={panel => <div data-wand-popup-owner="scheduled-task-form">{panel}</div>}/>
       </Form.Item> : <>
-        <Form.Item label="执行时间" required><TimePicker ref={timeRef} aria-label="执行时间" format="HH:mm"
+        {draft.schedule.kind === "interval" ? <>
+          <Form.Item label="间隔小时数" required help="1–8760 的整数；每小时填 1，每3小时填 3。">
+            <InputNumber aria-label="间隔小时数" min={1} max={8760} precision={0} value={draft.schedule.everyHours} disabled={disabled}
+              onChange={value => { if (draft.schedule.kind === "interval") changePlan({ ...draft.schedule, everyHours: value ?? 0 }); }}/>
+          </Form.Item>
+          <Form.Item label="首次执行时间" required help={`按本机时区 ${localZone} 编辑；下方预览按所选时区显示。`}>
+            <DatePicker classNames={{ popup: { root: "scheduled-task-date-popup" } }} ref={dateRef} aria-label="首次执行时间" value={draft.schedule.startAt ? dayjs(draft.schedule.startAt) : null}
+              showTime={{ format: "HH:mm" }} format="YYYY-MM-DD HH:mm" disabled={disabled} open={dateOpen} onOpenChange={setDateOpen}
+              onChange={value => { if (draft.schedule.kind === "interval") changePlan({ ...draft.schedule, startAt: value?.toISOString() || "" }); }}
+              panelRender={panel => <div data-wand-popup-owner="scheduled-task-form">{panel}</div>}/>
+          </Form.Item>
+        </> : <Form.Item label="执行时间" required><TimePicker ref={timeRef} aria-label="执行时间" format="HH:mm"
           value={draft.schedule.time ? dayjs(`2000-01-01T${draft.schedule.time}`) : null} disabled={disabled}
           open={timeOpen} onOpenChange={setTimeOpen} needConfirm={false}
-          onChange={value => { if (draft.schedule.kind !== "once") changePlan({ ...draft.schedule, time: value?.format("HH:mm") || "" }); }}
-          panelRender={panel => <div data-wand-popup-owner="scheduled-task-form">{panel}</div>}/></Form.Item>
+          onChange={value => { if (draft.schedule.kind === "daily" || draft.schedule.kind === "weekly") changePlan({ ...draft.schedule, time: value?.format("HH:mm") || "" }); }}
+          panelRender={panel => <div data-wand-popup-owner="scheduled-task-form">{panel}</div>}/></Form.Item>}
         {draft.schedule.kind === "weekly" ? <Form.Item label="星期" required><WandSelect ariaLabel="执行星期" value={String(draft.schedule.weekday)} disabled={disabled}
           options={[1, 2, 3, 4, 5, 6, 0].map(weekday => ({ value: String(weekday), label: WEEKDAYS[weekday] }))}
           popupOwner="scheduled-task-form" onValueChange={weekday => { if (draft.schedule.kind === "weekly") changePlan({ ...draft.schedule, weekday: Number(weekday) }); }}/></Form.Item> : null}
         <Form.Item label="时区" required><WandSelect ariaLabel="执行时区" value={draft.schedule.timeZone} options={zones} searchable searchPlaceholder="搜索时区"
           disabled={disabled} popupOwner="scheduled-task-form" onValueChange={timeZone => { if (draft.schedule.kind !== "once") changePlan({ ...draft.schedule, timeZone }); }}/></Form.Item>
       </>}
+    </div>
+    <div role="status" aria-label="执行计划预览"><Typography.Paragraph>{scheduleLabel(draft.schedule)}</Typography.Paragraph>
+      <Typography.Paragraph>{preview}</Typography.Paragraph>
+      {draft.schedule.kind === "interval" ? <Typography.Paragraph type="secondary">从首次执行时间起按固定小时数重复，跨夏令时仍保持间隔。首次时间已过去时，从下个周期开始。暂停后恢复沿用原时间锚点；服务停机漏期合并补跑一次，上次未结束则跳过本次。</Typography.Paragraph> : null}
     </div>
     <Flex gap="small" className="scheduled-task-form-actions"><WandButton className="scheduled-task-save" kind="primary" type="submit" loading={saving} disabled={saving || result || !unknown && (employeeData.loading || !!employeeData.error || workspaceLoading || !!workspaceError)}>
       {saving ? "正在保存…" : result ? "已保存" : unknown ? "确认保存结果" : editing?.schedule.kind === "once" && !editing.nextRunAt ? "保存并重新安排" : editing ? "保存修改" : "创建定时任务"}</WandButton>

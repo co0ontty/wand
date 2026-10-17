@@ -1,9 +1,12 @@
 import * as React from "react";
 import { Alert, Button, Flex, Form, Input, Spin, Typography } from "antd";
 import { WandBrandMark, WandIcon } from "../ui";
+import { isWebLoginTicket } from "../../login-credential.js";
 
 /** Credentials remain in the native input, consumed by the existing login handler. */
 export function LoginForm({ checking, switchServer, visual, httpHref = "/", serverLabel }: { checking: boolean; switchServer: boolean; visual?: React.ReactNode; httpHref?: string; serverLabel?: string }): React.ReactElement {
+  const [ticketCredential, setTicketCredential] = React.useState(false);
+  const [passwordVisible, setPasswordVisible] = React.useState(false);
   return <main className="login-page">
     <div className="login-layout">
       <header className="login-brand"><WandBrandMark style={{ width: 36, height: 36 }}/><span>Wand</span></header>
@@ -16,7 +19,7 @@ export function LoginForm({ checking, switchServer, visual, httpHref = "/", serv
       <section className="login-right" aria-labelledby="login-form-title" aria-busy={checking}>
         <div className="login-form-heading">
           <Typography.Title id="login-form-title" level={2}>{checking ? "正在恢复会话" : "欢迎回来"}</Typography.Title>
-          <Typography.Paragraph type="secondary">{checking ? "正在检查本地登录会话，请稍候。" : "使用当前 Wand 服务的访问密码继续。"}</Typography.Paragraph>
+          <Typography.Paragraph type="secondary">{checking ? "正在检查本地登录会话，请稍候。" : "输入访问密码，继续你的工作。"}</Typography.Paragraph>
         </div>
         {serverLabel && <Flex className="login-server" align="center" gap={12}>
           <WandIcon name="server" size={18}/><div><Typography.Text type="secondary">当前服务</Typography.Text><div className="login-server-address" title={serverLabel}>{serverLabel}</div></div>
@@ -26,7 +29,7 @@ export function LoginForm({ checking, switchServer, visual, httpHref = "/", serv
             <input name="username" autoComplete="username" value="wand" readOnly tabIndex={-1} aria-hidden="true" style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }}/>
             <div>
               <Form.Item label="访问密码" layout="vertical" htmlFor="password" style={{ margin: 0 }}>
-                <Input.Password id="password" size="large" placeholder="输入访问密码" autoComplete="current-password" aria-describedby="password-hint login-error" aria-invalid="false"/>
+                <Input.Password id="password" size="large" placeholder="输入访问密码" autoComplete={ticketCredential ? "off" : "current-password"} visibilityToggle={{ visible: !ticketCredential && passwordVisible, onVisibleChange: visible => setPasswordVisible(!ticketCredential && visible) }} onChange={event => setTicketCredential(isWebLoginTicket(event.target.value))} aria-describedby="password-hint login-error" aria-invalid="false"/>
               </Form.Item>
               <Typography.Paragraph id="password-hint" type="secondary" className="login-password-hint">密码由当前服务验证，不会保存在此页面。</Typography.Paragraph>
               <div className="login-feedback" aria-live="polite"><Typography.Paragraph id="login-error" type="danger" className="hidden" role="alert"/></div>

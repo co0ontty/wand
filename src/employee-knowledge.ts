@@ -55,6 +55,7 @@ export function rememberExplicitEmployeeRequest(storage: WandStorage, employeeId
 export function startEmployeeKnowledgeRunner(
   storage: WandStorage, runner: StructuredRunnerAdapter, context: StructuredRunnerContext,
   observer: StructuredRunnerObserver,
+  webLoginGrant?: (sessionId: string, employeeId: string) => { proof: string; revoke(): void },
 ): StructuredRunnerExecution {
   const employeeId = context.session.employeeId;
   // Strip any inherited credentials from the parent environment (including nested Wand runs).
@@ -62,6 +63,7 @@ export function startEmployeeKnowledgeRunner(
   const env: NodeJS.ProcessEnv = { ...context.env, WAND_SESSION_ID: context.session.id };
   delete env.WAND_KNOWLEDGE_DB;
   delete env.WAND_KNOWLEDGE_TOKEN;
+  delete env.WAND_WEB_LOGIN_PROOF;
   if (!employeeId) return runner.start({ ...context, env }, observer);
   if (!storage.getSiliconEmployee(employeeId)) {
     return runner.start({ ...context, env, session: { ...context.session,
@@ -69,16 +71,24 @@ export function startEmployeeKnowledgeRunner(
     } }, observer);
   }
   const token = storage.issueEmployeeKnowledgeAccess(context.session.id, employeeId);
-  const cleanup = (): void => { try { storage.revokeEmployeeKnowledgeAccess(token); } catch { /* storage may be closing */ } };
+  let loginGrant: { proof: string; revoke(): void } | undefined;
+  const cleanup = (): void => {
+    loginGrant?.revoke();
+    try { storage.revokeEmployeeKnowledgeAccess(token); } catch { /* storage may be closing */ }
+  };
   try {
+    // Optional Web login must not prevent an otherwise valid employee execution.
+    try { loginGrant = webLoginGrant?.(context.session.id, employeeId); } catch { /* CLI reports unavailable when explicitly used. */ }
     const receipt = (!context.session.automationId || context.session.automationId.startsWith("wand-task:"))
       ? rememberExplicitEmployeeRequest(storage, employeeId, context.prompt) : null;
     const runtimeSystemPrompt = [context.session.runtimeSystemPrompt, `当前 Wand 会话 ID：${context.session.id}（非凭据；创建后续检查计划时用作精确续接目标）。`, receipt, knowledgeContext(storage, employeeId, context.prompt)]
       .filter(Boolean).join("\n\n");
     const execution = runner.start({ ...context,
       session: { ...context.session, runtimeSystemPrompt },
-      env: { ...env, WAND_KNOWLEDGE_DB: storage.databasePath(), WAND_KNOWLEDGE_TOKEN: token },
+      env: { ...env, WAND_KNOWLEDGE_DB: storage.databasePath(), WAND_KNOWLEDGE_TOKEN: token,
+        ...(loginGrant ? { WAND_WEB_LOGIN_PROOF: loginGrant.proof } : {}) },
+
     }, observer);
-    return { ...execution, completion: execution.completion.finally(cleanup), interrupt: () => execution.interrupt() };
+    return { ...execution, completion: execution.completion.finally(cleanup), interrupt: () => { loginGrant?.revoke(); execution.interrupt(); } };
   } catch (error) { cleanup(); throw error; }
 }

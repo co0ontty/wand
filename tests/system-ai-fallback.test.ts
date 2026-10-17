@@ -6,7 +6,7 @@ import { delimiter, join } from "node:path";
 import test from "node:test";
 
 import {
-  callConfiguredAiText, generateCommitMessageOnly, QuickCommitError, runTagHead,
+  callConfiguredAiText, generateCommitMessageOnly, QuickCommitError, runQuickCommitWithFallback, runTagHead,
 } from "../src/git-quick-commit.js";
 import { optimizePrompt } from "../src/prompt-optimizer.js";
 import { generateSessionTopic } from "../src/session-topic.js";
@@ -94,6 +94,26 @@ for (const [provider, failure] of failures) {
         provider, model: "first",
       }), (error: unknown) => error instanceof QuickCommitError
         && error.code === "CLAUDE_CLI_FAILED" && error.message.includes(FAILURE));
+    });
+  });
+}
+
+for (const status of ["error", "completed"]) {
+  test(`OpenCode pure-text rejects a ${status} tool attempt even with valid text`, async () => {
+    await withCliOutputs({
+      first: [
+        { type: "tool_use", part: { tool: "bash", state: { status } } },
+        ...textEvents("opencode", "must not be used"),
+      ],
+      second: textEvents("pi", SUCCESS),
+    }, async (root, attempts) => {
+      await assert.rejects(callConfiguredAiText(REQUEST, root, "", {
+        provider: "opencode", model: "first",
+      }), (error: unknown) => error instanceof QuickCommitError && error.message.includes("尝试使用工具"));
+      assert.equal(await callConfiguredAiText(REQUEST, root, "", {
+        cliCandidates: [{ provider: "opencode", model: "first" }, { provider: "pi", model: "second" }],
+      }), SUCCESS);
+      assert.deepEqual(attempts(), ["first", "first", "second"]);
     });
   });
 }
@@ -256,4 +276,50 @@ test("an empty cleaned optimized prompt tries the next candidate", async () => {
       }), "请修复登录页错误提示。");
       assert.deepEqual(attempts(), ["first", "second"]);
     });
+});
+
+test("git execution fallback walks the system employee chain instead of one direct model", async () => {
+  const root = mkdtempSync(join(tmpdir(), "wand-git-fallback-chain-"));
+  const bin = join(root, "bin");
+  const repo = join(root, "repo");
+  const marker = join(root, "attempts");
+  mkdirSync(bin);
+  mkdirSync(repo);
+  execFileSync("git", ["init"], { cwd: repo });
+  writeFileSync(join(repo, "note.txt"), "x\n");
+    writeFileSync(join(repo, ".git", "hooks", "pre-commit"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  writeFileSync(join(bin, "pi"), `#!${process.execPath}\n` + [
+    'const fs = require("node:fs");',
+    'const { execFileSync } = require("node:child_process");',
+    'const args = process.argv.slice(2);',
+    'const model = args[args.indexOf("--model") + 1];',
+    `fs.appendFileSync(${JSON.stringify(marker)}, model + "\\n");`,
+    'process.stdin.resume();',
+    'process.stdin.on("end", () => {',
+    '  if (model !== "second") process.exit(1);',
+    `  execFileSync("git", ["-c", "core.hooksPath=/dev/null", "-c", "user.email=t@example.com", "-c", "user.name=t", "add", "-A"], { cwd: ${JSON.stringify(repo)} });`,
+    `  execFileSync("git", ["-c", "core.hooksPath=/dev/null", "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-m", "ok"], { cwd: ${JSON.stringify(repo)} });`,
+    '});',
+  ].join("\n"), { mode: 0o755 });
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${bin}${delimiter}${previousPath ?? ""}`;
+  try {
+    const result = await runQuickCommitWithFallback({
+      cwd: repo,
+      language: "中文",
+      autoMessage: false,
+      customMessage: "不应被内置提交使用",
+      employeeChannelOnly: true,
+      cliCandidates: [
+        { provider: "pi", model: "first", thinkingEffort: "off" },
+        { provider: "opencode", engine: "sdk", model: "sdk-only" },
+        { provider: "pi", model: "second", thinkingEffort: "off" },
+      ],
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(readFileSync(marker, "utf8").trim().split("\n"), ["first", "second"]);
+  } finally {
+    process.env.PATH = previousPath;
+    rmSync(root, { recursive: true, force: true });
+  }
 });

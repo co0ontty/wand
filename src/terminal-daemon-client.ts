@@ -374,7 +374,8 @@ export class TerminalDaemonClient implements TerminalHost, StructuredExecHost {
       }
       // Run exited while we were disconnected.
       this.structuredHandles.delete(runId);
-      handle.acceptExit({ exitCode: current?.exitCode ?? -1, signal: current?.signal ?? null });
+      handle.acceptExit({ exitCode: current?.exitCode ?? -1, signal: current?.signal ?? null,
+        ...(current?.status !== "exited" ? { processExited: false } : {}) });
     }
   }
 

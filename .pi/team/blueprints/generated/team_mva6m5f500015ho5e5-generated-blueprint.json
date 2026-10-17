@@ -1,0 +1,61 @@
+{
+  "blueprintId": "team_mva6m5f500015ho5e5-generated-blueprint",
+  "runId": "team_mva6m5f500015ho5e5",
+  "task": "实现本轮需求：移动端工作台的工作区模式，在目录“更多”菜单（现有重命名工作区的位置）增加“根据会话内容自动分组”，Android/iOS 行为对齐。主仓 cwd /Users/co0ontty/Self/vibe_coding/wand。各自仅修改负责平台；不要修改主仓和另一平台；不要提交/push/tag/安装设备/重启服务/调用真实模型。工具 bash/read/write 可用，先发现文件并读取说明、git status/diff 保留已有修改。服务端已有 POST /api/sessions/auto-organize {action:'preview', target:{kind:'workspace',workspaceId} 或 {kind:'directory',cwd}, mode:'auto'|'all'} -> {kind:'preview',preview:{token,sessionCount,manualSessionCount,skippedSessionCount,existingTaskCount,contentCharacters,estimatedModelRequests,unchanged,activeJobId?}}；选择范围用 taskIds/sessionIds，不能与target混用。POST 同端点 {action:'start',token,force:boolean} -> {job}，GET /api/sessions/auto-organize/by-token/:token 和 /:id -> {job}，POST /:id/cancel -> {job}。job结构见 src/conversation-organize-contract.ts，参考 Web src/web-ui/react/workspaces/task-organization.tsx 和 repository.ts 275+。必须读这些真源。仅添加入口不重写算法，不误用按标题归类 API。目录使用服务端全量范围，不依赖折叠/分页/筛选；合成目录用cwd，真实workspace用workspaceId，global范围须正确且禁止kind:all误扩。默认auto保护人工任务，可明确选择all；显示正文字符/会话数/预计模型请求及初二配置费用确认，用户确认才start。原位展开（不用全屏sheet新页面），复用平台现有组件与motion token。提交按钮固定位置尺寸加载/完成/结果，失败保留输入/范围；作业后台可取消后续并保留完成部分；轮询有界/生命周期取消，开始回执未知只用by-token查原作业不自动重发，保留可重查状态。activeJobId复用不重复start；迟到回调不覆盖新目标；最终刷新目录。若现有多选工具栏支持归类可同样接入内容归类，但不要删除旧标题功能。添加可运行单元/协议测试并跑平台相关测试/编译；此轮先不要分发构建，captain统一运行正式脚本。发现无法顺手修的问题，在报告给出证据、影响、复现入口以便captain记录。报告改动文件、验证命令结果、未验收事项。",
+  "playbookId": "generated-blueprint",
+  "playbookTitle": "Dynamic team blueprint",
+  "source": "generated",
+  "status": "draft",
+  "createdAt": 1792107636924,
+  "roles": [
+    {
+      "roleId": "android",
+      "title": "Android 实现与测试",
+      "description": "仅负责 android/，实现原生工作区目录菜单与自动归组 API/状态/UI；保留 TaskListPresentation.kt TaskListScreen.kt RecentTerminalConversationTest.kt 已有未提交改动。先读 android/README.md、真实代码，必要时最少修改已有文件。运行相关 unit test 和 compile，不运行debug.sh分发，由captain处理。",
+      "capabilityNeeds": [],
+      "tools": [
+        "bash",
+        "read",
+        "write",
+        "edit"
+      ],
+      "modelPreferences": []
+    },
+    {
+      "roleId": "ios",
+      "title": "iOS 实现与测试",
+      "description": "仅负责 ios/，实现 SwiftUI 工作区目录菜单与自动归组 API/状态/UI，与任务描述Android语义对齐。保留 WorkspaceListView.swift 和 HomeParityTests.swift 已有未提交改动。读取 ios/README.md 和实际工程测试入口；新增文件注意Xcode工程发现方式，跑相关测试/编译。不要运行build.sh分发，由captain处理。",
+      "capabilityNeeds": [],
+      "tools": [
+        "bash",
+        "read",
+        "write",
+        "edit"
+      ],
+      "modelPreferences": []
+    }
+  ],
+  "rounds": [
+    {
+      "id": "collect",
+      "type": "parallel",
+      "roles": [
+        "android",
+        "ios"
+      ]
+    }
+  ],
+  "policy": {
+    "rationale": "A task-specific collaboration blueprint generated for the lead captain",
+    "strategy": "The lead captain generated this collaboration plan; the extension handles dispatch, communication, observation, and recording.",
+    "evidencePolicy": "Workers should separate cited evidence, inference, confidence, and missing information.",
+    "modelPolicy": "Use configured models that are objectively available; keep soft health observations visible.",
+    "synthesisPolicy": "The lead uses worker outputs as inputs and keeps final judgment outside the extension.",
+    "progressMilestones": [
+      "collect: parallel"
+    ],
+    "stopCriteria": "All planned rounds have returned a status and the run log is persisted."
+  },
+  "outputContract": "每角色输出具体实现/范围保护/未知回执行为/验证证据/阻塞与未验收；captain负责最终复核与分发。",
+  "captainRationale": "A task-specific collaboration blueprint generated for the lead captain"
+}

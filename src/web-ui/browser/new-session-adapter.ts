@@ -105,7 +105,10 @@ const legacyRuntime: NewSessionRuntimeAdapter = {
     dismissDrawerIfOverlay();
     if (initialDraft) {
       restoreComposerStateForSession(created.id);
-      await sendInputFromBox(undefined);
+      // The composer captures the session/revision and owns delivery, recovery and
+      // duplicate protection. Its promise may wait for the entire first AI turn;
+      // accepted creation must hand off navigation without waiting for that turn.
+      void sendInputFromBox(undefined);
     }
     window.setTimeout(() => focusInputBox(true), 0);
   },

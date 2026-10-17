@@ -2,6 +2,7 @@ import type { ConversationReceipt } from "./conversation-types.js";
 
 export type TaskSchedule =
   | { kind: "once"; runAt: string }
+  | { kind: "interval"; everyHours: number; startAt: string; timeZone: string }
   | { kind: "daily"; time: string; timeZone: string }
   | { kind: "weekly"; time: string; timeZone: string; weekday: number };
 

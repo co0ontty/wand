@@ -112,6 +112,8 @@ function harness() {
 
   return {
     registry: new SessionRegistry(processes, structured, storage),
+    processes,
+    structured,
     structuredRows,
     ptyRows,
     storageRows,
@@ -154,6 +156,82 @@ test("SessionRegistry preserves structured, PTY, storage precedence without stal
   h.registry.setSessionTopic("stored", "fresh", "fresh description");
   assert.equal(h.storageRows.get("stored")?.title, "fresh");
   assert.deepEqual(h.calls.storageUpdates, ["stored"]);
+});
+
+test("all registry deletion paths clean native history, including plain retention deletion", () => {
+  const h = harness();
+  const value = { ...snapshot("retained", "structured", "old"), claudeSessionId: "native-old" };
+  h.structuredRows.set(value.id, value);
+  h.registry.delete(value.id);
+  assert.deepEqual(h.calls.claudeDeletes, [value.claudeSessionId]);
+  assert.equal(h.registry.delete(value.id), null);
+  assert.deepEqual(h.calls.claudeDeletes, [value.claudeSessionId]);
+});
+
+test("shared provider IDs survive until the final Wand conversation is deleted", () => {
+  const h = harness();
+  const value = { ...snapshot("one", "structured", "first"), claudeSessionId: "shared-native" };
+  h.structuredRows.set("one", value);
+  h.structuredRows.set("two", { ...value, id: "two" });
+  h.registry.delete("one");
+  assert.deepEqual(h.calls.claudeDeletes, []);
+  assert.equal(h.config.has("hidden_claude_session_ids"), false);
+  h.registry.delete("two");
+  assert.deepEqual(h.calls.claudeDeletes, [value.claudeSessionId]);
+});
+
+test("deleting two live aliases waits for both CLI exits, not just the last visible owner", async () => {
+  const h = harness();
+  const value = { ...snapshot("one", "structured", "live"), claudeSessionId: "shared-live" };
+  h.structuredRows.set("one", value);
+  h.structuredRows.set("two", { ...value, id: "two" });
+  let exitOne = () => {};
+  let exitTwo = () => {};
+  const one = new Promise<void>((resolve) => { exitOne = resolve; });
+  const two = new Promise<void>((resolve) => { exitTwo = resolve; });
+  h.structured.nativeHistoryCleanupBarrier = (id) => id === "one" ? one : two;
+  h.registry.delete("one");
+  h.registry.delete("two");
+  exitOne();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(h.calls.claudeDeletes, [], "the deleted second owner can still be writing");
+  exitTwo();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(h.calls.claudeDeletes, [value.claudeSessionId]);
+});
+
+test("native cleanup waits for exit and rechecks native ID references after exit", async () => {
+  const h = harness();
+  const value = { ...snapshot("one", "structured", "live"), claudeSessionId: "native-live" };
+  let exit = () => {};
+  const barrier = new Promise<void>((resolve) => { exit = resolve; });
+  h.structured.nativeHistoryCleanupBarrier = () => barrier;
+  h.structuredRows.set("one", value);
+  h.registry.delete("one");
+  assert.deepEqual(h.calls.structuredDeletes, ["one"]);
+  assert.deepEqual(h.calls.claudeDeletes, []);
+  h.structuredRows.set("two", { ...value, id: "two" });
+  exit();
+  await barrier;
+  await Promise.resolve();
+  assert.deepEqual(h.calls.claudeDeletes, [], "a newly restored native conversation must be preserved");
+});
+
+test("native cleanup happens after acknowledged exit, but not after an exit failure", async () => {
+  for (const fails of [false, true]) {
+    const h = harness();
+    const value = { ...snapshot("one", "structured", "live"), claudeSessionId: "native-live" };
+    let exit = () => {};
+    const barrier = new Promise<void>((resolve, reject) => { exit = () => fails ? reject(new Error("unknown exit")) : resolve(); });
+    h.structured.nativeHistoryCleanupBarrier = () => barrier;
+    h.structuredRows.set("one", value);
+    h.registry.delete("one");
+    assert.deepEqual(h.calls.claudeDeletes, []);
+    exit();
+    await barrier.catch(() => {});
+    await Promise.resolve();
+    assert.deepEqual(h.calls.claudeDeletes, fails ? [] : [value.claudeSessionId]);
+  }
 });
 
 test("SessionRegistry deletion chooses one owner and preserves provider history ownership", () => {

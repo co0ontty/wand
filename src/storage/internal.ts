@@ -55,6 +55,7 @@ export function resolveDatabasePath(configPath: string): string {
 export interface CreateWandTaskInput {
   workspaceId?: string | null;
   workspaceTaskId?: string | null;
+  acceptance?: WandTask["acceptance"];
   parentTaskId?: string | null;
   title: string;
   titleSource?: WandTaskTitleSource;
@@ -71,11 +72,11 @@ export interface CreateWandTaskInput {
 export type WandTaskPatch = Partial<Pick<WandTask,
   "workspaceId" | "workspaceTaskId" | "parentTaskId" | "title" | "titleSource"
   | "autoTitleSignature" | "description" | "status" | "priority" | "labels"
-  | "dueDate" | "milestoneId" | "sortOrder" | "agent" | "executionSubject">>;
+  | "dueDate" | "milestoneId" | "sortOrder" | "agent" | "executionSubject" | "acceptance">>;
 
 export const WAND_TASK_FIELDS = `id, identifier, workspace_id, workspace_task_id, parent_task_id,
   title, title_source, auto_title_signature, description, status, priority, labels_json,
-  due_date, milestone_id, sort_order, agent_json, execution_subject_json, archived_at, created_at, updated_at`;
+  due_date, milestone_id, sort_order, agent_json, execution_subject_json, archived_at, created_at, updated_at, acceptance_json`;
 
 // Shared metadata comes from the latest explicitly linked card, including meaningful NULLs.
 // The old container columns remain readable for legacy rows until the startup migration.

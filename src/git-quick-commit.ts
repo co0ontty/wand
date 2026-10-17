@@ -22,8 +22,10 @@ import {
 } from "./types.js";
 
 /** provider 缺省值：无法识别时回落到 Claude。 */
-import { buildGrokTextArgs,buildPiTextArgs,buildQoderTextArgs,callConfiguredAiText,contentWithSystemPrompt,defaultProvider,normalizeAiText,runCliText,systemPromptArgsFrom,withOpsPersona,type QuickCommitAiOptions } from "./ai-text-runner.js";
+import { buildGrokTextArgs,buildPiTextArgs,buildQoderTextArgs,callConfiguredAiText,contentWithSystemPrompt,defaultProvider,expandEmployeeCandidates,normalizeAiText,runCliText,systemPromptArgsFrom,withOpsPersona,type QuickCommitAiOptions } from "./ai-text-runner.js";
 import { QuickCommitError } from "./command-error.js";
+import { candidateInstalled } from "./session-provider.js";
+import { AiCallTraceError } from "./system-ai-call.js";
 export { callCliAiText,callConfiguredAiText,withOpsPersona } from "./ai-text-runner.js";
 export type { QuickCommitAiOptions } from "./ai-text-runner.js";
 export { QuickCommitError,type QuickCommitErrorCode } from "./command-error.js";
@@ -979,22 +981,47 @@ async function getLatestTagAtHead(cwd: string): Promise<string | undefined> {
 
 async function runQuickCommitFallbackCli(opts: QuickCommitOptions, priorError: string): Promise<QuickCommitResult> {
   const trace = opts.traceFactory?.start("git-fallback", buildFallbackPrompt(opts, priorError), opts.cwd);
-  const candidate = { provider: defaultProvider(opts.provider), engine: "cli" as const, model: opts.model ?? undefined, thinkingEffort: opts.thinkingEffort ?? undefined };
+  if (trace) opts.onCallSessionCreated?.(trace.sessionId);
+  const beforeHead = await getHead(opts.cwd);
   try {
-    if (trace) opts.onCallSessionCreated?.(trace.sessionId);
-    trace?.candidateStarted(candidate);
-    const result = await runQuickCommitFallbackCliImpl(opts, priorError);
-    trace?.applicationResult(result);
-    trace?.complete();
-    return result;
+    const { chain, deadline } = await expandEmployeeCandidates(opts, trace);
+    const executable = chain.filter(candidate => candidate.engine !== "sdk" && candidateInstalled(candidate));
+    for (const candidate of chain) {
+      if (candidate.engine === "sdk") trace?.candidateSkipped(candidate, "提交执行需要 CLI 工具，未把无工具文字候选当执行器。");
+      else if (!executable.includes(candidate)) trace?.candidateSkipped(candidate, "CLI 未安装，未提交输入。");
+    }
+    if (!executable.length) throw new QuickCommitError("系统员工没有可执行 git 的 CLI 候选。", "AI_FALLBACK_FAILED");
+    const errors: string[] = [];
+    for (const candidate of executable) {
+      opts.signal?.throwIfAborted();
+      if (Date.now() >= deadline) { errors.push("已超过等待上限"); break; }
+      trace?.candidateStarted(candidate);
+      try {
+        const result = await runQuickCommitFallbackCliImpl({
+          ...opts,
+          provider: candidate.provider,
+          model: candidate.model,
+          thinkingEffort: candidate.thinkingEffort ?? opts.thinkingEffort,
+        }, priorError, Math.max(1, Math.min(QUICK_COMMIT_CLI_TIMEOUT_MS, deadline - Date.now())));
+        trace?.applicationResult(result);
+        trace?.complete();
+        return result;
+      } catch (error) {
+        if (error instanceof AiCallTraceError) throw error;
+        trace?.candidateFailed(candidate, error, "execution");
+        const afterHead = await getHead(opts.cwd);
+        if (afterHead && afterHead !== beforeHead) throw error;
+        errors.push(`${candidate.provider}: ${getGitErrorMessage(error)}`);
+      }
+    }
+    throw new QuickCommitError(`所有执行候选均失败：${errors.join("；")}`, "AI_FALLBACK_FAILED");
   } catch (error) {
-    trace?.candidateFailed(candidate, error, "execution");
     trace?.fail(error);
     throw error;
   }
 }
 
-async function runQuickCommitFallbackCliImpl(opts: QuickCommitOptions, priorError: string): Promise<QuickCommitResult> {
+async function runQuickCommitFallbackCliImpl(opts: QuickCommitOptions, priorError: string, timeoutMs = QUICK_COMMIT_CLI_TIMEOUT_MS): Promise<QuickCommitResult> {
   await assertGitWorkTreeAsync(opts.cwd);
   const beforeHead = await getHead(opts.cwd);
   const request = withOpsPersona(buildFallbackPrompt(opts, priorError), opts.opsPersona);
@@ -1008,7 +1035,7 @@ async function runQuickCommitFallbackCliImpl(opts: QuickCommitOptions, priorErro
     args.push("-");
     await runCliText("codex", args, contentWithSystemPrompt("codex", request), {
       cwd: opts.cwd,
-      timeoutMs: QUICK_COMMIT_CLI_TIMEOUT_MS,
+      timeoutMs,
       inheritEnv: opts.inheritEnv,
     });
   } else if (provider === "opencode") {
@@ -1019,25 +1046,25 @@ async function runQuickCommitFallbackCliImpl(opts: QuickCommitOptions, priorErro
     if (variant) args.push("--variant", variant);
     await runCliText("opencode", args, contentWithSystemPrompt("opencode", request), {
       cwd: opts.cwd,
-      timeoutMs: QUICK_COMMIT_CLI_TIMEOUT_MS,
+      timeoutMs,
       inheritEnv: opts.inheritEnv,
     });
   } else if (provider === "grok") {
     await runCliText("grok", buildGrokTextArgs(request, opts, true), "", {
       cwd: opts.cwd,
-      timeoutMs: QUICK_COMMIT_CLI_TIMEOUT_MS,
+      timeoutMs,
       inheritEnv: opts.inheritEnv,
     });
   } else if (provider === "qoder") {
     await runCliText("qodercli", buildQoderTextArgs(request, opts, true), "", {
       cwd: opts.cwd,
-      timeoutMs: QUICK_COMMIT_CLI_TIMEOUT_MS,
+      timeoutMs,
       inheritEnv: opts.inheritEnv,
     });
   } else if (provider === "pi") {
     await runCliText("pi", buildPiTextArgs(request, opts, true), "", {
       cwd: opts.cwd,
-      timeoutMs: QUICK_COMMIT_CLI_TIMEOUT_MS,
+      timeoutMs,
       inheritEnv: opts.inheritEnv,
     });
   } else {
@@ -1058,7 +1085,7 @@ async function runQuickCommitFallbackCliImpl(opts: QuickCommitOptions, priorErro
     args.push(...systemPromptArgsFrom("claude", request.system));
     await runCliText("claude", args, request.prompt, {
       cwd: opts.cwd,
-      timeoutMs: QUICK_COMMIT_CLI_TIMEOUT_MS,
+      timeoutMs,
       inheritEnv: opts.inheritEnv,
     });
   }

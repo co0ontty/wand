@@ -271,4 +271,40 @@ export const STORAGE_MIGRATIONS: readonly StorageMigration[] = [
       scope_key TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, updated_at TEXT NOT NULL
     );
   `) },
+  { version: 7, name: "feedback-task-projection", up: db => db.exec(`
+    CREATE TABLE IF NOT EXISTS wand_task_comments (
+      id TEXT PRIMARY KEY, task_id TEXT NOT NULL, author_name TEXT NOT NULL,
+      body TEXT NOT NULL, created_at TEXT NOT NULL,
+      FOREIGN KEY(task_id) REFERENCES wand_tasks(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_wand_task_comments_task ON wand_task_comments(task_id, created_at);
+    CREATE TABLE IF NOT EXISTS feedback_task_features (
+      feature TEXT PRIMARY KEY, task_id TEXT,
+      FOREIGN KEY(task_id) REFERENCES wand_tasks(id) ON DELETE SET NULL
+    );
+    CREATE TABLE IF NOT EXISTS feedback_reports (
+      report_id TEXT PRIMARY KEY, feature TEXT NOT NULL, task_id TEXT,
+      occurred_at TEXT NOT NULL, received_at TEXT NOT NULL, envelope_json TEXT NOT NULL,
+      FOREIGN KEY(task_id) REFERENCES wand_tasks(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_feedback_reports_task ON feedback_reports(task_id, received_at);
+  `) },
+  // These objects originally shipped in baseline SQL only. Existing versioned
+  // databases skip that baseline, so they need explicit additive upgrade steps.
+  { version: 8, name: "employee-im-settings", up: db => db.exec(`
+    CREATE TABLE IF NOT EXISTS employee_im_settings (
+      employee_id TEXT PRIMARY KEY REFERENCES silicon_employees(id) ON DELETE CASCADE,
+      config_json TEXT NOT NULL,
+      credentials TEXT
+    );
+  `) },
+  // Freeze the expression here instead of importing the evolving runtime helper.
+  { version: 9, name: "scheduled-run-claim-indexes", up: db => db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_scheduled_task_runs_claimed ON scheduled_task_runs((CASE WHEN json_extract(run_json, '$.claimedAt') GLOB '????-??-??T*' THEN julianday(json_extract(run_json, '$.claimedAt')) ELSE NULL END), id);
+    CREATE INDEX IF NOT EXISTS idx_scheduled_task_runs_task_claimed ON scheduled_task_runs(task_id, (CASE WHEN json_extract(run_json, '$.claimedAt') GLOB '????-??-??T*' THEN julianday(json_extract(run_json, '$.claimedAt')) ELSE NULL END), id);
+  `) },
+  { version: 10, name: "task-delivery-acceptance", up: db => {
+    const columns = db.prepare("PRAGMA table_info(wand_tasks)").all() as Array<{ name: string }>;
+    if (!columns.some(column => column.name === "acceptance_json")) db.exec("ALTER TABLE wand_tasks ADD COLUMN acceptance_json TEXT");
+  } },
 ];

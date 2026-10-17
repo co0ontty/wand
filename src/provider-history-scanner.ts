@@ -4,14 +4,14 @@ import {
   openSync,
   readSync,
   readdirSync,
-  rmSync,
   statSync,
-  unlinkSync,
   type Dirent,
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { removeSessionArtifact } from "./session-artifact-cleanup.js";
+import { logInfo } from "./runtime-log.js";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PROVIDER_SESSION_ID_PATTERN = /^[a-z0-9][a-z0-9._:-]{0,199}$/i;
@@ -68,6 +68,7 @@ export interface QoderHistorySession {
 export interface ProviderHistoryScannerOptions {
   claudeHome?: string;
   codexSessionsDir?: string;
+  codexHome?: string;
   openCodeDatabasePath?: string;
   /** Qoder and Qoder CN use separate config roots; callers may override both for tests. */
   qoderProjectsDirs?: string[];
@@ -336,6 +337,7 @@ export class ProviderHistoryScanner {
   private readonly claudeHome: string;
   private readonly claudeProjectsDir: string;
   private readonly codexSessionsDir: string;
+  private readonly codexHome: string;
   private readonly openCodeDatabasePath: string;
   private readonly qoderProjectsDirs: string[];
   private readonly piSessionsDir: string;
@@ -348,16 +350,19 @@ export class ProviderHistoryScanner {
   private parsedFiles = 0;
 
   constructor(options: ProviderHistoryScannerOptions = {}) {
-    this.claudeHome = options.claudeHome ?? path.join(os.homedir(), ".claude");
+    this.claudeHome = options.claudeHome ?? (process.env.CLAUDE_CONFIG_DIR?.trim() || path.join(os.homedir(), ".claude"));
     this.claudeProjectsDir = path.join(this.claudeHome, "projects");
-    this.codexSessionsDir = options.codexSessionsDir ?? path.join(os.homedir(), ".codex", "sessions");
+    this.codexHome = options.codexHome ?? (options.codexSessionsDir ? path.dirname(options.codexSessionsDir) : null)
+      ?? (process.env.CODEX_HOME?.trim() || path.join(os.homedir(), ".codex"));
+    this.codexSessionsDir = options.codexSessionsDir ?? path.join(this.codexHome, "sessions");
     const dataHome = process.env.XDG_DATA_HOME?.trim() || path.join(os.homedir(), ".local", "share");
     this.openCodeDatabasePath = options.openCodeDatabasePath ?? path.join(dataHome, "opencode", "opencode.db");
     this.qoderProjectsDirs = options.qoderProjectsDirs ?? [
       path.join(os.homedir(), ".qoder", "projects"),
       path.join(os.homedir(), ".qoder-cn", "projects"),
     ];
-    this.piSessionsDir = options.piSessionsDir ?? path.join(os.homedir(), ".pi", "agent", "sessions");
+    this.piSessionsDir = options.piSessionsDir
+      ?? path.join(process.env.PI_CODING_AGENT_DIR?.trim() || path.join(os.homedir(), ".pi", "agent"), "sessions");
     this.grokSessionsDir = options.grokSessionsDir ?? path.join(os.homedir(), ".grok", "sessions");
   }
 
@@ -418,14 +423,14 @@ export class ProviderHistoryScanner {
     return results.sort((left, right) => right.mtimeMs - left.mtimeMs);
   }
 
-  private listCodexRolloutFiles(): string[] {
+  private listCodexRolloutFiles(root = this.codexSessionsDir): string[] {
     try {
-      return readdirSync(this.codexSessionsDir, { recursive: true, withFileTypes: true })
+      return readdirSync(root, { recursive: true, withFileTypes: true })
         .filter((entry) => entry.isFile() && entry.name.startsWith("rollout-") && entry.name.endsWith(".jsonl"))
         .map((entry) => {
           const parent = (entry as { parentPath?: string; path?: string }).parentPath
             ?? (entry as { path?: string }).path
-            ?? this.codexSessionsDir;
+            ?? root;
           return path.join(parent, entry.name);
         });
     } catch {
@@ -597,12 +602,15 @@ export class ProviderHistoryScanner {
       if (!UUID_PATTERN.test(claudeSessionId)) continue;
       const normalized = path.resolve(cwd).replace(/[^a-zA-Z0-9]/g, "-");
       const jsonlPath = path.join(this.claudeProjectsDir, normalized, `${claudeSessionId}.jsonl`);
-      try { unlinkSync(jsonlPath); deleted += 1; } catch { /* already absent */ }
+      if (removeSessionArtifact(this.claudeHome, path.join("projects", normalized, `${claudeSessionId}.jsonl`))) deleted += 1;
       this.claudeIndex.delete(jsonlPath);
-      for (const sub of ["session-env", "tasks", "todos"]) {
-        const dir = path.join(this.claudeHome, sub, claudeSessionId);
-        try { if (existsSync(dir)) rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+      // Claude keeps subagent transcripts alongside the primary JSONL in <id>/.
+      removeSessionArtifact(this.claudeHome, path.join("projects", normalized, claudeSessionId));
+      for (const sub of ["session-env", "tasks", "todos", "file-history"]) {
+        removeSessionArtifact(this.claudeHome, path.join(sub, claudeSessionId));
       }
+      removeSessionArtifact(this.claudeHome, path.join("todos", `${claudeSessionId}.json`));
+      removeSessionArtifact(this.claudeHome, path.join("debug", `${claudeSessionId}.txt`));
     }
     return deleted;
   }
@@ -611,18 +619,24 @@ export class ProviderHistoryScanner {
     const valid = new Set(threadIds.filter((id) => UUID_PATTERN.test(id)));
     if (valid.size === 0) return 0;
     let deleted = 0;
-    for (const filePath of this.listCodexRolloutFiles()) {
-      let cached = this.codexIndex.get(filePath);
-      if (!cached) {
+    for (const root of [this.codexSessionsDir, path.join(this.codexHome, "archived_sessions")]) {
+      for (const filePath of this.listCodexRolloutFiles(root)) {
+        // Re-read identity before destructive operations; the listing cache may be stale.
         const head = readHead(filePath, 65536);
-        if (!head) continue;
-        cached = { mtimeMs: head.mtimeMs, size: head.size, summary: parseCodexSummary(head) };
-        this.codexIndex.set(filePath, cached);
-        this.parsedFiles += 1;
+        const summary = head ? parseCodexSummary(head) : null;
+        if (summary && valid.has(summary.claudeSessionId)) {
+          if (removeSessionArtifact(path.dirname(root), path.relative(path.dirname(root), filePath))) deleted += 1;
+          this.codexIndex.delete(filePath);
+        }
       }
-      if (cached.summary && valid.has(cached.summary.claudeSessionId)) {
-        try { unlinkSync(filePath); deleted += 1; } catch { /* already absent */ }
-        this.codexIndex.delete(filePath);
+    }
+    let snapshots: string[] = [];
+    try { snapshots = readdirSync(path.join(this.codexHome, "shell_snapshots")); } catch { /* absent */ }
+    for (const id of valid) {
+      for (const file of snapshots) {
+        if (file === `${id}.sh` || (file.startsWith(`${id}.`) && /^\d+\.sh$/.test(file.slice(id.length + 1)))) {
+          removeSessionArtifact(this.codexHome, path.join("shell_snapshots", file));
+        }
       }
     }
     return deleted;
@@ -657,7 +671,8 @@ export class ProviderHistoryScanner {
       }
       this.invalidate("opencode");
       return deleted;
-    } catch {
+    } catch (error) {
+      logInfo(`[SessionCleanup] OpenCode session removal failed (${(error as NodeJS.ErrnoException).code ?? "database error"}).`);
       return 0;
     } finally {
       try { database?.close(); } catch { /* best effort */ }
@@ -671,8 +686,20 @@ export class ProviderHistoryScanner {
     for (const filePath of this.listQoderTranscriptFiles()) {
       const id = path.basename(filePath, ".jsonl");
       if (!ids.has(id)) continue;
-      try { unlinkSync(filePath); deleted += 1; } catch { /* already absent */ }
+      const root = this.qoderProjectsDirs.find((dir) => filePath.startsWith(`${dir}${path.sep}`));
+      if (root && removeSessionArtifact(path.dirname(root), path.relative(path.dirname(root), filePath))) deleted += 1;
       this.qoderIndex.delete(filePath);
+    }
+    for (const projectsDir of this.qoderProjectsDirs) {
+      const home = path.dirname(projectsDir);
+      for (const id of ids) {
+        for (const sub of ["tasks", "session-env", "file-history"]) removeSessionArtifact(home, path.join(sub, id));
+        let projects: Dirent<string>[] = [];
+        try { projects = readdirSync(projectsDir, { withFileTypes: true }); } catch { /* absent */ }
+        for (const project of projects) {
+          if (project.isDirectory()) removeSessionArtifact(home, path.join(path.basename(projectsDir), project.name, id));
+        }
+      }
     }
     return deleted;
   }
@@ -692,10 +719,7 @@ export class ProviderHistoryScanner {
             if (!file.isFile() || !file.name.endsWith(".jsonl")) continue;
             const matched = Array.from(ids).some((id) => file.name.endsWith(`_${id}.jsonl`) || file.name === `${id}.jsonl`);
             if (matched) {
-              try {
-                unlinkSync(path.join(projectDir, file.name));
-                deleted += 1;
-              } catch { /* already absent */ }
+              if (removeSessionArtifact(path.dirname(this.piSessionsDir), path.join(path.basename(this.piSessionsDir), dir.name, file.name))) deleted += 1;
             }
           }
         } catch { /* ignore per-project read error */ }
@@ -717,12 +741,7 @@ export class ProviderHistoryScanner {
         const projectDir = path.join(this.grokSessionsDir, dir.name);
         for (const id of ids) {
           const targetDir = path.join(projectDir, id);
-          if (existsSync(targetDir)) {
-            try {
-              rmSync(targetDir, { recursive: true, force: true });
-              deleted += 1;
-            } catch { /* best effort */ }
-          }
+          if (existsSync(targetDir) && removeSessionArtifact(path.dirname(this.grokSessionsDir), path.join(path.basename(this.grokSessionsDir), dir.name, id))) deleted += 1;
         }
       }
     } catch {

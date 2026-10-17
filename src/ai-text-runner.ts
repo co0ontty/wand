@@ -11,6 +11,8 @@ import { buildLanguageDirective } from "./language-prompt.js";
 import { candidateInstalled, isSessionProvider } from "./session-provider.js";
 import { asRecord } from "./structured-content.js";
 import { AiCallTraceError, type AiCallTrace, type AiCallTraceFactory, type SystemAiPurpose } from "./system-ai-call.js";
+import type { OpenCodeTextRuntime, OpenCodeFreePool } from "./opencode-system-fallback.js";
+import { OPENCODE_FREE_GROUP_SELECTOR } from "./opencode-free-selection.js";
 import {
   composeSystemFallback,systemPromptFlag,thinkingEffortToClaudeCliEffort,
   thinkingEffortToCodexReasoningEffort,thinkingEffortToGrokEffort,thinkingEffortToOpenCodeVariant,
@@ -23,7 +25,7 @@ export { QuickCommitError } from "./command-error.js";
 const CLAUDE_MESSAGE_TIMEOUT_MS = 60_000;
 const CODEX_MESSAGE_TIMEOUT_MS = 60_000;
 
-/** Neutral one-shot text execution. Tool-running Git fallback never uses the retry chain. */
+/** Neutral one-shot text execution. Tool-running Git fallback uses the same employee chain. */
 export function defaultProvider(provider: SessionProvider | undefined): SessionProvider {
   return isSessionProvider(provider) ? provider : "claude";
 }
@@ -42,6 +44,10 @@ export interface QuickCommitAiOptions {
   employeeText?: EmployeeTextDeps;
   /** 系统应用必须经员工渠道；没有可用候选时直接失败，不退回默认 provider。 */
   employeeChannelOnly?: boolean;
+  /** Server-owned proof/runtime for the saved OpenCode free group. */
+  opencodeFree?: OpenCodeFreePool;
+  /** Internal anonymous runtime for the final OpenCode-only stage. Never a client DTO. */
+  opencodeRuntime?: OpenCodeTextRuntime;
   /** 整条候选链的时间上限；默认 CLI_CHAIN_BUDGET_MS。第一条消息里的调用要短得多。 */
   budgetMs?: number;
   signal?: AbortSignal;
@@ -174,10 +180,14 @@ function extractOpenCodeText(stdout: string): string {
     if (!trimmed.startsWith("{")) continue;
     try {
       const parsed = JSON.parse(trimmed) as { type?: string; part?: { text?: unknown } };
+      if (parsed.type === "tool_use") {
+        throw new QuickCommitError("OpenCode 纯文本调用尝试使用工具，结果未采用。", "CLAUDE_CLI_FAILED");
+      }
       if (parsed.type === "text" && typeof parsed.part?.text === "string" && parsed.part.text.trim()) {
         texts.push(parsed.part.text.trim());
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof QuickCommitError) throw error;
       // ignore diagnostics mixed into stdout
     }
   }
@@ -427,17 +437,25 @@ async function callOpenCodeText(request: AiTextRequest, cwd: string, opts: CliAi
   const variant = thinkingEffortToOpenCodeVariant(opts.thinkingEffort ?? "off");
   if (variant) args.push("--variant", variant);
   const stdout = await runCliText("opencode", args, contentWithSystemPrompt("opencode", request), {
-    cwd,
+    cwd: opts.opencodeRuntime?.cwd ?? cwd,
     timeoutMs: cliTextTimeoutMs(CODEX_MESSAGE_TIMEOUT_MS, opts),
     inheritEnv: opts.inheritEnv, signal: opts.signal,
-    // A dedicated per-invocation agent and scalar deny replace rather than merge
-    // wildcard/specific allow rules. Preserve inherited provider/model config.
-    env: base => {
+    // Keep the native tool schemas: Zen rejects tool-less free-tier requests.
+    // Scalar ask replaces inherited allow rules; non-interactive `run` WITHOUT
+    // --auto/--yolo rejects every permission request, so no tool is authorized.
+    // Tool attempts also invalidate the text result. Do not loosen this to allow.
+    // Disable the CLI's unrelated title call (which can use a paid default model).
+    env: inherited => {
+      const base = opts.opencodeRuntime ? opts.opencodeRuntime.env(inherited) : inherited;
       const configured = base.OPENCODE_CONFIG_CONTENT ? JSON.parse(base.OPENCODE_CONFIG_CONTENT) : {};
       if (!configured || typeof configured !== "object" || Array.isArray(configured)) throw new Error("OpenCode 内联配置无效。");
-      return { ...base, OPENCODE_PERMISSION: JSON.stringify("deny"), OPENCODE_CONFIG_CONTENT: JSON.stringify({
-        ...configured, permission: "deny", autoupdate: false, share: "disabled",
-        agent: { ...configured.agent, [agent]: { mode: "primary", permission: "deny", prompt: "Return only the requested text. Do not use tools." } },
+      return { ...base, OPENCODE_PERMISSION: JSON.stringify("ask"), OPENCODE_CONFIG_CONTENT: JSON.stringify({
+        ...configured, permission: "ask", autoupdate: false, share: "disabled",
+        agent: {
+          ...configured.agent,
+          title: { ...configured.agent?.title, disable: true },
+          [agent]: { mode: "primary", permission: "ask", prompt: "Return only the requested text. Do not use tools." },
+        },
       }) };
     },
   });
@@ -522,10 +540,55 @@ function singleCandidate(opts: QuickCommitAiOptions): import("./types.js").AiCli
   };
 }
 
+export interface ExpandedAiCandidates {
+  chain: import("./types.js").AiCliCandidate[];
+  freeLeaves: Set<import("./types.js").AiCliCandidate>;
+  deadline: number;
+}
+
+/** Expand the system employee's chain once: groups, free leaves, and duplicates. */
+export async function expandEmployeeCandidates(opts: QuickCommitAiOptions, trace?: AiCallTrace): Promise<ExpandedAiCandidates> {
+  opts.signal?.throwIfAborted();
+  const { resolveModelGroupModels } = await import("./model-groups.js");
+  const modelGroups = opts.modelGroups ?? opts.employeeText?.config.modelGroups;
+  const seen = new Set<string>();
+  const deadline = Date.now() + Math.max(1, opts.budgetMs ?? CLI_CHAIN_BUDGET_MS);
+  const sources = opts.cliCandidates?.length ? opts.cliCandidates : [singleCandidate(opts)];
+  const freeLeaves = new Set<import("./types.js").AiCliCandidate>();
+  const expanded: import("./types.js").AiCliCandidate[] = [];
+  for (const candidate of sources) {
+    if (candidate.provider === "opencode" && candidate.model === OPENCODE_FREE_GROUP_SELECTOR) {
+      if (!opts.opencodeFree) { trace?.candidateSkipped(candidate, "OpenCode 免费分组执行服务尚未就绪。"); continue; }
+      const signal = AbortSignal.any([...(opts.signal ? [opts.signal] : []), AbortSignal.timeout(Math.max(1, deadline - Date.now()))]);
+      try {
+        const members = await abortableEmployeeText(opts.opencodeFree.candidates(signal), signal);
+        for (const member of members) {
+          const leaf = { ...candidate, ...member, thinkingEffort: "off" as const };
+          expanded.push(leaf); freeLeaves.add(leaf);
+        }
+        if (!members.length) trace?.candidateSkipped(candidate, "当前没有实测可用且仍免费的 OpenCode 模型。");
+      } catch (error) { trace?.candidateFailed(candidate, error, "availability"); opts.signal?.throwIfAborted(); }
+      continue;
+    }
+    expanded.push(...resolveModelGroupModels(modelGroups, candidate.provider, candidate.model,
+      { preferDefault: !candidate.model || candidate.model === "default" }).map(model => ({ ...candidate, model: model || undefined })));
+  }
+  const chain = expanded.filter(candidate => {
+    const key = JSON.stringify([candidate.provider, candidate.engine ?? "cli", candidate.model ?? "", candidate.thinkingEffort ?? opts.thinkingEffort]);
+    if (seen.has(key)) return false;
+    seen.add(key); return true;
+  });
+  if (opts.employeeChannelOnly && !opts.cliCandidates?.length) {
+    throw new QuickCommitError("系统员工没有可用的执行候选。", "AI_FALLBACK_FAILED");
+  }
+  if (!chain.length) throw new QuickCommitError("系统员工没有可用的执行候选；免费分组为空或尚未同步。", "AI_FALLBACK_FAILED");
+  return { chain, freeLeaves, deadline };
+}
+
 /**
  * 按顺序尝试候选：跳过没安装的 CLI，协议与输出校验均成功才返回。
  * 只有一条候选时保持原行为（错误原样抛出，不摘要）。
- * 仅用于一次性文本生成；执行工具的任务不能使用这条无条件重试路径。
+ * 文本生成可以无条件换下一条；有副作用的执行要先确认没有产生结果再换。
  */
 async function callTextCandidates<T>(
   request: AiTextRequest,
@@ -535,25 +598,13 @@ async function callTextCandidates<T>(
   parseOutput: (raw: string) => T,
   trace?: AiCallTrace,
 ): Promise<T> {
-  opts.signal?.throwIfAborted();
-  const { resolveModelGroupModels } = await import("./model-groups.js");
   const modelGroups = opts.modelGroups ?? opts.employeeText?.config.modelGroups;
-  const seen = new Set<string>();
-  const chain = (opts.cliCandidates?.length ? opts.cliCandidates : [singleCandidate(opts)])
-    .flatMap((candidate) => resolveModelGroupModels(modelGroups, candidate.provider, candidate.model,
-      { preferDefault: !candidate.model || candidate.model === "default" })
-      .map((model) => ({ ...candidate, model: model || undefined })))
-    .filter(candidate => {
-      const key = JSON.stringify([candidate.provider, candidate.engine ?? "cli", candidate.model ?? "", candidate.thinkingEffort ?? opts.thinkingEffort]);
-      if (seen.has(key)) return false;
-      seen.add(key); return true;
-    });
-  if (opts.employeeChannelOnly && !opts.cliCandidates?.length) {
-    throw new QuickCommitError("系统员工没有可用的执行候选。", "AI_FALLBACK_FAILED");
-  }
-  const deadline = Date.now() + Math.max(1, opts.budgetMs ?? CLI_CHAIN_BUDGET_MS);
+  const { chain, freeLeaves, deadline } = await expandEmployeeCandidates(opts, trace);
   const call = async (candidate: import("./types.js").AiCliCandidate): Promise<string> => {
-    if (candidate.engine !== "sdk") return callCliAiText(request, cwd, language, { ...candidateOptions(opts, candidate), deadline });
+    const free = freeLeaves.has(candidate);
+    const candidateDeadline = free ? Math.min(deadline, Date.now() + 20_000) : deadline;
+    if (candidate.engine !== "sdk") return callCliAiText(request, cwd, language, { ...candidateOptions(opts, candidate),
+      ...(free ? { opencodeRuntime: opts.opencodeFree!.execution } : {}), deadline: candidateDeadline });
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new QuickCommitError("Wand Agent 调用超时。", "CLAUDE_TIMEOUT")), Math.max(1, deadline - Date.now()));
     const signal = opts.signal ? AbortSignal.any([opts.signal, controller.signal]) : controller.signal;

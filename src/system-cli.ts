@@ -47,6 +47,23 @@ export async function parseSystemCliCommand(
     if (args.length !== 1 || !args[0] || args[0].startsWith("-")) throw new Error("用法：wand schedule:read <id>");
     return api => api.get(`/api/scheduled-tasks/${encodeURIComponent(args[0]!)}`);
   }
+  if (command === "web-login:issue" || command === "web-login:cancel") {
+    if (args.length !== 1 || args[0] !== "--stdin") throw new Error(`用法：wand ${command} --stdin`);
+    const body = await jsonInput(input);
+    fields(body, command === "web-login:issue" ? ["requestId", "origin"] : ["requestId"]);
+    requiredText(body.requestId, "requestId");
+    if (command === "web-login:cancel") return api => api.post("/api/login/ticket/cancel", body);
+    const { webLoginOrigin } = await import("./web-login-tickets.js");
+    const origin = webLoginOrigin(body.origin);
+    const proof = process.env.WAND_WEB_LOGIN_PROOF;
+    if (!proof || !/^wlp_[a-zA-Z0-9_-]{43}$/.test(proof)) {
+      const { HttpError } = await import("./http-error.js");
+      throw new HttpError(403, "invalid_subject", "当前执行没有有效的网页登录证明；独立启动的 Pi/终端不具备签发资格，请在 Wand 员工会话新一轮执行中使用（升级前已启动的回合也需新一轮执行），或由用户手动登录。不能手填会话 ID、复制证明或回退到所有者身份。");
+    }
+    // Owner authentication permits local issuance; a separate revocable proof
+    // determines the actor. Caller-supplied/non-secret session IDs prove nothing.
+    return api => api.post("/api/login/ticket/issue", { requestId: body.requestId, origin }, { "X-Wand-Web-Login-Proof": proof });
+  }
   const withId = command === "schedule:update" || command === "session:resume";
   const id = withId ? args[0] : undefined;
   if ((withId && (!id || id.startsWith("-"))) || args.length !== (withId ? 2 : 1) || args.at(-1) !== "--stdin") {

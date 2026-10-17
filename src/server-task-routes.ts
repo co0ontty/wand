@@ -1,3 +1,4 @@
+import { taskDispatchReceipt } from "./task-dispatch-receipt.js";
 import type { Express } from "express";
 import { dispatchAgentForTask, resolveTaskDispatchTarget } from "./agent-dispatch.js";
 import type { AiTeamRunner } from "./ai-team-runner.js";
@@ -80,7 +81,10 @@ function parseExecutionSubject(storage: WandStorage, value: unknown): TaskExecut
   if (type === "employee") {
     const employee = storage.getSiliconEmployee(id);
     if (!employee || employee.archivedAt) throw badRequest("硅基员工不存在或已归档。");
-    return { type, id };
+    const agentOverride = body.agentOverride === undefined ? undefined : parseTaskAgent(body.agentOverride);
+    if (agentOverride && bodyObject(body.agentOverride).mode && bodyObject(body.agentOverride).mode !== agentOverride.mode) throw badRequest("所选工具不支持该运行模式，请重新选择。");
+    if (body.agentOverride !== undefined && (!agentOverride || agentOverride.kind !== "structured")) throw badRequest("员工本次工具配置必须是有效的结构化配置。");
+    return { type, id, ...(agentOverride ? { agentOverride } : {}) };
   }
   if (type === "team") {
     if (!storage.getAiTeam(id)) throw badRequest("AI 团队不存在。");
@@ -165,8 +169,11 @@ function taskDto({ storage, sessions }: TaskDtoDeps, task: ReturnType<WandStorag
   const workspace = task.workspaceId ? (model ? model.workspaces.get(task.workspaceId) : storage.getWorkspace(task.workspaceId)) : null;
   const sessionIds = model ? model.taskSessions(task).map(session => session.id) : storage.listWandTaskSessionIds(task.id);
   const milestone = model ? model.milestone(task.milestoneId) : resolvedMilestoneFields(storage, task.milestoneId);
+  const assignee = model ? model.assignee(task) : task.executionSubject?.type === "employee" ? storage.getSiliconEmployee(task.executionSubject.id)
+    : task.executionSubject?.type === "team" ? storage.getAiTeam(task.executionSubject.id) : null;
   return {
     ...task,
+    assignedExecutor: assignee ? { id: assignee.id, name: assignee.name, avatar: "avatar" in assignee ? compactTransportAvatar(assignee.avatar) : "" } : null,
     canArchive: model ? model.canArchive(task) : canArchiveTask(storage, sessions, task.id),
     sessionIds,
     sessions: sessionIds.flatMap((id) => {
@@ -217,6 +224,10 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
     const model = new TaskReadModel(storage, sessions);
     res.json(model.tasks.filter(task => workspaceId === undefined || task.workspaceId === workspaceId)
       .map(task => taskDto(deps, task, model)));
+  });
+  app.get("/api/wand-tasks/:id/comments", (req, res) => {
+    if (!storage.getWandTask(req.params.id)) { res.status(404).json({ error: "未找到该任务。" }); return; }
+    res.set("Cache-Control", "no-store").json({ comments: storage.listWandTaskComments(req.params.id) });
   });
   app.get("/api/wand-task-agent-defaults", (_req, res) => {
     res.json(readTaskBoardLastAgent(storage));
@@ -329,7 +340,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         throw badRequest("PTY 只能选择 CLI 工具。");
       }
       const assignedAgent = executionSubject && executionSubject.type !== "cli"
-        ? preferredAgentForSubject(storage, executionSubject)
+        ? executionSubject.agentOverride ?? preferredAgentForSubject(storage, executionSubject)
         : executionSubject?.type === "cli" ? agent ?? cliAgentForSubject(executionSubject) : agent;
       const labels = labelsFrom(body.labels);
       const dueDate = dateValue(body.dueDate) ?? null;
@@ -383,6 +394,15 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         patch.titleSource = "user";
       }
       if (body.description !== undefined) patch.description = text(body.description);
+      if (body.acceptance !== undefined) {
+        const acceptance = bodyObject(body.acceptance);
+        const evidence = text(acceptance.evidence).slice(0, 16000);
+        const blocker = text(acceptance.blocker).slice(0, 4000);
+        const accepted = acceptance.acceptedAt != null;
+        if (accepted && (!evidence || blocker)) throw badRequest("验收通过需要交付证据，并先解除阻塞。");
+        if (accepted && storage.listWandTasks().some(child => child.parentTaskId === currentTask.id && !child.acceptance?.acceptedAt)) throw badRequest("仍有子任务未验收通过，不能通过主目标整体验收。");
+        patch.acceptance = { evidence, blocker, acceptedAt: accepted ? new Date().toISOString() : null };
+      }
       if (body.status !== undefined) {
         if (!STATUSES.has(body.status as WandTaskStatus)) throw badRequest("任务状态无效。");
         patch.status = body.status as WandTaskStatus;
@@ -434,7 +454,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         }
         if (patch.executionSubject && patch.executionSubject.type !== "cli") {
           if (patch.agent?.kind === "pty") throw badRequest("PTY 只能选择 CLI 工具。");
-          patch.agent = preferredAgentForSubject(storage, patch.executionSubject);
+          patch.agent = patch.executionSubject.agentOverride ?? preferredAgentForSubject(storage, patch.executionSubject);
         }
       }
       if (body.sortOrder !== undefined && Number.isFinite(Number(body.sortOrder))) {
@@ -533,7 +553,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
    * CLI 终端），把这次派发的 prompt 作为首条消息 / 初始输入，并把会话绑定回该任务。
    * cwd 取任务所属项目目录；未指定项目时用全局默认目录。
    */
-  app.post("/api/wand-tasks/:id/dispatch", asyncRoute(async (req, res) => {
+  app.post("/api/wand-tasks/:id/dispatch", taskDispatchReceipt(storage), asyncRoute(async (req, res) => {
     try {
       let task = storage.getWandTask(req.params.id);
       if (!task) {
@@ -604,7 +624,13 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         && !body.provider ? selectEmployeeCandidate(defaultRoleForCli(storage, config.defaultProvider)).agent : null;
       const fallbackAgent = fallbackCandidate && body.kind === "pty"
         ? { ...fallbackCandidate, kind: "pty" as const } : fallbackCandidate;
-      const agent = selected?.agent ?? (body.agent === undefined
+      const storedOverride = body.useEmployeeDefaults === true ? null : subject?.agentOverride
+        ?? (subject?.type === "employee" && task.executionSubject?.type === "employee" && subject.id === task.executionSubject.id ? task.executionSubject.agentOverride : null);
+      const override = employee ? body.agent !== undefined ? parseTaskAgent(body.agent) : storedOverride ? parseTaskAgent(storedOverride) : null : null;
+      if (override && body.agent !== undefined && bodyObject(body.agent).mode && bodyObject(body.agent).mode !== override.mode) throw badRequest("所选工具不支持该运行模式，请重新选择。");
+      if (employee && body.agent !== undefined && !override) throw badRequest("请选择有效的本次工具配置。");
+      const executionEmployee = employee && override ? { ...employee, agents: [override] } : employee;
+      const agent = override ?? selected?.agent ?? (body.agent === undefined
         ? cliDefault ?? task.agent ?? fallbackAgent ?? parseWandTaskAgent(JSON.stringify(body))
         : parseTaskAgent(body.agent, task.agent?.mode, task.agent?.kind));
       if (!agent) throw badRequest("请先为该任务选择 CLI 工具。");
@@ -623,11 +649,11 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       const { session, cwd, workspaceId } = await dispatchAgentForTask(
         { storage, config, structured: structured ?? null, processes: processes ?? null },
         { task, agent, prompt, automationId: `wand-task:${task.id}`,
-          systemPrompt: employee?.prompt, employee: employee ?? undefined,
-          employeeCandidateIndex: selected?.index },
+          systemPrompt: employee?.prompt, employee: executionEmployee ?? undefined,
+          employeeCandidateIndex: override ? 0 : selected?.index },
       );
       task = storage.getWandTask(task.id)!;
-      const usedSubject = subject ?? { type: "cli" as const, id: agent.provider };
+      const usedSubject = subject?.type === "employee" ? { type: "employee" as const, id: subject.id, ...(override ? { agentOverride: override } : {}) } : subject ?? { type: "cli" as const, id: agent.provider };
       storage.updateWandTask(task.id, {
         agent,
         executionSubject: usedSubject,

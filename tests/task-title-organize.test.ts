@@ -120,7 +120,7 @@ test("duplicate titles parent onto the doing task and consolidate sessions", asy
   assert.deepEqual(again.taskParents, []);
 });
 
-test("a non-doing canonical does not become a parent, but sessions still move", async () => {
+test("an unstarted canonical can become a planning parent without execution", async () => {
   const plan = await planTitleOrganization([
     task({ id: "first", titles: ["修复登录"], status: "todo", createdAt: "2026-10-01T00:00:00.000Z" }),
     task({ id: "second", titles: ["修复登录"], status: "todo", createdAt: "2026-10-02T00:00:00.000Z" }),
@@ -129,8 +129,8 @@ test("a non-doing canonical does not become a parent, but sessions still move", 
     session({ id: "s", title: "修复登录", workspaceTaskId: "second" }),
   ]);
   assert.deepEqual(plan.sessionMoves, [{ sessionId: "s", taskId: "first" }]);
-  assert.equal(plan.taskParents.length, 0);
-  assert.match(plan.refused[0]?.reason ?? "", /不在处理中/);
+  assert.deepEqual(plan.taskParents, [{ workspaceTaskId: "second", parentCardId: "card-first" }]);
+  assert.equal(plan.refused.some(item => item.id === "second"), false);
 });
 
 test("team sessions and existing parents are not rewritten", async () => {
@@ -213,4 +213,15 @@ test("outcome copy stays on the action and surfaces a refusal", () => {
   assert.deepEqual(describeOrganizeOutcome({ movedSessions: [], categorizedTasks: [], refused: [{ reason: "自动判断不可用" }], eligibleTasks: 3 }), {
     label: "未调整任何任务或会话", reason: "已检查 3 个任务；自动判断不可用",
   });
+});
+
+
+test("semantic batch planning accepts each unarchived root and refuses children as parents", async () => {
+  for (const status of ["todo", "doing", "done"] as const) {
+    const plan = await planTitleOrganization([task({ id: "parent", titles: ["主目标"], status }), task({ id: "leaf", titles: ["独立子项"], status: "todo" })], [], async () => ({ sessions: [], tasks: [{ id: "leaf", parentId: "parent" }] }));
+    assert.deepEqual(plan.taskParents, [{ workspaceTaskId: "leaf", parentCardId: "card-parent" }]);
+  }
+  const plan = await planTitleOrganization([task({ id: "root", titles: ["主目标"] }), task({ id: "child", titles: ["历史子项"], parentTaskId: "card-root" }), task({ id: "leaf", titles: ["独立子项"] })], [], async () => ({ sessions: [], tasks: [{ id: "leaf", parentId: "child" }] }));
+  assert.deepEqual(plan.taskParents, []);
+  assert.match(plan.refused.find(item => item.id === "leaf")?.reason ?? "", /最多两层/);
 });

@@ -5,6 +5,7 @@ import { withModelGroups } from "./model-group-runner.js";
 import { classifyStructuredFailure, hasStructuredExecutionProgress, type StructuredFailure } from "./structured-failure.js";
 import { withAutomaticPiResources } from "./pi-auto-resources.js";
 import { randomUUID } from "node:crypto";
+import { waitForSessionProcessExit } from "./session-artifact-cleanup.js";
 
 import { prepareSessionWorktree, type WorktreeSetupSpec } from "./git-worktree.js";
 
@@ -23,6 +24,7 @@ import type { WandTaskAgent } from "./task-types.js";
 import { selectEmployeeCandidate } from "./silicon-employee-dispatch.js";
 import { recordIterationPrompt } from "./iteration-log.js";
 import { startEmployeeKnowledgeRunner } from "./employee-knowledge.js";
+import type { WebLoginTickets } from "./web-login-tickets.js";
 import { CoreRunner } from "./core-runner.js";
 import { CoreTurnTracker } from "./core-turn-tracker.js";
 import type { CoreStatus } from "./core-status-cli.js";
@@ -184,7 +186,9 @@ function buildUserTurn(
 export class StructuredSessionManager {
   private readonly sessions = new Map<string, SessionSnapshot>();
   // Both freshly started runners and adopted daemon runs own the same input gate.
-  private readonly pendingRunnerExecutions = new Map<string, Pick<StructuredRunnerExecution, "interrupt">>();
+  private readonly pendingRunnerExecutions = new Map<string,
+    Pick<StructuredRunnerExecution, "interrupt"> & Partial<Pick<StructuredRunnerExecution, "completion">> & { settled?: Promise<void> }
+  >();
   // Server-only, one-shot execution UUIDs. Actual request lifecycle clears them; metadata updates do not.
   // Never persisted or included in session DTOs.
   private readonly unacceptedTeamStarts = new Map<string, { requestId: string; failure: StructuredFailure }>();
@@ -250,6 +254,7 @@ export class StructuredSessionManager {
     private readonly openRouter?: OpenRouterFreeModelsService,
     /** 「智能分配」专用的本地决策入口：只有真正能跑时才注入，没注入则用系统员工回退。 */
     private readonly autoAssignEvaluate: () => DecisionRuntimeAccess["evaluate"] = () => undefined,
+    private readonly webLoginTickets?: WebLoginTickets,
   ) {
     if (logger && execHost?.persistent && !runners.pi && process.env.WAND_PI_NATIVE_TMUX !== "0"
       && process.env.WAND_TEST_MODE !== "1" && !process.env.NODE_TEST_CONTEXT) {
@@ -590,7 +595,9 @@ export class StructuredSessionManager {
     const requestId = `recover-${initialState.incarnationId}`;
     let runningHandle: Awaited<ReturnType<StructuredExecHost["adoptRun"]>> = null;
     let interruptRequested = false;
+    let acknowledgeExit = () => {};
     const execution = {
+      settled: new Promise<void>((resolve) => { acknowledgeExit = resolve; }),
       interrupt: (): void => {
         interruptRequested = true;
         runningHandle?.interrupt();
@@ -599,6 +606,7 @@ export class StructuredSessionManager {
     // Reserve ownership before publishing inFlight or awaiting adoption. Inputs
     // arriving during replay/attach must queue just like inputs to a fresh runner.
     this.pendingRunnerExecutions.set(sessionId, execution);
+    this.trackNativeProcessExit(sessionId, { exited: execution.settled });
 
     // Re-arm the in-flight marker so UI and request guards treat the resumed
     // turn like any other streaming turn.
@@ -771,6 +779,7 @@ export class StructuredSessionManager {
     };
 
     if (initialState.status === "exited") {
+      acknowledgeExit();
       feedFullLog();
       stdoutFile?.dispose();
       if (fileFailed) return;
@@ -802,6 +811,8 @@ export class StructuredSessionManager {
       this.releasePendingRunnerExecution(sessionId, execution, false);
       throw error;
     }
+    // Exit acknowledgement survives callback invalidation during stop/delete.
+    runningHandle?.onExit((event) => { if (event.processExited !== false) acknowledgeExit(); });
     // Server shutdown detaches persistent runs; only an explicit stop/delete
     // should cancel a handle that arrived after its request was invalidated.
     if (this.disposed) { stdoutFile?.dispose(); return; }
@@ -2360,6 +2371,36 @@ export class StructuredSessionManager {
     return cancelled;
   }
 
+  private readonly nativeCleanupBarriers = new Map<string, Promise<void>>();
+  private readonly nativeProcessExits = new Map<string, Set<Promise<void>>>();
+
+  private trackNativeProcessExit(id: string, execution: Pick<StructuredRunnerExecution, "exited">): void {
+    if (!execution.exited) return;
+    const exits = this.nativeProcessExits.get(id) ?? new Set<Promise<void>>();
+    exits.add(execution.exited);
+    this.nativeProcessExits.set(id, exits);
+    void execution.exited.then(() => {
+      exits.delete(execution.exited!);
+      if (!exits.size && this.nativeProcessExits.get(id) === exits) this.nativeProcessExits.delete(id);
+    }, () => { /* Unknown process state must continue to block destructive cleanup. */ });
+  }
+
+  nativeHistoryCleanupBarrier(id: string): Promise<void> | null {
+    const existing = this.nativeCleanupBarriers.get(id);
+    if (existing) return existing;
+    const execution = this.pendingRunnerExecutions.get(id);
+    const exits = this.nativeProcessExits.get(id);
+    const completion = exits?.size ? Promise.all([...exits]) : execution?.completion ?? execution?.settled;
+    if (!completion) return execution ? Promise.reject(new Error("CLI exit acknowledgement is unavailable.")) : null;
+    const barrier = waitForSessionProcessExit((done) => {
+      let active = true;
+      void completion.then(() => { if (active) done(); }, () => { /* fail closed on timeout */ });
+      return () => { active = false; };
+    });
+    this.nativeCleanupBarriers.set(id, barrier);
+    return barrier;
+  }
+
   delete(id: string): void {
     this.unacceptedTeamStarts.delete(id);
     this.requireRecoveryControl(id);
@@ -2408,7 +2449,18 @@ export class StructuredSessionManager {
     if (this.pendingRunnerExecutions.get(sessionId) !== execution) return false;
     this.pendingRunnerExecutions.delete(sessionId);
     // A failed recovery attach must retain the daemon record for the next retry.
-    if (forgetRun) this.execHost?.forgetRun(structuredRunId(sessionId));
+    if (forgetRun) {
+      const exits = this.nativeProcessExits.get(sessionId);
+      const barrier = this.nativeCleanupBarriers.get(sessionId) ?? (exits?.size ? Promise.all([...exits]) : null);
+      if (barrier) {
+        const forget = () => {
+          this.nativeCleanupBarriers.delete(sessionId);
+          if (!this.pendingRunnerExecutions.has(sessionId)) this.execHost?.forgetRun(structuredRunId(sessionId));
+        };
+        // Forgetting a remote handle early discards the exit notification.
+        void barrier.then(forget, forget);
+      } else this.execHost?.forgetRun(structuredRunId(sessionId));
+    }
     return true;
   }
 
@@ -2649,8 +2701,9 @@ export class StructuredSessionManager {
         syncSnapshot(turnState);
         scheduleEmit();
       },
-    });
+    }, this.webLoginTickets ? (sessionId, employeeId) => this.webLoginTickets!.grant({ sessionId, employeeId }) : undefined);
     this.pendingRunnerExecutions.set(sessionId, execution);
+    this.trackNativeProcessExit(sessionId, execution);
     if (candidateChain) {
       this.armCandidateStartupWatchdog(sessionId, () => {
         if (turnCompleted || !this.isCurrentRequest(sessionId, requestId)) return;

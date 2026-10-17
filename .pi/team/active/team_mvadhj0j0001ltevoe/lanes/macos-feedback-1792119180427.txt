@@ -1,0 +1,6 @@
+Lane mailbox for macOS 错误日志适配 (role macos-feedback)
+Run: team_mvadhj0j0001ltevoe
+Lane: macos-feedback-1792119180427
+Token: 8b20652d-e054-4b7c-afdd-2d4f8bd39576
+
+Captain messages appear below, newest last.

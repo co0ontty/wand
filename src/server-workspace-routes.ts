@@ -727,8 +727,13 @@ export function registerWorkspaceRoutes(
           ...summarize(session, { taskName: task.name, workspaceName: isGlobalWorkspace(workspace) ? undefined : workspace.name }),
           workspaceTaskId: task.id,
         }));
+      const board = model.cardsByContainer.get(task.id);
+      const parent = board?.parentTaskId ? storage.getWandTask(board.parentTaskId) : null;
       target.tasks.push({
         ...task,
+        boardTaskId: board?.id ?? null,
+        parentWorkspaceTaskId: parent?.workspaceTaskId ?? null,
+
         canArchive: (() => { const card = model.cardsByContainer.get(task.id); return card ? model.canArchive(card) : true; })(),
         ...model.milestone(task.milestoneId),
         cwd: taskRuntimeCwd(task, workspace),
@@ -744,10 +749,31 @@ export function registerWorkspaceRoutes(
       const global = isGlobalWorkspace(workspace);
       // Filter before pagination. Keep the full membership map below so hidden
       // task sessions cannot reappear as standalone conversations.
-      const visibleTasks = tasksByWorkspace.get(workspace.id)!
-        .filter((task) => includeArchived || !task.archived);
+      const workspaceTasks = tasksByWorkspace.get(workspace.id)!;
+      const keep = new Set(workspaceTasks.filter(task => includeArchived || !task.archived).map(task => task.id));
+      for (const id of [...keep]) {
+        let card = model.cardsByContainer.get(id);
+        const seen = new Set<string>();
+        while (card?.parentTaskId && !seen.has(card.id)) {
+          seen.add(card.id);
+          const parent = storage.getWandTask(card.parentTaskId);
+          if (!parent) break;
+          if (parent.workspaceTaskId) keep.add(parent.workspaceTaskId);
+          card = parent;
+        }
+      }
+      const visibleTasks = workspaceTasks.filter(task => keep.has(task.id));
       for (const task of visibleTasks.slice(0, taskLimit ?? undefined)) {
-        const taskCwd = taskRuntimeCwd(task, workspace);
+        let root = model.cardsByContainer.get(task.id);
+        const seen = new Set<string>();
+        while (root?.parentTaskId && !seen.has(root.id)) {
+          seen.add(root.id);
+          const parent = storage.getWandTask(root.parentTaskId);
+          if (!parent) break;
+          root = parent;
+        }
+        const rootContainer = root?.workspaceTaskId ? storage.getWorkspaceTask(root.workspaceTaskId) : null;
+        const taskCwd = taskRuntimeCwd(rootContainer ?? task, workspace);
         const target = global && taskCwd
           && normalizeProjectCwd(taskCwd) !== normalizeProjectCwd(workspace.cwd)
           ? syntheticGroupForCwd(taskCwd)

@@ -5,6 +5,7 @@ import { WandButton } from "../ui/button";
 import { WandIcon } from "../ui/icons";
 import { ExecutionHistory } from "./execution-history";
 import { useScheduledPresentation } from "./presentation-context";
+import { scheduleLabel, scheduleDateInZone } from "./model";
 import { scheduledTasksRepository } from "./repository";
 
 /** A selected historical occurrence is fetched by exact task+run identity.
@@ -35,6 +36,7 @@ export function ScheduledTaskDetails({ task, active, focusRun, onEdit, onOpenSes
     <div className="scheduled-detail-prompt"><h2>{task.title}</h2>
       {prompt !== undefined ? <p>{prompt}</p> : error ? null : <p role="status"><Spin size="small"/>正在读取本次执行快照…</p>}
       {error && <Alert type="warning" showIcon title={`记录内容读取失败，已知执行状态仍保留：${error}`} action={<WandButton size="small" onClick={() => setRetry(value => value + 1)}>重新读取</WandButton>}/>}
+      {!focusRun && <dl><dt>执行频率</dt><dd>{scheduleLabel(task.schedule)}</dd><dt>下次执行</dt><dd>{task.enabled && task.nextRunAt ? scheduleDateInZone(task.nextRunAt, task.schedule.kind === "once" ? timeZone : task.schedule.timeZone) : task.cancelledAt ? "已取消" : !task.enabled ? "已暂停；恢复后重新计算" : "计划已结束"}</dd></dl>}
       <dl><dt>{focusRun ? "显示时区" : "计划时区"}</dt><dd>{focusRun ? timeZone : task.schedule.kind === "once" ? "单次绝对时间" : task.schedule.timeZone}</dd><dt>执行目录</dt><dd><code>{cwd || (focusRun ? "本次记录未保留目录" : "目录不可用")}</code></dd></dl>
       {!focusRun && (task.employeeUnavailableReason || task.workspaceUnavailableReason) && <Alert type="error" showIcon title={task.employeeUnavailableReason || task.workspaceUnavailableReason}/>}
       {!task.cancelledAt && <WandButton size="small" kind="ghost" onClick={onEdit}><WandIcon name="edit"/>编辑任务</WandButton>}

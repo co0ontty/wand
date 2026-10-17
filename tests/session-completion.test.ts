@@ -167,8 +167,8 @@ test("viewed completion leaves directory and recent activity without closing the
     standaloneSessions: [{ ...session, id: "standalone" }],
   }];
   assert.equal(filterActiveGroups(page(unread), unread.id)[0].tasks.length, 1);
-  assert.deepEqual(filterActiveGroups(page(seen), seen.id)[0].tasks, []);
-  assert.deepEqual(filterActiveGroups(page(seen), "standalone")[0].standaloneSessions, []);
+  assert.deepEqual(filterActiveGroups(page(seen), seen.id), []);
+  assert.deepEqual(filterActiveGroups(page(seen), "standalone"), []);
   const recent = (session: typeof unread, activeOnly = true) => recentConversationGroups(collectRecentEntries(page(session)),
     { activeOnly, selectedSessionId: session.id }).flatMap(group => group.entries);
   assert.equal(recent(unread).length, 2);

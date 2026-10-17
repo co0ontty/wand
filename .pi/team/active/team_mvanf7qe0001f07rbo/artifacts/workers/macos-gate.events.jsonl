@@ -1,0 +1,117 @@
+{"at":1792135868718,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135868719,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135868719,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135868719,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135869675,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135881402,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135881403,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_start read","toolName":"read"}
+{"at":1792135881411,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792135881413,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135881414,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135882155,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135886514,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135886515,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_start bash","toolName":"bash"}
+{"at":1792135886523,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792135886524,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135886524,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135887302,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135887848,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135887849,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_start bash","toolName":"bash"}
+{"at":1792135887866,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792135887867,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135887868,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135888729,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135890010,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135890013,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_start bash","toolName":"bash"}
+{"at":1792135890038,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792135890039,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135890040,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135890937,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135891575,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135891576,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_start read","toolName":"read"}
+{"at":1792135891582,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792135891583,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135891584,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135892795,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135893512,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135893515,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_start bash","toolName":"bash"}
+{"at":1792135893543,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792135893545,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135893546,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135894493,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135896075,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135896078,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_start read","toolName":"read"}
+{"at":1792135896093,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792135896095,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135896096,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135897565,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135897823,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135897826,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_start bash","toolName":"bash"}
+{"at":1792135897851,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792135897853,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135897854,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135898999,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135900165,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135900169,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_start bash","toolName":"bash"}
+{"at":1792135900192,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792135900194,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135900195,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135901616,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135901833,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135901835,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_start read","toolName":"read"}
+{"at":1792135901849,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792135901850,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135901852,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135902883,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135904140,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135904143,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_start read","toolName":"read"}
+{"at":1792135904159,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792135904162,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135904164,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135905437,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135909296,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135909300,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_start bash","toolName":"bash"}
+{"at":1792135909340,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792135909342,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135909343,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135910834,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135929730,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135929731,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_start read","toolName":"read"}
+{"at":1792135929735,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792135929735,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135929735,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135933200,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135936723,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135936726,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_start bash","toolName":"bash"}
+{"at":1792135937487,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792135937488,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135937488,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135938758,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135952272,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135952273,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_start read","toolName":"read"}
+{"at":1792135952279,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792135952280,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135952281,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135953835,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135954976,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135954979,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_start read","toolName":"read"}
+{"at":1792135954990,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792135954992,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135954994,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135957277,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135974778,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135974779,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_start bash","toolName":"bash"}
+{"at":1792135974784,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792135974784,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135974785,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135977022,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135980002,"phase":"worker-budget-notice","message":"macOS XCTest 与 Beta 出包 reached soft request budget (18/18)"}
+{"at":1792135980003,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135980004,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_start bash","toolName":"bash"}
+{"at":1792135980032,"phase":"worker-tool","message":"macOS XCTest 与 Beta 出包 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792135980033,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135980034,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135980035,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792135980036,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended"}
+{"at":1792135982993,"phase":"worker-message-start","message":"macOS XCTest 与 Beta 出包 message started"}
+{"at":1792136013718,"phase":"worker-message-end","message":"macOS XCTest 与 Beta 出包 assistant message ended","preview":"**RADIO: status=finalizing, action=bounded-evidence-stop (18 responses used), evidence=read mailbox(empty)+snapshot-AGENTS.md+macos/README.md+scripts/run-tests.sh+build.sh+environment.sh+ls/mount checks, blocker=next-xcodebuild-call-exceeds"}

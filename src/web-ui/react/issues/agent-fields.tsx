@@ -1,13 +1,17 @@
-import { Flex, Form, Typography } from "antd";
+import { Alert, Collapse, Flex, Form, Typography } from "antd";
 import * as React from "react";
 import { isLocalDecisionModel, WAND_LOCAL_DECISION_MODEL, WAND_LOCAL_DECISION_LABEL } from "../../../decision-expert-identity.js";
 import { OPENROUTER_FREE_SELECTOR, OPENROUTER_FREE_GROUP } from "../../../openrouter-free-selection.js";
 import type { AiTeam, SiliconEmployee } from "../../../ai-team-types";
 import type { TaskExecutionSubject, WandTaskAgent } from "../../../task-types";
 import { TeamAvatarStack } from "../ai-teams/avatar";
-import { WandSelect } from "../ui";
+import { EmployeeAvatar } from "../agents/employee-avatar";
+import { WandButton, WandDialogSurface, WandSelect } from "../ui";
 import { AGENT_TOOL_OPTIONS, WAND_AGENT_TOOL_ID } from "../../provider-identity.js";
 import {
+  issueAgentLabel,
+  issueAgentModeLabel,
+  issueAgentEffortLabel,
   issueAgentEffortOptions,
   issueAgentModeOptions,
   issueAgentModelOptions,
@@ -29,12 +33,12 @@ export function agentTargetOptions(
   options: { includeDispatch?: boolean } = {},
 ): Array<{ value: string; label: string }> {
   return [
-    ...providerOptions,
     ...(employees ?? []).filter((employee) => !employee.archivedAt).map((employee) => ({
       value: `${EMPLOYEE_VALUE_PREFIX}${employee.id}`,
       label: `员工 · ${employee.name}`,
     })),
     ...(teams ?? []).map((team) => ({ value: `${TEAM_VALUE_PREFIX}${team.id}`, label: `团队 · ${team.name}` })),
+    ...providerOptions,
     ...(options.includeDispatch ? [{ value: DISPATCH_VALUE, label: "临时派工 · 决策选人" }] : []),
   ];
 }
@@ -83,6 +87,8 @@ export function AgentFields({
   employeeId = "",
   onEmployeeChange,
   onChange,
+  onDispatchSelect,
+  employeeOverride = false,
 }: {
   agent: WandTaskAgent;
   catalog: IssueModelCatalog | null;
@@ -97,8 +103,10 @@ export function AgentFields({
   employees?: ReadonlyArray<SiliconEmployee> | null;
   employeeId?: string;
   onEmployeeChange?(employeeId: string): void;
+  onDispatchSelect?(): void;
+  employeeOverride?: boolean;
   /** A target change carries the complete subject, so callers never remember intermediate resets. */
-  onChange(agent: WandTaskAgent, subject?: TaskExecutionSubject): void;
+  onChange(agent: WandTaskAgent, subject?: TaskExecutionSubject, employeeOverride?: boolean): void;
 }): React.ReactElement {
   const team = teamId ? teams?.find((item) => item.id === teamId) ?? null : null;
   const employee = employeeId ? employees?.find((item) => item.id === employeeId) ?? null : null;
@@ -110,12 +118,13 @@ export function AgentFields({
       .map(option => ({ value: option.id, label: option.label })),
   ] : providerOptions;
   const selectTarget = (value: string): void => {
+    if (agentTargetIsDispatch(value)) { onDispatchSelect?.(); return; }
     const nextTeam = agentTargetTeamId(value);
     const nextEmployee = agentTargetEmployeeId(value);
     onTeamChange?.(nextTeam);
     onEmployeeChange?.(nextEmployee);
     if (nextTeam || nextEmployee) {
-      onChange({ ...agent, kind: "structured" }, {
+      onChange(nextEmployee ? employees?.find(item => item.id === nextEmployee)?.agents[0] ?? { ...agent, kind: "structured" } : { ...agent, kind: "structured" }, {
         type: nextEmployee ? "employee" : "team", id: nextEmployee || nextTeam,
       });
       return;
@@ -123,36 +132,57 @@ export function AgentFields({
     const next = withIssueAgentTarget(agent, value, catalog);
     onChange(next, { type: "cli", id: next.provider });
   };
+  const peopleFirst = !!(onTeamChange || onEmployeeChange);
+  const targetSelect = (direct: boolean) => <AgentField label={peopleFirst ? direct ? "直接工具指派" : "指派给" : "执行工具"}>
+    {toolOptions ? <WandSelect
+      value={direct || !peopleFirst ? direct && (employee || team) ? "" : issueAgentTargetValue(agent) : employee ? `${EMPLOYEE_VALUE_PREFIX}${employee.id}` : team ? `${TEAM_VALUE_PREFIX}${team.id}` : employeeId ? `${EMPLOYEE_VALUE_PREFIX}${employeeId}` : teamId ? `${TEAM_VALUE_PREFIX}${teamId}` : ""}
+      options={direct || !peopleFirst ? toolOptions : agentTargetOptions([], teams, employees, { includeDispatch: !!onDispatchSelect })}
+      ariaLabel={`${ariaPrefix}${direct ? "直接工具" : "指派给"}`}
+      className="task-board-native-select" disabled={disabled} onValueChange={selectTarget}
+    /> : <span role="status">正在加载执行对象…</span>}
+  </AgentField>;
   return <>
-    <AgentField label={onTeamChange || onEmployeeChange ? "指派给" : allowSdkEngine ? "执行工具" : "CLI 工具"}>
-      {toolOptions ? <WandSelect
-        value={employee ? `${EMPLOYEE_VALUE_PREFIX}${employee.id}` : team ? `${TEAM_VALUE_PREFIX}${team.id}` : issueAgentTargetValue(agent)}
-        options={onTeamChange || onEmployeeChange ? agentTargetOptions(toolOptions, teams, employees) : toolOptions}
-        ariaLabel={`${ariaPrefix}指派给`}
-        className="task-board-native-select"
-        disabled={disabled}
-        onValueChange={selectTarget}
-      /> : <span role="status">正在加载工具列表…</span>}
-    </AgentField>
-    {employee ? <AgentField label="执行顺序">
-      <Flex align="center" gap={10}>
-        <Typography.Text type="secondary">{employee.agents.length} 个结构化候选 · 按顺序降级</Typography.Text>
-      </Flex>
-    </AgentField> : team ? <AgentField label="团队成员">
-      <Flex align="center" gap={10}>
-        <TeamAvatarStack members={team.members}/>
-        <Typography.Text type="secondary">{team.members.length} 人 · 由负责人拆解分派</Typography.Text>
-      </Flex>
-    </AgentField> : <AgentModelFields
-      agent={agent}
-      catalog={catalog}
-      disabled={disabled}
-      ariaPrefix={ariaPrefix}
-      showKind={showKind}
-      allowSdkEngine={allowSdkEngine}
-      onChange={onChange}
-    />}
+    {targetSelect(false)}
+    {employeeId && !employee && <Alert type="warning" title="已指派员工不可用，请明确选择其他员工或在高级选项中改为工具指派。"/>}
+    {teamId && !team && <Alert type="warning" title="已指派团队不可用，请重新选择执行对象。"/>}
+    {employee ? <EmployeeTaskTools employee={employee} agent={agent} catalog={catalog} providerOptions={toolOptions}
+      disabled={disabled} ariaPrefix={ariaPrefix} overridden={employeeOverride}
+      onReset={() => onChange(employee.agents[0]!, { type: "employee", id: employee.id }, false)}
+      onApply={next => onChange(next, { type: "employee", id: employee.id }, true)}/>
+      : team ? <AgentField label="团队成员"><Flex align="center" gap={10}>
+        <TeamAvatarStack members={team.members}/><Typography.Text type="secondary">{team.members.length} 人 · 由负责人拆解分派</Typography.Text>
+      </Flex></AgentField> : peopleFirst ? <Typography.Text type="secondary">{issueAgentLabel(agent.provider, agent.engine)} · 直接工具配置；在高级选项中修改</Typography.Text> :
+      <AgentModelFields agent={agent} catalog={catalog} disabled={disabled} ariaPrefix={ariaPrefix} showKind={showKind} allowSdkEngine={allowSdkEngine} onChange={onChange}/>}
+    {peopleFirst && <Collapse style={{ width: "100%" }} ghost items={[{ key: "tools", label: "高级选项 · 直接指派工具", children: <>
+      <Typography.Paragraph type="secondary">选择工具后将直接派发，不使用员工或团队身份。</Typography.Paragraph>
+      {targetSelect(true)}
+      {!employee && !team && <AgentModelFields agent={agent} catalog={catalog} disabled={disabled} ariaPrefix={ariaPrefix} showKind={showKind} allowSdkEngine={allowSdkEngine} onChange={next => onChange(next, { type: "cli", id: next.provider })}/>}
+    </> }]}/>}
   </>;
+}
+
+export function EmployeeTaskTools({ employee, agent, catalog, providerOptions, disabled, ariaPrefix, onApply, overridden, onReset }: {
+  employee: SiliconEmployee; agent: WandTaskAgent; catalog: IssueModelCatalog | null;
+  providerOptions: Array<{ value: string; label: string }> | null; disabled?: boolean; ariaPrefix: string;
+  overridden: boolean; onReset(): void;
+  onApply(agent: WandTaskAgent): void;
+}): React.ReactElement {
+  const [editing, setEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState(agent);
+  const summary = [issueAgentLabel(agent.provider, agent.engine), agent.model, issueAgentEffortLabel(agent.thinkingEffort), issueAgentModeLabel(agent.mode)].join(" · ");
+  return <Flex vertical gap={4}>
+    <Flex align="center" gap={8}><EmployeeAvatar employee={employee} size="sm"/><strong>{employee.name}</strong></Flex>
+    <WandButton kind="ghost" size="small" disabled={disabled || !employee.agents.length} aria-label={`${ariaPrefix}工具设置`} onClick={() => { setDraft(agent); setEditing(true); }}>{summary}</WandButton>
+    <Typography.Text type="secondary">{overridden ? "已覆盖本次任务；员工默认配置保持不变。" : `${employee.agents.length} 个候选 · 按员工默认顺序执行`}</Typography.Text>
+    {overridden && <WandButton kind="ghost" size="small" onClick={onReset}>恢复员工默认</WandButton>}
+    {!employee.agents.length && <Alert type="warning" title="该员工尚未配置执行工具"/>}
+    <WandDialogSurface open={editing} title="本次任务的工具设置" description="应用仅影响本次执行，不修改员工默认配置；覆盖后只使用所选配置。" onOpenChange={setEditing}>
+      <Alert type="info" title="切换工具后，模型和运行模式会按该工具支持范围调整；请核对后应用。"/>
+      <AgentFields agent={draft} catalog={catalog} providerOptions={providerOptions} allowSdkEngine disabled={disabled} ariaPrefix="本次" onChange={setDraft}/>
+      {draft.mode === "full-access" && <Alert type="warning" title="完全访问：本次工具将自动确认权限请求。"/>}
+      <Flex justify="end" gap={8}><WandButton kind="ghost" onClick={() => setEditing(false)}>取消</WandButton><WandButton kind="primary" onClick={() => { onApply({ ...draft, kind: "structured" }); setEditing(false); }}>应用到本次</WandButton></Flex>
+    </WandDialogSurface>
+  </Flex>;
 }
 
 function AgentModelFields({

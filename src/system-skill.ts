@@ -8,7 +8,7 @@ import { SESSION_PROVIDERS, type SessionProvider } from "./provider-catalog.js";
 
 export async function installSystemSkill(configPath: string, providers: readonly SessionProvider[] = SESSION_PROVIDERS, home = homedir()) {
   const source = fileURLToPath(new URL("../skills/wand-system/", import.meta.url));
-  const files = Object.fromEntries(await Promise.all(["SKILL.md", "references/operations.md", "scripts/wand.mjs"].map(async file =>
+  const files = Object.fromEntries(await Promise.all(["SKILL.md", "references/operations.md", "scripts/wand.mjs", "scripts/web-login.mjs"].map(async file =>
     [file, await readFile(path.join(source, file), "utf8")])));
   const js = fileURLToPath(new URL("./cli.js", import.meta.url));
   const cli = existsSync(js) ? js : js.replace(/\.js$/, ".ts");

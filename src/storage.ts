@@ -19,6 +19,7 @@ import { AiTeamRepository } from "./storage/ai-teams-repository.js";
 import { MissionRepository } from "./storage/missions-repository.js";
 import { SessionRepository } from "./storage/sessions-repository.js";
 import { UploadRepository } from "./storage/uploads-repository.js";
+import { FeedbackRepository } from "./storage/feedback-repository.js";
 export { parseWandTaskAgent };
 export type { ConnectorMeta };
 export { ensureDatabaseFile } from "./storage-schema.js";
@@ -38,7 +39,8 @@ export interface WandStorage extends
   RepositoryMethods<AiTeamRepository>,
   RepositoryMethods<MissionRepository>,
   RepositoryMethods<SessionRepository>,
-  RepositoryMethods<UploadRepository> {}
+  RepositoryMethods<UploadRepository>,
+  RepositoryMethods<FeedbackRepository> {}
 
 export class WandStorage {
   readonly conversations: ConversationRepository;
@@ -53,6 +55,7 @@ export class WandStorage {
   readonly missions: MissionRepository;
   readonly sessions: SessionRepository;
   readonly uploads: UploadRepository;
+  readonly feedback: FeedbackRepository;
   private readonly closeListeners = new Set<() => void>();
   private readonly taskTitleListeners = new Set<() => void>();
   private titleNoticePending = false;
@@ -114,6 +117,7 @@ export class WandStorage {
     this.missions = new MissionRepository(this.db, this);
     this.sessions = new SessionRepository(this.db, this);
     this.uploads = new UploadRepository(this.db, this);
+    this.feedback = new FeedbackRepository(this.db, this);
     this.schedules = new ScheduledTaskRepository(this.db, action => this.transaction(action));
     this.secrets.openVault();
     const brokenLinks = this.integrityReport().filter((item) => item.count > 0);
@@ -542,6 +546,7 @@ const REPOSITORY_FORWARDS: ReadonlyArray<readonly [field: string, repository: { 
   ["missions", MissionRepository],
   ["sessions", SessionRepository],
   ["uploads", UploadRepository],
+  ["feedback", FeedbackRepository],
 ];
 for (const [field, repository] of REPOSITORY_FORWARDS) {
   for (const name of Object.getOwnPropertyNames(repository.prototype)) {

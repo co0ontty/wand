@@ -255,11 +255,14 @@ test("PTY 创建请求把模型发到 /api/commands", async () => {
 test("new work uses page-only model choices and the existing composer handoff", () => {
   const host = readFileSync(new URL("../src/web-ui/react/new-session/host.tsx", import.meta.url), "utf8");
   assert.match(host, /ConversationExecutionSelectors/);
-  assert.match(host, /usePageExecutionPreference/);
+  // 临时执行配置归本页实例所有（useState），随打开实例丢弃，不写员工或服务默认。
+  assert.match(host, /React\.useState<ConversationExecutionPreference \| undefined>/);
+  assert.match(host, /onChange={setPreference}/);
   assert.doesNotMatch(host, /savePreferences\(|rememberModel\(/);
   const adapter = readFileSync(new URL("../src/web-ui/browser/new-session-adapter.ts", import.meta.url), "utf8");
   assert.match(adapter, /teamChatComposer\.transfer/);
-  assert.match(adapter, /await sendInputFromBox/);
+  assert.match(adapter, /void sendInputFromBox/);
+  assert.doesNotMatch(adapter, /await sendInputFromBox/);
 });
 
 test("HTTP repository serializes preferences and loads the latest server defaults", async () => {

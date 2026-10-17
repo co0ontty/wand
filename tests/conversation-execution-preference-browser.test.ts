@@ -9,7 +9,7 @@ import { registerConversationRoutes } from "../src/server-conversation-routes.js
 import { conversationHarness } from "./helpers/conversation-harness.js";
 import { openBrowser } from "./helpers/sidebar-ux-browser.mjs";
 
-test("conversation tool/model/thinking selectors retain page choice, send it, and never edit employee defaults", {
+test("conversation tool/model/thinking selectors send a session-scoped choice, discard it when leaving, and never edit employee defaults", {
   skip: process.env.WAND_EXECUTION_PREFERENCE_BROWSER !== "1", timeout: 120_000,
 }, async t => {
   const root = resolve(import.meta.dirname, "..");
@@ -69,22 +69,32 @@ test("conversation tool/model/thinking selectors retain page choice, send it, an
   await click('[role="option"][data-menu-id$="page-model"]');
   await click('[aria-label="本页思考深度"]');
   await click('[role="option"][data-menu-id$="deep"]');
-  for (const peer of ["dm_e_test_1", "dm_e_test_2"]) {
-    await evaluate(`fixture.ui.select(${JSON.stringify(peer)});true`);
-    await wait(`document.querySelector('.conversation-heading-title')?.textContent.includes(${JSON.stringify(peer.endsWith("1") ? "员工 1" : "员工 2")})`);
-    await wait('document.querySelector("[aria-label=本页模型]")?.textContent.includes("page-model")');
+  // 当前会话（员工 1）带着临时配置发送一次。
+  await wait('document.querySelector("[aria-label=本页模型]")?.textContent.includes("page-model")');
+  const work = async (text: string): Promise<void> => {
     await wait('document.querySelector(".conversation-sender textarea")?.readOnly === false');
     await click(".composer-compact-entry");
     await wait('document.activeElement === document.querySelector(".conversation-sender textarea")');
-    await browser.send("Input.insertText", { text: "isolated test work" });
-    await wait('document.querySelector(".conversation-sender textarea").value.includes("isolated test work")');
+    await browser.send("Input.insertText", { text });
+    await wait(`document.querySelector(".conversation-sender textarea").value.includes(${JSON.stringify(text)})`);
     await key("Enter");
     await wait('!document.querySelector(".conversation-sender textarea").value');
     await wait('document.querySelector("[aria-label=本页模型]")?.disabled === false');
-  }
+  };
+  await work("isolated test work");
+  // 切到另一个会话：临时配置必须丢弃，回到员工默认（Wand Agent）。
+  await evaluate('fixture.ui.select("dm_e_test_2");true');
+  await wait("document.querySelector('.conversation-heading-title')?.textContent.includes('员工 2')");
+  await wait('document.querySelector("[aria-label=本页执行工具]")?.textContent.includes("Wand Agent")');
+  await work("default work");
+  // 再切回原会话也应是员工默认，临时配置不跨重进存活。
+  await evaluate('fixture.ui.select("dm_e_test_1");true');
+  await wait("document.querySelector('.conversation-heading-title')?.textContent.includes('员工 1')");
+  await wait('document.querySelector("[aria-label=本页执行工具]")?.textContent.includes("Wand Agent")');
   if (bodies.length !== 2) console.log(await evaluate('({text:document.body.innerText.slice(-2400),active:document.activeElement?.outerHTML})'), browser.errors);
   assert.equal(bodies.length, 2);
-  for (const body of bodies) assert.deepEqual(body.executionPreference, { provider: "pi", engine: "cli", model: "page-model", thinkingEffort: "deep" });
+  assert.deepEqual(bodies[0].executionPreference, { provider: "pi", engine: "cli", model: "page-model", thinkingEffort: "deep" });
+  assert.equal("executionPreference" in bodies[1], false);
   assert.deepEqual(h.storage.getSiliconEmployee(saved.id), saved);
   // Real pointer dismissal paths, including the portal search box and keyboard return.
   await click('[aria-label="本页模型"]'); await click('[aria-label="搜索本页模型"]'); await key("Escape");

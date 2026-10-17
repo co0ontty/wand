@@ -17,7 +17,8 @@ test("Ant Design task pages preserve date-only, portals, draft refs and owned fo
   const artifact = join(root, "output/web-ui-library-migration/tasks");
   const subjectAudit = process.env.WAND_SUBJECT_CSS_AUDIT === "1";
   const boardOnly = process.env.WAND_TASK_BOARD_BROWSER_ONLY === "1";
-  const artifactName = boardOnly ? "task-board-browser.json" : subjectAudit ? `subject-css-audit-${process.env.WAND_SUBJECT_AUDIT_LABEL ?? "latest"}.json` : "tasks-browser.json";
+  const detailOnly = process.env.WAND_TASK_DETAIL_BROWSER_ONLY === "1";
+  const artifactName = detailOnly ? "task-detail-browser.json" : boardOnly ? "task-board-browser.json" : subjectAudit ? `subject-css-audit-${process.env.WAND_SUBJECT_AUDIT_LABEL ?? "latest"}.json` : "tasks-browser.json";
   const browserErrors: string[] = [];
   const evidence: Array<Record<string, unknown>> = [];
   const source = String.raw`
@@ -88,7 +89,7 @@ test("Ant Design task pages preserve date-only, portals, draft refs and owned fo
       let data = url.includes("provider-usage")?{}:url.includes("silicon-employees")?{employees:window.tasks.employees}:url.includes("ai-teams")?window.tasks.teams:url.includes("workspaces")?[{id:"w-audit",name:"Audit project",cwd:"/tmp",kind:"project"}]:url.includes("wand-milestones")?{milestones}:url.includes("team-runs")?[]:url.includes("models")?{models:[{id:"default",label:"Default"},{id:"alpha",label:"Alpha"}]}:{};
       return new Response(JSON.stringify(data), {status:200,headers:{"content-type":"application/json"}});
     };
-    Object.assign(taskBoardRepository,{list:async()=>{if(window.tasks.qaError)throw Error("Fixture list load failed — 草稿与数据未修改");if(window.tasks.qaLoading)return new Promise(resolve=>{window.tasks.qaRelease=()=>resolve([task])});return window.tasks.boardTasks??[task,{...task,id:"old",identifier:"TASK-2",title:"Archived",status:"archived"}]},workspaces:async()=>[{id:"w1",name:"Project",cwd:"/tmp"}],models:async()=>({models:[{id:"default",label:"Default"}]}),agentDefaults:async()=>window.tasks.agentDefaults??agent,saveAgentDefaults:async()=>{throw Error("Implicit defaults mutation")},create:async input=>new Promise(resolve=>{window.tasks.createdInputs??=[];window.tasks.createdInputs.push(input);window.tasks.createReceipt=()=>{if(input.rememberAgentDefaults)window.tasks.agentDefaults=input.agent;resolve({...task,...input,id:"new"})}})});
+    Object.assign(taskBoardRepository,{comments:async()=>{if(window.tasks.commentsFailed)throw Error("Fixture comments unavailable");return window.tasks.comments??[]},update:async(_id,patch)=>{if(window.tasks.rejectDescription)throw Error("Fixture description save rejected");Object.assign(task,patch);return task},list:async()=>{if(window.tasks.qaError)throw Error("Fixture list load failed — 草稿与数据未修改");if(window.tasks.qaLoading)return new Promise(resolve=>{window.tasks.qaRelease=()=>resolve([task])});return window.tasks.boardTasks??[task,{...task,id:"old",identifier:"TASK-2",title:"Archived",status:"archived"}]},workspaces:async()=>[{id:"w1",name:"Project",cwd:"/tmp"}],models:async()=>({models:[{id:"default",label:"Default"}]}),agentDefaults:async()=>window.tasks.agentDefaults??agent,saveAgentDefaults:async()=>{throw Error("Implicit defaults mutation")},create:async input=>new Promise(resolve=>{window.tasks.createdInputs??=[];window.tasks.createdInputs.push(input);window.tasks.createReceipt=()=>{if(input.rememberAgentDefaults)window.tasks.agentDefaults=input.agent;resolve({...task,...input,id:"new"})}})});
     Object.assign(issuesRepository,{list:async()=>[{number:1,title:"Library migration",state:"open",labels:[{name:"UI"}]}],bindings:async()=>({bindings:[]}),create:async()=>new Promise(resolve=>{window.tasks.issueReceipt=()=>resolve({number:2})})});
     configureNewSessionRuntime({onOpen:noop,onClose:noop,getContext:()=>({effectiveCwd:"/tmp",selectedModels:{}}),rememberModel:noop,prepareCreate:async()=>({}),completeCreate:async()=>{}});
     const newRepo={load:async()=>({config:{defaultProvider:"claude",defaultSessionKind:"structured",defaultMode:"default",defaultCwd:"/tmp"},recentPaths:[{path:"/tmp",name:"tmp"}]}),suggestPaths:async()=>[{path:"/tmp/project",name:"project"}],savePreferences:async()=>{},create:async()=>{throw Error("Local rejection keeps inputs");}};
@@ -393,10 +394,59 @@ test("Ant Design task pages preserve date-only, portals, draft refs and owned fo
       assert.equal(await evaluate("document.querySelector('.task-board-card-detail').textContent.includes('Full inline description')"), true);
       assert.equal(await evaluate(`(()=>{const card=document.querySelector('[data-task-id=t1]');const list=card.querySelector('.task-board-session-list');return {display:list?getComputedStyle(list).display:null,doubled:(card.innerText.match(/Real session/g)||[]).length}})()`).then((state) => state.display === "none" && state.doubled === 1), true, `${mode}: expanded card does not list the same session twice`);
       await settle(); await screenshot(`${mode}-board-expanded`);
+      await click('.task-board-card-detail-open');
+      await wait("!!document.querySelector('[aria-label=任务详情]')");
+      await wait("document.querySelector('[aria-label=任务评论]')?.textContent.includes('暂无评论')");
+      assert.equal(await evaluate("document.querySelector('[role=region][aria-label=任务描述]').textContent.includes(tasks.baseTask.description)"), true, `${mode}: detail retains the entire saved brief`);
+      assert.equal(await evaluate("document.querySelector('[role=region][aria-label=任务描述]').compareDocumentPosition(document.querySelector('.task-board-native-assign,.task-board-agent-add')) & Node.DOCUMENT_POSITION_FOLLOWING"), 4, `${mode}: reading content precedes execution`);
+      const detailOverflow = await evaluate("(()=>{const p=document.querySelector('.task-board-native-page');return {fits:p.scrollWidth<=p.clientWidth,offenders:Array.from(p.querySelectorAll('*')).filter(n=>n.getBoundingClientRect().right>p.getBoundingClientRect().right+1).slice(0,8).map(n=>({class:n.className,width:n.getBoundingClientRect().width,text:n.textContent.slice(0,50)}))}})()");
+      assert.equal(detailOverflow.fits, true, `${mode}: full detail has no horizontal overflow: ${JSON.stringify(detailOverflow.offenders)}`);
+      await evaluate("Array.from(document.querySelectorAll('button')).find(n=>n.textContent==='编辑描述').click()");
+      await wait("document.activeElement.getAttribute('aria-label')==='编辑任务描述'");
+      await send('Input.insertText', { text: 'Unsaved retained detail text' });
+      await evaluate("tasks.rejectDescription=true;Array.from(document.querySelectorAll('button')).find(n=>n.textContent==='保存描述').click()");
+      await wait("document.body.textContent.includes('Fixture description save rejected')");
+      assert.equal(await evaluate("document.querySelector('[aria-label=编辑任务描述]').value.includes('Unsaved retained detail text')"), true, `${mode}: failed save retains the editable draft`);
+      await evaluate("tasks.rejectDescription=false");
+      await key('Escape');
+      await wait("!document.querySelector('[aria-label=编辑任务描述]')");
+      assert.equal(await evaluate("!!document.querySelector('[aria-label=任务详情]')"), true, `${mode}: editor Escape retains task detail`);
+      await evaluate("tasks.originalDescription=tasks.baseTask.description;Array.from(document.querySelectorAll('button')).find(n=>n.textContent==='编辑描述').click()");
+      await wait("document.activeElement.getAttribute('aria-label')==='编辑任务描述'");
+      await evaluate("document.querySelector('[aria-label=编辑任务描述]').select()");
+      await send('Input.insertText', { text: 'Saved description acceptance marker' });
+      await evaluate("Array.from(document.querySelectorAll('button')).find(n=>n.textContent==='保存描述').click()");
+      await wait("!document.querySelector('[aria-label=编辑任务描述]') && document.querySelector('[role=region][aria-label=任务描述]').textContent.includes('Saved description acceptance marker')");
+      await evaluate("Array.from(document.querySelectorAll('button')).find(n=>n.textContent==='编辑描述').click()");
+      await wait("document.activeElement.getAttribute('aria-label')==='编辑任务描述'");
+      await evaluate("document.querySelector('[aria-label=编辑任务描述]').select()");
+      await send('Input.insertText', { text: await evaluate('tasks.originalDescription') });
+      await evaluate("Array.from(document.querySelectorAll('button')).find(n=>n.textContent==='保存描述').click()");
+      await wait("!document.querySelector('[aria-label=编辑任务描述]')");
+      await evaluate("tasks.comments=[{id:'comment-1',taskId:'t1',authorName:'评论作者',body:'## 完整评论标题\\n\\n'+('长评论内容 '.repeat(120))+'评论末尾验收标记\\n\\n1. 评论条目一\\n2. 评论条目二',createdAt:'2026-01-01'}];Array.from(document.querySelectorAll('button')).find(n=>n.textContent==='刷新评论').click()");
+      await wait("document.querySelector('[aria-label=任务评论]')?.textContent.includes('评论末尾验收标记')");
+      await wait("!!document.querySelector('[aria-label=任务评论] ol')");
+      assert.equal(await evaluate("getComputedStyle(document.querySelector('[aria-label=任务评论] ol')).listStyleType"), 'decimal', `${mode}: Markdown numbering survives the CSS reset without opening a preview dialog`);
+      assert.equal(await evaluate("document.querySelectorAll('#wand-markdown-preview-styles').length"), 1, `${mode}: canonical Markdown styles install once`);
+      await evaluate("tasks.commentsFailed=true;Array.from(document.querySelectorAll('button')).find(n=>n.textContent==='刷新评论').click()");
+      await wait("document.querySelector('[aria-label=任务评论]')?.textContent.includes('评论暂时加载失败')");
+      assert.equal(await evaluate("document.querySelector('[aria-label=任务评论]').textContent.includes('评论末尾验收标记')"), true, `${mode}: refresh failure preserves loaded comments`);
+      await evaluate("tasks.commentsFailed=false;Array.from(document.querySelectorAll('button')).find(n=>n.textContent==='重试').click()");
+      await wait("!document.querySelector('[aria-label=任务评论]').textContent.includes('评论暂时加载失败')");
+      await settle(); await screenshot(`${mode}-task-detail`);
+      await key('Escape'); await wait("!document.querySelector('[aria-label=任务详情]')");
+      await evaluate("tasks.comments=[]");
+      await wait("!!document.querySelector('.task-board-card-open')");
+      await click('.task-board-card-open'); await wait("document.querySelector('.task-board-card-open').getAttribute('aria-expanded')==='true'");
       // 展开后面板盖住整卡 overlay，非点击收起走 Escape（一次只退一层），焦点回到卡片触发区。
       await key('Escape'); await wait("document.querySelector('.task-board-card-open').getAttribute('aria-expanded')==='false'");
       assert.equal(await evaluate("document.activeElement===document.querySelector('.task-board-card-open')"), true, `${mode}: Escape collapse keeps focus on the card trigger`);
       await settle(); await screenshot(`${mode}-board`);
+      if (detailOnly) {
+        evidence.push({ mode, fullDescription: true, fullComments: true, saveAndRetry: true, editorEscape: true, noHorizontalOverflow: true, scope: "production detail with isolated repositories" });
+        console.log(`Task detail browser passed: ${mode}`);
+        continue;
+      }
       await click('[aria-label="任务菜单 TASK-1"]');
       await wait("!!document.querySelector('[data-wand-popup-owner=task-board-context] [role=menuitem]')");
       await key('Escape'); await wait("!document.querySelector('[data-wand-popup-owner=task-board-context]')");

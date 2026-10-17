@@ -113,7 +113,7 @@ class RemoteRun implements StructuredExecProcess {
   fail(): void {
     this.client.dropHandle(this.runId, this);
     // Explicit failure is preferable to a successful but incomplete turn.
-    this.acceptExit({ exitCode: 1, signal: null });
+    this.acceptExit({ exitCode: 1, signal: null, processExited: false });
   }
 }
 

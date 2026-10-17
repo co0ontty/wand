@@ -6,8 +6,17 @@ import { SESSION_PROVIDERS, type SessionProvider } from "./provider-catalog.js";
 
 const sha = (data: string): string => createHash("sha256").update(data).digest("hex");
 
+export interface ManagedSkillInstallResult {
+  installed: string[];
+  providers: readonly SessionProvider[];
+  /** Canonical files whose content was newly written (missing or refreshed from a prior managed version). */
+  changed: string[];
+  /** Provider discovery symlinks newly created by this install. */
+  linked: string[];
+}
+
 /** Install trusted bundled files without overwriting user content or changing tool permissions. */
-export async function installManagedSkill(configDir: string, name: string, files: Record<string, string>, providers: readonly SessionProvider[] = SESSION_PROVIDERS, home = homedir()): Promise<{ installed: string[]; providers: readonly SessionProvider[] }> {
+export async function installManagedSkill(configDir: string, name: string, files: Record<string, string>, providers: readonly SessionProvider[] = SESSION_PROVIDERS, home = homedir()): Promise<ManagedSkillInstallResult> {
   if (!providers.length || providers.some((provider) => !SESSION_PROVIDERS.includes(provider))) throw new Error("未知CLI技能目标。");
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name) || Object.keys(files).some(file =>
     path.isAbsolute(file) || file.split(/[\\/]/).some(part => !part || part === ".." || part === "."))) {
@@ -47,22 +56,30 @@ export async function installManagedSkill(configDir: string, name: string, files
   try { previous = JSON.parse(await readFile(path.join(canonical, ".wand-managed.json"), "utf8")) as Record<string, string>; }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   const contents = Object.entries(files).map(([file, content]) => ({ file, content }));
+  const changed: string[] = [];
   for (const { file, content } of contents) {
     try {
       const old = await readFile(path.join(canonical, file), "utf8");
-      if (old !== content && sha(old) !== previous[file]) throw new Error(`技能已有用户修改，拒绝覆盖：${file}`);
-    } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      if (old !== content) {
+        if (sha(old) !== previous[file]) throw new Error(`技能已有用户修改，拒绝覆盖：${file}`);
+        changed.push(file);
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      changed.push(file);
+    }
   }
   for (const { file, content } of contents) {
     await mkdir(path.dirname(path.join(canonical, file)), { recursive: true });
     await writeFile(path.join(canonical, file), content, { mode: 0o644 });
   }
   await writeFile(path.join(canonical, ".wand-managed.json"), JSON.stringify(Object.fromEntries(contents.map(({ file, content }) => [file, sha(content)]))), { mode: 0o600 });
+  const linked: string[] = [];
   for (const target of targets) {
     await mkdir(path.dirname(target), { recursive: true });
-    try { await symlink(canonical, target, "dir"); }
+    try { await symlink(canonical, target, "dir"); linked.push(target); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
     if (await realpath(target) !== await realpath(canonical)) throw new Error("技能链接目标校验失败。");
   }
-  return { installed: [...targets], providers };
+  return { installed: [...targets], providers, changed, linked };
 }

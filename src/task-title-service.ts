@@ -49,6 +49,9 @@ export class TaskTitleService {
       if (!isAutoNameableBoardTask(card)) continue;
       const source = taskAutoNameSourceText(this.storage, card);
       if (!source) continue;
+      // Planning must not spend model calls, even when the user leaves the title blank.
+      // Once an execution is explicitly bound, normal execution-driven naming may resume.
+      if (this.storage.listWandTaskSessionIds(card.id).length === 0) continue;
       const signature = taskAutoNameSignature(source);
       if (card.autoTitleSignature === signature) continue;
       const title = provisionalTaskTitleFromDescription(source);

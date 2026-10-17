@@ -63,9 +63,11 @@ test("sensitive system inputs are bounded/redacted; git and memory input preserv
     assert.ok(!JSON.stringify(stored).includes(fake)); assert.ok(!text(stored).includes("fixture-password"));
     assert.match(text(stored), /已脱敏/); assert.ok(!text(stored).includes(f.employee.prompt));
     const git = f.recorder.forEmployee(f.employee).start("git-commit", { system: "生成提交说明", prompt: "private source diff with arbitrary credentials" }, f.root);
-    git.fail(new Error("provider body must not persist"));
+    git.fail(new Error("upstream original error: HTTP 403 model unavailable; Bearer fixture-secret-abc123"));
     assert.match(text(f.storage.getSession(git.sessionId)), /SHA256/);
-    assert.doesNotMatch(text(f.storage.getSession(git.sessionId)), /arbitrary credentials|provider body/);
+    assert.doesNotMatch(text(f.storage.getSession(git.sessionId)), /arbitrary credentials|fixture-secret-abc123/);
+    assert.match(text(f.storage.getSession(git.sessionId)), /upstream original error: HTTP 403 model unavailable/);
+    assert.match(text(f.storage.getSession(git.sessionId)), /原始错误（凭据已脱敏）/);
   } finally { if (previous === undefined) delete process.env.WAND_TRACE_TEST_SECRET; else process.env.WAND_TRACE_TEST_SECRET = previous; }
 });
 

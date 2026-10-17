@@ -1,0 +1,6 @@
+Lane mailbox for macOS XCTest 与 Beta 出包 (role macos-gate)
+Run: team_mvanf7qe0001f07rbo
+Lane: macos-gate-1792135868663
+Token: 12c2c60d-33f0-4dd5-946f-5eed91bb5a18
+
+Captain messages appear below, newest last.

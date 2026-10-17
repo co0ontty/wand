@@ -1,0 +1,8 @@
+Captain messages for this run appear below, newest last. Empty means no captain message yet.
+Captain messages for this run appear below, newest last. Empty means no captain message yet.
+
+[captain request=d9025b9d-73ea-4f1e-ab2d-1d6cdbce6f44 broadcast @ 2026-10-16T02:58:10.699Z]
+用户新增：中央收到每条错误后自动归并为任务，标题【上报用户自定义个人名】-【错误功能】，相同错误功能仅追加评论。用户名由中转服务从上报方Wand userProfile.name注入（不是OS/设备/员工名；客户端无需额外上传名字）。队长正在扩展后端及 docs/feedback.md：客户端请求新增可选feature稳定代码，用于按功能归并，不按错误文本关键词。请实现端内显式feature：更新失败 app_update，Socket realtime，通用API5xx可先 api；如能从已知请求路径声明的路由族映射 sessions/conversations/tasks/files/speech/settings/models/authentication/storage/repository 则更好。字段可选以兼容已写代码；不要把原始URL/会话ID作feature。队长维护后端严格字段校验。各自继续独立实现/验证，无需等待其他端。
+
+[captain request=1ad5e3dd-3f17-4800-bf84-699cb12f0ee9 broadcast @ 2026-10-16T03:00:56.585Z]
+新增任务评论展示补充：主仓确认原来没有通用任务评论，队长将新增 GET /api/wand-tasks/:id/comments（现有sessions鉴权）返回 {comments:[{id,taskId,authorName,body,createdAt}]}，最近50条按时间正序，任务不存在404。接收端会原子创建任务/追加【用户名】也遇到了相同的问题。请各端在现有任务详情内复用原生组件只读展示“评论”（有评论才显示），不做整页跳转/新自建样式；绑定当前taskId，迟到回包不能写错任务。旧服务404兼容为空，不递归上报。同步补测试、构建。可以新建独立评论组件，尽量减少碰已有改动中的任务详情文件。队长负责Web。

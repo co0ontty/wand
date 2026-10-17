@@ -82,6 +82,9 @@ test("login redesign keeps library credentials and identifies the current server
   assert.match(html, /&lt;host&gt;:8181/);
   assert.doesNotMatch(html, /<host>|ant-card/);
   assert.match(html, /autoComplete="current-password"/);
+  assert.equal((html.match(/id="password"/g) ?? []).length, 1);
+  assert.match(html, /输入访问密码/);
+  assert.doesNotMatch(html, /一次性票据|本机 CLI|登录方式|ant-segmented|data-login-kind/);
   assert.match(html, /aria-describedby="password-hint login-error"/);
   assert.match(html, /class="login-feedback" aria-live="polite"/);
   assert.ok(html.indexOf('id="login-cert-hint"') > html.indexOf('id="login-button"'), "certificate guidance cannot push the submit action down");

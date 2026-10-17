@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
+import { redactSystemAiText } from "./system-ai-redaction.js";
+export { redactSystemAiText } from "./system-ai-redaction.js";
 import type { SiliconEmployee } from "./employee-types.js";
 import { CONVERSATION_OWNER, employeeConversationId, type ConversationSessionUpdate } from "./conversation-types.js";
 import { conversationSessionPreview } from "./conversation-session-preview.js";
@@ -16,19 +18,6 @@ const OUTPUT_LIMIT = 32_000;
 const MESSAGE_LIMIT = 256;
 const recorders = new WeakMap<WandStorage, SystemAiSessionRecorder>();
 
-/** Only copies business text. Never logs credential commands, runtime config, or provider error bodies. */
-export function redactSystemAiText(value: string): string {
-  let text = value;
-  for (const [key, secret] of Object.entries(process.env)) {
-    if (/(?:KEY|TOKEN|PASSWORD|SECRET|CONNECTION_CODE)/i.test(key) && secret && secret.length >= 6) text = text.split(secret).join("[已脱敏]");
-  }
-  text = text.replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "[私钥已脱敏]")
-    .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi, "Bearer [已脱敏]")
-    .replace(/\b(?:sk-|ghp_|github_pat_|xox[baprs]-)[A-Za-z0-9_-]{10,}/g, "[已脱敏]")
-    .replace(/((?:["']?(?:api[_ -]?key|access[_ -]?token|connection[_ -]?code|password|secret|密钥|密码|口令|连接码)["']?)\s*[:=：]\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s"'，;\n}]+)/gi,
-      (_all, key: string, value: string) => key + (value.startsWith('"') ? '"[已脱敏]"' : value.startsWith("'") ? "'[已脱敏]'" : "[已脱敏]"));
-  return text;
-}
 function logText(value: string, limit: number): string {
   const text = redactSystemAiText(value);
   return text.length > limit ? text.slice(0, limit) + `\n（日志已限长，原始 ${text.length} 字符）` : text;
@@ -193,7 +182,7 @@ export class SystemAiSessionRecorder {
         append(`候选 ${attempts}：开始本地决策 worker（${model}），不是 CLI 或 Wand Agent SDK。`);
       },
       candidateSkipped: (candidate, reason) => append(`未执行候选 ${candidateName(candidate)}：${reason}`),
-      candidateFailed: (candidate, error, phase) => append(`候选 ${candidateName(candidate)} ${phase === "availability" ? "准备" : phase === "result" ? "结果校验" : "调用"}失败（${failureCode(error)}）。未保存提供商错误正文。`),
+      candidateFailed: (candidate, error, phase) => append(`候选 ${candidateName(candidate)} ${phase === "availability" ? "准备" : phase === "result" ? "结果校验" : "调用"}失败（${failureCode(error)}）。\n\n原始错误（凭据已脱敏）：\n${logText(error instanceof Error ? error.message : resultText(error), 8_000)}`),
       candidateSucceeded: (raw, parsed) => {
         append(`## 模型输出（已通过调用方校验）\n\n${raw}`, true);
         if (typeof parsed !== "string" || parsed !== raw) append(`## 解析后的业务结果\n\n${resultText(parsed)}`, true);
@@ -205,7 +194,7 @@ export class SystemAiSessionRecorder {
       },
       applicationResult: value => append(`## 实际业务执行结果\n\n${resultText(value)}`, true),
       complete: () => finish("exited", `${attempts ? `调用完成；尝试了 ${attempts} 个候选。` : "系统操作已结束；本记录未直接请求模型。"}具体业务是否应用以单独记录的实际业务结果为准。${attempts && !usageAvailable ? "未采集到实际叶子/上游用量，不估算费用。" : ""}`),
-      fail: (error, cancelled = false) => finish(cancelled ? "stopped" : "failed", `${cancelled ? "调用已取消，结果不再应用" : "调用失败"}（${failureCode(error)}）；未自动扩大模型/费用范围。`),
+      fail: (error, cancelled = false) => finish(cancelled ? "stopped" : "failed", `${cancelled ? "调用已取消，结果不再应用" : "调用失败"}（${failureCode(error)}）；未自动扩大模型/费用范围。\n\n原始错误（凭据已脱敏）：\n${logText(error instanceof Error ? error.message : resultText(error), 8_000)}`),
     };
   }
 }

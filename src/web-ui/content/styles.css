@@ -581,6 +581,24 @@ textarea[data-idle-speech] { touch-action: none; user-select: none; -webkit-user
 .task-board-list-meta time { margin-left:auto; }
 .task-board-list-detail-inner { border-top:1px solid var(--border-subtle); margin-top:12px; padding-top:12px; }
 .task-board-list-detail-inner code { overflow-wrap:anywhere; }
+/* Detail shares one reading scroll; long briefs/comments are never clipped. */
+.task-board-detail { min-width:0; }
+.task-board-detail-layout { align-items:flex-start; }
+.task-board-detail-main { max-width:960px; }
+.task-board-detail-title.ant-input { font-size:20px; font-weight:600; line-height:1.5; }
+.task-board-detail-content { min-width:0; overflow-wrap:anywhere; }
+.task-board-detail-content .wand-markdown-preview { max-width:none; }
+.task-board-detail-properties { max-width:320px; }
+.task-board-detail-properties .ant-form-item:last-child { margin-bottom:0; }
+.task-board-agent-add { align-self:flex-start; }
+.task-board-agent-group-head { display:flex; align-items:center; gap:8px; min-width:0; }
+.task-board-agent-group-head > span { min-width:0; overflow-wrap:anywhere; }
+.task-board-agent-session { display:flex; width:100%; height:auto; min-width:0; text-align:left; justify-content:flex-start; white-space:normal; }
+.task-board-agent-session > strong { min-width:0; flex:1; overflow-wrap:anywhere; }
+.task-board-agent-session > small { flex-shrink:0; color:var(--text-secondary); }
+@container taskboard (max-width:700px) {
+  .task-board-detail-main, .task-board-detail-properties { flex-basis:100%!important; max-width:none; width:100%; }
+}
 @container taskboard (min-width:1000px) {
   .task-board-toolbar-controls { flex-basis:auto; max-width:780px; }
 }

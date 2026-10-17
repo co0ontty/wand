@@ -57,7 +57,7 @@ test("foreground activity survives both HTTP projections and invalidates revisio
     const sessionsBefore = await get("/api/session-list");
     // Active-only trims idle sessions, not the workspace roots used to start new work.
     assert.deepEqual(filterActiveGroups(before.groups).map(({ workspaceId, tasks, standaloneSessions }) => ({ workspaceId, tasks, standaloneSessions })),
-      [{ workspaceId: workspace.id, tasks: [], standaloneSessions: [] }]);
+      []);
     assert.equal((await get(`/api/tasks?revision=${before.revision}`)).unchanged, true);
     assert.equal((await get(`/api/session-list?revision=${sessionsBefore.revision}`)).unchanged, true);
 
@@ -84,7 +84,7 @@ test("foreground activity survives both HTTP projections and invalidates revisio
     const finished = await get(`/api/tasks?revision=${running.revision}`) as TaskPage;
     assert.equal(finished.unchanged, false);
     assert.deepEqual(filterActiveGroups(finished.groups).map(({ workspaceId, tasks, standaloneSessions }) => ({ workspaceId, tasks, standaloneSessions })),
-      [{ workspaceId: workspace.id, tasks: [], standaloneSessions: [] }]);
+      []);
     assert.notEqual((await get(`/api/session-list?revision=${sessionsRunning.revision}`)).revision, sessionsRunning.revision);
     assert.equal(storage.getSessionCompletion(live.id)?.completionRevision ?? 0, 0, "foreground transitions are not a successful AI turn");
   } finally {

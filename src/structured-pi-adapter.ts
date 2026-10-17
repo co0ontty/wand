@@ -264,6 +264,7 @@ export class PiRunner implements StructuredRunnerAdapter {
     }));
     return { get args() { return execution?.args ?? buildPiArgs(context.session, context.prompt, ["--no-skills"]); },
       get pid() { return execution?.pid ?? null; }, spawnedAt, completion,
+      exited: completion.then(() => execution?.exited, () => execution?.exited).then(() => {}),
       interrupt: () => { interrupted = true; execution?.interrupt(); } };
   }
 

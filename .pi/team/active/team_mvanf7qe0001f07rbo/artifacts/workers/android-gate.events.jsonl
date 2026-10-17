@@ -1,0 +1,219 @@
+{"at":1792135868728,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135868729,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135868729,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135868729,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135871780,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135871781,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135871815,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135871816,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135871817,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135871817,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135875241,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135875244,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135875285,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135875286,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135875286,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135875287,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135877644,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135880692,"phase":"worker-radio-report","message":"Android Beta 构建与测试 reported to captain","preview":"RADIO: status=started, action=检查冻结快照 Android 目录、README/构建配置与外置构建环境，准备按指定 Gradle 命令验证, evidence=none, blocker=none, next=读取快照文档并确认输出/签名基线"}
+{"at":1792135880694,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start bash","toolName":"bash"}
+{"at":1792135880696,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start read","toolName":"read"}
+{"at":1792135880698,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start read","toolName":"read"}
+{"at":1792135880699,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start read","toolName":"read"}
+{"at":1792135880700,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start read","toolName":"read"}
+{"at":1792135880710,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792135880712,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792135880713,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792135880714,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792135880800,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792135880800,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135880801,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135880801,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135880801,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135880801,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135880802,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135880802,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135880802,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135880802,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135880803,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135882050,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135885922,"phase":"worker-radio-report","message":"Android Beta 构建与测试 reported to captain","preview":"RADIO: status=source-read, action=已读取快照 AGENTS.md、android/README.md、build.gradle；主仓有大量既有改动，但本次只操作冻结快照。正在检查外置构建环境、锁与 Android 模块配置, evidence=source/android/README.md; source/android/build.gradle; git status, blocker=none, next=source 环境脚本后执行指"}
+{"at":1792135885925,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start bash","toolName":"bash"}
+{"at":1792135885927,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start bash","toolName":"bash"}
+{"at":1792135885929,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start bash","toolName":"bash"}
+{"at":1792135885964,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792135885970,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792135887619,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792135887619,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135887619,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135887620,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135887620,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135887620,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135887620,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135888699,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135891241,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135891241,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start bash","toolName":"bash"}
+{"at":1792135891242,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start bash","toolName":"bash"}
+{"at":1792135891243,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start bash","toolName":"bash"}
+{"at":1792135891414,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792135891648,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792135891663,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792135891664,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135891666,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135891666,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135891667,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135891668,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135891668,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135892550,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135893855,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135893858,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start read","toolName":"read"}
+{"at":1792135893869,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792135893871,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135893873,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135894988,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135896416,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135896420,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start bash","toolName":"bash"}
+{"at":1792135896597,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792135896598,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135896599,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135897574,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135898322,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135898325,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start read","toolName":"read"}
+{"at":1792135898340,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792135898342,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135898343,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135899008,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135900851,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135900854,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start read","toolName":"read"}
+{"at":1792135900867,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792135900868,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135900870,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135901557,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135902953,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135902956,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start bash","toolName":"bash"}
+{"at":1792135903065,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792135903066,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135903067,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135903717,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135905303,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135905304,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start read","toolName":"read"}
+{"at":1792135905310,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792135905311,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135905312,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135907141,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135910254,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135910257,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start bash","toolName":"bash"}
+{"at":1792135910731,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792135910732,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135910733,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135911829,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135914722,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135914726,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start bash","toolName":"bash"}
+{"at":1792135914791,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792135914792,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135914793,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135915785,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135916927,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135916930,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start read","toolName":"read"}
+{"at":1792135916942,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792135916944,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135916945,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135917635,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135919054,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135919058,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start bash","toolName":"bash"}
+{"at":1792135949072,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end bash failed","toolName":"bash","isError":true}
+{"at":1792135949074,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135949076,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135949906,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135952024,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135952027,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start bash","toolName":"bash"}
+{"at":1792135952095,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792135952096,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135952098,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135953793,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135958561,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135958565,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start bash","toolName":"bash"}
+{"at":1792135958616,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792135958617,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135958617,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135960153,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135963382,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135963386,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start bash","toolName":"bash"}
+{"at":1792135963446,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792135963447,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135963448,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135964232,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135970410,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135970412,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start bash","toolName":"bash"}
+{"at":1792135989829,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792135989830,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135989831,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792135990615,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792135997706,"phase":"worker-budget-notice","message":"Android Beta 构建与测试 reached soft request budget (18/18)"}
+{"at":1792135997710,"phase":"worker-radio-report","message":"Android Beta 构建与测试 reported to captain","preview":"RADIO: status=policy-check, action=环境脚本已成功执行：外置卷 /Volumes/Wand-Dev 已挂载且 migration.lock 未触发；wrapper 会将 project-cache 放到外置 project key，但工程默认 buildDir 仍需确认。将使用外置初始化策略避免在冻结源码下生成本地 app/build，并保留指定任务与版本参数, evidence=environment.sh; android/gradlew"}
+{"at":1792135997714,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start bash","toolName":"bash"}
+{"at":1792136123281,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end bash failed","toolName":"bash","isError":true}
+{"at":1792136123285,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792136123286,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792136123288,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792136123289,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792136124066,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792136129446,"phase":"worker-radio-report","message":"Android Beta 构建与测试 reported to captain","preview":"RADIO: status=build-failed, action=指定 Gradle 任务已完成执行但 testDebugUnitTest 失败；1179 tests 中 1 failed、7 skipped，失败为 ChatBackNavigationTest.kt:50。Gradle 因测试失败未完成 assembleDebug；正在确认是否已有 APK、提取失败报告并决定是否单独完成 assembleDebug 以取得可验收包, evidence=android-b"}
+{"at":1792136129450,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start bash","toolName":"bash"}
+{"at":1792136129454,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start bash","toolName":"bash"}
+{"at":1792136129456,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start bash","toolName":"bash"}
+{"at":1792136129488,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792136129874,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792136135858,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792136135859,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792136135860,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792136135861,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792136135862,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792136135862,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792136135863,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792136137038,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792136138671,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792136138676,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start bash","toolName":"bash"}
+{"at":1792136138729,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792136138730,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792136138731,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792136139391,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792136141823,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792136141826,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start bash","toolName":"bash"}
+{"at":1792136145503,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792136145504,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792136145505,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792136146194,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792136153143,"phase":"worker-radio-report","message":"Android Beta 构建与测试 reported to captain","preview":"RADIO: status=assemble-passed, action=单独 assembleDebug 重试成功，APK 已生成于外置 project-key build 目录；接下来复制到本次独立外置 dist，提取 APK 元数据/签名，并与主仓既有 APK 证书比较, evidence=android-build.log; assemble_retry status=0; external app-debug.apk, blocker=原指定组合任务仍因 1 个单"}
+{"at":1792136153151,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start bash","toolName":"bash"}
+{"at":1792136158546,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792136158548,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792136158549,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792136159199,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792136163422,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792136163428,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start bash","toolName":"bash"}
+{"at":1792136163431,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start bash","toolName":"bash"}
+{"at":1792136163435,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start bash","toolName":"bash"}
+{"at":1792136163465,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792136163496,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792136163516,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792136163516,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792136163517,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792136163518,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792136163518,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792136163519,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792136163519,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792136164147,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792136175070,"phase":"worker-radio-report","message":"Android Beta 构建与测试 reported to captain","preview":"RADIO: status=artifacts-verified, action=APK 已复制并验证：package com.wand.app、versionName 指定值、versionCode 40960100、16,014,615 bytes、SHA256 928772…947aa；签名证书 SHA256 5ab798…94055，与主仓 APK 及外置 4.96.0 基线一致。正在落盘 android-report.json, evidence=external "}
+{"at":1792136175075,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start write","toolName":"write"}
+{"at":1792136175100,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end write","toolName":"write","isError":false}
+{"at":1792136175103,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792136175105,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792136175739,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792136177135,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792136177141,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_start read","toolName":"read"}
+{"at":1792136177157,"phase":"worker-tool","message":"Android Beta 构建与测试 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792136177160,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792136177162,"phase":"worker-message-end","message":"Android Beta 构建与测试 assistant message ended"}
+{"at":1792136177811,"phase":"worker-message-start","message":"Android Beta 构建与测试 message started"}
+{"at":1792136183279,"phase":"worker-radio-report","message":"Android Beta 构建与测试 reported to captain","preview":"RADIO: status=complete, action=已写入 android-report.json；外置 APK、测试失败 XML/HTML、构建日志、签名对比均可复核。未执行 adb 安装/启动，未修改源码/发布/push；冻结快照 Android gate 因 1 个单测失败阻塞, evidence=android-report.json; android-build.log; external APK path, blocker=ChatBackNavigat"}

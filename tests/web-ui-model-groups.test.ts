@@ -65,7 +65,8 @@ test("分组配置就地展开，按工具查看与保存，免费组仅能排�
   const panel = readFileSync(new URL("../src/web-ui/react/settings/model-groups-panel.tsx", import.meta.url), "utf8");
   assert.match(panel, /moveGroupModel\(group, index, -1\)/);
   assert.match(panel, /moveGroupModel\(group, index, 1\)/);
-  assert.match(panel, /const free = group.id === FREE_MODEL_GROUP_ID/);
+  assert.match(panel, /const free = isManagedFreeGroup\(group\)/);
+  assert.match(panel, /group.provider === "opencode"/);
   const android = readFileSync(new URL("../android/app/src/main/java/com/wand/app/ui/screens/ModelGroupsSettingsPanel.kt", import.meta.url), "utf8");
   assert.match(android, /WandInlinePanel/);
   assert.match(android, /moveGroupModel\(group, index, -1\)/);

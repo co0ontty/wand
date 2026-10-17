@@ -93,7 +93,13 @@ test("real native Pi runs in default tmux with same-process event files and clea
   await waitFor(() => updates.some((text) => text.includes("真实原生界面")), "file updates before exit");
   const job = findJob()!; assert.ok(job);
   assert.match((await exec("tmux", ["list-sessions", "-F", "#{session_name}"])).stdout, new RegExp(job.tmux));
-  const screen = (await exec("tmux", ["capture-pane", "-p", "-t", job.tmux])).stdout;
+  // File events can precede the TUI's next render frame. Wait for the actual
+  // pane, not merely the protocol event, before asserting visible output.
+  let screen = "";
+  await waitFor(async () => {
+    screen = (await exec("tmux", ["capture-pane", "-p", "-t", job.tmux])).stdout;
+    return screen.includes("真实原生界面");
+  }, "native pane renders streamed text");
   assert.match(screen, /真实原生界面/); assert.ok(!screen.includes('"assistantMessageEvent"'));
   const ready = JSON.parse(readFileSync(job.ready, "utf8")); assert.equal(ready.mode, "tui"); assert.equal(ready.hasUI, true);
   assert.match(readFileSync(job.events, "utf8"), /"message_update"/);

@@ -1,10 +1,12 @@
 import type { ScheduledTaskInput, ScheduledTaskRunView, ScheduledTaskSummary, TaskSchedule } from "../../../scheduled-task-types.js";
+import { parseTaskSchedule } from "../../../scheduled-task-time.js";
 import { HttpResponseError } from "../http-adapter.js";
 
 export const WEEKDAYS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
 export function scheduleLabel(schedule: TaskSchedule): string {
   if (schedule.kind === "once") return `一次 · ${scheduleDate(schedule.runAt)}`;
+  if (schedule.kind === "interval") return `每 ${schedule.everyHours} 小时 · ${schedule.timeZone}`;
   return `${schedule.kind === "daily" ? "每天" : `每${WEEKDAYS[schedule.weekday]}`} ${schedule.time} · ${schedule.timeZone}`;
 }
 
@@ -14,6 +16,14 @@ export function scheduleDate(value: string | null): string {
   return Number.isFinite(date.getTime()) ? date.toLocaleString([], {
     year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
   }) : "时间无效";
+}
+
+/** Schedule previews and saved details use the plan's explicit zone, never an implicit browser conversion. */
+export function scheduleDateInZone(value: string | null, timeZone: string): string {
+  if (!value) return "—";
+  if (!Number.isFinite(Date.parse(value))) return "时间无效";
+  return `${new Intl.DateTimeFormat("zh-CN", { timeZone, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(value))} · ${timeZone}`;
 }
 
 export function scheduledTaskState(task: ScheduledTaskSummary): string {
@@ -41,6 +51,8 @@ export function scheduleInputError(input: ScheduledTaskInput, now = Date.now()):
   if (input.schedule.kind === "once") {
     if (!Number.isFinite(Date.parse(input.schedule.runAt))) return "请选择执行日期和时间。";
     if (Date.parse(input.schedule.runAt) <= now) return "执行时间需要晚于现在。";
+  } else if (input.schedule.kind === "interval") {
+    try { parseTaskSchedule(input.schedule); } catch (error) { return (error as Error).message; }
   } else {
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(input.schedule.time)) return "请选择执行时间。";
     try { new Intl.DateTimeFormat([], { timeZone: input.schedule.timeZone }); }

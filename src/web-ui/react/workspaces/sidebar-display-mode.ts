@@ -80,14 +80,16 @@ export function filterActiveGroups(
     const keep = (session: WorkspaceSessionSummary): boolean => (
       isSessionActive(session)
     );
-    const tasks = group.tasks.flatMap((task) => {
-      const sessions = task.sessions.filter(keep);
-      // 「只看活动」不展示归档区（归档会话本就不在跑）。
-      return sessions.length ? [{ ...task, sessions, archivedSessions: [] }] : [];
-    });
+    const keepIds = new Set(group.tasks.filter(task => task.sessions.some(keep)).map(task => task.id));
+    for (const id of [...keepIds]) {
+      let parent = group.tasks.find(task => task.id === id)?.parentWorkspaceTaskId;
+      const seen = new Set<string>();
+      while (parent && !seen.has(parent)) { seen.add(parent); keepIds.add(parent); parent = group.tasks.find(task => task.id === parent)?.parentWorkspaceTaskId; }
+    }
+    const tasks = group.tasks.filter(task => keepIds.has(task.id)).map(task => ({ ...task, sessions: task.sessions.filter(keep), archivedSessions: [] }));
     const standaloneSessions = group.standaloneSessions.filter(keep);
     return { ...group, tasks, standaloneSessions, archivedSessions: [] };
-  });
+  }).filter(group => group.tasks.length > 0 || group.standaloneSessions.length > 0);
 }
 
 export function useSidebarDisplayMode(): [SidebarDisplayMode, () => void, (mode: SidebarDisplayMode) => void] {

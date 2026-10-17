@@ -72,3 +72,14 @@ test("nearby readable markers use separate lanes, unrelated times regain full wi
   const result = weekPositions(entries, "2026-10-12", DISPLAY_ZONE);
   assert.deepEqual(result.map(entry => [entry.minute, entry.lane, entry.lanes]), [[540, 0, 2], [570, 1, 2], [720, 0, 1]]);
 });
+
+test("hourly forecasts cover a full month and explicitly flag the shared cap", () => {
+  const task = { ...initialTasks()[0]!, enabled: true, cancelledAt: null, nextRunAt: "2026-10-01T00:00:00.000Z",
+    schedule: { kind: "interval" as const, everyHours: 1, startAt: "2026-10-01T00:00:00.000Z", timeZone: "UTC" } };
+  const result = calendarEntries([task], "2026-10-01", "2026-10-31", new Date("2026-09-30T23:00:00Z"), "UTC");
+  assert.equal(result.entries.length, 31 * 24);
+  assert.equal(result.truncated, false);
+  assert.equal(result.entries.at(-1)!.at, "2026-10-31T23:00:00.000Z");
+  const capped = calendarEntries([task, { ...task, id: "hourly-second" }], "2026-10-01", "2026-10-31", new Date("2026-09-30T23:00:00Z"), "UTC");
+  assert.equal(capped.entries.length, 1000); assert.equal(capped.truncated, true);
+});

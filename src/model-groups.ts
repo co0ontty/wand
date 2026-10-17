@@ -1,6 +1,7 @@
 import { isSessionProvider, SESSION_PROVIDERS, type SessionProvider } from "./provider-catalog.js";
 import { OPENROUTER_FREE_GROUP, OPENROUTER_FREE_PROVIDER, OPENROUTER_FREE_SELECTOR,
   isOpenRouterFreeSelector } from "./openrouter-free-selection.js";
+import { isOpenCodeFreeGroup, isOpenCodeNativeModelId, OPENCODE_FREE_GROUP_ID, OPENCODE_FREE_GROUP_NAME } from "./opencode-free-selection.js";
 import { AUTO_ASSIGN_SELECTOR, MODEL_GROUP_PREFIX, isAutoAssignSelector, isModelGroupSelector } from "./model-selectors.js";
 export { AUTO_ASSIGN_SELECTOR, MODEL_GROUP_PREFIX, isAutoAssignSelector, isModelGroupSelector };
 
@@ -20,6 +21,9 @@ export interface ModelGroup {
  */
 export const AUTO_ASSIGN_LABEL = "智能分配";
 export const FREE_MODEL_GROUP_ID = "openrouter-free";
+export function isManagedFreeGroup(group: Pick<ModelGroup, "id" | "provider">): boolean {
+  return (group.id === FREE_MODEL_GROUP_ID && group.provider === "pi") || isOpenCodeFreeGroup(group);
+}
 export const MODEL_GROUP_MAX_PER_PROVIDER = 32;
 export const MODEL_GROUP_MAX_MEMBERS = 32;
 export const DEFAULT_MODEL_GROUP_NAMES = ["默认分组", "默认", "default"] as const;
@@ -38,7 +42,7 @@ export function modelGroupSelector(group: Pick<ModelGroup, "id" | "provider">): 
 }
 
 export function normalizeModelGroups(value: unknown): ModelGroup[] {
-  if (!Array.isArray(value) || value.length > MODEL_GROUP_MAX_PER_PROVIDER * SESSION_PROVIDERS.length + 1) {
+  if (!Array.isArray(value) || value.length > MODEL_GROUP_MAX_PER_PROVIDER * SESSION_PROVIDERS.length + 2) {
     throw new Error("模型分组必须是有界数组。");
   }
   const identities = new Set<string>();
@@ -52,8 +56,11 @@ export function normalizeModelGroups(value: unknown): ModelGroup[] {
     if (!GROUP_ID.test(id) || !isSessionProvider(row.provider)) throw new Error("模型分组标识或工具无效。");
     const provider = row.provider;
     if (!name || name.length > 40 || /[\x00-\x1f\x7f]/.test(name)) throw new Error("分组名称需为 1–40 个字符。");
-    const free = id === FREE_MODEL_GROUP_ID;
-    if (free && (provider !== "pi" || name !== OPENROUTER_FREE_GROUP)) throw new Error("免费分组的工具与名称不可修改。");
+    const routerFree = id === FREE_MODEL_GROUP_ID;
+    const nativeFree = id === OPENCODE_FREE_GROUP_ID;
+    const free = routerFree || nativeFree;
+    if ((routerFree && (provider !== "pi" || name !== OPENROUTER_FREE_GROUP))
+      || (nativeFree && (provider !== "opencode" || name !== OPENCODE_FREE_GROUP_NAME))) throw new Error("免费分组的工具与名称不可修改。");
     if (!free && provider === "pi" && name === OPENROUTER_FREE_GROUP) throw new Error("免费分组是内置分组，请直接调整它的顺序。");
     const identity = `${provider}/${id}`;
     const named = `${provider}/${name}`;
@@ -74,7 +81,8 @@ export function normalizeModelGroups(value: unknown): ModelGroup[] {
         throw new Error("组内必须是具体模型 ID，不能嵌套分组或使用默认值。");
       }
       if (isOpenRouterFreeSelector(trimmed) && provider !== "pi") throw new Error("免费模型仅属于 Pi。");
-      if (free && !trimmed.startsWith(`${OPENROUTER_FREE_PROVIDER}/`)) throw new Error("免费分组只能包含免费池中的模型。");
+      if ((routerFree && !trimmed.startsWith(`${OPENROUTER_FREE_PROVIDER}/`))
+        || (nativeFree && !isOpenCodeNativeModelId(trimmed))) throw new Error("免费分组只能包含对应免费池中的模型。");
       return trimmed;
     });
     if (new Set(models).size !== models.length) throw new Error("同一分组中的模型不能重复。");
@@ -98,7 +106,7 @@ export function findModelGroup(
   }
   const named = DEFAULT_MODEL_GROUP_NAMES.map((name) => candidates.find((entry) => entry.name === name))
     .find((entry) => entry !== undefined);
-  return named ?? candidates.find((entry) => entry.id !== FREE_MODEL_GROUP_ID) ?? candidates[0];
+  return named ?? candidates.find((entry) => !isManagedFreeGroup(entry)) ?? (provider === "opencode" ? undefined : candidates[0]);
 }
 
 /** A configured group wins; do not silently replace a deleted configured group. */
@@ -134,6 +142,14 @@ export function resolveModelGroupModels(
 
 export function freeModelOrder(groups: readonly ModelGroup[] | undefined): string[] {
   return groups?.find((entry) => entry.id === FREE_MODEL_GROUP_ID && entry.provider === "pi")?.models ?? [];
+}
+
+/** Membership is service-owned; settings may reorder, but not inject paid/unverified members or delete the pool. */
+export function preserveOpenCodeFreeMembership(requested: ModelGroup[], current: readonly ModelGroup[]): ModelGroup[] {
+  const managed = current.find(isOpenCodeFreeGroup);
+  if (!managed) return requested.filter(group => !isOpenCodeFreeGroup(group));
+  const preference = requested.find(isOpenCodeFreeGroup)?.models ?? managed.models;
+  return [...requested.filter(group => !isOpenCodeFreeGroup(group)), { ...managed, models: orderModelIds(managed.models, preference) }];
 }
 
 /** Used for free pools: saved priority first; newly verified models append, vanished models are skipped. */

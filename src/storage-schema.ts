@@ -256,6 +256,7 @@ const INIT_SQL = `
     sort_order INTEGER NOT NULL DEFAULT 0,
     agent_json TEXT,
     execution_subject_json TEXT,
+    acceptance_json TEXT,
     workspace_task_id TEXT,
     parent_task_id TEXT,
     title_source TEXT,
@@ -431,6 +432,7 @@ function ensureWandTaskSchema(db: DatabaseSync): void {
   if (columns.length > 0 && !names.has("due_date")) db.exec("ALTER TABLE wand_tasks ADD COLUMN due_date TEXT");
   // 任务的默认派发配置（CLI 工具 / 模型 / 思考深度）。只加列，历史行保持 NULL。
   if (columns.length > 0 && !names.has("agent_json")) db.exec("ALTER TABLE wand_tasks ADD COLUMN agent_json TEXT");
+  if (columns.length > 0 && !names.has("acceptance_json")) db.exec("ALTER TABLE wand_tasks ADD COLUMN acceptance_json TEXT");
   if (columns.length > 0 && !names.has("execution_subject_json")) db.exec("ALTER TABLE wand_tasks ADD COLUMN execution_subject_json TEXT");
   if (columns.length > 0 && !names.has("workspace_task_id")) db.exec("ALTER TABLE wand_tasks ADD COLUMN workspace_task_id TEXT");
   // 父任务归属只加列；历史任务仍然是顶层任务。

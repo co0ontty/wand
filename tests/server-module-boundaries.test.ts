@@ -61,9 +61,9 @@ test("production registry deletion removes native history and records its tombst
     status:"exited" as const,exitCode:0,startedAt:new Date().toISOString(),endedAt:null,output:"",claudeSessionId:"native-fixture"};
   storage.saveSession(session);
   const actions:string[]=[];let alive=true;
-  const processes={getOwned:()=>alive?session:null,delete(id:string){actions.push("managed");alive=false;storage.deleteSession(id);},
+  const processes={getOwned:()=>alive?session:null,listSlim:()=>alive?[session]:[],delete(id:string){actions.push("managed");alive=false;storage.deleteSession(id);},
     deletePiHistoryFiles(ids:string[]){actions.push("native");assert.deepEqual(ids,["native-fixture"]);}};
-  const registry=new SessionRegistry(processes as never,{get:()=>null} as never,storage);
+  const registry=new SessionRegistry(processes as never,{get:()=>null,listSlim:()=>[]} as never,storage);
   registry.deleteWithProviderHistory(session.id);
   assert.deepEqual(actions,["managed","native"]);
   assert.ok(readHiddenSessionIds(storage).has("native-fixture"));

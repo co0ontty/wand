@@ -97,6 +97,11 @@ test("自动标题把已配置 SDK 候选和免费服务传到执行入口，不
     const response = await fetch(`${url}/api/wand-tasks`, { method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ description: "验证免费候选依赖传递" }) });
     assert.equal(response.status, 201);
+    const planned = await response.json() as { id: string };
+    await whenWandTaskTitlesSettled();
+    assert.equal(received, undefined, "saving a description never calls a model");
+    storage.saveSession(sessionSnapshot({ id: "title-execution-fixture", title: "已有执行记录" }));
+    storage.bindWandTaskSession(planned.id, "title-execution-fixture");
     await whenWandTaskTitlesSettled();
     assert.equal(received?.cliCandidates?.[0]?.engine, "sdk");
     assert.equal(received?.cliCandidates?.[0]?.model, "wand-openrouter-free/auto");
@@ -229,7 +234,7 @@ test("tasks can be pointed at a workspace and expose its directory", async () =>
   });
 });
 
-test("a task can be created from the description alone and gets a generated title", async () => {
+test("description-only planning gets a local title without any model execution", async () => {
   const calls: string[] = [];
   await withHarness(async ({ url, storage }) => {
     const created = await fetch(`${url}/api/wand-tasks`, {
@@ -244,9 +249,9 @@ test("a task can be created from the description alone and gets a generated titl
 
     await whenWandTaskTitlesSettled();
     const stored = storage.getWandTask(created.id);
-    assert.equal(stored?.title, "终端乱码修复");
+    assert.equal(stored?.title, "修复 Android 终端输入乱码");
     assert.equal(stored?.titleSource, "auto");
-    assert.deepEqual(calls, ["修复 Android 终端输入乱码\n另外检查列宽"]);
+    assert.deepEqual(calls, []);
     assert.equal(created.title.length > 0, true);
   }, { generateTitle: async (description) => { calls.push(description); return "终端乱码修复"; } });
 });
@@ -291,7 +296,9 @@ test("editing the title of an auto-titled task keeps the manual title", async ()
     }).then(jsonOf<{ id: string; titleSource: string }>);
     assert.equal(created.titleSource, "auto");
 
-    // 后台还没总结完，用户自己先改了标题；PATCH 要把它标回 user。
+    storage.saveSession(sessionSnapshot({ id: "late-title-execution", title: "已有执行记录" }));
+    storage.bindWandTaskSession(created.id, "late-title-execution");
+    // 已有执行的后台标题尚未总结完，用户先改标题；迟到结果不能覆盖。
     const patched = await fetch(`${url}/api/wand-tasks/${created.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -306,7 +313,7 @@ test("editing the title of an auto-titled task keeps the manual title", async ()
   }, { generateTitle: async () => { await gate; return "迟到的自动标题"; } });
 });
 
-test("a sidebar task created with only a prompt is summarized right away", async () => {
+test("a sidebar plan created with only a prompt keeps its local title without a model", async () => {
   const calls: string[] = [];
   await withHarness(async ({ url, storage }) => {
     const workspace = storage.createWorkspace({ name: "wand", cwd: storage.directory() });
@@ -320,9 +327,9 @@ test("a sidebar task created with only a prompt is summarized right away", async
     assert.equal(created.name, "帮我排查登录页 Safari 白屏");
     await whenWandTaskTitlesSettled();
     const card = storage.getWandTaskByWorkspaceTaskId(created.id);
-    assert.equal(card?.title, "修复 Safari 登录页白屏");
-    assert.equal(storage.getWorkspaceTask(created.id)?.name, "修复 Safari 登录页白屏");
-    assert.deepEqual(calls, [prompt]);
+    assert.equal(card?.title, "帮我排查登录页 Safari 白屏");
+    assert.equal(storage.getWorkspaceTask(created.id)?.name, "帮我排查登录页 Safari 白屏");
+    assert.deepEqual(calls, []);
   }, { generateTitle: async (description) => { calls.push(description); return "修复 Safari 登录页白屏"; } });
 });
 
@@ -500,9 +507,11 @@ test("dispatching an issue creates a structured session in the issue workspace a
 });
 
 test("claiming a board task creates an independently dispatched child of a doing task", async () => {
+  let startCount = 0;
   let storageForPty: WandStorage;
   const stub = {
     start: async (command: string, cwd: string, mode: SessionSnapshot["mode"], prompt: string) => {
+      startCount++;
       const session = sessionSnapshot({
         id: "child-pty", command, cwd, mode, provider: "pi", sessionKind: "pty", description: prompt,
       });
@@ -516,7 +525,7 @@ test("claiming a board task creates an independently dispatched child of a doing
     const other = storage.createWorkspace({ name: "Other", cwd: "/tmp/other-project" });
     const parent = storage.createWandTask({ title: "正在做的工作", status: "doing", workspaceId: workspace.id });
     const peer = storage.createWandTask({ title: "另一项工作", status: "doing", workspaceId: workspace.id });
-    const closed = storage.createWandTask({ title: "已经完成", status: "done", workspaceId: workspace.id });
+    const closed = storage.createWandTask({ title: "已经归档", status: "archived", workspaceId: workspace.id });
     const send = (route: string, body: object, method = "PATCH") => fetch(`${url}${route}`, {
       method, headers: { "content-type": "application/json" }, body: JSON.stringify(body),
     });
@@ -529,12 +538,21 @@ test("claiming a board task creates an independently dispatched child of a doing
     assert.equal(child.status, "todo");
     assert.equal(storage.getWandTask(child.id)?.parentTaskId, parent.id);
 
-    const started = await send(`/api/wand-tasks/${child.id}/dispatch`, { prompt: "独立执行检查" }, "POST");
+    const planned = await Promise.all(["验证交付", "整合产物"].map(title => send("/api/wand-tasks", { title, description: "独立验收目标，仅保存", parentTaskId: parent.id }, "POST").then(jsonOf<{ id: string }>) ));
+    assert.equal(storage.listWandTasks().filter(task => task.parentTaskId === parent.id).length, 3);
+    assert.equal(startCount, 0, "one goal and three deliverables are planning-only");
+    const businessTaskCount = storage.listWandTasks().length;
+    const started = await send(`/api/wand-tasks/${child.id}/dispatch`, { requestId: "one-child-dispatch", prompt: "独立执行检查" }, "POST");
     assert.equal(started.status, 202);
     const payload = await jsonOf<{ session: { id: string; cwd: string } }>(started);
     assert.equal(payload.session.cwd, storage.directory());
     assert.deepEqual(storage.listWandTaskSessionIds(child.id), [payload.session.id]);
     assert.deepEqual(storage.listWandTaskSessionIds(parent.id), []);
+    for (const task of planned) assert.deepEqual(storage.listWandTaskSessionIds(task.id), []);
+    assert.equal((await send(`/api/wand-tasks/${child.id}/dispatch`, { requestId: "one-child-dispatch", prompt: "独立执行检查" }, "POST")).status, 202);
+    assert.equal(startCount, 1, "receipt replay does not create another execution");
+    assert.equal(storage.listWandTasks().length, businessTaskCount, "retry never creates a business task");
+    assert.equal(storage.getWandTask(parent.id)?.acceptance?.acceptedAt ?? null, null);
     const listed = await fetch(`${url}/api/wand-tasks`).then(jsonOf<Array<{ id: string; parentTaskId: string | null }>>);
     assert.equal(listed.find((task) => task.id === child.id)?.parentTaskId, parent.id);
     assert.equal((await fetch(`${url}/api/wand-tasks/${child.id}`).then(jsonOf<{ parentTaskId: string }>)).parentTaskId, parent.id);
@@ -548,21 +566,21 @@ test("claiming a board task creates an independently dispatched child of a doing
     await reject(await send(`/api/wand-tasks/${child.id}`, { parentTaskId: child.id }), /循环/);
     await reject(await send(`/api/wand-tasks/${parent.id}`, { parentTaskId: child.id }), /循环/);
     await reject(await send(`/api/wand-tasks/${child.id}`, { parentTaskId: "missing" }), /不存在/);
-    await reject(await send(`/api/wand-tasks/${child.id}`, { parentTaskId: closed.id }), /正在处理/);
+    await reject(await send(`/api/wand-tasks/${child.id}`, { parentTaskId: closed.id }), /归档/);
     await reject(await send(`/api/wand-tasks/${child.id}`, { workspaceId: other.id }), /同一项目/);
     await reject(await send(`/api/wand-tasks/${parent.id}`, { workspaceId: other.id }), /解除归属/);
     await reject(await send(`/api/wand-tasks/${child.id}/dispatch`, { workspaceId: other.id, prompt: "再次执行" }, "POST"), /同一项目/);
     assert.equal(storage.getWandTask(child.id)?.workspaceId, workspace.id);
-    await reject(await send("/api/wand-tasks", { title: "无效归属", parentTaskId: closed.id }, "POST"), /正在处理/);
+    await reject(await send("/api/wand-tasks", { title: "无效归属", parentTaskId: closed.id }, "POST"), /归档/);
     await reject(await send("/api/wand-tasks", { title: "跨项目", workspaceId: other.id, parentTaskId: peer.id }, "POST"), /同一项目/);
 
     const reparented = await send(`/api/wand-tasks/${child.id}`, { parentTaskId: peer.id })
       .then(jsonOf<{ parentTaskId: string }>);
     assert.equal(reparented.parentTaskId, peer.id);
     await send(`/api/wand-tasks/${peer.id}`, { status: "done" });
-    // 父任务完成后，既有子任务的历史归属保持不变，但不能再认领新的子任务。
+    // 等待确认也是合法主任务；带子任务的主任务不能降为子任务。
     assert.equal((await send(`/api/wand-tasks/${child.id}`, { title: "继续处理" }).then(jsonOf<{ parentTaskId: string }>)).parentTaskId, peer.id);
-    await reject(await send(`/api/wand-tasks/${parent.id}`, { parentTaskId: peer.id }), /正在处理/);
+    await reject(await send(`/api/wand-tasks/${parent.id}`, { parentTaskId: peer.id }), /带子任务/);
     const detached = await send(`/api/wand-tasks/${child.id}`, { parentTaskId: null, workspaceId: other.id })
       .then(jsonOf<{ parentTaskId: null; workspaceId: string }>);
     assert.equal(detached.parentTaskId, null);
@@ -926,5 +944,77 @@ test("clearing the archive folder skips cards whose session is still working", a
     assert.equal(storage.getWandTask(gone.id), null);
     assert.equal(storage.getWandTask(busyCard.id)?.status, "archived");
     assert.ok(storage.getWorkspaceTask(container.id), "the skipped card keeps its container");
+  });
+});
+
+
+test("planning parent reassignment preserves metadata and sessions across all unarchived statuses", async () => {
+  let executions = 0;
+  await withHarness(async ({ url, storage }) => {
+    const workspace = storage.createWorkspace({ name: "Planning QA", cwd: storage.directory() });
+    const child = storage.createWandTask({ title: "历史叶子", description: "保留正文", status: "todo", workspaceId: workspace.id, labels: ["历史"], priority: "high", dueDate: "2026-12-01" });
+    storage.saveSession(sessionSnapshot({ id: "retained-history", command: "claude", cwd: storage.directory(), provider: "claude", sessionKind: "structured" }));
+    storage.bindWandTaskSession(child.id, "retained-history");
+    const before = storage.getWandTask(child.id)!;
+    const originalSession = storage.getSession("retained-history");
+    const send = (route: string, body: object, method = "PATCH") => fetch(`${url}${route}`, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    for (const status of ["todo", "doing", "done"] as const) {
+      const parent = storage.createWandTask({ title: status + "零会话主任务", status, workspaceId: workspace.id });
+      const response = await send(`/api/wand-tasks/${child.id}`, { parentTaskId: parent.id });
+      assert.equal(response.status, 200);
+      const reread = await fetch(`${url}/api/wand-tasks/${child.id}`).then(jsonOf<typeof before>);
+      assert.equal(reread.parentTaskId, parent.id);
+      for (const key of ["identifier", "title", "description", "status", "priority", "dueDate", "workspaceId", "agent"] as const) assert.deepEqual(reread[key], before[key], key);
+      assert.deepEqual(reread.labels, before.labels);
+      assert.deepEqual(storage.listWandTaskSessionIds(child.id), ["retained-history"]);
+      assert.deepEqual(storage.getSession("retained-history"), originalSession);
+      assert.deepEqual(storage.listWandTaskSessionIds(parent.id), []);
+      assert.equal(storage.getWandTask(parent.id)?.status, status);
+      const created = await send("/api/wand-tasks", { title: "只保存子任务", parentTaskId: parent.id }, "POST");
+      assert.equal(created.status, 201);
+      assert.equal((await created.json()).parentTaskId, parent.id);
+    }
+    assert.equal(executions, 0);
+  }, { generateTitle: async () => { executions++; throw Error("unexpected model"); }, processes: { start: async () => { executions++; throw Error("unexpected execution"); } } as never });
+});
+
+test("员工任务覆盖只保存任务与执行快照，不改员工候选或扩大降级链", async () => {
+  await withHarness(async ({ storage, url, manager }) => {
+    const original = storage.ensureDefaultSiliconEmployee();
+    const employee = { ...original, agents: [{ provider: "claude" as const, model: "default", thinkingEffort: "off" as const, mode: "default" as const, kind: "structured" as const }] };
+    storage.saveSiliconEmployee(employee);
+    const before = storage.getSiliconEmployee(employee.id);
+    const override = { provider: "codex", model: "gpt-test", thinkingEffort: "deep", mode: "full-access", kind: "structured" };
+    Object.defineProperty(manager, "sendMessage", { value: async () => undefined });
+    const planned = await fetch(`${url}/api/wand-tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "覆盖验收", executionSubject: { type: "employee", id: employee.id, agentOverride: override } }) });
+    assert.equal(planned.status, 201);
+    const task = await planned.json() as { id: string; agent: unknown; assignedExecutor: { name: string }; executionSubject: { agentOverride: unknown } };
+    assert.deepEqual(task.agent, override);
+    assert.deepEqual(task.executionSubject.agentOverride, override);
+    assert.equal(task.assignedExecutor.name, employee.name);
+    const response = await fetch(`${url}/api/wand-tasks/${task.id}/dispatch`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt: "隔离测试，不调用模型" }) });
+    assert.equal(response.status, 202, await response.clone().text());
+    const result = await response.json() as { session: { id: string } };
+    const session = manager.get(result.session.id)!;
+    assert.equal(session.employeeId, employee.id);
+    assert.equal(session.provider, "codex");
+    assert.equal(session.selectedModel, override.model);
+    assert.deepEqual(session.employeeCandidates, [override]);
+    assert.deepEqual(storage.getSiliconEmployee(employee.id), before);
+    const repeat = await fetch(`${url}/api/wand-tasks/${task.id}/dispatch`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ subject: { type: "employee", id: employee.id }, prompt: "旧客户端沿用任务覆盖" }) });
+    assert.equal(repeat.status, 202);
+    const repeated = await repeat.json() as { session: { id: string } };
+    assert.equal(manager.get(repeated.session.id)?.provider, "codex");
+    const reset = await fetch(`${url}/api/wand-tasks/${task.id}/dispatch`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ subject: { type: "employee", id: employee.id }, useEmployeeDefaults: true, prompt: "显式恢复员工默认" }) });
+    assert.equal(reset.status, 202);
+    const restored = await reset.json() as { session: { id: string } };
+    assert.equal(manager.get(restored.session.id)?.provider, "claude");
+    assert.equal(storage.getWandTask(task.id)?.executionSubject?.agentOverride, undefined);
+    const unsupported = await fetch(`${url}/api/wand-tasks/${task.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ executionSubject: { type: "employee", id: employee.id, agentOverride: { ...override, mode: "default" } } }) });
+    assert.equal(unsupported.status, 400);
+
+    const invalid = await fetch(`${url}/api/wand-tasks/${task.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ executionSubject: { type: "employee", id: employee.id, agentOverride: { ...override, kind: "pty" } } }) });
+    assert.equal(invalid.status, 400);
+    assert.deepEqual(storage.getSiliconEmployee(employee.id), before);
   });
 });

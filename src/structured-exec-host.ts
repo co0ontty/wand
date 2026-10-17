@@ -55,6 +55,8 @@ export interface StructuredStreamEvent {
 export interface StructuredExitEvent {
   exitCode: number | null;
   signal: number | null;
+  /** false for observation/transport failure, not an OS process exit. */
+  processExited?: boolean;
 }
 
 export interface StructuredExecProcess {

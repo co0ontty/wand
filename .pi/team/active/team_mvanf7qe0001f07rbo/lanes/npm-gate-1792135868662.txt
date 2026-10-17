@@ -1,0 +1,6 @@
+Lane mailbox for npm 发布门禁 (role npm-gate)
+Run: team_mvanf7qe0001f07rbo
+Lane: npm-gate-1792135868662
+Token: 2d5e3ff0-4681-4125-bedd-a7e323025f11
+
+Captain messages appear below, newest last.

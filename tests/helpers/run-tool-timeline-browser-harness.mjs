@@ -160,8 +160,18 @@ try {
       const shot = await send("Page.captureScreenshot",{format:"png"}); writeFileSync(join(output,`timeline-summary-${mode}.png`),Buffer.from(shot.data,"base64"));
     }
     report.removedSelectorHits.push({ mode, groups: await e('document.querySelectorAll(".chat-activity-group,.chat-activity-group-title").length'), oldAnimation: await e('document.getAnimations().filter(a=>a.animationName==="activity-menu-in").length') });
-    await e('window.entryNode=document.querySelector("button.chat-call-button");entryNode.scrollIntoView({block:"nearest"})');
+    // 打开抽屉会启动一个短暂的布局锚定租约（preserveDisclosurePosition），把外框
+    // 钉在触发器原位置；只有真实滚轮/指针输入会结束它。真实读者会先滚到消息下沿
+    // 再点行——这里用真实滚轮做同一件事，避免程序化 scrollIntoView 和租约互相拉扯。
+    for (let n = 0; n < 40; n++) {
+      const view = await e(`(()=>{const sc=document.querySelector(".chat-messages");const r=document.querySelector(".chat-call:nth-child(1) button.chat-call-button").getBoundingClientRect();const b=sc.getBoundingClientRect();return{top:Math.round(sc.scrollTop),visible:r.top>=b.top&&r.bottom<=b.bottom}})()`);
+      if (view.visible && Math.abs(view.top) <= 1) break;
+      const point = await e(`(()=>{const b=document.querySelector(".chat-messages").getBoundingClientRect();return{x:Math.round(b.right-30),y:Math.round(b.bottom-30)}})()`);
+      await send("Input.dispatchMouseEvent", { type: "mouseWheel", x: point.x, y: point.y, deltaX: 0, deltaY: 120 });
+      await sleep(60);
+    }
     await e('h.settle()');
+    await e('window.entryNode=document.querySelector("button.chat-call-button");true');
     await e('window.entryRect=entryNode.getBoundingClientRect().toJSON()');
     await click('.chat-call:nth-child(1) button.chat-call-button');
     await wait('document.querySelector(".chat-call-detail")?.textContent.includes("DETAIL_ONLY")'); await e("h.settle()");
@@ -292,8 +302,8 @@ try {
   assert.doesNotMatch(await e('document.querySelector("button.chat-process-summary").textContent'), /npm run check|退出码 1/);
   assert.equal(await e('document.querySelector(".chat-activity [data-chat-activity-renderer=canonical] > .chat-disclosure-body").getBoundingClientRect().height'), 0);
   await click('button.chat-process-summary'); await e('h.settle()');
-  // 输入与结果各占一行（对齐安卓的摘录行）：输入看 .chat-call-preview，结果看 .chat-call-result。
-  assert.match(await e('document.querySelector(".chat-call-preview").textContent'), /npm run check/);
+  // 输入与结果在未取详情前可见：命令提升为主标题（对齐可读标题的行语言），结果走 .chat-call-result。
+  assert.match(await e('document.querySelector(".chat-call-button").textContent'), /npm run check/);
   assert.match(await e('document.querySelector(".chat-call-result").textContent'), /TypeError/);
   assert.equal(report.requests.length, previewRequests, 'summary and timeline do not fetch bodies');
   assert.equal(await e('document.querySelector(".chat-call").dataset.status'), 'error');
@@ -303,7 +313,7 @@ try {
     await e(`(async()=>{await h.fresh([{role:"assistant",uuid:${JSON.stringify(kind)},content:[
       {type:"tool_use",id:${JSON.stringify(kind)},name:"Bash",input:{},preview:"npm test",activity:{kind:"run_command",label:"运行命令 · Bash"}}
     ]}])})()`);
-    await click('button.chat-process-summary'); await click('button.chat-call-button');
+    await click('button.chat-process-summary'); await e('h.settle()'); await click('button.chat-call-button');
     if (kind === "pending-command") {
       await wait('!!document.querySelector(".chat-activity-pending-detail")');await e('h.settle()');
       await e('window.pendingHeader=document.querySelector("button.chat-call-button");window.pendingBounds=pendingHeader.getBoundingClientRect().toJSON()');
@@ -318,7 +328,7 @@ try {
       await wait('document.querySelector(".chat-activity-detail-content").textContent.includes("DETAIL_ONLY")');
       assert.equal(report.requests.filter(id=>id===kind).length,2);
     } else {
-      await wait('!!document.querySelector(".chat-activity-loading")');
+      await wait('!!document.querySelector(".chat-activity-loading")'); await e('h.settle()');
       await click('button.chat-call-button'); await sleep(300); await e('h.settle()');
       assert.equal(await e('document.querySelector(".chat-call").dataset.expanded'),"false");
       assert.equal(await e('document.querySelector(".chat-call-detail").inert'),true);
@@ -330,7 +340,7 @@ try {
     {type:"tool_use",id:"file-only",name:"Read",input:{},activity:{kind:"read_file",label:"查看文件",fileKey:"opaque"}}
   ]}]);h.state.sessions[0].cwd="/repo";window.openedPath=null;window.__openFilePreview=p=>{window.openedPath=p}})()`);
   const fileRequests=report.requests.length;
-  await click('button.chat-process-summary');await click('button.chat-call-button');await e('h.settle()');
+  await click('button.chat-process-summary');await e('h.settle()');await click('button.chat-call-button');await e('h.settle()');
   assert.equal(report.requests.length,fileRequests);
   assert.equal(await e('document.querySelectorAll(".chat-activity-file-open").length'),1);
   await click('.chat-activity-file-open');await wait('openedPath==="/repo/src/main.ts"');await e('h.settle()');

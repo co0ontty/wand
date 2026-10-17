@@ -19,6 +19,13 @@
 | HELPER schedule:list --include-cancelled | 包含取消记录 |
 | HELPER schedule:read <id> | {task,runs}，最近50条执行含 sessionId、接收及实际执行状态 |
 
+## 创建员工定义（控制台招聘）
+
+`employee:list` 只是查询，`session:create` 是为已有员工创建会话，都不是创建员工定义；当前无 `employee:create/add` 命令。
+正式创建入口：Web 左侧「设置」菜单 → 员工与通讯录 → 管理员工与团队模板 → 员工 → 招聘员工。
+展开「人选资料（可手动填写）」填写名字、职责、Prompt 并核对执行候选后，可直接「确认入职」，不请求模型起草；也可在获得调用授权后填写岗位期望请嘟嘟拟定，核对草稿后再确认入职。起草不等于创建，创建不等于启动工作。
+不要绕过界面直接调用内部接口，也不要因新员工入职擅自修改其他员工配置、权限或扩大付费范围。助手只有创建会话授权时，不得替换为创建员工。
+
 ## 创建员工会话
 
 ```sh
@@ -96,5 +103,33 @@ JSON
 ## 无法执行时
 
 不读管理员密码、不改员工配置、不换引擎、不改系统定时器、不自动重启 Wand。
-提示 skill 未安装时由已授权的本机 CLI 执行 `wand system:skills`；安装只增加发现入口，不改变任何会话的工具开关或 Skills 白名单。
+默认安装（`~/.wand`）在服务启动时自动同步托管技能；提示 skill 未安装或过期时可用已授权的本机 CLI 显式执行 `wand system:skills` 刷新。安装只增加发现入口，不改变任何会话的工具开关或 Skills 白名单。
 新会话/资源刷新后可发现；被显式限定资源的会话需用户在原设置里选择该技能，不能绕过选择。
+
+
+## 一次性网页登录
+
+本能力沿用**本机所有者 CLI** 已有认证，不显示或传递长期密码；不是知识库/决策 token，也不是由员工自行授予 Web 管理权限。
+- `web-login:issue --stdin` 输入 `{requestId,origin}`；`web-login:cancel --stdin` 输入 `{requestId}`。仅本机直连、已认证管理员的所有者 CLI 可签发/取消；原生 App token、浏览器和代理转发不能签发。
+- 不能传 employeeId、sessionId、scopes、mode 或 TTL。每轮runner注入专用、可撤销的随机执行证明，经内存请求头交给服务；服务从证明回读实际员工/会话，再核对运行主体。不以非秘密WAND_SESSION_ID或调用者提供的ID当作授权。回合结束/取消/改密/重启撤销证明；升级前正在运行的回合需等新一轮员工执行取得新证明，无证明明确拒绝，不能降为local-owner或复用知识库/决策token。签发本身不改变员工模型、执行模式或工具权限；界面操作权限来自消费后的管理员登录 Cookie，仅限用户授权的界面自动化。
+- 消费后的 Cookie 与网页管理员密码登录同权限（browser-admin）：登录者可像普通用户一样查看和操作界面，包括其他会话、任务/工作区、文件/密码库、设置与实时 WebSocket。签发门槛不变：必须由本机可信所有者 CLI 在真实员工执行证明下签发，请求不能携带 employeeId/scopes/TTL。Cookie 按普通登录持久化，最长 12 小时且跨服务重启有效；只在用户授权的界面自动化中使用，不导出、不转存到其他进程。
+- 票据绑定精确 origin；仅 HTTPS（回环地址允许 HTTP），配置 publicOrigin 时必须匹配。60 秒有效，服务端内存保存摘要；重启、改密、取消、主体结束/改变都会使未消费票据失效。同一 requestId 12 小时内只处理一次，重复返回409，不重发密钥；重启会清空内存记录，旧票据仍失效。
+- 票据不得放入 argv、URL（含 fragment）、剪贴板、文件、日志、知识或截图。禁用 Playwright trace/HAR/video、请求体记录和页面输入快照；登录期间不截图。不要把签发命令直接交给会回显 stdout 的命令工具。
+
+在已有 Playwright 程序中，关闭凭据录制后直接 import（占位路径换成真实技能目录）：
+
+```js
+import { loginWithWebTicket } from "/absolute/path/to/wand-system/scripts/web-login.mjs";
+// 已用用户授权的专用 Chrome 打开精确 origin；不注入 Cookie、不调用登录内部 API。
+await page.goto(origin);
+await page.locator('#login-form, #app[data-react-shell="enabled"] .main-content').first().waitFor();
+const result = await loginWithWebTicket(page, { origin });
+// 仅输出非敏感 result；不能输出中间票据、输入值或网络请求体。
+```
+
+助手先查是否存在可见登录表单；已有登录态不签发。否则匿名进程管道拿票据，在真实页面的「访问密码」输入框填写票据并点「进入控制台」（页面自动识别，不切换登录方式）；一次提交后立即清除 DOM 中的票据。不得用 Cookie 注入或 API 登录代替该入口。
+页面与 helper 不静默重新签发/重试；失败、取消或未知后 helper 尝试取消原 requestId 并清空输入。取消不能撤销已消费形成的登录态；如果需要退出，用正常登出。
+helper 签发前检查当前进程是否持有格式有效的执行证明；缺少/格式无效返回 `EXECUTION_PROOF_REQUIRED`，不会启动 CLI、认证、签发、取消或修改页面输入。独立启动的 Pi/终端不会自动获得证明，能发现技能也不等于可以签发；请在 Wand 内已获授权的员工会话新一轮执行中使用，或由用户手动登录。此检查不替代服务端的证明及实时主体校验，不能手填会话 ID、复制证明或降级身份。已有网页登录态直接复用，不要求证明。
+
+签发请求失败/超时/响应解析失败可能已经签发，消费连接断开也可能已经登录：先刷新核对真实登录状态，不重放票据、不自动换 requestId。明确确认未登录且重新获得授权后才能发起新请求。浏览器登录态过期或服务重启后，沿同一显式流程重新取得新票据，不存长期密码。
+`issueWebLoginTicket` 仅供需要自管内存与失败处理的可信程序；其结果含密钥，不能打印。`cancelWebLoginTicket(requestId)` 可取消未消费票据；取消先到也会阻止迟到签发。

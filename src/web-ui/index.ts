@@ -2,7 +2,7 @@
 
 import { EMBEDDED_WEB_ASSETS, type EmbeddedVendorAssetPath } from "./embedded-assets.js";
 import { getStylesAsset } from "./styles.js";
-import { getScriptAsset, getThemePreloadAsset } from "./scripts.js";
+import { getBrowserModuleManifest, getScriptAsset, getThemePreloadAsset } from "./scripts.js";
 import { WAND_FAVICON_URL } from "./brand-identity.js";
 
 function vendorAssetUrl(relPath: EmbeddedVendorAssetPath): string {
@@ -12,6 +12,11 @@ function vendorAssetUrl(relPath: EmbeddedVendorAssetPath): string {
 export function renderApp(configPath: string, page: "console" | "settings" = "console", settingsAuth: "browser" | "client" = "browser"): string {
   const stylesHref = `/assets/app.css?v=${getStylesAsset().hash}`;
   const scriptSrc = `/assets/app.js?v=${getScriptAsset(configPath).hash}`;
+  // Discover the eager graph in the HTML instead of waiting for app.js to
+  // download and execute its dynamic import. Preloading does not execute it:
+  // the bootstrap still installs instance values before the runtime runs.
+  const modulePreloads = getBrowserModuleManifest().eager
+    .map(file => `<link rel="modulepreload" href="/assets/${file}" />`).join("\n  ");
   const xtermSrc = vendorAssetUrl("/vendor/xterm/xterm.bundle.js");
   const qrcodeSrc = vendorAssetUrl("/vendor/qrcode/qrcode.bundle.js");
   const xtermCssHref = vendorAssetUrl("/vendor/xterm/xterm.css");
@@ -29,6 +34,7 @@ export function renderApp(configPath: string, page: "console" | "settings" = "co
   <meta name="theme-color" content="#faf8f5" />
   <meta name="format-detection" content="telephone=no" />
   <meta name="msapplication-tap-highlight" content="no" />
+  ${modulePreloads}
   <script src="/assets/theme.js?v=${getThemePreloadAsset().hash}"></script>
   <link rel="stylesheet" href="${xtermCssHref}" />
   <link rel="stylesheet" href="${stylesHref}" />

@@ -1,5 +1,6 @@
 import { presentAssistantReply, presentChat, refreshChatPresentation } from "../react/chat/presentation.js";
 import { paintTurnNavigation } from "../react/chat/navigation/browser-host.js";
+import { paintChatSubtasks } from "./chat-subtasks.js";
 import { buildTurnNavIndex, turnNavRange } from "../react/chat/navigation/turn-nav-model.js";
 import { jumpToChatTurn } from "../react/chat/navigation/turn-jump.js";
 import { mountBrowserButtons, updateBrowserButtonLabel } from "./library-buttons.js";
@@ -10,7 +11,7 @@ import { beginChatInteraction, chatViewLease, isChatLeaseCurrent, patchChatConte
 import type { ChatOwnerPlan, ChatViewLease } from "./chat-render-focus.js";
 import { t, getActiveLang, iconSvg } from "./i18n";
 import { escapeHtml, isImagePath, refreshTailMarqueePaths, renderTailMarqueePath } from "./utils";
-import { beginChatHistorySeek, applyExpandedState, applyPersistedExpandState, bindChatScrollListener, buildExpandKey, clearChatUnread, getMessageKey, getPersistedAgentSelection, getPersistedExpandState, isChatNearBottom, observeLoadMoreSentinel, persistElementExpandState, refreshChatUnreadDivider, setPersistedExpandState, updateChatUnreadBubble } from "./chat-scroll";
+import { beginChatHistorySeek, applyExpandedState, applyPersistedExpandState, bindChatScrollListener, buildExpandKey, clearChatUnread, getMessageKey, getPersistedExpandState, isChatNearBottom, observeLoadMoreSentinel, persistElementExpandState, refreshChatUnreadDivider, setPersistedExpandState, updateChatUnreadBubble } from "./chat-scroll";
 import "./file-browser";
 import { buildMessagesForRender } from "./input";
 import { syncSessionProgressToNative } from "./notifications";
@@ -41,7 +42,6 @@ export { ensureChatMessagesContainer } from "./chat-host.js";
 export { formatInlineResult, shortCommand, setInlineToolImageState } from "./chat-render-model.js";
 import { formatInlineResult, setInlineToolImageState } from "./chat-render-model.js";
 import {
-  agentRunAccentSeed,
   agentRunAgentTitle,
   agentRunBlockKey,
   agentRunInLatestWindow,
@@ -51,7 +51,6 @@ import {
   deriveSubagentMeta,
   flattenAgentRunInline,
   getAgentRunStatusSummary,
-  shouldAgentRunStartExpanded,
   truncateInlineText,
 } from "./agent-runs";
 import "./local-preview-adapter";
@@ -522,6 +521,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
             state.lastRenderedMsgCount = 0;
           }
           syncTurnNavigation(chatOutput, null);
+          paintChatSubtasks(chatOutput, null, []);
           renderStructuredStatusBar(null, null);
           updateTodoProgress([]);
           state.chatRenderCache?.reset();
@@ -550,6 +550,19 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         _currentLastUserTextMessageIndex = agentRunIndex.lastUserTextMessageIndex;
         _currentSessionRunning = !!(selectedSession.structuredState &&
           selectedSession.structuredState.inFlight && selectedSession.status === "running");
+        if (typeof HTMLElement !== "undefined") paintChatSubtasks(chatOutput, selectedSession.id, agentRunIndex.agents.map(agent => {
+          var run = agentRunIndex.runs.find(run => run.id === agent.runId)!;
+          var activity = agentRunActivity(run);
+          var status = getAgentRunStatusSummary({ agents: [agent] } as any, activity).status;
+          return {
+            id: agent.taskId, title: agentRunAgentName(agent),
+            status: agentRunStatusLabel(status, activity),
+            latest: agentRunLastActionText(agent, status),
+            instruction: String(agent.dispatch?.block.input?.prompt || agent.dispatch?.block.input?.task || agentRunTaskDescription(agent)),
+            render: () => renderAgentRunDetailHtml(run, agent, true, "assistant", conversationToolResults,
+              "subtask:" + agent.taskId, activity, false, false),
+          };
+        }));
         _currentActivitySessionBusy = selectedSession.status === "running" &&
           (!!selectedSession.structuredState?.inFlight || selectedSession.ptyBusy === true ||
             selectedSession.isResponding === true);
@@ -1349,73 +1362,8 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         base: "#9EAAB8", dark: "#6B7B8D", light: "#C5CED8",
         accent: "#FFFFFF", eye: "#7EC88B", mouth: "#F28B9A",
       };
-      // Agent Run 使用稳定的身份色，但不再引入额外头像或“角色扮演”命名。
-      // 颜色只是让同一个 taskId 在并行轨迹里可辨认，状态色仍由 CSS 统一控制。
-      var AGENT_RUN_ACCENTS = ["#4F7FD8", "#8A61C9", "#4F8A68", "#C45F78", "#3F9992", "#A66B35"];
-      function hashStringToIndex(str, mod) {
-        var s = String(str || "");
-        var h = 0;
-        for (var i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
-        return Math.abs(h) % mod;
-      }
-      /**
-       * 身份色：种子用 taskId（同一批次并行子 Agent 的 agentType 往往完全相同，
-       * 按类型取色会让四个 Agent 撞成同一个颜色），但一卡之内撞色时向后取下一个
-       * 空位——同一张卡里四个点同色就等于没有身份色。
-       */
-      function agentRunAccent(run, agent) {
-        var n = AGENT_RUN_ACCENTS.length;
-        var taken = [];
-        var slot = hashStringToIndex(agentRunAccentSeed(agent), n);
-        var agents = (run && Array.isArray(run.agents)) ? run.agents : [];
-        for (var i = 0; i < agents.length; i++) {
-          if (agents[i] === agent) break;
-          var other = hashStringToIndex(agentRunAccentSeed(agents[i]), n);
-          for (var step = 0; step < n && taken.indexOf(other) >= 0; step++) other = (other + 1) % n;
-          taken.push(other);
-        }
-        for (var shift = 0; shift < n && taken.indexOf(slot) >= 0; shift++) slot = (slot + 1) % n;
-        return AGENT_RUN_ACCENTS[slot];
-      }
-      // 这些类型名不携带信息（“通用 Agent”），不配占一个 chip 位。
-      var AGENT_RUN_DEFAULT_TYPES = ["general", "general-purpose", "generalist", "default"];
       function agentRunTypeValue(agent) {
         return String((agent && agent.meta && agent.meta.agentType) || "").trim();
-      }
-      function isDefaultAgentRunType(type) {
-        if (!type) return true;
-        return AGENT_RUN_DEFAULT_TYPES.indexOf(type.toLowerCase()) >= 0;
-      }
-      /**
-       * 卡级类型 chip 只在「整卡就一个类型、且这个类型有信息量」时出现。
-       * 多个类型混在一行等于没写；同类型的 general-purpose 是纯噪音。
-       */
-      function agentRunTypeChip(run) {
-        if (!agentRunTypesCarryInfo(run)) return "";
-        var types = [];
-        for (var i = 0; i < run.agents.length; i++) {
-          var type = agentRunTypeValue(run.agents[i]);
-          if (type && types.indexOf(type) < 0) types.push(type);
-        }
-        if (types.length !== 1) return "";
-        return types[0];
-      }
-      /**
-       * rail 每行都写 "general-purpose" 等于没写：只有类型能区分谁是谁（或非默认类型）
-       * 时才显示类型小字。
-       */
-      function agentRunTypesCarryInfo(run) {
-        var types = [];
-        for (var i = 0; i < run.agents.length; i++) {
-          var type = agentRunTypeValue(run.agents[i]);
-          if (type && types.indexOf(type) < 0) types.push(type);
-        }
-        if (types.length > 1) return true;
-        return types.length === 1 && !isDefaultAgentRunType(types[0]);
-      }
-      // 状态文字只在需要解释时出现：完成态由图标 + aria-label / title 表达。
-      function agentRunStatusNeedsText(status) {
-        return status !== "completed";
       }
       function agentRunStatusLabel(status, activity) {
         return t(agentRunStatusLabelKey(status, activity));
@@ -1436,25 +1384,6 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
       function agentRunTaskDescription(agent) {
         var task = agent && agent.meta.taskDescription && String(agent.meta.taskDescription).trim();
         return task || t("agentRun.noTask");
-      }
-      function agentRunTitle(run, summary) {
-        if (run.agents.length > 1) return t("agentRun.count", { count: String(summary.total) });
-        return agentRunAgentName(run.agents[0]);
-      }
-      // 多 Agent 卡的主 Agent：正在跑的那个优先，否则第一条（保持稳定，不随刷新跳字）。
-      function agentRunPrimaryAgent(run, activity) {
-        for (var i = 0; i < run.agents.length; i++) {
-          var status = getAgentRunStatusSummary({ agents: [run.agents[i]] } as any, activity).status;
-          if (status === "running" || status === "background") return run.agents[i];
-        }
-        return run.agents[0];
-      }
-      function agentRunTopicText(run, activity) {
-        if (run.agents.length < 2) return "";
-        var primary = agentRunPrimaryAgent(run, activity);
-        var desc = String((primary && primary.meta && primary.meta.taskDescription) || "").trim();
-        if (!desc) desc = agentRunTypeValue(primary) || t("agentRun.subagent");
-        return truncateInlineText(desc, 96);
       }
       // 结果体保留原始换行：压平后再走 renderMarkdown，标题/列表/代码块会全塌成一段。
       function agentRunResultText(agent) {
@@ -1484,31 +1413,6 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         if (resultText.trim()) return truncateInlineText(flattenAgentRunInline(resultText), 150);
         if (status === "running") return t("agentRun.waiting");
         return "";
-      }
-      function agentRunLatestRef(agent) {
-        var latest = agent && (agent.result || agent.dispatch || agent.firstSeen);
-        var blocks = agent && Array.isArray(agent.blocks) ? agent.blocks : [];
-        for (var i = 0; i < blocks.length; i++) {
-          var ref = blocks[i];
-          if (!latest || ref.messageIndex > latest.messageIndex ||
-              (ref.messageIndex === latest.messageIndex && ref.blockIndex > latest.blockIndex)) latest = ref;
-        }
-        return latest;
-      }
-      function agentRunLatestSummary(run, activity) {
-        var latestAgent = null;
-        var latestRef = null;
-        for (var i = 0; i < run.agents.length; i++) {
-          var ref = agentRunLatestRef(run.agents[i]);
-          if (!latestRef || (ref && (ref.messageIndex > latestRef.messageIndex ||
-              (ref.messageIndex === latestRef.messageIndex && ref.blockIndex > latestRef.blockIndex)))) {
-            latestRef = ref;
-            latestAgent = run.agents[i];
-          }
-        }
-        if (!latestAgent) return "";
-        var status = getAgentRunStatusSummary({ agents: [latestAgent] } as any, activity).status;
-        return agentRunLastActionText(latestAgent, status);
       }
       function renderAgentRunStepHtml(ref, role, toolResults, messageKey) {
         var block = ref && ref.block;
@@ -1649,107 +1553,9 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
       function renderAgentRunHtml(run, activity, role, toolResults, messageKey) {
         if (!run || !run.agents.length) return "";
         var summary = getAgentRunStatusSummary(run, activity);
-        var expandKey = buildExpandKey("agent-run", [run.id]);
-        var persisted = getPersistedExpandState(expandKey);
-        var expanded = shouldAgentRunStartExpanded(summary.status, persisted);
-        var selectedTaskId = typeof getPersistedAgentSelection === "function" ? getPersistedAgentSelection(run.id) : "";
-        var selectedAgent = null;
-        for (var i = 0; i < run.agents.length; i++) {
-          var candidate = run.agents[i];
-          if (selectedTaskId && candidate.taskId === selectedTaskId) selectedAgent = candidate;
-        }
-        if (!selectedAgent) {
-          for (var j = 0; j < run.agents.length; j++) {
-            var candidateStatus = getAgentRunStatusSummary({ agents: [run.agents[j]] } as any, activity).status;
-            if (!selectedAgent || candidateStatus === "failed" || (candidateStatus === "running" && selectedAgent !== run.agents[j])) {
-              selectedAgent = run.agents[j];
-            }
-            if (candidateStatus === "failed") break;
-          }
-        }
-        selectedAgent = selectedAgent || run.agents[0];
-        var bodyId = "agent-run-body-" + String(run.id).replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 120);
-        var latest = agentRunLatestSummary(run, activity);
-        var statusWord = agentRunStatusLabel(summary.status, activity);
-        // 标题（设计 A）：单 Agent 用任务描述，多 Agent 用「N 个子 Agent」+ 主 Agent 的描述。
-        // 「Agent 运行」这种卡名不再出现——它不告诉用户这一轮到底做了什么。
-        var titleText = agentRunTitle(run, summary);
-        var topicText = agentRunTopicText(run, activity);
-        var typeChip = agentRunTypeChip(run);
-        var summaryAria = t("agentRun.summary_aria", {
-          count: String(summary.total),
-          status: statusWord,
-          latest: latest || t("agentRun.noOutput"),
-        });
-        var railHtml = "";
-        var detailHtml = "";
-        var isMulti = run.agents.length > 1;
-        // 类型只在能区分时出现一次：摘要行已经代表整卡类型时，rail 行与详情头不再重复。
-        var showType = agentRunTypesCarryInfo(run);
-        for (var k = 0; k < run.agents.length; k++) {
-          var agent = run.agents[k];
-          var agentStatus = getAgentRunStatusSummary({ agents: [agent] } as any, activity).status;
-          var agentStatusWord = agentRunStatusLabel(agentStatus, activity);
-          var agentLabel = agentRunTaskDescription(agent);
-          var agentType = agentRunTypeValue(agent);
-          var isSelected = agent === selectedAgent;
-          var panelId = agentRunPanelId(run.id, agent.taskId);
-          var tabId = panelId + "-tab";
-          var rowType = showType && agentType && agentType !== typeChip ? agentType : "";
-          if (isMulti) railHtml += '<button data-antd-control type="button" class="agent-run-agent' + (isSelected ? ' is-selected' : '') + '" ' +
-              'id="' + escapeHtml(tabId) + '" role="tab" aria-controls="' + escapeHtml(panelId) + '" ' +
-              'aria-selected="' + (isSelected ? "true" : "false") + '" ' +
-              'tabindex="' + (isSelected ? "0" : "-1") + '" data-agent-task-id="' + escapeHtml(agent.taskId) + '" ' +
-              'data-agent-run-id="' + escapeHtml(run.id) + '" onclick="__agentRunSelect(event, this)" ' +
-              'onkeydown="__agentRunSelect(event, this)" ' +
-              'style="--agent-color:' + escapeHtml(agentRunAccent(run, agent)) + '">' +
-            '<span class="agent-run-agent-marker" aria-hidden="true"></span>' +
-            // rail 行标题 = 任务描述（能区分谁在干什么），agentType 降为次要小字。
-            '<span class="agent-run-agent-copy">' +
-              '<strong>' + escapeHtml(truncateInlineText(agentLabel, 86)) + '</strong>' +
-              (rowType ? '<span class="agent-run-agent-type">' + escapeHtml(rowType) + '</span>' : '') +
-            '</span>' +
-            (agentRunStatusNeedsText(agentStatus)
-              ? '<span class="agent-run-agent-status is-' + agentStatus + '">' + escapeHtml(agentStatusWord) + '</span>'
-              : '<span class="agent-run-agent-status is-' + agentStatus + '" role="img" aria-label="' +
-                  escapeHtml(agentStatusWord) + '">' + agentRunStatusIcon(agentStatus) + '</span>') +
-          '</button>';
-          detailHtml += renderAgentRunDetailHtml(run, agent, isSelected, role, toolResults, messageKey, activity, isMulti, !!rowType);
-        }
-        return '<section class="agent-run is-' + summary.status + (isMulti ? '' : ' is-single') + '" ' +
-            'data-expand-kind="agent-run" data-expand-key="' + escapeHtml(expandKey) + '" ' +
-            'data-agent-run-id="' + escapeHtml(run.id) + '" data-status="' + summary.status + '" ' +
-            'data-expanded="' + (expanded ? "true" : "false") + '" ' +
-            'aria-label="' + escapeHtml(summaryAria) + '">' +
-          '<button data-antd-control type="button" class="agent-run-summary" aria-expanded="' + (expanded ? "true" : "false") + '" ' +
-              'aria-controls="' + escapeHtml(bodyId) + '" aria-label="' + escapeHtml(summaryAria) + '" ' +
-              'onclick="__agentRunToggle(event, this)">' +
-            '<span class="agent-run-summary-icon" aria-hidden="true">' + agentRunStatusIcon(summary.status) + '</span>' +
-            '<span class="agent-run-summary-main">' +
-              '<span class="agent-run-summary-top">' +
-                '<strong class="agent-run-title">' + escapeHtml(titleText) + '</strong>' +
-                (topicText ? '<span class="agent-run-topic">' + escapeHtml(topicText) + '</span>' : '') +
-                (typeChip ? '<span class="agent-run-type-chip">' + escapeHtml(typeChip) + '</span>' : '') +
-                (agentRunStatusNeedsText(summary.status)
-                  ? '<span class="agent-run-status-label is-' + summary.status + '">' + escapeHtml(statusWord) + '</span>'
-                  : '') +
-              '</span>' +
-              // 副行 = 最后一步动作，纯文本一行，不渲染 markdown。
-              (latest
-                ? '<span class="agent-run-latest"><span class="agent-run-latest-text">' + escapeHtml(latest) + '</span></span>'
-                : '') +
-            '</span>' +
-            '<span class="agent-run-chevron" aria-hidden="true">' + iconSvg("chevronDown", { size: 14, strokeWidth: 2 }) + '</span>' +
-          '</button>' +
-          '<div class="agent-run-body" id="' + escapeHtml(bodyId) + '" aria-hidden="' + (expanded ? "false" : "true") + '">' +
-            '<div class="agent-run-body-inner">' +
-              (isMulti
-                ? '<div class="agent-run-rail" role="tablist" aria-label="' + escapeHtml(t("agentRun.agent_list")) + '">' + railHtml + '</div>'
-                : '') +
-              '<div class="agent-run-detail">' + detailHtml + '</div>' +
-            '</div>' +
-          '</div>' +
-        '</section>';
+        return '<button data-antd-control type="button" class="chat-subtask-link" data-open-subtask="' +
+          escapeHtml(run.agents[0].taskId) + '">子任务 ' + summary.total + ' · ' +
+          escapeHtml(agentRunStatusLabel(summary.status, activity)) + ' · 查看详情</button>';
       }
       export var PIXEL_AVATAR = {
         assistant: buildPixelSvg(buildCatGrid(GARFIELD_PALETTE)),
@@ -2314,7 +2120,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         // Android 最新运行组默认向下展开；Web 不按网络或设备分类。
         // 默认值每轮重新派生，绝不写进手动偏好；查详情/滚动会显式保留展开。
         var activityLive = !!opts.isTrailing && isTurnActivityLive(_currentMessageGlobalIndex);
-        var expanded = persisted ?? true;
+        var expanded = persisted ?? activityLive;
         // 全段只有一个活跃条目：没回执的调用优先，其次最后一轮思考。
         // 摘要的 running 标记与时间线行的 loading 都读它，两处不会同时闪。
         var liveRow = activityLiveRow(items, _currentActivitySessionBusy && _currentLatestPendingCommandId
@@ -2335,7 +2141,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
           var callScope = renderBlockScope(messageKey, call.index + segmentFirstIndex, block);
           var entryKey = buildExpandKey(isThinking ? "activity-thinking" : "activity-detail",
             [state.selectedId, groupKey, callScope]);
-          var entryOpen = isThinking ? getPersistedExpandState(entryKey) ?? true : activityDetailOpen.has(entryKey);
+          var entryOpen = activityDetailOpen.has(entryKey);
           var entryRunning = !!liveRow && block === liveBlock;
           var result = isThinking ? null : pickToolResultForDisplay(toolResults, block.id);
           var status = entryRunning ? "运行中" : result?.is_error ? "失败" : result ? "完成" : "未返回";
@@ -2480,7 +2286,6 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         var group = row.closest(".chat-activity");
         var detail = row.querySelector(".chat-call-detail");
         var nowExpanded = row.getAttribute("data-expanded") !== "true";
-        if (row.getAttribute("data-thinking-entry") === "true") setPersistedExpandState(key, nowExpanded);
         // Only opening a detail is a reading choice; closing it must release the drawer.
         if (group && nowExpanded) holdActivityTimeline(group);
         row.setAttribute("data-expanded", nowExpanded ? "true" : "false");

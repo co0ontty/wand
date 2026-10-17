@@ -39,6 +39,7 @@
     "dev": "node scripts/check-node-version.js && node scripts/bundle-tailwind.js && node scripts/bundle-xterm.js && node scripts/bundle-qrcode.js && node scripts/bundle-browser.js --development && npm run generate:web-assets && tsx src/cli.ts web",
     "check": "node src/deployment-lock.ts --run-project -- npm run check:body",
     "check:body": "node scripts/check-node-version.js && node scripts/bundle-tailwind.js && node scripts/bundle-xterm.js && node scripts/bundle-qrcode.js && node scripts/bundle-browser.js && npm run generate:web-assets && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.browser.json && tsc --noEmit -p tsconfig.react.json",
+    "typecheck": "node scripts/check-node-version.js && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.browser.json && tsc --noEmit -p tsconfig.react.json",
     "test": "node scripts/check-node-version.js && node scripts/run-tests.js",
     "check:bundle-budget": "node scripts/check-node-version.js && node scripts/check-bundle-budget.js",
     "budget:accept": "node scripts/check-node-version.js && node scripts/check-bundle-budget.js --accept-baseline",
@@ -80,6 +81,7 @@
     "multer": "^2.1.1",
     "neo-blessed": "^0.2.0",
     "node-pty": "^1.1.0",
+    "pi-agent-browser-native": "^0.9.6",
     "stream-chain": "4.2.5",
     "stream-json": "3.7.0",
     "ws": "^8.19.0"

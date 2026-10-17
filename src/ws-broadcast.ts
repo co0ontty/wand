@@ -154,14 +154,14 @@ export class WsBroadcastManager {
 
   private getCardDefaults: () => CardExpandDefaults;
   private useHttps: boolean;
-  private authService?: Pick<AuthService, "validateSession">;
+  private authService?: Pick<AuthService, "validateSession"> & Partial<Pick<AuthService, "authenticateSession">>;
   private authenticateRequest?: (req: IncomingMessage) => boolean;
 
   constructor(
     wss: WebSocketServer,
     getCardDefaults?: () => CardExpandDefaults,
     useHttps = false,
-    authService?: Pick<AuthService, "validateSession">,
+    authService?: Pick<AuthService, "validateSession"> & Partial<Pick<AuthService, "authenticateSession">>,
     authenticateRequest?: (req: IncomingMessage) => boolean,
   ) {
     this.wss = wss;

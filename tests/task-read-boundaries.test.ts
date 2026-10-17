@@ -28,6 +28,12 @@ async function harness(t: test.TestContext) {
   return {storage, registry, root, get};
 }
 
+function bindTitleExecution(storage: WandStorage, taskId: string, id: string): void {
+  storage.saveSession({ id, command: "fixture", cwd: storage.directory(), mode: "default", status: "exited", exitCode: 0,
+    startedAt: "2026-10-17T00:00:00Z", endedAt: "2026-10-17T00:00:01Z", output: "", sessionKind: "structured", provider: "pi" });
+  storage.bindWandTaskSession(taskId, id);
+}
+
 test("list and detail projections neither hydrate messages nor mutate read state", async t => {
   const {storage, root, get} = await harness(t);
   const workspace = storage.createWorkspace({name:"Fixture",cwd:root});
@@ -66,7 +72,8 @@ test("title jobs cannot write after storage closes, even if the generator ignore
   const {storage} = await harness(t);
   let release!: (title:string)=>void;
   const service=taskTitleService(storage,{generateTitle:()=>new Promise(resolve=>{release=resolve;})});
-  storage.createWandTask({title:"临时",titleSource:"auto",description:"真实命名输入"});
+  const task = storage.createWandTask({title:"临时",titleSource:"auto",description:"真实命名输入"});
+  bindTitleExecution(storage, task.id, "title-close-execution");
   service.refresh();
   await new Promise(resolve=>setImmediate(resolve));
   assert.ok(release);
@@ -84,10 +91,24 @@ test("title queues are storage-local and coalesce superseded work before invokin
     if(sources.length===1) return new Promise<string>(resolve=>{release=resolve;});
     return "最新标题";
   }});
-  storage.createWandTask({title:"占位",description:"first",titleSource:"auto"});
+  const first = storage.createWandTask({title:"占位",description:"first",titleSource:"auto"});
+  bindTitleExecution(storage, first.id, "first-title-execution");
   service.refresh();await new Promise(resolve=>setImmediate(resolve));
   const pending=storage.createWandTask({title:"占位",description:"old",titleSource:"auto"});
+  bindTitleExecution(storage, pending.id, "pending-title-execution");
   service.refresh();storage.updateWandTask(pending.id,{description:"new"});service.refresh();
   release("第一个标题");await whenWandTaskTitlesSettled();
   assert.deepEqual(sources,["first","new"]);
+});
+
+
+test("saving unstarted plans never calls title models or rewrites historical plan titles", async t => {
+  const { storage } = await harness(t);
+  let calls = 0;
+  const historic = storage.createWandTask({ title: "保留既有标题", titleSource: "auto", description: "另一段原描述" });
+  const service = taskTitleService(storage, { generateTitle: async () => { calls++; return "不应调用"; } });
+  storage.createWandTask({ title: "新计划", description: "保存不执行" });
+  service.refresh(); await whenWandTaskTitlesSettled();
+  assert.equal(calls, 0);
+  assert.equal(storage.getWandTask(historic.id)?.title, "保留既有标题");
 });

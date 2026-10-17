@@ -31,9 +31,8 @@ test("activity filter keeps a manual CLI in a blank terminal, not the idle shell
   const entries = [terminal, idle].map((session) => ({ session, group, taskName: null }));
   assert.deepEqual(filterRecentEntries(entries, { activeOnly: true }).map((e) => e.session.id), [terminal.id]);
   const idleGroups = filterActiveGroups([{ ...group, tasks: [], standaloneSessions: [idle] }]);
-  assert.equal(idleGroups.length, 1, "the workspace root survives an empty activity result");
-  assert.deepEqual(idleGroups[0].standaloneSessions, []);
-  assert.equal(filterActiveGroups([{ ...group, tasks: [], standaloneSessions: [idle] }], idle.id).length, 1);
+  assert.equal(idleGroups.length, 0, "empty activity directories are projection-only and disappear");
+  assert.equal(filterActiveGroups([{ ...group, tasks: [], standaloneSessions: [idle] }], idle.id).length, 0);
 });
 
 test("foreground commands share sidebar badge, counts and shell activity without inventing an AI turn", () => {

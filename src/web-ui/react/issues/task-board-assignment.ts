@@ -1,3 +1,4 @@
+import { DEFAULT_EMPLOYEE_ID } from "../../../employee-types";
 import { isTaskExecutionSubject, type TaskExecutionSubject, type WandTaskAgent } from "../../../task-types";
 import { createDefaultIssueAgent, isDispatchableIssueAgent, isIssueAgentProvider, resolveIssueAgent } from "./task-board-agent";
 
@@ -54,12 +55,14 @@ export function resolveIssueAssignment(
       : resolveIssueAgent(null, recent?.agent ?? defaults);
   const subject = configuredSubject ?? (configuredAgent
     ? { type: "cli" as const, id: agent.provider }
-    : recent?.subject ?? { type: "cli" as const, id: agent.provider });
+    : recent?.subject ?? (available.employees?.some(item => item.id === DEFAULT_EMPLOYEE_ID && !item.archivedAt)
+      ? { type: "employee" as const, id: DEFAULT_EMPLOYEE_ID } : { type: "cli" as const, id: agent.provider }));
   // null means still loading/failed: don't discard a stable ID before its catalog arrives.
   const unavailable = subject.type === "employee"
     ? available.employees !== null && !available.employees.some((item) => item.id === subject.id && !item.archivedAt)
     : subject.type === "team"
       && available.teams !== null && !available.teams.some((item) => item.id === subject.id);
+  if (unavailable && configuredSubject) return { agent, subject };
   if (unavailable) {
     const fallback = resolveIssueAgent(configuredAgent, defaults);
     return { agent: fallback, subject: { type: "cli", id: fallback.provider } };

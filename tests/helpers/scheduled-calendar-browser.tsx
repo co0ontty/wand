@@ -12,6 +12,7 @@ function App() {
   return <WandUiProvider><div className="fixture-shell"><ConversationNavigation activePage={state.page === "calendar" ? "calendar" : "schedules"} teamAttention={0} onNavigate={page => {
     if (page === "calendar" || page === "schedules") taskBoardController.open("", "", page);
   }}/><main><ScheduledTasksPage visible={state.open} view={state.page === "calendar" ? "calendar" : "list"} calendarMode={state.calendarRange}
+    onViewChange={view => taskBoardController.open("", "", view === "calendar" ? "calendar" : "schedules")}
     onCalendarModeChange={mode => taskBoardController.calendarRange(mode)} onBack={() => taskBoardController.close()}
     onOpenSession={id => (window as any).openedScheduledSessions.push(id)}/></main></div></WandUiProvider>;
 }

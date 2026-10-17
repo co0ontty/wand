@@ -14,7 +14,7 @@ function entry(id: string, extra: Partial<WorkspaceSessionSummary> = {}): Worksp
     startedAt: "2026-10-10T08:00:00Z", ...extra };
 }
 
-test("activity keeps every workspace root, including empty, synthetic, global and archive-only roots", () => {
+test("activity prunes empty roots without modifying source directories", () => {
   const groups: TaskDirectoryGroup[] = [
     directory("busy", [entry("busy", { inFlight: true }), entry("idle")]),
     { ...directory("synthetic", [entry("old")]), synthetic: true },
@@ -24,7 +24,7 @@ test("activity keeps every workspace root, including empty, synthetic, global an
   ];
   const before = structuredClone(groups);
   const result = filterActiveGroups(groups);
-  assert.deepEqual(result.map(group => group.workspaceId), groups.map(group => group.workspaceId));
+  assert.deepEqual(result.map(group => group.workspaceId), ["busy"]);
   assert.deepEqual(result[0].standaloneSessions.map(session => session.id), ["busy"]);
   for (const group of result.slice(1)) {
     assert.deepEqual(group.tasks, []);
@@ -34,11 +34,10 @@ test("activity keeps every workspace root, including empty, synthetic, global an
   assert.deepEqual(groups, before, "filtering never modifies source sessions or archive data");
 });
 
-test("search still narrows roots; an idle matching root survives the additional activity filter", () => {
+test("search narrows roots and activity prunes idle results", () => {
   const groups = [directory("wand", [entry("wand-idle")]), directory("other", [entry("other-busy", { inFlight: true })])];
   const searched = filterSidebarGroups(groups, "wand");
-  assert.deepEqual(filterActiveGroups(searched).map(group => group.workspaceId), ["wand"]);
-  assert.deepEqual(filterActiveGroups(searched)[0].standaloneSessions, []);
+  assert.deepEqual(filterActiveGroups(searched), []);
   assert.deepEqual(filterActiveGroups(filterSidebarGroups(groups, "missing")), []);
 });
 
@@ -56,7 +55,7 @@ test("recent activity retains employee, team, CLI and terminal heads with their 
   const employees = [{ id: "e1", name: "当前员工名" }];
   const full = recentConversationGroups(entries, { employees });
   const active = recentConversationGroups(entries, { employees, activeOnly: true });
-  assert.deepEqual(active.map(group => group.key), full.map(group => group.key));
+  assert.deepEqual(active.map(group => group.key), ["employee:e2"]);
   for (const group of active) {
     const source = full.find(candidate => candidate.key === group.key)!;
     assert.equal(group.title, source.title);
@@ -66,8 +65,8 @@ test("recent activity retains employee, team, CLI and terminal heads with their 
     assert.equal(group.showsHeader, true);
     assert.equal(group.entries.length, group.key === "employee:e2" ? 1 : 0);
   }
-  assert.equal(active.find(group => group.key === "employee:e1")?.title, "当前员工名");
-  assert.equal(active.find(group => group.key === "employee:e1")?.latestSession.employeeAvatar, "cat:2");
+  assert.equal(full.find(group => group.key === "employee:e1")?.title, "当前员工名");
+  assert.equal(full.find(group => group.key === "employee:e1")?.latestSession.employeeAvatar, "cat:2");
   assert.deepEqual(entries, before);
 });
 
@@ -79,8 +78,8 @@ test("recent selection respects activity but survives the full-list recent limit
   ])];
   const entries = collectRecentEntries(groups);
   const active = recentConversationGroups(entries, { limit: 1, activeOnly: true, selectedSessionId: "selected-idle" });
-  assert.deepEqual(active.map(group => group.key), ["employee:e1", "employee:e2"]);
-  assert.deepEqual(active.map(group => group.entries.map(entry => entry.session.id)), [[], ["older-busy"]]);
+  assert.deepEqual(active.map(group => group.key), ["employee:e2"]);
+  assert.deepEqual(active.map(group => group.entries.map(entry => entry.session.id)), [["older-busy"]]);
   const full = recentConversationGroups(entries, { limit: 1, selectedSessionId: "selected-idle" });
   assert.deepEqual(full.flatMap(group => group.entries.map(entry => entry.session.id)), ["new-idle", "selected-idle"]);
 });

@@ -1,6 +1,6 @@
 ---
 name: wand-system
-description: 操作 Wand 工作台的系统能力：查询员工和工作区，创建员工会话，查看或续接指定历史会话，创建、查看、暂停和取消定时任务。用户要求延迟检查、两小时后复查、选择员工执行、异常时唤起原会话等自动化流程时使用。
+description: 操作 Wand 工作台的系统能力：查询员工和工作区，创建员工会话，查看或续接指定历史会话，创建、查看、暂停和取消定时任务，以及通过真实网页登录页使用短时一次性票据。用户要求延迟检查、两小时后复查、选择员工执行、异常时唤起原会话等自动化流程时使用。
 license: MIT
 compatibility: 本机 Wand 服务、Node.js、已安装的 wand-system skill，以及用户允许的命令执行权限。
 ---
@@ -27,6 +27,14 @@ node /absolute/path/to/wand-system/scripts/wand.mjs session:current
 - 以 API 返回的 ID、nextRunAt、revision、执行记录及检查证据为准。创建成功不等于执行完成，accepted 不等于检查通过；不靠状态文案关键词判断业务恢复。
 - 网络断开、超时、5xx/408/409、响应解析失败均可能已接受；不盲目重建计划或再次唤起。定时任务保留相同 requestId 查询核对；会话操作读取原 ID/消息后核对，无法确认就报告未知。
 - 仅支持当前 Wand 管理的结构化历史会话精确续接。不能拿 provider 原生 ID 替代 Wand ID，不能把新建空白会话说成恢复原会话。PTY 或已删除历史明确报告不支持/不可用。
+
+## 一次性网页登录
+
+仅限用户授权的本机 Wand 界面自动化；先读 `references/operations.md` 的「一次性网页登录」。
+使用 `scripts/web-login.mjs` 的 `loginWithWebTicket(page, {origin})`，票据从 CLI 匿名管道直接进入 Playwright 内存，再填写真实页面；禁止把签发命令作为会回显 stdout 的工具调用，也不能截图、录制 trace/HAR/video、输出或保存票据。
+票据 60 秒、单次消费，只能由本机可信所有者 CLI 在真实员工执行回合内签发；登录后与网页管理员密码登录同权限（browser-admin，可正常操作界面），Cookie 按普通登录持久化并在服务重启后仍有效（12 小时）。仍不是 App 长期连接码：不要把 Cookie 导出、转存或转交其他进程，只在本次授权的界面自动化中使用。
+
+独立启动的 Pi/终端即使能发现本技能，也不代表持有 Wand 员工执行证明。helper 在缺少/格式无效时返回 `EXECUTION_PROOF_REQUIRED`，不启动 CLI、不签发、不取消、不改输入；请在 Wand 内已获授权的员工会话新一轮执行中使用，或由用户手动登录。不能通过手填会话 ID、复制证明或退回所有者身份解决。已有网页登录态无需证明，不签发新票据。
 
 ## 标准执行顺序
 

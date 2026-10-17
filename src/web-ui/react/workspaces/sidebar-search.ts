@@ -15,6 +15,8 @@ export function filterSidebarTaskSessions(
   query: string,
   liveTitles: Readonly<Record<string, string>> = {},
 ): readonly WorkspaceSessionSummary[] {
+  if (task.archived || task.status === "done") return [];
+  if (group.tasks.some(parent => parent.id === task.parentWorkspaceTaskId && sidebarSearchMatches(query, parent.name))) return task.sessions;
   if (sidebarSearchMatches(query, group.workspaceName, group.workspaceCwd, task.name, task.cwd)) return task.sessions;
   return task.sessions.filter(session => sidebarSearchMatches(query,
     session.title, liveTitles[session.id], session.cwd, session.provider, session.employeeName,
@@ -30,11 +32,29 @@ export function filterSidebarGroups(
 ): readonly TaskDirectoryGroup[] {
   // Hide completed containers only in the sidebar, including their sessions.
   // Keep the source snapshot intact for the board, navigation and task history.
-  const activeGroups = groups.map((group) => ({
-    ...group,
-    workspaceName: group.global ? "未归属工作区" : group.workspaceName,
-    tasks: group.tasks.filter((task) => !task.archived && task.status !== "done"),
-  })).filter((group) => !group.global || group.tasks.length > 0 || group.standaloneSessions.length > 0 || Boolean(group.archivedSessions?.length))
+  // Grouping keys may represent cwd/worktrees; business children follow their root in the projection.
+  const taskGroups = new Map(groups.flatMap(group => group.tasks.map(task => [task.id, group.workspaceId] as const)));
+  const allTasks = new Map(groups.flatMap(group => group.tasks.map(task => [task.id, task] as const)));
+  const home = (task: TaskSummary): string | undefined => {
+    let root = task; const seen = new Set([root.id]);
+    while (root.parentWorkspaceTaskId && allTasks.has(root.parentWorkspaceTaskId) && !seen.has(root.parentWorkspaceTaskId)) {
+      root = allTasks.get(root.parentWorkspaceTaskId)!; seen.add(root.id);
+    }
+    return taskGroups.get(root.id);
+  };
+  const projected = groups.map(group => ({ ...group, tasks: groups.flatMap(source => source.tasks.filter(task => task.parentWorkspaceTaskId ? home(task) === group.workspaceId : source.workspaceId === group.workspaceId)) }));
+  const activeGroups = projected.map((group) => {
+    const candidates = group.tasks;
+    const keep = new Set(candidates.filter(task => !task.archived && task.status !== "done" && (task.sessions.length > 0 || (query.trim() && sidebarSearchMatches(query, task.name, task.cwd)))).map(task => task.id));
+    const byId = new Map(candidates.map(task => [task.id, task]));
+    for (const id of [...keep]) {
+      let parent = byId.get(id)?.parentWorkspaceTaskId;
+      const seen = new Set<string>();
+      while (parent && !seen.has(parent)) { seen.add(parent); keep.add(parent); parent = byId.get(parent)?.parentWorkspaceTaskId; }
+    }
+    return { ...group, workspaceName: group.global ? "未归属工作区" : group.workspaceName,
+      tasks: candidates.filter(task => keep.has(task.id)) };
+  }).filter(group => group.tasks.length > 0 || group.standaloneSessions.length > 0 || Boolean(query.trim() && group.archivedSessions?.length))
     .sort((left, right) => Number(Boolean(left.global)) - Number(Boolean(right.global)));
   if (!query.trim()) return activeGroups;
   const matches = (...values: (string | undefined)[]): boolean => sidebarSearchMatches(query, ...values);
@@ -44,9 +64,18 @@ export function filterSidebarGroups(
   return activeGroups.flatMap((group) => {
     const name = group.workspaceName;
     if (matches(name, group.workspaceCwd)) return [group];
-    const tasks = group.tasks.filter((task) => matches(
+    const matching = group.tasks.filter((task) => matches(
       name, task.name, task.cwd, ...task.sessions.map(sessionText), ...(task.archivedSessions ?? []).map(sessionText),
     ));
+    const keep = new Set(matching.map(task => task.id));
+    for (const task of group.tasks) {
+      if (task.parentWorkspaceTaskId && matching.some(parent => parent.id === task.parentWorkspaceTaskId)) keep.add(task.id);
+    }
+    for (const task of matching) {
+      let parent = task.parentWorkspaceTaskId; const seen = new Set<string>();
+      while (parent && !seen.has(parent)) { seen.add(parent); keep.add(parent); parent = group.tasks.find(t => t.id === parent)?.parentWorkspaceTaskId; }
+    }
+    const tasks = group.tasks.filter(task => keep.has(task.id));
     const defaultName = defaultDirectoryTaskName(group);
     const standaloneSessions = group.standaloneSessions.filter((session) => (
       matches(defaultName, sessionText(session))

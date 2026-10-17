@@ -1,0 +1,6 @@
+{
+  "at": 1792121490463,
+  "runId": "team_mvadhj0j0001ltevoe",
+  "roleId": "macos-feedback",
+  "reason": "旧通道attention持续，三十多分钟无有效执行、0请求/工具/ACK，已取消全队仍未结算。新独立子代理接管macOS，撤回旧通道写权限；确认结束最后旧worker，不影响新子代理。"
+}

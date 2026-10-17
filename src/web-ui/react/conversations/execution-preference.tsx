@@ -8,29 +8,20 @@ import { issueAgentEffortOptions } from "../issues/task-board-agent";
 import { WandSelect } from "../ui";
 import { composerRuntimePreference } from "./composer-presentation";
 
-// Module memory belongs to this loaded page; no localStorage or employee writes.
-let pagePreference: ConversationExecutionPreference | undefined;
-const listeners = new Set<() => void>();
-export function setPageExecutionPreference(next: ConversationExecutionPreference | undefined): void {
-  pagePreference = next;
-  for (const listener of listeners) listener();
-}
-export function usePageExecutionPreference(): ConversationExecutionPreference | undefined {
-  return React.useSyncExternalStore(listener => { listeners.add(listener); return () => { listeners.delete(listener); }; },
-    () => pagePreference, () => undefined);
-}
+// 临时执行配置由所在界面自己持有（对话按会话、新建工作按打开实例），离开即丢弃；这里只做投影。
 export function conversationPreferenceAgent(base: WandTaskAgent | undefined, preference: ConversationExecutionPreference | undefined): WandTaskAgent | undefined {
   return base && preference ? { ...base, ...preference, kind: "structured", mode: normalizeWandTaskAgentMode(preference.provider, base.mode) } : base;
 }
-export function ConversationExecutionSelectors({ agent, catalog, disabled, cliOnly = false }: {
+export function ConversationExecutionSelectors({ agent, catalog, disabled, cliOnly = false, onChange }: {
   agent: WandTaskAgent; catalog: WandModelCatalog | null; disabled: boolean; cliOnly?: boolean;
+  onChange(preference: ConversationExecutionPreference): void;
 }): React.ReactElement {
   const summary = composerRuntimePreference(agent, catalog);
   const models = [...wandModelOptions(catalog, agent.provider)];
   if (!models.some(option => option.value === agent.model)) models.push({ value: agent.model, label: agent.model });
   const efforts = issueAgentEffortOptions(agent.provider, catalog, agent.model, agent.thinkingEffort)
     .map(option => option.value === "off" ? { ...option, label: "自动（模型默认）" } : option);
-  const commit = (next: WandTaskAgent): void => setPageExecutionPreference({ provider: next.provider, engine: next.engine,
+  const commit = (next: WandTaskAgent): void => onChange({ provider: next.provider, engine: next.engine,
     model: next.model, thinkingEffort: next.thinkingEffort });
   return <>
     <WandSelect ariaLabel="本页执行工具" value={agentToolIdFor(agent.provider, agent.engine)}

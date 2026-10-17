@@ -131,12 +131,12 @@ function TurnActivity({ turn, source, results, session, live, submit }: {
   if (!blocks.length) return null;
   const pending = new Set(session ? pendingActivityQuestions(session).map(block => block.id) : []);
   const duration = turn.completedAt && turn.createdAt ? Date.parse(turn.completedAt) - Date.parse(turn.createdAt) : 0;
-  const open = expanded ?? true;
+  const open = expanded ?? live;
   const questionBlocks = blocks.filter((block): block is ToolUseBlock => block.type === "tool_use" && pending.has(block.id));
   const runningCall = live && blocks.some((block, index) => index === blocks.length - 1 && block.type === "tool_use" && !(source && results.get(activityToolKey(source, block.id))));
   const runningThinking = live && blocks.some((block, index) => index === blocks.length - 1 && block.type === "thinking");
   return <div className={`chat-activity chat-activity-inline conversation-turn-activity${runningCall ? " is-command-running" : ""}${runningThinking ? " is-thinking-running" : ""}`} data-expanded={open ? "true" : "false"}>
-    <ChatActivity expanded={open} onToggle={event => preserveDisclosurePosition(event.currentTarget, () => setExpanded(current => !(current ?? true)))} summary={<>
+    <ChatActivity expanded={open} onToggle={event => preserveDisclosurePosition(event.currentTarget, () => setExpanded(current => !(current ?? live)))} summary={<>
       {live ? <ActivityMark running/> : null}
       <span className="chat-activity-meta">
         <span className="chat-activity-meta-item">{turn.completedAt ? "处理结束" : "执行过程"}</span>
@@ -156,9 +156,9 @@ function TurnActivity({ turn, source, results, session, live, submit }: {
   </div>;
 }
 
-/** Thinking is readable by default; explicit reader choices survive stream updates. */
+/** 思考轮次默认收起：展开是阅读选择，流式更新不重置手动状态。 */
 function ActivityThinkingRow({ thinking, running }: { thinking: string; running: boolean }): React.ReactElement {
-  const [open, setOpen] = React.useState(true);
+  const [open, setOpen] = React.useState(false);
   return <div className="chat-call chat-call-inline" data-status={running ? "running" : "complete"} data-thinking-entry="true" data-expanded={open ? "true" : "false"}>
     <ChatActivityEntry expanded={open} status={running ? "running" : "complete"} label="思考过程" stateLabel={running ? "运行中" : "已结束"}
       icon="brain" onToggle={event => preserveDisclosurePosition(event.currentTarget, () => setOpen(current => !current))}>

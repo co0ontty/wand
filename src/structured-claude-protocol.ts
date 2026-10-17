@@ -140,8 +140,16 @@ export class ClaudeCliProtocolReducer {
   private readonly keyOrder: string[] = [];
   private readonly taskMetaRegistry: TaskMetaMap = new Map();
   private toolResultSequence = 0;
+  private readonly qoder: boolean;
+  private readonly childResultIds = new Set<string>();
 
   constructor(session: SessionSnapshot) {
+    this.qoder = session.provider === "qoder" || session.runner === "qoder-cli-print";
+    // A notification may resume a child dispatched in a previous CLI turn.
+    // Seed only recognized dispatches, not arbitrary background shell tasks.
+    if (this.qoder) {
+      for (const turn of session.messages ?? []) captureTaskMeta(turn.content, this.taskMetaRegistry);
+    }
     this.state = { blocks: [], result: "", sessionId: session.claudeSessionId, model: undefined, usage: undefined };
   }
 
@@ -191,13 +199,65 @@ export class ClaudeCliProtocolReducer {
       const parentId = typeof event.parent_tool_use_id === "string" && event.parent_tool_use_id
         ? event.parent_tool_use_id
         : null;
+      if (this.qoder && parentId === null) {
+        const nativeResult = event.tool_use_result as { isAsync?: boolean } | undefined;
+        for (const block of collected) {
+          if (block.type !== "tool_result") continue;
+          const launch = nativeResult?.isAsync === true || (typeof block.content === "string"
+            && block.content.trim().startsWith("Async agent launched successfully.\n"));
+          if (!launch) this.childResultIds.add(block.tool_use_id);
+        }
+      }
+      const visible = this.qoder ? collected.filter((block) => {
+        if (block.type !== "tool_result") return true;
+        const launch = typeof block.content === "string"
+          && block.content.trim().startsWith("Async agent launched successfully.\n");
+        return !launch || (!this.blocksByKey.has(`qoder-task-notification:${block.tool_use_id}`)
+          && !this.childResultIds.has(block.tool_use_id));
+      }) : collected;
       const stamped = parentId === null
-        ? stampParentTaskResults(collected, this.taskMetaRegistry)
-        : tagSubagentBlocks(collected, parentId, this.taskMetaRegistry);
+        ? stampParentTaskResults(visible, this.taskMetaRegistry)
+        : tagSubagentBlocks(visible, parentId, this.taskMetaRegistry);
       if (stamped.length > 0) {
         this.assistantWorkObserved = true;
         this.upsertBlocks(`tool_result:${this.toolResultSequence++}`, stamped);
       }
+      return true;
+    }
+
+    // Qoder's native lifecycle notification is independent of the Agent launch
+    // receipt and of the parent's prose. It can arrive in a later CLI turn, whose
+    // reducer has never seen the dispatch. The native tool_use_id is the exact
+    // correlation key; task_id, filenames and agent names are not substitutes.
+    if (this.qoder && event.type === "system" && event.subtype === "task_notification") {
+      const toolUseId = typeof event.tool_use_id === "string" ? event.tool_use_id.trim() : "";
+      if (!toolUseId || !this.taskMetaRegistry.has(toolUseId)
+        || (event.status !== "completed" && event.status !== "failed")
+        || this.childResultIds.has(toolUseId)) return false;
+      const key = `qoder-task-notification:${toolUseId}`;
+      if (this.blocksByKey.has(key)) return false;
+      const failed = event.status === "failed";
+      const summary = typeof event.summary === "string" ? event.summary.trim() : "";
+      const meta = this.taskMetaRegistry.get(toolUseId);
+      // The observed protocol supplies a summary, not the child's result body.
+      // Do not read arbitrary output_file paths or copy a parent's answer here.
+      const content = [
+        failed ? "原生子任务通知：执行失败。" : "原生子任务通知：已完成。",
+        ...(summary ? [`原生摘要：${summary}`] : []),
+        "此通知未提供结果正文；以上是运行状态通知，不是子任务的最终产出。",
+      ].join("\n\n");
+      this.assistantWorkObserved = true;
+      this.upsertBlocks(key, [{
+        type: "tool_result",
+        tool_use_id: toolUseId,
+        content,
+        is_error: failed,
+        __subagent: {
+          taskId: toolUseId,
+          ...(meta?.agentType ? { agentType: meta.agentType } : {}),
+          ...(meta?.description ? { taskDescription: meta.description } : {}),
+        },
+      }]);
       return true;
     }
 

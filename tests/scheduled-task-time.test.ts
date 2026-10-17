@@ -45,3 +45,16 @@ test("invalid schedules reject malformed fields without guessing", () => {
     { kind: "daily", time: "09:00", timeZone: "not/a-zone" }, { kind: "weekly", time: "09:00", timeZone: "UTC", weekday: "1" },
     { kind: "weekly", time: "09:00", timeZone: "UTC", weekday: 7 }]) assert.throws(() => parseTaskSchedule(input));
 });
+
+test("hour intervals keep their absolute anchor across scans, pauses and DST", () => {
+  const schedule = parseTaskSchedule({ kind: "interval", everyHours: 3, startAt: "2026-10-31T23:30:00-04:00", timeZone: "America/New_York" });
+  assert.equal(nextScheduledTime(schedule, new Date("2026-11-01T03:00:00Z")), "2026-11-01T03:30:00.000Z");
+  assert.equal(nextScheduledTime(schedule, new Date("2026-11-01T03:30:00Z")), "2026-11-01T06:30:00.000Z");
+  assert.equal(nextScheduledTime(schedule, new Date("2026-11-01T06:30:01Z")), "2026-11-01T09:30:00.000Z");
+  assert.equal(nextScheduledTime(schedule, new Date("2026-11-05T10:00:00Z")), "2026-11-05T12:30:00.000Z");
+  const hourly = parseTaskSchedule({ kind: "interval", everyHours: 1, startAt: "2026-03-08T06:30:00Z", timeZone: "America/New_York" });
+  assert.equal(nextScheduledTime(hourly, new Date("2026-03-08T06:30:00Z")), "2026-03-08T07:30:00.000Z");
+  for (const everyHours of [0, -1, 1.5, "3", 8761, NaN]) assert.throws(() => parseTaskSchedule({ kind: "interval", everyHours, startAt: "2026-01-01T00:00:00Z", timeZone: "UTC" }));
+  for (const startAt of ["2026-02-30T00:00:00Z", "2026-01-01T00:00", ""]) assert.throws(() => parseTaskSchedule({ kind: "interval", everyHours: 3, startAt, timeZone: "UTC" }));
+  assert.throws(() => parseTaskSchedule({ kind: "interval", everyHours: 3, startAt: "2026-01-01T00:00:00Z", timeZone: "" }));
+});

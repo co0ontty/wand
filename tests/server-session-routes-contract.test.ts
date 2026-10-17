@@ -15,6 +15,7 @@ import { registerClaudeHistoryRoutes, registerSessionRoutes } from "../src/serve
 import { SessionRegistry } from "../src/session-registry.js";
 import { WandStorage } from "../src/storage.js";
 import { StructuredSessionManager } from "../src/structured-session-manager.js";
+import type { ContentBlock } from "../src/types.js";
 
 test("session HTTP interface preserves create, list, update, detail, and delete behavior", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-session-routes-"));
@@ -102,6 +103,60 @@ test("session HTTP interface preserves create, list, update, detail, and delete 
     assert.equal(boundedPage.offset, 90);
     assert.equal(boundedPage.leadingBlockOffset, 138);
     assert.equal(boundedPage.messages[0].content[0].text, "large-138");
+    messages.length = 0;
+
+    // A long assistant turn contains many folded tool blocks between visible
+    // paragraphs. Intra-turn Web pages must fill the visible budget rather
+    // than spend a network round trip on every twelve raw blocks.
+    const toolHeavy: ContentBlock[] = Array.from({ length: 24 }, (_, index) => [
+      { type: "text" as const, text: `paragraph-${index}` },
+      ...Array.from({ length: 8 }, (_, tool) => [
+        { type: "tool_use" as const, id: `page-${index}-${tool}`, name: "Bash", input: { command: "true" } },
+        { type: "tool_result" as const, tool_use_id: `page-${index}-${tool}`, content: "done" },
+      ]).flat(),
+    ]).flat();
+    messages.push({ role: "assistant", content: toolHeavy });
+    const pageCounts: number[] = [];
+    for (const visible of [false, true]) {
+      let offset = toolHeavy.length;
+      let count = 0;
+      const received: ContentBlock[] = [];
+      while (offset > 0) {
+        const page = await (await fetch(`${baseUrl}/api/sessions/${created.id}/messages?turn=0`
+          + `&blockOffset=${offset}&blockLimit=12&byteBudget=98304${visible ? "&blockBudget=12" : ""}`,
+        { headers: { "X-Wand-Tool-Projection": "compact" } })).json() as {
+          blocks: ContentBlock[]; blockOffset: number; blockTotal: number; turnIndex: number;
+        };
+        assert.equal(page.turnIndex, 0);
+        assert.equal(page.blockTotal, toolHeavy.length);
+        assert.ok(page.blockOffset < offset, "every page makes progress");
+        assert.equal(page.blockOffset + page.blocks.length, offset, "pages are contiguous");
+        received.unshift(...page.blocks);
+        offset = page.blockOffset;
+        count++;
+        assert.ok(count <= toolHeavy.length);
+      }
+      assert.deepEqual(received.map(block => block.type === "text" ? block.text
+        : block.type === "tool_use" ? block.id : block.type === "tool_result" ? block.tool_use_id : block.type),
+      toolHeavy.map(block => block.type === "text" ? block.text
+        : block.type === "tool_use" ? block.id : block.type === "tool_result" ? block.tool_use_id : block.type),
+      "both pagination modes retain every source block in order");
+      pageCounts.push(count);
+    }
+    assert.ok(pageCounts[0] > 12, "legacy raw-block pagination reproduces the request waterfall");
+    assert.equal(pageCounts[1], 2, "Web batches folded metadata with twelve visible paragraphs per page");
+    messages[0].content = Array.from({ length: 30 }, () => ({ type: "text", text: "x".repeat(20_000) }));
+    const byteBounded = await (await fetch(`${baseUrl}/api/sessions/${created.id}/messages`
+      + "?turn=0&blockOffset=30&blockLimit=12&blockBudget=12&byteBudget=98304")).json() as {
+        blocks: ContentBlock[]; blockOffset: number;
+      };
+    assert.ok(byteBounded.blocks.length > 0 && byteBounded.blocks.length < 12,
+      "byte budget still bounds pages with large visible blocks");
+    assert.ok(JSON.stringify(byteBounded).length < 100_000);
+    const emptyPage = await (await fetch(`${baseUrl}/api/sessions/${created.id}/messages`
+      + "?turn=0&blockOffset=0&blockBudget=12")).json() as { blocks: ContentBlock[]; blockOffset: number };
+    assert.deepEqual(emptyPage.blocks, []);
+    assert.equal(emptyPage.blockOffset, 0);
     messages.length = 0;
 
     messages.push({ role: "assistant", content: [

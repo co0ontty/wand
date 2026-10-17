@@ -138,7 +138,8 @@ export async function runFocusBrowser({ root = resolve(import.meta.dirname, ".."
       // Library cards can exceed this deliberately short fixture viewport. A user
       // scrolls to the next control before clicking; keep geometry assertions for
       // the actual disclosure/update after that navigation.
-      await evaluate(`(() => { const n=document.querySelector(${JSON.stringify(selector)}); const scroller=n?.closest(".chat-messages"); if(!n||!scroller)return; const r=n.getBoundingClientRect(), b=scroller.getBoundingClientRect(); if(r.top<b.top||r.bottom>b.bottom)n.scrollIntoView({block:"center",inline:"nearest"}); })()`);
+      const scrollToTarget = `(() => { const n=document.querySelector(${JSON.stringify(selector)}); const scroller=n?.closest(".chat-messages"); if(!n||!scroller)return; const r=n.getBoundingClientRect(), b=scroller.getBoundingClientRect(); if(r.top<b.top||r.bottom>b.bottom)n.scrollIntoView({block:"center",inline:"nearest"}); })()`;
+      await evaluate(scrollToTarget);
       await evaluate("new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))");
       let previous = null;
       for (let i = 0; i < 200; i++) {
@@ -150,6 +151,10 @@ export async function runFocusBrowser({ root = resolve(import.meta.dirname, ".."
           return;
         }
         previous = state;
+        // 刚打开的披露带一个短暂布局租约（preserveDisclosurePosition），会把
+        // 外框逐帧钉回触发器原位，抵消一次性的程序化滚动；租约（动效 token
+        // 时长）结束后重试滚动即可稳定命中，期间保持探测让目标有机会 settle。
+        if (!state.hit && i % 20 === 19) await evaluate(scrollToTarget);
         // Let the pending grid-row transition advance before re-probing.
         await evaluate("new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))");
       }

@@ -133,7 +133,9 @@ export function withAutomaticPiResources(runner: StructuredRunnerAdapter, config
       };
     });
     return { get args() { return execution?.args ?? []; }, get pid() { return execution?.pid ?? null; },
-      spawnedAt, completion, interrupt: () => {
+      spawnedAt, completion,
+      exited: completion.then(() => execution?.exited, () => execution?.exited).then(() => {}),
+      interrupt: () => {
         if (interrupted) return;
         if (notice.status === "selecting") { notice = { ...notice, status: "cancelled", label: "本轮自动选择已取消" }; publish(); }
         interrupted = true; abort.abort(); execution?.interrupt();

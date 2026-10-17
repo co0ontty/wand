@@ -36,9 +36,8 @@ export function calendarEntries<T extends ScheduledTaskRunFactView = ScheduledTa
         if (Date.parse(candidate) <= now.getTime() && !append(task, candidate)) break;
         candidate = nextScheduledTime(task.schedule, new Date(cursor));
       }
-      // A single supported recurrence produces at most one future occurrence per
-      // local day. Bounded iteration also protects corrupt legacy input.
-      for (let count = 0; candidate && Date.parse(candidate) <= upper && count < 74; count++) {
+      // Hourly plans can fill a month. Keep bounded iteration and surface truncation.
+      for (let count = 0; candidate && Date.parse(candidate) <= upper && count < 1800; count++) {
         if (!append(task, candidate)) break taskLoop;
         const next = nextScheduledTime(task.schedule, new Date(candidate));
         if (next && Date.parse(next) <= Date.parse(candidate)) throw new Error("计划未向后推进");

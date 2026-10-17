@@ -1,0 +1,6 @@
+Lane mailbox for Android 实现与测试 (role android)
+Run: team_mva6m5f500015ho5e5
+Lane: android-1792107636931
+Token: 3fcadb58-b5a0-40b3-8e1d-77eb33f37ed8
+
+Captain messages appear below, newest last.

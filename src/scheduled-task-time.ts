@@ -34,7 +34,17 @@ export function parseTaskSchedule(value: unknown): TaskSchedule {
     }
     return { kind: "once", runAt: new Date(input.runAt).toISOString() };
   }
-  if (input.kind !== "daily" && input.kind !== "weekly") throw new Error("执行计划仅支持单次、每天或每周。");
+  if (input.kind === "interval") {
+    if (!Number.isInteger(input.everyHours) || Number(input.everyHours) < 1 || Number(input.everyHours) > 8760) {
+      throw new Error("小时间隔须为 1–8760 的整数。");
+    }
+    if (typeof input.timeZone !== "string" || !input.timeZone || input.timeZone.length > 100) throw new Error("请选择有效的时区。");
+    try { formatter(input.timeZone); } catch { throw new Error("请选择有效的时区。"); }
+    const start = parseTaskSchedule({ kind: "once", runAt: input.startAt });
+    if (start.kind !== "once") throw new Error("请选择有效的首次执行时间。");
+    return { kind: "interval", everyHours: Number(input.everyHours), startAt: start.runAt, timeZone: input.timeZone };
+  }
+  if (input.kind !== "daily" && input.kind !== "weekly") throw new Error("执行计划仅支持单次、小时间隔、每天或每周。");
   if (typeof input.time !== "string" || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(input.time)) throw new Error("执行时间须为 HH:mm。");
   if (typeof input.timeZone !== "string" || input.timeZone.length > 100) throw new Error("请选择有效的时区。");
   try { formatter(input.timeZone); } catch { throw new Error("请选择有效的时区。"); }
@@ -45,11 +55,18 @@ export function parseTaskSchedule(value: unknown): TaskSchedule {
   return { kind: "daily", time: input.time, timeZone: input.timeZone };
 }
 
-/** Calendar time in the saved zone. A missing DST time is skipped; a repeated time runs once. */
+/** Daily/weekly use calendar time in the saved zone; intervals use elapsed hours from a saved absolute anchor.
+ * A missing calendar DST time is skipped; a repeated calendar time runs once. */
 export function nextScheduledTime(schedule: TaskSchedule, after: Date): string | null {
   const timestamp = after.getTime();
   if (!Number.isFinite(timestamp)) throw new Error("当前时间无效。");
   if (schedule.kind === "once") return Date.parse(schedule.runAt) > timestamp ? schedule.runAt : null;
+  if (schedule.kind === "interval") {
+    // An immutable absolute anchor prevents drift after pauses, slow scans, or restarts.
+    const anchor = Date.parse(schedule.startAt), step = schedule.everyHours * 3_600_000;
+    if (!Number.isFinite(anchor) || !Number.isInteger(schedule.everyHours) || step < 3_600_000 || schedule.everyHours > 8760) throw new Error("小时间隔计划无效。");
+    return new Date(anchor + Math.max(0, Math.floor((timestamp - anchor) / step) + 1) * step).toISOString();
+  }
   const current = localParts(timestamp, schedule.timeZone);
   const [hour, minute] = schedule.time.split(":").map(Number);
   const today = Date.UTC(current[0]!, current[1]! - 1, current[2]!);

@@ -91,7 +91,7 @@ class NativeProcess implements StructuredExecProcess {
       this.ended = { exitCode: state.exitCode, signal: state.signal ? signalNumberFromName(state.signal) : null };
     } catch (error) {
       logInfo(`Pi native file observation failed: ${error instanceof Error ? error.message : String(error)}`);
-      this.ended = { exitCode: 1, signal: null };
+      this.ended = { exitCode: 1, signal: null, processExited: false };
       void this.host.kill(this.job).catch(() => {});
     }
     if (this.timer) clearInterval(this.timer); this.timer = null;

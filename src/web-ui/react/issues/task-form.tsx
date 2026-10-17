@@ -3,7 +3,7 @@ import { Form, Input } from "antd";
 import type { TextAreaRef } from "antd/es/input/TextArea";
 
 /** Keep the native textarea ref used by selection, autofocus and submit shortcuts. */
-export const TaskTextArea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(function TaskTextArea(props, ref) {
+export const TaskTextArea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement> & { autoSize?: boolean | { minRows?: number; maxRows?: number } }>(function TaskTextArea(props, ref) {
   const bind = React.useCallback((instance: TextAreaRef | null) => {
     const textarea = instance?.resizableTextArea?.textArea ?? null;
     if (typeof ref === "function") ref(textarea);

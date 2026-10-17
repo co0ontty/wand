@@ -283,21 +283,21 @@ test("task board create sheets only assign agents from the doing column", () => 
 
   // macOS 4.72 把新建面板拆成 TaskBoardCreateView，派发判定下沉到 TaskBoardModels。
   includesAll("macos/Wand/TaskBoardModels.swift", [
-    'func wandBoardCreateDispatches(status: String) -> Bool { status == WandBoardStatus.doing.rawValue }',
+    'func wandBoardCreateDispatches(status: String) -> Bool { false }',
   ]);
   includesAll("macos/Wand/TaskBoardCreateView.swift", [
     "initialStatus: String = WandBoardStatus.todo.rawValue",
     "initial.status = initialStatus",
-    "private var dispatches: Bool { wandBoardCreateDispatches(status: draft.status) }",
+    "private var dispatches: Bool { draft.saveAndDispatch }",
     "private var hasDescription: Bool {",
     "!draft.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty",
-    '(dispatches && hasDescription ? "创建并指派" : "创建任务")',
+    '(dispatches && hasDescription ? "保存并派发" : "保存任务")',
     "添加描述…（只创建任务，不指派 Agent）",
   ]);
   includesAll("macos/Wand/TaskBoardView.swift", [
     "private func openCreate(_ status: String)",
     "initialStatus: createStatus,",
-    "if wandBoardCreateDispatches(status: draft.status) && !prompt.isEmpty {",
+    "if draft.saveAndDispatch && !prompt.isEmpty {",
   ]);
   assert.equal(
     (source("macos/Wand/TaskBoardCreateView.swift").match(/if !draft\.description\.trimmingCharacters\(in: \.whitespacesAndNewlines\)\.isEmpty \{/g) ?? []).length,
@@ -308,27 +308,28 @@ test("task board create sheets only assign agents from the doing column", () => 
 
 test("subagent execution surfaces stay compact, avatar-free, and follow the newest content", () => {
   includesAll("src/web-ui/browser/chat-render.ts", [
-    'class="agent-run-summary"',
-    'aria-expanded="\' + (expanded ? "true" : "false") + \'"',
-    'data-status="\' + summary.status + \'"',
-    "var expanded = shouldAgentRunStartExpanded(summary.status, persisted);",
-    'class="agent-run-rail"',
-    'class="agent-run-agent',
+    "paintChatSubtasks(chatOutput, selectedSession.id",
+    'class="chat-subtask-link"',
+    'data-open-subtask="',
     'class="agent-run-detail-panel',
     'class="agent-run-result',
     "renderAgentRunAgentBody(agent, agentStatus, activity, role, toolResults, messageKey)",
     'class="agent-run-process"',
-    'class="agent-run-body-inner"',
     'class="agent-run-receipt"',
-    "role=\"tabpanel\"",
-    'onkeydown="__agentRunSelect(event, this)"',
-    'aria-controls="\' + escapeHtml(panelId) + \'"',
-    // 类型小字与身份色都要「能区分才算数」：整卡同类型的 general-purpose
-    // 不许每行重复，一卡之内也不许两个 Agent 撞同一个颜色。
-    "function agentRunTypesCarryInfo(run)",
-    "var rowType = showType && agentType && agentType !== typeChip ? agentType : \"\";",
-    "taken.indexOf(other)",
-    "for (var shift = 0; shift < n && taken.indexOf(slot) >= 0; shift++) slot = (slot + 1) % n;",
+  ]);
+  includesAll("src/web-ui/react/chat/subtasks/panel.tsx", [
+    'React.useState(false)',
+    'aria-controls={panelId}',
+    'aria-pressed={selectedId === task.id}',
+    'aria-label="关闭子任务详情"',
+    'task.detail',
+    'event.key !== "Escape"',
+  ]);
+  includesAll("src/web-ui/react/chat/subtasks/styles.ts", [
+    '@container (max-width:960px)',
+    'prefers-reduced-motion:reduce',
+    'overflow:auto',
+    'var(--motion-normal)',
   ]);
   includesAll("src/web-ui/browser/events.ts", [
     "(window as any).__agentRunToggle",
@@ -479,7 +480,7 @@ test("receipt headers carry icon + note, not a second status word", () => {
   );
   assert.match(androidReceipt, /SubagentStatusIcon\(SubagentStatus\.Background/,
     "Android receipt header must keep its status icon");
-  assert.match(androidReceipt, /这只是派发回执，不是最终结论/,
+  assert.match(androidReceipt, /仅收到后台派发回执，尚无可关联的原生终态或结果；当前运行状态未知/,
     "Android receipt header must keep the dispatch-receipt note (same wording as Web zh)");
   assert.doesNotMatch(androidReceipt, /statusLabel/,
     "Android receipt header must not repeat the status word — the summary row owns it");
@@ -540,8 +541,8 @@ test("tool activity summaries stay consecutive and split when prose arrives", ()
 
   includesAll("macos/Wand/ChatView.swift", [
     "struct ActivityFoldCard",
-    "_expanded = State(initialValue: ChatDisclosurePresentation.expanded(userChoice: nil,",
-    "running: activityGroup.newest && running, attention: attention)",
+    "_expanded = State(initialValue: ChatDisclosurePresentation.activityExpanded(userChoice: nil,",
+    "isNewest: activityGroup.newest, running: running)",
     "summarizeActivityItems",
   ]);
 });

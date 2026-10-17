@@ -297,6 +297,8 @@ function ArchivedSessionsFold({
 function TaskItem({
   task,
   visibleSessions = task.sessions,
+  hasChildExecution = false,
+  descendantSessionCount = 0,
   now,
   liveTitles,
   activeTaskId,
@@ -326,6 +328,8 @@ function TaskItem({
   defaultGroup?: TaskDirectoryGroup;
   /** Display-only filtering; task.sessions remains the full mutation scope. */
   visibleSessions?: readonly WorkspaceSessionSummary[];
+  hasChildExecution?: boolean;
+  descendantSessionCount?: number;
   now: number;
   liveTitles?: Readonly<Record<string, string>>;
   activeTaskId: string | null;
@@ -556,8 +560,8 @@ function TaskItem({
           {manageMode && <ManageCheck checked={selected} label={`选择任务 ${task.name}`}/>}
           <span style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} className="workspace-task-name">{task.name}</span>
         </WandNavigationLink>
-        <span id={countId} className="workspace-task-count" title={`${taskAggregate.description}，共 ${totalSessionCount} 个会话`}>
-          {visibleSessions.length === totalSessionCount ? totalSessionCount : `${visibleSessions.length}/${totalSessionCount}`}
+        <span id={countId} className="workspace-task-count" title={`${taskAggregate.description}，自身 ${totalSessionCount} 个会话${descendantSessionCount ? `，后代 ${descendantSessionCount} 个会话（去重）` : ""}`}>
+          {descendantSessionCount > 0 ? visibleSessions.length + descendantSessionCount : visibleSessions.length === totalSessionCount ? totalSessionCount : `${visibleSessions.length}/${totalSessionCount}`}
         </span>
         <span className={`sidebar-head-activity tone-${taskAggregate.tone}`} title={taskAggregate.description}
           aria-label={taskAggregate.description}>{taskAggregate.label ? <Badge status={taskAggregate.tone === "warning" ? "warning" : taskAggregate.tone === "success" ? "success" : "processing"}/> : null}</span>
@@ -594,7 +598,7 @@ function TaskItem({
           onOpenSession(session);
         }}/>
       <SidebarDisclosure id={sessionsId} open={open}>
-        {totalSessionCount === 0 && !manageMode && <WandButton kind="ghost" type="button" className="workspace-task-empty"
+        {totalSessionCount === 0 && !hasChildExecution && !manageMode && <WandButton kind="ghost" type="button" className="workspace-task-empty"
           onClick={onRequestNewSession}><WandIcon name="plus" size={12}/>{defaultGroup ? "添加会话" : "添加会话，或拖入已有会话"}</WandButton>}
         <Flex vertical gap={4} style={{ paddingInlineStart: 6 }} className="workspace-task-sessions">
           {(manageMode ? task.sessions : shownSessions).map((session, index) => (
@@ -758,7 +762,7 @@ function TaskGroupSection({
   onTasksChanged(): Promise<void>;
   onOpenDialog?: () => void;
 }) {
-  const visibleSessionCount = group.tasks.reduce((count, task) => count + task.sessions.length, group.standaloneSessions.length);
+  const visibleSessionCount = new Set([...group.standaloneSessions, ...group.tasks.flatMap(task => filterSidebarTaskSessions(group, task, searchQuery, liveTitles))].map(session => session.id)).size;
   const [directoryOpen, setDirectoryOpen] = useSidebarExpansion(`project.${group.workspaceId}`, false, true, undefined, visibleSessionCount > 0);
   const [worktreeDialogOpen, setWorktreeDialogOpen] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
@@ -974,7 +978,7 @@ function TaskGroupSection({
               style={{ fontSize: 12 }}>{shortenWorkspacePath(group.workspaceCwd)}</Typography.Text>}
           </Flex>
           <Typography.Text type="secondary" className="workspace-row-count"
-            title={`当前显示 ${visibleSessionCount} / 共 ${totalSessionCount} 个会话；${taskCount + 1} 个任务（含默认任务），${group.standaloneSessions.length} 个未分组会话；不含归档`}
+            title={`当前显示 ${visibleSessionCount} / 共 ${totalSessionCount} 个会话；${group.tasks.filter(task => !task.parentWorkspaceTaskId).length} 个主目标、${group.tasks.filter(task => task.parentWorkspaceTaskId).length} 个子任务，${group.standaloneSessions.length} 个未分组会话；不含归档`}
             aria-label={`当前显示 ${visibleSessionCount} 个会话，共 ${totalSessionCount} 个会话`}>
             {visibleSessionCount === totalSessionCount ? visibleSessionCount : `${visibleSessionCount}/${totalSessionCount}`}
           </Typography.Text>
@@ -1010,7 +1014,7 @@ function TaskGroupSection({
           {displayMode === "active" && visibleSessionCount === 0 ? (
             <Typography.Paragraph type="secondary" className="sidebar-group-empty">暂无活动会话</Typography.Paragraph>
           ) : null}
-          <TaskItem
+          {(defaultTask.sessions.length > 0 || Boolean(searchQuery.trim() && defaultTask.archivedSessions?.length)) && <TaskItem
             task={defaultTask}
             defaultGroup={group}
             now={now}
@@ -1037,11 +1041,32 @@ function TaskGroupSection({
             onDeleteSession={(session, index) => handleDeleteSessions([session.id], null,
               `已删除终端「${sidebarSessionLabel(session, index ?? defaultTask.sessions.indexOf(session), liveTitles?.[session.id])}」`)}
             onArchiveSession={handleArchiveSession}
-          />
-          {group.tasks.map((task) => (
+          />}
+          {(() => {
+            const childrenByParent = new Map<string, TaskSummary[]>();
+            for (const task of group.tasks) if (task.parentWorkspaceTaskId) {
+              const children = childrenByParent.get(task.parentWorkspaceTaskId) ?? [];
+              children.push(task); childrenByParent.set(task.parentWorkspaceTaskId, children);
+            }
+            const descendantCount = (id: string): number => {
+              const pending = [...(childrenByParent.get(id) ?? [])], seen = new Set([id]), sessions = new Set<string>();
+              while (pending.length) {
+                const task = pending.pop()!;
+                if (seen.has(task.id)) continue;
+                seen.add(task.id);
+                for (const session of filterSidebarTaskSessions(group, task, searchQuery, liveTitles)) sessions.add(session.id);
+                pending.push(...(childrenByParent.get(task.id) ?? []));
+              }
+              return sessions.size;
+            };
+            const renderTask = (task: TaskSummary, ancestors: string[] = []): React.ReactNode => <div key={task.id} style={{ marginLeft: ancestors.length ? 12 : 0 }}>
+              {task.sessions.length === 0 && <Typography.Text type="secondary">{group.tasks.some(t => t.parentWorkspaceTaskId === task.id) ? "子任务有执行记录 · 主目标待验收" : "尚未派发 · 计划项"}</Typography.Text>}
+
             <TaskItem
               key={task.id}
               task={task}
+              descendantSessionCount={descendantCount(task.id)}
+              hasChildExecution={group.tasks.some(child => child.parentWorkspaceTaskId === task.id)}
               visibleSessions={filterSidebarTaskSessions(group, task, searchQuery, liveTitles)}
               now={now}
               liveTitles={liveTitles}
@@ -1087,7 +1112,10 @@ function TaskGroupSection({
               onDelete={() => handleDeleteTask(task)}
               onArchive={() => handleArchiveTask(task)}
             />
-          ))}
+              {group.tasks.filter(child => child.parentWorkspaceTaskId === task.id && ![...ancestors, task.id].includes(child.id)).map(child => renderTask(child, [...ancestors, task.id]))}
+            </div>;
+            return group.tasks.filter(task => !task.parentWorkspaceTaskId || !group.tasks.some(parent => parent.id === task.parentWorkspaceTaskId)).map(task => renderTask(task));
+          })()}
 
         </Flex>
       </SidebarDisclosure>
@@ -1770,7 +1798,8 @@ function SidebarWorkspacesPanel({
                 </>
               ) : (
                 <>
-                  <span>会话按工作目录归类，也可以归入任务统一管理。</span>
+                  <span>当前没有匹配的执行会话。未派发任务仍在任务面板，归档记录可通过搜索查看。</span>
+                  <WandButton kind="ghost" size="small" onClick={() => { onNavigate?.(); taskBoardController.open(); }}>查看任务计划</WandButton>
                   <WandButton kind="ghost" size="small" className="workspaces-empty-action" aria-label="新建会话"
                     onClick={() => { onOpenDialog?.(); newSessionController.open(); }}>
                     <WandIcon name="plus" slot="start" size={13}/><span>开始一个会话</span>

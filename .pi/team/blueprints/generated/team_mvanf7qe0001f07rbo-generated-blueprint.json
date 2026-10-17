@@ -1,0 +1,72 @@
+{
+  "blueprintId": "team_mvanf7qe0001f07rbo-generated-blueprint",
+  "runId": "team_mvanf7qe0001f07rbo",
+  "task": "为当前用户要求的 npm、Android、macOS beta 发布做三端独立验证和出包。只验证冻结源码快照，不发布、不push、不改工作主仓、不安装/启动用户客户端或设备。不增加真实付费模型调用。源码快照 /Users/co0ontty/Self/vibe_coding/wand/output/architecture-stage2/beta-release-20261016/source；主提交709c8acc310220cfc86d34aa7cca4e05a1d55c47，版本4.96.1-beta.202610161530.g709c8ac，BUILD_STAMP=202610161530。结果日志写 /Users/co0ontty/Self/vibe_coding/wand/output/architecture-stage2/beta-release-20261016/ 下各角色独立文件。开工读快照AGENTS.md及平台README。允许bash/read/write工具已经列给每个worker，分析/代码用high thinking。每个worker先RADIO报已开始，再报关键阶段，失败只报告证据不擅自修或跳过测试，不删除他人文件。注意源快照中node_modules/render/render-bin为指向主仓的只读依赖链接，不要修改依赖源。三端彼此独立，负责人最终判断是否发布。",
+  "playbookId": "generated-blueprint",
+  "playbookTitle": "Dynamic team blueprint",
+  "source": "generated",
+  "status": "draft",
+  "createdAt": 1792135868656,
+  "roles": [
+    {
+      "roleId": "npm-gate",
+      "title": "npm 发布门禁",
+      "description": "在冻结快照source执行 PATH=/Users/co0ontty/.nvm/versions/node/v24.21.0/bin:$PATH。先仅在快照package.json/package-lock.json写入版本4.96.1-beta.202610161530.g709c8ac（两个root version和packages['']），不修改主仓包文件；执行 npm run check、npm test（全量）、WAND_BUILD_CHANNEL=beta npm run build，分开保存check/npm-test/build日志和退出码，失败后可继续其余门禁但不能声称通过。严格执行node scripts/stage-render-binaries.js --all --strict --check；npm pack --ignore-scripts --pack-destination父日志目录，检查包版本/build-info/channel/commit。禁止npm publish。全量npm test较慢属正常，无真实付费模型。输出紧凑npm-report.json和说明，包含失败用例行号与复现。",
+      "capabilityNeeds": [],
+      "tools": [
+        "bash",
+        "read",
+        "write"
+      ],
+      "modelPreferences": []
+    },
+    {
+      "roleId": "android-gate",
+      "title": "Android Beta 构建与测试",
+      "description": "在冻结快照source/android读README/build.gradle，先source ~/.config/wand-build/environment.sh遵守外置卷和维护锁，不绕过。执行./gradlew testDebugUnitTest assembleDebug -PAPP_VERSION_NAME='4.96.1-beta.202610161530.g709c8ac+202610161530'（不要debug.sh因为不接受指定版本；绝不安装设备）。查实际build输出位置（外置按project key），将APK拷贝到本次独立外置输出目录并报告绝对路径、size、SHA256、aapt包名/versionName/versionCode和apksigner证书SHA256。检查与原工作主仓既有APK签名身份一致，若不同报告阻塞不擅自换签名。日志放本次父目录，JSON android-report.json。禁止adb安装/启动、不publish不push不修改任何源码。",
+      "capabilityNeeds": [],
+      "tools": [
+        "bash",
+        "read",
+        "write"
+      ],
+      "modelPreferences": []
+    },
+    {
+      "roleId": "macos-gate",
+      "title": "macOS XCTest 与 Beta 出包",
+      "description": "在冻结快照source/macos读README及scripts/run-tests.sh/build.sh，遵守 ~/.config/wand-build/environment.sh 外置存储政策，不绕维护锁。执行全量scripts/run-tests.sh（DERIVED_DATA用外置本次独立目录）；可运行隔离XCTest宿主，不安装/启动用户生产App。随后 WAND_BUILD_STAMP=202610161530 WAND_ASSET_VERSION='4.96.1-beta.202610161530.g709c8ac+202610161530' WAND_BUILD_DIR=<尚不存在外置目录> WAND_DIST_DIR=<尚不存在外置目录> ./build.sh 4.96.1-beta.202610161530.g709c8ac，保留现有ad-hoc签名契约。报告测试数/skips、Universal架构、codesign核验、ZIP/DMG/manifest绝对路径、size/SHA256，写macos-report.json。失败不擅自修源、不复用旧产物、不改主仓、不push/发布。",
+      "capabilityNeeds": [],
+      "tools": [
+        "bash",
+        "read",
+        "write"
+      ],
+      "modelPreferences": []
+    }
+  ],
+  "rounds": [
+    {
+      "id": "collect",
+      "type": "parallel",
+      "roles": [
+        "npm-gate",
+        "android-gate",
+        "macos-gate"
+      ]
+    }
+  ],
+  "policy": {
+    "rationale": "A task-specific collaboration blueprint generated for the lead captain",
+    "strategy": "The lead captain generated this collaboration plan; the extension handles dispatch, communication, observation, and recording.",
+    "evidencePolicy": "Workers should separate cited evidence, inference, confidence, and missing information.",
+    "modelPolicy": "Use configured models that are objectively available; keep soft health observations visible.",
+    "synthesisPolicy": "The lead uses worker outputs as inputs and keeps final judgment outside the extension.",
+    "progressMilestones": [
+      "collect: parallel"
+    ],
+    "stopCriteria": "All planned rounds have returned a status and the run log is persisted."
+  },
+  "outputContract": "三份独立JSON及日志：exit codes、测试汇总、产物路径/大小/SHA256/签名，失败提供可定位原因；负责人决定发布。",
+  "captainRationale": "A task-specific collaboration blueprint generated for the lead captain"
+}

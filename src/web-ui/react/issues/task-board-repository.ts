@@ -4,10 +4,11 @@ import type {
   WandTaskDetail,
   WandTaskPriority,
   WandTaskStatus,
+  WandTaskComment,
   TaskExecutionSubject,
 } from "../../../task-types";
 import { normalizeIssueAgentDefaults, type IssueWorkspace } from "./task-board-agent";
-import { jsonBody, requestJson } from "../http-adapter";
+import { HttpResponseError, jsonBody, requestJson } from "../http-adapter";
 import { taskMutationCompleted } from "../task-changes";
 
 function mutateTask<T>(url: string, init: RequestInit): Promise<T> {
@@ -15,11 +16,13 @@ function mutateTask<T>(url: string, init: RequestInit): Promise<T> {
 }
 
 let agentDefaultsWrite = Promise.resolve();
+const dispatchRequests = new Map<string, string>();
 
 
 /** GET /api/wand-tasks 返回的任务：附带头部所需的工作空间、里程碑与已绑定会话。 */
 export interface WandTaskListed extends WandTaskDetail {
   canArchive?: boolean;
+  assignedExecutor?: { id: string; name: string; avatar?: string } | null;
   workspace: { id: string; name: string; cwd: string } | null;
   /** 服务端已解出的里程碑（含名称），卡片可以直接显示。 */
   milestone: { id: string; name: string } | null;
@@ -27,6 +30,9 @@ export interface WandTaskListed extends WandTaskDetail {
 }
 
 export interface IssueSessionSummary {
+  employeeId?: string;
+  employeeName?: string;
+  employeeAvatar?: string;
   id: string;
   provider: string;
   sessionKind: string;
@@ -78,7 +84,7 @@ export const taskBoardRepository = {
     dueDate?: string | null;
     /** 里程碑 id；null / 省略表示不归入里程碑。 */
     milestoneId?: string | null;
-    /** 将任务认领为另一项处理中任务的子任务。 */
+    /** 将任务归入同项目未归档主任务，不启动执行。 */
     parentTaskId?: string | null;
     agent?: WandTaskAgent | null;
     executionSubject?: TaskExecutionSubject | null;
@@ -91,9 +97,14 @@ export const taskBoardRepository = {
   get(id: string): Promise<WandTaskListed> {
     return requestJson(`/api/wand-tasks/${encodeURIComponent(id)}`);
   },
+  comments(id: string, signal?: AbortSignal): Promise<WandTaskComment[]> {
+    return requestJson<{ comments: WandTaskComment[] }>(`/api/wand-tasks/${encodeURIComponent(id)}/comments`, { signal, cache: "no-store" })
+      .then(result => result.comments)
+      .catch(error => { if (error instanceof HttpResponseError && error.status === 404) return []; throw error; });
+  },
   update(
     id: string,
-    patch: Partial<Pick<WandTask, "title" | "titleSource" | "description" | "status" | "priority" | "labels" | "dueDate" | "milestoneId" | "workspaceId" | "parentTaskId" | "sortOrder" | "agent" | "executionSubject">>,
+    patch: Partial<Pick<WandTask, "title" | "titleSource" | "description" | "status" | "priority" | "labels" | "dueDate" | "milestoneId" | "workspaceId" | "parentTaskId" | "sortOrder" | "agent" | "executionSubject" | "acceptance">>,
   ): Promise<WandTaskListed> {
     return mutateTask(`/api/wand-tasks/${encodeURIComponent(id)}`, jsonBody(patch, "PATCH"));
   },
@@ -109,14 +120,21 @@ export const taskBoardRepository = {
   dispatch(
     id: string,
     agent: WandTaskAgent | null,
-    extra?: { prompt?: string; workspaceId?: string | null; subject?: TaskExecutionSubject },
+    extra?: { prompt?: string; workspaceId?: string | null; subject?: TaskExecutionSubject; useEmployeeDefaults?: boolean },
   ): Promise<IssueDispatchResult> {
-    return mutateTask(`/api/wand-tasks/${encodeURIComponent(id)}/dispatch`, jsonBody({
+    const requestId = dispatchRequests.get(id) ?? crypto.randomUUID();
+    dispatchRequests.set(id, requestId);
+    return mutateTask<IssueDispatchResult>(`/api/wand-tasks/${encodeURIComponent(id)}/dispatch`, jsonBody({
+      requestId,
       ...(agent ? { agent } : {}),
       ...(extra?.subject ? { subject: extra.subject } : {}),
+      ...(extra?.useEmployeeDefaults ? { useEmployeeDefaults: true } : {}),
       ...(extra?.prompt != null ? { prompt: extra.prompt } : {}),
       ...(extra && "workspaceId" in extra ? { workspaceId: extra.workspaceId ?? null } : {}),
-    }));
+    })).then(result => { dispatchRequests.delete(id); return result; }).catch(error => {
+      if (error instanceof HttpResponseError && error.status < 500 && ![408, 409].includes(error.status)) dispatchRequests.delete(id);
+      throw error;
+    });
   },
   moveSession(id: string, sessionId: string): Promise<WandTaskListed> {
     return mutateTask(`/api/wand-tasks/${encodeURIComponent(id)}/sessions`, jsonBody({ sessionId }));

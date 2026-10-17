@@ -46,17 +46,17 @@ export function ConversationNavigation({ activePage, teamAttention, onNavigate }
     { value: "tasks", label: "工作区", icon: "folder" },
     { value: "board", label: "任务看板", icon: "board", id: "task-board-button" },
     { value: "teams", label: "团队", icon: "users", id: "ai-teams-button" },
-    { value: "schedules", label: "定时任务", icon: "history", id: "scheduled-tasks-button" },
-    { value: "calendar", label: "全局日历", icon: "calendar", id: "global-calendar-button" },
+    { value: "calendar", label: "定时", icon: "calendar", id: "global-calendar-button" },
   ] as const;
+  const selectedPage = activePage === "schedules" ? "calendar" : activePage;
   return <Flex component="nav" vertical gap={4} className="conversation-navigation" aria-label="功能导航">
     {entries.map(entry => <WandIconButton key={entry.value} id={"id" in entry ? entry.id : undefined}
       data-stretch-value={entry.value} aria-label={entry.label} title={entry.label}
-      kind={activePage === entry.value ? "soft" : "ghost"} aria-current={activePage === entry.value ? "page" : undefined}
-      aria-pressed={activePage === entry.value} onClick={() => onNavigate(entry.value)}>
+      kind={selectedPage === entry.value ? "soft" : "ghost"} aria-current={selectedPage === entry.value ? "page" : undefined}
+      aria-pressed={selectedPage === entry.value} onClick={() => onNavigate(entry.value)}>
       <span className="sidebar-nav-icon" aria-hidden="true">{entry.value === "teams" ? <Badge count={teamAttention} size="small"><WandIcon name={entry.icon} size={18}/></Badge>
         : <WandIcon name={entry.icon} size={18}/>}</span>
-      <span className="sidebar-nav-label" aria-hidden="true">{entry.value === "board" ? "任务" : entry.value === "schedules" ? "定时" : entry.value === "calendar" ? "日历" : entry.label}</span>
+      <span className="sidebar-nav-label" aria-hidden="true">{entry.value === "board" ? "任务" : entry.label}</span>
     </WandIconButton>)}
   </Flex>;
 }

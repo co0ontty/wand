@@ -20,6 +20,8 @@ import { SessionTimers, type ProviderDiscoveryKind } from "./process-manager-tim
 import { truncateMessagesForTransport } from "./message-truncator.js";
 import { appendWindow, hasExplicitConfirmSyntax, hasPermissionActionContext, normalizePromptText, PTY_OUTPUT_MAX_SIZE } from "./pty-text-utils.js";
 import { buildChildEnv, isRunningAsRoot, systemEnvValue } from "./env-utils.js";
+import { coreHarnessAgentDir } from "./harness-engine.js";
+import { waitForSessionProcessExit } from "./session-artifact-cleanup.js";
 import { buildLanguageDirective, buildManagedAutonomyDirective } from "./language-prompt.js";
 import { prepareSessionWorktree } from "./git-worktree.js";
 import { getProviderCommandSessionId, getProviderResumeCommandSessionId } from "./resume-policy.js";
@@ -218,8 +220,9 @@ export class ProcessManager extends EventEmitter {
   private readonly sessions = new Map<string, SessionRecord>();
   /** Own the full start handshake, including model resolution and late host replies. */
   private readonly startingSessions = new Map<string, { cancelled: boolean }>();
+  private readonly nativeCleanupBarriers = new Map<string, Promise<void>>();
   private readonly logger: SessionLogger;
-  private readonly providerHistory = new ProviderHistoryScanner();
+  private readonly providerHistory: ProviderHistoryScanner;
   /** Quiet window for the non-Claude PTY turn tracker. */
   private readonly ptyTurnIdleMs: number;
   /** Foreground-process-group sampling interval. */
@@ -261,6 +264,12 @@ export class ProcessManager extends EventEmitter {
     options: ProcessManagerOptions = {},
   ) {
     super();
+    const cliEnv = buildChildEnv(config.inheritEnv !== false);
+    this.providerHistory = new ProviderHistoryScanner({
+      claudeHome: cliEnv.CLAUDE_CONFIG_DIR?.trim() || path.join(os.homedir(), ".claude"),
+      codexHome: cliEnv.CODEX_HOME?.trim() || path.join(os.homedir(), ".codex"),
+      openCodeDatabasePath: path.join(cliEnv.XDG_DATA_HOME?.trim() || path.join(os.homedir(), ".local", "share"), "opencode", "opencode.db"),
+    });
     this.ptyTurnIdleMs = options.ptyTurnIdleMs ?? PTY_TURN_IDLE_MS;
     this.ptyForegroundSampleMs = options.ptyForegroundSampleMs ?? PTY_FOREGROUND_SAMPLE_MS;
     this.probePtyForegrounds = options.samplePtyForegrounds ?? samplePtyForegrounds;
@@ -1289,7 +1298,16 @@ export class ProcessManager extends EventEmitter {
   }
 
   deletePiHistoryFiles(sessionIds: string[]): number {
-    return this.providerHistory.deletePiHistoryFiles(sessionIds);
+    // Structured Pi uses harness.agentDir, which may differ from the CLI default.
+    // PTY Pi uses the default root. Remove the exact IDs from both, never a root.
+    const configured = path.join(coreHarnessAgentDir(this.config.harness), "sessions");
+    const defaults = path.join(buildChildEnv(this.config.inheritEnv !== false).PI_CODING_AGENT_DIR?.trim()
+      || path.join(os.homedir(), ".pi", "agent"), "sessions");
+    let deleted = new ProviderHistoryScanner({ piSessionsDir: configured }).deletePiHistoryFiles(sessionIds);
+    if (path.resolve(defaults) !== path.resolve(configured)) {
+      deleted += new ProviderHistoryScanner({ piSessionsDir: defaults }).deletePiHistoryFiles(sessionIds);
+    }
+    return deleted;
   }
 
   deleteGrokHistoryFiles(sessionIds: string[]): number {
@@ -1754,6 +1772,39 @@ export class ProcessManager extends EventEmitter {
     record.terminalState = null;
   }
 
+  /** Capture before delete drops the process handles. Never unlink a live CLI's history. */
+  nativeHistoryCleanupBarrier(id: string): Promise<void> | null {
+    const existing = this.nativeCleanupBarriers.get(id);
+    if (existing) return existing;
+    const record = this.sessions.get(id);
+    if (!record) return null;
+    if (this.startingSessions.has(id)) {
+      return Promise.reject(new Error("CLI startup is still pending; session artifacts were preserved."));
+    }
+    const waits: Promise<void>[] = [];
+    if (record.ptyProcess) {
+      const terminal = record.ptyProcess;
+      waits.push(waitForSessionProcessExit((done) => {
+        const listener = terminal.onExit((event) => {
+          // A missing remote inventory entry is reported as -1, not an OS exit.
+          if (event.exitCode >= 0) done();
+        });
+        return () => listener.dispose();
+      }));
+    }
+    const child = record.childProcess;
+    if (child && child.exitCode === null && child.signalCode === null) {
+      waits.push(waitForSessionProcessExit((done) => {
+        child.once("close", done);
+        return () => { child.off("close", done); };
+      }));
+    }
+    if (!waits.length) return null;
+    const barrier = Promise.all(waits).then(() => {});
+    this.nativeCleanupBarriers.set(id, barrier);
+    return barrier;
+  }
+
   delete(id: string): void {
     const record = this.mustGet(id);
     const start = this.startingSessions.get(id);
@@ -1796,7 +1847,15 @@ export class ProcessManager extends EventEmitter {
     record.terminalState?.dispose();
     record.terminalState = null;
 
-    this.terminalHost.forget(id);
+    const barrier = this.nativeCleanupBarriers.get(id);
+    if (barrier) {
+      const forget = () => {
+        this.nativeCleanupBarriers.delete(id);
+        if (!this.sessions.has(id)) this.terminalHost.forget(id);
+      };
+      // Keep remote handles until their exit event has reached the barrier.
+      void barrier.then(forget, forget);
+    } else this.terminalHost.forget(id);
 
     // Delete from persistent storage BEFORE removing from in-memory map,
     // so a storage failure doesn't leave orphan records in the database.

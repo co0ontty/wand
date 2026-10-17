@@ -56,6 +56,9 @@ export class AuthService {
   private readonly sessions = new Map<string, CachedAuthSession>();
   private readonly cleanupTimer: NodeJS.Timeout;
   private disposed = false;
+  private readonly revokeAllListeners = new Set<() => void>();
+
+  onRevokeAll(listener: () => void): void { this.revokeAllListeners.add(listener); }
 
   constructor(
     private readonly storage: WandStorage,
@@ -72,6 +75,7 @@ export class AuthService {
     const expiresAt = Date.now() + this.sessionTtlMs;
     const cached = { expiresAt, principal: clonePrincipal(principal) };
     this.sessions.set(token, cached);
+    // 所有登录态（含票据登录）持久化，和密码登录一样跨服务重启有效。
     this.storage.saveAuthSession(token, expiresAt, cached.principal);
     return token;
   }
@@ -93,6 +97,11 @@ export class AuthService {
       }
       return null;
     }
+    // Retire cookies minted by the early ticket prototype. Native App sessions
+    // use the established multi-scope principal; a sessions-only connected-app
+    // cookie must never regain broad workbench access after upgrade.
+    if (cached.principal.kind === "connected-app" && cached.principal.scopes.length === 1
+      && cached.principal.scopes[0] === "sessions") return null;
     return clonePrincipal(cached.principal);
   }
 
@@ -110,6 +119,7 @@ export class AuthService {
     if (this.disposed) return;
     this.sessions.clear();
     this.storage.deleteAllAuthSessions();
+    for (const listener of this.revokeAllListeners) listener();
   }
 
   dispose(): void {
@@ -117,6 +127,8 @@ export class AuthService {
     this.disposed = true;
     clearInterval(this.cleanupTimer);
     this.sessions.clear();
+    for (const listener of this.revokeAllListeners) listener();
+    this.revokeAllListeners.clear();
   }
 
   private cleanupExpiredSessions(): void {

@@ -37,6 +37,11 @@ test("the shell transfers only HTML repeatedly and serves versioned, cacheable a
     const themeSrc = html.match(/src="(\/assets\/theme\.js\?v=[a-f0-9]{16})"/)?.[1];
     assert.ok(cssHref && jsSrc && themeSrc);
     assert.ok(html.indexOf(themeSrc) < html.indexOf(cssHref));
+    const preloadUrls = [...html.matchAll(/<link rel="modulepreload" href="([^"]+)"/g)].map(match => match[1]);
+    assert.deepEqual(preloadUrls, getBrowserModuleManifest().eager.map(file => `/assets/${file}`),
+      "preload exactly the boot graph, without fetching optional features");
+    assert.ok(html.indexOf('rel="modulepreload"') < html.indexOf(themeSrc),
+      "discover the runtime before the blocking theme bootstrap");
     assert.ok(html.indexOf("/vendor/xterm/xterm.css") < html.indexOf(cssHref));
     assert.match(html, /name="wand-qrcode-script" content="\/vendor\/qrcode\/qrcode\.bundle\.js\?v=[a-f0-9]{8}"/);
     assert.match(html, /name="wand-xterm-script" content="\/vendor\/xterm\/xterm\.bundle\.js\?v=[a-f0-9]{8}"/);

@@ -202,7 +202,7 @@ test("workspace and standalone task creation can claim a doing parent without or
     const other = storage.createWorkspace({ name: "Other", cwd: path.join(root, "other") });
     const parent = storage.createWandTask({ title: "Parent", workspaceId: workspace.id, status: "doing" });
     const globalParent = storage.createWandTask({ title: "Global parent", status: "doing" });
-    const closed = storage.createWandTask({ title: "Closed", workspaceId: workspace.id, status: "done" });
+    const closed = storage.createWandTask({ title: "Archived", workspaceId: workspace.id, status: "archived" });
     const create = (route: string, parentTaskId: string) => fetch(`${baseUrl}${route}`,
       json({ name: "Child", parentTaskId }));
 
@@ -220,7 +220,7 @@ test("workspace and standalone task creation can claim a doing parent without or
 
     const before = storage.listWorkspaceTasks(workspace.id).length;
     for (const [route, id, message] of [
-      [`/api/workspaces/${workspace.id}/tasks`, closed.id, /正在处理/],
+      [`/api/workspaces/${workspace.id}/tasks`, closed.id, /归档/],
       [`/api/workspaces/${workspace.id}/tasks`, globalParent.id, /同一项目/],
       [`/api/workspaces/${workspace.id}/tasks`, "missing", /不存在/],
       ["/api/tasks", parent.id, /同一项目/],

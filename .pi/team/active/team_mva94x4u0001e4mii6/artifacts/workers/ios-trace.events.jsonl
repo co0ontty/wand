@@ -1,0 +1,256 @@
+{"at":1792111885524,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111885524,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111885524,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111885525,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111888826,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111888829,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111888870,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111888871,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111888871,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111888871,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111890616,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111890617,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111890650,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111890651,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111890651,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111890651,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111892376,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111894464,"phase":"worker-radio-report","message":"iOS 工作区链路诊断 reported to captain","preview":"RADIO: status=started, action=读取根约束并盘点 iOS/Web 未提交状态，随后追踪工作区 API→Store→首页/目录/搜索, evidence=none, blocker=none, next=先读取 AGENTS.md、git status 与相关入口。"}
+{"at":1792111894468,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start read","toolName":"read"}
+{"at":1792111894470,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start bash","toolName":"bash"}
+{"at":1792111894472,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start read","toolName":"read"}
+{"at":1792111894491,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792111894493,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792111894601,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792111894602,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111894602,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111894602,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111894602,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111894602,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111894603,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111895226,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111897835,"phase":"worker-radio-report","message":"iOS 工作区链路诊断 reported to captain","preview":"RADIO: status=progress, action=已确认主仓存在预先未提交的 android/ios 子模块改动与 Web sidebar-recent 改动；未触碰任何文件，正在定位 iOS 入口和子模块 diff, evidence=git status --short, AGENTS.md, blocker=none, next=读取 HomePresentation/WorkspaceListView/WorkspaceStore 及协议模型。"}
+{"at":1792111897837,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start bash","toolName":"bash"}
+{"at":1792111897839,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start bash","toolName":"bash"}
+{"at":1792111897841,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start bash","toolName":"bash"}
+{"at":1792111897874,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792111897892,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792111897904,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792111897904,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111897905,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111897905,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111897905,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111897906,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111897906,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111898682,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111900202,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111900204,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start read","toolName":"read"}
+{"at":1792111900206,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start read","toolName":"read"}
+{"at":1792111900208,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start read","toolName":"read"}
+{"at":1792111900209,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start read","toolName":"read"}
+{"at":1792111900210,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start read","toolName":"read"}
+{"at":1792111900229,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792111900230,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792111900231,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792111900232,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792111900232,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792111900233,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111900233,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111900233,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111900233,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111900233,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111900234,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111900234,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111900234,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111900234,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111900234,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111901004,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111903852,"phase":"worker-radio-report","message":"iOS 工作区链路诊断 reported to captain","preview":"RADIO: status=progress, action=已确认 iOS 当前已切换到 GET /api/tasks 聚合链路；HomePresentation 从 taskGroups 生成最近组，WorkspaceListView 同时展示最近与任务目录，Store 以 revision + generation 更新。正在检查未提交 diff 是否存在漏字段/筛选差异, evidence=ios/Wand/HomePresentation.swift, Worksp"}
+{"at":1792111903855,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start bash","toolName":"bash"}
+{"at":1792111903857,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start bash","toolName":"bash"}
+{"at":1792111903858,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start bash","toolName":"bash"}
+{"at":1792111903859,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start read","toolName":"read"}
+{"at":1792111903860,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start read","toolName":"read"}
+{"at":1792111903861,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start read","toolName":"read"}
+{"at":1792111903872,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792111903874,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792111903875,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792111903892,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792111903900,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792111903907,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792111903908,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111903908,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111903908,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111903909,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111903909,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111903909,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111903909,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111903910,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111903910,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111903910,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111903910,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111903911,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111904617,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111907686,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111907689,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start read","toolName":"read"}
+{"at":1792111907691,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start read","toolName":"read"}
+{"at":1792111907693,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start read","toolName":"read"}
+{"at":1792111907694,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start bash","toolName":"bash"}
+{"at":1792111907696,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start bash","toolName":"bash"}
+{"at":1792111907717,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792111907720,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792111907722,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792111907727,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792111907751,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792111907751,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111907752,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111907752,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111907753,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111907753,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111907753,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111907754,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111907754,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111907755,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111907755,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111908518,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111912363,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111912365,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start bash","toolName":"bash"}
+{"at":1792111912366,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start read","toolName":"read"}
+{"at":1792111912367,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start read","toolName":"read"}
+{"at":1792111912368,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start read","toolName":"read"}
+{"at":1792111912369,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start read","toolName":"read"}
+{"at":1792111912393,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792111912396,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792111912398,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792111912400,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792111912451,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792111912452,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111912452,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111912452,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111912452,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111912453,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111912453,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111912453,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111912454,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111912454,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111912454,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111913119,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111915977,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111915979,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start read","toolName":"read"}
+{"at":1792111915981,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start read","toolName":"read"}
+{"at":1792111915983,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start read","toolName":"read"}
+{"at":1792111915985,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start bash","toolName":"bash"}
+{"at":1792111915986,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start bash","toolName":"bash"}
+{"at":1792111916000,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792111916001,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792111916002,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792111916015,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792111916024,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792111916025,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111916026,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111916027,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111916027,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111916027,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111916028,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111916028,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111916028,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111916029,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111916029,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111916817,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111919762,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111919765,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start bash","toolName":"bash"}
+{"at":1792111919767,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start bash","toolName":"bash"}
+{"at":1792111919769,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start bash","toolName":"bash"}
+{"at":1792111919770,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start read","toolName":"read"}
+{"at":1792111919787,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792111919795,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792111919812,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792111919832,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792111919832,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111919833,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111919833,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111919834,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111919834,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111919834,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111919835,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111919835,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111920603,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111925851,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111925855,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start read","toolName":"read"}
+{"at":1792111925859,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start read","toolName":"read"}
+{"at":1792111925864,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start bash","toolName":"bash"}
+{"at":1792111925870,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start read","toolName":"read"}
+{"at":1792111925894,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end read failed","toolName":"read","isError":true}
+{"at":1792111925896,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792111925897,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792111925927,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792111925928,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111925928,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111925928,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111925929,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111925929,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111925930,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111925930,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111925931,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111926599,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111927449,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111927451,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start read","toolName":"read"}
+{"at":1792111927463,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792111927464,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111927465,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111928110,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111936196,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111936199,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start bash","toolName":"bash"}
+{"at":1792111936201,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start bash","toolName":"bash"}
+{"at":1792111936203,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start bash","toolName":"bash"}
+{"at":1792111936205,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start bash","toolName":"bash"}
+{"at":1792111936239,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792111936242,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792111936259,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792111936291,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792111936292,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111936292,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111936292,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111936293,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111936293,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111936293,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111936294,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111936294,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111936996,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111938150,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111938154,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start bash","toolName":"bash"}
+{"at":1792111938229,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792111938230,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111938231,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111939054,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111939907,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111939910,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start read","toolName":"read"}
+{"at":1792111939921,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792111939923,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111939925,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111940571,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111950022,"phase":"worker-radio-report","message":"iOS 工作区链路诊断 reported to captain","preview":"RADIO: status=progress, action=已找到关键跨端差异：iOS 旧默认 `recentGroups` 全局只取 8 条非终端会话，而 Android/Web 生产入口传全量；当前未提交 iOS diff 已将入口改为 `.max`。同时 iOS 最近区忽略 `visible` 投影参数，搜索/目录区与最近区各自过滤。另发现 iOS 未解码服务端 `ptyCommandRunning`，活动判定与 Web 不同, evidence=ios/Wand/W"}
+{"at":1792111950024,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start read","toolName":"read"}
+{"at":1792111950027,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start read","toolName":"read"}
+{"at":1792111950028,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start bash","toolName":"bash"}
+{"at":1792111950030,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start bash","toolName":"bash"}
+{"at":1792111950042,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792111950044,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792111950058,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792111950125,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end bash","toolName":"bash","isError":false}
+{"at":1792111950126,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111950126,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111950127,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111950127,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111950127,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111950128,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111950128,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111950129,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111950816,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111953471,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111953475,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_start read","toolName":"read"}
+{"at":1792111953489,"phase":"worker-tool","message":"iOS 工作区链路诊断 tool_execution_end read","toolName":"read","isError":false}
+{"at":1792111953492,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111953494,"phase":"worker-message-end","message":"iOS 工作区链路诊断 assistant message ended"}
+{"at":1792111954190,"phase":"worker-message-start","message":"iOS 工作区链路诊断 message started"}
+{"at":1792111967300,"phase":"worker-radio-report","message":"iOS 工作区链路诊断 reported to captain","preview":"RADIO: status=complete, action=完成只读链路诊断，未编辑/构建/部署；结论按“已证实差异 / 尚不能归因”分层，含最小修改与定点测试建议, evidence=git -C ios diff --check 与 git diff --check 均无输出；关键行号见最终报告, blocker=none, next=等待 captain 吸收；若需进一步确认须抓取 iOS 实际 GET /api/tasks 响应而非凭推断。"}

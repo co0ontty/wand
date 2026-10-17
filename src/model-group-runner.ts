@@ -17,6 +17,7 @@ export function withModelGroups(runner: StructuredRunnerAdapter, config: WandCon
     const grouped = !!group && models[0] !== OPENROUTER_FREE_SELECTOR;
     let cancelled = false;
     let current: StructuredRunnerExecution;
+    const exits: Promise<unknown>[] = [];
     const start = (model: string): StructuredRunnerExecution => {
       let active = true;
       let output = false;
@@ -38,6 +39,7 @@ export function withModelGroups(runner: StructuredRunnerAdapter, config: WandCon
           observer.onUpdate({ ...state, model: state.model ?? model });
         },
       });
+      exits.push(execution.exited ?? execution.completion);
       return { ...execution, get args() { return execution.args; }, get pid() { return execution.pid; },
         completion: execution.completion.then((result) => {
           const failed = result.spawnError ? { ...result, exitCode: result.exitCode ?? 1,
@@ -58,7 +60,8 @@ export function withModelGroups(runner: StructuredRunnerAdapter, config: WandCon
         current = start(models[index + 1]!);
       }
     })();
-    return { ...first, get args() { return first.args; }, get pid() { return first.pid; }, completion, interrupt() {
+    const exited = completion.then(() => Promise.all(exits), () => Promise.all(exits)).then(() => {});
+    return { ...first, get args() { return first.args; }, get pid() { return first.pid; }, completion, exited, interrupt() {
       cancelled = true;
       try { current.interrupt(); } catch { /* best effort, never replay after cancellation */ }
     } };

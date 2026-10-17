@@ -74,15 +74,17 @@ test("adjacent thinking and command share one inline activity with hidden proces
   assert.doesNotMatch(html, /Private reasoning text|More private reasoning/);
 });
 
-test("thinking content is visible by default but an explicit collapse remains authoritative", () => {
+test("thinking content stays folded until its row is opened", () => {
   const blocks = [{ type: "thinking", thinking: "完整思考正文，直接阅读。" },
     { type: "tool_use", id: "cmd", name: "Bash", input: { description: "验证界面", command: "npm run check" }, activity: { kind: "run_command" } }];
   const initial = renderActivity(blocks, "", null, false);
-  assert.match(initial, /完整思考正文，直接阅读。/);
-  assert.match(initial, /data-thinking-entry="true"[^>]*data-expanded="true"/);
+  assert.doesNotMatch(initial, /完整思考正文，直接阅读。/);
+  assert.match(initial, /data-thinking-entry="true"[^>]*data-expanded="false"/);
   assert.match(initial, /data-label="验证界面"/);
   assert.match(initial, /data-icon="terminal"/);
-  assert.doesNotMatch(renderActivity(blocks, "", false, false), /完整思考正文，直接阅读。/);
+  // 展开的是组，不是每一行：正文仍逐条展开。
+  assert.doesNotMatch(renderActivity(blocks, "", true, false), /完整思考正文，直接阅读。/,
+    "an opened group does not expand every row body");
 });
 
 test("completed command keeps its real time but has no running animation", () => {
@@ -226,28 +228,29 @@ test("only the newest unfinished call or the last round is live, never both", ()
   assert.equal(toolActivity.activityLiveRow(items, null, false), null);
 });
 
-test("activity stays readable by default without writing a manual preference", () => {
+test("latest running activity defaults open without writing a manual preference", () => {
   const blocks = [{ type: "tool_use", id: "cmd", name: "Bash", activity: { kind: "run_command" } }];
   assert.match(renderActivity(blocks, "cmd", null), /data-live="true"[^>]*data-expanded="true"/);
   assert.match(renderActivity(blocks, "", null), /data-live="true"[^>]*data-expanded="true"/,
     "a returned call does not fold the timeline while this trailing group is still streaming");
-  assert.match(renderActivity(blocks, "", null, false), /data-live="false"[^>]*data-expanded="true"/);
-  assert.match(renderActivity(blocks, "cmd", null, true, 2), /data-live="false"[^>]*data-expanded="true"/,
-    "historical process remains readable independently of session activity");
+  assert.match(renderActivity(blocks, "", null, false), /data-live="false"[^>]*data-expanded="false"/,
+    "historical process stays folded until the reader opens it");
+  assert.match(renderActivity(blocks, "cmd", null, true, 2), /data-live="false"[^>]*data-expanded="false"/,
+    "older groups are not opened just because the session is running");
   assert.match(renderActivity(blocks, "cmd", false), /data-live="true"[^>]*data-expanded="false"/,
     "manual collapse wins over the running default");
   assert.match(renderActivity(blocks, "", true, false), /data-live="false"[^>]*data-expanded="true"/,
     "manual inspection keeps a completed group open");
 });
 
-test("thinking in all activity groups is open unless the reader chooses otherwise", () => {
+test("only the trailing activity group opens automatically", () => {
   const html = renderActivity([
     { type: "thinking", thinking: "Earlier thought" },
     { type: "text", text: "接下来继续" },
     { type: "thinking", thinking: "Current thought" },
   ], "", null);
   assert.deepEqual([...html.matchAll(/data-live="(true|false)"[^>]*data-expanded="(true|false)"/g)]
-    .map(match => [match[1], match[2]]), [["false", "true"], ["true", "true"]]);
+    .map(match => [match[1], match[2]]), [["false", "false"], ["true", "true"]]);
 });
 
 test("the compact summary keeps the only running mark, expanded or not", () => {

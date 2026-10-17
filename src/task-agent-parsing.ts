@@ -1,3 +1,4 @@
+import { assertTaskHierarchy } from "./task-hierarchy.js";
 import { text } from "./server-request.js";
 import { isSessionProvider } from "./session-provider.js";
 import { type WandStorage } from "./storage.js";
@@ -8,7 +9,7 @@ import { badRequest } from "./http-error.js";
 import { AI_TEAM_MAX_CANDIDATES, agentKey } from "./ai-team-types.js";
 
 /** Request parsing for task agents and parent-task links, shared by task, team and employee routes. */
-/** 新认领只能挂到同项目且正在处理的任务；历史归属在父任务完成后仍保留。 */
+/** 规划归属可选同项目未归档主任务，不依赖执行状态或会话；保留历史关系。 */
 export function parentTaskIdFrom(
   storage: WandStorage,
   value: unknown,
@@ -22,17 +23,10 @@ export function parentTaskIdFrom(
   const parent = storage.getWandTask(parentId);
   if (!parent) throw badRequest("父任务不存在。");
   if (parent.workspaceId !== workspaceId) throw badRequest("父任务必须与子任务属于同一项目目录。");
-  if (parent.status !== "doing" && parentId !== existingParentId) {
-    throw badRequest("只能认领到正在处理的父任务。");
-  }
-  // 不允许自己做父任务，也不允许把祖先接到后代下。
-  const visited = new Set<string>();
-  let ancestorId: string | null = parentId;
-  while (ancestorId) {
-    if (ancestorId === childId || visited.has(ancestorId)) throw badRequest("父任务不能形成循环。");
-    visited.add(ancestorId);
-    ancestorId = storage.getWandTask(ancestorId)?.parentTaskId ?? null;
-  }
+  try {
+    assertTaskHierarchy(storage.listWandTasks(), childId, parentId, workspaceId,
+      childId && existingParentId === parentId ? storage.getWandTask(childId) ?? undefined : undefined);
+  } catch (error) { throw badRequest(error instanceof Error ? error.message : "父任务无效。"); }
   return parentId;
 }
 

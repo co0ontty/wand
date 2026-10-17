@@ -28,14 +28,16 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
     host: "127.0.0.1", port: 3000, https: false, defaultMode: "default", defaultCwd: "/tmp",
     shell: "/bin/zsh", language: "", inheritEnv: true, defaultProvider: "claude", defaultThinkingEffort: "off",
     defaultModel: "first", defaultCodexModel: "codex-first", defaultPiModel: "",
-    modelGroups: [{ id: "coding", provider: "claude", name: "编程分组", models: ["first", "second"] }],
+    modelGroups: [{ id: "coding", provider: "claude", name: "编程分组", models: ["first", "second"] },
+      { id: "opencode-free", provider: "opencode", name: "免费分组", models: ["opencode/big-pickle", "opencode/cat-jam-free"] }],
     commandPresets: [{label: "示例预设", command: "echo example", mode: "default"}],
     cardDefaults: { editCards: false, inlineTools: false, terminal: false, thinking: false },
     taskRetention: { autoArchiveEnabled: false, autoArchiveDays: 7, autoDeleteEnabled: false, autoDeleteDays: 30 },
     userProfile: { name: "", avatar: "" },
   };
   const models = { models: [{id:"default",label:"默认"},{id:"first",label:"首选模型"},{id:"second",label:"备用模型"}],
-    codexModels:[{id:"codex-first",label:"Codex First"}], freeModels:[], piModels:[] };
+    codexModels:[{id:"codex-first",label:"Codex First"}], freeModels:[], piModels:[],
+    opencodeModels:[{id:"opencode/big-pickle",label:"Big Pickle"},{id:"opencode/cat-jam-free",label:"Cat Jam"}] };
   const about = () => ({packageName:qaLoadMode === "long" ? "超长软件包名称 LongPackageIdentifier".repeat(20) : "wand-local", version:"4.83.1", nodeVersion:">=26", updateChannel:"stable",
     build:{}, androidApk:{enabled:true},macosDmg:{enabled:true},iosIpa:{enabled:true},
     config, desiredConfig:config, activeConfig:config, githubConnector:{connected:false},
@@ -458,8 +460,22 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
       assert.equal(commands.at(-1)!.value.modelGroups[0].models[0],"second");
       await click('[data-settings-panel]:not([hidden]) .ant-collapse-header');
       await wait(`(()=>{const n=document.querySelector('[aria-label="下移模型 1"]');return !n||n.getBoundingClientRect().height===0})()`);
+      // The saved native free group supports ordering, not local membership edits.
+      await click('[aria-label="配置模型分组的工具"]');
+      await wait('!!document.querySelector(".wand-ui-select-content [role=option]")');
+      await evaluate(`Array.from(document.querySelectorAll('.wand-ui-select-content [role=option]')).find(n=>n.textContent.trim()==='OpenCode').setAttribute('data-native-free-option','true')`);
+      await click('[data-native-free-option="true"]');
+      await click('[data-settings-panel]:not([hidden]) .ant-collapse-header');
+      await wait(`!!document.querySelector('[aria-label="免费分组 的模型顺序"]')`);
+      assert.equal(await evaluate(`document.querySelector('[aria-label="免费分组 的模型顺序"]').textContent.includes('Big Pickle')`), true, `${mode}: native free models need not have a free suffix`);
+      assert.equal(await evaluate(`!!document.querySelector('#name-opencode-opencode-free')`), false, `${mode}: managed name is locked`);
+      assert.equal(await evaluate(`!!document.querySelector('[aria-label="移除模型 1"]')`), false, `${mode}: managed membership is server-owned`);
+      await click('[aria-label="下移模型 1"]'); await clickText("保存模型分组");
+      await wait('document.body.innerText.includes("模型分组与顺序已保存")');
+      assert.deepEqual(commands.at(-1)!.value.modelGroups.find((g: any)=>g.id==='opencode-free').models, ["opencode/cat-jam-free","opencode/big-pickle"]);
       // Restore the fixture order for the next mode, without invoking any real service.
       config.modelGroups[0].models=["first","second"];
+      config.modelGroups.find((g: any)=>g.id==='opencode-free').models=["opencode/big-pickle","opencode/cat-jam-free"];
       await clickText("基本配置","tab");
       assert.equal(await evaluate('document.querySelector("#settings-host").value'),"newer.example",`${mode}: unrelated model save retains draft`);
       await clickText("AI 与模型","tab");

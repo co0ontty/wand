@@ -1,0 +1,59 @@
+{
+  "blueprintId": "team_mva94x4u0001e4mii6-generated-blueprint",
+  "runId": "team_mva94x4u0001e4mii6",
+  "task": "只读诊断 Wand 移动端工作区漏会话问题。用户报告运行中会话在顶部员工组、下面目录列表、搜索均不可见，Web 最近更改过逻辑。必须读取根 AGENTS.md，保留所有未提交修改，禁止编辑/构建/部署。每个角色独立沿API→模型→列表→搜索追踪并对照 Web src/web-ui/react/workspaces/sidebar-recent.ts、sidebar-search.ts、sidebar-display-mode.ts。报告具体有证据的根因/差异、建议最小修改、适用测试。不要输出凭据。",
+  "playbookId": "generated-blueprint",
+  "playbookTitle": "Dynamic team blueprint",
+  "source": "generated",
+  "status": "draft",
+  "createdAt": 1792111885456,
+  "roles": [
+    {
+      "roleId": "android-trace",
+      "title": "Android 工作区链路诊断",
+      "description": "只读检查 android 数据到首页与目录筛选的全链路，特别 HomePresentation、TaskListPresentation、TaskListScreen、WorkspaceWorkflow。读取现有 diff 不覆盖工作。",
+      "capabilityNeeds": [],
+      "tools": [
+        "bash",
+        "read",
+        "write"
+      ],
+      "modelPreferences": []
+    },
+    {
+      "roleId": "ios-trace",
+      "title": "iOS 工作区链路诊断",
+      "description": "只读检查 ios 数据到首页与目录筛选全链路，特别 HomePresentation、WorkspaceListView、WorkspaceStore，对照 Web 与现有 diff。",
+      "capabilityNeeds": [],
+      "tools": [
+        "bash",
+        "read",
+        "write"
+      ],
+      "modelPreferences": []
+    }
+  ],
+  "rounds": [
+    {
+      "id": "collect",
+      "type": "parallel",
+      "roles": [
+        "android-trace",
+        "ios-trace"
+      ]
+    }
+  ],
+  "policy": {
+    "rationale": "A task-specific collaboration blueprint generated for the lead captain",
+    "strategy": "The lead captain generated this collaboration plan; the extension handles dispatch, communication, observation, and recording.",
+    "evidencePolicy": "Workers should separate cited evidence, inference, confidence, and missing information.",
+    "modelPolicy": "Use configured models that are objectively available; keep soft health observations visible.",
+    "synthesisPolicy": "The lead uses worker outputs as inputs and keeps final judgment outside the extension.",
+    "progressMilestones": [
+      "collect: parallel"
+    ],
+    "stopCriteria": "All planned rounds have returned a status and the run log is persisted."
+  },
+  "outputContract": "每角色给出带路径行号的已证实差异、是否可解释运行会话失踪、建议回归用例；不要编辑文件。",
+  "captainRationale": "A task-specific collaboration blueprint generated for the lead captain"
+}

@@ -88,6 +88,8 @@ export interface StructuredRunnerExecution {
   spawnedAt: string;
   pid: number | null;
   completion: Promise<StructuredRunnerResult>;
+  /** CLI process exit acknowledgement; protocol failure may settle completion earlier. */
+  exited?: Promise<void>;
   /** Idempotent, best-effort, and never throws. Completion must still settle. */
   interrupt(): void;
 }

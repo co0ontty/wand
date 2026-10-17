@@ -15,6 +15,7 @@ export class TaskReadModel {
   readonly workspaces;
   readonly milestones;
   readonly activeTeamTasks;
+  private readonly assignees = new Map<string, { id: string; name: string; avatar?: string } | null>();
 
   constructor(readonly storage: WandStorage, registry?: SessionRegistry, snapshots?: SessionSnapshot[]) {
     this.sessions = snapshots ?? registry?.listSlim() ?? storage.loadSessionsSlim();
@@ -30,6 +31,17 @@ export class TaskReadModel {
     this.workspaces = new Map(storage.listWorkspaces().map(workspace => [workspace.id, workspace]));
     this.milestones = storage.listWandMilestones();
     this.activeTeamTasks = new Set(storage.listAiTeamRuns({ statuses: AI_TEAM_ACTIVE_RUN_STATUSES }).map(run => run.taskId));
+  }
+
+  assignee(task: WandTask): { id: string; name: string; avatar?: string } | null {
+    const subject = task.executionSubject;
+    if (!subject || subject.type === "cli") return null;
+    const key = `${subject.type}:${subject.id}`;
+    if (!this.assignees.has(key)) {
+      const value = subject.type === "employee" ? this.storage.getSiliconEmployee(subject.id) : this.storage.getAiTeam(subject.id);
+      this.assignees.set(key, value ? { id: value.id, name: value.name, avatar: "avatar" in value ? value.avatar : undefined } : null);
+    }
+    return this.assignees.get(key) ?? null;
   }
 
   taskSessions(task: WandTask): SessionSnapshot[] {

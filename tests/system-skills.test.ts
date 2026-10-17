@@ -9,6 +9,7 @@ import { parseSystemCliCommand } from "../src/system-cli.js";
 import { WandCliApi } from "../src/cli-api.js";
 import { installSystemSkill } from "../src/system-skill.js";
 import { installManagedSkill } from "../src/managed-skill.js";
+import { ensureManagedSkills, formatManagedSkillsEnsureLog, isDefaultConfigPath } from "../src/managed-skills-ensure.js";
 import { startEmployeeKnowledgeRunner } from "../src/employee-knowledge.js";
 import type { WandConfig, SessionSnapshot } from "../src/types.js";
 import type { StructuredRunnerAdapter, StructuredRunnerContext, StructuredRunnerObserver } from "../src/structured-runner.js";
@@ -138,7 +139,12 @@ test("managed system skill ships helper/runtime/references, preserves edits and 
   const installed = await installSystemSkill(config, undefined, home);
   assert.equal(installed.installed.length, 3);
   assert.equal(new Set(await Promise.all(installed.installed.map(target => realpath(target)))).size, 1);
-  assert.deepEqual(await installSystemSkill(config, undefined, home), installed);
+  assert.deepEqual(installed.changed.sort(), [".runtime.json", "SKILL.md", "references/operations.md", "scripts/wand.mjs", "scripts/web-login.mjs"]);
+  assert.equal(installed.linked.length, 3);
+  const reinstalled = await installSystemSkill(config, undefined, home);
+  assert.deepEqual(reinstalled.installed, installed.installed);
+  assert.deepEqual(reinstalled.changed, []);
+  assert.deepEqual(reinstalled.linked, []);
   const canonical = path.join(path.dirname(config), "skills/wand-system");
   const runtime = JSON.parse(await readFile(path.join(canonical, ".runtime.json"), "utf8"));
   assert.equal(runtime.config, config);
@@ -165,6 +171,31 @@ test("managed system skill ships helper/runtime/references, preserves edits and 
   await assert.rejects(installSystemSkill(path.join(root, "other/config.json"), ["pi"], path.join(root, "foreign")), /同名/);
   await assert.rejects(installManagedSkill(root, "../bad", { "SKILL.md": "bad" }), /路径/);
   await assert.rejects(installManagedSkill(root, "good", { "../bad": "bad" }), /路径/);
+});
+
+test("managed skills ensure syncs both skills, stays quiet when current, and never overwrites user edits", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "wand-skills-ensure-test-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const configPath = path.join(root, "config/config.json");
+  const home = path.join(root, "home");
+  assert.equal(isDefaultConfigPath(path.join(home, ".wand/config.json"), home), true);
+  assert.equal(isDefaultConfigPath(configPath, home), false);
+  const first = await ensureManagedSkills(configPath, home);
+  assert.deepEqual(first.map(outcome => [outcome.name, outcome.status]),
+    [["wand-system", "synced"], ["wand-decision", "synced"]]);
+  assert.ok(first.every(outcome => outcome.files > 0 && outcome.links > 0));
+  assert.match(formatManagedSkillsEnsureLog(first)!, /^\[wand\] 托管技能已同步：wand-system/);
+  const second = await ensureManagedSkills(configPath, home);
+  assert.deepEqual(second.map(outcome => outcome.status), ["unchanged", "unchanged"]);
+  assert.equal(formatManagedSkillsEnsureLog(second), null);
+  const doc = path.join(root, "config/skills/wand-decision/SKILL.md");
+  await writeFile(doc, await readFile(doc, "utf8") + "\nuser changes");
+  const third = await ensureManagedSkills(configPath, home);
+  assert.deepEqual(third.map(outcome => [outcome.name, outcome.status]),
+    [["wand-system", "unchanged"], ["wand-decision", "failed"]]);
+  assert.match(third[1]!.error!, /用户修改/);
+  assert.match(await readFile(doc, "utf8"), /user changes/);
+  assert.match(formatManagedSkillsEnsureLog(third)!, /托管技能部分未同步：wand-decision 未同步/);
 });
 
 test("runner overwrites inherited current session identity without granting a new credential", t => {

@@ -95,6 +95,8 @@ export interface WandTaskAgent {
 export interface TaskExecutionSubject {
   type: "employee" | "team" | "cli";
   id: string;
+  /** Explicit task-only execution snapshot; never written into the employee definition. */
+  agentOverride?: WandTaskAgent;
 }
 
 export function isTaskExecutionSubject(value: unknown): value is TaskExecutionSubject {
@@ -177,7 +179,23 @@ export interface WandIterationPrompt {
   createdAt: string;
 }
 
+export interface WandTaskComment {
+  id: string;
+  taskId: string;
+  authorName: string;
+  body: string;
+  createdAt: string;
+}
+
+export interface TaskAcceptance {
+  evidence: string;
+  blocker: string;
+  acceptedAt: string | null;
+}
+
 export interface WandTask {
+  /** Explicit user acceptance, independent of sessions and archival. */
+  acceptance?: TaskAcceptance | null;
   id: string;
   workspaceId: string | null;
   /** 关联的侧栏工作任务；归档/新建时用来对账，不随 WorkspaceTask 删除而消失。 */

@@ -36,7 +36,7 @@ function remoteHarness() {
   const host = { persistent: true, spawnStructured: () => pending } as StructuredExecHost;
   return { host, handle, resolve, reject, interrupts: () => interrupts,
     stdout: (data: string) => stream?.({ stream: "stdout", data, seq: 1 }),
-    exit: () => exit?.({ exitCode: 0, signal: null }),
+    exit: (event: StructuredExitEvent = { exitCode: 0, signal: null }) => exit?.(event),
   };
 }
 
@@ -100,6 +100,36 @@ test("a completed pump ignores late remote output and cancellation", async () =>
   h.stdout("late\n"); run.interrupt();
   assert.equal(result.state.result, "before");
   assert.equal(h.interrupts(), 0);
+});
+
+test("transport observation failure cannot authorize deleting a live CLI's files", async () => {
+  const h = remoteHarness();
+  const run = startStructuredCli({ ...options(), execHost: h.host });
+  h.resolve(h.handle);
+  await new Promise(resolve => setImmediate(resolve));
+  let exited = false;
+  void run.exited!.then(() => { exited = true; });
+  h.exit({ exitCode: 1, signal: null, processExited: false });
+  await run.completion;
+  assert.equal(exited, false);
+});
+
+test("protocol failure completion is not a CLI process exit acknowledgement", async () => {
+  const h = remoteHarness();
+  const run = startStructuredCli({ ...options(), execHost: h.host,
+    processLine() { throw new Error("broken protocol"); },
+  });
+  h.resolve(h.handle);
+  await new Promise(resolve => setImmediate(resolve));
+  let exited = false;
+  void run.exited!.then(() => { exited = true; });
+  h.stdout("bad\n");
+  assert.match((await run.completion).primaryError ?? "", /broken protocol/);
+  assert.equal(exited, false);
+  assert.equal(h.interrupts(), 1);
+  h.exit();
+  await run.exited;
+  assert.equal(exited, true);
 });
 
 test("local protocol stop and external cancellation share one idempotent stop", async () => {

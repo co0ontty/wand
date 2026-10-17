@@ -44,9 +44,9 @@ test("default children are exactly the directory's unbound sessions and archive,
   assert.notEqual(onlyAssigned.id, real.id);
 });
 
-test("search finds the default task by name even when empty, and filters its children by title", () => {
+test("search finds existing default sessions by group name, without empty placeholders", () => {
   const group = directory({ standaloneSessions: [{ id: "a", title: "界面检查" }, { id: "b", title: "整理日志" }] });
-  assert.equal(filterSidebarGroups([directory()], "未分组任务").length, 1);
+  assert.equal(filterSidebarGroups([directory()], "未分组任务").length, 0);
   assert.equal(filterSidebarGroups([group], "Atlas 未分组")[0]?.standaloneSessions.length, 2);
   assert.deepEqual(filterSidebarGroups([group], "界面")[0]?.standaloneSessions.map(s => s.id), ["a"]);
   assert.deepEqual(filterSidebarGroups([group], "不存在"), []);

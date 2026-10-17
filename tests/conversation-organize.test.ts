@@ -81,6 +81,21 @@ test("default excludes manual-task conversations before reading their body; expl
   const all = service.prepare({ ...f.scope, mode: "all" });assert.equal(all.sessionCount, 2);assert.equal(all.manualSessionCount, 0);assert.ok(read.includes("protected"));
 });
 
+test("persisted user provenance protects both user-created and user-renamed tasks before body reads, while explicit all includes both", async t => {
+  const f = fixture(t);
+  const created = f.storage.createWorkspaceTask({ workspaceId: f.workspace.id, name: "用户创建的固定标题" });
+  const renamed = f.storage.createWorkspaceTask({ workspaceId: f.workspace.id, name: "系统自动初始名", board: { titleSource: "auto" } });
+  f.storage.updateWorkspaceTask(renamed.id, { name: "用户后来指定的新标题" });
+  assert.equal(f.storage.getWandTaskByWorkspaceTaskId(renamed.id)?.titleSource, "user");
+  f.save("created", "工作正文", { workspaceTaskId: created.id });f.save("renamed", "工作正文", { workspaceTaskId: renamed.id });f.save("loose", "工作正文");
+  const reads: string[] = [];
+  const service = f.service({ getSession: id => { reads.push(id);return f.storage.getSession(id); }, judge: async input => newGroup(input) });
+  const automatic = service.prepare(f.scope);assert.equal(automatic.sessionCount, 1);assert.equal(automatic.manualSessionCount, 2);assert.deepEqual(reads, ["loose"]);
+  const all = service.prepare({ ...f.scope, mode: "all" });assert.equal(all.sessionCount, 3);assert.equal(all.manualSessionCount, 0);
+  const job = await done(service, service.start(all.token).id);assert.equal(job.status, "completed");assert.equal(job.result.movedSessions.length, 3);
+  assert.equal(f.storage.getWorkspaceTask(created.id)?.name, "用户创建的固定标题");assert.equal(f.storage.getWorkspaceTask(renamed.id)?.name, "用户后来指定的新标题");
+});
+
 test("directory boundaries are hard constraints even for equivalent conversation bodies", async t => {
   const f = fixture(t);f.save("a", "相同工作内容");
   const cwd = path.join(f.root, "other");mkdirSync(cwd);const b = f.storage.createWorkspace({ name: "Other", cwd });f.save("b", "相同工作内容", { cwd, workspaceId: b.id });
