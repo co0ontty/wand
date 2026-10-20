@@ -1,4 +1,5 @@
 import * as React from "react";
+import { usePageRouteState } from "../use-page-route";
 import { isSessionJustCompleted } from "../../../session-completion-state.js";
 import { ptyTurnActive } from "../../session-activity.js";
 
@@ -93,6 +94,7 @@ export function filterActiveGroups(
 }
 
 export function useSidebarDisplayMode(): [SidebarDisplayMode, () => void, (mode: SidebarDisplayMode) => void] {
+  // A device preference, not shareable page state: it must survive a fresh load without URL parameters.
   const [mode, setMode] = React.useState<SidebarDisplayMode>(() => {
     try {
       return parseSidebarDisplayMode(window.localStorage.getItem(SIDEBAR_DISPLAY_MODE_STORAGE_KEY));
@@ -149,7 +151,7 @@ export function sidebarExpansionOpen(
 
 export function useSidebarPresentation(): SidebarPresentation {
   const [mode, , persistMode] = useSidebarDisplayMode();
-  const [query, setQuery] = React.useState("");
+  const [query, setQuery] = usePageRouteState("sidebarQuery", "", undefined, undefined, "replace", 250);
   const [normal, setNormalState] = React.useState<Record<string, boolean>>({});
   const [overrides, setOverrides] = React.useState<Readonly<Record<string, boolean>>>({});
   const setMode = React.useCallback((next: SidebarDisplayMode): void => {

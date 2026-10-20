@@ -1,5 +1,5 @@
 import * as React from "react";
-import { WandButton } from "../ui/index.js";
+import { WandButton, WandIcon } from "../ui/index.js";
 import { ConversationMorphIcon } from "../conversations/controls.js";
 
 import type { PtyInputMode } from "../../pty-input-state.js";
@@ -20,3 +20,16 @@ export const PtyInputModeToggle = React.forwardRef<HTMLButtonElement, {
     </span>
   </WandButton>;
 });
+
+/** Collapsed: a slim "按键" entry. Expanded: a chevron that tucks the dock away again. */
+export function PtyDockToggle({ collapsed, hasDraft, disabled, onToggle }: {
+  collapsed: boolean; hasDraft?: boolean; disabled?: boolean; onToggle(): void;
+}): React.ReactElement {
+  const label = collapsed ? "展开终端按键" + (hasDraft ? " · 有草稿" : "") : "收起终端按键";
+  return <WandButton kind="soft" className="pty-dock-toggle" data-collapsed={collapsed} aria-label={label} title={label}
+    aria-expanded={!collapsed} aria-controls="terminal-shortcuts" disabled={disabled}
+    onPointerDown={event => event.preventDefault()} onClick={onToggle}>
+    {collapsed ? <><WandIcon name="keyboard" size={16}/><span>按键{hasDraft ? <i className="pty-draft-dot"/> : null}</span><WandIcon name="chevronUp" size={14}/></>
+      : <WandIcon name="chevronDown" size={16}/>}
+  </WandButton>;
+}

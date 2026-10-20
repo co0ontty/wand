@@ -1,4 +1,6 @@
 import * as React from "react";
+import { usePageRouteState } from "../use-page-route";
+import { pageSearch } from "../../page-route";
 import { Alert, Avatar, Calendar } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import type { ScheduledTaskRunFactView, ScheduledTaskSummary, ScheduledTaskCalendarResponse } from "../../../scheduled-task-types.js";
@@ -54,7 +56,7 @@ export function ScheduleCalendar({ tasks, allTasks, feed, loading, mode, onModeC
 }) {
   const { now, timeZone } = useScheduledPresentation();
   const today = dateKey(now, timeZone);
-  const [value, setValue] = React.useState(() => dayjs(today));
+  const [value, setValue] = usePageRouteState("scheduleDate", dayjs(today), raw => { const date = dayjs(raw); if (!/^\d{4}-\d{2}-\d{2}$/.test(raw) || !date.isValid()) throw Error("Invalid date"); return date; }, date => date.format("YYYY-MM-DD"));
   const reduced = useReducedMotion();
   const [monthHidden, setMonthHidden] = React.useState(mode !== "month");
   const [weekHidden, setWeekHidden] = React.useState(mode !== "week");
@@ -74,8 +76,12 @@ export function ScheduleCalendar({ tasks, allTasks, feed, loading, mode, onModeC
   const projection = React.useMemo(() => calendarProjection(feed, tasks, monthStart, monthEnd, timeZone), [feed, tasks, monthStart, monthEnd, timeZone]);
   const rangeReady = feed?.range.from === monthStart && feed?.range.to === monthEnd && feed?.range.timeZone === timeZone;
   React.useEffect(() => { if (active) onRangeChange(monthStart, monthEnd); }, [active, monthStart, monthEnd, onRangeChange]);
-  React.useEffect(() => { if (feed && !initialFeed.current) { initialFeed.current = true; if (!navigated.current) setValue(dayjs(dateKey(now, timeZone))); } }, [feed, now, timeZone]);
-  React.useEffect(() => { onSelectTask(null); }, [mode, onSelectTask]);
+  React.useEffect(() => { if (feed && !initialFeed.current) { initialFeed.current = true; if (!navigated.current && !new URLSearchParams(pageSearch()).has("scheduleDate")) setValue(dayjs(dateKey(now, timeZone))); } }, [feed, now, timeZone]);
+  const previousMode = React.useRef(mode);
+  React.useEffect(() => { if (previousMode.current !== mode) { previousMode.current = mode; onSelectTask(null); } }, [mode, onSelectTask]);
+  React.useEffect(() => {
+    if (selectedTaskId && selected?.task.id !== selectedTaskId) setSelected(projection.entries.find(entry => entry.task.id === selectedTaskId) ?? null);
+  }, [selectedTaskId, projection]);
   const byDate = React.useMemo(() => {
     const map = new Map<string, CalendarEntry[]>();
     for (const entry of projection.entries) { const entries = map.get(entry.date) ?? []; entries.push(entry); map.set(entry.date, entries); }

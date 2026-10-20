@@ -634,10 +634,13 @@ test("non-Claude PTY providers get a quiet-window turn signal on ptyBusy", async
 test("foreground sampling is what qualifies a non-Claude PTY turn", async (t) => {
   let cliInForeground = false;
   const { manager, root, spawned } = createHarness(t, [], {
-    ptyTurnIdleMs: 60,
-    ptyForegroundSampleMs: 20,
+    // This case tests probe qualification, not timer scheduling under parallel browser load.
+    // Quiet-window expiration is covered by the preceding test.
+    ptyTurnIdleMs: 60_000,
+    ptyForegroundSampleMs: 60_000,
     samplePtyForegrounds: async (pids: readonly number[]) => new Map(pids.map((pid) => [pid, cliInForeground])),
   });
+  const sample = () => (manager as unknown as { samplePtyForegrounds(): Promise<void> }).samplePtyForegrounds();
   const session = await manager.start("pi", root, "managed", undefined, { provider: "pi" });
   const wireStatuses: boolean[] = [];
   manager.on("process", (event: ProcessEvent) => {
@@ -647,22 +650,20 @@ test("foreground sampling is what qualifies a non-Claude PTY turn", async (t) =>
   });
 
   // 采样说「前台是提示符」：终端里的散装重绘不开启一轮。
-  await delay(60);
+  await sample();
   spawned[0].emitData("prompt repaint");
-  await delay(20);
   assert.equal(manager.get(session.id)?.ptyBusy, false);
 
   // CLI 重新回到前台（自更新 / 手动重跑）后，同一个终端的输出重新开启一轮，
   // 既不需要新的提交，也不需要那次性的启动标记。
   cliInForeground = true;
-  await delay(60);
+  await sample();
   spawned[0].emitData("working...");
-  await delay(20);
   assert.equal(manager.get(session.id)?.ptyBusy, true);
 
   // CLI 退回提示符：采样直接收轮，不必等静默窗口。
   cliInForeground = false;
-  await delay(80);
+  await sample();
   assert.equal(manager.get(session.id)?.ptyBusy, false);
   assert.deepEqual(wireStatuses, [true, false]);
 });

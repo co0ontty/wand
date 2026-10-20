@@ -278,7 +278,7 @@ test("all employee roles share tool/model validation and retain legacy single-ag
   for (const provider of ["claude", "codex", "opencode", "grok", "qoder", "pi"] as const) {
     const configured = { provider, model: "explicit-configured-model", kind: "structured", engine: "cli", thinkingEffort: "off", mode: "default" };
     const ordinary = parseSiliconEmployeeInput({ name: "ordinary", duty: "", prompt: "", agent: configured }, null, "now");
-    for (const systemKey of [SYSTEM_EMPLOYEE_KEY, DEFAULT_EMPLOYEE_KEY, DECISION_EXPERT_KEY, "wand-speech-polisher"]) {
+    for (const systemKey of [SYSTEM_EMPLOYEE_KEY, DEFAULT_EMPLOYEE_KEY, DECISION_EXPERT_KEY]) {
       const role = { ...base, systemKey };
       const parsed = parseSystemEmployeeAgents({ agents: [configured] }, role);
       assert.deepEqual(parsed, ordinary.agents);

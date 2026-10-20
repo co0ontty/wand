@@ -212,7 +212,7 @@ test("Ant Design teams pages keep library controls, chat ownership and keyboard 
     if (url.startsWith("/api/conversations")) return send({ conversations: routeLinked ? [{
       id: "conversation-a", kind: "group", sessionId: "relay-a", tasks: [],
     }] : [] });
-    if (url.startsWith("/api/structured-sessions") && request.method === "POST") {
+    if (url.startsWith("/api/sessions") && request.method === "POST") {
       let body = "";
       request.on("data", (chunk) => { body += chunk; });
       request.on("end", () => {

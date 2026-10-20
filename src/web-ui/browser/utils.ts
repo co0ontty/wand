@@ -3,6 +3,7 @@ import "./i18n";
 import { isStructuredSession } from "./session-engine";
 import { escapeHtml } from "./text-escape";
 import { turnStartedAtMs } from "../running-activity.js";
+import { registerPopupDismiss } from "../react/ui/popup-lifecycle.js";
 
 export { escapeHtml };
 export { computeRunningSignal } from "../session-activity";
@@ -16,7 +17,14 @@ state._statusBarStartTime = 0;
 // 收起待办进度条：容器与展开面板一起复位。切会话 / 发下一条消息时要立刻让上一轮
 // 的待办消失，不能等下一帧 render。展开态的真值存在 DOM（#todo-progress-body 的
 // .expanded）上，所以清 class 就是唯一需要做的事，不会跟 chat-render 里的状态飘。
+let releaseTodoPopup: (() => void) | undefined;
+export function syncTodoPopupDismiss(expanded: boolean, dismiss?: () => void): void {
+  releaseTodoPopup?.();
+  releaseTodoPopup = expanded && dismiss ? registerPopupDismiss(dismiss) : undefined;
+}
+
 export function collapseTodoProgress(): void {
+  syncTodoPopupDismiss(false);
   var container = document.getElementById("todo-progress");
   var body = document.getElementById("todo-progress-body");
   if (container) {
@@ -27,6 +35,7 @@ export function collapseTodoProgress(): void {
     body.classList.remove("expanded");
     body.classList.add("hidden");
   }
+  document.getElementById("todo-progress-toggle")?.setAttribute("aria-expanded", "false");
 }
 
 export function renderStructuredStatusBar(chatMessages: any, session: any) {

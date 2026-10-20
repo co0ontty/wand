@@ -94,6 +94,47 @@ export function compareWandInstallOrder(a: string, b: string): number {
   return compareSemver(a, b);
 }
 
+/**
+ * macOS 分发包的版本相同时的次序：ZIP 优先于 DMG（免挂载，Beta 原位更新只认 ZIP）。
+ * 更新检查选包和分发目录清理必须用同一个函数，否则会删掉还在下发的那个文件。
+ */
+export function compareMacosFormatTieBreak(
+  a: { name: string },
+  b: { name: string },
+): number {
+  const zipA = a.name.toLowerCase().endsWith(".zip") ? 1 : 0;
+  const zipB = b.name.toLowerCase().endsWith(".zip") ? 1 : 0;
+  return zipB - zipA;
+}
+
+/**
+ * 分发目录里的文件排序：版本新者优先，解析不出版本的排在有版本之后，
+ * 版本相同时用 `tieBreak`（例如「同版本 ZIP 优先」），最后按修改时间新者优先。
+ *
+ * `compareVersions` 和 `tieBreak` 必须与更新检查使用同一份规则：清理和选包
+ * 回答的是同一个问题，不能用两套排序。
+ */
+export function compareDistributionFiles(
+  a: { name: string; mtimeMs: number; version: string | null },
+  b: { name: string; mtimeMs: number; version: string | null },
+  compareVersions: (a: string, b: string) => number,
+  tieBreak?: (a: { name: string; mtimeMs: number }, b: { name: string; mtimeMs: number }) => number,
+): number {
+  if (a.version && b.version) {
+    const comparison = compareVersions(b.version, a.version);
+    if (comparison !== 0) return comparison;
+    if (tieBreak) {
+      const tie = tieBreak(a, b);
+      if (tie !== 0) return tie;
+    }
+  } else if (a.version) {
+    return -1;
+  } else if (b.version) {
+    return 1;
+  }
+  return b.mtimeMs - a.mtimeMs;
+}
+
 function compareMainParts(a: number[], b: number[]): number {
   for (let i = 0; i < 3; i++) {
     const diff = (a[i] || 0) - (b[i] || 0);

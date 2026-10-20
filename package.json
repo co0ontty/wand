@@ -22,7 +22,6 @@
     "scripts/update-node.sh",
     "scripts/update-target.js",
     "scripts/stage-render-binaries.js",
-    "scripts/install-speech-runtime.js",
     "scripts/install-laya-runtime.js"
   ],
   "preferGlobal": true,
@@ -32,7 +31,6 @@
     "build:body": "node scripts/build-body.js",
     "build:copy-content": "cp -r src/web-ui/content dist/web-ui/ && cp src/decision-worker.py dist/decision-worker.py && node scripts/minify-dist-content.js",
     "build:render-bin": "node scripts/stage-render-binaries.js --all",
-    "speech:install": "node scripts/install-speech-runtime.js",
     "laya:install": "node scripts/install-laya-runtime.js",
     "build:render-native": "cargo build --release --manifest-path render/Cargo.toml -p wand-renderd",
     "build:structured-render-native": "cargo build --release --manifest-path render/Cargo.toml -p wand-structured-renderd",

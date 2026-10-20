@@ -220,7 +220,7 @@ test("模型选择随创建请求发出，PTY 也按模型启动 CLI", () => {
   assert.equal("model" in buildCreateRequest({ ...base, provider: "claude", kind: "shell" }, config, context), false);
 });
 
-test("PTY 创建请求把模型发到 /api/commands", async () => {
+test("PTY 创建请求把模型发到统一 /api/sessions 契约", async () => {
   const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
   const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({ url: String(input), body: JSON.parse(String(init?.body ?? "{}")) });
@@ -237,7 +237,8 @@ test("PTY 创建请求把模型发到 /api/commands", async () => {
     sessionSource: "interactive",
     model: "opus",
   });
-  assert.equal(calls[0].url, "/api/commands");
+  assert.equal(calls[0].url, "/api/sessions");
+  assert.equal(calls[0].body.kind, "pty");
   assert.equal(calls[0].body.model, "opus");
   // 空白终端没有模型概念，不能把 stale 值带上。
   calls.length = 0;
@@ -249,6 +250,7 @@ test("PTY 创建请求把模型发到 /api/commands", async () => {
     worktreeEnabled: false,
     sessionSource: "interactive",
   });
+  assert.equal(calls[0].body.kind, "pty");
   assert.equal(calls[0].body.model, undefined);
 });
 
@@ -257,7 +259,7 @@ test("new work uses page-only model choices and the existing composer handoff", 
   assert.match(host, /ConversationExecutionSelectors/);
   // 临时执行配置归本页实例所有（useState），随打开实例丢弃，不写员工或服务默认。
   assert.match(host, /React\.useState<ConversationExecutionPreference \| undefined>/);
-  assert.match(host, /onChange={setPreference}/);
+  assert.match(host, /onChange=\{setPreference\}/);
   assert.doesNotMatch(host, /savePreferences\(|rememberModel\(/);
   const adapter = readFileSync(new URL("../src/web-ui/browser/new-session-adapter.ts", import.meta.url), "utf8");
   assert.match(adapter, /teamChatComposer\.transfer/);
@@ -323,7 +325,8 @@ test("HTTP repository selects the endpoint and surfaces server creation errors",
     const url = String(input);
     const body = JSON.parse(String(init?.body ?? "{}"));
     calls.push({ url, body });
-    if (url === "/api/structured-sessions") return json({ id: "structured-1", sessionKind: "structured" }, 201);
+    if (body.cwd === "/missing") return json({ error: "cwd 不存在" }, 400);
+    if (url === "/api/sessions") return json({ id: "structured-1", sessionKind: "structured" }, 201);
     return json({ error: "cwd 不存在" }, 400);
   }) as typeof fetch;
   const repository = new HttpNewSessionRepository(fetchImpl);
@@ -338,7 +341,8 @@ test("HTTP repository selects the endpoint and surfaces server creation errors",
   };
   const created = await repository.create(structured);
   assert.equal(created.id, "structured-1");
-  assert.equal(calls[0].url, "/api/structured-sessions");
+  assert.equal(calls[0].url, "/api/sessions");
+  assert.equal(calls[0].body.kind, "structured");
   assert.equal(calls[0].body.runner, "opencode-cli-run");
 
   await assert.rejects(() => repository.create({
@@ -350,7 +354,8 @@ test("HTTP repository selects the endpoint and surfaces server creation errors",
     worktreeEnabled: false,
     sessionSource: "interactive",
   }), /cwd 不存在/);
-  assert.equal(calls[1].url, "/api/commands");
+  assert.equal(calls[1].url, "/api/sessions");
+  assert.equal(calls[1].body.kind, "pty");
 });
 
 test("HTTP repository creates a bare shell without sending a provider command", async () => {
@@ -375,7 +380,8 @@ test("HTTP repository creates a bare shell without sending a provider command", 
   });
 
   assert.equal(created.id, "shell-1");
-  assert.equal(calls[0].url, "/api/commands");
+  assert.equal(calls[0].url, "/api/sessions");
+  assert.equal(calls[0].body.kind, "pty");
   assert.equal(calls[0].body.shell, true);
   assert.equal("command" in calls[0].body, false);
   assert.equal("provider" in calls[0].body, false);
@@ -535,7 +541,13 @@ test("team new work retains its direct-run route before ordinary session creatio
   const submit = host.slice(host.indexOf("const submit = async"));
   assert.ok(submit.indexOf("if (form.teamId)") < submit.indexOf("prepareCreate"));
   assert.match(submit, /aiTeamsRepository\.startDirect/);
-  assert.match(host, /form.kind === "structured" && !draft.text.trim/);
+  assert.match(host, /const valid =/);
+  assert.match(host, /unknown \|\| !valid/);
+  assert.match(host, /disabled=\{disabled \|\| !valid\}/);
+  // 新建工作不再要求额外勾选执行权限确认：合法性只看目录/内容/执行对象。
+  assert.doesNotMatch(host, /fullAccessConfirmed|确认新工作执行权限/);
+  assert.match(host, /NewSessionTaskField form=\{form\}/);
+  assert.doesNotMatch(host, /savePreferences\(/);
   assert.match(host, /useAiTeamList\(!controller.workspaceTaskId && !controller.newTask\)/);
 });
 

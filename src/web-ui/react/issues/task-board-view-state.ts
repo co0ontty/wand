@@ -54,7 +54,7 @@ export function parseTaskBoardViewState(value: unknown): TaskBoardViewState {
   };
 }
 
-/** Search may contain local paths; keep browsing context in this tab, outside shareable URLs. */
+/** Legacy tab-preference reader retained for compatibility; live board navigation is URL-owned. */
 export function readTaskBoardViewState(): TaskBoardViewState {
   try {
     return parseTaskBoardViewState(JSON.parse(sessionStorage.getItem(STORAGE_KEY) ?? "null"));

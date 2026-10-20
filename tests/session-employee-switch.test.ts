@@ -179,8 +179,8 @@ test("new work manual tool/model/thinking apply together without overwriting emp
   const server = createServer(app); await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
   const base = "http://127.0.0.1:" + (server.address() as { port: number }).port;
-  const response = await fetch(base + "/api/structured-sessions", { method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ employeeId: saved.id, overrideCli: true, cwd: root, provider: "pi", engine: "cli",
+  const response = await fetch(base + "/api/sessions", { method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ kind: "structured", employeeId: saved.id, overrideCli: true, cwd: root, provider: "pi", engine: "cli",
       model: "page-model", thinkingEffort: "pi:high", mode: "default" }) });
   assert.equal(response.status, 201); const created = await response.json();
   const snapshot = manager.get(created.id)!;

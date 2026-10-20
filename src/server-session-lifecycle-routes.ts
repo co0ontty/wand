@@ -1,14 +1,20 @@
 import type { Express } from "express";
-import { parseExecutionMode,parseSessionCreationOrigin } from "./session-request.js";
+import { parseExecutionMode, parseSessionCreationOrigin } from "./session-request.js";
 
 import { isExecutionMode } from "./config.js";
 import { defaultRoleForCli } from "./default-employee.js";
 import { fallbackProviderModel, resolveExplicitOrFallbackModel, sessionEmployeeFields } from "./session-model.js";
-import { ExecutionMode, SessionProvider, SessionRunner, SessionSnapshot } from "./types.js";
+import { CommandRequest, ExecutionMode, SessionProvider, SessionRunner, SessionSnapshot } from "./types.js";
 
 import { resolveSessionCwd } from "./session-cwd.js";
 
 import { asyncRoute } from "./express-async.js";
+import { principalHasScope } from "./auth.js";
+import { inferProviderFromCommand, providerCliCommand } from "./session-provider.js";
+import { recordRecentPath } from "./recent-paths.js";
+import { toSessionDetailDTO } from "./session-transport.js";
+import { compactToolMessagesForTransport, windowMessagesForTransport } from "./message-truncator.js";
+import { enrichStructuredMessages } from "./structured-client-protocol.js";
 import { installedPiExtensions } from "./pi-extension-resources.js";
 import { discoverPiResources,resolvePiResourceSelection } from "./pi-resource-catalog.js";
 import { effectivePiSessionSettings, patchPiSessionSettings } from "./pi-session-settings.js";
@@ -30,9 +36,81 @@ export function registerSessionLifecycleRoutes(app: Express, ctx: SessionRouteCo
     wantsCompactTools, sessionResponseDTO, piSettingsResponse, requirePiSession,
   } = ctx;
 
-  app.post("/api/structured-sessions", asyncRoute(async (req, res) => {
-    const body = req.body as { cwd?: string; mode?: ExecutionMode; prompt?: string; runner?: SessionRunner; provider?: string; engine?: string; worktreeEnabled?: boolean; model?: string; thinkingEffort?: string; sessionSource?: unknown; automationId?: unknown; workspaceId?: string; workspaceTaskId?: string; respondImmediately?: unknown; systemPrompt?: string; employeeId?: unknown; teamId?: unknown; kind?: unknown; subject?: { type?: unknown }; overrideCli?: unknown };
+  app.post("/api/sessions", asyncRoute(async (req, res) => {
+    const body = req.body as CommandRequest & { kind?: unknown; prompt?: string; runner?: SessionRunner; engine?: string; employeeId?: unknown; teamId?: unknown; subject?: { type?: unknown }; overrideCli?: unknown; sessionSource?: unknown; automationId?: unknown };
     try {
+      if (body.kind !== "structured" && body.kind !== "pty") throw badRequest("kind 必须是 structured 或 pty。");
+      if (body.prompt !== undefined && typeof body.prompt !== "string") throw badRequest("prompt 必须是字符串。");
+      if (body.initialInput !== undefined && typeof body.initialInput !== "string") throw badRequest("initialInput 必须是字符串。");
+      const prompt = body.prompt?.trim();
+      if (body.kind === "pty") {
+        if (prompt !== undefined) throw badRequest("PTY 会话不接受结构化 prompt，请使用 initialInput。");
+        if ((body.engine !== undefined && body.engine !== "cli") || body.runner !== undefined
+          || body.employeeId !== undefined || body.teamId !== undefined
+          || (body.subject !== undefined && body.subject?.type !== "cli")) {
+          throw badRequest("PTY 不支持 SDK engine、runner 或员工/团队身份。");
+        }
+        if (body.provider !== undefined && !isSessionProvider(body.provider)) throw badRequest("请选择有效的执行工具。");
+        const interactiveShell = body.shell === true;
+        if (interactiveShell && (body.command !== undefined || body.provider !== undefined)) {
+          throw badRequest("shell:true 不能同时指定 command 或 provider。");
+        }
+        if (!req.principal || !principalHasScope(req.principal, "admin")) {
+          if (!interactiveShell) {
+            const rawCommand = typeof body.command === "string" ? body.command.trim() : "";
+            const provider = isSessionProvider(body.provider) ? body.provider : inferProviderFromCommand(rawCommand);
+            const isProviderCli = !!provider && (!rawCommand || rawCommand === provider || rawCommand === providerCliCommand(provider));
+            if (!isProviderCli) {
+              res.status(403).json({ error: "当前连接只能启动已配置的 CLI 工具，不能执行自定义命令。", code: "forbidden" });
+              return;
+            }
+          }
+        }
+        if (!interactiveShell && !body.command?.trim()) throw badRequest("请输入要执行的命令。");
+        if (body.mode !== undefined && !isExecutionMode(body.mode)) throw badRequest(`无效执行模式: ${String(body.mode)}`);
+        const initialInput = body.initialInput?.trim();
+        const origin = parseSessionCreationOrigin(body);
+        const rawModel = typeof body.model === "string" ? body.model.trim() : "";
+        const rawCommand = body.command?.trim() ?? "";
+        const provider: SessionProvider | undefined = interactiveShell
+          ? undefined
+          : (isSessionProvider(body.provider) ? body.provider : inferProviderFromCommand(rawCommand) ?? "claude");
+        const command = provider === "qoder" && rawCommand === "qoder" ? "qodercli" : rawCommand;
+        const effectiveModel = provider ? rawModel || fallbackProviderModel(config, provider) : undefined;
+        const reqCols = typeof body.cols === "number" && Number.isFinite(body.cols) ? body.cols : undefined;
+        const reqRows = typeof body.rows === "number" && Number.isFinite(body.rows) ? body.rows : undefined;
+        const sessionCwd = resolveSessionCwd(body.cwd, config.defaultCwd);
+        const workspaceId = resolveWorkspaceIdForNewSession(storage, sessionCwd, body.workspaceId);
+        const role = !interactiveShell && !body.systemPrompt?.trim() && origin.sessionSource === "interactive"
+          && (isSessionProvider(body.provider) || inferProviderFromCommand(command))
+          ? defaultRoleForCli(storage, provider) : null;
+        const snapshot = await (interactiveShell
+          ? processes.startShell(sessionCwd, body.mode ?? "default", {
+              worktreeEnabled: body.worktreeEnabled === true, cols: reqCols, rows: reqRows, workspaceId,
+              workspaceTaskId: body.workspaceTaskId, ...origin,
+            })
+          : processes.start(command, sessionCwd, body.mode ?? config.defaultMode, initialInput || undefined, {
+              worktreeEnabled: body.worktreeEnabled === true, provider, model: effectiveModel, cols: reqCols, rows: reqRows,
+              thinkingEffort: body.thinkingEffort ?? config.defaultThinkingEffort,
+              systemPrompt: body.systemPrompt?.trim() || role?.prompt, ...sessionEmployeeFields(role),
+              workspaceId, workspaceTaskId: body.workspaceTaskId, ...origin,
+            }));
+        recordRecentPath(storage, snapshot.cwd);
+        const messages = enrichStructuredMessages(snapshot.messages ?? [], snapshot.id);
+        const windowed = windowMessagesForTransport(
+          wantsCompactTools(req) ? compactToolMessagesForTransport(messages) : messages,
+          config.cardDefaults ?? {},
+        );
+        res.status(201).json(toSessionDetailDTO(snapshot, {
+          messages: windowed.messages, messageOffset: windowed.messageOffset, messageTotal: windowed.messageTotal,
+        }));
+        return;
+      }
+      if (body.shell !== undefined || body.command !== undefined || body.initialInput !== undefined
+        || body.kind !== "structured") {
+        throw badRequest("结构化会话不接受 PTY 参数。");
+      }
+      if (body.engine !== undefined && body.engine !== "cli" && body.engine !== "sdk") throw badRequest("请选择有效的执行引擎。");
       if (body.teamId !== undefined || body.subject?.type === "team") {
         throw badRequest("AI 团队请通过团队开工入口创建群聊。");
       }
@@ -41,7 +119,7 @@ export function registerSessionLifecycleRoutes(app: Express, ctx: SessionRouteCo
       if (employeeId === null || (body.employeeId !== undefined && !employeeId)) {
         throw badRequest("employeeId 必须是员工 ID。");
       }
-      if (employeeId && (body.kind === "pty" || body.runner === "pty")) {
+      if (employeeId && body.runner === "pty") {
         throw badRequest("硅基员工只支持结构化会话。");
       }
       const employee = employeeId ? storage.getSiliconEmployee(employeeId) : null;
@@ -113,29 +191,22 @@ export function registerSessionLifecycleRoutes(app: Express, ctx: SessionRouteCo
         ...origin,
       });
       onSessionCreated?.(snapshot.cwd);
-      const prompt = body.prompt?.trim();
       if (prompt) {
-        if (body.respondImmediately === true) {
-          // 只创建、不等首轮：整轮可能是几分钟，调用方（新建任务对话框、worktree 合并）
-          // 等在 HTTP 上会把用户锁在「正在创建…」且关闭按钮被禁用。与
-          // /api/sessions/:id/input 的 respondImmediately、/api/wand-tasks/:id/dispatch
-          // 一致：先回会话快照，首轮进度继续走结构化事件。
-          structured.sendMessage(snapshot.id, prompt).catch((error) => {
+        try {
+          Promise.resolve(structured.sendMessage(snapshot.id, prompt)).catch((error) => {
             console.error("[wand] Accepted structured prompt later failed", {
               sessionId: snapshot.id,
               error: getInputDebugMeta(error),
             });
           });
-          const accepted = structured.get(snapshot.id);
-          if (!accepted) throw badRequest("未找到该结构化会话。");
-          res.status(201).json(sessionResponseDTO(accepted, req));
-          return;
+        } catch (error) {
+          console.error("[wand] Accepted structured prompt later failed", {
+            sessionId: snapshot.id,
+            error: getInputDebugMeta(error),
+          });
         }
-        const finished = await structured.sendMessage(snapshot.id, prompt);
-        res.status(201).json(sessionResponseDTO(finished, req));
-        return;
       }
-      res.status(201).json(sessionResponseDTO(snapshot, req));
+      res.status(201).json(sessionResponseDTO(structured.get(snapshot.id) ?? snapshot, req));
     } catch (error) {
       sendRouteError(res, surfaceDomainError(error, /Wand Agent|harness|core/i) ?? error, "无法启动结构化会话。");
     }

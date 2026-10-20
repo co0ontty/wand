@@ -17,7 +17,6 @@ import { PiSettingsHost } from "./pi-settings/deferred-host";
 import { ComposerPopoverHost } from "./composer-popover/host";
 import { ComposerActionErrorHost } from "./composer-action-error/host";
 import { ComposerAttachmentsHost } from "./composer-attachments/host";
-import { ComposerVoiceHost } from "./composer-voice/host";
 import { ComposerBadgesHost } from "./composer-badges/host";
 import { ComposerRailHost } from "./composer-rail/host";
 
@@ -45,7 +44,6 @@ export function OverlayHost({ portalContainer, settingsPresentation = "workspace
       <ComposerPopoverHost />
       <ComposerActionErrorHost />
       <ComposerAttachmentsHost />
-      <ComposerVoiceHost />
       <ComposerBadgesHost />
       <ComposerRailHost />
       <MissionsHost />

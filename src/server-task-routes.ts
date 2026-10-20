@@ -1,6 +1,8 @@
 import { taskDispatchReceipt } from "./task-dispatch-receipt.js";
+import { registerTaskCommentRoutes, submitTaskComment } from "./task-comment-dispatch.js";
+import { randomUUID } from "node:crypto";
 import type { Express } from "express";
-import { dispatchAgentForTask, resolveTaskDispatchTarget } from "./agent-dispatch.js";
+import { AgentDispatchPreflightError, dispatchAgentForTask, resolveTaskDispatchTarget } from "./agent-dispatch.js";
 import type { AiTeamRunner } from "./ai-team-runner.js";
 import { memberAgents } from "./ai-team-types.js";
 import { defaultRoleForCli } from "./default-employee.js";
@@ -225,10 +227,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
     res.json(model.tasks.filter(task => workspaceId === undefined || task.workspaceId === workspaceId)
       .map(task => taskDto(deps, task, model)));
   });
-  app.get("/api/wand-tasks/:id/comments", (req, res) => {
-    if (!storage.getWandTask(req.params.id)) { res.status(404).json({ error: "未找到该任务。" }); return; }
-    res.set("Cache-Control", "no-store").json({ comments: storage.listWandTaskComments(req.params.id) });
-  });
+  registerTaskCommentRoutes(app, deps);
   app.get("/api/wand-task-agent-defaults", (_req, res) => {
     res.json(readTaskBoardLastAgent(storage));
   });
@@ -629,7 +628,6 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       const override = employee ? body.agent !== undefined ? parseTaskAgent(body.agent) : storedOverride ? parseTaskAgent(storedOverride) : null : null;
       if (override && body.agent !== undefined && bodyObject(body.agent).mode && bodyObject(body.agent).mode !== override.mode) throw badRequest("所选工具不支持该运行模式，请重新选择。");
       if (employee && body.agent !== undefined && !override) throw badRequest("请选择有效的本次工具配置。");
-      const executionEmployee = employee && override ? { ...employee, agents: [override] } : employee;
       const agent = override ?? selected?.agent ?? (body.agent === undefined
         ? cliDefault ?? task.agent ?? fallbackAgent ?? parseWandTaskAgent(JSON.stringify(body))
         : parseTaskAgent(body.agent, task.agent?.mode, task.agent?.kind));
@@ -646,11 +644,20 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         if (workspaceId !== task.workspaceId) assertTaskWorkspaceMove(storage, task.id, workspaceId);
         task = storage.updateWandTask(task.id, { workspaceId }) ?? task;
       }
+      // Compatibility creation/drag clients also enter the same durable comment path for employees.
+      // No implicit description fallback: a first dispatch needs an explicit round instruction too.
+      if (employee) {
+        const result = await submitTaskComment(deps, task.id, { requestId: text(body.requestId) || randomUUID(), body: requestedPrompt, employeeId: employee.id }, override ?? undefined);
+        const session = result.comment.dispatch?.sessionId ? sessions?.getSlim(result.comment.dispatch.sessionId)
+          ?? storage.getSessionSlim(result.comment.dispatch.sessionId) : null;
+        if (session) storage.updateWandTask(task.id, { agent, executionSubject: { type: "employee", id: employee.id, ...(override ? { agentOverride: override } : {}) }, status: task.status === "todo" ? "doing" : task.status });
+        res.status(202).json({ ok: true, taskId: task.id, subject: { type: "employee", id: employee.id }, comment: result.comment,
+          session: session ? { ...taskSessionSummary(session), employeeCandidateIndex: session.employeeCandidateIndex } : null });
+        return;
+      }
       const { session, cwd, workspaceId } = await dispatchAgentForTask(
         { storage, config, structured: structured ?? null, processes: processes ?? null },
-        { task, agent, prompt, automationId: `wand-task:${task.id}`,
-          systemPrompt: employee?.prompt, employee: executionEmployee ?? undefined,
-          employeeCandidateIndex: override ? 0 : selected?.index },
+        { task, agent, prompt, automationId: `wand-task:${task.id}` },
       );
       task = storage.getWandTask(task.id)!;
       const usedSubject = subject?.type === "employee" ? { type: "employee" as const, id: subject.id, ...(override ? { agentOverride: override } : {}) } : subject ?? { type: "cli" as const, id: agent.provider };
@@ -690,7 +697,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         },
       });
     } catch (error) {
-      sendRouteError(res, surfaceDomainError(error, /^(任务所属项目已被删除，请重新指定。|任务容器不存在，请恢复任务后再派发。|绑定员工只支持结构化会话。|员工执行候选与启动快照不一致。|当前服务未启用结构化会话，无法派发 Agent。|当前服务未启用终端会话，无法派发 Agent。|LAYA 仅支持有界决策，不能执行聊天或任务；该候选尚未接受输入。)$/) ?? error, "无法派发 Agent。");
+      sendRouteError(res, error instanceof AgentDispatchPreflightError ? badRequest(error.message) : surfaceDomainError(error, /^(任务所属项目已被删除，请重新指定。|任务容器不存在，请恢复任务后再派发。|绑定员工只支持结构化会话。|员工执行候选与启动快照不一致。|当前服务未启用结构化会话，无法派发 Agent。|当前服务未启用终端会话，无法派发 Agent。|LAYA 仅支持有界决策，不能执行聊天或任务；该候选尚未接受输入。)$/) ?? error, "无法派发 Agent。");
     }
   }));
 

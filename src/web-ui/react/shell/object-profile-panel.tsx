@@ -151,6 +151,10 @@ export function ObjectProfilePanel({
           </Flex>
           {employee ? <Flex justify="center" gap={8} wrap>{siliconEmployeeTags(employee).map(tag => <Tag key={tag}>{tag}</Tag>)}{employee.archivedAt ? <Tag>已归档</Tag> : null}</Flex> : null}
           {onMessage ? <WandButton kind="primary" onClick={onMessage}><WandIcon name="chat"/>发送消息</WandButton> : null}
+          {employee ? <Card size="small" title="员工设置" extra={<WandButton size="small" aria-label="设置系统调用历史保留上限" onClick={() => setEditing(true)}>设置</WandButton>}>
+            <Descriptions column={1} size="small" items={[{ key: "system-session-limit", label: "系统调用历史保留上限", children:
+              employee.systemSessionLimit == null ? "不限" : employee.systemSessionLimit === 0 ? "不保留已结束记录" : `保留最新 ${employee.systemSessionLimit} 条已结束记录` }]}/>
+          </Card> : null}
           {employee?.prompt ? <Collapse items={[{ key: "prompt", label: "角色设定", children:
             <Typography.Paragraph className="object-profile-prompt-content" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", margin: 0 }}>{employee.prompt}</Typography.Paragraph>
           }]} /> : null}

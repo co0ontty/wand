@@ -102,6 +102,9 @@ export const taskBoardRepository = {
       .then(result => result.comments)
       .catch(error => { if (error instanceof HttpResponseError && error.status === 404) return []; throw error; });
   },
+  postComment(id: string, input: { requestId: string; body: string; employeeId?: string | null; sourceCommentId?: string | null }): Promise<{ comment: WandTaskComment; replayed: boolean }> {
+    return mutateTask(`/api/wand-tasks/${encodeURIComponent(id)}/comments`, jsonBody(input));
+  },
   update(
     id: string,
     patch: Partial<Pick<WandTask, "title" | "titleSource" | "description" | "status" | "priority" | "labels" | "dueDate" | "milestoneId" | "workspaceId" | "parentTaskId" | "sortOrder" | "agent" | "executionSubject" | "acceptance">>,

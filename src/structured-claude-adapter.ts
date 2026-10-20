@@ -174,7 +174,11 @@ export class ClaudeCliRunner implements StructuredRunnerAdapter {
       file: "claude",
       args,
       cwd: context.session.cwd,
-      env: context.env,
+      // Claude print mode otherwise kills live background agents ten minutes
+      // after the parent's last turn, even while children are making progress,
+      // then exits 0. Wand owns cancellation; keep the CLI alive until its work
+      // settles instead of imposing that independent parent-idle deadline.
+      env: { ...context.env, CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0" },
       stdinData: context.prompt,
       observer,
       execHost: this.execHost,

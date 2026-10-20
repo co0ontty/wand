@@ -1,6 +1,0 @@
-Lane mailbox for 通知节点集成 (role im-lifecycle)
-Run: team_mv959ngh0001i1lsi0
-Lane: im-lifecycle-1792044910130
-Token: a0d3aca8-c6aa-4e47-88a7-545bfffe916b
-
-Captain messages appear below, newest last.

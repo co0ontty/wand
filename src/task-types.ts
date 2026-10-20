@@ -179,7 +179,22 @@ export interface WandIterationPrompt {
   createdAt: string;
 }
 
+export interface TaskCommentDispatch {
+  employeeId: string;
+  employeeName: string;
+  state: "pending" | "accepted" | "failed" | "unknown";
+  sessionId: string | null;
+  /** Projection from the owning runtime, never inferred from model text. */
+  status?: string;
+  error: string | null;
+}
+
 export interface WandTaskComment {
+  requestId?: string;
+  sourceCommentId?: string | null;
+  taskVersion?: string;
+  instruction?: string;
+  dispatch?: TaskCommentDispatch | null;
   id: string;
   taskId: string;
   authorName: string;

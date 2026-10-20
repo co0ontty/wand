@@ -24,9 +24,41 @@ export const SYSTEM_AI_PURPOSES = {
   "user-memory": "短期习惯分析",
   "employee-draft": "员工招聘草稿",
   "decision": "有界决策",
-  "speech-polish": "口述文字整理",
 } as const;
 export type SystemAiPurpose = keyof typeof SYSTEM_AI_PURPOSES;
+
+/** Audit provenance is broader than disposable auxiliary history. Classify new purposes explicitly. */
+const SYSTEM_AI_HISTORY_SCOPES = {
+  "system-text": "unspecified",
+  "session-title": "auxiliary",
+  "task-title": "auxiliary",
+  "task-organize": "auxiliary",
+  "conversation-organize-job": "auxiliary",
+  "conversation-organize": "auxiliary",
+  "conversation-summary": "auxiliary",
+  "prompt-optimize": "auxiliary",
+  "git-commit": "auxiliary",
+  "git-tag": "auxiliary",
+  "git-fallback": "auxiliary",
+  "model-auto-assign": "auxiliary",
+  "user-memory": "auxiliary",
+  "employee-draft": "auxiliary",
+  "decision": "agent-call",
+} as const satisfies Record<SystemAiPurpose, "auxiliary" | "agent-call" | "unspecified">;
+
+export const SYSTEM_AI_AUXILIARY_PURPOSES = (Object.keys(SYSTEM_AI_HISTORY_SCOPES) as SystemAiPurpose[])
+  .filter(purpose => SYSTEM_AI_HISTORY_SCOPES[purpose] === "auxiliary");
+
+/** Unknown/unspecified history and agent decisions are protected, even with system-ai provenance. */
+export function isRetainableSystemAiCall(session: { automationId?: unknown } | null | undefined): boolean {
+  if (!isSystemAiCall(session)) return false;
+  const remainder = (session!.automationId as string).slice(SYSTEM_AI_CALL_PREFIX.length);
+  const separator = remainder.indexOf(":");
+  if (separator <= 0 || separator === remainder.length - 1) return false;
+  const purpose = remainder.slice(0, separator);
+  return Object.prototype.hasOwnProperty.call(SYSTEM_AI_HISTORY_SCOPES, purpose)
+    && SYSTEM_AI_HISTORY_SCOPES[purpose as SystemAiPurpose] === "auxiliary";
+}
 
 export interface AiCallTrace {
   readonly sessionId: string;

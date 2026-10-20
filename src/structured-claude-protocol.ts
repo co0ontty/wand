@@ -130,7 +130,7 @@ interface ClaudeCliTurnState extends StructuredRunnerTurnState {
 export class ClaudeCliProtocolReducer {
   readonly state: ClaudeCliTurnState;
   askUserQuestionDetected = false;
-  /** result 事件带 is_error 时的说明（如「API Error: 503 …」），作为这一轮的主错误。 */
+  /** 原生 result 错误或系统强停子代理的说明，作为这一轮的主错误。 */
   errorText: string | null = null;
   /** 协议里出现过带 is_error 的 result 事件；没有本轮助手内容时才是可降级的执行前拒绝。 */
   errorResultObserved = false;
@@ -269,6 +269,16 @@ export class ClaudeCliProtocolReducer {
           || (typeof event.subtype === "string" && event.subtype && event.subtype !== "success"
             ? `Claude 以 ${event.subtype} 结束，未产生任何输出。` : "");
         if (detail) this.errorText = detail;
+      } else if (!this.qoder) {
+        // Claude 2.1.296 can report success / exit 0 after its background-wait
+        // ceiling has killed children. Use the native execution facts, never
+        // the parent's prose or stderr keywords, and never classify this as an
+        // upstream rejection that would authorize replay of already-run work.
+        const stats = event.subagent_stats as { killed?: { system?: unknown } } | undefined;
+        const killed = stats?.killed?.system;
+        if (typeof killed === "number" && Number.isSafeInteger(killed) && killed > 0 && !this.errorText) {
+          this.errorText = `Claude Code 被系统停止了 ${killed} 个子代理，任务未完整完成；请检查已有改动后再续接，不要自动重跑。`;
+        }
       }
       this.state.model = extractClaudeModelName(
         event.modelUsage && typeof event.modelUsage === "object"

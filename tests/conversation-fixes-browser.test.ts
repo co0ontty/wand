@@ -159,7 +159,6 @@ test("F1–F5 conversation defect regression in real Chrome", { skip: process.en
       assert.equal(await evaluate('document.querySelector("#conversation-members-panel").dataset.open'), "true", "F3 second Escape keeps enclosing members open");
       const sentBeforeOutside = h.sent.length, executionsBeforeOutside = h.executions.length;
       assert.equal(await evaluate('document.querySelector(".conversation-sender textarea").value'), "", "F3 outside target is the empty sender");
-      if (mobile) assert.equal(await evaluate('document.querySelector(".conversation-sender textarea").hasAttribute("data-idle-speech")'), true, "F3 mobile outside target has idle speech pointer capture");
       await click('.conversation-sender textarea');
       assert.equal(await evaluate('document.querySelector("#conversation-members-panel").dataset.open'), "false", "F3 pointer outside closes remaining members panel");
       assert.equal(await evaluate('document.activeElement===document.querySelector(".conversation-sender textarea")'), true, "outside point keeps its own focus");

@@ -288,7 +288,7 @@ try {
   if (cmd === "login") {
     console.log(JSON.stringify(await login()));
   } else if (cmd === "create-shell") {
-    const created = await api("POST", "/api/commands", { shell: true, cwd: CWD, mode: "default", cols: 100, rows: 30 });
+    const created = await api("POST", "/api/sessions", { kind: "pty", shell: true, cwd: CWD, mode: "default", cols: 100, rows: 30 });
     console.log(JSON.stringify({ status: created.status, sessionId: created.json?.id ?? null }));
   } else if (cmd === "ws-echo") {
     console.log(JSON.stringify(await wsEcho(rest[0], rest[1])));

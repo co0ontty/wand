@@ -309,7 +309,8 @@ test("create form explicitly chooses saving or dispatching", () => {
   assert.match(host, /保存并派发/);
 
   assert.match(editor, /指派 Agent/);
-  assert.match(editor, /先输入提示词，再选员工、团队或 CLI/);
+  assert.match(editor, /CLI \/ 团队兼容派发/);
+  assert.match(editor, /员工请使用上方评论 @/);
   // 指派面板的执行配置控件与 AI 团队成员编辑共用 AgentFields，aria 标签按前缀拼出。
   const agentFields = readFileSync(new URL("../src/web-ui/react/issues/agent-fields.tsx", import.meta.url), "utf8");
   assert.match(editor, /<AgentFields[\s\S]*?ariaPrefix="任务"/);
@@ -485,10 +486,10 @@ test("task board is a first-class view=taskboard route that does not unmount the
   const main = readFileSync(new URL("../src/web-ui/react/shell/shell-main-content.tsx", import.meta.url), "utf8");
   const sidebar = readFileSync(new URL("../src/web-ui/react/shell/shell-sidebar.tsx", import.meta.url), "utf8");
 
-  // 打开看板必须写入独立路由，关闭走 history.back / 去掉 view=，浏览器后退才能离开。
-  assert.match(controller, /history\.pushState/);
-  assert.match(controller, /history\.back\(\)/);
-  assert.match(controller, /addEventListener\("popstate"/);
+  // Explicit transitions push synchronously; only browser traversal restores, never replays navigation.
+  assert.match(controller, /updatePageRoute/);
+  assert.match(controller, /subscribePageRoute\(restore\)/);
+  assert.match(readFileSync(new URL("../src/web-ui/page-route.ts", import.meta.url), "utf8"), /addEventListener\("popstate"/);
   assert.match(controller, /installTaskBoardHistory/);
 
   // 主区把看板叠在会话槽位上，禁止 early-return 整块替换 <main>（那会拆掉 LegacyHost）。
@@ -519,7 +520,7 @@ test("task board is a first-class view=taskboard route that does not unmount the
   // 同一功能只留一个可见入口：箭头只在未选中任务时出现（返回工作区），选中任务后返回交给面包屑首段。
   assert.match(host, /\{!selected \? <WandIconButton/);
   assert.match(host, /aria-label="返回工作区"/);
-  assert.doesNotMatch(host, /返回任务看板/);
+  assert.match(host, /任务不存在、已删除或无权访问[\s\S]*返回任务看板/);
   assert.doesNotMatch(host, /返回会话/);
 });
 

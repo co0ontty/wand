@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createServer } from "node:http";
-import { build } from "esbuild";
+import { build, stop } from "esbuild";
 
 const pause = ms => new Promise(resolvePause => setTimeout(resolvePause, ms));
 const root = resolve(import.meta.dirname, "../..");
@@ -47,6 +47,17 @@ export async function recordMotion(browser, name = "avatar-motion", durationMs =
   return { frames: samples.length, duration: samples.at(-1).time-samples[0].time, video, timing: "Actual Chrome screencast timestamps preserved" };
 }
 
+/** Chrome creates DevToolsActivePort before its contents are fully published. */
+export function readPublishedChromePort(portFile) {
+  let contents;
+  try { contents = readFileSync(portFile, "utf8"); }
+  catch (error) { if (error.code === "ENOENT") return null; throw error; }
+  const end = contents.indexOf("\n");
+  if (end < 0) return null;
+  const port = contents.slice(0, end).trim();
+  return /^\d{1,5}$/.test(port) && Number(port) > 0 && Number(port) <= 65535 ? port : null;
+}
+
 export async function openPlushBrowser(width = 1280, height = 960, fallback = false, motion = "system") {
   assert.ok(["system", "no-preference", "reduce"].includes(motion), "Known motion test preference");
   const temp = mkdtempSync(join(tmpdir(), "wand-plush-chrome-"));
@@ -64,14 +75,14 @@ export async function openPlushBrowser(width = 1280, height = 960, fallback = fa
     // The port file, not elapsed sleeps, is the startup readiness signal. Hosted
     // CPU contention may exceed the old 7.5s window; process failures still fail early.
     const deadline = Date.now() + 30_000;
-    while (!existsSync(portFile)) {
+    let port;
+    while (!(port = readPublishedChromePort(portFile))) {
       if (startupError) throw startupError;
       if (chrome.exitCode !== null || chrome.signalCode !== null) throw Error(`Chrome exited before debugging was ready: ${chrome.exitCode ?? chrome.signalCode}; ${startupLog}`);
       if (Date.now() >= deadline) throw Error(`Chrome debugging did not become ready within 30s; ${startupLog}`);
       await pause(50);
     }
-    const port = readFileSync(portFile, "utf8").split("\n")[0];
-    assert.match(port, /^\d{1,5}$/, "Chrome publishes a numeric debugging port");
+    assert.match(port, /^\d{1,5}$/, "Chrome publishes a complete numeric debugging port");
     let page, discoveryError = "no page target";
     while (Date.now() < deadline) {
       if (startupError) throw startupError;
@@ -252,6 +263,25 @@ export async function runPlushBrowser() {
     await browser.send("Page.reload"); await browser.wait("!!document.querySelector('#standalone [data-plush-avatar][data-renderer=webgl]')");
     assert.equal(await e("document.querySelector('#standalone [data-plush-avatar]').dataset.avatarConfig"), initial, "stable ID survives refresh");
     cases.push({ name: "stable seed refresh; zero implicit changes", config: initial });
+    await e(`(()=>{
+      const canvas=document.createElement('canvas');canvas.id='working-probe';
+      canvas.style.cssText='position:fixed;left:0;top:0;width:48px;height:48px;pointer-events:none';document.body.appendChild(canvas);
+      window.workingOptions={config:JSON.parse(document.querySelector('#standalone [data-plush-avatar]').dataset.avatarConfig),size:48,interactive:false,reducedMotion:false,speaking:false,thinking:false,fileActivity:'idle'};
+      window.workingHandle=__wandPlushRuntime.attach(canvas,workingOptions,(_,activity)=>canvas.dataset.activity=activity);
+    })()`);
+    await browser.wait("Number(document.querySelector('#working-probe').dataset.frame)>0", "idle scene prepared");
+    const resting = await e("document.querySelector('#working-probe').dataset.frame");
+    await e("window.restingProbeImage=document.querySelector('#working-probe').toDataURL()"); await pause(250);
+    assert.equal(await e("document.querySelector('#working-probe').dataset.frame"), resting, "idle scene has no ambient loop");
+    await e("workingHandle.update({...workingOptions,thinking:true,fileActivity:'reading'})");
+    await browser.wait("document.querySelector('#working-probe').dataset.activity==='active' && Number(document.querySelector('#working-probe').dataset.frame)>" + Number(resting), "real work resumes rendering");
+    await e("workingHandle.update(workingOptions)");
+    await browser.wait("document.querySelector('#working-probe').dataset.activity==='static' && document.querySelector('#working-probe').toDataURL()===restingProbeImage", "work completion returns the actual resting image");
+    const settledFrame = await e("document.querySelector('#working-probe').dataset.frame"); await pause(250);
+    assert.equal(await e("document.querySelector('#working-probe').dataset.frame"), settledFrame, "completion stops repeated GPU frames");
+    await e("workingHandle.dispose();document.querySelector('#working-probe').remove()");
+    cases.push({name:"idle → working → resting uses on-demand GPU rendering"});
+
     await browser.click('#standalone button[aria-label="编辑员工头像"]');
     await browser.wait("[...document.querySelectorAll('.ant-popover button')].some(n=>n.textContent.trim()==='上传图片')");
     await browser.key("Escape");
@@ -348,7 +378,13 @@ export async function runPlushBrowser() {
     const budget = await diagnostics(); assert.ok(budget, "diagnostics available");
     assert.equal(budget.contexts, 1); assert.ok(budget.animated <= 6, "ordinary plus preview animation cap");
     assert.ok(budget.registrations >= 36, "large actual avatar list mounted");
-    cases.push({ name: "36 avatar shared WebGL budget", diagnostics: budget });
+    // Visible but idle list identities must finish a resting still, not keep
+    // stealing GPU/CPU time from text input. Preview animation stays separate.
+    await browser.wait("[...document.querySelectorAll('#avatar-gallery [data-plush-avatar]')].filter(n=>n.getBoundingClientRect().bottom>0&&n.getBoundingClientRect().top<innerHeight).every(n=>n.dataset.renderer==='webgl')", "idle gallery stills ready");
+    const idleFrames = await e("[...document.querySelectorAll('#avatar-gallery canvas')].map(n=>n.dataset.frame)");
+    await pause(400);
+    assert.deepEqual(await e("[...document.querySelectorAll('#avatar-gallery canvas')].map(n=>n.dataset.frame)"), idleFrames, "idle identities do not submit repeated GPU frames");
+    cases.push({ name: "36 avatar shared WebGL budget; idle stills do not repaint", diagnostics: budget });
     const heap = await browser.send("Runtime.getHeapUsage"); cases.push({name:"Chrome JavaScript heap with large list",heap});
     await e("window.plushContextLoss=window.__wandPlushRuntime.renderer.getContext().getExtension('WEBGL_lose_context');plushContextLoss.loseContext()");
     await browser.wait("window.__wandPlushDiagnostics().contextLost===true");
@@ -405,8 +441,15 @@ export async function runPlushBrowser() {
     await browser.screenshot(join(output, "failure.png")).catch(()=>{});
     writeFileSync(join(output,"browser-result.json"), JSON.stringify(evidence,null,2)+"\n"); throw error;
   } finally {
-    await browser.close(); await new Promise(resolveClose=>server.close(resolveClose)); rmSync(temp,{recursive:true,force:true});
+    await browser.close();
+    // Chrome can leave speculative/keep-alive sockets after its process exits.
+    // Do not leave the successful fixture hanging in server.close().
+    server.closeAllConnections();
+    await new Promise(resolveClose=>server.close(resolveClose)); rmSync(temp,{recursive:true,force:true});
   }
 }
 
-if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) await runPlushBrowser();
+if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+  try { await runPlushBrowser(); }
+  finally { stop(); }
+}

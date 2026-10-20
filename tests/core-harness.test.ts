@@ -15,6 +15,7 @@ import { WandStorage } from "../src/storage.js";
 import { StructuredSessionManager } from "../src/structured-session-manager.js";
 import type { ResolvedCoreModel } from "../src/harness-engine.js";
 import type { StructuredRunnerAdapter, StructuredRunnerTurnState } from "../src/structured-runner.js";
+import { defaultPiSessionSettings } from "../src/pi-session-settings.js";
 import type { SessionSnapshot } from "../src/types.js";
 
 const testAgentDir = path.join(os.tmpdir(), `wand-core-harness-test-${process.pid}`);
@@ -356,6 +357,90 @@ test("core runner 跑完一个真回合：工具调用 → 工具结果 → 文�
   assert.ok((result.state.contextUsage?.percent ?? 0) > 0);
   assert.equal(seenSystemPrompts.length, 2, "每次请求都带系统提示（而非只首轮）");
   assert.match(seenSystemPrompts[0], /只回答文件内容/);
+});
+
+for (const extensions of [false, true]) {
+  test(`core durable steering 一次取一条且历史不覆盖（extensions=${extensions}）`, async (t) => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "wand-core-steering-"));
+    const storage = new WandStorage(path.join(root, "wand.db"));
+    writeFileSync(path.join(root, "steering.txt"), "completed tool boundary");
+    const { runner, seenTranscripts, callCount } = fauxCore([
+      fauxAssistantMessage([fauxText("first response"), fauxToolCall("read", { path: "steering.txt" }, { id: "steering-read" })]),
+      fauxAssistantMessage([fauxText("second response")]),
+      fauxAssistantMessage([fauxText("third response")]),
+    ], root);
+    storage.saveSession(session({ id: "steering", cwd: root,
+      queuedMessages: ["second", "third"],
+      piSettings: { ...defaultPiSessionSettings(false), codemode: extensions ? "on" : "off" },
+      structuredState: { provider: "pi", runner: "pi-cli-json", engine: "core", inFlight: false,
+        activeRequestId: null, lastError: null },
+    }));
+    let starts = 0;
+    const manager = new StructuredSessionManager(storage, { ...defaultConfig(), defaultCwd: root }, null, {
+      core: { start(context, observer) { starts += 1; return runner.start(context, observer); } },
+      pi: { start() { throw new Error("CLI must not own core steering"); } },
+    });
+    t.after(() => { manager.dispose(); storage.close(); rmSync(root, { recursive: true, force: true }); });
+    const finished = await manager.sendMessage("steering", "first");
+    assert.equal(starts, 1, "single runner/prompt owns all three inputs");
+    assert.equal(callCount(), 3);
+    assert.deepEqual(finished.queuedMessages, []);
+    assert.deepEqual(finished.messages?.map((turn) => [turn.role,
+      turn.content.filter((block) => block.type === "text").map((block) => block.text).join("")]), [
+      ["user", "first"], ["assistant", "first response"],
+      ["user", "second"], ["assistant", "second response"],
+      ["user", "third"], ["assistant", "third response"],
+    ]);
+    assert.deepEqual(storage.getSession("steering")?.messages, finished.messages);
+    assert.ok(finished.messages?.[1].content.some((block) => block.type === "tool_result"
+      && String(block.content).includes("completed tool boundary")), "tools settle before steering is persisted");
+    const transcripts = seenTranscripts as Array<{ messages: Array<{ role: string; content: unknown }> }>;
+    assert.ok(!JSON.stringify(transcripts[0]).includes('"second"'));
+    assert.ok(JSON.stringify(transcripts[1]).includes('"second"'));
+    assert.ok(!JSON.stringify(transcripts[1]).includes('"third"'));
+    assert.ok(JSON.stringify(transcripts[2]).includes('"third"'));
+  });
+}
+
+test("core 模型失败不领取 durable steering", async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-core-steering-error-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const { runner } = fauxCore([fauxAssistantMessage([fauxText("")], { stopReason: "error", errorMessage: "offline refusal" })], root);
+  let claims = 0;
+  const result = await runner.start({ session: session({ cwd: root }), prompt: "first", env: {},
+    takeSteering: () => { claims += 1; return "second"; },
+  }, { isActive: () => true, onUpdate() {} }).completion;
+  assert.equal(result.primaryError, "offline refusal");
+  assert.equal(claims, 0);
+});
+
+test("flush 未知异常不重新入队", async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-core-flush-unknown-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  storage.saveSession(session({ id: "unknown", cwd: root, queuedMessages: ["once", "later"] }));
+  const manager = new StructuredSessionManager(storage, defaultConfig());
+  t.after(() => { manager.dispose(); storage.close(); rmSync(root, { recursive: true, force: true }); });
+  manager.sendMessage = async () => { throw new Error("delivery unknown"); };
+  await (manager as unknown as { flushNextQueuedMessage(id: string): Promise<void> }).flushNextQueuedMessage("unknown");
+  assert.deepEqual(manager.get("unknown")?.queuedMessages, ["later"]);
+  assert.deepEqual(storage.getSession("unknown")?.queuedMessages, ["later"]);
+  assert.match(JSON.stringify(storage.getSession("unknown")?.messages), /原文仅供核对/);
+  assert.match(JSON.stringify(storage.getSession("unknown")?.messages), /once/);
+});
+
+test("queue reorder and clear reject stale same-length snapshots", (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-queue-stale-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  storage.saveSession(session({ id: "stale", cwd: root, queuedMessages: ["new first", "second"] }));
+  const manager = new StructuredSessionManager(storage, defaultConfig());
+  t.after(() => { manager.dispose(); storage.close(); rmSync(root, { recursive: true, force: true }); });
+  assert.throws(() => manager.reorderQueuedMessages("stale", [1, 0], ["old first", "second"]), /排队消息已变化/);
+  assert.throws(() => manager.clearQueuedMessages("stale", ["old first", "second"]), /排队消息已变化/);
+  assert.deepEqual(manager.get("stale")?.queuedMessages, ["new first", "second"]);
+  manager.reorderQueuedMessages("stale", [1, 0], ["new first", "second"]);
+  assert.deepEqual(manager.get("stale")?.queuedMessages, ["second", "new first"]);
+  manager.clearQueuedMessages("stale", ["second", "new first"]);
+  assert.deepEqual(manager.get("stale")?.queuedMessages, []);
 });
 
 test("core runner 的中断是幂等的，且不会把取消报成失败", async (t) => {

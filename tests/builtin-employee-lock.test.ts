@@ -9,14 +9,13 @@ import express from "express";
 import { WandStorage } from "../src/storage.js";
 import { decisionExpertDefinition } from "../src/decision-expert-employee.js";
 import { DECISION_EXPERT_ID, DECISION_EXPERT_KEY } from "../src/decision-expert-identity.js";
-import { speechPolisherDefinition } from "../src/speech-polisher-employee.js";
 import { hrEmployeeDefinition } from "../src/hr-employee.js";
 import { jsonErrorHandler } from "../src/express-async.js";
 import { registerSiliconEmployeeRoutes } from "../src/server-employee-routes.js";
 import { employeeUpdateInput } from "../src/web-ui/react/agents/employee-repository.js";
 import type { SiliconEmployee } from "../src/ai-team-types.js";
 
-const roles = [decisionExpertDefinition("now"), speechPolisherDefinition("now"), hrEmployeeDefinition("now")];
+const roles = [decisionExpertDefinition("now"), hrEmployeeDefinition("now")];
 const configuredAgents: SiliconEmployee["agents"] = [
   { provider: "codex", model: "custom-backup", thinkingEffort: "off", mode: "full-access", kind: "structured" },
   { provider: "pi", engine: "sdk", model: "configured-model", thinkingEffort: "off", mode: "default", kind: "structured" },
@@ -112,4 +111,22 @@ test("decision expert becomes 石一 by stable identity, preserving configured c
   storage.saveSiliconEmployee({ ...ordinary, name: "普通员工仍可编辑" });
   storage.archiveSiliconEmployee(ordinary.id); storage.unarchiveSiliconEmployee(ordinary.id);
   assert.equal(storage.getSiliconEmployeeDefinition(ordinary.id)?.name, "普通员工仍可编辑");
+});
+
+test("removed speech polisher row is archived, never deleted, and no longer seeded", t => {
+  const root = mkdtempSync(join(tmpdir(), "wand-retired-polisher-"));
+  const dbPath = join(root, "wand.db");
+  const storage = new WandStorage(dbPath);
+  t.after(() => { storage.close(); rmSync(root, { recursive: true, force: true }); });
+  const db = new DatabaseSync(dbPath);
+  db.prepare("INSERT INTO silicon_employees (id, name, duty, prompt, avatar, agents_json, system_key, archived_at, created_at, updated_at, tags_json) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)")
+    .run("e_wand_speech_polisher", "口述整理师", "", "旧设定", "", JSON.stringify(configuredAgents), "wand-speech-polisher", "before", "before", JSON.stringify(["系统用户"]));
+  db.close();
+  storage.retireLegacySpeechPolisherEmployee();
+  const retired = storage.getSiliconEmployeeDefinition("e_wand_speech_polisher");
+  assert.equal(retired?.prompt, "旧设定");
+  assert.ok(retired?.archivedAt);
+  assert.equal(storage.listSiliconEmployees().some(employee => employee.id === "e_wand_speech_polisher"), false);
+  storage.retireLegacySpeechPolisherEmployee();
+  assert.equal(storage.getSiliconEmployeeDefinition("e_wand_speech_polisher")?.archivedAt, retired?.archivedAt);
 });

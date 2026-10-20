@@ -1,7 +1,7 @@
 /**
  * 直通 composer 的尾部操作区（Appica 渲染）。
  *
- * PTY 直通模式下 `#input-box` 是唯一的输入面，legacy 的发送 / 语音 / 优化按钮
+ * PTY 直通模式下 `#input-box` 是唯一的输入面，legacy 的发送 / 优化按钮
  * 全部收起，右侧栏会留下一条空白。这里由 React 侧 portal 一个 Appica 按钮补上
  * 「发送回车」这个真实动作，让底部输入栏的可见控件都来自组件库。
  */

@@ -248,7 +248,7 @@ export async function loadConfigWithStorage(configPath: string, storage: WandSto
 
 /**
  * Idempotent seeding of built-in employees (system ops, default partner, decision
- * expert, speech polisher, HR). Runs once per process start from loadConfigWithStorage;
+ * expert, HR). Runs once per process start from loadConfigWithStorage;
  * never rewrites user-maintained candidates.
  */
 export function bootstrapBuiltinEmployees(config: WandConfig, storage: WandStorage): void {
@@ -263,7 +263,7 @@ export function bootstrapBuiltinEmployees(config: WandConfig, storage: WandStora
   // 默认任务伙伴独立于系统运维；重启保留短期偏好与用户维护的候选。
   storage.ensureDefaultSiliconEmployee(config.defaultProvider);
   storage.ensureDecisionExpertEmployee();
-  storage.ensureSpeechPolisherEmployee();
+  storage.retireLegacySpeechPolisherEmployee();
   storage.ensureHrEmployee(storage.getSystemSiliconEmployee()?.agents);
 }
 

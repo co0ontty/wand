@@ -5,6 +5,9 @@ import { nowIso } from "../password-manager.js";
 import { ConversationTurn, SessionSnapshot, StructuredSessionState } from "../types.js";
 import { SessionRow, sessionSelectFields, sessionPersistFields, sessionPersistAssignments, sessionRuntimeMetadataAssignments, mapSessionCore, sessionRowQuery } from "./mappers.js";
 import type { WandStorage } from "../storage.js";
+import { SYSTEM_AI_AUXILIARY_PURPOSES, SYSTEM_AI_CALL_PREFIX } from "../system-ai-call.js";
+
+const AUXILIARY_HISTORY_PATTERNS = SYSTEM_AI_AUXILIARY_PURPOSES.map(purpose => `${SYSTEM_AI_CALL_PREFIX}${purpose}:?*`);
 
 /** Session storage: one domain of the WandStorage facade. Shares the connection and the facade's transaction. */
 export class SessionRepository {
@@ -267,6 +270,17 @@ export class SessionRepository {
 
   mapSessionRow(row: SessionRow): SessionSnapshot {
     return mapSessionCore(row);
+  }
+
+  /** Metadata-only indexed scan. Running or ambiguous records never count toward the history cap. */
+  excessSystemAiSessionIds(employeeId: string, keep: number): string[] {
+    if (!Number.isInteger(keep) || keep < 0 || keep > 10_000) return [];
+    const rows = this.db.prepare(`SELECT id FROM command_sessions
+      WHERE (${AUXILIARY_HISTORY_PATTERNS.map(() => "automation_id GLOB ?").join(" OR ")})
+        AND json_extract(session_options, '$.employeeId') = ?
+        AND status IN ('exited', 'failed', 'stopped') AND ended_at IS NOT NULL
+      ORDER BY started_at DESC, rowid DESC LIMIT -1 OFFSET ?`).all(...AUXILIARY_HISTORY_PATTERNS, employeeId, keep) as Array<{ id: string }>;
+    return rows.map(row => row.id);
   }
 
   deleteSession(id: string): void {

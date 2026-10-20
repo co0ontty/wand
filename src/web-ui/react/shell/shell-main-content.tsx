@@ -6,7 +6,7 @@ import { CodeEditorHost, TaskBoardHost, SettingsHost, NewSessionHost } from "../
 import { newSessionController, newSessionStore } from "../new-session/controller";
 import { codeEditorStore } from "../code-editor/controller";
 import { workspaceContextStore } from "../workspaces/workspace-context";
-import { openSessionWithOwningTask } from "../workspaces/session-open";
+import { openSessionPage } from "../../page-route";
 import { workspacesStore } from "../workspaces/controller";
 import { deferredComponent, deferredFeature } from "../deferred-feature";
 import { WorkspaceTabBar } from "../workspaces/workspace-tab-bar";
@@ -25,7 +25,7 @@ import { restartOverlayController } from "../restart-overlay/controller";
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
 import type { UiSnapshotData } from "./ui-store";
 import { ConversationHome } from "../conversations/home";
-import { conversationUi, useConversationUi } from "../conversations/state";
+import { useConversationUi } from "../conversations/state";
 
 const WorkspaceWindow = deferredComponent(
   () => import("../workspaces/workspace-window").then(module => module.WorkspaceWindow),
@@ -129,7 +129,7 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
   return (
     <Flex component="main" vertical inert={snapshot.layout.sessionsBackdropVisible} className={`main-content${snapshot.layout.filePanelOpen && !settings.open ? " file-panel-open" : ""}${inSplit ? " main-content-in-split" : ""}${conversationVisible ? " main-content-conversation" : ""}${taskBoard.open ? " task-board-main-content" : ""}${pageLayerOpen ? " main-content-page-layer" : ""}`} style={{ flex: 1, minWidth: 0, minHeight: 0, position: "relative", overflow: "hidden" }}>
       {/* 任务内由标签条承担主区导航；不再叠一层重复的会话标题栏。 */}
-      {context.taskId ? null : <div style={{ display: "contents", visibility: settings.open ? "hidden" : undefined }} inert={newWork.open || conversationVisible || settings.open} aria-hidden={newWork.open || conversationVisible || settings.open}><ShellTopbar/></div>}
+      {context.taskId ? null : <div style={{ display: "contents", visibility: settings.open ? "hidden" : undefined }} inert={newWork.open || conversationVisible || settings.open} aria-hidden={newWork.open || conversationVisible || settings.open}><ShellTopbar terminalActionVisible={!newWork.open && !conversationVisible && !settings.open}/></div>}
       {context.taskId && snapshot.layout.sidebarDrawer && (
         <Flex component="nav" align="center" gap="small" hidden={newWork.open} className="workspace-mobile-navigation" aria-label="任务导航" style={{ flexShrink: 0, padding: "6px 12px" }}>
           <WandIconButton
@@ -168,10 +168,7 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
       <div style={{ display: "contents", visibility: settings.open ? "hidden" : undefined }} inert={settings.open} aria-hidden={settings.open}><CodeEditorHost/></div>
       <ConversationHome visible={conversationVisible} sidebarOpen={snapshot.layout.sessionsDrawerOpen}
         onOpenSidebar={snapshot.layout.sidebarDrawer ? () => void dispatch({ type: "layout.drawer.toggle" }) : undefined}
-        onOpenSession={id => {
-          conversationUi.suspend();
-          void openSessionWithOwningTask(id, selectedId => { void dispatch({ type: "session.select", id: selectedId }); });
-        }}/>
+        onOpenSession={openSessionPage}/>
       {/* 看板是独立路由，不能替换 <main>：#output 等 LegacyHost 槽位必须一直挂着。 */}
       <div style={{ display: "contents", visibility: settings.open ? "hidden" : undefined }} inert={settings.open} aria-hidden={settings.open}>
       {taskBoard.open && taskBoard.page === "teamchat" ? <TeamChatPage
@@ -181,41 +178,21 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
         onOpenSidebar={snapshot.layout.sidebarDrawer
           ? () => void dispatch({ type: "layout.drawer.toggle" })
           : undefined}
-        onOpenSession={(sessionId) => {
-          taskBoardController.close();
-          conversationUi.suspend();
-          // 群聊里点成员名字：同样带上任务上下文打开该成员的会话。
-          void openSessionWithOwningTask(sessionId, (id) => {
-            void dispatch({ type: "session.select", id });
-          });
-        }}
+        onOpenSession={openSessionPage}
       /> : taskBoard.open && taskBoard.page === "teams" ? <AiTeamsPage
         sidebarOpen={snapshot.layout.sessionsDrawerOpen}
         onBack={() => taskBoardController.close()}
         onOpenSidebar={snapshot.layout.sidebarDrawer
           ? () => void dispatch({ type: "layout.drawer.toggle" })
           : undefined}
-        onOpenSession={(sessionId) => {
-          taskBoardController.close();
-          conversationUi.suspend();
-          void openSessionWithOwningTask(sessionId, (id) => {
-            void dispatch({ type: "session.select", id });
-          });
-        }}
+        onOpenSession={openSessionPage}
       /> : taskBoard.open && taskBoard.page === "board" ? <TaskBoardHost
         sidebarOpen={snapshot.layout.sessionsDrawerOpen}
         onBack={() => taskBoardController.close()}
         onOpenSidebar={snapshot.layout.sidebarDrawer
           ? () => void dispatch({ type: "layout.drawer.toggle" })
           : undefined}
-        onOpenSession={(sessionId) => {
-          taskBoardController.close();
-          conversationUi.suspend();
-          // 看板卡片里的会话也要带上任务上下文，否则顶部标签栏（含「＋」）不出现。
-          void openSessionWithOwningTask(sessionId, (id) => {
-            void dispatch({ type: "session.select", id });
-          });
-        }}
+        onOpenSession={openSessionPage}
       /> : null}
       <ScheduledTasksPage visible={taskBoard.open && (taskBoard.page === "schedules" || taskBoard.page === "calendar") && !settings.open}
         view={taskBoard.page === "calendar" ? "calendar" : "list"} calendarMode={taskBoard.calendarRange}
@@ -224,11 +201,7 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
         sidebarOpen={snapshot.layout.sessionsDrawerOpen}
         onBack={() => taskBoardController.close()}
         onOpenSidebar={snapshot.layout.sidebarDrawer ? () => void dispatch({ type: "layout.drawer.toggle" }) : undefined}
-        onOpenSession={(sessionId) => {
-          taskBoardController.close();
-          conversationUi.suspend();
-          void openSessionWithOwningTask(sessionId, (id) => { void dispatch({ type: "session.select", id }); });
-        }}/>
+        onOpenSession={openSessionPage}/>
       </div>
       <NewSessionHost/>
       <SettingsHost showRestart={restartOverlayController.showRestart}/>

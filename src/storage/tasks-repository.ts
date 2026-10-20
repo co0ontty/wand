@@ -120,11 +120,63 @@ export class TaskRepository {
   }
 
   listWandTaskComments(taskId: string): WandTaskComment[] {
-    const rows = this.db.prepare(`SELECT id, task_id, author_name, body, created_at
-      FROM wand_task_comments WHERE task_id = ? ORDER BY rowid DESC LIMIT 50`).all(taskId) as Array<{
-        id: string; task_id: string; author_name: string; body: string; created_at: string;
-      }>;
-    return rows.reverse().map(row => ({ id: row.id, taskId: row.task_id, authorName: row.author_name, body: row.body, createdAt: row.created_at }));
+    const rows = this.db.prepare(`SELECT id FROM wand_task_comments WHERE task_id = ? ORDER BY rowid DESC LIMIT 50`).all(taskId) as Array<{ id: string }>;
+    return rows.reverse().map(row => this.getWandTaskComment(row.id)!);
+  }
+
+  getWandTaskComment(id: string): WandTaskComment | null {
+    const row = this.db.prepare(`SELECT c.*, d.request_id, d.source_comment_id, d.employee_id, d.employee_name,
+      d.instruction, d.task_version, d.state, d.session_id, d.error, d.execution_status FROM wand_task_comments c
+      LEFT JOIN wand_task_comment_dispatches d ON d.comment_id = c.id WHERE c.id = ?`).get(id) as Record<string, string | null> | undefined;
+    if (!row) return null;
+    return { id: row.id!, taskId: row.task_id!, authorName: row.author_name!, body: row.body!, createdAt: row.created_at!,
+      ...(row.request_id ? { requestId: row.request_id, sourceCommentId: row.source_comment_id, instruction: row.instruction!, taskVersion: row.task_version!,
+        dispatch: row.employee_id ? { employeeId: row.employee_id, employeeName: row.employee_name!,
+          state: row.state as "pending" | "accepted" | "failed" | "unknown", sessionId: row.session_id, error: row.error, ...(row.execution_status ? { status: row.execution_status } : {}) } : null } : {}) };
+  }
+
+  findTaskCommentRequest(taskId: string, requestId: string): { comment: WandTaskComment; signature: string } | null {
+    const row = this.db.prepare(`SELECT comment_id, signature FROM wand_task_comment_dispatches WHERE task_id = ? AND request_id = ?`)
+      .get(taskId, requestId) as { comment_id: string; signature: string } | undefined;
+    return row ? { comment: this.getWandTaskComment(row.comment_id)!, signature: row.signature } : null;
+  }
+
+  /** Atomically persist both the visible comment and the one-shot dispatch intent before any side effect. */
+  createTaskCommentIntent(input: { taskId: string; requestId: string; signature: string; body: string; instruction: string;
+    sourceCommentId: string | null; employeeId: string | null; employeeName: string | null; taskVersion: string }): WandTaskComment {
+    return this.s.transaction(() => {
+      const id = crypto.randomUUID();
+      this.db.prepare(`INSERT INTO wand_task_comments(id, task_id, author_name, body, created_at) VALUES (?, ?, ?, ?, ?)`)
+        .run(id, input.taskId, "用户", input.body, nowIso());
+      this.db.prepare(`INSERT INTO wand_task_comment_dispatches(comment_id, task_id, request_id, signature, source_comment_id,
+        employee_id, employee_name, instruction, task_version, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(id, input.taskId, input.requestId, input.signature, input.sourceCommentId, input.employeeId, input.employeeName,
+          input.instruction, input.taskVersion, input.employeeId ? "pending" : "accepted");
+      return this.getWandTaskComment(id)!;
+    });
+  }
+
+  updateTaskCommentDispatch(id: string, state: "pending" | "accepted" | "failed" | "unknown", sessionId: string | null, error: string | null = null): void {
+    this.db.prepare(`UPDATE wand_task_comment_dispatches SET state = ?, session_id = COALESCE(?, session_id), error = ? WHERE comment_id = ?`)
+      .run(state, sessionId, error, id);
+  }
+
+  /** Read-only recovery of the create/bind crash gap, by a server-generated correlation ID, never message text. */
+  findTaskCommentExecutionSessionId(commentId: string, employeeId: string): string | null {
+    const rows = this.db.prepare("SELECT id FROM command_sessions WHERE automation_id = ? LIMIT 2")
+      .all(`wand-task-comment:${commentId}`) as Array<{ id: string }>;
+    return rows.length === 1 && this.s.getSessionSlim(rows[0]!.id)?.employeeId === employeeId ? rows[0]!.id : null;
+  }
+
+  /** Event-owned facts, including stop outcomes which structured sessions intentionally represent as idle. */
+  recordTaskCommentSessionEvent(event: import("../types.js").ProcessEvent): void {
+    const data = event.data as { status?: string; turnOutcome?: string; structuredState?: { lastError?: string | null; inFlight?: boolean } } | undefined;
+    if (!data || typeof data !== "object") return;
+    const status = data.turnOutcome === "stopped" ? "stopped" : data.structuredState?.inFlight ? "running"
+      : data.structuredState?.lastError ? "failed" : data.status;
+    if (!status) return;
+    this.db.prepare("UPDATE wand_task_comment_dispatches SET execution_status = ? WHERE session_id = ?")
+      .run(status, event.sessionId);
   }
 
   getWandTask(id: string): WandTask | null {

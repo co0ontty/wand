@@ -46,9 +46,9 @@ test("runtime anchors match Web while permission stays in the add panel", { skip
   assert.match(communications, /ComposerIdentityHeader\(kind: \.conversation/);
 });
 
-test("footer follows Web add, voice, entry, submit order and full-width editor", { skip: !available }, () => {
+test("footer follows Web add, entry, submit order and full-width editor", { skip: !available }, () => {
   const surface = native.slice(native.indexOf("struct FocusComposerSurface"), native.indexOf("enum ComposerHeaderKind"));
-  const ordered = ["editor()", "add()", "ComposerVoiceUnavailableButton()", "Button(action: onFocus)", "send()"];
+  const ordered = ["editor()", "add()", "Button(action: onFocus)", "send()"];
   let previous = -1;
   for (const marker of ordered) {
     const index = surface.indexOf(marker);
@@ -56,8 +56,6 @@ test("footer follows Web add, voice, entry, submit order and full-width editor",
     previous = index;
   }
   assert.doesNotMatch(surface, /padding\(\.horizontal, 16\)/);
-  assert.match(native, /语音输入，macOS 尚未接入/);
-  assert.match(native, /buttonStyle\(ComposerControlStyle\(\)\)\.disabled\(true\)/);
   assert.match(chat, /isFocused: inputFocused/);
   assert.match(chat, /textView\.font = \.systemFont\(ofSize: 14\)/);
   assert.match(chat, /textView\.textContainerInset = \.zero/);
@@ -66,6 +64,48 @@ test("footer follows Web add, voice, entry, submit order and full-width editor",
   assert.match(communications, /isFocused: focus.focused/);
   assert.match(native, /RoundedRectangle\(cornerRadius: FocusComposerMetrics\.controlRadius\)\.fill\(tint\)/);
   assert.match(native, /stopping \? Theme\.danger/);
+});
+
+test("Todo shares the desktop input edge and opens without replacing the editor", { skip: !available }, () => {
+  const render = source("src/web-ui/browser/render.ts");
+  assert.ok(render.indexOf('class="composer-top-row"') > render.indexOf('class="input-composer\''));
+  assert.match(base, /composer-top-row \{ position:absolute/);
+  assert.match(web, /composer-todo-width/);
+  assert.match(native, /progress\.frame\(width: progressWidth\)/);
+  assert.match(chat, /progress: composerProgress/);
+  assert.match(chat, /TodoProgressBar\(todos: visibleTodos\)/);
+  const todo = chat.slice(chat.indexOf("struct TodoProgressBar:"), chat.indexOf("private struct QueueBar:"));
+  assert.match(todo, /\.popover\(isPresented: \$expanded, arrowEdge: \.bottom\)/);
+  assert.match(todo, /Text\("\\\(completed\) \/ \\\(todos\.count\)"\)/);
+  assert.doesNotMatch(todo, /currentStep/);
+});
+
+test("pending messages share Todo space with width-aware summaries on both desktops", { skip: !available }, () => {
+  const queue = source("src/web-ui/browser/queue-view-adapter.tsx");
+  assert.match(base, /container:queue-summary \/ inline-size/);
+  assert.match(base, /@container queue-summary \(min-width:180px\)/);
+  assert.match(queue, /queue-summary-label">待发消息/);
+  const nativeQueue = chat.slice(chat.indexOf("struct ComposerQueue:"), chat.indexOf("private struct QueueItemRow:"));
+  assert.match(nativeQueue, /geometry\.size\.width >= 180/);
+  assert.match(nativeQueue, /Text\("待发消息"\)/);
+  assert.match(nativeQueue, /\.popover\(isPresented: \$expanded, arrowEdge: \.bottom\)/);
+  const bar = chat.slice(chat.indexOf("private var composerProgress:"), chat.indexOf("private var modePanel:"));
+  assert.ok(bar.indexOf("ComposerQueue(") < bar.indexOf("private var inputBar:"), "queue belongs to the shared header, not editor accessory");
+});
+
+test("new-work invitation centers above the composer on both desktop clients", { skip: !available }, () => {
+  const styles = source("src/web-ui/react/new-session/start-styles.ts");
+  assert.match(styles, /\.new-work-context \{[^\n]*align-items:center; justify-content:center/);
+  assert.match(styles, /\.new-work-context \{[^\n]*padding:24px var\(--wand-page-inset\)/);
+  const host = source("src/web-ui/react/new-session/host.tsx");
+  assert.doesNotMatch(host, /<WandBrandMark/);
+  assert.match(host, /今天你想与[\s\S]*new-work-inline-avatar[\s\S]*在[\s\S]*new-work-inline-directory[\s\S]*的[\s\S]*NewSessionTaskField[\s\S]*inline[\s\S]*中创造些什么？/);
+  const view = source("macos/Wand/NewSessionView.swift");
+  const invitation = view.slice(view.indexOf("private var form: some View"), view.indexOf("private var projectName:"));
+  assert.doesNotMatch(invitation, /WandBrandMark/);
+  assert.match(invitation, /Spacer\(minLength: 32\)[\s\S]*Spacer\(minLength: 32\)\s+creationFeedback/);
+  assert.match(invitation, /今天你想与[\s\S]*showEmployeePicker[\s\S]*在[\s\S]*showDirectoryOptions[\s\S]*的[\s\S]*showTaskOptions[\s\S]*中创造些什么？/);
+  assert.doesNotMatch(invitation, /padding\(\.top, 12\)|Spacer\(minLength: 64\)/);
 });
 
 test("native default colors match Web warm and graphite palettes", { skip: !available }, () => {

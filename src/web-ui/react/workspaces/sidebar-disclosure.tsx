@@ -190,9 +190,9 @@ export function SidebarDisclosure({
   return (
     <div ref={ref} id={id} className="wand-sidebar-disclosure" data-open={open}
       inert={!open} aria-hidden={!open}>
-      <WandUiBoundary><Collapse ghost activeKey={open ? [id] : []}
+      <WandUiBoundary><Collapse ghost destroyOnHidden activeKey={open ? [id] : []}
         items={[{ key: id, label: null, showArrow: false, collapsible: "disabled",
-          forceRender: true, children,
+          children,
           styles: { header: { display: "none" }, body: { padding: 0 } },
         }]}/></WandUiBoundary>
     </div>

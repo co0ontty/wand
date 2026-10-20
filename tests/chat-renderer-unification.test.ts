@@ -17,7 +17,7 @@ function sourceFiles(dir: string): string[] {
 test("all Web chat adapters use the Wand message surface", () => {
   const files = sourceFiles("src/web-ui/react");
   assert.deepEqual(files.filter(file => /<Bubble(?:\s|>|\.)/.test(readFileSync(file, "utf8"))), []);
-  for (const file of ["chat/presentation.tsx", "ai-teams/team-chat-view.tsx", "conversations/session-preview.tsx", "composer-voice/host.tsx"]) {
+  for (const file of ["chat/presentation.tsx", "ai-teams/team-chat-view.tsx", "conversations/session-preview.tsx"]) {
     assert.match(readFileSync(`src/web-ui/react/${file}`, "utf8"), /<ChatMessage\b/, file);
   }
   for (const file of ["chat/message.tsx", "chat/activity.tsx"]) {

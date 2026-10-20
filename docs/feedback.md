@@ -39,7 +39,7 @@
 
 `feature`、`error.code`、`error.stack` 可以省略；其余字段必填。不允许额外字段。客户端版本无法获取时使用 `0.0.0`。`feature` 是明确采集点声明的稳定功能代码，不解析错误文本关键词；省略时按事件类型兜底。
 
-功能代码：`app_update` 应用更新、`server_update` 服务端更新、`provider_update` CLI 工具更新、`daemon_update` 底层组件更新、`api` 接口请求、`sessions` 会话、`conversations` 对话、`tasks` 任务、`files` 文件、`speech` 语音、`settings` 设置、`models` 模型、`authentication` 登录认证、`realtime` 实时连接、`runtime` 系统运行、`startup` 服务启动、`storage` 存储、`repository` 代码仓库。
+功能代码：`app_update` 应用更新、`server_update` 服务端更新、`provider_update` CLI 工具更新、`daemon_update` 底层组件更新、`api` 接口请求、`sessions` 会话、`conversations` 对话、`tasks` 任务、`files` 文件、`settings` 设置、`models` 模型、`authentication` 登录认证、`realtime` 实时连接、`runtime` 系统运行、`startup` 服务启动、`storage` 存储、`repository` 代码仓库。
 
 用户名不由请求随意传入。中转服务在采集时读取**上报方 Wand 自定义个人名称 `userProfile.name`**，沿用 `userDisplayName()` 的默认名 `我`，写入内层密文报告的 `username`。不读取操作系统账号、设备名、员工名，也不使用收集主机的个人名称。改名热生效；已采集/排队报告保留当时姓名快照。
 

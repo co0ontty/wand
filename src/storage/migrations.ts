@@ -307,4 +307,24 @@ export const STORAGE_MIGRATIONS: readonly StorageMigration[] = [
     const columns = db.prepare("PRAGMA table_info(wand_tasks)").all() as Array<{ name: string }>;
     if (!columns.some(column => column.name === "acceptance_json")) db.exec("ALTER TABLE wand_tasks ADD COLUMN acceptance_json TEXT");
   } },
+  { version: 11, name: "task-comment-dispatch", up: db => db.exec(`
+    CREATE TABLE IF NOT EXISTS wand_task_comment_dispatches (
+      comment_id TEXT PRIMARY KEY REFERENCES wand_task_comments(id) ON DELETE CASCADE,
+      task_id TEXT NOT NULL REFERENCES wand_tasks(id) ON DELETE CASCADE,
+      request_id TEXT NOT NULL, signature TEXT NOT NULL, source_comment_id TEXT,
+      employee_id TEXT, employee_name TEXT, instruction TEXT NOT NULL,
+      task_version TEXT NOT NULL, state TEXT NOT NULL, session_id TEXT, error TEXT, execution_status TEXT,
+      UNIQUE(task_id, request_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_comment_dispatch_session ON wand_task_comment_dispatches(session_id);
+  `) },
+  { version: 12, name: "employee-system-session-limit", up: db => {
+    const columns = db.prepare("PRAGMA table_info(silicon_employees)").all() as Array<{ name: string }>;
+    if (!columns.some(column => column.name === "system_session_limit")) {
+      db.exec("ALTER TABLE silicon_employees ADD COLUMN system_session_limit INTEGER");
+    }
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_system_ai_employee_history
+      ON command_sessions(json_extract(session_options, '$.employeeId'), started_at DESC)
+      WHERE automation_id GLOB 'system-ai:*'`);
+  } },
 ];

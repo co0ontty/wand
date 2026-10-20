@@ -25,7 +25,7 @@ test("installed helper calls its bound source CLI outside the repo, with auth an
   app.get("/api/silicon-employees", (_req, res) => res.json({ employees: [{ id: "e_fixture", name: "诊断员" }] }));
   app.patch("/api/scheduled-tasks/:id", (req, res) => res.json({ task: { id: req.params.id, ...req.body } }));
   app.get("/api/sessions/broken-json", (_req, res) => res.send("<html>not JSON</html>"));
-  app.post("/api/structured-sessions", (_req, res) => res.status(201).send("invalid JSON"));
+  app.post("/api/sessions", (_req, res) => res.status(201).send("invalid JSON"));
   const server = app.listen(0, "127.0.0.1");
   await new Promise<void>(resolve => server.once("listening", resolve));
   t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
@@ -64,8 +64,8 @@ test("installed helper calls its bound source CLI outside the repo, with auth an
 
   const api = new WandCliApi({ port: address.port, https: false, password: "fixture-password-not-real" } as WandConfig);
   await assert.rejects(api.get("/api/sessions/broken-json"), /HTTP 200.*无法确认结果/);
-  await assert.rejects(api.post("/api/structured-sessions", {}), /HTTP 201.*可能已接受/);
-  assert.equal(requests.filter(request => request.url === "/api/structured-sessions").length, 1);
+  await assert.rejects(api.post("/api/sessions", { kind: "structured" }), /HTTP 201.*可能已接受/);
+  assert.equal(requests.filter(request => request.url === "/api/sessions").length, 1);
 });
 
 test("installer refuses canonical or nested file symlinks without changing their targets", async t => {

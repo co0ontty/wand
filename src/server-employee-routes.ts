@@ -37,6 +37,16 @@ import type { WandStorage } from "./storage.js";
 import type { WandTaskAgent } from "./task-types.js";
 import type { SessionProvider, WandConfig } from "./types.js";
 import { badRequest } from "./http-error.js";
+import { systemAiSessions } from "./system-ai-session-recorder.js";
+
+export function parseSystemSessionLimit(value: unknown, existing?: SiliconEmployee | null): number | null {
+  if (value === undefined) return existing?.systemSessionLimit ?? null;
+  if (value === null) return null;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 10_000) {
+    throw badRequest("系统调用历史保留上限必须是 0 到 10000 的整数，或 null（不限）。");
+  }
+  return value;
+}
 
 /** Recruitment uses HR’s own ordered candidates and persona, never the ops chain. */
 export function employeeDraftAiOptions(storage: WandStorage, config?: WandConfig, free?: Pick<OpenRouterFreeModelsService, "resolveForCall">): QuickCommitAiOptions {
@@ -126,7 +136,7 @@ export function parseSystemEmployeeAgents(value: unknown, existing: SiliconEmplo
     throw badRequest("该员工是内置的，身份不可修改。");
   }
 
-  return isFixedAvatarEmployee(existing) && body.agents === undefined ? existing.agents : parseEmployeeAgents(body.agents);
+  return body.agents === undefined ? existing.agents : parseEmployeeAgents(body.agents);
 }
 
 /** Partial edits preserve omitted fields and the raw saved prompt, not a generated read projection. */
@@ -138,7 +148,7 @@ export function parseFixedAvatarEmployeeInput(value: unknown, existing: SiliconE
   const prompt = body.prompt === undefined ? existing.prompt : text(body.prompt);
   if (duty.length > 2000) throw badRequest("员工职责不能超过 2000 个字符。");
   if (prompt.length > 20_000) throw badRequest("员工设定 Prompt 不能超过 20000 个字符。");
-  return { ...existing, name, duty, prompt, agents, updatedAt: now };
+  return { ...existing, name, duty, prompt, agents, systemSessionLimit: parseSystemSessionLimit(body.systemSessionLimit, existing), updatedAt: now };
 }
 
 /** One validation owner for every employee candidate list, including legacy single agents. */
@@ -185,6 +195,7 @@ export function parseSiliconEmployeeInput(
     avatar,
     agents,
     tags,
+    systemSessionLimit: parseSystemSessionLimit(body.systemSessionLimit, existing),
     archivedAt: existing?.archivedAt,
     createdAt: existing ? existing.createdAt : now,
     updatedAt: now,
@@ -373,9 +384,10 @@ export function registerSiliconEmployeeRoutes(
       const employee = isFixedAvatarEmployee(definition)
         ? parseFixedAvatarEmployeeInput(input, definition, now)
         : isBuiltinSiliconEmployee(existing)
-          ? { ...existing, agents: parseSystemEmployeeAgents(input, existing), updatedAt: now }
-          : parseSiliconEmployeeInput(input, existing, now);
+          ? { ...existing, agents: parseSystemEmployeeAgents(input, existing), systemSessionLimit: parseSystemSessionLimit(input.systemSessionLimit, existing), updatedAt: now }
+          : parseSiliconEmployeeInput({ ...definition, ...input }, definition, now);
       storage.saveSiliconEmployee(employee);
+      systemAiSessions(storage).enforceRetention(employee.id);
       notifyEmployee(employee.id);
       res.json(storage.getSiliconEmployee(employee.id));
     } catch (error) {

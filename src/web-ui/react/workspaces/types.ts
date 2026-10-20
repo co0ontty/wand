@@ -86,6 +86,8 @@ export interface Workspace {
 /** GET /api/workspaces/:id 额外带回该项目下的会话列表。 */
 export interface WorkspaceSessionSummary {
   id: string;
+  /** Server-owned provenance; system calls are read-only employee history, not task work. */
+  automationId?: string;
   /** 实际运行引擎的只读投影，不把 Wand Agent 冒充 Pi CLI。 */
   engine?: "core" | "cli";
   provider?: WorkspaceProvider;
@@ -343,6 +345,9 @@ export interface WorkspacesRepository {
 
 /** 打开任务时传给宿主的载荷：足够启动一个绑定到该任务的会话。 */
 export interface OpenWorkspaceTaskPayload {
+  /** Transient navigation restore, not a user selection or a server field. */
+  restoreRoute?: boolean;
+  navigationCurrent?: () => boolean;
   workspaceId: string;
   workspaceName: string;
   taskId: string;

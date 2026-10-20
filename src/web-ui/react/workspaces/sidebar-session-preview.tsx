@@ -67,7 +67,10 @@ export function SidebarSessionPreview({ sessions, expanded, selectedSessionId, l
   const iconProbe = React.useRef<HTMLButtonElement>(null);
   const moreProbe = React.useRef<HTMLButtonElement>(null);
   const moreText = React.useRef<HTMLSpanElement>(null);
-  const [layout, setLayout] = React.useState<SidebarPreviewLayout>({ titles: false, count: sessions.length });
+  // Do not mount every session before the first measurement. A collapsed person
+  // can own thousands of sessions while only a handful of preview chips fit.
+  const [layout, setLayout] = React.useState<SidebarPreviewLayout>({ titles: false, count: 0 });
+  const [measureTitles, setMeasureTitles] = React.useState(false);
   const [dismissedTooltipId, setDismissedTooltipId] = React.useState<string | null>(null);
   const labels = sessions.map((session, index) => sidebarSessionLabel(session, index, liveTitles?.[session.id]));
   const signature = JSON.stringify(sessions.map((session, index) => [session.id, labels[index]]));
@@ -82,9 +85,17 @@ export function SidebarSessionPreview({ sessions, expanded, selectedSessionId, l
       const css = getComputedStyle(element);
       const gap = Number.parseFloat(css.columnGap) || 0;
       const padding = (Number.parseFloat(css.paddingInlineStart) || 0) + (Number.parseFloat(css.paddingInlineEnd) || 0);
-      const titleWidths = Array.from(probe.children).map(child => child.getBoundingClientRect().width);
-      const next = fitSidebarSessionPreview(element.clientWidth - padding, titleWidths,
-        iconProbe.current!.getBoundingClientRect().width, gap, hidden => {
+      const available = element.clientWidth - padding;
+      const iconWidth = iconProbe.current!.getBoundingClientRect().width;
+      // A title chip is always wider than its icon-only chip. If even all icons
+      // cannot fit, full-title probes cannot change the result: never mount them.
+      const canFitIcons = iconWidth > 0 && iconWidth * sessions.length + gap * (sessions.length - 1) <= available;
+      setMeasureTitles(previous => previous === canFitIcons ? previous : canFitIcons);
+      const titleWidths = canFitIcons && probe.children.length === sessions.length
+        ? Array.from(probe.children).map(child => child.getBoundingClientRect().width)
+        : Array<number>(sessions.length).fill(0);
+      const next = fitSidebarSessionPreview(available, titleWidths,
+        iconWidth, gap, hidden => {
           // Measure the actual +N text (including digit changes), not a guessed reserved width.
           moreText.current!.textContent = `+${hidden}`;
           return moreProbe.current!.getBoundingClientRect().width;
@@ -101,7 +112,7 @@ export function SidebarSessionPreview({ sessions, expanded, selectedSessionId, l
       active = false; observer?.disconnect(); window.removeEventListener("resize", recalculate);
       document.fonts?.removeEventListener("loadingdone", recalculate);
     };
-  }, [signature]);
+  }, [signature, measureTitles]);
   if (!sessions.length) return null;
   const shown = sessions.slice(0, layout.count);
   const hidden = sessions.length - shown.length;
@@ -145,8 +156,8 @@ export function SidebarSessionPreview({ sessions, expanded, selectedSessionId, l
       </Tooltip> : null}
       <div className="sidebar-session-preview-measure-clip" aria-hidden="true" inert>
         <div ref={measure} className="sidebar-session-preview-measure">
-          {sessions.map((session, index) => <WandChip key={session.id} size="sm" kind="ghost" tabIndex={-1}
-            className="sidebar-session-tag" data-titles="true">{contents(session, index, true)}</WandChip>)}
+          {measureTitles ? sessions.map((session, index) => <WandChip key={session.id} size="sm" kind="ghost" tabIndex={-1}
+            className="sidebar-session-tag" data-titles="true">{contents(session, index, true)}</WandChip>) : null}
         </div>
         <WandChip ref={iconProbe} size="sm" kind="ghost" tabIndex={-1} className="sidebar-session-tag">{contents(sessions[0], 0, false)}</WandChip>
         <WandChip ref={moreProbe} size="sm" kind="ghost" tabIndex={-1} className="sidebar-session-more"><span ref={moreText}>+{sessions.length}</span></WandChip>

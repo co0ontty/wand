@@ -15,7 +15,7 @@ import { registerClaudeHistoryRoutes, registerSessionRoutes } from "../src/serve
 import { SessionRegistry } from "../src/session-registry.js";
 import { WandStorage } from "../src/storage.js";
 import { StructuredSessionManager } from "../src/structured-session-manager.js";
-import type { ContentBlock } from "../src/types.js";
+import type { ContentBlock, SessionSnapshot } from "../src/types.js";
 
 test("session HTTP interface preserves create, list, update, detail, and delete behavior", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-session-routes-"));
@@ -42,10 +42,10 @@ test("session HTTP interface preserves create, list, update, detail, and delete 
   try {
     const address = server.address() as AddressInfo;
     const baseUrl = `http://127.0.0.1:${address.port}`;
-    const createdResponse = await fetch(`${baseUrl}/api/structured-sessions`, {
+    const createdResponse = await fetch(`${baseUrl}/api/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ cwd: root, provider: "opencode", mode: "assist" }),
+      body: JSON.stringify({ kind: "structured", cwd: root, provider: "opencode", mode: "assist" }),
     });
     assert.equal(createdResponse.status, 201);
     const created = await createdResponse.json() as { id: string; sessionKind: string; provider: string; output: string };
@@ -53,24 +53,46 @@ test("session HTTP interface preserves create, list, update, detail, and delete 
     assert.equal(created.provider, "opencode");
     assert.equal(created.output, "");
     assert.equal((await fetch(`${baseUrl}/api/sessions/${created.id}/pty-history?before=1&revision=0`)).status, 404);
-    const structuredPage = await (await fetch(`${baseUrl}/api/structured-sessions/${created.id}/messages`)).json() as {
+    const structuredPage = await (await fetch(`${baseUrl}/api/sessions/${created.id}/messages`)).json() as {
       messages: unknown[]; offset: number; total: number;
     };
-    assert.deepEqual(structuredPage, { id: created.id, messages: [], offset: 0, total: 0 });
-    const messages = structured.get(created.id)?.messages;
-    assert.ok(messages);
-    for (let index = 0; index < 90; index++) {
-      messages.push({ role: "user", content: [{ type: "text", text: `history-${index}` }] });
-    }
-    const tailPage = await (await fetch(`${baseUrl}/api/structured-sessions/${created.id}/messages`)).json() as {
+    assert.deepEqual(structuredPage, { wandProtocolVersion: 2, messages: [], offset: 0, total: 0 });
+    const messages: NonNullable<SessionSnapshot["messages"]> = Array.from({ length: 90 }, (_, index) => ({
+      role: "user" as const,
+      content: [{ type: "text" as const, text: `history-${index}` }],
+    }));
+    // get() returns detached snapshots. Inject the fixture transcript at the HTTP registry seam,
+    // including mutation responses, without mutating a detached read or bypassing the real settings operations.
+    const withHistory = (snapshot: SessionSnapshot | null): SessionSnapshot | null =>
+      snapshot?.id === created.id ? { ...snapshot, messages } : snapshot;
+    const originalGet = sessions.get.bind(sessions);
+    sessions.get = (id: string) => withHistory(originalGet(id));
+    const originalModel = sessions.setSessionModel.bind(sessions);
+    sessions.setSessionModel = (...args) => withHistory(originalModel(...args));
+    const originalThinking = sessions.setSessionThinkingEffort.bind(sessions);
+    sessions.setSessionThinkingEffort = (...args) => withHistory(originalThinking(...args));
+    const originalMode = sessions.setSessionMode.bind(sessions);
+    sessions.setSessionMode = (...args) => withHistory(originalMode(...args));
+    const originalStructuredGetSlim = structured.getSlim.bind(structured);
+    structured.getSlim = (id: string) => {
+      const snapshot = originalStructuredGetSlim(id);
+      return snapshot?.id === created.id ? { ...snapshot, messages } : snapshot;
+    };
+    // The unified messages endpoint starts at zero unless an explicit cursor is supplied.
+    const firstPageOfMessages = await (await fetch(`${baseUrl}/api/sessions/${created.id}/messages`)).json() as {
       messages: Array<{ content: Array<{ text?: string }> }>; offset: number; total: number;
     };
+    assert.equal(firstPageOfMessages.offset, 0);
+    assert.equal(firstPageOfMessages.messages.length, 40);
+    assert.equal(firstPageOfMessages.messages[0].content[0].text, "history-0");
+    assert.equal(firstPageOfMessages.total, 90);
+    const tailPage = await (await fetch(`${baseUrl}/api/sessions/${created.id}/messages?offset=50`)).json() as typeof firstPageOfMessages;
     assert.equal(tailPage.messages.length, 40);
     assert.equal(tailPage.offset, 50);
     assert.equal(tailPage.total, 90);
     assert.equal(tailPage.messages[0].content[0].text, "history-50");
     const olderPage = await (await fetch(
-      `${baseUrl}/api/structured-sessions/${created.id}/messages?offset=10&limit=5`,
+      `${baseUrl}/api/sessions/${created.id}/messages?offset=10&limit=5`,
     )).json() as typeof tailPage;
     assert.equal(olderPage.messages.length, 5);
     assert.equal(olderPage.messages[0].content[0].text, "history-10");
@@ -193,7 +215,7 @@ test("session HTTP interface preserves create, list, update, detail, and delete 
     assert.deepEqual(compactBlocks.blocks[0].input, {});
     assert.equal(compactBlocks.blocks[1].content, "");
     const structuredPageCompact = await (await fetch(
-      `${baseUrl}/api/structured-sessions/${created.id}/messages?offset=0&limit=1`,
+      `${baseUrl}/api/sessions/${created.id}/messages?offset=0&limit=1`,
       { headers: compactHeaders },
     )).json() as { messages: Array<{ content: Array<Record<string, any>> }> };
     assert.deepEqual(structuredPageCompact.messages[0].content[0].input, {});
@@ -346,10 +368,10 @@ test("session HTTP interface preserves create, list, update, detail, and delete 
     );
     assert.equal(stalePageResponse.status, 200);
 
-    const secondCreatedResponse = await fetch(`${baseUrl}/api/structured-sessions`, {
+    const secondCreatedResponse = await fetch(`${baseUrl}/api/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ cwd: root, provider: "opencode", mode: "assist" }),
+      body: JSON.stringify({ kind: "structured", cwd: root, provider: "opencode", mode: "assist" }),
     });
     assert.equal(secondCreatedResponse.status, 201);
     assert.equal((await (await fetch(`${baseUrl}/api/sessions/provider-usage`)).json()).opencode, 2);
@@ -438,10 +460,11 @@ test("session list and detail DTOs keep workspace binding and queue skills", asy
   try {
     const address = server.address() as AddressInfo;
     const baseUrl = `http://127.0.0.1:${address.port}`;
-    const createdResponse = await fetch(`${baseUrl}/api/structured-sessions`, {
+    const createdResponse = await fetch(`${baseUrl}/api/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
+        kind: "structured",
         cwd: root,
         provider: "opencode",
         mode: "assist",
@@ -524,10 +547,11 @@ test("a session created inside a sidebar task reaches the board card immediately
       status: "todo",
     });
 
-    const createdResponse = await fetch(`${baseUrl}/api/structured-sessions`, {
+    const createdResponse = await fetch(`${baseUrl}/api/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
+        kind: "structured",
         cwd: root,
         provider: "opencode",
         mode: "assist",
@@ -590,10 +614,10 @@ test("首轮提示词不再把创建请求挂在 HTTP 上", async () => {
     const address = server.address() as AddressInfo;
     const baseUrl = `http://127.0.0.1:${address.port}`;
     const responded = await Promise.race([
-      fetch(`${baseUrl}/api/structured-sessions`, {
+      fetch(`${baseUrl}/api/sessions`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ cwd: root, provider: "claude", prompt: "开始做这个任务", respondImmediately: true }),
+        body: JSON.stringify({ kind: "structured", cwd: root, provider: "claude", prompt: "开始做这个任务" }),
       }),
       new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
     ]);
@@ -603,9 +627,7 @@ test("首轮提示词不再把创建请求挂在 HTTP 上", async () => {
     assert.deepEqual(prompts, ["structured-1:开始做这个任务"]);
     assert.ok(resolveTurn, "提示词必须在后台真的发出去");
 
-    // 不带 flag 时维持原契约：原生客户端靠「响应返回 = 首轮结束」。
     prompts.length = 0;
-    let settleTurn: (() => void) | null = null;
     const blocking = {
       id: "structured-2",
       cwd: root,
@@ -616,21 +638,18 @@ test("首轮提示词不再把创建请求挂在 HTTP 上", async () => {
     } as unknown as Record<string, unknown>;
     structured.createSession = () => blocking;
     structured.get = () => blocking;
-    structured.sendMessage = () => new Promise((resolve) => { settleTurn = () => resolve(blocking); });
-    const pending = fetch(`${baseUrl}/api/structured-sessions`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ cwd: root, provider: "claude", prompt: "继续" }),
-    });
-    const early = await Promise.race([
-      pending.then(() => "responded"),
-      new Promise<string>((resolve) => setTimeout(() => resolve("waiting"), 300)),
+    structured.sendMessage = () => new Promise(() => {});
+    const immediate = await Promise.race([
+      fetch(`${baseUrl}/api/sessions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind: "structured", cwd: root, provider: "claude", prompt: "继续" }),
+      }),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 300)),
     ]);
-    assert.equal(early, "waiting", "默认行为必须等首轮结束，不能悄悄改成非阻塞");
-    settleTurn?.();
-    const blocked = await pending;
-    assert.equal(blocked.status, 201);
-    assert.equal((await blocked.json() as { id: string }).id, "structured-2");
+    assert.ok(immediate, "structured 创建无论是否带旧 respondImmediately 字段都必须立即确认");
+    assert.equal(immediate.status, 201);
+    assert.equal((await immediate.json() as { id: string }).id, "structured-2");
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     processes.dispose();
@@ -658,10 +677,11 @@ test("创建会话时 systemPrompt 落到会话上，不并进首条消息", asy
   try {
     const address = server.address() as AddressInfo;
     const baseUrl = `http://127.0.0.1:${address.port}`;
-    const created = await (await fetch(`${baseUrl}/api/structured-sessions`, {
+    const created = await (await fetch(`${baseUrl}/api/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
+        kind: "structured",
         cwd: root,
         provider: "opencode",
         mode: "assist",
@@ -679,11 +699,9 @@ test("创建会话时 systemPrompt 落到会话上，不并进首条消息", asy
   }
 });
 
-test("创建会话接口把 Pi 与 Wand Agent 当两个引擎，非法组合明确拒绝", async (t) => {
-  const root = mkdtempSync(path.join(os.tmpdir(), "wand-pi-engine-routes-"));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+test("统一创建接口需要 kind，旧 POST 入口不再创建会话", async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-unified-session-route-"));
   const storage = new WandStorage(path.join(root, "wand.db"));
-  t.after(() => storage.close());
   const config = { ...defaultConfig(), defaultCwd: root, startupCommands: [] };
   const processes = new ProcessManager(config, storage, root);
   const structured = new StructuredSessionManager(storage, config);
@@ -697,12 +715,73 @@ test("创建会话接口把 Pi 与 Wand Agent 当两个引擎，非法组合明�
     server.once("error", reject);
     server.listen(0, "127.0.0.1", () => { server.off("error", reject); resolve(); });
   });
-  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  t.after(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    processes.dispose();
+    structured.dispose();
+    storage.close();
+    rmSync(root, { recursive: true, force: true });
+  });
   const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const post = (body: Record<string, unknown>) => fetch(`${baseUrl}/api/structured-sessions`, {
+  for (const body of [{}, { kind: "bad" }, { kind: null }]) {
+    assert.equal((await fetch(`${baseUrl}/api/sessions`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    })).status, 400);
+  }
+  for (const body of [
+    { kind: "structured", shell: true },
+    { kind: "structured", command: "claude" },
+    { kind: "structured", initialInput: "text" },
+    { kind: "structured", prompt: 123 },
+    { kind: "pty", command: "pi", initialInput: 123 },
+  ]) {
+    assert.equal((await fetch(`${baseUrl}/api/sessions`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    })).status, 400, "cross-kind fields must be rejected before creating a session");
+  }
+  assert.equal((await fetch(`${baseUrl}/api/structured-sessions`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ cwd: root, provider: "opencode" }),
+  })).status, 404);
+  assert.equal((await fetch(`${baseUrl}/api/commands`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ command: "pi", cwd: root }),
+  })).status, 404);
+  assert.equal((await fetch(`${baseUrl}/api/structured-sessions/legacy/messages`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ input: "hello" }),
+  })).status, 404, "message route is mounted and reports the missing session");
+  assert.equal((await fetch(`${baseUrl}/api/structured-sessions/legacy/queued`, {
+    method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ order: [] }),
+  })).status, 400, "queue route is mounted and validates payload before manager lookup");
+  assert.equal(sessions.listSlim().length, 0);
+});
+
+test("创建会话接口把 Pi 与 Wand Agent 当两个引擎，非法组合明确拒绝", async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-pi-engine-routes-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const config = { ...defaultConfig(), defaultCwd: root, startupCommands: [] };
+  const processes = new ProcessManager(config, storage, root);
+  const structured = new StructuredSessionManager(storage, config);
+  const sessions = new SessionRegistry(processes, structured, storage);
+  const app = express();
+  app.use(express.json());
+  registerSessionRoutes(app, { processes, structured, storage, defaultMode: config.defaultMode, config, sessions });
+  app.use(jsonErrorHandler);
+  const server = createServer(app);
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => { server.off("error", reject); resolve(); });
+  });
+  t.after(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    processes.dispose();
+    structured.dispose();
+    storage.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+  const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const post = (body: Record<string, unknown>) => fetch(`${baseUrl}/api/sessions`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ cwd: root, mode: "default", ...body }),
+    body: JSON.stringify({ kind: "structured", cwd: root, mode: "default", ...body }),
   });
 
   const bogus = await post({ provider: "pi", engine: "bogus" });
@@ -712,6 +791,16 @@ test("创建会话接口把 Pi 与 Wand Agent 当两个引擎，非法组合明�
   const wrongProvider = await post({ provider: "claude", engine: "sdk" });
   assert.equal(wrongProvider.status, 400);
   assert.match(String((await wrongProvider.json() as { error: string }).error), /Wand Agent/);
+  const ptySdk = await fetch(`${baseUrl}/api/sessions`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ kind: "pty", command: "pi", engine: "sdk", cwd: root }),
+  });
+  assert.equal(ptySdk.status, 400);
+  const ptyCli = await fetch(`${baseUrl}/api/sessions`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ kind: "pty", command: "pi", engine: "cli", cwd: root }),
+  });
+  assert.equal(ptyCli.status, 201, "PTY permits the explicit CLI engine");
 
   // Pi CLI：不传引擎与显式 cli 等价，pi-settings 必须报告 cli。
   const cli = await post({ provider: "pi" });
@@ -727,5 +816,6 @@ test("创建会话接口把 Pi 与 Wand Agent 当两个引擎，非法组合明�
   assert.equal(sdk.status, 400);
   assert.match(String((await sdk.json() as { error: string }).error), /core|harness/i);
   const listed = await (await fetch(`${baseUrl}/api/sessions`)).json() as Array<{ id: string }>;
-  assert.deepEqual(listed.map((item) => item.id), [cliSession.id], "被拒绝的 SDK 会话不能留下半个会话");
+  assert.deepEqual(listed.map((item) => item.id).sort(), [cliSession.id, (await ptyCli.json() as { id: string }).id].sort(),
+    "only successful CLI/PTY creations remain after rejecting SDK");
 });

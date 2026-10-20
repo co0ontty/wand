@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { confirmSidebarLogout } from "../src/web-ui/react/shell/shell-sidebar.js";
+import { conversationUi } from "../src/web-ui/react/conversations/state.js";
 import { taskBoardController } from "../src/web-ui/react/issues/task-board-controller.js";
 import { overlayStore } from "../src/web-ui/react/overlay-controller.js";
 
@@ -176,6 +177,19 @@ function renderSidebar(snapshot: UiSnapshotData): string {
   }
 }
 
+/**
+ * 侧栏现在只为当前投影挂载内容：工作区树的断言要在「工作区」模式下渲染，
+ * 静态渲染没有 effect，不会走到首屏空闲后挂载另一侧的路径。
+ */
+function renderWorkspaceSidebar(snapshot: UiSnapshotData): string {
+  conversationUi.mode("tasks");
+  try {
+    return renderSidebar(snapshot);
+  } finally {
+    conversationUi.mode("chats");
+  }
+}
+
 test("sidebar entry helpers map primary and secondary actions without legacy state", () => {
   const regular = session({
     worktree: { enabled: true, branch: "codex/sidebar", path: "/worktree", mergeStatus: "ready" },
@@ -225,7 +239,7 @@ test("sidebar entry helpers map primary and secondary actions without legacy sta
 });
 
 test("ShellSidebar SSR preserves native ids, key classes, groups, and action contracts", () => {
-  const html = renderSidebar(fixture());
+  const html = renderWorkspaceSidebar(fixture());
   const requiredIds = [
     "sessions-drawer-backdrop",
     "sessions-drawer",
@@ -318,7 +332,7 @@ test("ShellSidebar SSR retires manage mode but keeps capability-gated controls",
 
 test("ShellSidebar collapsed rail still renders the unified task panel", () => {
   const base = fixture();
-  const html = renderSidebar(fixture({
+  const html = renderWorkspaceSidebar(fixture({
     viewport: { ...base.viewport, mobile: false },
     layout: {
       ...base.layout,
@@ -371,7 +385,7 @@ test("sidebar temporary tools preserve the page while navigation leaves it", () 
 });
 
 test("ShellSidebar keeps creation above the directory task tree and profile settings at the rail bottom", () => {
-  const html = renderSidebar(fixture());
+  const html = renderWorkspaceSidebar(fixture());
   const createIndex = html.indexOf('id="drawer-new-session-button"');
   const treeIndex = html.indexOf('class="workspaces-panel"');
   assert.ok(createIndex > 0 && createIndex < treeIndex);
@@ -387,7 +401,7 @@ test("ShellSidebar keeps creation above the directory task tree and profile sett
 
 test("mobile drawer ignores the desktop compact preference", () => {
   const base = fixture();
-  const html = renderSidebar(fixture({ layout: { ...base.layout, sidebarCollapsed: true } }));
+  const html = renderWorkspaceSidebar(fixture({ layout: { ...base.layout, sidebarCollapsed: true } }));
   assert.doesNotMatch(html, /class="sidebar sidebar-refined open pinned collapsed"/);
   assert.match(html, /aria-label="正在加载任务列表"/);
   assert.doesNotMatch(html, /aria-label="新建项目"/);
@@ -409,8 +423,17 @@ test("a desktop file panel borrows the list space without changing the compact p
   assert.doesNotMatch(restored, /context-rail/);
 });
 
+test("Sidebar mounts only the active projection so the first load does not fetch both lists", () => {
+  const chats = renderSidebar(fixture());
+  assert.match(chats, /conversation-sidebar-list/);
+  assert.doesNotMatch(chats, /class="workspaces-panel"/, "chats first paint must not include the workspace tree");
+  const tasks = renderWorkspaceSidebar(fixture());
+  assert.match(tasks, /class="workspaces-panel"/);
+  assert.doesNotMatch(tasks, /conversation-sidebar-list/, "workspace first paint must not include the conversation list");
+});
+
 test("ShellSidebar removes redundant tools and retains a closed account menu", () => {
-  const html = renderSidebar(fixture());
+  const html = renderWorkspaceSidebar(fixture());
   assert.match(html, /class="sidebar-brand-mark"/);
   assert.match(html, /id="task-board-button"/);
   assert.match(html, /aria-label="任务看板"/);

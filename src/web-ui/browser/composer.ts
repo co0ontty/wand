@@ -13,6 +13,7 @@ export interface ComposerDraft {
   readonly memoryOnly: boolean;
   readonly revision: number;
   readonly recovery?: ComposerPayload | null;
+  readonly queueRetrieval?: { readonly text: string; readonly status: "pending" | "confirmed" | "unknown" | "rejected" } | null;
 }
 
 export interface ComposerPayload {
@@ -27,6 +28,7 @@ interface ComposerSession {
   revision: number;
   submissions: Map<string, Promise<unknown>>;
   recovery?: { payload: ComposerPayload; persist: boolean };
+  queueRetrieval?: { text: string; status: "pending" | "confirmed" | "unknown" | "rejected"; token: object };
 }
 
 interface ComposerDependencies {
@@ -89,6 +91,7 @@ export class ComposerStore {
       memoryOnly: session?.memoryOnly ?? false,
       revision: session?.revision ?? 0,
       recovery: session?.recovery?.payload ?? null,
+      queueRetrieval: session?.queueRetrieval ? { text: session.queueRetrieval.text, status: session.queueRetrieval.status } : null,
     };
   }
 
@@ -161,6 +164,39 @@ export class ComposerStore {
     }
     this.notify();
     return true;
+  }
+
+  /** Keep the original in the owner before destructive IO; never persist an unknown delivery as a sendable draft. */
+  beginQueueRetrieval(sessionId: string, text: string): object | null {
+    const session = this.session(sessionId);
+    if (session.queueRetrieval) return null;
+    const token = {};
+    session.queueRetrieval = { text, status: "pending", token };
+    this.notify();
+    return token;
+  }
+
+  finishQueueRetrieval(sessionId: string, token: object, status: "confirmed" | "unknown" | "rejected"): boolean {
+    const retrieval = this.sessions.get(sessionId)?.queueRetrieval;
+    if (!retrieval || retrieval.token !== token) return false;
+    retrieval.status = status;
+    this.notify();
+    return true;
+  }
+
+  restoreQueueRetrieval(sessionId: string): boolean {
+    const session = this.sessions.get(sessionId);
+    if (!session?.queueRetrieval || session.queueRetrieval.status !== "confirmed") return false;
+    const text = session.queueRetrieval.text;
+    session.queueRetrieval = undefined;
+    return this.edit(sessionId, { restore: { text, attachments: [] }, persist: !session.memoryOnly });
+  }
+
+  dismissQueueRetrieval(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session?.queueRetrieval || session.queueRetrieval.status === "pending") return;
+    session.queueRetrieval = undefined;
+    this.notify();
   }
 
   /** Explicit adoption of an unaddressed draft; never overwrite a recipient's own draft. */

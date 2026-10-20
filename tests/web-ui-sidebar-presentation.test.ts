@@ -88,8 +88,8 @@ test("recent employee groups omit CLI badges while child sessions retain actual 
       assert.equal(children.split(`data-provider-logo="${provider}"`).length - 1, 1,
         "each actual child retains its tool");
       const preview = html.split('class="sidebar-session-preview-row"')[1].split('class="sidebar-session-preview-measure-clip"')[0];
-      assert.equal(preview.split(`data-provider-logo="${provider}"`).length - 1, 1,
-        "one preview slot per real tool; inaccessible measurements are not semantic entries");
+      assert.equal(preview.split(`data-provider-logo="${provider}"`).length - 1, 0,
+        "preview slots wait for browser width measurement rather than mounting the whole list");
     }
     assert.match(html, /sidebar-session-preview[^>]*data-expanded="true"[^>]*inert[^>]*aria-hidden="true"/);
   }

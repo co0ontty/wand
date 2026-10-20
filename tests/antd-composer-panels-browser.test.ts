@@ -12,7 +12,7 @@ import { cssEvidenceCapture } from "./helpers/antd-css-evidence.js";
 
 const sleep = (ms: number) => new Promise(resolveSleep => setTimeout(resolveSleep, ms));
 const modes = ["desktop", "390px", "native-shell", "reactUi=0", "reduce-motion"];
-export async function runPanels(matrix = modes) {
+export async function runPanels(matrix = modes, queueOnly = false) {
   const root = resolve(import.meta.dirname, "..");
   const directory = mkdtempSync(join(tmpdir(), "wand-panels-source-"));
   const result: any = { ok: false, evidence: "Real Chrome production adapters/native callbacks; local synthetic HTTP only; no installed service or device", cases: [], requests: [], errors: [], exceptions: [], dialogs: [] };
@@ -45,14 +45,14 @@ export async function runPanels(matrix = modes) {
           const operation = { path, method: request.method, body, compact: request.headers["x-wand-tool-projection"] };
           result.requests.push(operation);
           const match = path.match(/\/queued\/(\d+)(\/promote)?$/);
-          const plan = match && request.method === "PATCH" ? editPlan : null;
+          const plan = match && request.method === "DELETE" ? editPlan : null;
           if (plan) editPlan = null;
           if (plan?.error) {
             const reply = () => { response.writeHead(503, { "Content-Type": "application/json" }); response.end(JSON.stringify({ error: "Synthetic edit failure" })); };
             if (plan.defer) deferred.push(reply); else reply(); return;
           }
           if (match && match[2]) { assert.equal(body.expectedText, queue[Number(match[1])]); queue.splice(Number(match[1]), 1); }
-          else if (match && request.method === "DELETE") queue.splice(Number(match[1]), 1);
+          else if (match && request.method === "DELETE") { assert.equal(body.expectedText, queue[Number(match[1])]); queue.splice(Number(match[1]), 1); }
           else if (match && request.method === "PATCH") { assert.equal(body.expectedText, queue[Number(match[1])]); queue[Number(match[1])] = body.text; }
           else if (request.method === "PATCH") queue = body.order.map((index: number) => queue[index]);
           else if (request.method === "DELETE") queue = [];
@@ -61,7 +61,8 @@ export async function runPanels(matrix = modes) {
             const captured = JSON.stringify(payload);
             deferred.push(() => { response.setHeader("Content-Type", "application/json"); response.end(captured); }); return;
           }
-        } else if (path.endsWith("/input")) result.requests.push({ path, method: request.method, body, compact: request.headers["x-wand-tool-projection"] });
+        } else if (path === "/api/sessions/panels-A") payload = { id: "panels-A", queuedMessages: [...queue], status: "running", sessionKind: "structured", messages: [], structuredState: { inFlight: true } };
+        else if (path.endsWith("/input")) result.requests.push({ path, method: request.method, body, compact: request.headers["x-wand-tool-projection"] });
         response.setHeader("Content-Type", "application/json"); response.end(JSON.stringify(payload)); return;
       }
       response.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -145,23 +146,43 @@ export async function runPanels(matrix = modes) {
       const record = (name: string, facts: any) => result.cases.push({ mode, name, ...facts });
       const requestStart = result.requests.length;
       await e('p.queue(["alpha queue","beta queue","gamma queue"])');
+      assert.equal(await e("document.querySelector('.composer-surface').contains(document.getElementById('queue-bar-host'))"), true, "queue is part of input surface");
+      assert.equal(await e("document.querySelector('.composer-top-row').contains(document.getElementById('queue-bar-host'))"), true, "queue summary shares the Todo input edge");
+      const queueSummary = await e(`(()=>{const q=document.querySelector('.queue-bar .ant-collapse-header'),r=q.getBoundingClientRect();const s=document.querySelector('.queue-summary');const others=['.composer-floating-avatar','.composer-usage-line','.composer-inline-config'].map(selector=>document.querySelector(selector)?.getBoundingClientRect()).filter(b=>b?.width&&b?.height);return {height:r.height,overlap:others.some(b=>r.left<b.right&&r.right>b.left&&r.top<b.bottom&&r.bottom>b.top),preview:getComputedStyle(s.querySelector('.queue-summary-preview')).display,label:s.innerText};})()`);
+      assert.equal(queueSummary.overlap, false, "summary must not overlap avatar/status/runtime: " + JSON.stringify(queueSummary));
+      assert.ok(queueSummary.height <= (mode === "390px" ? 44 : 32));
+      assert.equal(queueSummary.preview, mode === "390px" ? "none" : "block", "actual available summary width determines message preview");
+      record("compact responsive queue summary", queueSummary);
+      const sendRect = await e("document.getElementById('send-input-button').getBoundingClientRect().toJSON()");
+      await click('.queue-bar .ant-collapse-header');
+      const expandedSendRect = await e("document.getElementById('send-input-button').getBoundingClientRect().toJSON()");
+      assert.ok(Math.abs(sendRect.y - expandedSendRect.y) < 1 && sendRect.height === expandedSendRect.height, "queue expands upwards without moving the send button");
+      const queueLanes = await e("(()=>{const q=document.querySelector('.queue-bar .ant-collapse-panel').getBoundingClientRect();const u=document.querySelector('.composer-usage-line')?.getBoundingClientRect();return {queueBottom:q.bottom,usageTop:u?.top,usageVisible:!!u?.height};})()");
+      if (queueLanes.usageVisible) {
+        assert.ok(queueLanes.queueBottom <= queueLanes.usageTop, "queue must not overlap the execution status lane: " + JSON.stringify(queueLanes));
+        assert.ok(queueLanes.usageTop - queueLanes.queueBottom <= 80, "queue must not reserve the unrelated runtime menu height: " + JSON.stringify(queueLanes));
+      }
+      const queueCapture = resolve(root, `output/architecture-stage2/session-queue/queue-${mode.replace(/[^a-z0-9-]/gi, "-")}.png`);
+      mkdirSync(dirname(queueCapture), { recursive: true });
+      writeFileSync(queueCapture, Buffer.from((await send("Page.captureScreenshot", { format: "png" })).data, "base64"));
+      await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+      await wait("!p.state.queueBarExpanded", "queue Escape closes");
+      assert.equal(await e("document.activeElement===document.querySelector('.queue-bar .ant-collapse-header')"), true, "Escape restores summary focus");
+      await click('.queue-bar .ant-collapse-header');
+      await click('#input-box');
+      await wait("!p.state.queueBarExpanded", "outside pointer closes queue");
+      await click('.queue-bar .ant-collapse-header');
       await click('.queue-bar-item[data-index="1"] [data-action="delete"]');
       await wait('JSON.stringify(p.queueTexts())===JSON.stringify(["alpha queue","gamma queue"])', "native deletion");
       await wait(`document.querySelectorAll('.queue-bar-item').length===2`, "deleted row removed");
       record("queue delete delegates once", { queue: await e("p.queueTexts()"), operation: result.requests.at(-1) });
       await click('.queue-bar-item[data-index="0"] [data-action="edit"]');
-      await wait("!!document.querySelector('.wand-ui-dialog-content input')", "canonical edit dialog");
-      await e("document.querySelector('.wand-ui-dialog-content input').dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));void 0");
-      await send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
-      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
-      assert.equal(result.requests.length, requestStart + 1, "IME candidate Enter never edits the queue");
-      assert.equal(await e("!!document.querySelector('.wand-ui-dialog-content input')"), true);
-      await e("document.querySelector('.wand-ui-dialog-content input').dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));document.querySelector('.wand-ui-dialog-content input').select();void 0");
-      await send("Input.insertText", { text: "alpha edited" });
-      await click(".wand-ui-dialog-actions .wand-ui-button-primary");
-      await wait('p.queueTexts()[0]==="alpha edited"', "canonical edit and PATCH response");
-      assert.equal(await e("document.querySelector('.queue-bar-item[data-index=\"0\"] .queue-bar-item-text').textContent"), "alpha edited", "accepted edit reaches the library projection");
-      record("queue edit uses Ant dialog with IME", { queue: await e("p.queueTexts()"), operation: result.requests.at(-1), nativeDialogs: result.dialogs.length });
+      await wait('p.queueTexts()[0]==="gamma queue" && document.getElementById("input-box").value==="alpha queue"', "queue item returns to main input");
+      assert.equal(await e("document.querySelector('.queue-bar-item[data-index=\"0\"] .queue-bar-item-text').textContent"), "gamma queue", "retrieve removes only the expected queue item");
+      assert.equal(await e("document.querySelector('.wand-ui-dialog-content input')===null"), true, "re-edit does not open a prompt");
+      assert.equal(result.requests.at(-1).body.expectedText, "alpha queue");
+      record("queue re-edit merges into composer without dialog", { queue: await e("p.queueTexts()"), draft: await e("document.getElementById('input-box').value"), operation: result.requests.at(-1), nativeDialogs: result.dialogs.length });
+      await e('p.queue(["alpha edited","gamma queue"])');
       const from = await point('.queue-bar-item[data-index="0"] .queue-bar-item-text');
       const to = await point('.queue-bar-item[data-index="1"] .queue-bar-item-text');
       await send("Input.dispatchMouseEvent", { type: "mousePressed", x: from.x, y: from.y, button: "left", clickCount: 1 });
@@ -177,76 +198,82 @@ export async function runPanels(matrix = modes) {
       record("queue promote preserves remaining input", { queue: await e("p.queueTexts()"), operation: promote });
       await e('p.queue(["clear one","clear two"])'); await click('.queue-bar [data-action="clear-all"]');
       await wait("p.queueTexts().length===0 && document.getElementById('queue-bar-host').hidden && !document.querySelector('.queue-bar')", "clear native queue and unmount adapter");
-      const queueOperations = result.requests.slice(requestStart); assert.deepEqual(queueOperations.map((operation: any) => operation.method), ["DELETE", "PATCH", "PATCH", "POST", "DELETE"]);
+      const queueOperations = result.requests.slice(requestStart); assert.deepEqual(queueOperations.map((operation: any) => operation.method), ["DELETE", "DELETE", "PATCH", "POST", "DELETE"]);
       assert.deepEqual(queueOperations[2].body.order, [1, 0]); assert.ok(queueOperations.every((operation: any) => operation.compact === "compact"));
       record("queue clear and unique actions", { count: queueOperations.length, hostHidden: true, rowCount: 0 });
 
-      const openEdit = async (text?: string) => {
-        await click('.queue-bar-item[data-index="0"] [data-action="edit"]');
-        await wait("!!document.querySelector('.wand-ui-dialog-content input')", "owned input dialog");
-        if (text !== undefined) {
-          await e("document.querySelector('.wand-ui-dialog-content input').select();void 0");
-          await send("Input.insertText", { text });
-        }
-      };
-      const saveEdit = () => click(".wand-ui-dialog-actions .wand-ui-button-primary");
       const cancelEdit = () => click(".wand-ui-dialog-actions .wand-ui-button-secondary");
       const configureEdit = (plan: any) => e(`fetch('/_fixture/edit-plan',{method:'POST',headers:{'Content-Type':'application/json'},body:${JSON.stringify(JSON.stringify(plan))}}).then(()=>undefined)`);
       const releaseEdit = () => e("fetch('/_fixture/release',{method:'POST'}).then(()=>undefined)");
-      await e('p.queue(["edit original","keep other"])');
+      const expandQueue = async () => {
+        if (!await e("p.state.queueBarExpanded")) await click(".queue-bar .ant-collapse-header");
+        await e("p.frames()");
+      };
+      await e('p.composer.edit("panels-A",{text:"existing draft"});p.composer.edit("panels-A",{addAttachment:{name:"draft.png",size:3,file:new File(["png"],"draft.png")}});p.queue(["edit original","keep other"])');
+      await expandQueue();
+      await configureEdit({ defer: true });
       const untouched = result.requests.length;
-      await e("window.cancelOrigin=document.querySelector('.queue-bar-item[data-index=\"0\"] [data-action=edit]');void 0");
-      await openEdit("cancelled text"); await cancelEdit();
-      await wait("!document.querySelector('.wand-ui-dialog-content input') && document.activeElement===cancelOrigin", "cancel restores source focus");
-      await openEdit("escaped text");
-      await send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
-      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
-      await wait("!document.querySelector('.wand-ui-dialog-content input') && document.activeElement===cancelOrigin", "Escape restores source focus");
-      assert.equal(result.requests.length, untouched); assert.deepEqual(await e("p.queueTexts()"), ["edit original", "keep other"]);
-      record("queue cancel and Escape restore source focus", { requests: 0, queueKept: true, focusRestored: true });
+      const replies = await e("p.stats.queueReplies");
+      await click('.queue-bar-item[data-index="0"] [data-action="edit"]');
+      await waitRequests(untouched + 1);
+      assert.equal(await e('p.composer.read("panels-A").text'), "existing draft", "not filled before server confirms removal");
+      await e('p.composer.edit("panels-A",{text:"new typing while taking"});void 0');
+      await releaseEdit(); await wait(`p.stats.queueReplies>${replies}`, "retrieve confirmation");
+      await wait('p.composer.read("panels-A").text==="edit original\\nnew typing while taking"', "merge into latest text");
+      assert.equal(await e('p.composer.read("panels-A").attachments[0].name'), "draft.png");
+      record("retrieve confirms then merges latest draft and attachments", { oldDraftNotOverwritten: true, attachmentsKept: true });
 
-      await openEdit("stale edit"); await e('p.serverQueue(["replacement item","keep other"])'); await saveEdit();
-      await wait("!document.querySelector('.wand-ui-dialog-content input')", "stale queue dialog closes");
-      assert.equal(result.requests.length, untouched); assert.deepEqual(await e("p.queueTexts()"), ["replacement item", "keep other"]);
-      await e('p.queue(["edit original","keep other"])');
-      const toastVisible = await e("Array.from(document.querySelectorAll('.ant-notification-notice,.notification-bubble')).some(node=>node.getClientRects().length>0)");
-      assert.equal(toastVisible, true, "stale-edit warning is still visible");
-      const afterWarning = await point('.queue-bar-item[data-index="0"] [data-action="edit"]');
-      assert.equal(afterWarning.hit, true, "visible toast list preserves the queue's pointer target");
-      record("queue changes invalidate editing and toast preserves hit testing", { requests: 0, newerQueueKept: true, toastVisible, queueHit: afterWarning.hit });
-      await openEdit("wrong session edit"); await e('p.switchFixture("panels-B",["other session queue"])'); await saveEdit();
-      await wait("!document.querySelector('.wand-ui-dialog-content input')", "session switch cancels editor");
-      assert.equal(result.requests.length, untouched);
-      assert.deepEqual(await e('p.queueTexts("panels-A")'), ["edit original", "keep other"]);
-      assert.deepEqual(await e("p.queueTexts()"), ["other session queue"]);
-      assert.equal(await e('p.composer.read("panels-B").text'), "new owner's draft");
-      record("session switch during prompt never edits the new owner", { requests: 0, originalQueueKept: true, newDraftKept: true });
-
-      await e('p.switchFixture("panels-A",[])'); await configureEdit({ error: true });
-      await openEdit("recover entered text"); await saveEdit();
-      await wait("document.querySelector('.wand-ui-dialog-content input')?.value==='recover entered text' && document.querySelector('.wand-ui-dialog-content')?.textContent.includes('Synthetic edit failure')", "failure restores entered text in owner dialog");
-      assert.deepEqual(await e("p.queueTexts()"), ["edit original", "keep other"]);
-      await cancelEdit(); assert.equal(result.requests.length, untouched + 1, "failed edit is never retried automatically");
-      record("edit failure keeps entered text and queue without resending", { requests: 1, value: "recover entered text", queueKept: true });
-
-      await configureEdit({ error: true, defer: true }); const failedReplies = await e("p.stats.queueReplies");
-      await openEdit("late failing text"); await saveEdit();
-      await waitRequests(untouched + 2); await wait("!document.querySelector('.wand-ui-dialog-content input')", "edit request waits for transport");
-      await e('p.switchFixture("panels-B",[])'); const newOwner = await e('p.composer.read("panels-B")');
-      await releaseEdit(); await wait(`p.stats.queueReplies>${failedReplies}`, "late failure arrives"); await e("p.frames()");
-      assert.equal(await e("!!document.querySelector('.wand-ui-dialog-content input')"), false, "late error never reopens over another owner");
+      await e('p.queue(["owner original","keep other"])'); await expandQueue();
+      await configureEdit({ defer: true });
+      const lateReplies = await e("p.stats.queueReplies");
+      await click('.queue-bar-item[data-index="0"] [data-action="edit"]');
+      await waitRequests(untouched + 2);
+      await e('p.switchFixture("panels-B",["other session queue"]);p.serverQueue(["newer B queue"])');
+      const newOwner = await e('p.composer.read("panels-B")');
+      await releaseEdit(); await wait(`p.stats.queueReplies>${lateReplies}`, "late owner reply"); await e("p.frames()");
       assert.equal(await e('p.composer.read("panels-B").revision'), newOwner.revision);
       assert.equal(await e('p.composer.read("panels-B").text'), newOwner.text);
-      assert.deepEqual(await e('p.queueTexts("panels-A")'), ["edit original", "keep other"]);
-      record("late edit failure does not overwrite another session", { newOwnerRevision: newOwner.revision, inputKept: true, originalQueueKept: true });
+      assert.ok((await e('p.composer.read("panels-A").text')).includes("owner original"));
+      record("late retrieve belongs only to original session", { newDraftKept: true, originalDraftRecovered: true });
 
-      await e('p.switchFixture("panels-A",[])'); await configureEdit({ defer: true }); const lateReplies = await e("p.stats.queueReplies");
-      await openEdit("older accepted text"); await saveEdit();
+      await e('p.switchFixture("panels-A",[]);p.queue(["older original","keep other"])'); await expandQueue();
+      await configureEdit({ defer: true });
+      const epochReplies = await e("p.stats.queueReplies");
+      await click('.queue-bar-item[data-index="0"] [data-action="edit"]');
       await waitRequests(untouched + 3);
       await e('p.serverQueue(["newer websocket item","keep other"])');
-      await releaseEdit(); await wait(`p.stats.queueReplies>${lateReplies}`, "late accepted response arrives"); await e("p.frames()");
+      await releaseEdit(); await wait(`p.stats.queueReplies>${epochReplies}`, "late accepted removal"); await e("p.frames()");
       assert.deepEqual(await e("p.queueTexts()"), ["newer websocket item", "keep other"]);
-      record("late accepted edit cannot undo newer queue epoch", { newerQueueKept: true, responses: 1 });
+      record("late accepted take cannot undo newer websocket queue", { newerQueueKept: true });
+
+      await e('p.queue(["unknown original","keep other"])'); await expandQueue();
+      await configureEdit({ error: true, defer: true });
+      const failedReplies = await e("p.stats.queueReplies");
+      const beforeUnknown = await e('p.composer.read("panels-A").text');
+      await click('.queue-bar-item[data-index="0"] [data-action="edit"]');
+      await waitRequests(untouched + 4);
+      await releaseEdit(); await wait(`p.stats.queueReplies>${failedReplies}`, "unknown removal response"); await e("p.frames()");
+      assert.equal(await e('p.composer.read("panels-A").text'), beforeUnknown);
+      assert.equal(await e('p.composer.read("panels-A").queueRetrieval.status'), "unknown");
+      assert.equal(await e('document.querySelector(".queue-retrieval").textContent.includes("unknown original")'), true);
+      assert.equal(result.requests.length, untouched + 4, "unknown removal never retries");
+      assert.equal(await e("!!document.querySelector('.wand-ui-dialog-content input')"), false);
+      await click('[data-action="dismiss-retrieved"]');
+      record("unknown take keeps copyable original and never resends", { requests: 1, draftKept: true, originalKept: true });
+
+      await e('p.queue(["IME original"])'); await expandQueue();
+      await configureEdit({ defer: true });
+      const imeReplies = await e("p.stats.queueReplies");
+      await click('.queue-bar-item[data-index="0"] [data-action="edit"]');
+      await waitRequests(untouched + 5);
+      await e('p.state.composerComposing=true;p.composer.edit("panels-A",{text:"候选输入"});document.getElementById("input-box").value="候选输入";void 0');
+      await releaseEdit(); await wait(`p.stats.queueReplies>${imeReplies}`, "receipt during composition"); await e("p.frames()");
+      assert.equal(await e('document.getElementById("input-box").value'), "候选输入");
+      assert.equal(await e('p.composer.read("panels-A").queueRetrieval.status'), "confirmed");
+      await e('p.state.composerComposing=false;p.composer.edit("panels-A",{text:"中文"});void 0');
+      await click('[data-action="restore-retrieved"]');
+      assert.equal(await e('document.getElementById("input-box").value'), "IME original\n中文");
+      record("confirmed retrieve defers active composition and merges only on request", { bufferKept: true });
 
       await e("window.savedGeneric=window.__wandReactUi;window.portalBefore=document.getElementById('wand-react-ui-portals');window.portalToast=p.rawOverlay.toast('Owned portal lease',{duration:0});window.__wandReactUi={dialog(options){p.rawOverlay.dialog(options);throw Error('Synthetic bridge failure after publish')},toast(){},closeTopmost(){return false}};window.dialogOutcome='pending';p.dialog('owned').then(value=>{window.dialogOutcome={value};});void 0");
       const ownedInput = '.wand-ui-dialog-content input[aria-label="Owned fallback layer probe"]';
@@ -298,22 +325,45 @@ export async function runPanels(matrix = modes) {
       assert.equal(await e("Boolean(window.__wandReactUi)"), mode !== "reactUi=0", "rollback retains the disabled generic bridge");
       record("generic confirm and alert remain application dialogs in rollback", { confirmCancelled: true, alertAccepted: true, bridgeEnabled: mode !== "reactUi=0" });
       await e("p.queue([])");
+      await e("p.resetDraft();p.frames()");
 
-      await e('p.todos([{content:"Done",status:"completed"},{content:"Working",activeForm:"正在处理",status:"in_progress"},{content:"Pending",status:"pending"}])');
+      const emptyComposerHeight = await e("document.querySelector('.input-panel').getBoundingClientRect().height");
+      await e('p.queue(["A very long pending message ".repeat(30),"Second pending message"]);p.todos([{content:"Working",activeForm:"正在处理",status:"in_progress"},{content:"Pending",status:"pending"}])');
+      const shared = await e(`(()=>{const t=document.getElementById('todo-progress-toggle').getBoundingClientRect(),q=document.querySelector('.queue-bar .ant-collapse-header').getBoundingClientRect(),s=document.querySelector('.queue-summary');return {overlap:t.left<q.right&&t.right>q.left&&t.top<q.bottom&&t.bottom>q.top,contained:q.left>=0&&q.right<=innerWidth,labelClipped:s.scrollWidth>s.clientWidth};})()`);
+      assert.deepEqual(shared,{overlap:false,contained:true,labelClipped:false},"Todo and pending messages fit together: "+JSON.stringify(shared));
+      record("Todo and queue coexist",shared);
+      await e('p.queue([]);p.todos([{content:"Done",status:"completed"},{content:"Working",activeForm:"正在处理",status:"in_progress"},{content:"Pending",status:"pending"}])');
+      const placement = await e(`(()=>{const t=document.getElementById('todo-progress-toggle'),s=document.querySelector('.composer-surface'),r=t.getBoundingClientRect(),b=s.getBoundingClientRect();return {inSurface:s.contains(t),inert:!!t.closest('[inert]'),left:r.left,right:r.right,top:r.top,bottom:r.bottom,surfaceTop:b.top,surfaceLeft:b.left,surfaceRight:b.right,panelHeight:document.querySelector('.input-panel').getBoundingClientRect().height};})()`);
+      assert.equal(placement.inSurface, true, "Todo belongs to the input surface, not a detached top row");
+      assert.equal(placement.inert, false, "collapsed editing must not disable Todo");
+      assert.ok(placement.left >= placement.surfaceLeft && placement.right <= placement.surfaceRight);
+      assert.ok(placement.bottom <= placement.surfaceTop + 8, "Todo sits on the input top edge");
+      record("todo input-edge placement", { ...placement, emptyComposerHeight });
       assert.equal(await e("document.getElementById('todo-progress-counter').textContent"), "1 / 3");
       assert.equal(await e("document.getElementById('todo-progress-task').textContent"), "正在处理");
       await click("#todo-progress-toggle");
       await wait("document.getElementById('todo-progress-body').classList.contains('expanded')", "native Todo disclosure");
+      assert.equal(await e("document.querySelector('.input-panel').getBoundingClientRect().height"), placement.panelHeight, "opening details never moves the composer");
+      const todoCapture = resolve(root, `output/todo-input-edge/source-${mode.replace(/[^a-z0-9-]/gi, "-")}.png`);
+      mkdirSync(dirname(todoCapture), { recursive: true });
+      writeFileSync(todoCapture, Buffer.from((await send("Page.captureScreenshot", { format: "png" })).data, "base64"));
       const progress = await e(`(()=>{const b=document.getElementById('todo-progress-body'),c=document.querySelector('.chat-messages');return {open:document.getElementById('todo-progress-toggle').getAttribute('aria-expanded'),count:b.querySelectorAll('.ant-list-item').length,current:b.querySelector('[aria-current=step]')?.textContent,circle:document.querySelector('#todo-progress-ring [role=progressbar]')?.getAttribute('aria-valuenow'),padding:parseFloat(c.style.paddingBottom),height:b.offsetHeight,linear:document.querySelector('#todo-progress-fill [role=progressbar]')?.getAttribute('aria-valuenow'),track:document.querySelector('#todo-progress-fill .ant-progress-track')?.style.width};})()`);
       assert.equal(progress.open, "true"); assert.equal(progress.count, 3); assert.equal(progress.current, "Working"); assert.equal(progress.circle, "33"); assert.equal(progress.linear, "33"); assert.equal(progress.track, "33%"); assert.ok(progress.padding >= progress.height);
       record("todo real progress and reading clearance", progress);
       await click("#todo-progress-content .ant-list-item"); assert.equal(await e("document.getElementById('todo-progress-body').classList.contains('expanded')"), true, "inside list preserves expansion");
       await click("#input-box"); assert.equal(await e("document.getElementById('todo-progress-toggle').getAttribute('aria-expanded')"), "false", "outside pointer closes");
+      await click("#input-box");
       await click("#todo-progress-toggle");
       await send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
       await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
       assert.equal(await e("document.getElementById('todo-progress-toggle').getAttribute('aria-expanded')==='false' && document.activeElement===document.getElementById('todo-progress-toggle')"), true, "Escape closes and restores actual toggle focus");
       await e('p.todos([{content:"Next pending",status:"pending"},{content:"Later",status:"pending"}])');
+      await e("p.todoContext()");
+      const lanes = await e(`(()=>{const t=document.getElementById('todo-progress-toggle').getBoundingClientRect(),u=document.querySelector('.composer-usage-line').getBoundingClientRect(),c=document.querySelector('.composer-inline-config').getBoundingClientRect();const overlaps=(a,b)=>a.left<b.right&&a.right>b.left&&a.top<b.bottom&&a.bottom>b.top;return {usageOverlap:overlaps(t,u),configOverlap:overlaps(t,c),contained:t.left>=0&&t.right<=innerWidth};})()`);
+      const laneGeometry = await e(`(()=>{const h=document.querySelector('.input-composer');return {mode:${JSON.stringify(mode)},todo:document.getElementById('todo-progress-toggle').getBoundingClientRect().toJSON(),config:h.querySelector('.composer-inline-config').getBoundingClientRect().toJSON(),runtimeHeight:h.style.getPropertyValue('--composer-runtime-height')};})()`);
+      assert.deepEqual(lanes, { usageOverlap: false, configOverlap: false, contained: true }, "long identity and runtime labels keep independent Todo space: " + JSON.stringify(laneGeometry));
+      const contextCapture = resolve(root, `output/todo-input-edge/context-${mode.replace(/[^a-z0-9-]/gi, "-")}.png`);
+      writeFileSync(contextCapture, Buffer.from((await send("Page.captureScreenshot", { format: "png" })).data, "base64"));
       assert.equal(await e("document.getElementById('todo-progress-task').textContent"), "Next pending");
       await e('p.todos([{content:"Done",status:"completed"}])');
       assert.equal(await e("document.getElementById('todo-progress').classList.contains('hidden') && document.getElementById('todo-progress-body').classList.contains('hidden')"), true);
@@ -321,7 +371,9 @@ export async function runPanels(matrix = modes) {
       assert.equal(await e("document.getElementById('todo-progress').classList.contains('hidden') && !document.getElementById('todo-progress-body').classList.contains('expanded')"), true, "new turn retires the previous checklist");
       record("todo inside/outside/Escape and completed turn", { nativeFocusRestored: true, pendingFallback: true, completeHidden: true, newTurnHidden: true });
 
+      if (queueOnly) continue;
       await e("p.terminal()");
+      if (await e("document.querySelector('.input-composer').hasAttribute('data-pty-collapsed')")) await click('.pty-dock-toggle');
       assert.equal(await e("document.querySelectorAll('.wand-joystick-root').length"), 0);
       const row = await e(`(()=>{const h=document.getElementById('terminal-shortcuts'),r=h.getBoundingClientRect();return {count:document.querySelectorAll('#terminal-shortcuts').length,inputHidden:document.getElementById('input-box').closest('.composer-input-wrap').inert,singleLine:new Set([...h.querySelectorAll('[data-terminal-key]:not([hidden])')].map(b=>b.getBoundingClientRect().top)).size===1,contained:r.left>=0&&r.right<=innerWidth,scrollable:h.scrollWidth>h.clientWidth};})()`);
       assert.equal(row.count, 1); assert.equal(row.inputHidden, true); assert.equal(row.singleLine, true); assert.equal(row.contained, true); assert.equal(row.scrollable,false);
@@ -432,6 +484,10 @@ export async function runPanels(matrix = modes) {
   }
   return result;
 }
+
+test("pending-message summary stays compact and preserves queue actions beside Todo in five Chrome modes", { timeout: 360000, skip: process.env.WAND_QUEUE_BROWSER !== "1" }, async () => {
+  assert.equal((await runPanels(modes, true)).ok, true);
+});
 
 test("Ant composer panels preserve native queue, Todo, terminal and notice actions in five Chrome modes", { timeout: 360000, skip: process.env.WAND_CHAT_BROWSER !== "1" }, async () => {
   assert.equal((await runPanels()).ok, true);

@@ -6,6 +6,7 @@ import { workspaceSessionProvider } from "../workspaces/session-order";
 import type { TaskDirectoryGroup, WorkspaceSessionSummary } from "../workspaces/types";
 import type { ConversationListFilter } from "./state";
 import { isSessionActive } from "../workspaces/sidebar-display-mode";
+import { isSystemAiCall } from "../../../system-ai-call.js";
 
 export interface PersonSessionEntry extends SidebarRecentEntry {
   readonly archived: boolean;
@@ -13,7 +14,7 @@ export interface PersonSessionEntry extends SidebarRecentEntry {
 export type PersonSessionIndex = ReadonlyMap<string, readonly PersonSessionEntry[]>;
 
 /** Stable employee IDs own sessions. Names, paths, group membership and legacy DM channel IDs do not. */
-export function indexPersonSessions(groups: readonly TaskDirectoryGroup[]): PersonSessionIndex {
+export function indexPersonSessions(groups: readonly TaskDirectoryGroup[], systemSessions: readonly WorkspaceSessionSummary[] = []): PersonSessionIndex {
   const index = new Map<string, PersonSessionEntry[]>();
   const seen = new Set<string>();
   const push = (group: TaskDirectoryGroup, session: WorkspaceSessionSummary, taskName: string | null, archived = false): void => {
@@ -30,6 +31,13 @@ export function indexPersonSessions(groups: readonly TaskDirectoryGroup[]): Pers
     }
     for (const session of group.standaloneSessions) push(group, session, null);
     for (const session of group.archivedSessions ?? []) push(group, session, null, true);
+  }
+  // Employee-only projection. Never add these synthetic containers to the shared
+  // workspace store, where feature audit logs must remain excluded.
+  for (const session of systemSessions) {
+    if (!isSystemAiCall(session)) continue;
+    push({ workspaceId: `system-calls:${session.employeeId}`, workspaceName: "系统调用记录",
+      workspaceCwd: session.cwd ?? "", synthetic: true, tasks: [], standaloneSessions: [] }, session, null);
   }
   for (const entries of index.values()) entries.sort(compareRecentEntries);
   return index;

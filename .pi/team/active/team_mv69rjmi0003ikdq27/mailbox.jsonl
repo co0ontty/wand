@@ -1,1 +1,0 @@
-{"at":1791871399698,"runId":"team_mv69rjmi0003ikdq27","message":"本轮检查确认你仍推进实际编辑，不取消。隔离tsc共有4条TS2307因ignored embedded-assets.ts未随git worktree检出；负责人已将主仓既有生成文件原样SHA核对后原子复制到三worktree，属环境前置，没改手写源码。请直接完成已有修改和验证，不再重侦察；复跑tsc，预算收尾优先保存真实patch/handoff/实质final。","messageRef":"92b499a5-1271-4bb1-a8c8-48e6e652d130","targetRoleId":"route-a","broadcast":false}

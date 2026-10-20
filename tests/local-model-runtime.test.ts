@@ -4,11 +4,10 @@ import path from "node:path";
 import os from "node:os";
 import test from "node:test";
 import { DecisionService } from "../src/decision-service.ts";
-import { SpeechService } from "../src/speech-service.ts";
 import { LocalModelSetupService } from "../src/local-model-setup.ts";
 import type { LocalDecisionConfig } from "../src/decision-types.ts";
 
-test("real managed setup verifies and initializes existing LAYA/MLX and whisper without enabling or modifying global configuration", {
+test("real managed setup verifies and initializes existing LAYA/MLX without enabling or modifying global configuration", {
   skip: process.env.WAND_LOCAL_MODEL_REAL !== "1", timeout: 180_000,
 }, async t => {
   // Read only the trusted existing model/runtime configuration, never output the full file or secrets.
@@ -23,18 +22,15 @@ test("real managed setup verifies and initializes existing LAYA/MLX and whisper 
     "models--aac6fef--laya-multilingual-mlx", "snapshots", "f2b4faf51023039425946074e2cf1361d2db11d5");
   assert.ok(pythonPath && existsSync(pythonPath) && existsSync(modelPath), "Install isolated LAYA fixtures or supply explicit trusted test paths.");
   let config: LocalDecisionConfig = { enabled: false, pythonPath, modelPath };
-  const root = path.resolve("output/server-speech/host"), pref = new Map<string, unknown>();
+  const root = path.resolve("output/local-models/host");
   const decisions = new DecisionService(config);
-  const speech = new SpeechService({ getPreference: (key, fallback) => (pref.get(key) ?? fallback) as typeof fallback,
-    setPreference: (key, value) => { pref.set(key, value); } }, root);
-  const manager = new LocalModelSetupService({ configDir: root, decisions, speech, decisionConfig: () => config,
+  const manager = new LocalModelSetupService({ configDir: root, decisions, decisionConfig: () => config,
     configureDecision: next => { decisions.configure(next); config = next; } });
-  t.after(() => { manager.dispose(); decisions.dispose(); speech.dispose(); });
+  t.after(() => { manager.dispose(); decisions.dispose(); });
   const before = await manager.status();
   assert.equal(before.laya.downloaded, true); assert.equal(before.laya.runtimeAvailable, true);
-  assert.equal(before.speech.downloaded, true); assert.equal(before.speech.runtimeAvailable, true);
   const cases = [];
-  for (const kind of ["laya", "speech"] as const) {
+  for (const kind of ["laya"] as const) {
     const started = performance.now(); manager.start(kind, "initialize", {});
     let done = false;
     for (let count = 0; count < 600; count += 1) {

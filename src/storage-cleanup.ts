@@ -21,7 +21,20 @@ export interface CleanupReport {
   allocatedBytes: number;
   skipped: number;
   issues: string[];
-  byKind: Partial<Record<TempKind | "upload" | "diagnostic-log", number>>;
+  byKind: Partial<Record<TempKind | "upload" | "diagnostic-log" | "distribution-package" | "native-run" | "migration-snapshot", number>>;
+}
+
+/** pi-native 回收结果（与 PiTmuxHost.collectGarbage 的返回一致）。 */
+export interface PiNativeGcReport {
+  removedSlots: number;
+  removedTurns: number;
+  freedBytes: number;
+}
+
+/** 分发包清理结果（由 DistributionManager 提供，只保留最新一套产物）。 */
+export interface DistributionPruneResult {
+  deleted: string[];
+  freedBytes: number;
 }
 
 interface TreeStats { logicalBytes: number; allocatedBytes: number; latest: number; dev: number; ino: number }
@@ -35,6 +48,21 @@ interface CleanupOptions {
   uploads?: Pick<UploadRepository, "listManagedUploads" | "managedUploadReferenced" | "observeManagedUpload" | "forgetManagedUpload">;
   uploadsActive?: () => boolean;
   onUploadRemoved?: (cwd: string) => void;
+  /**
+   * 清理分发目录里的历史构建包（Android APK / macOS zip+dmg / iOS IPA）。
+   * 只在 apply 时调用：预览不能删文件。保留规则由 DistributionManager 统一持有，
+   * 这里不重复一份「哪个是最新」的判断。
+   */
+  pruneDistributionArtifacts?: () => Promise<DistributionPruneResult>;
+  /**
+   * 回收 pi-native 下废弃的回合目录。同样只在 apply 时调用，失败不阻断其他回收。
+   */
+  collectNativeArtifacts?: () => PiNativeGcReport | null;
+  /**
+   * 修剪迁移前 SQLite 快照（旧版本遗留的无上限堆积）。迁移成功路径已经在
+   * storage-schema 里修剪一次，这里只是把历史遗留的一起收掉。
+   */
+  pruneMigrationSnapshots?: () => { deleted: string[]; freedBytes: number };
 }
 
 async function openPaths(): Promise<string[]> {
@@ -164,7 +192,56 @@ export class StorageCleanup {
         report.byKind[file.kind] = (report.byKind[file.kind] ?? 0) + 1;
       } catch { report.skipped++; }
     }
+    await this.sweepDistributionArtifacts(apply, report);
     return report;
+  }
+
+  /**
+   * 历史构建包回收。这是唯一需要把「版本比较」交给外部的清理：哪个包是「最新」
+   * 必须和更新检查同一个答案，所以保留规则住在 DistributionManager，这里只调用。
+   * 失败不阻断其他回收。
+   */
+  private async sweepDistributionArtifacts(apply: boolean, report: CleanupReport): Promise<void> {
+    if (!apply || this.stopped) return;
+    const detail: string[] = [];
+    if (this.options.pruneDistributionArtifacts) {
+      try {
+        const pruned = await this.options.pruneDistributionArtifacts();
+        if (pruned.deleted.length > 0) {
+          report.removed += pruned.deleted.length;
+          report.logicalBytes += pruned.freedBytes;
+          report.byKind["distribution-package"] = pruned.deleted.length;
+          detail.push(`分发构建包 ${pruned.deleted.length} 个（${(pruned.freedBytes / 1024 / 1024).toFixed(1)} MB）：${pruned.deleted.join(", ")}`);
+        }
+      } catch { report.issues.push("Distribution package cleanup failed; packages preserved."); }
+    }
+    if (this.options.collectNativeArtifacts) {
+      try {
+        const native = this.options.collectNativeArtifacts();
+        const removed = (native?.removedSlots ?? 0) + (native?.removedTurns ?? 0);
+        if (native && removed > 0) {
+          report.removed += removed;
+          report.logicalBytes += native.freedBytes;
+          report.byKind["native-run"] = removed;
+          detail.push(`Pi 原生产物 ${removed} 个（${(native.freedBytes / 1024 / 1024).toFixed(1)} MB）`
+            + `：slot ${native.removedSlots} 个 / turn ${native.removedTurns} 个`);
+        }
+      } catch { report.issues.push("Native run artifact cleanup failed; artifacts preserved."); }
+    }
+    if (this.options.pruneMigrationSnapshots) {
+      try {
+        const snapshots = this.options.pruneMigrationSnapshots();
+        if (snapshots.deleted.length > 0) {
+          report.removed += snapshots.deleted.length;
+          report.logicalBytes += snapshots.freedBytes;
+          report.byKind["migration-snapshot"] = snapshots.deleted.length;
+          detail.push(`迁移快照 ${snapshots.deleted.length} 份（${(snapshots.freedBytes / 1024 / 1024).toFixed(1)} MB）：${snapshots.deleted.join(", ")}`);
+        }
+      } catch { report.issues.push("Migration snapshot cleanup failed; snapshots preserved."); }
+    }
+    // 后台删除必须留痕迹：这些路径不是用户主动触发，没有日志就无法事后追溯删了什么。
+    if (detail.length > 0) process.stdout.write(`[storage-cleanup] 已回收 ${detail.join("；")}\n`);
+    for (const issue of report.issues) process.stdout.write(`[storage-cleanup] ${issue}\n`);
   }
 
   private async sweepTemporary(apply: boolean): Promise<CleanupReport> {
@@ -206,7 +283,7 @@ export class StorageCleanup {
             if (!entry.isDirectory()) { report.skipped++; continue; }
             const lease = readTemporaryLease(directory);
             if (active(lease)) { report.skipped++; continue; }
-            const stat = await stats(directory, (await lstat(root)).dev, lease.kind === "test-run" || lease.kind === "speech-setup");
+            const stat = await stats(directory, (await lstat(root)).dev, lease.kind === "test-run");
             if (stat.latest >= cutoff) { report.skipped++; continue; }
             candidates.push({ root, directory, lease, stat });
           } catch (error) {
@@ -234,7 +311,7 @@ export class StorageCleanup {
         const lease = readTemporaryLease(candidate.directory);
         if (lease.id !== candidate.lease.id || active(lease)
           || opened.some(file => file === candidate.directory || file.startsWith(candidate.directory + path.sep))) { report.skipped++; continue; }
-        const latest = await stats(candidate.directory, candidate.stat.dev, lease.kind === "test-run" || lease.kind === "speech-setup");
+        const latest = await stats(candidate.directory, candidate.stat.dev, lease.kind === "test-run");
         if (latest.ino !== candidate.stat.ino || latest.latest >= cutoff) { report.skipped++; continue; }
         // The final synchronous lease/PID/path check leaves no await before removal starts.
         validateTemporaryRoot(candidate.root);
@@ -249,7 +326,7 @@ export class StorageCleanup {
   }
 }
 
-export function createStorageCleanup(configDir: string, options: Pick<CleanupOptions, "uploads" | "uploadsActive" | "onUploadRemoved"> = {}): StorageCleanup {
+export function createStorageCleanup(configDir: string, options: Pick<CleanupOptions, "uploads" | "uploadsActive" | "onUploadRemoved" | "pruneDistributionArtifacts" | "collectNativeArtifacts" | "pruneMigrationSnapshots"> = {}): StorageCleanup {
   const root = configTemporaryRoot(configDir);
   return new StorageCleanup({ roots: [root, systemTemporaryRoot(), testTemporaryRoot()], configDirectory: path.dirname(path.dirname(root)), ...options });
 }

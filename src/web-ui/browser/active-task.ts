@@ -5,6 +5,7 @@
 // 标签栏，刷新后没了」，主区退回一条裸会话。任务 id 单独记一个键，因为刷新时
 // 会话可能已被关闭、任务也可能已经空了，只靠选中会话推不出当前任务。
 
+import { restorePageNavigation } from "./page-selection";
 import { workspacesStore } from "../react/workspaces/controller";
 import { httpWorkspacesRepository } from "../react/workspaces/repository";
 import { findTaskContext, taskOpenPayload } from "../react/workspaces/session-open";
@@ -43,6 +44,8 @@ const selectionOnLoad = readStoredSelection();
  *   读到的那一份。
  */
 export async function restoreActiveTask(selection: string | null = selectionOnLoad): Promise<void> {
+  if (isEmbeddedTerminalView()) return;
+  if (await restorePageNavigation()) return;
   const taskId = readActiveTaskId();
   if (!taskId) return;
   // 原生嵌入终端（?embed=terminal）只要一个终端黑窗，不恢复网页侧的任务壳。

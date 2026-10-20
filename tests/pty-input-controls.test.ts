@@ -9,7 +9,7 @@ test("latched modifiers stay enabled across letters and input views, and do not 
   assert.equal(modifiedPtySequence("b", ptyInputState.read(owner)), "\x02");
   ptyInputState.update(owner, { mode: "keyboard" });
   assert.equal(ptyInputState.read(owner).ctrl, true);
-  assert.deepEqual(ptyInputState.read("modifier-owner-B"), {mode:"shortcuts",ctrl:false,shift:false});
+  assert.deepEqual(ptyInputState.read("modifier-owner-B"), {mode:"shortcuts",ctrl:false,shift:false,open:false});
   ptyInputState.toggle(owner, "ctrl");
   assert.equal(modifiedPtySequence("a", ptyInputState.read(owner)), null);
 });

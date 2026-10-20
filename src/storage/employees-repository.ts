@@ -10,8 +10,6 @@ import { EMPLOYEE_KNOWLEDGE_MAX_ENTRIES, type EmployeeKnowledgeEntry } from "../
 import { FIXED_EMPLOYEE_AVATARS, employeeAvatarValue, fixedEmployeeAvatar, isFixedAvatarEmployee } from "../fixed-employee-avatar.js";
 import { HR_EMPLOYEE_KEY } from "../hr-employee-identity.js";
 import { hrEmployeeDefinition } from "../hr-employee.js";
-import { speechPolisherDefinition } from "../speech-polisher-employee.js";
-import { SPEECH_POLISHER_KEY } from "../speech-polisher-identity.js";
 import { SYSTEM_EMPLOYEE_KEY, systemEmployeeDefinition, systemEmployeeDefaultAgents, systemEmployeeSeedAgents, type SystemEmployeeSeed } from "../system-employee.js";
 import type { WandTaskAgent } from "../task-types.js";
 import { SessionProvider } from "../types.js";
@@ -95,16 +93,10 @@ export class EmployeeRepository {
     return existing;
   }
 
-  /** Seed the SDK free group once, then preserve independent user choices. */
-  ensureSpeechPolisherEmployee(): SiliconEmployee {
-    const existing = this.getSystemSiliconEmployee(SPEECH_POLISHER_KEY);
-    const definition = speechPolisherDefinition(new Date().toISOString(), existing);
-    if (!existing || existing.name !== definition.name || existing.duty !== definition.duty || existing.prompt !== definition.prompt
-      || existing.avatar !== definition.avatar || existing.archivedAt || !existing.agents.length) {
-      this.saveSiliconEmployee(definition);
-      return definition;
-    }
-    return existing;
+  /** The speech polisher built-in was removed; archive (never delete) a leftover row so history stays readable. */
+  retireLegacySpeechPolisherEmployee(): void {
+    const now = new Date().toISOString();
+    this.db.prepare("UPDATE silicon_employees SET archived_at = ?, updated_at = ? WHERE system_key = 'wand-speech-polisher' AND archived_at IS NULL").run(now, now);
   }
 
   /** HR owns recruitment independently; seed from configured system candidates once. */
@@ -143,10 +135,14 @@ export class EmployeeRepository {
     const tags = isBuiltinSiliconEmployee(employee)
       ? siliconEmployeeTags(employee)
       : parseSiliconEmployeeTags(employee.tags ?? []);
+    const systemSessionLimit = employee.systemSessionLimit === undefined ? existing?.systemSessionLimit ?? null : employee.systemSessionLimit;
+    if (systemSessionLimit !== null && (!Number.isInteger(systemSessionLimit) || systemSessionLimit < 0 || systemSessionLimit > 10_000)) {
+      throw new Error("系统调用历史保留上限必须是 0 到 10000 的整数，或 null（不限）。");
+    }
     this.db.prepare(
       `INSERT INTO silicon_employees (
-         id, name, duty, prompt, avatar, agents_json, system_key, archived_at, created_at, updated_at, tags_json
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         id, name, duty, prompt, avatar, agents_json, system_key, archived_at, created_at, updated_at, tags_json, system_session_limit
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          name = excluded.name,
          duty = excluded.duty,
@@ -154,6 +150,7 @@ export class EmployeeRepository {
          avatar = excluded.avatar,
          agents_json = excluded.agents_json,
          tags_json = excluded.tags_json,
+         system_session_limit = excluded.system_session_limit,
          system_key = excluded.system_key,
          archived_at = excluded.archived_at,
          updated_at = excluded.updated_at`
@@ -170,6 +167,7 @@ export class EmployeeRepository {
       employee.createdAt,
       employee.updatedAt,
       JSON.stringify(tags),
+      systemSessionLimit,
     );
   }
 

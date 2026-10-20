@@ -45,7 +45,7 @@ test("minimal composer preserves drafts and owned popups; PTY input and shortcut
       const runtime = await browser.evaluate(`(()=>{const r=document.querySelector('.composer-inline-config'),m=r.querySelector('[data-mode-control-pill=model]'),t=r.querySelector('[data-mode-control-pill=thinking]');const box=r.getBoundingClientRect(),attach=document.getElementById('attach-btn').getBoundingClientRect();return {height:box.height,model:m.textContent,thinking:t.textContent,sameActionRow:Math.abs((box.top+box.bottom)/2-(attach.top+attach.bottom)/2)<1,floating:getComputedStyle(r).position==='absolute',modelWidth:m.getBoundingClientRect().width,overflow:document.documentElement.scrollWidth>innerWidth}})()`);
       assert.ok(runtime.height >= 24, "model/thinking remain visible while the editor is collapsed");
       assert.equal(runtime.floating, true, "runtime labels float at the upper right without occupying the attachment/action row");
-      assert.ok(runtime.modelWidth >= 60, "narrow layouts must not squeeze the model name to zero width");
+      assert.ok(runtime.modelWidth >= 60, "narrow layouts must not squeeze the model name to zero width: " + JSON.stringify({ name, ...runtime }));
       assert.match(runtime.model, /4[.-]6/);
       assert.match(runtime.thinking, /中/);
       assert.equal(runtime.overflow, false);
@@ -62,10 +62,26 @@ test("minimal composer preserves drafts and owned popups; PTY input and shortcut
       await browser.send("Input.insertText", { text: "未发送草稿\n第二行" });
       await browser.evaluate("p.composer.edit(p.state.selectedId,{text:original.value});void 0");
       assert.equal(await browser.evaluate("document.querySelector('.input-composer').dataset.composerExpanded"), "true");
+      // Real native input events must not republish companion/portal chrome or
+      // remeasure once in the native handler and again in Sender's layout effect.
+      await browser.settle();
+      await browser.evaluate(`(()=>{window.typingMeasurements=0;window.companionChanges=0;
+        window.originalComputedStyle=window.getComputedStyle;
+        window.getComputedStyle=function(node,...args){if(node===original)typingMeasurements++;return originalComputedStyle.call(window,node,...args)};
+        window.companionObserver=new MutationObserver(records=>companionChanges+=records.length);
+        const companion=document.querySelector('[data-composer-avatar-host]');
+        if(companion)companionObserver.observe(companion,{subtree:true,childList:true,attributes:true,characterData:true});})()`);
+      for (const text of "typing0123") await browser.send("Input.insertText", { text });
+      await browser.settle();
+      const typing = await browser.evaluate(`(()=>{companionObserver.disconnect();window.getComputedStyle=originalComputedStyle;return {measurements:typingMeasurements,companionChanges,value:original.value,draft:p.composer.read(p.state.selectedId).text}})()`);
+      assert.ok(typing.measurements <= 10, "at most one textarea measurement per native edit: " + JSON.stringify({ name, ...typing }));
+      assert.equal(typing.companionChanges, 0, "typing never synchronously rerenders the identity/status tree");
+      assert.equal(typing.value, "未发送草稿\n第二行typing0123");
+      assert.equal(typing.draft, typing.value, "native edit and revision owner agree");
       await browser.screenshot(join(output, `${name}-chat-edit.png`));
       await browser.key("Escape"); await browser.wait("document.querySelector('.input-composer').dataset.composerExpanded==='false'");
       assert.match(await browser.evaluate("document.querySelector('.composer-compact-entry').textContent"), /草稿/);
-      assert.equal(await browser.evaluate("original.value"), "未发送草稿\n第二行");
+      assert.equal(await browser.evaluate("original.value"), "未发送草稿\n第二行typing0123");
       await browser.click(".composer-compact-entry");
       // Failed delivery remains editable, and acknowledgement cannot clear newer input.
       await browser.evaluate("document.getElementById('send-input-button').dataset.phase='failed';void 0"); await browser.settle();
@@ -79,6 +95,11 @@ test("minimal composer preserves drafts and owned popups; PTY input and shortcut
       await browser.wait("document.querySelector('.input-composer').dataset.composerExpanded==='false'", "accepted empty draft collapses");
       await browser.evaluate("p.state.sessions[0].sessionKind='pty';p.state.sessions[0].status='running';p.state.currentView='terminal';p.state.terminalInteractive=true;window.packets=[];p.state.ws={readyState:1,send:value=>packets.push(JSON.parse(value))};minimalFixture.update();void 0");
       await browser.settle();
+      // The PTY dock rests collapsed; the keys return only when asked for.
+      await browser.evaluate("minimalFixture.ptyInputState.update(p.state.selectedId,{open:false});void 0");
+      await browser.wait("document.querySelector('.input-composer').dataset.ptyCollapsed==='true'", "PTY dock rests collapsed");
+      await browser.click(".pty-dock-toggle");
+      await browser.wait("!document.querySelector('.input-composer').dataset.ptyCollapsed", "dock expands on demand");
       await browser.evaluate("window.modeToggle=document.querySelector('.pty-input-mode-toggle');document.addEventListener('keydown',p.captureTerminalInput,true);void 0");
       const keys = await browser.evaluate(`(()=>{const t=modeToggle.getBoundingClientRect(),k=document.getElementById('terminal-shortcuts'),h=document.querySelector('.input-composer');return{mode:h.dataset.ptyInputMode,keysWidth:k.getBoundingClientRect().width,inputInert:original.closest('.composer-input-wrap').inert,keysInert:k.inert,overflow:document.documentElement.scrollWidth>innerWidth,node:original===document.getElementById('input-box'),toggle:{x:t.x,y:t.y,width:t.width,height:t.height}}})()`);
       const visible = await browser.evaluate("[...document.querySelectorAll('[data-terminal-key]')].filter(n=>!n.hidden).map(n=>n.dataset.terminalKey)");
@@ -147,7 +168,7 @@ test("minimal composer preserves drafts and owned popups; PTY input and shortcut
       if (reduced) assert.ok(evidence.every((a: any) => a.duration <= .01), "reduced motion permits only the library's instantaneous alignment lifecycle");
       else assert.ok(evidence.length > 0, "state change produces real CSS transitions");
       await browser.settle(); await browser.key("Escape");
-      await browser.evaluate("document.removeEventListener('keydown',p.captureTerminalInput,true);p.state.ws=null;p.state.currentView='chat';void 0");
+      await browser.evaluate("minimalFixture.ptyInputState.update(p.state.selectedId,{mode:'shortcuts',open:false,ctrl:false,shift:false});document.removeEventListener('keydown',p.captureTerminalInput,true);p.state.ws=null;p.state.currentView='chat';void 0");
     }
     assert.deepEqual(browser.errors, []);
   } finally { await browser.close(); server.closeAllConnections(); await new Promise<void>(done => server.close(() => done())); rmSync(temp, { recursive: true, force: true }); }

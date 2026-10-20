@@ -9,7 +9,9 @@ import { mountBrowserButtons } from "../../src/web-ui/browser/library-buttons.js
 import { installReactUiStyles } from "../../src/web-ui/react/styles.js";
 import { startReactUi } from "../../src/web-ui/react/index.js";
 import { wandOverlay } from "../../src/web-ui/react/overlay-controller.js";
-import { updateSessionSnapshot } from "../../src/web-ui/browser/session-engine.js";
+import { refreshComposerConfigControls, restoreComposerStateForSession, updateSessionSnapshot } from "../../src/web-ui/browser/session-engine.js";
+import { syncComposerCompanion } from "../../src/web-ui/browser/composer-sender-adapter.js";
+import { mountComposerSurfaces } from "../../src/web-ui/browser/composer-surface-adapter.js";
 
 installReactUiStyles();
 const frames = async () => {
@@ -46,7 +48,7 @@ function publish(next: any): void {
     host.innerHTML = renderAppShell(); document.body.appendChild(host);
     document.getElementById("output")?.classList.add("hidden");
     document.getElementById("chat-output")?.classList.remove("hidden");
-    mountBrowserButtons(host); attachQueueBarDelegates(); attachQueueBarDelegates();
+    mountBrowserButtons(host); mountComposerSurfaces(); attachQueueBarDelegates(); attachQueueBarDelegates();
     startReactUi();
     doRenderChat(false); await frames();
   },
@@ -54,6 +56,12 @@ function publish(next: any): void {
     await fetch("/_fixture/queue", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(items) });
     const next = Object.assign({}, state.sessions[0], { queuedMessages: items });
     publish(next); updateQueueBar(); await frames();
+  },
+  resetDraft() {
+    const id = state.selectedId!;
+    composer.edit(id, { clear: true });
+    while (composer.read(id).attachments.length) composer.edit(id, { removeAttachment: 0 });
+    restoreComposerStateForSession(id);
   },
   queueTexts(id = state.selectedId) { return state.sessions.find(item => item.id === id)?.queuedMessages || []; },
   serverQueue(items: string[]) {
@@ -80,6 +88,12 @@ function publish(next: any): void {
     ] } as any);
     const next = Object.assign({}, session(), { messages, messageTotal: messages.length });
     publish(next); resetChatRenderCache(); doRenderChat(false); await frames();
+  },
+  async todoContext() {
+    Object.assign(state.sessions[0], { employeeId: "todo-fixture", employeeName: "很长的员工姓名用于核对输入区布局", employeeAvatar: "cat:1" });
+    syncComposerCompanion();
+    refreshComposerConfigControls(state.sessions[0], "default", "very-long-model-name-for-layout-check", "high");
+    await frames();
   },
   async terminal() {
     publish(Object.assign({}, session(), { sessionKind: "pty" }));

@@ -47,10 +47,10 @@ test("sessions archive and restore through the HTTP routes and report their stat
   try {
     const { port } = server.address() as AddressInfo;
     const base = `http://127.0.0.1:${port}`;
-    const created = await (await fetch(`${base}/api/structured-sessions`, {
+    const created = await (await fetch(`${base}/api/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ cwd: root, provider: "opencode", mode: "assist" }),
+      body: JSON.stringify({ kind: "structured", cwd: root, provider: "opencode", mode: "assist" }),
     })).json() as { id: string };
     const id = created.id;
 

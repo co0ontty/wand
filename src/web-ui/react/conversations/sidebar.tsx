@@ -15,7 +15,7 @@ import { conversationsRepository, notifyConversationChanges, useConversations } 
 import { ConversationMorphIcon, ConversationPanel } from "./controls";
 import { GroupEditor } from "./group-editor";
 import { useUserProfile } from "../user-profile-repository";
-import { taskGroupsStore, useTaskGroups } from "../workspaces/task-groups-store";
+import { taskGroupsStore, useTaskGroupsAfterIdle } from "../workspaces/task-groups-store";
 import { SidebarSessionMenu } from "../workspaces/sidebar-session-menu";
 import { SidebarSurfacesContext } from "../workspaces/sidebar-popup-owner";
 import { archiveSidebarSession, deleteSidebarSessions } from "../workspaces/sidebar-session-actions";
@@ -143,10 +143,10 @@ export function ConversationSidebarList({ compact, enabled = true, onNavigate, o
   selectedSessionId?: string | null;
   sessionTitles?: Readonly<Record<string, string>>;
 }): React.ReactElement {
-  const { items, error, loaded, refresh } = useConversations();
-  const { groups: sessionGroups } = useTaskGroups();
-  const sessionIndex = React.useMemo(() => indexPersonSessions(sessionGroups), [sessionGroups]);
-  const activitySessions = React.useMemo(() => conversationActivitySessions(sessionGroups), [sessionGroups]);
+  const { items, systemSessions, error, loaded, refresh } = useConversations(true);
+  const { groups: sessionGroups } = useTaskGroupsAfterIdle();
+  const sessionIndex = React.useMemo(() => indexPersonSessions(sessionGroups, systemSessions), [sessionGroups, systemSessions]);
+  const activitySessions = React.useMemo(() => [...conversationActivitySessions(sessionGroups), ...systemSessions], [sessionGroups, systemSessions]);
   const { employees } = useSiliconEmployees({ enabled });
   const ui = useConversationUi();
   const query = (ui.filters["list-query"] ?? "").trim().toLowerCase();

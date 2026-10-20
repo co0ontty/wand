@@ -6,6 +6,8 @@ import { sha256Hex } from "../sha256";
 import { subscribeAiTeamRunChanges } from "../ai-teams/repository";
 import { subscribeSiliconEmployeeDefinitionChanges } from "../agents/employee-repository";
 import { subscribeTaskChanges } from "../task-changes";
+import { isSystemAiCall } from "../../../system-ai-call.js";
+import type { WorkspaceSessionSummary } from "../workspaces/types";
 
 export class UnconfirmedConversationError extends Error {
   readonly __wandAmbiguousDelivery = true;
@@ -33,6 +35,10 @@ const listeners = new Set<() => void>();
 export function notifyConversationChanges(): void { for (const listener of listeners) listener(); }
 export const conversationsRepository = {
   list: () => requestJson<{ conversations: ConversationSummary[] }>("/api/conversations").then((r) => r.conversations),
+  // Workspaces deliberately omit system calls. Read their canonical metadata, not
+  // conversation transcripts or a second task projection, for the employee list.
+  systemSessions: () => requestJson<WorkspaceSessionSummary[]>("/api/sessions")
+    .then(sessions => sessions.filter(session => isSystemAiCall(session) && !!session.employeeId)),
   async updateListState(id: string, patch: { pinned?: boolean; dissolved?: boolean }): Promise<ConversationSummary> {
     const value = await requestJson<ConversationSummary>(`/api/conversations/${encodeURIComponent(id)}/list-state`, jsonBody(patch, "PATCH"));
     notifyConversationChanges(); return value;
@@ -80,21 +86,25 @@ export const conversationsRepository = {
   },
 };
 
-export function useConversations(): { items: ConversationSummary[]; error: string; loaded: boolean; refresh(): void } {
+export function useConversations(includeSystemSessions = false): { items: ConversationSummary[]; systemSessions: WorkspaceSessionSummary[]; error: string; loaded: boolean; refresh(): void } {
   const [items, setItems] = React.useState<ConversationSummary[]>([]);
+  const [systemSessions, setSystemSessions] = React.useState<WorkspaceSessionSummary[]>([]);
   const [error, setError] = React.useState("");
   const [loaded, setLoaded] = React.useState(false);
   const epoch = React.useRef(0);
   const load = React.useCallback(async () => {
     const current = ++epoch.current;
-    try { const next = await conversationsRepository.list(); if (current === epoch.current) { setItems(next); setLoaded(true); setError(""); } }
-    catch (cause) { if (current === epoch.current) setError(cause instanceof Error ? cause.message : "对话列表读取失败。"); }
-  }, []);
+    try {
+      const [next, calls] = await Promise.all([conversationsRepository.list(),
+        includeSystemSessions ? conversationsRepository.systemSessions() : Promise.resolve([])]);
+      if (current === epoch.current) { setItems(next); setSystemSessions(calls); setLoaded(true); setError(""); }
+    } catch (cause) { if (current === epoch.current) setError(cause instanceof Error ? cause.message : "对话列表读取失败。"); }
+  }, [includeSystemSessions]);
   React.useEffect(() => {
     void load(); listeners.add(load);
     const unsubscribes = [subscribeAiTeamRunChanges(load), subscribeTaskChanges(load), subscribeSiliconEmployeeDefinitionChanges(load)];
     const timer = window.setInterval(() => { if (!document.hidden) void load(); }, 6000);
     return () => { ++epoch.current; listeners.delete(load); unsubscribes.forEach((f) => f()); clearInterval(timer); };
   }, [load]);
-  return { items, error, loaded, refresh: () => { void load(); } };
+  return { items, systemSessions, error, loaded, refresh: () => { void load(); } };
 }

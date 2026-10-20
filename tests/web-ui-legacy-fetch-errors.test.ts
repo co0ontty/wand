@@ -276,7 +276,7 @@ function loadInput(
   });
 }
 
-test("sendOrStart 在 /api/commands 返回 4xx/5xx 时不进入成功分支且保留草稿", async () => {
+test("sendOrStart 在新会话创建返回 4xx/5xx 时不进入成功分支且保留草稿", async () => {
   const cases: Array<{ name: string; response: () => any; expected: RegExp }> = [
     { name: "500 非 JSON 错误页", response: () => htmlResponse(500), expected: /500/ },
     { name: "409 JSON 错误体", response: () => jsonResponse({ error: "会话数量已达上限。" }, 409), expected: /会话数量已达上限/ },

@@ -1,6 +1,0 @@
-Lane mailbox for iOS 实现与测试 (role ios)
-Run: team_mva6m5f500015ho5e5
-Lane: ios-1792107636931
-Token: 08eb305a-b544-49c0-9385-698466c35fab
-
-Captain messages appear below, newest last.

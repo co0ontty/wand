@@ -1,4 +1,5 @@
 import { getWandTerminalTheme } from "../react/theme";
+import { configureQuickTerminalRuntime } from "../react/quick-terminal/runtime";
 import { wandThemeStore } from "../react/theme-preference";
 // 终端实例池（工作空间「分屏」专用）。
 // 与 state.terminal 单例**完全隔离**：仅在用户显式分屏、<WorkspaceWindow/> 渲染多个窗格时
@@ -47,6 +48,34 @@ interface PooledTerminal {
 
 const pool = new Map<string, PooledTerminal>();
 const sessionScales = new Map<string, number>();
+const retainedTerminals = new Set<string>();
+const terminalListeners = new Set<(event: { sessionId?: string; type: string; data?: any }) => void>();
+
+/** Shared transport facts, never inferred from a mounted xterm surface. */
+export function notifyPooledTerminalEvent(event: { sessionId?: string; type: string; data?: any }): void {
+  for (const id of retainedTerminals) {
+    if (event.sessionId && event.sessionId !== id) continue;
+    const handle = pool.get(id);
+    if (handle && ["init", "disconnected", "connected", "pty_error", "resync_required", "ended", "error"].includes(event.type)) {
+      handle.terminal.options.disableStdin = event.type !== "init" || ["stopped", "exited", "failed"].includes(event.data?.status);
+    }
+  }
+  for (const listener of terminalListeners) listener(event);
+}
+export function observePooledTerminal(listener: (event: { sessionId?: string; type: string; data?: any }) => void): () => void {
+  terminalListeners.add(listener);
+  return () => { terminalListeners.delete(listener); };
+}
+export function retainPooledTerminal(sessionId: string, retained: boolean): void {
+  if (retained) retainedTerminals.add(sessionId);
+  else retainedTerminals.delete(sessionId);
+}
+export function isRetainedPooledTerminal(sessionId: string): boolean { return retainedTerminals.has(sessionId); }
+export function focusPooledTerminal(sessionId: string): void { pool.get(sessionId)?.terminal.focus(); }
+export function reconnectPooledTerminal(sessionId: string): void {
+  sendJson({ type: "subscribe", mode: "add", sessionId, compactTools: true, capabilities: { ptyAck: true } });
+}
+
 
 function clampScale(value: number): number {
   return Math.round(Math.max(0.5, Math.min(2, value)) * 4) / 4;
@@ -75,7 +104,11 @@ function terminalFontSize(scale = Number(state.terminalScale || 1)): number {
 }
 
 function sendInput(sessionId: string, data: string): void {
-  sendJson({ type: "pty_input", sessionId, data, userInput: state.terminalInteractive === true });
+  if (retainedTerminals.has(sessionId) && !ws()) {
+    notifyPooledTerminalEvent({ sessionId, type: "pty_error" });
+    return;
+  }
+  sendJson({ type: "pty_input", sessionId, data, userInput: retainedTerminals.has(sessionId) || state.terminalInteractive === true });
 }
 
 function sendResize(sessionId: string, cols: number, rows: number): void {
@@ -85,8 +118,10 @@ function sendResize(sessionId: string, cols: number, rows: number): void {
 }
 
 /** FitAddon 只在 cols/rows 变化时触发 onResize；首次 fit 可能早于监听器，因此总是显式同步一次。 */
-function fitAndSync(handle: Pick<PooledTerminal, "sessionId" | "terminal" | "fitAddon" | "disposed">): void {
+function fitAndSync(handle: Pick<PooledTerminal, "sessionId" | "terminal" | "fitAddon" | "disposed" | "container">): void {
   if (handle.disposed) return;
+  // A hidden quick panel must not resize a running command to a zero-width grid.
+  if (retainedTerminals.has(handle.sessionId) && (handle.container.clientWidth <= 0 || handle.container.clientHeight <= 0)) return;
   try { fitTerminalToContainer(handle.terminal, handle.fitAddon); } catch { /* container not laid out yet */ }
   const cols = Number(handle.terminal.cols);
   const rows = Number(handle.terminal.rows);
@@ -174,7 +209,7 @@ export function createPooledTerminal(sessionId: string, container: HTMLElement):
       allowProposedApi: true,
       convertEol: false,
       cursorBlink: false,
-      disableStdin: false,
+      disableStdin: retainedTerminals.has(sessionId),
       fontFamily: terminalFontFamily(),
       fontSize: terminalFontSize(getPooledTerminalScale(sessionId)),
       lineHeight: 1.25,
@@ -201,7 +236,7 @@ export function createPooledTerminal(sessionId: string, container: HTMLElement):
 
     term.onData((data: string) => sendInput(sessionId, data));
     term.onBinary((data: string) => {
-      if (state.terminalInteractive) sendInput(sessionId, data);
+      if (retainedTerminals.has(sessionId) || state.terminalInteractive) sendInput(sessionId, data);
     });
     term.onResize((size: { cols: number; rows: number }) => sendResize(sessionId, size.cols, size.rows));
 
@@ -445,6 +480,7 @@ export function restorePooledTerminalState(
 
 /** 释放单个池实例（窗格关闭 / 会话移除时）。 */
 export function disposePooledTerminal(sessionId: string): void {
+  if (retainedTerminals.has(sessionId)) return;
   // 缩放比例是「这个窗格」的偏好而不是会话属性；且 setPooledTerminalScale 在
   // 没有池实例时也会写入记录（面板已渲染、XTermLib 尚未就绪的情况），所以清理
   // 必须在 handle 早退之前，否则 sessionScales 依旧会留下无界记录。
@@ -462,5 +498,11 @@ export function disposePooledTerminal(sessionId: string): void {
 
 /** 退出分屏模式时清空整个池。 */
 export function disposeAllPooledTerminals(): void {
-  for (const sessionId of [...pool.keys()]) disposePooledTerminal(sessionId);
+  for (const sessionId of [...pool.keys()]) {
+    if (!retainedTerminals.has(sessionId)) disposePooledTerminal(sessionId);
+  }
 }
+
+configureQuickTerminalRuntime({ mount: createPooledTerminal, dispose: disposePooledTerminal,
+  retain: retainPooledTerminal, focus: focusPooledTerminal, reconnect: reconnectPooledTerminal,
+  observe: observePooledTerminal });

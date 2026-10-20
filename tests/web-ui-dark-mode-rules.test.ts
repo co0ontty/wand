@@ -95,8 +95,10 @@ test("styles.css 不再保留无人消费的 [data-theme=\"dark\"] 深色规则"
     !/\[\s*data-theme/.test(styles),
     "src/web-ui/content/styles.css 不应再按 data-theme 选择器分支",
   );
-  assert.match(source("src/web-ui/browser/queue-view-adapter.tsx"), /<Card size="small" className=\{`queue-bar/,
-    "queue visuals now inherit the shared Ant theme");
+  const queue = source("src/web-ui/browser/queue-view-adapter.tsx");
+  assert.match(queue, /<WandUiProvider>\{view\}<\/WandUiProvider>/);
+  assert.match(queue, /<Collapse ghost size="small"/,
+    "inline queue disclosure inherits the shared Ant theme");
   assert.doesNotMatch(styles, /prefers-color-scheme/, "用户选择的主题拥有终端背景，系统配色不再覆盖它");
 });
 

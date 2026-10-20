@@ -38,7 +38,7 @@ Node 版本以 `.nvmrc` 为准。只检出需要的子模块：服务端构建�
 - 任务元数据归 `wand_tasks`，cwd/worktree/layout 归 `workspace_tasks`，当前会话归属归 `command_sessions.workspace_task_id`；通过 storage 原子入口修改。DTO 是投影，不在 GET/路由里加双向同步或全表修复。
 - SQLite 迁移只加不删；保留已有用户数据与历史。密钥不回写配置 JSON，schema/config 变更核对 `loadConfigWithStorage()`。归档不杀进程，展示状态不改运行事实，GET/轮询不冒充用户已查看。
 - Web 草稿、附件和提交恢复归 `src/web-ui/browser/composer.ts`；Android 归会话级 `ChatComposer`，协议/消息/权限/队列归 `ChatStore`。页面投影状态，不复制发送锁与恢复逻辑。
-- 异步上传、语音、优化和请求回执绑定启动时会话及 revision；迟到结果不能覆盖新输入、另一会话或复活已删除内容。默认数据在 `~/.wand/`；开发用 `-c /tmp/wand-dev/config.json` 隔离，不另起同配置服务。
+- 异步上传、优化和请求回执绑定启动时会话及 revision；迟到结果不能覆盖新输入、另一会话或复活已删除内容。默认数据在 `~/.wand/`；开发用 `-c /tmp/wand-dev/config.json` 隔离，不另起同配置服务。
 - 所有 CLI 子进程（PTY、structured、一次性 git/npm/模型探测）共用 `buildChildEnv()` 的环境底座：启动探测回收的**系统默认登录 shell 环境** ∪ 服务进程环境，冲突时进程值优先，PATH 顺序按登录 shell 重排，`WAND_DECISION_*` 始终剥离。`inheritEnv=false` 只在同一底座上收窄白名单；`WAND_SHELL_ENV_DISABLE=1` 仅关环境回收。改 shell rc 需重启生效，不在每次 spawn 起 shell。
 
 ### Session 输入契约

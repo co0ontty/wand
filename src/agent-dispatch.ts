@@ -51,6 +51,7 @@ export async function dispatchAgentForTask(
   deps: AgentDispatchDeps,
   input: { task: WandTask; agent: WandTaskAgent; prompt: string; automationId: string; systemPrompt?: string;
     employee?: SiliconEmployee; employeeCandidateIndex?: number;
+    sessionCreated?: (session: SessionSnapshot) => void;
     teamRequestStarted?: (sessionId: string, requestId: string) => void },
 ): Promise<AgentDispatchResult> {
   const { storage, config, structured, processes } = deps;
@@ -75,6 +76,12 @@ export async function dispatchAgentForTask(
   if (isLocalDecisionModel(resolvedModel)) {
     throw new AgentDispatchPreflightError("LAYA 仅支持有界决策，不能执行聊天或任务；该候选尚未接受输入。");
   }
+  // This resolution is a pure pre-session capability check: rejection here cannot have delivered input.
+  let sdkEngine: Awaited<ReturnType<StructuredSessionManager["resolveNewSessionPiEngine"]>> | null = null;
+  if (agent.kind === "structured" && agent.engine === "sdk") {
+    try { sdkEngine = await structured!.resolveNewSessionPiEngine("sdk"); }
+    catch (cause) { throw new AgentDispatchPreflightError("当前 Wand Agent 引擎不可用；未创建会话或发送输入，请核对执行工具配置。", { cause }); }
+  }
   const session = agent.kind === "pty"
     ? await processes!.start(providerCliCommand(provider), cwd, agent.mode, input.prompt, {
         provider,
@@ -95,8 +102,8 @@ export async function dispatchAgentForTask(
         thinkingEffort: agent.thinkingEffort,
         // 直接派发 Wand Agent（不进员工候选链）：先裁决进程内引擎是否可用，
         // 不可用就让这次派发明确失败，不静默退回 CLI 冒充。
-        ...(agent.engine === "sdk"
-          ? { engine: (await structured!.resolveNewSessionPiEngine("sdk")).engine }
+        ...(sdkEngine
+          ? { engine: sdkEngine.engine }
           : {}),
         worktreeEnabled: false,
         sessionSource: "automation",
@@ -109,6 +116,7 @@ export async function dispatchAgentForTask(
         workspaceTaskId: group.workspaceTaskId,
       });
   storage.bindWandTaskSession(input.task.id, session.id);
+  input.sessionCreated?.(session);
   if (agent.kind !== "pty") {
     const completion = input.teamRequestStarted
       ? structured!.sendMessage(session.id, input.prompt, { teamRequestStarted: input.teamRequestStarted })

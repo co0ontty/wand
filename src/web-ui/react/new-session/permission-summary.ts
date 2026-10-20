@@ -22,7 +22,7 @@ export function modeHint({ provider, mode, kind, engine }: Pick<NewSessionForm, 
   if (provider === "pi") {
     return engine === "sdk"
       ? "Wand Agent 在 Wand 内执行，使用当前会话配置的工具与扩展。"
-      : "Pi CLI 使用自身工具与扩展配置；这里的模式不会增加逐项权限确认。";
+      : "Pi CLI 使用自身工具与扩展配置。";
   }
   if (mode === "full-access") return "Claude 自动批准工具权限请求，可连续执行修改。";
   if (mode === "auto-edit") return "Claude 自动批准文件编辑；其他工具按当前会话权限策略处理。";
@@ -31,7 +31,7 @@ export function modeHint({ provider, mode, kind, engine }: Pick<NewSessionForm, 
 }
 
 
-/** Visual risk only: never changes the permission passed to the execution owner. */
+/** Visual risk marker only: it never gates submission and never grants permissions. */
 export function hasAutomaticPermissions(form: Pick<NewSessionForm, "provider" | "mode" | "kind">): boolean {
   return form.kind !== "shell" && (form.mode === "full-access" || form.mode === "managed"
     || form.provider === "codex" || form.provider === "qoder");

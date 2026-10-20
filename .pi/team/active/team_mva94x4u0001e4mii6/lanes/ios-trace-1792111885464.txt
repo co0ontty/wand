@@ -1,6 +1,0 @@
-Lane mailbox for iOS 工作区链路诊断 (role ios-trace)
-Run: team_mva94x4u0001e4mii6
-Lane: ios-trace-1792111885464
-Token: 0317e4ec-073b-4de3-9229-7978538a2fc6
-
-Captain messages appear below, newest last.

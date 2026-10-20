@@ -20,7 +20,7 @@ export type FeedbackClientSource = typeof FEEDBACK_CLIENT_SOURCES[number];
 /** Stable semantic owners, not error-text classification or user-controlled URLs. */
 export const FEEDBACK_FEATURE_LABELS = {
   app_update: "应用更新", server_update: "服务端更新", provider_update: "CLI 工具更新", daemon_update: "底层组件更新",
-  api: "接口请求", sessions: "会话", conversations: "对话", tasks: "任务", files: "文件", speech: "语音",
+  api: "接口请求", sessions: "会话", conversations: "对话", tasks: "任务", files: "文件",
   settings: "设置", models: "模型", authentication: "登录认证", realtime: "实时连接", runtime: "系统运行",
   startup: "服务启动", storage: "存储", repository: "代码仓库",
 } as const;

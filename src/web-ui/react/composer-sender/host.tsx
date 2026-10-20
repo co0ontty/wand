@@ -26,8 +26,12 @@ const ComposerInput = React.forwardRef<any, any>((props, ref) => {
       else { parent.appendChild(input); if (active) { input.focus({ preventScroll: true }); input.setSelectionRange(start, end); } }
     }
     input.classList.add("input-textarea", ...String(props.className || "").split(/\s+/).filter(Boolean));
-    if (input.value !== props.value && !projection.isComposing()) input.value = props.value || "";
-    resize(input);
+    // The native input handler already sizes user edits. Only an external
+    // projection (restore/clear/transform) needs another layout measurement.
+    if (input.value !== props.value && !projection.isComposing()) {
+      input.value = props.value || "";
+      resize(input);
+    }
   }, [input, props.value, props.className, resize]);
   return <div ref={slot} style={{ display: "contents" }}/>;
 });

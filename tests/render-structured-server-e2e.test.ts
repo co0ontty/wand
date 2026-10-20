@@ -124,11 +124,10 @@ setTimeout(() => process.exit(2), 15000).unref();
   };
   await startWeb();
   let token = await login();
-  const created = await fetch(`${base}/api/structured-sessions`, { method: "POST",
+  const created = await fetch(`${base}/api/sessions`, { method: "POST",
     headers: { "content-type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ cwd: root, provider: "pi", engine: "cli", runner: "pi-cli-json", model: "default", mode: "assist",
-      systemPrompt: "Isolated fake CLI fixture; no network or real models.",
-      respondImmediately: true }) });
+    body: JSON.stringify({ kind: "structured", cwd: root, provider: "pi", engine: "cli", runner: "pi-cli-json", model: "default", mode: "assist",
+      systemPrompt: "Isolated fake CLI fixture; no network or real models." }) });
   assert.equal(created.status, 201);
   const snapshot = await created.json() as { id: string; runner?: string; structuredState?: { engine?: string } };
   assert.ok(snapshot.id);

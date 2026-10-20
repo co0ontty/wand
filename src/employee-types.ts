@@ -1,10 +1,8 @@
 import type { WandTaskAgent } from "./task-types.js";
 import { DECISION_EXPERT_KEY } from "./decision-expert-identity.js";
 export { DECISION_EXPERT_KEY } from "./decision-expert-identity.js";
-import { SPEECH_POLISHER_KEY } from "./speech-polisher-identity.js";
 import { HR_EMPLOYEE_KEY } from "./hr-employee-identity.js";
 export { HR_EMPLOYEE_KEY } from "./hr-employee-identity.js";
-export { SPEECH_POLISHER_KEY } from "./speech-polisher-identity.js";
 
 /** Employee contact entry; identity and execution choices are persisted independently of teams. */
 export interface SiliconEmployee {
@@ -16,6 +14,8 @@ export interface SiliconEmployee {
   agents: WandTaskAgent[];
   /** Built-in tags are fixed by systemKey; ordinary employees' tags are user-maintained. */
   tags?: string[];
+  /** Finished system auxiliary history only, excluding agent decisions/dispatch; null/omitted = unlimited, 0 = none. */
+  systemSessionLimit?: number | null;
   /** Non-empty = Wand built-in identity; it cannot be archived or deleted. */
   systemKey?: string;
   archivedAt?: string;
@@ -63,7 +63,7 @@ export function isBuiltinSiliconEmployee(
 ): boolean {
   const key = employee?.systemKey;
   return key === SYSTEM_EMPLOYEE_KEY || key === DEFAULT_EMPLOYEE_KEY || key === DECISION_EXPERT_KEY
-    || key === SPEECH_POLISHER_KEY || key === HR_EMPLOYEE_KEY;
+    || key === HR_EMPLOYEE_KEY;
 }
 
 export const SILICON_EMPLOYEE_MAX_TAGS = 8;
@@ -74,7 +74,7 @@ export function siliconEmployeeTags(
   employee: Pick<SiliconEmployee, "systemKey" | "tags">,
 ): string[] {
   if (isSystemSiliconEmployee(employee) || isDecisionExpertSiliconEmployee(employee)
-    || employee.systemKey === SPEECH_POLISHER_KEY || employee.systemKey === HR_EMPLOYEE_KEY) {
+    || employee.systemKey === HR_EMPLOYEE_KEY) {
     return [SYSTEM_EMPLOYEE_TAG];
   }
   if (isDefaultSiliconEmployee(employee)) return [DEFAULT_EMPLOYEE_TAG];

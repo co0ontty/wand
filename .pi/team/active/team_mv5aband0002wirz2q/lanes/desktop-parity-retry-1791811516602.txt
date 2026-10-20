@@ -1,6 +1,0 @@
-Lane mailbox for 客户端交互差距与架构补审 (role desktop-parity-retry)
-Run: team_mv5aband0002wirz2q
-Lane: desktop-parity-retry-1791811516602
-Token: b824a90c-bd3a-4d57-8730-cd00219c5c40
-
-Captain messages appear below, newest last.

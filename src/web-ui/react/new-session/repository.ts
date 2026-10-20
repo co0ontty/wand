@@ -208,9 +208,10 @@ export class HttpNewSessionRepository implements NewSessionRepository {
 
   async create(request: NewSessionCreateRequest): Promise<NewSessionCreated> {
     const structured = request.kind === "structured";
-    const endpoint = structured ? "/api/structured-sessions" : "/api/commands";
+    const endpoint = "/api/sessions";
     const body = structured
       ? {
+          kind: "structured",
           cwd: request.cwd,
           mode: request.mode,
           provider: request.provider,
@@ -226,6 +227,7 @@ export class HttpNewSessionRepository implements NewSessionRepository {
           sessionSource: request.sessionSource,
         }
       : {
+          kind: "pty",
           command: request.kind === "pty" ? request.command : undefined,
           provider: request.kind === "pty" ? request.provider : undefined,
           shell: request.kind === "shell" || undefined,

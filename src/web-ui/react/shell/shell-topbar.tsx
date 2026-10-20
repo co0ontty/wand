@@ -1,4 +1,7 @@
 import * as React from "react";
+import { CopyPageLink } from "../ui/copy-page-link";
+import { QuickTerminalActionContext, QuickTerminalTopbarAction } from "../quick-terminal/action";
+import { createPortal } from "react-dom";
 import { Flex, Typography } from "antd";
 
 import {
@@ -127,6 +130,7 @@ export interface TopbarMoreMenuProps {
 export function TopbarMoreMenu({ selected, actions, onAction }: TopbarMoreMenuProps) {
   return (
     <>
+      <CopyPageLink menuItem label="复制会话链接"/>
       {getTopbarMoreActions(selected, actions).map((item) => (
         <React.Fragment key={item.actionName}>
           {item.dividerBefore ? <WandDropdownMenuSeparator/> : null}
@@ -145,13 +149,14 @@ export function TopbarMoreMenu({ selected, actions, onAction }: TopbarMoreMenuPr
   );
 }
 
-export function ShellTopbar() {
+export function ShellTopbar({ terminalActionVisible = true }: { terminalActionVisible?: boolean } = {}) {
   const snapshot = useUiStoreSnapshot();
+  const terminalAction = React.useContext(QuickTerminalActionContext);
   const dispatch = useUiDispatch();
   const moreOpen = snapshot.layout.topbarMoreOpen;
   const menuOpenIntent = React.useRef(moreOpen);
   React.useEffect(() => { menuOpenIntent.current = moreOpen; }, [moreOpen]);
-  return <ShellTopbarChrome snapshot={snapshot} onAction={dispatch}
+  const chrome = <ShellTopbarChrome snapshot={snapshot} onAction={dispatch} terminalActionVisible={terminalActionVisible}
     onMoreOpenChange={(open) => {
       if (open !== menuOpenIntent.current) {
         menuOpenIntent.current = open;
@@ -159,15 +164,18 @@ export function ShellTopbar() {
       }
     }}
     gitBadge={<TopbarGitBadge/>}/>;
+  // Keep the existing header at full workspace width while docking resizes only its content.
+  return terminalAction && terminalActionVisible ? createPortal(chrome, terminalAction.chromeHost) : chrome;
 }
 
 /** Static chrome shared by the live shell and invisible creation measurement. */
-export function ShellTopbarChrome({ snapshot, onAction, onMoreOpenChange, gitBadge, measurement = false }: {
+export function ShellTopbarChrome({ snapshot, onAction, onMoreOpenChange, gitBadge, measurement = false, terminalActionVisible = true }: {
   snapshot: Readonly<UiSnapshotData>;
   onAction?: (action: UiAction) => void | Promise<unknown>;
   onMoreOpenChange?: (open: boolean) => void;
   gitBadge?: React.ReactNode;
   measurement?: boolean;
+  terminalActionVisible?: boolean;
 }) {
   const selected = snapshot.selected;
   const moreOpen = snapshot.layout.topbarMoreOpen;
@@ -226,6 +234,7 @@ export function ShellTopbarChrome({ snapshot, onAction, onMoreOpenChange, gitBad
         )}
       </Flex>
       <Flex align="center" gap={4} className="topbar-right">
+        {!measurement && <QuickTerminalTopbarAction visible={terminalActionVisible}/>}
         <WandIconButton
           id={chromeId("topbar-file-button")}
           kind="ghost"

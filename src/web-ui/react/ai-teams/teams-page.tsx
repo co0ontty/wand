@@ -1,4 +1,6 @@
 import * as React from "react";
+import { usePageRouteState, routeEnum } from "../use-page-route";
+import { CopyPageLink } from "../ui/copy-page-link";
 import { Alert, Avatar, Button, Card, Collapse, Empty, Flex, Input, InputNumber, List, Tag, Tooltip, Typography } from "antd";
 import {
   AI_TEAM_AVATAR_MAX_CHARS,
@@ -945,17 +947,17 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
     ISSUE_AGENT_PROVIDERS, usage, (entry) => entry.value,
   ).map((entry) => ({ value: entry.value, label: entry.label }));
   const [teams, setTeams] = React.useState<AiTeam[] | null>(null);
-  const [pageMode, setPageMode] = React.useState<"employees" | "teams">("employees");
+  const [pageMode, setPageMode] = usePageRouteState<"employees" | "teams">("teamPage", "employees", routeEnum(["employees", "teams"], "employees"), String, "push");
   const [employeeEditing, setEmployeeEditing] = React.useState(false);
   const [runs, setRuns] = React.useState<AiTeamRunSummary[]>([]);
   const [loadError, setLoadError] = React.useState("");
   const [teamsLoading, setTeamsLoading] = React.useState(true);
   const [catalog, setCatalog] = React.useState<IssueModelCatalog | null>(null);
   const [defaultAgent, setDefaultAgent] = React.useState<WandTaskAgent>(() => createDefaultIssueAgent());
-  const [selectedId, setSelectedId] = React.useState("");
+  const [selectedId, setSelectedId] = usePageRouteState("team", "", undefined, undefined, "push");
   const [template, setTemplate] = React.useState<TeamTemplate | null>(null);
-  const [query, setQuery] = React.useState("");
-  const [filter, setFilter] = React.useState<TeamFilter>("all");
+  const [query, setQuery] = usePageRouteState("teamQuery", "", undefined, undefined, "replace", 250);
+  const [filter, setFilter] = usePageRouteState<TeamFilter>("teamFilter", "all", routeEnum(["all", "running", "attention"], "all"));
   const [detailTab, setDetailTab] = React.useState("members");
   const [projects, setProjects] = React.useState<IssueWorkspace[]>([]);
   const [projectsLoaded, setProjectsLoaded] = React.useState(false);
@@ -975,7 +977,7 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
       const list = await aiTeamsRepository.list();
       setTeams(list);
       setLoadError("");
-      setSelectedId((current) => list.some(team => team.id === current) ? current : "");
+      // Keep invalid/deleted targets in the URL with an explicit return action.
     } catch (cause) {
       setLoadError(failureMessage(cause, "团队模板加载失败。"));
     } finally {
@@ -1154,6 +1156,7 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
         </div>
       </Flex>
       <Flex wrap align="center" gap="small" className="task-board-header-actions">
+        <CopyPageLink/>
         {!detailOpen && <WandStretchTabs
           tabs={PAGE_MODE_TABS}
           value={pageMode}
@@ -1199,6 +1202,7 @@ export function AiTeamsPage({ sidebarOpen = false, onBack, onOpenSidebar, onOpen
       projectsLoaded={projectsLoaded}
       onStarted={(started) => afterDirectRun(started.teamId, started)}
     /> : null}
+    {pageMode === "teams" && selectedId && !creating && !selected && !teamsLoading && <Alert type="warning" title="团队不存在、已删除或无权访问" action={<WandButton onClick={() => setSelectedId("")}>返回团队列表</WandButton>}/>}
     {pageMode === "employees" ? (
       <div className="wand-teams-layout wand-employees-layout" style={{ width: "100%", minWidth: 0 }}>
         <EmployeeListPage catalog={catalog} providerOptions={providerOptions} onEditingChange={setEmployeeEditing} />

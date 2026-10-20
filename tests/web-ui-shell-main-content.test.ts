@@ -185,7 +185,7 @@ test("ShellMainContent uses UiStore actions and no forbidden legacy seam", () =>
   assert.match(source, /<div id="chat-output" inert=\{pageLayerOpen\} className=\{classes\.chat\} ref=\{legacyRefs\?\.chat\}[^>]*\/>/);
   assert.match(source, /<div inert=\{pageLayerOpen\} className=\{classes\.composer\} ref=\{legacyRefs\?\.composer\}[^>]*\/>/);
   assert.match(source, /id="cross-session-queue-host" ref=\{queueRef\}/);
-  assert.match(source, /context\.taskId \? null : <div[^>]*inert=\{newWork\.open \|\| conversationVisible \|\| settings\.open\}[^>]*><ShellTopbar\/>/);
+  assert.match(source, /context\.taskId \? null : <div[^>]*inert=\{newWork\.open \|\| conversationVisible \|\| settings\.open\}[^>]*><ShellTopbar terminalActionVisible=\{!newWork\.open && !conversationVisible && !settings\.open\}\/>/);
   assert.match(source, /<WorkspaceTabBar\/>/);
   assert.doesNotMatch(source, /inSplit \? null : <WorkspaceTabBar\/>/);
   assert.match(source, /const pageLayerOpen = newWork\.open \|\| settings\.open \|\| conversationVisible \|\| taskBoard\.open \|\| editor\.open/);

@@ -1,5 +1,4 @@
 import { isStandaloneSettingsPage } from "../page.js";
-import { readSpeechMode, speechInputDescription } from "../react/speech/repository";
 import { clearNoticeView, paintBootNotice, paintOfflineNotice } from "./notice-view-adapter";
 import { composer, state, writeStoredBoolean } from "./state";
 import { invalidateChatInteraction } from "./chat-render-focus.js";
@@ -478,25 +477,25 @@ export function renderAppShell() {
         '<div id="chat-running-host"></div>' +
         '<div id="cross-session-queue-host"></div>' +
         '<div class="input-panel' + (state.selectedId ? "" : " hidden") + '">' +
-          '<div class="composer-top-row">' +
-            '<div id="todo-progress" class="todo-progress hidden">' +
-              '<button data-antd-control class="todo-progress-header" id="todo-progress-toggle" type="button" aria-expanded="false" aria-controls="todo-progress-body" aria-label="展开待办列表">' +
-                '<span id="todo-progress-summary"></span>' +
-              '</button>' +
-            '</div>' +
-            '<div class="todo-progress-body hidden" id="todo-progress-body">' +
-              '<div id="todo-progress-content"></div>' +
-            '</div>' +
-          '</div>' +
-          // 排队气泡宿主：绝对定位浮在 .input-panel 顶边线「上方」、右侧贴边。
-          // 垂直排列，一行一个液态玻璃气泡（编号 + 文本 + 立即/删除）。
-          // updateQueueBar() 在 queuedMessages 非空时去掉 hidden。
-          '<div id="queue-bar-host" class="queue-bar-host" hidden></div>' +
           // 输入主行：正文独占上层书写区域；下层按参考布局分为
           // 「添加 / 权限」与「模型 / 思考 / 发送」两组，键盘顺序与视觉顺序一致。
           '<div class="input-composer-row" data-pi-composer="">' +
           '<span data-pi-settings-host=""></span>' +
           '<div class="input-composer' + (String(currentDraft || "").trim() ? ' has-text' : '') + (state.terminalInteractive ? ' is-terminal-interactive' : '') + '" role="group" aria-label="消息编辑器">' +
+            // Todo 与身份/执行配置共用输入面上沿，不放进收起时 inert 的编辑区域。
+            '<div class="composer-top-row">' +
+              '<div id="todo-progress" class="todo-progress hidden">' +
+                '<button data-antd-control class="todo-progress-header" id="todo-progress-toggle" type="button" aria-expanded="false" aria-controls="todo-progress-body" aria-label="展开待办列表">' +
+                  '<span id="todo-progress-summary"></span>' +
+                '</button>' +
+              '</div>' +
+              '<div class="todo-progress-body hidden" id="todo-progress-body">' +
+                '<div id="todo-progress-content"></div>' +
+              '</div>' +
+              // 待发摘要与 Todo 共用输入面上沿；展开列表不挤动编辑器或身份状态行。
+              // 队列动作仍由 input.ts 委托，React 只投影当前会话快照。
+              '<div id="queue-bar-host" class="queue-bar-host" hidden></div>' +
+            '</div>' +
             '<div class="composer-main-row">' +
               '<div id="terminal-shortcuts" class="terminal-shortcuts" hidden></div>' +
               '<div class="composer-input-wrap">' +
@@ -510,9 +509,6 @@ export function renderAppShell() {
                 // 加号按钮 —— 点击向上展开 popover：附件 / 终端交互 / 三件套（模式·模型·思考）
                 '<button id="attach-btn" data-antd-control class="composer-attach-trigger" type="button" title="附件与执行选项（思考深度、模型和权限）" aria-label="更多操作" aria-haspopup="dialog" aria-controls="composer-plus-popover" aria-expanded="false">' +
                   iconSvg("plus", { size: 18, strokeWidth: 2.2 }) +
-                '</button>' +
-                '<button id="voice-record-btn" data-antd-control type="button" title="' + escapeHtml(speechInputDescription(readSpeechMode())) + '" aria-label="按住语音输入" aria-pressed="false"' + (state.terminalInteractive ? ' disabled' : '') + '>' +
-                  iconSvg("mic", { size: 18, strokeWidth: 1.8 }) +
                 '</button>' +
                 '<div class="composer-inline-config">' +
                   '<span class="composer-config-host" data-composer-config-host="runtime"></span>' +
@@ -570,10 +566,6 @@ export function renderAppShell() {
             '</div>' +
           '</div>' +
           // 关闭时不发布 mount。落点与旧实现 insertAdjacentElement("afterend") 一致。
-          // 语音实时转写气泡 —— 浮在输入框上方（.input-composer 之外，绕开它的
-          // overflow:hidden）。**内容由 React portal 渲染**（见 composer-voice 组件）：
-          // 非录音态不发布 mount，整条气泡不渲染，等价于原来的 .hidden。
-          '<span class="composer-voice-host" data-composer-voice-host="main"></span>' +
           // 错误条由 React portal 渲染（见 composer-action-error 组件），
           // legacy 通过 state.actionError 表达文案。
           '<span class="composer-action-error-host" data-composer-action-error-host="main"></span>' +

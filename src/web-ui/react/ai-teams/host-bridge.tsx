@@ -32,6 +32,8 @@ import { taskBoardController, taskBoardStore } from "../issues/task-board-contro
 import { taskBoardRepository } from "../issues/task-board-repository";
 import { subscribeWandModelCatalog, wandModelDisplayName } from "../model-catalog";
 import { useWandModelCatalog } from "../use-model-catalog";
+import { usePageRouteState, routeEnum } from "../use-page-route";
+import { CopyPageLink } from "../ui/copy-page-link";
 import { wandOverlay } from "../overlay-controller";
 import { sortProviderOptions, useProviderUsage } from "../provider-usage";
 import {
@@ -133,6 +135,8 @@ const AI_TEAMS_HOST: Record<string, object> = {
   "provider-logo": { ProviderLogo },
   "model-catalog": { subscribeWandModelCatalog, wandModelDisplayName },
   "use-model-catalog": { useWandModelCatalog },
+  "use-page-route": { usePageRouteState, routeEnum },
+  "ui/copy-page-link": { CopyPageLink },
   "overlay-controller": { wandOverlay },
   "provider-usage": { sortProviderOptions, useProviderUsage },
   "settings/controller": { settingsController },

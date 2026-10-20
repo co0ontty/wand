@@ -6,7 +6,7 @@ import { rm } from "node:fs/promises";
 
 export const TEMP_ROOT_MARKER = ".wand-temporary-root.json";
 export const TEMP_LEASE = ".wand-temporary-lease.json";
-export const TEMP_KINDS = ["speech-check", "speech-voice", "speech-setup", "test-run", "upload-stage"] as const;
+export const TEMP_KINDS = ["test-run", "upload-stage"] as const;
 export type TempKind = typeof TEMP_KINDS[number];
 const uid = (): number | null => process.getuid?.() ?? null;
 

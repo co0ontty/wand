@@ -19,7 +19,7 @@ import "./render";
 import { copyToClipboard, getPreferredMessages, isRecoverableToolError, markSessionCompletionViewed } from "./session-engine";
 import { summarizeTodoProgress } from "./todo-progress";
 import { paintTodoProgress } from "./todo-view-adapter";
-import { renderStructuredStatusBar } from "./utils";
+import { renderStructuredStatusBar, syncTodoPopupDismiss } from "./utils";
 import { getCardDefault } from "./events";
 import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
 import { shouldExtractPtySystemInfo } from "./pty-system-info";
@@ -202,11 +202,20 @@ export function clearActivityDetailState(): void {
 
 
 
-      export function renderChat(forceFullRender?) {
+      // Local disclosures invalidate their owning message, not the whole transcript.
+      // The normal cache plan still contributes any concurrent streaming changes.
+      function renderActivityRow(element: Element | null): void {
+        const owner = element?.closest(".chat-message[data-msg-index]");
+        const index = owner ? Number(owner.getAttribute("data-msg-index")) : NaN;
+        if (Number.isInteger(index) && index >= 0) renderChat(false, index);
+        else renderChat(true);
+      }
+
+      export function renderChat(forceFullRender?, interactionMessageIndex?: number) {
         var sessionId = state.selectedId;
         var epoch = state.chatRenderEpoch || 0;
         var pending = state.chatRenderPendingToken;
-        if (state.renderPending && !forceFullRender && pending &&
+        if (state.renderPending && !forceFullRender && interactionMessageIndex === undefined && pending &&
           pending.sessionId === sessionId && pending.epoch === epoch) return;
         var token = { sessionId: sessionId, epoch: epoch };
         state.chatRenderPendingToken = token;
@@ -221,7 +230,7 @@ export function clearActivityDetailState(): void {
           try {
             if (state.chatRenderPendingToken !== token || state.selectedId !== sessionId ||
               (state.chatRenderEpoch || 0) !== epoch) return;
-            doRenderChat(!!forceFullRender);
+            doRenderChat(!!forceFullRender, interactionMessageIndex);
             if (state.currentView === "chat") {
               void markSessionCompletionViewed(state.sessions.find((session) => session.id === sessionId));
             }
@@ -232,7 +241,7 @@ export function clearActivityDetailState(): void {
             release();
           }
         };
-        if (forceFullRender) draw();
+        if (forceFullRender || interactionMessageIndex !== undefined) draw();
         else {
           try { requestAnimationFrame(draw); }
           catch (error) { release(); console.error("[wand] chat frame scheduling failed:", error); }
@@ -474,14 +483,14 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
   return true;
 }
 
-      export function doRenderChat(forceFullRender): void {
+      export function doRenderChat(forceFullRender, interactionMessageIndex?: number): void {
         var sessionId = state.selectedId;
         var epoch = state.chatRenderEpoch || 0;
         var pendingToken = state.chatRenderPendingToken;
         var root = document.querySelector("#chat-output > .chat-messages") as HTMLElement | null;
         var interaction = root && typeof HTMLElement !== "undefined" ? beginChatInteraction(root) : null;
         try {
-          paintChat(forceFullRender);
+          paintChat(forceFullRender, interactionMessageIndex);
         } catch (error) {
           // A failed paint may already have mutated part of the DOM. Neither the
           // previous row snapshot nor an old empty-state marker is then reliable.
@@ -503,7 +512,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         }
       }
 
-      function paintChat(forceFullRender): void {
+      function paintChat(forceFullRender, interactionMessageIndex?: number): void {
         var chatOutput = document.getElementById("chat-output");
         if (!chatOutput) return;
 
@@ -638,6 +647,8 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         }, { visibleOffset: visibleOffset, count: msgCount, hasOlder: hasOlderMessages,
           systemInfo: systemInfo, placeholder: !!selectedSession.inFlight });
         var changedVisibleIndices = plan.changedIndices.filter(function(index) { return index >= visibleOffset; });
+        if (interactionMessageIndex !== undefined && interactionMessageIndex >= visibleOffset && interactionMessageIndex < totalMsgCount
+          && !changedVisibleIndices.includes(interactionMessageIndex)) changedVisibleIndices.push(interactionMessageIndex);
         var forceRender = forceFullRender || plan.structureChanged;
         if (!forceRender && changedVisibleIndices.length === 0) {
           var unchangedMessages = chatOutput.querySelector(".chat-messages");
@@ -945,6 +956,8 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
           toggle.setAttribute("aria-expanded", next ? "true" : "false");
           toggle.setAttribute("aria-label", next ? "收起待办列表" : "展开待办列表");
         }
+        // 与编辑器、选择器共享关闭优先级，Escape/返回先关详情，不收起编辑。
+        syncTodoPopupDismiss(next, () => setTodoExpanded(false, true));
         // body 展开/收起后视觉高度变了，触发一次 padding 同步
         syncChatMessagesPaddingForTodoBody();
         if (focusToggle && toggle) toggle.focus();
@@ -969,11 +982,6 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         if (!(target instanceof Element)) return;
         if (target.closest("#todo-progress-body") || target.closest("#todo-progress-toggle")) return;
         setTodoExpanded(false);
-      });
-      document.addEventListener("keydown", function(e) {
-        if (!isTodoExpanded() || e.key !== "Escape") return;
-        e.stopPropagation();
-        setTodoExpanded(false, true);
       });
 
       // 同步 .chat-messages 的 padding-bottom 与 .todo-progress-body 的实际高度。
@@ -2067,12 +2075,12 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
               fetchActivityToolDetail(sessionId, block.id, resultRequest).then(function() {
                 if (!currentActivityEntry(entryKey, entryState) || entryState.request !== resultRequest) return;
                 entryState.request = null;
-                renderChat(true);
+                renderActivityRow(currentActivityEntry(entryKey, entryState));
               }).catch(function(error) {
                 if (!currentActivityEntry(entryKey, entryState) || entryState.request !== resultRequest) return;
                 entryState.request = null;
                 entryState.error = String(error && error.message || "加载失败");
-                renderChat(true);
+                renderActivityRow(currentActivityEntry(entryKey, entryState));
               });
             }
           }
@@ -2276,7 +2284,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         if (menu) { menu.inert = false; menu.removeAttribute("aria-hidden"); }
         var key = wrap.getAttribute("data-expand-key");
         if (key) setPersistedExpandState(key, true);
-        renderChat(true);
+        renderActivityRow(wrap);
       };
 
       (window as any).__activityEntryToggle = function(btn) {
@@ -2304,11 +2312,11 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
           return;
         }
         activityDetailOpen.add(key);
-        if (row.getAttribute("data-thinking-entry") === "true") { renderChat(true); return; }
+        if (row.getAttribute("data-thinking-entry") === "true") { renderActivityRow(row); return; }
         var view = chatViewLease();
         if (!view) return;
         activityEntryStates.set(key, { lease: view, open: {}, request: null, error: null });
-        if (row.getAttribute("data-file-entry") === "true") { renderChat(true); return; }
+        if (row.getAttribute("data-file-entry") === "true") { renderActivityRow(row); return; }
         requestActivityEntry(key, row);
       };
 
@@ -2332,7 +2340,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         entryState.request = requestToken;
         entryState.error = null;
         // Same paint transaction retires a focused retry with the exact entry fallback.
-        renderChat(true);
+        renderActivityRow(row);
         if (!ids.length) return;
         Promise.all(ids.map(function(id) { return fetchActivityToolDetail(sessionId, id, requestToken); }))
           .then(function(details) {
@@ -2345,13 +2353,13 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
               (window as any).__openFilePreview(path);
             }
             entryState.request = null;
-            renderChat(true);
+            renderActivityRow(currentActivityEntry(key, entryState));
           })
           .catch(function(error) {
             if (!currentActivityEntry(key, entryState) || entryState.request !== requestToken) return;
             entryState.request = null;
             entryState.error = String(error && error.message || "加载失败");
-            renderChat(true);
+            renderActivityRow(currentActivityEntry(key, entryState));
           });
       }
       (window as any).__activityFileOpen = function(btn) {

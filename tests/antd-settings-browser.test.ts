@@ -89,7 +89,7 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
       const payload = path === "/api/settings" || path === "/api/settings/about" ? about()
         : path === "/api/models" ? models
         : path === "/api/provider-cli-updates" ? {items:process.env.WAND_SETTINGS_LAYOUT_QA === "1" ? ["Claude Code", "Codex", "OpenCode", "Grok CLI", "Qoder CLI", "Pi CLI"].map((label,index)=>({id:String(index),label,installed:true,currentVersion:"1.0.0",latestVersion:"1.0.0",updateAvailable:false,updateSupported:true})) : [],autoUpdate:false}
-        : path === "/api/local-models/status" ? {laya:null,speech:{operation:null,supported:false}}
+        : path === "/api/local-models/status" ? {laya:null}
         : path === "/api/app-connect-code" ? {code:"local-browser-fixture",url:""}
         : path === "/api/silicon-employees" ? {employees:[]}
         : path === "/api/sessions/provider-usage" ? {claude:5,codex:2}
@@ -272,7 +272,7 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
         await clickText('基本配置','tab');
         assert.equal(await evaluate("document.querySelector('#settings-host').value"),'layout-draft.example',`${width}/${condition}: layout/navigation preserve the draft`);
         const fragments: Array<Record<string,unknown>>=[];
-        for(const tab of ['本地模型','语音输入']) {
+        for(const tab of ['本地模型']) {
           await clickText(tab,'tab');
           await wait("!!document.querySelector('[data-settings-panel]:not([hidden]) .wand-settings-library-section')");
           const geometry=await evaluate(`(()=>{const n=document.querySelector('[data-settings-panel]:not([hidden])'),section=n.querySelector('.wand-settings-library-detail-content>.wand-settings-library-section'),r=n=>n.getBoundingClientRect().toJSON();return {tab:${JSON.stringify(tab)},heading:r(section.querySelector('.wand-settings-library-section-heading')),body:r(section.querySelector('.wand-settings-library-section-body')),overflow:n.scrollWidth>n.clientWidth+1}})()`);
@@ -524,7 +524,7 @@ test("settings tabs use Ant controls and preserve draft, ordering, permission an
       await click('[aria-label="返回设置目录"]');
       await click('.wand-settings-library-access .ant-collapse-header');
       await wait('!!document.querySelector("#settings-admin-password")');
-      assert.deepEqual(await evaluate('Array.from(document.querySelectorAll("[role=menuitem] .wand-settings-library-nav-copy>span:first-child")).map(n=>n.innerText.trim())'),["通知","显示","本地模型","语音输入","关于"],`${mode}: connected App exposes local appearance but not administrator settings`);
+      assert.deepEqual(await evaluate('Array.from(document.querySelectorAll("[role=menuitem] .wand-settings-library-nav-copy>span:first-child")).map(n=>n.innerText.trim())'),["通知","显示","本地模型","关于"],`${mode}: connected App exposes local appearance but not administrator settings`);
       const localWritesBefore = commands.length;
       await clickText("显示", "tab");
       await click('input[name="wand-chat-width"][value="column"]');

@@ -9,7 +9,7 @@ import { FirstStandaloneSessionChrome, FirstWorkspaceWindowChrome } from "../wor
 import type { WorkspaceSessionSummary } from "../workspaces/types";
 import { TerminalShortcutsChrome } from "../composer-rail/terminal-shortcuts";
 import { ComposerRailSubmitChrome } from "../composer-rail/host";
-import { PtyInputModeToggle } from "../composer-rail/input-mode-toggle";
+import { PtyDockToggle, PtyInputModeToggle } from "../composer-rail/input-mode-toggle";
 import { PtyModifierButtons } from "../composer-rail/modifiers";
 
 let probeSequence = 0;
@@ -80,6 +80,10 @@ export function prepareTerminalCreationComposer(panel: HTMLElement): () => void 
       const mode = composer.dataset.ptyInputMode;
       undo.push(() => { if (mode === undefined) delete composer.dataset.ptyInputMode; else composer.dataset.ptyInputMode = mode; });
       composer.dataset.ptyInputMode = "shortcuts";
+      // New PTY docks rest collapsed (see ptyInputState's initial `open`).
+      const collapsed = composer.dataset.ptyCollapsed;
+      undo.push(() => { if (collapsed === undefined) delete composer.dataset.ptyCollapsed; else composer.dataset.ptyCollapsed = collapsed; });
+      composer.dataset.ptyCollapsed = "true";
       // The future resting geometry is measured synchronously, not mid-transition.
       for (const token of ["--motion-normal", "--motion-fast", "--motion-quick-exit", "--motion-morph"]) style(composer, token, "0s");
     }
@@ -95,7 +99,7 @@ export function prepareTerminalCreationComposer(panel: HTMLElement): () => void 
     const footer = composer?.querySelector<HTMLElement>(".composer-main-row");
     if (footer && !footer.querySelector(".pty-input-mode-toggle")) {
       const slot = document.createElement("span"); slot.style.display = "contents"; slots.push(slot); footer.appendChild(slot);
-      portals.push(createPortal(<><PtyInputModeToggle mode="shortcuts" onToggle={() => {}}/>
+      portals.push(createPortal(<><PtyDockToggle collapsed onToggle={() => {}}/><PtyInputModeToggle mode="shortcuts" onToggle={() => {}}/>
         <PtyModifierButtons ctrl={false} shift={false} onToggle={() => {}}/></>, slot));
     }
     const shortcuts = panel.querySelector<HTMLElement>(".terminal-shortcuts");

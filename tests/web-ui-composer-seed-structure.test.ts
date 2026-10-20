@@ -8,7 +8,7 @@ import test from "node:test";
  * `createLegacyRefs`），随后 `app.replaceChildren()` 丢掉其余旧节点。
  *
  * 因此种子里的标签一旦不平衡，`.input-panel` 会提前闭合，紧跟其后的浮层
- * （加号 popover、语音气泡、`#action-error`、skills picker）会变成被丢弃的
+ * （加号 popover、`#action-error`、skills picker）会变成被丢弃的
  * 兄弟节点 —— 表现为「按钮点了没反应」「错误提示永远不显示」，但不会报错。
  * 这组断言把该不变量钉在源码层。
  */
@@ -66,7 +66,6 @@ test(".input-panel 之后的浮层仍留在输入面板内", () => {
     ["加号 popover", '<div class="composer-plus-popover'],
     ["错误条宿主", 'data-composer-action-error-host="main"'],
     ["附件预览宿主", 'data-composer-attachments-host="main"'],
-    ["语音气泡宿主", 'data-composer-voice-host="main"'],
   ];
   for (const [label, needle] of floating) {
     const at = SHELL_BODY.indexOf(needle);

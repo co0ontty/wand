@@ -159,7 +159,7 @@ test("server rejects send/model/mode/resume and active deletion, while completed
   for (const [method, suffix] of [["POST", "/input"], ["POST", "/model"], ["POST", "/mode"], ["POST", "/resume"], ["POST", "/stop"], ["DELETE", ""]]) {
     assert.equal((await fetch(`${origin}/api/sessions/${call.sessionId}${suffix}`, { method, headers: { "content-type": "application/json" }, body: method === "POST" ? JSON.stringify({ input: "must not run", model: "new", mode: "full-access" }) : undefined })).status, 409);
   }
-  assert.equal((await fetch(`${origin}/api/structured-sessions/${call.sessionId}/messages`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "must not run" }) })).status, 409);
+  assert.equal((await fetch(`${origin}/api/sessions/${call.sessionId}/messages`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "must not run" }) })).status, 409);
   call.complete();
   const read = await fetch(`${origin}/api/sessions/${call.sessionId}?format=chat`); assert.equal(read.status, 200);
   assert.equal((await read.json()).automationId.startsWith(SYSTEM_AI_CALL_PREFIX), true);

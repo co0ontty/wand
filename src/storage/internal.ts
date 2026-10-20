@@ -7,7 +7,6 @@ import { hrEmployeeDefinition } from "../hr-employee.js";
 import type { AgentActivityItem, AgentActivityState, Mission, MissionAttempt, MissionAttemptState, MissionReviewComment, MissionReviewStatus, MissionStatus } from "../mission-types.js";
 import { type PasswordVault, type PasswordVaultItem } from "../password-manager.js";
 import { isSessionProvider } from "../session-provider.js";
-import { speechPolisherDefinition } from "../speech-polisher-employee.js";
 import type { WandTask, WandTaskAgent, WandTaskAgentKind, WandTaskTitleSource } from "../task-types.js";
 import { isWandTaskAgentKind } from "../task-types.js";
 import { GLOBAL_WORKSPACE_ID, LayoutNode, SessionProvider } from "../types.js";
@@ -17,7 +16,7 @@ import { parseWandTaskAgent } from "./mappers.js";
 // Shared module-level helpers for the storage repositories (moved verbatim from storage.ts).
 
 // These system profiles are code-owned; candidates and timestamps are not part of the lock.
-export const LOCKED_SYSTEM_EMPLOYEE_DEFINITIONS = [decisionExpertDefinition(""), speechPolisherDefinition(""), hrEmployeeDefinition("")];
+export const LOCKED_SYSTEM_EMPLOYEE_DEFINITIONS = [decisionExpertDefinition(""), hrEmployeeDefinition("")];
 
 /** `ai_team_runs.run_state_json`：本次运行的候选黑名单（§3.4 修正 B12 两层键值 + host-disabled）。 */
 export interface AiTeamRunState {
@@ -126,6 +125,7 @@ export function mapSiliconEmployeeRow(row: Record<string, unknown>): SiliconEmpl
     agents,
     systemKey,
     tags: siliconEmployeeTags({ systemKey, tags }),
+    systemSessionLimit: typeof row.system_session_limit === "number" ? row.system_session_limit : null,
     archivedAt: typeof row.archived_at === "string" && row.archived_at ? row.archived_at : undefined,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),

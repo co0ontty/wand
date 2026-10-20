@@ -7,7 +7,8 @@ import type { PlushAvatarRuntime, PlushGlobals, PlushRenderOptions } from "./run
 
 // One GPU context for the entire application. Individual identity canvases only
 // receive copied frames; scrolling through hundreds of employees cannot exhaust
-// browser context limits. Preview is 24fps, at most four small identities 8fps.
+// browser context limits. Preview is 24fps, at most four working identities
+// 8fps. Idle identities use a cached still instead of an ambient GPU loop.
 const MODEL_LIMIT = 8;
 const FRAME_LIMIT = 80;
 const MODEL_BYTES_LIMIT = 48 * 1024 * 1024;
@@ -574,7 +575,7 @@ class PlushEngine implements PlushAvatarRuntime {
     try {
       const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, preserveDrawingBuffer: true,
         powerPreference: "low-power" });
-      renderer.setPixelRatio(1); renderer.setClearColor(0x000000, 0);
+      renderer.setPixelRatio(1); renderer.setSize(MAX_PIXELS, MAX_PIXELS, false); renderer.setClearColor(0x000000, 0);
       renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.ACESFilmicToneMapping;
       renderer.toneMappingExposure = 1.05;
       renderer.domElement.addEventListener("webglcontextlost", event => {
@@ -651,8 +652,13 @@ class PlushEngine implements PlushAvatarRuntime {
       || Number(b.options.speaking) - Number(a.options.speaking));
     for (const item of items) {
       if (!item.visible || !item.canvas.isConnected) { this.setState(item, "paused"); continue; }
+      const working = item.options.speaking || item.options.thinking
+        || (item.options.fileActivity !== undefined && item.options.fileActivity !== "idle");
       const animate = !item.options.reducedMotion && (item.options.interactive
-        ? previews++ < ANIMATED_PREVIEW_LIMIT : listAnimations++ < ANIMATED_LIST_LIMIT);
+        ? previews++ < ANIMATED_PREVIEW_LIMIT : working && listAnimations++ < ANIMATED_LIST_LIMIT);
+      // Draw one resting pose when activity ends; never freeze mid-word or
+      // mid-blink. Other static/over-budget identities share their cached pose.
+      if (!animate && item.activity === "active") item.dirty = true;
       this.setState(item, animate ? "active" : "static");
       if (!item.dirty && (!animate || start - item.lastFrame < (item.options.interactive ? 1000 / 24 : 125))) {
         more ||= animate; continue;
@@ -744,7 +750,10 @@ class PlushEngine implements PlushAvatarRuntime {
       // or pushing its lower edge outside the identity canvas.
       model.fileProps?.root.quaternion.copy(model.root.quaternion).invert();
       this.scene.add(model.root);
-      this.renderer!.setSize(pixels, pixels, false); this.renderer!.render(this.scene, this.camera);
+      // Keep the shared drawing buffer stable across identities of different sizes.
+      // setSize writes canvas.width/height even for an unchanged size, forcing
+      // the driver to reallocate/clear it on every frame. Only the viewport varies.
+      this.renderer!.setViewport(0, 0, pixels, pixels); this.renderer!.render(this.scene, this.camera);
       if (item.options.thinking && item.canvas.parentElement) {
         // Project the thought mark from the head's local upper-left anchor so it
         // follows the very same yaw, tilt and bob as the 3D face, without a RAF owner.
@@ -753,7 +762,9 @@ class PlushEngine implements PlushAvatarRuntime {
         item.canvas.parentElement.style.setProperty("--plush-thinking-y", `${(1 - anchor.y) * size / 2}px`);
       }
       this.scene.remove(model.root);
-      item.context.clearRect(0, 0, pixels, pixels); item.context.drawImage(this.renderer!.domElement, 0, 0, pixels, pixels);
+      item.context.clearRect(0, 0, pixels, pixels);
+      // WebGL's viewport starts at bottom-left, Canvas2D's source at top-left.
+      item.context.drawImage(this.renderer!.domElement, 0, MAX_PIXELS - pixels, pixels, pixels, 0, 0, pixels, pixels);
       item.canvas.dataset.fileActivity = fileActivity;
       item.canvas.dataset.filePropPose = phase.toFixed(3);
       item.canvas.dataset.pageAngle = String(model.fileProps?.root.userData.pageAngle ?? 0);

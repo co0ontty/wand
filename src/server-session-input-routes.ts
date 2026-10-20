@@ -81,10 +81,10 @@ export function registerSessionInputRoutes(app: Express, ctx: SessionRouteContex
       return;
     }
     try {
-      const snapshot = structured.reorderQueuedMessages(req.params.id, rawOrder.map((v: unknown) => Number(v)));
+      const snapshot = structured.reorderQueuedMessages(req.params.id, rawOrder.map((v: unknown) => Number(v)), req.body?.expectedQueue);
       res.json(sessionResponseDTO(snapshot, req));
     } catch (error) {
-      sendRouteError(res, surfaceDomainError(error, /^(排序长度与当前队列不一致，请刷新后重试。|排序参数无效。)$/) ?? error, "无法调整排队顺序。");
+      sendRouteError(res, surfaceDomainError(error, /^(排序长度与当前队列不一致，请刷新后重试。|排序参数无效。|排队消息已变化，请刷新后重试。)$/) ?? error, "无法调整排队顺序。");
     }
   });
 
@@ -141,7 +141,7 @@ export function registerSessionInputRoutes(app: Express, ctx: SessionRouteContex
 
   app.delete("/api/structured-sessions/:id/queued", (req, res) => {
     try {
-      const snapshot = structured.clearQueuedMessages(req.params.id);
+      const snapshot = structured.clearQueuedMessages(req.params.id, req.body?.expectedQueue);
       res.json(sessionResponseDTO(snapshot, req));
     } catch (error) {
       sendRouteError(res, error, "无法清空排队消息。");

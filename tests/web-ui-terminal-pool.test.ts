@@ -187,6 +187,24 @@ test("退出分屏清空整个池时同样丢弃缩放记录", () => {
   assert.equal(h.pool.getPooledTerminalScale("S2"), 1.5);
 });
 
+test("快捷终端租约不被工作区分屏清理，断线禁用输入，init 后恢复", () => {
+  const h = harness();
+  h.pool.retainPooledTerminal("quick", true);
+  h.pool.createPooledTerminal("quick", h.container);
+  h.pool.createPooledTerminal("split", h.container);
+  assert.equal(h.created[0].options.disableStdin, true);
+  h.pool.notifyPooledTerminalEvent({ type: "init", sessionId: "quick", data: { status: "running" } });
+  assert.equal(h.created[0].options.disableStdin, false);
+  h.pool.notifyPooledTerminalEvent({ type: "disconnected" });
+  assert.equal(h.created[0].options.disableStdin, true);
+  h.pool.disposeAllPooledTerminals();
+  assert.equal(h.pool.hasPooledTerminal("quick"), true);
+  assert.equal(h.pool.hasPooledTerminal("split"), false);
+  h.pool.retainPooledTerminal("quick", false);
+  h.pool.disposePooledTerminal("quick");
+  assert.equal(h.pool.hasPooledTerminal("quick"), false);
+});
+
 test("没有池实例时会话的缩放记录也要被清掉（面板已渲染但 XTermLib 未就绪）", () => {
   const h = harness();
   // createPooledTerminal 从未成功（未进池），但缩放会被写入记录。

@@ -1,4 +1,5 @@
 import { Checkbox, Flex, Layout, Tag, Typography } from "antd";
+import { CopyPageLink } from "../ui/copy-page-link";
 import { WandUiBoundary } from "../theme";
 import { ImSidebarGroup } from "./im-sidebar-group";
 import { WandBrandMark } from "../ui/brand-mark";
@@ -589,6 +590,36 @@ function SessionGroup({
 export function ShellSidebar() {
   const snapshot = useUiStoreSnapshot();
   const conversationState = useConversationUi();
+  // 首屏只挂载当前投影：对话列表和工作区树各自带着自己的请求与渲染，
+  // 同时挂载会让首屏先排队拉一份用户没在看的数据。另一侧等首屏空闲后再挂载，
+  // 之后保持常驻，来回切换不再重复拉取，也不会丢掉展开/滚动状态。
+  const [mountedModes, setMountedModes] = React.useState<ReadonlySet<"chats" | "tasks">>(
+    () => new Set<"chats" | "tasks">([conversationState.mode]),
+  );
+  const activeModeMounted = mountedModes.has(conversationState.mode);
+  // 切换到的投影当帧挂载：layout effect 里的更新会在浏览器绘制前完成。
+  React.useLayoutEffect(() => {
+    if (activeModeMounted) return;
+    setMountedModes((previous) => new Set(previous).add(conversationState.mode));
+  }, [activeModeMounted, conversationState.mode]);
+  React.useEffect(() => {
+    const inactive: "chats" | "tasks" = conversationState.mode === "chats" ? "tasks" : "chats";
+    if (mountedModes.has(inactive)) return undefined;
+    let cancelled = false;
+    const mountInactive = (): void => {
+      if (cancelled) return;
+      setMountedModes((previous) => previous.has(inactive) ? previous : new Set(previous).add(inactive));
+    };
+    const idle = typeof window !== "undefined" && typeof window.requestIdleCallback === "function";
+    const handle = idle
+      ? window.requestIdleCallback(mountInactive, { timeout: 1_500 })
+      : window.setTimeout(mountInactive, 0);
+    return () => {
+      cancelled = true;
+      if (idle) window.cancelIdleCallback(handle);
+      else window.clearTimeout(handle);
+    };
+  }, [conversationState.mode, mountedModes]);
   const dispatch = useUiDispatch();
   const taskBoard = React.useSyncExternalStore(taskBoardStore.subscribe, taskBoardStore.getSnapshot, taskBoardStore.getSnapshot);
   const settings = React.useSyncExternalStore(settingsStore.subscribe, settingsStore.getSnapshot, settingsStore.getSnapshot);
@@ -775,6 +806,7 @@ export function ShellSidebar() {
                 设置
               </WandDropdownMenuItem>
               <WandDropdownMenuSeparator/>
+              <CopyPageLink menuItem/>
               <WandDropdownMenuItem id="logout-button" icon="logout" tone="danger"
                 onClick={() => { setMoreOpen(false); void confirmSidebarLogout(() => navigate({ type: "auth.logout" }), () => {
                   requestAnimationFrame(() => accountTriggerRef.current?.focus({ preventScroll: true }));
@@ -828,15 +860,19 @@ export function ShellSidebar() {
             <div id="sessions-panel">
               <div className="sessions-list" id="sessions-list">
                 <SidebarProjectionSwap value={conversationState.mode}>
-                  <div hidden={conversationState.mode !== "chats"} inert={conversationState.mode !== "chats"}><ConversationSidebarList compact={narrow} enabled={visible && !contextRail && conversationState.mode === "chats"}
-                    selectedSessionId={snapshot.selected?.id ?? null}
-                    sessionTitles={Object.fromEntries(snapshot.sidebar.groups.flatMap(group => group.entries.map(entry => [entry.id, entry.title] as const)))}
-                    onNavigate={() => { taskBoardController.close(); dismissSidebarSurfaces(); }}
-                    onOpenSession={id => {
-                      taskBoardController.close(); conversationUi.suspend(); dismissSidebarSurfaces();
-                      void openSessionWithOwningTask(id, selectedId => { void dispatch({ type: "session.select", id: selectedId }); });
-                    }}/></div>
-                  <div hidden={conversationState.mode !== "tasks"} inert={conversationState.mode !== "tasks"}>{taskTree(narrow)}</div>
+                  {mountedModes.has("chats") ? (
+                    <div hidden={conversationState.mode !== "chats"} inert={conversationState.mode !== "chats"}><ConversationSidebarList compact={narrow} enabled={visible && !contextRail && conversationState.mode === "chats"}
+                      selectedSessionId={snapshot.selected?.id ?? null}
+                      sessionTitles={Object.fromEntries(snapshot.sidebar.groups.flatMap(group => group.entries.map(entry => [entry.id, entry.title] as const)))}
+                      onNavigate={() => { taskBoardController.close(); dismissSidebarSurfaces(); }}
+                      onOpenSession={id => {
+                        taskBoardController.close(); conversationUi.suspend(); dismissSidebarSurfaces();
+                        void openSessionWithOwningTask(id, selectedId => { void dispatch({ type: "session.select", id: selectedId }); });
+                      }}/></div>
+                  ) : null}
+                  {mountedModes.has("tasks") ? (
+                    <div hidden={conversationState.mode !== "tasks"} inert={conversationState.mode !== "tasks"}>{taskTree(narrow)}</div>
+                  ) : null}
                 </SidebarProjectionSwap>
               </div>
             </div>

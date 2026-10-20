@@ -51,7 +51,7 @@ import { QoderRunner } from "./structured-qoder-adapter.js";
 import { PiRunner, isMissingPiSession } from "./structured-pi-adapter.js";
 import { PiOutputFile, type PiOutputFileOptions } from "./pi-output-file.js";
 import { PiProtocolReader } from "./pi-protocol-reader.js";
-import { PiTmuxHost } from "./pi-tmux-host.js";
+import { PiTmuxHost, type PiNativeGcReport } from "./pi-tmux-host.js";
 import { structuredRunId, type StructuredExecHost, type StructuredRunState } from "./structured-exec-host.js";
 import type { StructuredRunnerAdapter, StructuredRunnerExecution, StructuredRunnerResult, StructuredRunnerTurnState } from "./structured-runner.js";
 import { defaultStructuredRunner, defaultStructuredState, isStructuredRunnerForProvider, normalizeThinkingEffort, resolveStructuredRunner } from "./structured-provider-common.js";
@@ -1111,6 +1111,16 @@ export class StructuredSessionManager {
       .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
   }
 
+  /**
+   * 回收 Pi 原生执行宿主下的废弃产物（旧 turn 目录与无主 slot）。
+   * 只有真在跑原生 tmux 时才有意义，否则返回 null 表示本次未执行。
+   */
+  collectNativeGarbage(options: { liveSessionIds: ReadonlySet<string>; retentionMs: number; now?: number }): PiNativeGcReport | null {
+    const host = this.execHost;
+    if (!(host instanceof PiTmuxHost)) return null;
+    return host.collectGarbage(options);
+  }
+
   /** Return lightweight snapshots for the session list (no output/messages). */
   listSlim(): SessionSnapshot[] {
     return Array.from(this.sessions.values())
@@ -1484,7 +1494,9 @@ export class StructuredSessionManager {
     const relay = this.relayHandlerFor(session);
     if (relay) return await this.relayUserMessage(id, prompt, relay);
     if (opts?.idempotencyKey) this.claimIdempotencyKey(id, opts.idempotencyKey);
-    // Pi 主功能现在固定走 CLI；core SDK 重启 drain 不影响 CLI 会话入场。
+    // The drain owns Core admission, not CLI admission. Check before any
+    // asynchronous selection/topic work; accepted Core inputs remain durable.
+    if (this.coreRestartDrains > 0 && this.usesCoreEngine(session)) return this.enqueueInput(session, prompt);
     this.maybeGenerateSessionTopic(id, prompt);
     // 「智能分配」结算窗口：还没有 runner 归属，新输入先排队，不能另起一轮。
     if (this.autoAssignPending.has(id)) return this.enqueueInput(session, prompt);
@@ -1495,8 +1507,17 @@ export class StructuredSessionManager {
     if (isAutoAssignSelector(session.selectedModel)) {
       const assigned = await this.settleAutoAssignForSend(id, session, prompt);
       if ("result" in assigned) return assigned.result;
-      session = assigned.session;
+      session = this.requireSession(id);
+      // Selection yielded: a drain or another input may now own admission.
+      // This request preceded inputs accepted during its selection window.
+      if (this.coreRestartDrains > 0 && this.usesCoreEngine(session)) return this.enqueueInput(session, prompt, true);
+      const ready = this.resolveInFlightSend(id, session, prompt, opts);
+      if ("result" in ready) return ready.result;
+      session = ready.session;
     }
+    // From this gate through runner.start/ownership registration there is no
+    // await, so the drain cannot observe idle and then admit a new Core turn.
+    if (this.coreRestartDrains > 0 && this.usesCoreEngine(session)) return this.enqueueInput(session, prompt);
 
     // 检测上一轮 assistant 是否有未配对的 AskUserQuestion tool_use（说明前一次
     // child 是被 SIGTERM 主动 kill 的，正在等用户回答）。如果有，把这次的输入打包
@@ -1734,11 +1755,15 @@ export class StructuredSessionManager {
     }
   }
 
+  private usesCoreEngine(session: SessionSnapshot): boolean {
+    if ((session.provider ?? session.structuredState?.provider) !== "pi") return false;
+    const decided = session.structuredState?.engine;
+    return decided ? decided === "core" : session.employeeCandidates?.[session.employeeCandidateIndex ?? 0]?.engine === "sdk";
+  }
+
   private async runPiTurn(id: string, updated: SessionSnapshot, prompt: string, requestId: string): Promise<void> {
-    const employeeAgent = updated.employeeCandidates?.[updated.employeeCandidateIndex ?? 0];
-    // 会话已裁决过引擎就沿用（新建会话选了 Wand Agent 或 Pi CLI）；未裁决的旧会话/员工会话回落到候选配置。
-    const decidedEngine = updated.structuredState?.engine;
-    const sdkRequested = decidedEngine ? decidedEngine === "core" : employeeAgent?.engine === "sdk";
+    // Admission and dispatch must agree for both pinned and legacy employee engines.
+    const sdkRequested = this.usesCoreEngine(updated);
     // 没显式选择时对话框固定走 CLI；只有选定 Wand Agent 或员工候选配置 SDK 才是 core。
     // Register the selected Core runner synchronously before its lazy SDK/model
     // preparation. This preserves cancellation ownership and the restart drain;
@@ -1842,9 +1867,10 @@ export class StructuredSessionManager {
    * 期间改"已经被 flushNextQueuedMessage 拿走的队首"，但本方法只动 queue 数组
    * 本身，flushNext 在另一段时序里读 sessions.get(...) 当前快照，已经天然安全。
    */
-  reorderQueuedMessages(sessionId: string, order: number[]): SessionSnapshot {
+  reorderQueuedMessages(sessionId: string, order: number[], expectedQueue?: readonly string[]): SessionSnapshot {
     const session = this.requireSession(sessionId);
     const queue = session.queuedMessages ?? [];
+    this.assertExpectedQueue(queue, expectedQueue);
     if (!Array.isArray(order) || order.length !== queue.length) {
       throw new Error("排序长度与当前队列不一致，请刷新后重试。");
     }
@@ -1918,6 +1944,9 @@ export class StructuredSessionManager {
   ): Promise<SessionSnapshot> {
     const session = this.requireSession(sessionId);
     this.requireRecoveryControl(sessionId);
+    if (this.coreRestartDrains > 0 && this.usesCoreEngine(session)) {
+      throw new Error("服务正在排空 Wand Agent，排队消息已保留，请稍后重试立即发送。");
+    }
     if (idempotencyKey && this.seenIdempotencyKeys.has(`${sessionId}:${idempotencyKey}`)) {
       return session;
     }
@@ -1954,9 +1983,17 @@ export class StructuredSessionManager {
     }
   }
 
+  private assertExpectedQueue(queue: readonly string[], expected?: readonly string[]): void {
+    if (expected !== undefined && (!Array.isArray(expected) || expected.length !== queue.length
+      || expected.some((text, index) => typeof text !== "string" || text !== queue[index]))) {
+      throw new Error("排队消息已变化，请刷新后重试。");
+    }
+  }
+
   /** Clear all queued messages. No-op when queue is already empty. */
-  clearQueuedMessages(sessionId: string): SessionSnapshot {
+  clearQueuedMessages(sessionId: string, expectedQueue?: readonly string[]): SessionSnapshot {
     const session = this.requireSession(sessionId);
+    this.assertExpectedQueue(session.queuedMessages ?? [], expectedQueue);
     if (!session.queuedMessages || session.queuedMessages.length === 0) {
       return session;
     }
@@ -2543,7 +2580,7 @@ export class StructuredSessionManager {
     });
   }
 
-  private enqueueInput(session: SessionSnapshot, prompt: string): SessionSnapshot {
+  private enqueueInput(session: SessionSnapshot, prompt: string, prepend = false): SessionSnapshot {
     if (isDuplicateStructuredQueueInput(session, prompt)) {
       const err = new Error("与上一条消息相同，已忽略，不会加入排队。") as Error & { code?: string };
       err.code = "duplicate_queued_message";
@@ -2551,7 +2588,7 @@ export class StructuredSessionManager {
     }
     const queue = session.queuedMessages ?? [];
     if (queue.length >= 10) throw new Error("排队消息已满（最多 10 条），请等待当前消息处理完成。");
-    const queued = { ...session, queuedMessages: [...queue, prompt] };
+    const queued = { ...session, queuedMessages: prepend ? [prompt, ...queue] : [...queue, prompt] };
     this.sessions.set(session.id, queued);
     this.storage.updateSessionRuntimeMetadata(queued);
     this.emitStructuredSnapshot(queued);
@@ -2564,7 +2601,7 @@ export class StructuredSessionManager {
     if (!current || (current.queuedMessages?.length ?? 0) === 0) {
       return;
     }
-    if (current.structuredState?.inFlight) {
+    if (current.structuredState?.inFlight || (this.coreRestartDrains > 0 && this.usesCoreEngine(current))) {
       return;
     }
     const [nextInput, ...restQueue] = current.queuedMessages ?? [];
@@ -2582,9 +2619,10 @@ export class StructuredSessionManager {
       await this.sendMessage(sessionId, nextInput);
     } catch (error) {
       console.error("[WAND] flushNextQueuedMessage failed:", error);
-      // 发送失败时把消息放回队首，避免永久丢失
+      // Only an explicit pre-execution rejection permits replay. A persisted
+      // runner failure or arbitrary exception can mean delivery is unknown.
       const afterFail = this.sessions.get(sessionId);
-      if (afterFail) {
+      if (afterFail && error instanceof UnacceptedStructuredInputError) {
         const rescued: SessionSnapshot = {
           ...afterFail,
           queuedMessages: [nextInput, ...(afterFail.queuedMessages ?? [])],
@@ -2592,6 +2630,16 @@ export class StructuredSessionManager {
         this.sessions.set(sessionId, rescued);
         this.storage.updateSessionRuntimeMetadata(rescued);
         this.emitStructuredSnapshot(rescued);
+      } else if (afterFail && (afterFail.messages?.length ?? 0) <= (current.messages?.length ?? 0)) {
+        // If dispatch failed before a user turn was checkpointed, retain the
+        // original visibly for reconciliation, never as another sendable item.
+        const retained: SessionSnapshot = { ...afterFail, messages: appendNoticeTurn(afterFail.messages, {
+          role: "assistant", notice: true, content: [{ type: "text",
+            text: "排队消息送达未确认，未自动重发。以下原文仅供核对，不是新的执行指令：\n\n" + nextInput }],
+        }) };
+        this.saveAuthoritativeSession(retained);
+        this.sessions.set(sessionId, retained);
+        this.emitStructuredSnapshot(retained);
       }
     }
   }
@@ -2688,6 +2736,25 @@ export class StructuredSessionManager {
       session,
       prompt,
       env: buildChildEnv(this.config.inheritEnv !== false),
+      ...(provider === "pi" && session.structuredState?.engine === "core" ? {
+        takeSteering: (turnState: StructuredRunnerTurnState): string | null => {
+          const current = this.currentSessionForRequest(sessionId, requestId);
+          if (!current || this.disposed || this.interruptedWith.has(sessionId) || this.coreRestartDrains > 0) return null;
+          const [input, ...remaining] = current.queuedMessages ?? [];
+          if (!input) return null;
+          const preceding = turnState.blocks.length || turnState.result
+            ? this.buildCompletedAssistantMessages(current, turnState) : [...(current.messages ?? [])];
+          const consumed: SessionSnapshot = {
+            ...current, queuedMessages: remaining,
+            messages: [...preceding, buildUserTurn(input, undefined, isoNow())],
+          };
+          // Persist queue removal and transcript together before exposing consumption.
+          this.saveAuthoritativeSession(consumed);
+          this.sessions.set(sessionId, consumed);
+          this.emitStructuredSnapshot(consumed);
+          return input;
+        },
+      } : {}),
     }, {
       isActive: () => this.isCurrentRequest(sessionId, requestId),
       onStdout: (text) => {

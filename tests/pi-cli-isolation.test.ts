@@ -76,8 +76,8 @@ for (const allowSdk of [false, true]) test(`real server and CLI settings never l
       assert.equal(login.status, 200);
       const cookie = login.headers.getSetCookie().map(v => v.split(";")[0]).join("; ");
       const headers = { Cookie: cookie, "Content-Type": "application/json" };
-      const cli = await fetch(origin + "/api/structured-sessions", { method: "POST", headers,
-        body: JSON.stringify({ provider: "pi", engine: "cli", cwd: root, mode: "managed", systemPrompt: "CLI isolation probe" }) });
+      const cli = await fetch(origin + "/api/sessions", { method: "POST", headers,
+        body: JSON.stringify({ kind: "structured", provider: "pi", engine: "cli", cwd: root, mode: "managed", systemPrompt: "CLI isolation probe" }) });
       assert.equal(cli.status, 201, await cli.clone().text());
       const session = await cli.json();
       const settings = await fetch(origin + "/api/sessions/" + session.id + "/pi-settings", { headers });
@@ -86,8 +86,8 @@ for (const allowSdk of [false, true]) test(`real server and CLI settings never l
       assert.equal(state.engine, "cli");
       assert.ok(state.resourceCatalog.skills.some(s => s.name === "cli-probe"));
       assert.equal(globalThis[Symbol.for("wand.sdk.importAttempts")] ?? 0, 0, "CLI startup/settings must never probe SDK");
-      const sdk = await fetch(origin + "/api/structured-sessions", { method: "POST", headers,
-        body: JSON.stringify({ provider: "pi", engine: "sdk", cwd: root }) });
+      const sdk = await fetch(origin + "/api/sessions", { method: "POST", headers,
+        body: JSON.stringify({ kind: "structured", provider: "pi", engine: "sdk", cwd: root }) });
       if (${allowSdk}) {
         assert.equal(sdk.status, 201, await sdk.clone().text());
         assert.equal((await sdk.json()).structuredState.engine, "core");

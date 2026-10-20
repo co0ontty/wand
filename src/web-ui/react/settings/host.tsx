@@ -2,7 +2,6 @@ import { isClientSettingsPage } from "../../page.js";
 import { Alert, Collapse, Form, Skeleton } from "antd";
 import { WandUiProvider } from "../theme";
 import { installSettingsLibraryStyles } from "./styles";
-import { SpeechSettingsTab } from "./speech-panel";
 import { LocalModelsSettingsTab } from "./local-models-panel";
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as React from "react";
@@ -42,7 +41,6 @@ const ADMIN_TAB_ORDER: SettingsTab[] = [
   "general",
   "ai",
   "local-models",
-  "speech",
   "notifications",
   "display",
   "security",
@@ -52,7 +50,6 @@ const ADMIN_TAB_ORDER: SettingsTab[] = [
 
 const CONNECTED_APP_TAB_ORDER: SettingsTab[] = [
   "local-models",
-  "speech",
   "notifications",
   "display",
   "about",
@@ -233,7 +230,6 @@ export function SettingsHost({
       connectors: <GithubSettingsTab {...props} />,
       general: <GeneralSettingsTab {...props} />,
       ai: <AiSettingsTab {...props} />,
-      speech: <SpeechSettingsTab admin={snapshot.access === "admin"} />,
       "local-models": <LocalModelsSettingsTab admin={snapshot.access === "admin"} />,
       notifications: <NotificationSettingsTab {...props} />,
       display: <DisplaySettingsTab {...props} />,

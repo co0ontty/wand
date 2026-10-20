@@ -271,8 +271,8 @@ test("employee HTTP create cannot replace an existing id; sessions and tasks ret
   assert.notEqual(created.json?.id, "e_test123");
   assert.equal(storage.getSiliconEmployee("e_test123")?.name, "测试员工");
 
-  const made = await request("/api/structured-sessions", "POST", {
-    cwd: root, employeeId: "e_test123", provider: "grok", systemPrompt: "客户端冒充规则",
+  const made = await request("/api/sessions", "POST", {
+    kind: "structured", cwd: root, employeeId: "e_test123", provider: "grok", systemPrompt: "客户端冒充规则",
   });
   assert.equal(made.status, 201, JSON.stringify(made.json));
   const sessionId = made.json?.id as string;
@@ -284,8 +284,8 @@ test("employee HTTP create cannot replace an existing id; sessions and tasks ret
   assert.equal(storage.getSession(sessionId)?.employeeId, "e_test123");
   assert.equal(storage.getSession(sessionId)?.employeeCandidates?.length, 2);
 
-  const customSession = await request("/api/structured-sessions", "POST", {
-    cwd: root, employeeId: "e_test123", overrideCli: true, provider: "pi", model: "custom-pi-model",
+  const customSession = await request("/api/sessions", "POST", {
+    kind: "structured", cwd: root, employeeId: "e_test123", overrideCli: true, provider: "pi", model: "custom-pi-model",
   });
   assert.equal(customSession.status, 201, JSON.stringify(customSession.json));
   assert.equal(customSession.json?.employeeId, "e_test123");
@@ -293,11 +293,11 @@ test("employee HTTP create cannot replace an existing id; sessions and tasks ret
   assert.equal(customSession.json?.selectedModel, "custom-pi-model");
   assert.equal(customSession.json?.employeeName, "测试员工");
 
-  assert.equal((await request("/api/structured-sessions", "POST", {
-    cwd: root, employeeId: "e_test123", runner: "pty",
+  assert.equal((await request("/api/sessions", "POST", {
+    kind: "structured", cwd: root, employeeId: "e_test123", runner: "pty",
   })).status, 400);
-  assert.equal((await request("/api/structured-sessions", "POST", {
-    cwd: root, teamId: "team_test",
+  assert.equal((await request("/api/sessions", "POST", {
+    kind: "structured", cwd: root, teamId: "team_test",
   })).status, 400);
 
   const createdTask = await request("/api/wand-tasks", "POST", {
@@ -384,15 +384,15 @@ test("employee HTTP create cannot replace an existing id; sessions and tasks ret
     ? { engine: "core", reason: "mock SDK ready" } : resolveEngine(engine);
   const sdkEmployee = employee({ agents: [{ ...PI, engine: "sdk" }, CODEX] });
   storage.saveSiliconEmployee(sdkEmployee);
-  const sdkSession = await request("/api/structured-sessions", "POST", {
-    cwd: root, employeeId: sdkEmployee.id, engine: "cli",
+  const sdkSession = await request("/api/sessions", "POST", {
+    kind: "structured", cwd: root, employeeId: sdkEmployee.id, engine: "cli",
   });
   assert.equal(sdkSession.status, 201, JSON.stringify(sdkSession.json));
   assert.equal(sdkSession.json?.employeeCandidateIndex, 0);
   assert.equal((sdkSession.json?.structuredState as Record<string, unknown>)?.engine, "core",
     "employee candidate, rather than a client engine override, determines execution");
-  const explicitCli = await request("/api/structured-sessions", "POST", {
-    cwd: root, employeeId: sdkEmployee.id, overrideCli: true, provider: "pi", engine: "cli",
+  const explicitCli = await request("/api/sessions", "POST", {
+    kind: "structured", cwd: root, employeeId: sdkEmployee.id, overrideCli: true, provider: "pi", engine: "cli",
   });
   assert.equal(explicitCli.status, 201, JSON.stringify(explicitCli.json));
   assert.equal((explicitCli.json?.structuredState as Record<string, unknown>)?.engine, "cli",
@@ -419,8 +419,8 @@ test("employee HTTP create cannot replace an existing id; sessions and tasks ret
     if (engine === "sdk") throw new Error("mock Wand Agent unavailable");
     return resolveEngine(engine);
   };
-  const unavailableSdk = await request("/api/structured-sessions", "POST", {
-    cwd: root, employeeId: sdkEmployee.id,
+  const unavailableSdk = await request("/api/sessions", "POST", {
+    kind: "structured", cwd: root, employeeId: sdkEmployee.id,
   });
   assert.equal(unavailableSdk.status, 400);
   assert.match(String(unavailableSdk.json?.error), /Wand Agent unavailable/);
@@ -434,8 +434,8 @@ test("employee HTTP create cannot replace an existing id; sessions and tasks ret
   assert.equal(activeEmployees.some((item) => item.id === "e_test123"), false);
   const archivedEmployees = (await request("/api/silicon-employees?includeArchived=1", "GET")).json?.employees as Array<{ id: string }>;
   assert.equal(archivedEmployees.some((item) => item.id === "e_test123"), true);
-  assert.equal((await request("/api/structured-sessions", "POST", {
-    cwd: root, employeeId: "e_test123",
+  assert.equal((await request("/api/sessions", "POST", {
+    kind: "structured", cwd: root, employeeId: "e_test123",
   })).status, 400);
   assert.equal((await request("/api/silicon-employees/e_test123", "DELETE")).status, 204);
   assert.equal(storage.getSession(sessionId)?.employeeName, "测试员工");

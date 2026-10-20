@@ -1,6 +1,0 @@
-Lane mailbox for macOS Beta 交付验证 (role macos-build)
-Run: team_mv8192uj000315w5mb
-Lane: macos-build-1791977698295
-Token: 52341932-c516-4be0-8cdd-e9e6cf8920d5
-
-Captain messages appear below, newest last.

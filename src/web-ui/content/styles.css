@@ -90,9 +90,10 @@ html.no-transition *, html.no-transition *::before, html.no-transition *::after 
 .chat-message-content :is(code, pre), .chat-markdown :is(code, pre) { font-family: var(--font-mono); }
 /* Native textarea, toolbar placement and imperative disclosure; visuals are Ant surfaces. */
 .input-panel { position: relative; flex-shrink: 0; box-sizing: border-box; padding: 8px max(var(--wand-page-inset,20px), var(--wand-safe-right)) calc(8px + var(--input-safe-bottom) + var(--keyboard-offset, 0px)) max(var(--wand-page-inset,20px), var(--wand-safe-left)); }
-.composer-top-row { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.composer-top-row:has(.todo-progress:not(.hidden), .structured-status-bar) { min-height: 32px; margin-block-end: 12px; }
-.todo-progress { flex: 1; min-width: 0; }
+/* The checklist shares the composer's context line, not a detached row above the portrait. */
+.composer-top-row { position:absolute; inset-block-end:calc(100% - 2px); inset-inline-start:50%; width:var(--composer-todo-width,30%); transform:translateX(-50%); z-index:2; display:flex; align-items:center; gap:4px; }
+.todo-progress { flex:1; min-width:0; text-align:center; container:todo-summary / inline-size; }
+@container todo-summary (max-width:110px) { #todo-progress-ring, #todo-progress-task { display:none; } }
 .todo-progress-header.ant-btn { max-width: 100%; height: 32px; padding-inline: 6px; font-size: var(--font-size-xs); }
 .todo-progress-header.ant-btn > span, #todo-progress-summary { display: block; min-width: 0; max-width: 100%; }
 #todo-progress-ring, #todo-progress-counter, .todo-progress-chevron { flex: none; display: inline-flex; align-items: center; }
@@ -132,31 +133,45 @@ html.no-transition *, html.no-transition *::before, html.no-transition *::after 
 .composer-actions-left, .composer-actions-right, .composer-status-row, .composer-inline-config, .composer-config-controls { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .composer-actions-right { justify-content: flex-end; flex-wrap: wrap; }
 .composer-config-controls > [data-mode-control-pill] { min-width: 0; }
-.composer-badge-host, .composer-config-host, .composer-rail-host, .composer-voice-host, .composer-attachments-host, .composer-action-error-host, .plus-popover-items-host { display: contents; }
+.composer-badge-host, .composer-config-host, .composer-rail-host, .composer-attachments-host, .composer-action-error-host, .plus-popover-items-host { display: contents; }
 .input-textarea { width: 100%; min-height: 36px; max-height: var(--input-max-height, 160px); resize: none; touch-action: pan-y; overscroll-behavior: contain; box-sizing: border-box; display: block; border: 0; padding: 0; outline: none; background: transparent; color: var(--text-primary); caret-color: var(--accent); font: inherit; }
 .input-textarea::placeholder { color: var(--text-secondary); }
 .input-composer:not(.is-terminal-interactive) .input-textarea { min-height:63px; max-height:min(168px,28dvh); line-height:21px; }
 .input-composer:not(.is-terminal-interactive) .composer-input-wrap[data-editor-expanded="true"] .input-textarea { max-height:min(504px,48dvh); }
 .composer-editor-controls { display:flex; justify-content:flex-end; padding-block:4px; }
 .input-composer.is-terminal-interactive .composer-editor-controls { display:none; }
-/* Only idle mobile input owns hold-to-talk; focused/nonempty input keeps native selection/scroll. */
-textarea[data-idle-speech] { touch-action: none; user-select: none; -webkit-user-select: none; }
 .input-textarea:disabled { color: var(--text-tertiary); cursor: not-allowed; }
 @media (prefers-reduced-motion: reduce) { .prompt-optimize-btn.is-loading .prompt-optimize-icon { animation: none; } }
 .composer-status-line { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-secondary); font-size: var(--font-size-xs); }
 .composer-plus-popover { position: absolute; bottom: calc(100% - 8px); left: 16px; z-index: 50; width: min(360px, calc(100vw - 32px)); }
 .composer-plus-popover [data-composer-popover-host] { display: grid; gap: 4px; }
 .composer-plus-popover .composer-config-controls { flex-wrap: wrap; }
-.todo-progress-body { display: none; position: absolute; bottom: calc(100% + 8px); left: 0; width: min(420px, 100%); max-height: min(320px, 48dvh); overflow: auto; z-index: 50; }
+.todo-progress-body { display:none; position:absolute; bottom:calc(100% + 8px); inset-inline-start:50%; transform:translateX(-50%); width:min(420px,calc(100vw - 48px)); max-height:min(320px,48dvh); overflow:auto; z-index:50; }
 .todo-progress-body.expanded { display: block; }
-.queue-bar-host { position: absolute; bottom: calc(100% + 8px); right: 16px; width: min(360px, calc(100% - 32px)); max-height: 40dvh; overflow: auto; z-index: 40; }
+.queue-bar-host { flex:1; min-width:0; container:queue-summary / inline-size; }
+.queue-bar-host[hidden] { display: none !important; }
+.queue-bar-host .queue-bar { margin:0; }
+.queue-bar-host .ant-collapse-header { height:32px; box-sizing:border-box; padding:0 4px !important; align-items:center !important; gap:4px; font-size:var(--font-size-xs); color:var(--text-secondary) !important; }
+.queue-bar-host .ant-collapse-header-text { min-width:0; }
+.queue-bar-host .ant-collapse-expand-icon { padding-inline-end:0 !important; flex:none; }
+.queue-summary { display:flex; align-items:center; gap:4px; min-width:0; overflow:hidden; white-space:nowrap; }
+.queue-summary-label, .queue-summary-count { flex:none; }
+.queue-summary-count { font-variant-numeric:tabular-nums; }
+.queue-bar-capacity .queue-summary-count { color:var(--warning); }
+.queue-summary-preview { display:none; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+@container queue-summary (min-width:180px) { .queue-summary-preview { display:block; } }
+/* The library owns disclosure/focus/motion; only its details occupy the space above the fixed summary. */
+.queue-bar-host .ant-collapse-panel, .queue-bar-host .queue-retrieval { position:absolute; inset-block-end:calc(100% + 8px); inset-inline-end:0; width:min(420px,calc(100vw - 48px)); max-height:min(40dvh,320px); overflow:auto; background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:var(--control-radius); box-shadow:var(--shadow-md); }
+.queue-bar-host:has(.queue-retrieval) .ant-collapse-panel { visibility:hidden; }
+@media (pointer:coarse), (max-width:640px) { .queue-bar-host .ant-collapse-header { height:44px; font-size:11px; } }
+@media (prefers-reduced-motion:reduce) { .queue-bar-item-sliding { transition: none; } }
 .queue-bar-item { touch-action: pan-y; }
 .queue-bar-item-sliding { transition: transform var(--motion-fast) var(--ease-in-out-smooth); }
 .structured-status-bar { display: flex; align-items: center; flex: none; margin-inline-start: auto; gap: 6px; padding-inline: 6px; min-height: 32px; color: var(--text-secondary); font-size: var(--font-size-xs); white-space: nowrap; }
 .status-bar-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
 .status-bar-timer { font-variant-numeric: tabular-nums; }
 .structured-status-bar.completed { color: var(--success); }
-.input-composer.is-terminal-interactive :is(.composer-status-row, .composer-inline-config, #voice-record-btn, .composer-attachments-host) { display: none; }
+.input-composer.is-terminal-interactive :is(.composer-status-row, .composer-inline-config, .composer-attachments-host) { display: none; }
 .input-composer.is-terminal-interactive #send-input-button:not([data-phase="running"]) { display: none; }
 /* One PTY key row stays with the composer; Ant owns the key visuals. */
 .terminal-shortcuts:not([hidden]) { min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; padding: 0; }
@@ -587,6 +602,12 @@ textarea[data-idle-speech] { touch-action: none; user-select: none; -webkit-user
 .task-board-detail-main { max-width:960px; }
 .task-board-detail-title.ant-input { font-size:20px; font-weight:600; line-height:1.5; }
 .task-board-detail-content { min-width:0; overflow-wrap:anywhere; }
+.task-comment-mention { overflow:auto; max-height:240px; margin:0; padding:4px; border:1px solid var(--border-subtle); border-radius:var(--radius-md); background:var(--bg-primary); box-shadow:var(--shadow-md); pointer-events:auto; transform-origin:top center; animation:task-comment-mention-in var(--motion-fast) var(--ease-out-expo); }
+.task-comment-mention [role=option] { display:block; width:100%; text-align:left; border:0; background:transparent; border-radius:var(--radius-sm); padding:6px 8px; color:inherit; cursor:pointer; }
+.task-comment-mention [role=option][aria-selected=true] { background:var(--bg-secondary); }
+.task-comment-mention [role=option]:disabled { color:var(--text-secondary); cursor:default; }
+@keyframes task-comment-mention-in { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+@media (prefers-reduced-motion: reduce) { .task-comment-mention { animation:none; } }
 .task-board-detail-content .wand-markdown-preview { max-width:none; }
 .task-board-detail-properties { max-width:320px; }
 .task-board-detail-properties .ant-form-item:last-child { margin-bottom:0; }

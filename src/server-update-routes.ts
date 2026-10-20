@@ -57,8 +57,12 @@ export interface PublicUpdateRoutesDependencies {
   resolveAndroidDownload(channel: "stable" | "beta"): Promise<DownloadAsset | null>;
   /** GitHub 来源由服务端代拉，避免手机直连 CDN。测试 stub 可不实现。 */
   resolveGitHubApkDownload?(): Promise<GitHubApkDownload | null>;
-  /** Beta 包下发时清理分发目录，只保留最新一个 APK（可选，测试 stub 可不实现）。 */
+  /** Beta 包下发时清理分发目录，只保留最新一套产物（可选，测试 stub 可不实现）。 */
   pruneAndroidApkDirectory?(keepFileName?: string): Promise<{ deleted: string[]; freedBytes: number }>;
+  /** macOS Beta 包下发时清理分发目录，保留最新一整套 zip/dmg/update.json。 */
+  pruneMacosBetaDirectory?(keepFileName?: string): Promise<{ deleted: string[]; freedBytes: number }>;
+  /** iOS IPA 下发时清理分发目录，保留最新一个包。 */
+  pruneIosIpaDirectory?(keepFileName?: string): Promise<{ deleted: string[]; freedBytes: number }>;
   /** 计算本地分发文件的 SHA-256（hex）；失败返回 null，下载响应不带哈希头。 */
   computeAssetSha256(asset: DownloadAsset): Promise<string | null>;
   resolveLatestDmg(): Promise<ResolvedUpdateAsset | null>;
@@ -70,6 +74,27 @@ export interface PublicUpdateRoutesDependencies {
 }
 
 const GITHUB_PROXY_TIMEOUT_MS = 5 * 60 * 1000;
+
+/**
+ * 分发目录清理的共用执行器：清理失败绝不能阻断本次下载或更新检查。
+ * 只在真正开始下发时调用，避免定时扫描去删一个没人要的文件。
+ */
+async function pruneQuietly(
+  prune: ((keepFileName?: string) => Promise<{ deleted: string[]; freedBytes: number }>) | undefined,
+  keepFileName: string,
+  label: string,
+): Promise<void> {
+  if (!prune) return;
+  try {
+    const pruned = await prune(keepFileName);
+    if (pruned.deleted.length > 0) {
+      process.stdout.write(`[wand] 已清理旧版${label}：${pruned.deleted.join(", ")}`
+        + `（释放 ${(pruned.freedBytes / 1024 / 1024).toFixed(1)} MB）\n`);
+    }
+  } catch (error) {
+    process.stdout.write(`[wand] 清理旧版${label}失败：${getErrorMessage(error)}\n`);
+  }
+}
 
 async function proxyGitHubApk(
   _req: Request,
@@ -178,17 +203,7 @@ export function registerPublicUpdateRoutes(
     // Beta 包下发时顺手清理分发目录：debug 构建每次都带独立时间戳版本号，
     // 不清理会按构建次数无限堆积。只保留最新一个；正在下发的文件与
     // currentApkFile 固定指向的文件不会被删。清理失败不阻断本次下载。
-    if (channel === "beta" && deps.pruneAndroidApkDirectory) {
-      try {
-        const pruned = await deps.pruneAndroidApkDirectory(asset.fileName);
-        if (pruned.deleted.length > 0) {
-          process.stdout.write(`[wand] 已清理旧版安装包：${pruned.deleted.join(", ")}`
-            + `（释放 ${(pruned.freedBytes / 1024 / 1024).toFixed(1)} MB）\n`);
-        }
-      } catch (error) {
-        process.stdout.write(`[wand] 清理旧版安装包失败：${getErrorMessage(error)}\n`);
-      }
-    }
+    if (channel === "beta") await pruneQuietly(deps.pruneAndroidApkDirectory, asset.fileName, "安装包");
     // 响应头携带实际发送字节的 SHA-256：check 与 download 之间 APK 目录若被
     // 重新构建/覆盖，客户端以响应头为准，避免用过期 check 快照误报校验失败。
     const headers: Record<string, string> = {};
@@ -239,6 +254,9 @@ export function registerPublicUpdateRoutes(
       res.status(503).json({ error: "无法校验 macOS Beta 更新包。" });
       return;
     }
+    // 开始下发后再清理：macOS 每次 debug 构建产出独立的 zip+dmg+update.json，
+    // 不清理会按构建次数堆积。清理保留最新一整套，不影响本次传输。
+    await pruneQuietly(deps.pruneMacosBetaDirectory, asset.fileName, " macOS 构建包");
     streamFileWithRange(req, res, {
       filePath: asset.filePath,
       size: asset.size,
@@ -362,6 +380,8 @@ export function registerPublicUpdateRoutes(
       res.status(404).json({ error: "当前没有可下载的 IPA 文件。" });
       return;
     }
+    // iOS 每次 debug 构建产出独立时间戳的 IPA，不清理会按构建次数堆积。
+    await pruneQuietly(deps.pruneIosIpaDirectory, asset.fileName, " iOS 构建包");
     streamFileWithRange(req, res, {
       filePath: asset.filePath,
       size: asset.size,

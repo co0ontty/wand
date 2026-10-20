@@ -1,7 +1,8 @@
 export type PtyInputMode = "shortcuts" | "keyboard";
-export interface PtyInputState { readonly mode: PtyInputMode; readonly ctrl: boolean; readonly shift: boolean; }
+/** open: the key dock is expanded; collapsed by default because PTY keys are rarely needed. */
+export interface PtyInputState { readonly mode: PtyInputMode; readonly ctrl: boolean; readonly shift: boolean; readonly open: boolean; }
 export interface PtyModifiers { ctrl: boolean; shift: boolean; alt?: boolean; }
-const initial: PtyInputState = Object.freeze({ mode: "shortcuts", ctrl: false, shift: false });
+const initial: PtyInputState = Object.freeze({ mode: "shortcuts", ctrl: false, shift: false, open: false });
 const sessions = new Map<string, PtyInputState>();
 const listeners = new Set<() => void>();
 
@@ -12,7 +13,7 @@ export const ptyInputState = {
   update(owner: string, patch: Partial<PtyInputState>): void {
     if (!owner) return;
     const previous = this.read(owner), next = { ...previous, ...patch };
-    if (next.mode === previous.mode && next.ctrl === previous.ctrl && next.shift === previous.shift) return;
+    if (next.mode === previous.mode && next.ctrl === previous.ctrl && next.shift === previous.shift && next.open === previous.open) return;
     sessions.delete(owner); sessions.set(owner, Object.freeze(next));
     // Keep transient UI state bounded; reload also returns to unmodified keys.
     if (sessions.size > 128) sessions.delete(sessions.keys().next().value!);

@@ -1,10 +1,8 @@
-import type { SpeechBackend } from "./speech-types.js";
-
-export type LocalModelKind = "laya" | "speech";
+export type LocalModelKind = "laya";
 export type ModelSetupPhase = "downloading" | "verifying" | "runtime" | "initializing" | "completed" | "failed" | "cancelled";
 export interface ModelSetupOperation {
   id: number;
-  action: "download" | "initialize" | "activate";
+  action: "download" | "initialize";
   phase: ModelSetupPhase;
   message: string;
   received: number;
@@ -28,8 +26,7 @@ export interface LocalModelStatus {
   hardware?: import("./decision-hardware.js").DecisionHardwareAssessment;
   decisionEmployeeId?: string;
 }
-export interface LocalModelsStatus { laya: LocalModelStatus; speech: LocalModelStatus; }
+export interface LocalModelsStatus { laya: LocalModelStatus; }
 export interface ModelSetupInput {
   model?: string;
-  backend?: "auto" | SpeechBackend;
 }

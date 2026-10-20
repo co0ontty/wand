@@ -35,6 +35,8 @@ src/web-ui/content/vendor/qrcode/
 # IDE / 工具本地状态，不该入库
 .qoder/
 .claude/
+.pi/team/
+
 
 # Superdesign 设计上下文（本地生成，不入库）
 .superdesign/

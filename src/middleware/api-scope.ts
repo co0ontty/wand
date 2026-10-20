@@ -87,11 +87,10 @@ export const API_ROUTE_RULES: readonly ApiRouteRule[] = [
 
   // ── 会话、任务、工作区与员工（原生客户端的主要功能面）──
   { prefix: "/api/sessions", scope: "sessions" },
+  { prefix: "/api/structured-sessions", scope: "sessions" },
   { prefix: "/api/session-list", scope: "sessions" },
   { prefix: "/api/session-directories", scope: "sessions" },
-  { prefix: "/api/structured-sessions", scope: "sessions" },
   { prefix: "/api/structured-chat-avatar", scope: "sessions" },
-  { prefix: "/api/commands", scope: "sessions" },
   { prefix: "/api/config", scope: "sessions" },
   { prefix: "/api/optimize-prompt", scope: "sessions" },
   { prefix: "/api/decisions", scope: "sessions" },
@@ -124,8 +123,7 @@ export const API_ROUTE_RULES: readonly ApiRouteRule[] = [
   { prefix: "/api/missions", scope: "sessions" },
   { prefix: "/api/attention", scope: "sessions" },
 
-  // ── 语音与本地模型：查询需要 sessions，修改类由路由内部 requireAdmin ──
-  { prefix: "/api/speech", scope: "sessions" },
+  // ── 本地模型：查询需要 sessions，修改类由路由内部 requireAdmin ──
   { prefix: "/api/local-models", scope: "sessions" },
 ];
 

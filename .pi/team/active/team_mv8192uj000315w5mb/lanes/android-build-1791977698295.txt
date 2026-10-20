@@ -1,6 +1,0 @@
-Lane mailbox for Android Beta 交付验证 (role android-build)
-Run: team_mv8192uj000315w5mb
-Lane: android-build-1791977698295
-Token: 765302c3-f14c-47e5-a694-e44bb3784694
-
-Captain messages appear below, newest last.

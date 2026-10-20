@@ -1,4 +1,6 @@
 import * as React from "react";
+import { usePageRouteState, routeEnum } from "../use-page-route";
+import { CopyPageLink } from "../ui/copy-page-link";
 import { Alert, Flex, Typography } from "antd";
 import { employeeConversationId } from "../../../conversation-types.js";
 import { employeeProfile } from "../agents/employee-profile";
@@ -21,8 +23,8 @@ export function ConversationDirectory({ onSelect }: { onSelect(id: string, focus
   const self = useUserProfile();
   const teamSource = useAiTeamListState(true);
   const { teams } = teamSource;
-  const [tab, setTab] = React.useState("employees");
-  const [query, setQuery] = React.useState("");
+  const [tab, setTab] = usePageRouteState<"employees" | "presets">("directoryTab", "employees", routeEnum(["employees", "presets"], "employees"), String, "push");
+  const [query, setQuery] = usePageRouteState("directoryQuery", "", undefined, undefined, "replace", 250);
   const [expanded, setExpanded] = React.useState<string[]>([]);
   const [create, setCreate] = React.useState(false);
   const [presetId, setPresetId] = React.useState("");
@@ -36,6 +38,7 @@ export function ConversationDirectory({ onSelect }: { onSelect(id: string, focus
   return <Flex vertical className="conversation-directory" style={{ height: "100%", minHeight: 0 }}>
     <Flex ref={anchor} align="center" justify="space-between" gap={8} className="conversation-directory-header" style={{ position: "relative", flexShrink: 0 }}>
       <Flex align="center" gap={8}><WandButton kind="ghost" size="small" onClick={() => { setCreate(false); conversationUi.directory(false); }}>返回对话</WandButton><Typography.Title level={2}>通讯录</Typography.Title></Flex>
+      <CopyPageLink/>
       <WandButton ref={trigger} kind="primary" size="small" aria-label={create ? "关闭建群" : "发起群聊"} aria-expanded={create}
         onClick={() => { setPresetId(""); setCreate(!create); }}><ConversationMorphIcon from="plus" to="close" active={create}/>{create ? "关闭建群" : "发起群聊"}</WandButton>
       <ConversationPanel open={create} owner="directory-group-panel" anchorRef={anchor} triggerRef={trigger} onClose={() => setCreate(false)}>
@@ -44,7 +47,7 @@ export function ConversationDirectory({ onSelect }: { onSelect(id: string, focus
       </ConversationPanel>
     </Flex>
     <Flex gap={8} align="center" wrap className="conversation-directory-toolbar">
-      <WandStretchTabs value={tab} onValueChange={value => { setCreate(false); setTab(value); }} ariaLabel="通讯录分类"
+      <WandStretchTabs value={tab} onValueChange={value => { setCreate(false); setTab(value as "employees" | "presets"); }} ariaLabel="通讯录分类"
         tabs={[{ value: "employees", label: "员工" }, { value: "presets", label: "团队模板" }]}/>
       <div className="conversation-directory-search"><WandSearchField label="搜索通讯录" placeholder="搜索员工或团队模板" value={query} onValueChange={setQuery}/></div>
       <WandButton kind="ghost" size="small" className="conversation-directory-manage" onClick={() => taskBoardController.open("", "", "teams")}>管理员工与团队模板</WandButton>

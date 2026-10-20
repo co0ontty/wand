@@ -127,7 +127,8 @@ test("目录工作区名称与项目名双向同步，且改名会刷新任务�
   const { baseUrl, close } = await startApp(root);
   try {
     // 建一个会话，让该目录出现在会话目录树里（rename 路由要求目录已存在）。
-    const created = await fetch(`${baseUrl}/api/structured-sessions`, json("POST", {
+    const created = await fetch(`${baseUrl}/api/sessions`, json("POST", {
+      kind: "structured",
       cwd: projectDir,
       provider: "opencode",
       mode: "assist",

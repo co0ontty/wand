@@ -21,24 +21,31 @@ const group = (sessions: WorkspaceSessionSummary[]): TaskDirectoryGroup => ({
 });
 const person = (employeeId = "employee-a") => ({ kind: "dm" as const, peerEmployeeId: employeeId, title: "同名员工", name: "" });
 
-test("preview keeps one real tool and factual state per session, including SDK identity", () => {
+test("preview waits for measurement instead of eagerly mounting every session", () => {
   const html = renderToStaticMarkup(createElement(SidebarSessionPreview, {
     sessions: [session("a", { engine: "core", inFlight: true }), session("b", { status: "failed" }), session("c", { status: "permission-blocked" })],
     expanded: false, label: "会话预览", onActivate() {},
   }));
-  assert.equal((html.match(/data-preview-session-id=/g) ?? []).length, 3);
-  assert.match(html, /a · Wand Agent · 运行中/);
-  assert.match(html, /b · Pi · 失败/);
-  assert.match(html, /c · Pi · 等待授权/);
-  assert.equal((html.match(/data-provider-logo="pi"/g) ?? []).length, 7, "three visible logo slots, three title measurements and one fixed icon-slot measurement");
+  assert.equal((html.match(/data-preview-session-id=/g) ?? []).length, 0);
+  assert.match(html, /data-total-count="3" data-visible-count="0"/);
+  assert.match(html, /还有 3 个匹配会话/);
+  assert.equal((html.match(/data-provider-logo="pi"/g) ?? []).length, 1, "only the fixed icon-slot probe mounts before real width is known");
   assert.match(html, /sidebar-session-preview-measure-clip[^>]*aria-hidden="true"[^>]*inert/);
 });
 
 test("expanded preview is hidden and inert without discarding session identity", () => {
   const html = renderToStaticMarkup(createElement(SidebarSessionPreview, { sessions: [session("a")], expanded: true, label: "会话预览", onActivate() {} }));
   assert.match(html, /data-expanded="true"[^>]*inert[^>]*aria-hidden="true"/);
-  assert.match(html, /data-preview-session-id="a"/);
+  assert.match(html, /data-total-count="1"/);
   assert.equal(renderToStaticMarkup(createElement(SidebarSessionPreview, { sessions: [], expanded: false, label: "会话预览", onActivate() {} })), "");
+});
+
+test("a thousand-session preview has constant initial DOM cost", () => {
+  const render = (count: number): string => renderToStaticMarkup(createElement(SidebarSessionPreview, {
+    sessions: Array.from({ length: count }, (_, i) => session(`session-${i}`)), expanded: false, label: "会话预览", onActivate() {},
+  }));
+  assert.equal((render(1000).match(/<button/g) ?? []).length, (render(10).match(/<button/g) ?? []).length);
+  assert.equal((render(1000).match(/data-provider-logo=/g) ?? []).length, 1);
 });
 
 test("empty matched session areas render no disclosure control or vacant preview region", () => {

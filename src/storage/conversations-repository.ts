@@ -172,6 +172,11 @@ export class ConversationRepository {
     });
   }
 
+  /** Remove only the canonical system/employee link, never a user's chat message. */
+  unlinkEmployeeSession(sessionId: string): void {
+    this.db.prepare("DELETE FROM conversation_messages WHERE id = ?").run(`employee-session:${sessionId}`);
+  }
+
   employeeConversationForSession(sessionId: string): string | null {
     const row = this.db.prepare("SELECT conversation_id FROM conversation_messages WHERE id = ?")
       .get(`employee-session:${sessionId}`) as { conversation_id: string } | undefined;

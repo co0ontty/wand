@@ -20,6 +20,7 @@ export function decisionExpertSeedAgents(): WandTaskAgent[] {
 export function decisionExpertDefinition(now: string, existing?: SiliconEmployee | null): SiliconEmployee {
   return { id: existing?.id ?? DECISION_EXPERT_ID, systemKey: DECISION_EXPERT_KEY, name: DECISION_EXPERT_NAME,
     duty: DECISION_EXPERT_DUTY, prompt: DECISION_EXPERT_PROMPT, avatar: "", tags: [SYSTEM_EMPLOYEE_TAG],
+    systemSessionLimit: existing?.systemSessionLimit,
     agents: existing?.agents.length ? existing.agents : decisionExpertSeedAgents(),
     createdAt: existing?.createdAt ?? now, updatedAt: now };
 }

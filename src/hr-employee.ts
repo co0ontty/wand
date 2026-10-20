@@ -18,6 +18,7 @@ export function hrEmployeeDefinition(now: string, existing?: SiliconEmployee | n
   return {
     id: existing?.id ?? HR_EMPLOYEE_ID, systemKey: HR_EMPLOYEE_KEY, name: HR_EMPLOYEE_NAME,
     duty: HR_EMPLOYEE_DUTY, prompt: HR_EMPLOYEE_PROMPT, avatar: HR_EMPLOYEE_AVATAR, tags: [SYSTEM_EMPLOYEE_TAG],
+    systemSessionLimit: existing?.systemSessionLimit,
     agents: existing?.agents.length ? existing.agents : seedAgents?.length ? seedAgents : systemEmployeeSeedAgents(),
     createdAt: existing?.createdAt ?? now, updatedAt: now,
   };

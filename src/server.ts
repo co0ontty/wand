@@ -30,12 +30,11 @@ import { ensureCertificates } from "./cert.js";
 import {
   getDefaultModelForProvider,
   getProviderDefaultModels,
-  isExecutionMode,
   resolveConfigDir,
   writePreferenceToStorage,
 } from "./config.js";
 import { ModelCatalogService, type ModelRefreshOptions } from "./models.js";
-import { fallbackProviderModel, readProviderModelPreferences, sessionEmployeeFields } from "./session-model.js";
+import { readProviderModelPreferences } from "./session-model.js";
 
 import { ProcessManager, ProcessEvent } from "./process-manager.js";
 import { SessionLogger } from "./session-logger.js";
@@ -53,16 +52,13 @@ import { registerFileRoutes } from "./server-file-routes.js";
 import { recordRecentPath } from "./recent-paths.js";
 import { registerLocalPreviewRoutes } from "./server-local-preview-routes.js";
 import { registerSettingsRoutes } from "./server-settings-routes.js";
-import { registerSpeechRoutes } from "./server-speech-routes.js";
-import { SpeechPolisherService } from "./speech-polisher-service.js";
-import { SPEECH_POLISHER_KEY } from "./speech-polisher-identity.js";
 import { registerLocalModelRoutes } from "./server-local-model-routes.js";
-import { createStorageCleanup } from "./storage-cleanup.js";
+import { createStorageCleanup, STORAGE_CLEANUP_RETENTION_DAYS } from "./storage-cleanup.js";
+import { pruneMigrationBackups } from "./migration-backup-retention.js";
 import { registerStorageCleanupRoutes } from "./server-storage-cleanup-routes.js";
 import { LocalModelSetupService } from "./local-model-setup.js";
 import { DecisionExpertService } from "./decision-expert-service.js";
 import { DECISION_EXPERT_KEY } from "./decision-expert-identity.js";
-import { SpeechService } from "./speech-service.js";
 import {
   buildStructuredChatPersonaPayload,
   resolveAppConnectCode,
@@ -70,7 +66,7 @@ import {
 import { resolveTrustProxy, sendRouteError } from "./server-request.js";
 import { registerAuthRoutes } from "./server-auth-routes.js";
 import { WebLoginTickets } from "./web-login-tickets.js";
-import { inferProviderFromCommand, isSessionProvider, providerCliCommand } from "./session-provider.js";
+import { isSessionProvider } from "./session-provider.js";
 import { registerVaultRoutes } from "./server-vault-routes.js";
 import { registerGithubRoutes } from "./server-github-routes.js";
 import { registerTaskRoutes } from "./server-task-routes.js";
@@ -91,7 +87,6 @@ import { registerSiliconEmployeeRoutes } from "./server-employee-routes.js";
 import { EmployeeImService } from "./employee-im.js";
 import { EmployeeImLifecycle } from "./employee-im-lifecycle.js";
 import { registerEmployeeImRoutes } from "./server-employee-im-routes.js";
-import { defaultRoleForCli } from "./default-employee.js";
 import { UserMemoryService } from "./user-memory.js";
 import { registerUserMemoryRoutes, userMemoryOperationLog } from "./server-user-memory.js";
 import { registerAttentionRoutes } from "./server-attention-routes.js";
@@ -104,10 +99,8 @@ import {
   ServerUpdateState,
 } from "./server-update-routes.js";
 import { registerClaudeHistoryRoutes, registerSessionRoutes } from "./server-session-routes.js";
-import { parseSessionCreationOrigin } from "./session-request.js";
 import { registerWorkspaceRoutes } from "./server-workspace-routes.js";
-import { resolveSessionCwd } from "./session-cwd.js";
-import { backfillSessionWorkspaces, resolveWorkspaceIdForNewSession } from "./workspace-binding.js";
+import { backfillSessionWorkspaces } from "./workspace-binding.js";
 import { getErrorMessage } from "./error-utils.js";
 import { asyncRoute, jsonErrorHandler } from "./express-async.js";
 import { FeedbackReceiver, FeedbackReporter } from "./feedback.js";
@@ -125,9 +118,6 @@ import { computeRelaunch } from "./relaunch.js";
 import { createRetentionSweep, startRetentionTimer, type RetentionResult } from "./retention.js";
 import { RuntimeConfigState } from "./runtime-config.js";
 import { safeServiceInstalled } from "./tui/runtime-utils.js";
-import { toSessionDetailDTO } from "./session-transport.js";
-import { compactToolMessagesForTransport, windowMessagesForTransport } from "./message-truncator.js";
-import { enrichStructuredMessages } from "./structured-client-protocol.js";
 import { registerUploadRoutes, invalidateUploadUsage } from "./upload-routes.js";
 import { uploadReferenceGuard } from "./upload-reference-guard.js";
 import { configTemporaryRoot } from "./managed-temp.js";
@@ -152,7 +142,7 @@ import {
   verifyProviderCliUpdateResults,
   type ProviderCliUpdateStatus,
 } from "./provider-cli-updater.js";
-import { CommandRequest, SessionProvider, WandConfig } from "./types.js";
+import { SessionProvider, WandConfig } from "./types.js";
 import { userAuthor, userDisplayName } from "./user-profile.js";
 
 const SERVER_MODULE_DIR = path.dirname(new URL(import.meta.url).pathname);
@@ -219,15 +209,6 @@ function readBuildInfo(): WandBuildInfo {
 const BUILD_INFO = readBuildInfo();
 const DISPLAY_VERSION = BUILD_INFO.version || PKG_VERSION;
 const SERVER_INSTANCE_ID = crypto.randomUUID();
-
-/**
- * 解析 PTY 会话的 provider：显式 `provider` 字段优先，其次按命令前缀识别；
- * 都识别不出时回落到 Claude，与旧版客户端行为保持一致。
- */
-function resolveProviderForCommand(provider: unknown, command: string): SessionProvider {
-  if (isSessionProvider(provider)) return provider;
-  return inferProviderFromCommand(command) ?? "claude";
-}
 
 // ── Startup error handling ──
 
@@ -353,7 +334,8 @@ export async function startServer(
   // Explicit and bounded: login/bearer limits key on req.ip, so forwarded headers are only
   // honoured for the configured proxy hops (see resolveTrustProxy).
   app.set("trust proxy", resolveTrustProxy(config.trustProxy));
-  const storage = new WandStorage(resolveDatabasePath(configPath));
+  const databasePath = resolveDatabasePath(configPath);
+  const storage = new WandStorage(databasePath);
   const systemCalls = systemAiSessions(storage);
   systemCalls.recoverInterrupted();
   if (!storage.getConfigValue("migration:session-workspaces:v1")) {
@@ -363,9 +345,6 @@ export async function startServer(
   const taskTitles = taskTitleService(storage, { config });
   const runtimeConfig = new RuntimeConfigState(config);
   const openRouter = new OpenRouterFreeModelsService(storage, options.openRouterFetch);
-  const speechPolisher = new SpeechPolisherService({ config, free: openRouter,
-    employee: () => storage.getSystemSiliconEmployee(SPEECH_POLISHER_KEY),
-    trace: employee => systemCalls.forEmployee(employee) });
   const authService = new AuthService(storage);
   const webLoginTickets = new WebLoginTickets();
   const settingsAccess = new SettingsWebAccess();
@@ -432,9 +411,27 @@ export async function startServer(
   }
   const storageCleanup = createStorageCleanup(configDir, { uploads: storage.uploads,
     uploadsActive: () => sessionRegistry.listSlim().some(session => (session.sessionKind === "structured" && session.status === "running") || (session.queuedMessages?.length ?? 0) > 0),
-    onUploadRemoved: invalidateUploadUsage });
-  const speech = new SpeechService(storage, configDir);
-  const localModels = new LocalModelSetupService({ configDir, speech, decisions,
+    onUploadRemoved: invalidateUploadUsage,
+    // 历史构建包也会持续堆积（每次 debug 构建一个新版本号），跟着同一轮定时回收走。
+    pruneDistributionArtifacts: async () => {
+      const results = await Promise.all([
+        distributionManager.pruneAndroidApkDirectory(),
+        distributionManager.pruneMacosBetaDirectory(),
+        distributionManager.pruneIosIpaDirectory(),
+      ]);
+      return {
+        deleted: results.flatMap((result) => result.deleted),
+        freedBytes: results.reduce((total, result) => total + result.freedBytes, 0),
+      };
+    },
+    // Pi 原生回合目录（pi-native/）按回合数增长，同样交给同一轮定时回收。
+    collectNativeArtifacts: () => structuredSessions.collectNativeGarbage({
+      liveSessionIds: new Set(sessionRegistry.listSlim().map((session) => session.id)),
+      retentionMs: STORAGE_CLEANUP_RETENTION_DAYS * 24 * 60 * 60 * 1000,
+    }),
+    // 旧版本遗留的迁移前快照：无上限堆积。迁移成功路径已在 storage-schema 修剪。
+    pruneMigrationSnapshots: () => pruneMigrationBackups(databasePath, { dryRun: false }) });
+  const localModels = new LocalModelSetupService({ configDir, decisions,
     decisionConfig: () => config.localDecision ?? { enabled: false, pythonPath: "", modelPath: "" },
     configureDecision(next) {
       decisions.assertConfigurable();
@@ -789,7 +786,6 @@ export async function startServer(
   registerWorkspaceRoutes(app, storage, sessionRegistry, { config, free: openRouter });
   registerMissionRoutes(app, missions);
   registerUploadRoutes(app, sessionRegistry, { uploads: storage.uploads, temporaryRoot: configTemporaryRoot(configDir) });
-  registerSpeechRoutes(app, { speech, requireSessions, requireAdmin, polisher: speechPolisher });
   registerLocalModelRoutes(app, { models: localModels, requireSessions, requireAdmin });
   registerStorageCleanupRoutes(app, storageCleanup, requireAdmin);
 
@@ -836,107 +832,6 @@ export async function startServer(
   registerFileRoutes(app, { storage, defaultCwd: config.defaultCwd });
 
   // ── Session control ──
-
-  app.post("/api/commands", asyncRoute(async (req, res) => {
-    const body = req.body as CommandRequest & { sessionSource?: unknown; automationId?: unknown;
-      employeeId?: unknown; teamId?: unknown; subject?: { type?: unknown; id?: unknown } };
-    if (body.employeeId !== undefined || body.teamId !== undefined
-      || (body.subject !== undefined && body.subject?.type !== "cli")) {
-      res.status(400).json({ error: "PTY 只能选择 CLI 工具。" });
-      return;
-    }
-    if (body.provider !== undefined && !isSessionProvider(body.provider)) {
-      res.status(400).json({ error: "请选择有效的执行工具。" });
-      return;
-    }
-    const interactiveShell = body.shell === true;
-    // 连接应用只能启动 Provider CLI 会话（provider 字段 + 该 CLI 的标准可执行名）。
-    // 任意自定义命令字符串需要 admin。shell:true 是原生客户端“空白终端”（服务端配置的
-    // 登录 shell，不接受外部命令）：为保持现有客户端可用而保留，见 AGENTS 与报告。
-    if (!principalHasScope(req.principal!, "admin") && !interactiveShell) {
-      // Provider CLI only: the executable must be the provider's own CLI name (old clients send
-      // the provider id as the command, so an absent provider is inferred from it).
-      const rawCommand = typeof body.command === "string" ? body.command.trim() : "";
-      const provider = isSessionProvider(body.provider) ? body.provider : inferProviderFromCommand(rawCommand);
-      const isProviderCli = !!provider && (!rawCommand || rawCommand === provider || rawCommand === providerCliCommand(provider));
-      if (!isProviderCli) {
-        res.status(403).json({ error: "当前连接只能启动已配置的 CLI 工具，不能执行自定义命令。", code: "forbidden" });
-        return;
-      }
-    }
-    if (!interactiveShell && !body.command?.trim()) {
-      res.status(400).json({ error: "请输入要执行的命令。" });
-      return;
-    }
-    if (body.mode !== undefined && !isExecutionMode(body.mode)) {
-      res.status(400).json({ error: `无效执行模式: ${String(body.mode)}` });
-      return;
-    }
-    const initialInput = body.initialInput?.trim();
-    try {
-      const origin = parseSessionCreationOrigin(body);
-      const rawModel = typeof body.model === "string" ? body.model.trim() : "";
-      const rawCommand = body.command?.trim() ?? "";
-      const provider: SessionProvider | undefined = interactiveShell
-        ? undefined
-        : resolveProviderForCommand(body.provider, rawCommand);
-      // Older clients used the provider id as the PTY command. Qoder's executable
-      // is named qodercli, so keep those clients working while preserving custom commands.
-      const command = provider === "qoder" && rawCommand === "qoder"
-        ? "qodercli"
-        : rawCommand;
-      const effectiveModel = provider ? rawModel || fallbackProviderModel(config, provider) : undefined;
-      const reqCols = typeof body.cols === "number" && Number.isFinite(body.cols) ? body.cols : undefined;
-      const reqRows = typeof body.rows === "number" && Number.isFinite(body.rows) ? body.rows : undefined;
-      const sessionCwd = resolveSessionCwd(body.cwd, config.defaultCwd);
-      const workspaceId = resolveWorkspaceIdForNewSession(storage, sessionCwd, body.workspaceId);
-      const role = !interactiveShell && !body.systemPrompt?.trim() && origin.sessionSource === "interactive"
-        && (isSessionProvider(body.provider) || inferProviderFromCommand(command))
-        ? defaultRoleForCli(storage, provider) : null;
-      const snapshot = await (interactiveShell
-        ? processes.startShell(sessionCwd, body.mode ?? "default", {
-            worktreeEnabled: body.worktreeEnabled === true,
-            cols: reqCols,
-            rows: reqRows,
-            workspaceId,
-            workspaceTaskId: body.workspaceTaskId,
-            ...origin,
-          })
-        : processes.start(
-            command,
-            sessionCwd,
-            body.mode ?? config.defaultMode,
-            initialInput || undefined,
-            {
-              worktreeEnabled: body.worktreeEnabled === true,
-              provider,
-              model: effectiveModel,
-              cols: reqCols,
-              rows: reqRows,
-              thinkingEffort: body.thinkingEffort ?? config.defaultThinkingEffort,
-              systemPrompt: body.systemPrompt?.trim() || role?.prompt,
-              ...sessionEmployeeFields(role),
-              workspaceId,
-              workspaceTaskId: body.workspaceTaskId,
-              ...origin,
-            }
-          ));
-      recordRecentPath(storage, snapshot.cwd);
-      const compactTools = req.get("X-Wand-Tool-Projection") === "compact"
-        || req.query.compactTools === "1";
-      if (compactTools) {
-        const messages = compactToolMessagesForTransport(
-          enrichStructuredMessages(snapshot.messages ?? [], snapshot.id),
-        );
-        const windowed = windowMessagesForTransport(messages, config.cardDefaults ?? {});
-        res.status(201).json(toSessionDetailDTO(snapshot, windowed));
-      } else {
-        res.status(201).json(toSessionDetailDTO(snapshot));
-      }
-    } catch (error) {
-      sendRouteError(res, error, "无法启动命令。请检查命令是否安装。");
-    }
-  }));
 
   // ── WebSocket broadcast layer ──
 
@@ -1022,6 +917,7 @@ export async function startServer(
   });
   structuredSessions.setEventEmitter((event) => {
     taskTitles.ingest(event);
+    storage.recordTaskCommentSessionEvent(event);
     conversationService.ingestSessionEvent(event);
     scheduledTasks.ingestSessionEvent(event);
     sessionCompletions.ingest(event);
@@ -1123,8 +1019,6 @@ export async function startServer(
       try { processes.dispose(); } catch { /* noop */ }
       conversationService.dispose();
       localModels.dispose();
-      speech.dispose();
-      speechPolisher.dispose();
       try { structuredSessions.dispose(); } catch { /* noop */ }
       taskTitles.dispose();
       modelCatalog.dispose();
@@ -1419,8 +1313,6 @@ export async function startServer(
       try { processes.dispose(); } catch { /* best-effort shutdown */ }
       conversationService.dispose();
       localModels.dispose();
-      speech.dispose();
-      speechPolisher.dispose();
       try { structuredSessions.dispose(); } catch { /* best-effort shutdown */ }
       await teamShutdown;
       try { structuredHosts.rustClient?.disconnect(); } catch { /* best-effort shutdown */ }

@@ -18,6 +18,8 @@ import { getLastAssistantSummary } from "./session-ui";
 import { clampClientTerminalOutput, restoreTerminalState, scheduleTerminalChromeUpdate, syncTerminalBuffer, updateTerminalJumpToBottomButton, wandTerminalWrite } from "./terminal";
 import {
   hasPooledTerminal,
+  notifyPooledTerminalEvent,
+  isRetainedPooledTerminal,
   replacePooledTerminalOutput,
   resubscribePooledTerminals,
   restorePooledTerminalState,
@@ -211,6 +213,7 @@ function projectSelectedChat(sessionId: string): any {
             if (state.ws !== ws) return;
             try { (window as any).__wandWs = ws; } catch (e) {}
             state.wsConnected = true;
+            notifyPooledTerminalEvent({ type: "connected" });
             state.lastWsMessageAt = Date.now();
             // Reset backoff on a successful connect so the next disconnect
             // starts the ladder from 500ms again.
@@ -257,6 +260,7 @@ function projectSelectedChat(sessionId: string): any {
                 return;
               }
               if (msg && msg.type === "pty_error") {
+                notifyPooledTerminalEvent(msg);
                 showToast("终端操作未确认。请检查输出后再重试。", "error");
                 if (msg.sessionId && state.ws && state.ws.readyState === WebSocket.OPEN) {
                   state.ws.send(JSON.stringify({ type: "resync", sessionId: msg.sessionId }));
@@ -264,6 +268,7 @@ function projectSelectedChat(sessionId: string): any {
                 return;
               }
               if (msg && msg.type === "resync_required" && msg.sessionId) {
+                notifyPooledTerminalEvent(msg);
                 // Server dropped some output events under backpressure and
                 // is asking us for a fresh snapshot. Send a resync so the
                 // server replies with a new init carrying the full output.
@@ -296,6 +301,7 @@ function projectSelectedChat(sessionId: string): any {
               if (msg?.sessionId && (msg.type === "init" || Array.isArray(msg.data?.messages))) {
                 if (state.chatResyncPendingBySession) delete state.chatResyncPendingBySession[msg.sessionId];
               }
+              notifyPooledTerminalEvent(msg);
               handleWebSocketMessage(msg);
             } catch (e) {
               // Ignore parse errors
@@ -306,6 +312,7 @@ function projectSelectedChat(sessionId: string): any {
             if (state.ws !== ws) return;
             state.ws = null;
             state.wsConnected = false;
+            notifyPooledTerminalEvent({ type: "disconnected" });
             stopWsHeartbeatCheck();
             scheduleWsReconnect();
           };
@@ -464,6 +471,17 @@ function projectSelectedChat(sessionId: string): any {
                     scheduleChatRender();
                   }
                 }
+              }
+            }
+            // The quick terminal can also be opened from the ordinary session list.
+            // Mirror into that existing surface without ACKing twice or moving its leased DOM.
+            if (msg.sessionId === state.selectedId && state.terminal && msg.data && isRetainedPooledTerminal(msg.sessionId)) {
+              if (msg.data.chunk && isCurrentTerminalSession(msg.sessionId)) {
+                wandTerminalWrite(state.terminal, String(msg.data.chunk));
+                state.terminalOutput = clampClientTerminalOutput((state.terminalOutput || "") + String(msg.data.chunk));
+                scheduleTerminalChromeUpdate();
+              } else if (!msg.data.incremental && Object.prototype.hasOwnProperty.call(msg.data, "output")) {
+                syncTerminalBuffer(msg.sessionId, msg.data.output || "", { mode: "append" });
               }
             }
             // Real-time terminal output
@@ -638,6 +656,9 @@ function projectSelectedChat(sessionId: string): any {
               updateTaskDisplay();
               syncComposerBadges();
               var initOutput = msg.data.output || "";
+              if (isRetainedPooledTerminal(msg.sessionId)) {
+                if (!restoreTerminalState(msg.sessionId, msg.data.terminalState, initOutput)) updateTerminalOutput(initOutput, msg.sessionId, "replace");
+              }
               if (hasPooledTerminal(msg.sessionId)) {
                 if (!restorePooledTerminalState(msg.sessionId, msg.data.terminalState, initOutput)) {
                   replacePooledTerminalOutput(msg.sessionId, initOutput);

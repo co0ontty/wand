@@ -282,4 +282,146 @@ export class PiTmuxHost implements StructuredExecHost {
     });
     writeFileSync(job.ack, "consumed\n", { mode: 0o600 }); this.observed.delete(runId);
   }
+
+  /**
+   * 回收 pi-native 下已经没用的执行产物。每次 Pi 原生回合都会在 slot 里
+   * `mkdtemp` 一个新 turn 目录（events.jsonl / stderr.log / state.json 等），
+   * 而 forgetRun 只写 ack 标记、从不删目录，所以会按回合数无限堆积。
+   *
+   * 只回收三类确定无主的东西：
+   * - slot 已 ack 且 runId 不再属于任何存活会话：整个 slot 无主；
+   * - slot 无主的，整槽删除；
+   * - slot 仍有主的，只删非 current.json 引用、已 ack 且进程已退出、超保留期的 turn。
+   *
+   * 保留 current.json 指向的 turn：`listRuns` / `adoptRun` 仍靠它的 events.jsonl
+   * 重放恢复；未 ack 的 slot 可能是尚未收尾的回合，一律不动。
+   */
+  collectGarbage(options: {
+    /** 仍在数据库里的会话 id；不在其中的 slot 视为无主。 */
+    liveSessionIds: ReadonlySet<string>;
+    retentionMs: number;
+    now?: number;
+  }): PiNativeGcReport {
+    const report: PiNativeGcReport = { removedSlots: 0, removedTurns: 0, freedBytes: 0 };
+    const now = options.now ?? Date.now();
+    let entries;
+    try { entries = readdirSync(this.root, { withFileTypes: true }); } catch { return report; }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const slot = path.join(this.root, entry.name);
+      const job = this.readJob(slot);
+      if (!job) continue;
+      const acked = existsSync(job.ack);
+      const sessionId = job.runId.replace(/^structured:/, "");
+      const orphan = !options.liveSessionIds.has(sessionId);
+      if (orphan) {
+        // 无主 slot 也得等 ack 完成：未 ack 说明回合可能还在收尾。
+        if (!acked) continue;
+        if (!this.slotIsIdle(slot, job, now, options.retentionMs)) continue;
+        report.freedBytes += directoryBytes(slot);
+        if (removeTree(slot)) report.removedSlots += 1;
+        else report.freedBytes -= directoryBytes(slot);
+        continue;
+      }
+      // 有主 slot：只删不被 current.json 引用的旧 turn。
+      const current = path.dirname(job.events);
+      let turns;
+      try { turns = readdirSync(slot, { withFileTypes: true }); } catch { continue; }
+      for (const turn of turns) {
+        if (!turn.isDirectory() || !turn.name.startsWith("turn-")) continue;
+        const directory = path.join(slot, turn.name);
+        if (directory === current) continue;
+        if (!existsSync(path.join(directory, "ack"))) continue;
+        const state = readJson<WorkerState>(path.join(directory, "state.json"));
+        // 进程还活着的回合不能被当成垃圾。state 写 running 但 PID 已消失的
+        // （异常退出/被强杀）按已退出处理，否则这种回合会永久堆积。
+        if (!state || stateAlive(state)) continue;
+        let latest: number;
+        try { latest = directoryLatestMtime(directory); } catch { continue; }
+        if (now - latest < options.retentionMs) continue;
+        const bytes = directoryBytes(directory);
+        if (!removeTree(directory)) continue;
+        report.removedTurns += 1;
+        report.freedBytes += bytes;
+      }
+    }
+    return report;
+  }
+
+  private readJob(slot: string): NativeJob | null {
+    try { return JSON.parse(readFileSync(path.join(slot, "current.json"), "utf8")) as NativeJob; } catch { return null; }
+  }
+
+  /** 无主 slot 是否已整体静默：所有 turn 都不再是运行中，且最新写入超过保留期。 */
+  private slotIsIdle(slot: string, job: NativeJob, now: number, retentionMs: number): boolean {
+    const current = path.dirname(job.events);
+    const state = readJson<WorkerState>(job.state);
+    if (state && stateAlive(state)) return false;
+    let latest: number;
+    try { latest = directoryLatestMtime(slot); } catch { return false; }
+    if (now - latest < retentionMs) return false;
+    // 非 current 的 turn 里如果还有活进程，整槽不能删。
+    let turns: import("node:fs").Dirent[];
+    try { turns = readdirSync(slot, { withFileTypes: true }); } catch { return false; }
+    for (const turn of turns) {
+      if (!turn.isDirectory() || !turn.name.startsWith("turn-")) continue;
+      const directory = path.join(slot, turn.name);
+      if (directory === current) continue;
+      const other = readJson<WorkerState>(path.join(directory, "state.json"));
+      if (other && stateAlive(other)) return false;
+    }
+    return true;
+  }
+}
+
+/** pi-native 回收结果：删了几个 slot / 几个旧 turn / 释放多少字节。 */
+export interface PiNativeGcReport {
+  removedSlots: number;
+  removedTurns: number;
+  freedBytes: number;
+}
+
+function readJson<T>(file: string): T | null {
+  try { return JSON.parse(readFileSync(file, "utf8")) as T; } catch { return null; }
+}
+
+/** 回合是否仍活着：state 声称未退出且 PID 真实存在。 */
+function stateAlive(state: WorkerState): boolean {
+  return state.status !== "exited" && pidAlive(state.pid);
+}
+
+function pidAlive(pid: number | undefined): boolean {  if (!pid || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; } catch (error) {
+    // EPERM means the PID exists but belongs to another user; treat as alive.
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+function directoryLatestMtime(directory: string): number {
+  let latest = lstatSync(directory).mtimeMs;
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const child = path.join(directory, entry.name);
+    const stat = lstatSync(child);
+    if (stat.isDirectory()) latest = Math.max(latest, directoryLatestMtime(child));
+    // 只看 mtime：ctime 无法回拨，且文件被任何元数据操作碰一下就会刷新，
+    // 用它做保留期会把「早已结束的回合」永远当成刚活动过。
+    else latest = Math.max(latest, stat.mtimeMs);
+  }
+  return latest;
+}
+
+function directoryBytes(directory: string): number {
+  let total = 0;
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const child = path.join(directory, entry.name);
+    const stat = lstatSync(child);
+    if (stat.isDirectory()) total += directoryBytes(child);
+    else total += stat.size;
+  }
+  return total;
+}
+
+/** 只删目录，不跟随符号链接。 */
+function removeTree(directory: string): boolean {
+  try { rmSync(directory, { recursive: true, force: false }); return true; } catch { return false; }
 }

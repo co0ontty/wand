@@ -10,7 +10,7 @@ assert.ok(readiness);
 // Run the production readiness loop with a virtual clock and no real service.
 function probe(readyAt: number, ownsListener = true, expectedCommand = true) {
   return spawnSync("/bin/bash", ["-c", `set -euo pipefail
-SECONDS=0
+fixture_seconds=0
 NODE_FOR_WAND=/fixture/node
 WAND_BIN=/fixture/wand
 CONFIG_PATH=/fixture/config.json
@@ -19,12 +19,12 @@ config_value() { if [[ "$1" == port ]]; then echo 8181; else echo false; fi; }
 service_pid() { echo 123; }
 ps() { echo ${expectedCommand ? "/fixture/node /fixture/wand web -c /fixture/config.json" : "/other/server"}; }
 lsof() { echo ${ownsListener ? "123" : "456"}; }
-curl() { (( SECONDS >= ${readyAt} )); }
-sleep() { SECONDS=$((SECONDS + 1)); }
+curl() { (( fixture_seconds >= ${readyAt} )); }
+sleep() { fixture_seconds=$((fixture_seconds + 1)); }
 msg() { printf '%s\\n' "$*"; }
-ok() { printf 'READY %s\\n' "$SECONDS"; }
+ok() { printf 'READY %s\\n' "$fixture_seconds"; }
 die() { printf '%s\\n' "$*" >&2; exit 1; }
-${readiness}
+${readiness!.replace(/\bSECONDS\b/g, "fixture_seconds")}
 wait_for_service_ready
 `], { encoding: "utf8", timeout: 5000 });
 }

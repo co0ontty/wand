@@ -40,6 +40,7 @@ import { installFilePreviewLegacyAdapter } from "./file-preview-adapter";
 import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
 import { installMissionsLegacyAdapter } from "./missions-adapter";
 import { installWorkspacesLegacyAdapter } from "./workspaces-adapter";
+import { installPageNavigation } from "./page-navigation";
 import { appendToComposer, copyTextSafely, setFilePanelOpen } from "./file-browser";
 import { fileExplorerController, fileExplorerStore } from "../react/file-explorer/controller";
 import { explorerParentOf } from "../react/file-explorer/paths";
@@ -114,6 +115,7 @@ startReactUi();
 installNewSessionLegacyAdapter();
 installMissionsLegacyAdapter();
 installWorkspacesLegacyAdapter();
+installPageNavigation();
 installFolderPickerLegacyAdapter();
 installWorktreeMergeLegacyAdapter({
   getSession(sessionId) {

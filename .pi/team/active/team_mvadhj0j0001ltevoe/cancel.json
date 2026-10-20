@@ -1,5 +1,0 @@
-{
-  "at": 1792121025817,
-  "runId": "team_mvadhj0j0001ltevoe",
-  "reason": "运行时attention=3，两个队长请求持续未送达/ACK；三角色连续1423秒无token/request/tool增长，Android有provider_error记录，尚无实现产物。停止冻结通道，保留现有工作，改用可用子代理通道重新分派，不宣称原生完成。"
-}

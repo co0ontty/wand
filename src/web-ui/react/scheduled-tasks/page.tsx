@@ -1,4 +1,6 @@
 import * as React from "react";
+import { usePageRouteState, routeEnum } from "../use-page-route";
+import { CopyPageLink } from "../ui/copy-page-link";
 import { Alert, DatePicker, Empty, Flex, Form, Input, InputNumber, Spin, Switch, TimePicker, Tooltip, Typography } from "antd";
 import dayjs from "dayjs";
 import { nextScheduledTime, parseTaskSchedule } from "../../../scheduled-task-time.js";
@@ -60,7 +62,7 @@ function sameSavedInput(task: ScheduledTaskSummary, patch: ScheduledTaskPatch): 
 
 /** Keep the page and its draft mounted; only the visible page owns polling. */
 export function ScheduledTasksPage({ visible, view: controlledView, onViewChange, calendarMode, onCalendarModeChange, sidebarOpen, onBack, onOpenSidebar, onOpenSession }: ScheduledTasksPageProps): React.ReactElement {
-  const [localView, setLocalView] = React.useState<"list" | "calendar">("list");
+  const [localView, setLocalView] = usePageRouteState<"list" | "calendar">("scheduleView", "list", routeEnum(["list", "calendar"], "list"), String, "push");
   const view = controlledView ?? localView;
   const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   const reduced = useReducedMotion();
@@ -72,9 +74,9 @@ export function ScheduledTasksPage({ visible, view: controlledView, onViewChange
     else { setCalendarHidden(false); setCalendarVisited(true); }
     if (reduced) { setListHidden(view !== "list"); setCalendarHidden(view !== "calendar"); }
   }, [view, reduced]);
-  const [localCalendarMode, setLocalCalendarMode] = React.useState<"month" | "week">("month");
+  const [localCalendarMode, setLocalCalendarMode] = usePageRouteState<"month" | "week">("scheduleRange", "month", routeEnum(["month", "week"], "month"));
   const [clock, setClock] = React.useState(() => new Date());
-  const [query, setQuery] = React.useState("");
+  const [query, setQuery] = usePageRouteState("scheduleQuery", "", undefined, undefined, "replace", 250);
   const [expanded, setExpanded] = React.useState<string[]>([]);
   const [visited, setVisited] = React.useState<string[]>([]);
   const viewRef = React.useRef(view); viewRef.current = view;
@@ -93,7 +95,7 @@ export function ScheduledTasksPage({ visible, view: controlledView, onViewChange
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState("");
   const [actionError, setActionError] = React.useState("");
-  const [filter, setFilter] = React.useState<Filter>("all");
+  const [filter, setFilter] = usePageRouteState<Filter>("scheduleFilter", "all", routeEnum(["all", "active", "paused", "finished"], "all"));
   const [mode, setMode] = React.useState<"list" | "form">("list");
   const [editing, setEditing] = React.useState<ScheduledTaskSummary | null>(null);
   const [draft, setDraft] = React.useState<ScheduledTaskInput>(newDraft);
@@ -340,6 +342,7 @@ export function ScheduledTasksPage({ visible, view: controlledView, onViewChange
   return <ScheduledPresentationProvider employees={employeeData.employees} now={clock} timeZone={localZone}>
     <section ref={pageRef} className="scheduled-tasks-page" aria-label={pageTitle} hidden={!visible} inert={!visible} style={{ display: visible ? undefined : "none" }}>
       <Flex component="header" className="scheduled-tasks-header" align="center" justify="space-between" gap="small">
+        <CopyPageLink/>
         <Flex className="scheduled-tasks-heading" align="center" gap="small">
           {onOpenSidebar ? <WandIconButton aria-label={sidebarOpen ? "关闭列表" : "打开列表"} onClick={onOpenSidebar}><SidebarToggleIcon open={!!sidebarOpen}/></WandIconButton> : null}
           <WandIconButton aria-label={mode === "form" ? `返回${pageTitle}` : "返回会话"} onClick={back} disabled={saving || !!busyTask}><WandIcon name="back"/></WandIconButton>
@@ -353,6 +356,7 @@ export function ScheduledTasksPage({ visible, view: controlledView, onViewChange
         <div className="scheduled-view-toolbar"><WandStretchTabs ariaLabel="日程视图" value={view}
           onValueChange={value => (onViewChange ?? setLocalView)(value as "list" | "calendar")}
           tabs={[{ value: "calendar", label: "日历" }, { value: "list", label: "定时任务" }]}/></div>
+        {loaded && expanded.some(id => !tasks.some(task => task.id === id)) && <Alert type="warning" showIcon title="链接中的定时任务不存在、已删除或无权访问" action={<WandButton onClick={() => setExpanded([])}>返回定时任务列表</WandButton>}/>}
         {actionError && <Alert type="error" showIcon title={actionError} role="alert" closable onClose={() => setActionError("")}/>}
         {error && <Alert type="error" showIcon title={error} action={<WandButton size="small" onClick={() => void refresh()}>重新读取</WandButton>} role="alert"/>}
         {employeeData.error && <Alert type="warning" showIcon title="员工资料暂时无法读取，日程仍保留。头像使用公共回退显示。"/>}

@@ -1,4 +1,5 @@
 import { isArchiveBlocked } from "../../../archive-policy.js";
+import { isSystemAiCall } from "../../../system-ai-call.js";
 import * as React from "react";
 import { WandIcon } from "../ui";
 import { describeError } from "../errors";
@@ -26,6 +27,7 @@ export function SidebarSessionMenu({ row, session, label, disabled, intoNewTask,
   const lock = React.useRef(false);
   const rowRef = React.useRef<HTMLElement>(null);
   const archived = session.archived === true;
+  const systemCall = isSystemAiCall(session);
   const canArchive = archived || (session.canArchive !== false && !isArchiveBlocked(session));
   const move = useSessionMove({ sessionId: session.id, taskId: session.workspaceTaskId, intoNewTask,
     open: open && moveOpen, onMoved: () => setOpen(false) });
@@ -54,7 +56,7 @@ export function SidebarSessionMenu({ row, session, label, disabled, intoNewTask,
   return <SidebarRowMenu row={React.cloneElement(row, { "aria-busy": busy || undefined,
     draggable: busy ? false : row.props.draggable })} rowRef={rowRef} disabled={disabled}
     open={open} onOpenChange={next => { if (!next || !busy) setOpen(next); }}
-    label={`会话 ${label} 的操作`} title={label} description={archived ? "已归档会话" : undefined}
+    label={`会话 ${label} 的操作`} title={label} description={systemCall ? "系统调用 · 只读记录" : archived ? "已归档会话" : undefined}
     className="workspace-session-menu" error={error}
     menu={{
       // Ant's non-selectable multi mode keeps a destination submenu open until the
@@ -63,7 +65,7 @@ export function SidebarSessionMenu({ row, session, label, disabled, intoNewTask,
       onOpenChange: keys => { setMoveOpen(keys.includes("move")); if (keys.includes("move")) setError(""); },
       items: [
         { key: "open", disabled: busy, icon: <WandIcon name="chat"/>, label: "打开会话" },
-        ...(!archived ? [{ key: "move", disabled: busy, icon: <WandIcon name="folder"/>, label: "移动到任务",
+        ...(!archived && !systemCall ? [{ key: "move", disabled: busy, icon: <WandIcon name="folder"/>, label: "移动到任务",
           popupClassName: "workspace-session-move-menu", children: [
             { key: "move-context", type: "group" as const, label: "保留运行目录", children: [] },
             ...(intoNewTask ? [{ key: "new-task", disabled: busy, icon: <WandIcon name="plus"/>, label: move.busy ? "正在移动…" : "归纳为新任务" },

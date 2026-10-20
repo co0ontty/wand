@@ -20,6 +20,8 @@ import { mergeBlockWindowedMessages, mergeWindowedMessages, type MessageMergeSou
 import { clearActivityDetailState, ensureChatMessagesContainer, renderChat, scheduleChatRender } from "./chat-render-loader";
 import { extractToolResultText } from "./tool-result-display.js";
 import { parseMessages } from "./pty-chat-parser.js";
+import { hasPageRoute } from "../page-route";
+import { notifyPageSelection } from "./page-selection";
 import { bindChatScrollListener, normalizeStructuredSnapshot, persistSelectedId, restoreStructuredQueue, saveStructuredQueue, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession, updateChatUnreadBubble, setChatHistoryLoadState } from "./chat-scroll";
 import "./events";
 import { isSidebarDrawerLayout, terminalZoomFromKeyboard, updateFilePanelCwd, updateLayoutState } from "./file-browser";
@@ -1046,6 +1048,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
               ? "pi-cli-json"
             : "claude-cli-print";
         var payload = {
+          kind: "structured",
           cwd: cwdOverride || getEffectiveCwd(),
           mode: modeOverride || state.chatMode || (state.config && state.config.defaultMode) || "default",
           provider: provider,
@@ -1066,7 +1069,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           // 会被锁在「正在创建…」里直到模型答完，可能是几分钟。
           respondImmediately: prompt ? true : undefined,
         };
-        return compactSessionFetch("/api/structured-sessions", {
+        return compactSessionFetch("/api/sessions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
@@ -1287,6 +1290,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           if (stillExists) return stillExists.id;
           return null;
         }
+        if (hasPageRoute()) return null;
         var runningSession = sessions.find(function(session) { return session.status === "running"; });
         if (runningSession) return runningSession.id;
         var recent = sessions.find(function(session) { return !session.archived; });
@@ -1640,7 +1644,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         return true;
       }
 
-      export function selectSession(id, options?: { focusInput?: boolean }) {
+      export function selectSession(id, options?: { focusInput?: boolean; updateRoute?: boolean }) {
         var foundSession = state.sessions.find(function(item) { return item.id === id; });
         if (!foundSession) {
           return;
@@ -1667,6 +1671,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         clearActivityDetailState();
         state.selectedId = id;
         persistSelectedId();
+        if (options?.updateRoute !== false) notifyPageSelection();
         state.toolContentCache = {};
         // Clear queued inputs from the previous session to prevent cross-session leaks
         state.messageQueue = [];
@@ -1717,8 +1722,9 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
       }
 
       /** DOM-free home navigation used by the React shell command port. */
-      export function goHome() {
+      export function goHome(options?: { updateRoute?: boolean }) {
         completionViewIntent.clear();
+        if (options?.updateRoute !== false) notifyPageSelection();
         if (!state.selectedId) return;
         clearActivityDetailState();
         state.selectedId = null;
@@ -2140,11 +2146,11 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         state.preferredCommand = provider;
         state.chatMode = getSafeModeForTool(provider, state.chatMode);
         return ensureTerminalReady().then(function() {
-          return compactSessionFetch("/api/commands", {
+          return compactSessionFetch("/api/sessions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
-          body: JSON.stringify(withTerminalDimensions({ command: command, provider: provider, cwd: defaultCwd, mode: defaultMode, sessionSource: "interactive" }, { kind: "pty", provider: provider, command: command, cwd: defaultCwd }))
+          body: JSON.stringify(withTerminalDimensions({ kind: "pty", command: command, provider: provider, cwd: defaultCwd, mode: defaultMode, sessionSource: "interactive" }, { kind: "pty", provider: provider, command: command, cwd: defaultCwd }))
         });
         })
         .then(function(res) { return res.json(); })
@@ -2230,12 +2236,14 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         var command = shell ? undefined : providerCliCommand(provider);
         var body: Record<string, unknown> = shell
           ? {
+              kind: "pty",
               shell: true,
               cwd: cwd,
               mode: defaultMode,
               sessionSource: "interactive",
             }
           : {
+              kind: "pty",
               command: command,
               provider: provider,
               cwd: cwd,
@@ -2249,7 +2257,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         if (options && options.workspaceId) body.workspaceId = options.workspaceId;
         if (options && options.workspaceTaskId) body.workspaceTaskId = options.workspaceTaskId;
         return ensureTerminalReady().then(function() {
-          return compactSessionFetch("/api/commands", {
+          return compactSessionFetch("/api/sessions", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             credentials: "same-origin",
@@ -2992,11 +3000,5 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         var inputBox = (el || document.getElementById("input-box")) as HTMLTextAreaElement | null;
         var hasText = !!(inputBox && String(inputBox.value || "").trim());
         composer.classList.toggle("has-text", hasText);
-        updateInteractiveControls();
+        updateInteractiveControls(true);
       }
-
-      // ─────────────────────────────────────────────────────────────────
-      // v2 语音输入：按住说话 → 实时气泡 → 松手填回输入框（微信式交互）
-      //
-      // 数据源与交互解耦：所有识别文字都经 updateVoiceTranscript(text) 进来。
-      // 现在是临时 MOCK（逐字蹦示例文字）；接入真实 STT 后，删掉下方 MOCK 段，

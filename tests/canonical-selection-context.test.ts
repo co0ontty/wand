@@ -38,7 +38,7 @@ function harness(taskId: string | null = "old-task", workspaceTaskId?: string) {
   for (const name of ["teardownTerminal", "clearActivityDetailState", "persistSelectedId", "syncStructuredQueueFromSession",
     "restoreStructuredQueue", "updateStructuredQueueCounter", "resetChatRenderCache", "clearTimeout", "collapseTodoProgress",
     "clearInterval", "setTerminalInteractive", "updateSessionsList", "renderChat", "updateFilePanelCwd", "subscribeToSession",
-    "restoreGitStatusForSession", "loadGitStatus"]) sandbox[name] = noop;
+    "restoreGitStatusForSession", "loadGitStatus", "notifyPageSelection"]) sandbox[name] = noop;
   runInNewContext(compiled.outputText, sandbox);
   return { api: exports, state, context, calls, composer };
 }

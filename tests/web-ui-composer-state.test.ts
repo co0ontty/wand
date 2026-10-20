@@ -274,3 +274,46 @@ test("destructive queue rollback cannot restore a stale full queue after another
   const failed = clock.advance("A", "local");
   assert.deepEqual(clock.rollback("A", [], ["first", "second"], failed), ["first", "second"]);
 });
+
+test("queue retrieval confirms before merging newest text and attachments", () => {
+  const h = harness();
+  h.store.edit("A", { text: "existing" });
+  const token = h.store.beginQueueRetrieval("A", "queued")!;
+  assert.ok(token);
+  assert.equal(h.store.beginQueueRetrieval("A", "again"), null);
+  assert.equal(h.store.restoreQueueRetrieval("A"), false);
+  assert.equal(h.store.read("A").text, "existing");
+  h.store.edit("A", { text: "new input" });
+  const attachment = image("new.png");
+  h.store.edit("A", { addAttachment: attachment });
+  assert.equal(h.store.finishQueueRetrieval("A", token, "confirmed"), true);
+  assert.equal(h.store.restoreQueueRetrieval("A"), true);
+  assert.equal(h.store.read("A").text, "queued\nnew input");
+  assert.deepEqual(h.store.read("A").attachments, [attachment]);
+  assert.equal(h.store.read("A").queueRetrieval, null);
+  assert.equal(h.store.restoreQueueRetrieval("A"), false);
+});
+
+test("unknown queue retrieval retains a copy, not a durable sendable draft or retry", () => {
+  const h = harness();
+  const token = h.store.beginQueueRetrieval("A", "uncertain")!;
+  h.store.finishQueueRetrieval("A", token, "unknown");
+  assert.equal(h.store.restoreQueueRetrieval("A"), false);
+  assert.equal(h.store.beginQueueRetrieval("A", "again"), null);
+  assert.equal(h.store.read("A").text, "");
+  assert.equal(h.data.has("wand-draft-A"), false);
+  assert.deepEqual(h.store.read("A").queueRetrieval, { text: "uncertain", status: "unknown" });
+  h.store.dismissQueueRetrieval("A");
+  assert.equal(h.store.read("A").queueRetrieval, null);
+});
+
+test("late queue retrieval never recreates deleted owners or crosses sessions", () => {
+  const h = harness();
+  const token = h.store.beginQueueRetrieval("A", "old A")!;
+  h.store.edit("B", { text: "B" });
+  h.store.retain(new Set(["B"]));
+  h.store.edit("A", { text: "new generation" });
+  assert.equal(h.store.finishQueueRetrieval("A", token, "confirmed"), false);
+  assert.equal(h.store.read("A").text, "new generation");
+  assert.equal(h.store.read("B").text, "B");
+});

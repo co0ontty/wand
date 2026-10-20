@@ -7,7 +7,6 @@ import {
 } from "../src/web-ui/react/composer-badges/controller.ts";
 import { ComposerConfigController, type ComposerConfigMount } from "../src/web-ui/react/composer-config/controller.ts";
 import { ComposerPopoverController, type ComposerPopoverMount } from "../src/web-ui/react/composer-popover/controller.ts";
-import { ComposerVoiceController, type ComposerVoiceMount } from "../src/web-ui/react/composer-voice/controller.ts";
 import {
   ComposerAttachmentsController,
   type ComposerAttachmentItem,
@@ -151,19 +150,6 @@ const LEAF_CASES: readonly LeafCase[] = [
     changed: (): ComposerPopoverMount => ({
       key: "composer-popover-items", target: LEAF_TARGET, interactiveVisible: true, interactiveOn: true,
       onAttach() {}, onToggleInteractive() {},
-    }),
-  },
-  {
-    name: "composer voice",
-    controller: new ComposerVoiceController(),
-    baseline: (): ComposerVoiceMount => ({
-      key: "composer-voice", target: LEAF_TARGET, canceling: false, transcript: "", status: "正在聆听…上滑取消",
-    }),
-    replay: (): ComposerVoiceMount => ({
-      key: "composer-voice", target: LEAF_TARGET, canceling: false, transcript: "", status: "正在聆听…上滑取消",
-    }),
-    changed: (): ComposerVoiceMount => ({
-      key: "composer-voice", target: LEAF_TARGET, canceling: false, transcript: "你好", status: "正在聆听…上滑取消",
     }),
   },
   {

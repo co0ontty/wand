@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { STORAGE_MIGRATIONS, type StorageMigration, type StorageMigrationContext } from "./storage/migrations.js";
+import { pruneMigrationBackups } from "./migration-backup-retention.js";
 import { SCHEDULED_CLAIM_DATE_SQL } from "./storage-schedules.js";
 
 /** Additive schema only. Domain migrations and transactions remain owned by WandStorage. */
@@ -735,6 +736,11 @@ export function migrateStorageSchema(db: DatabaseSync, options: { dbPath: string
       try { db.exec("ROLLBACK"); } catch { /* keep the original error */ }
       throw new Error(`[wand] storage migration v${migration.version} (${migration.name}) failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
     }
+  }
+  // 只有全部迁移提交成功后才修剪旧快照：失败时回滚点必须完整保留。
+  // 本次刚生成的这一份始终保留，修剪失败不影响迁移结果。
+  if (backupPath) {
+    try { pruneMigrationBackups(options.dbPath, { keepPath: backupPath }); } catch { /* best-effort */ }
   }
   return { fromVersion, toVersion: readStorageSchemaVersion(db), backupPath, newerSchema: false };
 }

@@ -53,6 +53,8 @@ export interface StructuredRunnerContext {
   env: NodeJS.ProcessEnv;
   /** Execution-only group boundary; never persisted/projected to session DTOs. */
   modelGroupModels?: readonly string[];
+  /** Core-only: synchronously persist one queued user turn and the preceding assistant segment. */
+  takeSteering?(state: StructuredRunnerTurnState): string | null;
 }
 
 export interface StructuredRunnerObserver {

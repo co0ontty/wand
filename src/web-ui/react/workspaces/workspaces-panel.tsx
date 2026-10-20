@@ -9,6 +9,7 @@ import { confirmSidebarAction, confirmClearSessions } from "./sidebar-menu-confi
 import { Badge, Checkbox, Flex, Menu, Skeleton, Typography } from "antd";
 import { WandUiBoundary } from "../theme";
 import * as React from "react";
+import { usePageRouteState, routeEnum } from "../use-page-route";
 import { SidebarActivityFilter } from "./sidebar-activity-filter";
 import { workspacesStore } from "./controller";
 import { httpWorkspacesRepository } from "./repository";
@@ -1310,10 +1311,7 @@ function SidebarWorkspacesPanel({
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
-  const [view, setView] = React.useState<"directory" | "recent">(() => {
-    try { return localStorage.getItem("wand.sidebar.workspaceView") === "recent" ? "recent" : "directory"; }
-    catch { return "directory"; }
-  });
+  const [view, setView] = usePageRouteState<"directory" | "recent">("workspaceView", "directory", routeEnum(["directory", "recent"], "directory"), String, "push");
   const [listMenuOpen, setListMenuOpen] = useSidebarPopupState();
   const [manageMode, setManageMode] = React.useState(false);
   const [manageFeedback, setManageFeedback] = React.useState<"idle" | "pending" | "done" | "error">("idle");

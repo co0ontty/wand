@@ -107,7 +107,7 @@ test("memory projection and team snapshot preserve custom role without persistin
 
 test("HTTP supports profile/tool partial edits, blocks fixed fields and keeps GET/save echoes migration-free", async (t) => {
   const { storage, expected } = fixture(t, true);
-  storage.ensureDecisionExpertEmployee(); storage.ensureSpeechPolisherEmployee();
+  storage.ensureDecisionExpertEmployee();
   const app = express(); app.use(express.json()); registerSiliconEmployeeRoutes(app, { storage });
   const server = createServer(app); await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
@@ -132,7 +132,7 @@ test("HTTP supports profile/tool partial edits, blocks fixed fields and keeps GE
     assert.equal((await call("POST", path + "/archive")).status, 400); assert.equal((await call("DELETE", path)).status, 400);
   }
   for (const employee of before.filter((entry) => !fixedEmployeeAvatar(entry))) assert.deepEqual(storage.getSiliconEmployeeDefinition(employee.id), employee);
-  for (const employee of [storage.ensureDecisionExpertEmployee(), storage.ensureSpeechPolisherEmployee()]) assert.equal((await call("PUT", `/api/silicon-employees/${employee.id}`, { name: "cannot unlock", agents: [AGENT] })).status, 400);
+  for (const employee of [storage.ensureDecisionExpertEmployee()]) assert.equal((await call("PUT", `/api/silicon-employees/${employee.id}`, { name: "cannot unlock", agents: [AGENT] })).status, 400);
   // Rendered memory sent back unchanged must not become durable profile content.
   const now = Date.now(); storage.appendUserMemoryEvent("session.prompt", "concise", "http-memory", 0, now);
   const event = storage.listUserMemoryEvents()[0]!;

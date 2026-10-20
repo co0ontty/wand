@@ -4,8 +4,7 @@ import { lstat, mkdir, readdir, readFile, stat, unlink } from "node:fs/promises"
 import path from "node:path";
 
 import type { WandConfig } from "./types.js";
-import { compareApkInstallOrder, compareSemver, compareWandInstallOrder, extractSemver } from "./version-utils.js";
-
+import { compareApkInstallOrder, compareDistributionFiles, compareMacosFormatTieBreak, compareSemver, compareWandInstallOrder, extractSemver } from "./version-utils.js";
 export type ApkUpdateChannel = "stable" | "beta";
 
 export interface LocalDistributionAsset {
@@ -73,6 +72,35 @@ export interface DistributionManagerOptions {
 
 const GITHUB_CACHE_TTL_MS = 10 * 60 * 1000;
 const MACOS_UPDATE_FILE_PATTERN = /^wand-v\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?(?:\+[A-Za-z0-9.-]+)?\.(?:zip|dmg)$/i;
+/** macOS 构建脚本写在包旁边的校验边车（`wand-v<version>.update.json`）。 */
+const MACOS_UPDATE_SIDECAR_PATTERN = /^wand-v\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?(?:\+[A-Za-z0-9.-]+)?\.update\.json$/i;
+
+/** 分发目录清理结果：删了哪些文件名、释放多少字节。 */
+export interface PruneReport {
+  deleted: string[];
+  freedBytes: number;
+}
+
+function emptyPruneReport(): PruneReport {
+  return { deleted: [], freedBytes: 0 };
+}
+
+/** 从 `wand-v1.2.3.update.json` 得到 `wand-v1.2.3`，非边车返回 null。 */
+function macosSidecarBase(name: string): string | null {
+  if (!MACOS_UPDATE_SIDECAR_PATTERN.test(name)) return null;
+  return name.slice(0, -"update.json".length - 1);
+}
+
+/** 尽力删除：删不掉（如下载流仍持有）就留给下次触发，不计入结果。 */
+async function removeQuietly(filePath: string, report: PruneReport): Promise<boolean> {
+  try {
+    await unlink(filePath);
+    report.deleted.push(path.basename(filePath));
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * GitHub Release 正文还包含 Android/macOS/iOS 的安装指引；它们属于发布页，
@@ -123,9 +151,8 @@ function extractArtifactVersion(fileName: string, extension: string): string | n
 }
 
 /**
- * 本地分发候选的统一排序：版本新者优先（调用方提供比较器），解析不出版本的
- * 文件排在有版本的后面，同版本按修改时间新者优先。resolveLocalAsset 的挑选
- * 和 pruneAndroidApkDirectory 的「保最新」判定共用这一份规则。
+ * 本地分发候选的统一排序：直接复用 version-utils 的实现，保证「更新检查选谁」
+ * 与「构建包清理保谁」永远同一个答案。
  */
 function compareLocalAssetCandidates(
   a: { name: string; mtimeMs: number },
@@ -133,17 +160,11 @@ function compareLocalAssetCandidates(
   extension: ".apk" | ".dmg" | ".ipa" | ".zip",
   compareVersions: (a: string, b: string) => number,
 ): number {
-  const aVersion = extractArtifactVersion(a.name, extension);
-  const bVersion = extractArtifactVersion(b.name, extension);
-  if (aVersion && bVersion) {
-    const comparison = compareVersions(bVersion, aVersion);
-    if (comparison !== 0) return comparison;
-  } else if (aVersion) {
-    return -1;
-  } else if (bVersion) {
-    return 1;
-  }
-  return b.mtimeMs - a.mtimeMs;
+  return compareDistributionFiles(
+    { ...a, version: extractArtifactVersion(a.name, extension) },
+    { ...b, version: extractArtifactVersion(b.name, extension) },
+    compareVersions,
+  );
 }
 
 function isPrerelease(version: string | null): boolean {
@@ -245,48 +266,138 @@ export class DistributionManager {
    * compareLocalAssetCandidates）。返回删除的文件名与释放字节数；目录不存在、
    * 只剩一个包等情形都是空操作。单个文件删除失败不阻断其余清理。
    */
-  async pruneAndroidApkDirectory(keepFileName?: string): Promise<{ deleted: string[]; freedBytes: number }> {
+  async pruneAndroidApkDirectory(keepFileName?: string): Promise<PruneReport> {
     await this.refreshConfig();
     const { config, configDir } = this.options;
-    if (config.android?.enabled !== true) return { deleted: [], freedBytes: 0 };
-    const directory = resolveConfiguredDir(configDir, config.android.apkDir, "android");
+    if (config.android?.enabled !== true) return emptyPruneReport();
+    return this.pruneDistributionDirectory({
+      directory: resolveConfiguredDir(configDir, config.android.apkDir, "android"),
+      matches: (name) => name.toLowerCase().endsWith(".apk"),
+      extension: (name) => ".apk",
+      compareVersions: compareApkInstallOrder,
+      keepNames: [config.android.currentApkFile, keepFileName],
+    });
+  }
+
+  /**
+   * 清理 macOS 分发目录。macOS 的构建脚本每个 debug 构建都产出独立时间戳的
+   * `.zip` + `.dmg` + `.update.json`，跨版本、同版本多次构建都会堆积。
+   *
+   * 保留：最新版本的全部文件（同版本的 zip/dmg/update.json 是一套，必须整体
+   * 保留——更新检查选 zip、`/macos/download` 可能选 dmg、update.json 是它们的
+   * 校验边车）、`currentDmgFile` 固定指向的包及其边车、本次正在下发的包及其边车。
+   * 其余版本的文件才会删除。
+   */
+  async pruneMacosBetaDirectory(keepFileName?: string): Promise<PruneReport> {
+    await this.refreshConfig();
+    const { config, configDir } = this.options;
+    if (config.macos?.enabled !== true) return emptyPruneReport();
+    return this.pruneDistributionDirectory({
+      directory: resolveConfiguredDir(configDir, config.macos.dmgDir, "macos"),
+      matches: (name) => MACOS_UPDATE_FILE_PATTERN.test(name) || MACOS_UPDATE_SIDECAR_PATTERN.test(name),
+      extension: (name) => (name.toLowerCase().endsWith(".zip") ? ".zip" : ".dmg"),
+      // 与 resolveMacosBetaAsset 完全同一份规则：同版本 ZIP 优先，其次修改时间。
+      compareVersions: compareWandInstallOrder,
+      tieBreak: compareMacosFormatTieBreak,
+      keepNames: [config.macos.currentDmgFile, keepFileName],
+      sidecarOf: macosSidecarBase,
+    });
+  }
+
+  /**
+   * 清理 iOS 分发目录。`ios/build.sh` 每次构建产出 `wand-v<version>.ipa`，
+   * debug 版本号带时间戳，因此同样会按构建次数堆积。
+   */
+  async pruneIosIpaDirectory(keepFileName?: string): Promise<PruneReport> {
+    await this.refreshConfig();
+    const { config, configDir } = this.options;
+    if (config.ios?.enabled !== true) return emptyPruneReport();
+    return this.pruneDistributionDirectory({
+      directory: resolveConfiguredDir(configDir, config.ios.ipaDir, "ios"),
+      matches: (name) => name.toLowerCase().endsWith(".ipa"),
+      extension: () => ".ipa",
+      compareVersions: compareWandInstallOrder,
+      keepNames: [config.ios.currentIpaFile, keepFileName],
+    });
+  }
+
+  /**
+   * 分发目录清理的统一实现。三个平台只在「哪些文件算包」「怎么比版本」上不同，
+   * 保留规则和删除安全性必须共用，避免各自演化出不同答案。
+   *
+   * 排序与更新检查共用 `compareLocalAssetCandidates`，所以清理永远保留更新
+   * 检查会选中的那个文件。`.update.json` 这类边车不参与排序，只跟随它的包。
+   */
+  private async pruneDistributionDirectory(options: {
+    directory: string;
+    matches: (name: string) => boolean;
+    extension: (name: string) => ".apk" | ".dmg" | ".ipa" | ".zip";
+    compareVersions: (a: string, b: string) => number;
+    tieBreak?: (a: { name: string; mtimeMs: number }, b: { name: string; mtimeMs: number }) => number;
+    keepNames: (string | undefined)[];
+    sidecarOf?: (name: string) => string | null;
+  }): Promise<PruneReport> {
+    const report = emptyPruneReport();
     let entries;
     try {
-      entries = await readdir(directory, { withFileTypes: true });
+      entries = await readdir(options.directory, { withFileTypes: true });
     } catch {
-      return { deleted: [], freedBytes: 0 };
+      return report;
     }
-    const apks = entries.filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".apk"));
-    if (apks.length === 0) return { deleted: [], freedBytes: 0 };
-    const candidates = await Promise.all(apks.map(async (entry) => ({
-      name: entry.name,
-      filePath: path.join(directory, entry.name),
-      fileStat: await stat(path.join(directory, entry.name)),
-    })));
-    const sorted = [...candidates].sort((a, b) =>
-      compareLocalAssetCandidates(
-        { name: a.name, mtimeMs: a.fileStat.mtimeMs },
-        { name: b.name, mtimeMs: b.fileStat.mtimeMs },
-        ".apk",
-        compareApkInstallOrder,
-      ));
-    const keepNames = new Set<string>([sorted[0].name]);
-    const pinned = config.android.currentApkFile?.trim();
-    if (pinned) keepNames.add(path.basename(pinned));
-    if (keepFileName) keepNames.add(keepFileName);
-    const deleted: string[] = [];
-    let freedBytes = 0;
-    for (const candidate of sorted) {
-      if (keepNames.has(candidate.name)) continue;
+    const matched = entries.filter((entry) => entry.isFile() && options.matches(entry.name));
+    if (matched.length === 0) return report;
+    const candidates = await Promise.all(matched.map(async (entry) => {
+      const filePath = path.join(options.directory, entry.name);
       try {
-        await unlink(candidate.filePath);
-        deleted.push(candidate.name);
-        freedBytes += candidate.fileStat.size;
+        const fileStat = await stat(filePath);
+        const sidecar = options.sidecarOf?.(entry.name) ?? null;
+        return {
+          name: entry.name,
+          filePath,
+          fileStat,
+          version: sidecar ? null : extractArtifactVersion(entry.name, options.extension(entry.name)),
+          sidecar,
+        };
       } catch {
-        // 清理是尽力而为；删不掉（如正被另一个下载流读取）留到下次触发。
+        return null;
       }
+    }));
+    const packages = candidates.filter((candidate): candidate is NonNullable<typeof candidate> => candidate !== null && candidate.version !== null);
+    const sidecars = candidates.filter((candidate): candidate is NonNullable<typeof candidate> => candidate !== null && candidate.version === null);
+    if (packages.length === 0) return report;
+    const sorted = [...packages].sort((a, b) => compareDistributionFiles(
+      { name: a.name, mtimeMs: a.fileStat.mtimeMs, version: a.version },
+      { name: b.name, mtimeMs: b.fileStat.mtimeMs, version: b.version },
+      options.compareVersions,
+      options.tieBreak,
+    ));
+    const keepNames = new Set<string>();
+    const newest = sorted[0];
+    // 最新版本保留整套：同版本的所有格式（zip/dmg）都留。
+    // debug 构建的版本号里已带构建时间戳（`4.97.1-debug.10181725`），所以同版本
+    // 多次构建是不同 version，自然只有最靠前的那一次被保留。
+    for (const candidate of packages) if (candidate.version === newest.version) keepNames.add(candidate.name);
+    for (const name of options.keepNames) {
+      const base = name?.trim();
+      if (!base) continue;
+      const fileName = path.basename(base);
+      keepNames.add(fileName);
+      const version = extractArtifactVersion(fileName, options.extension(fileName));
+      // 固定指向某个版本时，该版本整套产物一起保留，避免留下半套。
+      if (version) for (const candidate of packages) if (candidate.version === version) keepNames.add(candidate.name);
     }
-    return { deleted, freedBytes };
+    for (const candidate of packages) {
+      if (keepNames.has(candidate.name)) continue;
+      if (await removeQuietly(candidate.filePath, report)) report.freedBytes += candidate.fileStat.size;
+    }
+    // 边车跟随它的包：保留集合里的包所对应的 `wand-v<version>` 基名。
+    const keepBases = new Set<string>();
+    for (const name of keepNames) keepBases.add(name.slice(0, name.length - path.extname(name).length));
+    for (const sidecar of sidecars) {
+      if (sidecar.sidecar && keepBases.has(sidecar.sidecar)) continue;
+      if (await removeQuietly(sidecar.filePath, report)) report.freedBytes += sidecar.fileStat.size;
+    }
+    return report;
   }
 
   /** Beta 仅从当前服务端的 macOS 分发目录选择，绝不回退 GitHub。 */
@@ -338,15 +449,12 @@ export class DistributionManager {
         filePath: path.join(directory, entry.name),
         fileStat: await stat(path.join(directory, entry.name)),
       })));
-    candidates.sort((a, b) => {
-      const aVersion = extractArtifactVersion(a.name, path.extname(a.name));
-      const bVersion = extractArtifactVersion(b.name, path.extname(b.name));
-      const order = compareWandInstallOrder(aVersion ?? "", bVersion ?? "");
-      if (order !== 0) return -order;
-      // 同版本优先 ZIP，避免 DMG 挂载；同格式多构建按最新修改时间挑选。
-      const format = Number(b.name.toLowerCase().endsWith(".zip")) - Number(a.name.toLowerCase().endsWith(".zip"));
-      return format || b.fileStat.mtimeMs - a.fileStat.mtimeMs;
-    });
+    candidates.sort((a, b) => compareDistributionFiles(
+      { name: a.name, mtimeMs: a.fileStat.mtimeMs, version: extractArtifactVersion(a.name, path.extname(a.name)) },
+      { name: b.name, mtimeMs: b.fileStat.mtimeMs, version: extractArtifactVersion(b.name, path.extname(b.name)) },
+      compareWandInstallOrder,
+      compareMacosFormatTieBreak,
+    ));
     const selected = candidates[0];
     if (!selected) return null;
     return {

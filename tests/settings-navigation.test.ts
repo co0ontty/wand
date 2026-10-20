@@ -49,18 +49,21 @@ test("browser Back and Forward restore settings without pushing another history 
     Object.defineProperty(globalThis, "window", { configurable: true, value: {
       location, history, addEventListener(type: string, listener: () => void) { listeners.set(type, listener); },
       removeEventListener(type: string) { listeners.delete(type); },
+      dispatchEvent(event: Event) { listeners.get(event.type)?.(); return true; },
     } });
     stop = installSettingsHistory();
     settingsController.open();
     settingsStore.setTab("about");
-    assert.equal(urls.length, 2);
+    assert.equal(urls.length, 3);
     assert.equal(settingsRoute(location.search), "about");
+    index = 1; listeners.get("popstate")!();
+    assert.equal(settingsStore.getSnapshot().detail, false, "Back restores the settings directory");
     index = 0; listeners.get("popstate")!();
     assert.equal(settingsController.isOpen(), false);
-    index = 1; listeners.get("popstate")!();
+    index = 2; listeners.get("popstate")!();
     assert.equal(settingsController.isOpen(), true);
     assert.equal(settingsStore.getSnapshot().tab, "about");
-    assert.equal(urls.length, 2);
+    assert.equal(urls.length, 3);
     settingsController.close();
     assert.equal(settingsRoute(location.search), null);
     assert.equal(new URL(location.href).searchParams.get("run"), "abc");

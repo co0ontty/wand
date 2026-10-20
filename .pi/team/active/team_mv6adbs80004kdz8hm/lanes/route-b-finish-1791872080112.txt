@@ -1,6 +1,0 @@
-Lane mailbox for route-b-finish 剩余清理 (role route-b-finish)
-Run: team_mv6adbs80004kdz8hm
-Lane: route-b-finish-1791872080112
-Token: 4b53b841-e9ad-4374-8aba-7abcee9fac9b
-
-Captain messages appear below, newest last.

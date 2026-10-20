@@ -152,15 +152,15 @@ export function installWorkspacesLegacyAdapter(): void {
       notifyLegacyUiChange("workspace:open");
       // 任务上下文已经切换，旧任务的终端不能继续挂在新任务标题下。
       // 先即时进入任务欢迎/加载态；详情返回后再恢复已有会话。
-      goHome();
+      goHome({ updateRoute: !payload.restoreRoute });
       // 已有会话的任务只恢复标签 / 布局，不因每次点击任务而偷偷再起一个会话。
       // 空任务进入任务欢迎页，由用户主动选择 Agent 或空白终端。
       // 返回 Promise：调用方（如侧栏「＋」建会话）需等恢复完成再动作。
       const saving = taskLayouts.isSaving(payload.taskId);
       await taskLayouts.flush(payload.taskId);
-      if (generation !== openTaskGeneration) return;
+      if (generation !== openTaskGeneration || payload.navigationCurrent?.() === false) return;
       return (saving ? taskDetailStore.reload(payload.taskId) : taskDetailStore.load(payload.taskId)).then((detail) => {
-        if (generation !== openTaskGeneration) return;
+        if (generation !== openTaskGeneration || payload.navigationCurrent?.() === false) return;
         const sessionIds = orderWorkspaceSessions(detail.sessions).map((session) => session.id);
         const savedActive = activeWorkWindowTab(detail.layout);
         const preferred = requested && sessionIds.includes(requested)
@@ -172,10 +172,10 @@ export function installWorkspacesLegacyAdapter(): void {
           ? reconcileTaskWindowLayout(detail.layout, sessionIds, preferred)
           : reconcileTaskWindowLayout(detail.layout, [], null);
         const active = activeWorkWindowTab(layout);
-        if (active?.kind === "session") selectSession(active.sessionId);
+        if (active?.kind === "session") selectSession(active.sessionId, { updateRoute: !payload.restoreRoute });
         taskLayouts.remember(payload.taskId, detail.layoutRevision);
         setActiveWorkspaceContext({ layout, layoutRevision: detail.layoutRevision });
-        if (JSON.stringify(layout) !== JSON.stringify(detail.layout)) {
+        if (!payload.restoreRoute && JSON.stringify(layout) !== JSON.stringify(detail.layout)) {
           void saveTaskLayout(payload.taskId, layout, { automatic: true });
         }
         dismissDrawerIfOverlay();

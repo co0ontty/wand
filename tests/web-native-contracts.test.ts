@@ -37,7 +37,7 @@ test("web entry preserves native URL, viewport, and global bridge contracts", ()
   ]);
   includesAll("src/web-ui/browser/state.ts", [
     'url.searchParams.get("session")',
-    'url.searchParams.delete("session")',
+    'if (hasPageRoute()) return null;',
   ]);
   includesAll("src/web-ui/browser/main.ts", [
     "/WandApp\\//",
@@ -529,8 +529,11 @@ test("tool activity summaries stay consecutive and split when prose arrives", ()
   ]);
   includesAll("ios/Wand/ChatActivityTimeline.swift", [
     "struct ActivityFoldCard",
-    // Android/iOS 共用时序语义；自动展开服从网络偏好，用户手动收放后不再覆盖。
-    "group.newest && automaticTimeline",
+    // Source-only tripwire; the native replay/XCTest verifies actual state changes.
+    // Latest + running + network policy: an automatically opened group closes on completion.
+    "activityShouldAutoExpand(newest: group.newest, running: running, timelineEnabled: automaticTimeline)",
+    "newest && running && timelineEnabled",
+    ".onChange(of: autoExpanded)",
     "if !userToggled",
     "activityTimelineOrder",
     "ActivityTimelineEntry",

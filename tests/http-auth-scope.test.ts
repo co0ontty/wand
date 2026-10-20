@@ -36,7 +36,12 @@ test("every /api family referenced by route modules is explicitly classified", (
 });
 
 test("api scope matching is segment-aware and unknown paths default to admin", () => {
+  assert.equal(requiredApiScope("/api/sessions"), "sessions");
   assert.equal(requiredApiScope("/api/sessions/abc/input"), "sessions");
+  assert.equal(requiredApiScope("/api/commands"), "admin");
+  assert.equal(requiredApiScope("/api/structured-sessions"), "sessions");
+  assert.equal(requiredApiScope("/api/structured-sessions/abc/messages"), "sessions");
+  assert.equal(requiredApiScope("/api/structured-sessions/abc/queued"), "sessions");
   assert.equal(requiredApiScope("/api/session-list"), "sessions");
   assert.equal(requiredApiScope("/api/sessionsx"), "admin");
   assert.equal(requiredApiScope("/api/file-raw"), "files");
@@ -192,18 +197,31 @@ test("connected apps are limited to declared scopes and cannot reach admin or ra
   })).status, 403);
   assert.equal((await fetch(`${baseUrl}/api/update-channel`, { headers })).status, 403);
 
+  // Unified session creation is reachable in the session scope; command strings still require admin.
+  assert.equal((await fetch(`${baseUrl}/api/sessions`, { method: "POST", headers,
+    body: JSON.stringify({}) })).status, 400, "kind is required before a session is created");
+  assert.equal((await fetch(`${baseUrl}/api/sessions`, { method: "POST", headers,
+    body: JSON.stringify({ kind: "structured", provider: "opencode", cwd: root }) })).status, 201);
+  const legacyMessages = await fetch(`${baseUrl}/api/structured-sessions/not-a-session/messages`, {
+    method: "POST", headers, body: JSON.stringify({ input: "no-op" }),
+  });
+  assert.equal(legacyMessages.status, 404, "sessions-scoped clients retain access to structured message routes");
+  const legacyQueue = await fetch(`${baseUrl}/api/structured-sessions/not-a-session/queued`, {
+    method: "PATCH", headers, body: JSON.stringify({ order: [] }),
+  });
+  assert.equal(legacyQueue.status, 400, "sessions-scoped clients retain access to structured queue routes");
   // Raw command strings require admin; provider-based CLI sessions are not rejected by the gate.
-  const rawCommand = await fetch(`${baseUrl}/api/commands`, {
-    method: "POST", headers, body: JSON.stringify({ command: "touch /tmp/should-not-run", provider: "claude", cwd: root }),
+  const rawCommand = await fetch(`${baseUrl}/api/sessions`, {
+    method: "POST", headers, body: JSON.stringify({ kind: "pty", command: "touch /tmp/should-not-run", provider: "claude", cwd: root }),
   });
   assert.equal(rawCommand.status, 403);
-  const noProvider = await fetch(`${baseUrl}/api/commands`, {
-    method: "POST", headers, body: JSON.stringify({ command: "touch /tmp/should-not-run", cwd: root }),
+  const noProvider = await fetch(`${baseUrl}/api/sessions`, {
+    method: "POST", headers, body: JSON.stringify({ kind: "pty", command: "touch /tmp/should-not-run", cwd: root }),
   });
   assert.equal(noProvider.status, 403);
   // Old clients send the provider id as the command; that is still a provider CLI session.
-  const legacyProvider = await fetch(`${baseUrl}/api/commands`, {
-    method: "POST", headers, body: JSON.stringify({ command: "pi", cwd: root }),
+  const legacyProvider = await fetch(`${baseUrl}/api/sessions`, {
+    method: "POST", headers, body: JSON.stringify({ kind: "pty", command: "pi", cwd: root }),
   });
   assert.equal(legacyProvider.status, 201);
 

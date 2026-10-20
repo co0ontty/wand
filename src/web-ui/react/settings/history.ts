@@ -1,7 +1,8 @@
+import { subscribePageRoute, updatePageRoute } from "../../page-route";
 import { settingsController, settingsStore } from "./controller";
 import type { SettingsTab } from "./types";
 
-const TABS: readonly SettingsTab[] = ["profile", "notifications", "display", "ai", "local-models", "speech", "general", "connectors", "security", "presets", "about"];
+const TABS: readonly SettingsTab[] = ["profile", "notifications", "display", "ai", "local-models", "general", "connectors", "security", "presets", "about"];
 
 export function settingsRoute(search: string): SettingsTab | "directory" | null {
   const value = new URLSearchParams(search).get("settings");
@@ -22,8 +23,11 @@ export function installSettingsHistory(): () => void {
   const restore = (): void => {
     syncing = true;
     const route = settingsRoute(window.location.search);
-    if (route) settingsController.open(route === "directory" ? undefined : route);
-    else settingsController.close();
+    const current = settingsStore.getSnapshot();
+    if (route) {
+      if (!current.open || (route === "directory" ? current.detail : current.tab !== route || !current.detail)) settingsController.open(route === "directory" ? undefined : route);
+      settingsStore.setNested(new URLSearchParams(window.location.search).get("settingsNested") === "environment" ? "environment" : null);
+    } else settingsController.close();
     previous = settingsStore.getSnapshot();
     syncing = false;
   };
@@ -31,14 +35,11 @@ export function installSettingsHistory(): () => void {
   const unsubscribe = settingsStore.subscribe(() => {
     const next = settingsStore.getSnapshot();
     if (syncing) return;
-    if (next.open !== previous.open || next.tab !== previous.tab || next.detail !== previous.detail) {
-      const url = new URL(window.location.href);
-      url.search = settingsSearch(url.search, next.open ? next.detail ? next.tab : "directory" : null);
-      const method = next.open && !previous.open ? "pushState" : "replaceState";
-      window.history[method](window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    if (next.open !== previous.open || next.tab !== previous.tab || next.detail !== previous.detail || next.nested !== previous.nested) {
+      updatePageRoute({ settings: next.open ? next.detail ? next.tab : "directory" : null, settingsNested: next.open ? next.nested : null });
     }
     previous = next;
   });
-  window.addEventListener("popstate", restore);
-  return () => { unsubscribe(); window.removeEventListener("popstate", restore); };
+  const stopRoute = subscribePageRoute(restore);
+  return () => { unsubscribe(); stopRoute(); };
 }

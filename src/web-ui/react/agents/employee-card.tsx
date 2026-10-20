@@ -1,6 +1,6 @@
 import { SettingsActionButton, SettingsField } from "../settings/fields.js";
 import * as React from "react";
-import { Alert, Input } from "antd";
+import { Alert, Input, InputNumber } from "antd";
 import { isBuiltinSiliconEmployee, isDefaultSiliconEmployee, parseSiliconEmployeeTagInput, siliconEmployeeTags, type SiliconEmployee } from "../../../ai-team-types.js";
 import { isFixedAvatarEmployee } from "../../../fixed-employee-avatar.js";
 import { WandButton, WandIcon, WandIconButton, WandInput } from "../ui";
@@ -69,7 +69,7 @@ export function EmployeeCard({ employee, catalog, providerOptions, onSave, onArc
       const next = { ...draft, tags };
       // Fixed identities accept partial profile edits: do not echo a generated prompt or a stale avatar.
       const input: Partial<SiliconEmployee> = fixed ? {} : next;
-      if (fixed) for (const field of ["name", "duty", "prompt", "agents"] as const) {
+      if (fixed) for (const field of ["name", "duty", "prompt", "agents", "systemSessionLimit"] as const) {
         if (JSON.stringify(next[field]) !== JSON.stringify(baseline[field])) Object.assign(input, { [field]: next[field] });
       }
       setSubmitting(true); setError(""); await onSave(input);
@@ -91,6 +91,13 @@ export function EmployeeCard({ employee, catalog, providerOptions, onSave, onArc
       <section id="identity" className="form-section" aria-label="个人资料"><div className="identity-fields">
         {field("员工名字", `employee-${employee.id}-name`, <WandInput ref={nameInput} id={`employee-${employee.id}-name`} value={draft.name} maxLength={40} disabled={saving || lockedProfile} onChange={event => patch({ name: event.target.value })}/>)}
         <EmployeeTagsField id={`employee-${employee.id}-tags`} value={tagInput} disabled={saving || builtin} onChange={value => { setTagInput(value); setNotice(""); }}/></div></section>
+      <section id="employee-settings" className="form-section" aria-label="员工设置">
+        <h3>员工设置</h3>
+        {field("系统调用历史保留上限", `employee-${employee.id}-system-session-limit`, <InputNumber id={`employee-${employee.id}-system-session-limit`} className="wand-employee-system-session-limit" min={0} max={10000} precision={0} placeholder="不限" disabled={saving}
+          value={draft.systemSessionLimit ?? null}
+          onChange={value => patch({ systemSessionLimit: typeof value === "number" ? value : null })}/>,
+          "仅限制标题生成等系统辅助功能的已结束历史，按开始时间保留最新 N 条，超出记录保存后永久删除。留空=不限；0=不保留。任务派发、agent 间调用（含决策）、手动聊天与运行中会话不计入，也不会清理。")}
+      </section>
       <section id="role" className="form-section" aria-label="职责与角色">
         {field("一句话职责", `employee-${employee.id}-duty`, <Input.TextArea id={`employee-${employee.id}-duty`} value={draft.duty} autoSize={{ minRows: 2, maxRows: 8 }} style={{ resize: "none" }} maxLength={2000} disabled={saving || lockedProfile} onChange={event => patch({ duty: event.target.value })}/>)}
         {field("角色设定", `employee-${employee.id}-prompt`, <Input.TextArea id={`employee-${employee.id}-prompt`} value={draft.prompt} autoSize={{ minRows: 5, maxRows: 14 }} style={{ resize: "none" }} maxLength={20000} disabled={saving || lockedProfile} onChange={event => patch({ prompt: event.target.value })}/>, "用于此员工之后的新工作；已有执行快照保持不变。")}</section>

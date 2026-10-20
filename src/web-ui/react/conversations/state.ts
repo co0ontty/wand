@@ -1,5 +1,6 @@
 import * as React from "react";
 import type { ConversationTarget } from "../../../conversation-types.js";
+import { hasPageRoute, pageSearch, scheduleReplacePageRoute, subscribePageRoute, updatePageRoute } from "../../page-route";
 
 /** Device-local archive tier, shared by every conversation list projection. */
 export type ConversationListFilter = "all" | "active" | "archived";
@@ -31,14 +32,49 @@ function initial(): ConversationUiState {
     listFilter: normalizeListFilter(stored.listFilter), activityOnly: stored.activityOnly === true,
     targets: stored.targets ?? {}, filters: stored.filters ?? {}, scrolls: stored.scrolls ?? {}, focusRequest: null };
 }
-let state = initial();
+function fromRoute(base: ConversationUiState): ConversationUiState {
+  const params = new URLSearchParams(pageSearch());
+  if (!hasPageRoute()) return base;
+  const view = params.get("view");
+  const id = params.get("conversation") ?? "";
+  const taskId = params.get("conversationTask") ?? "";
+  const runId = params.get("conversationRun");
+  return { ...base, mode: params.get("sidebar") === "tasks" ? "tasks" : params.get("sidebar") === "chats" || view === "chats" || view === "contacts" ? "chats" : "tasks",
+    active: view === "chats" || view === "contacts", directory: view === "contacts", selectedId: id,
+    listFilter: normalizeListFilter(params.get("chatFilter")), activityOnly: params.get("chatActivity") === "true",
+    filters: { "list-query": params.get("chatQuery") ?? "", ...(id ? { [id]: taskId } : {}) },
+    targets: id ? { [id]: taskId && runId ? { taskId, runId } : null } : {}, focusRequest: base.selectedId === id ? base.focusRequest : null };
+}
+let state = fromRoute(initial());
 let selectionRevision = 0;
 const listeners = new Set<() => void>();
 function update(patch: Partial<ConversationUiState>): void {
   state = { ...state, ...patch };
   try { localStorage.setItem(storageKey, JSON.stringify({ ...state, directory: false, focusRequest: null })); } catch {}
+  const params: Record<string, string | null> = {};
+  if ("mode" in patch) params.sidebar = state.mode;
+  if ("active" in patch || "directory" in patch || "selectedId" in patch) {
+    params.view = state.directory ? "contacts" : state.active ? "chats" : "workspace";
+    params.sidebar = state.mode;
+    params.conversation = state.selectedId;
+  }
+  if ("listFilter" in patch) params.chatFilter = state.listFilter === "all" ? null : state.listFilter;
+  if ("activityOnly" in patch) params.chatActivity = state.activityOnly ? "true" : null;
+  if ("filters" in patch) { params.chatQuery = state.filters["list-query"] ?? ""; params.conversationTask = state.filters[state.selectedId] ?? ""; }
+  if ("targets" in patch) { params.conversationTask = state.targets[state.selectedId]?.taskId ?? ""; params.conversationRun = state.targets[state.selectedId]?.runId ?? ""; }
+  const navigates = "selectedId" in patch || "active" in patch || "directory" in patch;
+  const queryOnly = !navigates && Object.keys(patch).every(key => key === "filters");
+  // Only a change of destination earns a history entry; typing and filters settle into one replace.
+  if (queryOnly) scheduleReplacePageRoute(params);
+  else updatePageRoute(params, navigates ? "push" : "replace");
   for (const listener of listeners) listener();
 }
+subscribePageRoute(() => {
+  const next = fromRoute(state);
+  if (next.selectedId !== state.selectedId || next.active !== state.active) ++selectionRevision;
+  state = next;
+  for (const listener of listeners) listener();
+});
 export const conversationUi = {
   subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
   getSnapshot: () => state,
@@ -56,7 +92,7 @@ export const conversationUi = {
   show: () => { ++selectionRevision; update({ active: true, directory: false, focusRequest: null }); },
   suspend: () => { ++selectionRevision; update({ active: false, directory: false, focusRequest: null }); },
   directory: (open: boolean) => { ++selectionRevision; update({ directory: open, active: open ? true : state.active, focusRequest: null }); },
-  mode: (mode: "chats" | "tasks") => update({ mode }),
+  mode: (mode: "chats" | "tasks") => update({ mode, active: mode === "chats", directory: false, focusRequest: null }),
   listFilter: (value: string) => update({ listFilter: normalizeListFilter(value) }),
   activityOnly: (value: boolean) => update({ activityOnly: value }),
   target: (id: string, target: ConversationTarget) => update({ targets: { ...state.targets, [id]: target } }),

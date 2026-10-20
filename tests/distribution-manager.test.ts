@@ -247,3 +247,115 @@ test("pruneAndroidApkDirectory is a no-op when android distribution is disabled"
     rmSync(fixture.root, { recursive: true, force: true });
   }
 });
+
+test("pruneMacosBetaDirectory keeps the newest complete set and drops older builds with sidecars", async () => {
+  const fixture = createFixture();
+  try {
+    const dir = path.join(fixture.root, "macos");
+    // 旧版本：zip + dmg + update.json 一整套，应整体删除。
+    writeFileSync(path.join(dir, "wand-v4.96.0-debug.10181200.zip"), "old-zip");
+    writeFileSync(path.join(dir, "wand-v4.96.0-debug.10181200.dmg"), "old-dmg");
+    writeFileSync(path.join(dir, "wand-v4.96.0-debug.10181200.update.json"), "{}");
+    // 同版本更早一次构建，同样应删除。
+    writeFileSync(path.join(dir, "wand-v4.97.1-debug.10181725.zip"), "mid-zip");
+    writeFileSync(path.join(dir, "wand-v4.97.1-debug.10181725.update.json"), "{}");
+    // 最新版本（同版本里构建时间戳最大的那次）：zip + dmg + update.json 整套保留。
+    writeFileSync(path.join(dir, "wand-v4.97.1-debug.10181740.zip"), "new-zip");
+    writeFileSync(path.join(dir, "wand-v4.97.1-debug.10181740.dmg"), "new-dmg");
+    writeFileSync(path.join(dir, "wand-v4.97.1-debug.10181740.update.json"), "{}");
+
+    const pruned = await fixture.manager.pruneMacosBetaDirectory("wand-v4.97.1-debug.10181740.zip");
+
+    assert.deepEqual(pruned.deleted.sort(), [
+      "wand-v4.96.0-debug.10181200.dmg",
+      "wand-v4.96.0-debug.10181200.update.json",
+      "wand-v4.96.0-debug.10181200.zip",
+      "wand-v4.97.1-debug.10181725.update.json",
+      "wand-v4.97.1-debug.10181725.zip",
+    ]);
+    assert.ok(pruned.freedBytes > 0);
+    const remaining = (await import("node:fs")).readdirSync(dir).sort();
+    assert.deepEqual(remaining, [
+      "wand-v4.97.1-debug.10181740.dmg",
+      "wand-v4.97.1-debug.10181740.update.json",
+      "wand-v4.97.1-debug.10181740.zip",
+    ]);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("pruneMacosBetaDirectory keeps the whole set for the pinned currentDmgFile version", async () => {
+  const fixture = createFixture();
+  try {
+    const dir = path.join(fixture.root, "macos");
+    writeFileSync(path.join(dir, "wand-v4.90.0.zip"), "pinned-zip");
+    writeFileSync(path.join(dir, "wand-v4.90.0.dmg"), "pinned-dmg");
+    writeFileSync(path.join(dir, "wand-v4.91.0.zip"), "older-unpinned");
+    writeFileSync(path.join(dir, "wand-v4.99.0-debug.10190000.zip"), "newest");
+    writeFileSync(fixture.configPath, JSON.stringify({
+      android: { enabled: false },
+      macos: { enabled: true, dmgDir: "macos", currentDmgFile: "wand-v4.90.0.dmg" },
+      ios: { enabled: false },
+    }));
+
+    const pruned = await fixture.manager.pruneMacosBetaDirectory();
+
+    // 固定指向 v4.90.0 时该版本整套保留；最新一套（v4.99.0）也总保留；只删两者之间的。
+    assert.deepEqual(pruned.deleted, ["wand-v4.91.0.zip"]);
+    const remaining = (await import("node:fs")).readdirSync(dir).sort();
+    assert.deepEqual(remaining, [
+      "wand-v4.90.0.dmg",
+      "wand-v4.90.0.zip",
+      "wand-v4.99.0-debug.10190000.zip",
+    ]);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("pruneIosIpaDirectory keeps only the newest IPA and honours currentIpaFile", async () => {
+  const fixture = createFixture();
+  try {
+    const dir = path.join(fixture.root, "ios");
+    writeFileSync(path.join(dir, "wand-v4.95.0-debug.10181000.ipa"), "pinned");
+    writeFileSync(path.join(dir, "wand-v4.96.0-debug.10181100.ipa"), "mid");
+    writeFileSync(path.join(dir, "wand-v4.97.0-debug.10181440.ipa"), "newest");
+    writeFileSync(fixture.configPath, JSON.stringify({
+      android: { enabled: false },
+      macos: { enabled: false },
+      ios: { enabled: true, ipaDir: "ios", currentIpaFile: "wand-v4.95.0-debug.10181000.ipa" },
+    }));
+
+    const pruned = await fixture.manager.pruneIosIpaDirectory();
+
+    assert.deepEqual(pruned.deleted, ["wand-v4.96.0-debug.10181100.ipa"]);
+    const remaining = (await import("node:fs")).readdirSync(dir).sort();
+    assert.deepEqual(remaining, [
+      "wand-v4.95.0-debug.10181000.ipa",
+      "wand-v4.97.0-debug.10181440.ipa",
+    ]);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("macOS pruning and update selection agree on the same newest candidate", async () => {
+  const fixture = createFixture();
+  try {
+    const dir = path.join(fixture.root, "macos");
+    // 同版本 zip 与 dmg 的 mtime 顺序与「zip 优先」相反，用来固定 tie-break 方向。
+    writeFileSync(path.join(dir, "wand-v4.97.1-debug.10181725.dmg"), "dmg");
+    writeFileSync(path.join(dir, "wand-v4.97.1-debug.10181725.zip"), "zip");
+    const selected = await fixture.manager.resolveLatestMacosBeta();
+    assert.equal(selected?.fileName, "wand-v4.97.1-debug.10181725.zip");
+
+    writeFileSync(path.join(dir, "wand-v4.97.0-debug.10181440.zip"), "old");
+    const pruned = await fixture.manager.pruneMacosBetaDirectory();
+    // 被清理的必须正好是「更新检查不会选」的那些。
+    assert.deepEqual(pruned.deleted, ["wand-v4.97.0-debug.10181440.zip"]);
+    assert.equal((await fixture.manager.resolveLatestMacosBeta())?.fileName, selected?.fileName);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});

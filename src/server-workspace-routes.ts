@@ -31,6 +31,7 @@ import { parentTaskIdFrom } from "./task-agent-parsing.js";
 import { taskTitleService, refreshAutoBoardTaskTitles, type AutoTaskTitleOptions } from "./task-title-service.js";
 import { organizeSelectedByTitle, titleJudgeForStorage } from "./task-title-organize-service.js";
 import { systemAiSessions } from "./system-ai-session-recorder.js";
+import { isSystemAiCall } from "./system-ai-call.js";
 import { registerConversationOrganizeRoutes } from "./server-conversation-organize-routes.js";
 import type { ConversationGroupingJudge } from "./conversation-organize.js";
 import { TITLE_ORGANIZE_MAX_SESSIONS, TITLE_ORGANIZE_MAX_TASKS, type TitleJudge } from "./task-title-organize.js";
@@ -277,7 +278,7 @@ function workspaceWithCounts(
   const worktreeCount = storage.listWorkspaceTasks(workspace.id)
     .filter((task) => (includeArchived || !task.archived) && task.worktree !== null)
     .length;
-  const sessionCount = (sessionCounts ?? storage.countSessionsByWorkspace({ includeArchived })).get(workspace.id) ?? 0;
+  const sessionCount = (sessionCounts ?? storage.countSessionsByWorkspace({ includeArchived, excludeSystemAiCalls: true })).get(workspace.id) ?? 0;
   return { ...workspace, worktreeCount, sessionCount };
 }
 
@@ -390,7 +391,7 @@ export function registerWorkspaceRoutes(
   // 列出所有项目（按创建时间降序：新建在前，打开不会改位置）
   app.get("/api/workspaces", (req, res) => {
     const includeArchived = req.query.includeArchived === "1";
-    const sessionCounts = storage.countSessionsByWorkspace({ includeArchived });
+    const sessionCounts = storage.countSessionsByWorkspace({ includeArchived, excludeSystemAiCalls: true });
     res.json(storage.listWorkspaces()
       .filter((workspace) => !isGlobalWorkspace(workspace))
       .map((workspace) => workspaceWithCounts(storage, workspace, sessionCounts, includeArchived)));
@@ -430,7 +431,7 @@ export function registerWorkspaceRoutes(
     const archivedTaskIds = new Set(storage.listWorkspaceTasks(workspace.id)
       .filter((task) => task.archived).map((task) => task.id));
     const teamMarkers = teamSessionMarkers(storage);
-    const visibleSessions = storage.listSessionsByWorkspaceSlim(workspace.id).map((session) => ({
+    const visibleSessions = storage.listSessionsByWorkspaceSlim(workspace.id).filter((session) => !isSystemAiCall(session)).map((session) => ({
       ...workspaceSessionSummary(
         session, { workspaceName: workspace.name }, sessions, teamMarkersFor(teamMarkers, session.id),
       ),
@@ -640,6 +641,7 @@ export function registerWorkspaceRoutes(
     const snapshots = sessions?.listSlim();
     const revision = crypto.createHash("sha256").update(JSON.stringify({
       storage: storage.projectionRevision(),
+      projection: "workspace-work-sessions-v1",
       query: { includeArchived, workspaceFilter, taskLimit, sessionLimit },
       runtime: snapshots,
     })).digest("base64url");
@@ -649,7 +651,11 @@ export function registerWorkspaceRoutes(
     }
     const model = new TaskReadModel(storage, sessions, snapshots);
     const allSessions = model.sessions;
-    const sessionVisible = (session: SessionSnapshot): boolean => includeArchived || !session.archived;
+    // Server-owned one-shot feature logs are not Agent work. Do not filter by employee,
+    // sessionSource=automation or generic automation IDs: those also carry dispatch,
+    // communication and scheduled work. Keep storage and employee audit history intact.
+    const sessionVisible = (session: SessionSnapshot): boolean => !isSystemAiCall(session)
+      && (includeArchived || !session.archived);
     const workspaces = [...model.workspaces.values()];
     // 目录组为一级容器：任务归属目录；未绑定任务的会话以 standaloneSessions
     // 归入所在目录的组（含无项目的合成组），保证没有会话在任务视图里失联。
@@ -998,7 +1004,7 @@ export function registerWorkspaceRoutes(
       ...task,
       ...resolvedMilestoneFields(storage, task.milestoneId),
       cwd: taskRuntimeCwd(task, workspace),
-      sessions: storage.listSessionsByWorkspaceTaskSlim(task.id).map((session) => ({
+      sessions: storage.listSessionsByWorkspaceTaskSlim(task.id).filter((session) => !isSystemAiCall(session)).map((session) => ({
         ...workspaceSessionSummary(session, {
           taskName: task.name,
           workspaceName: workspace?.name,

@@ -1,6 +1,0 @@
-Lane mailbox for macOS 与 Web 交互架构审查 (role desktop-parity)
-Run: team_mv5a71wh0001mi19ev
-Lane: desktop-parity-1791811321932
-Token: 18946b7d-9dc0-4d8f-99e0-12f025d6e40b
-
-Captain messages appear below, newest last.

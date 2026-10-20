@@ -20,7 +20,7 @@ test("permission summary follows actual provider behavior instead of treating ev
 });
 
 test("Pi CLI and Wand Agent descriptions retain different execution and permission boundaries", () => {
-  assert.match(modeHint(form({ provider: "pi", engine: "cli" })), /Pi CLI.*自身.*不会增加逐项权限确认/);
+  assert.equal(modeHint(form({ provider: "pi", engine: "cli" })), "Pi CLI 使用自身工具与扩展配置。");
   assert.match(modeHint(form({ provider: "pi", engine: "sdk" })), /Wand Agent.*Wand 内执行/);
   assert.match(modeHint(form({ provider: "opencode" })), /未批准.*拒绝/);
   assert.match(modeHint(form({ provider: "opencode", kind: "pty" })), /终端.*确认/);

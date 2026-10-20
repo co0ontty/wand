@@ -5,7 +5,7 @@ export interface NewSessionControllerSnapshot {
   dismissable: boolean;
   initialCwd: string;
   initialEmployeeId: string;
-  /** 侧栏「新建空白终端」这类入口直接带上形态；空串表示用默认形态。 */
+  /** 侧栏新建空白终端等入口可指定会话形态；空串表示用默认形态。 */
   initialKind: NewSessionKind | "";
   workspaceId: string;
   workspaceTaskId: string;
@@ -24,6 +24,11 @@ export interface NewSessionOpenOptions {
   newTask?: boolean;
 }
 
+export interface NewSessionUnknownCreation {
+  scope: string;
+  message: string;
+}
+
 export interface WandNewSessionController {
   open(options?: NewSessionOpenOptions): boolean;
   close(): void;
@@ -31,6 +36,8 @@ export interface WandNewSessionController {
   closeTopmost(): boolean;
   isOpen(): boolean;
   setDismissable(dismissable: boolean): void;
+  getUnknownCreation(scope: string): NewSessionUnknownCreation | undefined;
+  markUnknownCreation(value: NewSessionUnknownCreation): void;
 }
 
 type Listener = () => void;
@@ -49,6 +56,7 @@ let snapshot: NewSessionControllerSnapshot = {
   revision: 0,
 };
 const listeners = new Set<Listener>();
+const unknownCreations = new Map<string, NewSessionUnknownCreation>();
 
 function publish(
   open: boolean,
@@ -124,6 +132,14 @@ export const newSessionController: WandNewSessionController = {
 
   setDismissable(dismissable): void {
     publishDismissable(dismissable);
+  },
+
+  getUnknownCreation(scope): NewSessionUnknownCreation | undefined {
+    return unknownCreations.get(scope);
+  },
+
+  markUnknownCreation(value): void {
+    unknownCreations.set(value.scope, value);
   },
 };
 

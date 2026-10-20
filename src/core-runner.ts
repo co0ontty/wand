@@ -200,9 +200,14 @@ function applyAssistantMessage(state: StructuredRunnerTurnState, message: Assist
  * core agent 事件 → Wand 回合状态。与 pi CLI 适配器共用同一套 blocks 语义，
  * 但参数与结果是上游真值（不再从 provider 文本里反推）。返回本轮的 primaryError。
  */
+const assistantMessageOffsets = new WeakMap<StructuredRunnerTurnState, { blocks: number; result: number }>();
+
 export function applyCoreAgentEvent(state: StructuredRunnerTurnState, event: Record<string, unknown>): string | null {
   capturePiExecutionEvent(state.blocks, event);
   const type = typeof event.type === "string" ? event.type : "";
+  if (type === "message_start" && (event.message as { role?: string } | undefined)?.role === "assistant") {
+    assistantMessageOffsets.set(state, { blocks: state.blocks.length, result: state.result.length });
+  }
   if (type === "agent_start" || type === "turn_start" || type === "message_start") {
     state.phase = "responding";
     return null;
@@ -215,12 +220,12 @@ export function applyCoreAgentEvent(state: StructuredRunnerTurnState, event: Rec
     if (!delta) return null;
     if (update?.type === "text_delta") {
       const last = state.blocks.at(-1);
-      if (last?.type === "text") last.text += delta;
+      if (last?.type === "text" && state.blocks.length > (assistantMessageOffsets.get(state)?.blocks ?? 0)) last.text += delta;
       else state.blocks.push({ type: "text", text: delta });
       state.result += delta;
     } else if (update?.type === "thinking_delta") {
       const last = state.blocks.at(-1);
-      if (last?.type === "thinking") last.thinking += delta;
+      if (last?.type === "thinking" && state.blocks.length > (assistantMessageOffsets.get(state)?.blocks ?? 0)) last.thinking += delta;
       else state.blocks.push({ type: "thinking", thinking: delta });
     }
     return null;
@@ -228,7 +233,18 @@ export function applyCoreAgentEvent(state: StructuredRunnerTurnState, event: Rec
   if (type === "message_end") {
     const message = event.message as AssistantMessage | undefined;
     if (message?.role !== "assistant") return null;
-    applyAssistantMessage(state, message);
+    const offset = assistantMessageOffsets.get(state);
+    if (offset) {
+      const segment = { ...state, blocks: state.blocks.slice(offset.blocks), result: state.result.slice(offset.result) };
+      applyAssistantMessage(segment, message);
+      state.blocks = [...state.blocks.slice(0, offset.blocks), ...segment.blocks];
+      state.result = state.result.slice(0, offset.result) + segment.result;
+      state.model = segment.model;
+      state.usage = segment.usage;
+      assistantMessageOffsets.delete(state);
+    } else {
+      applyAssistantMessage(state, message);
+    }
     if (message.stopReason === "error") {
       return typeof message.errorMessage === "string" && message.errorMessage ? message.errorMessage : "core 引擎回合失败";
     }
@@ -469,6 +485,27 @@ export class CoreRunner implements StructuredRunnerAdapter {
         },
       });
     }
+    // Agent owns getSteeringMessages internally. Stage only at its awaited finishTurn
+    // boundary, then let the native one-at-a-time queue drain before the next request.
+    // Install after AgentSession so extension boundary hooks finish first.
+    agent.steeringMode = "one-at-a-time";
+    const finishTurn = agent.finishTurn;
+    agent.finishTurn = async (turn, signal) => {
+      const decision = await finishTurn?.(turn, signal);
+      if (decision?.action === "end" || controller.signal.aborted || signal?.aborted
+        || !observer.isActive() || turn.message.stopReason === "error" || turn.message.stopReason === "aborted"
+        || agent.hasQueuedMessages()) return decision ?? undefined;
+      const prompt = context.takeSteering?.(state);
+      if (prompt !== null && prompt !== undefined) {
+        agent.steer({ role: "user", content: [{ type: "text", text: prompt }], timestamp: Date.now() });
+        // The preceding segment is now durable. Subsequent streaming must append
+        // after its new user turn rather than upsert the entire old assistant text.
+        state.blocks = [];
+        state.result = "";
+        state.usage = undefined;
+      }
+      return decision ?? undefined;
+    };
     if (extensionHost) register(agent, () => extensionHost!.interrupt());
     const handleEvent = (event: unknown) => {
       const record = event as unknown as Record<string, unknown>;

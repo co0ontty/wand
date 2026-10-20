@@ -14,7 +14,7 @@ import { shortCommand } from "./chat-render-model.js";
 import { getStructuredQueuedInputs, persistCrossSessionQueue, persistSelectedId, prepareChatBottomFollow, stripRenderOnlyStructuredMessages, syncStructuredQueueFromSession } from "./chat-scroll";
 import "./file-browser";
 import "./git-commit";
-import { showToast, wandConfirm, wandPrompt as uiPrompt } from "./notifications";
+import { showToast, wandConfirm } from "./notifications";
 import { getEffectiveCwd } from "./render";
 import { applyCurrentView, buildAttachmentPrefix, canSendComposer, clearDraftValueForSession, closePlusPopover, COMPOSER_IDLE_HINT, dismissDrawerIfOverlay, getComposerPlaceholder, getDraftValueForSession, getPendingAttachments, getPreferredMessages, getPreferredTool, isStructuredSession, selectSession, loadOutput, refreshAll, renderAttachmentPreview, restoreComposerStateForSession, setDraftValue, setDraftValueForSession, shouldBracketPtyPaste, subscribeToSession, syncComposerHasText, updateSessionSnapshot, updateSessionsList, uploadAttachments, withTerminalDimensions } from "./session-engine";
 import { confirmDelete } from "./sidebar";
@@ -25,13 +25,10 @@ import { paintTerminalPanel } from "./terminal-panel-adapter";
 import "./websocket";
 import { buildPtyAttachmentChunks, isImageAttachmentSource } from "./pty-paste";
 import { notifyLegacyUiChange, subscribeLegacyUiChange } from "./ui-store-bridge";
-import { BrowserSpeechInput, readSpeechMode, speechInputDescription } from "../react/speech/repository";
-import { bindIdleSpeechInput } from "../react/speech/hold-input";
 import { PROVIDER_IDS, PROVIDER_LABELS, inferProviderIdFromCommand } from "../provider-identity";
 import { syncBrowserComposerRail } from "./composer-rail-adapter";
 import { syncBrowserComposerPopover } from "./composer-popover-adapter";
 import { showActionError } from "./composer-action-error";
-import { syncBrowserComposerVoice } from "./composer-voice-adapter";
 import { shouldPersistQueueItemRestore } from "./composer-draft";
 import { handlePiSettingsSubmit, syncPiSettingsComposer } from "./pi-settings-adapter";
 import { resolveInsertBeforeAnchor } from "./queue-dom";
@@ -42,141 +39,6 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
     headers: { ...(init?.headers as Record<string, string> | undefined),
       "X-Wand-Tool-Projection": "compact" } });
 }
-
-      // Hardware/request lifecycle lives in BrowserSpeechInput; drafts remain in ComposerStore.
-      var voiceState = { recording: false, canceling: false, transcript: "", startY: 0, bubbleVisible: false, status: "" };
-      var VOICE_CANCEL_THRESHOLD = 60;
-      var voiceSession: BrowserSpeechInput | null = null;
-      var voiceCapture: { sessionId: string; revision: number; text: string } | null = null;
-      var voiceErrorTimer: ReturnType<typeof setTimeout> | null = null;
-      var voiceLifecycleBound = false;
-      var idleVoiceInput: { input: HTMLTextAreaElement; binding: ReturnType<typeof bindIdleSpeechInput> } | null = null;
-      function syncIdleVoiceInput(input: HTMLTextAreaElement) {
-        if (!input) return;
-        if (idleVoiceInput?.input !== input) {
-          idleVoiceInput?.binding.dispose();
-          const binding = bindIdleSpeechInput(input, {
-            enabled: () => !!state.selectedId && !state.terminalInteractive && !(state.promptOptimizeRequest?.sessionId === state.selectedId),
-            begin: startVoiceRecording, move: handleVoiceMove, finish: stopVoiceRecording,
-            cancel: () => cancelVoiceRecording(null),
-          });
-          idleVoiceInput = { input, binding };
-        }
-        const session = state.sessions.find((item) => item.id === state.selectedId);
-        idleVoiceInput.binding.sync(getComposerPlaceholder(session, state.terminalInteractive));
-      }
-
-      function syncVoiceBubble() {
-        syncBrowserComposerVoice({ visible: voiceState.bubbleVisible, canceling: voiceState.canceling,
-          transcript: voiceState.transcript, status: voiceState.status });
-      }
-      export function updateVoiceTranscript(text) {
-        voiceState.transcript = text || "";
-        syncVoiceBubble();
-      }
-      function bindVoiceLifecycle() {
-        if (voiceLifecycleBound) return;
-        voiceLifecycleBound = true;
-        window.addEventListener("pagehide", () => cancelVoiceRecording(null));
-        window.addEventListener("wand-voice-settings-change", () => cancelVoiceRecording(null));
-        document.addEventListener("visibilitychange", () => { if (document.hidden) cancelVoiceRecording(null); });
-        document.addEventListener("keydown", (event) => { if (event.key === "Escape") cancelVoiceRecording(null); });
-        const rejectStale = () => {
-          if (voiceCapture && (state.selectedId !== voiceCapture.sessionId || state.terminalInteractive
-            || !composerStore.isCurrentRevision(voiceCapture.sessionId, voiceCapture.revision))) cancelVoiceRecording(null);
-        };
-        composerStore.subscribe(rejectStale);
-        subscribeLegacyUiChange(rejectStale);
-      }
-      export function startVoiceRecording(e) {
-        if (state.terminalInteractive || !state.selectedId || voiceSession
-          || (state.promptOptimizeRequest && state.promptOptimizeRequest.sessionId === state.selectedId)) return;
-        bindVoiceLifecycle();
-        if (voiceErrorTimer) { clearTimeout(voiceErrorTimer); voiceErrorTimer = null; }
-        if (e) {
-          e.preventDefault();
-          voiceState.startY = typeof e.clientY === "number" ? e.clientY : 0;
-          try { if (e.pointerId !== undefined) e.currentTarget?.setPointerCapture?.(e.pointerId); } catch (_) {}
-        }
-        const draft = composerStore.read(state.selectedId);
-        const capture = { sessionId: state.selectedId, revision: draft.revision, text: draft.text };
-        voiceCapture = capture;
-        voiceState.recording = true;
-        voiceState.canceling = false;
-        voiceState.transcript = "";
-        voiceState.bubbleVisible = true;
-        voiceState.status = "正在准备麦克风…";
-        var btn = document.getElementById("voice-record-btn");
-        btn?.classList.add("is-recording");
-        btn?.setAttribute("aria-pressed", "true");
-        btn?.setAttribute("title", "松开结束 · 上滑取消");
-        const session = new BrowserSpeechInput(readSpeechMode(), {
-          onPartial: updateVoiceTranscript,
-          onStatus(status) { if (voiceSession === session) { voiceState.status = status; syncVoiceBubble(); } },
-          onProcessing() {
-            if (voiceSession !== session) return;
-            if (voiceState.canceling) { cancelVoiceRecording(null); return; }
-            voiceState.recording = false; btn?.setAttribute("aria-busy", "true"); btn?.setAttribute("aria-pressed", "false");
-          },
-          onFinal(text, notice) {
-            if (voiceSession !== session) return;
-            voiceSession = null; voiceCapture = null;
-            resetVoiceRecordingUI();
-            const destinationCurrent = state.selectedId === capture.sessionId && composerStore.read(capture.sessionId).revision === capture.revision;
-            commitVoiceTranscript(text, capture);
-            if (notice && destinationCurrent) { voiceState.status = notice; voiceState.bubbleVisible = true; syncVoiceBubble(); }
-          },
-          onError(message) {
-            if (voiceSession !== session) return;
-            voiceSession = null; voiceCapture = null;
-            resetVoiceRecordingUI();
-            voiceState.status = message; voiceState.bubbleVisible = true; syncVoiceBubble();
-            voiceErrorTimer = setTimeout(resetVoiceRecordingUI, MOTION_DWELL_FAILED_MS);
-          },
-        });
-        voiceSession = session;
-        syncVoiceBubble();
-        void session.start();
-      }
-      export function handleVoiceMove(e) {
-        if (!voiceState.recording || !e) return;
-        const shouldCancel = voiceState.startY - (typeof e.clientY === "number" ? e.clientY : voiceState.startY) > VOICE_CANCEL_THRESHOLD;
-        if (shouldCancel === voiceState.canceling) return;
-        voiceState.canceling = shouldCancel;
-        voiceState.status = shouldCancel ? "松开手指 取消" : "正在聆听…上滑取消";
-        syncVoiceBubble();
-      }
-      export function stopVoiceRecording(e) {
-        if (!voiceState.recording) return;
-        e?.preventDefault();
-        if (voiceState.canceling) cancelVoiceRecording(e);
-        else voiceSession?.finish();
-      }
-      export function cancelVoiceRecording(e) {
-        e?.preventDefault();
-        voiceSession?.cancel(); voiceSession = null; voiceCapture = null;
-        if (voiceErrorTimer) { clearTimeout(voiceErrorTimer); voiceErrorTimer = null; }
-        resetVoiceRecordingUI();
-      }
-      function resetVoiceRecordingUI() {
-        voiceState.recording = false; voiceState.canceling = false;
-        const btn = document.getElementById("voice-record-btn");
-        btn?.classList.remove("is-recording"); btn?.setAttribute("aria-pressed", "false");
-        btn?.removeAttribute("aria-busy"); btn?.setAttribute("title", speechInputDescription(readSpeechMode()));
-        voiceState.bubbleVisible = false;
-        syncVoiceBubble();
-      }
-      function commitVoiceTranscript(text: string, capture: { sessionId: string; revision: number; text: string }) {
-        const clean = text.trim();
-        if (!clean || state.selectedId !== capture.sessionId) return;
-        const joined = capture.text ? capture.text.replace(/\s+$/, "") + " " + clean : clean;
-        if (!composerStore.edit(capture.sessionId, { text: joined, expectedRevision: capture.revision, persist: true })) return;
-        const box = document.getElementById("input-box") as HTMLTextAreaElement | null;
-        if (!box) return;
-        box.value = joined;
-        autoResizeInput(box);
-        try { box.setSelectionRange(joined.length, joined.length); } catch (_) {}
-      }
 
       export function autoResizeInput(el) {
         if (!el) return;
@@ -328,7 +190,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         updateSessionSnapshot({ id: session.id, queuedMessages: nextQueue });
         if (session.id === state.selectedId) updateQueueBar();
         var label = session.title || shortCommand(session.command) || "当前会话";
-        showToast("已加入「" + label + "」的排队，回复结束后自动发送（含上下文）。", "info");
+        showToast("已加入「" + label + "」的待发送队列（保留上下文）。", "info");
         return compactSessionFetch("/api/structured-sessions/" + session.id + "/messages", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -366,7 +228,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
 
       function enqueueCrossSessionMessage(text) {
         // 关键修复：以前这里无脑把消息塞进 crossSessionQueue，等空闲后用
-        // /api/commands 起一个「全新会话」发送 —— 新会话不带任何历史，于是
+        // 旧启动接口起一个「全新会话」发送 —— 新会话不带任何历史，于是
         // 「第 2 条消息没有第 1 条的上下文」。正确做法是把它送回「正在忙的那个
         // 会话」继续对话。结构化会话直接进它的服务端排队（结束后 --resume 续接，
         // 上下文完整）。
@@ -408,11 +270,12 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           return;
         }
         _queueLaunching = true;
-        compactSessionFetch("/api/commands", {
+        compactSessionFetch("/api/sessions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
           body: JSON.stringify(withTerminalDimensions({
+            kind: "pty",
             command: item.tool,
             cwd: item.cwd,
             mode: item.mode,
@@ -443,11 +306,12 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         persistCrossSessionQueue();
         renderCrossSessionQueue();
         // 立即发送不受 _queueLaunching 限制
-        compactSessionFetch("/api/commands", {
+        compactSessionFetch("/api/sessions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
           body: JSON.stringify(withTerminalDimensions({
+            kind: "pty",
             command: item.tool,
             cwd: item.cwd,
             mode: item.mode,
@@ -478,14 +342,14 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
 
       export function flushCrossSessionQueue() {
         // 未登录 / 已登出：绝不自动起会话。队列是从 localStorage 恢复的，
-        // 没有这道门禁时它会在登录页（或登出后）拿着 401 去 POST /api/commands。
+        // 没有这道门禁时它会在登录页（或登出后）发未授权的创建请求。
         if (!state.config) return;
         if (state.crossSessionQueue.length === 0) return;
         if (hasAnyBusySession()) return;
         if (_queueLaunching) return;
         var item = state.crossSessionQueue.shift();
         // 出队立刻落盘：多条目时 renderCrossSessionQueue() 只在队列排空时才会
-        // persist，否则 localStorage 会留着已经交给 /api/commands 的旧队首，
+        // persist，否则 localStorage 会留着已经交给服务端的旧队首，
         // 刷新后它被重新 flush 一次 = 同一条消息发两遍。
         persistCrossSessionQueue();
         // 先把这条交给 launchQueueItem（它同步置位 _queueLaunching），再做展示层
@@ -651,11 +515,12 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         var mode = state.chatMode || "managed";
         var defaultCwd = getEffectiveCwd();
         var preferredTool = getPreferredTool();
-        compactSessionFetch("/api/commands", {
+        compactSessionFetch("/api/sessions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
           body: JSON.stringify(withTerminalDimensions({
+            kind: "pty",
             command: preferredTool,
             provider: preferredTool,
             cwd: defaultCwd,
@@ -992,8 +857,8 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         opts = opts || {};
         // interrupt:true 现在只来自 Cmd/Ctrl+Enter 快捷键，或点队列气泡触发的
         // queueBarPromoteIndex()。普通 Enter / 点发送在上一条还在流式时默认走
-        // queue —— 后端 sendMessage(...) 会把它追加到 queuedMessages，等当前 turn
-        // 结束自动 flush；想插队就点输入框上方那条气泡。
+        // queue —— 后端按执行器能力在安全边界追加，或当前整轮结束后续发；
+        // 显式打断仍只由中断快捷键和队列中的立即发送触发。
         var requestedInterrupt = !!opts.interrupt;
         if (!input) return Promise.resolve();
         if (!session) {
@@ -1025,6 +890,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         }
         var submitStamp = rapidDuplicateGuardEnabled ? { at: nowTs, input: input } : null;
         if (submitStamp) _structuredLastSubmitAt[session.id] = submitStamp;
+        if (session.id === state.selectedId) setQueueBarExpanded(false);
 
         var isInterrupting = sessionInFlight && requestedInterrupt;
         var isQueueing = sessionInFlight && !requestedInterrupt;
@@ -1058,10 +924,10 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           if (session.id === state.selectedId) {
             flashComposerDone(nextQueue.length > 1
               ? ("已加入排队（共 " + nextQueue.length + " 条等待）")
-              : "已加入排队，等当前回复完成会自动发送。", session.id);
+              : "已加入队列，将按执行器支持的时机自动发送。", session.id);
           } else {
             // 排进的是另一个会话：当前页没有它的排队条，原位宿主不存在，只能保留气泡。
-            showToast(nextQueue.length > 1 ? ("已加入「" + (session.title || "该会话") + "」排队（共 " + nextQueue.length + " 条等待）") : "已加入「" + (session.title || "该会话") + "」排队，等它当前回复完成会自动发送。", "info");
+            showToast(nextQueue.length > 1 ? ("已加入「" + (session.title || "该会话") + "」排队（共 " + nextQueue.length + " 条等待）") : "已加入「" + (session.title || "该会话") + "」的待发送队列。", "info");
           }
         } else {
           // 普通发送 / interrupt 发送：照旧乐观推 user turn + inFlight=true
@@ -1298,10 +1164,12 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         var line = document.getElementById("composer-status-line");
         if (line) {
           var isResult = phase === "sending" || phase === "sent" || phase === "failed";
-          line.textContent = isResult && text ? text : composerIdleHint(isCodex);
+          var nextText = isResult && text ? text : composerIdleHint(isCodex);
+          if (line.textContent !== nextText) line.textContent = nextText;
           var tone = isResult ? phase : "";
-          line.removeAttribute("data-tone");
-          if (tone) {
+          var toneChanged = (line.getAttribute("data-tone") || "") !== tone;
+          if (toneChanged) line.removeAttribute("data-tone");
+          if (tone && toneChanged) {
             // 同名 animation 改属性不会重播；强制一次重排让驻留倒计时重新开始走。
             void line.offsetWidth;
             line.setAttribute("data-tone", tone);
@@ -1401,19 +1269,25 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
       function setQueueBarExpanded(expanded) {
         if (!!state.queueBarExpanded === !!expanded) return;
         state.queueBarExpanded = !!expanded;
-        var bar = document.querySelector(".queue-bar");
-        if (bar) bar.classList.toggle("expanded", !!expanded);
+        updateQueueBar();
       }
 
+      var queueBarOwner = null;
       export function updateQueueBar() {
         var host = document.getElementById("queue-bar-host");
         if (!host) return;
         var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        if (queueBarOwner !== (session?.id ?? null)) {
+          queueBarOwner = session?.id ?? null;
+          state.queueBarExpanded = false;
+          if (state.queueBarDrag) queueBarDragEnd(null);
+        }
         var isStructured = session && session.sessionKind === "structured";
         var queue = isStructured ? getStructuredQueuedInputs(session) : [];
         queue = Array.isArray(queue) ? queue : [];
 
-        if (!isStructured || queue.length === 0) {
+        var retrieval = session ? composerStore.read(session.id).queueRetrieval : null;
+        if (!isStructured || (queue.length === 0 && !retrieval)) {
           host.hidden = true;
           clearQueueView(host);
           // 队列空时同步把"展开"标志收回，避免下次出现新排队时还是展开态。
@@ -1428,7 +1302,13 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         var inFlight = !!(session.structuredState && session.structuredState.inFlight && session.status === "running");
         var atCapacity = queue.length >= QUEUE_BAR_MAX;
 
-        paintQueueBar(host, queue, inFlight, atCapacity);
+        paintQueueBar(host, queue, inFlight, atCapacity, {
+          expanded: !!state.queueBarExpanded,
+          onExpandedChange: setQueueBarExpanded,
+          busy: queueBarEditing.has(session.id) || queueBarMutating.has(session.id),
+          retrieval: retrieval,
+          steering: session.provider === "pi" && session.structuredState?.engine === "core",
+        });
       }
 
       // ── 单条删除 / 全部清空 / 队首插队 ──
@@ -1445,122 +1325,110 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
       }
 
       var queueBarEditing = new Set<string>();
+      var queueBarMutating = new Set<string>();
+      /**
+       * 取回队列项到主输入框，而不是再开一个 prompt。DELETE 的 expectedText
+       * 是并发护栏：队列顺序或文本变化时服务端拒绝，客户端不会误取另一条。
+       * ComposerStore.restore 会把队列文本合并到现有草稿前面，并始终保留已有附件。
+       */
       async function queueBarEditItem(index) {
         var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
         var original = session && session.queuedMessages && session.queuedMessages[index];
-        if (typeof original !== "string" || queueBarEditing.has(session.id)) return;
+        if (typeof original !== "string" || queueBarEditing.has(session.id) || queueBarMutating.has(session.id)) return;
         var sessionId = session.id;
-        var originalQueue = session.queuedMessages.slice();
-        var version = composerQueue.read(sessionId);
-        var draft = original;
-        var message = "修改这条排队消息";
-        var isCurrent = function() {
-          var current = state.sessions.find(function(s) { return s.id === sessionId; });
-          var now = composerQueue.read(sessionId);
-          var queue = current && current.queuedMessages;
-          return !!current && state.selectedId === sessionId
-            && now.revision === version.revision && now.epoch === version.epoch
-            && Array.isArray(queue) && queue.length === originalQueue.length
-            && queue.every(function(text, position) { return text === originalQueue[position]; });
-        };
+        var token = composerStore.beginQueueRetrieval(sessionId, original);
+        if (!token) return;
+        var version = composerQueue.advance(sessionId, "local");
         queueBarEditing.add(sessionId);
+        updateQueueBar();
+        var explicitlyRejected = false;
         try {
-          while (true) {
-            var edited = await uiPrompt(message, draft, { title: "编辑排队消息", okLabel: "保存" });
-            if (edited === null || edited.trim() === original) return;
-            if (!isCurrent()) {
-              showToast("会话或排队内容已更新，此次编辑已取消。", "warning");
-              return;
-            }
-            draft = edited;
-            if (!edited.trim()) { message = "排队消息不能为空。"; continue; }
-            version = composerQueue.advance(sessionId, "local");
-            try {
-              var res = await compactSessionFetch("/api/structured-sessions/" + encodeURIComponent(sessionId) + "/queued/" + index, {
-                method: "PATCH", credentials: "same-origin",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ expectedText: original, text: edited }),
-              });
-              if (!res.ok) throw new Error((await res.json()).error || "编辑失败");
-              var payload = await res.json();
-              if (!Array.isArray(payload.queuedMessages)) throw new Error("编辑结果暂不可用，请检查排队内容。");
-              if (!state.sessions.some(function(s) { return s.id === sessionId; })) return;
-              var snapshot = composerQueue.filter({ id: sessionId, queuedMessages: payload.queuedMessages }, sessionId, version);
-              if (snapshot.queuedMessages) updateSessionSnapshot(snapshot);
-              if (state.selectedId === sessionId) updateQueueBar();
-              return;
-            } catch (err) {
-              // Keep the entered text in the same owner's dialog. A late error
-              // must neither reopen it over another session nor replace new queue state.
-              if (!isCurrent()) return;
-              message = getErrorMessage(err, "编辑排队消息失败。") + " 请重试或取消。";
-            }
+          var res = await compactSessionFetch("/api/structured-sessions/" + encodeURIComponent(sessionId) + "/queued/" + index, {
+            method: "DELETE", credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ expectedText: original }),
+          });
+          if (!res.ok) {
+            explicitlyRejected = res.status >= 400 && res.status < 500 && res.status !== 408;
+            var failure = await res.json().catch(function() { return {}; });
+            throw new Error((failure && failure.error) || "取回排队消息失败。");
           }
+          var payload = await res.json();
+          if (payload.id !== sessionId || !Array.isArray(payload.queuedMessages)) throw new Error("取回结果暂不可用，请检查排队内容。");
+          // Never recreate a deleted session or write its text into a new owner.
+          if (!state.sessions.some(function(s) { return s.id === sessionId; })) return;
+          var snapshot = composerQueue.filter({ id: sessionId, queuedMessages: payload.queuedMessages }, sessionId, version);
+          if (snapshot.queuedMessages) updateSessionSnapshot(snapshot);
+          if (!composerStore.finishQueueRetrieval(sessionId, token, "confirmed")) return;
+          // Do not replace a live IME buffer. Its confirmed original remains in
+          // the composer until the user explicitly merges after composition.
+          if (state.selectedId !== sessionId || !state.composerComposing) restoreRetrievedQueue(sessionId);
         } catch (err) {
-          if (isCurrent()) showToast(getErrorMessage(err, "无法打开编辑对话框，排队内容已保留。"), "error");
-        } finally { queueBarEditing.delete(sessionId); }
+          // No retry: a failed/unknown DELETE may already have reached the
+          // server. The queue must be reconciled by WS/refresh, not repeated.
+          composerStore.finishQueueRetrieval(sessionId, token, explicitlyRejected ? "rejected" : "unknown");
+          if (state.selectedId === sessionId) {
+            flashComposerFailed(getErrorMessage(err, "取回结果未知，原文已保留，未自动重试。"), sessionId);
+            void loadOutput(sessionId);
+          }
+        } finally {
+          queueBarEditing.delete(sessionId);
+          if (state.selectedId === sessionId) updateQueueBar();
+        }
+      }
+
+      function restoreRetrievedQueue(sessionId) {
+        if (state.selectedId === sessionId && state.composerComposing) return;
+        if (!composerStore.restoreQueueRetrieval(sessionId)) return;
+        if (state.selectedId !== sessionId) return;
+        restoreComposerStateForSession(sessionId);
+        var inputBox = document.getElementById("input-box") as HTMLTextAreaElement | null;
+        if (inputBox) {
+          syncComposerHasText(inputBox);
+          try { inputBox.focus({ preventScroll: true }); } catch (_) { inputBox.focus(); }
+        }
+        updateQueueBar();
       }
 
       function queueBarDeleteItem(index) {
         var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
-        if (!session) return;
-        var queue = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
-        if (index < 0 || index >= queue.length) return;
-        var prev = queue.slice();
-        var next = queue.slice(0, index).concat(queue.slice(index + 1));
-        var mutationVersion = composerQueue.advance(session.id, "local");
-        updateSessionSnapshot({ id: session.id, queuedMessages: next });
-        var refreshed = state.sessions.find(function(s) { return s.id === session.id; }) || session;
-        state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, refreshed.output, false));
-        renderChat(true);
-        updateQueueBar();
-        compactSessionFetch("/api/structured-sessions/" + session.id + "/queued/" + index, {
-          method: "DELETE",
-          credentials: "same-origin",
-        })
-        .then(function(res) {
-          if (!res.ok) {
-            return res.json().catch(function() { return {}; }).then(function(p) {
-              throw new Error((p && p.error) || "删除失败");
-            });
-          }
-        })
-        .catch(function(err) {
-          rollbackQueueOptimistic(session, prev, mutationVersion);
-          flashComposerFailed((err && err.message) || "删除排队消息失败。", session.id);
-        });
+        var original = session?.queuedMessages?.[index];
+        if (typeof original !== "string") return;
+        void removeQueuedItems(session.id, "/" + index, { expectedText: original });
       }
 
       function queueBarClearAll() {
         var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
-        if (!session) return;
-        var prev = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
-        if (prev.length === 0) return;
-        // 全部清空后收起列表，UX 上更干净（用户不需要盯着一条不剩的展开面板）。
-        state.queueBarExpanded = false;
-        var mutationVersion = composerQueue.advance(session.id, "local");
-        updateSessionSnapshot({ id: session.id, queuedMessages: [] });
-        var refreshed = state.sessions.find(function(s) { return s.id === session.id; }) || session;
-        state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, refreshed.output, false));
-        renderChat(true);
+        if (!session?.queuedMessages?.length) return;
+        void removeQueuedItems(session.id, "", { expectedQueue: session.queuedMessages.slice() });
+      }
+
+      async function removeQueuedItems(sessionId, suffix, body) {
+        if (queueBarEditing.has(sessionId) || queueBarMutating.has(sessionId)) return;
+        queueBarMutating.add(sessionId);
+        var version = composerQueue.advance(sessionId, "local");
         updateQueueBar();
-        compactSessionFetch("/api/structured-sessions/" + session.id + "/queued", {
-          method: "DELETE",
-          credentials: "same-origin",
-        })
-        .then(function(res) {
-          if (!res.ok) {
-            return res.json().catch(function() { return {}; }).then(function(p) {
-              throw new Error((p && p.error) || "清空失败");
-            });
+        try {
+          var res = await compactSessionFetch("/api/structured-sessions/" + encodeURIComponent(sessionId) + "/queued" + suffix, {
+            method: "DELETE", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          var payload = await res.json();
+          if (!res.ok) throw new Error(payload.error || "无法更新排队消息。");
+          if (payload.id !== sessionId || !Array.isArray(payload.queuedMessages)) throw new Error("队列回执无效，请核对最新状态。");
+          if (state.sessions.some(function(s) { return s.id === sessionId; })) {
+            updateSessionSnapshot(composerQueue.filter(payload, sessionId, version));
           }
-          // 「清空」的结果原位可见：整条 .queue-bar 已经收起（上面 updateQueueBar 乐观做完），
-          // 不再补一条「已清空 N 条」的气泡，同一件事只说一次。
-        })
-        .catch(function(err) {
-          rollbackQueueOptimistic(session, prev, mutationVersion);
-          flashComposerFailed((err && err.message) || "清空排队消息失败。", session.id);
-        });
+        } catch (err) {
+          // A lost response is not a rejection. Never resurrect an old queue.
+          if (state.selectedId === sessionId) {
+            flashComposerFailed(getErrorMessage(err, "队列更新结果未知，未自动重试。"), sessionId);
+            void loadOutput(sessionId);
+          }
+        } finally {
+          queueBarMutating.delete(sessionId);
+          if (state.selectedId === sessionId) updateQueueBar();
+        }
       }
 
       // 把队列里第 index 条剥下来，作为新的输入立刻发送出去。
@@ -1570,12 +1438,11 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
       function queueBarPromoteIndex(index) {
         if (state.queueBarPromoting) return;
         var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
-        if (!session) return;
+        if (!session || queueBarEditing.has(session.id) || queueBarMutating.has(session.id)) return;
         var queue = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
         if (index < 0 || index >= queue.length) return;
         var picked = queue[index];
         var rest = queue.slice(0, index).concat(queue.slice(index + 1));
-        var prev = queue.slice();
         var inFlight = !!(session.structuredState && session.structuredState.inFlight && session.status === "running");
         state.queueBarPromoting = true;
 
@@ -1632,8 +1499,10 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         })
         .catch(function(err) {
           state.queueBarPromoting = false;
-          rollbackQueueOptimistic(session, prev, mutationVersion);
-          flashComposerFailed((err && err.message) || "立即发送失败。", session.id);
+          // Promotion may already have reached the runner. Reconcile rather
+          // than restoring a sendable duplicate from the optimistic snapshot.
+          if (state.selectedId === session.id) void loadOutput(session.id);
+          flashComposerFailed((err && err.message) || "立即发送结果未知，请核对对话；未自动重试。", session.id);
         });
       }
 
@@ -1643,7 +1512,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
       // 气泡 → 立即发送"）。
       function queueBarDragStart(ev, chipEl) {
         var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
-        if (!session) return;
+        if (!session || queueBarEditing.has(session.id) || queueBarMutating.has(session.id)) return;
         var queue = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
         if (queue.length <= 1) return;
         if (!chipEl) return;
@@ -1792,7 +1661,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
-          body: JSON.stringify({ order: order }),
+          body: JSON.stringify({ order: order, expectedQueue: queueSnapshot }),
         })
         .then(function(res) {
           if (!res.ok) {
@@ -1833,6 +1702,11 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
               if (itemEl) queueBarDeleteItem(Number(itemEl.getAttribute("data-index")));
             } else if (action === "clear-all") {
               queueBarClearAll();
+            } else if (action === "restore-retrieved") {
+              restoreRetrievedQueue(state.selectedId);
+            } else if (action === "dismiss-retrieved") {
+              composerStore.dismissQueueRetrieval(state.selectedId);
+              updateQueueBar();
             }
             return;
           }
@@ -2427,8 +2301,10 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         updateInteractiveControls();
       }
 
-      export function updateInteractiveControls() {
-        mountComposerSender(autoResizeInput);
+      // Native text edits only affect the send action. Do not synchronously
+      // remount/scan every portal, avatar and status lane for each keystroke.
+      export function updateInteractiveControls(draftOnly = false) {
+        if (!draftOnly) mountComposerSender(autoResizeInput);
         var selectedSession = state.sessions.find(function(session) { return session.id === state.selectedId; });
         var structured = isStructuredSession(selectedSession);
         var isCodex = selectedSession && selectedSession.provider === "codex";
@@ -2442,6 +2318,8 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           && promptOptimizeRequest.sessionId === state.selectedId);
         var promptOptimizeBusyAnywhere = !!promptOptimizeRequest;
         var terminalPassthrough = shouldUseTerminalPassthrough(selectedSession);
+        var canResumeOnSend = !structured && !isRunning && canAutoResumeSession(selectedSession);
+        if (!draftOnly) {
         // 终端交互 toggle 挂在加号 popover 内，条目由 React portal 渲染；
         // 这里只发布可见性与开关状态，不再直接改写 class / aria / 文案。
         syncBrowserComposerPopover({
@@ -2456,7 +2334,6 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         });
         // 历史会话只要可自动恢复（Claude/Codex PTY + 有历史 id），输入框/发送按钮
         // 就保持可用——发送时由 ensureSessionReadyForInput 透明完成恢复。
-        var canResumeOnSend = !structured && !isRunning && canAutoResumeSession(selectedSession);
         if (composer) {
           composer.placeholder = getComposerPlaceholder(selectedSession, state.terminalInteractive);
           composer.disabled = !structured && !!selectedSession && !isRunning && !canResumeOnSend;
@@ -2476,7 +2353,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           composerShell.classList.toggle("is-optimizing", promptOptimizeBusyForCurrent);
           composerShell.classList.toggle("is-terminal-interactive", !!state.terminalInteractive);
         }
-        // 直通 composer 的尾部操作区由 Appica 渲染：legacy 的发送 / 语音 / 优化按钮
+        // 直通 composer 的尾部操作区由 Appica 渲染：legacy 的发送 / 优化按钮
         // 在直通下全部收起，这里把「发送回车」这个真实动作补回右侧栏。
         // 原生嵌入壳的底栏由原生渲染，网页侧不挂载。
         syncBrowserComposerRail({
@@ -2513,15 +2390,6 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
             promptOptimizeLabel.textContent = promptOptimizeBusyForCurrent ? "优化中" : "优化";
           }
         }
-        // 终端直通时禁用独立语音按钮；若切换过程中正在录音则立即取消。
-        var voiceBtn = document.getElementById("voice-record-btn") as HTMLButtonElement | null;
-        if (voiceBtn) {
-          voiceBtn.disabled = state.terminalInteractive || promptOptimizeBusyForCurrent;
-          voiceBtn.setAttribute("aria-disabled", voiceBtn.disabled ? "true" : "false");
-        }
-        if ((state.terminalInteractive || promptOptimizeBusyForCurrent) && voiceState.recording) {
-          voiceState.recording = false;
-          resetVoiceRecordingUI();
         }
         var sendBtn = document.getElementById("send-input-button") as HTMLButtonElement | null;
         var structuredInFlight = structured && isRunning;
@@ -2547,20 +2415,20 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           // 空草稿不算「不能点」，否则在跑会话的唯一出口又被发条件锁死。
           if (sendPhase === "running") sendDisabled = false;
           if (state.selectedId && composerStops.has(state.selectedId)) sendDisabled = true;
-          sendBtn.disabled = sendDisabled;
-          sendBtn.setAttribute("aria-disabled", sendBtn.disabled ? "true" : "false");
-          sendBtn.setAttribute("data-phase", sendPhase);
+          if (sendBtn.disabled !== sendDisabled) sendBtn.disabled = sendDisabled;
+          if (sendBtn.getAttribute("aria-disabled") !== String(sendDisabled)) sendBtn.setAttribute("aria-disabled", String(sendDisabled));
+          if (sendBtn.dataset.phase !== sendPhase) sendBtn.dataset.phase = sendPhase;
           var sendTitle = promptOptimizeBusyForCurrent
             ? "正在优化提示词"
             : (structured
-              ? (structuredInFlight ? "排队发送（当前回复结束后处理）" : "发送")
+              ? (structuredInFlight ? "加入待发送队列" : "发送")
               : (isCodex ? (isRunning ? "发送给 Codex" : "Codex 会话已结束") : (!selectedSession || isRunning || canResumeOnSend ? "发送" : "会话已结束")));
           var sendLabel = promptOptimizeBusyForCurrent
             ? "正在优化提示词"
             : (structuredInFlight ? "加入发送队列" : "发送消息");
           var phaseLabels = composerPhaseLabels(sendPhase, sendTitle, sendLabel, phaseText);
-          sendBtn.setAttribute("title", phaseLabels.title);
-          sendBtn.setAttribute("aria-label", phaseLabels.label);
+          if (sendBtn.title !== phaseLabels.title) sendBtn.title = phaseLabels.title;
+          if (sendBtn.getAttribute("aria-label") !== phaseLabels.label) sendBtn.setAttribute("aria-label", phaseLabels.label);
           // queue-mode 只描述「点下去是排队」这一语义；露出停止 glyph 时不参与。
           sendBtn.classList.toggle("queue-mode", structuredInFlight && sendPhase !== "running");
           renderComposerPhaseHost(sendPhase, phaseText, isCodex);
@@ -2568,11 +2436,13 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         // 「是否有 reply 在跑」由 computeRunningSignal 统一给出（结构化 inFlight /
         // PTY running / 权限审批阻塞），它只决定上面那颗按钮的相位，
         // 不再单独控制一个停止节点的显隐。
-        var container = document.getElementById("output");
-        if (container) container.classList.toggle("interactive", !structured && state.terminalInteractive);
-        updateTerminalShortcuts();
-        mountMinimalComposer(autoResizeInput);
-        paintSelectedRunningStatus();
+        if (!draftOnly) {
+          var container = document.getElementById("output");
+          if (container) container.classList.toggle("interactive", !structured && state.terminalInteractive);
+          updateTerminalShortcuts();
+          mountMinimalComposer(autoResizeInput);
+          paintSelectedRunningStatus();
+        }
       }
 
       // 会话区持续可见的「正在执行」状态条。只在聊天视图投影，终端视图不抢位置。
@@ -3187,7 +3057,6 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
 
       export function refreshInputBoxState(inputBox) {
         syncInputBoxForCurrentState(inputBox);
-        syncIdleVoiceInput(inputBox);
       }
 
       export function shouldAdjustForKeyboard(vv, inputBox) {

@@ -1,5 +1,0 @@
-Captain messages for this run appear below, newest last. Empty means no captain message yet.
-Captain messages for this run appear below, newest last. Empty means no captain message yet.
-
-[captain request=01dca916-1377-4e3e-9a58-a79fe5ac3e02 target=web-navigation @ 2026-10-15T08:46:13.855Z]
-Captain已检查：你仍在写入，不作卡死处理。请优先把已写导航模块接到真实普通会话/IM入口并跑定点验证，停止扩展性读源码。若请求预算将耗尽，必须明确交接哪些入口尚未挂载、哪些测试未跑；不能把静态组件或测试占位称为已完成功能。共享样式继续使用你的独立样式模块，勿越过LANE-BOARD。请ACK并给一个具体可验的下一步。

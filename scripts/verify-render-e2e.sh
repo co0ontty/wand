@@ -276,8 +276,8 @@ try {
   if (cmd === "login") {
     console.log(JSON.stringify(await login()));
   } else if (cmd === "create-shell") {
-    const created = await api("POST", "/api/commands", {
-      shell: true, cwd: CWD, mode: "default", cols: 100, rows: 30,
+    const created = await api("POST", "/api/sessions", {
+      kind: "pty", shell: true, cwd: CWD, mode: "default", cols: 100, rows: 30,
     });
     const sessionId = created.json?.id ?? null;
     let attached = null;
@@ -805,7 +805,7 @@ DRAIN_CREATE="$(run_helper create-shell)"
 if [ "$(json_field "$DRAIN_CREATE" status)" = "201" ]; then
   fail "drain 之后新会话仍然建成功（§9.3 要求拒绝新会话）"
 else
-  pass "drain 之后新会话被拒绝：/api/commands → $(json_field "$DRAIN_CREATE" status)（$(json_field "$DRAIN_CREATE" bodyPreview)）"
+  pass "drain 之后新会话被拒绝：/api/sessions → $(json_field "$DRAIN_CREATE" status)（$(json_field "$DRAIN_CREATE" bodyPreview)）"
 fi
 if [ -n "$NEW_SESSION_PID" ] && process_alive "$NEW_SESSION_PID"; then pass "被拒绝的建会话没有影响运行中的 PTY"; else fail "建会话被拒后 PTY 也没了"; fi
 # Server 的自愈器会在 daemon 退出后主动拉起替代者；它不是 shutdown(now) 的失败。

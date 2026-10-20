@@ -166,9 +166,9 @@ test("pending split-terminal code preserves the canonical measurement host", () 
 test("opening an empty workspace task keeps creation user-driven", () => {
   const source = readFileSync(new URL("../src/web-ui/browser/workspaces-adapter.ts", import.meta.url), "utf8");
   const openTask = source.slice(source.indexOf("openTask(payload"), source.indexOf("newTaskSession(payload"));
-  assert.match(openTask, /goHome\(\)/);
+  assert.match(openTask, /goHome\(\{ updateRoute: !payload\.restoreRoute \}\)/);
   assert.match(openTask, /const generation = \+\+openTaskGeneration/);
-  assert.match(openTask, /if \(generation !== openTaskGeneration\) return;/);
+  assert.match(openTask, /if \(generation !== openTaskGeneration \|\| payload\.navigationCurrent\?\.\(\) === false\) return;/);
   assert.match(openTask, /reconcileTaskWindowLayout\(detail\.layout, \[\], null\)/);
   assert.doesNotMatch(openTask, /startSessionInCwd/);
   const openWorkspace = source.slice(source.indexOf("openWorkspace(workspace"), source.indexOf("closeWorkspace()"));
@@ -199,6 +199,7 @@ test("task tab bar and standalone topbar share one quick-commit badge", () => {
   assert.match(badge, /id = "topbar-git-badge"/, "默认保留顶栏的 DOM id");
   assert.match(badge, /dispatch\(\{ type: "topbar\.gitCommit" \}\)/);
   assert.match(badge, /if \(!git\) return null;/, "非 git 会话 / 首页不显示徽章");
+  assert.match(tabBar, /if \(mobile\) return null/);
   assert.match(tabBar, /<WorkspaceTabBarChrome mobile=\{mobile\} taskName=\{context.taskName\}/);
   assert.match(tabChrome, /<Flex align="center" gap=\{4\} wrap=\{!mobile\} className="workspace-tab-bar"/);
 });
@@ -232,17 +233,18 @@ test("workspaces panel waits for the first read before offering its business emp
   assert.doesNotMatch(html, /刷新项目列表|workspaces-panel-refresh/);
 });
 
-test("sidebar disclosure keeps content mounted but inert when collapsed", () => {
+test("sidebar disclosure lazily mounts open content and keeps closed wrappers inert", () => {
   const collapsed = renderToStaticMarkup(createElement(SidebarDisclosure, {
     id: "task-terminals", open: false, children: createElement("button", null, "终端"),
   }));
   assert.match(collapsed, /data-open="false" inert="" aria-hidden="true"/);
-  assert.match(collapsed, /<button>终端<\/button>/);
+  assert.doesNotMatch(collapsed, /<button>终端<\/button>/);
   const expanded = renderToStaticMarkup(createElement(SidebarDisclosure, {
     id: "task-terminals", open: true, children: "终端",
   }));
   assert.doesNotMatch(expanded, /inert=/);
   assert.match(expanded, /data-open="true" aria-hidden="false"/);
+  assert.match(expanded, /终端/);
 });
 
 test("task recency handles minute, hour, day, invalid and future timestamps", () => {

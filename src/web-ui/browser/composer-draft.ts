@@ -61,7 +61,7 @@ export function isAmbiguousComposerSubmissionFailure(error: unknown): boolean {
 /**
  * 跨会话排队项在启动失败后回填队首时，是否把队首写回 localStorage。
  *
- * 与草稿同一套「送达未知」取舍：页面正在卸载说明这次 `/api/commands` 是被
+ * 与草稿同一套「送达未知」取舍：页面正在卸载说明这次会话创建请求是被
  * abort 的，服务端可能已经建好了会话并把 initialInput 发出去。此时把它写回
  * localStorage，刷新后队列会被自动 flush，同一条消息就会二次发送（多出一个
  * 会话）。留在内存里用户仍能看到、能用「立即发送」重试，刷新即放弃。

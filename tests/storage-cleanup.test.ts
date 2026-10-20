@@ -11,7 +11,7 @@ function fixture(t: { after(fn: () => void): void }) {
   const base = realpathSync(mkdtempSync(path.join(tmpdir(), "wand-cleanup-test-")));
   t.after(() => rmSync(base, { recursive: true, force: true }));
   const root = path.join(base, "managed");
-  const temporary = createManagedTemporary("speech-voice", root);
+  const temporary = createManagedTemporary("upload-stage", root);
   writeFileSync(path.join(temporary.directory, "audio.wav"), "audio");
   return { base, root, temporary, options: { roots: [root], now: () => Date.now() + 14 * DAY,
     isAlive: (_pid: number, _group?: boolean) => false, inspectOpenPaths: async () => [] as string[] } };
@@ -20,14 +20,14 @@ function fixture(t: { after(fn: () => void): void }) {
 test("preview preserves all files; apply reclaims only leased expired temporaries with accurate stats", async t => {
   const h = fixture(t); const cleanup = new StorageCleanup(h.options);
   const user = path.join(h.base, "sessions", "messages.json"); mkdirSync(path.dirname(user)); writeFileSync(user, "history");
-  mkdirSync(path.join(h.root, "speech-voice-unowned")); writeFileSync(path.join(h.root, "speech-voice-unowned", "important"), "keep");
+  mkdirSync(path.join(h.root, "upload-stage-unowned")); writeFileSync(path.join(h.root, "upload-stage-unowned", "important"), "keep");
   const preview = await cleanup.run();
   assert.equal(preview.candidates, 1); assert.equal(preview.removed, 0); assert.ok(preview.logicalBytes >= 5);
   assert.ok(existsSync(h.temporary.directory)); assert.equal(cleanup.status().lastRun, null);
   const removed = await cleanup.run(true);
   assert.equal(removed.removed, 1); assert.equal(removed.allocatedBytes, preview.allocatedBytes);
   assert.equal(existsSync(h.temporary.directory), false); assert.ok(existsSync(user));
-  assert.ok(existsSync(path.join(h.root, "speech-voice-unowned", "important")));
+  assert.ok(existsSync(path.join(h.root, "upload-stage-unowned", "important")));
   assert.equal(cleanup.status().lastRun?.removed, 1);
 });
 
@@ -85,19 +85,19 @@ test("lease and root symlink substitution are refused without following user dat
   assert.equal((await new StorageCleanup(h.options).run(true)).removed, 0);
   assert.equal(h.temporary.close(), false);
   const redirect = path.join(h.base, "root-link"); symlinkSync(h.root, redirect);
-  assert.throws(() => createManagedTemporary("speech-voice", redirect), /symbolic link/);
+  assert.throws(() => createManagedTemporary("upload-stage", redirect), /symbolic link/);
   assert.equal((await new StorageCleanup({ ...h.options, roots: [redirect] }).run(true)).removed, 0);
 });
 
-test("explicitly disposable test and installer checkouts can be reclaimed; other temporary purposes retain Git", async t => {
+test("explicitly disposable test checkouts can be reclaimed; other temporary purposes retain Git", async t => {
   const h = fixture(t);
-  for (const kind of ["test-run", "speech-setup"] as const) {
+  for (const kind of ["test-run"] as const) {
     const temp = createManagedTemporary(kind, h.root);
-    mkdirSync(path.join(temp.directory, ".git")); writeFileSync(path.join(temp.directory, ".git", "config"), "fixture or fixed installer clone");
+    mkdirSync(path.join(temp.directory, ".git")); writeFileSync(path.join(temp.directory, ".git", "config"), "fixture clone");
   }
   mkdirSync(path.join(h.temporary.directory, ".git"));
   const report = await new StorageCleanup(h.options).run(true);
-  assert.equal(report.removed, 2); assert.equal(report.byKind["test-run"], 1); assert.equal(report.byKind["speech-setup"], 1);
+  assert.equal(report.removed, 1); assert.equal(report.byKind["test-run"], 1);
   assert.ok(existsSync(h.temporary.directory));
 });
 

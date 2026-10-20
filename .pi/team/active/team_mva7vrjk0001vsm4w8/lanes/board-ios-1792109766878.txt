@@ -1,6 +1,0 @@
-Lane mailbox for iOS 看板未分组目录 (role board-ios)
-Run: team_mva7vrjk0001vsm4w8
-Lane: board-ios-1792109766878
-Token: 0abbaf8a-d315-4101-91b7-2a564d76f658
-
-Captain messages appear below, newest last.

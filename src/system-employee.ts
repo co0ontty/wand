@@ -89,6 +89,7 @@ export function systemEmployeeDefinition(agents: WandTaskAgent[], now: string, e
     agents: agents.length ? agents : systemEmployeeDefaultAgents(),
     systemKey: SYSTEM_EMPLOYEE_KEY,
     tags: [SYSTEM_EMPLOYEE_TAG],
+    systemSessionLimit: existing?.systemSessionLimit,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };

@@ -26,6 +26,7 @@ import { buildGrokTextArgs,buildPiTextArgs,buildQoderTextArgs,callConfiguredAiTe
 import { QuickCommitError } from "./command-error.js";
 import { candidateInstalled } from "./session-provider.js";
 import { AiCallTraceError } from "./system-ai-call.js";
+import { gitTagHint, gitTagSystemPrompt, readGitTagContext, validateSuggestedTag } from "./git-tag-generation.js";
 export { callCliAiText,callConfiguredAiText,withOpsPersona } from "./ai-text-runner.js";
 export type { QuickCommitAiOptions } from "./ai-text-runner.js";
 export { QuickCommitError,type QuickCommitErrorCode } from "./command-error.js";
@@ -245,7 +246,7 @@ export async function getGitStatusAsync(cwd: string): Promise<GitStatusResult> {
       const parts = (await runGitAsync(["log", "-1", "--pretty=format:%H%x09%h%x09%s"], cwd)).split("\t");
       if (parts.length >= 3) lastCommit = { hash: parts[0], shortHash: parts[1], subject: parts.slice(2).join("\t") };
     } catch { /* optional */ }
-    try { latestTag = await runGitAsync(["describe", "--tags", "--abbrev=0"], cwd) || undefined; } catch { /* optional */ }
+    try { latestTag = (await readGitTagContext(cwd)).latestTag; } catch { /* optional */ }
   }
 
   return {
@@ -416,15 +417,6 @@ function tryParseJson(raw: string): { message?: unknown; tag?: unknown } | null 
   }
 }
 
-function sanitizeSuggestedTag(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const cleaned = value.trim().replace(/^["'`]+|["'`]+$/g, "").trim();
-  if (!cleaned) return undefined;
-  // Accept common semver-ish forms (v1.2.3, 1.2.3, v1.2.3-rc.1, v1.2.3+build.5)
-  if (!/^v?\d+\.\d+\.\d+([.\-+][0-9A-Za-z.\-+]*)?$/.test(cleaned)) return undefined;
-  return cleaned;
-}
-
 async function generateCommitMessageWithTag(
   cwd: string,
   language: string,
@@ -432,28 +424,16 @@ async function generateCommitMessageWithTag(
   options: CommitInputOptions = {},
 ): Promise<GenerateCommitMessageResult> {
   const { input } = await buildCommitPromptInput(cwd, options);
-  let latestTag: string | undefined;
-  try {
-    latestTag = await runGitAsync(["describe", "--tags", "--abbrev=0"], cwd) || undefined;
-  } catch {
-    latestTag = undefined;
-  }
-  const lang = language.trim() || "中文";
-  const tagHint = latestTag
-    ? `当前最新 tag 是 \`${latestTag}\`，请基于它给出下一个版本号（保持原有前缀风格，例如有 \`v\` 就保留 \`v\`）。`
-    : `仓库还没有任何 tag，请直接给一个起始版本号（建议 \`v0.0.1\` / \`v0.1.0\` / \`v1.0.0\` 之一，按改动幅度选择）。`;
-  const system = `阅读本轮用户消息，完成两件事：
-1. 用${lang}写一条简洁的 commit message（祈使句，不超过 50 字，描述「做了什么」）。
-2. 根据改动幅度推荐下一个语义化版本 tag（破坏性变更 → 升 major；新增功能 → 升 minor；修复 / 文档 / 重构 / 维护 → 升 patch）。
-
-请严格输出**单行 JSON 对象**，不要 Markdown 代码块、不要任何解释文字、不要多余引号。格式：
-{"message":"...","tag":"v1.2.3"}`;
+  const tagContext = await readGitTagContext(cwd);
+  const tagHint = gitTagHint(tagContext);
+  const system = gitTagSystemPrompt(language.trim() || "中文", true);
   return callConfiguredAiText({ system, prompt: `${tagHint}\n\n${input}` }, cwd, language, { ...ai, purpose: "git-tag" }, (raw) => {
     const parsed = tryParseJson(raw);
     // Preserve the plain-message fallback for older CLIs that do not return JSON.
-    const message = normalizeAiText(parsed && typeof parsed.message === "string" ? parsed.message : raw);
-    const suggestedTag = parsed && typeof parsed.message === "string" ? sanitizeSuggestedTag(parsed.tag) : undefined;
+    const message = normalizeAiText(parsed ? (typeof parsed.message === "string" ? parsed.message : "") : raw);
     if (!message) throw new QuickCommitError("AI 返回了空的 commit message。", "EMPTY_AI_MESSAGE");
+    // A structured response promises both fields. Never mark an invalid/missing tag as success.
+    const suggestedTag = parsed ? validateSuggestedTag(parsed.tag, tagContext) : undefined;
     return { message, suggestedTag };
   });
 }
@@ -473,7 +453,7 @@ export async function generateCommitMessageOnly(
 
 /**
  * Ask the session provider for a single tag string. Called from `runQuickCommit` after the commit has
- * already landed, so we look at `git show HEAD` and use `HEAD~1` for the previous tag.
+ * already landed. Read its diff and all local version tags (including tags on HEAD/other branches).
  */
 async function generateTagAfterCommit(
   cwd: string,
@@ -498,28 +478,13 @@ async function generateTagAfterCommit(
     diff = diff.slice(0, MAX_DIFF_FOR_AI) + "\n\n... (diff truncated) ...";
   }
 
-  let latestTag: string | undefined;
-  try {
-    // We just made a commit, so look for the most recent tag reachable from HEAD~1.
-    latestTag = await runGitAsync(["describe", "--tags", "--abbrev=0", "HEAD~1"], cwd) || undefined;
-  } catch {
-    latestTag = undefined;
-  }
-
-  const lang = language.trim() || "中文";
-  const tagHint = latestTag
-    ? `当前最新 tag 是 \`${latestTag}\`，请基于它给出下一个版本号（保持原有前缀风格，例如有 \`v\` 就保留 \`v\`）。`
-    : `仓库还没有任何 tag，请给一个起始版本号（建议 \`v0.0.1\` / \`v0.1.0\` / \`v1.0.0\` 之一，按改动幅度选择）。`;
-  const system = `根据本轮用户消息里的 commit message 和 git diff 推荐一个语义化版本 tag（破坏性变更 → 升 major；新增功能 → 升 minor；修复 / 文档 / 重构 / 维护 → 升 patch）。
-
-请用${lang}思考但严格输出**单行 JSON 对象**，不要 Markdown 代码块、不要任何解释文字、不要多余引号。格式：
-{"tag":"v1.2.3"}`;
+  const tagContext = await readGitTagContext(cwd);
+  const tagHint = gitTagHint(tagContext);
+  const system = gitTagSystemPrompt(language.trim() || "中文", false);
   const prompt = `${tagHint}\n\ncommit message：${commitMessage}\n\ngit diff：\n${diff}`;
   return callConfiguredAiText({ system, prompt }, cwd, language, { ...ai, purpose: "git-tag" }, (raw) => {
     const parsed = tryParseJson(raw);
-    const suggested = sanitizeSuggestedTag(parsed && typeof parsed.tag === "string" ? parsed.tag : raw);
-    if (!suggested) throw new QuickCommitError("AI 没有给出合法的 tag，请手动填写。", "INVALID_AI_TAG");
-    return suggested;
+    return validateSuggestedTag(parsed ? parsed.tag : raw, tagContext);
   });
 }
 

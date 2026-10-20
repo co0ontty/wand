@@ -47,7 +47,7 @@ test("system commands map to bounded existing routes and preserve employee setti
   }
   const body = { employeeId: "e_one", cwd: "/work", workspaceId: "w_one", prompt: "检查" };
   const created = await execute("session:create", ["--stdin"], body);
-  assert.deepEqual(created.calls, [{ method: "POST", route: "/api/structured-sessions", body: { ...body, respondImmediately: true } }]);
+  assert.deepEqual(created.calls, [{ method: "POST", route: "/api/sessions", body: { ...body, kind: "structured" } }]);
   for (const [command, args, value] of [
     ["session:create", ["--stdin"], { ...body, mode: "full-access" }],
     ["session:create", ["--stdin"], { ...body, provider: "pi" }],

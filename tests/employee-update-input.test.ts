@@ -54,7 +54,7 @@ test("a mismatched fixed identity with a recognized built-in key retains the exi
 });
 
 test("other built-in employees still send only agents, retaining current candidates when omitted", () => {
-  for (const systemKey of ["wand-decision-expert", "wand-speech-polisher"]) {
+  for (const systemKey of ["wand-decision-expert"]) {
     const current = employee({ systemKey });
     assert.deepEqual(employeeUpdateInput(current, { name: "改名", duty: "新职责", prompt: "新角色", avatar: "cat:9", tags: [], agents: changedAgents }), { agents: changedAgents });
     assert.deepEqual(employeeUpdateInput(current, { prompt: "新角色" }), { agents });

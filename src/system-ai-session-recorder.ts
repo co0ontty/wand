@@ -10,7 +10,7 @@ import { buildStructuredOutputPayload } from "./structured-session-manager-repla
 import type { SessionLogger } from "./session-logger.js";
 import type { WandStorage } from "./storage.js";
 import type { AiCliCandidate, AiTextRequest, ConversationTurn, ProcessEvent, SessionSnapshot } from "./types.js";
-import { AiCallTraceError, SYSTEM_AI_CALL_PREFIX, SYSTEM_AI_PURPOSES, SYSTEM_AI_READ_ONLY, isSystemAiCall,
+import { AiCallTraceError, SYSTEM_AI_CALL_PREFIX, SYSTEM_AI_PURPOSES, SYSTEM_AI_READ_ONLY, isSystemAiCall, isRetainableSystemAiCall,
   type AiCallTrace, type AiCallTraceFactory, type SystemAiPurpose } from "./system-ai-call.js";
 
 const INPUT_LIMIT = 24_000;
@@ -47,6 +47,8 @@ export class SystemAiSessionRecorder {
     this.logger = options.logger ?? this.logger;
     this.emit = options.emit ?? this.emit;
     this.notifyConversation = options.notifyConversation ?? this.notifyConversation;
+    // Logger must be attached before startup retention, so file history is removed too.
+    if (options.logger) this.enforceAllRetention();
   }
 
   /** A server-owned one-shot has no detached runner to adopt after a restart. Never replay it. */
@@ -64,6 +66,23 @@ export class SystemAiSessionRecorder {
     }
   }
 
+  private enforceAllRetention(): void {
+    for (const employee of this.storage.listSiliconEmployees({ includeArchived: true })) this.enforceRetention(employee.id);
+  }
+
+  enforceRetention(employeeId: string): void {
+    if (this.closed) return;
+    const keep = this.storage.getSiliconEmployeeDefinition(employeeId)?.systemSessionLimit;
+    if (keep == null) return;
+    for (const id of this.storage.excessSystemAiSessionIds(employeeId, keep)) {
+      // Synchronous recheck + delete: no await where another completion could invalidate selection.
+      const current = this.storage.getSessionSlim(id);
+      if (!isRetainableSystemAiCall(current) || current?.employeeId !== employeeId || this.active.has(id) || !current.endedAt
+        || !["exited", "failed", "stopped"].includes(current.status)) continue;
+      this.remove(id);
+    }
+  }
+
   forEmployee(employee: SiliconEmployee, sourceSessionId?: string): AiCallTraceFactory {
     const stored = this.storage.getSiliconEmployee(employee.id);
     if (!stored || stored.systemKey !== employee.systemKey) throw new AiCallTraceError();
@@ -75,8 +94,11 @@ export class SystemAiSessionRecorder {
   remove(sessionId: string): void {
     const current = this.storage.getSessionSlim(sessionId);
     if (!current || !isSystemAiCall(current)) return;
-    if (current.status === "running") throw Object.assign(new Error("系统调用仍在执行，完成后才能删除日志。"), { statusCode: 409 });
-    this.storage.deleteSession(sessionId);
+    if (current.status === "running" || this.active.has(sessionId)) throw Object.assign(new Error("系统调用仍在执行，完成后才能删除日志。"), { statusCode: 409 });
+    this.storage.transaction(() => {
+      this.storage.unlinkEmployeeSession(sessionId);
+      this.storage.deleteSession(sessionId);
+    });
     this.logger?.deleteSession(sessionId);
   }
 
@@ -161,6 +183,9 @@ export class SystemAiSessionRecorder {
           activeRequestId: null, turnStartedAt: null, lastActivityAt: null, lastError: status === "exited" ? null : message ?? "系统调用失败。" } } : {}),
       };
       this.persist(snapshot, false);
+      // Retention is housekeeping, not model refusal: never turn its failure into a paid retry.
+      try { this.enforceRetention(actor.id); }
+      catch { console.error("[SystemAi] history retention failed; retry on next completion or startup"); }
     };
     const candidateName = (candidate: AiCliCandidate): string => `${candidate.provider} / ${candidate.engine === "sdk" ? "Wand Agent SDK" : "CLI"} / ${candidate.model ?? "默认模型"}`;
     return {

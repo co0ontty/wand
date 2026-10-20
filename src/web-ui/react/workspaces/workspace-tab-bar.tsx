@@ -4,6 +4,7 @@ import { WandDropdownMenu, WandDropdownMenuTrigger, WandDropdownMenuContent, Wan
 // 只有活动工作窗口为 split 时才由 WorkspaceWindow 挂载多终端池。
 
 import * as React from "react";
+import { CopyPageLink } from "../ui/copy-page-link";
 
 import { workspaceContextStore } from "./workspace-context";
 import { workspacesStore } from "./controller";
@@ -106,6 +107,9 @@ export function WorkspaceTabBar(): React.ReactElement | null {
     runtime()?.saveTaskLayout(taskLayout, { automatic: true });
   }, [persistedLayout, context.taskId, detail, taskLayout]);
 
+  // 窄屏（iOS / Android 浏览器）不放会话标签。PTY 与终端页以前仍留着这排，
+  // 从左向右滑会沿历史切到上一个会话；现在滑回去的是进入页面前的那一页。
+  if (mobile) return null;
   if (!context.taskId) return <StandaloneSessionTabBar/>;
   // 任务还没有任何工作窗口：让主区全页 CLI 选择桌面单独出现，
   // 避免空标签栏和选择器叠在一起。
@@ -182,6 +186,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
       actions={mobile ? <WandDropdownMenu>
         <WandDropdownMenuTrigger render={<WorkspaceMoreButton/>}/>
         <WandDropdownMenuContent align="end" aria-label="工作窗口操作">
+          <CopyPageLink menuItem label="复制窗口链接"/>
           <WandDropdownMenuItem icon="plus" onSelect={openNewSession}>新建 Agent 或空白终端</WandDropdownMenuItem>
           <WandDropdownMenuItem icon="explorer" onSelect={() => void dispatch({ type: "layout.files.toggle" })}>文件</WandDropdownMenuItem>
           {snapshot.topbar.git ? <WandDropdownMenuItem icon="git" onSelect={() => void dispatch({ type: "topbar.gitCommit" })}>快捷提交 · {snapshot.topbar.git.branch}</WandDropdownMenuItem> : null}
@@ -195,6 +200,7 @@ export function WorkspaceTabBar(): React.ReactElement | null {
           <WandDropdownMenuItem icon="close" onSelect={handleClose}>关闭任务标签组</WandDropdownMenuItem>
         </WandDropdownMenuContent>
       </WandDropdownMenu> : <WorkspaceDesktopActionsChrome onFiles={() => void dispatch({ type: "layout.files.toggle" })} onClose={handleClose}>
+        <CopyPageLink label="复制窗口链接"/>
         <TopbarGitBadge id="workspace-tab-git-badge" className="workspace-tab-git"/>
       </WorkspaceDesktopActionsChrome>}/>
   );

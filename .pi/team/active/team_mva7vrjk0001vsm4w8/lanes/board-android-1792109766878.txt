@@ -1,6 +1,0 @@
-Lane mailbox for Android 看板未分组目录 (role board-android)
-Run: team_mva7vrjk0001vsm4w8
-Lane: board-android-1792109766878
-Token: d7ead799-251f-4aa2-b9b0-22cc10016c86
-
-Captain messages appear below, newest last.

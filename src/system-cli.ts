@@ -43,6 +43,10 @@ export async function parseSystemCliCommand(
     const query = args.length ? (command === "employee:list" ? "?includeArchived=1" : "?includeCancelled=1") : "";
     return api => api.get(reads[command]! + query);
   }
+  if (command === "task:context") {
+    if (args.length < 1 || args.length > 2 || args.some(arg => !arg || arg.startsWith("-"))) throw new Error("用法：wand task:context <task-id> [comment-id]");
+    return api => api.get(`/api/wand-tasks/${encodeURIComponent(args[0]!)}/context${args[1] ? `?commentId=${encodeURIComponent(args[1])}` : ""}`);
+  }
   if (command === "schedule:read") {
     if (args.length !== 1 || !args[0] || args[0].startsWith("-")) throw new Error("用法：wand schedule:read <id>");
     return api => api.get(`/api/scheduled-tasks/${encodeURIComponent(args[0]!)}`);
@@ -74,7 +78,7 @@ export async function parseSystemCliCommand(
     fields(body, ["employeeId", "workspaceId", "cwd", "prompt"]);
     requiredText(body.employeeId, "employeeId（先查询员工列表）");
     // Employee's configured provider, model, role and permissions remain authoritative.
-    return api => api.post("/api/structured-sessions", { ...body, respondImmediately: true });
+    return api => api.post("/api/sessions", { ...body, kind: "structured" });
   }
   if (command === "schedule:create") {
     fields(body, ["requestId", "employeeId", "workspaceId", "title", "prompt", "schedule"]);

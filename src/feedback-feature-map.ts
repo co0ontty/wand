@@ -6,7 +6,6 @@ export const FEEDBACK_API_FEATURES = {
   conversations: "conversations",
   "wand-tasks": "tasks", "wand-task-agent-defaults": "tasks", tasks: "tasks", "workspace-tasks": "tasks", workspaces: "tasks", "wand-milestones": "tasks", missions: "tasks", "scheduled-tasks": "tasks",
   files: "files", upload: "files", directory: "files", "session-files": "files", "file-preview": "files", "file-read": "files", "file-write": "files", "recent-paths": "files",
-  speech: "speech",
   settings: "settings", config: "settings", "user-profile": "settings", "auto-update": "settings", "update-channel": "settings",
   models: "models", "model-groups": "models", "local-models": "models",
   login: "authentication", logout: "authentication", "app-login": "authentication", "session-check": "authentication", "set-password": "authentication",

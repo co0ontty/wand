@@ -97,10 +97,10 @@ test("iteration context route exposes the window between commits and remembers t
 
   try {
     // 建一个真实会话（structured 不启动 CLI），cwd 指向 git 仓库。
-    const created = await fetch(`${baseUrl}/api/structured-sessions`, {
+    const created = await fetch(`${baseUrl}/api/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ cwd: repo, provider: "opencode", mode: "assist" }),
+      body: JSON.stringify({ kind: "structured", cwd: repo, provider: "opencode", mode: "assist" }),
     });
     assert.equal(created.status, 201);
     const session = await created.json() as { id: string };
@@ -176,10 +176,10 @@ test("quick commit ignores legacy archive flags for current, completed and forei
   const { baseUrl, storage } = harness;
 
   try {
-    const created = await fetch(`${baseUrl}/api/structured-sessions`, {
+    const created = await fetch(`${baseUrl}/api/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ cwd: repo, provider: "opencode", mode: "assist" }),
+      body: JSON.stringify({ kind: "structured", cwd: repo, provider: "opencode", mode: "assist" }),
     });
     assert.equal(created.status, 201);
     const session = await created.json() as { id: string };
@@ -242,10 +242,10 @@ test("quick commit ignores legacy archive flags for current, completed and forei
     assert.equal(storage.listIterationPromptsByIds([entries[1]!.id])[0]?.consumedCommit, null);
 
     // A chat opened from the sidebar may not be bound yet. The client still names that row.
-    const opened = await fetch(`${baseUrl}/api/structured-sessions`, {
+    const opened = await fetch(`${baseUrl}/api/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ cwd: repo, provider: "opencode", mode: "assist" }),
+      body: JSON.stringify({ kind: "structured", cwd: repo, provider: "opencode", mode: "assist" }),
     });
     assert.equal(opened.status, 201);
     const openedSession = await opened.json() as { id: string };
@@ -287,10 +287,10 @@ test("an empty iteration reports diff as the effective mode", async (t) => {
   const repo = initRepo(path.join(root, "repo"));
   const harness = await startHarness(t, root);
   try {
-    const created = await fetch(`${harness.baseUrl}/api/structured-sessions`, {
+    const created = await fetch(`${harness.baseUrl}/api/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ cwd: repo, provider: "opencode", mode: "assist" }),
+      body: JSON.stringify({ kind: "structured", cwd: repo, provider: "opencode", mode: "assist" }),
     });
     const session = await created.json() as { id: string };
     const body = await fetch(`${harness.baseUrl}/api/sessions/${session.id}/iteration-context`)
@@ -317,9 +317,9 @@ test("quick commit sweeps all standalone sessions in its project, preserving tas
   const { baseUrl, storage, sessions, structured } = harness;
   try {
     const create = async (cwd: string) => {
-      const response = await fetch(`${baseUrl}/api/structured-sessions`, {
+      const response = await fetch(`${baseUrl}/api/sessions`, {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ cwd, provider: "opencode", mode: "assist" }),
+        body: JSON.stringify({ kind: "structured", cwd, provider: "opencode", mode: "assist" }),
       });
       assert.equal(response.status, 201);
       return await response.json() as { id: string };

@@ -25,6 +25,9 @@ export interface StorageReadonly {
 
 export function openStorageReadonly(dbPath: string): StorageReadonly {
   const db = new DatabaseSync(dbPath, { readOnly: true });
+  // Local CLI readers share the file with the Server writer. Configure only this connection;
+  // a transient exclusive/schema lock is not proof of a missing/revoked capability.
+  db.exec("PRAGMA busy_timeout = 5000");
   const readConfig = (key: string): string | null => {
     const value = db.prepare("SELECT value FROM app_config WHERE key = ?").get(key)?.value;
     return typeof value === "string" ? value : null;

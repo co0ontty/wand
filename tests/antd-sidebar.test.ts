@@ -19,9 +19,16 @@ test("sidebar disclosures use controlled Ant Collapse without a second native di
     }));
     assert.match(html, /ant-collapse/);
     assert.match(html, new RegExp(`data-open="${expanded}"`));
-    assert.match(html, /data-session-id="session:42"/);
-    assert.match(html, /aria-current="page"/);
-    assert.match(html, /wand-ui-button-soft/);
+    assert.match(html, new RegExp(`aria-expanded="${expanded}"`));
+    if (expanded) {
+      assert.match(html, /data-session-id="session:42"/);
+      assert.match(html, /aria-current="page"/);
+      assert.match(html, /wand-ui-button-soft/);
+    } else {
+      assert.match(html, /inert=""/);
+      assert.match(html, /aria-hidden="true"/);
+      assert.doesNotMatch(html, /data-session-id="session:42"/, "destroyOnHidden does not mount collapsed rows during SSR");
+    }
     assert.doesNotMatch(html, /<(?:details|summary)\b/);
   }
 });

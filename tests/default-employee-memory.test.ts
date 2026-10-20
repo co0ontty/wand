@@ -8,7 +8,6 @@ import express from "express";
 import { DEFAULT_EMPLOYEE_ID, DEFAULT_EMPLOYEE_KEY, DEFAULT_EMPLOYEE_NAME, SYSTEM_EMPLOYEE_ID, isDefaultSiliconEmployee } from "../src/ai-team-types.js";
 import { defaultConfig, loadConfigWithStorage } from "../src/config.js";
 import { DEFAULT_EMPLOYEE_PROMPT } from "../src/default-employee.js";
-import { SPEECH_POLISHER_ID } from "../src/speech-polisher-identity.js";
 import { HR_EMPLOYEE_ID } from "../src/hr-employee-identity.js";
 import { DECISION_EXPERT_ID, DECISION_EXPERT_KEY } from "../src/decision-expert-identity.js";
 import { dispatchAgentForTask } from "../src/agent-dispatch.js";
@@ -63,7 +62,7 @@ test("default partner is seeded alongside ops, idempotent and preserves candidat
   storage.saveSiliconEmployee({ ...decisionExpert, agents: decisionCandidates });
   storage.saveSiliconEmployee({ ...role, agents: [CODEX, PI] });
   await loadConfigWithStorage(join(root, "config.json"), storage);
-  assert.deepEqual(storage.listSiliconEmployees().map((employee) => employee.id), [SYSTEM_EMPLOYEE_ID, DEFAULT_EMPLOYEE_ID, DECISION_EXPERT_ID, SPEECH_POLISHER_ID, HR_EMPLOYEE_ID]);
+  assert.deepEqual(storage.listSiliconEmployees().map((employee) => employee.id), [SYSTEM_EMPLOYEE_ID, DEFAULT_EMPLOYEE_ID, DECISION_EXPERT_ID, HR_EMPLOYEE_ID]);
   assert.deepEqual(storage.getDefaultSiliconEmployee()?.agents, [CODEX, PI]);
   assert.equal(storage.getSystemSiliconEmployee(DECISION_EXPERT_KEY)?.id, decisionExpert.id);
   assert.deepEqual(storage.getSystemSiliconEmployee(DECISION_EXPERT_KEY)?.agents, decisionCandidates);
@@ -297,8 +296,8 @@ test("CLI sessions use default role without replacing provider/model/mode or add
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-  const response = await fetch(base + "/api/structured-sessions", { method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ cwd: root, provider: "codex", model: "explicit-model", mode: "assist", thinkingEffort: "deep" }),
+  const response = await fetch(base + "/api/sessions", { method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ kind: "structured", cwd: root, provider: "codex", model: "explicit-model", mode: "assist", thinkingEffort: "deep" }),
   });
   assert.equal(response.status, 201);
   const created = await response.json() as { id: string };

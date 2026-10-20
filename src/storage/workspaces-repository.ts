@@ -11,6 +11,7 @@ import { ensureWorkspaceForCwd } from "../workspace-binding.js";
 import { SessionRow, parseWorktreeInfo, sessionSelectFields, WorkspaceRow, mapWorkspaceRow, WorkspaceTaskRow, mapWorkspaceTaskRow, mapSessionCore, sessionRowQuery } from "./mappers.js";
 import type { WandStorage } from "../storage.js";
 import { WAND_TASK_FIELDS, WORKSPACE_TASK_PROJECTION } from "./internal.js";
+import { SYSTEM_AI_CALL_PREFIX } from "../system-ai-call.js";
 
 /** Workspace storage: one domain of the WandStorage facade. Shares the connection and the facade's transaction. */
 export class WorkspaceRepository {
@@ -191,7 +192,7 @@ export class WorkspaceRepository {
   }
 
   /** Normal workspace counts exclude archived sessions and sessions in archived tasks. */
-  countSessionsByWorkspace(options: { includeArchived?: boolean } = {}): Map<string, number> {
+  countSessionsByWorkspace(options: { includeArchived?: boolean; excludeSystemAiCalls?: boolean } = {}): Map<string, number> {
     const rows = this.db
       .prepare(
         `SELECT session.workspace_id AS id, COUNT(*) AS n
@@ -201,9 +202,10 @@ export class WorkspaceRepository {
              SELECT status FROM wand_tasks WHERE workspace_task_id = session.workspace_task_id
              ORDER BY updated_at DESC, rowid DESC LIMIT 1
            ), '') <> 'archived'))
+           AND (? = 0 OR COALESCE(session.automation_id, '') NOT GLOB ?)
          GROUP BY session.workspace_id`,
       )
-      .all(options.includeArchived === true ? 1 : 0) as unknown as Array<{ id: string; n: number }>;
+      .all(options.includeArchived === true ? 1 : 0, options.excludeSystemAiCalls === true ? 1 : 0, `${SYSTEM_AI_CALL_PREFIX}*`) as unknown as Array<{ id: string; n: number }>;
     return new Map(rows.map((row) => [row.id, Number(row.n) || 0]));
   }
 

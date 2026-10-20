@@ -17,8 +17,6 @@ test("local model settings use native controls for download/init/progress/retry 
   const status: any = {
     laya: { kind: "laya", label: "LAYA 本地决策", supported: true, reason: "模型尚未下载", enabled: false,
       model: "aac6fef/laya-multilingual-mlx", modelSize: 678214509, downloaded: false, runtimeAvailable: false, initialized: false, busy: false, operation: null },
-    speech: { kind: "speech", label: "服务端语音识别", supported: true, reason: null, enabled: false,
-      model: "base", modelSize: 147951465, downloaded: true, runtimeAvailable: false, initialized: false, busy: false, operation: null },
   };
   const calls: Array<{ path: string; body: unknown }> = [];
   const expert = { id: "e_wand_decision_expert", name: "石一", systemKey: "wand-decision-expert", duty: "有界选择", prompt: "判断", avatar: "", createdAt: "now", updatedAt: "now",
@@ -52,7 +50,7 @@ test("local model settings use native controls for download/init/progress/retry 
         const body = JSON.parse(text || "{}"); calls.push({ path: req.url, body });
         if (req.url.endsWith("/settings")) status.laya.enabled = body.enabled;
         else {
-          const kind = req.url.includes("/laya/") ? "laya" : "speech", value = status[kind], action = req.url.split("/").pop();
+          const value = status.laya, action = req.url.split("/").pop();
           const id = ++counter;
           value.busy = true; value.operation = { id, action, phase: action === "download" ? "downloading" : "runtime", message: action === "download" ? "模型下载中" : "正在初始化独立运行时", received: 25, total: 100 };
           setTimeout(() => {

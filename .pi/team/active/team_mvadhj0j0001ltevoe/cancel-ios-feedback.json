@@ -1,6 +1,0 @@
-{
-  "at": 1792121473643,
-  "runId": "team_mvadhj0j0001ltevoe",
-  "roleId": "ios-feedback",
-  "reason": "旧通道attention持续，模型已实证当前账号不支持gpt-5.5，0请求/工具增长及0送达/ACK；由新支持模型子代理接管，撤回旧通道写权限。"
-}

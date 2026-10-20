@@ -1,10 +1,10 @@
 import * as React from "react";
 import { useCallback, useEffect, useState } from "react";
 import { Progress, Space, Typography } from "antd";
-import type { LocalModelKind, LocalModelsStatus, LocalModelStatus } from "../../../local-model-types.js";
+import type { LocalModelsStatus, LocalModelStatus } from "../../../local-model-types.js";
 import { jsonBody, requestJson } from "../http-adapter";
 import { DecisionChainEditor } from "../ai-teams/lazy";
-import { SettingsActionButton, SettingsField, SettingsSection, SettingsSelect, SettingsStatus, SettingsToggle } from "./fields";
+import { SettingsActionButton, SettingsSection, SettingsStatus, SettingsToggle } from "./fields";
 
 function useLocalModels() {
   const [status, setStatus] = useState<LocalModelsStatus | null>(null);
@@ -12,22 +12,22 @@ function useLocalModels() {
   const refresh = useCallback(async (signal?: AbortSignal) => {
     try {
       const next = await requestJson<LocalModelsStatus>("/api/local-models/status", { signal });
-      if (!next.laya || !next.speech) throw new Error("服务端尚未提供本地模型管理，请先更新 Wand。");
+      if (!next.laya) throw new Error("服务端尚未提供本地模型管理，请先更新 Wand。");
       setStatus(next); setError("");
     }
     catch (cause) { if (!signal?.aborted) setError(cause instanceof Error ? cause.message : "无法读取本地模型状态。"); }
   }, []);
   useEffect(() => { const abort = new AbortController(); void refresh(abort.signal); return () => abort.abort(); }, [refresh]);
   useEffect(() => {
-    if (![status?.laya, status?.speech].some(value => value?.operation && !["completed", "failed", "cancelled"].includes(value.operation.phase))) return;
+    if (!(status?.laya.operation && !["completed", "failed", "cancelled"].includes(status.laya.operation.phase))) return;
     const abort = new AbortController(), timer = window.setTimeout(() => void refresh(abort.signal), 1500);
     return () => { window.clearTimeout(timer); abort.abort(); };
   }, [status, refresh]);
   return { status, setStatus, error, setError, refresh };
 }
 
-function ModelInstallActions({ value, admin, model, backend, downloaded, onStatus, onError }: {
-  value: LocalModelStatus; admin: boolean; model?: string; backend?: string; downloaded?: boolean;
+function ModelInstallActions({ value, admin, model, downloaded, onStatus, onError }: {
+  value: LocalModelStatus; admin: boolean; model?: string; downloaded?: boolean;
   onStatus(value: LocalModelsStatus): void; onError(message: string): void;
 }) {
   const [pending, setPending] = useState("");
@@ -37,7 +37,7 @@ function ModelInstallActions({ value, admin, model, backend, downloaded, onStatu
   async function act(action: "download" | "initialize" | "cancel") {
     setPending(action); onError("");
     try {
-      const payload = action === "cancel" ? {} : { ...(model ? { model } : {}), ...(backend && value.kind === "speech" ? { backend } : {}) };
+      const payload = action === "cancel" ? {} : { ...(model ? { model } : {}), };
       const next = await requestJson<LocalModelsStatus>(`/api/local-models/${value.kind}/${action}`, jsonBody(payload));
       onStatus(next);
     } catch (cause) { onError(cause instanceof Error ? cause.message : "模型操作失败，请重试。"); }
@@ -94,12 +94,6 @@ export function LocalModelsSettingsTab({ admin }: { admin: boolean }) {
         {laya.reason ? <SettingsStatus tone="warning">{laya.reason}</SettingsStatus> : null}
         <SettingsStatus tone="warning">LAYA 判断质量仍为实验性，高概率不代表正确。不得用它自动审批权限、删除数据或发布。</SettingsStatus>
       </> : <SettingsStatus>正在检查模型和运行时…</SettingsStatus>}
-    </SettingsSection>
-    <SettingsSection title="服务端语音输入" description="在「语音输入」中开启即可，模型下载与运行环境准备会自动完成。">
-      {state.status ? <>
-        <Typography.Text type="secondary">Whisper {state.status.speech.model} · {state.status.speech.downloaded ? "模型校验通过" : "未下载"} · {state.status.speech.runtimeAvailable ? "运行时已安装" : "运行时未安装"}</Typography.Text>
-      </> : null}
-      <SettingsStatus>只安装独立模型组件，不覆盖已有 Python 环境，不中断活动识别/决策，不重启 Wand 服务。</SettingsStatus>
     </SettingsSection>
     {state.error ? <SettingsStatus tone="error">{state.error}</SettingsStatus> : null}
   </>;

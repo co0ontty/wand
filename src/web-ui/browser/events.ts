@@ -16,7 +16,7 @@ import { scheduleChatRender } from "./chat-render-loader";
 import { formatInlineResult, setInlineToolImageState } from "./chat-render-model";
 import { applyExpandedState, persistElementExpandState, persistSelectedId, scrollChatToBottom, setPersistedAgentSelection } from "./chat-scroll";
 import { adjustTerminalScale, openFilePreview } from "./file-browser";
-import { attachQueueBarDelegates, bindInputTouchScroll, cancelVoiceRecording, getComposerSendPhase, handleInputBoxBlur, handleInputBoxFocus, handleVoiceMove, refreshInputBoxState, sendOrStart, setupMobileKeyboardHandlers, startVoiceRecording, stopSession, stopVoiceRecording, updateQueueBar } from "./input";
+import { attachQueueBarDelegates, bindInputTouchScroll, getComposerSendPhase, handleInputBoxBlur, handleInputBoxFocus, refreshInputBoxState, sendOrStart, setupMobileKeyboardHandlers, stopSession, updateQueueBar } from "./input";
 import { hideError } from "./notifications";
 import { render, resetChatRenderCache } from "./render";
 import { addPendingAttachments, closePlusPopover, closeSessionsDrawer, dismissDrawerIfOverlay, handleInputBoxKeydown, handleInputPaste, handleInteractiveTextInput, handlePtyImagePaste, login, onChatModeChange, onChatModelChange, onChatThinkingChange, optimizePromptText, selectSession, setDraftValue, switchServer, syncComposerHasText, togglePlusPopover } from "./session-engine";
@@ -473,10 +473,10 @@ import { setupVisualViewportHandlers } from "./viewport";
             if (handleInteractiveTextInput(inputBox!, event as InputEvent)) {
               return;
             }
-            refreshInputBoxState(inputBox!);
+            // Commit the native edit before measuring/projecting it. A forced
+            // React flush must never restore the previous draft into this node.
             setDraftValue(inputBox!.value, true);
-            // v2: 触发 ghost meta / 优化按钮的显隐切换
-            syncComposerHasText(inputBox!);
+            refreshInputBoxState(inputBox!);
             syncPiSettingsComposer();
           });
           // INPUT-3: 所有 composer 都跟踪 IME 组字，避免 Safari / WKWebView 在
@@ -599,23 +599,6 @@ import { setupVisualViewportHandlers } from "./viewport";
             }
             fileInput!.value = "";
           });
-        }
-
-        // 语音手势只绑定独立按钮；textarea 保留系统原生的长按、选区与粘贴行为。
-        var voiceRecordBtn = document.getElementById("voice-record-btn");
-        if (voiceRecordBtn) {
-          voiceRecordBtn.addEventListener("pointerdown", startVoiceRecording);
-          voiceRecordBtn.addEventListener("pointermove", handleVoiceMove);
-          voiceRecordBtn.addEventListener("pointerup", stopVoiceRecording);
-          voiceRecordBtn.addEventListener("pointercancel", cancelVoiceRecording);
-          voiceRecordBtn.addEventListener("click", function(e) {
-            // Enter/Space and assistive activation have no pointerdown/up sequence.
-            if (e.detail !== 0) return;
-            if (voiceRecordBtn.getAttribute("aria-pressed") === "true") stopVoiceRecording(e);
-            else if (voiceRecordBtn.getAttribute("aria-busy") === "true") cancelVoiceRecording(e);
-            else startVoiceRecording(e);
-          });
-          voiceRecordBtn.addEventListener("contextmenu", function(e) { e.preventDefault(); });
         }
 
         var promptOptimizeBtn = document.getElementById("prompt-optimize-btn");

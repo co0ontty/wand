@@ -13,7 +13,7 @@ import { startServer } from "../src/server.js";
 import { WandStorage } from "../src/storage.js";
 import type { SessionSnapshot } from "../src/types.js";
 
-test("commands endpoint dispatches shell requests without a provider command", async (t) => {
+test("unified session endpoint dispatches shell requests without a provider command", async (t) => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-shell-route-"));
   const configPath = path.join(root, "config.json");
   const handle = await startServer({
@@ -64,22 +64,22 @@ test("commands endpoint dispatches shell requests without a provider command", a
     { subject: { type: "employee", id: "e_test123" } },
     { subject: { type: "team", id: "team_test" } },
   ]) {
-    const rejected = await fetch(`${handle.urls[0]!.url}/api/commands`, {
+    const rejected = await fetch(`${handle.urls[0]!.url}/api/sessions`, {
       method: "POST",
       headers: { Authorization: `Bearer ${appToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ shell: true, cwd: root, ...identity }),
+      body: JSON.stringify({ kind: "pty", shell: true, cwd: root, ...identity }),
     });
     assert.equal(rejected.status, 400);
   }
   assert.equal(calls.length, 0, "PTY must reject non-CLI identity before starting a process");
 
-  const response = await fetch(`${handle.urls[0]!.url}/api/commands`, {
+  const response = await fetch(`${handle.urls[0]!.url}/api/sessions`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${appToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ shell: true, cwd: root, cols: 92, rows: 27 }),
+    body: JSON.stringify({ kind: "pty", shell: true, cwd: root, cols: 92, rows: 27 }),
   });
 
   assert.equal(response.status, 201);
@@ -87,6 +87,16 @@ test("commands endpoint dispatches shell requests without a provider command", a
   assert.equal(created.id, "shell-route-1");
   assert.equal(created.provider, undefined);
   assert.equal(calls.length, 1);
+  const providerConflict = await fetch(`${handle.urls[0]!.url}/api/sessions`, {
+    method: "POST", headers: { Authorization: `Bearer ${appToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "pty", shell: true, provider: "claude", cwd: root }),
+  });
+  assert.equal(providerConflict.status, 400);
+  const engineConflict = await fetch(`${handle.urls[0]!.url}/api/sessions`, {
+    method: "POST", headers: { Authorization: `Bearer ${appToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "pty", shell: true, engine: "sdk", cwd: root }),
+  });
+  assert.equal(engineConflict.status, 400);
   const [cwd, mode, opts] = calls[0] as [string, string, {
     worktreeEnabled?: boolean;
     cols?: number;
@@ -214,18 +224,18 @@ test("commands endpoint puts a new session on its task card without a board relo
   }) as typeof handle.processManager.start;
 
   for (const command of ["claude", "gemini"]) {
-    const rejected = await fetch(`${baseUrl}/api/commands`, {
+    const rejected = await fetch(`${baseUrl}/api/sessions`, {
       method: "POST", headers: authHeaders,
-      body: JSON.stringify({ provider: "gemini", command, cwd: root }),
+      body: JSON.stringify({ kind: "pty", provider: "gemini", command, cwd: root }),
     });
     assert.equal(rejected.status, 400, "removed explicit provider must not be discarded or inferred as another tool");
   }
   assert.equal(roleCalls.length, 0, "invalid provider must not reach the process owner");
 
-  const response = await fetch(`${baseUrl}/api/commands`, {
+  const response = await fetch(`${baseUrl}/api/sessions`, {
     method: "POST",
     headers: authHeaders,
-    body: JSON.stringify({ command: "pi", cwd: root, workspaceId: workspace.id, workspaceTaskId: task.id,
+    body: JSON.stringify({ kind: "pty", command: "pi", cwd: root, workspaceId: workspace.id, workspaceTaskId: task.id,
       model: "explicit-model", thinkingEffort: "deep" }),
   });
   assert.equal(response.status, 201);
@@ -258,8 +268,8 @@ test("commands endpoint puts a new session on its task card without a board relo
     { command: "pi", systemPrompt: "自定义角色" },
     { command: "pi", sessionSource: "automation", automationId: "test:internal" },
   ]) {
-    const result = await fetch(`${baseUrl}/api/commands`, {
-      method: "POST", headers: authHeaders, body: JSON.stringify({ cwd: root, ...request }),
+    const result = await fetch(`${baseUrl}/api/sessions`, {
+      method: "POST", headers: authHeaders, body: JSON.stringify({ kind: "pty", cwd: root, ...request }),
     });
     assert.equal(result.status, 201);
     assert.equal((await result.json() as SessionSnapshot).employeeId, undefined);
@@ -267,8 +277,8 @@ test("commands endpoint puts a new session on its task card without a board relo
     assert.equal(roleCalls.at(-1)?.systemPrompt, request.systemPrompt);
   }
   // Raw command strings are admin-only: a connected app (bearer) cannot run arbitrary commands.
-  const rawForApp = await fetch(`${baseUrl}/api/commands`, {
-    method: "POST", headers: authHeaders, body: JSON.stringify({ cwd: root, command: "echo hello" }),
+  const rawForApp = await fetch(`${baseUrl}/api/sessions`, {
+    method: "POST", headers: authHeaders, body: JSON.stringify({ kind: "pty", cwd: root, command: "echo hello" }),
   });
   assert.equal(rawForApp.status, 403);
 });

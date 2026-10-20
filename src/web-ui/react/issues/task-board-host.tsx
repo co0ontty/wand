@@ -109,7 +109,10 @@ import {
 } from "./task-board-views";
 import { wandOverlay } from "../overlay-controller";
 import { confirmDiscardTaskDraft } from "../task-draft-guard";
-import { readTaskBoardViewState, writeTaskBoardViewState, sortTaskBoardTasks, TASK_BOARD_SORTS, type TaskBoardSort } from "./task-board-view-state";
+import { parseTaskBoardViewState, readTaskBoardViewState, writeTaskBoardViewState, sortTaskBoardTasks, TASK_BOARD_SORTS, type TaskBoardSort } from "./task-board-view-state";
+import { pageSearch, updatePageRoute } from "../../page-route";
+import { usePageRouteState, routeEnum, routeJson } from "../use-page-route";
+import { CopyPageLink } from "../ui/copy-page-link";
 import { createGeneratedTitlePoller, type GeneratedTitlePoller } from "./generated-title-poll";
 import { parseIssueAssignment, readIssueAssignment, resolveIssueAssignment, writeIssueAssignment } from "./task-board-assignment";
 
@@ -167,7 +170,7 @@ export function TaskBoardHost({
   const providerOptions = providerUsage === null ? null : sortProviderOptions(
     ISSUE_AGENT_TARGETS, providerUsage, (entry) => entry.provider,
   ).map((entry) => ({ value: entry.value, label: entry.label }));
-  const [restored] = React.useState(readTaskBoardViewState);
+
   const [tasks, setTasks] = React.useState<WandTaskListed[]>([]);
   const [workspaces, setWorkspaces] = React.useState<IssueWorkspace[]>([]);
   const [catalog, setCatalog] = React.useState<IssueModelCatalog | null>(null);
@@ -176,14 +179,34 @@ export function TaskBoardHost({
   const [sessionDropTarget, setSessionDropTarget] = React.useState("");
   const [error, setError] = React.useState("");
   const [notice, setNotice] = React.useState("");
-  const [query, setQuery] = React.useState(restored.query);
-  const [view, setView] = React.useState<IssueBoardView>(restored.view);
-  const [sort, setSort] = React.useState<TaskBoardSort>(restored.sort);
+  const [query, setQuery] = usePageRouteState("q", "", undefined, undefined, "replace", 250);
+  const [view, setView] = usePageRouteState<IssueBoardView>("boardView", "board", routeEnum(ISSUE_BOARD_VIEWS.map(item => item.value), "board"), String, "push");
+  const [sort, setSort] = usePageRouteState<TaskBoardSort>("sort", "manual", routeEnum(TASK_BOARD_SORTS.map(item => item.value), "manual"));
   const [display, setDisplay] = React.useState<IssueBoardDisplay>(DEFAULT_ISSUE_BOARD_DISPLAY);
-  const [filters, setFilters] = React.useState<IssueBoardFilters>(restored.filters);
+  const [filters, setFilters] = usePageRouteState<IssueBoardFilters>("filters", EMPTY_ISSUE_FILTERS,
+    value => parseTaskBoardViewState({ filters: JSON.parse(value) }).filters, routeJson);
   const [ganttZoom, setGanttZoom] = React.useState<IssueGanttZoom>("week");
   const [ganttHideCompleted, setGanttHideCompleted] = React.useState(false);
-  const [filterWorkspaceId, setFilterWorkspaceId] = React.useState(restored.workspaceId);
+  const [filterWorkspaceId, setFilterWorkspaceId] = usePageRouteState("directory", "");
+  // A bare board link reopens where this tab left off; an explicit link always wins.
+  const skipPersist = React.useRef(false);
+  React.useEffect(() => {
+    const params = new URLSearchParams(pageSearch());
+    if (["boardView", "sort", "filters", "q", "directory"].some(key => params.has(key))) return;
+    const saved = readTaskBoardViewState();
+    const patch: Record<string, string | null> = {
+      boardView: saved.view === "board" ? null : saved.view, sort: saved.sort === "manual" ? null : saved.sort,
+      q: saved.query || null, directory: saved.workspaceId || null,
+      filters: routeJson(saved.filters) === routeJson(EMPTY_ISSUE_FILTERS) ? null : routeJson(saved.filters),
+    };
+    if (Object.values(patch).every(value => value === null)) return;
+    skipPersist.current = true;
+    updatePageRoute(patch, "replace");
+  }, []);
+  React.useEffect(() => {
+    if (skipPersist.current) { skipPersist.current = false; return; }
+    writeTaskBoardViewState({ view, query, workspaceId: filterWorkspaceId, filters, sort });
+  }, [view, query, filterWorkspaceId, filters, sort]);
   const mutationPending = React.useRef(false);
   const [createOpen, setCreateOpen] = React.useState(false);
   const [rememberCreateDefaults, setRememberCreateDefaults] = React.useState(false);
@@ -192,7 +215,7 @@ export function TaskBoardHost({
   const [draft, setDraft] = React.useState<DraftState>(() => emptyDraft(""));
   const draftRef = React.useRef(draft);
   draftRef.current = draft;
-  const [selectedId, setSelectedId] = React.useState("");
+  const [selectedId, setSelectedId] = usePageRouteState("task", "", undefined, undefined, "push");
   // 看板卡片的就地展开态，同一时刻只开一张；完整详情仍由 selectedId 那套详情页承担。
   const [expandedTaskId, setExpandedTaskId] = React.useState("");
   // 非点击收起（换视图、改筛选、Esc）后，把焦点还给那张卡片的触发按钮，和列表行共用一份实现。
@@ -213,10 +236,7 @@ export function TaskBoardHost({
   const lastAgentRef = React.useRef(lastAgent);
   lastAgentRef.current = lastAgent;
   const [collapsedList, setCollapsedList] = React.useState<Record<WandTaskStatus, boolean>>({
-    todo: false,
-    doing: false,
-    done: false,
-    archived: true,
+    todo: false, doing: false, done: false, archived: true,
   });
   const [draggedId, setDraggedId] = React.useState("");
   const [dropStatus, setDropStatus] = React.useState<WandTaskStatus | "">("");
@@ -271,7 +291,7 @@ export function TaskBoardHost({
       const next = await taskBoardRepository.workspaces();
       if (generation === workspaceGenerationRef.current) {
         setWorkspaces(next);
-        setFilterWorkspaceId((current) => next.some((workspace) => workspace.id === current) ? current : "");
+        // Never silently broaden results for an invalid URL directory.
       }
     } catch {
       // 轮询失败时保留上一次成功列表，避免瞬时错误把已选目录清掉。
@@ -289,7 +309,6 @@ export function TaskBoardHost({
 
   React.useEffect(() => {
     if (!controller.open) return;
-    setDisplay(readIssueBoardDisplay());
     void reload();
     void loadWorkspaces();
     void taskBoardRepository.models()
@@ -319,7 +338,6 @@ export function TaskBoardHost({
   React.useEffect(() => {
     setError("");
     setNotice("");
-    setSelectedId("");
     setDetailAgent(null);
     detailChoiceTaskRef.current = "";
     setCreateOpen(false);
@@ -328,7 +346,6 @@ export function TaskBoardHost({
 
   React.useEffect(() => {
     if (!controller.workspaceId) return;
-    setFilterWorkspaceId((current) => current || controller.workspaceId);
     setDraft((current) => (current.workspaceId ? current : { ...current, workspaceId: controller.workspaceId }));
   }, [controller.workspaceId, controller.open]);
 
@@ -730,9 +747,7 @@ export function TaskBoardHost({
     setEmployeeTarget(assignment.subject.type === "employee" ? assignment.subject.id : "");
   }, [selected?.id, selectedAgentKey, selected?.executionSubject?.type, selected?.executionSubject?.id, lastAgent, lastAssignment, employeeTarget, employees, employeesError, employeesLoading, teamTarget, teams]);
 
-  React.useEffect(() => {
-    writeTaskBoardViewState({ view, query, workspaceId: filterWorkspaceId, filters, sort });
-  }, [view, query, filterWorkspaceId, filters, sort]);
+  // URL owns result filters; device preferences cannot override shared links.
 
   // 展开选择随面板保留；过滤仅改变可见投影，不清除返回位置。
 
@@ -1031,6 +1046,7 @@ export function TaskBoardHost({
         </div>
       </Flex>
       <Flex wrap gap="small" className="task-board-header-actions">
+        <CopyPageLink label={selectedId ? "复制任务链接" : "复制当前页面链接"}/>
         {!selected && <>
           <WandSwitch checked={executionQueue} onCheckedChange={setExecutionQueue} ariaLabel="子任务执行队列"/>
           <Typography.Text>{executionQueue ? "包含子任务的执行队列" : "主目标视图"}</Typography.Text>
@@ -1099,6 +1115,8 @@ export function TaskBoardHost({
     {!selected && !loading && activeCount === 0 && archiveCount > 0 && !archiveOpen && <Alert type="info" showIcon title="当前没有活动任务"
       description={`有 ${archiveCount} 个归档任务。展开归档可查看历史，归档不会启动或停止执行。`}
       action={<WandButton kind="ghost" size="small" onClick={() => setCollapsedList((current) => ({ ...current, archived: false }))}>展开归档</WandButton>}/>}
+    {selectedId && !selected && !loading && !error && <Alert type="warning" showIcon title="任务不存在、已删除或无权访问" action={<WandButton onClick={() => setSelectedId("")}>返回任务看板</WandButton>}/>}
+    {filterWorkspaceId && !workspaces.some(item => item.id === filterWorkspaceId) && !loading && <Alert type="warning" title="链接中的目录不可用" action={<WandButton onClick={() => setFilterWorkspaceId("")}>查看所有目录</WandButton>}/>}
     {error && <Alert type="error" role="alert" showIcon title={error} action={<WandButton kind="ghost" size="small" disabled={loading} onClick={() => void reload()}>重新加载</WandButton>}/>}
 
     {selected ? <IssueDetail
@@ -1561,8 +1579,7 @@ function IssueDetail({
 }): React.ReactElement {
   const [title, setTitle] = React.useState(task.title);
   const [labelDraft, setLabelDraft] = React.useState(task.labels.join(", "));
-  const hasAgents = task.sessions.length > 0;
-  const [composeOpen, setComposeOpen] = React.useState(!hasAgents);
+  const [composeOpen, setComposeOpen] = React.useState(false);
   const [composePrompt, setComposePrompt] = React.useState(() => taskDispatchDrafts.get(task.id) ?? "");
   const knownLabels = collectIssueLabels([task]);
   const labelKey = task.labels.join("\0");
@@ -1588,13 +1605,13 @@ function IssueDetail({
   // 静默刷新不能把刚打开的面板和已经输入的提示词一起关掉。
   const sessionCount = task.sessions.length;
   React.useEffect(() => {
-    const assigned = sessionCount > 0;
-    setComposeOpen(!assigned);
+    setComposeOpen(false);
     setComposePrompt(taskDispatchDrafts.get(task.id) ?? "");
   }, [task.id, sessionCount]);
 
   React.useEffect(() => {
     if (composeRequest?.id !== task.id) return;
+    onEmployeeChange("");
     setComposeOpen(true);
     setComposePrompt(taskDispatchDrafts.get(task.id) ?? "");
   }, [composeRequest, task.id]);
@@ -1623,7 +1640,7 @@ function IssueDetail({
           />
           <TaskDescription key={task.id} description={task.description} busy={busy} onSave={value => onPatch({ description: value })}/>
           <TaskAcceptanceEditor key={`acceptance-${task.id}`} task={task} children={children} busy={busy} onSave={acceptance => onPatch({ acceptance })}/>
-          <TaskComments key={`comments-${task.id}`} taskId={task.id} updatedAt={task.updatedAt}/>
+          <TaskComments key={`comments-${task.id}`} taskId={task.id} updatedAt={task.updatedAt} employees={employees} onOpenSession={onOpenSession}/>
           <TaskBoardAgentSessionList
             sessions={task.sessions}
             assigned={task.agent}
@@ -1643,8 +1660,8 @@ function IssueDetail({
           </section>}
           {composeOpen ? <Card size="small" className="task-board-native-assign" aria-label="指派 Agent">
             <Flex vertical gap={4} className="task-board-native-assign-head" style={{ marginBottom: 12 }}>
-              <strong>{task.sessions.length > 0 ? "再指派一个 Agent" : "指派 Agent"}</strong>
-              <small>先输入提示词，再选员工、团队或 CLI</small>
+              <strong>CLI / 团队兼容派发</strong>
+              <small>员工请使用上方评论 @；此处保留旧工具和团队执行能力。</small>
             </Flex>
             <TaskTextArea
               className="resize-none task-board-detail-body"
@@ -1672,9 +1689,9 @@ function IssueDetail({
                 ariaPrefix="任务"
                 teams={teams}
                 teamId={teamId}
-                employees={employees}
-                employeeId={employeeId}
-                employeeOverride={employeeOverride}
+                employees={[]}
+                employeeId=""
+                employeeOverride={false}
                 onTeamChange={onTeamChange}
                 onEmployeeChange={onEmployeeChange}
                 onChange={onAgentChange}
@@ -1696,14 +1713,15 @@ function IssueDetail({
           </Card> : <WandButton kind="ghost"
             type="button"
             className="task-board-agent-add"
-            aria-label="再指派一个 Agent"
+            aria-label="CLI / 团队兼容派发"
             disabled={busy}
             onClick={() => {
+              onEmployeeChange("");
               setComposePrompt("");
               setComposeOpen(true);
             }}
           >
-            <WandIcon name="plus" size={16}/>再指派一个 Agent
+            <WandIcon name="plus" size={16}/>CLI / 团队兼容派发
           </WandButton>}
           <TaskTeamRunPanel taskId={task.id} refreshKey={teamRunRefresh} onOpenSession={onOpenSession}/>
         </Flex>

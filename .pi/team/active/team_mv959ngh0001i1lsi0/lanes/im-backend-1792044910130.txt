@@ -1,6 +1,0 @@
-Lane mailbox for IM配置与发送后端 (role im-backend)
-Run: team_mv959ngh0001i1lsi0
-Lane: im-backend-1792044910130
-Token: d377dfd2-96a3-44ff-9ad3-411a73f7791b
-
-Captain messages appear below, newest last.
