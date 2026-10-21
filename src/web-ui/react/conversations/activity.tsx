@@ -4,7 +4,7 @@ import type { ConversationTarget } from "../../../conversation-types.js";
 import type { ConversationTurn, ToolResultBlock, ToolUseBlock } from "../../../types.js";
 import { ChatActivity, ChatActivityEntry } from "../chat/activity.js";
 import { activityLabel } from "../chat/activity-label.js";
-import { DeferredMarkdownPreview as MarkdownPreview } from "../file-preview/deferred-markdown.js";
+import { MarkdownPreview } from "../file-preview/markdown.js";
 import { preserveDisclosurePosition } from "../chat/disclosure-position.js";
 import { installChatSurfaceStyles } from "../chat/styles.js";
 import { RunningStatusBar } from "../chat/running-status-bar.js";

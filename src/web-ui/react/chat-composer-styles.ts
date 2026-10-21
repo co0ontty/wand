@@ -163,7 +163,8 @@ export function installChatComposerStyles(): void {
 .conversation-composer:has([data-composer-expanded="false"]) > .conversation-input-hint { display:none; }
 .conversation-root .conversation-action-row > .ant-flex { flex-wrap:nowrap; }
 .conversation-runtime-summary { position:absolute; inset-block-start:-56px; inset-inline-end:0; width:max-content; max-width:calc(100% - 84px); height:24px; display:flex; align-items:center; gap:8px; min-width:0; font-size:var(--font-size-xs); color:var(--text-secondary); }
-.conversation-input-wrap:has(.conversation-runtime-summary):not(:has(.composer-floating-avatar)) { margin-block-start:56px; }
+/* 头像加载前后保持同一间距：56→42 的切换会在晚到员工资料时把输入区抬高 14px。 */
+.conversation-input-wrap:has(.conversation-runtime-summary):not(:has(.composer-floating-avatar)) { margin-block-start:42px; }
 .conversation-input-wrap:not(:has(.composer-floating-avatar)) > .conversation-runtime-summary { max-width:100%; }
 .conversation-runtime-summary > .ant-typography { min-width:0; }
 .conversation-runtime-summary > .ant-typography:first-child { flex:1; }

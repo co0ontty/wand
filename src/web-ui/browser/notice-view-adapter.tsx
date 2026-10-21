@@ -3,7 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { Alert, Button, Card, Flex, Spin, Tag, Typography } from "../react/design-library";
 import { WandUiProvider } from "../react/theme";
-import { WandIcon } from "../react/ui";
+import { WandIcon } from "../react/ui/icons";
 const roots = new Map<HTMLElement, Root>();
 function paint(host: HTMLElement, view: React.ReactNode): void {
   for (const [node, root] of roots) if (!node.isConnected) { root.unmount(); roots.delete(node); }

@@ -347,7 +347,7 @@ export function presentAssistantReply(element: HTMLElement, key: string, preview
       <span className="assistant-author">
         <span className="assistant-author-avatar" aria-hidden="true">
           {employee
-            ? <EmployeeAvatar employee={{ id: employee.id, name: employee.name || employee.id, avatar: employee.avatar }} provider={employee.provider} engine={employee.engine} size="lg"/>
+            ? <EmployeeAvatar employee={{ id: employee.id, name: employee.name || employee.id, avatar: employee.avatar }} provider={employee.provider} engine={employee.engine} size="lg" renderMode="static"/>
             : <span className="assistant-author-spark"><WandIcon name="sparkle" size={14}/></span>}
         </span>
         <span className="assistant-author-name">{authorName}</span>

@@ -148,6 +148,11 @@ async function recordGraph(target, metafile) {
 try {
   await bundleModules();
   await bundle({ ...commonOptions, entryPoints: [path.join(root, "src/web-ui/browser/boot.ts")] });
+  // 匿名登录页的独立小包：不含 React/AntD/终端/会话，登录成功后才去取控制台
+  // runtime。必须单独产出，否则匿名访客仍会下载整份控制台代码。
+  await bundle({ ...commonOptions,
+    entryPoints: [path.join(root, "src/web-ui/browser/login-main.ts")],
+    outfile: path.join(root, "src/web-ui/content/login.js") });
   await bundle(
     { ...commonOptions, entryPoints: [AI_TEAMS_CHUNK_ENTRY], outfile: AI_TEAMS_CHUNK_OUTFILE },
     [createAiTeamsHostPlugin()],

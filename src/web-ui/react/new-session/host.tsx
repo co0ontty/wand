@@ -1,4 +1,5 @@
 import * as React from "react";
+import { NewSessionHeader, NewSessionHeaderProvided } from "./header";
 import { Sender } from "@ant-design/x";
 import { Alert, AutoComplete, Flex, Spin, Typography } from "antd";
 import { DEFAULT_EMPLOYEE_ID } from "../../../ai-team-types.js";
@@ -39,7 +40,8 @@ export interface NewSessionHostProps { repository?: NewSessionRepository; }
 export function NewSessionHost(props: NewSessionHostProps): React.ReactElement | null {
   const controller = React.useSyncExternalStore(newSessionStore.subscribe, newSessionStore.getSnapshot, newSessionStore.getSnapshot);
   const ready = React.useSyncExternalStore(teamChatComposer.subscribeReady, teamChatComposer.ready, () => false);
-  return controller.open ? ready ? <NewWorkPage key={controller.revision} {...props}/> : <Spin tip="正在准备输入服务…"/> : null;
+  const headerProvided = React.useContext(NewSessionHeaderProvided);
+  return controller.open ? <>{!headerProvided && <NewSessionHeader/>}{ready ? <NewWorkPage key={controller.revision} {...props}/> : <Flex align="center" justify="center" flex={1} role="status"><Spin/><span>正在准备输入服务…</span></Flex>}</> : null;
 }
 
 function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostProps): React.ReactElement {
@@ -261,10 +263,6 @@ function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostPr
   );
 
   return <section className="new-work-page conversation-root" aria-label="新建工作">
-    <Flex align="center" justify="space-between" className="new-work-heading">
-      <span className="new-work-page-label">{controller.taskName ? `新建工作 · ${controller.taskName}` : "新建会话"}</span>
-      <WandButton kind="ghost" disabled={submitting} onClick={() => newSessionController.close()}>返回</WandButton>
-    </Flex>
     {loading || employeesLoading ? <Flex align="center" justify="center" flex={1}><Spin/><span>正在读取工作配置…</span></Flex> : form && defaults ? <>
       <div className="new-work-context">
         <h1>{form.kind === "structured" ? <>
@@ -326,6 +324,16 @@ function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostPr
         <div className="conversation-input-wrap" data-composer-expanded="true" data-editor-expanded={editor.expanded}>
           <Sender ref={sender} className="conversation-sender" value={draft.text} readOnly={disabled} placeholder={placeholder} suffix={false}
             autoSize={{ minRows: 2, maxRows: editor.expanded ? 24 : 4 }} onChange={text => teamChatComposer.edit(key, { text })} onSubmit={() => void submit()}
+            submitType="enter"
+            onKeyDown={event => {
+              // suffix 关掉后，发送器内部的提交开关不会随输入更新，默认回车会被吃掉。
+              // 这里自己提交；中文输入法确认候选、Shift 换行都不算开工。
+              if (event.nativeEvent.isComposing || event.keyCode === 229) return false;
+              if (event.key !== "Enter" || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return undefined;
+              event.preventDefault();
+              void submit();
+              return false;
+            }}
             header={draft.attachments.length ? <ComposerAttachmentList items={draft.attachments.map((item, index) => ({ index, name: item.name, sizeLabel: `${item.size} B`, previewUrl: item.previewUrl || null }))} onRemove={index => teamChatComposer.edit(key, { removeAttachment: index })}/> : null}
             footer={<Flex justify="space-between" align="center" className="conversation-action-row"><Flex gap={4} align="center" className="new-work-actions">
               <WandPopover ariaLabel="新工作更多选项" side="top" open={moreOpen} onOpenChange={setMoreOpen} trigger={<WandIconButton aria-label="更多新工作选项" disabled={disabled}><ConversationMorphIcon active={moreOpen} from="plus" to="close"/></WandIconButton>}>

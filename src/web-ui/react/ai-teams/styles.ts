@@ -215,10 +215,56 @@ export const aiTeamsChunkStyles = String.raw`
 .team-chat-doc-layer .team-chat-attachments {
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-start;
   gap: 6px;
   max-width: 100%;
   margin-bottom: 6px;
 }
+/* 历史图片附件：卡片几何在图片到达前后完全一致，所以原图晚到不会推动消息。
+   占位与图片共用同一个 120×90 框（4:3），只是里面先放一个底色。 */
+.task-board-team-chat .team-chat-attachment-images,
+.team-chat-doc-layer .team-chat-attachment-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+.task-board-team-chat .team-chat-attachment-image,
+.team-chat-doc-layer .team-chat-attachment-image {
+  position: relative;
+  display: block;
+  flex: none;
+  width: 120px;
+  height: 90px;
+  padding: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  overflow: hidden;
+  cursor: pointer;
+}
+.task-board-team-chat .team-chat-attachment-image > img,
+.team-chat-doc-layer .team-chat-attachment-image > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.task-board-team-chat .team-chat-attachment-image-pending,
+.team-chat-doc-layer .team-chat-attachment-image-pending {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+}
+.task-board-team-chat .team-chat-attachment-image:focus-visible,
+.team-chat-doc-layer .team-chat-attachment-image:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.task-board-team-chat .team-chat-attachment-files,
+.team-chat-doc-layer .team-chat-attachment-files { min-width: 0; }
 /* 附件与报告文件都是通用文件卡：这里只收窄宽度、把摘录截成固定行数。
    文件正文在公共预览里按需读取，卡片本身不读流。 */
 .task-board-team-chat .team-chat-file-card { width: min(100%, 360px); overflow: hidden; }

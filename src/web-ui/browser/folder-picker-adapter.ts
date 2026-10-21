@@ -1,8 +1,5 @@
-import {
-  configureFolderPickerRuntime,
-  folderPickerController,
-  type FolderPickerRuntimeAdapter,
-} from "../react";
+import { configureFolderPickerRuntime, folderPickerController } from "../react/folder-picker/controller";
+import type { FolderPickerRuntimeAdapter } from "../react/folder-picker/types";
 import { getEffectiveCwd } from "./render";
 import { saveWorkingDir } from "./terminal";
 import { showToast } from "./notifications";

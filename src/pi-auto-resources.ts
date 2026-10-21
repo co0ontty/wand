@@ -1,6 +1,6 @@
 import { DECISION_CHAIN_WAIT_MS, DecisionError } from "./decision-types.js";
 import { discoverPiResources, resolvePiResourceSelection, type PiResourceInventory } from "./pi-resource-catalog.js";
-import { decidePiCodemode, parsePiRecommendationRequest, recommendPiResources, type PiAutomaticCodemodeChoice, type PiResourceEvaluator } from "./pi-resource-recommendation.js";
+import { decidePiCodemode, isFlowControlOnly, parsePiRecommendationRequest, recommendPiResources, type PiAutomaticCodemodeChoice, type PiResourceEvaluator } from "./pi-resource-recommendation.js";
 import { patchPiResourceSelection, type PiResourceSelection, type PiResourceSelectionNotice } from "./pi-session-settings.js";
 import type { StructuredRunnerAdapter, StructuredRunnerContext, StructuredRunnerExecution, StructuredRunnerObserver,
   StructuredRunnerResult, StructuredRunnerTurnState } from "./structured-runner.js";
@@ -11,6 +11,12 @@ interface AutoResourceOptions {
   inventory?: (cwd: string) => Promise<PiResourceInventory>;
   timeoutMs?: number;
 }
+
+interface SessionAutoResourceState {
+  selected: PiResourceSelection;
+  codemode?: PiAutomaticCodemodeChoice;
+}
+const sessionAutoStates = new Map<string, SessionAutoResourceState>();
 
 /** Owned by the submitted runner, not by the composer. Manual settings are never overwritten. */
 export function withAutomaticPiResources(runner: StructuredRunnerAdapter, config: Pick<WandConfig, "harness">,
@@ -55,30 +61,53 @@ export function withAutomaticPiResources(runner: StructuredRunnerAdapter, config
             .map((item) => item.id),
         };
         const request = parsePiRecommendationRequest({ prompt: context.prompt, candidates });
-        const boundedEvaluate: PiResourceEvaluator = (value, caller, signal) => new Promise((resolve, reject) => {
-          // Restart the watchdog for each decision, so an earlier resource cannot
-          // consume the configured backup's window on the next decision.
-          const decisionTimer = setTimeout(() => abort.abort(), options.timeoutMs ?? DECISION_CHAIN_WAIT_MS);
-          timer = decisionTimer;
-          const cancelled = (): void => reject(new DecisionError("CANCELLED", "本地选择已取消"));
-          if (signal?.aborted) { cancelled(); return; }
-          signal?.addEventListener("abort", cancelled, { once: true });
-          Promise.resolve().then(() => { checkActive(); return evaluate(value, caller, signal); }).then(resolve, reject)
-            .finally(() => { clearTimeout(decisionTimer); signal?.removeEventListener("abort", cancelled); });
-        });
-        if (!manualCodemode) automaticCodemode = await decidePiCodemode({
-          prompt: request.prompt, evaluate: boundedEvaluate, caller: `pi-auto-resources:${context.session.id}`, signal: abort.signal,
-        });
-        const result = await recommendPiResources({ ...request, catalog: inventory.catalog, evaluate: boundedEvaluate,
-          caller: `pi-auto-resources:${context.session.id}`, signal: abort.signal });
-        checkActive();
-        if (abort.signal.aborted) throw new DecisionError("TIMEOUT", "本地选择超时");
-        selected = patchPiResourceSelection({
-          skills: [...new Set([...manual.skills.filter((id) => locked.has(id)),
-            ...result.selection.skills.filter((id) => !locked.has(id))])],
-          mcpServers: [...new Set([...manual.mcpServers, ...result.selection.mcpServers])],
-        });
-        resolvePiResourceSelection(inventory, selected);
+        const hasPriorTurns = (context.session.messages?.length ?? 0) > 1;
+        const cached = sessionAutoStates.get(context.session.id);
+        const isFollowUpFlowControl = hasPriorTurns && isFlowControlOnly(request.prompt, inventory.catalog);
+
+        if (isFollowUpFlowControl) {
+          if (cached) {
+            selected = patchPiResourceSelection({
+              skills: [...new Set([...manual.skills.filter((id) => locked.has(id)),
+                ...cached.selected.skills.filter((id) => !locked.has(id))])],
+              mcpServers: [...new Set([...manual.mcpServers, ...cached.selected.mcpServers])],
+            });
+            automaticCodemode = cached.codemode;
+          } else {
+            selected = manual;
+          }
+          resolvePiResourceSelection(inventory, selected);
+        } else {
+          const boundedEvaluate: PiResourceEvaluator = (value, caller, signal) => new Promise((resolve, reject) => {
+            // Restart the watchdog for each decision, so an earlier resource cannot
+            // consume the configured backup's window on the next decision.
+            const decisionTimer = setTimeout(() => abort.abort(), options.timeoutMs ?? DECISION_CHAIN_WAIT_MS);
+            timer = decisionTimer;
+            const cancelled = (): void => reject(new DecisionError("CANCELLED", "本地选择已取消"));
+            if (signal?.aborted) { cancelled(); return; }
+            signal?.addEventListener("abort", cancelled, { once: true });
+            Promise.resolve().then(() => { checkActive(); return evaluate(value, caller, signal); }).then(resolve, reject)
+              .finally(() => { clearTimeout(decisionTimer); signal?.removeEventListener("abort", cancelled); });
+          });
+          if (!manualCodemode) automaticCodemode = await decidePiCodemode({
+            prompt: request.prompt, evaluate: boundedEvaluate, caller: `pi-auto-resources:${context.session.id}`, signal: abort.signal,
+          });
+          const result = await recommendPiResources({ ...request, catalog: inventory.catalog, evaluate: boundedEvaluate,
+            caller: `pi-auto-resources:${context.session.id}`, signal: abort.signal });
+          checkActive();
+          if (abort.signal.aborted) throw new DecisionError("TIMEOUT", "本地选择超时");
+          selected = patchPiResourceSelection({
+            skills: [...new Set([...manual.skills.filter((id) => locked.has(id)),
+              ...result.selection.skills.filter((id) => !locked.has(id))])],
+            mcpServers: [...new Set([...manual.mcpServers, ...result.selection.mcpServers])],
+          });
+          resolvePiResourceSelection(inventory, selected);
+          sessionAutoStates.set(context.session.id, { selected, codemode: automaticCodemode });
+          if (sessionAutoStates.size > 200) {
+            const oldest = sessionAutoStates.keys().next().value;
+            if (oldest) sessionAutoStates.delete(oldest);
+          }
+        }
       } catch (error) {
         checkActive();
         selected = manual; automaticCodemode = undefined;

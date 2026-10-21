@@ -1,9 +1,5 @@
-import {
-  configureNewSessionRuntime,
-  type NewSessionCreateRequest,
-  type NewSessionCreated,
-  type NewSessionRuntimeAdapter,
-} from "../react";
+import { configureNewSessionRuntime } from "../react/new-session/controller";
+import type { NewSessionCreateRequest, NewSessionCreated, NewSessionRuntimeAdapter } from "../react/new-session/types";
 import { focusInputBox, sendInputFromBox } from "./input";
 import { teamChatComposer } from "../react/ai-teams/composer-bridge";
 import { getEffectiveCwd } from "./render";

@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Alert, Flex, Spin } from "antd";
-import { WandButton, WandDialogSurface } from "./ui";
+import { WandButton } from "./ui/button";
+import { WandDialogSurface } from "./ui/dialog";
 
 interface FeatureStore<S> {
   subscribe(listener: () => void): () => void;

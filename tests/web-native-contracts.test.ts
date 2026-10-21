@@ -218,9 +218,9 @@ test("Apple clients preserve native terminal, IME, replay and transport contract
   assert.doesNotMatch(source("macos/Wand/ChatView.swift"), /WebContainerView|terminalWebModel|evaluateJavaScript/);
 });
 
-test("task board create sheets only assign agents from the doing column", () => {
-  // 语义：待办列的新建只创建任务；进行中列的新建创建后立刻派 Agent。
-  // 三端 + Web 必须一致，否则同一个面板在不同端会做出不同的事。
+test("task board create entries preserve their explicit dispatch boundaries", () => {
+  // Android delegates creation to the shared conversation flow; native task forms
+  // retain their explicit dispatch gates rather than dispatching on every create.
   includesAll("android/app/src/main/java/com/wand/app/ui/screens/TaskBoardScreen.kt", [
     'internal fun boardCreateDispatches(status: String): Boolean = status == "doing"',
     "onCreateForStatus: (String) -> Unit",
@@ -228,24 +228,12 @@ test("task board create sheets only assign agents from the doing column", () => 
     'onAdd = onCreateForStatus,',
     "contentDescription = boardGroupAddTaskDescription(status)",
   ]);
-  includesAll("android/app/src/main/java/com/wand/app/ui/screens/CreateBoardTaskDialog.kt", [
-    "initialStatus: String",
-    "var status by remember { mutableStateOf(initialStatus) }",
-    "val dispatches = boardCreateDispatches(status)",
-    "else boardCreateActionLabel(teamTarget != null, dispatches, description.trim().isNotEmpty(),",
-    "else title.isNotBlank() || description.isNotBlank()",
-    "只创建任务，稍后再开始",
-    "WandFormDialog(",
-    "WorkspaceDirectoryPicker(",
-  ]);
-  // 派工门槛：两个条件都得成立，且必须是 `&&`。Kotlin 把这条 if 写成多行（teamId/retriedTaskId
-  // 在第一行，boardCreateDispatches/description 在第二行），所以断言只容忍换行与缩进，不容忍语义变化。
-  assert.match(
-    source("android/app/src/main/java/com/wand/app/ui/screens/TaskBoardScreen.kt"),
-    /if \([\s\S]{0,80}?boardCreateDispatches\(status\)\s*&&\s*description\.isNotBlank\(\)\s*\)\s*\{/,
-    "android/app/src/main/java/com/wand/app/ui/screens/TaskBoardScreen.kt must preserve native WebView contract:" +
-      " if (boardCreateDispatches(status) && description.isNotBlank())",
-  );
+  const androidBoard = source("android/app/src/main/java/com/wand/app/ui/screens/TaskBoardScreen.kt");
+  const createEntry = androidBoard.match(/onCreateForStatus = \{ status ->([\s\S]*?)\n\s*\},/)?.[1];
+  assert.ok(createEntry, "Android board must retain its shared creation entry");
+  assert.match(createEntry, /workspaces\.firstOrNull \{ it\.id == filterWorkspaceId \}/);
+  assert.match(createEntry, /onNewConversation\(workspace\?\.cwd, workspace\?\.id, null, null, true\)/);
+  assert.doesNotMatch(createEntry, /dispatchBoardTask|createBoardTask/, "Opening creation must not execute a task");
   // 分组＋的可访问性文案已抽成纯函数；按钮必须调用它，避免退回无引号的歧义读法。
   includesAll("android/app/src/main/java/com/wand/app/ui/screens/TaskBoardPresentation.kt", [
     'internal fun boardGroupAddTaskDescription(status: String): String =',
@@ -269,7 +257,11 @@ test("task board create sheets only assign agents from the doing column", () => 
     "initialStatus: String = \"todo\"",
     "_status = State(initialValue: initialStatus)",
     "private var dispatches: Bool { wandBoardCreateDispatches(status: status) }",
-    "if wandBoardCreateDispatches(status: status),",
+    ".sheet(isPresented: $showCreate)",
+    "NewConversationView(",
+    "initialCwd: createCwd,",
+    "workspaceID: createWorkspaceID,",
+    "initialCreateTask: true",
     "private func openCreate(_ status: String)",
     "openCreate(status)",
     "dispatches && !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? \"创建并指派\" : \"创建任务\"",
@@ -288,7 +280,7 @@ test("task board create sheets only assign agents from the doing column", () => 
   includesAll("macos/Wand/TaskBoardCreateView.swift", [
     "initialStatus: String = WandBoardStatus.todo.rawValue",
     "initial.status = initialStatus",
-    "private var dispatches: Bool { draft.saveAndDispatch }",
+    "private var dispatches: Bool { draft.saveAndDispatch && draft.status != WandBoardStatus.backlog.rawValue }",
     "private var hasDescription: Bool {",
     "!draft.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty",
     '(dispatches && hasDescription ? "保存并派发" : "保存任务")',

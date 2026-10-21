@@ -3,7 +3,7 @@ import { Avatar } from "antd";
 
 import { GeneratedAvatarGlyph, generatedAvatarBackground, generatedAvatarFace } from "../ai-teams/avatar";
 import { ProviderLogo } from "../provider-logo";
-import { WandIcon } from "../ui";
+import { WandIcon } from "../ui/icons";
 import { workspaceSessionProvider } from "./session-order";
 import type { WorkspaceSessionTeamChat } from "./types";
 

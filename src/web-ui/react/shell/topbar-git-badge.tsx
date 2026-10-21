@@ -9,7 +9,8 @@
 
 import * as React from "react";
 
-import { WandButton, WandIcon } from "../ui";
+import { WandButton } from "../ui/button";
+import { WandIcon } from "../ui/icons";
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
 
 export interface TopbarGitBadgeProps {

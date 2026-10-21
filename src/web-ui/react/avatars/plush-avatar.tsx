@@ -89,6 +89,76 @@ const onOnline = () => { recoverRuntime(true); };
 /** Explicit resource retry only; this never resets WebGL or changes avatar data. */
 export function retryPlushAvatarRuntime(): boolean { return recoverRuntime(false); }
 
+// Ambient avatars render the static SVG immediately, but must not race the
+// first-screen runtime/API work with a 155KB script, WebGL context and model
+// compilation. Wait for the load event (bounded), a short quiet window, then an
+// idle slice. Interactive authoring previews bypass this and stay immediate.
+const AMBIENT_DEADLINE_MS = 2_500;
+const AMBIENT_SETTLE_MS = 650;
+const AMBIENT_IDLE_TIMEOUT_MS = 1_000;
+let ambientCriticalDone = false;
+let ambientGateOpen = false;
+let ambientGateArmed = false;
+let ambientDeadlineTimer = 0;
+let ambientSettleTimer = 0;
+let ambientIdleScheduled = false;
+const ambientWaiters = new Set<() => void>();
+
+function ambientOnVisible(): void { if (!document.hidden) ambientFinish(); }
+
+function ambientFinish(): void {
+  if (ambientGateOpen) return;
+  if (!ambientWaiters.size) { ambientGateArmed = false; return; }
+  if (document.hidden) {
+    document.addEventListener("visibilitychange", ambientOnVisible, { once: true });
+    return;
+  }
+  if (ambientIdleScheduled) return;
+  ambientIdleScheduled = true;
+  const open = () => {
+    ambientIdleScheduled = false;
+    if (ambientGateOpen) return;
+    if (!ambientWaiters.size) { ambientGateArmed = false; return; }
+    if (document.hidden) {
+      document.addEventListener("visibilitychange", ambientOnVisible, { once: true });
+      return;
+    }
+    ambientGateOpen = true;
+    const waiting = [...ambientWaiters]; ambientWaiters.clear();
+    for (const run of waiting) run();
+  };
+  if (typeof window.requestIdleCallback === "function") window.requestIdleCallback(open, { timeout: AMBIENT_IDLE_TIMEOUT_MS });
+  else window.setTimeout(open, 0);
+}
+
+function ambientCriticalFinished(): void {
+  if (ambientCriticalDone) return;
+  ambientCriticalDone = true;
+  window.clearTimeout(ambientDeadlineTimer); ambientDeadlineTimer = 0;
+  window.removeEventListener("load", ambientCriticalFinished);
+  ambientSettleTimer = window.setTimeout(ambientFinish, AMBIENT_SETTLE_MS);
+}
+
+function armAmbientGate(): void {
+  if (ambientGateOpen || ambientGateArmed || !ambientWaiters.size) return;
+  ambientGateArmed = true;
+  if (ambientCriticalDone || document.readyState === "complete") {
+    ambientCriticalDone = true;
+    ambientSettleTimer = window.setTimeout(ambientFinish, AMBIENT_SETTLE_MS);
+    return;
+  }
+  window.addEventListener("load", ambientCriticalFinished, { once: true });
+  ambientDeadlineTimer = window.setTimeout(ambientCriticalFinished, Math.max(0, AMBIENT_DEADLINE_MS - performance.now()));
+}
+
+/** Returns a cancel that only removes this avatar; the shared download starts when the gate opens. */
+function waitForAmbientInit(run: () => void): () => void {
+  if (ambientGateOpen) { run(); return () => {}; }
+  ambientWaiters.add(run);
+  armAmbientGate();
+  return () => { ambientWaiters.delete(run); };
+}
+
 const styles = String.raw`
 .wand-plush-avatar{position:relative;display:inline-grid;flex:none;place-items:center;overflow:visible;isolation:isolate;vertical-align:middle;line-height:0}
 .wand-plush-avatar canvas,.wand-plush-avatar-fallback{position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none}
@@ -187,13 +257,23 @@ function PlushFallback({ config }: { config: PlushRenderConfig }): React.ReactEl
   </svg>;
 }
 
+/** Reply history needs identity, not a canvas or a live render subscription. */
+export function StaticPlushAvatar({ config, size = 32, className = "" }: { config: PlushRenderConfig; size?: number; className?: string }): React.ReactElement {
+  React.useEffect(() => { installStyleSheet("wand-plush-avatar-styles", styles); }, []);
+  return <span className={`wand-plush-avatar ${className}`.trim()} data-plush-avatar="" data-avatar-config={JSON.stringify(config)}
+    data-renderer="static" aria-hidden="true" style={{ width: size, height: size }}>
+    <PlushFallback config={config}/>
+  </span>;
+}
+
 /** Shared real 3D identity. Speaking is an explicit audio state, never inferred from task activity. */
-export function PlushAvatar({ config, size = 32, className = "", speaking = false, thinking = false, fileActivity = "idle", interactive = false, onRendererChange }: {
+export function PlushAvatar({ config, size = 32, className = "", speaking = false, thinking = false, loading = false, fileActivity = "idle", interactive = false, onRendererChange }: {
   config: PlushRenderConfig;
   size?: number;
   className?: string;
   speaking?: boolean;
   thinking?: boolean;
+  loading?: boolean;
   fileActivity?: import("../../composer-avatar-activity.js").AvatarFileActivity;
   interactive?: boolean;
   onRendererChange?(renderer: "loading" | "webgl" | "fallback", reason?: PlushFallbackReason): void;
@@ -201,7 +281,7 @@ export function PlushAvatar({ config, size = 32, className = "", speaking = fals
   const canvas = React.useRef<HTMLCanvasElement>(null);
   const handle = React.useRef<PlushRenderHandle | null>(null);
   const reducedMotion = useReducedMotion();
-  const [renderer, setRenderer] = React.useState<"loading" | "webgl" | "fallback">("loading");
+  const [renderer, setRenderer] = React.useState<"deferred" | "loading" | "webgl" | "fallback">("deferred");
   const [activity, setActivity] = React.useState("static");
   const [fallbackReason, setFallbackReason] = React.useState<PlushFallbackReason | undefined>();
   const configKey = JSON.stringify(config);
@@ -217,14 +297,17 @@ export function PlushAvatar({ config, size = 32, className = "", speaking = fals
     let attaching = false;
     let resourceFailed = false;
     let reported = "";
+    let cancelWait: (() => void) | null = null;
+    let cancelVisibility: (() => void) | null = null;
+    let observer: IntersectionObserver | null = null;
     const notifyRenderer = (next: "loading" | "webgl" | "fallback", reason?: PlushFallbackReason) => {
       const key = `${next}:${reason ?? ""}`;
       if (reported !== key) { reported = key; reportRenderer.current?.(next, reason); }
     };
-    notifyRenderer("loading");
     const attach = () => {
       if (!alive || attaching || handle.current) return;
       attaching = true; resourceFailed = false;
+      observer?.disconnect();
       setRenderer("loading"); setActivity("static"); setFallbackReason(undefined); notifyRenderer("loading");
       loadRuntime().then(runtime => {
         attaching = false;
@@ -234,9 +317,28 @@ export function PlushAvatar({ config, size = 32, className = "", speaking = fals
         });
       }, () => { attaching = false; resourceFailed = true; if (alive) { setRenderer("fallback"); setActivity("fallback"); setFallbackReason("runtime-load"); notifyRenderer("fallback", "runtime-load"); } });
     };
-    // Hidden lists do not download WebGL or acquire a context until an avatar becomes visible.
-    const observer = new IntersectionObserver(entries => {
-      if (entries.some(entry => entry.isIntersecting)) { observer.disconnect(); attach(); }
+    const attachWhenAllowed = () => {
+      if (!alive || attaching || handle.current) return;
+      cancelVisibility?.(); cancelVisibility = null;
+      if (document.hidden) {
+        const visible = () => {
+          if (document.hidden) return;
+          document.removeEventListener("visibilitychange", visible);
+          cancelVisibility = null; attachWhenAllowed();
+        };
+        document.addEventListener("visibilitychange", visible);
+        cancelVisibility = () => document.removeEventListener("visibilitychange", visible);
+        return;
+      }
+      if (interactive || ambientGateOpen) { attach(); return; }
+      if (cancelWait) return;
+      cancelWait = waitForAmbientInit(() => { cancelWait = null; attach(); });
+    };
+    // Hidden lists do not download WebGL or acquire a context until an avatar
+    // becomes visible; leaving the viewport during the deferred phase cancels it.
+    observer = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) { attachWhenAllowed(); return; }
+      cancelWait?.(); cancelWait = null;
     }, { rootMargin: "48px" });
     observer.observe(node);
     const retry = () => { if (resourceFailed) attach(); };
@@ -245,7 +347,9 @@ export function PlushAvatar({ config, size = 32, className = "", speaking = fals
     return () => {
       recoveryListeners.delete(retry);
       if (!recoveryListeners.size) window.removeEventListener("online", onOnline);
-      alive = false; observer.disconnect(); handle.current?.dispose(); handle.current = null;
+      alive = false; observer?.disconnect(); cancelWait?.(); cancelWait = null;
+      cancelVisibility?.(); cancelVisibility = null;
+      handle.current?.dispose(); handle.current = null;
     };
   }, []);
   React.useEffect(() => { handle.current?.update(latest.current); }, [configKey, size, speaking, thinking, fileActivity, interactive, reducedMotion]);
@@ -255,7 +359,10 @@ export function PlushAvatar({ config, size = 32, className = "", speaking = fals
     title={renderer === "fallback" ? fallbackReason === "webgl-unavailable" ? "静态头像 · 当前浏览器不支持 3D"
       : fallbackReason === "runtime-load" ? "静态头像 · 3D 组件未能加载" : "静态头像 · 3D 暂不可用" : undefined}
     aria-hidden="true" style={{ width: size, height: size }}>
-    <PlushFallback config={config}/><canvas ref={canvas} width={size} height={size}/>
-    {fileActivity !== "idle" ? <AvatarFilePropsFallback activity={fileActivity} pawColor={isPlushCatAvatar(config) ? plushCatAppearance(config).coat : isPlushDogAvatar(config) ? "#cb803f" : PLUSH_COLORS.find(option => option.id === config.color)?.color ?? "#ecb6a3"}/> : thinking ? <AvatarThinking/> : null}
+    {/* 3D 渲染接管后，静态兜底被 CSS 隐藏（visibility:hidden），却仍占着几十个节点。
+        同一页有几十个头像（会话列表、群拼图、消息行），隐藏的 SVG 直接不进 DOM；
+        渲染器退回静态时 state 变化会把它挂回来。矢量画面本身不变（仍是内联 SVG）。 */}
+    {renderer === "webgl" ? null : <PlushFallback config={config}/>}<canvas ref={canvas} width={size} height={size}/>
+    {fileActivity !== "idle" ? <AvatarFilePropsFallback activity={fileActivity} pawColor={isPlushCatAvatar(config) ? plushCatAppearance(config).coat : isPlushDogAvatar(config) ? "#cb803f" : PLUSH_COLORS.find(option => option.id === config.color)?.color ?? "#ecb6a3"}/> : loading || thinking || renderer === "loading" ? <AvatarThinking/> : null}
   </span>;
 }

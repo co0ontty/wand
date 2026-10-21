@@ -167,9 +167,13 @@ test("one new-work page handles conversation, CLI terminal, shell, task binding 
   await b.click('[role=option][data-menu-id$="page-model"]');
   await b.click("textarea"); await b.wait("document.activeElement===document.querySelector('textarea')");
   await b.send("Input.insertText", { text: "新工作的真实草稿（隔离测试）" });
+  const beforeNewline = writes.length;
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 8 });
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 8 });
+  assert.equal(writes.length, beforeNewline, "Shift+Enter does not start work");
   await b.screenshot(out + "/new-work-desktop.png");
   refusal = true;
-  await b.click('.conversation-submit');
+  await b.key("Enter");
   await b.wait("!!document.querySelector('[role=alert]')");
   assert.ok(await b.evaluate("document.querySelector('textarea').value.includes('真实草稿')"));
   assert.equal(await b.evaluate("Math.round(document.querySelector('.conversation-submit').getBoundingClientRect().bottom)"), Math.round(layout.submit.bottom), "failure feedback cannot move the send slot");

@@ -177,7 +177,7 @@ test("发送与停止是同一颗按钮的相位模型，结果原位显示不�
   assert.match(renderSrc, /id="send-input-button"[^\n]*data-phase="idle"[^\n]*aria-label="发送消息"/);
   assert.doesNotMatch(renderSrc, /composer-send-glyph/);
   assert.match(inputSrc, /type ComposerSendPhase = "idle" \| "sending" \| "sent" \| "failed" \| "running";/);
-  assert.match(inputSrc, /sendBtn\.setAttribute\("data-phase", sendPhase\)/);
+  assert.match(inputSrc, /if \(sendBtn\.dataset\.phase !== sendPhase\) sendBtn\.dataset\.phase = sendPhase;/);
   const controls = readFileSync(new URL("../src/web-ui/browser/library-buttons.tsx", import.meta.url), "utf8");
   assert.match(controls, /loading=\{snapshot\.phase === "sending"\}/);
   assert.match(controls, /danger=\{snapshot\.phase === "running" \|\| snapshot\.phase === "failed"\}/);

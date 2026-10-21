@@ -1,4 +1,15 @@
-export type WandTaskStatus = "todo" | "doing" | "done" | "archived";
+export type WandTaskStatus = "backlog" | "todo" | "doing" | "done" | "archived";
+
+export const WAND_TASK_STATUSES: readonly WandTaskStatus[] = ["backlog", "todo", "doing", "done", "archived"];
+
+export function isWandTaskStatus(value: unknown): value is WandTaskStatus {
+  return typeof value === "string" && WAND_TASK_STATUSES.includes(value as WandTaskStatus);
+}
+
+/** An explicit execution transition promotes backlog work to doing. */
+export function statusAfterWandTaskDispatch(status: WandTaskStatus): WandTaskStatus {
+  return status === "backlog" || status === "todo" ? "doing" : status;
+}
 
 /** 已确认或已归档：不再算未完成，也不会被未分组会话同步重新打开。 */
 export function isClosedWandTaskStatus(status: WandTaskStatus): boolean {
@@ -179,11 +190,28 @@ export interface WandIterationPrompt {
   createdAt: string;
 }
 
+export interface TaskCommentResultAnchor {
+  /** Exact structured request identity, persisted on the corresponding user turn. */
+  requestId: string;
+  /** Digest of the exact user turn at capture time; proves the anchored request content was not rewritten. */
+  startFingerprint: string;
+  /** Digest of the ordered frozen result range; detects rewritten/compacted transcript history. */
+  fingerprint: string;
+  /** Absolute index in the structured session message array for this request's user turn. */
+  startIndex: number;
+  /** Exclusive, frozen end index. Null while this dispatch's first turn is still running. */
+  endIndex: number | null;
+  /** Runtime-owned terminal outcome, independent from user acceptance. */
+  outcome: "done" | "failed" | "stopped" | null;
+}
+
 export interface TaskCommentDispatch {
   employeeId: string;
   employeeName: string;
   state: "pending" | "accepted" | "failed" | "unknown";
   sessionId: string | null;
+  /** Missing for older dispatches whose exact execution round cannot be proven. */
+  resultAnchor?: TaskCommentResultAnchor | null;
   /** Projection from the owning runtime, never inferred from model text. */
   status?: string;
   error: string | null;
@@ -245,4 +273,9 @@ export interface WandTask {
 
 export interface WandTaskDetail extends WandTask {
   sessionIds: string[];
+}
+
+/** Read-model DTO enrichment for task-board lists; absent only on older server responses. */
+export interface WandTaskListed extends WandTaskDetail {
+  commentCount?: number;
 }

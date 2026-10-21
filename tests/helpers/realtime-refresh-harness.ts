@@ -173,6 +173,9 @@ export function createRealtimeSessionHarness() {
     localStorage: { getItem: () => null, setItem: noop, removeItem: noop } };
   const dependencies = { "./state": { state, composer, composerQueue: { advance: noop }, writeStoredBoolean: noop },
     "./session-reads": { createSessionReads }, "./message-reconciliation": reconciliation,
+    // Reconnect resync is exercised by the snapshot tests; keep this read
+    // pending so synthetic frames remain the authoritative fixture here.
+    "../react/session-list-snapshot": { loadSessionList: () => new Promise(() => {}), invalidateSessionList: noop },
     "../../session-completion-state.js": completionState,
     "../react/http-adapter": { parseJsonResponse },
     "../react/task-changes": { notifyTasksChanged: () => { taskChanges++; } },

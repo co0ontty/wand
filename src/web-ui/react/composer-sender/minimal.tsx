@@ -1,6 +1,6 @@
 import * as React from "react";
 import { flushSync } from "react-dom";
-import { WandButton } from "../ui/index.js";
+import { WandButton } from "../ui/button.js";
 import { hasOpenOwnedPopupSurface, hasOpenPopupSurface, isWandPopupOwnedBy } from "../ui/popup-lifecycle.js";
 
 /** Presentation only: the original editor, draft and delivery owner stay mounted. */

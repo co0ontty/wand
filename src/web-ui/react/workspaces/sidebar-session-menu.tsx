@@ -1,8 +1,9 @@
 import { isArchiveBlocked } from "../../../archive-policy.js";
 import { isSystemAiCall } from "../../../system-ai-call.js";
 import * as React from "react";
-import { WandIcon } from "../ui";
+import { WandIcon } from "../ui/icons";
 import { describeError } from "../errors";
+import { copyTextToPlatformClipboard } from "../file-preview/platform-adapter";
 import { SidebarRowMenu } from "./sidebar-row-menu";
 import { useSidebarPopupState } from "./sidebar-popup-owner";
 import { useSessionMove } from "./session-move";
@@ -65,6 +66,7 @@ export function SidebarSessionMenu({ row, session, label, disabled, intoNewTask,
       onOpenChange: keys => { setMoveOpen(keys.includes("move")); if (keys.includes("move")) setError(""); },
       items: [
         { key: "open", disabled: busy, icon: <WandIcon name="chat"/>, label: "打开会话" },
+        ...(session.cwd?.trim() ? [{ key: "copy-cwd", disabled: busy, icon: <WandIcon name="copy"/>, label: "复制工作目录" }] : []),
         ...(!archived && !systemCall ? [{ key: "move", disabled: busy, icon: <WandIcon name="folder"/>, label: "移动到任务",
           popupClassName: "workspace-session-move-menu", children: [
             { key: "move-context", type: "group" as const, label: "保留运行目录", children: [] },
@@ -87,6 +89,10 @@ export function SidebarSessionMenu({ row, session, label, disabled, intoNewTask,
         if (busy) return;
         setError("");
         if (key === "open") { setOpen(false); onOpen(); }
+        else if (key === "copy-cwd" && session.cwd?.trim()) {
+          void copyTextToPlatformClipboard(session.cwd).then(() => setOpen(false))
+            .catch(cause => setError(describeError(cause, "无法复制工作目录。")));
+        }
         else if (key === "archive" || key === "delete") void run(key);
         else if (key === "new-task") void move.summarize();
         else if (key === "retry") move.retry();

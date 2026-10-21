@@ -1,10 +1,11 @@
-import { WandDropdownMenu, WandDropdownMenuTrigger, WandDropdownMenuContent, WandDropdownMenuItem, WandDropdownMenuSeparator } from "../ui";
+import { WandDropdownMenuItem } from "../ui/dropdown-menu";
+import { QuickTerminalChrome } from "../quick-terminal/action";
+import { WorkbarActions, WorkbarLeading } from "../shell/workbar-actions";
 // 任务顶部的“工作窗口”标签栏。每个顶层 Tab 是一个工作窗口：默认含一个终端；
 // 终端移入另一窗口后，来源空 Tab 消失、目标 Tab 内部转为 split。单窗格继续复用全局终端，
 // 只有活动工作窗口为 split 时才由 WorkspaceWindow 挂载多终端池。
 
 import * as React from "react";
-import { CopyPageLink } from "../ui/copy-page-link";
 
 import { workspaceContextStore } from "./workspace-context";
 import { workspacesStore } from "./controller";
@@ -21,8 +22,7 @@ import type {
 } from "./types";
 import { newSessionController } from "../new-session/controller";
 import { useUiDispatch, useUiStoreSnapshot } from "../shell/ui-store-react";
-import { TopbarGitBadge } from "../shell/topbar-git-badge";
-import { WorkspaceDesktopActionsChrome, WorkspaceMoreButton, WorkspaceTabBarChrome } from "./workspace-tab-chrome";
+import { WorkspaceTabBarChrome } from "./workspace-tab-chrome";
 import { StandaloneSessionTabBar } from "./standalone-session-tab-bar";
 import {
   activateWorkWindow,
@@ -59,7 +59,7 @@ function windowPresentation(
   };
 }
 
-export function WorkspaceTabBar(): React.ReactElement | null {
+export function WorkspaceTabBar({ fallback = null }: { fallback?: React.ReactElement | null } = {}): React.ReactElement | null {
   const context = React.useSyncExternalStore(
     workspaceContextStore.subscribe,
     workspaceContextStore.getSnapshot,
@@ -76,8 +76,6 @@ export function WorkspaceTabBar(): React.ReactElement | null {
   React.useEffect(() => {
     setMoving(null);
   }, [context.taskId]);
-
-  React.useEffect(() => () => newSessionController.close(), []);
 
   React.useEffect(() => {
     if (!moving) return;
@@ -109,11 +107,11 @@ export function WorkspaceTabBar(): React.ReactElement | null {
 
   // 窄屏（iOS / Android 浏览器）不放会话标签。PTY 与终端页以前仍留着这排，
   // 从左向右滑会沿历史切到上一个会话；现在滑回去的是进入页面前的那一页。
-  if (mobile) return null;
-  if (!context.taskId) return <StandaloneSessionTabBar/>;
+  if (mobile) return fallback;
+  if (!context.taskId) return <StandaloneSessionTabBar fallback={fallback}/>;
   // 任务还没有任何工作窗口：让主区全页 CLI 选择桌面单独出现，
   // 避免空标签栏和选择器叠在一起。
-  if (taskLayout.windows.length === 0) return null;
+  if (taskLayout.windows.length === 0) return fallback;
 
   const selectWindow = (window: WorkWindowLayout) => {
     const rt = runtime();
@@ -175,33 +173,22 @@ export function WorkspaceTabBar(): React.ReactElement | null {
   const activeWindow = taskLayout.windows.find((window) => window.id === taskLayout.activeWindowId);
 
   return (
-    <WorkspaceTabBarChrome mobile={mobile} taskName={context.taskName} activeWindowId={taskLayout.activeWindowId}
+    <QuickTerminalChrome><WorkspaceTabBarChrome mobile={mobile} taskName={context.taskName} activeWindowId={taskLayout.activeWindowId}
       windows={taskLayout.windows.map(window => ({ id: window.id, ...windowPresentation(window, sessionById),
+        titleGenerating: layoutSessionIds(window.layout).includes(selectedId ?? "") && snapshot.topbar.titleGenerating,
         containsMoving: Boolean(moving && layoutSessionIds(window.layout).includes(moving.sessionId)) }))}
       movingDir={moving?.dir} closingWindowId={closingWindowId}
       onSelectWindow={id => { const window = taskLayout.windows.find(window => window.id === id); if (window) selectWindow(window); }}
       onCloseWindow={id => { const window = taskLayout.windows.find(window => window.id === id); if (window) void closeWindow(window); }}
       onNewSession={openNewSession} onCancelMove={() => setMoving(null)}
-      onToggleMove={dir => moving?.dir === dir ? setMoving(null) : beginMove(dir)}
-      actions={mobile ? <WandDropdownMenu>
-        <WandDropdownMenuTrigger render={<WorkspaceMoreButton/>}/>
-        <WandDropdownMenuContent align="end" aria-label="工作窗口操作">
-          <CopyPageLink menuItem label="复制窗口链接"/>
-          <WandDropdownMenuItem icon="plus" onSelect={openNewSession}>新建 Agent 或空白终端</WandDropdownMenuItem>
-          <WandDropdownMenuItem icon="explorer" onSelect={() => void dispatch({ type: "layout.files.toggle" })}>文件</WandDropdownMenuItem>
-          {snapshot.topbar.git ? <WandDropdownMenuItem icon="git" onSelect={() => void dispatch({ type: "topbar.gitCommit" })}>快捷提交 · {snapshot.topbar.git.branch}</WandDropdownMenuItem> : null}
-          {taskLayout.windows.length > 1 ? <>
-            <WandDropdownMenuSeparator/>
-            <WandDropdownMenuItem icon="splitHorizontal" onSelect={() => beginMove("h")}>移动终端并左右分屏</WandDropdownMenuItem>
-            <WandDropdownMenuItem icon="splitVertical" onSelect={() => beginMove("v")}>移动终端并上下分屏</WandDropdownMenuItem>
-          </> : null}
-          <WandDropdownMenuSeparator/>
-          {activeWindow ? <WandDropdownMenuItem icon="close" disabled={closingWindowId !== null} onSelect={() => void closeWindow(activeWindow)}>关闭当前工作窗口</WandDropdownMenuItem> : null}
-          <WandDropdownMenuItem icon="close" onSelect={handleClose}>关闭任务标签组</WandDropdownMenuItem>
-        </WandDropdownMenuContent>
-      </WandDropdownMenu> : <WorkspaceDesktopActionsChrome onFiles={() => void dispatch({ type: "layout.files.toggle" })} onClose={handleClose}>
-        <CopyPageLink label="复制窗口链接"/>
-        <TopbarGitBadge id="workspace-tab-git-badge" className="workspace-tab-git"/>
-      </WorkspaceDesktopActionsChrome>}/>
+      leading={<WorkbarLeading/>}
+      actions={<WorkbarActions windowActions={close => <>
+        {taskLayout.windows.length > 1 && <>
+          <WandDropdownMenuItem icon="splitHorizontal" onSelect={() => { close(); beginMove("h"); }}>移动当前会话并左右分屏</WandDropdownMenuItem>
+          <WandDropdownMenuItem icon="splitVertical" onSelect={() => { close(); beginMove("v"); }}>移动当前会话并上下分屏</WandDropdownMenuItem>
+        </>}
+        {activeWindow && <WandDropdownMenuItem icon="close" disabled={closingWindowId !== null} onSelect={() => { close(); void closeWindow(activeWindow); }}>关闭当前工作窗口</WandDropdownMenuItem>}
+        <WandDropdownMenuItem icon="back" onSelect={() => { close(); handleClose(); }}>退出任务标签组</WandDropdownMenuItem>
+      </>}/>}/></QuickTerminalChrome>
   );
 }

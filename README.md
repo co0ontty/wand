@@ -15,6 +15,8 @@ Wand is a web console for remotely accessing and managing local CLI tools from a
 
 The browser password manager extension source lives in `browser-extension/`.
 
+See [tmux execution and recovery](docs/tmux-execution.md) for CLI ownership, execution switches, and safe restart behavior.
+
 ### Installation
 
 Choose one installation method:

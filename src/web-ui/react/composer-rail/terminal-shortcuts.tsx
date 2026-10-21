@@ -1,7 +1,9 @@
 import * as React from "react";
 import { createPortal } from "react-dom";
 import { Button, Flex } from "../design-library";
-import { WandButton, WandIcon, WandPopover } from "../ui/index.js";
+import { WandButton } from "../ui/button.js";
+import { WandIcon } from "../ui/icons.js";
+import { WandPopover } from "../ui/popover.js";
 import { ptyInputState } from "../../pty-input-state.js";
 
 /** Priority is stable; resizing shows the largest prefix that fits. */

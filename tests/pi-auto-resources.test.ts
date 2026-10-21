@@ -363,3 +363,40 @@ test("HTTP auto mode accepts immediately, queues during selection, recomputes ea
   assert.ok(cancelled.messages?.at(-1)?.completedAt);
   await tick(); assert.equal(seen.length, 2, "stop during matching cannot launch another process");
 });
+
+test("flow-control follow-up inputs inherit previous round selection without re-evaluating", async () => {
+  let evaluateCalls = 0;
+  const runner = withAutomaticPiResources(immediate(() => {}), {}, {
+    inventory: async () => inventory,
+    evaluate: () => async (raw) => {
+      evaluateCalls++;
+      return decision(requestedResource(raw) === "auto-skill", raw);
+    },
+  });
+
+  // First substantive turn: should evaluate
+  const sessionInput = context();
+  sessionInput.session.id = "session-flow-test-1";
+  sessionInput.prompt = "设计一个数据大屏";
+  sessionInput.session.messages = [{ role: "user", content: [{ type: "text", text: "设计一个数据大屏" }] }];
+  const observer1 = observe();
+  const res1 = await runner.start(sessionInput, observer1).completion;
+  assert.ok(evaluateCalls > 0, "first substantive round must evaluate");
+  assert.deepEqual(res1.state.resourceSelection?.skills, ["manual-pin", "auto-skill"]);
+
+  const initialCalls = evaluateCalls;
+
+  // Second follow-up turn with flow-control input ("继续"): should inherit without evaluating
+  const followUpInput = context();
+  followUpInput.session.id = "session-flow-test-1";
+  followUpInput.prompt = "继续";
+  followUpInput.session.messages = [
+    { role: "user", content: [{ type: "text", text: "设计一个数据大屏" }] },
+    { role: "assistant", content: [{ type: "text", text: "好的，我已经完成第一步。" }] },
+    { role: "user", content: [{ type: "text", text: "继续" }] },
+  ];
+  const observer2 = observe();
+  const res2 = await runner.start(followUpInput, observer2).completion;
+  assert.equal(evaluateCalls, initialCalls, "follow-up '继续' must not trigger any new evaluation calls");
+  assert.deepEqual(res2.state.resourceSelection?.skills, ["manual-pin", "auto-skill"], "must inherit previous round's selected skills");
+});

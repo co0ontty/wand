@@ -224,6 +224,7 @@ export class GrokRunner implements StructuredRunnerAdapter {
       env: context.env,
       observer,
       execHost: this.execHost,
+      requestId: context.session.structuredState?.activeRequestId ?? undefined,
       spawnProcess: this.spawnProcess,
       createState: () => state,
       processLine: (line) => {

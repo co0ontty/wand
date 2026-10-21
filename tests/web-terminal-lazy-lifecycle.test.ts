@@ -74,6 +74,9 @@ class Element {
   get isConnected(): boolean { return this.root || !!this.parentNode?.isConnected; }
   classList = { add: noop, remove: noop, contains: () => false, toggle: noop };
   get parentElement() { return this.parentNode; }
+  closest(selector: string): Element | null {
+    return selector.startsWith(".") && this.className.split(" ").includes(selector.slice(1)) ? this : this.parentNode?.closest(selector) ?? null;
+  }
   getBoundingClientRect() { return { width: this.clientWidth, height: this.clientHeight }; }
   insertBefore(child: Element, before: Element) { child.remove(); child.parentNode = this; this.children.splice(this.children.indexOf(before), 0, child); return child; }
   appendChild(child: Element) { child.remove(); child.parentNode = this; this.children.push(child); return child; }
@@ -371,7 +374,7 @@ test("accepted creation leaves the conversation before selecting its session whi
 });
 
 
-test("only the first active empty task projects its future window bar and releases the temporary slot", () => {
+test("future task projects one header without fetching or changing current task layout", () => {
   for (const variant of ["empty", "unknown", "different", "split", "existing", "throw"]) {
     const h = terminalHarness(); const main = new Element(); main.root = true; main.appendChild(h.output);
     const input = main.appendChild(new Element()); input.className = "input-panel";
@@ -381,25 +384,22 @@ test("only the first active empty task projects its future window bar and releas
     h.state.terminal = { cols: 180, rows: 39 };
     let projections = 0, proposals = 0;
     const api = load("terminal", { ...h.dependencies,
-      "./ui-store-bridge": { browserEnvironment: () => ({ width:390,height:900,coarsePointer:false,online:true,embedTerminal:false,nativeInput:false,backToNative:false,switchServer:false }) },
-      "../react/shell/legacy-snapshot": { deriveLegacyUiSnapshot: () => ({viewport:{mobile:true}}) },
+      "../react/shell/legacy-snapshot": { deriveLegacyUiSnapshot: () => ({viewport:{mobile:false}}) },
       "../react/workspaces/workspace-context": { workspaceContextStore: { getSnapshot: () => ({ taskId: variant === "different" ? "other-task" : "self-task", taskName: "own-task", layout: variant === "split" ? { windows: [{}] } : null }) } },
-      "../react/workspaces/task-detail-store": { taskDetailStore: { getSnapshot: () => variant === "unknown" ? null : { sessions: [], layout: null } } },
       "../react/shell/terminal-creation-measurement": { prepareTerminalCreationComposer: () => noop, measureTerminalCreationWorkspaceTabbar: (props: any) => {
         projections++; assert.equal(props.session.workspaceTaskId, "self-task"); assert.equal(props.session.provider, undefined);
-        assert.equal(props.mobile, true); assert.equal(props.taskName, "own-task"); return 57;
+        assert.equal(props.mobile, false); return 56;
       } },
       "./terminal-fit": { proposeTerminalDimensions: () => {
         proposals++; const slots = main.children.filter(n => n.dataset.terminalCreationSpace);
-        assert.equal(slots.length, variant === "empty" || variant === "throw" ? 1 : 0);
+        assert.equal(slots.length, variant === "existing" ? 0 : 1);
         if (variant === "throw") throw new Error("proposal failure");
         return { cols: 46, rows: 31 };
       } },
-    }, { ...h.globals, window: { ...h.globals.window, innerWidth: 390 }, getComputedStyle: () => ({ display: "none" }) });
+    }, h.globals);
     if (variant === "throw") assert.throws(() => api.measureTerminalCreationDimensions({ kind: "shell", cwd: "/own", workspaceTaskId: "self-task" }), /proposal failure/);
-    else { const dimensions = api.measureTerminalCreationDimensions({ kind: "shell", cwd: "/own", workspaceTaskId: "self-task" }); assert.equal(dimensions.rows, 31); }
-    assert.equal(projections, variant === "empty" || variant === "throw" ? 1 : 0);
-    assert.equal(proposals, 1);
+    else assert.equal(api.measureTerminalCreationDimensions({ kind: "shell", cwd: "/own", workspaceTaskId: "self-task" }).rows, 31);
+    assert.equal(projections, 1); assert.equal(proposals, 1);
     assert.equal(main.children.filter(n => n.dataset.terminalCreationSpace).length, 0);
     assert.equal(h.output.style.getPropertyValue("display"), "");
     assert.equal(input.style.getPropertyValue("display"), "none");
@@ -434,48 +434,48 @@ test("future PTY input presentation is released on proposal failure without resi
   }
 });
 
-test("ungrouped creation reserves its native tab row once and restores old task chrome without resizing", () => {
-  for (const variant of ["first", "existing", "hidden", "from-task", "projection-throw", "proposal-throw", "no-context"]) {
-    const h = terminalHarness(), main = new Element(); main.root = true; main.appendChild(h.output);
-    const header = variant === "from-task" ? null : main.appendChild(new Element());
-    if (header) { header.className = "main-header-row"; header.style.setProperty("height", "80px", "important"); }
-    const bar = ["existing", "hidden"].includes(variant) ? main.appendChild(new Element()) : null;
-    if (bar) { bar.className = "workspace-tab-bar"; bar.dataset.sessionTabs = "standalone"; bar.style.setProperty("display", variant === "hidden" ? "none" : "flex", "important"); }
-    const oldTask = variant === "from-task" ? [main.appendChild(new Element()), main.appendChild(new Element())] : [];
-    for (const [index, node] of oldTask.entries()) { node.className = index ? "workspace-tab-bar" : "workspace-mobile-navigation"; node.style.setProperty("display", "flex"); }
+test("ungrouped creation measures one outer header, preserves old chrome and never resizes the old session", () => {
+  for (const variant of ["first", "inline", "outer", "mobile", "projection-throw", "proposal-throw", "no-context"]) {
+    const h = terminalHarness(), frame = new Element(), main = new Element();
+    frame.root = true; frame.className = "quick-terminal-workspace"; frame.appendChild(main); main.appendChild(h.output);
+    const header = ["outer", "mobile", "no-context"].includes(variant) ? frame.appendChild(new Element())
+      : variant === "inline" ? main.appendChild(new Element()) : null;
+    if (header) { header.className = variant === "inline" ? "main-header-row" : "quick-terminal-toolbar"; header.style.setProperty("height", "80px", "important"); }
+    const oldSplit = main.appendChild(new Element()); oldSplit.className = "workspace-window"; oldSplit.style.setProperty("display", "flex");
     h.state.terminal = { cols: 180, rows: 37 };
     let headerProjections = 0, tabProjections = 0, proposals = 0;
     const api = load("terminal", { ...h.dependencies,
+      "../react/shell/legacy-snapshot": { deriveLegacyUiSnapshot: () => ({ viewport: { mobile: variant === "mobile" } }) },
       "../react/shell/terminal-creation-measurement": {
         prepareTerminalCreationComposer: () => noop,
-        measureTerminalCreationTopbar: (_snapshot: any, width: number) => { headerProjections++; assert.equal(width, 390); return 80; },
+        measureTerminalCreationTopbar: () => { headerProjections++; return 60; },
         measureTerminalCreationStandaloneTabbar: (props: any, width: number) => {
-          tabProjections++; assert.equal(width, 390); assert.equal(props.mobile, true);
-          assert.equal(props.session.sessionKind, "pty"); assert.equal(props.session.status, "running");
-          assert.equal(props.session.cwd, "/own-future-directory"); assert.equal(props.session.provider, undefined);
-          assert.equal(props.session.workspaceTaskId, undefined);
+          tabProjections++; assert.equal(width, 390); assert.equal(props.mobile, false);
+          assert.equal(props.session.sessionKind, "pty"); assert.equal(props.session.cwd, "/own-future-directory");
           if (variant === "projection-throw") throw new Error("native tab projection failure");
-          return 57;
+          return 56;
         },
       },
       "./terminal-fit": { proposeTerminalDimensions: () => {
         proposals++;
         const spaces = main.children.filter(n => n.dataset.terminalCreationSpace);
-        assert.equal(spaces.length, variant === "from-task" ? 2 : ["first", "proposal-throw"].includes(variant) ? 1 : 0);
-        if (bar && variant !== "no-context") { assert.equal(bar.style.getPropertyValue("visibility"), "hidden"); assert.equal(bar.style.getPropertyValue("display"), "flex"); assert.equal(bar.style.getPropertyValue("height"), "57px"); }
-        for (const node of oldTask) assert.equal(node.style.getPropertyValue("display"), "none");
+        assert.equal(spaces.length, header ? 0 : 1);
+        if (variant !== "no-context") {
+          if (header) assert.equal(header.style.getPropertyValue("height"), variant === "mobile" ? "60px" : "56px");
+          assert.equal(oldSplit.style.getPropertyValue("display"), "none");
+        }
         if (variant === "proposal-throw") throw new Error("proposal failure");
         return { cols: 46, rows: 27 };
       } },
-    }, { ...h.globals, getComputedStyle: (node: Element) => ({ display: node.style.getPropertyValue("display") || "flex" }) });
-    const before = [h.output, header, bar, ...oldTask].filter(Boolean).map(node => [...node!.values]);
+    }, h.globals);
+    const before = [h.output, header, oldSplit].filter(Boolean).map(node => [...node!.values]);
     const context = variant === "no-context" ? undefined : { kind: "shell", cwd: "/own-future-directory" };
     if (variant.endsWith("throw")) assert.throws(() => api.measureTerminalCreationDimensions(context), /failure/);
     else assert.equal(api.measureTerminalCreationDimensions(context).rows, 27);
-    assert.equal(headerProjections, variant === "no-context" ? 0 : 1);
-    assert.equal(tabProjections, variant === "no-context" ? 0 : 1);
+    assert.equal(headerProjections, variant === "mobile" ? 1 : 0);
+    assert.equal(tabProjections, variant === "no-context" || variant === "mobile" ? 0 : 1);
     assert.equal(proposals, variant === "projection-throw" ? 0 : 1);
-    assert.deepEqual([h.output, header, bar, ...oldTask].filter(Boolean).map(node => [...node!.values]), before);
+    assert.deepEqual([h.output, header, oldSplit].filter(Boolean).map(node => [...node!.values]), before);
     assert.equal(main.children.filter(n => n.dataset.terminalCreationSpace).length, 0);
     assert.equal(h.state.terminal.cols, 180); assert.equal(h.state.terminal.rows, 37);
   }

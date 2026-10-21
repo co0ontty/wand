@@ -31,7 +31,7 @@ export function currentRunningAction(source: RunningActivityShape): CurrentRunni
   const started = Date.parse(source.structuredState?.turnStartedAt ?? source.turnStartedAt ?? "");
   let start = messages.length - 1;
   while (start >= 0 && !(messages[start]!.role === "user"
-    && messages[start]!.content.some(block => block.type === "text" && !block.__subagent && block.text.trim()))) start--;
+    && (messages[start]!.content ?? []).some(block => block.type === "text" && !block.__subagent && block.text.trim()))) start--;
   const user = messages[start];
   if (request && user?.requestId && user.requestId !== request) return null;
   const sameRequest = Boolean(request && user?.requestId === request);
@@ -48,7 +48,7 @@ export function currentRunningAction(source: RunningActivityShape): CurrentRunni
   for (let index = start + 1; index < messages.length; index++) {
     const turn = messages[index]!;
     if (!isCurrent(turn)) continue;
-    for (const block of turn.content) {
+    for (const block of turn.content ?? []) {
       if (block.__subagent) continue;
       if (block.type === "tool_result") {
         completed.add(block.tool_use_id);

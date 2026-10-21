@@ -1,10 +1,12 @@
-import { Badge, List, Typography } from "antd";
+import { Badge, Typography } from "antd";
 import { WandUiBoundary } from "../theme";
 import { SidebarDisclosure } from "../workspaces/sidebar-disclosure";
 import * as React from "react";
 import type { AttentionItem } from "../../../attention";
 import { taskBoardController } from "../issues/task-board-controller";
-import { WandButton, WandIcon, WandIconButton, WandPopover } from "../ui";
+import { WandButton, WandIconButton } from "../ui/button";
+import { WandIcon } from "../ui/icons";
+import { WandPopover } from "../ui/popover";
 import { classNames } from "../ui/class-names";
 import { useUiDispatch, useUiStoreSnapshot } from "../shell/ui-store-react";
 import { refreshAttention, useAttentionItems } from "./attention-store";
@@ -44,12 +46,13 @@ function AttentionList({
   items: readonly AttentionItem[];
   onOpen(item: AttentionItem): void;
 }): React.ReactElement {
-  return <WandUiBoundary><List size="small" dataSource={[...items]}
-    renderItem={(item) => <List.Item key={item.id}>
+  return <WandUiBoundary><ul className="wand-attention-list">
+    {items.map(item => <li key={item.id}>
       <WandButton kind="ghost" className="wand-attention-item" onClick={() => onOpen(item)}>
         <span><strong>{item.title}</strong><br/>{item.detail}</span>
       </WandButton>
-    </List.Item>}/></WandUiBoundary>;
+    </li>)}
+  </ul></WandUiBoundary>;
 }
 
 /**

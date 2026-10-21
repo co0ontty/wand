@@ -27,7 +27,7 @@ test("ProviderLogo renders a distinct local brand mark for every supported provi
   assert.match(rendered[2], /fill="#131010"/);
   assert.match(rendered[4], /fill="#2ADB5C"/);
   assert.match(rendered[5], /viewBox="0 0 800 800"/);
-  assert.match(rendered[5], /fill-rule="evenodd"/);
+  for (const color of ["#F09082", "#4D9ABF", "#F1BE58"]) assert.ok(rendered[5].includes(`fill="${color}"`));
   assert.match(rendered[5], /M517\.36 400H634\.72V634\.72H517\.36Z/);
   assert.equal(rendered.length, 6);
 });

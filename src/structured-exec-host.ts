@@ -25,7 +25,7 @@ export interface StructuredSpawnRequest {
   /** Internal opt-in: a real Pi native TUI in an owned tmux pane. Never supplied by HTTP command text. */
   nativePi?: boolean;
   requestId?: string;
-  /** Native launch cancellation before a CLI has accepted any input; not sent to daemon RPCs. */
+  /** Native launch cancellation before input has been accepted; not sent to daemon RPCs. */
   launchSignal?: AbortSignal;
 }
 
@@ -71,6 +71,7 @@ export interface StructuredExecProcess {
 export interface StructuredExecHost {
   readonly persistent: boolean;
   readonly piNativeTui?: boolean;
+  collectGarbage?(options: { liveSessionIds: ReadonlySet<string>; retentionMs: number; now?: number }): { removedSlots: number; removedTurns: number; freedBytes: number };
   spawnStructured(request: StructuredSpawnRequest): Promise<StructuredExecProcess>;
   /** Full state incl. replay logs; null when the host does not know the run. */
   attachRun(runId: string): Promise<StructuredRunState | null>;

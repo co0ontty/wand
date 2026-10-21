@@ -1,4 +1,6 @@
 import * as React from "react";
+import { QuickTerminalChrome } from "../quick-terminal/action";
+import { WorkbarActions, WorkbarLeading } from "../shell/workbar-actions";
 import { newSessionController } from "../new-session/controller";
 import { workspacesStore } from "./controller";
 import { useUiDispatch, useUiStoreSnapshot } from "../shell/ui-store-react";
@@ -8,7 +10,7 @@ import { standaloneSessionTabScope } from "./standalone-session-tabs";
 import { WorkspaceTabBarChrome } from "./workspace-tab-chrome";
 
 /** Unbound sessions share the directory list; no task or persisted layout is created. */
-export function StandaloneSessionTabBar(): React.ReactElement | null {
+export function StandaloneSessionTabBar({ fallback = null }: { fallback?: React.ReactElement | null } = {}): React.ReactElement | null {
   const snapshot = useUiStoreSnapshot();
   const dispatch = useUiDispatch();
   const { groups, loading, reload } = useTaskGroups();
@@ -29,16 +31,18 @@ export function StandaloneSessionTabBar(): React.ReactElement | null {
   }, [selected?.id, reload]);
   const liveSessions = new Map(snapshot.sidebar.groups.flatMap(group => group.entries.map(session => [session.id, session] as const)));
   const scope = standaloneSessionTabScope(groups, selected, liveSessions);
-  if (!scope || !selected) return null;
+  if (!scope || !selected) return fallback;
   const sessions = scope.sessions.map(session => {
     const live = liveSessions.get(session.id);
     return { ...withLiveSessionTitle(session, live?.title), status: live?.status ?? session.status };
   });
   const group = scope.group;
-  return <WorkspaceTabBarChrome mobile={snapshot.viewport.mobile} variant="standalone" taskName=""
+  return <QuickTerminalChrome><WorkspaceTabBarChrome mobile={snapshot.viewport.mobile} variant="standalone" taskName=""
+    leading={<WorkbarLeading/>}
+    actions={<WorkbarActions/>}
     activeWindowId={selected.id} closingWindowId={closingId}
     windows={sessions.map((session, index) => ({ id: session.id, label: listSessionLabel(session, index),
-      status: session.status, count: 1, session }))}
+      status: session.status, count: 1, session, titleGenerating: session.id === selected.id && snapshot.topbar.titleGenerating }))}
     onSelectWindow={id => { if (id !== selected.id) void dispatch({ type: "session.select", id, focusInput: false }); }}
     onCloseWindow={id => {
       const rt = workspacesStore.getRuntime();
@@ -77,5 +81,5 @@ export function StandaloneSessionTabBar(): React.ReactElement | null {
     onNewSession={() => newSessionController.open({
       initialCwd: selected.cwd || group?.workspaceCwd,
       workspaceId: group ? !group.synthetic && !group.global ? group.workspaceId : undefined : selected.workspaceId,
-    })}/>;
+    })}/></QuickTerminalChrome>;
 }

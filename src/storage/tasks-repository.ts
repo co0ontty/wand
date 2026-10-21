@@ -6,7 +6,7 @@ import { nowIso } from "../password-manager.js";
 import { isSessionProvider } from "../session-provider.js";
 import { isSystemAiCall } from "../system-ai-call.js";
 import { isThinkingEffort } from "../structured-provider-common.js";
-import type { WandTask, WandTaskAgent, WandTaskComment } from "../task-types.js";
+import type { WandTask, WandTaskAgent, WandTaskComment, WandTaskStatus } from "../task-types.js";
 import { DEFAULT_ITERATION_NAME, DEFAULT_WAND_TASK_PRIORITY, isTaskExecutionSubject, normalizeWandTaskAgentMode } from "../task-types.js";
 import { GLOBAL_WORKSPACE_ID, SessionSnapshot } from "../types.js";
 import { safeJsonParse, mapWandMilestoneRow, mapIterationPromptRow } from "./mappers.js";
@@ -102,7 +102,7 @@ export class TaskRepository {
       titleSource: row.title_source === "auto" ? "auto" : "user",
       autoTitleSignature: typeof row.auto_title_signature === "string" && row.auto_title_signature ? row.auto_title_signature : null,
       description: String(row.description ?? ""),
-      status: row.status === "doing" || row.status === "done" || row.status === "archived" ? row.status : "todo",
+      status: row.status === "backlog" || row.status === "doing" || row.status === "done" || row.status === "archived" ? row.status as WandTaskStatus : "todo",
       priority: row.priority === "low" || row.priority === "medium" || row.priority === "high" || row.priority === "urgent" ? row.priority : "none",
       labels: (() => { const parsed = safeJsonParse<unknown>(String(row.labels_json ?? "[]")); return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : []; })(),
       dueDate: typeof row.due_date === "string" ? row.due_date : null,
@@ -120,19 +120,71 @@ export class TaskRepository {
   }
 
   listWandTaskComments(taskId: string): WandTaskComment[] {
-    const rows = this.db.prepare(`SELECT id FROM wand_task_comments WHERE task_id = ? ORDER BY rowid DESC LIMIT 50`).all(taskId) as Array<{ id: string }>;
-    return rows.reverse().map(row => this.getWandTaskComment(row.id)!);
+    return this.listWandTaskCommentsPage(taskId, { limit: 50 }).comments;
+  }
+
+  /** Cursor page ordered by stable (created_at, id), returned oldest-to-newest for display. */
+  listWandTaskCommentsPage(taskId: string, options: { before?: { createdAt: string; id: string } | null; limit?: number } = {}): { comments: WandTaskComment[]; totalCount: number; nextCursor: { createdAt: string; id: string } | null } {
+    const limit = Math.max(1, Math.min(100, Math.floor(options.limit ?? 50)));
+    const before = options.before;
+    const rows = (before
+      ? this.db.prepare(`SELECT id, created_at FROM wand_task_comments WHERE task_id = ? AND (created_at < ? OR (created_at = ? AND id < ?)) ORDER BY created_at DESC, id DESC LIMIT ?`)
+        .all(taskId, before.createdAt, before.createdAt, before.id, limit + 1)
+      : this.db.prepare(`SELECT id, created_at FROM wand_task_comments WHERE task_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`)
+        .all(taskId, limit + 1)) as Array<{ id: string; created_at: string }>;
+    const hasMore = rows.length > limit;
+    const page = rows.slice(0, limit);
+    const oldest = page.at(-1);
+    const count = this.db.prepare("SELECT COUNT(*) AS count FROM wand_task_comments WHERE task_id = ?").get(taskId) as { count: number };
+    const comments = [...page].reverse().map(row => this.getWandTaskComment(row.id)!).filter(Boolean);
+    return { comments, totalCount: Number(count.count) || 0,
+      nextCursor: hasMore && oldest ? { createdAt: oldest.created_at, id: oldest.id } : null };
+  }
+
+  countWandTaskComments(taskId: string): number {
+    const row = this.db.prepare("SELECT COUNT(*) AS count FROM wand_task_comments WHERE task_id = ?").get(taskId) as { count: number };
+    return Number(row.count) || 0;
+  }
+
+  /** One grouped query for task-list projections; tasks without comments are omitted (read as zero). */
+  countWandTaskCommentsByTask(): Map<string, number> {
+    const rows = this.db.prepare(`SELECT task_id, COUNT(*) AS count FROM wand_task_comments GROUP BY task_id`)
+      .all() as Array<{ task_id: string; count: number }>;
+    return new Map(rows.map(row => [row.task_id, Number(row.count) || 0]));
   }
 
   getWandTaskComment(id: string): WandTaskComment | null {
     const row = this.db.prepare(`SELECT c.*, d.request_id, d.source_comment_id, d.employee_id, d.employee_name,
-      d.instruction, d.task_version, d.state, d.session_id, d.error, d.execution_status FROM wand_task_comments c
+      d.instruction, d.task_version, d.state, d.session_id, d.error, d.execution_status,
+      d.result_start_index, d.result_end_index, d.result_request_id, d.result_outcome, d.result_fingerprint, d.result_start_fingerprint FROM wand_task_comments c
       LEFT JOIN wand_task_comment_dispatches d ON d.comment_id = c.id WHERE c.id = ?`).get(id) as Record<string, string | null> | undefined;
-    if (!row) return null;
+    return row ? this.mapWandTaskCommentRow(row) : null;
+  }
+
+  /** One task-scoped query for a bounded set of known comment IDs (e.g. status refresh for older pages). */
+  getWandTaskCommentsByIds(taskId: string, ids: readonly string[]): WandTaskComment[] {
+    const boundedIds = [...new Set(ids)].slice(0, 100);
+    if (!boundedIds.length) return [];
+    const placeholders = boundedIds.map(() => "?").join(", ");
+    const rows = this.db.prepare(`SELECT c.*, d.request_id, d.source_comment_id, d.employee_id, d.employee_name,
+      d.instruction, d.task_version, d.state, d.session_id, d.error, d.execution_status,
+      d.result_start_index, d.result_end_index, d.result_request_id, d.result_outcome, d.result_fingerprint, d.result_start_fingerprint
+      FROM wand_task_comments c LEFT JOIN wand_task_comment_dispatches d ON d.comment_id = c.id
+      WHERE c.task_id = ? AND c.id IN (${placeholders})`).all(taskId, ...boundedIds) as Array<Record<string, string | null>>;
+    const byId = new Map(rows.map(row => [row.id!, this.mapWandTaskCommentRow(row)]));
+    return boundedIds.flatMap(id => { const comment = byId.get(id); return comment ? [comment] : []; });
+  }
+
+  private mapWandTaskCommentRow(row: Record<string, string | null>): WandTaskComment {
     return { id: row.id!, taskId: row.task_id!, authorName: row.author_name!, body: row.body!, createdAt: row.created_at!,
       ...(row.request_id ? { requestId: row.request_id, sourceCommentId: row.source_comment_id, instruction: row.instruction!, taskVersion: row.task_version!,
         dispatch: row.employee_id ? { employeeId: row.employee_id, employeeName: row.employee_name!,
-          state: row.state as "pending" | "accepted" | "failed" | "unknown", sessionId: row.session_id, error: row.error, ...(row.execution_status ? { status: row.execution_status } : {}) } : null } : {}) };
+          state: row.state as "pending" | "accepted" | "failed" | "unknown", sessionId: row.session_id, error: row.error,
+          ...(row.result_start_index !== null && row.result_start_index !== undefined && row.result_request_id ? { resultAnchor: {
+            requestId: row.result_request_id, startFingerprint: row.result_start_fingerprint ?? "", fingerprint: row.result_fingerprint ?? "", startIndex: Number(row.result_start_index),
+            endIndex: row.result_end_index === null || row.result_end_index === undefined ? null : Number(row.result_end_index),
+            outcome: row.result_outcome === "done" || row.result_outcome === "failed" || row.result_outcome === "stopped" ? row.result_outcome : null,
+          } } : {}), ...(row.execution_status ? { status: row.execution_status } : {}) } : null } : {}) };
   }
 
   findTaskCommentRequest(taskId: string, requestId: string): { comment: WandTaskComment; signature: string } | null {
@@ -161,6 +213,80 @@ export class TaskRepository {
       .run(state, sessionId, error, id);
   }
 
+  /** Bind the first structured request to its stable message index exactly once. */
+  bindTaskCommentResultStart(sessionId: string, requestId: string, startIndex: number): void {
+    const session = this.db.prepare("SELECT messages FROM command_sessions WHERE id = ?").get(sessionId) as { messages: string | null } | undefined;
+    if (!session?.messages) return;
+    let messages: unknown;
+    try { messages = JSON.parse(session.messages); } catch { return; }
+    const turns = Array.isArray(messages) ? messages as Array<{ role?: unknown; requestId?: unknown }> : null;
+    const turn = turns?.[startIndex];
+    if (!Number.isInteger(startIndex) || startIndex < 0 || turn?.role !== "user" || turn.requestId !== requestId) return;
+    // Bind once. Candidate fallback explicitly reopens this anchor only after the
+    // runner reports a verified pre-execution rejection.
+    const fingerprint = crypto.createHash("sha256").update(JSON.stringify(turn)).digest("hex");
+    this.db.prepare(`UPDATE wand_task_comment_dispatches SET result_start_index = ?, result_request_id = ?,
+      result_start_fingerprint = ?, result_fingerprint = NULL
+      WHERE session_id = ? AND state != 'failed' AND result_start_index IS NULL AND EXISTS (
+        SELECT 1 FROM command_sessions s WHERE s.id = ? AND s.automation_id = 'wand-task-comment:' || wand_task_comment_dispatches.comment_id
+          AND s.session_kind = 'structured'
+      )`).run(startIndex, requestId, fingerprint, sessionId, sessionId);
+  }
+
+  /** Reopen only a terminal, explicitly rejected attempt that the structured runner is retrying before acceptance. */
+  resetTaskCommentResultForUnacceptedRetry(sessionId: string, failedRequestId: string): void {
+    this.db.prepare(`UPDATE wand_task_comment_dispatches SET result_start_index = NULL, result_end_index = NULL,
+      result_request_id = NULL, result_start_fingerprint = NULL, result_outcome = NULL, result_fingerprint = NULL, execution_status = 'running'
+      WHERE session_id = ? AND result_request_id = ?
+        AND (result_end_index IS NULL OR result_outcome = 'failed')
+        AND EXISTS (SELECT 1 FROM command_sessions s WHERE s.id = ?
+          AND s.automation_id = 'wand-task-comment:' || wand_task_comment_dispatches.comment_id AND s.session_kind = 'structured')`)
+      .run(sessionId, failedRequestId, sessionId);
+  }
+
+  /** Freeze end-exclusive message boundary only on an explicit terminal event, once. */
+  freezeTaskCommentResult(sessionId: string, endIndex: number, outcome: "done" | "failed" | "stopped", requestId?: string | null): void {
+    const session = this.db.prepare("SELECT messages FROM command_sessions WHERE id = ?").get(sessionId) as { messages: string | null } | undefined;
+    if (!session?.messages) return;
+    let messages: unknown;
+    try { messages = JSON.parse(session.messages); } catch { return; }
+    if (!Array.isArray(messages) || !Number.isInteger(endIndex) || endIndex < 0 || endIndex > messages.length) return;
+    const turns = messages as Array<{ role?: unknown; requestId?: unknown }>;
+    const bindings = this.db.prepare(`SELECT comment_id, result_start_index, result_request_id, result_start_fingerprint FROM wand_task_comment_dispatches
+      WHERE session_id = ? AND result_start_index IS NOT NULL AND result_end_index IS NULL`).all(sessionId) as Array<{ comment_id: string; result_start_index: number; result_request_id: string; result_start_fingerprint: string | null }>;
+    for (const binding of bindings) {
+      const startIndex = Number(binding.result_start_index);
+      if (startIndex < 0 || endIndex <= startIndex || turns[startIndex]?.role !== "user"
+        || turns[startIndex]?.requestId !== binding.result_request_id || (requestId && requestId !== binding.result_request_id)) continue;
+      const startFingerprint = crypto.createHash("sha256").update(JSON.stringify(turns[startIndex])).digest("hex");
+      if (startFingerprint !== binding.result_start_fingerprint) continue;
+      const range = turns.slice(startIndex, endIndex);
+      // A later user request means the original terminal event was missed; never widen its result into another round.
+      if (range.some((turn, index) => index > 0 && turn.role === "user")) continue;
+      const fingerprint = crypto.createHash("sha256").update(JSON.stringify(range)).digest("hex");
+      this.db.prepare(`UPDATE wand_task_comment_dispatches SET result_end_index = ?, result_outcome = ?, result_fingerprint = ?
+        WHERE comment_id = ? AND result_end_index IS NULL AND result_start_fingerprint = ?`)
+        .run(endIndex, outcome, fingerprint, binding.comment_id, binding.result_start_fingerprint);
+    }
+  }
+
+  getTaskCommentResultBinding(taskId: string, commentId: string): { sessionId: string; requestId: string | null; startFingerprint: string | null; fingerprint: string | null; startIndex: number | null; endIndex: number | null; outcome: "done" | "failed" | "stopped" | null } | null {
+    const row = this.db.prepare(`SELECT session_id, result_request_id, result_start_fingerprint, result_fingerprint, result_start_index, result_end_index, result_outcome
+      FROM wand_task_comment_dispatches WHERE task_id = ? AND comment_id = ?`).get(taskId, commentId) as {
+        session_id: string | null; result_request_id: string | null; result_start_fingerprint: string | null; result_fingerprint: string | null; result_start_index: number | null; result_end_index: number | null; result_outcome: string | null;
+      } | undefined;
+    if (!row?.session_id) return null;
+    return { sessionId: row.session_id, requestId: row.result_request_id, startFingerprint: row.result_start_fingerprint, fingerprint: row.result_fingerprint,
+      startIndex: row.result_start_index === null ? null : Number(row.result_start_index),
+      endIndex: row.result_end_index === null ? null : Number(row.result_end_index),
+      outcome: row.result_outcome === "done" || row.result_outcome === "failed" || row.result_outcome === "stopped" ? row.result_outcome : null };
+  }
+
+  getTaskCommentForTask(taskId: string, commentId: string): WandTaskComment | null {
+    const comment = this.getWandTaskComment(commentId);
+    return comment?.taskId === taskId ? comment : null;
+  }
+
   /** Read-only recovery of the create/bind crash gap, by a server-generated correlation ID, never message text. */
   findTaskCommentExecutionSessionId(commentId: string, employeeId: string): string | null {
     const rows = this.db.prepare("SELECT id FROM command_sessions WHERE automation_id = ? LIMIT 2")
@@ -170,13 +296,52 @@ export class TaskRepository {
 
   /** Event-owned facts, including stop outcomes which structured sessions intentionally represent as idle. */
   recordTaskCommentSessionEvent(event: import("../types.js").ProcessEvent): void {
-    const data = event.data as { status?: string; turnOutcome?: string; structuredState?: { lastError?: string | null; inFlight?: boolean } } | undefined;
+    const data = event.data as { status?: string; turnOutcome?: string; terminalRequestId?: string; messages?: unknown; structuredState?: { activeRequestId?: string | null; lastError?: string | null; inFlight?: boolean } } | undefined;
     if (!data || typeof data !== "object") return;
-    const status = data.turnOutcome === "stopped" ? "stopped" : data.structuredState?.inFlight ? "running"
-      : data.structuredState?.lastError ? "failed" : data.status;
-    if (!status) return;
-    this.db.prepare("UPDATE wand_task_comment_dispatches SET execution_status = ? WHERE session_id = ?")
-      .run(status, event.sessionId);
+    const rows = this.db.prepare(`SELECT comment_id, execution_status FROM wand_task_comment_dispatches
+      WHERE session_id = ? AND EXISTS (SELECT 1 FROM command_sessions s WHERE s.id = ?
+        AND s.automation_id = 'wand-task-comment:' || wand_task_comment_dispatches.comment_id AND s.session_kind = 'structured')`)
+      .all(event.sessionId, event.sessionId) as Array<{ comment_id: string; execution_status: string | null }>;
+    if (rows.length === 0) return;
+    const messages = Array.isArray(data.messages) ? data.messages as Array<{ requestId?: unknown; messageId?: unknown; role?: unknown }> : null;
+    const anchored = this.db.prepare(`SELECT 1 AS found FROM wand_task_comment_dispatches WHERE session_id = ?
+      AND result_start_index IS NOT NULL AND result_end_index IS NULL LIMIT 1`).get(event.sessionId);
+    if (!anchored && !messages && event.type !== "ended") return;
+    const eventOutcome = data.turnOutcome === "stopped" || data.turnOutcome === "done" || data.turnOutcome === "failed"
+      ? data.turnOutcome : null;
+    const status = eventOutcome ?? (data.structuredState?.inFlight ? "running"
+      : data.structuredState?.lastError ? "failed" : data.status);
+    const perTurnTerminal = typeof data.terminalRequestId === "string"
+      && (data.turnOutcome === "stopped" || data.turnOutcome === "done" || data.turnOutcome === "failed");
+    if (status && (event.type === "ended" || perTurnTerminal)) {
+      const update = this.db.prepare(`UPDATE wand_task_comment_dispatches SET execution_status = ? WHERE comment_id = ?
+        AND execution_status IS NOT ? AND (result_end_index IS NULL OR ? = 'done')`);
+      for (const row of rows) update.run(status, row.comment_id, status, status);
+    } else if (status === "running") {
+      const update = this.db.prepare(`UPDATE wand_task_comment_dispatches SET execution_status = 'running' WHERE comment_id = ?
+        AND execution_status IS NOT 'running' AND result_end_index IS NULL`);
+      for (const row of rows) update.run(row.comment_id);
+    }
+
+    const activeRequestId = data.structuredState?.activeRequestId;
+    if (data.structuredState?.inFlight && activeRequestId && messages) {
+      // A different active request supersedes an open anchor whose terminal event was
+      // missed (e.g. after a crash). Only an explicitly rejected retry resets first.
+      const startIndex = messages.findIndex(message => message?.role === "user" && message.requestId === activeRequestId);
+      if (startIndex >= 0) this.bindTaskCommentResultStart(event.sessionId, activeRequestId, startIndex);
+      return;
+    }
+    // Quiet/idle status snapshots, stale ended events, and incomplete payloads cannot settle an anchor.
+    // A manager may emit an explicit per-turn terminal fact while the session remains running
+    // (interrupt-and-send); it carries the original logical request ID and exact transcript boundary.
+    if (!perTurnTerminal || !messages) return;
+    const outcome = data.turnOutcome === "stopped" ? "stopped"
+      : data.turnOutcome === "failed" || data.structuredState?.lastError || status === "failed" ? "failed" : "done";
+    const terminalRequestId = data.terminalRequestId ?? (event.type === "ended"
+      ? messages.slice().reverse().find(message => message?.role === "user")?.requestId
+      : null);
+    const terminalId = typeof terminalRequestId === "string" ? terminalRequestId : null;
+    this.freezeTaskCommentResult(event.sessionId, messages.length, outcome, terminalId);
   }
 
   getWandTask(id: string): WandTask | null {
@@ -687,7 +852,7 @@ export class TaskRepository {
       kind: session.sessionKind === "structured" ? "structured" : "pty",
     } : null;
     this.db.prepare(`UPDATE wand_tasks SET agent_json = COALESCE(agent_json, ?),
-      status = CASE WHEN status = 'todo' AND ? THEN 'doing' ELSE status END,
+      status = CASE WHEN status IN ('todo', 'backlog') AND ? THEN 'doing' ELSE status END,
       updated_at = ? WHERE id = ?`)
       .run(agent ? JSON.stringify(agent) : null, newlyAssigned ? 1 : 0, nowIso(), card.id);
   }

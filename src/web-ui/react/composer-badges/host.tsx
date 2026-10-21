@@ -2,7 +2,9 @@ import { useSyncExternalStore } from "react";
 import * as React from "react";
 import { createPortal } from "react-dom";
 import { composerBadgesController, type ComposerApprovalStats, type ComposerBadgeMount, type ComposerPermissionMount } from "./controller";
-import { WandButton, WandIcon, WandPopover } from "../ui";
+import { WandButton } from "../ui/button";
+import { WandIcon } from "../ui/icons";
+import { WandPopover } from "../ui/popover";
 
 export function ComposerAutoApproveChip({ enabled, pending = false, onToggle }: {
   enabled: boolean; pending?: boolean; onToggle(): void;

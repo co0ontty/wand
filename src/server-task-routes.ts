@@ -24,13 +24,12 @@ import { canArchiveTask } from "./task-archive-policy.js";
 import { TaskReadModel } from "./task-read-model.js";
 import { refreshAutoBoardTaskTitles, taskTitleService } from "./task-title-service.js";
 import { generateWandTaskTitle, provisionalTaskTitleFromDescription } from "./task-title.js";
-import type { TaskExecutionSubject, WandTaskAgent, WandTaskPriority, WandTaskStatus, WandTaskTitleSource } from "./task-types.js";
+import { isWandTaskStatus, statusAfterWandTaskDispatch, type TaskExecutionSubject, type WandTaskAgent, type WandTaskPriority, type WandTaskStatus, type WandTaskTitleSource } from "./task-types.js";
 import { DEFAULT_WAND_TASK_AGENT_KIND, DEFAULT_WAND_TASK_AGENT_MODE, DEFAULT_WAND_TASK_PRIORITY, WAND_MILESTONE_NAME_MAX_LENGTH } from "./task-types.js";
 import type { SessionSnapshot, WandConfig } from "./types.js";
 import { badRequest, surfaceDomainError } from "./http-error.js";
 import { parseTaskAgent, parentTaskIdFrom } from "./task-agent-parsing.js";
 
-const STATUSES = new Set<WandTaskStatus>(["todo", "doing", "done", "archived"]);
 const PRIORITIES = new Set<WandTaskPriority>(["none", "low", "medium", "high", "urgent"]);
 
 const TASK_BOARD_LAST_AGENT_KEY = "pref:taskBoardLastAgent";
@@ -175,6 +174,7 @@ function taskDto({ storage, sessions }: TaskDtoDeps, task: ReturnType<WandStorag
     : task.executionSubject?.type === "team" ? storage.getAiTeam(task.executionSubject.id) : null;
   return {
     ...task,
+    commentCount: model ? model.commentCounts.get(task.id) ?? 0 : storage.countWandTaskComments(task.id),
     assignedExecutor: assignee ? { id: assignee.id, name: assignee.name, avatar: "avatar" in assignee ? compactTransportAvatar(assignee.avatar) : "" } : null,
     canArchive: model ? model.canArchive(task) : canArchiveTask(storage, sessions, task.id),
     sessionIds,
@@ -209,6 +209,8 @@ function taskSessionSummary(session: SessionSnapshot) {
     employeeId: session.employeeId,
     employeeName: session.employeeName,
     employeeAvatar: compactTransportAvatar(session.employeeAvatar),
+    ...(session.automationId?.startsWith("wand-task-comment:")
+      ? { taskCommentId: session.automationId.slice("wand-task-comment:".length) } : {}),
   };
 }
 
@@ -326,7 +328,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       if (!providedTitle && !description) throw badRequest("请填写任务标题或任务描述。");
       const titleSource: WandTaskTitleSource = providedTitle ? "user" : "auto";
       const title = providedTitle || provisionalTaskTitleFromDescription(description) || "新建任务";
-      const status = STATUSES.has(body.status as WandTaskStatus) ? body.status as WandTaskStatus : "todo";
+      const status = isWandTaskStatus(body.status) ? body.status as WandTaskStatus : "todo";
       const priority = PRIORITIES.has(body.priority as WandTaskPriority) ? body.priority as WandTaskPriority : DEFAULT_WAND_TASK_PRIORITY;
       const agent = body.agent === undefined ? null : parseTaskAgent(body.agent);
       const executionSubject = body.executionSubject === undefined
@@ -403,7 +405,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         patch.acceptance = { evidence, blocker, acceptedAt: accepted ? new Date().toISOString() : null };
       }
       if (body.status !== undefined) {
-        if (!STATUSES.has(body.status as WandTaskStatus)) throw badRequest("任务状态无效。");
+        if (!isWandTaskStatus(body.status)) throw badRequest("任务状态无效。");
         patch.status = body.status as WandTaskStatus;
       }
       if (body.priority !== undefined) {
@@ -590,7 +592,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         storage.updateWandTask(task.id, {
           executionSubject: subject,
           agent: preferredAgent,
-          status: task.status === "todo" ? "doing" : task.status,
+          status: statusAfterWandTaskDispatch(task.status),
         });
         recordIterationPromptForTask(storage, {
           sessionId: detail.run.chatSessionId ?? undefined,
@@ -650,7 +652,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         const result = await submitTaskComment(deps, task.id, { requestId: text(body.requestId) || randomUUID(), body: requestedPrompt, employeeId: employee.id }, override ?? undefined);
         const session = result.comment.dispatch?.sessionId ? sessions?.getSlim(result.comment.dispatch.sessionId)
           ?? storage.getSessionSlim(result.comment.dispatch.sessionId) : null;
-        if (session) storage.updateWandTask(task.id, { agent, executionSubject: { type: "employee", id: employee.id, ...(override ? { agentOverride: override } : {}) }, status: task.status === "todo" ? "doing" : task.status });
+        if (session) storage.updateWandTask(task.id, { agent, executionSubject: { type: "employee", id: employee.id, ...(override ? { agentOverride: override } : {}) }, status: statusAfterWandTaskDispatch(task.status) });
         res.status(202).json({ ok: true, taskId: task.id, subject: { type: "employee", id: employee.id }, comment: result.comment,
           session: session ? { ...taskSessionSummary(session), employeeCandidateIndex: session.employeeCandidateIndex } : null });
         return;
@@ -664,7 +666,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
       storage.updateWandTask(task.id, {
         agent,
         executionSubject: usedSubject,
-        status: task.status === "todo" ? "doing" : task.status,
+        status: statusAfterWandTaskDispatch(task.status),
       });
       if (body.rememberAgentDefaults === true && !employee) writeTaskBoardLastAgent(storage, agent);
       // 派发也算一轮迭代里的改动意图：直接把任务的标题 / 描述记进迭代记录。

@@ -4,7 +4,7 @@ import { syncBrowserComposerBadges } from "./composer-badges-adapter";
 import { getErrorMessage } from "../../error-utils.js";
 import { parseJsonResponse } from "../react/http-adapter";
 import { notifyAiTeamDefinitionChanged, notifyAiTeamRunChanged, notifyAiTeamStepLive } from "../react/ai-teams/repository";
-import { notifyConversationSessionPreview } from "../react/conversations/session-preview.js";
+import { notifyConversationSessionPreview } from "../react/conversations/session-preview-events.js";
 import { notifySiliconEmployeeDefinitionChanged } from "../react/agents/employee-repository.js";
 import { resolveComposerPermission } from "../react/composer-badges/model";
 import type { ComposerPermissionAction } from "../react/composer-badges/controller";
@@ -31,6 +31,14 @@ import { scheduleGitStatusRefresh, startGitStatusPolling, stopGitStatusPolling }
 import { notifyLegacyUiChange } from "./ui-store-bridge";
 import { recordTerminalHistoryChunk } from "./terminal-history";
 import { notifyTasksChanged } from "../react/task-changes";
+import { invalidateSessionList } from "../react/session-list-snapshot";
+
+let hasOpenedSocket = false;
+
+/** Login teardown starts a new socket lifetime; the first open is not a resync. */
+export function resetWebSocketResyncState(): void {
+  hasOpenedSocket = false;
+}
 
 function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   return fetch(input, { ...init,
@@ -223,8 +231,14 @@ function projectSelectedChat(sessionId: string): any {
             // new socket; clear ours so the first init isn't treated as a gap.
             state.lastSeqBySession = {};
             state.chatResyncPendingBySession = {};
-            // Definition notifications can be missed while offline or during an upgrade.
-            notifySiliconEmployeeDefinitionChanged();
+            // The first open follows this page's authoritative HTTP boot reads;
+            // only reconnects can have missed definitions or list changes.
+            if (hasOpenedSocket) {
+              invalidateSessionList();
+              notifySiliconEmployeeDefinitionChanged();
+              void loadSessions({ skipSelectedOutputReload: true });
+            }
+            hasOpenedSocket = true;
             // 启动客户端心跳检测：每 10s 检查一次 lastWsMessageAt，超过 40s
             // 没收到任何消息（包括服务端 20s 一次的 ping）就视为半开连接。
             startWsHeartbeatCheck();

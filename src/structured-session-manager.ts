@@ -51,7 +51,7 @@ import { QoderRunner } from "./structured-qoder-adapter.js";
 import { PiRunner, isMissingPiSession } from "./structured-pi-adapter.js";
 import { PiOutputFile, type PiOutputFileOptions } from "./pi-output-file.js";
 import { PiProtocolReader } from "./pi-protocol-reader.js";
-import { PiTmuxHost, type PiNativeGcReport } from "./pi-tmux-host.js";
+import type { PiNativeGcReport } from "./pi-tmux-host.js";
 import { structuredRunId, type StructuredExecHost, type StructuredRunState } from "./structured-exec-host.js";
 import type { StructuredRunnerAdapter, StructuredRunnerExecution, StructuredRunnerResult, StructuredRunnerTurnState } from "./structured-runner.js";
 import { defaultStructuredRunner, defaultStructuredState, isStructuredRunnerForProvider, normalizeThinkingEffort, resolveStructuredRunner } from "./structured-provider-common.js";
@@ -172,15 +172,17 @@ function buildUserTurn(
   prompt: string,
   pendingAsk: { id: string } | null | undefined,
   createdAt: string,
+  requestId?: string,
 ): ConversationTurn {
   if (pendingAsk) {
     return {
       role: "user",
+      ...(requestId ? { requestId } : {}),
       createdAt,
       content: [{ type: "tool_result", tool_use_id: pendingAsk.id, content: prompt, is_error: false }],
     };
   }
-  return { role: "user", createdAt, content: [{ type: "text", text: prompt }] };
+  return { role: "user", ...(requestId ? { requestId } : {}), createdAt, content: [{ type: "text", text: prompt }] };
 }
 
 export class StructuredSessionManager {
@@ -192,6 +194,8 @@ export class StructuredSessionManager {
   // Server-only, one-shot execution UUIDs. Actual request lifecycle clears them; metadata updates do not.
   // Never persisted or included in session DTOs.
   private readonly unacceptedTeamStarts = new Map<string, { requestId: string; failure: StructuredFailure }>();
+  /** Original persisted request identity for an adopted run; separate from callback-generation IDs. */
+  private readonly recoveredLogicalRequests = new Map<string, string>();
   private readonly interruptedWith = new Map<string, string>();
   /**
    * 「智能分配」正在结算的会话：这段窗口内还没有 runner 归属，新输入必须排队而不是另起一轮。
@@ -256,10 +260,6 @@ export class StructuredSessionManager {
     private readonly autoAssignEvaluate: () => DecisionRuntimeAccess["evaluate"] = () => undefined,
     private readonly webLoginTickets?: WebLoginTickets,
   ) {
-    if (logger && execHost?.persistent && !runners.pi && process.env.WAND_PI_NATIVE_TMUX !== "0"
-      && process.env.WAND_TEST_MODE !== "1" && !process.env.NODE_TEST_CONTEXT) {
-      this.execHost = new PiTmuxHost(logger.getConfigDirectory(), execHost);
-    }
     const wrap = (runner: StructuredRunnerAdapter): StructuredRunnerAdapter =>
       withModelGroups(withDecisionAccess(runner, storage, decisionRuntime), config);
     this.claudeCliRunner = wrap(runners.claudeCli ?? new ClaudeCliRunner({ language: () => this.config.language }, this.execHost));
@@ -420,6 +420,7 @@ export class StructuredSessionManager {
     for (const release of this.systemCallDrainReleases) release();
     this.systemCallDrainReleases.clear();
     this.unacceptedTeamStarts.clear();
+    this.recoveredLogicalRequests.clear();
     // 静默心跳不跨服务关闭存活（会话级 timer 不允许泄漏）。
     this.turnHeartbeat.dispose();
 
@@ -593,6 +594,11 @@ export class StructuredSessionManager {
     const sessionId = snapshot.id;
     if (this.disposed || !this.execHost || !snapshot.structuredState) return;
     const requestId = `recover-${initialState.incarnationId}`;
+    const logicalRequestId = snapshot.automationId?.startsWith("wand-task-comment:")
+      ? snapshot.structuredState.activeRequestId
+        ?? [...(snapshot.messages ?? [])].reverse().find(message => message.role === "user")?.requestId
+      : null;
+    if (logicalRequestId) this.recoveredLogicalRequests.set(sessionId, logicalRequestId);
     let runningHandle: Awaited<ReturnType<StructuredExecHost["adoptRun"]>> = null;
     let interruptRequested = false;
     let acknowledgeExit = () => {};
@@ -921,7 +927,9 @@ export class StructuredSessionManager {
       this.sessions.set(sessionId, failed);
       this.saveAuthoritativeSession(failed);
       this.emitStructuredSnapshot(failed);
-      this.emitStructuredSnapshot(failed, "ended");
+      this.emitStructuredSnapshot(failed, "ended", this.commentTerminalEvent(failed,
+        this.recoveredLogicalRequests.get(sessionId) ?? requestId, "failed"));
+      this.recoveredLogicalRequests.delete(sessionId);
       return;
     }
 
@@ -952,8 +960,18 @@ export class StructuredSessionManager {
     };
     this.sessions.set(sessionId, finished);
     this.saveAuthoritativeSession(finished);
+    const logicalTerminalRequestId = this.recoveredLogicalRequests.get(sessionId) ?? requestId;
+    if (interruptPrompt) {
+      // This logical turn has stopped at this exact transcript boundary even though
+      // interrupt-and-send keeps the session open for the replacement request.
+      this.emitStructuredSnapshot(finished, "output", this.commentTerminalEvent(finished, logicalTerminalRequestId, "stopped"));
+      this.recoveredLogicalRequests.delete(sessionId);
+    }
     this.emitStructuredSnapshot(finished);
-    if (!keepRunning) this.emitStructuredSnapshot(finished, "ended");
+    if (!keepRunning) {
+      this.emitStructuredSnapshot(finished, "ended", this.commentTerminalEvent(finished, logicalTerminalRequestId, "done"));
+      this.recoveredLogicalRequests.delete(sessionId);
+    }
 
     if (interruptPrompt) {
       this.interruptedWith.delete(sessionId);
@@ -1052,6 +1070,7 @@ export class StructuredSessionManager {
     this.turnHeartbeat.cancel(sessionId);
     if (scope === "run") return;
     this.unacceptedTeamStarts.delete(sessionId);
+    this.recoveredLogicalRequests.delete(sessionId);
     const keyPrefix = `${sessionId}:`;
     this.seenIdempotencyKeys.deleteMatching((key) => key.startsWith(keyPrefix));
   }
@@ -1116,9 +1135,7 @@ export class StructuredSessionManager {
    * 只有真在跑原生 tmux 时才有意义，否则返回 null 表示本次未执行。
    */
   collectNativeGarbage(options: { liveSessionIds: ReadonlySet<string>; retentionMs: number; now?: number }): PiNativeGcReport | null {
-    const host = this.execHost;
-    if (!(host instanceof PiTmuxHost)) return null;
-    return host.collectGarbage(options);
+    return this.execHost?.collectGarbage?.(options) ?? null;
   }
 
   /** Return lightweight snapshots for the session list (no output/messages). */
@@ -1385,6 +1402,7 @@ export class StructuredSessionManager {
     original: SessionSnapshot,
     prompt: string,
     error: unknown,
+    requestId: string,
   ): Promise<SessionSnapshot> | null {
     // Team runs own candidate scheduling; keep the snapshot without a second retry loop.
     if (original.automationId?.startsWith("ai-team:") || !(error instanceof UnacceptedStructuredInputError)) return null;
@@ -1444,6 +1462,9 @@ export class StructuredSessionManager {
     };
     this.logger?.appendStructuredSpawn(id, { kind: "candidate-fallback", failureKind: error.failure.kind,
       fromProvider: original.provider, toProvider: next.provider, candidateIndex: nextIndex, sameTool });
+    if (original.automationId?.startsWith("wand-task-comment:")) {
+      this.storage.resetTaskCommentResultForUnacceptedRetry(id, requestId);
+    }
     this.sessions.set(id, retry);
     this.saveAuthoritativeSession(retry);
     // sendMessage publishes the new running snapshot synchronously; do not expose a transient idle slot.
@@ -1524,8 +1545,12 @@ export class StructuredSessionManager {
     // 成 tool_result 注入到 messages，让 UI 把卡片渲染为 answered。
     const pendingAsk = findUnpairedAskUserQuestion(session.messages ?? []);
     const userTurnAt = isoNow();
-    const userTurn = buildUserTurn(prompt, pendingAsk, userTurnAt);
     const requestId = randomUUID();
+    // Persist the logical request ID only where comment-result anchoring requires
+    // a durable transcript identity. Team startup correlation IDs are private
+    // lifecycle tokens and must never be copied into persisted/public messages.
+    const transcriptRequestId = session.automationId?.startsWith("wand-task-comment:") ? requestId : undefined;
+    const userTurn = buildUserTurn(prompt, pendingAsk, userTurnAt, transcriptRequestId);
     this.unacceptedTeamStarts.delete(id);
     if (this.unsupportedStructuredProviders.has(id)) {
       throw new Error(`会话使用的 provider 已不受支持，不能继续发送。`);
@@ -1550,6 +1575,7 @@ export class StructuredSessionManager {
     if (updated.automationId?.startsWith("ai-team:")) opts?.teamRequestStarted?.(id, requestId);
     this.checkpointSessionMessages(updated);
     this.emitStructuredSnapshot(updated);
+    if (transcriptRequestId) this.storage.bindTaskCommentResultStart(id, transcriptRequestId, updated.messages!.length - 1);
     this.emit({
       type: "status",
       sessionId: id,
@@ -1822,7 +1848,7 @@ export class StructuredSessionManager {
     if (!this.isCurrentRequest(id, requestId)) {
       return current;
     }
-    const retry = this.retryEmployeeCandidate(id, session, prompt, error);
+    const retry = this.retryEmployeeCandidate(id, session, prompt, error, requestId);
     if (retry) return await retry;
     const failed: SessionSnapshot = error instanceof UnacceptedStructuredInputError
       ? this.finishStructuredFailure(current, 1, message, error.state)
@@ -1855,7 +1881,8 @@ export class StructuredSessionManager {
       sessionId: id,
       data: { status: failed.status, error: message, sessionKind: "structured", queuedMessages: failed.queuedMessages, structuredState: failed.structuredState },
     });
-    this.emitStructuredSnapshot(failed, "ended");
+    this.emitStructuredSnapshot(failed, "ended", error instanceof UnacceptedStructuredInputError
+      ? {} : this.commentTerminalEvent(failed, requestId, "failed"));
     throw error;
   }
 
@@ -2401,10 +2428,12 @@ export class StructuredSessionManager {
       this.releasePendingRunnerExecution(id, runnerExecution);
     }
     this.saveAuthoritativeSession(cancelled);
-    // 仍发 "ended" 事件让各端停掉"回复中"指示 / 灵动岛，但携带的 status 是 idle。
-    this.emitStructuredSnapshot(cancelled, "ended", {
-      ...(session.structuredState?.inFlight || session.status === "running" ? { turnOutcome: "stopped" as const } : {}),
-    });
+    // Preserve the terminal request identity for result anchoring even though stop() clears activeRequestId.
+    const terminal = this.recoveredLogicalRequests.get(id) ?? session.structuredState?.activeRequestId;
+    this.recoveredLogicalRequests.delete(id);
+    const stopped = session.structuredState?.inFlight || session.status === "running";
+    const terminalEvent = stopped ? this.commentTerminalEvent(cancelled, terminal, "stopped") : {};
+    this.emitStructuredSnapshot(cancelled, "ended", terminalEvent);
     return cancelled;
   }
 
@@ -2562,7 +2591,14 @@ export class StructuredSessionManager {
     return true;
   }
 
-  private emitStructuredSnapshot(session: SessionSnapshot, eventType: "output" | "ended" = "output", outcome: { turnOutcome?: "stopped" } = {}): void {
+  private commentTerminalEvent(session: SessionSnapshot, requestId: string | null | undefined, turnOutcome: "done" | "failed" | "stopped"): { terminalRequestId?: string; turnOutcome: "done" | "failed" | "stopped" } {
+    return {
+      turnOutcome,
+      ...(session.automationId?.startsWith("wand-task-comment:") && requestId ? { terminalRequestId: requestId } : {}),
+    };
+  }
+
+  private emitStructuredSnapshot(session: SessionSnapshot, eventType: "output" | "ended" = "output", outcome: { turnOutcome?: "done" | "failed" | "stopped"; terminalRequestId?: string } = {}): void {
     // 排队消息只通过 payload.queuedMessages 单独下发，由各端在消息卡片外的「排队条」
     // 里纵向渲染——绝不再把它们当成 __queued 占位 turn 混进 messages 消息流里，否则会
     // 和排队条重复显示（旧的「显示异常」根因）。
@@ -2865,7 +2901,7 @@ export class StructuredSessionManager {
       this.sessions.set(sessionId, failed);
       this.saveAuthoritativeSession(failed);
       this.emitStructuredSnapshot(failed);
-      this.emitStructuredSnapshot(failed, "ended");
+      this.emitStructuredSnapshot(failed, "ended", this.commentTerminalEvent(failed, requestId, "failed"));
       throw new PersistedStructuredRunnerError(errorText);
     }
 
@@ -2901,8 +2937,18 @@ export class StructuredSessionManager {
     };
     this.sessions.set(sessionId, finished);
     this.saveAuthoritativeSession(finished);
+    const logicalTerminalRequestId = this.recoveredLogicalRequests.get(sessionId) ?? requestId;
+    if (interruptPrompt) {
+      // This logical turn has stopped at this exact transcript boundary even though
+      // interrupt-and-send keeps the session open for the replacement request.
+      this.emitStructuredSnapshot(finished, "output", this.commentTerminalEvent(finished, logicalTerminalRequestId, "stopped"));
+      this.recoveredLogicalRequests.delete(sessionId);
+    }
     this.emitStructuredSnapshot(finished);
-    if (!keepRunning) this.emitStructuredSnapshot(finished, "ended");
+    if (!keepRunning) {
+      this.emitStructuredSnapshot(finished, "ended", this.commentTerminalEvent(finished, logicalTerminalRequestId, "done"));
+      this.recoveredLogicalRequests.delete(sessionId);
+    }
 
     if (interruptPrompt) {
       this.interruptedWith.delete(sessionId);

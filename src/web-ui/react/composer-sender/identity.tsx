@@ -1,10 +1,13 @@
 import * as React from "react";
+import { cachedComposerAvatarChoice, resolveComposerAvatarChoice, type AvatarRenderChoice } from "../../avatar-hardware.js";
 import { EmployeeAvatar } from "../agents/employee-avatar.js";
+import { AvatarThinking } from "../avatars/thinking.js";
 import { chatUsageMetrics } from "../../chat-message-meta.js";
 import { RunningStatusBar } from "../chat/running-status-bar.js";
 import { computeRunningPhase, type RunningActivityShape } from "../../running-activity.js";
 import type { ConversationTurn } from "../../../types.js";
-import { WandButton, WandPopover } from "../ui/index.js";
+import { WandButton } from "../ui/button.js";
+import { WandPopover } from "../ui/popover.js";
 
 export function ComposerUsage({ usage, activity, employeeName, legacyStatus = false, showName = true }: { usage: ConversationTurn["usage"]; activity?: RunningActivityShape; employeeName?: string; legacyStatus?: boolean; showName?: boolean }): React.ReactElement | null {
   const metrics = chatUsageMetrics(usage);
@@ -20,13 +23,29 @@ export function ComposerUsage({ usage, activity, employeeName, legacyStatus = fa
   </div>;
 }
 
-/** Identity only: draft, focus and send ownership stay with the existing composer. */
+function useComposerAvatarChoice(): "pending" | AvatarRenderChoice {
+  const [choice, setChoice] = React.useState<"pending" | AvatarRenderChoice>(() => cachedComposerAvatarChoice() ?? "pending");
+  React.useEffect(() => {
+    if (choice !== "pending") return;
+    setChoice(resolveComposerAvatarChoice());
+  }, [choice]);
+  return choice;
+}
+
+/** Bottom identity. Live 3D only when this browser's hardware facts can afford it. */
 export function ComposerIdentity({ employee, thinking = false, fileActivity = "idle" }: {
   employee: React.ComponentProps<typeof EmployeeAvatar>["employee"];
   thinking?: boolean;
   fileActivity?: import("../../composer-avatar-activity.js").AvatarFileActivity;
 }): React.ReactElement {
-  return <span className="composer-floating-avatar" role="img" aria-label={`${employee.name}${fileActivity === "reading" ? "，正在查看文件" : fileActivity === "writing" ? "，正在编写文件" : ""}`} data-file-activity={fileActivity}>
-    <EmployeeAvatar employee={employee} provider="" size="composer" thinking={thinking && fileActivity === "idle"} fileActivity={fileActivity}/>
+  const choice = useComposerAvatarChoice();
+  const executing = thinking && fileActivity === "idle";
+  const staticMode = choice !== "live";
+  // A flat head still has to say something while this browser's hardware facts are
+  // being read, and while the employee is executing. Reply history stays pure static.
+  const loading = choice === "pending";
+  return <span className="composer-floating-avatar" role="img" aria-label={`${employee.name}${fileActivity === "reading" ? "，正在查看文件" : fileActivity === "writing" ? "，正在编写文件" : ""}`} data-file-activity={fileActivity} data-avatar-choice={choice}>
+    <EmployeeAvatar employee={employee} provider="" size="composer" renderMode={staticMode ? "static" : "live"} loading={loading} thinking={executing} fileActivity={fileActivity}/>
+    {staticMode && (loading || executing) ? <AvatarThinking/> : null}
   </span>;
 }

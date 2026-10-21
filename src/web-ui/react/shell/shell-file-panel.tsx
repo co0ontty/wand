@@ -1,7 +1,9 @@
 import * as React from "react";
 import { Drawer, Flex } from "antd";
 
-import { WandInput, WandIcon, WandIconButton } from "../ui";
+import { WandInput } from "../ui/input";
+import { WandIcon } from "../ui/icons";
+import { WandIconButton } from "../ui/button";
 import { classNames } from "../ui/class-names";
 import { fileExplorerController } from "../file-explorer/controller";
 import { deferredComponent } from "../deferred-feature";

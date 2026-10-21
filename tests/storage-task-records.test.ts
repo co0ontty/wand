@@ -80,7 +80,10 @@ test("either task creation entry point immediately returns both compatible proje
   assert.equal(card.description, "sidebar details");
   assert.equal(card.status, "todo");
   assert.equal(storage.getWorkspaceTask(board.workspaceTaskId!)?.name, board.title);
-  assert.equal(storage.listWorkspaceTasks(project.id).length, 2);
+  const backlog = storage.createWandTask({ workspaceId: project.id, title: "未立项", status: "backlog" });
+  assert.equal(storage.getWandTask(backlog.id)?.status, "backlog");
+  assert.equal(storage.getWorkspaceTask(backlog.workspaceTaskId!)?.status, "active");
+  assert.equal(storage.listWorkspaceTasks(project.id).length, 3);
   assert.equal(card.milestoneId, storage.findDefaultWandMilestone()?.id);
 });
 
@@ -110,6 +113,10 @@ test("one metadata writer changes both DTOs and task fingerprints while preservi
   storage.updateWorkspaceTask(task.id, { name: "User name", status: "active" });
   assert.equal(storage.getWandTask(card.id)?.titleSource, "user");
   assert.equal(storage.getWandTask(card.id)?.status, "doing");
+
+  const backlog = storage.createWandTask({ workspaceId: project.id, title: "Backlog card", status: "backlog" });
+  storage.updateWorkspaceTask(backlog.workspaceTaskId!, { status: "active" });
+  assert.equal(storage.getWandTask(backlog.id)?.status, "backlog", "workspace projection cannot promote backlog as a side effect");
 });
 
 test("canonical NULL does not restore a stale container milestone and reads do not mutate it", (t) => {

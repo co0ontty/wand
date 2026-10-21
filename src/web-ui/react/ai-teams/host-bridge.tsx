@@ -53,7 +53,7 @@ import {
   useTeamDispatchFlow,
 } from "../team-dispatch/roster";
 import { subscribeTaskChanges } from "../task-changes";
-import { appendedConversationKeys, CONVERSATION_TAIL_PX, conversationClock, conversationDay, conversationMessageKey, joinsConversationBubble } from "../conversations/presentation";
+import { appendedConversationKeys, CONVERSATION_TAIL_PX, conversationClock, conversationDay, conversationMessageKey, conversationScrollRestore, joinsConversationBubble, CONVERSATION_HISTORY_PAGE_TURNS, CONVERSATION_INITIAL_TURNS, chatHistoryRootMargin } from "../conversations/presentation";
 import { conversationUi } from "../conversations/state";
 import { currentUserAuthor, selfAuthorFor, userProfileStore, useUserProfile } from "../user-profile-repository";
 import { settingsController } from "../settings/controller";
@@ -86,7 +86,8 @@ import { EmployeeAvatarWorkspace } from "../agents/employee-avatar-workspace.js"
 import { installEmployeeProfileStyles } from "../styles/employee-profile.js";
 import { EmployeeImEditor } from "../agents/employee-im-editor.js";
 import { installEmployeeStyles } from "../agents/styles.js";
-import { PlushAvatar } from "../avatars/plush-avatar.js";
+import { AvatarFilePropsFallback } from "../avatars/file-props-fallback.js";
+import { PlushAvatar, StaticPlushAvatar } from "../avatars/plush-avatar.js";
 import { AvatarThinking } from "../avatars/thinking.js";
 import { ProviderLogo } from "../provider-logo.js";
 import { teamChatComposer } from "./composer-bridge";
@@ -150,14 +151,15 @@ const AI_TEAMS_HOST: Record<string, object> = {
   },
   "shell/sidebar-toggle-icon": { SidebarToggleIcon },
   "styles": { installStyleSheet },
-  "avatars/plush-avatar": { PlushAvatar },
+  "avatars/file-props-fallback": { AvatarFilePropsFallback },
+  "avatars/plush-avatar": { PlushAvatar, StaticPlushAvatar },
   "avatars/thinking": { AvatarThinking },
   "agents/employee-avatar-styles": { installAvatarEditorStyles },
   "task-changes": { subscribeTaskChanges },
   "conversations/state": { conversationUi },
   "conversations/repository": { conversationsRepository },
   "conversations/run-route": { conversationForRun },
-  "conversations/presentation": { appendedConversationKeys, CONVERSATION_TAIL_PX, conversationClock, conversationDay, conversationMessageKey, joinsConversationBubble },
+  "conversations/presentation": { appendedConversationKeys, CONVERSATION_TAIL_PX, conversationClock, conversationDay, conversationMessageKey, conversationScrollRestore, joinsConversationBubble, CONVERSATION_HISTORY_PAGE_TURNS, CONVERSATION_INITIAL_TURNS, chatHistoryRootMargin },
   "user-profile-repository": { currentUserAuthor, selfAuthorFor, userProfileStore, useUserProfile },
   "ui": {
     WandBadge, WandBrandMark, WandBreadcrumb, WandButton, WandDialogSurface,
@@ -165,6 +167,12 @@ const AI_TEAMS_HOST: Record<string, object> = {
     WandIcon, WandIconButton, WandPopover, WandSearchField, WandSelect, WandStretchTabs,
   },
   "ui/motion-tokens": { MOTION_DWELL_FAILED_MS, MOTION_DWELL_SENT_MS, useReducedMotion },
+  // chunk 里按具体模块 import 的那几个公共控件也必须单独登记：经 "ui" 汇总入口借到的是
+  // 另一条路径，按路径生成的 key 是 ui/button 这类，缺一条就整块聊天渲染失败。
+  "ui/brand-mark": { WandBrandMark },
+  "ui/button": { WandButton, WandIconButton },
+  "ui/icons": { WandIcon },
+  "ui/popover": { WandPopover },
   "ai-teams/cat-coats": { CAT_COATS },
   "ai-teams/avatar": {
     CAT_COATS, GeneratedAvatarGlyph, TeamAvatar, TeamAvatarStack, avatarFace, avatarFaceParts,

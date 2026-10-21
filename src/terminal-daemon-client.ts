@@ -276,6 +276,7 @@ export class TerminalDaemonClient implements TerminalHost, StructuredExecHost {
 
   attach(sessionId: string, afterSeq = 0): TerminalAttachResult | null {
     const state = this.inventory.get(sessionId);
+    if (!state && (!this.socket || this.socket.destroyed)) throw new Error("Terminal ownership unavailable while daemon is disconnected");
     if (!state) return null;
     return this.resultFromState(state, false, afterSeq);
   }
@@ -694,8 +695,8 @@ export class TerminalDaemonClient implements TerminalHost, StructuredExecHost {
   }
 }
 
-export async function createTerminalHost(configPath: string): Promise<TerminalHost> {
-  if (process.env.WAND_TEST_MODE === "1" || process.env.NODE_TEST_CONTEXT) return new InProcessTerminalHost();
+export async function createTerminalHost(configPath: string, options: { persistent?: boolean } = {}): Promise<TerminalHost> {
+  if (!options.persistent && (process.env.WAND_TEST_MODE === "1" || process.env.NODE_TEST_CONTEXT)) return new InProcessTerminalHost();
   const paths = terminalDaemonPaths(configPath);
   const endpointExists = process.platform === "win32" || existsSync(paths.socketPath);
 

@@ -34,8 +34,19 @@ function harness() {
   const toasts: Array<{ message: string; tone?: string }> = [];
   const noop = () => {};
   const fallback = new Proxy({}, { get: () => noop });
+  // Keep raw transport here: this suite exercises the legacy merge/ordering
+  // rules, while the shared snapshot's single-flight is covered separately.
+  const fetchImpl = (url: string, init?: RequestInit) => {
+    const response = deferred<Response>();
+    requests.push({ url, init, response });
+    return response.promise;
+  };
   const dependencies: Record<string, unknown> = {
     "./state": { composer, state, writeStoredBoolean: noop },
+    "../react/session-list-snapshot": {
+      loadSessionList: () => fetchImpl("/api/sessions", { credentials: "same-origin" }).then((response) => parseJsonResponse(response)),
+      invalidateSessionList: noop,
+    },
     "../react/workspaces/controller": { workspacesStore: { getRuntime: () => null } },
     "../react/workspaces/workspace-context": { workspaceContextStore: { getSnapshot: () => ({ taskId: null }) } },
     "../chat-history-window.js": chatHistoryWindow,
@@ -83,11 +94,7 @@ function harness() {
     localStorage: { getItem: () => null, setItem: noop },
     console: { error: (...args: unknown[]) => errors.push(args) },
     setTimeout: noop, clearTimeout: noop, clearInterval: noop,
-    fetch: (url: string, init?: RequestInit) => {
-      const response = deferred<Response>();
-      requests.push({ url, init, response });
-      return response.promise;
-    },
+    fetch: fetchImpl,
   });
   const respond = (index: number, body: unknown, status = 200) => requests[index].response.resolve(new Response(JSON.stringify(body), { status }));
   return { composer, state, api, requests, respond, errors, toasts };
@@ -422,6 +429,7 @@ for (const kind of ["new-session", "missions"]) {
     const dependencies: Record<string, unknown> = {
       "./state": { state },
       "../react": { configureNewSessionRuntime: (value: unknown) => { runtime = value; return noop; } },
+      "../react/new-session/controller": { configureNewSessionRuntime: (value: unknown) => { runtime = value; return noop; } },
       "../react/conversations/state": { conversationUi: { suspend: noop } },
       "../react/missions/controller": { configureMissionsRuntime: (value: unknown) => { runtime = value; return noop; } },
       "./session-engine": new Proxy({}, { get: (_, key) => {

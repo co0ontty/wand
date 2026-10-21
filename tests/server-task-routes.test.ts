@@ -156,6 +156,20 @@ test("task board creates, moves, binds, and deletes tasks", async () => {
     assert.equal(created.status, "todo");
     assert.deepEqual(created.labels, ["mvp"]);
 
+    const backlog = await fetch(`${url}/api/wand-tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "待立项", status: "backlog" }),
+    }).then(jsonOf<{ id: string; status: string }>);
+    assert.equal(backlog.status, "backlog");
+
+    const defaulted = await fetch(`${url}/api/wand-tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "API 默认状态" }),
+    }).then(jsonOf<{ id: string; status: string }>);
+    assert.equal(defaulted.status, "todo", "API clients omitting status retain the legacy default");
+
     const session = manager.createSession({ cwd: storage.directory(), provider: "codex", mode: "full-access" });
     const moved = await fetch(`${url}/api/wand-tasks/${created.id}`, {
       method: "PATCH",
@@ -170,12 +184,21 @@ test("task board creates, moves, binds, and deletes tasks", async () => {
       body: JSON.stringify({ sessionId: session.id }),
     }).then(jsonOf<{ sessionIds: string[] }>);
     assert.deepEqual(bound.sessionIds, [session.id]);
-    assert.equal((await fetch(`${url}/api/wand-tasks`).then(jsonOf<unknown[]>)).length, 1);
+
+    const taskCommentSession = manager.createSession({ cwd: storage.directory(), provider: "codex", mode: "full-access",
+      sessionSource: "automation", automationId: "wand-task-comment:comment-owned-123" });
+    storage.bindWandTaskSession(created.id, taskCommentSession.id);
+    const taskWithCommentSession = await fetch(`${url}/api/wand-tasks/${created.id}`).then(jsonOf<{ sessions: Array<{ id: string; taskCommentId?: string; automationId?: string }> }>);
+    assert.equal(taskWithCommentSession.sessions.find(item => item.id === taskCommentSession.id)?.taskCommentId, "comment-owned-123",
+      "task-owned comment sessions expose a purpose-built identity independent of loaded comment pages");
+    assert.equal(taskWithCommentSession.sessions.find(item => item.id === taskCommentSession.id)?.automationId, undefined,
+      "the raw automation identifier is not projected");
+    assert.equal((await fetch(`${url}/api/wand-tasks`).then(jsonOf<unknown[]>)).length, 3);
   });
 });
 
-test("GET /api/wand-tasks returns newest created tasks first", async () => {
-  await withHarness(async ({ url }) => {
+test("GET /api/wand-tasks returns newest tasks with batched comment counts", async () => {
+  await withHarness(async ({ url, storage }) => {
     const older = await fetch(`${url}/api/wand-tasks`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -191,8 +214,22 @@ test("GET /api/wand-tasks returns newest created tasks first", async () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ status: "doing" }),
     });
-    const listed = await fetch(`${url}/api/wand-tasks`).then(jsonOf<Array<{ id: string }>>);
-    assert.deepEqual(listed.map((task) => task.id), [newer.id, older.id]);
+    const workspace = storage.createWorkspace({ name: "count scope", cwd: "/tmp/count-scope" });
+    const scoped = storage.createWandTask({ title: "工作区任务", workspaceId: workspace.id });
+    const employee = storage.ensureDefaultSiliconEmployee();
+    for (const [index, taskId] of [older.id, newer.id, newer.id, scoped.id].entries()) {
+      storage.createTaskCommentIntent({ taskId, requestId: `count-request-${index}`, signature: `count-${index}`, body: `comment ${index}`,
+        instruction: `comment ${index}`, sourceCommentId: null, employeeId: employee.id, employeeName: employee.name, taskVersion: "test" });
+    }
+    const listed = await fetch(`${url}/api/wand-tasks`).then(jsonOf<Array<{ id: string; commentCount: number }>>);
+    const listedById = new Map(listed.map(task => [task.id, task]));
+    assert.equal(listedById.get(newer.id)?.commentCount, 2);
+    assert.equal(listedById.get(older.id)?.commentCount, 1);
+    assert.equal(listedById.get(scoped.id)?.commentCount, 1);
+    const filtered = await fetch(`${url}/api/wand-tasks?workspaceId=${workspace.id}`).then(jsonOf<Array<{ id: string; commentCount: number }>>);
+    assert.deepEqual(filtered.map(task => [task.id, task.commentCount]), [[scoped.id, 1]], "workspace-filtered tasks retain their aggregated comment counts");
+    const empty = await fetch(`${url}/api/wand-tasks?workspaceId=nonexistent`).then(jsonOf<Array<{ commentCount: number }>>);
+    assert.deepEqual(empty, [], "workspace filtering remains applied after the shared batched projection");
   });
 });
 
@@ -463,9 +500,11 @@ test("dispatching an issue creates a structured session in the issue workspace a
         title: "修复构建",
         description: "跑通 assembleDebug",
         workspaceId: workspace.id,
+        status: "backlog",
         agent: { provider: "claude", model: "default", thinkingEffort: "standard" },
       }),
     }).then(jsonOf<{ id: string; status: string }>);
+    assert.equal(issue.status, "backlog");
 
     const dispatched = await fetch(`${url}/api/wand-tasks/${issue.id}/dispatch`, {
       method: "POST",
@@ -480,6 +519,8 @@ test("dispatching an issue creates a structured session in the issue workspace a
     // agent 未指定 mode 时落到标准模式，不再是旧的 "agent"。
     assert.equal(payload.session.mode, "default");
     assert.ok(registry.get(payload.session.id));
+    const promoted = await fetch(`${url}/api/wand-tasks/${issue.id}`).then(jsonOf<{ status: string }>);
+    assert.equal(promoted.status, "doing", "explicitly dispatching a backlog task advances it to doing");
     const defaultsAfterDispatch = await fetch(`${url}/api/wand-task-agent-defaults`)
       .then(jsonOf<{ thinkingEffort: string }>);
     assert.equal(defaultsAfterDispatch.thinkingEffort, "off", "ordinary dispatch must not overwrite future defaults");

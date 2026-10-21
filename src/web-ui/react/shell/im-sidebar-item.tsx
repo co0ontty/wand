@@ -1,6 +1,6 @@
 import { Badge, Flex, Typography } from "antd";
 import { SidebarLabelTooltip } from "../workspaces/sidebar-label-tooltip";
-import { WandButton } from "../ui";
+import { WandButton } from "../ui/button";
 import * as React from "react";
 import { classNames } from "../ui/class-names";
 import type { GlowStatus, SidebarSessionState } from "../workspaces/sidebar-session-state";

@@ -19,15 +19,10 @@ test("future first workspace window renders native task chrome without a live st
     assert.match(html, /workspace-tab-logo/);
     assert.match(html, /workspace-tab-dot/);
     assert.doesNotMatch(html, /topbar-git-badge|workspace-tab-git-badge|sessions-toggle-button/);
-    if (mobile) {
-      assert.match(html, /工作窗口操作/);
-      assert.doesNotMatch(html, /workspace-tab-add|workspace-tab-files|workspace-tab-close/);
-    } else {
-      assert.match(html, /新建 Agent 或空白终端/);
-      assert.match(html, /workspace-tab-files/);
-      assert.match(html, /关闭任务标签组/);
-      assert.doesNotMatch(html, /工作窗口操作|chat-width-toggle/);
-    }
+    assert.match(html, /新建 Agent 或空白终端/);
+    assert.match(html, /打开终端/);
+    assert.match(html, /工作窗口操作/);
+    assert.doesNotMatch(html, /关闭任务标签组|chat-width-toggle/, "exit and split belong to the live controller menu");
   }
 });
 
@@ -42,7 +37,7 @@ test("pure workspace chrome preserves moving labels and controller action slots"
   assert.match(html, /把当前终端移入「目标窗口」/);
   assert.match(html, /关闭工作窗口 目标窗口/);
   assert.match(html, /aria-busy="true"/);
-  assert.match(html, /移动终端并左右分屏/);
+  assert.doesNotMatch(html, /移动终端并左右分屏/, "split commands no longer consume standalone toolbar buttons");
   assert.match(html, /选择目标窗口 · Esc 取消/);
   assert.match(html, /controller action slot/);
 });
@@ -73,7 +68,8 @@ test("ungrouped tabs reuse native chrome with add on both widths and retain task
     assert.match(html, /在当前目录新建 Agent 或空白终端/);
     assert.match(html, /ant-tabs-tab-remove/);
     assert.match(html, /关闭并删除会话 独立会话/);
-    assert.doesNotMatch(html, /workspace-tab-move|workspace-tab-close|workspace-tab-files|工作窗口操作/);
-    if (mobile) assert.match(html, /width:44px;height:44px/);
+    assert.doesNotMatch(html, /workspace-tab-move|workspace-tab-close|workspace-tab-files/);
+    assert.match(html, /工作窗口操作/);
+    // Touch hit targets are shared CSS; mobile route selection is tested at ShellMainContent.
   }
 });

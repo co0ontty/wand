@@ -2,7 +2,8 @@ import { useSyncExternalStore } from "react";
 import * as React from "react";
 import { createPortal } from "react-dom";
 import { composerRailController } from "./controller";
-import { WandButton, WandIcon } from "../ui";
+import { WandButton } from "../ui/button";
+import { WandIcon } from "../ui/icons";
 
 const DEFAULT_HINT = "发送回车到终端（相当于 Enter）";
 

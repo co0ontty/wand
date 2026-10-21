@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 import * as React from "react";
 import { createPortal } from "react-dom";
 import { composerSelectController } from "./controller";
-import { WandSelect } from "../ui";
+import { WandSelect } from "../ui/select";
 
 export function ComposerSelectHost() {
   const snapshot = useSyncExternalStore(

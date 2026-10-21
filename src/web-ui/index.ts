@@ -2,21 +2,29 @@
 
 import { EMBEDDED_WEB_ASSETS, type EmbeddedVendorAssetPath } from "./embedded-assets.js";
 import { getStylesAsset } from "./styles.js";
-import { getBrowserModuleManifest, getScriptAsset, getThemePreloadAsset } from "./scripts.js";
+import { getBrowserModuleManifest, getLoginChunk, getScriptAsset, getThemePreloadAsset } from "./scripts.js";
 import { WAND_FAVICON_URL } from "./brand-identity.js";
 
 function vendorAssetUrl(relPath: EmbeddedVendorAssetPath): string {
   return `${relPath}?v=${EMBEDDED_WEB_ASSETS.vendor[relPath].hash}`;
 }
 
-export function renderApp(configPath: string, page: "console" | "settings" = "console", settingsAuth: "browser" | "client" = "browser"): string {
+export function renderApp(configPath: string, page: "console" | "settings" = "console",
+  settingsAuth: "browser" | "client" = "browser", authenticated = true): string {
   const stylesHref = `/assets/app.css?v=${getStylesAsset().hash}`;
-  const scriptSrc = `/assets/app.js?v=${getScriptAsset(configPath).hash}`;
+  // 匿名访客只下发登录小包（content/login.js），不预载控制台 runtime：
+  // 之前登录页要等 Brotli 669KB 的整份控制台代码才能渲染密码框。
+  const loginAsset = authenticated ? null : getLoginChunk();
+  const scriptSrc = loginAsset
+    ? `/assets/login.js?v=${loginAsset.hash}`
+    : `/assets/app.js?v=${getScriptAsset(configPath).hash}`;
   // Discover the eager graph in the HTML instead of waiting for app.js to
   // download and execute its dynamic import. Preloading does not execute it:
   // the bootstrap still installs instance values before the runtime runs.
-  const modulePreloads = getBrowserModuleManifest().eager
-    .map(file => `<link rel="modulepreload" href="/assets/${file}" />`).join("\n  ");
+  const modulePreloads = authenticated
+    ? getBrowserModuleManifest().eager
+      .map(file => `<link rel="modulepreload" href="/assets/${file}" />`).join("\n  ")
+    : "";
   const xtermSrc = vendorAssetUrl("/vendor/xterm/xterm.bundle.js");
   const qrcodeSrc = vendorAssetUrl("/vendor/qrcode/qrcode.bundle.js");
   const xtermCssHref = vendorAssetUrl("/vendor/xterm/xterm.css");
@@ -40,7 +48,7 @@ export function renderApp(configPath: string, page: "console" | "settings" = "co
   <link rel="stylesheet" href="${stylesHref}" />
 </head>
 <body>
-  <div id="app"></div>
+  <div id="app">${authenticated ? "" : '<div data-login-controls style="height:100%"></div>'}</div>
   <div id="overlay-root" data-wand-ui-root></div>
 <script src="${scriptSrc}"></script>
 </body>

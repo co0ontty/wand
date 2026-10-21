@@ -286,7 +286,10 @@ test("reconnect discards a partial frame from the previous socket", async (t) =>
     await daemon.kill();
     daemon.sessions = [makeState("after-reconnect", "new-incarnation")];
     await daemon.start();
-    await waitFor(() => client.attach("after-reconnect"), "partial old frame corrupted reconnect");
+    await waitFor(() => {
+      try { return client.attach("after-reconnect"); }
+      catch { return null; } // Disconnected inventory is unknown, not absent.
+    }, "partial old frame corrupted reconnect");
     assert.ok((await client.createOrAttach(makeSpawnRequest("after-reconnect"))).process);
   });
 });

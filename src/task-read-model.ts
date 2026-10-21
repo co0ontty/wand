@@ -15,6 +15,7 @@ export class TaskReadModel {
   readonly workspaces;
   readonly milestones;
   readonly activeTeamTasks;
+  readonly commentCounts: Map<string, number>;
   private readonly assignees = new Map<string, { id: string; name: string; avatar?: string } | null>();
 
   constructor(readonly storage: WandStorage, registry?: SessionRegistry, snapshots?: SessionSnapshot[]) {
@@ -27,6 +28,7 @@ export class TaskReadModel {
       this.sessionsByTask.set(session.workspaceTaskId, bucket);
     }
     this.tasks = storage.listWandTasks();
+    this.commentCounts = storage.countWandTaskCommentsByTask();
     this.cardsByContainer = new Map(this.tasks.filter(task => task.workspaceTaskId).map(task => [task.workspaceTaskId!, task]));
     this.workspaces = new Map(storage.listWorkspaces().map(workspace => [workspace.id, workspace]));
     this.milestones = storage.listWandMilestones();

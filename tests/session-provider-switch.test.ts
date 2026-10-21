@@ -281,7 +281,11 @@ test("HTTP provider switch routes by owner, validates input and never rewrites a
   }
   assert.equal((await request(original.id, "pi", "core")).status, 400);
   assert.equal((await request(original.id, "codex", "sdk")).status, 400);
+  const unavailable = t.mock.method(manager, "resolveNewSessionPiEngine", async () => {
+    throw new Error("Wand Agent harness unavailable in this test");
+  });
   assert.equal((await request(original.id, "pi", "sdk")).status, 400, "unavailable SDK must not mutate the session");
+  unavailable.mock.restore();
   assert.equal(manager.get(original.id)?.provider, "codex");
   const cli = await request(original.id, "pi", "cli");
   assert.equal(cli.status, 200);

@@ -1,13 +1,12 @@
 import { useSyncExternalStore } from "react";
 import * as React from "react";
 import { overlayStore } from "./overlay-controller";
-import {
-  PortalContainerProvider,
-  WandDialog,
-  WandToastRegion,
-} from "./ui";
+import { PortalContainerProvider } from "./ui/portal-context";
+import { WandDialog } from "./ui/dialog";
+import { WandToastRegion } from "./ui/toast";
 import { SettingsHost, FolderPickerHost, QuickCommitHost, WorktreeMergeHost,
-  FilePreviewHost, LocalPreviewHost, ImageViewerHost, MissionsHost, WorkspacesHost, GithubIssuesHost, PiExecutionHost } from "./deferred-hosts";
+  FilePreviewHost, LocalPreviewHost, ImageViewerHost, MissionsHost, WorkspacesHost, GithubIssuesHost, PiExecutionHost,
+  ComposerAttachmentsHost } from "./deferred-hosts";
 import { RestartOverlayHost } from "./restart-overlay/host";
 import { restartOverlayController } from "./restart-overlay/controller";
 
@@ -16,7 +15,6 @@ import { ComposerConfigHost } from "./composer-config/host";
 import { PiSettingsHost } from "./pi-settings/deferred-host";
 import { ComposerPopoverHost } from "./composer-popover/host";
 import { ComposerActionErrorHost } from "./composer-action-error/host";
-import { ComposerAttachmentsHost } from "./composer-attachments/host";
 import { ComposerBadgesHost } from "./composer-badges/host";
 import { ComposerRailHost } from "./composer-rail/host";
 

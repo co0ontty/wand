@@ -179,8 +179,8 @@ test("opening an empty workspace task keeps creation user-driven", () => {
 
 test("empty task tab bar yields to the full-page CLI desktop", () => {
   const source = readFileSync(new URL("../src/web-ui/react/workspaces/workspace-tab-bar.tsx", import.meta.url), "utf8");
-  assert.match(source, /if \(!context\.taskId\) return <StandaloneSessionTabBar\/>/);
-  assert.match(source, /if \(taskLayout\.windows\.length === 0\) return null/);
+  assert.match(source, /if \(!context\.taskId\) return <StandaloneSessionTabBar fallback=\{fallback\}\/>/);
+  assert.match(source, /if \(taskLayout\.windows\.length === 0\) return fallback/);
   assert.doesNotMatch(source, /该任务还没有工作窗口/);
 });
 
@@ -195,13 +195,17 @@ test("task tab bar and standalone topbar share one quick-commit badge", () => {
   assert.match(topbar, /gitBadge=\{<TopbarGitBadge\/>\}/);
   assert.match(topbar, /<span id=\{chromeId\("topbar-git-slot"\)\} className="topbar-git-slot">\s*\{gitBadge\}/);
   assert.doesNotMatch(topbar, /id="topbar-git-badge"/, "顶栏不再自带一份内联徽章");
-  assert.match(tabBar, /<TopbarGitBadge id="workspace-tab-git-badge" className="workspace-tab-git"\/>/);
+  const actions = readFileSync(new URL("../src/web-ui/react/shell/workbar-actions.tsx", import.meta.url), "utf8");
+  assert.match(tabBar, /<WorkbarActions windowActions=/);
+  assert.match(actions, /<TopbarGitBadge id="workspace-tab-git-badge"\/>/);
   assert.match(badge, /id = "topbar-git-badge"/, "默认保留顶栏的 DOM id");
   assert.match(badge, /dispatch\(\{ type: "topbar\.gitCommit" \}\)/);
   assert.match(badge, /if \(!git\) return null;/, "非 git 会话 / 首页不显示徽章");
-  assert.match(tabBar, /if \(mobile\) return null/);
+  assert.match(tabBar, /if \(mobile\) return fallback/);
   assert.match(tabBar, /<WorkspaceTabBarChrome mobile=\{mobile\} taskName=\{context.taskName\}/);
-  assert.match(tabChrome, /<Flex align="center" gap=\{4\} wrap=\{!mobile\} className="workspace-tab-bar"/);
+  assert.match(tabChrome, /<Flex align="center" gap=\{8\} className="workspace-tab-bar"/);
+  assert.match(styles, /container:wand-workbar \/ inline-size/);
+  assert.match(styles, /flex-wrap:nowrap/);
 });
 
 test("clicking a session inside the open task skips the task reopen", () => {

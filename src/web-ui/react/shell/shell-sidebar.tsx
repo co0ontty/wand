@@ -9,7 +9,7 @@ import { settingsController, settingsStore } from "../settings/controller";
 import { isSessionJustCompleted } from "../../../session-completion-state.js";
 import { WAND_AGENT_LABEL, normalizeProviderId, providerDisplayName } from "../../provider-identity";
 import { ProviderLogo } from "../provider-logo";
-import { WorkspacesPanel } from "../workspaces/workspaces-panel";
+import { deferredComponent } from "../deferred-feature";
 import { openSessionWithOwningTask } from "../workspaces/session-open";
 import { SidebarProjectionSwap } from "../workspaces/sidebar-projection-swap";
 import { conversationUi, useConversationUi } from "../conversations/state";
@@ -20,17 +20,9 @@ import { useUserProfile } from "../user-profile-repository";
 import { DEFAULT_USER_DISPLAY_NAME } from "../../../user-profile.js";
 import { SidebarToggleIcon } from "./sidebar-toggle-icon";
 import { DaemonUpdateNotice } from "./daemon-update-notice";
-import {
-  WandButton,
-  WandDropdownMenu,
-  WandDropdownMenuContent,
-  WandDropdownMenuItem,
-  WandDropdownMenuSeparator,
-  WandDropdownMenuTrigger,
-  WandIcon,
-  WandIconButton,
-  type WandIconName,
-} from "../ui";
+import { WandButton, WandIconButton } from "../ui/button";
+import { WandDropdownMenu, WandDropdownMenuContent, WandDropdownMenuItem, WandDropdownMenuSeparator, WandDropdownMenuTrigger } from "../ui/dropdown-menu";
+import { WandIcon, type WandIconName } from "../ui/icons";
 import { classNames } from "../ui/class-names";
 import { sidebarSearchMatches } from "../workspaces/sidebar-search";
 import {
@@ -45,6 +37,7 @@ import { useAiTeamAttentionCount } from "../ai-teams/repository";
 import { SidebarPeek } from "./sidebar-peek";
 import { useHoverPointer, useSidebarPeek } from "./use-sidebar-peek";
 import { useSidebarDrawer } from "./use-sidebar-drawer";
+import { useSidebarGesture } from "./use-sidebar-gesture";
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
 import type {
   UiAction,
@@ -74,6 +67,13 @@ export interface ShellSidebarEntryActions {
 export const SHELL_WORKTREE_MERGE_LABEL = "合并到主分支…";
 export const SHELL_WORKTREE_CLEANUP_LABEL = "重试 worktree 清理";
 export const SHELL_SESSION_DELETE_LABEL = "删除会话";
+
+/** The workspace tree mounts only after the user switches projections; keep its
+ * dialog/polling code out of the chat shell's first load. */
+const WorkspacesPanel = deferredComponent<NonNullable<React.ComponentProps<(typeof import("../workspaces/workspaces-panel"))["WorkspacesPanel"]>>>(
+  () => import("../workspaces/workspaces-panel").then(module => module.WorkspacesPanel),
+  { title: "工作区", renderPending: () => <div role="status" style={{ padding: 12, fontSize: 12, color: "var(--text-secondary)" }}>正在加载工作区…</div> },
+);
 
 export function getSidebarEntryTarget(entry: Readonly<UiSessionVm>): UiManageTarget {
   if (entry.source.endsWith("-history")) return entry.source as UiManageTarget;
@@ -590,9 +590,9 @@ function SessionGroup({
 export function ShellSidebar() {
   const snapshot = useUiStoreSnapshot();
   const conversationState = useConversationUi();
-  // 首屏只挂载当前投影：对话列表和工作区树各自带着自己的请求与渲染，
-  // 同时挂载会让首屏先排队拉一份用户没在看的数据。另一侧等首屏空闲后再挂载，
-  // 之后保持常驻，来回切换不再重复拉取，也不会丢掉展开/滚动状态。
+  // 首屏只挂载当前投影：对话列表和工作区树各自带着自己的请求、订阅与渲染。
+  // 另一侧等用户首次切换过去时才挂载，之后保持常驻；空闲预挂载会让隐藏列表
+  // 在首屏就拉对话/会话/员工并开始页面级轮询，即使它从没显示过。
   const [mountedModes, setMountedModes] = React.useState<ReadonlySet<"chats" | "tasks">>(
     () => new Set<"chats" | "tasks">([conversationState.mode]),
   );
@@ -602,24 +602,6 @@ export function ShellSidebar() {
     if (activeModeMounted) return;
     setMountedModes((previous) => new Set(previous).add(conversationState.mode));
   }, [activeModeMounted, conversationState.mode]);
-  React.useEffect(() => {
-    const inactive: "chats" | "tasks" = conversationState.mode === "chats" ? "tasks" : "chats";
-    if (mountedModes.has(inactive)) return undefined;
-    let cancelled = false;
-    const mountInactive = (): void => {
-      if (cancelled) return;
-      setMountedModes((previous) => previous.has(inactive) ? previous : new Set(previous).add(inactive));
-    };
-    const idle = typeof window !== "undefined" && typeof window.requestIdleCallback === "function";
-    const handle = idle
-      ? window.requestIdleCallback(mountInactive, { timeout: 1_500 })
-      : window.setTimeout(mountInactive, 0);
-    return () => {
-      cancelled = true;
-      if (idle) window.cancelIdleCallback(handle);
-      else window.clearTimeout(handle);
-    };
-  }, [conversationState.mode, mountedModes]);
   const dispatch = useUiDispatch();
   const taskBoard = React.useSyncExternalStore(taskBoardStore.subscribe, taskBoardStore.getSnapshot, taskBoardStore.getSnapshot);
   const settings = React.useSyncExternalStore(settingsStore.subscribe, settingsStore.getSnapshot, settingsStore.getSnapshot);
@@ -649,6 +631,15 @@ export function ShellSidebar() {
     || (!snapshot.layout.sidebarDrawer && snapshot.layout.sidebarAnchored);
   const overlay = visible && (snapshot.layout.sidebarDrawer || !snapshot.layout.sidebarPinned);
   const drawerRef = useSidebarDrawer(overlay, () => void dispatch({ type: "layout.drawer.close" }));
+  const backdropRef = React.useRef<HTMLDivElement>(null);
+  useSidebarGesture({
+    drawerRef,
+    backdropRef,
+    enabled: snapshot.layout.sidebarDrawer || overlay,
+    isOpen: snapshot.layout.sessionsDrawerOpen,
+    onOpen: () => void dispatch({ type: "layout.drawer.open" }),
+    onClose: () => void dispatch({ type: "layout.drawer.close" }),
+  });
   const bodyRef = React.useRef<HTMLDivElement>(null);
   const peekSurfaceRef = React.useRef<HTMLDivElement>(null);
   // 窄栏的悬浮目录树：只在有真实指针的设备上启用（触摸设备没有悬停语义）。
@@ -750,6 +741,7 @@ export function ShellSidebar() {
     <SidebarPresentationContext.Provider value={presentation}>
       <div
         id="sessions-drawer-backdrop"
+        ref={backdropRef}
         className={classNames("drawer-backdrop", snapshot.layout.sessionsBackdropVisible && "open")}
         aria-hidden="true"
         style={{ position: "fixed", inset: 0, background: "var(--bg-overlay)", zIndex: 19999, display: snapshot.layout.sessionsBackdropVisible ? undefined : "none" }}

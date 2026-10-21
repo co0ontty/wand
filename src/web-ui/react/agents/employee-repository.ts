@@ -1,6 +1,7 @@
 import * as React from "react";
 import { isBuiltinSiliconEmployee, type SiliconEmployee, type SiliconEmployeeDraft } from "../../../ai-team-types.js";
 import { jsonBody, requestJson } from "../http-adapter.js";
+import { createQuerySnapshot, type QuerySnapshot } from "../../query-snapshot.js";
 
 export type SiliconEmployeeInput = Pick<
   SiliconEmployee,
@@ -36,19 +37,38 @@ type EmployeeListener = (employeeId?: string) => void;
 const employeeListeners = new Set<EmployeeListener>();
 const employeeCacheListeners = new Set<() => void>();
 
-let employeeList: SiliconEmployee[] | null = null;
-let employeeListPending: Promise<SiliconEmployee[]> | null = null;
-let employeeListVersion = 0;
+// `includeArchived` is a different server projection, not a cache flag: each
+// dimension keeps its own committed value and single-flight request.
+const employeeSnapshots = new Map<boolean, QuerySnapshot<SiliconEmployee[]>>();
+
+function employeeSnapshot(includeArchived: boolean): QuerySnapshot<SiliconEmployee[]> {
+  let snapshot = employeeSnapshots.get(includeArchived);
+  if (!snapshot) {
+    const query = includeArchived ? "?includeArchived=1" : "";
+    snapshot = createQuerySnapshot(async () => {
+      const response = await requestJson<{ employees: SiliconEmployee[] }>(
+        `/api/silicon-employees${query}`,
+        { cache: "no-store" },
+      );
+      return response.employees ?? [];
+    });
+    employeeSnapshots.set(includeArchived, snapshot);
+  }
+  return snapshot;
+}
 
 export function invalidateEmployeeList(): void {
-  employeeListVersion++;
-  employeeList = null;
-  employeeListPending = null;
+  employeeSnapshot(false).invalidate();
+  employeeSnapshot(true).invalidate();
   for (const listener of employeeCacheListeners) listener();
 }
 
+export function peekSiliconEmployees(includeArchived = false): SiliconEmployee[] | null {
+  return employeeSnapshot(includeArchived).peek();
+}
+
 export function cachedSiliconEmployee(id: string): SiliconEmployee | null {
-  return employeeList?.find((employee) => employee.id === id) ?? null;
+  return employeeSnapshot(false).peek()?.find((employee) => employee.id === id) ?? null;
 }
 
 export function subscribeSiliconEmployeeCache(listener: () => void): () => void {
@@ -70,30 +90,7 @@ export function subscribeSiliconEmployeeDefinitionChanges(listener: EmployeeList
 
 export const siliconEmployeesRepository = {
   list(options?: { includeArchived?: boolean }): Promise<SiliconEmployee[]> {
-    if (!options?.includeArchived && employeeList) return Promise.resolve(employeeList);
-    if (!options?.includeArchived && employeeListPending) return employeeListPending;
-
-    const query = options?.includeArchived ? "?includeArchived=1" : "";
-    const version = employeeListVersion;
-    const pending = requestJson<{ employees: SiliconEmployee[] }>(`/api/silicon-employees${query}`, { cache: "no-store" })
-      .then((res) => {
-        const list = res.employees ?? [];
-        if (!options?.includeArchived && version === employeeListVersion) {
-          employeeList = list;
-          for (const listener of employeeCacheListeners) listener();
-        }
-        return list;
-      })
-      .finally(() => {
-        if (!options?.includeArchived && employeeListPending === pending) {
-          employeeListPending = null;
-        }
-      });
-
-    if (!options?.includeArchived) {
-      employeeListPending = pending;
-    }
-    return pending;
+    return employeeSnapshot(options?.includeArchived === true).load();
   },
 
   get(id: string): Promise<SiliconEmployee> {
@@ -146,9 +143,10 @@ export function useSiliconEmployees(options?: { includeArchived?: boolean; enabl
   error: string | null;
   reload: () => void;
 } {
-  const [employees, setEmployees] = React.useState<SiliconEmployee[]>(() => (!options?.includeArchived && employeeList) || []);
+  const includeArchived = options?.includeArchived === true;
+  const [employees, setEmployees] = React.useState<SiliconEmployee[]>(() => peekSiliconEmployees(includeArchived) ?? []);
   const enabled = options?.enabled !== false;
-  const [loading, setLoading] = React.useState<boolean>(() => enabled && !(!options?.includeArchived && employeeList));
+  const [loading, setLoading] = React.useState<boolean>(() => enabled && peekSiliconEmployees(includeArchived) === null);
   const [error, setError] = React.useState<string | null>(null);
   const active = React.useRef(false);
   const enabledRef = React.useRef(enabled);
@@ -161,7 +159,7 @@ export function useSiliconEmployees(options?: { includeArchived?: boolean; enabl
     const current = (): boolean => active.current && enabledRef.current && generation.current === request;
     setLoading(true);
     siliconEmployeesRepository
-      .list({ includeArchived: options?.includeArchived })
+      .list({ includeArchived })
       .then((list) => {
         if (!current()) return;
         setEmployees(list);
@@ -173,7 +171,7 @@ export function useSiliconEmployees(options?: { includeArchived?: boolean; enabl
       .finally(() => {
         if (current()) setLoading(false);
       });
-  }, [options?.includeArchived]);
+  }, [includeArchived]);
 
   React.useEffect(() => {
     if (!enabled) {

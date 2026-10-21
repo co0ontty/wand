@@ -7,6 +7,24 @@ import { versionWebAsset, type VersionedWebAsset } from "./asset-version.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+/** 匿名登录页的独立小包（content/login.js）；自更新期间退回内嵌副本。 */
+const embeddedLoginChunk = withHash(EMBEDDED_WEB_ASSETS.loginJs);
+let loginChunk = embeddedLoginChunk;
+let loginChunkKey = "";
+
+export function getLoginChunk(requestedHash?: string): { content: string; hash: string } {
+  const chunkPath = path.join(__dirname, "content", "login.js");
+  try {
+    const stat = fs.statSync(chunkPath);
+    const key = `${stat.mtimeMs}:${stat.size}`;
+    if (key !== loginChunkKey) {
+      loginChunk = withHash(fs.readFileSync(chunkPath, "utf-8"));
+      loginChunkKey = key;
+    }
+  } catch { /* Keep the process's last/embedded version during self-update. */ }
+  return requestedHash === embeddedLoginChunk.hash ? embeddedLoginChunk : loginChunk;
+}
+
 let _scriptCache = EMBEDDED_WEB_ASSETS.scriptsJs;
 let _scriptCacheKey = "";
 let _scriptAsset: (VersionedWebAsset & { source: string; configPath: string; chunkHash: string }) | null = null;

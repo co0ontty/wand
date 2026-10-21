@@ -150,6 +150,7 @@ export function installSidebarStyles(): void {
   .wand-workspace-tab-label { max-width:96px; }
   [data-session-tabs="task"] .wand-workspace-tabs .ant-tabs-tab-remove { display:none; }
 }
+.wand-attention-list { display:flex; flex-direction:column; gap:2px; margin:0; padding:0; list-style:none; }
 .wand-attention-item { width:100%; height:auto; white-space:normal; text-align:start; justify-content:flex-start; }
 /* 报错项正文是不带空格的 CJK 长串，默认 overflow-wrap:normal 时 min-content 会把
    侧栏撑到 350px（父级 296px，overflow 可见=>右侧 54px 被裁且无横向滚动）。
@@ -158,6 +159,25 @@ export function installSidebarStyles(): void {
 /* 5 条报错展开后有 1900px+，整段插在侧栏里会把会话列表顶到屏幕外（实测导航 y≈2038）。
    侧栏空间有限，面板自己滚，保持“就地展开”不变。 */
 .home-attention.is-sidebar { max-height:min(50dvh, 520px); overflow-y:auto; overscroll-behavior:contain; }
+/* 空白对话区的报错条异步到达：绝对定位在左上角，不占纵向流，
+   避免它一出现就把居中的欢迎内容顶下去（实测任务看板 CLS 0.0189）。 */
+.blank-chat-attention { position:absolute; inset-block-start:24px; inset-inline-start:24px; z-index:1; }
 .wand-worktree-selection { display:flex; align-items:flex-start; width:100%; margin-block:8px; }
+@media (prefers-reduced-motion: no-preference) {
+  #sessions-drawer.sidebar-refined[role="dialog"]:not([data-drawer-gesture="active"]) {
+    animation: sidebar-drawer-slide-in var(--motion-normal, 220ms) cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .drawer-backdrop.open:not([data-drawer-gesture="active"]) {
+    animation: sidebar-backdrop-fade-in var(--motion-normal, 220ms) cubic-bezier(0.16, 1, 0.3, 1);
+  }
+}
+@keyframes sidebar-drawer-slide-in {
+  from { transform: translate3d(-100%, 0, 0); }
+  to { transform: translate3d(0, 0, 0); }
+}
+@keyframes sidebar-backdrop-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 `);
 }

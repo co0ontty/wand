@@ -527,7 +527,7 @@ export class AiTeamRunner {
     this.openChat(run, task, shown, chatHistory);
     this.storage.saveAiTeamRun(run);
     input.onAccepted?.(run);
-    if (task.status === "todo") this.storage.updateWandTask(task.id, { status: "doing" });
+    if (task.status === "todo" || task.status === "backlog") this.storage.updateWandTask(task.id, { status: "doing" });
     excludeAiTeamReportDir(cwd);
     await this.enqueue(run.id, async () => {
       const step = this.createLeaderStep(run, "制定计划");

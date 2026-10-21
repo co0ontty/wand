@@ -1,7 +1,9 @@
 import * as React from "react";
 import { useEffect, useRef, useState, type ComponentProps, type MouseEvent, type ReactNode } from "react";
 import { Alert, Form, Input, InputNumber } from "antd";
-import { WandButton, WandSelect, WandSwitch } from "../ui";
+import { WandButton } from "../ui/button";
+import { WandSelect } from "../ui/select";
+import { WandSwitch } from "../ui/switch";
 import { MOTION_DWELL_FAILED_MS, MOTION_DWELL_SENT_MS } from "../ui/motion-tokens";
 import { installStyleSheet } from "../styles";
 

@@ -1,19 +1,22 @@
 import * as React from "react";
 import { Avatar, Badge, Flex, Typography } from "antd";
 import type { ConversationSummary } from "../../../conversation-types.js";
-import { employeeProfile } from "../agents/employee-profile";
+import { employeeProfile } from "../agents/employee-profile-state";
 import { wandOverlay } from "../overlay-controller";
 import { SidebarLabelTooltip } from "../workspaces/sidebar-label-tooltip";
 import { SidebarRowMenu } from "../workspaces/sidebar-row-menu";
 import { EmployeeAvatar } from "../agents/employee-avatar";
 import { cachedSiliconEmployee, useSiliconEmployees } from "../agents/employee-repository";
 import { ConversationGroupAvatar } from "./avatar";
-import { WandButton, WandIcon, WandIconButton, WandSearchField, WandStretchTabs } from "../ui";
+import { WandButton, WandIconButton } from "../ui/button";
+import { WandIcon } from "../ui/icons";
+import { WandSearchField } from "../ui/search-field";
+import { WandStretchTabs } from "../ui/stretch-tabs";
 import { conversationUi, useConversationUi, type ConversationListFilter } from "./state";
 import { conversationTaskStateLabel } from "./presentation";
 import { conversationsRepository, notifyConversationChanges, useConversations } from "./repository";
 import { ConversationMorphIcon, ConversationPanel } from "./controls";
-import { GroupEditor } from "./group-editor";
+import { deferredComponent } from "../deferred-feature";
 import { useUserProfile } from "../user-profile-repository";
 import { taskGroupsStore, useTaskGroupsAfterIdle } from "../workspaces/task-groups-store";
 import { SidebarSessionMenu } from "../workspaces/sidebar-session-menu";
@@ -34,6 +37,11 @@ import { conversationActivitySessions, isConversationActive } from "./activity-f
 import { indexPersonSessions, filterPersonSessions, personSessionSearchValues, type PersonSessionEntry } from "./sidebar-sessions";
 
 export type ConversationNavigationPage = "chats" | "tasks" | "board" | "teams" | "contacts" | "schedules" | "calendar";
+
+const GroupEditor = deferredComponent(
+  () => import("./group-editor").then(module => module.GroupEditor),
+  { title: "群聊", renderPending: () => <></> },
+);
 
 /** Global destinations stay in the left rail, independent of the current list. */
 export function ConversationNavigation({ activePage, teamAttention, onNavigate }: {
@@ -78,7 +86,7 @@ export function ConversationSidebarTools({ enabled, onNavigate, onCreateSession 
       <span className="conversation-create-label">{panel === "closed" ? "发起群聊" : "关闭"}</span>
     </WandIconButton>
     <ConversationPanel open={enabled && panel !== "closed"} owner="conversation-create-panel" focusKey={panel} anchorRef={anchor} triggerRef={plus} onClose={() => setPanel("closed")}>
-      <div hidden={panel !== "group"}><GroupEditor open={enabled && panel === "group"} owner="conversation-create-panel"
+      <div hidden={panel !== "group"}><GroupEditor open={enabled && panel === "group"} enabled={enabled && panel === "group"} owner="conversation-create-panel"
         onCancel={() => setPanel("closed")} onCreated={id => { setPanel("closed"); conversationUi.select(id, true); onNavigate(); }}/></div>
     </ConversationPanel>
   </Flex>;
@@ -304,7 +312,7 @@ function ConversationListRow({ item, employee: projectedEmployee, compact, query
     } }}/>
 
     {!compact && item.kind === "dm" ? <SidebarSessionArea id={sessionListId} open={showSessions} label={item.title}
-      toggleRef={sessionToggleRef} toggleClassName="conversation-session-toggle" disabled={!enabled || busy} hasSessions={sessions.length > 0}
+      toggleRef={sessionToggleRef} toggleClassName="conversation-session-toggle" disabled={!enabled || busy} hasSessions={sessions.length > 0} reserve
       onOpenChange={open => { setExpanded(false); setSessionsExpanded(open); }}>
       <SidebarSessionPreview sessions={sessions} expanded={showSessions || showTasks} label={`${item.title}的会话预览`}
         className="sidebar-session-preview-person" disabled={!enabled || busy} liveTitles={sessionTitles}

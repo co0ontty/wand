@@ -1,7 +1,9 @@
 import * as React from "react";
 import { createPortal } from "react-dom";
 import { Card } from "antd";
-import { WandButton, WandIcon, isWandPopupOwnedBy } from "../ui";
+import { WandButton } from "../ui/button";
+import { WandIcon } from "../ui/icons";
+import { isWandPopupOwnedBy } from "../ui/popup-lifecycle";
 import { WandUiBoundary } from "../theme";
 import { deferredComponent } from "../deferred-feature";
 import { piSettingsController, type PiSettingsMount } from "./controller";

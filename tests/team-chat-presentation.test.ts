@@ -165,3 +165,19 @@ test("[I-1–I-3] cross-platform presentation-cases.json is executable, not a pr
     }
   }
 });
+
+test("[M-2] 补更早历史时阅读锚点按元素身份恢复，不因「贴尾」被送回底部", () => {
+  const source = readFileSync(new URL("../src/web-ui/react/ai-teams/team-chat-view.tsx", import.meta.url), "utf8");
+  // 点「加载更早」前必须先记下读者眼前那条消息及偏移：只靠 scrollHeight 差补偿会被
+  // 流式/排版晚到的内容带偏，落到尾部又触发窗口回收，实测点一次就弹回最新页。
+  assert.match(source, /const pendingAnchor = React\.useRef<\{ id: string; offset: number \} \| null>\(null\)/);
+  assert.match(source, /const captureAnchor = React\.useCallback\(\(\): \{ id: string; offset: number \} \| null => \{/);
+  assert.match(source, /\.find\(candidate => candidate\.getBoundingClientRect\(\)\.bottom > rect\.top \+ 1\)/);
+  assert.match(source, /const loadEarlier = React\.useCallback\(\(\) => \{\n\s+pendingAnchor\.current = captureAnchor\(\);/);
+  // 往前补页的分支必须走锚点复位并明确退出贴尾，不能再有「贴尾就跳到底」。
+  const branch = source.slice(source.indexOf("if (start < previousStart) {"), source.indexOf("} else if (following.current) scroll.scrollTop = scroll.scrollHeight;"));
+  assert.match(branch, /const node = anchor \? scroll\.querySelector<HTMLElement>\(`\[data-presentation-id=/);
+  assert.match(branch, /scroll\.scrollTop \+= node\.getBoundingClientRect\(\)\.top - rect\.top - anchor\.offset/);
+  assert.match(branch, /following\.current = false;/);
+  assert.doesNotMatch(branch, /following\.current\) scroll\.scrollTop = scroll\.scrollHeight/);
+});

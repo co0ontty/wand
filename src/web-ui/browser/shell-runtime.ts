@@ -2,13 +2,11 @@ import * as React from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 
-import {
-  LegacyHost,
-  ShellApp,
-  type LegacyUiCommands,
-  type ShellMainContentRefs,
-  type UiStore,
-} from "../react";
+import { LegacyHost } from "../react/shell/legacy-hosts";
+import { ShellApp } from "../react/shell/shell-app";
+import type { LegacyUiCommands } from "../react/shell/legacy-ui-actions";
+import type { ShellMainContentRefs } from "../react/shell/shell-main-content";
+import type { UiStore } from "../react/shell/ui-store";
 import { createBrowserUiStoreBridge } from "./ui-store-bridge";
 
 export type BrowserShellRenderResult = "mounted" | "updated";

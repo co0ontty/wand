@@ -1,4 +1,5 @@
 import { parseJsonResponse } from "../http-adapter";
+import { invalidateConfigSnapshot, loadConfigSnapshot } from "../config-snapshot";
 import type {
   NewSessionConfig,
   NewSessionCreateRequest,
@@ -19,6 +20,7 @@ import { isRecord, stringValue, type JsonRecord } from "../json-utils";
 import { PROVIDER_IDS, providerCliCommand } from "../../provider-identity";
 
 type FetchLike = typeof fetch;
+const defaultFetch: FetchLike = (input, init) => globalThis.fetch(input, init);
 const KINDS: readonly NewSessionPreferenceKind[] = ["structured", "pty"];
 const MODES: readonly NewSessionMode[] = [
   "default",
@@ -148,11 +150,16 @@ export class HttpNewSessionRepository implements NewSessionRepository {
   private preferenceWrite: Promise<void> = Promise.resolve();
 
   constructor(
-    private readonly fetchImpl: FetchLike = (input, init) => globalThis.fetch(input, init),
+    private readonly fetchImpl: FetchLike = defaultFetch,
   ) {}
 
   async loadConfig(options: NewSessionLoadOptions = {}): Promise<NewSessionConfig> {
     await this.preferenceWrite.catch(() => undefined);
+    if (this.fetchImpl === defaultFetch) {
+      const config = await loadConfigSnapshot();
+      options.signal?.throwIfAborted();
+      return normalizeConfig(config as JsonRecord);
+    }
     const response = await this.fetchImpl("/api/config", {
       credentials: "same-origin",
       signal: options.signal,
@@ -189,6 +196,9 @@ export class HttpNewSessionRepository implements NewSessionRepository {
           body: JSON.stringify(patch),
         });
         await parseJsonResponse<JsonRecord>(response);
+        // Preferences are part of /api/config; drop the shared read so the next
+        // dialog boot observes the saved defaults.
+        if (this.fetchImpl === defaultFetch) invalidateConfigSnapshot();
       });
     this.preferenceWrite = write;
     return write;

@@ -3,7 +3,9 @@ import { Alert, Card, Checkbox, Empty, Flex, List, Space, Spin, Tag, Typography 
 import "../issues/library-layout";
 import { WandUiBoundary } from "../theme";
 
-import { WandButton, WandDialogSurface, WandIcon } from "../ui";
+import { WandButton } from "../ui/button";
+import { WandDialogSurface } from "../ui/dialog";
+import { WandIcon } from "../ui/icons";
 import { httpWorkspacesRepository } from "./repository";
 import {
   buildWorkspaceMergeAgentBrief,

@@ -122,6 +122,25 @@ test("session transcript stays generic with or without employee identity and act
   assert.match(topbar, /snapshot\.topbar\.title/);
 });
 
+test("static reply identities preserve avatars and provider badges without mounting live canvases", () => {
+  for (const avatar of ["", "plush-cat:v1:silver", "plush-cat:v1:orange"]) {
+    const html = renderToStaticMarkup(createElement(EmployeeAvatar, {
+      employee: { ...employee, avatar }, provider: "codex", renderMode: "static", thinking: true, speaking: true, fileActivity: "reading",
+    }));
+    assert.match(html, /data-renderer="static"/);
+    assert.match(html, /<svg/);
+    assert.match(html, /Codex CLI/);
+    assert.doesNotMatch(html, /<canvas|wand-avatar-thinking|wand-avatar-file-fallback/);
+  }
+  const uploaded = renderToStaticMarkup(createElement(EmployeeAvatar, {
+    employee: { ...employee, avatar: "data:image/png;base64,BBB" }, renderMode: "static", thinking: true,
+  }));
+  assert.match(uploaded, /data:image\/png;base64,BBB/);
+  assert.doesNotMatch(uploaded, /<canvas|wand-avatar-thinking/);
+  const live = renderToStaticMarkup(createElement(EmployeeAvatar, { employee: { ...employee, avatar: "" } }));
+  assert.match(live, /<canvas/);
+});
+
 test("contact avatars still support generated faces, explicit cats and uploaded images outside sessions", () => {
   const generated = renderToStaticMarkup(createElement(EmployeeAvatar, { employee: { ...employee, avatar: "" } }));
   assert.match(generated, /wand-employee-avatar/);

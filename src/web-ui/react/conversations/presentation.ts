@@ -7,23 +7,48 @@ import type { ConversationTurn } from "../../../types.js";
 export const CONVERSATION_TAIL_PX = 24;
 
 /**
+ * IM 历史按回合成页：首屏只挂最新一页，靠近顶部时再逐页向前补。
+ * 浏览器聊天滚动共用同一组页尺寸与预取余量，AI 团队视图直接复用，避免两套窗口漂移。
+ */
+export const CONVERSATION_INITIAL_TURNS = 20;
+export const CONVERSATION_HISTORY_PAGE_TURNS = 20;
+export const CHAT_HISTORY_BUFFER_SCREENS = 2;
+
+export function chatHistoryRootMargin(height: number): string {
+  return `${Math.max(0, Math.ceil(height * CHAT_HISTORY_BUFFER_SCREENS))}px 0px 0px 0px`;
+}
+
+/**
  * 会话恢复位置的存档口径（`conversationUi.scrolls` 的取值）：
- * 非负数是离开时的像素位置；本哨兵表示「离开时本来就贴底」，恢复时按当期内容高度重新贴底。
- * 分这两种是为了让离开期间到达的新消息把人留在底部，而不是停在离底还差一截的旧像素处。
+ * `-1` 是「离开时本来就贴底」；`-2` 及以下是从底部往上量的像素距离（反码），
+ * 非负数是旧版绝对位置。历史按窗口渲染后绝对位置会随窗口起点漂移，
+ * 距底距离才是与内容变化无关的稳定量；贴底单独存档，恢复时按当期内容高度重新贴底。
  */
 export const CONVERSATION_SCROLL_FOLLOW_TAIL = -1;
 
 interface ScrollBox { scrollTop: number; scrollHeight: number; clientHeight: number }
 
-/** 读取存档位置：没记录过、哨兵或脏数据都返回 undefined，调用方按「贴底」处理。 */
+/** 读取存档：没记录或脏数据返回 undefined，调用方按「贴底」处理。 */
 export function storedConversationScroll(saved: number | undefined): number | undefined {
-  return typeof saved === "number" && Number.isFinite(saved) && saved >= 0 ? saved : undefined;
+  return typeof saved === "number" && Number.isFinite(saved) ? saved : undefined;
 }
 
-/** 写档：贴底存哨兵，否则存像素位置。 */
+/** 写档：贴底存哨兵，否则存距底像素距离。 */
 export function conversationScrollRecord(scroll: ScrollBox): number {
-  return scroll.scrollHeight - (scroll.scrollTop + scroll.clientHeight) <= CONVERSATION_TAIL_PX
-    ? CONVERSATION_SCROLL_FOLLOW_TAIL : scroll.scrollTop;
+  const distance = scroll.scrollHeight - (scroll.scrollTop + scroll.clientHeight);
+  return distance <= CONVERSATION_TAIL_PX ? CONVERSATION_SCROLL_FOLLOW_TAIL : -(Math.round(distance) + 2);
+}
+
+/**
+ * 按存档恢复滚动位置。距底记录在当前窗口里够不着时 `needsEarlier` 为真，
+ * 调用方先向历史方向扩一页再恢复，不能把目标裁成 0 假装恢复成功。
+ */
+export function conversationScrollRestore(saved: number | undefined, scroll: ScrollBox): { top: number; needsEarlier: boolean } {
+  const record = storedConversationScroll(saved);
+  if (record === undefined || record === CONVERSATION_SCROLL_FOLLOW_TAIL) return { top: scroll.scrollHeight, needsEarlier: false };
+  if (record >= 0) return { top: record, needsEarlier: false };
+  const top = scroll.scrollHeight - scroll.clientHeight - (-record - 2);
+  return { top: Math.max(0, top), needsEarlier: top < 0 };
 }
 
 /** Presentation only: a recorded user turn means accepted, never read by a recipient. */

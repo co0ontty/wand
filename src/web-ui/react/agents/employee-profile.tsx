@@ -4,21 +4,13 @@ import { employeeConversationId } from "../../../conversation-types.js";
 import { conversationUi } from "../conversations/state";
 import { ObjectProfilePanel } from "../shell/object-profile-panel";
 import { siliconEmployeesRepository, subscribeSiliconEmployeeDefinitionChanges } from "./employee-repository";
+import { employeeProfile, employeeProfileStore, type EmployeeProfileTarget } from "./employee-profile-state";
 
-type Profile = { id: string; name: string; avatar?: string; trigger: HTMLButtonElement | null };
-let current: Profile | null = null;
-const listeners = new Set<() => void>();
-export const employeeProfile = {
-  open(employee: { id: string; name: string; avatar?: string }, trigger: HTMLButtonElement | null): void {
-    current = { ...employee, trigger }; listeners.forEach(listener => listener());
-  },
-  close(): void { current = null; listeners.forEach(listener => listener()); },
-};
+export { employeeProfile } from "./employee-profile-state";
+
 export function EmployeeProfileHost({ mobile }: { mobile: boolean }): React.ReactElement | null {
-  const profile = React.useSyncExternalStore(React.useCallback(listener => {
-    listeners.add(listener); return () => listeners.delete(listener);
-  }, []), () => current, () => null);
-  const last = React.useRef<Profile | null>(null);
+  const profile = React.useSyncExternalStore(employeeProfileStore.subscribe, employeeProfileStore.getSnapshot, employeeProfileStore.getServerSnapshot);
+  const last = React.useRef<EmployeeProfileTarget | null>(null);
   if (profile) last.current = profile;
   const displayed = profile ?? last.current;
   const [employee, setEmployee] = React.useState<SiliconEmployee | null>(null);

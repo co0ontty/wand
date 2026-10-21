@@ -77,7 +77,8 @@ import {
 } from "../src/web-ui/react/ai-teams/team-chat-view.js";
 import type { AiTeamLiveStep, AiTeamRunDetail } from "../src/ai-team-types.js";
 import { HttpResponseError } from "../src/web-ui/react/http-adapter.js";
-import { memberCoatIndex, CAT_COATS, GENERATED_AVATAR_COATS, generatedAvatarFace, generatedAvatarGlyph, generatedAvatarSeed } from "../src/web-ui/react/ai-teams/avatar.js";
+import { memberCoatIndex, CAT_COATS, GENERATED_AVATAR_COATS, generatedAvatarFace, generatedAvatarGlyph, generatedAvatarSeed, PixelCat } from "../src/web-ui/react/ai-teams/avatar.js";
+import { catCoatGrid } from "../src/web-ui/react/ai-teams/cat-coats.js";
 import { normalizeWandModelCatalog } from "../src/web-ui/react/model-catalog.js";
 import { taskBoardPageOf, taskBoardSearch, isTaskBoardView } from "../src/web-ui/react/issues/task-board-controller.js";
 import { aiTeamsChunkStyles } from "../src/web-ui/react/ai-teams/styles.js";
@@ -273,6 +274,20 @@ test("team page and run panel stay out of the inline bundle and load on demand",
   assert.match(read("react/ai-teams/chunk-entry.ts"), /installStyleSheet\("wand-ai-teams-styles", aiTeamsChunkStyles\)/);
   assert.match(read("react/ai-teams/lazy.tsx"), /const AI_TEAMS_CHUNK_SRC = browserAssetRuntime.aiTeamsChunkSrc;/);
   assert.match(read("scripts.ts"), /\.replace\("\$\{aiTeamsChunkSrc\}", `\/assets\/ai-teams\.js\?v=\$\{chunkHash\}`\)/);
+});
+
+test("ai-teams chunk 构建产物请求的每个 host key 都真的在注册表里", () => {
+  // 源码 import 检查不到打包器按路径生成的 key：chunk 里 `import { WandButton } from "../ui/button"`
+  // 会变成 __wandAiTeamsHost("ui/button")，而注册表当时只有汇总的 "ui"。缺一条就整块聊天
+  // 渲染失败（已安装版本实测："AI 团队脚本要的模块 ui/brand-mark 不在主包注册表里"，
+  // 消息列只剩重试占位），所以这里对着真实产物核对，不只读源码。
+  const chunk = read("content/ai-teams.js");
+  const asked = new Set([...chunk.matchAll(/__wandAiTeamsHost\("([^"]+)"\)/g)].map((hit) => hit[1]!));
+  assert.ok(asked.has("ui/brand-mark"), "产物里应能看到按模块路径借公共控件的 key");
+  const bridge = read("react/ai-teams/host-bridge.tsx");
+  const registry = bridge.slice(bridge.indexOf("const AI_TEAMS_HOST"), bridge.indexOf("};", bridge.indexOf("const AI_TEAMS_HOST")));
+  const missing = [...asked].filter((key) => !new RegExp(`"${key.replace(/[/.]/g, "\\$&")}":`).test(registry));
+  assert.deepEqual(missing, [], `主包注册表缺少 chunk 实际请求的模块：${missing.join(", ")}`);
 });
 
 test("ai-teams chunk borrows every shared import from the main-bundle host registry", () => {
@@ -1099,6 +1114,26 @@ test("[T8] 每条发言都有头像 + 名字，自己的发言用设置里的资
   assert.match(chatStylesSource, /\.task-board-team-chat \.team-chat-msg:hover \{ transform: none; \}/);
   assert.match(body, /<Avatar className="team-chat-avatar" shape="square" size=\{size === "sm" \? 36 : 48\}/, "两档身份头像由 Ant Avatar 渲染");
   assert.doesNotMatch(chatStylesSource, /\.team-chat-avatar\s*\{/, "不重画库头像外观");
+});
+
+test("[T8] 像素猫每种颜色一条 path，格子与毛色表逐格一致", () => {
+  // 头像在会话列表、群拼图、成员行里重复几十次：逐格 <rect> 会让整页多出两千多个
+  // DOM 节点（聊天首屏实测 5,535 个节点里 2,146 个是像素猫的矩形）。
+  for (const coat of [0, 1, 3, 7]) {
+    const markup = renderToStaticMarkup(createElement(PixelCat, { coat }));
+    assert.doesNotMatch(markup, /<rect/, `第 ${coat} 号毛色不再逐格画矩形`);
+    const paths = [...markup.matchAll(/<path d="([^"]*)" fill="([^"]*)"/g)];
+    assert.ok(paths.length > 0 && paths.length <= 8, `第 ${coat} 号毛色只画 ${paths.length} 条 path`);
+    const cells = new Map<string, string>();
+    for (const [, d, fill] of paths) {
+      for (const cell of d.matchAll(/M(\d+) (\d+)h1v1h-1z/g)) cells.set(`${cell[1]},${cell[2]}`, fill);
+    }
+    const grid = catCoatGrid(coat);
+    const expected: Array<[string, string]> = [];
+    grid.forEach((row, y) => row.forEach((fill, x) => { if (fill) expected.push([`${x},${y}`, fill]); }));
+    assert.equal(cells.size, expected.length, `第 ${coat} 号毛色的实心格数量一致`);
+    for (const [coord, fill] of expected) assert.equal(cells.get(coord), fill, `第 ${coat} 号毛色 ${coord} 格颜色一致`);
+  }
 });
 
 test("[T8] 超长正文只渲染预览 + 「点击展开」，不藏第二份全文", () => {

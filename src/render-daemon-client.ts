@@ -416,6 +416,9 @@ export class RenderDaemonClient implements TerminalHost {
   attach(sessionId: string, afterSeq = 0): TerminalAttachResult | null {
     this.flushLiveData();
     const state = this.inventory.get(sessionId);
+    if (!state && (!this.socket || this.socket.destroyed || this.connecting || this.reconciling)) {
+      throw new Error("Render ownership unavailable before authoritative inventory synchronization");
+    }
     if (!state) return null;
     return this.resultFromState(state, false, afterSeq);
   }

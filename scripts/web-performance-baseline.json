@@ -1,0 +1,1982 @@
+{
+  "schema": 1,
+  "kind": "web-performance-lab-baseline",
+  "status": "provisional",
+  "recordedAt": "2026-10-20T01:02:28.403Z",
+  "note": "Provisional: re-record with --accept-baseline --final after the P1/P2 performance work and the installed build settle. Do not treat these values as a final baseline.",
+  "sources": {
+    "static": {
+      "available": true,
+      "reason": null,
+      "source": "scripts/check-bundle-budget.js",
+      "kind": "static-gzip-estimate-not-observed-network",
+      "firstLoadGzip": 810809,
+      "firstLoadLimit": 900000,
+      "allModulesGzip": 1050605,
+      "buildIdentity": "f195614339c2ae58",
+      "scenarios": {
+        "kind": "static-scenarios-not-observed-network",
+        "staticDependenciesComplete": true,
+        "scenarios": {
+          "shell": {
+            "gzip": 698801,
+            "raw": 2240000,
+            "files": [
+              "HTML (repeat)",
+              "app.js (cached)",
+              "app.css (cached)",
+              "theme.js (cached)",
+              "modules/fd340aca8fe91efa/runtime.js"
+            ],
+            "assumption": "HTML/bootstrap/theme/CSS and eager modules only; no optional feature or visible 3D avatar"
+          },
+          "visibleAvatar": {
+            "gzip": 854492,
+            "raw": 2842604,
+            "files": [
+              "HTML (repeat)",
+              "app.js (cached)",
+              "app.css (cached)",
+              "theme.js (cached)",
+              "modules/fd340aca8fe91efa/runtime.js",
+              "plush-avatar.js"
+            ],
+            "assumption": "shell plus a visible 3D identity, which starts the standalone renderer download"
+          },
+          "terminal": {
+            "gzip": 801037,
+            "raw": 2623528,
+            "files": [
+              "HTML (repeat)",
+              "app.js (cached)",
+              "app.css (cached)",
+              "theme.js (cached)",
+              "modules/fd340aca8fe91efa/runtime.js",
+              "/vendor/xterm/xterm.bundle.js",
+              "/vendor/xterm/xterm.css"
+            ],
+            "assumption": "shell plus terminal vendor; excludes optional workspace views"
+          },
+          "qrCode": {
+            "gzip": 708573,
+            "raw": 2265045,
+            "files": [
+              "HTML (repeat)",
+              "app.js (cached)",
+              "app.css (cached)",
+              "theme.js (cached)",
+              "modules/fd340aca8fe91efa/runtime.js",
+              "/vendor/qrcode/qrcode.bundle.js"
+            ],
+            "assumption": "shell plus QR vendor; excludes the settings view"
+          },
+          "conversation": {
+            "gzip": 772834,
+            "raw": 2478157,
+            "files": [
+              "HTML (repeat)",
+              "app.js (cached)",
+              "app.css (cached)",
+              "theme.js (cached)",
+              "modules/fd340aca8fe91efa/runtime.js",
+              "modules/12aead0281f2d14c/chat-render.js",
+              "modules/31239e552f8900b0/chunk.js",
+              "modules/58c04f095082b3e1/chunk.js",
+              "modules/666703a9f0358b7a/chunk.js",
+              "modules/727ad16894625dc1/chunk.js",
+              "modules/ed370d61ba634cda/chunk.js"
+            ],
+            "assumption": "shell plus chat renderer and its static dependencies; other dynamic edges load on use"
+          },
+          "conversationWithAvatar": {
+            "gzip": 928525,
+            "raw": 3080761,
+            "files": [
+              "HTML (repeat)",
+              "app.js (cached)",
+              "app.css (cached)",
+              "theme.js (cached)",
+              "modules/fd340aca8fe91efa/runtime.js",
+              "modules/12aead0281f2d14c/chat-render.js",
+              "modules/31239e552f8900b0/chunk.js",
+              "modules/58c04f095082b3e1/chunk.js",
+              "modules/666703a9f0358b7a/chunk.js",
+              "modules/727ad16894625dc1/chunk.js",
+              "modules/ed370d61ba634cda/chunk.js",
+              "plush-avatar.js"
+            ],
+            "assumption": "conversation plus a visible 3D identity"
+          },
+          "allWebAssets": {
+            "gzip": 1391758,
+            "raw": 4648498,
+            "files": [
+              "modules/fd340aca8fe91efa/runtime.js",
+              "plush-avatar.js",
+              "/vendor/xterm/xterm.bundle.js",
+              "ai-teams.js",
+              "modules/f8eb9ea0c9485a18/host.js",
+              "modules/12aead0281f2d14c/chat-render.js",
+              "modules/795edcea2b566f40/task-board-host.js",
+              "modules/f890ef61d9fdb4e4/chunk.js",
+              "modules/dbe96675110cbf7d/page.js",
+              "modules/04d1c3a5a0cbabbd/home.js",
+              "app.css (cached)",
+              "modules/58c04f095082b3e1/chunk.js",
+              "modules/7cc97142adfc9fdb/host.js",
+              "modules/666703a9f0358b7a/chunk.js",
+              "modules/ec42f281b7ddde6e/host.js",
+              "modules/900e8fa2beba6c4e/library-bridge.js",
+              "/vendor/qrcode/qrcode.bundle.js",
+              "modules/156bb73b868c5c63/chunk.js",
+              "modules/7641f5371eddd41b/host.js",
+              "modules/d9635068e2be39b4/employee-card.js",
+              "modules/92baff4be8ae076f/chunk.js",
+              "modules/a3b54fe7c9446241/panel.js",
+              "modules/695c32fb5d2b4abc/host.js",
+              "modules/f88afc73d8085a04/host.js",
+              "modules/013981083edd96bf/host.js",
+              "modules/d946730cdc21ae57/host.js",
+              "modules/3385f28021dd6736/chunk.js",
+              "modules/31d09f3d80da1a13/chunk.js",
+              "modules/d717d1e95276a05c/host.js",
+              "modules/70b9ab999f18457e/workspace-window.js",
+              "modules/3db5c7eb6f68fba8/host-bridge.js",
+              "modules/ed370d61ba634cda/chunk.js",
+              "/vendor/xterm/xterm.css",
+              "modules/894f284243480d7f/sha256.js",
+              "modules/6b24216674adf2bc/chunk.js",
+              "modules/727ad16894625dc1/chunk.js",
+              "modules/da31ef122bca1612/chunk.js",
+              "theme.js (cached)",
+              "modules/446c033a5aa59b33/host.js",
+              "modules/2667a9deefede625/chunk.js",
+              "modules/258f84956cfb10bb/host.js",
+              "modules/87363c2989f3fd2b/chunk.js",
+              "modules/b08cbafde5b934ad/host.js",
+              "app.js (cached)",
+              "modules/9aafc62c4453d985/host.js",
+              "modules/31239e552f8900b0/chunk.js",
+              "HTML (repeat)",
+              "modules/7c086a40f8cc1583/chunk.js",
+              "modules/83479f293c7565ab/chunk.js",
+              "modules/b818a4e3de64f508/chunk.js",
+              "modules/33a3860c1875c113/chunk.js",
+              "modules/352f9f31a4158c20/host.js",
+              "modules/bf2a5f7d233cbf52/chunk.js",
+              "modules/be546b6fdbb1c572/markdown.js"
+            ],
+            "assumption": "every budgeted asset exactly once, including all optional ESM, teams, 3D and vendor assets"
+          }
+        }
+      }
+    },
+    "lab": {
+      "available": true,
+      "note": "Chrome lab observation from the installed service; not field CWV. INP is not measured."
+    },
+    "field": {
+      "available": false,
+      "reason": "No RUM/CrUX collection in this repository; lab medians are not field percentiles."
+    }
+  },
+  "environment": {
+    "node": "24.21.0",
+    "platform": "darwin",
+    "arch": "arm64",
+    "browser": "chromium",
+    "browserVersion": "155.0.8059.80",
+    "viewport": "1440x900",
+    "headless": true,
+    "serviceVersion": "4.98.1-debug.t10200002",
+    "packageVersion": "4.98.1-debug.t10200002",
+    "loadAverage": [
+      5.12,
+      4.39,
+      4.48
+    ],
+    "networkProfiles": {
+      "normal": {
+        "id": "normal",
+        "latencyMs": 0,
+        "downloadBytesPerSecond": null,
+        "uploadBytesPerSecond": null,
+        "cpuSlowdown": 1,
+        "emulated": false,
+        "note": "No CDP network or CPU emulation"
+      },
+      "throttled": {
+        "id": "throttled",
+        "latencyMs": 150,
+        "downloadBytesPerSecond": 200000,
+        "uploadBytesPerSecond": 93750,
+        "cpuSlowdown": 4,
+        "emulated": true,
+        "note": "CDP 1.6 Mbps down / 0.75 Mbps up / +150ms latency / 4x CPU; lab condition, not a real device or carrier"
+      }
+    },
+    "assetChecks": [
+      {
+        "file": "modules/fd340aca8fe91efa/runtime.js",
+        "bytes": 2143376,
+        "sha256": "02459ddd7bf0ea1d85b64ccab27be3908d1a72b8e841f3f95d34e5e2892421ba",
+        "sourceMatches": null
+      },
+      {
+        "file": "modules/e91ec84c3fc68268/runtime.js",
+        "bytes": null,
+        "sha256": null,
+        "sourceMatches": null
+      },
+      {
+        "file": "plush-avatar.js",
+        "bytes": 602604,
+        "sha256": "d2754718605084dfbb5a4d1c495f228e277b1608b66a878e3b1458236e1aefbf",
+        "sourceMatches": true
+      }
+    ],
+    "buildIntegrity": {
+      "manifestEntry": "modules/e91ec84c3fc68268/runtime.js",
+      "servedEntry": "modules/fd340aca8fe91efa/runtime.js",
+      "manifestBuildId": "cb3c49684e01452a",
+      "servedRuntimeMatchesSource": false,
+      "checks": [
+        {
+          "file": "modules/fd340aca8fe91efa/runtime.js",
+          "bytes": 2143376,
+          "sha256": "02459ddd7bf0ea1d85b64ccab27be3908d1a72b8e841f3f95d34e5e2892421ba",
+          "sourceMatches": null
+        },
+        {
+          "file": "modules/e91ec84c3fc68268/runtime.js",
+          "status": 404,
+          "bytes": null,
+          "sha256": null,
+          "sourceMatches": null
+        },
+        {
+          "file": "plush-avatar.js",
+          "bytes": 602604,
+          "sha256": "d2754718605084dfbb5a4d1c495f228e277b1608b66a878e3b1458236e1aefbf",
+          "sourceMatches": true
+        }
+      ],
+      "staticBuildIdentity": "f195614339c2ae58"
+    }
+  },
+  "fixture": {
+    "conversationHash": "sha256:c2f4820668b585ec",
+    "conversationTurns": 35,
+    "dataScale": {
+      "sessionsTotal": 290,
+      "wandTasksTotal": 75,
+      "conversationsTotal": 19
+    },
+    "stableDuringRun": true
+  },
+  "metricDefinitions": {
+    "fcpMs": "First Contentful Paint from Paint Timing, navigation-relative ms",
+    "lcpMs": "Largest Contentful Paint at the end of the fixed observation window, ms; lab observation, not field CWV",
+    "contentMs": "First visible view-specific content measured by requestAnimationFrame; chat requires a rendered .chat-message, not a mounted composer",
+    "cls": "Maximum layout-shift session window (1s gap / 5s cap), excluding shifts with recent input",
+    "longTaskOver50Ms": "Sum of max(0, long-task duration - 50ms) in the observation window; not Lighthouse TBT",
+    "longTaskCount": "Number of long tasks (>50ms)",
+    "longTaskMaxMs": "Longest long task in ms",
+    "domNodes": "document.getElementsByTagName('*').length at the end of the observation window",
+    "imageCount": "Same-origin img Resource Timing entries",
+    "imageBytes": "Transfer bytes for img Resource Timing entries; cached responses count as zero transfer",
+    "imageDecodedBytes": "Decoded body bytes for img Resource Timing entries",
+    "imageUnreserved": "img elements without both width and height attributes",
+    "apiRequests": "Same-origin /api Resource Timing entries",
+    "apiBytes": "Transfer bytes for same-origin /api Resource Timing entries",
+    "assetRequests": "Same-origin /assets and /vendor Resource Timing entries",
+    "assetBytes": "Transfer bytes for /assets and /vendor Resource Timing entries",
+    "totalBytes": "Navigation transfer plus same-origin resource transfer; later WebSocket frames are not included",
+    "cacheHits": "Resource entries with transferSize 0 and a non-zero body size",
+    "cacheHitRatio": "cacheHits divided by same-origin resource entries; a warm-cache health signal, not a browser-wide hit rate",
+    "chatMessages": "Mounted .chat-message elements at the end of the observation window; a data-scale/rendering check, not an INP metric"
+  },
+  "tolerances": {
+    "normal": {
+      "fcpMs": {
+        "percent": 20,
+        "floor": 100
+      },
+      "lcpMs": {
+        "percent": 20,
+        "floor": 150
+      },
+      "contentMs": {
+        "percent": 20,
+        "floor": 150
+      },
+      "cls": {
+        "percent": 15,
+        "floor": 0.03
+      },
+      "longTaskOver50Ms": {
+        "percent": 50,
+        "floor": 100
+      },
+      "domNodes": {
+        "percent": 10,
+        "floor": 250
+      },
+      "imageBytes": {
+        "percent": 20,
+        "floor": 65536
+      },
+      "apiBytes": {
+        "percent": 20,
+        "floor": 32768
+      },
+      "assetBytes": {
+        "percent": 15,
+        "floor": 32768
+      },
+      "totalBytes": {
+        "percent": 15,
+        "floor": 131072
+      },
+      "cacheHitRatio": {
+        "absolute": 0.15,
+        "higherIsBetter": true,
+        "warmOnly": true
+      }
+    },
+    "throttled": {
+      "fcpMs": {
+        "percent": 30,
+        "floor": 300
+      },
+      "lcpMs": {
+        "percent": 30,
+        "floor": 300
+      },
+      "contentMs": {
+        "percent": 30,
+        "floor": 300
+      },
+      "cls": {
+        "percent": 20,
+        "floor": 0.05
+      },
+      "longTaskOver50Ms": {
+        "percent": 60,
+        "floor": 200
+      },
+      "domNodes": {
+        "percent": 10,
+        "floor": 250
+      },
+      "imageBytes": {
+        "percent": 20,
+        "floor": 65536
+      },
+      "apiBytes": {
+        "percent": 20,
+        "floor": 32768
+      },
+      "assetBytes": {
+        "percent": 15,
+        "floor": 32768
+      },
+      "totalBytes": {
+        "percent": 15,
+        "floor": 131072
+      },
+      "cacheHitRatio": {
+        "absolute": 0.15,
+        "higherIsBetter": true,
+        "warmOnly": true
+      }
+    }
+  },
+  "cacheToleranceOverrides": {
+    "warm": {
+      "totalBytes": {
+        "percent": 25,
+        "floor": 65536
+      },
+      "assetBytes": {
+        "percent": 25,
+        "floor": 16384
+      },
+      "apiBytes": {
+        "percent": 25,
+        "floor": 32768
+      }
+    }
+  },
+  "fixtureTolerance": {
+    "dataScale": {
+      "percent": 10,
+      "floor": 5
+    },
+    "pinnedConversation": {
+      "turns": "exact",
+      "chatMessages": "exact"
+    }
+  },
+  "notMeasured": [
+    "INP (not truly measured; no interaction probe in this gate)",
+    "Field/CrUX metrics (no RUM pipeline; lab values are not field percentiles)",
+    "Real mobile device and carrier network (throttled profile is CDP emulation)",
+    "Mac WKWebView (Web Chrome only; Mac needs separate acceptance)"
+  ],
+  "scenarios": {
+    "workspace-cold": {
+      "view": "workspace",
+      "cache": "cold",
+      "network": "normal",
+      "rounds": 3,
+      "metrics": {
+        "fcpMs": 240,
+        "lcpMs": 436,
+        "contentMs": 641.9,
+        "cls": 0.014,
+        "longTaskOver50Ms": 223,
+        "longTaskCount": 5,
+        "longTaskMaxMs": 130,
+        "domNodes": 7173,
+        "imageCount": 0,
+        "imageBytes": 0,
+        "imageDecodedBytes": 0,
+        "imageUnreserved": 0,
+        "apiRequests": 19,
+        "apiBytes": 101330,
+        "assetRequests": 12,
+        "assetBytes": 863437,
+        "totalBytes": 966073,
+        "cacheHits": 0,
+        "cacheHitRatio": 0,
+        "chatMessages": 0
+      },
+      "ranges": {
+        "fcpMs": {
+          "min": 212,
+          "max": 452
+        },
+        "lcpMs": {
+          "min": 356,
+          "max": 452
+        },
+        "contentMs": {
+          "min": 573.4,
+          "max": 672.2
+        },
+        "cls": {
+          "min": 0.014,
+          "max": 0.014
+        },
+        "longTaskOver50Ms": {
+          "min": 148,
+          "max": 237
+        },
+        "longTaskCount": {
+          "min": 5,
+          "max": 6
+        },
+        "longTaskMaxMs": {
+          "min": 110,
+          "max": 157
+        },
+        "domNodes": {
+          "min": 7173,
+          "max": 7173
+        },
+        "imageCount": {
+          "min": 0,
+          "max": 0
+        },
+        "imageBytes": {
+          "min": 0,
+          "max": 0
+        },
+        "imageDecodedBytes": {
+          "min": 0,
+          "max": 0
+        },
+        "imageUnreserved": {
+          "min": 0,
+          "max": 0
+        },
+        "apiRequests": {
+          "min": 19,
+          "max": 19
+        },
+        "apiBytes": {
+          "min": 101330,
+          "max": 101338
+        },
+        "assetRequests": {
+          "min": 12,
+          "max": 12
+        },
+        "assetBytes": {
+          "min": 863437,
+          "max": 863437
+        },
+        "totalBytes": {
+          "min": 966073,
+          "max": 966081
+        },
+        "cacheHits": {
+          "min": 0,
+          "max": 0
+        },
+        "cacheHitRatio": {
+          "min": 0,
+          "max": 0
+        },
+        "chatMessages": {
+          "min": 0,
+          "max": 0
+        }
+      },
+      "spreadPercent": {
+        "fcpMs": 100,
+        "lcpMs": 22,
+        "contentMs": 15.4,
+        "cls": 0,
+        "longTaskOver50Ms": 39.9,
+        "longTaskCount": 20,
+        "longTaskMaxMs": 36.2,
+        "domNodes": 0,
+        "imageCount": 0,
+        "imageBytes": 0,
+        "imageDecodedBytes": 0,
+        "imageUnreserved": 0,
+        "apiRequests": 0,
+        "apiBytes": 0,
+        "assetRequests": 0,
+        "assetBytes": 0,
+        "totalBytes": 0,
+        "cacheHits": 0,
+        "cacheHitRatio": 0,
+        "chatMessages": 0
+      },
+      "integrity": {
+        "pageErrors": 0,
+        "failedRequests": 0,
+        "blockedWrites": 0
+      },
+      "serving": {
+        "byCategory": {
+          "document": {
+            "responses": 3,
+            "encodings": {
+              "br": 3
+            },
+            "cacheControls": {
+              "no-store": 3
+            }
+          },
+          "asset": {
+            "responses": 36,
+            "encodings": {
+              "br": 33,
+              "identity": 3
+            },
+            "cacheControls": {
+              "immutable": 36
+            }
+          },
+          "api": {
+            "responses": 57,
+            "encodings": {
+              "identity": 9,
+              "br": 48
+            },
+            "cacheControls": {
+              "unspecified": 42,
+              "no-store": 15
+            }
+          }
+        },
+        "statuses": {
+          "200": 96
+        },
+        "revalidatedAssets": 0
+      }
+    },
+    "workspace-warm": {
+      "view": "workspace",
+      "cache": "warm",
+      "network": "normal",
+      "rounds": 3,
+      "metrics": {
+        "fcpMs": 184,
+        "lcpMs": 316,
+        "contentMs": 552.7,
+        "cls": 0.0144,
+        "longTaskOver50Ms": 119,
+        "longTaskCount": 3,
+        "longTaskMaxMs": 124,
+        "domNodes": 7173,
+        "imageCount": 0,
+        "imageBytes": 0,
+        "imageDecodedBytes": 0,
+        "imageUnreserved": 0,
+        "apiRequests": 20,
+        "apiBytes": 98155,
+        "assetRequests": 12,
+        "assetBytes": 0,
+        "totalBytes": 99461,
+        "cacheHits": 12,
+        "cacheHitRatio": 0.375,
+        "chatMessages": 0
+      },
+      "ranges": {
+        "fcpMs": {
+          "min": 56,
+          "max": 192
+        },
+        "lcpMs": {
+          "min": 292,
+          "max": 432
+        },
+        "contentMs": {
+          "min": 552.6,
+          "max": 662.2
+        },
+        "cls": {
+          "min": 0.0143,
+          "max": 0.0144
+        },
+        "longTaskOver50Ms": {
+          "min": 89,
+          "max": 152
+        },
+        "longTaskCount": {
+          "min": 3,
+          "max": 5
+        },
+        "longTaskMaxMs": {
+          "min": 96,
+          "max": 132
+        },
+        "domNodes": {
+          "min": 7173,
+          "max": 7173
+        },
+        "imageCount": {
+          "min": 0,
+          "max": 0
+        },
+        "imageBytes": {
+          "min": 0,
+          "max": 0
+        },
+        "imageDecodedBytes": {
+          "min": 0,
+          "max": 0
+        },
+        "imageUnreserved": {
+          "min": 0,
+          "max": 0
+        },
+        "apiRequests": {
+          "min": 20,
+          "max": 20
+        },
+        "apiBytes": {
+          "min": 44147,
+          "max": 98157
+        },
+        "assetRequests": {
+          "min": 12,
+          "max": 12
+        },
+        "assetBytes": {
+          "min": 0,
+          "max": 0
+        },
+        "totalBytes": {
+          "min": 45453,
+          "max": 99463
+        },
+        "cacheHits": {
+          "min": 12,
+          "max": 12
+        },
+        "cacheHitRatio": {
+          "min": 0.375,
+          "max": 0.375
+        },
+        "chatMessages": {
+          "min": 0,
+          "max": 0
+        }
+      },
+      "spreadPercent": {
+        "fcpMs": 73.9,
+        "lcpMs": 44.3,
+        "contentMs": 19.8,
+        "cls": 0.6,
+        "longTaskOver50Ms": 52.9,
+        "longTaskCount": 66.7,
+        "longTaskMaxMs": 29,
+        "domNodes": 0,
+        "imageCount": 0,
+        "imageBytes": 0,
+        "imageDecodedBytes": 0,
+        "imageUnreserved": 0,
+        "apiRequests": 0,
+        "apiBytes": 55,
+        "assetRequests": 0,
+        "assetBytes": 0,
+        "totalBytes": 54.3,
+        "cacheHits": 0,
+        "cacheHitRatio": 0,
+        "chatMessages": 0
+      },
+      "integrity": {
+        "pageErrors": 0,
+        "failedRequests": 0,
+        "blockedWrites": 0
+      },
+      "serving": {
+        "byCategory": {
+          "document": {
+            "responses": 3,
+            "encodings": {
+              "br": 3
+            },
+            "cacheControls": {
+              "no-store": 3
+            }
+          },
+          "asset": {
+            "responses": 36,
+            "encodings": {
+              "br": 33,
+              "identity": 3
+            },
+            "cacheControls": {
+              "immutable": 36
+            }
+          },
+          "api": {
+            "responses": 60,
+            "encodings": {
+              "identity": 9,
+              "br": 51
+            },
+            "cacheControls": {
+              "unspecified": 42,
+              "no-store": 18
+            }
+          }
+        },
+        "statuses": {
+          "200": 99
+        },
+        "revalidatedAssets": 0
+      }
+    },
+    "taskboard-cold": {
+      "view": "taskboard",
+      "cache": "cold",
+      "network": "normal",
+      "rounds": 3,
+      "metrics": {
+        "fcpMs": 220,
+        "lcpMs": 1188,
+        "contentMs": 1032.5,
+        "cls": 0.0184,
+        "longTaskOver50Ms": 218,
+        "longTaskCount": 7,
+        "longTaskMaxMs": 118,
+        "domNodes": 12657,
+        "imageCount": 0,
+        "imageBytes": 0,
+        "imageDecodedBytes": 0,
+        "imageUnreserved": 0,
+        "apiRequests": 25,
+        "apiBytes": 175491,
+        "assetRequests": 20,
+        "assetBytes": 948055,
+        "totalBytes": 1124852,
+        "cacheHits": 0,
+        "cacheHitRatio": 0,
+        "chatMessages": 0
+      },
+      "ranges": {
+        "fcpMs": {
+          "min": 204,
+          "max": 312
+        },
+        "lcpMs": {
+          "min": 956,
+          "max": 1292
+        },
+        "contentMs": {
+          "min": 931.9,
+          "max": 1167.6
+        },
+        "cls": {
+          "min": 0.0184,
+          "max": 0.0184
+        },
+        "longTaskOver50Ms": {
+          "min": 173,
+          "max": 316
+        },
+        "longTaskCount": {
+          "min": 7,
+          "max": 11
+        },
+        "longTaskMaxMs": {
+          "min": 91,
+          "max": 161
+        },
+        "domNodes": {
+          "min": 12657,
+          "max": 12657
+        },
+        "imageCount": {
+          "min": 0,
+          "max": 0
+        },
+        "imageBytes": {
+          "min": 0,
+          "max": 0
+        },
+        "imageDecodedBytes": {
+          "min": 0,
+          "max": 0
+        },
+        "imageUnreserved": {
+          "min": 0,
+          "max": 0
+        },
+        "apiRequests": {
+          "min": 22,
+          "max": 25
+        },
+        "apiBytes": {
+          "min": 174511,
+          "max": 194049
+        },
+        "assetRequests": {
+          "min": 20,
+          "max": 20
+        },
+        "assetBytes": {
+          "min": 948055,
+          "max": 948055
+        },
+        "totalBytes": {
+          "min": 1123872,
+          "max": 1143410
+        },
+        "cacheHits": {
+          "min": 0,
+          "max": 0
+        },
+        "cacheHitRatio": {
+          "min": 0,
+          "max": 0
+        },
+        "chatMessages": {
+          "min": 0,
+          "max": 0
+        }
+      },
+      "spreadPercent": {
+        "fcpMs": 49.1,
+        "lcpMs": 28.3,
+        "contentMs": 22.8,
+        "cls": 0,
+        "longTaskOver50Ms": 65.6,
+        "longTaskCount": 57.1,
+        "longTaskMaxMs": 59.3,
+        "domNodes": 0,
+        "imageCount": 0,
+        "imageBytes": 0,
+        "imageDecodedBytes": 0,
+        "imageUnreserved": 0,
+        "apiRequests": 12,
+        "apiBytes": 11.1,
+        "assetRequests": 0,
+        "assetBytes": 0,
+        "totalBytes": 1.7,
+        "cacheHits": 0,
+        "cacheHitRatio": 0,
+        "chatMessages": 0
+      },
+      "integrity": {
+        "pageErrors": 0,
+        "failedRequests": 0,
+        "blockedWrites": 0
+      },
+      "serving": {
+        "byCategory": {
+          "document": {
+            "responses": 3,
+            "encodings": {
+              "br": 3
+            },
+            "cacheControls": {
+              "no-store": 3
+            }
+          },
+          "asset": {
+            "responses": 60,
+            "encodings": {
+              "br": 51,
+              "identity": 9
+            },
+            "cacheControls": {
+              "immutable": 60
+            }
+          },
+          "api": {
+            "responses": 72,
+            "encodings": {
+              "identity": 16,
+              "br": 56
+            },
+            "cacheControls": {
+              "unspecified": 54,
+              "no-store": 18
+            }
+          }
+        },
+        "statuses": {
+          "200": 135
+        },
+        "revalidatedAssets": 0
+      }
+    },
+    "taskboard-warm": {
+      "view": "taskboard",
+      "cache": "warm",
+      "network": "normal",
+      "rounds": 3,
+      "metrics": {
+        "fcpMs": 136,
+        "lcpMs": 660,
+        "contentMs": 604,
+        "cls": 0.0189,
+        "longTaskOver50Ms": 200,
+        "longTaskCount": 7,
+        "longTaskMaxMs": 105,
+        "domNodes": 12657,
+        "imageCount": 0,
+        "imageBytes": 0,
+        "imageDecodedBytes": 0,
+        "imageUnreserved": 0,
+        "apiRequests": 75,
+        "apiBytes": 253529,
+        "assetRequests": 20,
+        "assetBytes": 0,
+        "totalBytes": 254835,
+        "cacheHits": 20,
+        "cacheHitRatio": 0.2105,
+        "chatMessages": 0
+      },
+      "ranges": {
+        "fcpMs": {
+          "min": 72,
+          "max": 276
+        },
+        "lcpMs": {
+          "min": 624,
+          "max": 776
+        },
+        "contentMs": {
+          "min": 509.8,
+          "max": 691.1
+        },
+        "cls": {
+          "min": 0.0189,
+          "max": 0.0189
+        },
+        "longTaskOver50Ms": {
+          "min": 124,
+          "max": 299
+        },
+        "longTaskCount": {
+          "min": 5,
+          "max": 9
+        },
+        "longTaskMaxMs": {
+          "min": 87,
+          "max": 185
+        },
+        "domNodes": {
+          "min": 12657,
+          "max": 12657
+        },
+        "imageCount": {
+          "min": 0,
+          "max": 0
+        },
+        "imageBytes": {
+          "min": 0,
+          "max": 0
+        },
+        "imageDecodedBytes": {
+          "min": 0,
+          "max": 0
+        },
+        "imageUnreserved": {
+          "min": 0,
+          "max": 0
+        },
+        "apiRequests": {
+          "min": 25,
+          "max": 75
+        },
+        "apiBytes": {
+          "min": 84794,
+          "max": 272174
+        },
+        "assetRequests": {
+          "min": 20,
+          "max": 20
+        },
+        "assetBytes": {
+          "min": 0,
+          "max": 0
+        },
+        "totalBytes": {
+          "min": 86100,
+          "max": 273480
+        },
+        "cacheHits": {
+          "min": 20,
+          "max": 20
+        },
+        "cacheHitRatio": {
+          "min": 0.2105,
+          "max": 0.4444
+        },
+        "chatMessages": {
+          "min": 0,
+          "max": 0
+        }
+      },
+      "spreadPercent": {
+        "fcpMs": 150,
+        "lcpMs": 23,
+        "contentMs": 30,
+        "cls": 0.5,
+        "longTaskOver50Ms": 87.5,
+        "longTaskCount": 57.1,
+        "longTaskMaxMs": 93.3,
+        "domNodes": 0,
+        "imageCount": 0,
+        "imageBytes": 0,
+        "imageDecodedBytes": 0,
+        "imageUnreserved": 0,
+        "apiRequests": 66.7,
+        "apiBytes": 73.9,
+        "assetRequests": 0,
+        "assetBytes": 0,
+        "totalBytes": 73.5,
+        "cacheHits": 0,
+        "cacheHitRatio": 111.1,
+        "chatMessages": 0
+      },
+      "integrity": {
+        "pageErrors": 0,
+        "failedRequests": 0,
+        "blockedWrites": 0
+      },
+      "serving": {
+        "byCategory": {
+          "api": {
+            "responses": 177,
+            "encodings": {
+              "br": 162,
+              "identity": 15
+            },
+            "cacheControls": {
+              "unspecified": 56,
+              "no-store": 121
+            }
+          },
+          "document": {
+            "responses": 3,
+            "encodings": {
+              "br": 3
+            },
+            "cacheControls": {
+              "no-store": 3
+            }
+          },
+          "asset": {
+            "responses": 60,
+            "encodings": {
+              "br": 51,
+              "identity": 9
+            },
+            "cacheControls": {
+              "immutable": 60
+            }
+          }
+        },
+        "statuses": {
+          "200": 240
+        },
+        "revalidatedAssets": 0
+      }
+    },
+    "chat-cold": {
+      "view": "chat",
+      "cache": "cold",
+      "network": "normal",
+      "rounds": 3,
+      "metrics": {
+        "fcpMs": 340,
+        "lcpMs": 1464,
+        "contentMs": 1241.1,
+        "cls": 0.5485,
+        "longTaskOver50Ms": 298,
+        "longTaskCount": 12,
+        "longTaskMaxMs": 124,
+        "domNodes": 7765,
+        "imageCount": 9,
+        "imageBytes": 1850787,
+        "imageDecodedBytes": 1848087,
+        "imageUnreserved": 9,
+        "apiRequests": 41,
+        "apiBytes": 2046325,
+        "assetRequests": 26,
+        "assetBytes": 1018299,
+        "totalBytes": 3065930,
+        "cacheHits": 0,
+        "cacheHitRatio": 0,
+        "chatMessages": 16
+      },
+      "ranges": {
+        "fcpMs": {
+          "min": 300,
+          "max": 408
+        },
+        "lcpMs": {
+          "min": 1456,
+          "max": 1644
+        },
+        "contentMs": {
+          "min": 1057.3,
+          "max": 1282
+        },
+        "cls": {
+          "min": 0.0394,
+          "max": 0.7221
+        },
+        "longTaskOver50Ms": {
+          "min": 229,
+          "max": 338
+        },
+        "longTaskCount": {
+          "min": 6,
+          "max": 14
+        },
+        "longTaskMaxMs": {
+          "min": 120,
+          "max": 137
+        },
+        "domNodes": {
+          "min": 7765,
+          "max": 7765
+        },
+        "imageCount": {
+          "min": 9,
+          "max": 9
+        },
+        "imageBytes": {
+          "min": 1850787,
+          "max": 1850787
+        },
+        "imageDecodedBytes": {
+          "min": 1848087,
+          "max": 1848087
+        },
+        "imageUnreserved": {
+          "min": 9,
+          "max": 9
+        },
+        "apiRequests": {
+          "min": 41,
+          "max": 41
+        },
+        "apiBytes": {
+          "min": 1992393,
+          "max": 2081685
+        },
+        "assetRequests": {
+          "min": 26,
+          "max": 26
+        },
+        "assetBytes": {
+          "min": 1018299,
+          "max": 1018299
+        },
+        "totalBytes": {
+          "min": 3011998,
+          "max": 3101290
+        },
+        "cacheHits": {
+          "min": 0,
+          "max": 0
+        },
+        "cacheHitRatio": {
+          "min": 0,
+          "max": 0
+        },
+        "chatMessages": {
+          "min": 16,
+          "max": 16
+        }
+      },
+      "spreadPercent": {
+        "fcpMs": 31.8,
+        "lcpMs": 12.8,
+        "contentMs": 18.1,
+        "cls": 124.5,
+        "longTaskOver50Ms": 36.6,
+        "longTaskCount": 66.7,
+        "longTaskMaxMs": 13.7,
+        "domNodes": 0,
+        "imageCount": 0,
+        "imageBytes": 0,
+        "imageDecodedBytes": 0,
+        "imageUnreserved": 0,
+        "apiRequests": 0,
+        "apiBytes": 4.4,
+        "assetRequests": 0,
+        "assetBytes": 0,
+        "totalBytes": 2.9,
+        "cacheHits": 0,
+        "cacheHitRatio": 0,
+        "chatMessages": 0
+      },
+      "integrity": {
+        "pageErrors": 0,
+        "failedRequests": 0,
+        "blockedWrites": 0
+      },
+      "serving": {
+        "byCategory": {
+          "document": {
+            "responses": 3,
+            "encodings": {
+              "br": 3
+            },
+            "cacheControls": {
+              "no-store": 3
+            }
+          },
+          "asset": {
+            "responses": 78,
+            "encodings": {
+              "br": 72,
+              "identity": 6
+            },
+            "cacheControls": {
+              "immutable": 78
+            }
+          },
+          "api": {
+            "responses": 123,
+            "encodings": {
+              "identity": 37,
+              "br": 86
+            },
+            "cacheControls": {
+              "unspecified": 78,
+              "no-store": 18,
+              "other": 27
+            }
+          }
+        },
+        "statuses": {
+          "200": 204
+        },
+        "revalidatedAssets": 0
+      }
+    },
+    "chat-warm": {
+      "view": "chat",
+      "cache": "warm",
+      "network": "normal",
+      "rounds": 3,
+      "metrics": {
+        "fcpMs": 212,
+        "lcpMs": 644,
+        "contentMs": 558.2,
+        "cls": 0.0402,
+        "longTaskOver50Ms": 97,
+        "longTaskCount": 3,
+        "longTaskMaxMs": 83,
+        "domNodes": 7763,
+        "imageCount": 9,
+        "imageBytes": 0,
+        "imageDecodedBytes": 1848087,
+        "imageUnreserved": 9,
+        "apiRequests": 38,
+        "apiBytes": 123041,
+        "assetRequests": 26,
+        "assetBytes": 0,
+        "totalBytes": 124347,
+        "cacheHits": 35,
+        "cacheHitRatio": 0.5469,
+        "chatMessages": 16
+      },
+      "ranges": {
+        "fcpMs": {
+          "min": 84,
+          "max": 224
+        },
+        "lcpMs": {
+          "min": 484,
+          "max": 820
+        },
+        "contentMs": {
+          "min": 473.9,
+          "max": 583.6
+        },
+        "cls": {
+          "min": 0.0391,
+          "max": 0.0466
+        },
+        "longTaskOver50Ms": {
+          "min": 33,
+          "max": 104
+        },
+        "longTaskCount": {
+          "min": 3,
+          "max": 6
+        },
+        "longTaskMaxMs": {
+          "min": 70,
+          "max": 124
+        },
+        "domNodes": {
+          "min": 7719,
+          "max": 7763
+        },
+        "imageCount": {
+          "min": 9,
+          "max": 9
+        },
+        "imageBytes": {
+          "min": 0,
+          "max": 0
+        },
+        "imageDecodedBytes": {
+          "min": 1848087,
+          "max": 1848087
+        },
+        "imageUnreserved": {
+          "min": 9,
+          "max": 9
+        },
+        "apiRequests": {
+          "min": 37,
+          "max": 38
+        },
+        "apiBytes": {
+          "min": 68721,
+          "max": 123041
+        },
+        "assetRequests": {
+          "min": 26,
+          "max": 26
+        },
+        "assetBytes": {
+          "min": 0,
+          "max": 0
+        },
+        "totalBytes": {
+          "min": 70027,
+          "max": 124347
+        },
+        "cacheHits": {
+          "min": 35,
+          "max": 35
+        },
+        "cacheHitRatio": {
+          "min": 0.5469,
+          "max": 0.5556
+        },
+        "chatMessages": {
+          "min": 16,
+          "max": 16
+        }
+      },
+      "spreadPercent": {
+        "fcpMs": 66,
+        "lcpMs": 52.2,
+        "contentMs": 19.7,
+        "cls": 18.5,
+        "longTaskOver50Ms": 73.2,
+        "longTaskCount": 100,
+        "longTaskMaxMs": 65.1,
+        "domNodes": 0.6,
+        "imageCount": 0,
+        "imageBytes": 0,
+        "imageDecodedBytes": 0,
+        "imageUnreserved": 0,
+        "apiRequests": 2.6,
+        "apiBytes": 44.1,
+        "assetRequests": 0,
+        "assetBytes": 0,
+        "totalBytes": 43.7,
+        "cacheHits": 0,
+        "cacheHitRatio": 1.6,
+        "chatMessages": 0
+      },
+      "integrity": {
+        "pageErrors": 0,
+        "failedRequests": 0,
+        "blockedWrites": 0
+      },
+      "serving": {
+        "byCategory": {
+          "document": {
+            "responses": 3,
+            "encodings": {
+              "br": 3
+            },
+            "cacheControls": {
+              "no-store": 3
+            }
+          },
+          "asset": {
+            "responses": 78,
+            "encodings": {
+              "br": 72,
+              "identity": 6
+            },
+            "cacheControls": {
+              "immutable": 78
+            }
+          },
+          "api": {
+            "responses": 113,
+            "encodings": {
+              "identity": 36,
+              "br": 77
+            },
+            "cacheControls": {
+              "unspecified": 59,
+              "no-store": 27,
+              "other": 27
+            }
+          }
+        },
+        "statuses": {
+          "200": 194
+        },
+        "revalidatedAssets": 0
+      }
+    },
+    "login-cold": {
+      "view": "login",
+      "cache": "cold",
+      "network": "normal",
+      "rounds": 3,
+      "metrics": {
+        "fcpMs": 120,
+        "lcpMs": 120,
+        "contentMs": 109.1,
+        "cls": 0,
+        "longTaskOver50Ms": 0,
+        "longTaskCount": 0,
+        "longTaskMaxMs": 0,
+        "domNodes": 207,
+        "imageCount": 0,
+        "imageBytes": 0,
+        "imageDecodedBytes": 0,
+        "imageUnreserved": 0,
+        "apiRequests": 0,
+        "apiBytes": 0,
+        "assetRequests": 4,
+        "assetBytes": 30047,
+        "totalBytes": 31336,
+        "cacheHits": 0,
+        "cacheHitRatio": 0,
+        "chatMessages": 0
+      },
+      "ranges": {
+        "fcpMs": {
+          "min": 112,
+          "max": 264
+        },
+        "lcpMs": {
+          "min": 112,
+          "max": 264
+        },
+        "contentMs": {
+          "min": 103.4,
+          "max": 128.8
+        },
+        "cls": {
+          "min": 0,
+          "max": 0
+        },
+        "longTaskOver50Ms": {
+          "min": 0,
+          "max": 0
+        },
+        "longTaskCount": {
+          "min": 0,
+          "max": 0
+        },
+        "longTaskMaxMs": {
+          "min": 0,
+          "max": 0
+        },
+        "domNodes": {
+          "min": 207,
+          "max": 207
+        },
+        "imageCount": {
+          "min": 0,
+          "max": 0
+        },
+        "imageBytes": {
+          "min": 0,
+          "max": 0
+        },
+        "imageDecodedBytes": {
+          "min": 0,
+          "max": 0
+        },
+        "imageUnreserved": {
+          "min": 0,
+          "max": 0
+        },
+        "apiRequests": {
+          "min": 0,
+          "max": 0
+        },
+        "apiBytes": {
+          "min": 0,
+          "max": 0
+        },
+        "assetRequests": {
+          "min": 4,
+          "max": 4
+        },
+        "assetBytes": {
+          "min": 30047,
+          "max": 30047
+        },
+        "totalBytes": {
+          "min": 31336,
+          "max": 31336
+        },
+        "cacheHits": {
+          "min": 0,
+          "max": 0
+        },
+        "cacheHitRatio": {
+          "min": 0,
+          "max": 0
+        },
+        "chatMessages": {
+          "min": 0,
+          "max": 0
+        }
+      },
+      "spreadPercent": {
+        "fcpMs": 126.7,
+        "lcpMs": 126.7,
+        "contentMs": 23.3,
+        "cls": 0,
+        "longTaskOver50Ms": 0,
+        "longTaskCount": 0,
+        "longTaskMaxMs": 0,
+        "domNodes": 0,
+        "imageCount": 0,
+        "imageBytes": 0,
+        "imageDecodedBytes": 0,
+        "imageUnreserved": 0,
+        "apiRequests": 0,
+        "apiBytes": 0,
+        "assetRequests": 0,
+        "assetBytes": 0,
+        "totalBytes": 0,
+        "cacheHits": 0,
+        "cacheHitRatio": 0,
+        "chatMessages": 0
+      },
+      "integrity": {
+        "pageErrors": 0,
+        "failedRequests": 0,
+        "blockedWrites": 0
+      },
+      "serving": {
+        "byCategory": {
+          "document": {
+            "responses": 3,
+            "encodings": {
+              "br": 3
+            },
+            "cacheControls": {
+              "no-store": 3
+            }
+          },
+          "asset": {
+            "responses": 12,
+            "encodings": {
+              "br": 12
+            },
+            "cacheControls": {
+              "immutable": 12
+            }
+          }
+        },
+        "statuses": {
+          "200": 15
+        },
+        "revalidatedAssets": 0
+      }
+    },
+    "login-warm": {
+      "view": "login",
+      "cache": "warm",
+      "network": "normal",
+      "rounds": 3,
+      "metrics": {
+        "fcpMs": 84,
+        "lcpMs": 84,
+        "contentMs": 19.1,
+        "cls": 0,
+        "longTaskOver50Ms": 0,
+        "longTaskCount": 0,
+        "longTaskMaxMs": 0,
+        "domNodes": 207,
+        "imageCount": 0,
+        "imageBytes": 0,
+        "imageDecodedBytes": 0,
+        "imageUnreserved": 0,
+        "apiRequests": 0,
+        "apiBytes": 0,
+        "assetRequests": 4,
+        "assetBytes": 0,
+        "totalBytes": 1289,
+        "cacheHits": 4,
+        "cacheHitRatio": 1,
+        "chatMessages": 0
+      },
+      "ranges": {
+        "fcpMs": {
+          "min": 20,
+          "max": 144
+        },
+        "lcpMs": {
+          "min": 20,
+          "max": 144
+        },
+        "contentMs": {
+          "min": 15.3,
+          "max": 24.3
+        },
+        "cls": {
+          "min": 0,
+          "max": 0
+        },
+        "longTaskOver50Ms": {
+          "min": 0,
+          "max": 0
+        },
+        "longTaskCount": {
+          "min": 0,
+          "max": 0
+        },
+        "longTaskMaxMs": {
+          "min": 0,
+          "max": 0
+        },
+        "domNodes": {
+          "min": 207,
+          "max": 207
+        },
+        "imageCount": {
+          "min": 0,
+          "max": 0
+        },
+        "imageBytes": {
+          "min": 0,
+          "max": 0
+        },
+        "imageDecodedBytes": {
+          "min": 0,
+          "max": 0
+        },
+        "imageUnreserved": {
+          "min": 0,
+          "max": 0
+        },
+        "apiRequests": {
+          "min": 0,
+          "max": 0
+        },
+        "apiBytes": {
+          "min": 0,
+          "max": 0
+        },
+        "assetRequests": {
+          "min": 4,
+          "max": 4
+        },
+        "assetBytes": {
+          "min": 0,
+          "max": 0
+        },
+        "totalBytes": {
+          "min": 1289,
+          "max": 1289
+        },
+        "cacheHits": {
+          "min": 4,
+          "max": 4
+        },
+        "cacheHitRatio": {
+          "min": 1,
+          "max": 1
+        },
+        "chatMessages": {
+          "min": 0,
+          "max": 0
+        }
+      },
+      "spreadPercent": {
+        "fcpMs": 147.6,
+        "lcpMs": 147.6,
+        "contentMs": 47.1,
+        "cls": 0,
+        "longTaskOver50Ms": 0,
+        "longTaskCount": 0,
+        "longTaskMaxMs": 0,
+        "domNodes": 0,
+        "imageCount": 0,
+        "imageBytes": 0,
+        "imageDecodedBytes": 0,
+        "imageUnreserved": 0,
+        "apiRequests": 0,
+        "apiBytes": 0,
+        "assetRequests": 0,
+        "assetBytes": 0,
+        "totalBytes": 0,
+        "cacheHits": 0,
+        "cacheHitRatio": 0,
+        "chatMessages": 0
+      },
+      "integrity": {
+        "pageErrors": 0,
+        "failedRequests": 0,
+        "blockedWrites": 0
+      },
+      "serving": {
+        "byCategory": {
+          "document": {
+            "responses": 3,
+            "encodings": {
+              "br": 3
+            },
+            "cacheControls": {
+              "no-store": 3
+            }
+          },
+          "asset": {
+            "responses": 12,
+            "encodings": {
+              "br": 12
+            },
+            "cacheControls": {
+              "immutable": 12
+            }
+          }
+        },
+        "statuses": {
+          "200": 15
+        },
+        "revalidatedAssets": 0
+      }
+    },
+    "workspace-throttled-cold": {
+      "view": "workspace",
+      "cache": "cold",
+      "network": "throttled",
+      "rounds": 3,
+      "metrics": {
+        "fcpMs": 4176,
+        "lcpMs": 5024,
+        "contentMs": 5988.5,
+        "cls": 0.0139,
+        "longTaskOver50Ms": 1745,
+        "longTaskCount": 15,
+        "longTaskMaxMs": 335,
+        "domNodes": 7173,
+        "imageCount": 0,
+        "imageBytes": 0,
+        "imageDecodedBytes": 0,
+        "imageUnreserved": 0,
+        "apiRequests": 25,
+        "apiBytes": 157238,
+        "assetRequests": 12,
+        "assetBytes": 863437,
+        "totalBytes": 1021981,
+        "cacheHits": 0,
+        "cacheHitRatio": 0,
+        "chatMessages": 0
+      },
+      "ranges": {
+        "fcpMs": {
+          "min": 4140,
+          "max": 4224
+        },
+        "lcpMs": {
+          "min": 4836,
+          "max": 5076
+        },
+        "contentMs": {
+          "min": 5764.6,
+          "max": 6073.2
+        },
+        "cls": {
+          "min": 0.0139,
+          "max": 0.0139
+        },
+        "longTaskOver50Ms": {
+          "min": 1689,
+          "max": 1893
+        },
+        "longTaskCount": {
+          "min": 14,
+          "max": 16
+        },
+        "longTaskMaxMs": {
+          "min": 331,
+          "max": 371
+        },
+        "domNodes": {
+          "min": 7173,
+          "max": 7173
+        },
+        "imageCount": {
+          "min": 0,
+          "max": 0
+        },
+        "imageBytes": {
+          "min": 0,
+          "max": 0
+        },
+        "imageDecodedBytes": {
+          "min": 0,
+          "max": 0
+        },
+        "imageUnreserved": {
+          "min": 0,
+          "max": 0
+        },
+        "apiRequests": {
+          "min": 25,
+          "max": 25
+        },
+        "apiBytes": {
+          "min": 121863,
+          "max": 211164
+        },
+        "assetRequests": {
+          "min": 12,
+          "max": 12
+        },
+        "assetBytes": {
+          "min": 863437,
+          "max": 863437
+        },
+        "totalBytes": {
+          "min": 986606,
+          "max": 1075907
+        },
+        "cacheHits": {
+          "min": 0,
+          "max": 0
+        },
+        "cacheHitRatio": {
+          "min": 0,
+          "max": 0
+        },
+        "chatMessages": {
+          "min": 0,
+          "max": 0
+        }
+      },
+      "spreadPercent": {
+        "fcpMs": 2,
+        "lcpMs": 4.8,
+        "contentMs": 5.2,
+        "cls": 0,
+        "longTaskOver50Ms": 11.7,
+        "longTaskCount": 13.3,
+        "longTaskMaxMs": 11.9,
+        "domNodes": 0,
+        "imageCount": 0,
+        "imageBytes": 0,
+        "imageDecodedBytes": 0,
+        "imageUnreserved": 0,
+        "apiRequests": 0,
+        "apiBytes": 56.8,
+        "assetRequests": 0,
+        "assetBytes": 0,
+        "totalBytes": 8.7,
+        "cacheHits": 0,
+        "cacheHitRatio": 0,
+        "chatMessages": 0
+      },
+      "integrity": {
+        "pageErrors": 0,
+        "failedRequests": 0,
+        "blockedWrites": 0
+      },
+      "serving": {
+        "byCategory": {
+          "document": {
+            "responses": 3,
+            "encodings": {
+              "br": 3
+            },
+            "cacheControls": {
+              "no-store": 3
+            }
+          },
+          "asset": {
+            "responses": 36,
+            "encodings": {
+              "br": 33,
+              "identity": 3
+            },
+            "cacheControls": {
+              "immutable": 36
+            }
+          },
+          "api": {
+            "responses": 75,
+            "encodings": {
+              "identity": 11,
+              "br": 64
+            },
+            "cacheControls": {
+              "unspecified": 60,
+              "no-store": 15
+            }
+          }
+        },
+        "statuses": {
+          "200": 114
+        },
+        "revalidatedAssets": 0
+      }
+    }
+  }
+}

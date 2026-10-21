@@ -5,7 +5,7 @@ import { build } from "esbuild";
 import { openBrowser } from "./sidebar-ux-browser.mjs";
 
 const productionChrome = process.env.WAND_TERMINAL_PRODUCTION_CHROME === "1";
-const built = await build({ stdin: { loader: "ts", resolveDir: process.cwd(), contents: `
+const built = await build({ stdin: { loader: "tsx", resolveDir: process.cwd(), contents: `
 import{state}from'./src/web-ui/browser/state.ts';
 import{ensureTerminalReady,withTerminalDimensions}from'./src/web-ui/browser/session-engine.ts';
 import{fitTerminalToContainer}from'./src/web-ui/browser/terminal-fit.ts';
@@ -16,19 +16,35 @@ import{Layout}from'antd';import*as React from'react';import{createRoot}from'reac
 import{ShellTopbarChrome}from'./src/web-ui/react/shell/shell-topbar.tsx';import{WandUiProvider}from'./src/web-ui/react/theme.tsx';
 import{deriveLegacyUiSnapshot}from'./src/web-ui/react/shell/legacy-snapshot.ts';
 import{FirstStandaloneSessionChrome,FirstWorkspaceWindowChrome}from'./src/web-ui/react/workspaces/workspace-tab-chrome.tsx';
+import{PtyDockToggle,PtyInputModeToggle}from'./src/web-ui/react/composer-rail/input-mode-toggle.tsx';import{PtyModifierButtons}from'./src/web-ui/react/composer-rail/modifiers.tsx';
 import{TerminalShortcutsChrome}from'./src/web-ui/react/composer-rail/terminal-shortcuts.tsx';import{ComposerRailSubmitChrome}from'./src/web-ui/react/composer-rail/host.tsx';import{Card}from'antd';import{WandButton}from'./src/web-ui/react/ui/index.tsx';
 import{workspaceContextStore,setActiveWorkspaceContext,clearActiveWorkspaceContext}from'./src/web-ui/react/workspaces/workspace-context.ts';import{taskDetailStore}from'./src/web-ui/react/workspaces/task-detail-store.ts';import{installSidebarStyles}from'./src/web-ui/react/shell/sidebar-styles.ts';
 const chrome=${productionChrome};const futureCwd='/tmp/wand-terminal-creation-long-owned-fixture-cwd';let future={kind:'shell',cwd:futureCwd};if(chrome)installSidebarStyles();let taskMode=false,taskSubscribe;
 const headerHost=document.querySelector('#fixture-header');const headerRoot=chrome?createRoot(headerHost):null;
-const main=document.querySelector('.main-content'),appHost=document.createElement('div');appHost.style.height='100%';if(chrome){main.before(appHost);const appRoot=createRoot(appHost);flushSync(()=>appRoot.render(React.createElement(WandUiProvider,null,React.createElement(Layout,{style:{height:'100%'},ref:n=>{if(n&&!n.contains(main))n.appendChild(main)}}))))}
+const main=document.querySelector('.main-content'),appHost=document.createElement('div');appHost.style.height='100%';if(chrome){main.before(appHost);const toolbar=document.createElement('div');toolbar.className='quick-terminal-toolbar';toolbar.style.flexShrink='0';toolbar.appendChild(headerHost);main.style.height='auto';main.style.flex='1';main.style.minHeight='0';const appRoot=createRoot(appHost);flushSync(()=>appRoot.render(React.createElement(WandUiProvider,null,React.createElement(Layout,{className:'quick-terminal-workspace',style:{height:'100%'},ref:n=>{if(n&&!n.contains(main)){n.appendChild(toolbar);n.appendChild(main)}}}))))}
 const composerRoot=chrome?createRoot(document.querySelector('.input-panel')):null;let shortcutMounted=false;
-function drawComposer(){if(!composerRoot)return;const interactive=!!state.selectedId&&state.sessions[0]?.sessionKind==='pty';if(interactive)shortcutMounted=true;flushSync(()=>composerRoot.render(React.createElement(WandUiProvider,null,React.createElement(React.Fragment,null,
-React.createElement('div',{className:'composer-top-row'},!interactive?[React.createElement('div',{key:'todo',id:'todo-progress',className:'todo-progress expanded'},React.createElement('button',{className:'todo-progress-header',type:'button'},'own prior todo')),React.createElement('div',{key:'body',id:'todo-progress-body',className:'todo-progress-body expanded'},React.createElement('div',{id:'todo-progress-content'},'own prior expanded body')),React.createElement('div',{key:'status',className:'structured-status-bar'},React.createElement('span',{className:'status-bar-dot'}),React.createElement('span',{className:'status-bar-label'},'own prior reply'),React.createElement('span',{className:'status-bar-timer'},'0.0s'))]:null),React.createElement('div',{id:'terminal-shortcuts',className:'terminal-shortcuts',hidden:!interactive},shortcutMounted?React.createElement(TerminalShortcutsChrome,{disabled:false}):null),
-React.createElement('div',{className:'input-composer-row'},React.createElement('div',{className:'input-composer'+(interactive?' is-terminal-interactive':'')},React.createElement(Card,{size:'small',className:'composer-surface'},React.createElement('div',{className:'composer-main-row'},
-React.createElement('div',{className:'composer-input-wrap'},React.createElement('div',{'data-composer-sender':''},React.createElement('textarea',{id:'input-box',className:'input-textarea',rows:1}))),
-React.createElement('div',{className:'composer-actions-left'},React.createElement(WandButton,{size:'small'},'+')),
-React.createElement('div',{className:'composer-actions-right'},React.createElement('span',{className:'composer-rail-host','data-composer-rail-host':'pty'},interactive?React.createElement(ComposerRailSubmitChrome):null),React.createElement(WandButton,{id:'voice-record-btn'},'语音'),React.createElement(WandButton,{id:'send-input-button','data-phase':'idle'},'发送'))))))))))}
-function drawHeader(){if(!headerRoot)return;const snapshot=deriveLegacyUiSnapshot(state,{width:innerWidth,height:innerHeight,online:true});const chromeNode=taskMode?[snapshot.layout.sidebarDrawer?React.createElement('div',{key:'nav',className:'workspace-mobile-navigation',style:{height:36,flexShrink:0}}):null,state.selectedId?React.createElement(FirstWorkspaceWindowChrome,{key:'tabs',mobile:snapshot.viewport.mobile,taskName:'own-empty-task',session:state.sessions[0]}):null]:[React.createElement(ShellTopbarChrome,{key:'header',snapshot,measurement:true}),state.selectedId?React.createElement(FirstStandaloneSessionChrome,{key:'tabs',mobile:snapshot.viewport.mobile,session:state.sessions[0]}):null];flushSync(()=>headerRoot.render(React.createElement(WandUiProvider,null,React.createElement(Layout,{style:{flex:'none'}},chromeNode))))}
+function drawComposer(){
+  if(!composerRoot)return;
+  const interactive=!!state.selectedId&&state.sessions[0]?.sessionKind==='pty';
+  if(interactive)shortcutMounted=true;
+  flushSync(()=>composerRoot.render(<WandUiProvider>
+    <div className="composer-top-row">{!interactive&&<>
+      <div id="todo-progress" className="todo-progress expanded"><button className="todo-progress-header">own prior todo</button></div>
+      <div id="todo-progress-body" className="todo-progress-body expanded"><div id="todo-progress-content">own prior expanded body</div></div>
+      <div className="structured-status-bar"><span className="status-bar-dot"/><span className="status-bar-label">own prior reply</span><span className="status-bar-timer">0.0s</span></div>
+    </>}</div>
+    <div id="terminal-shortcuts" className="terminal-shortcuts" hidden={!interactive}>{shortcutMounted&&<TerminalShortcutsChrome disabled={false}/>}</div>
+    <div className="input-composer-row"><div className={'input-composer'+(interactive?' is-terminal-interactive':'')} data-pty-input-mode={interactive?'shortcuts':undefined} data-pty-collapsed={interactive?'true':undefined}>
+      <Card size="small" className="composer-surface"><div className="composer-main-row">
+        <div className="composer-input-wrap"><div data-composer-sender=""><textarea id="input-box" className="input-textarea" rows={1}/></div></div>
+        <div className="composer-actions-left"><WandButton size="small">+</WandButton></div>
+        <div className="composer-actions-right"><span className="composer-rail-host" data-composer-rail-host="pty">{interactive&&<ComposerRailSubmitChrome/>}</span><WandButton id="send-input-button" data-phase="idle">发送</WandButton></div>
+        {interactive&&<span style={{display:'contents'}}><PtyDockToggle collapsed onToggle={()=>{}}/><PtyInputModeToggle mode="shortcuts" onToggle={()=>{}}/><PtyModifierButtons ctrl={false} shift={false} onToggle={()=>{}}/></span>}
+      </div></Card>
+    </div></div>
+  </WandUiProvider>))
+}
+function drawHeader(){if(!headerRoot)return;const snapshot=deriveLegacyUiSnapshot(state,{width:innerWidth,height:innerHeight,online:true});const chromeNode=snapshot.viewport.mobile||!state.selectedId?React.createElement(ShellTopbarChrome,{snapshot,measurement:true}):taskMode?React.createElement(FirstWorkspaceWindowChrome,{mobile:false,taskName:'own-empty-task',session:state.sessions[0]}):React.createElement(FirstStandaloneSessionChrome,{mobile:false,session:state.sessions[0]});flushSync(()=>headerRoot.render(React.createElement(WandUiProvider,null,React.createElement(Layout,{style:{flex:'none'}},chromeNode))))}
 function newSelection(){if(!future.workspaceTaskId){taskMode=false;clearActiveWorkspaceContext()}state.sessions=[{id:'future-session',sessionKind:'pty',status:'running',cwd:future.cwd,workspaceTaskId:future.workspaceTaskId,provider:future.kind==='pty'?future.provider:undefined,command:future.kind==='pty'?future.provider:'Shell'}];state.selectedId='future-session';drawHeader();drawComposer();const input=document.querySelector('#input-box');if(input){input.value='';input.style.height='';input.style.minHeight=''}}
 window.addEventListener('resize',drawHeader);
 const originalRect=Element.prototype.getBoundingClientRect;window.probeRects=[];Element.prototype.getBoundingClientRect=function(){const r=originalRect.call(this);if((this.classList.contains('main-header-row')||this.classList.contains('workspace-tab-bar'))&&this.closest('[data-terminal-creation-measure]')){if(window.probeThrow)throw new Error('probe rectangle failure');window.probeRects.push({height:r.height,width:r.width,font:getComputedStyle(this).font,gap:getComputedStyle(this).gap,children:Array.from(this.children).map(n=>({class:n.className,height:originalRect.call(n).height,width:originalRect.call(n).width,text:n.textContent,font:getComputedStyle(n).font}))})}return r};
@@ -87,7 +103,7 @@ try {
     if(posted.cols!==actual.cols||posted.rows!==actual.rows)console.log(JSON.stringify({mismatch:{kind,initial,posted,prepared,actual,shownStats:await browser.evaluate("geometryFixture.stats()"),probeRects:await browser.evaluate("window.probeRects")}}));
     assert.deepEqual({cols:posted.cols,rows:posted.rows}, actual, "first POST dimensions match the first displayed terminal");
     const shown = await browser.evaluate("geometryFixture.stats()");
-    if (productionChrome) {assert.equal(shown.standaloneTabCount,1,"ungrouped creation has exactly one native tab row");assert.equal(shown.composerTopHeight,0);assert.equal(shown.legacyStatusPresent,false);assert.equal(shown.legacyTodoExpanded,false)}
+    if (productionChrome) {assert.equal(shown.standaloneTabCount,width>640?1:0,"desktop uses one tab row; mobile uses only the title row");assert.equal(shown.composerTopHeight,0);assert.equal(shown.legacyStatusPresent,false);assert.equal(shown.legacyTodoExpanded,false)}
     cases.push({ kind, width, initial, posted, prepared, actual, shown, dimensionsMatch: true, layoutStylesRestored: true });
   }
   const emptyTaskCases=[];
@@ -101,8 +117,8 @@ try {
       assert.equal(await browser.evaluate("document.querySelectorAll('[data-terminal-creation-space]').length"),0);
       const actual=await browser.evaluate("geometryFixture.show()");const shown=await browser.evaluate("geometryFixture.stats()");
       assert.deepEqual({cols:posted.cols,rows:posted.rows},actual,"first active empty task POST dimensions match its first window");
-      assert.equal(initial.headerHeight,undefined);assert.equal(shown.headerHeight,undefined);
-      assert.ok(shown.workspaceTabbarHeight>0);assert.equal(shown.workspaceNavHeight,initial.workspaceNavHeight);
+      if(width>640){assert.equal(shown.headerHeight,undefined);assert.ok(shown.workspaceTabbarHeight>0)}else{assert.ok(shown.headerHeight>0);assert.equal(shown.workspaceTabbarHeight,undefined)}
+      assert.equal(shown.workspaceNavHeight,undefined);
       emptyTaskCases.push({kind,width,initial,posted,prepared,shown,actual,dimensionsMatch:true,stylesRestored:true});
     }
     await browser.send("Emulation.setDeviceMetricsOverride",{width:390,height:900,deviceScaleFactor:1,mobile:false});
@@ -119,13 +135,14 @@ try {
     assert.deepEqual(await browser.evaluate("geometryFixture.styles()"),beforeStyles,"unbound projection restores the old task chrome");
     if(existing){assert.equal(prepared.cols,initial.cols);assert.equal(prepared.rows,initial.rows)}
     const actual=await browser.evaluate("geometryFixture.show()"),shown=await browser.evaluate("geometryFixture.stats()");
-    assert.deepEqual({cols:posted.cols,rows:posted.rows},actual,"task exit predicts the new header plus standalone tabs");
-    assert.equal(initial.headerHeight,undefined);assert.ok(shown.headerHeight>0);assert.equal(shown.workspaceNavHeight,undefined);assert.equal(shown.standaloneTabCount,1);
+    assert.deepEqual({cols:posted.cols,rows:posted.rows},actual,"task exit predicts a single replacement header");
+    assert.equal(shown.workspaceNavHeight,undefined);assert.equal(shown.standaloneTabCount,width>640?1:0);
+    if(width>640)assert.equal(shown.headerHeight,undefined);else assert.ok(shown.headerHeight>0);
     taskExitCases.push({width,existing,initial,posted,prepared,actual,shown,dimensionsMatch:true,stylesRestored:true,oldInstanceUnresized:!existing||(prepared.cols===initial.cols&&prepared.rows===initial.rows)});
   }
   let visiblePrediction = null, predictionFailureRestores = null;
   if(productionChrome) {
-    await browser.send("Emulation.setDeviceMetricsOverride",{width:390,height:900,deviceScaleFactor:1,mobile:false});
+    await browser.send("Emulation.setDeviceMetricsOverride",{width:1440,height:900,deviceScaleFactor:1,mobile:false});
     const beforeProbes=await browser.evaluate("window.probeRects.length");
     await browser.evaluate("geometryFixture.setTarget({kind:'shell',provider:undefined})");
     const visiblePosted=await browser.evaluate("geometryFixture.prepare()");

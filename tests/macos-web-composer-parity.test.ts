@@ -30,15 +30,21 @@ test("desktop composer uses Web control size and radius instead of a separate ca
 test("runtime anchors match Web while permission stays in the add panel", { skip: !available }, () => {
   assert.match(web, /composer-inline-config \{ position:absolute;[^\n]*inset-inline-end:0/);
   assert.match(base, /composer-floating-avatar[^\n]*inset-block-start:-76px; width:72px; height:72px/);
-  // Web input-wrap starts 11pt below surface top: -76 + 11 = -65.
-  assert.match(native, /frame\(height: hasPortrait \? \(kind == \.task \? 65 : 76\)/);
+  assert.match(native, /frame\(height: hasPortrait \? \(kind == \.task \? 65 : 76\) : \(kind == \.task \? 32 : 28\)\)/);
   assert.match(native, /portrait\(\)\.frame\(width: 72, height: 72\)/);
-  assert.match(native, /padding\(\.leading, 84\)/);
+  assert.match(native, /padding\(\.leading, hasPortrait \? 84 : 0\)/);
+  const bar = chat.slice(chat.indexOf("private var inputBar:"), chat.indexOf("private var modePanel:"));
+  assert.match(bar, /WorkingAvatar\(/);
+  assert.match(communications, /ComposerIdentityHeader\(kind: \.conversation/);
+  assert.match(communications, /ExecutingConversationCompanion/);
+  assert.match(source("macos/Wand/SharedPlushScene.swift"), /static let liveMinCores = 4/);
+  assert.match(source("macos/Wand/SharedPlushScene.swift"), /static let liveMinMemoryGB = 4\.0/);
+  assert.match(source("src/web-ui/avatar-hardware.ts"), /AVATAR_LIVE_MIN_CORES = 4/);
+  assert.match(source("src/web-ui/avatar-hardware.ts"), /AVATAR_LIVE_MIN_MEMORY_GB = 4/);
   assert.match(native, /\(viewportWidth \?\? geometry\.size\.width\) > 640/);
   assert.match(native, /window\?\.contentLayoutRect\.width/);
   assert.match(chat, /modelThinkingChip\(inMenu: false\)/);
   assert.match(chat, /thinkingChip\(inMenu: false\)/);
-  const bar = chat.slice(chat.indexOf("private var inputBar:"), chat.indexOf("private var modePanel:"));
   assert.doesNotMatch(bar, /ComposerSettingLabel\(title:.*权限/);
   assert.match(chat, /modelThinkingChip\(inMenu: true\)/);
   assert.match(chat, /thinkingChip\(inMenu: true\)/);

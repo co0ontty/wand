@@ -1,5 +1,5 @@
 import * as React from "react";
-import { WandButton } from "../ui/index.js";
+import { WandButton } from "../ui/button.js";
 
 export function PtyModifierButtons({ ctrl, shift, disabled, onToggle }: {
   ctrl: boolean; shift: boolean; disabled?: boolean; onToggle(key: "ctrl" | "shift"): void;

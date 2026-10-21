@@ -41,6 +41,7 @@ class NativeProcess implements StructuredExecProcess {
   private readonly decoders = { stdout: createUtf8TextDecoder(), stderr: createUtf8TextDecoder() };
   private timer: NodeJS.Timeout | null = null;
   private ended: StructuredExitEvent | null = null;
+  private observationFailed = false;
   private readonly identities: Record<"stdout" | "stderr", { dev: number; ino: number }>;
   constructor(readonly job: NativeJob, private readonly host: PiTmuxHost, after?: StructuredRunState) {
     this.runId = job.runId; this.incarnationId = job.incarnationId;
@@ -86,13 +87,21 @@ class NativeProcess implements StructuredExecProcess {
     if (this.ended) return;
     try {
       const state = this.host.state(this.job);
-      this.read("stdout", state.status === "exited"); this.read("stderr", state.status === "exited");
+      if (!this.observationFailed) {
+        this.read("stdout", state.status === "exited"); this.read("stderr", state.status === "exited");
+      }
       if (state.status !== "exited") return;
       this.ended = { exitCode: state.exitCode, signal: state.signal ? signalNumberFromName(state.signal) : null };
     } catch (error) {
-      logInfo(`Pi native file observation failed: ${error instanceof Error ? error.message : String(error)}`);
-      this.ended = { exitCode: 1, signal: null, processExited: false };
-      void this.host.kill(this.job).catch(() => {});
+      if (!this.observationFailed) {
+        this.observationFailed = true;
+        logInfo(`Pi native file observation failed: ${error instanceof Error ? error.message : String(error)}`);
+        for (const listener of this.exits) listener({ exitCode: 1, signal: null, processExited: false });
+        void this.host.kill(this.job).catch(error => logInfo(`Pi native cleanup failed: ${String(error)}`));
+      }
+      // An observation failure ends the response, not ownership of the process.
+      // Keep watching state so actual termination can release deletion barriers.
+      return;
     }
     if (this.timer) clearInterval(this.timer); this.timer = null;
     for (const listener of this.exits) listener(this.ended);
@@ -102,20 +111,24 @@ class NativeProcess implements StructuredExecProcess {
 /** New Pi CLI turns use real native TUI tmux panes; existing daemon runs stay with their original owner. */
 export class PiTmuxHost implements StructuredExecHost {
   readonly persistent = true;
-  readonly piNativeTui = true;
+  get piNativeTui(): boolean { return this.enabled; }
   private readonly root: string;
   private readonly prefix: string;
   private readonly owners = new Map<string, "native" | "legacy">();
   private readonly observed = new Map<string, StructuredRunState>();
   private readonly terminations = new Map<string, Promise<void>>();
-  constructor(configDir: string, private readonly legacy: StructuredExecHost) {
+  constructor(configDir: string, private readonly legacy: StructuredExecHost, private readonly enabled = true) {
     this.root = path.join(configDir, "pi-native");
     this.prefix = `wand-pi-${createHash("sha256").update(path.resolve(configDir)).digest("hex").slice(0, 6)}-`;
     mkdirSync(this.root, { recursive: true, mode: 0o700 });
   }
   private slot(runId: string): string { return path.join(this.root, createHash("sha256").update(runId).digest("hex").slice(0, 24)); }
   private job(runId: string): NativeJob | null {
-    try { return JSON.parse(readFileSync(path.join(this.slot(runId), "current.json"), "utf8")) as NativeJob; } catch { return null; }
+    try { return JSON.parse(readFileSync(path.join(this.slot(runId), "current.json"), "utf8")) as NativeJob; }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
   }
   private async tmux(args: string[]): Promise<string> {
     const result = await execute("tmux", args, { env: buildChildEnv(false), timeout: 10000, maxBuffer: 1024 * 1024 });
@@ -150,7 +163,15 @@ export class PiTmuxHost implements StructuredExecHost {
       nativeFile: job.events };
   }
   async spawnStructured(request: StructuredSpawnRequest): Promise<StructuredExecProcess> {
-    if (!request.nativePi) { this.owners.set(request.runId, "legacy"); return this.legacy.spawnStructured(request); }
+    if (!request.nativePi) {
+      const previous = this.job(request.runId);
+      if (previous && (!existsSync(previous.ack) || this.state(previous).status !== "exited")) {
+        throw Object.assign(new Error("原 Pi 原生回合尚未释放；未重复发送输入。"), { preflightBlocked: true });
+      }
+      this.owners.set(request.runId, "legacy");
+      return this.legacy.spawnStructured(request);
+    }
+    if (!this.enabled) throw Object.assign(new Error("Pi 原生 tmux 已禁用，未发送输入。"), { preflightBlocked: true });
     if (request.launchSignal?.aborted) throw new Error("Pi 原生启动已取消，未发送输入。");
     if (process.platform === "win32") throw new Error("Pi 原生 tmux 执行需要支持 tmux 的宿主机。");
     if (request.file !== "pi") throw Object.assign(new Error("原生 tmux 入口仅用于 Pi CLI。"), { preflightBlocked: true });
@@ -243,16 +264,22 @@ export class PiTmuxHost implements StructuredExecHost {
     const native: StructuredRunState[] = [];
     for (const item of readdirSync(this.root, { withFileTypes: true })) {
       if (!item.isDirectory()) continue;
-      try {
-        const job = JSON.parse(readFileSync(path.join(this.root, item.name, "current.json"), "utf8")) as NativeJob;
-        if (!existsSync(job.ack) || this.state(job).status !== "exited") {
-          native.push(this.snapshot(job)); this.owners.set(job.runId, "native");
-        }
-      } catch { /* An incomplete startup is not a fabricated live execution. */ }
+      const current = path.join(this.root, item.name, "current.json");
+      if (!existsSync(current)) continue;
+      // A published owner with unreadable state is unknown, not an idle host.
+      const job = JSON.parse(readFileSync(current, "utf8")) as NativeJob;
+      if (!existsSync(job.ack) || this.state(job).status !== "exited") {
+        native.push(this.snapshot(job)); this.owners.set(job.runId, "native");
+      }
     }
     const legacy = await this.legacy.listRuns();
-    for (const state of legacy) if (!native.some((other) => other.runId === state.runId)) this.owners.set(state.runId, "legacy");
-    return [...legacy.filter((state) => !native.some((other) => other.runId === state.runId)), ...native];
+    for (const state of legacy) {
+      if (native.some(other => other.runId === state.runId && (other.status === "running" || state.status === "running"))) {
+        throw new Error("Pi 执行存在冲突的持久宿主，拒绝继续维护。");
+      }
+      if (!native.some(other => other.runId === state.runId)) this.owners.set(state.runId, "legacy");
+    }
+    return [...legacy.filter(state => !native.some(other => other.runId === state.runId)), ...native];
   }
   kill(job: NativeJob): Promise<void> {
     const previous = this.terminations.get(job.incarnationId);
@@ -277,10 +304,19 @@ export class PiTmuxHost implements StructuredExecHost {
   forgetRun(runId: string): void {
     const job = this.job(runId);
     if (this.owners.get(runId) !== "native" || !job) { this.legacy.forgetRun(runId); return; }
-    void this.kill(job).catch((error) => {
-      if (this.state(job).status !== "exited") logInfo(`Pi tmux cleanup failed: ${String(error)}`);
-    });
-    writeFileSync(job.ack, "consumed\n", { mode: 0o600 }); this.observed.delete(runId);
+    const acknowledge = (): void => {
+      writeFileSync(job.ack, "consumed\n", { mode: 0o600 });
+      if (this.observed.get(runId)?.incarnationId === job.incarnationId) this.observed.delete(runId);
+    };
+    if (this.state(job).status === "exited") { acknowledge(); return; }
+    void this.kill(job).then(async () => {
+      const deadline = Date.now() + 10000;
+      while (this.state(job).status !== "exited") {
+        if (Date.now() >= deadline) throw new Error("Pi process exit is not yet confirmed");
+        await delay(25);
+      }
+      acknowledge();
+    }).catch((error) => logInfo(`Pi tmux cleanup failed: ${String(error)}`));
   }
 
   /**

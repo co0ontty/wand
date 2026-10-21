@@ -48,3 +48,19 @@ test("chat surfaces keep meaningful conditions, not permanent empty-state teachi
   assert.match(home, /\|\| !id \|\| !selected \|\| !!selected\.unavailableReason/, "unloaded target cannot accept a silently ignored submit");
   assert.match(team, /回复『批准』即开工/, "permission guidance is not useless copy");
 });
+
+test("会话页样式在骨架帧就位，且几何属性不参与过渡动画", () => {
+  const home = readFileSync(new URL("../src/web-ui/react/conversations/home.tsx", import.meta.url), "utf8");
+  const styles = readFileSync(new URL("../src/web-ui/react/conversations/home-styles.ts", import.meta.url), "utf8");
+  // 骨架屏用的是同一批类名，样式表晚一帧安装就会让标题 16→20px、发送按钮 padding 0→12px。
+  const mount = home.slice(home.indexOf("export function ConversationHome("), home.indexOf("function ReadyConversationHome("));
+  assert.match(mount, /React\.useLayoutEffect\(\(\) => \{ installChatComposerStyles\(\); installConversationHomeStyles\(\); \}, \[\]\);/,
+    "样式必须在 ConversationHome 本体里安装，骨架帧和真实页面共用同一套几何");
+  assert.doesNotMatch(home.slice(home.indexOf("function ReadyConversationHome(")), /installConversationHomeStyles\(\);/,
+    "真实页面不再单独安装，避免骨架帧缺样式");
+  // antd 按钮默认 transition:all，会把晚到的字号/内边距当动画播放 240ms。
+  assert.match(styles, /transition-property: color, background-color, border-color, box-shadow, opacity;/);
+  assert.match(styles, /\.conversation-root \.conversation-heading-title,\n\.conversation-root \.conversation-submit-labelled\.ant-btn,/);
+  // 空态提示不参与阅读列布局：它撤掉时投影槽必须留在原处。
+  assert.match(styles, /\.conversation-message-scroll > \.conversation-empty:first-child \{ position:absolute; inset-block-start:var\(--conversation-scroll-pad-top\)/);
+});

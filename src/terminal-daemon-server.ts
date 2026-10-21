@@ -6,6 +6,7 @@ import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
 
 import pty from "node-pty";
+import { PtyTmuxBackend, type DaemonPty } from "./pty-tmux-backend.js";
 
 import { keepUnixSocketAlive } from "./unix-socket-keepalive.js";
 import { TERMINAL_DAEMON_BUILD_ID } from "./terminal-daemon-build.js";
@@ -39,7 +40,7 @@ import { appendWindow, PTY_OUTPUT_MAX_SIZE } from "./pty-text-utils.js";
 interface DaemonSession {
   sessionId: string;
   incarnationId: string;
-  process: import("node-pty").IPty | null;
+  process: DaemonPty | null;
   pid: number;
   status: "running" | "exited";
   exitCode: number | null;
@@ -134,6 +135,7 @@ const MAX_REQUEST_BUFFER = 4 * 1024 * 1024;
 
 export async function runTerminalDaemon(configPath: string): Promise<void> {
   const paths = terminalDaemonPaths(configPath);
+  const tmux = path.basename(configPath) === "tmux-terminald.json" ? new PtyTmuxBackend(configPath) : null;
   mkdirSync(path.dirname(paths.tokenPath), { recursive: true, mode: 0o700 });
 
   const previousPid = readTerminalDaemonPid(configPath);
@@ -185,18 +187,7 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
     launchMarkerToken: session.launchMarkerToken,
   });
 
-  const createOrAttach = (params: TerminalDaemonCreateParams): TerminalDaemonAttachPayload => {
-    const existing = sessions.get(params.sessionId);
-    if (existing) return { state: serialize(existing), isNew: false };
-
-    ensureNodePtyHelperExecutable();
-    const child = pty.spawn(params.file, params.args, {
-      cwd: params.cwd,
-      env: params.env,
-      name: params.name,
-      cols: params.cols,
-      rows: params.rows,
-    });
+  const register = (params: TerminalDaemonCreateParams, child: DaemonPty): TerminalDaemonAttachPayload => {
     const session: DaemonSession = {
       sessionId: params.sessionId,
       incarnationId: randomUUID(),
@@ -250,15 +241,39 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
     return { state: serialize(session), isNew: true };
   };
 
+  const pendingStarts = new Map<string, Promise<TerminalDaemonAttachPayload>>();
+  const createOrAttach = async (params: TerminalDaemonCreateParams): Promise<TerminalDaemonAttachPayload> => {
+    const existing = sessions.get(params.sessionId);
+    if (existing) return { state: serialize(existing), isNew: false };
+    const pending = pendingStarts.get(params.sessionId);
+    if (pending) return pending;
+    const start = (async () => {
+      ensureNodePtyHelperExecutable();
+      const child = tmux ? await tmux.spawn(params) : pty.spawn(params.file, params.args, {
+        cwd: params.cwd, env: params.env, name: params.name, cols: params.cols, rows: params.rows,
+      });
+      return register(params, child);
+    })();
+    pendingStarts.set(params.sessionId, start);
+    try { return await start; }
+    catch (error) {
+      // A lost launch acknowledgement must remain visible to maintenance/recovery.
+      for (const recovered of tmux?.recover(new Set(sessions.keys())) ?? []) {
+        register(recovered.request, recovered.child);
+      }
+      throw error;
+    } finally { pendingStarts.delete(params.sessionId); }
+  };
+  for (const recovered of tmux?.recover() ?? []) register(recovered.request, recovered.child);
+
   const forget = (sessionId: string): void => {
     const session = sessions.get(sessionId);
     if (!session) return;
-    sessions.delete(sessionId);
     const child = session.process;
+    if (child) child.kill();
+    tmux?.forget(sessionId);
+    sessions.delete(sessionId);
     session.process = null;
-    if (child) {
-      try { child.kill(); } catch { /* best-effort explicit deletion */ }
-    }
     session.terminalState.dispose();
   };
 
@@ -410,7 +425,7 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
     }
   };
 
-  const handleRequest = (client: DaemonClient, request: TerminalDaemonRequest): void => {
+  const handleRequest = async (client: DaemonClient, request: TerminalDaemonRequest): Promise<void> => {
     if (request.token !== token) {
       send(client.socket, { kind: "response", id: request.id, ok: false, error: "Unauthorized" });
       client.socket.destroy();
@@ -436,7 +451,7 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
             buildId: TERMINAL_DAEMON_BUILD_ID, shutdownIfIdle: true };
           break;
         case "shutdownIfIdle": {
-          const busy = [...sessions.values(), ...structuredRuns.values()].some((entry) => entry.status === "running");
+          const busy = pendingStarts.size > 0 || [...sessions.values(), ...structuredRuns.values()].some((entry) => entry.status === "running");
           result = { accepted: !busy };
           if (!busy && !retiring) {
             // The idle check and admission closure happen in the same event-loop turn.
@@ -450,7 +465,7 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
           break;
         case "createOrAttach":
           if (retiring) throw new Error("Terminal daemon is updating");
-          result = createOrAttach(params as unknown as TerminalDaemonCreateParams);
+          result = await createOrAttach(params as unknown as TerminalDaemonCreateParams);
           break;
         case "write": {
           const session = sessions.get(String(params.sessionId ?? ""));
@@ -473,15 +488,20 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
           break;
         }
         case "kill": {
+          const pending = pendingStarts.get(String(params.sessionId ?? ""));
+          if (pending) { try { await pending; } catch { /* Recovered unknown owner is still stopped below. */ } }
           const session = sessions.get(String(params.sessionId ?? ""));
           if (session?.process) session.process.kill(typeof params.signal === "string" ? params.signal : undefined);
           result = { ok: true };
           break;
         }
-        case "forget":
+        case "forget": {
+          const pending = pendingStarts.get(String(params.sessionId ?? ""));
+          if (pending) { try { await pending; } catch { /* Preserve unknown owner if termination fails. */ } }
           forget(String(params.sessionId ?? ""));
           result = { ok: true };
           break;
+        }
         case "structuredSpawn":
           if (retiring) throw new Error("Terminal daemon is updating");
           result = structuredSpawn(params as unknown as StructuredSpawnRequest);
@@ -566,7 +586,12 @@ export async function runTerminalDaemon(configPath: string): Promise<void> {
   const stopSocketKeepalive = keepUnixSocketAlive(server, paths.socketPath, () => {
     chmodSync(paths.socketPath, 0o600);
   });
-  const shutdown = (): void => {
+  let shuttingDown = false;
+  const shutdown = async (): Promise<void> => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    retiring = true;
+    await Promise.allSettled(pendingStarts.values());
     stopSocketKeepalive();
     for (const sessionId of Array.from(sessions.keys())) forget(sessionId);
     for (const runId of Array.from(structuredRuns.keys())) structuredForget(runId);

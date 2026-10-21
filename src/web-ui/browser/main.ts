@@ -23,7 +23,7 @@ import "./websocket";    // includes 30s setInterval side effect
 import "./chat-render-loader";  // view code and copy delegates load on first chat paint
 import "./notifications";
 import { configPath, state } from "./state";
-import { startReactUi } from "../react";
+import { startReactUi } from "../react/start-ui";
 import { installFolderPickerLegacyAdapter } from "./folder-picker-adapter";
 import { installAiTeamComposerAdapter } from "./ai-team-composer-adapter";
 import { installNewSessionLegacyAdapter } from "./new-session-adapter";

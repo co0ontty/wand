@@ -7,6 +7,7 @@ import test from "node:test";
 import { runInNewContext } from "node:vm";
 
 import { renderLoginVisual } from "../src/web-ui/browser/login-visual.js";
+import { renderLoginPageMarkup } from "../src/web-ui/browser/login-template.js";
 import { renderWandBrandMarkup } from "../src/web-ui/brand-identity.js";
 import { PROVIDER_IDS, renderProviderLogoMarkup } from "../src/web-ui/provider-identity.js";
 
@@ -73,27 +74,43 @@ test("restoring and anonymous logins share one illustration and preserve the for
   }
 });
 
-test("login redesign keeps library credentials and identifies the current server as escaped text", () => {
-  const html = renderToStaticMarkup(React.createElement(LoginForm, { checking: false, switchServer: true, serverLabel: "<host>:8181" }));
+test("login redesign keeps library credentials and drops the single-server address block", () => {
+  const html = renderToStaticMarkup(React.createElement(LoginForm, { checking: false, switchServer: true }));
   assert.match(html, /<main class="login-page"/);
   assert.match(html, /id="login-title"/);
   assert.match(html, /你的 AI 工作台/);
-  assert.match(html, /当前服务/);
-  assert.match(html, /&lt;host&gt;:8181/);
-  assert.doesNotMatch(html, /<host>|ant-card/);
+  // 单机部署没有第二个服务可指，地址块只占地方：整块移除。
+  assert.doesNotMatch(html, /当前服务|login-server|serverLabel/);
+  assert.doesNotMatch(html, /终端 · AI 会话 · 工作区/);
+  assert.doesNotMatch(html, /ant-card/);
   assert.match(html, /autoComplete="current-password"/);
   assert.equal((html.match(/id="password"/g) ?? []).length, 1);
   assert.match(html, /输入访问密码/);
   assert.doesNotMatch(html, /一次性票据|本机 CLI|登录方式|ant-segmented|data-login-kind/);
   assert.match(html, /aria-describedby="password-hint login-error"/);
   assert.match(html, /class="login-feedback" aria-live="polite"/);
+  // 凭据说明只留一条，合并在密码框下方。
+  assert.equal((html.match(/凭据只发送到本机 Wand 服务，不会保存在此页面。/g) ?? []).length, 1);
+  assert.doesNotMatch(html, /login-privacy/);
   assert.ok(html.indexOf('id="login-cert-hint"') > html.indexOf('id="login-button"'), "certificate guidance cannot push the submit action down");
   assert.match(styles, /\.login-feedback \{ min-height: 44px;/);
   assert.match(styles, /#login-switch-server-button \{ height: 44px;/);
-  const restoring = renderToStaticMarkup(React.createElement(LoginForm, { checking: true, switchServer: false, serverLabel: "local:8181" }));
+  const restoring = renderToStaticMarkup(React.createElement(LoginForm, { checking: true, switchServer: false }));
   assert.match(restoring, /aria-busy="true"/);
-  assert.match(restoring, /local:8181/);
   assert.doesNotMatch(restoring, /id="password"/);
+});
+
+test("the vanilla login page matches the React form: no server address, one credential note", () => {
+  const html = renderLoginPageMarkup("<svg class=\"brand-logo\"></svg>", "<div class=\"login-visual\"></div>");
+  assert.match(html, /class="login-brand"/);
+  assert.match(html, /id="login-title"/);
+  assert.doesNotMatch(html, /当前服务|login-server|login-capabilities|login-privacy/);
+  assert.equal((html.match(/凭据只发送到本机 Wand 服务，不会保存在此页面。/g) ?? []).length, 1);
+  assert.match(html, /id="password"[^>]*autofocus/);
+  assert.match(html, /aria-describedby="password-hint login-error"/);
+  assert.match(html, /id="login-error"[^>]*role="alert"/);
+  assert.match(html, /id="login-cert-hint"/);
+  assert.ok(html.indexOf('id="login-cert-hint"') > html.indexOf('id="login-button"'));
 });
 
 test("motion has a keyboard-accessible pause, a static reduced-motion view, and no mobile footprint", () => {

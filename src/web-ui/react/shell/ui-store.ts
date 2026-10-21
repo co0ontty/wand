@@ -163,6 +163,7 @@ export type UiAction =
   | { type: "session.manage.clear" }
   | { type: "session.manage.deleteSelected" }
   | { type: "layout.drawer.toggle" }
+  | { type: "layout.drawer.open" }
   | { type: "layout.drawer.close" }
   | { type: "layout.drawer.pin" }
   | { type: "layout.drawer.collapse" }

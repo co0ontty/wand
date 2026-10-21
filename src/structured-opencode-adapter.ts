@@ -156,6 +156,7 @@ export class OpenCodeRunner implements StructuredRunnerAdapter {
       stdinData: promptWithSystemFallback(context.session, context.prompt),
       observer,
       execHost: this.execHost,
+      requestId: context.session.structuredState?.activeRequestId ?? undefined,
       spawnProcess: this.spawnProcess,
       createState: () => state,
       processLine: (line) => {

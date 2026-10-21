@@ -152,27 +152,13 @@ export class CompositeTerminalHost implements TerminalHost {
     this.render.disconnect();
   }
 
-  /**
-   * legacy 查询失败（socket 抖动）时按「不属于它」处理：宁可让 Render 侧查一遍，
-   * 也不能在会话恢复路径上抛异常 —— 那会让服务器重启后旧会话全部恢复失败。
-   */
+  /** An unavailable owner is not proof of absence; never duplicate its workload. */
   private attachFromLegacy(sessionId: string, afterSeq: number): TerminalAttachResult | null {
-    if (!this.legacy) return null;
-    try {
-      return this.legacy.attach(sessionId, afterSeq) ?? null;
-    } catch {
-      return null;
-    }
+    return this.legacy?.attach(sessionId, afterSeq) ?? null;
   }
 
   private legacyOwns(sessionId: string): boolean {
-    if (!this.legacy) return false;
-    try {
-      return this.legacy.attach(sessionId) !== null;
-    } catch {
-      // 查询失败按「不属于 legacy」处理：宁可让 Render 建新会话，也不要把请求丢进坏掉的 daemon。
-      return false;
-    }
+    return this.legacy ? this.legacy.attach(sessionId) !== null : false;
   }
 }
 

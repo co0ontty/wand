@@ -1,3 +1,4 @@
+import * as React from "react";
 import { deferredFeature } from "./deferred-feature";
 import { piExecutionController } from "./pi-execution/controller";
 import { settingsController, settingsStore } from "./settings/controller";
@@ -13,6 +14,14 @@ import { imageViewerController } from "./image-viewer/controller";
 import { missionsController, missionsStore } from "./missions/controller";
 import { workspacesController, workspacesStore } from "./workspaces/controller";
 import { githubIssuesController, githubIssuesStore } from "./issues/controller";
+import { composerAttachmentsController } from "./composer-attachments/controller";
+
+export const ComposerAttachmentsHost = deferredFeature(
+  () => import("./composer-attachments/host").then(module => module.ComposerAttachmentsHost),
+  composerAttachmentsController,
+  snapshot => snapshot.mounts.length > 0,
+  { title: "附件", close: () => {}, renderPending: () => <></> },
+);
 
 export const PiExecutionHost = deferredFeature(
   () => import("./pi-execution/host").then(module => module.PiExecutionHost), piExecutionController,
@@ -35,7 +44,8 @@ export const TaskBoardHost = deferredFeature<import("./issues/task-board-host").
 );
 export const NewSessionHost = deferredFeature(
   () => import("./new-session/host").then(module => module.NewSessionHost), newSessionStore,
-  snapshot => snapshot.open, { title: "新建会话", close: () => newSessionController.close() },
+  snapshot => snapshot.open, { title: "新建会话", page: true, close: () => newSessionController.close(),
+    renderPending: status => <section aria-label="新建会话加载" style={{ position: "absolute", inset: 0, zIndex: 8, background: "var(--bg-primary)", padding: "var(--wand-page-inset)" }}>{status}</section> },
 );
 export const FolderPickerHost = deferredFeature(
   () => import("./folder-picker/host").then(module => module.FolderPickerHost), folderPickerStore,

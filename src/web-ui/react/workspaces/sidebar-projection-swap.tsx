@@ -4,9 +4,11 @@ import { useReducedMotion } from "../ui/motion-tokens";
 import { SidebarPresentationContext, type SidebarPresentation } from "./sidebar-display-mode";
 
 /** Both list sections change in the same place; the old projection is inert during exit. */
-export function SidebarProjectionSwap({ value, children }: {
+export function SidebarProjectionSwap({ value, children, animate = true }: {
   value: string;
   children: React.ReactNode;
+  /** Some page projections must not remove an absolutely-positioned ghost: its removal is a layout shift. */
+  animate?: boolean;
 }): React.ReactElement {
   React.useLayoutEffect(() => { installSidebarStyles(); }, []);
   const scope = React.useContext(SidebarPresentationContext);
@@ -19,7 +21,7 @@ export function SidebarProjectionSwap({ value, children }: {
   const [entering, setEntering] = React.useState(false);
   React.useLayoutEffect(() => {
     let frame = 0;
-    if (reduced) {
+    if (reduced || !animate) {
       setGhost(null);
       setEntering(false);
     } else if (previous.current.value !== value) {
@@ -28,7 +30,7 @@ export function SidebarProjectionSwap({ value, children }: {
       frame = requestAnimationFrame(() => setEntering(false));
     }
     return () => cancelAnimationFrame(frame);
-  }, [value, reduced]);
+  }, [value, reduced, animate]);
   React.useLayoutEffect(() => { previous.current = { value, children, scope }; });
   return <div className="sidebar-projection-swap" data-entering={entering}>
     <div className="sidebar-projection-current">{children}</div>

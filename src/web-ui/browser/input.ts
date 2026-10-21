@@ -32,7 +32,7 @@ import { showActionError } from "./composer-action-error";
 import { shouldPersistQueueItemRestore } from "./composer-draft";
 import { handlePiSettingsSubmit, syncPiSettingsComposer } from "./pi-settings-adapter";
 import { resolveInsertBeforeAnchor } from "./queue-dom";
-import { clearQueueView, paintCrossSessionQueue, paintQueueBar } from "./queue-view-adapter";
+import { clearQueueView, paintCrossSessionQueue, paintQueueBar } from "./queue-view-loader";
 
 function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   return fetch(input, { ...init,

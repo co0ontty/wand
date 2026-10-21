@@ -136,6 +136,11 @@ import { createDaemonMaintenanceTargets } from "./daemon-maintenance-targets.js"
 import { registerDaemonMaintenanceRoutes } from "./server-daemon-maintenance-routes.js";
 import { terminalDaemonBuildIsCurrent } from "./terminal-daemon-build.js";
 import { createUpgradeAwareStructuredHost } from "./render-structured-host.js";
+import { PiTmuxHost } from "./pi-tmux-host.js";
+import { StructuredTmuxHost } from "./structured-tmux-host.js";
+import { tmuxEnabled } from "./tmux-policy.js";
+import { structuredHostMaintenance } from "./structured-host-maintenance.js";
+import { createTmuxTerminalHost } from "./tmux-terminal-host.js";
 import type { TerminalHost } from "./terminal-host.js";
 import {
   updateProviderClis,
@@ -460,8 +465,11 @@ export async function startServer(
         binaryPath: config.render?.binaryPath,
         knownSessionIds: knownPtySessionIds,
       });
+  const tmuxTerminals = options.terminalHost
+    ? { host: ptyHosts.host, client: null, configPath, maintenanceTarget: undefined }
+    : await createTmuxTerminalHost(configPath, ptyHosts.host);
   const daemonAdmission = new DaemonAdmission();
-  const terminalHost = daemonAdmission.terminal(ptyHosts.host);
+  const terminalHost = daemonAdmission.terminal(tmuxTerminals.host);
   let decisionRuntime: DecisionRuntimeAccess | null = null;
   let autoAssignEvaluate: DecisionRuntimeAccess["evaluate"];
   const processes = new ProcessManager(config, storage, configDir, terminalHost,
@@ -475,9 +483,17 @@ export async function startServer(
   const structuredHosts = await createUpgradeAwareStructuredHost(
     configPath, legacyStructuredHost, config.structured?.processHost,
   );
+  let structuredHost = structuredHosts.host;
+  if (structuredHost?.persistent) {
+    const enabled = tmuxEnabled();
+    const tmuxHost = new StructuredTmuxHost(configDir, structuredHost, enabled);
+    // Keep both routes available after disabling new tmux launches: existing
+    // native and generic runs still belong to their original persistent owner.
+    structuredHost = new PiTmuxHost(configDir, tmuxHost, enabled && process.env.WAND_PI_NATIVE_TMUX !== "0");
+  }
   const structuredSessions = new StructuredSessionManager(
     storage, config, structuredLogger, {},
-    structuredHosts.host ? daemonAdmission.structured(structuredHosts.host) : undefined, () => decisionRuntime, openRouter,
+    structuredHost ? daemonAdmission.structured(structuredHost) : undefined, () => decisionRuntime, openRouter,
     () => autoAssignEvaluate, webLoginTickets,
   );
   // No SDK prewarm: Pi defaults to CLI. Only an explicit Wand Agent selection
@@ -541,7 +557,14 @@ export async function startServer(
   }
   const updateState = new ServerUpdateState();
   const daemonMaintenance = new DaemonMaintenance({
-    targets: testMode ? [] : await createDaemonMaintenanceTargets(configPath, ptyHosts, structuredHosts.rustClient, config.render?.binaryPath),
+    targets: testMode ? [] : [
+      ...await createDaemonMaintenanceTargets(configPath, ptyHosts, structuredHosts.rustClient, config.render?.binaryPath),
+      ...(tmuxTerminals.client ? (await createDaemonMaintenanceTargets(tmuxTerminals.configPath,
+        { host: tmuxTerminals.host, renderHost: null, legacyHost: tmuxTerminals.client }, null))
+        .map(target => ({ ...target, name: "tmux-terminald" })) : []),
+      ...(tmuxTerminals.maintenanceTarget ? [tmuxTerminals.maintenanceTarget] : []),
+      ...(structuredHost ? [structuredHostMaintenance(structuredHost)] : []),
+    ],
     admission: daemonAdmission,
     busy: () => structuredSessions.getCoreTurnStatus().hasActiveTurns
       || [...processes.list(), ...structuredSessions.list()].some((session) =>
@@ -598,7 +621,7 @@ export async function startServer(
   });
   app.use(createExtensionCors(config.browserExtensionIds));
 
-  registerAssetRoutes(app, { configPath, config, requireAuth, requireSessions });
+  registerAssetRoutes(app, { configPath, config, requireAuth, requireSessions, authService, useHttps });
 
 
   registerAuthRoutes(app, {

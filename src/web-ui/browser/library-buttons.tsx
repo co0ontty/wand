@@ -4,7 +4,7 @@ import { flushSync } from "react-dom";
 import { Button, Flex, Typography } from "antd";
 import { WandUiProvider } from "../react/theme";
 import { installStyleSheet } from "../react/styles";
-import { WandIcon } from "../react/ui";
+import { WandIcon } from "../react/ui/icons";
 
 interface ButtonProjection { root: Root; key: string; source?: HTMLButtonElement; }
 const roots = new Map<HTMLElement, ButtonProjection>();

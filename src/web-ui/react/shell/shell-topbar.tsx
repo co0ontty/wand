@@ -1,20 +1,12 @@
 import * as React from "react";
-import { CopyPageLink } from "../ui/copy-page-link";
-import { QuickTerminalActionContext, QuickTerminalTopbarAction } from "../quick-terminal/action";
-import { createPortal } from "react-dom";
+import { agentToolDisplayName } from "../../provider-identity";
+import { QuickTerminalChrome, QuickTerminalTopbarAction } from "../quick-terminal/action";
 import { Flex, Typography } from "antd";
 
-import {
-  WandBrandMark,
-  WandDropdownMenu,
-  WandDropdownMenuContent,
-  WandDropdownMenuItem,
-  WandDropdownMenuSeparator,
-  WandDropdownMenuTrigger,
-  WandIcon,
-  WandIconButton,
-  type WandIconName,
-} from "../ui";
+import { WandBrandMark } from "../ui/brand-mark";
+import { WandDropdownMenu, WandDropdownMenuContent, WandDropdownMenuItem, WandDropdownMenuSeparator, WandDropdownMenuTrigger } from "../ui/dropdown-menu";
+import { WandIcon, type WandIconName } from "../ui/icons";
+import { WandIconButton } from "../ui/button";
 import { localPreviewController } from "../local-preview/controller";
 import { classNames } from "../ui/class-names";
 
@@ -66,7 +58,7 @@ export function getTopbarMoreActions(
         ? "复制 Codex thread ID"
         : selected.provider === "opencode"
           ? "复制 OpenCode session ID"
-          : "复制 Claude 会话 ID",
+          : `复制 ${agentToolDisplayName(selected.provider, selected.engine)} 会话 ID`,
       icon: "copy",
     });
   }
@@ -130,7 +122,6 @@ export interface TopbarMoreMenuProps {
 export function TopbarMoreMenu({ selected, actions, onAction }: TopbarMoreMenuProps) {
   return (
     <>
-      <CopyPageLink menuItem label="复制会话链接"/>
       {getTopbarMoreActions(selected, actions).map((item) => (
         <React.Fragment key={item.actionName}>
           {item.dividerBefore ? <WandDropdownMenuSeparator/> : null}
@@ -151,7 +142,6 @@ export function TopbarMoreMenu({ selected, actions, onAction }: TopbarMoreMenuPr
 
 export function ShellTopbar({ terminalActionVisible = true }: { terminalActionVisible?: boolean } = {}) {
   const snapshot = useUiStoreSnapshot();
-  const terminalAction = React.useContext(QuickTerminalActionContext);
   const dispatch = useUiDispatch();
   const moreOpen = snapshot.layout.topbarMoreOpen;
   const menuOpenIntent = React.useRef(moreOpen);
@@ -165,7 +155,7 @@ export function ShellTopbar({ terminalActionVisible = true }: { terminalActionVi
     }}
     gitBadge={<TopbarGitBadge/>}/>;
   // Keep the existing header at full workspace width while docking resizes only its content.
-  return terminalAction && terminalActionVisible ? createPortal(chrome, terminalAction.chromeHost) : chrome;
+  return terminalActionVisible ? <QuickTerminalChrome>{chrome}</QuickTerminalChrome> : chrome;
 }
 
 /** Static chrome shared by the live shell and invisible creation measurement. */

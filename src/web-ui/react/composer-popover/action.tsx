@@ -1,5 +1,6 @@
 import * as React from "react";
-import { WandIcon, WandButton, type WandIconName } from "../ui";
+import { WandIcon, type WandIconName } from "../ui/icons";
+import { WandButton } from "../ui/button";
 
 /** The same action row is used by the main composer and the group chat attachment menu. */
 export function ComposerPopoverAction({ id, icon, label, onClick }: {

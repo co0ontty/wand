@@ -1,6 +1,7 @@
 import * as React from "react";
 import { createPortal } from "react-dom";
-import { WandButton, WandIcon, WandIconButton } from "../ui";
+import { WandButton, WandIconButton } from "../ui/button";
+import { WandIcon } from "../ui/icons";
 import type { WandIconName } from "../ui/icons";
 import { useReducedMotion } from "../ui/motion-tokens";
 import { isWandPopupOwnedBy, registerPopupOwner, usePopupDismiss } from "../ui/popup-lifecycle";
@@ -37,6 +38,13 @@ export function ConversationApprovalButton({ phase, disabled, onClick }: {
   </WandButton>;
 }
 
+/** Every label the conversation composer can show; the stack reserves the widest so the button never resizes. */
+const CONVERSATION_SUBMIT_LABELS = ["发送消息", "发送并开始新工作", "发送中", "已接受", "操作失败", "送达未确认", "停止本轮", "派发任务", "确认继续此任务"];
+
+function submitLabelSlots(label: string): string[] {
+  return CONVERSATION_SUBMIT_LABELS.includes(label) ? CONVERSATION_SUBMIT_LABELS : [...CONVERSATION_SUBMIT_LABELS, label];
+}
+
 export function ConversationSubmitButton({ phase, stops, disabled, label, onClick, showLabel = false, disabledReason, descriptionId }: {
   phase: ConversationSubmitPhase; stops: boolean; disabled?: boolean; label: string; onClick(): void; showLabel?: boolean;
   disabledReason?: string; descriptionId?: string;
@@ -50,7 +58,9 @@ export function ConversationSubmitButton({ phase, stops, disabled, label, onClic
       <span data-slot="failed"><WandIcon name="warning"/></span>
       <span data-slot="unknown"><WandIcon name="question"/></span>
     </span>
-    {showLabel ? <span className="conversation-submit-label">{label}</span> : null}
+    {showLabel ? <span className="conversation-submit-labels" aria-hidden="true">
+      {submitLabelSlots(label).map(text => <span key={text} className="conversation-submit-label" data-active={text === label || undefined}>{text}</span>)}
+    </span> : null}
   </WandIconButton>;
 }
 

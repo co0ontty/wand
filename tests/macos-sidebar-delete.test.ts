@@ -14,7 +14,8 @@ for (const [file, state, parameter, action, type] of [
   ["WorkspaceListView", "clearTarget", "target", "confirmClearSessions", "WorkspaceTaskSummary"],
   ["WorkspaceListView", "deleteSessionTarget", "target", "confirmDeleteSession", "WorkspaceSessionSummary"],
   ["WorkspaceListView", "pendingManagedDelete", "selection", "confirmManagedDelete", "TaskListPresentation.ManageSelection"],
-  ["WorkspaceTaskView", "pendingDeleteSession", "target", "confirmDeleteSession", "WorkspaceSessionSummary"],
+  // The shared WorkspaceSessionHeader lives in WorkspaceTaskView.swift.
+  ["WorkspaceTaskView", "pendingDelete", "target", "confirmDeleteSession", "WorkspaceSessionSummary"],
 ] as const) {
   test(`macOS ${file}.${action} carries its target across dialog dismissal`, { skip: !available }, () => {
     const text = source(file);
@@ -73,7 +74,8 @@ test("macOS session batch deletion refreshes and reports partial success instead
 
 test("macOS task terminal deletion failures remain visible after confirmation closes", { skip: !available }, () => {
   const text = source("WorkspaceTaskView");
-  assert.match(text, /\.alert\("删除未完成", isPresented: Binding\(\s*get: \{ deleteSessionError != nil \}/);
-  assert.match(text, /catch \{\s*deleteSessionError = error\.localizedDescription/);
-  assert.match(text, /Text\(deleteSessionError \?\? ""\)/);
+  assert.match(text, /struct WorkspaceSessionHeader: View/);
+  assert.match(text, /\.alert\("删除未完成", isPresented: Binding\(\s*get: \{ deleteError != nil \}/);
+  assert.match(text, /catch \{\s*deleteError = error\.localizedDescription/);
+  assert.match(text, /Text\(deleteError \?\? ""\)/);
 });

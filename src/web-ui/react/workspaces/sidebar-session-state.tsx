@@ -1,6 +1,6 @@
 import * as React from "react";
 import { isSessionJustCompleted } from "../../../session-completion-state.js";
-import { WandIcon, type WandIconName } from "../ui";
+import { WandIcon, type WandIconName } from "../ui/icons";
 import { isSessionAttention, isSessionRunning } from "./sidebar-display-mode";
 import type { WorkspaceSessionSummary } from "./types";
 

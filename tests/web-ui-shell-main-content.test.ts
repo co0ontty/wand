@@ -113,6 +113,8 @@ test("ShellMainContent SSR keeps all identity-stable legacy slots childless", ()
   assert.match(html, /<div id="cross-session-queue-host"><\/div>/);
   assert.equal((html.match(/id="output"/g) ?? []).length, 1);
   assert.equal((html.match(/id="chat-output"/g) ?? []).length, 1);
+  // 终端/工作区首屏不挂聊天页：未可见时不下载聊天模块，也不渲染它的加载占位。
+  assert.doesNotMatch(html, /正在加载聊天/);
 });
 
 test("ShellMainContent SSR renders the complete React welcome state contract", () => {
@@ -144,7 +146,9 @@ test("ShellMainContent SSR renders the complete React welcome state contract", (
   assert.match(html, /新建工作/);
   assert.match(html, /<div id="output" inert="" class="terminal-container hidden"[^>]*><\/div>/);
   assert.match(html, /<div id="chat-output" inert="" class="chat-container hidden"[^>]*><\/div>/);
-  assert.match(html, /<section class="conversation-root" aria-label="正在读取聊天输入服务"/);
+  // 聊天页现在按需加载（首屏壳不再带消息列/侧栏投影/Markdown），SSR 里是
+  // deferredFeature 的加载态；它在就绪前必须给出可见占位，不能留白。
+  assert.match(html, /正在加载聊天/);
   assert.match(html, /<div(?=[^>]*id="blank-chat")(?=[^>]*class="[^"]*blank-chat[^"]*")/);
   assert.match(html, /<div inert="" class="input-panel hidden"[^>]*><\/div>.*<\/main>$/s);
 });
@@ -185,8 +189,7 @@ test("ShellMainContent uses UiStore actions and no forbidden legacy seam", () =>
   assert.match(source, /<div id="chat-output" inert=\{pageLayerOpen\} className=\{classes\.chat\} ref=\{legacyRefs\?\.chat\}[^>]*\/>/);
   assert.match(source, /<div inert=\{pageLayerOpen\} className=\{classes\.composer\} ref=\{legacyRefs\?\.composer\}[^>]*\/>/);
   assert.match(source, /id="cross-session-queue-host" ref=\{queueRef\}/);
-  assert.match(source, /context\.taskId \? null : <div[^>]*inert=\{newWork\.open \|\| conversationVisible \|\| settings\.open\}[^>]*><ShellTopbar terminalActionVisible=\{!newWork\.open && !conversationVisible && !settings\.open\}\/>/);
-  assert.match(source, /<WorkspaceTabBar\/>/);
+  assert.match(source, /!pageLayerOpen && <WorkspaceTabBar fallback=\{<ShellTopbar\/>\}\/>/, "one route owns one header; hidden pages leave no interactive portal");
   assert.doesNotMatch(source, /inSplit \? null : <WorkspaceTabBar\/>/);
   assert.match(source, /const pageLayerOpen = newWork\.open \|\| settings\.open \|\| conversationVisible \|\| taskBoard\.open \|\| editor\.open/);
   // 任务管理是叠层路由，不能替换 <main>，否则 #output 被卸载后会话回不去。
@@ -208,9 +211,10 @@ test("mobile tasks keep a sidebar navigation entry even without terminal windows
   const source = readFileSync(
     path.join(root, "src", "web-ui", "react", "shell", "shell-main-content.tsx"), "utf8",
   );
-  assert.match(source, /context\.taskId && snapshot\.layout\.sidebarDrawer &&/);
-  // aria-label 现在跟着抽屉开合切换文案，所以两个状态都要在（以前只写死 "打开任务"）。
-  assert.match(source, /aria-label=\{[^}]*"关闭任务列表"[^}]*"打开任务"[^}]*\}/);
-  assert.match(source, /aria-controls="sessions-drawer"/);
-  assert.match(source, /dispatch\(\{ type: "layout\.drawer\.toggle" \}\)/);
+  const tabs = readFileSync(path.join(root, "src/web-ui/react/workspaces/workspace-tab-bar.tsx"), "utf8");
+  const topbar = readFileSync(path.join(root, "src/web-ui/react/shell/shell-topbar.tsx"), "utf8");
+  assert.match(source, /<WorkspaceTabBar fallback=\{<ShellTopbar\/>\}\/>/);
+  assert.match(tabs, /if \(mobile\) return fallback/);
+  assert.match(topbar, /aria-controls=\{measurement \? undefined : "sessions-drawer"\}/);
+  assert.match(topbar, /type: "layout\.drawer\.toggle"/);
 });

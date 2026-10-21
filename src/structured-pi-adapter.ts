@@ -292,8 +292,8 @@ export class PiRunner implements StructuredRunnerAdapter {
       observer,
       execHost: this.execHost,
       spawnProcess: this.spawnProcess,
-      ...(nativePi ? { nativePi: true, requestId: context.session.structuredState?.activeRequestId ?? undefined }
-        : { stdoutFile: this.outputFiles?.(context.session.id) ?? {} }),
+      ...(nativePi ? { nativePi: true } : { stdoutFile: this.outputFiles?.(context.session.id) ?? {} }),
+      requestId: context.session.structuredState?.activeRequestId ?? undefined,
       createState: () => state,
       createProtocolReader: (onLine) => new PiProtocolReader(onLine),
       processLine: (line) => {

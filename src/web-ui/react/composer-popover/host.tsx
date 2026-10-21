@@ -1,7 +1,8 @@
 import { useSyncExternalStore } from "react";
 import * as React from "react";
 import { createPortal } from "react-dom";
-import { WandIcon, WandButton } from "../ui";
+import { WandIcon } from "../ui/icons";
+import { WandButton } from "../ui/button";
 import { ComposerPopoverAction } from "./action";
 import { composerPopoverController, type ComposerPopoverMount } from "./controller";
 

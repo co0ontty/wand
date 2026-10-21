@@ -87,60 +87,33 @@ export function TaskBoardLabelChip({ label }: { label: string }): React.ReactEle
     color={issueLabelColor(label)}>{issueLabelName(label)}</Tag>;
 }
 
-export function TaskBoardConversationButton({
-  sessions,
-  onOpen,
-}: {
+export function TaskBoardConversationButton({ sessions, onOpen }: {
   sessions: IssueSessionSummary[];
   onOpen?: (sessionId: string) => void;
 }): React.ReactElement | null {
   const catalog = useWandModelCatalog();
   if (sessions.length === 0) return null;
-  const multiple = sessions.length > 1;
-  if (!multiple) {
-    return <WandButton kind="ghost"
-      type="button"
-      className="task-board-conversation"
-      title={sessions[0]!.title || sessions[0]!.id}
-      onClick={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        onOpen?.(sessions[0]!.id);
-      }}
-    >
-      <TaskBoardConversationIcon size={16}/>
-    </WandButton>;
-  }
-  return <WandPopover
-    align="end"
-    side="bottom"
-    sideOffset={6}
-    ariaLabel="关联会话"
-    className="task-board-conversation-menu"
-    trigger={<WandButton kind="ghost"
-      type="button"
-      className="task-board-conversation is-multiple"
-      aria-label={`查看 ${sessions.length} 个会话`}
-      onClick={(event) => event.stopPropagation()}
-    >
-      <TaskBoardConversationIcon size={16}/>
-      <span>+{sessions.length}</span>
-    </WandButton>}
-  >
+  if (sessions.length === 1) return <WandButton kind="ghost" type="button" className="task-board-conversation"
+    title={sessions[0]!.title || sessions[0]!.id} aria-label="打开关联会话"
+    onClick={event => { event.preventDefault(); event.stopPropagation(); onOpen?.(sessions[0]!.id); }}>
+    <TaskBoardConversationIcon size={16}/>
+  </WandButton>;
+  return <WandPopover align="end" side="bottom" sideOffset={6} ariaLabel="关联会话" className="task-board-conversation-menu"
+    trigger={<WandButton kind="ghost" type="button" className="task-board-conversation is-multiple" aria-label={`查看 ${sessions.length} 个会话`} onClick={event => event.stopPropagation()}>
+      <TaskBoardConversationIcon size={16}/><span>+{sessions.length}</span>
+    </WandButton>}>
     <div className="task-board-conversation-menu-heading">关联会话</div>
-    {sessions.map((session) => <WandButton kind="ghost"
-      key={session.id}
-      type="button"
-      role="menuitem"
-      onClick={() => onOpen?.(session.id)}
-    >
+    {sessions.map(session => <WandButton kind="ghost" key={session.id} type="button" role="menuitem" onClick={() => onOpen?.(session.id)}>
       <ProviderLogo provider={session.provider} className="task-board-agent-logo"/>
-      <span>
-        <strong>{session.employeeName ? `${session.employeeName} · ` : ""}{session.title || issueAgentLabel(session.provider, session.engine)}</strong>
-        <small>{issueAgentProviderModelLine(session, catalog)}</small>
-      </span>
+      <span><strong>{session.employeeName ? `${session.employeeName} · ` : ""}{session.title || issueAgentLabel(session.provider, session.engine)}</strong>
+        <small>{issueAgentProviderModelLine(session, catalog)}</small></span>
     </WandButton>)}
   </WandPopover>;
+}
+
+export function TaskBoardCommentCountButton({ task, onOpen }: { task: WandTaskListed; onOpen(): void }): React.ReactElement {
+  return <WandButton kind="ghost" type="button" className="task-board-comment-count" aria-label={`查看评论（${task.commentCount ?? 0}）`}
+    onClick={event => { event.preventDefault(); event.stopPropagation(); onOpen(); }}>评论 {task.commentCount ?? 0}</WandButton>;
 }
 
 export function TaskBoardProcessingRow({
@@ -362,6 +335,7 @@ function TaskBoardListRow({
   onToggle,
   onOpen,
   onOpenSession,
+  onOpenComments,
   bindTrigger,
 }: {
   task: WandTaskListed;
@@ -371,6 +345,7 @@ function TaskBoardListRow({
   onToggle(): void;
   onOpen(id: string): void;
   onOpenSession?: (sessionId: string) => void;
+  onOpenComments?(id: string): void;
   bindTrigger(id: string): (element: HTMLElement | null) => void;
 }): React.ReactElement {
   const description = task.description.trim();
@@ -402,6 +377,7 @@ function TaskBoardListRow({
       {task.dueDate ? <span className="task-board-due"><TaskBoardDueIcon size={12}/>{issueDueStamp(task.dueDate)}</span> : null}
       <span>{task.workspace?.name ?? "未归属工作区"}</span>
       <TaskBoardConversationButton sessions={task.sessions} onOpen={onOpenSession}/>
+      <TaskBoardCommentCountButton task={task} onOpen={() => onOpenComments?.(task.id)}/>
       <time>{formatIssueStamp(task.updatedAt)}</time>
     </Flex>
     <TaskGoalChildren task={task} tasks={allTasks} onOpen={onOpen}/>
@@ -490,22 +466,18 @@ export function TaskBoardCardDetail({
           <Descriptions size="small" column={1} items={fields}/>
           {task.labels.length > 0 && <Flex wrap gap={4} aria-label="全部任务标签">{task.labels.map((label) => <TaskBoardLabelChip key={label} label={label}/>)}</Flex>}
           <Typography.Paragraph ellipsis={{ rows: 4, expandable: "collapsible", symbol: (expanded) => expanded ? "收起全文" : "展开全文" }} style={{ whiteSpace: "pre-wrap", margin: 0 }}>{description || "还没有填写任务说明。"}</Typography.Paragraph>
-          {task.sessions.length > 0 ? <List size="small" className="task-board-card-detail-sessions" dataSource={task.sessions}
-            renderItem={(session) => {
-              const glow = taskSessionGlow(session.status);
-              return <List.Item>
-                <WandButton kind="ghost" type="button" onClick={() => onOpenSession?.(session.id)} title={session.cwd} data-session-glow={glow}
-                  style={{ height: "auto", width: "100%", justifyContent: "flex-start", textAlign: "left", whiteSpace: "normal" }}>
-                  <Badge status={glow === "failed" ? "error" : glow === "none" ? "default" : "processing"}><ProviderLogo provider={session.provider}/></Badge>
-                  <Flex vertical align="flex-start" style={{ minWidth: 0 }}>
-                    <Typography.Text>{session.title || issueAgentLabel(session.provider, session.engine)}</Typography.Text>
-                    <Typography.Text type="secondary">{sessionStatusLabel(session.status)}</Typography.Text>
-                    <Typography.Text code style={{ overflowWrap: "anywhere" }}>{session.cwd}</Typography.Text>
-                  </Flex>
-                </WandButton>
-              </List.Item>;
-            }}/>
-          : <Typography.Text type="secondary">还没有关联会话。</Typography.Text>}
+          {task.sessions.length > 0 && <Flex vertical gap="small" className="task-board-card-detail-sessions" aria-label="关联会话">
+            {task.sessions.map(session => <Flex key={session.id} align="center" justify="space-between" gap="small" wrap>
+              <Flex vertical style={{ minWidth: 0 }}>
+                <Typography.Text strong>{session.employeeName ? `${session.employeeName} · ` : ""}{session.title || issueAgentLabel(session.provider, session.engine)}</Typography.Text>
+                <Typography.Text type="secondary">{session.provider}{session.model ? ` · ${session.model}` : ""} · {session.status}</Typography.Text>
+                {session.cwd && <Typography.Text code>{session.cwd}</Typography.Text>}
+              </Flex>
+              <WandButton kind="ghost" size="small" onClick={() => onOpenSession?.(session.id)}>打开会话</WandButton>
+            </Flex>)}
+          </Flex>}
+          <Typography.Text type="secondary">任务摘要与执行记录请在详情事项流中查看。</Typography.Text>
+          <WandButton kind="ghost" size="small" onClick={() => onOpen(task.id)}>打开详情事项流</WandButton>
           <Flex wrap gap="small" className="task-board-card-detail-actions">
             <WandButton kind="ghost" type="button" className="task-board-card-detail-open" onClick={() => onOpen(task.id)}>查看完整详情</WandButton>
             <WandButton kind="ghost" type="button" className="task-board-card-detail-collapse" onClick={() => onCollapse()}>收起</WandButton>
@@ -527,6 +499,7 @@ export function TaskBoardListView({
   archivePurging = false,
   onOpen,
   onOpenSession,
+  onOpenComments,
 }: {
   grouped: Record<WandTaskStatus, WandTaskListed[]>;
   allTasks: WandTaskListed[];
@@ -539,6 +512,7 @@ export function TaskBoardListView({
   archivePurging?: boolean;
   onOpen(id: string): void;
   onOpenSession?: (sessionId: string) => void;
+  onOpenComments?(id: string): void;
 }): React.ReactElement {
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
   const bindTrigger = useExpansionFocusReturn(expandedId ?? "");
@@ -578,6 +552,7 @@ export function TaskBoardListView({
             onToggle={() => toggleExpanded(task.id)}
             onOpen={onOpen}
             onOpenSession={onOpenSession}
+            onOpenComments={onOpenComments}
             bindTrigger={bindTrigger}
           />)}
           {column.status === "done" ? <TaskBoardArchiveFolder
@@ -597,6 +572,7 @@ export function TaskBoardListView({
                 onToggle={() => toggleExpanded(task.id)}
                 onOpen={onOpen}
                 onOpenSession={onOpenSession}
+                onOpenComments={onOpenComments}
                 bindTrigger={bindTrigger}
               />)}
             </Flex>
@@ -651,6 +627,7 @@ export function TaskBoardDashboard({
     <section aria-label="任务状态">
       <Typography.Title level={5} style={{ margin: "0 0 8px" }}>任务状态</Typography.Title>
       <Flex wrap gap="small" className="task-board-metrics">
+        {metric(issueStatusLabel("backlog"), stats.backlog, "backlog")}
         {metric(issueStatusLabel("todo"), stats.todo, "todo")}
         {metric(issueStatusLabel("doing"), stats.doing, "doing")}
         {metric(issueStatusLabel("done"), stats.done, "done")}

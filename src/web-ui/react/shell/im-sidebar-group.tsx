@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Badge, Flex, Typography } from "antd";
-import { WandButton } from "../ui/index.js";
+import { WandButton } from "../ui/button.js";
 import { SidebarLabelTooltip } from "../workspaces/sidebar-label-tooltip";
 import { SidebarSessionArea } from "../workspaces/sidebar-session-area";
 import { SidebarChevron, SidebarDisclosure, anchorSidebarDisclosure, sidebarDisclosureKeys } from "../workspaces/sidebar-disclosure";

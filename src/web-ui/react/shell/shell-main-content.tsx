@@ -1,9 +1,12 @@
 import * as React from "react";
 import { Flex, Typography } from "antd";
 
-import { WandBrandMark, WandButton, WandIcon, WandIconButton } from "../ui";
+import { WandBrandMark } from "../ui/brand-mark";
+import { WandButton, WandIconButton } from "../ui/button";
+import { WandIcon } from "../ui/icons";
 import { CodeEditorHost, TaskBoardHost, SettingsHost, NewSessionHost } from "../deferred-hosts";
 import { newSessionController, newSessionStore } from "../new-session/controller";
+import { NewSessionHeader, NewSessionHeaderProvided } from "../new-session/header";
 import { codeEditorStore } from "../code-editor/controller";
 import { workspaceContextStore } from "../workspaces/workspace-context";
 import { openSessionPage } from "../../page-route";
@@ -24,7 +27,13 @@ import { settingsStore } from "../settings/controller";
 import { restartOverlayController } from "../restart-overlay/controller";
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
 import type { UiSnapshotData } from "./ui-store";
-import { ConversationHome } from "../conversations/home";
+import type { ConversationHomeProps } from "../conversations/home";
+// 会话页是整页覆盖层，只有用户真的进会话时才需要；首屏壳不需要它的消息列、
+// 侧栏投影、Markdown 与附件卡。改成按需加载后它从 eager runtime 里退出。
+const ConversationHome = deferredComponent<ConversationHomeProps>(
+  () => import("../conversations/home").then(module => module.ConversationHome),
+  { title: "聊天" },
+);
 import { useConversationUi } from "../conversations/state";
 
 const WorkspaceWindow = deferredComponent(
@@ -78,8 +87,11 @@ function ShellBlankChat({ className, queueRef, workspaceTask, workspaceProject }
   workspaceTask?: { workspaceId: string; workspaceName: string; taskId: string; taskName: string; cwd: string };
   workspaceProject?: { workspaceId: string; workspaceName: string; cwd: string };
 }) {
-  return <Flex vertical id="blank-chat" className={className} style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 24, display: className.includes("hidden") ? "none" : undefined }}>
-    <HomeAttention/>
+  return <Flex vertical id="blank-chat" className={className} style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 24, position: "relative", display: className.includes("hidden") ? "none" : undefined }}>
+    {/* 报错条是异步到达的（没有报错时它根本不渲染）。若参与纵向流，它一出现就把居中的
+        欢迎内容顶下去 32px（实测任务看板 CLS 0.0189）。改为绝对定位在左上角：
+        位置不变，也不影响下面居中的内容。 */}
+    <div className="blank-chat-attention"><HomeAttention/></div>
     <Flex vertical align="center" justify="center" gap="middle" style={{ flex: 1 }}>
       <WandBrandMark style={{ width: 48, height: 48 }}/>
       <Typography.Title level={2}>{workspaceTask?.taskName || workspaceProject?.workspaceName || "开始新的工作"}</Typography.Title>
@@ -128,23 +140,11 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
 
   return (
     <Flex component="main" vertical inert={snapshot.layout.sessionsBackdropVisible} className={`main-content${snapshot.layout.filePanelOpen && !settings.open ? " file-panel-open" : ""}${inSplit ? " main-content-in-split" : ""}${conversationVisible ? " main-content-conversation" : ""}${taskBoard.open ? " task-board-main-content" : ""}${pageLayerOpen ? " main-content-page-layer" : ""}`} style={{ flex: 1, minWidth: 0, minHeight: 0, position: "relative", overflow: "hidden" }}>
-      {/* 任务内由标签条承担主区导航；不再叠一层重复的会话标题栏。 */}
-      {context.taskId ? null : <div style={{ display: "contents", visibility: settings.open ? "hidden" : undefined }} inert={newWork.open || conversationVisible || settings.open} aria-hidden={newWork.open || conversationVisible || settings.open}><ShellTopbar terminalActionVisible={!newWork.open && !conversationVisible && !settings.open}/></div>}
-      {context.taskId && snapshot.layout.sidebarDrawer && (
-        <Flex component="nav" align="center" gap="small" hidden={newWork.open} className="workspace-mobile-navigation" aria-label="任务导航" style={{ flexShrink: 0, padding: "6px 12px" }}>
-          <WandIconButton
-            aria-label={snapshot.layout.sessionsDrawerOpen ? "关闭任务列表" : "打开任务"}
-            title={snapshot.layout.sessionsDrawerOpen ? "关闭任务列表" : "打开任务"}
-            data-pressed={snapshot.layout.sessionsDrawerOpen || undefined}
-            aria-expanded={snapshot.layout.sessionsDrawerOpen} aria-controls="sessions-drawer"
-            onClick={() => void dispatch({ type: "layout.drawer.toggle" })}>
-            <SidebarToggleIcon open={snapshot.layout.sessionsDrawerOpen} size={19}/>
-          </WandIconButton>
-          <Typography.Text ellipsis title={context.taskName}>{context.taskName || "任务"}</Typography.Text>
-        </Flex>
-      )}
+      {/* One route owns the whole header; page layers must not leave focusable portal chrome behind. */}
+      {!pageLayerOpen && <WorkspaceTabBar fallback={<ShellTopbar/>}/>}
+      {newWork.open && !settings.open && <NewSessionHeader/>}
       <ShellFilePanel explorerRef={legacyRefs?.fileExplorer} suspended={settings.open || newWork.open}/>
-      <div style={{ display: "contents", visibility: settings.open ? "hidden" : undefined }} inert={newWork.open || conversationVisible || settings.open} aria-hidden={newWork.open || conversationVisible || settings.open}><WorkspaceTabBar/></div>
+
       <div id="output" inert={pageLayerOpen} className={classes.terminal} ref={legacyRefs?.terminal} style={{ flex: 1, minHeight: 0, position: "relative", overflow: "hidden", display: snapshot.legacyVisibility.terminal && !inSplit ? "flex" : "none" }}/>
       <div id="chat-output" inert={pageLayerOpen} className={classes.chat} ref={legacyRefs?.chat} style={{ flex: 1, minHeight: 0, position: "relative", overflow: "hidden", display: snapshot.legacyVisibility.chat && !inSplit ? "flex" : "none", flexDirection: "column" }}/>
       <ShellBlankChat
@@ -166,7 +166,8 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
       <div inert={pageLayerOpen} className={classes.composer} ref={legacyRefs?.composer} style={{ flexShrink: 0, position: "relative", display: snapshot.legacyVisibility.composer && !inSplit ? undefined : "none" }}/>
       {inSplit ? <div style={{ display: "contents" }} inert={newWork.open || conversationVisible || settings.open} aria-hidden={newWork.open || conversationVisible || settings.open}><WorkspaceWindow/></div> : null}
       <div style={{ display: "contents", visibility: settings.open ? "hidden" : undefined }} inert={settings.open} aria-hidden={settings.open}><CodeEditorHost/></div>
-      <ConversationHome visible={conversationVisible} sidebarOpen={snapshot.layout.sessionsDrawerOpen}
+      {/* 首次进入聊天才下载并挂载整页；之后常驻，用 visible 控制读取与订阅，草稿仍归 composer store。 */}
+      <ConversationHome enabled={conversationVisible} visible={conversationVisible} sidebarOpen={snapshot.layout.sessionsDrawerOpen}
         onOpenSidebar={snapshot.layout.sidebarDrawer ? () => void dispatch({ type: "layout.drawer.toggle" }) : undefined}
         onOpenSession={openSessionPage}/>
       {/* 看板是独立路由，不能替换 <main>：#output 等 LegacyHost 槽位必须一直挂着。 */}
@@ -203,7 +204,7 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
         onOpenSidebar={snapshot.layout.sidebarDrawer ? () => void dispatch({ type: "layout.drawer.toggle" }) : undefined}
         onOpenSession={openSessionPage}/>
       </div>
-      <NewSessionHost/>
+      <NewSessionHeaderProvided.Provider value={true}><NewSessionHost/></NewSessionHeaderProvided.Provider>
       <SettingsHost showRestart={restartOverlayController.showRestart}/>
     </Flex>
   );

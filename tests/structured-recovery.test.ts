@@ -616,6 +616,102 @@ test("recoverDetachedRuns keeps the stored transcript when a truncated replay fa
   manager.dispose();
 });
 
+test("recovered comment interrupt-and-send freezes the original request boundary before starting replacement", async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-recovered-comment-interrupt-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  t.after(() => { storage.close(); rmSync(root, { recursive: true, force: true }); });
+  const sessionId = "recovered-comment-interrupt";
+  const task = storage.createWandTask({ title: "comment task" });
+  const comment = storage.createTaskCommentIntent({ taskId: task.id,
+    requestId: "comment-request-001", signature: "sig", body: "@employee work", instruction: "work",
+    sourceCommentId: null, employeeId: "employee", employeeName: "employee", taskVersion: "v1" });
+  const requestId = "comment-logical-request";
+  const original = piInterruptedSession(root, sessionId);
+  const snapshot = { ...original, workspaceTaskId: task.workspaceTaskId ?? undefined,
+    automationId: `wand-task-comment:${comment.id}`,
+    messages: [{ role: "user" as const, requestId, content: [{ type: "text" as const, text: "original" }] }],
+    structuredState: { ...original.structuredState!, activeRequestId: requestId } };
+  storage.saveSession(snapshot);
+  storage.updateTaskCommentDispatch(comment.id, "accepted", sessionId);
+  storage.bindTaskCommentResultStart(sessionId, requestId, 0);
+  const run = { ...truncatedPiRun(sessionId, 0), status: "running" as const, exitCode: null, stdoutLog: "", stdoutTruncated: false };
+  const host = fakeHost([run]);
+  const starts: string[] = [];
+  const releases: Array<() => void> = [];
+  const manager = new StructuredSessionManager(storage, { ...defaultConfig(), defaultCwd: root }, null, { pi: {
+    start({ prompt }) { starts.push(prompt); return { args: [], pid: 46, spawnedAt: new Date().toISOString(), interrupt() {},
+      completion: new Promise<StructuredRunnerResult>(resolve => releases.push(() => resolve({
+        state: { blocks: [], result: "replacement done", sessionId: "native-pi" }, exitCode: 0, signal: null, stderr: "", primaryError: null,
+      }))) };
+    },
+  } }, host);
+  manager.setEventEmitter(event => { storage.recordTaskCommentSessionEvent(event); });
+  try {
+    await manager.recoverDetachedRuns();
+    const recoveredRequestId = manager.get(sessionId)?.structuredState?.activeRequestId;
+    assert.ok(recoveredRequestId?.startsWith("recover-"));
+    const running = manager.get(sessionId)!;
+    storage.recordTaskCommentSessionEvent({ type: "output", sessionId, data: {
+      messages: running.messages, status: "running", structuredState: running.structuredState,
+    } } as never);
+    const bound = storage.getTaskCommentResultBinding(task.id, comment.id);
+    assert.equal(bound?.requestId, requestId);
+    await manager.sendMessage(sessionId, "replacement", { interrupt: true });
+    assert.deepEqual(host.interrupts, [run.runId]);
+    assert.deepEqual(starts, []);
+    host.finish(run.runId, 0);
+    await nextLoop();
+    assert.deepEqual(starts, ["replacement"]);
+    const stopped = storage.getTaskCommentResultBinding(task.id, comment.id);
+    assert.equal(stopped?.outcome, "stopped");
+    assert.equal(stopped?.requestId, requestId);
+    assert.equal(stopped?.endIndex, 2, "replacement user turn is excluded from the frozen original range");
+    assert.equal(manager.get(sessionId)?.messages?.filter(turn => turn.role === "user").length, 2);
+  } finally {
+    manager.dispose();
+    for (const release of releases) release();
+  }
+});
+
+test("stopping a recovered comment freezes its original request boundary", async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-recovered-comment-stop-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  t.after(() => { storage.close(); rmSync(root, { recursive: true, force: true }); });
+  const sessionId = "recovered-comment-stop";
+  const task = storage.createWandTask({ title: "comment stop task" });
+  const comment = storage.createTaskCommentIntent({ taskId: task.id,
+    requestId: "comment-request-stop", signature: "sig", body: "@employee work", instruction: "work",
+    sourceCommentId: null, employeeId: "employee", employeeName: "employee", taskVersion: "v1" });
+  const requestId = "comment-logical-stop-request";
+  const original = piInterruptedSession(root, sessionId);
+  const snapshot = { ...original, workspaceTaskId: task.workspaceTaskId ?? undefined,
+    automationId: `wand-task-comment:${comment.id}`,
+    messages: [{ role: "user" as const, requestId, content: [{ type: "text" as const, text: "original stop" }] }],
+    structuredState: { ...original.structuredState!, activeRequestId: requestId } };
+  storage.saveSession(snapshot);
+  storage.updateTaskCommentDispatch(comment.id, "accepted", sessionId);
+  storage.bindTaskCommentResultStart(sessionId, requestId, 0);
+  const run = { ...truncatedPiRun(sessionId, 0), status: "running" as const, exitCode: null, stdoutLog: "", stdoutTruncated: false };
+  const host = fakeHost([run]);
+  const manager = new StructuredSessionManager(storage, { ...defaultConfig(), defaultCwd: root }, null, {}, host);
+  manager.setEventEmitter(event => { storage.recordTaskCommentSessionEvent(event); });
+  try {
+    await manager.recoverDetachedRuns();
+    const recoveredRequestId = manager.get(sessionId)?.structuredState?.activeRequestId;
+    assert.ok(recoveredRequestId?.startsWith("recover-"));
+    const running = manager.get(sessionId)!;
+    storage.recordTaskCommentSessionEvent({ type: "output", sessionId, data: {
+      messages: running.messages, status: "running", structuredState: running.structuredState,
+    } } as never);
+    manager.stop(sessionId);
+    assert.deepEqual(host.interrupts, [run.runId]);
+    const stopped = storage.getTaskCommentResultBinding(task.id, comment.id);
+    assert.equal(stopped?.outcome, "stopped");
+    assert.equal(stopped?.requestId, requestId, "recovery callback IDs must not replace the persisted logical request ID");
+    assert.equal(stopped?.endIndex, 1);
+  } finally { manager.dispose(); }
+});
+
 test("recoverDetachedRuns streams a truncated replay instead of freezing the view", async (t) => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-recover-truncated-stream-"));
   const storage = new WandStorage(path.join(root, "wand.db"));

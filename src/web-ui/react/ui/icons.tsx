@@ -1,4 +1,9 @@
 import * as React from "react";
+import { lucideGlyph } from "./lucide-glyphs";
+
+const IconFamilyContext = React.createContext<"default" | "lucide">("default");
+/** Scope the approved workbar family, including its portalled menus. */
+export const WandIconFamily = IconFamilyContext.Provider;
 
 /**
  * Shell / 任务树 / 顶栏共用的线性图标。
@@ -101,15 +106,18 @@ export function WandIcon({
   strokeWidth?: number;
   slot?: WandIconSlot;
 }): React.ReactElement {
+  const family = React.useContext(IconFamilyContext);
+  const glyph = family === "lucide" ? lucideGlyph(name) : undefined;
+  const weight = glyph ? 2 : strokeWidth;
   const common = {
     width: size,
     height: size,
     viewBox: "0 0 24 24",
     fill: "none",
     stroke: "currentColor",
-    strokeWidth,
+    strokeWidth: weight,
     // Explicit dimensions keep legacy host styles from resizing icon adornments.
-    style: { width: size, height: size, strokeWidth },
+    style: { width: size, height: size, strokeWidth: weight },
     strokeLinecap: "round" as const,
     strokeLinejoin: "round" as const,
     className,
@@ -118,6 +126,7 @@ export function WandIcon({
     "data-icon": slot ?? name,
   };
 
+  if (glyph) return <svg {...common} data-wand-icon-family="lucide">{glyph}</svg>;
   switch (name) {
     case "archive":
       return <svg {...common}><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/><path d="M10 12h4"/></svg>;

@@ -327,4 +327,16 @@ export const STORAGE_MIGRATIONS: readonly StorageMigration[] = [
       ON command_sessions(json_extract(session_options, '$.employeeId'), started_at DESC)
       WHERE automation_id GLOB 'system-ai:*'`);
   } },
+  { version: 13, name: "task-comment-result-anchor", up: db => {
+    const columns = db.prepare("PRAGMA table_info(wand_task_comment_dispatches)").all() as Array<{ name: string }>;
+    if (!columns.some(column => column.name === "result_start_index")) db.exec("ALTER TABLE wand_task_comment_dispatches ADD COLUMN result_start_index INTEGER");
+    if (!columns.some(column => column.name === "result_end_index")) db.exec("ALTER TABLE wand_task_comment_dispatches ADD COLUMN result_end_index INTEGER");
+    if (!columns.some(column => column.name === "result_request_id")) db.exec("ALTER TABLE wand_task_comment_dispatches ADD COLUMN result_request_id TEXT");
+    if (!columns.some(column => column.name === "result_outcome")) db.exec("ALTER TABLE wand_task_comment_dispatches ADD COLUMN result_outcome TEXT");
+    if (!columns.some(column => column.name === "result_fingerprint")) db.exec("ALTER TABLE wand_task_comment_dispatches ADD COLUMN result_fingerprint TEXT");
+  } },
+  { version: 14, name: "task-comment-result-start-fingerprint", up: db => {
+    const columns = db.prepare("PRAGMA table_info(wand_task_comment_dispatches)").all() as Array<{ name: string }>;
+    if (!columns.some(column => column.name === "result_start_fingerprint")) db.exec("ALTER TABLE wand_task_comment_dispatches ADD COLUMN result_start_fingerprint TEXT");
+  } },
 ];

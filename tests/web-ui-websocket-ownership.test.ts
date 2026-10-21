@@ -34,6 +34,9 @@ function harness() {
   let listUpdates = 0;
   let gitPollsStarted = 0;
   let gitPollsStopped = 0;
+  let sessionInvalidations = 0;
+  let employeeInvalidations = 0;
+  let sessionLoads = 0;
   const listeners: string[] = [];
   const timeEls: unknown[] = [];
   const intervals: Array<{ id: number; handler: () => void; ms: number | undefined; cleared: boolean }> = [];
@@ -60,7 +63,11 @@ function harness() {
     }, { get: (obj: Record<string, unknown>, key: string) => obj[key] ?? (() => {}) }),
     "./session-engine": new Proxy({}, { get: (_target, key) => key === "subscribeToSession"
       ? () => { subscribed++; }
-      : key === "scheduleSessionListUpdate" ? () => { listUpdates++; } : () => Promise.resolve() }),
+      : key === "scheduleSessionListUpdate" ? () => { listUpdates++; }
+        : key === "loadSessions" ? () => { sessionLoads++; return Promise.resolve(); }
+          : () => Promise.resolve() }),
+    "../react/session-list-snapshot": { invalidateSessionList: () => { sessionInvalidations++; } },
+    "../react/agents/employee-repository.js": { notifySiliconEmployeeDefinitionChanged: () => { employeeInvalidations++; } },
   };
   const ws = loadBrowserModule("websocket", dependencies, globals);
   const render = loadBrowserModule("render", { ...dependencies, "./websocket": ws }, globals);
@@ -69,6 +76,8 @@ function harness() {
     state, sockets, ws, render, listeners, timeEls,
     subscribed: () => subscribed, toasted: () => toasted, foregroundBindings: () => foregroundBindings,
     listUpdates: () => listUpdates, gitPollsStarted: () => gitPollsStarted, gitPollsStopped: () => gitPollsStopped,
+    sessionInvalidations: () => sessionInvalidations, employeeInvalidations: () => employeeInvalidations,
+    sessionLoads: () => sessionLoads,
     liveIntervals,
   };
 }
@@ -153,4 +162,29 @@ test("forced foreground recovery does not first create an extra heartbeat replac
   h.state.lastWsMessageAt = Date.now() - 60_000;
   await h.render.syncOnForeground("forced", true);
   assert.equal(h.sockets.length, 2);
+});
+
+test("the first socket open trusts boot reads while a reconnect resyncs sessions and employees", () => {
+  const h = harness();
+  h.ws.initWebSocket();
+  h.sockets[0].readyState = 1; h.sockets[0].onopen!();
+  assert.deepEqual([h.sessionInvalidations(), h.employeeInvalidations(), h.sessionLoads()], [0, 0, 0],
+    "this page's HTTP boot reads are authoritative; the first open must not refetch them");
+  h.ws.forceReconnectWebSocket("test");
+  h.sockets[1].readyState = 1; h.sockets[1].onopen!();
+  assert.deepEqual([h.sessionInvalidations(), h.employeeInvalidations(), h.sessionLoads()], [1, 1, 1],
+    "a reconnect may have missed list or definition changes");
+});
+
+test("teardown starts a new socket lifetime whose first open is not treated as a resync", () => {
+  const h = harness();
+  h.ws.initWebSocket(); h.sockets[0].readyState = 1; h.sockets[0].onopen!();
+  h.ws.resetWebSocketResyncState();
+  h.ws.forceReconnectWebSocket("login");
+  h.sockets[1].readyState = 1; h.sockets[1].onopen!();
+  assert.deepEqual([h.sessionInvalidations(), h.employeeInvalidations(), h.sessionLoads()], [0, 0, 0]);
+  h.ws.forceReconnectWebSocket("drop");
+  h.sockets[2].readyState = 1; h.sockets[2].onopen!();
+  assert.deepEqual([h.sessionInvalidations(), h.employeeInvalidations(), h.sessionLoads()], [1, 1, 1],
+    "within the new lifetime, later opens are reconnects again");
 });

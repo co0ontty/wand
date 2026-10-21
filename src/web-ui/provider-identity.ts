@@ -105,6 +105,12 @@ export const CODEX_LOGO_PATH =
 export const PI_LOGO_PATH =
   "M165.29 165.29H517.36V400H400V517.36H282.65V634.72H165.29ZM282.65 282.65V400H400V282.65Z";
 export const PI_LOGO_DOT_PATH = "M517.36 400H634.72V634.72H517.36Z";
+/** Official color artwork, unchanged from pi.dev/logo-auto.svg. */
+export const PI_LOGO_PARTS = [
+  { fill: "#F09082", d: "M165.29 165.29H517.36V400H400V282.65H165.29Z" },
+  { fill: "#4D9ABF", d: "M165.29 282.65H282.65V400H400V517.36H282.65V634.72H165.29Z" },
+  { fill: "#F1BE58", d: PI_LOGO_DOT_PATH },
+] as const;
 
 export const GROK_LOGO_PATHS = [
   "M13.2371 21.0407L24.3186 12.8506C24.8619 12.4491 25.6384 12.6057 25.8973 13.2294C27.2597 16.5185 26.651 20.4712 23.9403 23.1851C21.2297 25.8989 17.4581 26.4941 14.0108 25.1386L10.2449 26.8843C15.6463 30.5806 22.2053 29.6665 26.304 25.5601C29.5551 22.3051 30.562 17.8683 29.6205 13.8673L29.629 13.8758C28.2637 7.99809 29.9647 5.64871 33.449.844576C33.5314.730667 33.6139.616757 33.6964.5L29.1113 5.09055V5.07631L13.2343 21.0436Z",
@@ -127,7 +133,7 @@ export function renderProviderLogoMarkup(value: unknown): string {
     return `<svg ${common} viewBox="0 0 34 33" fill="currentColor">${GROK_LOGO_PATHS.map((path) => `<path d="${path}"/>`).join("")}</svg>`;
   }
   if (provider === "pi") {
-    return `<svg ${common} viewBox="0 0 800 800" fill="currentColor"><path d="${PI_LOGO_PATH}" fill-rule="evenodd"/><path d="${PI_LOGO_DOT_PATH}"/></svg>`;
+    return `<svg ${common} viewBox="0 0 800 800">${PI_LOGO_PARTS.map(({ d, fill }) => `<path d="${d}" fill="${fill}"/>`).join("")}</svg>`;
   }
   if (provider === "claude") {
     return `<svg ${common} viewBox="0 0 24 24" fill="${CLAUDE_BRAND_COLOR}"><path d="${CLAUDE_LOGO_PATH}"/></svg>`;

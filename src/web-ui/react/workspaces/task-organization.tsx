@@ -8,7 +8,9 @@ import { openSessionWithOwningTask } from "./session-open";
 import { taskBoardController } from "../issues/task-board-controller";
 import { describeConversationOrganizationOutcome } from "./sidebar-manage";
 import { describeError } from "../errors";
-import { WandButton, WandDropdownMenu, WandDropdownMenuTrigger, WandDropdownMenuContent, WandDropdownMenuItem, WandIcon } from "../ui";
+import { WandButton } from "../ui/button";
+import { WandDropdownMenu, WandDropdownMenuTrigger, WandDropdownMenuContent, WandDropdownMenuItem } from "../ui/dropdown-menu";
+import { WandIcon } from "../ui/icons";
 import { MOTION_DWELL_SENT_MS, MOTION_DWELL_FAILED_MS } from "../ui/motion-tokens";
 
 type OrganizationTarget = TaskOrganizeTarget | { kind: "selection"; taskIds: readonly string[]; sessionIds: readonly string[] };

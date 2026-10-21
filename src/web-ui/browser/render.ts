@@ -1,4 +1,5 @@
 import { isStandaloneSettingsPage } from "../page.js";
+import { loadConfigSnapshot } from "../react/config-snapshot";
 import { clearNoticeView, paintBootNotice, paintOfflineNotice } from "./notice-view-adapter";
 import { composer, state, writeStoredBoolean } from "./state";
 import { invalidateChatInteraction } from "./chat-render-focus.js";
@@ -267,13 +268,15 @@ export function restoreLoginSession() {
         render();
         return null;
       }
-      return fetch("/api/config", { credentials: "same-origin" }).then(function(res) {
-        if (!res.ok) {
+      return loadConfigSnapshot().catch(function(error: any) {
+        // Any HTTP answer means we reached the server but are not authorized;
+        // transport failures fall through to the offline boot notice below.
+        if (error && typeof error.status === "number" && error.status > 0) {
           state.loginChecked = true;
           render();
           return null;
         }
-        return res.json();
+        throw error;
       });
     })
     .then(function(config: any) {

@@ -4,8 +4,8 @@ import { Alert, Flex, Spin } from "antd";
 import { DECISION_EXPERT_NAME } from "../../../decision-expert-identity.js";
 import { AGENT_TOOL_OPTIONS } from "../../provider-identity";
 import { failureMessage } from "../errors";
-import { SettingsStatus } from "../settings/fields";
-import { WandButton, WandDialogSurface } from "../ui";
+import { WandButton } from "../ui/button";
+import { WandDialogSurface } from "../ui/dialog";
 import type { TaskTeamRunPanelProps } from "../issues/team-run-panel";
 import type { ConversationMessagesProps, TeamChatViewProps } from "./team-chat-view";
 import type { TeamChatPageProps } from "./team-chat-page";
@@ -98,7 +98,7 @@ export function DecisionChainEditor({ admin }: { admin: boolean }): React.ReactE
     {chunk ? <chunk.DecisionChainEditor admin={admin} open={open} onOpenChange={setOpen}
       providerOptions={AGENT_TOOL_OPTIONS.filter(option => option.engine !== "sdk").map(option => ({ value: option.provider, label: option.label }))}/>
       : <WandDialogSurface open={open} onOpenChange={setOpen} title={`${DECISION_EXPERT_NAME} · 调用链`}>
-        {error ? <SettingsStatus tone="error">调用链编辑器加载失败。<WandButton kind="soft" onClick={retry}>重试</WandButton></SettingsStatus>
+        {error ? <Alert type="error" showIcon title={<><span>调用链编辑器加载失败。</span><WandButton kind="soft" onClick={retry}>重试</WandButton></>}/>
           : <div role="status" aria-busy="true"><Spin/>正在加载调用链编辑器…</div>}
       </WandDialogSurface>}
   </>;
@@ -135,8 +135,15 @@ export async function formatConversationAttachments(files: readonly { savedPath:
 export function ConversationMessages(props: ConversationMessagesProps): React.ReactElement {
   const { chunk, error, retry } = useAiTeamsChunk(props.active !== false);
   if (chunk) return <chunk.ConversationMessages {...props}/>;
-  if (props.active === false) return <></>;
-  return <div className="conversation-messages-loading" role="status" style={{ minHeight: 144, display: "flex", alignItems: "center" }}>{error || "正在读取消息组件…"}{error ? <WandButton onClick={retry}>重试</WandButton> : null}</div>;
+  // 占位必须与真实消息列一样占满阅读视口：之前是固定 144px，脚本到位后整列
+  // 从 144px 长到视口高度，于是标题/发送按钮/侧栏都跟着重新排一次（实测 0.03~0.05）。
+  // 未激活时也不能返回空节点：空节点会让槽位先塌成 0 高，激活那一帧再从 0 长满，
+  // 那正是实测里 0.032 那次位移的来源。保留同一个占位框，只收起文字与可访问性。
+  const inactive = props.active === false;
+  return <div className="conversation-messages-loading" role={inactive ? undefined : "status"} aria-hidden={inactive || undefined}
+    style={{ flex: "1 1 auto", minHeight: "100%", display: "flex", alignItems: "center" }}>
+    {inactive ? null : <>{error || "正在读取消息组件…"}{error ? <WandButton onClick={retry}>重试</WandButton> : null}</>}
+  </div>;
 }
 
 /** 群聊页：侧栏点群聊条目进入，脚本到位前显示占位，失败可重试。 */

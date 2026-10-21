@@ -4,14 +4,10 @@ import { Flex, Typography, theme } from "antd";
 import type { ConversationTurn } from "../../../types.js";
 import type { ConversationSessionUpdate } from "../../../conversation-types.js";
 import { conversationSessionPreviewLabels } from "../../../conversation-session-preview.js";
-import { DeferredMarkdownPreview as MarkdownPreview } from "../file-preview/deferred-markdown.js";
+import { MarkdownPreview } from "../file-preview/markdown.js";
 import { WandButton, WandIcon } from "../ui/index.js";
 import { executionFailure } from "./execution-failure.js";
-
-const listeners = new Set<(update: ConversationSessionUpdate) => void>();
-export function notifyConversationSessionPreview(update: ConversationSessionUpdate): void {
-  for (const listener of listeners) listener(update);
-}
+import { subscribeConversationSessionPreview } from "./session-preview-events.js";
 
 /** The transcript shares the conversation's reading scroller and keeps its live controls. */
 export function ConversationSessionReply({ turn, active, onOpen, onModelSettings, statusProvided = false, children }: {
@@ -25,11 +21,9 @@ export function ConversationSessionReply({ turn, active, onOpen, onModelSettings
   React.useEffect(() => {
     setLive(null);
     if (!active) return;
-    const listener = (update: ConversationSessionUpdate): void => {
+    return subscribeConversationSessionPreview(update => {
       if (update.sessionId === sessionId && update.conversationId === turn.conversationId) setLive(update);
-    };
-    listeners.add(listener);
-    return () => { listeners.delete(listener); };
+    });
   }, [active, sessionId, turn.conversationId]);
   // HTTP detail is the reconnect/reload repair path; it must not be shadowed forever by an old WS frame.
   React.useEffect(() => { setLive(null); }, [turn.sessionPreview]);

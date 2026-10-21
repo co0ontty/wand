@@ -41,6 +41,8 @@
     "test": "node scripts/check-node-version.js && node scripts/run-tests.js",
     "check:bundle-budget": "node scripts/check-node-version.js && node scripts/check-bundle-budget.js",
     "budget:accept": "node scripts/check-node-version.js && node scripts/check-bundle-budget.js --accept-baseline",
+    "check:web-performance": "node scripts/check-node-version.js && node scripts/check-web-performance.js",
+    "web-performance:accept": "node scripts/check-node-version.js && node scripts/check-web-performance.js --accept-baseline",
     "sync:brand-assets": "node scripts/sync-brand-assets.js",
     "check:brand-assets": "node scripts/sync-brand-assets.js --check",
     "audit:remnants": "node scripts/audit-legacy-remnants.js",

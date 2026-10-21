@@ -36,10 +36,23 @@ export {
  */
 export function PixelCat({ coat }: { coat: number }): React.ReactElement {
   const grid = catCoatGrid(coat);
+  // 一只像素猫原本是 74 个 <rect>。同一只猫会在会话列表、群头像拼图、成员头像里
+  // 重复几十次，整页 DOM 有两千多个矩形节点（实测聊天首屏 5,535 个节点里 2,146 个是它），
+  // 首屏渲染还要为每个矩形建一次 React 元素。改成「每种颜色一条 path」后像素完全一样，
+  // 节点数降一个数量级，几何也还是整数格 + crispEdges。
+  const paths = new Map<string, string[]>();
+  for (let y = 0; y < grid.length; y += 1) {
+    const row = grid[y]!;
+    for (let x = 0; x < row.length; x += 1) {
+      const fill = row[x];
+      if (!fill) continue;
+      const subpaths = paths.get(fill);
+      if (subpaths) subpaths.push(`M${x} ${y}h1v1h-1z`);
+      else paths.set(fill, [`M${x} ${y}h1v1h-1z`]);
+    }
+  }
   return <svg className="wand-team-avatar-cat" width="74%" height="74%" viewBox="0 0 10 10" shapeRendering="crispEdges" aria-hidden="true">
-    {grid.flatMap((row, y) => row.map((fill, x) => fill
-      ? <rect key={`${x}-${y}`} x={x} y={y} width={1} height={1} fill={fill}/>
-      : null))}
+    {[...paths].map(([fill, subpaths]) => <path key={fill} d={subpaths.join("")} fill={fill}/>)}
   </svg>;
 }
 

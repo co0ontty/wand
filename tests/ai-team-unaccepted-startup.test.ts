@@ -271,6 +271,10 @@ test("manager startup facts are current-request one-shot, disappear on new reque
     await assert.rejects(manager.sendMessage(id, "启动", { teamRequestStarted: (_id, requestId) => { token = requestId; } }));
     assert.equal(manager.teamRequestId(id), token);
     assert.ok(!JSON.stringify(storage.getSession(id)).includes(token), "private failed token not persisted");
+    const privateFacts = manager as unknown as { unacceptedTeamStarts: Map<string, { requestId: string; failure: unknown }> };
+    const privateFact = privateFacts.unacceptedTeamStarts.get(id);
+    assert.equal(privateFact?.requestId, token);
+    assert.ok(privateFact?.failure, "the typed failure remains available only in manager memory");
     return token;
   };
   const one = make(); const token = await sendFailure(one.id);

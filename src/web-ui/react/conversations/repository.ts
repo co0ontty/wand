@@ -7,6 +7,7 @@ import { subscribeAiTeamRunChanges } from "../ai-teams/repository";
 import { subscribeSiliconEmployeeDefinitionChanges } from "../agents/employee-repository";
 import { subscribeTaskChanges } from "../task-changes";
 import { isSystemAiCall } from "../../../system-ai-call.js";
+import { loadSessionList } from "../session-list-snapshot";
 import type { WorkspaceSessionSummary } from "../workspaces/types";
 
 export class UnconfirmedConversationError extends Error {
@@ -37,7 +38,8 @@ export const conversationsRepository = {
   list: () => requestJson<{ conversations: ConversationSummary[] }>("/api/conversations").then((r) => r.conversations),
   // Workspaces deliberately omit system calls. Read their canonical metadata, not
   // conversation transcripts or a second task projection, for the employee list.
-  systemSessions: () => requestJson<WorkspaceSessionSummary[]>("/api/sessions")
+  // Initial paint reuses the committed list; explicit refreshes force a read.
+  systemSessions: (options?: { fresh?: boolean }) => loadSessionList({ force: options?.fresh })
     .then(sessions => sessions.filter(session => isSystemAiCall(session) && !!session.employeeId)),
   async updateListState(id: string, patch: { pinned?: boolean; dissolved?: boolean }): Promise<ConversationSummary> {
     const value = await requestJson<ConversationSummary>(`/api/conversations/${encodeURIComponent(id)}/list-state`, jsonBody(patch, "PATCH"));
@@ -92,19 +94,21 @@ export function useConversations(includeSystemSessions = false): { items: Conver
   const [error, setError] = React.useState("");
   const [loaded, setLoaded] = React.useState(false);
   const epoch = React.useRef(0);
-  const load = React.useCallback(async () => {
+  const load = React.useCallback(async (fresh = false) => {
     const current = ++epoch.current;
     try {
       const [next, calls] = await Promise.all([conversationsRepository.list(),
-        includeSystemSessions ? conversationsRepository.systemSessions() : Promise.resolve([])]);
+        includeSystemSessions ? conversationsRepository.systemSessions({ fresh }) : Promise.resolve([])]);
       if (current === epoch.current) { setItems(next); setSystemSessions(calls); setLoaded(true); setError(""); }
     } catch (cause) { if (current === epoch.current) setError(cause instanceof Error ? cause.message : "对话列表读取失败。"); }
   }, [includeSystemSessions]);
+  const refresh = React.useCallback(() => { void load(true); }, [load]);
   React.useEffect(() => {
-    void load(); listeners.add(load);
-    const unsubscribes = [subscribeAiTeamRunChanges(load), subscribeTaskChanges(load), subscribeSiliconEmployeeDefinitionChanges(load)];
-    const timer = window.setInterval(() => { if (!document.hidden) void load(); }, 6000);
-    return () => { ++epoch.current; listeners.delete(load); unsubscribes.forEach((f) => f()); clearInterval(timer); };
-  }, [load]);
-  return { items, systemSessions, error, loaded, refresh: () => { void load(); } };
+    void load();
+    listeners.add(refresh);
+    const unsubscribes = [subscribeAiTeamRunChanges(refresh), subscribeTaskChanges(refresh), subscribeSiliconEmployeeDefinitionChanges(refresh)];
+    const timer = window.setInterval(() => { if (!document.hidden) void refresh(); }, 6000);
+    return () => { ++epoch.current; listeners.delete(refresh); unsubscribes.forEach((f) => f()); clearInterval(timer); };
+  }, [load, refresh]);
+  return { items, systemSessions, error, loaded, refresh };
 }

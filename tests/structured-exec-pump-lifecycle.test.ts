@@ -112,6 +112,9 @@ test("transport observation failure cannot authorize deleting a live CLI's files
   h.exit({ exitCode: 1, signal: null, processExited: false });
   await run.completion;
   assert.equal(exited, false);
+  h.exit();
+  await run.exited;
+  assert.equal(exited, true, "a later actual exit still releases the termination barrier");
 });
 
 test("protocol failure completion is not a CLI process exit acknowledgement", async () => {

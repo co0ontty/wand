@@ -31,9 +31,9 @@ import {
 import { ComposerAttachmentList } from "../composer-attachments/host";
 import { GeneratedAvatarGlyph, PixelCat, TeamAvatar, avatarFace, generatedAvatarBackground, type GeneratedAvatarFace } from "./avatar";
 import { encodePlushAvatar, encodePlushCatAvatar, encodePlushDogAvatar, isPlushCatAvatar, isPlushDogAvatar, parsePlushAvatar, parsePlushCatAvatar, parsePlushDogAvatar, resolveEmployeeAvatar, type PlushRenderConfig } from "../../../plush-avatar.js";
-import { PlushAvatar } from "../avatars/plush-avatar.js";
+import { StaticPlushAvatar } from "../avatars/plush-avatar.js";
 import { EmployeeAvatar } from "../agents/employee-avatar.js";
-import { appendedConversationKeys, CONVERSATION_TAIL_PX, conversationClock, conversationDay, conversationMessageKey, joinsConversationBubble } from "../conversations/presentation";
+import { appendedConversationKeys, CONVERSATION_TAIL_PX, conversationClock, conversationDay, conversationMessageKey, conversationScrollRestore, joinsConversationBubble, CONVERSATION_HISTORY_PAGE_TURNS, CONVERSATION_INITIAL_TURNS, chatHistoryRootMargin } from "../conversations/presentation";
 import { useReducedMotion } from "../ui/motion-tokens";
 import { teamChatComposer } from "./composer-bridge";
 import { composerRuntimePreference } from "../conversations/composer-presentation";
@@ -633,33 +633,89 @@ function chatAttachmentUrl(path: string): string {
 }
 
 /**
+ * 历史附件图是否已经进入过阅读范围。
+ *
+ * 图片卡是固定几何（见 `.team-chat-attachment-image`），所以首屏不会因为原图到达
+ * 而位移；真正的浪费是浏览器把整段历史里的 12 张原图（实测 3.5MB）一次性下完——
+ * 它们全在滚动视口之外。这里给每张图一个「进入过视口才把 src 交出去」的门：
+ * 观察的是滚动容器而不是 window，未进入时用 data 占位，进入后才真正请求。
+ * 一旦放行就常驻（重新滚回去不再等待），也不改写/删除用户原文件。
+ */
+function useLazyImageSource(src: string, enabled: boolean): {
+  visible: boolean;
+  ref: React.RefCallback<HTMLElement>;
+} {
+  const [visible, setVisible] = React.useState(false);
+  const node = React.useRef<HTMLElement | null>(null);
+  const observer = React.useRef<IntersectionObserver | null>(null);
+  const ref = React.useCallback((element: HTMLElement | null) => {
+    node.current = element;
+    observer.current?.disconnect();
+    observer.current = null;
+    if (!element || !enabled || typeof IntersectionObserver === "undefined") return;
+    // 提前一屏放行：滚到附近就开始取图，用户不会盯着空白等。
+    const root = element.closest<HTMLElement>(".conversation-message-scroll, .task-board-team-chat-scroll");
+    observer.current = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        setVisible(true);
+        observer.current?.disconnect();
+        observer.current = null;
+      }
+    }, { root, rootMargin: "100% 0px" });
+    observer.current.observe(element);
+  }, [enabled]);
+  React.useEffect(() => () => { observer.current?.disconnect(); observer.current = null; }, []);
+  // 没有观察器（旧浏览器/测试环境）时退化成直接加载，不能把图片永远藏起来。
+  return { visible: !enabled || visible || typeof IntersectionObserver === "undefined", ref };
+}
+
+/**
+ * 单张历史图片附件：先用固定尺寸的占位卡站住几何，进入阅读范围后才请求原图。
+ * 卡片始终可点（点击打开完整文件预览，仍取原文件），加载失败就地降成文件卡。
+ */
+function ChatAttachmentImage({ path, name, onBroken }: {
+  path: string; name: string; onBroken(): void;
+}): React.ReactElement {
+  const { visible, ref } = useLazyImageSource(path, true);
+  return <button type="button" ref={ref as React.RefCallback<HTMLButtonElement>}
+    className="team-chat-attachment-image" data-loaded={visible || undefined}
+    data-path={path} title={name} aria-label={`查看附件图片 ${name}`}
+    onClick={() => { void filePreviewController.open(path); }}>
+    {visible ? <img src={chatAttachmentUrl(path)} alt={name} loading="lazy" decoding="async"
+      onError={onBroken}/> : <span className="team-chat-attachment-image-pending" aria-hidden="true"/>}
+  </button>;
+}
+
+/**
  * 消息附件：通用文件卡片（图片走图片卡，加载失败就地降成文件卡），点击才去读文件，
- * 不给卡片加自己的预览层。
+ * 不给卡片加自己的预览层。历史图片走 ChatAttachmentImage：占位几何固定、进视口才取原图。
  */
 function ChatAttachments({ paths }: { paths: readonly string[] }): React.ReactElement | null {
   const [brokenImages, setBrokenImages] = React.useState<readonly string[]>([]);
   if (!paths.length) return null;
-  return <FileCard.List
-    className="team-chat-attachments"
-    overflow="wrap"
-    items={paths.map((path, index) => {
-      const name = chatAttachmentName(path);
-      const image = chatAttachmentIsImage(path) && !brokenImages.includes(path);
-      return {
+  const markBroken = (path: string): void => {
+    setBrokenImages((current) => current.includes(path) ? current : [...current, path]);
+  };
+  const imageItems = paths.flatMap((path, index) => chatAttachmentIsImage(path) && !brokenImages.includes(path)
+    ? [{ path, index }] : []);
+  const fileItems = paths.flatMap((path, index) => chatAttachmentIsImage(path) && !brokenImages.includes(path)
+    ? [] : [{ path, index }]);
+  return <div className="team-chat-attachments">
+    {imageItems.length ? <div className="team-chat-attachment-images">
+      {imageItems.map(({ path, index }) => <ChatAttachmentImage key={`${path}#${index}`} path={path}
+        name={chatAttachmentName(path)} onBroken={() => markBroken(path)}/>)}
+    </div> : null}
+    {fileItems.length ? <FileCard.List
+      className="team-chat-attachment-files"
+      overflow="wrap"
+      items={fileItems.map(({ path, index }) => ({
         key: `${path}#${index}`,
-        name,
-        type: image ? "image" : "file",
-        src: image ? chatAttachmentUrl(path) : undefined,
-        // 自己的预览层才是打开文件的入口，图片卡不带内建预览。
-        imageProps: image ? {
-          preview: false,
-          onError: () => setBrokenImages((current) => current.includes(path) ? current : [...current, path]),
-          onClick: () => { void filePreviewController.open(path); },
-        } : undefined,
+        name: chatAttachmentName(path),
+        type: "file" as const,
         onClick: () => { void filePreviewController.open(path); },
-      };
-    })}
-  />;
+      }))}
+    /> : null}
+  </div>;
 }
 
 /** 真正的文件消息，不展示正文或报告预览；只有点击后才读取文件。 */
@@ -685,7 +741,7 @@ function MessageAvatar({ spec, size = "md" }: {
   spec: ChatAvatarSpec;
   size?: "md" | "sm";
 }): React.ReactElement {
-  if (spec.kind === "plush") return <PlushAvatar config={spec.config} size={size === "sm" ? 36 : 48} className="team-chat-avatar"/>;
+  if (spec.kind === "plush") return <StaticPlushAvatar config={spec.config} size={size === "sm" ? 36 : 48} className="team-chat-avatar"/>;
   return <Avatar className="team-chat-avatar" shape="square" size={size === "sm" ? 36 : 48}
     data-kind={spec.kind} data-size={size} aria-hidden="true"
     src={spec.kind === "upload" ? spec.src : undefined}
@@ -1497,11 +1553,42 @@ export function ConversationMessages({ turns, navigationScope = "conversation", 
   employeeIds = {}, mentionNames = EMPTY_MENTION_NAMES, onOpenEmployee, onOpenConversation, onOpenSession, renderActivity, renderTaskPreview, renderSessionPreview }: ConversationMessagesProps): React.ReactElement {
   const profile = useUserProfile();
   const list = React.useRef<HTMLDivElement>(null);
+  const more = React.useRef<HTMLDivElement>(null);
   const previous = React.useRef<string[] | null>(null);
   const following = React.useRef(true);
   const [arrivals, setArrivals] = React.useState<ReadonlySet<string>>(new Set());
   const [unseen, setUnseen] = React.useState(0);
   const [awayFromTail, setAwayFromTail] = React.useState(false);
+  // 旧版存档是绝对像素，窗口化后无法换算：这一轮先整段挂载，离开时自动迁移成距底记录。
+  const [windowStart, setWindowStart] = React.useState<number | null>(() =>
+    typeof restoreScroll === "number" && restoreScroll >= 0 ? 0 : null);
+  const tailStart = Math.max(0, turns.length - CONVERSATION_INITIAL_TURNS);
+  // null 表示跟着最新一页走；数字表示读者停在历史里，窗口起点不再随新消息前移。
+  const start = windowStart === null ? tailStart : Math.min(Math.max(0, windowStart), tailStart);
+  const startRef = React.useRef(start);
+  startRef.current = start;
+  const renderedStart = React.useRef(start);
+  const renderedHeight = React.useRef(0);
+  // 初次恢复在最后一个扩窗提交里已经精确落位，锚点补偿不能再叠加一次。
+  const restoredNow = React.useRef(false);
+  const pendingJump = React.useRef("");
+  // 补更早历史前记下读者眼前那条消息与它的相对偏移。用高度差补偿会被流式/排版
+  // 晚到的内容带偏（recorded height 可能早于最后一次布局），落到尾部又会把窗口
+  // 收回最新一页，于是点一次「加载更早」就弹回底部。锚点必须按元素身份恢复。
+  const pendingAnchor = React.useRef<{ id: string; offset: number } | null>(null);
+  const captureAnchor = React.useCallback((): { id: string; offset: number } | null => {
+    const scroll = list.current?.closest<HTMLElement>(".conversation-message-scroll");
+    if (!scroll) return null;
+    const rect = scroll.getBoundingClientRect();
+    const node = [...scroll.querySelectorAll<HTMLElement>("[data-presentation-id]")]
+      .find(candidate => candidate.getBoundingClientRect().bottom > rect.top + 1);
+    if (!node?.dataset.presentationId) return null;
+    return { id: node.dataset.presentationId, offset: node.getBoundingClientRect().top - rect.top };
+  }, []);
+  const loadEarlier = React.useCallback(() => {
+    pendingAnchor.current = captureAnchor();
+    setWindowStart(current => Math.max(0, (current ?? startRef.current) - CONVERSATION_HISTORY_PAGE_TURNS));
+  }, [captureAnchor]);
   const reduced = useReducedMotion();
   const keys = turns.map(conversationMessageKey);
   const questionBodies = turns.map(turn => turn.role === "user" ? parseChatAttachments(chatTurnText(turn)).body : "");
@@ -1521,27 +1608,56 @@ export function ConversationMessages({ turns, navigationScope = "conversation", 
     notice: !!turn.notice || !!turn.sessionLink || !!turn.conversationLink,
     visibleText: questionBodies[index]!,
   })));
+  // 团队页的任务详情可能在同一位置换一条运行；换范围时窗口与阅读状态都从最新一页重来。
+  const scopeRef = React.useRef(navigationScope);
+  React.useEffect(() => {
+    if (scopeRef.current === navigationScope) return;
+    scopeRef.current = navigationScope;
+    previous.current = null;
+    following.current = true;
+    setWindowStart(null);
+    setUnseen(0);
+    setAwayFromTail(false);
+  }, [navigationScope]);
   React.useLayoutEffect(() => {
     const scroll = list.current?.closest<HTMLElement>(".conversation-message-scroll");
     if (!scroll || !active || list.current?.closest(".sidebar-projection-old")) return;
-    const track = (): void => { following.current = isFollowingTail(scroll); setAwayFromTail(!following.current); if (following.current) setUnseen(0); };
+    const track = (): void => {
+      const nowFollowing = isFollowingTail(scroll);
+      following.current = nowFollowing;
+      setAwayFromTail(!nowFollowing);
+      // 离开尾部就把当前窗口起点钉住：新消息仍会进来，但读者眼前的旧消息不会被抽走。
+      // 回到尾部再交还给「最新一页」，上方已读窗口随渲染回收。
+      if (nowFollowing) { setUnseen(0); setWindowStart(null); }
+      else setWindowStart(current => current === null ? startRef.current : current);
+    };
     scroll.addEventListener("scroll", track, { passive: true });
     return () => scroll.removeEventListener("scroll", track);
   }, [active]);
   React.useLayoutEffect(() => {
     if (!ready || list.current?.closest(".sidebar-projection-old")) return;
     const scroll = list.current?.closest<HTMLElement>(".conversation-message-scroll");
-    const initial = previous.current === null;
-    const added = appendedConversationKeys(previous.current, keys);
-    previous.current = keys;
-    if (!scroll || !active || document.hidden) { setArrivals(new Set()); return; }
-    if (reduced) setArrivals(current => current.size ? new Set() : current);
-    const own = turns.some((turn, index) => turn.role === "user" && added.includes(keys[index]!));
-    if (initial) {
-      scroll.scrollTop = restoreScroll ?? scroll.scrollHeight;
+    if (!scroll || !active || document.hidden) { previous.current = keys; setArrivals(new Set()); return; }
+    if (previous.current === null) {
+      // 恢复可能落在当前窗口之上：逐页往前扩，直到记录的位置真的能落下来。
+      const restored = conversationScrollRestore(restoreScroll, scroll);
+      if (restored.needsEarlier && start > 0) {
+        setWindowStart(Math.max(0, start - CONVERSATION_HISTORY_PAGE_TURNS));
+        return;
+      }
+      restoredNow.current = true;
+      scroll.scrollTop = restored.top;
       following.current = isFollowingTail(scroll);
       setAwayFromTail(!following.current);
-    } else if (added.length) {
+      previous.current = keys;
+      if (reduced) setArrivals(current => current.size ? new Set() : current);
+      return;
+    }
+    const added = appendedConversationKeys(previous.current, keys);
+    previous.current = keys;
+    if (reduced) setArrivals(current => current.size ? new Set() : current);
+    const own = turns.some((turn, index) => turn.role === "user" && added.includes(keys[index]!));
+    if (added.length) {
       if (following.current || own) {
         scroll.scrollTop = scroll.scrollHeight;
         following.current = true;
@@ -1550,17 +1666,73 @@ export function ConversationMessages({ turns, navigationScope = "conversation", 
         if (!reduced) setArrivals(new Set(added));
       } else setUnseen(count => count + added.length);
     }
-  }, [turns, ready, active, reduced]);
+  }, [turns, ready, active, reduced, start]);
+  // 窗口往前补一页时保住读者眼前的锚点；回到尾部后回收上方窗口时把底部继续压住。
+  React.useLayoutEffect(() => {
+    const scroll = list.current?.closest<HTMLElement>(".conversation-message-scroll");
+    if (!scroll) return;
+    const before = renderedHeight.current;
+    const previousStart = renderedStart.current;
+    const justRestored = restoredNow.current;
+    restoredNow.current = false;
+    renderedHeight.current = scroll.scrollHeight;
+    renderedStart.current = start;
+    // 初次恢复还在逐页扩窗口，定位由上面的恢复分支负责。
+    if (previous.current === null || previousStart === start || justRestored) return;
+    if (start < previousStart) {
+      // 补更早的历史时，读者的阅读锚点必须留在原处。这里不能再沿用「贴尾就跳到底」：
+      // 点「加载更早」的瞬间 following 往往还是 true（按钮要先被聚焦/滚进视口），
+      // 一旦跳到底，滚动监听就会认为读者回到尾部、把窗口收回最新一页，
+      // 刚加载出来的那一页连同阅读位置一起消失（实测点一次就弹回底部）。
+      const anchor = pendingAnchor.current;
+      pendingAnchor.current = null;
+      const rect = scroll.getBoundingClientRect();
+      const node = anchor ? scroll.querySelector<HTMLElement>(`[data-presentation-id="${CSS.escape(anchor.id)}"]`) : null;
+      if (anchor && node) scroll.scrollTop += node.getBoundingClientRect().top - rect.top - anchor.offset;
+      else if (before > 0) scroll.scrollTop += Math.max(0, scroll.scrollHeight - before);
+      following.current = false;
+    } else if (following.current) scroll.scrollTop = scroll.scrollHeight;
+    setAwayFromTail(!isFollowingTail(scroll));
+  }, [start]);
+  // 靠近顶部才自动补页；贴尾跟随时不预取——回到尾部会回收窗口，预取只会白渲染一页再被裁掉。
+  React.useLayoutEffect(() => {
+    const sentinel = more.current;
+    const scroll = sentinel?.closest<HTMLElement>(".conversation-message-scroll");
+    if (!sentinel || !scroll || !awayFromTail || start <= 0 || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(entries => {
+      if (!entries.some(entry => entry.isIntersecting)) return;
+      observer.disconnect();
+      loadEarlier();
+    }, { root: scroll, rootMargin: chatHistoryRootMargin(scroll.clientHeight) });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [start, loadEarlier, awayFromTail]);
+  // 提问目录可能指向窗口外的更早回合：先把它所在的那一页挂上，提交后再定位。
+  React.useLayoutEffect(() => {
+    const ownerKey = pendingJump.current;
+    if (!ownerKey || previous.current === null) return;
+    const content = list.current;
+    const scroll = content?.closest<HTMLElement>(".conversation-message-scroll");
+    if (!content || !scroll) return;
+    if (!content.querySelector<HTMLElement>(`[data-conversation-nav-owner="${CSS.escape(ownerKey)}"]`)) return;
+    pendingJump.current = "";
+    if (!jumpToChatTurn(scroll, ownerKey, "data-conversation-nav-owner")) return;
+    following.current = false;
+    setAwayFromTail(true);
+  }, [start, turns]);
   React.useLayoutEffect(() => {
     const content = list.current;
     const scroll = content?.closest<HTMLElement>(".conversation-message-scroll");
     if (!content || !scroll || !active || typeof ResizeObserver === "undefined") return;
     let previousHeight = scroll.scrollHeight;
     const observer = new ResizeObserver(() => {
-      // Streamed replies resize without adding a turn. The reading owner follows
-      // only if the reader was at the previous tail, including pending scroll events.
+      // 流式回复不新增回合也会长高。这里只能「保持与底部的距离」，不能贴到绝对底部：
+      // 内容在视口上方长高时，贴底会把读者眼前的整列往上拽走（实测位移 0.077）。
+      // 距离不变时，尾部追加与上方增长两种情况都对：尾部追加保持贴底，
+      // 上方增长则让读者眼前的内容留在原处。
       if (!document.hidden && isFollowingTail({ scrollTop: scroll.scrollTop, scrollHeight: previousHeight, clientHeight: scroll.clientHeight })) {
-        scroll.scrollTop = scroll.scrollHeight;
+        const growth = scroll.scrollHeight - previousHeight;
+        if (growth !== 0) scroll.scrollTop += growth;
         following.current = true;
       }
       setAwayFromTail(!isFollowingTail(scroll));
@@ -1577,12 +1749,23 @@ export function ConversationMessages({ turns, navigationScope = "conversation", 
         const scroll = content?.closest<HTMLElement>(".conversation-message-scroll");
         if (!content || !scroll || !active || content.closest(".sidebar-projection-old")) return false;
         const found = content.querySelector<HTMLElement>(`[data-conversation-nav-owner="${CSS.escape(ownerKey)}"]`);
-        if (!found || !jumpToChatTurn(scroll, ownerKey, "data-conversation-nav-owner")) return false;
-        following.current = false;
-        setAwayFromTail(true);
+        if (found) {
+          if (!jumpToChatTurn(scroll, ownerKey, "data-conversation-nav-owner")) return false;
+          following.current = false;
+          setAwayFromTail(true);
+          return true;
+        }
+        const index = navigationOwners.indexOf(ownerKey);
+        if (index < 0) return false;
+        pendingJump.current = ownerKey;
+        setWindowStart(Math.max(0, index - CONVERSATION_HISTORY_PAGE_TURNS));
         return true;
       }}/>
-    {turns.map((turn, index) => {
+    {start > 0 ? <div ref={more} className="conversation-history-more">
+      <WandButton kind="ghost" size="small" onClick={loadEarlier}>加载更早的 {start} 条消息</WandButton>
+    </div> : null}
+    {turns.slice(start).map((turn, offset) => {
+      const index = start + offset;
       const key = keys[index]!;
       const text = chatTurnText(turn);
       const target = turn.conversationTarget;

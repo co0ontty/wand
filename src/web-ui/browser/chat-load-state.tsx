@@ -1,7 +1,7 @@
 import * as React from "react";
 import { createRoot } from "react-dom/client";
 import { Alert, Flex, Spin } from "antd";
-import { WandButton } from "../react/ui";
+import { WandButton } from "../react/ui/button";
 import { WandUiBoundary } from "../react/theme";
 
 /** One transient feedback root; message rendering remains in its canonical owner. */

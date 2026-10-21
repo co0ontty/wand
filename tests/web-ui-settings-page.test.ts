@@ -4,10 +4,14 @@ import test from "node:test";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import express from "express";
+import os from "node:os";
+import path from "node:path";
 import { defaultConfig } from "../src/config.js";
 import { registerAssetRoutes } from "../src/server-asset-routes.js";
 import { renderApp } from "../src/web-ui/index.js";
 import { isStandaloneSettingsPage } from "../src/web-ui/page.js";
+import { AuthService } from "../src/auth.js";
+import { WandStorage } from "../src/storage.js";
 import { SettingsHost } from "../src/web-ui/react/settings/host.js";
 
 const source = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
@@ -20,11 +24,17 @@ test("the dedicated settings HTML declares page mode before the shared browser e
   assert.doesNotMatch(html, /settings-button|trigger\.click|MutationObserver/);
   assert.doesNotMatch(renderApp("/tmp/wand-settings-page/config.json"), /data-wand-page="settings"/);
   const app = express();
+  // 匿名访客只拿登录小包，所以这里要给出一个真实可用的 AuthService 实例；
+  // 没有会话时 `/` 与 `/settings` 都按匿名页下发，正是本次拆分的目标行为。
+  const storage = new WandStorage(path.join(os.tmpdir(), `wand-settings-page-${process.pid}-${Date.now()}.db`));
+  t.after(() => storage.close());
   registerAssetRoutes(app, {
     configPath: "/tmp/wand-settings-page/config.json",
     config: defaultConfig(),
     requireAuth: (_req, _res, next) => next(),
     requireSessions: (_req, _res, next) => next(),
+    authService: new AuthService(storage),
+    useHttps: false,
   });
   const server = app.listen(0, "127.0.0.1");
   t.after(() => new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())));
@@ -35,7 +45,11 @@ test("the dedicated settings HTML declares page mode before the shared browser e
     const response = await fetch(`http://127.0.0.1:${address.port}${route}`);
     assert.equal(response.status, 200);
     assert.match(response.headers.get("content-type") ?? "", /text\/html/);
-    assert.equal((await response.text()).includes('data-wand-page="settings"'), page === "settings");
+    const html = await response.text();
+    assert.equal(html.includes('data-wand-page="settings"'), page === "settings");
+    // 未登录时不预载控制台 runtime，只下发登录小包。
+    assert.match(html, /\/assets\/login\.js\?v=/);
+    assert.doesNotMatch(html, /rel="modulepreload"/);
   }
 });
 

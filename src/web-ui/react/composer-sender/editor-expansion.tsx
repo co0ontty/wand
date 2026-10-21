@@ -1,5 +1,5 @@
 import * as React from "react";
-import { WandButton } from "../ui/index.js";
+import { WandButton } from "../ui/button.js";
 
 /** Keep the same input node and draft owner when opening a larger editing area. */
 export function useEditorExpansion(owner: string, input: () => HTMLTextAreaElement | null | undefined) {

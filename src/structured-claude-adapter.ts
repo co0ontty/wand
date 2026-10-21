@@ -182,6 +182,7 @@ export class ClaudeCliRunner implements StructuredRunnerAdapter {
       stdinData: context.prompt,
       observer,
       execHost: this.execHost,
+      requestId: context.session.structuredState?.activeRequestId ?? undefined,
       createState: () => reducer.state,
       processLine: createNdjsonLineHandler({
         observer,

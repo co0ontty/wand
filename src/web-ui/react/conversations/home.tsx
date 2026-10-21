@@ -17,14 +17,15 @@ import { teamChatComposer } from "../ai-teams/composer-bridge";
 import { subscribeAiTeamRunChanges } from "../ai-teams/repository";
 import { ComposerAttachmentList } from "../composer-attachments/host";
 import { requestJson } from "../http-adapter";
+import { loadConfigSnapshot } from "../config-snapshot";
 import { SidebarToggleIcon } from "../shell/sidebar-toggle-icon";
 import { SidebarProjectionSwap } from "../workspaces/sidebar-projection-swap";
 import { WandButton, WandIcon, WandIconButton, WandInput, WandSelect, WandPopover } from "../ui";
 import { MOTION_DWELL_FAILED_MS, MOTION_DWELL_RESULT_SENTENCE_MS, MOTION_DWELL_SENT_MS } from "../ui/motion-tokens";
 import { ConversationApprovalButton, ConversationMorphIcon, ConversationPanel, ConversationSubmitButton, type ConversationSubmitPhase } from "./controls";
-import { employeeProfile } from "../agents/employee-profile";
+import { employeeProfile } from "../agents/employee-profile-state";
 import { ConversationDirectory } from "./directory";
-import { conversationScrollRecord, storedConversationScroll } from "./presentation";
+import { conversationScrollRecord, conversationScrollRestore, storedConversationScroll } from "./presentation";
 import { ConversationTaskPanel } from "./task-panel";
 import { ConversationTaskPreview } from "./task-preview";
 import { ConversationSessionReply } from "./session-preview";
@@ -55,12 +56,28 @@ export interface ConversationHomeProps {
   visible: boolean; sidebarOpen: boolean; onOpenSidebar?(): void; onOpenSession(id: string): void;
 }
 export function ConversationHome(props: ConversationHomeProps): React.ReactElement {
+  // 样式必须在第一帧就位：骨架屏用的是同一批类名，样式表晚一步装好就会让标题从
+  // 16px 变 20px、发送按钮 padding 0→12px，整块阅读区与按钮一起重排（冷加载实测 0.0088）。
+  // 这两个安装函数都幂等，放在这里给骨架与真实页面共用同一套几何。
+  React.useLayoutEffect(() => { installChatComposerStyles(); installConversationHomeStyles(); }, []);
   const ready = React.useSyncExternalStore(teamChatComposer.subscribeReady, teamChatComposer.ready, () => false);
-  return ready ? <ReadyConversationHome {...props}/> : <section className="conversation-root" hidden={!props.visible} aria-label="正在读取聊天输入服务"/>;
+  // 输入服务就绪前也要撑出和真实页面一样的骨架：只放一个空 <section> 会让阅读槽位
+  // 先塌成 0 高，就绪那一帧再从 0 长满，标题/发送按钮/侧栏各被重排一次（实测 0.032）。
+  // 这里复用真实类名（滚动容器 + 投影槽 + 输入区），几何由同一套 CSS 决定。
+  if (!ready) return <section className="conversation-root" hidden={!props.visible} aria-busy="true"
+    aria-label="正在读取聊天输入服务" style={{ height: "100%" }}>
+    <Flex vertical className="conversation-chat-surface" style={{ height: "100%", minHeight: 0 }}>
+      <div className="conversation-heading" style={{ flexShrink: 0 }}/>
+      <div className="conversation-message-scroll">
+        <div className="sidebar-projection-swap"><div className="sidebar-projection-current"/></div>
+      </div>
+      <div className="conversation-composer" style={{ flexShrink: 0 }}/>
+    </Flex>
+  </section>;
+  return <ReadyConversationHome {...props}/>;
 }
 
 function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSession }: ConversationHomeProps): React.ReactElement {
-  React.useLayoutEffect(() => { installChatComposerStyles(); installConversationHomeStyles(); }, []);
   const ui = useConversationUi();
   // 老数据没有 dissolvedBy 时按当前资料署名，不让群解散提示永远写死「我」。
   const selfProfile = useUserProfile();
@@ -92,11 +109,13 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
   const modelCatalog = useWandModelCatalog(visible);
   React.useEffect(() => {
     if (!visible) return;
-    const request = new AbortController();
-    void requestJson<{ defaultCwd?: string }>("/api/config", { signal: request.signal }).then(config => {
-      if (!request.signal.aborted) setDefaultCwd(config.defaultCwd ?? "");
+    let active = true;
+    // Shared snapshot: the request may serve other owners, so only this
+    // consumer's late state write is cancelled when the page switches away.
+    void loadConfigSnapshot().then(config => {
+      if (active) setDefaultCwd(typeof config.defaultCwd === "string" ? config.defaultCwd : "");
     }).catch(() => {});
-    return () => request.abort();
+    return () => { active = false; };
   }, [visible]);
   const sender = React.useRef<React.ComponentRef<typeof Sender>>(null);
   const inputFiles = React.useRef<HTMLInputElement>(null);
@@ -216,7 +235,8 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
     const element = scroll.current;
     if (!element || !visible) return;
     const bound = scrollScope;
-    element.scrollTop = storedConversationScroll(ui.scrolls[bound]) ?? element.scrollHeight;
+    // 消息列还没挂载时这里只是临时定位；真正的距底恢复由 ConversationMessages 在窗口就位后完成。
+    element.scrollTop = conversationScrollRestore(ui.scrolls[bound], element).top;
     return () => {
       if (boundScrollScope.current !== bound) return;
       conversationUi.scroll(bound, conversationScrollRecord(element));
@@ -354,15 +374,18 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
     popupOwners: ["conversation-task-panel", "本次新工作的执行配置", "本页执行工具", "本页模型", "本页思考深度"],
   });
   const inputPlaceholder = layer === "task" ? "描述任务要求…" : selected?.kind === "dm" ? "描述一项新工作…" : "输入消息…";
-  const primaryLabel = phase === "sending" ? "发送中" : phase === "sent" ? "已接受" : phase === "failed" ? "操作失败" : phase === "unknown" ? "送达未确认" : stops ? "停止本轮" : layer === "task" ? continueTaskId ? "确认继续此任务" : "派发任务" : selected?.kind === "dm" ? "发送并开始新工作" : "发送消息";
+  // 详情未到时 selected 仍是 null，但会话 id 前缀已经决定了这是私聊还是群聊。
+  // 用前缀投影标签，按钮宽度不会在详情到达那一刻从 98px 跳到 146px。
+  const projectedKind = selected?.kind ?? (id.startsWith("dm_") ? "dm" : id.startsWith("group_") ? "group" : null);
+  const primaryLabel = phase === "sending" ? "发送中" : phase === "sent" ? "已接受" : phase === "failed" ? "操作失败" : phase === "unknown" ? "送达未确认" : stops ? "停止本轮" : layer === "task" ? continueTaskId ? "确认继续此任务" : "派发任务" : projectedKind === "dm" ? "发送并开始新工作" : "发送消息";
   return <section className="conversation-root" aria-label="聊天首页" hidden={!visible} inert={!visible}>
     <Flex vertical className="conversation-chat-surface" data-active={!ui.directory} inert={ui.directory} style={{ height: "100%", minHeight: 0 }}>
       <Flex ref={membersAnchor} align="center" justify="space-between" gap={8} className="conversation-heading" style={{ position: "relative", flexShrink: 0 }}>
         <Flex align="center" gap={8} style={{ minWidth: 0 }}>
           {onOpenSidebar ? <WandIconButton style={{ width: 44, height: 44 }} aria-label={sidebarOpen ? "关闭列表" : "打开列表"} onClick={onOpenSidebar}><SidebarToggleIcon open={sidebarOpen}/></WandIconButton> : null}
-          {selected?.team ? <WandIconButton className="conversation-avatar-button" aria-label="查看群资料" aria-expanded={members} aria-controls="conversation-members-panel" onClick={event => toggleMembers(event.currentTarget)}><ConversationGroupAvatar title={selected.title} members={selected.team.members} size={48}/></WandIconButton> : id && !selected ? <span className="conversation-avatar-placeholder" aria-hidden="true"/> : null}
+          {selected?.team ? <WandIconButton className="conversation-avatar-button" aria-label="查看群资料" aria-expanded={members} aria-controls="conversation-members-panel" onClick={event => toggleMembers(event.currentTarget)}><ConversationGroupAvatar title={selected.title} members={selected.team.members} size={48}/></WandIconButton> : <span className="conversation-heading-avatar-slot" aria-hidden="true">{employee ? <EmployeeAvatar employee={{ id: employee.id, name: employee.name, avatar: employee.avatar }} provider="" size="md"/> : null}</span>}
           <div className="conversation-heading-copy">
-            <WandButton kind="ghost" className="conversation-heading-title" title={selected?.title ?? employee?.name} aria-expanded={selected?.kind === "group" ? members : undefined} aria-controls={selected?.kind === "group" ? "conversation-members-panel" : undefined} onClick={event => employee ? employeeProfile.open(employee, event.currentTarget) : toggleMembers(event.currentTarget)}>{selected?.title ?? employee?.name ?? "选择一位员工，开始聊天"}</WandButton>
+            <WandButton kind="ghost" className="conversation-heading-title" title={selected?.title ?? employee?.name} aria-expanded={selected?.kind === "group" ? members : undefined} aria-controls={selected?.kind === "group" ? "conversation-members-panel" : undefined} onClick={event => employee ? employeeProfile.open(employee, event.currentTarget) : toggleMembers(event.currentTarget)}><span className="conversation-heading-title-text">{selected?.title ?? employee?.name ?? "选择一位员工，开始聊天"}</span></WandButton>
             <Typography.Text type="secondary" className="conversation-heading-context">{selected?.kind === "group" ? `群聊 · 我 + ${selected.team?.members.length ?? 0} 位员工` : employee ? `私聊${employee.id === DEFAULT_EMPLOYEE_ID ? " · 默认伙伴" : ""}` : "选择接收对象后发送"}</Typography.Text>
           </div>
         </Flex>
@@ -404,10 +427,12 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
         onContinue={taskMode} onOpenSession={onOpenSession}/>
       <div ref={scroll} className="conversation-message-scroll">
         {loadError ? <Typography.Paragraph type="danger">{loadError}<WandButton onClick={() => void load()}>只读重试</WandButton><WandButton onClick={() => conversationUi.directory(true)}>返回通讯录</WandButton></Typography.Paragraph> : null}
+        {/* 空态提示只在真的没有消息时出现；它一出现/消失会把整列上下推一次，
+            所以它自身的占位由 CSS 固定，且不参与阅读列的滚动锚定。 */}
         {emptyNotice ? <Typography.Paragraph type={!selected && directoryError ? "danger" : "secondary"} className="conversation-empty" role="status">
           {emptyNotice}
         </Typography.Paragraph> : null}
-        <SidebarProjectionSwap value={`${id}:${filter}`}><ConversationMessages key={`${id}:${filter}`} navigationScope={`${id}:${filter}`} ready={!!selected} active={visible && !ui.directory} group={selected?.kind === "group"} restoreScroll={storedConversationScroll(ui.scrolls[scrollScope])} turns={turns} taskLabels={taskLabels}
+        <SidebarProjectionSwap value={`${id}:${filter}`} animate={false}><ConversationMessages key={`${id}:${filter}`} navigationScope={`${id}:${filter}`} ready={!!selected} active={visible && !ui.directory} group={selected?.kind === "group"} restoreScroll={storedConversationScroll(ui.scrolls[scrollScope])} turns={turns} taskLabels={taskLabels}
           mentionNames={[...new Set(roster.map(member => member.name).filter(Boolean))]}
           employeeIds={Object.fromEntries(roster.filter(member => member.employeeId).flatMap(member => [[member.id, member.employeeId!], [member.employeeId!, member.employeeId!]]))}
           renderSessionPreview={(turn, index) => <ConversationSessionReply turn={turn} active={visible && !ui.directory} statusProvided={activity.hasStatus(turn)}
@@ -455,14 +480,14 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
           {feedback && feedback !== selected.unavailableReason ? <Typography.Text type="secondary" role="status">{feedback}</Typography.Text> : null}
         </div> : null}
         <div ref={composerSurface} className="conversation-input-wrap" data-editor-expanded={editor.expanded} data-composer-expanded={minimal.expanded}>
-        {selected ? <div className="conversation-runtime-summary" aria-label={target ? "本轮负责人的首选配置" : "新工作的首选执行配置"}>
-          {editablePreference && runtimeAgent ? <ConversationExecutionSelectors agent={runtimeAgent} catalog={modelCatalog}
+        <div className="conversation-runtime-summary" aria-label={target ? "本轮负责人的首选配置" : "新工作的首选执行配置"} data-pending={!selected || undefined}>
+          {selected ? (editablePreference && runtimeAgent ? <ConversationExecutionSelectors agent={runtimeAgent} catalog={modelCatalog}
             disabled={busy || !!unknown || !!selected.unavailableReason} onChange={setConversationPreference}/> : <>
             <Typography.Text type="secondary">{runtimeAgent ? agentToolDisplayName(runtimeAgent.provider, runtimeAgent.engine) : "工具未就绪"}</Typography.Text>
             <Typography.Text type="secondary" ellipsis={{ tooltip: true }}>首选模型：{runtimePreference.model}</Typography.Text>
             <Typography.Text type="secondary" className="conversation-thinking-summary">思考：{runtimePreference.thinking}</Typography.Text>
-          </>}
-        </div> : null}
+          </>) : null}
+        </div>
         {employee ? <WandIconButton className="conversation-companion" aria-label={`查看${employee.name}的资料`} onClick={event => employeeProfile.open(employee, event.currentTarget)}><ComposerIdentity employee={employee} fileActivity={composerUsage.fileActivity} thinking={computeRunningPhase(composerUsage.activity) === "executing"}/></WandIconButton> : null}
         <ComposerUsage showName={false} employeeName={employee?.name} usage={composerUsage.usage} activity={composerUsage.activity}/>
         <Sender ref={sender} value={draft.text} className="conversation-sender" readOnly={!!selected?.unavailableReason || !selected} placeholder={inputPlaceholder} autoSize={{ minRows: 1, maxRows: editor.expanded ? 24 : 4 }} suffix={false}

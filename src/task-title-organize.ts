@@ -1,4 +1,5 @@
 import { assertTaskHierarchy } from "./task-hierarchy.js";
+import type { WandTaskStatus } from "./task-types.js";
 
 /** Explicit multi-select limits. Directory/board passes bound each semantic request separately. */
 export const TITLE_ORGANIZE_MAX_TASKS = 40;
@@ -28,7 +29,7 @@ export interface OrganizeTask {
   titles: readonly string[];
   workspaceId: string | null;
   directoryKey: string;
-  status: "todo" | "doing" | "done" | "archived";
+  status: WandTaskStatus;
   parentTaskId: string | null;
   createdAt: string;
   archived: boolean;

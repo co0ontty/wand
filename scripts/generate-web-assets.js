@@ -20,6 +20,8 @@ const assets = [
   // 按需加载的 AI 团队脚本，bundle-browser.js 已按生产模式 minify，这里原样内嵌。
   ["aiTeamsJs", "ai-teams.js", "application/javascript"],
   ["plushAvatarJs", "plush-avatar.js", "application/javascript"],
+  // 匿名登录页独立小包（bundle-browser.js 已 minify），登录成功后才取控制台 runtime。
+  ["loginJs", "login.js", "application/javascript"],
 ];
 
 const moduleManifest = JSON.parse(readFileSync(path.join(contentDir, "module-manifest.json"), "utf8"));
@@ -59,7 +61,7 @@ for (const [file, content] of Object.entries(moduleContents)) {
 }
 artifactHashes["theme.js"] = sha256(themePreload);
 const graphDirectory = path.join(root, "output/web-ui-library-migration/bundle-graphs");
-const graphNames = ["main.js.json", "scripts.js.json", "ai-teams.js.json", "plush-avatar.js.json"];
+const graphNames = ["main.js.json", "scripts.js.json", "ai-teams.js.json", "plush-avatar.js.json", "login.js.json"];
 const graphContents = Object.fromEntries(graphNames.map(name => [name, readFileSync(path.join(graphDirectory, name), "utf8")]));
 if (JSON.parse(graphContents["main.js.json"]).wandBuild?.id !== moduleManifest.buildId) throw new Error("Browser graph/manifest build identity mismatch");
 const evidence = { moduleBuildId: moduleManifest.buildId, node: process.version, zlib: process.versions.zlib,
@@ -85,6 +87,7 @@ export const EMBEDDED_WEB_ASSETS = {
   themePreloadJs: decode(${JSON.stringify(gzipSync(themePreload).toString("base64"))}),
   scriptsJs: decode(${JSON.stringify(entries.scriptsJs.base64)}),
   aiTeamsJs: decode(${JSON.stringify(entries.aiTeamsJs.base64)}),
+  loginJs: decode(${JSON.stringify(entries.loginJs.base64)}),
   plushAvatarJs: decode(${JSON.stringify(entries.plushAvatarJs.base64)}),
   stylesCss: decode(${JSON.stringify(entries.stylesCss.base64)}),
   vendor: {

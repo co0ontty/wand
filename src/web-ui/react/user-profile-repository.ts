@@ -1,5 +1,6 @@
 import * as React from "react";
 import { normalizeUserProfile, type UserProfileConfig } from "../../user-profile.js";
+import { loadConfigSnapshot, peekConfigSnapshot, subscribeConfigSnapshot } from "./config-snapshot";
 
 /**
  * 当前用户资料（显示名 + 头像）在 React 侧的只读投影。
@@ -16,11 +17,9 @@ export interface UserProfileView {
 
 const listeners = new Set<() => void>();
 let current: UserProfileView = { name: "", avatar: "", loaded: false };
-let inflight: Promise<unknown> | null = null;
-let loading = false;
-let revision = 0;
 
 function publish(next: UserProfileView): void {
+  if (next.name === current.name && next.avatar === current.avatar && next.loaded === current.loaded) return;
   current = next;
   for (const listener of listeners) listener();
 }
@@ -30,23 +29,27 @@ function view(value: unknown): UserProfileView {
   return { name: profile?.name ?? "", avatar: profile?.avatar ?? "", loaded: true };
 }
 
+function publishFromSnapshot(): void {
+  const config = peekConfigSnapshot();
+  if (config) publish(view(config.userProfile));
+}
+
+const cachedConfig = peekConfigSnapshot();
+if (cachedConfig) current = view(cachedConfig.userProfile);
+subscribeConfigSnapshot(publishFromSnapshot);
+
 function load(): Promise<unknown> {
-  if (inflight) return inflight;
-  loading = true;
-  const startedRevision = revision;
-  inflight = fetch("/api/config", { credentials: "same-origin" })
-    .then((response) => (response.ok ? response.json() : null))
-    .then((payload) => { if (payload && startedRevision === revision) publish(view(payload.userProfile)); })
+  return loadConfigSnapshot()
     // 读不到就继续用默认值：署名回落到「我」不该让聊天界面报错。
-    .catch(() => { publish(current); })
-    .finally(() => { loading = false; inflight = null; });
-  return inflight;
+    .then(publishFromSnapshot, () => {});
 }
 
 // 设置保存后服务端会广播整份配置，署名立刻跟着变，不用等下次拉取。
+// 有已提交快照时由 config snapshot 合并后统一发布；没有快照时（设置页刚启动）
+// 直接采用本次保存的资料，并让 snapshot 丢弃更早的在途读取。
 if (typeof window !== "undefined") {
   window.addEventListener("wand-settings-config-saved", (event) => {
-    ++revision;
+    if (peekConfigSnapshot()) return;
     publish(view((event as CustomEvent<{ userProfile?: unknown }>).detail?.userProfile));
   });
 }
@@ -60,7 +63,7 @@ export const userProfileStore = {
     return current;
   },
   refresh(): void {
-    if (!loading) void load();
+    void load();
   },
 };
 

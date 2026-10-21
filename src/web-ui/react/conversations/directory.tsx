@@ -3,7 +3,7 @@ import { usePageRouteState, routeEnum } from "../use-page-route";
 import { CopyPageLink } from "../ui/copy-page-link";
 import { Alert, Flex, Typography } from "antd";
 import { employeeConversationId } from "../../../conversation-types.js";
-import { employeeProfile } from "../agents/employee-profile";
+import { employeeProfile } from "../agents/employee-profile-state";
 import { EmployeeAvatar } from "../agents/employee-avatar";
 import { employeeCliLabel } from "../agents/employee-identity.js";
 import { useSiliconEmployees } from "../agents/employee-repository";

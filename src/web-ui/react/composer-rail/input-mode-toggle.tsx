@@ -1,5 +1,6 @@
 import * as React from "react";
-import { WandButton, WandIcon } from "../ui/index.js";
+import { WandButton } from "../ui/button.js";
+import { WandIcon } from "../ui/icons.js";
 import { ConversationMorphIcon } from "../conversations/controls.js";
 
 import type { PtyInputMode } from "../../pty-input-state.js";

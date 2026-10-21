@@ -718,7 +718,7 @@ test("blank terminal foreground commands are active even without output, but are
 test("a late foreground probe cannot reactivate a stopped or replaced terminal", async (t) => {
   let finish: ((samples: Map<number, boolean>) => void) | undefined;
   let pid = 0;
-  const { manager, root } = createHarness(t, [], {
+  const { manager, root, spawned } = createHarness(t, [], {
     ptyForegroundSampleMs: 60_000,
     samplePtyForegrounds: (pids) => new Promise((resolve) => { pid = pids[0]; finish = resolve; }),
   });
@@ -731,12 +731,15 @@ test("a late foreground probe cannot reactivate a stopped or replaced terminal",
   });
   const stoppedProbe = sample();
   manager.stop(session.id);
+  spawned[0].emitExit(0);
   finish!(new Map([[pid, true]]));
   await stoppedProbe;
   assert.equal(manager.get(session.id)?.ptyCommandRunning, false);
 
   session = await manager.start("/bin/zsh", root, "default", undefined, { interactiveShell: true, reuseId: session.id });
   const replacedProbe = sample();
+  // Replacement waits for actual exit acknowledgement, not just the kill request.
+  spawned[1].kill = () => { spawned[1].killed = true; spawned[1].emitExit(0); };
   session = await manager.start("/bin/zsh", root, "default", undefined, { interactiveShell: true, reuseId: session.id });
   finish!(new Map([[pid, true]]));
   await replacedProbe;
@@ -773,6 +776,7 @@ test("PTY employee identity survives snapshots, persistence, and same-id resume"
     assert.equal(snapshot.employeeCandidates, undefined);
   }
   manager.stop(session.id);
+  spawned[0].emitExit(0);
   const resumed = await manager.start("pi", root, "managed", undefined, {
     reuseId: session.id, provider: "pi", model: "chosen-model",
   });

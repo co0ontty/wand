@@ -1,5 +1,5 @@
 import * as React from "react";
-import { WandIcon } from "../ui";
+import { WandIcon } from "../ui/icons";
 import { useReducedMotion } from "../ui/motion-tokens";
 import { useServerAnchoredClock } from "../shell/use-server-anchored-clock.js";
 import {

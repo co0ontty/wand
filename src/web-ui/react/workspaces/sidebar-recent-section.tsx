@@ -4,7 +4,8 @@ import * as React from "react";
 
 import { SidebarEmployeeAvatar } from "./sidebar-employee-avatar";
 import { newSessionController } from "../new-session/controller";
-import { WandButton, WandIcon, WandIconButton } from "../ui";
+import { WandButton, WandIconButton } from "../ui/button";
+import { WandIcon } from "../ui/icons";
 import { ImSidebarGroup } from "../shell/im-sidebar-group";
 import { ImSidebarItem } from "../shell/im-sidebar-item";
 import { SessionProviderMark, TeamChatSessionMark } from "./session-mark";

@@ -1,8 +1,9 @@
 /** Small transport pages; the browser fills them to a measured viewport buffer. */
 export const CHAT_INITIAL_MESSAGE_COUNT = 8;
+export { CONVERSATION_INITIAL_TURNS, CONVERSATION_HISTORY_PAGE_TURNS, CHAT_HISTORY_BUFFER_SCREENS, chatHistoryRootMargin } from "./react/conversations/presentation.js";
+import { CHAT_HISTORY_BUFFER_SCREENS } from "./react/conversations/presentation.js";
 export const CHAT_HISTORY_BLOCK_BUDGET = 12;
 export const CHAT_HISTORY_BYTE_BUDGET = 96 * 1024;
-export const CHAT_HISTORY_BUFFER_SCREENS = 2;
 
 export interface ChatScrollGeometry {
   scrollHeight: number;
@@ -18,10 +19,6 @@ export function chatHistoryBufferRemaining(geometry: ChatScrollGeometry): number
 export function needsChatHistoryBuffer(geometry: ChatScrollGeometry): boolean {
   return geometry.clientHeight > 0
     && chatHistoryBufferRemaining(geometry) < geometry.clientHeight * CHAT_HISTORY_BUFFER_SCREENS;
-}
-
-export function chatHistoryRootMargin(height: number): string {
-  return `${Math.max(0, Math.ceil(height * CHAT_HISTORY_BUFFER_SCREENS))}px 0px 0px 0px`;
 }
 
 /** One attempt per cursor until progress or an explicit retry. Height decides

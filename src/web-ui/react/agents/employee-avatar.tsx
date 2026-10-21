@@ -2,26 +2,32 @@ import * as React from "react";
 import { Alert, Avatar, Badge, Button, Flex, Typography } from "antd";
 import { WandUiBoundary } from "../theme";
 import { avatarFaceParts, shrinkAvatarImage } from "../ai-teams/avatar.js";
-import { WandBrandMark, WandButton, WandIcon, WandPopover } from "../ui";
+import { WandBrandMark } from "../ui/brand-mark";
+import { WandButton } from "../ui/button";
+import { WandIcon } from "../ui/icons";
+import { WandPopover } from "../ui/popover";
 import type { AgentToolEngine } from "../../provider-identity.js";
 import { SILICON_EMPLOYEE_AVATAR_MAX_CHARS } from "../../../ai-team-types.js";
 import { employeeAvatarProvider, employeeCliLabel } from "./employee-identity.js";
 import { ProviderLogo } from "../provider-logo.js";
-import { PlushAvatar } from "../avatars/plush-avatar.js";
+import { PlushAvatar, StaticPlushAvatar } from "../avatars/plush-avatar.js";
 import { defaultPlushAvatar, encodePlushAvatar, resolvePlushAvatar, resolveEmployeeAvatar, PLUSH_SHAPES, PLUSH_COLORS, PLUSH_GLASSES, PLUSH_HATS, type PlushAvatarConfig } from "../../../plush-avatar.js";
 import { usePopupDismiss } from "../ui/popup-lifecycle.js";
 import { installAvatarEditorStyles } from "./employee-avatar-styles.js";
 import { AvatarThinking } from "../avatars/thinking.js";
 
-export function EmployeeAvatar({ employee, provider, engine, size = "md", className = "", speaking = false, thinking = false, fileActivity = "idle" }: {
+export function EmployeeAvatar({ employee, provider, engine, size = "md", className = "", renderMode = "live", speaking = false, thinking = false, loading = false, fileActivity = "idle" }: {
   employee: { id: string; name: string; avatar?: string; systemKey?: string; agents?: ReadonlyArray<{ provider?: string; engine?: "cli" | "sdk" }> };
   provider?: string;
   engine?: AgentToolEngine | "core";
   size?: "sm" | "md" | "lg" | "xl" | "chat" | "composer";
   className?: string;
+  renderMode?: "live" | "static";
   /** Audio playback owners may set this only while this employee is actually speaking. Work status is separate. */
   speaking?: boolean;
   thinking?: boolean;
+  /** Probe or 3D startup. Independent of whether this employee is executing. */
+  loading?: boolean;
   fileActivity?: import("../../composer-avatar-activity.js").AvatarFileActivity;
 }): React.ReactElement {
   const cli = employeeAvatarProvider(employee, provider);
@@ -34,8 +40,11 @@ export function EmployeeAvatar({ employee, provider, engine, size = "md", classN
   return <WandUiBoundary><Badge className={`wand-team-avatar wand-employee-avatar ${className}`.trim()} data-size={size}
     title={employee.name} offset={[0, pixelSize - providerSize / 2]}
     count={cli ? <span role="img" aria-label={cliLabel} title={cliLabel} className="wand-employee-avatar-provider"><Avatar size={providerSize} shape="square" icon={cli === "pi" && (actualEngine === "sdk" || actualEngine === "core") ? <WandBrandMark style={{ width: 14, height: 14 }}/> : <ProviderLogo provider={cli}/>} /></span> : undefined}>
-    {plush ? <PlushAvatar config={plush} size={pixelSize} speaking={speaking} thinking={thinking} fileActivity={fileActivity}/>
-      : <span style={{ position: "relative", display: "inline-flex" }}><Avatar shape="square" size={pixelSize} src={face?.src} style={face?.style} icon={face?.icon}/>{thinking ? <AvatarThinking/> : null}</span>}
+    {plush ? renderMode === "static" ? <span style={{ position: "relative", display: "inline-flex" }}>
+        <StaticPlushAvatar config={plush} size={pixelSize}/>
+      </span>
+      : <PlushAvatar config={plush} size={pixelSize} speaking={speaking} thinking={thinking} loading={loading} fileActivity={fileActivity}/>
+      : <span style={{ position: "relative", display: "inline-flex" }}><Avatar shape="square" size={pixelSize} src={face?.src} style={face?.style} icon={face?.icon}/>{renderMode === "static" ? null : loading || thinking ? <AvatarThinking/> : null}</span>}
   </Badge></WandUiBoundary>;
 }
 

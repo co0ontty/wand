@@ -11,7 +11,7 @@ function daemonBuildId(): string {
   const hash = createHash("sha256");
   hash.update(JSON.stringify([process.versions.node, process.platform, process.arch]));
   for (const name of ["terminal-daemon-server", "terminal-daemon-protocol", "terminal-daemon-build", "terminal-host",
-    "structured-exec-host", "pty-terminal-state", "pty-shell-launch", "unix-socket-keepalive",
+    "structured-exec-host", "pty-tmux-backend", "pty-tmux-log", "pty-terminal-state", "pty-shell-launch", "unix-socket-keepalive",
     "ensure-node-pty-helper", "signal-utils", "pty-text-utils", "shell-quote", "error-utils", "render-protocol"]) {
     hash.update(name).update("\0").update(readFileSync(new URL(`./${name}.${extension}`, import.meta.url)));
   }

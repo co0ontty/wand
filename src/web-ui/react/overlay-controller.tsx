@@ -1,4 +1,6 @@
-import { showWandToast, type WandButtonKind, type WandDialogTone, type WandToastTone } from "./ui";
+import { showWandToast, type WandToastTone } from "./ui/toast";
+import type { WandButtonKind } from "./ui/button";
+import type { WandDialogTone } from "./ui/dialog";
 import * as React from "react";
 
 interface OverlayDialogAction<T> {

@@ -160,7 +160,7 @@ test("new sessions always land in Render, legacy-owned sessions stay where their
   assert.deepEqual(render.spawns, ["brand-new"]);
 });
 
-test("a legacy host that throws during ownership probing never swallows the request", async () => {
+test("unknown legacy ownership blocks duplicate execution on Render", async () => {
   const brokenLegacy: TerminalHost = {
     persistent: true,
     attach: () => { throw new Error("daemon socket died"); },
@@ -171,10 +171,9 @@ test("a legacy host that throws during ownership probing never swallows the requ
   const render = new FakeHost(new Set());
   const host = new CompositeTerminalHost({ legacy: brokenLegacy, render });
 
-  assert.equal(host.attach("x"), null);
-  const created = await host.createOrAttach(spawnRequest("x"));
-  assert.equal(created.isNew, true);
-  assert.deepEqual(render.spawns, ["x"]);
+  assert.throws(() => host.attach("x"), /daemon socket died/);
+  await assert.rejects(host.createOrAttach(spawnRequest("x")), /daemon socket died/);
+  assert.deepEqual(render.spawns, []);
 });
 
 test("forget and disconnect unbind both engines without killing anything", () => {

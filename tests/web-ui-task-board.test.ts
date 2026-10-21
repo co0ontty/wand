@@ -19,6 +19,8 @@ import {
   ISSUE_ARCHIVE_COLUMN,
   ISSUE_BOARD_VIEWS,
   ISSUE_COLUMNS,
+  DEFAULT_ISSUE_BOARD_DISPLAY,
+  readIssueBoardDisplay,
   ISSUE_NO_PARENT,
   ISSUE_NO_WORKSPACE,
   ISSUE_STATUS_FILTERS,
@@ -304,8 +306,8 @@ test("create form explicitly chooses saving or dispatching", () => {
   assert.match(host, /\.\.\.\(subject\.type === "cli" \? \{ agent: draft\.agent \} : \{\}\)/);
   assert.match(host, /parentTaskId: draft\.parentTaskId \|\| null/);
   assert.match(composer, /ariaLabel="归属父任务"/);
-  assert.match(host, /onCreateChild=\{\(\) => openCreate\("todo", selected\)\}/);
-  assert.match(host, /aria-label="子任务"/);
+  assert.match(host, /onCreateChild=\{\(\) => openCreate\("backlog", selected\)\}/);
+  assert.match(host, /<TaskGoalChildren[\s\S]*?onCreateChild=/);
   assert.match(host, /保存并派发/);
 
   assert.match(editor, /指派 Agent/);
@@ -319,7 +321,7 @@ test("create form explicitly chooses saving or dispatching", () => {
   assert.match(agentFields, /\$\{ariaPrefix\}思考深度/);
   assert.match(agentFields, /\$\{ariaPrefix\}工作模式/);
   assert.match(host, /task-board-agent-add/);
-  assert.match(host, /TaskBoardAgentSessionList/);
+  assert.match(host, /task-board-agent-add/);
   assert.match(host, /TaskBoardAgentChips/);
 
   assert.match(host, /!draft\.title\.trim\(\) && !draft\.description\.trim\(\)/);
@@ -345,10 +347,14 @@ test("board host preserves navigation, column creation, drag, and detail contrac
   assert.match(host, /新建任务/);
   assert.match(host, /创建更多/);
   assert.deepEqual(ISSUE_BOARD_VIEWS.map((entry) => entry.value), ["dashboard", "board", "list", "gantt"]);
-  assert.deepEqual(ISSUE_COLUMNS.map((column) => column.status), ["todo", "doing", "done"]);
+  assert.deepEqual(ISSUE_COLUMNS.map((column) => column.status), ["backlog", "todo", "doing", "done"]);
   assert.equal(ISSUE_ARCHIVE_COLUMN.status, "archived");
   assert.match(host, /TaskBoardArchiveFolder/);
   assert.match(host, /issueArchiveFolderOpen/);
+  assert.match(host, /TaskBoardCommentCountButton task=\{task\} onOpen=\{\(\) => setSelectedId\(task\.id\)\}/,
+    "board task cards expose server-provided comment counts and open that task detail");
+  assert.match(host, /onOpenComments=\{id => setSelectedId\(id\)\}/,
+    "list comment counts navigate to the matching task detail");
 });
 
 test("已完成卡片不带「完成」死按钮：写回同一个状态、触屏也看不见", () => {
@@ -409,6 +415,34 @@ test("create dialog keeps modal positioning so title and selects stay visible", 
   assert.match(overlayRoot, /REACT_UI_PORTALS_ID/);
 });
 
+test("backlog is a visible independent status and legacy default visibility migrates once", () => {
+  assert.deepEqual(ISSUE_COLUMNS.map((column) => column.status), ["backlog", "todo", "doing", "done"]);
+  assert.deepEqual(DEFAULT_ISSUE_BOARD_DISPLAY.mainStatuses, ["backlog", "todo", "doing", "done"]);
+  assert.equal(issueStatusLabel("backlog"), "待立项");
+
+  const previousWindow = globalThis.window;
+  const data = new Map<string, string>();
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { localStorage: {
+      getItem: (key: string) => data.get(key) ?? null,
+      setItem: (key: string, value: string) => data.set(key, value),
+    } },
+  });
+  try {
+    data.set("wand.issue-board.display", JSON.stringify({ body: true, mainStatuses: ["todo", "doing", "done"] }));
+    assert.deepEqual(readIssueBoardDisplay(), { body: true, mainStatuses: ["backlog", "todo", "doing", "done"] });
+    assert.deepEqual(JSON.parse(data.get("wand.issue-board.display")!), {
+      body: true, mainStatuses: ["backlog", "todo", "doing", "done"], version: 2,
+    });
+    data.set("wand.issue-board.display", JSON.stringify({ body: true, mainStatuses: ["todo", "doing"] }));
+    assert.deepEqual(readIssueBoardDisplay(), { body: true, mainStatuses: ["todo", "doing"] });
+  } finally {
+    if (previousWindow === undefined) delete (globalThis as { window?: unknown }).window;
+    else Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow });
+  }
+});
+
 test("filter helpers keep board columns compact", () => {
   const tasks = [
     { id: "a", title: "登录", identifier: "TASK-1", description: "", labels: [], workspaceId: "w1", status: "todo" as const, sortOrder: 0, updatedAt: "1" },
@@ -438,25 +472,26 @@ test("filter helpers keep board columns compact", () => {
     ["d"],
   );
   assert.deepEqual(groupIssuesByStatus(withArchived).archived.map((task) => task.id), ["d"]);
+  assert.deepEqual(groupIssuesByStatus([{ status: "backlog" as const, id: "b" }]).backlog.map(task => task.id), ["b"]);
   assert.equal(issueArchiveFolderOpen(true, "", EMPTY_ISSUE_FILTERS), false);
   assert.equal(issueArchiveFolderOpen(true, "旧登录", EMPTY_ISSUE_FILTERS), false);
   assert.equal(issueArchiveFolderOpen(false, "", EMPTY_ISSUE_FILTERS), true);
   assert.equal(issueArchiveFolderOpen(true, "", { ...EMPTY_ISSUE_FILTERS, statuses: ["archived"] }), true);
-  assert.deepEqual(ISSUE_STATUS_FILTERS.map((entry) => entry.status), ["todo", "doing", "done", "archived"]);
+  assert.deepEqual(ISSUE_STATUS_FILTERS.map((entry) => entry.status), ["backlog", "todo", "doing", "done", "archived"]);
   assert.deepEqual(issueBoardStats([
     { status: "todo" as const, priority: "none" as const, dueDate: null },
     { status: "done" as const, priority: "low" as const, dueDate: null },
     { status: "archived" as const, priority: "urgent" as const, dueDate: "2000-01-01" },
-  ]), { total: 2, todo: 1, doing: 0, done: 1, overdue: 0, high: 0, remaining: 1 });
+  ]), { total: 2, backlog: 0, todo: 1, doing: 0, done: 1, overdue: 0, high: 0, remaining: 1 });
   const progress = issueProgressSeries(withArchived.map((task) => ({ ...task, createdAt: "2000-01-01", updatedAt: "2000-01-02" })));
   assert.equal(progress.at(-1)?.scope, 3);
   assert.equal(progress.at(-1)?.completed, 0);
 });
 
 test("archive entry remains available while archived cards are hidden", () => {
-  const empty = { todo: [], doing: [], done: [], archived: [] };
+  const empty = { backlog: [], todo: [], doing: [], done: [], archived: [] };
   const markup = renderToStaticMarkup(createElement(TaskBoardListView, {
-    grouped: empty, allTasks: [], collapsed: { todo: false, doing: false, done: false, archived: true },
+    grouped: empty, allTasks: [], collapsed: { backlog: false, todo: false, doing: false, done: false, archived: true },
     archiveOpen: false, archiveCount: 3, onToggle() {}, onToggleArchive() {}, onOpen() {},
   }));
   assert.match(markup, /task-board-archive-header/);
@@ -601,7 +636,9 @@ test("看板卡片点击就地展开，不再把整块看板换成详情页（�
   assert.match(card, /aria-controls=\{`task-card-detail-\$\{task\.id\}`\}/);
   assert.match(card, /aria-label=\{`\$\{expanded \? "收起" : "展开"\} \$\{task\.identifier\}: \$\{task\.title\}`\}/);
   assert.match(card, /onClick=\{\(\) => setExpandedTaskId\(\(current\) => current === task\.id \? "" : task\.id\)\}/);
-  assert.doesNotMatch(card, /setSelectedId\(task\.id\)/, "卡片点击不再走整板替换");
+  const cardTrigger = card.slice(card.indexOf('className="task-board-card-open"'), card.indexOf("</WandButton>", card.indexOf('className="task-board-card-open"')));
+  assert.doesNotMatch(cardTrigger, /setSelectedId\(task\.id\)/, "卡片主触发区只展开，不跳转详情");
+  assert.match(card, /<TaskBoardCommentCountButton task=\{task\} onOpen=\{\(\) => setSelectedId\(task\.id\)\}/, "独立评论入口可打开任务详情，不改变卡片展开行为");
 
   // 展开区必须比重叠态更完整：状态 / 负责人 / 迭代 / 截止 / 会话（带状态）/ 描述全文。
   for (const label of ["状态", "负责人", "迭代", "截止", "更新", "父任务", "子任务"]) {
@@ -609,8 +646,8 @@ test("看板卡片点击就地展开，不再把整块看板换成详情页（�
   }
   assert.match(detail, /label: "状态", children: issueStatusLabel\(task\.status\)/);
   assert.match(detail, /\{description \|\| "还没有填写任务说明。"\}/, "描述全文常驻，截断版才是条件显示");
-  assert.match(detail, /dataSource=\{task\.sessions\}/);
-  assert.match(detail, /<Typography.Text type="secondary">\{sessionStatusLabel\(session\.status\)\}<\/Typography.Text>/);
+  assert.match(detail, /任务摘要与执行记录请在详情事项流中查看/);
+  assert.match(detail, /任务摘要与执行记录请在详情事项流中查看/);
 
   // 完整详情仍是既有那条路（面包屑 任务看板 › TASK-xxx 依赖 selectedId）。
   assert.match(detail, /onClick=\{\(\) => onOpen\(task\.id\)\}/);

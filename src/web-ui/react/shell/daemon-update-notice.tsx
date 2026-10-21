@@ -2,7 +2,8 @@ import * as React from "react";
 import { Flex, Popover, Typography } from "antd";
 import { daemonMaintenanceMessage, type DaemonMaintenanceStatus } from "../../../daemon-maintenance-state.js";
 import { jsonBody, requestJson } from "../http-adapter";
-import { WandButton, WandIcon } from "../ui";
+import { WandButton } from "../ui/button";
+import { WandIcon } from "../ui/icons";
 import { wandOverlay } from "../overlay-controller";
 import { usePopupDismiss } from "../ui/popup-lifecycle";
 

@@ -148,12 +148,23 @@ test("canonical messages preserve body and compact metadata across live patches"
       })()`);
       assert.match(shape.variant, /wand-chat-message-content/);
       assert.equal(shape.bodyInside && shape.bodyFits, true, `${mode}: text belongs to the shared message`);
+      const assertStaticReplies = async () => {
+        const avatars = await evaluate(`({
+          staticCount: document.querySelectorAll('.assistant-author-avatar [data-renderer="static"]').length,
+          canvases: document.querySelectorAll('.assistant-author-avatar canvas').length,
+          runtimeLoaded: performance.getEntriesByType('resource').some(entry => entry.name.includes('/assets/plush-avatar.js'))
+        })`);
+        assert.ok(avatars.staticCount >= 2, `${mode}: reply employees retain static identity`);
+        assert.equal(avatars.canvases, 0, `${mode}: replies never mount canvas`);
+        assert.equal(avatars.runtimeLoaded, false, `${mode}: replies do not load the 3D runtime`);
+      };
+      await assertStaticReplies();
       assert.equal(shape.fontSize, "12px");
       assert.ok(textContrast(shape.color, shape.background) >= 4.5, `${mode}: small metadata remains readable`);
       assert.equal(shape.usage, 0, `${mode}: the transcript no longer carries a per-turn usage row`);
       assert.match(shape.duration, /耗时 39 秒/); assert.equal(shape.clockIso, "2026-10-07T09:00:41Z");
       assert.ok(textContrast(shape.badgeColor, shape.badgeBackground) >= 4.5, `${mode}: tool mark contrasts with its own surface`);
-      assert.equal(shape.avatarWidth, 56);assert.equal(shape.badgeLabel,"Codex CLI");assert.equal(shape.badgeLogo,"codex");assert.equal(shape.badgeRadius,"4px");assert.equal(shape.badgeSize,20); assert.equal(shape.overflow, false);
+      assert.equal(shape.avatarWidth, 56);assert.equal(shape.badgeLabel,"Codex CLI");assert.equal(shape.badgeLogo,"codex");assert.equal(shape.badgeRadius,"4px");assert.equal(shape.badgeSize,20); assert.equal(shape.overflow, false, `${mode}: viewport overflow: ${JSON.stringify(shape)}`);
       // Quiet identity changes update the corner mark without replacing the transcript.
       const changedIdentity = await evaluate(`(async()=>{
         const row=document.querySelector('.chat-message[data-msg-index="1"]');
@@ -206,6 +217,7 @@ test("canonical messages preserve body and compact metadata across live patches"
       assert.equal(await evaluate("document.querySelector('.chat-message[data-msg-index=\"3\"] .chat-message-content').checkVisibility({checkVisibilityCSS:true})"), false);
       await evaluate(`document.querySelector(${JSON.stringify(disclosure)}).click()`);
       assert.equal(await evaluate("document.querySelector('.chat-message[data-msg-index=\"3\"] .chat-message-content').checkVisibility({checkVisibilityCSS:true})"), true);
+      await assertStaticReplies();
       const plain = await evaluate(`(async()=>{await h.fresh([{role:'assistant',uuid:'plain-metadata',content:[{type:'text',text:'没有统计信息的回复。'}]}]);
         const row=document.querySelector('.chat-message[data-msg-index="0"]');return {footer:row.querySelectorAll('.turn-usage-summary').length,text:row.textContent};})()`);
       assert.equal(plain.footer, 0, "absent metadata never reserves an empty footer");

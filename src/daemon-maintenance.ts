@@ -43,6 +43,8 @@ export class DaemonAdmission {
   structured(host: StructuredExecHost): StructuredExecHost {
     return {
       persistent: host.persistent,
+      piNativeTui: host.piNativeTui,
+      ...(host.collectGarbage ? { collectGarbage: host.collectGarbage.bind(host) } : {}),
       spawnStructured: (request) => this.run(() => host.spawnStructured(request)),
       listRuns: () => host.listRuns(),
       attachRun: (id) => host.attachRun(id),

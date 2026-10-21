@@ -7,7 +7,7 @@ import { resolve, join } from "node:path";
 import { build } from "esbuild";
 import { openBrowser } from "./helpers/sidebar-ux-browser.mjs";
 
-test("approved home keeps the reading axis, real roster and attached companion", {
+test("approved home keeps the reading axis and real roster without a live head", {
   skip: process.env.WAND_APPROVED_HOME_BROWSER !== "1", timeout: 120_000,
 }, async () => {
   const root = resolve(import.meta.dirname, ".."), out = process.env.WAND_CHAT_SURFACE_OUTPUT || join(root, "output/home-approved-20261011/browser");
@@ -92,7 +92,9 @@ test("approved home keeps the reading axis, real roster and attached companion",
     assert.equal(await browser.evaluate("document.querySelectorAll('.conversation-group-mosaic .conversation-group-cell').length"), 13);
     assert.equal(await browser.evaluate("!!document.querySelector('[aria-label=通讯录]')"), false);
     assert.equal(await browser.evaluate("getComputedStyle(document.querySelector('.conversation-reply-body')).overflowY"), "visible");
-    assert.equal(await browser.evaluate("!!document.querySelector('.conversation-companion .composer-floating-avatar')"), true);
+    await browser.wait("[\"live\",\"static\"].includes(document.querySelector('.conversation-companion .composer-floating-avatar')?.dataset.avatarChoice)");
+    assert.equal(await browser.evaluate("document.querySelectorAll('.conversation-message-scroll canvas').length"), 0, "reply history stays on the flat face");
+    assert.equal(await browser.evaluate("document.querySelector('.conversation-companion .composer-floating-avatar').dataset.avatarChoice==='static' ? document.querySelectorAll('.conversation-companion canvas').length : 0"), 0, "a weak browser must not keep a live canvas");
     const desktopGeometry = await browser.evaluate("(()=>{const r=s=>document.querySelector(s).getBoundingClientRect();return {frame:{x:r('.app-container').x,y:r('.app-container').y},sidebar:r('.sidebar').width,rail:r('.sidebar-navigation-rail').width,composer:r('.conversation-sender').height,bodyFont:parseFloat(getComputedStyle(document.querySelector('.conversation-reply-body')).fontSize)}})()");
     assert.ok(desktopGeometry.frame.x === 0 && desktopGeometry.frame.y === 0, "conversation page fills the window like every other page");
     assert.ok(desktopGeometry.sidebar === 344 && desktopGeometry.rail === 56, "wide chat shares the compact sidebar scale with workspaces");

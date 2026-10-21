@@ -1,7 +1,9 @@
 import * as React from "react";
 import { createPortal } from "react-dom";
 import { Alert, Flex, Splitter, Typography } from "antd";
-import { WandButton, WandIcon, WandIconButton, WandDropdownMenu, WandDropdownMenuTrigger, WandDropdownMenuContent, WandDropdownMenuItem } from "../ui";
+import { WandButton, WandIconButton } from "../ui/button";
+import { WandIcon } from "../ui/icons";
+import { WandDropdownMenu, WandDropdownMenuTrigger, WandDropdownMenuContent, WandDropdownMenuItem } from "../ui/dropdown-menu";
 import { ensureTerminalLibrary } from "../../vendor-loader.js";
 import { quickTerminalRuntime } from "./runtime";
 import { installQuickTerminalStyles } from "./styles";
@@ -38,7 +40,12 @@ function BrowserQuickTerminalWorkspace({ children }: { children: React.ReactNode
   const [narrow, setNarrow] = React.useState(false);
   const [ratio, setRatio] = React.useState<number | null>(null);
   const [dragging, setDragging] = React.useState(false);
-  const [topbarActive, setTopbarActive] = React.useState(false);
+  const [chromeOwners, setChromeOwners] = React.useState<ReadonlySet<string>>(() => new Set());
+  const registerChrome = React.useCallback((owner: string) => {
+    setChromeOwners(previous => new Set(previous).add(owner));
+    return () => setChromeOwners(previous => { const next = new Set(previous); next.delete(owner); return next; });
+  }, []);
+  const topbarActive = chromeOwners.size > 0;
   const frame = React.useRef<HTMLDivElement>(null);
   const button = React.useRef<HTMLButtonElement>(null);
   const session = React.useRef("");
@@ -141,7 +148,7 @@ function BrowserQuickTerminalWorkspace({ children }: { children: React.ReactNode
       quickTerminalRuntime().reconnect(session.current); setConnection("连接中"); setError("");
     } catch { setError("终端组件加载失败，请重试连接。"); }
   };
-  return <QuickTerminalActionContext.Provider value={{ open, show: () => { void show(); }, trigger: button, chromeHost, setTopbarActive }}><Flex vertical ref={frame} className="quick-terminal-workspace" style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: "hidden" }}>
+  return <QuickTerminalActionContext.Provider value={{ open, show: () => { void show(); }, trigger: button, chromeHost, registerChrome }}><Flex vertical ref={frame} className="quick-terminal-workspace" style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: "hidden" }}>
     <Flex align="center" justify="end" className="quick-terminal-toolbar" style={{ padding: topbarActive ? 0 : "2px var(--wand-page-inset, 20px)", borderBottom: topbarActive ? undefined : "1px solid var(--border-subtle)", flexShrink: 0 }}>
       <div style={{ width: "100%", display: topbarActive ? undefined : "none" }}><StableSlot host={chromeHost}/></div>
       {!topbarActive && <QuickTerminalButton/>}

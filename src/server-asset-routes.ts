@@ -8,11 +8,12 @@ import path from "node:path";
 import { stat } from "node:fs/promises";
 import type { Express, Request, Response, RequestHandler } from "express";
 
+import { AuthService, readSessionCookie } from "./auth.js";
 import { resolveStructuredChatAvatarPath } from "./server-app-connect.js";
 import { asyncRoute } from "./express-async.js";
 import { EMBEDDED_WEB_ASSETS, type EmbeddedVendorAssetPath } from "./web-ui/embedded-assets.js";
 import { renderApp } from "./web-ui/index.js";
-import { getAiTeamsChunk, getBrowserModule, getPlushAvatarChunk, getScriptAsset, getThemePreloadAsset } from "./web-ui/scripts.js";
+import { getAiTeamsChunk, getBrowserModule, getLoginChunk, getPlushAvatarChunk, getScriptAsset, getThemePreloadAsset } from "./web-ui/scripts.js";
 import { getStylesAsset } from "./web-ui/styles.js";
 import type { WandConfig } from "./types.js";
 
@@ -32,10 +33,13 @@ export interface AssetRouteDependencies {
   config: WandConfig;
   requireAuth: RequestHandler;
   requireSessions: RequestHandler;
+  /** 决定匿名访客拿登录小包还是完整控制台。 */
+  authService: AuthService;
+  useHttps: boolean;
 }
 
 export function registerAssetRoutes(app: Express, deps: AssetRouteDependencies): void {
-  const { configPath, config, requireAuth, requireSessions } = deps;
+  const { configPath, config, requireAuth, requireSessions, authService, useHttps } = deps;
   const requestedHash = (req: Request): string | undefined =>
     typeof req.query.v === "string" ? req.query.v : undefined;
   const setAssetCache = (req: Request, res: Response, hash: string, visibility: "public" | "private"): void => {
@@ -87,6 +91,11 @@ export function registerAssetRoutes(app: Express, deps: AssetRouteDependencies):
     setAssetCache(req, res, chunk.hash, "public");
     res.type("application/javascript").send(chunk.content);
   });
+  app.get("/assets/login.js", (req, res) => {
+    const chunk = getLoginChunk(requestedHash(req));
+    setAssetCache(req, res, chunk.hash, "public");
+    res.type("application/javascript").send(chunk.content);
+  });
   app.get("/assets/plush-avatar.js", (req, res) => {
     const chunk = getPlushAvatarChunk(requestedHash(req));
     setAssetCache(req, res, chunk.hash, "public");
@@ -97,8 +106,11 @@ export function registerAssetRoutes(app: Express, deps: AssetRouteDependencies):
 
   app.get(["/", "/settings"], (req, res) => {
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    // 未登录的访客只需要登录页：HTML 不预载控制台 runtime，也不下发它的模块清单。
+    // 登录成功后页面重新加载，这时才走已认证路径。
+    const authenticated = authService.validateSession(readSessionCookie(req, useHttps));
     res.type("html").send(renderApp(configPath, /^\/settings\/?$/.test(req.path) ? "settings" : "console",
-      req.query.client === "app" ? "client" : "browser"));
+      req.query.client === "app" ? "client" : "browser", authenticated));
   });
 
 

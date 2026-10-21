@@ -27,15 +27,12 @@ import type {
 import { taskBoardController } from "../issues/task-board-controller";
 import { classNames } from "../ui/class-names";
 import { MOTION_DWELL_FAILED_MS, MOTION_DWELL_RESULT_SENTENCE_MS, useReducedMotion } from "../ui/motion-tokens";
-import {
-  WandButton,
-  WandIcon,
-  WandIconButton,
-  WandInput,
-  WandNavigationLink,
-  WandPopover,
-  WandStretchTabs,
-} from "../ui";
+import { WandButton, WandIconButton } from "../ui/button";
+import { WandIcon } from "../ui/icons";
+import { WandInput } from "../ui/input";
+import { WandNavigationLink } from "../ui/navigation";
+import { WandPopover } from "../ui/popover";
+import { WandStretchTabs } from "../ui/stretch-tabs";
 import { SessionProviderMark, TeamChatSessionMark } from "./session-mark";
 import { sidebarSessionLabel } from "./session-order";
 import {
@@ -82,6 +79,7 @@ import {
 } from "./sidebar-manage";
 import { reportSidebarListError } from "./sidebar-list-error";
 import { describeError } from "../errors";
+import { copyTextToPlatformClipboard } from "../file-preview/platform-adapter";
 import { sidebarSafeError } from "./sidebar-safe-error";
 
 const NAME_MAX = 80;
@@ -569,6 +567,7 @@ function TaskItem({
       </Flex>} menu={{ items: [
         ...(onOpen ? [{ key: "open", disabled: busy, icon: <WandIcon name="task"/>, label: "打开任务" }] : []),
         { key: "new", disabled: busy, icon: <WandIcon name="plus"/>, label: "新建会话" },
+        ...((task.worktree?.path || task.cwd)?.trim() ? [{ key: "copy-cwd", disabled: busy, icon: <WandIcon name="copy"/>, label: "复制工作目录" }] : []),
         ...(onRename ? [{ key: "rename", disabled: busy, icon: <WandIcon name="edit"/>, label: "重命名任务" }] : []),
         ...(onArchive ? [{ key: "archive", disabled: busy || !canArchive, icon: <WandIcon name="archive"/>,
           label: !canArchive ? "归档任务（执行结束后可用）" : isolated ? "归档任务（保留 Worktree）" : "归档任务" }] : []),
@@ -580,6 +579,11 @@ function TaskItem({
         if (busy) return;
         if (key === "open") { setTaskMenuOpen(false); onOpen?.(); }
         else if (key === "new") { setTaskMenuOpen(false); onRequestNewSession(); }
+        else if (key === "copy-cwd") {
+          setTaskActionError("");
+          void copyTextToPlatformClipboard(task.worktree?.path || task.cwd).then(() => setTaskMenuOpen(false))
+            .catch(cause => setTaskActionError(describeError(cause, "无法复制工作目录。")));
+        }
         else if (key === "rename") { setTaskMenuOpen(false); setRenameValue(task.name); setRenameError(""); setRenaming(true); }
         else if (key === "archive" || key === "delete" || key === "clear" || key === "clear-history") void runTaskAction(key);
       } }}/>
@@ -990,6 +994,7 @@ function TaskGroupSection({
       </Flex>} menu={{ multiple: true, items: [
         // Ant keeps this non-selectable submenu open across preview/confirm/progress.
         { key: "new", disabled: deleting || group.global, icon: <WandIcon name="plus"/>, label: "在此新建会话" },
+        ...(!group.global && group.workspaceCwd.trim() ? [{ key: "copy-cwd", disabled: deleting, icon: <WandIcon name="copy"/>, label: "复制工作目录" }] : []),
         { key: "organize", disabled: deleting, icon: <WandIcon name="folder"/>, label: organization.label, children: organization.items },
         ...(canRenameDirectory ? [{ key: "rename", disabled: deleting, icon: <WandIcon name="edit"/>, label: "重命名目录" }] : []),
         ...(group.tasks.some(task => task.worktree) ? [{ key: "merge", disabled: deleting, icon: <WandIcon name="merge"/>, label: "查看并合并 Worktree" }] : []),
@@ -1004,6 +1009,10 @@ function TaskGroupSection({
           setMenuOpen(false); onOpenDialog?.();
           newSessionController.open({ initialCwd: group.workspaceCwd,
             ...(group.synthetic || group.global ? {} : { workspaceId: group.workspaceId }) });
+        } else if (key === "copy-cwd") {
+          setDirectoryActionError("");
+          void copyTextToPlatformClipboard(group.workspaceCwd).then(() => setMenuOpen(false))
+            .catch(cause => setDirectoryActionError(describeError(cause, "无法复制工作目录。")));
         } else if (key === "rename") {
           setMenuOpen(false); setDirectoryNameValue(group.workspaceName); setDirectoryNameError(""); setRenamingDirectory(true);
         } else if (key === "merge") { setMenuOpen(false); setWorktreeDialogOpen(true); }

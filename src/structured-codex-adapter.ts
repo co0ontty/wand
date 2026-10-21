@@ -63,6 +63,7 @@ export class CodexRunner implements StructuredRunnerAdapter {
       stdinData: promptWithSystemFallback(context.session, context.prompt),
       observer,
       execHost: this.execHost,
+      requestId: context.session.structuredState?.activeRequestId ?? undefined,
       spawnProcess: this.spawnProcess,
       createState: () => reducer.state,
       processLine: createNdjsonLineHandler({

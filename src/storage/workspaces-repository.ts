@@ -340,7 +340,8 @@ export class WorkspaceRepository {
         ...(patch.status !== undefined ? {
           status: patch.status === "done"
             ? card.status === "archived" ? "archived" as const : "done" as const
-            : card.status === "todo" ? "todo" as const : "doing" as const,
+            : card.status === "backlog" ? "backlog" as const
+              : card.status === "todo" ? "todo" as const : "doing" as const,
         } : {}),
       });
     });

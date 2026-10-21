@@ -26,6 +26,7 @@ export interface LegacyUiCommands {
   clearManagedSelection(): void | Promise<unknown>;
   deleteManagedSelection(): void | Promise<unknown>;
   toggleSessionsDrawer(): void | Promise<unknown>;
+  openSessionsDrawer?(): void | Promise<unknown>;
   closeSessionsDrawer(): void | Promise<unknown>;
   toggleSidebarPin(): void | Promise<unknown>;
   toggleSidebarCollapsed(): void | Promise<unknown>;
@@ -74,6 +75,10 @@ export function applyLegacyUiAction(
     case "session.manage.clear": return commands.clearManagedSelection();
     case "session.manage.deleteSelected": return commands.deleteManagedSelection();
     case "layout.drawer.toggle": return commands.toggleSessionsDrawer();
+    case "layout.drawer.open":
+      return commands.openSessionsDrawer
+        ? commands.openSessionsDrawer()
+        : commands.toggleSessionsDrawer();
     case "layout.drawer.close": return commands.closeSessionsDrawer();
     case "layout.drawer.pin": return commands.toggleSidebarPin();
     case "layout.drawer.collapse": return commands.toggleSidebarCollapsed();

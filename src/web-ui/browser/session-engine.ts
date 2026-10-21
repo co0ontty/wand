@@ -1,7 +1,7 @@
 import { composer, state, writeStoredBoolean } from "./state";
 import { isSystemAiCall, SYSTEM_AI_READ_ONLY } from "../../system-ai-call.js";
 import { ensureTerminalLibrary } from "../vendor-loader.js";
-import { clearLoginCredential, isWebLoginTicket } from "../login-credential.js";
+import { submitLoginCredential, clearSubmittedCredential } from "./login-protocol";
 import { handlePiSettingsKeydown } from "./pi-settings-adapter";
 import { hasOpenPopupSurface } from "../react/ui/popup-lifecycle.js";
 import { ptyInputState, mergePtyModifiers, modifiedPtySequence, modifiedTypedPtyText } from "../pty-input-state.js";
@@ -11,6 +11,8 @@ import { notifyTasksChanged } from "../react/task-changes";
 import { workspacesStore } from "../react/workspaces/controller";
 import { workspaceContextStore } from "../react/workspaces/workspace-context";
 import { parseJsonResponse } from "../react/http-adapter";
+import { invalidateConfigSnapshot } from "../react/config-snapshot";
+import { invalidateSessionList, loadSessionList } from "../react/session-list-snapshot";
 import { publishWandModelCatalog, startWandModelCatalogPolling } from "../react/model-catalog";
 import { compactThinkingLabel, dynamicThinkingChoices } from "../thinking-efforts";
 import { getErrorMessage } from "../../error-utils.js";
@@ -32,7 +34,7 @@ import { getEffectiveCwd, render, resetChatRenderCache } from "./render";
 import { initTerminal, measureTerminalCreationDimensions, maybeScrollTerminalToBottom, syncTerminalBuffer, waitForTerminalSettled, type TerminalCreationContext } from "./terminal";
 import { collapseTodoProgress } from "./utils";
 import { ensureTerminalFit, scheduleTerminalResize, teardownTerminal } from "./viewport";
-import { startPolling, stopPolling, updateAutoApproveIndicator, updateTaskDisplay } from "./websocket";
+import { resetWebSocketResyncState, startPolling, stopPolling, updateAutoApproveIndicator, updateTaskDisplay } from "./websocket";
 import { notifyLegacyUiChange } from "./ui-store-bridge";
 import {
   openWorktreeMergeForSession,
@@ -135,6 +137,11 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         }, 1000);
       }
 
+      /**
+       * 会话内重新登录（页面已经加载了控制台）。登录协议在 `login-protocol.ts`，
+       * 与独立登录页共用同一份规则；这里只负责控制台自己的收尾：
+       * 写入 config、刷新数据、重新渲染壳。
+       */
       export function login() {
         var passwordEl = document.getElementById("password") as HTMLInputElement | null;
         var loginButton = document.getElementById("login-button") as HTMLButtonElement | null;
@@ -158,7 +165,31 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         loginButton.disabled = true;
         loginButton.textContent = "登录中...";
 
-        var finishLoginAttempt = function () {
+        var credential = passwordEl.value;
+        clearSubmittedCredential(passwordEl, credential);
+        submitLoginCredential(credential).then(function (result) {
+          if (!result.ok) {
+            if (result.retryAfterMs) {
+              state.loginLockUntil = Date.now() + result.retryAfterMs;
+              scheduleLoginLockTick();
+            }
+            if (result.kind === "cookie-not-stored" && location.protocol === "https:") showLoginCertHint();
+            if (result.credentialInvalid) {
+              passwordEl.dataset.error = "true";
+              passwordEl.setAttribute("aria-invalid", "true");
+            }
+            showError(errorEl, result.message);
+            return;
+          }
+          state.config = result.config as any;
+          applyConfigDefaultThinking(state.config);
+          return refreshAll().then(function () {
+            startPolling();
+            render();
+          });
+        }).catch(function (error) {
+          showError(errorEl, "登录失败，请重试。");
+        }).finally(function () {
           state.loginPending = false;
           // 冷却期内保持按钮禁用，由 tick 归零后恢复；否则用户会对着 429 连点
           if (state.loginLockUntil > Date.now()) {
@@ -168,77 +199,6 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
           state.loginLockUntil = 0;
           loginButton.disabled = false;
           loginButton.textContent = "进入控制台";
-        };
-
-        var credential = passwordEl.value;
-        var ticketMode = isWebLoginTicket(credential);
-        // Never retain a submitted ticket in DOM, browser storage, URLs or error logs.
-        // Unknown delivery cannot be retried with the same value.
-        if (ticketMode) clearLoginCredential(passwordEl);
-        fetch(ticketMode ? "/api/login/ticket" : "/api/login", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(ticketMode ? { ticket: credential } : { password: credential }),
-          credentials: "same-origin"
-        })
-        .then(function (res) {
-          if (ticketMode && !res.ok) {
-            return res.json().then(function (body) {
-              showError(errorEl, body && typeof body.error === "string" ? body.error : "票据登录未确认；请先刷新核对登录状态，不要自动重试。");
-              return Promise.reject("handled");
-            });
-          }
-          if (res.status === 429) {
-            return res.json().then(function (body) {
-              var seconds = body && typeof body.retryAfter === "number" ? Math.max(1, Math.ceil(body.retryAfter)) : 0;
-              showError(
-                errorEl,
-                body && typeof body.error === "string" ? body.error : "登录尝试次数过多，请稍后再试。"
-              );
-              if (!seconds) return Promise.reject("handled");
-              state.loginLockUntil = Date.now() + seconds * 1000;
-              scheduleLoginLockTick();
-              return Promise.reject("handled");
-            });
-          }
-          if (!res.ok) {
-            passwordEl.dataset.error = "true";
-            passwordEl.setAttribute("aria-invalid", "true");
-            showError(errorEl, "密码错误，请重试。");
-            return Promise.reject("handled");
-          }
-          // 登录 POST 成功（密码正确）。立刻打一个需要鉴权的请求验证登录态是否
-          // 真的保存住 —— 不受信任证书下浏览器会拒存 Secure Cookie，这里就会 401。
-          return fetch("/api/config", { credentials: "same-origin" });
-        })
-        .then(function(res) {
-          if (!res.ok) {
-            // 密码对、却没带回 Cookie = 登录态没存住，几乎必然是证书信任问题。
-            if (location.protocol === "https:") {
-              showLoginCertHint();
-            } else {
-              showError(errorEl, "登录失败，请重试。");
-            }
-            return Promise.reject("handled");
-          }
-          return res.json();
-        })
-        .then(function(config) {
-          state.config = config;
-          applyConfigDefaultThinking(config);
-          return refreshAll();
-        })
-        .then(function() {
-          startPolling();
-          render();
-        })
-        .catch(function(error) {
-          if (error === "handled") return;
-          if (!ticketMode) console.error("[wand] Login error:", error);
-          showError(errorEl, ticketMode ? "票据登录结果未知；请先刷新核对登录状态，不要重复提交。" : "登录失败，请重试。");
-        })
-        .finally(function() {
-          finishLoginAttempt();
         });
       }
 
@@ -265,6 +225,9 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
       // 供「用户主动登出」与「服务端已判定会话失效（401）」两条路径复用。
       function teardownLocalSession() {
         sessionReads.reset();
+        invalidateSessionList();
+        invalidateConfigSnapshot();
+        resetWebSocketResyncState();
         earlierMessageRequests.clear();
         stopPolling();
         stopCrossSessionQueueTicker();
@@ -1300,15 +1263,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
       export function loadSessions(options?) {
         var opts = options || {};
         var read = sessionReads.begin("list");
-        return fetch("/api/sessions", { credentials: "same-origin" })
-          .then(function(res) {
-            if (!read.isCurrent()) return;
-            if (res.status === 401) {
-              logoutExpiredSession();
-              return;
-            }
-            return parseJsonResponse<any[]>(res);
-          })
+        return loadSessionList({ force: true })
           .then(function(sessions) {
             if (!read.isCurrent()) return;
             if (!Array.isArray(sessions) || sessions.some(function(s) { return !s || typeof s.id !== "string"; })) {
@@ -1377,6 +1332,11 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
             });
           })
           .catch(function(e) {
+            if (!read.isCurrent()) return;
+            if (e && e.status === 401) {
+              logoutExpiredSession();
+              return;
+            }
             var message = (e && e.message) || "";
             var isTransientAbort =
               message === "Failed to fetch" ||
@@ -1769,6 +1729,28 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
             localStorage.setItem("wand-file-panel-open", "false");
           } catch (e) {}
         }
+        updateLayoutState();
+      }
+
+      export function openSessionsDrawer() {
+        var drawerMode = isSidebarDrawerLayout();
+        if (!drawerMode) {
+          if (state.sidebarPinned && !state.sidebarCollapsed) return;
+          state.sessionsDrawerOpen = true;
+          state.sidebarCollapsed = false;
+          writeStoredBoolean("wand-sidebar-collapsed", false);
+          writeStoredBoolean("wand-sidebar-open", true);
+          updateLayoutState();
+          scheduleTerminalRefitAfterPaddingTransition();
+          return;
+        }
+        if (state.sessionsDrawerOpen) return;
+        state.sessionsDrawerOpen = true;
+        writeStoredBoolean("wand-sidebar-open", true);
+        state.filePanelOpen = false;
+        try {
+          localStorage.setItem("wand-file-panel-open", "false");
+        } catch (e) {}
         updateLayoutState();
       }
 

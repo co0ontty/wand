@@ -1,5 +1,5 @@
 import * as React from "react";
-import { WandButton } from "../ui";
+import { WandButton } from "../ui/button";
 
 /** A fixed-size, text-only toggle shared by conversation and workspace lists. */
 export function SidebarActivityFilter({ active, onChange, label = "只看活动会话" }: {

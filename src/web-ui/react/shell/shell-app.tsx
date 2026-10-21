@@ -1,6 +1,7 @@
 import * as React from "react";
 import { PageRouteNotice } from "../page-route-notice";
-import { EmployeeProfileHost } from "../agents/employee-profile";
+import { employeeProfile, employeeProfileStore } from "../agents/employee-profile-state";
+import { deferredFeature } from "../deferred-feature";
 import { Layout } from "antd";
 import { WandUiProvider } from "../theme";
 import { installSidebarStyles } from "./sidebar-styles";
@@ -12,6 +13,14 @@ import { UiStoreProvider, useUiStoreSnapshot } from "./ui-store-react";
 import type { UiSnapshotData, UiStore } from "./ui-store";
 
 void React;
+
+/** The drawer only matters after a profile is opened; its editor must not ride the shell. */
+const EmployeeProfileHost = deferredFeature(
+  () => import("../agents/employee-profile").then(module => module.EmployeeProfileHost),
+  employeeProfileStore,
+  snapshot => snapshot !== null,
+  { title: "员工资料", close: () => employeeProfile.close(), renderPending: () => <></> },
+);
 
 export type ShellLayoutState = Pick<
   UiSnapshotData["layout"],

@@ -221,6 +221,7 @@ export class ProcessManager extends EventEmitter {
   /** Own the full start handshake, including model resolution and late host replies. */
   private readonly startingSessions = new Map<string, { cancelled: boolean }>();
   private readonly nativeCleanupBarriers = new Map<string, Promise<void>>();
+  private readonly unknownTerminalOwners = new Set<string>();
   private readonly logger: SessionLogger;
   private readonly providerHistory: ProviderHistoryScanner;
   /** Quiet window for the non-Claude PTY turn tracker. */
@@ -330,13 +331,16 @@ export class ProcessManager extends EventEmitter {
               })?.id ?? null
           : null;
       const restoredSessionId = resumeCommandSessionId ?? snapshot.claudeSessionId ?? sessionIdFromHistory;
-      const attached = snapshot.status === "running"
-        ? this.terminalHost.attach(snapshot.id, snapshot.ptyOutputSeq ?? 0)
-        : null;
+      let attached: ReturnType<TerminalHost["attach"]> = null;
+      let ownershipUnknown = false;
+      if (snapshot.status === "running") {
+        try { attached = this.terminalHost.attach(snapshot.id, snapshot.ptyOutputSeq ?? 0); }
+        catch { ownershipUnknown = true; }
+      }
       const live = attached?.process && attached.state.status === "running" ? attached : null;
       const daemonEnded = attached && attached.state.status === "exited" ? attached : null;
       const recoveredMessages = recoverMessagesFromSnapshot(snapshot);
-      const updated: SessionSnapshot = live
+      const updated: SessionSnapshot = ownershipUnknown ? snapshot : live
         ? {
             ...snapshot,
             sessionSource: snapshot.sessionSource ?? "interactive",
@@ -385,6 +389,27 @@ export class ProcessManager extends EventEmitter {
       if (live?.process) {
         this.bindRestoredTerminal(record, live);
         logInfo(`Reattached live terminal ${snapshot.id} (pid ${live.process.pid}).`);
+      } else if (ownershipUnknown) {
+        this.unknownTerminalOwners.add(record.id);
+        const retry = setInterval(() => {
+          if (this.disposed || this.sessions.get(record.id) !== record || record.status !== "running") { clearInterval(retry); return; }
+          try {
+            const restored = this.terminalHost.attach(record.id, snapshot.ptyOutputSeq ?? 0);
+            if (restored?.process) {
+              this.bindRestoredTerminal(record, restored);
+            } else {
+              record.status = restored?.state.exitCode === 0 ? "exited" : restored ? "failed" : "exited";
+              record.exitCode = restored?.state.exitCode ?? null;
+              record.endedAt = new Date().toISOString();
+              record.output = restored?.state.output ?? record.output;
+              this.flushPersist(record, true);
+              this.emitEvent({ type: "ended", sessionId: record.id, data: this.snapshot(record) });
+            }
+            this.unknownTerminalOwners.delete(record.id);
+            clearInterval(retry);
+          } catch { /* Keep durable ownership until the daemon can answer. */ }
+        }, 1000);
+        retry.unref();
       } else if (snapshot.status === "running") {
         this.orphanRecoveredCount += 1;
       }
@@ -840,12 +865,19 @@ export class ProcessManager extends EventEmitter {
       throw new Error(`不支持的终端 provider：${String(opts.provider)}`);
     }
     const id = opts?.reuseId || randomUUID();
+    if (this.unknownTerminalOwners.has(id)) throw new Error("Terminal ownership is unknown; wait for recovery before reusing it.");
     // Host operations are keyed by session id, not by the manager record. A
     // second handshake must not adopt/forget a cancelled first incarnation.
     if (this.startingSessions.has(id)) throw new Error("终端启动仍在进行，请等待本次启动结束后再恢复。");
     const start = { cancelled: false };
     this.startingSessions.set(id, start);
     try {
+      const termination = this.nativeCleanupBarriers.get(id);
+      if (termination) {
+        await termination;
+        this.nativeCleanupBarriers.delete(id);
+      }
+      if (start.cancelled) throw new Error("终端启动已取消。");
       return await this.startSession(id, start, command, cwd, mode, initialInput, opts);
     } finally {
       this.startingSessions.delete(id);
@@ -1691,6 +1723,7 @@ export class ProcessManager extends EventEmitter {
   }
 
   stop(id: string): SessionSnapshot {
+    if (this.unknownTerminalOwners.has(id)) throw new Error("Terminal ownership is unknown; stop was not delivered. Retry after recovery.");
     const record = this.mustGet(id);
     const start = this.startingSessions.get(id);
     if (start) start.cancelled = true;
@@ -1700,6 +1733,9 @@ export class ProcessManager extends EventEmitter {
 
     record.timers.clearAll();
 
+    const termination = this.nativeHistoryCleanupBarrier(id);
+    // Preserve the true-exit barrier even though the UI transitions synchronously.
+    if (termination) void termination.catch(() => {});
     record.stopRequested = true;
     record.providerCliActive = false;
     record.providerShellMarker = null;
@@ -1774,6 +1810,7 @@ export class ProcessManager extends EventEmitter {
 
   /** Capture before delete drops the process handles. Never unlink a live CLI's history. */
   nativeHistoryCleanupBarrier(id: string): Promise<void> | null {
+    if (this.unknownTerminalOwners.has(id)) return Promise.reject(new Error("Terminal ownership is unknown; history was preserved."));
     const existing = this.nativeCleanupBarriers.get(id);
     if (existing) return existing;
     const record = this.sessions.get(id);
@@ -1806,7 +1843,10 @@ export class ProcessManager extends EventEmitter {
   }
 
   delete(id: string): void {
+    if (this.unknownTerminalOwners.has(id)) throw new Error("Terminal ownership is unknown; deletion was not delivered. Retry after recovery.");
     const record = this.mustGet(id);
+    const termination = this.nativeHistoryCleanupBarrier(id);
+    if (termination) void termination.catch(() => {});
     const start = this.startingSessions.get(id);
     if (start) start.cancelled = true;
 

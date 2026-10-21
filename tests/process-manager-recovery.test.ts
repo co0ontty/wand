@@ -63,6 +63,40 @@ class FakeStorage {
   }
 }
 
+for (const outcome of ["exited", "absent"] as const) {
+  test(`unknown terminal ownership recovers to ${outcome} without early deletion`, async (t) => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "wand-pm-unknown-"));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const stored: SessionSnapshot = { id: "unknown", sessionKind: "pty", runner: "pty", command: "/bin/sh",
+      cwd: root, mode: "default", status: "running", exitCode: null, startedAt: new Date().toISOString(),
+      endedAt: null, output: "before", archived: false, archivedAt: null };
+    let unavailable = true;
+    const host: TerminalHost = {
+      persistent: true,
+      attach() {
+        if (unavailable) throw new Error("offline");
+        if (outcome === "absent") return null;
+        return { process: null, replay: [], isNew: false, state: {
+          sessionId: "unknown", incarnationId: "old", pid: 0, status: "exited", exitCode: 7,
+          cols: 80, rows: 24, seq: 1, output: "after", chunks: [], terminalSnapshot: null, launchMarkerToken: null,
+        } };
+      },
+      async createOrAttach() { throw new Error("must not launch"); }, forget() {}, disconnect() {},
+    };
+    const storage = new FakeStorage([stored]);
+    const manager = new ProcessManager({ ...defaultConfig(), defaultCwd: root, startupCommands: [] }, storage as unknown as WandStorage, root, host);
+    t.after(() => manager.dispose());
+    assert.equal(manager.get("unknown").status, "running");
+    assert.throws(() => manager.stop("unknown"), /ownership is unknown/);
+    assert.throws(() => manager.delete("unknown"), /ownership is unknown/);
+    await assert.rejects(manager.nativeHistoryCleanupBarrier("unknown")!, /ownership is unknown/);
+    unavailable = false;
+    await new Promise(resolve => setTimeout(resolve, 1150));
+    assert.equal(manager.get("unknown").status, outcome === "exited" ? "failed" : "exited");
+    assert.equal(storage.getSession("unknown")!.status, outcome === "exited" ? "failed" : "exited");
+  });
+}
+
 test("ProcessManager installs a Render resync snapshot before notifying clients", (t) => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-pm-render-resync-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));

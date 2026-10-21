@@ -33,23 +33,45 @@ test("the shell transfers only HTML repeatedly and serves versioned, cacheable a
     assert.ok(Buffer.byteLength(html) < 8_192, "the shell should not contain entire bundles");
     assert.doesNotMatch(html, /<style\b|<script(?!\s+src=)/i);
     const cssHref = html.match(/href="(\/assets\/app\.css\?v=[a-f0-9]{16})"/)?.[1];
-    const jsSrc = html.match(/src="(\/assets\/app\.js\?v=[a-f0-9]{16})"/)?.[1];
     const themeSrc = html.match(/src="(\/assets\/theme\.js\?v=[a-f0-9]{16})"/)?.[1];
-    assert.ok(cssHref && jsSrc && themeSrc);
+    assert.ok(cssHref && themeSrc);
+    // 未登录访客只拿登录小包：不预载、也不下发控制台 runtime 的模块清单。
+    // 之前登录页要先下载整份控制台代码（Brotli 669KB）才能渲染密码框。
+    const loginSrc = html.match(/src="(\/assets\/login\.js\?v=[a-f0-9]{8})"/)?.[1];
+    assert.ok(loginSrc, "anonymous visitors get the lightweight login bundle");
+    assert.doesNotMatch(html, /\/assets\/app\.js\?v=/, "the console bootstrap is not sent to anonymous visitors");
+    assert.doesNotMatch(html, /rel="modulepreload"/, "no console runtime is preloaded before login");
+    assert.match(html, /data-login-controls/, "the login mount point ships with the HTML, not with a runtime");
     assert.ok(html.indexOf(themeSrc) < html.indexOf(cssHref));
     const preloadUrls = [...html.matchAll(/<link rel="modulepreload" href="([^"]+)"/g)].map(match => match[1]);
-    assert.deepEqual(preloadUrls, getBrowserModuleManifest().eager.map(file => `/assets/${file}`),
-      "preload exactly the boot graph, without fetching optional features");
-    assert.ok(html.indexOf('rel="modulepreload"') < html.indexOf(themeSrc),
-      "discover the runtime before the blocking theme bootstrap");
+    assert.deepEqual(preloadUrls, [],
+      "an anonymous page preloads nothing: there is no console runtime to boot yet");
+    // 已登录页面才需要「先发现 runtime 再跑阻塞的 theme 引导」；匿名页没有 runtime 预载。
     assert.ok(html.indexOf("/vendor/xterm/xterm.css") < html.indexOf(cssHref));
     assert.match(html, /name="wand-qrcode-script" content="\/vendor\/qrcode\/qrcode\.bundle\.js\?v=[a-f0-9]{8}"/);
     assert.match(html, /name="wand-xterm-script" content="\/vendor\/xterm\/xterm\.bundle\.js\?v=[a-f0-9]{8}"/);
     assert.doesNotMatch(html, /<script src="\/vendor\//);
     assert.doesNotMatch(html, /maximum-scale|user-scalable/);
 
+    // 已登录页面才下发控制台 bootstrap；匿名页只下发 login.js（见上）。两者都是
+    // 内容寻址的静态资产，所以这里分别核对各自的缓存可见性。
+    const consoleJs = getScriptAsset(configPath);
+    const consoleJsSrc = `/assets/app.js?v=${consoleJs.hash}`;
+    // login.js 与 ai-teams.js 一样用 8 位 md5 内容寻址（不是 versionWebAsset 的 16 位），
+    // 所以单独核对它的字节与缓存，其余资产仍走同一套 URL 哈希校验。
+    {
+      const response = await fetch(`${base}${loginSrc}`);
+      const content = await response.text();
+      assert.equal(response.status, 200);
+      assert.match(response.headers.get("content-type") ?? "", /javascript/);
+      assert.match(response.headers.get("cache-control") ?? "", /public.*immutable/);
+      assert.equal(createHash("md5").update(content).digest("hex").slice(0, 8), loginSrc.split("v=")[1],
+        "the login URL hashes the bytes actually delivered");
+      assert.doesNotMatch(content, /react-dom|antd|@ant-design/, "the login bundle stays free of the console UI stack");
+      assert.match(content, /\/api\/login/, "the login bundle still owns the login request");
+    }
     for (const [url, type, cache] of [
-      [jsSrc, "javascript", "private"],
+      [consoleJsSrc, "javascript", "private"],
       [cssHref, "css", "public"],
       [themeSrc, "javascript", "public"],
     ] as const) {
@@ -71,7 +93,7 @@ test("the shell transfers only HTML repeatedly and serves versioned, cacheable a
       });
       assert.equal(status, 304);
     }
-    const script = await (await fetch(`${base}${jsSrc}`)).text();
+    const script = await (await fetch(`${base}${consoleJsSrc}`)).text();
     assert.ok(script.includes(JSON.stringify(configPath)), "the script still receives the instance config path");
     const unusualPath = `${configPath} & "quoted" \\test`;
     assert.ok(getScriptAsset(unusualPath).content.includes(JSON.stringify(unusualPath)),

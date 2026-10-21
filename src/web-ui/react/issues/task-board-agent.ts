@@ -127,6 +127,7 @@ export const ISSUE_COLUMNS: ReadonlyArray<{
   label: string;
   empty: string;
 }> = [
+  { status: "backlog", label: "待立项", empty: "还没有待立项的任务" },
   { status: "todo", label: "等待认领", empty: "还没有等待认领的任务" },
   { status: "doing", label: "处理中", empty: "暂无处理中的任务" },
   { status: "done", label: ISSUE_DONE_LABEL, empty: `还没有${ISSUE_DONE_LABEL}的任务` },
@@ -516,17 +517,14 @@ export function normalizeIssueAgentDefaults(payload: unknown): WandTaskAgent {
 }
 
 export function emptyIssueGroups<T>(): Record<WandTaskStatus, T[]> {
-  return { todo: [], doing: [], done: [], archived: [] };
+  return { backlog: [], todo: [], doing: [], done: [], archived: [] };
 }
 
 export function groupIssuesByStatus<T extends { status: WandTaskStatus }>(
   tasks: readonly T[],
 ): Record<WandTaskStatus, T[]> {
   const grouped = emptyIssueGroups<T>();
-  for (const task of tasks) {
-    const bucket = grouped[task.status] ?? grouped.todo;
-    bucket.push(task);
-  }
+  for (const task of tasks) grouped[task.status].push(task);
   return grouped;
 }
 
@@ -610,25 +608,35 @@ export interface IssueBoardDisplay {
 
 export const DEFAULT_ISSUE_BOARD_DISPLAY: IssueBoardDisplay = {
   body: false,
-  mainStatuses: ["todo", "doing", "done"],
+  mainStatuses: ["backlog", "todo", "doing", "done"],
 };
 
 const ISSUE_BOARD_DISPLAY_KEY = "wand.issue-board.display";
+const ISSUE_BOARD_DISPLAY_VERSION = 2;
+const LEGACY_DEFAULT_MAIN_STATUSES: WandTaskStatus[] = ["todo", "doing", "done"];
 
 export function readIssueBoardDisplay(): IssueBoardDisplay {
   if (typeof window === "undefined") return DEFAULT_ISSUE_BOARD_DISPLAY;
   try {
     const raw = window.localStorage.getItem(ISSUE_BOARD_DISPLAY_KEY);
     if (!raw) return DEFAULT_ISSUE_BOARD_DISPLAY;
-    const parsed = JSON.parse(raw) as Partial<IssueBoardDisplay>;
+    const parsed = JSON.parse(raw) as Partial<IssueBoardDisplay> & { version?: number };
     const allowed = new Set(ISSUE_COLUMNS.map((column) => column.status));
-    const mainStatuses = Array.isArray(parsed.mainStatuses)
+    const parsedStatuses = Array.isArray(parsed.mainStatuses)
       ? parsed.mainStatuses.filter((status): status is WandTaskStatus => allowed.has(status as WandTaskStatus))
       : [];
-    return {
-      body: parsed.body === true,
-      mainStatuses: mainStatuses.length > 0 ? mainStatuses : DEFAULT_ISSUE_BOARD_DISPLAY.mainStatuses,
-    };
+    const migratedLegacyDefault = parsed.version !== ISSUE_BOARD_DISPLAY_VERSION
+      && Array.isArray(parsed.mainStatuses)
+      && LEGACY_DEFAULT_MAIN_STATUSES.every((status) => parsed.mainStatuses!.includes(status))
+      && parsed.mainStatuses.length === LEGACY_DEFAULT_MAIN_STATUSES.length;
+    const mainStatuses = migratedLegacyDefault
+      ? DEFAULT_ISSUE_BOARD_DISPLAY.mainStatuses
+      : parsedStatuses.length > 0 ? parsedStatuses : DEFAULT_ISSUE_BOARD_DISPLAY.mainStatuses;
+    const display = { body: parsed.body === true, mainStatuses };
+    if (migratedLegacyDefault) {
+      window.localStorage.setItem(ISSUE_BOARD_DISPLAY_KEY, JSON.stringify({ ...display, version: ISSUE_BOARD_DISPLAY_VERSION }));
+    }
+    return display;
   } catch {
     return DEFAULT_ISSUE_BOARD_DISPLAY;
   }
@@ -637,7 +645,7 @@ export function readIssueBoardDisplay(): IssueBoardDisplay {
 export function writeIssueBoardDisplay(display: IssueBoardDisplay): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(ISSUE_BOARD_DISPLAY_KEY, JSON.stringify(display));
+    window.localStorage.setItem(ISSUE_BOARD_DISPLAY_KEY, JSON.stringify({ ...display, version: ISSUE_BOARD_DISPLAY_VERSION }));
   } catch {
     /* ignore quota / private mode */
   }
@@ -715,6 +723,7 @@ export function issueIsOverdue(dueDate: string | null | undefined, status: WandT
 
 export interface IssueBoardStats {
   total: number;
+  backlog: number;
   todo: number;
   doing: number;
   done: number;
@@ -732,17 +741,19 @@ export function issueBoardStats<T extends {
   let todo = 0;
   let doing = 0;
   let done = 0;
+  let backlog = 0;
   let overdue = 0;
   let high = 0;
   for (const task of tasks) {
     if (task.status === "archived") continue;
-    if (task.status === "todo") todo += 1;
+    if (task.status === "backlog") backlog += 1;
+    else if (task.status === "todo") todo += 1;
     else if (task.status === "doing") doing += 1;
     else if (task.status === "done") done += 1;
     if (issueIsOverdue(task.dueDate, task.status, today)) overdue += 1;
     if (task.priority === "high" || task.priority === "urgent") high += 1;
   }
-  return { total: todo + doing + done, todo, doing, done, overdue, high, remaining: todo + doing };
+  return { total: backlog + todo + doing + done, backlog, todo, doing, done, overdue, high, remaining: backlog + todo + doing };
 }
 
 export interface IssueProgressPoint {
@@ -769,7 +780,7 @@ export function issueProgressSeries<T extends { status: WandTaskStatus; createdA
         const createdAt = new Date(task.createdAt).getTime();
         const updatedAt = new Date(task.updatedAt).getTime();
         if (Number.isNaN(createdAt)) return false;
-        if (task.status === "todo") return false;
+        if (task.status === "todo" || task.status === "backlog") return false;
         return (Number.isNaN(updatedAt) ? createdAt : Math.max(createdAt, updatedAt)) <= timestamp;
       }).length,
       completed: activeTasks.filter((task) => isClosedWandTaskStatus(task.status) && new Date(task.updatedAt).getTime() <= timestamp).length,

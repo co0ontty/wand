@@ -5,8 +5,7 @@ import {
   CLAUDE_LOGO_PATH,
   CODEX_LOGO_PATH,
   GROK_LOGO_PATHS,
-  PI_LOGO_DOT_PATH,
-  PI_LOGO_PATH,
+  PI_LOGO_PARTS,
   normalizeProviderId,
 } from "../provider-identity";
 import { classNames } from "./ui/class-names";
@@ -88,8 +87,7 @@ export function ProviderLogo({ provider, className }: ProviderLogoProps) {
         focusable="false"
         data-provider-logo="pi"
       >
-        <path d={PI_LOGO_PATH} fillRule="evenodd"/>
-        <path d={PI_LOGO_DOT_PATH}/>
+        {PI_LOGO_PARTS.map(({ d, fill }) => <path key={fill} d={d} fill={fill}/>)}
       </svg>
     );
   }

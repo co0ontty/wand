@@ -8,7 +8,7 @@ import { TaskForm, TaskTextArea } from "./task-form";
 import { TaskDatePicker } from "./date-picker";
 import { WandInput } from "../ui";
 import * as React from "react";
-import { Alert, Card, Flex, Form, Typography } from "antd";
+import { Alert, Card, Collapse, Flex, Form, Typography } from "antd";
 import { subscribeWandModelCatalog } from "../model-catalog";
 import { subscribeTaskChanges } from "../task-changes";
 import { draggedTaskId, isTaskDrag, startTaskDrag, TASK_DRAG_TYPE } from "./task-drag";
@@ -89,11 +89,11 @@ import { taskBoardRepository, type IssueWorkspace, type WandTaskListed } from ".
 import { openTaskSessionCreation } from "./task-session-create";
 import {
   TaskBoardAgentChips,
-  TaskBoardAgentSessionList,
   TaskBoardArchiveFolder,
   TaskBoardCardDetail,
   TaskBoardContextMenu,
   TaskBoardConversationButton,
+  TaskBoardCommentCountButton,
   TaskBoardDashboard,
   TaskBoardDisplayMenu,
   TaskBoardFilterMenu,
@@ -132,7 +132,7 @@ interface DraftState {
 
 function emptyDraft(
   workspaceId: string,
-  status: WandTaskStatus = "todo",
+  status: WandTaskStatus = "backlog",
   agent: WandTaskAgent = createDefaultIssueAgent(),
   parentTaskId = "",
 ): DraftState {
@@ -182,7 +182,7 @@ export function TaskBoardHost({
   const [query, setQuery] = usePageRouteState("q", "", undefined, undefined, "replace", 250);
   const [view, setView] = usePageRouteState<IssueBoardView>("boardView", "board", routeEnum(ISSUE_BOARD_VIEWS.map(item => item.value), "board"), String, "push");
   const [sort, setSort] = usePageRouteState<TaskBoardSort>("sort", "manual", routeEnum(TASK_BOARD_SORTS.map(item => item.value), "manual"));
-  const [display, setDisplay] = React.useState<IssueBoardDisplay>(DEFAULT_ISSUE_BOARD_DISPLAY);
+  const [display, setDisplay] = React.useState<IssueBoardDisplay>(() => readIssueBoardDisplay());
   const [filters, setFilters] = usePageRouteState<IssueBoardFilters>("filters", EMPTY_ISSUE_FILTERS,
     value => parseTaskBoardViewState({ filters: JSON.parse(value) }).filters, routeJson);
   const [ganttZoom, setGanttZoom] = React.useState<IssueGanttZoom>("week");
@@ -236,7 +236,7 @@ export function TaskBoardHost({
   const lastAgentRef = React.useRef(lastAgent);
   lastAgentRef.current = lastAgent;
   const [collapsedList, setCollapsedList] = React.useState<Record<WandTaskStatus, boolean>>({
-    todo: false, doing: false, done: false, archived: true,
+    backlog: false, todo: false, doing: false, done: false, archived: true,
   });
   const [draggedId, setDraggedId] = React.useState("");
   const [dropStatus, setDropStatus] = React.useState<WandTaskStatus | "">("");
@@ -389,7 +389,7 @@ export function TaskBoardHost({
     setDraft((current) => (current.milestoneId ? current : { ...current, milestoneId: id }));
   });
 
-  const openCreate = React.useCallback((status: WandTaskStatus = "todo", parent?: WandTaskListed) => {
+  const openCreate = React.useCallback((status: WandTaskStatus = "backlog", parent?: WandTaskListed) => {
     const assignment = resolveIssueAssignment({}, lastAssignmentRef.current?.subject.type === "cli" ? null : lastAssignmentRef.current, lastAgentRef.current, {
       employees: employeesLoading || employeesError ? null : employees, teams,
     });
@@ -478,7 +478,7 @@ export function TaskBoardHost({
         requestAnimationFrame(() => titleRef.current?.focus());
       } else {
         setCreateOpen(false);
-        setDraft(emptyDraft(draft.workspaceId, "todo", draft.agent));
+        setDraft(emptyDraft(draft.workspaceId, "backlog", draft.agent));
       }
       await reload();
       // reload() 开头会清掉错误横幅，所以这些提示必须放在它之后才留得住。
@@ -781,7 +781,7 @@ export function TaskBoardHost({
       }
       if (event.key === "c" && !typing && !event.metaKey && !event.ctrlKey) {
         event.preventDefault();
-        openCreate("todo");
+        openCreate("backlog");
         return;
       }
       if (event.key !== "Escape" || typing) return;
@@ -911,9 +911,8 @@ export function TaskBoardHost({
           {issueDueStamp(task.dueDate)}
         </span> : null}
         <TaskBoardAgentChips sessions={task.sessions} assigned={assigned} subject={task.executionSubject} assignee={task.assignedExecutor}/>
-        {task.status !== "doing"
-          ? <TaskBoardConversationButton sessions={task.sessions} onOpen={onOpenSession}/>
-          : null}
+        {task.status !== "doing" && <TaskBoardConversationButton sessions={task.sessions} onOpen={onOpenSession}/>}
+        <TaskBoardCommentCountButton task={task} onOpen={() => setSelectedId(task.id)}/>
       </Flex>
       <TaskGoalChildren task={task} tasks={tasks} onOpen={setSelectedId}/>
       {sessionDropTarget === task.id && <Alert type="info" showIcon title="移入此任务 · 运行目录不变"/>}
@@ -1060,7 +1059,7 @@ export function TaskBoardHost({
             size="medium"
             aria-label="新建任务"
             title="新建任务 (C)"
-            onClick={() => openCreate("todo")}
+            onClick={() => openCreate("backlog")}
           >
             <WandIcon name="plus" slot="start"/>
             <span>新建任务</span>
@@ -1138,7 +1137,7 @@ export function TaskBoardHost({
       children={selectedChildren}
       parentOptions={issueParentOptions(tasks, selected.workspaceId, selected.id, selected.parentTaskId)}
       onOpenTask={setSelectedId}
-      onCreateChild={() => openCreate("todo", selected)}
+      onCreateChild={() => openCreate("backlog", selected)}
       onAgentChange={(agent, subject, override) => {
         setEmployeeOverride(override === true);
         detailChoiceTaskRef.current = selected.id;
@@ -1167,7 +1166,7 @@ export function TaskBoardHost({
       <WandButton kind={emptyState.kind === "filtered" ? "secondary" : "primary"} onClick={() => {
         if (emptyState.kind === "filtered") {
           setQuery(""); setFilters(EMPTY_ISSUE_FILTERS); setFilterWorkspaceId(""); searchRef.current?.focus();
-        } else openCreate("todo");
+        } else openCreate("backlog");
       }}>{emptyState.kind === "filtered" ? "清除筛选" : "新建任务"}</WandButton>
     </div> : view === "dashboard" ? <TaskBoardDashboard
       projectName={projectName}
@@ -1187,6 +1186,7 @@ export function TaskBoardHost({
       archivePurging={archivePurging}
       onOpen={setSelectedId}
       onOpenSession={onOpenSession}
+      onOpenComments={id => setSelectedId(id)}
     /> : view === "gantt" ? <TaskBoardGantt
       allTasks={tasks}
       grouped={grouped}
@@ -1639,25 +1639,15 @@ function IssueDetail({
             }}
           />
           <TaskDescription key={task.id} description={task.description} busy={busy} onSave={value => onPatch({ description: value })}/>
-          <TaskAcceptanceEditor key={`acceptance-${task.id}`} task={task} children={children} busy={busy} onSave={acceptance => onPatch({ acceptance })}/>
-          <TaskComments key={`comments-${task.id}`} taskId={task.id} updatedAt={task.updatedAt} employees={employees} onOpenSession={onOpenSession}/>
-          <TaskBoardAgentSessionList
-            sessions={task.sessions}
-            assigned={task.agent}
-            subject={task.executionSubject}
-            assignee={task.assignedExecutor}
-            catalog={catalog}
-            onOpenSession={onOpenSession}
-          />
-          {(children.length > 0 || !task.parentTaskId) && <section className="task-board-children" aria-label="子任务">
-            <div className="task-board-children-head">
-              <strong>子任务 <span>{children.length}</span></strong>
-              {!task.parentTaskId && task.status !== "archived" && <WandButton kind="ghost" size="small" onClick={onCreateChild}>
-                <WandIcon name="plus" size={14} slot="start"/>添加子任务
-              </WandButton>}
-            </div>
-            <TaskGoalChildren task={task} tasks={children} onOpen={onOpenTask}/>
-          </section>}
+          <TaskComments key={`comments-${task.id}`} taskId={task.id} updatedAt={task.updatedAt} employees={employees}
+            childTasks={children} sessions={task.sessions} onOpenSession={onOpenSession} onOpenTask={onOpenTask}/>
+          <Collapse ghost className="task-board-acceptance-collapse" items={[{ key: "acceptance", label: <Typography.Text strong>交付与验收 {task.acceptance?.acceptedAt ? "· 已通过" : "· 待确认"}</Typography.Text>,
+            children: <TaskAcceptanceEditor key={`acceptance-${task.id}`} task={task} children={children} busy={busy} onSave={acceptance => onPatch({ acceptance })}/> }]}/>
+          {(children.length > 0 || !task.parentTaskId) && <div className="task-board-children-actions">
+            {!task.parentTaskId && task.status !== "archived" && <WandButton kind="ghost" size="small" onClick={onCreateChild}>
+              <WandIcon name="plus" size={14} slot="start"/>添加正式子任务
+            </WandButton>}
+          </div>}
           {composeOpen ? <Card size="small" className="task-board-native-assign" aria-label="指派 Agent">
             <Flex vertical gap={4} className="task-board-native-assign-head" style={{ marginBottom: 12 }}>
               <strong>CLI / 团队兼容派发</strong>

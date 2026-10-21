@@ -2,7 +2,8 @@ import { useSyncExternalStore } from "react";
 import * as React from "react";
 import { createPortal } from "react-dom";
 import { Flex } from "antd";
-import { WandIcon, WandIconButton } from "../ui";
+import { WandIcon } from "../ui/icons";
+import { WandIconButton } from "../ui/button";
 import { composerConfigController, type ComposerConfigMount, type ComposerConfigScope } from "./controller";
 
 function ariaLabelFor(scope: ComposerConfigScope): string {

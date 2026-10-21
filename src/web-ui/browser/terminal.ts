@@ -17,7 +17,6 @@ import { conversationUi } from "../react/conversations/state";
 import { deriveLegacyUiSnapshot } from "../react/shell/legacy-snapshot";
 import { measureTerminalCreationTopbar, measureTerminalCreationWorkspaceTabbar, measureTerminalCreationStandaloneTabbar, prepareTerminalCreationComposer } from "../react/shell/terminal-creation-measurement";
 import { workspaceContextStore } from "../react/workspaces/workspace-context";
-import { taskDetailStore } from "../react/workspaces/task-detail-store";
 import type { WorkspaceProvider } from "../react/workspaces/types";
 import "./i18n";
 import { consumeTerminalTouchPage, consumeTerminalWheelLines, consumeTerminalWheelPage, consumeTerminalZoomWheel, installTerminalPinchZoom, terminalWheelPageSequence, type TerminalTouchPagingState, type TerminalWheelPagingState, type TerminalWheelScrollState, type TerminalZoomWheelState } from "./terminal-wheel";
@@ -824,71 +823,37 @@ wandThemeStore.subscribe(() => {
           // invisible and restore before paint; the current chat view stays selected.
           change(container, "display", "flex");
           change(container, "visibility", "hidden");
-          if (context) {
-            const topbar = parent.querySelector<HTMLElement>(".main-header-row");
-            if (topbar || !context.workspaceTaskId) {
-              const id = "terminal-creation-measurement";
-              const snapshot = deriveLegacyUiSnapshot({ ...state,
-                selectedId: id, currentTask: null, gitStatus: null, currentView: "terminal",
-                sessions: [{ id, sessionKind: "pty", status: "running", cwd: context.cwd || state.workingDir,
-                  provider: context.kind === "shell" ? undefined : context.provider,
-                  command: context.command || (context.kind === "shell" ? "Shell" : context.provider),
-                }],
-              }, browserEnvironment());
-              const height = measureTerminalCreationTopbar(snapshot, parent.clientWidth);
-              if (height > 0 && topbar) {
-                change(topbar, "box-sizing", "border-box");
-                change(topbar, "height", `${height}px`);
-                change(topbar, "min-height", `${height}px`);
-                change(topbar, "max-height", `${height}px`);
-              } else if (!topbar) {
-                reserveSpace(height);
-              }
-            }
-          }
-          // A first window replaces the main header in an already active task.
-          // Only predict the evidenced empty-task transition, never an old split
-          // or an unknown task detail; this read cannot fetch or persist layout.
-          const activeTask = context?.workspaceTaskId ? workspaceContextStore.getSnapshot() : null;
-          const taskDetail = activeTask?.taskId ? taskDetailStore.getSnapshot(activeTask.taskId) : null;
-          const taskLayout = activeTask?.layout ?? taskDetail?.layout;
-          if (context && activeTask?.taskId === context.workspaceTaskId && taskDetail?.sessions.length === 0
-              && (!taskLayout || taskLayout.windows.length === 0)
-              && !parent.querySelector(".main-header-row, .workspace-tab-bar")) {
-            const height = measureTerminalCreationWorkspaceTabbar({
-              mobile: deriveLegacyUiSnapshot(state, browserEnvironment()).viewport.mobile, taskName: activeTask.taskName,
-              session: { id: "terminal-creation-measurement", sessionKind: "pty", status: "running",
-                provider: context.kind === "shell" ? undefined : context.provider as WorkspaceProvider | undefined,
+          if (context && !document.documentElement.classList.contains("is-wand-embed-terminal")) {
+            const id = "terminal-creation-measurement";
+            const snapshot = deriveLegacyUiSnapshot({ ...state,
+              selectedId: id, currentTask: null, gitStatus: null, currentView: "terminal",
+              sessions: [{ id, sessionKind: "pty", status: "running", cwd: context.cwd || state.workingDir,
+                provider: context.kind === "shell" ? undefined : context.provider,
                 command: context.command || (context.kind === "shell" ? "Shell" : context.provider),
-                cwd: context.cwd, workspaceTaskId: activeTask.taskId,
-              },
-            }, parent.clientWidth);
-            reserveSpace(height);
-          }
-          if (context && !context.workspaceTaskId) {
-            const standalone = parent.querySelector<HTMLElement>('[data-session-tabs="standalone"]');
-            const height = measureTerminalCreationStandaloneTabbar({
-              mobile: deriveLegacyUiSnapshot(state, browserEnvironment()).viewport.mobile,
-              session: { id: "terminal-creation-measurement", sessionKind: "pty", status: "running",
-                provider: context.kind === "shell" ? undefined : context.provider as WorkspaceProvider | undefined,
-                command: context.command || (context.kind === "shell" ? "Shell" : context.provider), cwd: context.cwd,
-              },
-            }, parent.clientWidth);
-            if (standalone) {
-              // A selected standalone session already owns this native flex row.
-              // Reuse its slot; native Tabs may still be settling after a resize.
-              if (getComputedStyle(standalone).display === "none") change(standalone, "display", "flex");
-              change(standalone, "visibility", "hidden");
-              if (height > 0) {
-                change(standalone, "box-sizing", "border-box");
-                change(standalone, "height", `${height}px`);
-                change(standalone, "min-height", `${height}px`);
-                change(standalone, "max-height", `${height}px`);
-              }
-            } else {
-              reserveSpace(height);
-            }
-            for (const oldTaskChrome of parent.querySelectorAll<HTMLElement>(".workspace-mobile-navigation, .workspace-tab-bar:not([data-session-tabs='standalone']), .workspace-window")) change(oldTaskChrome, "display", "none");
+              }],
+            }, browserEnvironment());
+            const session = { id, sessionKind: "pty" as const, status: "running",
+              provider: context.kind === "shell" ? undefined : context.provider as WorkspaceProvider | undefined,
+              command: context.command || (context.kind === "shell" ? "Shell" : context.provider),
+              cwd: context.cwd, workspaceTaskId: context.workspaceTaskId };
+            // The future page owns ONE row, including its terminal action. Its real
+            // host is outside Splitter; never reserve another title/tab row in main.
+            const host = parent.closest(".quick-terminal-workspace")?.querySelector<HTMLElement>(".quick-terminal-toolbar");
+            const inline = parent.querySelector<HTMLElement>(".main-header-row, .workspace-tab-bar");
+            const width = host?.clientWidth || parent.clientWidth;
+            const height = snapshot.viewport.mobile ? measureTerminalCreationTopbar(snapshot, width)
+              : context.workspaceTaskId ? measureTerminalCreationWorkspaceTabbar({
+                mobile: false, taskName: workspaceContextStore.getSnapshot().taskName, session,
+              }, width) : measureTerminalCreationStandaloneTabbar({ mobile: false, session }, width);
+            const chrome = host || inline;
+            if (chrome) {
+              change(chrome, "box-sizing", "border-box");
+              change(chrome, "height", `${height}px`);
+              change(chrome, "min-height", `${height}px`);
+              change(chrome, "max-height", `${height}px`);
+            } else reserveSpace(height);
+            // Retained task roots may belong to the page being left, not the new PTY.
+            for (const oldTaskChrome of parent.querySelectorAll<HTMLElement>(".workspace-mobile-navigation, .workspace-window")) change(oldTaskChrome, "display", "none");
           }
           for (const sibling of Array.from(parent.children)) {
             if (!(sibling instanceof HTMLElement) || sibling === container) continue;

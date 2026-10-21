@@ -5,7 +5,8 @@ import {
   useSyncExternalStore,
 } from "react";
 import * as React from "react";
-import { WandButton, WandDialogSurface } from "../ui";
+import { WandButton } from "../ui/button";
+import { WandDialogSurface } from "../ui/dialog";
 import { wandTheme } from "../theme";
 import { restartOverlayController } from "./controller";
 import { restartOverlayPresentation } from "./model";

@@ -7,9 +7,15 @@ import ts from "typescript";
 function fixture() {
   const requests: Array<{ path: string; init?: RequestInit; resolve(payload: unknown): void }> = [];
   const exports: Record<string, any> = {};
+  const snapshotExports: Record<string, any> = {};
+  const snapshotSource = readFileSync(new URL("../src/web-ui/query-snapshot.ts", import.meta.url), "utf8");
+  runInNewContext(ts.transpileModule(snapshotSource, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText, { exports: snapshotExports });
   const source = readFileSync(new URL("../src/web-ui/react/agents/employee-repository.ts", import.meta.url), "utf8");
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   runInNewContext(code, { exports, require(id: string) {
+    if (id.includes("query-snapshot")) return snapshotExports;
     if (id.includes("http-adapter")) return { requestJson: (path: string, init?: RequestInit) => new Promise(resolve => requests.push({ path, init, resolve })) };
     return {};
   } });
@@ -39,7 +45,9 @@ test("reconnect invalidates the sole employee cache and rejects stale in-flight 
 test("the live WebSocket recovery and open profile use the same employee invalidation owner", () => {
   const socket = readFileSync(new URL("../src/web-ui/browser/websocket.ts", import.meta.url), "utf8");
   const profile = readFileSync(new URL("../src/web-ui/react/agents/employee-profile.tsx", import.meta.url), "utf8");
-  assert.match(socket, /ws\.onopen = function\(\) \{[\s\S]*?notifySiliconEmployeeDefinitionChanged\(\);/);
+  // Boot HTTP reads are authoritative; only a reconnect may invalidate and resync.
+  assert.match(socket, /ws\.onopen = function\(\) \{[\s\S]*?if \(hasOpenedSocket\) \{[\s\S]*?notifySiliconEmployeeDefinitionChanged\(\);/);
+  assert.match(socket, /hasOpenedSocket = true;/);
   assert.match(profile, /subscribeSiliconEmployeeDefinitionChanges/);
   assert.match(profile, /employeeId === undefined \|\| employeeId === profile\.id/);
 });

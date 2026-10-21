@@ -82,7 +82,7 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
 
   let source: PumpSource | null = null;
   let stdoutFile: PiOutputFile | null = null;
-  const nativeLaunch = options.nativePi ? new AbortController() : null;
+  const launchController = options.nativePi || options.requestId ? new AbortController() : null;
   let lineBuffer = "";
   let lineBytes = 0;
   const protocolReader = options.createProtocolReader?.((line) => options.processLine(line, ctx));
@@ -99,7 +99,7 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
   function requestStop(): void {
     if (settled || stopRequested) return;
     stopRequested = true;
-    nativeLaunch?.abort();
+    launchController?.abort();
     interruptSource();
   }
   let acknowledgeExit = () => {};
@@ -216,7 +216,9 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
       cwd: options.cwd,
       env: options.env,
       ...(options.stdinData !== undefined ? { stdinData: options.stdinData } : {}),
-      ...(options.nativePi ? { nativePi: true, requestId: options.requestId, launchSignal: nativeLaunch!.signal } : {}),
+      ...(options.nativePi ? { nativePi: true } : {}),
+      ...(options.requestId ? { requestId: options.requestId } : {}),
+      ...(launchController ? { launchSignal: launchController.signal } : {}),
     };
     const unavailable = (error?: unknown): void => {
       source = null;
@@ -226,7 +228,7 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
         return;
       }
       if (error && typeof error === "object" && "deliveryUnknown" in error && error.deliveryUnknown) {
-        finish(1, null, undefined, new Error("Pi 原生启动送达结果未知，不自动重试。"));
+        finish(1, null, undefined, new Error("CLI 启动送达结果未知，不自动重试。"));
         return;
       }
       // Explicit pre-execution failure; existing providers retain their daemon contract.
@@ -281,12 +283,20 @@ function wireRemoteHandle(
   finish: (exitCode: number | null, signal: NodeJS.Signals | null, spawnError?: NodeJS.ErrnoException) => void,
   acknowledgeExit: () => void,
 ): void {
-  handle.onStream((event) => {
+  const stream = handle.onStream((event) => {
     if (event.stream === "stdout") onStdout(event.data);
     else onStderr(event.data);
   });
-  handle.onExit((event) => {
-    if (event.processExited !== false) acknowledgeExit();
+  let exit: { dispose(): void } | undefined;
+  let ended = false;
+  exit = handle.onExit((event) => {
+    stream.dispose();
+    if (event.processExited !== false) {
+      ended = true;
+      exit?.dispose();
+      acknowledgeExit();
+    }
     finish(event.exitCode, signalNameFromNumber(event.signal));
   });
+  if (ended) exit.dispose();
 }

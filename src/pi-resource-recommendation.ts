@@ -23,7 +23,7 @@ export function parsePiRecommendationRequest(raw: unknown): { prompt: string; ca
 }
 
 /** Literal resource names only; conservative exclusions take priority over inclusion. */
-function explicitMention(prompt: string, name: string): "included" | "excluded" | null {
+export function explicitMention(prompt: string, name: string): "included" | "excluded" | null {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const literal = new RegExp(`(^|[^a-zA-Z0-9_-])${escaped}(?=$|[^a-zA-Z0-9_-])`, "i");
   let included = false;
@@ -49,6 +49,30 @@ function resourceTask(prompt: string, catalog: PiResourceCatalog): string {
   const clauses = prompt.split(/[。！？!?；;\n，,]/);
   const task = clauses.filter((clause) => !switchOnly.test(clause.trim()));
   return task.length === clauses.length ? prompt : task.filter((clause) => clause.trim()).join("，").trim();
+}
+
+/**
+ * Distinguishes conversational flow-control signals (e.g. "继续", "ok", "next", "确认")
+ * from substantive task specifications. Flow-control signals in an ongoing turn
+ * carry no domain capability requirements and must not trigger semantic skill evaluation.
+ */
+export function isFlowControlOnly(prompt: string, catalog?: PiResourceCatalog): boolean {
+  const trimmed = prompt.trim();
+  if (!trimmed) return true;
+  if (explicitMention(trimmed, "codemode") || explicitMention(trimmed, "code mode")) return false;
+  if (catalog) {
+    for (const item of [...catalog.skills, ...catalog.mcpServers]) {
+      if (explicitMention(trimmed, item.name)) return false;
+    }
+  }
+  const clean = trimmed.replace(/[\s\p{P}\p{S}]/gu, "").toLowerCase();
+  if (clean.length > 8) return false;
+  const FLOW_SIGNALS = new Set([
+    "继续", "接着", "下一步", "确认", "好的", "好的继续", "收到", "收到继续",
+    "行", "可以", "好", "走", "开始", "执行", "同意", "好的处理吧", "部署吧",
+    "ok", "okay", "continue", "next", "go", "proceed", "yes", "y", "done", "run",
+  ]);
+  return FLOW_SIGNALS.has(clean);
 }
 
 function matchProbability(result: DecisionResult, id: string): number {

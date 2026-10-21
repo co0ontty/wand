@@ -1,0 +1,104 @@
+import { isStandaloneSettingsPage } from "../page.js";
+import { createRoot, type Root } from "react-dom/client";
+import * as React from "react";
+import { isReactUiEnabled } from "./feature-flags";
+import { OverlayHost } from "./overlay-host";
+import { installReactUiStyles } from "./styles";
+import { wandOverlay, type WandOverlay } from "./overlay-controller";
+import { settingsController } from "./settings/controller";
+import { installSettingsHistory } from "./settings/history";
+import { newSessionController } from "./new-session/controller";
+import { folderPickerController } from "./folder-picker/controller";
+import { quickCommitController } from "./quick-commit/controller";
+import { worktreeMergeController } from "./worktree-merge/controller";
+import { restartOverlayController } from "./restart-overlay/controller";
+import { filePreviewController } from "./file-preview/controller";
+import { missionsController } from "./missions/controller";
+import { workspacesController } from "./workspaces/controller";
+import { githubIssuesController } from "./issues/controller";
+import { installTaskBoardHistory, taskBoardController } from "./issues/task-board-controller";
+import { WandUiProvider } from "./theme";
+import { REACT_UI_PORTALS_ID } from "./ui/portal-context";
+
+const OVERLAY_ROOT_ID = "overlay-root";
+const REACT_MOUNT_ID = "wand-react-ui-mount";
+
+let activeRoot: Root | null = null;
+
+declare global {
+  interface Window {
+    __wandReactUi?: WandOverlay;
+  }
+}
+
+function getOrCreateChild(parent: HTMLElement, id: string, className: string): HTMLElement {
+  const existing = document.getElementById(id);
+  if (existing && existing.parentElement === parent) return existing;
+  const element = document.createElement("div");
+  element.id = id;
+  element.className = className;
+  parent.appendChild(element);
+  return element;
+}
+
+function getOrCreateOverlayRoot(): HTMLElement {
+  const existing = document.getElementById(OVERLAY_ROOT_ID);
+  if (existing) return existing;
+  const root = document.createElement("div");
+  root.id = OVERLAY_ROOT_ID;
+  root.dataset.wandUiRoot = "";
+  document.body.appendChild(root);
+  return root;
+}
+
+function exposeBusinessControllers(): void {
+  window.__wandReactSettings = settingsController;
+  window.__wandReactNewSession = newSessionController;
+  window.__wandReactFolderPicker = folderPickerController;
+  window.__wandReactQuickCommit = quickCommitController;
+  window.__wandReactWorktreeMerge = worktreeMergeController;
+  window.__wandReactRestartOverlay = restartOverlayController;
+  window.__wandReactFilePreview = filePreviewController;
+  window.__wandReactMissions = missionsController;
+  window.__wandReactWorkspaces = workspacesController;
+  window.__wandReactGithubIssues = githubIssuesController;
+  window.__wandReactTaskBoard = taskBoardController;
+  installTaskBoardHistory();
+}
+
+/**
+ * Mounts the stable business-overlay infrastructure next to legacy #app.
+ *
+ * `reactUi=0` rolls only the generic dialog/toast bridge back. The Shell and
+ * migrated business overlays remain mounted because they have
+ * no legacy implementation. This prevents their public adapters from
+ * reporting a successful open while no Host exists to render it.
+ */
+export function startReactUi(): WandOverlay | null {
+  const overlayRoot = getOrCreateOverlayRoot();
+  const genericUiEnabled = isReactUiEnabled();
+  const standaloneSettings = isStandaloneSettingsPage();
+
+  if (!activeRoot) {
+    if (!standaloneSettings) installSettingsHistory();
+    installReactUiStyles();
+    const mount = getOrCreateChild(overlayRoot, REACT_MOUNT_ID, "wand-ui-mount");
+    const portals = getOrCreateChild(overlayRoot, REACT_UI_PORTALS_ID, "wand-ui-portals");
+    activeRoot = createRoot(mount);
+    activeRoot.render(<WandUiProvider><OverlayHost portalContainer={portals}
+      settingsPresentation={standaloneSettings ? "page" : "workspace"} /></WandUiProvider>);
+  }
+
+  if (standaloneSettings) window.__wandReactSettings = settingsController;
+  else exposeBusinessControllers();
+  overlayRoot.dataset.reactUi = genericUiEnabled ? "enabled" : "fallback";
+  if (!genericUiEnabled) {
+    // Keep the application-owned canonical dialog and legacy notice bubble as
+    // generic fallbacks while business controllers retain real Hosts.
+    delete window.__wandReactUi;
+    return null;
+  }
+
+  window.__wandReactUi = wandOverlay;
+  return wandOverlay;
+}

@@ -30,6 +30,12 @@ export function TaskBoardStatusIcon({
   className,
 }: GlyphProps & { status: WandTaskStatus }): React.ReactElement {
   const props = svgProps({ size, color, className });
+  if (status === "backlog") {
+    return <svg {...props}>
+      <path d="M2 4.25h12v8.5H2z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+      <path d="M2 7.25h3l1 1.5h4l1-1.5h3" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+    </svg>;
+  }
   if (status === "doing") {
     return <svg {...props}>
       <path d="M8 1.83C3.38 1.83 1.83 3.38 1.83 8s1.55 6.17 6.17 6.17S14.17 12.62 14.17 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
