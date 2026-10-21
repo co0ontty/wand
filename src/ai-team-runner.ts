@@ -693,7 +693,7 @@ export class AiTeamRunner {
     });
   }
 
-  detail(runId: string): AiTeamRunDetail {
+  detail(runId: string, relayTurns?: ConversationTurn[]): AiTeamRunDetail {
     const run = this.storage.getAiTeamRun(runId);
     if (!run) throw new Error("团队运行不存在。");
     const steps = this.storage.listAiTeamSteps(run.id);
@@ -706,8 +706,8 @@ export class AiTeamRunner {
     // 群聊回合只给最近这一段（§4.4）；没有群聊会话的旧运行给空数组，前端不用判 null。
     // 有对话归属时 ConversationService 已投影用户署名；旧运行只回放 relay 快照，在这里补同一口径。
     const self = this.selfAuthorOf;
-    const messages = (run.conversationId && this.chatHistoryTurns ? this.chatHistoryTurns(run.conversationId)
-      : run.chatSessionId ? this.ops.snapshot(run.chatSessionId)?.messages ?? [] : [])
+    const messages = (relayTurns ?? (run.conversationId && this.chatHistoryTurns ? this.chatHistoryTurns(run.conversationId)
+      : run.chatSessionId ? this.ops.snapshot(run.chatSessionId)?.messages ?? [] : []))
       .map((turn) => (turn.role === "user" && !turn.author && self ? { ...turn, author: self() } : turn));
     const currentTeam = this.storage.getAiTeam(run.teamId);
     // A relay belongs to a conversation, not its newest task. Always use the run's task.

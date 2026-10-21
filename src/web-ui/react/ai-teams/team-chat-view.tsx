@@ -1536,6 +1536,9 @@ export interface ConversationMessagesProps {
   ready?: boolean;
   active?: boolean;
   restoreScroll?: number;
+  hasEarlier?: boolean;
+  loadingEarlier?: boolean;
+  onLoadEarlier?(): void;
   /** Native execution projection supplied by the owning IM page, outside this lazy chunk. */
   renderActivity?(turn: ConversationTurn, index: number): React.ReactNode;
   renderTaskPreview?(turn: ConversationTurn): React.ReactNode;
@@ -1550,7 +1553,7 @@ export interface ConversationMessagesProps {
 
 /** IM presentation shares file cards and text expansion; composer/receipt ownership stays unchanged. */
 export function ConversationMessages({ turns, navigationScope = "conversation", taskLabels, group = true, ready = true, active = true, restoreScroll,
-  employeeIds = {}, mentionNames = EMPTY_MENTION_NAMES, onOpenEmployee, onOpenConversation, onOpenSession, renderActivity, renderTaskPreview, renderSessionPreview }: ConversationMessagesProps): React.ReactElement {
+  employeeIds = {}, mentionNames = EMPTY_MENTION_NAMES, onOpenEmployee, onOpenConversation, onOpenSession, renderActivity, renderTaskPreview, renderSessionPreview, hasEarlier = false, loadingEarlier = false, onLoadEarlier }: ConversationMessagesProps): React.ReactElement {
   const profile = useUserProfile();
   const list = React.useRef<HTMLDivElement>(null);
   const more = React.useRef<HTMLDivElement>(null);
@@ -1586,9 +1589,11 @@ export function ConversationMessages({ turns, navigationScope = "conversation", 
     return { id: node.dataset.presentationId, offset: node.getBoundingClientRect().top - rect.top };
   }, []);
   const loadEarlier = React.useCallback(() => {
+    if (loadingEarlier) return;
     pendingAnchor.current = captureAnchor();
+    if (startRef.current <= CONVERSATION_HISTORY_PAGE_TURNS && hasEarlier) onLoadEarlier?.();
     setWindowStart(current => Math.max(0, (current ?? startRef.current) - CONVERSATION_HISTORY_PAGE_TURNS));
-  }, [captureAnchor]);
+  }, [captureAnchor, hasEarlier, loadingEarlier, onLoadEarlier]);
   const reduced = useReducedMotion();
   const keys = turns.map(conversationMessageKey);
   const questionBodies = turns.map(turn => turn.role === "user" ? parseChatAttachments(chatTurnText(turn)).body : "");
@@ -1698,7 +1703,7 @@ export function ConversationMessages({ turns, navigationScope = "conversation", 
   React.useLayoutEffect(() => {
     const sentinel = more.current;
     const scroll = sentinel?.closest<HTMLElement>(".conversation-message-scroll");
-    if (!sentinel || !scroll || !awayFromTail || start <= 0 || typeof IntersectionObserver === "undefined") return;
+    if (!sentinel || !scroll || !awayFromTail || (start <= 0 && !hasEarlier) || loadingEarlier || typeof IntersectionObserver === "undefined") return;
     const observer = new IntersectionObserver(entries => {
       if (!entries.some(entry => entry.isIntersecting)) return;
       observer.disconnect();
@@ -1706,7 +1711,7 @@ export function ConversationMessages({ turns, navigationScope = "conversation", 
     }, { root: scroll, rootMargin: chatHistoryRootMargin(scroll.clientHeight) });
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [start, loadEarlier, awayFromTail]);
+  }, [start, loadEarlier, awayFromTail, hasEarlier, loadingEarlier]);
   // 提问目录可能指向窗口外的更早回合：先把它所在的那一页挂上，提交后再定位。
   React.useLayoutEffect(() => {
     const ownerKey = pendingJump.current;
@@ -1761,8 +1766,8 @@ export function ConversationMessages({ turns, navigationScope = "conversation", 
         setWindowStart(Math.max(0, index - CONVERSATION_HISTORY_PAGE_TURNS));
         return true;
       }}/>
-    {start > 0 ? <div ref={more} className="conversation-history-more">
-      <WandButton kind="ghost" size="small" onClick={loadEarlier}>加载更早的 {start} 条消息</WandButton>
+    {start > 0 || hasEarlier ? <div ref={more} className="conversation-history-more">
+      <WandButton kind="ghost" size="small" disabled={loadingEarlier} onClick={loadEarlier}>{loadingEarlier ? "加载中…" : start > 0 ? `加载更早的 ${start} 条消息` : "加载更早消息"}</WandButton>
     </div> : null}
     {turns.slice(start).map((turn, offset) => {
       const index = start + offset;

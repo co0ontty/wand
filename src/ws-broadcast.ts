@@ -128,6 +128,7 @@ interface WsClient {
 
 export interface WsSessionPort {
   getSession(id: string): SessionSnapshot | null;
+  projectMessages?(id: string, messages: ConversationTurn[]): ConversationTurn[];
   getTerminalState?(id: string): PtyTerminalSnapshot | null;
   sendPtyInput?(id: string, input: string, shortcutKey?: string, userInput?: boolean): void | Promise<void>;
   resizePty?(id: string, cols: number, rows: number): void;
@@ -512,7 +513,7 @@ export class WsBroadcastManager {
     if (!messages) {
       return { messages: undefined, messageOffset: 0, messageTotal: 0 };
     }
-    messages = enrichStructuredMessages(messages, sessionId);
+    messages = this.port?.projectMessages?.(sessionId, messages) ?? enrichStructuredMessages(messages, sessionId);
     if (client.compactTools) {
       this.rememberToolNames(client, sessionId, messages);
       messages = compactToolMessagesForTransport(messages);

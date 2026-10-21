@@ -52,6 +52,7 @@ export interface ConversationSummary extends ConversationInstance {
 export interface ConversationDetail extends ConversationSummary {
   messages: ConversationTurn[];
   runDetails: AiTeamRunDetail[];
+  history?: import("./conversation-sync-contract.js").ConversationHistory;
 }
 
 export interface ConversationReceipt {

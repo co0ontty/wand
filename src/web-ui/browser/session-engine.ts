@@ -17,6 +17,7 @@ import { invalidateSessionList, loadSessionList, projectSessionSummaries, publis
 import { publishWandModelCatalog, startWandModelCatalogPolling } from "../react/model-catalog";
 import { compactThinkingLabel, dynamicThinkingChoices } from "../thinking-efforts";
 import { getErrorMessage } from "../../error-utils.js";
+import { waitForSnapshot } from "./snapshot-arrival";
 import { CHAT_HISTORY_BLOCK_BUDGET, CHAT_HISTORY_BYTE_BUDGET } from "../chat-history-window.js";
 
 import { mergeBlockWindowedMessages, mergeWindowedMessages, type MessageMergeSource } from "./message-reconciliation";
@@ -1475,7 +1476,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         }
         return compactSessionFetch(url, { credentials: "same-origin" })
           .then(async function(res) {
-            if (!read.isCurrent() || state.selectedId !== id) return;
+            if (!res || !read.isCurrent() || state.selectedId !== id) return;
             // Only a missing session warrants deselection; HTTP failures retain the current view.
             if (res.status === 404) return { missing: true };
             return parseJsonResponse<any>(res);
@@ -1488,6 +1489,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
             if (!read.isCurrent() || state.selectedId !== id) {
               return;
             }
+            if (!data) return;
             if (data.missing) {
               // Session no longer exists — deselect and refresh list
               if (state.selectedId === id) {
@@ -1700,10 +1702,15 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         if (state.filePanelOpen) {
           updateFilePanelCwd(session);
         }
-        var outputLoaded = loadOutput(id).then(function() {
+        const canAwaitSnapshot = state.ws && typeof state.ws.readyState === "number" && shouldRequestChatFormat(session)
+          && (state.ws.readyState === WebSocket.OPEN || state.ws.readyState === WebSocket.CONNECTING);
+        const snapshotWait = canAwaitSnapshot ? waitForSnapshot(id) : null;
+        subscribeToSession(id);
+        var outputLoaded = (snapshotWait ? snapshotWait.then(function(received) {
+          if (!received && state.selectedId === id && ownsFocus()) return loadOutput(id);
+        }) : loadOutput(id)).then(function() {
           if (options?.focusInput !== false && ownsFocus()) focusInputBox(true);
         });
-        subscribeToSession(id);
         // 切会话：先用缓存里的上一次结果顶上（没有就空着），再异步刷新，
         // 避免慢仓库上徽章先消失、隔一两秒才出现。
         restoreGitStatusForSession(id);

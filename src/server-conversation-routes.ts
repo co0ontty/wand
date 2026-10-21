@@ -38,6 +38,19 @@ export function registerConversationRoutes(app: Express, service: ConversationSe
     if (!receipt) res.status(404).json({ error: "未找到回执；不能据此断言请求未接受。" });
     else res.json(receipt);
   });
+  app.get("/api/conversations/:id/sync", (req, res) => {
+    try {
+      for (const key of ["since", "from"]) if (typeof req.query[key] === "string" && String(req.query[key]).length > 2048) {
+        throw badRequest("对话同步游标无效。");
+      }
+      res.setHeader("Cache-Control", "private, no-store");
+      res.json(service.sync(req.params.id, {
+        since: typeof req.query.since === "string" ? req.query.since : undefined,
+        from: typeof req.query.from === "string" ? req.query.from : undefined,
+        older: req.query.older === "1",
+      }));
+    } catch (error) { sendRouteError(res, error, "对话同步失败。", 404); }
+  });
   app.get("/api/conversations/:id", (req, res) => {
     try { res.json(service.detail(req.params.id)); }
     catch (error) { sendRouteError(res, error, "对话读取失败。", 404); }

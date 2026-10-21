@@ -556,7 +556,7 @@ export async function startServer(
     defaultModelOf: (provider) => getDefaultModelForProvider(config, provider),
   });
   const conversationService = new ConversationService({ storage, config, structured: structuredSessions, runner: aiTeams,
-    notifySession: notifier.conversationSession, deleteSession: id => { sessionRegistry.deleteWithProviderHistory(id); } });
+    notifySession: notifier.conversationSession, notifyChanged: () => notifier.system({ kind: "conversations-changed" }), deleteSession: id => { sessionRegistry.deleteWithProviderHistory(id); } });
   conversations = conversationService;
   conversationService.migrateExistingChats();
   const scheduledTasks = new ScheduledTaskService({ storage, conversations: conversationService,
@@ -925,6 +925,7 @@ export async function startServer(
   );
   wsManager.setup({
     getSession: (id) => sessionRegistry.get(id),
+    projectMessages: (id, messages) => sessionRegistry.transportMessages(id, messages),
     getTerminalState: (id) => processes.getTerminalState(id),
     sendPtyInput: (id, input, shortcutKey, userInput) =>
       processes.sendInputConfirmed(id, input, "terminal", shortcutKey, userInput).then(() => {}),
@@ -941,6 +942,7 @@ export async function startServer(
 
   // Wire process events to WebSocket broadcast
   processes.on("process", (event: ProcessEvent) => {
+    sessionRegistry.invalidateMessageProjection(event.sessionId);
     taskTitles.ingest(event);
     sessionCompletions.ingest(event);
     missions.ingest(event);
@@ -949,6 +951,7 @@ export async function startServer(
     wsManager.emitEvent(event);
   });
   structuredSessions.setEventEmitter((event) => {
+    sessionRegistry.invalidateMessageProjection(event.sessionId);
     taskTitles.ingest(event);
     storage.recordTaskCommentSessionEvent(event);
     conversationService.ingestSessionEvent(event);

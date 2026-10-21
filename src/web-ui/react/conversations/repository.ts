@@ -1,3 +1,4 @@
+import { mergeConversationSync, type ConversationSync } from "../../../conversation-sync-contract.js";
 import { teamChatComposer } from "../ai-teams/composer-bridge";
 import * as React from "react";
 import type { ConversationDetail, ConversationReceipt, ConversationSummary } from "../../../conversation-types.js";
@@ -56,7 +57,21 @@ export const conversationsRepository = {
     if (teamChatComposer.ready()) teamChatComposer.discardScope(`conversation-draft:${location.origin}:local-owner:${id}:`);
     notifyConversationChanges();
   },
-  detail: (id: string) => requestJson<ConversationDetail>(`/api/conversations/${encodeURIComponent(id)}`),
+  async detail(id: string, previous: ConversationDetail | null = null, older = false): Promise<ConversationDetail> {
+    const params = new URLSearchParams();
+    if (previous?.id === id && previous.history) {
+      params.set("since", previous.history.revision);
+      if (previous.history.from) params.set("from", previous.history.from);
+    }
+    if (older) params.set("older", "1");
+    try {
+      const update = await requestJson<ConversationSync>(`/api/conversations/${encodeURIComponent(id)}/sync?${params}`);
+      return mergeConversationSync(previous, update);
+    } catch (error) {
+      if (error instanceof HttpResponseError && error.status === 404) return requestJson<ConversationDetail>(`/api/conversations/${encodeURIComponent(id)}`);
+      throw error;
+    }
+  },
   receipt: (requestId: string) => readReceipt(`/api/conversations/requests/${encodeURIComponent(requestId)}`),
   async post(path: string, body: Record<string, unknown>): Promise<ConversationReceipt> {
     const fingerprint = await sha256Hex(path + "\0" + JSON.stringify(body));
@@ -148,7 +163,7 @@ export function useConversations(includeSystemSessions = false, enabled = true):
     // 只有引擎发布或快照过期时才重新下载全量。
     listeners.add(reload);
     const unsubscribes = [subscribeAiTeamRunChanges(reload), subscribeTaskChanges(reload), subscribeSiliconEmployeeDefinitionChanges(reloadAfterEmployeeChange)];
-    const timer = window.setInterval(() => { if (!document.hidden) void reload(); }, 6000);
+    const timer = window.setInterval(() => { if (!document.hidden) void reload(); }, 30_000);
     return () => { ++epoch.current; listeners.delete(reload); unsubscribes.forEach((f) => f()); clearInterval(timer); };
   }, [load, reload, reloadAfterEmployeeChange, enabled]);
   return { items, systemSessions, error, loaded, refresh };

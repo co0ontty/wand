@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { isArchiveBlocked } from "./archive-policy.js";
 import { logInfo } from "./runtime-log.js";
 import { isSystemAiCall } from "./system-ai-call.js";
@@ -7,7 +8,8 @@ import type { ProcessManager } from "./process-manager.js";
 import { inferProviderFromCommand } from "./session-provider.js";
 import type { WandStorage } from "./storage.js";
 import type { StructuredSessionManager } from "./structured-session-manager.js";
-import type { ExecutionMode,SessionSnapshot } from "./types.js";
+import type { ExecutionMode,SessionSnapshot,ConversationTurn } from "./types.js";
+import { enrichStructuredMessages } from "./structured-client-protocol.js";
 
 export type SessionOwner = "structured" | "pty" | "storage";
 
@@ -135,6 +137,31 @@ export function removeHiddenSessionIds(storage: HiddenSessionStore, ids: readonl
  * Live structured state wins over PTY, and both win over a durable fallback.
  */
 export class SessionRegistry {
+  private readonly messageProjections = new Map<string, { revision: string; source: ConversationTurn[]; projected: ConversationTurn[] }>();
+  private readonly messageEpochs = new Map<string, number>();
+  invalidateMessageProjection(id: string): void {
+    this.messageProjections.delete(id);
+    this.messageEpochs.set(id, (this.messageEpochs.get(id) ?? 0) + 1);
+    if (this.messageEpochs.size > 2048) this.messageEpochs.delete(this.messageEpochs.keys().next().value!);
+  }
+  /** One semantic pass per source/revision, shared by HTTP and all WS readers. */
+  transportMessages(id: string, messages: ConversationTurn[]): ConversationTurn[] {
+    // Some live adapters append in place before the debounced event boundary. A
+    // content digest prevents cached semantics from crossing that mutation window.
+    const raw = JSON.stringify(messages);
+    const digest = createHash("sha256").update(raw).digest("hex");
+    const revision = `${this.storage.projectionRevision()}:${this.messageEpochs.get(id) ?? 0}:${digest}`;
+    const cached = this.messageProjections.get(id);
+    if (cached?.revision === revision) return cached.projected;
+    const projected = enrichStructuredMessages(messages, id);
+    this.messageProjections.delete(id);
+    if (raw.length <= 1024 * 1024 && messages.length <= 2000 && messages.reduce((n, turn) => n + turn.content.length, 0) <= 10000) {
+      this.messageProjections.set(id, { revision, source: messages, projected });
+      while (this.messageProjections.size > 16) this.messageProjections.delete(this.messageProjections.keys().next().value!);
+    }
+    return projected;
+  }
+
   /** Deleted owners can still be exiting; listSlim alone no longer sees them. */
   private readonly nativeDeletionBarriers = new Map<string, Set<Promise<void>>>();
 

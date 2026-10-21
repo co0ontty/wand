@@ -1,4 +1,5 @@
 import * as React from "react";
+import { subscribeConversationSessionPreview } from "./session-preview-events";
 import { Alert, Checkbox, Flex, Input, Radio, Typography } from "antd";
 import type { ConversationTarget } from "../../../conversation-types.js";
 import type { ConversationTurn, ToolResultBlock, ToolUseBlock } from "../../../types.js";
@@ -199,8 +200,12 @@ export function useConversationActivity({ detail, active, target = null, onRefre
   React.useEffect(() => {
     setSessions({}); setLoadError("");
     void load();
-    const timer = active && owners.size ? setInterval(() => { if (!document.hidden) void load(); }, 3000) : undefined;
-    return () => { ++epoch.current; if (timer) clearInterval(timer); };
+    let notice: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = subscribeConversationSessionPreview(update => {
+      if (active && owners.has(update.sessionId) && !document.hidden && !notice) notice = setTimeout(() => { notice = undefined; void load(); }, 250);
+    });
+    const timer = active && owners.size ? setInterval(() => { if (!document.hidden) void load(); }, 15_000) : undefined;
+    return () => { ++epoch.current; unsubscribe(); if (notice) clearTimeout(notice); if (timer) clearInterval(timer); };
   }, [load]);
   const available = active ? Object.values(sessions).filter(session => owners.has(session.id)) : [];
   const results = activityResults(detail?.messages ?? [], detail?.communicationSessionId ?? null, available);
