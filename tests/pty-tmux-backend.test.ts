@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -9,11 +9,72 @@ import { once } from "node:events";
 import { connectExistingTerminalHost, type TerminalDaemonClient } from "../src/terminal-daemon-client.js";
 import { ptyTmuxLogWriter } from "../src/pty-tmux-log.js";
 import { PtyTmuxBackend } from "../src/pty-tmux-backend.js";
+import xterm from "@xterm/headless";
 
-const wait = async (predicate: () => boolean) => {
+for (const { name, term, expected } of [
+  { name: "xterm-256color", term: undefined, expected: "xterm-256color" },
+  { name: "xterm-256color", term: "dumb", expected: "xterm-256color" },
+  { name: "", term: "screen-256color", expected: "screen-256color" },
+  { name: "", term: "", expected: "xterm-color" },
+]) {
+  test(`tmux shell receives terminal type ${expected} (name=${name}, TERM=${term})`, async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "wand-tmux-term-"));
+    const backend = new PtyTmuxBackend(path.join(root, "tmux-terminald.json"));
+    const env = { PATH: process.env.PATH, ...(term === undefined ? {} : { TERM: term }) };
+    const child = await backend.spawn({ sessionId: "term", file: "/bin/sh",
+      args: ["-c", "printf 'TYPE=<%s>\\n' \"$TERM\"; clear; printf 'CLEAR_STATUS=<%s>\\n' \"$?\""],
+      cwd: root, env, name, cols: 80, rows: 24 });
+    try {
+      let output = "", exited = false;
+      child.onData(data => { output += data; });
+      child.onExit(() => { exited = true; });
+      await wait(() => exited);
+      assert.ok(output.includes(`TYPE=<${expected}>`), JSON.stringify(output));
+      assert.ok(output.includes("CLEAR_STATUS=<0>"), JSON.stringify(output));
+      assert.ok(!output.includes("TERM environment variable not set"));
+      assert.equal(env.TERM, term, "do not mutate the caller's environment");
+      backend.forget("term");
+    } finally {
+      try { child.kill(); } catch { /* already exited */ }
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("tmux zsh edits one line without ghost characters when the server has no TERM", { skip: !existsSync("/bin/zsh") }, async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-tmux-edit-"));
+  const backend = new PtyTmuxBackend(path.join(root, "tmux-terminald.json"));
+  const terminal = new xterm.Terminal({ cols: 80, rows: 24, allowProposedApi: true });
+  const child = await backend.spawn({ sessionId: "edit", file: "/bin/zsh", args: ["-f", "-i"],
+    cwd: root, env: { PATH: process.env.PATH, HOME: root, PS1: "EDIT> " }, name: "xterm-256color", cols: 80, rows: 24 });
+  let screen = "", output = "";
+  child.onData(data => {
+    output += data;
+    terminal.write(data, () => {
+      const buffer = terminal.buffer.active;
+      screen = buffer.getLine(buffer.baseY + buffer.cursorY)?.translateToString(true).trimEnd() ?? "";
+    });
+  });
+  try {
+    await wait(() => screen === "EDIT>", () => JSON.stringify({ screen, output }));
+    child.write("abc");
+    await wait(() => screen === "EDIT> abc");
+    child.write("\x7f"); child.write("d");
+    await wait(() => screen === "EDIT> abd");
+    child.write("\x15");
+    child.write("printf 'RESULT=<%s>\\n' one"); child.write("\r");
+    await wait(() => output.includes("RESULT=<one>"));
+    assert.equal(output.split("RESULT=<one>").length - 1, 1, "execute once");
+  } finally {
+    child.kill(); backend.forget("edit"); terminal.dispose();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+const wait = async (predicate: () => boolean, detail?: () => string) => {
   const deadline = Date.now() + 5000;
   while (!predicate()) {
-    if (Date.now() > deadline) throw new Error("Timed out waiting for terminal output");
+    if (Date.now() > deadline) throw new Error(`Timed out waiting for terminal output${detail ? ": " + detail() : ""}`);
     await new Promise(resolve => setTimeout(resolve, 30));
   }
 };

@@ -169,6 +169,8 @@ export class ClaudeCliRunner implements StructuredRunnerAdapter {
     let killedForQuestion = false;
     let stdoutTail = "";
     let unparsedStdout = false;
+    let protocolEventObserved = false;
+    const previousSessionId = context.session.claudeSessionId;
     return startStructuredCli({
       sessionId: context.session.id,
       file: "claude",
@@ -188,6 +190,7 @@ export class ClaudeCliRunner implements StructuredRunnerAdapter {
         observer,
         onUnparsed: () => { unparsedStdout = true; },
         handleEvent: (event, ctx) => {
+          protocolEventObserved = true;
           if (reducer.apply(event, context.session.mode === "managed")) {
             observer.onUpdate(reducer.state);
           }
@@ -201,25 +204,33 @@ export class ClaudeCliRunner implements StructuredRunnerAdapter {
         const trimmed = text.trim();
         if (trimmed) stdoutTail = trimmed.slice(-1024);
       },
-      finalize: (ctx, exitCode, signal, spawnError) => ({
-        state: reducer.state,
-        exitCode,
-        signal,
-        stderr: ctx.stderr,
-        stdoutTail,
-        primaryError: reducer.errorText,
-        stopReason: killedForQuestion ? "ask-user-question" : undefined,
-        spawnError,
-        ...cliUnacceptedFacts({
+      finalize: (ctx, exitCode, signal, spawnError) => {
+        // `<synthetic>` 助手消息是 CLI 自己写的拒绝说明，它带上了拒绝原文，
+        // 即使没有 is_error 的 result 事件也能定性。
+        const primaryError = reducer.errorText ?? reducer.syntheticRefusalText;
+        return {
           state: reducer.state,
-          primaryError: reducer.errorText,
-          protocolError: reducer.errorResultObserved,
-          unparsedStdout,
+          exitCode,
           signal,
-          progressed: reducer.assistantWorkObserved,
-          ...(spawnError ? { spawnError } : {}),
-        }),
-      }),
+          stderr: ctx.stderr,
+          stdoutTail,
+          primaryError,
+          stopReason: killedForQuestion ? "ask-user-question" : undefined,
+          spawnError,
+          ...cliUnacceptedFacts({
+            state: reducer.state,
+            primaryError,
+            protocolError: reducer.errorResultObserved || !!reducer.syntheticRefusalText,
+            unparsedStdout,
+            signal,
+            progressed: reducer.assistantWorkObserved,
+            exitCode,
+            previousSessionId,
+            noProtocolEvent: !protocolEventObserved,
+            ...(spawnError ? { spawnError } : {}),
+          }),
+        };
+      },
     });
   }
 }

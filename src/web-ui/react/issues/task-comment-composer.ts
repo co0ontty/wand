@@ -1,6 +1,9 @@
 import type { WandTaskComment } from "../../../task-types";
 import { createRequestId, HttpResponseError } from "../http-adapter";
 import { sha256Hex } from "../sha256";
+// 任务引用（`#TASK-133`）的解析与插入规则与三端共享契约一致，Web 直接复用同一份实现。
+export { commentReferenceQuery, insertCommentReference, parseTaskReferenceIds, taskReferenceSegments,
+  type TaskReferenceQuery } from "../../../task-comment-references.js";
 
 export function commentRequestRejected(error: unknown): boolean {
   return error instanceof HttpResponseError && error.status >= 400 && error.status < 500 && ![408, 409].includes(error.status);
@@ -34,7 +37,8 @@ export function commentMentionQuery(body: string, caret: number): CommentMention
 export function insertCommentMention(body: string, caret: number, name: string): { body: string; caret: number } {
   const index = Math.max(0, Math.min(caret, body.length));
   const start = commentMentionQuery(body, index)?.start ?? index;
-  const token = `@${name} `;
+  // 末尾已经紧跟空白时不再补空格，否则正文里会多出一个空格。
+  const token = `@${name}${/\s/.test(body[index] ?? "") ? "" : " "}`;
   return { body: body.slice(0, start) + token + body.slice(index), caret: start + token.length };
 }
 

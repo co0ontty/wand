@@ -993,6 +993,12 @@ export class ModelCatalogService {
       const saved = configured.find((group) => group.id === FREE_MODEL_GROUP_ID && group.provider === "pi");
       groups.push({ id: FREE_MODEL_GROUP_ID, provider: "pi", name: OPENROUTER_FREE_GROUP,
         models: orderModelIds(freeModels.map((model) => model.id), saved?.models ?? []) });
+      const piModels = catalog.piModels;
+      const seen = new Set(piModels.map((model) => model.id));
+      for (const model of freeModels) {
+        if (seen.has(model.id)) continue;
+        piModels.push({ ...model, group: OPENROUTER_FREE_GROUP });
+      }
     }
     for (const group of groups) {
       if (group.id === FREE_MODEL_GROUP_ID) continue; // Already published by OpenRouter as a single pool option.

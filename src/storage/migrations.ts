@@ -339,4 +339,23 @@ export const STORAGE_MIGRATIONS: readonly StorageMigration[] = [
     const columns = db.prepare("PRAGMA table_info(wand_task_comment_dispatches)").all() as Array<{ name: string }>;
     if (!columns.some(column => column.name === "result_start_fingerprint")) db.exec("ALTER TABLE wand_task_comment_dispatches ADD COLUMN result_start_fingerprint TEXT");
   } },
+  { version: 15, name: "task-comment-referenced-tasks", up: db => {
+    const columns = db.prepare("PRAGMA table_info(wand_task_comment_dispatches)").all() as Array<{ name: string }>;
+    if (!columns.some(column => column.name === "referenced_task_ids")) db.exec("ALTER TABLE wand_task_comment_dispatches ADD COLUMN referenced_task_ids TEXT NOT NULL DEFAULT '[]'");
+  } },
+  { version: 16, name: "employee-task-concurrency", up: db => {
+    const employeeColumns = db.prepare("PRAGMA table_info(silicon_employees)").all() as Array<{ name: string }>;
+    if (!employeeColumns.some(column => column.name === "max_concurrent_tasks")) {
+      db.exec("ALTER TABLE silicon_employees ADD COLUMN max_concurrent_tasks INTEGER");
+    }
+    const dispatchColumns = db.prepare("PRAGMA table_info(wand_task_comment_dispatches)").all() as Array<{ name: string }>;
+    if (!dispatchColumns.some(column => column.name === "agent_json")) {
+      db.exec("ALTER TABLE wand_task_comment_dispatches ADD COLUMN agent_json TEXT");
+    }
+    db.exec("CREATE INDEX IF NOT EXISTS idx_comment_dispatch_queue ON wand_task_comment_dispatches(state, employee_id)");
+  } },
+  // 未设置过的员工回填为新的默认并发上限 2；迁移内写死数值，保持当时语义。
+  { version: 17, name: "employee-task-concurrency-default", up: db => {
+    db.exec("UPDATE silicon_employees SET max_concurrent_tasks = 2 WHERE max_concurrent_tasks IS NULL");
+  } },
 ];

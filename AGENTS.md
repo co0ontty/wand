@@ -10,6 +10,7 @@ Wand 是本机 AI 工作台（Node.js + TypeScript ESM、Express + WebSocket）�
 - 不提交或打印密码、token、私钥及其他敏感信息。默认监听回环地址；命令与可执行路径来自可信配置，不把未校验的 HTTP 输入直接当作执行参数。相关边界写在对应配置文档或源码附近，不必全部堆进本文。
 - 沿用邻近代码风格：2 空格、双引号、分号，Node 内置模块用 `node:`，ESM 相对导入带 `.js`。高频事件与大输出考虑防抖、取消和有界缓冲。
 - 死代码凭引用与运行态证据清理，不能把公开 API、动态标识符、条件样式或迁移兼容项当死代码。需要时用 `npm run audit:remnants`。
+- 全仓文本搜索必须显式排除构建产物与缓存目录：`output/`、`node_modules/`、`build/`、`dist/`、`.git/`、`DerivedData/`。`output/` 里存过 Xcode 的 `CompilationCache.noindex`（单文件可达 24GB 稀疏体），`grep -r` 命中后会逐字节读完，表现为「机器卡住」且数小时不返回。仓库根搜索用 `rg`（自动读 `.gitignore`）或给 `grep` 带上 `--exclude-dir`；排除后重跑比等待更快。
 
 ## 常用入口
 

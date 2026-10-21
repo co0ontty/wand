@@ -1,5 +1,6 @@
 import { parseJsonResponse } from "../http-adapter";
-import { taskMutationCompleted } from "../task-changes";
+import { subscribeTaskChanges, taskMutationCompleted } from "../task-changes";
+import { createStartupPreload } from "../../startup-preload";
 import type { TaskOrganizeMode, TaskOrganizeTarget, OrganizeByTitleResult } from "../../../task-organize-contract";
 import type { ConversationOrganizationScope, ConversationOrganizationPreview, ConversationOrganizationJob } from "../../../conversation-organize-contract";
 
@@ -12,13 +13,11 @@ import type {
   CreateWorkspaceTaskRequest,
   LayoutNode,
   TaskWindowLayout,
-  NewProjectDefaults,
   RecentPath,
   UpdateWorkspaceRequest,
   UpdateWorkspaceTaskRequest,
   Workspace,
   WorkspaceDetail,
-  WorkspaceProvider,
   WorkspaceTask,
   WorkspaceTaskDetail,
   WorkspaceWorktreeOverview,
@@ -28,13 +27,8 @@ import type {
   WorkspacesRepository,
 } from "./types";
 import { record, stringValue } from "../json-utils";
-import { isProviderId } from "../../provider-identity";
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-
-function parseProvider(value: unknown): WorkspaceProvider | undefined {
-  return isProviderId(value) ? value : undefined;
-}
 
 function finiteCount(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
@@ -108,6 +102,10 @@ function normalizePaths(value: unknown): RecentPath[] {
 }
 
 export class HttpWorkspacesRepository implements WorkspacesRepository {
+  private readonly startupGroups = createStartupPreload(() => this.readTaskGroups());
+  preloadTaskGroups(): void { this.startupGroups.preload(); }
+  clearPreload(): void { this.startupGroups.clear(); }
+
   constructor(private readonly fetchImpl: FetchLike = (input, init) => globalThis.fetch(input, init)) {}
 
   async list(): Promise<Workspace[]> {
@@ -124,7 +122,11 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
     });
   }
 
-  async listTaskGroups(revision?: string): Promise<{ groups: TaskDirectoryGroup[]; revision?: string; unchanged: boolean }> {
+  listTaskGroups(revision?: string): Promise<{ groups: TaskDirectoryGroup[]; revision?: string; unchanged: boolean }> {
+    return revision === undefined ? this.startupGroups.load() : this.readTaskGroups(revision);
+  }
+
+  private async readTaskGroups(revision?: string): Promise<{ groups: TaskDirectoryGroup[]; revision?: string; unchanged: boolean }> {
     // An empty revision opts into the envelope on the first read; an omitted query returns legacy arrays.
     // Fetch both tiers once; groupSessionsByArchive keeps archived sessions out of active views.
     // The person submenu and the archive folds otherwise cannot represent the server\'s archived tier.
@@ -398,34 +400,6 @@ export class HttpWorkspacesRepository implements WorkspacesRepository {
   }
 }
 
-/** 加载新建项目默认值：默认 provider + 默认 cwd + 最近目录。镜像 new-session 的 load()。 */
-export async function loadNewProjectDefaults(
-  fetchImpl: FetchLike = (input, init) => globalThis.fetch(input, init),
-  options: { signal?: AbortSignal } = {},
-): Promise<NewProjectDefaults> {
-  const [configRes, recentRes] = await Promise.all([
-    fetchImpl("/api/config", { credentials: "same-origin", signal: options.signal }),
-    fetchImpl("/api/recent-paths", { credentials: "same-origin", signal: options.signal }),
-  ]);
-  const config = await parseJsonResponse<Record<string, unknown>>(configRes);
-  let recentPaths: RecentPath[] = [];
-  if (recentRes.ok) {
-    try {
-      recentPaths = normalizePaths(await recentRes.json());
-    } catch {
-      recentPaths = [];
-    }
-  }
-  return {
-    defaultProvider: parseProvider(config.defaultProvider) ?? "claude",
-    defaultEngine: config.defaultEngine === "sdk" ? "sdk" : "cli",
-    defaultCwd: stringValue(config.defaultCwd),
-    defaultSessionKind: config.defaultSessionKind === "pty" ? "pty" : "structured",
-    defaultTaskWorktree: config.defaultTaskWorktree !== false,
-    recentPaths,
-  };
-}
-
 /** 路径自动补全。镜像 new-session 的 suggestPaths()。 */
 export async function suggestWorkspacePaths(
   query: string,
@@ -443,3 +417,4 @@ export async function suggestWorkspacePaths(
 }
 
 export const httpWorkspacesRepository = new HttpWorkspacesRepository();
+subscribeTaskChanges(() => httpWorkspacesRepository.clearPreload());

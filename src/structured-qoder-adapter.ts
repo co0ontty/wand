@@ -43,6 +43,8 @@ export class QoderRunner implements StructuredRunnerAdapter {
     let primaryError: string | null = null;
     let protocolError = false;
     let unparsedStdout = false;
+    let protocolEventObserved = false;
+    const previousSessionId = context.session.claudeSessionId;
     return startStructuredCli({
       sessionId: context.session.id,
       file: "qodercli",
@@ -59,6 +61,7 @@ export class QoderRunner implements StructuredRunnerAdapter {
         onUnparsed: () => { unparsedStdout = true; },
         handleEvent: (event) => {
           if (event && typeof event === "object" && !Array.isArray(event)) {
+            protocolEventObserved = true;
             const record = event as Record<string, unknown>;
             if (record.type === "result" && record.subtype !== "success") {
               const errors = Array.isArray(record.errors)
@@ -75,24 +78,35 @@ export class QoderRunner implements StructuredRunnerAdapter {
         const trimmed = text.trim();
         if (trimmed) stdoutTail = trimmed.slice(-1024);
       },
-      finalize: (ctx, exitCode, signal, spawnError) => ({
-        state: reducer.state,
-        exitCode,
-        signal,
-        stderr: ctx.stderr,
-        stdoutTail,
-        primaryError,
-        ...(spawnError ? { spawnError } : {}),
-        ...cliUnacceptedFacts({
+      finalize: (ctx, exitCode, signal, spawnError) => {
+        // CLI 自己合成的拒绝回显（`<synthetic>`）也算 provider 亲自答复，
+        // 它带上了拒绝原文，即使没有 result 事件也能定性。
+        if (!primaryError && reducer.syntheticRefusalText) {
+          primaryError = reducer.syntheticRefusalText;
+          protocolError = true;
+        }
+        return {
           state: reducer.state,
-          primaryError,
-          protocolError: protocolError || reducer.errorResultObserved,
-          unparsedStdout,
+          exitCode,
           signal,
-          progressed: reducer.assistantWorkObserved,
+          stderr: ctx.stderr,
+          stdoutTail,
+          primaryError,
           ...(spawnError ? { spawnError } : {}),
-        }),
-      }),
+          ...cliUnacceptedFacts({
+            state: reducer.state,
+            primaryError,
+            protocolError: protocolError || reducer.errorResultObserved,
+            unparsedStdout,
+            signal,
+            progressed: reducer.assistantWorkObserved,
+            exitCode,
+            previousSessionId,
+            noProtocolEvent: !protocolEventObserved,
+            ...(spawnError ? { spawnError } : {}),
+          }),
+        };
+      },
     });
   }
 }

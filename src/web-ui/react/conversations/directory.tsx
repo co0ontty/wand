@@ -17,11 +17,12 @@ import { GroupEditor, PresetDetails } from "./group-editor";
 import { conversationUi } from "./state";
 import { installDirectoryStyles } from "./directory-styles.js";
 
-export function ConversationDirectory({ onSelect }: { onSelect(id: string, focusComposer?: boolean): void }): React.ReactElement {
+export function ConversationDirectory({ active = true, onSelect }: { active?: boolean; onSelect(id: string, focusComposer?: boolean): void }): React.ReactElement {
   React.useEffect(() => { installDirectoryStyles(); }, []);
-  const { employees, error, loading, reload } = useSiliconEmployees({ includeArchived: true });
+  // 隐藏时不读：团队名单与归档员工都是重列表，只在通讯录真的打开时拉。
+  const { employees, error, loading, reload } = useSiliconEmployees({ includeArchived: true, enabled: active });
   const self = useUserProfile();
-  const teamSource = useAiTeamListState(true);
+  const teamSource = useAiTeamListState(active);
   const { teams } = teamSource;
   const [tab, setTab] = usePageRouteState<"employees" | "presets">("directoryTab", "employees", routeEnum(["employees", "presets"], "employees"), String, "push");
   const [query, setQuery] = usePageRouteState("directoryQuery", "", undefined, undefined, "replace", 250);

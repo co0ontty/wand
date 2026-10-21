@@ -1,4 +1,4 @@
-import { Flex, Modal, Typography, type ModalProps } from "antd";
+import { Flex, Typography, type ModalProps } from "antd";
 import * as React from "react";
 import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { WandButton, type WandButtonKind } from "./button";
@@ -96,7 +96,19 @@ export function WandDialogSurface({ open, title, description, children, width = 
     (preferred ?? fallback)?.focus({ preventScroll: true });
     if (container && !preferred) stopDeferredFocus.current = watchDialogAutofocus(container, fallback);
   };
-  return <WandUiBoundary><Modal open={open} centered footer={null} destroyOnHidden
+  // Modal 只在真的打开对话框时才有意义：实现单独成块，第一次打开时才下载。
+  // 下载完成后保持挂载，关闭时 antd 的 afterClose 仍然按原契约触发。
+  const [ModalSurface, setModalSurface] = React.useState<React.ComponentType<React.ComponentProps<typeof import("antd").Modal>> | null>(null);
+  React.useEffect(() => {
+    if (!open || ModalSurface) return;
+    let alive = true;
+    void import("./dialog-modal").then(module => {
+      if (alive) setModalSurface(() => module.WandDialogModal);
+    });
+    return () => { alive = false; };
+  }, [open, ModalSurface]);
+  if (!ModalSurface) return <WandUiBoundary>{null}</WandUiBoundary>;
+  return <WandUiBoundary><ModalSurface open={open} centered footer={null} destroyOnHidden
     getContainer={portal ?? undefined} aria-describedby={description ? descriptionId : undefined} keyboard={false} closable={false}
     mask={{ closable: dismissable }} width={width} styles={styles} zIndex={zIndex} focusable={{ focusTriggerAfterClose: focusTriggerAfterClose ?? !onAfterClose }}
     afterClose={onAfterClose}
@@ -117,7 +129,7 @@ export function WandDialogSurface({ open, title, description, children, width = 
       {showClose && <WandButton kind="ghost" style={{ flexShrink: 0 }} aria-label={closeLabel} disabled={!dismissable} onClick={() => onOpenChange(false)}>{closeContent}</WandButton>}
     </Flex>}>
     {children}
-  </Modal></WandUiBoundary>;
+  </ModalSurface></WandUiBoundary>;
 }
 
 export function WandDialog<T>({ open, title, description, tone = "info", icon, actions, input,

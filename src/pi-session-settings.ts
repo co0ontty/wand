@@ -113,6 +113,38 @@ export function defaultPiCliSessionSettings(autoCompaction = true): PiSessionSet
     resources: { skills: [], mcpServers: [] }, autoResources: false };
 }
 
+/**
+ * 用户级默认设置的合并：只把本次 patch 真正出现的字段写进默认，其余字段保留默认原值。
+ *
+ * 会话里的改动是「用户此刻在这个会话里的选择」，不是「用户想要的全局默认」的全部内容：
+ * 一个从旧默认起步的会话（例如 autoResources=false）只改一个 Skill 时，不能把后来在别的
+ * 会话里开启的自动配置 / CodeMode 覆盖一起拉回旧值。`codemodeOverride: null` 是显式清除，
+ * 与「没提到这个字段」区分开。
+ */
+export function mergePiSessionDefaults(defaults: PiSessionSettings, patch: unknown): PiSessionSettings {
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) return defaults;
+  const touched = patch as Record<string, unknown>;
+  if (!Object.keys(touched).length) return defaults;
+  const next: PiSessionSettings = { ...defaults, tools: [...defaults.tools] };
+  if ("resources" in touched) next.resources = patchPiResourceSelection(touched.resources);
+  if ("lockedSkills" in touched) next.lockedSkills = [...(patchPiSessionSettings(defaults, { lockedSkills: touched.lockedSkills }).lockedSkills ?? [])];
+  for (const key of ["codemode", "tools", "globalTools", "goalMode", "localDecision", "autoCompaction", "autoResources"] as const) {
+    if (!(key in touched)) continue;
+    const patched = patchPiSessionSettings(defaults, { [key]: touched[key] });
+    if (key === "tools") next.tools = [...patched.tools];
+    else if (key === "codemode") next.codemode = patched.codemode;
+    else next[key] = patched[key] === true;
+  }
+  if ("codemodeOverride" in touched) {
+    const patched = patchPiSessionSettings(defaults, { codemodeOverride: touched.codemodeOverride });
+    if (patched.codemodeOverride === undefined) delete next.codemodeOverride;
+    else next.codemodeOverride = patched.codemodeOverride;
+  }
+  // 自动选择或锁定需要一个显式的资源边界，否则会退回旧会话的 Pi 自动发现。
+  if ((next.autoResources || next.lockedSkills?.length) && !next.resources) next.resources = { skills: [], mcpServers: [] };
+  return next;
+}
+
 /** Strict partial updates: an invalid/unknown field never silently enables a capability. */
 export function patchPiSessionSettings(current: PiSessionSettings, raw: unknown): PiSessionSettings {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Pi 设置必须是对象。");

@@ -4,6 +4,7 @@ import { OpenRouterSettingsPanel } from "./openrouter-panel";
 import { DaemonUpdateNotice } from "../shell/daemon-update-notice";
 import { ensureQrCodeLibrary } from "../../vendor-loader.js";
 import { ModelGroupsSettingsPanel } from "./model-groups-panel";
+import { PiDefaultsPanel } from "./pi-defaults-panel";
 import {
   type Dispatch,
   type SetStateAction,
@@ -1170,6 +1171,7 @@ export function AiSettingsTab({ snapshot, repository, refresh, setSnapshot }: Se
         </p>
       </SettingsSection>
 
+      <PiDefaultsPanel />
       <OpenRouterSettingsPanel snapshot={snapshot} repository={repository} setSnapshot={setSnapshot} />
       <ModelGroupsSettingsPanel snapshot={snapshot} repository={repository} setSnapshot={setSnapshot} />
 

@@ -252,13 +252,17 @@ test("免费分组变化发布到模型目录；CLI 探测不会回写旧免费�
     const catalog = new ModelCatalogService(() => ({ storage: fixture.storage,
       env: {}, commandRunner: async () => { throw new Error("offline"); },
       managedPiModels: () => fixture.service.catalog(),
+      managedPiModelMembers: () => fixture.service.members(),
     }));
     let changes = 0;
     fixture.service.onChanged(() => catalog.publishManagedPiModels());
     catalog.onChanged(() => { changes++; });
     await fixture.service.saveKey(secret);
     assert.equal(catalog.snapshot().piModels.find((model) => model.id === OPENROUTER_FREE_SELECTOR)?.label, "免费分组");
-    assert.equal(catalog.snapshot().piModels.some((model) => model.id === selector), false);
+    const listed = catalog.snapshot().piModels.find((model) => model.id === selector);
+    assert.equal(listed?.label, "Free Agent · vendor/agent:free");
+    assert.equal(listed?.group, "免费分组");
+    assert.equal(catalog.snapshot().models.some((model) => model.id === selector), false);
     fixture.service.clearKey();
     assert.equal(catalog.snapshot().piModels.some((model) => model.id === OPENROUTER_FREE_SELECTOR), false);
     await catalog.refresh();
@@ -297,7 +301,10 @@ test("设置接口仅管理员可管理 Key，普通客户端读到免费模型�
     assert.equal(JSON.parse(savedText).modelCount, 1);
     const catalog = await (await fetch(`${base}/api/models`, { headers: appHeaders })).json() as { piModels: Array<{ id: string; label: string }> };
     assert.deepEqual(catalog.piModels.filter((model) => model.id.startsWith(`${OPENROUTER_FREE_PROVIDER}/`))
-      .map((model) => ({ id: model.id, label: model.label })), [{ id: OPENROUTER_FREE_SELECTOR, label: "免费分组" }]);
+      .map((model) => ({ id: model.id, label: model.label })), [
+      { id: OPENROUTER_FREE_SELECTOR, label: "免费分组" },
+      { id: selector, label: "Free Agent · vendor/agent:free" },
+    ]);
     const settings = await (await fetch(`${base}/api/settings`, { headers: adminHeaders })).text();
     assert.equal(settings.includes(secret), false);
     const removed = await fetch(`${base}/api/settings/openrouter`, { method: "DELETE", headers: adminHeaders });

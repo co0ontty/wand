@@ -8,6 +8,11 @@
  * Static gzip estimates are delegated to check-bundle-budget.js (never
  * re-implemented here). Lab metrics come from measure-web-performance.js
  * against the installed service. INP and field CWV are not measured.
+ *
+ * A run that did not measure this tree's bytes, or whose data moved mid-run,
+ * fails on comparability instead of reporting per-metric regressions; see
+ * assessComparability(). --measurement <file> re-decides a stored run without
+ * a browser and can never record a baseline.
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -17,7 +22,9 @@ import {
   BASELINE_KIND,
   BASELINE_SCHEMA,
   LAB_GROUPS,
+  MEASUREMENT_KIND,
   allScenarios,
+  assessComparability,
   buildBaseline,
   compareFixture,
   compareScenario,
@@ -42,6 +49,7 @@ Options:
   --scenario <id>          Run/compare only matching scenarios (repeatable or comma-separated).
   --skip-static            Do not run scripts/check-bundle-budget.js (lab only).
   --baseline <path>        Baseline path; default scripts/web-performance-baseline.json.
+  --measurement <path>     Re-decide the gate from a stored measurements.json instead of re-measuring (cannot record a baseline).
   --output <dir>           Report directory; default output/web-performance.
   --help                   Show this help.
 
@@ -53,7 +61,7 @@ INP is not measured and is never reported.`);
 function parseArgs(argv) {
   const options = {
     accept: false, final: false, conversation: null, rounds: 3, scenarios: [],
-    skipStatic: false, baseline: DEFAULT_BASELINE, output: DEFAULT_OUTPUT, help: false,
+    skipStatic: false, baseline: DEFAULT_BASELINE, output: DEFAULT_OUTPUT, measurement: null, help: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -76,10 +84,14 @@ function parseArgs(argv) {
     else if (arg.startsWith("--baseline=")) options.baseline = path.resolve(root, arg.slice("--baseline=".length));
     else if (arg === "--output") options.output = path.resolve(root, take(arg));
     else if (arg.startsWith("--output=")) options.output = path.resolve(root, arg.slice("--output=".length));
+    else if (arg === "--measurement") options.measurement = path.resolve(root, take(arg));
+    else if (arg.startsWith("--measurement=")) options.measurement = path.resolve(root, arg.slice("--measurement=".length));
     else throw new Error(`Unknown option: ${arg}. Use --help.`);
   }
   if (!Number.isInteger(options.rounds) || options.rounds < 3) throw new Error("--rounds must be an integer >= 3.");
   if (options.final && !options.accept) throw new Error("--final is only valid with --accept-baseline.");
+  if (options.measurement && !existsSync(options.measurement)) throw new Error(`No measurement file at ${options.measurement}.`);
+  if (options.measurement && options.accept) throw new Error("--measurement replays a stored run; it cannot record a baseline.");
   const known = new Set(allScenarios().map(scenario => scenario.id));
   for (const id of options.scenarios) if (!known.has(id)) throw new Error(`Unknown scenario: ${id}. Known: ${[...known].join(", ")}`);
   if (options.accept && options.scenarios.length > 0) throw new Error("--accept-baseline always records every scenario; remove --scenario.");
@@ -142,31 +154,6 @@ function runStaticBudget() {
   };
 }
 
-function majorVersion(value) {
-  return typeof value === "string" ? value.split(".")[0] : null;
-}
-
-function validateEnvironment(measurement, baseline) {
-  const failures = [];
-  const warnings = [];
-  const current = measurement.environment ?? {};
-  const base = baseline.environment ?? {};
-  const add = (message) => {
-    if (baseline.status === "recorded") failures.push(message);
-    else warnings.push(message);
-  };
-  if (base.serviceVersion && current.serviceVersion && current.serviceVersion !== base.serviceVersion) {
-    add(`service version changed from ${base.serviceVersion} to ${current.serviceVersion}; re-record the baseline after an intentional install.`);
-  }
-  if (base.browserVersion && current.browserVersion && majorVersion(current.browserVersion) !== majorVersion(base.browserVersion)) {
-    add(`browser major version changed from ${base.browserVersion} to ${current.browserVersion}; timings are not comparable.`);
-  }
-  if (current.buildIntegrity?.servedRuntimeMatchesSource === false) {
-    add("installed runtime does not match src/web-ui/content; rebuild/install before trusting this lab run.");
-  }
-  return { failures, warnings };
-}
-
 function validateMeasurementForBaseline(measurement) {
   const problems = [];
   const required = ["fcpMs", "lcpMs", "contentMs", "cls", "longTaskOver50Ms", "domNodes", "imageCount", "imageBytes", "apiBytes", "assetBytes", "totalBytes"];
@@ -194,6 +181,11 @@ function validateNoInp(...scenarioMaps) {
     }
   }
   return failures;
+}
+
+function displayPath(target) {
+  const relative = path.relative(root, target);
+  return relative && !relative.startsWith("..") ? relative : target;
 }
 
 function formatNumber(value) {
@@ -253,6 +245,7 @@ function renderSummary(measurement, staticSource, gate) {
     lines.push(`- Baseline accepted: ${gate.status}.`);
   } else if (gate) {
     lines.push(`- Result: ${gate.passed ? "PASS" : "FAIL"}`);
+    if (gate.replayed) lines.push("- Replayed stored measurement: no browser was launched for this verdict.");
     for (const failure of gate.failures ?? []) lines.push(`- FAIL: ${failure}`);
     for (const warning of gate.warnings ?? []) lines.push(`- WARN: ${warning}`);
   }
@@ -310,27 +303,44 @@ async function main() {
     ? { available: false, reason: "--skip-static" }
     : runStaticBudget();
   if (options.final && !staticSource.available) throw new Error("--final requires the static gzip budget; remove --skip-static.");
-  const measurement = await measureWebPerformance({
-    rounds: options.rounds,
-    conversationId,
-    conversationHash,
-    scenarioIds: options.scenarios.length ? options.scenarios : null,
-    onProgress: message => console.log(message),
-  });
+  let measurement;
+  if (options.measurement) {
+    // Replaying a stored run re-decides the gate from the bytes that were actually
+    // observed; it must never re-record them, and it never launches a browser.
+    measurement = JSON.parse(readFileSync(options.measurement, "utf8"));
+    if (measurement.kind !== MEASUREMENT_KIND) throw new Error(`${options.measurement} is not a ${MEASUREMENT_KIND} file.`);
+    if (!measurement.scenarios || typeof measurement.scenarios !== "object") throw new Error(`${options.measurement} has no scenarios.`);
+    if (!measurement.environment || !measurement.fixture) throw new Error(`${options.measurement} has no environment or fixture block.`);
+    console.log(`[web-perf] replaying ${displayPath(options.measurement)}; no browser was launched.`);
+  } else {
+    measurement = await measureWebPerformance({
+      rounds: options.rounds,
+      conversationId,
+      conversationHash,
+      scenarioIds: options.scenarios.length ? options.scenarios : null,
+      onProgress: message => console.log(message),
+    });
+    if (measurement.environment.buildIntegrity) measurement.environment.buildIntegrity.staticBuildIdentity = staticSource.buildIdentity ?? null;
+  }
   measurement.environment.staticChecked = staticSource.available;
-  if (measurement.environment.buildIntegrity) measurement.environment.buildIntegrity.staticBuildIdentity = staticSource.buildIdentity ?? null;
   mkdirSync(options.output, { recursive: true });
   const measurementPath = path.join(options.output, "measurements.json");
-  writeFileSync(measurementPath, `${JSON.stringify(measurement, null, 2)}\n`);
+  if (options.measurement && path.resolve(options.measurement) === measurementPath) {
+    console.log("[web-perf] replay target is the report file; leaving it untouched.");
+  } else {
+    writeFileSync(measurementPath, `${JSON.stringify(measurement, null, 2)}\n`);
+  }
   console.log(`[web-perf] fixture ${measurement.fixture.conversationHash}, turns ${measurement.fixture.conversationTurns}, sessions ${measurement.fixture.dataScale?.sessionsTotal}, tasks ${measurement.fixture.dataScale?.wandTasksTotal}`);
-  if (measurement.fixture.stableDuringRun === false) console.warn("[web-perf] data scale changed during the run; the report marks it unstable.");
+  if (measurement.fixture.stableDuringRun === false) console.warn("[web-perf] data scale moved between the pre-run and post-run reads; the run is not comparable.");
   if (options.accept) {
     validateMeasurementForBaseline(measurement);
-    if (options.final && measurement.fixture.stableDuringRun !== true) {
-      throw new Error("Refusing a final baseline while the data scale changed during the run. Re-run when the fixture is stable.");
+    // Recording unattributable numbers is how a baseline becomes fiction: the bytes
+    // must be the ones this tree builds and the data must not have moved mid-run.
+    if (measurement.fixture.stableDuringRun !== true) {
+      throw new Error("Refusing to record a baseline while the data scale changed during the run. Re-run when the fixture is stable.");
     }
-    if (options.final && measurement.environment.buildIntegrity?.servedRuntimeMatchesSource !== true) {
-      throw new Error("Refusing a final baseline when the installed runtime does not match src/web-ui/content.");
+    if (measurement.environment.buildIntegrity?.servedRuntimeMatchesSource !== true) {
+      throw new Error("Refusing to record a baseline when the installed runtime does not match src/web-ui/content. Build and install this tree first.");
     }
     const next = buildBaseline({
       environment: measurement.environment,
@@ -352,12 +362,11 @@ async function main() {
   }
   const failures = [];
   const warnings = [];
-  const environmentCheck = validateEnvironment(measurement, previous);
-  failures.push(...environmentCheck.failures);
-  warnings.push(...environmentCheck.warnings);
   const fixtureCheck = compareFixture(measurement.fixture, previous.fixture);
-  failures.push(...fixtureCheck.failures);
   warnings.push(...fixtureCheck.warnings);
+  const comparability = assessComparability(measurement, previous, { fixtureFailures: fixtureCheck.failures });
+  failures.push(...comparability.reasons);
+  warnings.push(...comparability.warnings);
   const compareIds = options.scenarios.length ? options.scenarios : Object.keys(previous.scenarios);
   if (options.scenarios.length) warnings.push("partial gate run: only the requested scenarios were compared.");
   const rows = [];
@@ -369,10 +378,14 @@ async function main() {
     const result = compareScenario(id, currentScenario, baseScenario, {
       profile: baseScenario.network ?? "normal",
       cache: baseScenario.cache ?? "cold",
+      enforceTolerances: comparability.comparable,
     });
     failures.push(...result.failures);
     warnings.push(...result.warnings);
     rows.push(...result.rows);
+  }
+  if (!comparability.comparable) {
+    warnings.push("metric tolerances were not applied: this run did not measure the bytes and data the baseline describes, so its deltas are not evidence either way.");
   }
   // The pinned conversation's mounted message scale is part of the fixture,
   // not a performance tolerance: a change invalidates chat comparisons.
@@ -392,7 +405,7 @@ async function main() {
   }
   if (previous.status === "provisional") warnings.push("baseline is provisional; re-record after P1/P2 settle before treating it as final.");
   const passed = failures.length === 0;
-  const gate = { passed, failures: [...new Set(failures)], warnings: [...new Set(warnings)], rows };
+  const gate = { passed, replayed: Boolean(options.measurement), failures: [...new Set(failures)], warnings: [...new Set(warnings)], rows };
   writeFileSync(path.join(options.output, "gate.json"), `${JSON.stringify(gate, null, 2)}\n`);
   writeFileSync(path.join(options.output, "summary.md"), renderSummary(measurement, staticSource, gate));
   console.log("[web-perf] scenario metrics:");
@@ -401,7 +414,8 @@ async function main() {
     console.log(
       `  ${id.padEnd(24)} FCP ${formatNumber(m.fcpMs).padStart(7)}  LCP ${formatNumber(m.lcpMs).padStart(7)}  ` +
       `content ${formatNumber(m.contentMs).padStart(7)}  CLS ${formatNumber(m.cls).padStart(6)}  ` +
-      `long>50 ${formatNumber(m.longTaskOver50Ms).padStart(7)}  DOM ${formatNumber(m.domNodes).padStart(7)}  ` +
+      `long>50 ${formatNumber(m.longTaskOver50Ms).padStart(7)} (${formatNumber(m.longTaskCount)}x, max ${formatNumber(m.longTaskMaxMs)})  ` +
+      `DOM ${formatNumber(m.domNodes).padStart(7)}  ` +
       `total ${formatNumber(m.totalBytes).padStart(9)}  cache ${formatNumber(m.cacheHitRatio)}`,
     );
   }
@@ -415,7 +429,8 @@ async function main() {
     process.exitCode = 1;
     return;
   }
-  console.log(`[web-perf] PASS (${compareIds.length} scenarios, ${options.rounds} rounds); report: ${path.relative(root, path.join(options.output, "summary.md"))}`);
+  const roundsLabel = options.measurement ? "stored rounds" : `${options.rounds} rounds`;
+  console.log(`[web-perf] PASS (${compareIds.length} scenarios, ${roundsLabel}); report: ${displayPath(path.join(options.output, "summary.md"))}`);
 }
 
 main().catch(error => {

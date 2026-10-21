@@ -1,5 +1,6 @@
-import { Dropdown, type MenuProps, type DropdownProps } from "antd";
+import { type MenuProps, type DropdownProps } from "antd";
 import * as React from "react";
+import type { DropdownSurfaceProps } from "./dropdown-surface";
 import { WandButton } from "./button";
 import { classNames } from "./class-names";
 import { WandIcon, type WandIconName, type WandIconSlot } from "./icons";
@@ -73,6 +74,18 @@ export function WandDropdownMenu({ children, contextTrigger, triggers = ["click"
     if (next) selectionFocusTarget.current = null;
     setInternalOpen(next); onOpenChange?.(next);
   };
+  // 弹层实现（antd Dropdown + Menu）单独成块：菜单只在真的点开时才需要。
+  // 触发器与菜单项注册留在首屏，点开时按需下载弹层本体。
+  const [Surface, setSurface] = React.useState<React.ComponentType<DropdownSurfaceProps> | null>(null);
+  const surfaceRequest = React.useRef<Promise<void> | null>(null);
+  const loadSurface = React.useCallback((): Promise<void> => {
+    if (Surface) return Promise.resolve();
+    if (!surfaceRequest.current) {
+      surfaceRequest.current = import("./dropdown-surface").then(module => { setSurface(() => module.DropdownSurface); });
+    }
+    return surfaceRequest.current;
+  }, [Surface]);
+  React.useEffect(() => { if (shown) void loadSurface(); }, [shown, loadSurface]);
   const parts = React.Children.toArray(children).filter(React.isValidElement);
   const trigger = parts.find(part => part.type === WandDropdownMenuTrigger) as React.ReactElement<WandDropdownMenuTriggerProps> | undefined;
   const content = parts.find(part => part.type === WandDropdownMenuContent) as React.ReactElement<WandDropdownMenuContentProps> | undefined;
@@ -80,29 +93,48 @@ export function WandDropdownMenu({ children, contextTrigger, triggers = ["click"
   if ((!trigger && !contextTrigger) || !content) return null;
   const { align = "start", side = "bottom", sideOffset = 6, container, collisionPadding = 12, popupOwner,
     className, children: declarations, ...attributes } = content.props;
+  const menu: MenuProps = { items: [...registeredItems.values()].sort((a, b) => {
+    if (!a.marker || !b.marker) return 0;
+    const position = a.marker.compareDocumentPosition(b.marker);
+    return position & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : position & Node.DOCUMENT_POSITION_PRECEDING ? 1 : 0;
+  }).map(entry => entry.item), selectable: false, onClick: () => {
+    if (closeOnSelect) {
+      selectionFocusTarget.current = triggerRef.current;
+      change(false);
+    }
+  } };
+  const triggerElement = contextTrigger ?? React.cloneElement(trigger!, { "aria-haspopup": "menu", "aria-expanded": shown, "aria-controls": attributes.id });
+  const baseProps = (contextTrigger ?? trigger!)?.props as Record<string, unknown>;
+  // 弹层还没到时，触发器自己先接住这一次交互：菜单在实现到达后展开。
+  const pendingTrigger = React.cloneElement(contextTrigger ?? trigger!, {
+    "aria-haspopup": "menu", "aria-expanded": shown, "aria-controls": attributes.id,
+    onClick: (event: React.MouseEvent) => {
+      (baseProps as { onClick?: (event: React.MouseEvent) => void })?.onClick?.(event);
+      if (triggers.includes("click")) change(true);
+    },
+    onMouseEnter: (event: React.MouseEvent) => {
+      (baseProps as { onMouseEnter?: (event: React.MouseEvent) => void })?.onMouseEnter?.(event);
+      if (triggers.includes("hover")) change(true);
+    },
+    onContextMenu: (event: React.MouseEvent) => {
+      (baseProps as { onContextMenu?: (event: React.MouseEvent) => void })?.onContextMenu?.(event);
+      if (triggers.includes("contextMenu")) change(true);
+    },
+  } as React.HTMLAttributes<HTMLElement>);
   return <WandUiBoundary>
     <MenuRegistration.Provider value={register}>{declarations}</MenuRegistration.Provider>
-    <Dropdown ref={triggerRef} open={shown} onOpenChange={(next, info) => {
-      if (info.source === "menu" && !closeOnSelect) return;
-      change(next);
-    }} trigger={triggers}
-      getPopupContainer={() => container ?? portal ?? document.body}
-      placement={popupPlacement(side, align)} destroyOnHidden autoFocus
-      align={{ offset: popupOffset(side, sideOffset), overflow: { adjustX: true, adjustY: true, shiftX: collisionPadding, shiftY: collisionPadding } }}
-      classNames={{ root: classNames("wand-ui-dropdown-content", className) }}
-      menu={{ items: [...registeredItems.values()].sort((a, b) => {
-        if (!a.marker || !b.marker) return 0;
-        const position = a.marker.compareDocumentPosition(b.marker);
-        return position & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : position & Node.DOCUMENT_POSITION_PRECEDING ? 1 : 0;
-      }).map(entry => entry.item), selectable: false, onClick: () => {
-        if (closeOnSelect) {
-          selectionFocusTarget.current = triggerRef.current;
-          change(false);
-        }
-      } }}
-      popupRender={menu => <div {...attributes} ref={bindPopup} data-wand-popup-owner={popupOwner ?? attributes.id}>{menu}</div>}>
-      {contextTrigger ?? React.cloneElement(trigger!, { "aria-haspopup": "menu", "aria-expanded": shown, "aria-controls": attributes.id })}
-    </Dropdown>
+    {Surface
+      ? <Surface trigger={triggerElement} triggerRef={triggerRef} open={shown} onOpenChange={(next, info) => {
+          if (info.source === "menu" && !closeOnSelect) return;
+          change(next);
+        }} triggers={triggers}
+        getPopupContainer={() => container ?? portal ?? document.body}
+        placement={popupPlacement(side, align)} destroyOnHidden autoFocus
+        align={{ offset: popupOffset(side, sideOffset), overflow: { adjustX: true, adjustY: true, shiftX: collisionPadding, shiftY: collisionPadding } }}
+        classNames={{ root: classNames("wand-ui-dropdown-content", className) }}
+        menu={menu}
+        popupRender={menuNode => <div {...attributes} ref={bindPopup} data-wand-popup-owner={popupOwner ?? attributes.id}>{menuNode}</div>}/>
+      : pendingTrigger}
   </WandUiBoundary>;
 }
 export function WandDropdownMenuTrigger({ render, className, ...props }: WandDropdownMenuTriggerProps) {

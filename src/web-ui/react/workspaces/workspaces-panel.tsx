@@ -297,6 +297,8 @@ function TaskItem({
   task,
   visibleSessions = task.sessions,
   hasChildExecution = false,
+  childTaskCount = 0,
+  children,
   descendantSessionCount = 0,
   now,
   liveTitles,
@@ -328,6 +330,8 @@ function TaskItem({
   /** Display-only filtering; task.sessions remains the full mutation scope. */
   visibleSessions?: readonly WorkspaceSessionSummary[];
   hasChildExecution?: boolean;
+  childTaskCount?: number;
+  children?: React.ReactNode;
   descendantSessionCount?: number;
   now: number;
   liveTitles?: Readonly<Record<string, string>>;
@@ -382,6 +386,7 @@ function TaskItem({
     ? task.sessions.some(session => session.id === activeSessionId)
     : activeTaskId === task.id;
   const sessionsId = React.useId();
+  const childrenId = React.useId();
   const teamId = React.useId();
   const teamHistoryId = React.useId();
   const archivedId = React.useId();
@@ -395,14 +400,17 @@ function TaskItem({
   const totalSessionCount = task.sessions.length;
   const sessionToggleRef = React.useRef<HTMLButtonElement>(null);
   const [open, setSessionsOpen] = useSidebarExpansion(
-    `task.${task.id}`, true, false, Boolean(defaultGroup) || isActive || isOnlyTask,
+    `task.${task.id}`, true, false, Boolean(defaultGroup) || isActive || isOnlyTask || hasChildExecution,
   );
   // Selecting a child changes the main content, not the user's disclosure choice.
   const toggleSessionsOpen = (): void => setSessionsOpen(!open);
   const teamActivity = sidebarAggregateState(shownTeamSplit.live);
-  const taskAggregate = sidebarAggregateState(visibleSessions);
+  const taskAggregate = sidebarAggregateState(visibleSessions, task);
   const canArchive = task.canArchive !== false && !task.sessions.some(isArchiveBlocked);
   const countId = React.useId();
+  const hasDisclosure = visibleSessions.length > 0 || hasChildExecution || archivedSessions.length > 0;
+  const countLabel = childTaskCount > 0 ? `${childTaskCount} 项`
+    : totalSessionCount > 0 ? visibleSessions.length === totalSessionCount ? String(totalSessionCount) : `${visibleSessions.length}/${totalSessionCount}` : "";
 
   const submitRename = async () => {
     if (busy || !onRename) return;
@@ -500,7 +508,7 @@ function TaskItem({
       data-sidebar-default-task-id={defaultGroup?.workspaceId}
       aria-busy={busy || undefined}
       onKeyDown={(event) => {
-        if (event.key !== "Escape" || event.defaultPrevented || !open || taskMenuOpen
+        if (event.key !== "Escape" || event.defaultPrevented || !open || !hasDisclosure || taskMenuOpen
           || !event.currentTarget.contains(event.target as Node)) return;
         event.preventDefault(); event.stopPropagation();
         sessionToggleRef.current?.focus({ preventScroll: true });
@@ -540,30 +548,40 @@ function TaskItem({
         manageMode && "managing",
         manageMode && selected && "selected",
       )}>
-        <WandIcon name={isolated ? "branch" : "task"} size={14}/>
-        <WandNavigationLink style={{ flex: 1, minWidth: 0, height: "auto", whiteSpace: "normal", justifyContent: "flex-start", textAlign: "start" }}
+        <span className="workspace-task-disclosure-slot">
+          {hasDisclosure && !manageMode ? <WandIconButton ref={sessionToggleRef} className="workspace-task-disclosure"
+            disabled={busy} aria-label={`${open ? "收起" : "展开"}任务 ${task.name}`}
+            aria-expanded={open} aria-controls={hasChildExecution ? childrenId : sessionsId}
+            onClick={event => { event.stopPropagation(); anchorSidebarDisclosure(event.currentTarget, toggleSessionsOpen); }}
+            onKeyDown={event => sidebarDisclosureKeys(event, open, setSessionsOpen)}>
+            <SidebarChevron open={open} size={12}/>
+          </WandIconButton> : null}
+        </span>
+        <WandNavigationLink style={{ flex: 1, minWidth: 0, height: "auto", whiteSpace: "nowrap", justifyContent: "flex-start", textAlign: "start" }}
           className="workspace-task-main"
           orientation="vertical"
           size="sm"
           active={isActive}
           aria-pressed={manageMode ? selected : undefined}
-          aria-expanded={manageMode ? undefined : open}
-          aria-controls={sessionsId}
+          aria-expanded={manageMode || onOpen ? undefined : open}
+          aria-controls={onOpen ? undefined : sessionsId}
           title={`${task.name}\n${task.worktree?.path ?? task.cwd}`}
           render={<button type="button" onClick={event => {
             if (manageMode) { (onToggleSelect ?? onOpen)?.(); return; }
-            if (totalSessionCount === 0) { onOpen?.(); return; }
-            anchorSidebarDisclosure(event.currentTarget, toggleSessionsOpen);
+            if (onOpen) { onOpen(); return; }
+            if (hasDisclosure) anchorSidebarDisclosure(event.currentTarget, toggleSessionsOpen);
           }} onKeyDown={manageMode ? undefined : event => sidebarDisclosureKeys(event, open, setSessionsOpen)}/>}
         >
           {manageMode && <ManageCheck checked={selected} label={`选择任务 ${task.name}`}/>}
           <span style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} className="workspace-task-name">{task.name}</span>
         </WandNavigationLink>
-        <span id={countId} className="workspace-task-count" title={`${taskAggregate.description}，自身 ${totalSessionCount} 个会话${descendantSessionCount ? `，后代 ${descendantSessionCount} 个会话（去重）` : ""}`}>
-          {descendantSessionCount > 0 ? visibleSessions.length + descendantSessionCount : visibleSessions.length === totalSessionCount ? totalSessionCount : `${visibleSessions.length}/${totalSessionCount}`}
-        </span>
-        <span className={`sidebar-head-activity tone-${taskAggregate.tone}`} title={taskAggregate.description}
-          aria-label={taskAggregate.description}>{taskAggregate.label ? <Badge status={taskAggregate.tone === "warning" ? "warning" : taskAggregate.tone === "success" ? "success" : "processing"}/> : null}</span>
+        {countLabel ? <span id={countId} className="workspace-task-count"
+          title={`${childTaskCount ? `${childTaskCount} 个直接子任务，` : ""}${taskAggregate.description}，自身 ${totalSessionCount} 个会话${descendantSessionCount ? `，后代 ${descendantSessionCount} 个会话（去重）` : ""}`}>{countLabel}</span> : null}
+        {taskAggregate.label ? <span className={`sidebar-task-status tone-${taskAggregate.tone}`} title={taskAggregate.description}
+          aria-label={taskAggregate.label}>
+          <WandIcon name={taskAggregate.label === "排队中" ? "history" : taskAggregate.label === "待处理" ? "warning" : taskAggregate.label === "刚完成" ? "check" : "circle"} size={11}/>
+          <span>{taskAggregate.label}</span>
+        </span> : null}
       </Flex>} menu={{ items: [
         ...(onOpen ? [{ key: "open", disabled: busy, icon: <WandIcon name="task"/>, label: "打开任务" }] : []),
         { key: "new", disabled: busy, icon: <WandIcon name="plus"/>, label: "新建会话" },
@@ -589,7 +607,7 @@ function TaskItem({
       } }}/>
 
       <SidebarSessionArea id={sessionsId} open={open} label={`任务 ${task.name}`} toggleRef={sessionToggleRef}
-        toggleClassName="workspace-task-chevron-btn" disabled={busy} hasSessions={visibleSessions.length > 0} onOpenChange={setSessionsOpen}>
+        toggleClassName="workspace-task-chevron-btn" inlineToggle disabled={busy} hasSessions={visibleSessions.length > 0 || archivedSessions.length > 0} onOpenChange={setSessionsOpen}>
       <SidebarSessionPreview sessions={visibleSessions} expanded={open || manageMode}
         label={`任务 ${task.name} 的会话预览`} className="sidebar-session-preview-task"
         selectedSessionId={activeSessionId} liveTitles={liveTitles} disabled={manageMode || busy}
@@ -603,7 +621,7 @@ function TaskItem({
           onOpenSession(session);
         }}/>
       <SidebarDisclosure id={sessionsId} open={open}>
-        {totalSessionCount === 0 && !hasChildExecution && !manageMode && <WandButton kind="ghost" type="button" className="workspace-task-empty"
+        {totalSessionCount === 0 && !hasChildExecution && task.executionStatus !== "queued" && !manageMode && <WandButton kind="ghost" type="button" className="workspace-task-empty"
           onClick={onRequestNewSession}><WandIcon name="plus" size={12}/>{defaultGroup ? "添加会话" : "添加会话，或拖入已有会话"}</WandButton>}
         <Flex vertical gap={4} style={{ paddingInlineStart: 6 }} className="workspace-task-sessions">
           {(manageMode ? task.sessions : shownSessions).map((session, index) => (
@@ -713,6 +731,9 @@ function TaskItem({
       )}
       </SidebarDisclosure>
       </SidebarSessionArea>
+      {hasChildExecution && children ? <SidebarDisclosure id={childrenId} open={open || manageMode}>
+        <div className="workspace-task-children">{children}</div>
+      </SidebarDisclosure> : null}
     </div>
   );
 }
@@ -768,7 +789,8 @@ function TaskGroupSection({
   onOpenDialog?: () => void;
 }) {
   const visibleSessionCount = new Set([...group.standaloneSessions, ...group.tasks.flatMap(task => filterSidebarTaskSessions(group, task, searchQuery, liveTitles))].map(session => session.id)).size;
-  const [directoryOpen, setDirectoryOpen] = useSidebarExpansion(`project.${group.workspaceId}`, false, true, undefined, visibleSessionCount > 0);
+  const hasQueuedTasks = group.tasks.some(task => task.executionStatus === "queued");
+  const [directoryOpen, setDirectoryOpen] = useSidebarExpansion(`project.${group.workspaceId}`, false, true, undefined, visibleSessionCount > 0 || hasQueuedTasks);
   const [worktreeDialogOpen, setWorktreeDialogOpen] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
   const [directoryActionError, setDirectoryActionError] = React.useState("");
@@ -788,7 +810,10 @@ function TaskGroupSection({
   const tasksId = React.useId();
   const defaultTask = defaultDirectoryTask(group);
   const open = preview || directoryOpen;
-  const groupActivity = sidebarAggregateState([...group.tasks.flatMap((task) => task.sessions), ...group.standaloneSessions]);
+  const groupActivity = sidebarAggregateState([...group.tasks.flatMap((task) => task.sessions), ...group.standaloneSessions], {
+    executionStatus: group.tasks.some(task => task.executionStatus === "running") ? "running" : hasQueuedTasks ? "queued" : null,
+    queuedExecutionCount: group.tasks.reduce((count, task) => count + (task.queuedExecutionCount ?? 0), 0),
+  });
   const canDelete = !group.synthetic && !group.global;
   // 全局（不挂目录）不参与重命名；合成目录用目录接口改名。
   const canRenameDirectory = !group.global;
@@ -1021,7 +1046,7 @@ function TaskGroupSection({
       } }}/>}
       <SidebarDisclosure id={tasksId} open={open}>
         <Flex vertical gap={4} style={{ paddingInlineStart: 4 }} className="workspace-tasks">
-          {displayMode === "active" && visibleSessionCount === 0 ? (
+          {displayMode === "active" && visibleSessionCount === 0 && !hasQueuedTasks ? (
             <Typography.Paragraph type="secondary" className="sidebar-group-empty">暂无活动会话</Typography.Paragraph>
           ) : null}
           {(defaultTask.sessions.length > 0 || Boolean(searchQuery.trim() && defaultTask.archivedSessions?.length)) && <TaskItem
@@ -1069,14 +1094,14 @@ function TaskGroupSection({
               }
               return sessions.size;
             };
-            const renderTask = (task: TaskSummary, ancestors: string[] = []): React.ReactNode => <div key={task.id} style={{ marginLeft: ancestors.length ? 12 : 0 }}>
-              {task.sessions.length === 0 && <Typography.Text type="secondary">{group.tasks.some(t => t.parentWorkspaceTaskId === task.id) ? "子任务有执行记录 · 主目标待验收" : "尚未派发 · 计划项"}</Typography.Text>}
+            const renderTask = (task: TaskSummary, ancestors: string[] = []): React.ReactNode => <div key={task.id}>
 
             <TaskItem
               key={task.id}
               task={task}
               descendantSessionCount={descendantCount(task.id)}
               hasChildExecution={group.tasks.some(child => child.parentWorkspaceTaskId === task.id)}
+              childTaskCount={group.tasks.filter(child => child.parentWorkspaceTaskId === task.id).length}
               visibleSessions={filterSidebarTaskSessions(group, task, searchQuery, liveTitles)}
               now={now}
               liveTitles={liveTitles}
@@ -1121,8 +1146,9 @@ function TaskGroupSection({
               }}
               onDelete={() => handleDeleteTask(task)}
               onArchive={() => handleArchiveTask(task)}
-            />
+            >
               {group.tasks.filter(child => child.parentWorkspaceTaskId === task.id && ![...ancestors, task.id].includes(child.id)).map(child => renderTask(child, [...ancestors, task.id]))}
+            </TaskItem>
             </div>;
             return group.tasks.filter(task => !task.parentWorkspaceTaskId || !group.tasks.some(parent => parent.id === task.parentWorkspaceTaskId)).map(task => renderTask(task));
           })()}

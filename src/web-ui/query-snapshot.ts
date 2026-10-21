@@ -10,12 +10,20 @@
 export interface QuerySnapshotLoadOptions {
   /** Ignore the committed value, but still join an already-running request. */
   force?: boolean;
+  /**
+   * Serve the committed value only while the last real read is younger than
+   * this budget. Local publishes do not reset the clock: they keep the value
+   * fresh for the UI without pretending the server was re-read.
+   */
+  maxAgeMs?: number;
 }
 
 export interface QuerySnapshot<T> {
   peek(): T | null;
   load(options?: QuerySnapshotLoadOptions): Promise<T>;
   publish(value: T): void;
+  /** Keep the committed value for the UI, but require the next read to hit the server again. */
+  stale(): void;
   invalidate(): void;
   subscribe(listener: () => void): () => void;
 }
@@ -32,6 +40,8 @@ export function createQuerySnapshot<T>(
   let value: T | null = null;
   let pending: Promise<T> | null = null;
   let generation = 0;
+  let lastReadAt = 0;
+  let needsRead = false;
   const listeners = new Set<() => void>();
 
   const notify = (): void => {
@@ -45,7 +55,10 @@ export function createQuerySnapshot<T>(
   };
 
   const load = (loadOptions?: QuerySnapshotLoadOptions): Promise<T> => {
-    if (!loadOptions?.force && value !== null) return Promise.resolve(value);
+    if (!loadOptions?.force && value !== null && !needsRead) {
+      const maxAge = loadOptions?.maxAgeMs;
+      if (maxAge === undefined || Date.now() - lastReadAt <= maxAge) return Promise.resolve(value);
+    }
     if (pending) return pending;
     const started = generation;
     let source: Promise<T>;
@@ -59,6 +72,8 @@ export function createQuerySnapshot<T>(
       if (pending === request) pending = null;
       // A publish or invalidation happened while this read was in flight.
       if (started !== generation) return value ?? result;
+      lastReadAt = Date.now();
+      needsRead = false;
       commit(result);
       return result;
     }, (error) => {
@@ -81,6 +96,12 @@ export function createQuerySnapshot<T>(
       generation++;
       pending = null;
       value = null;
+      lastReadAt = 0;
+      needsRead = false;
+    },
+    stale(): void {
+      // The value stays visible, but the next reader must go back to the server.
+      needsRead = true;
     },
     subscribe(listener: () => void): () => void {
       listeners.add(listener);

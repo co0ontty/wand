@@ -1,7 +1,7 @@
 import * as React from "react";
 import { isSessionJustCompleted } from "../../../session-completion-state.js";
 import { WandIcon, type WandIconName } from "../ui/icons";
-import { isSessionAttention, isSessionRunning } from "./sidebar-display-mode";
+import { isSessionAttention, isSessionRunning, isSessionQueued } from "./sidebar-display-mode";
 import type { WorkspaceSessionSummary } from "./types";
 
 export interface SidebarSessionState {
@@ -12,6 +12,7 @@ export interface SidebarSessionState {
 }
 
 export type GlowStatus =
+  | "queued"
   | "running"
   | "thinking"
   | "permission"
@@ -24,6 +25,7 @@ export type GlowStatus =
 /** Shared Ant Badge colors for the existing activity projection. */
 export function sidebarGlowColor(status: GlowStatus): string | undefined {
   if (status === "none") return undefined;
+  if (status === "queued") return "var(--text-secondary)";
   if (status === "failed") return "var(--danger, #b24f45)";
   if (status === "permission" || status === "waiting-input" || status === "reconnecting") return "var(--warning, #a96a2f)";
   if (status === "thinking") return "var(--info, #4a6fa5)";
@@ -35,6 +37,7 @@ export function sessionGlowStatus(session: {
   status?: string;
   permissionBlocked?: boolean;
   inFlight?: boolean;
+  executionStatus?: "running" | "queued" | null;
   turnActive?: boolean;
   ptyBusy?: boolean;
   ptyCommandRunning?: boolean;
@@ -60,6 +63,7 @@ export function sessionGlowStatus(session: {
   if (isSessionRunning(session as WorkspaceSessionSummary)) {
     return session.status === "thinking" ? "thinking" : "running";
   }
+  if (isSessionQueued(session as WorkspaceSessionSummary)) return "queued";
   if (isSessionJustCompleted(session as WorkspaceSessionSummary)) {
     return "just-completed";
   }
@@ -80,6 +84,7 @@ export function sidebarSessionState(session: WorkspaceSessionSummary): SidebarSe
       ? { label: "思考中", icon: "brain", tone: "accent" }
       : { label: "运行中", icon: "refresh", tone: "accent", spinning: true };
   }
+  if (isSessionQueued(session)) return { label: "排队中", icon: "history", tone: "muted" };
   if (isSessionJustCompleted(session)) return { label: "刚完成", icon: "check", tone: "success" };
   switch (session.status) {
     case "exited": return { label: "已结束", icon: "stop", tone: "muted" };
@@ -90,19 +95,22 @@ export function sidebarSessionState(session: WorkspaceSessionSummary): SidebarSe
   }
 }
 
-export function sidebarAggregateState(sessions: readonly WorkspaceSessionSummary[]): {
+export function sidebarAggregateState(sessions: readonly WorkspaceSessionSummary[], execution?: { executionStatus?: string | null; queuedExecutionCount?: number }): {
   label: string;
   description: string;
   tone: SidebarSessionState["tone"];
 } {
   const attention = sessions.filter(isSessionAttention).length;
   const running = sessions.filter(isSessionRunning).length;
+  const queued = execution?.queuedExecutionCount ?? sessions.filter(isSessionQueued).length;
+  const executing = running > 0 || execution?.executionStatus === "running";
+  const waiting = execution?.executionStatus === "queued" || sessions.some(isSessionQueued);
   const completed = sessions.filter((session) => !isSessionAttention(session)
     && !isSessionRunning(session) && isSessionJustCompleted(session)).length;
   return {
-    label: attention ? "待处理" : running ? "运行中" : completed ? "刚完成" : "",
-    tone: attention ? "warning" : running ? "accent" : completed ? "success" : "muted",
-    description: `当前匹配 ${sessions.length} 个会话，${attention} 个待处理，${running} 个运行中，${completed} 个刚完成`,
+    label: attention ? "待处理" : executing ? "运行中" : waiting ? "排队中" : completed ? "刚完成" : "",
+    tone: attention ? "warning" : executing ? "accent" : waiting ? "muted" : completed ? "success" : "muted",
+    description: `当前匹配 ${sessions.length} 个会话，${attention} 个待处理，${running} 个运行中${queued ? `，${queued} 条排队中` : ""}，${completed} 个刚完成`,
   };
 }
 

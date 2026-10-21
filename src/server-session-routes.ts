@@ -1,5 +1,6 @@
 import type { Express } from "express";
 import { isSystemAiCall, SYSTEM_AI_READ_ONLY } from "./system-ai-call.js";
+import { registerPiDefaultsRoutes } from "./server-pi-defaults-routes.js";
 import { registerPiRecommendationRoute } from "./server-pi-recommendation-routes.js";
 
 export { parseExecutionMode,parseSessionCreationOrigin } from "./session-request.js";
@@ -27,6 +28,8 @@ export function registerSessionRoutes(app: Express, deps: SessionRouteDeps): voi
     });
   }
   registerPiRecommendationRoute(app, { structured: deps.structured, sessions: deps.sessions, config: deps.config, decisions: deps.decisions });
+  // 用户级 Pi 默认设置：新建 CLI 会话的起点，与会话里的改动同源（pref:piSessionDefaults）。
+  registerPiDefaultsRoutes(app, { storage: deps.storage, config: deps.config, decisions: deps.decisions });
   const ctx = createSessionRouteContext(deps);
   registerSessionListRoutes(app, ctx);
   registerSessionLifecycleRoutes(app, ctx);

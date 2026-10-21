@@ -19,7 +19,7 @@ let writing = false;
 let lastTarget = "";
 function targetKey(): string {
   const params = new URLSearchParams(pageSearch());
-  return JSON.stringify(["session", "workspace", "workspaceTask", "window", "tab"].map(key => params.get(key)));
+  return JSON.stringify(["view", "session", "workspace", "workspaceTask", "window", "tab"].map(key => params.get(key)));
 }
 
 function syncSelection(mode: "push" | "replace" = "push", userIntent = false): void {
@@ -131,14 +131,14 @@ export function installPageNavigation(): void {
   installed = true;
   configurePageSelection(() => {
     // A real click invalidates an older in-flight route restore, including its later task read.
-    if (restoring) { generation++; ready = true; }
+    if (restoring || !ready) { generation++; ready = true; }
     syncSelection("push", true);
   });
   configurePageRestore(restorePageNavigation);
   workspaceContextStore.subscribe(() => syncSelection());
   subscribePageRoute(() => {
     const next = targetKey();
-    if (!ready || writing || next === lastTarget) return;
+    if ((!ready && !restoring) || writing || next === lastTarget) return;
     lastTarget = next;
     // Our own synchronous write already describes the current selection.
     if (scheduled) return;

@@ -58,6 +58,7 @@ export function registerSessionInputRoutes(app: Express, ctx: SessionRouteContex
         interrupt,
         preserveQueue,
         idempotencyKey,
+        source: "user",
       });
       res.json(sessionResponseDTO(snapshot, req));
     } catch (error) {
@@ -158,7 +159,7 @@ export function registerSessionInputRoutes(app: Express, ctx: SessionRouteContex
     const shortcutKey = body.shortcutKey;
     try {
       if (structured.get(sessionId)) {
-        const completion = structured.sendMessage(sessionId, input);
+        const completion = structured.sendMessage(sessionId, input, { source: "user" });
         if (body.respondImmediately === true || (structured.get(sessionId)?.provider === "pi"
           && structured.get(sessionId)?.piSettings?.autoResources === true)) {
           // sendMessage updates the canonical snapshot synchronously before it

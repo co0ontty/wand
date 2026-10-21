@@ -165,10 +165,11 @@ test("Ant Design foundation preserves popup ownership, focus, keyboard and progr
       await wait("document.querySelectorAll('.test-owner-menu [role=option]').length === 1");
       await click('.test-owner-menu [role="option"]');
       await wait("foundation.selection === 'b'");
-      assert.equal(await evaluate("foundation.parentCloses === 0 && foundation.selectRef === document.activeElement"), true, `${mode}: option ownership and focus`);
+      // 弹层实现按需到达，触发器会重建一次：断言要落在活着的触发器上。
+      assert.equal(await evaluate("foundation.parentCloses === 0 && document.querySelector('[aria-label=\"Choose model\"]') === document.activeElement"), true, `${mode}: option ownership and focus`);
       await click('[aria-label="Choose model"]'); await wait("!!document.querySelector('.test-owner-menu input')");
       await key("Escape"); await wait("!document.querySelector('.test-owner-menu input')");
-      assert.equal(await evaluate("foundation.selectRef === document.activeElement"), true, `${mode}: escape refocus`);
+      assert.equal(await evaluate("document.querySelector('[aria-label=\"Choose model\"]') === document.activeElement"), true, `${mode}: escape refocus`);
       await click('#outside'); assert.equal(await evaluate("foundation.parentCloses"), 1, `${mode}: real outside press`);
       await click('#show-menu'); await wait("!!document.getElementById('menu-last')");
       await click('#menu-disabled');

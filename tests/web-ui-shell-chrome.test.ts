@@ -257,9 +257,12 @@ test("ShellFilePanel keeps the legacy slot outside its client Drawer portal", ()
   assert.match(html, /id="file-panel-backdrop"/);
   assert.match(html, /<div class="file-explorer legacy-file-explorer-host" id="file-explorer" hidden="" aria-hidden="true"><\/div>/);
   const source = readFileSync(new URL("../src/web-ui/react/shell/shell-file-panel.tsx", import.meta.url), "utf8");
-  assert.match(source, /<Drawer forceRender open=\{snapshot\.layout\.filePanelOpen && !suspended\}/);
+  // 抽屉本体（antd Drawer）单独成块：面板只在真的打开时才下载。
+  const drawerSource = readFileSync(new URL("../src/web-ui/react/shell/shell-file-panel-drawer.tsx", import.meta.url), "utf8");
+  assert.match(source, /import\("\.\/shell-file-panel-drawer"\)/);
+  assert.match(drawerSource, /<Drawer forceRender open=\{snapshot\.layout\.filePanelOpen && !suspended\}/);
   for (const id of ["file-side-panel", "file-explorer-refresh", "file-side-panel-close", "file-explorer-up", "file-explorer-cwd"]) {
-    assert.match(source, new RegExp(`id="${id}"`), `missing #${id}`);
+    assert.match(drawerSource, new RegExp(`id="${id}"`), `missing #${id}`);
   }
 });
 
@@ -274,10 +277,14 @@ test("Shell chrome sources use UiStore hooks and no forbidden legacy seam", () =
     path.join(root, "src", "web-ui", "react", "shell", "shell-file-panel.tsx"),
     "utf8",
   );
+  const drawerSource = readFileSync(
+    path.join(root, "src", "web-ui", "react", "shell", "shell-file-panel-drawer.tsx"),
+    "utf8",
+  );
   assert.match(panelSource, /className="file-explorer legacy-file-explorer-host"/);
   // root 必须来自 state，不能是 ref：commitCwd 的 setCwd 常与当前值相同
   // （输入期间 onChange 已同步），ref 更新不会触发 FileExplorerHost 重挂。
-  assert.match(panelSource, /const \[committedCwd, setCommittedCwd\] = React\.useState\(snapshotCwd\)/);
-  assert.match(panelSource, /<FileExplorerHost root=\{committedCwd\} enabled=\{snapshot.layout.filePanelOpen && !suspended\}\/>/);
-  assert.match(panelSource, /import\("\.\.\/file-explorer\/host"\)/);
+  assert.match(drawerSource, /const \[committedCwd, setCommittedCwd\] = React\.useState\(snapshotCwd\)/);
+  assert.match(drawerSource, /<FileExplorerHost root=\{committedCwd\} enabled=\{snapshot.layout.filePanelOpen && !suspended\}\/>/);
+  assert.match(drawerSource, /import\("\.\.\/file-explorer\/host"\)/);
 });

@@ -15,6 +15,14 @@ import type { WandStorage } from "../storage.js";
 import { CreateWandTaskInput, WandTaskPatch, WAND_TASK_FIELDS, WORKSPACE_TASK_PROJECTION, withoutSessionTab } from "./internal.js";
 import type { WandTaskMilestone, WandIterationPrompt, WandIterationPromptSource } from "../task-types.js";
 
+/** 引用任务 ID 是本仓写入的 UUID 列表；解析失败一律当作空，避免读路径抛错。 */
+function parseReferencedTaskIds(value: string | null | undefined): string[] {
+  if (!value) return [];
+  const parsed = safeJsonParse(String(value));
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
+}
+
 /** Task storage: one domain of the WandStorage facade. Shares the connection and the facade's transaction. */
 export class TaskRepository {
   constructor(private readonly db: DatabaseSync, private readonly s: WandStorage) {}
@@ -90,6 +98,14 @@ export class TaskRepository {
     return rows.map((row) => this.mapWandTaskRow(row));
   }
 
+  /** 直接子任务；`#TASK-xxx` 引用只能落在这些任务上。 */
+  listWandTaskChildren(parentTaskId: string): WandTask[] {
+    const rows = this.db.prepare(
+      `SELECT ${WAND_TASK_FIELDS} FROM wand_tasks WHERE parent_task_id = ? ORDER BY created_at ASC, rowid ASC`,
+    ).all(parentTaskId) as unknown as Array<Record<string, unknown>>;
+    return rows.map((row) => this.mapWandTaskRow(row));
+  }
+
   mapWandTaskRow(row: Record<string, unknown>): WandTask {
     return {
       acceptance: safeJsonParse(String(row.acceptance_json ?? "null")),
@@ -155,7 +171,7 @@ export class TaskRepository {
 
   getWandTaskComment(id: string): WandTaskComment | null {
     const row = this.db.prepare(`SELECT c.*, d.request_id, d.source_comment_id, d.employee_id, d.employee_name,
-      d.instruction, d.task_version, d.state, d.session_id, d.error, d.execution_status,
+      d.instruction, d.task_version, d.state, d.session_id, d.error, d.execution_status, d.referenced_task_ids,
       d.result_start_index, d.result_end_index, d.result_request_id, d.result_outcome, d.result_fingerprint, d.result_start_fingerprint FROM wand_task_comments c
       LEFT JOIN wand_task_comment_dispatches d ON d.comment_id = c.id WHERE c.id = ?`).get(id) as Record<string, string | null> | undefined;
     return row ? this.mapWandTaskCommentRow(row) : null;
@@ -167,7 +183,7 @@ export class TaskRepository {
     if (!boundedIds.length) return [];
     const placeholders = boundedIds.map(() => "?").join(", ");
     const rows = this.db.prepare(`SELECT c.*, d.request_id, d.source_comment_id, d.employee_id, d.employee_name,
-      d.instruction, d.task_version, d.state, d.session_id, d.error, d.execution_status,
+      d.instruction, d.task_version, d.state, d.session_id, d.error, d.execution_status, d.referenced_task_ids,
       d.result_start_index, d.result_end_index, d.result_request_id, d.result_outcome, d.result_fingerprint, d.result_start_fingerprint
       FROM wand_task_comments c LEFT JOIN wand_task_comment_dispatches d ON d.comment_id = c.id
       WHERE c.task_id = ? AND c.id IN (${placeholders})`).all(taskId, ...boundedIds) as Array<Record<string, string | null>>;
@@ -176,10 +192,13 @@ export class TaskRepository {
   }
 
   private mapWandTaskCommentRow(row: Record<string, string | null>): WandTaskComment {
+    const referencedTaskIds = parseReferencedTaskIds(row.referenced_task_ids);
     return { id: row.id!, taskId: row.task_id!, authorName: row.author_name!, body: row.body!, createdAt: row.created_at!,
       ...(row.request_id ? { requestId: row.request_id, sourceCommentId: row.source_comment_id, instruction: row.instruction!, taskVersion: row.task_version!,
+        ...(referencedTaskIds.length ? { referencedTaskIds } : {}),
         dispatch: row.employee_id ? { employeeId: row.employee_id, employeeName: row.employee_name!,
-          state: row.state as "pending" | "accepted" | "failed" | "unknown", sessionId: row.session_id, error: row.error,
+          state: row.state as "queued" | "paused" | "pending" | "accepted" | "failed" | "unknown", sessionId: row.session_id, error: row.error,
+          ...(referencedTaskIds.length ? { referencedTaskIds } : {}),
           ...(row.result_start_index !== null && row.result_start_index !== undefined && row.result_request_id ? { resultAnchor: {
             requestId: row.result_request_id, startFingerprint: row.result_start_fingerprint ?? "", fingerprint: row.result_fingerprint ?? "", startIndex: Number(row.result_start_index),
             endIndex: row.result_end_index === null || row.result_end_index === undefined ? null : Number(row.result_end_index),
@@ -195,22 +214,103 @@ export class TaskRepository {
 
   /** Atomically persist both the visible comment and the one-shot dispatch intent before any side effect. */
   createTaskCommentIntent(input: { taskId: string; requestId: string; signature: string; body: string; instruction: string;
-    sourceCommentId: string | null; employeeId: string | null; employeeName: string | null; taskVersion: string }): WandTaskComment {
+    sourceCommentId: string | null; employeeId: string | null; employeeName: string | null; taskVersion: string;
+    referencedTaskIds?: readonly string[]; agent?: WandTaskAgent | null; queued?: boolean }): WandTaskComment {
     return this.s.transaction(() => {
       const id = crypto.randomUUID();
       this.db.prepare(`INSERT INTO wand_task_comments(id, task_id, author_name, body, created_at) VALUES (?, ?, ?, ?, ?)`)
         .run(id, input.taskId, "用户", input.body, nowIso());
       this.db.prepare(`INSERT INTO wand_task_comment_dispatches(comment_id, task_id, request_id, signature, source_comment_id,
-        employee_id, employee_name, instruction, task_version, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        employee_id, employee_name, instruction, task_version, state, referenced_task_ids, agent_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(id, input.taskId, input.requestId, input.signature, input.sourceCommentId, input.employeeId, input.employeeName,
-          input.instruction, input.taskVersion, input.employeeId ? "pending" : "accepted");
+          input.instruction, input.taskVersion, input.employeeId ? input.queued ? "queued" : "pending" : "accepted",
+          JSON.stringify(input.referencedTaskIds ?? []), input.agent ? JSON.stringify(input.agent) : null);
       return this.getWandTaskComment(id)!;
     });
   }
 
-  updateTaskCommentDispatch(id: string, state: "pending" | "accepted" | "failed" | "unknown", sessionId: string | null, error: string | null = null): void {
+  updateTaskCommentDispatch(id: string, state: "queued" | "pending" | "accepted" | "failed" | "unknown", sessionId: string | null, error: string | null = null): void {
     this.db.prepare(`UPDATE wand_task_comment_dispatches SET state = ?, session_id = COALESCE(?, session_id), error = ? WHERE comment_id = ?`)
       .run(state, sessionId, error, id);
+  }
+
+  /** Hold only unclaimed intents atomically. Running/pending deliveries are never touched. */
+  pauseQueuedTaskComments(): string[] {
+    return this.s.transaction(() => {
+      const rows = this.db.prepare("UPDATE wand_task_comment_dispatches SET state = 'paused' WHERE state = 'queued' RETURNING comment_id")
+        .all() as Array<{ comment_id: string }>;
+      return rows.map(row => row.comment_id);
+    });
+  }
+
+  /** Explicit recovery only; never resume held work during startup or polling. */
+  resumePausedTaskComments(ids: readonly string[]): number {
+    return this.s.transaction(() => {
+      const resume = this.db.prepare("UPDATE wand_task_comment_dispatches SET state = 'queued' WHERE comment_id = ? AND state = 'paused'");
+      return [...new Set(ids)].reduce((count, id) => count + Number(resume.run(id).changes), 0);
+    });
+  }
+
+  /** 按任务面板的实时优先级排序，同级保持实际插入顺序；只读查询不修改运行事实。 */
+  listQueuedTaskCommentDispatches(employeeId: string, limit = 10, taskIds?: readonly string[]): Array<{ commentId: string; taskId: string; createdAt: string }> {
+    if (taskIds && !taskIds.length) return [];
+    const filter = taskIds ? ` AND d.task_id IN (${taskIds.map(() => "?").join(",")})` : "";
+    const rows = this.db.prepare(`SELECT d.comment_id, d.task_id, c.created_at FROM wand_task_comment_dispatches d
+      JOIN wand_task_comments c ON c.id = d.comment_id
+      LEFT JOIN wand_tasks t ON t.id = d.task_id
+      WHERE d.state = 'queued' AND d.employee_id = ?${filter}
+      ORDER BY CASE t.priority WHEN 'urgent' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END DESC,
+        c.created_at ASC, c.rowid ASC LIMIT ?`).all(employeeId, ...(taskIds ?? []), Math.max(1, limit)) as Array<{ comment_id: string; task_id: string; created_at: string }>;
+    return rows.map(row => ({ commentId: row.comment_id, taskId: row.task_id, createdAt: row.created_at }));
+  }
+
+  countQueuedTaskCommentDispatchesForEmployee(employeeId: string): number {
+    const row = this.db.prepare(`SELECT COUNT(*) AS count FROM wand_task_comment_dispatches WHERE state = 'queued' AND employee_id = ?`)
+      .get(employeeId) as { count: number };
+    return Number(row.count) || 0;
+  }
+
+  countQueuedTaskCommentDispatchesForTask(taskId: string): number {
+    const row = this.db.prepare(`SELECT COUNT(*) AS count FROM wand_task_comment_dispatches WHERE state = 'queued' AND task_id = ?`)
+      .get(taskId) as { count: number };
+    return Number(row.count) || 0;
+  }
+
+  /** One grouped query for task-list projections; tasks without queued work are omitted (read as zero). */
+  countQueuedTaskCommentDispatchesByTask(): Map<string, number> {
+    const rows = this.db.prepare(`SELECT task_id, COUNT(*) AS count FROM wand_task_comment_dispatches
+      WHERE state = 'queued' GROUP BY task_id`).all() as Array<{ task_id: string; count: number }>;
+    return new Map(rows.map(row => [row.task_id, Number(row.count) || 0]));
+  }
+
+  /** 原子占位：只有仍是 queued 的评论能转成 pending，避免重复派发。 */
+  claimQueuedTaskComment(commentId: string): boolean {
+    return this.db.prepare(`UPDATE wand_task_comment_dispatches SET state = 'pending', error = NULL
+      WHERE comment_id = ? AND state = 'queued'`).run(commentId).changes === 1;
+  }
+
+  cancelQueuedTaskComment(commentId: string, error: string): boolean {
+    return this.db.prepare(`UPDATE wand_task_comment_dispatches SET state = 'failed', error = ?
+      WHERE comment_id = ? AND state = 'queued'`).run(error, commentId).changes === 1;
+  }
+
+  cancelQueuedTaskCommentsForEmployee(employeeId: string, error: string): number {
+    return Number(this.db.prepare(`UPDATE wand_task_comment_dispatches SET state = 'failed', error = ?
+      WHERE employee_id = ? AND state = 'queued'`).run(error, employeeId).changes);
+  }
+
+  /** 排队的统一执行快照；历史行没有 agent_json 时返回 null，由队列重新选择候选。 */
+  getTaskCommentDispatchAgent(commentId: string): WandTaskAgent | null {
+    const row = this.db.prepare(`SELECT agent_json FROM wand_task_comment_dispatches WHERE comment_id = ?`)
+      .get(commentId) as { agent_json: string | null } | undefined;
+    if (!row?.agent_json) return null;
+    return parseWandTaskAgent(safeJsonParse(row.agent_json));
+  }
+
+  listQueuedTaskCommentEmployees(): string[] {
+    const rows = this.db.prepare(`SELECT DISTINCT employee_id FROM wand_task_comment_dispatches
+      WHERE state = 'queued' AND employee_id IS NOT NULL`).all() as Array<{ employee_id: string }>;
+    return rows.map(row => row.employee_id);
   }
 
   /** Bind the first structured request to its stable message index exactly once. */
@@ -436,6 +536,11 @@ export class TaskRepository {
       if (!next.archivedAt) next.archivedAt = next.updatedAt;
     } else {
       next.archivedAt = null;
+    }
+    // 任务一旦关闭，排队中的派发不再有意义；保留失败记录供用户核对，不静默删除。
+    if (next.status !== current.status && (next.status === "done" || next.status === "archived")) {
+      this.db.prepare(`UPDATE wand_task_comment_dispatches SET state = 'failed', error = '任务已关闭，排队执行已取消。'
+        WHERE task_id = ? AND state = 'queued'`).run(next.id);
     }
     if (patch.milestoneId !== undefined || patch.workspaceId !== undefined) {
       next.milestoneId = this.s.taskMilestoneForWrite(next.milestoneId, next.workspaceId);

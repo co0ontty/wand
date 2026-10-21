@@ -217,6 +217,112 @@ test("employee plain and archived queries keep independent snapshots", async () 
   assert.equal(requests.length, 4, "the next readers own fresh requests for each dimension");
 });
 
+test("the engine publish feeds the React projection without another download", async () => {
+  const pending: Array<ReturnType<typeof deferred<Response>>> = [];
+  globalThis.fetch = ((url: string) => {
+    assert.equal(url, "/api/sessions");
+    const next = deferred<Response>();
+    pending.push(next);
+    return next.promise;
+  }) as typeof fetch;
+
+  const sessionList = await import("../src/web-ui/react/session-list-snapshot.ts");
+  const conversations = await import("../src/web-ui/react/conversations/repository.ts");
+
+  const read = sessionList.loadSessionList();
+  assert.equal(pending.length, 1);
+  pending[0]!.resolve(Response.json([{ id: "sys_1", automationId: "system-ai:system-text:1", employeeId: "e_1" }]));
+  await read;
+  assert.equal(pending.length, 1);
+
+  // 轮询式的读取复用已提交快照：同一份全量不再下载。
+  await conversations.conversationsRepository.systemSessions();
+  await conversations.conversationsRepository.systemSessions();
+  assert.equal(pending.length, 1, "the poll reuses the committed list instead of downloading it again");
+
+  // 引擎发布新列表后，投影直接读到新值，仍然不需要请求。
+  let notified = 0;
+  const unsubscribe = sessionList.subscribeSessionList(() => { notified++; });
+  sessionList.publishSessionList(sessionList.projectSessionSummaries([
+    { id: "sys_1", automationId: "system-ai:system-text:1", employeeId: "e_1", status: "exited" },
+    { id: "sys_2", automationId: "system-ai:system-text:2", employeeId: "e_2" },
+  ]));
+  unsubscribe();
+  assert.equal(notified, 1, "the projection is notified once per publish");
+  assert.equal(pending.length, 1, "an engine publish never triggers a download");
+  assert.deepEqual(
+    conversations.conversationsRepository.peekSystemSessions().map(session => session.id),
+    ["sys_1", "sys_2"],
+  );
+  assert.deepEqual(
+    (await conversations.conversationsRepository.systemSessions()).map(session => session.id),
+    ["sys_1", "sys_2"],
+  );
+  assert.equal(pending.length, 1);
+
+  // 用户主动刷新才绕过快照重新下载。
+  const forced = conversations.conversationsRepository.systemSessions({ fresh: true });
+  assert.equal(pending.length, 2, "an explicit refresh still reads the server");
+  pending[1]!.resolve(Response.json([{ id: "sys_3", automationId: "system-ai:system-text:3", employeeId: "e_3" }]));
+  await forced;
+  assert.equal(conversations.conversationsRepository.peekSystemSessions()[0]?.id, "sys_3");
+});
+
+test("session list projection keeps DTO fields and drops local buffers", async () => {
+  const sessionList = await import("../src/web-ui/react/session-list-snapshot.ts");
+  const projected = sessionList.projectSessionSummaries([
+    {
+      id: "A", status: "running", title: "任务", employeeId: "e_1", employeeName: "伙伴",
+      automationId: "system-ai:system-text:1", archived: false, teamChat: { teamId: "t" },
+      output: "本地终端缓冲", messages: [{ role: "user", content: "本地消息" }],
+      messageOffset: 12,
+    },
+    { title: "没有 id 的条目" },
+    null,
+  ]);
+  assert.equal(projected.length, 1);
+  assert.equal(projected[0]?.id, "A");
+  assert.equal(projected[0]?.employeeName, "伙伴");
+  assert.equal(projected[0]?.automationId, "system-ai:system-text:1");
+  assert.deepEqual(projected[0]?.teamChat, { teamId: "t" });
+  assert.equal((projected[0] as Record<string, unknown>).output, undefined, "local output buffers stay in the engine");
+  assert.equal((projected[0] as Record<string, unknown>).messages, undefined, "local message windows stay in the engine");
+  assert.equal((projected[0] as Record<string, unknown>).messageOffset, undefined);
+});
+
+test("a stale session list forces one re-read while a fresh one is served from memory", async () => {
+  const pending: Array<ReturnType<typeof deferred<Response>>> = [];
+  globalThis.fetch = ((url: string) => {
+    assert.equal(url, "/api/sessions");
+    const next = deferred<Response>();
+    pending.push(next);
+    return next.promise;
+  }) as typeof fetch;
+
+  const sessionList = await import("../src/web-ui/react/session-list-snapshot.ts");
+  sessionList.invalidateSessionList();
+  const read = sessionList.loadSessionList();
+  pending[0]!.resolve(Response.json([{ id: "A" }]));
+  await read;
+  assert.equal(pending.length, 1);
+
+  // 轮询：快照还新鲜时复用，不重复下载。
+  await sessionList.loadSessionList({ maxAgeMs: 60_000 });
+  assert.equal(pending.length, 1, "a fresh snapshot is not downloaded again");
+
+  // 快照被标记过期：保留旧值给界面，但下一次读必须回服务端。
+  sessionList.markSessionListStale();
+  assert.deepEqual(sessionList.peekSessionList(), [{ id: "A" }], "a stale list keeps its value for the UI");
+  const reread = sessionList.loadSessionList({ maxAgeMs: 60_000 });
+  assert.equal(pending.length, 2, "a stale list is downloaded again exactly once");
+  pending[1]!.resolve(Response.json([{ id: "B" }]));
+  await reread;
+  assert.deepEqual(sessionList.peekSessionList(), [{ id: "B" }]);
+
+  await sessionList.loadSessionList({ maxAgeMs: 60_000 });
+  assert.equal(pending.length, 2, "the fresh read serves later readers without IO");
+});
+
 test.after(() => {
   if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
   else Reflect.deleteProperty(globalThis, "window");

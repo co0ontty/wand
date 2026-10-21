@@ -83,7 +83,8 @@ test("startup restore reopens the task that was open before the refresh", async 
   await restoreActiveTask();
 
   assert.equal(requests, 1);
-  assert.deepEqual(calls.opened, [{
+  assert.equal(calls.opened[0].navigationCurrent?.(), true);
+  assert.deepEqual(calls.opened.map(({ navigationCurrent: _current, ...payload }) => payload), [{
     workspaceId: "workspace-1",
     workspaceName: "项目 A",
     taskId: "task-1",
@@ -207,4 +208,23 @@ test("persisting a task replaces the previous cursor and closing clears it", (t)
   assert.equal(readActiveTaskId(), "task-2");
   persistActiveTask(null);
   assert.equal(readActiveTaskId(), "");
+});
+
+
+test("late remembered-task lookup cannot override a newer user navigation", async (t) => {
+  installStorage(t);
+  const calls = newCalls();
+  installRuntime(t, calls);
+  let resolve!: (response: Response) => void;
+  installFetch(t, () => new Promise(done => { resolve = done; }));
+  persistActiveTask("task-1");
+  let current = true;
+  const restore = restoreActiveTask("old-session", () => current);
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  current = false;
+  resolve(jsonResponse({ groups: groups(true) }));
+  await restore;
+  assert.deepEqual(calls.opened, []);
+  assert.deepEqual(calls.selected, []);
+  assert.equal(readActiveTaskId(), "task-1", "obsolete reads must not erase the saved cursor either");
 });

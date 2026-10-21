@@ -43,9 +43,9 @@ const selectionOnLoad = readStoredSelection();
  *   刚看的会话抢走（任务外的会话，例如从看板点进来的独立会话）。默认用启动时
  *   读到的那一份。
  */
-export async function restoreActiveTask(selection: string | null = selectionOnLoad): Promise<void> {
-  if (isEmbeddedTerminalView()) return;
-  if (await restorePageNavigation()) return;
+export async function restoreActiveTask(selection: string | null = selectionOnLoad, current: () => boolean = () => true): Promise<void> {
+  if (isEmbeddedTerminalView() || !current()) return;
+  if (await restorePageNavigation() || !current()) return;
   const taskId = readActiveTaskId();
   if (!taskId) return;
   // 原生嵌入终端（?embed=terminal）只要一个终端黑窗，不恢复网页侧的任务壳。
@@ -54,6 +54,7 @@ export async function restoreActiveTask(selection: string | null = selectionOnLo
   if (!runtime) return;
   try {
     const page = await httpWorkspacesRepository.listTaskGroups();
+    if (!current()) return;
     const found = findTaskContext(page.groups, taskId);
     // 已删除；或已完成（归档）——后者已不在侧栏，不能把它拉回主区。
     if (!found || found.task.status === "done") {
@@ -61,10 +62,10 @@ export async function restoreActiveTask(selection: string | null = selectionOnLo
       return;
     }
     // 带上刷新前在看的会话：恢复布局时就选中它，不会先把活动标签拉上来闪一下。
-    await runtime.openTask(taskOpenPayload(found, selection || undefined));
+    await runtime.openTask({ ...taskOpenPayload(found, selection || undefined), navigationCurrent: current });
     // openTask 恢复的是任务的标签布局，选中态可能落在任务的活动标签上；
     // 刷新要还原用户真正在看的会话（不属于本任务时也一样）。
-    if (selection) runtime.selectSession(selection);
+    if (selection && current()) runtime.selectSession(selection);
   } catch (e) {
     // 离线 / 详情加载失败：保留游标，下次刷新再试。
   }

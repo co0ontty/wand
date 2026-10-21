@@ -1,11 +1,11 @@
 import * as React from "react";
-import { isBuiltinSiliconEmployee, type SiliconEmployee, type SiliconEmployeeDraft } from "../../../ai-team-types.js";
+import { DEFAULT_MAX_CONCURRENT_TASKS, isBuiltinSiliconEmployee, type SiliconEmployee, type SiliconEmployeeDraft } from "../../../ai-team-types.js";
 import { jsonBody, requestJson } from "../http-adapter.js";
 import { createQuerySnapshot, type QuerySnapshot } from "../../query-snapshot.js";
 
 export type SiliconEmployeeInput = Pick<
   SiliconEmployee,
-  "name" | "duty" | "prompt" | "avatar" | "agents" | "tags" | "systemSessionLimit"
+  "name" | "duty" | "prompt" | "avatar" | "agents" | "tags" | "systemSessionLimit" | "maxConcurrentTasks"
 >;
 
 import { isFixedAvatarEmployee } from "../../../fixed-employee-avatar.js";
@@ -16,19 +16,25 @@ export type EmployeeUpdateInput = Partial<SiliconEmployeeInput>;
 export function employeeUpdateInput(employee: SiliconEmployee, patch: Partial<SiliconEmployee>): EmployeeUpdateInput {
   if (isFixedAvatarEmployee(employee)) {
     const input: EmployeeUpdateInput = {};
-    for (const field of ["name", "duty", "prompt", "agents", "systemSessionLimit"] as const) {
-      if (patch[field] !== undefined) Object.assign(input, { [field]: patch[field] });
+    for (const field of ["name", "duty", "prompt", "agents", "systemSessionLimit", "maxConcurrentTasks"] as const) {
+      if (patch[field] === undefined) continue;
+      Object.assign(input, { [field]: field === "maxConcurrentTasks"
+        ? patch.maxConcurrentTasks ?? DEFAULT_MAX_CONCURRENT_TASKS : patch[field] });
     }
     return input;
   }
   if (isBuiltinSiliconEmployee(employee)) return { agents: patch.agents ?? employee.agents,
-    ...(patch.systemSessionLimit !== undefined ? { systemSessionLimit: patch.systemSessionLimit } : {}) };
+    ...(patch.systemSessionLimit !== undefined ? { systemSessionLimit: patch.systemSessionLimit } : {}),
+    ...(patch.maxConcurrentTasks !== undefined ? { maxConcurrentTasks: patch.maxConcurrentTasks ?? DEFAULT_MAX_CONCURRENT_TASKS } : {}) };
   const input: EmployeeUpdateInput = { name: patch.name ?? employee.name, duty: patch.duty ?? employee.duty, prompt: patch.prompt ?? employee.prompt,
     avatar: patch.avatar ?? employee.avatar, tags: patch.tags ?? employee.tags ?? [], agents: patch.agents ?? employee.agents };
   // PUT 合同：省略保留旧值；只有本次草稿明确携带（数字或 null）才发送。
   const limit = patch.systemSessionLimit !== undefined ? patch.systemSessionLimit
     : employee.systemSessionLimit;
   if (limit !== undefined) input.systemSessionLimit = limit;
+  const concurrency = patch.maxConcurrentTasks !== undefined ? patch.maxConcurrentTasks
+    : employee.maxConcurrentTasks;
+  if (concurrency !== undefined) input.maxConcurrentTasks = concurrency ?? DEFAULT_MAX_CONCURRENT_TASKS;
   return input;
 }
 

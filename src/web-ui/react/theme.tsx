@@ -1,5 +1,8 @@
 import * as React from "react";
-import { XProvider } from "@ant-design/x";
+// 窄路径导入：包桶 @ant-design/x 会被首屏与按需分块共同引用，esbuild 只能把它放进
+// 共享块，于是把 Sender / FileCard 等整套实现提升进首屏 eager runtime。这里只取
+// Provider 本身，让 @ant-design/x 的组件实现留在按需分块里。
+import { XProvider } from "./x-provider";
 import zhCN from "antd/locale/zh_CN";
 import xZhCN from "@ant-design/x/locale/zh_CN";
 import dayjs from "dayjs";

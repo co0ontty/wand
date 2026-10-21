@@ -11,9 +11,10 @@ import { withModelGroups } from "../src/model-group-runner.js";
 import { modelGroupSelector } from "../src/model-groups.js";
 import { discoverPiResources } from "../src/pi-resource-catalog.js";
 import { defaultPiCliSessionSettings } from "../src/pi-session-settings.js";
-import { classifyProviderRejection, classifyStructuredFailure } from "../src/structured-failure.js";
+import { classifyProviderRejection, classifyStructuredFailure, cliUnacceptedFacts } from "../src/structured-failure.js";
 import { OpenCodeRunner } from "../src/structured-opencode-adapter.js";
 import { PiRunner } from "../src/structured-pi-adapter.js";
+import { QoderRunner } from "../src/structured-qoder-adapter.js";
 import { StructuredSessionManager } from "../src/structured-session-manager.js";
 import { WandStorage } from "../src/storage.js";
 import type { StructuredRunnerAdapter, StructuredRunnerContext, StructuredRunnerResult } from "../src/structured-runner.js";
@@ -68,8 +69,10 @@ function fixture(t: TestContext) {
     managers.forEach((manager) => manager.dispose());
     await whenIterationPromptsSettled(); storage.close(); rmSync(root, { recursive: true, force: true });
   });
-  return { root, agentDir, storage, config, manager(pi: StructuredRunnerAdapter, codex?: StructuredRunnerAdapter) {
-    const manager = new StructuredSessionManager(storage, config, null, { pi, ...(codex ? { codex } : {}) });
+  return { root, agentDir, storage, config, manager(pi: StructuredRunnerAdapter, codex?: StructuredRunnerAdapter,
+    extra: { qoder?: StructuredRunnerAdapter; opencode?: StructuredRunnerAdapter } = {}) {
+    const manager = new StructuredSessionManager(storage, config, null,
+      { pi, ...(codex ? { codex } : {}), ...extra });
     managers.push(manager); return manager;
   } };
 }
@@ -89,16 +92,20 @@ for (const [message, kind] of [
 test("normalized refusal facts distinguish metadata from progress, unknown delivery and hard boundaries", () => {
   const refused = result({ primaryError: "积分已耗尽，调用失败", rejection: "quota", inputAccepted: false,
     state: { blocks: [], result: "", sessionId: "metadata-only" } });
+  // 适配器解析过协议，它的「未接受」是权威事实：原生会话 id 这类元数据、以及原始 stdout
+  // 里本来就会出现的拒绝回显，都不能反过来把它改成「已送达」。
   assert.deepEqual(classifyStructuredFailure(refused, { output: true }), { kind: "quota", delivery: "rejected", retryable: true });
   for (const changed of [
     { inputAccepted: true }, { retryForbidden: true }, { signal: "SIGTERM" as const },
     { state: { ...refused.state, blocks: [{ type: "tool_use" as const, id: "tool", name: "Bash", input: {} }] } },
     { state: { ...refused.state, usage: { inputTokens: 1 } } },
   ]) assert.equal(classifyStructuredFailure({ ...refused, ...changed })?.retryable, false);
+  // 结构化进度（真实内容块/工具调用/用量）始终优先于适配器自己的结论。
   assert.equal(classifyStructuredFailure(refused, { progress: true })?.retryable, false);
   assert.equal(classifyStructuredFailure(result({ primaryError: "积分已耗尽，调用失败" }))?.retryable, false,
     "a display string alone cannot prove rejection");
-  assert.equal(classifyStructuredFailure(result({ primaryError: "local rejection", inputAccepted: false }), { output: true })?.retryable, false);
+  // 没有任何适配器事实的旧实现仍按「有 stdout / 有原生会话 = 送达未知」的保守启发处理。
+  assert.equal(classifyStructuredFailure(result({ primaryError: "local rejection" }), { output: true })?.retryable, false);
 });
 
 for (const mode of ["refusal", "text", "thinking", "tool", "earlier-reply", "usage", "unknown", "noise",
@@ -386,4 +393,151 @@ test("employee fallback: a candidate that never produces a protocol event is aba
   const finished = await sending;
   assert.deepEqual(starts, ["opencode/a", "opencode/b"]);
   assert.equal(finished.employeeCandidateIndex, 1); assert.equal(finished.status, "idle");
+});
+
+/**
+ * 真实录制样本：Qoder/Claude 系 CLI 在额度耗尽时，把拒绝原文当作一条 `model: "<synthetic>"`
+ * 的普通助手消息写进协议流，然后 result 报 is_error 并以退出码 1 结束。这条「看起来像回答」
+ * 的回显曾经被当成「本轮已有产出」，导致兜底链路整条断掉（见 2026-10-20 六条 qoder 会话）。
+ */
+const qoderQuotaRefusal = {
+  type: "assistant",
+  message: { id: "chatcmpl-synthetic", type: "message", role: "assistant", model: "<synthetic>",
+    stop_reason: "stop_sequence", stop_sequence: "",
+    content: [{ type: "text", text: "You've reached your daily usage limit for Chat. Come back tomorrow to continue working with me. Report Issue (input /feedback)" }],
+    usage: { input_tokens: 0, output_tokens: 0 } },
+};
+const qoderQuotaResult = {
+  type: "result", subtype: "error_during_execution", is_error: true, num_turns: 1,
+  errors: ["You've reached your daily usage limit for Chat. Come back tomorrow to continue working with me. Report Issue (input /feedback)"],
+  error_code: 110, session_id: "qoder-native-id",
+};
+
+test("Qoder adapter: a synthetic quota echo is a pre-execution refusal, not work already done", async () => {
+  const execution = new QoderRunner(replayCli([qoderQuotaRefusal, qoderQuotaResult], 1)).start(
+    { session: { id: "fixture", provider: "qoder", cwd: "/tmp", mode: "managed", claudeSessionId: null,
+      selectedModel: "DeepSeek-Flash" } as SessionSnapshot, prompt: "fixture", env: {} },
+    { isActive: () => true, onUpdate() {} });
+  const got = await execution.completion;
+  assert.equal(got.rejection, "quota", "the CLI's own refusal text is provider-attributed");
+  assert.equal(got.inputAccepted, false);
+  assert.equal(got.state.blocks.length, 0, "the synthetic echo is not model output");
+  assert.deepEqual(classifyStructuredFailure(got), { kind: "quota", delivery: "rejected", retryable: true });
+  assert.match(got.primaryError ?? "", /daily usage limit/);
+});
+
+test("Qoder adapter: a real turn that later hits the quota wall stays unreplayable", async () => {
+  const worked = { type: "assistant", message: { id: "chatcmpl-real", type: "message", role: "assistant",
+    model: "Qwen3.8-Flash", stop_reason: "tool_use",
+    content: [{ type: "tool_use", id: "call_1", name: "Edit", input: { file_path: "/repo/a.ts" } }],
+    usage: { input_tokens: 12, output_tokens: 3 } } };
+  const execution = new QoderRunner(replayCli([worked, qoderQuotaRefusal, qoderQuotaResult], 1)).start(
+    { session: { id: "fixture", provider: "qoder", cwd: "/tmp", mode: "managed", claudeSessionId: null,
+      selectedModel: "DeepSeek-Flash" } as SessionSnapshot, prompt: "fixture", env: {} },
+    { isActive: () => true, onUpdate() {} });
+  const got = await execution.completion;
+  assert.equal(got.inputAccepted, undefined);
+  assert.equal(got.rejection, undefined);
+  assert.equal(classifyStructuredFailure(got)?.retryable, false, "work already done must never be replayed");
+});
+
+test("Qoder adapter: a nonzero exit before any protocol event is an unaccepted pre-execution failure", async () => {
+  const execution = new QoderRunner(replayCli([], 1)).start(
+    { session: { id: "fixture", provider: "qoder", cwd: "/tmp", mode: "managed", claudeSessionId: null } as SessionSnapshot,
+      prompt: "fixture", env: {} },
+    { isActive: () => true, onUpdate() {} });
+  const got = await execution.completion;
+  assert.equal(got.inputAccepted, false);
+  assert.equal(classifyStructuredFailure(got)?.retryable, true);
+});
+
+test("Qoder adapter: a resumed turn that keeps the old native session is still an unaccepted failure", async () => {
+  const execution = new QoderRunner(replayCli([], 1)).start(
+    { session: { id: "fixture", provider: "qoder", cwd: "/tmp", mode: "managed", claudeSessionId: "prior-native" } as SessionSnapshot,
+      prompt: "fixture", env: {} },
+    { isActive: () => true, onUpdate() {} });
+  const got = await execution.completion;
+  assert.equal(got.state.sessionId, "prior-native");
+  assert.equal(got.inputAccepted, false, "resuming keeps the old id; that is not new work");
+  assert.equal(classifyStructuredFailure(got)?.retryable, true);
+});
+
+test("a turn that established a new native session but exited nonzero stays unknown, not replayable", async () => {
+  const sessionEvent = { type: "system", subtype: "init", session_id: "brand-new-native" };
+  const execution = new QoderRunner(replayCli([sessionEvent], 1)).start(
+    { session: { id: "fixture", provider: "qoder", cwd: "/tmp", mode: "managed", claudeSessionId: null } as SessionSnapshot,
+      prompt: "fixture", env: {} },
+    { isActive: () => true, onUpdate() {} });
+  const got = await execution.completion;
+  assert.equal(got.state.sessionId, "brand-new-native");
+  assert.equal(got.inputAccepted, undefined, "a new provider-side session may already hold the input");
+  assert.equal(classifyStructuredFailure(got)?.retryable, false);
+});
+
+test("an interrupted candidate is never treated as an unaccepted refusal", async () => {
+  const execution = new QoderRunner(replayCli([], 1)).start(
+    { session: { id: "fixture", provider: "qoder", cwd: "/tmp", mode: "managed", claudeSessionId: null } as SessionSnapshot,
+      prompt: "fixture", env: {} },
+    { isActive: () => true, onUpdate() {} });
+  const got = await execution.completion;
+  assert.equal(got.inputAccepted, false);
+  // 用户停止走 signal 分支，那里的 inputAccepted 必须留空，不能授权换候选。
+  const stopped = { ...got, signal: "SIGTERM" as const, inputAccepted: undefined, rejection: undefined };
+  assert.equal(classifyStructuredFailure(stopped)?.retryable, false);
+});
+
+test("employee fallback: a synthetic quota refusal from the first candidate reaches the next configured candidate", async (t) => {
+  const f = fixture(t);
+  const backups: StructuredRunnerContext[] = [];
+  const qoder = new QoderRunner(replayCli([qoderQuotaRefusal, qoderQuotaResult], 1));
+  const codexBackup: StructuredRunnerAdapter = { start(context) {
+    backups.push(context);
+    return { args: [], pid: null, spawnedAt: "", interrupt() {}, completion: Promise.resolve(success()) };
+  } };
+  const manager = f.manager({ start: () => ({ args: [], pid: null, spawnedAt: "", interrupt() {},
+    completion: Promise.reject(new Error("unused")) }) }, codexBackup, { qoder });
+  const session = manager.createSession({ cwd: f.root, provider: "qoder", mode: "managed", model: "DeepSeek-Flash",
+    employeeId: "fixture", employeeName: "勤劳的初二",
+    employeeCandidates: [candidate("qoder", "DeepSeek-Flash"), candidate("codex")], employeeCandidateIndex: 0 });
+  const finished = await manager.sendMessage(session.id, "synthetic quota task");
+  assert.equal(finished.provider, "codex", "the quota refusal must hand off to the next candidate");
+  assert.equal(backups.length, 1, "the backup candidate is started exactly once");
+  assert.equal(finished.employeeCandidateIndex, 1);
+  assert.equal(finished.status, "idle");
+  assert.equal(finished.messages?.filter((turn) => turn.role === "user").length, 1, "the input replays once, unchanged");
+});
+
+test("an adapter's explicit refusal outranks raw stdout and a carried native session id", () => {
+  // Qoder/Claude 的拒绝回显本来就走 stdout，旧实现里它会和「有 stdout」互相抵消。
+  const refused = result({ primaryError: "You've reached your daily usage limit for Chat.",
+    inputAccepted: false, rejection: "quota",
+    state: { blocks: [], result: "", sessionId: "qoder-native-id" } });
+  assert.equal(classifyStructuredFailure(refused, { output: true })?.retryable, true);
+  assert.equal(classifyStructuredFailure(refused, { progress: true })?.retryable, false,
+    "real structured progress still wins over the adapter's conclusion");
+});
+
+test("transport failures never authorize replay even when the protocol reported an error", () => {
+  const facts = cliUnacceptedFacts({
+    state: { blocks: [], result: "", sessionId: null }, primaryError: "fetch failed", protocolError: true,
+    unparsedStdout: false, signal: null, exitCode: 1, previousSessionId: null,
+  });
+  // 请求可能已送达，只是答复丢了：既不能判拒绝，也不能判接受。
+  assert.deepEqual(facts, {});
+  assert.equal(classifyStructuredFailure(result({ primaryError: "fetch failed", exitCode: 1, ...facts }))?.retryable, false);
+});
+
+test("the exit-code rule needs an explicit no-protocol-event fact, never an implicit one", () => {
+  const blank = { blocks: [], result: "", sessionId: null };
+  // 适配器没声明「没收到任何协议事件」时，非零退出仍按送达未知处理（不自动重放）。
+  assert.deepEqual(cliUnacceptedFacts({ state: blank, primaryError: "boom", protocolError: false,
+    unparsedStdout: false, signal: null, exitCode: 1, previousSessionId: null }), {});
+  // 显式声明后才是执行前失败。
+  assert.equal(cliUnacceptedFacts({ state: blank, primaryError: "boom", protocolError: false,
+    unparsedStdout: false, signal: null, exitCode: 1, previousSessionId: null,
+    noProtocolEvent: true }).inputAccepted, false);
+  // 已经建立了新的原生会话，说明 provider 可能已经收下输入，仍不可重放。
+  assert.deepEqual(cliUnacceptedFacts({ state: { ...blank, sessionId: "new-native" }, primaryError: "boom",
+    protocolError: false, unparsedStdout: false, signal: null, exitCode: 1, previousSessionId: null,
+    noProtocolEvent: true }), {});
 });

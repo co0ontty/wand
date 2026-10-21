@@ -1,3 +1,4 @@
+import { sessionExecutionStatus, taskExecutionProjection } from "./execution-state.js";
 import { canArchiveTask } from "./task-archive-policy.js";
 import { TaskReadModel } from "./task-read-model.js";
 import { isArchiveBlocked } from "./archive-policy.js";
@@ -72,6 +73,8 @@ function workspaceSessionSummary(
     command: live.command,
     title: team.chat?.chatTitle ?? workspaceSessionTitle(live, names),
     status: live.status,
+    executionStatus: sessionExecutionStatus(live),
+    queuedMessageCount: live.queuedMessages?.length ?? 0,
     completionRevision: live.completionRevision ?? 0,
     viewedCompletionRevision: live.viewedCompletionRevision ?? 0,
     ptyBusy: live.ptyBusy === true,
@@ -641,7 +644,7 @@ export function registerWorkspaceRoutes(
     const snapshots = sessions?.listSlim();
     const revision = crypto.createHash("sha256").update(JSON.stringify({
       storage: storage.projectionRevision(),
-      projection: "workspace-work-sessions-v1",
+      projection: "workspace-work-sessions-v2-queued",
       query: { includeArchived, workspaceFilter, taskLimit, sessionLimit },
       runtime: snapshots,
     })).digest("base64url");
@@ -738,6 +741,7 @@ export function registerWorkspaceRoutes(
       target.tasks.push({
         ...task,
         boardTaskId: board?.id ?? null,
+        ...(board ? model.execution(board) : taskExecutionProjection(visibleSessions)),
         parentWorkspaceTaskId: parent?.workspaceTaskId ?? null,
 
         canArchive: (() => { const card = model.cardsByContainer.get(task.id); return card ? model.canArchive(card) : true; })(),
@@ -1000,8 +1004,12 @@ export function registerWorkspaceRoutes(
     }
     const workspace = storage.getWorkspace(task.workspaceId);
     const teamMarkers = teamSessionMarkers(storage);
+    const card = storage.getWandTaskByWorkspaceTaskId(task.id);
+    const taskSessions = storage.listSessionsByWorkspaceTaskSlim(task.id).filter(session => !isSystemAiCall(session))
+      .map(session => liveSession(session, sessions));
     res.json({
       ...task,
+      ...taskExecutionProjection(taskSessions, card ? storage.countQueuedTaskCommentDispatchesForTask(card.id) : 0),
       ...resolvedMilestoneFields(storage, task.milestoneId),
       cwd: taskRuntimeCwd(task, workspace),
       sessions: storage.listSessionsByWorkspaceTaskSlim(task.id).filter((session) => !isSystemAiCall(session)).map((session) => ({

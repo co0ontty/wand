@@ -147,6 +147,8 @@ export class OpenCodeRunner implements StructuredRunnerAdapter {
     let primaryError: string | null = null;
     let protocolError = false;
     let unparsedStdout = false;
+    let protocolEventObserved = false;
+    const previousSessionId = context.session.claudeSessionId;
     return startStructuredCli({
       sessionId: context.session.id,
       file: "opencode",
@@ -170,6 +172,7 @@ export class OpenCodeRunner implements StructuredRunnerAdapter {
           unparsedStdout = true;
           return;
         }
+        protocolEventObserved = true;
         observer.onEvent?.(event);
         const error = applyOpenCodeEvent(state, event);
         if (error) { primaryError = error; protocolError = true; }
@@ -178,6 +181,8 @@ export class OpenCodeRunner implements StructuredRunnerAdapter {
       finalize: (ctx, exitCode, signal, spawnError) => buildStructuredCliResult({
         state, exitCode, signal, stderr: ctx.stderr, primaryError,
         protocolError, unparsedStdout, spawnError,
+        previousSessionId,
+        noProtocolEvent: !protocolEventObserved,
       }),
     });
   }

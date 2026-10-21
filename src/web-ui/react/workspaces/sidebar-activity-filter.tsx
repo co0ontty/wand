@@ -8,6 +8,6 @@ export function SidebarActivityFilter({ active, onChange, label = "只看活动�
   label?: string;
 }): React.ReactElement {
   return <WandButton kind="outline" size="small" className="sidebar-activity-filter"
-    aria-label={label} aria-pressed={active} title="在跑、待处理及尚未查看的刚完成内容"
+    aria-label={label} aria-pressed={active} title="排队中、在跑、待处理及尚未查看的刚完成内容"
     onClick={() => onChange(!active)}>活动</WandButton>;
 }

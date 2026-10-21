@@ -528,6 +528,10 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         state.terminalSessionId = null;
         state.terminalFitAddon = null;
         state.terminalWriteQueue = Promise.resolve();
+        state.terminalRestoring = false;
+        // Reject callbacks from writes queued for the disposed xterm before a
+        // replacement terminal can start consuming the shared queue.
+        state.terminalWriteGeneration = (state.terminalWriteGeneration || 0) + 1;
         state.terminalRestoreGeneration = (state.terminalRestoreGeneration || 0) + 1;
         state.terminalOutput = "";
         state.terminalAutoFollow = true;
@@ -541,7 +545,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
       }
 
       export function sendTerminalResize(cols, rows) {
-        if (!state.selectedId) return;
+        if (!state.selectedId || state.terminalRestoring) return;
         var selectedSess = state.sessions.find(function(s) { return s.id === state.selectedId; });
         if (!selectedSess || selectedSess.status !== "running") return;
         if (isStructuredSession(selectedSess)) return;
@@ -569,7 +573,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
       }
 
       export function ensureTerminalFit(reason?, options?) {
-        if (!state.terminal) return false;
+        if (!state.terminal || state.terminalRestoring) return false;
         var el = document.getElementById("output");
         if (!el || el.offsetWidth === 0 || el.offsetHeight === 0) {
           ensureTerminalFitWithRetry(reason || "fit-retry");
@@ -583,7 +587,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         var shouldStickToBottom = state.terminalAutoFollow;
         requestAnimationFrame(function() {
           requestAnimationFrame(function() {
-            if (!state.terminal) return;
+            if (!state.terminal || state.terminalRestoring) return;
             if (state.terminalFitAddon && typeof state.terminalFitAddon.fit === "function") {
               fitTerminalToContainer(state.terminal, state.terminalFitAddon);
             }
@@ -633,7 +637,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
       }
 
       function syncTerminalSize() {
-        if (!state.terminal) return;
+        if (!state.terminal || state.terminalRestoring) return;
         // SCROLL-3: 手动浏览模式下 resize 不拽底（原实现的宽松近底判断
         // 会在距底 12px 内把上滚用户强行拉回去并重新开启跟随）。
         if (state.terminalAutoFollow) {

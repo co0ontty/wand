@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   BASELINE_KIND,
   BASELINE_SCHEMA,
+  assessComparability,
   buildBaseline,
   compareFixture,
   compareScenario,
@@ -82,6 +83,32 @@ test("summarizeRounds reports medians, spread and integrity without mounting raw
   assert.deepEqual(result.integrity, { pageErrors: 1, failedRequests: 2, blockedWrites: 3 });
   assert.deepEqual(result.serving, { html: "gzip" });
   assert.equal("rawRounds" in result, false);
+});
+
+test("long-task count and max are gated, while the sum is only reported", () => {
+  const baseline = summary({ metrics: metrics({ longTaskOver50Ms: 200, longTaskCount: 5, longTaskMaxMs: 100 }) });
+  const oneOutlier = compareScenario("chat-cold",
+    summary({ metrics: metrics({ longTaskOver50Ms: 900, longTaskCount: 5, longTaskMaxMs: 110 }) }),
+    baseline, { profile: "normal", cache: "cold" });
+  assert.deepEqual(oneOutlier.failures, [], "one scheduler outlier must not fail the gate on its own");
+  const moreTasks = compareScenario("chat-cold",
+    summary({ metrics: metrics({ longTaskOver50Ms: 200, longTaskCount: 11, longTaskMaxMs: 100 }) }),
+    baseline, { profile: "normal", cache: "cold" });
+  assert.equal(moreTasks.failures.length, 1);
+  assert.match(moreTasks.failures[0], /longTaskCount grew from 5 to 11/);
+  const longerTask = compareScenario("chat-cold",
+    summary({ metrics: metrics({ longTaskOver50Ms: 200, longTaskCount: 5, longTaskMaxMs: 250 }) }),
+    baseline, { profile: "normal", cache: "cold" });
+  assert.equal(longerTask.failures.length, 1);
+  assert.match(longerTask.failures[0], /longTaskMaxMs grew from 100 to 250/);
+});
+
+test("normal LCP tolerance covers image-decode lab variance but still catches a large regression", () => {
+  const baseline = summary({ metrics: metrics({ lcpMs: 1_464 }) });
+  assert.deepEqual(compareScenario("chat-cold", summary({ metrics: metrics({ lcpMs: 1_784 }) }),
+    baseline, { profile: "normal", cache: "cold" }).failures, []);
+  assert.equal(compareScenario("chat-cold", summary({ metrics: metrics({ lcpMs: 2_000 }) }),
+    baseline, { profile: "normal", cache: "cold" }).failures.length, 1);
 });
 
 test("a metric regression beyond tolerance fails the scenario; a small fluctuation passes", () => {
@@ -226,4 +253,96 @@ test("final baselines state they are recorded; provisional ones warn on re-recor
   };
   assert.match(buildBaseline(args).note, /Provisional/);
   assert.match(buildBaseline({ ...args, status: "recorded" }).note, /Recorded lab baseline/);
+});
+
+test("tolerance lines are suppressed only when the run cannot be attributed to this build", () => {
+  const baseline = summary({ metrics: metrics({ fcpMs: 200 }) });
+  const slower = summary({ metrics: metrics({ fcpMs: 600 }) });
+  assert.equal(compareScenario("workspace-cold", slower, baseline, { profile: "normal", cache: "cold" }).failures.length, 1);
+  const suppressed = compareScenario("workspace-cold", slower, baseline, {
+    profile: "normal",
+    cache: "cold",
+    enforceTolerances: false,
+  });
+  assert.deepEqual(suppressed.failures, []);
+  // The row is still produced so the report shows the delta as information, not as a verdict.
+  const fcpRow = suppressed.rows.find(row => row.metric === "fcpMs");
+  assert.equal(fcpRow?.pass, false);
+  assert.equal(fcpRow?.current, 600);
+  assert.ok(suppressed.rows.some(row => row.pass === true), "metrics within tolerance are still measured");
+  // Integrity failures are environment-independent and must survive suppression.
+  const dirty = compareScenario("workspace-cold", summary({
+    metrics: metrics({ fcpMs: 600 }),
+    integrity: { pageErrors: 2, failedRequests: 0, blockedWrites: 0 },
+  }), baseline, { profile: "normal", cache: "cold", enforceTolerances: false });
+  assert.deepEqual(dirty.failures, ["workspace-cold: pageErrors=2 (expected 0)"]);
+});
+
+const runFrom = (overrides: Record<string, unknown> = {}) => ({
+  environment: {
+    serviceVersion: "4.98.1-debug.t1",
+    browserVersion: "155.0.0.0",
+    buildIntegrity: { servedEntry: "modules/aaaa/runtime.js", servedRuntimeMatchesSource: true },
+  },
+  fixture: { conversationHash: "sha256:aaaa", conversationTurns: 35, stableDuringRun: true },
+  ...overrides,
+});
+const baselineEnv = (overrides: Record<string, unknown> = {}) => ({
+  status: "recorded",
+  environment: {
+    serviceVersion: "4.98.1-debug.t1",
+    browserVersion: "155.0.0.0",
+    buildIntegrity: { servedEntry: "modules/aaaa/runtime.js" },
+  },
+  ...overrides,
+});
+
+test("a run whose served bytes are not this tree's bytes is not comparable", () => {
+  const mismatch = assessComparability(runFrom({
+    environment: { ...runFrom().environment, buildIntegrity: { servedEntry: "modules/bbbb/runtime.js", servedRuntimeMatchesSource: false } },
+  }), baselineEnv());
+  assert.equal(mismatch.comparable, false);
+  assert.match(mismatch.reasons.join("\n"), /installed runtime .* does not match src\/web-ui\/content/);
+  // Provisional baselines get no exemption: the reason is about the run, not the baseline.
+  assert.equal(assessComparability(runFrom({
+    environment: { ...runFrom().environment, buildIntegrity: { servedEntry: "modules/bbbb/runtime.js", servedRuntimeMatchesSource: false } },
+  }), baselineEnv({ status: "provisional" })).comparable, false);
+});
+
+test("a matching build with a changed version is comparable, and only version drift warns", () => {
+  const installed = assessComparability(runFrom({
+    environment: { ...runFrom().environment, serviceVersion: "4.99.0-debug.t2" },
+  }), baselineEnv());
+  assert.equal(installed.comparable, true);
+  assert.equal(installed.warnings.length, 1);
+  assert.match(installed.warnings[0], /service version changed/);
+  // A recorded baseline must not be compared against a different browser engine.
+  const browser = assessComparability(runFrom({
+    environment: { ...runFrom().environment, browserVersion: "156.0.0.0" },
+  }), baselineEnv());
+  assert.equal(browser.comparable, false);
+  assert.equal(browser.reasons.length, 1);
+});
+
+test("moved data or a drifted fixture invalidates the comparison, not just the warning", () => {
+  assert.match(assessComparability(runFrom({
+    fixture: { ...runFrom().fixture, stableDuringRun: false },
+  }), baselineEnv()).reasons.join("\n"), /data scale changed while the rounds/);
+  const drifted = assessComparability(runFrom(), baselineEnv(), {
+    fixtureFailures: ["fixture: pinned conversation turns changed from 35 to 40"],
+  });
+  assert.equal(drifted.comparable, false);
+  assert.equal(drifted.reasons.length, 1);
+  assert.match(drifted.reasons[0], /^run is not comparable: fixture:/);
+});
+
+test("a baseline without proven build integrity records a provenance caveat", () => {
+  const args = { fixture: {}, scenarios: {}, staticSource: { available: true } };
+  const unproven = buildBaseline({ ...args, environment: {} });
+  assert.match(unproven.provenanceCaveat, /did not match src\/web-ui\/content/);
+  const proven = buildBaseline({
+    ...args,
+    environment: { buildIntegrity: { servedRuntimeMatchesSource: true } },
+  });
+  assert.equal(proven.provenanceCaveat, null);
 });

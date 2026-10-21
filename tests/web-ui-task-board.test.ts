@@ -42,6 +42,7 @@ import {
   issueWorkspaceIdFromSelect,
   issueWorkspaceOptions,
   issueStatusLabel,
+  issueTaskStatusLabel,
   issueWorkspaceSelectValue,
   normalizeIssueModelCatalog,
   withIssueAgentProvider,
@@ -482,9 +483,9 @@ test("filter helpers keep board columns compact", () => {
     { status: "todo" as const, priority: "none" as const, dueDate: null },
     { status: "done" as const, priority: "low" as const, dueDate: null },
     { status: "archived" as const, priority: "urgent" as const, dueDate: "2000-01-01" },
-  ]), { total: 2, backlog: 0, todo: 1, doing: 0, done: 1, overdue: 0, high: 0, remaining: 1 });
+  ]), { total: 2, backlog: 0, todo: 1, doing: 0, done: 1, overdue: 0, high: 0, accepted: 0, remaining: 1 });
   const progress = issueProgressSeries(withArchived.map((task) => ({ ...task, createdAt: "2000-01-01", updatedAt: "2000-01-02" })));
-  assert.equal(progress.at(-1)?.scope, 3);
+  assert.equal(progress.at(-1)?.scope, withArchived.length);
   assert.equal(progress.at(-1)?.completed, 0);
 });
 
@@ -605,7 +606,10 @@ test("done 状态只有一个界面名：列名、概览指标、过滤开关同
   assert.match(views, /title="需要关注"/);
   assert.doesNotMatch(views, /task-board-progress-chart|issueProgressSeries/);
   assert.match(views, /\{issueHideStatusFilterLabel\("done"\)\}/);
-  assert.match(views, /<span>\{issueStatusLabel\(task\.status\)\}<\/span>/, "行内状态标签也读同一处");
+  assert.match(views, /<span>\{issueTaskStatusLabel\(task\)\}<\/span>/, "行内状态通过执行投影读取同一业务状态名");
+  assert.equal(issueTaskStatusLabel({ status: "done", executionStatus: "queued" }), issueStatusLabel("done"));
+  assert.equal(issueTaskStatusLabel({ status: "doing", executionStatus: "queued" }), "排队中");
+  assert.equal(issueTaskStatusLabel({ status: "doing", executionStatus: "running", queuedCommentCount: 1 }), issueStatusLabel("doing"));
 });
 
 test("会话状态界面名只有一份映射，未知值不再一律兑成「空闲」", () => {
@@ -644,7 +648,7 @@ test("看板卡片点击就地展开，不再把整块看板换成详情页（�
   for (const label of ["状态", "负责人", "迭代", "截止", "更新", "父任务", "子任务"]) {
     assert.ok(detail.includes(`label: "${label}"`), `展开区要有「${label}」`);
   }
-  assert.match(detail, /label: "状态", children: issueStatusLabel\(task\.status\)/);
+  assert.match(detail, /label: "状态", children: issueTaskStatusLabel\(task\)/);
   assert.match(detail, /\{description \|\| "还没有填写任务说明。"\}/, "描述全文常驻，截断版才是条件显示");
   assert.match(detail, /任务摘要与执行记录请在详情事项流中查看/);
   assert.match(detail, /任务摘要与执行记录请在详情事项流中查看/);

@@ -83,6 +83,10 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
   const selfProfile = useUserProfile();
   const selfName = selfProfile.name || "我";
   const { employees, loading, error: directoryError } = useSiliconEmployees({ enabled: visible, includeArchived: true });
+  // 通讯录按需挂载：URL 直接进 ?view=contacts 时首帧就是打开态，懒挂载会晚一帧；
+  // 其余情况等用户第一次打开再挂载，之后常驻。
+  const [directoryMounted, setDirectoryMounted] = React.useState(() => ui.directory);
+  React.useEffect(() => { if (ui.directory) setDirectoryMounted(true); }, [ui.directory]);
   const id = ui.selectedId;
   const [detail, setDetail] = React.useState<ConversationDetail | null>(null);
   const [loadError, setLoadError] = React.useState("");
@@ -545,6 +549,10 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
         <input ref={inputFiles} hidden type="file" multiple aria-label="选择附件" onChange={e => { if (e.currentTarget.files) addFiles(e.currentTarget.files); e.currentTarget.value = ""; }}/>
       </div>
     </Flex>
-    <div className="conversation-directory-surface" data-active={ui.directory} inert={!ui.directory}><ConversationDirectory onSelect={select}/></div>
+    {/* 通讯录是隐藏页：第一次打开前不挂载，也不读团队名单与归档员工；
+        打开后保持挂载，切回对话再回来时筛选、滚动与已读内容都还在。 */}
+    {directoryMounted ? <div className="conversation-directory-surface" data-active={ui.directory} inert={!ui.directory}>
+      <ConversationDirectory active={ui.directory} onSelect={select}/>
+    </div> : null}
   </section>;
 }

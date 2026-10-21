@@ -22,7 +22,7 @@ function fixture() {
   return { requests, ...exports };
 }
 
-test("reconnect invalidates the sole employee cache and rejects stale in-flight list publication", async () => {
+test("definition changes invalidate the shared employee snapshot and reject stale in-flight publication", async () => {
   const store = fixture(); const changes: Array<string | undefined> = [];
   const unsubscribe = store.subscribeSiliconEmployeeDefinitionChanges((id?: string) => changes.push(id));
   const old = store.siliconEmployeesRepository.list(); assert.equal(store.requests.length, 1);

@@ -117,7 +117,7 @@ export function issueAgentModeOptions(provider: IssueAgentProvider): WandSelectO
 
 /**
  * 「done」状态的界面名，唯一来源。
- * 语义是 Agent 跑完了等你点头，不是已经收尾：归档才是收尾，见下面 ISSUE_ARCHIVE_COLUMN。
+ * 工作流阶段表示等待用户确认；业务完成只由 acceptance.acceptedAt 表达，归档只是收纳。
  * 列名、概览指标、进度图例、过滤开关、状态标签都必须从这里取，不得再写第二份。
  */
 const ISSUE_DONE_LABEL = "等你确认";
@@ -137,6 +137,12 @@ export const ISSUE_COLUMNS: ReadonlyArray<{
 export function issueStatusLabel(status: WandTaskStatus): string {
   return ISSUE_COLUMNS.find((column) => column.status === status)?.label
     ?? (status === "archived" ? ISSUE_ARCHIVE_COLUMN.label : status);
+}
+
+export function issueTaskStatusLabel(task: { status: WandTaskStatus; executionStatus?: string | null; queuedCommentCount?: number; sessions?: readonly { status: string }[] }): string {
+  const queued = task.executionStatus === "queued" || (task.executionStatus == null
+    && (task.queuedCommentCount ?? 0) > 0 && !task.sessions?.some(session => issueSessionRunning(session.status)));
+  return task.status === "doing" && queued ? "排队中" : issueStatusLabel(task.status);
 }
 
 /** 过滤开关用的整句：把状态名框起来，避免和「隐藏已完成」这类历史说法混用。 */
@@ -730,12 +736,14 @@ export interface IssueBoardStats {
   overdue: number;
   high: number;
   remaining: number;
+  accepted: number;
 }
 
 export function issueBoardStats<T extends {
   status: WandTaskStatus;
   priority: WandTaskPriority;
   dueDate: string | null;
+  acceptance?: WandTask["acceptance"];
 }>(tasks: readonly T[]): IssueBoardStats {
   const today = isoDate(new Date());
   let todo = 0;
@@ -744,6 +752,7 @@ export function issueBoardStats<T extends {
   let backlog = 0;
   let overdue = 0;
   let high = 0;
+  const accepted = tasks.filter(task => Boolean(task.acceptance?.acceptedAt)).length;
   for (const task of tasks) {
     if (task.status === "archived") continue;
     if (task.status === "backlog") backlog += 1;
@@ -753,7 +762,7 @@ export function issueBoardStats<T extends {
     if (issueIsOverdue(task.dueDate, task.status, today)) overdue += 1;
     if (task.priority === "high" || task.priority === "urgent") high += 1;
   }
-  return { total: backlog + todo + doing + done, backlog, todo, doing, done, overdue, high, remaining: backlog + todo + doing };
+  return { total: backlog + todo + doing + done, backlog, todo, doing, done, overdue, high, accepted, remaining: backlog + todo + doing };
 }
 
 export interface IssueProgressPoint {
@@ -763,19 +772,19 @@ export interface IssueProgressPoint {
   completed: number;
 }
 
-export function issueProgressSeries<T extends { status: WandTaskStatus; createdAt: string; updatedAt: string }>(
+export function issueProgressSeries<T extends { status: WandTaskStatus; createdAt: string; updatedAt: string; acceptance?: WandTask["acceptance"] }>(
   tasks: readonly T[],
 ): IssueProgressPoint[] {
   const now = Date.now();
   const activeTasks = tasks.filter((task) => task.status !== "archived");
-  const created = activeTasks.map((task) => new Date(task.createdAt).getTime()).filter((value) => !Number.isNaN(value));
+  const created = tasks.map((task) => new Date(task.createdAt).getTime()).filter((value) => !Number.isNaN(value));
   const start = created.length > 0 ? Math.min(...created) : now - 12 * 86_400_000;
   const interval = Math.max(1, (now - start) / 12);
   return Array.from({ length: 13 }, (_, index) => {
     const timestamp = index === 12 ? now : start + interval * index;
     return {
       timestamp,
-      scope: activeTasks.filter((task) => new Date(task.createdAt).getTime() <= timestamp).length,
+      scope: tasks.filter((task) => new Date(task.createdAt).getTime() <= timestamp).length,
       started: activeTasks.filter((task) => {
         const createdAt = new Date(task.createdAt).getTime();
         const updatedAt = new Date(task.updatedAt).getTime();
@@ -783,7 +792,7 @@ export function issueProgressSeries<T extends { status: WandTaskStatus; createdA
         if (task.status === "todo" || task.status === "backlog") return false;
         return (Number.isNaN(updatedAt) ? createdAt : Math.max(createdAt, updatedAt)) <= timestamp;
       }).length,
-      completed: activeTasks.filter((task) => isClosedWandTaskStatus(task.status) && new Date(task.updatedAt).getTime() <= timestamp).length,
+      completed: tasks.filter((task) => task.acceptance?.acceptedAt && new Date(task.acceptance.acceptedAt).getTime() <= timestamp).length,
     };
   });
 }

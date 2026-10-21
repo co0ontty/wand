@@ -502,8 +502,9 @@ test("移动对话框的路径输入在输入法组字期不进入目录、也�
   assert.match(source, /function handleInputKeyDown\(event: KeyboardEvent<HTMLInputElement>\): void \{\n\s*\/\/ [^\n]*\n\s*if \(event\.nativeEvent\.isComposing\) return;\n\s*if \(NAVIGATION_KEYS\.has/);
   assert.match(source, /void commit\(targetDir\);/);
   // 文件面板的路径框同理：Enter 走 commitCwd + blur，半截拼音会被写成当前目录。
+  // 抽屉本体单独成块，路径框住在抽屉模块里。
   const panel = readFileSync(
-    new URL("../src/web-ui/react/shell/shell-file-panel.tsx", import.meta.url),
+    new URL("../src/web-ui/react/shell/shell-file-panel-drawer.tsx", import.meta.url),
     "utf8",
   );
   assert.match(panel, /onKeyDown=\{\(event\) => \{\n\s*\/\/ [^\n]*\n\s*if \(event\.nativeEvent\.isComposing\) return;/);

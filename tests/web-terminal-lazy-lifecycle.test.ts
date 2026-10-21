@@ -4,6 +4,7 @@ import test from "node:test";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import { getWandTerminalTheme } from "../src/web-ui/react/theme.js";
+import { queueTerminalWrite } from "../src/web-ui/browser/terminal-write-queue.js";
 
 const noop = () => {};
 const fallback = new Proxy({}, { get: () => noop });
@@ -127,9 +128,15 @@ function terminalHarness(library?: ReturnType<typeof deferred>) {
     loadAddon() { if (failAt === "addon") throw new Error("loadAddon failed"); }
     open(wrap: Element) { this.openCount++; if (failAt === "open") throw new Error("open failed"); this.element = new Element(); wrap.appendChild(this.element); }
     dispose() { this.disposeCount++; if (disposeThrows) throw new Error("dispose failed"); }
-    registerLinkProvider() {} attachCustomKeyEventHandler() {} onData() {} onBinary() {} onResize() {} onScroll() {}
+    dataHandler?: (data: string) => void;
+    resizeHandler?: (size: { cols: number; rows: number }) => void;
+    writes: string[] = [];
+    registerLinkProvider() {} attachCustomKeyEventHandler() {} onBinary() {} onScroll() {}
+    onData(callback: (data: string) => void) { this.dataHandler = callback; }
+    onResize(callback: (size: { cols: number; rows: number }) => void) { this.resizeHandler = callback; }
+    resize(cols: number, rows: number) { this.cols = cols; this.rows = rows; this.resizeHandler?.({ cols, rows }); }
     reset() {} clear() {}
-    write(_text: string, callback?: () => void) { callback?.(); } scrollToBottom() {}
+    write(text: string, callback?: () => void) { this.writes.push(text); if (text.includes("\x1b[6n")) this.dataHandler?.("\x1b[1;1R"); callback?.(); } scrollToBottom() {}
   }
   class FitAddon {
     disposeCount = 0;
@@ -137,6 +144,7 @@ function terminalHarness(library?: ReturnType<typeof deferred>) {
     dispose() { this.disposeCount++; }
   }
   const globals = {
+    WebSocket: { OPEN: 1 },
     document, HTMLElement: Element, window: { addEventListener: noop, removeEventListener: noop, setTimeout: () => 1 },
     console: { error: (...values: unknown[]) => errors.push(values) },
     XTermLib: (library ? {} : { Terminal, FitAddon, Unicode11Addon: class {} }) as Record<string, any>,
@@ -146,6 +154,7 @@ function terminalHarness(library?: ReturnType<typeof deferred>) {
   };
   const dependencies = {
     "./state": { state },
+    "./terminal-write-queue": { queueTerminalWrite },
     "../vendor-loader.js": { ensureTerminalLibrary: () => library!.promise.then(() => {
       Object.assign(globals.XTermLib, { Terminal, FitAddon, Unicode11Addon: class {} });
     }) },
@@ -171,6 +180,31 @@ function terminalHarness(library?: ReturnType<typeof deferred>) {
     readyLibrary: () => { Object.assign(globals.XTermLib, { Terminal, FitAddon, Unicode11Addon: class {} }); },
     fail: (where: string) => { failAt = where; }, failDispose: () => { disposeThrows = true; } };
 }
+
+test("main terminal replay suppresses historical resize/query side effects and preserves new live output", async () => {
+  const h = terminalHarness();
+  h.state.sessions[0].status = "running";
+  h.state.lastResize = { cols: 0, rows: 0 };
+  const sent: Array<{ type: string; cols?: number; rows?: number }> = [];
+  h.state.ws = { readyState: 1, send: (text: string) => sent.push(JSON.parse(text)) };
+  h.dependencies["./terminal-fit"].fitTerminalToContainer = (term: any) => term.resize(100, 30);
+  h.api.initTerminal(); await tick(); await h.state.terminalWriteQueue;
+  h.state.terminalFitAddon.fit = noop;
+  sent.length = 0;
+  h.api.restoreTerminalState("A", { version: 1, cols: 80, rows: 24, data: "\x1b[6n",
+    pending: [{ type: "resize", cols: 60, rows: 20 }, { type: "data", data: "\x1b[6n" }, { type: "resize", cols: 90, rows: 25 }] });
+  h.api.wandTerminalWrite(h.state.terminal, "after-init", 10, "A");
+  await h.state.terminalWriteQueue;
+  assert.deepEqual(sent.filter(e => e.type === "pty_input"), []);
+  assert.deepEqual(sent.filter(e => e.type === "pty_resize"), [{ type: "pty_resize", sessionId: "A", cols: 100, rows: 30 }]);
+  assert.equal(sent.filter(e => e.type === "pty_ack").length, 1);
+  assert.equal(h.state.terminalRestoring, false);
+  assert.equal(h.state.terminal.writes.at(-1), "after-init");
+  sent.length = 0;
+  h.api.syncTerminalBuffer("A", "legacy\x1b[6n", { mode: "replace" });
+  await h.state.terminalWriteQueue;
+  assert.deepEqual(sent.filter(e => e.type === "pty_input"), [], "legacy full-output replay is also read-only");
+});
 
 test("lazy terminal loading preserves shell controls and listeners through success or explicit retry", async () => {
   for (const initiallyFails of [false, true]) {
@@ -331,7 +365,7 @@ test("React Shell and PTY creation adapters await readiness and use the shared p
       "./terminal": { measureTerminalCreationDimensions: (context: any) => { measured++; contexts.push(context); return { cols: 46, rows: 39 }; } },
     }, { window: { addEventListener: noop }, document: {}, console });
     const api = load("new-session-adapter", {
-      "../react": { configureNewSessionRuntime: (runtime: any) => { adapter = runtime; return noop; } },
+      "../react/new-session/controller": { configureNewSessionRuntime: (runtime: any) => { adapter = runtime; return noop; } },
       "./state": { state },
       "./session-engine": { ensureTerminalReady: () => ready.promise, withTerminalDimensions: sessionEngine.withTerminalDimensions },
       "./terminal": { initTerminal: (options: any) => assert.equal(options.prepare, true) },
@@ -360,7 +394,7 @@ test("accepted creation leaves the conversation before selecting its session whi
     selectSession: (id: string) => { assert.equal(active, false, "logical owner changes before terminal selection"); selected = id; },
   };
   const api = load("new-session-adapter", {
-    "../react": { configureNewSessionRuntime: (runtime: any) => { adapter = runtime; return noop; } },
+    "../react/new-session/controller": { configureNewSessionRuntime: (runtime: any) => { adapter = runtime; return noop; } },
     "./state": { state: {} }, "./session-engine": engine,
     "./terminal": { saveWorkingDir: noop },
     "../react/conversations/state": { conversationUi: { suspend: () => { active = false; suspendCount++; } } },

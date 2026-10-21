@@ -10,6 +10,7 @@ function fixture(search: string) {
   const state: any = { selectedId: null, sessions: [{ id: "s", workspaceId: "w", workspaceTaskId: "t" }] };
   let failure = "";
   let onSelection = () => {};
+  let onRoute = () => {};
   let readTask: (() => Promise<any>) | null = null;
   const calls: string[] = [];
   const tab = { id: "tab-s", kind: "session", sessionId: "s" };
@@ -22,7 +23,7 @@ function fixture(search: string) {
   };
   const api: any = {};
   const imports: Record<string, any> = {
-    "../page-route": { hasPageRoute: () => true, pageSearch: () => `?${params}`, subscribePageRoute: () => {}, updatePageRoute: () => {}, workspaceSessionHistoryMode: (search: string, next: string | null) => {
+    "../page-route": { hasPageRoute: () => true, pageSearch: () => `?${params}`, subscribePageRoute: (listener: () => void) => { onRoute = listener; }, updatePageRoute: () => {}, workspaceSessionHistoryMode: (search: string, next: string | null) => {
       const current = new URLSearchParams(search).get("session");
       return new URLSearchParams(search).get("view") === "workspace" && current && next && next !== current ? "replace" : "push";
     } },
@@ -43,7 +44,7 @@ function fixture(search: string) {
   return { restore: api.restorePageNavigation, state, calls,
     deferTask: (reader: () => Promise<any>) => { readTask = reader; },
     select: (id: string) => { state.selectedId = id; onSelection(); }, context: () => context, failure: () => failure,
-    navigate: (search: string) => { params = new URLSearchParams(search); } };
+    navigate: (search: string) => { params = new URLSearchParams(search); onRoute(); } };
 }
 
 test("explicit session, task, window and pane restore without selecting another default", async () => {
@@ -71,6 +72,31 @@ test("a direct feature page clears a remembered session instead of opening it un
   await f.restore();
   assert.equal(f.state.selectedId, null);
   assert.deepEqual(f.calls, []);
+});
+
+test("switching view while the initial task read is pending restores the new page, not the late task", async () => {
+  const f = fixture("view=workspace&workspaceTask=t&session=s");
+  const releases: Array<(value: any) => void> = [];
+  f.deferTask(() => new Promise(resolve => { releases.push(resolve); }));
+  const pending = f.restore();
+  // Keep the same workspace target keys: a view-only change must still cancel it.
+  f.navigate("view=taskboard&workspaceTask=t&session=s");
+  // Use a feature route without a workspace target for the final destination.
+  f.navigate("view=taskboard");
+  assert.equal(releases.length, 2, "the view-only change must be observed during initial restoration");
+  for (const release of releases) release({ id: "t", workspaceId: "w", name: "Old task", cwd: "/repo" });
+  await pending;
+  assert.deepEqual(f.calls, []);
+  assert.equal(f.state.selectedId, null);
+});
+
+test("a selection before boot restore arms navigation for subsequent URL changes", async () => {
+  const f = fixture("view=workspace");
+  f.select("user-choice");
+  await Promise.resolve();
+  f.navigate("view=taskboard");
+  await Promise.resolve();
+  assert.equal(f.state.selectedId, null);
 });
 
 test("a user selection invalidates an older delayed route before it can reopen its task", async () => {

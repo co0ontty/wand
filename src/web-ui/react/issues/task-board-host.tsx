@@ -1,5 +1,7 @@
 import { buildTaskDispatchPrompt, taskDispatchConfiguration } from "./task-dispatch-preview";
 import { TaskAcceptanceEditor } from "./task-acceptance";
+import { TaskSessionSummary } from "./task-session-summary";
+import { taskAcceptanceLabel } from "./task-delivery-state";
 import { taskGoalProjection } from "../../../task-hierarchy";
 import { TaskGoalChildren } from "./task-goal-children";
 import { canArchiveBoardTask } from "./task-board-repository";
@@ -83,6 +85,7 @@ import { TeamDispatchActionButton, TeamDispatchRoster, dispatchStartBlockedReaso
 import { aiTeamsRepository, type AiTeam } from "../ai-teams/repository";
 import { TaskTeamRunPanel } from "../ai-teams/lazy";
 import { TaskComments } from "./task-comments";
+import { TaskReferenceableTasks } from "./task-referenceable-tasks";
 import { TaskDescription } from "./task-description";
 import { taskBoardController, taskBoardStore } from "./task-board-controller";
 import { taskBoardRepository, type IssueWorkspace, type WandTaskListed } from "./task-board-repository";
@@ -465,7 +468,9 @@ export function TaskBoardHost({
             subject,
           });
           rememberAssignment(draft.agent, subject);
-          setNotice(`${employee?.name || issueAgentLabel(result.session?.provider || draft.agent.provider, draft.agent.engine)} 已开始处理「${created.title}」`);
+          setNotice(result.queued && employee
+            ? `「${created.title}」已排队，等待 ${employee.name} 空闲后自动开始`
+            : `${employee?.name || issueAgentLabel(result.session?.provider || draft.agent.provider, draft.agent.engine)} 已开始处理「${created.title}」`);
         } catch (cause) {
           assignError = cause instanceof Error ? cause.message : "任务已创建，但第一次指派失败。";
         }
@@ -576,7 +581,7 @@ export function TaskBoardHost({
         useEmployeeDefaults: !override,
       });
       rememberAssignment(agentOf(task, lastAssignmentRef.current?.agent ?? lastAgentRef.current), { type: "employee", id: employeeId });
-      setNotice(`${employee.name} 已开始处理「${task.title}」`);
+      setNotice(result.queued ? `「${task.title}」已排队，等待 ${employee.name} 空闲后自动开始` : `${employee.name} 已开始处理「${task.title}」`);
       await reload();
       if (result.session?.id) onOpenSession?.(result.session.id);
     });
@@ -626,7 +631,9 @@ export function TaskBoardHost({
             : moving.executionSubject?.type === "team"
               ? teams?.find((item) => item.id === moving.executionSubject?.id)?.name
               : issueAgentLabel(result.session?.provider || agent.provider, agent.engine);
-          setNotice(`${targetName || issueAgentLabel(result.session?.provider || agent.provider, agent.engine)} 已开始处理「${moving.title}」`);
+          setNotice(result.queued
+            ? `「${moving.title}」已排队，等待 ${targetName || "员工"} 空闲后自动开始`
+            : `${targetName || issueAgentLabel(result.session?.provider || agent.provider, agent.engine)} 已开始处理「${moving.title}」`);
         } catch (cause) {
           // 状态已经改好，派发失败只提示、不回滚：用户可进详情改参数后重试。
           dispatchError = cause instanceof Error ? cause.message : "任务已移入「处理中」，但派发 Agent 失败。";
@@ -893,7 +900,7 @@ export function TaskBoardHost({
       {display.body && task.description && !expanded
         ? <p className="task-board-card-body">{task.description}</p>
         : null}
-      {task.acceptance?.acceptedAt && <Typography.Text type="success">验收通过</Typography.Text>}
+      <Typography.Text type={task.acceptance?.acceptedAt ? "success" : "secondary"}>{taskAcceptanceLabel(task.acceptance)}</Typography.Text>
       <Flex wrap gap={4} align="center" className="task-board-card-meta" aria-label="任务属性">
         <span className="task-board-card-id">{task.identifier}</span>
         {parent && <span className="task-board-chip is-parent" title={`归属 ${parent.identifier} · ${parent.title}`}>
@@ -1638,14 +1645,23 @@ function IssueDetail({
               onPatch({ title: title.trim() });
             }}
           />
+          <Flex wrap align="center" gap="small" aria-label="任务负责人">
+            <Typography.Text type="secondary">负责人</Typography.Text>
+            <TaskBoardAgentChips sessions={task.sessions} assigned={task.agent} subject={task.executionSubject} assignee={task.assignedExecutor}/>
+          </Flex>
           <TaskDescription key={task.id} description={task.description} busy={busy} onSave={value => onPatch({ description: value })}/>
+          <TaskSessionSummary task={task} onOpenSession={onOpenSession} onNewParallel={() => {
+            onEmployeeChange("");
+            setComposeOpen(true);
+          }}/>
+          <Collapse ghost className="task-board-acceptance-collapse" items={[{ key: "acceptance", label: <Typography.Text strong>交付与验收 · {taskAcceptanceLabel(task.acceptance)}</Typography.Text>,
+            children: <TaskAcceptanceEditor key={`acceptance-${task.id}`} task={task} children={children} busy={busy} onSave={acceptance => onPatch({ acceptance })}/> }]}/>
+          <TaskReferenceableTasks key={`references-${task.id}`} children={children} onOpenTask={onOpenTask}/>
           <TaskComments key={`comments-${task.id}`} taskId={task.id} updatedAt={task.updatedAt} employees={employees}
             childTasks={children} sessions={task.sessions} onOpenSession={onOpenSession} onOpenTask={onOpenTask}/>
-          <Collapse ghost className="task-board-acceptance-collapse" items={[{ key: "acceptance", label: <Typography.Text strong>交付与验收 {task.acceptance?.acceptedAt ? "· 已通过" : "· 待确认"}</Typography.Text>,
-            children: <TaskAcceptanceEditor key={`acceptance-${task.id}`} task={task} children={children} busy={busy} onSave={acceptance => onPatch({ acceptance })}/> }]}/>
           {(children.length > 0 || !task.parentTaskId) && <div className="task-board-children-actions">
             {!task.parentTaskId && task.status !== "archived" && <WandButton kind="ghost" size="small" onClick={onCreateChild}>
-              <WandIcon name="plus" size={14} slot="start"/>添加正式子任务
+              <WandIcon name="plus" size={14} slot="start"/>添加业务子任务（独立验收）
             </WandButton>}
           </div>}
           {composeOpen ? <Card size="small" className="task-board-native-assign" aria-label="指派 Agent">

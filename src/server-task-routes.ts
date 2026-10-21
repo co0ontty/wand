@@ -1,4 +1,5 @@
 import { taskDispatchReceipt } from "./task-dispatch-receipt.js";
+import { sessionExecutionStatus, taskExecutionProjection } from "./execution-state.js";
 import { registerTaskCommentRoutes, submitTaskComment } from "./task-comment-dispatch.js";
 import { randomUUID } from "node:crypto";
 import type { Express } from "express";
@@ -19,6 +20,7 @@ import type { SessionRegistry } from "./session-registry.js";
 import { selectEmployeeCandidate } from "./silicon-employee-dispatch.js";
 import { parseWandTaskAgent, type WandStorage } from "./storage.js";
 import type { StructuredSessionManager } from "./structured-session-manager.js";
+import type { TaskExecutionQueue } from "./task-execution-queue.js";
 import { compactTransportAvatar } from "./fixed-employee-avatar.js";
 import { canArchiveTask } from "./task-archive-policy.js";
 import { TaskReadModel } from "./task-read-model.js";
@@ -71,6 +73,8 @@ export interface TaskRouteDependencies {
   aiTeams?: AiTeamRunner;
   /** 可注入的任务标题生成器；测试里换成同步桩，避免真的起 CLI。 */
   generateTitle?: typeof generateWandTaskTitle;
+  /** 员工任务的并发闸门；缺省时保持旧同步派发语义（测试/嵌入调用）。 */
+  executionQueue?: TaskExecutionQueue;
 }
 
 function parseExecutionSubject(storage: WandStorage, value: unknown): TaskExecutionSubject | null {
@@ -175,6 +179,11 @@ function taskDto({ storage, sessions }: TaskDtoDeps, task: ReturnType<WandStorag
   return {
     ...task,
     commentCount: model ? model.commentCounts.get(task.id) ?? 0 : storage.countWandTaskComments(task.id),
+    queuedCommentCount: model ? model.queuedCommentCounts.get(task.id) ?? 0 : storage.countQueuedTaskCommentDispatchesForTask(task.id),
+    ...(model ? model.execution(task) : taskExecutionProjection(sessionIds.flatMap(id => {
+      const session = sessions?.getSlim(id) ?? storage.getSessionSlim(id);
+      return session ? [session] : [];
+    }), storage.countQueuedTaskCommentDispatchesForTask(task.id))),
     assignedExecutor: assignee ? { id: assignee.id, name: assignee.name, avatar: "avatar" in assignee ? compactTransportAvatar(assignee.avatar) : "" } : null,
     canArchive: model ? model.canArchive(task) : canArchiveTask(storage, sessions, task.id),
     sessionIds,
@@ -198,7 +207,13 @@ function taskSessionSummary(session: SessionSnapshot) {
     provider: session.provider ?? "",
     sessionKind: session.sessionKind ?? "",
     title: session.title || session.description || session.command,
-    status: session.status,
+    purpose: session.description || "",
+    permissionBlocked: session.permissionBlocked === true || Boolean(session.pendingEscalation),
+    archived: session.archived === true,
+    status: sessionExecutionStatus(session) === "queued" ? "queued" : session.status,
+    executionStatus: sessionExecutionStatus(session),
+    inFlight: session.structuredState?.inFlight === true,
+    queuedMessageCount: session.queuedMessages?.length ?? 0,
     cwd: session.cwd,
     model: session.selectedModel || session.structuredState?.model || "",
     thinkingEffort: session.thinkingEffort || "off",
@@ -652,8 +667,10 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
         const result = await submitTaskComment(deps, task.id, { requestId: text(body.requestId) || randomUUID(), body: requestedPrompt, employeeId: employee.id }, override ?? undefined);
         const session = result.comment.dispatch?.sessionId ? sessions?.getSlim(result.comment.dispatch.sessionId)
           ?? storage.getSessionSlim(result.comment.dispatch.sessionId) : null;
-        if (session) storage.updateWandTask(task.id, { agent, executionSubject: { type: "employee", id: employee.id, ...(override ? { agentOverride: override } : {}) }, status: statusAfterWandTaskDispatch(task.status) });
+        // 排队中的派发同样要把任务挂到员工并保持活动；不能因为没有会话就跳过。
+        if (result.comment.dispatch) storage.updateWandTask(task.id, { agent, executionSubject: { type: "employee", id: employee.id, ...(override ? { agentOverride: override } : {}) }, status: statusAfterWandTaskDispatch(task.status) });
         res.status(202).json({ ok: true, taskId: task.id, subject: { type: "employee", id: employee.id }, comment: result.comment,
+          queued: result.comment.dispatch?.state === "queued",
           session: session ? { ...taskSessionSummary(session), employeeCandidateIndex: session.employeeCandidateIndex } : null });
         return;
       }

@@ -151,7 +151,8 @@ export function ConversationSidebarList({ compact, enabled = true, onNavigate, o
   selectedSessionId?: string | null;
   sessionTitles?: Readonly<Record<string, string>>;
 }): React.ReactElement {
-  const { items, systemSessions, error, loaded, refresh } = useConversations(true);
+  // enabled 就是可见性：隐藏时列表不读也不轮询，已读到的条目留在状态里，重新可见时补读。
+  const { items, systemSessions, error, loaded, refresh } = useConversations(true, enabled);
   const { groups: sessionGroups } = useTaskGroupsAfterIdle();
   const sessionIndex = React.useMemo(() => indexPersonSessions(sessionGroups, systemSessions), [sessionGroups, systemSessions]);
   const activitySessions = React.useMemo(() => [...conversationActivitySessions(sessionGroups), ...systemSessions], [sessionGroups, systemSessions]);

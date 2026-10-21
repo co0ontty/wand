@@ -1,7 +1,7 @@
 import { SettingsActionButton, SettingsField } from "../settings/fields.js";
 import * as React from "react";
 import { Alert, Input, InputNumber } from "antd";
-import { isBuiltinSiliconEmployee, isDefaultSiliconEmployee, parseSiliconEmployeeTagInput, siliconEmployeeTags, type SiliconEmployee } from "../../../ai-team-types.js";
+import { DEFAULT_MAX_CONCURRENT_TASKS, isBuiltinSiliconEmployee, isDefaultSiliconEmployee, parseSiliconEmployeeTagInput, siliconEmployeeTags, type SiliconEmployee } from "../../../ai-team-types.js";
 import { isFixedAvatarEmployee } from "../../../fixed-employee-avatar.js";
 import { WandButton, WandIcon, WandIconButton, WandInput } from "../ui";
 import { EmployeeAvatar } from "./employee-avatar.js";
@@ -66,10 +66,10 @@ export function EmployeeCard({ employee, catalog, providerOptions, onSave, onArc
     if (!draft.name.trim()) { setSaveStatus("failed"); setError("员工名字不能为空。"); requestAnimationFrame(() => nameInput.current?.focus()); return; }
     try {
       const tags = builtin ? siliconEmployeeTags(baseline) : parseSiliconEmployeeTagInput(tagInput);
-      const next = { ...draft, tags };
+      const next = { ...draft, tags, maxConcurrentTasks: draft.maxConcurrentTasks ?? DEFAULT_MAX_CONCURRENT_TASKS };
       // Fixed identities accept partial profile edits: do not echo a generated prompt or a stale avatar.
       const input: Partial<SiliconEmployee> = fixed ? {} : next;
-      if (fixed) for (const field of ["name", "duty", "prompt", "agents", "systemSessionLimit"] as const) {
+      if (fixed) for (const field of ["name", "duty", "prompt", "agents", "systemSessionLimit", "maxConcurrentTasks"] as const) {
         if (JSON.stringify(next[field]) !== JSON.stringify(baseline[field])) Object.assign(input, { [field]: next[field] });
       }
       setSubmitting(true); setError(""); await onSave(input);
@@ -93,6 +93,10 @@ export function EmployeeCard({ employee, catalog, providerOptions, onSave, onArc
         <EmployeeTagsField id={`employee-${employee.id}-tags`} value={tagInput} disabled={saving || builtin} onChange={value => { setTagInput(value); setNotice(""); }}/></div></section>
       <section id="employee-settings" className="form-section" aria-label="员工设置">
         <h3>员工设置</h3>
+        {field("并发任务上限", `employee-${employee.id}-max-concurrent-tasks`, <InputNumber id={`employee-${employee.id}-max-concurrent-tasks`} className="wand-employee-max-concurrent-tasks" min={1} max={100} precision={0} placeholder="默认 2" disabled={saving}
+          value={draft.maxConcurrentTasks ?? null}
+          onChange={value => patch({ maxConcurrentTasks: typeof value === "number" ? value : null })}/>,
+          "同一员工同时执行的任务数上限，默认 2，可设 1-100。超出上限的新派发显示为「排队中」，任务仍留在活动任务里；前序任务结束后按先后顺序自动开始。留空保存时恢复默认 2。同一任务的多条派发不额外占用名额。")}
         {field("系统调用历史保留上限", `employee-${employee.id}-system-session-limit`, <InputNumber id={`employee-${employee.id}-system-session-limit`} className="wand-employee-system-session-limit" min={0} max={10000} precision={0} placeholder="不限" disabled={saving}
           value={draft.systemSessionLimit ?? null}
           onChange={value => patch({ systemSessionLimit: typeof value === "number" ? value : null })}/>,

@@ -860,7 +860,8 @@ export interface SessionSnapshot extends SessionCompletionState {
   messages?: ConversationTurn[];
   /** Pending structured user inputs queued while an assistant response is in flight. */
   queuedMessages?: string[];
-  /** Per-message Claude Agent SDK skill allowlists aligned with queuedMessages. */
+  /** Server-owned scheduling metadata, aligned with queuedMessages; omitted from client DTOs. */
+  queuedInputScheduling?: import("./employee-input-scheduling.js").EmployeeInputScheduling[];
   structuredState?: StructuredSessionState;
   /** 此会话是从哪个 Wand 会话恢复而来 */
   resumedFromSessionId?: string | null;

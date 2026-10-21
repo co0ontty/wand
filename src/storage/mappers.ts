@@ -195,6 +195,7 @@ export type DurableSessionOptions = Pick<SessionSnapshot,
   | "harnessContext"
   | "piSettings"
   | "harnessExtensionState"
+  | "queuedInputScheduling"
 
 >;
 
@@ -311,6 +312,7 @@ export function serializeSessionOptions(snapshot: SessionSnapshot): string {
     harnessContext: snapshot.harnessContext,
     piSettings: snapshot.piSettings,
     harnessExtensionState: snapshot.harnessExtensionState,
+    queuedInputScheduling: snapshot.queuedInputScheduling,
   };
   return JSON.stringify(options);
 }
@@ -320,6 +322,14 @@ export function parseSessionOptions(raw: string | null): DurableSessionOptions {
   if (!isRecord(parsed) || parsed.schemaVersion !== SESSION_OPTIONS_SCHEMA_VERSION) return {};
 
   const options: DurableSessionOptions = {};
+  if (Array.isArray(parsed.queuedInputScheduling)) {
+    options.queuedInputScheduling = parsed.queuedInputScheduling.map(value =>
+      isRecord(value) && (value.source === "user" || value.source === "task")
+        && typeof value.enqueuedAt === "string" && Number.isFinite(Date.parse(value.enqueuedAt))
+        ? { source: value.source, enqueuedAt: value.enqueuedAt,
+          ...(Number.isSafeInteger(value.sequence) && Number(value.sequence) >= 0 ? { sequence: Number(value.sequence) } : {}) }
+        : { source: "task", enqueuedAt: new Date(0).toISOString() });
+  }
   if (isAutonomyPolicy(parsed.autonomyPolicy)) options.autonomyPolicy = parsed.autonomyPolicy;
   if (isApprovalPolicy(parsed.approvalPolicy)) options.approvalPolicy = parsed.approvalPolicy;
   if (Array.isArray(parsed.allowedScopes)) {

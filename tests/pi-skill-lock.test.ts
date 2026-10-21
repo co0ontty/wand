@@ -97,3 +97,34 @@ test("HTTP skill detents persist selection and locks, reject nonexistent IDs and
   assert.equal((await read()).skillLocksAvailable, false);
   assert.equal((await patch({ lockedSkills: [] })).status, 400);
 });
+
+test("默认设置只合并本次改动：旧会话改一个 Skill 不会把自动配置/CodeMode 拉回旧值", async (t) => {
+  const root = mkdtempSync(path.join(tmpdir(), "wand-pi-defaults-merge-"));
+  const agentDir = path.join(root, "agent");
+  const dir = path.join(agentDir, "skills", "subagent"); mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, "SKILL.md"), "---\nname: subagent\ndescription: Delegate subtasks\n---\n# Subagent\n");
+  const config = { ...defaultConfig(), defaultCwd: root, harness: { engine: "cli" as const, agentDir } };
+  const installed = (await discoverPiResources(config, root)).catalog.skills.find((item) => item.name === "subagent")!.id;
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const structured = new StructuredSessionManager(storage, config, null, { pi: { start() { throw new Error("must not launch a model"); } } });
+  t.after(() => {
+    structured.dispose(); storage.close(); rmSync(root, { recursive: true, force: true });
+  });
+  // 一个从旧默认起步的会话（autoResources 默认关），之后用户在新会话里开启了自动配置 + CodeMode。
+  const stale = structured.createSession({ cwd: root, mode: "managed", provider: "pi" });
+  const fresh = structured.createSession({ cwd: root, mode: "managed", provider: "pi" });
+  structured.setPiSettings(fresh.id, { autoResources: true, codemodeOverride: "on" });
+  assert.equal(storage.getPiSessionDefaults()?.autoResources, true);
+  // 用户回到旧会话，只点了一个 Skill 开关。
+  const before = structured.getPiSettings(stale.id).settings;
+  structured.setPiSettings(stale.id, piSkillModePatch(before, installed, "on"));
+  const defaults = storage.getPiSessionDefaults()!;
+  assert.equal(defaults.autoResources, true, "旧会话的 stale autoResources 不能覆盖默认");
+  assert.equal(defaults.codemodeOverride, "on", "未提到的 CodeMode 保持默认原值");
+  assert.ok(defaults.resources?.skills.includes(installed));
+  // 显式关闭仍要生效，且 null 是「清除」而不是「保持」。
+  structured.setPiSettings(fresh.id, { autoResources: false });
+  assert.equal(storage.getPiSessionDefaults()?.autoResources, false);
+  structured.setPiSettings(fresh.id, { codemodeOverride: null });
+  assert.equal(storage.getPiSessionDefaults()?.codemodeOverride, undefined);
+});

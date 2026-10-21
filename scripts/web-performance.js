@@ -261,7 +261,7 @@ function toleranceFor(metric, profile, cache) {
   return override ? { ...base, ...override } : base;
 }
 
-export function compareScenario(scenario, current, baseline, { profile, cache } = {}) {
+export function compareScenario(scenario, current, baseline, { profile, cache, enforceTolerances = true } = {}) {
   const failures = [];
   const warnings = [];
   const rows = [];
@@ -309,7 +309,7 @@ export function compareScenario(scenario, current, baseline, { profile, cache } 
       direction: rule.higherIsBetter ? "higher-is-better" : "lower-is-better",
       pass,
     });
-    if (!pass) {
+    if (!pass && enforceTolerances) {
       const direction = rule.higherIsBetter ? "dropped" : "grew";
       failures.push(
         `${label}: ${metric} ${direction} from ${base} to ${value} (${normalizeMetric(metric, value - base)}); ` +
@@ -322,6 +322,49 @@ export function compareScenario(scenario, current, baseline, { profile, cache } 
     if (typeof spread === "number" && spread > 75) warnings.push(`${label}: ${metric} round spread ${spread}% (>75%); treat the median cautiously`);
   }
   return { failures, warnings, rows };
+}
+
+/**
+ * A lab number is only evidence when the run measured bytes this repository can
+ * account for, on an engine and dataset the baseline describes. Two different
+ * causes must not be conflated:
+ *
+ * - a new service version is exactly what the gate is for: the previous build is
+ *   the reference, so the version string is a note, never a reason to skip the
+ *   comparison (that would make cross-build regressions undetectable);
+ * - a different browser engine, a runtime the tree does not produce, or a dataset
+ *   that moved mid-run means the delta has no single cause. Those runs fail on
+ *   comparability instead of reporting per-metric "regressions" that belong to
+ *   something else.
+ */
+export function assessComparability(measurement, baseline, { fixtureFailures = [] } = {}) {
+  const current = measurement?.environment ?? {};
+  const base = baseline?.environment ?? {};
+  const reasons = [];
+  const warnings = [];
+  const major = value => (typeof value === "string" ? value.split(".")[0] : null);
+
+  if (base.serviceVersion && current.serviceVersion && current.serviceVersion !== base.serviceVersion) {
+    warnings.push(`service version changed from ${base.serviceVersion} to ${current.serviceVersion}; re-record the baseline once the new numbers are reviewed.`);
+  }
+  if (base.browserVersion && current.browserVersion && major(current.browserVersion) !== major(base.browserVersion)) {
+    reasons.push(`run is not comparable: the browser engine changed from ${base.browserVersion} to ${current.browserVersion}; timings moved as a whole and need a re-record.`);
+  }
+  if (base.viewport && current.viewport && current.viewport !== base.viewport) {
+    reasons.push(`run is not comparable: the viewport changed from ${base.viewport} to ${current.viewport}.`);
+  }
+  if (current.buildIntegrity?.servedRuntimeMatchesSource === false) {
+    reasons.push(
+      `run is not comparable: the installed runtime (${current.buildIntegrity.servedEntry ?? "unknown entry"}) ` +
+      "does not match src/web-ui/content. Build and install this tree, then re-measure; " +
+      "individual metric deltas from this run are not attributable to the change under test.",
+    );
+  }
+  if (measurement?.fixture?.stableDuringRun === false) {
+    reasons.push("run is not comparable: the data scale changed while the rounds were running, so transfer metrics describe different datasets; re-run while no other session is creating or archiving data.");
+  }
+  reasons.push(...fixtureFailures.map(failure => `run is not comparable: ${failure}`));
+  return { comparable: reasons.length === 0, reasons, warnings };
 }
 
 export function compareFixture(current, baseline) {
@@ -343,7 +386,7 @@ export function compareFixture(current, baseline) {
     }
   }
   if (current.stableDuringRun === false) {
-    warnings.push("fixture: data scale changed during the run; inspect the report before accepting these numbers");
+    warnings.push("fixture: data scale moved between the pre-run and post-run reads");
   }
   return { failures, warnings };
 }
@@ -443,6 +486,12 @@ export function buildBaseline({
     note: status === "provisional"
       ? "Provisional: re-record with --accept-baseline --final after the P1/P2 performance work and the installed build settle. Do not treat these values as a final baseline."
       : "Recorded lab baseline; re-record after an intentional build or fixture change.",
+    // Numbers collected from an install that does not match the tree cannot be tied
+    // to a commit; the CLI refuses to record them, and any caller without proven
+    // integrity carries the caveat forward.
+    provenanceCaveat: environment?.buildIntegrity?.servedRuntimeMatchesSource === true
+      ? null
+      : "The installed runtime did not match src/web-ui/content when these numbers were collected: they describe whatever bundle was installed at that moment, not this tree. Re-record after a build+install of the same commit before using them as a reference.",
     sources: {
       static: whitelistStatic(staticSource),
       lab: {
