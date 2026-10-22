@@ -79,7 +79,13 @@ export class PtyTmuxBackend {
     const configured = new Promise<void>(resolve => { ready = resolve; });
     const server = net.createServer(socket => {
       server.close();
-      void configured.then(() => socket.write(`${JSON.stringify(request)}\n`));
+      // node-pty and Render derive TERM from name. This bootstrap uses ordinary
+      // spawn with a replacement env, so it must apply the same contract itself.
+      const launchRequest = { ...request, env: {
+        ...request.env,
+        TERM: request.name || request.env.TERM || "xterm-color",
+      } };
+      void configured.then(() => socket.write(`${JSON.stringify(launchRequest)}\n`));
       let response = "";
       socket.on("data", data => { response += data; });
       socket.on("end", () => {

@@ -125,6 +125,16 @@ const css = String.raw`
   .wand-settings-library-connect-qr { grid-column:1; grid-row:1 / span 3; }
   .wand-settings-library-connect>:not(.wand-settings-library-connect-qr) { grid-column:2; }
 }
+
+.wand-settings-pi-search { width:100%; }
+.wand-settings-pi-resource-group { display:flex; flex-direction:column; gap:8px; min-width:0; }
+.wand-settings-pi-resource-list { padding:0; margin:0; list-style:none; display:flex; flex-direction:column; gap:2px; max-height:min(360px,42vh); overflow:auto; overflow-anchor:none; }
+.wand-settings-pi-resource-item { padding:8px 4px; border-bottom:1px solid var(--border-subtle); }
+.wand-settings-pi-resource-item:last-child { border-bottom:0; }
+.wand-settings-pi-resource-item[data-selected=true] { background:var(--accent-muted); border-radius:var(--radius-sm); }
+.wand-settings-pi-resource-description { display:block; max-width:52ch; }
+.wand-settings-pi-skill-mode { flex-shrink:0; }
+.wand-settings-pi-skill-mode .ant-segmented-item-label { min-width:44px; }
 @media (pointer:coarse) {
   .wand-settings-library-secret-toggle.ant-btn { min-height:32px; min-width:44px; }
 }

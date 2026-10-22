@@ -85,7 +85,13 @@ export var state: AppState = {
   terminal: null,
   terminalFitAddon: null,
   terminalWriteQueue: Promise.resolve(),
+  // Authoritative snapshot replay invalidates live writes already queued behind
+  // the current xterm frame.  The queue itself remains ordered, while this
+  // token lets stale frames be skipped instead of delaying replay or drawing
+  // bytes from the pre-reset screen after the reset.
+  terminalWriteGeneration: 0,
   terminalRestoreGeneration: 0,
+  terminalRestoring: false,
   // WS init can arrive before xterm finishes loading fonts/opening its DOM.
   // Keep the authoritative emulator snapshot outside the replaceable session
   // list so a concurrent /api/sessions refresh cannot lose it.

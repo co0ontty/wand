@@ -1107,6 +1107,9 @@ export class ProcessManager extends EventEmitter {
           WAND_AUTO_CONFIRM: record.autoApprovePermissions ? "1" : "0",
           WAND_AUTO_EDIT: effectiveMode === "auto-edit" ? "1" : "0",
           SHELL: this.config.shell,
+          // Declare the emulator type even when the service runs without a TTY.
+          // Persistent hosts may forward env directly instead of using node-pty.
+          TERM: "xterm-256color",
           LANG: systemEnvValue("LANG") || systemEnvValue("LC_ALL") || systemEnvValue("LC_CTYPE") || "C.UTF-8",
           LC_CTYPE: systemEnvValue("LC_CTYPE") || systemEnvValue("LANG") || systemEnvValue("LC_ALL") || "C.UTF-8",
         }),

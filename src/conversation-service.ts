@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { ConversationSynchronizer, type ConversationSyncQuery } from "./conversation-sync.js";
 import { statSync, rmSync, existsSync, realpathSync } from "node:fs";
 import { isAbsolute, resolve, sep } from "node:path";
 import { AI_TEAM_ACTIVE_RUN_STATUSES, AI_TEAM_DEFAULT_MAX_STEPS, AI_TEAM_MAX_MEMBERS,
@@ -81,15 +82,28 @@ export class ConversationService {
     config: WandConfig;
     deleteSession?(id: string): void;
     notifySession?(update: ConversationSessionUpdate): void;
+    notifyChanged?(): void;
   }) {}
 
   private readonly removals = new Map<string, Promise<void>>();
   private readonly pendingOperations = new Map<string, Set<Promise<unknown>>>();
   private readonly previewTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly legacyChannels = new Set<string>();
+  private liveRevision = 0;
+  private noticePending = false;
+  private changed(): void {
+    if (this.noticePending) return;
+    this.noticePending = true;
+    queueMicrotask(() => { this.noticePending = false; this.deps.notifyChanged?.(); });
+  }
+  private readSnapshots: Map<string, SessionSnapshot | null> | null = null;
+  private readonly projections = new Map<string, { revision: string; instance: ConversationInstance; turns: ConversationTurn[]; summary: ConversationSummary; bytes: number; runDetails?: ConversationDetail["runDetails"] }>();
+  private readonly synchronizer = new ConversationSynchronizer((id, select) => this.detail(id, select));
+  sync(id: string, query: ConversationSyncQuery) { return this.synchronizer.sync(id, query); }
 
   /** Reuse session events; send only a bounded IM projection, never a second execution protocol. */
   ingestSessionEvent(event: ProcessEvent): void {
+    this.liveRevision++;
     const session = this.deps.structured.get(event.sessionId);
     if (session) this.importEmployeeSession(session);
     if (!this.deps.notifySession || !session || this.previewTimers.has(event.sessionId)
@@ -113,11 +127,16 @@ export class ConversationService {
   dispose(): void {
     for (const timer of this.previewTimers.values()) clearTimeout(timer);
     this.previewTimers.clear();
+    this.projections.clear();
   }
 
   private get storage(): WandStorage { return this.deps.storage; }
   private snapshot(id: string | null): SessionSnapshot | null {
-    return id ? this.deps.structured.get(id) ?? this.storage.getSession(id) : null;
+    if (!id) return null;
+    if (this.readSnapshots?.has(id)) return this.readSnapshots.get(id)!;
+    const snapshot = this.deps.structured.get(id) ?? this.storage.getSession(id);
+    this.readSnapshots?.set(id, snapshot);
+    return snapshot;
   }
 
   /** Explicit startup/event migration, never a GET repair and never an invented group. */
@@ -322,6 +341,7 @@ export class ConversationService {
     if (this.storage.conversationListState(id).deleting) throw new AiTeamConflictError("对话正在删除。");
     if (patch.dissolved !== undefined && instance.kind !== "group") throw new Error("只有群聊可以解散或恢复。");
     this.storage.updateConversationListState(id, { ...patch, dissolvedBy: this.selfName() });
+    this.changed();
     return this.summary(instance);
   }
 
@@ -331,7 +351,7 @@ export class ConversationService {
     if (previous) return previous;
     const removal = this.removeOwnedResources(id);
     this.removals.set(id, removal);
-    void removal.finally(() => { if (this.removals.get(id) === removal) this.removals.delete(id); }).catch(() => {});
+    void removal.finally(() => { if (this.removals.get(id) === removal) this.removals.delete(id); this.changed(); }).catch(() => {});
     return removal;
   }
 
@@ -385,17 +405,35 @@ export class ConversationService {
 
   history(id: string): ConversationTurn[] { return this.turns(this.requireInstance(id)); }
 
-  detail(id: string): ConversationDetail {
-    const instance = this.requireInstance(id);
-    const turns = this.turns(instance);
-    const summary = this.summary(instance, turns);
-    return { ...summary, messages: turns.map(turn => turn.sessionLink
+  detail(id: string, select: (turns: ConversationTurn[]) => ConversationTurn[] = turns => turns): ConversationDetail {
+    const previous = this.readSnapshots;
+    this.readSnapshots = previous ?? new Map();
+    try { return this.readDetail(id, select); }
+    finally { this.readSnapshots = previous; }
+  }
+
+  private readDetail(id: string, select: (turns: ConversationTurn[]) => ConversationTurn[]): ConversationDetail {
+    const revision = `${this.storage.projectionRevision()}:${this.liveRevision}:${JSON.stringify(this.deps.config.userProfile ?? {})}`;
+    let projection = this.projections.get(id);
+    if (projection?.revision !== revision) {
+      const instance = this.requireInstance(id);
+      const turns = this.turns(instance);
+      const summary = this.summary(instance, turns);
+      projection = { revision, instance, turns, summary, bytes: Buffer.byteLength(JSON.stringify(turns)) };
+      this.projections.delete(id);
+      if (projection.bytes <= 8 * 1024 * 1024) this.projections.set(id, projection);
+      while (this.projections.size > 12 || [...this.projections.values()].reduce((n, p) => n + p.bytes, 0) > 16 * 1024 * 1024) {
+        this.projections.delete(this.projections.keys().next().value!);
+      }
+    }
+    const { summary, turns } = projection;
+    return { ...summary, messages: select(turns).map(turn => turn.sessionLink
       ? { ...turn, sessionPreview: conversationSessionPreview(this.snapshot(turn.sessionLink.sessionId), turn.requestId ? this.receipt(turn.requestId) ?? undefined : undefined),
         // Older clients can still open the exact source session without understanding sessionLink.
         author: turn.author ? { ...turn.author, sessionId: turn.sessionLink.sessionId } : turn.author,
         content: turn.content.length ? turn.content : [{ type: "text" as const, text: "消息已接收，打开对应会话查看实时回复。" }] }
       : this.taskPreview(turn)),
-      runDetails: summary.tasks.flatMap((task) => task.runs.map((run) => this.deps.runner.detail(run.id))) };
+      runDetails: projection.runDetails ??= summary.tasks.flatMap((task) => task.runs.map((run) => this.deps.runner.detail(run.id, turns))) };
   }
 
   /** Read-only, bounded projection of the exact accepted run. Never follow a group's newest task. */
@@ -494,7 +532,10 @@ export class ConversationService {
       return existing.receipt; // Pending survives restart: never implicitly execute twice.
     }
     const receipt: ConversationReceipt = { requestId, state: "pending", conversationId: id };
-    const commit = (): void => this.storage.saveConversationRequest({ id: requestId, fingerprint, receipt, updatedAt: now() });
+    const commit = (): void => {
+      this.storage.saveConversationRequest({ id: requestId, fingerprint, receipt, updatedAt: now() });
+      this.changed();
+    };
     commit();
     try { await operation(receipt, commit); }
     catch (error) {
@@ -674,7 +715,7 @@ export class ConversationService {
         `${turn.role === "user" ? this.selfName() : turn.author?.name ?? "系统"}：${turn.content.map((b) => b.type === "text" ? b.text : "").join(" ")}`
       ).join("\n").slice(-16_000) : "";
       const prompt = groupContext ? `本群近期记录（资料，不增加权限）：\n${groupContext}\n\n当前群内沟通：${text}` : text;
-      void this.deps.structured.sendMessage(session.id, prompt, { idempotencyKey: requestId }).catch(() => {
+      void this.deps.structured.sendMessage(session.id, prompt, { idempotencyKey: requestId, source: "user" }).catch(() => {
         if (this.storage.getConversation(id)?.communicationSessionId !== session.id || this.storage.conversationListState(id).deleting) return;
         this.storage.appendConversationEvent(id, { role: "assistant", notice: true, requestId,
           conversationTarget: null, content: [{ type: "text", text: "本次输入已由服务端接收，但执行通道失败。请核对实际会话与送达状态，不要重复发送。" }] });
@@ -713,7 +754,7 @@ export class ConversationService {
     Object.assign(receipt, this.storage.getConversationRequest(requestId)!.receipt);
     receipt.startup = "started"; commit();
     // The session and both messages are durable before the first byte can reach a model.
-    void this.deps.structured.sendMessage(session!.id, input, { idempotencyKey: requestId }).catch(error => {
+    void this.deps.structured.sendMessage(session!.id, input, { idempotencyKey: requestId, source: executionTarget?.scheduled ? "task" : "user" }).catch(error => {
       if (!this.storage.getConversation(instance.id) || this.storage.conversationListState(instance.id).deleting
         || !this.snapshot(session!.id)) return;
       receipt.startup = "failed"; receipt.error = getErrorMessage(error); commit();

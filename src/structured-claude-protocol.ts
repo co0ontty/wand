@@ -58,6 +58,15 @@ export function stampParentTaskResults(blocks: ContentBlock[], registry: TaskMet
   });
 }
 
+/**
+ * Claude 系 CLI（Claude Code / Qoder）在额度耗尽、鉴权失败这类执行前拒绝时，会把错误原文
+ * 当作一条 `model: "<synthetic>"` 的普通助手消息写进协议流。它是 CLI 自己合成的拒绝说明，
+ * 不是模型产出的工作，也不带任何工具调用或用量；按这个原生字段判定，不靠文案关键词。
+ */
+export function isSyntheticAssistantMessage(message: Record<string, unknown>): boolean {
+  return typeof message.model === "string" && message.model.trim() === "<synthetic>";
+}
+
 export function normalizeClaudeToolInput(name: unknown, input: unknown): Record<string, unknown> {
   if (!input || typeof input !== "object" || Array.isArray(input)) return {};
   const record = input as Record<string, unknown>;
@@ -136,6 +145,13 @@ export class ClaudeCliProtocolReducer {
   errorResultObserved = false;
   /** 本轮真正跑出来的助手/工具内容，错误回显不算。 */
   assistantWorkObserved = false;
+  /**
+   * 这条助手消息是 CLI 自己合成的拒绝回显（`model: "<synthetic>"`），不是模型产出的工作。
+   * Qoder/Claude 在额度耗尽、鉴权失败这类执行前拒绝时，会把错误原文当作一条
+   * `stop_reason: "stop_sequence"` 的普通助手消息写进协议，退出码非 0 但内容「看起来像回答」。
+   * 只有按这条事实区分，才不会把「一行拒绝文案」当成「本轮已经跑过」。
+   */
+  syntheticRefusalText: string | null = null;
   private readonly blocksByKey = new Map<string, ContentBlock[]>();
   private readonly keyOrder: string[] = [];
   private readonly taskMetaRegistry: TaskMetaMap = new Map();
@@ -171,7 +187,14 @@ export class ClaudeCliProtocolReducer {
       const stamped = parentId === null
         ? stampSelfTask(extracted.content, this.taskMetaRegistry)
         : tagSubagentBlocks(extracted.content, parentId, this.taskMetaRegistry);
-      if (stamped.length > 0) {
+      // 合成回显只说明 provider 拒绝了这次请求，不是模型产出的工作：它不能进 blocks/result，
+      // 否则「一行拒绝文案」会被下游当成「本轮已经跑过」，降级链路就断了。
+      // 原文单独存起来，作为主错误展示（不进转录）。
+      const synthetic = isSyntheticAssistantMessage(message);
+      if (synthetic) {
+        const text = stamped.flatMap((block) => block.type === "text" ? [block.text] : []).join("\n").trim();
+        if (text) this.syntheticRefusalText = text;
+      } else if (stamped.length > 0) {
         this.assistantWorkObserved = true;
         this.upsertBlocks(key, stamped);
       }
@@ -265,7 +288,14 @@ export class ClaudeCliProtocolReducer {
       if (typeof event.result === "string") this.state.result = event.result.trim();
       if (event.is_error === true) {
         this.errorResultObserved = true;
-        const detail = this.state.result
+        // 原生错误字段优先；其次是 result 正文；再次是合成回显的原文。
+        // 合成回显是 CLI 自己写的拒绝说明，属于 provider 的明确答复，可以作为主错误。
+        const errors = Array.isArray(event.errors)
+          ? event.errors.filter((item): item is string => typeof item === "string" && !!item.trim())
+          : [];
+        const detail = errors.join("\n").trim()
+          || this.state.result
+          || this.syntheticRefusalText
           || (typeof event.subtype === "string" && event.subtype && event.subtype !== "success"
             ? `Claude 以 ${event.subtype} 结束，未产生任何输出。` : "");
         if (detail) this.errorText = detail;

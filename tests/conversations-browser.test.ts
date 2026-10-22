@@ -80,7 +80,7 @@ async function runConversationBrowser(t: TestContext, mentions: boolean): Promis
     import { taskBoardController } from "./src/web-ui/react/issues/task-board-controller";
     import { conversationUi } from "./src/web-ui/react/conversations/state";
     import { notifyAiTeamStepLive } from "./src/web-ui/react/ai-teams/repository";
-    import { notifyConversationSessionPreview } from "./src/web-ui/react/conversations/session-preview";
+    import { notifyConversationSessionPreview } from "./src/web-ui/react/conversations/session-preview-events";
     import "./src/web-ui/react/ai-teams/chunk-entry";
     installReactUiStyles();
     const composer = new ComposerStore({ storage: () => localStorage, isUnloading: () => false, disposeAttachment: () => {} });

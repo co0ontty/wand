@@ -231,7 +231,7 @@ export function registerSessionListRoutes(app: Express, ctx: SessionRouteContext
     const transcriptOutput = (snapshot.sessionKind ?? "pty") === "pty"
       ? processes.getPtyTranscript(snapshot.id) ?? snapshot.output
       : req.query.format === "chat" && req.query.output === "omit" ? "" : snapshot.output;
-    const enriched = enrichStructuredMessages(snapshot.messages ?? [], snapshot.id);
+    const enriched = sessions.transportMessages?.(snapshot.id, snapshot.messages ?? []) ?? enrichStructuredMessages(snapshot.messages ?? [], snapshot.id);
     const messages = wantsCompactTools(req) ? compactToolMessagesForTransport(enriched) : enriched;
     if (req.query.format === "chat") {
       // 客户端带 blockBudget（Web/iOS）走块级窗口：只回最近 N 个块（必要时切掉最旧 turn 的头部），
@@ -282,7 +282,7 @@ export function registerSessionListRoutes(app: Express, ctx: SessionRouteContext
       res.status(404).json({ error: "未找到该会话，可能已被删除。" });
       return;
     }
-    const enriched = enrichStructuredMessages(snapshot.messages ?? [], snapshot.id);
+    const enriched = sessions.transportMessages?.(snapshot.id, snapshot.messages ?? []) ?? enrichStructuredMessages(snapshot.messages ?? [], snapshot.id);
     const all = wantsCompactTools(req) ? compactToolMessagesForTransport(enriched) : enriched;
     const total = all.length;
 

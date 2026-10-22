@@ -193,7 +193,7 @@ export function registerSessionLifecycleRoutes(app: Express, ctx: SessionRouteCo
       onSessionCreated?.(snapshot.cwd);
       if (prompt) {
         try {
-          Promise.resolve(structured.sendMessage(snapshot.id, prompt)).catch((error) => {
+          Promise.resolve(structured.sendMessage(snapshot.id, prompt, { source: origin.sessionSource === "interactive" ? "user" : "task" })).catch((error) => {
             console.error("[wand] Accepted structured prompt later failed", {
               sessionId: snapshot.id,
               error: getInputDebugMeta(error),

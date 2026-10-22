@@ -363,7 +363,7 @@ test("task list treats directories as group headers and exposes per-terminal del
 test("task sessions prioritize the active or only task and unbound sessions reuse the fixed default task", () => {
   const panel = readFileSync(new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url), "utf8");
   assert.match(panel, /useSidebarExpansion\(\s*`task\.\$\{task.id\}`, true, false, (Boolean\(defaultGroup\) \|\| )?isActive \|\| isOnlyTask/);
-  assert.match(panel, /useSidebarExpansion\(`project\.\$\{group.workspaceId\}`, false, true, undefined, visibleSessionCount > 0\)/);
+  assert.match(panel, /useSidebarExpansion\(`project\.\$\{group.workspaceId\}`, false, true, undefined, visibleSessionCount > 0 \|\| hasQueuedTasks\)/);
   assert.doesNotMatch(panel, /useSidebarExpansion\(`loose\./);
   assert.match(panel, /data-sidebar-default-task-id=\{defaultGroup\?\.workspaceId\}/);
   assert.match(panel, /defaultGroup=\{group\}/);

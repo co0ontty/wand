@@ -2,7 +2,7 @@ import * as React from "react";
 import { Flex, Tag, Typography } from "antd";
 import type { TaskExecutionSubject, WandTaskAgent } from "../../../task-types";
 import type { IssueSessionSummary, WandTaskListed } from "./task-board-repository";
-import { taskExecutors } from "./task-executors";
+import { taskExecutors, taskExecutorToolLabels } from "./task-executors";
 import { EmployeeAvatar } from "../agents/employee-avatar";
 import { useSiliconEmployees } from "../agents/employee-repository";
 import { ProviderLogo } from "../provider-logo";
@@ -14,10 +14,13 @@ export function TaskBoardAgentChips({ sessions, assigned, subject, assignee }: {
   const { employees } = useSiliconEmployees();
   const executors = taskExecutors(sessions, assigned, subject, employees, assignee);
   if (!executors.length) return <Typography.Text type="secondary">待指派</Typography.Text>;
-  const personChip = (person: typeof executors[number]) => <Tag key={person.key}>
+  const personChip = (person: typeof executors[number]) => <Tag key={person.key} style={{ maxWidth: "100%", whiteSpace: "normal", overflowWrap: "anywhere" }}>
     <Flex align="center" gap={6}>
       {person.employeeId || person.key.startsWith("legacy-employee:") ? <EmployeeAvatar employee={{ id: person.employeeId ?? person.key, name: person.name, avatar: person.avatar }} size="sm"/> : person.provider ? <ProviderLogo provider={person.provider} className="task-board-agent-logo"/> : null}
-      <span>{person.name} · {person.state === "running" ? "执行中" : person.state === "assigned" ? "已指派 · 未启动" : "历史执行"}</span>
+      <Flex vertical style={{ minWidth: 0 }}>
+        <span>{person.name} · {person.state === "running" ? "执行中" : person.state === "assigned" ? "已指派 · 未启动" : "历史执行"}</span>
+        {person.employeeId || person.key.startsWith("legacy-employee:") ? <Typography.Text type="secondary">{taskExecutorToolLabels(person).join(" · ")}</Typography.Text> : null}
+      </Flex>
     </Flex>
   </Tag>;
   return <Flex wrap gap={6} aria-label="任务执行者">{executors.slice(0, 3).map(personChip)}

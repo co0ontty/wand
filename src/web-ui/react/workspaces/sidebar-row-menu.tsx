@@ -1,6 +1,7 @@
-import { Dropdown, type MenuProps } from "antd";
+import { type MenuProps } from "antd";
 import * as React from "react";
 import { createPortal } from "react-dom";
+import type { DropdownSurfaceProps } from "../ui/dropdown-surface";
 import { classNames } from "../ui/class-names";
 import { usePortalContainer } from "../ui/portal-context";
 import { usePopupDismiss } from "../ui/popup-lifecycle";
@@ -95,6 +96,25 @@ export function SidebarRowMenu({ row, menu, open, onOpenChange, label, title, de
     triggerNode.current?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2 }));
     synthetic.current = false;
   };
+  // 弹层实现（antd Dropdown + Menu）单独成块：右键菜单只在真的打开时才需要。
+  // 弹层未到位时先记下这次右键的位置，实现到达后按原坐标重放。
+  const [Surface, setSurface] = React.useState<React.ComponentType<DropdownSurfaceProps> | null>(null);
+  const surfaceRequest = React.useRef<Promise<void> | null>(null);
+  const pendingOpen = React.useRef<{ x: number; y: number; target: HTMLElement | null } | null>(null);
+  const loadSurface = React.useCallback((): Promise<void> => {
+    if (Surface) return Promise.resolve();
+    if (!surfaceRequest.current) {
+      surfaceRequest.current = import("../ui/dropdown-surface").then(module => { setSurface(() => module.DropdownSurface); });
+    }
+    return surfaceRequest.current;
+  }, [Surface]);
+  React.useEffect(() => {
+    if (!Surface) return;
+    const pending = pendingOpen.current;
+    if (!pending) return;
+    pendingOpen.current = null;
+    openAt(pending.x, pending.y, pending.target);
+  }, [Surface]);
   const trigger = React.cloneElement(row, {
     ref: (node: HTMLElement | null) => {
       triggerNode.current = node;
@@ -115,6 +135,11 @@ export function SidebarRowMenu({ row, menu, open, onOpenChange, label, title, de
       // Treat it as the same gesture, not a second toggle that closes the menu.
       if (!unavailable && pressed.current && !synthetic.current) onOpenChange(true);
       row.props.onContextMenu?.(event);
+      if (!unavailable && !Surface) {
+        // 弹层还没到位：记下这次右键坐标，等实现到达后重放同一个手势。
+        pendingOpen.current = { x: event.clientX, y: event.clientY, target: event.target as HTMLElement };
+        void loadSurface();
+      }
     },
     onKeyDown: event => {
       row.props.onKeyDown?.(event);
@@ -164,30 +189,30 @@ export function SidebarRowMenu({ row, menu, open, onOpenChange, label, title, de
     ...(error ? [{ key: "action-error", disabled: true, label: <span role="alert" className="sidebar-menu-error">{error}</span> }] : []),
   ];
   return <WandUiBoundary>
-    <Dropdown open={shown} disabled={unavailable} trigger={["contextMenu"]}
-    onOpenChange={(next, info) => { if (info.source === "trigger") onOpenChange(next); }}
-    getPopupContainer={() => portal ?? document.body} placement="bottomLeft" destroyOnHidden
-    align={{ overflow: { adjustX: true, adjustY: true, shiftX: 12, shiftY: 12 } }}
-    classNames={{ root: classNames("sidebar-row-menu", className) }}
-    styles={{ root: { minWidth: "min(224px, calc(100vw - 24px))", maxWidth: "min(288px, calc(100vw - 24px))" },
-      itemContent: { whiteSpace: "normal", overflowWrap: "anywhere" } }}
-    menu={{ ...menu, id, "aria-label": label, selectable: false, items, openKeys, onOpenChange: changeKeys,
-      triggerSubMenuAction: "click", getPopupContainer: () => submenuContainer.current ?? portal ?? document.body,
-      // On narrow screens two menus cannot fit side by side. Let Ant shift the child,
-      // rather than clipping it or moving the parent when the child opens.
-      builtinPlacements: {
-        rightTop: { points: ["tl", "tr"], overflow: { adjustX: true, adjustY: true, shiftX: 12, shiftY: 12 } },
-        leftTop: { points: ["tr", "tl"], overflow: { adjustX: true, adjustY: true, shiftX: 12, shiftY: 12 } },
-        ...menu.builtinPlacements,
-      },
-      style: { maxHeight: "calc(100dvh - 24px)", overflowY: "auto", overscrollBehavior: "contain", ...menu.style } }}
-    popupRender={nativeMenu => <div ref={content} data-wand-popup-owner={popupOwner} onKeyDown={event => {
-      if (event.key === "Tab" && !event.nativeEvent.isComposing) {
-        onOpenChange(false); restoreFocus(); event.stopPropagation();
-      }
-    }}>{nativeMenu}</div>}>
-    {trigger}
-  </Dropdown>
+    {Surface
+      ? <Surface trigger={trigger} open={shown} disabled={unavailable} triggers={["contextMenu"]}
+        onOpenChange={(next, info) => { if (info.source === "trigger") onOpenChange(next); }}
+        getPopupContainer={() => portal ?? document.body} placement="bottomLeft" destroyOnHidden
+        align={{ overflow: { adjustX: true, adjustY: true, shiftX: 12, shiftY: 12 } }}
+        classNames={{ root: classNames("sidebar-row-menu", className) }}
+        styles={{ root: { minWidth: "min(224px, calc(100vw - 24px))", maxWidth: "min(288px, calc(100vw - 24px))" },
+          itemContent: { whiteSpace: "normal", overflowWrap: "anywhere" } }}
+        menu={{ ...menu, id, "aria-label": label, selectable: false, items, openKeys, onOpenChange: changeKeys,
+          triggerSubMenuAction: "click", getPopupContainer: () => submenuContainer.current ?? portal ?? document.body,
+          // On narrow screens two menus cannot fit side by side. Let Ant shift the child,
+          // rather than clipping it or moving the parent when the child opens.
+          builtinPlacements: {
+            rightTop: { points: ["tl", "tr"], overflow: { adjustX: true, adjustY: true, shiftX: 12, shiftY: 12 } },
+            leftTop: { points: ["tr", "tl"], overflow: { adjustX: true, adjustY: true, shiftX: 12, shiftY: 12 } },
+            ...menu.builtinPlacements,
+          },
+          style: { maxHeight: "calc(100dvh - 24px)", overflowY: "auto", overscrollBehavior: "contain", ...menu.style } }}
+        popupRender={nativeMenu => <div ref={content} data-wand-popup-owner={popupOwner} onKeyDown={event => {
+          if (event.key === "Tab" && !event.nativeEvent.isComposing) {
+            onOpenChange(false); restoreFocus(); event.stopPropagation();
+          }
+        }}>{nativeMenu}</div>}/>
+      : trigger}
     {shown && createPortal(<div ref={submenuContainer} className="sidebar-menu-submenus" data-wand-popup-owner={popupOwner}/>, portal ?? document.body)}
   </WandUiBoundary>;
 }

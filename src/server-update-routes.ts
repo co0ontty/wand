@@ -203,7 +203,7 @@ export function registerPublicUpdateRoutes(
     // Beta 包下发时顺手清理分发目录：debug 构建每次都带独立时间戳版本号，
     // 不清理会按构建次数无限堆积。只保留最新一个；正在下发的文件与
     // currentApkFile 固定指向的文件不会被删。清理失败不阻断本次下载。
-    if (channel === "beta") await pruneQuietly(deps.pruneAndroidApkDirectory, asset.fileName, "安装包");
+    if (channel === "beta") await pruneQuietly(deps.pruneAndroidApkDirectory?.bind(deps), asset.fileName, "安装包");
     // 响应头携带实际发送字节的 SHA-256：check 与 download 之间 APK 目录若被
     // 重新构建/覆盖，客户端以响应头为准，避免用过期 check 快照误报校验失败。
     const headers: Record<string, string> = {};
@@ -256,7 +256,7 @@ export function registerPublicUpdateRoutes(
     }
     // 开始下发后再清理：macOS 每次 debug 构建产出独立的 zip+dmg+update.json，
     // 不清理会按构建次数堆积。清理保留最新一整套，不影响本次传输。
-    await pruneQuietly(deps.pruneMacosBetaDirectory, asset.fileName, " macOS 构建包");
+    await pruneQuietly(deps.pruneMacosBetaDirectory?.bind(deps), asset.fileName, " macOS 构建包");
     streamFileWithRange(req, res, {
       filePath: asset.filePath,
       size: asset.size,
@@ -381,7 +381,7 @@ export function registerPublicUpdateRoutes(
       return;
     }
     // iOS 每次 debug 构建产出独立时间戳的 IPA，不清理会按构建次数堆积。
-    await pruneQuietly(deps.pruneIosIpaDirectory, asset.fileName, " iOS 构建包");
+    await pruneQuietly(deps.pruneIosIpaDirectory?.bind(deps), asset.fileName, " iOS 构建包");
     streamFileWithRange(req, res, {
       filePath: asset.filePath,
       size: asset.size,

@@ -70,6 +70,7 @@ import { isSessionProvider } from "./session-provider.js";
 import { registerVaultRoutes } from "./server-vault-routes.js";
 import { registerGithubRoutes } from "./server-github-routes.js";
 import { registerTaskRoutes } from "./server-task-routes.js";
+import { TaskExecutionQueue } from "./task-execution-queue.js";
 import { taskTitleService } from "./task-title-service.js";
 import { getGithubConnectorStatus } from "./github-connector.js";
 import { registerMissionRoutes } from "./server-mission-routes.js";
@@ -499,6 +500,14 @@ export async function startServer(
   // No SDK prewarm: Pi defaults to CLI. Only an explicit Wand Agent selection
   // probes the in-process harness; CLI startup/settings must not depend on it.
   const sessionRegistry = new SessionRegistry(processes, structuredSessions, storage);
+  // 员工任务并发闸门：所有员工派发共用同一实例，排队状态随存储持久化。
+  const taskExecutionQueue = new TaskExecutionQueue({
+    storage, config, structured: structuredSessions, processes, sessions: sessionRegistry,
+  });
+  structuredSessions.setEmployeeInputAdmission({
+    canStart: (session, scheduling) => taskExecutionQueue.canStartSession(session, scheduling),
+    schedule: employeeId => taskExecutionQueue.scheduleDrain(employeeId),
+  });
   const sessionCompletions = new SessionCompletionTracker(storage, (id) => sessionRegistry.get(id));
   let nextEmployeeImWarningAt = 0;
   const employeeIm = new EmployeeImService(storage, { onFailure: () => {
@@ -547,7 +556,7 @@ export async function startServer(
     defaultModelOf: (provider) => getDefaultModelForProvider(config, provider),
   });
   const conversationService = new ConversationService({ storage, config, structured: structuredSessions, runner: aiTeams,
-    notifySession: notifier.conversationSession, deleteSession: id => { sessionRegistry.deleteWithProviderHistory(id); } });
+    notifySession: notifier.conversationSession, notifyChanged: () => notifier.system({ kind: "conversations-changed" }), deleteSession: id => { sessionRegistry.deleteWithProviderHistory(id); } });
   conversations = conversationService;
   conversationService.migrateExistingChats();
   const scheduledTasks = new ScheduledTaskService({ storage, conversations: conversationService,
@@ -750,7 +759,7 @@ export async function startServer(
 
   registerGithubRoutes(app, { storage, requireAdmin, sessions: sessionRegistry });
   // 任务管理与 Missions 一样只需登录：原生 connected-app 也要能列/建/派发。
-  registerTaskRoutes(app, { storage, sessions: sessionRegistry, structured: structuredSessions, processes, config, aiTeams, free: openRouter });
+  registerTaskRoutes(app, { storage, sessions: sessionRegistry, structured: structuredSessions, processes, config, aiTeams, free: openRouter, executionQueue: taskExecutionQueue });
   registerAiTeamRoutes(app, {
     storage,
     runner: aiTeams,
@@ -762,6 +771,7 @@ export async function startServer(
     storage,
     config,
     free: openRouter,
+    executionQueue: taskExecutionQueue,
     notifyEmployeeChanged: (employeeId) => notifyAiTeamRun({ kind: "silicon-employee-definition", employeeId }),
   });
   registerEmployeeImRoutes(app, { storage, im: employeeIm, requireAdmin });
@@ -915,6 +925,7 @@ export async function startServer(
   );
   wsManager.setup({
     getSession: (id) => sessionRegistry.get(id),
+    projectMessages: (id, messages) => sessionRegistry.transportMessages(id, messages),
     getTerminalState: (id) => processes.getTerminalState(id),
     sendPtyInput: (id, input, shortcutKey, userInput) =>
       processes.sendInputConfirmed(id, input, "terminal", shortcutKey, userInput).then(() => {}),
@@ -931,6 +942,7 @@ export async function startServer(
 
   // Wire process events to WebSocket broadcast
   processes.on("process", (event: ProcessEvent) => {
+    sessionRegistry.invalidateMessageProjection(event.sessionId);
     taskTitles.ingest(event);
     sessionCompletions.ingest(event);
     missions.ingest(event);
@@ -939,6 +951,7 @@ export async function startServer(
     wsManager.emitEvent(event);
   });
   structuredSessions.setEventEmitter((event) => {
+    sessionRegistry.invalidateMessageProjection(event.sessionId);
     taskTitles.ingest(event);
     storage.recordTaskCommentSessionEvent(event);
     conversationService.ingestSessionEvent(event);
@@ -947,13 +960,18 @@ export async function startServer(
     missions.ingest(event);
     aiTeams.ingest(event);
     employeeImLifecycle.ingest(event);
+    // 员工结构化回合结束时补位排队派发；inFlight 仍为 true 的事件不触发。
+    const data = event.data as { employeeId?: unknown; structuredState?: { inFlight?: unknown } } | undefined;
+    if (typeof data?.employeeId === "string" && data.structuredState?.inFlight !== true) {
+      taskExecutionQueue.scheduleDrain(data.employeeId);
+    }
     wsManager.emitEvent(event);
   });
   notifier.attach((event) => wsManager.emitEvent(event));
   systemCalls.attach({ emit: event => wsManager.emitEvent(event), notifyConversation: notifier.conversationSession });
   // Re-attach structured CLI runs that kept going inside terminald while the
   // previous web process was down; fire-and-forget, failures are logged inside.
-  void structuredSessions.recoverDetachedRuns();
+  void structuredSessions.recoverDetachedRuns().then(() => taskExecutionQueue.drainAll());
   aiTeams.reconcile();
   structuredSessions.resumeQueuedPiMessages();
 
@@ -1052,6 +1070,7 @@ export async function startServer(
       try { wss.close(); } catch { /* noop */ }
       try { server.close(); } catch { /* noop */ }
       authService.dispose();
+      taskExecutionQueue.dispose();
       try { storage.close(); } catch { /* noop */ }
     };
     const onListenError = (err: NodeJS.ErrnoException): void => {
@@ -1285,6 +1304,7 @@ export async function startServer(
       shuttingDown = true;
       feedback.stop();
       if (activeFeedback === feedback) activeFeedback = null;
+      taskExecutionQueue.dispose();
       employeeImLifecycle.dispose();
       employeeIm.dispose();
       taskTitles.dispose();

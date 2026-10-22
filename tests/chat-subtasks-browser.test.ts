@@ -33,6 +33,10 @@ test("session subtask workspace preserves main input, reading, selection and ind
   const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   const browser = await openBrowser(url, 1778, 1267);
   t.after(async () => { await browser.close(); server.close(); rmSync(temp, { recursive: true, force: true }); });
+  // Device metrics alone change CSS geometry, not Chrome's native input bounds.
+  // The right-pane wheel target is outside the default 800px headless window.
+  const { windowId } = await browser.send("Browser.getWindowForTarget");
+  await browser.send("Browser.setWindowBounds", { windowId, bounds: { width: 1778, height: 1267 } });
   const e = (source: string) => browser.evaluate(source);
   const dispatch = (id: string) => ({ type: "tool_use", id, name: "Task", input: { subagent_type: "general-purpose", description: `检查 ${id}`, prompt: `任务说明 ${id}` }, __subagent: { taskId: id, taskDescription: `检查 ${id}` } });
   const result = (id: string) => ({ type: "tool_result", tool_use_id: id, content: `# ${id} 结果\n\n${"完整结果内容\n\n".repeat(100)}` });
@@ -109,6 +113,12 @@ test("session subtask workspace preserves main input, reading, selection and ind
     assert.equal(await e("document.activeElement.matches('.chat-subtasks-trigger')"), true, "Escape restores focus to the fixed entrance");
     await browser.click(".chat-subtasks-trigger");
     assert.equal(await e("document.querySelector('.chat-subtasks-scroll:not([hidden])').scrollTop"), 120);
+    // Closing/reopening separates physical gestures so Chrome cannot latch
+    // this wheel packet to the preceding main-pane scroll gesture.
+    const childWheel = await e("(()=>{const s=document.querySelector('.chat-subtasks-scroll:not([hidden])'),r=s.getBoundingClientRect();return{x:r.left+100,y:r.top+Math.min(100,r.height/2),main:main.scrollTop}})()");
+    await browser.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: childWheel.x, y: childWheel.y, deltaX: 0, deltaY: 120 });
+    await browser.wait("document.querySelector('.chat-subtasks-scroll:not([hidden])').scrollTop > 120", "detail wheel scroll");
+    assert.equal(await e("main.scrollTop"), childWheel.main, "detail wheel must not move the main reading pane");
     await browser.click(".chat-subtasks-item:nth-child(1)");
     assert.equal(await e("document.querySelector('.chat-subtasks-scroll:not([hidden])').scrollTop"), 200);
     assert.equal(await e("(()=>{const r=document.querySelector('.chat-subtasks-trigger').getBoundingClientRect();return r.x===triggerRect.x&&r.width===triggerRect.width})()"), true);
@@ -125,12 +135,58 @@ test("session subtask workspace preserves main input, reading, selection and ind
     await browser.key("Escape");
     assert.equal(await e("getComputedStyle(main).visibility"), "visible");
     assert.equal(await e("input.value"), "保留草稿");
+    // Check actual workspace width, not just viewport breakpoints. The 344px
+    // navigation means 1304/1305px straddle the 960px container boundary.
+    const layoutCases = [];
+    for (const mode of [
+      { name: "wide", width: 1778, column: false, native: false, reduced: false },
+      { name: "column", width: 2560, column: true, native: false, reduced: false },
+      { name: "column-shrink", width: 1778, column: true, native: false, reduced: false },
+      { name: "native-reduced", width: 1778, column: false, native: true, reduced: true },
+      { name: "container-961", width: 1305, column: false, native: false, reduced: false },
+      { name: "container-960", width: 1304, column: true, native: false, reduced: false },
+    ]) {
+      await browser.send("Emulation.setDeviceMetricsOverride", { width: mode.width, height: 900, deviceScaleFactor: 1, mobile: false });
+      await browser.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: mode.reduced ? "reduce" : "no-preference" }] });
+      await e(`document.documentElement.dataset.chatWidth=${JSON.stringify(mode.column ? "column" : "full")};document.documentElement.classList.toggle('is-wand-app',${mode.native})`);
+      await browser.settle();
+      const closed = await e("({main:main.getBoundingClientRect().toJSON(),paragraph:wrapProbe.getBoundingClientRect().toJSON()})");
+      await browser.click(".chat-subtasks-trigger");
+      const opened = await e(`(()=>{const root=document.getElementById('chat-output'),panel=document.querySelector('.chat-subtasks-panel');return{
+        available:root.clientWidth,main:main.getBoundingClientRect().toJSON(),panel:panel.getBoundingClientRect().toJSON(),
+        paragraph:wrapProbe.getBoundingClientRect().toJSON(),visibility:getComputedStyle(main).visibility,
+        transition:getComputedStyle(panel).transitionDuration,overflow:root.scrollWidth>root.clientWidth,
+        sameInput:document.getElementById('input-box')===input,draft:input.value}})()`);
+      if (opened.available > 960) {
+        assert.ok(opened.main.right <= opened.panel.left + 1, mode.name + ": non-overlapping panes");
+        assert.ok(opened.paragraph.right <= opened.main.right + 1, mode.name + ": prose stays inside main pane");
+        if (opened.available * 0.62 < closed.main.width - 1) {
+          assert.ok(opened.main.width < closed.main.width, mode.name + ": opening genuinely shrinks main width");
+          assert.ok(opened.paragraph.height > closed.paragraph.height, mode.name + ": prose rewraps instead of clipping");
+        } else {
+          assert.ok(Math.abs(opened.main.width - closed.main.width) <= 1, mode.name + ": capped reading column keeps its width when there is enough room");
+        }
+        if (mode.column) assert.ok(Math.abs((opened.main.left - 344) - (opened.panel.left - opened.main.right)) <= 2, "reading column is centered within the remaining main pane");
+      } else {
+        assert.equal(opened.visibility, "hidden", mode.name + ": narrow workspace switches views");
+        assert.ok(Math.abs(opened.panel.width - opened.available) <= 1, mode.name + ": details use the full workspace");
+      }
+      assert.equal(opened.overflow, false, mode.name + ": work area does not escape horizontally");
+      assert.equal(opened.sameInput, true); assert.equal(opened.draft, "保留草稿");
+      if (mode.reduced) assert.equal(opened.transition, "0s");
+      await browser.screenshot(join(evidence, mode.name + ".png"));
+      await browser.key("Escape");
+      assert.equal(await e("getComputedStyle(main).visibility"), "visible");
+      assert.ok(Math.abs(await e("main.getBoundingClientRect().width") - closed.main.width) <= 1, mode.name + ": closing restores main width");
+      layoutCases.push({ mode: mode.name, closed, opened });
+    }
+    writeFileSync(join(evidence, "layout-matrix.json"), JSON.stringify(layoutCases, null, 2));
     await e("h.state.selectedId='focus-B';h.publish([{role:'user',messageId:'other',content:[{type:'text',text:'另一会话'}]}]);h.doRenderChat(true);h.frames()");
     assert.equal(await e("document.getElementById('chat-output').dataset.subtasksOpen"), "false");
     assert.equal(await e("document.querySelectorAll('.chat-subtasks-scroll').length"), 0, "session switch cannot retain another session's results");
     assert.deepEqual(browser.errors, []);
     writeFileSync(join(evidence, "result.json"), JSON.stringify({ ok: true, realProductionRenderer: true,
-      modes: ["1778px-with-344px-navigation", "900px-reduced"], modelCalls: 0, errors: browser.errors }, null, 2));
+      modes: ["1778px-with-344px-navigation", "900px-reduced", ...layoutCases.map(item => item.mode)], bidirectionalWheelIsolation: true, modelCalls: 0, errors: browser.errors }, null, 2));
   } catch (error) {
     writeFileSync(join(evidence, "failure.json"), JSON.stringify({ error: String(error), errors: browser.errors, dom: await e("document.body.innerText.slice(0,5000)") }, null, 2));
     throw error;

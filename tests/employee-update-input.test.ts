@@ -67,3 +67,14 @@ test("ordinary employee saves include all editable fields and default absent tag
   assert.deepEqual(employeeUpdateInput(current, { name: "新名字", duty: "", prompt: "新角色", avatar: "", tags: [], agents: changedAgents,
     id: "e_replacement", systemKey: "replacement" }), { name: "新名字", duty: "", prompt: "新角色", avatar: "", tags: [], agents: changedAgents });
 });
+
+test("clearing the concurrency field submits the default limit of two", () => {
+  assert.equal(employeeUpdateInput(employee({ maxConcurrentTasks: 3 }), { maxConcurrentTasks: null }).maxConcurrentTasks, 2);
+  assert.equal(employeeUpdateInput(employee({ maxConcurrentTasks: 3 }), { name: "改名" }).maxConcurrentTasks, 3);
+  for (const identity of FIXED_EMPLOYEE_AVATARS) {
+    const current = employee(identity);
+    assert.equal(employeeUpdateInput(current, { maxConcurrentTasks: null }).maxConcurrentTasks, 2);
+  }
+  const builtin = employee({ systemKey: "wand-decision-expert" });
+  assert.equal(employeeUpdateInput(builtin, { maxConcurrentTasks: null, agents }).maxConcurrentTasks, 2);
+});

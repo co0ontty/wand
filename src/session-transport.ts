@@ -1,4 +1,5 @@
 import type { ConversationTurn, SessionSnapshot } from "./types.js";
+import { sessionExecutionStatus, type ExecutionStatus } from "./execution-state.js";
 import { compactTransportAvatar } from "./fixed-employee-avatar.js";
 import { enrichStructuredMessages, WAND_PROTOCOL_VERSION } from "./structured-client-protocol.js";
 import { normalizeTurnAnchors } from "./structured-provider-common.js";
@@ -15,6 +16,8 @@ type SessionBaseDTO = Omit<SessionSnapshot, "output" | "messages" | "title" | "p
   title: string;
   /** Alias of claudeSessionId; that field stores every provider's native resume id. */
   providerSessionId?: string | null;
+  executionStatus?: ExecutionStatus;
+  queuedMessageCount?: number;
 };
 
 export interface SessionListItemDTO extends SessionBaseDTO {
@@ -108,6 +111,8 @@ function sessionBase(snapshot: SessionSnapshot, avatarMode: "full" | "compact" =
     claudeSessionId: snapshot.claudeSessionId,
     providerSessionId: snapshot.claudeSessionId,
     queuedMessages: snapshot.queuedMessages,
+    executionStatus: sessionExecutionStatus(snapshot),
+    queuedMessageCount: snapshot.queuedMessages?.length ?? 0,
     // inFlight 之外的回合锚点一律读成 null（兜底历史库残值与重启降级窗口）。
     structuredState: normalizeTurnAnchors(snapshot.structuredState),
     resumedFromSessionId: snapshot.resumedFromSessionId,

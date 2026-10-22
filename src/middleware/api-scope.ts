@@ -86,6 +86,7 @@ export const API_ROUTE_RULES: readonly ApiRouteRule[] = [
   { prefix: "/api/local-preview", scope: "files" },
 
   // ── 会话、任务、工作区与员工（原生客户端的主要功能面）──
+  { prefix: "/api/pi-settings", scope: "sessions" },
   { prefix: "/api/sessions", scope: "sessions" },
   { prefix: "/api/structured-sessions", scope: "sessions" },
   { prefix: "/api/session-list", scope: "sessions" },

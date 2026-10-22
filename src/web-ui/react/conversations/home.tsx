@@ -29,6 +29,7 @@ import { conversationScrollRecord, conversationScrollRestore, storedConversation
 import { ConversationTaskPanel } from "./task-panel";
 import { ConversationTaskPreview } from "./task-preview";
 import { ConversationSessionReply } from "./session-preview";
+import { subscribeConversationSessionPreview } from "./session-preview-events";
 import { useConversationActivity } from "./activity";
 import { GroupEditor } from "./group-editor";
 import { conversationsRepository, notifyConversationChanges, UnconfirmedConversationError } from "./repository";
@@ -83,8 +84,14 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
   const selfProfile = useUserProfile();
   const selfName = selfProfile.name || "我";
   const { employees, loading, error: directoryError } = useSiliconEmployees({ enabled: visible, includeArchived: true });
+  // 通讯录按需挂载：URL 直接进 ?view=contacts 时首帧就是打开态，懒挂载会晚一帧；
+  // 其余情况等用户第一次打开再挂载，之后常驻。
+  const [directoryMounted, setDirectoryMounted] = React.useState(() => ui.directory);
+  React.useEffect(() => { if (ui.directory) setDirectoryMounted(true); }, [ui.directory]);
   const id = ui.selectedId;
   const [detail, setDetail] = React.useState<ConversationDetail | null>(null);
+  const detailRef = React.useRef<ConversationDetail | null>(null);
+  const [historyLoading, setHistoryLoading] = React.useState(false);
   const [loadError, setLoadError] = React.useState("");
   const [phase, setPhase] = React.useState<ConversationSubmitPhase>("idle");
   const [feedback, setFeedback] = React.useState("");
@@ -127,6 +134,8 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
   const inviteTrigger = React.useRef<HTMLButtonElement>(null);
   const scroll = React.useRef<HTMLDivElement>(null);
   const loadEpoch = React.useRef(0);
+  const pendingHistory = React.useRef<{ id: string; promise: Promise<void> } | null>(null);
+  const historyDirty = React.useRef(false);
   const pendingDetail = React.useRef<{ id: string; promise: Promise<void>; dirty: boolean } | null>(null);
   const projectsEpoch = React.useRef(0);
   const selected = detail?.id === id ? detail : null;
@@ -143,7 +152,7 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
     const input = sender.current?.inputElement;
     return input instanceof HTMLTextAreaElement ? input : input?.querySelector("textarea");
   });
-  React.useEffect(() => { setDraftRecipient(""); }, [id]);
+  React.useEffect(() => { setDraftRecipient(""); setHistoryLoading(false); historyDirty.current = false; }, [id]);
   const scope = `${id}:${target?.runId ?? "talk"}:${layer === "task" ? "dispatch" : "message"}`;
   const current = React.useRef({ scope, visible, id, key: draftKey }); current.current = { scope, visible, id, key: draftKey };
   const employee = employees.find(e => e.id === selected?.peerEmployeeId || id === `dm_${e.id}`);
@@ -176,12 +185,14 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
       : selected?.kind === "group" ? mentionedLeader ? `@${mentionedLeader.name} · 本轮负责人` : "群内沟通 · @成员指定负责人" : `新工作 · 发给 ${employee?.name ?? "当前员工"}`;
   const load = React.useCallback(async () => {
     if (!id || !visible || ui.directory) return;
+    if (pendingHistory.current?.id === id) { historyDirty.current = true; return pendingHistory.current.promise; }
+    if (detailRef.current?.id !== id) detailRef.current = null;
     if (pendingDetail.current?.id === id) { pendingDetail.current.dirty = true; return pendingDetail.current.promise; }
     const epoch = ++loadEpoch.current;
     const promise = (async () => {
       do {
         if (pendingDetail.current?.id === id) pendingDetail.current.dirty = false;
-        try { const next = await conversationsRepository.detail(id); if (epoch === loadEpoch.current && current.current.id === id) { setDetail(next); setLoadError(""); } }
+        try { const next = await conversationsRepository.detail(id, detailRef.current); if (epoch === loadEpoch.current && current.current.id === id) { detailRef.current = next; setDetail(next); setLoadError(""); } }
         catch (cause) { if (epoch === loadEpoch.current) setLoadError(cause instanceof Error ? cause.message : "读取对话失败。"); }
         // A notification during a GET needs one fresh read after it, not another concurrent GET.
       } while (epoch === loadEpoch.current && pendingDetail.current?.dirty);
@@ -189,6 +200,26 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
     pendingDetail.current = { id, promise, dirty: false };
     return promise;
   }, [id, visible, ui.directory]);
+  const loadHistory = React.useCallback(async () => {
+    if (historyLoading || current.current.id !== id) return;
+    if (pendingHistory.current?.id === id) return pendingHistory.current.promise;
+    setHistoryLoading(true);
+    const epoch = loadEpoch.current;
+    const pending = (async () => {
+      try {
+        await pendingDetail.current?.promise;
+        const next = await conversationsRepository.detail(id, detailRef.current, true);
+        if (current.current.id === id && epoch === loadEpoch.current) { detailRef.current = next; setDetail(next); setLoadError(""); }
+      } catch (error) { if (current.current.id === id && epoch === loadEpoch.current) setLoadError(error instanceof Error ? error.message : "历史读取失败"); }
+      finally {
+        if (pendingHistory.current?.id === id && epoch === loadEpoch.current) pendingHistory.current = null;
+        if (current.current.id === id) setHistoryLoading(false);
+        if (historyDirty.current && current.current.id === id) { historyDirty.current = false; void load(); }
+      }
+    })();
+    pendingHistory.current = { id, promise: pending };
+    return pending;
+  }, [id, historyLoading, load]);
   const loadProjects = React.useCallback(async () => {
     const epoch = ++projectsEpoch.current;
     setProjectsLoading(true); setProjectsError("");
@@ -204,11 +235,14 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
   }, [visible, ui.directory, loading, employees, id]);
   React.useEffect(() => {
     if (!visible || ui.directory) return;
-    void load(); const unsubscribe = subscribeAiTeamRunChanges(() => { if (!document.hidden) void load(); });
-    const timer = setInterval(() => { if (!document.hidden) void load(); }, 3000);
+    let pending: ReturnType<typeof setTimeout> | undefined;
+    const changed = (): void => { if (!document.hidden && !pending) pending = setTimeout(() => { pending = undefined; void load(); }, 250); };
+    void load(); const unsubscribe = subscribeAiTeamRunChanges(changed);
+    const unsubscribePreview = subscribeConversationSessionPreview(update => { if (update.conversationId === id) changed(); });
+    const timer = setInterval(() => { if (!document.hidden) void load(); }, 15_000);
     const resume = (): void => { if (!document.hidden) void load(); };
     document.addEventListener("visibilitychange", resume);
-    return () => { ++loadEpoch.current; pendingDetail.current = null; unsubscribe(); clearInterval(timer); document.removeEventListener("visibilitychange", resume); };
+    return () => { ++loadEpoch.current; pendingDetail.current = null; unsubscribe(); unsubscribePreview(); if (pending) clearTimeout(pending); clearInterval(timer); document.removeEventListener("visibilitychange", resume); };
   }, [load, visible, ui.directory]);
   React.useEffect(() => {
     if (!visible || layer !== "task") return;
@@ -432,7 +466,7 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
         {emptyNotice ? <Typography.Paragraph type={!selected && directoryError ? "danger" : "secondary"} className="conversation-empty" role="status">
           {emptyNotice}
         </Typography.Paragraph> : null}
-        <SidebarProjectionSwap value={`${id}:${filter}`} animate={false}><ConversationMessages key={`${id}:${filter}`} navigationScope={`${id}:${filter}`} ready={!!selected} active={visible && !ui.directory} group={selected?.kind === "group"} restoreScroll={storedConversationScroll(ui.scrolls[scrollScope])} turns={turns} taskLabels={taskLabels}
+        <SidebarProjectionSwap value={`${id}:${filter}`} animate={false}><ConversationMessages key={`${id}:${filter}`} navigationScope={`${id}:${filter}`} ready={!!selected} active={visible && !ui.directory} group={selected?.kind === "group"} restoreScroll={storedConversationScroll(ui.scrolls[scrollScope])} turns={turns} taskLabels={taskLabels} hasEarlier={selected?.history?.hasEarlier} loadingEarlier={historyLoading} onLoadEarlier={() => { void loadHistory(); }}
           mentionNames={[...new Set(roster.map(member => member.name).filter(Boolean))]}
           employeeIds={Object.fromEntries(roster.filter(member => member.employeeId).flatMap(member => [[member.id, member.employeeId!], [member.employeeId!, member.employeeId!]]))}
           renderSessionPreview={(turn, index) => <ConversationSessionReply turn={turn} active={visible && !ui.directory} statusProvided={activity.hasStatus(turn)}
@@ -545,6 +579,10 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
         <input ref={inputFiles} hidden type="file" multiple aria-label="选择附件" onChange={e => { if (e.currentTarget.files) addFiles(e.currentTarget.files); e.currentTarget.value = ""; }}/>
       </div>
     </Flex>
-    <div className="conversation-directory-surface" data-active={ui.directory} inert={!ui.directory}><ConversationDirectory onSelect={select}/></div>
+    {/* 通讯录是隐藏页：第一次打开前不挂载，也不读团队名单与归档员工；
+        打开后保持挂载，切回对话再回来时筛选、滚动与已读内容都还在。 */}
+    {directoryMounted ? <div className="conversation-directory-surface" data-active={ui.directory} inert={!ui.directory}>
+      <ConversationDirectory active={ui.directory} onSelect={select}/>
+    </div> : null}
   </section>;
 }

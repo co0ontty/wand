@@ -1,5 +1,9 @@
 import { isStandaloneSettingsPage } from "../page.js";
+import { hasPageRoute, pageSearch } from "../page-route";
+import { capturePageSelection } from "./page-selection";
+import { clearStartupPreloads, preloadAuthenticatedPage } from "./startup";
 import { loadConfigSnapshot } from "../react/config-snapshot";
+import { invalidateSessionList } from "../react/session-list-snapshot";
 import { clearNoticeView, paintBootNotice, paintOfflineNotice } from "./notice-view-adapter";
 import { composer, state, writeStoredBoolean } from "./state";
 import { invalidateChatInteraction } from "./chat-render-focus.js";
@@ -12,7 +16,7 @@ import { isSidebarDrawerLayout } from "./file-browser";
 import { loadGitStatus } from "./git-commit";
 import { autoResizeInput, getSelectedSession } from "./input";
 import { requestNotificationPermission, notifyUpdateAvailable, _apkVersion, _macAppVersion } from "./notifications";
-import { applyCurrentView, applyConfigDefaultThinking, checkApkAutoUpdate, checkDmgAutoUpdate, closeTransientSessionsDrawer, COMPOSER_IDLE_HINT, fetchAvailableModels, getComposerPlaceholder, hasNativeSwitchServer, loadSessions, refreshAll, syncComposerModeSelect, syncComposerModelSelect, updateDrawerState, updateShellChrome } from "./session-engine";
+import { applyCurrentView, applyConfigDefaultThinking, checkApkAutoUpdate, checkDmgAutoUpdate, closeTransientSessionsDrawer, COMPOSER_IDLE_HINT, fetchAvailableModels, getComposerPlaceholder, hasNativeSwitchServer, loadSessions, syncComposerModeSelect, syncComposerModelSelect, updateDrawerState, updateShellChrome } from "./session-engine";
 import { maybeScrollTerminalToBottom } from "./terminal";
 import { ensureTerminalFit, ensureTerminalFitWithRetry, teardownTerminal } from "./viewport";
 import { initWebSocket, forceReconnectWebSocket, cancelWsReconnect, evaluateWsHeartbeatStale, startPolling, syncComposerBadges } from "./websocket";
@@ -258,6 +262,7 @@ export function bindForegroundSyncListeners() {
 
 export function restoreLoginSession() {
   if (isStandaloneSettingsPage()) return;
+  const selectionCurrent = capturePageSelection();
   // Probe an unauthenticated endpoint first so an anonymous visit
   // does not leave a noisy 401 on /api/config in DevTools.
   fetch("/api/session-check", { credentials: "same-origin" })
@@ -268,7 +273,13 @@ export function restoreLoginSession() {
         render();
         return null;
       }
-      return loadConfigSnapshot().catch(function(error: any) {
+      const configuration = loadConfigSnapshot();
+      // The auth gate is open: data and the known target module must not wait
+      // for config, rAF, React effects or a remembered session's output.
+      preloadAuthenticatedPage();
+      return configuration.catch(function(error: any) {
+        clearStartupPreloads();
+        invalidateSessionList();
         // Any HTTP answer means we reached the server but are not authorized;
         // transport failures fall through to the offline boot notice below.
         if (error && typeof error.status === "number" && error.status > 0) {
@@ -285,6 +296,7 @@ export function restoreLoginSession() {
       applyConfigDefaultThinking(config);
       state.loginChecked = true;
       requestAnimationFrame(function() {
+        if (state.config !== config) return;
         try {
           render({ skipShellChrome: true });
         } catch (_e) {
@@ -292,9 +304,15 @@ export function restoreLoginSession() {
           // continue with polling and session loading so the app remains functional
         }
         startPolling();
-        // 会话加载完再恢复任务上下文：弹回上次打开的任务（标签栏 / 分屏），
-        // 否则主区只剩一条裸会话（会话选中态是持久化的，任务上下文不是）。
-        refreshAll().then(function() { return restoreActiveTask(); });
+        // Explicit feature/target links never need the remembered session's
+        // full output. Navigation still waits for the authoritative list.
+        loadSessions({ reuseSnapshot: true, skipSelectedOutputReload: hasPageRoute() }).then(function() {
+          if (state.config !== config || !selectionCurrent()) return;
+          // A URL changed before the list arrived is the new target, not a
+          // reason to leave the router permanently uninitialized.
+          const restoreSearch = pageSearch();
+          return restoreActiveTask(undefined, () => state.config === config && selectionCurrent() && pageSearch() === restoreSearch);
+        });
         fetchAvailableModels();
         requestNotificationPermission();
         if (config.updateAvailable && config.latestVersion) {
@@ -311,6 +329,7 @@ export function restoreLoginSession() {
       });
     })
     .catch(function() {
+      clearStartupPreloads();
       state.loginChecked = true;
       if (!navigator.onLine) {
         var app = document.getElementById("app");

@@ -142,6 +142,15 @@ export function buildIosInstallPage(options: {
   const warningHtml = warnings.length
     ? `<div class="warn">${warnings.map((item) => `<p>${escapeHtml(item)}</p>`).join("")}</div>`
     : "";
+  // Reuse the visible link so automatic and manual handoff always use the same URL.
+  // Attempt only once per page load; cancellation must not cause another prompt.
+  const autoInstallScript = options.signed && options.https && options.installUrl.startsWith("itms-services://")
+    ? `<script>
+    const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent)
+      || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    if (isIos) document.getElementById("ios-install").click();
+  </script>`
+    : "";
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -166,10 +175,11 @@ export function buildIosInstallPage(options: {
     <h1>安装 ${escapeHtml(options.title)}</h1>
     <div class="meta">版本 ${escapeHtml(options.version)} · ${escapeHtml(options.sizeLabel)}</div>
     ${warningHtml}
-    <a class="install" href="${escapeHtml(options.installUrl)}">在 iPhone 上安装</a>
+    <a id="ios-install" class="install" href="${escapeHtml(options.installUrl)}">在 iPhone 上安装</a>
     <a class="secondary" href="${escapeHtml(options.downloadUrl)}">下载 IPA</a>
-    <p class="hint">请用 Safari 打开本页。安装后如提示未受信任，到 设置 → 通用 → VPN 与设备管理 中信任，iOS 18 企业包可能需要重启。</p>
+    <p class="hint">请用 Safari 打开本页。${autoInstallScript ? "iPhone / iPad 会自动请求系统安装确认；若未弹出，请点击上方安装按钮。" : ""}安装后如提示未受信任，到 设置 → 通用 → VPN 与设备管理 中信任，iOS 18 企业包可能需要重启。</p>
   </main>
+  ${autoInstallScript}
 </body>
 </html>
 `;

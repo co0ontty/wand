@@ -173,7 +173,7 @@ test("[M-2] 补更早历史时阅读锚点按元素身份恢复，不因「贴�
   assert.match(source, /const pendingAnchor = React\.useRef<\{ id: string; offset: number \} \| null>\(null\)/);
   assert.match(source, /const captureAnchor = React\.useCallback\(\(\): \{ id: string; offset: number \} \| null => \{/);
   assert.match(source, /\.find\(candidate => candidate\.getBoundingClientRect\(\)\.bottom > rect\.top \+ 1\)/);
-  assert.match(source, /const loadEarlier = React\.useCallback\(\(\) => \{\n\s+pendingAnchor\.current = captureAnchor\(\);/);
+  assert.match(source, /const loadEarlier = React\.useCallback\(\(\) => \{\n\s+if \(loadingEarlier\) return;\n\s+pendingAnchor\.current = captureAnchor\(\);/);
   // 往前补页的分支必须走锚点复位并明确退出贴尾，不能再有「贴尾就跳到底」。
   const branch = source.slice(source.indexOf("if (start < previousStart) {"), source.indexOf("} else if (following.current) scroll.scrollTop = scroll.scrollHeight;"));
   assert.match(branch, /const node = anchor \? scroll\.querySelector<HTMLElement>\(`\[data-presentation-id=/);

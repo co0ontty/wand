@@ -67,6 +67,16 @@ export function installSidebarStyles(): void {
 .sidebar .workspace-tasks { margin-inline-start:8px; border-inline-start:1px solid var(--border-subtle); }
 .sidebar .workspace-task-sessions { margin-inline-start:6px; border-inline-start:1px solid var(--border-subtle); }
 .sidebar .workspace-task-main, .sidebar .workspace-session-main { min-height:36px; }
+.sidebar .workspace-task-main { flex:1 1 0; min-width:0; overflow:hidden; }
+.sidebar .workspace-task-name { font-size:13px; white-space:nowrap; }
+.sidebar .workspace-task-disclosure-slot { width:20px; height:32px; flex:none; display:inline-flex; align-items:center; }
+.sidebar .workspace-task-disclosure.ant-btn { width:20px; min-width:20px; height:32px; padding:0; color:var(--text-secondary); }
+.sidebar .sidebar-task-status { display:inline-flex; align-items:center; justify-content:flex-end; gap:3px; flex:0 0 auto; min-width:4em; white-space:nowrap; word-break:keep-all; font-size:12px; line-height:18px; color:var(--text-secondary); }
+.sidebar .sidebar-task-status > * { flex:none; white-space:nowrap; }
+.sidebar .sidebar-task-status.tone-accent { color:var(--success); }
+.sidebar .sidebar-task-status.tone-warning { color:var(--warning); }
+.sidebar .sidebar-task-status.tone-success { color:var(--success); }
+.sidebar .workspace-task-children { margin-inline-start:8px; padding-inline-start:8px; border-inline-start:1px solid var(--border-subtle); }
 .sidebar .workspace-session-name { font-size:13px; }
 .sidebar .workspace-session-kind { color:var(--text-secondary); font-size:11px; }
 .sidebar .workspace-loose-label { display:block; padding:8px 6px 4px; font-size:12px; }
@@ -118,6 +128,8 @@ export function installSidebarStyles(): void {
   .sidebar-new-task.ant-btn { min-height:44px; }
   .sidebar :is(.workspace-task-action,.workspace-task-chevron-btn) { width:32px; min-width:32px; height:44px; }
   .sidebar .workspace-task-main, .sidebar .workspace-session-main { min-height:44px; }
+  .sidebar .workspace-task-disclosure-slot { width:36px; height:44px; }
+  .sidebar .workspace-task-disclosure.ant-btn { width:36px; min-width:36px; height:44px; }
   .sidebar .sidebar-activity-filter.ant-btn { min-height:44px; }
   .sidebar .sidebar-recent-add { width:44px; min-width:44px; height:44px; }
   :is(.sidebar-row-menu,.sidebar-menu-submenus) :is(.ant-dropdown-menu-item,.ant-dropdown-menu-submenu-title) { min-height:44px; }

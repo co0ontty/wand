@@ -70,23 +70,28 @@ function BrowserQuickTerminalWorkspace({ children }: { children: React.ReactNode
     if (frame.current) observer.observe(frame.current);
     return () => observer.disconnect();
   }, [chromeHost, mainHost, terminalHost]);
+  const focusRequestedTerminal = React.useCallback(() => {
+    if (!focusIntent.current || !session.current) return;
+    const active = document.activeElement;
+    if (active === button.current || active === document.body || terminalHost.contains(active)) quickTerminalRuntime().focus(session.current);
+    focusIntent.current = false;
+  }, [terminalHost]);
+  // A retained terminal is still inert while show() is handling the click.
+  // Focus only after React removes inert and applies the reopened layout.
+  React.useLayoutEffect(() => { if (open) focusRequestedTerminal(); }, [open, focusRequestedTerminal]);
   React.useEffect(() => quickTerminalRuntime().observe(event => {
     if (!session.current || (event.sessionId && event.sessionId !== session.current)) return;
     if (event.type === "init") {
       const ended = ["stopped", "exited", "failed"].includes(event.data?.status || "");
       setConnection(ended ? "进程已结束" : "已连接"); setError("");
       if (event.data?.cwd) setCwd(event.data.cwd);
-      if (focusIntent.current && !ended) {
-        const active = document.activeElement;
-        if (active === button.current || active === document.body || terminalHost.contains(active)) quickTerminalRuntime().focus(session.current);
-        focusIntent.current = false;
-      }
+      if (!ended) focusRequestedTerminal();
     } else if (event.type === "disconnected") setConnection("已断开 · 自动重连中");
     else if (event.type === "connected" || event.type === "resync_required") setConnection("连接中");
     else if (event.type === "pty_error" || event.type === "error") {
       setConnection("连接异常"); setError("终端操作未确认，请检查输出后重新连接；不会自动重发输入。");
     } else if (event.type === "ended" || (event.type === "status" && ["stopped", "exited", "failed"].includes(event.data?.status || ""))) setConnection("进程已结束");
-  }), [terminalHost]);
+  }), [focusRequestedTerminal]);
   React.useEffect(() => () => {
     if (session.current) {
       quickTerminalRuntime().retain(session.current, false);
@@ -97,7 +102,10 @@ function BrowserQuickTerminalWorkspace({ children }: { children: React.ReactNode
   const show = async () => {
     setOpen(true); setMenu(false);
     focusIntent.current = true;
-    if (session.current) { quickTerminalRuntime().focus(session.current); return; }
+    if (session.current) {
+      if (open) focusRequestedTerminal();
+      return;
+    }
     if (pending.current) return;
     pending.current = true; setBusy(true); setConnection("连接中");
     try {

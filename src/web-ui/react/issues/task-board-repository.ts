@@ -12,6 +12,7 @@ import type { ConversationTurn } from "../../../types.js";
 import { normalizeIssueAgentDefaults, type IssueWorkspace } from "./task-board-agent";
 import { HttpResponseError, jsonBody, requestJson } from "../http-adapter";
 import { taskMutationCompleted } from "../task-changes";
+import { loadTaskBoardList } from "./task-board-list-repository";
 
 function mutateTask<T>(url: string, init: RequestInit): Promise<T> {
   return requestJson<T>(url, init).then(taskMutationCompleted);
@@ -39,6 +40,12 @@ export interface IssueSessionSummary {
   provider: string;
   sessionKind: string;
   title: string;
+  purpose?: string;
+  executionStatus?: "running" | "queued" | null;
+  inFlight?: boolean;
+  queuedMessageCount?: number;
+  permissionBlocked?: boolean;
+  archived?: boolean;
   status: string;
   cwd: string;
   model: string;
@@ -64,12 +71,12 @@ export interface IssueDispatchResult {
   } | null;
   subject?: TaskExecutionSubject;
   teamRun?: { run: { id: string } };
+  /** 员工并发上限已满：派发已记录为排队，暂无会话可打开。 */
+  queued?: boolean;
 }
 
 export const taskBoardRepository = {
-  list(workspaceId?: string): Promise<WandTaskListed[]> {
-    return requestJson(`/api/wand-tasks${workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : ""}`);
-  },
+  list: loadTaskBoardList,
   workspaces(): Promise<IssueWorkspace[]> {
     return requestJson("/api/workspaces");
   },

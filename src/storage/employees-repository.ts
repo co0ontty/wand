@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import type { SiliconEmployee } from "../ai-team-types.js";
-import { DEFAULT_EMPLOYEE_KEY, isBuiltinSiliconEmployee, parseSiliconEmployeeTags, siliconEmployeeTags } from "../ai-team-types.js";
+import { DEFAULT_EMPLOYEE_KEY, DEFAULT_MAX_CONCURRENT_TASKS, isBuiltinSiliconEmployee, parseSiliconEmployeeTags, siliconEmployeeTags } from "../ai-team-types.js";
 import { decisionExpertDefinition } from "../decision-expert-employee.js";
 import { DECISION_EXPERT_KEY } from "../decision-expert-identity.js";
 import { defaultEmployeeDefinition } from "../default-employee.js";
@@ -139,10 +139,14 @@ export class EmployeeRepository {
     if (systemSessionLimit !== null && (!Number.isInteger(systemSessionLimit) || systemSessionLimit < 0 || systemSessionLimit > 10_000)) {
       throw new Error("系统调用历史保留上限必须是 0 到 10000 的整数，或 null（不限）。");
     }
+    const maxConcurrentTasks = employee.maxConcurrentTasks ?? existing?.maxConcurrentTasks ?? DEFAULT_MAX_CONCURRENT_TASKS;
+    if (!Number.isInteger(maxConcurrentTasks) || maxConcurrentTasks < 1 || maxConcurrentTasks > 100) {
+      throw new Error("并发任务上限必须是 1 到 100 的整数。");
+    }
     this.db.prepare(
       `INSERT INTO silicon_employees (
-         id, name, duty, prompt, avatar, agents_json, system_key, archived_at, created_at, updated_at, tags_json, system_session_limit
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         id, name, duty, prompt, avatar, agents_json, system_key, archived_at, created_at, updated_at, tags_json, system_session_limit, max_concurrent_tasks
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          name = excluded.name,
          duty = excluded.duty,
@@ -151,6 +155,7 @@ export class EmployeeRepository {
          agents_json = excluded.agents_json,
          tags_json = excluded.tags_json,
          system_session_limit = excluded.system_session_limit,
+         max_concurrent_tasks = excluded.max_concurrent_tasks,
          system_key = excluded.system_key,
          archived_at = excluded.archived_at,
          updated_at = excluded.updated_at`
@@ -168,6 +173,7 @@ export class EmployeeRepository {
       employee.updatedAt,
       JSON.stringify(tags),
       systemSessionLimit,
+      maxConcurrentTasks,
     );
   }
 
@@ -198,11 +204,15 @@ export class EmployeeRepository {
 
   archiveSiliconEmployee(id: string, archivedAt = new Date().toISOString()): void {
     if (isBuiltinSiliconEmployee(this.getSiliconEmployeeDefinition(id))) throw new Error("内置员工不可归档。");
-    this.db.prepare("UPDATE silicon_employees SET archived_at = ?, updated_at = ? WHERE id = ?").run(
-      archivedAt,
-      new Date().toISOString(),
-      id,
-    );
+    this.s.transaction(() => {
+      this.db.prepare("UPDATE silicon_employees SET archived_at = ?, updated_at = ? WHERE id = ?").run(
+        archivedAt,
+        new Date().toISOString(),
+        id,
+      );
+      this.db.prepare(`UPDATE wand_task_comment_dispatches SET state = 'failed', error = '员工已归档或删除，排队执行已取消。'
+        WHERE employee_id = ? AND state = 'queued'`).run(id);
+    });
   }
 
   unarchiveSiliconEmployee(id: string): void {
@@ -215,7 +225,11 @@ export class EmployeeRepository {
 
   deleteSiliconEmployee(id: string): void {
     if (isBuiltinSiliconEmployee(this.getSiliconEmployeeDefinition(id))) throw new Error("内置员工不可删除。");
-    this.db.prepare("DELETE FROM silicon_employees WHERE id = ?").run(id);
+    this.s.transaction(() => {
+      this.db.prepare(`UPDATE wand_task_comment_dispatches SET state = 'failed', error = '员工已归档或删除，排队执行已取消。'
+        WHERE employee_id = ? AND state = 'queued'`).run(id);
+      this.db.prepare("DELETE FROM silicon_employees WHERE id = ?").run(id);
+    });
   }
 
   private requireKnowledgeEmployee(employeeId: string): void {

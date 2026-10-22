@@ -8,6 +8,7 @@ import { canArchiveBoardTask } from "./task-board-repository";
 import { WandButton } from "../ui";
 import { Alert, Badge, Checkbox, Card, Collapse, Descriptions, Empty, Flex, List, Tag, Progress, Dropdown, Typography } from "antd";
 import * as React from "react";
+import { taskAcceptanceLabel, taskSessionActivity, taskSessionSummary } from "./task-delivery-state";
 import type { TaskExecutionSubject, WandTaskAgent, WandTaskPriority, WandTaskStatus } from "../../../task-types";
 import { ProviderLogo } from "../provider-logo";
 import { WandIcon, WandIconButton, WandPopover, WandStretchTabs, WandSwitch } from "../ui";
@@ -42,6 +43,7 @@ import {
   issuePriorityLabel,
   issueSessionRunning,
   issueStatusLabel,
+  issueTaskStatusLabel,
   listIssueAgents,
   type IssueBoardDisplay,
   type IssueBoardFilters,
@@ -124,10 +126,14 @@ export function TaskBoardProcessingRow({
   onOpenSession?: (sessionId: string) => void;
 }): React.ReactElement | null {
   if (task.status !== "doing") return null;
-  const running = task.sessions.some((session) => issueSessionRunning(session.status));
+  const running = task.executionStatus === "running" || task.sessions.some((session) => taskSessionActivity(session) === "运行中");
+  const queued = task.queuedExecutionCount ?? task.queuedCommentCount ?? 0;
   return <Flex align="center" gap="small" className={classNames("task-board-processing", running && "is-running")}>
     {running ? <TaskBoardProcessingGlyph/> : null}
-    <span className="task-board-processing-label">{running ? "正在处理..." : task.sessions.length > 0 ? "暂停处理" : "等待派发"}</span>
+    <span className="task-board-processing-label">{running ? "正在处理..." : queued > 0
+      ? queued === 1 ? "排队中 · 等待执行" : `排队中 · ${queued} 条等待执行`
+      : task.acceptance?.acceptedAt ? "验收通过 · 已完成" : task.acceptance?.blocker ? `待处理：${task.acceptance.blocker}`
+      : task.sessions.length > 0 ? taskSessionSummary(task.sessions) + " · 尚待验收" : "等待派发"}</span>
     <span style={{ flex: 1 }} aria-hidden="true"/>
     <TaskBoardConversationButton sessions={task.sessions} onOpen={onOpenSession}/>
   </Flex>;
@@ -135,9 +141,8 @@ export function TaskBoardProcessingRow({
 
 export function TaskBoardProgressRow({ task }: { task: WandTaskListed }): React.ReactElement | null {
   if (task.status !== "doing" || task.sessions.length === 0) return null;
-  const running = task.sessions.filter((session) => issueSessionRunning(session.status)).length;
   return <Typography.Text type="secondary" className="task-board-progress-row">
-    {running > 0 ? `${running} 个会话运行中 · 共 ${task.sessions.length} 个关联会话` : `${task.sessions.length} 个关联会话`}
+    {`${task.sessions.length} 个关联会话 · ${taskSessionSummary(task.sessions)}`}
   </Typography.Text>;
 }
 
@@ -281,6 +286,7 @@ export function TaskBoardArchiveFolder({
  * 空值给「会话」，不再一律显示「空闲」把异常状态藏起来。
  */
 function sessionStatusLabel(status: string): string {
+  if (status === "queued") return "排队中";
   if (status === "running" || status === "thinking") return "进行中";
   if (status === "waiting-input") return "等待输入";
   if (status === "idle") return "空闲";
@@ -371,6 +377,7 @@ function TaskBoardListRow({
       <strong>{task.title}</strong>
     </WandButton>
     <Flex wrap align="center" gap={4} className="task-board-list-meta">
+      <Typography.Text type={task.acceptance?.acceptedAt ? "success" : "secondary"}>{taskAcceptanceLabel(task.acceptance)}</Typography.Text>
       <TaskBoardPriorityChip priority={task.priority}/>
       {task.milestone ? <TaskBoardMilestoneChip name={task.milestone.name}/> : null}
       {task.labels.slice(0, 2).map((label) => <TaskBoardLabelChip key={label} label={label}/>)}
@@ -386,7 +393,7 @@ function TaskBoardListRow({
       items={[{ key: "details", label: "任务详情", forceRender: true, showArrow: false, children: <div className="task-board-list-detail" id={`task-list-detail-${task.id}`} inert={!expanded}>
       <div className="task-board-list-detail-inner">
         <p>
-          <span>{issueStatusLabel(task.status)}</span>
+          <span>{issueTaskStatusLabel(task)}</span>
           <span>更新于 {formatIssueStamp(task.updatedAt)}</span>
         </p>
         {description ? <Typography.Paragraph className="task-board-list-description" ellipsis={{ rows: 4, expandable: "collapsible", symbol: (expanded) => expanded ? "收起全文" : "展开全文" }} style={{ whiteSpace: "pre-wrap", margin: "8px 0" }}>{description}</Typography.Paragraph> : null}
@@ -447,7 +454,7 @@ export function TaskBoardCardDetail({
   const agent = task.agent;
   const assignee = <TaskBoardAgentChips sessions={task.sessions} assigned={agent} subject={task.executionSubject} assignee={task.assignedExecutor}/>;
   const fields = [
-    { key: "status", label: "状态", children: issueStatusLabel(task.status) },
+    { key: "status", label: "状态", children: issueTaskStatusLabel(task) },
     { key: "assignee", label: "负责人", children: assignee },
     { key: "priority", label: "优先级", children: issuePriorityLabel(task.priority) },
     { key: "workspace", label: "项目", children: <Flex vertical><span>{task.workspace?.name ?? "未归属工作区"}</span>{task.workspace?.cwd && <Typography.Text code>{task.workspace.cwd}</Typography.Text>}</Flex> },
@@ -633,6 +640,10 @@ export function TaskBoardDashboard({
         {metric(issueStatusLabel("done"), stats.done, "done")}
       </Flex>
     </section>
+    <Card size="small" title="验收进度" aria-label="任务验收进度">
+      <Typography.Text>{stats.accepted} / {tasks.length} 项验收通过 · 按任务计数，不按会话数或归档计数</Typography.Text>
+      <Progress percent={Math.round(tasks.length ? stats.accepted / tasks.length * 100 : 0)}/>
+    </Card>
     <Card size="small" title="需要关注" className="task-board-risk-panel">
       <Flex wrap gap="small">
         <Tag color={stats.overdue > 0 ? "error" : "default"}>已逾期 {stats.overdue}</Tag>

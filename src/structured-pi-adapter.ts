@@ -7,7 +7,7 @@ import { preparePiResources, type PreparedPiResources } from "./pi-resource-run.
 import { prepareOpenRouterFreeCli, type OpenRouterFreeCliDependencies } from "./openrouter-free-cli.js";
 import { isOpenRouterFreeSelector } from "./openrouter-free-selection.js";
 import { getErrorMessage } from "./error-utils.js";
-import { classifyProviderRejection, hasStructuredExecutionProgress } from "./structured-failure.js";
+import { cliUnacceptedFacts, hasStructuredExecutionProgress } from "./structured-failure.js";
 
 import { settleThinkingRound, updateThinkingActivity } from "./structured-thinking.js";
 import { startStructuredCli } from "./structured-exec-pump.js";
@@ -283,6 +283,11 @@ export class PiRunner implements StructuredRunnerAdapter {
     let primaryError: string | null = null;
     let progressed = false;
     let unparsedOutput = false;
+    let protocolEventObserved = false;
+    // Pi 把 provider 的执行前拒绝写成 `stopReason: "error"` 的助手消息；只有这种协议内错误
+    // 才能算「provider 亲自拒绝了本轮」，stderr 或被杀信号不算。
+    let protocolErrorObserved = false;
+    const previousSessionId = context.session.claudeSessionId;
     return startStructuredCli({
       sessionId: context.session.id,
       file: "pi",
@@ -301,7 +306,9 @@ export class PiRunner implements StructuredRunnerAdapter {
         try {
           const event = JSON.parse(line) as Record<string, unknown>;
           observer.onEvent?.(event);
-          primaryError = applyPiEvent(state, event, new Date().toISOString()) ?? primaryError;
+          protocolEventObserved = true;
+          const eventError = applyPiEvent(state, event, new Date().toISOString());
+          if (eventError) { primaryError = eventError; protocolErrorObserved = true; }
           progressed ||= hasStructuredExecutionProgress(state);
           const messages = event.type === "agent_end" && Array.isArray(event.messages) ? event.messages
             : event.type === "message_end" || event.type === "turn_end" ? [event.message] : [];
@@ -317,12 +324,21 @@ export class PiRunner implements StructuredRunnerAdapter {
           observer.onUpdate(state);
         } catch { unparsedOutput = true; /* Unknown stdout is not evidence of a safe refusal. */ }
       },
-      finalize: (ctx, exitCode, signal, spawnError) => {
-        const rejection = !progressed && !unparsedOutput && !signal && !spawnError
-          ? classifyProviderRejection(primaryError) : null;
-        return { state, exitCode, signal, stderr: ctx.stderr, primaryError, ...(spawnError ? { spawnError } : {}),
-          ...(rejection ? { rejection, inputAccepted: false } : progressed ? { inputAccepted: true } : {}) };
-      },
+      finalize: (ctx, exitCode, signal, spawnError) => ({
+        state,
+        exitCode,
+        signal,
+        stderr: ctx.stderr,
+        primaryError,
+        ...(spawnError ? { spawnError } : {}),
+        // 已经跑出东西就是「已接受」，显式写下来，不靠下游从 state 反推。
+        ...(progressed ? { inputAccepted: true } : {}),
+        ...cliUnacceptedFacts({
+          state, primaryError, protocolError: protocolErrorObserved, unparsedStdout: unparsedOutput,
+          signal, exitCode, previousSessionId, progressed, noProtocolEvent: !protocolEventObserved,
+          ...(spawnError ? { spawnError } : {}),
+        }),
+      }),
     });
   }
 }

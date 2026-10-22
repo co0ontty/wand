@@ -1,5 +1,6 @@
-import { Dropdown, type MenuProps } from "antd";
+import { type MenuProps } from "antd";
 import * as React from "react";
+import type { DropdownSurfaceProps } from "./dropdown-surface";
 import { classNames } from "./class-names";
 import { WandIcon } from "./icons";
 import { WandButton, type WandButtonKind } from "./button";
@@ -83,38 +84,62 @@ export function WandSelect({ value, defaultValue, options, placeholder = "请选
   });
   usePopupDismiss(open, () => { changeOpen(false); buttonRef.current?.focus({ preventScroll: true }); });
   React.useEffect(() => { if (disabled && open) changeOpen(false); }, [disabled, open]);
-  return <WandUiBoundary><Dropdown trigger={["click"]} disabled={disabled} open={open}
-    onOpenChange={(next, info) => { if (info.source === "trigger") changeOpen(next); }}
-    getPopupContainer={() => portal ?? document.body} placement={popupPlacement(side, align)} destroyOnHidden
-    align={{ offset: popupOffset(side, sideOffset), overflow: { adjustX: true, adjustY: true, shiftX: collisionPadding, shiftY: collisionPadding } }}
-    classNames={{ root: classNames("wand-ui-select-content", searchable && "wand-ui-select-searchable", contentClassName) }}
-    menu={{ id: listId, items, role: "listbox", selectable: true, selectedKeys: selectedValue === undefined ? [] : [selectedValue],
-      onClick: ({ key }) => { setInternalValue(key); onValueChange?.(key); changeOpen(false); buttonRef.current?.focus({ preventScroll: true }); } }}
-    popupRender={menu => <div ref={popupRef} data-wand-popup-owner={popupOwner}>
-      {searchable && <WandInput ref={focusSearch} type="search" aria-label={searchPlaceholder} placeholder={searchPlaceholder}
-        value={query} onChange={event => setQuery(event.currentTarget.value)}
-        startSlot={<WandIcon name="search" size={14}/>}
-        onKeyDown={event => {
-          if (event.nativeEvent.isComposing) return;
-          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-            event.preventDefault();
-            const enabled = popupRef.current?.querySelectorAll<HTMLElement>('[role="option"]:not([aria-disabled="true"])');
-            (event.key === "ArrowUp" ? enabled?.[enabled.length - 1] : enabled?.[0])?.focus();
-          }
-        }}/> }
-      {filtered.length ? menu : <div role="status">没有匹配的选项</div>}
-    </div>}>
-    <WandButton ref={node => {
-      buttonRef.current = node;
-      if (typeof triggerRef === "function") return triggerRef(node);
-      if (triggerRef) triggerRef.current = node;
-    }} kind={triggerKind} id={id} aria-describedby={describedBy} aria-invalid={invalid} disabled={disabled} className={classNames("wand-ui-select-trigger", className)}
-      data-popup-open={open ? "" : undefined} data-placeholder={selectedValue === undefined && !displayValue ? "" : undefined}
-      aria-controls={open ? listId : undefined} role="combobox" aria-haspopup="listbox" aria-expanded={open} aria-label={ariaLabel}
-      title={displayTitle ?? shown}>
-      <span className="wand-ui-select-value">{shown}</span><WandIcon name="chevronDown" size={14}/>
-    </WandButton>
-  </Dropdown></WandUiBoundary>;
+  // 弹层实现（antd Dropdown + Menu）单独成块：选择器只在真的点开时才需要。
+  const [Surface, setSurface] = React.useState<React.ComponentType<DropdownSurfaceProps> | null>(null);
+  const surfaceRequest = React.useRef<Promise<void> | null>(null);
+  const loadSurface = React.useCallback((): Promise<void> => {
+    if (Surface) return Promise.resolve();
+    if (!surfaceRequest.current) {
+      surfaceRequest.current = import("./dropdown-surface").then(module => { setSurface(() => module.DropdownSurface); });
+    }
+    return surfaceRequest.current;
+  }, [Surface]);
+  React.useEffect(() => { if (open) void loadSurface(); }, [open, loadSurface]);
+  const triggerButton = <WandButton ref={node => {
+    buttonRef.current = node;
+    if (typeof triggerRef === "function") return triggerRef(node);
+    if (triggerRef) triggerRef.current = node;
+  }} kind={triggerKind} id={id} aria-describedby={describedBy} aria-invalid={invalid} disabled={disabled} className={classNames("wand-ui-select-trigger", className)}
+    data-popup-open={open ? "" : undefined} data-placeholder={selectedValue === undefined && !displayValue ? "" : undefined}
+    aria-controls={open ? listId : undefined} role="combobox" aria-haspopup="listbox" aria-expanded={open} aria-label={ariaLabel}
+    title={displayTitle ?? shown}>
+    <span className="wand-ui-select-value">{shown}</span><WandIcon name="chevronDown" size={14}/>
+  </WandButton>;
+  // 弹层实现还没到时，触发器自己接住这一次点击；实现到达后由 Ant 接管开合。
+  const pendingTriggerButton = <WandButton ref={node => {
+    buttonRef.current = node;
+    if (typeof triggerRef === "function") return triggerRef(node);
+    if (triggerRef) triggerRef.current = node;
+  }} kind={triggerKind} id={id} aria-describedby={describedBy} aria-invalid={invalid} disabled={disabled} className={classNames("wand-ui-select-trigger", className)}
+    data-popup-open={open ? "" : undefined} data-placeholder={selectedValue === undefined && !displayValue ? "" : undefined}
+    aria-controls={open ? listId : undefined} role="combobox" aria-haspopup="listbox" aria-expanded={open} aria-label={ariaLabel}
+    title={displayTitle ?? shown}
+    onClick={() => { if (!disabled) changeOpen(true); }}>
+    <span className="wand-ui-select-value">{shown}</span><WandIcon name="chevronDown" size={14}/>
+  </WandButton>;
+  return <WandUiBoundary>{Surface
+    ? <Surface trigger={triggerButton} open={open} triggers={["click"]} disabled={disabled}
+      onOpenChange={(next, info) => { if (info.source === "trigger") changeOpen(next); }}
+      getPopupContainer={() => portal ?? document.body} placement={popupPlacement(side, align)} destroyOnHidden
+      align={{ offset: popupOffset(side, sideOffset), overflow: { adjustX: true, adjustY: true, shiftX: collisionPadding, shiftY: collisionPadding } }}
+      classNames={{ root: classNames("wand-ui-select-content", searchable && "wand-ui-select-searchable", contentClassName) }}
+      menu={{ id: listId, items, role: "listbox", selectable: true, selectedKeys: selectedValue === undefined ? [] : [selectedValue],
+        onClick: ({ key }) => { setInternalValue(key); onValueChange?.(key); changeOpen(false); buttonRef.current?.focus({ preventScroll: true }); } }}
+      popupRender={menuNode => <div ref={popupRef} data-wand-popup-owner={popupOwner}>
+        {searchable && <WandInput ref={focusSearch} type="search" aria-label={searchPlaceholder} placeholder={searchPlaceholder}
+          value={query} onChange={event => setQuery(event.currentTarget.value)}
+          startSlot={<WandIcon name="search" size={14}/>}
+          onKeyDown={event => {
+            if (event.nativeEvent.isComposing) return;
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+              event.preventDefault();
+              const enabled = popupRef.current?.querySelectorAll<HTMLElement>('[role="option"]:not([aria-disabled="true"])');
+              (event.key === "ArrowUp" ? enabled?.[enabled.length - 1] : enabled?.[0])?.focus();
+            }
+          }}/> }
+        {filtered.length ? menuNode : <div role="status">没有匹配的选项</div>}
+      </div>}/>
+    : pendingTriggerButton}</WandUiBoundary>;
 }
 
 /**

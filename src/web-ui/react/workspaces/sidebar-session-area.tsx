@@ -10,6 +10,7 @@ const styles = String.raw`
 .sidebar-session-area[data-empty] { min-height:36px; }
 .sidebar-session-area .sidebar-session-area-toggle.ant-btn { width:24px; min-width:24px; height:28px; padding:0; margin-block-start:2px; color:var(--text-secondary); }
 .sidebar-session-area-content { min-width:0; }
+.sidebar-session-area[data-inline-toggle] { display:block; padding-inline-start:18px; }
 .sidebar-session-area-content > .sidebar-session-preview { margin-inline-start:0; }
 .sidebar-session-area-content .conversation-person-sessions, .sidebar .sidebar-session-area-content .im-sidebar-group-inner { margin-inline-start:0; }
 .sidebar .sidebar-session-area-content .workspace-task-sessions { margin-inline-start:0; }
@@ -21,7 +22,7 @@ const styles = String.raw`
 `;
 
 /** One stable disclosure control in the preview's left gutter, also reachable when the list is open. */
-export function SidebarSessionArea({ id, open, label, toggleRef, toggleClassName = "", disabled = false, hasSessions = true, reserve = false, onOpenChange, children }: {
+export function SidebarSessionArea({ id, open, label, toggleRef, toggleClassName = "", disabled = false, hasSessions = true, reserve = false, inlineToggle = false, onOpenChange, children }: {
   id: string;
   open: boolean;
   label: string;
@@ -31,13 +32,15 @@ export function SidebarSessionArea({ id, open, label, toggleRef, toggleClassName
   hasSessions?: boolean;
   /** Keep the preview band's height before (or without) any session, so late directory data cannot move rows. */
   reserve?: boolean;
+  /** Task rows host their disclosure inline; employee previews retain their gutter control. */
+  inlineToggle?: boolean;
   onOpenChange(open: boolean): void;
   children: React.ReactNode;
 }): React.ReactElement | null {
   React.useLayoutEffect(() => { installStyleSheet("wand-sidebar-session-area", styles); }, []);
   if (!hasSessions && !reserve) return null;
-  return <div className="sidebar-session-area" data-empty={!hasSessions || undefined}>
-    {hasSessions ? <WandIconButton ref={toggleRef} className={`sidebar-session-area-toggle ${toggleClassName}`} disabled={disabled}
+  return <div className="sidebar-session-area" data-empty={!hasSessions || undefined} data-inline-toggle={inlineToggle || undefined}>
+    {hasSessions && !inlineToggle ? <WandIconButton ref={toggleRef} className={`sidebar-session-area-toggle ${toggleClassName}`} disabled={disabled}
       aria-label={`${open ? "收起" : "展开"}${label}的会话列表`} aria-expanded={open} aria-controls={id}
       onClick={event => { event.stopPropagation(); anchorSidebarDisclosure(event.currentTarget, () => onOpenChange(!open)); }}
       onKeyDown={event => sidebarDisclosureKeys(event, open, onOpenChange)}>

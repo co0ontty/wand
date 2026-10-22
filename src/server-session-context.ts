@@ -47,7 +47,7 @@ export function createSessionRouteContext(deps: SessionRouteDeps): SessionRouteC
     req.get("X-Wand-Tool-Projection") === "compact" || req.query.compactTools === "1";
 
   const sessionResponseDTO = (snapshot: SessionSnapshot, req: Request) => {
-    const enriched = enrichStructuredMessages(snapshot.messages ?? [], snapshot.id);
+    const enriched = sessions.transportMessages?.(snapshot.id, snapshot.messages ?? []) ?? enrichStructuredMessages(snapshot.messages ?? [], snapshot.id);
     const windowed = windowMessagesForTransport(
       wantsCompactTools(req) ? compactToolMessagesForTransport(enriched) : enriched,
       config.cardDefaults ?? {},

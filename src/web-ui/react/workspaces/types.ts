@@ -111,6 +111,8 @@ export interface WorkspaceSessionSummary {
   providerCliActive?: boolean;
   providerCliExitCode?: number | null;
   inFlight?: boolean;
+  executionStatus?: "running" | "queued" | null;
+  queuedMessageCount?: number;
   canArchive?: boolean;
   employeeId?: string;
   employeeName?: string;
@@ -195,6 +197,8 @@ export interface WorkspaceTaskDetail extends WorkspaceTask {
 /** GET /api/tasks 聚合行：任务 + 运行期派生字段；目录信息在 TaskDirectoryGroup 上。 */
 export type TaskSummary = WorkspaceTaskDetail & {
   boardTaskId?: string | null;
+  executionStatus?: "running" | "queued" | null;
+  queuedExecutionCount?: number;
   parentWorkspaceTaskId?: string | null;
   /** 使用 maxSessions 截断时的真实会话总数（未截断时等于 sessions.length）。 */
   totalSessions?: number;

@@ -6,7 +6,7 @@ import { WandIcon, WandButton } from "../ui/index.js";
 import { EmployeeAvatar } from "../agents/employee-avatar.js";
 import { deferredComponent } from "../deferred-feature";
 import { siliconEmployeesRepository, employeeUpdateInput } from "../agents/employee-repository.js";
-import { siliconEmployeeTags } from "../../../ai-team-types.js";
+import { DEFAULT_MAX_CONCURRENT_TASKS, siliconEmployeeTags } from "../../../ai-team-types.js";
 import { isWandPopupOwnedBy } from "../ui/popup-lifecycle.js";
 import type { SiliconEmployee } from "../../../ai-team-types.js";
 import type { UiSessionVm } from "./ui-store.js";
@@ -151,8 +151,10 @@ export function ObjectProfilePanel({
           </Flex>
           {employee ? <Flex justify="center" gap={8} wrap>{siliconEmployeeTags(employee).map(tag => <Tag key={tag}>{tag}</Tag>)}{employee.archivedAt ? <Tag>已归档</Tag> : null}</Flex> : null}
           {onMessage ? <WandButton kind="primary" onClick={onMessage}><WandIcon name="chat"/>发送消息</WandButton> : null}
-          {employee ? <Card size="small" title="员工设置" extra={<WandButton size="small" aria-label="设置系统调用历史保留上限" onClick={() => setEditing(true)}>设置</WandButton>}>
-            <Descriptions column={1} size="small" items={[{ key: "system-session-limit", label: "系统调用历史保留上限", children:
+          {employee ? <Card size="small" title="员工设置" extra={<WandButton size="small" aria-label="设置员工并发与系统调用历史保留上限" onClick={() => setEditing(true)}>设置</WandButton>}>
+            <Descriptions column={1} size="small" items={[{ key: "max-concurrent-tasks", label: "并发任务上限", children:
+              `同时执行 ${employee.maxConcurrentTasks ?? DEFAULT_MAX_CONCURRENT_TASKS} 个任务，超出排队` },
+            { key: "system-session-limit", label: "系统调用历史保留上限", children:
               employee.systemSessionLimit == null ? "不限" : employee.systemSessionLimit === 0 ? "不保留已结束记录" : `保留最新 ${employee.systemSessionLimit} 条已结束记录` }]}/>
           </Card> : null}
           {employee?.prompt ? <Collapse items={[{ key: "prompt", label: "角色设定", children:

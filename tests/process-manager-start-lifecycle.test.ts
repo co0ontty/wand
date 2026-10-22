@@ -43,6 +43,26 @@ function harness(t: test.TestContext, persistent = false) {
   return { root, storage, manager, pending, resolve, events, forgotten };
 }
 
+test("PTY launch declares TERM independently of the service environment", async t => {
+  const h = harness(t, true);
+  const previous = process.env.TERM;
+  try {
+    for (const term of [undefined, "", "dumb"]) {
+      if (term === undefined) delete process.env.TERM;
+      else process.env.TERM = term;
+      const start = h.manager.startShell(h.root, "default");
+      const request = h.pending.at(-1)!.request;
+      h.resolve(h.pending.length - 1);
+      await start;
+      assert.equal(request.env.TERM, "xterm-256color");
+      assert.equal(request.env.TERM, request.name);
+    }
+  } finally {
+    if (previous === undefined) delete process.env.TERM;
+    else process.env.TERM = previous;
+  }
+});
+
 for (const persistent of [false, true]) {
   for (const action of ["stop", "delete", "dispose"] as const) {
     test(`pending ${persistent ? "persistent" : "local"} start cannot undo ${action}`, async t => {

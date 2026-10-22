@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { Express, Response } from "express";
 
 import {
+  DEFAULT_MAX_CONCURRENT_TASKS,
   SILICON_EMPLOYEE_AVATAR_MAX_CHARS,
   isBuiltinSiliconEmployee,
   parseSiliconEmployeeTags,
@@ -34,6 +35,7 @@ import { DEFAULT_WAND_TASK_AGENT_KIND } from "./task-types.js";
 import type { QuickCommitAiOptions } from "./ai-text-runner.js";
 import { EMPLOYEE_KNOWLEDGE_MAX_ENTRIES } from "./employee-knowledge-types.js";
 import type { WandStorage } from "./storage.js";
+import type { TaskExecutionQueue } from "./task-execution-queue.js";
 import type { WandTaskAgent } from "./task-types.js";
 import type { SessionProvider, WandConfig } from "./types.js";
 import { badRequest } from "./http-error.js";
@@ -44,6 +46,16 @@ export function parseSystemSessionLimit(value: unknown, existing?: SiliconEmploy
   if (value === null) return null;
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 10_000) {
     throw badRequest("系统调用历史保留上限必须是 0 到 10000 的整数，或 null（不限）。");
+  }
+  return value;
+}
+
+/** 并发任务上限：null/缺省回落到默认值 2；最小值 1，避免把员工永久停摆。 */
+export function parseMaxConcurrentTasks(value: unknown, existing?: SiliconEmployee | null): number {
+  if (value === undefined) return existing?.maxConcurrentTasks ?? DEFAULT_MAX_CONCURRENT_TASKS;
+  if (value === null) return DEFAULT_MAX_CONCURRENT_TASKS;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 100) {
+    throw badRequest("并发任务上限必须是 1 到 100 的整数。");
   }
   return value;
 }
@@ -148,7 +160,8 @@ export function parseFixedAvatarEmployeeInput(value: unknown, existing: SiliconE
   const prompt = body.prompt === undefined ? existing.prompt : text(body.prompt);
   if (duty.length > 2000) throw badRequest("员工职责不能超过 2000 个字符。");
   if (prompt.length > 20_000) throw badRequest("员工设定 Prompt 不能超过 20000 个字符。");
-  return { ...existing, name, duty, prompt, agents, systemSessionLimit: parseSystemSessionLimit(body.systemSessionLimit, existing), updatedAt: now };
+  return { ...existing, name, duty, prompt, agents, systemSessionLimit: parseSystemSessionLimit(body.systemSessionLimit, existing),
+    maxConcurrentTasks: parseMaxConcurrentTasks(body.maxConcurrentTasks, existing), updatedAt: now };
 }
 
 /** One validation owner for every employee candidate list, including legacy single agents. */
@@ -196,6 +209,7 @@ export function parseSiliconEmployeeInput(
     agents,
     tags,
     systemSessionLimit: parseSystemSessionLimit(body.systemSessionLimit, existing),
+    maxConcurrentTasks: parseMaxConcurrentTasks(body.maxConcurrentTasks, existing),
     archivedAt: existing?.archivedAt,
     createdAt: existing ? existing.createdAt : now,
     updatedAt: now,
@@ -213,6 +227,8 @@ export function registerSiliconEmployeeRoutes(
     generateDraft?: (request: EmployeeDraftRequest) => Promise<SiliconEmployeeDraft>;
     /** 测试注入点：CLI 可用性探测。 */
     isProviderAvailable?: (agent: WandTaskAgent) => boolean;
+    /** 并发上限变化后立即尝试排空该员工已排队的派发。 */
+    executionQueue?: TaskExecutionQueue;
   },
 ): void {
   const { storage, notifyEmployeeChanged, config } = deps;
@@ -384,11 +400,13 @@ export function registerSiliconEmployeeRoutes(
       const employee = isFixedAvatarEmployee(definition)
         ? parseFixedAvatarEmployeeInput(input, definition, now)
         : isBuiltinSiliconEmployee(existing)
-          ? { ...existing, agents: parseSystemEmployeeAgents(input, existing), systemSessionLimit: parseSystemSessionLimit(input.systemSessionLimit, existing), updatedAt: now }
+          ? { ...existing, agents: parseSystemEmployeeAgents(input, existing), systemSessionLimit: parseSystemSessionLimit(input.systemSessionLimit, existing), maxConcurrentTasks: parseMaxConcurrentTasks(input.maxConcurrentTasks, existing), updatedAt: now }
           : parseSiliconEmployeeInput({ ...definition, ...input }, definition, now);
       storage.saveSiliconEmployee(employee);
       systemAiSessions(storage).enforceRetention(employee.id);
       notifyEmployee(employee.id);
+      // 上限调高后已排队的派发可以立即补位；上限调低则保持排队等待现有回合结束。
+      void deps.executionQueue?.drain(employee.id).catch(error => console.error("[SiliconEmployee] queue drain failed:", getErrorMessage(error)));
       res.json(storage.getSiliconEmployee(employee.id));
     } catch (error) {
       sendEmployeeError(res, error);

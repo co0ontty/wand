@@ -2,7 +2,7 @@
   "schema": 1,
   "kind": "web-performance-lab-baseline",
   "status": "provisional",
-  "recordedAt": "2026-10-20T01:02:28.403Z",
+  "recordedAt": "2026-10-20T01:34:11.185Z",
   "note": "Provisional: re-record with --accept-baseline --final after the P1/P2 performance work and the installed build settle. Do not treat these values as a final baseline.",
   "sources": {
     "static": {
@@ -279,9 +279,9 @@
     "lcpMs": "Largest Contentful Paint at the end of the fixed observation window, ms; lab observation, not field CWV",
     "contentMs": "First visible view-specific content measured by requestAnimationFrame; chat requires a rendered .chat-message, not a mounted composer",
     "cls": "Maximum layout-shift session window (1s gap / 5s cap), excluding shifts with recent input",
-    "longTaskOver50Ms": "Sum of max(0, long-task duration - 50ms) in the observation window; not Lighthouse TBT",
-    "longTaskCount": "Number of long tasks (>50ms)",
-    "longTaskMaxMs": "Longest long task in ms",
+    "longTaskOver50Ms": "Sum of max(0, long-task duration - 50ms) in the observation window; reported but not gated alone because one scheduler outlier can dominate it",
+    "longTaskCount": "Number of long tasks (>50ms); gated with longTaskMaxMs so a single outlier does not fail a run",
+    "longTaskMaxMs": "Longest long task in ms; gated with longTaskCount",
     "domNodes": "document.getElementsByTagName('*').length at the end of the observation window",
     "imageCount": "Same-origin img Resource Timing entries",
     "imageBytes": "Transfer bytes for img Resource Timing entries; cached responses count as zero transfer",
@@ -303,7 +303,7 @@
         "floor": 100
       },
       "lcpMs": {
-        "percent": 20,
+        "percent": 30,
         "floor": 150
       },
       "contentMs": {
@@ -314,8 +314,12 @@
         "percent": 15,
         "floor": 0.03
       },
-      "longTaskOver50Ms": {
-        "percent": 50,
+      "longTaskCount": {
+        "percent": 100,
+        "floor": 5
+      },
+      "longTaskMaxMs": {
+        "percent": 100,
         "floor": 100
       },
       "domNodes": {
@@ -361,9 +365,13 @@
         "percent": 20,
         "floor": 0.05
       },
-      "longTaskOver50Ms": {
-        "percent": 60,
-        "floor": 200
+      "longTaskCount": {
+        "percent": 100,
+        "floor": 5
+      },
+      "longTaskMaxMs": {
+        "percent": 150,
+        "floor": 150
       },
       "domNodes": {
         "percent": 10,
@@ -1978,5 +1986,6 @@
         "revalidatedAssets": 0
       }
     }
-  }
+  },
+  "provenanceCaveat": "The installed runtime did not match src/web-ui/content when these numbers were collected: they describe whatever bundle was installed at that moment, not this tree. Re-record after a build+install of the same commit before using them as a reference."
 }

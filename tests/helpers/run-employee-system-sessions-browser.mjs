@@ -19,10 +19,14 @@ await build({ stdin: { resolveDir: root, loader: "tsx", contents: `
 import * as React from 'react';import {createRoot} from 'react-dom/client';
 import {ConversationSidebarList} from './src/web-ui/react/conversations/sidebar';
 import {notifyConversationChanges} from './src/web-ui/react/conversations/repository';
+import {publishSessionList} from './src/web-ui/react/session-list-snapshot';
 import {WandUiProvider} from './src/web-ui/react/theme';
 import {PortalContainerProvider} from './src/web-ui/react/ui';
 import {installReactUiStyles} from './src/web-ui/react/styles';
-installReactUiStyles();window.refreshEmployeeList=notifyConversationChanges;window.opened=[];
+installReactUiStyles();
+// 会话列表由 owner（生产里是 legacy engine）读到后发布到共享快照，React 侧只做投影：
+// 这里没有 engine，所以夹具直接扮演 owner 的角色（读一次服务端列表再发布）。
+window.refreshEmployeeList=async()=>{const response=await fetch('/api/sessions',{credentials:'same-origin'});publishSessionList(await response.json());notifyConversationChanges();};window.opened=[];
 createRoot(document.getElementById('root')).render(<PortalContainerProvider container={document.getElementById('portals')}><WandUiProvider><ConversationSidebarList compact={false} onNavigate={()=>{}} onOpenSession={id=>window.opened.push(id)}/></WandUiProvider></PortalContainerProvider>);
 ` }, bundle: true, platform: "browser", format: "iife", outfile: join(tmp, "app.js"), define: { "process.env.NODE_ENV": '"production"' } });
 const server = createServer((req, res) => {

@@ -4,44 +4,44 @@
   "zlib": "1.3.2.1-motley-8002e91",
   "metrics": {
     "firstLoad": {
-      "gzip": 880983,
-      "raw": 2890480
+      "gzip": 689113,
+      "raw": 2248972
     },
     "allModules": {
-      "gzip": 1005603,
-      "raw": 3227720
+      "gzip": 1075101,
+      "raw": 3409068
     },
     "eagerModules": {
-      "gzip": 750661,
-      "raw": 2393288
+      "gzip": 557223,
+      "raw": 1743405
     },
     "vendor": {
       "gzip": 112008,
       "raw": 408573
     },
     "html": {
-      "gzip": 997,
-      "raw": 2621
+      "gzip": 1038,
+      "raw": 2703
     },
     "appJs": {
-      "gzip": 1387,
-      "raw": 2353
+      "gzip": 1582,
+      "raw": 2777
     },
     "css": {
-      "gzip": 13570,
-      "raw": 66753
+      "gzip": 14902,
+      "raw": 74622
     },
     "theme": {
       "gzip": 2360,
       "raw": 16892
     },
     "aiTeams": {
-      "gzip": 52620,
-      "raw": 178396
+      "gzip": 54459,
+      "raw": 185344
     },
     "plush": {
-      "gzip": 155642,
-      "raw": 602418
+      "gzip": 155691,
+      "raw": 602604
     }
   }
 }

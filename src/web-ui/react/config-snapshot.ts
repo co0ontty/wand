@@ -1,12 +1,11 @@
-import { parseJsonResponse } from "./http-adapter";
+import { requestJson } from "./http-adapter";
 import { createQuerySnapshot } from "../query-snapshot";
 
 /** One committed `/api/config` read for boot, profile, home and new-session entry points. */
 export type WandConfigSnapshot = Record<string, unknown>;
 
 const snapshot = createQuerySnapshot<WandConfigSnapshot>(async () => {
-  const response = await fetch("/api/config", { credentials: "same-origin" });
-  return parseJsonResponse<WandConfigSnapshot>(response);
+  return requestJson<WandConfigSnapshot>("/api/config", { credentials: "same-origin" });
 });
 
 export function peekConfigSnapshot(): WandConfigSnapshot | null {

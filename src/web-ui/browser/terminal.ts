@@ -22,6 +22,7 @@ import "./i18n";
 import { consumeTerminalTouchPage, consumeTerminalWheelLines, consumeTerminalWheelPage, consumeTerminalZoomWheel, installTerminalPinchZoom, terminalWheelPageSequence, type TerminalTouchPagingState, type TerminalWheelPagingState, type TerminalWheelScrollState, type TerminalZoomWheelState } from "./terminal-wheel";
 import { openLocalPreviewFromLegacy } from "./local-preview-adapter";
 import { cachedTerminalHistory, loadTerminalHistory, resetTerminalHistory } from "./terminal-history";
+import { queueTerminalWrite } from "./terminal-write-queue";
 import { ensureTerminalLibrary } from "../vendor-loader.js";
 import { mountBrowserButtons } from "./library-buttons";
 import { ptyInputState, mergePtyModifiers, modifiedPtySequence } from "../pty-input-state.js";
@@ -557,7 +558,7 @@ wandThemeStore.subscribe(() => {
       }
 
       function sendPtyInput(data: string, shortcutKey?: string) {
-        if (!state.selectedId || !data) return false;
+        if (!state.selectedId || !data || state.terminalRestoring) return false;
         return sendPtySocketMessage({
           type: "pty_input",
           sessionId: state.selectedId,
@@ -640,29 +641,19 @@ wandThemeStore.subscribe(() => {
         }
         var text = String(data);
         lastTerminalOutputAt = Date.now();
+        // Capture the live generation at enqueue time.  A later authoritative
+        // init/reset increments it, so queued pre-reset bytes are ACKed but not
+        // drawn after the fresh snapshot.
+        var generation = state.terminalWriteGeneration || 0;
         var queue = state.terminalWriteQueue || Promise.resolve();
-        state.terminalWriteQueue = queue.catch(function() {}).then(function() {
-          return new Promise(function(resolve) {
-            if (!state.terminal || terminal !== state.terminal) {
-              if (ackBytes && sessionId) acknowledgePtyOutput(sessionId, ackBytes);
-              resolve(null);
-              return;
-            }
-            terminal.write(text, function() {
-              // Check the live flag instead of a snapshot taken at enqueue
-              // time: a chunk queued before the user scrolled up must not
-              // yank the viewport back to the bottom mid-drag. Going through
-              // scrollTerminalToBottom also opens the programmatic-scroll
-              // window so the viewport scroll handler doesn't read our own
-              // bottom-snap as "the user returned to the bottom".
-              if (terminal === state.terminal && state.terminalAutoFollow !== false) {
-                scrollTerminalToBottom(false);
-              }
-              if (ackBytes && sessionId) acknowledgePtyOutput(sessionId, ackBytes);
-              resolve(null);
-            });
-          });
-        });
+        state.terminalWriteQueue = queueTerminalWrite(terminal, text, queue,
+          function() { return terminal === state.terminal && generation === (state.terminalWriteGeneration || 0); },
+          function() {
+            // Read follow state after parsing: a queued write must not yank a
+            // user who started scrolling while xterm was busy back to the bottom.
+            if (state.terminalAutoFollow !== false) scrollTerminalToBottom(false);
+          },
+          function() { if (ackBytes && sessionId) acknowledgePtyOutput(sessionId, ackBytes); });
         return state.terminalWriteQueue;
       }
 
@@ -696,6 +687,9 @@ wandThemeStore.subscribe(() => {
         // the cached value as soon as the emulator is ready.
         if (!state.terminal) return true;
         var terminal = state.terminal;
+        // Invalidate live writes that are queued behind the current emulator
+        // state before enqueueing the authoritative reset/replay.
+        state.terminalWriteGeneration = (state.terminalWriteGeneration || 0) + 1;
         var generation = (state.terminalRestoreGeneration || 0) + 1;
         state.terminalRestoreGeneration = generation;
         state.terminalProgrammaticScrollUntil = Date.now() + 400;
@@ -712,40 +706,52 @@ wandThemeStore.subscribe(() => {
           if (!Number.isFinite(manualDistanceFromBottom) && prevViewport) {
             manualDistanceFromBottom = prevViewport.scrollHeight - prevViewport.clientHeight - prevViewport.scrollTop;
           }
-          terminal.reset();
-          terminal.clear();
-          if (snapshot.cols > 0 && snapshot.rows > 0) terminal.resize(snapshot.cols, snapshot.rows);
-          await writeTerminalNow(terminal, String(snapshot.data || ""));
-          var pending = Array.isArray(snapshot.pending) ? snapshot.pending : [];
-          for (var i = 0; i < pending.length; i++) {
-            var operation = pending[i] || {};
-            if (operation.type === "resize" && operation.cols > 0 && operation.rows > 0) {
-              terminal.resize(operation.cols, operation.rows);
-            } else if (operation.type === "data") {
-              await writeTerminalNow(terminal, String(operation.data || ""));
+          state.terminalRestoring = true;
+          try {
+            terminal.reset();
+            terminal.clear();
+            if (snapshot.cols > 0 && snapshot.rows > 0) terminal.resize(snapshot.cols, snapshot.rows);
+            await writeTerminalNow(terminal, String(snapshot.data || ""));
+            if (terminal !== state.terminal || generation !== state.terminalRestoreGeneration) return;
+            var pending = Array.isArray(snapshot.pending) ? snapshot.pending : [];
+            for (var i = 0; i < pending.length; i++) {
+              if (terminal !== state.terminal || generation !== state.terminalRestoreGeneration) return;
+              var operation = pending[i] || {};
+              if (operation.type === "resize" && operation.cols > 0 && operation.rows > 0) {
+                terminal.resize(operation.cols, operation.rows);
+              } else if (operation.type === "data") {
+                await writeTerminalNow(terminal, String(operation.data || ""));
+              }
             }
+            if (terminal !== state.terminal || generation !== state.terminalRestoreGeneration) return;
+            // Historical resizes are local replay, never new SIGWINCH requests.
+            // Compare the final viewport only against the checkpoint's final grid.
+            state.lastResize = { cols: terminal.cols, rows: terminal.rows };
+            state.terminalSessionId = sessionId || null;
+            state.terminalOutput = String(fallbackOutput || "");
+            state.terminalProgrammaticScrollUntil = Date.now() + 120;
+            if (wasManualBrowsing && manualDistanceFromBottom > 0) {
+              // 用户正在往上翻页：保持他的阅读位置和手动模式，不强行贴底。
+              state.terminalAutoFollow = false;
+              if (state.terminalFitAddon && typeof state.terminalFitAddon.fit === "function") {
+                fitTerminalToContainer(terminal, state.terminalFitAddon);
+              }
+              terminal.scrollToLine(Math.max(0,
+                terminal.buffer.active.baseY - manualDistanceFromBottom));
+            } else {
+              state.terminalAutoFollow = true;
+              if (state.terminalFitAddon && typeof state.terminalFitAddon.fit === "function") {
+                fitTerminalToContainer(terminal, state.terminalFitAddon);
+              }
+              terminal.scrollToBottom();
+            }
+            updateTerminalJumpToBottomButton();
+          } finally {
+            if (terminal === state.terminal) state.terminalRestoring = false;
           }
-          state.terminalSessionId = sessionId || null;
-          state.terminalOutput = String(fallbackOutput || "");
-          state.terminalProgrammaticScrollUntil = Date.now() + 120;
-          if (wasManualBrowsing && manualDistanceFromBottom > 0) {
-            // 用户正在往上翻页：保持他的阅读位置和手动模式，不强行贴底。
-            state.terminalAutoFollow = false;
-            if (state.terminalFitAddon && typeof state.terminalFitAddon.fit === "function") {
-              fitTerminalToContainer(terminal, state.terminalFitAddon);
-              sendTerminalResize(terminal.cols, terminal.rows);
-            }
-            terminal.scrollToLine(Math.max(0,
-              terminal.buffer.active.baseY - manualDistanceFromBottom));
-          } else {
-            state.terminalAutoFollow = true;
-            if (state.terminalFitAddon && typeof state.terminalFitAddon.fit === "function") {
-              fitTerminalToContainer(terminal, state.terminalFitAddon);
-              sendTerminalResize(terminal.cols, terminal.rows);
-            }
-            terminal.scrollToBottom();
+          if (terminal === state.terminal && generation === state.terminalRestoreGeneration) {
+            sendTerminalResize(terminal.cols, terminal.rows);
           }
-          updateTerminalJumpToBottomButton();
         });
         return true;
       }
@@ -761,8 +767,22 @@ wandThemeStore.subscribe(() => {
         var wrote = false;
 
         if (sessionChanged || replace) {
-          resetTerminal();
-          if (rawOutput) wandTerminalWrite(state.terminal, rawOutput);
+          // Legacy servers have no emulator checkpoint, but replayed ANSI still
+          // must not answer old queries or resize a live process.
+          var terminal = state.terminal;
+          var generation = (state.terminalWriteGeneration || 0) + 1;
+          state.terminalWriteGeneration = generation;
+          state.terminalRestoreGeneration = (state.terminalRestoreGeneration || 0) + 1;
+          state.terminalWriteQueue = (state.terminalWriteQueue || Promise.resolve()).catch(function() {}).then(async function() {
+            if (terminal !== state.terminal || generation !== state.terminalWriteGeneration) return;
+            state.terminalRestoring = true;
+            try {
+              resetTerminal();
+              await writeTerminalNow(terminal, rawOutput);
+            } finally {
+              if (terminal === state.terminal) state.terminalRestoring = false;
+            }
+          });
           wrote = !!rawOutput || sessionChanged;
         } else if (rawOutput.startsWith(previousOutput)) {
           var delta = rawOutput.slice(previousOutput.length);

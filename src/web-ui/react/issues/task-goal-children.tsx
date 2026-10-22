@@ -2,7 +2,7 @@ import { TaskBoardAgentChips } from "./task-executor-chips";
 import * as React from "react";
 import { Collapse, Flex, Tag, Typography } from "antd";
 import { WandButton } from "../ui";
-import { issueStatusLabel } from "./task-board-agent";
+import { issueTaskStatusLabel } from "./task-board-agent";
 import type { WandTaskListed } from "./task-board-repository";
 
 const expandedGoals = new Map<string, boolean>();
@@ -22,9 +22,9 @@ export function TaskGoalChildren({ task, tasks, onOpen, path = [] }: {
         <WandButton kind="ghost" onClick={() => onOpen(child.id)} style={{ height: "auto", whiteSpace: "normal", textAlign: "left" }}>
           {child.identifier} · {child.title}
         </WandButton>
-        <Flex gap={4} wrap><Tag>{issueStatusLabel(child.status)}</Tag>
+        <Flex gap={4} wrap><Tag>{issueTaskStatusLabel(child)}</Tag>
           {child.dueDate && <Tag>截止 {child.dueDate}</Tag>}
-          <Typography.Text type="secondary">{child.sessions.length ? `${child.sessions.length} 个执行会话 · 交付待验收` : "尚未派发"}</Typography.Text>
+          <Typography.Text type="secondary">{child.executionStatus === "queued" ? "已排队 · 等待员工空闲" : child.sessions.length ? `${child.sessions.length} 个执行会话 · 交付待验收` : "尚未派发"}</Typography.Text>
           <TaskBoardAgentChips sessions={child.sessions} assigned={child.agent} subject={child.executionSubject} assignee={child.assignedExecutor}/>
         </Flex>
         {child.description && <Typography.Paragraph ellipsis={{ rows: 2, expandable: true }}>{child.description}</Typography.Paragraph>}

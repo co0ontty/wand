@@ -38,6 +38,7 @@ try {
   await browser.click('[aria-label="打开终端"]');
   await browser.wait("document.querySelector('#quick-terminal-panel').textContent.includes('已连接')");
   assert.equal(await browser.evaluate("fixture.posts"), 1);
+  assert.equal(await browser.evaluate("document.querySelector('#quick-terminal-panel').dataset.dock"), "right", "first use docks on the right");
   assert.equal(await browser.evaluate("JSON.parse(fixture.requests[0].body).cwd"), "/workspace/worktree");
   const position = await browser.evaluate("(()=>{let r=document.querySelector('[aria-label=打开终端]').getBoundingClientRect();return [r.x,r.y,r.width,r.height]})()");
   await browser.click('[aria-label="停靠位置：右侧"]');
@@ -54,6 +55,7 @@ try {
   await browser.wait("document.querySelector('[aria-label=\"停靠位置：底部\"]').getAttribute('aria-expanded')==='false'");
   await browser.click('[aria-label="关闭终端面板"]');
   await browser.click('[aria-label="打开终端"]');
+  assert.equal(await browser.evaluate("document.activeElement.id"), "terminal-input", "explicit reopen focuses the retained terminal");
   assert.equal(await browser.evaluate("fixture.posts"), 1);
   assert.equal(await browser.evaluate("document.querySelector('#draft').value"), "主编辑器草稿");
   // A delayed reconnect may not refocus over an editor the user returned to.
@@ -94,6 +96,12 @@ try {
   assert.ok(Math.abs(geometry.terminalWidth / geometry.rootWidth - .4) < .03, JSON.stringify(geometry));
   assert.ok(Math.abs(geometry.right - geometry.rootRight) < 2, JSON.stringify(geometry));
   await browser.screenshot("output/quick-terminal/web-existing-topbar-mock.png");
+  await browser.send("Page.navigate", { url: origin });
+  await browser.wait("!!document.querySelector('[aria-label=打开终端]')");
+  await browser.click('[aria-label="打开终端"]');
+  await browser.wait("!!document.querySelector('#terminal-input')");
+  assert.equal(await browser.evaluate("fixture.posts"), 0);
+  assert.equal(await browser.evaluate("document.querySelector('#quick-terminal-panel').dataset.dock"), "right", "right dock is also restored after refresh");
   assert.deepEqual(browser.errors, []);
   console.log(JSON.stringify({ passed: true, scope: "isolated layout with mock transport, not installed-service acceptance", checks: ["single creation", "same terminal and draft nodes", "dock persistence", "refresh GET only", "Escape", "focus preservation", "narrow/low-height"] }));
 } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }

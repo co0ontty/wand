@@ -4,6 +4,9 @@ export { DECISION_EXPERT_KEY } from "./decision-expert-identity.js";
 import { HR_EMPLOYEE_KEY } from "./hr-employee-identity.js";
 export { HR_EMPLOYEE_KEY } from "./hr-employee-identity.js";
 
+/** 未设置并发上限时的默认值；null/缺省都回落到它。 */
+export const DEFAULT_MAX_CONCURRENT_TASKS = 2;
+
 /** Employee contact entry; identity and execution choices are persisted independently of teams. */
 export interface SiliconEmployee {
   id: string; // "e_<uuid>"
@@ -16,6 +19,8 @@ export interface SiliconEmployee {
   tags?: string[];
   /** Finished system auxiliary history only, excluding agent decisions/dispatch; null/omitted = unlimited, 0 = none. */
   systemSessionLimit?: number | null;
+  /** 同时执行的任务上限；null/未设置按 DEFAULT_MAX_CONCURRENT_TASKS 执行。超出的派发保留为排队，任务仍算活动任务。 */
+  maxConcurrentTasks?: number | null;
   /** Non-empty = Wand built-in identity; it cannot be archived or deleted. */
   systemKey?: string;
   archivedAt?: string;

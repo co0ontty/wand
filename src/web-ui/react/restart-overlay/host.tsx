@@ -1,4 +1,4 @@
-import { Flex, Progress, Spin, Typography } from "antd";
+import { Flex, Spin, Typography } from "antd";
 import {
   useEffect,
   useRef,
@@ -15,6 +15,9 @@ import type { RestartOverlayController } from "./types";
 export interface RestartOverlayHostProps {
   controller?: RestartOverlayController;
 }
+
+/** 进度条只在重启等待期出现：antd Progress 的实现按需下载。 */
+const RestartProgress = React.lazy(() => import("./progress").then(module => ({ default: module.RestartProgress })));
 
 export function RestartOverlayHost({
   controller = restartOverlayController,
@@ -93,14 +96,7 @@ export function RestartOverlayHost({
           </Typography.Paragraph>
           {snapshot.phase !== "timed-out" ? (
             <>
-              <Progress
-                className="wand-restart-progress"
-                percent={progressPercent}
-                showInfo={false}
-                size="small"
-                status="active"
-                aria-label="等待服务重启进度"
-              />
+              <React.Suspense fallback={null}><RestartProgress percent={progressPercent} /></React.Suspense>
               <Typography.Text type="secondary" className="wand-restart-attempts">
                 已检查 {snapshot.attempts} / {snapshot.maxAttempts} 次
               </Typography.Text>

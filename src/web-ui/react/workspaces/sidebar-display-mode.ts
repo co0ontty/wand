@@ -67,9 +67,14 @@ export function isSessionRunning(session: WorkspaceSessionSummary): boolean {
     || ptyTurnActive(session);
 }
 
-/** 「活动」= 在跑或等你处理；群聊条目按同一规则判定。 */
+export function isSessionQueued(session: WorkspaceSessionSummary): boolean {
+  return !session.archived && !isSessionRunning(session) && !isSessionAttention(session)
+    && (session.executionStatus === "queued" || session.status === "queued");
+}
+
+/** 「活动」包含排队、在跑、等你处理与未查看的完成。 */
 export function isSessionActive(session: WorkspaceSessionSummary): boolean {
-  return isSessionAttention(session) || isSessionRunning(session) || isSessionJustCompleted(session);
+  return !session.archived && (isSessionAttention(session) || isSessionRunning(session) || isSessionQueued(session) || isSessionJustCompleted(session));
 }
 
 /** 只裁剪目录内部的会话与空任务；选择仅表示导航，不赋予活动状态。 */
@@ -81,7 +86,7 @@ export function filterActiveGroups(
     const keep = (session: WorkspaceSessionSummary): boolean => (
       isSessionActive(session)
     );
-    const keepIds = new Set(group.tasks.filter(task => task.sessions.some(keep)).map(task => task.id));
+    const keepIds = new Set(group.tasks.filter(task => task.executionStatus === "queued" || task.executionStatus === "running" || task.sessions.some(keep)).map(task => task.id));
     for (const id of [...keepIds]) {
       let parent = group.tasks.find(task => task.id === id)?.parentWorkspaceTaskId;
       const seen = new Set<string>();

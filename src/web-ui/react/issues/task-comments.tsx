@@ -9,9 +9,11 @@ import { usePortalContainer } from "../ui/portal-context";
 import { createPortal } from "react-dom";
 import { taskBoardRepository } from "./task-board-repository";
 import { TaskTextArea } from "./task-form";
-import { acceptCommentDraft, commentDeliveryUncertain, commentDraft, commentMentionHeld, commentMentionQuery, commentRequestIdentity, commentRequestRejected, editCommentDraft, insertCommentMention, settleCommentRequest, type CommentDraft } from "./task-comment-composer";
+import { acceptCommentDraft, commentDeliveryUncertain, commentDraft, commentMentionHeld, commentMentionQuery, commentReferenceQuery, commentRequestIdentity, commentRequestRejected, editCommentDraft, insertCommentMention, insertCommentReference, parseTaskReferenceIds, settleCommentRequest, type CommentDraft } from "./task-comment-composer";
 
 type MentionEmployee = { id: string; name: string; archivedAt?: string | null };
+/** 可被 `#TASK-133` 引用的子任务；编号是引用句柄，标题与状态只用于展示。 */
+type ReferenceTask = { id: string; identifier: string; title: string; status?: string };
 
 function focusCommentCaret(node: HTMLTextAreaElement | null | undefined, caret: number): void {
   if (!node) return;
@@ -32,6 +34,12 @@ export function TaskComments({ taskId, updatedAt, employees = [], childTasks = [
   const [caret, setCaret] = React.useState(0);
   const [highlight, setHighlight] = React.useState(0);
   const [dismissed, setDismissed] = React.useState("");
+  // 可引用任务 = 本任务的直接子任务；编号是 `#TASK-xxx` 的唯一句柄。
+  const referenceTasks: ReferenceTask[] = React.useMemo(() => childTasks.map(child => ({
+    id: child.id, identifier: child.identifier, title: child.title, status: child.status,
+  })), [childTasks]);
+  // 正文里已经写入的引用编号，按出现顺序展示；合法性由服务端最终判定。
+  const referencedIdentifiers = React.useMemo(() => parseTaskReferenceIds(draft.body), [draft.body]);
   const [streamExpanded, setStreamExpanded] = React.useState<Record<string, boolean>>({});
   const [resultPages, setResultPages] = React.useState<Record<string, { taskId: string; messages: import("../../../types.js").ConversationTurn[]; offset: number; total: number; outcome: string; unavailable?: string; loading: boolean; failed?: boolean; retryOffset?: number; truncatedBlocks?: Array<{ turnOffset: number; blockIndex: number }> }>>({});
   const resultRequests = React.useRef(new Map<string, { id: number; controller: AbortController }>());
@@ -64,9 +72,20 @@ export function TaskComments({ taskId, updatedAt, employees = [], childTasks = [
     ? active.filter(employee => employee.name.toLocaleLowerCase().includes(mention.query.toLocaleLowerCase()))
     : [];
   const menuOpen = mention != null && dismissed !== mentionKey;
+  // `#` 唤起任务引用选择器；与 `@` 互斥，同一时刻只开一个浮层。
+  const reference = commentReferenceQuery(draft.body, caret);
+  const referenceKey = reference ? `${reference.start}:${reference.query}` : "";
+  const referenceMatches = reference && dismissed !== referenceKey
+    ? referenceTasks.filter(task => task.identifier.toLocaleLowerCase().includes(reference.query.toLocaleLowerCase())
+      || task.title.toLocaleLowerCase().includes(reference.query.toLocaleLowerCase()))
+    : [];
+  const referenceMenuOpen = reference != null && dismissed !== referenceKey;
+  const [referenceHighlight, setReferenceHighlight] = React.useState(0);
   React.useEffect(() => { setHighlight(0); }, [mentionKey]);
+  React.useEffect(() => { setReferenceHighlight(0); }, [referenceKey]);
   const closeMention = React.useCallback(() => { if (mentionKey) setDismissed(mentionKey); }, [mentionKey]);
   usePopupDismiss(menuOpen, closeMention);
+  usePopupDismiss(referenceMenuOpen, closeMention);
   React.useEffect(() => {
     if (!menuOpen) return;
     const outside = (event: PointerEvent): void => {
@@ -78,17 +97,33 @@ export function TaskComments({ taskId, updatedAt, employees = [], childTasks = [
     return () => window.removeEventListener("pointerdown", outside);
   }, [closeMention, menuOpen, popupOwner]);
   React.useLayoutEffect(() => {
-    if (!menuOpen || !input.current) return;
+    // @ 员工与 # 引用两个浮层共用同一个输入框锚点，任一浮层打开时都要量位置。
+    if (!menuOpen && !referenceMenuOpen) return;
+    if (!input.current) return;
     const update = (): void => setMentionRect(input.current?.getBoundingClientRect() ?? null);
     update(); window.addEventListener("resize", update); window.addEventListener("scroll", update, true);
     return () => { window.removeEventListener("resize", update); window.removeEventListener("scroll", update, true); };
-  }, [menuOpen, mentionKey]);
+  }, [menuOpen, mentionKey, referenceMenuOpen, referenceKey]);
   const nativeInput = (): HTMLTextAreaElement | null => input.current;
+  /** 引用编号 → 子任务 ID；只在本任务的直接子任务里找。 */
+  const openReferencedTask = (identifier: string): void => {
+    const target = referenceTasks.find(task => task.identifier === identifier);
+    if (target) onOpenTask?.(target.id);
+  };
   const choose = (employee: MentionEmployee): void => {
     const node = nativeInput();
     const pos = node?.selectionStart ?? caret;
     const next = insertCommentMention(draft.body, pos, employee.name);
     edit({ body: next.body, employeeId: employee.id });
+    setCaret(next.caret);
+    setDismissed("");
+    requestAnimationFrame(() => focusCommentCaret(nativeInput(), next.caret));
+  };
+  const chooseReference = (task: ReferenceTask): void => {
+    const node = nativeInput();
+    const pos = node?.selectionStart ?? caret;
+    const next = insertCommentReference(draft.body, pos, task.identifier);
+    edit({ body: next.body });
     setCaret(next.caret);
     setDismissed("");
     requestAnimationFrame(() => focusCommentCaret(nativeInput(), next.caret));
@@ -247,7 +282,8 @@ export function TaskComments({ taskId, updatedAt, employees = [], childTasks = [
   const dispatchingReply = Boolean(draft.sourceCommentId) && dispatching;
   const submitLabels = { idle: dispatching ? (dispatchingReply ? "回复并派发" : "评论并派发") : draft.sourceCommentId ? "回复" : "发表评论", sending: "正在提交…", saved: "评论已保存", failed: "提交失败", unknown: "送达待核对" };
   const commentById = new Map(comments.map(comment => [comment.id, comment]));
-  const mentionHeight = Math.min(240, Math.max(38, matches.length * 34 + 8));
+  // 浮层高度按当前打开的选择器算：@ 员工与 # 引用两个列表的行数不同。
+  const mentionHeight = Math.min(240, Math.max(38, (referenceMenuOpen ? referenceMatches.length : matches.length) * 34 + 8));
   const mentionBelow = mentionRect ? mentionRect.bottom + 6 : 0;
   const submitRect = submitButton.current?.getBoundingClientRect() ?? null;
   const overlapsComposerActions = Boolean(submitRect && mentionRect && mentionBelow < submitRect.bottom && mentionBelow + mentionHeight > submitRect.top);
@@ -269,6 +305,7 @@ export function TaskComments({ taskId, updatedAt, employees = [], childTasks = [
         {childTasks.map(child => <TaskChildStreamRow key={`child-${child.id}`} task={child} onOpen={id => onOpenTask?.(id)} onOpenSession={onOpenSession}/>)}
         {dispatchComments.map(comment => <TaskCommentDispatchStreamRow ref={(node: HTMLDivElement | null) => { const key = `dispatch-${comment.id}`; if (node) rowRefs.current.set(key, node); else rowRefs.current.delete(key); }} key={`dispatch-${comment.id}`} comment={comment}
           result={resultPages[comment.id]?.taskId === taskId ? resultPages[comment.id] : undefined} onLoadResult={loadResult} onOpenSession={onOpenSession}
+          onOpenTask={identifier => openReferencedTask(identifier)}
           onLocateComment={() => { setStreamExpanded(current => ({ ...current, [comment.id]: true })); requestAnimationFrame(() => rowRefs.current.get(`comment-${comment.id}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" })); }}/>) }
         {legacySessions.map(session => <TaskLegacySessionStreamRow key={`session-${session.id}`} session={session} onOpen={onOpenSession}/>)}
       </Flex>
@@ -285,6 +322,7 @@ export function TaskComments({ taskId, updatedAt, employees = [], childTasks = [
         sourceComment={comment.sourceCommentId ? commentById.get(comment.sourceCommentId) ?? sourceComments[comment.sourceCommentId]?.comment ?? undefined : undefined}
         expanded={streamExpanded[comment.id]} onExpanded={value => setStreamExpanded(current => ({ ...current, [comment.id]: value }))}
         onViewDispatch={() => rowRefs.current.get(`dispatch-${comment.id}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" })}
+        onOpenTask={identifier => openReferencedTask(identifier)}
         onReply={replyTo}/ >)}
       {nextCursor && <WandButton kind="ghost" size="small" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? "正在加载更早评论…" : "加载更早评论"}</WandButton>}
       {draft.sourceCommentId && <Flex align="center" gap="small" className="task-comment-reply-context"><Typography.Text type="secondary">回复「{replyLabel || draft.sourceCommentId.slice(0, 8)}」</Typography.Text><WandButton kind="ghost" size="small" onClick={() => { edit({ sourceCommentId: null }); setReplyLabel(""); }}>取消回复</WandButton></Flex>}
@@ -297,9 +335,21 @@ export function TaskComments({ taskId, updatedAt, employees = [], childTasks = [
           onClick={() => choose(employee)}
         >@{employee.name}</button>)}
       </div>, portal) : null}
+      {referenceMenuOpen && portal && mentionRect ? createPortal(<div id="task-comment-reference" role="listbox" aria-label="引用任务" className="task-comment-mention" data-wand-popup-owner={`task-comment-${taskId}`}
+        style={{ position: "fixed", zIndex: 1200, left: Math.max(8, Math.min(mentionRect.left, window.innerWidth - 320)), top: mentionTop, width: Math.min(320, window.innerWidth - 16), maxHeight: mentionHeight, pointerEvents: "auto" }}>
+        {referenceMatches.length === 0 ? <button type="button" role="option" disabled>没有匹配的任务</button> : referenceMatches.map((task, index) => <button
+          key={task.id} id={`task-comment-reference-option-${task.id}`} type="button" role="option" className="task-comment-reference-option" title={`#${task.identifier}`} aria-selected={index === referenceHighlight}
+          onMouseEnter={() => setReferenceHighlight(index)}
+          onMouseDown={event => event.preventDefault()}
+          onClick={() => chooseReference(task)}
+        ><span className="task-comment-reference-id">#{task.identifier}</span><span className="task-comment-reference-title">{task.title}</span></button>)}
+      </div>, portal) : null}
       <TaskTextArea ref={input} value={draft.body} rows={3} maxLength={16000} aria-label="任务评论输入"
-        aria-expanded={menuOpen} aria-controls={menuOpen ? "task-comment-mention" : undefined} aria-activedescendant={menuOpen && matches[highlight] ? `task-comment-mention-option-${matches[highlight]!.id}` : undefined} aria-autocomplete="list"
-        placeholder="写评论。输入 @ 选择员工，选中后才会派发"
+        aria-expanded={menuOpen || referenceMenuOpen} aria-controls={menuOpen ? "task-comment-mention" : referenceMenuOpen ? "task-comment-reference" : undefined}
+        aria-activedescendant={menuOpen && matches[highlight] ? `task-comment-mention-option-${matches[highlight]!.id}`
+          : referenceMenuOpen && referenceMatches[referenceHighlight] ? `task-comment-reference-option-${referenceMatches[referenceHighlight]!.id}` : undefined}
+        aria-autocomplete="list"
+        placeholder="写评论。输入 @ 选择员工派发，输入 # 引用子任务"
         onSelect={event => setCaret(event.currentTarget.selectionStart ?? draft.body.length)}
         onChange={event => {
           const value = event.currentTarget.value;
@@ -309,6 +359,12 @@ export function TaskComments({ taskId, updatedAt, employees = [], childTasks = [
           setCaret(pos);
         }} onKeyDown={event => {
           if (event.nativeEvent.isComposing) return;
+          if (referenceMenuOpen && (referenceMatches.length > 0 || event.key === "Escape")) {
+            if (event.key === "ArrowDown" && referenceMatches.length > 0) { event.preventDefault(); setReferenceHighlight(index => (index + 1) % referenceMatches.length); return; }
+            if (event.key === "ArrowUp" && referenceMatches.length > 0) { event.preventDefault(); setReferenceHighlight(index => (index - 1 + referenceMatches.length) % referenceMatches.length); return; }
+            if (event.key === "Enter" && !event.metaKey && !event.ctrlKey && referenceMatches[referenceHighlight]) { event.preventDefault(); chooseReference(referenceMatches[referenceHighlight]!); return; }
+            if (event.key === "Escape") { event.preventDefault(); closeMention(); return; }
+          }
           if (menuOpen && (matches.length > 0 || event.key === "Escape")) {
             if (event.key === "ArrowDown" && matches.length > 0) { event.preventDefault(); setHighlight(index => (index + 1) % matches.length); return; }
             if (event.key === "ArrowUp" && matches.length > 0) { event.preventDefault(); setHighlight(index => (index - 1 + matches.length) % matches.length); return; }
@@ -327,7 +383,10 @@ export function TaskComments({ taskId, updatedAt, employees = [], childTasks = [
                 transition: "opacity var(--motion-fast) var(--ease-in-out-smooth)" }}>{label}</span>)}
           </span>
         </WandButton>
-        <Typography.Text type="secondary" role="status">{message || (dispatching ? `将派发给 @${bound?.name}。只派发这一次选中的人。` : "正文里没有选中的 @员工时，不会启动执行。")}</Typography.Text>
+        <Typography.Text type="secondary" role="status">{message || (dispatching
+          ? `将派发给 @${bound?.name}${referencedIdentifiers.length ? `，目标 ${referencedIdentifiers.map(id => `#${id}`).join("、")}` : ""}。只派发这一次选中的人。`
+          : referencedIdentifiers.length ? `本轮引用 ${referencedIdentifiers.map(id => `#${id}`).join("、")}；正文里没有选中的 @员工时，不会启动执行。`
+            : "正文里没有选中的 @员工时，不会启动执行。")}</Typography.Text>
       </Flex>
       </Flex>
     </section>

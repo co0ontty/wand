@@ -37,7 +37,7 @@ export const conversationActivityRepository = {
     }
   },
   session(id: string, signal?: AbortSignal): Promise<ActivitySession> {
-    return requestJson(`${endpoint(id)}?format=chat&blockBudget=120`, { signal, headers: { "X-Wand-Tool-Projection": "compact" } });
+    return requestJson(`${endpoint(id)}?format=chat&blockBudget=12&byteBudget=98304&output=omit`, { signal, headers: { "X-Wand-Tool-Projection": "compact" } });
   },
   tool(id: string, toolId: string): Promise<{ input: Record<string, unknown>; content: unknown; is_error: boolean; pending: boolean }> {
     return requestJson(`${endpoint(id)}/tool-content/${encodeURIComponent(toolId)}`);

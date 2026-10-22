@@ -34,7 +34,6 @@ import {
 import { taskBoardController, taskBoardStore } from "../issues/task-board-controller";
 import { HomeAttentionBadge } from "../attention/home-attention";
 import { useAiTeamAttentionCount } from "../ai-teams/repository";
-import { SidebarPeek } from "./sidebar-peek";
 import { useHoverPointer, useSidebarPeek } from "./use-sidebar-peek";
 import { useSidebarDrawer } from "./use-sidebar-drawer";
 import { useSidebarGesture } from "./use-sidebar-gesture";
@@ -74,6 +73,10 @@ const WorkspacesPanel = deferredComponent<NonNullable<React.ComponentProps<(type
   () => import("../workspaces/workspaces-panel").then(module => module.WorkspacesPanel),
   { title: "工作区", renderPending: () => <div role="status" style={{ padding: 12, fontSize: 12, color: "var(--text-secondary)" }}>正在加载工作区…</div> },
 );
+
+/** 悬浮目录预览只在窄栏首次悬停时出现：它的实现（antd Card）按需下载，
+ * 首屏 runtime 不再背着预览卡片。 */
+const SidebarPeekSurface = React.lazy(() => import("./sidebar-peek").then(module => ({ default: module.SidebarPeek })));
 
 export function getSidebarEntryTarget(entry: Readonly<UiSessionVm>): UiManageTarget {
   if (entry.source.endsWith("-history")) return entry.source as UiManageTarget;
@@ -872,7 +875,8 @@ export function ShellSidebar() {
           {/* 首次悬停才挂载，之后常驻（关闭态用 CSS visibility 藏起来）：
               既不预览就多跑一份任务树轮询，也不会每次悬停都重新拉一次。 */}
           {narrow && hoverPointer && peek.mounted && peekDirectory ? (
-            <SidebarPeek
+            <React.Suspense fallback={null}>
+            <SidebarPeekSurface
               title={peekDirectory.name}
               top={peekDirectory.top}
               open={peek.open}
@@ -885,7 +889,8 @@ export function ShellSidebar() {
             >
               {/* 仅渲染当前目录，不复制 legacy DOM id。 */}
               <div className="sessions-list">{taskTree(false, peekDirectory.id)}</div>
-            </SidebarPeek>
+            </SidebarPeekSurface>
+            </React.Suspense>
           ) : null}
           {(snapshot.layout.sidebarDrawer || snapshot.capabilities.backToNative || snapshot.capabilities.switchServer) && <Flex vertical={narrow} align="center" justify="space-between" gap="small" className="sidebar-footer" style={{ flexShrink: 0, padding: narrow ? 8 : "8px 16px", borderTop: "1px solid var(--border-subtle)" }}>
             <Flex component="nav" wrap gap={4} vertical={narrow} className="sidebar-footer-actions" aria-label="侧栏快捷操作">

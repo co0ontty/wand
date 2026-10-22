@@ -1,55 +1,37 @@
-import { notification } from "antd";
 import * as React from "react";
-import { usePortalContainer } from "./portal-context";
+import { getToastEntries, subscribeToasts } from "./toast-queue";
 import { WandUiBoundary } from "../theme";
 
-export type WandToastTone = "info" | "success" | "warning" | "error";
-export interface WandToastOptions { description?: string; tone?: WandToastTone; duration?: number; }
-export interface WandToastHandle { readonly id: string; dismiss(): void; }
-type ToastEntry = { id: string; message: string; options: WandToastOptions; expiresAt: number | null };
-const queue = new Map<string, ToastEntry>();
-const listeners = new Set<() => void>();
-let serial = 0;
-const notify = (): void => { for (const listener of listeners) listener(); };
-/** Plain browser modules may queue feedback before the React region mounts. */
-export function showWandToast(message: string, options: WandToastOptions = {}): WandToastHandle {
-  for (const [key, toast] of queue) if (toast.expiresAt !== null && toast.expiresAt <= Date.now()) queue.delete(key);
-  while (queue.size >= 20) queue.delete(queue.keys().next().value!);
-  const id = `wand-toast-${++serial}`;
-  const duration = options.duration ?? 3200;
-  queue.set(id, { id, message, options, expiresAt: duration > 0 ? Date.now() + duration : null });
-  notify();
-  return { id, dismiss() { queue.delete(id); notify(); } };
-}
+export {
+  showWandToast,
+  type WandToastHandle,
+  type WandToastOptions,
+  type WandToastTone,
+} from "./toast-queue";
+
+/**
+ * Toast 宿主：队列与 antd 实现分离，队列里真的有反馈时才下载 notification。
+ * 首屏 runtime 因此不再包含 antd/rc-notification。
+ */
 export function WandToastRegion() {
-  return <WandUiBoundary><ToastRegion/></WandUiBoundary>;
-}
-function ToastRegion() {
-  const portal = usePortalContainer();
-  const config = React.useMemo(() => ({ getContainer: () => portal ?? document.body,
-    placement: "topRight" as const, stack: { threshold: 3 } }), [portal]);
-  const [api, holder] = notification.useNotification(config);
-  const generation = React.useRef(0);
+  const [Region, setRegion] = React.useState<React.ComponentType | null>(null);
   React.useEffect(() => {
-    const lease = ++generation.current;
-    const shown = new Set<string>();
-    const sync = (): void => {
-      for (const id of shown) if (!queue.has(id)) { api.destroy(id); shown.delete(id); }
-      for (const [id, toast] of queue) {
-        if (shown.has(id)) continue;
-        const remaining = toast.expiresAt === null ? 0 : toast.expiresAt - Date.now();
-        if (toast.expiresAt !== null && remaining <= 0) { queue.delete(id); continue; }
-        shown.add(id);
-        api.open({ key: id, title: toast.message, description: toast.options.description,
-          type: toast.options.tone ?? "info", duration: remaining / 1000,
-          onClose: () => {
-            if (generation.current !== lease) return;
-            shown.delete(id); queue.delete(id);
-          } });
-      }
+    if (Region) return;
+    let alive = true;
+    let pending = false;
+    const load = (): void => {
+      if (pending) return;
+      pending = true;
+      void import("./toast-region").then(module => {
+        pending = false;
+        if (alive) setRegion(() => module.WandToastRegion);
+      }, () => { pending = false; });
     };
-    listeners.add(sync); sync();
-    return () => { generation.current++; listeners.delete(sync); api.destroy(); };
-  }, [api]);
-  return holder;
+    // 只有队列非空才需要真正的 notification 实现；队列里已有反馈时同样要加载
+    // （普通浏览器模块可以在 React 区域挂载前先排队）。
+    const unsubscribe = subscribeToasts(() => { load(); });
+    if (getToastEntries().length > 0) load();
+    return () => { alive = false; unsubscribe(); };
+  }, [Region]);
+  return <WandUiBoundary>{Region ? <Region/> : null}</WandUiBoundary>;
 }

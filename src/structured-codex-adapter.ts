@@ -54,6 +54,8 @@ export class CodexRunner implements StructuredRunnerAdapter {
     const file = whichSync("codex", { env: context.env }) ?? "codex";
     const reducer = new CodexProtocolReducer(context.session);
     let unparsedStdout = false;
+    let protocolEventObserved = false;
+    const previousSessionId = context.session.claudeSessionId;
     return startStructuredCli({
       sessionId: context.session.id,
       file,
@@ -70,6 +72,7 @@ export class CodexRunner implements StructuredRunnerAdapter {
         observer,
         onUnparsed: () => { unparsedStdout = true; },
         handleEvent: (event) => {
+          protocolEventObserved = true;
           if (reducer.apply(event)) observer.onUpdate(reducer.state);
         },
       }),
@@ -87,6 +90,9 @@ export class CodexRunner implements StructuredRunnerAdapter {
           protocolError: !!reducer.primaryError,
           unparsedStdout,
           signal,
+          exitCode,
+          previousSessionId,
+          noProtocolEvent: !protocolEventObserved,
           ...(spawnError ? { spawnError } : {}),
         }),
       }),

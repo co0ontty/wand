@@ -3,6 +3,7 @@ import { composerQueue, state } from "./state";
 import { syncBrowserComposerBadges } from "./composer-badges-adapter";
 import { getErrorMessage } from "../../error-utils.js";
 import { parseJsonResponse } from "../react/http-adapter";
+import { snapshotArrived } from "./snapshot-arrival";
 import { notifyAiTeamDefinitionChanged, notifyAiTeamRunChanged, notifyAiTeamStepLive } from "../react/ai-teams/repository";
 import { notifyConversationSessionPreview } from "../react/conversations/session-preview-events.js";
 import { notifySiliconEmployeeDefinitionChanged } from "../react/agents/employee-repository.js";
@@ -317,6 +318,7 @@ function projectSelectedChat(sessionId: string): any {
               }
               notifyPooledTerminalEvent(msg);
               handleWebSocketMessage(msg);
+              if (msg.type === "init" && msg.sessionId) snapshotArrived(msg.sessionId);
             } catch (e) {
               // Ignore parse errors
             }
@@ -882,6 +884,8 @@ function projectSelectedChat(sessionId: string): any {
               } else if (msg.data.kind === "conversation-session-preview" && typeof msg.data.sessionId === "string"
                 && typeof msg.data.conversationId === "string" && typeof msg.data.preview?.text === "string") {
                 notifyConversationSessionPreview(msg.data);
+              } else if (msg.data.kind === "conversations-changed") {
+                notifyAiTeamRunChanged({ runId: "", taskId: "" });
               } else if (msg.data.kind === "ai-team-run" && typeof msg.data.runId === "string") {
                 notifyAiTeamRunChanged({ runId: msg.data.runId, taskId: String(msg.data.taskId || "") });
               } else if (msg.data.kind === "ai-team-definition" && typeof msg.data.teamId === "string") {

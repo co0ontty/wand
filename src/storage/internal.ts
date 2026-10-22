@@ -1,7 +1,7 @@
 import path from "node:path";
 import { restoreTeamMemberEmployee } from "../ai-team-employee-binding.js";
 import type { AiTeam, AiTeamMember, AiTeamRun, AiTeamRunStatus, AiTeamStep, AiTeamStepKind, AiTeamStepStatus, CandidateFailureKind, SiliconEmployee, StepDispatchInfo } from "../ai-team-types.js";
-import { AI_TEAM_DEFAULT_MAX_STEPS, isTeamMemberRole, memberAgents, siliconEmployeeTags } from "../ai-team-types.js";
+import { AI_TEAM_DEFAULT_MAX_STEPS, DEFAULT_MAX_CONCURRENT_TASKS, isTeamMemberRole, memberAgents, siliconEmployeeTags } from "../ai-team-types.js";
 import { decisionExpertDefinition } from "../decision-expert-employee.js";
 import { hrEmployeeDefinition } from "../hr-employee.js";
 import type { AgentActivityItem, AgentActivityState, Mission, MissionAttempt, MissionAttemptState, MissionReviewComment, MissionReviewStatus, MissionStatus } from "../mission-types.js";
@@ -126,6 +126,7 @@ export function mapSiliconEmployeeRow(row: Record<string, unknown>): SiliconEmpl
     systemKey,
     tags: siliconEmployeeTags({ systemKey, tags }),
     systemSessionLimit: typeof row.system_session_limit === "number" ? row.system_session_limit : null,
+    maxConcurrentTasks: typeof row.max_concurrent_tasks === "number" ? row.max_concurrent_tasks : DEFAULT_MAX_CONCURRENT_TASKS,
     archivedAt: typeof row.archived_at === "string" && row.archived_at ? row.archived_at : undefined,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),

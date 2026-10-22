@@ -1,4 +1,5 @@
 import { composer, state, writeStoredBoolean } from "./state";
+import { clearStartupPreloads } from "./startup";
 import { isSystemAiCall, SYSTEM_AI_READ_ONLY } from "../../system-ai-call.js";
 import { ensureTerminalLibrary } from "../vendor-loader.js";
 import { submitLoginCredential, clearSubmittedCredential } from "./login-protocol";
@@ -12,10 +13,11 @@ import { workspacesStore } from "../react/workspaces/controller";
 import { workspaceContextStore } from "../react/workspaces/workspace-context";
 import { parseJsonResponse } from "../react/http-adapter";
 import { invalidateConfigSnapshot } from "../react/config-snapshot";
-import { invalidateSessionList, loadSessionList } from "../react/session-list-snapshot";
+import { invalidateSessionList, loadSessionList, projectSessionSummaries, publishSessionList } from "../react/session-list-snapshot";
 import { publishWandModelCatalog, startWandModelCatalogPolling } from "../react/model-catalog";
 import { compactThinkingLabel, dynamicThinkingChoices } from "../thinking-efforts";
 import { getErrorMessage } from "../../error-utils.js";
+import { waitForSnapshot } from "./snapshot-arrival";
 import { CHAT_HISTORY_BLOCK_BUDGET, CHAT_HISTORY_BYTE_BUDGET } from "../chat-history-window.js";
 
 import { mergeBlockWindowedMessages, mergeWindowedMessages, type MessageMergeSource } from "./message-reconciliation";
@@ -88,6 +90,24 @@ export async function markSessionCompletionViewed(session: any): Promise<void> {
   } finally {
     if (completionViews.get(session.id) === revision) completionViews.delete(session.id);
   }
+}
+
+/**
+ * 列表投影真正关心的字段签名。只有这些字段变了才需要重发共享快照：
+ * 流式输出每个 chunk 都会更新会话对象，但状态/标题/归档没变时不必惊动 React。
+ */
+function sessionProjectionSignature(session: any): string {
+  if (!session) return "";
+  return [
+    session.status ?? "",
+    session.title ?? "",
+    session.titleGenerating === true ? "1" : "0",
+    session.archived === true ? "1" : "0",
+    session.employeeId ?? "",
+    session.employeeName ?? "",
+    session.teamChat ? "1" : "0",
+    session.teamStep?.title ?? "",
+  ].join("\u0001");
 }
 
 function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
@@ -224,6 +244,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
       // 本地登出收尾：清运行时状态 + 拆终端 + 回登录页。不发网络请求，
       // 供「用户主动登出」与「服务端已判定会话失效（401）」两条路径复用。
       function teardownLocalSession() {
+        clearStartupPreloads();
         sessionReads.reset();
         invalidateSessionList();
         invalidateConfigSnapshot();
@@ -1080,6 +1101,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         if (messageSource === "latest" && (Array.isArray(snapshot.messages) || typeof snapshot.output === "string")) {
           completionViewIntent.loaded(snapshot.id);
         }
+        var projectedBefore = sessionProjectionSignature(state.sessions.find(function(session) { return session.id === snapshot.id; }));
         var currentSession = state.sessions.find(function(session) { return session.id === snapshot.id; }) || null;
         var normalizedSnapshot = Object.assign({}, normalizeStructuredSnapshot(snapshot, currentSession),
           mergeSessionCompletionState(currentSession, snapshot));
@@ -1113,6 +1135,12 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         });
         if (!updated) {
           state.sessions.unshift(normalizedSnapshot);
+        }
+        // 列表投影关心的字段变了才广播：流式输出每个 chunk 都会走到这里，
+        // 但状态/标题/归档没变时不该反复惊动 React 投影。
+        var projectedAfter = sessionProjectionSignature(state.sessions.find(function(session) { return session.id === snapshot.id; }));
+        if (projectedAfter !== projectedBefore) {
+          publishSessionList(projectSessionSummaries(state.sessions));
         }
         var updatedSession = state.sessions.find(function(session) { return session.id === normalizedSnapshot.id; }) || normalizedSnapshot;
         if (updatedSession && Array.isArray(updatedSession.queuedMessages) && normalizedSnapshot.id === state.selectedId) {
@@ -1263,7 +1291,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
       export function loadSessions(options?) {
         var opts = options || {};
         var read = sessionReads.begin("list");
-        return loadSessionList({ force: true })
+        return loadSessionList({ force: !opts.reuseSnapshot })
           .then(function(sessions) {
             if (!read.isCurrent()) return;
             if (!Array.isArray(sessions) || sessions.some(function(s) { return !s || typeof s.id !== "string"; })) {
@@ -1290,6 +1318,9 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
               sessionReads.record(snapshot);
               return mergeServerSession(localSession, snapshot);
             });
+            // 引擎是会话列表的唯一 owner：合并后的列表就是共享快照的当前值，
+            // React 侧不必再单独拉一次全量 /api/sessions。
+            publishSessionList(projectSessionSummaries(state.sessions));
 
             // Destructive refreshes must preserve an explicit return to Home;
             // ordinary boot/list reads retain the existing preferred selection.
@@ -1445,7 +1476,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         }
         return compactSessionFetch(url, { credentials: "same-origin" })
           .then(async function(res) {
-            if (!read.isCurrent() || state.selectedId !== id) return;
+            if (!res || !read.isCurrent() || state.selectedId !== id) return;
             // Only a missing session warrants deselection; HTTP failures retain the current view.
             if (res.status === 404) return { missing: true };
             return parseJsonResponse<any>(res);
@@ -1458,6 +1489,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
             if (!read.isCurrent() || state.selectedId !== id) {
               return;
             }
+            if (!data) return;
             if (data.missing) {
               // Session no longer exists — deselect and refresh list
               if (state.selectedId === id) {
@@ -1670,10 +1702,15 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         if (state.filePanelOpen) {
           updateFilePanelCwd(session);
         }
-        var outputLoaded = loadOutput(id).then(function() {
+        const canAwaitSnapshot = state.ws && typeof state.ws.readyState === "number" && shouldRequestChatFormat(session)
+          && (state.ws.readyState === WebSocket.OPEN || state.ws.readyState === WebSocket.CONNECTING);
+        const snapshotWait = canAwaitSnapshot ? waitForSnapshot(id) : null;
+        subscribeToSession(id);
+        var outputLoaded = (snapshotWait ? snapshotWait.then(function(received) {
+          if (!received && state.selectedId === id && ownsFocus()) return loadOutput(id);
+        }) : loadOutput(id)).then(function() {
           if (options?.focusInput !== false && ownsFocus()) focusInputBox(true);
         });
-        subscribeToSession(id);
         // 切会话：先用缓存里的上一次结果顶上（没有就空着），再异步刷新，
         // 避免慢仓库上徽章先消失、隔一两秒才出现。
         restoreGitStatusForSession(id);

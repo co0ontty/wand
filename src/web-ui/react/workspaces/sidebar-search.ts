@@ -45,7 +45,7 @@ export function filterSidebarGroups(
   const projected = groups.map(group => ({ ...group, tasks: groups.flatMap(source => source.tasks.filter(task => task.parentWorkspaceTaskId ? home(task) === group.workspaceId : source.workspaceId === group.workspaceId)) }));
   const activeGroups = projected.map((group) => {
     const candidates = group.tasks;
-    const keep = new Set(candidates.filter(task => !task.archived && task.status !== "done" && (task.sessions.length > 0 || (query.trim() && sidebarSearchMatches(query, task.name, task.cwd)))).map(task => task.id));
+    const keep = new Set(candidates.filter(task => !task.archived && task.status !== "done" && (task.sessions.length > 0 || task.executionStatus === "queued" || task.executionStatus === "running" || (query.trim() && sidebarSearchMatches(query, task.name, task.cwd)))).map(task => task.id));
     const byId = new Map(candidates.map(task => [task.id, task]));
     for (const id of [...keep]) {
       let parent = byId.get(id)?.parentWorkspaceTaskId;

@@ -32,6 +32,7 @@ function harness() {
   const requests: Array<{ url: string; init?: RequestInit; response: ReturnType<typeof deferred<Response>> }> = [];
   const errors: unknown[] = [];
   const toasts: Array<{ message: string; tone?: string }> = [];
+  const published: unknown[][] = [];
   const noop = () => {};
   const fallback = new Proxy({}, { get: () => noop });
   // Keep raw transport here: this suite exercises the legacy merge/ordering
@@ -46,6 +47,8 @@ function harness() {
     "../react/session-list-snapshot": {
       loadSessionList: () => fetchImpl("/api/sessions", { credentials: "same-origin" }).then((response) => parseJsonResponse(response)),
       invalidateSessionList: noop,
+      publishSessionList: (sessions: unknown[]) => { published.push(sessions); },
+      projectSessionSummaries: (sessions: unknown[]) => sessions,
     },
     "../react/workspaces/controller": { workspacesStore: { getRuntime: () => null } },
     "../react/workspaces/workspace-context": { workspaceContextStore: { getSnapshot: () => ({ taskId: null }) } },
@@ -97,7 +100,7 @@ function harness() {
     fetch: fetchImpl,
   });
   const respond = (index: number, body: unknown, status = 200) => requests[index].response.resolve(new Response(JSON.stringify(body), { status }));
-  return { composer, state, api, requests, respond, errors, toasts };
+  return { composer, state, api, requests, respond, errors, toasts, published };
 }
 
 test("shared session reads protect only fields updated during a read and reset on logout", () => {
@@ -165,6 +168,26 @@ test("a newer selection during destructive refresh stays selected", async () => 
   await pending;
   assert.equal(h.state.selectedId, "B");
   assert.deepEqual(h.errors, []);
+});
+
+test("the engine publishes the merged list and only re-publishes on projection changes", async () => {
+  const h = harness();
+  const pending = h.api.loadSessions({ skipSelectedOutputReload: true });
+  h.respond(0, [{ id: "A", status: "running", title: "任务" }]);
+  await pending;
+  assert.equal(h.published.length, 1, "the engine owns the list and publishes it once");
+  assert.equal((h.published[0] as any[])[0]?.id, "A");
+
+  h.api.updateSessionSnapshot({ id: "A", output: "流式片段" });
+  assert.equal(h.published.length, 1, "output chunks do not churn the shared projection");
+
+  h.api.updateSessionSnapshot({ id: "A", status: "exited" });
+  assert.equal(h.published.length, 2, "a status change is part of the list projection");
+  assert.equal((h.published[1] as any[])[0]?.status, "exited");
+
+  h.api.updateSessionSnapshot({ id: "B", title: "新会话" });
+  assert.equal(h.published.length, 3, "a new session joins the published list");
+  assert.deepEqual((h.published[2] as any[]).map((session: any) => session.id).sort(), ["A", "B"]);
 });
 
 test("HTTP detail cannot roll back a newer status push or append old queued inputs", async () => {

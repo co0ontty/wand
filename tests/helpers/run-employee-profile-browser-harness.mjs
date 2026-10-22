@@ -309,7 +309,7 @@ try{
     await section("appearance");assert.equal(await e("document.querySelectorAll('.appearance input:not(:disabled)').length"),0,"all avatar editing inputs locked, including disabled fieldsets");
     await section("advanced");assert.equal(await e("[...document.querySelectorAll('[data-employee-profile] button')].some(n=>/归档员工|恢复员工|删除员工/.test(n.textContent))"),false);
     await section("tools");await browser.click('[aria-label="把备用 2上移"]');await browser.click('.wand-employee-save-submit');await browser.wait("document.querySelector('[data-employee-profile]').textContent.includes('员工资料已保存')");
-    const write=requests.filter(r=>r.method==="PUT").at(-1);assert.equal(write.path,`/api/silicon-employees/${id}`);assert.deepEqual(Object.keys(write.body),["agents"]);assert.deepEqual(write.body.agents.map(a=>a.model),["m2","m1"]);
+    const write=requests.filter(r=>r.method==="PUT").at(-1);assert.equal(write.path,`/api/silicon-employees/${id}`);assert.deepEqual(Object.keys(write.body),["agents","maxConcurrentTasks"]);assert.equal(write.body.maxConcurrentTasks,2);assert.deepEqual(write.body.agents.map(a=>a.model),["m2","m1"]);
     assert.equal(employees.find(item=>item.id===id).name,"石一");
     cases.push({name:"locked built-in profile, avatar and lifecycle; ordered candidates still editable",id});
   }

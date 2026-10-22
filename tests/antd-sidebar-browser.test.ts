@@ -28,10 +28,14 @@ import { workspacesController, configureWorkspacesRuntime } from "./src/web-ui/r
 import { conversationUi } from "./src/web-ui/react/conversations/state";
 import { NewSessionHost } from "./src/web-ui/react/new-session/host";
 import { employeeProfile } from "./src/web-ui/react/agents/employee-profile";
+import { configureQuickTerminalRuntime } from "./src/web-ui/react/quick-terminal/runtime";
 import { configureNewSessionRuntime } from "./src/web-ui/react/new-session/controller";
 // SessionPane validates vendor readiness before calling the mock terminal runtime below.
 // The runtime owns fixture DOM; these markers satisfy the canonical loader contract only.
 globalThis.XTermLib = { Terminal: class FixtureTerminal {}, FitAddon: class FixtureFitAddon {} };
+// 真实页面由 eager 的 terminal-pool 注册快速终端运行时；本夹具只构建 React 壳，
+// 不注册的话 QuickTerminalWorkspace 的订阅副作用会在挂载时抛错并掀掉整棵树。
+configureQuickTerminalRuntime({ mount() { return false; }, retain() {}, dispose() {}, focus() {}, reconnect() {}, observe() { return () => {}; } });
 conversationUi.mode("tasks"); conversationUi.suspend();
 configureNewSessionRuntime({onOpen(){},onClose(){},getContext(){return {effectiveCwd:"/workspace/wand"};},rememberModel(){},prepareCreate:async()=>({}),completeCreate:async()=>{}});
 import { UnifiedExecutionSubjectPicker } from "./src/web-ui/react/workspaces/unified-execution-subject-picker";

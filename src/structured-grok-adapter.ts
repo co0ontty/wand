@@ -216,6 +216,8 @@ export class GrokRunner implements StructuredRunnerAdapter {
     let primaryError: string | null = null;
     let protocolError = false;
     let unparsedStdout = false;
+    let protocolEventObserved = false;
+    const previousSessionId = context.session.claudeSessionId;
     return startStructuredCli({
       sessionId: context.session.id,
       file: "grok",
@@ -233,6 +235,7 @@ export class GrokRunner implements StructuredRunnerAdapter {
         if (!trimmed) return;
         try {
           const event = JSON.parse(trimmed) as Record<string, unknown>;
+          protocolEventObserved = true;
           observer.onEvent?.(event);
           const error = applyGrokEvent(state, event);
           if (error) { primaryError = primaryError ?? error; protocolError = true; }
@@ -242,6 +245,8 @@ export class GrokRunner implements StructuredRunnerAdapter {
       finalize: (ctx, exitCode, signal, spawnError) => buildStructuredCliResult({
         state, exitCode, signal, stderr: ctx.stderr, primaryError,
         protocolError, unparsedStdout, spawnError,
+        previousSessionId,
+        noProtocolEvent: !protocolEventObserved,
       }),
     });
   }

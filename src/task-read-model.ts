@@ -1,3 +1,4 @@
+import { taskExecutionProjection } from "./execution-state.js";
 import { isArchiveBlocked } from "./archive-policy.js";
 import { AI_TEAM_ACTIVE_RUN_STATUSES } from "./ai-team-types.js";
 import type { SessionRegistry } from "./session-registry.js";
@@ -16,6 +17,7 @@ export class TaskReadModel {
   readonly milestones;
   readonly activeTeamTasks;
   readonly commentCounts: Map<string, number>;
+  readonly queuedCommentCounts: Map<string, number>;
   private readonly assignees = new Map<string, { id: string; name: string; avatar?: string } | null>();
 
   constructor(readonly storage: WandStorage, registry?: SessionRegistry, snapshots?: SessionSnapshot[]) {
@@ -29,6 +31,7 @@ export class TaskReadModel {
     }
     this.tasks = storage.listWandTasks();
     this.commentCounts = storage.countWandTaskCommentsByTask();
+    this.queuedCommentCounts = storage.countQueuedTaskCommentDispatchesByTask();
     this.cardsByContainer = new Map(this.tasks.filter(task => task.workspaceTaskId).map(task => [task.workspaceTaskId!, task]));
     this.workspaces = new Map(storage.listWorkspaces().map(workspace => [workspace.id, workspace]));
     this.milestones = storage.listWandMilestones();
@@ -51,6 +54,10 @@ export class TaskReadModel {
     // Archived legacy cards retain their old links; active membership uses the canonical column.
     return task.status === "archived" ? this.storage.listWandTaskSessionIds(task.id)
       .flatMap(id => this.sessionsById.get(id) ? [this.sessionsById.get(id)!] : []) : [];
+  }
+
+  execution(task: WandTask) {
+    return taskExecutionProjection(this.taskSessions(task), this.queuedCommentCounts.get(task.id) ?? 0);
   }
 
   canArchive(task: WandTask): boolean {

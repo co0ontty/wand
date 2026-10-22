@@ -208,8 +208,11 @@ export interface TaskCommentResultAnchor {
 export interface TaskCommentDispatch {
   employeeId: string;
   employeeName: string;
-  state: "pending" | "accepted" | "failed" | "unknown";
+  /** queued = 已接受但因员工并发上限排队，尚未创建会话；任务仍保持活动状态。 */
+  state: "queued" | "paused" | "pending" | "accepted" | "failed" | "unknown";
   sessionId: string | null;
+  /** 本评论引用的子任务（`#TASK-133` 解析结果），按正文出现顺序。 */
+  referencedTaskIds?: string[];
   /** Missing for older dispatches whose exact execution round cannot be proven. */
   resultAnchor?: TaskCommentResultAnchor | null;
   /** Projection from the owning runtime, never inferred from model text. */
@@ -222,6 +225,10 @@ export interface WandTaskComment {
   sourceCommentId?: string | null;
   taskVersion?: string;
   instruction?: string;
+  /** 本评论引用的子任务（`#TASK-133` 解析结果），按正文出现顺序。 */
+  referencedTaskIds?: string[];
+  /** 引用目标的编号（`TASK-133`），对外展示用；`referencedTaskIds` 是内部稳定 ID。 */
+  referencedTaskIdentifiers?: string[];
   dispatch?: TaskCommentDispatch | null;
   id: string;
   taskId: string;
@@ -278,4 +285,8 @@ export interface WandTaskDetail extends WandTask {
 /** Read-model DTO enrichment for task-board lists; absent only on older server responses. */
 export interface WandTaskListed extends WandTaskDetail {
   commentCount?: number;
+  /** 该任务还有多少条派发在员工并发上限后排队；任务仍属于活动任务。 */
+  queuedCommentCount?: number;
+  executionStatus?: import("./execution-state.js").ExecutionStatus;
+  queuedExecutionCount?: number;
 }

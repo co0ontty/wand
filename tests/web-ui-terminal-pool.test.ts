@@ -4,6 +4,7 @@ import test from "node:test";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import { getWandTerminalTheme } from "../src/web-ui/react/theme.js";
+import { queueTerminalWrite } from "../src/web-ui/browser/terminal-write-queue.js";
 
 // 分屏终端池的缩放记录清理：sessionScales 是「窗格」级别的临时偏好，
 // 池实例释放时必须一起删掉，否则反复开关分屏会留下无界 Map，且同 id 重建
@@ -15,6 +16,7 @@ interface FakeTerminal {
   options: Record<string, unknown>;
   buffer: { active: { type: string; ydisp: number; ybase: number } };
   modes: { bracketedPasteMode: boolean };
+  writes: string[];
   dispose(): void;
 }
 
@@ -67,16 +69,24 @@ function harness(options?: { embed?: boolean }) {
     }
     open(): void {}
     loadAddon(): void {}
-    onData(): void {}
+    dataHandler?: (data: string) => void;
+    resizeHandler?: (size: { cols: number; rows: number }) => void;
+    onData(callback: (data: string) => void): void { this.dataHandler = callback; }
     onBinary(): void {}
-    onResize(): void {}
+    onResize(callback: (size: { cols: number; rows: number }) => void): void { this.resizeHandler = callback; }
     onScroll(): void {}
-    write(_data: string, callback?: () => void): void {
+    writes: string[] = [];
+    write(data: string, callback?: () => void): void {
+      this.writes.push(data);
+      if (data.includes("\x1b[6n")) this.dataHandler?.("\x1b[1;1R");
       if (callback) callback();
     }
     reset(): void {}
     clear(): void {}
-    resize(): void {}
+    resize(cols: number, rows: number): void {
+      this.cols = cols; this.rows = rows;
+      this.resizeHandler?.({ cols, rows });
+    }
     scrollLines(): void {}
     scrollToBottom(): void {}
     dispose(): void {}
@@ -94,7 +104,8 @@ function harness(options?: { embed?: boolean }) {
       "../react/theme": { getWandTerminalTheme },
       "../react/theme-preference": { wandThemeStore: { subscribe: () => noop } },
       "./terminal": { clampClientTerminalOutput: (value: string) => value },
-      "./terminal-fit": { fitTerminalToContainer: noop },
+      "./terminal-fit": { fitTerminalToContainer: (term: FakeXTerm) => { if (term.cols !== 100 || term.rows !== 30) term.resize(100, 30); } },
+      "./terminal-write-queue": { queueTerminalWrite },
       "./terminal-wheel": {
         consumeTerminalWheelLines: () => 0,
         consumeTerminalWheelPage: () => 0,
@@ -103,6 +114,7 @@ function harness(options?: { embed?: boolean }) {
         terminalWheelPageSequence: () => "",
       },
     } as Record<string, unknown>)[id] ?? fallback,
+    WebSocket: { OPEN: 1 },
     XTermLib: { Terminal: FakeXTerm, FitAddon: class {} },
     ResizeObserver: class {
       observe(): void {}
@@ -203,6 +215,46 @@ test("快捷终端租约不被工作区分屏清理，断线禁用输入，init 
   h.pool.retainPooledTerminal("quick", false);
   h.pool.disposePooledTerminal("quick");
   assert.equal(h.pool.hasPooledTerminal("quick"), false);
+});
+
+test("权威快照会跳过 reset 前已排队的实时帧，避免回放后重影", async () => {
+  const h = harness();
+  assert.equal(h.pool.createPooledTerminal("S1", h.container), true);
+  const terminal = h.created[0];
+
+  // Promise queue callbacks run after this synchronous turn. The snapshot
+  // generation must invalidate both live frames before either reaches xterm.
+  h.pool.writePooledTerminal("S1", "live-before-1");
+  h.pool.writePooledTerminal("S1", "live-before-2");
+  assert.equal(h.pool.restorePooledTerminalState("S1", {
+    version: 1, cols: 80, rows: 24, data: "authoritative", pending: [],
+  }), true);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(terminal.writes.length, 1,
+    "旧 live 帧不能在 reset/replay 后再次写入 xterm");
+  assert.equal(terminal.writes[0], "authoritative");
+});
+
+test("快照的历史网格和终端查询只在本地重放，最终只同步一次真实网格", async () => {
+  const h = harness();
+  const sent: Array<{ type: string; cols?: number; rows?: number }> = [];
+  h.state.ws = { readyState: 1, send: (text: string) => sent.push(JSON.parse(text)) };
+  h.pool.createPooledTerminal("S1", h.container);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  sent.length = 0;
+  h.pool.restorePooledTerminalState("S1", { version: 1, cols: 80, rows: 24,
+    data: "\x1b[6n", pending: [{ type: "resize", cols: 60, rows: 20 }, { type: "data", data: "\x1b[6n" }, { type: "resize", cols: 90, rows: 25 }] });
+  h.pool.writePooledTerminal("S1", "live-after-restore", 16);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(sent.filter(e => e.type === "pty_input"), [], "never answer historical DA/DSR queries");
+  assert.deepEqual(sent.filter(e => e.type === "pty_resize"), [{ type: "pty_resize", sessionId: "S1", cols: 100, rows: 30 }]);
+  assert.equal(sent.filter(e => e.type === "pty_ack").length, 1);
+  assert.equal(h.created[0].writes.at(-1), "live-after-restore");
+  sent.length = 0;
+  h.pool.replacePooledTerminalOutput("S1", "legacy\x1b[6n");
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(sent.filter(e => e.type === "pty_input"), [], "legacy full-output replay is also read-only");
 });
 
 test("没有池实例时会话的缩放记录也要被清掉（面板已渲染但 XTermLib 未就绪）", () => {

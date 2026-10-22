@@ -208,7 +208,7 @@ test("发送与停止是同一颗按钮的相位模型，结果原位显示不�
   assert.match(renderSrc, /id="terminal-scale-down-top"[^\n]*aria-label="缩小终端字号"/);
   assert.match(renderSrc, /id="terminal-scale-up-top"[^\n]*aria-label="放大终端字号"/);
   assert.match(renderSrc, /id="page-refresh-btn"[^\n]*aria-label="刷新页面"/);
-  const notices = readFileSync(new URL("../src/web-ui/browser/notice-view-adapter.tsx", import.meta.url), "utf8");
+  const notices = readFileSync(new URL("../src/web-ui/browser/notice-view.tsx", import.meta.url), "utf8");
   assert.match(notices, /notification-bubble-close"[^\n]*aria-label="关闭这条通知"/);
   const queue = readFileSync(new URL("../src/web-ui/browser/queue-view-adapter.tsx", import.meta.url), "utf8");
   assert.match(queue, /aria-label="取消这条排队消息"/);
@@ -217,7 +217,7 @@ test("发送与停止是同一颗按钮的相位模型，结果原位显示不�
 // 用户可见的成句文案统一中文；code fence 里的命令、诊断 key 这类技术标识不在此列。
 test("离线横幅不再有英文成句", () => {
   const renderSrc = readFileSync(new URL("../src/web-ui/browser/render.ts", import.meta.url), "utf8");
-  const notices = readFileSync(new URL("../src/web-ui/browser/notice-view-adapter.tsx", import.meta.url), "utf8");
+  const notices = readFileSync(new URL("../src/web-ui/browser/notice-view.tsx", import.meta.url), "utf8");
   assert.match(notices, /当前处于离线状态，部分功能可能不可用。/);
   assert.match(renderSrc, /paintOfflineNotice\(el\)/);
   assert.doesNotMatch(renderSrc, /You are offline/);

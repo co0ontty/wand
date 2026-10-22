@@ -2,6 +2,8 @@ import * as React from "react";
 import { Alert, Flex, Tag, Typography } from "antd";
 import type { WandTaskComment } from "../../../task-types";
 import { DeferredMarkdownPreview } from "../file-preview/deferred-markdown";
+import { taskReferenceSegments } from "../../../task-comment-references.js";
+import { TaskExecutionCard, TaskExecutionReferences } from "./task-execution-card.js";
 import { WandButton } from "../ui/button";
 import { WandIcon } from "../ui/icons";
 import type { IssueSessionSummary, WandTaskListed } from "./task-board-repository";
@@ -11,8 +13,7 @@ import { ChatActivityEntry } from "../chat/activity";
 import { preserveDisclosurePosition } from "../chat/disclosure-position";
 import { taskBoardRepository } from "./task-board-repository";
 import { ChatMessage } from "../chat/message";
-
-const statusLabels: Record<string, string> = { pending: "等待确认", accepted: "已创建执行", running: "执行中", blocked: "等待审批", idle: "本轮已结束", exited: "会话已退出", stopped: "已停止", failed: "执行失败", done: "已完成", unknown: "送达未知 · 不会重放", history: "历史会话", unavailable: "会话不可用" };
+import { statusLabels } from "../../../task-comment-status.js";
 
 function RowDisclosure({ id, summary, children, expanded, onExpanded, rowRef }: { id: string; summary: React.ReactNode; children: React.ReactNode; expanded?: boolean; onExpanded?(value: boolean): void; rowRef?: React.Ref<HTMLDivElement> }): React.ReactElement {
   const [localOpen, setLocalOpen] = React.useState(false);
@@ -100,16 +101,25 @@ function TruncatedCommentBlock({ taskId, commentId, turnOffset, blockIndex }: { 
     {value !== undefined && <pre tabIndex={0}>{JSON.stringify(value, null, 2)}</pre>}</div>;
 }
 
+/** 正文里的 `#TASK-133` 渲染成可点引用 token；其余文字原样。 */
+export function TaskReferenceText({ text, onOpenTask }: { text: string; onOpenTask?(identifier: string): void }): React.ReactElement {
+  return <>{taskReferenceSegments(text).map((segment, index) => segment.identifier
+    ? <button type="button" key={`ref#${index}`} className="task-comment-reference-token" title={`引用 ${segment.identifier}`}
+      onClick={() => onOpenTask?.(segment.identifier!)}>{segment.text}</button>
+    : <React.Fragment key={`plain#${index}`}>{segment.text}</React.Fragment>)}</>;
+}
+
 export const TaskCommentStreamRow = React.forwardRef<HTMLDivElement, {
   comment: WandTaskComment; sourceComment?: WandTaskComment; onReply(id: string, dispatch?: boolean): void; onViewDispatch?(): void; expanded?: boolean; onExpanded?(value: boolean): void;
-}>(function TaskCommentStreamRow({ comment, sourceComment, onReply, onViewDispatch, expanded, onExpanded }, ref): React.ReactElement {
+  onOpenTask?(identifier: string): void;
+}>(function TaskCommentStreamRow({ comment, sourceComment, onReply, onViewDispatch, expanded, onExpanded, onOpenTask }, ref): React.ReactElement {
   return <RowDisclosure id={`comment-${comment.id}`} summary={<Flex align="center" gap="small" wrap className="task-stream-row-line">
     <Typography.Text strong>{comment.authorName || "用户"}</Typography.Text>
-    {comment.dispatch && <Tag color="purple">已派发给 {comment.dispatch.employeeName}</Tag>}
+    {comment.dispatch && <Tag color="purple">{comment.dispatch.state === "paused" ? `已暂停 · ${comment.dispatch.employeeName}` : comment.dispatch.state === "queued" ? `排队中 · 已派发给 ${comment.dispatch.employeeName}` : `已派发给 ${comment.dispatch.employeeName}`}</Tag>}
     {sourceComment && <Typography.Text type="secondary">回复 {sourceComment.authorName}：{sourceComment.body.slice(0, 100)}</Typography.Text>}
     <time dateTime={comment.createdAt}>{new Date(comment.createdAt).toLocaleString()}</time>
   </Flex>} expanded={expanded} onExpanded={onExpanded} rowRef={ref}>
-    <DeferredMarkdownPreview content={comment.body} variant="inline" wrap/>
+    <DeferredMarkdownPreview content={comment.body} variant="inline" wrap renderText={value => <TaskReferenceText text={value} onOpenTask={onOpenTask}/>}/>
     <Flex wrap gap="small" className="task-stream-row-actions">
       {comment.dispatch && <WandButton size="small" kind="ghost" onClick={() => { onExpanded?.(true); onViewDispatch?.(); }}>查看员工执行事项</WandButton>}
       <WandButton size="small" kind="ghost" onClick={() => onReply(comment.id)}>回复</WandButton>
@@ -171,6 +181,7 @@ export const TaskCommentDispatchStreamRow = React.forwardRef<HTMLDivElement, {
   comment: WandTaskComment; onOpenSession?: (id: string) => void; onLocateComment?(): void;
   result?: { messages: ConversationTurn[]; offset: number; total: number; outcome: string; unavailable?: string; loading: boolean; failed?: boolean; retryOffset?: number; truncatedBlocks?: Array<{ turnOffset: number; blockIndex: number }> };
   onLoadResult?(commentId: string, offset?: number): void;
+  onOpenTask?(identifier: string): void;
 }>(function TaskCommentDispatchStreamRow(props, ref): React.ReactElement {
   return <TaskCommentDispatchStreamRowContent {...props} rowRef={ref}/>;
 });
@@ -193,24 +204,17 @@ export function TaskChildStreamRow({ task, onOpen, onOpenSession }: {
   </RowDisclosure>;
 }
 
-function TaskCommentDispatchStreamRowContent({ comment, onOpenSession, onLocateComment, result, onLoadResult, rowRef }: {
+function TaskCommentDispatchStreamRowContent({ comment, onOpenSession, onLocateComment, result, onLoadResult, rowRef, onOpenTask }: {
   comment: WandTaskComment; onOpenSession?: (id: string) => void; onLocateComment?(): void; rowRef?: React.Ref<HTMLDivElement>;
   result?: { messages: ConversationTurn[]; offset: number; total: number; outcome: string; unavailable?: string; loading: boolean; failed?: boolean; retryOffset?: number; truncatedBlocks?: Array<{ turnOffset: number; blockIndex: number }> };
   onLoadResult?(commentId: string, offset?: number): void;
+  onOpenTask?(identifier: string): void;
 }): React.ReactElement {
   const dispatch = comment.dispatch!;
-  const status = dispatch.status ?? dispatch.state ?? "unknown";
-  return <RowDisclosure id={`dispatch-${comment.id}`} rowRef={rowRef} summary={<Flex align="center" gap="small" wrap className="task-stream-row-line">
-    <Tag color="purple">员工派发</Tag><Typography.Text strong>{dispatch.employeeName}</Typography.Text>
-    <Tag color={status === "failed" ? "error" : status === "running" ? "processing" : undefined}>{statusLabels[status] ?? "状态未确认"}</Tag>
-    <Typography.Text type="secondary">{comment.body}</Typography.Text><time dateTime={comment.createdAt}>{new Date(comment.createdAt).toLocaleString()}</time>
-  </Flex>}>
-    <Typography.Text strong>执行指令</Typography.Text><DeferredMarkdownPreview content={comment.body} variant="inline" wrap/>
+  return <div ref={rowRef} className="task-stream-row" data-stream-row={`dispatch-${comment.id}`}>
+    <TaskExecutionCard comment={comment} result={result} onOpenSession={onOpenSession} onLocateComment={onLocateComment}
+      onLoadResult={onLoadResult} onOpenTask={onOpenTask}/>
     <Flex wrap gap="small" align="center" className="task-stream-row-actions">
-      {dispatch.error && <Typography.Text type="warning">{dispatch.error}</Typography.Text>}
-      <WandButton size="small" kind="ghost" onClick={onLocateComment}>定位原评论</WandButton>
-      {dispatch.sessionId && <WandButton size="small" kind="ghost" onClick={() => onOpenSession?.(dispatch.sessionId!)}>查看本次执行</WandButton>}
-      {dispatch.resultAnchor && <WandButton size="small" kind="ghost" disabled={result?.loading} onClick={() => onLoadResult?.(comment.id, 0)}>{result?.messages.length ? "刷新本轮结果" : "查看本轮结果"}</WandButton>}
       {result?.loading && <Typography.Text role="status">正在读取固定执行轮次…</Typography.Text>}
       {result?.failed && <Alert type="warning" title="本轮结果加载失败" action={<WandButton kind="ghost" size="small" onClick={() => onLoadResult?.(comment.id, result.retryOffset ?? result.offset)}>重试</WandButton>}/>}
       {result?.unavailable && <Typography.Text type="secondary">{result.unavailable === "still_running" ? "本轮执行仍在进行；完成后可读取固定轮次结果。" : "旧记录缺少可验证的执行轮次，无法安全展示结果。"}</Typography.Text>}
@@ -223,7 +227,7 @@ function TaskCommentDispatchStreamRowContent({ comment, onOpenSession, onLocateC
         resultByTool={new Map(result.messages.flatMap(loadedTurn => loadedTurn.content.flatMap(block => block.type === "tool_result" ? [[block.tool_use_id, block] as const] : [])))}/>)}</div>
       {result.offset < result.total && <WandButton kind="ghost" size="small" disabled={result.loading} onClick={() => onLoadResult?.(comment.id, result.offset)}>加载后续结果</WandButton>}
     </section>}
-  </RowDisclosure>;
+  </div>;
 }
 
 export function TaskLegacySessionStreamRow({ session, onOpen }: { session: IssueSessionSummary; onOpen?: (id: string) => void }): React.ReactElement {

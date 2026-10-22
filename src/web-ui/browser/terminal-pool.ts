@@ -14,6 +14,7 @@ import { fitTerminalToContainer } from "./terminal-fit";
 import { consumeTerminalWheelLines, consumeTerminalWheelPage, consumeTerminalZoomWheel, installTerminalPinchZoom, terminalWheelPageSequence, type TerminalWheelPagingState, type TerminalWheelScrollState, type TerminalZoomWheelState } from "./terminal-wheel";
 import { state } from "./state";
 import { cachedTerminalHistory, forgetTerminalHistory, loadTerminalHistory, resetTerminalHistory } from "./terminal-history";
+import { queueTerminalWrite } from "./terminal-write-queue";
 
 /** 把 chunk 追加进该会话在 state.sessions 里的 output 缓冲（带 clamp），供将来 remount 回放，避免丢字。 */
 function appendSessionOutput(sessionId: string, chunk: string): void {
@@ -43,6 +44,8 @@ interface PooledTerminal {
   wheelScrollState: TerminalWheelScrollState;
   autoFollow: boolean;
   restoreGeneration: number;
+  restoring: boolean;
+  lastSize?: string;
   disposed: boolean;
 }
 
@@ -104,6 +107,7 @@ function terminalFontSize(scale = Number(state.terminalScale || 1)): number {
 }
 
 function sendInput(sessionId: string, data: string): void {
+  if (pool.get(sessionId)?.restoring) return;
   if (retainedTerminals.has(sessionId) && !ws()) {
     notifyPooledTerminalEvent({ sessionId, type: "pty_error" });
     return;
@@ -112,14 +116,19 @@ function sendInput(sessionId: string, data: string): void {
 }
 
 function sendResize(sessionId: string, cols: number, rows: number): void {
+  const handle = pool.get(sessionId);
+  if (handle?.restoring || !ws()) return;
   const c = Math.max(20, Math.min(Math.floor(cols), 1000));
   const r = Math.max(5, Math.min(Math.floor(rows), 500));
+  const size = `${c}x${r}`;
+  if (handle?.lastSize === size) return;
+  if (handle) handle.lastSize = size;
   sendJson({ type: "pty_resize", sessionId, cols: c, rows: r });
 }
 
 /** FitAddon 只在 cols/rows 变化时触发 onResize；首次 fit 可能早于监听器，因此总是显式同步一次。 */
-function fitAndSync(handle: Pick<PooledTerminal, "sessionId" | "terminal" | "fitAddon" | "disposed" | "container">): void {
-  if (handle.disposed) return;
+function fitAndSync(handle: Pick<PooledTerminal, "sessionId" | "terminal" | "fitAddon" | "disposed" | "container" | "restoring">): void {
+  if (handle.disposed || handle.restoring) return;
   // A hidden quick panel must not resize a running command to a zero-width grid.
   if (retainedTerminals.has(handle.sessionId) && (handle.container.clientWidth <= 0 || handle.container.clientHeight <= 0)) return;
   try { fitTerminalToContainer(handle.terminal, handle.fitAddon); } catch { /* container not laid out yet */ }
@@ -165,8 +174,8 @@ export function isPooledTerminalBracketedPasteMode(sessionId: string): boolean {
   return !!handle?.terminal?.modes?.bracketedPasteMode;
 }
 
-function writeTerminal(handle: PooledTerminal, data: string): Promise<void> {
-  if (!data || handle.disposed) return Promise.resolve();
+function writeTerminal(handle: PooledTerminal, data: string, generation = handle.restoreGeneration): Promise<void> {
+  if (!data || handle.disposed || generation !== handle.restoreGeneration) return Promise.resolve();
   return new Promise<void>((resolve) => {
     try {
       handle.terminal.write(data, () => resolve());
@@ -347,6 +356,7 @@ export function createPooledTerminal(sessionId: string, container: HTMLElement):
       wheelScrollState,
       autoFollow: true,
       restoreGeneration: 0,
+      restoring: false,
       disposed: false,
     };
     pool.set(sessionId, handle);
@@ -396,15 +406,11 @@ export function writePooledTerminal(sessionId: string, data: string, ackBytes?: 
     if (ackBytes && sessionId) sendJson({ type: "pty_ack", sessionId, bytes: ackBytes });
     return;
   }
-  handle.writeQueue = handle.writeQueue.catch(() => {}).then(async () => {
-    await writeTerminal(handle, data);
-    if (!handle.disposed) {
-      try {
-        if (handle.autoFollow) handle.terminal.scrollToBottom();
-      } catch { /* ignore */ }
-    }
-    if (ackBytes && sessionId) sendJson({ type: "pty_ack", sessionId, bytes: ackBytes });
-  });
+  const generation = handle.restoreGeneration;
+  handle.writeQueue = queueTerminalWrite(handle.terminal, data, handle.writeQueue,
+    () => !handle.disposed && generation === handle.restoreGeneration,
+    () => { if (handle.autoFollow) handle.terminal.scrollToBottom(); },
+    () => { if (ackBytes && sessionId) sendJson({ type: "pty_ack", sessionId, bytes: ackBytes }); });
 }
 
 /** 全量 output 回放（无 chunk 时的兜底）：重置后整体写入。 */
@@ -415,13 +421,13 @@ export function replacePooledTerminalOutput(sessionId: string, output: string): 
   const generation = ++handle.restoreGeneration;
   handle.writeQueue = handle.writeQueue.catch(() => {}).then(async () => {
     if (handle.disposed || generation !== handle.restoreGeneration) return;
+    handle.restoring = true;
     try {
-      handle.terminal.reset();
-      handle.terminal.clear();
-    } catch { /* ignore */ }
-    await writeTerminal(handle, output);
-    if (handle.disposed || generation !== handle.restoreGeneration) return;
-    try { handle.terminal.scrollToBottom(); } catch { /* ignore */ }
+      try { handle.terminal.reset(); handle.terminal.clear(); } catch { /* ignore */ }
+      await writeTerminal(handle, output, generation);
+      if (handle.disposed || generation !== handle.restoreGeneration) return;
+      try { handle.terminal.scrollToBottom(); } catch { /* ignore */ }
+    } finally { handle.restoring = false; }
   });
 }
 
@@ -447,33 +453,40 @@ export function restorePooledTerminalState(
     if (handle.disposed || generation !== handle.restoreGeneration) return;
     const wasBrowsing = !handle.autoFollow;
     const distance = handle.terminal.buffer.active.baseY - handle.terminal.buffer.active.viewportY;
+    handle.restoring = true;
     try {
-      handle.terminal.reset();
-      handle.terminal.clear();
-      if (snapshot.cols > 0 && snapshot.rows > 0) {
-        handle.terminal.resize(snapshot.cols, snapshot.rows);
+      try {
+        handle.terminal.reset();
+        handle.terminal.clear();
+        if (snapshot.cols > 0 && snapshot.rows > 0) {
+          handle.terminal.resize(snapshot.cols, snapshot.rows);
+        }
+      } catch { /* ignore */ }
+      await writeTerminal(handle, String(snapshot.data || ""), generation);
+      const pending = Array.isArray(snapshot.pending) ? snapshot.pending : [];
+      for (const operation of pending) {
+        if (handle.disposed || generation !== handle.restoreGeneration) return;
+        if (operation?.type === "resize" && operation.cols > 0 && operation.rows > 0) {
+          try { handle.terminal.resize(operation.cols, operation.rows); } catch { /* ignore */ }
+        } else if (operation?.type === "data") {
+          await writeTerminal(handle, String(operation.data || ""), generation);
+        }
       }
-    } catch { /* ignore */ }
-    await writeTerminal(handle, String(snapshot.data || ""));
-    const pending = Array.isArray(snapshot.pending) ? snapshot.pending : [];
-    for (const operation of pending) {
       if (handle.disposed || generation !== handle.restoreGeneration) return;
-      if (operation?.type === "resize" && operation.cols > 0 && operation.rows > 0) {
-        try { handle.terminal.resize(operation.cols, operation.rows); } catch { /* ignore */ }
-      } else if (operation?.type === "data") {
-        await writeTerminal(handle, String(operation.data || ""));
-      }
+      handle.lastSize = `${handle.terminal.cols}x${handle.terminal.rows}`;
+      try {
+        fitTerminalToContainer(handle.terminal, handle.fitAddon);
+        if (wasBrowsing) {
+          handle.autoFollow = false;
+          handle.terminal.scrollToLine(Math.max(0, handle.terminal.buffer.active.baseY - distance));
+        } else {
+          handle.terminal.scrollToBottom();
+        }
+      } catch { /* ignore */ }
+    } finally { handle.restoring = false; }
+    if (!handle.disposed && generation === handle.restoreGeneration) {
+      sendResize(sessionId, handle.terminal.cols, handle.terminal.rows);
     }
-    if (handle.disposed || generation !== handle.restoreGeneration) return;
-    try {
-      fitAndSync(handle);
-      if (wasBrowsing) {
-        handle.autoFollow = false;
-        handle.terminal.scrollToLine(Math.max(0, handle.terminal.buffer.active.baseY - distance));
-      } else {
-        handle.terminal.scrollToBottom();
-      }
-    } catch { /* ignore */ }
   });
   return true;
 }
