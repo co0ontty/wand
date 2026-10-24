@@ -62,6 +62,8 @@ export interface StructuredRunnerObserver {
   onStdout?(text: string): void;
   onStderr?(text: string): void;
   onEvent?(event: Record<string, unknown>): void;
+  /** Internal native Pi materialization; never forwarded to clients. */
+  onPiCheckpoint?(checkpoint: import("./pi-cli-checkpoint.js").PiCliCheckpoint): void;
   onUpdate(state: StructuredRunnerTurnState): void;
 }
 

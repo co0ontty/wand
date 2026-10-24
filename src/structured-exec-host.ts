@@ -44,6 +44,8 @@ export interface StructuredRunState {
   stderrTruncated: boolean;
   /** Already-file-backed native output; no Server-side stdout capture copy is required. */
   nativeFile?: string;
+  /** Validated native replay starts after this durable parsed checkpoint. */
+  stdoutFrom?: number;
 }
 
 export interface StructuredStreamEvent {
@@ -63,6 +65,8 @@ export interface StructuredExecProcess {
   readonly runId: string;
   readonly incarnationId: string;
   readonly pid: number;
+  /** Immutable identity of the native journal, used only by internal checkpoints. */
+  readonly protocolSource?: { file: string; dev: number; ino: number };
   interrupt(signal?: string): void;
   onStream(listener: (event: StructuredStreamEvent) => void): { dispose(): void };
   onExit(listener: (event: StructuredExitEvent) => void): { dispose(): void };
@@ -74,7 +78,7 @@ export interface StructuredExecHost {
   collectGarbage?(options: { liveSessionIds: ReadonlySet<string>; retentionMs: number; now?: number }): { removedSlots: number; removedTurns: number; freedBytes: number };
   spawnStructured(request: StructuredSpawnRequest): Promise<StructuredExecProcess>;
   /** Full state incl. replay logs; null when the host does not know the run. */
-  attachRun(runId: string): Promise<StructuredRunState | null>;
+  attachRun(runId: string, checkpoint?: import("./pi-cli-checkpoint.js").PiCliCheckpoint): Promise<StructuredRunState | null>;
   /** Subscribe to a known running run without spawning anything. */
   adoptRun(runId: string): Promise<StructuredExecProcess | null>;
   listRuns(): Promise<StructuredRunState[]>;

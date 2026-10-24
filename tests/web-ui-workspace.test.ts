@@ -184,21 +184,18 @@ test("empty task tab bar yields to the full-page CLI desktop", () => {
   assert.doesNotMatch(source, /该任务还没有工作窗口/);
 });
 
-test("task tab bar and standalone topbar share one quick-commit badge", () => {
+test("task tab bar and standalone topbar share the quick-commit menu item", () => {
   const tabBar = readFileSync(new URL("../src/web-ui/react/workspaces/workspace-tab-bar.tsx", import.meta.url), "utf8");
   const tabChrome = readFileSync(new URL("../src/web-ui/react/workspaces/workspace-tab-chrome.tsx", import.meta.url), "utf8");
   const topbar = readFileSync(new URL("../src/web-ui/react/shell/shell-topbar.tsx", import.meta.url), "utf8");
   const badge = readFileSync(new URL("../src/web-ui/react/shell/topbar-git-badge.tsx", import.meta.url), "utf8");
   const styles = readFileSync(new URL("../src/web-ui/content/styles.css", import.meta.url), "utf8");
-  // 任务里主区顶部是标签栏而不是顶栏（ShellMainContent 在任务态不挂 ShellTopbar），
-  // 徽章必须两个宿主都有，否则进任务后快捷提交入口就没了。
-  assert.match(topbar, /gitBadge=\{<TopbarGitBadge\/>\}/);
-  assert.match(topbar, /<span id=\{chromeId\("topbar-git-slot"\)\} className="topbar-git-slot">\s*\{gitBadge\}/);
-  assert.doesNotMatch(topbar, /id="topbar-git-badge"/, "顶栏不再自带一份内联徽章");
+  assert.match(topbar, /<TopbarGitMenuItem\/>/);
+  assert.doesNotMatch(topbar, /topbar-git-slot/, "Git belongs to the menu, not the permanent toolbar");
   const actions = readFileSync(new URL("../src/web-ui/react/shell/workbar-actions.tsx", import.meta.url), "utf8");
   assert.match(tabBar, /<WorkbarActions windowActions=/);
-  assert.match(actions, /<TopbarGitBadge id="workspace-tab-git-badge"\/>/);
-  assert.match(badge, /id = "topbar-git-badge"/, "默认保留顶栏的 DOM id");
+  assert.match(actions, /<TopbarGitMenuItem id="workspace-tab-git-badge"\/>/);
+  assert.match(badge, /WandDropdownMenuItem/);
   assert.match(badge, /dispatch\(\{ type: "topbar\.gitCommit" \}\)/);
   assert.match(badge, /if \(!git\) return null;/, "非 git 会话 / 首页不显示徽章");
   assert.match(tabBar, /if \(mobile\) return fallback/);

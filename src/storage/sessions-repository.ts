@@ -6,6 +6,7 @@ import { ConversationTurn, SessionSnapshot, StructuredSessionState } from "../ty
 import { SessionRow, sessionSelectFields, sessionPersistFields, sessionPersistAssignments, sessionRuntimeMetadataAssignments, mapSessionCore, sessionRowQuery } from "./mappers.js";
 import type { WandStorage } from "../storage.js";
 import { SYSTEM_AI_AUXILIARY_PURPOSES, SYSTEM_AI_CALL_PREFIX } from "../system-ai-call.js";
+import { validPiCliCheckpoint, type PiCliCheckpoint } from "../pi-cli-checkpoint.js";
 
 const AUXILIARY_HISTORY_PATTERNS = SYSTEM_AI_AUXILIARY_PURPOSES.map(purpose => `${SYSTEM_AI_CALL_PREFIX}${purpose}:?*`);
 
@@ -283,7 +284,45 @@ export class SessionRepository {
     return rows.map(row => row.id);
   }
 
+  /** Cursor and parsed state are a single atomic value. A crash can only leave
+   * an older complete checkpoint, never a newer cursor with missing content. */
+  savePiCliCheckpoint(sessionId: string, checkpoint: PiCliCheckpoint): boolean {
+    if (!validPiCliCheckpoint(checkpoint)) return false;
+    const json = JSON.stringify(checkpoint);
+    // Optional acceleration only: an unusually large turn safely replays from
+    // its original journal rather than doubling that payload in SQLite.
+    if (Buffer.byteLength(json) > 16 * 1024 * 1024) return false;
+    return this.db.prepare(`INSERT INTO pi_cli_checkpoints (session_id, checkpoint, updated_at)
+      SELECT id, ?, ? FROM command_sessions WHERE id = ? AND provider = 'pi'
+        AND json_extract(structured_state, '$.activeRequestId') = ?
+        AND json_extract(structured_state, '$.inFlight') = 1
+      ON CONFLICT(session_id) DO UPDATE SET checkpoint = excluded.checkpoint, updated_at = excluded.updated_at
+      WHERE NOT json_valid(pi_cli_checkpoints.checkpoint)
+        OR CASE WHEN json_valid(pi_cli_checkpoints.checkpoint) THEN
+          json_extract(pi_cli_checkpoints.checkpoint, '$.incarnationId') != json_extract(excluded.checkpoint, '$.incarnationId')
+          OR json_extract(pi_cli_checkpoints.checkpoint, '$.offset') <= json_extract(excluded.checkpoint, '$.offset')
+        ELSE 1 END`)
+      .run(json, nowIso(), sessionId, checkpoint.requestId).changes > 0;
+  }
+
+  getPiCliCheckpoint(sessionId: string): PiCliCheckpoint | null {
+    const row = this.db.prepare(`SELECT p.checkpoint, json_extract(s.structured_state, '$.activeRequestId') AS requestId
+      FROM pi_cli_checkpoints p JOIN command_sessions s ON s.id = p.session_id
+      WHERE p.session_id = ? AND s.provider = 'pi'
+        AND json_extract(s.structured_state, '$.inFlight') = 1`)
+      .get(sessionId) as { checkpoint: string; requestId: string } | undefined;
+    if (!row) return null;
+    try {
+      const value: unknown = JSON.parse(row.checkpoint);
+      return validPiCliCheckpoint(value) && value.requestId === row.requestId ? value : null;
+    }
+    catch { return null; }
+  }
+
   deleteSession(id: string): void {
-    this.db.prepare("DELETE FROM command_sessions WHERE id = ?").run(id);
+    this.s.transaction(() => {
+      this.db.prepare("DELETE FROM pi_cli_checkpoints WHERE session_id = ?").run(id);
+      this.db.prepare("DELETE FROM command_sessions WHERE id = ?").run(id);
+    });
   }
 }

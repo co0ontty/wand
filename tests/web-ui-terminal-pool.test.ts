@@ -5,6 +5,7 @@ import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import { getWandTerminalTheme } from "../src/web-ui/react/theme.js";
 import { queueTerminalWrite } from "../src/web-ui/browser/terminal-write-queue.js";
+import { terminalConnectionLabel } from "../src/web-ui/react/quick-terminal/runtime.js";
 
 // 分屏终端池的缩放记录清理：sessionScales 是「窗格」级别的临时偏好，
 // 池实例释放时必须一起删掉，否则反复开关分屏会留下无界 Map，且同 id 重建
@@ -101,6 +102,7 @@ function harness(options?: { embed?: boolean }) {
     exports,
     require: (id: string) => ({
       "./state": { state },
+      "../react/quick-terminal/runtime": { configureQuickTerminalRuntime: noop, terminalConnectionLabel },
       "../react/theme": { getWandTerminalTheme },
       "../react/theme-preference": { wandThemeStore: { subscribe: () => noop } },
       "./terminal": { clampClientTerminalOutput: (value: string) => value },
@@ -215,6 +217,34 @@ test("快捷终端租约不被工作区分屏清理，断线禁用输入，init 
   h.pool.retainPooledTerminal("quick", false);
   h.pool.disposePooledTerminal("quick");
   assert.equal(h.pool.hasPooledTerminal("quick"), false);
+});
+
+test("共享连接的其他错误不禁用快捷终端，进程退出状态立即禁用输入", () => {
+  const h = harness();
+  h.pool.retainPooledTerminal("quick", true);
+  h.pool.createPooledTerminal("quick", h.container);
+  h.pool.notifyPooledTerminalEvent({ type: "init", sessionId: "quick", data: { status: "running" } });
+  h.pool.notifyPooledTerminalEvent({ type: "error", data: { message: "unrelated request" } });
+  h.pool.notifyPooledTerminalEvent({ type: "pty_error", sessionId: "another" });
+  assert.equal(h.created[0].options.disableStdin, false);
+  h.pool.notifyPooledTerminalEvent({ type: "status", sessionId: "quick", data: { status: "exited" } });
+  assert.equal(h.created[0].options.disableStdin, true);
+});
+
+test("隐藏的快捷终端收到重连快照不发送尺寸，重新显示后仍保留输出", async () => {
+  const h = harness();
+  const sent: Array<{ type: string }> = [];
+  h.state.ws = { readyState: 1, send: (value: string) => sent.push(JSON.parse(value)) };
+  h.pool.retainPooledTerminal("quick", true);
+  h.container.clientWidth = 0;
+  h.container.clientHeight = 0;
+  h.pool.createPooledTerminal("quick", h.container);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  sent.length = 0;
+  h.pool.restorePooledTerminalState("quick", { version: 1, cols: 80, rows: 24, data: "KEPT", pending: [] });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(sent.filter(message => message.type === "pty_resize"), []);
+  assert.equal(h.created[0].writes.at(-1), "KEPT");
 });
 
 test("权威快照会跳过 reset 前已排队的实时帧，避免回放后重影", async () => {

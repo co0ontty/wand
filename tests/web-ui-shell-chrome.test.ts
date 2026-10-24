@@ -105,10 +105,6 @@ test("ShellTopbar SSR preserves title, git, and menu contracts without duplicate
   const html = renderWithStore(createElement(ShellTopbar));
   const requiredIds = [
     "current-task",
-    "topbar-file-button",
-    "topbar-local-preview-button",
-    "topbar-git-slot",
-    "topbar-git-badge",
     "topbar-more-button",
   ];
   for (const id of requiredIds) assert.match(html, new RegExp(`id="${id}"`), `missing #${id}`);
@@ -127,8 +123,7 @@ test("ShellTopbar SSR preserves title, git, and menu contracts without duplicate
   assert.doesNotMatch(html, /topbar-metadata|session-status-pill|topbar-provider|topbar-cwd/);
   assert.equal((html.match(/id="topbar-more-button"/g) ?? []).length, 1);
   assert.equal((html.match(/aria-label="当前会话操作"/g) ?? []).length, 1);
-  assert.match(html, /class="topbar-git-branch">codex\/chrome</);
-  assert.match(html, /class="topbar-git-count">·3</);
+  assert.doesNotMatch(html, /id="topbar-file-button"|id="topbar-local-preview-button"|topbar-git-slot/, "secondary actions mount inside the menu");
   // Appica's icon button reports its pressed state through `data-pressed`.
   assert.match(html, /id="topbar-more-button"[^>]*data-pressed="true"/);
   assert.match(html, /id="topbar-more-button"[^>]*wand-ui-icon-button/);
@@ -236,8 +231,7 @@ test("ShellTopbar SSR renders the home state and an empty stable git slot", () =
   assert.match(html, /class="topbar-tagline">Wand 控制台</);
   assert.match(html, /<svg class="topbar-brand"[^>]*aria-hidden="true"/);
   assert.doesNotMatch(html, /class="topbar-brand"[^>]*>W</);
-  assert.match(html, /<span id="topbar-git-slot" class="topbar-git-slot"><\/span>/);
-  assert.doesNotMatch(html, /id="topbar-more-button"/);
+  assert.match(html, /id="topbar-more-button"/, "file and preview remain available without a selected session");
   assert.doesNotMatch(html, /id="topbar-cwd"/);
   assert.doesNotMatch(html, /id="topbar-git-badge"/);
 });

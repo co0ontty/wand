@@ -1,3 +1,5 @@
+import { projectPiToolResult } from "./pi-tool-result-preview.js";
+
 /** Fields consumed by Wand's Pi reducer. Context/entries are CLI-owned history,
  * not new output. Never journal repeated copies of that history in native mode. */
 export const PI_PROTOCOL_FIELDS = new Set([
@@ -24,6 +26,17 @@ export function projectPiProtocolEvent(event: Record<string, unknown>): Record<s
   if (event.type === "agent_end" && Array.isArray(event.messages)) {
     const last = lastPiAssistantMessage(event);
     projected.messages = last ? [last] : [];
+  }
+  const message = event.message;
+  if (message && typeof message === "object" && !Array.isArray(message)
+    && ["user", "toolResult"].includes(String((message as Record<string, unknown>).role))) {
+    // These are duplicate transcript snapshots. tool_execution_end already
+    // carries the result; do not serialize its image/body a second time.
+    projected.message = { role: (message as Record<string, unknown>).role };
+  }
+  if (event.type === "tool_execution_end" || event.type === "tool_execution_update") {
+    const key = event.type === "tool_execution_end" ? "result" : "partialResult";
+    if (key in projected) projected[key] = projectPiToolResult(projected[key]);
   }
   return projected;
 }

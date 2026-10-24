@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import { APNS_SCHEMA } from "./apns-repository.js";
+import { LIVE_ACTIVITY_SCHEMA } from "./live-activity-repository.js";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -358,4 +360,24 @@ export const STORAGE_MIGRATIONS: readonly StorageMigration[] = [
   { version: 17, name: "employee-task-concurrency-default", up: db => {
     db.exec("UPDATE silicon_employees SET max_concurrent_tasks = 2 WHERE max_concurrent_tasks IS NULL");
   } },
+  { version: 18, name: "pi-cli-parsed-checkpoints", up: db => db.exec(`
+    CREATE TABLE IF NOT EXISTS pi_cli_checkpoints (
+      session_id TEXT PRIMARY KEY,
+      checkpoint TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(session_id) REFERENCES command_sessions(id) ON DELETE CASCADE
+    )
+  `) },
+  { version: 19, name: "dingtalk-group-mirrors", up: db => db.exec(`
+    CREATE TABLE IF NOT EXISTS dingtalk_records (
+      kind TEXT NOT NULL, id TEXT NOT NULL, data TEXT NOT NULL, updated_at TEXT NOT NULL,
+      PRIMARY KEY(kind, id)
+    );
+    CREATE INDEX IF NOT EXISTS dingtalk_records_kind_updated ON dingtalk_records(kind, updated_at);
+    CREATE INDEX IF NOT EXISTS dingtalk_records_state ON dingtalk_records(kind, json_extract(data, '$.state'), id);
+    CREATE INDEX IF NOT EXISTS dingtalk_records_delivery ON dingtalk_records(kind, json_extract(data, '$.delivery'), updated_at, id);
+    CREATE INDEX IF NOT EXISTS dingtalk_records_binding_delivery ON dingtalk_records(kind, json_extract(data, '$.bindingId'), json_extract(data, '$.delivery'));
+  `) },
+  { version: 20, name: "apns-device-subscriptions-and-outbox", up: db => db.exec(APNS_SCHEMA) },
+  { version: 21, name: "apns-live-activity-updates", up: db => db.exec(LIVE_ACTIVITY_SCHEMA) },
 ];

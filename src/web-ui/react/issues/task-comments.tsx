@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Alert, Flex, Typography } from "antd";
 import type { WandTaskComment } from "../../../task-types";
-import { TaskChildStreamRow, TaskCommentDispatchStreamRow, TaskCommentStreamRow, TaskLegacySessionStreamRow } from "./task-stream-row";
+import { TaskCommentDispatchStreamRow, TaskCommentStreamRow, TaskLegacySessionStreamRow } from "./task-stream-row";
 import type { IssueSessionSummary, WandTaskListed } from "./task-board-repository";
 import { WandButton } from "../ui/button";
 import { isWandPopupOwnedBy, usePopupDismiss } from "../ui/popup-lifecycle";
@@ -295,21 +295,19 @@ export function TaskComments({ taskId, updatedAt, employees = [], childTasks = [
   const dispatchCommentBySessionId = new Map(dispatchComments.map(comment => [comment.dispatch?.sessionId, comment.id]));
   const legacySessions = sessions.filter(session => !session.taskCommentId && !dispatchedSessionIds.has(session.id) && !dispatchCommentBySessionId.has(session.id));
   return <div className="task-board-detail-streams" data-testid="task-detail-streams">
-    <section className="task-board-child-stream" role="region" aria-label="子任务与员工执行">
-      <Flex align="center" justify="space-between" gap="small" className="task-stream-heading">
-        <Typography.Title level={4} style={{ margin: 0 }}>子任务与员工执行</Typography.Title>
-        <Typography.Text type="secondary">{childTasks.length} 个子任务 · 已加载 {dispatchComments.length + legacySessions.length} 项执行</Typography.Text>
+    {(dispatchComments.length > 0 || legacySessions.length > 0) && <section className="task-board-child-stream" role="region" aria-label="本任务的员工执行">
+      <Flex wrap align="center" justify="space-between" gap="small" className="task-stream-heading">
+        <Typography.Title level={4} style={{ margin: 0 }}>本任务的员工执行</Typography.Title>
+        <Typography.Text type="secondary">已加载 {dispatchComments.length + legacySessions.length} 项 · 执行记录不计入子任务</Typography.Text>
       </Flex>
       <Flex vertical gap="small" className="task-board-detail-content" data-testid="task-child-stream">
-        {!childTasks.length && !dispatchComments.length && !legacySessions.length && <Typography.Text type="secondary">暂无子任务或执行事项。</Typography.Text>}
-        {childTasks.map(child => <TaskChildStreamRow key={`child-${child.id}`} task={child} onOpen={id => onOpenTask?.(id)} onOpenSession={onOpenSession}/>)}
         {dispatchComments.map(comment => <TaskCommentDispatchStreamRow ref={(node: HTMLDivElement | null) => { const key = `dispatch-${comment.id}`; if (node) rowRefs.current.set(key, node); else rowRefs.current.delete(key); }} key={`dispatch-${comment.id}`} comment={comment}
           result={resultPages[comment.id]?.taskId === taskId ? resultPages[comment.id] : undefined} onLoadResult={loadResult} onOpenSession={onOpenSession}
           onOpenTask={identifier => openReferencedTask(identifier)}
           onLocateComment={() => { setStreamExpanded(current => ({ ...current, [comment.id]: true })); requestAnimationFrame(() => rowRefs.current.get(`comment-${comment.id}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" })); }}/>) }
         {legacySessions.map(session => <TaskLegacySessionStreamRow key={`session-${session.id}`} session={session} onOpen={onOpenSession}/>)}
       </Flex>
-    </section>
+    </section>}
     <section className="task-board-comment-stream" role="region" aria-label="任务评论" aria-busy={loading} data-testid="task-comments-stream">
       <Flex align="center" justify="space-between" gap="small" className="task-stream-heading">
         <Typography.Title level={4} style={{ margin: 0 }}>评论 <Typography.Text type="secondary">{totalCount}</Typography.Text></Typography.Title>

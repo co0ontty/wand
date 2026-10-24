@@ -94,7 +94,7 @@ test("React-owned controls are not rebound or imperatively rewritten", () => {
     assert.ok(!events.includes(dead), `${dead} should stay deleted`);
   }
   // 组合器仍由 legacy 渲染（.input-panel 槽），它的监听器必须在无守卫路径上保留。
-  // 发送与停止现在是同一颗按钮的两种相位（docs/motion-design.md §4）：只剩一个
+  // 发送与停止现在是同一颗按钮的两种相位：只剩一个
   // click 监听器，按宿主 data-phase 分派 sendOrStart() / stopSession()。旧的
   // #stop-button 节点与它的监听器一起下线，不留隐藏节点。
   assert.match(events, /getElementById\("send-input-button"\)/);
@@ -104,7 +104,7 @@ test("React-owned controls are not rebound or imperatively rewritten", () => {
     /getElementById\("send-input-button"\)[\s\S]{0,260}getComposerSendPhase\(\) === "running"\)\s*\{\s*stopSession\(\);/
   );
   assert.match(events, /getElementById\("input-box"\)/);
-  assert.match(events, /getElementById\("terminal-scale-down-top"\)/);
+  assert.doesNotMatch(events, /getElementById\("terminal-scale-down-top"\)/, "terminal display actions use the shell command port");
   // 会话列表整簇由 React 渲染：legacy 的 HTML 渲染器、在 React-owned
   // <details> 上抢 `open` 属性的 document 监听器，以及只被它们读的
   // localStorage 展开键都一起删除，不再保留半死分支。

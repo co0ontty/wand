@@ -43,7 +43,7 @@ export interface RenderHostOptions {
  * - daemon 被 kill -9 / 崩溃，socket 文件作为陈留文件留了下来（没有监听者）。
  *
  * 保守之处：pid 文件里还有活进程就不插手（那个 daemon 会自己重建端点，
- * docs/render-protocol.md §6 single instance）；能连上监听者也不插手；同一个窗口只 spawn 一次。
+ * render/docs/render-protocol.md §6 single instance）；能连上监听者也不插手；同一个窗口只 spawn 一次。
  */
 export function createRenderDaemonReviver(
   configPath: string,
@@ -262,7 +262,7 @@ export async function createUpgradeAwareTerminalHost(
 /**
  * adopt 已存在的 Render，不存在则 spawn 后等待就绪。
  *
- * 协议（docs/render-protocol.md §6）：pid 活着但 socket 不可用 → 等待就绪，
+ * 协议（render/docs/render-protocol.md §6）：pid 活着但 socket 不可用 → 等待就绪，
  * 不另起第二个 daemon；协议版本不符 → 明确抛错，**不做降级运行**。
  */
 export async function createRenderTerminalHost(
@@ -329,7 +329,7 @@ export function shouldUpgradeRenderDaemon(
 /**
  * detached spawn（stdio 忽略、unref），返回子进程 pid。
  *
- * `-c <configPath>` 是按 config 隔离的既定约定（docs/render-protocol.md §6）：
+ * `-c <configPath>` 是按 config 隔离的既定约定（render/docs/render-protocol.md §6）：
  * socket / token / pid / meta 全部由它派生。
  */
 export function spawnDetachedRenderProcess(configPath: string, binaryPath: string): number | null {

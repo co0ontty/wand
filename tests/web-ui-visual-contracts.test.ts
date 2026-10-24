@@ -155,7 +155,7 @@ test("原位已有结果的反馈不再同时弹 Toast", () => {
   assert.doesNotMatch(workspaces, /toast\(result, "info"\)/, "批量管理结果只写在原位置按钮上");
 });
 
-// 发送 ⇄ 停止（docs/motion-design.md §3、§4）：一颗按钮的相位模型 + 原位结果行。
+// 发送 ⇄ 停止：一颗按钮的相位模型 + 原位结果行。
 // 这里验单宿主、库加载与相位、token 化驻留时长、
 // 以及旧的两按钮 / .input-hint / 发送类 Toast 三种形态都不许回来。
 test("发送与停止是同一颗按钮的相位模型，结果原位显示不借 Toast", () => {
@@ -205,9 +205,11 @@ test("发送与停止是同一颗按钮的相位模型，结果原位显示不�
   assert.match(renderSrc, /id="composer-status-line" role="status" aria-live="polite"[^\n]*COMPOSER_IDLE_HINT/);
 
   // ⑥ 只有 title 的图标按钮补上可访问名称（WCAG 4.1.2 / 2.1.1）。
-  assert.match(renderSrc, /id="terminal-scale-down-top"[^\n]*aria-label="缩小终端字号"/);
-  assert.match(renderSrc, /id="terminal-scale-up-top"[^\n]*aria-label="放大终端字号"/);
-  assert.match(renderSrc, /id="page-refresh-btn"[^\n]*aria-label="刷新页面"/);
+  const terminalMenu = readFileSync(new URL("../src/web-ui/react/shell/shell-topbar.tsx", import.meta.url), "utf8");
+  assert.match(terminalMenu, /放大终端字号/);
+  assert.match(terminalMenu, /缩小终端字号/);
+  assert.match(terminalMenu, /刷新终端显示/);
+  assert.doesNotMatch(renderSrc, /terminal-scale-overlay/);
   const notices = readFileSync(new URL("../src/web-ui/browser/notice-view.tsx", import.meta.url), "utf8");
   assert.match(notices, /notification-bubble-close"[^\n]*aria-label="关闭这条通知"/);
   const queue = readFileSync(new URL("../src/web-ui/browser/queue-view-adapter.tsx", import.meta.url), "utf8");

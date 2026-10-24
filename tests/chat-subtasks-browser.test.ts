@@ -52,10 +52,9 @@ test("session subtask workspace preserves main input, reading, selection and ind
     await browser.wait("!!window.focusRefreshHarness");
     await e("window.h=focusRefreshHarness;h.fresh([])");
     await browser.wait("!!document.querySelector('.chat-subtasks-trigger')");
-    assert.equal(await e("getComputedStyle(document.querySelector('.chat-subtasks-trigger')).visibility"), "hidden");
-    await e("window.emptySlot=document.querySelector('.chat-subtasks-trigger').getBoundingClientRect().toJSON()");
+    assert.equal(await e("document.querySelector('.chat-subtasks-host').getBoundingClientRect().height"), 0, "no subtasks must leave no empty toolbar");
     await e(`window.turns=${JSON.stringify(turns)};h.fresh(turns)`);
-    assert.equal(await e("(()=>{const r=document.querySelector('.chat-subtasks-trigger').getBoundingClientRect();return r.x===emptySlot.x&&r.y===emptySlot.y&&r.width===emptySlot.width})()"), true, "first child does not move the reserved toolbar slot");
+    assert.equal(await e("document.querySelector('.chat-subtasks-host').getBoundingClientRect().height"), 42, "the toolbar appears only when child work exists");
     assert.equal(await e("document.querySelector('.chat-subtasks-trigger').getAttribute('aria-expanded')"), "false");
     assert.equal(await e("document.querySelectorAll('.chat-subtask-link').length"), 1);
     assert.equal(await e("document.querySelectorAll('.chat-messages .agent-run-detail-panel').length"), 0);

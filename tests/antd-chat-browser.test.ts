@@ -250,7 +250,7 @@ export async function runFocusBrowser({ root = resolve(import.meta.dirname, ".."
         await evaluate("chatLane.shell()");
         await wait("!!document.getElementById('send-input-button')?.classList.contains('ant-btn')", "library composer shell controls");
         const shellControls = await evaluate(`(async () => {
-          const ids = ["send-input-button","attach-btn","prompt-optimize-btn","terminal-scale-down-top","terminal-scale-up-top","page-refresh-btn","terminal-jump-bottom","chat-unread-bubble","todo-progress-toggle"];
+          const ids = ["send-input-button","attach-btn","prompt-optimize-btn","terminal-jump-bottom","chat-unread-bubble","todo-progress-toggle"];
           const host = document.getElementById("send-input-button");
           document.documentElement.classList.add("no-transition");
           const phase = async value => {

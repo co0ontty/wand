@@ -23,7 +23,8 @@ function StatusDot({ status }: { status?: string }) {
   const running = status === "running" || status === "thinking";
   const label = status === "waiting-input" ? "等待输入" : status === "failed" ? "失败" : running ? "运行中"
     : status === "stopped" || status === "exited" ? "已结束" : "空闲";
-  return <span aria-label={label} title={label}><Badge status={status === "failed" ? "error" : running ? "processing" : "default"}
+  if (!running && status !== "failed" && status !== "waiting-input") return <span className="workbar-accessible-title">{label}</span>;
+  return <span aria-label={label} title={label}><Badge status={status === "failed" ? "error" : running ? "processing" : "warning"}
     className={classNames("workspace-tab-dot", running ? "running" : "idle")} aria-hidden/></span>;
 }
 
@@ -33,12 +34,11 @@ export function WorkspaceMoreButton({ className, ...props }: Omit<WandButtonProp
 }
 
 /** Static action geometry for first-window measurement; live controllers supply their action owner. */
-export function WorkspaceDesktopActionsChrome({ children, onFiles, onClose }: {
-  children?: React.ReactNode; onFiles?: () => void; onClose?: () => void;
+export function WorkspaceDesktopActionsChrome({ children, onClose }: {
+  children?: React.ReactNode; onClose?: () => void;
 }) {
   return <div className="workbar-actions">{children}
     <WandButton kind="ghost" aria-label="打开终端"><WandIcon name="terminal" size={18}/></WandButton>
-    <WandButton kind="ghost" className="workbar-secondary-action" aria-label="文件" onClick={onFiles}><WandIcon name="explorer" size={18}/></WandButton>
     <WorkspaceMoreButton onClick={onClose}/>
   </div>;
 }
@@ -68,7 +68,7 @@ export function WorkspaceTabBarChrome({ mobile, taskName, variant = "task", acti
     <h1 className="workbar-accessible-title">{active?.label || taskName || "工作窗口"}</h1>
     {leading}
     <Flex align="center" gap={8} className="workspace-tab-bar-list">
-      <WandUiBoundary><ConfigProvider theme={{ components: { Tabs: { itemSelectedColor: "var(--text-link)", itemActiveColor: "var(--text-link)", itemHoverColor: "var(--text-link)" } } }}><Tabs className="wand-workspace-tabs" type="editable-card" hideAdd tabBarStyle={{ marginBottom: 0 }} style={{ flex: 1, minWidth: 0 }}
+      <WandUiBoundary><ConfigProvider theme={{ components: { Tabs: { cardBg: "transparent", cardPadding: "6px 10px", itemSelectedColor: "var(--text-link)", itemActiveColor: "var(--text-link)", itemHoverColor: "var(--text-link)" } } }}><Tabs className="wand-workspace-tabs" type="editable-card" hideAdd tabBarStyle={{ marginBottom: 0 }} style={{ flex: 1, minWidth: 0 }}
         aria-label={standalone ? "未分组会话标签" : `任务 ${taskName} 的工作窗口标签`} activeKey={activeWindowId ?? undefined}
         items={windows.map(presentation => ({
           key: presentation.id,

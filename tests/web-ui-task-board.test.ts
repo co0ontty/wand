@@ -244,7 +244,7 @@ test("parent planning offers every unarchived root and explains illegal depth", 
   assert.deepEqual(enabled("child"), [ISSUE_NO_PARENT, "root", "done", "todo"]);
   assert.deepEqual(enabled("root"), [ISSUE_NO_PARENT]);
   const options = issueParentOptions(tasks, "w1", "child");
-  assert.match(options.find(o => o.value === "done")!.label, /TASK-101 · iOS 体验 · 等你确认 · 0 个子任务 · 0 个会话/);
+  assert.match(options.find(o => o.value === "done")!.label, /TASK-101 · iOS 体验 · 等待验收 · 0 个子任务 · 0 个会话/);
   assert.match(options.find(o => o.value === "child")!.label, /不可选.*循环/);
   assert.match(options.find(o => o.value === "archived")!.label, /不可选.*归档/);
   assert.equal(options.some(o => o.value === "other"), false);
@@ -401,7 +401,7 @@ test("create dialog keeps modal positioning so title and selects stay visible", 
   const host = readFileSync(new URL("../src/web-ui/react/issues/task-board-host.tsx", import.meta.url), "utf8");
   const styles = readFileSync(new URL("../src/web-ui/content/styles.css", import.meta.url), "utf8");
   const portal = readFileSync(new URL("../src/web-ui/react/ui/portal-context.tsx", import.meta.url), "utf8");
-  const overlayRoot = readFileSync(new URL("../src/web-ui/react/index.tsx", import.meta.url), "utf8");
+  const overlayRoot = readFileSync(new URL("../src/web-ui/react/start-ui.tsx", import.meta.url), "utf8");
 
   const layout = readFileSync(new URL("../src/web-ui/react/issues/library-layout.ts", import.meta.url), "utf8");
   assert.match(host, /wand-task-library-dialog/);
@@ -591,11 +591,11 @@ test("task detail drafts survive the silent board refresh", () => {
 
 test("done 状态只有一个界面名：列名、概览指标、过滤开关同源", () => {
   const column = ISSUE_COLUMNS.find((item) => item.status === "done")!;
-  assert.equal(issueStatusLabel("done"), "等你确认");
+  assert.equal(issueStatusLabel("done"), "等待验收");
   assert.equal(column.label, issueStatusLabel("done"), "列名就是那个唯一来源");
   assert.equal(column.empty, `还没有${issueStatusLabel("done")}的任务`, "空态文案也跟着走，不再「待确认」另起一词");
   assert.equal(issueStatusLabel("archived"), ISSUE_ARCHIVE_COLUMN.label);
-  assert.equal(issueHideStatusFilterLabel("done"), "隐藏「等你确认」");
+  assert.equal(issueHideStatusFilterLabel("done"), "隐藏「等待验收」");
 
   const views = readFileSync(new URL("../src/web-ui/react/issues/task-board-views.tsx", import.meta.url), "utf8");
   // 同文件曾经三处各写一份：概览「已确认」、图例「已确认」、开关「隐藏已确认」。

@@ -18,7 +18,7 @@ import {
   type ShellSidebarEntryActions,
 } from "./shell-sidebar";
 import { SidebarToggleIcon } from "./sidebar-toggle-icon";
-import { TopbarGitBadge } from "./topbar-git-badge";
+import { TopbarGitMenuItem } from "./topbar-git-badge";
 import { useUiDispatch, useUiStoreSnapshot } from "./ui-store-react";
 import type { UiAction, UiSessionVm, UiSnapshotData } from "./ui-store";
 
@@ -110,6 +110,7 @@ export interface TopbarMoreMenuProps {
   selected: UiSessionVm;
   actions: ShellSidebarEntryActions | null;
   onAction(action: UiAction): void;
+  terminalControls?: boolean;
 }
 
 /**
@@ -119,9 +120,16 @@ export interface TopbarMoreMenuProps {
  * `data-action` hooks the browser layer dispatches through) can be tested
  * without rendering a portalled popover.
  */
-export function TopbarMoreMenu({ selected, actions, onAction }: TopbarMoreMenuProps) {
+export function TopbarMoreMenu({ selected, actions, onAction, terminalControls = true }: TopbarMoreMenuProps) {
   return (
     <>
+      {terminalControls && selected.kind === "pty" && <>
+        <WandDropdownMenuItem onSelect={() => onAction({ type: "terminal.display", command: "zoom-in" })}>放大终端字号</WandDropdownMenuItem>
+        <WandDropdownMenuItem onSelect={() => onAction({ type: "terminal.display", command: "zoom-out" })}>缩小终端字号</WandDropdownMenuItem>
+        <WandDropdownMenuItem onSelect={() => onAction({ type: "terminal.display", command: "reset" })}>恢复默认字号</WandDropdownMenuItem>
+        <WandDropdownMenuItem icon="refresh" onSelect={() => onAction({ type: "terminal.display", command: "refresh" })}>刷新终端显示</WandDropdownMenuItem>
+        <WandDropdownMenuSeparator/>
+      </>}
       {getTopbarMoreActions(selected, actions).map((item) => (
         <React.Fragment key={item.actionName}>
           {item.dividerBefore ? <WandDropdownMenuSeparator/> : null}
@@ -152,18 +160,16 @@ export function ShellTopbar({ terminalActionVisible = true }: { terminalActionVi
         menuOpenIntent.current = open;
         void dispatch({ type: "topbar.menu.toggle" });
       }
-    }}
-    gitBadge={<TopbarGitBadge/>}/>;
+    }}/>;
   // Keep the existing header at full workspace width while docking resizes only its content.
   return terminalActionVisible ? <QuickTerminalChrome>{chrome}</QuickTerminalChrome> : chrome;
 }
 
 /** Static chrome shared by the live shell and invisible creation measurement. */
-export function ShellTopbarChrome({ snapshot, onAction, onMoreOpenChange, gitBadge, measurement = false, terminalActionVisible = true }: {
+export function ShellTopbarChrome({ snapshot, onAction, onMoreOpenChange, measurement = false, terminalActionVisible = true }: {
   snapshot: Readonly<UiSnapshotData>;
   onAction?: (action: UiAction) => void | Promise<unknown>;
   onMoreOpenChange?: (open: boolean) => void;
-  gitBadge?: React.ReactNode;
   measurement?: boolean;
   terminalActionVisible?: boolean;
 }) {
@@ -171,7 +177,8 @@ export function ShellTopbarChrome({ snapshot, onAction, onMoreOpenChange, gitBad
   const moreOpen = snapshot.layout.topbarMoreOpen;
   const selectedActions = selected ? getShellSidebarEntryActions(selected, false) : null;
   const chromeId = (value: string) => measurement ? undefined : value;
-  const runMoreAction = (action: UiAction) => { void onAction?.(action); };
+  const menuTrigger = React.useRef<HTMLButtonElement>(null);
+  const runMoreAction = (action: UiAction) => { menuTrigger.current?.focus({ preventScroll: true }); void onAction?.(action); };
   return (
     <Flex align="center" gap="small" wrap className={classNames(
       "main-header-row",
@@ -225,38 +232,13 @@ export function ShellTopbarChrome({ snapshot, onAction, onMoreOpenChange, gitBad
       </Flex>
       <Flex align="center" gap={4} className="topbar-right">
         {!measurement && <QuickTerminalTopbarAction visible={terminalActionVisible}/>}
-        <WandIconButton
-          id={chromeId("topbar-file-button")}
-          kind="ghost"
-          size="medium"
-          aria-label="文件"
-          aria-pressed={snapshot.layout.filePanelOpen}
-          data-pressed={snapshot.layout.filePanelOpen || undefined}
-          title="查看文件（可修改路径）"
-          onClick={() => void onAction?.({ type: "layout.files.toggle" })}
-        >
-          <WandIcon name="explorer" size={18}/>
-        </WandIconButton>
-        <WandIconButton
-          id={chromeId("topbar-local-preview-button")}
-          kind="ghost"
-          size="medium"
-          aria-label="本地预览"
-          title="打开本机 Web 服务或 HTML 文件"
-          onClick={measurement ? undefined : () => localPreviewController.show()}
-        >
-          <WandIcon name="eye" size={18}/>
-        </WandIconButton>
-        <span id={chromeId("topbar-git-slot")} className="topbar-git-slot">
-          {gitBadge}
-        </span>
-        {selected && (
           <div className="topbar-more-wrap">
             {measurement ? <WandIconButton kind="ghost" size="medium"><WandIcon name="more" size={18}/></WandIconButton> : <WandDropdownMenu
               open={moreOpen}
               onOpenChange={onMoreOpenChange}
             >
               <WandDropdownMenuTrigger
+                ref={menuTrigger}
                 render={(
                   <WandIconButton
                     id={chromeId("topbar-more-button")}
@@ -276,11 +258,13 @@ export function ShellTopbarChrome({ snapshot, onAction, onMoreOpenChange, gitBad
                 align="end"
                 sideOffset={6}
               >
-                <TopbarMoreMenu selected={selected} actions={selectedActions} onAction={runMoreAction}/>
+                <WandDropdownMenuItem id="topbar-file-button" icon="explorer" onSelect={() => runMoreAction({ type: "layout.files.toggle" })}>{snapshot.layout.filePanelOpen ? "关闭文件面板" : "文件"}</WandDropdownMenuItem>
+                <WandDropdownMenuItem id="topbar-local-preview-button" icon="eye" onSelect={() => localPreviewController.show()}>本地预览</WandDropdownMenuItem>
+                <TopbarGitMenuItem/>
+                {selected && <><WandDropdownMenuSeparator/><TopbarMoreMenu selected={selected} actions={selectedActions} onAction={runMoreAction}/></>}
               </WandDropdownMenuContent>
             </WandDropdownMenu>}
           </div>
-        )}
       </Flex>
 
     </Flex>

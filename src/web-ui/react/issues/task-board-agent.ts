@@ -120,7 +120,7 @@ export function issueAgentModeOptions(provider: IssueAgentProvider): WandSelectO
  * 工作流阶段表示等待用户确认；业务完成只由 acceptance.acceptedAt 表达，归档只是收纳。
  * 列名、概览指标、进度图例、过滤开关、状态标签都必须从这里取，不得再写第二份。
  */
-const ISSUE_DONE_LABEL = "等你确认";
+const ISSUE_DONE_LABEL = "等待验收";
 
 export const ISSUE_COLUMNS: ReadonlyArray<{
   status: WandTaskStatus;
@@ -133,7 +133,7 @@ export const ISSUE_COLUMNS: ReadonlyArray<{
   { status: "done", label: ISSUE_DONE_LABEL, empty: `还没有${ISSUE_DONE_LABEL}的任务` },
 ];
 
-/** 状态界面名的唯一出口；列名与「等你确认」相关的文案都从这里读。 */
+/** 状态界面名的唯一出口；列名与「等待验收」相关的文案都从这里读。 */
 export function issueStatusLabel(status: WandTaskStatus): string {
   return ISSUE_COLUMNS.find((column) => column.status === status)?.label
     ?? (status === "archived" ? ISSUE_ARCHIVE_COLUMN.label : status);
@@ -150,7 +150,7 @@ export function issueHideStatusFilterLabel(status: WandTaskStatus): string {
   return `隐藏「${issueStatusLabel(status)}」`;
 }
 
-/** 归档不是第四列，而是「等你确认」下面的独立目录。 */
+/** 归档不是第四列，而是「等待验收」下面的独立目录。 */
 export const ISSUE_ARCHIVE_COLUMN: {
   status: Extract<WandTaskStatus, "archived">;
   label: string;

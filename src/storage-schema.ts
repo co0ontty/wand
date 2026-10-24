@@ -5,9 +5,11 @@ import { DatabaseSync } from "node:sqlite";
 import { STORAGE_MIGRATIONS, type StorageMigration, type StorageMigrationContext } from "./storage/migrations.js";
 import { pruneMigrationBackups } from "./migration-backup-retention.js";
 import { SCHEDULED_CLAIM_DATE_SQL } from "./storage-schedules.js";
+import { DINGTALK_SCHEMA } from "./storage/dingtalk-repository.js";
 
 /** Additive schema only. Domain migrations and transactions remain owned by WandStorage. */
 const INIT_SQL = `
+  ${DINGTALK_SCHEMA}
   CREATE TABLE IF NOT EXISTS auth_sessions (
     token TEXT PRIMARY KEY,
     expires_at INTEGER NOT NULL,

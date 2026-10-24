@@ -75,6 +75,8 @@ function stableJson(value: unknown): string {
 
 /** Business coordination only; all execution remains in StructuredSessionManager / AiTeamRunner. */
 export class ConversationService {
+  private external?: Pick<import("./dingtalk-service.js").DingTalkService, "groupForConversation" | "metadata" | "send" | "removeMirror">;
+  attachExternal(service: NonNullable<ConversationService["external"]>): void { this.external = service; }
   constructor(private readonly deps: {
     storage: WandStorage;
     structured: Pick<StructuredSessionManager, "createSession" | "createRelaySession" | "get" | "sendMessage" | "appendRelayTurns">;
@@ -298,6 +300,8 @@ export class ConversationService {
   }
 
   summary(instance: ConversationInstance, knownTurns?: ConversationTurn[]): ConversationSummary {
+    const externalGroup = this.external?.groupForConversation(instance.id);
+    if (externalGroup) instance = { ...instance, external: this.external!.metadata(externalGroup) };
     const tasks = this.storage.conversationTasks(instance.id).flatMap((link) => {
       const task = this.storage.getWandTask(link.taskId);
       const receipt = task ? this.storage.conversationTaskStartup(task.id) : null;
@@ -307,7 +311,7 @@ export class ConversationService {
     });
     const employee = instance.peerEmployeeId ? this.storage.getSiliconEmployee(instance.peerEmployeeId) : null;
     const lifecycle = this.storage.conversationListState(instance.id);
-    let unavailableReason: string | null = lifecycle.deleting ? "对话正在删除，请稍后重试。" : lifecycle.dissolvedAt ? "群聊已解散，恢复后可以继续聊天。" : null;
+    let unavailableReason: string | null = lifecycle.deleting ? "对话正在删除，请稍后重试。" : lifecycle.dissolvedAt ? instance.external ? "此钉钉群镜像已暂停接收新输入，不影响真实钉钉群。" : "群聊已解散，恢复后可以继续聊天。" : null;
     if (instance.kind === "dm") {
       try { requireTeamEmployee(this.storage, instance.peerEmployeeId ?? ""); }
       catch (error) { unavailableReason = getErrorMessage(error); }
@@ -319,7 +323,7 @@ export class ConversationService {
     const title = instance.kind === "dm" ? employee?.name ?? instance.name
       : instance.nameSource === "custom" ? instance.name : tasks.at(-1)?.task.title ?? instance.name;
     // 私聊标题已说明对方身份；只保留自己的署名，群聊仍需区分发言人。
-    const previewAuthor = last?.role === "user" ? `${this.selfName()}：`
+    const previewAuthor = last?.role === "user" ? `${instance.external ? last.author?.name ?? "钉钉成员" : this.selfName()}：`
       : instance.kind === "group" && last ? `${last.author?.name ?? "系统"}：` : "";
     const team = instance.team ? projectTeamEmployees(instance.team, this.storage) : null;
     return { ...instance, ...lifecycle, team: team ? { ...team, members: team.members.map((member) => ({
@@ -327,7 +331,7 @@ export class ConversationService {
     })) } : null,
       title, unavailableReason, memberUnavailableReasons: this.memberReasons(instance), tasks,
       preview: last ? `${previewAuthor}${lastText.slice(0, 160)}`
-        : instance.kind === "group" ? "群已建立，尚未派任务" : "还没有消息", messageAt };
+        : instance.external ? "钉钉群已接入，等待消息同步" : instance.kind === "group" ? "群已建立，尚未派任务" : "还没有消息", messageAt };
   }
 
   list(): ConversationSummary[] {
@@ -401,6 +405,7 @@ export class ConversationService {
     for (const tree of worktrees) cleanupWorktreeSync(tree);
     for (const taskId of taskIds) this.storage.deleteWandTask(taskId);
     this.storage.deleteConversation(id);
+    if (instance.external) this.external?.removeMirror(id);
   }
 
   history(id: string): ConversationTurn[] { return this.turns(this.requireInstance(id)); }
@@ -611,6 +616,7 @@ export class ConversationService {
   prepare(id: string, requestId: string, explicitCwd?: string): Promise<ConversationReceipt> {
     return this.request(requestId, "prepare", { explicitCwd }, id, (receipt) => {
       const instance = this.requireInstance(id);
+      if (instance.external) { receipt.state = "accepted"; return; }
       const session = this.communicationChannel(instance, this.cwd(explicitCwd));
       receipt.sessionId = session.id; receipt.state = "accepted";
     });
@@ -647,6 +653,11 @@ export class ConversationService {
   send(id: string, requestId: string, input: string, target: ConversationTarget, explicitCwd?: string, echo = true,
     executionTarget?: ConversationExecutionTarget, executionPreference?: ConversationExecutionPreference): Promise<ConversationReceipt> {
     const preference = parseConversationExecutionPreference(executionPreference);
+    if (this.storage.getConversation(id)?.external) {
+      if (!this.external) throw new Error("钉钉连接器尚未启动。");
+      if (target || executionTarget || preference) throw new Error("钉钉群消息不能作为内部任务或临时员工配置派发。");
+      return this.external.send(id, requestId, input);
+    }
     return this.request(requestId, "send", { input, target, explicitCwd, echo,
       ...(preference ? { executionPreference: preference } : {}),
       ...(executionTarget?.workspaceId ? { workspaceId: executionTarget.workspaceId } : {}),
@@ -774,6 +785,7 @@ export class ConversationService {
   dispatch(id: string, requestId: string, input: ConversationDispatchInput): Promise<ConversationReceipt> {
     return this.request(requestId, "dispatch", input, id, (receipt, commit) => {
       const instance = this.requireInstance(id);
+      if (instance.external) throw new Error("钉钉群不是内部团队任务群，请在群内明确 @已接入的员工。");
       // Older clients may still use the task form in a DM. It now starts a session, never a task group.
       if (instance.kind === "dm") {
         if (input.continueTaskId) throw new Error("请到原任务群继续历史任务。");

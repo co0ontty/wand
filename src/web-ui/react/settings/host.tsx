@@ -4,6 +4,7 @@ import { WandUiProvider } from "../theme";
 import { installSettingsLibraryStyles } from "./styles";
 import { LocalModelsSettingsTab } from "./local-models-panel";
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { DingTalkSettingsPanel } from "./dingtalk-panel.js";
 import * as React from "react";
 import { useSyncExternalStore } from "react";
 import { wandOverlay } from "../overlay-controller";
@@ -185,6 +186,10 @@ export function SettingsHost({
   const [loginRequired, setLoginRequired] = useState(false);
   const isOpen = presentation === "page" || controller.open;
   const clientAuth = presentation === "page" && isClientSettingsPage();
+  useEffect(() => {
+    // Native settings wrappers use an allowlisted section, never a token or arbitrary redirect.
+    if (presentation === "page" && new URLSearchParams(location.search).get("section") === "connectors") settingsController.open("connectors");
+  }, [presentation]);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
@@ -227,7 +232,7 @@ export function SettingsHost({
     const props = { snapshot, repository, refresh, setSnapshot, toast, showRestart };
     const panels: Record<SettingsTab, ReactNode> = {
       profile: <EmployeesSettingsTab {...props} />,
-      connectors: <GithubSettingsTab {...props} />,
+      connectors: <><DingTalkSettingsPanel admin={snapshot.access === "admin"} active={isOpen && controller.tab === "connectors" && (controller.detail || wide)}/><GithubSettingsTab {...props}/></>,
       general: <GeneralSettingsTab {...props} />,
       ai: <AiSettingsTab {...props} />,
       "local-models": <LocalModelsSettingsTab admin={snapshot.access === "admin"} />,
@@ -238,7 +243,7 @@ export function SettingsHost({
       about: <AboutSettingsTab {...props} />,
     };
     return panels;
-  }, [refresh, repository, showRestart, snapshot, toast]);
+  }, [refresh, repository, showRestart, snapshot, toast, isOpen, controller.tab, controller.detail, wide]);
 
   const available = snapshot?.access === "admin" ? ADMIN_TAB_ORDER : CONNECTED_APP_TAB_ORDER;
 

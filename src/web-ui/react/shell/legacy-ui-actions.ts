@@ -7,6 +7,7 @@ import type { UiAction, UiManageTarget, UiNativeHistoryProvider } from "./ui-sto
 export interface LegacyUiCommands {
   goHome(): void | Promise<unknown>;
   refreshPage(): void | Promise<unknown>;
+  terminalDisplay?(command: "zoom-in" | "zoom-out" | "reset" | "refresh"): void;
   openNewSession(cwd?: string): void | Promise<unknown>;
   openMissions?(): void | Promise<unknown>;
   openNewProject?(cwd?: string): void | Promise<unknown>;
@@ -52,6 +53,7 @@ export function applyLegacyUiAction(
   switch (action.type) {
     case "nav.home": return commands.goHome();
     case "nav.refresh": return commands.refreshPage();
+    case "terminal.display": return commands.terminalDisplay?.(action.command);
     case "session.new": return commands.openNewSession();
     case "session.newAt": return commands.openNewSession(action.cwd);
     case "missions.open": return commands.openMissions?.();
