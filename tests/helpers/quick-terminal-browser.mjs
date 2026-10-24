@@ -13,13 +13,14 @@ import{MemoryUiAdapter}from'./src/web-ui/react/shell/ui-store.ts';
 import{UiStoreProvider}from'./src/web-ui/react/shell/ui-store-react.tsx';
 import{setActiveWorkspaceContext}from'./src/web-ui/react/workspaces/workspace-context.ts';
 window.XTermLib={Terminal:class{},FitAddon:class{}};
-window.fixture={mounts:0,posts:0,requests:[],node:null,listener:null};
+window.fixture={mounts:0,posts:0,attempts:0,requests:[],node:null,listener:null,failMount:new URLSearchParams(location.search).has('mountFailure')};
 window.fetch=async(url,init)=>{fixture.requests.push({url,body:init?.body});if(init?.method==='POST')fixture.posts++;return new Response(JSON.stringify({id:'quick-1',sessionKind:'pty',cwd:'/workspace/worktree',status:'running'}))};
-configureQuickTerminalRuntime({mount(id,node){if(!fixture.node){fixture.mounts++;fixture.node=document.createElement('textarea');fixture.node.id='terminal-input';fixture.node.value='终端已有输出';node.appendChild(fixture.node)}setTimeout(()=>fixture.listener?.({type:'init',sessionId:id,data:{status:'running',cwd:'/workspace/worktree'}}),20);return true},dispose(){},retain(){},focus(){fixture.node?.focus()},reconnect(id){fixture.listener?.({type:'init',sessionId:id,data:{status:'running'}})},observe(listener){fixture.listener=listener;return()=>{fixture.listener=null}}});
+configureQuickTerminalRuntime({mount(id,node){fixture.attempts++;if(fixture.failMount){fixture.failMount=false;return false}if(!fixture.node){fixture.mounts++;fixture.node=document.createElement('textarea');fixture.node.id='terminal-input';fixture.node.value='终端已有输出';node.appendChild(fixture.node)}setTimeout(()=>fixture.listener?.({type:'init',sessionId:id,data:{status:'running',cwd:'/workspace/worktree'}}),20);return true},dispose(){},retain(){},focus(){fixture.node?.focus()},reconnect(id){fixture.listener?.({type:'init',sessionId:id,data:{status:'running'}})},observe(listener){fixture.listener=listener;return()=>{fixture.listener=null}}});
 const snapshot={auth:{phase:'authenticated'},viewport:{mobile:false,online:true,embedTerminal:false,nativeInput:false},capabilities:{backToNative:false,switchServer:false},layout:{sessionsDrawerOpen:false,sidebarPinned:true,sidebarCollapsed:false,sidebarDrawer:false,sidebarAnchored:true,sessionsBackdropVisible:false,filePanelOpen:false,filePanelBackdropVisible:false,topbarMoreOpen:false,currentView:'chat'},selected:null,sidebar:{interactiveCount:0,totalCount:0,manageMode:false,selectedCount:0,groups:[]},topbar:{title:'Wand',description:'',statusLabel:'',statusTone:'',cwd:'',currentTask:'',titleGenerating:false,git:null},legacyVisibility:{terminal:false,chat:false,blank:true,composer:true}};
 setActiveWorkspaceContext({cwd:'/workspace/worktree'});
 function Draft(){const[value,set]=React.useState('主编辑器草稿');return <textarea id='draft' value={value} onChange={e=>set(e.target.value)} style={{width:'100%',height:'100%',boxSizing:'border-box'}}/>}
-function Fixture(){const[topbar,set]=React.useState(false);fixture.topbar=set;return <QuickTerminalWorkspace>{topbar&&<ShellTopbar/>}<Draft/></QuickTerminalWorkspace>}
+function Fixture(){const[topbar,set]=React.useState(false);const[shown,show]=React.useState(true);const[,tick]=React.useReducer(x=>x+1,0);fixture.topbar=set;React.useEffect(()=>{if(!new URLSearchParams(location.search).has('manual'))return;const timer=setInterval(tick,100);return()=>clearInterval(timer)},[]);return <>{new URLSearchParams(location.search).has('manual')&&<div style={{position:'absolute',bottom:0,left:0,zIndex:100,background:'white'}}><button onClick={()=>fixture.listener?.({type:'error'})}>模拟其他操作错误</button><button onClick={()=>fixture.listener?.({type:'pty_error',sessionId:'quick-1'})}>模拟终端错误</button><button onClick={()=>fixture.listener?.({type:'init',sessionId:'quick-1',data:{status:'running'}})}>恢复连接</button><button onClick={()=>show(!shown)}>切换工作区挂载</button><output id='fixture-counts'>创建 {fixture.posts} · 挂载尝试 {fixture.attempts} · 实例 {fixture.mounts}</output></div>}{shown&&<QuickTerminalWorkspace>{topbar&&<ShellTopbar/>}<Draft/></QuickTerminalWorkspace>}</>}
+
 createRoot(document.getElementById('root')).render(<WandUiProvider><UiStoreProvider store={new MemoryUiAdapter(snapshot)}><Fixture/></UiStoreProvider></WandUiProvider>);`;
 const built = await build({ stdin: { contents: entry, loader: "tsx", resolveDir: process.cwd() }, bundle: true, format: "iife", write: false, define: { "process.env.NODE_ENV": '"production"' } });
 const server = createServer((req, res) => {
@@ -29,6 +30,10 @@ const server = createServer((req, res) => {
   res.end(`<!doctype html><html lang="zh-CN"><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/style.css"></head><body><div id="root" style="display:flex;height:100vh;width:100vw"></div><script src="/app.js"></script></body></html>`);
 });
 await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+if (process.env.WAND_QUICK_TERMINAL_MANUAL === '1') {
+  console.log(`Manual fixture: http://127.0.0.1:${server.address().port}/?manual&mountFailure`);
+  await new Promise(() => {});
+}
 let browser;
 try {
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -41,7 +46,7 @@ try {
   assert.equal(await browser.evaluate("document.querySelector('#quick-terminal-panel').dataset.dock"), "right", "first use docks on the right");
   assert.equal(await browser.evaluate("JSON.parse(fixture.requests[0].body).cwd"), "/workspace/worktree");
   const position = await browser.evaluate("(()=>{let r=document.querySelector('[aria-label=打开终端]').getBoundingClientRect();return [r.x,r.y,r.width,r.height]})()");
-  await browser.click('[aria-label="停靠位置：右侧"]');
+  await browser.click('[aria-label="终端选项"]');
   await browser.wait("!!document.querySelector('.ant-dropdown:not(.ant-dropdown-hidden)')");
   await browser.evaluate("[...document.querySelectorAll('.ant-dropdown-menu-item')].find(n=>n.textContent.includes('底部')).id='dock-bottom';true");
   await browser.click('#dock-bottom');
@@ -50,9 +55,9 @@ try {
   assert.equal(await browser.evaluate("document.querySelector('#terminal-input')===fixture.node"), true);
   assert.equal(await browser.evaluate("fixture.mounts"), 1);
   assert.deepEqual(await browser.evaluate("(()=>{let r=document.querySelector('[aria-label=打开终端]').getBoundingClientRect();return [r.x,r.y,r.width,r.height]})()"), position);
-  await browser.click('[aria-label="停靠位置：底部"]');
+  await browser.click('[aria-label="终端选项"]');
   await browser.key("Escape");
-  await browser.wait("document.querySelector('[aria-label=\"停靠位置：底部\"]').getAttribute('aria-expanded')==='false'");
+  await browser.wait("document.querySelector('[aria-label=\"终端选项\"]').getAttribute('aria-expanded')==='false'");
   await browser.click('[aria-label="关闭终端面板"]');
   await browser.click('[aria-label="打开终端"]');
   assert.equal(await browser.evaluate("document.activeElement.id"), "terminal-input", "explicit reopen focuses the retained terminal");
@@ -82,15 +87,15 @@ try {
   await browser.wait("!!document.querySelector('.main-header-row [aria-label=打开终端]')");
   await browser.settle();
   const headerButton = await browser.evaluate("(()=>{const r=document.querySelector('[aria-label=打开终端]').getBoundingClientRect();return [r.x,r.y,r.width,r.height]})()");
-  await browser.click('[aria-label="停靠位置：底部"]');
+  await browser.click('[aria-label="终端选项"]');
   await browser.evaluate("[...document.querySelectorAll('.ant-dropdown-menu-item')].find(n=>n.textContent.includes('右侧')).id='dock-right';true");
   await browser.click('#dock-right');
   await browser.wait("document.querySelector('#quick-terminal-panel').dataset.dock==='right'");
   assert.deepEqual(await browser.evaluate("(()=>{const r=document.querySelector('[aria-label=打开终端]').getBoundingClientRect();return [r.x,r.y,r.width,r.height]})()"), headerButton, "existing header stays at full workspace width");
   assert.equal(await browser.evaluate("[...document.querySelectorAll('[aria-label=打开终端]')].filter(n=>n.getBoundingClientRect().width>0).length"), 1);
-  await browser.click('[aria-label="停靠位置：右侧"]');
+  await browser.click('[aria-label="终端选项"]');
   await browser.click('#draft');
-  await browser.wait("document.querySelector('[aria-label=\"停靠位置：右侧\"]').getAttribute('aria-expanded')==='false'");
+  await browser.wait("document.querySelector('[aria-label=\"终端选项\"]').getAttribute('aria-expanded')==='false'");
   assert.equal(await browser.evaluate("fixture.mounts"), 1);
   const geometry = await browser.evaluate("(()=>{const root=document.querySelector('.quick-terminal-split').getBoundingClientRect();const terminal=document.querySelector('#quick-terminal-panel').getBoundingClientRect();return {rootWidth:root.width,terminalWidth:terminal.width,right:terminal.right,rootRight:root.right}})()");
   assert.ok(Math.abs(geometry.terminalWidth / geometry.rootWidth - .4) < .03, JSON.stringify(geometry));
@@ -102,6 +107,17 @@ try {
   await browser.wait("!!document.querySelector('#terminal-input')");
   assert.equal(await browser.evaluate("fixture.posts"), 0);
   assert.equal(await browser.evaluate("document.querySelector('#quick-terminal-panel').dataset.dock"), "right", "right dock is also restored after refresh");
+  await browser.send("Page.navigate", { url: origin + "/?mountFailure" });
+  await browser.wait("!!document.querySelector('[aria-label=打开终端]')");
+  await browser.click('[aria-label="打开终端"]');
+  await browser.wait("document.querySelector('#quick-terminal-panel').textContent.includes('终端组件加载失败')");
+  await browser.click('[aria-label="关闭终端面板"]');
+  await browser.click('[aria-label="打开终端"]');
+  await browser.wait("document.querySelector('#quick-terminal-panel').textContent.includes('已连接')");
+  assert.equal(await browser.evaluate("fixture.attempts"), 2, "reopen retries a failed mount even though its session ID is already known");
+  assert.equal(await browser.evaluate("fixture.posts"), 0, "mount recovery must not create another process");
+  await browser.evaluate("fixture.listener({type:'error'});true");
+  assert.equal(await browser.evaluate("document.querySelector('#quick-terminal-panel').textContent.includes('已连接')"), true, "unscoped errors are not terminal failures");
   assert.deepEqual(browser.errors, []);
   console.log(JSON.stringify({ passed: true, scope: "isolated layout with mock transport, not installed-service acceptance", checks: ["single creation", "same terminal and draft nodes", "dock persistence", "refresh GET only", "Escape", "focus preservation", "narrow/low-height"] }));
 } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }

@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { statSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 import { MAX_PROTOCOL_LINE_BYTES } from "../src/bounded-process-output.js";
 import { PiProtocolReader } from "../src/pi-protocol-reader.js";
 import { projectPiProtocolEvent } from "../src/pi-event-projection.js";
-import { PiRunner } from "../src/structured-pi-adapter.js";
+import { PiRunner, applyPiEvent } from "../src/structured-pi-adapter.js";
 import type { SessionSnapshot } from "../src/types.js";
 
 const assistant = (text = "最终答复🙂", stopReason = "stop") => ({ role: "assistant", model: "fixture",
@@ -26,10 +27,12 @@ function runner() {
   let kills = 0;
   const child = Object.assign(new EventEmitter(), { pid: 42, stdout: new PassThrough(), stderr: new PassThrough(),
     stdin: new PassThrough(), kill() { kills++; child.emit("close", 0, null); return true; } });
-  const pi = new PiRunner((() => child as unknown as ChildProcess) as typeof spawn);
+  const files: string[] = [];
+  const pi = new PiRunner((() => child as unknown as ChildProcess) as typeof spawn,
+    undefined, undefined, undefined, () => ({ onCreated: (file) => files.push(file) }));
   const session = { id: "large-pi", provider: "pi", cwd: process.cwd(), claudeSessionId: null } as SessionSnapshot;
   const run = pi.start({ session, prompt: "fixture only", env: {} }, { isActive: () => true, onUpdate() {} });
-  return { child, run, kills: () => kills };
+  return { child, run, files, kills: () => kills };
 }
 
 // The latest Pi turn_end contains context in addition to message/toolResults.
@@ -109,10 +112,9 @@ test("bounded non-JSON stdout remains diagnostic noise and does not masquerade a
   assert.throws(() => read(large), /8 MiB/);
 });
 
-test("genuine huge assistant/tool payloads, giant keys and deep ignored contexts remain bounded", () => {
+test("huge assistant payloads, giant keys and deep ignored contexts remain bounded", () => {
   assert.throws(() => read(JSON.stringify({ type: "agent_end", messages: [assistant(large)] })), /8 MiB/);
   assert.throws(() => read(JSON.stringify({ type: "message_end", message: assistant(large) })), /8 MiB/);
-  assert.throws(() => read(JSON.stringify({ type: "tool_execution_end", result: { content: large } })), /8 MiB/);
   assert.throws(() => read(JSON.stringify({ type: "turn_end", context: { ["a".repeat(2000)]: 1 } })), /属性名/);
   assert.throws(() => read('{"type":"turn_end","context":' + '['.repeat(130) + '0' + ']'.repeat(130) + '}'), /深度/);
   assert.throws(() => read(JSON.stringify({ type: "unknown_future_event", context: large })), /非汇总事件/);
@@ -124,6 +126,11 @@ test("native source projection removes cumulative histories before serialization
   assert.deepEqual(projectPiProtocolEvent(event), { type: "agent_end", messages: [assistant("late error", "error")] });
   assert.deepEqual(projectPiProtocolEvent({ type: "turn_end", message: assistant(), context: large, toolResults: [large] }),
     { type: "turn_end", message: assistant() });
+  for (const role of ["user", "toolResult"]) {
+    const snapshot = { type: "message_end", message: { content: large, role } };
+    assert.deepEqual(projectPiProtocolEvent(snapshot), { type: "message_end", message: { role } });
+    assert.deepEqual(read(JSON.stringify(snapshot)), [{ type: "message_end", message: { role } }]);
+  }
 });
 
 test("PiRunner accepts huge redundant summaries through its actual file/pump path with split UTF-8", async () => {
@@ -166,4 +173,119 @@ test("malformed/oversized real payload stops once even with synchronous close an
     assert.notEqual(result.inputAccepted, false);
     assert.equal(f.kills(), 1);
   }
+});
+
+
+for (const type of ["tool_execution_end", "tool_execution_update"]) {
+  const key = type === "tool_execution_end" ? "result" : "partialResult";
+  test(`${type} projects large images/text/details regardless of property order and keeps following errors`, () => {
+    const result = {
+      details: { output: large, mode: "parallel", asyncId: "fixture-id", inventoryComplete: true },
+      content: [{ data: large, mimeType: "image/png", type: "image" },
+        { type: "text", text: "HEAD🙂" + large + "TAIL中" }],
+    };
+    const event = { [key]: result, toolCallId: "large-tool", isError: true, type };
+    const events = read(JSON.stringify(event) + "\n"
+      + JSON.stringify({ type: "message_end", message: assistant("terminal provider error", "error") }));
+    const projected = events[0][key] as Record<string, any>;
+    assert.equal(events[0].isError, true);
+    assert.equal(events[0].toolCallId, "large-tool");
+    assert.equal(projected.content[0].type, "text", "an incomplete base64 image must never reach clients");
+    assert.match(projected.content[0].text, /图片/);
+    assert.match(projected.content[1].text, /^HEAD🙂/);
+    assert.match(projected.content[1].text, /TAIL中$/);
+    assert.match(projected.content.at(-1).text, /仅展示有界预览/);
+    assert.equal(projected.details.asyncId, "fixture-id");
+    assert.equal(projected.details.inventoryComplete, false);
+    assert.ok(Buffer.byteLength(JSON.stringify(projected)) < 1024 * 1024);
+    assert.equal((events[1].message as Record<string, unknown>).errorMessage, "terminal provider error");
+    const native = projectPiProtocolEvent(event);
+    assert.deepEqual(read(JSON.stringify(native))[0], native);
+    assert.deepEqual(native, events[0], "native/source and legacy/replay projections share the same policy");
+    assert.equal(result.content[0].data, large, "projection must not mutate Pi's own result/context");
+    assert.equal(result.details.inventoryComplete, true);
+  });
+}
+
+test("large collections remain bounded without starving later tool metadata", () => {
+  const event = { type: "tool_execution_end", result: {
+    content: Array.from({ length: 15000 }, () => ({ type: "text", text: "x".repeat(600) })),
+    details: { mode: "parallel", state: "failed", asyncId: "receipt", error: "real failure" },
+  }, isError: true };
+  const projected = read(JSON.stringify(event))[0].result as Record<string, any>;
+  assert.ok(projected.content.length < 1000);
+  assert.ok(JSON.stringify(projected).length < 1024 * 1024);
+  assert.equal(projected.details.error, "real failure");
+  assert.equal(projected.details.asyncId, "receipt");
+});
+
+test("malformed or incomplete large tool results are never published as valid previews", () => {
+  for (const raw of [
+    '{"type":"tool_execution_end","result":{"content":"' + large,
+    '{"type":"tool_execution_end","result":{"content":"' + large + '\\q"}}',
+    '{"type":"tool_execution_end","result":{"content":"' + large + '"},"isError":tru}',
+  ]) {
+    let published = 0;
+    const reader = new PiProtocolReader(() => published++);
+    assert.throws(() => { reader.push(raw); reader.finish(); });
+    assert.equal(published, 0);
+  }
+});
+
+test("PiRunner continues after a huge tool result without a kill, retry or lost final reply", async () => {
+  const f = runner();
+  const bytes = Buffer.from(JSON.stringify({ type: "tool_execution_start", toolCallId: "image", toolName: "read", args: { path: "fixture.png" } }) + "\n"
+    + JSON.stringify({ result: { content: [{ data: large, type: "image", mimeType: "image/png" }] },
+      isError: true, toolCallId: "image", type: "tool_execution_end" }) + "\n"
+    + JSON.stringify({ type: "agent_end", messages: [assistant("继续完成🙂")] }));
+  for (let offset = 0; offset < bytes.length; offset += 16381) f.child.stdout.emit("data", bytes.subarray(offset, offset + 16381));
+  f.child.emit("close", 0, null);
+  const result = await f.run.completion;
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.primaryError, null);
+  assert.equal(result.state.result, "继续完成🙂");
+  assert.equal(result.inputAccepted, true);
+  const block = result.state.blocks.find(b => b.type === "tool_result");
+  assert.equal(block?.type === "tool_result" && block.is_error, true);
+  assert.match(JSON.stringify(block), /仅展示有界预览/);
+  assert.equal(f.kills(), 0);
+});
+
+test("truncated workflow inventories remain incomplete after the client execution projection", () => {
+  const event = { type: "tool_execution_end", toolCallId: "workflow", result: {
+    details: { mode: "workflow", workflowChildren: { children: [{ childId: "kept", status: "completed", output: large }],
+      inventoryComplete: true, workflowState: "completed" } }, content: [{ type: "text", text: "workflow output" }],
+  } };
+  const projected = read(JSON.stringify(event))[0];
+  const state = { blocks: [{ type: "tool_use", id: "workflow", name: "Pi/subagent", input: {} }], result: "", sessionId: null } as import("../src/structured-runner.js").StructuredRunnerTurnState;
+  applyPiEvent(state, projected);
+  const use = state.blocks[0];
+  assert.equal(use.type === "tool_use" && use.execution?.inventoryComplete, false);
+});
+
+test("JSON escaping and aggregate retained tool fields cannot reintroduce the line-size failure", () => {
+  const escaped = "\u0000".repeat(2 * 1024 * 1024);
+  const event = { type: "tool_execution_end", result: { content: escaped }, isError: false };
+  const projected = read(JSON.stringify(event))[0];
+  assert.match(JSON.stringify(projected), /仅展示有界预览/);
+  assert.ok(Buffer.byteLength(JSON.stringify(projected)) < 1024 * 1024);
+  const aggregate = { type: "tool_execution_end", result: { content: "a".repeat(5 * 1024 * 1024) },
+    partialResult: { content: "b".repeat(5 * 1024 * 1024) } };
+  assert.ok(Buffer.byteLength(JSON.stringify(read(JSON.stringify(aggregate)))) < 1024 * 1024);
+});
+
+test("Pi capture streams a >256 MiB result into a small journal before disk quotas apply", async () => {
+  const f = runner();
+  f.child.stdout.emit("data", Buffer.from('{"result":{"content":[{"type":"image","data":"'));
+  const chunk = Buffer.from("x".repeat(1024 * 1024));
+  for (let index = 0; index < 270; index++) f.child.stdout.emit("data", chunk);
+  f.child.stdout.emit("data", Buffer.from('" ,"mimeType":"image/png"}]},"type":"tool_execution_end","toolCallId":"huge","isError":false}' + "\n"
+    + JSON.stringify({ type: "agent_end", messages: [assistant("large streamed result completed")] }) + "\n"));
+  assert.ok(statSync(f.files[0]).size < 1024 * 1024, "raw bytes must not be journaled before projection");
+  f.child.emit("close", 0, null);
+  const result = await f.run.completion;
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.primaryError, null);
+  assert.equal(result.state.result, "large streamed result completed");
+  assert.equal(f.kills(), 0);
 });

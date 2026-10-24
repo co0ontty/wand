@@ -1,5 +1,22 @@
-import type { TaskAcceptance } from "../../../task-types";
+import type { TaskAcceptance, WandTask } from "../../../task-types";
 import type { IssueSessionSummary } from "./task-board-repository";
+
+type TaskDeliveryState = Pick<WandTask, "status" | "acceptance">;
+
+/** Work is explicitly submitted for review; idle sessions and archival prove neither stage. */
+export function taskWorkLabel(task: TaskDeliveryState): string {
+  if (task.acceptance?.acceptedAt || task.status === "done") return "已完成";
+  if (task.status === "doing") return "处理中";
+  if (task.status === "backlog") return "待立项";
+  if (task.status === "todo") return "未开始";
+  return "未确认";
+}
+
+export function taskReviewLabel(task: TaskDeliveryState): string {
+  if (task.acceptance?.acceptedAt) return "已通过";
+  if (task.status === "done") return "等待你验收";
+  return task.acceptance?.blocker.trim() ? "有待处理项" : "未验收";
+}
 
 /** Execution facts and explicit acceptance are orthogonal; never inspect model text. */
 export function taskAcceptanceLabel(acceptance?: TaskAcceptance | null): string {

@@ -52,7 +52,7 @@ export function SubtaskPanel({ tasks, registerOpen, prepareOpenChange, onOpenCha
   tasks.forEach(task => counts.set(task.status, (counts.get(task.status) || 0) + 1));
   const summary = Array.from(counts, ([label, count]) => `${count}${label}`).join(" · ");
   return <>
-    <div className="chat-subtasks-toolbar">
+    <div className="chat-subtasks-toolbar" hidden={!tasks.length}>
       <WandButton ref={trigger} className="chat-subtasks-trigger" style={{ visibility: tasks.length ? "visible" : "hidden" }}
         aria-expanded={open} aria-controls={panelId} title={summary} onClick={() => { if (selectedId) select(selectedId); changeOpen(!open); }}>
         <WandIcon name="splitHorizontal" size={14}/><span>子任务 {tasks.length}</span><span className="chat-subtasks-counts">{summary}</span>

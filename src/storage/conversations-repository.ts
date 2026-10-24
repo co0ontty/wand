@@ -204,6 +204,16 @@ export class ConversationRepository {
       .run(messageId, id, JSON.stringify({ ...turn, messageId, conversationId: id, createdAt }), createdAt);
   }
 
+  /** Exact message update scoped to its owning conversation; external echoes never create a second transcript. */
+  updateConversationEvent(id: string, messageId: string, patch: Partial<ConversationTurn>): boolean {
+    const row = this.db.prepare("SELECT turn_json FROM conversation_messages WHERE id = ? AND conversation_id = ?").get(messageId, id) as { turn_json: string } | undefined;
+    if (!row) return false;
+    const turn = JSON.parse(row.turn_json) as ConversationTurn;
+    this.db.prepare("UPDATE conversation_messages SET turn_json = ? WHERE id = ? AND conversation_id = ?")
+      .run(JSON.stringify({ ...turn, ...patch, messageId, conversationId: id }), messageId, id);
+    return true;
+  }
+
   conversationEvents(id: string): ConversationTurn[] {
     return (this.db.prepare("SELECT turn_json FROM conversation_messages WHERE conversation_id = ? ORDER BY created_at, rowid")
       .all(id) as Array<{ turn_json: string }>).map((row) => JSON.parse(row.turn_json) as ConversationTurn);

@@ -8,6 +8,9 @@ import type { ConnectorMeta } from "./storage/mappers.js";
 import { parseWandTaskAgent } from "./storage/mappers.js";
 export * from "./storage/internal.js";
 import { ConversationRepository } from "./storage/conversations-repository.js";
+import { DingTalkRepository } from "./storage/dingtalk-repository.js";
+import { ApnsRepository } from "./storage/apns-repository.js";
+import { LiveActivityRepository } from "./storage/live-activity-repository.js";
 import { ConversationOrganizationRepository } from "./storage/conversation-organization-repository.js";
 import { PreferencesRepository } from "./storage/preferences-repository.js";
 import { WorkspaceRepository } from "./storage/workspaces-repository.js";
@@ -28,6 +31,7 @@ export { ensureDatabaseFile } from "./storage-schema.js";
 type RepositoryMethods<T> = Pick<T, { [K in keyof T]: T[K] extends (...args: never[]) => unknown ? K : never }[keyof T]>;
 
 export interface WandStorage extends
+  RepositoryMethods<DingTalkRepository>,
   RepositoryMethods<ConversationRepository>,
   RepositoryMethods<ConversationOrganizationRepository>,
   RepositoryMethods<PreferencesRepository>,
@@ -43,6 +47,9 @@ export interface WandStorage extends
   RepositoryMethods<FeedbackRepository> {}
 
 export class WandStorage {
+  readonly dingtalk: DingTalkRepository;
+  readonly apns: ApnsRepository;
+  readonly liveActivities: LiveActivityRepository;
   readonly conversations: ConversationRepository;
   readonly conversationOrganizations: ConversationOrganizationRepository;
   readonly preferences: PreferencesRepository;
@@ -105,6 +112,9 @@ export class WandStorage {
     chmodSync(dir, 0o700);
     this.dbPath = dbPath;
     this.db = openStorageDatabase(dbPath);
+    this.dingtalk = new DingTalkRepository(this.db);
+    this.apns = new ApnsRepository(this.db, this);
+    this.liveActivities = new LiveActivityRepository(this.db, this);
     this.conversations = new ConversationRepository(this.db, this);
     this.conversationOrganizations = new ConversationOrganizationRepository(this.db);
     this.preferences = new PreferencesRepository(this.db, this);
@@ -534,6 +544,7 @@ export class WandStorage {
 }
 
 const REPOSITORY_FORWARDS: ReadonlyArray<readonly [field: string, repository: { readonly prototype: object }]> = [
+  ["dingtalk", DingTalkRepository],
   ["conversations", ConversationRepository],
   ["conversationOrganizations", ConversationOrganizationRepository],
   ["preferences", PreferencesRepository],

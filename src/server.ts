@@ -41,6 +41,11 @@ import { SessionLogger } from "./session-logger.js";
 import { coreHarnessAgentDir } from "./harness-engine.js";
 import { SessionRegistry } from "./session-registry.js";
 import { SessionCompletionTracker } from "./session-completion.js";
+import { ApnsClient, loadApnsConfiguration } from "./apns-client.js";
+import { ApnsService } from "./apns-service.js";
+import { LiveActivityService } from "./live-activity-service.js";
+import { apnsDigest } from "./storage/apns-repository.js";
+import { registerApnsRoutes } from "./server-apns-routes.js";
 import { resolveSystemAiContext } from "./session-ai-context.js";
 import { systemAiSessions } from "./system-ai-session-recorder.js";
 import { StructuredSessionManager } from "./structured-session-manager.js";
@@ -61,6 +66,7 @@ import { DecisionExpertService } from "./decision-expert-service.js";
 import { DECISION_EXPERT_KEY } from "./decision-expert-identity.js";
 import {
   buildStructuredChatPersonaPayload,
+  generateAppToken,
   resolveAppConnectCode,
 } from "./server-app-connect.js";
 import { resolveTrustProxy, sendRouteError } from "./server-request.js";
@@ -88,6 +94,9 @@ import { registerSiliconEmployeeRoutes } from "./server-employee-routes.js";
 import { EmployeeImService } from "./employee-im.js";
 import { EmployeeImLifecycle } from "./employee-im-lifecycle.js";
 import { registerEmployeeImRoutes } from "./server-employee-im-routes.js";
+import { DwsClient } from "./dingtalk-dws.js";
+import { DingTalkService } from "./dingtalk-service.js";
+import { registerDingTalkRoutes } from "./server-dingtalk-routes.js";
 import { UserMemoryService } from "./user-memory.js";
 import { registerUserMemoryRoutes, userMemoryOperationLog } from "./server-user-memory.js";
 import { registerAttentionRoutes } from "./server-attention-routes.js";
@@ -508,7 +517,20 @@ export async function startServer(
     canStart: (session, scheduling) => taskExecutionQueue.canStartSession(session, scheduling),
     schedule: employeeId => taskExecutionQueue.scheduleDrain(employeeId),
   });
-  const sessionCompletions = new SessionCompletionTracker(storage, (id) => sessionRegistry.get(id));
+  let apnsConfiguration: ReturnType<typeof loadApnsConfiguration> = null;
+  try { apnsConfiguration = loadApnsConfiguration(process.env, configDir); }
+  catch (error) { wandWarn(error instanceof Error ? error.message : "APNs 配置不可用。"); }
+  const apns = new ApnsService(storage, apnsConfiguration, apnsConfiguration ? new ApnsClient(apnsConfiguration) : null,
+    () => apnsDigest(generateAppToken(getEffectivePassword(storage, config), config.appSecret ?? "")),
+    id => sessionRegistry.ownerOf(id) === "storage" ? null : sessionRegistry.getSlim(id),
+    message => wandWarn(message));
+  let liveActivityFactsReady = false;
+  const liveActivities = new LiveActivityService(storage, apnsConfiguration, apnsConfiguration ? new ApnsClient(apnsConfiguration) : null,
+    () => apnsDigest(generateAppToken(getEffectivePassword(storage, config), config.appSecret ?? "")),
+    () => liveActivityFactsReady ? sessionRegistry.listSlim({ runtimeOnly: true }) : null,
+    message => wandWarn(message));
+  const sessionCompletions = new SessionCompletionTracker(storage, (id) => sessionRegistry.get(id),
+    (id, revision) => apns.completed(id, revision));
   let nextEmployeeImWarningAt = 0;
   const employeeIm = new EmployeeImService(storage, { onFailure: () => {
     if (Date.now() < nextEmployeeImWarningAt) return;
@@ -559,6 +581,13 @@ export async function startServer(
     notifySession: notifier.conversationSession, notifyChanged: () => notifier.system({ kind: "conversations-changed" }), deleteSession: id => { sessionRegistry.deleteWithProviderHistory(id); } });
   conversations = conversationService;
   conversationService.migrateExistingChats();
+  const dingtalkDws = new DwsClient(storage.directory());
+  const dingtalk = new DingTalkService({ storage, dws: dingtalkDws, config, structured: structuredSessions,
+    changed: () => notifier.system({ kind: "conversations-changed" }) });
+  conversationService.attachExternal(dingtalk);
+  storage.onClose(() => { dingtalk.dispose(); dingtalkDws.dispose(); });
+  // Restore only explicitly persisted subscriptions; startup never creates or publishes remote resources.
+  if (!testMode) void dingtalk.restore().catch(() => wandWarn("钉钉连接恢复未完成，请在连接器检查授权。"));
   const scheduledTasks = new ScheduledTaskService({ storage, conversations: conversationService,
     getSession: id => sessionRegistry.get(id), defaultCwd: () => config.defaultCwd });
   for (const prefix of [CONVERSATION_RELAY_PREFIX, AI_TEAM_CHAT_PREFIX]) {
@@ -614,6 +643,7 @@ export async function startServer(
   // Route-specific parsers must run before the global parser. Once body-parser
   // has consumed a request, a later express.json() cannot tighten or widen it.
   registerFeedbackIngress(app, feedbackReceiver);
+  registerApnsRoutes(app, { storage, config, service: apns, liveActivity: liveActivities });
   app.use("/api/feedback/client", express.json({ limit: "32kb", inflate: false }));
   app.use("/api/decisions", express.json({ limit: "32kb" }));
   app.use("/api/optimize-prompt", express.json({ limit: "256kb" }));
@@ -775,6 +805,7 @@ export async function startServer(
     notifyEmployeeChanged: (employeeId) => notifyAiTeamRun({ kind: "silicon-employee-definition", employeeId }),
   });
   registerEmployeeImRoutes(app, { storage, im: employeeIm, requireAdmin });
+  registerDingTalkRoutes(app, { service: dingtalk, requireAdmin, install: () => dingtalkDws.install() });
   registerAttentionRoutes(app, { sessions: sessionRegistry, runner: aiTeams });
   registerConversationRoutes(app, conversationService);
   registerScheduledTaskRoutes(app, scheduledTasks);
@@ -945,6 +976,8 @@ export async function startServer(
     sessionRegistry.invalidateMessageProjection(event.sessionId);
     taskTitles.ingest(event);
     sessionCompletions.ingest(event);
+    apns.ingest(event);
+    liveActivities.ingest(event);
     missions.ingest(event);
     aiTeams.ingest(event);
     employeeImLifecycle.ingest(event);
@@ -956,7 +989,10 @@ export async function startServer(
     storage.recordTaskCommentSessionEvent(event);
     conversationService.ingestSessionEvent(event);
     scheduledTasks.ingestSessionEvent(event);
+    dingtalk.ingest(event);
     sessionCompletions.ingest(event);
+    apns.ingest(event);
+    liveActivities.ingest(event);
     missions.ingest(event);
     aiTeams.ingest(event);
     employeeImLifecycle.ingest(event);
@@ -971,7 +1007,14 @@ export async function startServer(
   systemCalls.attach({ emit: event => wsManager.emitEvent(event), notifyConversation: notifier.conversationSession });
   // Re-attach structured CLI runs that kept going inside terminald while the
   // previous web process was down; fire-and-forget, failures are logged inside.
-  void structuredSessions.recoverDetachedRuns().then(() => taskExecutionQueue.drainAll());
+  apns.start();
+  liveActivities.start();
+  void structuredSessions.recoverDetachedRuns().then(() => {
+    liveActivityFactsReady = true;
+    return taskExecutionQueue.drainAll();
+  }, () => {
+    wandWarn("会话恢复未确认：暂缓灵动岛远程更新，不将旧状态判为完成。");
+  });
   aiTeams.reconcile();
   structuredSessions.resumeQueuedPiMessages();
 
@@ -1051,6 +1094,8 @@ export async function startServer(
   await new Promise<void>((resolve, reject) => {
     const cleanupFailedListen = async (): Promise<void> => {
       shuttingDown = true;
+      dingtalk.dispose();
+      dingtalkDws.dispose();
       employeeImLifecycle.dispose();
       employeeIm.dispose();
       await scheduledTasks.dispose();
@@ -1305,6 +1350,10 @@ export async function startServer(
       feedback.stop();
       if (activeFeedback === feedback) activeFeedback = null;
       taskExecutionQueue.dispose();
+      apns.dispose();
+      liveActivities.dispose();
+      dingtalk.dispose();
+      dingtalkDws.dispose();
       employeeImLifecycle.dispose();
       employeeIm.dispose();
       taskTitles.dispose();

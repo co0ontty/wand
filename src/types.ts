@@ -703,6 +703,8 @@ export interface ConversationSessionPreview {
 }
 
 export interface ConversationTurn {
+  /** External delivery facts; not model protocol or a tool event. */
+  external?: { provider: "dingtalk"; messageId?: string; senderId?: string; state: "sending" | "synced" | "unknown" | "failed" };
   /** Stable instance/target association. Legacy turns remain unchanged. */
   messageId?: string;
   requestId?: string;

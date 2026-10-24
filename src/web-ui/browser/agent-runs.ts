@@ -118,9 +118,8 @@ export function agentRunResultRawText(block: any): string {
 }
 
 /**
- * 「派发回执」判据。形状来自 271 条真实 `Pi/subagent` toolResult 的全量聚类
- * （取证见 `.wand-team/run_46c0a39145b3/8-m_ca82f853.md`，形状表见
- * `docs/subagent-display.md` §6），不是照猜的合取式。分三层，顺序不可调换。
+ * 「派发回执」判据。形状来自 271 条真实 `Pi/subagent` toolResult 的全量聚类，
+ * 不是照猜的合取式。分三层，顺序不可调换。
  *
  * 第一层：否决。状态查询与转录报告正文里同样含 `Run fan-out:` 和 `Output:`
  * （真实样本 130 + 12 条），只按「含什么关键字」判必然误判，所以先按首行前缀排除。

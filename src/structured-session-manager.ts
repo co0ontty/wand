@@ -52,6 +52,7 @@ import { QoderRunner } from "./structured-qoder-adapter.js";
 import { PiRunner, isMissingPiSession } from "./structured-pi-adapter.js";
 import { PiOutputFile, type PiOutputFileOptions } from "./pi-output-file.js";
 import { PiProtocolReader } from "./pi-protocol-reader.js";
+import type { PiCliCheckpoint } from "./pi-cli-checkpoint.js";
 import type { PiNativeGcReport } from "./pi-tmux-host.js";
 import { structuredRunId, type StructuredExecHost, type StructuredRunState } from "./structured-exec-host.js";
 import type { StructuredRunnerAdapter, StructuredRunnerExecution, StructuredRunnerResult, StructuredRunnerTurnState } from "./structured-runner.js";
@@ -209,6 +210,7 @@ export class StructuredSessionManager {
   private inputSequence = 0;
   /** Last wall-clock time (ms) a streaming checkpoint reached SQLite. */
   private readonly lastStreamSaveAt = new Map<string, number>();
+  private readonly lastPiCheckpointAt = new Map<string, number>();
   private readonly streamCheckpointTimers = new Map<string, NodeJS.Timeout>();
   private readonly streamCheckpointDirty = new Map<string, StreamingCheckpointDirty>();
   /**
@@ -515,6 +517,7 @@ export class StructuredSessionManager {
     for (const id of this.sessions.keys()) this.disposeSession(id, "session");
     this.streamCheckpointDirty.clear();
     this.lastStreamSaveAt.clear();
+    this.lastPiCheckpointAt.clear();
     this.topicCoordinator.clear();
     this.nativeTitles.clear();
     this.emitEvent = null;
@@ -593,12 +596,15 @@ export class StructuredSessionManager {
       try {
         // listRuns is metadata-only on Render v2. Fetch the authoritative
         // paged replay from the owner before feeding any provider reducer.
-        const attached = await this.execHost.attachRun(state.runId);
+        const checkpoint = session.provider === "pi" && session.structuredState?.engine !== "core"
+          ? this.storage.getPiCliCheckpoint(sessionId) : null;
+        const attached = await this.execHost.attachRun(state.runId, checkpoint ?? undefined);
         if (this.disposed) return;
         if (!attached || attached.incarnationId !== state.incarnationId) {
           throw new Error("Structured run changed owner between inventory and replay");
         }
-        await this.resumeDetachedRun(this.requireSession(sessionId), attached);
+        await this.resumeDetachedRun(this.requireSession(sessionId), attached,
+          checkpoint && attached.stdoutFrom === checkpoint.offset ? checkpoint : undefined);
         this.pendingRecoveryIds = this.pendingRecoveryIds.filter((id) => id !== sessionId);
       } catch (error) {
         console.error(`[WAND] structured run recovery failed for ${sessionId}:`, error);
@@ -626,7 +632,7 @@ export class StructuredSessionManager {
     };
   }
 
-  private async resumeDetachedRun(snapshot: SessionSnapshot, initialState: StructuredRunState): Promise<void> {
+  private async resumeDetachedRun(snapshot: SessionSnapshot, initialState: StructuredRunState, checkpoint?: PiCliCheckpoint): Promise<void> {
     const sessionId = snapshot.id;
     if (this.disposed || !this.execHost || !snapshot.structuredState) return;
     const requestId = `recover-${initialState.incarnationId}`;
@@ -680,6 +686,10 @@ export class StructuredSessionManager {
     });
 
     const processor = buildReplayProcessor(resumed);
+    if (checkpoint) {
+      Object.assign(processor.state, checkpoint.state);
+      processor.primaryError = checkpoint.primaryError;
+    }
     let emitTimer: ReturnType<typeof setTimeout> | null = null;
     // 日志被截断时 reducer 只看到半截历史，重建出的 turn 远比本地已存的少；
     // 不能用它覆盖 messages/output，也不能就此冻结前端。
@@ -771,6 +781,8 @@ export class StructuredSessionManager {
     let carry = "";
 
     let stdoutFile: PiOutputFile | null = null;
+    const captureReader = piReader && !initialState.nativeFile
+      ? new PiProtocolReader((line) => stdoutFile!.append(line + "\n"), { truncatedHead: initialState.stdoutTruncated }) : null;
     let fileFailed = false;
     const fileFailure = (error: Error): void => {
       if (fileFailed) return;
@@ -786,7 +798,9 @@ export class StructuredSessionManager {
       if (fileFailed) return;
       try {
         if (!stdoutFile) { feedDelta(text); return; }
-        stdoutFile.append(text); stdoutFile.drain();
+        if (captureReader) captureReader.push(text);
+        else stdoutFile.append(text);
+        stdoutFile.drain();
       }
       catch (error) { fileFailure(error instanceof Error ? error : new Error(String(error))); }
     };
@@ -801,6 +815,8 @@ export class StructuredSessionManager {
     }
 
     const finishProtocol = (): void => {
+      captureReader?.finish();
+      stdoutFile?.drain();
       if (piReader) piReader.finish();
       else if (carry.trim()) feedLine(carry);
       carry = "";
@@ -820,6 +836,10 @@ export class StructuredSessionManager {
       if (tail.trim()) feedLine(tail);
     };
 
+    if (checkpoint) {
+      syncTurn(processor.state);
+      this.savePiCheckpoint(sessionId, requestId, { ...checkpoint, requestId });
+    }
     if (initialState.status === "exited") {
       acknowledgeExit();
       feedFullLog();
@@ -880,6 +900,11 @@ export class StructuredSessionManager {
     // 首轮 feed + attach 完成后再定锚点，之后 onStream 的事件都走合并视图。
     replayView.prime([...processor.state.blocks]);
     replayingHistory = false;
+    if (!replayTruncated && runningHandle.protocolSource && piReader?.atBoundary) {
+      this.savePiCheckpoint(sessionId, requestId, { version: 1, requestId,
+        incarnationId: runningHandle.incarnationId, source: runningHandle.protocolSource, offset: lastStdoutSeq,
+        state: processor.state, primaryError: processor.primaryError });
+    }
     runningHandle.onStream((event) => {
       // Events may be buffered while structuredAttach is in flight. Sequence
       // watermarks distinguish overlap with the snapshot from genuinely new
@@ -891,6 +916,11 @@ export class StructuredSessionManager {
         // 事后无从核对这一轮到底产出了什么。
         this.logger?.appendStructuredStdout(sessionId, event.data);
         captureStdout(event.data);
+        if (!fileFailed && !replayTruncated && runningHandle?.protocolSource && piReader?.atBoundary && !captureReader) {
+          this.savePiCheckpoint(sessionId, requestId, { version: 1, requestId,
+            incarnationId: runningHandle.incarnationId, source: runningHandle.protocolSource, offset: event.seq,
+            state: processor.state, primaryError: processor.primaryError });
+        }
         return;
       }
       if (event.seq <= lastStderrSeq) return;
@@ -1035,6 +1065,17 @@ export class StructuredSessionManager {
     this.streamEmitTimers.delete(timer);
   }
 
+  private savePiCheckpoint(sessionId: string, requestId: string, checkpoint: PiCliCheckpoint): void {
+    if (this.disposed || !this.isCurrentRequest(sessionId, requestId)) return;
+    const now = Date.now();
+    if (now - (this.lastPiCheckpointAt.get(sessionId) ?? 0) < STREAM_SAVE_THROTTLE_MS) return;
+    this.lastPiCheckpointAt.set(sessionId, now);
+    // Acceleration must not change execution/delivery on storage failure. The
+    // original journal remains authoritative and is the fallback after restart.
+    try { this.storage.savePiCliCheckpoint(sessionId, checkpoint); }
+    catch { logInfo("Pi 解析断点未能保存；恢复时将读取原始事件日志，不重发输入。"); }
+  }
+
   /** Mark streaming payload dirty and enforce both leading and trailing checkpoints. */
   private saveStreamingSnapshot(
     snapshot: SessionSnapshot,
@@ -1141,6 +1182,7 @@ export class StructuredSessionManager {
     this.cancelStreamingCheckpointTimer(sessionId);
     this.streamCheckpointDirty.delete(sessionId);
     this.lastStreamSaveAt.delete(sessionId);
+    this.lastPiCheckpointAt.delete(sessionId);
   }
 
   private cancelStreamingCheckpointTimer(sessionId: string): void {
@@ -2877,6 +2919,7 @@ export class StructuredSessionManager {
       },
       onStderr: (text) => this.logger?.appendStructuredStderr(sessionId, text),
       onEvent: (event) => this.logger?.appendStreamEvent(sessionId, event),
+      onPiCheckpoint: (checkpoint) => this.savePiCheckpoint(sessionId, requestId, checkpoint),
       onUpdate: (turnState) => {
         disarmStartupWatchdog();
         syncSnapshot(turnState);

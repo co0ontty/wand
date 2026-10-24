@@ -1,5 +1,5 @@
 import { getWandTerminalTheme } from "../react/theme";
-import { configureQuickTerminalRuntime } from "../react/quick-terminal/runtime";
+import { configureQuickTerminalRuntime, terminalConnectionLabel } from "../react/quick-terminal/runtime";
 import { wandThemeStore } from "../react/theme-preference";
 // 终端实例池（工作空间「分屏」专用）。
 // 与 state.terminal 单例**完全隔离**：仅在用户显式分屏、<WorkspaceWindow/> 渲染多个窗格时
@@ -57,11 +57,9 @@ const terminalListeners = new Set<(event: { sessionId?: string; type: string; da
 /** Shared transport facts, never inferred from a mounted xterm surface. */
 export function notifyPooledTerminalEvent(event: { sessionId?: string; type: string; data?: any }): void {
   for (const id of retainedTerminals) {
-    if (event.sessionId && event.sessionId !== id) continue;
     const handle = pool.get(id);
-    if (handle && ["init", "disconnected", "connected", "pty_error", "resync_required", "ended", "error"].includes(event.type)) {
-      handle.terminal.options.disableStdin = event.type !== "init" || ["stopped", "exited", "failed"].includes(event.data?.status);
-    }
+    const connection = terminalConnectionLabel(id, event);
+    if (handle && connection) handle.terminal.options.disableStdin = connection !== "已连接";
   }
   for (const listener of terminalListeners) listener(event);
 }
@@ -379,7 +377,9 @@ export function createPooledTerminal(sessionId: string, container: HTMLElement):
     scheduleFitAndSync(handle);
     return true;
   } catch (error) {
-    if (pool.has(sessionId)) disposePooledTerminal(sessionId);
+    // A failed mount must release its partial client instance even when the
+    // quick panel already retained the session. Keep the server process intact.
+    if (pool.has(sessionId)) releasePooledTerminal(sessionId);
     else {
       partialObserver?.disconnect();
       try { partialFit?.dispose?.(); } catch { /* preserve the mount error */ }
@@ -475,7 +475,9 @@ export function restorePooledTerminalState(
       if (handle.disposed || generation !== handle.restoreGeneration) return;
       handle.lastSize = `${handle.terminal.cols}x${handle.terminal.rows}`;
       try {
-        fitTerminalToContainer(handle.terminal, handle.fitAddon);
+        if (handle.container.clientWidth !== 0 && handle.container.clientHeight !== 0) {
+          fitTerminalToContainer(handle.terminal, handle.fitAddon);
+        }
         if (wasBrowsing) {
           handle.autoFollow = false;
           handle.terminal.scrollToLine(Math.max(0, handle.terminal.buffer.active.baseY - distance));
@@ -485,7 +487,7 @@ export function restorePooledTerminalState(
       } catch { /* ignore */ }
     } finally { handle.restoring = false; }
     if (!handle.disposed && generation === handle.restoreGeneration) {
-      sendResize(sessionId, handle.terminal.cols, handle.terminal.rows);
+      fitAndSync(handle);
     }
   });
   return true;
@@ -494,6 +496,10 @@ export function restorePooledTerminalState(
 /** 释放单个池实例（窗格关闭 / 会话移除时）。 */
 export function disposePooledTerminal(sessionId: string): void {
   if (retainedTerminals.has(sessionId)) return;
+  releasePooledTerminal(sessionId);
+}
+
+function releasePooledTerminal(sessionId: string): void {
   // 缩放比例是「这个窗格」的偏好而不是会话属性；且 setPooledTerminalScale 在
   // 没有池实例时也会写入记录（面板已渲染、XTermLib 尚未就绪的情况），所以清理
   // 必须在 handle 早退之前，否则 sessionScales 依旧会留下无界记录。

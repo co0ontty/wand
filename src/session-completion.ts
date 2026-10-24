@@ -10,6 +10,7 @@ export class SessionCompletionTracker {
   constructor(
     private readonly storage: WandStorage,
     private readonly getSession: (id: string) => SessionSnapshot | null,
+    private readonly onCompleted?: (sessionId: string, revision: number) => void,
   ) {}
 
   ingest(event: ProcessEvent): void {
@@ -50,7 +51,10 @@ export class SessionCompletionTracker {
     }
     if (completed) {
       const completion = this.storage.recordSessionCompletion(snapshot.id);
-      if (completion) Object.assign(data, completion);
+      if (completion) {
+        Object.assign(data, completion);
+        this.onCompleted?.(snapshot.id, completion.completionRevision);
+      }
     }
   }
 }

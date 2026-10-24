@@ -61,6 +61,8 @@ export const API_ROUTE_RULES: readonly ApiRouteRule[] = [
   { prefix: "/api/settings", scope: "route-guarded" },
   { prefix: "/api/models", scope: "sessions" },
   { prefix: "/api/daemon-maintenance", scope: "route-guarded" },
+  // Mounted before the global guard: app-bearer registration, device-capability revocation only.
+  { prefix: "/api/push", scope: "route-guarded" },
 
   // ── 浏览器扩展密码库 ──
   { prefix: "/api/browser-extension", scope: "password-vault" },

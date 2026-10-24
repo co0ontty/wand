@@ -64,6 +64,13 @@ export function startEmployeeKnowledgeRunner(
   delete env.WAND_KNOWLEDGE_DB;
   delete env.WAND_KNOWLEDGE_TOKEN;
   delete env.WAND_WEB_LOGIN_PROOF;
+  // External group requests retain employee identity, but never inherit private knowledge,
+  // explicit-memory writes or owner Web-login capabilities. This is a trusted session tag,
+  // not a phrase read from the remote message.
+  if (context.session.automationId?.startsWith("dingtalk:")) {
+    for (const key of ["DWS_CLIENT_ID", "DWS_CLIENT_SECRET", "DWS_ACCESS_TOKEN", "DWS_TOKEN", "DWS_CONFIG_DIR"]) delete env[key];
+    return runner.start({ ...context, env }, observer);
+  }
   if (!employeeId) return runner.start({ ...context, env }, observer);
   if (!storage.getSiliconEmployee(employeeId)) {
     return runner.start({ ...context, env, session: { ...context.session,

@@ -142,6 +142,7 @@ export type UiSnapshot = Readonly<UiSnapshotData & { revision: number }>;
 export type UiAction =
   | { type: "nav.home" }
   | { type: "nav.refresh" }
+  | { type: "terminal.display"; command: "zoom-in" | "zoom-out" | "reset" | "refresh" }
   | { type: "session.new" }
   | { type: "session.newAt"; cwd: string }
   | { type: "missions.open" }

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import express from "express";
 import { WandStorage } from "../src/storage.js";
 import { registerTaskRoutes } from "../src/server-task-routes.js";
-import { taskAcceptanceLabel, taskSessionActivity, taskSessionSummary } from "../src/web-ui/react/issues/task-delivery-state.js";
+import { taskAcceptanceLabel, taskReviewLabel, taskWorkLabel, taskSessionActivity, taskSessionSummary } from "../src/web-ui/react/issues/task-delivery-state.js";
 import { issueBoardStats, issueProgressSeries } from "../src/web-ui/react/issues/task-board-agent.js";
 import type { IssueSessionSummary } from "../src/web-ui/react/issues/task-board-repository.js";
 
@@ -24,6 +24,19 @@ test("parallel execution uses facts; a queued follow-up cannot hide its live tur
   assert.equal(taskSessionSummary([session({ status: "exited" }), session({ status: "waiting-input" })]), "已结束 1 · 等待输入 1");
   assert.equal(taskAcceptanceLabel(null), "未验收 · 待汇总交付");
   assert.equal(taskAcceptanceLabel({ evidence: "会话A: output/report", blocker: "等待部署：尚未安装", acceptedAt: null }), "待处理 · 有验收缺口");
+});
+
+test("submitted work awaits user acceptance; idle sessions and archival never imply completion", () => {
+  const acceptance = { evidence: "交付报告", blocker: "下载与设备验收待核对", acceptedAt: null };
+  const submitted = { status: "done" as const, acceptance };
+  assert.equal(taskWorkLabel(submitted), "已完成");
+  assert.equal(taskReviewLabel(submitted), "等待你验收");
+  assert.equal(taskReviewLabel({ ...submitted, acceptance: { ...acceptance, blocker: "", acceptedAt: "2026-01-01" } }), "已通过");
+  assert.equal(taskWorkLabel({ status: "doing", acceptance: null }), "处理中");
+  assert.equal(taskReviewLabel({ status: "doing", acceptance: null }), "未验收");
+  assert.equal(taskWorkLabel({ status: "archived", acceptance: null }), "未确认");
+  assert.equal(taskReviewLabel({ status: "archived", acceptance: null }), "未验收");
+  assert.equal(taskWorkLabel({ status: "archived", acceptance: { ...acceptance, blocker: "", acceptedAt: "2026-01-01" } }), "已完成");
 });
 
 test("iteration acceptance counts tasks, never done, archival or number of sessions", () => {

@@ -1,4 +1,4 @@
-import { WandButton } from "../ui";
+import { WandButton, WandIconButton, WandIcon, WandDropdownMenu, WandDropdownMenuTrigger, WandDropdownMenuContent, WandDropdownMenuItem, WandDropdownMenuSeparator } from "../ui";
 import { Alert, Empty, Flex, Spin, Splitter, Typography } from "../design-library";
 import { ensureTerminalLibrary } from "../../vendor-loader.js";
 // 活动工作窗口为 split 时取代单例终端槽位：split 节点递归渲染两个窗格和可拖拽 sash，
@@ -130,89 +130,35 @@ function PaneNode({ pane, path, api }: { pane: Extract<LayoutNode, { type: "pane
         if (activeTab) api.focusTab(activeTab);
       }}
     >
-      <Flex align="center" gap="small" wrap className="ws-pane-toolbar" style={{ padding: 8, flexShrink: 0 }}>
-        <Flex align="center" gap={4} style={{ flex: "1 1 140px", minWidth: 0 }}>
+      <Flex align="center" gap={8} className="ws-pane-toolbar" style={{ padding: "4px 8px", minHeight: 40, flexShrink: 0 }}>
+        <Flex align="center" gap={4} style={{ flex: 1, minWidth: 0 }}>
           {sessionMeta ? <SessionProviderMark session={sessionMeta} className="ws-pane-logo" size={14}/> : null}
           <Typography.Text ellipsis style={{ flex: 1, minWidth: 0 }} className="ws-pane-title" title={activeTab ? paneLabel(activeTab, api.sessionMeta) : "空窗格"}>
             {activeTab ? paneLabel(activeTab, api.sessionMeta) : "空窗格"}
           </Typography.Text>
         </Flex>
-        {sessionId ? (
-          <Flex align="center" gap={4} className="ws-pane-scale" role="group" aria-label={`${paneLabel(activeTab, api.sessionMeta)} 终端缩放`}>
-            <WandButton kind="ghost"
-              type="button"
-              className="ws-pane-scale-btn"
-              aria-label="缩小终端"
-              title="缩小这个终端"
-              onClick={(event) => { event.stopPropagation(); changeScale(scale - 0.25); }}
-            >−</WandButton>
-            <WandButton kind="ghost"
-              type="button"
-              className="ws-pane-scale-value"
-              aria-label={`恢复终端缩放，当前 ${Math.round(scale * 100)}%`}
-              title="恢复为 100%"
-              onClick={(event) => { event.stopPropagation(); changeScale(1); }}
-            >{Math.round(scale * 100)}%</WandButton>
-            <WandButton kind="ghost"
-              type="button"
-              className="ws-pane-scale-btn"
-              aria-label="放大终端"
-              title="放大这个终端"
-              onClick={(event) => { event.stopPropagation(); changeScale(scale + 0.25); }}
-            >+</WandButton>
-          </Flex>
-        ) : null}
-        {activeTab?.kind === "session" ? (
-          <WandButton kind="ghost"
-            type="button"
-            className="ws-pane-btn extract"
-            title="把这个终端移出为独立工作窗口 Tab"
-            aria-label="移出为新 Tab"
-            onClick={(event) => {
-              event.stopPropagation();
-              api.extractTab(activeTab);
-            }}
-          >
-            ↗
-          </WandButton>
-        ) : null}
-        {activeTab?.kind === "session" ? (
-          <WandButton kind="ghost"
-            type="button"
-            className="ws-pane-btn close"
-            title="关闭这个终端"
-            aria-label={`关闭终端 ${paneLabel(activeTab, api.sessionMeta)}`}
-            disabled={api.closingSessionId === activeTab.sessionId}
-            onClick={(event) => {
-              event.stopPropagation();
-              api.closeTab(activeTab);
-            }}
-          >
-            ×
-          </WandButton>
-        ) : null}
-        {isPrimary ? (
-          <>
-            <WandButton kind="ghost"
-              type="button"
-              className="ws-pane-btn files"
-              title="打开文件面板"
-              aria-label="文件"
-              onClick={api.openFiles}
-            >
-              ▤
-            </WandButton>
-            <WandButton kind="ghost"
-              type="button"
-              className="ws-pane-btn exit"
-              title="把当前分屏拆成独立工作窗口 Tabs"
-              aria-label="全部移出为独立 Tabs"
-              onClick={api.ungroupWindow}
-            >
-              ◫
-            </WandButton>
-          </>
-        ) : null}
+        <WandDropdownMenu>
+          <WandDropdownMenuTrigger render={<WandIconButton aria-label="窗格选项" title="窗格选项"><WandIcon name="more" size={16}/></WandIconButton>}/>
+          <WandDropdownMenuContent aria-label="窗格选项" align="end">
+            {sessionId && <>
+              <WandDropdownMenuItem onSelect={() => changeScale(scale + 0.25)}>放大终端字号</WandDropdownMenuItem>
+              <WandDropdownMenuItem onSelect={() => changeScale(scale - 0.25)}>缩小终端字号</WandDropdownMenuItem>
+              <WandDropdownMenuItem hint={`${Math.round(scale * 100)}%`} onSelect={() => changeScale(1)}>恢复默认字号</WandDropdownMenuItem>
+              <WandDropdownMenuSeparator/>
+            </>}
+            {activeTab?.kind === "session" && <WandDropdownMenuItem onSelect={() => api.extractTab(activeTab)}>移出为独立标签</WandDropdownMenuItem>}
+            {isPrimary && <>
+              <WandDropdownMenuItem icon="folder" onSelect={api.openFiles}>打开文件面板</WandDropdownMenuItem>
+              <WandDropdownMenuItem onSelect={api.ungroupWindow}>全部移出为独立标签</WandDropdownMenuItem>
+            </>}
+          </WandDropdownMenuContent>
+        </WandDropdownMenu>
+        {activeTab?.kind === "session" && <WandIconButton
+          aria-label={`关闭终端 ${paneLabel(activeTab, api.sessionMeta)}`}
+          title="关闭这个终端"
+          disabled={api.closingSessionId === activeTab.sessionId}
+          onClick={(event) => { event.stopPropagation(); api.closeTab(activeTab); }}
+        ><WandIcon name="close" size={16}/></WandIconButton>}
       </Flex>
       <div className="ws-pane-content" style={{ flex: 1, minHeight: 0, position: "relative", contain: "strict", isolation: "isolate", background: "var(--bg-terminal)" }}>
         {activeTab && activeTab.kind === "session"

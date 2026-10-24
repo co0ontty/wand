@@ -917,7 +917,7 @@ export class RenderDaemonClient implements TerminalHost {
       if (this.disposed) return;
       // 端点本身没了（socket 文件被临时目录清理器删掉，或 daemon 崩了没留下 socket）：
       // 重试同一个路径永远不会成功，先把 daemon 拉回来再连一次。只要 pid 文件里还有
-      // 活进程，回调就不会动手 —— 那个 daemon 会自己重建端点（docs/render-protocol.md §6）。
+      // 活进程，回调就不会动手 —— 那个 daemon 会自己重建端点（render/docs/render-protocol.md §6）。
       if (await this.reviveDaemonForRetry()) {
         try {
           await this.connect();

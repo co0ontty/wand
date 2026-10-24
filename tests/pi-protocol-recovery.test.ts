@@ -69,6 +69,27 @@ for (const native of [false, true]) {
     assert.equal(f.starts(), 0);
   });
 
+  test(`large tool result ${native ? "native" : "file-capture"} recovery keeps errors, metadata and the final reply without respawning`, async (t) => {
+    const tool = line({ result: { content: [{ type: "image", data: large, mimeType: "image/png" }],
+      details: { mode: "parallel", state: "failed", asyncId: "original-receipt" } },
+      toolCallId: "huge", type: "tool_execution_end", isError: true });
+    const prefix = line({ type: "tool_execution_start", toolCallId: "huge", toolName: "subagent", args: {} });
+    const split = 33333;
+    const f = await fixture(t, prefix + tool.slice(0, split), "running", native);
+    f.send(tool.slice(split) + line({ type: "agent_end", messages: [message("大结果后继续完成🙂")] }));
+    f.close();
+    assert.equal(f.get().status, "idle");
+    assert.equal(f.get().structuredState?.lastError, null);
+    assert.equal(f.get().output, "大结果后继续完成🙂");
+    const blocks = f.get().messages.flatMap(m => m.content);
+    const result = blocks.find(b => b.type === "tool_result");
+    assert.equal(result?.type === "tool_result" && result.is_error, true);
+    assert.match(JSON.stringify(result), /仅展示有界预览/);
+    const use = blocks.find(b => b.type === "tool_use");
+    assert.equal(use?.type === "tool_use" && use.execution?.state, "failed");
+    assert.equal(f.starts(), 0);
+  });
+
   test(`malformed ${native ? "native" : "file-capture"} recovery is unknown delivery, never a retry or false success`, async (t) => {
     const f = await fixture(t, line({ type: "message_end", message: message("accepted work") })
       + '{"type":"turn_end","context":"' + large, "exited", native);

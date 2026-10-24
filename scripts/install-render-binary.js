@@ -283,7 +283,7 @@ export function installRenderBinary(options = {}) {
   if (!triple) {
     logger(`wand-render 暂不支持 ${platform}-${arch}，支持 ${SUPPORTED_TRIPLES.join(" / ")}`);
     if (platform === "win32") {
-      logger("Windows 需要命名管道，协议第一阶段不实现（见 docs/render-protocol.md §2）。");
+      logger("Windows 需要命名管道，协议第一阶段不实现（见 render/docs/render-protocol.md §2）。");
     }
     logger("保持 legacy terminald 运行即可；升级链路不做任何改动。");
     return { ...base, exitCode: EXIT_UNSUPPORTED, action: "unsupported" };
