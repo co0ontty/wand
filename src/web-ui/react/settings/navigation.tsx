@@ -10,7 +10,7 @@ export const SETTINGS_SECTIONS: Record<SettingsTab, { label: string; description
   ai: { label: "AI 与模型", description: "默认工具、模型与候选分组", keywords: "Claude Codex Pi OpenRouter" },
   "local-models": { label: "本地模型", description: "离线决策与模型资源", keywords: "LAYA 下载 初始化" },
   general: { label: "基本配置", description: "服务连接、执行偏好与保留策略", keywords: "Host 端口 HTTPS Shell 环境 目录 归档 删除" },
-  connectors: { label: "连接器", description: "GitHub 账号与仓库连接", keywords: "token Enterprise" },
+  connectors: { label: "连接器", description: "钉钉群聊、员工与 GitHub 仓库连接", keywords: "钉钉 DWS 机器人 群 员工 Agent token Enterprise" },
   security: { label: "安全", description: "登录密码与 SSL 证书" },
   presets: { label: "命令预设", description: "创建会话时可用的快捷命令" },
   about: { label: "关于", description: "版本、更新与客户端连接", keywords: "下载 连接码 二维码 APK iOS macOS" },

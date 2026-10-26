@@ -14,6 +14,7 @@ import { preserveDisclosurePosition } from "../chat/disclosure-position";
 import { taskBoardRepository } from "./task-board-repository";
 import { ChatMessage } from "../chat/message";
 import { statusLabels } from "../../../task-comment-status.js";
+import { taskReviewLabel, taskWorkLabel } from "./task-delivery-state";
 
 function RowDisclosure({ id, summary, children, expanded, onExpanded, rowRef }: { id: string; summary: React.ReactNode; children: React.ReactNode; expanded?: boolean; onExpanded?(value: boolean): void; rowRef?: React.Ref<HTMLDivElement> }): React.ReactElement {
   const [localOpen, setLocalOpen] = React.useState(false);
@@ -189,10 +190,14 @@ export const TaskCommentDispatchStreamRow = React.forwardRef<HTMLDivElement, {
 export function TaskChildStreamRow({ task, onOpen, onOpenSession }: {
   task: WandTaskListed; onOpen(id: string): void; onOpenSession?: (id: string) => void;
 }): React.ReactElement {
-  return <RowDisclosure id={`child-${task.id}`} summary={<Flex align="center" gap="small" wrap className="task-stream-row-line">
-    <Tag>{task.identifier}</Tag><Typography.Text strong>{task.title}</Typography.Text><Tag>{task.status}</Tag>
-    {task.acceptance?.acceptedAt && <Tag color="success">已验收</Tag>}
-    <Typography.Text type="secondary">正式子任务</Typography.Text>
+  return <RowDisclosure id={`child-${task.id}`} summary={<Flex vertical gap={4} className="task-stream-row-line">
+    <Flex align="baseline" gap="small"><Typography.Text type="secondary" style={{ flexShrink: 0 }}>{task.identifier}</Typography.Text><Typography.Text strong style={{ minWidth: 0 }}>{task.title}</Typography.Text></Flex>
+    <Flex align="center" gap="small" wrap aria-label={`${task.identifier} 的工作与验收状态`}>
+      <Typography.Text>工作：{taskWorkLabel(task)}</Typography.Text>
+      <Typography.Text type={task.acceptance?.acceptedAt ? "success" : "secondary"}>验收：{taskReviewLabel(task)}</Typography.Text>
+      <Typography.Text type="secondary">{task.assignedExecutor?.name || task.sessions.find(session => session.employeeName)?.employeeName || "未指定负责人"}</Typography.Text>
+      {task.status === "archived" && <Tag>已归档</Tag>}
+    </Flex>
   </Flex>}>
     {task.description && <DeferredMarkdownPreview content={task.description} variant="inline" wrap/>}
     {task.acceptance?.evidence && <Typography.Paragraph type="secondary">交付证据：{task.acceptance.evidence}</Typography.Paragraph>}

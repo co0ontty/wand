@@ -193,7 +193,7 @@ export class SessionRegistry {
     return snapshot ? { ...snapshot, ...this.storage.getSessionWorkspace(id), ...this.storage.getSessionCompletion(id) } : null;
   }
 
-  listSlim(): SessionSnapshot[] {
+  listSlim(options?: { runtimeOnly?: boolean }): SessionSnapshot[] {
     const byId = new Map<string, SessionSnapshot>();
     for (const snapshot of this.structured.listSlim()) byId.set(snapshot.id, snapshot);
     for (const snapshot of this.processes.listSlim()) {
@@ -201,6 +201,7 @@ export class SessionRegistry {
     }
     for (const snapshot of this.storage.loadSessionsSlim()) {
       const live = byId.get(snapshot.id);
+      if (options?.runtimeOnly && !live) continue;
       byId.set(snapshot.id, live ? {
         ...live, workspaceId: snapshot.workspaceId, workspaceTaskId: snapshot.workspaceTaskId,
         completionRevision: snapshot.completionRevision,

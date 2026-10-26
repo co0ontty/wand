@@ -564,7 +564,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
 
         // #blank-chat / #output / #chat-output 的可见性、以及 #terminal-title /
         // #terminal-info / .session-summary-value 的文案都由 React 外壳持有
-        // （见 docs/web-ui-react-migration-adr.md），legacy 只负责切自己的 view。
+        // （React 外壳持有这些节点与文案），legacy 只负责切自己的 view。
         // v2: 不再无条件展示停止按钮 —— 由 updateInteractiveControls() 按
         // computeRunningSignal 判断「真在跑」时才露出，下面 updateInteractiveControls
         // 链路会处理（switchToSessionView 后续会触发它）。
@@ -719,7 +719,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         refocusComposerAfterTouchSubmit(inputBox, sessionId);
 
         // 提交瞬间按钮进「加载」相位、状态行给句子；结果到了再原地换 完成/失败。
-        // 全程不弹气泡，也不挪动任何控件（docs/motion-design.md §3）。
+        // 全程不弹气泡，也不挪动任何控件。
         // token 让这条链路的 then/catch 只推进自己的进行态，不覆盖更新的提交。
         var sendingToken = flashComposerSending("正在发送…", sessionId, "已发送");
 
@@ -1085,7 +1085,7 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         });
       }
 
-      // ── 发送按钮相位机（docs/motion-design.md §3 提交状态反馈、§4 图标变形）──────
+      // ── 发送按钮相位机（原位结果反馈 + 单宿主图标变形）──────
       // 一个宿主 #send-input-button 承载发送 / 停止 / 加载 / 完成四种可见状态：
       // 结果相位（sending / sent / failed）是短暂覆盖，驻留后回落到结构相位
       // （running = 可停止 / idle = 可发送）。优先级与 Android 的

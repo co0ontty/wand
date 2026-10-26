@@ -452,7 +452,7 @@ export function GithubSettingsTab({ snapshot, repository, refresh, setSnapshot }
   return (
     <section className="wand-settings-library-panel" aria-label="连接器">
       <header className="wand-settings-library-panel-heading">
-        <h2>连接器</h2><p>当前支持 GitHub，用于仓库、Issue 和 Pull Request 的协作操作。</p>
+        <h2>GitHub</h2><p>连接仓库、Issue 和 Pull Request 的协作操作，与钉钉群接入独立配置。</p>
       </header>
       <SettingsSection title="GitHub" description="使用 Fine-grained Token，建议只授权需要操作的仓库和权限。">
         <div className="wand-settings-library-update-deck">

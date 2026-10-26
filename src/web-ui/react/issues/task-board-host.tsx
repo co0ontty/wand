@@ -1650,20 +1650,18 @@ function IssueDetail({
             <TaskBoardAgentChips sessions={task.sessions} assigned={task.agent} subject={task.executionSubject} assignee={task.assignedExecutor}/>
           </Flex>
           <TaskDescription key={task.id} description={task.description} busy={busy} onSave={value => onPatch({ description: value })}/>
-          <TaskSessionSummary task={task} onOpenSession={onOpenSession} onNewParallel={() => {
-            onEmployeeChange("");
-            setComposeOpen(true);
-          }}/>
-          <Collapse ghost className="task-board-acceptance-collapse" items={[{ key: "acceptance", label: <Typography.Text strong>交付与验收 · {taskAcceptanceLabel(task.acceptance)}</Typography.Text>,
+          <TaskReferenceableTasks key={`references-${task.id}`} children={children} onOpenTask={onOpenTask} onOpenSession={onOpenSession}
+            onCreateChild={!task.parentTaskId && task.status !== "archived" ? onCreateChild : undefined}/>
+          <Collapse ghost items={[{ key: "execution", label: `本任务执行汇总 · ${task.sessions.length} 个会话`, children:
+            <TaskSessionSummary task={task} onOpenSession={onOpenSession} onNewParallel={() => {
+              onEmployeeChange("");
+              setComposeOpen(true);
+            }}/>,
+          }]}/>
+          <Collapse ghost className="task-board-acceptance-collapse" items={[{ key: "acceptance", label: <Typography.Text strong>{children.length ? "主任务整体验收" : "交付与验收"} · {taskAcceptanceLabel(task.acceptance)}</Typography.Text>,
             children: <TaskAcceptanceEditor key={`acceptance-${task.id}`} task={task} children={children} busy={busy} onSave={acceptance => onPatch({ acceptance })}/> }]}/>
-          <TaskReferenceableTasks key={`references-${task.id}`} children={children} onOpenTask={onOpenTask}/>
           <TaskComments key={`comments-${task.id}`} taskId={task.id} updatedAt={task.updatedAt} employees={employees}
             childTasks={children} sessions={task.sessions} onOpenSession={onOpenSession} onOpenTask={onOpenTask}/>
-          {(children.length > 0 || !task.parentTaskId) && <div className="task-board-children-actions">
-            {!task.parentTaskId && task.status !== "archived" && <WandButton kind="ghost" size="small" onClick={onCreateChild}>
-              <WandIcon name="plus" size={14} slot="start"/>添加业务子任务（独立验收）
-            </WandButton>}
-          </div>}
           {composeOpen ? <Card size="small" className="task-board-native-assign" aria-label="指派 Agent">
             <Flex vertical gap={4} className="task-board-native-assign-head" style={{ marginBottom: 12 }}>
               <strong>CLI / 团队兼容派发</strong>

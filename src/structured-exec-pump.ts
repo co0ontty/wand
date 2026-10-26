@@ -48,7 +48,9 @@ export interface StructuredCliPumpOptions<S extends StructuredRunnerTurnState> {
   nativePi?: boolean;
   requestId?: string;
   /** Provider-owned streaming projection; defaults to the strict shared line framer. */
-  createProtocolReader?(onLine: (line: string) => void): { push(text: string): void; finish(): void };
+  createProtocolReader?(onLine: (line: string) => void): { push(text: string): void; finish(): void; readonly atBoundary?: boolean };
+  /** Called only at native-file chunk boundaries after complete parsed events. */
+  checkpoint?(source: { incarnationId: string; source: { file: string; dev: number; ino: number }; offset: number }): void;
   /** Fresh per-run state (or reducer-owned state) for the pump context. */
   createState(): S;
   processLine(line: string, ctx: StructuredCliPumpContext<S>): void;
@@ -86,6 +88,9 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
   let lineBuffer = "";
   let lineBytes = 0;
   const protocolReader = options.createProtocolReader?.((line) => options.processLine(line, ctx));
+  // Compact Pi's transport before journaling it: a single image or redundant
+  // history snapshot must not exhaust the raw-file quota before SAX can read it.
+  const captureReader = options.stdoutFile ? options.createProtocolReader?.((line) => stdoutFile?.append(line + "\n")) : undefined;
   let settled = false;
   let stopRequested = false;
   let stopDelivered = false;
@@ -120,14 +125,16 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
   ): void => {
     if (settled) return;
     if (!protocolError) {
-      try {
-        stdoutFile?.drain();
-        // File consumption can itself settle a protocol failure.
-        if (settled) return;
-        protocolReader?.finish();
-      } catch (error) { protocolError = error instanceof Error ? error : new Error(String(error)); }
-      if (settled) return;
+      try { captureReader?.finish(); }
+      catch (error) { protocolError = error instanceof Error ? error : new Error(String(error)); }
     }
+    try {
+      // Preserve already validated output even if a later source frame failed.
+      stdoutFile?.drain();
+      if (settled) return;
+      if (!protocolError) protocolReader?.finish();
+    } catch (error) { protocolError ??= error instanceof Error ? error : new Error(String(error)); }
+    if (settled) return;
     settled = true;
     try {
       if (!protocolError && lineBuffer.trim()) options.processLine(lineBuffer, ctx);
@@ -194,7 +201,10 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
     if (settled || !text) return;
     if (!observer.isActive()) { stdoutFile?.dispose(); return; }
     if (!stdoutFile) { handleStdoutText(text); return; }
-    try { stdoutFile.append(text); }
+    try {
+      if (captureReader) captureReader.push(text);
+      else stdoutFile.append(text);
+    }
     catch (error) { fileFailure(error instanceof Error ? error : new Error(String(error))); }
   };
   if (options.stdoutFile) {
@@ -240,7 +250,12 @@ export function startStructuredCli<S extends StructuredRunnerTurnState>(
       void host.spawnStructured(request).then((handle) => {
         source = { pid: handle.pid, interrupt: () => handle.interrupt() };
         // Replay and subscribe before applying a pending external cancellation.
-        wireRemoteHandle(handle, captureStdout, handleStderrText, finish, acknowledgeExit);
+        wireRemoteHandle(handle, captureStdout, handleStderrText, finish, acknowledgeExit, (event) => {
+          if (!settled && options.nativePi && event.stream === "stdout" && handle.protocolSource
+            && protocolReader?.atBoundary && observer.isActive()) {
+            options.checkpoint?.({ incarnationId: handle.incarnationId, source: handle.protocolSource, offset: event.seq });
+          }
+        });
         if (stopRequested && !settled) interruptSource();
       }, unavailable);
     } catch {
@@ -282,10 +297,12 @@ function wireRemoteHandle(
   onStderr: (text: string) => void,
   finish: (exitCode: number | null, signal: NodeJS.Signals | null, spawnError?: NodeJS.ErrnoException) => void,
   acknowledgeExit: () => void,
+  afterStream?: (event: import("./structured-exec-host.js").StructuredStreamEvent) => void,
 ): void {
   const stream = handle.onStream((event) => {
     if (event.stream === "stdout") onStdout(event.data);
     else onStderr(event.data);
+    afterStream?.(event);
   });
   let exit: { dispose(): void } | undefined;
   let ended = false;

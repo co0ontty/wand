@@ -67,6 +67,15 @@ function DraftDialog(){const state=React.useSyncExternalStore(overlayStore.subsc
 function WindowPicker({open,onDismiss}){const [subject,setSubject]=React.useState({type:"cli",id:"codex",engine:"cli"});const [kind,setKind]=React.useState("structured");const [model,setModel]=React.useState("default");const [error,setError]=React.useState("");return <WandDialogSurface open={open} onOpenChange={(next)=>{if(!next)onDismiss();}} title="新建工作窗口" className="wand-task-library-dialog wand-workspace-agent-modal" closeLabel="关闭工作窗口选择" testId="workspace-agent-dialog" dismissable><form className="wand-ui-dialog-content" onSubmit={async(event)=>{event.preventDefault();try{sidebar.mutations.push([subject.id,kind,model==="default"?"":model]);throw Error("本地拒收，保留选择");}catch(cause){setError(String(cause.message));}}}><UnifiedExecutionSubjectPicker selectedSubject={subject} kind={kind} model={model} teams={null} teamWorkspaceId="" onSubjectChange={setSubject} onKindChange={setKind} onModelChange={setModel}/>{error?<Alert type="error" showIcon role="alert" title={error}/>:null}<button type="submit">创建</button></form></WandDialogSurface>;}
 function Fixture(){const [agent,setAgent]=React.useState(false);return <><ShellApp store={store}/><WandUiProvider><WorkspacesHost/><NewSessionHost/><DraftDialog/><WandButton id="fixture-profile" onClick={event=>employeeProfile.open({id:"employee:real",name:"真实员工"},event.currentTarget)}>员工资料</WandButton><WandButton id="fixture-agent" onClick={()=>setAgent(true)}>窗口选择器</WandButton><WindowPicker open={agent} onDismiss={()=>setAgent(false)}/></WandUiProvider></>;}
 createRoot(document.getElementById("root")).render(<Fixture/>);
+if (new URLSearchParams(location.search).has("manual")) {
+  const controls = document.createElement("div");
+  Object.assign(controls.style, { position: "fixed", bottom: "0", left: "350px", zIndex: "10000" });
+  for (const [label, dir] of [["左右分屏", "h"], ["上下分屏", "v"]]) {
+    const button = document.createElement("button"); button.textContent = label;
+    button.onclick = () => sidebar.openSplit(dir); controls.append(button);
+  }
+  document.body.append(controls);
+}
 `;
   await build({ stdin: { contents: source, resolveDir: root, loader: "tsx" }, bundle: true, format: "iife", platform: "browser", jsx: "automatic", outfile: join(temporary, "app.js"), define: { "process.env.NODE_ENV": '"production"' } });
   const sourceBundleSha256 = createHash("sha256").update(readFileSync(join(temporary, "app.js"))).digest("hex");
@@ -105,6 +114,10 @@ createRoot(document.getElementById("root")).render(<Fixture/>);
   server.listen(0, "127.0.0.1"); await once(server, "listening");
   const address = server.address(); assert.ok(address && typeof address === "object");
   const origin = `http://127.0.0.1:${address.port}`;
+  if (process.env.WAND_SIDEBAR_MANUAL === "1") {
+    console.log(`Manual fixture: ${origin}/?manual`);
+    await new Promise(() => {});
+  }
   const chrome = spawn(process.env.CHROME_BIN ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", ["--headless=new", "--disable-gpu", "--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows", "--no-first-run", "--remote-allow-origins=*", "--remote-debugging-port=0", `--user-data-dir=${temporary}/profile`, "about:blank"], { stdio: "ignore" });
   let socket: WebSocket | undefined;
   let diagnosticEvaluate: ((expression: string) => Promise<any>) | undefined;
@@ -268,6 +281,8 @@ createRoot(document.getElementById("root")).render(<Fixture/>);
       await wait("!document.querySelector('#object-profile-panel').classList.contains('open') && document.activeElement.matches('#fixture-profile')");
       // Fixture-only launchers must not cover the production mobile footer or splitter.
       await evaluate("document.querySelector('#fixture-profile').style.display='none';true");
+      await click('#topbar-more-button');
+      await wait("!!document.querySelector('#topbar-file-button')");
       await click('#topbar-file-button');
       await click('#file-explorer-cwd');
       await send("Input.insertText", {text:"/workspace/other"});
@@ -282,7 +297,7 @@ createRoot(document.getElementById("root")).render(<Fixture/>);
       await key("Enter");
       await wait("document.activeElement.id!=='file-explorer-cwd'");
       await click('#file-side-panel-close');
-      await wait("document.activeElement.id==='topbar-file-button'");
+      await wait("document.activeElement.id==='topbar-more-button'");
       if (mode === "mobile") await click('#sessions-toggle-button');
       await click('[aria-label="搜索任务或会话"]');
 
@@ -412,7 +427,9 @@ createRoot(document.getElementById("root")).render(<Fixture/>);
         await pause(350);
         await wait("document.querySelector('.ws-split [role=separator]').getAttribute('aria-valuenow')==='50'");
         if (direction === "v") {
-          await wait("document.querySelector('.ws-pane-scale-value').textContent==='125%'");
+          await click('.ws-pane [aria-label="窗格选项"]');
+          await wait("Array.from(document.querySelectorAll('[role=menuitem]')).some(n=>n.textContent.includes('恢复默认字号')&&n.textContent.includes('125%'))");
+          await key("Escape");
           const terminalLease = await evaluate("({scale:sidebar.terminalScales.get('s1'),original:sidebar.originalTerminals.map(node=>({id:node.dataset.poolTerminal,connected:node.isConnected,same:sidebar.terminalNodes.get(node.dataset.poolTerminal)===node,parent:node.parentElement?.className})),current:Array.from(document.querySelectorAll('[data-pool-terminal]')).map(node=>({id:node.dataset.poolTerminal,parent:node.parentElement?.className})),mounts:sidebar.terminalMounts,disposals:sidebar.terminalDisposals,disposeAll:sidebar.disposeAllCalls})");
           evidence.push({mode,terminalLease});
           assert.equal(terminalLease.original.length, 2, `${mode}: both terminal DOM nodes were mounted before remount`);
@@ -439,8 +456,12 @@ createRoot(document.getElementById("root")).render(<Fixture/>);
         assert.deepEqual(await evaluate("sidebar.layoutSaves.at(-1).windows[0].layout.children.map(pane=>pane.tabs[0].sessionId)"), ["s1","s2"], `${mode}: drag saves ratio without changing session ownership`);
         assert.equal(await evaluate("sidebar.slots.every(node=>node.isConnected) && ['#output','#chat-output','.input-panel'].every(selector=>getComputedStyle(document.querySelector(selector)).display==='none')"), true, `${mode}: split hides but preserves single legacy hosts`);
         if (direction === "h") {
-          await click('.ws-pane [aria-label="放大终端"]');
-          await wait("document.querySelector('.ws-pane-scale-value').textContent==='125%'");
+          await click('.ws-pane [aria-label="窗格选项"]');
+          await evaluate("Array.from(document.querySelectorAll('[role=menuitem]')).find(n=>n.textContent.includes('放大终端字号')).id='pane-zoom-in';true");
+          await click('#pane-zoom-in');
+          await click('.ws-pane [aria-label="窗格选项"]');
+          await wait("Array.from(document.querySelectorAll('[role=menuitem]')).some(n=>n.textContent.includes('恢复默认字号')&&n.textContent.includes('125%'))");
+          await key("Escape");
           assert.equal(await evaluate("sidebar.terminalScales.get('s1')"), 1.25, `${mode}: real zoom control updates the session scale`);
           await wait("document.querySelectorAll('[data-pool-terminal]').length===2");
           await evaluate("sidebar.originalTerminals=Array.from(document.querySelectorAll('[data-pool-terminal]'));true");

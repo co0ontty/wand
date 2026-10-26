@@ -65,7 +65,7 @@ try {
     const chrome = await browser.evaluate(`(()=>{const title=document.querySelector('.topbar-session-title');return {title:title.textContent,metadata:document.querySelectorAll('.topbar-metadata,.topbar-provider,.topbar-cwd,.session-status-pill,.session-status-elapsed').length,overflow:document.documentElement.scrollWidth>innerWidth+1,file:!!document.querySelector('#topbar-file-button'),preview:!!document.querySelector('#topbar-local-preview-button')}})()`);
     assert.equal(chrome.title, "阅读完整工具结果并继续这项工作");
     assert.equal(chrome.metadata, 0, "execution metadata stays below the header");
-    assert.ok(chrome.file && chrome.preview); assert.equal(chrome.overflow, false);
+    assert.ok(!chrome.file && !chrome.preview, "secondary actions stay inside the menu"); assert.equal(chrome.overflow, false);
     for (const shell of ["web", "native", "rollback"]) {
       await browser.evaluate(`document.documentElement.classList.toggle('is-wand-app',${shell === "native"});history.replaceState(null,'',${JSON.stringify(shell === "rollback" ? "?reactUi=0" : "/")})`);
       const counts = await browser.evaluate(`(()=>{const selectors=['.topbar-metadata','.topbar-provider','.topbar-cwd','.session-status-pill','.session-status-elapsed','.session-status-text','.session-status-silent'];return Object.fromEntries(selectors.map(selector=>[selector,document.querySelectorAll(selector).length]))})()`);
@@ -100,7 +100,7 @@ try {
     await browser.wait("!window.readingFixture.imageViewerController.isOpen()");
     assert.equal(await browser.evaluate("document.activeElement === document.querySelector('img.inline-tool-image-thumb')"), true, "closing the viewer restores the thumbnail focus");
     assert.equal(await browser.evaluate("document.documentElement.scrollWidth>innerWidth+1"), false);
-    const touch = await browser.evaluate("(()=>{const button=document.querySelector('#topbar-file-button');return{coarse:matchMedia('(pointer:coarse)').matches,height:button.getBoundingClientRect().height,width:button.getBoundingClientRect().width}})()");
+    const touch = await browser.evaluate("(()=>{const button=document.querySelector('#topbar-more-button');return{coarse:matchMedia('(pointer:coarse)').matches,height:button.getBoundingClientRect().height,width:button.getBoundingClientRect().width}})()");
     if (touch.coarse) assert.ok(touch.height >= 44 && touch.width >= 44);
     if (process.env.WAND_READING_OUTPUT) {
       mkdirSync(process.env.WAND_READING_OUTPUT, { recursive: true });

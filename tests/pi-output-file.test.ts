@@ -257,7 +257,7 @@ test("recovered Pi replay, live output and file-only events all use the file sou
   const files = readdirSync(dir, { recursive: true }).filter((name) => typeof name === "string" && name.endsWith("stdout.jsonl"));
   assert.equal(files.length, 1);
   const file = path.join(dir, String(files[0]));
-  assert.equal(readFileSync(file, "utf8"), state.stdoutLog);
+  assert.equal(readFileSync(file, "utf8"), delta("before") + "\n", "only complete validated projections enter the journal; the source reader holds the partial tail");
   assert.equal(manager.get(id)?.output, "before");
   onStream?.({ stream: "stdout", seq: 2, data: continuation.slice(split) + "\n" });
   onStream?.({ stream: "stdout", seq: 2, data: continuation.slice(split) + "\n" });

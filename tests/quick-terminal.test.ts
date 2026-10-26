@@ -4,6 +4,15 @@ import { spawnSync } from "node:child_process";
 import { toSessionDetailDTO } from "../src/session-transport.js";
 import type { SessionSnapshot } from "../src/types.js";
 import { QUICK_TERMINAL_KEY, readQuickTerminalPreference, saveQuickTerminalPreference, resolveQuickTerminal } from "../src/web-ui/react/quick-terminal/state.js";
+import { terminalConnectionLabel } from "../src/web-ui/react/quick-terminal/runtime.js";
+
+test("terminal connection state follows its own session and shared transport only", () => {
+  assert.equal(terminalConnectionLabel("q", { type: "error" }), undefined);
+  assert.equal(terminalConnectionLabel("q", { type: "pty_error", sessionId: "other" }), undefined);
+  assert.equal(terminalConnectionLabel("q", { type: "disconnected" }), "已断开 · 自动重连中");
+  assert.equal(terminalConnectionLabel("q", { type: "init", sessionId: "q", data: { status: "running" } }), "已连接");
+  assert.equal(terminalConnectionLabel("q", { type: "status", sessionId: "q", data: { status: "exited" } }), "进程已结束");
+});
 
 test("quick terminal defaults, malformed storage, and client-local persistence", () => {
   for (const raw of [null, "broken", "null", '{"dock":"left","sessionId":123}']) {

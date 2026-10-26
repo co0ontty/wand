@@ -160,7 +160,7 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
   const composerUsage = useComposerUsage(previousWork?.sessionId ?? selected?.communicationSessionId ?? undefined, visible && !ui.directory, selected?.updatedAt);
   const leader = selected?.team?.members.find(m => m.isLeader);
   const selectedRun = selected?.runDetails.find(d => d.run.id === target?.runId);
-  const mention = selected?.kind === "group" ? conversationLeaderMention(draft.text,
+  const mention = selected?.kind === "group" && !selected.external ? conversationLeaderMention(draft.text,
     layer !== "task" && selectedRun ? selectedRun.run.team.members : selected.team?.members ?? []) : null;
   const mentionedLeader = mention && !("error" in mention) ? mention : null;
   // 临时执行配置只属于当前打开的会话：切到别的会话或进入通讯录即丢弃，重进回到员工默认。
@@ -182,7 +182,7 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
   const busy = phase === "sending";
   const receiver = layer === "task" ? `${continueTaskId ? "继续此任务" : "派新任务"} · ${selected?.kind === "group" ? selected.title : employee?.name ?? "尚未选择"}`
     : target && selectedRun ? `${selectedRun.run.status === "awaiting_approval" ? "计划意见" : selectedRun.run.status === "waiting_user" ? "回复任务" : "补充任务"} · ${selected?.tasks.find(t => t.task.id === target.taskId)?.task.title} · 第 ${selectedRun.run.roundNumber ?? 1} 轮 · 发给负责人 ${selectedRun.run.team.members.find(m => m.isLeader)?.name ?? "未配置"}`
-      : selected?.kind === "group" ? mentionedLeader ? `@${mentionedLeader.name} · 本轮负责人` : "群内沟通 · @成员指定负责人" : `新工作 · 发给 ${employee?.name ?? "当前员工"}`;
+      : selected?.external ? "钉钉群消息 · 仅最终回答回群；请在钉钉中原生 @员工" : selected?.kind === "group" ? mentionedLeader ? `@${mentionedLeader.name} · 本轮负责人` : "群内沟通 · @成员指定负责人" : `新工作 · 发给 ${employee?.name ?? "当前员工"}`;
   const load = React.useCallback(async () => {
     if (!id || !visible || ui.directory) return;
     if (pendingHistory.current?.id === id) { historyDirty.current = true; return pendingHistory.current.promise; }
@@ -345,6 +345,7 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
   };
   const send = async (): Promise<void> => {
     if (busy || unknown || (feedbackAction === "approve" && phase !== "idle") || !id || !selected || selected.unavailableReason || (!draft.text.trim() && !draft.attachments.length)) return;
+    if (selected.external && draft.attachments.length) { setFeedback("此钉钉接入当前只支持文字消息，附件仍保留在草稿中。"); return; }
     if (mention && "error" in mention) { setFeedback(mention.error); return; }
     if (layer === "task" && (projectsLoading || projectsError)) { setFeedback(projectsLoading ? "工作项目仍在加载，请稍候。" : "请先重试读取工作项目，任务草稿已保留。"); return; }
     if (layer === "task" && (!projectId || capturedVersion !== selected.memberVersion)) { setFeedback("请选择工作项目并核对当前群成员版本。"); return; }
@@ -407,7 +408,7 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
     locked: !!draft.recovery || layer === "task",
     popupOwners: ["conversation-task-panel", "本次新工作的执行配置", "本页执行工具", "本页模型", "本页思考深度"],
   });
-  const inputPlaceholder = layer === "task" ? "描述任务要求…" : selected?.kind === "dm" ? "描述一项新工作…" : "输入消息…";
+  const inputPlaceholder = selected?.external ? "发送到钉钉群（普通消息不启动员工）…" : layer === "task" ? "描述任务要求…" : selected?.kind === "dm" ? "描述一项新工作…" : "输入消息…";
   // 详情未到时 selected 仍是 null，但会话 id 前缀已经决定了这是私聊还是群聊。
   // 用前缀投影标签，按钮宽度不会在详情到达那一刻从 98px 跳到 146px。
   const projectedKind = selected?.kind ?? (id.startsWith("dm_") ? "dm" : id.startsWith("group_") ? "group" : null);
@@ -420,13 +421,18 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
           {selected?.team ? <WandIconButton className="conversation-avatar-button" aria-label="查看群资料" aria-expanded={members} aria-controls="conversation-members-panel" onClick={event => toggleMembers(event.currentTarget)}><ConversationGroupAvatar title={selected.title} members={selected.team.members} size={48}/></WandIconButton> : <span className="conversation-heading-avatar-slot" aria-hidden="true">{employee ? <EmployeeAvatar employee={{ id: employee.id, name: employee.name, avatar: employee.avatar }} provider="" size="md"/> : null}</span>}
           <div className="conversation-heading-copy">
             <WandButton kind="ghost" className="conversation-heading-title" title={selected?.title ?? employee?.name} aria-expanded={selected?.kind === "group" ? members : undefined} aria-controls={selected?.kind === "group" ? "conversation-members-panel" : undefined} onClick={event => employee ? employeeProfile.open(employee, event.currentTarget) : toggleMembers(event.currentTarget)}><span className="conversation-heading-title-text">{selected?.title ?? employee?.name ?? "选择一位员工，开始聊天"}</span></WandButton>
-            <Typography.Text type="secondary" className="conversation-heading-context">{selected?.kind === "group" ? `群聊 · 我 + ${selected.team?.members.length ?? 0} 位员工` : employee ? `私聊${employee.id === DEFAULT_EMPLOYEE_ID ? " · 默认伙伴" : ""}` : "选择接收对象后发送"}</Typography.Text>
+            <Typography.Text type="secondary" className="conversation-heading-context">{selected?.external ? `钉钉群 · ${selected.external.bindings.length} 名已接入员工` : selected?.kind === "group" ? `群聊 · 我 + ${selected.team?.members.length ?? 0} 位员工` : employee ? `私聊${employee.id === DEFAULT_EMPLOYEE_ID ? " · 默认伙伴" : ""}` : "选择接收对象后发送"}</Typography.Text>
           </div>
         </Flex>
         <CopyPageLink label="复制会话链接"/>
         {selected?.kind === "group" ? <WandButton kind="ghost" aria-expanded={members} aria-controls="conversation-members-panel" onClick={event => toggleMembers(event.currentTarget)}>成员</WandButton> : null}
         <ConversationPanel open={members} owner="conversation-members-panel" anchorRef={membersAnchor} triggerRef={membersTrigger} onClose={() => { setMembers(false); setInvite(false); }}>
-          <Typography.Text strong>当前群成员：我 + {selected?.team?.members.length ?? 0} 位员工</Typography.Text>
+          {selected?.external ? <Flex vertical gap={12}>
+            <Typography.Text strong>已接入员工（不是钉钉完整成员名单）</Typography.Text>
+            {selected.external.bindings.map(binding => { const e = employees.find(e => e.id === binding.employeeId); return <Flex key={binding.id} gap={8} align="center">{e ? <EmployeeAvatar employee={e} size="sm" renderMode="static"/> : null}<Typography.Text>{e?.name ?? "员工已不可用"} · {binding.state === "ready" ? "已接通" : binding.state === "paused" ? "已暂停" : "接入待核实"}</Typography.Text></Flex>; })}
+            <Typography.Text type="secondary">请在钉钉里选择真实机器人完成 @；普通群消息不会启动员工。</Typography.Text>
+            <WandButton onClick={() => { setMembers(false); settingsController.open("connectors"); }}>管理钉钉接入</WandButton>
+          </Flex> : <><Typography.Text strong>当前群成员：我 + {selected?.team?.members.length ?? 0} 位员工</Typography.Text>
           {selected?.sourceTemplateId ? <Typography.Paragraph type="secondary">来自团队模板 · {selected.team?.name}</Typography.Paragraph> : null}
           <Flex gap={8} align="center" style={{ paddingBlock: 8 }}><WandIconButton className="conversation-avatar-button" aria-label="查看我的资料" onClick={() => { setMembers(false); settingsController.open("profile"); }}><EmployeeAvatar employee={{ id: "user", name: selfName, avatar: selfProfile.avatar }} provider="" size="md"/></WandIconButton><Typography.Text strong>{selfName} · 我</Typography.Text></Flex>
           {selected?.team?.members.map(m => <Flex key={m.id} vertical gap={4} style={{ paddingBlock: 8 }}>
@@ -446,10 +452,11 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
               <GroupEditor open={invite} owner="conversation-invite-panel" inviteTo={selected?.kind === "group" ? selected : undefined}
                 onCancel={() => setInvite(false)} onCreated={() => { setInvite(false); void load(); }}/>
             </ConversationPanel>
-          </Flex>
+          </Flex></>}
         </ConversationPanel>
       </Flex>
-      {selected?.kind === "group" ? <Flex align="center" gap={8} className="conversation-task-index">
+      {selected?.external ? <Alert type={selected.external.syncState === "live" ? "info" : "warning"} showIcon title={selected.external.syncState === "live" ? "钉钉群消息通道已连接" : selected.external.syncState === "at_only" ? "仅同步 @消息，非完整群记录" : "钉钉消息同步尚未就绪"} description={selected.external.syncError || (!selected.external.historyComplete ? "历史仅包含已读取范围；员工过程留在 Wand，钉钉只接收最终正文。" : "员工过程留在 Wand，钉钉只接收最终正文。")}/> : null}
+      {selected?.kind === "group" && !selected.external ? <Flex align="center" gap={8} className="conversation-task-index">
         <WandButton ref={taskTrigger} aria-expanded={taskDetails} onClick={() => setTaskDetails(true)}>群任务 · {selected.tasks.length}</WandButton>
         <Typography.Text type="secondary" ellipsis>{selected.dissolvedAt ? "群聊已解散 · 执行记录" : selected.tasks.some(t => t.task.status !== "archived" && ["waiting_user", "awaiting_approval"].includes(t.runs[0]?.status))
           ? "有任务需要你确认" : selected.tasks.some(t => t.task.status !== "archived" && t.runs[0]?.status === "running") ? "任务进行中" : "进度与执行记录"}</Typography.Text>
@@ -468,7 +475,7 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
         </Typography.Paragraph> : null}
         <SidebarProjectionSwap value={`${id}:${filter}`} animate={false}><ConversationMessages key={`${id}:${filter}`} navigationScope={`${id}:${filter}`} ready={!!selected} active={visible && !ui.directory} group={selected?.kind === "group"} restoreScroll={storedConversationScroll(ui.scrolls[scrollScope])} turns={turns} taskLabels={taskLabels} hasEarlier={selected?.history?.hasEarlier} loadingEarlier={historyLoading} onLoadEarlier={() => { void loadHistory(); }}
           mentionNames={[...new Set(roster.map(member => member.name).filter(Boolean))]}
-          employeeIds={Object.fromEntries(roster.filter(member => member.employeeId).flatMap(member => [[member.id, member.employeeId!], [member.employeeId!, member.employeeId!]]))}
+          employeeIds={Object.fromEntries([...roster.filter(member => member.employeeId).flatMap(member => [[member.id, member.employeeId!], [member.employeeId!, member.employeeId!]]), ...(selected?.external?.bindings.map(b => [b.employeeId, b.employeeId]) ?? [])])}
           renderSessionPreview={(turn, index) => <ConversationSessionReply turn={turn} active={visible && !ui.directory} statusProvided={activity.hasStatus(turn)}
             onOpen={() => onOpenSession(turn.sessionLink!.sessionId)} onModelSettings={employee && !selected?.unavailableReason ? event => employeeProfile.open(employee, event.currentTarget) : undefined}>{activity.renderActivity(turn, index)}</ConversationSessionReply>}
           renderTaskPreview={turn => <ConversationTaskPreview turn={turn} active={visible && !ui.directory} onOpen={() => {
@@ -514,7 +521,7 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
           {feedback && feedback !== selected.unavailableReason ? <Typography.Text type="secondary" role="status">{feedback}</Typography.Text> : null}
         </div> : null}
         <div ref={composerSurface} className="conversation-input-wrap" data-editor-expanded={editor.expanded} data-composer-expanded={minimal.expanded}>
-        <div className="conversation-runtime-summary" aria-label={target ? "本轮负责人的首选配置" : "新工作的首选执行配置"} data-pending={!selected || undefined}>
+        <div className="conversation-runtime-summary" hidden={!!selected?.external} aria-label={target ? "本轮负责人的首选配置" : "新工作的首选执行配置"} data-pending={!selected || undefined}>
           {selected ? (editablePreference && runtimeAgent ? <ConversationExecutionSelectors agent={runtimeAgent} catalog={modelCatalog}
             disabled={busy || !!unknown || !!selected.unavailableReason} onChange={setConversationPreference}/> : <>
             <Typography.Text type="secondary">{runtimeAgent ? agentToolDisplayName(runtimeAgent.provider, runtimeAgent.engine) : "工具未就绪"}</Typography.Text>
@@ -536,7 +543,7 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
           footer={<Flex ref={toolsAnchor} align="center" justify="space-between" className="conversation-action-row" style={{ position: "relative" }}>
           <Flex align="center" gap={4}><WandIconButton ref={toolsTrigger} className="conversation-composer-control" aria-label={toolsOpen ? "关闭聊天操作" : layer === "task" ? "任务选项" : "更多聊天操作"}
             aria-expanded={toolsOpen} onClick={() => layer === "task" ? setTaskOptionsOpen(!taskOptionsOpen) : setLayer(layer === "closed" ? "menu" : "closed")}><ConversationMorphIcon from="plus" to="close" active={toolsOpen}/></WandIconButton>
-            <WandIconButton className="conversation-composer-control composer-edit-action" aria-label="添加附件" disabled={!selected || !!selected.unavailableReason} onClick={() => { if (layer === "task") setTaskOptionsOpen(false); else setLayer("closed"); inputFiles.current?.click(); }}><WandIcon name="paperclip" size={18}/></WandIconButton>
+            <WandIconButton className="conversation-composer-control composer-edit-action" aria-label="添加附件" disabled={!selected || !!selected.unavailableReason || !!selected.external} onClick={() => { if (layer === "task") setTaskOptionsOpen(false); else setLayer("closed"); inputFiles.current?.click(); }}><WandIcon name="paperclip" size={18}/></WandIconButton>
             <span className="composer-edit-action">{editor.control}</span>
             {selected?.kind === "dm" && employee && layer !== "task" ? <WandPopover side="top" ariaLabel="本次新工作的执行配置" trigger={<WandButton kind="ghost" size="small" className="conversation-config-trigger" title="每次发送创建独立工作；补充已有工作请使用回复中的「继续此工作」。">执行配置{chatCwd ? " · 临时目录" : ""}<WandIcon name="chevronDown" size={14}/></WandButton>}>
               <div className="conversation-preference-details">
@@ -556,13 +563,13 @@ function ReadyConversationHome({ visible, sidebarOpen, onOpenSidebar, onOpenSess
           <MinimalComposerEntry text={draft.text} attachments={draft.attachments.length} placeholder={inputPlaceholder} disabled={!selected || !!selected.unavailableReason} onOpen={minimal.open}/>
           <ConversationSubmitButton showLabel phase={feedbackAction === "approve" ? "idle" : phase} stops={stops} label={feedbackAction === "approve" ? "发送消息" : primaryLabel} disabled={busy || !!unknown || (feedbackAction === "approve" && phase !== "idle") || !id || !selected || !!selected.unavailableReason || (!stops && !draft.text.trim() && !draft.attachments.length)} onClick={() => void (stops ? act("stop") : send())}/>
           <ConversationPanel open={toolsOpen} owner="conversation-task-panel" focusKey={layer} anchorRef={toolsAnchor} triggerRef={toolsTrigger} direction="up" onClose={() => layer === "task" ? setTaskOptionsOpen(false) : setLayer("closed")}>
-            <div className="conversation-action-menu" hidden={layer !== "menu"}>{selected?.kind === "group" ? <WandButton disabled={!id || !!selected.unavailableReason} onClick={() => taskMode()}>派新任务</WandButton> : null}
+            <div className="conversation-action-menu" hidden={layer !== "menu"}>{selected?.external ? <><Typography.Text type="secondary">此处文字发送到钉钉群，不派发内部团队任务；群接入与员工候选在连接器管理。</Typography.Text><WandButton onClick={() => { setLayer("closed"); settingsController.open("connectors"); }}>管理钉钉群接入</WandButton></> : null}{selected?.kind === "group" && !selected.external ? <WandButton disabled={!id || !!selected.unavailableReason} onClick={() => taskMode()}>派新任务</WandButton> : null}
               {selected?.kind === "dm" && previousWork ? <WandButton onClick={() => { setLayer("closed"); onOpenSession(previousWork.sessionId); }} title={previousWork.title}>继续上一项工作</WandButton> : null}
               {selected?.kind === "dm" && employee ? <WandButton onClick={event => { setLayer("closed"); employeeProfile.open(employee, event.currentTarget); }}>员工资料与默认执行配置</WandButton> : null}
               <WandButton disabled={!selected?.communicationSessionId} onClick={() => { setLayer("closed"); if (selected?.communicationSessionId) onOpenSession(selected.communicationSessionId); }}>{selected?.kind === "dm" ? "历史私聊执行窗口" : "会话工具 / 资源设置"}</WandButton>
-              <WandInput aria-label="临时聊天目录（本页共用）" placeholder="留空沿用员工或项目目录" value={chatCwd} onChange={e => setChatCwd(e.currentTarget.value)}/>
+              {!selected?.external ? <><WandInput aria-label="临时聊天目录（本页共用）" placeholder="留空沿用员工或项目目录" value={chatCwd} onChange={e => setChatCwd(e.currentTarget.value)}/>
               <Typography.Text type="secondary">只用于本页之后发送的新工作；切换联系人仍保留，不改变已有工作目录或员工配置。</Typography.Text>
-              {chatCwd ? <WandButton onClick={() => setChatCwd("")}>清除临时目录</WandButton> : null}
+              {chatCwd ? <WandButton onClick={() => setChatCwd("")}>清除临时目录</WandButton> : null}</> : null}
             </div>
             <div hidden={layer !== "task"}><Typography.Text strong>{continueTaskId ? "确认继续此任务" : "派新任务"}</Typography.Text>
               <WandInput aria-label="任务名称" placeholder="任务名称" value={title} disabled={!!continueTaskId} onChange={e => setTitle(e.currentTarget.value)}/>

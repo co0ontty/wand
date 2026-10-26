@@ -35,6 +35,7 @@ function savePending(): void {
 }
 const listeners = new Set<() => void>();
 export function notifyConversationChanges(): void { for (const listener of listeners) listener(); }
+export function subscribeConversationChanges(listener: () => void): () => void { listeners.add(listener); return () => { listeners.delete(listener); }; }
 export const conversationsRepository = {
   list: () => requestJson<{ conversations: ConversationSummary[] }>("/api/conversations").then((r) => r.conversations),
   // Workspaces deliberately omit system calls. Read their canonical metadata, not

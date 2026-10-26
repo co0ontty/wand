@@ -3,6 +3,7 @@ import * as React from "react";
 import { Collapse, Flex, Tag, Typography } from "antd";
 import { WandButton } from "../ui";
 import { issueTaskStatusLabel } from "./task-board-agent";
+import { taskReviewLabel, taskWorkLabel } from "./task-delivery-state";
 import type { WandTaskListed } from "./task-board-repository";
 
 const expandedGoals = new Map<string, boolean>();
@@ -15,16 +16,20 @@ export function TaskGoalChildren({ task, tasks, onOpen, path = [] }: {
   const children = tasks.filter(t => t.parentTaskId === task.id && !path.includes(t.id) && t.id !== task.id);
   if (!children.length) return null;
   const review = children.filter(t => t.acceptance?.acceptedAt).length;
+  const awaiting = children.filter(t => t.status === "done" && !t.acceptance?.acceptedAt).length;
   return <Collapse size="small" ghost activeKey={expanded ? [task.id] : []} onChange={keys => { const open = Array.isArray(keys) ? keys.length > 0 : Boolean(keys); expandedGoals.set(task.id, open); setExpanded(open); }} items={[{
-    key: task.id, label: `${children.length} 个子任务 · ${review} 个已验收 · ${task.acceptance?.acceptedAt ? "主目标验收通过" : "主目标待整体验收"}`,
+    key: task.id, label: `${children.length} 个子任务 · ${awaiting} 个等待验收 · ${review} 个已验收 · ${task.acceptance?.acceptedAt ? "主目标验收通过" : "主目标待整体验收"}`,
     children: <Flex vertical gap="small" aria-label={`${task.title} 的子任务计划`}>
       {children.map(child => <div key={child.id}>
         <WandButton kind="ghost" onClick={() => onOpen(child.id)} style={{ height: "auto", whiteSpace: "normal", textAlign: "left" }}>
           {child.identifier} · {child.title}
         </WandButton>
-        <Flex gap={4} wrap><Tag>{issueTaskStatusLabel(child)}</Tag>
+        <Flex gap={4} wrap aria-label={`${child.identifier} 的工作与验收状态`}>
+          <Tag>工作：{taskWorkLabel(child)}</Tag>
+          <Tag color={child.acceptance?.acceptedAt ? "success" : child.status === "done" ? "processing" : undefined}>验收：{taskReviewLabel(child)}</Tag>
+          {child.status === "archived" && <Tag>{issueTaskStatusLabel(child)}</Tag>}
           {child.dueDate && <Tag>截止 {child.dueDate}</Tag>}
-          <Typography.Text type="secondary">{child.executionStatus === "queued" ? "已排队 · 等待员工空闲" : child.sessions.length ? `${child.sessions.length} 个执行会话 · 交付待验收` : "尚未派发"}</Typography.Text>
+          <Typography.Text type="secondary">{child.executionStatus === "queued" ? "已排队 · 等待员工空闲" : child.sessions.length ? `${child.sessions.length} 个执行会话` : "尚未派发"}</Typography.Text>
           <TaskBoardAgentChips sessions={child.sessions} assigned={child.agent} subject={child.executionSubject} assignee={child.assignedExecutor}/>
         </Flex>
         {child.description && <Typography.Paragraph ellipsis={{ rows: 2, expandable: true }}>{child.description}</Typography.Paragraph>}

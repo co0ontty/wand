@@ -77,7 +77,6 @@ import { openFilePreviewFromLegacy } from "./file-preview-adapter";
           localStorage.setItem("wand-terminal-scale", String(next));
         } catch (e) {}
         applyTerminalScale();
-        updateScaleLabel();
       }
 
       // Ctrl/Cmd plus, minus, and zero zoom the terminal instead of the browser page.
@@ -109,13 +108,6 @@ import { openFilePreviewFromLegacy } from "./file-preview-adapter";
           if (!state.terminal || !state.terminalFitAddon) return;
           fitTerminalToContainer(state.terminal, state.terminalFitAddon);
         });
-      }
-
-      export function updateScaleLabel() {
-        var label = document.getElementById("terminal-scale-label-top");
-        if (label) {
-          label.textContent = Math.round(state.terminalScale * 100) + "%";
-        }
       }
 
       export function appendToComposer(text) {

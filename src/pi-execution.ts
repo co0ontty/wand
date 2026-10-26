@@ -78,7 +78,8 @@ export function projectPiExecution(raw: unknown, source: PiExecutionSnapshot["so
     version: 1, source, mode: text(d.mode) ?? "workflow", name: text(d.name),
     runId: text(d.runId ?? children.workflowRunId ?? d.asyncId),
     state: state(children.workflowState ?? d.state ?? (d.asyncId ? "background" : fallbackState)),
-    inventoryComplete: typeof children.inventoryComplete === "boolean" ? children.inventoryComplete : source === "tool-result" && !d.asyncId,
+    inventoryComplete: d.inventoryComplete === false ? false
+      : typeof children.inventoryComplete === "boolean" ? children.inventoryComplete : source === "tool-result" && !d.asyncId,
     updatedAt: number(d.lastUpdate ?? d.updatedAt), nodes: rows.slice(0, MAX_NODES),
     trace: trace.slice(-MAX_TRACE).map(t => ({ key: text(t.key) ?? "", operation: text(t.operation) ?? "", state: text(t.state) ?? "unknown",
       phase: text(t.phase), durationMs: number(t.durationMs), error: text(t.error, 1000) })),

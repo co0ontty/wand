@@ -61,7 +61,11 @@ test("real native Pi runs in default tmux with same-process event files and clea
   let active = true;
   const current = snapshot("native-live", root);
   const updates: string[] = [];
-  const run = runner.start({ session: current, prompt: "本地原生验证", env }, { isActive: () => active, onUpdate: (state) => updates.push(state.result) });
+  const checkpoints: import("../src/pi-cli-checkpoint.js").PiCliCheckpoint[] = [];
+  const run = runner.start({ session: current, prompt: "本地原生验证", env }, {
+    isActive: () => active, onUpdate: (state) => updates.push(state.result),
+    onPiCheckpoint: (checkpoint) => checkpoints.push(JSON.parse(JSON.stringify(checkpoint))),
+  });
   void run.completion.then((result) => t.diagnostic(JSON.stringify({ exitCode: result.exitCode, primaryError: result.primaryError,
     spawnError: result.spawnError?.message, stderr: result.stderr.slice(-1000) })));
   const findJob = () => {
@@ -104,7 +108,12 @@ test("real native Pi runs in default tmux with same-process event files and clea
   const ready = JSON.parse(readFileSync(job.ready, "utf8")); assert.equal(ready.mode, "tui"); assert.equal(ready.hasUI, true);
   assert.match(readFileSync(job.events, "utf8"), /"message_update"/);
   const adoptedHost = new PiTmuxHost(root, legacy());
-  const adoptedState = await adoptedHost.attachRun("structured:native-live");
+  assert.ok(checkpoints.length > 0, "real native event chunks expose a durable complete-record checkpoint");
+  const checkpoint = checkpoints.at(-1)!;
+  assert.equal(checkpoint.state.result, "真实原生界面：中文🙂");
+  assert.equal(checkpoint.source.file, job.events);
+  const adoptedState = await adoptedHost.attachRun("structured:native-live", checkpoint);
+  assert.equal(adoptedState?.stdoutFrom, checkpoint.offset);
   assert.equal(adoptedState?.nativeFile, job.events);
   assert.equal(adoptedState?.pid, ready.pid);
   const adopted = await adoptedHost.adoptRun("structured:native-live");

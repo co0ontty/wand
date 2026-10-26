@@ -476,15 +476,6 @@ export function renderAppShell() {
         // 只保留 #file-explorer 槽位锚点，legacy 不再往里写内容。
         '<div class="file-explorer" id="file-explorer"></div>' +
         '<div id="output" class="terminal-container' + (state.selectedId ? "" : " hidden") + ' active">' +
-          '<div class="terminal-scale-overlay" aria-label="终端缩放控件">' +
-            // 只有 title 时读屏在图标 / 符号按钮上只能念出「减号 / 加号」，够不到动作本身
-            // （UX-CONTRACT 的 WCAG 2.2 AA 4.1.2）；aria-label 与 title 同步写明动作。
-            '<button data-antd-control id="terminal-scale-down-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="缩小" aria-label="缩小终端字号">−</button>' +
-            '<span class="terminal-scale-overlay-label terminal-scale-label" id="terminal-scale-label-top">' + Math.round(state.terminalScale * 100) + '%</span>' +
-            '<button data-antd-control id="terminal-scale-up-top" class="terminal-scale-overlay-btn terminal-scale-btn" type="button" title="放大" aria-label="放大终端字号">+</button>' +
-            '<span class="terminal-scale-overlay-divider"></span>' +
-            '<button data-antd-control id="page-refresh-btn" class="terminal-scale-overlay-btn" type="button" title="刷新页面" aria-label="刷新页面">' + iconSvg("refresh", { size: 13, strokeWidth: 2 }) + '</button>' +
-          '</div>' +
           '<button data-antd-control id="terminal-jump-bottom" class="terminal-jump-bottom' + (state.showTerminalJumpToBottom ? ' visible' : '') + '" type="button" title="回到底部" aria-label="回到底部"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8l4.5 4.5L12.5 8"/></svg></button>' +
         '</div>' +
         '<div id="chat-output" class="chat-container hidden">' +

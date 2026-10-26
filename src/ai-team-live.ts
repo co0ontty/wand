@@ -108,7 +108,7 @@ function safeTailStart(output: string, start: number): number {
  * 终端原始输出的尾部：先按尾部截窗，再剥 ANSI / 换行归一 / 压缩空行 / 截尾。
  * live 每 500ms 就可能算一遍，而 PTY 的 output 能长到几 MB —— 顺序反过来等于每半秒对全量
  * 跑一遍正则。丢掉的前缀计入 omittedChars，是**估算值（可能偏大也可能偏小，用于量级提示）**：
- * 按截窗点的原始字数计，含 ANSI 与控制字符，不精确到账。三条边界写进 docs/ai-teams.md。
+ * 按截窗点的原始字数计，含 ANSI 与控制字符，只用于量级提示，不精确到账。
  */
 function outputTailText(output: string): LiveStepText {
   const rawStart = Math.max(0, output.length - LIVE_OUTPUT_WINDOW_CHARS);

@@ -48,6 +48,9 @@ class NativeProcess implements StructuredExecProcess {
     this.identities = { stdout: lstatSync(job.events), stderr: lstatSync(job.stderr) };
     if (after) { this.offsets.stdout = after.stdoutSeq; this.offsets.stderr = after.stderrSeq; }
   }
+  get protocolSource(): { file: string; dev: number; ino: number } {
+    return { file: this.job.events, ...this.identities.stdout };
+  }
   get pid(): number { return this.host.state(this.job).pid; }
   interrupt(): void { void this.host.kill(this.job).catch((error) => logInfo(`Pi native stop failed: ${error instanceof Error ? error.message : String(error)}`)); }
   onStream(listener: (event: StructuredStreamEvent) => void): { dispose(): void } {
@@ -143,15 +146,31 @@ export class PiTmuxHost implements StructuredExecHost {
     }
     return value;
   }
-  private snapshot(job: NativeJob): StructuredRunState {
+  private snapshot(job: NativeJob, checkpoint?: import("./pi-cli-checkpoint.js").PiCliCheckpoint): StructuredRunState {
     const state = this.state(job);
+    let stdoutFrom: number | undefined;
     const log = (file: string): { text: string; size: number; truncated: boolean } => {
       const fd = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
       try {
-        const size = fstatSync(fd).size; const count = Math.min(size, REPLAY_BYTES); const bytes = Buffer.alloc(count);
-        let read = 0; while (read < count) { const n = readSync(fd, bytes, read, count - read, size - count + read); if (!n) break; read += n; }
+        const stat = fstatSync(fd);
+        const size = stat.size;
+        const matched = file === job.events && checkpoint?.incarnationId === job.incarnationId
+          && checkpoint.source.file === file && checkpoint.source.dev === stat.dev && checkpoint.source.ino === stat.ino
+          && checkpoint.offset <= size && size - checkpoint.offset <= REPLAY_BYTES;
+        // A checkpoint is usable only if it ends at a real source record
+        // boundary. Never splice an arbitrary byte position into JSON.
+        let boundary = checkpoint?.offset === 0;
+        if (matched && checkpoint.offset > 0) {
+          const byte = Buffer.alloc(1);
+          boundary = readSync(fd, byte, 0, 1, checkpoint.offset - 1) === 1 && byte[0] === 10;
+        }
+        const start = matched && boundary ? checkpoint.offset : Math.max(0, size - REPLAY_BYTES);
+        if (matched && boundary) stdoutFrom = start;
+        const count = size - start; const bytes = Buffer.alloc(count);
+        let read = 0; while (read < count) { const n = readSync(fd, bytes, read, count - read, start + read); if (!n) break; read += n; }
+        if (read !== count) throw new Error("Pi 原生事件文件读取不完整。");
         let begin = 0; while (begin < read && (bytes[begin] & 0xc0) === 0x80) begin++;
-        return { text: bytes.subarray(begin, read).toString("utf8"), size, truncated: size > count };
+        return { text: bytes.subarray(begin, read).toString("utf8"), size, truncated: (file !== job.events || stdoutFrom === undefined) && size > count };
       } finally { closeSync(fd); }
     };
     const stdout = log(job.events); const stderr = log(job.stderr);
@@ -160,7 +179,7 @@ export class PiTmuxHost implements StructuredExecHost {
       signal: state.signal ? signalNumberFromName(state.signal) : null,
       stdoutSeq: stdout.size, stderrSeq: stderr.size, stdoutLog: stdout.text, stderrLog: stderr.text,
       stdoutTruncated: stdout.truncated, stderrTruncated: stderr.truncated,
-      nativeFile: job.events };
+      nativeFile: job.events, ...(stdoutFrom !== undefined ? { stdoutFrom } : {}) };
   }
   async spawnStructured(request: StructuredSpawnRequest): Promise<StructuredExecProcess> {
     if (!request.nativePi) {
@@ -250,9 +269,9 @@ export class PiTmuxHost implements StructuredExecHost {
       server.close(); rmSync(launchDir, { recursive: true, force: true });
     }
   }
-  async attachRun(runId: string): Promise<StructuredRunState | null> {
+  async attachRun(runId: string, checkpoint?: import("./pi-cli-checkpoint.js").PiCliCheckpoint): Promise<StructuredRunState | null> {
     const job = this.job(runId);
-    if (job && !existsSync(job.ack)) { const state = this.snapshot(job); this.observed.set(runId, state); this.owners.set(runId, "native"); return state; }
+    if (job && !existsSync(job.ack)) { const state = this.snapshot(job, checkpoint); this.observed.set(runId, state); this.owners.set(runId, "native"); return state; }
     this.owners.set(runId, "legacy"); return this.legacy.attachRun(runId);
   }
   async adoptRun(runId: string): Promise<StructuredExecProcess | null> {

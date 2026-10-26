@@ -12,15 +12,14 @@ import { imageViewerController } from "../react/image-viewer/controller";
 import { openMessageImage } from "../react/image-viewer/gallery";
 import { getErrorMessage } from "../../error-utils.js";
 import { escapeHtml } from "./utils";
-import { scheduleChatRender } from "./chat-render-loader";
 import { formatInlineResult, setInlineToolImageState } from "./chat-render-model";
 import { applyExpandedState, persistElementExpandState, persistSelectedId, scrollChatToBottom, setPersistedAgentSelection } from "./chat-scroll";
-import { adjustTerminalScale, openFilePreview } from "./file-browser";
+import { openFilePreview } from "./file-browser";
 import { attachQueueBarDelegates, bindInputTouchScroll, getComposerSendPhase, handleInputBoxBlur, handleInputBoxFocus, refreshInputBoxState, sendOrStart, setupMobileKeyboardHandlers, stopSession, updateQueueBar } from "./input";
 import { hideError } from "./notifications";
-import { render, resetChatRenderCache } from "./render";
+import { render } from "./render";
 import { addPendingAttachments, closePlusPopover, closeSessionsDrawer, dismissDrawerIfOverlay, handleInputBoxKeydown, handleInputPaste, handleInteractiveTextInput, handlePtyImagePaste, login, onChatModeChange, onChatModelChange, onChatThinkingChange, optimizePromptText, selectSession, setDraftValue, switchServer, syncComposerHasText, togglePlusPopover } from "./session-engine";
-import { initTerminal, maybeScrollTerminalToBottom, softResyncTerminal } from "./terminal";
+import { initTerminal, maybeScrollTerminalToBottom } from "./terminal";
 import { setupVisualViewportHandlers } from "./viewport";
 
       // Global toggle function for tool card headers — called via onclick attribute
@@ -639,25 +638,6 @@ import { setupVisualViewportHandlers } from "./viewport";
 
         // Terminal interactive toggle: 点击处理随条目一起搬进了 React。
 
-        // Terminal scale controls (topbar)
-        var scaleDownBtn = document.getElementById("terminal-scale-down-top");
-        var scaleUpBtn = document.getElementById("terminal-scale-up-top");
-        if (scaleDownBtn) scaleDownBtn.addEventListener("click", function() { adjustTerminalScale(-0.25); });
-        if (scaleUpBtn) scaleUpBtn.addEventListener("click", function() { adjustTerminalScale(0.25); });
-        var pageRefreshBtn = document.getElementById("page-refresh-btn");
-        if (pageRefreshBtn) pageRefreshBtn.addEventListener("click", function(ev) {
-          // Soft refresh: replay terminal buffer + rebuild chat view.
-          // Fixes residual DOM from CSI cursor-jump sequences without losing page state.
-          // Hold Shift to force a full page reload as an escape hatch.
-          if (ev && ev.shiftKey) {
-            location.reload();
-            return;
-          }
-          softResyncTerminal();
-          // 用户停留在当前会话，只是想刷一下 DOM——保留其阅读位置和 sticky 状态。
-          resetChatRenderCache({ preserveStickState: true });
-          scheduleChatRender(true);
-        });
         var jumpBottomBtn = document.getElementById("terminal-jump-bottom");
         if (jumpBottomBtn) jumpBottomBtn.addEventListener("click", function() {
           maybeScrollTerminalToBottom("force");

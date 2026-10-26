@@ -42,7 +42,7 @@ try {
       assert.equal(shape.title, "保留完整会话标题");
       assert.ok(Object.values(shape.counts).every(count => count === 0));
       assert.equal(shape.overflow, false);
-      assert.ok(shape.file && shape.preview);
+      assert.ok(!shape.file && !shape.preview, "secondary actions stay inside the menu");
       cases.push({ width, suffix, reduced, phase, counts: shape.counts });
     }
     if (width < 640) {
@@ -52,6 +52,7 @@ try {
     }
     await browser.click("#topbar-more-button");
     await browser.wait("!!document.querySelector('#topbar-more-menu')");
+    assert.equal(await browser.evaluate("!!document.querySelector('#topbar-file-button') && !!document.querySelector('#topbar-local-preview-button')"), true);
     assert.equal(await browser.evaluate("document.querySelectorAll('.topbar-metadata,.topbar-provider,.topbar-cwd,.session-status-pill').length"), 0);
     assert.equal(await browser.evaluate("[...document.querySelectorAll('[data-action]')].some(el=>el.dataset.action==='copy-cwd')"), true);
     await browser.key("Escape");

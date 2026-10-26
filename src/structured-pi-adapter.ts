@@ -301,6 +301,10 @@ export class PiRunner implements StructuredRunnerAdapter {
       requestId: context.session.structuredState?.activeRequestId ?? undefined,
       createState: () => state,
       createProtocolReader: (onLine) => new PiProtocolReader(onLine),
+      checkpoint: (checkpoint) => {
+        const requestId = context.session.structuredState?.activeRequestId;
+        if (requestId) observer.onPiCheckpoint?.({ version: 1, ...checkpoint, requestId, state, primaryError });
+      },
       processLine: (line) => {
         if (!observer.isActive() || !line.trim()) return;
         try {

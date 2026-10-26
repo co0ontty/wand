@@ -23,6 +23,7 @@ Wand 是本机 AI 工作台（Node.js + TypeScript ESM、Express + WebSocket）�
 | Provider、模型、Pi 资源 | `src/provider-catalog.ts`、`src/model-groups.ts`、`src/pi-session-settings.ts`、`src/pi-resource-*.ts` |
 | 员工、团队、记忆 | `src/silicon-employee*.ts`、`src/ai-team*.ts`、`src/employee-knowledge*.ts`、`src/user-memory*.ts` |
 | Web / 原生端 | `src/web-ui/browser/`、`src/web-ui/react/`；`android/`、`ios/`、`macos/` |
+| 文档索引、架构工作记录 | `docs/README.md`；`output/architecture-stage2/WORKLOG.md` |
 
 Node 版本以 `.nvmrc` 为准。只检出需要的子模块：服务端构建用 `git submodule update --init -- render-bin`，改 Render 或原生端时再检出对应目录。查会话问题优先确认 `SessionRegistry.ownerOf(id)`，不要混淆 PTY、structured 和存储快照。
 

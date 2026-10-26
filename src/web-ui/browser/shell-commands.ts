@@ -1,5 +1,5 @@
 import { type LegacyUiCommands, type UiManageTarget } from "../react";
-import { closeFilePanel, toggleFilePanel } from "./file-browser";
+import { adjustTerminalScale, setTerminalScale, closeFilePanel, toggleFilePanel } from "./file-browser";
 import { openQuickCommitModal } from "./git-commit";
 import {
   deleteClaudeHistorySession,
@@ -39,7 +39,9 @@ import {
 } from "./sidebar";
 import { state, writeStoredBoolean } from "./state";
 import { openFolderPickerFromLegacy } from "./folder-picker-adapter";
-import { copySelectedSessionField } from "./terminal";
+import { copySelectedSessionField, softResyncTerminal } from "./terminal";
+import { resetChatRenderCache } from "./render";
+import { scheduleChatRender } from "./chat-render-loader";
 import { missionsController } from "../react/missions/controller";
 import { workspacesController } from "../react/workspaces/controller";
 
@@ -109,6 +111,16 @@ export function createBrowserShellCommands(): LegacyUiCommands {
   return {
     goHome,
     refreshPage: () => window.location.reload(),
+    terminalDisplay: command => {
+      if (command === "zoom-in") adjustTerminalScale(0.25);
+      else if (command === "zoom-out") adjustTerminalScale(-0.25);
+      else if (command === "reset") setTerminalScale(1);
+      else {
+        softResyncTerminal();
+        resetChatRenderCache({ preserveStickState: true });
+        scheduleChatRender(true);
+      }
+    },
     openNewSession: (cwd) => openSessionModal(cwd),
     openMissions: () => { missionsController.open(); },
     openNewProject: (cwd) => openSessionModal(cwd),

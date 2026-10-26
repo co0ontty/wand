@@ -12,6 +12,8 @@ export type ConversationTarget = { taskId: string; runId: string } | null;
 export interface ConversationInstance {
   id: string;
   owner: string;
+  /** Real external group mirror; ordinary messages never enter the internal team dispatcher. */
+  external?: import("./dingtalk-types.js").DingTalkExternalConversation;
   kind: "dm" | "group";
   peerEmployeeId: string | null;
   name: string;

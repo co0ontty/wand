@@ -58,10 +58,9 @@ test("web source preserves native events, safe-area variables, and selector hook
     "wand-android-network",
     "wand-ime-state",
     'id="output"',
-    'id="terminal-scale-down-top"',
-    'id="terminal-scale-label-top"',
-    'id="terminal-scale-up-top"',
-    'id="page-refresh-btn"',
+  ]);
+  includesAll("src/web-ui/react/shell/shell-topbar.tsx", [
+    "放大终端字号", "缩小终端字号", "恢复默认字号", "刷新终端显示",
   ]);
   includesAll("src/web-ui/browser/viewport.ts", [
     "wand-ios-ime-state",

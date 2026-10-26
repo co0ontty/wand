@@ -186,7 +186,7 @@ export function ConversationSidebarList({ compact, enabled = true, onNavigate, o
   };
   const remove = async (item: ConversationSummary): Promise<void> => {
     const answer = await wandOverlay.dialog({ title: `删除对话「${item.title}」？`,
-      description: item.kind === "group" ? `将删除这个群聊、${item.tasks.length} 个关联任务，以及它们的消息、执行记录和资源文件。此操作无法撤销。` : "将永久删除此私聊的消息记录和会话文件。员工资料及已经派出的群聊任务保留。此操作无法撤销。", actions: [
+      description: item.external ? "仅删除 Wand 中的群镜像、本地消息和关联执行；不会退出或解散钉钉群，也不会删除其他群共用的机器人。此操作无法撤销。" : item.kind === "group" ? `将删除这个群聊、${item.tasks.length} 个关联任务，以及它们的消息、执行记录和资源文件。此操作无法撤销。` : "将永久删除此私聊的消息记录和会话文件。员工资料及已经派出的群聊任务保留。此操作无法撤销。", actions: [
         { label: "取消", value: false, autoFocus: true }, { label: "删除对话", value: true, kind: "danger" },
       ] });
     if (answer.dismissed !== true && answer.action) {
@@ -262,11 +262,11 @@ function ConversationListRow({ item, employee: projectedEmployee, compact, query
     data-pinned={!!item.pinnedAt} data-archived={archived || undefined} data-conversation-id={item.id} aria-busy={busy || undefined}>
     <WandIconButton className="conversation-row-avatar conversation-avatar-button" aria-label={identity && !compact ? `查看${item.title}的资料` : `打开${item.title}`}
       onClick={event => identity && !compact ? employeeProfile.open(identity, event.currentTarget) : onSelect()}>
-      {identity ? <EmployeeAvatar employee={identity} size="sm"/> : item.kind === "group" ? <ConversationGroupAvatar title={item.title} members={item.team?.members ?? []} size={36}/> : <Avatar size={36} icon={<WandIcon name="chat" size={16}/>}/>}</WandIconButton>
+      {identity ? <EmployeeAvatar employee={identity} size="sm"/> : item.external ? <Avatar size={36} icon={<WandIcon name="users" size={18}/>}/> : item.kind === "group" ? <ConversationGroupAvatar title={item.title} members={item.team?.members ?? []} size={36}/> : <Avatar size={36} icon={<WandIcon name="chat" size={16}/>}/>}</WandIconButton>
     {!compact ? <SidebarLabelTooltip title={item.title} selector=".conversation-row-title"><WandButton kind="ghost" className="conversation-row-open" title={item.title} onClick={onSelect}>
       <span className="conversation-row-copy"><span className="conversation-row-topline"><span className="conversation-row-title">{item.title}</span>
         {formatConversationListTime(item.messageAt) ? <time className="conversation-row-time" dateTime={item.messageAt}>{formatConversationListTime(item.messageAt)}</time> : null}</span>
-        <span className="conversation-row-bottomline">{archived ? <span className="conversation-archived-tag">已归档</span> : null}<span className="conversation-row-preview">{item.dissolvedAt ? "群聊已解散 · 点击查看或恢复" : item.preview || (item.kind === "group" ? `${selfName} + ${item.team?.members.length ?? 0} 位员工` : "私聊")}</span>
+        <span className="conversation-row-bottomline">{item.external ? <span className="conversation-archived-tag">钉钉</span> : null}{archived ? <span className="conversation-archived-tag">已归档</span> : null}<span className="conversation-row-preview">{item.dissolvedAt ? "群聊已解散 · 点击查看或恢复" : item.preview || (item.kind === "group" ? `${selfName} + ${item.team?.members.length ?? 0} 位员工` : "私聊")}</span>
           {item.pinnedAt ? <span className="conversation-pin" title="已置顶" aria-label="已置顶"><WandIcon name="pin" size={13}/></span> : null}</span>
       </span></WandButton></SidebarLabelTooltip> : null}
 
@@ -292,8 +292,8 @@ function ConversationListRow({ item, employee: projectedEmployee, compact, query
       ...(item.kind === "dm" ? [{ key: "sessions", disabled: busy, icon: <WandIcon name="chat"/>, label: showSessions ? "收起会话" : `查看 ${sessions.length} 个会话` }] : []),
       ...(!item.dissolvedAt && item.tasks.length > 0 ? [{ key: "tasks", disabled: busy, icon: <WandIcon name="task"/>, label: expanded ? "收起任务" : `查看 ${item.tasks.length} 个任务` }] : []),
       { key: "danger-divider", type: "divider" },
-      ...(item.kind === "group" ? [{ key: "dissolve", disabled: busy, icon: <WandIcon name={item.dissolvedAt ? "resume" : "archive"}/>, label: item.dissolvedAt ? "恢复群聊" : "解散群聊…" }] : []),
-      { key: "delete", disabled: busy, danger: true, icon: <WandIcon name="trash"/>, label: item.kind === "group" ? "删除群聊…" : "删除对话…" },
+      ...(item.kind === "group" && !item.external ? [{ key: "dissolve", disabled: busy, icon: <WandIcon name={item.dissolvedAt ? "resume" : "archive"}/>, label: item.dissolvedAt ? "恢复群聊" : "解散群聊…" }] : []),
+      { key: "delete", disabled: busy, danger: true, icon: <WandIcon name="trash"/>, label: item.external ? "删除本地群镜像…" : item.kind === "group" ? "删除群聊…" : "删除对话…" },
     ], onClick: ({ key }) => {
       if (busy) return;
       setMenu(false);
