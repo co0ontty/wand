@@ -1,4 +1,5 @@
 import { isArchiveBlocked } from "../../../archive-policy.js";
+import { isSidebarSessionVisible } from "../../group-chat-visibility.js";
 import { SidebarPopupOwnerContext, SidebarSurfacesContext, useSidebarPopupOwner, useSidebarPopupState } from "./sidebar-popup-owner";
 import { ConversationMorphIcon } from "../conversations/controls";
 import { SidebarRowMenu } from "./sidebar-row-menu";
@@ -295,6 +296,7 @@ function ArchivedSessionsFold({
 
 function TaskItem({
   task,
+  listedSessions = task.sessions,
   visibleSessions = task.sessions,
   hasChildExecution = false,
   childTaskCount = 0,
@@ -329,6 +331,8 @@ function TaskItem({
   defaultGroup?: TaskDirectoryGroup;
   /** Display-only filtering; task.sessions remains the full mutation scope. */
   visibleSessions?: readonly WorkspaceSessionSummary[];
+  /** Feature/activity scope before text search; clear actions use this same list. */
+  listedSessions?: readonly WorkspaceSessionSummary[];
   hasChildExecution?: boolean;
   childTaskCount?: number;
   children?: React.ReactNode;
@@ -391,13 +395,14 @@ function TaskItem({
   const teamHistoryId = React.useId();
   const archivedId = React.useId();
 
-  // 人工会话和群聊入口照常显示，团队派发的会话收进一个可点的折叠头。
-  const teamSplit = splitTeamSessions(task.sessions);
+  // 群聊入口遵循可见性开关，团队派发的会话仍收进可点的折叠头。
+  const presentedSessions = listedSessions.filter(isSidebarSessionVisible);
+  const teamSplit = splitTeamSessions(presentedSessions);
   const shownTeamSplit = splitTeamSessions(visibleSessions);
   const shownSessions = nonTeamSessions(visibleSessions);
   const teamCount = shownTeamSplit.live.length + shownTeamSplit.history.length;
-  const archivedSessions = task.archivedSessions ?? [];
-  const totalSessionCount = task.sessions.length;
+  const archivedSessions = task.archivedSessions?.filter(isSidebarSessionVisible) ?? [];
+  const totalSessionCount = presentedSessions.length;
   const sessionToggleRef = React.useRef<HTMLButtonElement>(null);
   const [open, setSessionsOpen] = useSidebarExpansion(
     `task.${task.id}`, true, false, Boolean(defaultGroup) || isActive || isOnlyTask || hasChildExecution,
@@ -624,7 +629,7 @@ function TaskItem({
         {totalSessionCount === 0 && !hasChildExecution && task.executionStatus !== "queued" && !manageMode && <WandButton kind="ghost" type="button" className="workspace-task-empty"
           onClick={onRequestNewSession}><WandIcon name="plus" size={12}/>{defaultGroup ? "添加会话" : "添加会话，或拖入已有会话"}</WandButton>}
         <Flex vertical gap={4} style={{ paddingInlineStart: 6 }} className="workspace-task-sessions">
-          {(manageMode ? task.sessions : shownSessions).map((session, index) => (
+          {(manageMode ? presentedSessions : shownSessions).map((session, index) => (
             <TaskSessionItem
               key={session.id}
               session={session}
@@ -742,6 +747,7 @@ function TaskItem({
 
 function TaskGroupSection({
   group,
+  sourceTasks,
   searchQuery = "",
   totalSessionCount,
   now,
@@ -765,6 +771,8 @@ function TaskGroupSection({
   onOpenDialog,
 }: {
   group: TaskDirectoryGroup;
+  /** Full task snapshots preserve action scope and execution guards under display filtering. */
+  sourceTasks: ReadonlyMap<string, TaskSummary>;
   searchQuery?: string;
   totalSessionCount: number;
   now: number;
@@ -1094,15 +1102,18 @@ function TaskGroupSection({
               }
               return sessions.size;
             };
-            const renderTask = (task: TaskSummary, ancestors: string[] = []): React.ReactNode => <div key={task.id}>
+            const renderTask = (shownTask: TaskSummary, ancestors: string[] = []): React.ReactNode => {
+              const task = sourceTasks.get(shownTask.id) ?? shownTask;
+              return <div key={task.id}>
 
             <TaskItem
               key={task.id}
               task={task}
+              listedSessions={shownTask.sessions}
               descendantSessionCount={descendantCount(task.id)}
               hasChildExecution={group.tasks.some(child => child.parentWorkspaceTaskId === task.id)}
               childTaskCount={group.tasks.filter(child => child.parentWorkspaceTaskId === task.id).length}
-              visibleSessions={filterSidebarTaskSessions(group, task, searchQuery, liveTitles)}
+              visibleSessions={filterSidebarTaskSessions(group, shownTask, searchQuery, liveTitles)}
               now={now}
               liveTitles={liveTitles}
               activeTaskId={activeTaskId}
@@ -1118,7 +1129,8 @@ function TaskGroupSection({
               onRequestNewSession={() => onRequestNewSessionInTask(task)}
               isOnlyTask={taskCount === 1}
               onClearSessions={async () => {
-                const ids = task.sessions.map((session) => session.id);
+                // Clear the listed feature scope, even when a search narrows the rows.
+                const ids = shownTask.sessions.map((session) => session.id);
                 await handleDeleteSessions(ids, task, `已清空任务「${task.name}」的 ${ids.length} 个终端`);
               }}
               onClearTeamHistory={async (ids) => {
@@ -1150,6 +1162,7 @@ function TaskGroupSection({
               {group.tasks.filter(child => child.parentWorkspaceTaskId === task.id && ![...ancestors, task.id].includes(child.id)).map(child => renderTask(child, [...ancestors, task.id]))}
             </TaskItem>
             </div>;
+            };
             return group.tasks.filter(task => !task.parentWorkspaceTaskId || !group.tasks.some(parent => parent.id === task.parentWorkspaceTaskId)).map(task => renderTask(task));
           })()}
 
@@ -1285,20 +1298,21 @@ function SidebarWorkspacesPanel({
   }, [controllerSnapshot.open]);
 
   const { groups: sourceGroups, loading, error, reload } = useTaskGroups(refreshTick);
+  const sourceTasks = React.useMemo(() => new Map(sourceGroups.flatMap(group => group.tasks.map(task => [task.id, task] as const))), [sourceGroups]);
   // Every task is a visible container, including empty and legacy unnamed tasks.
   const groups = React.useMemo(() => {
-    if (!sessionTitleGenerating) return sourceGroups;
     const project = (session: WorkspaceSessionSummary): WorkspaceSessionSummary => (
-      session.id in sessionTitleGenerating
+      sessionTitleGenerating && session.id in sessionTitleGenerating
         ? { ...session, titleGenerating: sessionTitleGenerating[session.id] }
         : session
     );
+    // Filter only the rendered projection; actions still inspect complete sourceGroups.
     return sourceGroups.map((group) => ({ ...group,
-      standaloneSessions: group.standaloneSessions.map(project),
-      archivedSessions: group.archivedSessions?.map(project),
+      standaloneSessions: group.standaloneSessions.filter(isSidebarSessionVisible).map(project),
+      archivedSessions: group.archivedSessions?.filter(isSidebarSessionVisible).map(project),
       tasks: group.tasks.map((task) => ({ ...task,
-        sessions: task.sessions.map(project),
-        archivedSessions: task.archivedSessions?.map(project),
+        sessions: task.sessions.filter(isSidebarSessionVisible).map(project),
+        archivedSessions: task.archivedSessions?.filter(isSidebarSessionVisible).map(project),
       })),
     }));
   }, [sourceGroups, sessionTitleGenerating]);
@@ -1780,6 +1794,7 @@ function SidebarWorkspacesPanel({
                   <TaskGroupSection
                     key={group.workspaceId}
                     group={group}
+                    sourceTasks={sourceTasks}
                     searchQuery={searchQuery}
                     totalSessionCount={groupSessionCounts.get(group.workspaceId) ?? 0}
                     preview={directoryId !== undefined}

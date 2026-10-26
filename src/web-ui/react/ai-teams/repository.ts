@@ -315,9 +315,10 @@ export function useAiTeamListState(enabled: boolean): {
 }
 
 /** 侧栏角标：等你批准计划或回复负责人的运行数。启动拉一次，之后跟着运行通知刷新。 */
-export function useAiTeamAttentionCount(): number {
+export function useAiTeamAttentionCount(enabled = true): number {
   const [count, setCount] = React.useState(0);
   React.useEffect(() => {
+    if (!enabled) return undefined;
     let alive = true;
     const load = (): void => {
       void aiTeamsRepository.runs({ activeOnly: true })
@@ -332,6 +333,6 @@ export function useAiTeamAttentionCount(): number {
       alive = false;
       unsubscribe();
     };
-  }, []);
-  return count;
+  }, [enabled]);
+  return enabled ? count : 0;
 }

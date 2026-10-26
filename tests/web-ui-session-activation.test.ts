@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
+import { sessionFetchModule } from "./helpers/session-fetch-harness.js";
 
 function harness() {
   const state: Record<string, any> = { selectedId: "A", sessions: [{ id: "A" }], drafts: { A: "draft A", B: "draft B" }, messageQueue: ["queued A"], chatMode: "default", config: {}, claudeHistory: [], codexHistory: [] };
@@ -20,11 +21,14 @@ function harness() {
   const api: Record<string, any> = {};
   const source = readFileSync(new URL("../src/web-ui/browser/input.ts", import.meta.url), "utf8");
   let resolve!: (response: Response) => void;
+  const fetchImpl = () => new Promise<Response>((yes) => { resolve = yes; });
+  const sessionFetch = sessionFetchModule(fetchImpl);
   runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText, {
-    exports: api, require: (id: string) => id === "./state" ? { state } : id === "./session-engine" ? engine : fallback,
+    exports: api, require: (id: string) => id === "./state" ? { state } : id === "./session-engine" ? engine
+      : id === "./session-fetch.js" ? sessionFetch : fallback,
     document: { getElementById: () => null, querySelector: () => null, addEventListener: noop },
     window: {}, setInterval: noop,
-    fetch: () => new Promise<Response>((yes) => { resolve = yes; }),
+    fetch: fetchImpl,
   });
   return { api, state, selections, respond: (data: any) => resolve(new Response(JSON.stringify(data))) };
 }

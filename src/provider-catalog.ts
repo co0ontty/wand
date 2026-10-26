@@ -5,6 +5,7 @@
  * 服务端（`src/session-provider.ts`）与浏览器 bundle（`src/web-ui/provider-identity.ts`）
  * 都直接复用它，避免同一个 provider 概念散落在两处各写一份。
  */
+import type { SessionRunner } from "./types.js";
 
 /** 全部受支持的会话 provider；顺序即 UI / 派发选择器里的展示顺序。 */
 export const SESSION_PROVIDERS = ["claude", "codex", "opencode", "grok", "qoder", "pi"] as const;
@@ -36,6 +37,21 @@ export function isSessionProvider(value: unknown): value is SessionProvider {
 /** provider 对应的 CLI 可执行文件名（Qoder 的 CLI 叫 qodercli）。 */
 export function providerCliCommand(provider: SessionProvider): string {
   return provider === "qoder" ? "qodercli" : provider;
+}
+
+// 新 provider 必须明确配置 runner；不能静默落到 Claude。
+const DEFAULT_STRUCTURED_RUNNERS = {
+  claude: "claude-cli-print",
+  codex: "codex-cli-exec",
+  opencode: "opencode-cli-run",
+  grok: "grok-cli-headless",
+  qoder: "qoder-cli-print",
+  pi: "pi-cli-json",
+} as const satisfies Record<SessionProvider, SessionRunner>;
+
+/** CLI 结构化执行的默认 runner；服务端与 Web 创建入口共用。 */
+export function defaultStructuredRunner(provider: SessionProvider) {
+  return DEFAULT_STRUCTURED_RUNNERS[provider];
 }
 
 /**

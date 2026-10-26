@@ -17,13 +17,13 @@ import { WandStorage } from "../src/storage.js";
 import { StructuredSessionManager } from "../src/structured-session-manager.js";
 import { defaultConfig } from "../src/config.js";
 
-function startWorkspaceApp(storage: WandStorage): Promise<{
+function startWorkspaceApp(storage: WandStorage, sessions?: Parameters<typeof registerWorkspaceRoutes>[2]): Promise<{
   baseUrl: string;
   close: () => Promise<void>;
 }> {
   const app = express();
   app.use(express.json());
-  registerWorkspaceRoutes(app, storage);
+  registerWorkspaceRoutes(app, storage, sessions);
   app.use(jsonErrorHandler);
   const server = createServer(app);
   return new Promise((resolve, reject) => {
@@ -168,6 +168,49 @@ test("task aggregation reuses queries without leaking truncated or filtered task
   }
 });
 
+test("task detail projects execution and summaries from one visible session snapshot", async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-task-detail-snapshot-"));
+  const storage = new WandStorage(path.join(root, "wand.db"));
+  const workspace = storage.createWorkspace({ name: "Project", cwd: root });
+  const task = storage.createWorkspaceTask({ workspaceId: workspace.id, name: "Task" });
+  storage.saveSession({
+    id: "visible", command: "sh", cwd: root, mode: "managed", status: "exited", exitCode: 0,
+    startedAt: "2026-07-14T00:00:00.000Z", endedAt: null, output: "transcript",
+    workspaceId: workspace.id, workspaceTaskId: task.id,
+  });
+  const saved = storage.getSessionSlim("visible")!;
+  const sessionQueries = t.mock.method(storage, "listSessionsByWorkspaceTaskSlim", () => [
+    saved, { ...saved, id: "system", automationId: "system-ai:task-title:excluded" },
+  ]);
+  const fullReads = t.mock.method(storage, "getSession");
+  const getSlim = t.mock.fn(() => ({ ...saved, status: "running" as const, ptyBusy: true }));
+  const { baseUrl, close } = await startWorkspaceApp(storage,
+    { getSlim } as unknown as Parameters<typeof registerWorkspaceRoutes>[2]);
+  try {
+    const response = await fetch(`${baseUrl}/api/workspace-tasks/${task.id}`);
+    assert.equal(response.status, 200);
+    const detail = await response.json() as {
+      executionStatus: string;
+      sessions: Array<{ id: string; status: string; executionStatus: string; ptyBusy: boolean; workspaceTaskId: string }>;
+    };
+    assert.equal(detail.executionStatus, "running");
+    assert.equal(detail.sessions.length, 1);
+    assert.equal(detail.sessions[0].id, "visible");
+    assert.equal(detail.sessions[0].status, "running");
+    assert.equal(detail.sessions[0].executionStatus, detail.executionStatus);
+    assert.equal(detail.sessions[0].ptyBusy, true);
+    assert.equal(detail.sessions[0].workspaceTaskId, task.id);
+    assert.equal(sessionQueries.mock.callCount(), 1);
+    assert.equal(getSlim.mock.callCount(), 1);
+    assert.equal(fullReads.mock.callCount(), 0, "detail never hydrates conversation payloads");
+    assert.equal(storage.getSessionSlim("visible")?.status, "exited", "live projection does not rewrite history");
+  } finally {
+    await close();
+    storage.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a task created without a name is titled from its first prompt", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-task-prompt-"));
   const storage = new WandStorage(path.join(root, "wand.db"));
@@ -205,6 +248,12 @@ test("workspace and standalone task creation can claim a doing parent without or
     const closed = storage.createWandTask({ title: "Archived", workspaceId: workspace.id, status: "archived" });
     const create = (route: string, parentTaskId: string) => fetch(`${baseUrl}${route}`,
       json({ name: "Child", parentTaskId }));
+
+    const beforeMissing = storage.listAllWorkspaceTasks().length;
+    const missingProject = await create("/api/workspaces/missing/tasks", "missing");
+    assert.equal(missingProject.status, 404, "project lookup precedes body validation");
+    assert.deepEqual(await missingProject.json(), { error: "未找到该项目。" });
+    assert.equal(storage.listAllWorkspaceTasks().length, beforeMissing, "missing projects never fall back to global");
 
     const projectResponse = await create(`/api/workspaces/${workspace.id}/tasks`, parent.id);
     assert.equal(projectResponse.status, 201);

@@ -33,18 +33,13 @@ import { notifyLegacyUiChange } from "./ui-store-bridge";
 import { recordTerminalHistoryChunk } from "./terminal-history";
 import { notifyTasksChanged } from "../react/task-changes";
 import { invalidateSessionList } from "../react/session-list-snapshot";
+import { compactSessionFetch } from "./session-fetch.js";
 
 let hasOpenedSocket = false;
 
 /** Login teardown starts a new socket lifetime; the first open is not a resync. */
 export function resetWebSocketResyncState(): void {
   hasOpenedSocket = false;
-}
-
-function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  return fetch(input, { ...init,
-    headers: { ...(init?.headers as Record<string, string> | undefined),
-      "X-Wand-Tool-Projection": "compact" } });
 }
 
 /**

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { createReactStartupHarness, overlayHostTree } from "./helpers/react-startup-harness.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -10,28 +11,32 @@ function source(relativePath: string): string {
   return readFileSync(path.join(root, relativePath), "utf8");
 }
 
-function occurrences(contents: string, fragment: string): number {
-  return contents.split(fragment).length - 1;
-}
-
 test("business overlay hosts and browser bridges are mounted exactly once", () => {
-  const host = source("src/web-ui/react/overlay-host.tsx");
-  const index = source("src/web-ui/react/index.tsx");
+  const host = overlayHostTree("workspace");
+  const hosts = { ...host.require("./deferred-hosts"), ...host.require("./restart-overlay/host") };
   const main = source("src/web-ui/browser/main.ts");
 
   for (const component of ["WorktreeMergeHost", "FilePreviewHost", "LocalPreviewHost", "RestartOverlayHost"]) {
-    assert.equal(occurrences(host, `<${component} />`), 1, `${component} must mount once`);
+    assert.equal(host.nodes.filter(node => node.type === hosts[component]).length, 1, `${component} must mount once`);
   }
   assert.ok(
-    host.indexOf("<RestartOverlayHost />") > host.indexOf("<FilePreviewHost />"),
+    host.nodes.findIndex(node => node.type === hosts.RestartOverlayHost) > host.nodes.findIndex(node => node.type === hosts.FilePreviewHost),
     "the non-dismissable restart surface must be mounted last",
   );
-  for (const globalName of [
-    "__wandReactWorktreeMerge",
-    "__wandReactFilePreview",
-    "__wandReactRestartOverlay",
-  ]) {
-    assert.equal(occurrences(index, `window.${globalName} =`), 1, `${globalName} must be exposed once`);
+  for (const genericEnabled of [true, false]) {
+    const startup = createReactStartupHarness(false, genericEnabled);
+    const bridge = startup.start();
+    startup.start();
+    assert.equal(startup.roots.length, 1, "repeated boot reuses its React root");
+    assert.equal(startup.renders.length, 1, "repeated boot does not remount overlay state");
+    assert.equal(startup.roots[0].parentElement, startup.body.children[0]);
+    assert.equal(startup.body.children[0].children.length, 2, "one mount and one shared Portal container");
+    for (const [globalName, module, exported] of [
+      ["__wandReactWorktreeMerge", "./worktree-merge/controller", "worktreeMergeController"],
+      ["__wandReactFilePreview", "./file-preview/controller", "filePreviewController"],
+      ["__wandReactRestartOverlay", "./restart-overlay/controller", "restartOverlayController"],
+    ]) assert.equal(startup.window[globalName], startup.require(module)[exported]);
+    assert.equal(startup.window.__wandReactUi, genericEnabled ? bridge : undefined);
   }
   assert.match(main, /installWorktreeMergeLegacyAdapter\s*\(/);
   assert.match(main, /installFilePreviewLegacyAdapter\s*\(/);

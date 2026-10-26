@@ -256,10 +256,11 @@ test("native board host talks to the Wand task API instead of the removed taskbo
   assert.match(host, /taskBoardRepository\.workspaces\(/);
   // 会话模式里新建目录会在服务端生成 workspace；看板打开时必须持续拉取，
   // 否则「新建任务」的项目目录下拉停留在旧数据。
-  assert.match(host, /window\.setInterval\(\(\) => \{ void loadWorkspaces\(\); void reload\(true\); \}, createOpen \? 2_000 : 6_000\)/);
+  assert.match(host, /window\.setInterval\(\(\) => \{ void loadWorkspaces\(\); void reload\(true\); \}, 6_000\)/);
   assert.match(host, /subscribeTaskChanges/);
   assert.match(host, /taskBoardRepository\.agentDefaults\(/);
-  assert.match(host, /rememberAgentDefaults: subject\.type === "cli" && rememberCreateDefaults/);
+  const createState = readFileSync(new URL("../src/web-ui/react/issues/task-create-state.ts", import.meta.url), "utf8");
+  assert.match(createState, /rememberAgentDefaults: executionSubject\.type === "cli" && rememberDefaults/);
   assert.doesNotMatch(host, /taskBoardRepository\.saveAgentDefaults\(/);
   assert.match(host, /WandSelect/);
   assert.match(host, /issueWorkspaceOptions/);
@@ -279,37 +280,29 @@ test("business status never creates execution implicitly", () => {
   assert.equal(issueCreateDispatches("done"), false);
   assert.equal(issueCreateDispatches("archived"), false);
 
-  const host = readFileSync(new URL("../src/web-ui/react/issues/task-board-host.tsx", import.meta.url), "utf8");
-  // 创建链路和新建对话框共用同一个判定，避免「按钮写创建并指派但没派发」这类不一致。
-  assert.match(host, /dispatch && submitDescription && \(employee \|\| isDispatchableIssueAgent\(draft\.agent\)\)/);
-  assert.match(host, /const createDispatches = saveAndDispatch/);
-  // 运行模式属于本任务，保存以后默认必须显式选择。
-  assert.match(host, /<Card size="small" className="task-board-create-assign task-board-form-section" aria-label=\{createDispatches \? "第一次指派" : "执行员工"\}>/);
-  // 只创建时不出现「创建并指派」的按钮文案。
-  assert.match(host, /saveAndDispatch && draft\.description\.trim\(\) \? "保存并派发" : "保存任务"/);
-  assert.match(host, /仅保存任务的指派计划/);
+  const creator = readFileSync(new URL("../src/web-ui/react/issues/task-create.tsx", import.meta.url), "utf8");
+  assert.match(creator, /if \(saveAndDispatch\) \{/);
+  assert.match(creator, /setSaveAndDispatch\] = React\.useState\(false\)/);
+  assert.match(creator, /saveAndDispatch \? "创建并开始执行" : "仅创建任务"/);
+  assert.match(creator, /确认创建并开始执行/);
+  assert.doesNotMatch(creator, /draft\.status === "doing"/);
 });
 
 test("create form explicitly chooses saving or dispatching", () => {
   const host = readFileSync(new URL("../src/web-ui/react/issues/task-board-host.tsx", import.meta.url), "utf8");
-  const composer = host.slice(host.indexOf("task-board-native-composer"), host.indexOf("task-board-create-footer"));
+  const composer = readFileSync(new URL("../src/web-ui/react/issues/task-create.tsx", import.meta.url), "utf8");
+  const createState = readFileSync(new URL("../src/web-ui/react/issues/task-create-state.ts", import.meta.url), "utf8");
   const editor = host.slice(host.indexOf("task-board-native-assign"));
-
-  assert.match(composer, /任务标题/);
-  assert.match(composer, /可选/);
+  assert.match(composer, /任务标题（可选）/);
   assert.match(composer, /按描述自动生成/);
-  assert.match(host, /指定项目目录/);
+  assert.match(composer, /指定项目目录/);
   assert.match(composer, /<AgentFields agent=\{draft.agent\}/);
-  assert.match(composer, /onEmployeeChange=\{setEmployeeTarget\}/);
-  assert.match(host, /作为第一个 Agent 的指派内容/);
-  assert.match(host, /submitDescription && \(employee \|\| isDispatchableIssueAgent\(draft\.agent\)\)/);
-  assert.match(host, /taskBoardRepository\.dispatch\(created\.id, subject\.type === "cli" \|\| employeeOverride \? draft\.agent : null/);
-  assert.match(host, /\.\.\.\(subject\.type === "cli" \? \{ agent: draft\.agent \} : \{\}\)/);
-  assert.match(host, /parentTaskId: draft\.parentTaskId \|\| null/);
+  assert.match(composer, /taskBoardRepository\.dispatch\(created\.id, subject\.type === "cli" \|\| captured\.employeeOverride \? captured\.agent : null/);
+  assert.match(createState, /parentTaskId: draft\.parentTaskId \|\| null/);
   assert.match(composer, /ariaLabel="归属父任务"/);
   assert.match(host, /onCreateChild=\{\(\) => openCreate\("backlog", selected\)\}/);
   assert.match(host, /<TaskGoalChildren[\s\S]*?onCreateChild=/);
-  assert.match(host, /保存并派发/);
+  assert.match(composer, /保存并派发/);
 
   assert.match(editor, /指派 Agent/);
   assert.match(editor, /CLI \/ 团队兼容派发/);
@@ -325,9 +318,8 @@ test("create form explicitly chooses saving or dispatching", () => {
   assert.match(host, /task-board-agent-add/);
   assert.match(host, /TaskBoardAgentChips/);
 
-  assert.match(host, /!draft\.title\.trim\(\) && !draft\.description\.trim\(\)/);
-  assert.match(host, /created\.titleSource === "auto"/);
-  assert.match(host, /taskBoardRepository\.get\(taskId\)/);
+  assert.match(composer, /!draft\.title\.trim\(\) && !textDraft\.text\.trim\(\)/);
+  assert.match(host, /void reload\(true\)/, "the visible board continues refreshing generated titles");
 });
 
 test("board host preserves navigation, column creation, drag, and detail contracts", () => {
@@ -346,7 +338,7 @@ test("board host preserves navigation, column creation, drag, and detail contrac
   assert.match(host, /aria-label="返回工作区"/);
   assert.match(host, /\{ label: "任务看板", onNavigate: \(\) => setSelectedId\(""\) \}/);
   assert.match(host, /新建任务/);
-  assert.match(host, /创建更多/);
+  assert.match(readFileSync(new URL("../src/web-ui/react/issues/task-create.tsx", import.meta.url), "utf8"), /创建更多/);
   assert.deepEqual(ISSUE_BOARD_VIEWS.map((entry) => entry.value), ["dashboard", "board", "list", "gantt"]);
   assert.deepEqual(ISSUE_COLUMNS.map((column) => column.status), ["backlog", "todo", "doing", "done"]);
   assert.equal(ISSUE_ARCHIVE_COLUMN.status, "archived");
@@ -397,23 +389,24 @@ test("dropping an unassigned task into doing asks before sending the card descri
   assert.match(host, /任务已移入「处理中」，但派发 Agent 失败/);
 });
 
-test("create dialog keeps modal positioning so title and selects stay visible", () => {
+test("task creation shares the new-work page and owns nested property popups", () => {
   const host = readFileSync(new URL("../src/web-ui/react/issues/task-board-host.tsx", import.meta.url), "utf8");
-  const styles = readFileSync(new URL("../src/web-ui/content/styles.css", import.meta.url), "utf8");
+  const creator = readFileSync(new URL("../src/web-ui/react/issues/task-create.tsx", import.meta.url), "utf8");
   const portal = readFileSync(new URL("../src/web-ui/react/ui/portal-context.tsx", import.meta.url), "utf8");
-  const overlayRoot = readFileSync(new URL("../src/web-ui/react/start-ui.tsx", import.meta.url), "utf8");
-
-  const layout = readFileSync(new URL("../src/web-ui/react/issues/library-layout.ts", import.meta.url), "utf8");
-  assert.match(host, /wand-task-library-dialog/);
-  assert.match(host, /WandDialogSurface/);
-  assert.match(layout, /\.ant-modal:has\(\.wand-task-library-dialog\)/);
-  assert.match(layout, /max-height:[^;]*100dvh/);
-  assert.match(layout, /overflow: auto/);
-  assert.match(host, /<TaskTextArea[\s\S]*?task-board-create-title-input/);
-
-  // 看板在 Shell 里，不在 OverlayHost 的 PortalProvider 下；下拉/弹层要回落到同一 portals 根。
+  assert.match(host, /newSessionController\.open\(\{ newTask: true/);
+  assert.doesNotMatch(host, /task-board-create-form|setCreateOpen/);
+  assert.match(creator, /new-work-page conversation-root/);
+  assert.match(creator, /<NewWorkComposer/);
+  assert.match(creator, /今天你想与/);
+  assert.match(creator, /中创造些什么？/);
+  assert.match(creator, /new-work-inline-avatar/);
+  assert.match(creator, /new-work-inline-directory/);
+  assert.match(creator, /aria-label="任务标题"/);
+  assert.doesNotMatch(creator, /<h1>从这里开始新的任务<\/h1>|先记录要做的事，准备好后再开始执行。/);
+  assert.match(creator, /PopupOwnerProvider owner="task-create-properties"/);
+  const properties = creator.slice(creator.indexOf('const properties ='), creator.indexOf('const subjects ='));
+  assert.match(properties, /task-board-create-title-input/, "the title lives in the task properties popup");
   assert.match(portal, /document\.getElementById\(REACT_UI_PORTALS_ID\)/);
-  assert.match(overlayRoot, /REACT_UI_PORTALS_ID/);
 });
 
 test("backlog is a visible independent status and legacy default visibility migrates once", () => {
@@ -667,9 +660,9 @@ test("看板卡片点击就地展开，不再把整块看板换成详情页（�
   assert.match(host, /if \(expandedTaskId\) \{\s*setExpandedTaskId\(""\);\s*return;\s*\}/);
   // Esc 一次只退一层：新建对话框 → 完整详情 → 展开的卡片 → 离开看板。
   const esc = host.slice(host.indexOf('if (event.key !== "Escape"'), host.indexOf("window.addEventListener(\"keydown\", onKey)"));
-  const escOrder = ["createOpen", "selectedId", "expandedTaskId"].map((name) => esc.indexOf(`if (${name}) {`));
-  assert.deepEqual(escOrder, [...escOrder].sort((a, b) => a - b), "三段都在，且按 对话框→详情→展开卡片 的次序退");
-  assert.ok(escOrder.every((index) => index >= 0), "Esc 的三段退层缺一不可");
+  const escOrder = ["selectedId", "expandedTaskId"].map((name) => esc.indexOf(`if (${name}) {`));
+  assert.deepEqual(escOrder, [...escOrder].sort((a, b) => a - b), "看板按详情→展开卡片的次序退，新建页交给共享 owner");
+  assert.ok(escOrder.every((index) => index >= 0), "Esc 的详情与卡片退层缺一不可");
   assert.match(views, /inert=\{!open\}/, "收起后展开区不可聚焦，Tab 不会走进面板");
   assert.match(views, /id=\{`task-card-detail-\$\{task\.id\}`\}/);
 
@@ -792,7 +785,7 @@ test("task board distinguishes first-use, inactive and filtered empty states", (
   assert.match(host, /子任务 \$\{matchedTasks\.filter/);
   assert.match(host, /const matchedTasks = filterIssues\(tasks, query, filterWorkspaceId, filters, true\)/);
   assert.doesNotMatch(host, /共 \$\{visible\.length\} 个任务/);
-  assert.match(host, /rememberCreateDefaults, setRememberCreateDefaults\] = React\.useState\(false\)/);
-  const form = host.slice(host.indexOf("task-board-native-composer"));
+  const form = readFileSync(new URL("../src/web-ui/react/issues/task-create.tsx", import.meta.url), "utf8");
+  assert.match(form, /rememberDefaults, setRememberDefaults\] = React\.useState\(false\)/);
   assert.doesNotMatch(form, /rememberAgent\(/, "changing fields must not mutate global defaults");
 });

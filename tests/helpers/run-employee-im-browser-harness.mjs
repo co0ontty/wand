@@ -5,8 +5,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { build } from "esbuild";
-import { openPlushBrowser } from "./run-plush-avatar-browser-harness.mjs";
+import { build, stop } from "esbuild";
+import { closeBrowserFixture, openPlushBrowser } from "./run-plush-avatar-browser-harness.mjs";
 const root = resolve(import.meta.dirname, "../.."), output = join(root, "output/architecture-stage2/employee-im-browser");
 mkdirSync(output, { recursive: true });
 const temp = mkdtempSync(join(tmpdir(), "wand-im-browser-"));
@@ -129,4 +129,4 @@ try {
   assert.deepEqual(browser.errors, []);
   writeFileSync(join(output, "result.json"), JSON.stringify({ ok: true, fixtureOnly: true, writes: writes.length, testMessages: tests.length, realProviderCalls: 0, widths: [1280, 390], cases: ["opt-in", "shared-events", "progressive-disclosure", "hidden-selection-count", "selected-events", "masked-credentials", "saved-only-test", "failed-save-preserves-input", "explicit-clear", "late-ack-isolation", "inline-disclosure", "escape-and-enter", "input-instance-preserved", "44px-event-targets", "narrow-layout", "reduced-motion"] }, null, 2));
   console.log("Employee IM browser fixture passed (no real IM/model calls)");
-} finally { releaseSave?.(); await browser.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); rmSync(temp, { recursive: true, force: true }); }
+} finally { releaseSave?.(); await closeBrowserFixture(browser, server, () => { stop(); rmSync(temp, { recursive: true, force: true }); }); }

@@ -53,7 +53,7 @@ test("one new-work page handles conversation, CLI terminal, shell, task binding 
     plugins: [{ name: "new-work-shell-fixture", setup(builder) {
       builder.onResolve({ filter: /.*/ }, args => {
         if (!args.importer.endsWith("/browser/new-session-adapter.ts")) return;
-        if (args.path === "../react") return { path: process.cwd() + "/src/web-ui/react/new-session/controller.ts" };
+        if (args.path === "../react/new-session/controller") return;
         if (args.path === "../react/ai-teams/composer-bridge") return;
         return { path: "shell-fixture", namespace: "new-work-shell" };
       });
@@ -68,7 +68,7 @@ test("one new-work page handles conversation, CLI terminal, shell, task binding 
   // Captured public settings reproduce the installed companion's mixed-provider
   // candidate chain, not the old default-mode/single-agent happy-path fixture.
   const installed = JSON.parse(readFileSync(process.env.WAND_NEW_SESSION_CONFIG_FILE || "tests/fixtures/new-session/managed-companion.json", "utf8"));
-  let refusal: boolean | number = false;
+  let refusal: boolean | number | "malformed" = false;
   const server = createServer(async (req, res) => {
     const path = new URL(req.url!, "http://fixture").pathname;
     if (path === "/bundle.js") { res.setHeader("content-type", "text/javascript"); res.end(built.outputFiles[0].text); return; }
@@ -80,7 +80,8 @@ test("one new-work page handles conversation, CLI terminal, shell, task binding 
       let text = ""; for await (const chunk of req) text += chunk;
       const body = JSON.parse(text || "{}"); writes.push({ path, body });
       if (path === "/api/sessions" || path === "/api/ai-teams/fixture-team/runs") {
-        if (refusal) { res.statusCode = typeof refusal === "number" ? refusal : 400; refusal = false; res.end(JSON.stringify({ error: "Fixture creation error" })); }
+        if (refusal === "malformed") { refusal = false; res.end('{"id":'); }
+        else if (refusal) { res.statusCode = typeof refusal === "number" ? refusal : 400; refusal = false; res.end(JSON.stringify({ error: "Fixture creation error" })); }
         else res.end(JSON.stringify(path === "/api/sessions" ? { id: "created-" + writes.length } : { run: { id: "team-run" }, taskId: "team-task" }));
         return;
       }
@@ -145,9 +146,9 @@ test("one new-work page handles conversation, CLI terminal, shell, task binding 
   await b.screenshot(out + "/new-work-short-centered.png");
   await b.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
   await b.click('[aria-label="新工作设置"]');
-  assert.equal(await b.evaluate("document.querySelector('[role=tab][aria-selected=true]').textContent"), "对话");
+  assert.equal(await b.evaluate("document.querySelector('[aria-label=工作类型] [role=tab][aria-selected=true]').textContent"), "对话");
   await b.key("Escape");
-  await b.wait("!document.querySelector('[role=tab]') || !document.querySelector('[role=tab]').checkVisibility()");
+  await b.wait("!document.querySelector('[aria-label=工作类型]') || !document.querySelector('[aria-label=工作类型]').checkVisibility()");
   await b.click(".new-work-person"); await b.wait("!!document.querySelector('[aria-label=搜索执行对象]')");
   await b.click("[aria-label=搜索执行对象]"); await b.send("Input.insertText", { text: "另一位" });
   await b.click('.wand-execution-subject-picker input[value="employee:e_other"]');
@@ -258,8 +259,8 @@ test("one new-work page handles conversation, CLI terminal, shell, task binding 
   await b.screenshot(out + "/new-work-narrow-dark-reduced.png");
   await b.click('[aria-label="新工作设置"]');
   await b.screenshot(out + "/new-work-kind-settings.png");
-  await b.click('[role=tab][data-state=inactive], [role=tab][aria-selected=false]');
-  await b.wait("!document.querySelector('[role=tab]') || !document.querySelector('[role=tab]').checkVisibility()", "choosing a work kind closes its settings");
+  await b.click('[aria-label=工作类型] [role=tab][aria-selected=false]');
+  await b.wait("!document.querySelector('[aria-label=工作类型]') || !document.querySelector('[aria-label=工作类型]').checkVisibility()", "choosing a work kind closes its settings");
   await b.evaluate("fixture.close();true");
   // Reproduce TASK-124 with the installed configuration shape and an actual
   // localStorage restore into a new ComposerStore (full browser reload).
@@ -270,8 +271,14 @@ test("one new-work page handles conversation, CLI terminal, shell, task binding 
   for (const bound of [false, true]) {
     const scope = bound ? "regression-bound-task" : "regression-project";
     const text = `TASK-124 isolated restored draft ${scope}`;
-    await b.evaluate(`localStorage.setItem('wand-draft-'+fixture.draftKey(${JSON.stringify(scope)}),${JSON.stringify(text)});fixture.open(${JSON.stringify({ workspaceId: bound ? "regression-project" : scope, ...(bound ? { workspaceTaskId: scope } : {}) })});true`);
+    await b.evaluate(`localStorage.setItem('wand-draft-'+fixture.draftKey(${JSON.stringify(scope)}),${JSON.stringify(text)});fixture.open(${JSON.stringify({ workspaceId: bound ? "regression-project" : scope, ...(bound ? { workspaceTaskId: scope } : { taskDraft: { executionSubject: { type: "employee", id: installed.employee.id, agentOverride: { provider: "qoder", engine: "cli", model: "manual-model", mode: "managed", thinkingEffort: "off", kind: "structured" } } } }) })});true`);
     await b.wait("document.querySelector('.new-work-person')?.textContent.includes('赛博虎妞')");
+    if (!bound) {
+      assert.match(await b.evaluate("document.querySelector('[aria-label=本页执行工具]').textContent"), /Qoder/);
+      await b.click('[aria-label="更多新工作选项"]');
+      await b.click('[aria-label="恢复员工默认执行配置"]');
+      await b.wait("document.querySelector('[aria-label=本页执行工具]').textContent.includes('Pi')");
+    }
     assert.equal(await b.evaluate("document.querySelector('textarea').value"), text, "restore real persistent draft before any input event");
     assert.equal(await b.evaluate("document.querySelector('[aria-label=确认新工作执行权限]') === null"), true, "no separate permission acknowledgement is rendered");
     assert.equal(await b.evaluate("document.querySelector('.conversation-submit').disabled"), false, "a restored valid draft is ready to send immediately");
@@ -343,7 +350,7 @@ test("one new-work page handles conversation, CLI terminal, shell, task binding 
   await b.evaluate("fixture.open({});true");
   await b.wait("!!document.querySelector('.new-work-person')");
   await b.click("textarea"); await b.send("Input.insertText", { text: "unknown creation fixture" });
-  refusal = 503;
+  refusal = "malformed"; // A 200 response with an unreadable receipt may already have created the session.
   const beforeUnknown = writes.length;
   await b.click('.conversation-submit');
   await b.wait("document.querySelector('[aria-label=新建工作]')?.textContent.includes('创建结果未确认')");

@@ -605,9 +605,16 @@ export function registerWorkspaceRoutes(
     res.json(result);
   }));
 
-  // 不依赖项目的独立任务：挂到隐藏的全局空间，目录可省略（使用全局临时目录）。
-  app.post("/api/tasks", asyncRoute(async (req, res) => {
-    const workspace = storage.ensureGlobalWorkspace();
+  // 两个创建入口只在项目来源上不同；独立任务挂到隐藏全局空间。
+  // 默认只创建逻辑分组，仅显式 worktree:true 才创建隔离目录。
+  app.post(["/api/tasks", "/api/workspaces/:id/tasks"], asyncRoute(async (req, res) => {
+    const workspace = req.params.id === undefined
+      ? storage.ensureGlobalWorkspace()
+      : storage.getWorkspace(req.params.id);
+    if (!workspace) {
+      res.status(404).json({ error: "未找到该项目。" });
+      return;
+    }
     try {
       const created = createTaskForWorkspace(storage, workspace, req.body as {
         name?: unknown; description?: unknown; baseRef?: unknown; worktree?: unknown;
@@ -970,31 +977,6 @@ export function registerWorkspaceRoutes(
     });
   }));
 
-  // 默认只创建逻辑分组；仅显式 worktree:true 才创建隔离目录。
-  app.post("/api/workspaces/:id/tasks", asyncRoute(async (req, res) => {
-    const workspace = storage.getWorkspace(req.params.id);
-    if (!workspace) {
-      res.status(404).json({ error: "未找到该项目。" });
-      return;
-    }
-    try {
-      const created = createTaskForWorkspace(storage, workspace, req.body as {
-        name?: unknown; description?: unknown; baseRef?: unknown; worktree?: unknown;
-        cwd?: unknown; milestoneId?: unknown; parentTaskId?: unknown;
-      });
-      refreshAutoBoardTaskTitles(storage, titleOptions);
-      res.status(201).json({
-        ...created.task,
-        ...resolvedMilestoneFields(storage, created.task.milestoneId),
-        cwd: created.cwd,
-        isolated: created.isolated,
-        worktreeError: created.worktreeError,
-      });
-    } catch (error) {
-      sendRouteError(res, surfaceDomainError(error, /Git 仓库/) ?? error, "创建任务失败。");
-    }
-  }));
-
   // 任务详情：meta + 该任务下的会话；后台预取/轮询不改活动时间。
   app.get("/api/workspace-tasks/:taskId", (req, res) => {
     const task = storage.getWorkspaceTask(req.params.taskId);
@@ -1012,11 +994,11 @@ export function registerWorkspaceRoutes(
       ...taskExecutionProjection(taskSessions, card ? storage.countQueuedTaskCommentDispatchesForTask(card.id) : 0),
       ...resolvedMilestoneFields(storage, task.milestoneId),
       cwd: taskRuntimeCwd(task, workspace),
-      sessions: storage.listSessionsByWorkspaceTaskSlim(task.id).filter((session) => !isSystemAiCall(session)).map((session) => ({
+      sessions: taskSessions.map((session) => ({
         ...workspaceSessionSummary(session, {
           taskName: task.name,
           workspaceName: workspace?.name,
-        }, sessions, teamMarkersFor(teamMarkers, session.id)),
+        }, undefined, teamMarkersFor(teamMarkers, session.id)),
         workspaceTaskId: task.id,
       })),
     });

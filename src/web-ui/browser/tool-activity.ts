@@ -96,15 +96,6 @@ export function toolActivityTimeline<T extends ActivityBlock>(
   });
 }
 
-/**
- * 一个思考块算不算一轮：空块只有在「它就是段尾」时才是正在进行的那一轮占位，
- * 其余空块是没产出过正文的轮次（provider 只发了边界事件），不占时间线也不占计数。
- */
-function keepThinkingRound<T extends ActivityBlock>(item: ToolActivityCall<T>, lastPosition: number): boolean {
-  if (item.block.type !== "thinking") return false;
-  return String(item.block.thinking ?? "").trim() !== "" || item.index === lastPosition;
-}
-
 /** Each reasoning block is one round; rounds keep their arrival order identity. */
 export function thinkingRounds<T extends ActivityBlock>(
   items: Array<ToolActivityCall<T>>,

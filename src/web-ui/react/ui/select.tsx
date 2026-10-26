@@ -8,6 +8,7 @@ import { WandInput } from "./input";
 import { useParentPopupOwner, usePortalContainer } from "./portal-context";
 import { popupPlacement, popupOffset, registerPopupOwner, usePopupDismiss } from "./popup-lifecycle";
 import { WandUiBoundary } from "../theme";
+import { useImeGuard } from "../composer-sender/ime-guard";
 
 export interface WandSelectOption {
   value: string;
@@ -56,19 +57,26 @@ export function WandSelect({ value, defaultValue, options, placeholder = "请选
   const [open, setOpen] = React.useState(false);
   const openRef = React.useRef(false);
   const [query, setQuery] = React.useState("");
+  const searchIme = useImeGuard();
   const buttonRef = React.useRef<HTMLButtonElement | null>(null);
   const popupRef = React.useRef<HTMLDivElement | null>(null);
+  const focusedSearchRef = React.useRef<HTMLInputElement | null>(null);
   // A portal search box must not scroll its enclosing Drawer back to the top on mount.
   const focusSearch = React.useCallback((node: HTMLInputElement | null) => {
-    if (!node) return;
-    const frame = requestAnimationFrame(() => { if (openRef.current && node.isConnected) node.focus({ preventScroll: true }); });
+    // Ant refreshes its input handle on focus changes; only the initial handle owns autofocus.
+    if (!node || focusedSearchRef.current === node) return;
+    const frame = requestAnimationFrame(() => {
+      if (!openRef.current || !node.isConnected) return;
+      focusedSearchRef.current = node;
+      node.focus({ preventScroll: true });
+    });
     return () => cancelAnimationFrame(frame);
   }, []);
   const shown = displayValue ?? options.find(option => option.value === selectedValue)?.label ?? placeholder;
   const changeOpen = (next: boolean): void => {
     openRef.current = next;
     setOpen(next);
-    if (!next) setQuery("");
+    if (!next) { setQuery(""); searchIme.reset(); focusedSearchRef.current = null; }
     onOpenChange?.(next);
   };
   const filtered = filterSelectOptions(options, query);
@@ -128,9 +136,10 @@ export function WandSelect({ value, defaultValue, options, placeholder = "请选
       popupRender={menuNode => <div ref={popupRef} data-wand-popup-owner={popupOwner}>
         {searchable && <WandInput ref={focusSearch} type="search" aria-label={searchPlaceholder} placeholder={searchPlaceholder}
           value={query} onChange={event => setQuery(event.currentTarget.value)}
+          onCompositionStart={searchIme.onCompositionStart} onCompositionEnd={searchIme.onCompositionEnd}
           startSlot={<WandIcon name="search" size={14}/>}
           onKeyDown={event => {
-            if (event.nativeEvent.isComposing) return;
+            if (searchIme.shouldIgnore(event)) return;
             if (event.key === "ArrowDown" || event.key === "ArrowUp") {
               event.preventDefault();
               const enabled = popupRef.current?.querySelectorAll<HTMLElement>('[role="option"]:not([aria-disabled="true"])');

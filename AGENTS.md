@@ -82,6 +82,7 @@ Node 版本以 `.nvmrc` 为准。只检出需要的子模块：服务端构建�
 | Select/Listbox | `src/web-ui/react/ui/select.tsx` | Ant Select、Portal 所有权 | 搜索、多选、分组 | `tests/antd-foundation-browser.test.ts` |
 | Date | `src/web-ui/react/issues/date-picker.tsx` | Ant DatePicker；YYYY-MM-DD，不转 UTC；普通表单归 `task-form.tsx`，`form-controls.tsx` 仅兼容导出 | 空值、禁用 | `tests/antd-tasks-browser.test.ts` |
 | Form | feature Controller、composer 与共享 Form/Field | 本文数据与输入契约 | 创建、原位编辑；应用校验 | feature 单测与浏览器 |
+| New work | `new-session/controller.ts`、`new-session/host.tsx`、`issues/task-create.tsx` | 新建工作页与 `NewWorkComposer`；入口只传上下文 | 开始工作、仅创建任务、显式创建并执行、已有任务添加会话 | `tests/new-session-task-browser.test.ts`、`tests/task-creation-browser.test.ts`、`tests/new-work-composer-browser.test.ts` |
 | Scrollbar | `src/web-ui/content/styles.css` | `theme.tsx` token 映射；见 `DESIGN.md` | xterm 自有滚动、宿主几何 | 浏览器 computed style |
 | Toast | `src/web-ui/react/ui/toast.tsx` | 共享通知状态 | 成功、失败、提示 | `tests/antd-foundation-browser.test.ts` |
 | CRUD | storage 原子入口与 feature Controller | 本文数据与权限边界 | 依业务保存、归档 | feature 全流程与失败回归 |
@@ -92,6 +93,7 @@ Node 版本以 `.nvmrc` 为准。只检出需要的子模块：服务端构建�
 
 - 按影响范围选择验证，不要求每个小改动机械跑全套。局部改动先相关单测/类型检查；UI 补真实浏览器或设备交互。涉及共享协议、存储、运行生命周期、依赖/构建或发布时跑全量 `check/test/build`；死代码清理仍遵守全局验证约定。
 - 纯文档只核对引用、约束和 `git diff --check`，不因此重启服务或构建客户端。区分本轮问题与既有基线，明确未验证项目和阻塞，不把局部通过说成全量通过。
+- 处理任务时同步记录实际发现的其他问题和优化机会，区分已修复、待处理与待验证；完成后整理输出，每项写清证据、影响、建议做法和优先级。记录归本轮报告与工作日志，不把推测写成已确认缺陷，也不把已明确授权的同类修复仅留为建议。
 - 最终功能验收用本机已安装 Wand 服务；连接从私密 `~/.wand/acceptance-connection.json` 读取，不泄露凭据。隔离/mock 可做开发与单测，不替代最终验收；只验受影响流程，不要求每轮重验全部功能。
 - 测试不隐式调用真实付费模型；真实 CLI 样本在 `tests/fixtures/structured-cli-recordings/`，再录制须授权，入口为 `scripts/capture-structured-cli-fixtures.ts --record`。
 

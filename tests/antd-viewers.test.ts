@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
+import * as React from "react";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { loadReactModule } from "./helpers/react-startup-harness.js";
 
 import { MarkdownPreview } from "../src/web-ui/react/file-preview/markdown.tsx";
 import {
@@ -130,7 +132,7 @@ test("Markdown 预览由 React 拥有 DOM：没有 h1、没有可执行 HTML、�
   assert.match(html, /&lt;script&gt;window\.__xss = 1&lt;\/script&gt;/);
 });
 
-test("查看器不再手写通用控件，只保留有契约约束的专业面", () => {
+test("查看器不再手写通用控件，只保留有契约约束的专业面", async () => {
   const explorer = sourceOf("src/web-ui/react/file-explorer/host.tsx");
   assert.ok(!explorer.includes("<button"), "文件树控件全部走 WandButton/WandIconButton");
   assert.ok(!explorer.includes("<input"), "重命名与新建输入走 WandInput");
@@ -155,7 +157,32 @@ test("查看器不再手写通用控件，只保留有契约约束的专业面",
 
   const restart = sourceOf("src/web-ui/react/restart-overlay/host.tsx");
   assert.match(restart, /<Spin size="large"/);
-  assert.match(restart, /<Progress/);
+  // Execute the lazy delegation rather than requiring Ant Progress to remain
+  // in the eager host file. Its public progress semantics survive code splitting.
+  let loadProgress: (() => Promise<{ default: React.ComponentType<{ percent: number }> }>) | undefined;
+  const ProgressSlot = () => null;
+  const { api } = loadReactModule("src/web-ui/react/restart-overlay/host.tsx", {
+    react: { ...React, lazy: (load: typeof loadProgress) => { loadProgress = load; return ProgressSlot; },
+      useEffect: () => {}, useRef: () => ({ current: null }),
+      useSyncExternalStore: (_subscribe: unknown, snapshot: () => unknown) => snapshot() },
+  });
+  const tree = api.RestartOverlayHost({ controller: { subscribe: () => () => {},
+    getSnapshot: () => ({ open: true, phase: "waiting", attempts: 2, maxAttempts: 4,
+      target: { previousInstanceId: "old", expectedVersion: "" }, readiness: { instanceReady: false, versionReady: true } }) } });
+  const progressSlots: React.ReactElement<{ percent: number }>[] = [];
+  const visit = (node: React.ReactNode): void => React.Children.forEach(node, child => {
+    if (!React.isValidElement(child)) return;
+    if (child.type === ProgressSlot) progressSlots.push(child as React.ReactElement<{ percent: number }>);
+    visit((child.props as { children?: React.ReactNode }).children);
+  });
+  visit(tree);
+  assert.equal(progressSlots.length, 1, "waiting host mounts one deferred progress view");
+  assert.equal(progressSlots[0].props.percent, 50);
+  assert.ok(loadProgress);
+  const progress = renderToStaticMarkup(createElement((await loadProgress()).default, { percent: 50 }));
+  assert.match(progress, /role="progressbar"/);
+  assert.match(progress, /aria-valuenow="50"/);
+  assert.match(progress, /aria-label="等待服务重启进度"/);
   assert.match(restart, /showClose=\{false\}/);
   assert.ok(restart.includes("data-wand-autofocus"), "live 文本仍是弹层内唯一的初始焦点");
 

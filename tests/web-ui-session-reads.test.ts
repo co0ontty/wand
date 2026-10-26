@@ -10,6 +10,7 @@ import { getErrorMessage } from "../src/error-utils.js";
 import * as completionState from "../src/session-completion-state.js";
 import * as chatHistoryWindow from "../src/web-ui/chat-history-window.js";
 import { compactModelDisplayLabel } from "../src/web-ui/browser/composer-select-values.js";
+import { sessionFetchModule } from "./helpers/session-fetch-harness.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -43,6 +44,7 @@ function harness() {
     return response.promise;
   };
   const dependencies: Record<string, unknown> = {
+    "./session-fetch.js": sessionFetchModule(fetchImpl),
     "./state": { composer, state, writeStoredBoolean: noop },
     "../react/session-list-snapshot": {
       loadSessionList: () => fetchImpl("/api/sessions", { credentials: "same-origin" }).then((response) => parseJsonResponse(response)),
@@ -208,7 +210,7 @@ test("session detail requests opt in to compact tool projection", async () => {
   h.state.selectedId = "A";
   h.state.sessions = [{ id: "A", status: "running" }];
   const pending = h.api.loadOutput("A");
-  assert.equal((h.requests[0]?.init?.headers as Record<string, string>)["X-Wand-Tool-Projection"], "compact");
+  assert.equal(new Headers(h.requests[0]?.init?.headers).get("X-Wand-Tool-Projection"), "compact");
   h.respond(0, { id: "A", status: "running", messages: [] });
   await pending;
 });

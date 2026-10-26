@@ -1,6 +1,8 @@
 import type { SessionProvider, SessionRunner, SessionSnapshot, StructuredSessionState } from "./types.js";
-import { isNativeThinkingEffort } from "./provider-catalog.js";
+import { defaultStructuredRunner, isNativeThinkingEffort, isSessionProvider } from "./provider-catalog.js";
 import { shellQuote } from "./shell-quote.js";
+
+export { defaultStructuredRunner } from "./provider-catalog.js";
 
 /**
  * 把会话级系统提示交给 CLI 的开关。Claude / Qoder / Pi 用 `--append-system-prompt`，
@@ -85,22 +87,8 @@ export function prefixedThinkingEffort(
 
 export function isStructuredRunnerForProvider(provider: SessionProvider, runner: unknown): runner is SessionRunner {
   // "claude-sdk" 是历史值：SDK 执行路径已移除，只在读旧会话时用来识别（见 normalizeStructuredRunner）。
-  if (provider === "claude") return runner === "claude-sdk" || runner === "claude-cli-print";
-  if (provider === "codex") return runner === "codex-cli-exec";
-  if (provider === "opencode") return runner === "opencode-cli-run";
-  if (provider === "grok") return runner === "grok-cli-headless";
-  if (provider === "qoder") return runner === "qoder-cli-print";
-  if (provider === "pi") return runner === "pi-cli-json";
-  return false;
-}
-
-export function defaultStructuredRunner(provider: SessionProvider): SessionRunner {
-  if (provider === "codex") return "codex-cli-exec";
-  if (provider === "opencode") return "opencode-cli-run";
-  if (provider === "grok") return "grok-cli-headless";
-  if (provider === "qoder") return "qoder-cli-print";
-  if (provider === "pi") return "pi-cli-json";
-  return "claude-cli-print";
+  return isSessionProvider(provider)
+    && (runner === defaultStructuredRunner(provider) || provider === "claude" && runner === "claude-sdk");
 }
 
 /**
@@ -125,7 +113,7 @@ export function resolveStructuredRunner(
 
 export function defaultStructuredState(
   provider: SessionProvider,
-  runner = defaultStructuredRunner(provider),
+  runner: SessionRunner = defaultStructuredRunner(provider),
 ): StructuredSessionState {
   return {
     provider,

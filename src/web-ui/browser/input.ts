@@ -33,12 +33,7 @@ import { shouldPersistQueueItemRestore } from "./composer-draft";
 import { handlePiSettingsSubmit, syncPiSettingsComposer } from "./pi-settings-adapter";
 import { resolveInsertBeforeAnchor } from "./queue-dom";
 import { clearQueueView, paintCrossSessionQueue, paintQueueBar } from "./queue-view-loader";
-
-function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  return fetch(input, { ...init,
-    headers: { ...(init?.headers as Record<string, string> | undefined),
-      "X-Wand-Tool-Projection": "compact" } });
-}
+import { compactSessionFetch } from "./session-fetch.js";
 
       export function autoResizeInput(el) {
         if (!el) return;

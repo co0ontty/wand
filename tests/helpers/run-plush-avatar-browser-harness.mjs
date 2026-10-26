@@ -9,11 +9,44 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createServer } from "node:http";
 import { build, stop } from "esbuild";
+import { openChromeConnection } from "./browser-process.mjs";
 
 const pause = ms => new Promise(resolvePause => setTimeout(resolvePause, ms));
 const root = resolve(import.meta.dirname, "../..");
 export const output = resolve(root, process.env.WAND_PLUSH_BROWSER_OUTPUT || "output/plush-avatar");
 mkdirSync(output, { recursive: true });
+
+/** Stop accepting new sockets before closing existing keep-alive requests. */
+export async function closeFixtureServer(server) {
+  let timer;
+  try {
+    await Promise.race([
+      new Promise((resolveClose, reject) => {
+        server.close(error => error ? reject(error) : resolveClose());
+        server.closeAllConnections();
+      }),
+      new Promise((_resolve, reject) => { timer = setTimeout(() => reject(Error("Fixture HTTP server did not close within 3s")), 3000); }),
+    ]);
+  } finally { clearTimeout(timer); }
+}
+
+/** An unavailable browser must not prevent fixture sockets or owned files from closing. */
+export async function closeBrowserFixture(browser, server, cleanup) {
+  const trace = stage => {
+    if (process.env.WAND_BROWSER_CLEANUP_TRACE !== "1") return;
+    process.stderr.write(JSON.stringify({ fixtureCleanup: stage,
+      at: new Date().toISOString(), resources: process.getActiveResourcesInfo(),
+      handles: process._getActiveHandles().map(handle => ({ type: handle.constructor?.name,
+        pid: handle.pid, fd: handle.fd, destroyed: handle.destroyed, readable: handle.readable, writable: handle.writable })) }) + "\n");
+  };
+  trace("browser-start");
+  try { await browser.close(); trace("browser-closed"); }
+  finally {
+    trace("http-start");
+    try { await closeFixtureServer(server); trace("http-closed"); }
+    finally { cleanup(); trace("cleanup-complete"); }
+  }
+}
 
 export async function recordMotion(browser, name = "avatar-motion", durationMs = 4500) {
   const directory = join(output, name); mkdirSync(directory, { recursive: true });
@@ -47,60 +80,13 @@ export async function recordMotion(browser, name = "avatar-motion", durationMs =
   return { frames: samples.length, duration: samples.at(-1).time-samples[0].time, video, timing: "Actual Chrome screencast timestamps preserved" };
 }
 
-/** Chrome creates DevToolsActivePort before its contents are fully published. */
-export function readPublishedChromePort(portFile) {
-  let contents;
-  try { contents = readFileSync(portFile, "utf8"); }
-  catch (error) { if (error.code === "ENOENT") return null; throw error; }
-  const end = contents.indexOf("\n");
-  if (end < 0) return null;
-  const port = contents.slice(0, end).trim();
-  return /^\d{1,5}$/.test(port) && Number(port) > 0 && Number(port) <= 65535 ? port : null;
-}
+export { readPublishedChromePort, stopChromeProcess } from "./browser-process.mjs";
 
 export async function openPlushBrowser(width = 1280, height = 960, fallback = false, motion = "system") {
   assert.ok(["system", "no-preference", "reduce"].includes(motion), "Known motion test preference");
-  const temp = mkdtempSync(join(tmpdir(), "wand-plush-chrome-"));
-  const chrome = spawn(process.env.CHROME_BIN || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", [
-    "--headless=new", "--no-first-run", "--remote-allow-origins=*",
-    "--remote-debugging-port=0", `--user-data-dir=${temp}/profile`,
-    ...(fallback ? ["--disable-webgl"] : []), "about:blank",
-  ], { stdio: ["ignore", "ignore", "pipe"] });
-  let startupError, startupLog = "";
-  chrome.once("error", error => { startupError = error; });
-  chrome.stderr.on("data", chunk => { startupLog = (startupLog + chunk.toString()).slice(-8192); });
-  let socket;
+  const browser = await openChromeConnection("about:blank", fallback ? ["--disable-webgl"] : []);
+  const { socket } = browser;
   try {
-    const portFile = join(temp, "profile/DevToolsActivePort");
-    // The port file, not elapsed sleeps, is the startup readiness signal. Hosted
-    // CPU contention may exceed the old 7.5s window; process failures still fail early.
-    const deadline = Date.now() + 30_000;
-    let port;
-    while (!(port = readPublishedChromePort(portFile))) {
-      if (startupError) throw startupError;
-      if (chrome.exitCode !== null || chrome.signalCode !== null) throw Error(`Chrome exited before debugging was ready: ${chrome.exitCode ?? chrome.signalCode}; ${startupLog}`);
-      if (Date.now() >= deadline) throw Error(`Chrome debugging did not become ready within 30s; ${startupLog}`);
-      await pause(50);
-    }
-    assert.match(port, /^\d{1,5}$/, "Chrome publishes a complete numeric debugging port");
-    let page, discoveryError = "no page target";
-    while (Date.now() < deadline) {
-      if (startupError) throw startupError;
-      if (chrome.exitCode !== null || chrome.signalCode !== null) throw Error(`Chrome exited during debugging discovery; ${startupLog}`);
-      try {
-        const response = await fetch(`http://127.0.0.1:${port}/json`, { signal: AbortSignal.timeout(Math.min(1000, Math.max(1, deadline - Date.now()))) });
-        const body = await response.text();
-        if (!response.ok) throw Error(`HTTP ${response.status}: ${body.slice(0, 256)}`);
-        const pages = JSON.parse(body);
-        page = Array.isArray(pages) && pages.find(target => target.type === "page" && typeof target.webSocketDebuggerUrl === "string");
-        if (page) break;
-        discoveryError = "no page target";
-      } catch (error) { discoveryError = error.message; }
-      await pause(50);
-    }
-    if (!page) throw Error(`Chrome page discovery did not become ready within 30s: ${discoveryError}; ${startupLog}`);
-    socket = new WebSocket(page.webSocketDebuggerUrl);
-    await once(socket, "open");
     const pending = new Map(), errors = [], events = []; let sequence = 0;
     socket.addEventListener("message", event => {
       const message = JSON.parse(event.data);
@@ -110,6 +96,10 @@ export async function openPlushBrowser(width = 1280, height = 960, fallback = fa
       if (!request) return;
       pending.delete(message.id); clearTimeout(request.timer);
       message.error ? request.reject(Error(`CDP rejected ${request.method}`)) : request.resolve(message.result);
+    });
+    socket.addEventListener("close", () => {
+      for (const request of pending.values()) { clearTimeout(request.timer); request.reject(Error(`Chrome closed during ${request.method}`)); }
+      pending.clear();
     });
     const send = (method, params = {}) => new Promise((resolveSend, reject) => {
       const id = ++sequence;
@@ -123,7 +113,8 @@ export async function openPlushBrowser(width = 1280, height = 960, fallback = fa
       return reply.result.value;
     };
     const wait = async (expression, label = expression) => {
-      for (let n = 0; n < 250; n++) { if (await evaluate(expression)) return; await pause(40); }
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) { if (await evaluate(expression)) return; await pause(40); }
       throw Error(`Browser condition missing: ${label}`);
     };
     const settle = () => evaluate("document.fonts.ready.then(()=>new Promise(resolve=>{let n=0;function frame(){if(++n===6)resolve();else requestAnimationFrame(frame)}requestAnimationFrame(frame)}))");
@@ -153,16 +144,9 @@ export async function openPlushBrowser(width = 1280, height = 960, fallback = fa
       assert.equal(await evaluate("matchMedia('(prefers-reduced-motion: reduce)').matches"), motion === "reduce");
     }
     await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
-    return { send, evaluate, wait, settle, click, clickText, key, screenshot, errors, events,
-      async close() {
-        socket.close(); chrome.kill("SIGTERM"); await Promise.race([once(chrome, "exit"), pause(1500)]);
-        try { rmSync(temp, { recursive: true, force: true }); } catch { /* only owned Chrome profile */ }
-      },
-    };
+    return { send, evaluate, wait, settle, click, clickText, key, screenshot, errors, events, close: browser.close };
   } catch (error) {
-    socket?.close(); chrome.kill("SIGTERM");
-    await Promise.race([once(chrome, "exit").catch(() => {}), pause(1500)]);
-    rmSync(temp, { recursive: true, force: true });
+    await browser.close();
     throw error;
   }
 }
@@ -441,11 +425,9 @@ export async function runPlushBrowser() {
     await browser.screenshot(join(output, "failure.png")).catch(()=>{});
     writeFileSync(join(output,"browser-result.json"), JSON.stringify(evidence,null,2)+"\n"); throw error;
   } finally {
-    await browser.close();
     // Chrome can leave speculative/keep-alive sockets after its process exits.
     // Do not leave the successful fixture hanging in server.close().
-    server.closeAllConnections();
-    await new Promise(resolveClose=>server.close(resolveClose)); rmSync(temp,{recursive:true,force:true});
+    await closeBrowserFixture(browser, server, () => rmSync(temp,{recursive:true,force:true}));
   }
 }
 

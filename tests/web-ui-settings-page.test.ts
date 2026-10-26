@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
 import test from "node:test";
+import ts from "typescript";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import express from "express";
@@ -13,6 +15,7 @@ import { isStandaloneSettingsPage } from "../src/web-ui/page.js";
 import { AuthService } from "../src/auth.js";
 import { WandStorage } from "../src/storage.js";
 import { SettingsHost } from "../src/web-ui/react/settings/host.js";
+import { createReactStartupHarness, overlayHostTree } from "./helpers/react-startup-harness.js";
 
 const source = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
@@ -75,12 +78,32 @@ test("page presentation is always visible without a controller open or a modal w
 });
 
 test("page mode bypasses home bootstrap and only mounts settings plus its supporting overlays", () => {
-  const render = source("src/web-ui/browser/render.ts");
-  for (const signature of ["renderBootLoading()", "restoreLoginSession()", "render(options?: any)"]) {
-    assert.ok(render.includes(`export function ${signature} {\n  if (isStandaloneSettingsPage()) return;`));
+  const render = ts.createSourceFile("render.ts", source("src/web-ui/browser/render.ts"), ts.ScriptTarget.Latest, true);
+  for (const name of ["renderBootLoading", "restoreLoginSession", "render"]) {
+    const declaration = render.statements.find(statement => ts.isFunctionDeclaration(statement) && statement.name?.text === name);
+    assert.ok(declaration, `missing home entry ${name}`);
+    const api: Record<string, () => unknown> = {};
+    const code = ts.transpileModule(declaration.getText(render), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
+    runInNewContext(code, { exports: api, isStandaloneSettingsPage: () => true });
+    // No DOM/state/network globals are supplied: an entry must return before
+    // performing any home bootstrap work, regardless of whitespace or signature.
+    assert.equal(api[name](), undefined, `${name} must bypass home work on the settings page`);
   }
-  assert.match(source("src/web-ui/react/index.tsx"), /settingsPresentation=\{standaloneSettings \? "page" : "workspace"\}/);
-  assert.match(source("src/web-ui/react/overlay-host.tsx"), /settingsPresentation === "workspace" \? <>/);
+  const startup = createReactStartupHarness(true);
+  startup.start();
+  const provider = startup.renders[0] as React.ReactElement<{ children: React.ReactElement<{ settingsPresentation: string }> }>;
+  assert.equal(provider.props.children.props.settingsPresentation, "page");
+  assert.deepEqual(startup.effects, ["styles"], "standalone settings does not install workspace navigation histories");
+  assert.equal(startup.window.__wandReactSettings, startup.require("./settings/controller").settingsController);
+  assert.equal(startup.window.__wandReactWorkspaces, undefined);
+  const host = overlayHostTree("page"), features = host.require("./deferred-hosts");
+  const settings = host.nodes.filter(node => node.type === features.SettingsHost);
+  assert.equal(settings.length, 1);
+  assert.equal(settings[0].props.presentation, "page");
+  for (const name of ["WorkspacesHost", "MissionsHost", "GithubIssuesHost", "WorktreeMergeHost", "FilePreviewHost"]) {
+    assert.equal(host.nodes.filter(node => node.type === features[name]).length, 0, `page mode must not mount ${name}`);
+  }
+  assert.equal(host.nodes.filter(node => node.type === host.require("./restart-overlay/host").RestartOverlayHost).length, 1);
   const css = source("src/web-ui/content/styles.css");
   assert.match(css, /\.wand-settings-library-page \{[^}]*inset:0;[^}]*overflow:hidden;[^}]*pointer-events:auto/);
 });

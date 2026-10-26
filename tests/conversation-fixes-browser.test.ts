@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { build } from "esbuild";
+import { retainedGroupChatFixture } from "./conversation-group-visibility-fixture.js";
 import express from "express";
 import { conversationHarness } from "./helpers/conversation-harness.js";
 import { registerConversationRoutes } from "../src/server-conversation-routes.js";
@@ -17,7 +18,7 @@ test("F1–F5 conversation defect regression in real Chrome", { skip: process.en
   const evidence = join(root, ".wand-team/run_5cc8a794a8ba/fixes-evidence/browser"); mkdirSync(evidence, { recursive: true });
   const h = conversationHarness(t);
   h.storage.saveSiliconEmployee({ ...h.storage.getSiliconEmployee("e_test_1")!, id: "e_wand_default", name: "默认伙伴（明确替身）" });
-  await build({ stdin: { resolveDir: root, loader: "tsx", contents: `
+  await build({ plugins: [retainedGroupChatFixture], stdin: { resolveDir: root, loader: "tsx", contents: `
     import * as React from "react";
     import { createRoot } from "react-dom/client";
     import { ShellSidebar } from "./src/web-ui/react/shell/shell-sidebar";
@@ -57,7 +58,7 @@ test("F1–F5 conversation defect regression in real Chrome", { skip: process.en
   app.get("/api/silicon-employees", (_req, res) => res.json({ employees: h.storage.listSiliconEmployees({ includeArchived: true }) }));
   app.get("/api/ai-teams", (_req, res) => res.json(h.storage.listAiTeams()));
   app.get("/api/workspaces", (_req, res) => res.json(h.storage.listWorkspaces()));
-  for (const path of ["/api/tasks", "/api/ai-team-runs"]) app.get(path, (_req, res) => res.json([]));
+  for (const path of ["/api/tasks", "/api/ai-team-runs", "/api/sessions"]) app.get(path, (_req, res) => res.json([]));
   app.get("/api/attention", (_req, res) => res.json({ items: [] })); app.get("/api/*", (_req, res) => res.json({}));
   app.get("/app.js", (_req, res) => res.type("js").send(readFileSync(join(temp, "app.js"))));
   for (const file of ["styles.css", "tailwind.css"]) app.get(`/${file}`, (_req, res) => res.type("css").send(readFileSync(join(root, "src/web-ui/content", file))));
@@ -101,7 +102,7 @@ test("F1–F5 conversation defect regression in real Chrome", { skip: process.en
       await click(`[data-wand-popup-owner="${owner}"] .ant-select-item-option`);
       await escape();
     };
-    const openCreate = async () => { await click('[aria-label="对话操作"]'); await click('#conversation-create-panel button'); await wait('document.querySelector("#conversation-create-panel .conversation-group-editor")?.getClientRects().length>0'); };
+    const openCreate = async () => { await click('[aria-label="发起群聊"]'); await wait('document.querySelector("#conversation-create-panel .conversation-group-editor")?.getClientRects().length>0'); };
     const preparePlan = async (id: string) => {
       const receipt = await h.dispatch(id, `批准回归-${randomUUID().slice(0, 6)}`);
       const detail = h.runner.detail(receipt.runId!), step = detail.steps.find(s => s.kind === "leader")!;

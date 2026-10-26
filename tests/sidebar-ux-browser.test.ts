@@ -7,6 +7,7 @@ import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "nod
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { build } from "esbuild";
+import { retainedGroupChatFixture } from "./conversation-group-visibility-fixture.js";
 import { openBrowser } from "./helpers/sidebar-ux-browser.mjs";
 
 // Real production controls and Chrome input; repository fixtures never execute a model.
@@ -47,7 +48,7 @@ function DialogHost(){const state=React.useSyncExternalStore(overlayStore.subscr
   return dialog?<WandDialog key={dialog.id} open title={dialog.options.title} description={dialog.options.description} tone={dialog.options.tone} icon={dialog.options.icon} actions={dialog.options.actions} input={dialog.options.input} dismissable={dialog.options.dismissable} onAction={(action,inputValue)=>overlayStore.completeDialog(dialog.id,{dismissed:false,action,inputValue})} onDismiss={()=>overlayStore.completeDialog(dialog.id,{dismissed:true})}/>:null;}
 conversationUi.mode("tasks");
 createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvider store={store}><ShellSidebar/><div style={{flex:1,minWidth:0}}><ShellTopbar/></div><DialogHost/></UiStoreProvider></WandUiProvider>);`;
-  await build({ stdin: { contents: source, resolveDir: root, loader: "tsx" }, bundle: true, format: "iife", platform: "browser", jsx: "automatic", outfile: join(temp, "app.js"), define: { "process.env.NODE_ENV": '"production"' } });
+  await build({ plugins: [retainedGroupChatFixture], stdin: { contents: source, resolveDir: root, loader: "tsx" }, bundle: true, format: "iife", platform: "browser", jsx: "automatic", outfile: join(temp, "app.js"), define: { "process.env.NODE_ENV": '"production"' } });
   const session = (id: string, title: string, extra = {}) => ({ id, title, provider: "pi", kind: "structured", cwd: "/work/atlas", status: "idle", startedAt: "2026-10-07T08:00:00Z", ...extra });
   const task = (id: string, name: string, sessions: unknown[]) => ({ id, name, workspaceId: "w1", cwd: "/work/atlas", sessions, status: "active", createdAt: "2026-10-07T08:00:00Z" });
   const groups = [
@@ -88,6 +89,7 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
         : url.pathname === "/api/attention" ? { items: [{ id: "sidebar-alert", title: "会话需要处理", detail: "验证状态提示不挤动主导航", sessionId: "s1" }] }
         : url.pathname === "/api/ai-team-runs" ? { runs: [] }
         : url.pathname === "/api/conversations" ? { conversations }
+        : url.pathname === "/api/sessions" ? []
         : url.pathname === "/api/ai-teams" ? []
         : url.pathname === "/api/config" ? { userProfile: { name: "测试用户", avatar: "cat:2" } } : {};
       res.end(JSON.stringify(payload)); return;
@@ -182,7 +184,7 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
         assert.equal(new Set(rail.buttons.map(b => b.x)).size, 1, `${mode}: destinations form a vertical rail`);
         assert.ok(rail.buttons.every(b => b.size === 44));
         assert.equal(rail.profile, "测试用户 · 设置");
-        assert.deepEqual(rail.buttons.map(b => b.label), ["对话", "工作区", "任务看板", "团队", "定时任务"]);
+        assert.deepEqual(rail.buttons.map(b => b.label), ["对话", "工作区", "任务看板", "团队", "定时"]);
         await browser.click('.sidebar-notification-button');
         await browser.wait('!!document.querySelector("#sidebar-notifications .wand-attention-item")', "notifications open from rail");
         await browser.click('#sidebar-notifications strong');

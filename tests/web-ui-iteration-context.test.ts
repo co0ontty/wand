@@ -101,10 +101,9 @@ test("默认迭代预选钩子只在打开时填一次", () => {
   assert.ok(source.includes("if (done.current || !milestone) return;"));
   assert.ok(source.includes("done.current = false;"), "关闭后要允许下次打开重新预选");
   // 会建任务卡的入口都要接上预选，否则「所有任务都有默认迭代」在前端不成立。
-  // 侧栏「新建任务」现在统一复用新建会话页（`workspaces/host.tsx` 只是桥接，不建任务卡），
-  // 那条路径没有迭代可预选；桥接本身单独钉住，避免有人又在那里建任务却忘了预选。
+  // 看板与侧栏都进入共享新建工作页；任务模式持有默认迭代预选，入口桥接不再建卡。
   for (const file of [
-    "../src/web-ui/react/issues/task-board-host.tsx",
+    "../src/web-ui/react/issues/task-create.tsx",
     "../src/web-ui/react/missions/host.tsx",
   ]) {
     const host = readFileSync(new URL(file, import.meta.url), "utf8");
@@ -113,7 +112,10 @@ test("默认迭代预选钩子只在打开时填一次", () => {
   }
   const bridge = readFileSync(new URL("../src/web-ui/react/workspaces/host.tsx", import.meta.url), "utf8");
   assert.ok(bridge.includes("newSessionController.open("), "侧栏新建任务桥接到统一的新建会话页");
-  assert.doesNotMatch(bridge, /\/api\/tasks|createTask/, "桥接不建任务卡，所以没有可预选的迭代");
+  assert.doesNotMatch(bridge, /\/api\/tasks|createTask/, "桥接不建任务卡，预选归共享创建页");
+  const creator = readFileSync(new URL("../src/web-ui/react/issues/task-create.tsx", import.meta.url), "utf8");
+  assert.match(creator, /usePreselectMilestone\(!loading && !resumedDraft\.current/, "返回已编辑草稿时不重新填入已清空的迭代");
+  assert.match(creator, /current && !current\.milestoneId \?/, "入口指定迭代优先于默认值");
   assert.equal(typeof useDefaultMilestone, "function");
   assert.equal(typeof usePreselectMilestone, "function");
 });
@@ -131,13 +133,12 @@ test("默认迭代只在面板打开时拉列表（登录前挂载的宿主不�
     "没打开（或已加载/加载中）时不该打接口",
   );
   assert.ok(source.includes("[active, snapshot.loaded, snapshot.loading]"), "打开或加载状态变化后要能重试");
-  for (const file of [
-    "../src/web-ui/react/issues/task-board-host.tsx",
-    "../src/web-ui/react/missions/host.tsx",
-  ]) {
-    const host = readFileSync(new URL(file, import.meta.url), "utf8");
-    assert.match(host, /useDefaultMilestone\([^)]*,\s*[\w.]+/, `${file} 要把打开状态传进去`);
-  }
+  const mission = readFileSync(new URL("../src/web-ui/react/missions/host.tsx", import.meta.url), "utf8");
+  assert.match(mission, /useDefaultMilestone\(activeTaskContext\.workspaceId, creating\)/);
+  const host = readFileSync(new URL("../src/web-ui/react/new-session/host.tsx", import.meta.url), "utf8");
+  assert.match(host, /return controller\.open \?[\s\S]*controller\.newTask\s*\? <TaskCreationPage/, "任务创建页只在用户打开任务模式后挂载");
+  const creator = readFileSync(new URL("../src/web-ui/react/issues/task-create.tsx", import.meta.url), "utf8");
+  assert.match(creator, /useDefaultMilestone\(draft\?\.workspaceId \|\| null, !loading\)/, "配置加载后才请求迭代");
 });
 
 test("本轮变更面板默认用迭代提示词，勾选状态一眼可见", () => {

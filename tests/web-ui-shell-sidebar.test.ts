@@ -3,6 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -10,6 +11,7 @@ import { confirmSidebarLogout } from "../src/web-ui/react/shell/shell-sidebar.js
 import { conversationUi } from "../src/web-ui/react/conversations/state.js";
 import { taskBoardController } from "../src/web-ui/react/issues/task-board-controller.js";
 import { overlayStore } from "../src/web-ui/react/overlay-controller.js";
+import { loadReactModule } from "./helpers/react-startup-harness.js";
 
 import {
   MemoryUiAdapter,
@@ -164,13 +166,20 @@ function fixture(overrides: Partial<UiSnapshotData> = {}): UiSnapshotData {
   };
 }
 
-function renderSidebar(snapshot: UiSnapshotData): string {
+// A cold SSR cannot run the effect that downloads the task tree. Exercise that
+// boundary separately, then render the same shell with its real loaded child.
+const sidebarRequire = createRequire(new URL("../src/web-ui/react/shell/shell-sidebar.tsx", import.meta.url));
+const loadedSidebar = loadReactModule("src/web-ui/react/shell/shell-sidebar.tsx", {
+  "../deferred-feature": { deferredComponent: () => sidebarRequire("../workspaces/workspaces-panel").WorkspacesPanel },
+}).api.ShellSidebar as typeof ShellSidebar;
+
+function renderSidebar(snapshot: UiSnapshotData, workspaceLoaded = false): string {
   const store = new MemoryUiAdapter(snapshot);
   try {
     return renderToStaticMarkup(createElement(
-      UiStoreProvider,
+      workspaceLoaded ? sidebarRequire("./ui-store-react").UiStoreProvider : UiStoreProvider,
       { store },
-      createElement(ShellSidebar),
+      createElement(workspaceLoaded ? loadedSidebar : ShellSidebar),
     ));
   } finally {
     store.dispose();
@@ -179,14 +188,15 @@ function renderSidebar(snapshot: UiSnapshotData): string {
 
 /**
  * 侧栏现在只为当前投影挂载内容：工作区树的断言要在「工作区」模式下渲染，
- * 静态渲染没有 effect，不会走到首屏空闲后挂载另一侧的路径。
+ * 未加载/已加载分别验证，不能把 SSR 的 chunk 等待状态当作已渲染的树。
  */
-function renderWorkspaceSidebar(snapshot: UiSnapshotData): string {
-  conversationUi.mode("tasks");
+function renderWorkspaceSidebar(snapshot: UiSnapshotData, workspaceLoaded = true): string {
+  const owner = workspaceLoaded ? sidebarRequire("../conversations/state").conversationUi : conversationUi;
+  owner.mode("tasks");
   try {
-    return renderSidebar(snapshot);
+    return renderSidebar(snapshot, workspaceLoaded);
   } finally {
-    conversationUi.mode("chats");
+    owner.mode("chats");
   }
 }
 
@@ -423,11 +433,15 @@ test("a desktop file panel borrows the list space without changing the compact p
   assert.doesNotMatch(restored, /context-rail/);
 });
 
-test("Sidebar mounts only the active projection so the first load does not fetch both lists", () => {
+test("Sidebar SSR selects one projection and preserves the workspace loading boundary", () => {
   const chats = renderSidebar(fixture());
   assert.match(chats, /conversation-sidebar-list/);
   assert.doesNotMatch(chats, /class="workspaces-panel"/, "chats first paint must not include the workspace tree");
-  const tasks = renderWorkspaceSidebar(fixture());
+  const pending = renderWorkspaceSidebar(fixture(), false);
+  assert.match(pending, /role="status"[^>]*>正在加载工作区…/);
+  assert.doesNotMatch(pending, /class="workspaces-panel"|conversation-sidebar-list/,
+    "a cold task projection neither renders its unloaded tree nor mounts the chat list");
+  const tasks = renderWorkspaceSidebar(fixture(), true);
   assert.match(tasks, /class="workspaces-panel"/);
   assert.doesNotMatch(tasks, /conversation-sidebar-list/, "workspace first paint must not include the conversation list");
 });
@@ -443,7 +457,9 @@ test("ShellSidebar removes redundant tools and retains a closed account menu", (
   for (const id of ["missions-button", "github-issues-button", "logout-button"]) {
     assert.doesNotMatch(html, new RegExp(`id="${id}"`));
   }
-  assert.match(html, /sidebar-list-title[^>]*><strong>执行会话<\/strong>/);
+  const title = html.match(/<([a-z][\w-]*)\b[^>]*class="[^"]*\bsidebar-list-title\b[^"]*"[^>]*>([\s\S]*?)<\/\1>/);
+  assert.ok(title, "the workspace list has its own title node");
+  assert.equal(title[2].replace(/<[^>]*>/g, "").trim(), "执行会话");
   // 搜索框现在常驻 DOM（靠 CSS 展开、inert 收起），所以收起时断言「不可交互」，
   // 而不是「不存在」（旧断言是 placeholder 不出现）。
   assert.match(html, /class="sidebar-search-expand[^"]*"[^>]*inert=/);

@@ -396,10 +396,17 @@ test("task session rows and work-window tabs render each CLI logo", () => {
   assert.match(websocket, /statusUpdate\.title = msg\.data\.title/);
 });
 
-test("new task dialog delegates project suggestions and controls to the library", () => {
+test("new work variants delegate project suggestions and input to shared library controls", () => {
   const newSessionHost = readFileSync(new URL("../src/web-ui/react/new-session/host.tsx", import.meta.url), "utf8");
-  assert.match(newSessionHost, /<AutoComplete/);
-  assert.match(newSessionHost, /<Sender/);
+  const taskCreator = readFileSync(new URL("../src/web-ui/react/issues/task-create.tsx", import.meta.url), "utf8");
+  const composer = readFileSync(new URL("../src/web-ui/react/new-session/composer.tsx", import.meta.url), "utf8");
+  for (const variant of [newSessionHost, taskCreator]) {
+    assert.match(variant, /<AutoComplete/);
+    assert.match(variant, /<NewWorkComposer/);
+    assert.doesNotMatch(variant, /<Sender\b/, "variants must use the shared input and keyboard policy");
+  }
+  assert.match(composer, /<Sender/);
+  assert.match(composer, /useImeGuard\(\)/);
   assert.match(newSessionHost, /<NewSessionTaskField/);
   assert.doesNotMatch(sessionPickerAndWorktreeStyles, /wand-new-project-providers/);
 });

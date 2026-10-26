@@ -2,6 +2,7 @@ import * as React from "react";
 import { WandIcon } from "./icons";
 import { WandInput } from "./input";
 import { classNames } from "./class-names";
+import { useImeGuard } from "../composer-sender/ime-guard";
 
 export interface WandSearchFieldProps {
   value: string;
@@ -30,9 +31,12 @@ export function WandSearchField({
 }: WandSearchFieldProps): React.ReactElement {
   const internalRef = React.useRef<HTMLInputElement>(null);
   const ref = inputRef ?? internalRef;
-  const composing = React.useRef(false);
+  const ime = useImeGuard();
+  // Text commits may arrive after compositionend; only keyboard actions need the trailing guard.
+  const composingText = React.useRef(false);
   const clear = (): void => {
-    composing.current = false;
+    ime.reset();
+    composingText.current = false;
     onValueChange("");
     onSearch?.("");
     ref.current?.focus();
@@ -53,18 +57,19 @@ export function WandSearchField({
       aria-autocomplete={listId ? "list" : undefined}
       aria-controls={listId}
       aria-activedescendant={activeOptionId}
-      onCompositionStart={() => { composing.current = true; }}
+      onCompositionStart={() => { composingText.current = true; ime.onCompositionStart(); }}
       onCompositionEnd={(event) => {
-        composing.current = false;
+        composingText.current = false;
+        ime.onCompositionEnd();
         onSearch?.(event.currentTarget.value);
       }}
       onChange={(event) => {
         const next = event.currentTarget.value;
         onValueChange(next);
-        if (!composing.current) onSearch?.(next);
+        if (!composingText.current) onSearch?.(next);
       }}
       onKeyDown={(event) => {
-        if (composing.current || event.nativeEvent.isComposing) return;
+        if (ime.shouldIgnore(event)) return;
         if (event.key === "Escape" && value) {
           event.preventDefault();
           event.stopPropagation();

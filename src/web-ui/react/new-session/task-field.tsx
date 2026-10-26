@@ -1,15 +1,16 @@
 import * as React from "react";
 import { Alert, Flex, Form } from "antd";
-import { WandButton, WandIcon, WandInput, WandPopover, WandSelect } from "../ui";
+import { WandButton, WandIcon, WandPopover, WandSelect } from "../ui";
 import { useTaskGroups } from "../workspaces/task-groups-store";
 import type { NewSessionForm } from "./types";
 
-export function NewSessionTaskField({ form, initialName, disabled, cwd, onChange, inline }: {
+export function NewSessionTaskField({ form, initialName, disabled, cwd, onChange, onCreateTask, inline }: {
   form: NewSessionForm;
   initialName?: string;
   disabled: boolean;
   cwd: string;
   onChange(form: NewSessionForm): void;
+  onCreateTask(): void;
   inline?: boolean;
 }) {
   const { groups, loading, error, reload } = useTaskGroups();
@@ -35,11 +36,14 @@ export function NewSessionTaskField({ form, initialName, disabled, cwd, onChange
           onChange({ ...form, workspaceTaskId: target.task.id, workspaceId: target.task.workspaceId,
             taskName: undefined, cwd: target.task.worktree?.path || target.task.cwd || target.group.workspaceCwd });
           if (inline) setPopoverOpen(false);
-        } else if (value === "" || value === "new") {
+        } else if (value === "new") {
+          setPopoverOpen(false);
+          onCreateTask();
+        } else if (value === "") {
           onChange({ ...form, workspaceTaskId: undefined,
             workspaceId: selected && !selected.group.synthetic && !selected.group.global ? selected.group.workspaceId : form.workspaceId,
-            cwd: form.workspaceTaskId ? form.cwd : selected?.group.workspaceCwd || cwd, taskName: value === "new" ? form.taskName ?? "" : undefined });
-          if (value === "" && inline) setPopoverOpen(false);
+            cwd: form.workspaceTaskId ? form.cwd : selected?.group.workspaceCwd || cwd, taskName: undefined });
+          if (inline) setPopoverOpen(false);
         }
       }}/>
   );
@@ -49,15 +53,8 @@ export function NewSessionTaskField({ form, initialName, disabled, cwd, onChange
       <Form.Item label="所属任务" style={{ marginBottom: 0 }}>
         {selector}
       </Form.Item>
-      {form.taskName !== undefined && !form.workspaceTaskId ? <Form.Item label="任务名称" htmlFor="wand-new-session-task-name" required
-        style={{ marginBottom: 0 }} extra="先创建任务，再在任务中启动会话。">
-        <WandInput id="wand-new-session-task-name" autoFocus={inline} value={form.taskName} disabled={disabled} maxLength={200}
-          placeholder="输入任务名称" onChange={event => onChange({ ...form, taskName: event.currentTarget.value })}
-          onKeyDown={event => { if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); if (inline) setPopoverOpen(false); } }}/>
-      </Form.Item> : null}
       {loading ? <span role="status">正在加载已有任务…</span> : null}
       {error ? <Alert type="warning" title={error} action={<WandButton size="small" onClick={() => void reload()}>重试</WandButton>}/> : null}
-      {inline && form.taskName !== undefined ? <WandButton onClick={() => setPopoverOpen(false)}>完成</WandButton> : null}
     </Flex>
   );
 

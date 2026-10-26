@@ -165,13 +165,13 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
       />
       <div inert={pageLayerOpen} className={classes.composer} ref={legacyRefs?.composer} style={{ flexShrink: 0, position: "relative", display: snapshot.legacyVisibility.composer && !inSplit ? undefined : "none" }}/>
       {inSplit ? <div style={{ display: "contents" }} inert={newWork.open || conversationVisible || settings.open} aria-hidden={newWork.open || conversationVisible || settings.open}><WorkspaceWindow/></div> : null}
-      <div style={{ display: "contents", visibility: settings.open ? "hidden" : undefined }} inert={settings.open} aria-hidden={settings.open}><CodeEditorHost/></div>
+      <div style={{ display: "contents", visibility: settings.open || newWork.open ? "hidden" : undefined }} inert={settings.open || newWork.open} aria-hidden={settings.open || newWork.open}><CodeEditorHost/></div>
       {/* 首次进入聊天才下载并挂载整页；之后常驻，用 visible 控制读取与订阅，草稿仍归 composer store。 */}
       <ConversationHome enabled={conversationVisible} visible={conversationVisible} sidebarOpen={snapshot.layout.sessionsDrawerOpen}
         onOpenSidebar={snapshot.layout.sidebarDrawer ? () => void dispatch({ type: "layout.drawer.toggle" }) : undefined}
         onOpenSession={openSessionPage}/>
       {/* 看板是独立路由，不能替换 <main>：#output 等 LegacyHost 槽位必须一直挂着。 */}
-      <div style={{ display: "contents", visibility: settings.open ? "hidden" : undefined }} inert={settings.open} aria-hidden={settings.open}>
+      <div style={{ display: "contents", visibility: settings.open || newWork.open ? "hidden" : undefined }} inert={settings.open || newWork.open} aria-hidden={settings.open || newWork.open}>
       {taskBoard.open && taskBoard.page === "teamchat" ? <TeamChatPage
         runId={taskBoard.runId}
         sidebarOpen={snapshot.layout.sessionsDrawerOpen}

@@ -9,6 +9,7 @@ import * as toolActivity from "../../src/web-ui/browser/tool-activity.js";
 import * as completionState from "../../src/session-completion-state.js";
 import { parseJsonResponse } from "../../src/web-ui/react/http-adapter.js";
 import { compactModelDisplayLabel } from "../../src/web-ui/browser/composer-select-values.js";
+import { sessionFetchModule } from "./session-fetch-harness.js";
 
 const compiled = new Map<string, string>();
 const noop = () => {};
@@ -23,8 +24,10 @@ export function loadRealtimeBrowserModule(file: string, dependencies: Record<str
   }
   const api: Record<string, any> = {};
   const pureModules = new Map<string, Record<string, any>>();
+  const sessionFetch = sessionFetchModule(globals.fetch);
   runInNewContext(code, { exports: api, require: (id: string) => {
     if (dependencies[id]) return dependencies[id];
+    if (id === "./session-fetch.js") return sessionFetch;
     const pure = /^\.\/(chat-render-cache|chat-render-signature|chat-host|pty-chat-parser|pty-noise)(?:\.js)?$/.exec(id)?.[1];
     if (pure) {
       if (!pureModules.has(pure)) pureModules.set(pure, loadRealtimeBrowserModule(pure, dependencies, globals));

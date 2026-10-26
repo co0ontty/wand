@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import test from "node:test";
 
 import { buildChildEnv } from "../src/env-utils.js";
+import { shellQuote } from "../src/shell-quote.js";
 import { PiRunner, buildPiNativeArgs } from "../src/structured-pi-adapter.js";
 import { PiTmuxHost } from "../src/pi-tmux-host.js";
 import nativeBridge from "../src/pi-native-event-bridge.js";
@@ -39,10 +40,31 @@ test("native Pi arguments preserve configuration without JSON/print/RPC mode", (
   assert.equal(args.at(-1), "hello");
 });
 
-test("real native Pi runs in default tmux with same-process event files and cleans up on completion/cancel", { timeout: 90000 }, async (t) => {
-  const env = buildChildEnv(false, { PI_OFFLINE: "1" });
-  if (spawnSync("tmux", ["-V"], { env }).status !== 0 || spawnSync("pi", ["--version"], { env }).status !== 0) { t.skip("tmux/Pi CLI unavailable"); return; }
+test("real native Pi runs in isolated tmux with same-process event files and cleans up on completion/cancel", { timeout: 90000 }, async (t) => {
+  const baseEnv = buildChildEnv(false, { PI_OFFLINE: "1" });
+  if (spawnSync("tmux", ["-V"], { env: baseEnv }).status !== 0 || spawnSync("pi", ["--version"], { env: baseEnv }).status !== 0) { t.skip("tmux/Pi CLI unavailable"); return; }
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-native-test-"));
+  // The production host intentionally rebuilds its own minimal environment.
+  // A PATH shim pins both that host and every assertion to this test's socket.
+  const realTmux = spawnSync("which", ["tmux"], { env: baseEnv, encoding: "utf8" }).stdout.trim();
+  assert.ok(path.isAbsolute(realTmux));
+  const bin = path.join(root, "bin"); mkdirSync(bin);
+  const socket = path.join(root, "tmux.sock");
+  writeFileSync(path.join(bin, "tmux"), `#!/bin/sh\nexec ${shellQuote(realTmux)} -f /dev/null -S ${shellQuote(socket)} "$@"\n`, { mode: 0o700 });
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${bin}${path.delimiter}${baseEnv.PATH ?? ""}`;
+  const env = buildChildEnv(false, { PI_OFFLINE: "1" });
+  const tmux = (args: string[]) => exec("tmux", args, { env, timeout: 5_000, signal: t.signal });
+  let cleanupRun = async (): Promise<void> => {};
+  t.after(async () => {
+    try { await cleanupRun(); }
+    finally {
+      // This explicit socket belongs only to this fixture; never inspect/kill the default server.
+      try { await exec(realTmux, ["-S", socket, "kill-server"], { env, timeout: 5_000 }); } catch { /* already exited */ }
+      if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
   const agent = path.join(root, "agent"); mkdirSync(agent);
   const responses: Array<import("node:http").ServerResponse> = [];
   let requests = 0;
@@ -73,35 +95,51 @@ test("real native Pi runs in default tmux with same-process event files and clea
     const file = path.join(root, "pi-native", slot ?? "none", "current.json");
     return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) as { tmux: string; events: string; ready: string } : null;
   };
-  t.after(async () => {
-    const nativeRoot = path.join(root, "pi-native");
-    for (const entry of readdirSync(nativeRoot, { recursive: true })) {
-      if (String(entry).endsWith("state.json") || String(entry).endsWith("stderr.log") || String(entry).endsWith("worker-startup.log")) {
-        t.diagnostic(`${entry}: ${readFileSync(path.join(nativeRoot, String(entry)), "utf8").slice(-2500)}`);
+  cleanupRun = async () => {
+    try {
+      const nativeRoot = path.join(root, "pi-native");
+      for (const entry of readdirSync(nativeRoot, { recursive: true })) {
+        if (String(entry).endsWith("state.json") || String(entry).endsWith("stderr.log") || String(entry).endsWith("worker-startup.log")) {
+          t.diagnostic(`${entry}: ${readFileSync(path.join(nativeRoot, String(entry)), "utf8").slice(-2500)}`);
+        }
+      }
+      const job = findJob();
+      if (job && existsSync(job.events)) {
+        const diagnostic = { requests, updates: updates.length, eventBytes: readFileSync(job.events).length,
+          ready: existsSync(job.ready) ? readFileSync(job.ready, "utf8") : "missing",
+          state: readFileSync(path.join(path.dirname(job.events), "state.json"), "utf8"),
+          stderr: readFileSync(path.join(path.dirname(job.events), "stderr.log"), "utf8").slice(-2000) };
+        t.diagnostic(JSON.stringify(diagnostic));
+      }
+    } finally {
+      active = false;
+      run.interrupt();
+      try {
+        const jobs = readdirSync(path.join(root, "pi-native")).flatMap(slot => {
+          const file = path.join(root, "pi-native", slot, "current.json");
+          return existsSync(file) ? [JSON.parse(readFileSync(file, "utf8")) as Parameters<PiTmuxHost["kill"]>[0]] : [];
+        });
+        // kill() also joins any interrupt already in progress. Do not restore PATH
+        // until every host command and its durable consume acknowledgement settle.
+        const stopped = await Promise.allSettled(jobs.map(job => host.kill(job)));
+        for (const result of stopped) if (result.status === "rejected") throw result.reason;
+        for (const job of jobs) host.forgetRun(job.runId);
+        await waitFor(() => jobs.every(job => existsSync(job.ack)), "native cleanup acknowledged");
+      } finally {
+        for (const res of responses) res.destroy();
+        await new Promise<void>((resolve) => { server.close(() => resolve()); server.closeAllConnections(); });
       }
     }
-    const job = findJob();
-    if (job && existsSync(job.events)) {
-      const diagnostic = { requests, updates: updates.length, eventBytes: readFileSync(job.events).length,
-        ready: existsSync(job.ready) ? readFileSync(job.ready, "utf8") : "missing",
-        state: readFileSync(path.join(path.dirname(job.events), "state.json"), "utf8"),
-        stderr: readFileSync(path.join(path.dirname(job.events), "stderr.log"), "utf8").slice(-2000) };
-      t.diagnostic(JSON.stringify(diagnostic));
-    }
-    active = false;
-    run.interrupt(); host.forgetRun("structured:native-live"); host.forgetRun("structured:native-cancel");
-    for (const res of responses) res.destroy();
-    server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve()));
-    await new Promise((r) => setTimeout(r, 300)); rmSync(root, { recursive: true, force: true });
-  });
+  };
   await waitFor(() => updates.some((text) => text.includes("真实原生界面")), "file updates before exit");
   const job = findJob()!; assert.ok(job);
-  assert.match((await exec("tmux", ["list-sessions", "-F", "#{session_name}"])).stdout, new RegExp(job.tmux));
+  assert.equal((await tmux(["display-message", "-p", "-t", job.tmux, "#{socket_path}"])).stdout.trim(), socket);
+  assert.equal((await tmux(["list-sessions", "-F", "#{session_name}"])).stdout.trim(), job.tmux);
   // File events can precede the TUI's next render frame. Wait for the actual
   // pane, not merely the protocol event, before asserting visible output.
   let screen = "";
   await waitFor(async () => {
-    screen = (await exec("tmux", ["capture-pane", "-p", "-t", job.tmux])).stdout;
+    screen = (await tmux(["capture-pane", "-p", "-t", job.tmux])).stdout;
     return screen.includes("真实原生界面");
   }, "native pane renders streamed text");
   assert.match(screen, /真实原生界面/); assert.ok(!screen.includes('"assistantMessageEvent"'));
@@ -127,7 +165,7 @@ test("real native Pi runs in default tmux with same-process event files and clea
   await waitFor(() => adoptedDone, "second observer receives real CLI exit");
   assert.ok(!adoptedTail.includes('"type":"session"'), "adoption does not repeat the snapshot prefix");
   host.forgetRun("structured:native-live");
-  await waitFor(async () => { try { await exec("tmux", ["has-session", "-t", job.tmux]); return false; } catch { return true; } }, "finished tmux removed");
+  await waitFor(async () => { try { await tmux(["has-session", "-t", job.tmux]); return false; } catch { return true; } }, "finished tmux removed");
   const cancel = runner.start({ session: snapshot("native-cancel", root), prompt: "取消本地任务", env }, { isActive: () => true, onUpdate() {} });
   await waitFor(() => requests === 2, "second local request");
   cancel.interrupt(); host.forgetRun("structured:native-cancel");

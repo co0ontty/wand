@@ -5,8 +5,8 @@ import { createServer } from "node:http";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { build } from "esbuild";
-import { openPlushBrowser } from "./run-plush-avatar-browser-harness.mjs";
+import { build, stop } from "esbuild";
+import { closeBrowserFixture, openPlushBrowser } from "./run-plush-avatar-browser-harness.mjs";
 const root = resolve(import.meta.dirname, "../.."), output = join(root, "output/architecture-stage2/dingtalk-implementation/browser"); mkdirSync(output, { recursive: true });
 const temp = mkdtempSync(join(tmpdir(), "wand-dingtalk-ui-"));
 const employees = [1, 2].map(n => ({ id: `e_ui_${n}`, name: `测试员工${n}`, duty: "接口替身，非真实员工", avatar: "", tags: [], agents: [{ provider: "pi", engine: "sdk", kind: "structured", model: "fixture-model", thinkingEffort: "off", mode: "full-access" }], updatedAt: "fixture" }));
@@ -169,4 +169,4 @@ try {
   const report = { productionComponents: true, fixtureApiOnly: true, cases, writes, errors: browser.errors, realDependencyInstallations: 0, realDingTalkRequests: 0, modelCalls: 0 };
   writeFileSync(join(output, "browser-report.json"), JSON.stringify(report, null, 2)); console.log(JSON.stringify({ cases, errorCount: browser.errors.length, fixtureWrites: writes.length, realDingTalkRequests: 0 }));
 } catch (error) { await browser.screenshot(join(output, "failure.png")); throw error; }
-finally { await browser.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); rmSync(temp, { recursive: true, force: true }); }
+finally { releaseInstall?.(); await closeBrowserFixture(browser, server, () => { stop(); rmSync(temp, { recursive: true, force: true }); }); }

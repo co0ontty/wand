@@ -16,8 +16,6 @@ const MAX_MODELS_PER_ENDPOINT = 2000;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 10_000;
 
-type JsonRecord = Record<string, unknown>;
-
 export interface PiModelEndpointDiscoveryOptions {
   /** Defaults to PI_CODING_AGENT_DIR or ~/.pi/agent. */
   agentDir?: string;

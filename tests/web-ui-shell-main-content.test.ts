@@ -218,3 +218,10 @@ test("mobile tasks keep a sidebar navigation entry even without terminal windows
   assert.match(topbar, /aria-controls=\{measurement \? undefined : "sessions-drawer"\}/);
   assert.match(topbar, /type: "layout\.drawer\.toggle"/);
 });
+
+
+test("new work suspends covered board and editor controls without unmounting them", () => {
+  const source = readFileSync(new URL("../src/web-ui/react/shell/shell-main-content.tsx", import.meta.url), "utf8");
+  const suspended = source.match(/visibility: settings\.open \|\| newWork\.open \? "hidden" : undefined \}\} inert=\{settings\.open \|\| newWork\.open\} aria-hidden=\{settings\.open \|\| newWork\.open\}/g);
+  assert.equal(suspended?.length, 2, "board and editor stay mounted while their controls leave the keyboard and accessibility tree");
+});

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
+import { sessionFetchModule } from "./helpers/session-fetch-harness.js";
 
 /**
  * 跨会话排队条的节拍器生命周期。
@@ -27,9 +28,12 @@ function harness() {
   const { outputText } = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   });
+  const fetchImpl = () => { fetches++; return Promise.resolve(new Response("{}", { status: 200 })); };
+  const sessionFetch = sessionFetchModule(fetchImpl);
   runInNewContext(outputText, {
     exports: api,
-    require: (id: string) => (id === "./state" ? { state } : id === "./chat-scroll" ? new Proxy({}, { get: () => noop }) : fallback),
+    require: (id: string) => (id === "./state" ? { state } : id === "./chat-scroll" ? new Proxy({}, { get: () => noop })
+      : id === "./session-fetch.js" ? sessionFetch : fallback),
     document: {
       getElementById: () => null, querySelector: () => null, querySelectorAll: () => [],
       addEventListener: noop, removeEventListener: noop,
@@ -40,7 +44,7 @@ function harness() {
     setTimeout: () => 1, clearTimeout: noop,
     setInterval: (handler: () => void, ms?: number) => { const id = nextTimerId++; intervals.push({ id, handler, ms, cleared: false }); return id; },
     clearInterval: (id: number) => { const entry = intervals.find((item) => item.id === id); if (entry) entry.cleared = true; },
-    fetch: () => { fetches++; return Promise.resolve(new Response("{}", { status: 200 })); },
+    fetch: fetchImpl,
     console: { error: noop, log: noop, warn: noop },
     Date, JSON, Promise, Math, String, Number, Array, Object, Error, WebSocket: class {},
   });

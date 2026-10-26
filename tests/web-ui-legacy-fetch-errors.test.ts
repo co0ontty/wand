@@ -6,6 +6,7 @@ import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import { HttpResponseError, parseJsonResponse } from "../src/web-ui/react/http-adapter.js";
 import { getErrorMessage } from "../src/error-utils.js";
+import { sessionFetchModule } from "./helpers/session-fetch-harness.js";
 
 const noop = (): void => {};
 const fallback = new Proxy({}, { get: () => noop });
@@ -149,9 +150,10 @@ function loadBrowserModule(fileName: string, sandbox: Record<string, any>): Load
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   });
   const api: LoadedModule = {};
+  const sessionFetch = sessionFetchModule(sandbox.fetch);
   runInNewContext(outputText, {
     exports: api,
-    require: (id: string) => sandbox.require(id),
+    require: (id: string) => id === "./session-fetch.js" ? sessionFetch : sandbox.require(id),
     document: sandbox.document,
     window: {},
     navigator: { userAgent: "" },

@@ -260,45 +260,57 @@ test("task board create entries preserve their explicit dispatch boundaries", ()
     "initialStatus: String = \"todo\"",
     "_status = State(initialValue: initialStatus)",
     "private var dispatches: Bool { wandBoardCreateDispatches(status: status) }",
-    ".sheet(isPresented: $showCreate)",
-    "NewConversationView(",
-    "initialCwd: createCwd,",
-    "workspaceID: createWorkspaceID,",
-    "initialCreateTask: true",
     "private func openCreate(_ status: String)",
     "openCreate(status)",
     "dispatches && !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? \"创建并指派\" : \"创建任务\"",
     "描述（只创建任务）",
   ]);
+  const iosBoard = source("ios/Wand/TaskBoardView.swift");
+  const iosCreateEntry = iosBoard.match(/private func openCreate\(_ status: String\) \{([\s\S]*?)\n    \}/)?.[1];
+  assert.ok(iosCreateEntry, "iOS board retains its shared creation entry");
+  assert.match(iosCreateEntry, /workspaces\.first \{ \$0\.id == filterWorkspaceId \}/);
+  assert.match(iosCreateEntry, /onRequestNewConversation\(cwd, selectedWorkspace\?\.id\)/);
+  assert.doesNotMatch(iosCreateEntry, /dispatchBoardTask|createBoardTask|api\./, "opening creation must not execute a task");
+  assert.match(source("ios/Wand/NativeRootView.swift"), /onRequestNewConversation: \{ cwd, workspaceID in\s*beginPendingConversation\(cwd: cwd, workspaceID: workspaceID, createsTask: true\)/);
   assert.equal(
     (source("ios/Wand/TaskBoardView.swift").match(/if !description\.trimmingCharacters\(in: \.whitespacesAndNewlines\)\.isEmpty \{/g) ?? []).length,
     0,
     "iOS must not dispatch on create from every column",
   );
 
-  // macOS 4.72 把新建面板拆成 TaskBoardCreateView，派发判定下沉到 TaskBoardModels。
+  // Desktop entry points only seed a shared creation page; execution is an explicit submit choice.
+  const webBoard = source("src/web-ui/react/issues/task-board-host.tsx");
+  const webCreateEntry = webBoard.match(/const openCreate = React\.useCallback\(([\s\S]*?)\n  \}, \[/)?.[1];
+  assert.ok(webCreateEntry);
+  assert.match(webCreateEntry, /newSessionController\.open\(\{\s*newTask: true,/);
+  assert.match(webCreateEntry, /status, parentTaskId: parent\?\.id, milestoneId: parent\?\.milestoneId/);
+  assert.doesNotMatch(webCreateEntry, /taskBoardRepository\.(create|dispatch)/);
+  includesAll("src/web-ui/react/issues/task-create.tsx", [
+    'const [saveAndDispatch, setSaveAndDispatch] = React.useState(false)',
+    'title: "确认创建并开始执行"',
+    'if (answer.dismissed === true || answer.action !== true) return;',
+    'await taskBoardRepository.dispatch(created.id',
+  ]);
   includesAll("macos/Wand/TaskBoardModels.swift", [
     'func wandBoardCreateDispatches(status: String) -> Bool { false }',
   ]);
   includesAll("macos/Wand/TaskBoardCreateView.swift", [
-    "initialStatus: String = WandBoardStatus.todo.rawValue",
-    "initial.status = initialStatus",
-    "private var dispatches: Bool { draft.saveAndDispatch && draft.status != WandBoardStatus.backlog.rawValue }",
-    "private var hasDescription: Bool {",
-    "!draft.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty",
-    '(dispatches && hasDescription ? "保存并派发" : "保存任务")',
-    "添加描述…（只创建任务，不指派 Agent）",
+    "draft.status = context.status",
+    "draft.parentTaskId = context.parentTaskId",
+    "NewWorkPage { width in",
+    "IMEAwareComposerTextView(text: $text",
+    'Button(owner.creating ? "创建中…" : "仅创建任务") { submit(execute: false) }',
+    'Button("创建并开始执行") { submit(execute: true) }',
+    'if execute {',
+    'createdTask = task',
+    '_ = try await api.dispatchBoardTask(id: task.id',
   ]);
-  includesAll("macos/Wand/TaskBoardView.swift", [
-    "private func openCreate(_ status: String)",
-    "initialStatus: createStatus,",
-    "if draft.saveAndDispatch && !prompt.isEmpty {",
-  ]);
-  assert.equal(
-    (source("macos/Wand/TaskBoardCreateView.swift").match(/if !draft\.description\.trimmingCharacters\(in: \.whitespacesAndNewlines\)\.isEmpty \{/g) ?? []).length,
-    0,
-    "macOS must not dispatch on create from every column",
-  );
+  const macCreateEntry = source("macos/Wand/TaskBoardView.swift").match(/private func openCreate\(_ status: String, parent: WandBoardTask\? = nil\) \{([\s\S]*?)\n    \}/)?.[1];
+  assert.ok(macCreateEntry);
+  assert.match(macCreateEntry, /onRequestCreation\(WandTaskPlanningContext\(/);
+  assert.match(macCreateEntry, /status: status, parentTaskId: parent\?\.id/);
+  assert.doesNotMatch(macCreateEntry, /dispatchBoardTask|createBoardTask|api\./, "opening creation must not execute a task");
+  assert.match(source("macos/Wand/TaskBoardCreateView.swift"), /if execute \{\s*do \{\s*_ = try await api\.dispatchBoardTask/, "description alone does not dispatch");
 });
 
 test("subagent execution surfaces stay compact, avatar-free, and follow the newest content", () => {

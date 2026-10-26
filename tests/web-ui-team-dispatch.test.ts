@@ -179,21 +179,31 @@ test("看板的「第一次指派」下拉里出现临时派工，且它不是 E
   assert.equal(agentTargetIsDispatch("claude"), false);
 });
 
-test("看板新建任务接上共享派工流程：不建本地任务、成功后打开群聊", () => {
-  const host = read("react/issues/task-board-host.tsx");
-  assert.match(host, /const \[dispatchSelected, setDispatchSelected\] = React\.useState\(false\)/);
-  assert.match(host, /const dispatchFlow = useTeamDispatchFlow\(\)/);
-  assert.match(host, /onDispatchSelect=\{\(\) => \{[^}]*setDispatchSelected\(true\)/);
+test("临时派工保留独立团队入口，任务创建携带完整属性后显式派发", () => {
+  const board = read("react/issues/task-board-host.tsx");
+  const creator = read("react/issues/task-create.tsx");
+  const dispatch = read("react/ai-teams/team-dispatch.tsx");
+  const teams = read("react/ai-teams/teams-page.tsx");
+  // 临时派工 API 自己建任务，不能接收已有 taskId 或完整任务属性，所以不再混入建卡表单。
+  assert.doesNotMatch(creator, /useTeamDispatchFlow|onDispatchSelect|dispatchStart|dispatchSelected/);
+  assert.match(board, /newSessionController\.open\(\{\s*newTask: true,/);
+  assert.match(creator, /const request = taskCreationRequest\(captured, textDraft\.text, rememberDefaults\)/);
+  assert.match(creator, /taskBoardRepository\.create\(request\)/);
+  assert.match(creator, /if \(saveAndDispatch\) \{\s*const answer = await wandOverlay\.dialog/);
+  assert.match(creator, /if \(saveAndDispatch\) \{\s*try \{\s*await taskBoardRepository\.dispatch\(created\.id/);
+  assert.ok(creator.indexOf("acceptedTasks.set(scope, created)") < creator.indexOf("await taskBoardRepository.dispatch(created.id"), "派发前保留已创建任务，失败不可重新建卡");
+  // 独立团队入口继续复用同一套选人、计划、确认开工和群聊落点。
+  assert.match(dispatch, /const flow = host\.useTeamDispatchFlow\(\)/);
+  assert.match(dispatch, /<host\.TeamDispatchRoster\s/);
+  assert.match(dispatch, /<host\.TeamDispatchActionButton\s/);
+  assert.match(dispatch, /if \(!flow\.hasPlan\) \{\s*void flow\.planNow\(note\);\s*return;/);
+  assert.match(dispatch, /flow\.startNow\(pickedProject, note\)\.then/);
+  assert.match(dispatch, /if \(!started\) return;[\s\S]*onStarted\(started\)/);
+  assert.doesNotMatch(dispatch, /taskBoardRepository\.create|createTask/, "临时派工不能在客户端提前重复建卡");
+  assert.match(teams, /<TeamDispatchPanel\s/);
+  assert.match(teams, /onStarted=\{\(started\) => afterDirectRun\(started\.teamId, started\)\}/);
+  assert.match(teams, /const sessionId = started\.run\.chatSessionId;\s*if \(sessionId && onOpenSession\) \{\s*onOpenSession\(sessionId\)/);
   const fields = read("react/issues/agent-fields.tsx");
   assert.match(fields, /agentTargetOptions\(\[\], teams, employees, \{ includeDispatch: !!onDispatchSelect \}\)/);
   assert.match(fields, /agentTargetIsDispatch\(value\)\) \{ onDispatchSelect\?\.\(\)/);
-  assert.match(host, /<TeamDispatchRoster\s/);
-  assert.match(host, /<TeamDispatchActionButton\s/);
-  // 派工分支必须在创建本地任务之前返回（服务端自己建卡）
-  const dispatchBranch = host.slice(host.indexOf("if (dispatchSelected) {"));
-  assert.match(dispatchBranch.slice(0, 400), /dispatchFlow\.(startNow|planNow)/);
-  assert.match(dispatchBranch.slice(0, 900), /return;/);
-  // 成功后按 run 的群聊会话导航
-  assert.match(host, /started\.run\?\.chatSessionId/);
-  assert.match(host, /onOpenSession\?\.\(chatId\)/);
 });

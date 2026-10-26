@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
+import { createReactStartupHarness, reactStartupSource } from "./helpers/react-startup-harness.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const reactRoot = path.join(root, "src", "web-ui", "react");
@@ -138,6 +139,7 @@ function isUiInfrastructure(relativePath: string): boolean {
   return relativePath.startsWith("src/web-ui/react/ui/")
     || relativePath.startsWith("src/web-ui/react/styles/")
     || relativePath === "src/web-ui/react/index.tsx"
+    || path.resolve(root, relativePath) === reactStartupSource
     || relativePath === "src/web-ui/react/styles.ts";
 }
 
@@ -455,7 +457,6 @@ test("migrated Worktree, File Preview, and Restart overlays keep only browser ad
   const main = source("src/web-ui/browser/main.ts");
   const notifications = source("src/web-ui/browser/notifications.ts");
   const overlayHost = source("src/web-ui/react/overlay-host.tsx");
-  const reactIndex = source("src/web-ui/react/index.tsx");
   for (const fragment of [
     "installWorktreeMergeLegacyAdapter",
     "installFilePreviewLegacyAdapter",
@@ -473,12 +474,14 @@ test("migrated Worktree, File Preview, and Restart overlays keep only browser ad
     }
     assert.ok(overlayHost.includes(`<${host} />`), `OverlayHost must mount ${host}`);
   }
-  for (const controller of [
-    "__wandReactWorktreeMerge",
-    "__wandReactFilePreview",
-    "__wandReactRestartOverlay",
+  const startup = createReactStartupHarness(false, false);
+  assert.equal(startup.start(), null, "generic UI rollback remains available");
+  for (const [name, module, exported] of [
+    ["__wandReactWorktreeMerge", "./worktree-merge/controller", "worktreeMergeController"],
+    ["__wandReactFilePreview", "./file-preview/controller", "filePreviewController"],
+    ["__wandReactRestartOverlay", "./restart-overlay/controller", "restartOverlayController"],
   ]) {
-    assert.ok(reactIndex.includes(controller), `React index must publish ${controller}`);
+    assert.equal(startup.window[name], startup.require(module)[exported], `${name} retains its real controller in rollback mode`);
   }
 });
 

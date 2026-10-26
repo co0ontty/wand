@@ -34,6 +34,7 @@ import {
 import { taskBoardController, taskBoardStore } from "../issues/task-board-controller";
 import { HomeAttentionBadge } from "../attention/home-attention";
 import { useAiTeamAttentionCount } from "../ai-teams/repository";
+import { GROUP_CHAT_VISIBLE } from "../../group-chat-visibility.js";
 import { useHoverPointer, useSidebarPeek } from "./use-sidebar-peek";
 import { useSidebarDrawer } from "./use-sidebar-drawer";
 import { useSidebarGesture } from "./use-sidebar-gesture";
@@ -608,7 +609,7 @@ export function ShellSidebar() {
   const dispatch = useUiDispatch();
   const taskBoard = React.useSyncExternalStore(taskBoardStore.subscribe, taskBoardStore.getSnapshot, taskBoardStore.getSnapshot);
   const settings = React.useSyncExternalStore(settingsStore.subscribe, settingsStore.getSnapshot, settingsStore.getSnapshot);
-  const teamAttention = useAiTeamAttentionCount();
+  const teamAttention = useAiTeamAttentionCount(GROUP_CHAT_VISIBLE);
   const profile = useUserProfile();
   const profileName = profile.name || DEFAULT_USER_DISPLAY_NAME;
   const [moreOpen, setMoreOpen] = React.useState(false);

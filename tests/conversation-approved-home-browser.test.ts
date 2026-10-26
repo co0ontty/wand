@@ -5,6 +5,7 @@ import { once } from "node:events";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { build } from "esbuild";
+import { retainedGroupChatFixture } from "./conversation-group-visibility-fixture.js";
 import { openBrowser } from "./helpers/sidebar-ux-browser.mjs";
 
 test("approved home keeps the reading axis and real roster without a live head", {
@@ -41,7 +42,7 @@ test("approved home keeps the reading axis and real roster without a live head",
     <EmployeeProfileHost mobile={false}/></div></div>}
     createRoot(document.getElementById('root')).render(<WandUiProvider><PortalContainerProvider container={document.getElementById('portals')}><Stage/></PortalContainerProvider></WandUiProvider>);
   `;
-  await build({ stdin: { contents: source, resolveDir: root, loader: "tsx" }, outfile: join(out, "app.js"), bundle: true, format: "iife", platform: "browser", jsx: "automatic", define: { "process.env.NODE_ENV": '"production"' } });
+  await build({ plugins: [retainedGroupChatFixture], stdin: { contents: source, resolveDir: root, loader: "tsx" }, outfile: join(out, "app.js"), bundle: true, format: "iife", platform: "browser", jsx: "automatic", define: { "process.env.NODE_ENV": '"production"' } });
   const agent = { provider: "pi", engine: "cli", model: "fixture-only", mode: "default", kind: "structured" };
   const employees = [
     { id: "design", name: "示例伙伴", avatar: "plush-cat:v1:silver", agents: [agent], duty: "", createdAt: "", updatedAt: "" },
@@ -64,6 +65,7 @@ test("approved home keeps the reading axis and real roster without a live head",
       let body: unknown = {};
       if (path === "/api/config") body = { defaultCwd: "/tmp/fixture-only", userProfile: { name: "我" } };
       else if (path === "/api/ai-teams") body = [];
+      else if (path === "/api/sessions") body = [];
       else if (path === "/api/silicon-employees") body = { employees };
       else if (path === "/api/silicon-employees/design") body = employees[0];
       else if (path === "/api/conversations") body = { conversations: [dm, { ...dm, id: "dm_other", title: "另一位伙伴", peerEmployeeId: "other", messages: [] }, group] };

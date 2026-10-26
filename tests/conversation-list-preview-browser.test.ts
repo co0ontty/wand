@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import express from "express";
 import { build } from "esbuild";
+import { retainedGroupChatFixture } from "./conversation-group-visibility-fixture.js";
 import { conversationHarness } from "./helpers/conversation-harness.js";
 import { registerConversationRoutes } from "../src/server-conversation-routes.js";
 
@@ -23,7 +24,7 @@ test("conversation sidebar displays DM body once while preserving group signatur
   });
   const root = resolve(import.meta.dirname, ".."), temp = mkdtempSync(join(tmpdir(), "wand-preview-browser-"));
   t.after(() => rmSync(temp, { recursive: true, force: true }));
-  await build({ stdin: { resolveDir: root, loader: "tsx", contents: `
+  await build({ plugins: [retainedGroupChatFixture], stdin: { resolveDir: root, loader: "tsx", contents: `
     import * as React from "react";
     import { createRoot } from "react-dom/client";
     import { WandUiProvider } from "./src/web-ui/react/theme";
@@ -34,6 +35,9 @@ test("conversation sidebar displays DM body once while preserving group signatur
   ` }, bundle: true, format: "iife", platform: "browser", jsx: "automatic", outfile: join(temp, "app.js"),
     logLevel: "warning", define: { "process.env.NODE_ENV": '"production"' } });
   const app = express(); app.use(express.json()); registerConversationRoutes(app, h.service);
+  app.get("/api/sessions", (_req, res) => res.json([]));
+  app.get("/api/tasks", (_req, res) => res.json({ groups: [] }));
+  app.get("/api/silicon-employees", (_req, res) => res.json({ employees: h.storage.listSiliconEmployees() }));
   app.get("/api/config", (_req, res) => res.json({}));
   app.get("/app.js", (_req, res) => res.type("js").send(readFileSync(join(temp, "app.js"))));
   app.get("/styles.css", (_req, res) => res.type("css").send(readFileSync(join(root, "src/web-ui/content/styles.css"))));

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { SESSION_PROVIDERS } from "../src/provider-catalog.js";
+import { resolveStructuredRunner } from "../src/structured-provider-common.js";
 
 import {
   configureNewSessionRuntime,
@@ -25,6 +27,20 @@ function json(value: unknown, status = 200): Response {
     headers: { "Content-Type": "application/json" },
   });
 }
+
+test("every Web structured provider submits the server's default CLI runner", () => {
+  const defaults = { defaultProvider: "claude" as const, defaultSessionKind: "structured" as const,
+    defaultMode: "default" as const, defaultCwd: "/repo" };
+  for (const provider of SESSION_PROVIDERS) {
+    const request = buildCreateRequest({ provider, kind: "structured", cwd: "", mode: "default",
+      worktreeEnabled: false }, defaults, { effectiveCwd: "/repo" });
+    assert.equal(request.runner, resolveStructuredRunner(provider, undefined));
+    assert.equal(resolveStructuredRunner(provider, request.runner), request.runner);
+    assert.equal(request.engine, undefined, "CLI default does not opt into the SDK");
+  }
+  assert.equal(resolveStructuredRunner("claude", "claude-sdk"), "claude-cli-print");
+  assert.throws(() => resolveStructuredRunner("pi", "claude-cli-print"), /不支持 provider pi/);
+});
 
 test("provider modes are clamped without leaking unsupported values", () => {
   assert.deepEqual(supportedModes("codex"), ["full-access"]);
@@ -423,6 +439,33 @@ test("controller delegates lifecycle through one runtime adapter", () => {
   unsubscribe();
   uninstall();
   assert.equal(newSessionController.open(), false);
+});
+
+test("new-work entry context and accepted receipts survive returning to the shared draft", () => {
+  const uninstall = configureNewSessionRuntime({ onOpen() {}, onClose() {}, getContext: () => ({ effectiveCwd: "/repo" }),
+    prepareCreate: async () => ({}), completeCreate: async () => {} });
+  const draftKey = "test:new-work-reopen";
+  const agent = { provider: "pi" as const, engine: "sdk" as const, kind: "structured" as const,
+    model: "chosen-model", thinkingEffort: "high", mode: "managed" as const };
+  const context = { initialCwd: "/repo", initialKind: "pty" as const, workspaceId: "workspace",
+    taskDraft: { draftKey, parentTaskId: "parent", status: "todo" as const,
+      executionSubject: { type: "employee" as const, id: "employee", agentOverride: agent }, agent } };
+  try {
+    newSessionController.open({ ...context, newTask: true });
+    assert.deepEqual(newSessionStore.getSnapshot().taskDraft, context.taskDraft);
+    newSessionController.open({ ...context, newTask: false });
+    assert.equal(newSessionStore.getSnapshot().initialKind, "pty");
+    assert.deepEqual(newSessionStore.getSnapshot().taskDraft?.executionSubject, context.taskDraft.executionSubject);
+    const receipt = { created: { id: "accepted-session" }, request: { kind: "shell" as const, shell: true as const,
+      cwd: "/repo", mode: "default" as const, worktreeEnabled: false, sessionSource: "interactive" as const } };
+    newSessionController.setAcceptedCreation(draftKey, receipt);
+    newSessionController.close();
+    newSessionController.open(context);
+    assert.deepEqual(newSessionController.getAcceptedCreation(draftKey), receipt, "reopening must recover the accepted resource, not create another");
+    assert.equal(newSessionController.getAcceptedCreation("another-draft"), undefined);
+    newSessionController.setAcceptedCreation(draftKey, null);
+    assert.equal(newSessionController.getAcceptedCreation(draftKey), undefined);
+  } finally { newSessionController.close(); uninstall(); }
 });
 
 test("新会话对话框支持员工默认派发与指定 CLI 及模型", () => {

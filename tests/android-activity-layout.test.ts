@@ -72,9 +72,12 @@ test("Android Back navigates directly and is independent of all inline chat card
   assert.match(controls, /if \(showBack\) FloatingChatIconButton\(WandIcons\.back, "返回", onBack\)/);
   assert.match(controls, /internal val FloatingControlTouch = 48\.dp/);
   assert.match(controls, /IconButton\(onClick = onClick, modifier = Modifier\.size\(FloatingControlTouch\)\)/);
-  // 右上角三枚悬浮按钮共用同一套几何：48dp 触控 + 40dp 可见圆底，文件槽不允许自己画更大的圆。
-  assert.match(controls, /Box\(Modifier\.size\(FloatingControlTouch\), contentAlignment = Alignment\.Center\) \{/);
-  assert.match(controls, /Box\(Modifier\.size\(40\.dp\)\.clip\(CircleShape\)\.background\(WandColors\.surface\)\)/);
+  // The clickable owner owns the 48dp target; only the visible surface is 40dp.
+  // No redundant outer Box or fixed number of toolbar actions is required.
+  const iconButton = controls.slice(controls.indexOf("internal fun FloatingChatIconButton("));
+  assert.match(iconButton, /IconButton\(onClick = onClick, modifier = Modifier\.size\(FloatingControlTouch\)\)/);
+  assert.match(iconButton, /size\(40\.dp\)\.clip\(CircleShape\)\.background\(WandColors\.surface\)/);
+  assert.match(iconButton, /Icon\(icon, description,/);
   assert.doesNotMatch(controls, /size\((?:48\.dp|FloatingControlTouch)\)\.clip\(CircleShape\)/);
   assert.doesNotMatch(controls, /\b(?:BackHandler|PredictiveBackHandler|onBackPressedDispatcher)\b/);
   assert.doesNotMatch(screenSource, /rememberChatBackAction|dispatchChatBack|onBackPressedDispatcher/);
@@ -85,7 +88,8 @@ test("Android Back navigates directly and is independent of all inline chat card
   assert.doesNotMatch(taskList, /BackHandler\(enabled = state\.hasTemporaryExpansion/);
   assert.match(taskList, /BackHandler\(enabled = terminalMenuKey != null\)/);
   const timeline = screen("ToolActivitySummary");
-  assert.match(timeline, /menuOpen = !menuOpen\s*drawerManuallyToggled = true/);
+  assert.match(timeline, /val nextOpen = !menuOpen[\s\S]*?menuOpen = nextOpen\s*drawerManuallyToggled = true/);
+  assert.match(timeline, /timelinePreference\.toggleTo\(nextOpen\)/, "manual timeline expansion retains its shared preference");
   assert.match(timeline, /open = !open/);
   const blocks = screen("ChatBlocks");
   assert.match(blocks, /foldOverride = foldToggleCode\(foldOverride, derivedDefault = false\)/);

@@ -1,6 +1,5 @@
 import * as React from "react";
 import { NewSessionHeader, NewSessionHeaderProvided } from "./header";
-import { Sender } from "@ant-design/x";
 import { Alert, AutoComplete, Flex, Spin, Typography } from "antd";
 import { DEFAULT_EMPLOYEE_ID } from "../../../ai-team-types.js";
 import { normalizeWandTaskAgentMode, type WandTaskAgent } from "../../../task-types.js";
@@ -33,6 +32,10 @@ import { NewSessionTaskField } from "./task-field";
 import type { NewSessionCreated, NewSessionCreateRequest, NewSessionDefaults, NewSessionForm, NewSessionKind, NewSessionRepository } from "./types";
 import { installNewWorkStyles } from "./start-styles";
 import { hasAutomaticPermissions, modeHint } from "./permission-summary";
+import { NewWorkComposer, type NewWorkComposerHandle } from "./composer";
+import { TaskCreationPage } from "../issues/task-create";
+import { useImeGuard } from "../composer-sender/ime-guard";
+import { NewWorkIntent } from "./intent";
 
 export interface NewSessionHostProps { repository?: NewSessionRepository; }
 
@@ -41,18 +44,23 @@ export function NewSessionHost(props: NewSessionHostProps): React.ReactElement |
   const controller = React.useSyncExternalStore(newSessionStore.subscribe, newSessionStore.getSnapshot, newSessionStore.getSnapshot);
   const ready = React.useSyncExternalStore(teamChatComposer.subscribeReady, teamChatComposer.ready, () => false);
   const headerProvided = React.useContext(NewSessionHeaderProvided);
-  return controller.open ? <>{!headerProvided && <NewSessionHeader/>}{ready ? <NewWorkPage key={controller.revision} {...props}/> : <Flex align="center" justify="center" flex={1} role="status"><Spin/><span>正在准备输入服务…</span></Flex>}</> : null;
+  return controller.open ? <>{!headerProvided && <NewSessionHeader/>}{ready ? controller.newTask
+    ? <TaskCreationPage key={controller.revision} options={controller}/>
+    : <NewWorkPage key={controller.revision} {...props}/>
+    : <Flex align="center" justify="center" flex={1} role="status"><Spin/><span>正在准备输入服务…</span></Flex>}</> : null;
 }
 
 function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostProps): React.ReactElement {
   const controller = newSessionStore.getSnapshot();
+  const key = controller.taskDraft?.draftKey || conversationDraftKey(`new-work:${controller.workspaceTaskId || controller.workspaceId || "standalone"}`, null);
   const [defaults, setDefaults] = React.useState<NewSessionDefaults | null>(null);
   const [form, setForm] = React.useState<NewSessionForm | null>(null);
   const [error, setError] = React.useState("");
   const [loading, setLoading] = React.useState(true);
   const [submitting, setSubmitting] = React.useState(false);
-  const [unknown, setUnknown] = React.useState(() => newSessionController.getUnknownCreation(controller.workspaceTaskId || controller.workspaceId || "standalone")?.message || "");
-  const accepted = React.useRef<{ request: NewSessionCreateRequest; created: NewSessionCreated } | null>(null);
+  const [unknown, setUnknown] = React.useState(() => (newSessionController.getUnknownCreation(`draft:${key}`)
+    || newSessionController.getUnknownCreation(controller.workspaceTaskId || controller.workspaceId || "standalone"))?.message || "");
+  const accepted = React.useRef<{ request: NewSessionCreateRequest; created: NewSessionCreated } | null>(newSessionController.getAcceptedCreation(key) || null);
   const lock = React.useRef(false);
   const mounted = React.useRef(true);
   const [directoryOpen, setDirectoryOpen] = React.useState(false);
@@ -62,7 +70,8 @@ function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostPr
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [moreOpen, setMoreOpen] = React.useState(false);
   const [suggestions, setSuggestions] = React.useState<readonly { path: string; name: string }[]>([]);
-  const sender = React.useRef<React.ComponentRef<typeof Sender>>(null);
+  const sender = React.useRef<NewWorkComposerHandle>(null);
+  const directoryIme = useImeGuard();
   const files = React.useRef<HTMLInputElement>(null);
   const { employees, loading: employeesLoading, error: employeesError } = useSiliconEmployees({ enabled: true });
   const teams = useAiTeamList(!controller.workspaceTaskId && !controller.newTask);
@@ -74,8 +83,11 @@ function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostPr
   }, []);
   const catalog = useWandModelCatalog(true);
   // 新建工作每次打开都是新实例（按 revision 重挂载），临时执行配置随实例丢弃，不跨打开或跨界面共用。
-  const [preference, setPreference] = React.useState<ConversationExecutionPreference | undefined>(undefined);
-  const key = conversationDraftKey(`new-work:${controller.workspaceTaskId || controller.workspaceId || "standalone"}`, null);
+  const [preference, setPreference] = React.useState<ConversationExecutionPreference | undefined>(() => {
+    const subject = controller.taskDraft?.executionSubject;
+    const agent = subject?.type === "employee" ? subject.agentOverride : subject?.type === "cli" ? controller.taskDraft?.agent : undefined;
+    return agent ? { provider: agent.provider, engine: agent.engine, model: agent.model, thinkingEffort: agent.thinkingEffort } : undefined;
+  });
   const revision = React.useCallback(() => teamChatComposer.revision(key), [key]);
   React.useSyncExternalStore(teamChatComposer.subscribe, revision, revision);
   const draft = teamChatComposer.read(key);
@@ -88,9 +100,13 @@ function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostPr
       if (abort.signal.aborted) return;
       setDefaults(loaded);
       const context = newSessionStore.getRuntime()?.getContext();
-      setForm({ provider: loaded.config.defaultProvider, engine: loaded.config.defaultEngine, model: "default",
-        kind: controller.initialKind || "structured", employeeId: controller.initialEmployeeId || undefined,
-        mode: safeMode(loaded.config.defaultProvider, loaded.config.defaultMode),
+      const subject = controller.taskDraft?.executionSubject;
+      const selectedAgent = subject?.type === "employee" ? subject.agentOverride : subject?.type === "cli" ? controller.taskDraft?.agent : undefined;
+      const provider = selectedAgent?.provider || loaded.config.defaultProvider;
+      setForm({ provider, engine: selectedAgent?.engine || loaded.config.defaultEngine, model: selectedAgent?.model || "default",
+        kind: controller.initialKind || "structured", employeeId: subject?.type === "employee" ? subject.id : subject ? undefined : controller.initialEmployeeId || undefined,
+        teamId: subject?.type === "team" ? subject.id : undefined, specifiedCli: subject?.type === "cli" || !!subject?.agentOverride,
+        mode: safeMode(provider, selectedAgent?.mode || loaded.config.defaultMode),
         cwd: controller.initialCwd || context?.effectiveCwd || loaded.config.defaultCwd, worktreeEnabled: false,
         workspaceId: controller.workspaceId || undefined, workspaceTaskId: controller.workspaceTaskId || undefined,
         taskName: controller.newTask ? "" : undefined });
@@ -100,7 +116,7 @@ function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostPr
   }, [repository]);
   // Wait for the real directory, then use the default companion only when no entry selected an identity.
   React.useEffect(() => {
-    if (!form || employeesLoading || form.kind !== "structured" || form.employeeId || form.teamId) return;
+    if (!form || employeesLoading || form.kind !== "structured" || form.employeeId || form.teamId || form.specifiedCli) return;
     const employee = employees.find(item => item.id === DEFAULT_EMPLOYEE_ID) ?? employees[0];
     if (employee) setForm(current => current ? { ...current, employeeId: employee.id } : current);
   }, [!!form, employeesLoading]);
@@ -116,9 +132,11 @@ function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostPr
   const team = teams?.find(item => item.id === form?.teamId);
   const matchedProject = projects.find(project => project.cwd.replace(/\/+$/, "") === form?.cwd.trim().replace(/\/+$/, ""));
   const teamWorkspaceId = controller.workspaceTaskId || controller.newTask ? "" : usableTeamWorkspaceId(form?.workspaceId || matchedProject?.id, matchedProject?.kind);
-  const base: WandTaskAgent | undefined = employee?.agents[0] ?? (form ? { provider: form.provider, engine: form.engine,
-    model: form.model || "default", thinkingEffort: "off", mode: normalizeWandTaskAgentMode(form.provider, form.mode), kind: "structured" } : undefined);
-  const runtimeAgent = base && preference ? { ...base, ...preference } : base;
+  const base: WandTaskAgent | undefined = form?.specifiedCli ? { provider: form.provider, engine: form.engine,
+    model: form.model || "default", thinkingEffort: preference?.thinkingEffort || "off", mode: normalizeWandTaskAgentMode(form.provider, form.mode), kind: "structured" }
+    : employee?.agents[0] ?? (form ? { provider: form.provider, engine: form.engine,
+      model: form.model || "default", thinkingEffort: "off", mode: normalizeWandTaskAgentMode(form.provider, form.mode), kind: "structured" } : undefined);
+  const runtimeAgent = base && preference ? { ...base, ...preference, mode: normalizeWandTaskAgentMode(preference.provider, base.mode) } : base;
   const disabled = submitting || !!unknown || !!accepted.current;
   const executionForm = form && preference && form.kind !== "shell" ? {
     ...form,
@@ -157,9 +175,10 @@ function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostPr
   };
   const markUnconfirmedCreation = (cause: unknown): void => {
     const status = (cause as { status?: number })?.status;
-    if (status && status < 500 && status !== 408 && status !== 409) return;
+    if (status && status >= 400 && status < 500 && status !== 408 && status !== 409) return;
     const message = "创建结果未确认，请先核对任务和会话列表，不要重复创建；本页输入保留。";
     newSessionController.markUnknownCreation({ scope: controller.workspaceTaskId || controller.workspaceId || "standalone", message });
+    newSessionController.markUnknownCreation({ scope: `draft:${key}`, message });
     // Unlike ordinary empty-session creation, a team start includes the note.
     // It may already be executing: preserve it only in the owning page's memory.
     if (form?.teamId) teamChatComposer.edit(key, { text: draft.text, expectedRevision: draft.revision, persist: false });
@@ -167,7 +186,7 @@ function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostPr
   };
   const submit = async (): Promise<void> => {
     const scope = controller.workspaceTaskId || controller.workspaceId || "standalone";
-    const unresolved = newSessionController.getUnknownCreation(scope);
+    const unresolved = newSessionController.getUnknownCreation(`draft:${key}`) || newSessionController.getUnknownCreation(scope);
     if (unresolved) { setUnknown(unresolved.message); return; }
     if (!form || !defaults || lock.current || !!unknown || !valid) return;
     const runtime = newSessionStore.getRuntime();
@@ -208,9 +227,11 @@ function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostPr
           throw cause;
         }
         accepted.current = { request, created };
+        newSessionController.setAcceptedCreation(key, accepted.current);
       }
       const { request, created } = accepted.current;
       await runtime.completeCreate(request, created, draft.text || draft.attachments.length ? { key, revision: draft.revision } : undefined);
+      newSessionController.setAcceptedCreation(key, null);
       newSessionController.close();
     } catch (cause) {
       if (form.teamId) await aiTeamsRepository.settle("error");
@@ -223,12 +244,20 @@ function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostPr
   const placeholder = form?.kind === "shell" ? "输入启动后要执行的命令（可选）…" : form?.kind === "pty" ? "输入要交给 CLI 的内容（可选）…" : "随心输入，描述你想完成的事…";
   const projectName = matchedProject?.name || form?.cwd.trim().split("/").filter(Boolean).at(-1) || "Wand";
   const permissionLabel = permission?.kind === "shell" ? "系统 Shell" : ({ managed: "托管执行", "full-access": "完全访问", "auto-edit": "自动编辑", native: "原生模式", default: "标准权限" } as const)[permission?.mode || "default"];
+  const taskOptions = { initialCwd: form?.cwd, initialEmployeeId: form?.employeeId, initialKind: form?.kind, workspaceId: form?.workspaceId,
+    taskDraft: { ...controller.taskDraft, draftKey: key, workspaceId: form?.workspaceId || "",
+      executionSubject: form?.teamId ? { type: "team" as const, id: form.teamId }
+        : form?.employeeId ? { type: "employee" as const, id: form.employeeId, ...(preference && runtimeAgent ? { agentOverride: runtimeAgent } : {}) }
+        : form?.specifiedCli ? { type: "cli" as const, id: form.provider } : undefined,
+      agent: runtimeAgent } };
+  const createTask = (): void => { newSessionController.open({ ...taskOptions, newTask: true }); };
 
   const directoryPickerContent = defaults && form ? (
     <Flex vertical gap={12} className="new-work-paths"><Typography.Text strong>运行目录</Typography.Text>
       <AutoComplete value={form.cwd} options={suggestions.map(item => ({ value: item.path }))} onChange={cwd => setForm({ ...form, cwd, workspaceId: undefined })}>
-        <WandInput autoFocus aria-label="新工作运行目录路径" placeholder="输入目录路径" onKeyDown={event => {
-          if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+        <WandInput autoFocus aria-label="新工作运行目录路径" placeholder="输入目录路径"
+          onCompositionStart={directoryIme.onCompositionStart} onCompositionEnd={directoryIme.onCompositionEnd} onKeyDown={event => {
+          if (event.key === "Enter" && !directoryIme.shouldIgnore(event)) {
             event.preventDefault();
             setDirectoryOpen(false);
             setTitleDirectoryOpen(false);
@@ -265,6 +294,7 @@ function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostPr
   return <section className="new-work-page conversation-root" aria-label="新建工作">
     {loading || employeesLoading ? <Flex align="center" justify="center" flex={1}><Spin/><span>正在读取工作配置…</span></Flex> : form && defaults ? <>
       <div className="new-work-context">
+        {!controller.workspaceTaskId ? <NewWorkIntent task={false} options={taskOptions} disabled={disabled}/> : null}
         <h1>{form.kind === "structured" ? <>
           今天你想与
           <WandPopover ariaLabel="选择新工作员工" side="bottom" open={titleSubjectOpen} onOpenChange={setTitleSubjectOpen}
@@ -286,11 +316,11 @@ function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostPr
             {directoryPickerContent}
           </WandPopover>
           的
-          <NewSessionTaskField form={form} initialName={controller.taskName} disabled={disabled || !!controller.workspaceTaskId} cwd={form.cwd} onChange={setForm} inline/>
+          <NewSessionTaskField form={form} initialName={controller.taskName} disabled={disabled || !!controller.workspaceTaskId} cwd={form.cwd} onChange={setForm} onCreateTask={createTask} inline/>
           中创造些什么？
         </> : form.kind === "pty" ? "从这里开始 CLI 工作" : "从这里打开空白终端"}</h1>
         {controller.workspaceTaskId ? <Typography.Text type="secondary">当前任务使用既有工作目录</Typography.Text> : null}
-        {form.kind !== "structured" ? <NewSessionTaskField form={form} initialName={controller.taskName} disabled={disabled || !!controller.workspaceTaskId} cwd={form.cwd} onChange={setForm}/> : null}
+        {form.kind !== "structured" ? <NewSessionTaskField form={form} initialName={controller.taskName} disabled={disabled || !!controller.workspaceTaskId} cwd={form.cwd} onChange={setForm} onCreateTask={createTask}/> : null}
       </div>
       <div className="conversation-composer new-work-composer">
         {submitStatus ? <Flex vertical gap={4} className="new-work-submit-status" id={submitStatusId}>
@@ -316,31 +346,27 @@ function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostPr
         </div>
         {employeesError ? <Alert type="error" title={employeesError}/> : null}
         {error ? <Alert type="error" role="alert" title={error}/>: null}
-        {accepted.current && error ? <WandButton onClick={() => {
+        {accepted.current ? <WandButton onClick={() => {
           const captured = accepted.current!;
-          void newSessionStore.getRuntime()?.completeCreate(captured.request, captured.created).then(() => newSessionController.close())
+          void newSessionStore.getRuntime()?.completeCreate(captured.request, captured.created).then(() => {
+            newSessionController.setAcceptedCreation(key, null);
+            newSessionController.close();
+          })
             .catch(cause => setError(describeError(cause, "打开工作失败，请从会话列表重试。")));
         }}>打开已创建的工作（本页草稿保留）</WandButton> : null}
-        <div className="conversation-input-wrap" data-composer-expanded="true" data-editor-expanded={editor.expanded}>
-          <Sender ref={sender} className="conversation-sender" value={draft.text} readOnly={disabled} placeholder={placeholder} suffix={false}
-            autoSize={{ minRows: 2, maxRows: editor.expanded ? 24 : 4 }} onChange={text => teamChatComposer.edit(key, { text })} onSubmit={() => void submit()}
-            submitType="enter"
-            onKeyDown={event => {
-              // suffix 关掉后，发送器内部的提交开关不会随输入更新，默认回车会被吃掉。
-              // 这里自己提交；中文输入法确认候选、Shift 换行都不算开工。
-              if (event.nativeEvent.isComposing || event.keyCode === 229) return false;
-              if (event.key !== "Enter" || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return undefined;
-              event.preventDefault();
-              void submit();
-              return false;
-            }}
-            header={draft.attachments.length ? <ComposerAttachmentList items={draft.attachments.map((item, index) => ({ index, name: item.name, sizeLabel: `${item.size} B`, previewUrl: item.previewUrl || null }))} onRemove={index => teamChatComposer.edit(key, { removeAttachment: index })}/> : null}
+          <NewWorkComposer ref={sender} text={draft.text} disabled={disabled} placeholder={placeholder}
+            expanded={editor.expanded} onTextChange={text => teamChatComposer.edit(key, { text })} onSubmit={() => void submit()}
+            header={draft.attachments.length ? <ComposerAttachmentList items={draft.attachments.map((item, index) => ({ index, name: item.name, sizeLabel: `${item.size} B`, previewUrl: item.previewUrl || null }))} onRemove={index => { if (!disabled) teamChatComposer.edit(key, { removeAttachment: index }); }}/> : null}
             footer={<Flex justify="space-between" align="center" className="conversation-action-row"><Flex gap={4} align="center" className="new-work-actions">
               <WandPopover ariaLabel="新工作更多选项" side="top" open={moreOpen} onOpenChange={setMoreOpen} trigger={<WandIconButton aria-label="更多新工作选项" disabled={disabled}><ConversationMorphIcon active={moreOpen} from="plus" to="close"/></WandIconButton>}>
                 <Flex vertical gap={12}>
                   <WandButton disabled={disabled || form.kind === "shell"} onClick={() => { setMoreOpen(false); files.current?.click(); }}><WandIcon name="paperclip"/>添加附件</WandButton>
                   {permission ? <Typography.Text type="secondary">{modeHint(permission)}</Typography.Text> : null}
-                  {preference ? <WandButton disabled={disabled} onClick={() => { setPreference(undefined); setMoreOpen(false); }}>恢复员工默认执行配置</WandButton> : null}
+                  {employee && (preference || form.specifiedCli) ? <WandButton aria-label="恢复员工默认执行配置" disabled={disabled} onClick={() => {
+                    setPreference(undefined);
+                    setForm(current => current ? { ...current, specifiedCli: false } : current);
+                    setMoreOpen(false);
+                  }}>恢复员工默认执行配置</WandButton> : null}
                 </Flex>
               </WandPopover>
               <span className="new-work-permission" data-automatic={!form.teamId && permission && hasAutomaticPermissions(permission)} title={form.teamId ? "团队成员分别使用各自的执行配置" : permission ? modeHint(permission) : undefined}><WandIcon name="shield" size={14}/>{form.teamId ? "团队配置" : permissionLabel}</span>
@@ -348,9 +374,8 @@ function NewWorkPage({ repository = httpNewSessionRepository }: NewSessionHostPr
             </Flex><Flex gap={4} align="center" className="new-work-send-actions">
             {form.kind !== "shell" && runtimeAgent && !form.teamId ? <div className="conversation-runtime-summary"><ConversationExecutionSelectors agent={form.kind === "pty" ? { ...runtimeAgent, engine: "cli" } : runtimeAgent} catalog={catalog} disabled={disabled} cliOnly={form.kind === "pty"} onChange={setPreference}/></div> : null}
             <ConversationSubmitButton stops={false} phase={submitting ? "sending" : error ? "failed" : "idle"} label={form.kind === "structured" ? "开始工作" : "打开终端"} disabled={disabled || !valid} disabledReason={submitReason} descriptionId={submitStatus ? submitStatusId : undefined} onClick={() => void submit()}/></Flex></Flex>}/>
-        </div>
         <input ref={files} hidden type="file" multiple onChange={event => {
-          for (const file of Array.from(event.currentTarget.files || [])) teamChatComposer.edit(key, { addAttachment: { file, name: file.name, size: file.size } });
+          if (!disabled) for (const file of Array.from(event.currentTarget.files || [])) teamChatComposer.edit(key, { addAttachment: { file, name: file.name, size: file.size } });
           event.currentTarget.value = "";
         }}/>
       </div>

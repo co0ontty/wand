@@ -163,11 +163,6 @@ function commentBlockNeedsRestore(block: import("./types.js").ContentBlock): boo
     || block.type === "tool_result" && block._truncated === true;
 }
 
-function commentBlockHandles(messages: import("./types.js").ConversationTurn[], turnOffset: number): Array<{ turnOffset: number; blockIndex: number }> {
-  return messages.flatMap((turn, index) => turn.content.flatMap((block, blockIndex) =>
-    commentBlockNeedsRestore(block) ? [{ turnOffset: turnOffset + index, blockIndex }] : []));
-}
-
 function boundedCommentResultMessages(messages: import("./types.js").ConversationTurn[], turnOffset: number): {
   messages: Array<import("./types.js").ConversationTurn & { blockOffset: number; blockTotal: number }>;
   truncatedBlocks: Array<{ turnOffset: number; blockIndex: number }>;

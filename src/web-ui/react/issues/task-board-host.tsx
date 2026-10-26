@@ -6,7 +6,7 @@ import { taskGoalProjection } from "../../../task-hierarchy";
 import { TaskGoalChildren } from "./task-goal-children";
 import { canArchiveBoardTask } from "./task-board-repository";
 import "./library-layout";
-import { TaskForm, TaskTextArea } from "./task-form";
+import { TaskTextArea } from "./task-form";
 import { TaskDatePicker } from "./date-picker";
 import { WandInput } from "../ui";
 import * as React from "react";
@@ -19,12 +19,11 @@ import { SessionMoveButton } from "../workspaces/session-move-button";
 import { workspacesStore } from "../workspaces/controller";
 import { TaskOrganizeButton } from "../workspaces/task-organization";
 import { sortProviderOptions, useProviderUsage } from "../provider-usage";
-import { DEFAULT_WAND_TASK_PRIORITY, type TaskExecutionSubject, type WandTaskAgent, type WandTaskPriority, type WandTaskStatus } from "../../../task-types";
+import { type TaskExecutionSubject, type WandTaskAgent, type WandTaskPriority, type WandTaskStatus } from "../../../task-types";
 import { useSiliconEmployees } from "../agents/employee-repository.js";
 import {
   WandBreadcrumb,
   WandButton,
-  WandDialogSurface,
   WandIcon,
   WandIconButton,
   WandSelect,
@@ -36,7 +35,6 @@ import {
 import { SidebarToggleIcon } from "../shell/sidebar-toggle-icon";
 import { classNames } from "../ui/class-names";
 import { MilestonePicker } from "../milestones/picker";
-import { useDefaultMilestone, usePreselectMilestone } from "../milestones/default-iteration";
 import {
   collectIssueLabels,
   createDefaultIssueAgent,
@@ -45,7 +43,6 @@ import {
   filterIssues,
   issueBoardEmptyState,
   groupIssuesByStatus,
-  issueAgentEffortOptions,
   ISSUE_AGENT_TARGETS,
   ISSUE_ARCHIVE_COLUMN,
   ISSUE_NO_PARENT,
@@ -53,12 +50,8 @@ import {
   ISSUE_COLUMNS,
   ISSUE_PRIORITIES,
   issueArchiveFolderOpen,
-  issueCreateDispatches,
   issueDropDispatches,
   issueDropDispatchPrompt,
-  isDispatchableIssueAgent,
-  issueAgentModeOptions,
-  issueAgentModelOptions,
   issueAgentLabel,
   issueDueStamp,
   issueFilterCount,
@@ -70,8 +63,6 @@ import {
   normalizeIssueModelCatalog,
   readIssueBoardDisplay,
   resolveIssueAgent,
-  issueAgentTargetValue,
-  withIssueAgentTarget,
   writeIssueBoardDisplay,
   type IssueAgentProvider,
   type IssueBoardDisplay,
@@ -80,8 +71,7 @@ import {
   type IssueGanttZoom,
   type IssueModelCatalog,
 } from "./task-board-agent";
-import { AgentField, AgentFields, DISPATCH_VALUE, agentTargetIsDispatch, agentTargetOptions, agentTargetTeamId, agentTargetEmployeeId } from "./agent-fields";
-import { TeamDispatchActionButton, TeamDispatchRoster, dispatchStartBlockedReason, useTeamDispatchFlow } from "../team-dispatch/roster";
+import { AgentField, AgentFields } from "./agent-fields";
 import { aiTeamsRepository, type AiTeam } from "../ai-teams/repository";
 import { TaskTeamRunPanel } from "../ai-teams/lazy";
 import { TaskComments } from "./task-comments";
@@ -111,37 +101,12 @@ import {
   useExpansionFocusReturn,
 } from "./task-board-views";
 import { wandOverlay } from "../overlay-controller";
-import { confirmDiscardTaskDraft } from "../task-draft-guard";
 import { parseTaskBoardViewState, readTaskBoardViewState, writeTaskBoardViewState, sortTaskBoardTasks, TASK_BOARD_SORTS, type TaskBoardSort } from "./task-board-view-state";
 import { pageSearch, updatePageRoute } from "../../page-route";
 import { usePageRouteState, routeEnum, routeJson } from "../use-page-route";
 import { CopyPageLink } from "../ui/copy-page-link";
-import { createGeneratedTitlePoller, type GeneratedTitlePoller } from "./generated-title-poll";
 import { parseIssueAssignment, readIssueAssignment, resolveIssueAssignment, writeIssueAssignment } from "./task-board-assignment";
-
-interface DraftState {
-  workspaceId: string;
-  title: string;
-  description: string;
-  status: WandTaskStatus;
-  priority: WandTaskPriority;
-  dueDate: string;
-  labels: string;
-  /** 里程碑 id；空串表示不选。 */
-  milestoneId: string;
-  parentTaskId: string;
-  agent: WandTaskAgent;
-}
-
-function emptyDraft(
-  workspaceId: string,
-  status: WandTaskStatus = "backlog",
-  agent: WandTaskAgent = createDefaultIssueAgent(),
-  parentTaskId = "",
-): DraftState {
-  // 用户没挑优先级就默认「低」，不再落成「无优先级」。
-  return { workspaceId, title: "", description: "", status, priority: DEFAULT_WAND_TASK_PRIORITY, dueDate: "", labels: "", milestoneId: "", parentTaskId, agent };
-}
+import { newSessionController } from "../new-session/controller";
 
 function agentOf(task: WandTaskListed, lastAgent?: WandTaskAgent | null): WandTaskAgent {
   return resolveIssueAgent(task.agent, lastAgent);
@@ -211,13 +176,6 @@ export function TaskBoardHost({
     writeTaskBoardViewState({ view, query, workspaceId: filterWorkspaceId, filters, sort });
   }, [view, query, filterWorkspaceId, filters, sort]);
   const mutationPending = React.useRef(false);
-  const [createOpen, setCreateOpen] = React.useState(false);
-  const [rememberCreateDefaults, setRememberCreateDefaults] = React.useState(false);
-  const [createMore, setCreateMore] = React.useState(false);
-  const [createExpanded, setCreateExpanded] = React.useState(false);
-  const [draft, setDraft] = React.useState<DraftState>(() => emptyDraft(""));
-  const draftRef = React.useRef(draft);
-  draftRef.current = draft;
   const [selectedId, setSelectedId] = usePageRouteState("task", "", undefined, undefined, "push");
   // 看板卡片的就地展开态，同一时刻只开一张；完整详情仍由 selectedId 那套详情页承担。
   const [expandedTaskId, setExpandedTaskId] = React.useState("");
@@ -249,7 +207,6 @@ export function TaskBoardHost({
   const [composeRequest, setComposeRequest] = React.useState<{ id: string; nonce: number } | null>(null);
   const loadGenerationRef = React.useRef(0);
   const workspaceGenerationRef = React.useRef(0);
-  const titleRef = React.useRef<HTMLTextAreaElement>(null);
   const searchRef = React.useRef<HTMLInputElement>(null);
   const pageRef = React.useRef<HTMLDivElement>(null);
   const readingPositions = React.useRef(new Map<string, number>());
@@ -259,7 +216,6 @@ export function TaskBoardHost({
     for (const [status, column] of Object.entries(columnScrollRefs.current)) if (column) column.scrollTop = readingPositions.current.get(`column:${status}`) ?? 0;
   }, [selectedId, view]);
   const columnScrollRefs = React.useRef<Partial<Record<WandTaskStatus, HTMLElement>>>({});
-  const titlePollerRef = React.useRef<GeneratedTitlePoller | null>(null);
 
   React.useLayoutEffect(() => {
     for (const column of Object.values(columnScrollRefs.current)) if (column) column.scrollTop = 0;
@@ -301,15 +257,6 @@ export function TaskBoardHost({
     }
   }, []);
 
-  // 看板关闭时停掉自动标题轮询：轮询每轮都会 reload + setState，用户看不见时不该继续跑。
-  React.useEffect(() => {
-    if (controller.open) return;
-    titlePollerRef.current?.cancel();
-  }, [controller.open]);
-
-  // 组件整体卸载（登出 / 切到旧外壳）时兜底取消。
-  React.useEffect(() => () => { titlePollerRef.current?.cancel(); }, []);
-
   React.useEffect(() => {
     if (!controller.open) return;
     void reload();
@@ -332,25 +279,19 @@ export function TaskBoardHost({
 
   React.useEffect(() => {
     if (!controller.open) return;
-    // 新建对话框打开时用更高频率同步目录；仅看板打开时维持普通轮询。
-    const interval = window.setInterval(() => { void loadWorkspaces(); void reload(true); }, createOpen ? 2_000 : 6_000);
+    // 创建器通过共享任务事件通知；看板只维护自身列表轮询。
+    const interval = window.setInterval(() => { void loadWorkspaces(); void reload(true); }, 6_000);
     const unsubscribe = subscribeTaskChanges(() => { void reload(true); void loadWorkspaces(); });
     return () => { window.clearInterval(interval); unsubscribe(); };
-  }, [controller.open, createOpen, loadWorkspaces, reload]);
+  }, [controller.open, loadWorkspaces, reload]);
 
   React.useEffect(() => {
     setError("");
     setNotice("");
     setDetailAgent(null);
     detailChoiceTaskRef.current = "";
-    setCreateOpen(false);
     setContextMenu(null);
   }, [controller.revision, controller.open]);
-
-  React.useEffect(() => {
-    if (!controller.workspaceId) return;
-    setDraft((current) => (current.workspaceId ? current : { ...current, workspaceId: controller.workspaceId }));
-  }, [controller.workspaceId, controller.open]);
 
   const runFor = React.useCallback(async (id: string, action: () => Promise<void>): Promise<void> => {
     if (mutationPending.current) return;
@@ -372,12 +313,6 @@ export function TaskBoardHost({
     writeIssueBoardDisplay(next);
   }, []);
 
-  const rememberAgent = React.useCallback((agent: WandTaskAgent) => {
-    if (!isDispatchableIssueAgent(agent)) return;
-    lastAgentRef.current = agent;
-    setLastAgent(agent);
-  }, []);
-
   const rememberAssignment = React.useCallback((agent: WandTaskAgent, subject: TaskExecutionSubject) => {
     const next = parseIssueAssignment({ agent, subject });
     if (!next) return;
@@ -386,118 +321,12 @@ export function TaskBoardHost({
     writeIssueAssignment(next);
   }, []);
 
-  // 新卡片默认挂到「默认迭代」：用户不选也有归属，面板上直接看得见。
-  const presetMilestone = useDefaultMilestone(draft.workspaceId || filterWorkspaceId || null, createOpen);
-  usePreselectMilestone(createOpen, presetMilestone, (id) => {
-    setDraft((current) => (current.milestoneId ? current : { ...current, milestoneId: id }));
-  });
-
   const openCreate = React.useCallback((status: WandTaskStatus = "backlog", parent?: WandTaskListed) => {
-    const assignment = resolveIssueAssignment({}, lastAssignmentRef.current?.subject.type === "cli" ? null : lastAssignmentRef.current, lastAgentRef.current, {
-      employees: employeesLoading || employeesError ? null : employees, teams,
+    newSessionController.open({ newTask: true,
+      taskDraft: { workspaceId: parent ? parent.workspaceId ?? "" : filterWorkspaceId || controller.workspaceId,
+        status, parentTaskId: parent?.id, milestoneId: parent?.milestoneId || undefined },
     });
-    setTeamTarget(assignment.subject.type === "team" ? assignment.subject.id : "");
-    setEmployeeTarget(assignment.subject.type === "employee" ? assignment.subject.id : "");
-    setDraft({
-      ...emptyDraft(parent ? parent.workspaceId ?? "" : filterWorkspaceId || controller.workspaceId, status, assignment.subject.type === "employee" ? employees.find(item => item.id === assignment.subject.id)?.agents[0] ?? assignment.agent : assignment.agent, parent?.id),
-      milestoneId: parent?.milestoneId ?? "",
-    });
-    setEmployeeOverride(false);
-    setSaveAndDispatch(false);
-    setDispatchSelected(false);
-    setCreateExpanded(false);
-    setRememberCreateDefaults(false);
-    setCreateOpen(true);
-    requestAnimationFrame(() => titleRef.current?.focus());
-  }, [controller.workspaceId, employees, employeesError, employeesLoading, filterWorkspaceId, teams]);
-
-  const [saveAndDispatch, setSaveAndDispatch] = React.useState(false);
-  const createTask = React.useCallback(async (dispatch = false): Promise<void> => {
-    const submitTitle = draft.title.trim();
-    const submitDescription = draft.description.trim();
-    // 标题是可选字段：只写描述也能创建，标题由服务端按描述自动生成。
-    if ((!submitTitle && !submitDescription) || loading) return;
-    if (employeeTarget && !employees.some(item => item.id === employeeTarget && !item.archivedAt)) { setError("所选员工不可用，请重新选择。"); return; }
-    if (dispatch) {
-      if (!submitDescription) { setError("保存并派发需要填写本次交付目标。"); return; }
-      const answer = await wandOverlay.dialog({ title: "确认保存并派发", description: `将保存任务并新建一次执行。\n${submitTitle}\n${submitDescription}\n${taskDispatchConfiguration(draft.agent, employeeOverride ? undefined : employees.find(employee => employee.id === employeeTarget))}\n${teams?.find(team => team.id === teamTarget)?.name ?? ""}\n主目标约束：${tasks.find(task => task.id === draft.parentTaskId)?.description ?? "无父任务"}\n确认后随本轮要求发送任务快照，沿用已有权限与费用边界。`, actions: [{ label: "取消", value: false, autoFocus: true }, { label: "保存并派发", value: true, kind: "primary" }] });
-      if (answer.dismissed === true || answer.action !== true) return;
-    }
-    await runFor("__create__", async () => {
-      const subject: TaskExecutionSubject = teamTarget
-        ? { type: "team", id: teamTarget }
-        : employeeTarget
-          ? { type: "employee", id: employeeTarget, ...(employeeOverride ? { agentOverride: draft.agent } : {}) }
-          : { type: "cli", id: draft.agent.provider };
-      const created = await taskBoardRepository.create({
-        workspaceId: draft.workspaceId || null,
-        title: submitTitle,
-        description: submitDescription,
-        status: draft.status,
-        priority: draft.priority,
-        labels: draft.labels.split(/[,，]/).map((label) => label.trim()).filter(Boolean),
-        dueDate: draft.dueDate || null,
-        milestoneId: draft.milestoneId || null,
-        parentTaskId: draft.parentTaskId || null,
-        ...(subject.type === "cli" ? { agent: draft.agent } : {}),
-        executionSubject: subject,
-        rememberAgentDefaults: subject.type === "cli" && rememberCreateDefaults,
-      });
-      if (subject.type === "cli" && rememberCreateDefaults) rememberAgent(draft.agent);
-      const executionPrompt = buildTaskDispatchPrompt(created, tasks.find(task => task.id === created.parentTaskId), submitDescription);
-      // 只有明确选择保存并派发才启动执行，与业务状态无关。
-      // 有描述才派发，否则只落库，之后在任务详情里再指派。
-      let assignError = "";
-      const team = subject.type === "team" ? teams?.find((item) => item.id === subject.id) : undefined;
-      const employee = subject.type === "employee" ? employees.find((item) => item.id === subject.id) : undefined;
-      if (dispatch && team && submitDescription) {
-        try {
-          await taskBoardRepository.dispatch(created.id, null, {
-            subject, prompt: executionPrompt, workspaceId: draft.workspaceId || null,
-          });
-          rememberAssignment(draft.agent, subject);
-          setNotice(`团队「${team.name}」已开始处理「${created.title}」`);
-        } catch (cause) {
-          assignError = cause instanceof Error ? cause.message : "任务已创建，但交给团队失败。";
-        }
-      } else if (dispatch && submitDescription && (employee || isDispatchableIssueAgent(draft.agent))) {
-        try {
-          const result = await taskBoardRepository.dispatch(created.id, subject.type === "cli" || employeeOverride ? draft.agent : null, {
-            prompt: executionPrompt,
-            workspaceId: draft.workspaceId || null,
-            subject,
-          });
-          rememberAssignment(draft.agent, subject);
-          setNotice(result.queued && employee
-            ? `「${created.title}」已排队，等待 ${employee.name} 空闲后自动开始`
-            : `${employee?.name || issueAgentLabel(result.session?.provider || draft.agent.provider, draft.agent.engine)} 已开始处理「${created.title}」`);
-        } catch (cause) {
-          assignError = cause instanceof Error ? cause.message : "任务已创建，但第一次指派失败。";
-        }
-      }
-      if (draftRef.current !== draft) {
-        // Keep edits made after this submission; the accepted task still refreshes below.
-        requestAnimationFrame(() => titleRef.current?.focus());
-      } else if (createMore) {
-        setDraft({ ...emptyDraft(draft.workspaceId, draft.status, draft.agent, draft.parentTaskId), milestoneId: draft.milestoneId });
-        requestAnimationFrame(() => titleRef.current?.focus());
-      } else {
-        setCreateOpen(false);
-        setDraft(emptyDraft(draft.workspaceId, "backlog", draft.agent));
-      }
-      await reload();
-      // reload() 开头会清掉错误横幅，所以这些提示必须放在它之后才留得住。
-      if (assignError) setError(assignError);
-      else setNotice(`已创建任务「${created.title}」${dispatch && submitDescription ? "，已启动执行" : "，未启动执行"}${subject.type === "cli" && rememberCreateDefaults ? "；以后新建任务将使用这组执行默认" : ""}。`);
-      if (!submitTitle && created.titleSource === "auto") {
-        titlePollerRef.current ??= createGeneratedTitlePoller({
-          getTask: (taskId) => taskBoardRepository.get(taskId),
-          reload,
-        });
-        void titlePollerRef.current.start(created.id, created.title);
-      }
-    });
-  }, [createMore, draft, employeeOverride, employeeTarget, employees, loading, rememberAgent, rememberAssignment, rememberCreateDefaults, reload, runFor, tasks, teamTarget, teams]);
+  }, [controller.workspaceId, filterWorkspaceId]);
 
   const patchTask = React.useCallback(async (id: string, patch: Parameters<typeof taskBoardRepository.update>[1]): Promise<boolean> => {
     let saved = false;
@@ -713,7 +542,6 @@ export function TaskBoardHost({
     }
   }, [archivePurgeScope, filterWorkspaceId, reload]);
   const workspaceOptions = issueWorkspaceOptions(workspaces);
-  const createParentOptions = issueParentOptions(tasks, draft.workspaceId || undefined, null, draft.parentTaskId);
   const projectName = filterWorkspaceId
     ? workspaces.find((workspace) => workspace.id === filterWorkspaceId)?.name ?? "项目"
     : "所有项目";
@@ -724,15 +552,6 @@ export function TaskBoardHost({
   const contextTask = contextMenu ? tasks.find((task) => task.id === contextMenu.taskId) ?? null : null;
   const filterActive = issueFilterCount(filters) > 0;
   const emptyState = issueBoardEmptyState(tasks.length, activeCount, archiveCount, Boolean(query.trim() || filterActive));
-  // 新建对话框与「处理中」列保持一致：只有会立刻指派时才展示指派控件。
-  // 无指派派工：不指定员工/团队，由本机决策模型给建议名单后再确认开工。
-  // 服务端自己建卡 + 建临时团队 + 起 run，所以这条路径不创建本地任务，也不派 CLI。
-  const [dispatchSelected, setDispatchSelected] = React.useState(false);
-  const dispatchFlow = useTeamDispatchFlow();
-  const createDispatches = saveAndDispatch;
-  const createTeam = teams?.find((team) => team.id === teamTarget) ?? null;
-  const createEmployee = employees.find((employee) => employee.id === employeeTarget) ?? null;
-
   // Compare the saved configuration by value, not the fresh objects returned by polling.
   const selectedAgentKey = JSON.stringify(selected?.agent ?? null);
   React.useEffect(() => {
@@ -764,18 +583,10 @@ export function TaskBoardHost({
     return () => { document.title = previous; };
   }, [selected?.title]);
 
-  const closeCreate = React.useCallback(async (): Promise<void> => {
-    if (mutationPending.current) return;
-    if (draft.title.trim() || draft.description.trim()) {
-      if (!await confirmDiscardTaskDraft()) return;
-    }
-    setCreateOpen(false);
-  }, [draft.title, draft.description]);
-
   React.useEffect(() => {
     if (!controller.open) return;
     const onKey = (event: KeyboardEvent): void => {
-      if (event.defaultPrevented || event.isComposing) return;
+      if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || newSessionController.isOpen()) return;
       const target = event.target;
       if (target instanceof Element && target.closest('[role="dialog"], [role="alertdialog"], [role="listbox"], [role="menu"]')) return;
       const typing = target instanceof HTMLElement && (
@@ -792,10 +603,6 @@ export function TaskBoardHost({
         return;
       }
       if (event.key !== "Escape" || typing) return;
-      if (createOpen) {
-        void closeCreate();
-        return;
-      }
       if (selectedId) {
         setSelectedId("");
         return;
@@ -809,7 +616,7 @@ export function TaskBoardHost({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [controller.open, createOpen, closeCreate, expandedTaskId, onBack, openCreate, selectedId]);
+  }, [controller.open, expandedTaskId, onBack, openCreate, selectedId]);
 
   if (!controller.open) return null;
 
@@ -1299,235 +1106,6 @@ export function TaskBoardHost({
       onClose={() => setContextMenu(null)}
     />}
 
-    <WandDialogSurface
-      open={createOpen}
-      title="新建任务"
-      className={classNames("wand-ui-dialog-content", "wand-task-library-dialog task-board-create-library-dialog", createExpanded && "is-expanded")}
-      description={createDispatches
-        ? "描述要完成的工作，创建后交给所选工具执行。"
-        : "先记录要做的事，准备好后再从任务详情启动执行。"}
-      closeLabel="关闭新建任务"
-      dismissable={busyId !== "__create__"}
-      closeContent={<WandIcon name="close" size={14} strokeWidth={1.8}/>}
-      onOpenChange={(open) => {
-        if (!open) void closeCreate();
-      }}
-    >
-      <TaskForm noValidate
-        aria-busy={busyId === "__create__"}
-        className="task-board-create-form task-board-native-composer"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (dispatchSelected) {
-            // 派工由服务端建卡 + 起 run：同一个按钮先选人、再确认开工。
-            void (dispatchFlow.hasPlan
-              ? dispatchFlow.startNow(draft.workspaceId, draft.description).then((started) => {
-                if (started) {
-                  setDispatchSelected(false);
-                  dispatchFlow.resetResults();
-                  closeCreate();
-                  const chatId = started.run?.chatSessionId;
-                  if (chatId) onOpenSession?.(chatId);
-                  else setNotice(`已开工（任务 ${started.taskId}），可在任务详情里查看团队运行。`);
-                }
-              })
-              : dispatchFlow.planNow(draft.description));
-            return;
-          }
-          void createTask(saveAndDispatch);
-        }}
-      >
-        <Flex vertical gap="small" className="task-board-create-writing task-board-form-section">
-          <h3 className="task-board-form-section-title">任务内容</h3>
-          {/* 标题是可选字段：留空就按描述自动生成，所以这里刻意做得比描述框更轻。 */}
-          <Form.Item label={<span id="task-board-create-title-label">任务标题 <Typography.Text type="secondary">可选</Typography.Text></span>} className="task-board-create-title-field">
-
-            <TaskTextArea
-              ref={titleRef}
-              className="resize-none task-board-create-title-input"
-              rows={1}
-              value={draft.title}
-              placeholder="不填写则按描述自动生成"
-              aria-labelledby="task-board-create-title-label"
-              maxLength={240}
-              data-wand-autofocus=""
-              onChange={(event) => {
-                const value = event.currentTarget.value.replace(/\n/g, "");
-                setDraft((current) => ({ ...current, title: value }));
-              }}
-            />
-          </Form.Item>
-          <IssueField label="任务描述"><TaskTextArea
-            className="resize-none task-board-create-body-input"
-            rows={4}
-            value={draft.description}
-            placeholder={createDispatches
-              ? "添加描述…（将作为第一个 Agent 的指派内容）"
-              : "添加描述…（仅保存计划，不启动执行）"}
-            aria-label={createDispatches ? "任务描述（作为第一次指派）" : "任务描述"}
-            onChange={(event) => {
-              const value = event.currentTarget.value;
-              setDraft((current) => ({ ...current, description: value }));
-            }}
-          /></IssueField>
-        </Flex>
-        <Flex vertical gap="middle" className="task-board-create-meta">
-          <section className="task-board-form-section">
-          <h3 className="task-board-form-section-title">归属与排期</h3>
-          <Flex wrap gap="small" className="task-board-create-properties" aria-label="任务属性">
-            <IssueField label="项目目录"><WandSelect
-              value={issueWorkspaceSelectValue(draft.workspaceId)}
-              options={workspaceOptions}
-              ariaLabel="指定项目目录"
-              placeholder="选择项目目录"
-              searchable
-              searchPlaceholder="搜索项目"
-              className="task-board-native-select"
-              onValueChange={(value) => {
-                const workspaceId = issueWorkspaceIdFromSelect(value) ?? "";
-                setDraft((current) => ({
-                  ...current,
-                  workspaceId,
-                  parentTaskId: tasks.some((task) => task.id === current.parentTaskId && task.workspaceId === (workspaceId || null))
-                    ? current.parentTaskId : "",
-                }));
-              }}
-            /></IssueField>
-            <IssueField label="父任务"><WandSelect
-              value={draft.parentTaskId || ISSUE_NO_PARENT}
-              options={createParentOptions}
-              ariaLabel="归属父任务"
-              placeholder="归属父任务"
-              searchable
-              searchPlaceholder="搜索主任务编号或标题"
-              className="task-board-native-select task-board-parent-select"
-              onValueChange={(value) => {
-                const parent = tasks.find((task) => task.id === value);
-                setDraft((current) => ({
-                  ...current,
-                  parentTaskId: parent?.id ?? "",
-                  workspaceId: parent ? parent.workspaceId ?? "" : current.workspaceId,
-                  milestoneId: parent?.milestoneId ?? current.milestoneId,
-                }));
-              }}
-            /></IssueField>
-            <IssueField label="任务状态"><WandSelect
-              value={draft.status}
-              options={ISSUE_COLUMNS.map((column) => ({ value: column.status, label: column.label }))}
-              ariaLabel="状态"
-              className="task-board-native-select"
-              onValueChange={(status) => setDraft((current) => ({ ...current, status: status as WandTaskStatus }))}
-            /></IssueField>
-            <IssueField label="优先级"><WandSelect
-              value={draft.priority}
-              options={ISSUE_PRIORITIES.map((entry) => ({ value: entry.value, label: entry.label }))}
-              ariaLabel="优先级"
-              className="task-board-native-select"
-              onValueChange={(priority) => setDraft((current) => ({ ...current, priority: priority as WandTaskPriority }))}
-            /></IssueField>
-            <IssueField label="截止日期">
-              <TaskDatePicker
-                ariaLabel="截止日期"
-                value={draft.dueDate}
-                popupOwner="task-board-create"
-                onValueChange={(dueDate) => setDraft((current) => ({ ...current, dueDate }))}
-              />
-            </IssueField>
-            <IssueField label="迭代"><MilestonePicker
-              value={draft.milestoneId || null}
-              workspaceId={draft.workspaceId || null}
-              onChange={(milestoneId) => setDraft((current) => ({ ...current, milestoneId: milestoneId ?? "" }))}
-            /></IssueField>
-            <IssueField label="标签">
-              <WandInput
-                type="text"
-                value={draft.labels}
-                placeholder="用逗号分隔"
-                onChange={(event) => {
-                  const value = event.currentTarget.value;
-                  setDraft((current) => ({ ...current, labels: value }));
-                }}
-              />
-            </IssueField>
-          </Flex>
-          </section>
-
-          {/* 执行配置先属于本任务；只有显式勾选后才在创建成功时更新以后默认。 */}
-          <Card size="small" className="task-board-create-assign task-board-form-section" aria-label={createDispatches ? "第一次指派" : "执行员工"}>
-            <Flex vertical gap={4} className="task-board-create-assign-copy" style={{ marginBottom: 12 }}>
-              <strong>{createDispatches ? "第一次指派" : "执行员工"}</strong>
-              <span>{dispatchSelected
-                ? "不指派员工：本机决策模型给建议名单，确认后才开工"
-                : createTeam ? "有描述时会立刻交给团队，由负责人拆解分派"
-                : createEmployee ? "默认交给所选员工；仅保存不会启动执行"
-                : createDispatches ? "有描述时会立即交给所选工具；配置仅用于本任务" : "仅保存任务的指派计划，确认派发后才启动执行"}</span>
-            </Flex>
-            <Flex wrap gap="small" className="task-board-create-assign-controls">
-              <AgentFields agent={draft.agent} catalog={catalog} providerOptions={providerOptions} ariaPrefix="任务" employeeOverride={employeeOverride} teams={teams} teamId={teamTarget} employees={employees} employeeId={employeeTarget} onTeamChange={setTeamTarget} onEmployeeChange={setEmployeeTarget}
-                onDispatchSelect={() => { setEmployeeTarget(""); setTeamTarget(""); setDispatchSelected(true); dispatchFlow.resetResults(); }}
-                onChange={(agent, _subject, override) => { setEmployeeOverride(override === true); setDraft(current => ({ ...current, agent })); }}/>
-
-            </Flex>
-            {!createTeam && !createEmployee && !dispatchSelected && draft.agent.mode === "full-access" && <Alert type="warning" showIcon
-              className="task-board-create-permission-note" title="完全访问（Full access）"
-              description="工具会自动确认权限请求。创建前请确认执行对象和项目目录。"/>}
-            {!createTeam && !createEmployee && !dispatchSelected && <div className="task-board-defaults-choice">
-              <WandSwitch checked={rememberCreateDefaults} onCheckedChange={setRememberCreateDefaults}
-                ariaLabel="同时设为以后默认" label="同时设为以后默认" disabled={busyId === "__create__"}/>
-              <Typography.Text type="secondary">创建成功后生效；不改变已有任务或会话。</Typography.Text>
-            </div>}
-            {dispatchSelected ? <div className="task-board-create-dispatch">
-              <TeamDispatchRoster
-                flow={dispatchFlow}
-                blockedReason={dispatchStartBlockedReason({
-                  selection: dispatchFlow.selection,
-                  workspaceId: draft.workspaceId,
-                  note: draft.description,
-                  busy: dispatchFlow.busy,
-                })}
-              />
-            </div> : null}
-          </Card>
-        </Flex>
-        {error && <Alert type="error" role="alert" showIcon title={error}/>}
-        <Flex wrap gap="small" align="center" justify="space-between" className="task-board-create-footer" style={{ marginTop: 16 }}>
-          <WandSwitch
-            checked={createMore}
-            onCheckedChange={setCreateMore}
-            ariaLabel="创建更多"
-            label="创建更多"
-          />
-          <WandIconButton
-            className="task-board-icon-button"
-            aria-label={createExpanded ? "收起编辑器" : "展开编辑器"}
-            onClick={() => setCreateExpanded((open) => !open)}
-          >
-            <WandIcon name={createExpanded ? "chevron" : "up"}/>
-          </WandIconButton>
-          <WandSwitch checked={saveAndDispatch} onCheckedChange={value => { setSaveAndDispatch(value); if (!value) setDispatchSelected(false); }} ariaLabel="保存并派发"/>
-          <Typography.Text>{saveAndDispatch ? "保存并派发（新建执行）" : "仅保存计划"}</Typography.Text>
-          {dispatchSelected ? <div className="task-board-create-submit-slot">
-            <TeamDispatchActionButton
-              flow={dispatchFlow}
-              canPlan={draft.description.trim().length > 0}
-              blockedReason={dispatchStartBlockedReason({
-                selection: dispatchFlow.selection,
-                workspaceId: draft.workspaceId,
-                note: draft.description,
-                busy: dispatchFlow.busy,
-              })}
-            />
-          </div> : <WandButton
-            kind="primary"
-            type="submit"
-            className="task-board-create-submit"
-            disabled={(!draft.title.trim() && !draft.description.trim()) || (saveAndDispatch && !draft.description.trim()) || busyId === "__create__"}
-          >
-            {busyId === "__create__" ? "正在保存…" : saveAndDispatch && draft.description.trim() ? "保存并派发" : "保存任务"}
-          </WandButton>}
-        </Flex>
-      </TaskForm>
-    </WandDialogSurface>
   </Flex>;
 }
 

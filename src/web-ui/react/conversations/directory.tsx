@@ -1,4 +1,5 @@
 import * as React from "react";
+import { GROUP_CHAT_VISIBLE } from "../../group-chat-visibility.js";
 import { usePageRouteState, routeEnum } from "../use-page-route";
 import { CopyPageLink } from "../ui/copy-page-link";
 import { Alert, Flex, Typography } from "antd";
@@ -40,12 +41,13 @@ export function ConversationDirectory({ active = true, onSelect }: { active?: bo
     <Flex ref={anchor} align="center" justify="space-between" gap={8} className="conversation-directory-header" style={{ position: "relative", flexShrink: 0 }}>
       <Flex align="center" gap={8}><WandButton kind="ghost" size="small" onClick={() => { setCreate(false); conversationUi.directory(false); }}>返回对话</WandButton><Typography.Title level={2}>通讯录</Typography.Title></Flex>
       <CopyPageLink/>
-      <WandButton ref={trigger} kind="primary" size="small" aria-label={create ? "关闭建群" : "发起群聊"} aria-expanded={create}
+      {GROUP_CHAT_VISIBLE ? <WandButton ref={trigger} kind="primary" size="small" aria-label={create ? "关闭建群" : "发起群聊"} aria-expanded={create}
         onClick={() => { setPresetId(""); setCreate(!create); }}><ConversationMorphIcon from="plus" to="close" active={create}/>{create ? "关闭建群" : "发起群聊"}</WandButton>
-      <ConversationPanel open={create} owner="directory-group-panel" anchorRef={anchor} triggerRef={trigger} onClose={() => setCreate(false)}>
+        : null}
+      {GROUP_CHAT_VISIBLE ? <ConversationPanel open={create} owner="directory-group-panel" anchorRef={anchor} triggerRef={trigger} onClose={() => setCreate(false)}>
         <GroupEditor open={create} owner="directory-group-panel" presetId={presetId || undefined} onCancel={() => setCreate(false)}
           onCreated={id => { setCreate(false); onSelect(id, true); }}/>
-      </ConversationPanel>
+      </ConversationPanel> : null}
     </Flex>
     <Flex gap={8} align="center" wrap className="conversation-directory-toolbar">
       <WandStretchTabs value={tab} onValueChange={value => { setCreate(false); setTab(value as "employees" | "presets"); }} ariaLabel="通讯录分类"
@@ -81,11 +83,11 @@ export function ConversationDirectory({ active = true, onSelect }: { active?: bo
             <Flex vertical><Typography.Text strong>{t.name} · 团队模板</Typography.Text><Typography.Text type="secondary">{t.members.length} 位员工 · 负责人 {t.members.find(m => m.isLeader)?.name || "未设置"}</Typography.Text></Flex>
           </WandButton>
           <div className="conversation-inline-detail" data-open={expanded.includes(t.id)} inert={!expanded.includes(t.id)}><div>
-            <PresetDetails team={t}/><WandButton onClick={() => { setPresetId(t.id); setCreate(true); trigger.current?.focus({ preventScroll: true }); }}>用此模板发起群聊</WandButton>
+            <PresetDetails team={t}/>{GROUP_CHAT_VISIBLE ? <WandButton onClick={() => { setPresetId(t.id); setCreate(true); trigger.current?.focus({ preventScroll: true }); }}>用此模板发起群聊</WandButton> : null}
           </div></div>
         </div>)}
         {!teamSource.loading && !teamSource.error && teams.length > 0 && !visibleTeams.length ? <Typography.Paragraph type="secondary" role="status">没有匹配的团队模板，试试其他名称或清空搜索。</Typography.Paragraph> : null}
-        {!teamSource.loading && !teamSource.error && !teams.length ? <Typography.Paragraph type="secondary">还没有团队模板，可以直接选择员工发起群聊。</Typography.Paragraph> : null}
+        {!teamSource.loading && !teamSource.error && !teams.length ? <Typography.Paragraph type="secondary">{GROUP_CHAT_VISIBLE ? "还没有团队模板，可以直接选择员工发起群聊。" : "还没有团队模板，可以通过管理入口创建。"}</Typography.Paragraph> : null}
       </>}
     </div>
   </Flex>;

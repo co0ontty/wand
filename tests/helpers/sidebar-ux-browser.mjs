@@ -1,29 +1,14 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { once } from "node:events";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { writeFileSync } from "node:fs";
+import { openChromeConnection } from "./browser-process.mjs";
 import { BrowserCommandError, createDocumentEvaluator, waitForBrowserCondition } from "./browser-document.mjs";
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 export async function openBrowser(url, width = 1440, height = 1000) {
-  const temp = mkdtempSync(join(tmpdir(), "wand-sidebar-ux-"));
-  const browser = spawn("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", [
-    "--headless=new", "--disable-gpu", "--no-first-run", "--ignore-certificate-errors",
-    "--remote-allow-origins=*", "--remote-debugging-port=0", `--user-data-dir=${temp}/profile`, url,
-  ], { stdio: "ignore" });
-  let socket;
+  const browser = await openChromeConnection(url, ["--disable-gpu", "--ignore-certificate-errors"]);
+  const { socket } = browser;
   try {
-    const portFile = join(temp, "profile/DevToolsActivePort");
-    for (let i = 0; i < 100 && !existsSync(portFile); i++) await pause(50);
-    assert.ok(existsSync(portFile), "Chrome must start");
-    const port = readFileSync(portFile, "utf8").split("\n")[0];
-    const pages = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
-    const page = pages.find(p => p.type === "page");
-    socket = new WebSocket(page.webSocketDebuggerUrl);
-    await once(socket, "open");
     const pending = new Map(); const errors = []; let sequence = 0;
     socket.addEventListener("message", event => {
       const response = JSON.parse(event.data);
@@ -34,6 +19,12 @@ export async function openBrowser(url, width = 1440, height = 1000) {
       pending.delete(response.id); clearTimeout(request.timer);
       if (response.error) request.reject(new BrowserCommandError(request.method, response.error));
       else request.resolve(response.result);
+    });
+    socket.addEventListener("close", () => {
+      for (const request of pending.values()) {
+        clearTimeout(request.timer); request.reject(new Error("Chrome closed during " + request.method));
+      }
+      pending.clear();
     });
     const send = (method, params = {}) => new Promise((resolve, reject) => {
       const id = ++sequence;
@@ -79,16 +70,9 @@ export async function openBrowser(url, width = 1440, height = 1000) {
     documentEvaluator.setMainFrame(frameTree.frame.id);
     await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
     await send("Page.bringToFront");
-    return { send, evaluate, wait, click, key, settle, screenshot, errors,
-      async close() {
-        socket.close(); browser.kill();
-        await Promise.race([once(browser, "exit"), pause(2000)]);
-        // Chrome may still be flushing its profile; a leftover temp dir is not a failure.
-        try { rmSync(temp, { recursive: true, force: true }); }
-        catch { try { await pause(500); rmSync(temp, { recursive: true, force: true }); } catch {} }
-      },
-    };
+    return { send, evaluate, wait, click, key, settle, screenshot, errors, close: browser.close };
   } catch (error) {
-    socket?.close(); browser.kill(); rmSync(temp, { recursive: true, force: true }); throw error;
+    await browser.close();
+    throw error;
   }
 }

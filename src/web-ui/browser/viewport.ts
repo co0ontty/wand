@@ -7,12 +7,7 @@ import { isStructuredSession, updateDrawerState } from "./session-engine";
 import { maybeScrollTerminalToBottom, updateTerminalJumpToBottomButton } from "./terminal";
 import { isSidebarDrawerLayout } from "./file-browser";
 import { fitTerminalToContainer } from "./terminal-fit";
-
-function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  return fetch(input, { ...init,
-    headers: { ...(init?.headers as Record<string, string> | undefined),
-      "X-Wand-Tool-Projection": "compact" } });
-}
+import { compactSessionFetch } from "./session-fetch.js";
 
       var appViewportBaselineWidth = 0;
       var appViewportBaselineHeight = 0;

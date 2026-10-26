@@ -5,8 +5,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { build } from "esbuild";
-import { openPlushBrowser } from "./run-plush-avatar-browser-harness.mjs";
+import { build, stop } from "esbuild";
+import { closeBrowserFixture, openPlushBrowser } from "./run-plush-avatar-browser-harness.mjs";
 import { runEmployeeLayoutCases } from "./employee-layout-cases.mjs";
 
 const layoutQa = process.env.WAND_EMPLOYEE_LAYOUT_QA === "1";
@@ -102,9 +102,17 @@ const server=createServer(async(request,response)=>{
 });
 server.listen(0,"127.0.0.1");await once(server,"listening");const origin=`http://127.0.0.1:${server.address().port}`;
 const browser=await openPlushBrowser(1440,1000),e=browser.evaluate;
+const recordStage=(name,detail={})=>{
+  const stage={name,at:new Date().toISOString(),elapsedMs:Math.round(process.uptime()*1000),...detail};
+  (result.stages??=[]).push(stage);
+  writeFileSync(join(output,"browser-stages.json"),JSON.stringify(result.stages,null,2));
+  if(process.env.WAND_BROWSER_CLEANUP_TRACE==="1")console.log(JSON.stringify({employeeProfileStage:stage}));
+};
+recordStage('browser-ready');
 // Library closing surfaces keep layout boxes briefly. Re-resolve painted candidates on every
 // probe; a pinned first text match can disappear or remain covered after a dialog reopens.
 const clickTarget=async(target)=>{
+  const started=Date.now();
   const probe=()=>e(`(()=>{const target=${JSON.stringify(target)};
     window.__employeePointerProbes=(window.__employeePointerProbes??0)+1;
     const identities=window.__employeePointerIdentities??=new WeakMap();
@@ -133,7 +141,8 @@ const clickTarget=async(target)=>{
     if(a&&b&&a.identity===b.identity&&Math.abs(a.x-b.x)<1&&Math.abs(a.y-b.y)<1){
       await e(`(window.__employeeClickPlans??=[]).push(${JSON.stringify({target,...b})});window.__employeeClickPlans=window.__employeeClickPlans.slice(-30);true`);
       for(const type of ['mousePressed','mouseReleased'])await browser.send('Input.dispatchMouseEvent',{type,x:b.x,y:b.y,button:'left',clickCount:1});
-      await browser.settle();return;
+      const dispatched=Date.now();await browser.settle();
+      (result.pointerTimings??=[]).push({target,attempts:attempt+1,elapsedMs:Date.now()-started,settleMs:Date.now()-dispatched});return;
     }
   }
   const targets=await e(`([...document.querySelectorAll(${JSON.stringify(target.selector)})].filter(n=>${JSON.stringify(target.text)}===undefined||n.innerText.replace(/\\s+/g,'')===${JSON.stringify(target.text)}).slice(0,10).map(n=>{const r=n.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {text:n.textContent,connected:n.isConnected,disabled:n.disabled,visible:n.checkVisibility?.({visibilityProperty:true}),scope:n.closest('[role=dialog]')?'dialog':'page',rect:{x:r.x,y:r.y,width:r.width,height:r.height},hit:hit?{tag:hit.tagName,text:hit.textContent.slice(0,80)}:null}}))`);
@@ -159,6 +168,7 @@ const editor=async(id)=>{await e(`employeeProfileFixture.editor(${JSON.stringify
 const directory=async()=>{await e("employeeProfileFixture.directory()");await browser.wait("!!document.querySelector('.wand-employee-workspace')");await browser.settle()};
 try{
   await browser.send("Page.navigate",{url:origin});await browser.wait("!!window.employeeProfileFixture");await directory();
+  recordStage('fixture-ready',{scenario:confirmOnly?'confirmation':guardOnly?'dirty-leave':layoutQa?'layout':hrQa?'recruitment':'full-profile'});
   if(guardOnly)await e(`const style=document.createElement("style");style.textContent=".ant-zoom-appear,.ant-zoom-enter{animation-duration:2s!important}";document.head.append(style);true`);
   await e(`window.__guardPointer=[];for(const type of ['mousedown','mouseup','click'])document.addEventListener(type,event=>{const n=event.target;window.__guardPointer.push({type,tag:n.tagName,text:n.textContent.slice(0,50),x:event.clientX,y:event.clientY,dialog:employeeProfileFixture.dialogState()});window.__guardPointer=window.__guardPointer.slice(-60)},true);true`);
   if(hrQa){
@@ -236,6 +246,7 @@ try{
     assert.equal(await e("window.__employeeClickPlans.filter(plan=>plan.animations.some(a=>a.properties.includes('transform')&&['running','paused'].includes(a.state))).length"),0,'no pointer is sent during unresolved entrance geometry');
     cases.push({name:'dirty-leave confirmation accepts sixteen real pointer cancellations, CPU4x wide/mobile',events:await e('window.__guardPointer')});
   }else if(confirmOnly){
+    recordStage('confirmation-start');
     await browser.send('Emulation.setDeviceMetricsOverride',{width:320,height:1000,deviceScaleFactor:1,mobile:false});
     await browser.send('Emulation.setCPUThrottlingRate',{rate:4});
     await browser.send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]});
@@ -253,11 +264,13 @@ try{
       await clickText('取消','[role=dialog]');
       await browser.wait("employeeProfileFixture.dialogState()===null",'reopened confirmation actually closes');
       assert.equal(writes(),mutations,'reopening and cancelling never writes');
+      recordStage('confirmation-cycle-complete',{iteration:iteration+1,cancellations:(iteration+1)*2});
     }
     await clickText('删除员工');await browser.wait("[...document.querySelectorAll('[role=dialog]')].some(n=>n.textContent.includes('删除员工')&&n.getClientRects().length)");
     await clickText('删除员工','[role=dialog]');await browser.wait("!document.querySelector('[data-employee-id=emp-custom]')");
     assert.equal(employees.some(item=>item.id==='emp-custom'),false);assert.equal(writes(),mutations+1,'explicit confirmation deletes exactly once');
     cases.push({name:'rapid cancel/reopen/confirm with real pointer',width:320,cpuRate:4,cancellations:16,deletes:1});
+    recordStage('confirmation-complete',{cancellations:16,deletes:1});
   }else{
   assert.equal(await e("document.querySelectorAll('.employee-item').length"),seeds.filter(employee=>!employee.archivedAt).length + 1);assert.equal(await e("document.querySelectorAll('[data-employee-profile]').length"),0,"directory opens without an automatic split editor");
   assert.equal(await e("document.querySelector('.employee-item').dataset.directoryEmployeeId"), "user", "我固定置顶，不进入员工执行配置");
@@ -362,6 +375,6 @@ try{
   await clickText("删除员工");await browser.wait("[...document.querySelectorAll('[role=dialog]')].some(n=>n.textContent.includes('删除员工')&&n.getClientRects().length)");await clickText("删除员工","[role=dialog]");await browser.wait("!document.querySelector('[data-employee-id=emp-created]')");assert.equal(employees.some(item=>item.id==='emp-created'),false);
   cases.push({name:"manual create dirty guard, delayed create blocks switching, confirmation cancel and explicit delete fixture roundtrip"});
   }
-  assert.equal(result.modelCalls,0);assert.deepEqual(browser.errors,[]);result.pointerEvidence=await e("({events:window.__guardPointer,plans:window.__employeeClickPlans,dialog:employeeProfileFixture.dialogState(),actions:employeeProfileFixture.dialogActions})");result.ok=true;writeFileSync(join(output,"browser-result.json"),JSON.stringify(result,null,2));console.log(JSON.stringify({ok:true,cases:cases.length,modelCalls:0,output}));
+  assert.equal(result.modelCalls,0);assert.deepEqual(browser.errors,[]);result.pointerEvidence=await e("({events:window.__guardPointer,plans:window.__employeeClickPlans,dialog:employeeProfileFixture.dialogState(),actions:employeeProfileFixture.dialogActions})");recordStage('business-complete');result.ok=true;writeFileSync(join(output,"browser-result.json"),JSON.stringify(result,null,2));console.log(JSON.stringify({ok:true,cases:cases.length,modelCalls:0,output}));
 }catch(error){result.ok=false;result.error=error.message;result.errors=browser.errors;result.pointerEvidence=await e("({events:window.__guardPointer,plans:window.__employeeClickPlans,dialog:employeeProfileFixture.dialogState(),actions:employeeProfileFixture.dialogActions})").catch(()=>null);await browser.screenshot(join(output,"failure.png")).catch(()=>{});writeFileSync(join(output,"browser-result.json"),JSON.stringify(result,null,2));throw error}
-finally{await browser.close();await new Promise(resolveClose=>server.close(resolveClose));rmSync(temp,{recursive:true,force:true})}
+finally{createRelease?.();draftRelease?.();await closeBrowserFixture(browser,server,()=>{stop();rmSync(temp,{recursive:true,force:true})})}

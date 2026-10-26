@@ -33,7 +33,10 @@ test("iOS projects execution and new drafts independently and retains a stop pat
   assert.match(chat, /!draft\.trimmingCharacters\(in: \.whitespacesAndNewlines\)\.isEmpty \|\| !attachments\.attachments\.isEmpty/);
   assert.match(actions, /phase == \.idle && turnRunning && !hasDraft/);
   assert.match(actions, /if stopping \{ onStop\(\) \} else \{ onSend\(\) \}/);
-  assert.match(chat, /if store\.isResponding \{ Button\("停止当前任务"/);
+  const menu = chat.slice(chat.indexOf("private var chatMenuItems:"), chat.indexOf("private var modalContent:"));
+  assert.match(menu, /if store\.isResponding \{[\s\S]*?SessionMenuAction\(id: "stop", title: "停止当前任务", symbol: "stop", role: \.destructive\) \{\s*showStopConfirm = true/);
+  assert.doesNotMatch(menu, /store\.stop/, "opening the stop action must preserve explicit confirmation");
+  assert.match(chat, /isPresented: \$showStopConfirm[^\n]*\{\s*Button\("停止", role: \.destructive\) \{ store\.stopResponding\(\) \}\s*Button\("取消", role: \.cancel\)/);
   assert.match(source(root + "ConversationViews.swift"), /turnRunning: running && !dispatch, hasDraft:/);
   assert.match(actions, /if actions\.stop/);
   assert.match(actions, /if actions\.send/);

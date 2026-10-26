@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { build } from "esbuild";
+import { retainedGroupChatFixture } from "./conversation-group-visibility-fixture.js";
 import express from "express";
 import { peopleContrastExpression } from "./helpers/people-layout-contrast.js";
 
@@ -23,7 +24,7 @@ test("directory distinguishes resource failures, search misses, and unselected t
       agent: { provider: "codex", model: "default" } }] };
   let fixture = { employeeFail: true, teamFail: true, empty: false };
   let writes = 0;
-  await build({ stdin: { resolveDir: root, loader: "tsx", contents: `
+  await build({ plugins: [retainedGroupChatFixture], stdin: { resolveDir: root, loader: "tsx", contents: `
     import * as React from "react";
     import { createRoot } from "react-dom/client";
     import { ConversationDirectory } from "./src/web-ui/react/conversations/directory";

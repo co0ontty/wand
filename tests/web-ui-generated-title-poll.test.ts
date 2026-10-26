@@ -174,15 +174,36 @@ test("同一任务重复 start 不会叠加两个循环", async () => {
   assert.equal(h.clock.pending, 0);
 });
 
-test("任务看板使用可取消轮询器，并在看板关闭 / 卸载时 cancel", () => {
+test("任务看板通过共享事件和列表轮询更新生成标题，关闭 / 卸载时取消订阅和定时器", () => {
   const host = readFileSync(new URL("../src/web-ui/react/issues/task-board-host.tsx", import.meta.url), "utf8");
-  assert.match(host, /titlePollerRef\.current \?\?= createGeneratedTitlePoller\(/);
-  assert.match(host, /void titlePollerRef\.current\.start\(created\.id, created\.title\);/);
-  assert.doesNotMatch(host, /AUTO_TITLE_POLL_DELAYS_MS|refreshGeneratedTitle/, "内联轮询实现已移除");
-  assert.equal(
-    host.match(/titlePollerRef\.current\?\.cancel\(\)/g)?.length,
-    2,
-    "看板关闭与组件卸载各 cancel 一次",
-  );
-  assert.match(host, /\}, \[controller\.open\]\);/);
+  const creator = readFileSync(new URL("../src/web-ui/react/issues/task-create.tsx", import.meta.url), "utf8");
+  assert.match(creator, /notifyTasksChanged\(\)/, "共享创建页成功后通知列表刷新");
+  assert.doesNotMatch(host, /titlePollerRef|AUTO_TITLE_POLL_DELAYS_MS|refreshGeneratedTitle/, "看板不再持有创建器的标题轮询");
+  const body = host.match(/React\.useEffect\(\(\) => \{(\s*if \(!controller\.open\) return;\s*\/\/ 创建器[\s\S]*?)\n  \}, \[controller\.open, loadWorkspaces, reload\]\);/)?.[1];
+  assert.ok(body, "列表刷新 effect 随打开状态安装和清理");
+  const effect = new Function("controller", "window", "subscribeTaskChanges", "loadWorkspaces", "reload", body);
+  let tick: (() => void) | undefined;
+  let onChange: (() => void) | undefined;
+  let cleared = false;
+  let unsubscribed = false;
+  let reloads = 0;
+  let workspaceLoads = 0;
+  const timer = {
+    setInterval(callback: () => void, delay: number) { assert.equal(delay, 6_000); tick = callback; return 23; },
+    clearInterval(id: number) { assert.equal(id, 23); cleared = true; },
+  };
+  const subscribe = (callback: () => void) => { onChange = callback; return () => { unsubscribed = true; }; };
+  const loadWorkspaces = () => { workspaceLoads += 1; };
+  const reload = (silent: boolean) => { assert.equal(silent, true); reloads += 1; };
+  assert.equal(effect({ open: false }, timer, subscribe, loadWorkspaces, reload), undefined);
+  assert.equal(tick, undefined, "关闭时不轮询");
+  assert.equal(onChange, undefined, "关闭时不订阅");
+  const cleanup = effect({ open: true }, timer, subscribe, loadWorkspaces, reload);
+  assert.ok(tick); assert.ok(onChange);
+  tick(); onChange();
+  assert.equal(reloads, 2);
+  assert.equal(workspaceLoads, 2);
+  cleanup();
+  assert.equal(cleared, true, "effect 清理取消定时器");
+  assert.equal(unsubscribed, true, "effect 清理取消共享任务事件订阅");
 });

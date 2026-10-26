@@ -4,6 +4,7 @@ import {
   SESSION_PROVIDERS as PROVIDER_IDS,
   PROVIDER_LABELS,
   WAND_AGENT_LABEL,
+  defaultStructuredRunner,
   inferProviderFromCommand,
   isNativeThinkingEffort,
   NATIVE_THINKING_EFFORT_PATTERN,
@@ -14,6 +15,7 @@ import {
 } from "../provider-catalog.js";
 
 export {
+  defaultStructuredRunner,
   providerCliCommand,
   isNativeThinkingEffort,
   NATIVE_THINKING_EFFORT_PATTERN,
@@ -83,12 +85,7 @@ export function agentToolDisplayName(provider: unknown, engine?: AgentToolEngine
     : providerDisplayName(provider);
 }
 
-const PROVIDER_ID_SET: ReadonlySet<string> = new Set(PROVIDER_IDS);
-
-/** 严格判断：只接受 7 个 provider 字面量，不做别名 / 大小写归一。 */
-export function isProviderId(value: unknown): value is ProviderId {
-  return typeof value === "string" && PROVIDER_ID_SET.has(value);
-}
+export { isSessionProvider as isProviderId } from "../provider-catalog.js";
 
 // Claude/Codex paths match the existing Android BrandLogos source (simple-icons,
 // CC0). Grok uses xAI's mark path already shipped by the Web new-session view.

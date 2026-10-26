@@ -1,4 +1,20 @@
-import type { NewSessionKind, NewSessionRuntimeAdapter } from "./types";
+import type { NewSessionCreated, NewSessionCreateRequest, NewSessionKind, NewSessionRuntimeAdapter } from "./types";
+import type { TaskExecutionSubject, WandTaskAgent, WandTaskPriority, WandTaskStatus } from "../../../task-types.js";
+
+/** Entry points supply context; the new-work page owns the only task editor. */
+export interface NewTaskDraftOptions {
+  workspaceId?: string;
+  status?: WandTaskStatus;
+  priority?: WandTaskPriority;
+  parentTaskId?: string;
+  milestoneId?: string;
+  title?: string;
+  description?: string;
+  executionSubject?: TaskExecutionSubject;
+  agent?: WandTaskAgent;
+  draftKey?: string;
+  scope?: string;
+}
 
 export interface NewSessionControllerSnapshot {
   open: boolean;
@@ -11,6 +27,7 @@ export interface NewSessionControllerSnapshot {
   workspaceTaskId: string;
   taskName: string;
   newTask: boolean;
+  taskDraft?: NewTaskDraftOptions;
   revision: number;
 }
 
@@ -22,12 +39,14 @@ export interface NewSessionOpenOptions {
   workspaceTaskId?: string;
   taskName?: string;
   newTask?: boolean;
+  taskDraft?: NewTaskDraftOptions;
 }
 
 export interface NewSessionUnknownCreation {
   scope: string;
   message: string;
 }
+export interface NewSessionAcceptedCreation { request: NewSessionCreateRequest; created: NewSessionCreated; }
 
 export interface WandNewSessionController {
   open(options?: NewSessionOpenOptions): boolean;
@@ -38,6 +57,8 @@ export interface WandNewSessionController {
   setDismissable(dismissable: boolean): void;
   getUnknownCreation(scope: string): NewSessionUnknownCreation | undefined;
   markUnknownCreation(value: NewSessionUnknownCreation): void;
+  getAcceptedCreation(draftKey: string): NewSessionAcceptedCreation | undefined;
+  setAcceptedCreation(draftKey: string, value: NewSessionAcceptedCreation | null): void;
 }
 
 type Listener = () => void;
@@ -57,6 +78,7 @@ let snapshot: NewSessionControllerSnapshot = {
 };
 const listeners = new Set<Listener>();
 const unknownCreations = new Map<string, NewSessionUnknownCreation>();
+const acceptedCreations = new Map<string, NewSessionAcceptedCreation>();
 
 function publish(
   open: boolean,
@@ -67,6 +89,7 @@ function publish(
   workspaceTaskId = "",
   taskName = "",
   newTask = false,
+  taskDraft?: NewTaskDraftOptions,
 ): void {
   snapshot = {
     open,
@@ -78,6 +101,7 @@ function publish(
     workspaceTaskId: open ? workspaceTaskId.trim() : "",
     taskName: open ? taskName.trim() : "",
     newTask: open && newTask,
+    taskDraft: open ? taskDraft : undefined,
     revision: snapshot.revision + 1,
   };
   for (const listener of listeners) listener();
@@ -104,6 +128,7 @@ export const newSessionController: WandNewSessionController = {
       options.workspaceTaskId,
       options.taskName,
       options.newTask,
+      options.taskDraft,
     );
     return true;
   },
@@ -140,6 +165,11 @@ export const newSessionController: WandNewSessionController = {
 
   markUnknownCreation(value): void {
     unknownCreations.set(value.scope, value);
+  },
+  getAcceptedCreation(draftKey) { return acceptedCreations.get(draftKey); },
+  setAcceptedCreation(draftKey, value) {
+    if (value) acceptedCreations.set(draftKey, value);
+    else acceptedCreations.delete(draftKey);
   },
 };
 

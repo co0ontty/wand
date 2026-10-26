@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Avatar, Badge, Flex, Typography } from "antd";
 import type { ConversationSummary } from "../../../conversation-types.js";
+import { GROUP_CHAT_VISIBLE, isSidebarConversationVisible } from "../../group-chat-visibility.js";
 import { employeeProfile } from "../agents/employee-profile-state";
 import { wandOverlay } from "../overlay-controller";
 import { SidebarLabelTooltip } from "../workspaces/sidebar-label-tooltip";
@@ -58,7 +59,7 @@ export function ConversationNavigation({ activePage, teamAttention, onNavigate }
   ] as const;
   const selectedPage = activePage === "schedules" ? "calendar" : activePage;
   return <Flex component="nav" vertical gap={4} className="conversation-navigation" aria-label="功能导航">
-    {entries.map(entry => <WandIconButton key={entry.value} id={"id" in entry ? entry.id : undefined}
+    {entries.filter(entry => GROUP_CHAT_VISIBLE || entry.value !== "teams").map(entry => <WandIconButton key={entry.value} id={"id" in entry ? entry.id : undefined}
       data-stretch-value={entry.value} aria-label={entry.label} title={entry.label}
       kind={selectedPage === entry.value ? "soft" : "ghost"} aria-current={selectedPage === entry.value ? "page" : undefined}
       aria-pressed={selectedPage === entry.value} onClick={() => onNavigate(entry.value)}>
@@ -71,19 +72,20 @@ export function ConversationNavigation({ activePage, teamAttention, onNavigate }
 
 export function ConversationSidebarTools({ enabled, onNavigate, onCreateSession }: {
   enabled: boolean; onNavigate(): void; onCreateSession?(): void;
-}): React.ReactElement {
+}): React.ReactElement | null {
   const state = useConversationUi();
   const [panel, setPanel] = React.useState<"closed" | "menu" | "group">("closed");
   const anchor = React.useRef<HTMLDivElement>(null);
   const plus = React.useRef<HTMLButtonElement>(null);
   React.useEffect(() => { setPanel("closed"); }, [enabled, state.mode]);
+  if (!GROUP_CHAT_VISIBLE && state.mode !== "tasks") return null;
   return <Flex ref={anchor} align="center" className="conversation-sidebar-tools" style={{ position: "relative" }}>
     <WandIconButton ref={plus} className="conversation-create-button"
       aria-label={state.mode === "tasks" ? "新建会话" : panel === "closed" ? "发起群聊" : "关闭群聊表单"}
       aria-expanded={panel !== "closed"} aria-controls="conversation-create-panel"
       onClick={() => state.mode === "tasks" ? onCreateSession?.() : setPanel(panel === "closed" ? "group" : "closed")}>
       <ConversationMorphIcon active={panel !== "closed"} from="plus" to="close"/>
-      <span className="conversation-create-label">{panel === "closed" ? "发起群聊" : "关闭"}</span>
+      <span className="conversation-create-label">{state.mode === "tasks" ? "新建会话" : panel === "closed" ? "发起群聊" : "关闭"}</span>
     </WandIconButton>
     <ConversationPanel open={enabled && panel !== "closed"} owner="conversation-create-panel" focusKey={panel} anchorRef={anchor} triggerRef={plus} onClose={() => setPanel("closed")}>
       <div hidden={panel !== "group"}><GroupEditor open={enabled && panel === "group"} enabled={enabled && panel === "group"} owner="conversation-create-panel"
@@ -152,7 +154,8 @@ export function ConversationSidebarList({ compact, enabled = true, onNavigate, o
   sessionTitles?: Readonly<Record<string, string>>;
 }): React.ReactElement {
   // enabled 就是可见性：隐藏时列表不读也不轮询，已读到的条目留在状态里，重新可见时补读。
-  const { items, systemSessions, error, loaded, refresh } = useConversations(true, enabled);
+  const { items: allItems, systemSessions, error, loaded, refresh } = useConversations(true, enabled);
+  const items = React.useMemo(() => allItems.filter(isSidebarConversationVisible), [allItems]);
   const { groups: sessionGroups } = useTaskGroupsAfterIdle();
   const sessionIndex = React.useMemo(() => indexPersonSessions(sessionGroups, systemSessions), [sessionGroups, systemSessions]);
   const activitySessions = React.useMemo(() => [...conversationActivitySessions(sessionGroups), ...systemSessions], [sessionGroups, systemSessions]);
@@ -218,7 +221,7 @@ export function ConversationSidebarList({ compact, enabled = true, onNavigate, o
       onUpdate={patch => update(item, patch)} onRemove={() => remove(item)}/>) }
     {loaded && !rows.length ? <div className="conversation-list-empty" role="status"><WandIcon name={query ? "search" : "chat"} size={20}/><Typography.Paragraph type="secondary">{query ? "没有匹配的对话或任务"
       : ui.activityOnly ? "现在没有符合筛选条件的活动对话。"
-      : filter === "archived" ? "还没有已归档的对话，解散群聊或归档任务后会出现在这里。"
+      : filter === "archived" ? GROUP_CHAT_VISIBLE ? "还没有已归档的对话，解散群聊或归档任务后会出现在这里。" : "还没有已归档的对话，归档任务后会出现在这里。"
       : filter === "active" ? "还没有未归档的对话。"
       : "还没有对话，可以从通讯录找一位员工。"}</Typography.Paragraph>{query ? <WandButton kind="ghost" size="small" onClick={() => { conversationUi.filter("list-query", ""); searchInput.current?.focus({ preventScroll: true }); }}>清空搜索</WandButton> : null}</div> : null}
     </SidebarProjectionSwap>

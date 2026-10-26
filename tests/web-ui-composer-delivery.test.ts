@@ -5,6 +5,7 @@ import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import { ComposerQueueClock, ComposerStore } from "../src/web-ui/browser/composer.js";
 import { getErrorMessage } from "../src/error-utils.js";
+import { sessionFetchModule } from "./helpers/session-fetch-harness.js";
 
 function harness(responses: Array<Response | Error>, websocket = false) {
   const data = new Map<string, string>();
@@ -40,7 +41,15 @@ function harness(responses: Array<Response | Error>, websocket = false) {
     },
   };
   const fallback = new Proxy({}, { get: () => noop });
+  const fetchImpl = async (_url: string, options: RequestInit) => {
+    inputs.push(JSON.parse(String(options.body)).input);
+    const response = responses[responseIndex++];
+    if (response instanceof Error) throw response;
+    assert.ok(response, "unexpected request");
+    return response;
+  };
   const dependencies: Record<string, unknown> = {
+    "./session-fetch.js": sessionFetchModule(fetchImpl),
     "./state": { state, composer, composerQueue: new ComposerQueueClock() },
     "../../error-utils.js": { getErrorMessage },
     "./session-engine": new Proxy({
@@ -80,13 +89,7 @@ function harness(responses: Array<Response | Error>, websocket = false) {
     navigator: { maxTouchPoints: 0 },
     setTimeout: (handler: () => void) => { queueMicrotask(handler); return 0; },
     clearTimeout: noop,
-    fetch: async (_url: string, options: RequestInit) => {
-      inputs.push(JSON.parse(String(options.body)).input);
-      const response = responses[responseIndex++];
-      if (response instanceof Error) throw response;
-      assert.ok(response, "unexpected request");
-      return response;
-    },
+    fetch: fetchImpl,
     console: { error: noop, warn: noop },
     WebSocket: { OPEN: 1 },
   });

@@ -17,7 +17,7 @@ import type {
   NewSessionTerminalDimensions,
 } from "./types";
 import { isRecord, stringValue, type JsonRecord } from "../json-utils";
-import { PROVIDER_IDS, providerCliCommand } from "../../provider-identity";
+import { PROVIDER_IDS, defaultStructuredRunner, providerCliCommand } from "../../provider-identity";
 
 type FetchLike = typeof fetch;
 const defaultFetch: FetchLike = (input, init) => globalThis.fetch(input, init);
@@ -71,15 +71,6 @@ export function safeMode(
   if (supported.includes(requested)) return requested;
   if (supported.includes(fallback)) return fallback;
   return supported[0];
-}
-
-function structuredRunner(provider: NewSessionProvider): string {
-  if (provider === "codex") return "codex-cli-exec";
-  if (provider === "opencode") return "opencode-cli-run";
-  if (provider === "grok") return "grok-cli-headless";
-  if (provider === "qoder") return "qoder-cli-print";
-  if (provider === "pi") return "pi-cli-json";
-  return "claude-cli-print";
 }
 
 export function buildCreateRequest(
@@ -139,7 +130,7 @@ export function buildCreateRequest(
     ...base,
     ...engine,
     kind: "structured",
-    runner: structuredRunner(form.provider),
+    runner: defaultStructuredRunner(form.provider),
     model: (form.employeeId && !form.specifiedCli) ? undefined : (model || undefined),
     thinkingEffort: thinkingEffort || undefined,
     ...(form.employeeId ? { employeeId: form.employeeId, overrideCli } : {}),

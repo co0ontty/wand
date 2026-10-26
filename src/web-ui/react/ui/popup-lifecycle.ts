@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { DropdownProps } from "antd";
+import { createImeGuard } from "../composer-sender/ime-guard";
 
 export type PopupSide = "top" | "right" | "bottom" | "left";
 export type PopupAlign = "start" | "center" | "end";
@@ -18,6 +19,7 @@ export function popupOffset(side: PopupSide, distance: number): [number, number]
 export type PopupDismissPriority = "normal" | "blocking";
 interface PopupDismissLease { dismiss(): void; priority: PopupDismissPriority }
 const dismissStack: PopupDismissLease[] = [];
+const dismissIme = createImeGuard();
 
 function topDismissLease(): PopupDismissLease | undefined {
   // Service recovery owns input even if an ordinary dialog mounts afterwards.
@@ -34,7 +36,13 @@ export function hasOpenPopupSurface(): boolean {
     .some((element) => element.getClientRects().length && getComputedStyle(element).visibility !== "hidden");
 }
 function dismissTopPopup(event: KeyboardEvent): void {
-  if (event.key !== "Escape" || event.isComposing || !dismissStack.length) return;
+  if (event.key !== "Escape" || !dismissStack.length) return;
+  if (dismissIme.shouldIgnore(event)) {
+    // The library also listens on window. Keep candidate Escape away from every
+    // dismissal owner while leaving its native IME action (default) untouched.
+    event.stopImmediatePropagation();
+    return;
+  }
   event.preventDefault();
   event.stopImmediatePropagation();
   topDismissLease()?.dismiss();
@@ -45,6 +53,9 @@ function dismissTopOnHistory(): void { topDismissLease()?.dismiss(); }
 /** Escape/back closes only the top popup; the enclosing dialog keeps its focus lease. */
 export function registerPopupDismiss(dismiss: () => void, priority: PopupDismissPriority = "normal"): () => void {
   if (!dismissStack.length) {
+    document.addEventListener("compositionstart", dismissIme.onCompositionStart, true);
+    document.addEventListener("compositionend", dismissIme.onCompositionEnd, true);
+    document.addEventListener("focusout", dismissIme.reset, true);
     document.addEventListener("keydown", dismissTopPopup, true);
     window.addEventListener("popstate", dismissTopOnHistory);
   }
@@ -54,8 +65,12 @@ export function registerPopupDismiss(dismiss: () => void, priority: PopupDismiss
     const index = dismissStack.indexOf(lease);
     if (index >= 0) dismissStack.splice(index, 1);
     if (!dismissStack.length) {
+      document.removeEventListener("compositionstart", dismissIme.onCompositionStart, true);
+      document.removeEventListener("compositionend", dismissIme.onCompositionEnd, true);
+      document.removeEventListener("focusout", dismissIme.reset, true);
       document.removeEventListener("keydown", dismissTopPopup, true);
       window.removeEventListener("popstate", dismissTopOnHistory);
+      dismissIme.reset();
     }
   };
 }

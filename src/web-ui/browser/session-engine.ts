@@ -7,6 +7,7 @@ import { handlePiSettingsKeydown } from "./pi-settings-adapter";
 import { hasOpenPopupSurface } from "../react/ui/popup-lifecycle.js";
 import { ptyInputState, mergePtyModifiers, modifiedPtySequence, modifiedTypedPtyText } from "../pty-input-state.js";
 import { createSessionReads } from "./session-reads";
+import { compactSessionFetch } from "./session-fetch.js";
 import { createSessionCompletionViewIntent, isSessionJustCompleted, mergeSessionCompletionState } from "../../session-completion-state.js";
 import { notifyTasksChanged } from "../react/task-changes";
 import { workspacesStore } from "../react/workspaces/controller";
@@ -53,7 +54,7 @@ import {
   normalizeAvailableComposerValue,
   normalizeComposerModelValue,
 } from "./composer-select-values";
-import { AGENT_TOOL_OPTIONS, agentToolOption, PROVIDER_IDS, inferProviderIdFromCommand, isNativeThinkingEffort, providerCliCommand } from "../provider-identity";
+import { AGENT_TOOL_OPTIONS, agentToolOption, PROVIDER_IDS, defaultStructuredRunner, inferProviderIdFromCommand, isNativeThinkingEffort, providerCliCommand } from "../provider-identity";
 import { canSwitchSessionTool, sessionToolId } from "./session-tool-switch.js";
 import { hasPooledTerminal, isPooledTerminalBracketedPasteMode } from "./terminal-pool";
 import { buildPtyAttachmentChunks, buildTerminalPasteSequence, clipboardImageExtension, isClipboardImageMimeType } from "./pty-paste";
@@ -108,12 +109,6 @@ function sessionProjectionSignature(session: any): string {
     session.teamChat ? "1" : "0",
     session.teamStep?.title ?? "",
   ].join("\u0001");
-}
-
-function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  return fetch(input, { ...init,
-    headers: { ...(init?.headers as Record<string, string> | undefined),
-      "X-Wand-Tool-Projection": "compact" } });
 }
 
       // 证书不受信任时浏览器会丢弃 Secure Cookie —— 密码正确也存不住登录态。
@@ -1020,23 +1015,12 @@ function compactSessionFetch(input: RequestInfo | URL, init?: RequestInit): Prom
         var pickedModel = (extra && extra.model ? String(extra.model) : "").trim();
         var modelPref = pickedModel || getChatModelForProvider(provider) || getConfigDefaultModelForProvider(provider);
         var thinkingPref = state.chatThinking || "off";
-        var structuredRunner = provider === "codex"
-          ? "codex-cli-exec"
-          : provider === "opencode"
-            ? "opencode-cli-run"
-            : provider === "grok"
-              ? "grok-cli-headless"
-            : provider === "qoder"
-              ? "qoder-cli-print"
-            : provider === "pi"
-              ? "pi-cli-json"
-            : "claude-cli-print";
         var payload = {
           kind: "structured",
           cwd: cwdOverride || getEffectiveCwd(),
           mode: modeOverride || state.chatMode || (state.config && state.config.defaultMode) || "default",
           provider: provider,
-          runner: structuredRunner,
+          runner: defaultStructuredRunner(provider),
           // 引擎只对 pi 有意义：Wand Agent（sdk）走进程内 harness，不传就是 Pi CLI。
           engine: extra && extra.engine ? extra.engine : undefined,
           prompt: prompt || undefined,

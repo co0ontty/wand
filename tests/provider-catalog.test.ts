@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   SESSION_PROVIDERS,
+  defaultStructuredRunner,
   inferProviderFromCommand,
   inferProviderFromRunner,
   isNativeThinkingEffort,
@@ -10,17 +11,48 @@ import {
   normalizeProviderId,
   providerCliCommand,
   providerDisplayName,
+  type SessionProvider,
 } from "../src/provider-catalog.js";
+import { isProviderId } from "../src/web-ui/provider-identity.js";
+import { isStructuredRunnerForProvider, resolveStructuredRunner } from "../src/structured-provider-common.js";
 
 test("provider 真源是唯一的一份列表，且守卫只接受字面量", () => {
   assert.deepEqual([...SESSION_PROVIDERS], ["claude", "codex", "opencode", "grok", "qoder", "pi"]);
-  for (const provider of SESSION_PROVIDERS) assert.equal(isSessionProvider(provider), true);
+  for (const provider of SESSION_PROVIDERS) {
+    assert.equal(isSessionProvider(provider), true);
+    assert.equal(isProviderId(provider), true);
+  }
+  for (const value of ["anthropic", "Claude", " claude", "gemini", "", undefined, "toString"]) {
+    assert.equal(isProviderId(value), false);
+  }
   // 别名 / 大小写 / 空白都不算合法字面量。
   assert.equal(isSessionProvider("anthropic"), false);
   assert.equal(isSessionProvider("Claude"), false);
   assert.equal(isSessionProvider(" claude"), false);
   assert.equal(isSessionProvider(""), false);
   assert.equal(isSessionProvider(undefined), false);
+});
+
+test("structured runner validation rejects cross-provider, PTY and unknown-provider values", () => {
+  for (const provider of SESSION_PROVIDERS) {
+    for (const candidate of SESSION_PROVIDERS) {
+      const runner = defaultStructuredRunner(candidate);
+      assert.equal(isStructuredRunnerForProvider(provider, runner), provider === candidate);
+      if (provider !== candidate) assert.throws(() => resolveStructuredRunner(provider, runner), /不支持 provider/);
+    }
+    for (const runner of [undefined, null, "pty", "claude-cli", "unknown", 1, {}]) {
+      assert.equal(isStructuredRunnerForProvider(provider, runner), false);
+    }
+    assert.equal(isStructuredRunnerForProvider(provider, "claude-sdk"), provider === "claude");
+  }
+  assert.equal(resolveStructuredRunner("claude", "claude-sdk"), "claude-cli-print");
+  for (const unknown of ["gemini", "anthropic", "", "toString", "__proto__", undefined, null]) {
+    const provider = unknown as SessionProvider;
+    for (const runner of [undefined, "claude-sdk", ...SESSION_PROVIDERS.map(defaultStructuredRunner)]) {
+      assert.equal(isStructuredRunnerForProvider(provider, runner), false);
+      assert.throws(() => resolveStructuredRunner(provider, runner), /不支持 provider/);
+    }
+  }
 });
 
 test("normalizeProviderId 接受别名与历史 runner 值，拒绝未知名字", () => {

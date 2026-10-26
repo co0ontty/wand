@@ -109,8 +109,13 @@ test("new-work invitation centers above the composer on both desktop clients", {
   const view = source("macos/Wand/NewSessionView.swift");
   const invitation = view.slice(view.indexOf("private var form: some View"), view.indexOf("private var projectName:"));
   assert.doesNotMatch(invitation, /WandBrandMark/);
-  assert.match(invitation, /Spacer\(minLength: 32\)[\s\S]*Spacer\(minLength: 32\)\s+creationFeedback/);
-  assert.match(invitation, /今天你想与[\s\S]*showEmployeePicker[\s\S]*在[\s\S]*showDirectoryOptions[\s\S]*的[\s\S]*showTaskOptions[\s\S]*中创造些什么？/);
+  assert.match(invitation, /NewWorkPage \{ width in[\s\S]*content: \{ width in\s+creationFeedback/);
+  const page = view.slice(view.indexOf("struct NewWorkPage<"));
+  assert.match(page, /Spacer\(minLength: 32\)\s+heading\(geometry.size.width\)\s+Spacer\(minLength: 32\)\s+content\(geometry.size.width\)/);
+  assert.match(invitation, /NewWorkInvitation\(width: width\)[\s\S]*showEmployeePicker[\s\S]*showDirectoryOptions[\s\S]*showTaskOptions/);
+  const sentence = view.slice(view.indexOf("struct NewWorkInvitation<"));
+  assert.match(sentence, /今天你想与[\s\S]*employee\(\)[\s\S]*Text\("在"\)[\s\S]*directory\(\)[\s\S]*Text\("的"\)[\s\S]*task\(\)[\s\S]*中创造些什么？/);
+  assert.match(source("macos/Wand/TaskBoardCreateView.swift"), /NewWorkInvitation\(width: width\)/);
   assert.doesNotMatch(invitation, /padding\(\.top, 12\)|Spacer\(minLength: 64\)/);
 });
 
