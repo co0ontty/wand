@@ -23,3 +23,10 @@ test("retired URL state is cleaned on the next write and tolerated in old links"
   assert.deepEqual(unknownPageParameters("?display=1&sidebarMode=rail&bogus=1"), ["bogus"]);
   assert.equal(shareablePageUrl("https://h/?view=taskboard&display=1&sidebarMode=rail&embed=1#x"), "https://h/?view=taskboard");
 });
+
+test("knowledge links preserve scope, employee and document while leaving drops library state", () => {
+  const route = "?view=knowledge&knowledgeScope=personal&knowledgeOwner=e_a&knowledgeDocument=k_a";
+  assert.deepEqual(unknownPageParameters(route), []);
+  assert.equal(shareablePageUrl(`https://h/${route}`), `https://h/${route}`);
+  assert.equal(mergePageSearch(route, { view: "workspace" }), "?view=workspace");
+});

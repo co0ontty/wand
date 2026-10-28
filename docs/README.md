@@ -44,4 +44,4 @@
 - [React Generative UI 可行性研究](research/generative-ui-feasibility.md)：历史研究，未进入当前实现范围。
 - [本机运行产物清理记录](local-runtime-artifact-retention.md)：2026-10-18 的一次性清理记录；当前规则见 `storage-cleanup.md`。
 
-架构逐轮工作记录保存在本机忽略目录 `output/architecture-stage2/`，入口为 `WORKLOG.md`，详见根 `AGENTS.md`。
+待办与问题跟踪统一走任务面板（`wand_tasks`）。历史逐轮工作记录保留在本机忽略目录 `output/architecture-stage2/`（`AGENTS-WORKLOG.md`，2026-10-27 起只读、停止追加），约定见根 `AGENTS.md`。

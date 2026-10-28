@@ -11,6 +11,49 @@ import { DEFAULT_WAND_TASK_PRIORITY, normalizeWandTaskAgentMode, type WandTaskAg
 import { GLOBAL_WORKSPACE_ID, type SessionSnapshot } from "../types.js";
 import { mapSessionCore, parseWandTaskAgent, sessionSelectFields, type SessionRow } from "./mappers.js";
 
+/** Additive, idempotent initialization; legacy content and IDs are never rewritten. */
+function migrateKnowledgeDocumentsV22(db: DatabaseSync): void {
+  const columns = new Set((db.prepare("PRAGMA table_info(employee_knowledge)").all() as Array<{ name: string }>).map(row => row.name));
+  for (const [name, definition] of [["title", "TEXT NOT NULL DEFAULT ''"], ["folder", "TEXT NOT NULL DEFAULT ''"], ["revision", "INTEGER NOT NULL DEFAULT 1"], ["updated_at", "TEXT"]]) {
+    if (!columns.has(name!)) db.exec(`ALTER TABLE employee_knowledge ADD COLUMN ${name} ${definition}`);
+  }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS project_knowledge (
+      id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, project_name TEXT NOT NULL,
+      title TEXT NOT NULL DEFAULT '', folder TEXT NOT NULL DEFAULT '', content TEXT NOT NULL,
+      content_hash TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL, updated_at TEXT, UNIQUE(workspace_id, content_hash)
+    );
+    CREATE INDEX IF NOT EXISTS idx_project_knowledge_owner ON project_knowledge(workspace_id);
+    CREATE TABLE IF NOT EXISTS knowledge_namespace_versions (
+      scope TEXT NOT NULL, owner_id TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY(scope, owner_id)
+    );
+    CREATE TABLE IF NOT EXISTS knowledge_access (
+      token_hash TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES command_sessions(id) ON DELETE CASCADE,
+      employee_id TEXT, workspace_id TEXT, employee_revision INTEGER NOT NULL,
+      project_revision INTEGER NOT NULL, expires_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_knowledge_access_session ON knowledge_access(session_id);
+    CREATE TRIGGER IF NOT EXISTS revoke_knowledge_access_on_session_binding
+    AFTER UPDATE OF workspace_id, workspace_task_id, session_options, automation_id ON command_sessions
+    WHEN OLD.workspace_id IS NOT NEW.workspace_id
+      OR OLD.workspace_task_id IS NOT NEW.workspace_task_id
+      OR OLD.automation_id IS NOT NEW.automation_id
+      OR (CASE WHEN json_valid(OLD.session_options) THEN json_extract(OLD.session_options, '$.employeeId') END)
+        IS NOT (CASE WHEN json_valid(NEW.session_options) THEN json_extract(NEW.session_options, '$.employeeId') END)
+    BEGIN
+      DELETE FROM knowledge_access WHERE session_id = NEW.id;
+      DELETE FROM employee_knowledge_access WHERE session_id = NEW.id;
+    END;
+    CREATE TRIGGER IF NOT EXISTS revoke_knowledge_access_on_employee_delete
+    AFTER DELETE ON silicon_employees
+    BEGIN
+      DELETE FROM knowledge_access WHERE employee_id = OLD.id;
+    END;
+  `);
+}
+
 /**
  * Frozen schema migrations. Every body here is SQL or pure helpers only:
  * never call WandStorage / repository methods, because those change with the
@@ -380,4 +423,12 @@ export const STORAGE_MIGRATIONS: readonly StorageMigration[] = [
   `) },
   { version: 20, name: "apns-device-subscriptions-and-outbox", up: db => db.exec(APNS_SCHEMA) },
   { version: 21, name: "apns-live-activity-updates", up: db => db.exec(LIVE_ACTIVITY_SCHEMA) },
+  { version: 22, name: "scoped-knowledge-documents", up: migrateKnowledgeDocumentsV22 },
+  { version: 23, name: "task-retention-archive-provenance", up: db => {
+    const columns = db.prepare("PRAGMA table_info(wand_tasks)").all() as Array<{ name: string }>;
+    if (!columns.some(column => column.name === "retention_archive_version")) {
+      // NULL deliberately protects every pre-policy archive, even if it was once accepted.
+      db.exec("ALTER TABLE wand_tasks ADD COLUMN retention_archive_version INTEGER");
+    }
+  } },
 ];

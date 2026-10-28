@@ -117,6 +117,8 @@ export function EmployeeListPage({ catalog, providerOptions, onEditingChange, re
     </div> : isCreating ? <div className="employee-profile-content">
       <header className="profile-header"><div className="profile-heading"><WandIconButton aria-label="返回员工列表" disabled={busy} onClick={() => void back()}><WandIcon name="chevronLeft" size={18}/></WandIconButton><h2>招聘员工</h2></div></header>
       <EmployeeCreateForm catalog={catalog} providerOptions={providerOptions} onDirtyChange={setDirty} onSavingChange={setBusy} onSave={handleCreate} onCancel={() => { setIsCreating(false); setDirty(false); setBusy(false); }}/>
-    </div> : selected && <EmployeeCard key={selected.id} employee={selected} catalog={catalog} providerOptions={providerOptions} editorOnly onDirtyChange={setDirty} onSavingChange={setBusy} onSave={handleSave} onBack={() => void back()} onArchive={() => mutation("archive")} onUnarchive={() => mutation("unarchive")} onDelete={() => mutation("remove")}/>}
+    </div> : selected && <EmployeeCard key={selected.id} employee={selected} catalog={catalog} providerOptions={providerOptions} editorOnly onDirtyChange={setDirty} onSavingChange={setBusy} onSave={handleSave} onBack={() => void back()}
+      onOpenKnowledge={navigate => { void (async () => { if (!await discard()) return; setSelectedSelf(false); setSelectedId(null); setDirty(false); navigate(); })(); }}
+      onArchive={() => mutation("archive")} onUnarchive={() => mutation("unarchive")} onDelete={() => mutation("remove")}/>}
   </div>;
 }

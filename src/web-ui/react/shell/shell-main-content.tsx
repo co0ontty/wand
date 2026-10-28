@@ -19,6 +19,8 @@ import { HomeAttention } from "../attention/home-attention";
 import { ShellFilePanel } from "./shell-file-panel";
 
 import { taskBoardController, taskBoardStore } from "../issues/task-board-controller";
+import { knowledgeController, knowledgeStore } from "../knowledge/controller";
+import type { KnowledgeHostProps } from "../knowledge/host";
 import { AiTeamsPage, TeamChatPage } from "../ai-teams/lazy";
 import { SidebarToggleIcon } from "./sidebar-toggle-icon";
 import { ShellTopbar } from "./shell-topbar";
@@ -46,6 +48,11 @@ const ScheduledTasksPage = deferredFeature(
   taskBoardStore,
   (snapshot, props) => snapshot.open && (snapshot.page === "schedules" || snapshot.page === "calendar") && props.visible,
   { title: "定时", page: true, close: () => taskBoardController.close() },
+);
+const KnowledgeHost = deferredFeature<KnowledgeHostProps, ReturnType<typeof knowledgeStore.getSnapshot>>(
+  () => import("../knowledge/host").then(module => module.KnowledgeHost), knowledgeStore,
+  (snapshot, props) => snapshot.open && props.visible,
+  { title: "知识库", page: true, close: () => knowledgeController.close() },
 );
 
 export interface ShellMainContentRefs {
@@ -118,6 +125,7 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
   const conversationState = useConversationUi();
   const dispatch = useUiDispatch();
   const taskBoard = React.useSyncExternalStore(taskBoardStore.subscribe, taskBoardStore.getSnapshot, taskBoardStore.getSnapshot);
+  const knowledge = React.useSyncExternalStore(knowledgeStore.subscribe, knowledgeStore.getSnapshot, knowledgeStore.getSnapshot);
   const classes = getShellLegacySlotClasses(snapshot.legacyVisibility);
   const context = React.useSyncExternalStore(
     workspaceContextStore.subscribe,
@@ -130,25 +138,25 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
   // 用缓冲 output 重置即可恢复，无需重建终端。
   const inSplit = !!context.taskId && activeWorkWindow(context.layout)?.layout.type === "split";
   const newWork = React.useSyncExternalStore(newSessionStore.subscribe, newSessionStore.getSnapshot, newSessionStore.getSnapshot);
-  const conversationVisible = !newWork.open && !settings.open && !taskBoard.open && !editor.open && (conversationState.active === true
+  const conversationVisible = !newWork.open && !settings.open && !taskBoard.open && !knowledge.open && !editor.open && (conversationState.active === true
     || (conversationState.active === null && !inSplit && !snapshot.selected && !context.workspaceId));
   // 对话 / 看板 / 编辑器都是盖满主区的绝对定位页面层。它们在上面时，遗留槽位不能只是
   // 「被盖住」：#output / #chat-output / 输入区里的浮层仍然按自己的 z-index 参与主区堆叠
   // （终端缩放 11、终端拖拽把手 12、未读气泡 20、排队气泡 40、待办浮层 50 都高于页面层的 8），
   // 会直接浮到私聊页上。这里统一收口成 page layer，可见性交给同一条样式规则处理。
-  const pageLayerOpen = newWork.open || settings.open || conversationVisible || taskBoard.open || editor.open;
+  const pageLayerOpen = newWork.open || settings.open || conversationVisible || taskBoard.open || knowledge.open || editor.open;
 
   return (
     <Flex component="main" vertical inert={snapshot.layout.sessionsBackdropVisible} className={`main-content${snapshot.layout.filePanelOpen && !settings.open ? " file-panel-open" : ""}${inSplit ? " main-content-in-split" : ""}${conversationVisible ? " main-content-conversation" : ""}${taskBoard.open ? " task-board-main-content" : ""}${pageLayerOpen ? " main-content-page-layer" : ""}`} style={{ flex: 1, minWidth: 0, minHeight: 0, position: "relative", overflow: "hidden" }}>
       {/* One route owns the whole header; page layers must not leave focusable portal chrome behind. */}
       {!pageLayerOpen && <WorkspaceTabBar fallback={<ShellTopbar/>}/>}
       {newWork.open && !settings.open && <NewSessionHeader/>}
-      <ShellFilePanel explorerRef={legacyRefs?.fileExplorer} suspended={settings.open || newWork.open}/>
+      <ShellFilePanel explorerRef={legacyRefs?.fileExplorer} suspended={settings.open || newWork.open || knowledge.open}/>
 
       <div id="output" inert={pageLayerOpen} className={classes.terminal} ref={legacyRefs?.terminal} style={{ flex: 1, minHeight: 0, position: "relative", overflow: "hidden", display: snapshot.legacyVisibility.terminal && !inSplit ? "flex" : "none" }}/>
       <div id="chat-output" inert={pageLayerOpen} className={classes.chat} ref={legacyRefs?.chat} style={{ flex: 1, minHeight: 0, position: "relative", overflow: "hidden", display: snapshot.legacyVisibility.chat && !inSplit ? "flex" : "none", flexDirection: "column" }}/>
       <ShellBlankChat
-        className={`${classes.blank}${inSplit || newWork.open || conversationVisible || settings.open ? " hidden" : ""}`}
+        className={`${classes.blank}${inSplit || newWork.open || conversationVisible || settings.open || knowledge.open ? " hidden" : ""}`}
         queueRef={legacyRefs?.crossSessionQueue}
         workspaceTask={context.taskId && context.workspaceId ? {
           workspaceId: context.workspaceId,
@@ -164,14 +172,14 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
         } : undefined}
       />
       <div inert={pageLayerOpen} className={classes.composer} ref={legacyRefs?.composer} style={{ flexShrink: 0, position: "relative", display: snapshot.legacyVisibility.composer && !inSplit ? undefined : "none" }}/>
-      {inSplit ? <div style={{ display: "contents" }} inert={newWork.open || conversationVisible || settings.open} aria-hidden={newWork.open || conversationVisible || settings.open}><WorkspaceWindow/></div> : null}
-      <div style={{ display: "contents", visibility: settings.open || newWork.open ? "hidden" : undefined }} inert={settings.open || newWork.open} aria-hidden={settings.open || newWork.open}><CodeEditorHost/></div>
+      {inSplit ? <div style={{ display: "contents" }} inert={newWork.open || conversationVisible || settings.open || knowledge.open} aria-hidden={newWork.open || conversationVisible || settings.open || knowledge.open}><WorkspaceWindow/></div> : null}
+      <div style={{ display: "contents", visibility: settings.open || newWork.open || knowledge.open ? "hidden" : undefined }} inert={settings.open || newWork.open || knowledge.open} aria-hidden={settings.open || newWork.open || knowledge.open}><CodeEditorHost/></div>
       {/* 首次进入聊天才下载并挂载整页；之后常驻，用 visible 控制读取与订阅，草稿仍归 composer store。 */}
       <ConversationHome enabled={conversationVisible} visible={conversationVisible} sidebarOpen={snapshot.layout.sessionsDrawerOpen}
         onOpenSidebar={snapshot.layout.sidebarDrawer ? () => void dispatch({ type: "layout.drawer.toggle" }) : undefined}
         onOpenSession={openSessionPage}/>
       {/* 看板是独立路由，不能替换 <main>：#output 等 LegacyHost 槽位必须一直挂着。 */}
-      <div style={{ display: "contents", visibility: settings.open || newWork.open ? "hidden" : undefined }} inert={settings.open || newWork.open} aria-hidden={settings.open || newWork.open}>
+      <div style={{ display: "contents", visibility: settings.open || newWork.open || knowledge.open ? "hidden" : undefined }} inert={settings.open || newWork.open || knowledge.open} aria-hidden={settings.open || newWork.open || knowledge.open}>
       {taskBoard.open && taskBoard.page === "teamchat" ? <TeamChatPage
         runId={taskBoard.runId}
         sidebarOpen={snapshot.layout.sessionsDrawerOpen}
@@ -204,6 +212,8 @@ export function ShellMainContent({ legacyRefs }: ShellMainContentProps = {}) {
         onOpenSidebar={snapshot.layout.sidebarDrawer ? () => void dispatch({ type: "layout.drawer.toggle" }) : undefined}
         onOpenSession={openSessionPage}/>
       </div>
+      <KnowledgeHost visible={knowledge.open && !settings.open && !newWork.open}
+        onOpenSidebar={snapshot.layout.sidebarDrawer ? () => void dispatch({ type: "layout.drawer.toggle" }) : undefined}/>
       <NewSessionHeaderProvided.Provider value={true}><NewSessionHost/></NewSessionHeaderProvided.Provider>
       <SettingsHost showRestart={restartOverlayController.showRestart}/>
     </Flex>

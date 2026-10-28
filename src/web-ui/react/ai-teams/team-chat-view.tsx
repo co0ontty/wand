@@ -2532,14 +2532,14 @@ export function TeamChatView({ detail, onChange, onOpenSession, details, staleRu
                 <WandDropdownMenuContent className="team-chat-attach-menu" popupOwner="team-chat-attach">
                   <WandDropdownMenuItem id="team-chat-attach-image" icon="image" onClick={() => {
                     imageInputRef.current?.click();
-                  }}>上传图片</WandDropdownMenuItem>
+                  }}>上传照片或视频</WandDropdownMenuItem>
                   <WandDropdownMenuItem id="team-chat-attach-file" icon="paperclip" onClick={() => {
                     fileInputRef.current?.click();
                   }}>上传附件</WandDropdownMenuItem>
                 </WandDropdownMenuContent>
               </WandDropdownMenu>
-              <input ref={imageInputRef} type="file" accept="image/*" multiple hidden tabIndex={-1}
-                aria-label="选择图片" onChange={(event) => {
+              <input ref={imageInputRef} type="file" accept="image/*,video/*" multiple hidden tabIndex={-1}
+                aria-label="选择照片或视频" onChange={(event) => {
                   if (event.currentTarget.files) addFiles(event.currentTarget.files);
                   event.currentTarget.value = "";
                   senderRef.current?.focus();

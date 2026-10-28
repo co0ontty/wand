@@ -101,7 +101,7 @@ export function registerSessionListRoutes(app: Express, ctx: SessionRouteContext
   });
 
   app.get("/api/sessions", (req, res) => {
-    res.json(sessions.listSlim().map((session) => toSessionListItemDTO(session)));
+    res.json(sessions.listSlim().filter(session => session.sessionSource !== "quick-terminal").map((session) => toSessionListItemDTO(session)));
   });
 
   app.get("/api/sessions/provider-usage", (_req, res) => {

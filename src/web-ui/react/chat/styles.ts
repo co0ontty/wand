@@ -144,8 +144,6 @@ const CHAT_SURFACE_STYLES = String.raw`
     /* 收起态用弱底色交代「这里折起来了」，展开态回到透明标题行（对齐 Android AssistantReplyHeader）。 */
     .chat-message.assistant-reply-collapsed .assistant-reply-disclosure.ant-btn { background:color-mix(in srgb,var(--bg-secondary) 58%,transparent); }
     .assistant-author { display:inline-flex; align-items:center; gap:8px; flex:0 1 auto; min-width:0; }
-    .assistant-author-avatar { display:grid; place-items:center; width:56px; height:56px; flex:none; }
-    .assistant-author-spark { display:grid; place-items:center; width:26px; height:26px; border-radius:50%; background:color-mix(in srgb,var(--accent) 14%,transparent); color:var(--accent); }
     .assistant-author-name { font-size:var(--font-size-xs); font-weight:var(--font-weight-semibold); color:var(--text-primary); max-width:16em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .assistant-author-preview { flex:1; min-width:0; font-size:var(--font-size-2xs); font-weight:400; color:var(--text-secondary); text-align:start; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .assistant-author-space { flex:1; min-width:0; }

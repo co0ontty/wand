@@ -50,6 +50,12 @@ test("1→2→1 and filtered one-session employee keep the same identity and act
   assert.doesNotMatch(renderRecent(1, scope({ mode: "active" })), /im-sidebar-group-title/);
 });
 
+test("recent person task rows keep workspace and execution state together below the title", () => {
+  const html = renderRecent(1);
+  assert.match(html, /class="[^"]*im-sidebar-item-summary[^"]*"[^>]*>空闲 · Wand · 侧栏优化/);
+  assert.doesNotMatch(html, /\/repo/);
+});
+
 test("activity filtering removes empty employee heads while preserving the explicit new-work entry", () => {
   const html = renderRecent(2, scope({ mode: "active" }));
   assert.doesNotMatch(html, /im-sidebar-group-title|与华杰新建对话|im-sidebar-item-avatar-wrap/);

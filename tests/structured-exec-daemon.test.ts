@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -189,14 +189,9 @@ test("daemon-owned structured runs survive client reconnect and replay full logs
   const daemon = startDaemonProcess(configPath);
   try {
     const paths = terminalDaemonPaths(configPath);
-    const waitForToken = async (): Promise<string> => {
-      for (let i = 0; i < 100; i++) {
-        try { return readFileSync(paths.tokenPath, "utf8").trim(); } catch { /* not yet */ }
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
+    const token = await waitForDaemonToken(paths.tokenPath).catch(() => {
       throw new Error(`terminal daemon token never appeared; dir=${JSON.stringify(readdirSync(path.dirname(configPath)))} daemonExit=${daemon.exitCode} stderr=${String(daemon.stderrForDiagnostics ?? "")}`);
-    };
-    const token = await waitForToken();
+    });
 
     // First "web process": spawn a long-running NDJSON producer.
     const firstClient = new TerminalDaemonClient(paths.socketPath, token);
@@ -269,10 +264,7 @@ test("structured list snapshot stays immutable while adoption drains newer event
   let second: TerminalDaemonClient | null = null;
   try {
     const paths = terminalDaemonPaths(configPath);
-    await waitFor(() => {
-      try { return !!readFileSync(paths.tokenPath, "utf8").trim(); } catch { return false; }
-    });
-    const token = readFileSync(paths.tokenPath, "utf8").trim();
+    const token = await waitForDaemonToken(paths.tokenPath);
     first = new TerminalDaemonClient(paths.socketPath, token);
     await first.connect();
     await first.spawnStructured({
@@ -328,14 +320,7 @@ test("structured manager detaches on web shutdown and recovers the same daemon r
   let secondManager: StructuredSessionManager | null = null;
   try {
     const paths = terminalDaemonPaths(configPath);
-    const waitForToken = async (): Promise<string> => {
-      for (let i = 0; i < 100; i++) {
-        try { return readFileSync(paths.tokenPath, "utf8").trim(); } catch { /* not yet */ }
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-      throw new Error("terminal daemon token never appeared");
-    };
-    const token = await waitForToken();
+    const token = await waitForDaemonToken(paths.tokenPath);
     firstClient = new TerminalDaemonClient(paths.socketPath, token);
     await firstClient.connect();
     firstStorage = new WandStorage(dbPath);
@@ -500,13 +485,7 @@ test("truncated daemon replay keeps the checkpoint transcript instead of failing
   let manager: StructuredSessionManager | null = null;
   try {
     const paths = terminalDaemonPaths(configPath);
-    const token = await (async (): Promise<string> => {
-      for (let i = 0; i < 100; i++) {
-        try { return readFileSync(paths.tokenPath, "utf8").trim(); } catch { /* not yet */ }
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-      throw new Error("terminal daemon token never appeared");
-    })();
+    const token = await waitForDaemonToken(paths.tokenPath);
     client = new TerminalDaemonClient(paths.socketPath, token);
     await client.connect();
     storage = new WandStorage(dbPath);
@@ -617,14 +596,7 @@ test("daemon-owned structured runs round-trip a Chinese+emoji JSON line split mi
   const daemon = startDaemonProcess(configPath);
   try {
     const paths = terminalDaemonPaths(configPath);
-    const waitForToken = async (): Promise<string> => {
-      for (let i = 0; i < 100; i++) {
-        try { return readFileSync(paths.tokenPath, "utf8").trim(); } catch { /* not yet */ }
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-      throw new Error("terminal daemon token never appeared");
-    };
-    const token = await waitForToken();
+    const token = await waitForDaemonToken(paths.tokenPath);
     const client = new TerminalDaemonClient(paths.socketPath, token);
     await client.connect();
     const jsonLine = '{"text":"你好🙂"}';
@@ -665,14 +637,7 @@ test("incomplete UTF-8 at process exit does not inject replacement characters in
   const daemon = startDaemonProcess(configPath);
   try {
     const paths = terminalDaemonPaths(configPath);
-    const waitForToken = async (): Promise<string> => {
-      for (let i = 0; i < 100; i++) {
-        try { return readFileSync(paths.tokenPath, "utf8").trim(); } catch { /* not yet */ }
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-      throw new Error("terminal daemon token never appeared");
-    };
-    const token = await waitForToken();
+    const token = await waitForDaemonToken(paths.tokenPath);
     const client = new TerminalDaemonClient(paths.socketPath, token);
     await client.connect();
     const jsonLine = '{"text":"你好🙂"}';
@@ -709,14 +674,7 @@ test("daemon-owned structured spawn still delivers stdout and exit when the chil
   const daemon = startDaemonProcess(configPath);
   try {
     const paths = terminalDaemonPaths(configPath);
-    const waitForToken = async (): Promise<string> => {
-      for (let i = 0; i < 100; i++) {
-        try { return readFileSync(paths.tokenPath, "utf8").trim(); } catch { /* not yet */ }
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-      throw new Error("terminal daemon token never appeared");
-    };
-    const token = await waitForToken();
+    const token = await waitForDaemonToken(paths.tokenPath);
     const client = new TerminalDaemonClient(paths.socketPath, token);
     await client.connect();
     const handle = await client.spawnStructured({
@@ -737,6 +695,28 @@ test("daemon-owned structured spawn still delivers stdout and exit when the chil
     daemon.kill("SIGTERM");
   }
 });
+
+test("daemon token readiness waits for contents after the file is created", async (t) => {
+  const root = mkdtempSync(path.join(tmpdir(), "wand-structured-token-ready-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const tokenPath = path.join(root, "token");
+  writeFileSync(tokenPath, "");
+  const token = waitForDaemonToken(tokenPath);
+  queueMicrotask(() => writeFileSync(tokenPath, "fixture-token\n"));
+  assert.equal(await token, "fixture-token");
+});
+
+async function waitForDaemonToken(tokenPath: string): Promise<string> {
+  for (let i = 0; i < 100; i++) {
+    try {
+      // Creation and writing are separate syscalls; an existing empty file is not ready.
+      const token = readFileSync(tokenPath, "utf8").trim();
+      if (token) return token;
+    } catch { /* not yet */ }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("terminal daemon token never appeared");
+}
 
 async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 5000): Promise<void> {
   const deadline = Date.now() + timeoutMs;

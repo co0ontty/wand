@@ -16,6 +16,7 @@ import { PreferencesRepository } from "./storage/preferences-repository.js";
 import { WorkspaceRepository } from "./storage/workspaces-repository.js";
 import { TaskRepository } from "./storage/tasks-repository.js";
 import { SecretsRepository } from "./storage/secrets-repository.js";
+import { KnowledgeRepository } from "./storage/knowledge-repository.js";
 import { EmployeeRepository } from "./storage/employees-repository.js";
 import { UserMemoryRepository } from "./storage/user-memory-repository.js";
 import { AiTeamRepository } from "./storage/ai-teams-repository.js";
@@ -39,6 +40,7 @@ export interface WandStorage extends
   RepositoryMethods<TaskRepository>,
   RepositoryMethods<SecretsRepository>,
   RepositoryMethods<EmployeeRepository>,
+  RepositoryMethods<KnowledgeRepository>,
   RepositoryMethods<UserMemoryRepository>,
   RepositoryMethods<AiTeamRepository>,
   RepositoryMethods<MissionRepository>,
@@ -57,6 +59,7 @@ export class WandStorage {
   readonly tasks: TaskRepository;
   readonly secrets: SecretsRepository;
   readonly employees: EmployeeRepository;
+  readonly knowledge: KnowledgeRepository;
   readonly userMemory: UserMemoryRepository;
   readonly aiTeams: AiTeamRepository;
   readonly missions: MissionRepository;
@@ -122,6 +125,7 @@ export class WandStorage {
     this.tasks = new TaskRepository(this.db, this);
     this.secrets = new SecretsRepository(this.db, this);
     this.employees = new EmployeeRepository(this.db, this);
+    this.knowledge = new KnowledgeRepository(this.db, this);
     this.userMemory = new UserMemoryRepository(this.db, this);
     this.aiTeams = new AiTeamRepository(this.db, this);
     this.missions = new MissionRepository(this.db, this);
@@ -552,6 +556,7 @@ const REPOSITORY_FORWARDS: ReadonlyArray<readonly [field: string, repository: { 
   ["tasks", TaskRepository],
   ["secrets", SecretsRepository],
   ["employees", EmployeeRepository],
+  ["knowledge", KnowledgeRepository],
   ["userMemory", UserMemoryRepository],
   ["aiTeams", AiTeamRepository],
   ["missions", MissionRepository],

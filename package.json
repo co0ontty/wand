@@ -15,6 +15,7 @@
     "dist",
     "skills/wand-decision",
     "skills/wand-system",
+    "skills/wand-knowledge",
     "browser-extension",
     "scripts/install-render-binary.js",
     "scripts/recover-web-update.sh",

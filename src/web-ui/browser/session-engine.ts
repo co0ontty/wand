@@ -1,4 +1,5 @@
-import { composer, state, writeStoredBoolean } from "./state";
+import { composer, state, todoTurnEvidence, writeStoredBoolean } from "./state";
+import { observeTodoTurn } from "./todo-execution.js";
 import { clearStartupPreloads } from "./startup";
 import { isSystemAiCall, SYSTEM_AI_READ_ONLY } from "../../system-ai-call.js";
 import { ensureTerminalLibrary } from "../vendor-loader.js";
@@ -100,6 +101,7 @@ export async function markSessionCompletionViewed(session: any): Promise<void> {
 function sessionProjectionSignature(session: any): string {
   if (!session) return "";
   return [
+    session.sessionSource ?? "",
     session.status ?? "",
     session.title ?? "",
     session.titleGenerating === true ? "1" : "0",
@@ -1080,7 +1082,7 @@ function sessionProjectionSignature(session: any): string {
         notifyLegacyUiChange("shell:view");
       }
 
-      export function updateSessionSnapshot(snapshot, messageSource: MessageMergeSource = "unknown") {
+      export function updateSessionSnapshot(snapshot, messageSource: MessageMergeSource = "unknown", todoEvent?: { type: string; data?: any }) {
         if (!snapshot || !snapshot.id) return;
         if (messageSource === "latest" && (Array.isArray(snapshot.messages) || typeof snapshot.output === "string")) {
           completionViewIntent.loaded(snapshot.id);
@@ -1110,6 +1112,10 @@ function sessionProjectionSignature(session: any): string {
             normalizedSnapshot.leadingBlockTotal = normalizedSnapshot.messages[0]?.content?.length || 0;
           }
         }
+        const todoSession = Object.assign({}, currentSession, normalizedSnapshot);
+        const evidence = observeTodoTurn(todoTurnEvidence.get(snapshot.id), todoSession, todoEvent);
+        if (evidence) todoTurnEvidence.set(snapshot.id, evidence);
+        else todoTurnEvidence.delete(snapshot.id);
         sessionReads.record(normalizedSnapshot);
         var updated = false;
         state.sessions = state.sessions.map(function(session) {

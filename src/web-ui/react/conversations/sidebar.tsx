@@ -26,18 +26,20 @@ import { archiveSidebarSession, deleteSidebarSessions } from "../workspaces/side
 import { findSessionTask } from "../workspaces/session-task-lookup";
 import { SidebarSessionPreview } from "../workspaces/sidebar-session-preview";
 import { SidebarDisclosure } from "../workspaces/sidebar-disclosure";
-import { SidebarSessionArea } from "../workspaces/sidebar-session-area";
+import { SidebarSessionArea, SidebarSessionToggle } from "../workspaces/sidebar-session-area";
 import { SessionProviderMark } from "../workspaces/session-mark";
 import { sidebarSessionLabel, workspaceSessionProvider } from "../workspaces/session-order";
 import { sidebarSessionState, sessionGlowStatus } from "../workspaces/sidebar-session-state";
+import { sidebarWorkspaceLabel } from "../workspaces/sidebar-task-meta";
 import { agentToolDisplayName } from "../../provider-identity";
 import { ImSidebarItem } from "../shell/im-sidebar-item";
 import { SidebarActivityFilter } from "../workspaces/sidebar-activity-filter";
 import { SidebarProjectionSwap } from "../workspaces/sidebar-projection-swap";
 import { conversationActivitySessions, isConversationActive } from "./activity-filter";
-import { indexPersonSessions, filterPersonSessions, personSessionSearchValues, type PersonSessionEntry } from "./sidebar-sessions";
+import { isSessionActive } from "../workspaces/sidebar-display-mode";
+import { indexPersonSessions, filterPersonSessions, personSessionSearchValues, collectUnboundSessions, filterUnboundSessions, provisionalPersonConversations, provisionalPersonVisible, type PersonSessionEntry } from "./sidebar-sessions";
 
-export type ConversationNavigationPage = "chats" | "tasks" | "board" | "teams" | "contacts" | "schedules" | "calendar";
+export type ConversationNavigationPage = "chats" | "tasks" | "knowledge" | "board" | "teams" | "contacts" | "schedules" | "calendar";
 
 const GroupEditor = deferredComponent(
   () => import("./group-editor").then(module => module.GroupEditor),
@@ -53,6 +55,7 @@ export function ConversationNavigation({ activePage, teamAttention, onNavigate }
   const entries = [
     { value: "chats", label: "对话", icon: "chat" },
     { value: "tasks", label: "工作区", icon: "folder" },
+    { value: "knowledge", label: "知识库", icon: "file", id: "knowledge-library-button" },
     { value: "board", label: "任务看板", icon: "board", id: "task-board-button" },
     { value: "teams", label: "团队", icon: "users", id: "ai-teams-button" },
     { value: "calendar", label: "定时", icon: "calendar", id: "global-calendar-button" },
@@ -167,16 +170,29 @@ export function ConversationSidebarList({ compact, enabled = true, onNavigate, o
   const searchInput = React.useRef<HTMLInputElement>(null);
   const [engaged, setEngaged] = React.useState(false);
   const order = React.useRef<string[]>([]);
-  if (!engaged) order.current = items.map(item => item.id);
+  if (!engaged) order.current = [...items, ...provisionalPersonConversations(sessionIndex, items, employees)].map(item => item.id);
   const positions = new Map(order.current.map((id, index) => [id, index]));
   const sorted = items.slice().sort((a, b) => {
     const left = positions.get(a.id) ?? -1, right = positions.get(b.id) ?? -1;
     return Number(!!b.pinnedAt) - Number(!!a.pinnedAt) || (b.pinnedAt ?? "").localeCompare(a.pinnedAt ?? "") || (left < 0 ? items.length : left) - (right < 0 ? items.length : right);
   });
+  const provisional = React.useMemo(() => provisionalPersonConversations(sessionIndex, items, employees).filter(item => {
+    const entries = item.peerEmployeeId ? sessionIndex.get(item.peerEmployeeId) ?? [] : [];
+    if (!provisionalPersonVisible(entries, filter)) return false;
+    if (ui.activityOnly && !entries.some(entry => !entry.archived && isSessionActive(entry.session))) return false;
+    if (!query) return true;
+    return [item.title, item.preview, ...personSessionSearchValues(item, sessionIndex, filter, sessionTitles)].join(" ").toLowerCase().includes(query);
+  }), [sessionIndex, items, employees, filter, ui.activityOnly, query, sessionTitles]);
   const extraSearch = (item: ConversationSummary): string[] => personSessionSearchValues(item, sessionIndex, filter, sessionTitles);
   const activity = ui.activityOnly ? (item: ConversationSummary) => isConversationActive(item, activitySessions,
     ui.active === true ? ui.selectedId : null, selectedSessionId) : undefined;
-  const rows = filterConversationList(sorted, filter, query, extraSearch, activity);
+  const rows = [...filterConversationList(sorted, filter, query, extraSearch, activity), ...provisional].sort((a, b) => {
+    const pin = Number(!!b.pinnedAt) - Number(!!a.pinnedAt) || (b.pinnedAt ?? "").localeCompare(a.pinnedAt ?? "");
+    if (pin) return pin;
+    return (positions.get(a.id) ?? order.current.length) - (positions.get(b.id) ?? order.current.length);
+  });
+  const unbound = filterUnboundSessions(collectUnboundSessions(sessionGroups), filter, query, sessionTitles, ui.activityOnly);
+  const provisionalIds = new Set(provisional.map(item => item.id));
   const counts = conversationListCounts(items, filter, query, extraSearch, activity);
   const countLabel = loaded ? `${ui.activityOnly ? "活动 · " : ""}${conversationListFilterLabel(filter)}共 ${counts.scope} 个对话${query ? `，搜索匹配 ${counts.matches} 个` : ""}；全部 ${counts.total}，未归档 ${counts.active}，已归档 ${counts.archived}`
     : error ? "对话数量尚未加载" : "正在读取对话数量";
@@ -215,11 +231,13 @@ export function ConversationSidebarList({ compact, enabled = true, onNavigate, o
     {actionError ? <Typography.Paragraph type="danger" role="alert">{actionError}</Typography.Paragraph> : null}
     <SidebarProjectionSwap value={`${filter}:${ui.activityOnly}`}>
     {rows.map(item => <ConversationListRow key={item.id} item={item} employee={employees.find(employee => employee.id === item.peerEmployeeId) ?? null} compact={compact} query={query}
-      enabled={enabled} filter={filter} selected={ui.selectedId === item.id && ui.active !== false} onSelect={() => select(item.id)}
+      enabled={enabled} filter={filter} writable={!provisionalIds.has(item.id)} selected={ui.selectedId === item.id && ui.active !== false} onSelect={() => select(item.id)}
       sessionEntries={filterPersonSessions(item, sessionIndex, filter, query, sessionTitles, ui.activityOnly, selectedSessionId)}
       sessionTitles={sessionTitles} selectedSessionId={selectedSessionId} onOpenSession={onOpenSession}
       onUpdate={patch => update(item, patch)} onRemove={() => remove(item)}/>) }
-    {loaded && !rows.length ? <div className="conversation-list-empty" role="status"><WandIcon name={query ? "search" : "chat"} size={20}/><Typography.Paragraph type="secondary">{query ? "没有匹配的对话或任务"
+    {!compact && unbound.length ? <ConversationOtherSessions entries={unbound} query={query} enabled={enabled}
+      selectedSessionId={selectedSessionId} sessionTitles={sessionTitles} onOpenSession={onOpenSession}/> : null}
+    {loaded && !rows.length && !unbound.length ? <div className="conversation-list-empty" role="status"><WandIcon name={query ? "search" : "chat"} size={20}/><Typography.Paragraph type="secondary">{query ? "没有匹配的对话或任务"
       : ui.activityOnly ? "现在没有符合筛选条件的活动对话。"
       : filter === "archived" ? GROUP_CHAT_VISIBLE ? "还没有已归档的对话，解散群聊或归档任务后会出现在这里。" : "还没有已归档的对话，归档任务后会出现在这里。"
       : filter === "active" ? "还没有未归档的对话。"
@@ -228,9 +246,9 @@ export function ConversationSidebarList({ compact, enabled = true, onNavigate, o
   </div>;
 }
 
-function ConversationListRow({ item, employee: projectedEmployee, compact, query, enabled, filter, selected, onSelect, onUpdate, onRemove,
+function ConversationListRow({ item, employee: projectedEmployee, compact, query, enabled, filter, writable = true, selected, onSelect, onUpdate, onRemove,
   sessionEntries, sessionTitles, selectedSessionId, onOpenSession }: {
-  item: ConversationSummary; employee: React.ComponentProps<typeof EmployeeAvatar>["employee"] | null; compact: boolean; query: string; enabled: boolean; filter: ConversationListFilter; selected: boolean; onSelect(): void;
+  item: ConversationSummary; employee: React.ComponentProps<typeof EmployeeAvatar>["employee"] | null; compact: boolean; query: string; enabled: boolean; filter: ConversationListFilter; writable?: boolean; selected: boolean; onSelect(): void;
   onUpdate(patch: { pinned?: boolean; dissolved?: boolean }): Promise<void>; onRemove(): Promise<void>;
   sessionEntries: readonly PersonSessionEntry[];
   sessionTitles: Readonly<Record<string, string>>;
@@ -273,13 +291,18 @@ function ConversationListRow({ item, employee: projectedEmployee, compact, query
           {item.pinnedAt ? <span className="conversation-pin" title="已置顶" aria-label="已置顶"><WandIcon name="pin" size={13}/></span> : null}</span>
       </span></WandButton></SidebarLabelTooltip> : null}
 
-    {!compact ? <WandIconButton className="conversation-row-more" aria-label={`${item.title}的菜单`} aria-haspopup="menu" aria-expanded={menu}
+    {!compact ? <div className="conversation-row-actions">
+      {item.kind === "dm" && sessions.length > 0 ? <SidebarSessionToggle id={sessionListId} open={showSessions} label={item.title}
+        toggleRef={sessionToggleRef} className="conversation-session-toggle" disabled={!enabled || busy}
+        onOpenChange={open => { setExpanded(false); setSessionsExpanded(open); }}/> : null}
+      <WandIconButton className="conversation-row-more" aria-label={`${item.title}的菜单`} aria-haspopup="menu" aria-expanded={menu}
       onClick={event => {
         event.stopPropagation();
         if (menu) { setMenu(false); return; }
         const bounds = event.currentTarget.getBoundingClientRect();
         event.currentTarget.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: bounds.right, clientY: bounds.bottom, button: 2 }));
-      }}><WandIcon name="more" size={16}/></WandIconButton> : null}
+      }}><WandIcon name="more" size={16}/></WandIconButton>
+    </div> : null}
   </div>;
   return <div className="conversation-list-item" onKeyDown={event => {
     if (event.key !== "Escape" || event.defaultPrevented || !showSessions || menu
@@ -291,12 +314,12 @@ function ConversationListRow({ item, employee: projectedEmployee, compact, query
     menu={{ items: [
       { key: "open", disabled: busy, icon: <WandIcon name="chat"/>, label: "打开对话" },
       ...(identity ? [{ key: "profile", disabled: busy, icon: <WandIcon name="info"/>, label: "查看员工资料" }] : []),
-      { key: "pin", disabled: busy, icon: <WandIcon name="pin"/>, label: item.pinnedAt ? "取消置顶" : "置顶" },
+      ...(writable ? [{ key: "pin", disabled: busy, icon: <WandIcon name="pin"/>, label: item.pinnedAt ? "取消置顶" : "置顶" }] : []),
       ...(item.kind === "dm" ? [{ key: "sessions", disabled: busy, icon: <WandIcon name="chat"/>, label: showSessions ? "收起会话" : `查看 ${sessions.length} 个会话` }] : []),
       ...(!item.dissolvedAt && item.tasks.length > 0 ? [{ key: "tasks", disabled: busy, icon: <WandIcon name="task"/>, label: expanded ? "收起任务" : `查看 ${item.tasks.length} 个任务` }] : []),
-      { key: "danger-divider", type: "divider" },
-      ...(item.kind === "group" && !item.external ? [{ key: "dissolve", disabled: busy, icon: <WandIcon name={item.dissolvedAt ? "resume" : "archive"}/>, label: item.dissolvedAt ? "恢复群聊" : "解散群聊…" }] : []),
-      { key: "delete", disabled: busy, danger: true, icon: <WandIcon name="trash"/>, label: item.external ? "删除本地群镜像…" : item.kind === "group" ? "删除群聊…" : "删除对话…" },
+      ...(writable ? [{ key: "danger-divider", type: "divider" as const },
+        ...(item.kind === "group" && !item.external ? [{ key: "dissolve", disabled: busy, icon: <WandIcon name={item.dissolvedAt ? "resume" : "archive"}/>, label: item.dissolvedAt ? "恢复群聊" : "解散群聊…" }] : []),
+        { key: "delete", disabled: busy, danger: true, icon: <WandIcon name="trash"/>, label: item.external ? "删除本地群镜像…" : item.kind === "group" ? "删除群聊…" : "删除对话…" }] : []),
     ], onClick: ({ key }) => {
       if (busy) return;
       setMenu(false);
@@ -315,9 +338,7 @@ function ConversationListRow({ item, employee: projectedEmployee, compact, query
       });
     } }}/>
 
-    {!compact && item.kind === "dm" ? <SidebarSessionArea id={sessionListId} open={showSessions} label={item.title}
-      toggleRef={sessionToggleRef} toggleClassName="conversation-session-toggle" disabled={!enabled || busy} hasSessions={sessions.length > 0} reserve
-      onOpenChange={open => { setExpanded(false); setSessionsExpanded(open); }}>
+    {!compact && item.kind === "dm" ? <SidebarSessionArea hasSessions={sessions.length > 0} reserve>
       <SidebarSessionPreview sessions={sessions} expanded={showSessions || showTasks} label={`${item.title}的会话预览`}
         className="sidebar-session-preview-person" disabled={!enabled || busy} liveTitles={sessionTitles}
         selectedSessionId={selectedSessionId} expansionRef={sessionToggleRef}
@@ -338,7 +359,8 @@ function ConversationListRow({ item, employee: projectedEmployee, compact, query
               row={<div className="conversation-person-session"><ImSidebarItem id={session.id}
                 title={label} titleGenerating={session.titleGenerating}
                 avatarNode={<SessionProviderMark session={session} size={14}/>} state={sidebarSessionState(session)} glow={sessionGlowStatus(session)}
-                summary={`${agentToolDisplayName(workspaceSessionProvider(session), session.engine)} · ${sidebarSessionState(session).label}`}
+                summary={[sidebarSessionState(session).label, sidebarWorkspaceLabel(entry.group),
+                  agentToolDisplayName(workspaceSessionProvider(session), session.engine)].filter(Boolean).join(" · ")}
                 active={session.id === selectedSessionId} onClick={() => onOpenSession?.(session.id)}/></div>}/>;
           })}
           {!sessions.length ? <Typography.Paragraph type="secondary" className="sidebar-group-empty">暂无符合条件的会话</Typography.Paragraph> : null}
@@ -351,5 +373,40 @@ function ConversationListRow({ item, employee: projectedEmployee, compact, query
     {showTasks ? tasks.map(t => <WandButton key={t.task.id} kind="ghost" className="conversation-task-row" onClick={() => {
       onSelect(); conversationUi.filter(item.id, t.task.id);
     }}><WandIcon name="task"/><span className="conversation-row-title">{t.task.title}</span><span className="conversation-row-status" data-archived={t.task.status === "archived" || undefined}>{conversationTaskStateLabel(t)}</span></WandButton>) : null}
+  </div>;
+}
+
+function ConversationOtherSessions({ entries, query, enabled, selectedSessionId, sessionTitles, onOpenSession }: {
+  entries: readonly PersonSessionEntry[];
+  query: string;
+  enabled: boolean;
+  selectedSessionId: string | null;
+  sessionTitles: Readonly<Record<string, string>>;
+  onOpenSession?(sessionId: string): void;
+}): React.ReactElement {
+  const [open, setOpen] = React.useState(false);
+  const expanded = open || query.length > 0;
+  const refresh = async (): Promise<void> => { await taskGroupsStore.reload(); notifyConversationChanges(); };
+  return <div className="conversation-other-sessions">
+    <WandButton kind="ghost" className="conversation-other-toggle" aria-expanded={expanded} onClick={() => setOpen(!open)}>
+      <WandIcon name="terminal" size={14}/>其他会话<span>{entries.length}</span>
+    </WandButton>
+    {expanded ? <div className="conversation-person-sessions" role="group" aria-label="其他会话">
+      {entries.map((entry, index) => {
+        const session = entry.session;
+        const label = sidebarSessionLabel(session, index, sessionTitles[session.id]);
+        return <SidebarSessionMenu key={session.id} session={{ ...session, archived: entry.archived }} label={label}
+          disabled={!enabled} intoNewTask={session.workspaceTaskId ? undefined : entry.group}
+          onOpen={() => onOpenSession?.(session.id)}
+          onArchive={async archived => { await archiveSidebarSession(session.id, archived); await refresh(); }}
+          onDelete={async () => { await deleteSidebarSessions([session.id], findSessionTask(entry.group, session) ?? null); await refresh(); }}
+          row={<div className="conversation-person-session"><ImSidebarItem id={session.id}
+            title={label} titleGenerating={session.titleGenerating}
+            avatarNode={<SessionProviderMark session={session} size={14}/>} state={sidebarSessionState(session)} glow={sessionGlowStatus(session)}
+            summary={[sidebarSessionState(session).label, sidebarWorkspaceLabel(entry.group),
+              agentToolDisplayName(workspaceSessionProvider(session), session.engine)].filter(Boolean).join(" · ")}
+            active={session.id === selectedSessionId} onClick={() => onOpenSession?.(session.id)}/></div>}/>;
+      })}
+    </div> : null}
   </div>;
 }

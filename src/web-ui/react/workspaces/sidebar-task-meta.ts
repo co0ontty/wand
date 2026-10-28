@@ -1,6 +1,13 @@
 import type { TaskDirectoryGroup, TaskSummary } from "./types";
 import { isSessionAttention, isSessionRunning } from "./sidebar-display-mode";
 
+/** Person rows cross workspace boundaries; show the group name, never a full path or a synthetic global owner. */
+export function sidebarWorkspaceLabel(group: Pick<TaskDirectoryGroup, "workspaceId" | "workspaceName" | "workspaceCwd" | "global">): string {
+  if (group.global || group.workspaceId === "wand-global") return "";
+  const name = group.workspaceName.trim() || group.workspaceCwd.trim();
+  return name.replace(/\\/g, "/").split("/").filter(Boolean).at(-1) ?? "";
+}
+
 interface SidebarSelection {
   workspaceId: string | null;
   taskId: string | null;

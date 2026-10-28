@@ -14,7 +14,7 @@ import { SidebarSessionMenu } from "./sidebar-session-menu";
 import { sidebarSessionLabel } from "./session-order";
 import { useSidebarExpansion } from "./sidebar-disclosure";
 import { sidebarSessionState, sidebarAggregateState, sessionGlowStatus } from "./sidebar-session-state";
-import { formatTaskRecency } from "./sidebar-task-meta";
+import { formatTaskRecency, sidebarWorkspaceLabel } from "./sidebar-task-meta";
 import type { SidebarDisplayMode } from "./sidebar-display-mode";
 import {
   recentConversationGroups,
@@ -172,7 +172,7 @@ function RecentConversationGroup({
         avatarNode={<SecondaryRowMark entry={entry} group={group}/>}
         state={sidebarSessionState(session)}
         glow={sessionGlowStatus(session)}
-        summary={entrySummary(entry, group, now)}
+        summary={entrySummary(entry, now)}
         active={selectedSessionId === session.id}
         onClick={() => onOpen(entry)}
       />
@@ -259,9 +259,9 @@ function GroupCreateButton({
   return null;
 }
 
-function entrySummary(entry: SidebarRecentEntry, group: SidebarRecentGroup, now: number): string {
+function entrySummary(entry: SidebarRecentEntry, now: number): string {
   const recency = formatTaskRecency(entry.session.startedAt ?? "", now);
-  const parts = [entry.taskName || entry.group.workspaceName, recency];
+  const parts = [sidebarSessionState(entry.session).label, sidebarWorkspaceLabel(entry.group), entry.taskName, recency];
   return parts.filter(Boolean).join(" · ");
 }
 

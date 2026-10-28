@@ -11,6 +11,9 @@ import { StructuredSessionManager } from "../src/structured-session-manager.js";
 import type { ProcessEvent, SessionSnapshot } from "../src/types.js";
 
 class MemoryStorage {
+  knowledgeSessionScope(): null { return null; }
+  revokeSessionKnowledgeAccess(): void {}
+
   readonly sessions = new Map<string, SessionSnapshot>();
 
   constructor(initial: SessionSnapshot[]) {

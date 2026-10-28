@@ -32,7 +32,8 @@ function PhaseButton({ attrs, source }: { attrs: Record<string, string>; source:
     className={[...Array.from(source.classList).filter(name => name !== "queue-mode" && !name.startsWith("ant-btn")), snapshot.queued && "queue-mode"].filter(Boolean).join(" ")}
     type={snapshot.queued ? "default" : "primary"} danger={snapshot.phase === "running" || snapshot.phase === "failed"}
     disabled={snapshot.disabled} loading={snapshot.phase === "sending"}
-    icon={snapshot.phase === "sending" ? undefined : <WandIcon name={snapshot.phase === "running" ? "stop" : snapshot.phase === "sent" ? "check" : "up"} size={15}/>}/>;
+    icon={snapshot.phase === "sending" ? undefined : <span className="composer-send-icons">{(["up", "history", "stop", "check"] as const).map(name => <span key={name} data-active={name === (snapshot.phase === "running" ? "stop" : snapshot.phase === "sent" ? "check" : snapshot.queued ? "history" : "up")}><WandIcon name={name} size={15}/></span>)}</span>}>
+    <span>{snapshot.phase === "sending" ? "发送中" : snapshot.phase === "running" ? "停止" : snapshot.phase === "sent" ? "已接受" : snapshot.phase === "failed" ? "重试" : snapshot.queued ? "加入队列" : "发送"}</span></Button>;
 }
 
 export function browserButtonKey(element: Element): string | null {

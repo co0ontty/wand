@@ -192,7 +192,7 @@ export class WorkspaceRepository {
   }
 
   /** Normal workspace counts exclude archived sessions and sessions in archived tasks. */
-  countSessionsByWorkspace(options: { includeArchived?: boolean; excludeSystemAiCalls?: boolean } = {}): Map<string, number> {
+  countSessionsByWorkspace(options: { includeArchived?: boolean; excludeSystemAiCalls?: boolean; excludeQuickTerminals?: boolean } = {}): Map<string, number> {
     const rows = this.db
       .prepare(
         `SELECT session.workspace_id AS id, COUNT(*) AS n
@@ -203,9 +203,10 @@ export class WorkspaceRepository {
              ORDER BY updated_at DESC, rowid DESC LIMIT 1
            ), '') <> 'archived'))
            AND (? = 0 OR COALESCE(session.automation_id, '') NOT GLOB ?)
+           AND (? = 0 OR session.session_source <> 'quick-terminal')
          GROUP BY session.workspace_id`,
       )
-      .all(options.includeArchived === true ? 1 : 0, options.excludeSystemAiCalls === true ? 1 : 0, `${SYSTEM_AI_CALL_PREFIX}*`) as unknown as Array<{ id: string; n: number }>;
+      .all(options.includeArchived === true ? 1 : 0, options.excludeSystemAiCalls === true ? 1 : 0, `${SYSTEM_AI_CALL_PREFIX}*`, options.excludeQuickTerminals === true ? 1 : 0) as unknown as Array<{ id: string; n: number }>;
     return new Map(rows.map((row) => [row.id, Number(row.n) || 0]));
   }
 

@@ -18,6 +18,16 @@ test("employee layout is bounded by its real container rather than a phone-sized
   assert.match(teamStyles, /\.wand-employees-layout>\.wand-employee-list \{ width:100%; max-width:none;/);
 });
 
+test("employee drawer passes its finite height through the editor to the body scroll owner", () => {
+  const styles = source("styles/employee-profile.ts");
+  assert.match(styles, /\.wand-object-profile-drawer:has\(\[data-employee-profile\]\) \.ant-drawer-body\{display:flex;flex-direction:column;min-height:0;[^}]*overflow:hidden/,
+    "overflow-hidden Drawer body must be a flex parent so the editor can shrink within the viewport");
+  assert.match(styles, /\.employee-profile-content,\[data-employee-profile\]\{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;/);
+  assert.match(styles, /\[data-employee-profile\]\.wand-team-member\{[^}]*overflow:hidden/);
+  assert.match(styles, /\[data-employee-profile\] \.profile-body\{overflow:auto;min-height:0;flex:1;/,
+    "the inner body owns scrolling while the editor header remains reachable");
+});
+
 test("new employee fields remain in the same progressive single-page form", () => {
   const html = renderToStaticMarkup(React.createElement(EmployeeCreateForm, {
     catalog: null, providerOptions: [], onSave: async () => {}, onCancel: () => {},

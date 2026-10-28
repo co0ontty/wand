@@ -1275,23 +1275,27 @@ import { compactSessionFetch } from "./session-fetch.js";
         if (queueBarOwner !== (session?.id ?? null)) {
           queueBarOwner = session?.id ?? null;
           state.queueBarExpanded = false;
-          if (state.queueBarDrag) queueBarDragEnd(null);
+          if (state.queueBarDrag) queueBarDragEnd(null, true);
         }
         var isStructured = session && session.sessionKind === "structured";
         var queue = isStructured ? getStructuredQueuedInputs(session) : [];
         queue = Array.isArray(queue) ? queue : [];
 
         var retrieval = session ? composerStore.read(session.id).queueRetrieval : null;
-        if (!isStructured || (queue.length === 0 && !retrieval)) {
+        var removal = session ? composerStore.read(session.id).queueRemoval : null;
+        // A new snapshot/closed surface cancels the old gesture before painting.
+        if (state.queueBarDrag) {
+          const drag = state.queueBarDrag;
+          if (!isStructured || !state.queueBarExpanded || JSON.stringify(queue) !== JSON.stringify(drag.queueSnapshot)) queueBarDragEnd(null, true);
+          else return;
+        }
+        if (!isStructured || (queue.length === 0 && !retrieval && !removal)) {
           host.hidden = true;
           clearQueueView(host);
           // 队列空时同步把"展开"标志收回，避免下次出现新排队时还是展开态。
           state.queueBarExpanded = false;
           return;
         }
-
-        // 拖拽进行中绝不重建 DOM，否则 pointer capture 丢失、气泡闪屏。
-        if (state.queueBarDrag) return;
 
         host.hidden = false;
         var inFlight = !!(session.structuredState && session.structuredState.inFlight && session.status === "running");
@@ -1302,29 +1306,40 @@ import { compactSessionFetch } from "./session-fetch.js";
           onExpandedChange: setQueueBarExpanded,
           busy: queueBarEditing.has(session.id) || queueBarMutating.has(session.id),
           retrieval: retrieval,
+          removal: removal,
           steering: session.provider === "pi" && session.structuredState?.engine === "core",
+          onDragStart: queueBarDragStart,
+          onAction: (action, index, expected) => {
+            if (state.selectedId !== session.id) return;
+            if (action === "restore-retrieved") { restoreRetrievedQueue(session.id); return; }
+            if (action === "dismiss-retrieved") { composerStore.dismissQueueRetrieval(session.id); updateQueueBar(); return; }
+            if (action === "dismiss-removed") { composerStore.dismissQueueRemoval(session.id); updateQueueBar(); return; }
+            if (action === "restore-removed") {
+              if (state.composerComposing || !composerStore.restoreQueueRemoval(session.id)) return;
+              restoreComposerStateForSession(session.id);
+              document.getElementById("input-box")?.focus({ preventScroll: true });
+              setQueueBarExpanded(false); updateQueueBar(); return;
+            }
+            var latest = state.sessions.find(s => s.id === session.id)?.queuedMessages || [];
+            if (latest.length !== expected.length || latest.some((text, i) => text !== expected[i])) {
+              flashComposerFailed("队列已更新，请核对后重试。", session.id); updateQueueBar(); return;
+            }
+            if (action === "edit") { void queueBarEditItem(index); return; }
+            if (action === "promote-item") { queueBarPromoteIndex(index); return; }
+            if (action === "delete") { queueBarDeleteItem(index); return; }
+            if (action === "clear-all") { queueBarClearAll(); return; }
+            if (action === "move-up" || action === "move-down") void queueBarMoveItem(session.id, index, action === "move-up" ? -1 : 1, expected);
+          },
         });
       }
 
       // ── 单条删除 / 全部清空 / 队首插队 ──
-      function rollbackQueueOptimistic(session, prevQueue, requestVersion) {
-        var latest = state.sessions.find(function(s) { return s.id === session.id; }) || session;
-        var restored = composerQueue.rollback(session.id, latest.queuedMessages || [], prevQueue, requestVersion);
-        if (restored) updateSessionSnapshot({ id: session.id, queuedMessages: restored });
-        if (session.id === state.selectedId) {
-          var refreshed = state.sessions.find(function(s) { return s.id === session.id; }) || session;
-          state.currentMessages = buildMessagesForRender(refreshed, getPreferredMessages(refreshed, refreshed.output, false));
-          renderChat(true);
-          updateQueueBar();
-        }
-      }
-
       var queueBarEditing = new Set<string>();
       var queueBarMutating = new Set<string>();
       /**
        * 取回队列项到主输入框，而不是再开一个 prompt。DELETE 的 expectedText
        * 是并发护栏：队列顺序或文本变化时服务端拒绝，客户端不会误取另一条。
-       * ComposerStore.restore 会把队列文本合并到现有草稿前面，并始终保留已有附件。
+       * ComposerStore 会把确认取回的文本追加到最新草稿，并始终保留已有附件。
        */
       async function queueBarEditItem(index) {
         var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
@@ -1382,6 +1397,7 @@ import { compactSessionFetch } from "./session-fetch.js";
           syncComposerHasText(inputBox);
           try { inputBox.focus({ preventScroll: true }); } catch (_) { inputBox.focus(); }
         }
+        setQueueBarExpanded(false);
         updateQueueBar();
       }
 
@@ -1389,17 +1405,20 @@ import { compactSessionFetch } from "./session-fetch.js";
         var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
         var original = session?.queuedMessages?.[index];
         if (typeof original !== "string") return;
-        void removeQueuedItems(session.id, "/" + index, { expectedText: original });
+        void removeQueuedItems(session.id, "/" + index, { expectedText: original }, [original]);
       }
 
       function queueBarClearAll() {
         var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
         if (!session?.queuedMessages?.length) return;
-        void removeQueuedItems(session.id, "", { expectedQueue: session.queuedMessages.slice() });
+        void removeQueuedItems(session.id, "", { expectedQueue: session.queuedMessages.slice() }, session.queuedMessages.slice());
       }
 
-      async function removeQueuedItems(sessionId, suffix, body) {
+      async function removeQueuedItems(sessionId, suffix, body, removed: readonly string[]) {
         if (queueBarEditing.has(sessionId) || queueBarMutating.has(sessionId)) return;
+        var token = composerStore.beginQueueRemoval(sessionId, removed);
+        if (!token) return;
+        var explicitlyRejected = false;
         queueBarMutating.add(sessionId);
         var version = composerQueue.advance(sessionId, "local");
         updateQueueBar();
@@ -1409,12 +1428,17 @@ import { compactSessionFetch } from "./session-fetch.js";
             body: JSON.stringify(body),
           });
           var payload = await res.json();
-          if (!res.ok) throw new Error(payload.error || "无法更新排队消息。");
+          if (!res.ok) {
+            explicitlyRejected = res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 409;
+            throw new Error(payload.error || "无法更新排队消息。");
+          }
           if (payload.id !== sessionId || !Array.isArray(payload.queuedMessages)) throw new Error("队列回执无效，请核对最新状态。");
           if (state.sessions.some(function(s) { return s.id === sessionId; })) {
             updateSessionSnapshot(composerQueue.filter(payload, sessionId, version));
+            composerStore.finishQueueRemoval(sessionId, token, "confirmed");
           }
         } catch (err) {
+          composerStore.finishQueueRemoval(sessionId, token, explicitlyRejected ? "rejected" : "unknown");
           // A lost response is not a rejection. Never resurrect an old queue.
           if (state.selectedId === sessionId) {
             flashComposerFailed(getErrorMessage(err, "队列更新结果未知，未自动重试。"), sessionId);
@@ -1424,6 +1448,35 @@ import { compactSessionFetch } from "./session-fetch.js";
           queueBarMutating.delete(sessionId);
           if (state.selectedId === sessionId) updateQueueBar();
         }
+      }
+
+      async function queueBarMoveItem(sessionId: string, index: number, delta: number, expected: readonly string[]) {
+        if (queueBarMutating.has(sessionId) || queueBarEditing.has(sessionId)) return;
+        const target = index + delta;
+        if (index < 0 || index >= expected.length || target < 0 || target >= expected.length) return;
+        const order = expected.map((_, i) => i);
+        [order[index], order[target]] = [order[target], order[index]];
+        return queueBarReorder(sessionId, order, expected);
+      }
+
+      async function queueBarReorder(sessionId: string, order: number[], expected: readonly string[]) {
+        if (state.selectedId !== sessionId || queueBarMutating.has(sessionId) || queueBarEditing.has(sessionId)) return;
+        const latest = state.sessions.find(s => s.id === sessionId)?.queuedMessages || [];
+        if (JSON.stringify(latest) !== JSON.stringify(expected)) { updateQueueBar(); return; }
+        queueBarMutating.add(sessionId);
+        const version = composerQueue.advance(sessionId, "local");
+        updateQueueBar();
+        try {
+          const res = await compactSessionFetch("/api/structured-sessions/" + encodeURIComponent(sessionId) + "/queued", {
+            method: "PATCH", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ order, expectedQueue: expected }),
+          });
+          const payload = await res.json();
+          if (!res.ok || payload.id !== sessionId || !Array.isArray(payload.queuedMessages)) throw new Error(payload.error || "队列排序结果待核对。");
+          if (state.sessions.some(s => s.id === sessionId)) updateSessionSnapshot(composerQueue.filter(payload, sessionId, version));
+        } catch (err) {
+          if (state.selectedId === sessionId) { flashComposerFailed(getErrorMessage(err, "排序结果未知，未自动重试。"), sessionId); void loadOutput(sessionId); }
+        } finally { queueBarMutating.delete(sessionId); if (state.selectedId === sessionId) updateQueueBar(); }
       }
 
       // 把队列里第 index 条剥下来，作为新的输入立刻发送出去。
@@ -1501,11 +1554,9 @@ import { compactSessionFetch } from "./session-fetch.js";
         });
       }
 
-      // ── 拖拽排序（Pointer Events + 真实高度的 sort/animate）──
-      // 单条气泡的 pointerdown 也会进这里，但 queue.length <= 1 时直接返回，让
-      // 系统 click 事件穿透到 #queue-bar-host 的 click delegate（那里再判断"点击
-      // 气泡 → 立即发送"）。
+      // Only the dedicated handle owns pointer capture; body text stays selectable.
       function queueBarDragStart(ev, chipEl) {
+        if (state.queueBarDrag || !ev.target?.closest?.(".queue-drag-handle")) return;
         var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
         if (!session || queueBarEditing.has(session.id) || queueBarMutating.has(session.id)) return;
         var queue = Array.isArray(session.queuedMessages) ? session.queuedMessages.slice() : [];
@@ -1521,12 +1572,15 @@ import { compactSessionFetch } from "./session-fetch.js";
         if (rects.length >= 2) gap = Math.max(0, rects[1].top - rects[0].top - rects[0].height);
 
         ev.preventDefault();
-        try { chipEl.setPointerCapture(ev.pointerId); } catch (_e) {}
+        var handleEl = chipEl.querySelector(".queue-drag-handle");
+        if (!handleEl) return;
+        handleEl.focus({ preventScroll: true });
+        try { handleEl.setPointerCapture(ev.pointerId); } catch (_e) {}
         if (navigator && navigator.vibrate) { try { navigator.vibrate(8); } catch (_e2) {} }
 
         state.queueBarDrag = {
           pointerId: ev.pointerId,
-          handleEl: chipEl,
+          handleEl: handleEl,
           itemEl: chipEl,
           listEl: listEl,
           siblings: siblings,
@@ -1545,11 +1599,18 @@ import { compactSessionFetch } from "./session-fetch.js";
 
         var move = function(e) { queueBarDragMove(e); };
         var up = function(e) { queueBarDragEnd(e); };
-        state.queueBarDrag.moveHandler = move;
-        state.queueBarDrag.upHandler = up;
-        chipEl.addEventListener("pointermove", move);
-        chipEl.addEventListener("pointerup", up);
-        chipEl.addEventListener("pointercancel", up);
+        var cancel = function(e) { queueBarDragEnd(e, true); };
+        var blur = function() { queueBarDragEnd(null, true); };
+        var hidden = function() { if (document.hidden) queueBarDragEnd(null, true); };
+        var key = function(e) { if (e.key === "Escape") queueBarDragEnd(null, true); };
+        Object.assign(state.queueBarDrag, { moveHandler: move, upHandler: up, cancelHandler: cancel, blurHandler: blur, hiddenHandler: hidden, keyHandler: key });
+        handleEl.addEventListener("pointermove", move);
+        handleEl.addEventListener("pointerup", up);
+        handleEl.addEventListener("pointercancel", cancel);
+        handleEl.addEventListener("lostpointercapture", cancel);
+        window.addEventListener("blur", blur);
+        document.addEventListener("visibilitychange", hidden);
+        document.addEventListener("keydown", key, true);
       }
 
       // 给定 origIndex / target / 真实 rects，算出新排列下每个 sibling 的目标 top。
@@ -1604,13 +1665,19 @@ import { compactSessionFetch } from "./session-fetch.js";
         }
       }
 
-      function queueBarDragEnd(ev) {
+      function queueBarDragEnd(ev, cancelled = false) {
         var d = state.queueBarDrag;
         if (!d || (ev && ev.pointerId !== d.pointerId)) return;
-        try { d.handleEl.releasePointerCapture(d.pointerId); } catch (_e) {}
+        // Retire ownership and listeners before releasing capture (which emits loss).
+        state.queueBarDrag = null;
         d.handleEl.removeEventListener("pointermove", d.moveHandler);
         d.handleEl.removeEventListener("pointerup", d.upHandler);
-        d.handleEl.removeEventListener("pointercancel", d.upHandler);
+        d.handleEl.removeEventListener("pointercancel", d.cancelHandler);
+        d.handleEl.removeEventListener("lostpointercapture", d.cancelHandler);
+        window.removeEventListener("blur", d.blurHandler);
+        document.removeEventListener("visibilitychange", d.hiddenHandler);
+        document.removeEventListener("keydown", d.keyHandler, true);
+        try { d.handleEl.releasePointerCapture(d.pointerId); } catch (_e) {}
 
         var origIndex = d.origIndex;
         var targetIndex = d.targetIndex;
@@ -1623,9 +1690,7 @@ import { compactSessionFetch } from "./session-fetch.js";
         });
         d.itemEl.classList.remove("dragging");
 
-        state.queueBarDrag = null;
-
-        if (origIndex === targetIndex) {
+        if (cancelled || !ev || ev.type !== "pointerup" || origIndex === targetIndex) {
           // 没动 → 单纯刷新一下。立即发送由 chip 内部的 ⚡ 按钮触发，
           // 不在 chip 本体上做隐式 tap-to-promote（容易误触）。
           updateQueueBar();
@@ -1637,8 +1702,6 @@ import { compactSessionFetch } from "./session-fetch.js";
         for (var i = 0; i < queueSnapshot.length; i++) order.push(i);
         order.splice(origIndex, 1);
         order.splice(targetIndex, 0, origIndex);
-        var nextQueue = order.map(function(i) { return queueSnapshot[i]; });
-
         var session = state.sessions.find(function(s) { return s.id === state.selectedId; });
         if (!session || session.id !== d.sessionId) { updateQueueBar(); return; }
         var currentQueue = Array.isArray(session.queuedMessages) ? session.queuedMessages : [];
@@ -1648,27 +1711,8 @@ import { compactSessionFetch } from "./session-fetch.js";
           flashComposerFailed("排队内容已更新，请重新拖动排序。", session.id);
           return;
         }
-        var mutationVersion = composerQueue.advance(session.id, "local");
-        updateSessionSnapshot({ id: session.id, queuedMessages: nextQueue });
-        updateQueueBar();
-
-        compactSessionFetch("/api/structured-sessions/" + session.id + "/queued", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          body: JSON.stringify({ order: order, expectedQueue: queueSnapshot }),
-        })
-        .then(function(res) {
-          if (!res.ok) {
-            return res.json().catch(function() { return {}; }).then(function(p) {
-              throw new Error((p && p.error) || "排序失败");
-            });
-          }
-        })
-        .catch(function(err) {
-          rollbackQueueOptimistic(session, queueSnapshot, mutationVersion);
-          flashComposerFailed((err && err.message) || "调整排队顺序失败。", session.id);
-        });
+        // Same mutation lock, expected snapshot and receipt filtering as menu moves.
+        void queueBarReorder(session.id, order, queueSnapshot);
       }
 
       // ── 事件代理：所有交互入口都从 #queue-bar-host 起手 ──
@@ -1708,14 +1752,11 @@ import { compactSessionFetch } from "./session-fetch.js";
           // 点气泡本体（无拖动发生）= 无操作。立即发送 / 删除走各自按钮。
           // 真正发生过拖动时 pointer 链会吞掉 click，这里只会接到 tap。
         });
-        // 整个气泡都是拖拽起手区。⚡ / × / +N / 全部清空 通过 closest 跳过，
-        // 让 click 阶段去处理它们。
+        // Legacy host path also accepts only the named handle, never body text.
         host.addEventListener("pointerdown", function(ev) {
           if (ev.button !== undefined && ev.button !== 0) return;
           var evTarget = ev.target as HTMLElement;
-          if (evTarget && evTarget.closest && evTarget.closest(
-                '[data-action="delete"], [data-action="edit"], [data-action="promote-item"], ' +
-                '[data-action="clear-all"], [data-action="expand"]')) return;
+          if (!evTarget?.closest?.(".queue-drag-handle")) return;
           var chip = evTarget && evTarget.closest ? evTarget.closest(".queue-bar-item") : null;
           if (!chip) return;
           queueBarDragStart(ev, chip);
@@ -3013,6 +3054,9 @@ import { compactSessionFetch } from "./session-fetch.js";
         // its wrapped content needs more room. Re-measure immediately and again
         // while Android/iOS keyboard dismissal changes the available width.
         if (blurredEl) autoResizeInput(blurredEl);
+        // Only touch keyboards need a dismissal settling window. Desktop blur must
+        // not schedule late measurements into a subsequent editing gesture.
+        if (!isTouchDevice()) return;
         scheduleClosedViewportBaselineWindow(2200, blurredEl);
         // blur 触发瞬间 vv.height 通常还停在键盘弹起时的旧值——iOS 上动画
         // 要再跑 ~250ms 才回弹完整。这里铺一串 settle tick 让 syncAppViewportHeight
@@ -3020,6 +3064,7 @@ import { compactSessionFetch } from "./session-fetch.js";
         var dismissTicks = [80, 200, 380, 620, 900];
         dismissTicks.forEach(function(delay, idx) {
           setTimeout(function() {
+            if (document.activeElement === blurredEl) return;
             syncAppViewportHeight(false);
             if (blurredEl && blurredEl.value) autoResizeInput(blurredEl);
             // 第二档（200ms）顺便刷一次终端布局，再晚的 tick 仅校准视口变量。

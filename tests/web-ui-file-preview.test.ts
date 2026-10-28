@@ -17,6 +17,7 @@ import { HttpFilePreviewRepository } from "../src/web-ui/react/file-preview/repo
 import type {
   FilePreviewFile,
   FilePreviewRuntimeAdapter,
+  FilePreviewSaveOutcome,
 } from "../src/web-ui/react/file-preview/types.ts";
 
 function json(value: unknown, status = 200): Response {
@@ -244,6 +245,57 @@ test("controller owns navigation, editing, save, runtime commands, and view stat
   assert.deepEqual(confirmations, []);
 });
 
+test("editor links save the resolved file and ignore a receipt after the same link is reloaded", async () => {
+  let resolved = "/tmp/source.ts";
+  let finishSave!: (outcome: FilePreviewSaveOutcome) => void;
+  const writes: string[] = [];
+  const saved: string[] = [];
+  const module = createFilePreviewModule({
+    repository: {
+      async load() { return { ok: true, file: textFile(resolved, "loaded " + resolved) }; },
+      save(path) {
+        writes.push(path);
+        return new Promise<FilePreviewSaveOutcome>(resolve => { finishSave = resolve; });
+      },
+    },
+    runtime: {
+      confirmDiscard: async () => true,
+      copyText: async () => {},
+      appendToComposer: () => false,
+      notify: () => {},
+      onSaved: path => { saved.push(path); },
+    },
+  });
+  const link = "/tmp/source.ts:12";
+  await module.controller.open(link);
+  await module.controller.execute({ type: "edit.enter" });
+  await module.controller.execute({ type: "edit.change", value: "first edit" });
+  const firstSave = module.controller.execute({ type: "edit.save" });
+  assert.deepEqual(writes, ["/tmp/source.ts"]);
+  finishSave({ ok: true, result: { path: "/tmp/source.ts", size: 10 } });
+  assert.equal(await firstSave, true);
+  assert.deepEqual(saved, ["/tmp/source.ts"]);
+  assert.equal(module.store.getSnapshot().request?.path, link, "keep the navigation request identity");
+
+  await module.controller.execute({ type: "edit.change", value: "late edit" });
+  const lateSave = module.controller.execute({ type: "edit.save" });
+  // A literal colon filename can appear before the next read of the same link.
+  resolved = link;
+  await module.controller.open(link);
+  finishSave({ ok: true, result: { path: "/tmp/source.ts", size: 9 } });
+  assert.equal(await lateSave, false);
+  assert.equal(module.store.getSnapshot().file?.path, link);
+  assert.equal(module.store.getSnapshot().file?.content, "loaded " + link);
+  assert.deepEqual(saved, ["/tmp/source.ts"], "a stale receipt cannot refresh the newly opened file");
+
+  await module.controller.execute({ type: "edit.enter" });
+  await module.controller.execute({ type: "edit.change", value: "literal filename edit" });
+  const literalSave = module.controller.execute({ type: "edit.save" });
+  assert.equal(writes.at(-1), link, "existing colon filenames must retain their exact write target");
+  finishSave({ ok: true, result: { path: link, size: 21 } });
+  assert.equal(await literalSave, true);
+});
+
 test("dirty confirmation keeps state on cancel and discards only after approval", async () => {
   const decisions = [false, true, false, true];
   const reasons: string[] = [];
@@ -319,4 +371,32 @@ test("字号读数有语义承载：role=status，AT 读得到「字号 N」", (
   const source = readFileSync(new URL("../src/web-ui/react/file-preview/host.tsx", import.meta.url), "utf8");
   // 无 role 的 span 上 aria-label 被忽略，改前 AT 只能读到一个裸数字。
   assert.match(source, /<span className="wand-file-preview-font-size" role="status" aria-label=\{`字号 \$\{snapshot\.fontSize\}`\}/);
+});
+
+test("forwarded file metadata keeps source routes, decoded filenames and large-file downloads", async () => {
+  const calls: string[] = [];
+  const repository = new HttpFilePreviewRepository(async input => {
+    calls.push(String(input));
+    return json({ error: "too large", size: 900000, maxSize: 512000 }, 413);
+  });
+  const relative = "/api/session-file/source?path=docs%2Flarge.md";
+  const result = await repository.load(relative);
+  assert.equal(calls[0], relative + "&mode=metadata");
+  assert.ok(!result.ok && result.failure.download?.url === relative + "&mode=download");
+  await repository.load("/api/file-raw?path=%2Ftmp%2F100%25%23note.md");
+  assert.equal(calls[1], "/api/file-preview?path=%2Ftmp%2F100%25%23note.md");
+  await repository.load("/tmp/100%#note.md");
+  assert.equal(calls[2], calls[1]);
+  const resource = "/api/local-file/L3RtcC9zaXRl/sub/readme.md";
+  const nested = await repository.load(resource);
+  assert.equal(calls[3], resource + "?__wand_file_action=metadata");
+  assert.ok(!nested.ok && nested.failure.download?.url === resource + "?__wand_file_action=download");
+});
+
+test("oversized forwarded HTML retains resolved filename for interactive preview and full download", async () => {
+  const resolved = "/tmp/site.with.dots/index#final.html";
+  const repository = new HttpFilePreviewRepository(async () => json({ error: "too large", path: resolved, size: 900000, maxSize: 512000 }, 413));
+  const result = await repository.load("/api/local-file/L3RtcC9zaXRlLndpdGguZG90cw/?mode=edit#panel");
+  assert.ok(!result.ok && result.failure.download?.path === resolved);
+  assert.ok(!result.ok && result.failure.download?.url === "/api/file-raw?download=1&path=" + encodeURIComponent(resolved));
 });

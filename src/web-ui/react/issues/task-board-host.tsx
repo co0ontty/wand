@@ -1,5 +1,6 @@
 import { buildTaskDispatchPrompt, taskDispatchConfiguration } from "./task-dispatch-preview";
 import { TaskAcceptanceEditor } from "./task-acceptance";
+import { TaskActions } from "./task-actions";
 import { TaskSessionSummary } from "./task-session-summary";
 import { taskAcceptanceLabel } from "./task-delivery-state";
 import { taskGoalProjection } from "../../../task-hierarchy";
@@ -179,6 +180,7 @@ export function TaskBoardHost({
   const [selectedId, setSelectedId] = usePageRouteState("task", "", undefined, undefined, "push");
   // 看板卡片的就地展开态，同一时刻只开一张；完整详情仍由 selectedId 那套详情页承担。
   const [expandedTaskId, setExpandedTaskId] = React.useState("");
+  const [acceptanceTarget, setAcceptanceTarget] = React.useState("");
   // 非点击收起（换视图、改筛选、Esc）后，把焦点还给那张卡片的触发按钮，和列表行共用一份实现。
   const bindCardTrigger = useExpansionFocusReturn(expandedTaskId);
   const [detailAgent, setDetailAgent] = React.useState<WandTaskAgent | null>(null);
@@ -932,8 +934,12 @@ export function TaskBoardHost({
     {filterWorkspaceId && !workspaces.some(item => item.id === filterWorkspaceId) && !loading && <Alert type="warning" title="链接中的目录不可用" action={<WandButton onClick={() => setFilterWorkspaceId("")}>查看所有目录</WandButton>}/>}
     {error && <Alert type="error" role="alert" showIcon title={error} action={<WandButton kind="ghost" size="small" disabled={loading} onClick={() => void reload()}>重新加载</WandButton>}/>}
 
+    {!selected && !selectedId && view === "dashboard" && <TaskActions workspaceId={filterWorkspaceId} active={controller.open}
+      onOpenSession={onOpenSession} onOpenAcceptance={id => { setAcceptanceTarget(id); setSelectedId(id); }}/>}
+
     {selected ? <IssueDetail
       task={selected}
+      revealAcceptance={acceptanceTarget === selected.id}
       busy={detailBusy}
       catalog={catalog}
       agent={detailAgentValue}
@@ -1111,6 +1117,7 @@ export function TaskBoardHost({
 
 function IssueDetail({
   task,
+  revealAcceptance = false,
   busy,
   catalog,
   agent,
@@ -1137,6 +1144,7 @@ function IssueDetail({
   composeRequest,
 }: {
   task: WandTaskListed;
+  revealAcceptance?: boolean;
   busy: boolean;
   catalog: IssueModelCatalog | null;
   agent: WandTaskAgent;
@@ -1162,6 +1170,12 @@ function IssueDetail({
   onOpenSession?: (sessionId: string) => void;
   composeRequest: { id: string; nonce: number } | null;
 }): React.ReactElement {
+  const acceptanceRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (!revealAcceptance) return;
+    acceptanceRef.current?.scrollIntoView({ block: "nearest" });
+    acceptanceRef.current?.querySelector<HTMLElement>("[role=button]")?.focus({ preventScroll: true });
+  }, [task.id, revealAcceptance]);
   const [title, setTitle] = React.useState(task.title);
   const [labelDraft, setLabelDraft] = React.useState(task.labels.join(", "));
   const [composeOpen, setComposeOpen] = React.useState(false);
@@ -1236,8 +1250,8 @@ function IssueDetail({
               setComposeOpen(true);
             }}/>,
           }]}/>
-          <Collapse ghost className="task-board-acceptance-collapse" items={[{ key: "acceptance", label: <Typography.Text strong>{children.length ? "主任务整体验收" : "交付与验收"} · {taskAcceptanceLabel(task.acceptance)}</Typography.Text>,
-            children: <TaskAcceptanceEditor key={`acceptance-${task.id}`} task={task} children={children} busy={busy} onSave={acceptance => onPatch({ acceptance })}/> }]}/>
+          <div ref={acceptanceRef}><Collapse key={task.id} ghost defaultActiveKey={revealAcceptance ? ["acceptance"] : []} className="task-board-acceptance-collapse" items={[{ key: "acceptance", label: <Typography.Text strong>{children.length ? "主任务整体验收" : "交付与验收"} · {taskAcceptanceLabel(task.acceptance)}</Typography.Text>,
+            children: <TaskAcceptanceEditor key={`acceptance-${task.id}`} task={task} children={children} busy={busy} onSave={acceptance => onPatch({ acceptance })}/> }]}/></div>
           <TaskComments key={`comments-${task.id}`} taskId={task.id} updatedAt={task.updatedAt} employees={employees}
             childTasks={children} sessions={task.sessions} onOpenSession={onOpenSession} onOpenTask={onOpenTask}/>
           {composeOpen ? <Card size="small" className="task-board-native-assign" aria-label="指派 Agent">

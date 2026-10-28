@@ -292,11 +292,11 @@ export function deriveLegacyUiSnapshot(
   state: LegacySnapshotState,
   environment: LegacySnapshotEnvironment,
 ): UiSnapshotData {
-  const sessions = state.sessions ?? [];
-  const sessionSelection = state.selectedSessionIds ?? {};
+  const sessions = (state.sessions ?? []).filter(session => session.sessionSource !== "quick-terminal");
+  const sessionSelection = Object.fromEntries(sessions.flatMap(session => session.id ? [[session.id, Boolean(state.selectedSessionIds?.[session.id])]] : []));
   const sessionVms = sessions.map((session) => sessionToVm(session, state, sessionSelection));
-  const selected = sessionVms.find((session) => session.id === state.selectedId) ?? null;
-  const selectedLegacy = sessions.find((session) => session.id === state.selectedId) ?? null;
+  const selectedLegacy = state.sessions?.find((session) => session.id === state.selectedId) ?? null;
+  const selected = selectedLegacy ? sessionToVm(selectedLegacy, state, sessionSelection) : null;
   const wand = sortSessionVms(sessionVms.filter((session) => session.source === "wand"), sessions);
   const automation = sortSessionVms(sessionVms.filter((session) => session.source === "automation"), sessions);
 

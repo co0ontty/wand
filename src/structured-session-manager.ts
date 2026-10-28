@@ -206,6 +206,8 @@ export class StructuredSessionManager {
   private readonly autoAssignPending = new Map<string, { cancelled: boolean }>();
   private readonly preserveQueueOnInterrupt = new Set<string>();
   private readonly interruptedScheduling = new Map<string, EmployeeInputScheduling>();
+  /** 排队条「立即发送」中断后要补发的那条，也不得再回到员工并发排队。 */
+  private readonly interruptedImmediateStart = new Set<string>();
   private employeeInputAdmission: EmployeeInputAdmission | null = null;
   private inputSequence = 0;
   /** Last wall-clock time (ms) a streaming checkpoint reached SQLite. */
@@ -507,6 +509,7 @@ export class StructuredSessionManager {
     this.pendingRunnerExecutions.clear();
     this.interruptedWith.clear();
     this.interruptedScheduling.clear();
+    this.interruptedImmediateStart.clear();
     this.preserveQueueOnInterrupt.clear();
     for (const token of this.autoAssignPending.values()) token.cancelled = true;
     this.autoAssignPending.clear();
@@ -1045,8 +1048,9 @@ export class StructuredSessionManager {
       this.preserveQueueOnInterrupt.delete(sessionId);
       const scheduling = this.interruptedScheduling.get(sessionId);
       this.interruptedScheduling.delete(sessionId);
+      const immediateStart = this.interruptedImmediateStart.delete(sessionId);
       setImmediate(() => {
-        this.sendMessage(sessionId, interruptPrompt, { scheduling }).catch((error) => {
+        this.sendMessage(sessionId, interruptPrompt, { scheduling, immediateStart }).catch((error) => {
           console.error("[WAND] recovered interrupt-and-send failed:", error);
         });
       });
@@ -1145,6 +1149,7 @@ export class StructuredSessionManager {
     }
     this.interruptedWith.delete(sessionId);
     this.interruptedScheduling.delete(sessionId);
+    this.interruptedImmediateStart.delete(sessionId);
     this.preserveQueueOnInterrupt.delete(sessionId);
     this.clearStreamingCheckpoint(sessionId);
     this.disarmCandidateStartupWatchdog(sessionId);
@@ -1586,6 +1591,7 @@ export class StructuredSessionManager {
     id: string,
     input: string,
     opts?: { interrupt?: boolean; idempotencyKey?: string; preserveQueue?: boolean; queueAlreadyRemoved?: boolean;
+      immediateStart?: boolean;
       teamRequestStarted?: (sessionId: string, requestId: string) => void;
       source?: EmployeeInputScheduling["source"]; scheduling?: EmployeeInputScheduling },
   ): Promise<SessionSnapshot> {
@@ -1610,7 +1616,7 @@ export class StructuredSessionManager {
     const inFlight = this.resolveInFlightSend(id, session, prompt, opts);
     if ("result" in inFlight) return inFlight.result;
     session = inFlight.session;
-    if (session.employeeId && this.employeeInputAdmission && !this.employeeInputAdmission.canStart(session, scheduling)) {
+    if (session.employeeId && this.employeeInputAdmission && !this.employeeInputAdmission.canStart(session, scheduling, opts?.immediateStart)) {
       return this.enqueueInput(session, prompt, false, scheduling);
     }
 
@@ -1628,7 +1634,7 @@ export class StructuredSessionManager {
     // From this gate through runner.start/ownership registration there is no
     // await, so the drain cannot observe idle and then admit a new Core turn.
     if (this.coreRestartDrains > 0 && this.usesCoreEngine(session)) return this.enqueueInput(session, prompt, false, scheduling);
-    if (session.employeeId && this.employeeInputAdmission && !this.employeeInputAdmission.canStart(session, scheduling)) {
+    if (session.employeeId && this.employeeInputAdmission && !this.employeeInputAdmission.canStart(session, scheduling, opts?.immediateStart)) {
       return this.enqueueInput(session, prompt, true, scheduling);
     }
 
@@ -1728,7 +1734,7 @@ export class StructuredSessionManager {
     id: string,
     session: SessionSnapshot,
     prompt: string,
-    opts: { interrupt?: boolean; preserveQueue?: boolean; queueAlreadyRemoved?: boolean; scheduling?: EmployeeInputScheduling } | undefined,
+    opts: { interrupt?: boolean; preserveQueue?: boolean; queueAlreadyRemoved?: boolean; immediateStart?: boolean; scheduling?: EmployeeInputScheduling } | undefined,
   ): { session: SessionSnapshot } | { result: SessionSnapshot } {
     if (!session.structuredState?.inFlight) return { session };
     const runnerExecution = this.pendingRunnerExecutions.get(id);
@@ -1755,6 +1761,7 @@ export class StructuredSessionManager {
     this.requireRecoveryControl(id);
     this.interruptedWith.set(id, prompt);
     if (opts.scheduling) this.interruptedScheduling.set(id, opts.scheduling);
+    if (opts.immediateStart) this.interruptedImmediateStart.add(id);
     let current = session;
     if (opts.preserveQueue) {
       this.preserveQueueOnInterrupt.add(id);
@@ -2098,6 +2105,7 @@ export class StructuredSessionManager {
         interrupt: inFlight,
         preserveQueue: inFlight,
         queueAlreadyRemoved: true,
+        immediateStart: true,
         idempotencyKey,
         source: "user",
       });
@@ -3078,8 +3086,9 @@ export class StructuredSessionManager {
       this.preserveQueueOnInterrupt.delete(sessionId);
       const scheduling = this.interruptedScheduling.get(sessionId);
       this.interruptedScheduling.delete(sessionId);
+      const immediateStart = this.interruptedImmediateStart.delete(sessionId);
       setImmediate(() => {
-        this.sendMessage(sessionId, interruptPrompt, { scheduling }).catch((error) => {
+        this.sendMessage(sessionId, interruptPrompt, { scheduling, immediateStart }).catch((error) => {
           console.error("[WAND] interrupt-and-send failed:", error);
         });
       });

@@ -79,7 +79,11 @@ test("minimal composer preserves drafts and owned popups; PTY input and shortcut
       assert.equal(typing.value, "未发送草稿\n第二行typing0123");
       assert.equal(typing.draft, typing.value, "native edit and revision owner agree");
       await browser.screenshot(join(output, `${name}-chat-edit.png`));
-      await browser.key("Escape"); await browser.wait("document.querySelector('.input-composer').dataset.composerExpanded==='false'");
+      await browser.key("Escape");
+      await browser.click("#chat-output");
+      assert.equal(await browser.evaluate("document.querySelector('.input-composer').dataset.composerExpanded"), "true", "Escape and outside focus do not collapse a draft");
+      assert.equal(await browser.evaluate("!!document.querySelector(\"[aria-modal=true]\")"), false, "editing Escape must not open the stop confirmation");
+      await browser.click(".composer-manual-collapse"); await browser.wait("document.querySelector('.input-composer').dataset.composerExpanded==='false'");
       assert.match(await browser.evaluate("document.querySelector('.composer-compact-entry').textContent"), /草稿/);
       assert.equal(await browser.evaluate("original.value"), "未发送草稿\n第二行typing0123");
       await browser.click(".composer-compact-entry");
@@ -124,7 +128,9 @@ test("minimal composer preserves drafts and owned popups; PTY input and shortcut
       await browser.send("Input.insertText", {text:"a"}); await browser.send("Input.insertText", {text:"b"});
       assert.deepEqual(await browser.evaluate("packets.map(p=>p.data)"), ["\x01","\x02"]);
       assert.equal(await browser.evaluate("document.querySelector('[data-modifier=ctrl]').getAttribute('aria-pressed')"), "true");
+      assert.equal(await browser.evaluate("(()=>{const b=document.querySelector('[data-modifier=shift]'),r=b.getBoundingClientRect();return b.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))})()"), true, "dock collapse must not cover the Shift hit target");
       await browser.click('[data-modifier="shift"]');
+      assert.equal(await browser.evaluate("document.querySelector('[data-modifier=shift]').getAttribute('aria-pressed')"), "true", "Shift modifier toggles before physical arrow");
       await browser.key("ArrowLeft");
       assert.equal(await browser.evaluate("packets.at(-1).data"), "\x1b[1;6D");
       assert.equal(await browser.evaluate("packets.length"), 3, "the physical cursor event is modified exactly once");

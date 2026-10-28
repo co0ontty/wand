@@ -97,8 +97,9 @@ test("styles.css 不再保留无人消费的 [data-theme=\"dark\"] 深色规则"
   );
   const queue = source("src/web-ui/browser/queue-view-adapter.tsx");
   assert.match(queue, /<WandUiProvider>\{view\}<\/WandUiProvider>/);
-  assert.match(queue, /<Collapse ghost size="small"/,
-    "inline queue disclosure inherits the shared Ant theme");
+  assert.match(queue, /<WandPopover[\s\S]*className="composer-work-popover"/,
+    "queue disclosure inherits the shared opaque Ant Popover surface");
+  assert.doesNotMatch(queue, /<Collapse ghost/, "ghost must not erase the queue panel background");
   assert.doesNotMatch(styles, /prefers-color-scheme/, "用户选择的主题拥有终端背景，系统配色不再覆盖它");
 });
 

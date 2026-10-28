@@ -4,13 +4,16 @@ export const TASK_RETENTION_MAX_DAYS = 365;
 export const DEFAULT_TASK_AUTO_ARCHIVE_DAYS = 7;
 export const DEFAULT_TASK_AUTO_DELETE_DAYS = 7;
 
+/** Only archives created under the acceptance-aware policy may enter automatic deletion. Never backfill legacy rows. */
+export const TASK_RETENTION_ARCHIVE_VERSION = 1;
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface TaskRetentionSettings {
-  /** 空闲达到天数后自动归档。关闭后只停止自动归档，手动归档不受影响。 */
+  /** 合资格的已验收任务/无保护关联历史空闲达到天数后归档；关闭不影响手动归档。 */
   autoArchiveEnabled: boolean;
   autoArchiveDays: number;
-  /** 归档后达到天数仍未恢复则删除。关闭后已归档任务会一直保留。 */
+  /** 仅合资格的新归档及无保护关联历史到期删除；未完成上下文与旧任务归档不自动删除。 */
   autoDeleteEnabled: boolean;
   autoDeleteDays: number;
 }

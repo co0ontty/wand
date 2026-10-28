@@ -3,7 +3,8 @@ import { realpath, stat } from "node:fs/promises";
 import { coreHarnessAgentDir } from "./harness-engine.js";
 import { importPiCliModule, resolvePiCliPackage } from "./pi-cli-runtime.js";
 import { cliPiResourceReader, installedPiUserResources } from "./pi-user-resources.js";
-import type { PiResourceCatalog, PiResourceSelection } from "./pi-session-settings.js";
+import { patchPiSessionSettings, type PiResourceCatalog, type PiResourceSelection,
+  type PiSessionSettings, type PiSessionSettingsPatch } from "./pi-session-settings.js";
 import type { WandConfig } from "./types.js";
 import type { Skill, McpExtensionOptions } from "@earendil-works/pi-coding-agent";
 
@@ -75,4 +76,29 @@ export function resolvePiResourceSelection(inventory: PiResourceInventory, selec
     return found;
   });
   return { skills, servers };
+}
+
+/** Validate additions; an explicit unlock also releases that skill's unavailable selected reference. */
+export function resolvePiResourceSettingsPatch(inventory: PiResourceInventory, current: PiSessionSettings,
+  patch: PiSessionSettingsPatch): PiSessionSettingsPatch {
+  const next = patchPiSessionSettings(current, patch);
+  let resolved = patch;
+  if (patch.lockedSkills !== undefined && next.resources) {
+    const released = new Set((current.lockedSkills ?? []).filter((id) =>
+      !next.lockedSkills!.includes(id) && !inventory.skills.has(id)));
+    if (next.resources.skills.some((id) => released.has(id))) {
+      resolved = { ...patch, resources: { ...next.resources,
+        skills: next.resources.skills.filter((id) => !released.has(id)) } };
+    }
+  }
+  // Keep other stale references until explicitly removed, so several unavailable items can be
+  // repaired one at a time. Execution still validates the complete selection and fails closed.
+  if (resolved.resources !== undefined) resolvePiResourceSelection(inventory, {
+    skills: resolved.resources.skills.filter((id) => !current.resources?.skills.includes(id)),
+    mcpServers: resolved.resources.mcpServers.filter((id) => !current.resources?.mcpServers.includes(id)),
+  });
+  if (resolved.lockedSkills !== undefined) resolvePiResourceSelection(inventory, {
+    skills: resolved.lockedSkills.filter((id) => !current.lockedSkills?.includes(id)), mcpServers: [],
+  });
+  return resolved;
 }

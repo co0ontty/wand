@@ -30,7 +30,7 @@ test("desktop composer uses Web control size and radius instead of a separate ca
 test("runtime anchors match Web while permission stays in the add panel", { skip: !available }, () => {
   assert.match(web, /composer-inline-config \{ position:absolute;[^\n]*inset-inline-end:0/);
   assert.match(base, /composer-floating-avatar[^\n]*inset-block-start:-76px; width:72px; height:72px/);
-  assert.match(native, /frame\(height: hasPortrait \? \(kind == \.task \? 65 : 76\) : \(kind == \.task \? 32 : 28\)\)/);
+  assert.match(native, /frame\(height: hasPortrait \? \(kind == \.task \? 65 : 76\) : 32\)/);
   assert.match(native, /portrait\(\)\.frame\(width: 72, height: 72\)/);
   assert.match(native, /padding\(\.leading, hasPortrait \? 84 : 0\)/);
   const bar = chat.slice(chat.indexOf("private var inputBar:"), chat.indexOf("private var modePanel:"));
@@ -41,7 +41,7 @@ test("runtime anchors match Web while permission stays in the add panel", { skip
   assert.match(source("macos/Wand/SharedPlushScene.swift"), /static let liveMinMemoryGB = 4\.0/);
   assert.match(source("src/web-ui/avatar-hardware.ts"), /AVATAR_LIVE_MIN_CORES = 4/);
   assert.match(source("src/web-ui/avatar-hardware.ts"), /AVATAR_LIVE_MIN_MEMORY_GB = 4/);
-  assert.match(native, /\(viewportWidth \?\? geometry\.size\.width\) > 640/);
+  assert.match(native, /\(viewportWidth \?\? geometry\.size\.width\) <= 640/);
   assert.match(native, /window\?\.contentLayoutRect\.width/);
   assert.match(chat, /modelThinkingChip\(inMenu: false\)/);
   assert.match(chat, /thinkingChip\(inMenu: false\)/);
@@ -75,25 +75,29 @@ test("footer follows Web add, entry, submit order and full-width editor", { skip
 test("Todo shares the desktop input edge and opens without replacing the editor", { skip: !available }, () => {
   const render = source("src/web-ui/browser/render.ts");
   assert.ok(render.indexOf('class="composer-top-row"') > render.indexOf('class="input-composer\''));
-  assert.match(base, /composer-top-row \{ position:absolute/);
-  assert.match(web, /composer-todo-width/);
-  assert.match(native, /progress\.frame\(width: progressWidth\)/);
+  assert.match(base, /composer-top-row \{ position:relative; display:grid/);
+  assert.doesNotMatch(web, /composer-todo-width/);
+  assert.match(native, /progress\.frame\(maxWidth: \.infinity\)/);
   assert.match(chat, /progress: composerProgress/);
-  assert.match(chat, /TodoProgressBar\(todos: visibleTodos\)/);
+  const inputBar = chat.slice(chat.indexOf("private var inputBar:"), chat.indexOf("private var modePanel:"));
+  assert.ok(inputBar.indexOf("ComposerIdentityHeader(") < inputBar.indexOf("FocusComposerSurface("), "Mac progress is above the editing surface and its divider");
+  assert.ok(render.indexOf('class="composer-input-divider"') > render.indexOf('class="composer-top-row"'));
+  assert.ok(render.indexOf('class="composer-input-divider"') < render.indexOf('class="composer-main-row"'));
+  assert.match(chat, /TodoProgressBar\(todos: visibleTodos, expanded: \$showTodoProgress, context: store\.todoProgress\?\.context \?\? \.recent\)/);
   const todo = chat.slice(chat.indexOf("struct TodoProgressBar:"), chat.indexOf("private struct QueueBar:"));
   assert.match(todo, /\.popover\(isPresented: \$expanded, arrowEdge: \.bottom\)/);
-  assert.match(todo, /Text\("\\\(completed\) \/ \\\(todos\.count\)"\)/);
+  assert.match(todo, /count: "\\\(completed\)\/\\\(todos\.count\)"/);
   assert.doesNotMatch(todo, /currentStep/);
 });
 
 test("pending messages share Todo space with width-aware summaries on both desktops", { skip: !available }, () => {
   const queue = source("src/web-ui/browser/queue-view-adapter.tsx");
-  assert.match(base, /container:queue-summary \/ inline-size/);
-  assert.match(base, /@container queue-summary \(min-width:180px\)/);
-  assert.match(queue, /queue-summary-label">待发消息/);
-  const nativeQueue = chat.slice(chat.indexOf("struct ComposerQueue:"), chat.indexOf("private struct QueueItemRow:"));
-  assert.match(nativeQueue, /geometry\.size\.width >= 180/);
-  assert.match(nativeQueue, /Text\("待发消息"\)/);
+  assert.match(base, /container:composer-work \/ inline-size/);
+  assert.match(base, /@container composer-work \(max-width:230px\)/);
+  assert.match(queue, /label: "待发送"/);
+  const nativeQueue = chat.slice(chat.indexOf("struct ComposerQueue:"), chat.indexOf("struct QueueItemRow:"));
+  assert.match(chat, /geometry\.size\.width > 230/);
+  assert.match(nativeQueue, /NativeWorkSummary\(title: "待发送"/);
   assert.match(nativeQueue, /\.popover\(isPresented: \$expanded, arrowEdge: \.bottom\)/);
   const bar = chat.slice(chat.indexOf("private var composerProgress:"), chat.indexOf("private var modePanel:"));
   assert.ok(bar.indexOf("ComposerQueue(") < bar.indexOf("private var inputBar:"), "queue belongs to the shared header, not editor accessory");

@@ -108,6 +108,9 @@ export function installSidebarStyles(): void {
 .sidebar .conversation-row-open.ant-btn:hover { color:inherit; background:transparent; }
 .sidebar .conversation-row-time { color:var(--text-secondary); }
 .conversation-person-sessions { margin-inline-start:28px; border-inline-start:1px solid var(--border-subtle); padding-inline-start:4px; min-width:0; max-height:min(45dvh,360px); overflow-y:auto; overscroll-behavior:contain; }
+.conversation-other-sessions { margin-top:8px; }
+.conversation-other-toggle { width:100%; justify-content:flex-start; gap:8px; min-height:36px; color:var(--text-secondary); }
+.conversation-other-toggle span:last-child { margin-inline-start:auto; }
 .sidebar .im-sidebar-group:has(.sidebar-session-preview) .im-sidebar-group-inner { max-height:min(45dvh,360px); overflow-y:auto; overscroll-behavior:contain; }
 .conversation-person-sessions .wand-sidebar-session-row { min-height:44px; }
 .sidebar :is(.workspace-session-main,.workspace-task-main,.wand-sidebar-session-row)[aria-current="page"], .sidebar .wand-sidebar-session-row.active { color:var(--sidebar-accent); background:var(--sidebar-selected); }

@@ -131,6 +131,7 @@ export function buildIosInstallPage(options: {
   downloadUrl: string;
   signed: boolean;
   https: boolean;
+  apps?: Array<{ title: string; url: string; current: boolean }>;
 }): string {
   const warnings: string[] = [];
   if (!options.https) {
@@ -139,6 +140,11 @@ export function buildIosInstallPage(options: {
   if (!options.signed) {
     warnings.push("当前 IPA 未签名。系统安装会失败；签发后再放到更新目录即可 OTA 覆盖安装。");
   }
+  const appListHtml = options.apps?.length
+    ? `<nav class="app-list" aria-label="可安装的应用"><h2>可安装的应用</h2><ul>${options.apps.map((app) =>
+      `<li><a href="${escapeHtml(app.url)}"${app.current ? ' aria-current="page"' : ""}>${escapeHtml(app.title)}</a>${app.current ? '<span class="current">当前应用</span>' : ""}</li>`
+    ).join("")}</ul></nav>`
+    : "";
   const warningHtml = warnings.length
     ? `<div class="warn">${warnings.map((item) => `<p>${escapeHtml(item)}</p>`).join("")}</div>`
     : "";
@@ -168,6 +174,12 @@ export function buildIosInstallPage(options: {
     a.secondary { display: block; text-align: center; margin-top: 12px; color: #c5653d; }
     .warn { background: rgba(197,101,61,.12); border-radius: 12px; padding: 12px 14px; margin-bottom: 18px; }
     .hint { font-size: 13px; color: #7a7168; margin-top: 18px; }
+    .app-list { margin-top: 28px; border-top: 1px solid #8884; padding-top: 18px; }
+    .app-list h2 { font-size: 15px; margin: 0 0 8px; }
+    .app-list ul { list-style: none; padding: 0; margin: 0; }
+    .app-list li { display: flex; align-items: center; gap: 12px; }
+    .app-list a { display: block; padding: 10px 0; flex: 1; color: #c5653d; overflow-wrap: anywhere; }
+    .app-list .current { font-size: 12px; color: #7a7168; flex-shrink: 0; }
   </style>
 </head>
 <body>
@@ -177,7 +189,8 @@ export function buildIosInstallPage(options: {
     ${warningHtml}
     <a id="ios-install" class="install" href="${escapeHtml(options.installUrl)}">在 iPhone 上安装</a>
     <a class="secondary" href="${escapeHtml(options.downloadUrl)}">下载 IPA</a>
-    <p class="hint">请用 Safari 打开本页。${autoInstallScript ? "iPhone / iPad 会自动请求系统安装确认；若未弹出，请点击上方安装按钮。" : ""}安装后如提示未受信任，到 设置 → 通用 → VPN 与设备管理 中信任，iOS 18 企业包可能需要重启。</p>
+    <p class="hint">请用 Safari 打开本页。${autoInstallScript ? "iPhone / iPad 会自动请求系统安装确认；若未弹出，请点击上方安装按钮。" : ""}安装需要有效签名和受支持的设备；Ad Hoc 包仅限签名中已登记的设备。</p>
+    ${appListHtml}
   </main>
   ${autoInstallScript}
 </body>

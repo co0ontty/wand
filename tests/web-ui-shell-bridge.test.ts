@@ -22,6 +22,20 @@ const mobileEnvironment: LegacySnapshotEnvironment = {
   historyExpanded: true,
 };
 
+test("pooled quick-terminal snapshots stay addressable but cannot repopulate sidebar counts or bulk selection", () => {
+  const sessions = [
+    { id: "shell", sessionKind: "pty", sessionSource: "interactive", command: "/bin/zsh", status: "running" },
+    { id: "quick", sessionKind: "pty", sessionSource: "quick-terminal", command: "/bin/zsh", status: "running" },
+  ];
+  const snapshot = deriveLegacyUiSnapshot({ sessions, selectedId: "quick", selectedSessionIds: { shell: true, quick: true } }, mobileEnvironment);
+  assert.equal(snapshot.sidebar.totalCount, 1);
+  assert.equal(snapshot.sidebar.interactiveCount, 1);
+  assert.equal(snapshot.sidebar.selectedCount, 1);
+  assert.deepEqual(snapshot.sidebar.groups.flatMap(group => group.entries.map(session => session.id)), ["shell"]);
+  assert.equal(snapshot.selected?.id, "quick", "direct terminal selection still has its own detail projection");
+  assert.equal(sessions.length, 2, "the runtime snapshot is not deleted");
+});
+
 test("legacy snapshot exposes PTY resume for every managed provider", () => {
   const providers = ["claude", "codex", "opencode", "grok", "qoder"];
   const snapshot = deriveLegacyUiSnapshot({

@@ -33,7 +33,6 @@ import { WandIcon } from "../ui/icons";
 import { WandInput } from "../ui/input";
 import { WandNavigationLink } from "../ui/navigation";
 import { WandPopover } from "../ui/popover";
-import { WandStretchTabs } from "../ui/stretch-tabs";
 import { SessionProviderMark, TeamChatSessionMark } from "./session-mark";
 import { sidebarSessionLabel } from "./session-order";
 import {
@@ -46,19 +45,12 @@ import { filterSidebarGroups, filterSidebarTaskSessions } from "./sidebar-search
 import { defaultDirectoryTask, isDefaultTaskSelected, toggleDefaultTaskSelection } from "./sidebar-default-task";
 import { SidebarSessionPreview } from "./sidebar-session-preview";
 import { SidebarSessionArea } from "./sidebar-session-area";
-import { conversationUi } from "../conversations/state";
-import { employeeConversationId } from "../../../conversation-types.js";
 import {
   useSidebarPresentation,
   SidebarPresentationContext,
   filterActiveGroups,
   type SidebarDisplayMode,
 } from "./sidebar-display-mode";
-import {
-  collectRecentEntries,
-  filterRecentEntries,
-} from "./sidebar-recent";
-import { SidebarRecentSection } from "./sidebar-recent-section";
 import { nonTeamSessions, splitTeamSessions } from "./team-sessions";
 import { findSessionTask } from "./session-task-lookup";
 import { useTaskGroups } from "./task-groups-store";
@@ -120,7 +112,6 @@ export function shortenWorkspacePath(path: string): string {
   return `…/${parts.slice(-2).join("/")}`;
 }
 
-import { useSiliconEmployees } from "../agents/employee-repository.js";
 
 function ManageCheck({
   checked,
@@ -611,8 +602,7 @@ function TaskItem({
         else if (key === "archive" || key === "delete" || key === "clear" || key === "clear-history") void runTaskAction(key);
       } }}/>
 
-      <SidebarSessionArea id={sessionsId} open={open} label={`任务 ${task.name}`} toggleRef={sessionToggleRef}
-        toggleClassName="workspace-task-chevron-btn" inlineToggle disabled={busy} hasSessions={visibleSessions.length > 0 || archivedSessions.length > 0} onOpenChange={setSessionsOpen}>
+      <SidebarSessionArea hasSessions={visibleSessions.length > 0 || archivedSessions.length > 0}>
       <SidebarSessionPreview sessions={visibleSessions} expanded={open || manageMode}
         label={`任务 ${task.name} 的会话预览`} className="sidebar-session-preview-task"
         selectedSessionId={activeSessionId} liveTitles={liveTitles} disabled={manageMode || busy}
@@ -1248,7 +1238,7 @@ function SidebarWorkspacesPanel({
   selectedSessionId?: string | null;
   /** 实时会话标题（WS 已生成的命令摘要），覆盖轮询列表里的旧 title。 */
   sessionTitles?: Readonly<Record<string, string>> | null;
-  /** WS 的生成状态同时覆盖目录树和最近会话，不等待列表轮询。 */
+  /** WS 的生成状态覆盖目录树，不等待列表轮询。 */
   sessionTitleGenerating?: Readonly<Record<string, boolean>> | null;
   /** 侧栏附加分组（原生历史 / 自动化等），渲染在任务列表之后。 */
   extraGroups?: React.ReactNode;
@@ -1481,7 +1471,7 @@ function SidebarWorkspacesPanel({
     rt.selectSession(session.id);
   }, [onNavigate, openTask, sourceGroups]);
 
-  // 最近会话与目录树是同一批会话：归档 / 删除共用同一条服务端入口，不另写一套。
+  // 对话列表与目录树是同一批会话：归档 / 删除共用同一条服务端入口，不另写一套。
   const archiveListedSession = React.useCallback(async (sessionId: string, archived: boolean): Promise<void> => {
     await httpWorkspacesRepository.batchArchiveSessions([sessionId], archived);
     toast(archived
@@ -1500,15 +1490,7 @@ function SidebarWorkspacesPanel({
   }, [reload, sessionTitles, sourceGroups]);
 
   const sessionRefresh = React.useRef(true);
-  const contacts = useSiliconEmployees();
-  const { employees } = contacts;
-  // 最近对话：目录树里的全部会话拍平后按归属分组（口径见 sidebar-recent.ts），
-  // 搜索先缩小数据范围，活动筛选由分组投影裁剪子项，不能提前删掉员工身份头。
-  const recentEntries = React.useMemo(() => collectRecentEntries(groups), [groups]);
-  const visibleRecentEntries = React.useMemo(() => filterRecentEntries(recentEntries, {
-    query: searchQuery,
-    employees,
-  }), [recentEntries, searchQuery, employees]);
+  React.useEffect(() => { if (view === "recent") setView("directory"); }, [view, setView]);
   React.useEffect(() => {
     if (sessionRefresh.current) {
       sessionRefresh.current = false;
@@ -1680,7 +1662,7 @@ function SidebarWorkspacesPanel({
                   clearable={Boolean(searchQuery)}
                   clearLabel="清空工作区搜索"
                   onClear={() => { onSearchChange?.(""); searchInputRef.current?.focus({ preventScroll: true }); }}
-                  placeholder={view === "recent" ? "搜索最近会话" : "搜索工作区、任务或会话"}
+                  placeholder="搜索工作区、任务或会话"
                   aria-label="搜索工作区、任务或会话"
                   tabIndex={searchVisible ? 0 : -1}
                   startSlot={<WandIcon name="search" size={14}/>}
@@ -1726,12 +1708,6 @@ function SidebarWorkspacesPanel({
               </Flex>
             </Flex>
             <Flex align="center" justify="space-between" gap={4} className="sidebar-display-row">
-              <WandStretchTabs className="sidebar-view-switch" ariaLabel="会话组织方式"
-                tabs={[{ value: "directory", label: "按工作区" }, { value: "recent", label: "最近会话" }]}
-                value={view} onValueChange={(value) => {
-                  setView(value as "directory" | "recent"); setListMenuOpen(false);
-                  try { localStorage.setItem("wand.sidebar.workspaceView", value); } catch { /* local preference only */ }
-                }}/>
               <SidebarActivityFilter active={displayMode === "active"}
                 onChange={active => { setListMenuOpen(false); setDisplayMode(active ? "active" : "full"); }}/>
               {loading && groups.length > 0 ? <span className="sidebar-refresh-state" role="status" title="正在同步">
@@ -1741,35 +1717,9 @@ function SidebarWorkspacesPanel({
             </Flex>
             </>
           ) : null}
-          <SidebarProjectionSwap value={`${view}:${displayMode}:${manageMode}`}>
-          {directoryId === undefined ? <div hidden={manageMode || view !== "recent"} inert={manageMode || view !== "recent"}>
-            <SidebarRecentSection
-              entries={visibleRecentEntries}
-              employees={employees}
-              displayMode={displayMode}
-              query={searchQuery} disabled={view !== "recent" || manageMode || !surfacesEnabled || compact}
-              contactsLoading={contacts.loading} contactsError={contacts.error ? sidebarSafeError(contacts.error) : null} onReloadContacts={contacts.reload}
-              listLoading={loading && groups.length === 0} listError={Boolean(error && groups.length === 0)}
-              liveTitles={sessionTitles ?? {}}
-              selectedSessionId={selectedSessionId}
-              now={now}
-              onOpen={(entry) => openSession(entry.group, entry.session)}
-              onStartConversation={() => onOpenDialog?.()}
-              onOpenConversation={employeeId => {
-                onNavigate?.();
-                conversationUi.mode("chats");
-                conversationUi.select(employeeConversationId(employeeId));
-              }}
-              onArchiveSession={(sessionId, archived) => archiveListedSession(sessionId, archived)}
-              onDeleteSession={(session) => deleteListedSession(session)}
-            />
-            {!loading && !error && visibleRecentEntries.length === 0 && searchQuery
-              ? <Typography.Paragraph type="secondary" className="sidebar-filter-empty">没有匹配的会话。</Typography.Paragraph> : null}
-            {error && groups.length === 0 ? <WandButton kind="ghost" onClick={() => void reload()}>重新加载会话</WandButton> : null}
-          </div> : null}
-          <SidebarSurfacesContext.Provider value={surfacesEnabled && !compact && !manageMode && (directoryId !== undefined || view === "directory")}>
-          <div hidden={directoryId === undefined && !manageMode && view !== "directory"}
-            inert={directoryId === undefined && !manageMode && view !== "directory"}>
+          <SidebarProjectionSwap value={`${displayMode}:${manageMode}`}>
+          <SidebarSurfacesContext.Provider value={surfacesEnabled && !compact && !manageMode}>
+          <div>
           {!loading && !error && searchQuery && visibleGroups.length === 0 ? (
             <div className="sidebar-search-empty">没有找到匹配的工作区、任务或会话。</div>
           ) : null}
@@ -1862,7 +1812,7 @@ function SidebarWorkspacesPanel({
           </SidebarSurfacesContext.Provider>
           </SidebarProjectionSwap>
         </>
-      {manageMode || directoryId !== undefined || view !== "directory" ? null : extraGroups}
+      {manageMode || directoryId !== undefined ? null : extraGroups}
       </div>
       {compact ? <CompactDirectoryRail groups={visibleGroups} loading={loading} error={error}
         activeWorkspaceId={activeWorkspaceId} peekDirectoryId={peekDirectoryId}

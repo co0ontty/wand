@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { assertTaskHierarchy } from "../task-hierarchy.js";
+import { TASK_RETENTION_ARCHIVE_VERSION } from "../task-retention.js";
 import { DatabaseSync } from "node:sqlite";
 import { firstLayoutTabId } from "../layout-tree.js";
 import { nowIso } from "../password-manager.js";
@@ -457,6 +458,19 @@ export class TaskRepository {
     return row ? this.mapWandTaskRow(row) : null;
   }
 
+  /** Internal retention facts only: no settings, transcripts, or public DTO fields. */
+  taskRetentionArchiveVersions(): Map<string, number> {
+    const rows = this.db.prepare("SELECT id, retention_archive_version FROM wand_tasks WHERE status = 'archived' AND retention_archive_version IS NOT NULL")
+      .all() as Array<{ id: string; retention_archive_version: number }>;
+    return new Map(rows.map(row => [row.id, row.retention_archive_version]));
+  }
+
+  taskCommentRetentionFacts(): Array<{ taskId: string; sessionId: string | null; state: string }> {
+    return (this.db.prepare("SELECT task_id, session_id, state FROM wand_task_comment_dispatches")
+      .all() as Array<{ task_id: string; session_id: string | null; state: string }>)
+      .map(row => ({ taskId: row.task_id, sessionId: row.session_id, state: row.state }));
+  }
+
   insertWandTask(input: CreateWandTaskInput, createdAt = nowIso()): WandTask {
     return this.s.transaction(() => this.insertWandTaskBody(input, createdAt));
   }
@@ -488,6 +502,10 @@ export class TaskRepository {
         throw new Error("该任务容器已有任务卡片。", { cause: error });
       }
       throw error;
+    }
+    if (status === "archived") {
+      this.db.prepare("UPDATE wand_tasks SET retention_archive_version = ? WHERE id = ?")
+        .run(TASK_RETENTION_ARCHIVE_VERSION, id);
     }
     if (input.parentTaskId) {
       const parent = this.getWandTask(input.parentTaskId);
@@ -569,6 +587,11 @@ export class TaskRepository {
         next.agent ? JSON.stringify(next.agent) : null,
         next.executionSubject ? JSON.stringify(next.executionSubject) : null,
         next.archivedAt, next.updatedAt, next.acceptance ? JSON.stringify(next.acceptance) : null, next.id);
+    // Only a real transition may opt into the new policy. Editing/backfilling an old archive must not do so.
+    if (next.status !== current.status) {
+      this.db.prepare("UPDATE wand_tasks SET retention_archive_version = ? WHERE id = ?")
+        .run(next.status === "archived" ? TASK_RETENTION_ARCHIVE_VERSION : null, next.id);
+    }
     if (patch.workspaceId !== undefined && next.workspaceTaskId) {
       const workspaceId = next.workspaceId ?? this.s.ensureGlobalWorkspace().id;
       // The container FK/index and standalone session workspace bucket follow the canonical project.

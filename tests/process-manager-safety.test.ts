@@ -13,6 +13,9 @@ import type { EscalationRequest, ProcessEvent, SessionSnapshot } from "../src/ty
 import type { WandStorage } from "../src/storage.js";
 
 class FakeStorage {
+  knowledgeSessionScope(): null { return null; }
+  revokeSessionKnowledgeAccess(): void {}
+
   private readonly sessions = new Map<string, SessionSnapshot>();
   fullSaveCalls = 0;
   runtimeMetadataCalls = 0;

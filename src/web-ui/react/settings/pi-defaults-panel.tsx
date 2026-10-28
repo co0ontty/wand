@@ -3,6 +3,7 @@ import { Empty, Flex, Segmented, Typography } from "antd";
 import { WandButton, WandIcon, WandSelect, WandSwitch } from "../ui";
 import { SettingsSection, SettingsStatus } from "./fields";
 import { piDefaultsRepository } from "./pi-defaults-repository";
+import { piResourceSettingsConfirmed, piSkillMode, piSkillModePatch } from "../../../pi-session-settings.js";
 import type { PiResourceItem, PiSessionSettings, PiSessionSettingsPatch, PiSkillMode } from "../../../pi-session-settings.js";
 
 /** 用户级默认设置的读回形状；与会话面板共用同一份资源目录与能力字段。 */
@@ -23,11 +24,6 @@ const CODEMODE_OPTIONS = [
 
 const MODES: PiSkillMode[] = ["off", "on", "locked"];
 const MODE_LABELS: Record<PiSkillMode, string> = { off: "关闭", on: "开启", locked: "锁定" };
-
-function modeOf(settings: PiSessionSettings, id: string): PiSkillMode {
-  if (!settings.resources?.skills.includes(id)) return "off";
-  return settings.lockedSkills?.includes(id) ? "locked" : "on";
-}
 
 /**
  * Pi 会话默认：新建 Pi CLI 会话起步用的设置。
@@ -66,6 +62,18 @@ export function PiDefaultsPanel(): React.ReactElement {
     try {
       const result = await piDefaultsRepository.save(patch);
       if (generation.current !== revision) return;
+      if (!piResourceSettingsConfirmed(data.settings, patch, result.settings)) {
+        throw new Error("服务端未确认本次选择，请重开面板核对实际设置。");
+      }
+      if (patch.autoResources !== undefined && (result.settings.autoResources === true) !== patch.autoResources) {
+        throw new Error("服务端未确认自动选择设置，请重新读取核对。");
+      }
+      if (patch.codemodeOverride !== undefined && (result.settings.codemodeOverride ?? null) !== patch.codemodeOverride) {
+        throw new Error("服务端未确认 CodeMode 设置，请重新读取核对。");
+      }
+      if (patch.localDecision !== undefined && result.settings.localDecision !== patch.localDecision) {
+        throw new Error("服务端未确认本地决策设置，请重新读取核对。");
+      }
       setData((current) => current ? { ...current, settings: result.settings } : current);
       setPhase("saved");
       setMessage("已保存 · 之后新建的 Pi CLI 会话以它起步");
@@ -80,17 +88,6 @@ export function PiDefaultsPanel(): React.ReactElement {
   const disabled = !data || phase === "loading" || phase === "saving";
   const needle = query.trim().toLocaleLowerCase();
   const match = (item: PiResourceItem): boolean => `${item.name} ${item.description}`.toLocaleLowerCase().includes(needle);
-
-  function skillMode(id: string, mode: PiSkillMode): PiSessionSettingsPatch {
-    if (!settings) return {};
-    const resources = settings.resources ?? { skills: [], mcpServers: [] };
-    const locks = settings.lockedSkills ?? [];
-    return {
-      resources: { ...resources, skills: mode === "off" ? resources.skills.filter((value) => value !== id)
-        : [...new Set([...resources.skills, id])] },
-      lockedSkills: mode === "locked" ? [...new Set([...locks, id])] : locks.filter((value) => value !== id),
-    };
-  }
 
   function toggleResource(kind: "skills" | "mcpServers", id: string, checked: boolean): void {
     if (!settings) return;
@@ -118,9 +115,9 @@ export function PiDefaultsPanel(): React.ReactElement {
               <Typography.Text type="secondary" className="wand-settings-pi-resource-description" ellipsis={{ tooltip: item.description }}>{item.description}</Typography.Text>
             </Flex>
             {kind === "skills" && data?.skillLocksAvailable ? <Segmented size="small" className="wand-settings-pi-skill-mode"
-              aria-label={`默认 Skill ${item.name}`} value={modeOf(settings!, item.id)} disabled={disabled}
+              aria-label={`默认 Skill ${item.name}`} value={piSkillMode(settings!, item.id)} disabled={disabled}
               options={MODES.map((mode) => ({ value: mode, label: MODE_LABELS[mode] }))}
-              onChange={(value) => { void save(skillMode(item.id, value as PiSkillMode)); }}/> : <WandSwitch ariaLabel={`默认启用 ${item.name}`} checked={picked.includes(item.id)} disabled={disabled}
+              onChange={(value) => { void save(piSkillModePatch(settings!, item.id, value as PiSkillMode)); }}/> : <WandSwitch ariaLabel={`默认启用 ${item.name}`} checked={picked.includes(item.id)} disabled={disabled}
               onCheckedChange={(checked) => toggleResource(kind, item.id, checked)}/>}
           </Flex>
         </li>)}

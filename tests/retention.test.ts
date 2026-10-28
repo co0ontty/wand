@@ -156,6 +156,8 @@ test("tasks idle for seven days auto-archive, then get purged seven days later",
     }),
   ]);
 
+  markAccepted(storage, idle.id);
+  markAccepted(storage, archivedOld.id);
   backdate(dbPath, "UPDATE wand_tasks SET updated_at = ? WHERE id = ?", iso(NOW - RETENTION_IDLE_MS - DAY), idle.id);
   backdate(dbPath, "UPDATE wand_tasks SET updated_at = ? WHERE id = ?", iso(NOW - 60 * 60 * 1000), recent.id);
   backdate(dbPath, "UPDATE wand_tasks SET updated_at = ? WHERE id = ?", iso(NOW - RETENTION_IDLE_MS - DAY), busy.id);
@@ -198,6 +200,11 @@ test("default task retention matches the fixed session window", () => {
   assert.deepEqual(taskRetentionWindows(undefined), { idleMs: RETENTION_IDLE_MS, archivedMs: RETENTION_ARCHIVED_MS });
 });
 
+const accepted = { evidence: "fixture evidence", blocker: "", acceptedAt: iso(NOW - 30 * DAY) };
+function markAccepted(storage: WandStorage, id: string): void {
+  storage.updateWandTask(id, { status: "done", acceptance: accepted });
+}
+
 function taskPolicy(patch: Partial<TaskRetentionSettings>): TaskRetentionSettings {
   return {
     autoArchiveEnabled: true,
@@ -218,6 +225,9 @@ test("task retention windows also apply to idle sessions", (t) => {
   const idleSession = snapshot("idle-session");
   const { registry, current } = fakeRegistry([idleSession]);
 
+  markAccepted(storage, idle.id);
+  markAccepted(storage, archivedOld.id);
+  markAccepted(storage, archivedNew.id);
   backdate(dbPath, "UPDATE wand_tasks SET updated_at = ? WHERE id = ?", iso(NOW - 2 * DAY), idle.id);
   backdate(dbPath, "UPDATE wand_tasks SET updated_at = ? WHERE id = ?", iso(NOW - 12 * 60 * 60 * 1000), recent.id);
   storage.updateWandTask(archivedOld.id, { status: "archived" });
@@ -267,6 +277,7 @@ test("a fresh retention sweep reads the task window at call time", (t) => {
   const { storage, dbPath } = database(t);
   const project = storage.createWorkspace({ name: "Project", cwd: "/tmp/project" });
   const idle = storage.createWandTask({ workspaceId: project.id, title: "Idle" });
+  markAccepted(storage, idle.id);
   backdate(dbPath, "UPDATE wand_tasks SET updated_at = ? WHERE id = ?", iso(NOW - 2 * DAY), idle.id);
   let policy = taskPolicy({ autoArchiveEnabled: false });
   const sweep = createRetentionSweep({
@@ -276,7 +287,7 @@ test("a fresh retention sweep reads the task window at call time", (t) => {
   });
 
   assert.equal(sweep().archivedTasks, 0);
-  assert.equal(storage.getWandTask(idle.id)?.status, "todo");
+  assert.equal(storage.getWandTask(idle.id)?.status, "done");
   policy = taskPolicy({ autoArchiveDays: 1 });
   assert.equal(sweep().archivedTasks, 1);
   assert.equal(storage.getWandTask(idle.id)?.status, "archived");
@@ -354,14 +365,14 @@ test("team runs idle for several days are removed with their sessions, running r
     taskRetention: taskPolicy({ autoArchiveDays: 1, autoDeleteDays: 3 }),
   }, NOW);
 
-  assert.equal(result.purgedTeamRuns, 2);
+  assert.equal(result.purgedTeamRuns, 1);
   assert.equal(storage.getAiTeamRun("old-stopped"), null);
-  assert.equal(storage.getAiTeamRun("old-waiting"), null);
+  assert.equal(storage.getAiTeamRun("old-waiting")?.status, "waiting_user", "approval waits are unfinished work, not expired history");
   assert.equal(storage.getAiTeamRun("recent")?.status, "done");
   assert.equal(storage.getAiTeamRun("live")?.status, "running");
   assert.equal(storage.getAiTeamRun("silent-foreground")?.status, "done", "silent foreground work protects a completed team run from retention");
   assert.equal(deleted.includes("old-chat"), true);
-  assert.equal(deleted.includes("waiting-chat"), true);
+  assert.equal(deleted.includes("waiting-chat"), false);
   assert.equal(deleted.includes("live-chat"), false);
   assert.equal(deleted.includes("silent-chat"), false);
   assert.equal(current.get("recent-chat")?.archived, true, "a one-day-old team chat is archived, not deleted");

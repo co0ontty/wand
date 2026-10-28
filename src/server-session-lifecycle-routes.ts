@@ -16,7 +16,7 @@ import { toSessionDetailDTO } from "./session-transport.js";
 import { compactToolMessagesForTransport, windowMessagesForTransport } from "./message-truncator.js";
 import { enrichStructuredMessages } from "./structured-client-protocol.js";
 import { installedPiExtensions } from "./pi-extension-resources.js";
-import { discoverPiResources,resolvePiResourceSelection } from "./pi-resource-catalog.js";
+import { discoverPiResources, resolvePiResourceSettingsPatch } from "./pi-resource-catalog.js";
 import { effectivePiSessionSettings, patchPiSessionSettings } from "./pi-session-settings.js";
 import { isProviderSessionId } from "./resume-policy.js";
 import { sendRouteError } from "./server-request.js";
@@ -69,7 +69,7 @@ export function registerSessionLifecycleRoutes(app: Express, ctx: SessionRouteCo
         if (!interactiveShell && !body.command?.trim()) throw badRequest("请输入要执行的命令。");
         if (body.mode !== undefined && !isExecutionMode(body.mode)) throw badRequest(`无效执行模式: ${String(body.mode)}`);
         const initialInput = body.initialInput?.trim();
-        const origin = parseSessionCreationOrigin(body);
+        const origin = parseSessionCreationOrigin(body, interactiveShell);
         const rawModel = typeof body.model === "string" ? body.model.trim() : "";
         const rawCommand = body.command?.trim() ?? "";
         const provider: SessionProvider | undefined = interactiveShell
@@ -212,6 +212,14 @@ export function registerSessionLifecycleRoutes(app: Express, ctx: SessionRouteCo
     }
   }));
 
+  app.put("/api/sessions/:id/quick-terminal", (req, res) => {
+    try {
+      res.json(sessionResponseDTO(sessions.claimQuickTerminal(req.params.id), req));
+    } catch (error) {
+      sendRouteError(res, error, "无法连接快捷终端。");
+    }
+  });
+
   app.post("/api/sessions/:id/directory", (req, res) => {
     const cwd = req.body?.cwd;
     if (typeof cwd !== "string" || !cwd.trim()) {
@@ -307,6 +315,7 @@ export function registerSessionLifecycleRoutes(app: Express, ctx: SessionRouteCo
       requirePiSession(id);
       const { settings } = structured.getPiSettings(id);
       const next = patchPiSessionSettings(settings, req.body);
+      let patch = req.body;
       if (req.body.autoResources === true) {
         const capabilities = await piSettingsResponse(id);
         const runtime = decisions?.status();
@@ -316,23 +325,16 @@ export function registerSessionLifecycleRoutes(app: Express, ctx: SessionRouteCo
             : capabilities.autoResourcesReason || "自动选择暂不可用。");
         }
       }
-      if (req.body.resources !== undefined || req.body.lockedSkills !== undefined) {
-        const inventory = await discoverPiResources(config, structured.get(id)!.cwd);
-        // Removed resources may be retained only when already selected, so users can deselect stale
-        // items one at a time. Any NEW ID must resolve; the runner always revalidates the full list.
-        if (req.body.resources !== undefined) resolvePiResourceSelection(inventory, {
-          skills: next.resources!.skills.filter((id) => !settings.resources?.skills.includes(id)),
-          mcpServers: next.resources!.mcpServers.filter((id) => !settings.resources?.mcpServers.includes(id)),
-        });
-        if (req.body.lockedSkills !== undefined) resolvePiResourceSelection(inventory, {
-          skills: next.lockedSkills!.filter((id) => !settings.lockedSkills?.includes(id)), mcpServers: [],
-        });
-      }
       if (next.goalMode && !settings.goalMode) {
         const installed = await installedPiExtensions(config, structured.get(id)!.cwd);
         if (!installed.some((item) => item.goal)) throw badRequest("目标模式不可用：请先在 Pi 中安装并启用 pi-goal。");
       }
-      structured.setPiSettings(id, req.body);
+      if (req.body.resources !== undefined || req.body.lockedSkills !== undefined) {
+        const inventory = await discoverPiResources(config, structured.get(id)!.cwd);
+        // A lock-only patch must release from the latest selection after asynchronous discovery.
+        patch = resolvePiResourceSettingsPatch(inventory, structured.getPiSettings(id).settings, patch);
+      }
+      structured.setPiSettings(id, patch);
       // 回复「实际生效」的设置（CLI 的 CodeMode 只归一到 off/on），不把存库原值当生效值展示。
       const saved = structured.getPiSettings(id);
       res.json({ settings: effectivePiSessionSettings(saved.settings, saved.resolution.engine) });

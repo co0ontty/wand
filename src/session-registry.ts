@@ -10,6 +10,8 @@ import type { WandStorage } from "./storage.js";
 import type { StructuredSessionManager } from "./structured-session-manager.js";
 import type { ExecutionMode,SessionSnapshot,ConversationTurn } from "./types.js";
 import { enrichStructuredMessages } from "./structured-client-protocol.js";
+import { canClaimQuickTerminal } from "./quick-terminal-session.js";
+import { badRequest, notFound } from "./http-error.js";
 
 export type SessionOwner = "structured" | "pty" | "storage";
 
@@ -185,6 +187,20 @@ export class SessionRegistry {
 
   getLatest(id: string): SessionSnapshot | null {
     return this.get(id);
+  }
+
+  claimQuickTerminal(id: string): SessionSnapshot {
+    const snapshot = this.get(id);
+    if (!snapshot) throw notFound("未找到该终端，可能已被删除。");
+    if (!canClaimQuickTerminal(snapshot)) throw badRequest("只有普通空白终端可以作为快捷终端。");
+    const updated = this.storage.claimQuickTerminal(id);
+    if (this.processes.getOwned(id)) this.processes.setSessionSource(id, updated.sessionSource!);
+    return this.get(id)!;
+  }
+
+  /** Read-only runtime owner. Never hydrate a stored transcript to discover actions. */
+  getRuntimeSnapshot(id: string): SessionSnapshot | null {
+    return this.structured.get(id) ?? this.processes.getOwned(id) ?? null;
   }
 
   /** Runtime facts and membership only; list/policy reads must not hydrate transcripts. */

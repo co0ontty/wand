@@ -2,16 +2,18 @@ import { installStyleSheet } from "./styles";
 
 export function installChatComposerStyles(): void {
   installStyleSheet("wand-chat-composer-layout", String.raw`
-.composer-surface,
+.composer-surface { min-width:0; border:0; border-radius:0; background:transparent; box-shadow:none; padding:0; }
+/* The boundary belongs to editing, below the independent progress/queue row. */
+.composer-input-divider { height:1px; margin-block-end:10px; background:var(--border-subtle); pointer-events:none; }
+.composer-surface:has(textarea:focus) .composer-input-divider { background:var(--accent); box-shadow:0 1px 0 var(--accent); }
+.input-composer[data-pty-input-mode] .composer-input-divider { display:none; }
 .conversation-root .conversation-sender.ant-sender {
   min-width:0; border:0; border-block-start:1px solid var(--border-subtle);
   border-radius:0; background:transparent; box-shadow:none; padding-block-start:10px;
 }
-.composer-surface:has(textarea:focus),
 .conversation-root .conversation-sender.ant-sender:has(textarea:focus) {
   border-block-start-color:var(--accent);
 }
-.composer-surface:has(textarea:focus)::before,
 .conversation-root .conversation-sender.ant-sender:has(textarea:focus)::before {
   content:""; position:absolute; inset-block-start:0; inset-inline:0; height:2px;
   background:var(--accent); pointer-events:none;
@@ -79,12 +81,9 @@ export function installChatComposerStyles(): void {
 .composer-compact-entry.ant-btn { flex:1; min-width:0; height:var(--composer-control-height); padding-inline:8px; justify-content:flex-start; text-align:start; color:var(--text-secondary); overflow:hidden; }
 .composer-compact-entry.ant-btn > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .input-composer[data-composer-expanded] .composer-main-row { grid-template-columns:minmax(0,1fr) auto; grid-template-rows:auto auto; gap:4px 8px; align-items:center; }
-.input-composer[data-composer-expanded]:not([data-pty-input-mode]) .composer-inline-config { position:absolute; inset-block-start:calc(-1 * var(--composer-runtime-height,32px) + 6px); inset-inline-end:0; width:max-content; max-width:calc(100% - 84px); }
+.input-composer[data-composer-expanded]:not([data-pty-input-mode]) .composer-inline-config { position:absolute; inset-block-start:calc(-1 * var(--composer-runtime-height,32px) - 8px); inset-inline-end:0; width:max-content; max-width:calc(100% - 84px); }
 .input-composer[data-composer-expanded]:not([data-pty-input-mode]) .composer-usage-line { inset-inline-end:calc(var(--composer-runtime-width, 280px) + 8px); }
-.input-composer:has(:is(.todo-progress:not(.hidden),.queue-bar-host:not([hidden]))) { --composer-todo-width:clamp(120px,30%,300px); }
-.input-composer:has(:is(.todo-progress:not(.hidden),.queue-bar-host:not([hidden]))) .composer-surface { margin-block-start:50px; }
-.input-composer:has(:is(.todo-progress:not(.hidden),.queue-bar-host:not([hidden]))):not([data-pty-input-mode]) .composer-usage-line { inset-inline-end:calc(50% + var(--composer-todo-width) / 2 + 8px); }
-.input-composer:has(:is(.todo-progress:not(.hidden),.queue-bar-host:not([hidden]))):not([data-pty-input-mode]) .composer-inline-config { max-width:calc(50% - var(--composer-todo-width) / 2 - 8px); }
+.input-composer:not([data-pty-input-mode]) .composer-input-wrap { position:static; }
 .input-composer[data-composer-expanded] .composer-actions-left > .ant-btn { flex:none; }
 .input-composer[data-composer-expanded] .composer-actions-left > .composer-compact-entry { flex:1; min-width:44px; }
 .composer-config-controls-runtime > [data-mode-control-pill="model"] { flex:0 1 auto; max-width:100%; }
@@ -96,9 +95,14 @@ export function installChatComposerStyles(): void {
 .input-composer[data-composer-expanded] .composer-input-wrap { grid-row:1; grid-column:1 / -1; }
 .input-composer[data-composer-expanded] .composer-actions-left { grid-row:2; grid-column:1; }
 .input-composer[data-composer-expanded] .composer-actions-right { grid-row:2; grid-column:2; flex-wrap:nowrap; }
-.input-composer[data-composer-expanded] .composer-status-row > :not(#composer-status-line),
-.input-composer[data-composer-expanded] .composer-status-line:not([data-tone]),
-.input-composer[data-composer-expanded] .composer-input-wrap:not([data-editor-expanded="true"]):not(:has(.has-clipped-draft)) .composer-editor-controls { display:none; }
+.input-composer[data-composer-expanded] .composer-status-row > :not(#composer-status-line) { display:none; }
+.input-composer:not([data-pty-input-mode]) #send-input-button { width:100px; min-width:100px; padding-inline:8px; }
+.input-composer[data-pty-input-mode] #send-input-button > span:not(.ant-btn-icon) { display:none; }
+.composer-manual-collapse.ant-btn { width:32px; min-width:32px; padding:0; order:-1; }
+.composer-send-icons { display:block; position:relative; width:15px; height:15px; }
+.composer-send-icons > span { position:absolute; inset:0; display:flex; opacity:0; transform:scale(.9); transition:opacity var(--motion-morph),transform var(--motion-morph); }
+.composer-send-icons > span[data-active="true"] { opacity:1; transform:none; }
+@media (prefers-reduced-motion:reduce) { .composer-send-icons > span { transition:none; transform:none; } }
 .input-composer[data-composer-expanded="true"] .composer-compact-entry { visibility:hidden; pointer-events:none; }
 /* Collapsed editors must also release the identity layout's minimum height. */
 .input-composer[data-composer-expanded="false"] .composer-input-wrap [data-composer-sender] { height:0; min-height:0; overflow:hidden; opacity:0; pointer-events:none; }
@@ -180,16 +184,15 @@ export function installChatComposerStyles(): void {
   .input-composer[data-composer-expanded]:not([data-pty-input-mode]) .composer-surface { margin-block-start:50px; }
   .composer-config-controls-runtime > [data-mode-control-pill="tool"] { display:none; }
   .input-composer[data-composer-expanded]:not([data-pty-input-mode]) .composer-usage-line { inset-block-start:-64px; inset-inline-end:0; }
-  .input-composer:has(:is(.todo-progress:not(.hidden),.queue-bar-host:not([hidden]))) { --composer-todo-width:46%; }
-  .input-composer:has(:is(.todo-progress:not(.hidden),.queue-bar-host:not([hidden]))) .composer-top-row { inset-block-end:calc(100% + max(32px,var(--composer-runtime-height,32px))); inset-inline-start:auto; inset-inline-end:0; transform:none; }
-  .input-composer:has(:is(.todo-progress:not(.hidden),.queue-bar-host:not([hidden]))):not([data-pty-input-mode]) .composer-usage-line { inset-inline-end:calc(var(--composer-todo-width) + 8px); }
-  .input-composer:has(:is(.todo-progress:not(.hidden),.queue-bar-host:not([hidden]))):not([data-pty-input-mode]) .composer-inline-config { max-width:calc(100% - 84px); }
-  .composer-top-row .todo-progress-body { inset-inline-start:auto; inset-inline-end:0; transform:none; }
   .input-composer[data-pty-input-mode] .composer-surface { --composer-control-height:44px; }
   .input-composer[data-pty-input-mode] .wand-composer-rail-submit { width:var(--composer-control-height); min-width:var(--composer-control-height); padding-inline:0; }
   .input-composer[data-pty-input-mode] .wand-composer-rail-submit > span { display:none; }
   .input-composer[data-composer-expanded="true"] .composer-actions-right { max-width:100%; }
   .conversation-input-wrap[data-composer-expanded="true"] .conversation-config-trigger { max-width:96px; overflow:hidden; }
+}
+@media (max-width:400px) {
+  /* Keep the dock's collapse hit target out of the Ctrl/Shift targets. */
+  .input-composer[data-pty-input-mode]:not([data-pty-collapsed]) .pty-modifier-buttons { grid-row:3; grid-column:1 / -1; justify-content:center; }
 }
 @media (prefers-reduced-motion:reduce) {
   .input-composer[data-pty-input-mode] :is(.composer-input-wrap [data-composer-sender],.terminal-shortcuts),

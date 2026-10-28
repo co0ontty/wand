@@ -243,12 +243,17 @@ export function createFilePreviewModule(options: FilePreviewModuleOptions): File
           runtime.notify("没有改动", "info");
           return true;
         }
-        const path = snapshot.request.path;
+        // The server may resolve an editor suffix to the actual file. Save the
+        // file that was read, while keeping the original load identity for
+        // receipt checks (another load of the same link can resolve differently).
+        const path = snapshot.file.path;
+        const requestPath = snapshot.request.path;
+        const sequence = loadSequence;
         const draft = snapshot.draft;
         publish({ saving: true, failure: null });
         try {
           const outcome = await options.repository.save(path, draft);
-          if (!snapshot.open || snapshot.request?.path !== path) return false;
+          if (!snapshot.open || snapshot.request?.path !== requestPath || sequence !== loadSequence) return false;
           if (outcome.ok === false) {
             publish({ saving: false, failure: outcome.failure });
             runtime.notify(outcome.failure.message, "error");
@@ -267,7 +272,7 @@ export function createFilePreviewModule(options: FilePreviewModuleOptions): File
           try { await runtime.onSaved(path); } catch { /* Refresh is best-effort. */ }
           return true;
         } catch (error) {
-          if (!snapshot.open || snapshot.request?.path !== path) return false;
+          if (!snapshot.open || snapshot.request?.path !== requestPath || sequence !== loadSequence) return false;
           const failure = unknownFailure(error, "保存失败：网络错误");
           publish({ saving: false, failure });
           runtime.notify(failure.message, "error");

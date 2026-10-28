@@ -9,12 +9,19 @@ import { quickTerminalRuntime, terminalConnectionLabel } from "./runtime";
 import { installQuickTerminalStyles } from "./styles";
 import { QuickTerminalActionContext, QuickTerminalButton } from "./action";
 import { workspaceContextStore } from "../workspaces/workspace-context";
+import { workspacesStore } from "../workspaces/controller";
+import { notifyTasksChanged } from "../task-changes";
 import { useUiStoreSnapshot } from "../shell/ui-store-react";
-import { readQuickTerminalPreference, saveQuickTerminalPreference, resolveQuickTerminal, withQuickTerminalLock, type TerminalDock, type QuickTerminalPreference } from "./state";
+import { readQuickTerminalPreference, saveQuickTerminalPreference, resolveQuickTerminal, withQuickTerminalLock, QuickTerminalUnavailableError, type TerminalDock, type QuickTerminalPreference } from "./state";
 
 function StableSlot({ host }: { host: HTMLDivElement }) {
   const bind = React.useCallback((node: HTMLDivElement | null) => { if (node) node.appendChild(host); }, [host]);
   return <div ref={bind} style={{ width: "100%", height: "100%", minWidth: 0, minHeight: 0, overflow: "hidden" }}/>;
+}
+
+function refreshTerminalNavigation(): void {
+  notifyTasksChanged();
+  void Promise.resolve().then(() => workspacesStore.getRuntime()?.refreshSessions()).catch(() => {});
 }
 
 /** Portals target stable hosts: Splitter direction changes cannot remount a draft or xterm. */
@@ -35,7 +42,8 @@ function BrowserQuickTerminalWorkspace({ children }: { children: React.ReactNode
   const [busy, setBusy] = React.useState(false);
   const [cwd, setCwd] = React.useState("");
   const [connection, setConnection] = React.useState("未连接");
-  const [error, setError] = React.useState(preference.creationPending ? "上次创建终端未确认，请先在会话列表检查；不会重复创建。" : "");
+  const [error, setError] = React.useState(preference.creationPending ? "上次创建终端未确认，已暂停重复创建。" : "");
+  const [replaceableSession, setReplaceableSession] = React.useState("");
   const [storageWarning, setStorageWarning] = React.useState(false);
   const [narrow, setNarrow] = React.useState(false);
   const [ratio, setRatio] = React.useState<number | null>(null);
@@ -64,6 +72,7 @@ function BrowserQuickTerminalWorkspace({ children }: { children: React.ReactNode
     let saved = false;
     try { saved = saveQuickTerminalPreference(localStorage, next); } catch { /* storage getter can be denied */ }
     setStorageWarning(!saved);
+    return saved;
   };
   React.useLayoutEffect(() => {
     installQuickTerminalStyles();
@@ -82,10 +91,30 @@ function BrowserQuickTerminalWorkspace({ children }: { children: React.ReactNode
   // A retained terminal is still inert while show() is handling the click.
   // Focus only after React removes inert and applies the reopened layout.
   React.useLayoutEffect(() => { if (open) focusRequestedTerminal(); }, [open, focusRequestedTerminal]);
+  React.useEffect(() => {
+    if (ui.auth.phase !== "authenticated") return;
+    let cancelled = false;
+    // Upgrade the exact saved legacy shell without opening the panel or creating
+    // a process. Lists then hide it even before the user opens this panel again.
+    void withQuickTerminalLock(async () => {
+      if (cancelled) return;
+      let current = preferenceRef.current;
+      try { const stored = readQuickTerminalPreference(localStorage); if (stored.sessionId || stored.creationPending) current = stored; } catch { /* keep the local reference */ }
+      if (!current.sessionId || current.creationPending) return;
+      const resolved = await resolveQuickTerminal(current.sessionId, "");
+      if (!cancelled && resolved.navigationChanged) refreshTerminalNavigation();
+    }).catch(() => { /* Opening the panel presents lookup errors with its existing recovery actions. */ });
+    return () => { cancelled = true; };
+  }, [ui.auth.phase]);
   React.useEffect(() => quickTerminalRuntime().observe(event => {
+    if (preferenceRef.current.creationPending) return;
     const label = terminalConnectionLabel(session.current, event);
     if (!label) return;
     setConnection(label);
+    if (event.sessionId === session.current) {
+      if (event.type === "ended" || ((event.type === "init" || event.type === "status") && ["stopped", "exited", "failed"].includes(event.data?.status || ""))) setReplaceableSession(session.current);
+      else if (event.type === "init" || (event.type === "status" && ["running", "idle"].includes(event.data?.status || ""))) setReplaceableSession("");
+    }
     if (event.type === "init") {
       setError("");
       if (event.data?.cwd) setCwd(event.data.cwd);
@@ -103,34 +132,54 @@ function BrowserQuickTerminalWorkspace({ children }: { children: React.ReactNode
     }
   }, []);
   // Async connection/resize never steal focus from the editor the user returned to.
-  const show = async (reconnect = false) => {
+  const show = async (reconnect = false, replaceId = "") => {
     visible.current = true;
     setOpen(true); setMenu(false);
     focusIntent.current = true;
-    if (session.current && attached.current && !reconnect) {
+    if (session.current && attached.current && !reconnect && !replaceId && !preferenceRef.current.creationPending) {
       if (open) focusRequestedTerminal();
       return;
     }
     if (pending.current) return;
     const attempt = lifetime.current;
     pending.current = true; setBusy(true); setConnection("连接中"); setError("");
+    setReplaceableSession("");
     try {
       const context = workspaceContextStore.getSnapshot();
       const directory = ui.selected?.worktree?.path || context.cwd || ui.selected?.cwd || "~";
-      const result = session.current ? { id: session.current, cwd } : await withQuickTerminalLock(async () => {
+      const result = session.current && !reconnect && !replaceId && !preferenceRef.current.creationPending ? { id: session.current, cwd } : await withQuickTerminalLock(async () => {
+        if (attempt !== lifetime.current) throw new Error("终端面板已关闭。");
         let current = preferenceRef.current;
         try {
           const stored = readQuickTerminalPreference(localStorage);
           if (stored.sessionId || stored.creationPending) current = stored;
         } catch { /* this page still retains the unconfirmed-creation guard */ }
-        if (!current.sessionId && current.creationPending) throw new Error("上次创建终端未确认，请先在会话列表检查；不会重复创建。");
-        if (!current.sessionId) persist({ ...current, creationPending: true });
+        if (!current.sessionId && current.creationPending) {
+          persist({ ...current, dock: preferenceRef.current.dock });
+          throw new Error("上次创建终端未确认，已暂停重复创建。");
+        }
+        // Only the explicit recovery action replaces this exact reference. Another
+        // window may already have created its replacement while we waited for the lock.
+        const previous = current;
+        if (replaceId && current.sessionId === replaceId) current = { dock: current.dock, sessionId: "" };
+        if (!current.sessionId && !persist({ ...current, creationPending: true })) {
+          // Without a durable guard, a refresh could repeat a POST whose result
+          // was lost. This request has not been sent, so restoring the reference is safe.
+          persist(previous);
+          throw new Error("无法保存终端创建状态，请允许本站存储后重新连接；尚未创建新终端。");
+        }
         const resolved = await resolveQuickTerminal(current.sessionId, directory);
         // Commit before releasing the cross-window lock.
         persist({ dock: preferenceRef.current.dock, sessionId: resolved.id });
+        if (resolved.navigationChanged) refreshTerminalNavigation();
         return resolved;
       });
       if (attempt !== lifetime.current) return;
+      if (session.current && session.current !== result.id) {
+        quickTerminalRuntime().retain(session.current, false);
+        quickTerminalRuntime().dispose(session.current);
+        attached.current = false;
+      }
       session.current = result.id;
       setCwd(result.cwd);
       await ensureTerminalLibrary();
@@ -142,6 +191,7 @@ function BrowserQuickTerminalWorkspace({ children }: { children: React.ReactNode
       if (reconnect) quickTerminalRuntime().reconnect(result.id);
     } catch (cause) {
       if (attempt !== lifetime.current) return;
+      if (cause instanceof QuickTerminalUnavailableError) setReplaceableSession(cause.sessionId);
       setConnection("连接失败"); setError(cause instanceof Error ? cause.message : "终端连接失败");
     } finally {
       if (attempt === lifetime.current) { pending.current = false; setBusy(false); }
@@ -153,8 +203,23 @@ function BrowserQuickTerminalWorkspace({ children }: { children: React.ReactNode
     button.current?.focus({ preventScroll: true });
   };
   const dock = narrow ? "bottom" : preference.dock;
-  const changeDock = (next: TerminalDock) => { persist({ ...preferenceRef.current, dock: next }); setRatio(null); };
+  const changeDock = (next: TerminalDock) => {
+    const attempt = lifetime.current;
+    void withQuickTerminalLock(async () => {
+      if (attempt !== lifetime.current) return;
+      let current = preferenceRef.current;
+      try {
+        const stored = readQuickTerminalPreference(localStorage);
+        if (stored.sessionId || stored.creationPending) current = stored;
+      } catch { /* retain the in-memory creation guard when storage is denied */ }
+      // Layout preferences must not overwrite another window's newer binding or
+      // unconfirmed POST. All writes to this shared record use the same lock.
+      persist({ ...current, dock: next });
+      setRatio(null);
+    });
+  };
   const canReconnect = !!(session.current || preference.sessionId);
+  const canReplace = !!replaceableSession && !preference.creationPending;
   return <QuickTerminalActionContext.Provider value={{ open, show: () => { void show(); }, trigger: button, chromeHost, registerChrome }}><Flex vertical ref={frame} className="quick-terminal-workspace" style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: "hidden" }}>
     <Flex align="center" justify="end" className="quick-terminal-toolbar" style={{ padding: topbarActive ? 0 : "2px var(--wand-page-inset, 20px)", borderBottom: topbarActive ? undefined : "1px solid var(--border-subtle)", flexShrink: 0 }}>
       <div style={{ width: "100%", display: topbarActive ? undefined : "none" }}><StableSlot host={chromeHost}/></div>
@@ -185,7 +250,9 @@ function BrowserQuickTerminalWorkspace({ children }: { children: React.ReactNode
       </Flex>
       <span id="quick-terminal-description" className="workbar-accessible-title">运行在 Wand 主机；关闭仅隐藏，命令继续运行。结束 shell 请在终端输入 exit。{narrow && preference.dock === "right" ? "窄窗临时在底部显示。" : ""}</span>
       {storageWarning && <Alert type="warning" title="本页已应用，但客户端存储不可用，刷新后可能无法恢复位置或终端。"/>}
-      {error && <Alert type="error" title={error} action={canReconnect ? <WandButton disabled={busy} onClick={() => void show(true)}>重新连接</WandButton> : undefined}/>}
+      {(error || canReplace) && <Alert type={canReplace ? "info" : "error"} title={error || "原终端进程已结束，可以新建终端；原会话记录会保留。"} action={canReplace
+        ? <WandButton disabled={busy} onClick={() => void show(false, replaceableSession)}>新建终端</WandButton>
+        : canReconnect ? <WandButton disabled={busy} onClick={() => void show(true)}>重新连接</WandButton> : undefined}/>}
       <div ref={surface} className="quick-terminal-surface" style={{ flex: 1, minWidth: 0, minHeight: 0, position: "relative", overflow: "hidden" }}/>
     </section>, terminalHost)}
   </Flex></QuickTerminalActionContext.Provider>;

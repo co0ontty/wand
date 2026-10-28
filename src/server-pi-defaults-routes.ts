@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { asyncRoute } from "./express-async.js";
 import { surfaceDomainError } from "./http-error.js";
 import { sendRouteError } from "./server-request.js";
-import { discoverPiResources, resolvePiResourceSelection } from "./pi-resource-catalog.js";
+import { discoverPiResources, resolvePiResourceSettingsPatch } from "./pi-resource-catalog.js";
 import {
   defaultPiCliSessionSettings, effectivePiSessionSettings, mergePiSessionDefaults, patchPiSessionSettings,
   type PiSessionSettings,
@@ -26,7 +26,7 @@ const DOMAIN_MESSAGE = /^(Pi 设置必须是对象。|请选择有效的 Skills 
  * 之前只有「在某个会话里改一次，顺带成为新会话默认」这一条隐式路径，用户在设置页
  * 找不到它；而会话里的写入又只能表达会话本身的选择。这里给出显式入口，语义与
  * `StructuredSessionManager.setPiSettings` 写回默认的那一段保持一致（字段级合并、
- * 资源必须真实存在、不可表达的值直接拒绝）。
+ * 新增资源必须真实存在、不可表达的值直接拒绝）。
  */
 export function registerPiDefaultsRoutes(app: Express, deps: PiDefaultsRouteDeps): void {
   const readDefaults = (): PiSessionSettings => deps.storage.getPiSessionDefaults()
@@ -60,24 +60,18 @@ export function registerPiDefaultsRoutes(app: Express, deps: PiDefaultsRouteDeps
 
   app.patch("/api/pi-settings/defaults", asyncRoute(async (req, res) => {
     try {
-      const body = req.body;
+      let patch = req.body;
       const current = readDefaults();
       // 先按现有默认校验字段本身；再按「只合并本次改动」落库，与会话写入同一套语义。
-      const patched = patchPiSessionSettings(current, body);
-      const next = mergePiSessionDefaults(current, body);
-      if (body && typeof body === "object" && !Array.isArray(body)) {
-        const touched = body as Record<string, unknown>;
-        if (touched.resources !== undefined || touched.lockedSkills !== undefined) {
-          const inventory = await discoverPiResources(deps.config, deps.config.defaultCwd);
-          if (touched.resources !== undefined) resolvePiResourceSelection(inventory, next.resources ?? { skills: [], mcpServers: [] });
-          if (touched.lockedSkills !== undefined) {
-            resolvePiResourceSelection(inventory, { skills: next.lockedSkills ?? [], mcpServers: [] });
-          }
-        }
-        if (next.autoResources === true) {
-          const reason = autoResourcesReason(next);
-          if (reason) throw new Error(reason);
-        }
+      patchPiSessionSettings(current, patch);
+      if (patch.resources !== undefined || patch.lockedSkills !== undefined) {
+        const inventory = await discoverPiResources(deps.config, deps.config.defaultCwd);
+        patch = resolvePiResourceSettingsPatch(inventory, readDefaults(), patch);
+      }
+      const next = mergePiSessionDefaults(readDefaults(), patch);
+      if (next.autoResources === true) {
+        const reason = autoResourcesReason(next);
+        if (reason) throw new Error(reason);
       }
       deps.storage.setPiSessionDefaults(next);
       res.json({ settings: effectivePiSessionSettings(next, "cli") });

@@ -145,3 +145,32 @@ test("uncancelled startup failure still removes its own provisional record", asy
   await completion;
   assert.equal(h.storage.getSession(id), null);
 });
+
+test("provider PTY knowledge is bound to persisted owners, excludes secrets from prompts and revokes on stop", async t => {
+  const h = harness(t, true);
+  h.storage.saveSiliconEmployee({ id: "knowledge-owner", name: "测试员工", duty: "", prompt: "", avatar: "", agents: [], createdAt: "2026-01-01", updatedAt: "2026-01-01" });
+  const workspace = h.storage.createWorkspace({ name: "测试项目", cwd: h.root });
+  const start = h.manager.start("pi", h.root, "default", undefined, { provider: "pi", employeeId: "knowledge-owner", workspaceId: workspace.id, systemPrompt: "BASE_ROLE" });
+  const request = h.pending[0]!.request;
+  const token = request.env.WAND_KNOWLEDGE_TOKEN!;
+  assert.equal(h.storage.resolveKnowledgeAccess(token)?.employeeId, "knowledge-owner");
+  assert.equal(h.storage.resolveKnowledgeAccess(token)?.workspaceId, workspace.id);
+  assert.ok(request.args.join(" ").includes("knowledge:remember"));
+  assert.ok(!request.args.join(" ").includes(token));
+  assert.equal(h.storage.getSession(request.sessionId)?.systemPrompt, "BASE_ROLE");
+  h.resolve(); const result = await start;
+  h.manager.stop(result.id);
+  assert.equal(h.storage.resolveKnowledgeAccess(token), null);
+});
+
+test("bare shell never receives a knowledge capability; persistent server detach retains active provider capability", async t => {
+  const h = harness(t, true);
+  const shell = h.manager.startShell(h.root, "default");
+  assert.equal(h.pending[0]!.request.env.WAND_KNOWLEDGE_TOKEN, undefined); h.resolve(); await shell;
+  h.storage.saveSiliconEmployee({ id: "knowledge-owner", name: "测试员工", duty: "", prompt: "", avatar: "", agents: [], createdAt: "2026-01-01", updatedAt: "2026-01-01" });
+  const start = h.manager.start("pi", h.root, "default", undefined, { provider: "pi", employeeId: "knowledge-owner" });
+  const token = h.pending[1]!.request.env.WAND_KNOWLEDGE_TOKEN!;
+  h.resolve(1); await start;
+  h.manager.dispose();
+  assert.ok(h.storage.resolveKnowledgeAccess(token), "server detach must not revoke a live persistent PTY");
+});

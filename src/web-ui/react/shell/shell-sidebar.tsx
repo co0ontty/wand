@@ -32,6 +32,7 @@ import {
 } from "../workspaces/sidebar-list-error";
 
 import { taskBoardController, taskBoardStore } from "../issues/task-board-controller";
+import { knowledgeController, knowledgeStore } from "../knowledge/controller";
 import { HomeAttentionBadge } from "../attention/home-attention";
 import { useAiTeamAttentionCount } from "../ai-teams/repository";
 import { GROUP_CHAT_VISIBLE } from "../../group-chat-visibility.js";
@@ -608,6 +609,7 @@ export function ShellSidebar() {
   }, [activeModeMounted, conversationState.mode]);
   const dispatch = useUiDispatch();
   const taskBoard = React.useSyncExternalStore(taskBoardStore.subscribe, taskBoardStore.getSnapshot, taskBoardStore.getSnapshot);
+  const knowledge = React.useSyncExternalStore(knowledgeStore.subscribe, knowledgeStore.getSnapshot, knowledgeStore.getSnapshot);
   const settings = React.useSyncExternalStore(settingsStore.subscribe, settingsStore.getSnapshot, settingsStore.getSnapshot);
   const teamAttention = useAiTeamAttentionCount(GROUP_CHAT_VISIBLE);
   const profile = useUserProfile();
@@ -620,7 +622,7 @@ export function ShellSidebar() {
   const [attentionOpen, setAttentionOpen] = React.useState(false);
   // Secondary management surfaces borrow the list space without changing the user's pinned/collapsed preference.
   const contextRail = !snapshot.layout.sidebarDrawer && (settings.open || conversationState.directory
-    || taskBoard.open || snapshot.layout.filePanelOpen);
+    || taskBoard.open || knowledge.open || snapshot.layout.filePanelOpen);
   const narrow = !snapshot.layout.sidebarDrawer && snapshot.layout.sidebarPinned && snapshot.layout.sidebarCollapsed;
   const sidebarClass = classNames(
     "sidebar sidebar-refined",
@@ -674,7 +676,7 @@ export function ShellSidebar() {
   };
   const navigate = (action: UiAction): void => {
     // 设置、创建表单和辅助面板只暂时覆盖当前页面，取消后仍留在原视图。
-    if (sidebarActionLeavesPage(action)) { settingsController.close(); taskBoardController.close(); conversationUi.suspend(); }
+    if (sidebarActionLeavesPage(action)) { settingsController.close(); taskBoardController.close(); knowledgeController.close(); conversationUi.suspend(); }
     if (action.type === "nav.home") conversationUi.show();
     dismissSidebarSurfaces();
     void dispatch(action);
@@ -683,6 +685,7 @@ export function ShellSidebar() {
   const navigateFromTree = (): void => {
     settingsController.close();
     taskBoardController.close();
+    knowledgeController.close();
     conversationUi.suspend();
     dismissSidebarSurfaces();
   };
@@ -761,13 +764,17 @@ export function ShellSidebar() {
         <Flex vertical align="center" className="sidebar-navigation-rail">
           <div className="sidebar-rail-scroll">
             <WandBrandMark className="sidebar-brand-mark" style={{ width: "var(--conversation-brand-size, 24px)", height: "var(--conversation-brand-size, 24px)" }} />
-            <ConversationNavigation activePage={settings.open ? null : taskBoard.open ? taskBoard.page === "board" ? "board" : taskBoard.page === "schedules" ? "schedules" : taskBoard.page === "calendar" ? "calendar" : "teams"
+            <ConversationNavigation activePage={settings.open ? null : knowledge.open ? "knowledge" : taskBoard.open ? taskBoard.page === "board" ? "board" : taskBoard.page === "schedules" ? "schedules" : taskBoard.page === "calendar" ? "calendar" : "teams"
               : conversationState.directory ? "teams" : conversationState.mode} teamAttention={teamAttention}
               onNavigate={(page) => {
                 setAttentionOpen(false);
                 settingsController.close();
                 peek.close();
-                if (page === "board" || page === "teams" || page === "schedules" || page === "calendar") {
+                if (page !== "knowledge" && knowledge.open) knowledgeController.close();
+                if (page === "knowledge") {
+                  taskBoardController.close();
+                  knowledgeController.open();
+                } else if (page === "board" || page === "teams" || page === "schedules" || page === "calendar") {
                   taskBoardController.open(page === "calendar" ? "" : snapshot.selected?.workspaceId ?? "", page === "calendar" ? "" : snapshot.selected?.id ?? "", page);
                 } else {
                   taskBoardController.close();

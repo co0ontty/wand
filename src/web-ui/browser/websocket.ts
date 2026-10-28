@@ -1,5 +1,5 @@
 import { reportClientError } from "../client-feedback";
-import { composerQueue, state } from "./state";
+import { composerQueue, state, todoTurnEvidence } from "./state";
 import { syncBrowserComposerBadges } from "./composer-badges-adapter";
 import { getErrorMessage } from "../../error-utils.js";
 import { parseJsonResponse } from "../react/http-adapter";
@@ -40,6 +40,7 @@ let hasOpenedSocket = false;
 /** Login teardown starts a new socket lifetime; the first open is not a resync. */
 export function resetWebSocketResyncState(): void {
   hasOpenedSocket = false;
+  todoTurnEvidence.clear();
 }
 
 /**
@@ -217,6 +218,7 @@ function projectSelectedChat(sessionId: string): any {
             if (state.ws !== ws) return;
             try { (window as any).__wandWs = ws; } catch (e) {}
             state.wsConnected = true;
+            todoTurnEvidence.clear();
             notifyPooledTerminalEvent({ type: "connected" });
             state.lastWsMessageAt = Date.now();
             // Reset backoff on a successful connect so the next disconnect
@@ -282,6 +284,7 @@ function projectSelectedChat(sessionId: string): any {
                 // Server dropped some output events under backpressure and
                 // is asking us for a fresh snapshot. Send a resync so the
                 // server replies with a new init carrying the full output.
+                todoTurnEvidence.delete(msg.sessionId);
                 requestChatResync(msg.sessionId);
                 if (!state.lastSeqBySession) state.lastSeqBySession = {};
                 state.lastSeqBySession[msg.sessionId] = 0;
@@ -298,6 +301,7 @@ function projectSelectedChat(sessionId: string): any {
                 } else if (msg.seq > prevSeq + 1 && prevSeq > 0) {
                   // We missed at least one event — request a resync and
                   // skip this stale event so we don't apply a partial gap.
+                  todoTurnEvidence.delete(msg.sessionId);
                   requestChatResync(msg.sessionId);
                   state.lastSeqBySession[msg.sessionId] = 0;
                   return;
@@ -323,6 +327,8 @@ function projectSelectedChat(sessionId: string): any {
             if (state.ws !== ws) return;
             state.ws = null;
             state.wsConnected = false;
+            todoTurnEvidence.clear();
+            scheduleChatRender();
             notifyPooledTerminalEvent({ type: "disconnected" });
             stopWsHeartbeatCheck();
             scheduleWsReconnect();
@@ -469,7 +475,7 @@ function projectSelectedChat(sessionId: string): any {
                   }
                 }
               } else if (snapshot.output !== undefined || snapshot.messages || isIncremental || msg.data.permissionBlocked !== undefined || snapshot.title || snapshot.description || snapshot.titleGenerating !== undefined) {
-                updateSessionSnapshot(snapshot, "latest");
+                updateSessionSnapshot(snapshot, "latest", msg);
                 if (topicMetadataChanged) scheduleSessionListUpdate();
                 if (msg.sessionId === state.selectedId) {
                   var updatedSession = state.sessions.find(function(s: any) { return s.id === msg.sessionId; }) || snapshot;
@@ -566,7 +572,7 @@ function projectSelectedChat(sessionId: string): any {
             if (msg.data && msg.data.queuedMessages) {
               endedSnapshot.queuedMessages = msg.data.queuedMessages;
             }
-            updateSessionSnapshot(endedSnapshot, "latest");
+            updateSessionSnapshot(endedSnapshot, "latest", msg);
             if (typeof msg.data?.completionRevision === "number") notifyTasksChanged();
             if (state.currentView === "terminal") {
               void markSessionCompletionViewed(state.sessions.find((session) => session.id === msg.sessionId));
@@ -661,7 +667,7 @@ function projectSelectedChat(sessionId: string): any {
             // Initial state for subscribed session (after reconnect or subscription)
             if (msg.sessionId === state.selectedId && msg.data) {
               if (state.chatRenderTimer) { clearTimeout(state.chatRenderTimer); state.chatRenderTimer = null; }
-              updateSessionSnapshot(msg.data, "latest");
+              updateSessionSnapshot(msg.data, "latest", msg);
               projectSelectedChat(msg.sessionId);
               renderChat(true);
               updateTaskDisplay();
@@ -679,7 +685,7 @@ function projectSelectedChat(sessionId: string): any {
                 ensureTerminalFitWithRetry("init");
               }
             } else if (msg.data && hasPooledTerminal(msg.sessionId)) {
-              updateSessionSnapshot(msg.data, "latest");
+              updateSessionSnapshot(msg.data, "latest", msg);
               var pooledInitOutput = msg.data.output || "";
               if (!restorePooledTerminalState(msg.sessionId, msg.data.terminalState, pooledInitOutput)) {
                 replacePooledTerminalOutput(msg.sessionId, pooledInitOutput);
@@ -830,7 +836,7 @@ function projectSelectedChat(sessionId: string): any {
                   if (typeof msg.data[field] === "number") statusUpdate[field] = msg.data[field];
                 });
               }
-              updateSessionSnapshot(statusUpdate, "latest");
+              updateSessionSnapshot(statusUpdate, "latest", msg);
               if (typeof msg.data.completionRevision === "number") {
                 notifyTasksChanged();
                 if (state.currentView === "terminal") {

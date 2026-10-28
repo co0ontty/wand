@@ -6,7 +6,8 @@ export type { SessionProvider } from "./provider-catalog.js";
 import type { SessionProvider } from "./provider-catalog.js";
 /** "claude-sdk" 是历史值：SDK 执行路径已移除，读旧会话时归一为 claude-cli-print。 */
 export type SessionRunner = "claude-cli" | "claude-cli-print" | "claude-sdk" | "codex-cli-exec" | "opencode-cli-run" | "grok-cli-headless" | "qoder-cli-print" | "pi-cli-json" | "pty";
-export type SessionSource = "interactive" | "automation" | "startup";
+/** quick-terminal is a retained shell owned by the detail panel, excluded only from work-list projections. */
+export type SessionSource = "interactive" | "automation" | "startup" | "quick-terminal";
 
 export type ExecutionMode = "assist" | "agent" | "agent-max" | "default" | "auto-edit" | "full-access" | "native" | "managed";
 

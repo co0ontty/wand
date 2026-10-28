@@ -10,6 +10,7 @@ export function terminalConnectionLabel(sessionId: string, event: QuickTerminalE
   const ended = ["stopped", "exited", "failed"].includes(event.data?.status || "");
   if (event.type === "init") return ended ? "进程已结束" : "已连接";
   if (event.type === "ended" || (event.type === "status" && ended)) return "进程已结束";
+  if (event.type === "status" && (event.data?.status === "running" || event.data?.status === "idle")) return "已连接";
   if (event.type === "resync_required") return "连接中";
   if (event.type === "pty_error" || event.type === "error") return "连接异常";
 }

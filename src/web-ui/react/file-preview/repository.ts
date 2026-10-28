@@ -9,6 +9,7 @@ import type {
   FilePreviewSaveOutcome,
 } from "./types";
 import { finiteNumber, isRecord, readJson, stringValue, type JsonRecord } from "../json-utils";
+import { messageFileMetadataUrl, messageFileTarget } from "../../message-file-target.js";
 
 type FetchLike = typeof fetch;
 
@@ -35,6 +36,7 @@ function failureFromResponse(
   path: string,
   fallback: string,
 ): FilePreviewFailure {
+  path = stringValue(value.path, path);
   const name = fileNameFromPath(path);
   const size = finiteNumber(value.size, -1);
   const failure: FilePreviewFailure = {
@@ -44,7 +46,8 @@ function failureFromResponse(
     maxSize: finiteNumber(value.maxSize, -1) >= 0 ? finiteNumber(value.maxSize) : undefined,
   };
   if (response.status === 413) {
-    failure.download = { path, name, url: rawUrl(path, true), size: failure.size };
+    const target = path.startsWith("/api/") ? messageFileTarget(path) : null;
+    failure.download = { path, name, url: target?.downloadUrl ?? rawUrl(path, true), size: failure.size };
   }
   return failure;
 }
@@ -79,7 +82,7 @@ export class HttpFilePreviewRepository implements FilePreviewRepository {
     options: FilePreviewLoadOptions = {},
   ): Promise<FilePreviewLoadResult> {
     const response = await this.fetchImpl(
-      `/api/file-preview?path=${encodeURIComponent(path)}`,
+      messageFileMetadataUrl(path),
       { credentials: "same-origin", signal: options.signal },
     );
     const value = await readJson(response);

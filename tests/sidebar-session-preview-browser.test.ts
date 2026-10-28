@@ -43,7 +43,7 @@ const store={getSnapshot:()=>memory.getSnapshot(),subscribe:memory.subscribe.bin
 configureWorkspacesRuntime({selectSession,openTask(payload){setActiveWorkspaceContext({...payload,layout:null});selectSession(payload.preferredSessionId||"a-design");},openWorkspace(){},closeWorkspace(){},refreshSessions:async()=>{},toast(){},onOpen(){},onClose(){}});
 conversationUi.mode("chats");
 createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvider store={store}><ShellSidebar/><OverlayHost/></UiStoreProvider></WandUiProvider>);
-` }, bundle: true, platform: "browser", format: "iife", outfile: join(temp, "app.js"), define: { "process.env.NODE_ENV": '"production"' }, logLevel: "warning" });
+` }, bundle: true, platform: "browser", format: "iife", jsx: "automatic", outfile: join(temp, "app.js"), define: { "process.env.NODE_ENV": '"production"' }, logLevel: "warning" });
   await build({ entryPoints: [join(root, "src/web-ui/react/avatars/renderer.ts")], bundle: true, platform: "browser", format: "iife", minify: true, outfile: join(temp, "plush-avatar.js"), logLevel: "warning" });
   writeFileSync(join(temp, "app.js"), readFileSync(join(temp, "app.js"), "utf8").replaceAll("${plushAvatarChunkSrc}", "/plush-avatar.js"));
   const session = (id: string, title: string, employeeId: string, extra = {}) => ({ id, title, employeeId, employeeName: "同名员工", sessionKind: "structured", provider: "pi", status: "idle", cwd: "/repo", startedAt: "2026-10-13T10:00:00Z", ...extra });
@@ -62,7 +62,9 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
       if (req.method !== "GET") { mutationCount++; res.statusCode = 400; res.end('{}'); return; }
       const directory = archivedFixture && url.searchParams.get("includeArchived") !== "1"
         ? groups.map(g => ({ ...g, tasks: g.tasks.map(task => ({ ...task, sessions: task.sessions.filter((s: any) => !s.archived) })) })) : groups;
-      const payload = url.pathname === "/api/tasks" ? { groups: directory, revision: "fixture" }
+      const sessions = directory.flatMap(group => [...group.tasks.flatMap(task => task.sessions), ...group.standaloneSessions]);
+      const payload = url.pathname === "/api/sessions" ? sessions
+        : url.pathname === "/api/tasks" ? { groups: directory, revision: "fixture" }
         : url.pathname === "/api/conversations" ? { conversations: [{ ...person("dm_a", "employee-a"), tasks: archivedFixture ? [{ task: { id: "archived-card", title: "旧工作", status: "archived" } }] : [] }, person("dm_b", "employee-b"), person("dm_empty", "employee-empty")] }
         : url.pathname === "/api/silicon-employees" ? { employees: [{ id: "employee-a", name: "同名员工", avatar: "cat:2" }, { id: "employee-b", name: "同名员工", avatar: "cat:3" }, { id: "employee-empty", name: "空会话员工", avatar: "cat:2" }] }
         : url.pathname === "/api/config" ? { userProfile: { name: "测试用户" } }
@@ -75,7 +77,7 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
     if (url.pathname === "/tailwind.css" || url.pathname === "/styles.css") { res.setHeader("content-type", "text/css"); res.end(readFileSync(join(root, "src/web-ui/content", url.pathname.slice(1)))); return; }
     res.setHeader("content-type", "text/html");
     // Match production's SVG preflight; without it the terminal mark's line break is invisible here.
-    res.end('<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/tailwind.css"><link rel="stylesheet" href="/styles.css"></head><body><div id="root" style="height:100dvh;display:flex"></div><script src="/app.js"></script></body></html>');
+    res.end('<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/tailwind.css"><link rel="stylesheet" href="/styles.css"></head><body><div id="root" style="height:100dvh;display:flex"></div><div id="overlay-root"><div id="wand-react-ui-portals" class="wand-ui-portals"></div></div><script src="/app.js"></script></body></html>');
   });
   server.listen(0, "127.0.0.1"); await once(server, "listening");
   t.after(() => new Promise<void>(done => server.close(() => done())));
@@ -89,7 +91,8 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
       await browser.wait("!!document.documentElement && !!window.fixture", "production React fixture bootstrapped before native shell flags");
       if (mode === "native") await browser.evaluate("document.documentElement.classList.add('is-wand-app');true");
       await browser.wait("document.querySelectorAll('[data-conversation-id=dm_a]').length===1 && document.querySelectorAll('[data-conversation-id=dm_b]').length===1 && !!document.querySelector('.conversation-list-item:has([data-conversation-id=dm_b]) .sidebar-session-more[data-hidden-count]')");
-      assert.equal(await browser.evaluate("!!document.querySelector('[data-conversation-id=dm_empty]') && !document.querySelector('.conversation-list-item:has([data-conversation-id=dm_empty]) .sidebar-session-area')"), true, "zero matched sessions leave only the top person entry");
+      assert.equal(await browser.evaluate("!!document.querySelector('[data-conversation-id=dm_empty]') && !!document.querySelector('.conversation-list-item:has([data-conversation-id=dm_empty]) .sidebar-session-area[data-empty]') && !document.querySelector('.conversation-list-item:has([data-conversation-id=dm_empty]) [data-preview-session-id], .conversation-list-item:has([data-conversation-id=dm_empty]) .conversation-session-toggle')"), true, "zero matched sessions keep the reserved empty preview band and the person entry");
+      assert.ok(await browser.evaluate("document.querySelector('.conversation-list-item:has([data-conversation-id=dm_empty]) .sidebar-session-area[data-empty]').getBoundingClientRect().height") >= (mode === "mobile" ? 44 : 36), "reserved empty band keeps the person row from collapsing");
       const a = '.conversation-list-item:has([data-conversation-id="dm_a"])';
       const b = '.conversation-list-item:has([data-conversation-id="dm_b"])';
       assert.equal(await browser.evaluate(`Array.from(document.querySelectorAll('${a} [data-preview-session-id]')).map(n=>n.dataset.previewSessionId).join(',')`), "a-check,a-design,a-style", "same-name employees remain isolated");
@@ -124,7 +127,7 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
       assert.equal(await browser.evaluate("fixture.conversation.getSnapshot().selectedId"), "dm_a", "person header enters the employee conversation");
       assert.equal(await browser.evaluate("fixture.opened.length"), personOpenedBeforeParent, "person header does not select an execution session");
       assert.equal(await browser.evaluate(`document.querySelector('${a} .conversation-session-toggle').getAttribute('aria-expanded')`), "false");
-      assert.equal(await browser.evaluate(`(()=>{const g=document.querySelector('${a} .conversation-session-toggle').getBoundingClientRect(),tag=document.querySelector('${a} .sidebar-session-preview-row').getBoundingClientRect(),head=document.querySelector('${a} [data-conversation-id]').getBoundingClientRect();return g.right<=tag.left+1 && g.top>=head.bottom})()`), true, "disclosure fills the left gutter below the identity header");
+      assert.equal(await browser.evaluate(`(()=>{const g=document.querySelector('${a} .conversation-session-toggle').getBoundingClientRect(),tag=document.querySelector('${a} .sidebar-session-preview-row').getBoundingClientRect(),head=document.querySelector('${a} [data-conversation-id]').getBoundingClientRect();return g.top>=head.top-1 && g.bottom<=head.bottom+1 && tag.top>=head.bottom-1 && !document.querySelector('${a} .sidebar-session-area .sidebar-session-area-toggle')})()`), true, "header owns disclosure and the preview band does not reserve an arrow column");
       await browser.click(`${a} .conversation-session-toggle`);
       assert.equal(await browser.evaluate(`(()=>{const n=document.querySelector('${a} .sidebar-session-preview');return n.inert && n.getBoundingClientRect().height===0})()`), true);
       assert.equal(await browser.evaluate(`Array.from(document.querySelectorAll('${a} .conversation-person-sessions [data-session-id]')).every(n=>n.dataset.sessionId.startsWith('a-'))`), true);
@@ -140,7 +143,11 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
       assert.equal(await browser.evaluate(`document.querySelector('${a} .conversation-session-toggle').getAttribute('aria-expanded')`), "true", "closing a session menu must not close its person list");
       await browser.click(`${a} .conversation-person-session:has([data-session-id="a-check"])`, "right");
       await browser.wait("!!document.querySelector('.workspace-session-menu')");
-      await browser.click('.workspace-session-menu [role=menuitem]:has([data-wand-icon="trash"])');
+      const deleteHit = await browser.evaluate(`(()=>{const node=[...document.querySelectorAll('.workspace-session-menu [role=menuitem]')].find(n=>n.textContent.includes('删除会话'));if(!node)return null;const r=node.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,hit=document.elementFromPoint(x,y);return {x,y,hit:node===hit||node.contains(hit),actual:hit?.outerHTML.slice(0,180),text:node.textContent}})()`);
+      assert.equal(deleteHit?.hit, true, `delete action is reachable: ${JSON.stringify(deleteHit)}`);
+      await browser.send("Input.dispatchMouseEvent", { type: "mousePressed", x: deleteHit.x, y: deleteHit.y, button: "left", clickCount: 1 });
+      await browser.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: deleteHit.x, y: deleteHit.y, button: "left", clickCount: 1 });
+      await browser.settle();
       await browser.wait("!!document.querySelector('[data-wand-dialog-surface]')");
       await browser.key("Escape");
       await browser.wait("!document.querySelector('[data-wand-dialog-surface]')");
@@ -186,19 +193,21 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
       await browser.click('.conversation-navigation [data-stretch-value="tasks"]');
       await browser.wait("!!document.querySelector('[data-workspace-task-id=ta] .sidebar-session-preview')");
       const ta = '[data-workspace-task-id="ta"]';
-      assert.equal(await browser.evaluate(`document.querySelector('${ta} .workspace-task-chevron-btn').getAttribute('aria-expanded')`), "false", "changing selected session cannot force its task open");
+      assert.equal(await browser.evaluate(`document.querySelector('${ta} .workspace-task-disclosure').getAttribute('aria-expanded')`), "false", "changing selected session cannot force its task open");
       const taskOpenedBeforeParent = await browser.evaluate("fixture.opened.length");
       await browser.click(`${ta} .workspace-task-main`);
-      assert.equal(await browser.evaluate(`document.querySelector('${ta} .workspace-task-chevron-btn').getAttribute('aria-expanded')`), "true");
-      assert.equal(await browser.evaluate("fixture.opened.length"), taskOpenedBeforeParent, "task title toggles instead of navigating");
+      assert.equal(await browser.evaluate(`document.querySelector('${ta} .workspace-task-disclosure').getAttribute('aria-expanded')`), "false", "task title opens the task and leaves the session disclosure closed");
+      assert.equal(await browser.evaluate("fixture.opened.length"), taskOpenedBeforeParent + 1, "task title opens through the workspace runtime");
+      await browser.click(`${ta} .workspace-task-disclosure`);
+      assert.equal(await browser.evaluate(`document.querySelector('${ta} .workspace-task-disclosure').getAttribute('aria-expanded')`), "true");
       assert.equal(await browser.evaluate(`(()=>{const c=document.querySelector('${ta} .workspace-task-sessions').getBoundingClientRect(),p=document.querySelector('${ta}').getBoundingClientRect();return c.left-p.left<=36})()`), true, "directory-tree child indentation stays compact including the disclosure gutter");
-      await browser.click(`${ta} .workspace-task-main`);
-      assert.equal(await browser.evaluate(`document.querySelector('${ta} .workspace-task-chevron-btn').getAttribute('aria-expanded')`), "false", "parent toggles exactly once");
+      await browser.click(`${ta} .workspace-task-disclosure`);
+      assert.equal(await browser.evaluate(`document.querySelector('${ta} .workspace-task-disclosure').getAttribute('aria-expanded')`), "false", "disclosure toggles exactly once");
       assert.equal(await browser.evaluate(`document.querySelectorAll('${ta} [data-preview-session-id]').length`), 3);
       await assertTagAlignment();
       await browser.click(`${ta} [data-preview-session-id="a-style"]`);
       await browser.wait("fixture.opened.includes('a-style')");
-      assert.equal(await browser.evaluate(`document.querySelector('${ta} .workspace-task-chevron-btn').getAttribute('aria-expanded')`), "false", "task tag stays collapsed after owning-task selection and React effects");
+      assert.equal(await browser.evaluate(`document.querySelector('${ta} .workspace-task-disclosure').getAttribute('aria-expanded')`), "false", "task tag stays collapsed after owning-task selection and React effects");
       const tb = '[data-workspace-task-id="tb"]';
       const taskOpenedBeforeMore = await browser.evaluate("fixture.opened.length");
       await browser.click(`${tb} .sidebar-session-more[data-hidden-count]`);
@@ -254,8 +263,9 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
       await browser.key("Escape");
       groups[0].tasks[0].sessions = [];
       await browser.evaluate("fixture.reload().then(()=>true)");
-      await browser.wait(`!!document.querySelector('${a} [data-conversation-id]') && !document.querySelector('${a} .sidebar-session-area')`);
-      assert.equal(await browser.evaluate(`!!document.querySelector('${a} .conversation-row-open')`), true, "filtering or removing the last session preserves the top conversation entry only");
+      await browser.wait(`!!document.querySelector('${a} [data-conversation-id]') && !!document.querySelector('${a} .sidebar-session-area[data-empty]') && !document.querySelector('${a} [data-preview-session-id]') && !document.querySelector('${a} .conversation-session-toggle')`);
+      assert.ok(await browser.evaluate(`document.querySelector('${a} .sidebar-session-area[data-empty]').getBoundingClientRect().height`) >= (mode === "mobile" ? 44 : 36), "removing the last session keeps the reserved preview band");
+      assert.equal(await browser.evaluate(`!!document.querySelector('${a} .conversation-row-open')`), true, "filtering or removing the last session preserves the top conversation entry");
       groups[0].tasks[0].sessions = [...sessionsA, session("a-archived", "旧工作", "employee-a", { archived: true, status: "stopped" })];
       await browser.evaluate("fixture.reload().then(()=>true)");
       await browser.wait(`!!document.querySelector('${a} .sidebar-session-area-toggle')`);
@@ -263,7 +273,7 @@ createRoot(document.getElementById("root")).render(<WandUiProvider><UiStoreProvi
       assert.equal(await browser.evaluate("[...document.querySelectorAll('.sidebar-session-preview')].every(n=>getComputedStyle(n).transitionProperty==='none')"), true);
       assert.equal(await browser.evaluate("document.documentElement.scrollWidth<=innerWidth"), true);
       assert.deepEqual(browser.errors, []);
-      results.push(`${mode}: terminal and provider tag alignment with production preflight in full-title and icon modes/person ownership/12 separate same-tool sessions/filter/adaptive titles/expansion/focus/navigation/workspace display scope/tag direct navigation without forced expansion/identity header opens employee chat/gutter disclosure stays anchored/task parent toggles/compact child indentation/+N count and maximum fit/no arbitrary hidden selection/recent full list/archive tier/session management menu and owned move submenu/restoration action/empty and refiltered session areas hidden and recovered/reduced motion passed`);
+      results.push(`${mode}: terminal and provider tag alignment with production preflight in full-title and icon modes/person ownership/12 separate same-tool sessions/filter/adaptive titles/expansion/focus/navigation/workspace display scope/tag direct navigation without forced expansion/identity header opens employee chat/header-owned disclosure stays out of the preview band/task title opens without forcing disclosure; disclosure toggles independently/compact child indentation/+N count and maximum fit/no arbitrary hidden selection/recent full list/archive tier/session management menu and owned move submenu/restoration action/empty sessions keep the reserved preview band and recover when sessions return/reduced motion passed`);
       writeFileSync(join(output, "progress.json"), JSON.stringify({ results, mutationCount }, null, 2));
     } catch (error) {
       await browser.screenshot(join(output, `${mode}-failure.png`)).catch(() => {});

@@ -1,7 +1,7 @@
 import * as React from "react";
 import { flushSync } from "react-dom";
 import { WandButton } from "../ui/button.js";
-import { hasOpenOwnedPopupSurface, hasOpenPopupSurface, isWandPopupOwnedBy } from "../ui/popup-lifecycle.js";
+import { hasOpenOwnedPopupSurface, hasOpenPopupSurface } from "../ui/popup-lifecycle.js";
 
 /** Presentation only: the original editor, draft and delivery owner stay mounted. */
 export function useMinimalComposer({ owner, input, surface, phase, pending, locked, forceExpanded, onDismiss, popupOwners = [] }: {
@@ -17,8 +17,8 @@ export function useMinimalComposer({ owner, input, surface, phase, pending, lock
 }) {
   const [editing, setEditing] = React.useState(false);
   const [recovery, setRecovery] = React.useState(false);
-  const latest = React.useRef({ input, surface, locked, phase, popupOwners, onDismiss });
-  latest.current = { input, surface, locked, phase, popupOwners, onDismiss };
+  const latest = React.useRef({ input, surface, locked, phase, popupOwners, onDismiss, forceExpanded });
+  latest.current = { input, surface, locked, phase, popupOwners, onDismiss, forceExpanded };
   React.useLayoutEffect(() => { setEditing(false); setRecovery(false); }, [owner]);
   React.useEffect(() => {
     if (phase === "failed" || phase === "unknown") { setRecovery(true); setEditing(true); }
@@ -42,28 +42,27 @@ export function useMinimalComposer({ owner, input, surface, phase, pending, lock
       if (borrowers.size || current.locked || ["sending", "failed", "unknown"].includes(current.phase)) return;
       setEditing(false); element.blur(); current.onDismiss?.(reason);
     };
-    const inside = (target: EventTarget | null): boolean => target instanceof Node && (host.contains(target)
-      || latest.current.popupOwners.some(owner => isWandPopupOwnedBy(target, owner)));
-    const outside = (event: PointerEvent): void => {
-      if (!inside(event.target)) dismiss("outside");
-    };
+    const explicitClose = (): void => dismiss("escape");
     const escape = (event: KeyboardEvent): void => {
       if (event.key !== "Escape" || !expandedNow.current || event.defaultPrevented || event.isComposing || hasOpenPopupSurface()
         || !host.contains(document.activeElement)) return;
       if (hasOpenOwnedPopupSurface(latest.current.popupOwners)) return;
-      event.preventDefault(); event.stopPropagation(); dismiss("escape");
+      // Editing Escape is consumed without hiding the draft or opening the
+      // legacy stop-session confirmation. PTY keeps its explicit mode switch.
+      event.preventDefault(); event.stopPropagation();
+      if (latest.current.forceExpanded) dismiss("escape");
     };
     const back = (): void => { if (!hasOpenPopupSurface()) dismiss("back"); };
     document.addEventListener("wand-composer-focus-borrow", borrow);
     element.addEventListener("focus", focus);
     element.addEventListener("input", edited);
-    document.addEventListener("pointerdown", outside);
+    element.addEventListener("wand-composer-close", explicitClose);
     document.addEventListener("keydown", escape, true);
     window.addEventListener("popstate", back);
     return () => {
       document.removeEventListener("wand-composer-focus-borrow", borrow);
       element.removeEventListener("focus", focus); element.removeEventListener("input", edited);
-      document.removeEventListener("pointerdown", outside); document.removeEventListener("keydown", escape, true);
+      element.removeEventListener("wand-composer-close", explicitClose); document.removeEventListener("keydown", escape, true);
       window.removeEventListener("popstate", back);
     };
   }, [owner]);
@@ -84,12 +83,14 @@ export function useMinimalComposer({ owner, input, surface, phase, pending, lock
         && document.activeElement === document.body) element.focus({ preventScroll: true });
     });
   };
-  return { expanded, open };
+  const close = (): void => { input()?.dispatchEvent(new Event("wand-composer-close")); };
+  return { expanded, open, close };
 }
 
 export function MinimalComposerEntry({ text, attachments, placeholder, disabled, onOpen }: {
   text: string; attachments: number; placeholder: string; disabled?: boolean; onOpen(): void;
 }): React.ReactElement {
-  const label = attachments ? `草稿 · ${attachments} 个附件` : text ? `草稿 · ${text.length} 字` : placeholder;
+  const preview = text.trim().split(/\n/).find(Boolean);
+  const label = preview ? `草稿 · ${preview}` : attachments ? `草稿 · ${attachments} 个附件` : placeholder;
   return <WandButton kind="ghost" className="composer-compact-entry" disabled={disabled} aria-label={text || attachments ? "编辑未发送草稿及附件" : "展开文字输入"} onClick={onOpen}>{label}</WandButton>;
 }

@@ -212,11 +212,13 @@ export class TaskExecutionQueue {
   }
 
   /** 与任务派发共享同一闸门，来源来自服务端手动发送入口。 */
-  canStartSession(session: SessionSnapshot, scheduling: EmployeeInputScheduling): boolean {
+  canStartSession(session: SessionSnapshot, scheduling: EmployeeInputScheduling, immediate = false): boolean {
     if (this.disposed) return false;
     if (!session.employeeId) return true;
     const employee = this.deps.storage.getSiliconEmployee(session.employeeId);
     if (!employee || employee.archivedAt) throw new Error("硅基员工不存在或已归档。");
+    // 「立即发送」是显式用户动作：不再等待并发槽位或排在其它派发之后。
+    if (immediate) return true;
     const taskId = this.sessionTaskId(session);
     if (!this.hasCapacity(employee, taskId)) return false;
     if (this.dispatchingSessions.has(session.id)) return true;

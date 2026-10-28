@@ -122,7 +122,7 @@ test("session transcript stays generic with or without employee identity and act
   assert.match(topbar, /snapshot\.topbar\.title/);
 });
 
-test("static reply identities preserve avatars and provider badges without mounting live canvases", () => {
+test("static employee avatars preserve provider badges without mounting live canvases", () => {
   for (const avatar of ["", "plush-cat:v1:silver", "plush-cat:v1:orange"]) {
     const html = renderToStaticMarkup(createElement(EmployeeAvatar, {
       employee: { ...employee, avatar }, provider: "codex", renderMode: "static", thinking: true, speaking: true, fileActivity: "reading",

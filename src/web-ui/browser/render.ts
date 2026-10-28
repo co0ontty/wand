@@ -495,20 +495,14 @@ export function renderAppShell() {
           '<div class="input-composer-row" data-pi-composer="">' +
           '<span data-pi-settings-host=""></span>' +
           '<div class="input-composer' + (String(currentDraft || "").trim() ? ' has-text' : '') + (state.terminalInteractive ? ' is-terminal-interactive' : '') + '" role="group" aria-label="消息编辑器">' +
-            // Todo 与身份/执行配置共用输入面上沿，不放进收起时 inert 的编辑区域。
+            // Independent normal-flow summaries; Popover owns the portalled details.
             '<div class="composer-top-row">' +
-              '<div id="todo-progress" class="todo-progress hidden">' +
-                '<button data-antd-control class="todo-progress-header" id="todo-progress-toggle" type="button" aria-expanded="false" aria-controls="todo-progress-body" aria-label="展开待办列表">' +
-                  '<span id="todo-progress-summary"></span>' +
-                '</button>' +
-              '</div>' +
-              '<div class="todo-progress-body hidden" id="todo-progress-body">' +
-                '<div id="todo-progress-content"></div>' +
-              '</div>' +
+              '<div id="todo-progress" class="todo-progress hidden"></div>' +
               // 待发摘要与 Todo 共用输入面上沿；展开列表不挤动编辑器或身份状态行。
               // 队列动作仍由 input.ts 委托，React 只投影当前会话快照。
               '<div id="queue-bar-host" class="queue-bar-host" hidden></div>' +
             '</div>' +
+            '<div class="composer-input-divider" aria-hidden="true"></div>' +
             '<div class="composer-main-row">' +
               '<div id="terminal-shortcuts" class="terminal-shortcuts" hidden></div>' +
               '<div class="composer-input-wrap">' +

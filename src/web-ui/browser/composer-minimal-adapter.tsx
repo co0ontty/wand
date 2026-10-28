@@ -8,6 +8,7 @@ import { closePlusPopover } from "./session-engine.js";
 import { ptyInputState } from "../pty-input-state.js";
 import { PtyModifierButtons } from "../react/composer-rail/modifiers.js";
 import { composer, state } from "./state.js";
+import { WandButton, WandIcon } from "../react/ui/index.js";
 import type { ResizeInput } from "../react/composer-sender/host.js";
 
 const mounts = new Map<HTMLElement, { root: Root; chrome: HTMLElement }>();
@@ -114,6 +115,7 @@ function MinimalComposer({ host, input, resize }: { host: HTMLElement; input: HT
       <PtyModifierButtons ctrl={choice.ctrl} shift={choice.shift} disabled={state.composerComposing}
         onToggle={key => { if (!state.composerComposing) ptyInputState.toggle(owner, key); }}/></> : null}
   </>, host.querySelector(".composer-main-row")!)}
+    {!terminal && createPortal(<WandButton kind="ghost" className="composer-manual-collapse" title="收起输入框" aria-label="收起输入框" disabled={locked || phase === "sending"} style={{ visibility: minimal.expanded ? "visible" : "hidden" }} onClick={minimal.close}><WandIcon name="chevronDown" size={16}/></WandButton>, host.querySelector(".composer-actions-right")!)}
     {createPortal(<MinimalComposerEntry text={draft.text} attachments={draft.attachments.length}
       placeholder={input.placeholder} disabled={input.disabled} onOpen={minimal.open}/>, host.querySelector(".composer-actions-left")!)}
   </>;

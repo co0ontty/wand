@@ -17,6 +17,7 @@ import { createExtensionCors, extensionIdOf } from "../src/middleware/cors.js";
 import { sendRouteError } from "../src/server-request.js";
 import { resolveTrustProxy, DEFAULT_TRUST_PROXY } from "../src/server-request.js";
 import { startServer } from "../src/server.js";
+import type { TerminalHost, TerminalSpawnRequest } from "../src/terminal-host.js";
 
 const ROUTE_SOURCE_FILES = readdirSync(path.join(import.meta.dirname, "..", "src"))
   .filter((name) => /^server-.*\.ts$/.test(name) || name === "server.ts" || name === "upload-routes.ts")
@@ -37,6 +38,8 @@ test("every /api family referenced by route modules is explicitly classified", (
 
 test("api scope matching is segment-aware and unknown paths default to admin", () => {
   assert.equal(requiredApiScope("/api/sessions"), "sessions");
+  assert.equal(requiredApiScope("/api/wand-task-actions"), "sessions");
+  assert.equal(requiredApiScope("/api/wand-task-actions-extra"), "admin");
   assert.equal(requiredApiScope("/api/sessions/abc/input"), "sessions");
   assert.equal(requiredApiScope("/api/commands"), "admin");
   assert.equal(requiredApiScope("/api/structured-sessions"), "sessions");
@@ -170,6 +173,24 @@ test("connected apps are limited to declared scopes and cannot reach admin or ra
   });
   const password = "http-scope-password";
   const appSecret = "http-scope-secret";
+  const spawned: TerminalSpawnRequest[] = [];
+  let stopped = 0;
+  // This test exercises HTTP authorization, not a user's installed provider or
+  // shell rc. Record the real spawn request without launching a paid CLI.
+  const terminalHost: TerminalHost = {
+    persistent: false, attach() { return null; }, forget() {}, disconnect() {},
+    async createOrAttach(request) {
+      spawned.push(request);
+      const incarnationId = `http-scope-${spawned.length}`;
+      return { isNew: true, replay: [], process: {
+        sessionId: request.sessionId, incarnationId, pid: 0,
+        write() {}, resize() {}, kill() { stopped++; },
+        onData() { return { dispose() {} }; }, onExit() { return { dispose() {} }; },
+      }, state: { sessionId: request.sessionId, incarnationId, pid: 0, status: "running", exitCode: null,
+        cols: request.cols, rows: request.rows, seq: 0, output: "", chunks: [], terminalSnapshot: null,
+        launchMarkerToken: request.launchMarkerToken ?? null } };
+    },
+  };
   const handle = await startServer({
     ...defaultConfig(),
     host: "127.0.0.1",
@@ -179,7 +200,7 @@ test("connected apps are limited to declared scopes and cannot reach admin or ra
     appSecret,
     defaultCwd: root,
     startupCommands: [],
-  }, path.join(root, "config.json"));
+  }, path.join(root, "config.json"), { terminalHost });
   t.after(() => handle.close());
   const baseUrl = handle.urls[0].url;
   const appToken = crypto.createHmac("sha256", appSecret).update(password).digest("hex");
@@ -188,7 +209,10 @@ test("connected apps are limited to declared scopes and cannot reach admin or ra
   // Declared families stay reachable for native clients.
   assert.equal((await fetch(`${baseUrl}/api/tasks`, { headers })).status, 200);
   assert.equal((await fetch(`${baseUrl}/api/workspaces`, { headers })).status, 200);
+  assert.equal((await fetch(`${baseUrl}/api/wand-task-actions`, { headers })).status, 200, "native sessions scope can read actions without admin");
   assert.equal((await fetch(`${baseUrl}/api/silicon-employees`, { headers })).status, 200);
+  assert.equal((await fetch(`${baseUrl}/api/knowledge/owners`, { headers })).status, 200);
+  assert.equal((await fetch(`${baseUrl}/api/knowledge/owners`)).status, 401);
 
   // Default-deny: admin-only families refuse connected apps before their handlers run.
   assert.equal((await fetch(`${baseUrl}/api/restart`, { method: "POST", headers })).status, 403);
@@ -224,9 +248,15 @@ test("connected apps are limited to declared scopes and cannot reach admin or ra
     method: "POST", headers, body: JSON.stringify({ kind: "pty", command: "pi", cwd: root }),
   });
   assert.equal(legacyProvider.status, 201);
+  const legacySession = await legacyProvider.json() as { id: string };
+  assert.equal(spawned.length, 1, "denied raw commands never reach the terminal host");
+  assert.equal(spawned[0]?.sessionId, legacySession.id);
+  assert.equal((await fetch(`${baseUrl}/api/sessions/${legacySession.id}/stop`, { method: "POST", headers })).status, 200);
+  assert.equal(stopped, 1, "the test explicitly stops its provider fixture");
 
   // Unauthenticated requests still get 401, and a bad bearer token is counted.
   assert.equal((await fetch(`${baseUrl}/api/tasks`)).status, 401);
+  assert.equal((await fetch(`${baseUrl}/api/wand-task-actions`)).status, 401);
 });
 
 test("bearer token failures are rate limited per client", async (t) => {

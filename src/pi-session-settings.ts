@@ -49,6 +49,24 @@ export function piSkillModePatch(settings: PiSessionSettings, id: string, mode: 
   };
 }
 
+/** The server may also deselect a newly unlocked Skill if it disappeared since the panel loaded. */
+export function piResourceSettingsConfirmed(current: PiSessionSettings, patch: PiSessionSettingsPatch,
+  confirmed: PiSessionSettings | undefined): boolean {
+  if (!confirmed) return false;
+  if (patch.lockedSkills !== undefined
+    && JSON.stringify(confirmed.lockedSkills) !== JSON.stringify(patch.lockedSkills)) return false;
+  if (patch.resources === undefined && patch.lockedSkills === undefined) return true;
+  const expected = patch.resources ?? current.resources;
+  if (!confirmed.resources) return !expected && !patch.lockedSkills?.length;
+  let resources: PiResourceSelection;
+  try { resources = patchPiResourceSelection(confirmed.resources); } catch { return false; }
+  const unlocked = new Set(patch.lockedSkills === undefined ? []
+    : (current.lockedSkills ?? []).filter((id) => !patch.lockedSkills!.includes(id)));
+  const skills = (expected?.skills ?? []).filter((id) => !unlocked.has(id) || resources.skills.includes(id));
+  return JSON.stringify(resources.skills) === JSON.stringify(skills)
+    && JSON.stringify(resources.mcpServers) === JSON.stringify(expected?.mcpServers ?? []);
+}
+
 export interface PiResourceSelectionNotice {
   status: "selecting" | "selected" | "fallback" | "cancelled";
   label: string;

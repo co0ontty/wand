@@ -86,6 +86,7 @@ const server=createServer(async(request,response)=>{
     if (/^\/api\/silicon-employees\/[^/]+\/im$/.test(path) && request.method === "GET") return send({ events: [], telegram: { enabled: false, chatId: "" }, dingtalk: { enabled: false } });
     const knowledge=path.match(/^\/api\/silicon-employees\/([^/]+)\/knowledge$/);
     if(knowledge&&request.method==="GET")return send({employeeId:knowledge[1],entries:[],total:0,maxEntries:200});
+    if(path==="/api/knowledge"&&request.method==="GET")return send({scope:url.searchParams.get("scope"),ownerId:url.searchParams.get("ownerId"),ownerName:"普通员工",readOnly:false,entries:[],total:0,limit:200});
     const matched=path.match(/^\/api\/silicon-employees\/([^/]+)(?:\/(archive|unarchive))?$/);
     if(matched){const at=employees.findIndex(e=>e.id===matched[1]);if(at<0)return send({error:"missing"},404);
       if(request.method==="PUT"){employees[at]={...employees[at],...body};return send(employees[at])}
@@ -338,6 +339,12 @@ try{
   assert.deepEqual(employees.find(item=>item.id==="emp-custom").agents.map(a=>a.model),["m2","m1"]);
   cases.push({name:"candidate duplicate validation, deletion and fallback order save"});
   await e("employeeProfileFixture.drawer('emp-custom')");await browser.wait("!!document.querySelector('#object-profile-panel.open')");await pause(400);await clickText("编辑员工配置","#object-profile-panel");await browser.wait("!!document.querySelector('#object-profile-panel [data-employee-profile]')");
+  await section("advanced","#object-profile-panel");
+  const drawerScroll=await e(`(()=>{const body=document.querySelector('#object-profile-panel .ant-drawer-body'),profile=body.querySelector('[data-employee-profile]'),scroll=profile.querySelector('.profile-body'),button=[...profile.querySelectorAll('button')].find(n=>n.textContent.trim()==='打开个人知识库');button.scrollIntoView({block:'center',behavior:'instant'});const r=button.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return{bodyHeight:body.clientHeight,profileHeight:profile.getBoundingClientRect().height,scrollHeight:scroll.scrollHeight,clientHeight:scroll.clientHeight,scrollTop:scroll.scrollTop,reachable:r.top>=0&&r.bottom<=innerHeight&&(button===hit||button.contains(hit))}})()`);
+  assert.ok(drawerScroll.profileHeight<=drawerScroll.bodyHeight+1,"employee editor is bounded by the native Drawer body");
+  assert.ok(drawerScroll.scrollHeight>drawerScroll.clientHeight&&drawerScroll.scrollTop>0,"the editor body scrolls to expanded bottom content");
+  assert.equal(drawerScroll.reachable,true,"personal knowledge entry is visible and hit-testable after scrolling");
+  cases.push({name:"employee drawer bottom knowledge entry remains reachable",...drawerScroll});
   await section("tools","#object-profile-panel");const model='#object-profile-panel .wand-team-candidate [aria-label$="模型"]';await browser.click(model);await browser.wait("!!document.querySelector('.wand-ui-select-content input')");await browser.click('.wand-ui-select-content input');await browser.send("Input.insertText",{text:"模型"});
   assert.ok(await e("!!document.querySelector('#object-profile-panel [data-employee-profile]')"),"owned Portal search does not close drawer editor");await browser.key("Escape");await browser.wait("!document.querySelector('.wand-ui-select-content')");assert.ok(await e("!!document.querySelector('#object-profile-panel [data-employee-profile]')"),"first Escape closes owned select only");
   assert.equal(await e(`document.activeElement===document.querySelector(${JSON.stringify(model)})`),true,"Portal Escape restores model trigger");await clickText("取消","#object-profile-panel");await browser.wait("!document.querySelector('#object-profile-panel [data-employee-profile]')");await browser.key("Escape");await browser.wait("!document.querySelector('#object-profile-panel.open')");

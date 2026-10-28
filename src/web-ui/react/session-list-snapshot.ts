@@ -32,7 +32,7 @@ export function publishSessionList(sessions: WorkspaceSessionSummary[]): void {
  * 投影给 React 前先裁成 DTO 形状：共享快照只承载「列表」语义，不泄漏本地缓冲。
  */
 const SUMMARY_FIELDS = [
-  "automationId", "engine", "provider", "sessionKind", "runner", "command", "title", "titleGenerating",
+  "automationId", "sessionSource", "engine", "provider", "sessionKind", "runner", "command", "title", "titleGenerating",
   "status", "completionRevision", "viewedCompletionRevision", "cwd", "startedAt", "workspaceTaskId",
   "ptyBusy", "ptyCommandRunning", "archived", "archivedAt", "providerCliActive", "providerCliExitCode",
   "inFlight", "executionStatus", "queuedMessageCount", "canArchive", "employeeId", "employeeName", "employeeAvatar", "teamChat", "teamStep",
@@ -45,6 +45,7 @@ export function projectSessionSummaries(sessions: readonly unknown[]): Workspace
     if (!entry || typeof entry !== "object") continue;
     const source = entry as Record<string, unknown>;
     if (typeof source.id !== "string") continue;
+    if (source.sessionSource === "quick-terminal") continue;
     const summary: Record<string, unknown> = { id: source.id };
     for (const field of SUMMARY_FIELDS) {
       if (source[field] !== undefined) summary[field] = source[field];

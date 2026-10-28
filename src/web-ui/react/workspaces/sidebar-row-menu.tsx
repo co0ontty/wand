@@ -41,6 +41,8 @@ export function SidebarRowMenu({ row, menu, open, onOpenChange, label, title, de
   const pointer = React.useRef<{ x: number; y: number } | null>(null);
   const pressed = React.useRef(false);
   const [openKeys, setOpenKeys] = React.useState<string[]>([]);
+  const submenuOpen = React.useRef(false);
+  submenuOpen.current = openKeys.length > 0;
   const cancel = (): void => { if (timer.current !== null) clearTimeout(timer.current); timer.current = null; pointer.current = null; };
   const changeKeys = (keys: string[]): void => {
     // Ant's menu and context dropdown share a native layer when there is no enclosing
@@ -56,6 +58,10 @@ export function SidebarRowMenu({ row, menu, open, onOpenChange, label, title, de
   };
   usePopupDismiss(shown, () => { onOpenChange(false); restoreFocus(); });
   usePopupDismiss(shown && openKeys.length > 0, () => {
+    // The lease stays registered until the effect after this render. A second Escape
+    // in that interval must reach the parent menu instead of being consumed again.
+    if (!submenuOpen.current) { onOpenChange(false); restoreFocus(); return; }
+    submenuOpen.current = false;
     changeKeys([]);
     content.current?.querySelector<HTMLElement>(".ant-dropdown-menu-submenu-title")?.focus({ preventScroll: true });
   });
@@ -100,7 +106,7 @@ export function SidebarRowMenu({ row, menu, open, onOpenChange, label, title, de
   // 弹层未到位时先记下这次右键的位置，实现到达后按原坐标重放。
   const [Surface, setSurface] = React.useState<React.ComponentType<DropdownSurfaceProps> | null>(null);
   const surfaceRequest = React.useRef<Promise<void> | null>(null);
-  const pendingOpen = React.useRef<{ x: number; y: number; target: HTMLElement | null } | null>(null);
+  const pendingOpen = React.useRef<{ x: number; y: number; focusIndex: number } | null>(null);
   const loadSurface = React.useCallback((): Promise<void> => {
     if (Surface) return Promise.resolve();
     if (!surfaceRequest.current) {
@@ -113,7 +119,10 @@ export function SidebarRowMenu({ row, menu, open, onOpenChange, label, title, de
     const pending = pendingOpen.current;
     if (!pending) return;
     pendingOpen.current = null;
-    openAt(pending.x, pending.y, pending.target);
+    // Adding the lazy Dropdown wrapper remounts the row. Resolve the same control
+    // in its replacement instead of retaining a detached pre-load DOM node.
+    const target = triggerNode.current?.querySelectorAll<HTMLElement>("button,a[href],[tabindex]")[pending.focusIndex];
+    openAt(pending.x, pending.y, target ?? triggerNode.current);
   }, [Surface]);
   const trigger = React.cloneElement(row, {
     ref: (node: HTMLElement | null) => {
@@ -137,7 +146,8 @@ export function SidebarRowMenu({ row, menu, open, onOpenChange, label, title, de
       row.props.onContextMenu?.(event);
       if (!unavailable && !Surface) {
         // 弹层还没到位：记下这次右键坐标，等实现到达后重放同一个手势。
-        pendingOpen.current = { x: event.clientX, y: event.clientY, target: event.target as HTMLElement };
+        pendingOpen.current = { x: event.clientX, y: event.clientY,
+          focusIndex: Array.from(triggerNode.current?.querySelectorAll("button,a[href],[tabindex]") ?? []).indexOf(returnFocus.current!) };
         void loadSurface();
       }
     },

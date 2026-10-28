@@ -45,13 +45,29 @@ export function ObjectProfilePanel({
   const [editing, setEditing] = React.useState(false);
   const [dirty, setDirty] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
-  const [discard, setDiscard] = React.useState<"close" | "view" | null>(null);
+  const [discard, setDiscard] = React.useState<"close" | "view" | "navigate" | null>(null);
+  const pendingNavigation = React.useRef<(() => void) | null>(null);
   React.useEffect(() => { setSavedEmployee(null); }, [employee]);
-  React.useEffect(() => { setEditing(false); setDirty(false); setDiscard(null); }, [employee?.id, open]);
+  React.useEffect(() => { setEditing(false); setDirty(false); setDiscard(null); pendingNavigation.current = null; }, [employee?.id, open]);
   employee = savedEmployee ?? employee;
   const panelRef = React.useRef<HTMLDivElement>(null);
   const returnFocus = React.useRef(false);
   const container = usePortalContainer();
+  const finishNavigation = (): void => {
+    const navigate = pendingNavigation.current;
+    pendingNavigation.current = null;
+    if (!navigate) return;
+    setDiscard(null); setEditing(false); setDirty(false);
+    returnFocus.current = false;
+    onClose();
+    navigate();
+  };
+  const requestNavigation = (navigate: () => void): void => {
+    if (saving) return;
+    pendingNavigation.current = navigate;
+    if (editing && dirty) { setDiscard("navigate"); return; }
+    finishNavigation();
+  };
   const closeWithFocus = (): void => {
     if (saving) return;
     if (editing && dirty) { setDiscard("close"); return; }
@@ -128,13 +144,15 @@ export function ObjectProfilePanel({
         data-wand-popup-owner="object-profile">{node}</div>}
     >
         {discard ? <Alert role="alert" type="warning" title="放弃尚未保存的修改？" style={{ marginBottom: 16 }} action={<Flex gap={8}>
-          <WandButton onClick={() => setDiscard(null)}>继续编辑</WandButton><WandButton kind="danger" onClick={() => {
+          <WandButton onClick={() => { pendingNavigation.current = null; setDiscard(null); }}>继续编辑</WandButton><WandButton kind="danger" onClick={() => {
+            if (discard === "navigate") { finishNavigation(); return; }
+            pendingNavigation.current = null;
             const close = discard === "close"; setDiscard(null); setEditing(false); setDirty(false);
             if (close) { returnFocus.current = true; onClose(); if (!mobile) triggerRef.current?.focus({ preventScroll: true }); }
           }}>放弃修改</WandButton></Flex>}/> : null}
         {editing && employee ? <EmployeeCard key={employee.id} employee={employee} catalog={catalog}
           providerOptions={ISSUE_AGENT_PROVIDERS.map(({ value, label }) => ({ value, label }))}
-          editorOnly onDirtyChange={setDirty} onSavingChange={setSaving}
+          editorOnly onDirtyChange={setDirty} onSavingChange={setSaving} onOpenKnowledge={requestNavigation}
           onCancel={() => { setDirty(false); setEditing(false); }} onSave={async patch => {
             const updated = await siliconEmployeesRepository.update(employee!.id, employeeUpdateInput(employee!, patch));
             setSavedEmployee(updated); setSaving(false); setDirty(false); setEditing(false);

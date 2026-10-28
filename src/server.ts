@@ -1,3 +1,4 @@
+import { registerKnowledgeRoutes } from "./server-knowledge-routes.js";
 import { OpenRouterFreeModelsService } from "./openrouter-free-models.js";
 import { OpenCodeFreeModelsService, registerOpenCodeFreePool, adoptSystemOpenCodeFreeDefault } from "./opencode-system-fallback.js";
 import { OPENCODE_FREE_GROUP_ID, OPENCODE_FREE_GROUP_NAME } from "./opencode-free-selection.js";
@@ -514,7 +515,7 @@ export async function startServer(
     storage, config, structured: structuredSessions, processes, sessions: sessionRegistry,
   });
   structuredSessions.setEmployeeInputAdmission({
-    canStart: (session, scheduling) => taskExecutionQueue.canStartSession(session, scheduling),
+    canStart: (session, scheduling, immediate) => taskExecutionQueue.canStartSession(session, scheduling, immediate),
     schedule: employeeId => taskExecutionQueue.scheduleDrain(employeeId),
   });
   let apnsConfiguration: ReturnType<typeof loadApnsConfiguration> = null;
@@ -804,6 +805,7 @@ export async function startServer(
     executionQueue: taskExecutionQueue,
     notifyEmployeeChanged: (employeeId) => notifyAiTeamRun({ kind: "silicon-employee-definition", employeeId }),
   });
+  registerKnowledgeRoutes(app, storage);
   registerEmployeeImRoutes(app, { storage, im: employeeIm, requireAdmin });
   registerDingTalkRoutes(app, { service: dingtalk, requireAdmin, install: () => dingtalkDws.install() });
   registerAttentionRoutes(app, { sessions: sessionRegistry, runner: aiTeams });
@@ -1185,7 +1187,7 @@ export async function startServer(
     modelCatalogRefreshTimer.unref();
   }
 
-  // 会话仍按固定 7 天归档再清理；任务窗口每次扫描读取当前设置。
+  // 每次扫描读取当前保留窗口；未完成、待验收和升级前任务归档不进入自动清理。
   // 保存任务保留设置后走同一条扫描，不等下一小时。
   const retentionDeps = {
     storage,

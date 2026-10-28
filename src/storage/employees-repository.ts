@@ -289,8 +289,10 @@ export class EmployeeRepository {
       if (accessToken && this.resolveEmployeeKnowledgeAccess(accessToken) !== employeeId) {
         throw new Error("知识库访问已失效，请等待新的会话执行。");
       }
-      return this.db.prepare("DELETE FROM employee_knowledge WHERE employee_id = ? AND id = ?")
+      const deleted = this.db.prepare("DELETE FROM employee_knowledge WHERE employee_id = ? AND id = ?")
         .run(employeeId, entryId).changes === 1;
+      if (deleted) this.s.invalidateKnowledgeNamespace("personal", employeeId);
+      return deleted;
     });
   }
 
@@ -298,7 +300,7 @@ export class EmployeeRepository {
     this.s.transaction(() => {
       this.requireKnowledgeEmployee(employeeId);
       this.db.prepare("DELETE FROM employee_knowledge WHERE employee_id = ?").run(employeeId);
-      this.db.prepare("DELETE FROM employee_knowledge_access WHERE employee_id = ?").run(employeeId);
+      this.s.invalidateKnowledgeNamespace("personal", employeeId);
     });
   }
 

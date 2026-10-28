@@ -7,11 +7,13 @@ export const PAGE_ROUTE_KEYS = new Set([
   "boardView", "q", "directory", "sort", "filters",
   "scheduleView", "scheduleQuery", "scheduleFilter", "scheduleRange", "scheduleDate",
   "teamQuery", "teamFilter", "teamPage", "settingsNested",
+  "knowledgeScope", "knowledgeOwner", "knowledgeDocument",
 ]);
 /** Former URL state that is now a local preference. Old links are tolerated and cleaned on the next write. */
 const LEGACY_KEYS = ["sidebarMode", "display", "zoom", "hideCompleted", "queue", "expandedTask", "boardCollapsed", "scheduleExpanded"];
 /** Parameters owned by one page; leaving that page drops them so the address does not accumulate. */
 const VIEW_SCOPED: Array<{ views: string[]; keys: string[] }> = [
+  { views: ["knowledge"], keys: ["knowledgeScope", "knowledgeOwner", "knowledgeDocument"] },
   { views: ["taskboard", "issues"], keys: ["boardView", "q", "sort", "filters", "directory", "task"] },
   { views: ["teams", "teamchat"], keys: ["team", "teamQuery", "teamFilter", "teamPage", "run"] },
   { views: ["schedules", "calendar"], keys: ["scheduleView", "scheduleQuery", "scheduleFilter", "scheduleRange", "scheduleDate", "range"] },

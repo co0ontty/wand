@@ -1,6 +1,6 @@
-import { AI_TEAM_ACTIVE_RUN_STATUSES } from "./ai-team-types.js";
 import { isArchiveBlocked } from "./archive-policy.js";
 import { cleanupWorktreeSync } from "./git-worktree.js";
+import { createRetentionProtection } from "./retention-protection.js";
 import type { SessionRegistry } from "./session-registry.js";
 import type { WandStorage } from "./storage.js";
 import { defaultTaskRetention, taskRetentionWindows, type TaskRetentionSettings } from "./task-retention.js";
@@ -13,8 +13,9 @@ export const RETENTION_IDLE_MS = DEFAULT_RETENTION_WINDOWS.idleMs!;
 export const RETENTION_ARCHIVED_MS = DEFAULT_RETENTION_WINDOWS.archivedMs!;
 
 /**
- * 看板任务、会话和已结束的团队运行共用 `taskRetention`。
- * 没配过时默认空闲 7 天归档，再过 7 天清理。
+ * 看板任务、会话和已结束的团队运行共用 `taskRetention` 的开关与天数。
+ * 只有已验收、无未完成上下文且无执行/审批/排队事实的任务才能自动归档；
+ * 关联会话与团队历史跟随保护。升级前的任务归档不自动删除。
  * 结构化会话看运行状态；PTY 只有正在回复或等待确认才跳过，空闲壳不算在处理。
  */
 
@@ -80,12 +81,16 @@ export function runRetentionSweep(deps: RetentionDeps, now = Date.now()): Retent
     typeof deps.taskRetention === "function" ? deps.taskRetention() : deps.taskRetention,
   );
   const snapshots = deps.sessions.listSlim();
+  // Eligibility is fixed from the pre-mutation snapshot, so a task archived in this pass cannot be purged in it.
+  const protection = createRetentionProtection(deps.storage, snapshots, taskWindows.archivedMs, now);
+  const purgedSessionIds = new Set<string>();
+  const archivedSessionIds = new Set<string>();
 
   for (const session of snapshots) {
     // 真正还在处理的会话不能归档或杀掉。空闲 PTY 壳不算。
     if (isArchiveBlocked(session)) continue;
     if (session.archived) {
-      if (taskWindows.archivedMs === null) continue;
+      if (!protection.canPurgeSession(session.id) || taskWindows.archivedMs === null) continue;
       const archivedAt = timestamp(session.archivedAt);
       if (archivedAt === null) {
         // 历史归档行没有时间戳：先补上，让删除窗口从这一刻起算，而不是立刻删除。
@@ -93,22 +98,13 @@ export function runRetentionSweep(deps: RetentionDeps, now = Date.now()): Retent
         continue;
       }
       if (now - archivedAt < taskWindows.archivedMs) continue;
-      try {
-        deps.sessions.delete(session.id);
-        result.purgedSessions += 1;
-      } catch { /* best-effort: a session may disappear between the read and the purge */ }
+      purgeRetentionSession(deps, session, purgedSessionIds, result);
       continue;
     }
-    if (taskWindows.idleMs === null) continue;
+    if (taskWindows.idleMs === null || !protection.canArchiveSession(session.id)) continue;
     const reference = timestamp(session.endedAt ?? session.startedAt);
     if (reference === null || now - reference < taskWindows.idleMs) continue;
-    if (isIdleLivePty(session)) {
-      try { deps.sessions.stop(session.id); } catch { /* shell may already be gone */ }
-    }
-    try {
-      deps.sessions.setArchived(session.id, true);
-      result.archivedSessions += 1;
-    } catch { /* best-effort */ }
+    archiveRetentionSession(deps, session, archivedSessionIds, result);
   }
 
   const sessionsByTask = new Map<string, SessionSnapshot[]>();
@@ -120,20 +116,16 @@ export function runRetentionSweep(deps: RetentionDeps, now = Date.now()): Retent
     else sessionsByTask.set(taskId, [session]);
   }
 
-  const activeTeamTaskIds = new Set(deps.storage.listAiTeamRuns({ statuses: AI_TEAM_ACTIVE_RUN_STATUSES }).map(run => run.taskId));
-  for (const task of deps.storage.listWandTasks()) {
+  for (const task of protection.tasks) {
     const bound = task.workspaceTaskId ? sessionsByTask.get(task.workspaceTaskId) ?? [] : [];
-    const running = bound.some((session) => isArchiveBlocked(session))
-      || activeTeamTaskIds.has(task.id) || (!!task.workspaceTaskId && activeTeamTaskIds.has(task.workspaceTaskId));
     if (task.status === "archived") {
-      if (running || taskWindows.archivedMs === null) continue;
       const archivedAt = timestamp(task.archivedAt);
       if (archivedAt === null) {
-        // 历史归档行（归档时间尚未落库）：补写时间戳，给用户留出恢复窗口。
+        // 只补时间戳；状态未变，不会把升级前归档标记为可自动删除。
         deps.storage.updateWandTask(task.id, { status: "archived" });
         continue;
       }
-      if (now - archivedAt < taskWindows.archivedMs) continue;
+      if (!protection.canPurgeTask(task.id)) continue;
       const container = task.workspaceTaskId ? deps.storage.getWorkspaceTask(task.workspaceTaskId) : null;
       if (container?.worktree) {
         try { cleanupWorktreeSync(container.worktree); } catch { /* never block cleanup */ }
@@ -142,74 +134,86 @@ export function runRetentionSweep(deps: RetentionDeps, now = Date.now()): Retent
       result.purgedTasks += 1;
       continue;
     }
-    if (running || task.status === "doing" || taskWindows.idleMs === null) continue;
+    if (taskWindows.idleMs === null || !protection.canArchiveTask(task)) continue;
     const lastActivity = taskLastActivity(deps.storage, task, bound);
     if (lastActivity === null || now - lastActivity < taskWindows.idleMs) continue;
     deps.storage.updateWandTask(task.id, { status: "archived" });
     result.archivedTasks += 1;
   }
 
-  sweepTeamRuns(deps, taskWindows, snapshots, now, result);
+  sweepTeamRuns(deps, protection, taskWindows, snapshots, purgedSessionIds, archivedSessionIds, now, result);
   return result;
+}
+
+function archiveRetentionSession(
+  deps: RetentionDeps,
+  session: SessionSnapshot,
+  archivedSessionIds: Set<string>,
+  result: RetentionResult,
+): void {
+  if (session.archived || archivedSessionIds.has(session.id)) return;
+  if (isIdleLivePty(session)) {
+    try { deps.sessions.stop(session.id); } catch { /* shell may already be gone */ }
+  }
+  try {
+    deps.sessions.setArchived(session.id, true);
+    session.archived = true;
+    archivedSessionIds.add(session.id);
+    result.archivedSessions += 1;
+  } catch { /* best-effort */ }
+}
+
+function purgeRetentionSession(
+  deps: RetentionDeps,
+  session: SessionSnapshot,
+  purgedSessionIds: Set<string>,
+  result: RetentionResult,
+): void {
+  if (purgedSessionIds.has(session.id)) return;
+  if (isIdleLivePty(session)) {
+    try { deps.sessions.stop(session.id); } catch { /* already gone */ }
+  }
+  try {
+    deps.sessions.delete(session.id);
+    purgedSessionIds.add(session.id);
+    result.purgedSessions += 1;
+  } catch { /* best-effort: a session may disappear between the read and the purge */ }
 }
 
 function sweepTeamRuns(
   deps: RetentionDeps,
+  protection: ReturnType<typeof createRetentionProtection>,
   windows: { idleMs: number | null; archivedMs: number | null },
   snapshots: readonly SessionSnapshot[],
+  purgedSessionIds: Set<string>,
+  archivedSessionIds: Set<string>,
   now: number,
   result: RetentionResult,
 ): void {
   const sessionById = new Map(snapshots.map((session) => [session.id, session]));
-  for (const run of deps.storage.listAiTeamRuns()) {
-    if (run.status === "running") continue;
-    const linked = teamRunSessionIds(deps.storage, run.id, run.chatSessionId);
-    if (linked.some((id) => {
-      const session = sessionById.get(id);
-      return session ? isRetentionBusy(session) : false;
-    })) continue;
+  for (const run of protection.runs) {
+    if (!protection.canPurgeRun(run.id) && !protection.canArchiveRun(run.id)) continue;
+    const linked = protection.teamSessionIds.get(run.id) ?? [];
     const activity = teamRunActivity(run.updatedAt, linked, sessionById);
     if (activity === null) continue;
-    if (windows.archivedMs !== null && now - activity >= windows.archivedMs) {
+    if (protection.canPurgeRun(run.id) && windows.archivedMs !== null && now - activity >= windows.archivedMs) {
       for (const id of linked) {
         const session = sessionById.get(id);
-        if (!session || isRetentionBusy(session)) continue;
-        if (isIdleLivePty(session)) {
-          try { deps.sessions.stop(id); } catch { /* already gone */ }
-        }
-        try {
-          deps.sessions.delete(id);
-          result.purgedSessions += 1;
-          sessionById.delete(id);
-        } catch { /* already gone */ }
+        if (!session || !protection.canPurgeSession(id)) continue;
+        purgeRetentionSession(deps, session, purgedSessionIds, result);
+        sessionById.delete(id);
       }
       deps.storage.deleteAiTeamRun(run.id);
       result.purgedTeamRuns += 1;
       continue;
     }
-    if (windows.idleMs === null || now - activity < windows.idleMs) continue;
+    if (!protection.canArchiveRun(run.id) || windows.idleMs === null || now - activity < windows.idleMs) continue;
     for (const id of linked) {
       const session = sessionById.get(id);
-      if (!session || session.archived || isRetentionBusy(session)) continue;
-      if (isIdleLivePty(session)) {
-        try { deps.sessions.stop(id); } catch { /* already gone */ }
-      }
-      try {
-        deps.sessions.setArchived(id, true);
-        session.archived = true;
-        result.archivedSessions += 1;
-      } catch { /* best-effort */ }
+      if (!session || !protection.canArchiveSession(id)) continue;
+      archiveRetentionSession(deps, session, archivedSessionIds, result);
     }
   }
-}
-
-function teamRunSessionIds(storage: WandStorage, runId: string, chatSessionId: string | null): string[] {
-  const ids = new Set<string>();
-  if (chatSessionId) ids.add(chatSessionId);
-  for (const step of storage.listAiTeamSteps(runId)) {
-    if (step.sessionId) ids.add(step.sessionId);
-  }
-  return [...ids];
 }
 
 function teamRunActivity(

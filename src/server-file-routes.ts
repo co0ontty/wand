@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { exec } from "node:child_process";
 import { lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { homedir } from "node:os";
 import type { Stats } from "node:fs";
 import process from "node:process";
 import { promisify } from "node:util";
@@ -16,11 +17,41 @@ import type { WandStorage } from "./storage.js";
 import type { DirectoryListing, FileEntry, FilePreviewKind, FilePreviewResponse, GitFileStatus, PathSuggestion } from "./types.js";
 import { RecentPath, parseStoredPathList, recordRecentPath } from "./recent-paths.js";
 import { streamFileWithRange } from "./http-file-stream.js";
+import { HTML_PREVIEW_CSP } from "./html-preview-policy.js";
 
 const execAsync = promisify(exec);
 const DIRECTORY_MAX_ITEMS = 200;
 const MAX_TEXT_PREVIEW_SIZE = 512 * 1024;
 const MAX_TEXT_WRITE_SIZE = 1024 * 1024;
+
+/** Query/root values are already decoded filesystem names; whitespace may be
+ * literal. Home expansion must not apply the folder input's trimming policy. */
+function resolveReadPath(value: string): string {
+  return path.resolve(value.startsWith("~/") ? path.join(homedir(), value.slice(2)) : value);
+}
+
+/** Editor links may end in :line:column, but those characters are legal in
+ * filenames. Read the exact file first; writes never use this fallback. */
+async function readableFilePath(input: string, allowDirectory = false): Promise<string> {
+  const fallback = input.replace(/:\d+(?::\d+)?$/, "");
+  if (fallback === input) return input;
+  try {
+    const exact = await stat(input);
+    if (exact.isFile() || (allowDirectory && exact.isDirectory())) return input;
+  } catch (error) {
+    if (!["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code || "")) throw error;
+  }
+  if (isBlockedFolderPath(fallback)) return input;
+  try { if ((await stat(fallback)).isFile()) return fallback; }
+  catch (error) {
+    if (!["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code || "")) throw error;
+  }
+  return input;
+}
+
+function readableFileExtension(filePath: string): string {
+  return path.extname(filePath.replace(/:\d+(?::\d+)?$/, "")).toLowerCase();
+}
 
 export interface ServerFileRoutesDependencies {
   storage: WandStorage;
@@ -35,21 +66,31 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
     const session = storage.getSessionSlim(String(req.params.sessionId));
     if (!session?.cwd) { res.status(404).json({ error: "文件所属会话不存在。" }); return; }
     const relative = typeof req.query.path === "string" ? req.query.path : "";
-    if (!relative || path.isAbsolute(relative) || /[\u0000-\u001f]/.test(relative) || /^[a-z][a-z\d+.-]*:/i.test(relative)) {
+    const editorLocation = /^[^/:]+:\d+(?::\d+)?$/.test(relative);
+    if (!relative || path.isAbsolute(relative) || /[\u0000-\u001f]/.test(relative) || (/^[a-z][a-z\d+.-]*:/i.test(relative) && !editorLocation)) {
       res.status(400).json({ error: "文件相对路径无效。" }); return;
     }
-    const resolved = path.resolve(session.cwd, relative);
+    let resolved = path.resolve(session.cwd, relative);
     if (!isPathWithinBase(resolved, path.resolve(session.cwd)) || isBlockedFolderPath(resolved)) {
       res.status(403).json({ error: "文件路径超出会话目录。" }); return;
     }
+    resolved = await readableFilePath(resolved, relative.endsWith("/"));
     const canonical = await realpath(resolved).catch(() => null);
     const base = await realpath(session.cwd).catch(() => null);
     if (canonical && base && (!isPathWithinBase(canonical, base) || isBlockedFolderPath(canonical))) {
       res.status(403).json({ error: "文件链接目标超出会话目录。" }); return;
     }
     if (req.query.mode === "preview") {
-      if (!/\.html?$/i.test(resolved)) { res.status(400).json({ error: "目标不是 HTML 文件。" }); return; }
-      res.redirect(307, "/api/local-file/" + Buffer.from(resolved).toString("base64url") + "/");
+      if (!relative.endsWith("/") && !/\.html?(?::\d+(?::\d+)?)?$/i.test(resolved)) { res.status(400).json({ error: "目标不是 HTML 文件。" }); return; }
+      const search = typeof req.query.search === "string" ? req.query.search : "";
+      if (search && (!search.startsWith("?") || /[\u0000-\u0020#]/.test(search) || search.length > 8192)) {
+        res.status(400).json({ error: "预览参数无效。" }); return;
+      }
+      res.redirect(307, "/api/local-file/" + Buffer.from(resolved).toString("base64url") + "/" + search);
+    } else if (relative.endsWith("/") && req.query.mode === "download") {
+      res.redirect(307, "/api/local-file/" + Buffer.from(resolved).toString("base64url") + "/?__wand_file_action=download");
+    } else if (req.query.mode === "metadata") {
+      res.redirect(307, "/api/file-preview?path=" + encodeURIComponent(resolved));
     } else {
       res.redirect(307, "/api/file-raw?path=" + encodeURIComponent(resolved) + (req.query.mode === "download" ? "&download=1" : ""));
     }
@@ -122,20 +163,21 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
       res.status(400).json({ error: "Missing path parameter" });
       return;
     }
-    const resolvedPath = path.resolve(filePath);
+    let resolvedPath = resolveReadPath(filePath);
     if (isBlockedFolderPath(resolvedPath)) {
       res.status(403).json({ error: "Access denied" });
       return;
     }
 
     try {
+      resolvedPath = await readableFilePath(resolvedPath);
       const fileStat = await stat(resolvedPath);
       if (fileStat.isDirectory()) {
         res.status(400).json({ error: "Cannot preview a directory" });
         return;
       }
-      const ext = path.extname(filePath).toLowerCase();
-      const baseName = path.basename(filePath);
+      const ext = readableFileExtension(resolvedPath);
+      const baseName = path.basename(resolvedPath);
       const kind = classifyFile(ext, baseName);
       const mime = mimeForExt(ext);
       if (kind !== "text") {
@@ -153,6 +195,7 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
       if (fileStat.size > MAX_TEXT_PREVIEW_SIZE) {
         res.status(413).json({
           error: "文件太大，无法在线预览（限 512 KB）。",
+          path: resolvedPath,
           truncated: true,
           size: fileStat.size,
           maxSize: MAX_TEXT_PREVIEW_SIZE,
@@ -218,7 +261,7 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
         res.status(400).json({ error: "目标不是普通文件。" });
         return;
       }
-      const ext = path.extname(resolvedPath).toLowerCase();
+      const ext = readableFileExtension(resolvedPath);
       const baseName = path.basename(resolvedPath);
       if (classifyFile(ext, baseName) !== "text") {
         res.status(415).json({ error: "仅支持编辑文本类文件。" });
@@ -377,20 +420,21 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
       res.status(400).json({ error: "Missing path parameter" });
       return;
     }
-    const resolvedPath = path.resolve(filePath);
+    let resolvedPath = resolveReadPath(filePath);
     if (isBlockedFolderPath(resolvedPath)) {
       res.status(403).json({ error: "Access denied" });
       return;
     }
 
     try {
+      resolvedPath = await readableFilePath(resolvedPath);
       const fileStat = await stat(resolvedPath);
       if (!fileStat.isFile()) {
         res.status(400).json({ error: "Not a regular file" });
         return;
       }
-      const ext = path.extname(filePath).toLowerCase();
-      const baseName = path.basename(filePath);
+      const ext = path.extname(resolvedPath).toLowerCase();
+      const baseName = path.basename(resolvedPath);
       const kind = classifyFile(ext, baseName);
       const cap = RAW_MAX_BYTES_BY_KIND[kind] ?? RAW_MAX_BYTES_BY_KIND.binary;
       // Inline responses are previews and stay size-bounded. Explicit downloads are
@@ -414,7 +458,7 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
         headers: {
           "Cache-Control": "private, max-age=60",
           "X-Content-Type-Options": "nosniff",
-          ...(/\.html?$/i.test(ext) ? { "Content-Security-Policy": "sandbox allow-scripts; connect-src 'none'; form-action 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'" } : {}),
+          ...(/\.html?$/i.test(ext) ? { "Content-Security-Policy": HTML_PREVIEW_CSP } : {}),
         },
         readErrorMessage: "Failed to read file",
       });
@@ -429,6 +473,11 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
   app.use("/api/local-file/:encodedRoot", asyncRoute(async (req, res) => {
     if (req.method !== "GET" && req.method !== "HEAD") {
       res.status(405).json({ error: "本地文件预览只支持 GET。" });
+      return;
+    }
+    if (req.originalUrl.split("?")[0] === req.baseUrl) {
+      const search = req.originalUrl.includes("?") ? req.originalUrl.slice(req.originalUrl.indexOf("?")) : "";
+      res.redirect(307, req.baseUrl + "/" + search);
       return;
     }
     const encodedRoot = String(req.params.encodedRoot ?? "");
@@ -447,7 +496,7 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
       res.status(400).json({ error: "缺少本地预览路径。" });
       return;
     }
-    const requestedRoot = normalizeFolderPath(rootPath);
+    let requestedRoot = resolveReadPath(rootPath);
     if (isBlockedFolderPath(requestedRoot)) {
       res.status(403).json({ error: "访问被拒绝：无法访问系统敏感目录。" });
       return;
@@ -461,9 +510,10 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
     }
     relativePath = relativePath.replace(/^\/+/, "");
     try {
+      requestedRoot = await readableFilePath(requestedRoot, true);
       const rootStat = await stat(requestedRoot);
       const baseRoot = rootStat.isFile() ? path.dirname(requestedRoot) : requestedRoot;
-      const requested = relativePath.trim() || (rootStat.isFile() ? path.basename(requestedRoot) : "index.html");
+      const requested = relativePath || (rootStat.isFile() ? path.basename(requestedRoot) : "index.html");
       const resolvedPath = path.resolve(baseRoot, requested);
       if (!isPathWithinBase(resolvedPath, baseRoot) || isBlockedFolderPath(resolvedPath)) {
         res.status(403).json({ error: "访问被拒绝：路径越界。" });
@@ -472,6 +522,11 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
       let fileStat = await stat(resolvedPath);
       let filePath = resolvedPath;
       if (fileStat.isDirectory()) {
+        if (!req.originalUrl.split("?")[0]!.endsWith("/")) {
+          const search = req.originalUrl.includes("?") ? req.originalUrl.slice(req.originalUrl.indexOf("?")) : "";
+          res.redirect(307, req.originalUrl.split("?")[0] + "/" + search);
+          return;
+        }
         filePath = path.join(resolvedPath, "index.html");
         fileStat = await stat(filePath);
       }
@@ -484,7 +539,11 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
       if (!isPathWithinBase(canonicalFile, canonicalBase) || isBlockedFolderPath(canonicalFile)) {
         res.status(403).json({ error: "访问被拒绝：资源链接目标越界。" }); return;
       }
-      const ext = path.extname(filePath).toLowerCase();
+      if (req.query.__wand_file_action === "metadata" || req.query.__wand_file_action === "download") {
+        res.redirect(307, (req.query.__wand_file_action === "metadata" ? "/api/file-preview?path=" : "/api/file-raw?download=1&path=") + encodeURIComponent(filePath));
+        return;
+      }
+      const ext = readableFileExtension(filePath);
       const baseName = path.basename(filePath);
       const encodedName = encodeURIComponent(baseName);
       streamFileWithRange(req, res, {
@@ -496,7 +555,7 @@ export function registerFileRoutes(app: Express, deps: ServerFileRoutesDependenc
           "Cache-Control": "private, no-cache",
           "X-Content-Type-Options": "nosniff",
           // Even opening the artifact directly must not grant the Wand origin.
-          ...(/\.html?$/i.test(ext) ? { "Content-Security-Policy": "sandbox allow-scripts; connect-src 'none'; form-action 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'" } : {}),
+          ...(/\.html?$/i.test(ext) ? { "Content-Security-Policy": HTML_PREVIEW_CSP } : {}),
         },
         readErrorMessage: "读取本地文件失败。",
       });

@@ -1,3 +1,5 @@
+import { knowledgeRepository, subscribeKnowledgeChanges } from "../knowledge/repository";
+import { knowledgeController } from "../knowledge/controller";
 import { composerRuntimePreference } from "../conversations/composer-presentation";
 import { useConversationActivity } from "../conversations/activity";
 import { conversationForRun } from "../conversations/run-route";
@@ -94,6 +96,8 @@ import { teamChatComposer } from "./composer-bridge";
 import { aiTeamsRepository, subscribeAiTeamDefinitionChanges, subscribeAiTeamRunChanges } from "./repository";
 
 const AI_TEAMS_HOST: Record<string, object> = {
+  "knowledge/repository": { knowledgeRepository, subscribeKnowledgeChanges },
+  "knowledge/controller": { knowledgeController },
   "conversations/composer-presentation": { composerRuntimePreference },
   "conversations/activity": { useConversationActivity },
   "react": React,

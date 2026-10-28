@@ -42,6 +42,37 @@ test("composer hydrates per-session drafts and keeps attachment ownership out of
   assert.deepEqual(h.store.read("B").attachments, []);
 });
 
+test("confirmed queue removals recover only into their own latest draft", () => {
+  const h = harness();
+  h.store.edit("A", { text: "existing" });
+  const attachment = image("kept.png"); h.store.edit("A", { addAttachment: attachment });
+  const token = h.store.beginQueueRemoval("A", ["first", "second"]);
+  assert.ok(token);
+  assert.equal(h.store.beginQueueRemoval("A", ["overwrite"]), null);
+  assert.equal(h.store.restoreQueueRemoval("A"), false);
+  h.store.edit("A", { text: "new typing" });
+  assert.equal(h.store.finishQueueRemoval("A", token, "confirmed"), true);
+  assert.equal(h.store.restoreQueueRemoval("B"), false);
+  assert.equal(h.store.restoreQueueRemoval("A"), true);
+  assert.equal(h.store.read("A").text, "new typing\n\nfirst\n\nsecond");
+  assert.deepEqual(h.store.read("A").attachments, [attachment]);
+  assert.equal(h.store.read("A").queueRemoval, null);
+});
+
+test("unknown and stale removal receipts never create a sendable draft", () => {
+  const h = harness();
+  const token = h.store.beginQueueRemoval("A", ["removed"]);
+  assert.ok(token);
+  h.store.finishQueueRemoval("A", token, "unknown");
+  assert.equal(h.store.restoreQueueRemoval("A"), false);
+  assert.equal(h.store.read("A").text, "");
+  h.store.dismissQueueRemoval("A");
+  assert.equal(h.store.finishQueueRemoval("A", token, "confirmed"), false);
+  const late = h.store.beginQueueRemoval("A", ["late"]); assert.ok(late);
+  h.store.retain(new Set());
+  assert.equal(h.store.finishQueueRemoval("A", late, "confirmed"), false);
+});
+
 test("composer subscribers see session edits and synchronous submit clearing", async () => {
   const h = harness();
   const seen: string[] = [];
@@ -288,7 +319,7 @@ test("queue retrieval confirms before merging newest text and attachments", () =
   h.store.edit("A", { addAttachment: attachment });
   assert.equal(h.store.finishQueueRetrieval("A", token, "confirmed"), true);
   assert.equal(h.store.restoreQueueRetrieval("A"), true);
-  assert.equal(h.store.read("A").text, "queued\nnew input");
+  assert.equal(h.store.read("A").text, "new input\n\nqueued");
   assert.deepEqual(h.store.read("A").attachments, [attachment]);
   assert.equal(h.store.read("A").queueRetrieval, null);
   assert.equal(h.store.restoreQueueRetrieval("A"), false);

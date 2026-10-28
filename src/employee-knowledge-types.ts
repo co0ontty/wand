@@ -1,6 +1,6 @@
 /** Explicit employee-owned knowledge, distinct from the default partner's expiring habit profile. */
 export const EMPLOYEE_KNOWLEDGE_MAX_ENTRIES = 200;
-export const EMPLOYEE_KNOWLEDGE_MAX_CHARS = 4000;
+export const EMPLOYEE_KNOWLEDGE_MAX_CHARS = 12000;
 
 export interface EmployeeKnowledgeEntry {
   id: string;

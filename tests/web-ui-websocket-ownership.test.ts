@@ -53,7 +53,7 @@ function harness() {
     setTimeout: () => 1, clearTimeout: () => {},
   };
   const dependencies = {
-    "./state": { state },
+    "./state": { state, todoTurnEvidence: new Map() },
     "./render": { bindForegroundSyncListeners: () => { foregroundBindings++; } },
     "./notifications": { showToast: () => { toasted++; } },
     "./git-commit": new Proxy({

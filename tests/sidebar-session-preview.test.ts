@@ -3,10 +3,10 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { SidebarSessionPreview } from "../src/web-ui/react/workspaces/sidebar-session-preview.js";
-import { SidebarSessionArea } from "../src/web-ui/react/workspaces/sidebar-session-area.js";
+import { SidebarSessionArea, SidebarSessionToggle } from "../src/web-ui/react/workspaces/sidebar-session-area.js";
 import { fitSidebarSessionPreview } from "../src/web-ui/react/workspaces/sidebar-session-preview-layout.js";
 import { filterSidebarTaskSessions } from "../src/web-ui/react/workspaces/sidebar-search.js";
-import { indexPersonSessions, filterPersonSessions, personSessionSearchValues } from "../src/web-ui/react/conversations/sidebar-sessions.js";
+import { indexPersonSessions, filterPersonSessions, personSessionSearchValues, collectUnboundSessions, filterUnboundSessions, provisionalPersonConversations, provisionalPersonVisible } from "../src/web-ui/react/conversations/sidebar-sessions.js";
 import { filterConversationList, conversationListCounts } from "../src/web-ui/react/conversations/sidebar.js";
 import { collectRecentEntries, recentConversationGroups } from "../src/web-ui/react/workspaces/sidebar-recent.js";
 import type { TaskDirectoryGroup, WorkspaceSessionSummary } from "../src/web-ui/react/workspaces/types.js";
@@ -49,11 +49,16 @@ test("a thousand-session preview has constant initial DOM cost", () => {
 });
 
 test("empty matched session areas render no disclosure control or vacant preview region", () => {
-  assert.equal(renderToStaticMarkup(createElement(SidebarSessionArea, { id: "empty", label: "人物", open: false,
-    hasSessions: false, onOpenChange() {}, children: "" })), "");
-  const present = renderToStaticMarkup(createElement(SidebarSessionArea, { id: "one", label: "人物", open: false,
-    hasSessions: true, onOpenChange() {}, children: "会话" }));
-  assert.match(present, /sidebar-session-area-toggle/);
+  assert.equal(renderToStaticMarkup(createElement(SidebarSessionArea, { hasSessions: false, children: "" })), "");
+  const present = renderToStaticMarkup(createElement(SidebarSessionArea, { hasSessions: true, children: "会话" }));
+  assert.match(present, /sidebar-session-area-content/);
+  assert.doesNotMatch(present, /<button|sidebar-session-area-toggle/);
+  const toggle = renderToStaticMarkup(createElement(SidebarSessionToggle, {
+    id: "one", label: "人物", open: false, onOpenChange() {},
+  }));
+  assert.match(toggle, /aria-controls="one"/);
+  assert.match(toggle, /aria-expanded="false"/);
+  assert.match(toggle, /展开人物的会话列表/);
 });
 
 test("preview width layout shows full titles when they fit, then complete icons before overflowing", () => {
@@ -116,6 +121,24 @@ test("same filtered person projection respects archive scope and live child titl
   assert.deepEqual(filterPersonSessions(person(), index, "all", "new title", { live: "new title" }).map(e => e.session.id), ["live"]);
   assert.deepEqual(filterPersonSessions(person(), index, "active", "no match"), []);
   assert.equal(filterPersonSessions(person(), index, "all", "同名员工").length, 3, "person identity search retains matching own sessions");
+});
+
+test("session-only employees stay in the conversation list and unbound sessions are not dropped", () => {
+  const terminal = session("term", { employeeId: undefined, sessionKind: "pty", provider: "shell", title: "本地调试终端" });
+  const cli = session("cli", { employeeId: undefined, provider: "codex", title: "未绑定会话" });
+  const quick = session("quick", { employeeId: undefined, sessionSource: "quick-terminal" });
+  const owned = session("owned", { title: "已有私聊的会话" });
+  const orphan = session("orphan", { employeeId: "employee-b", employeeName: "只有会话", title: "目录里的工作" });
+  const source = group([owned, orphan, terminal, cli, quick]);
+  const index = indexPersonSessions([source]);
+  const existing = [{ kind: "dm" as const, peerEmployeeId: "employee-a" }];
+  const provisional = provisionalPersonConversations(index, existing, [{ id: "employee-b", name: "瑞辰" }]);
+  assert.deepEqual(provisional.map(item => item.id), ["dm_employee-b"]);
+  assert.equal(provisional[0]?.title, "瑞辰");
+  assert.equal(provisionalPersonVisible(index.get("employee-b") ?? [], "active"), true);
+  assert.equal(provisionalPersonVisible(index.get("employee-b") ?? [], "archived"), false);
+  assert.deepEqual(collectUnboundSessions([source]).map(entry => entry.session.id), ["cli", "term"]);
+  assert.deepEqual(filterUnboundSessions(collectUnboundSessions([source]), "all", "未绑定").map(entry => entry.session.id), ["cli"]);
 });
 
 test("parent search and displayed count can match the same session's title", () => {

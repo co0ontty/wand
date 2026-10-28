@@ -15,6 +15,9 @@ import type { SessionSnapshot } from "../src/types.js";
 import type { WandStorage } from "../src/storage.js";
 
 class FakeStorage {
+  knowledgeSessionScope(): null { return null; }
+  revokeSessionKnowledgeAccess(): void {}
+
   private readonly sessions = new Map<string, SessionSnapshot>();
 
   constructor(sessions: SessionSnapshot[]) {

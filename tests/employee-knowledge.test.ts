@@ -113,7 +113,7 @@ test("explicit requests do not treat examples, conditional language, logging tas
   assert.throws(() => normalizeEmployeeKnowledge("password: fictional-value"), /不保存/);
   assert.throws(() => normalizeEmployeeKnowledge("https://user:fixture@example.test"), /不保存/);
   assert.throws(() => normalizeEmployeeKnowledge("https://example.test?token=only-fixture-value"), /不保存/);
-  assert.throws(() => normalizeEmployeeKnowledge("很".repeat(4001)), /4000/);
+  assert.throws(() => normalizeEmployeeKnowledge("很".repeat(12001)), /12000/);
 });
 
 test("scoped capabilities bind the actual session employee, expire/revoke, and clear invalidates late writes", (t) => {
@@ -166,6 +166,7 @@ test("runtime knowledge is refreshed per turn, raw user text/base/history stay u
   storage.saveSession(snapshot("s_a", "e_a"));
   storage.saveSession(snapshot("s_b", "e_b"));
   storage.rememberEmployeeKnowledge("e_b", "乙的独立标记 B_ONLY");
+  storage.rememberEmployeeKnowledge("e_a", "甲的独立标记 A_ONLY");
   const session = storage.getSession("s_a")!;
   let first!: StructuredRunnerContext;
   const execution = startEmployeeKnowledgeRunner(storage, fakeRunner(ctx => { first = ctx; }),
@@ -177,9 +178,9 @@ test("runtime knowledge is refreshed per turn, raw user text/base/history stay u
   assert.ok(!first.session.runtimeSystemPrompt?.includes(first.env.WAND_KNOWLEDGE_TOKEN!));
   assert.equal(storage.getSession("s_a")?.runtimeSystemPrompt, undefined);
   assert.equal(storage.getSession("s_a")?.systemPrompt, session.systemPrompt);
-  assert.equal(storage.resolveEmployeeKnowledgeAccess(first.env.WAND_KNOWLEDGE_TOKEN!), "e_a");
+  assert.equal(storage.resolveKnowledgeAccess(first.env.WAND_KNOWLEDGE_TOKEN!)?.employeeId, "e_a");
   await execution.completion;
-  assert.equal(storage.resolveEmployeeKnowledgeAccess(first.env.WAND_KNOWLEDGE_TOKEN!), null);
+  assert.equal(storage.resolveKnowledgeAccess(first.env.WAND_KNOWLEDGE_TOKEN!), null);
   storage.clearEmployeeKnowledge("e_a");
   let after = "";
   await startEmployeeKnowledgeRunner(storage, fakeRunner(ctx => { after = ctx.session.runtimeSystemPrompt!; }),
@@ -210,11 +211,17 @@ test("all provider system channels and resumed no-flag providers receive live kn
   assert.ok(buildSessionSystemPromptParts({ mode: "default", systemPrompt: "BASE", runtimeSystemPrompt: "LIVE" }, "").includes("LIVE"));
 });
 
-test("real manager accepts an employee memory request and supplies it to later/new sessions, never to another employee", async (t) => {
+test("real manager supplies knowledge saved by an authorized tool to later sessions, never to another employee", async (t) => {
   const { root, storage } = setup(t);
   const contexts: StructuredRunnerContext[] = [];
   const manager = new StructuredSessionManager(storage, { ...defaultConfig(), defaultCwd: root }, undefined,
-    { pi: fakeRunner(ctx => contexts.push(ctx)) });
+    { pi: fakeRunner(ctx => {
+      contexts.push(ctx);
+      if (ctx.prompt === "记一下：演示项目的发布窗口是周五") {
+        assert.equal(storage.countEmployeeKnowledge("e_a"), 0, "no prefix-triggered automatic write");
+        storage.createKnowledgeDocument("personal", "e_a", { content: "演示项目的发布窗口是周五" }, ctx.env.WAND_KNOWLEDGE_TOKEN);
+      }
+    }) });
   t.after(() => manager.dispose());
   const a = manager.createSession({ cwd: root, mode: "default", provider: "pi", employeeId: "e_a", systemPrompt: "BASE_A" });
   const b = manager.createSession({ cwd: root, mode: "default", provider: "pi", employeeId: "e_b", systemPrompt: "BASE_B" });

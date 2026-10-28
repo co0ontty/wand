@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createServer } from "node:http";
 import express from "express";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
 import { registerPublicUpdateRoutes } from "../src/server-update-routes.js";
+import { DistributionManager } from "../src/distribution-manager.js";
+import { jsonErrorHandler } from "../src/express-async.js";
+import type { WandConfig } from "../src/types.js";
 
 import {
   absoluteUrl,
@@ -217,9 +220,118 @@ test("iOS install manifest uses the IPA build while update checks retain marketi
     assert.ok(installPage.includes(buildItmsServicesUrl(update.manifestUrl).replaceAll("&", "&amp;")));
     const same = await (await fetch(`${origin}/api/ios-ipa-update?currentVersion=${version}`)).json();
     assert.equal(same.updateAvailable, false);
+    assert.match(installPage, /aria-label="可安装的应用"/);
+    assert.match(installPage, /aria-current="page"/);
+    assert.doesNotMatch(installPage, /app=huniu-helper/, "missing independent app is not listed");
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("independent iOS app OTA stays isolated, compares builds, pins artifacts and rejects invalid selectors", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "wand-ios-independent-"));
+  const directory = path.join(root, "apps/huniu-helper/ios");
+  mkdirSync(directory, { recursive: true });
+  mkdirSync(path.join(root, "ios"));
+  const config = { ios: { enabled: true, ipaDir: "ios", currentIpaFile: "wand-v5.0.0.ipa" } } as WandConfig;
+  const configPath = path.join(root, "config.json");
+  writeFileSync(configPath, JSON.stringify(config));
+  const packageData = (bundle: string, build: string, title = bundle === "com.wand.app" ? "Wand" : "虎妞帮手") => createStoredZip({
+    "Payload/App.app/Info.plist": `<plist><dict>
+<key>CFBundleIdentifier</key><string>${bundle}</string>
+<key>CFBundleDisplayName</key><string>${title}</string>
+<key>CFBundleShortVersionString</key><string>0.1.0</string>
+<key>CFBundleVersion</key><string>${build}</string></dict></plist>`,
+    "Payload/App.app/embedded.mobileprovision": "signing-marker",
+  });
+  const fileName = "huniu-helper-v0.1.0-2-abcdef.ipa";
+  const data = packageData("dev.tigertools.PlaylistBridge", "2");
+  writeFileSync(path.join(directory, fileName), data);
+  const pointTo = (name: string) => writeFileSync(path.join(directory, "current.json"), JSON.stringify({ fileName: name }));
+  pointTo(fileName);
+  writeFileSync(path.join(root, "ios/wand-v5.0.0.ipa"), packageData("com.wand.app", "50000"));
+  writeFileSync(path.join(root, "ios/wand-v4.0.0.ipa"), "old-wand");
+  let remoteRequests = 0;
+  const manager = new DistributionManager({
+    configDir: root, configPath, config, repositoryUrl: "https://github.com/example/wand",
+    fetch: async () => { remoteRequests++; return new Response("[]"); },
+  });
+  const app = express();
+  registerPublicUpdateRoutes(app, manager, "https://updates.example.test");
+  app.use(jsonErrorHandler);
+  const server = createServer(app);
+  try {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const origin = `http://127.0.0.1:${address.port}`;
+    const get = (route: string) => fetch(origin + route);
+    const check = (build: string) => get(`/api/ios-ipa-update?app=huniu-helper&currentVersion=0.1.0&currentBuild=${build}`);
+    const metadata = await (await check("1")).json();
+    assert.equal(metadata.updateAvailable, true);
+    assert.equal(metadata.latestBuild, "2");
+    assert.equal(metadata.bundleId, "dev.tigertools.PlaylistBridge");
+    assert.equal(metadata.otaReady, true);
+    assert.ok(metadata.manifestUrl.includes("app=huniu-helper&fileName="));
+    assert.equal((await (await check("2")).json()).updateAvailable, false);
+    assert.equal((await (await check("3")).json()).updateAvailable, false);
+    const page = await (await get("/ios/install?app=huniu-helper")).text();
+    assert.match(page, /安装 虎妞帮手/);
+    assert.match(page, /0\.1\.0（2）/);
+    assert.match(page, /<nav class="app-list" aria-label="可安装的应用">/);
+    assert.ok(page.indexOf('class="app-list"') > page.indexOf('class="hint"'), "app links appear at the bottom");
+    assert.match(page, /href="https:\/\/updates\.example\.test\/ios\/install">Wand<\/a>/);
+    assert.match(page, /href="https:\/\/updates\.example\.test\/ios\/install\?app=huniu-helper" aria-current="page">虎妞帮手<\/a>/);
+    const wandPage = await (await get("/ios/install")).text();
+    assert.match(wandPage, /href="https:\/\/updates\.example\.test\/ios\/install" aria-current="page">Wand<\/a>/);
+    assert.match(wandPage, /href="https:\/\/updates\.example\.test\/ios\/install\?app=huniu-helper">虎妞帮手<\/a>/);
+    const manifestPath = new URL(metadata.manifestUrl).pathname + new URL(metadata.manifestUrl).search;
+    const newer = "huniu-helper-v0.1.0-3-fedcba.ipa";
+    writeFileSync(path.join(directory, newer), packageData("dev.tigertools.PlaylistBridge", "3", "石一造物"));
+    pointTo(newer);
+    const renamedPage = await (await get("/ios/install?app=huniu-helper")).text();
+    assert.match(renamedPage, /安装 石一造物/);
+    assert.match(await (await get("/ios/install")).text(), /app=huniu-helper">石一造物<\/a>/);
+    const renamedMetadata = await (await check("2")).json();
+    const renamedManifest = await (await get(new URL(renamedMetadata.manifestUrl).pathname + new URL(renamedMetadata.manifestUrl).search)).text();
+    assert.match(renamedManifest, /<key>title<\/key>\s*<string>石一造物<\/string>/);
+    const manifest = await (await get(manifestPath)).text();
+    assert.match(manifest, /<key>title<\/key>\s*<string>虎妞帮手<\/string>/);
+    assert.match(manifest, /<key>bundle-version<\/key>\s*<string>2<\/string>/);
+    assert.ok(manifest.includes(fileName));
+    const downloadPath = new URL(metadata.downloadUrl).pathname + new URL(metadata.downloadUrl).search;
+    assert.deepEqual(Buffer.from(await (await get(downloadPath)).arrayBuffer()), data);
+    const range = await fetch(origin + downloadPath, { headers: { Range: "bytes=0-7" } });
+    assert.equal(range.status, 206);
+    assert.deepEqual(Buffer.from(await range.arrayBuffer()), data.subarray(0, 8));
+    assert.ok(existsSync(path.join(root, "ios/wand-v4.0.0.ipa")), "independent download does not prune Wand");
+    assert.equal(remoteRequests, 0, "independent app does not fetch Wand releases");
+    for (const route of ["/ios/install", "/ios/manifest.plist", "/ios/download", "/api/ios-ipa-update?currentVersion=0.0.0"]) {
+      assert.equal((await get(route + (route.includes("?") ? "&" : "?") + "app=unknown")).status, 404);
+    }
+    assert.equal((await get("/ios/install?app=huniu-helper&app=unknown")).status, 404);
+    assert.equal((await get("/ios/download?app=huniu-helper&fileName=../../config.json")).status, 404);
+    symlinkSync(configPath, path.join(directory, "huniu-helper-v9.ipa"));
+    assert.equal(await manager.resolveIosAppDownload("huniu-helper", "huniu-helper-v9.ipa"), null);
+    assert.equal(await manager.resolveIosAppDownload("../../ios"), null);
+    const wrong = "huniu-helper-v9.ipa";
+    pointTo(wrong);
+    assert.equal((await get("/ios/install?app=huniu-helper")).status, 404);
+    writeFileSync(path.join(directory, "huniu-helper-v8.ipa"), packageData("com.other.app", "8"));
+    pointTo("huniu-helper-v8.ipa");
+    assert.equal((await get("/ios/install?app=huniu-helper")).status, 503);
+    assert.doesNotMatch(await (await get("/ios/install")).text(), /app=huniu-helper/, "wrong-bundle package is not listed");
+    pointTo("huniu-helper-v0.0.0-missing.ipa");
+    assert.equal((await get("/ios/install?app=huniu-helper")).status, 404);
+    const wand = await (await get("/api/ios-ipa-update?currentVersion=0.0.0")).json();
+    assert.equal(wand.bundleId, "com.wand.app");
+    assert.equal(wand.manifestUrl, "https://updates.example.test/ios/manifest.plist");
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
     rmSync(root, { recursive: true, force: true });
   }
 });

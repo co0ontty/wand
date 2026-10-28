@@ -81,13 +81,31 @@ function publish(next: any): void {
       : kind === "alert" ? wandAlert("Synthetic alert") : wandPrompt("Synthetic input", "kept input");
   },
   async todos(items: any[] | null) {
-    const messages = [{ role: "user", uuid: "todo-user", content: [{ type: "text", text: "Synthetic checklist" }] }];
+    const messages = [{ role: "user", uuid: "todo-user", requestId: "todo-request", content: [{ type: "text", text: "Synthetic checklist" }] }];
     if (items) messages.push({ role: "assistant", uuid: "todo-assistant", content: [
       { type: "tool_use", id: "panels-todo", name: "TodoWrite", input: { todos: items } },
       { type: "tool_result", tool_use_id: "panels-todo", content: "Updated" },
     ] } as any);
-    const next = Object.assign({}, session(), { messages, messageTotal: messages.length });
-    publish(next); resetChatRenderCache(); doRenderChat(false); await frames();
+    const next = Object.assign({}, session(), { messages, messageTotal: messages.length, structuredState: { inFlight: true, activeRequestId: "todo-request" } });
+    state.wsConnected = true;
+    publish(next); updateSessionSnapshot(next, "latest", { type: "output", data: next });
+    resetChatRenderCache(); doRenderChat(false); await frames();
+  },
+  async todoStatus(kind: string) {
+    const current = state.sessions.find(item => item.id === state.selectedId);
+    const messages = current.messages.slice();
+    if (kind === "waiting") messages.push({ role: "assistant", content: [{ type: "tool_use", id: "todo-question", name: "AskUserQuestion", input: { questions: [{ question: "Confirm?", options: [] }] } }] });
+    if (kind === "newturn") messages.push({ role: "user", requestId: "todo-next-request", content: [{ type: "text", text: "Synthetic checklist" }] });
+    const active = kind === "running" || kind === "newturn";
+    const data = { messages, messageTotal: messages.length, messageOffset: 0,
+      status: active || kind === "waiting" || kind === "permission" ? "running" : kind === "failed" ? "failed" : "idle",
+      structuredState: { inFlight: active, activeRequestId: active ? kind === "newturn" ? "todo-next-request" : "todo-request" : null },
+      permissionBlocked: kind === "permission",
+      ...(["stopped", "failed", "done"].includes(kind) ? { turnOutcome: kind } : {}),
+    };
+    updateSessionSnapshot({ id: current.id, ...data }, "latest", { type: kind === "unknown" ? "init" : "output", data });
+    state.currentMessages = buildMessagesForRender(state.sessions.find(item => item.id === current.id), messages);
+    doRenderChat(false); await frames();
   },
   async todoContext() {
     Object.assign(state.sessions[0], { employeeId: "todo-fixture", employeeName: "很长的员工姓名用于核对输入区布局", employeeAvatar: "cat:1" });

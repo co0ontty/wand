@@ -71,6 +71,7 @@ export interface PublicUpdateRoutesDependencies {
   resolveMacosBetaDownload(fileName: string): Promise<DownloadAsset | null>;
   resolveLatestIpa(): Promise<ResolvedUpdateAsset | null>;
   resolveIosDownload(): Promise<DownloadAsset | null>;
+  resolveIosAppDownload?(appId: string, fileName?: string): Promise<DownloadAsset | null>;
 }
 
 const GITHUB_PROXY_TIMEOUT_MS = 5 * 60 * 1000;
@@ -325,11 +326,15 @@ export function registerPublicUpdateRoutes(
       });
       return;
     }
-    const updateAvailable = compareWandInstallOrder(payload.latestVersion, currentVersion) > 0;
+    const versionOrder = compareWandInstallOrder(payload.latestVersion, currentVersion);
+    const currentBuild = text(req.query.currentBuild);
+    const updateAvailable = versionOrder > 0 || (versionOrder === 0 && !!currentBuild
+      && compareWandInstallOrder(payload.bundleBuild, currentBuild) > 0);
     res.json({
       updateAvailable,
       currentVersion,
       latestVersion: payload.latestVersion,
+      latestBuild: payload.bundleBuild,
       downloadUrl: updateAvailable ? payload.downloadUrl : null,
       installUrl: updateAvailable ? payload.installUrl : null,
       manifestUrl: payload.manifestUrl,
@@ -365,23 +370,27 @@ export function registerPublicUpdateRoutes(
     res.setHeader("Cache-Control", "no-cache");
     res.send(buildIosInstallPage({
       title: payload.title,
-      version: payload.latestVersion,
+      version: iosAppId(req) ? `${payload.latestVersion}（${payload.bundleBuild}）` : payload.latestVersion,
       sizeLabel: formatIosAssetSize(payload.size),
       installUrl: payload.installUrl ?? "#",
       downloadUrl: payload.downloadUrl,
       signed: payload.signed,
       https: payload.origin.startsWith("https://"),
+      apps: await resolveIosInstallLinks(req, deps, publicOrigin),
     }));
   }));
 
   app.get("/ios/download", asyncRoute(async (req, res) => {
-    const asset = await deps.resolveIosDownload();
+    const appId = iosAppId(req);
+    const asset = appId
+      ? await deps.resolveIosAppDownload?.(appId, text(req.query.fileName) || undefined)
+      : await deps.resolveIosDownload();
     if (!asset) {
       res.status(404).json({ error: "当前没有可下载的 IPA 文件。" });
       return;
     }
     // iOS 每次 debug 构建产出独立时间戳的 IPA，不清理会按构建次数堆积。
-    await pruneQuietly(deps.pruneIosIpaDirectory?.bind(deps), asset.fileName, " iOS 构建包");
+    if (!appId) await pruneQuietly(deps.pruneIosIpaDirectory?.bind(deps), asset.fileName, " iOS 构建包");
     streamFileWithRange(req, res, {
       filePath: asset.filePath,
       size: asset.size,
@@ -392,8 +401,15 @@ export function registerPublicUpdateRoutes(
   }));
 }
 
+function iosAppId(req: Request): "huniu-helper" | undefined {
+  if (req.query.app === undefined) return undefined;
+  if (req.query.app !== "huniu-helper") throw new HttpError(404, "unknown_app", "未知的 iOS 应用。");
+  return "huniu-helper";
+}
+
 interface IosOtaPayload {
   latestVersion: string;
+  bundleBuild: string;
   downloadUrl: string;
   installUrl: string | null;
   manifestUrl: string;
@@ -414,9 +430,13 @@ async function resolveIosOtaPayload(
   req: Request,
   deps: PublicUpdateRoutesDependencies,
   publicOrigin?: string,
+  selection?: { appId?: "huniu-helper" },
 ): Promise<IosOtaPayload | null> {
-  const latest = await deps.resolveLatestIpa();
-  const local = await deps.resolveIosDownload();
+  const appId = selection ? selection.appId : iosAppId(req);
+  const local = appId
+    ? await deps.resolveIosAppDownload?.(appId, selection ? undefined : text(req.query.fileName) || undefined)
+    : await deps.resolveIosDownload();
+  const latest = appId ? null : await deps.resolveLatestIpa();
   if (!latest && !local) return null;
   // Explicit ?origin= wins; then the deployment's configured publicOrigin
   // (same precedence as the connection-code logic in server-app-connect);
@@ -431,13 +451,16 @@ async function resolveIosOtaPayload(
   const size = local?.size ?? latest?.size ?? 0;
   const latestVersion = latest?.version ?? "0.0.0";
   const metadata = local
-    ? await inspectIpa(local.filePath, { version: latestVersion }).catch(() => ({
-      bundleId: "com.wand.app",
-      bundleVersion: latestVersion,
-      bundleBuild: latestVersion,
-      title: "Wand",
-      signed: false,
-    }))
+    ? await inspectIpa(local.filePath, { version: latestVersion }).catch((error) => {
+      if (appId) throw error;
+      return {
+        bundleId: "com.wand.app",
+        bundleVersion: latestVersion,
+        bundleBuild: latestVersion,
+        title: "Wand",
+        signed: false,
+      };
+    })
     : {
       bundleId: "com.wand.app",
       bundleVersion: latestVersion,
@@ -445,10 +468,17 @@ async function resolveIosOtaPayload(
       title: "Wand",
       signed: false,
     };
-  const downloadPath = latest?.downloadUrl ?? "/ios/download";
+  if (appId && metadata.bundleId !== "dev.tigertools.PlaylistBridge") {
+    throw new HttpError(503, "invalid_app_package", "所选 iOS 安装包身份不匹配。");
+  }
+  // Pin both manifest and IPA: publishing a new build must not change an in-flight install.
+  const suffix = appId ? `?app=${appId}&fileName=${encodeURIComponent(fileName)}` : "";
+  const downloadPath = appId ? `/ios/download${suffix}` : (latest?.downloadUrl ?? "/ios/download");
   const downloadUrl = origin ? absoluteUrl(origin, downloadPath) : downloadPath;
-  const manifestUrl = origin ? absoluteUrl(origin, "/ios/manifest.plist") : "/ios/manifest.plist";
-  const installPageUrl = origin ? absoluteUrl(origin, "/ios/install") : "/ios/install";
+  const manifestPath = `/ios/manifest.plist${suffix}`;
+  const installPath = appId ? `/ios/install?app=${appId}` : "/ios/install";
+  const manifestUrl = origin ? absoluteUrl(origin, manifestPath) : manifestPath;
+  const installPageUrl = origin ? absoluteUrl(origin, installPath) : installPath;
   const blockers = collectIosOtaBlockers({
     signed: metadata.signed,
     origin,
@@ -464,6 +494,7 @@ async function resolveIosOtaPayload(
   });
   return {
     latestVersion: metadata.bundleVersion || latestVersion,
+    bundleBuild: metadata.bundleBuild,
     downloadUrl,
     installUrl: origin ? buildItmsServicesUrl(manifestUrl) : null,
     manifestUrl,
@@ -479,6 +510,25 @@ async function resolveIosOtaPayload(
     origin,
     manifest,
   };
+}
+
+async function resolveIosInstallLinks(
+  req: Request,
+  deps: PublicUpdateRoutesDependencies,
+  publicOrigin?: string,
+): Promise<Array<{ title: string; url: string; current: boolean }>> {
+  const currentApp = iosAppId(req);
+  const selections = [{}, { appId: "huniu-helper" as const }];
+  // One missing/broken package must not hide the other app's valid installer.
+  const results = await Promise.allSettled(selections.map(selection =>
+    resolveIosOtaPayload(req, deps, publicOrigin, selection)));
+  return results.flatMap((result, index) => {
+    if (result.status !== "fulfilled" || !result.value?.otaReady) return [];
+    return [{
+      title: result.value.title, url: result.value.installPageUrl,
+      current: selections[index].appId === currentApp,
+    }];
+  });
 }
 
 export class ServerUpdateState {

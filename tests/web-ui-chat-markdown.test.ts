@@ -70,8 +70,8 @@ test("tables preserve inline formatting, escaped pipes and alignment", () => {
 test("server file links retain encoded spaces, line suffixes and formatted labels", () => {
   const html = renderChatMarkdown("[**Open** source](</tmp/My Project/source(1).ts:42>)\n\n[File](file:///tmp/My%20Project/readme.md#L12C2)");
   assert.match(html, /class="server-file-link"/);
-  assert.match(html, /data-server-file-path="\/tmp\/My Project\/source\(1\)\.ts"/);
-  assert.match(html, /path=%2Ftmp%2FMy%20Project%2Fsource\(1\)\.ts/);
+  assert.match(html, /data-server-file-path="\/tmp\/My Project\/source\(1\)\.ts:42"/);
+  assert.match(html, /path=%2Ftmp%2FMy%20Project%2Fsource\(1\)\.ts%3A42/);
   assert.match(html, /<strong>Open<\/strong> source<\/a>/);
   assert.match(html, /data-server-file-path="\/tmp\/My Project\/readme.md"/);
   assert.match(html, /window\.__openFilePreview/);
@@ -93,6 +93,14 @@ test("external links retain safe targets and local API paths are not file previe
   assert.match(html, /href="#part"/);
   assert.match(html, /<span>API<\/span>/);
   assert.doesNotMatch(html, /data-server-file-path="\/api\//);
+});
+
+test("forwarded local HTTP links retain their proxy, query, fragment and IPv6 target", () => {
+  const html = renderChatMarkdown("[Forwarded](/api/local-preview/localhost/5173/app/?tab=1#settings) [IPv6](http://[::1]:3000/#section)");
+  assert.match(html, /href="\/api\/local-preview\/127\.0\.0\.1\/5173\/app\/\?tab=1#settings"/);
+  assert.match(html, /data-local-preview-url="\/api\/local-preview\/localhost\/5173\/app\/\?tab=1#settings"/);
+  assert.match(html, /href="\/api\/local-preview\/::1\/3000\/#section"/);
+  assert.equal((html.match(/class="local-preview-link"/g) || []).length, 2);
 });
 
 test("raw HTML and dangerous link protocols never produce executable markup", () => {

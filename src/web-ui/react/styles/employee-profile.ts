@@ -18,7 +18,7 @@ const css = String.raw`
 .employee-archived-label{font-size:12px;font-weight:400;color:var(--text-secondary);margin-left:8px}
 .wand-employee-workspace .no-results{padding:40px 0;color:var(--text-secondary)}
 .employee-profile-content,[data-employee-profile]{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;background:var(--bg-primary);color:var(--text-primary);font-size:14px}
-[data-employee-profile].wand-team-member{border:0;box-shadow:none}
+[data-employee-profile].wand-team-member{border:0;box-shadow:none;overflow:hidden}
 .wand-employee-workspace .profile-header,[data-employee-profile] .profile-header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:10px var(--wand-page-inset);min-height:var(--wand-page-header-height);flex:none;border-bottom:1px solid var(--border-subtle)}
 .profile-heading{display:flex;align-items:center;gap:8px;min-width:0}
 .profile-heading h2{margin:0;font-size:var(--wand-page-title-size);line-height:1.4;font-weight:600}
@@ -47,7 +47,7 @@ const css = String.raw`
 .employee-profile-content>.is-new .wand-team-member-inner{max-width:1472px}
 .employee-create-avatar{display:flex;align-items:center;gap:12px;padding-block:8px}
 .employee-profile-content>.is-new .appearance{padding-block:16px;border-bottom:1px solid var(--border-subtle)}
-.wand-object-profile-drawer:has([data-employee-profile]) .ant-drawer-body{padding:0;overflow:hidden}
+.wand-object-profile-drawer:has([data-employee-profile]) .ant-drawer-body{display:flex;flex-direction:column;min-height:0;padding:0;overflow:hidden}
 :where(.wand-employee-workspace,[data-employee-profile]) .aside-title{display:flex;align-items:center;justify-content:space-between;font-size:12px;font-weight:500;line-height:28px}
 :where(.wand-employee-workspace,[data-employee-profile]) .aside-title>span{display:flex;align-items:center;gap:7px}
 :where(.wand-employee-workspace,[data-employee-profile]) .avatar-stage{text-align:center;padding:17px 0 11px}

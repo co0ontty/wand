@@ -359,7 +359,7 @@ export function registerSiliconEmployeeRoutes(
       res.setHeader("Cache-Control", "no-store");
       const employeeId = req.params.id;
       const query = typeof req.query.q === "string" ? req.query.q : "";
-      res.json({ employeeId, entries: storage.listEmployeeKnowledge(employeeId, query),
+      res.json({ employeeId, entries: storage.listEmployeeKnowledge(employeeId, query, EMPLOYEE_KNOWLEDGE_MAX_ENTRIES),
         total: storage.countEmployeeKnowledge(employeeId), maxEntries: EMPLOYEE_KNOWLEDGE_MAX_ENTRIES });
     } catch (error) { sendEmployeeError(res, error); }
   });

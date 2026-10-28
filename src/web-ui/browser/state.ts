@@ -1,6 +1,7 @@
 import { hasPageRoute } from "../page-route";
 import { browserAssetRuntime } from "../asset-runtime.js";
 import type { AppState } from "./types";
+import type { TodoTurnEvidence } from "./todo-execution.js";
 import { ComposerQueueClock, ComposerStore } from "./composer.js";
 import { ChatRenderCache } from "./chat-render-cache.js";
 import { CHAT_INITIAL_MESSAGE_COUNT } from "../chat-history-window.js";
@@ -14,6 +15,8 @@ export const composer = new ComposerStore({
   },
 });
 export const composerQueue = new ComposerQueueClock();
+/** Volatile execution evidence only; the transcript remains the sole Todo owner. */
+export const todoTurnEvidence = new Map<string, TodoTurnEvidence>();
 
 export var configPath = browserAssetRuntime.configPath;
 export var CHAT_EXPAND_STATE_STORAGE_KEY = "wand-chat-expand-state-v1";

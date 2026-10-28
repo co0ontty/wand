@@ -118,6 +118,9 @@ test("local preview proxies requests and rewrites same-host redirects", async ()
     res.type("text/plain").send(`${req.headers["x-wand-probe"]}:${req.body as Buffer}`);
   });
   targetApp.get("/redirect", (_req, res) => res.redirect("/hello"));
+  targetApp.get("/absolute", (req, res) => res.redirect(`http://localhost:${req.socket.localPort}/hello?tab=1#section`));
+  targetApp.get("/relative", (_req, res) => res.redirect("hello?tab=2#section"));
+  targetApp.get("/external", (_req, res) => res.redirect("//example.com/hello"));
   const target = await listen(targetApp);
   const targetPort = (target.address() as AddressInfo).port;
 
@@ -135,6 +138,8 @@ test("local preview proxies requests and rewrites same-host redirects", async ()
     assert.equal(await first.text(), "<p>hello</p>");
     assert.equal(first.headers.get("set-cookie"), null);
     assert.equal(first.headers.get("x-frame-options"), null);
+    assert.match(first.headers.get("content-security-policy") || "", /sandbox allow-scripts allow-forms/);
+    assert.match(first.headers.get("content-security-policy") || "", /form-action 'none'/);
 
     const posted = await fetch(`${proxyUrl}/api/local-preview/127.0.0.1/${targetPort}/echo`, {
       method: "POST",
@@ -153,6 +158,13 @@ test("local preview proxies requests and rewrites same-host redirects", async ()
       redirected.headers.get("location"),
       `/api/local-preview/127.0.0.1/${targetPort}/hello`,
     );
+    for (const [route, expected] of [["absolute", `/api/local-preview/127.0.0.1/${targetPort}/hello?tab=1#section`],
+      ["relative", `/api/local-preview/127.0.0.1/${targetPort}/hello?tab=2#section`], ["external", "//example.com/hello"]]) {
+      const response = await fetch(`${proxyUrl}/api/local-preview/localhost/${targetPort}/${route}`, { redirect: "manual" });
+      assert.equal(response.headers.get("location"), expected);
+    }
+    const directory = await fetch(`${proxyUrl}/api/local-preview/localhost/${targetPort}?tab=1`, { redirect: "manual" });
+    assert.equal(directory.headers.get("location"), `/api/local-preview/localhost/${targetPort}/?tab=1`);
 
     const blocked = await fetch(`${proxyUrl}/api/local-preview/example.com/${targetPort}/`);
     assert.equal(blocked.status, 400);
@@ -160,6 +172,27 @@ test("local preview proxies requests and rewrites same-host redirects", async ()
     target.close();
     proxy.close();
   }
+});
+
+test("cancelling a preview request closes its waiting upstream connection", { timeout: 5000 }, async () => {
+  let received!: () => void;
+  const upstreamReceived = new Promise<void>(resolve => { received = resolve; });
+  let disconnected!: () => void;
+  const upstreamDisconnected = new Promise<void>(resolve => { disconnected = resolve; });
+  const targetApp = express();
+  targetApp.use((req, _res) => { req.socket.once("close", disconnected); received(); });
+  const target = await listen(targetApp);
+  const app = express();
+  registerLocalPreviewRoutes(app, { requireAuth: noAuth as never, requireFiles: noAuth as never });
+  const proxy = await listen(app);
+  const abort = new AbortController();
+  try {
+    const waiting = fetch(`http://127.0.0.1:${(proxy.address() as AddressInfo).port}/api/local-preview/127.0.0.1/${(target.address() as AddressInfo).port}/`, { method: "HEAD", signal: abort.signal }).catch(() => null);
+    await upstreamReceived;
+    abort.abort();
+    await waiting;
+    await upstreamDisconnected;
+  } finally { abort.abort(); target.closeAllConnections(); proxy.closeAllConnections(); target.close(); proxy.close(); }
 });
 
 test("local file endpoint serves HTML and sibling assets without traversal", async () => {

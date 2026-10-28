@@ -1,11 +1,16 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFile } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 
 import { buildChildEnv, getLoginShellEnv, setLoginShellEnv } from "../src/env-utils.js";
 import { deepRepairRuntimePath, formatPathRepairSummary, repairRuntimePath, whichSync, type PathRepairResult } from "../src/path-repair.js";
+import { shellQuote } from "../src/shell-quote.js";
+
+const exec = promisify(execFile);
 
 test("runtime PATH includes the native OpenCode install even without shell initialization", t => {
   const root = mkdtempSync(path.join(os.tmpdir(), "wand-native-opencode-path-"));
@@ -153,3 +158,39 @@ test("login shell probe reuses the default shell environment for every CLI child
   assert.equal(childEnv.PATH?.split(path.delimiter)[0], loginPath);
   assert.equal(buildChildEnv(false).WAND_TEST_SHELL_ONLY, undefined, "关闭继承时仍只注入白名单");
 });
+
+for (const shellExits of [false, true]) {
+  test(`timed-out login probe closes inherited pipes when the shell ${shellExits ? "exits before its child" : "and its child ignore TERM"}`,
+    { skip: process.platform === "win32" }, async t => {
+      const root = mkdtempSync(path.join(os.tmpdir(), "wand-probe-timeout-"));
+      const parentPid = path.join(root, "parent.pid"), childPid = path.join(root, "child.pid"), sleeperPid = path.join(root, "sleeper.pid");
+      const childScript = path.join(root, "child.sh"), shell = path.join(root, "probe-shell"), runner = path.join(root, "run.mjs");
+      t.after(() => {
+        const pids = [parentPid, childPid, sleeperPid].flatMap(file => {
+          try { const pid = Number(readFileSync(file, "utf8")); return Number.isSafeInteger(pid) && pid > 1 ? [pid] : []; }
+          catch { return []; }
+        });
+        // These are PID files written only by this fixture. Clean up even if a
+        // regression makes execFile reach its outer deadline.
+        if (pids[0]) try { process.kill(-pids[0], "SIGKILL"); } catch { /* already reaped */ }
+        for (const pid of pids) try { process.kill(pid, "SIGKILL"); } catch { /* already reaped */ }
+        rmSync(root, { recursive: true, force: true });
+      });
+      writeFileSync(childScript, ["#!/bin/sh", "trap '' TERM", "/bin/sleep 30 &",
+        `printf '%s\\n' "$!" > ${shellQuote(sleeperPid)}`, "wait"].join("\n") + "\n");
+      writeFileSync(shell, ["#!/bin/sh", "trap '' TERM", `printf '%s\\n' "$$" > ${shellQuote(parentPid)}`,
+        `/bin/sh ${shellQuote(childScript)} &`, `printf '%s\\n' "$!" > ${shellQuote(childPid)}`,
+        shellExits ? "exit 0" : "wait"].join("\n") + "\n");
+      chmodSync(shell, 0o755);
+      writeFileSync(runner, `import { deepRepairRuntimePath } from ${JSON.stringify(new URL("../src/path-repair.ts", import.meta.url).href)};\n`
+        + `const result = await deepRepairRuntimePath({ added: [], resolved: {}, finalPath: process.env.PATH ?? "", deepProbe: "skipped", warnings: [] }, { shell: ${JSON.stringify(shell)}, timeoutMs: 500 });\n`
+        + `process.stdout.write(JSON.stringify({ status: result.deepProbe, timedOut: result.warnings.some(warning => warning.includes("timed out")) }));\n`);
+      const { stdout } = await exec(process.execPath, ["--import", "tsx", runner], {
+        timeout: 10_000, killSignal: "SIGKILL", env: { ...process.env, WAND_PATH_REPAIR_DISABLE: "0", WAND_PATH_REPAIR_DEEP_DISABLE: "0" },
+      });
+      assert.deepEqual(JSON.parse(stdout), { status: "failed", timedOut: true });
+      assert.ok(readFileSync(childPid, "utf8").trim(), "a descendant really held the inherited pipe");
+      // Natural worker completion proves that neither the ignoring shell nor
+      // its descendants retained a live pipe/child handle after the deadline.
+    });
+}

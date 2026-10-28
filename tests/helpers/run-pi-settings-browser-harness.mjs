@@ -21,7 +21,7 @@ const items = [
 ];
 const defaults = () => ({ codemode: 'off', globalTools: true, goalMode: false, tools: ['read', 'bash', 'edit', 'write'],
   localDecision: true, autoCompaction: true, resources: { skills: [], mcpServers: [] }, lockedSkills: [] });
-let settings = { a: defaults(), b: defaults() }, fail = false, loadDelay = 0, saveDelay = 0, legacy = false, badAck = false, badLockAck = false;
+let settings = { a: defaults(), b: defaults() }, fail = false, loadDelay = 0, saveDelay = 0, legacy = false, badAck = false, badLockAck = false, removeUnlocked = false;
 const calls = [], reads = [], recommendationCalls = [];
 const server = createServer(async (req, res) => {
   if (req.url?.endsWith('/pi-settings/recommend')) {
@@ -36,7 +36,10 @@ const server = createServer(async (req, res) => {
       const patch = JSON.parse(body); calls.push({ id, patch });
       if (saveDelay) await new Promise(r => setTimeout(r, saveDelay));
       if (fail) { res.statusCode = 500; res.end(JSON.stringify({ error: '保存失败：测试故障，原选择保持' })); return; }
+      const oldLocks = settings[id].lockedSkills;
       settings[id] = { ...settings[id], ...patch };
+      if (removeUnlocked && patch.lockedSkills) settings[id].resources = { ...settings[id].resources,
+        skills: settings[id].resources.skills.filter(value => !oldLocks.includes(value) || patch.lockedSkills.includes(value)) };
       res.end(JSON.stringify({ settings: { ...settings[id], ...(badAck ? { resources: undefined } : {}), ...(badLockAck ? { lockedSkills: undefined } : {}) } }));
     } else {
       reads.push(id);
@@ -219,6 +222,13 @@ try {
     await chooseSkill('mermaid', 0);
     await wait('document.querySelector("[role=slider][aria-label*=mermaid]").dataset.mode === "off" && document.querySelector(".wand-pi-settings-feedback").dataset.phase === "saved"');
     await check(`[${mode}] 三档设置重开持久化、关闭同时解锁`, 'piHarness.state.sessions[0].piSettings.lockedSkills.length === 0');
+    await chooseSkill('mermaid', 2);
+    await wait('document.querySelector("[role=slider][aria-label*=mermaid]").dataset.mode === "locked" && document.querySelector(".wand-pi-settings-feedback").dataset.phase === "saved"');
+    removeUnlocked = true;
+    await chooseSkill('mermaid', 1);
+    await wait('document.querySelector("[role=slider][aria-label*=mermaid]").dataset.mode === "off" && document.querySelector(".wand-pi-settings-feedback").dataset.phase === "saved"');
+    removeUnlocked = false;
+    await check(`[${mode}] 加载后卸载的技能解锁接受服务端清理，不留下假启用`, 'piHarness.state.sessions[0].piSettings.lockedSkills.length === 0 && !piHarness.state.sessions[0].piSettings.resources.skills.includes(' + JSON.stringify(skill('c')) + ')');
     await check(`[${mode}] 仅资源选择不改变通用工具`, 'piHarness.state.sessions[0].piSettings.globalTools === true && piHarness.state.sessions[0].piSettings.tools.length === 4 && document.getElementById("input-box").value === "保留我的草稿" && piHarness.composer.read("a").attachments.length === 1');
     await evaluate('(()=>{const n=document.querySelector("input[type=search]");Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set.call(n,"radix");n.dispatchEvent(new Event("input",{bubbles:true}));n.focus()})()');
     await wait('document.querySelectorAll(".wand-pi-resource-item").length === 1');

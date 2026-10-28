@@ -315,6 +315,8 @@ async function main(): Promise<void> {
     }
     case "knowledge:remember":
     case "knowledge:search":
+    case "knowledge:read":
+    case "knowledge:update":
     case "knowledge:forget": {
       const { runEmployeeKnowledgeCli } = await import("./employee-knowledge-cli.js");
       await runEmployeeKnowledgeCli(command, args.slice(1));
@@ -389,8 +391,11 @@ Agent runtime:
   wand decision:skills [--providers pi,claude,...]  Install managed user-level skills
   wand knowledge:remember <text> | --stdin
   wand knowledge:search [query]
-  wand knowledge:forget <entry-id>
-    Knowledge commands are bound to the current Wand employee execution environment.
+  wand knowledge:read <document-id> [--scope personal|project]
+  wand knowledge:update <document-id> --revision <version> <text> | --stdin
+  wand knowledge:forget <document-id> --revision <version>
+    All knowledge commands accept --scope personal|project (default personal).
+    Bound to the current Wand employee/project execution environment.
 
 System service (default = system-wide; pass --user for user-level):
   wand service:install      Register and start the background service (needs sudo for system)

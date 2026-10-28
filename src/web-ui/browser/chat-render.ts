@@ -4,7 +4,7 @@ import { paintChatSubtasks } from "./chat-subtasks.js";
 import { buildTurnNavIndex, turnNavRange } from "../react/chat/navigation/turn-nav-model.js";
 import { jumpToChatTurn } from "../react/chat/navigation/turn-jump.js";
 import { mountBrowserButtons, updateBrowserButtonLabel } from "./library-buttons.js";
-import { state } from "./state";
+import { state, todoTurnEvidence } from "./state";
 import { registerChatRuntime } from "./chat-render-runtime.js";
 import { ChatRenderCache } from "./chat-render-cache.js";
 import { beginChatInteraction, chatViewLease, isChatLeaseCurrent, patchChatContents, patchChatRow, prepareChatOwners, reconcileChatRows, retireChatTurnOwners, scopeChatMarkup } from "./chat-render-focus.js";
@@ -17,9 +17,9 @@ import { buildMessagesForRender } from "./input";
 import { syncSessionProgressToNative } from "./notifications";
 import "./render";
 import { copyToClipboard, getPreferredMessages, isRecoverableToolError, markSessionCompletionViewed } from "./session-engine";
-import { summarizeTodoProgress } from "./todo-progress";
+import { findTodoTurnSource, todoExecutionPresentation } from "./todo-execution.js";
 import { paintTodoProgress } from "./todo-view-adapter";
-import { renderStructuredStatusBar, syncTodoPopupDismiss } from "./utils";
+import { renderStructuredStatusBar } from "./utils";
 import { getCardDefault } from "./events";
 import { CHAT_RENDER_IDLE_MS, CHAT_RENDER_LIVE_MS } from "./terminal";
 import { shouldExtractPtySystemInfo } from "./pty-system-info";
@@ -935,95 +935,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
       // 相关入口：scrollChatToBottom（用户点气泡时强制贴底）、
       // refreshChatUnreadDivider（分割线渲染）、updateChatUnreadBubble（气泡 UI）。
 
-      // --- Todo progress bar ---
-      // 展开态的真值只在 DOM 上（#todo-progress-body 的 .expanded），不再另存一份
-      // 闭包变量：input.ts / session-engine.ts 在切会话、发新消息时会直接清这个 class，
-      // 两份状态一飘就会出现「点一下没反应，要点两下才展开」。
-      function isTodoExpanded() {
-        var body = document.getElementById("todo-progress-body");
-        return !!body && body.classList.contains("expanded");
-      }
-
-      // 展开/收起待办面板的唯一入口：aria、class、chat 底部 padding 一次改完。
-      function setTodoExpanded(expanded, focusToggle?) {
-        var next = !!expanded;
-        var prog = document.getElementById("todo-progress");
-        var body = document.getElementById("todo-progress-body");
-        var toggle = document.getElementById("todo-progress-toggle");
-        if (prog) prog.classList.toggle("expanded", next);
-        if (body) body.classList.toggle("expanded", next);
-        if (toggle) {
-          toggle.setAttribute("aria-expanded", next ? "true" : "false");
-          toggle.setAttribute("aria-label", next ? "收起待办列表" : "展开待办列表");
-        }
-        // 与编辑器、选择器共享关闭优先级，Escape/返回先关详情，不收起编辑。
-        syncTodoPopupDismiss(next, () => setTodoExpanded(false, true));
-        // body 展开/收起后视觉高度变了，触发一次 padding 同步
-        syncChatMessagesPaddingForTodoBody();
-        if (focusToggle && toggle) toggle.focus();
-      }
-
-      // Use event delegation for todo toggle (more robust than binding to specific element)
-      document.addEventListener("click", function(e) {
-        var target = e.target;
-        if (!target || !(target instanceof Element)) return;
-        var toggle = target.closest("#todo-progress-toggle");
-        if (!toggle) return;
-        e.preventDefault();
-        e.stopPropagation();
-        setTodoExpanded(!isTodoExpanded());
-      });
-
-      // 收起的兜底路径。之前只能再点一次那条，面板展开后会一直挂在聊天上方；
-      // 点外部收起对移动端尤其重要（手机上没有 Esc）。
-      document.addEventListener("pointerdown", function(e) {
-        if (!isTodoExpanded()) return;
-        var target = e.target;
-        if (!(target instanceof Element)) return;
-        if (target.closest("#todo-progress-body") || target.closest("#todo-progress-toggle")) return;
-        setTodoExpanded(false);
-      });
-
-      // 同步 .chat-messages 的 padding-bottom 与 .todo-progress-body 的实际高度。
-      // 背景：body 是 position: absolute 浮在 composer 上方，max-height 320px，会盖住
-      // .chat-messages 底部一大块；column-reverse 下新消息永远 prepend 到 DOM 第一个
-      // （也就是视觉底部），结果就是被 body 完全遮住、只在上沿露个头。给 chat-messages
-      // 动态加一段等于 body 高度的 padding-bottom，最新一条消息就会浮在 body 正上方，
-      // 不再渲染在 body 覆盖区。body 收起/隐藏时还原回 CSS 默认的 12px。
-      //
-      // 每次都用 ResizeObserver 跟住当前的 body 节点：列表条数变化、长文本换行、
-      // 面板被整块重渲染（节点被替换）都会改高度，靠调用点手动补刀总会漏掉一路。
-      var todoBodyObserver = null;
-      var todoBodyObserved = null;
-      function ensureTodoBodyObserver(todoBody) {
-        if (typeof ResizeObserver !== "function") return;
-        if (todoBodyObserved === todoBody && todoBodyObserver) return;
-        if (todoBodyObserver) todoBodyObserver.disconnect();
-        todoBodyObserved = todoBody;
-        todoBodyObserver = new ResizeObserver(function() {
-          syncChatMessagesPaddingForTodoBody();
-        });
-        todoBodyObserver.observe(todoBody);
-      }
-
-      function syncChatMessagesPaddingForTodoBody() {
-        var chatMessages = document.querySelector("#chat-output .chat-messages");
-        var todoBody = document.getElementById("todo-progress-body");
-        if (!chatMessages || !todoBody) return;
-        ensureTodoBodyObserver(todoBody);
-        // querySelector 返回 Element，但 .style 是 HTMLElement 上的；这里强转。
-        var chatMessagesEl = chatMessages as HTMLElement;
-        var isVisible = !todoBody.classList.contains("hidden");
-        var isExpanded = todoBody.classList.contains("expanded");
-        var bodyHeight = todoBody.offsetHeight;
-        if (isVisible && isExpanded && bodyHeight > 0) {
-          // 8px 是与 body 上方那 6px 间距对应的视觉缓冲，避免最新一条贴脸 body。
-          chatMessagesEl.style.paddingBottom = (bodyHeight + 8) + "px";
-        } else {
-          // 清掉内联样式，回到 .chat-messages CSS 默认的 padding: 20px 4px 12px
-          chatMessagesEl.style.paddingBottom = "";
-        }
-      }
+      // Popover owns positioning, focus and dismissal; opening never changes the reading scroll geometry.
 
       // 把一个 tool_result 的 content 拍平成纯字符串（可能是 string，也可能是
       // [{type:"text",text}] 数组）。TaskCreate 的结果文本形如
@@ -1070,7 +982,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
           if (!msg2 || !Array.isArray(msg2.content)) continue;
           for (var k = 0; k < msg2.content.length; k++) {
             var blk = msg2.content[k];
-            if (!blk || blk.type !== "tool_use") continue;
+            if (!blk || blk.type !== "tool_use" || blk.__subagent) continue;
             var input = blk.input || {};
             if (blk.name === "TaskCreate") {
               sawTaskTool = true;
@@ -1113,16 +1025,13 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
       }
 
       function updateTodoProgress(messages) {
-        // 只看"当前 turn"里的 TodoWrite——即最后一条 user 消息之后的那段。
-        // 不限制范围的话，上一轮留下的进度条会在新一轮（哪怕新一轮根本没用
-        // TodoWrite）里阴魂不散地重现。
-        var startIdx = 0;
-        for (var ui = messages.length - 1; ui >= 0; ui--) {
-          if (messages[ui] && messages[ui].role === "user") {
-            startIdx = ui + 1;
-            break;
-          }
-        }
+        // Only authoritative, accepted user boundaries own Todo. Pure tool-result
+        // answers continue the same logical turn; local drafts/queue placeholders do not.
+        var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
+        if (messages.length && Array.isArray(selectedSession?.messages)) messages = selectedSession.messages;
+        var source = messages.length && selectedSession
+          ? findTodoTurnSource({ ...selectedSession, messages }) : null;
+        var startIdx = source?.startIndex ?? messages.length;
 
         var todos = null;
         for (var i = messages.length - 1; i >= startIdx; i--) {
@@ -1130,6 +1039,7 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
           if (!msg.content || !Array.isArray(msg.content)) continue;
           for (var j = msg.content.length - 1; j >= 0; j--) {
             var block = msg.content[j];
+            if (block.__subagent) continue;
             if (block.type === "tool_use" && block.semantic && block.semantic.kind === "task_list") {
               todos = block.semantic.items;
               break;
@@ -1151,55 +1061,25 @@ function restoreChatReadingAnchor(container: HTMLElement, anchor: ChatReadingAnc
         }
 
         var container = document.getElementById("todo-progress");
-        var bodyEl = document.getElementById("todo-progress-body");
         if (!container) return;
 
-        if (!todos || todos.length === 0) {
+        if (!source || !todos || todos.length === 0) {
           container.classList.add("hidden");
-          if (bodyEl) bodyEl.classList.add("hidden");
-          // 收起态是闭包状态，隐藏时必须一起复位；否则下一次这个条重新出现
-          // 会带着上一轮的 expanded class，面板无人操作就自己弹开。
-          if (isTodoExpanded()) setTodoExpanded(false);
-          // body 隐藏（无 todo）→ 还原 chat 底部 padding
-          syncChatMessagesPaddingForTodoBody();
+          paintTodoProgress([], null);
           return;
         }
 
-        // 统计（完成数 / 当前任务文案）与 class、图标映射都收在 todo-progress.ts
-        // 里——那边是纯函数，有单测兜着；这里只负责把结果写进 DOM。
-        var summary = summarizeTodoProgress(todos);
-        var completed = summary.completed;
-        var allDone = summary.allDone;
-
-        // 当会话不再活跃时（status !== "running"，即 turn 已结束、会话 idle/exited/
-        // archived），隐藏进度条。解决两个问题：
-        //   1. 模型经常忘了发最后一条全 completed 的 TodoWrite，让用户对着 2/4
-        //      干瞪眼——会话结束后直接收起，不展示过期数据。
-        //   2. 旧方案用 inFlight=false 判定 turn 结束，结构化模式下 inFlight 在
-        //      流式间隙短暂置假导致进度条闪烁。改用 session.status（仅在 turn 真正
-        //      结束时从 "running" 变 "idle"）判断，避免闪烁。
-        var selectedSession = state.sessions.find(function(s) { return s.id === state.selectedId; });
-        var sessionActive = !!selectedSession && selectedSession.status === "running";
-        if (!sessionActive || allDone) {
-          container.classList.add("hidden");
-          if (bodyEl) bodyEl.classList.add("hidden");
-          if (isTodoExpanded()) setTodoExpanded(false);
-          // turn 结束 / 全部 done，body 不再展示 → 还原 chat 底部 padding
-          syncChatMessagesPaddingForTodoBody();
-          return;
-        }
-
+        // Preserve the current turn as a read-only record after it stops. Neither
+        // idle nor incomplete Todo implies a running/paused execution.
+        var execution = todoExecutionPresentation(selectedSession, source,
+          todoTurnEvidence.get(selectedSession.id), state.wsConnected);
         container.classList.remove("hidden");
-        if (bodyEl) bodyEl.classList.remove("hidden");
-
-        paintTodoProgress(todos);
+        paintTodoProgress(todos, execution);
 
         // Sync todo progress to native notification
         if (state.selectedId) {
           syncSessionProgressToNative(state.selectedId);
         }
-        // 列表条数/状态变了（item 高度变化），同步一次 chat 底部 padding
-        syncChatMessagesPaddingForTodoBody();
       }
 
       function attachCopyHandler(el) {

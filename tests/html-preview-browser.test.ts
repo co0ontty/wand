@@ -6,4 +6,9 @@ test("HTML artifacts run inline across shared chat surfaces without Wand origin 
   const { runHtmlPreviewBrowser } = await import("./helpers/html-preview-browser.mjs");
   const report = await runHtmlPreviewBrowser();
   assert.equal(report.ok, true);
+  assert.deepEqual(report.formSafety.map(item => item.surface), ["local-file", "local-http"]);
+  assert.ok(report.formSafety.every(item => item.reactSubmitWorks && item.nativeSubmitBlocked && item.opaqueOrigin));
+  assert.equal(report.nativeRequests, 0);
+  assert.equal(report.nonHtmlDownload, true);
+  assert.equal(report.forwardedLargeDirectory, true);
 });

@@ -4,7 +4,7 @@
     "src/web-ui/react"
   ],
   "locale": "zh-CN",
-  "canonicalMap": "AGENTS.md",
+  "canonicalMap": "DESIGN.md",
   "requiredCapabilities": [
     "Select/Listbox",
     "Date",

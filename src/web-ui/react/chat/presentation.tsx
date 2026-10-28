@@ -5,7 +5,6 @@ import { createRoot, type Root } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { Alert, Badge, Button, Card, Collapse, Flex, Tag, Timeline, Typography, theme } from "antd";
 import { FileCard } from "@ant-design/x";
-import { EmployeeAvatar } from "../agents/employee-avatar";
 import { WandIcon } from "../ui";
 import type { WandIconName } from "../ui/icons.js";
 import { WandUiProvider } from "../theme";
@@ -327,7 +326,7 @@ function renderProjection(element: HTMLElement, projection: Projection): void {
 /** The message owner keeps the fold choice; Ant owns its single keyboard control. */
 export function presentAssistantReply(element: HTMLElement, key: string, preview: string, expanded: boolean, toggle: (expanded: boolean) => void, meta?: { time?: string; dateTime?: string; duration?: string; author?: string; employee?: { id: string; name?: string; avatar?: string; provider?: string; engine?: "cli" | "sdk" | "core" } }): void {
   // 署名只是「谁在做这件事」的说明：会话自带员工快照就署员工，团队 relay 的 msg.author 次之，
-  // 都取不到才回落品牌标记 + Wand（与 Android AssistantReplyHeader 同一套优先级）。
+  // 都取不到才回落 Wand 名称（与 Android AssistantReplyHeader 同一套优先级）。
   const employee = meta?.employee?.id ? meta.employee : null;
   const authorName = employee?.name || meta?.author || "Wand";
   let host = Array.from(element.children).find(child => child.classList.contains("assistant-reply-host")) as HTMLElement | undefined;
@@ -345,11 +344,6 @@ export function presentAssistantReply(element: HTMLElement, key: string, preview
         toggle(!expanded); presentAssistantReply(element, key, preview, !expanded, toggle, meta);
       })}>
       <span className="assistant-author">
-        <span className="assistant-author-avatar" aria-hidden="true">
-          {employee
-            ? <EmployeeAvatar employee={{ id: employee.id, name: employee.name || employee.id, avatar: employee.avatar }} provider={employee.provider} engine={employee.engine} size="lg" renderMode="static"/>
-            : <span className="assistant-author-spark"><WandIcon name="sparkle" size={14}/></span>}
-        </span>
         <span className="assistant-author-name">{authorName}</span>
       </span>
       {!expanded && preview ? <span className="assistant-author-preview" title={preview}>{preview}</span> : <span className="assistant-author-space"/>}

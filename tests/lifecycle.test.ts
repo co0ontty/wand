@@ -23,6 +23,9 @@ import type { SessionSnapshot } from "../src/types.js";
 import { WsBroadcastManager } from "../src/ws-broadcast.js";
 
 class MemoryStorage {
+  knowledgeSessionScope(): null { return null; }
+  revokeSessionKnowledgeAccess(): void {}
+
   readonly sessions = new Map<string, SessionSnapshot>();
 
   loadSessions(): SessionSnapshot[] {

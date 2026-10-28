@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, renameSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createServer } from "node:http";
 import express from "express";
 import { defaultConfig } from "../src/config.js";
-import { discoverPiResources } from "../src/pi-resource-catalog.js";
+import { discoverPiResources, resolvePiResourceSelection } from "../src/pi-resource-catalog.js";
 import { ProcessManager } from "../src/process-manager.js";
 import { SessionRegistry } from "../src/session-registry.js";
 import { registerSessionRoutes } from "../src/server-session-routes.js";
@@ -21,8 +21,17 @@ test("用户级 Pi 默认设置可读可写，新建会话按它起步，失效�
   const agentDir = path.join(root, "agent");
   const dir = path.join(agentDir, "skills", "subagent"); mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(dir, "SKILL.md"), "---\nname: subagent\ndescription: Delegate subtasks\n---\n# Subagent\n");
+  const removedNames = ["removed-one", "removed-two", "removed-unlocked"];
+  for (const name of removedNames) {
+    const directory = path.join(agentDir, "skills", name); mkdirSync(directory, { recursive: true });
+    writeFileSync(path.join(directory, "SKILL.md"), `---\nname: ${name}\ndescription: Fixture ${name}\n---\n# Skill\n`);
+  }
+  writeFileSync(path.join(agentDir, "mcp.json"), JSON.stringify({ mcpServers: { fixture: { url: "https://example.invalid/mcp" } } }));
   const config = { ...defaultConfig(), defaultCwd: root, harness: { engine: "cli" as const, agentDir } };
-  const installed = (await discoverPiResources(config, root)).catalog.skills.find((item) => item.name === "subagent")!.id;
+  const inventory = await discoverPiResources(config, root);
+  const installed = inventory.catalog.skills.find((item) => item.name === "subagent")!.id;
+  const removed = removedNames.map((name) => inventory.catalog.skills.find((item) => item.name === name)!.id);
+  const mcpServers = [inventory.catalog.mcpServers[0]!.id];
   const storage = new WandStorage(path.join(root, "wand.db"));
   const structured = new StructuredSessionManager(storage, config, null, { pi: { start() { throw new Error("must not launch a model"); } } });
   const processes = new ProcessManager(config, storage, root);
@@ -74,4 +83,40 @@ test("用户级 Pi 默认设置可读可写，新建会话按它起步，失效�
   const intact = await read();
   assert.deepEqual(intact.settings.resources.skills, [installed]);
   assert.equal(intact.settings.codemodeOverride, "on");
+
+  assert.equal((await patch({ resources: { skills: [installed, ...removed], mcpServers },
+    lockedSkills: [installed, ...removed.slice(0, 2)] })).status, 200);
+  for (const name of removedNames) renameSync(path.join(agentDir, "skills", name), path.join(root, name));
+  const unavailable = await discoverPiResources(config, root);
+  const before = (await read()).settings;
+  assert.equal((await patch({ codemodeOverride: "off" })).status, 200);
+  assert.deepEqual((await read()).settings.resources, before.resources, "unrelated defaults edits preserve missing references");
+  assert.equal((await patch({ lockedSkills: removed.slice(0, 2) })).status, 200);
+  const validUnlock = (await read()).settings;
+  assert.deepEqual(validUnlock, { ...before, codemodeOverride: "off", lockedSkills: removed.slice(0, 2) },
+    "unlocking an installed skill keeps it selected, even alongside missing selections");
+
+  const firstUnlock = await patch({ lockedSkills: [removed[1]] });
+  assert.equal(firstUnlock.status, 200);
+  const firstSettings = (await firstUnlock.json() as any).settings;
+  assert.deepEqual(firstSettings, { ...validUnlock, lockedSkills: [removed[1]],
+    resources: { skills: [installed, removed[1], removed[2]], mcpServers } });
+  assert.deepEqual(storage.getPiSessionDefaults(), firstSettings);
+  assert.throws(() => resolvePiResourceSelection(unavailable, firstSettings.resources), /已不存在/);
+  assert.equal((await patch({ resources: { ...firstSettings.resources, skills: [...firstSettings.resources.skills, skill("f")] } })).status, 400);
+  assert.equal((await patch({ lockedSkills: [removed[1], skill("f")] })).status, 400);
+  assert.deepEqual((await read()).settings, firstSettings);
+
+  // UI sends both arrays, while lock-only callers send one; both release only this explicit unlock.
+  const secondUnlock = await patch({ resources: firstSettings.resources, lockedSkills: [] });
+  assert.equal(secondUnlock.status, 200);
+  const secondSettings = (await secondUnlock.json() as any).settings;
+  assert.deepEqual(secondSettings.resources, { skills: [installed, removed[2]], mcpServers });
+  assert.deepEqual(secondSettings.lockedSkills, []);
+  assert.equal((await patch({ lockedSkills: [] })).status, 200);
+  assert.deepEqual((await read()).settings.resources, secondSettings.resources, "an unlocked missing skill still needs explicit deselection");
+  assert.equal((await patch({ resources: { skills: [installed], mcpServers } })).status, 200);
+  const repaired = structured.createSession({ cwd: root, mode: "managed", provider: "pi" });
+  assert.deepEqual(repaired.piSettings?.resources, { skills: [installed], mcpServers });
+  assert.deepEqual(repaired.piSettings?.lockedSkills, []);
 });

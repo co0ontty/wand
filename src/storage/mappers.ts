@@ -449,7 +449,7 @@ export function normalizeWorktreeMergeStatus(raw: string | null | undefined): Se
 }
 
 export function normalizeSessionSource(raw: unknown): SessionSource {
-  return raw === "automation" || raw === "startup" || raw === "interactive" ? raw : "interactive";
+  return raw === "automation" || raw === "startup" || raw === "interactive" || raw === "quick-terminal" ? raw : "interactive";
 }
 
 

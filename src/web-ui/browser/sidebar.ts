@@ -8,7 +8,7 @@ import { parseJsonResponse } from "../react/http-adapter";
 import { getErrorMessage } from "../../error-utils.js";
 
       function getSelectedSessionIds() {
-        return Object.keys(state.selectedSessionIds).filter(function(id) { return !!state.selectedSessionIds[id]; });
+        return getSelectableSessions().filter(function(session) { return !!state.selectedSessionIds[session.id]; }).map(function(session) { return session.id; });
       }
 
       function clearManageSelections() {
@@ -26,7 +26,7 @@ import { getErrorMessage } from "../../error-utils.js";
       }
 
       function getSelectableSessions() {
-        return state.sessions.slice();
+        return state.sessions.filter(function(session) { return session.sessionSource !== "quick-terminal"; });
       }
 
       export function selectAllVisibleItems() {

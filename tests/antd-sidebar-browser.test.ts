@@ -13,9 +13,10 @@ import { createHash } from "node:crypto";
 test("Ant sidebar production components retain projection, library interactions and stable legacy hosts", { timeout: 420_000, skip: process.env.WAND_SIDEBAR_BROWSER !== "1" }, async () => {
   const root = resolve(import.meta.dirname, "..");
   const temporary = mkdtempSync(join(tmpdir(), "wand-antd-sidebar-"));
-  const artifact = join(root, process.env.WAND_SIDEBAR_ARTIFACT ?? "output/web-ui-library-migration/sidebar");
+  const artifact = resolve(root, process.env.WAND_SIDEBAR_ARTIFACT ?? "output/web-ui-library-migration/sidebar");
   const visualOnly = process.env.WAND_SIDEBAR_VISUAL_ONLY === "1";
-  const artifactName = visualOnly ? "sidebar-visual-browser.json" : "sidebar-browser.json";
+  const navigationOnly = process.env.WAND_SIDEBAR_NAVIGATION_ONLY === "1";
+  const artifactName = navigationOnly ? "sidebar-navigation-browser.json" : visualOnly ? "sidebar-visual-browser.json" : "sidebar-browser.json";
   const browserErrors: string[] = [];
   const clickLog: Array<Record<string, unknown>> = [];
   const evidence: Array<Record<string, unknown>> = [];
@@ -24,12 +25,13 @@ import { createRoot } from "react-dom/client";
 import { ShellApp } from "./src/web-ui/react/shell/shell-app";
 import { MemoryUiAdapter } from "./src/web-ui/react/shell/ui-store";
 import { WorkspacesHost } from "./src/web-ui/react/workspaces/host";
-import { workspacesController, configureWorkspacesRuntime } from "./src/web-ui/react/workspaces/controller";
+import { configureWorkspacesRuntime } from "./src/web-ui/react/workspaces/controller";
 import { conversationUi } from "./src/web-ui/react/conversations/state";
-import { NewSessionHost } from "./src/web-ui/react/new-session/host";
+import { ComposerStore } from "./src/web-ui/browser/composer";
+import { configureTeamChatComposerRuntime } from "./src/web-ui/react/ai-teams/composer-bridge";
 import { employeeProfile } from "./src/web-ui/react/agents/employee-profile";
 import { configureQuickTerminalRuntime } from "./src/web-ui/react/quick-terminal/runtime";
-import { configureNewSessionRuntime } from "./src/web-ui/react/new-session/controller";
+import { configureNewSessionRuntime, newSessionController } from "./src/web-ui/react/new-session/controller";
 // SessionPane validates vendor readiness before calling the mock terminal runtime below.
 // The runtime owns fixture DOM; these markers satisfy the canonical loader contract only.
 globalThis.XTermLib = { Terminal: class FixtureTerminal {}, FitAddon: class FixtureFitAddon {} };
@@ -38,6 +40,9 @@ globalThis.XTermLib = { Terminal: class FixtureTerminal {}, FitAddon: class Fixt
 configureQuickTerminalRuntime({ mount() { return false; }, retain() {}, dispose() {}, focus() {}, reconnect() {}, observe() { return () => {}; } });
 conversationUi.mode("tasks"); conversationUi.suspend();
 configureNewSessionRuntime({onOpen(){},onClose(){},getContext(){return {effectiveCwd:"/workspace/wand"};},rememberModel(){},prepareCreate:async()=>({}),completeCreate:async()=>{}});
+// The production new-work host projects the shared composer, not a separate modal draft.
+const composer = new ComposerStore({storage:()=>localStorage,isUnloading:()=>false,disposeAttachment(){}});
+configureTeamChatComposerRuntime({read:id=>composer.read(id),edit:(id,change)=>composer.edit(id,change),subscribe:listener=>composer.subscribe(listener),submit:(id,text,deliver)=>composer.submit(id,text,deliver)});
 import { UnifiedExecutionSubjectPicker } from "./src/web-ui/react/workspaces/unified-execution-subject-picker";
 import { WandUiProvider } from "./src/web-ui/react/theme";
 import { installReactUiStyles } from "./src/web-ui/react/styles";
@@ -54,7 +59,7 @@ window.sidebar = {overlay:()=>overlayStore.getSnapshot(),memory, selections:[], 
 window.sidebar.setCwd = cwd => {snapshot={...snapshot,topbar:{...snapshot.topbar,cwd}};memory.setSnapshot(snapshot,{sync:true});};
 const store = { getSnapshot:()=>memory.getSnapshot(),subscribe:(cb)=>memory.subscribe(cb),dispatch:(action)=>{
   memory.dispatch(action);
-  if(action.type==="workspace.new")workspacesController.open();
+  if(action.type==="workspace.new")newSessionController.open();
   if(action.type==="layout.drawer.close")sidebar.update({sessionsDrawerOpen:false});
   if(action.type==="layout.files.toggle")sidebar.update({filePanelOpen:!snapshot.layout.filePanelOpen,filePanelBackdropVisible:mobile&&!snapshot.layout.filePanelOpen});
   if(action.type==="layout.files.close")sidebar.update({filePanelOpen:false,filePanelBackdropVisible:false});
@@ -65,7 +70,7 @@ const store = { getSnapshot:()=>memory.getSnapshot(),subscribe:(cb)=>memory.subs
 configureWorkspacesRuntime({effectiveCwd(){return "/workspace/wand";},onOpen(){},onClose(){},modelPreference(){return "";},rememberModelPreference(){},toast(){},selectSession(id){sidebar.selections.push(id);},openTask(payload){setActiveWorkspaceContext({...payload,layout:null});},openWorkspace(){},closeWorkspace(){clearActiveWorkspaceContext();},refreshSessions:async()=>{},saveTaskLayout(layout){sidebar.layoutSaves.push(layout);setActiveWorkspaceContext({layout});},mountSessionTerminal(id,node){sidebar.terminalMounts.push(id);node.dataset.sessionId=id;let terminal=sidebar.terminalNodes.get(id);if(!terminal){terminal=document.createElement('div');terminal.dataset.poolTerminal=id;sidebar.terminalNodes.set(id,terminal);}node.append(terminal);return true;},unmountSessionTerminal(id){sidebar.terminalDisposals.push(id);sidebar.terminalNodes.get(id)?.remove();sidebar.terminalNodes.delete(id);sidebar.terminalScales.delete(id);},disposeAllSessionTerminals(){sidebar.disposeAllCalls++;sidebar.terminalNodes.forEach(node=>node.remove());sidebar.terminalNodes.clear();sidebar.terminalScales.clear();},getSessionTerminalScale(id){return sidebar.terminalScales.get(id)??1;},setSessionTerminalScale(id,scale){sidebar.terminalScales.set(id,scale);return scale;},closeTaskSessions:async()=>false,startWorktreeMergeAgent:async(payload)=>{sidebar.worktreeRequests.push(payload);throw Error("合并启动本地拒收");}});
 function DraftDialog(){const state=React.useSyncExternalStore(overlayStore.subscribe,overlayStore.getSnapshot,overlayStore.getSnapshot);const dialog=state.activeDialog;return dialog ? <WandDialog open {...dialog.options} onAction={(action,inputValue)=>overlayStore.completeDialog(dialog.id,{dismissed:false,action,inputValue})} onDismiss={()=>overlayStore.completeDialog(dialog.id,{dismissed:true})}/> : null;}
 function WindowPicker({open,onDismiss}){const [subject,setSubject]=React.useState({type:"cli",id:"codex",engine:"cli"});const [kind,setKind]=React.useState("structured");const [model,setModel]=React.useState("default");const [error,setError]=React.useState("");return <WandDialogSurface open={open} onOpenChange={(next)=>{if(!next)onDismiss();}} title="新建工作窗口" className="wand-task-library-dialog wand-workspace-agent-modal" closeLabel="关闭工作窗口选择" testId="workspace-agent-dialog" dismissable><form className="wand-ui-dialog-content" onSubmit={async(event)=>{event.preventDefault();try{sidebar.mutations.push([subject.id,kind,model==="default"?"":model]);throw Error("本地拒收，保留选择");}catch(cause){setError(String(cause.message));}}}><UnifiedExecutionSubjectPicker selectedSubject={subject} kind={kind} model={model} teams={null} teamWorkspaceId="" onSubjectChange={setSubject} onKindChange={setKind} onModelChange={setModel}/>{error?<Alert type="error" showIcon role="alert" title={error}/>:null}<button type="submit">创建</button></form></WandDialogSurface>;}
-function Fixture(){const [agent,setAgent]=React.useState(false);return <><ShellApp store={store}/><WandUiProvider><WorkspacesHost/><NewSessionHost/><DraftDialog/><WandButton id="fixture-profile" onClick={event=>employeeProfile.open({id:"employee:real",name:"真实员工"},event.currentTarget)}>员工资料</WandButton><WandButton id="fixture-agent" onClick={()=>setAgent(true)}>窗口选择器</WandButton><WindowPicker open={agent} onDismiss={()=>setAgent(false)}/></WandUiProvider></>;}
+function Fixture(){const [agent,setAgent]=React.useState(false);return <><ShellApp store={store}/><WandUiProvider><WorkspacesHost/><DraftDialog/><WandButton id="fixture-profile" onClick={event=>employeeProfile.open({id:"employee:real",name:"真实员工"},event.currentTarget)}>员工资料</WandButton><WandButton id="fixture-agent" onClick={()=>setAgent(true)}>窗口选择器</WandButton><WindowPicker open={agent} onDismiss={()=>setAgent(false)}/></WandUiProvider></>;}
 createRoot(document.getElementById("root")).render(<Fixture/>);
 if (new URLSearchParams(location.search).has("manual")) {
   const controls = document.createElement("div");
@@ -78,6 +83,8 @@ if (new URLSearchParams(location.search).has("manual")) {
 }
 `;
   await build({ stdin: { contents: source, resolveDir: root, loader: "tsx" }, bundle: true, format: "iife", platform: "browser", jsx: "automatic", outfile: join(temporary, "app.js"), define: { "process.env.NODE_ENV": '"production"' } });
+  await build({ entryPoints: [join(root, "src/web-ui/react/avatars/renderer.ts")], bundle: true, platform: "browser", format: "iife", minify: true, outfile: join(temporary, "plush-avatar.js"), logLevel: "warning" });
+  writeFileSync(join(temporary, "app.js"), readFileSync(join(temporary, "app.js"), "utf8").replaceAll("${plushAvatarChunkSrc}", "/plush-avatar.js"));
   const sourceBundleSha256 = createHash("sha256").update(readFileSync(join(temporary, "app.js"))).digest("hex");
   const globalCssSha256 = createHash("sha256").update(readFileSync(join(root, "src/web-ui/content/styles.css"))).digest("hex");
   const server = createServer((request, response) => {
@@ -87,6 +94,8 @@ if (new URLSearchParams(location.search).has("manual")) {
       const group = { workspaceId: "ws", workspaceName: "生产目录", workspaceCwd: "/workspace/wand", tasks: [task], standaloneSessions: [] };
       const url = new URL(request.url, "http://local");
       const payload = url.pathname === "/api/tasks" ? { groups: [group] }
+        : url.pathname === "/api/sessions" ? task.sessions
+        : url.pathname === "/api/workspaces" ? [{ id:"ws",name:"生产目录",cwd:"/workspace/wand" }]
         : url.pathname === "/api/workspace-tasks/t1" ? task
         : url.pathname === "/api/workspaces/ws/worktrees" ? { workspaceId:"ws", repoRoot:"/workspace/wand", targetBranch:"main", worktrees:[
           {taskId:"t1",taskName:"组件迁移任务",taskStatus:"active",branch:"branch/t1",path:"/workspace/worktree",baseRef:"main",state:"ready",actionable:true,reason:"",aheadCount:1,hasUncommittedChanges:false,hasConflicts:false,commits:[]},
@@ -106,7 +115,8 @@ if (new URLSearchParams(location.search).has("manual")) {
       response.setHeader("content-type", "application/json");
       if (url.pathname === "/api/config") setTimeout(() => response.end(JSON.stringify(payload)), 1200);
       else response.end(JSON.stringify(payload));
-    } else if (request.url === "/app.js") { response.setHeader("content-type", "application/javascript"); response.end(readFileSync(join(temporary, "app.js"))); }
+    } else if (new URL(request.url!, "http://fixture").pathname === "/plush-avatar.js") { response.setHeader("content-type", "application/javascript"); response.end(readFileSync(join(temporary, "plush-avatar.js"))); }
+    else if (request.url === "/app.js") { response.setHeader("content-type", "application/javascript"); response.end(readFileSync(join(temporary, "app.js"))); }
     else if (request.url === "/styles.css") { response.setHeader("content-type", "text/css"); response.end(readFileSync(join(root, "src/web-ui/content/styles.css"))); }
     else if (request.url === "/tailwind.css") { response.setHeader("content-type", "text/css"); response.end(readFileSync(join(root, "src/web-ui/content/tailwind.css"))); }
     else { response.setHeader("content-type", "text/html; charset=utf-8"); response.end('<!doctype html><html lang="zh-CN"><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/tailwind.css"><link rel="stylesheet" href="/styles.css"><style>#root{height:100vh}#fixture-agent{position:fixed;bottom:16px;right:16px;z-index:1000}#fixture-profile{position:fixed;bottom:16px;right:160px;z-index:1000}</style></head><body><div id="app" data-react-shell="enabled"><div id="root"></div></div><div id="overlay-root"><div class="wand-ui-portals" id="wand-react-ui-portals"></div></div><script src="/app.js"></script></body></html>'); }
@@ -121,6 +131,7 @@ if (new URLSearchParams(location.search).has("manual")) {
   const chrome = spawn(process.env.CHROME_BIN ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", ["--headless=new", "--disable-gpu", "--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows", "--no-first-run", "--remote-allow-origins=*", "--remote-debugging-port=0", `--user-data-dir=${temporary}/profile`, "about:blank"], { stdio: "ignore" });
   let socket: WebSocket | undefined;
   let diagnosticEvaluate: ((expression: string) => Promise<any>) | undefined;
+  let diagnosticScreenshot: (() => Promise<any>) | undefined;
   const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
   try {
     const portFile = join(temporary, "profile/DevToolsActivePort");
@@ -156,6 +167,7 @@ if (new URLSearchParams(location.search).has("manual")) {
       return result.result.value;
     };
     diagnosticEvaluate = evaluate;
+    diagnosticScreenshot = () => send("Page.captureScreenshot", { format: "png" });
     // Feature lanes share this machine, so the budget tolerates a loaded browser rather than
     // turning slow frames into failures.
     const wait = async (expression: string): Promise<void> => {
@@ -167,7 +179,8 @@ if (new URLSearchParams(location.search).has("manual")) {
     // Synthetic clicks are recorded so a failure can prove whether the browser delivered them.
     const dispatchClick = async (selector: string): Promise<{ matched: boolean; target: string }> => {
       const spot = await evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n)throw Error('Missing target');if(!n.closest('.ant-dropdown,.ant-popover,.sidebar-peek'))n.scrollIntoView({block:'center',behavior:'instant'});const r=n.getBoundingClientRect();const x=r.x+r.width/2,y=r.y+r.height/2;const hit=document.elementFromPoint(x,y);if(n!==hit&&!n.contains(hit))throw Error('Target obstructed: '+${JSON.stringify(selector)}+' hit '+hit?.outerHTML.slice(0,400)+' target '+n.outerHTML+' rect '+JSON.stringify(r.toJSON()));return{x,y}})()`);
-      await evaluate("window.__sidebarLastClickTarget = null; window.__sidebarLastClickControl = null; true");
+      // Keep the measured control identity: React may replace it after a successful action.
+      await evaluate(`window.__sidebarIntendedClick = document.querySelector(${JSON.stringify(selector)}); window.__sidebarLastClickTarget = null; window.__sidebarLastClickControl = null; true`);
       await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...spot });
       await send("Input.dispatchMouseEvent", { type: "mousePressed", ...spot, button: "left", buttons: 1, clickCount: 1 });
       await send("Input.dispatchMouseEvent", { type: "mouseReleased", ...spot, button: "left", buttons: 0, clickCount: 1 });
@@ -175,11 +188,15 @@ if (new URLSearchParams(location.search).has("manual")) {
       // A click that landed on a container of the control (a menu list, a dialog body) cannot have
       // run that control's action, so it may be re-issued. A press on the modal wrap is an outside
       // press with its own consequences and is never retried.
-      const record = await evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});const target=window.__sidebarLastClickTarget,control=window.__sidebarLastClickControl;if(!(target instanceof Element))return {target:"none",matched:false,wrapper:false};const html=String(target.outerHTML).slice(0,200);if(!n)return {target:html,matched:true,wrapper:false};const gate=n.closest('label,button,[role=tab],[role=menuitem],[role=radio],[role=checkbox],.ant-segmented-item,.ant-menu-item,.ant-tabs-tab,.ant-select-selector')||n;return {target:html,matched:target===n||n.contains(target)||target===gate||gate.contains(target)||control===gate,wrapper:target.contains(n)&&target.closest('.ant-modal-wrap,.ant-modal-mask,.ant-modal-root')===null}})()`);
+      const record = await evaluate(`(()=>{const n=window.__sidebarIntendedClick;const target=window.__sidebarLastClickTarget,control=window.__sidebarLastClickControl;if(!(target instanceof Element))return {target:"none",matched:false,wrapper:false};const html=String(target.outerHTML).slice(0,200);if(!n)return {target:html,matched:true,wrapper:false};const gate=n.closest('label,button,[role=tab],[role=menuitem],[role=radio],[role=checkbox],.ant-segmented-item,.ant-menu-item,.ant-tabs-tab,.ant-select-selector')||n;return {target:html,matched:target===n||n.contains(target)||target===gate||gate.contains(target)||control===gate,wrapper:target.contains(n)&&target.closest('.ant-modal-wrap,.ant-modal-mask,.ant-modal-root')===null}})()`);
       clickLog.push({ selector, ...record });
       return record;
     };
     const click = async (selector: string): Promise<void> => {
+      // Settle rc-trigger alignment before moving the pointer into a portalled menu.
+      // Hovering its prepare-frame coordinates can leave the owned surface mid-motion.
+      await evaluate("document.fonts.ready.then(()=>new Promise(resolve=>{let frames=0;function frame(){if(++frames>=6)resolve();else requestAnimationFrame(frame)}requestAnimationFrame(frame)}))");
+      await wait("!document.getAnimations().some(a=>a.playState==='running'&&Number.isFinite(a.effect?.getComputedTiming().endTime))");
       // While a library surface runs its entry motion the modal is still scaling, so a press
       // measured now can land on the wrapping element instead of the control.
       await wait(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n)return false;if(n.closest('.ant-zoom-appear,.ant-zoom-enter,.ant-zoom-leave,.ant-fade-appear,.ant-fade-enter'))return false;const r=n.getBoundingClientRect();return r.width>0&&r.height>0&&getComputedStyle(n).visibility!=='hidden'})()`);
@@ -204,6 +221,8 @@ if (new URLSearchParams(location.search).has("manual")) {
       await wait(`!!document.querySelector(${JSON.stringify(selector)})`);
       await pause(260);
       const point = await evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});n.scrollIntoView({block:'center'});const r=n.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+      await evaluate(`window.__sidebarContextTrigger = document.querySelector(${JSON.stringify(selector)}); true`);
+      await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...point });
       await send("Input.dispatchMouseEvent", { type: "mousePressed", ...point, button: "right", buttons: 2, clickCount: 1 });
       await send("Input.dispatchMouseEvent", { type: "mouseReleased", ...point, button: "right", buttons: 0, clickCount: 1 });
       clickLog.push({ selector, contextMenu: true });
@@ -234,9 +253,28 @@ if (new URLSearchParams(location.search).has("manual")) {
       await evaluate("document.addEventListener('click', event => { window.__sidebarLastClickTarget = event.target; window.__sidebarLastClickControl = event.target.closest?.('label,button,[role=tab],[role=menuitem],[role=radio],[role=checkbox],.ant-segmented-item,.ant-menu-item,.ant-tabs-tab,.ant-select-selector'); }, { capture: true }); true");
       if (mode === "native") await evaluate("document.documentElement.classList.add('is-wand-app','is-wand-ios')");
       await evaluate("sidebar.slots=Array.from(document.querySelectorAll('#output,#chat-output,.input-panel,#file-explorer'));true");
+      assert.equal(await evaluate("Array.from(document.querySelectorAll('.conversation-navigation .sidebar-nav-label')).map(n=>n.textContent).join(',')"), "对话,工作区,知识库,任务,定时", `${mode}: root navigation omits contacts while retaining work destinations`);
+      if (navigationOnly) {
+        for (const destination of ["chats", "tasks"]) {
+          if (mode === "mobile" && !await evaluate("sidebar.memory.getSnapshot().layout.sessionsDrawerOpen")) {
+            await click("#sessions-toggle-button");
+            await wait("sidebar.memory.getSnapshot().layout.sessionsDrawerOpen");
+          }
+          await wait(`(()=>{const n=document.querySelector('.conversation-navigation [data-stretch-value="${destination}"]');if(!n)return false;const r=n.getBoundingClientRect();return r.width>0&&r.height>0&&n.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))})()`);
+          const point = await evaluate(`(()=>{const r=document.querySelector('.conversation-navigation [data-stretch-value="${destination}"]').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+          await send("Input.dispatchMouseEvent", { type: "mousePressed", ...point, button: "left", buttons: 1, clickCount: 1 });
+          await send("Input.dispatchMouseEvent", { type: "mouseReleased", ...point, button: "left", buttons: 0, clickCount: 1 });
+          await wait(`document.querySelector('.conversation-navigation [data-stretch-value="${destination}"]').getAttribute('aria-current') === 'page'`);
+        }
+        const navigation = await evaluate("Array.from(document.querySelectorAll('.conversation-navigation button')).map(n=>({label:n.getAttribute('aria-label'),selected:n.getAttribute('aria-current')}))");
+        assert.equal(await evaluate("sidebar.slots.every(node=>node.isConnected)"), true);
+        evidence.push({ mode, sourceBundleSha256, globalCssSha256, navigation });
+        console.log(`Sidebar navigation browser passed: ${mode}`);
+        continue;
+      }
       if (visualOnly) {
         const heading = await evaluate("(()=>{const n=document.querySelector('.sidebar-title'),r=n.getBoundingClientRect();return {text:n.textContent,rect:r.toJSON()}})()");
-        assert.equal(heading.text, "Wand");
+        assert.equal(heading.text, "工作区");
         assert.ok(heading.rect.height > 0 && heading.rect.height < 32, `${mode}: sidebar title remains one line`);
         await evaluate("sidebar.openSplit('v');true");
         await wait("document.querySelectorAll('.ws-session-pane').length===2 && document.querySelectorAll('.ws-pane-title').length===2");
@@ -259,16 +297,23 @@ if (new URLSearchParams(location.search).has("manual")) {
       assert.equal(await evaluate("sidebar.memory.actionLog.some(action=>action.type==='session.resumeHistory'&&action.id==='native:42'&&action.provider==='codex')"), true, `${mode}: native history resume identity`);
       if (mode === "mobile") await click('#sessions-toggle-button');
       await click('#drawer-new-session-button');
-      await wait("!!document.querySelector('#wand-new-session-cwd')");
-      assert.equal(await evaluate("document.querySelector('#wand-new-session-cwd').classList.contains('ant-input')"), true, `${mode}: unified session form uses library Input`);
-      await click('#wand-new-session-cwd');
+      await wait("document.querySelectorAll('.new-work-page').length===1 && !!document.querySelector('.new-work-composer textarea')");
+      assert.equal(await evaluate("document.body.innerText.includes('正在准备输入服务')"), false, `${mode}: shared composer is ready`);
+      await click('.new-work-inline-directory');
+      await wait("!!document.querySelector('input[aria-label=\"新工作运行目录路径\"]')");
+      assert.equal(await evaluate("document.querySelector('input[aria-label=\"新工作运行目录路径\"]').classList.contains('ant-input')"), true, `${mode}: unified session form uses library Input`);
+      await click('input[aria-label="新工作运行目录路径"]');
       await send("Input.insertText", { text: "/other" });
       await wait("!!document.querySelector('.ant-select-dropdown .ant-select-item-option')");
       await key("ArrowDown"); await key("Enter");
-      await wait("document.querySelector('#wand-new-session-cwd').value==='/workspace/other'");
-      assert.equal(await evaluate("!!document.querySelector('[data-testid=new-session-dialog]')"), true, `${mode}: directory suggestion selection keeps canonical dialog`);
-      await click('[aria-label="关闭新建会话"]');
-      await wait("!document.querySelector('[data-testid=new-session-dialog]')");
+      await wait("document.querySelector('.new-work-inline-directory')?.title==='/workspace/other' && !document.querySelector('input[aria-label=\"新工作运行目录路径\"]')");
+      await click('.new-work-inline-directory');
+      await wait("document.querySelector('input[aria-label=\"新工作运行目录路径\"]')?.value==='/workspace/other'");
+      assert.equal(await evaluate("document.querySelectorAll('.new-work-page').length"), 1, `${mode}: directory suggestion selection keeps canonical new-work page`);
+      await key('Escape');
+      await wait("!document.querySelector('input[aria-label=\"新工作运行目录路径\"]') && document.activeElement.matches('.new-work-inline-directory')");
+      await click('[aria-label="返回原页面"]');
+      await wait("!document.querySelector('.new-work-page')");
       if (mode === "mobile") await click('#sessions-toggle-button');
       if (mode === "mobile") await click('#close-drawer-button');
       await evaluate("document.querySelector('#fixture-agent').style.display='none';true");
@@ -307,20 +352,18 @@ if (new URLSearchParams(location.search).has("manual")) {
       assert.equal(await evaluate("!!document.querySelector('[data-workspace-task-id=t1]')"), true, `${mode}: actual task projection`);
       await key("Escape");
       await wait("document.querySelector('[aria-label=\"搜索任务或会话\"]')===document.activeElement");
-      // The old employee popover was replaced by root navigation; employee choice is verified below.
-      assert.equal(await evaluate("Array.from(document.querySelectorAll('.conversation-navigation .sidebar-nav-label')).map(n=>n.textContent).join(',')"), "对话,工作区,任务,团队,通讯录", `${mode}: current root navigation retains the directory entry`);
       await click('[data-sidebar-tree-directory-id="ws"] .workspace-row-main');
       await wait("document.querySelector('[data-sidebar-tree-directory-id=ws] .workspace-row-main').getAttribute('aria-expanded')==='false'");
       await key("ArrowRight");
       await wait("document.querySelector('[data-sidebar-tree-directory-id=ws] .workspace-row-main').getAttribute('aria-expanded')==='true'");
-      await click('[data-workspace-task-id="t1"] .workspace-task-chevron-btn');
+      await click('[data-workspace-task-id="t1"] .workspace-task-disclosure');
       await key("ArrowRight");
-      await wait("document.querySelector('[aria-label=\"收起任务 组件迁移任务 的会话\"]').getAttribute('aria-expanded')==='true'");
-      await rightClick('[data-workspace-task-id="t1"] .workspace-task');
+      await wait("document.querySelector('[aria-label=\"收起任务 组件迁移任务\"]').getAttribute('aria-expanded')==='true'");
+      await rightClick('[data-workspace-task-id="t1"] .workspace-task-main');
       await wait("!!document.querySelector('.workspace-task-menu .ant-dropdown-menu')");
       await key("Escape");
       await wait("!document.querySelector('.workspace-task-menu .ant-dropdown-menu')");
-      assert.equal(await evaluate("document.activeElement.matches('[data-workspace-task-id=t1] .workspace-task-main')"), true, `${mode}: task context menu focus`);
+      assert.equal(await evaluate("document.activeElement.matches('[data-workspace-task-id=t1] .workspace-task-main')"), true, `${mode}: task context menu focus: ${await evaluate("JSON.stringify({active:document.activeElement.outerHTML.slice(0,700),connected:window.__sidebarContextTrigger?.isConnected,same:window.__sidebarContextTrigger===document.querySelector('[data-workspace-task-id=t1] .workspace-task-main')})")}`);
       await rightClick('[data-sidebar-tree-directory-id="ws"] .workspace-row');
       await wait("!!document.querySelector('.workspace-directory-menu .ant-dropdown-menu')");
       await evaluate("Array.from(document.querySelectorAll('.workspace-directory-menu .ant-dropdown-menu-item')).find(n=>n.textContent.includes('合并 Worktree')).id='fixture-merge-worktrees';true");
@@ -351,7 +394,7 @@ if (new URLSearchParams(location.search).has("manual")) {
         const point = await evaluate("(()=>{const r=document.querySelector('[data-sidebar-directory-id=ws]').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()");
         await send("Input.dispatchMouseEvent", {type:"mouseMoved", ...point});
         await wait("document.querySelector('#sidebar-peek')?.dataset.open==='true'");
-        await rightClick('#sidebar-peek .workspace-task');
+        await rightClick('#sidebar-peek .workspace-task-main');
         await wait("!!document.querySelector('.workspace-task-menu .ant-dropdown-menu')");
         await evaluate("Array.from(document.querySelectorAll('.workspace-task-menu .ant-dropdown-menu-item')).find(n=>n.textContent.includes('重命名任务')).id='fixture-rename-task';true");
         await click('#fixture-rename-task');
@@ -360,26 +403,37 @@ if (new URLSearchParams(location.search).has("manual")) {
         await key("Escape");
         await wait("document.activeElement.matches('#sidebar-peek .workspace-task-main')");
         await key("Escape");
+        await wait("document.querySelector('#sidebar-peek .workspace-task-disclosure').getAttribute('aria-expanded')==='false' && document.activeElement.matches('#sidebar-peek .workspace-task-disclosure')");
+        assert.equal(await evaluate("document.querySelector('#sidebar-peek').dataset.open==='true'"), true, `${mode}: Escape closes the inner task disclosure before the peek`);
+        await key("Escape");
         await wait("document.querySelector('#sidebar-peek').dataset.open!=='true'");
         await click('[aria-label="展开完整侧边栏"]');
         await wait("!document.querySelector('#sessions-drawer').classList.contains('collapsed')");
       }
       await click('[data-workspace-task-id="t1"] .workspace-task-main');
-      await wait("document.querySelectorAll('.wand-workspace-tabs [role=tab]').length===2");
-      await click('.wand-workspace-tabs .ant-tabs-tab:first-child [role=tab]');
-      await key("ArrowRight");
-      await key("Enter");
-      await wait("sidebar.memory.actionLog.some(action=>action.type==='session.select'&&action.id==='s2')");
       if (mode === "mobile") {
-        await click('.workspace-tab-more');
-        await wait("Array.from(document.querySelectorAll('[role=menuitem]')).some(n=>n.textContent==='新建 Agent 或空白终端')");
-        await evaluate("Array.from(document.querySelectorAll('[role=menuitem]')).find(n=>n.textContent==='新建 Agent 或空白终端').id='fixture-mobile-create';true");
+        await wait("!sidebar.memory.getSnapshot().layout.sessionsDrawerOpen");
+        assert.equal(await evaluate("document.querySelectorAll('.wand-workspace-tabs [role=tab]').length"), 0, "mobile: session tabs are desktop-only");
+        await click('#sessions-toggle-button');
+        await click('[data-workspace-task-id="t1"] [data-session-id="s2"] .workspace-session-main');
+        await wait("sidebar.selections.includes('s2') && !sidebar.memory.getSnapshot().layout.sessionsDrawerOpen");
+        await click('#sessions-toggle-button');
+        await rightClick('[data-workspace-task-id="t1"] .workspace-task-main');
+        await wait("!!document.querySelector('.workspace-task-menu .ant-dropdown-menu')");
+        await evaluate("Array.from(document.querySelectorAll('.workspace-task-menu [role=menuitem]')).find(n=>n.textContent==='新建会话').id='fixture-mobile-create';true");
         await click('#fixture-mobile-create');
-      } else await click('.workspace-tab-add');
-      await wait("!!document.querySelector('[data-testid=new-session-dialog]')");
-      await key("Escape");
-      await wait("!document.querySelector('[data-testid=new-session-dialog]')");
-      if (mode === "mobile") await click('[aria-label="打开任务"]');
+      } else {
+        await wait("document.querySelectorAll('.wand-workspace-tabs [role=tab]').length===2");
+        await click('.wand-workspace-tabs .ant-tabs-tab:first-child [role=tab]');
+        await key("ArrowRight");
+        await key("Enter");
+        await wait("sidebar.memory.actionLog.some(action=>action.type==='session.select'&&action.id==='s2')");
+        await click('.workspace-tab-add');
+      }
+      await wait("document.querySelectorAll('.new-work-page').length===1 && !!document.querySelector('.new-work-composer textarea')");
+      await click('[aria-label="返回原页面"]');
+      await wait("!document.querySelector('.new-work-page')");
+      if (mode === "mobile" && !await evaluate("sidebar.memory.getSnapshot().layout.sessionsDrawerOpen")) await click('#sessions-toggle-button');
       const accountBefore = mode === "mobile" ? await evaluate("({drawerOpen:sidebar.memory.getSnapshot().layout.sessionsDrawerOpen,contains:document.querySelector('#sessions-drawer').contains(document.querySelector('#settings-button')),popupOwner:document.querySelector('#settings-button').closest('[data-wand-popup-owner]')?.getAttribute('data-wand-popup-owner')??null,rail:document.querySelector('#settings-button').closest('.sidebar-navigation-rail')?.className??null})") : null;
       await click('#settings-button');
       await wait("!!document.querySelector('.sidebar-tools-menu .ant-dropdown-menu')");
@@ -480,7 +534,7 @@ if (new URLSearchParams(location.search).has("manual")) {
       assert.equal(await evaluate("document.querySelectorAll('#topbar-more-menu [data-chat-width-mode],.chat-width-toggle').length"), 0, `${mode}: width has one settings entry`);
       await key('Escape');
       await wait("!document.querySelector('#topbar-more-menu') && document.activeElement.id==='topbar-more-button'");
-      evidence.push({ mode, obsolete, clickRetries: clickRetries.slice(retriesBefore), reduced: await evaluate("matchMedia('(prefers-reduced-motion: reduce)').matches"), interactions: ["production ShellApp and repository projection", "native history resume identity", "canonical new-session Input/directory AutoComplete keyboard/Escape; retired task form no longer mounted", "profile explicit/Escape focus return", "file path Input IME/Enter", "search focus/filter/Escape", "current root navigation and employee picker below", "directory ArrowRight", "controlled task Collapse", "Ant Menu/Escape/refocus", "Ant Checkbox bulk selection", "worktree selection/disabled/start failure and Escape", "owned peek menu clicks and rename Escape focus", "Ant Tabs keyboard selection", "native back action", "stable legacy hosts", "employee identity survives late preferences", "failed start keeps choices", "PTY capability downgrade", "platform arrow navigation within the library radio group", "Ant Modal focus return", "Ant Splitter horizontal and vertical real pointer drag saves ratio and preserves terminal ownership"] });
+      evidence.push({ mode, obsolete, clickRetries: clickRetries.slice(retriesBefore), reduced: await evaluate("matchMedia('(prefers-reduced-motion: reduce)').matches"), interactions: ["production ShellApp and repository projection", "native history resume identity", "canonical new-work page/shared Composer/directory AutoComplete keyboard, owned Popover Escape and return; retired modal no longer mounted", "profile explicit/Escape focus return", "file path Input IME/Enter", "search focus/filter/Escape", "current root navigation and employee picker below", "directory ArrowRight", "controlled task Collapse", "Ant Menu/Escape/refocus", "Ant Checkbox bulk selection", "worktree selection/disabled/start failure and Escape", "owned peek menu clicks and rename Escape focus", "Ant Tabs keyboard selection", "native back action", "stable legacy hosts", "employee identity survives late preferences", "failed start keeps choices", "PTY capability downgrade", "platform arrow navigation within the library radio group", "Ant Modal focus return", "Ant Splitter horizontal and vertical real pointer drag saves ratio and preserves terminal ownership"] });
       if (mode === "desktop" || mode === "mobile") {
         if (mode === "mobile") { await click('#sessions-toggle-button'); await wait("document.querySelector('#sessions-drawer').classList.contains('open')"); await pause(350); }
         const screenshot = await send("Page.captureScreenshot", { format: "png" });
@@ -493,7 +547,11 @@ if (new URLSearchParams(location.search).has("manual")) {
     writeFileSync(join(artifact, artifactName), JSON.stringify({ passed: true, sourceBundleSha256, globalCssSha256, evidence, browserErrors, scope: "Current production sidebar sources in real Chrome with local repository fixtures; installed acceptance and native-host acceptance remain integration-owned" }, null, 2));
   } catch (error) {
     mkdirSync(artifact, { recursive: true });
-    if (diagnosticEvaluate) console.error(await diagnosticEvaluate("(()=>{const n=document.querySelector('#wand-new-session-cwd');if(!n)return {};const r=n.getBoundingClientRect();return {rect:r.toJSON(),hit:document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.outerHTML.slice(0,600),parents:Array.from((function*(p){while(p){yield p;p=p.parentElement;}})(n)).map(p=>({class:p.className,overflow:getComputedStyle(p).overflow,rect:p.getBoundingClientRect().toJSON()}))}})()"));
+    if (diagnosticScreenshot) {
+      const screenshot = await diagnosticScreenshot();
+      writeFileSync(join(artifact, "sidebar-failure.png"), Buffer.from(screenshot.data, "base64"));
+    }
+    if (diagnosticEvaluate) console.error(await diagnosticEvaluate("JSON.stringify({active:document.activeElement.outerHTML.slice(0,400),surfaces:Array.from(document.querySelectorAll('#sidebar-peek,.ant-dropdown,[data-wand-popup-owner],[data-sidebar-popup-owner]')).map(n=>({class:n.className,owner:n.dataset.wandPopupOwner||n.dataset.sidebarPopupOwner,open:n.dataset.open,rect:n.getBoundingClientRect().toJSON(),visibility:getComputedStyle(n).visibility,pointer:getComputedStyle(n).pointerEvents}))})"));
     writeFileSync(join(artifact, artifactName), JSON.stringify({ passed: false, sourceBundleSha256, globalCssSha256, evidence, browserErrors, error: String(error), clickLog }, null, 2));
     throw error;
   } finally {

@@ -15,10 +15,11 @@ import { EmployeeTagsField } from "./employee-tags-field.js";
 import type { IssueModelCatalog } from "../issues/task-board-agent.js";
 import { installEmployeeProfileStyles } from "../styles/employee-profile.js";
 
-export function EmployeeCard({ employee, catalog, providerOptions, onSave, onArchive, onUnarchive, onDelete, onCancel, onBack, onDirtyChange, onSavingChange }: {
+export function EmployeeCard({ employee, catalog, providerOptions, onSave, onArchive, onUnarchive, onDelete, onCancel, onBack, onDirtyChange, onSavingChange, onOpenKnowledge }: {
   employee: SiliconEmployee; catalog: IssueModelCatalog | null; providerOptions: ProviderOptions;
   onSave(patch: Partial<SiliconEmployee>): Promise<void>; onArchive?(): Promise<void>; onUnarchive?(): Promise<void>; onDelete?(): Promise<void>;
   editorOnly?: boolean; onCancel?(): void; onBack?(): void; onDirtyChange?(dirty: boolean): void; onSavingChange?(saving: boolean): void;
+  onOpenKnowledge?(navigate: () => void): void;
 }): React.ReactElement {
   const [baseline, setBaseline] = React.useState(employee);
   const [draft, setDraft] = React.useState(employee);
@@ -110,7 +111,7 @@ export function EmployeeCard({ employee, catalog, providerOptions, onSave, onArc
       <section id="advanced" className="form-section"><details className="advanced-details" open={advanced} onToggle={event => setAdvanced(event.currentTarget.open)}><summary>知识与员工管理</summary><div className="advanced-content">
         {field("员工 ID", `employee-${employee.id}-id`, <WandInput id={`employee-${employee.id}-id`} value={employee.id} readOnly/>)}
         {isDefaultSiliconEmployee(employee) && <EmployeeMemory active={advanced}/>}
-        <EmployeeKnowledge employeeId={employee.id} active={advanced}/>
+        <EmployeeKnowledge employeeId={employee.id} active={advanced} disabled={saving} onOpenLibrary={onOpenKnowledge}/>
         {!builtin && <div className="save-actions">{employee.archivedAt ? onUnarchive && <WandButton disabled={saving} onClick={() => void onUnarchive()}>恢复员工</WandButton> : onArchive && <WandButton disabled={saving} onClick={() => void onArchive()}>归档员工</WandButton>}{onDelete && <WandButton kind="danger" disabled={saving} onClick={() => void onDelete()}>删除员工</WandButton>}</div>}
       </div></details></section>
     </div></div>

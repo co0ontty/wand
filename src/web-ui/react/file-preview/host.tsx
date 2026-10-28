@@ -10,7 +10,7 @@ import * as React from "react";
 import { WandBadge, WandButton, WandDialogSurface, WandIcon } from "../ui";
 import { filePreviewController, filePreviewStore } from "./controller";
 import { CodeTokens, MarkdownPreview } from "./markdown";
-import { messageFileTarget } from "../../message-file-target";
+import { messageFileTarget, resolvedMessageFileTarget } from "../../message-file-target";
 import { InlineHtmlPreview } from "../local-preview/inline";
 import { markdownPreviewStyles } from "./markdown-styles";
 import {
@@ -45,7 +45,7 @@ function DownloadLink({ file, label = "下载" }: { file: Pick<FilePreviewFile, 
 
 function TextPreview({ snapshot, file }: { snapshot: FilePreviewSnapshot; file: FilePreviewFile }) {
   const content = file.content ?? "";
-  const target = messageFileTarget(file.path);
+  const target = resolvedMessageFileTarget(file.path, snapshot.request?.path);
   if (target?.previewUrl) return <InlineHtmlPreview previewUrl={target.previewUrl} downloadUrl={target.downloadUrl} label={file.name}/>;
   if (isMarkdownPreview(file)) {
     return <MarkdownPreview content={content} fontSize={snapshot.fontSize} wrap={snapshot.wrap} fileContext={{ cwd: file.path.slice(0, file.path.lastIndexOf("/")) }} />;
@@ -103,7 +103,10 @@ function PreviewBody({ snapshot, editorRef }: {
     );
   }
   if (snapshot.status === "error") {
-    const html = snapshot.failure?.status === 413 && snapshot.request ? messageFileTarget(snapshot.request.path) : null;
+    const resolvedPath = snapshot.failure?.download?.path;
+    const html = snapshot.failure?.status === 413 && snapshot.request
+      ? resolvedPath && !resolvedPath.startsWith("/api/") ? resolvedMessageFileTarget(resolvedPath, snapshot.request.path) : messageFileTarget(snapshot.request.path)
+      : null;
     if (html?.previewUrl) return <InlineHtmlPreview previewUrl={html.previewUrl} downloadUrl={html.downloadUrl} label={fileNameFromPath(html.path)}/>;
     return (
       <Flex vertical align="center" justify="center" gap="small" className="wand-file-preview-state wand-file-preview-error" role="alert" style={{ flex: 1, padding: 24 }}>
@@ -353,7 +356,7 @@ export function FilePreviewHost() {
         else run({ type: "close" });
       }}
       title={title}
-      description={path || "查看文件内容与元数据。"}
+      description={file?.path || path || "查看文件内容与元数据。"}
       className="wand-ui-dialog-content wand-file-preview-dialog"
       width={{ xs: "calc(100vw - 16px)", md: 960, xl: 1040 }}
       styles={{ body: { display: "flex", height: "min(72dvh, 680px)", minHeight: 0, overflow: "hidden" } }}

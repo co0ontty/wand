@@ -61,7 +61,7 @@ test("canonical messages preserve body and compact metadata across live patches"
     res.end(themeFixtureHtml(`<!doctype html><html lang="zh-CN" class="${url.searchParams.has("native") ? "is-wand-app" : ""}">
       <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
       <link rel="stylesheet" href="/tailwind.css"><link rel="stylesheet" href="/styles.css">
-      <style>#chat-output { height:100dvh; display:flex; }</style></head>
+      <style>#chat-output { height:100dvh; display:flex; position:relative; overflow:hidden; }</style></head>
       <body><div id="chat-output"></div><textarea id="input-box" hidden></textarea><script src="/app.js"></script></body></html>`));
   });
   server.listen(0, "127.0.0.1"); await once(server, "listening");
@@ -136,13 +136,7 @@ test("canonical messages preserve body and compact metadata across live patches"
           fontSize:getComputedStyle(time).fontSize, color:getComputedStyle(time).color,
           usage:row.querySelectorAll('.turn-usage-summary').length, time:time.textContent,
           duration:row.querySelector('.chat-message-time').textContent, clockIso:time.dateTime,
-          badgeLabel:row.querySelector('.wand-employee-avatar-provider')?.getAttribute('aria-label'),
-          badgeRadius:getComputedStyle(row.querySelector('.wand-employee-avatar-provider .ant-avatar')).borderRadius,
-          badgeColor:getComputedStyle(row.querySelector('.wand-employee-avatar-provider .ant-avatar')).color,
-          badgeBackground:getComputedStyle(row.querySelector('.wand-employee-avatar-provider .ant-avatar')).backgroundColor,
-          badgeSize:row.querySelector('.wand-employee-avatar-provider').getBoundingClientRect().width,
-          badgeLogo:row.querySelector('[data-provider-logo]')?.getAttribute('data-provider-logo'),
-          avatarWidth:row.querySelector('.assistant-author-avatar')?.getBoundingClientRect().width,
+          avatar:!!row.querySelector('.assistant-author-avatar'),
           overflow:document.documentElement.scrollWidth>innerWidth+1,
           background:(()=>{let n=time;while(n){const c=getComputedStyle(n).backgroundColor;if(!c.endsWith(', 0)')&&c!=='transparent')return c;n=n.parentElement;}return 'rgb(255, 255, 255)';})() };
       })()`);
@@ -150,12 +144,12 @@ test("canonical messages preserve body and compact metadata across live patches"
       assert.equal(shape.bodyInside && shape.bodyFits, true, `${mode}: text belongs to the shared message`);
       const assertStaticReplies = async () => {
         const avatars = await evaluate(`({
-          staticCount: document.querySelectorAll('.assistant-author-avatar [data-renderer="static"]').length,
-          canvases: document.querySelectorAll('.assistant-author-avatar canvas').length,
+          replyAvatars: document.querySelectorAll('.assistant-author-avatar').length,
+          replyCanvases: document.querySelectorAll('.chat-message canvas').length,
           runtimeLoaded: performance.getEntriesByType('resource').some(entry => entry.name.includes('/assets/plush-avatar.js'))
         })`);
-        assert.ok(avatars.staticCount >= 2, `${mode}: reply employees retain static identity`);
-        assert.equal(avatars.canvases, 0, `${mode}: replies never mount canvas`);
+        assert.equal(avatars.replyAvatars, 0, `${mode}: replies never render identity avatars`);
+        assert.equal(avatars.replyCanvases, 0, `${mode}: replies never mount canvas`);
         assert.equal(avatars.runtimeLoaded, false, `${mode}: replies do not load the 3D runtime`);
       };
       await assertStaticReplies();
@@ -163,28 +157,25 @@ test("canonical messages preserve body and compact metadata across live patches"
       assert.ok(textContrast(shape.color, shape.background) >= 4.5, `${mode}: small metadata remains readable`);
       assert.equal(shape.usage, 0, `${mode}: the transcript no longer carries a per-turn usage row`);
       assert.match(shape.duration, /耗时 39 秒/); assert.equal(shape.clockIso, "2026-10-07T09:00:41Z");
-      assert.ok(textContrast(shape.badgeColor, shape.badgeBackground) >= 4.5, `${mode}: tool mark contrasts with its own surface`);
-      assert.equal(shape.avatarWidth, 56);assert.equal(shape.badgeLabel,"Codex CLI");assert.equal(shape.badgeLogo,"codex");assert.equal(shape.badgeRadius,"4px");assert.equal(shape.badgeSize,20); assert.equal(shape.overflow, false, `${mode}: viewport overflow: ${JSON.stringify(shape)}`);
-      // Quiet identity changes update the corner mark without replacing the transcript.
+      assert.equal(shape.avatar, false, `${mode}: the reply byline has no avatar`);
+      assert.equal(shape.overflow, false, `${mode}: viewport overflow: ${JSON.stringify(shape)}`);
+      // Quiet identity changes update the transcript without replacing its owned nodes.
       const changedIdentity = await evaluate(`(async()=>{
         const row=document.querySelector('.chat-message[data-msg-index="1"]');
         const body=row.querySelector('.chat-message-content');
         const button=row.querySelector('.assistant-reply-disclosure');button.focus();
         h.publish(metaTurns,{provider:'pi',structuredState:{inFlight:false,engine:'core'}});
         h.doRenderChat(false);await h.frames();
-        const sdkLabel=row.querySelector('.wand-employee-avatar-provider')?.getAttribute('aria-label');
-        const wandMark=!!row.querySelector('[data-wand-brand="pixel-cat"]');
+        const engineMark=!!row.querySelector('[data-provider-logo],[data-wand-brand]');
         const stableBody=body===row.querySelector('.chat-message-content');
         const stableFocus=document.activeElement===button;
         h.publish(metaTurns,{provider:'codex',structuredState:{engine:'cli'}});h.doRenderChat(false);await h.frames();
-        return {sdkLabel,wandMark,stableBody,stableFocus,
-          finalLogo:row.querySelector('[data-provider-logo]')?.getAttribute('data-provider-logo')};
+        return {engineMark,stableBody,stableFocus,avatar:!!row.querySelector('.assistant-author-avatar')};
       })()`);
-      assert.equal(changedIdentity.sdkLabel, "Wand Agent");
-      assert.equal(changedIdentity.wandMark, true, `${mode}: SDK uses the Wand mark`);
+      assert.equal(changedIdentity.engineMark, false, `${mode}: the byline carries no engine mark`);
+      assert.equal(changedIdentity.avatar, false, `${mode}: identity refresh never restores an avatar`);
       assert.equal(changedIdentity.stableBody, true, `${mode}: identity refresh preserves the body`);
       assert.equal(changedIdentity.stableFocus, true, `${mode}: identity refresh preserves the focused disclosure`);
-      assert.equal(changedIdentity.finalLogo, "codex");
       if (process.env.WAND_CHAT_META_SCREENSHOTS !== "0") await screenshot(mode);
       assert.equal(await evaluate("document.querySelector('.chat-message[data-msg-index=\"1\"] [data-chat-renderer]').dataset.chatRenderer"), "canonical");
       assert.ok(await evaluate("!!document.querySelector('.chat-message[data-msg-index=\"1\"] .assistant-author-name').textContent"));
@@ -222,15 +213,15 @@ test("canonical messages preserve body and compact metadata across live patches"
         const row=document.querySelector('.chat-message[data-msg-index="0"]');return {footer:row.querySelectorAll('.turn-usage-summary').length,text:row.textContent};})()`);
       assert.equal(plain.footer, 0, "absent metadata never reserves an empty footer");
       assert.match(plain.text, /没有统计信息/);
-      // The provider corner mark must never replace the employee's actual face.
+      // Employee uploads never leak into the transcript byline.
       const identity = await evaluate(`(async()=>{
         const avatar='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" fill="green"/></svg>');
         await h.fresh([{role:'assistant',uuid:'native-identity',content:[{type:'text',text:'自定义头像核对'}]}],
           {employeeId:'fixture-upload-peer',employeeName:'上传员工',employeeAvatar:avatar,provider:'codex'});
         const row=document.querySelector('.chat-message[data-msg-index="0"]');
-        return {src:row.querySelector('.ant-avatar img')?.getAttribute('src'),expected:avatar,badge:!!row.querySelector('.ant-badge'),name:row.textContent};
+        return {avatar:!!row.querySelector('.assistant-author-avatar'),images:row.querySelectorAll('.chat-message .ant-avatar img').length,name:row.textContent};
       })()`);
-      assert.equal(identity.src, identity.expected); assert.equal(identity.badge, true); assert.match(identity.name, /上传员工/);
+      assert.equal(identity.avatar, false); assert.equal(identity.images, 0); assert.match(identity.name, /上传员工/);
       cases.push({ mode, shape, settled, missing, nativeIdentity: true });
     }
     assert.deepEqual(errors, []);

@@ -1,4 +1,6 @@
 import { Marked, type MarkedToken, type Token } from "marked";
+import { isRelativeFileLocation } from "../../message-file-target.js";
+import { localHttpPreviewHref } from "../local-preview/controller.js";
 /**
  * Markdown parsing is Marked's job. This module only maps Marked's token stream
  * onto the flat shapes the React renderer consumes, so the viewer keeps one
@@ -11,6 +13,7 @@ function safeMarkdownUrl(value: string, image = false): string | null {
   const trimmed = value.trim();
   if (!trimmed || /[\u0000-\u001f]/.test(trimmed) || trimmed.startsWith("//")) return null;
   if (/^(?:https?:|mailto:|#|\/)/i.test(trimmed)) return trimmed;
+  if (localHttpPreviewHref(trimmed)) return trimmed;
   if (/^file:/i.test(trimmed)) {
     try {
       const url = new URL(trimmed);
@@ -19,7 +22,7 @@ function safeMarkdownUrl(value: string, image = false): string | null {
   }
   // Keep relative references as tokens. Only a trusted rendering context may
   // turn them into file URLs; without it the component keeps a plain label.
-  if (!/^[a-z][a-z\d+.-]*:/i.test(trimmed)) return trimmed;
+  if (!/^[a-z][a-z\d+.-]*:/i.test(trimmed) || isRelativeFileLocation(trimmed)) return trimmed;
   if (image && /^data:image\/(?:png|gif|jpe?g|webp);base64,/i.test(trimmed)) return trimmed;
   return null;
 }

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { build } from "esbuild";
 import { createServer } from "node:http";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { openPlushBrowser } from "./helpers/run-plush-avatar-browser-harness.mjs";
 import { initialTasks, histories, employees, workspaces, PREVIEW_NOW, DISPLAY_ZONE } from "./helpers/scheduled-calendar-fixtures.js";
@@ -12,7 +13,8 @@ import { dateKey, addDateDays } from "../src/scheduled-task-activity.js";
 // Isolated UI integration. Actual service/storage/ACL contracts have separate
 // tests; this fixture accepts metadata edits only and can never dispatch a model.
 for (const motion of ["no-preference", "reduce"] as const) test(`unified calendar navigation, snapshot, editor, wide/narrow canvas (${motion})`, { timeout: 180_000 }, async t => {
-  const out = resolve("output/architecture-stage2/global-calendar-production/browser", motion); mkdirSync(out, { recursive: true });
+  const out = mkdtempSync(join(tmpdir(), `wand-calendar-browser-${motion}-`));
+  t.after(() => rmSync(out, { recursive: true, force: true }));
   await build({ entryPoints: [resolve("tests/helpers/scheduled-calendar-browser.tsx")], outfile: join(out, "app.js"), bundle: true, platform: "browser", format: "iife", jsx: "automatic", target: "es2022", minify: true, define: { "process.env.NODE_ENV": '"production"' } });
   await build({ entryPoints: [resolve("src/web-ui/react/avatars/renderer.ts")], outfile: join(out, "avatar.js"), bundle: true, platform: "browser", format: "iife", target: "es2022", minify: true });
   let tasks = initialTasks(); const requests: { path: string; method: string; query: string }[] = [];

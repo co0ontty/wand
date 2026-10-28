@@ -2,12 +2,14 @@ import * as React from "react";
 import { Alert, Button, Flex, Spin, Typography, theme } from "antd";
 import { localPreviewController } from "./controller";
 import { probeHtmlPreview } from "./repository";
+import { HTML_PREVIEW_SANDBOX } from "../../../html-preview-policy.js";
 
-export const HTML_PREVIEW_SANDBOX = "allow-scripts";
+export { HTML_PREVIEW_SANDBOX };
 
 /** The same HTML surface is used by message projections and the file viewer.
  * Never srcdoc/innerHTML: authenticated static serving preserves relative assets.
- * No allow-same-origin, forms, popups or navigation privileges. */
+ * No allow-same-origin, popups or navigation privileges; the response CSP
+ * prevents form navigation while allowing local submit event handlers. */
 export function InlineHtmlPreview({ previewUrl, downloadUrl, label = "HTML 预览" }: {
   previewUrl: string; downloadUrl: string; label?: string;
 }): React.ReactElement {

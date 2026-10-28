@@ -17,6 +17,7 @@ import { missionsController } from "./missions/controller";
 import { workspacesController } from "./workspaces/controller";
 import { githubIssuesController } from "./issues/controller";
 import { installTaskBoardHistory, taskBoardController } from "./issues/task-board-controller";
+import { installKnowledgeHistory } from "./knowledge/controller";
 import { WandUiProvider } from "./theme";
 import { REACT_UI_PORTALS_ID } from "./ui/portal-context";
 
@@ -64,6 +65,7 @@ function exposeBusinessControllers(): void {
   window.__wandReactGithubIssues = githubIssuesController;
   window.__wandReactTaskBoard = taskBoardController;
   installTaskBoardHistory();
+  installKnowledgeHistory();
 }
 
 /**

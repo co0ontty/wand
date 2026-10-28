@@ -14,6 +14,7 @@ export interface ComposerDraft {
   readonly revision: number;
   readonly recovery?: ComposerPayload | null;
   readonly queueRetrieval?: { readonly text: string; readonly status: "pending" | "confirmed" | "unknown" | "rejected" } | null;
+  readonly queueRemoval?: { readonly text: string; readonly status: "pending" | "confirmed" | "unknown" | "rejected" } | null;
 }
 
 export interface ComposerPayload {
@@ -29,6 +30,7 @@ interface ComposerSession {
   submissions: Map<string, Promise<unknown>>;
   recovery?: { payload: ComposerPayload; persist: boolean };
   queueRetrieval?: { text: string; status: "pending" | "confirmed" | "unknown" | "rejected"; token: object };
+  queueRemoval?: { text: string; status: "pending" | "confirmed" | "unknown" | "rejected"; token: object };
 }
 
 interface ComposerDependencies {
@@ -92,6 +94,7 @@ export class ComposerStore {
       revision: session?.revision ?? 0,
       recovery: session?.recovery?.payload ?? null,
       queueRetrieval: session?.queueRetrieval ? { text: session.queueRetrieval.text, status: session.queueRetrieval.status } : null,
+      queueRemoval: session?.queueRemoval ? { text: session.queueRemoval.text, status: session.queueRemoval.status } : null,
     };
   }
 
@@ -189,13 +192,46 @@ export class ComposerStore {
     if (!session?.queueRetrieval || session.queueRetrieval.status !== "confirmed") return false;
     const text = session.queueRetrieval.text;
     session.queueRetrieval = undefined;
-    return this.edit(sessionId, { restore: { text, attachments: [] }, persist: !session.memoryOnly });
+    return this.edit(sessionId, { text: session.text ? session.text + "\n\n" + text : text, persist: !session.memoryOnly });
   }
 
   dismissQueueRetrieval(sessionId: string): void {
     const session = this.sessions.get(sessionId);
     if (!session?.queueRetrieval || session.queueRetrieval.status === "pending") return;
     session.queueRetrieval = undefined;
+    this.notify();
+  }
+
+  /** Removal receipts only allow explicit recovery into a draft, never automatic re-enqueue. */
+  beginQueueRemoval(sessionId: string, texts: readonly string[]): object | null {
+    const session = this.session(sessionId);
+    if (session.queueRemoval || !texts.length) return null;
+    const token = {};
+    session.queueRemoval = { text: texts.join("\n\n"), status: "pending", token };
+    this.notify();
+    return token;
+  }
+
+  finishQueueRemoval(sessionId: string, token: object, status: "confirmed" | "unknown" | "rejected"): boolean {
+    const removal = this.sessions.get(sessionId)?.queueRemoval;
+    if (!removal || removal.token !== token) return false;
+    removal.status = status;
+    this.notify();
+    return true;
+  }
+
+  restoreQueueRemoval(sessionId: string): boolean {
+    const session = this.sessions.get(sessionId);
+    if (!session?.queueRemoval || session.queueRemoval.status !== "confirmed") return false;
+    const text = session.queueRemoval.text;
+    session.queueRemoval = undefined;
+    return this.edit(sessionId, { text: session.text ? session.text + "\n\n" + text : text, persist: !session.memoryOnly });
+  }
+
+  dismissQueueRemoval(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session?.queueRemoval || session.queueRemoval.status === "pending") return;
+    session.queueRemoval = undefined;
     this.notify();
   }
 

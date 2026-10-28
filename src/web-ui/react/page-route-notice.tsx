@@ -12,7 +12,7 @@ export function reportPageRouteFailure(message: string): void {
 }
 const subscribe = (listener: () => void): (() => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
 const snapshot = (): string => failure;
-const knownViews = ["taskboard", "issues", "teams", "teamchat", "schedules", "calendar", "workspace", "chats", "contacts"];
+const knownViews = ["knowledge", "taskboard", "issues", "teams", "teamchat", "schedules", "calendar", "workspace", "chats", "contacts"];
 
 export function PageRouteNotice(): React.ReactElement | null {
   const search = usePageSearch();

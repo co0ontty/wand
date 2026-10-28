@@ -281,7 +281,7 @@ function workspaceWithCounts(
   const worktreeCount = storage.listWorkspaceTasks(workspace.id)
     .filter((task) => (includeArchived || !task.archived) && task.worktree !== null)
     .length;
-  const sessionCount = (sessionCounts ?? storage.countSessionsByWorkspace({ includeArchived, excludeSystemAiCalls: true })).get(workspace.id) ?? 0;
+  const sessionCount = (sessionCounts ?? storage.countSessionsByWorkspace({ includeArchived, excludeSystemAiCalls: true, excludeQuickTerminals: true })).get(workspace.id) ?? 0;
   return { ...workspace, worktreeCount, sessionCount };
 }
 
@@ -394,7 +394,7 @@ export function registerWorkspaceRoutes(
   // 列出所有项目（按创建时间降序：新建在前，打开不会改位置）
   app.get("/api/workspaces", (req, res) => {
     const includeArchived = req.query.includeArchived === "1";
-    const sessionCounts = storage.countSessionsByWorkspace({ includeArchived, excludeSystemAiCalls: true });
+    const sessionCounts = storage.countSessionsByWorkspace({ includeArchived, excludeSystemAiCalls: true, excludeQuickTerminals: true });
     res.json(storage.listWorkspaces()
       .filter((workspace) => !isGlobalWorkspace(workspace))
       .map((workspace) => workspaceWithCounts(storage, workspace, sessionCounts, includeArchived)));
@@ -434,7 +434,7 @@ export function registerWorkspaceRoutes(
     const archivedTaskIds = new Set(storage.listWorkspaceTasks(workspace.id)
       .filter((task) => task.archived).map((task) => task.id));
     const teamMarkers = teamSessionMarkers(storage);
-    const visibleSessions = storage.listSessionsByWorkspaceSlim(workspace.id).filter((session) => !isSystemAiCall(session)).map((session) => ({
+    const visibleSessions = storage.listSessionsByWorkspaceSlim(workspace.id).filter((session) => !isSystemAiCall(session) && session.sessionSource !== "quick-terminal").map((session) => ({
       ...workspaceSessionSummary(
         session, { workspaceName: workspace.name }, sessions, teamMarkersFor(teamMarkers, session.id),
       ),
@@ -664,7 +664,7 @@ export function registerWorkspaceRoutes(
     // Server-owned one-shot feature logs are not Agent work. Do not filter by employee,
     // sessionSource=automation or generic automation IDs: those also carry dispatch,
     // communication and scheduled work. Keep storage and employee audit history intact.
-    const sessionVisible = (session: SessionSnapshot): boolean => !isSystemAiCall(session)
+    const sessionVisible = (session: SessionSnapshot): boolean => !isSystemAiCall(session) && session.sessionSource !== "quick-terminal"
       && (includeArchived || !session.archived);
     const workspaces = [...model.workspaces.values()];
     // 目录组为一级容器：任务归属目录；未绑定任务的会话以 standaloneSessions
@@ -987,7 +987,7 @@ export function registerWorkspaceRoutes(
     const workspace = storage.getWorkspace(task.workspaceId);
     const teamMarkers = teamSessionMarkers(storage);
     const card = storage.getWandTaskByWorkspaceTaskId(task.id);
-    const taskSessions = storage.listSessionsByWorkspaceTaskSlim(task.id).filter(session => !isSystemAiCall(session))
+    const taskSessions = storage.listSessionsByWorkspaceTaskSlim(task.id).filter(session => !isSystemAiCall(session) && session.sessionSource !== "quick-terminal")
       .map(session => liveSession(session, sessions));
     res.json({
       ...task,

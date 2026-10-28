@@ -397,6 +397,9 @@ function probeLoginShell(shell: string, timeoutMs: number): Promise<ProbeResult>
 
   return new Promise((resolve, reject) => {
     const child = spawn(shell, ["-lic", script], {
+      // Own a separate probe group: shell rc can spawn children which inherit
+      // our pipes, and an interactive shell may ignore SIGTERM.
+      detached: process.platform !== "win32",
       env: {
         ...process.env,
         // 防止 PROMPT_COMMAND / PS1 等钩子往 stdout 喷东西干扰解析
@@ -408,23 +411,37 @@ function probeLoginShell(shell: string, timeoutMs: number): Promise<ProbeResult>
     let stdout = "";
     let stderr = "";
     let settled = false;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    const terminateProbe = (signal: NodeJS.Signals): void => {
+      if (process.platform !== "win32" && child.pid) {
+        try { process.kill(-child.pid, signal); return; } catch { /* group already gone, or spawn failed */ }
+      }
+      try { child.kill(signal); } catch { /* probe already exited */ }
+    };
+    const clearTimers = (): void => {
+      clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
+    };
     const finalize = (fn: () => void): void => {
       if (settled) return;
       settled = true;
       fn();
     };
     const timer = setTimeout(() => {
-      try { child.kill("SIGTERM"); } catch { /* noop */ }
+      terminateProbe("SIGTERM");
+      // Kill only this detached probe group, never a provider PTY/daemon or
+      // another session. Descendants can keep stdout open after the shell exits.
+      killTimer = setTimeout(() => terminateProbe("SIGKILL"), 250);
       finalize(() => reject(new Error(`login shell probe timed out after ${timeoutMs}ms`)));
     }, timeoutMs);
     child.stdout?.on("data", (b: Buffer) => { stdout += b.toString(); });
     child.stderr?.on("data", (b: Buffer) => { stderr += b.toString(); });
     child.on("error", (err) => {
-      clearTimeout(timer);
+      clearTimers();
       finalize(() => reject(err));
     });
     child.on("close", (code) => {
-      clearTimeout(timer);
+      clearTimers();
       finalize(() => {
         if (!stdout && code !== 0) {
           reject(new Error(`login shell exited ${code}: ${stderr.trim().slice(0, 200)}`));

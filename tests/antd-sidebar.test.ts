@@ -7,6 +7,20 @@ import { ImSidebarItem } from "../src/web-ui/react/shell/im-sidebar-item.js";
 import { UnifiedExecutionSubjectPicker } from "../src/web-ui/react/workspaces/unified-execution-subject-picker.js";
 import { SidebarRecentSection } from "../src/web-ui/react/workspaces/sidebar-recent-section.js";
 import { getShellSidebarEntryActions } from "../src/web-ui/react/shell/shell-sidebar.js";
+import { ConversationNavigation } from "../src/web-ui/react/conversations/sidebar.js";
+
+test("root navigation omits contacts without shifting destination identity or selection", () => {
+  for (const activePage of ["chats", "tasks", "knowledge", "board", "calendar", "contacts"] as const) {
+    const html = renderToStaticMarkup(createElement(ConversationNavigation, {
+      activePage, teamAttention: 0, onNavigate() {},
+    }));
+    assert.doesNotMatch(html, /通讯录|data-stretch-value="contacts"/);
+    for (const destination of ["chats", "tasks", "knowledge", "board", "calendar"]) {
+      assert.match(html, new RegExp(`data-stretch-value="${destination}"`));
+    }
+    assert.equal((html.match(/aria-current="page"/g) ?? []).length, activePage === "contacts" ? 0 : 1);
+  }
+});
 
 // These assertions check the library's real rendering and business identities;
 // browser tests exercise the focus, selection and close behavior.

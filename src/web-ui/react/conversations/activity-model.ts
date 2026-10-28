@@ -1,6 +1,10 @@
 import type { ConversationDetail, ConversationTarget } from "../../../conversation-types.js";
-import type { ConversationTurn, SessionSnapshot, StructuredQuestion, ToolResultBlock, ToolUseBlock } from "../../../types.js";
+import type { ConversationTurn, SessionSnapshot, StructuredQuestion, ToolResultBlock } from "../../../types.js";
 import { computeRunningSignal } from "../../session-activity.js";
+import { pendingSessionQuestions, sessionToolQuestions } from "../../../session-questions.js";
+export { sessionToolQuestions as activityQuestions, pendingSessionQuestions as pendingActivityQuestions } from "../../../session-questions.js";
+const activityQuestions = sessionToolQuestions;
+const pendingActivityQuestions = pendingSessionQuestions;
 
 export type ActivitySession = Pick<SessionSnapshot, "id" | "status"> & Partial<SessionSnapshot>;
 export type ActivityOperation = { kind: "answer"; toolId: string; input: string }
@@ -26,28 +30,6 @@ export function activityResults(turns: readonly ConversationTurn[], communicatio
   for (const turn of turns) collect(turn, activitySource(turn, communicationSessionId));
   for (const session of sessions) for (const turn of session.messages ?? []) collect(turn, session.id);
   return results;
-}
-
-export function activityQuestions(block: ToolUseBlock): StructuredQuestion[] {
-  if (block.semantic?.kind === "question_request") return block.semantic.questions;
-  // Legacy Claude recordings predate the semantic projection.
-  if (block.name === "AskUserQuestion" && Array.isArray(block.input.questions)) return block.input.questions as StructuredQuestion[];
-  return [];
-}
-
-/** Only the latest unanswered assistant request can accept input; old cards remain read-only. */
-export function pendingActivityQuestions(session: ActivitySession): ToolUseBlock[] {
-  if (session.archived || ["failed", "stopped", "exited"].includes(session.status)) return [];
-  const turns = session.messages ?? [];
-  const results = activityResults([], null, [session]);
-  for (let index = turns.length - 1; index >= 0; index--) {
-    const turn = turns[index]!;
-    if (turn.role === "user" && turn.content.some(block => block.type === "text" && block.text.trim())) return [];
-    if (turn.role !== "assistant") continue;
-    return turn.content.filter((block): block is ToolUseBlock => block.type === "tool_use"
-      && activityQuestions(block).length > 0 && !results.has(activityToolKey(session.id, block.id)));
-  }
-  return [];
 }
 
 export type ConversationActivityDetail = Pick<ConversationDetail, "id" | "kind" | "title" | "communicationSessionId" | "messages" | "runDetails" | "dissolvedAt" | "deleting">;

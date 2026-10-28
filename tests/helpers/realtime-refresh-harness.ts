@@ -174,7 +174,7 @@ export function createRealtimeSessionHarness() {
     fetch: (url: string) => new Promise<Response>(resolve => requests.push({ url, resolve })),
     setTimeout: noop, clearTimeout: noop, setInterval: noop, clearInterval: noop,
     localStorage: { getItem: () => null, setItem: noop, removeItem: noop } };
-  const dependencies = { "./state": { state, composer, composerQueue: { advance: noop }, writeStoredBoolean: noop },
+  const dependencies = { "./state": { state, composer, todoTurnEvidence: new Map(), composerQueue: { advance: noop }, writeStoredBoolean: noop },
     "./session-reads": { createSessionReads }, "./message-reconciliation": reconciliation,
     // Reconnect resync is exercised by the snapshot tests; keep this read
     // pending so synthetic frames remain the authoritative fixture here.

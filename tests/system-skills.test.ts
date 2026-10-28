@@ -173,7 +173,7 @@ test("managed system skill ships helper/runtime/references, preserves edits and 
   await assert.rejects(installManagedSkill(root, "good", { "../bad": "bad" }), /路径/);
 });
 
-test("managed skills ensure syncs both skills, stays quiet when current, and never overwrites user edits", async t => {
+test("managed skills ensure syncs bundled skills, stays quiet when current, and never overwrites user edits", async t => {
   const root = await mkdtemp(path.join(tmpdir(), "wand-skills-ensure-test-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const configPath = path.join(root, "config/config.json");
@@ -182,17 +182,17 @@ test("managed skills ensure syncs both skills, stays quiet when current, and nev
   assert.equal(isDefaultConfigPath(configPath, home), false);
   const first = await ensureManagedSkills(configPath, home);
   assert.deepEqual(first.map(outcome => [outcome.name, outcome.status]),
-    [["wand-system", "synced"], ["wand-decision", "synced"]]);
+    [["wand-system", "synced"], ["wand-decision", "synced"], ["wand-knowledge", "synced"]]);
   assert.ok(first.every(outcome => outcome.files > 0 && outcome.links > 0));
   assert.match(formatManagedSkillsEnsureLog(first)!, /^\[wand\] 托管技能已同步：wand-system/);
   const second = await ensureManagedSkills(configPath, home);
-  assert.deepEqual(second.map(outcome => outcome.status), ["unchanged", "unchanged"]);
+  assert.deepEqual(second.map(outcome => outcome.status), ["unchanged", "unchanged", "unchanged"]);
   assert.equal(formatManagedSkillsEnsureLog(second), null);
   const doc = path.join(root, "config/skills/wand-decision/SKILL.md");
   await writeFile(doc, await readFile(doc, "utf8") + "\nuser changes");
   const third = await ensureManagedSkills(configPath, home);
   assert.deepEqual(third.map(outcome => [outcome.name, outcome.status]),
-    [["wand-system", "unchanged"], ["wand-decision", "failed"]]);
+    [["wand-system", "unchanged"], ["wand-decision", "failed"], ["wand-knowledge", "unchanged"]]);
   assert.match(third[1]!.error!, /用户修改/);
   assert.match(await readFile(doc, "utf8"), /user changes/);
   assert.match(formatManagedSkillsEnsureLog(third)!, /托管技能部分未同步：wand-decision 未同步/);

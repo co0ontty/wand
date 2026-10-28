@@ -7,12 +7,27 @@ import { SessionRow, sessionSelectFields, sessionPersistFields, sessionPersistAs
 import type { WandStorage } from "../storage.js";
 import { SYSTEM_AI_AUXILIARY_PURPOSES, SYSTEM_AI_CALL_PREFIX } from "../system-ai-call.js";
 import { validPiCliCheckpoint, type PiCliCheckpoint } from "../pi-cli-checkpoint.js";
+import { canClaimQuickTerminal } from "../quick-terminal-session.js";
+import { badRequest, notFound } from "../http-error.js";
 
 const AUXILIARY_HISTORY_PATTERNS = SYSTEM_AI_AUXILIARY_PURPOSES.map(purpose => `${SYSTEM_AI_CALL_PREFIX}${purpose}:?*`);
 
 /** Session storage: one domain of the WandStorage facade. Shares the connection and the facade's transaction. */
 export class SessionRepository {
   constructor(private readonly db: DatabaseSync, private readonly s: WandStorage) {}
+
+  /** Change only the client surface binding; preserve the process, transcript and task membership. */
+  claimQuickTerminal(id: string): SessionSnapshot {
+    return this.s.transaction(() => {
+      const session = this.getSession(id);
+      if (!session) throw notFound("未找到该终端，可能已被删除。");
+      if (!canClaimQuickTerminal(session)) throw badRequest("只有普通空白终端可以作为快捷终端。");
+      if (session.sessionSource !== "quick-terminal") {
+        this.db.prepare("UPDATE command_sessions SET session_source = 'quick-terminal' WHERE id = ?").run(id);
+      }
+      return { ...session, sessionSource: "quick-terminal" };
+    });
+  }
 
   listGithubIssueBindings(owner: string, repo: string, issueNumber: number): Array<{ sessionId: string; boundAt: string }> {
     const rows = this.db.prepare(

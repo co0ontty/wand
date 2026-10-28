@@ -181,7 +181,8 @@ test("发送与停止是同一颗按钮的相位模型，结果原位显示不�
   const controls = readFileSync(new URL("../src/web-ui/browser/library-buttons.tsx", import.meta.url), "utf8");
   assert.match(controls, /loading=\{snapshot\.phase === "sending"\}/);
   assert.match(controls, /danger=\{snapshot\.phase === "running" \|\| snapshot\.phase === "failed"\}/);
-  assert.match(controls, /snapshot\.phase === "running" \? "stop" : snapshot\.phase === "sent" \? "check" : "up"/);
+  assert.match(controls, /snapshot\.phase === "running" \? "stop" : snapshot\.phase === "sent" \? "check" : snapshot\.queued \? "history" : "up"/);
+  assert.match(controls, /snapshot\.queued \? "加入队列" : "发送"/);
   assert.match(inputSrc, /return phase === "failed" \? MOTION_DWELL_FAILED_MS : MOTION_DWELL_SENT_MS;/);
 
   // ② 提交链路（sendInputFromBox 全文）：结果只落原位相位，不再落 Toast。

@@ -1072,21 +1072,14 @@ test("批量处理失败：原因写进原位文案位，不再只活在 Toast �
   assert.match(panel, /setConfirmingManage\(false\);\n\s*setManageFeedback\("idle"\);\n\s*setManageFeedbackLabel\(""\);\n\s*\}, MOTION_DWELL_FAILED_MS\);/);
 });
 
-test("工作区与最近会话互斥展示，不重复堆叠同一批会话", () => {
+test("工作区只按目录组织，人物视图不再在同一列表重复出现", () => {
   const panel = readFileSync(
     new URL("../src/web-ui/react/workspaces/workspaces-panel.tsx", import.meta.url),
     "utf8",
   );
-  // 归属分组只有一个真源（sidebar-recent.ts），面板只做过滤与转发。
-  assert.match(panel, /collectRecentEntries\(groups\)/);
-  assert.match(panel, /<SidebarRecentSection\b[\s\S]*?entries=\{visibleRecentEntries\}/);
-  assert.match(panel, /filterRecentEntries\(recentEntries, \{\s*query: searchQuery,\s*employees,\s*\}\)/);
-  const recent = readFileSync(new URL("../src/web-ui/react/workspaces/sidebar-recent-section.tsx", import.meta.url), "utf8");
-  assert.match(recent, /recentConversationGroups\(entries, \{\s*employees, activeOnly: displayMode === "active", selectedSessionId,/);
-  // 同一列表位置切换组织方式；按目录为默认，不把折叠行为冒充数据筛选。
-  assert.match(panel, /ariaLabel="会话组织方式"/);
-  assert.match(panel, /hidden=\{manageMode \|\| view !== "recent"\}/);
-  assert.match(panel, /hidden=\{directoryId === undefined && !manageMode && view !== "directory"\}/);
+  assert.doesNotMatch(panel, /最近会话/);
+  assert.doesNotMatch(panel, /SidebarRecentSection/);
+  assert.match(panel, /if \(view === "recent"\) setView\("directory"\)/);
   assert.match(panel, /<SidebarActivityFilter\s+active=\{displayMode === "active"\}/);
   const activityFilter = readFileSync(new URL("../src/web-ui/react/workspaces/sidebar-activity-filter.tsx", import.meta.url), "utf8");
   assert.match(activityFilter, /label = "只看活动会话"/);

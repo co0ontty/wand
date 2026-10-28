@@ -165,10 +165,10 @@ export async function runChatExperience({ evaluate: e, send, click, key, wait, m
   })()`);
   assert.equal(messageShape.headTime,true,"the assistant header carries the message clock");
   assert.equal(messageShape.headTimeInControl,true,"the clock shares the author disclosure row");
-  assert.equal(messageShape.authorAvatar,true,"the assistant header carries an author mark");
+  assert.equal(messageShape.authorAvatar,false,"the assistant header carries no avatar");
   // 身份来自会话快照：署名就该是这条会话的员工，而不是通用的 Wand。
   assert.equal(messageShape.authorName,"Wand 助手","the assistant header names the session employee");
-  assert.equal(messageShape.authorAvatarKind,"employee","the session employee avatar replaces the generic brand mark");
+  assert.equal(messageShape.authorAvatarKind,"none","the assistant header keeps only the member name");
   assert.equal(messageShape.replyAction.length>0,true,"the header owns the expand/collapse control");
   assert.equal(messageShape.contentBorderless,true,"the assistant body has no bubble chrome");
   assert.equal(messageShape.usageRows,0,"the transcript keeps no per-turn usage row");

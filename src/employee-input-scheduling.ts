@@ -28,6 +28,7 @@ export function employeeInputPriority(source: EmployeeInputScheduling["source"],
 }
 
 export interface EmployeeInputAdmission {
-  canStart(session: SessionSnapshot, scheduling: EmployeeInputScheduling): boolean;
+  /** 显式「立即发送」跳过并发槽位与优先级比较，但仍校验员工归属是否有效。 */
+  canStart(session: SessionSnapshot, scheduling: EmployeeInputScheduling, immediate?: boolean): boolean;
   schedule(employeeId: string): void;
 }

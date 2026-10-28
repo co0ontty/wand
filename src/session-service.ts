@@ -161,7 +161,7 @@ export function sessionSortTimestamp(snapshot: SessionSnapshot): number {
 export function buildSessionListEntries(
   sessions: SessionSnapshot[],
 ): SessionListPageEntry[] {
-  return sessions.map<SessionListPageEntry>((session) => ({
+  return sessions.filter(session => session.sessionSource !== "quick-terminal").map<SessionListPageEntry>((session) => ({
     type: "managed",
     key: `session-${session.id}`,
     sortTimestamp: sessionSortTimestamp(session),

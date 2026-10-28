@@ -3,6 +3,7 @@ import type { Express, Request, RequestHandler, Response } from "express";
 
 import { getErrorMessage } from "./error-utils.js";
 import { asyncRoute } from "./express-async.js";
+import { HTML_PREVIEW_CSP } from "./html-preview-policy.js";
 
 const MAX_PORT = 65535;
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
@@ -71,13 +72,12 @@ function proxyLocation(
   value: string,
   target: LocalPreviewTarget,
 ): string {
-  if (value.startsWith("/")) {
-    return `/api/local-preview/${target.hostname}/${target.port}${value}`;
-  }
   try {
-    const url = new URL(value);
-    if (url.hostname === target.hostname && url.port === String(target.port)) {
-      return `/api/local-preview/${target.hostname}/${target.port}${url.pathname}${url.search}`;
+    const host = target.hostname.includes(":") ? `[${target.hostname}]` : target.hostname;
+    const url = new URL(value, `http://${host}:${target.port}${target.path}`);
+    const hostname = NORMALIZED_LOOPBACK_HOSTNAMES[url.hostname] ?? url.hostname;
+    if (url.protocol === "http:" && !url.username && !url.password && hostname === target.hostname && (url.port || "80") === String(target.port)) {
+      return `/api/local-preview/${target.hostname}/${target.port}${url.pathname}${url.search}${url.hash}`;
     }
   } catch {
     // Leave non-HTTP schemes and opaque values untouched.
@@ -104,6 +104,11 @@ export function registerLocalPreviewRoutes(
       res.status(400).json({ error: "只允许预览本机（localhost）HTTP 服务。" });
       return;
     }
+    if (req.originalUrl.split("?")[0] === req.baseUrl) {
+      const search = req.originalUrl.includes("?") ? req.originalUrl.slice(req.originalUrl.indexOf("?")) : "";
+      res.redirect(307, req.baseUrl + "/" + search);
+      return;
+    }
 
     const headers: Record<string, string | string[]> = {};
     for (const [key, value] of Object.entries(req.headers)) {
@@ -124,11 +129,24 @@ export function registerLocalPreviewRoutes(
           method: req.method,
           headers,
         }, resolve);
+        const cancel = () => proxyReq.destroy();
+        req.once("aborted", cancel);
+        res.once("close", cancel);
+        proxyReq.once("close", () => {
+          req.off("aborted", cancel);
+          res.off("close", cancel);
+        });
+        proxyReq.setTimeout(15_000, () => {
+          const error = new Error("本地服务响应超时。") as NodeJS.ErrnoException;
+          error.code = "ETIMEDOUT";
+          proxyReq.destroy(error);
+        });
         proxyReq.once("error", reject);
         req.once("error", reject);
         req.pipe(proxyReq);
       });
     } catch (error) {
+      if (res.destroyed) return;
       if (!res.headersSent) {
         const code = (error as NodeJS.ErrnoException).code;
         const message = code === "ECONNREFUSED"
@@ -150,6 +168,9 @@ export function registerLocalPreviewRoutes(
       }
       res.setHeader(key, value);
     }
+    res.setHeader("Content-Security-Policy", HTML_PREVIEW_CSP);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Referrer-Policy", "no-referrer");
 
     if (req.method === "HEAD" || !upstream.statusCode) {
       upstream.destroy();

@@ -5,7 +5,7 @@ import * as React from "react";
 import { piSettingsController, type PiSettingsMount } from "./controller";
 import { PiAutoResourcesControl } from "./recommender";
 import { PiSkillSwitch } from "./skill-switch";
-import { piSkillMode, piSkillModePatch } from "../../../pi-session-settings.js";
+import { piResourceSettingsConfirmed, piSkillMode, piSkillModePatch } from "../../../pi-session-settings.js";
 import { piSettingsRepository } from "./repository";
 import { WandIcon, WandSearchField, WandSelect, isWandPopupOwnedBy } from "../ui";
 import type { PiResourceItem, PiResourceSelection, PiSessionSettingsPatch, PiSettingsResponse } from "../../../pi-session-settings.js";
@@ -30,6 +30,7 @@ export function panelNotes(data: PiSettingsResponse | null): string[] {
   if (!data.resourceCatalog.supported) return [data.resourceCatalog.reason || "此会话不支持 Skills / MCP 选择。"];
   if (!data.settings.resources) return ["旧会话仍沿用 Pi 自动发现；勾选任意项或点击「改为仅选定资源」后，下一轮才停止加载未选项。基础工具不受影响。"];
   return [data.skillLocksAvailable ? "Skills 三档：关 → 开 → 开并锁定。锁定项始终开启，未锁定项由自动配置选择；左滑回「开」解锁。" : "当前服务端不支持 Skill 锁定，请更新服务端。",
+    "已卸载或停用的 Skill 解锁时会同时取消选择。",
     "基础工具保持现有配置，MCP 手选项保留。",
     "选择不是文件系统沙箱；旧会话历史中已读过的技能内容不会被删除。"];
 }
@@ -125,14 +126,11 @@ export function PiSettingsPanel({ mount }: { mount: PiSettingsMount }): React.Re
     try {
       const result = await piSettingsRepository.save(mount.sessionId, patch, controller.signal);
       if (!ownsRequest(revision, controller.signal)) return false;
-      const resources = patch.resources;
-      const confirmed = result.settings?.resources;
-      if (resources && (!confirmed || JSON.stringify(confirmed.skills) !== JSON.stringify(resources.skills)
-        || JSON.stringify(confirmed.mcpServers) !== JSON.stringify(resources.mcpServers))) {
-        throw new Error("服务端未确认本次选择，请重开面板核对实际设置。");
-      }
-      if ("lockedSkills" in patch && JSON.stringify(result.settings.lockedSkills) !== JSON.stringify(patch.lockedSkills)) {
+      if ("lockedSkills" in patch && JSON.stringify(result.settings?.lockedSkills) !== JSON.stringify(patch.lockedSkills)) {
         throw new Error("服务端未确认 Skill 锁定，请重开面板核对实际设置。");
+      }
+      if (!piResourceSettingsConfirmed(data.settings, patch, result.settings)) {
+        throw new Error("服务端未确认本次选择，请重开面板核对实际设置。");
       }
       if ("autoResources" in patch && (result.settings.autoResources === true) !== patch.autoResources) {
         throw new Error("服务端未确认自动选择设置，请重新读取核对。");

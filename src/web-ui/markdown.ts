@@ -1,28 +1,10 @@
 import { Marked, Renderer } from "marked";
-import { localFilePreviewHref, localHttpPreviewHref } from "./react/local-preview/controller.js";
+import { localHttpPreviewHref } from "./react/local-preview/controller.js";
 import { messageFileTarget, type MessageFileContext } from "./message-file-target.js";
 
 function escapeHtml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-}
-
-function serverFilePath(target: string): string | null {
-  let value = target.trim();
-  if (/^file:/i.test(value)) {
-    try {
-      const url = new URL(value);
-      if (url.hostname && url.hostname !== "localhost") return null;
-      value = decodeURIComponent(url.pathname);
-    } catch {
-      return null;
-    }
-  } else {
-    if (!value.startsWith("/") || value.startsWith("//")) return null;
-    try { value = decodeURIComponent(value); } catch { /* Keep literal percent signs. */ }
-  }
-  if (/^\/(?:api|android|macos)(?:\/|$)/.test(value)) return null;
-  return value.replace(/#L\d+(?:C\d+)?$/i, "").replace(/:\d+(?::\d+)?$/, "");
 }
 
 function previewAttributes(value: string, href: string): Array<[string, string]> {
@@ -36,19 +18,18 @@ function previewAttributes(value: string, href: string): Array<[string, string]>
 
 function linkAttributes(target: string, context: MessageFileContext): Array<[string, string]> | null {
   const file = messageFileTarget(target, context);
-  const path = file?.path || serverFilePath(target);
-  if (path) {
-    const preview = /(?:\/$|\.(?:html?|)$)/i.test(path) ? localFilePreviewHref(path) : null;
-    if (preview) return previewAttributes(path, preview);
+  if (file) {
+    if (file.previewUrl) return previewAttributes(file.previewUrl, file.previewUrl);
     return [
-      ["href", file?.downloadUrl || "/api/file-raw?download=1&path=" + encodeURIComponent(path)],
+      ["href", file.downloadUrl],
       ["class", "server-file-link"],
-      ["data-server-file-path", path],
+      ["data-server-file-path", file.path],
+      ["data-server-file-url", file.rawUrl],
       ["title", "打开或下载服务端文件"],
-      ...(path.startsWith("/") ? [["onclick", "if(window.__openFilePreview){event.preventDefault();window.__openFilePreview(this.getAttribute('data-server-file-path'));}"] as [string, string]] : []),
+      ["onclick", "if(window.__openFilePreview){event.preventDefault();window.__openFilePreview(this.getAttribute('data-server-file-url'));}"],
     ];
   }
-  const preview = localHttpPreviewHref(target);
+  const preview = localHttpPreviewHref(target, context.serverOrigin);
   if (preview) return previewAttributes(target, preview);
   if (/^https?:\/\//i.test(target)) {
     return [["href", target], ["target", "_blank"], ["rel", "noopener noreferrer"]];
@@ -113,5 +94,5 @@ const markdown = createMarkdown({});
 /** Shared parser with source-session-bound local-file adaptations. */
 export function renderChatMarkdown(text: string, context: MessageFileContext = {}): string {
   if (!text) return "";
-  return '<div class="markdown-content">' + (context.cwd || context.sessionId ? createMarkdown(context) : markdown).parse(text, { async: false }) + "</div>";
+  return '<div class="markdown-content">' + (context.cwd || context.sessionId || context.serverOrigin ? createMarkdown(context) : markdown).parse(text, { async: false }) + "</div>";
 }

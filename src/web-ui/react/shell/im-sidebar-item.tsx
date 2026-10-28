@@ -50,7 +50,7 @@ export function ImSidebarItem({
         <Typography.Text ellipsis className={classNames("im-sidebar-item-name", titleGenerating && "title-generating")}
           aria-busy={titleGenerating || undefined} aria-label={titleGenerating ? `${title}，AI 正在生成标题` : undefined}
           title={titleGenerating ? "AI 正在生成标题" : undefined}>{title}</Typography.Text>
-        <Typography.Text ellipsis type="secondary" id={descriptionId} className="im-sidebar-item-summary" style={{ fontSize: 12 }}>{summary}</Typography.Text>
+        <Typography.Text ellipsis type="secondary" id={descriptionId} title={summary} className="im-sidebar-item-summary" style={{ fontSize: 12 }}>{summary}</Typography.Text>
       </Flex>
     </WandButton></SidebarLabelTooltip>
   );

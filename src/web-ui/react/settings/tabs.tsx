@@ -742,16 +742,16 @@ export function GeneralSettingsTab({ snapshot, repository, refresh }: SettingsTa
         </SettingsGrid>
       </SettingsSection>
 
-      <SettingsSection title="任务与会话保留" description="看板任务、会话和已结束的团队运行共用此策略；正在处理工作的会跳过。保存本页后立即扫描。">
+      <SettingsSection title="任务与会话保留" description="看板任务、会话和已结束的团队运行共用天数与开关。未完成、待验收和升级前的任务归档不会自动关闭或删除。保存本页后立即扫描。">
         <SettingsToggle
           label="自动归档空闲任务与会话"
-          description="达到空闲天数后移入归档；空闲终端可能被停止。归档内容仍可恢复，手动归档不受影响。"
+          description="只归档已验收且无未完成上下文的任务，以及不受其保护的空闲会话；空闲终端可能被停止。手动归档不受影响，归档内容仍可恢复。"
           checked={form.taskRetention.autoArchiveEnabled}
           onCheckedChange={(checked) => updateRetention("autoArchiveEnabled", checked)}
         />
         <SettingsToggle
           label="自动删除到期内容"
-          description="删除超过保留天数的归档任务、会话及已结束团队运行；任务的 worktree 也会清理。删除后的内容无法恢复。"
+          description="只删除已按当前规则归档且到期的已验收任务，以及不再受未完成上下文保护的会话和团队记录；对应 worktree 也会清理。升级前的任务归档不自动删除。删除后的内容无法恢复。"
           checked={form.taskRetention.autoDeleteEnabled}
           onCheckedChange={(checked) => updateRetention("autoDeleteEnabled", checked)}
         />
@@ -784,7 +784,7 @@ export function GeneralSettingsTab({ snapshot, repository, refresh }: SettingsTa
         <SettingsStatus tone={form.taskRetention.autoDeleteEnabled ? "warning" : "info"}>
           点击“保存基本配置”后立即按当前策略扫描，即使本次只修改了其他字段。
           {form.taskRetention.autoDeleteEnabled
-            ? `自动删除已开启：归档任务与会话满 ${retentionDayError(form.taskRetention.autoDeleteDays, "归档后天数") ? "设定" : form.taskRetention.autoDeleteDays} 天、已结束团队运行达到保留天数时可能立即删除。请在保存前核对天数。`
+            ? `自动删除已开启：仅已验收且按当前规则归档满 ${retentionDayError(form.taskRetention.autoDeleteDays, "归档后天数") ? "设定" : form.taskRetention.autoDeleteDays} 天的任务，以及无未完成任务保护的会话和已结束团队运行，可能被删除。请在保存前核对天数。`
             : "自动删除已关闭；已归档内容会继续保留。"}
         </SettingsStatus>
       </SettingsSection>

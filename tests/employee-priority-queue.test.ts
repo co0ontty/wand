@@ -48,7 +48,7 @@ function harness(t: TestContext, limit = 1) {
   storage.saveSiliconEmployee(employee);
   const manager = new StructuredSessionManager(storage, config, null, { claudeCli: runner });
   const queue = new TaskExecutionQueue({ storage, config, structured: manager, processes: null });
-  manager.setEmployeeInputAdmission({ canStart: (session, scheduling) => queue.canStartSession(session, scheduling), schedule: () => {} });
+  manager.setEmployeeInputAdmission({ canStart: (session, scheduling, immediate) => queue.canStartSession(session, scheduling, immediate), schedule: () => {} });
   t.after(async () => {
     queue.dispose();
     manager.dispose();
@@ -98,6 +98,25 @@ test("manual messages share the employee cap and outrank urgent task dispatches 
   await h.release(1);
   await until(() => h.runner.starts.length === 3);
   assert.match(h.runner.starts[2]!.prompt, /urgent task/);
+});
+
+test("explicit send-now leaves the queue and starts even when the employee cap is full", async t => {
+  const h = harness(t);
+  const busy = h.session(h.task("low"));
+  void h.manager.sendMessage(busy.id, "blocking", { source: "user" });
+  await until(() => h.runner.starts.length === 1);
+  const idle = h.session();
+  await h.manager.sendMessage(idle.id, "send me now", { source: "user" });
+  assert.deepEqual(h.manager.get(idle.id)?.queuedMessages, ["send me now"], "precondition: cap keeps it queued");
+  const promotion = h.manager.promoteQueuedMessage(idle.id, 0, "send me now");
+  await until(() => h.runner.starts.length === 2);
+  assert.equal(h.runner.starts[1]!.prompt, "send me now");
+  assert.equal(h.manager.get(idle.id)?.structuredState?.inFlight, true, "promoted input starts immediately");
+  assert.deepEqual(h.manager.get(idle.id)?.queuedMessages, [], "promoted input never falls back into the queue");
+  h.runner.releases[1]!();
+  await promotion;
+  h.runner.releases[0]!();
+  await until(() => !h.manager.get(busy.id)?.structuredState?.inFlight && !h.manager.get(idle.id)?.structuredState?.inFlight);
 });
 
 test("task queues use live panel priorities and FIFO ties", async t => {
@@ -302,7 +321,7 @@ test("restart restores user priority and drains both queue kinds without replayi
   let runner = new DeferredRunner();
   let manager = new StructuredSessionManager(storage, config, null, { claudeCli: runner });
   let queue = new TaskExecutionQueue({ storage, config, structured: manager, processes: null });
-  const wire = () => manager.setEmployeeInputAdmission({ canStart: (session, scheduling) => queue.canStartSession(session, scheduling), schedule: () => {} });
+  const wire = () => manager.setEmployeeInputAdmission({ canStart: (session, scheduling, immediate) => queue.canStartSession(session, scheduling, immediate), schedule: () => {} });
   wire();
   const now = new Date().toISOString();
   const employee: SiliconEmployee = { id: "e_restart", name: "重启员工", duty: "", prompt: "", avatar: "", maxConcurrentTasks: 1,

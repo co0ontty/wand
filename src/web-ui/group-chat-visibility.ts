@@ -5,6 +5,6 @@ export function isSidebarConversationVisible(item: { kind: string }): boolean {
   return GROUP_CHAT_VISIBLE || item.kind !== "group";
 }
 
-export function isSidebarSessionVisible(session: { teamChat?: unknown }): boolean {
-  return GROUP_CHAT_VISIBLE || !session.teamChat;
+export function isSidebarSessionVisible(session: { teamChat?: unknown; sessionSource?: string }): boolean {
+  return session.sessionSource !== "quick-terminal" && (GROUP_CHAT_VISIBLE || !session.teamChat);
 }

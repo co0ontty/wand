@@ -2,7 +2,7 @@ import * as React from "react";
 import { Badge, Flex, Typography } from "antd";
 import { WandButton } from "../ui/button.js";
 import { SidebarLabelTooltip } from "../workspaces/sidebar-label-tooltip";
-import { SidebarSessionArea } from "../workspaces/sidebar-session-area";
+import { SidebarSessionArea, SidebarSessionToggle } from "../workspaces/sidebar-session-area";
 import { SidebarChevron, SidebarDisclosure, anchorSidebarDisclosure, sidebarDisclosureKeys } from "../workspaces/sidebar-disclosure";
 
 /** Identity navigation and child disclosure are independent when a session preview is present. */
@@ -59,10 +59,12 @@ export function ImSidebarGroup({ label, count, totalCount = count, description, 
           </span>
         </WandButton>
       </SidebarLabelTooltip>
+      {withPreview && count > 0 ? <SidebarSessionToggle id={id} open={expanded} label={label}
+        toggleRef={toggleRef} onOpenChange={setOpen}/> : null}
       {action ? <span className="im-sidebar-group-action">{action}</span> : null}
     </Flex>
     <span id={descriptionId} className="sidebar-visually-hidden" hidden>{description}{containsCurrent ? "，包含当前会话" : ""}</span>
-    {withPreview ? <SidebarSessionArea id={id} open={expanded} label={label} toggleRef={toggleRef} hasSessions={count > 0} onOpenChange={setOpen}>
+    {withPreview ? <SidebarSessionArea hasSessions={count > 0}>
       {collapsedPreview}{content}
     </SidebarSessionArea> : content}
   </div>;

@@ -278,6 +278,7 @@ test("session list projection keeps DTO fields and drops local buffers", async (
       messageOffset: 12,
     },
     { title: "没有 id 的条目" },
+    { id: "quick", sessionKind: "pty", sessionSource: "quick-terminal", status: "running" },
     null,
   ]);
   assert.equal(projected.length, 1);

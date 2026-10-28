@@ -56,7 +56,7 @@ export function ComposerConfigControl({ mount }: { mount: ComposerConfigMount })
         <>
           <span
             data-mode-control-pill="model"
-            style={{ minWidth: scope === "runtime" ? 0 : 120 }}
+            style={{ minWidth: scope === "runtime" ? 60 : 120 }}
             title={`模型：${mount.modelFullLabel}`}
           >
             {selectHost(scope, "model")}

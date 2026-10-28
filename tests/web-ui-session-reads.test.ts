@@ -45,7 +45,7 @@ function harness() {
   };
   const dependencies: Record<string, unknown> = {
     "./session-fetch.js": sessionFetchModule(fetchImpl),
-    "./state": { composer, state, writeStoredBoolean: noop },
+    "./state": { composer, state, todoTurnEvidence: new Map(), writeStoredBoolean: noop },
     "../react/session-list-snapshot": {
       loadSessionList: () => fetchImpl("/api/sessions", { credentials: "same-origin" }).then((response) => parseJsonResponse(response)),
       invalidateSessionList: noop,

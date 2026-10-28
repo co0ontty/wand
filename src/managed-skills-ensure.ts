@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { installDecisionSkill } from "./decision-skill.js";
 import { getErrorMessage } from "./error-utils.js";
+import { installKnowledgeSkill } from "./knowledge-skill.js";
 import { installSystemSkill } from "./system-skill.js";
 
 export interface ManagedSkillEnsureOutcome {
@@ -22,6 +23,7 @@ export async function ensureManagedSkills(configPath: string, home = homedir()):
   const installs: Array<[string, () => Promise<{ changed: string[]; linked: string[] }>]> = [
     ["wand-system", async () => installSystemSkill(configPath, undefined, home)],
     ["wand-decision", async () => installDecisionSkill(path.dirname(configPath), undefined, home)],
+    ["wand-knowledge", async () => installKnowledgeSkill(configPath, undefined, home)],
   ];
   const outcomes: ManagedSkillEnsureOutcome[] = [];
   for (const [name, install] of installs) {

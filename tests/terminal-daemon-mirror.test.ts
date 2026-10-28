@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -48,12 +48,26 @@ async function waitForToken(configPath: string): Promise<string> {
   const paths = terminalDaemonPaths(configPath);
   for (let i = 0; i < 200; i++) {
     try {
-      return readFileSync(paths.tokenPath, "utf8").trim();
+      // File creation and writing are separate syscalls. Match production's
+      // tryConnect readiness check instead of sending an empty credential.
+      const token = readFileSync(paths.tokenPath, "utf8").trim();
+      if (token) return token;
     } catch { /* not published yet */ }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error("terminal daemon token never appeared");
 }
+
+test("mirror token readiness waits for contents after the file is created", async (t) => {
+  const root = mkdtempSync(path.join(tmpdir(), "wand-mirror-token-ready-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const configPath = path.join(root, "config.json");
+  const { tokenPath } = terminalDaemonPaths(configPath);
+  writeFileSync(tokenPath, "");
+  const token = waitForToken(configPath);
+  queueMicrotask(() => writeFileSync(tokenPath, "fixture-token\n"));
+  assert.equal(await token, "fixture-token");
+});
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

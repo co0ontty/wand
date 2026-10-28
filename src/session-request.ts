@@ -1,6 +1,7 @@
 import { isExecutionMode } from "./config.js";
 import { isSystemAiCall } from "./system-ai-call.js";
 import type { ExecutionMode, SessionSource } from "./types.js";
+import { badRequest } from "./http-error.js";
 
 export function parseExecutionMode(value: unknown, fallback: ExecutionMode): ExecutionMode {
   if (value === undefined) return fallback;
@@ -12,9 +13,13 @@ export function parseExecutionMode(value: unknown, fallback: ExecutionMode): Exe
 
 export function parseSessionCreationOrigin(
   body: { sessionSource?: unknown; automationId?: unknown } | null | undefined,
+  allowQuickTerminal = false,
 ): { sessionSource: SessionSource; automationId?: string } {
   const rawSource = body?.sessionSource;
-  if (rawSource !== undefined && rawSource !== "interactive" && rawSource !== "automation" && rawSource !== "startup") {
+  if (rawSource === "quick-terminal" && (!allowQuickTerminal || body?.automationId !== undefined)) {
+    throw badRequest("快捷终端只允许无自动化绑定的空白 PTY shell。");
+  }
+  if (rawSource !== undefined && rawSource !== "interactive" && rawSource !== "automation" && rawSource !== "startup" && rawSource !== "quick-terminal") {
     throw new Error("sessionSource 必须是 interactive、automation 或 startup。");
   }
 

@@ -64,6 +64,14 @@ function chatDetail(overrides: Partial<AiTeamRunDetail> = {}): AiTeamRunDetail {
   };
 }
 
+test("team chat media picker accepts photos and videos", () => {
+  const html = renderToStaticMarkup(React.createElement(TeamChatView, {
+    detail: chatDetail(), onChange() {},
+  }));
+  assert.match(html, /accept="image\/\*,video\/\*"/);
+  assert.match(html, /aria-label="选择照片或视频"/);
+});
+
 test("team chat messages render through the shared Wand message surface", () => {
   const html = renderToStaticMarkup(React.createElement(TeamChatView, {
     detail: chatDetail(), onChange() {},
@@ -164,8 +172,12 @@ test("employee forms keep their validation, builtin and knowledge rules", () => 
   assert.match(card, /candidateListError\(draft\.agents\)/);
   assert.doesNotMatch(card, /showWandToast|notification\.|message\.success/, "结果不用浮层替代原位反馈");
   const knowledge = owned("agents/employee-knowledge.tsx");
-  assert.match(knowledge, /if \(action === "clear" && !armed\) \{ setArmed\(true\); return; \}/, "清空知识库仍要二次确认");
-  assert.match(knowledge, /return \(\) => \{ clearTimeout\(timer\); epoch\.current\+\+; \};/, "迟到的搜索结果不能落地");
+  assert.match(knowledge, /if \(!armed\) \{ setArmed\(true\); return; \}/, "清空知识库仍要二次确认");
+  assert.match(knowledge, /return \(\) => \{ epoch\.current\+\+; \};/, "切换员工后迟到的读取结果不能落地");
+  assert.match(knowledge, /if \(token === epoch\.current\) setView\(next\)/, "只有当前员工这一轮读取能显示");
+  assert.match(knowledge, /knowledgeRepository\.list\(\{ scope: "personal", ownerId: employeeId \}\)/, "旧入口使用同一知识库数据");
+  assert.match(knowledge, /subscribeKnowledgeChanges/, "文档编辑后同步刷新旧入口");
+  assert.match(knowledge, /knowledgeController\.open\("personal", employeeId\)/, "完整文档进入明确的员工个人空间");
 });
 
 test("X components stay display-only in this lane", () => {

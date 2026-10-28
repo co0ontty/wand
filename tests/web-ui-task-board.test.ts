@@ -538,11 +538,11 @@ test("task board is a first-class view=taskboard route that does not unmount the
   assert.equal(sidebarActionLeavesPage({ type: "session.select", id: "session-1" }), true);
   assert.equal(sidebarActionLeavesPage({ type: "settings.open" }), false);
   assert.equal(sidebarActionLeavesPage({ type: "workspace.new" }), false);
-  assert.match(sidebar, /if \(sidebarActionLeavesPage\(action\)\) \{ settingsController\.close\(\); taskBoardController\.close\(\); conversationUi\.suspend\(\)/);
+  assert.match(sidebar, /if \(sidebarActionLeavesPage\(action\)\) \{ settingsController\.close\(\); taskBoardController\.close\(\); knowledgeController\.close\(\); conversationUi\.suspend\(\)/);
   assert.match(sidebar, /const navigateFromTree = \(\): void => \{\s*settingsController\.close\(\);\s*taskBoardController\.close\(\)/);
   assert.match(sidebar, /onNavigate=\{navigateFromTree\}/);
   // 功能导航既有库按钮高亮，也保留当前页语义。
-  assert.match(sidebar, /activePage=\{settings\.open \? null : taskBoard\.open \? taskBoard\.page === "board" \? "board" : taskBoard\.page === "schedules" \? "schedules" : taskBoard\.page === "calendar" \? "calendar" : "teams"/);
+  assert.match(sidebar, /activePage=\{settings\.open \? null : knowledge\.open \? "knowledge" : taskBoard\.open \? taskBoard\.page === "board" \? "board" : taskBoard\.page === "schedules" \? "schedules" : taskBoard\.page === "calendar" \? "calendar" : "teams"/, "知识库与任务看板分别投影当前主页面");
   const navigation = readFileSync(new URL("../src/web-ui/react/conversations/sidebar.tsx", import.meta.url), "utf8");
   assert.match(navigation, /const selectedPage = activePage === "schedules" \? "calendar" : activePage/);
   assert.match(navigation, /aria-current=\{selectedPage === entry\.value \? "page" : undefined\}/);

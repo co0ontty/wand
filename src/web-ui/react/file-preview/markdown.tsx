@@ -4,13 +4,14 @@ import { messageFileTarget, type MessageFileContext as FileContext } from "../..
 import { InlineHtmlPreview } from "../local-preview/inline";
 
 export const MessageFileContext = React.createContext<FileContext>({});
-import { localFilePreviewHref, localHttpPreviewHref, localPreviewController } from "../local-preview/controller";
+import { localHttpPreviewHref, localPreviewController } from "../local-preview/controller";
 import { classNames } from "../ui/class-names";
 import { openMessageImage } from "../image-viewer/gallery";
 import { installStyleSheet } from "../styles";
 import { markdownPreviewStyles } from "./markdown-styles";
 import { tokenizeFilePreviewCode, type FilePreviewCodeToken } from "./model";
 import { parseFilePreviewMarkdown } from "./markdown-model";
+import { filePreviewController } from "./controller";
 import type {
   FilePreviewMarkdownBlock,
   FilePreviewMarkdownInline,
@@ -45,20 +46,19 @@ function MarkdownInline({ tokens, renderText }: {
           case "link": {
             const file = messageFileTarget(token.url, fileContext);
             if (file?.previewUrl) return <InlineHtmlPreview key={index} previewUrl={file.previewUrl} downloadUrl={file.downloadUrl} label={token.value}/>;
-            if (file) return <a key={index} href={file.downloadUrl}>{text(token.value)}</a>;
-            if (!/^(?:https?:|mailto:|#|\/)/i.test(token.url)) return <React.Fragment key={index}>{text(token.value)}</React.Fragment>;
-            const isServerHtmlPath = token.url.startsWith("/") && /\.(?:html?|)$/i.test(token.url);
-            const localHref = isServerHtmlPath
-              ? localFilePreviewHref(token.url)
-              : localHttpPreviewHref(token.url);
+            if (file) return <a key={index} href={file.downloadUrl} onClick={event => {
+              event.preventDefault();
+              void filePreviewController.open({ path: file.rawUrl });
+            }}>{text(token.value)}</a>;
+            const localHref = localHttpPreviewHref(token.url, fileContext.serverOrigin);
+            if (!localHref && !/^(?:https?:|mailto:|#|\/)/i.test(token.url)) return <React.Fragment key={index}>{text(token.value)}</React.Fragment>;
             return localHref ? (
               <a
                 key={index}
                 href={localHref}
                 onClick={(event) => {
                   event.preventDefault();
-                  if (isServerHtmlPath) localPreviewController.openFile(token.url);
-                  else localPreviewController.openUrl(token.url);
+                  localPreviewController.openUrl(localHref);
                 }}
               >
                 {text(token.value)}

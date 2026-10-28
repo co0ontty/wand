@@ -1,3 +1,4 @@
+import { knowledgeInstructions } from "./employee-knowledge.js";
 import { isOpenRouterFreeSelector } from "./openrouter-free-models.js";
 import { isAutoAssignSelector, defaultModelGroupSelector, resolveModelGroupModels } from "./model-groups.js";
 import { resolveAutoAssign } from "./model-auto-assign.js";
@@ -701,6 +702,7 @@ export class ProcessManager extends EventEmitter {
     // A stopped session can be resumed under the same public id before the old
     // PTY emits its asynchronous exit event. Ignore that stale incarnation.
     if (current !== record || current.ptyProcess !== child) return;
+    this.storage.revokeSessionKnowledgeAccess(record.id);
     current.timers.clearAll();
     if (current.ptyBridge) {
       current.ptyBridge.onExit(exitCode);
@@ -987,10 +989,7 @@ export class ProcessManager extends EventEmitter {
     let processedCommand = this.processCommandForMode(command, effectiveMode, provider, preferredModels[0], initialThinkingEffort);
     // 会话级系统提示：provider 有系统提示开关就走开关（PTY 与结构化行为一致），没有就并进首条输入。
     const systemPrompt = (opts?.systemPrompt ?? inheritedRole?.systemPrompt)?.trim() || undefined;
-    const initialInputText = initialInput && systemPrompt && !systemPromptFlag(provider)
-      ? composeSystemFallback(systemPrompt, initialInput)
-      : initialInput;
-    processedCommand = commandWithSystemPrompt(processedCommand, provider, systemPrompt);
+    let initialInputText = initialInput;
     const isCodexProvider = provider === "codex";
     const isOpenCodeProvider = provider === "opencode";
     const existingProviderSessionId = provider
@@ -1016,12 +1015,7 @@ export class ProcessManager extends EventEmitter {
       : null;
     const initialClaudeSessionId = existingProviderSessionId ?? assignedProviderSessionId;
     const startedAt = new Date().toISOString();
-    const launchPlan = buildPtyShellLaunchPlan({
-      shell: this.config.shell,
-      command: processedCommand,
-      bareShell: opts?.interactiveShell === true,
-      providerCommand: provider !== undefined,
-    });
+
 
     const record: SessionRecord = {
       id,
@@ -1059,7 +1053,7 @@ export class ProcessManager extends EventEmitter {
         opts?.cols !== undefined ? clampDimension(opts.cols, 20, 1000) : 120,
         opts?.rows !== undefined ? clampDimension(opts.rows, 5, 500) : 36,
       ),
-      providerShellMarker: launchPlan.cliExitMarker,
+      providerShellMarker: null,
       providerCliActive: provider !== undefined,
       providerCliExitCode: null,
       stopRequested: false,
@@ -1086,7 +1080,7 @@ export class ProcessManager extends EventEmitter {
       ptyCols: opts?.cols !== undefined ? clampDimension(opts.cols, 20, 1000) : 120,
       ptyRows: opts?.rows !== undefined ? clampDimension(opts.rows, 5, 500) : 36,
       ptyOutputSeq: 0,
-      ptyLaunchMarkerToken: launchPlan.cliExitMarker?.token ?? null,
+      ptyLaunchMarkerToken: null,
     };
 
     this.sessions.set(id, record);
@@ -1096,13 +1090,31 @@ export class ProcessManager extends EventEmitter {
     }
 
     let child: TerminalProcess;
+    let launchPlan: ReturnType<typeof buildPtyShellLaunchPlan>;
     try {
+      // Derive authority only after the real session/project binding has been persisted.
+      const access = provider ? this.storage.knowledgeSessionScope(id) : null;
+      const knowledgeToken = access ? this.storage.issueKnowledgeAccess(id) : undefined;
+      const runtimePrompt = access ? [knowledgeInstructions(access),
+        "本终端会话的知识工具只在有效执行期内可用；每次使用知识先 search/read，不把旧轮次快照当作当前状态。访问失效时新开一轮结构化执行或恢复会话，不绕过权限。"].join("\n\n") : undefined;
+      const launchPrompt = [systemPrompt, runtimePrompt].filter(Boolean).join("\n\n") || undefined;
+      initialInputText = initialInput && launchPrompt && !systemPromptFlag(provider)
+        ? composeSystemFallback(launchPrompt, initialInput) : initialInput;
+      processedCommand = commandWithSystemPrompt(processedCommand, provider, launchPrompt);
+      launchPlan = buildPtyShellLaunchPlan({ shell: this.config.shell, command: processedCommand,
+        bareShell: opts?.interactiveShell === true, providerCommand: provider !== undefined });
+      record.providerShellMarker = launchPlan.cliExitMarker;
+      record.ptyLaunchMarkerToken = launchPlan.cliExitMarker?.token ?? null;
+      this.persist(record, { forceFullSave: true });
       const attached = await this.terminalHost.createOrAttach({
         sessionId: id,
         file: this.config.shell,
         args: launchPlan.shellArgs,
         cwd: resolvedCwd,
         env: buildChildEnv(this.config.inheritEnv !== false, {
+          WAND_SESSION_ID: id,
+          WAND_KNOWLEDGE_DB: knowledgeToken ? this.storage.databasePath() : undefined,
+          WAND_KNOWLEDGE_TOKEN: knowledgeToken,
           WAND_MODE: effectiveMode,
           WAND_AUTO_CONFIRM: record.autoApprovePermissions ? "1" : "0",
           WAND_AUTO_EDIT: effectiveMode === "auto-edit" ? "1" : "0",
@@ -1689,6 +1701,7 @@ export class ProcessManager extends EventEmitter {
   private finishProviderCli(record: SessionRecord, exitCode: number): void {
     if (!record.providerCliActive) return;
 
+    this.storage.revokeSessionKnowledgeAccess(record.id);
     record.providerCliActive = false;
     record.providerCliExitCode = exitCode;
     record.providerShellMarker = null;
@@ -1728,6 +1741,7 @@ export class ProcessManager extends EventEmitter {
   stop(id: string): SessionSnapshot {
     if (this.unknownTerminalOwners.has(id)) throw new Error("Terminal ownership is unknown; stop was not delivered. Retry after recovery.");
     const record = this.mustGet(id);
+    this.storage.revokeSessionKnowledgeAccess(id);
     const start = this.startingSessions.get(id);
     if (start) start.cancelled = true;
     if (record.status !== "running") {
@@ -1783,6 +1797,7 @@ export class ProcessManager extends EventEmitter {
   }
 
   private cleanupRecord(record: SessionRecord, terminateTerminal = true): void {
+    if (terminateTerminal && record.status === "running") this.storage.revokeSessionKnowledgeAccess(record.id);
     this.clearPtyTurn(record);
     record.timers.clearAll();
     const pendingPersist = this.persistDebounceTimers.get(record.id);
@@ -2032,6 +2047,14 @@ export class ProcessManager extends EventEmitter {
   setSessionWorkspace(id: string, membership: Pick<SessionSnapshot, "workspaceId" | "workspaceTaskId">): void {
     Object.assign(this.mustGet(id), membership);
     this.emitEvent({ type: "status", sessionId: id, data: membership });
+  }
+
+  /** The source is committed by storage before the live checkpoint projection is refreshed. */
+  setSessionSource(id: string, sessionSource: SessionSource): void {
+    const record = this.mustGet(id);
+    if (record.sessionSource === sessionSource) return;
+    record.sessionSource = sessionSource;
+    this.emitEvent({ type: "status", sessionId: id, data: { sessionSource } });
   }
 
   setSessionTopic(id: string, title: string, description: string): SessionSnapshot {

@@ -33,7 +33,8 @@ test("sidebar hides group navigation and creation without hiding workspace creat
   const h = sidebarHarness();
   const navigation = h.render("ConversationNavigation", { activePage: "chats", teamAttention: 4, onNavigate() {} });
   assert.doesNotMatch(navigation, /ai-teams-button|aria-label="团队"/);
-  for (const label of ["对话", "工作区", "任务看板", "定时"]) assert.ok(navigation.includes(`aria-label="${label}"`));
+  for (const label of ["对话", "工作区", "知识库", "任务看板", "定时"]) assert.ok(navigation.includes(`aria-label="${label}"`));
+  assert.ok(navigation.indexOf('id="knowledge-library-button"') < navigation.indexOf('id="task-board-button"'), "知识库入口位于任务上方");
   assert.equal(h.render("ConversationSidebarTools", { enabled: true, onNavigate() {} }), "");
   h.state.mode = "tasks";
   const workspaceTools = h.render("ConversationSidebarTools", { enabled: true, onNavigate() {}, onCreateSession() {} });
@@ -84,6 +85,12 @@ test("workspace visibility hides only explicit group chat sessions and retains d
   ];
   assert.deepEqual(sessions.filter(isSidebarSessionVisible).map(session => session.id), ["normal", "dispatch"]);
   assert.equal(sessions.length, 3);
+});
+
+test("workspace visibility hides quick terminals by provenance, never by shell title", () => {
+  assert.equal(isSidebarSessionVisible({ sessionSource: "quick-terminal" }), false);
+  assert.equal(isSidebarSessionVisible({ sessionSource: "interactive" }), true);
+  assert.equal(isSidebarSessionVisible({}), true);
 });
 
 test("directory keeps employee and team management while hiding every group-create entry", () => {

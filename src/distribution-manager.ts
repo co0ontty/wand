@@ -511,6 +511,26 @@ export class DistributionManager {
     return github ? { ...github, source: "github" } : null;
   }
 
+  /** Independent app packages never participate in Wand selection or pruning. */
+  async resolveIosAppDownload(appId: string, requestedFile?: string): Promise<LocalDistributionAsset | null> {
+    if (appId !== "huniu-helper") return null;
+    const directory = path.join(this.options.configDir, "apps", appId, "ios");
+    try {
+      const current = JSON.parse(await readFile(path.join(directory, "current.json"), "utf8")) as { fileName?: unknown };
+      const fileName = requestedFile ?? current.fileName;
+      if (typeof fileName !== "string" || !/^huniu-helper-v[0-9A-Za-z.-]+\.ipa$/.test(fileName)) return null;
+      const filePath = path.join(directory, fileName);
+      const info = await lstat(filePath);
+      if (!info.isFile() || info.size === 0) return null;
+      return {
+        fileName, filePath, size: info.size, updatedAt: info.mtime.toISOString(),
+        version: null, source: "local", downloadUrl: `/ios/download?app=${appId}&fileName=${encodeURIComponent(fileName)}`,
+      };
+    } catch {
+      return null;
+    }
+  }
+
   async resolveIosDownload(): Promise<LocalDistributionAsset | null> {
     await this.refreshConfig();
     const { config, configDir } = this.options;

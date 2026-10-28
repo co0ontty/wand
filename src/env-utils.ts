@@ -83,7 +83,7 @@ export function buildChildEnv(
     }
   }
   // Do not let nested Wand/PTY or one-shot automation inherit another run's decision capability.
-  for (const key of ["WAND_DECISION_URL", "WAND_DECISION_TOKEN", "WAND_DECISION_CA", "WAND_DECISION_NODE", "WAND_DECISION_CLI", "WAND_WEB_LOGIN_PROOF"]) delete base[key];
+  for (const key of ["WAND_DECISION_URL", "WAND_DECISION_TOKEN", "WAND_DECISION_CA", "WAND_DECISION_NODE", "WAND_DECISION_CLI", "WAND_WEB_LOGIN_PROOF", "WAND_KNOWLEDGE_DB", "WAND_KNOWLEDGE_TOKEN"]) delete base[key];
   for (const [k, v] of Object.entries(extras)) {
     if (typeof v === "string") base[k] = v;
   }

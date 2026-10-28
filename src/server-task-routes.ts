@@ -24,6 +24,7 @@ import type { TaskExecutionQueue } from "./task-execution-queue.js";
 import { compactTransportAvatar } from "./fixed-employee-avatar.js";
 import { canArchiveTask } from "./task-archive-policy.js";
 import { TaskReadModel } from "./task-read-model.js";
+import { readTaskActions } from "./task-actions.js";
 import { refreshAutoBoardTaskTitles, taskTitleService } from "./task-title-service.js";
 import { generateWandTaskTitle, provisionalTaskTitleFromDescription } from "./task-title.js";
 import { isWandTaskStatus, statusAfterWandTaskDispatch, type TaskExecutionSubject, type WandTaskAgent, type WandTaskPriority, type WandTaskStatus, type WandTaskTitleSource } from "./task-types.js";
@@ -243,6 +244,11 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDependencies): v
     const model = new TaskReadModel(storage, sessions);
     res.json(model.tasks.filter(task => workspaceId === undefined || task.workspaceId === workspaceId)
       .map(task => taskDto(deps, task, model)));
+  });
+  app.get("/api/wand-task-actions", (req, res) => {
+    const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : undefined;
+    res.set("Cache-Control", "no-store");
+    res.json(readTaskActions(storage, sessions, workspaceId));
   });
   registerTaskCommentRoutes(app, deps);
   app.get("/api/wand-task-agent-defaults", (_req, res) => {

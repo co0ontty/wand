@@ -191,7 +191,7 @@ test("ShellMainContent uses UiStore actions and no forbidden legacy seam", () =>
   assert.match(source, /id="cross-session-queue-host" ref=\{queueRef\}/);
   assert.match(source, /!pageLayerOpen && <WorkspaceTabBar fallback=\{<ShellTopbar\/>\}\/>/, "one route owns one header; hidden pages leave no interactive portal");
   assert.doesNotMatch(source, /inSplit \? null : <WorkspaceTabBar\/>/);
-  assert.match(source, /const pageLayerOpen = newWork\.open \|\| settings\.open \|\| conversationVisible \|\| taskBoard\.open \|\| editor\.open/);
+  assert.match(source, /const pageLayerOpen = newWork\.open \|\| settings\.open \|\| conversationVisible \|\| taskBoard\.open \|\| knowledge\.open \|\| editor\.open/);
   // 任务管理是叠层路由，不能替换 <main>，否则 #output 被卸载后会话回不去。
   assert.match(source, /taskBoard\.open && taskBoard\.page === "board" \? <TaskBoardHost/);
   assert.doesNotMatch(source, /if \(taskBoard\.open\) \{\s*return <main/s);
@@ -220,8 +220,8 @@ test("mobile tasks keep a sidebar navigation entry even without terminal windows
 });
 
 
-test("new work suspends covered board and editor controls without unmounting them", () => {
+test("new work and knowledge suspend covered board and editor controls without unmounting them", () => {
   const source = readFileSync(new URL("../src/web-ui/react/shell/shell-main-content.tsx", import.meta.url), "utf8");
-  const suspended = source.match(/visibility: settings\.open \|\| newWork\.open \? "hidden" : undefined \}\} inert=\{settings\.open \|\| newWork\.open\} aria-hidden=\{settings\.open \|\| newWork\.open\}/g);
+  const suspended = source.match(/visibility: settings\.open \|\| newWork\.open \|\| knowledge\.open \? "hidden" : undefined \}\} inert=\{settings\.open \|\| newWork\.open \|\| knowledge\.open\} aria-hidden=\{settings\.open \|\| newWork\.open \|\| knowledge\.open\}/g);
   assert.equal(suspended?.length, 2, "board and editor stay mounted while their controls leave the keyboard and accessibility tree");
 });
