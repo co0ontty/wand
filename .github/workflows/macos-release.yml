@@ -56,13 +56,9 @@ jobs:
       - name: Select Xcode
         run: |
           set -euo pipefail
-          for developer_dir in /Applications/Xcode*.app/Contents/Developer; do
-            if [[ -x "$developer_dir/usr/bin/xcodebuild" ]]; then
-              export DEVELOPER_DIR="$developer_dir"
-              echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
-              break
-            fi
-          done
+          # Match iOS and use the runner's default Xcode, not the oldest glob match.
+          export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+          echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
           xcodebuild -version
 
       # Cache dependency downloads only; signed/versioned products are rebuilt.
